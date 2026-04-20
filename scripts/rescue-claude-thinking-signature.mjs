@@ -233,7 +233,13 @@ async function repairTranscript(target, options) {
 
   const stripped = stripPureThinkingAssistantTurns(original);
   if (stripped.removedCount === 0) {
-    return { sessionId: target.sessionId, status: 'clean', removedTurns: 0, backupPath: null };
+    return {
+      sessionId: target.sessionId,
+      status: 'unrescued',
+      removedTurns: 0,
+      backupPath: null,
+      reason: 'no_safe_turns_to_strip',
+    };
   }
 
   const backupPath = backupPathFor(target.sessionId, options.backupDir, options.now);
@@ -281,6 +287,7 @@ try {
 
   const rescuedCount = results.filter((item) => item.status === 'repaired').length;
   const skippedCount = results.length - rescuedCount;
+  const failedCount = results.filter((item) => item.status === 'unrescued').length;
 
   console.log('');
   console.log(options.dryRun ? 'Dry run summary' : 'Rescue summary');
@@ -289,6 +296,10 @@ try {
     const backupSuffix = result.backupPath ? ` backup=${result.backupPath}` : '';
     const reasonSuffix = result.reason ? ` reason=${result.reason}` : '';
     console.log(`- ${result.sessionId}: ${result.status} removed=${result.removedTurns}${backupSuffix}${reasonSuffix}`);
+  }
+
+  if (failedCount > 0) {
+    process.exit(1);
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));

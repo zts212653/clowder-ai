@@ -148,6 +148,26 @@ describe('mcp-doctor.mjs', () => {
     assert.match(result.stdout, /\[unresolved\] non-js-artifact — command args reference missing local artifact/);
   });
 
+  it('fails for missing local artifact paths passed via --flag=path args', () => {
+    const { root, binDir } = createSandbox([
+      {
+        id: 'flagged-artifact',
+        type: 'mcp',
+        enabled: true,
+        mcpServer: {
+          transport: 'stdio',
+          command: 'node',
+          args: ['--config=./missing.json'],
+        },
+      },
+    ]);
+
+    const result = runDoctor(root, binDir);
+
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert.match(result.stdout, /\[unresolved\] flagged-artifact — command args reference missing local artifact/);
+  });
+
   it('does not treat scoped package arguments as local artifact paths', () => {
     const { root, binDir } = createSandbox([
       {

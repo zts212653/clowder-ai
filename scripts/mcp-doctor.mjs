@@ -121,11 +121,25 @@ function referencedArtifactExists(args) {
   return artifactArgs.every((artifactArg) => existsSync(resolveArtifactPath(artifactArg)));
 }
 
+function extractFlagValue(arg) {
+  if (!arg.startsWith('-')) return null;
+
+  const separatorIndex = arg.indexOf('=');
+  if (separatorIndex <= 1 || separatorIndex === arg.length - 1) {
+    return null;
+  }
+
+  return arg.slice(separatorIndex + 1).trim();
+}
+
 function isLocalArtifactArg(value) {
   if (typeof value !== 'string') return false;
 
-  const artifactArg = value.trim();
-  if (!artifactArg || artifactArg.startsWith('-')) return false;
+  const rawArg = value.trim();
+  if (!rawArg) return false;
+
+  const artifactArg = extractFlagValue(rawArg) ?? rawArg;
+  if (artifactArg.startsWith('-')) return false;
   if (URL_SCHEME_RE.test(artifactArg)) return false;
   if (artifactArg.startsWith('@') && !artifactArg.startsWith('@/') && !artifactArg.startsWith('@\\')) {
     return false;
@@ -148,7 +162,8 @@ function isLocalArtifactArg(value) {
 }
 
 function resolveArtifactPath(artifactArg) {
-  return resolveLocalPath(artifactArg);
+  const rawArg = artifactArg.trim();
+  return resolveLocalPath(extractFlagValue(rawArg) ?? rawArg);
 }
 
 function resolveLocalPath(value) {
