@@ -197,8 +197,11 @@ function inferPencilApp(command, envApp) {
 
 function findLatestPencilBinary() {
   const explicit = process.env.PENCIL_MCP_BIN?.trim();
-  if (explicit && existsSync(explicit)) {
-    return { command: explicit, app: inferPencilApp(explicit, process.env.PENCIL_MCP_APP) };
+  if (explicit) {
+    if (isExecutableCommandPath(explicit)) {
+      return { command: explicit, app: inferPencilApp(explicit, process.env.PENCIL_MCP_APP) };
+    }
+    return { invalidExplicit: explicit };
   }
 
   const osName = process.platform === 'win32' ? 'windows' : process.platform === 'linux' ? 'linux' : 'darwin';
@@ -257,6 +260,13 @@ function statusForCapability(id, capability) {
   const server = capability.mcpServer;
   if (server.resolver === 'pencil') {
     const resolved = findLatestPencilBinary();
+    if (resolved?.invalidExplicit) {
+      return {
+        id,
+        status: 'unresolved',
+        reason: `configured PENCIL_MCP_BIN is not executable: ${resolved.invalidExplicit}`,
+      };
+    }
     return resolved
       ? { id, status: 'ready', reason: `resolved via ${resolved.app}` }
       : { id, status: 'unresolved', reason: 'resolver declared but no local Pencil installation found' };

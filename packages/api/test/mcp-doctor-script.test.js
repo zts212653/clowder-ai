@@ -300,4 +300,28 @@ describe('mcp-doctor.mjs', () => {
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.match(result.stdout, /\[ready\] tilde-command — stdio ~\/bin\/mcp-server/);
   });
+
+  it('fails when explicit PENCIL_MCP_BIN points to a non-executable path', () => {
+    const { root, binDir } = createSandbox([
+      {
+        id: 'pencil-custom',
+        type: 'mcp',
+        enabled: true,
+        mcpServer: {
+          resolver: 'pencil',
+        },
+      },
+    ]);
+
+    const explicitDir = join(root, 'fake-pencil-bin');
+    mkdirSync(explicitDir, { recursive: true });
+
+    const result = runDoctor(root, binDir, {
+      PENCIL_MCP_BIN: explicitDir,
+      PENCIL_MCP_APP: 'vscode',
+    });
+
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert.match(result.stdout, /\[unresolved\] pencil-custom — configured PENCIL_MCP_BIN is not executable/);
+  });
 });

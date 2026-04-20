@@ -194,8 +194,15 @@ ensure_alpha_branch() {
 }
 
 migrate_legacy_alpha_worktree() {
-  if worktree_exists || [ -e "$ALPHA_DIR" ] || ! legacy_worktree_exists; then
+  if worktree_exists || ! legacy_worktree_exists; then
     return 0
+  fi
+
+  if [ -e "$ALPHA_DIR" ]; then
+    if [ -n "$(ls -A "$ALPHA_DIR" 2>/dev/null || true)" ]; then
+      return 0
+    fi
+    rmdir "$ALPHA_DIR" || die "failed to clear empty alpha target dir before legacy migration: $ALPHA_DIR"
   fi
 
   info "migrating legacy alpha worktree from $LEGACY_ALPHA_DIR"
