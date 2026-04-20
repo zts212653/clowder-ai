@@ -55,6 +55,10 @@ export interface CallbackRoutesOptions {
   socketManager: SocketManager;
   /** F155 review fix: allow tests to inject a failing guide flow loader. */
   loadGuideFlow?: (guideId: string) => unknown;
+  /** F155 review fix: allow tests to inject guide availability prerequisites. */
+  getGuideAvailabilityContext?: (
+    threadId: string,
+  ) => Promise<{ memberCardCount: number }> | { memberCardCount: number };
   taskStore?: ITaskStore;
   backlogStore?: IBacklogStore;
   /** For thinking mode filtering in thread-context + thread-cats discovery */
@@ -1355,6 +1359,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       socketManager,
       ...(opts.guideSessionStore ? { guideSessionStore: opts.guideSessionStore } : {}),
       ...(opts.loadGuideFlow ? { loadGuideFlow: opts.loadGuideFlow } : {}),
+      ...(opts.getGuideAvailabilityContext ? { getGuideAvailabilityContext: opts.getGuideAvailabilityContext } : {}),
     });
   }
 };

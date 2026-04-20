@@ -136,6 +136,7 @@ export function HubListModal({ open, onClose, currentThreadId }: HubListModalPro
               activeTab === 'config' ? 'text-blue-600' : 'text-cafe-secondary hover:text-cafe-secondary'
             }`}
             data-testid="hub-tab-config"
+            data-guide-id="im-hub.config-tab"
           >
             平台配置
             {activeTab === 'config' && (

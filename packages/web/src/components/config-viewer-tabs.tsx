@@ -177,7 +177,7 @@ export function CatOverviewTab({
         </p>
       ) : null}
       <div className="space-y-3">
-        {displayCats.map((catData) => (
+        {displayCats.map((catData, idx) => (
           <HubMemberOverviewCard
             key={catData.id}
             cat={catData}
@@ -185,6 +185,7 @@ export function CatOverviewTab({
             onEdit={onEditMember}
             onToggleAvailability={onToggleAvailability}
             togglingAvailability={togglingCatId === catData.id}
+            guideTargetId={idx === 0 ? 'cats.first-member' : undefined}
             draggable
             onDragStart={handleDragStart}
             onDragOver={handleDragOver}
