@@ -181,11 +181,36 @@ class ServiceManager {
 
   async _startApi(nodeExe, userDataDir) {
     const apiEntry = path.join(this.root, 'packages', 'api', 'dist', 'index.js');
+    // Copy cat-template.json from install root to the writable project dir,
+    // and point the API at that copy via CAT_TEMPLATE_PATH. Otherwise the
+    // API's cat-config-loader derives projectRoot=dirname(templatePath) from
+    // the install location and tries to bootstrap .cat-cafe/cat-catalog.json
+    // inside Program Files → EPERM → fallback to placeholder model names.
+    const userProjectDir = path.join(userDataDir, 'project');
+    const templateSrc = path.join(this.root, 'cat-template.json');
+    const templateDst = path.join(userProjectDir, 'cat-template.json');
+    try {
+      if (fs.existsSync(templateSrc)) {
+        const srcStat = fs.statSync(templateSrc);
+        const dstStat = fs.existsSync(templateDst) ? fs.statSync(templateDst) : null;
+        if (!dstStat || srcStat.mtimeMs > dstStat.mtimeMs) {
+          fs.copyFileSync(templateSrc, templateDst);
+          log(`cat-template.json copied to ${templateDst}`);
+        }
+      } else {
+        log(`WARNING: cat-template.json missing at ${templateSrc}`);
+      }
+    } catch (err) {
+      log(`Warning: failed to mirror cat-template.json: ${err.message}`);
+    }
+
     const envOverrides = this._buildApiEnv(userDataDir);
+    if (fs.existsSync(templateDst)) {
+      envOverrides.CAT_TEMPLATE_PATH = templateDst;
+    }
     // cwd must be a writable dir containing pnpm-workspace.yaml so that the
     // API's findMonorepoRoot() anchors on it, not on Program Files.
-    const apiCwd = path.join(userDataDir, 'project');
-    this._startProcess('api', nodeExe, [apiEntry], { envOverrides, cwd: apiCwd });
+    this._startProcess('api', nodeExe, [apiEntry], { envOverrides, cwd: userProjectDir });
     log('API process spawned, waiting for port ' + this.apiPort);
     await this._waitForPort(this.apiPort, 'API');
   }
