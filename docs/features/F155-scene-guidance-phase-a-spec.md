@@ -81,12 +81,12 @@ interface OrchestrationStep {
 
 **P0 验证场景**：添加新成员（4 步：open-hub → go-to-cats → click-add-member → edit-member-profile）
 
-### Phase B: 平台内场景扩展（F155 scope）
+### Phase B: 场景扩展（F155 scope）
 
 > **Scope 调整（KD-13 + KD-14）**：
-> - Phase B 聚焦平台内已有功能的引导场景扩展，不做跨系统深度集成
+> - Phase B 聚焦已有 Console / Hub / IM Hub 表面的引导场景扩展；只要目标控件已经存在于当前产品 UI 中，provider / connector flows 可以纳入 Guide Engine
 > - 双向可观测（observe/verifier）已拆出为独立 feature 待立项，不再是 F155 的一部分
-> - 外部平台（飞书/微信等）的配置流程按场景单独做配置页签，不纳入 Guide Engine
+> - 需要新增独立配置页签、全新外部画布或 schema / inheritance 设计的跨系统流程，仍按后续 feature 单独推进
 
 **场景扩展**：基于已有 Console 功能逐场景补充引导流程，复用 Phase A 骨架（data-guide-id + Flow YAML + advance mode + complete callback）。具体场景所需的额外步骤类型或信息补充，结合场景实际需求决定。
 
@@ -99,9 +99,9 @@ interface OrchestrationStep {
 | 方向 | 归属 | 说明 |
 |------|------|------|
 | 自动观测 substrate | 独立 feature 待立项 | 不只服务 guide，可被 guide/debug/diagnostics 复用。含 observe.fields、idle 检测、verifier 契约、猫眼指示灯 |
-| 跨系统配置页签 | 按场景单独设计 | 飞书/微信/钉钉等外部平台配置流程，不走 Guide Engine 遮罩引导 |
+| 新增外部配置页签 / 全新外部画布 | 按场景单独设计 | 仅当某流程无法复用当前 Hub / IM Hub UI、需要新增专门配置 surface 时，才不走 Guide Engine 遮罩引导 |
 
-### 当前进展与阶段判断（2026-04-09）
+### 当前进展与阶段判断（2026-04-20）
 
 | 维度 | 当前状态 | 说明 |
 |------|---------|------|
@@ -111,7 +111,8 @@ interface OrchestrationStep {
 | Esc 误退修复 | ✅ 完成 | KD-14：GuideOverlay preventDefault + CatCafeHub guideActive guard |
 | CVO 验收 | ✅ 通过 | 2026-04-09 CVO 手动测试”添加成员”流程，确认链路通畅 |
 | gpt52 review | ✅ 放行 | completion callback 6 轮 + 收尾 2 轮，全部 P1/P2 已修复 |
-| 当前阶段判断 | **Phase A accepted / frozen** | 基础引导引擎已验收冻结，可开 PR 合入 main |
+| Phase B 场景扩展 | 🚧 Review-ready | 当前 branch 已补齐 `add-account-auth`、`configure-first-provider`、`edit-member-auth`、`connect-wechat`、`connect-feishu` |
+| 当前阶段判断 | **Phase A accepted / Phase B review-ready** | 基础引导引擎已冻结；当前 PR 聚焦场景扩展与交互 hardening 收口 |
 
 **Phase A 交付物**：
 - 前端引擎：`guideStore.ts` + `useGuideEngine.ts` + `GuideOverlay.tsx`（含 auto-advance）
@@ -123,10 +124,12 @@ interface OrchestrationStep {
 
 ### 触发与发现规范
 
-三层触发机制：
-1. **对话触发（主）**：用户问意图 → 猫查 catalog → 建议引导 → [🐾 带我去做] 卡片 → 启动
-2. **主动发现**：系统检测到未完成配置 → 猫主动建议相关引导
-3. **目录浏览**：Console "场景引导" 入口，按类别列出所有可用流程
+当前阶段只保留一条触发路径：
+1. **对话意图触发**：用户在正常对话中表达配置/求助意图 → 猫先判断是直接解释还是适合走引导 → 调用 MCP `cat_cafe_get_available_guides()` 获取当前可用场景目录 → 基于场景描述建议引导 → [🐾 带我去做] 卡片 → 用户确认后启动
+
+说明：
+- 路由层不直接根据原始消息关键词或显式命令触发 guide
+- 主动发现与目录浏览暂不作为当前设计的触发入口
 
 ### guide-authoring Skill
 
@@ -138,9 +141,11 @@ interface OrchestrationStep {
 | 优先级 | 场景 | Console Tab | 复杂度 | 跨系统 |
 |--------|------|------------|--------|--------|
 | P0 | 添加成员 | cats → HubCatEditor | 极高 | 否 |
-| ~~P0~~ deferred | 飞书对接 | 独立配置页签（不走 Guide Engine）| 高 | 是 |
-| P1 | 配置 API Provider | provider-profiles | 高 | 否 |
-| P1 | 添加连接器（通用） | connector config | 高 | 是 |
+| P0 | 配置第一个 Provider | cats → HubAddMemberWizard → HubCatEditor | 高 | 否 |
+| P1 | 添加账户认证 | settings → accounts | 高 | 否 |
+| P1 | 修改成员认证与模型 | cats → HubCatEditor | 高 | 否 |
+| P1 | 微信对接 | connector config | 高 | 是 |
+| P1 | 飞书对接 | connector config | 高 | 是 |
 | P1 | 开启推送通知 | notify | 中 | 否 |
 | P2 | 管理猫猫能力 | capabilities | 中 | 否 |
 | P2 | 治理看板配置 | governance | 中 | 否 |
@@ -148,9 +153,9 @@ interface OrchestrationStep {
 ### 触发与发现（详细设计）
 
 **Guide Registry**（`guides/registry.yaml`）：注册所有可用引导，含 keywords + 意图映射。
-**MCP Tool**：`guide_resolve(intent, context)` → 关键词匹配 registry → 返回候选引导列表。
-**Skill Manifest**：猫检测到配置意图（"怎么/如何/配置"）→ 自动查 registry → 问用户"要我带你走一遍吗？"。
-**主动发现**：后端检测未完成配置状态 → 推送建议到聊天（复用现有 Socket.io 事件管道）。
+**MCP Tool**：`cat_cafe_get_available_guides()` → 读取 registry + 当前上下文可用性 → 返回可用引导列表。
+**Skill Manifest**：猫检测到配置意图（"怎么/如何/配置"）后，先判断是否需要交互引导；需要时调用 `cat_cafe_get_available_guides` 查看可用场景目录，再问用户"要我带你走一遍吗？"。
+**Routing Boundary**：`GuideRoutingInterceptor` 仅负责续接已有 guideState（offered/awaiting_choice/active/completed），不从普通消息或显式命令直接创建新 guide offer。
 
 ## Acceptance Criteria
 
@@ -171,7 +176,7 @@ interface OrchestrationStep {
 - ~~AC-B1(旧): observe 层~~ → 独立 feature "自动观测 substrate" 待立项
 - ~~AC-B2(旧): MCP guide_observe~~ → 同上
 - ~~AC-B4(旧): 猫眼观测指示灯~~ → 同上
-- ~~AC-B5: 飞书 E2E~~ → KD-13 deferred
+- ~~AC-B5: 飞书外部平台完整 E2E~~ → 保持拆分；当前 F155 只覆盖 Hub / IM Hub 内已有 surface 的 guide flow，不覆盖外部平台联调自动化
 - ~~AC-S1: Sensitive Data Containment~~ → 随独立 observe feature 走
 - ~~AC-S2: Verifier Permission Boundary~~ → 随独立 observe feature 走
 
@@ -201,7 +206,7 @@ interface OrchestrationStep {
 
 - **Related**: F087（猫猫训练营 — 类似的引导概念，但面向不同场景）
 - **Related**: F110（训练营愿景引导增强 — 引导 UX 模式可复用）
-- **Related**: F134（飞书群聊 — 早期候选跨系统场景，已在 KD-13 后移出当前 scope）
+- **Related**: F134（飞书群聊 — `connect-feishu` guide 的业务背景与后续联调上下游）
 - **Related**: F099（Hub 导航可扩展 — Hub tab/深链基础设施）
 
 ## Risk
@@ -230,7 +235,7 @@ interface OrchestrationStep {
 | KD-10 | v2 步骤类型收敛为 4 种 advance mode（click/visible/input/confirm） | 简化 Phase A 范围，6 种步骤类型推迟到 Phase B 按需扩展 | 2026-03-30 |
 | KD-11 | Flow YAML 运行时加载（API），不在构建时生成 TS | 解耦部署：改 flow 不需要重新构建前端 | 2026-03-30 |
 | KD-12 | 完成回调作为基础能力：前端 complete → 后端状态 + Socket 通知 | CVO 明确要求：完整流程闭环是基础能力，不是后续补充 | 2026-04-03 |
-| KD-13 | Phase B 聚焦平台内引导，外部平台配置改为独立页签（不走 Guide Engine） | CVO：跨系统对接方式可能变化（扫码等），引导引擎聚焦已有功能；外部流程按场景单独做页签 | 2026-04-06 |
+| KD-13 | Phase B 继续复用 Guide Engine 覆盖已有 Hub / IM Hub UI 中的 provider / connector 场景；需要新增外部配置页签或 observe substrate 的能力另拆 | CVO：优先复用现有产品 surface 收口高频场景，把真正需要新 UI / 新联调形态的外部流程与观测基建拆出去 | 2026-04-06 |
 | KD-14 | 禁用引导模式下全局 Esc 退出，仅保留显式退出按钮 | CVO 手测反馈：误触 Esc 导致引导意外退出，体验差 | 2026-04-09 |
 | KD-15 | 双向可观测拆出为独立 feature，不再是 F155 Phase B | CVO + gpt52 共识：observe substrate 应更大——不只服务 guide，可被 debug/diagnostics 复用 | 2026-04-09 |
 
