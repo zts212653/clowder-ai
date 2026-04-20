@@ -539,6 +539,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
                 className="text-xs px-2 py-1 rounded-lg border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
                 title="IM Hub"
                 data-testid="sidebar-hub"
+                data-guide-id="im-hub.trigger"
               >
                 <HubIcon className="w-3.5 h-3.5 inline-block -mt-0.5" />
               </button>

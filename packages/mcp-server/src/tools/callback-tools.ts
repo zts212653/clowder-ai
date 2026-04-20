@@ -790,8 +790,10 @@ export async function handleStartGuide(input: { guideId: string }): Promise<Tool
   return callbackPost('/api/callbacks/start-guide', { guideId: input.guideId });
 }
 
-export async function handleGuideResolve(input: { intent: string }): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/guide-resolve', { intent: input.intent });
+export const getAvailableGuidesInputSchema = {};
+
+export async function handleGetAvailableGuides(): Promise<ToolResult> {
+  return callbackPost('/api/callbacks/get-available-guides', {});
 }
 
 export async function handleGuideControl(input: { action: string }): Promise<ToolResult> {
@@ -1018,7 +1020,8 @@ export const callbackTools = [
   {
     name: 'cat_cafe_update_guide_state',
     description:
-      'Update the guide session state for a thread. Must be called to persist state transitions. ' +
+      'Update the guide session state for a thread after you have already decided a guided flow is appropriate. ' +
+      'This is not a raw-text trigger path: do not infer guide offers from `/guide` or keywords alone. ' +
       'First call creates state (status must be "offered"). Subsequent calls must follow valid non-start transitions: ' +
       'offered→awaiting_choice/cancelled, awaiting_choice→cancelled, active→completed/cancelled. ' +
       'Do not use this tool to enter "active" — call cat_cafe_start_guide for offered/awaiting_choice→active so frontend start side effects run. ' +
@@ -1027,23 +1030,21 @@ export const callbackTools = [
     handler: handleUpdateGuideState,
   },
   {
-    name: 'cat_cafe_guide_resolve',
+    name: 'cat_cafe_get_available_guides',
     description:
-      'Match user intent to available guided flows. ' +
-      'Call this when a user asks how to do something (e.g. "怎么添加成员", "how to add a member"). ' +
-      'Returns a ranked list of matching guide flows with IDs, names, and descriptions. ' +
-      'If matches are found, suggest the top match to the user and ask if they want to start the guide. ' +
-      'On confirmation, call cat_cafe_start_guide with the matched guideId.',
-    inputSchema: {
-      intent: z.string().min(1).describe('User intent text (e.g. "添加成员", "配置飞书")'),
-    },
-    handler: handleGuideResolve,
+      'Fetch the current catalog of guides that are actually available in this thread context. ' +
+      'Use this after you decide a user likely needs a step-by-step walkthrough instead of a plain explanation. ' +
+      'Returns guide IDs, names, descriptions, categories, priorities, and estimated times so you can recommend the best-fit guide to the user. ' +
+      'Do not guess from keywords alone — inspect the returned guide metadata first, then ask the user whether to start one. ' +
+      'On confirmation, call cat_cafe_start_guide with the chosen guideId.',
+    inputSchema: getAvailableGuidesInputSchema,
+    handler: handleGetAvailableGuides,
   },
   {
     name: 'cat_cafe_start_guide',
     description:
       'Start an interactive guided flow on the Console frontend. ' +
-      'Requires the guide to be in "offered" or "awaiting_choice" state (call cat_cafe_update_guide_state first). ' +
+      'Requires the guide to be in "offered" or "awaiting_choice" state (call cat_cafe_update_guide_state first after you intentionally offered the guide). ' +
       'Transitions guide to "active" and emits socket event for frontend overlay.',
     inputSchema: {
       guideId: z.string().min(1).describe('Guide flow ID (e.g. "add-member")'),
@@ -1054,7 +1055,8 @@ export const callbackTools = [
     name: 'cat_cafe_guide_control',
     description:
       'Control an active guide session. Requires guide to be in "active" state. ' +
-      'Actions: "next" (advance), "skip" (skip step), "exit" (cancel guide). Forward-only — no back.',
+      'Actions: "next" (advance), "skip" (skip step), "exit" (cancel guide). ' +
+      'Use this only after a guide has been explicitly started; forward-only — no back.',
     inputSchema: {
       action: z.enum(['next', 'skip', 'exit']).describe('Guide control action'),
     },

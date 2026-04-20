@@ -1246,8 +1246,8 @@ describe('F155 guide offer ownership', () => {
     }
 
     assert.ok(
-      codexService.calls[0].includes('Guide Matched:'),
-      'foreign guide state should be hidden so current user can receive a fresh guide offer',
+      !codexService.calls[0].includes('Guide Matched:'),
+      'foreign guide state should be hidden without creating a fresh guide offer from raw user text',
     );
     assert.ok(
       !codexService.calls[0].includes('Guide Completed:'),
@@ -1255,7 +1255,7 @@ describe('F155 guide offer ownership', () => {
     );
   });
 
-  it('serial: injects offered guide only to the first target cat', async () => {
+  it('serial: does not synthesize a fresh offered guide from raw user text', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const opusService = createCapturingService('opus', '我来处理引导');
     const codexService = createCapturingService('codex', '不该收到引导 offer');
@@ -1266,10 +1266,13 @@ describe('F155 guide offer ownership', () => {
 
     assert.equal(opusService.calls.length, 1, 'first cat should be invoked');
     assert.equal(codexService.calls.length, 1, 'second cat should still be invoked');
-    assert.ok(opusService.calls[0].includes('status="offered"'), 'first cat should receive guide offer instructions');
+    assert.ok(
+      !opusService.calls[0].includes('status="offered"'),
+      'raw user text should not cause routing to inject a fresh guide offer',
+    );
     assert.ok(
       !codexService.calls[0].includes('status="offered"'),
-      'second cat must not receive duplicate guide offer instructions',
+      'second cat must also remain free of any synthesized guide offer',
     );
   });
 
@@ -1551,10 +1554,13 @@ describe('F155 guide offer ownership', () => {
 
     assert.equal(opusService.calls.length, 1, 'first cat should be invoked');
     assert.equal(codexService.calls.length, 1, 'second cat should still be invoked');
-    assert.ok(opusService.calls[0].includes('status="offered"'), 'first cat should receive guide offer instructions');
+    assert.ok(
+      !opusService.calls[0].includes('status="offered"'),
+      'raw user text should not cause parallel routing to inject a fresh guide offer',
+    );
     assert.ok(
       !codexService.calls[0].includes('status="offered"'),
-      'second cat must not receive duplicate guide offer instructions',
+      'second cat must also remain free of any synthesized guide offer',
     );
   });
 
@@ -1603,8 +1609,8 @@ describe('F155 guide offer ownership', () => {
     }
 
     assert.ok(
-      codexService.calls[0].includes('Guide Matched:'),
-      'foreign guide state should be hidden so current user can receive a fresh guide offer',
+      !codexService.calls[0].includes('Guide Matched:'),
+      'foreign guide state should be hidden without creating a fresh guide offer from raw user text',
     );
     assert.ok(
       !codexService.calls[0].includes('Guide Completed:'),

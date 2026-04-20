@@ -2,7 +2,7 @@
  * F155: Load guide registry from YAML source.
  *
  * Provides a validated set of known guide IDs for server-side validation,
- * and the full registry entries for the resolve MCP tool.
+ * and the guide catalog metadata for discovery MCP tools.
  */
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -19,12 +19,7 @@ export interface GuideRegistryEntry {
   cross_system: boolean;
   estimated_time: string;
   flow_file: string;
-  /** B-6: Optional trigger strategy. Defaults to { mode: 'keyword' }. */
-  trigger_strategy?: {
-    mode: 'keyword' | 'explicit' | 'hybrid';
-    confidence?: number;
-    max_dismissals?: number;
-  };
+  requires_member_cards?: boolean;
 }
 
 interface RegistryFile {
@@ -76,16 +71,18 @@ export function isValidGuideId(guideId: string): boolean {
   return getValidGuideIds().has(guideId);
 }
 
-/** B-6: Get trigger strategies for all registered guides. */
-export function getTriggerStrategies(): Record<string, NonNullable<GuideRegistryEntry['trigger_strategy']>> {
-  const entries = getRegistryEntries();
-  const result: Record<string, NonNullable<GuideRegistryEntry['trigger_strategy']>> = {};
-  for (const entry of entries) {
-    if (entry.trigger_strategy) {
-      result[entry.id] = entry.trigger_strategy;
-    }
-  }
-  return result;
+export interface AvailableGuide {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  priority: string;
+  crossSystem: boolean;
+  estimatedTime: string;
+}
+
+export interface GuideAvailabilityContext {
+  memberCardCount?: number;
 }
 
 export interface GuideMatch {
@@ -94,16 +91,30 @@ export interface GuideMatch {
   description: string;
   estimatedTime: string;
   score: number;
-  /** B-6: Total keyword count for confidence normalization. */
   totalKeywords: number;
+}
+
+export interface GuideResolveContext {
+  memberCardCount?: number;
 }
 
 /**
  * Match user intent against guide registry keywords.
  * Returns matched guides sorted by score (highest first), or empty array.
- * Used by both the MCP callback endpoint and the pre-invocation routing hook.
+ * Used by the explicit guide resolve tool after the cat decides a guided flow
+ * is more helpful than a plain-text explanation.
  */
 /* ── OrchestrationFlow v2 — runtime flow loader ── */
+
+export interface TipsMetadata {
+  /** data-guide-id of a pre-composed card div (type: 'card') */
+  target?: string;
+  type: 'card' | 'png';
+  /** Static image path (type: 'png') */
+  src?: string;
+  layout?: 'horizontal' | 'vertical';
+  alt?: string;
+}
 
 export interface OrchestrationStep {
   id: string;
@@ -112,6 +123,7 @@ export interface OrchestrationStep {
   advance: 'click' | 'visible' | 'input' | 'confirm';
   page?: string;
   timeoutSec?: number;
+  tipsMetadata?: TipsMetadata;
 }
 
 export interface OrchestrationFlow {
@@ -134,6 +146,13 @@ interface RawFlowFile {
     advance: string;
     page?: string;
     timeoutSec?: number;
+    tipsMetadata?: {
+      target?: string;
+      type?: string;
+      src?: string;
+      layout?: string;
+      alt?: string;
+    };
   }>;
 }
 
@@ -204,7 +223,7 @@ export function loadGuideFlow(guideId: string): OrchestrationFlow {
       if (!isValidGuideTarget(s.target)) {
         throw new Error(`[F155] Invalid target "${s.target}" in step "${s.id}"`);
       }
-      return {
+      const step: OrchestrationStep = {
         id: s.id,
         target: s.target,
         tips: s.tips,
@@ -212,6 +231,16 @@ export function loadGuideFlow(guideId: string): OrchestrationFlow {
         ...(s.page && { page: s.page }),
         ...(s.timeoutSec && { timeoutSec: s.timeoutSec }),
       };
+      if (s.tipsMetadata?.type === 'card' || s.tipsMetadata?.type === 'png') {
+        step.tipsMetadata = {
+          type: s.tipsMetadata.type,
+          ...(s.tipsMetadata.target && { target: s.tipsMetadata.target }),
+          ...(s.tipsMetadata.src && { src: s.tipsMetadata.src }),
+          ...(s.tipsMetadata.layout && { layout: s.tipsMetadata.layout as 'horizontal' | 'vertical' }),
+          ...(s.tipsMetadata.alt && { alt: s.tipsMetadata.alt }),
+        };
+      }
+      return step;
     }),
   };
 
@@ -219,17 +248,30 @@ export function loadGuideFlow(guideId: string): OrchestrationFlow {
   return flow;
 }
 
-export function resolveGuideForIntent(intent: string): GuideMatch[] {
+function entryIsAvailable(
+  entry: GuideRegistryEntry,
+  context?: GuideAvailabilityContext | GuideResolveContext,
+): boolean {
+  if (entry.requires_member_cards && (context?.memberCardCount ?? 0) <= 0) {
+    return false;
+  }
+  return true;
+}
+
+export function resolveGuideForIntent(intent: string, context?: GuideResolveContext): GuideMatch[] {
   const entries = getRegistryEntries();
   const query = normalizeGuideIntent(intent);
   if (!query) return [];
   const allowReverseSubstringMatch = canUseReverseSubstringMatch(query);
+
   return entries
+    .filter((entry) => entryIsAvailable(entry, context))
     .map((entry) => {
-      const score = entry.keywords.filter((kw) => {
-        const normalizedKeyword = normalizeGuideIntent(kw);
+      const score = entry.keywords.filter((keyword) => {
+        const normalizedKeyword = normalizeGuideIntent(keyword);
         return query.includes(normalizedKeyword) || (allowReverseSubstringMatch && normalizedKeyword.includes(query));
       }).length;
+
       return {
         id: entry.id,
         name: entry.name,
@@ -239,6 +281,20 @@ export function resolveGuideForIntent(intent: string): GuideMatch[] {
         totalKeywords: entry.keywords.length,
       };
     })
-    .filter((e) => e.score > 0)
-    .sort((a, b) => b.score - a.score);
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || a.totalKeywords - b.totalKeywords);
+}
+
+export function getAvailableGuides(context?: GuideAvailabilityContext): AvailableGuide[] {
+  return getRegistryEntries()
+    .filter((entry) => entryIsAvailable(entry, context))
+    .map((entry) => ({
+      id: entry.id,
+      name: entry.name,
+      description: entry.description,
+      category: entry.category,
+      priority: entry.priority,
+      crossSystem: entry.cross_system,
+      estimatedTime: entry.estimated_time,
+    }));
 }

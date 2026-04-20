@@ -125,7 +125,7 @@ export async function* routeParallel(
     }
   }
 
-  // F155: Guide interceptor — resolve existing state + match new candidates
+  // F155: Guide interceptor — resume existing guide state only
   const guideCtx = await prepareGuideContext({
     thread: routeThread,
     guideSessionStore: deps.invocationDeps.guideSessionStore,
@@ -134,7 +134,6 @@ export async function* routeParallel(
     userId,
     threadId,
     log,
-    dismissTracker: deps.invocationDeps.dismissTracker,
   });
 
   // F148 OQ-2: briefing→invocation link per cat (must be before Promise.all — TDZ fix)

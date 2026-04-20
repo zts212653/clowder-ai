@@ -161,7 +161,7 @@ export async function* routeSerial(
     }
   }
 
-  // F155: Guide interceptor — resolve existing state + match new candidates
+  // F155: Guide interceptor — resume existing guide state only
   const guideCtx = await prepareGuideContext({
     thread: routeThread,
     guideSessionStore: deps.invocationDeps.guideSessionStore,
@@ -170,7 +170,6 @@ export async function* routeSerial(
     userId,
     threadId,
     log,
-    dismissTracker: deps.invocationDeps.dismissTracker,
   });
 
   try {
