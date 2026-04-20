@@ -21,6 +21,8 @@ import { BatchSpanProcessor, ConsoleSpanExporter, SimpleSpanProcessor } from '@o
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 import { createModuleLogger } from '../logger.js';
 import { validateSalt } from './hmac.js';
+import { LocalTraceExporter } from './local-trace-exporter.js';
+import type { LocalTraceStore } from './local-trace-store.js';
 import { createMetricAllowlistViews } from './metric-allowlist.js';
 import { RedactingLogProcessor, RedactingSpanProcessor } from './redactor.js';
 
@@ -68,16 +70,23 @@ const DEFAULT_CONFIG: Required<TelemetryConfig> = {
   debugMode: process.env.TELEMETRY_DEBUG === 'true',
 };
 
+export interface TelemetryHandle {
+  /** Async shutdown function for graceful termination. */
+  shutdown: () => Promise<void>;
+  /** LocalTraceStore ring buffer — null if OTel is disabled. */
+  traceStore: LocalTraceStore | null;
+}
+
 let sdk: NodeSDK | null = null;
 
 /**
- * Initialize OTel SDK. Returns an async shutdown function.
+ * Initialize OTel SDK. Returns a handle with shutdown + traceStore.
  * No-op if OTEL_SDK_DISABLED=true.
  */
-export function initTelemetry(config?: TelemetryConfig): () => Promise<void> {
+export function initTelemetry(config?: TelemetryConfig): TelemetryHandle {
   if (process.env.OTEL_SDK_DISABLED === 'true') {
     log.info('OTel SDK disabled (OTEL_SDK_DISABLED=true)');
-    return async () => {};
+    return { shutdown: async () => {}, traceStore: null };
   }
 
   const cfg = { ...DEFAULT_CONFIG, ...config };
@@ -96,7 +105,7 @@ export function initTelemetry(config?: TelemetryConfig): () => Promise<void> {
     validateSalt();
   } catch (err) {
     log.error({ err }, 'OTel SDK disabled: HMAC salt validation failed');
-    return async () => {};
+    return { shutdown: async () => {}, traceStore: null };
   }
 
   const resource = resourceFromAttributes({
@@ -117,6 +126,13 @@ export function initTelemetry(config?: TelemetryConfig): () => Promise<void> {
   if (cfg.otlpEnabled) {
     spanProcessors.push(new RedactingSpanProcessor(new BatchSpanProcessor(new OTLPTraceExporter())));
   }
+
+  // F153 Phase E: LocalTraceExporter for Hub embedded observability.
+  // MUST come AFTER RedactingSpanProcessor — it sees redacted attributes
+  // because the redactor mutates span.attributes in-place before this runs.
+  // SimpleSpanProcessor ensures synchronous export (no batching delay).
+  const localExporter = new LocalTraceExporter();
+  spanProcessors.push(new SimpleSpanProcessor(localExporter));
 
   // --- Metrics: Prometheus scrape + optional OTLP push ---
   const prometheusExporter = new PrometheusExporter({
@@ -160,11 +176,14 @@ export function initTelemetry(config?: TelemetryConfig): () => Promise<void> {
     'OTel SDK initialized',
   );
 
-  return async () => {
-    if (sdk) {
-      await sdk.shutdown();
-      sdk = null;
-      log.info('OTel SDK shut down');
-    }
+  return {
+    shutdown: async () => {
+      if (sdk) {
+        await sdk.shutdown();
+        sdk = null;
+        log.info('OTel SDK shut down');
+      }
+    },
+    traceStore: localExporter.getStore(),
   };
 }

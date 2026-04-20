@@ -215,7 +215,7 @@ async function main(): Promise<void> {
 
   // F152: Initialize OpenTelemetry SDK (must be early, before routes)
   const { initTelemetry } = await import('./infrastructure/telemetry/init.js');
-  const shutdownTelemetry = initTelemetry();
+  const telemetryHandle = initTelemetry();
 
   const app = Fastify({ logger: customLogger as unknown as import('fastify').FastifyBaseLogger });
 
@@ -1229,6 +1229,12 @@ async function main(): Promise<void> {
   if (toolUsageCounter) {
     await app.register(toolUsageRoutes, { toolUsageCounter });
   }
+  // F153 Phase E: Hub embedded observability routes
+  const { telemetryRoutes } = await import('./routes/telemetry.js');
+  await app.register(telemetryRoutes, {
+    traceStore: telemetryHandle.traceStore,
+  });
+
   // F075 Phase B+C: Game + Achievement stores
   const { GameStore } = await import('./domains/leaderboard/game-store.js');
   const { AchievementStore } = await import('./domains/leaderboard/achievement-store.js');
@@ -2309,7 +2315,7 @@ async function main(): Promise<void> {
 
       // F152: Flush and shutdown OTel SDK before closing server
       try {
-        await shutdownTelemetry();
+        await telemetryHandle.shutdown();
       } catch (err) {
         app.log.error(`[api] OTel shutdown failed: ${String(err)}`);
       }
