@@ -439,9 +439,9 @@ function migrateHomedirCredentials(projectRoot?: string): void {
 }
 
 function ensureMigrated(projectRoot: string): void {
-  // Homedir credentials.json FIRST (skip-existing): fills target before legacy
-  // secrets run, so legacy's `id in existing` check naturally defers to homedir.
-  migrateHomedirCredentials(projectRoot);
+  // #506: migrateHomedirCredentials removed — F340 migration period complete.
+  // Post-migration, all reads/writes use resolveGlobalRoot() which is determined
+  // by CAT_CAFE_GLOBAL_CONFIG_ROOT or projectRoot, not homedir.
   migrateLegacyProviderProfiles(projectRoot);
   migrateProjectLegacyProviderProfiles(projectRoot);
   migrateHomedirLegacyProviderProfiles(projectRoot);

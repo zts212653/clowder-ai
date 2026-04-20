@@ -23,6 +23,15 @@ triggers:
   - "later"
   - "in 5 minutes"
   - "once"
+  - "删除"
+  - "清理"
+  - "移除"
+  - "取消"
+  - "停掉"
+  - "remove"
+  - "cancel"
+  - "delete"
+  - "stop task"
 ---
 
 # Schedule Tasks — 定时任务注册与管理
@@ -107,6 +116,14 @@ triggers:
 | 暂停/恢复 | SchedulePanel UI（目前无 MCP 工具，只能在面板操作） |
 | 删除 | `cat_cafe_remove_scheduled_task` |
 | 手动触发 | SchedulePanel UI "立即执行" 按钮（目前无 MCP 工具） |
+
+### 删除流程（3 步）
+
+用户说"删除/清理/取消定时任务"时：
+
+1. **确认目标** — 调用 `cat_cafe_list_tasks` 或让用户在 SchedulePanel 中查看，确认要删除的任务 `taskId`
+2. **用户确认** — 展示任务详情（名称、触发规则、上次执行），让用户确认删除
+3. **执行删除** — 调用 `cat_cafe_remove_scheduled_task`（参数：`taskId`），删除后告知用户结果
 
 ## 常见错误
 
