@@ -63,6 +63,12 @@ Source: "..\..\bundled\deploy\web\*";            DestDir: "{app}\packages\web"; 
   Flags: recursesubdirs createallsubdirs; Components: core
 Source: "..\..\bundled\deploy\mcp-server\*";     DestDir: "{app}\packages\mcp-server"; \
   Flags: recursesubdirs createallsubdirs; Components: core
+; cat-template.json — the authoritative source for cat model defaults.
+; cat-config-loader.js resolves it relative to its own location 4 dirs up
+; (= install root). Without this file, getCatModel("codex") falls back to
+; the hardcoded CAT_CONFIGS default ("codex") which fox/custom proxies
+; don't recognize — yielding 404 on every CLI invocation.
+Source: "..\..\cat-template.json";               DestDir: "{app}"; Components: core
 ; Desktop scripts (post-install config generation)
 Source: "..\scripts\post-install-offline.ps1";   DestDir: "{app}\scripts"; Components: core
 Source: "..\scripts\generate-desktop-config.ps1"; DestDir: "{app}\scripts"; Components: core
