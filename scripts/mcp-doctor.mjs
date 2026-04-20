@@ -205,8 +205,9 @@ function inferPencilApp(command, envApp) {
 function findLatestPencilBinary() {
   const explicit = process.env.PENCIL_MCP_BIN?.trim();
   if (explicit) {
-    if (isExecutableCommandPath(explicit)) {
-      return { command: explicit, app: inferPencilApp(explicit, process.env.PENCIL_MCP_APP) };
+    const resolvedExplicit = resolveLocalPath(explicit);
+    if (isExecutableCommandPath(resolvedExplicit)) {
+      return { command: resolvedExplicit, app: inferPencilApp(resolvedExplicit, process.env.PENCIL_MCP_APP) };
     }
     return { invalidExplicit: explicit };
   }

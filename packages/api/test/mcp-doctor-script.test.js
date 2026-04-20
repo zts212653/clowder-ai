@@ -112,4 +112,31 @@ describe('mcp-doctor.mjs', () => {
     assert.equal(result.status, 1, result.stderr || result.stdout);
     assert.match(result.stdout, /\[unresolved\] pencil-custom — configured PENCIL_MCP_BIN is not executable/);
   });
+
+  it('resolves home-relative PENCIL_MCP_BIN before executability check', () => {
+    const { root, binDir } = createSandbox([
+      {
+        id: 'pencil-home',
+        type: 'mcp',
+        enabled: true,
+        mcpServer: {
+          resolver: 'pencil',
+        },
+      },
+    ]);
+
+    const homeDir = join(root, 'fake-home');
+    mkdirSync(join(homeDir, 'bin'), { recursive: true });
+    writeFileSync(join(homeDir, 'bin', 'pencil-mcp'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+
+    const result = runDoctor(root, binDir, {
+      HOME: homeDir,
+      USERPROFILE: homeDir,
+      PENCIL_MCP_BIN: '~/bin/pencil-mcp',
+      PENCIL_MCP_APP: 'vscode',
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /\[ready\] pencil-home — resolved via vscode/);
+  });
 });

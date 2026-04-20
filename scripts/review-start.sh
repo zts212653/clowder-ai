@@ -17,12 +17,17 @@ port_in_use() {
     return 0
   fi
 
-  if command -v nc >/dev/null 2>&1; then
+  if command -v nc >/dev/null 2>&1 && {
     nc -z 127.0.0.1 "$port" >/dev/null 2>&1 || nc -z localhost "$port" >/dev/null 2>&1
-    return $?
+  }; then
+    return 0
   fi
 
-  (exec 3<>"/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1 || (exec 3<>"/dev/tcp/localhost/$port") >/dev/null 2>&1
+  if (exec 3<>"/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1 || (exec 3<>"/dev/tcp/localhost/$port") >/dev/null 2>&1; then
+    return 0
+  fi
+
+  return 1
 }
 
 pick_review_ports() {

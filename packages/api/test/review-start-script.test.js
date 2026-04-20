@@ -14,7 +14,7 @@ const reviewStartSource = join(repoRoot, 'scripts', 'review-start.sh');
 const tempDirs = [];
 const servers = [];
 
-function createSandbox() {
+function createSandbox({ ncScript } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'cc-review-start-'));
   tempDirs.push(root);
   mkdirSync(join(root, 'scripts'), { recursive: true });
@@ -30,7 +30,8 @@ function createSandbox() {
   writeFileSync(join(binDir, 'ss'), '#!/bin/sh\nexit 127\n', { mode: 0o755 });
   writeFileSync(
     join(binDir, 'nc'),
-    `#!/bin/bash
+    ncScript ??
+      `#!/bin/bash
 if [ "\${1:-}" = "-z" ]; then shift; fi
 host="$1"
 port="$2"
@@ -65,6 +66,30 @@ afterEach(async () => {
 describe('review-start.sh', () => {
   it('falls back when lsof is unavailable and skips occupied review ports', async () => {
     const { root, binDir } = createSandbox();
+    await listen(3201);
+
+    const result = spawnSync('bash', [join(root, 'scripts', 'review-start.sh')], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ''}`,
+        FRONTEND_PORT: '',
+        API_SERVER_PORT: '',
+        PREVIEW_GATEWAY_PORT: '',
+      },
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /Frontend port: 3211/);
+    assert.match(result.stdout, /API port:\s+3212/);
+    assert.match(result.stdout, /START_ENTRY:3211\/3212/);
+  });
+
+  it('continues to bash TCP fallback when nc is present but cannot probe', async () => {
+    const { root, binDir } = createSandbox({
+      ncScript: '#!/bin/sh\nexit 1\n',
+    });
     await listen(3201);
 
     const result = spawnSync('bash', [join(root, 'scripts', 'review-start.sh')], {
