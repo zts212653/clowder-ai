@@ -29,6 +29,11 @@ const BUILTIN_CLIENT_FOR_ID: Record<string, string> = {
   kimi: 'kimi',
   dare: 'dare',
   opencode: 'opencode',
+  // Canonical OAuth IDs (reachable via deriveAccountId slugging display names)
+  anthropic: 'anthropic',
+  openai: 'openai',
+  google: 'google',
+  // builtin_* prefixed (explicit reserved form):
   builtin_anthropic: 'anthropic',
   builtin_openai: 'openai',
   builtin_google: 'google',
