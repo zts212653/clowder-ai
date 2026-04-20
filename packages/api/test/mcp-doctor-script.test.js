@@ -123,4 +123,47 @@ describe('mcp-doctor.mjs', () => {
     assert.equal(result.status, 1, result.stderr || result.stdout);
     assert.match(result.stdout, /\[unresolved\] multi-artifact — command args reference missing local artifact/);
   });
+
+  it('fails for missing path-like artifact args beyond .js entrypoints', () => {
+    const { root, binDir } = createSandbox([
+      {
+        id: 'non-js-artifact',
+        type: 'mcp',
+        enabled: true,
+        mcpServer: {
+          transport: 'stdio',
+          command: 'node',
+          args: ['scripts/server.mjs', 'tools/bootstrap.ts'],
+        },
+      },
+    ]);
+
+    mkdirSync(join(root, 'tools'), { recursive: true });
+    writeFileSync(join(root, 'tools', 'bootstrap.ts'), '// bootstrap stub\n');
+
+    const result = runDoctor(root, binDir);
+
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert.match(result.stdout, /\[unresolved\] non-js-artifact — command args reference missing local artifact/);
+  });
+
+  it('does not treat scoped package arguments as local artifact paths', () => {
+    const { root, binDir } = createSandbox([
+      {
+        id: 'scoped-package',
+        type: 'mcp',
+        enabled: true,
+        mcpServer: {
+          transport: 'stdio',
+          command: 'npx',
+          args: ['-y', '@modelcontextprotocol/server-everything'],
+        },
+      },
+    ]);
+
+    const result = runDoctor(root, binDir);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /\[ready\] scoped-package — stdio npx/);
+  });
 });

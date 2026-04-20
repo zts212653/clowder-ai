@@ -11,6 +11,28 @@ const repoRoot = path.resolve(__dirname, '..');
 const capabilitiesPath = path.join(repoRoot, '.cat-cafe', 'capabilities.json');
 const resolvedPath = path.join(repoRoot, '.cat-cafe', 'mcp-resolved.json');
 const manifestPath = path.join(repoRoot, 'cat-cafe-skills', 'manifest.yaml');
+const WINDOWS_DRIVE_PATH_RE = /^[A-Za-z]:[\\/]/;
+const URL_SCHEME_RE = /^[A-Za-z][A-Za-z\d+.-]*:\/\//;
+const LOCAL_ARTIFACT_EXTENSIONS = new Set([
+  '.js',
+  '.mjs',
+  '.cjs',
+  '.ts',
+  '.mts',
+  '.cts',
+  '.jsx',
+  '.tsx',
+  '.json',
+  '.yaml',
+  '.yml',
+  '.py',
+  '.sh',
+  '.bash',
+  '.zsh',
+  '.ps1',
+  '.cmd',
+  '.bat',
+]);
 
 const CORE_SERVER_ARTIFACTS = new Map([
   ['cat-cafe', path.join(repoRoot, 'packages', 'mcp-server', 'dist', 'index.js')],
@@ -93,17 +115,42 @@ function resolveCommandOnPath(command) {
 
 function referencedArtifactExists(args) {
   if (!Array.isArray(args)) return true;
-  const artifactArgs = args.filter(
-    (value) =>
-      typeof value === 'string' &&
-      (value.startsWith('.') || value.startsWith('/') || value.includes('packages/') || value.endsWith('.js')),
-  );
+  const artifactArgs = args.filter(isLocalArtifactArg);
   if (artifactArgs.length === 0) return true;
 
   return artifactArgs.every((artifactArg) => {
-    const resolved = path.isAbsolute(artifactArg) ? artifactArg : path.resolve(repoRoot, artifactArg);
+    const resolved =
+      path.isAbsolute(artifactArg) || WINDOWS_DRIVE_PATH_RE.test(artifactArg)
+        ? artifactArg
+        : path.resolve(repoRoot, artifactArg);
     return existsSync(resolved);
   });
+}
+
+function isLocalArtifactArg(value) {
+  if (typeof value !== 'string') return false;
+
+  const artifactArg = value.trim();
+  if (!artifactArg || artifactArg.startsWith('-')) return false;
+  if (URL_SCHEME_RE.test(artifactArg)) return false;
+  if (artifactArg.startsWith('@') && !artifactArg.startsWith('@/') && !artifactArg.startsWith('@\\')) {
+    return false;
+  }
+
+  if (
+    artifactArg.startsWith('.') ||
+    artifactArg.startsWith('~') ||
+    path.isAbsolute(artifactArg) ||
+    WINDOWS_DRIVE_PATH_RE.test(artifactArg)
+  ) {
+    return true;
+  }
+
+  if (artifactArg.includes('/') || artifactArg.includes('\\')) {
+    return true;
+  }
+
+  return LOCAL_ARTIFACT_EXTENSIONS.has(path.extname(artifactArg).toLowerCase());
 }
 
 function normalizePencilApp(raw) {
