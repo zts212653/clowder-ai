@@ -112,16 +112,49 @@ if (-not $SkipBundleDeps) {
 Write-Step "Step 3/5 - Bundle Redis portable + Node.js"
 
 # Node.js portable — without this, clean Windows installs with no system Node
-# cannot spawn the API/Web processes.
+# cannot spawn the API/Web processes. CRITICAL: the bundled Node major version
+# must match the build-machine Node major version, otherwise native modules
+# (better-sqlite3) compiled during `pnpm install` fail with an ABI mismatch
+# (NODE_MODULE_VERSION) at runtime.
 $bundledNode = Join-Path (Join-Path $ProjectRoot "bundled") "node"
-if (Test-Path (Join-Path $bundledNode "node.exe")) {
-    Write-Ok "Node.js portable already present"
-} else {
+
+# Detect build-machine Node version so the bundled runtime matches the ABI
+# that native modules were compiled against.
+$buildNodeVersion = $null
+try {
+    $buildNodeVersion = (node --version 2>$null).Trim()
+} catch {}
+if (-not $buildNodeVersion) {
+    Write-Warn "Could not detect build-machine Node version; defaulting to v22.12.0"
+    $buildNodeVersion = "v22.12.0"
+}
+$buildNodeMajor = $buildNodeVersion.TrimStart('v').Split('.')[0]
+
+# Reuse an already-bundled Node only if its major matches the build machine.
+$reuseBundled = $false
+$existingNode = Join-Path $bundledNode "node.exe"
+if (Test-Path $existingNode) {
+    try {
+        $existingVersion = (& $existingNode --version 2>$null).Trim()
+        $existingMajor = $existingVersion.TrimStart('v').Split('.')[0]
+        if ($existingMajor -eq $buildNodeMajor) {
+            Write-Ok "Node.js portable already present (matches build Node $buildNodeVersion)"
+            $reuseBundled = $true
+        } else {
+            Write-Warn "Bundled Node $existingVersion does not match build $buildNodeVersion; re-downloading"
+            Remove-Item $bundledNode -Recurse -Force
+        }
+    } catch {
+        Remove-Item $bundledNode -Recurse -Force
+    }
+}
+
+if (-not $reuseBundled) {
     New-Item -ItemType Directory -Path $bundledNode -Force | Out-Null
-    $nodeVersion = "v20.18.1"
+    $nodeVersion = $buildNodeVersion
     $nodeArchive = "node-$nodeVersion-win-x64"
     $nodeZipUrl = "https://nodejs.org/dist/$nodeVersion/$nodeArchive.zip"
-    Write-Host "  Downloading $nodeArchive ..."
+    Write-Host "  Downloading $nodeArchive (matches build-machine ABI) ..."
     try {
         $zipPath = Join-Path $bundledNode "node.zip"
         Invoke-WebRequest -Uri $nodeZipUrl -OutFile $zipPath -UseBasicParsing -TimeoutSec 180
