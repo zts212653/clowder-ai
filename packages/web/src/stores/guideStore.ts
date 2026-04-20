@@ -8,6 +8,16 @@ import { create } from 'zustand';
 
 /* ── Orchestration Types (shared schema with backend) ── */
 
+export interface TipsMetadata {
+  /** data-guide-id of a pre-composed card div (type: 'card') */
+  target?: string;
+  type: 'card' | 'png';
+  /** Static image path (type: 'png') */
+  src?: string;
+  layout?: 'horizontal' | 'vertical';
+  alt?: string;
+}
+
 export interface OrchestrationStep {
   id: string;
   /** data-guide-id value on the target element */
@@ -18,6 +28,8 @@ export interface OrchestrationStep {
   advance: 'click' | 'visible' | 'input' | 'confirm';
   page?: string;
   timeoutSec?: number;
+  /** Rich tips content — card div or static image displayed alongside tips text */
+  tipsMetadata?: TipsMetadata;
 }
 
 export interface OrchestrationFlow {
