@@ -6,7 +6,14 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { CatId, ConnectorSource, MessageContent, RichMessageExtra } from '@cat-cafe/shared';
+import type {
+  CatId,
+  ConnectorSource,
+  MessageContent,
+  ReplyPreview,
+  RichMessageExtra,
+  SchedulerMessageExtra,
+} from '@cat-cafe/shared';
 import type { MessageMetadata } from '../../types.js';
 import { isSystemUserMessage } from '../visibility.js';
 // Single source of truth: ThreadStore.ts owns DEFAULT_THREAD_ID
@@ -56,16 +63,7 @@ export interface StoredMessage {
     stream?: { invocationId: string };
     crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
     targetCats?: string[];
-    scheduler?: {
-      hiddenTrigger?: boolean;
-      toast?: {
-        type: 'success' | 'error' | 'info';
-        title: string;
-        message: string;
-        duration: number;
-        lifecycleEvent: 'registered' | 'paused' | 'resumed' | 'deleted' | 'succeeded' | 'failed' | 'missed_window';
-      };
-    };
+    scheduler?: SchedulerMessageExtra['scheduler'];
   };
   /** CatIds mentioned in this message */
   mentions: readonly CatId[];
@@ -557,13 +555,6 @@ export class MessageStore {
   }
 }
 
-/** F121: Reply preview for frontend rendering */
-export interface ReplyPreview {
-  senderCatId: CatId | null;
-  content: string;
-  deleted?: true;
-}
-
 const PREVIEW_MAX_LENGTH = 80;
 
 /**
@@ -582,5 +573,9 @@ export async function hydrateReplyPreview(store: IMessageStore, replyToId: strin
   const truncated =
     parent.content.length > PREVIEW_MAX_LENGTH ? parent.content.slice(0, PREVIEW_MAX_LENGTH) : parent.content;
 
-  return { senderCatId: parent.catId, content: truncated };
+  return {
+    senderCatId: parent.catId,
+    content: truncated,
+    ...(parent.extra?.scheduler?.hiddenTrigger ? { kind: 'scheduler_trigger' as const } : {}),
+  };
 }

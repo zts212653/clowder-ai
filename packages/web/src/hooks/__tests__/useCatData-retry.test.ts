@@ -124,12 +124,12 @@ afterEach(() => {
 
 describe('useCatData retry mechanism', () => {
   it('retries after 10s on failure and stops after success', async () => {
-    // First call: API down → fallback returned
-    mockApiFetch.mockResolvedValueOnce({ ok: false });
-    // Second call (10s retry): API up → real cats
-    mockApiFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ cats: API_CATS }),
+    // F166: /api/config/cat-order always returns empty order; /api/cats follows
+    // the retry sequence (fail → success).
+    const catsResponses = [{ ok: false }, { ok: true, json: () => Promise.resolve({ cats: API_CATS }) }];
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/config/cat-order') return Promise.resolve({ ok: false });
+      return Promise.resolve(catsResponses.shift() ?? { ok: false });
     });
 
     // Render — triggers first fetchCats()
@@ -137,13 +137,15 @@ describe('useCatData retry mechanism', () => {
       root.render(React.createElement(TestComponent));
     });
 
+    const catsCallCount = () => mockApiFetch.mock.calls.filter((call) => call[0] === '/api/cats').length;
+
     // First fetch resolved (failure) → fallback cats, no breedId
     expect(hookResult.isLoading).toBe(false);
     expect(hookResult.cats[0].id).toBe('opus');
     expect(hookResult.cats[0].breedId).toBeUndefined(); // fallback marker
     expect((hookResult.cats[0] as CatData & { source?: string }).source).toBe('seed');
     expect((hookResult.cats[0] as CatData & { roster?: unknown }).roster ?? null).toBeNull();
-    expect(mockApiFetch).toHaveBeenCalledTimes(1);
+    expect(catsCallCount()).toBe(1);
 
     // Advance 10s → retry timer fires → retryCount increments → re-fetch
     await act(async () => {
@@ -158,39 +160,41 @@ describe('useCatData retry mechanism', () => {
     expect((hookResult.cats[0] as CatData & { roster?: { lead?: boolean } | null }).roster?.lead).toBe(true);
     expect((hookResult.cats[1] as CatData & { source?: string }).source).toBe('runtime');
     expect((hookResult.cats[1] as CatData & { roster?: unknown }).roster ?? null).toBeNull();
-    expect(mockApiFetch).toHaveBeenCalledTimes(2);
+    expect(catsCallCount()).toBe(2);
 
     // Advance another 30s → no further retries (success stops the cycle)
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
-    expect(mockApiFetch).toHaveBeenCalledTimes(2);
+    expect(catsCallCount()).toBe(2);
   });
 
   it('stops retrying after MAX_RETRIES (3) failures', async () => {
-    // All calls fail
+    // All calls fail (both /api/cats and /api/config/cat-order)
     mockApiFetch.mockResolvedValue({ ok: false });
 
     await act(async () => {
       root.render(React.createElement(TestComponent));
     });
 
+    const catsCallCount = () => mockApiFetch.mock.calls.filter((call) => call[0] === '/api/cats').length;
+
     // Initial fetch = call #1
-    expect(mockApiFetch).toHaveBeenCalledTimes(1);
+    expect(catsCallCount()).toBe(1);
 
     // Retry 1 (10s), Retry 2 (20s), Retry 3 (30s)
     for (let i = 1; i <= 3; i++) {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(10_000);
       });
-      expect(mockApiFetch).toHaveBeenCalledTimes(1 + i);
+      expect(catsCallCount()).toBe(1 + i);
     }
 
     // No retry #4 — MAX_RETRIES reached
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
-    expect(mockApiFetch).toHaveBeenCalledTimes(4); // 1 initial + 3 retries
+    expect(catsCallCount()).toBe(4); // 1 initial + 3 retries
   });
 
   it('refresh updates all mounted hook consumers, not only the caller', async () => {
@@ -223,15 +227,14 @@ describe('useCatData retry mechanism', () => {
         source: 'runtime',
       },
     ];
-    mockApiFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ cats: initialCats }),
-      } as unknown as Response)
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ cats: refreshedCats }),
-      } as unknown as Response);
+    const catsResponses = [
+      { ok: true, json: () => Promise.resolve({ cats: initialCats }) },
+      { ok: true, json: () => Promise.resolve({ cats: refreshedCats }) },
+    ];
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/config/cat-order') return Promise.resolve({ ok: false } as Response);
+      return Promise.resolve((catsResponses.shift() ?? { ok: false }) as Response);
+    });
 
     await act(async () => {
       root.render(React.createElement(MultiHookComponent));

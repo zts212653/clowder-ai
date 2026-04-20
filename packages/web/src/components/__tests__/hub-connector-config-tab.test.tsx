@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useGuideStore } from '@/stores/guideStore';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 vi.mock('../FeishuQrPanel', () => ({
@@ -20,6 +21,12 @@ import { apiFetch } from '@/utils/api-client';
 
 const mockApiFetch = vi.mocked(apiFetch);
 const { HubConnectorConfigTab } = await import('../HubConnectorConfigTab');
+
+const CONNECT_WECHAT_FLOW = {
+  id: 'connect-wechat',
+  name: '对接微信',
+  steps: [{ id: 'expand-wechat', target: 'connector.weixin', tips: '展开微信渠道配置', advance: 'click' as const }],
+};
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -58,6 +65,9 @@ describe('F134 follow-up — HubConnectorConfigTab', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    act(() => {
+      useGuideStore.getState().exitGuide();
+    });
     vi.clearAllMocks();
   });
 
@@ -126,5 +136,54 @@ describe('F134 follow-up — HubConnectorConfigTab', () => {
     await flushEffects();
 
     expect(mockApiFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not collapse an expanded weixin card when the current guide step targets connector.weixin', async () => {
+    mockApiFetch.mockResolvedValue(
+      jsonResponse({
+        platforms: [
+          {
+            id: 'weixin',
+            name: '微信',
+            nameEn: 'Weixin',
+            configured: false,
+            docsUrl: 'https://open.weixin.qq.com',
+            steps: [{ text: '生成二维码' }, { text: '完成接入' }],
+            fields: [],
+          },
+        ],
+      }),
+    );
+
+    await act(async () => {
+      root.render(React.createElement(HubConnectorConfigTab));
+    });
+    await flushEffects();
+
+    const card = container.querySelector('[data-guide-id="connector.weixin"]');
+    const expand = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('微信'),
+    );
+    expect(card).toBeTruthy();
+    expect(expand).toBeTruthy();
+
+    await act(async () => {
+      expand?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(container.querySelector('[data-guide-id="connector.weixin.qr-panel"]')).toBeTruthy();
+
+    await act(async () => {
+      useGuideStore.getState().startGuide(CONNECT_WECHAT_FLOW);
+      useGuideStore.getState().setPhase('active');
+    });
+
+    await act(async () => {
+      expand?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(container.querySelector('[data-guide-id="connector.weixin.qr-panel"]')).toBeTruthy();
   });
 });

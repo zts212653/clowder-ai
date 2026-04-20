@@ -182,21 +182,6 @@ server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
     assert.doesNotMatch(result.stderr, /API port appears active/);
   });
 
-  it('fails fast when project is a git repo but the configured remote is missing', () => {
-    const projectDir = createTempProject('runtime-missing-remote');
-    execFileSync('git', ['init', '-b', 'main'], { cwd: projectDir, stdio: 'ignore' });
-
-    const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-sync'], {
-      cwd: projectDir,
-      encoding: 'utf8',
-      env: { ...process.env, CAT_CAFE_RUNTIME_RESTART_OK: '1' },
-    });
-
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /remote 'origin' not found/);
-    assert.doesNotMatch(result.stdout, /running in-place \(deployment mode\)/);
-  });
-
   it('seeds missing runtime auth config from the launcher project during init', () => {
     const projectDir = createTempProject('runtime-auth-config-seed');
     const runtimeDir = mkdtempSync(join(tmpdir(), 'runtime-auth-config-worktree-'));
@@ -241,6 +226,21 @@ server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
     assert.deepEqual(JSON.parse(readFileSync(join(normalizedRuntimeDir, '.cat-cafe', 'credentials.json'), 'utf8')), {
       'installer-openai': { apiKey: 'sk-runtime' },
     });
+  });
+
+  it('fails fast when project is a git repo but the configured remote is missing', () => {
+    const projectDir = createTempProject('runtime-missing-remote');
+    execFileSync('git', ['init', '-b', 'main'], { cwd: projectDir, stdio: 'ignore' });
+
+    const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-sync'], {
+      cwd: projectDir,
+      encoding: 'utf8',
+      env: { ...process.env, CAT_CAFE_RUNTIME_RESTART_OK: '1' },
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /remote 'origin' not found/);
+    assert.doesNotMatch(result.stdout, /running in-place \(deployment mode\)/);
   });
 
   it('auto-installs missing runtime dependencies before in-place start', () => {

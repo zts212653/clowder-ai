@@ -2,6 +2,7 @@ import { CAT_CONFIGS } from '@cat-cafe/shared';
 import { create } from 'zustand';
 import { getBubbleInvocationId } from '@/debug/bubbleIdentity';
 import { recordDebugEvent } from '@/debug/invocationEventDebug';
+import { saveThreadMessages as saveMessagesSnapshot, saveThreads as saveThreadsSnapshot } from '../utils/offline-store';
 import type {
   CatInvocationInfo,
   CatStatusType,
@@ -139,6 +140,7 @@ function flattenThread(ts: ThreadState): Partial<ChatState> {
 const MAX_BLOB_MESSAGES = 200;
 
 const UI_THINKING_EXPANDED_KEY = 'catcafe.ui.thinkingExpandedByDefault';
+const THINKING_CHUNK_SEPARATOR = '\n\n---\n\n';
 
 function loadUiThinkingExpandedByDefault(): boolean {
   if (typeof window === 'undefined') return false;
@@ -156,6 +158,40 @@ function persistUiThinkingExpandedByDefault(next: boolean) {
   } catch {
     // ignore storage failures (privacy mode, quota, etc.)
   }
+}
+
+function renderThinkingChunks(chunks: string[]): string {
+  return chunks.join(THINKING_CHUNK_SEPARATOR);
+}
+
+function getThinkingChunks(message: Pick<ChatMessage, 'thinking' | 'thinkingChunks'>): string[] {
+  if (message.thinkingChunks && message.thinkingChunks.length > 0) {
+    if (!message.thinking || renderThinkingChunks(message.thinkingChunks) === message.thinking) {
+      return message.thinkingChunks;
+    }
+  }
+  return message.thinking ? [message.thinking] : [];
+}
+
+function appendThinkingChunk(
+  message: Pick<ChatMessage, 'thinking' | 'thinkingChunks'>,
+  next: string,
+): Pick<ChatMessage, 'thinking' | 'thinkingChunks'> {
+  const existingChunks = getThinkingChunks(message);
+  if (existingChunks.length === 0) {
+    return { thinking: next, thinkingChunks: [next] };
+  }
+  if (existingChunks.at(-1) === next) {
+    return {
+      thinking: renderThinkingChunks(existingChunks),
+      thinkingChunks: existingChunks,
+    };
+  }
+  const thinkingChunks = [...existingChunks, next];
+  return {
+    thinking: renderThinkingChunks(thinkingChunks),
+    thinkingChunks,
+  };
 }
 
 export type BubbleExpandState = 'expanded' | 'collapsed';
@@ -461,6 +497,8 @@ interface ChatState {
   _pendingAckCount: Record<string, number>;
   threads: Thread[];
   isLoadingThreads: boolean;
+  /** F164: True when messages are from offline snapshot, not fresh API data */
+  isOfflineSnapshot: boolean;
   /** UI: Whether Thinking blocks should be expanded by default (global preference). */
   uiThinkingExpandedByDefault: boolean;
   /** Global bubble display defaults from Config Hub (server-side). */
@@ -515,6 +553,7 @@ interface ChatState {
   setCurrentThread: (threadId: string) => void;
   setCurrentProject: (projectPath: string) => void;
   setLoadingThreads: (loading: boolean) => void;
+  setOfflineSnapshot: (v: boolean) => void;
   updateThreadTitle: (threadId: string, title: string) => void;
   updateThreadParticipants: (threadId: string, participants: string[]) => void;
   updateThreadPin: (threadId: string, pinned: boolean) => void;
@@ -635,9 +674,9 @@ interface ChatState {
   workspaceRevealPath: string | null;
   setWorkspaceRevealPath: (path: string | null, originThreadId?: string | null) => void;
 
-  // Phase H + F139: Workspace mode (dev tools / knowledge feed / schedule panel)
-  workspaceMode: 'dev' | 'recall' | 'schedule';
-  setWorkspaceMode: (mode: 'dev' | 'recall' | 'schedule') => void;
+  // Phase H + F139 + F160 + F168: Workspace mode
+  workspaceMode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community';
+  setWorkspaceMode: (mode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community') => void;
 
   // ── F120: Preview auto-open (always-mounted listener) ──
   pendingPreviewAutoOpen: { port: number; path: string } | null;
@@ -684,11 +723,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   _unreadSuppressedUntil: {},
   _pendingAckCount: {},
   threads: [],
-  isLoadingThreads: false,
+  isLoadingThreads: true,
+  isOfflineSnapshot: false,
   uiThinkingExpandedByDefault: loadUiThinkingExpandedByDefault(),
   globalBubbleDefaults: {
-    // Use old localStorage value as initial fallback for thinking; CLI defaults to collapsed
-    thinking: loadUiThinkingExpandedByDefault() ? 'expanded' : 'collapsed',
+    // Always start collapsed — server config overwrites via fetchGlobalBubbleDefaults().
+    // Previously used localStorage as initial fallback, but this races with thread loading:
+    // threads can finish before config, causing a flash of expanded bubbles from stale localStorage.
+    thinking: 'collapsed',
     cliOutput: 'collapsed',
   },
 
@@ -1195,9 +1237,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setMessageThinking: (messageId, thinking) =>
     set((state) => ({
-      messages: state.messages.map((m) =>
-        m.id === messageId ? { ...m, thinking: m.thinking ? `${m.thinking}\n\n---\n\n${thinking}` : thinking } : m,
-      ),
+      messages: state.messages.map((m) => (m.id === messageId ? { ...m, ...appendThinkingChunk(m, thinking) } : m)),
     })),
 
   setMessageStreamInvocation: (messageId, invocationId) =>
@@ -1233,9 +1273,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // ── Thread management ──
 
-  setThreads: (threads) => set({ threads }),
-  setCurrentProject: (projectPath) => set({ currentProjectPath: projectPath }),
+  setThreads: (threads) => {
+    set({ threads });
+    // F164: Write-through to IndexedDB (fire-and-forget)
+    void saveThreadsSnapshot(threads).catch(() => {});
+  },
+  setCurrentProject: (projectPath) =>
+    set((state) => (state.currentProjectPath === projectPath ? state : { currentProjectPath: projectPath })),
   setLoadingThreads: (loading) => set({ isLoadingThreads: loading }),
+  setOfflineSnapshot: (v) => set({ isOfflineSnapshot: v }),
 
   updateThreadTitle: (threadId, title) =>
     set((state) => ({
@@ -1284,6 +1330,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       // Save current flat state to map
       const saved = snapshotActive(state);
+      // F164: Write-through outgoing thread's messages to IndexedDB (fire-and-forget)
+      // Always write — even empty arrays — so server-cleared threads don't leave stale snapshots
+      void saveMessagesSnapshot(state.currentThreadId, saved.messages, saved.hasMore).catch(() => {});
       // Load target thread state (or defaults for first visit)
       const loaded = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
 
@@ -1530,7 +1579,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) =>
       updateThreadMessage(state, threadId, messageId, (m) => ({
         ...m,
-        thinking: m.thinking ? `${m.thinking}\n\n---\n\n${thinking}` : thinking,
+        ...appendThinkingChunk(m, thinking),
       })),
     ),
 

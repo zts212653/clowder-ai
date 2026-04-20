@@ -33,7 +33,8 @@ export type EnvCategory =
   | 'github_review'
   | 'evidence'
   | 'quota'
-  | 'telemetry';
+  | 'telemetry'
+  | 'antigravity';
 
 export interface EnvDefinition {
   /** The env var name, e.g. 'REDIS_URL' */
@@ -76,6 +77,7 @@ export const ENV_CATEGORIES: Record<EnvCategory, string> = {
   evidence: 'F102 记忆系统',
   quota: '额度监控',
   telemetry: '可观测性 (OTel)',
+  antigravity: '孟加拉猫 (Antigravity)',
 };
 
 export const ENV_VARS: EnvDefinition[] = [
@@ -174,6 +176,33 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'Hook 回调鉴权 token',
     category: 'server',
     sensitive: true,
+  },
+  {
+    name: 'CAT_CAFE_TEST_SANDBOX',
+    defaultValue: '(未设置)',
+    description: '测试沙盒写保护开关（仅测试/门禁使用）',
+    category: 'server',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_TEST_SANDBOX_ALLOW_UNSAFE_ROOT',
+    defaultValue: '(未设置)',
+    description: '测试沙盒临时允许写入非隔离根目录（仅测试调试使用）',
+    category: 'server',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_TEST_REAL_HOME',
+    defaultValue: '(未设置)',
+    description: '测试真实 HOME 路径快照（用于阻止测试写回宿主 HOME）',
+    category: 'server',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
   },
   {
     name: 'RUNTIME_REPO_PATH',
@@ -1185,6 +1214,63 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'evidence',
     sensitive: false,
   },
+  // --- F163 记忆熵减实验框架 ---
+  {
+    name: 'F163_AUTHORITY_BOOST',
+    defaultValue: 'off',
+    description: 'F163 authority 加权 rerank (off/shadow/on)',
+    category: 'evidence',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'F163_ALWAYS_ON_INJECTION',
+    defaultValue: 'off',
+    description: 'F163 constitutional 物理注入 (off/shadow/on)',
+    category: 'evidence',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'F163_RETRIEVAL_RERANK',
+    defaultValue: 'off',
+    description: 'F163 多轴元数据 rerank (off/shadow/on)',
+    category: 'evidence',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'F163_COMPRESSION',
+    defaultValue: 'off',
+    description: 'F163 非替代式压缩 (off/suggest/apply)',
+    category: 'evidence',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'F163_PROMOTION_GATE',
+    defaultValue: 'off',
+    description: 'F163 晋升门禁 (off/suggest/apply)',
+    category: 'evidence',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'F163_CONTRADICTION_DETECTION',
+    defaultValue: 'off',
+    description: 'F163 矛盾检测 (off/suggest/apply)',
+    category: 'evidence',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'F163_REVIEW_QUEUE',
+    defaultValue: 'off',
+    description: 'F163 审计 review queue (off/suggest/apply)',
+    category: 'evidence',
+    sensitive: false,
+    runtimeEditable: true,
+  },
   {
     name: 'EMBED_URL',
     defaultValue: 'http://127.0.0.1:9880',
@@ -1307,6 +1393,56 @@ export const ENV_VARS: EnvDefinition[] = [
     defaultValue: '(未设置 → 启用)',
     description: '设为 true 完全禁用 OTel SDK',
     category: 'telemetry',
+    sensitive: false,
+  },
+  // --- antigravity (F061 Bridge) ---
+  {
+    name: 'ANTIGRAVITY_PORT',
+    defaultValue: '(未设置 → 自动发现)',
+    description: 'Antigravity Language Server ConnectRPC 端口（覆盖自动发现）',
+    category: 'antigravity',
+    sensitive: false,
+  },
+  {
+    name: 'ANTIGRAVITY_CSRF_TOKEN',
+    defaultValue: '(未设置 → 自动发现)',
+    description: 'Antigravity Language Server CSRF Token（覆盖自动发现）',
+    category: 'antigravity',
+    sensitive: true,
+  },
+  {
+    name: 'ANTIGRAVITY_TLS',
+    defaultValue: 'true',
+    description: 'Antigravity ConnectRPC 是否使用 TLS（默认 true）',
+    category: 'antigravity',
+    sensitive: false,
+  },
+  {
+    name: 'ANTIGRAVITY_AUTO_APPROVE',
+    defaultValue: 'true',
+    description: 'YOLO 模式：自动批准 Antigravity 待审批交互（设 false 关闭）',
+    category: 'antigravity',
+    sensitive: false,
+  },
+  {
+    name: 'ANTIGRAVITY_TRACE_RAW',
+    defaultValue: '(未设置 → 关闭)',
+    description: '设为 1 启用 Antigravity 原始轨迹 dump（rpc raw response + step shape snapshot）',
+    category: 'antigravity',
+    sensitive: false,
+  },
+  {
+    name: 'ANTIGRAVITY_NATIVE_EXECUTOR',
+    defaultValue: '(未设置 → 开启)',
+    description: '设为 0 关闭 Antigravity 原生 executeAndPush（回落到通用 submit 路径）',
+    category: 'antigravity',
+    sensitive: false,
+  },
+  {
+    name: 'CAT_CAFE_READONLY',
+    defaultValue: '(未设置 → 全量注册)',
+    description: 'MCP Server 只读模式：跳过 post_message 等写操作工具注册（Antigravity 持久 MCP 用）',
+    category: 'antigravity',
     sensitive: false,
   },
 ];

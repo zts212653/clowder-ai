@@ -183,6 +183,12 @@ export interface ConnectorGatewayHandle {
   readonly weixinAdapter: InstanceType<typeof WeixinAdapter> | null;
   readonly permissionStore: IConnectorPermissionStore;
   readonly startWeixinPolling: () => void;
+  /** F132 Phase E: dynamically start WeCom Bot adapter after credential validation */
+  readonly startWeComBotStream: (botId: string, secret: string) => Promise<void>;
+  /** F132 Phase E: stop running WeCom Bot adapter (for disconnect) */
+  readonly stopWeComBot: () => Promise<void>;
+  /** F132 bugfix: live adapter getter for health reporting (instance changes on restart) */
+  readonly getWeComBotAdapter: () => WeComBotAdapter | null;
   stop(): Promise<void>;
 }
 
@@ -672,12 +678,21 @@ export async function startConnectorGateway(
   }
 
   // ── WeCom Bot (WebSocket mode via @wecom/aibot-node-sdk) ──
-  if (hasWeComBot) {
-    const wecomBot = new WeComBotAdapter(log, {
-      botId: config.wecomBotId!,
-      secret: config.wecomBotSecret!,
-      redis: deps.redis,
-    });
+  // F132 Phase E: extracted into a function for dynamic start/stop (Hub guided setup)
+
+  let wecomBotStopFn: (() => Promise<void>) | null = null;
+
+  // P2 fix: register once — closure delegates to whatever wecomBotStopFn currently points to
+  stopFns.push(async () => wecomBotStopFn?.());
+
+  const startWeComBotStream = async (botId: string, secret: string) => {
+    // Stop existing adapter if running
+    if (wecomBotStopFn) {
+      await wecomBotStopFn();
+      wecomBotStopFn = null;
+    }
+
+    const wecomBot = new WeComBotAdapter(log, { botId, secret, redis: deps.redis });
     adapters.set('wecom-bot', wecomBot);
 
     await wecomBot.hydrateGroupChatIds();
@@ -696,7 +711,6 @@ export async function startConnectorGateway(
           ...(a.fileName ? { fileName: a.fileName } : {}),
         }));
 
-      // F132 B.2: Register group chatId so outbound dispatch survives cold restarts
       if (msg.chatType === 'group') {
         wecomBot.registerGroupChatId(msg.chatId);
       }
@@ -712,9 +726,24 @@ export async function startConnectorGateway(
       );
     });
 
-    stopFns.push(async () => wecomBot.stopStream());
+    wecomBotStopFn = async () => {
+      await wecomBot.stopStream();
+      adapters.delete('wecom-bot');
+    };
 
     log.info('[ConnectorGateway] WeCom Bot adapter started (WebSocket mode)');
+  };
+
+  const stopWeComBot = async () => {
+    if (wecomBotStopFn) {
+      await wecomBotStopFn();
+      wecomBotStopFn = null;
+      log.info('[ConnectorGateway] WeCom Bot adapter stopped');
+    }
+  };
+
+  if (hasWeComBot) {
+    await startWeComBotStream(config.wecomBotId!, config.wecomBotSecret!);
   }
 
   // ── WeCom Agent (HTTP callback via webhook) ──
@@ -867,6 +896,12 @@ export async function startConnectorGateway(
     log,
     mediaPathResolver,
     messageLookup,
+    resolveVoiceBlocks: async (blocks, catId) => {
+      const { getVoiceBlockSynthesizer } = await import('../../domains/cats/services/tts/VoiceBlockSynthesizer.js');
+      const synth = getVoiceBlockSynthesizer();
+      if (!synth) throw new Error('VoiceBlockSynthesizer not initialized');
+      return synth.resolveVoiceBlocks(blocks, catId);
+    },
   });
 
   // Build streamable adapters map (only adapters with sendPlaceholder + editMessage)
@@ -900,6 +935,9 @@ export async function startConnectorGateway(
     weixinAdapter: weixin,
     permissionStore,
     startWeixinPolling,
+    startWeComBotStream,
+    stopWeComBot,
+    getWeComBotAdapter: () => (adapters.get('wecom-bot') as WeComBotAdapter) ?? null,
     async stop() {
       cleanupJob.stop();
       await Promise.allSettled(stopFns.map((fn) => fn()));

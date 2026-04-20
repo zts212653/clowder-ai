@@ -1,9 +1,27 @@
-import { type ReactNode, useCallback, useRef, useState } from 'react';
-import type { CatData } from '@/hooks/useCatData';
+import {
+  type DragEvent as ReactDragEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { type CatData, saveCatOrder } from '@/hooks/useCatData';
+import { sortCatsByOrder } from '@/lib/sort-cats-by-order';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import type { ConfigData } from './config-viewer-types';
+import { DefaultCatSelector } from './DefaultCatSelector';
 import { HubCoCreatorOverviewCard, HubMemberOverviewCard, HubOverviewToolbar } from './HubMemberOverviewCard';
+
+/** Move srcId to the position of targetId within ids. Returns a new array. */
+function reorderIds(ids: string[], srcId: string, targetId: string): string[] {
+  const withoutSrc = ids.filter((id) => id !== srcId);
+  const targetIdx = withoutSrc.indexOf(targetId);
+  if (targetIdx < 0) return ids;
+  return [...withoutSrc.slice(0, targetIdx), srcId, ...withoutSrc.slice(targetIdx)];
+}
 
 export type { Capabilities, CatConfig, ConfigData, ContextBudget } from './config-viewer-types';
 
@@ -44,12 +62,122 @@ export function CatOverviewTab({
   onToggleAvailability?: (cat: CatData) => void;
   togglingCatId?: string | null;
 }) {
+  // F154 Phase B (AC-B2): Fetch and manage global default cat
+  const [defaultCatId, setDefaultCatId] = useState<string | null>(null);
+  const [defaultCatLoading, setDefaultCatLoading] = useState(false);
+  const [defaultCatFetchError, setDefaultCatFetchError] = useState(false);
+  const [defaultCatSaveError, setDefaultCatSaveError] = useState<string | null>(null);
+
+  // F166: Local optimistic cat order; null = follow props. Re-sorted against incoming cats.
+  const [localOrder, setLocalOrder] = useState<string[] | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragError, setDragError] = useState<string | null>(null);
+  const draggingIdRef = useRef<string | null>(null);
+  const saveSeqRef = useRef(0);
+
+  const displayCats = useMemo(() => (localOrder ? sortCatsByOrder(cats, localOrder) : cats), [cats, localOrder]);
+
+  const handleDragStart = useCallback((cat: CatData, event: ReactDragEvent<HTMLElement>) => {
+    draggingIdRef.current = cat.id;
+    setDraggingId(cat.id);
+    event.dataTransfer?.setData('text/plain', cat.id);
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+  }, []);
+
+  const handleDragOver = useCallback((_cat: CatData, event: ReactDragEvent<HTMLElement>) => {
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  const handleDragEnd = useCallback(() => {
+    draggingIdRef.current = null;
+    setDraggingId(null);
+  }, []);
+
+  const handleDrop = useCallback(
+    async (target: CatData, event: ReactDragEvent<HTMLElement>) => {
+      event.preventDefault();
+      const srcId = draggingIdRef.current ?? event.dataTransfer?.getData('text/plain') ?? '';
+      draggingIdRef.current = null;
+      setDraggingId(null);
+      if (!srcId || srcId === target.id) return;
+      const currentIds = displayCats.map((c) => c.id);
+      const nextOrder = reorderIds(currentIds, srcId, target.id);
+      if (nextOrder.length === 0) return;
+      const previous = localOrder;
+      const mySeq = ++saveSeqRef.current;
+      setLocalOrder(nextOrder);
+      setDragError(null);
+      try {
+        await saveCatOrder(nextOrder);
+      } catch {
+        if (saveSeqRef.current === mySeq) {
+          setLocalOrder(previous);
+          setDragError('排序保存失败，请重试');
+        }
+      }
+    },
+    [displayCats, localOrder],
+  );
+
+  const fetchDefaultCat = useCallback(() => {
+    setDefaultCatFetchError(false);
+    apiFetch('/api/config/default-cat')
+      .then((r) => r.json())
+      .then((data: { catId: string }) => setDefaultCatId(data.catId))
+      .catch(() => setDefaultCatFetchError(true));
+  }, []);
+
+  useEffect(() => {
+    fetchDefaultCat();
+  }, [fetchDefaultCat]);
+
+  const handleDefaultCatSelect = useCallback(
+    async (catId: string) => {
+      if (catId === defaultCatId) return;
+      setDefaultCatLoading(true);
+      setDefaultCatSaveError(null);
+      try {
+        const res = await apiFetch('/api/config/default-cat', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ catId }),
+        });
+        if (res.ok) {
+          setDefaultCatId(catId);
+        } else {
+          setDefaultCatSaveError('保存失败，请重试');
+        }
+      } catch {
+        setDefaultCatSaveError('网络错误，请重试');
+      } finally {
+        setDefaultCatLoading(false);
+      }
+    },
+    [defaultCatId],
+  );
+
   return (
     <div className="space-y-4">
       <HubOverviewToolbar onAddMember={onAddMember} />
+      {/* F154 Phase B: Global default cat selector (AC-B2: always visible, even on error) */}
+      <DefaultCatSelector
+        cats={cats}
+        currentDefaultCatId={defaultCatId ?? ''}
+        onSelect={handleDefaultCatSelect}
+        isLoading={defaultCatLoading}
+        fetchError={defaultCatFetchError}
+        saveError={defaultCatSaveError}
+        onRetry={fetchDefaultCat}
+      />
       {config.coCreator ? <HubCoCreatorOverviewCard coCreator={config.coCreator} onEdit={onEditCoCreator} /> : null}
+      {dragError ? (
+        <p className="text-[13px] text-[#C14E4E]" role="alert">
+          {dragError}
+        </p>
+      ) : null}
       <div className="space-y-3">
-        {cats.map((catData) => (
+        {displayCats.map((catData, idx) => (
           <HubMemberOverviewCard
             key={catData.id}
             cat={catData}
@@ -57,10 +185,17 @@ export function CatOverviewTab({
             onEdit={onEditMember}
             onToggleAvailability={onToggleAvailability}
             togglingAvailability={togglingCatId === catData.id}
+            guideTargetId={idx === 0 ? 'cats.first-member' : undefined}
+            draggable
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+            onDragEnd={handleDragEnd}
+            isDragging={draggingId === catData.id}
           />
         ))}
       </div>
-      <p className="text-[13px] text-[#B59A88]">点击任意卡片进入成员配置 →</p>
+      <p className="text-[13px] text-[#B59A88]">按住 ⠿ 拖动卡片可自由排序；点击卡片进入成员配置 →</p>
       {cats.length === 0 && <p className="text-sm text-cafe-muted">未找到成员配置数据</p>}
     </div>
   );

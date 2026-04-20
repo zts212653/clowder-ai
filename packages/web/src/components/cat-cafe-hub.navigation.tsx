@@ -32,6 +32,7 @@ export const HUB_GROUPS: HubGroup[] = [
       { id: 'routing', label: '配额看板', icon: 'chart-pie' },
       { id: 'tool-usage', label: '工具统计', icon: 'wrench' },
       { id: 'leaderboard', label: '排行榜', icon: 'trophy' },
+      { id: 'marketplace', label: '能力市场', icon: 'store' },
     ],
   },
   {
@@ -93,8 +94,10 @@ export function AccordionSection({
   return (
     <div className="rounded-xl bg-cafe-surface shadow-[0_1px_8px_rgba(0,0,0,0.03)]">
       <button
+        type="button"
         onClick={onToggle}
         className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left transition-colors hover:bg-cafe-surface-elevated/50"
+        data-guide-id={group.id === 'settings' ? 'settings.group' : undefined}
       >
         <span className="flex-shrink-0" style={{ color: group.color }}>
           <HubIcon name={group.icon} className="h-5 w-5" />
@@ -123,7 +126,9 @@ export function AccordionSection({
                 onClick={() => onSelectTab(tab.id)}
                 className="flex w-full items-center gap-3 rounded-lg px-4 py-2.5 text-left text-sm transition-colors"
                 style={isActive ? { backgroundColor: `${group.color}10`, color: group.color } : {}}
-                data-guide-id={tab.id === 'cats' ? 'cats.overview' : undefined}
+                data-guide-id={
+                  tab.id === 'cats' ? 'cats.overview' : tab.id === 'accounts' ? 'settings.accounts' : undefined
+                }
               >
                 <span style={isActive ? { color: group.color } : { color: '#9ca3af' }}>
                   <HubIcon name={tab.icon} className="h-4 w-4" />

@@ -120,6 +120,28 @@ export interface IncrementalContextResult {
 }
 
 /**
+ * Decide whether the routing layer should append the raw current user message
+ * outside the incremental context envelope.
+ *
+ * The normal path is:
+ * - append when the current message is genuinely absent from unseen history
+ * - do NOT append when the message was filtered out for privacy
+ *
+ * Defensive guard:
+ * some smart-window / metadata paths can still surface the current message ID
+ * inside `contextText` even when `includesCurrentUserMessage` is false.
+ * In that case, appending the raw message would duplicate it in the same prompt.
+ */
+export function shouldAppendExplicitCurrentMessage(
+  inc: Pick<IncrementalContextResult, 'contextText' | 'includesCurrentUserMessage' | 'currentMessageFilteredOut'>,
+  currentUserMessageId: string | undefined,
+): boolean {
+  if (inc.includesCurrentUserMessage || inc.currentMessageFilteredOut) return false;
+  if (currentUserMessageId && inc.contextText.includes(currentUserMessageId)) return false;
+  return true;
+}
+
+/**
  * Keep cursor boundary monotonic within one invocation.
  * When the same cat is invoked multiple times (A2A re-entry), later passes may
  * observe fewer relevant messages and produce an older boundary; this helper
@@ -139,6 +161,34 @@ export function getService(services: Record<string, AgentService>, catId: CatId)
   const service = services[catId];
   if (!service) throw new Error(`Unknown cat ID: ${catId as string}`);
   return service;
+}
+
+export function shouldHandleCompletedGuide(
+  guideCompletionOwner: string | undefined,
+  targetCatIds: ReadonlySet<string>,
+  fallbackCatId: string | undefined,
+  catId: string,
+): boolean {
+  if (!guideCompletionOwner) return true;
+  if (guideCompletionOwner === catId) return true;
+  if (!targetCatIds.has(guideCompletionOwner)) return fallbackCatId === catId;
+  return false;
+}
+
+export function shouldHandleOfferedGuide(
+  guideOfferOwner: string | undefined,
+  targetCatIds: ReadonlySet<string>,
+  fallbackCatId: string | undefined,
+  catId: string,
+  hasUserSelection: boolean,
+  allowOwnerMissingFallback = false,
+): boolean {
+  if (!guideOfferOwner) return true;
+  if (guideOfferOwner === catId) return true;
+  if ((hasUserSelection || allowOwnerMissingFallback) && !targetCatIds.has(guideOfferOwner)) {
+    return fallbackCatId === catId;
+  }
+  return false;
 }
 
 export function detectContextDegradation(
@@ -228,6 +278,13 @@ export function isUserFacingSystemInfoContent(content: string): boolean {
   }
 }
 
+function isInternalToolRecipientName(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    (value.startsWith('functions.') || value.startsWith('mcp__') || value.startsWith('multi_tool_use.'))
+  );
+}
+
 function looksLikeLeakedToolCallPayload(candidate: string): boolean {
   const trimmed = candidate.trim();
   if (!trimmed.startsWith('{')) return false;
@@ -238,20 +295,9 @@ function looksLikeLeakedToolCallPayload(candidate: string): boolean {
       recipient_name?: unknown;
     };
     if (Array.isArray(parsed.tool_uses)) {
-      return parsed.tool_uses.some(
-        (item) =>
-          typeof item?.recipient_name === 'string' &&
-          (item.recipient_name.startsWith('functions.') ||
-            item.recipient_name.startsWith('mcp__') ||
-            item.recipient_name.startsWith('multi_tool_use.')),
-      );
+      return parsed.tool_uses.some((item) => isInternalToolRecipientName(item?.recipient_name));
     }
-    return (
-      typeof parsed.recipient_name === 'string' &&
-      (parsed.recipient_name.startsWith('functions.') ||
-        parsed.recipient_name.startsWith('mcp__') ||
-        parsed.recipient_name.startsWith('multi_tool_use.'))
-    );
+    return isInternalToolRecipientName(parsed.recipient_name);
   } catch {
     return false;
   }
@@ -266,12 +312,17 @@ const LEAKED_TOOL_CALL_SIGNATURES = [
   '{"recipient_name":"multi_tool_use.',
 ];
 
+const INTENTIONAL_JSON_EXAMPLE_LINE_RE =
+  /^(?:(?:(?:文档|JSON)\s*)?示例|for\s+example|example|json\s+example|例如|比如)\s*(?:[:：]\s*)?$/i;
+
 function looksLikePotentialLeakedToolCallPayloadPrefix(candidate: string): boolean {
   const trimmed = candidate.trim();
   if (!trimmed.startsWith('{')) return false;
 
   const compact = trimmed.replace(/\s+/g, '');
-  return LEAKED_TOOL_CALL_SIGNATURES.some((signature) => signature.startsWith(compact));
+  return LEAKED_TOOL_CALL_SIGNATURES.some(
+    (signature) => signature.startsWith(compact) || compact.startsWith(signature),
+  );
 }
 
 function findLineStartPayloadIndex(
@@ -300,19 +351,38 @@ function findLineStartPayloadIndex(
   return null;
 }
 
-/**
- * Strip internal tool-call argument payloads that occasionally leak into stream text.
- * Per-chunk stripping is best-effort; final sanitize on the complete text catches leftovers.
- */
+function isIntentionalJsonExamplePrefix(prefix: string): boolean {
+  const trimmed = prefix.trimEnd();
+  if (!trimmed) return false;
+
+  const lines = trimmed.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = (lines[i] ?? '').trim();
+    if (!line) continue;
+    if (/^```(?:json)?$/i.test(line)) return true;
+    return INTENTIONAL_JSON_EXAMPLE_LINE_RE.test(line);
+  }
+
+  return false;
+}
+
 export function stripLeakedToolCallPayload(content: string): string {
   if (!content) return content;
 
   const match = findLineStartPayloadIndex(content, looksLikeLeakedToolCallPayload);
   if (match) {
-    return content.slice(0, match.index).replace(/\s+$/, '');
+    const prefix = content.slice(0, match.index);
+    if (isIntentionalJsonExamplePrefix(prefix)) {
+      return content;
+    }
+    return prefix.replace(/\s+$/, '');
   }
 
   return content;
+}
+
+export interface RoutedMessageTransform {
+  transform(msg: AgentMessage): AgentMessage[];
 }
 
 export interface LeakedToolCallStreamStripper {
@@ -320,39 +390,72 @@ export interface LeakedToolCallStreamStripper {
   flush(): string;
 }
 
-/**
- * Track suspicious line-start `{...}` fragments across stream chunks so leaked tool-call
- * payloads can be suppressed before they become user-visible text.
- */
 export function createLeakedToolCallStreamStripper(): LeakedToolCallStreamStripper {
   let pending = '';
+  let pendingEmittedLength = 0;
 
   return {
     push(content: string): string {
       if (!content) return content;
 
       const combined = pending + content;
+      const alreadyEmittedLength = pendingEmittedLength;
       pending = '';
+      pendingEmittedLength = 0;
 
       const stripped = stripLeakedToolCallPayload(combined);
       if (stripped !== combined) {
-        return stripped;
+        return stripped.slice(alreadyEmittedLength);
       }
 
       const match = findLineStartPayloadIndex(combined, looksLikePotentialLeakedToolCallPayloadPrefix);
       if (!match) {
-        return combined;
+        return combined.slice(alreadyEmittedLength);
       }
 
-      pending = match.candidate;
-      return combined.slice(0, match.index).replace(/\s+$/, '');
+      const emittedPrefix = combined.slice(0, match.index).replace(/\s+$/, '');
+      pending = combined;
+      pendingEmittedLength = emittedPrefix.length;
+      return emittedPrefix.slice(alreadyEmittedLength);
     },
     flush(): string {
       if (!pending) return '';
 
       const remaining = pending;
+      const alreadyEmittedLength = pendingEmittedLength;
       pending = '';
-      return stripLeakedToolCallPayload(remaining);
+      pendingEmittedLength = 0;
+      return stripLeakedToolCallPayload(remaining).slice(alreadyEmittedLength);
+    },
+  };
+}
+
+export function createRoutingMessageTransform(explicitCatId?: CatId): RoutedMessageTransform {
+  const leakedPayloadStripper = createLeakedToolCallStreamStripper();
+
+  return {
+    transform(msg: AgentMessage): AgentMessage[] {
+      if (msg.type === 'text') {
+        const content = msg.content ? leakedPayloadStripper.push(msg.content) : msg.content;
+        return content ? [{ ...msg, content }] : [];
+      }
+
+      if (msg.type === 'done') {
+        const transformed: AgentMessage[] = [];
+        const flushedText = leakedPayloadStripper.flush();
+        if (flushedText) {
+          transformed.push({
+            type: 'text',
+            catId: msg.catId ?? explicitCatId,
+            content: flushedText,
+            timestamp: msg.timestamp,
+          });
+        }
+        transformed.push(msg);
+        return transformed;
+      }
+
+      return [msg];
     },
   };
 }

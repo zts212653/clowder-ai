@@ -1,5 +1,5 @@
 /**
- * F340 — Account startup hook (fail-fast contract)
+ * clowder-ai#340 — Account startup hook (fail-fast contract)
  *
  * Triggers migration, verifies accounts + credentials are readable,
  * and enforces LL-043: legacy source present + no accounts = hard error.
@@ -24,7 +24,7 @@ export function accountStartupHook(projectRoot: string): AccountStartupResult {
     // Wrap with context if legacy source exists (LL-043: migration failed)
     if (hasLegacyProviderProfiles(projectRoot)) {
       throw new Error(
-        `F340 LL-043: account read/migration failed while legacy provider-profiles.json exists. ` +
+        `F136 LL-043: account read/migration failed while legacy provider-profiles.json exists. ` +
           `Original: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
@@ -35,13 +35,13 @@ export function accountStartupHook(projectRoot: string): AccountStartupResult {
   try {
     assertCredentialsReadable(projectRoot);
   } catch (err) {
-    throw new Error(`F340 startup: credentials read failed — ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(`F136 startup: credentials read failed — ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // LL-043: Legacy source present but no accounts after migration = silent failure
   if (hasLegacyProviderProfiles(projectRoot) && Object.keys(accounts).length === 0) {
     throw new Error(
-      'F340 LL-043: legacy provider-profiles.json exists but no accounts after migration. ' +
+      'F136 LL-043: legacy provider-profiles.json exists but no accounts after migration. ' +
         'Migration may have failed silently. Check migration logs.',
     );
   }

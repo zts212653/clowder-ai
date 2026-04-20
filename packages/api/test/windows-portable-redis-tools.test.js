@@ -207,6 +207,7 @@ test('Windows scripts share a generic npm shim resolver for pnpm and agent CLIs'
   assert.match(helpersScript, /\$hasClaude = \$null -ne \(Resolve-ToolCommandWithRetry -Name "claude" -Attempts 6\)/);
   assert.match(helpersScript, /\$hasCodex = \$null -ne \(Resolve-ToolCommandWithRetry -Name "codex" -Attempts 6\)/);
   assert.match(helpersScript, /\$hasGemini = \$null -ne \(Resolve-ToolCommandWithRetry -Name "gemini" -Attempts 6\)/);
+  assert.match(helpersScript, /\$hasKimi = \$null -ne \(Resolve-ToolCommandWithRetry -Name "kimi" -Attempts 6\)/);
 });
 
 test('Windows tool resolution prefers explicit shim candidates before generic Get-Command resolution', () => {

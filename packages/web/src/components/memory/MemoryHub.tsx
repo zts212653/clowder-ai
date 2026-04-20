@@ -3,6 +3,7 @@
 import React from 'react';
 import { KnowledgeFeed } from '../workspace/KnowledgeFeed';
 import { EvidenceSearch } from './EvidenceSearch';
+import { HealthReport } from './HealthReport';
 import { IndexStatus } from './IndexStatus';
 import { MemoryNav, type MemoryTab } from './MemoryNav';
 
@@ -32,6 +33,11 @@ export function MemoryHub({ activeTab = 'feed', initialQuery }: MemoryHubProps) 
         {activeTab === 'status' && (
           <div data-testid="memory-tab-status">
             <IndexStatus />
+          </div>
+        )}
+        {activeTab === 'health' && (
+          <div data-testid="memory-tab-health">
+            <HealthReport />
           </div>
         )}
       </main>

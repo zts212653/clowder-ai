@@ -14,7 +14,11 @@ import { DeliveryCursorStore } from '../dist/domains/cats/services/stores/ports/
 import { InvocationRecordStore } from '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
-import { assertRedisIsolationOrThrow, cleanupPrefixedRedisKeys } from './helpers/redis-test-helpers.js';
+import {
+  assertRedisIsolationOrThrow,
+  cleanupPrefixedRedisKeys,
+  redisIsolationSkipReason,
+} from './helpers/redis-test-helpers.js';
 
 const REDIS_URL = process.env.REDIS_URL;
 
@@ -134,7 +138,7 @@ describe('Concurrent fault drills - in-memory stores', () => {
   });
 });
 
-describe('Concurrent fault drills - Redis stores', { skip: !REDIS_URL ? 'REDIS_URL not set' : false }, () => {
+describe('Concurrent fault drills - Redis stores', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let createRedisClient;
   let SessionStore;
   let RedisInvocationRecordStore;

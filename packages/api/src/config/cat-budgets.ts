@@ -33,9 +33,9 @@ const BUDGET_ENV_KEYS = {
 const DEFAULT_BUDGETS: Record<string, ContextBudget> = {
   // Keep these in sync with project cat-config.json defaults (方案 A) so
   // missing/invalid config doesn't silently regress budgets.
-  ragdoll: { maxPromptTokens: 180000, maxContextTokens: 160000, maxMessages: 200, maxContentLengthPerMsg: 10000 },
-  'maine-coon': { maxPromptTokens: 240000, maxContextTokens: 216000, maxMessages: 200, maxContentLengthPerMsg: 10000 },
-  siamese: { maxPromptTokens: 350000, maxContextTokens: 300000, maxMessages: 300, maxContentLengthPerMsg: 15000 },
+  ragdoll: { maxPromptTokens: 180000, maxContextTokens: 160000, maxMessages: 200, maxContentLengthPerMsg: 100000 },
+  'maine-coon': { maxPromptTokens: 240000, maxContextTokens: 216000, maxMessages: 200, maxContentLengthPerMsg: 100000 },
+  siamese: { maxPromptTokens: 350000, maxContextTokens: 300000, maxMessages: 300, maxContentLengthPerMsg: 100000 },
 };
 
 /** F32-a: Conservative fallback for unknown/dynamic cats — use smallest built-in budget */
@@ -43,7 +43,7 @@ const GLOBAL_FALLBACK_BUDGET: ContextBudget = {
   maxPromptTokens: 100000,
   maxContextTokens: 60000,
   maxMessages: 200,
-  maxContentLengthPerMsg: 10000,
+  maxContentLengthPerMsg: 100000,
 };
 
 // Cache from cat-config.json

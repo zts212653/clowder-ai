@@ -74,14 +74,94 @@ describe('parseSearchResults', () => {
     expect(items[1].title).toBe('F102 Spec');
   });
 
-  it('returns empty for degraded response', () => {
-    const items = parseSearchResults({ results: [], degraded: true, degradeReason: 'error' });
+  it('returns empty for error degradation', () => {
+    const items = parseSearchResults({ results: [], degraded: true, degradeReason: 'evidence_store_error' });
     expect(items).toEqual([]);
+  });
+
+  it('preserves results for graceful degradation (raw_lexical_only)', () => {
+    const response = {
+      results: [{ title: 'T', anchor: 'a', snippet: 's', confidence: 'mid', sourceType: 'decision' }],
+      degraded: true,
+      degradeReason: 'raw_lexical_only',
+      effectiveMode: 'lexical' as const,
+    };
+    const items = parseSearchResults(response);
+    expect(items).toHaveLength(1);
+    expect(items[0].title).toBe('T');
   });
 
   it('handles empty results', () => {
     const items = parseSearchResults({ results: [], degraded: false });
     expect(items).toEqual([]);
+  });
+});
+
+// ── Phase K: Contract Closure (AC-K1 + AC-K2) ──────────────────────
+
+describe('AC-K1: depth=raw forces lexical mode', () => {
+  it('buildSearchUrl overrides mode to lexical when depth=raw', () => {
+    const url = buildSearchUrl({ q: 'test', depth: 'raw', mode: 'hybrid' });
+    expect(url).toContain('mode=lexical');
+    expect(url).not.toContain('mode=hybrid');
+  });
+
+  it('buildSearchUrl keeps mode when depth is not raw', () => {
+    const url = buildSearchUrl({ q: 'test', depth: 'summary', mode: 'semantic' });
+    expect(url).toContain('mode=semantic');
+  });
+
+  it('buildSearchUrl keeps mode when depth is omitted', () => {
+    const url = buildSearchUrl({ q: 'test', mode: 'hybrid' });
+    expect(url).toContain('mode=hybrid');
+  });
+});
+
+describe('AC-K2: passage fields match backend shape', () => {
+  it('preserves passage content/speaker/createdAt from backend', () => {
+    const response = {
+      results: [
+        {
+          title: 'Thread',
+          anchor: 'thread-123',
+          snippet: 'Discussion',
+          confidence: 'mid',
+          sourceType: 'discussion',
+          passages: [{ passageId: 'p1', content: 'Hello world', speaker: 'opus', createdAt: '2026-04-13T00:00:00Z' }],
+        },
+      ],
+      degraded: false,
+    };
+    const items = parseSearchResults(response);
+    expect(items[0].passages![0]).toHaveProperty('content', 'Hello world');
+    expect(items[0].passages![0]).toHaveProperty('speaker', 'opus');
+    expect(items[0].passages![0]).toHaveProperty('passageId', 'p1');
+  });
+
+  it('preserves context passages', () => {
+    const response = {
+      results: [
+        {
+          title: 'Thread',
+          anchor: 'thread-456',
+          snippet: 'Context test',
+          confidence: 'mid',
+          sourceType: 'discussion',
+          passages: [
+            {
+              passageId: 'p2',
+              content: 'Main passage',
+              speaker: 'sonnet',
+              context: [{ passageId: 'p1', content: 'Before', speaker: 'opus', createdAt: '2026-04-13T00:00:00Z' }],
+            },
+          ],
+        },
+      ],
+      degraded: false,
+    };
+    const items = parseSearchResults(response);
+    expect(items[0].passages![0].context).toHaveLength(1);
+    expect(items[0].passages![0].context![0]).toHaveProperty('content', 'Before');
   });
 });
 

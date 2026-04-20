@@ -9,6 +9,7 @@
 import { CAT_CONFIGS } from '@cat-cafe/shared';
 import { useEffect, useMemo, useState } from 'react';
 import { refreshMentionData } from '@/lib/mention-highlight';
+import { sortCatsByOrder } from '@/lib/sort-cats-by-order';
 import { apiFetch } from '@/utils/api-client';
 import { refreshSpeechAliases } from '@/utils/transcription-corrector';
 
@@ -21,7 +22,7 @@ export interface CatData {
   mentionPatterns: string[];
   breedId?: string;
   accountRef?: string;
-  /** F340 P5: CLI client identity (renamed from provider). */
+  /** clowder-ai#340 P5: CLI client identity (renamed from provider). */
   clientId: string;
   defaultModel: string;
   cli?: {
@@ -32,7 +33,7 @@ export interface CatData {
   };
   commandArgs?: string[];
   cliConfigArgs?: string[];
-  /** F340 P5: Model provider name (renamed from ocProviderName). */
+  /** clowder-ai#340 P5: Model provider name (renamed from ocProviderName). */
   provider?: string;
   contextBudget?: {
     maxPromptTokens: number;
@@ -70,6 +71,7 @@ export interface CatData {
 // ── Module-level cache ──────────────────────────────────
 let _cached: CatData[] | null = null;
 let _fetchPromise: Promise<FetchResult> | null = null;
+let _catOrder: string[] = [];
 const _listeners = new Set<(cats: CatData[]) => void>();
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 10_000;
@@ -107,15 +109,29 @@ interface FetchResult {
   fromApi: boolean;
 }
 
+async function fetchCatOrder(): Promise<string[]> {
+  try {
+    const res = await apiFetch('/api/config/cat-order');
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!Array.isArray(data?.catOrder)) return [];
+    return (data.catOrder as unknown[]).filter((id): id is string => typeof id === 'string');
+  } catch {
+    return [];
+  }
+}
+
 async function fetchCats(): Promise<FetchResult> {
   try {
-    const res = await apiFetch('/api/cats');
-    if (!res.ok) return { cats: buildFallbackCats(), fromApi: false };
-    const data = await res.json();
-    const cats = Array.isArray(data?.cats) ? normalizeCats(data.cats) : null;
-    return cats ? { cats, fromApi: true } : { cats: buildFallbackCats(), fromApi: false };
+    const [catsRes, orderIds] = await Promise.all([apiFetch('/api/cats'), fetchCatOrder()]);
+    _catOrder = orderIds;
+    if (!catsRes.ok) return { cats: sortCatsByOrder(buildFallbackCats(), _catOrder), fromApi: false };
+    const data = await catsRes.json();
+    const normalized = Array.isArray(data?.cats) ? normalizeCats(data.cats) : null;
+    const cats = normalized ?? buildFallbackCats();
+    return { cats: sortCatsByOrder(cats, _catOrder), fromApi: normalized !== null };
   } catch {
-    return { cats: buildFallbackCats(), fromApi: false };
+    return { cats: sortCatsByOrder(buildFallbackCats(), _catOrder), fromApi: false };
   }
 }
 
@@ -261,5 +277,35 @@ export function getCachedCats(): CatData[] {
 export function _resetCatDataCache(): void {
   _cached = null;
   _fetchPromise = null;
+  _catOrder = [];
+  _saveSeq = 0;
+  _lastSuccessSeq = 0;
   _listeners.clear();
+}
+
+let _saveSeq = 0;
+let _lastSuccessSeq = 0;
+
+/**
+ * F166: Persist custom cat order and update the cached list optimistically.
+ * Throws on network failure — callers are expected to roll back UI state.
+ * Uses monotonic sequences: _saveSeq tracks all requests, _lastSuccessSeq tracks
+ * the newest successful one. Stale success still updates cache if no newer success exists.
+ */
+export async function saveCatOrder(catOrder: string[]): Promise<void> {
+  const mySeq = ++_saveSeq;
+  const res = await apiFetch('/api/config/cat-order', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ catOrder }),
+  });
+  if (!res.ok) throw new Error(`Failed to save cat order: ${res.status}`);
+  if (mySeq <= _lastSuccessSeq) return;
+  _lastSuccessSeq = mySeq;
+  _catOrder = catOrder;
+  if (_cached) {
+    const reordered = sortCatsByOrder(_cached, catOrder);
+    _cached = reordered;
+    notifyListeners(reordered);
+  }
 }

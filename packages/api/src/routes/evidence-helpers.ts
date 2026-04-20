@@ -22,6 +22,8 @@ export interface EvidenceResult {
   /** F102 Batch 3: knowledge dimension origin — project or global */
   source?: 'project' | 'global';
   status?: EvidenceStatus;
+  /** F163: boost source attribution — what F163 mechanisms affected this result's ranking */
+  boostSource: BoostSource[];
   /** AC-I9: passage-level detail when depth=raw */
   passages?: Array<{
     passageId: string;
@@ -36,6 +38,9 @@ export interface EvidenceResult {
     }>;
   }>;
 }
+
+/** F163: Boost source attribution (search-path reranking, not injection) */
+export type BoostSource = 'authority_boost' | 'retrieval_rerank' | 'compression_summary' | 'legacy';
 
 export function normalizeTags(input: string | string[] | undefined, defaultOrigin = 'origin:git'): string[] {
   const defaults = ['project:cat-cafe', defaultOrigin];
@@ -158,6 +163,7 @@ export async function searchDocs(docsRoot: string, query: string, limit: number)
         snippet,
         confidence: 'low',
         sourceType: classifySource(relative('', relPath)),
+        boostSource: ['legacy'],
       });
     }
 

@@ -8,7 +8,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react-dom/test-utils';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CatInvocationInfo } from '@/stores/chat-types';
-import { SessionChainPanel } from '../SessionChainPanel';
+import { __resetSessionChainCacheForTest, SessionChainPanel } from '../SessionChainPanel';
 
 beforeAll(() => {
   (globalThis as { React?: typeof React }).React = React;
@@ -65,6 +65,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   mockApiFetch = vi.fn();
+  __resetSessionChainCacheForTest();
 });
 
 afterEach(() => {
@@ -434,7 +435,7 @@ describe('F24: SessionChainPanel', () => {
     expect(container.textContent).not.toContain('1 sessions');
   });
 
-  it('clears stale sessions on thread switch when fetch fails (P2 regression)', async () => {
+  it('keeps stale data visible on thread switch when fetch fails (stale-while-revalidate)', async () => {
     // First thread loads successfully
     mockSessionsResponse([
       { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
@@ -443,18 +444,16 @@ describe('F24: SessionChainPanel', () => {
     await flushFetch();
     expect(container.textContent).toContain('Session #1');
 
-    // Switch to thread-2, but fetch fails
+    // Switch to thread-2, but fetch fails — stale data stays visible
     mockApiFetch.mockResolvedValue({ ok: false, status: 500 });
     renderPanel('thread-2');
     await flushFetch();
 
-    // Old thread-1 data must be gone
-    expect(container.textContent).not.toContain('Session #1');
-    // Panel still renders (F33: bind section), but no session cards
-    expect(container.textContent).toContain('0 sessions');
+    // Stale-while-revalidate: old data remains visible on transient error
+    expect(container.textContent).toContain('Session #1');
   });
 
-  it('clears stale sessions on thread switch when fetch throws', async () => {
+  it('keeps stale data visible on thread switch when fetch throws (stale-while-revalidate)', async () => {
     mockSessionsResponse([
       {
         id: 's1',
@@ -470,15 +469,122 @@ describe('F24: SessionChainPanel', () => {
     await flushFetch();
     expect(container.textContent).toContain('Session #1');
 
-    // Switch to thread-B, but fetch throws network error
+    // Switch to thread-B, but fetch throws — stale data stays visible
     mockApiFetch.mockRejectedValue(new Error('network error'));
     renderPanel('thread-B');
     await flushFetch();
 
-    // Old thread-A data must be gone
-    expect(container.textContent).not.toContain('Session #1');
-    // Panel still renders (F33: bind section), but no session cards
-    expect(container.textContent).toContain('0 sessions');
+    // Stale-while-revalidate: old data remains visible on transient error
+    expect(container.textContent).toContain('Session #1');
+  });
+
+  it('disables unseal button on stale data during AND after failed refetch (stale barrier)', async () => {
+    // Load sealed session for thread-1
+    mockSessionsResponse([
+      {
+        id: 's1',
+        catId: 'opus',
+        seq: 0,
+        status: 'sealed',
+        messageCount: 5,
+        createdAt: Date.now() - 60000,
+        sealedAt: Date.now(),
+      },
+    ]);
+    renderPanel('thread-1');
+    await flushFetch();
+
+    const findUnsealBtn = () => {
+      const buttons = Array.from(container.querySelectorAll('button'));
+      return buttons.find((b) => b.textContent?.includes('解封')) as HTMLButtonElement | undefined;
+    };
+
+    // Unseal button should be enabled for fresh data
+    expect(findUnsealBtn()!.disabled).toBe(false);
+
+    // Switch to thread-2, fetch fails — stale data from thread-1 stays visible
+    mockApiFetch.mockRejectedValue(new Error('network error'));
+    renderPanel('thread-2');
+    await flushFetch();
+
+    // Unseal button must stay DISABLED even after loading finishes,
+    // because data belongs to thread-1 not thread-2 (entity mismatch)
+    const staleBtn = findUnsealBtn();
+    expect(staleBtn).toBeDefined();
+    expect(staleBtn!.disabled).toBe(true);
+
+    // Also verify stale indicator is shown
+    expect(container.textContent).toContain('Refreshing...');
+  });
+
+  it('replaces stale data when new thread fetch succeeds (stale-while-revalidate)', async () => {
+    // First thread loads
+    mockSessionsResponse([
+      { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
+    ]);
+    renderPanel('thread-1');
+    await flushFetch();
+    expect(container.textContent).toContain('Session #1');
+
+    // Switch to thread-2 with different data — old data replaced
+    mockSessionsResponse([
+      { id: 's2', catId: 'codex', seq: 0, status: 'active', messageCount: 3, createdAt: Date.now() },
+    ]);
+    renderPanel('thread-2');
+    await flushFetch();
+
+    // New data visible, old data gone
+    expect(container.textContent).toContain('codex');
+    expect(container.textContent).toContain('1 session');
+  });
+
+  it('reuses per-thread session cache immediately when revisiting a thread during revalidate', async () => {
+    let resolveThread1Revisit!: (value: unknown) => void;
+    const thread1Revisit = new Promise((resolve) => {
+      resolveThread1Revisit = resolve;
+    });
+
+    mockApiFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          sessions: [{ id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          sessions: [{ id: 's2', catId: 'codex', seq: 5, status: 'active', messageCount: 3, createdAt: Date.now() }],
+        }),
+      })
+      .mockImplementationOnce(() => thread1Revisit);
+
+    renderPanel('thread-1');
+    await flushFetch();
+    expect(container.textContent).toContain('Session #1');
+
+    renderPanel('thread-2');
+    await flushFetch();
+    expect(container.textContent).toContain('Session #6');
+    expect(container.textContent).toContain('codex');
+
+    renderPanel('thread-1');
+    await flushFetch();
+
+    // Cache should win immediately while revalidate is still in flight.
+    expect(container.textContent).toContain('Session #1');
+    expect(container.textContent).not.toContain('Session #6');
+
+    resolveThread1Revisit({
+      ok: true,
+      json: async () => ({
+        sessions: [{ id: 's1b', catId: 'opus', seq: 1, status: 'active', messageCount: 6, createdAt: Date.now() }],
+      }),
+    });
+    await flushFetch();
+
+    expect(container.textContent).toContain('Session #2');
+    expect(container.textContent).not.toContain('Session #6');
   });
 
   it('applies codex green colors to active session border and badge', async () => {

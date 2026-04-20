@@ -245,7 +245,7 @@ describe('AgentRouter preferredCats routing', () => {
     assert.equal(mockClaudeService.invoke.mock.callCount(), 0);
   });
 
-  test('preferredCats takes priority over participants', async () => {
+  test('falls back to healthy participants before non-participant preferredCats', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
 
     const mockClaudeService = createMockAgentService('opus', 'Opus response');
@@ -273,10 +273,12 @@ describe('AgentRouter preferredCats routing', () => {
       messages.push(msg);
     }
 
-    // preferredCats=[gemini] overrides participants=[opus, codex]
-    assert.equal(mockGeminiService.invoke.mock.callCount(), 1);
-    assert.equal(mockClaudeService.invoke.mock.callCount(), 0);
+    // #1148 + #267: preferredCats only scopes candidates when there is no
+    // healthy participant to continue with. A non-participant preferred cat
+    // should not displace existing healthy participants.
+    assert.equal(mockClaudeService.invoke.mock.callCount(), 1);
     assert.equal(mockCodexService.invoke.mock.callCount(), 0);
+    assert.equal(mockGeminiService.invoke.mock.callCount(), 0);
   });
 
   test('invalid preferredCats (unregistered) are filtered out, falls back to participants', async () => {

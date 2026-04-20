@@ -114,6 +114,14 @@ WHEN 收到 review 反馈:
 
 对每个 P1/P2 问题：
 
+**Step 0: 创建修复任务**（F160 Phase C — 在动手修之前）
+调用 `cat_cafe_create_task` 为每个 P1/P2 创建独立跟踪任务：
+- title: `[P{N}] {问题摘要}`（如 `[P2] TaskComposer HTTP 错误时丢失输入`）
+- why: reviewer 的原始描述（≤120 字）
+- 修复完成后 `cat_cafe_update_task` 状态改为 `done`
+
+**Gotcha**: 不要为 P3 创建任务——P3 当场修或放下，不记 BACKLOG 也不记毛线球。
+
 ```
 1. 理解问题
 2. 写失败测试（Red）
@@ -149,6 +157,10 @@ Commit: {sha} — {message}
 
 请确认修复，确认后执行合入。
 ```
+
+修复完成后（F160 Phase C）：
+- 每个 P1/P2 修复任务 → `cat_cafe_update_task` 状态改为 `done`
+- 回给 reviewer 确认（硬规则不变）
 
 **云端 review 修了 P1/P2 → 必须 re-trigger 云端 review，不能自判通过直接合入。**
 

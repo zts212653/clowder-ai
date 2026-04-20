@@ -207,6 +207,9 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
           if (msg.type === 'done' && msg.errorCode) {
             governanceErrorCode = msg.errorCode;
           }
+          if ((msg.type === 'done' || msg.type === 'error') && msg.catId) {
+            opts.invocationTracker.completeSlot(record.threadId, msg.catId, controller);
+          }
           opts.socketManager.broadcastAgentMessage({ ...msg, invocationId: id }, record.threadId);
         }
 

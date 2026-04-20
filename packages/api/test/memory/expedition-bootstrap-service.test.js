@@ -263,6 +263,47 @@ describe('buildStructuralSummary', () => {
     assert.ok(Object.keys(result.summary.tierCoverage).length > 0, 'should have fallback tierCoverage');
   });
 
+  it('bootstrap populates kindCoverage from getKindCoverage dep', async () => {
+    const db = new Database(':memory:');
+    applyMigrations(db);
+    const stateManager = new IndexStateManager(db);
+    const storeKindCoverage = { feature: 10, decision: 3, lesson: 5, plan: 8 };
+    const svc = new ExpeditionBootstrapService(stateManager, {
+      rebuildIndex: async () => ({ docsIndexed: 26, durationMs: 100 }),
+      getFingerprint: () => 'test:3.0:full',
+      getKindCoverage: async (_projectPath) => storeKindCoverage,
+    });
+    const result = await svc.bootstrap(tmpRoot);
+    assert.equal(result.status, 'ready');
+    assert.deepEqual(result.summary.kindCoverage, storeKindCoverage);
+  });
+
+  it('bootstrap returns empty kindCoverage when getKindCoverage is absent', async () => {
+    const db = new Database(':memory:');
+    applyMigrations(db);
+    const stateManager = new IndexStateManager(db);
+    const svc = new ExpeditionBootstrapService(stateManager, {
+      rebuildIndex: async () => ({ docsIndexed: 5, durationMs: 100 }),
+      getFingerprint: () => 'test:4.0:full',
+    });
+    const result = await svc.bootstrap(tmpRoot);
+    assert.equal(result.status, 'ready');
+    assert.deepEqual(result.summary.kindCoverage, {});
+  });
+
+  it('kindCoverage does not affect docsIndexed (tierCoverage owns that)', async () => {
+    const db = new Database(':memory:');
+    applyMigrations(db);
+    const stateManager = new IndexStateManager(db);
+    const svc = new ExpeditionBootstrapService(stateManager, {
+      rebuildIndex: async () => ({ docsIndexed: 50, durationMs: 100 }),
+      getFingerprint: () => 'test:5.0:full',
+      getKindCoverage: async () => ({ feature: 100, lesson: 200 }),
+    });
+    const result = await svc.bootstrap(tmpRoot);
+    assert.equal(result.docsIndexed, 50, 'docsIndexed comes from rebuildIndex, not kindCoverage');
+  });
+
   it('detects rust from Cargo.toml', () => {
     writeFileSync(join(tmpRoot, 'Cargo.toml'), '[package]\nname = "test"');
     const summary = buildStructuralSummary(tmpRoot);

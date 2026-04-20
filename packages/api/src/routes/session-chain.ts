@@ -50,7 +50,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
     Params: { threadId: string };
     Querystring: { catId?: string };
   }>('/api/threads/:threadId/sessions', async (request, reply) => {
-    const userId = resolveUserId(request);
+    const userId = resolveUserId(request, { defaultUserId: 'default-user' });
     if (!userId) {
       reply.status(401);
       return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
@@ -93,7 +93,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
   app.get<{
     Params: { sessionId: string };
   }>('/api/sessions/:sessionId', async (request, reply) => {
-    const userId = resolveUserId(request);
+    const userId = resolveUserId(request, { defaultUserId: 'default-user' });
     if (!userId) {
       reply.status(401);
       return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
@@ -125,7 +125,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
   app.post<{
     Params: { sessionId: string };
   }>('/api/sessions/:sessionId/unseal', async (request, reply) => {
-    const userId = resolveUserId(request);
+    const userId = resolveUserId(request, { defaultUserId: 'default-user' });
     if (!userId) {
       reply.status(401);
       return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
@@ -234,7 +234,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
   app.patch<{
     Params: { threadId: string; catId: string };
   }>('/api/threads/:threadId/sessions/:catId/bind', async (request, reply) => {
-    const userId = resolveUserId(request);
+    const userId = resolveUserId(request, { defaultUserId: 'default-user' });
     if (!userId) {
       reply.status(401);
       return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };

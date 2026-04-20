@@ -2,6 +2,7 @@
 
 import assert from 'node:assert';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+import { assertRedisIsolationOrThrow, redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
 
 let Redis;
 try {
@@ -12,19 +13,23 @@ try {
 
 const { RedisPrTrackingStore } = await import('../dist/infrastructure/email/RedisPrTrackingStore.js');
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6398/15';
+const REDIS_URL = process.env.REDIS_URL;
 const TEST_PREFIX = 'test-pr-tracking:';
 
 function createTestRedis() {
-  if (!Redis) return null;
+  if (!Redis || !REDIS_URL) return null;
   try {
-    return new Redis(REDIS_URL, { keyPrefix: TEST_PREFIX, lazyConnect: true });
+    return new Redis(REDIS_URL, {
+      keyPrefix: TEST_PREFIX,
+      lazyConnect: true,
+      retryStrategy: () => null,
+    });
   } catch {
     return null;
   }
 }
 
-describe('RedisPrTrackingStore', () => {
+describe('RedisPrTrackingStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   /** @type {import('ioredis').default | null} */
   let redis;
   /** @type {InstanceType<typeof RedisPrTrackingStore> | null} */
@@ -32,12 +37,15 @@ describe('RedisPrTrackingStore', () => {
   let connected = false;
 
   beforeEach(async () => {
+    assertRedisIsolationOrThrow(REDIS_URL, 'RedisPrTrackingStore');
     redis = createTestRedis();
     if (!redis) return;
     try {
       await redis.connect();
       connected = true;
     } catch {
+      redis.disconnect();
+      redis = null;
       connected = false;
       return;
     }

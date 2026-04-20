@@ -1,5 +1,5 @@
 /**
- * Accounts API Routes — F136 Phase 4d → F340 renamed
+ * Accounts API Routes — F136 Phase 4d → clowder-ai#340 renamed
  *
  * Reads/writes via global ~/.cat-cafe/accounts.json + credentials.json.
  */
@@ -21,7 +21,7 @@ import { findMonorepoRoot } from '../utils/monorepo-root.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
-// F340: Derive client identity from well-known account IDs, not stored protocol.
+// clowder-ai#340: Derive client identity from well-known account IDs, not stored protocol.
 const BUILTIN_CLIENT_FOR_ID: Record<string, string> = {
   claude: 'anthropic',
   codex: 'openai',
@@ -241,7 +241,7 @@ export const accountsRoutes: FastifyPluginAsync = async (app) => {
 
     const body = parsed.data;
     try {
-      // F340: protocol not persisted on new accounts. Custom accounts use explicit
+      // clowder-ai#340: protocol not persisted on new accounts. Custom accounts use explicit
       // accountRef binding; system callers use well-known builtin IDs.
       const account: AccountConfig = {
         authType: (body.authType as 'oauth' | 'api_key') ?? 'api_key',
@@ -298,7 +298,7 @@ export const accountsRoutes: FastifyPluginAsync = async (app) => {
         reply.status(404);
         return { error: `Account "${params.profileId}" not found` };
       }
-      // F340: protocol not persisted — derived at runtime from well-known account IDs.
+      // clowder-ai#340: protocol not persisted — derived at runtime from well-known account IDs.
       const account: AccountConfig = {
         authType: (parsed.data.authType as 'oauth' | 'api_key') ?? existing.authType,
         ...(parsed.data.baseUrl != null

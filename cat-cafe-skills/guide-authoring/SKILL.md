@@ -37,7 +37,7 @@ triggers:
 | 自动推进 | 用户操作即推进，无手动导航按钮（v2 KD-9） |
 | 平台内聚焦 | 聚焦 Console 已有功能的引导（KD-13），外部平台配置改为独立页签 |
 
-**前置依赖**：F150 Guide Engine Phase A 已验收。
+**前置依赖**：F155 Guide Engine Phase A 已验收。
 
 ## 流程
 
@@ -54,7 +54,7 @@ pain_point: Provider 配置字段多，不同 provider 参数差异大
 complexity: medium  # low / medium / high
 estimated_steps: 4
 estimated_time: 3min
-related_features: [F150]
+related_features: [F155]
 ```
 
 **判断标准**：

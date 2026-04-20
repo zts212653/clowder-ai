@@ -10,8 +10,43 @@ function buildHeaders(): Record<string, string> {
   if (userId) headers['x-cat-cafe-user'] = userId;
   const catId = process.env['CAT_CAFE_CAT_ID'];
   if (catId) headers['x-cat-id'] = catId;
+  const invocationId = process.env['CAT_CAFE_INVOCATION_ID'];
+  if (invocationId) headers['x-callback-invocation-id'] = invocationId;
   headers['content-type'] = 'application/json';
   return headers;
+}
+
+function emitGameActionTrace(
+  stage: 'submit_attempt' | 'submit_result' | 'submit_error',
+  input: {
+    gameId: string;
+    round: number;
+    phase: string;
+    seat: number;
+    action: string;
+    target?: number;
+    text?: string;
+    nonce: string;
+  },
+  extra?: Record<string, unknown>,
+): void {
+  console.error(
+    `[cat-cafe-game-action] ${JSON.stringify({
+      stage,
+      invocationId: process.env['CAT_CAFE_INVOCATION_ID'] ?? null,
+      catId: process.env['CAT_CAFE_CAT_ID'] ?? null,
+      userId: process.env['CAT_CAFE_USER_ID'] ?? null,
+      gameId: input.gameId,
+      round: input.round,
+      phase: input.phase,
+      seat: input.seat,
+      action: input.action,
+      target: input.target ?? null,
+      hasText: Boolean(input.text),
+      nonce: input.nonce,
+      ...extra,
+    })}`,
+  );
 }
 
 export const submitGameActionInputSchema = {
@@ -36,6 +71,7 @@ export async function handleSubmitGameAction(input: {
   nonce: string;
 }): Promise<ToolResult> {
   const url = `${API_URL}/api/game/${input.gameId}/action`;
+  emitGameActionTrace('submit_attempt', input, { url });
 
   try {
     const res = await fetch(url, {
@@ -53,6 +89,13 @@ export async function handleSubmitGameAction(input: {
     });
 
     const data = (await res.json()) as Record<string, unknown>;
+    emitGameActionTrace('submit_result', input, {
+      status: res.status,
+      ok: res.ok,
+      accepted: data.accepted ?? null,
+      deduplicated: data.deduplicated ?? null,
+      error: data.error ?? null,
+    });
 
     if (!res.ok) {
       return errorResult(`Action rejected (${res.status}): ${data.error ?? JSON.stringify(data)}`);
@@ -64,6 +107,9 @@ export async function handleSubmitGameAction(input: {
 
     return successResult('Action accepted.');
   } catch (err) {
+    emitGameActionTrace('submit_error', input, {
+      error: err instanceof Error ? err.message : String(err),
+    });
     return errorResult(`Submit action failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }

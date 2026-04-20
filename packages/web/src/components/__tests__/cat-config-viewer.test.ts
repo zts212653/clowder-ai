@@ -129,7 +129,7 @@ describe('CatOverviewTab', () => {
     expect(html).toContain('已启用');
     expect(html).toContain('@布偶猫');
     expect(html).toContain('只能编辑，不能新增或删除');
-    expect(html).toContain('点击任意卡片进入成员配置');
+    expect(html).toContain('点击卡片进入成员配置');
     expect(html).toContain('gemini-bridge');
     expect(html).toContain('添加成员');
     expect(html).not.toContain('Owner 信息独立维护');
@@ -147,6 +147,26 @@ describe('CatOverviewTab', () => {
     expect(html).not.toContain('编辑成员');
     expect(html).not.toContain('Lead');
     expect(html).not.toContain('npx antigravity --bridge');
+  });
+
+  it('anchors the first-member guide target to the edit-only control, not the whole card', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(CatOverviewTab, {
+        config: CONFIG,
+        cats: CATS,
+        onEditMember: () => {},
+      }),
+    );
+    const root = document.createElement('div');
+    root.innerHTML = html;
+
+    const guideTarget = root.querySelector('[data-guide-id="cats.first-member"]');
+
+    expect(guideTarget).toBeTruthy();
+    expect(guideTarget?.tagName).toBe('BUTTON');
+    expect(guideTarget?.closest('section')?.textContent).toContain('布偶猫 · 宪宪');
+    expect(guideTarget?.textContent).toContain('布偶猫 · 宪宪');
+    expect(guideTarget?.textContent).not.toContain('已启用');
   });
 });
 

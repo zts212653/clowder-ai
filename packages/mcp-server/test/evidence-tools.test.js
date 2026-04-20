@@ -58,13 +58,15 @@ describe('MCP Evidence Tools', () => {
     assert.equal(parsed.searchParams.get('mode'), 'hybrid');
   });
 
-  test('handleSearchEvidence includes degraded header when API responds with degraded=true', async () => {
+  test('handleSearchEvidence renders raw_lexical_only as graceful degradation, not store error', async () => {
     const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
 
     globalThis.fetch = async () => ({
       ok: true,
       json: async () => ({
         degraded: true,
+        degradeReason: 'raw_lexical_only',
+        effectiveMode: 'lexical',
         results: [
           {
             title: 'Decision A',
@@ -81,8 +83,9 @@ describe('MCP Evidence Tools', () => {
 
     assert.equal(result.isError, undefined);
     assert.ok(
-      result.content[0].text.includes('[DEGRADED] Evidence store error — results may be incomplete'),
-      'expected degraded header in response text',
+      result.content[0].text.includes('depth=raw currently uses lexical retrieval only'),
+      'expected graceful raw degrade message in response text',
     );
+    assert.ok(!result.content[0].text.includes('Evidence store error'), 'must not misreport graceful degradation');
   });
 });

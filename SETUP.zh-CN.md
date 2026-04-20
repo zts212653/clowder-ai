@@ -35,6 +35,8 @@ pnpm start
 #   pnpm start:direct
 ```
 
+如果要给记忆系统开启本地语义 rerank，把 `.env` 里的 `EMBED_MODE` 改成 `on`（或 `shadow`）。开启后，`pnpm start` / `pnpm start:direct` 会自动拉起对应平台的 launcher（Unix 用 `scripts/embed-server.sh`，Windows 用 `scripts/embed-server.ps1`）。Apple Silicon 默认走 MLX，其它平台回落到 `sentence-transformers`。
+
 `pnpm start` 使用**运行时 worktree** 架构：首次运行时自动创建隔离的 `../cat-cafe-runtime` worktree，同步到 `origin/main`，构建，启动 Redis，然后启动前端（端口 3003）+ API（端口 3004）。这样你的开发目录保持干净。
 
 > **提示：** 如果 `pnpm start` 因为 `../cat-cafe-runtime` 已存在而失败，改用 `pnpm start:direct` — 直接在当前目录启动，不创建 worktree。也可以自定义路径：`CAT_CAFE_RUNTIME_DIR=../my-runtime pnpm start`。

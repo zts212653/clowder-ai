@@ -1,6 +1,7 @@
 'use client';
 
 import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
+import { HubIcon } from './hub-icons';
 import { MarkdownContent } from './MarkdownContent';
 
 function formatTime(ts: number): string {
@@ -13,35 +14,18 @@ function getNoticeTone(meta: Readonly<Record<string, unknown>> | undefined): 'in
   return tone === 'warning' || tone === 'error' ? tone : 'info';
 }
 
-function getToneClass(tone: 'info' | 'warning' | 'error') {
-  if (tone === 'warning') {
-    return {
-      label: 'text-[#9A6A32]',
-      time: 'text-cafe-muted',
-      box: 'border border-[#E8DCCF] bg-cafe-surface/90 text-cafe-secondary',
-      icon: 'text-[#B7791F]',
-    };
-  }
-  if (tone === 'error') {
-    return {
-      label: 'text-[#A45D5D]',
-      time: 'text-cafe-muted',
-      box: 'border border-[#F0DEDA] bg-[#FFF8F7] text-cafe-secondary',
-      icon: 'text-[#C76B6B]',
-    };
-  }
-  return {
-    label: 'text-[#5F7D9A]',
-    time: 'text-cafe-muted',
-    box: 'border border-[#D9E5F1] bg-cafe-surface/90 text-cafe-secondary',
-    icon: 'text-[#6488B0]',
-  };
-}
+const ICON_MAP: Record<string, string> = {
+  lightbulb: 'sparkles',
+  '\u{1F4A1}': 'sparkles',
+  warning: 'alert-triangle',
+  '\u{26A0}\u{FE0F}': 'alert-triangle',
+  error: 'alert-triangle',
+  info: 'info',
+};
 
-function iconText(icon?: string): string {
-  if (!icon) return 'ℹ️';
-  if (icon === 'lightbulb') return '💡';
-  return icon;
+function NoticeIcon({ icon }: { icon?: string }) {
+  const name = ICON_MAP[icon ?? ''] ?? 'info';
+  return <HubIcon name={name} className="h-4.5 w-4.5" />;
 }
 
 interface SystemNoticeBarProps {
@@ -53,20 +37,21 @@ export function SystemNoticeBar({ message }: SystemNoticeBarProps) {
   if (!source) return null;
 
   const tone = getNoticeTone(source.meta);
-  const style = getToneClass(tone);
 
   return (
-    <div data-message-id={message.id} className="flex justify-center mb-3">
+    <div data-message-id={message.id} data-notice-tone={tone} className="flex justify-center mb-3">
       <div className="max-w-[85%] w-full">
         <div className="flex items-center gap-2 mb-1 px-1">
-          <span className={`text-xs font-medium ${style.label}`}>{source.label}</span>
-          <span className={`text-xs ${style.time}`}>{formatTime(message.timestamp)}</span>
+          <span className="system-notice-bar__label text-xs font-medium">{source.label}</span>
+          <span className="text-xs text-cafe-muted">{formatTime(message.timestamp)}</span>
         </div>
         <div
-          className={`system-notice-bar ${tone !== 'info' ? 'system-notice-bar--alert' : ''} rounded-2xl px-4 py-3 ${style.box}`}
+          className={`system-notice-bar ${tone !== 'info' ? 'system-notice-bar--alert' : ''} rounded-2xl px-4 py-3 text-cafe-secondary`}
         >
           <div className="flex items-start gap-3">
-            <span className={`text-lg leading-none ${style.icon}`}>{iconText(source.icon)}</span>
+            <span className="system-notice-bar__icon leading-none mt-0.5">
+              <NoticeIcon icon={source.icon} />
+            </span>
             <div className="min-w-0 flex-1 text-sm leading-6">
               <MarkdownContent content={message.content} />
             </div>

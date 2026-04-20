@@ -65,6 +65,16 @@ The default ports are `3003` (API) and `3004` (Frontend). See [SETUP.md](SETUP.m
 
 ---
 
+## Design Principles (Contributor Guardrails)
+
+Before contributing new features, please align with our core aesthetic and architectural boundaries. Clowder is a cozy, collaborative space, and our features reflect that:
+
+1. **Cozy Café, not RPG**: Growth and progression should feel like a shared memory (e.g., sticker walls, cat trees, shared albums, and emergent knowledge). We do not build hardcore RPG systems, skill trees, or raw XP stats.
+2. **Extend, don't parallel**: New features should extend existing domains (like the Memory Hub `F102` or Expeditions `F152`) rather than creating isolated, parallel systems.
+3. **CatRegistry is the truth**: All identities must flow through the central `catRegistry` and our identity model. Do not hardcode fake `catId`s to represent co-creators or system events.
+
+---
+
 ## How Contributing Works Here
 
 Most open source projects say: "write code, open a PR." Clowder works differently.

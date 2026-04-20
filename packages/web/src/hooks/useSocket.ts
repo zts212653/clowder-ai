@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import {
   bootstrapDebugFromStorage,
@@ -120,9 +120,95 @@ export interface SocketCallbacks {
 }
 
 const RECONNECT_RECONCILE_DELAY_MS = 2000;
+/** Watchdog: how often to scan threadStates for silent active invocations. */
+const STALE_WATCHDOG_INTERVAL_MS = 30_000;
+/** A thread is suspect if hasActiveInvocation but lastActivity is older than this. */
+const STALE_IDLE_THRESHOLD_MS = 3 * 60_000;
+/** Don't re-probe the same thread more often than this (protects server + avoids loop). */
+const STALE_PROBE_COOLDOWN_MS = 60_000;
+/** Direction-2 gate: only probe current thread for missed slots if user engaged within this window. */
+const STALE_RECENT_ENGAGEMENT_MS = 5 * 60_000;
 
 /** Generation counter: each reconnect increments, stale callbacks discard themselves. */
 let reconcileGeneration = 0;
+/** Per-thread last-probe timestamp used by the watchdog cooldown. */
+const staleProbeCooldown = new Map<string, number>();
+
+/**
+ * Query /queue for one thread and reconcile local state against server truth.
+ * Shared by reconnect reconciliation and the stale-watchdog probe.
+ * `shouldAbort` lets the caller bail out when a newer reconciliation supersedes it.
+ */
+async function reconcileThreadWithServer(threadId: string, shouldAbort: () => boolean, source: string): Promise<void> {
+  try {
+    const res = await apiFetch(`/api/threads/${threadId}/queue`);
+    if (shouldAbort()) return;
+    if (!res.ok) return;
+    const data = (await res.json()) as {
+      activeInvocations?: Array<{ catId: string; startedAt: number }>;
+    };
+    if (shouldAbort()) return;
+    const store = useChatStore.getState();
+    const serverSlots = data.activeInvocations && data.activeInvocations.length > 0 ? data.activeInvocations : null;
+    const isActiveThread = store.currentThreadId === threadId;
+
+    if (serverSlots) {
+      // Server still processing — re-hydrate local slots to match server truth.
+      // Stale hydrated/mismatched invocationIds get replaced so done(isFinal)
+      // cleanup works correctly when the response finishes.
+      const serverActiveCats = serverSlots.map((s) => s.catId);
+      store.clearThreadActiveInvocation(threadId);
+      store.replaceThreadTargetCats(threadId, serverActiveCats);
+      for (const slot of serverSlots) {
+        store.updateThreadCatStatus(threadId, slot.catId, 'streaming');
+        const syntheticId = `hydrated-${threadId}-${slot.catId}`;
+        if (isActiveThread) {
+          store.addActiveInvocation(syntheticId, slot.catId, 'execute', slot.startedAt);
+        } else {
+          store.addThreadActiveInvocation(threadId, syntheticId, slot.catId, 'execute', slot.startedAt);
+        }
+      }
+      console.log(`[ws] ${source} reconciliation: re-hydrated active slots from server`, {
+        threadId,
+        cats: serverActiveCats,
+      });
+      return;
+    }
+
+    if (isActiveThread && store.hasActiveInvocation) {
+      // Reconciliation is stale-state repair, not a real completion event.
+      // Use the non-stamping clear so idle-thread recency is not artificially bumped.
+      store.clearThreadActiveInvocation(threadId);
+      store.setLoading(false);
+      store.setIntentMode(null);
+      store.clearCatStatuses();
+      for (const msg of store.messages) {
+        if (msg.type === 'assistant' && msg.isStreaming) {
+          store.setStreaming(msg.id, false);
+        }
+      }
+      // Server finished but done(isFinal) was lost → fetch missed messages so user doesn't need F5
+      store.requestStreamCatchUp(threadId);
+      console.log(`[ws] ${source} reconciliation: cleared stale active-thread invocation state`, { threadId });
+    } else if (!isActiveThread) {
+      const ts = store.getThreadState(threadId);
+      if (ts.hasActiveInvocation) {
+        store.clearThreadActiveInvocation(threadId);
+        store.setThreadLoading(threadId, false);
+        for (const msg of ts.messages) {
+          if (msg.type === 'assistant' && msg.isStreaming) {
+            store.setThreadMessageStreaming(threadId, msg.id, false);
+          }
+        }
+        console.log(`[ws] ${source} reconciliation: cleared stale background-thread invocation state`, {
+          threadId,
+        });
+      }
+    }
+  } catch {
+    // Non-critical — don't break the caller
+  }
+}
 
 /**
  * After socket reconnect, bidirectionally reconcile invocation state with server.
@@ -151,85 +237,80 @@ function reconcileInvocationStateOnReconnect(activeThreadId: string | null): voi
 
   // Small delay: let any buffered socket events arrive first
   setTimeout(async () => {
-    // Discard if a newer reconnect has started its own reconciliation
     if (generation !== reconcileGeneration) return;
     for (const threadId of threadsToCheck) {
       if (generation !== reconcileGeneration) return;
-      try {
-        const res = await apiFetch(`/api/threads/${threadId}/queue`);
-        if (generation !== reconcileGeneration) return; // stale after await
-        if (!res.ok) continue;
-        const data = (await res.json()) as {
-          activeInvocations?: Array<{ catId: string; startedAt: number }>;
-        };
-        if (generation !== reconcileGeneration) return; // stale after await
-        const store = useChatStore.getState();
-        const serverSlots = data.activeInvocations && data.activeInvocations.length > 0 ? data.activeInvocations : null;
-        const isActiveThread = store.currentThreadId === threadId;
-
-        if (serverSlots) {
-          // Server still processing — re-hydrate local slots to match server truth.
-          // Stale hydrated/mismatched invocationIds get replaced so done(isFinal)
-          // cleanup works correctly when the response finishes.
-          const serverActiveCats = serverSlots.map((s) => s.catId);
-          store.clearThreadActiveInvocation(threadId);
-          store.replaceThreadTargetCats(threadId, serverActiveCats);
-          for (const slot of serverSlots) {
-            store.updateThreadCatStatus(threadId, slot.catId, 'streaming');
-            const syntheticId = `hydrated-${threadId}-${slot.catId}`;
-            if (isActiveThread) {
-              store.addActiveInvocation(syntheticId, slot.catId, 'execute', slot.startedAt);
-            } else {
-              store.addThreadActiveInvocation(threadId, syntheticId, slot.catId, 'execute', slot.startedAt);
-            }
-          }
-          console.log('[ws] Reconnect reconciliation: re-hydrated active slots from server', {
-            threadId,
-            cats: serverActiveCats,
-          });
-          continue;
-        }
-
-        if (isActiveThread && store.hasActiveInvocation) {
-          // Reconnect reconciliation is stale-state repair, not a real completion event.
-          // Use the non-stamping clear so idle-thread recency is not artificially bumped.
-          store.clearThreadActiveInvocation(threadId);
-          store.setLoading(false);
-          store.setIntentMode(null);
-          store.clearCatStatuses();
-          for (const msg of store.messages) {
-            if (msg.type === 'assistant' && msg.isStreaming) {
-              store.setStreaming(msg.id, false);
-            }
-          }
-          // Reconnect catch-up (#276): server finished during disconnect,
-          // done(isFinal) was lost → fetch missed messages so user doesn't need F5
-          store.requestStreamCatchUp(threadId);
-          console.log('[ws] Reconnect reconciliation: cleared stale active-thread invocation state', { threadId });
-        } else if (!isActiveThread) {
-          const ts = store.getThreadState(threadId);
-          if (ts.hasActiveInvocation) {
-            store.clearThreadActiveInvocation(threadId);
-            store.setThreadLoading(threadId, false);
-            for (const msg of ts.messages) {
-              if (msg.type === 'assistant' && msg.isStreaming) {
-                store.setThreadMessageStreaming(threadId, msg.id, false);
-              }
-            }
-            console.log('[ws] Reconnect reconciliation: cleared stale background-thread invocation state', {
-              threadId,
-            });
-          }
-        }
-      } catch {
-        // Non-critical — don't break reconnect flow
-      }
+      await reconcileThreadWithServer(threadId, () => generation !== reconcileGeneration, 'Reconnect');
+      staleProbeCooldown.set(threadId, Date.now());
     }
   }, RECONNECT_RECONCILE_DELAY_MS);
 }
 
+/**
+ * Watchdog for two failure modes of the done/intent_mode pipeline on a live socket:
+ *  Direction 1 — done(isFinal) dropped: hasActiveInvocation=true but the slot went quiet.
+ *  Direction 2 — intent_mode dropped: server has a live slot but UI shows idle (no cancel button).
+ *
+ * Active-thread truth lives in flat state (`state.hasActiveInvocation`, `state.activeInvocations`,
+ * `state.messages`), not in `state.threadStates[currentThreadId]` — `setCurrentThread` only saves
+ * the outgoing thread's snapshot, and `snapshotActive` returns `lastActivity=Date.now()` while
+ * streaming, so neither source is reliable for stale detection. Background threads are still
+ * correctly reflected in `threadStates` since background updates write through to the map.
+ */
+function checkForStaleActiveInvocations(): void {
+  const now = Date.now();
+  const state = useChatStore.getState();
+  const currentThreadId = state.currentThreadId;
+  const toProbe = new Set<string>();
+
+  const canProbe = (threadId: string): boolean =>
+    now - (staleProbeCooldown.get(threadId) ?? 0) >= STALE_PROBE_COOLDOWN_MS;
+
+  // Background threads: iterate threadStates (skip current — flat state is the truth there).
+  for (const [threadId, ts] of Object.entries(state.threadStates ?? {})) {
+    if (threadId === currentThreadId) continue;
+    if (!ts.hasActiveInvocation) continue;
+    if (now - (ts.lastActivity ?? 0) < STALE_IDLE_THRESHOLD_MS) continue;
+    if (!canProbe(threadId)) continue;
+    toProbe.add(threadId);
+  }
+
+  if (currentThreadId && canProbe(currentThreadId)) {
+    // Active thread: read directly from flat state.
+    if (state.hasActiveInvocation) {
+      // Direction 1 on active: derive staleness from oldest invocation.startedAt, since
+      // snapshotActive.lastActivity is always Date.now() while streaming.
+      const starts = Object.values(state.activeInvocations ?? {})
+        .map((inv) => inv?.startedAt)
+        .filter((n): n is number => typeof n === 'number');
+      if (starts.length > 0 && now - Math.min(...starts) >= STALE_IDLE_THRESHOLD_MS) {
+        toProbe.add(currentThreadId);
+      }
+    } else {
+      // Direction 2 on active: probe only when user is waiting — last message
+      // is a user message. A completed assistant round-trip means there's
+      // nothing to reconcile, and keying off "any recent activity" probes
+      // healthy threads for 5 minutes after normal completion.
+      const lastMsg = state.messages?.[state.messages.length - 1];
+      if (lastMsg?.type === 'user') {
+        const lastActivity = lastMsg.deliveredAt ?? lastMsg.timestamp ?? 0;
+        if (now - lastActivity < STALE_RECENT_ENGAGEMENT_MS) {
+          toProbe.add(currentThreadId);
+        }
+      }
+    }
+  }
+
+  if (toProbe.size === 0) return;
+  for (const threadId of toProbe) {
+    staleProbeCooldown.set(threadId, now);
+    void reconcileThreadWithServer(threadId, () => false, 'Watchdog');
+  }
+}
+
 export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
   const socketRef = useRef<Socket | null>(null);
+  const [socketConnected, setSocketConnected] = useState<boolean | null>(null);
   const joinedRoomsRef = useRef<Set<string>>(new Set());
   const pendingGuideStartsRef = useRef<Map<string, { guideId: string; threadId: string; timestamp: number }>>(
     new Map(),
@@ -305,6 +386,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     };
 
     socket.on('connect', () => {
+      setSocketConnected(true);
       console.log('[ws] Connected', {
         socketId: socket.id,
         transport: getTransportName(),
@@ -751,6 +833,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     socket.on('voice_stream_end', handleVoiceStreamEnd);
 
     socket.on('connect_error', (error: Error & { description?: unknown; context?: unknown }) => {
+      setSocketConnected(false);
       console.error('[ws] connect_error', {
         message: error.message,
         name: error.name,
@@ -761,6 +844,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     });
 
     socket.on('disconnect', (...args: unknown[]) => {
+      setSocketConnected(false);
       const [reason, details] = args;
       console.warn('[ws] Disconnected', {
         reason: typeof reason === 'string' ? reason : String(reason),
@@ -794,7 +878,24 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
 
     socketRef.current = socket;
 
+    // Stale-invocation watchdog: periodic probe to catch missed done(isFinal) events
+    // on a still-connected socket (won't trigger reconcile-on-reconnect).
+    const watchdogTimer = setInterval(checkForStaleActiveInvocations, STALE_WATCHDOG_INTERVAL_MS);
+    const visibilityHandler =
+      typeof document !== 'undefined'
+        ? () => {
+            if (document.visibilityState === 'visible') checkForStaleActiveInvocations();
+          }
+        : null;
+    if (visibilityHandler) {
+      document.addEventListener('visibilitychange', visibilityHandler);
+    }
+
     return () => {
+      clearInterval(watchdogTimer);
+      if (visibilityHandler) {
+        document.removeEventListener('visibilitychange', visibilityHandler);
+      }
       socket.disconnect();
       joinedRoomsRef.current.clear();
     };
@@ -878,9 +979,9 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     });
   }, [threadId, storeThreadId]);
 
-  const cancelInvocation = useCallback((tid: string) => {
-    socketRef.current?.emit('cancel_invocation', { threadId: tid });
+  const cancelInvocation = useCallback((tid: string, catId?: string) => {
+    socketRef.current?.emit('cancel_invocation', catId ? { threadId: tid, catId } : { threadId: tid });
   }, []);
 
-  return { socketRef, joinRoom, leaveRoom, syncRooms, cancelInvocation };
+  return { socketRef, joinRoom, leaveRoom, syncRooms, cancelInvocation, socketConnected };
 }

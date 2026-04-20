@@ -5,12 +5,16 @@
 
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
-import { assertRedisIsolationOrThrow, cleanupPrefixedRedisKeys } from './helpers/redis-test-helpers.js';
+import {
+  assertRedisIsolationOrThrow,
+  cleanupPrefixedRedisKeys,
+  redisIsolationSkipReason,
+} from './helpers/redis-test-helpers.js';
 
 const REDIS_URL = process.env.REDIS_URL;
 const CLEANUP_PATTERNS = ['auth-rule:*', 'auth-rules:*', 'pending-req:*', 'pending-reqs:*', 'auth-audit:*'];
 
-describe('RedisAuthorizationRuleStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false }, () => {
+describe('RedisAuthorizationRuleStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let RedisAuthorizationRuleStore;
   let createRedisClient;
   let redis;
@@ -164,7 +168,7 @@ describe('RedisAuthorizationRuleStore', { skip: !REDIS_URL ? 'REDIS_URL not set'
   });
 });
 
-describe('RedisPendingRequestStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false }, () => {
+describe('RedisPendingRequestStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let RedisPendingRequestStore;
   let createRedisClient;
   let redis;
@@ -354,7 +358,7 @@ describe('RedisPendingRequestStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : 
   });
 });
 
-describe('RedisAuthorizationAuditStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false }, () => {
+describe('RedisAuthorizationAuditStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let RedisAuthorizationAuditStore;
   let createRedisClient;
   let redis;

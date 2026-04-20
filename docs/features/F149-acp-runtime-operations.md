@@ -9,7 +9,7 @@ updated: 2026-04-02
 
 # F149: ACP Runtime Operations — 项目级进程池 + Session Lease
 
-> **Status**: in-progress | **Owner**: Maine Coon/gpt52 | **Priority**: P1
+> **Status**: done | **Owner**: Maine Coon/gpt52 | **Priority**: P1
 
 ## Why
 
@@ -72,13 +72,11 @@ team experience（2026-03-31）：
 4. 加 admission / eviction / LRU / max live process count，避免 20 个 thread 把机器撑爆
 5. 明确取消、崩溃、模型容量错误、MCP 污染、僵尸进程等 recovery 语义
 
-### Phase D: ACP Carrier 泛化（后续）
+### Phase D: ACP Carrier 泛化 → 拆出到 F161
 
-在 Gemini 路径稳定后，再验证这套运行时运营层是否能服务其他 ACP-style local agent：
+> **Scope 收窄决策（2026-04-13 team lead拍板）**：F149 的愿景是 ACP runtime operations（池化/lease/lifecycle），Phase A~C 已完整兑现 Gemini 载体。Carrier 泛化是独立愿景，拆到 F161，Gemini 作为第一个已有实现，有需求时再继续。
 
-1. Codex / Claude Code / OpenCode 等 ACP carrier 是否能共用同一池化与 lease 语义
-2. 哪些字段应该留在 provider profile，哪些属于通用 ACP runtime policy
-3. 不为“未来也许支持”提前抽象；只有第二个 carrier 落地时再收敛共性
+~~在 Gemini 路径稳定后，再验证这套运行时运营层是否能服务其他 ACP-style local agent。~~ → **See [F161](F161-acp-carrier-generalization.md)**
 
 ## Acceptance Criteria
 
@@ -102,9 +100,9 @@ team experience（2026-03-31）：
 - [x] AC-C4: cancel / crash / timeout 后不会残留僵尸进程或悬挂 lease
 - [x] AC-C5: 并发 10 个活跃 thread 时，live process 数和 warm hit rate 都有可观测指标而非靠体感判断
 
-### Phase D（ACP Carrier 泛化）
-- [ ] AC-D1: 至少一个非 Gemini 的 ACP carrier 可映射到相同 runtime policy，而不需要重写池化/lease 模型
-- [ ] AC-D2: provider-specific 配置与通用 ACP runtime policy 的边界有明文文档
+### Phase D（ACP Carrier 泛化）→ 拆出到 [F161](F161-acp-carrier-generalization.md)
+- ~~AC-D1: 至少一个非 Gemini 的 ACP carrier 可映射到相同 runtime policy~~ → F161 AC-A1
+- ~~AC-D2: provider-specific 配置与通用 ACP runtime policy 的边界有明文文档~~ → F161 AC-A2
 
 ## Dependencies
 

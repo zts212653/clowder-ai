@@ -155,8 +155,8 @@ test('F153 runtime: cli_session span has correct attributes', async () => {
   assert.equal(attrs['cli.command'], 'claude', 'Should have cli.command');
   assert.equal(attrs['cli.arg_count'], 3, 'Should have cli.arg_count');
   assert.equal(attrs['cli.pid'], 99999, 'Should have cli.pid');
-  assert.equal(attrs['invocationId'], 'inv-attr-test', 'Should use redactor-safe invocationId key');
-  assert.equal(attrs['sessionId'], 'sess-attr-test', 'Should use redactor-safe sessionId key');
+  assert.equal(attrs.invocationId, 'inv-attr-test', 'Should use redactor-safe invocationId key');
+  assert.equal(attrs.sessionId, 'sess-attr-test', 'Should use redactor-safe sessionId key');
 });
 
 test('F153 runtime: cli_session span status OK on clean exit', async () => {

@@ -19,6 +19,9 @@ const mockRequestStreamCatchUp = vi.fn();
 const mockSetMessageMetadata = vi.fn();
 const mockSetMessageThinking = vi.fn();
 const mockSetMessageStreamInvocation = vi.fn();
+const mockRemoveActiveInvocation = vi.fn();
+const mockAddActiveInvocation = vi.fn();
+const mockReplaceThreadTargetCats = vi.fn();
 
 const mockAddMessageToThread = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
@@ -61,6 +64,9 @@ const storeState = {
   setMessageMetadata: mockSetMessageMetadata,
   setMessageThinking: mockSetMessageThinking,
   setMessageStreamInvocation: mockSetMessageStreamInvocation,
+  removeActiveInvocation: mockRemoveActiveInvocation,
+  addActiveInvocation: mockAddActiveInvocation,
+  replaceThreadTargetCats: mockReplaceThreadTargetCats,
 
   addMessageToThread: mockAddMessageToThread,
   clearThreadActiveInvocation: mockClearThreadActiveInvocation,
@@ -68,6 +74,8 @@ const storeState = {
   setThreadMessageStreaming: mockSetThreadMessageStreaming,
   getThreadState: mockGetThreadState,
   currentThreadId: 'thread-1',
+  targetCats: ['codex'],
+  activeInvocations: {} as Record<string, { catId: string; mode: string; startedAt?: number }>,
 };
 
 let captured: ReturnType<typeof useAgentMessages> | undefined;
@@ -104,9 +112,25 @@ describe('useAgentMessages system_info invocation_created', () => {
     root = createRoot(container);
     captured = undefined;
     storeState.messages = [];
+    storeState.targetCats = ['codex'];
+    storeState.activeInvocations = {};
+    mockRemoveActiveInvocation.mockImplementation((invocationId: string) => {
+      delete storeState.activeInvocations[invocationId];
+    });
+    mockAddActiveInvocation.mockImplementation(
+      (invocationId: string, catId: string, mode: string, startedAt?: number) => {
+        storeState.activeInvocations[invocationId] = { catId, mode, ...(startedAt ? { startedAt } : {}) };
+      },
+    );
+    mockReplaceThreadTargetCats.mockImplementation((_threadId: string, cats: string[]) => {
+      storeState.targetCats = [...cats];
+    });
     mockAddMessage.mockClear();
     mockSetCatInvocation.mockClear();
     mockSetMessageStreamInvocation.mockClear();
+    mockRemoveActiveInvocation.mockClear();
+    mockAddActiveInvocation.mockClear();
+    mockReplaceThreadTargetCats.mockClear();
   });
 
   afterEach(() => {
@@ -172,5 +196,62 @@ describe('useAgentMessages system_info invocation_created', () => {
     });
 
     expect(mockSetMessageStreamInvocation).toHaveBeenCalledWith('msg-live-1', 'inv-new-2');
+  });
+
+  it('migrates the active slot and displayed target during sequential handoff recovery', () => {
+    storeState.activeInvocations = {
+      'inv-root': { catId: 'codex', mode: 'execute', startedAt: 123456 },
+    };
+    storeState.targetCats = ['codex'];
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'opus',
+        content: JSON.stringify({ type: 'invocation_created', invocationId: 'inv-root' }),
+      });
+    });
+
+    expect(mockRemoveActiveInvocation).toHaveBeenCalledWith('inv-root');
+    expect(mockAddActiveInvocation).toHaveBeenCalledWith('inv-root', 'opus', 'execute', 123456);
+    expect(mockReplaceThreadTargetCats).toHaveBeenCalledWith('thread-1', ['opus']);
+    expect(storeState.activeInvocations['inv-root']).toEqual({
+      catId: 'opus',
+      mode: 'execute',
+      startedAt: 123456,
+    });
+    expect(storeState.targetCats).toEqual(['opus']);
+  });
+
+  it('does not rewrite slots for cats that already have an explicit parallel slot', () => {
+    storeState.activeInvocations = {
+      'inv-root': { catId: 'opus', mode: 'execute', startedAt: 123456 },
+      'inv-root-codex': { catId: 'codex', mode: 'execute', startedAt: 123457 },
+    };
+    storeState.targetCats = ['opus', 'codex'];
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'codex',
+        content: JSON.stringify({ type: 'invocation_created', invocationId: 'inv-root' }),
+      });
+    });
+
+    expect(mockRemoveActiveInvocation).not.toHaveBeenCalled();
+    expect(mockAddActiveInvocation).not.toHaveBeenCalled();
+    expect(mockReplaceThreadTargetCats).not.toHaveBeenCalled();
+    expect(storeState.activeInvocations).toEqual({
+      'inv-root': { catId: 'opus', mode: 'execute', startedAt: 123456 },
+      'inv-root-codex': { catId: 'codex', mode: 'execute', startedAt: 123457 },
+    });
   });
 });

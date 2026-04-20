@@ -84,6 +84,26 @@ describe('MobileStatusSheet', () => {
     expect(container.textContent).toContain('缅因猫');
   });
 
+  it('prefers activeInvocations over stale targetCats when provided', () => {
+    const props = {
+      ...baseProps,
+      open: true,
+      targetCats: ['codex'],
+      catStatuses: { codex: 'pending' as CatStatus, dare: 'streaming' as CatStatus },
+      activeInvocations: {
+        'inv-dare-1': { catId: 'dare', mode: 'execute' },
+      },
+      hasActiveInvocation: true,
+    };
+
+    act(() => {
+      root.render(React.createElement(MobileStatusSheet, props));
+    });
+
+    expect(container.textContent).toContain('dare');
+    expect(container.textContent).not.toContain('缅因猫');
+  });
+
   it('shows close button that calls onClose', () => {
     let closed = false;
     const props = {
@@ -129,18 +149,16 @@ describe('MobileStatusSheet', () => {
   });
 
   it('shows cats that only exist in activeInvocations on mobile', () => {
-    useChatStore.setState({
-      activeInvocations: {
-        'inv-main': { catId: 'opus', mode: 'ideate' },
-        'inv-main-codex': { catId: 'codex', mode: 'ideate' },
-      },
-    });
-
     const props = {
       ...baseProps,
       open: true,
       targetCats: ['opus'],
       catStatuses: { opus: 'streaming' as CatStatus, codex: 'pending' as CatStatus },
+      activeInvocations: {
+        'inv-main': { catId: 'opus', mode: 'ideate' },
+        'inv-main-codex': { catId: 'codex', mode: 'ideate' },
+      },
+      hasActiveInvocation: true,
     };
 
     act(() => {

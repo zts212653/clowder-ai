@@ -1,0 +1,29 @@
+# F155 Guide Flow: 对接飞书
+# 引导用户完成飞书渠道的接入配置
+# Schema: OrchestrationFlow v2 (tag-based engine)
+
+schemaVersion: 1
+id: connect-feishu
+name: 对接飞书
+description: 引导你完成飞书渠道的接入与授权配置
+
+steps:
+  - id: open-im-hub
+    target: im-hub.trigger
+    tips: 点击这里打开 IM Hub
+    advance: click
+
+  - id: go-to-config
+    target: im-hub.config-tab
+    tips: 切换到平台配置页面
+    advance: click
+
+  - id: expand-feishu
+    target: connector.feishu
+    tips: 展开飞书渠道配置
+    advance: click
+
+  - id: finish-feishu-setup
+    target: connector.feishu
+    tips: 按卡片里的步骤完成飞书授权或填写应用凭证；确认连接成功后点击“已完成该步骤”
+    advance: confirm

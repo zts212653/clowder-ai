@@ -1,8 +1,8 @@
 /**
- * F479: Shadow detection for inline @mention observability.
+ * clowder-ai#489: Shadow detection for inline @mention observability.
  *
  * Split from a2a-mentions.ts for file-size compliance.
- * Provides relaxed detection to identify "vocab gap" candidates —
+ * Provides relaxed detection to identify "vocab gap" candidates -
  * inline @mentions with handoff-like context that strict regex missed.
  */
 
@@ -26,7 +26,7 @@ interface MentionPatternEntry {
 
 /**
  * Relaxed action heuristic for shadow detection.
- * Superset of strict BEFORE/AFTER_HANDOFF_RE — catches broader patterns
+ * Superset of strict BEFORE/AFTER_HANDOFF_RE - catches broader patterns
  * that suggest handoff/request intent. Used to gate shadow misses so that
  * pure narrative mentions ("之前 @codex 提出的方案不错") are excluded.
  */
@@ -56,11 +56,11 @@ function hashContext(line: string): string {
 }
 
 /**
- * F479: Run strict detection + relaxed shadow detection in one pass.
+ * clowder-ai#489: Run strict detection + relaxed shadow detection in one pass.
  *
  * Shadow detection = "any inline @mention with relaxed action signal but not
  * caught by strict detection and not in routedSet". These are vocab gap
- * candidates — the user likely has handoff intent (per RELAXED_*_ACTION_RE)
+ * candidates - the user likely has handoff intent (per RELAXED_*_ACTION_RE)
  * but their wording isn't in the strict regex. Pure narrative mentions
  * (e.g. "之前 @codex 提出的方案不错") are excluded.
  */
@@ -118,9 +118,9 @@ export function detectInlineActionMentionsWithShadow(
           if (hasActionKeyword && !lineRoutedSkipSeen.has(entry.catId)) {
             lineRoutedSkipSeen.add(entry.catId);
             routedSetSkips++;
-            break; // classified — stop scanning this pattern
+            break;
           }
-          continue; // narrative routed mention — keep scanning for actionable occurrence
+          continue;
         }
         const hasRelaxedAction = RELAXED_BEFORE_ACTION_RE.test(before) || RELAXED_AFTER_ACTION_RE.test(after);
         if (!hasActionKeyword && hasRelaxedAction && !lineShadowSeen.has(entry.catId)) {
@@ -130,10 +130,11 @@ export function detectInlineActionMentionsWithShadow(
             contextHash: hashContext(rawLine.trim()),
             contextLength: rawLine.trim().length,
           });
+          break;
         }
-        // Stop scanning only if this occurrence was classified (strict/relaxed/shadow).
-        // Narrative occurrences (no action signal at all) should not block later occurrences.
-        if (hasActionKeyword || hasRelaxedAction) break;
+        if (hasActionKeyword || hasRelaxedAction) {
+          break;
+        }
       }
     }
   }

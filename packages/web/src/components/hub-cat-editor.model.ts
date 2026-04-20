@@ -9,9 +9,9 @@ import type { CatData } from '@/hooks/useCatData';
 import type { BuiltinAccountClient, ProfileItem } from './hub-accounts.types';
 import type { CatStrategyEntry, StrategyType } from './hub-strategy-types';
 
-/** F340 P5: Renamed from ClientValue → ClientId (aligned with shared type). */
+/** clowder-ai#340 P5: Renamed from ClientValue → ClientId (aligned with shared type). */
 export type ClientId = 'anthropic' | 'openai' | 'google' | 'kimi' | 'dare' | 'opencode' | 'antigravity' | 'catagent';
-/** @deprecated F340: Use {@link ClientId} instead. */
+/** @deprecated clowder-ai#340: Use {@link ClientId} instead. */
 export type ClientValue = ClientId;
 export type SessionChainValue = 'true' | 'false';
 export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
@@ -38,7 +38,7 @@ export interface HubCatEditorFormState {
   commandArgs: string;
   cliConfigArgs: string[];
   cliEffort: CliEffortValue | '';
-  /** F340 P5: Model provider name (renamed from ocProviderName). */
+  /** clowder-ai#340 P5: Model provider name (renamed from ocProviderName). */
   provider: string;
   sessionChain: SessionChainValue;
   maxPromptTokens: string;

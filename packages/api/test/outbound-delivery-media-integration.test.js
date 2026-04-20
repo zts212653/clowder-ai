@@ -262,4 +262,129 @@ describe('OutboundDeliveryHook — media delivery integration', () => {
     assert.equal(feishuMedia.length, 1);
     assert.equal(telegramMedia.length, 1);
   });
+
+  // --- Weixin audio outbound fix: voice blocks with text but no url ---
+
+  it('resolves audio{text, no url} via resolveVoiceBlocks before sending media', async () => {
+    const { OutboundDeliveryHook } = await import('../dist/infrastructure/connectors/OutboundDeliveryHook.js');
+
+    const sendMediaCalls = [];
+    const sendReplyCalls = [];
+    // WeChat-like adapter: sendMedia but NO sendRichMessage
+    const mockAdapter = {
+      connectorId: 'weixin',
+      async sendReply(chatId, content) {
+        sendReplyCalls.push({ chatId, content });
+      },
+      async sendMedia(chatId, payload) {
+        sendMediaCalls.push({ chatId, payload });
+      },
+    };
+
+    let resolverCalled = false;
+    const hook = new OutboundDeliveryHook({
+      bindingStore: {
+        async getByThread() {
+          return [{ connectorId: 'weixin', externalChatId: 'wx-chat1', threadId: 'T1', userId: 'u1', createdAt: 0 }];
+        },
+      },
+      adapters: new Map([['weixin', mockAdapter]]),
+      log: { info() {}, warn() {}, error() {}, debug() {} },
+      resolveVoiceBlocks: async (blocks, _catId) => {
+        resolverCalled = true;
+        return blocks.map((b) =>
+          b.kind === 'audio' && 'text' in b && !('url' in b && b.url)
+            ? { ...b, url: '/api/tts/audio/resolved.wav', mimeType: 'audio/wav' }
+            : b,
+        );
+      },
+    });
+
+    await hook.deliver('T1', 'Voice reply', 'opus', [{ id: 'b1', kind: 'audio', v: 1, text: '你好世界' }]);
+
+    assert.ok(resolverCalled, 'resolveVoiceBlocks should have been called');
+    assert.equal(sendMediaCalls.length, 1, 'sendMedia should be called once for resolved audio');
+    assert.equal(sendMediaCalls[0].payload.type, 'audio');
+    assert.equal(sendMediaCalls[0].payload.url, '/api/tts/audio/resolved.wav');
+  });
+
+  it('degrades audio{text, no url} to text when no resolver available — no silent loss', async () => {
+    const { OutboundDeliveryHook } = await import('../dist/infrastructure/connectors/OutboundDeliveryHook.js');
+
+    const sendReplyCalls = [];
+    const sendMediaCalls = [];
+    const mockAdapter = {
+      connectorId: 'weixin',
+      async sendReply(chatId, content) {
+        sendReplyCalls.push({ chatId, content });
+      },
+      async sendMedia(chatId, payload) {
+        sendMediaCalls.push({ chatId, payload });
+      },
+    };
+
+    const hook = new OutboundDeliveryHook({
+      bindingStore: {
+        async getByThread() {
+          return [{ connectorId: 'weixin', externalChatId: 'wx-chat1', threadId: 'T1', userId: 'u1', createdAt: 0 }];
+        },
+      },
+      adapters: new Map([['weixin', mockAdapter]]),
+      log: { info() {}, warn() {}, error() {}, debug() {} },
+      // NO resolveVoiceBlocks — simulates synth unavailable
+    });
+
+    await hook.deliver('T1', '', 'opus', [{ id: 'b1', kind: 'audio', v: 1, text: '这段语音应该以文本形式发出' }]);
+
+    // Audio should not be silently dropped — text fallback must appear in sendReply
+    assert.equal(sendMediaCalls.length, 0, 'no sendMedia since audio has no url');
+    assert.ok(sendReplyCalls.length > 0, 'sendReply should be called with text fallback');
+    const allText = sendReplyCalls.map((c) => c.content).join('\n');
+    assert.ok(allText.includes('这段语音应该以文本形式发出'), 'audio text must appear in fallback');
+  });
+
+  it('degrades to text when resolveVoiceBlocks throws', async () => {
+    const { OutboundDeliveryHook } = await import('../dist/infrastructure/connectors/OutboundDeliveryHook.js');
+
+    const sendReplyCalls = [];
+    const sendMediaCalls = [];
+    const warnCalls = [];
+    const mockAdapter = {
+      connectorId: 'weixin',
+      async sendReply(chatId, content) {
+        sendReplyCalls.push({ chatId, content });
+      },
+      async sendMedia(chatId, payload) {
+        sendMediaCalls.push({ chatId, payload });
+      },
+    };
+
+    const hook = new OutboundDeliveryHook({
+      bindingStore: {
+        async getByThread() {
+          return [{ connectorId: 'weixin', externalChatId: 'wx-chat1', threadId: 'T1', userId: 'u1', createdAt: 0 }];
+        },
+      },
+      adapters: new Map([['weixin', mockAdapter]]),
+      log: {
+        info() {},
+        warn(...args) {
+          warnCalls.push(args);
+        },
+        error() {},
+        debug() {},
+      },
+      resolveVoiceBlocks: async () => {
+        throw new Error('TTS service unavailable');
+      },
+    });
+
+    await hook.deliver('T1', '', 'opus', [{ id: 'b1', kind: 'audio', v: 1, text: '合成失败的语音' }]);
+
+    assert.equal(sendMediaCalls.length, 0, 'no sendMedia after resolver failure');
+    assert.ok(sendReplyCalls.length > 0, 'text fallback must be sent');
+    const allText = sendReplyCalls.map((c) => c.content).join('\n');
+    assert.ok(allText.includes('合成失败的语音'), 'audio text must survive resolver failure');
+    assert.ok(warnCalls.length > 0, 'resolver failure should be logged as warning');
+  });
 });

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useGuideStore } from '@/stores/guideStore';
 import { apiFetch } from '@/utils/api-client';
 import { FeishuQrPanel } from './FeishuQrPanel';
 import {
@@ -15,6 +16,7 @@ import {
   StepBadge,
   WifiIcon,
 } from './HubConfigIcons';
+import { WeComBotSetupPanel } from './WeComBotSetupPanel';
 import { WeixinQrPanel } from './WeixinQrPanel';
 
 interface PlatformFieldStatus {
@@ -40,6 +42,11 @@ interface PlatformStatus {
 }
 
 export function HubConnectorConfigTab() {
+  const activeGuideStep = useGuideStore((s) => {
+    const session = s.session;
+    if (!session || session.currentStepIndex >= session.flow.steps.length) return null;
+    return session.flow.steps[session.currentStepIndex];
+  });
   const [platforms, setPlatforms] = useState<PlatformStatus[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -66,7 +73,11 @@ export function HubConnectorConfigTab() {
   }, [fetchStatus]);
 
   const handleExpand = (platformId: string) => {
+    const guideToggleTarget = `connector.${platformId}`;
     if (expandedId === platformId) {
+      if (activeGuideStep?.advance === 'click' && activeGuideStep.target === guideToggleTarget) {
+        return;
+      }
       setExpandedId(null);
       setFieldValues({});
       setSaveResult(null);
@@ -137,6 +148,7 @@ export function HubConnectorConfigTab() {
             key={platform.id}
             className="border border-cafe rounded-2xl overflow-hidden"
             data-testid={`platform-card-${platform.id}`}
+            data-guide-id={`connector.${platform.id}`}
           >
             <button
               type="button"
@@ -163,6 +175,42 @@ export function HubConnectorConfigTab() {
               <span className="text-cafe-muted shrink-0">{isExpanded ? <ChevronDown /> : <ChevronRight />}</span>
             </button>
 
+            {/* F132 Phase E: WeCom Bot guided setup — dedicated panel with validate+connect */}
+            {isExpanded && platform.id === 'wecom-bot' && (
+              <div className="border-t border-cafe-subtle px-4 py-4 space-y-3.5">
+                {guideSteps.map((step, idx) => (
+                  <div key={idx} className="space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <StepBadge num={idx + 1} />
+                      <span className="text-[13px] font-medium text-cafe">{step.text}</span>
+                    </div>
+                    {idx === 0 && (
+                      <div className="ml-[26px]">
+                        <a
+                          href={platform.docsUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 text-xs text-blue-600 bg-sky-50 rounded-lg px-3 py-2 hover:bg-sky-100 transition-colors"
+                        >
+                          <ExternalLinkIcon />
+                          <span>developer.work.weixin.qq.com → WeCom AI Bot docs</span>
+                        </a>
+                      </div>
+                    )}
+                    {idx === guideSteps.length - 1 && (
+                      <div className="ml-[26px]">
+                        <WeComBotSetupPanel
+                          configured={platform.configured}
+                          onConnected={() => void fetchStatus()}
+                          onDisconnected={() => void fetchStatus()}
+                        />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
             {isExpanded && platform.id === 'weixin' && (
               <div className="border-t border-cafe-subtle px-4 py-4 space-y-3.5">
                 {filteredSteps.map((step, idx) => (
@@ -173,7 +221,9 @@ export function HubConnectorConfigTab() {
                     </div>
                     {idx === 0 && (
                       <div className="ml-[26px]">
-                        <WeixinQrPanel configured={platform.configured} />
+                        <div data-guide-id="connector.weixin.qr-panel">
+                          <WeixinQrPanel configured={platform.configured} />
+                        </div>
                       </div>
                     )}
                   </div>
@@ -181,7 +231,7 @@ export function HubConnectorConfigTab() {
               </div>
             )}
 
-            {isExpanded && platform.id !== 'weixin' && (
+            {isExpanded && platform.id !== 'weixin' && platform.id !== 'wecom-bot' && (
               <div className="border-t border-cafe-subtle px-4 py-4 space-y-3.5">
                 {guideSteps.map((step, idx) => (
                   <div key={idx} className="space-y-1.5">

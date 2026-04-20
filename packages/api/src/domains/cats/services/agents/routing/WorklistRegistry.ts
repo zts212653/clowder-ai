@@ -17,10 +17,16 @@
 import type { CatId } from '@cat-cafe/shared';
 
 /** F122: Structured result from pushToWorklist — reason explains empty adds */
-export type PushReason = 'not_found' | 'depth_limit' | 'caller_mismatch' | 'all_duplicate';
+export type PushReason = 'not_found' | 'depth_limit' | 'caller_mismatch' | 'all_duplicate' | 'pingpong_terminated';
 export interface PushResult {
   added: CatId[];
   reason?: PushReason;
+  /** F167 L1: streak >= 2 but < 4 — downstream must inject ping-pong warning prompt */
+  warnPingPong?: boolean;
+  /** F167 L1: streak >= 4 — push was rejected; caller must emit pingpong_terminated system msg */
+  blockPingPong?: boolean;
+  /** F167 L1: current pair count (present when warnPingPong / blockPingPong is set) */
+  pairCount?: number;
 }
 
 export interface WorklistEntry {
@@ -45,6 +51,47 @@ export interface WorklistEntry {
    * Used by auto-replyTo to thread replies back to the triggering @mention message.
    */
   a2aTriggerMessageId: Map<CatId, string>;
+  /**
+   * F167 L1: ping-pong streak tracking — records the last same-pair (A↔B) push run.
+   * Incremented on every 1-target A2A push where {caller, target} matches this pair
+   * (order-insensitive). Reset to {new pair, count=1} when the pair changes, or
+   * cleared by `resetStreak()` (called on user messages). See `streakPair.count`
+   * thresholds: >=2 warn, >=4 block.
+   */
+  streakPair?: { from: CatId; to: CatId; count: number };
+}
+
+/** F167 L1: streak thresholds. Hardcoded per KD (YAGNI — no config). */
+const PINGPONG_WARN_THRESHOLD = 2;
+const PINGPONG_BLOCK_THRESHOLD = 4;
+
+/** F167 L1: two cat pairs are the same if they share the same unordered set of cats. */
+function samePair(a: { from: CatId; to: CatId }, bFrom: CatId, bTo: CatId): boolean {
+  return (a.from === bFrom && a.to === bTo) || (a.from === bTo && a.to === bFrom);
+}
+
+/** F167 L1: shared streak check — used by both pushToWorklist (callback path) and route-serial (inline enqueue). */
+export interface StreakResult {
+  warnPingPong: boolean;
+  blockPingPong: boolean;
+  count: number;
+}
+
+export function updateStreakOnPush(entry: WorklistEntry, callerCatId: CatId, target: CatId): StreakResult {
+  if (entry.streakPair && samePair(entry.streakPair, callerCatId, target)) {
+    entry.streakPair.count++;
+    // Track latest direction so consumers can identify who just received the ball
+    entry.streakPair.from = callerCatId;
+    entry.streakPair.to = target;
+  } else {
+    entry.streakPair = { from: callerCatId, to: target, count: 1 };
+  }
+  const count = entry.streakPair.count;
+  return {
+    warnPingPong: count >= PINGPONG_WARN_THRESHOLD && count < PINGPONG_BLOCK_THRESHOLD,
+    blockPingPong: count >= PINGPONG_BLOCK_THRESHOLD,
+    count,
+  };
 }
 
 /** Primary registry: registryKey → WorklistEntry */
@@ -148,6 +195,24 @@ export function pushToWorklist(
     if (currentCat !== callerCatId) return { added: [], reason: 'caller_mismatch' };
   }
 
+  // F167 L1: ping-pong streak — only 1:1 A2A pushes count (caller + single target).
+  // Fan-out (multi-target) and non-A2A (no caller) pushes never update or consult streak.
+  let warnPingPong = false;
+  let pairCount = 0;
+  if (callerCatId !== undefined && cats.length === 1) {
+    const streak = updateStreakOnPush(entry, callerCatId, cats[0]);
+    if (streak.blockPingPong) {
+      return {
+        added: [],
+        reason: 'pingpong_terminated',
+        blockPingPong: true,
+        pairCount: streak.count,
+      };
+    }
+    warnPingPong = streak.warnPingPong;
+    pairCount = streak.count;
+  }
+
   // Only dedup against pending tail (from executedIndex onward)
   const pending = entry.list.slice(entry.executedIndex);
 
@@ -187,7 +252,31 @@ export function pushToWorklist(
   if (added.length === 0) {
     return { added: [], reason: hitDepthLimit ? 'depth_limit' : 'all_duplicate' };
   }
-  return { added };
+  return warnPingPong ? { added, warnPingPong: true, pairCount } : { added };
+}
+
+/**
+ * F167 L1: Reset streak for a thread's active worklist (user-message hook).
+ * Called when a user message arrives — fresh turn, streak shouldn't carry over.
+ *
+ * When `parentInvocationId` is omitted, clears streak on ALL worklists for the
+ * thread via the reverse index. This matches the user-POST caller (messages.ts)
+ * which has no parentInvocationId — route-serial registers entries keyed by
+ * parentInvocationId (F108), so a single-key lookup would miss them.
+ */
+export function resetStreak(threadId: string, parentInvocationId?: string): void {
+  if (parentInvocationId !== undefined) {
+    const key = registryKey(threadId, parentInvocationId);
+    const entry = registry.get(key);
+    if (entry) entry.streakPair = undefined;
+    return;
+  }
+  const keys = threadIndex.get(threadId);
+  if (!keys) return;
+  for (const key of keys) {
+    const entry = registry.get(key);
+    if (entry) entry.streakPair = undefined;
+  }
 }
 
 /** Check if a thread has any active worklist (any invocation running). */

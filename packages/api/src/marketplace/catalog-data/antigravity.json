@@ -1,0 +1,51 @@
+[
+  {
+    "id": "antigravity-pencil",
+    "name": "Pencil",
+    "description": "Design tool extension for creating, editing, and exporting .pen design files in Antigravity IDE",
+    "trustLevel": "official",
+    "publisher": "Antigravity Team",
+    "resolver": "antigravity-pencil",
+    "versionRef": "1.2.0"
+  },
+  {
+    "id": "antigravity-figma-sync",
+    "name": "Figma Sync",
+    "description": "Sync Figma designs into Antigravity projects — import frames, components, and design tokens",
+    "trustLevel": "verified",
+    "publisher": "Antigravity Community",
+    "versionRef": "0.5.0"
+  },
+  {
+    "id": "antigravity-git-lens",
+    "name": "Git Lens",
+    "description": "Enhanced git visualization — inline blame, file history, branch comparison, and commit graph",
+    "trustLevel": "official",
+    "publisher": "Antigravity Team",
+    "versionRef": "2.1.0"
+  },
+  {
+    "id": "antigravity-docker-explorer",
+    "name": "Docker Explorer",
+    "description": "Visual Docker container and image management within the Antigravity IDE",
+    "trustLevel": "verified",
+    "publisher": "Antigravity Community",
+    "versionRef": "1.0.0"
+  },
+  {
+    "id": "antigravity-tailwind-intellisense",
+    "name": "Tailwind CSS IntelliSense",
+    "description": "Tailwind CSS autocomplete, syntax highlighting, and class sorting in Antigravity editor",
+    "trustLevel": "official",
+    "publisher": "Tailwind Labs",
+    "versionRef": "0.14.0"
+  },
+  {
+    "id": "antigravity-prettier",
+    "name": "Prettier",
+    "description": "Opinionated code formatter supporting TypeScript, CSS, HTML, JSON, Markdown, and more",
+    "trustLevel": "official",
+    "publisher": "Prettier Team",
+    "versionRef": "3.5.0"
+  }
+]

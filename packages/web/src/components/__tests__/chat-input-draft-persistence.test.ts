@@ -1,5 +1,5 @@
 /**
- * F80/F314: Draft persistence across thread switches.
+ * F080 + clowder-ai#314: Draft persistence across thread switches.
  *
  * Verifies that:
  * 1. Typed text survives unmount/remount with the same threadId

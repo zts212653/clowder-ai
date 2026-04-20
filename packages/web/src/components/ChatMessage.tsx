@@ -1,7 +1,5 @@
 'use client';
 
-import { SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
-import { useRouter } from 'next/navigation';
 import type { CatData } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { useTts } from '@/hooks/useTts';
@@ -10,6 +8,7 @@ import { getMentionRe, getMentionToCat } from '@/lib/mention-highlight';
 import { parseDirection } from '@/lib/parse-direction';
 import { type ChatMessage as ChatMessageType, resolveBubbleExpanded, useChatStore } from '@/stores/chatStore';
 import { CatAvatar } from './CatAvatar';
+import { CollapsibleMarkdown } from './CollapsibleMarkdown';
 import { ConnectorBubble } from './ConnectorBubble';
 import { ContentBlocks } from './ContentBlocks';
 import { CliOutputBlock } from './cli-output/CliOutputBlock';
@@ -17,7 +16,6 @@ import { toCliEvents } from './cli-output/toCliEvents';
 import { DirectionPill } from './DirectionPill';
 import { EvidencePanel } from './EvidencePanel';
 import { GovernanceBlockedCard } from './GovernanceBlockedCard';
-import { MarkdownContent } from './MarkdownContent';
 import { MetadataBadge } from './MetadataBadge';
 import { ReplyPill } from './ReplyPill';
 import { BriefingCard } from './rich/BriefingCard';
@@ -25,6 +23,7 @@ import { RichBlocks } from './rich/RichBlocks';
 import { SummaryCard } from './SummaryCard';
 import { SystemNoticeBar } from './SystemNoticeBar';
 import { ThinkingContent } from './ThinkingContent';
+import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { TimeoutDiagnosticsPanel } from './TimeoutDiagnosticsPanel';
 import { TtsPlayButton } from './TtsPlayButton';
 
@@ -35,6 +34,10 @@ const BREED_STYLES: Record<string, { radius: string; font?: string }> = {
   'dragon-li': { radius: 'rounded-lg rounded-tl-sm', font: 'font-mono' },
 };
 const DEFAULT_BREED_STYLE = { radius: 'rounded-2xl' };
+const SCHEDULER_ACCENT_BADGE_CLASS =
+  'inline-flex w-fit items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800 shadow-sm';
+const SCHEDULER_ACCENT_BUBBLE_CLASS =
+  'border-amber-300 bg-amber-50/70 ring-1 ring-amber-200 shadow-[0_10px_24px_rgba(217,119,6,0.16)] bg-gradient-to-b from-amber-50/60 to-transparent';
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -51,7 +54,7 @@ function formatDualTime(timestamp: number, deliveredAt?: number): string {
 }
 
 function isSchedulerReplyPreview(replyPreview?: ChatMessageType['replyPreview']): boolean {
-  return replyPreview?.senderCatId === 'system' && replyPreview.content.startsWith(SCHEDULER_TRIGGER_PREFIX);
+  return replyPreview?.senderCatId === 'system' && replyPreview.kind === 'scheduler_trigger';
 }
 
 function isConnectorSystemNotice(message: ChatMessageType): boolean {
@@ -66,8 +69,9 @@ interface ChatMessageProps {
 
 export function ChatMessage({ message, getCatById }: ChatMessageProps) {
   const coCreator = useCoCreatorConfig();
-  const router = useRouter();
   const { state: ttsState, synthesize: ttsSynthesize, activeMessageId } = useTts();
+  const currentThreadId = useChatStore((s) => s.currentThreadId);
+  const isLoadingThreads = useChatStore((s) => s.isLoadingThreads);
   const threads = useChatStore((s) => s.threads);
   const threadMessages = useChatStore((s) => s.messages);
   const globalBubbleDefaults = useChatStore((s) => s.globalBubbleDefaults);
@@ -95,6 +99,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
       })()
     : null;
   const currentThread = useChatStore((s) => s.threads.find((t) => t.id === s.currentThreadId));
+  const bubbleRestorePending = isLoadingThreads && !!currentThreadId && !currentThread;
   const hasBlocks = message.contentBlocks && message.contentBlocks.length > 0;
   const hasTextContent = message.content.trim().length > 0;
   const isWhisper = message.visibility === 'whisper';
@@ -240,7 +245,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
             {hasBlocks ? (
               <ContentBlocks blocks={message.contentBlocks!} />
             ) : (
-              <MarkdownContent content={message.content} />
+              <CollapsibleMarkdown content={message.content} />
             )}
           </div>
         </div>
@@ -326,7 +331,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
               )}
             </div>
             {showSchedulerAccent && (
-              <div className="inline-flex items-center gap-1.5 rounded-full border border-[#E9C56B] bg-[#FFF7D6] px-2.5 py-1 text-[11px] font-semibold text-[#8B5E00] shadow-sm w-fit">
+              <div className={SCHEDULER_ACCENT_BADGE_CLASS}>
                 <span aria-hidden>⏰</span>
                 <span>定时提醒</span>
               </div>
@@ -343,7 +348,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      router.push(`/thread/${sourceId}`);
+                      pushThreadRouteWithHistory(sourceId, typeof window !== 'undefined' ? window : undefined);
                     }}
                     className="inline-flex items-center gap-1.5 border px-3 py-1 rounded-full bg-[#FDF6ED] border-[#E8DCCF] text-[#8D6E63] hover:bg-[#F5EDE0] transition-colors cursor-pointer w-fit max-w-full"
                     title={sourceId}
@@ -364,35 +369,20 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
         <div
           className={`border px-4 py-3 transition-transform hover:-translate-y-0.5 overflow-hidden ${
             catStyle ? `${catStyle.radius} ${catStyle.font ?? ''}` : 'bg-cafe-surface border-cafe rounded-2xl'
-          }`}
+          } ${showSchedulerAccent ? SCHEDULER_ACCENT_BUBBLE_CLASS : ''}`}
           style={
             catStyle
               ? {
                   backgroundColor: catStyle.bgColor,
-                  borderColor: showSchedulerAccent ? '#E9C56B' : catStyle.borderColor,
-                  ...(showSchedulerAccent
-                    ? {
-                        boxShadow: 'inset 0 0 0 1px rgba(233, 197, 107, 0.95), 0 10px 24px rgba(233, 197, 107, 0.16)',
-                        backgroundImage:
-                          'linear-gradient(180deg, rgba(255, 247, 214, 0.58) 0%, rgba(255, 247, 214, 0) 56%)',
-                      }
-                    : {}),
+                  ...(!showSchedulerAccent ? { borderColor: catStyle.borderColor } : {}),
                 }
-              : showSchedulerAccent
-                ? {
-                    backgroundColor: '#FFFDF7',
-                    borderColor: '#E9C56B',
-                    boxShadow: 'inset 0 0 0 1px rgba(233, 197, 107, 0.95), 0 10px 24px rgba(233, 197, 107, 0.16)',
-                    backgroundImage:
-                      'linear-gradient(180deg, rgba(255, 247, 214, 0.58) 0%, rgba(255, 247, 214, 0) 56%)',
-                  }
-                : undefined
+              : undefined
           }
         >
           {hasCliBlock && isStreamOrigin ? null : !isStreamOrigin && hasBlocks ? (
             <ContentBlocks blocks={message.contentBlocks!} />
           ) : !isStreamOrigin && hasTextContent ? (
-            <MarkdownContent content={message.content} className={catStyle?.font} />
+            <CollapsibleMarkdown content={message.content} className={catStyle?.font} />
           ) : message.isStreaming ? (
             <span className="text-xs text-cafe-secondary">Thinking...</span>
           ) : null}
@@ -401,7 +391,11 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
               content={message.thinking}
               className={catStyle?.font}
               label="Thinking"
-              defaultExpanded={resolveBubbleExpanded(currentThread?.bubbleThinking, globalBubbleDefaults.thinking)}
+              defaultExpanded={
+                bubbleRestorePending
+                  ? false
+                  : resolveBubbleExpanded(currentThread?.bubbleThinking, globalBubbleDefaults.thinking)
+              }
               expandInExport={false}
               breedColor={catData?.color.primary}
             />
@@ -411,7 +405,11 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
               events={cliEvents}
               status={cliStatus}
               thinkingMode={currentThread?.thinkingMode}
-              defaultExpanded={resolveBubbleExpanded(currentThread?.bubbleCli, globalBubbleDefaults.cliOutput)}
+              defaultExpanded={
+                bubbleRestorePending
+                  ? false
+                  : resolveBubbleExpanded(currentThread?.bubbleCli, globalBubbleDefaults.cliOutput)
+              }
               breedColor={catData?.color.primary}
             />
           )}

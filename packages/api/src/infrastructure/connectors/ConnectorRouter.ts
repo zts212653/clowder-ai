@@ -260,7 +260,11 @@ export class ConnectorRouter {
           }
         }
         // ISSUE-8 (8A): Store command exchange in Hub thread, not conversation thread
-        const chatLabel = chatType === 'group' ? `飞书群聊 · ${chatName || externalChatId.slice(-8)}` : undefined;
+        const cmdDef = getConnectorDefinition(connectorId);
+        const chatLabel =
+          chatType === 'group'
+            ? `${cmdDef?.displayName ?? connectorId}群聊 · ${chatName || externalChatId.slice(-8)}`
+            : undefined;
         const hubThreadId = await this.resolveHubThread(connectorId, externalChatId, chatLabel);
         const stored = await this.storeCommandExchange(connectorId, hubThreadId, text, cmdResult.response);
         log.info(
@@ -397,10 +401,9 @@ export class ConnectorRouter {
     let binding = await bindingStore.getByExternal(connectorId, externalChatId);
     if (!binding) {
       const def = getConnectorDefinition(connectorId);
+      const platformLabel = def?.displayName ?? connectorId;
       const title =
-        chatType === 'group'
-          ? `飞书群聊 · ${chatName || externalChatId.slice(-8)}`
-          : `${def?.displayName ?? connectorId} DM`;
+        chatType === 'group' ? `${platformLabel}群聊 · ${chatName || externalChatId.slice(-8)}` : `${platformLabel} DM`;
       const thread = await threadStore.create(this.opts.defaultUserId, title, findMonorepoRoot());
       binding = await bindingStore.bind(connectorId, externalChatId, thread.id, this.opts.defaultUserId);
       log.info(
@@ -420,7 +423,9 @@ export class ConnectorRouter {
     const source: ConnectorSource = {
       connector: connectorId,
       label:
-        chatType === 'group' ? `飞书群聊 · ${chatName || externalChatId.slice(-8)}` : (def?.displayName ?? connectorId),
+        chatType === 'group'
+          ? `${def?.displayName ?? connectorId}群聊 · ${chatName || externalChatId.slice(-8)}`
+          : (def?.displayName ?? connectorId),
       icon: def?.icon ?? 'message',
       ...(sender ? { sender } : {}),
     };

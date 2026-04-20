@@ -8,7 +8,7 @@ created: 2026-03-27
 
 # F155: Scene-Based Bidirectional Guidance Engine
 
-> **Status**: Phase A accepted / frozen — 基础引导引擎已验收冻结，可开 PR 合入 | **Owner**: 布偶猫/宪宪 | **Priority**: P1
+> **Status**: Phase A accepted / frozen — 基础引导引擎已验收冻结，可开 PR 合入 | **Owner**: Ragdoll/Ragdoll | **Priority**: P1
 
 ## Why
 
@@ -18,8 +18,6 @@ Console 功能日益复杂，但入口简单，用户不知道从哪开始。复
 - 用户不知道"添加新成员"需要先配认证
 - 飞书/钉钉等外部系统的权限配置需要反复截图沟通
 - 猫猫无法实时看到用户操作状态，只能靠用户描述和截图诊断问题
-
-> 铲屎官原话："我们的目标是让我们自己只承载我们真真需要的配置和功能；剩下的通过引导式来承载。猫猫们可以实时观察到当前用户的操作状态和效果，如果失败也就知道哪里有问题。不需要用户自己反复截图来证明和说明自己做的咋样了。"
 
 ## What
 
@@ -76,19 +74,19 @@ interface OrchestrationStep {
 **MCP 工具**（callback auth）：
 - `resolve` — 根据用户意图匹配候选流程
 - `start` — 启动引导 session
-- `control` — next/back/skip/exit
-- `update-guide-state` — 通用状态机更新
+- `control` — next/skip/exit（不再支持 back）
+- `update-guide-state` — offered / awaiting_choice / completed / cancelled 等非 start 状态更新
 
 **CI 验证**：`scripts/gen-guide-catalog.mjs` 校验 v2 schema + target whitelist
 
 **P0 验证场景**：添加新成员（4 步：open-hub → go-to-cats → click-add-member → edit-member-profile）
 
-### Phase B: 平台内场景扩展（F155 scope）
+### Phase B: 场景扩展（F155 scope）
 
 > **Scope 调整（KD-13 + KD-14）**：
-> - Phase B 聚焦平台内已有功能的引导场景扩展，不做跨系统深度集成
+> - Phase B 聚焦已有 Console / Hub / IM Hub 表面的引导场景扩展；只要目标控件已经存在于当前产品 UI 中，provider / connector flows 可以纳入 Guide Engine
 > - 双向可观测（observe/verifier）已拆出为独立 feature 待立项，不再是 F155 的一部分
-> - 外部平台（飞书/微信等）的配置流程按场景单独做配置页签，不纳入 Guide Engine
+> - 需要新增独立配置页签、全新外部画布或 schema / inheritance 设计的跨系统流程，仍按后续 feature 单独推进
 
 **场景扩展**：基于已有 Console 功能逐场景补充引导流程，复用 Phase A 骨架（data-guide-id + Flow YAML + advance mode + complete callback）。具体场景所需的额外步骤类型或信息补充，结合场景实际需求决定。
 
@@ -101,9 +99,9 @@ interface OrchestrationStep {
 | 方向 | 归属 | 说明 |
 |------|------|------|
 | 自动观测 substrate | 独立 feature 待立项 | 不只服务 guide，可被 guide/debug/diagnostics 复用。含 observe.fields、idle 检测、verifier 契约、猫眼指示灯 |
-| 跨系统配置页签 | 按场景单独设计 | 飞书/微信/钉钉等外部平台配置流程，不走 Guide Engine 遮罩引导 |
+| 新增外部配置页签 / 全新外部画布 | 按场景单独设计 | 仅当某流程无法复用当前 Hub / IM Hub UI、需要新增专门配置 surface 时，才不走 Guide Engine 遮罩引导 |
 
-### 当前进展与阶段判断（2026-04-09）
+### 当前进展与阶段判断（2026-04-20）
 
 | 维度 | 当前状态 | 说明 |
 |------|---------|------|
@@ -113,7 +111,8 @@ interface OrchestrationStep {
 | Esc 误退修复 | ✅ 完成 | KD-14：GuideOverlay preventDefault + CatCafeHub guideActive guard |
 | CVO 验收 | ✅ 通过 | 2026-04-09 CVO 手动测试”添加成员”流程，确认链路通畅 |
 | gpt52 review | ✅ 放行 | completion callback 6 轮 + 收尾 2 轮，全部 P1/P2 已修复 |
-| 当前阶段判断 | **Phase A accepted / frozen** | 基础引导引擎已验收冻结，可开 PR 合入 main |
+| Phase B 场景扩展 | 🚧 Review-ready | 当前 branch 已补齐 `add-account-auth`、`configure-first-provider`、`edit-member-auth`、`connect-wechat`、`connect-feishu` |
+| 当前阶段判断 | **Phase A accepted / Phase B review-ready** | 基础引导引擎已冻结；当前 PR 聚焦场景扩展与交互 hardening 收口 |
 
 **Phase A 交付物**：
 - 前端引擎：`guideStore.ts` + `useGuideEngine.ts` + `GuideOverlay.tsx`（含 auto-advance）
@@ -125,10 +124,12 @@ interface OrchestrationStep {
 
 ### 触发与发现规范
 
-三层触发机制：
-1. **对话触发（主）**：用户问意图 → 猫查 catalog → 建议引导 → [🐾 带我去做] 卡片 → 启动
-2. **主动发现**：系统检测到未完成配置 → 猫主动建议相关引导
-3. **目录浏览**：Console "场景引导" 入口，按类别列出所有可用流程
+当前阶段只保留一条触发路径：
+1. **对话意图触发**：用户在正常对话中表达配置/求助意图 → 猫先判断是直接解释还是适合走引导 → 调用 MCP `cat_cafe_get_available_guides()` 获取当前可用场景目录 → 基于场景描述建议引导 → [🐾 带我去做] 卡片 → 用户确认后启动
+
+说明：
+- 路由层不直接根据原始消息关键词或显式命令触发 guide
+- 主动发现与目录浏览暂不作为当前设计的触发入口
 
 ### guide-authoring Skill
 
@@ -140,9 +141,11 @@ interface OrchestrationStep {
 | 优先级 | 场景 | Console Tab | 复杂度 | 跨系统 |
 |--------|------|------------|--------|--------|
 | P0 | 添加成员 | cats → HubCatEditor | 极高 | 否 |
-| ~~P0~~ deferred | 飞书对接 | 独立配置页签（不走 Guide Engine）| 高 | 是 |
-| P1 | 配置 API Provider | provider-profiles | 高 | 否 |
-| P1 | 添加连接器（通用） | connector config | 高 | 是 |
+| P0 | 配置第一个 Provider | cats → HubAddMemberWizard → HubCatEditor | 高 | 否 |
+| P1 | 添加账户认证 | settings → accounts | 高 | 否 |
+| P1 | 修改成员认证与模型 | cats → HubCatEditor | 高 | 否 |
+| P1 | 微信对接 | connector config | 高 | 是 |
+| P1 | 飞书对接 | connector config | 高 | 是 |
 | P1 | 开启推送通知 | notify | 中 | 否 |
 | P2 | 管理猫猫能力 | capabilities | 中 | 否 |
 | P2 | 治理看板配置 | governance | 中 | 否 |
@@ -150,9 +153,9 @@ interface OrchestrationStep {
 ### 触发与发现（详细设计）
 
 **Guide Registry**（`guides/registry.yaml`）：注册所有可用引导，含 keywords + 意图映射。
-**MCP Tool**：`guide_resolve(intent, context)` → 关键词匹配 registry → 返回候选引导列表。
-**Skill Manifest**：猫检测到配置意图（"怎么/如何/配置"）→ 自动查 registry → 问用户"要我带你走一遍吗？"。
-**主动发现**：后端检测未完成配置状态 → 推送建议到聊天（复用现有 Socket.io 事件管道）。
+**MCP Tool**：`cat_cafe_get_available_guides()` → 读取 registry + 当前上下文可用性 → 返回可用引导列表。
+**Skill Manifest**：猫检测到配置意图（"怎么/如何/配置"）后，先判断是否需要交互引导；需要时调用 `cat_cafe_get_available_guides` 查看可用场景目录，再问用户"要我带你走一遍吗？"。
+**Routing Boundary**：`GuideRoutingInterceptor` 仅负责续接已有 guideState（offered/awaiting_choice/active/completed），不从普通消息或显式命令直接创建新 guide offer。
 
 ## Acceptance Criteria
 
@@ -173,7 +176,7 @@ interface OrchestrationStep {
 - ~~AC-B1(旧): observe 层~~ → 独立 feature "自动观测 substrate" 待立项
 - ~~AC-B2(旧): MCP guide_observe~~ → 同上
 - ~~AC-B4(旧): 猫眼观测指示灯~~ → 同上
-- ~~AC-B5: 飞书 E2E~~ → KD-13 deferred
+- ~~AC-B5: 飞书外部平台完整 E2E~~ → 保持拆分；当前 F155 只覆盖 Hub / IM Hub 内已有 surface 的 guide flow，不覆盖外部平台联调自动化
 - ~~AC-S1: Sensitive Data Containment~~ → 随独立 observe feature 走
 - ~~AC-S2: Verifier Permission Boundary~~ → 随独立 observe feature 走
 
@@ -203,7 +206,7 @@ interface OrchestrationStep {
 
 - **Related**: F087（猫猫训练营 — 类似的引导概念，但面向不同场景）
 - **Related**: F110（训练营愿景引导增强 — 引导 UX 模式可复用）
-- **Related**: F134（飞书群聊 — 飞书对接是 P0 验证场景之一）
+- **Related**: F134（飞书群聊 — `connect-feishu` guide 的业务背景与后续联调上下游）
 - **Related**: F099（Hub 导航可扩展 — Hub tab/深链基础设施）
 
 ## Risk
@@ -215,14 +218,6 @@ interface OrchestrationStep {
 | collect_input 敏感值泄露 | AC-S1 封存规则 + 服务端 TTL |
 | 流程文档与页面演进脱节 | CI gate 每次构建校验 tag manifest |
 | Guide Engine 性能影响正常操作 | 遮罩层 z-index 隔离 + 不影响非引导区域交互 |
-
-## Open Questions
-
-| # | 问题 | 状态 |
-|---|------|------|
-| OQ-1 | Guide Engine 是否需要支持流程嵌套（一个 flow 调用另一个 flow 作为子步骤）？ | ⬜ 未定（建议 Phase B 后评估） |
-| OQ-2 | 主动发现的触发条件如何定义？由前端检测还是后端推送？ | ⬜ 未定 |
-| OQ-3 | guide-authoring skill 是否需要自动从录屏生成初始 flow YAML？ | ⬜ 未定 |
 
 ## Key Decisions
 
@@ -240,34 +235,11 @@ interface OrchestrationStep {
 | KD-10 | v2 步骤类型收敛为 4 种 advance mode（click/visible/input/confirm） | 简化 Phase A 范围，6 种步骤类型推迟到 Phase B 按需扩展 | 2026-03-30 |
 | KD-11 | Flow YAML 运行时加载（API），不在构建时生成 TS | 解耦部署：改 flow 不需要重新构建前端 | 2026-03-30 |
 | KD-12 | 完成回调作为基础能力：前端 complete → 后端状态 + Socket 通知 | CVO 明确要求：完整流程闭环是基础能力，不是后续补充 | 2026-04-03 |
-| KD-13 | Phase B 聚焦平台内引导，外部平台配置改为独立页签（不走 Guide Engine） | CVO：跨系统对接方式可能变化（扫码等），引导引擎聚焦已有功能；外部流程按场景单独做页签 | 2026-04-06 |
+| KD-13 | Phase B 继续复用 Guide Engine 覆盖已有 Hub / IM Hub UI 中的 provider / connector 场景；需要新增外部配置页签或 observe substrate 的能力另拆 | CVO：优先复用现有产品 surface 收口高频场景，把真正需要新 UI / 新联调形态的外部流程与观测基建拆出去 | 2026-04-06 |
 | KD-14 | 禁用引导模式下全局 Esc 退出，仅保留显式退出按钮 | CVO 手测反馈：误触 Esc 导致引导意外退出，体验差 | 2026-04-09 |
 | KD-15 | 双向可观测拆出为独立 feature，不再是 F155 Phase B | CVO + gpt52 共识：observe substrate 应更大——不只服务 guide，可被 debug/diagnostics 复用 | 2026-04-09 |
 
-## Timeline
-
-| 日期 | 事件 |
-|------|------|
-| 2026-03-27 | 三猫讨论收敛 + 立项 |
-| 2026-03-30 | v2 tag-based auto-advance engine 跑通，HUD 收敛为 exit-only，flow 改为运行时加载 |
-| 2026-03-31 | P0 场景 add-member 4 步端到端验证通过 |
-| 2026-04-01 | `add-member` 第 4 步收敛为 `confirm` 型步骤，保存成功后才允许完成 |
-| 2026-04-03 | guide completion callback 打通：前端 complete → 后端 `guideState=completed` → Socket `guide_complete` |
-| 2026-04-06 | CVO 方向校准：Phase B 聚焦平台内引导，跨系统配置改为独立页签（KD-13） |
-| 2026-04-09 | CVO 验收 Phase A 通过；Esc 误退修复（KD-14）；observe 拆出独立 feature（KD-15）；Phase A accepted/frozen |
-
 ## Review Gate
 
-- Phase A: 砚砚(gpt52) 负责安全边界 + 可测性 review
-- Phase B: 砚砚(gpt52) 安全 review + 烁烁(gemini25) 视觉 review
-
-## Links
-
-| 类型 | 路径 | 说明 |
-|------|------|------|
-| **Discussion** | `docs/discussions/2026-03-27-F150-guidance-engine-convergence.md` | 三猫讨论收敛纪要 |
-| **Scene Catalog** | `docs/features/F155-scene-catalog.md` | 全量引导场景清单（12 场景，含步骤概要） |
-| **Skill** | `cat-cafe-skills/guide-authoring/SKILL.md` | 引导流程设计 SOP |
-| **Feature** | `docs/features/F087-bootcamp.md` | 类似引导概念（训练营） |
-| **Feature** | `docs/features/F134-feishu-group-chat.md` | 飞书对接（P0 验证场景） |
-| **Feature** | `docs/features/F137-weixin-personal-gateway.md` | 微信对接（P1 验证场景） |
+- Phase A: Maine Coon(gpt52) 负责安全边界 + 可测性 review
+- Phase B: Maine Coon(gpt52) 安全 review + Siamese(gemini25) 视觉 review

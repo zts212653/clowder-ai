@@ -50,6 +50,7 @@ function GuideOverlayInner() {
   const completionFailed = useGuideStore((s) => s.completionFailed);
 
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
+  const [hudSize, setHudSize] = useState<{ width: number; height: number }>({ width: 280, height: 160 });
   const rafRef = useRef<number>(0);
   const lastRectRef = useRef<{ t: number; l: number; w: number; h: number } | null>(null);
   const previousFocusRef = useRef<Element | null>(null);
@@ -79,6 +80,7 @@ function GuideOverlayInner() {
       ? session.flow.steps[session.currentStepIndex]
       : null;
   const isComplete = session ? session.phase === 'complete' : false;
+  const usesHorizontalMedia = !!currentStep?.tipsMetadata && currentStep.tipsMetadata.layout === 'horizontal';
   const handleExit = async () => {
     if (session?.threadId) {
       try {
@@ -132,6 +134,45 @@ function GuideOverlayInner() {
     };
   }, [session, currentStep, isComplete, session?.phase, setPhase]);
 
+  // Measure the rendered HUD so viewport clamping uses real media height/width.
+  useEffect(() => {
+    const hud = hudRef.current;
+    if (!hud || !currentStep || isComplete) return;
+
+    const measure = () => {
+      const rect = hud.getBoundingClientRect();
+      const nextWidth = Math.round(rect.width) || (usesHorizontalMedia ? 480 : 280);
+      const nextHeight = Math.round(rect.height) || 160;
+      setHudSize((prev) => {
+        if (prev.width === nextWidth && prev.height === nextHeight) return prev;
+        return { width: nextWidth, height: nextHeight };
+      });
+    };
+
+    measure();
+    const rafId = requestAnimationFrame(measure);
+
+    if (typeof ResizeObserver === 'undefined') {
+      return () => cancelAnimationFrame(rafId);
+    }
+
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(hud);
+    return () => {
+      cancelAnimationFrame(rafId);
+      observer.disconnect();
+    };
+  }, [
+    currentStep?.id,
+    currentStep?.advance,
+    currentStep?.tipsMetadata?.layout,
+    currentStep?.tipsMetadata?.src,
+    currentStep?.tipsMetadata?.target,
+    currentStep?.tipsMetadata?.type,
+    isComplete,
+    usesHorizontalMedia,
+  ]);
+
   // Auto-advance: listen for interaction with target element
   useAutoAdvance(currentStep, advanceStep, session?.phase === 'active');
 
@@ -145,44 +186,40 @@ function GuideOverlayInner() {
         return;
       }
       if (e.key === 'Tab' && currentStep) {
-        const targetEl = document.querySelector(buildGuideTargetSelector(currentStep.target));
+        const targetEl = document.querySelector<HTMLElement>(buildGuideTargetSelector(currentStep.target));
         const hud = hudRef.current;
         if (!hud) return;
 
-        const focusableInHud = hud.querySelectorAll<HTMLElement>('button, [tabindex]:not([tabindex="-1"])');
-        const lastHudFocusable = focusableInHud[focusableInHud.length - 1];
+        const focusableInHud = getFocusableElements(hud);
+        const focusableInTarget = getFocusableElements(targetEl);
         const firstHudFocusable = focusableInHud[0];
-        const isInHud = hud.contains(document.activeElement);
-        const isOnTarget = targetEl && document.activeElement === targetEl;
+        const lastHudFocusable = focusableInHud[focusableInHud.length - 1];
+        const firstTargetFocusable = focusableInTarget[0];
+        const lastTargetFocusable = focusableInTarget[focusableInTarget.length - 1];
+        const activeElement = document.activeElement as HTMLElement | null;
+        const isInHud = !!activeElement && hud.contains(activeElement);
+        const isInTarget = !!activeElement && !!targetEl && targetEl.contains(activeElement);
 
-        // If focus escaped the trap (neither in HUD nor on target), pull it back
-        if (!isInHud && !isOnTarget) {
+        // If focus escaped the trap, pull it back into the HUD.
+        if (!isInHud && !isInTarget) {
           e.preventDefault();
           firstHudFocusable?.focus();
           return;
         }
 
         if (e.shiftKey) {
-          if (document.activeElement === firstHudFocusable && targetEl) {
+          if (activeElement === firstHudFocusable) {
             e.preventDefault();
-            (targetEl as HTMLElement).focus();
-          } else if (isOnTarget) {
-            e.preventDefault();
-            lastHudFocusable?.focus();
-          } else if (document.activeElement === firstHudFocusable) {
-            // No target element available — wrap within HUD
+            (lastTargetFocusable ?? lastHudFocusable)?.focus();
+          } else if (activeElement === firstTargetFocusable) {
             e.preventDefault();
             lastHudFocusable?.focus();
           }
         } else {
-          if (document.activeElement === lastHudFocusable && targetEl) {
+          if (activeElement === lastHudFocusable) {
             e.preventDefault();
-            (targetEl as HTMLElement).focus();
-          } else if (isOnTarget) {
-            e.preventDefault();
-            firstHudFocusable?.focus();
-          } else if (document.activeElement === lastHudFocusable) {
-            // No target element available — wrap within HUD
+            (firstTargetFocusable ?? firstHudFocusable)?.focus();
+          } else if (activeElement === lastTargetFocusable) {
             e.preventDefault();
             firstHudFocusable?.focus();
           }
@@ -231,7 +268,29 @@ function GuideOverlayInner() {
           onClick={completionPersisted || completionFailed ? handleDismiss : undefined}
         />
         <div className="relative z-10 rounded-2xl border border-[var(--guide-hud-border)] bg-[var(--guide-hud-bg)] p-8 text-center shadow-2xl">
-          <div className="mb-4 text-4xl">{completionFailed ? '⚠️' : '🐾'}</div>
+          <div className="mb-4 flex justify-center">
+            {completionFailed ? (
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-10 w-10 text-amber-500"
+              >
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" className="h-10 w-10 text-cafe-secondary">
+                <ellipse cx="7.5" cy="14" rx="3" ry="2.5" fill="currentColor" />
+                <ellipse cx="16.5" cy="14" rx="3" ry="2.5" fill="currentColor" />
+                <ellipse cx="12" cy="19" rx="2.5" ry="2" fill="currentColor" />
+                <ellipse cx="5" cy="9" rx="2" ry="2.5" fill="currentColor" />
+                <ellipse cx="19" cy="9" rx="2" ry="2.5" fill="currentColor" />
+              </svg>
+            )}
+          </div>
           <h3 className="mb-2 text-lg font-bold text-[var(--guide-text-primary)]">
             {completionFailed ? '保存失败' : '引导完成!'}
           </h3>
@@ -365,6 +424,7 @@ function GuideOverlayInner() {
         totalSteps={session.flow.steps.length}
         phase={session.phase}
         targetRect={targetRect}
+        hudSize={hudSize}
         onExit={handleExit}
       />
     </>
@@ -484,19 +544,27 @@ interface GuideHUDProps {
   totalSteps: number;
   phase: string;
   targetRect: DOMRect | null;
+  hudSize: { width: number; height: number };
   onExit: () => void;
 }
 
 const GuideHUD = React.forwardRef<HTMLDivElement, GuideHUDProps>(function GuideHUD(
-  { step, stepIndex, totalSteps, phase, targetRect, onExit },
+  { step, stepIndex, totalSteps, phase, targetRect, hudSize, onExit },
   ref,
 ) {
-  const style = computeHUDPosition(targetRect);
+  const hasMedia = !!step.tipsMetadata;
+  const isHorizontal = step.tipsMetadata?.layout === 'horizontal';
+  const widthClass = hasMedia && isHorizontal ? 'w-[480px]' : 'w-[280px]';
+  const style = computeHUDPosition(targetRect, hudSize);
+
+  const handleConfirm = () => {
+    window.dispatchEvent(new CustomEvent('guide:confirm', { detail: { target: step.target } }));
+  };
 
   return (
     <div
       ref={ref}
-      className="fixed z-[var(--guide-z-hud)] w-[280px] animate-guide-hud-enter rounded-[var(--guide-radius)] border border-[var(--guide-hud-border)] bg-[var(--guide-hud-bg)] p-4 shadow-xl"
+      className={`fixed z-[var(--guide-z-hud)] ${widthClass} animate-guide-hud-enter rounded-[var(--guide-radius)] border border-[var(--guide-hud-border)] bg-[var(--guide-hud-bg)] p-4 shadow-xl`}
       style={style}
       role="dialog"
       aria-label="引导面板"
@@ -519,16 +587,21 @@ const GuideHUD = React.forwardRef<HTMLDivElement, GuideHUDProps>(function GuideH
         ))}
       </div>
 
-      {/* Tips from flow definition */}
-      <p className="mb-3 text-sm leading-relaxed text-[var(--guide-text-primary)]">{step.tips}</p>
+      {/* Tips content — plain text or with media */}
+      <div className={hasMedia && isHorizontal ? 'mb-3 flex gap-4' : 'mb-3'}>
+        <div className={hasMedia && isHorizontal ? 'flex-1' : ''}>
+          <p className="text-sm leading-relaxed text-[var(--guide-text-primary)]">{step.tips}</p>
+        </div>
+        {hasMedia && <TipsMediaBlock metadata={step.tipsMetadata!} />}
+      </div>
 
       {/* Locating indicator */}
       {phase === 'locating' && (
         <p className="mb-3 text-xs text-[var(--guide-text-secondary)] animate-pulse">正在定位目标元素...</p>
       )}
 
-      {/* Exit only */}
-      <div className="flex items-center border-t border-[var(--guide-hud-border)] pt-3">
+      {/* Actions: confirm button (when advance=confirm) + exit */}
+      <div className="flex items-center justify-between border-t border-[var(--guide-hud-border)] pt-3">
         <button
           type="button"
           onClick={onExit}
@@ -537,19 +610,134 @@ const GuideHUD = React.forwardRef<HTMLDivElement, GuideHUDProps>(function GuideH
         >
           退出
         </button>
+        {step.advance === 'confirm' && (
+          <button
+            type="button"
+            onClick={handleConfirm}
+            className="rounded-lg bg-[var(--guide-cutout-ring)] px-4 py-1.5 text-xs font-medium text-white transition hover:opacity-90"
+            aria-label="已完成该步骤"
+          >
+            已完成该步骤
+          </button>
+        )}
       </div>
     </div>
   );
 });
 
+/* ── Tips Media Block: renders card div or static image ── */
+
+function TipsMediaBlock({ metadata }: { metadata: import('@/stores/guideStore').TipsMetadata }) {
+  if (metadata.type === 'png' && metadata.src) {
+    return (
+      <div className="flex-shrink-0">
+        <img
+          src={metadata.src}
+          alt={metadata.alt ?? ''}
+          className="max-h-[200px] max-w-[200px] rounded-lg border border-[var(--guide-hud-border)] object-contain"
+        />
+      </div>
+    );
+  }
+
+  if (metadata.type === 'card' && metadata.target) {
+    return <CardCaptureBlock guideTarget={metadata.target} alt={metadata.alt} />;
+  }
+
+  return null;
+}
+
+function CardCaptureBlock({ guideTarget, alt }: { guideTarget: string; alt?: string }) {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const selector = buildGuideTargetSelector(guideTarget);
+
+    const syncCapture = () => {
+      if (cancelled || !containerRef.current) return;
+      const source = document.querySelector(selector);
+      if (!source) {
+        retryTimer = setTimeout(syncCapture, 100);
+        return;
+      }
+      const clone = source.cloneNode(true) as HTMLElement;
+      sanitizeCardClone(clone);
+      clone.style.pointerEvents = 'none';
+      containerRef.current.innerHTML = '';
+      containerRef.current.appendChild(clone);
+    };
+
+    syncCapture();
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [guideTarget]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="flex-shrink-0 max-w-[200px] overflow-hidden rounded-lg border border-[var(--guide-hud-border)]"
+      role="img"
+      aria-label={alt ?? '引导卡片'}
+    />
+  );
+}
+
+function sanitizeCardClone(clone: HTMLElement) {
+  clone.setAttribute('inert', '');
+  stripGuideIds(clone);
+
+  for (const el of Array.from(clone.querySelectorAll<HTMLElement>('button, a, summary, details')).reverse()) {
+    const replacement = document.createElement('span');
+    replacement.className = el.className;
+    replacement.style.cssText = el.style.cssText;
+    replacement.innerHTML = el.innerHTML;
+    el.replaceWith(replacement);
+  }
+
+  for (const el of Array.from(clone.querySelectorAll<HTMLElement>('input, textarea, select')).reverse()) {
+    const replacement = document.createElement('span');
+    replacement.className = el.className;
+    replacement.style.cssText = el.style.cssText;
+
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+      replacement.textContent = el.value || el.placeholder || '';
+    } else if (el instanceof HTMLSelectElement) {
+      replacement.textContent = el.selectedOptions[0]?.textContent ?? '';
+    }
+
+    el.replaceWith(replacement);
+  }
+
+  for (const el of clone.querySelectorAll<HTMLElement>(
+    '[tabindex], [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]',
+  )) {
+    el.removeAttribute('tabindex');
+    el.setAttribute('contenteditable', 'false');
+  }
+}
+
+function stripGuideIds(clone: HTMLElement) {
+  clone.removeAttribute('data-guide-id');
+  for (const el of clone.querySelectorAll<HTMLElement>('[data-guide-id]')) {
+    el.removeAttribute('data-guide-id');
+  }
+}
+
 /* ── Position helpers ── */
 
-function computeHUDPosition(targetRect: DOMRect | null): React.CSSProperties {
+export function computeHUDPosition(
+  targetRect: DOMRect | null,
+  hudSize: { width?: number; height?: number } = {},
+): React.CSSProperties {
   if (!targetRect) {
     return { top: '50%', left: '50%', transform: 'translate(-50%, -50%)' };
   }
-  const hudWidth = 280;
-  const hudHeight = 160;
+  const hudWidth = hudSize.width ?? 280;
+  const hudHeight = hudSize.height ?? 160;
   const gap = 16;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
@@ -590,4 +778,28 @@ export function computeShieldPanels(
 export function buildGuideTargetSelector(target: string): string {
   const escaped = globalThis.CSS?.escape ? globalThis.CSS.escape(target) : target;
   return `[data-guide-id="${escaped}"]`;
+}
+
+const FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  'a[href]',
+  'input:not([type="hidden"]):not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+  '[contenteditable="true"]',
+  '[contenteditable=""]',
+  '[contenteditable="plaintext-only"]',
+].join(', ');
+
+function getFocusableElements(root: HTMLElement | null): HTMLElement[] {
+  if (!root) return [];
+
+  const elements = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+    (el) => !el.hasAttribute('inert'),
+  );
+  if (root.matches(FOCUSABLE_SELECTOR) && !root.hasAttribute('inert')) {
+    elements.unshift(root);
+  }
+  return elements;
 }

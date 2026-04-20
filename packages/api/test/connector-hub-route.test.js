@@ -486,6 +486,30 @@ describe('GET /api/connector/hub-threads', () => {
     assert.match(JSON.parse(res.body).error, /Identity required/i);
   });
 
+  it('trusts localhost origin fallback and serves default-user hub threads', async () => {
+    const { app, listCalls } = await buildApp({
+      threads: [
+        {
+          id: 'thread-hub-browser',
+          title: 'Browser IM Hub',
+          connectorHubState: { connectorId: 'telegram', externalChatId: 'chat-browser', createdAt: 30 },
+        },
+      ],
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/connector/hub-threads',
+      headers: { origin: 'http://localhost:3003' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(listCalls, ['default-user']);
+    const body = JSON.parse(res.body);
+    assert.equal(body.threads.length, 1);
+    assert.equal(body.threads[0].id, 'thread-hub-browser');
+    await app.close();
+  });
+
   it('uses the trusted header identity and returns hub threads sorted by createdAt desc', async () => {
     const { app, listCalls } = await buildApp();
     const res = await app.inject({
@@ -509,5 +533,281 @@ describe('GET /api/connector/hub-threads', () => {
       externalChatId: 'chat-2',
       createdAt: 20,
     });
+  });
+});
+
+// ── F132 Phase E: WeCom Bot guided setup routes ──
+
+const { WeComBotAdapter } = await import('../dist/infrastructure/connectors/adapters/WeComBotAdapter.js');
+
+describe('GET /api/connector/status — WeCom Bot live health', () => {
+  it('P1: shows configured=false when adapter getter returns null (not false green from env)', async () => {
+    const savedBotId = process.env.WECOM_BOT_ID;
+    const savedSecret = process.env.WECOM_BOT_SECRET;
+    process.env.WECOM_BOT_ID = 'some-bot';
+    process.env.WECOM_BOT_SECRET = 'some-secret';
+
+    const app = Fastify();
+    await app.register(connectorHubRoutes, {
+      threadStore: {
+        async list() {
+          return [];
+        },
+      },
+      getWeComBotAdapter: () => null, // adapter stopped/not started
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/connector/status',
+      headers: AUTH_HEADERS,
+    });
+    const body = JSON.parse(res.body);
+    const wecomBot = body.platforms.find((p) => p.id === 'wecom-bot');
+
+    assert.ok(wecomBot, 'wecom-bot platform must exist in status');
+    assert.equal(wecomBot.configured, false, 'configured must be false when adapter is null, even with env vars set');
+
+    process.env.WECOM_BOT_ID = savedBotId;
+    process.env.WECOM_BOT_SECRET = savedSecret;
+    if (!savedBotId) delete process.env.WECOM_BOT_ID;
+    if (!savedSecret) delete process.env.WECOM_BOT_SECRET;
+    await app.close();
+  });
+});
+
+describe('POST /api/connector/wecom-bot/validate', () => {
+  it('returns 401 without auth header', async () => {
+    const { app } = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/connector/wecom-bot/validate',
+      payload: { botId: 'bot1', secret: 'sec1' },
+    });
+    assert.equal(res.statusCode, 401);
+    await app.close();
+  });
+
+  it('returns 400 when botId or secret is missing', async () => {
+    const { app } = await buildApp();
+    const res1 = await app.inject({
+      method: 'POST',
+      url: '/api/connector/wecom-bot/validate',
+      headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+      payload: JSON.stringify({ botId: 'bot1' }),
+    });
+    assert.equal(res1.statusCode, 400);
+
+    const res2 = await app.inject({
+      method: 'POST',
+      url: '/api/connector/wecom-bot/validate',
+      headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+      payload: JSON.stringify({ secret: 'sec1' }),
+    });
+    assert.equal(res2.statusCode, 400);
+    await app.close();
+  });
+
+  it('saves credentials and calls startWeComBotStream on success', async () => {
+    const tmpDir = mkdtempSync(join(os.tmpdir(), 'wecom-validate-'));
+    const envFilePath = join(tmpDir, '.env');
+    writeFileSync(envFilePath, 'EXISTING=keep\n');
+
+    // Mock validateCredentials to succeed without real WeCom connection
+    const original = WeComBotAdapter.validateCredentials;
+    WeComBotAdapter.validateCredentials = async () => ({ valid: true });
+
+    let streamStarted = false;
+    const app = Fastify();
+    await app.register(connectorHubRoutes, {
+      threadStore: {
+        async list() {
+          return [];
+        },
+      },
+      envFilePath,
+      startWeComBotStream: async () => {
+        streamStarted = true;
+      },
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/connector/wecom-bot/validate',
+      headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+      payload: JSON.stringify({ botId: 'test-bot', secret: 'test-sec' }),
+    });
+    const body = JSON.parse(res.body);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(body.valid, true);
+    assert.equal(streamStarted, true, 'startWeComBotStream must be called');
+    assert.equal(process.env.WECOM_BOT_ID, 'test-bot');
+    assert.equal(process.env.WECOM_BOT_SECRET, 'test-sec');
+
+    const envContent = readFileSync(envFilePath, 'utf8');
+    assert.match(envContent, /WECOM_BOT_ID=test-bot/);
+    assert.match(envContent, /WECOM_BOT_SECRET=test-sec/);
+    assert.match(envContent, /EXISTING=keep/);
+
+    WeComBotAdapter.validateCredentials = original;
+    delete process.env.WECOM_BOT_ID;
+    delete process.env.WECOM_BOT_SECRET;
+    await app.close();
+  });
+
+  it('P1: rolls back credentials when startWeComBotStream throws', async () => {
+    const tmpDir = mkdtempSync(join(os.tmpdir(), 'wecom-rollback-'));
+    const envFilePath = join(tmpDir, '.env');
+    writeFileSync(envFilePath, 'OTHER=stay\n');
+
+    const original = WeComBotAdapter.validateCredentials;
+    WeComBotAdapter.validateCredentials = async () => ({ valid: true });
+
+    const app = Fastify();
+    await app.register(connectorHubRoutes, {
+      threadStore: {
+        async list() {
+          return [];
+        },
+      },
+      envFilePath,
+      startWeComBotStream: async () => {
+        throw new Error('SDK init failed');
+      },
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/connector/wecom-bot/validate',
+      headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+      payload: JSON.stringify({ botId: 'fail-bot', secret: 'fail-sec' }),
+    });
+    const body = JSON.parse(res.body);
+
+    assert.equal(res.statusCode, 502);
+    assert.equal(body.valid, false);
+    assert.match(body.error, /adapter failed to start/);
+
+    // Credentials must NOT remain in .env or process.env
+    assert.equal(process.env.WECOM_BOT_ID, undefined, 'WECOM_BOT_ID must be rolled back');
+    assert.equal(process.env.WECOM_BOT_SECRET, undefined, 'WECOM_BOT_SECRET must be rolled back');
+    const envContent = readFileSync(envFilePath, 'utf8');
+    assert.ok(!envContent.includes('WECOM_BOT_ID'), '.env must not contain WECOM_BOT_ID after rollback');
+    assert.match(envContent, /OTHER=stay/, 'Other env entries preserved');
+
+    WeComBotAdapter.validateCredentials = original;
+    await app.close();
+  });
+
+  it('returns 422 when credentials are invalid', async () => {
+    const original = WeComBotAdapter.validateCredentials;
+    WeComBotAdapter.validateCredentials = async () => ({ valid: false, error: 'Bad credentials' });
+
+    const { app } = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/connector/wecom-bot/validate',
+      headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+      payload: JSON.stringify({ botId: 'bad', secret: 'bad' }),
+    });
+    const body = JSON.parse(res.body);
+
+    assert.equal(res.statusCode, 422);
+    assert.equal(body.valid, false);
+    assert.equal(body.error, 'Bad credentials');
+
+    WeComBotAdapter.validateCredentials = original;
+    await app.close();
+  });
+
+  it('P1: does not stop existing adapter when validation fails (no live-connection kill)', async () => {
+    const original = WeComBotAdapter.validateCredentials;
+    WeComBotAdapter.validateCredentials = async () => ({ valid: false, error: 'Bad credentials' });
+
+    let stopCalled = false;
+    const app = Fastify();
+    await app.register(connectorHubRoutes, {
+      threadStore: {
+        async list() {
+          return [];
+        },
+      },
+      stopWeComBot: async () => {
+        stopCalled = true;
+      },
+    });
+    await app.ready();
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/connector/wecom-bot/validate',
+      headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+      payload: JSON.stringify({ botId: 'bad', secret: 'bad' }),
+    });
+
+    assert.equal(
+      stopCalled,
+      false,
+      'stopWeComBot must NOT be called when validation fails — it kills the live connection',
+    );
+
+    WeComBotAdapter.validateCredentials = original;
+    await app.close();
+  });
+});
+
+describe('POST /api/connector/wecom-bot/disconnect', () => {
+  it('returns 401 without auth header', async () => {
+    const { app } = await buildApp();
+    const res = await app.inject({ method: 'POST', url: '/api/connector/wecom-bot/disconnect' });
+    assert.equal(res.statusCode, 401);
+    await app.close();
+  });
+
+  it('calls stopWeComBot, clears credentials, returns ok', async () => {
+    const tmpDir = mkdtempSync(join(os.tmpdir(), 'wecom-disconnect-'));
+    const envFilePath = join(tmpDir, '.env');
+    writeFileSync(envFilePath, 'WECOM_BOT_ID=old-bot\nWECOM_BOT_SECRET=old-sec\nKEEP=yes\n');
+    process.env.WECOM_BOT_ID = 'old-bot';
+    process.env.WECOM_BOT_SECRET = 'old-sec';
+
+    let stopped = false;
+    const app = Fastify();
+    await app.register(connectorHubRoutes, {
+      threadStore: {
+        async list() {
+          return [];
+        },
+      },
+      envFilePath,
+      stopWeComBot: async () => {
+        stopped = true;
+      },
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/connector/wecom-bot/disconnect',
+      headers: AUTH_HEADERS,
+    });
+    const body = JSON.parse(res.body);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(body.ok, true);
+    assert.equal(stopped, true, 'stopWeComBot must be called');
+    assert.equal(process.env.WECOM_BOT_ID, undefined);
+    assert.equal(process.env.WECOM_BOT_SECRET, undefined);
+
+    const envContent = readFileSync(envFilePath, 'utf8');
+    assert.ok(!envContent.includes('WECOM_BOT_ID'), 'WECOM_BOT_ID cleared from .env');
+    assert.ok(!envContent.includes('WECOM_BOT_SECRET'), 'WECOM_BOT_SECRET cleared from .env');
+    assert.match(envContent, /KEEP=yes/, 'Other entries preserved');
+
+    await app.close();
   });
 });

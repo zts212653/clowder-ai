@@ -31,6 +31,7 @@ import { bootstrapCatCatalog, resolveCatCatalogPath } from '../config/cat-catalo
 import { getAcpConfig, getRoster, loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
 import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
 import { resolveProjectTemplatePath } from '../config/project-template-path.js';
+import { getResolvedCats } from '../config/resolved-cats.js';
 import { createRuntimeCat, deleteRuntimeCat, updateRuntimeCat } from '../config/runtime-cat-catalog.js';
 import { deleteRuntimeOverride, getRuntimeOverride, setRuntimeOverride } from '../config/session-strategy-overrides.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
@@ -376,20 +377,6 @@ function getManagedCatalogIds(projectRoot: string): Set<string> {
     return new Set(Object.keys(toAllCatConfigs(loadCatConfig(resolve(projectRoot, '.cat-cafe', 'cat-catalog.json')))));
   } catch {
     return new Set();
-  }
-}
-
-function getResolvedCats(projectRoot: string) {
-  try {
-    const templatePath = resolveProjectTemplatePath(projectRoot);
-    bootstrapCatCatalog(projectRoot, templatePath);
-    const resolved = toAllCatConfigs(loadCatConfig(resolveCatCatalogPath(projectRoot)));
-    for (const [id, config] of Object.entries(catRegistry.getAllConfigs())) {
-      if (!resolved[id]) resolved[id] = config;
-    }
-    return resolved;
-  } catch {
-    return catRegistry.getAllConfigs();
   }
 }
 

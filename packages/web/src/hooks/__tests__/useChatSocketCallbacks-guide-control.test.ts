@@ -45,9 +45,13 @@ function HookHost({ threadId }: { threadId: string }) {
   return null;
 }
 
-describe('useChatSocketCallbacks guide control bridge', () => {
+describe('useChatSocketCallbacks guide event ownership', () => {
   let root: Root;
   let container: HTMLDivElement;
+
+  function callbackKeys(): Record<string, unknown> {
+    return (captured ?? {}) as Record<string, unknown>;
+  }
 
   beforeAll(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -72,51 +76,12 @@ describe('useChatSocketCallbacks guide control bridge', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('dispatches guide:control with action, guideId, and threadId', () => {
-    let detail: Record<string, unknown> | undefined;
-    const handler = (event: Event) => {
-      detail = (event as CustomEvent<Record<string, unknown>>).detail;
-    };
-    window.addEventListener('guide:control', handler);
-
-    try {
-      captured!.onGuideControl!({
-        action: 'exit',
-        guideId: 'add-member',
-        threadId: 'thread-1',
-        timestamp: Date.now(),
-      });
-    } finally {
-      window.removeEventListener('guide:control', handler);
-    }
-
-    expect(detail).toEqual({
-      action: 'exit',
-      guideId: 'add-member',
-      threadId: 'thread-1',
-    });
+  it('does not expose guide control bridge callbacks', () => {
+    expect('onGuideControl' in callbackKeys()).toBe(false);
+    expect('onGuideStart' in callbackKeys()).toBe(false);
   });
 
-  it('dispatches guide:complete with guideId and threadId', () => {
-    let detail: Record<string, unknown> | undefined;
-    const handler = (event: Event) => {
-      detail = (event as CustomEvent<Record<string, unknown>>).detail;
-    };
-    window.addEventListener('guide:complete', handler);
-
-    try {
-      captured!.onGuideComplete!({
-        guideId: 'add-member',
-        threadId: 'thread-1',
-        timestamp: Date.now(),
-      });
-    } finally {
-      window.removeEventListener('guide:complete', handler);
-    }
-
-    expect(detail).toEqual({
-      guideId: 'add-member',
-      threadId: 'thread-1',
-    });
+  it('does not expose guide completion bridge callbacks', () => {
+    expect('onGuideComplete' in callbackKeys()).toBe(false);
   });
 });

@@ -321,6 +321,26 @@ describe('InvocationTracker: startAll registers all target cats', () => {
     assert.equal(tracker.has('t1'), false);
   });
 
+  it('completeSlot releases one finished cat from a batch via batchController', () => {
+    const tracker = new InvocationTracker();
+    const controller = tracker.startAll('t1', ['opus', 'codex'], 'user1');
+
+    tracker.completeSlot('t1', 'opus', controller);
+
+    assert.equal(tracker.has('t1', 'opus'), false, 'finished cat should be released immediately');
+    assert.equal(tracker.has('t1', 'codex'), true, 'still-running cat must keep its slot');
+  });
+
+  it('completeSlot with wrong controller does not remove the slot', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['opus', 'codex'], 'user1');
+
+    tracker.completeSlot('t1', 'opus', new AbortController());
+
+    assert.equal(tracker.has('t1', 'opus'), true);
+    assert.equal(tracker.has('t1', 'codex'), true);
+  });
+
   it('completeAll with wrong controller does not remove slots', () => {
     const tracker = new InvocationTracker();
     tracker.startAll('t1', ['opus', 'codex'], 'user1');

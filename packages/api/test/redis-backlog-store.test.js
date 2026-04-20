@@ -5,11 +5,15 @@
 
 import assert from 'node:assert/strict';
 import { after, afterEach, before, beforeEach, describe, it } from 'node:test';
-import { assertRedisIsolationOrThrow, cleanupPrefixedRedisKeys } from './helpers/redis-test-helpers.js';
+import {
+  assertRedisIsolationOrThrow,
+  cleanupPrefixedRedisKeys,
+  redisIsolationSkipReason,
+} from './helpers/redis-test-helpers.js';
 
 const REDIS_URL = process.env.REDIS_URL;
 
-describe('RedisBacklogStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false }, () => {
+describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let RedisBacklogStore;
   let createRedisClient;
   let redis;

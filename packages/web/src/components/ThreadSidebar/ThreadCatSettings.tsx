@@ -89,12 +89,14 @@ export function ThreadCatSettings({ threadId, currentCats, onSave }: ThreadCatSe
       {isOpen && (
         <div
           style={getPopoverStyle()}
-          className="bg-cafe-surface rounded-lg shadow-lg border border-cafe p-3 z-50"
+          className="bg-cafe-surface rounded-lg shadow-lg border border-cafe z-50 flex flex-col"
           onClick={(e) => e.stopPropagation()}
         >
-          <CatSelector selectedCats={selectedCats} onSelectionChange={setSelectedCats} />
-          {saveError && <p className="text-[10px] text-red-500 mt-1">保存失败，请重试</p>}
-          <div className="flex items-center justify-between mt-3 pt-2 border-t border-cafe-subtle">
+          <div className="p-3 overflow-y-auto max-h-[50vh]">
+            <CatSelector selectedCats={selectedCats} onSelectionChange={setSelectedCats} />
+          </div>
+          {saveError && <p className="text-[10px] text-red-500 px-3 mt-1">保存失败，请重试</p>}
+          <div className="flex items-center justify-between px-3 pb-3 pt-2 border-t border-cafe-subtle flex-shrink-0">
             {selectedCats.length > 0 && (
               <button onClick={() => setSelectedCats([])} className="text-[10px] text-cafe-muted hover:text-red-400">
                 清除

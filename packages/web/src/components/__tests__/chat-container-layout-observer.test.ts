@@ -206,38 +206,38 @@ vi.mock('@/hooks/useVadInterrupt', () => ({ useVadInterrupt: vi.fn() }));
 vi.mock('@/hooks/useVoiceAutoPlay', () => ({ useVoiceAutoPlay: vi.fn() }));
 vi.mock('@/hooks/useVoiceStream', () => ({ useVoiceStream: vi.fn() }));
 
-vi.mock('@/components/ChatMessage', () => ({ ChatMessage: () => null }));
-vi.mock('@/components/ChatInput', () => ({
+vi.mock('../ChatMessage', () => ({ ChatMessage: () => null }));
+vi.mock('../ChatInput', () => ({
   ChatInput: () => React.createElement('div', { 'data-testid': 'chat-input' }),
 }));
-vi.mock('@/components/ChatContainerHeader', () => ({ ChatContainerHeader: () => null }));
-vi.mock('@/components/ThreadSidebar', () => ({ ThreadSidebar: () => null }));
-vi.mock('@/components/RightStatusPanel', () => ({ RightStatusPanel: () => null }));
-vi.mock('@/components/ParallelStatusBar', () => ({ ParallelStatusBar: () => null }));
-vi.mock('@/components/ThinkingIndicator', () => ({ ThinkingIndicator: () => null }));
-vi.mock('@/components/MessageNavigator', () => ({ MessageNavigator: () => null }));
-vi.mock('@/components/MessageActions', () => ({
+vi.mock('../ChatContainerHeader', () => ({ ChatContainerHeader: () => null }));
+vi.mock('../ThreadSidebar', () => ({ ThreadSidebar: () => null }));
+vi.mock('../RightStatusPanel', () => ({ RightStatusPanel: () => null }));
+vi.mock('../ParallelStatusBar', () => ({ ParallelStatusBar: () => null }));
+vi.mock('../ThinkingIndicator', () => ({ ThinkingIndicator: () => null }));
+vi.mock('../MessageNavigator', () => ({ MessageNavigator: () => null }));
+vi.mock('../MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
 }));
-vi.mock('@/components/MobileStatusSheet', () => ({ MobileStatusSheet: () => null }));
-vi.mock('@/components/QueuePanel', () => ({
+vi.mock('../MobileStatusSheet', () => ({ MobileStatusSheet: () => null }));
+vi.mock('../QueuePanel', () => ({
   QueuePanel: () => React.createElement('div', { 'data-testid': 'queue-panel' }),
 }));
-vi.mock('@/components/ThreadExecutionBar', () => ({
+vi.mock('../ThreadExecutionBar', () => ({
   ThreadExecutionBar: () => React.createElement('div', { 'data-testid': 'execution-bar' }),
 }));
-vi.mock('@/components/VoteActiveBar', () => ({
+vi.mock('../VoteActiveBar', () => ({
   VoteActiveBar: () => React.createElement('div', { 'data-testid': 'vote-bar' }),
 }));
-vi.mock('@/components/ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }));
-vi.mock('@/components/SplitPaneView', () => ({
+vi.mock('../ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }));
+vi.mock('../SplitPaneView', () => ({
   SplitPaneView: () => React.createElement('div', { 'data-testid': 'split-view' }),
 }));
-vi.mock('@/components/CatCafeHub', () => ({ CatCafeHub: () => null }));
-vi.mock('@/components/AuthorizationCard', () => ({ AuthorizationCard: () => null }));
-vi.mock('@/components/WorkspacePanel', () => ({ WorkspacePanel: () => null }));
-vi.mock('@/components/BootstrapOrchestrator', () => ({ BootstrapOrchestrator: () => null }));
-vi.mock('@/components/BootcampListModal', () => ({ BootcampListModal: () => null }));
+vi.mock('../CatCafeHub', () => ({ CatCafeHub: () => null }));
+vi.mock('../AuthorizationCard', () => ({ AuthorizationCard: () => null }));
+vi.mock('../WorkspacePanel', () => ({ WorkspacePanel: () => null }));
+vi.mock('../BootstrapOrchestrator', () => ({ BootstrapOrchestrator: () => null }));
+vi.mock('../BootcampListModal', () => ({ BootcampListModal: () => null }));
 vi.mock('@/components/HubListModal', () => ({ HubListModal: () => null }));
 vi.mock('@/components/ProjectSetupCard', () => ({ ProjectSetupCard: () => null }));
 vi.mock('@/components/game/GameOverlayConnector', () => ({ GameOverlayConnector: () => null }));

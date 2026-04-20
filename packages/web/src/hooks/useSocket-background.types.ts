@@ -83,6 +83,7 @@ export interface BackgroundStoreLike {
   }) => void;
   clearThreadActiveInvocation: (threadId: string) => void;
   getThreadState: (threadId: string) => ThreadState;
+  replaceThreadTargetCats: (threadId: string, cats: string[]) => void;
   replaceThreadMessageId: (threadId: string, fromId: string, toId: string) => void;
   patchThreadMessage: (threadId: string, messageId: string, patch: ChatMessagePatch) => void;
 }

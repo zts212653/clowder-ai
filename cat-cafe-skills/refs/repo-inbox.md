@@ -59,6 +59,14 @@ gh pr view {N} --repo {owner/repo}
 | **NEEDS-DISCUSSION** | 打 `needs-maintainer-decision`，48h SLA |
 | **POLITELY-DECLINE** | 礼貌回复（用 [话术模板](./ownership-gate.md#话术模板)）+ 打 `wontfix` + 关闭 |
 
+#### Direction Card（F168 台账联动）
+
+每个 verdict 确定后，**必须发 Direction Card** 到 Inbox thread（模板见 [direction-card-template.md](./direction-card-template.md)）：
+- 发 Direction Card（`cat_cafe_create_rich_block`）
+- 更新台账：`PATCH /api/community-issues/:id`（directionCard + state）
+- 非 bugfix：`multi_mention` 第二只猫独立评估
+- 两猫卡片都到了 → 汇总 → 标记是否需要铲屎官拍板
+
 #### PR WELCOME 后：注册 F140 追踪（F141→F140 桥接）
 
 WELCOME 的 PR **必须注册 PR tracking**，否则 F140 的追踪信号不会激活：

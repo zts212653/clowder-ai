@@ -20,6 +20,10 @@ triggers:
 
 **硬规则**：cross-post 是**通知层**，不是真相源。阻塞信息必须双写到可追溯状态（feature doc / workflow / task）。
 
+> **⚠️ 路由铁律**：cross-post 消息如果**没有 @mention 也没有 targetCats**，消息会到达目标 thread 但**不会触发任何猫 session**——消息静默躺在那里，直到铲屎官手动 @ 某只猫。**必须**用以下任一方式触发目标猫：
+> 1. 在 content 末尾另起一行写 `@句柄`（如 `@目标猫句柄`）
+> 2. 传 `targetCats` 参数（如 `targetCats: ["opus"]`）
+
 **Announce at start:** "I'm using the cross-thread-sync skill to coordinate with parallel sessions."
 
 ## Step 1: 发现（谁在平行工作？）
@@ -80,11 +84,12 @@ Action Needed 必须标注级别：
 ```
 → cat_cafe_cross_post_message(
     threadId: "<target_thread_id>",
+    targetCats: ["opus"],
     content: "## 🔄 Cross-Thread Sync\n\n### What Changed\n...\n\n### Impact on You\n...\n\n### Action Needed\n[ACTION] ...\n\n@opus"
   )
 ```
 
-**末尾 `@句柄` 必须写**——cross_post_message 到目标 thread 后，需要 @ 触发目标 session 感知。
+**⚠️ 必须触发目标猫**（见顶部路由铁律）：传 `targetCats` **且** 在 content 末尾 @句柄（双保险）。缺了这步 = 消息送达但无人看到。
 
 ## Step 3: 争用协调（共享文件冲突预防）
 
@@ -145,7 +150,7 @@ Action Needed 必须标注级别：
 |------|---------|
 | 在自己 thread 里说"另一个 session 注意" | 对方看不到！用 `cross_post_message` |
 | `post_message` 发到对方 thread | 用 `cross_post_message`（带 crossPost 元数据） |
-| 不写 `@句柄` | cross-post 末尾必须 @ 目标猫，否则不触发感知 |
+| 不写 `@句柄` 也不传 `targetCats` | 消息到达但**零触发**——必须至少用一种方式（推荐双保险：targetCats + content 末尾 @句柄） |
 | 以为 list_threads 能看到别人的 thread | 只能看到同 userId 的 thread |
 | 不 pull 就在 main 改共享文件 | 先 `git pull origin main` 再改（§14） |
 | 不标同步级别 | Action Needed 必须写 `[FYI]` / `[ACTION]` / `[BLOCKING]` |

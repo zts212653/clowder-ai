@@ -3,7 +3,6 @@
 import type { BacklogItem, CatId, ExternalProject, MissionHubSelfClaimScope, ThreadPhase } from '@cat-cafe/shared';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ThreadSidebar } from '@/components/ThreadSidebar';
 import { useChatStore } from '@/stores/chatStore';
 import { useExternalProjectStore } from '@/stores/externalProjectStore';
 import { useMissionControlStore } from '@/stores/missionControlStore';
@@ -449,9 +448,6 @@ export function MissionControlPage() {
 
   return (
     <div className="flex h-screen bg-[#F4EFE7]">
-      <div className="hidden h-full md:block">
-        <ThreadSidebar />
-      </div>
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Header */}
         <header className="flex items-center justify-between border-b border-[#E7DAC7] bg-[#FFFDF8] px-6 py-3">

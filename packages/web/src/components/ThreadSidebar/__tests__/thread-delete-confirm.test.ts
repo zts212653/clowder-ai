@@ -49,6 +49,7 @@ const mockStore: Record<string, unknown> = {
   updateThreadFavorite: vi.fn(),
   updateThreadPreferredCats: vi.fn(),
   threadStates: {},
+  clearUnread: vi.fn(),
   clearAllUnread: vi.fn(),
   initThreadUnread: vi.fn(),
   fetchGlobalBubbleDefaults: vi.fn(),

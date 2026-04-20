@@ -1,6 +1,7 @@
-# F150 Guide Registry
-# Maps guide IDs to flow files, keywords, and discovery metadata.
-# MCP resolve tool matches user intent against keywords to suggest guides.
+# F155 Guide Registry
+# Maps guide IDs to flow files and user-facing discovery metadata.
+# Guide discovery now returns the available catalog directly; the cat chooses
+# among the returned guide descriptions instead of keyword-resolving an intent.
 
 guides:
   - id: add-member
@@ -21,3 +22,100 @@ guides:
     priority: P0
     cross_system: false
     estimated_time: 3min
+
+  - id: add-account-auth
+    name: 添加账户认证
+    description: 引导你完成 API Key 认证账号的创建和配置
+    flow_file: flows/add-account-auth.yaml
+    keywords:
+      - 添加账户
+      - 添加认证
+      - 添加apikey
+      - 新增apikey
+      - 配置apikey
+      - 添加api key
+      - 添加模型
+      - add account
+      - add api key
+      - add apikey
+    category: account-config
+    priority: P1
+    cross_system: false
+    estimated_time: 3min
+
+  - id: configure-first-provider
+    name: 配置第一个 Provider
+    description: 引导你完成第一个成员的 Client、认证账号与模型配置
+    flow_file: flows/configure-first-provider.yaml
+    keywords:
+      - 第一个provider
+      - 第一个 Provider
+      - 配置provider
+      - 配置 Provider
+      - 配置第一个模型
+      - provider怎么配
+      - provider model
+      - first provider
+      - configure first provider
+      - setup provider
+    category: member-config
+    priority: P0
+    cross_system: false
+    estimated_time: 4min
+
+  - id: edit-member-auth
+    name: 修改成员认证与模型
+    description: 引导你为成员配置认证信息和默认模型
+    flow_file: flows/edit-member-auth.yaml
+    requires_member_cards: true
+    keywords:
+      - 修改成员
+      - 修改认证
+      - 修改模型
+      - 配置模型
+      - 配置认证
+      - 修改provider
+      - 修改client
+      - edit member auth
+      - change model
+      - configure provider
+    category: member-config
+    priority: P1
+    cross_system: false
+    estimated_time: 3min
+
+  - id: connect-wechat
+    name: 对接微信
+    description: 引导你完成微信渠道的接入和扫码配置
+    flow_file: flows/connect-wechat.yaml
+    keywords:
+      - 对接微信
+      - 连接微信
+      - 微信接入
+      - 配置微信
+      - 微信扫码
+      - connect wechat
+      - wechat setup
+    category: connector-config
+    priority: P1
+    cross_system: true
+    estimated_time: 5min
+
+  - id: connect-feishu
+    name: 对接飞书
+    description: 引导你完成飞书渠道的接入与授权配置
+    flow_file: flows/connect-feishu.yaml
+    keywords:
+      - 对接飞书
+      - 飞书接入
+      - 连接飞书
+      - 配置飞书
+      - 飞书授权
+      - 飞书机器人
+      - connect feishu
+      - feishu setup
+      - feishu auth
+    category: connector-config
+    priority: P1
+    cross_system: true
+    estimated_time: 4min
