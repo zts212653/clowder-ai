@@ -22,11 +22,12 @@ import { AttachIcon } from './icons/AttachIcon';
 import { MobileInputToolbar } from './MobileInputToolbar';
 import { PathCompletionMenu } from './PathCompletionMenu';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
+import { hasPendingThreadDraft, threadDrafts, threadImageDrafts } from './thread-drafts';
 import { WhisperCatSelector, WhisperTargetChips } from './WhisperCatSelector';
 
 /** Module-level draft storage — survives component unmount/remount across thread switches */
-export const threadDrafts = new Map<string, string>();
-export const threadImageDrafts = new Map<string, File[]>();
+export { threadDrafts, threadImageDrafts } from './thread-drafts';
+
 const MAX_IMAGE_DRAFT_THREADS = 5;
 
 interface ChatInputProps {
@@ -107,6 +108,7 @@ export function ChatInput({
   // F63-AC15: consume pendingChatInsert from workspace (thread-guarded)
   const pendingChatInsert = useChatStore((s) => s.pendingChatInsert);
   const setPendingChatInsert = useChatStore((s) => s.setPendingChatInsert);
+  const setThreadHasDraft = useChatStore((s) => s.setThreadHasDraft);
   useEffect(() => {
     if (!pendingChatInsert) return;
     if (pendingChatInsert.threadId !== threadId) return;
@@ -495,6 +497,7 @@ export function ChatInput({
   // on thread switch (key={threadId}). useEffect would lose the final keystroke.
   useLayoutEffect(() => {
     if (!threadId) return;
+    const hasDraft = input.trim().length > 0 || images.length > 0;
     if (input) threadDrafts.set(threadId, input);
     else threadDrafts.delete(threadId);
     if (images.length > 0) {
@@ -503,12 +506,16 @@ export function ChatInput({
       // LRU eviction: keep only the most recent N threads with image drafts
       while (threadImageDrafts.size > MAX_IMAGE_DRAFT_THREADS) {
         const oldest = threadImageDrafts.keys().next().value;
-        if (oldest !== undefined) threadImageDrafts.delete(oldest);
+        if (oldest !== undefined) {
+          threadImageDrafts.delete(oldest);
+          setThreadHasDraft(oldest, hasPendingThreadDraft(oldest));
+        }
       }
     } else {
       threadImageDrafts.delete(threadId);
     }
-  }, [input, images, threadId]);
+    setThreadHasDraft(threadId, hasDraft);
+  }, [input, images, threadId, setThreadHasDraft]);
 
   // F080: recalculate ghost suggestion whenever input changes (covers all setInput paths)
   useEffect(() => {

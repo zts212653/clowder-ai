@@ -491,6 +491,7 @@ export interface ThreadState {
   isLoading: boolean;
   isLoadingHistory: boolean;
   hasMore: boolean;
+  hasDraft?: boolean;
   /** Whether the thread has an active invocation (broader than isLoading — stays true during A2A chains) */
   hasActiveInvocation: boolean;
   /** F108: Per-invocation slot tracking — key=invocationId, value=slot info */
@@ -543,6 +544,7 @@ export const DEFAULT_THREAD_STATE: ThreadState = {
   isLoading: false,
   isLoadingHistory: false,
   hasMore: true,
+  hasDraft: false,
   hasActiveInvocation: false,
   intentMode: null,
   targetCats: [],
