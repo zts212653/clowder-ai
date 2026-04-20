@@ -57,7 +57,7 @@ export interface AnthropicMessageResponse {
  *
  * Ref: https://docs.anthropic.com/en/api/handling-stop-reasons
  */
-const TERMINAL_STOP_REASONS: ReadonlySet<string> = new Set([
+export const TERMINAL_STOP_REASONS: ReadonlySet<string> = new Set([
   'end_turn',
   'max_tokens',
   'stop_sequence',
