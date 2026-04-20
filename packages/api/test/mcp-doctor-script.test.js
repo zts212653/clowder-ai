@@ -194,4 +194,31 @@ describe('mcp-doctor.mjs', () => {
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.match(result.stdout, /\[ready\] tilde-artifact — stdio node/);
   });
+
+  it('expands home-relative stdio command paths before validation', () => {
+    const { root, binDir } = createSandbox([
+      {
+        id: 'tilde-command',
+        type: 'mcp',
+        enabled: true,
+        mcpServer: {
+          transport: 'stdio',
+          command: '~/bin/mcp-server',
+          args: [],
+        },
+      },
+    ]);
+
+    const homeDir = join(root, 'fake-home');
+    mkdirSync(join(homeDir, 'bin'), { recursive: true });
+    writeFileSync(join(homeDir, 'bin', 'mcp-server'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+
+    const result = runDoctor(root, binDir, {
+      HOME: homeDir,
+      USERPROFILE: homeDir,
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /\[ready\] tilde-command — stdio ~\/bin\/mcp-server/);
+  });
 });

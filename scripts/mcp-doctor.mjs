@@ -67,7 +67,7 @@ function buildRequiredBy(skills) {
 function commandExists(command) {
   if (!command || typeof command !== 'string') return false;
   if (command.includes('/') || command.includes('\\') || command.startsWith('.')) {
-    const resolved = path.isAbsolute(command) ? command : path.resolve(repoRoot, command);
+    const resolved = resolveLocalPath(command);
     return isExecutableCommandPath(resolved);
   }
   return resolveCommandOnPath(command) !== null;
@@ -148,14 +148,18 @@ function isLocalArtifactArg(value) {
 }
 
 function resolveArtifactPath(artifactArg) {
-  if (artifactArg === '~') return homedir();
-  if (artifactArg.startsWith('~/') || artifactArg.startsWith('~\\')) {
-    return path.join(homedir(), artifactArg.slice(2));
+  return resolveLocalPath(artifactArg);
+}
+
+function resolveLocalPath(value) {
+  if (value === '~') return homedir();
+  if (value.startsWith('~/') || value.startsWith('~\\')) {
+    return path.join(homedir(), value.slice(2));
   }
-  if (path.isAbsolute(artifactArg) || WINDOWS_DRIVE_PATH_RE.test(artifactArg)) {
-    return artifactArg;
+  if (path.isAbsolute(value) || WINDOWS_DRIVE_PATH_RE.test(value)) {
+    return value;
   }
-  return path.resolve(repoRoot, artifactArg);
+  return path.resolve(repoRoot, value);
 }
 
 function normalizePencilApp(raw) {
