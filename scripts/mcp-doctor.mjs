@@ -93,14 +93,17 @@ function resolveCommandOnPath(command) {
 
 function referencedArtifactExists(args) {
   if (!Array.isArray(args)) return true;
-  const artifactArg = args.find(
+  const artifactArgs = args.filter(
     (value) =>
       typeof value === 'string' &&
       (value.startsWith('.') || value.startsWith('/') || value.includes('packages/') || value.endsWith('.js')),
   );
-  if (!artifactArg) return true;
-  const resolved = path.isAbsolute(artifactArg) ? artifactArg : path.resolve(repoRoot, artifactArg);
-  return existsSync(resolved);
+  if (artifactArgs.length === 0) return true;
+
+  return artifactArgs.every((artifactArg) => {
+    const resolved = path.isAbsolute(artifactArg) ? artifactArg : path.resolve(repoRoot, artifactArg);
+    return existsSync(resolved);
+  });
 }
 
 function normalizePencilApp(raw) {

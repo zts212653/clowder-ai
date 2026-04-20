@@ -22,6 +22,14 @@ Options:
 `);
 }
 
+function readRequiredValue(argv, index, flagName) {
+  const value = argv[index + 1];
+  if (typeof value !== 'string' || value.length === 0 || value === '--' || value.startsWith('--')) {
+    throw new Error(`${flagName} requires a value.`);
+  }
+  return value;
+}
+
 function parseArgs(argv) {
   const options = {
     allBroken: false,
@@ -43,13 +51,16 @@ function parseArgs(argv) {
         options.dryRun = true;
         break;
       case '--session':
-        options.sessionIds.push(argv[++i]);
+        options.sessionIds.push(readRequiredValue(argv, i, '--session'));
+        i += 1;
         break;
       case '--root-dir':
-        options.rootDir = argv[++i];
+        options.rootDir = readRequiredValue(argv, i, '--root-dir');
+        i += 1;
         break;
       case '--backup-dir':
-        options.backupDir = argv[++i];
+        options.backupDir = readRequiredValue(argv, i, '--backup-dir');
+        i += 1;
         break;
       case '--help':
       case '-h':
