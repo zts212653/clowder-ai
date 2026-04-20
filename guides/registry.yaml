@@ -1,4 +1,4 @@
-# F150 Guide Registry
+# F155 Guide Registry
 # Maps guide IDs to flow files and user-facing discovery metadata.
 # Guide discovery now returns the available catalog directly; the cat chooses
 # among the returned guide descriptions instead of keyword-resolving an intent.
