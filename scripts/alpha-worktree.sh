@@ -57,6 +57,21 @@ die() {
   exit 1
 }
 
+join_by() {
+  local delim="$1"
+  shift || true
+  local first=true
+  local value
+  for value in "$@"; do
+    if [ "$first" = true ]; then
+      printf '%s' "$value"
+      first=false
+    else
+      printf '%s%s' "$delim" "$value"
+    fi
+  done
+}
+
 abs_path() {
   local input="$1"
   local dir base
@@ -215,12 +230,23 @@ install_alpha_dependencies() {
 }
 
 ensure_alpha_dependencies() {
-  if [ -d "$ALPHA_DIR/node_modules" ] && [ -f "$ALPHA_DIR/packages/web/package.json" ]; then
+  local missing=()
+
+  [ -d "$ALPHA_DIR/node_modules" ] || missing+=("node_modules")
+  [ -f "$ALPHA_DIR/packages/web/node_modules/next/package.json" ] || missing+=("packages/web:next")
+  [ -f "$ALPHA_DIR/packages/api/node_modules/tsx/package.json" ] || missing+=("packages/api:tsx")
+  [ -f "$ALPHA_DIR/packages/mcp-server/node_modules/typescript/package.json" ] || missing+=("packages/mcp-server:typescript")
+
+  if [ "${#missing[@]}" -eq 0 ]; then
     return 0
   fi
 
+  local joined_missing
+  joined_missing=$(join_by ", " "${missing[@]}")
+  info "detected missing alpha prerequisites: $joined_missing"
+
   if [ "$RUN_INSTALL" != "true" ]; then
-    die "alpha prerequisites missing. Run 'pnpm -C \"$ALPHA_DIR\" install --frozen-lockfile' or omit --no-install."
+    die "alpha prerequisites missing ($joined_missing). Run 'pnpm -C \"$ALPHA_DIR\" install --frozen-lockfile' or omit --no-install."
   fi
 
   install_alpha_dependencies

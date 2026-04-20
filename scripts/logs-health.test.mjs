@@ -6,10 +6,13 @@ import { dirname, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { requireBash } from './test-bash-runtime.mjs';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const scriptText = readFileSync(resolve(__dirname, 'logs-health.sh'), 'utf8');
 
-test('logs-health treats ripgrep no-match as zero errors', () => {
+test('logs-health treats ripgrep no-match as zero errors', (t) => {
+  const bash = requireBash(t);
   const sandbox = mkdtempSync(resolve(tmpdir(), 'logs-health-'));
   const scriptsDir = resolve(sandbox, 'scripts');
   const processLogsDir = resolve(sandbox, 'data/logs/process');
@@ -22,7 +25,7 @@ test('logs-health treats ripgrep no-match as zero errors', () => {
   writeFileSync(resolve(processLogsDir, 'clean.log'), 'all systems nominal\n', 'utf8');
   writeFileSync(resolve(binDir, 'rg'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
 
-  const result = spawnSync('bash', [resolve(scriptsDir, 'logs-health.sh')], {
+  const result = spawnSync(bash, [resolve(scriptsDir, 'logs-health.sh')], {
     cwd: sandbox,
     encoding: 'utf8',
     env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` },
@@ -33,7 +36,8 @@ test('logs-health treats ripgrep no-match as zero errors', () => {
   assert.match(result.stdout, /errors:\s+0/);
 });
 
-test('logs-health preserves ripgrep execution failures', () => {
+test('logs-health preserves ripgrep execution failures', (t) => {
+  const bash = requireBash(t);
   const sandbox = mkdtempSync(resolve(tmpdir(), 'logs-health-rg-fail-'));
   const scriptsDir = resolve(sandbox, 'scripts');
   const processLogsDir = resolve(sandbox, 'data/logs/process');
@@ -46,7 +50,7 @@ test('logs-health preserves ripgrep execution failures', () => {
   writeFileSync(resolve(processLogsDir, 'clean.log'), 'all systems nominal\n', 'utf8');
   writeFileSync(resolve(binDir, 'rg'), '#!/bin/sh\nexit 2\n', { mode: 0o755 });
 
-  const result = spawnSync('bash', [resolve(scriptsDir, 'logs-health.sh')], {
+  const result = spawnSync(bash, [resolve(scriptsDir, 'logs-health.sh')], {
     cwd: sandbox,
     encoding: 'utf8',
     env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` },

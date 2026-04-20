@@ -6,6 +6,8 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { requireBash } from './test-bash-runtime.mjs';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 const scriptPath = path.join(repoRoot, 'scripts', 'pre-merge-check.sh');
@@ -64,7 +66,7 @@ process.exit(0);
 `;
 }
 
-function runGate(args = []) {
+function runGate(bash, args = []) {
   const tempDir = mkdtempSync(path.join(os.tmpdir(), 'pre-merge-check-test-'));
   const binDir = path.join(tempDir, 'bin');
   const logPath = path.join(tempDir, 'commands.log');
@@ -75,7 +77,7 @@ function runGate(args = []) {
     writeExecutable(path.join(binDir, 'git'), createGitStub(logPath));
     writeExecutable(path.join(binDir, 'pnpm'), createPnpmStub(logPath));
 
-    const result = spawnSync('bash', [scriptPath, ...args], {
+    const result = spawnSync(bash, [scriptPath, ...args], {
       cwd: repoRoot,
       encoding: 'utf8',
       env: {
@@ -93,8 +95,9 @@ function runGate(args = []) {
 }
 
 describe('pre-merge-check dependency refresh order', () => {
-  it('runs pnpm install after rebasing onto origin/main', () => {
-    const result = runGate();
+  it('runs pnpm install after rebasing onto origin/main', (t) => {
+    const bash = requireBash(t);
+    const result = runGate(bash);
 
     assert.equal(result.status, 0, result.stderr);
     const rebaseIndex = result.logLines.indexOf('git rebase origin/main');
