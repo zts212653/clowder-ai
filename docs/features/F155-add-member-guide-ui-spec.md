@@ -8,7 +8,7 @@ created: 2026-03-27
 
 # F155: Add-Member Internal Guide UI Spec (Phase A)
 
-> Status: spec | Owner: 缅因猫/砚砚 (codex) | Scope: 内部场景（添加成员）
+> **Status**: spec | **Owner**: Maine Coon/Maine Coon (codex) | **Scope**: 内部场景（添加成员）
 
 ## Why
 
@@ -18,8 +18,8 @@ Pencil MCP 当前不可用（`failed to connect to running Pencil app: antigravi
 ## Scope
 
 - 仅覆盖 **场景 1：添加成员**（纯内部引导）
-- 覆盖：聚光灯遮罩、HUD 步骤导航、猫眼状态指示
-- 不含：外部步骤富媒体面板（Phase B）
+- 覆盖：聚光灯遮罩、tips HUD、进度 dots、完成态持久化反馈
+- 不含：手动上一步/下一步/跳过导航；外部步骤富媒体面板
 
 ## Component Tree
 
@@ -31,36 +31,24 @@ GuideOverlayRoot
 ├─ GuideHUD
 │  ├─ GuideHUDHeader
 │  │  ├─ StepTitle
-│  │  ├─ StepCounter (n / total)
-│  │  └─ CatEyeIndicator
+│  │  └─ ProgressDots
 │  ├─ GuideHUDBody
-│  │  ├─ InstructionText
-│  │  └─ ContextHint (可选)
-│  └─ GuideHUDActions
-│     ├─ PrevButton
-│     ├─ NextButton
-│     ├─ SkipButton
+│  │  └─ InstructionText
+│  └─ GuideHUDAction
 │     └─ ExitButton
-└─ GuideStatusToast (非阻塞错误/降级提示)
+└─ CompletionCard (持久化成功/失败反馈)
 ```
 
 ## Props Contract
 
 ```ts
-export type GuideObservationState =
-  | 'idle'
-  | 'active'
-  | 'success'
-  | 'error'
-  | 'verifying';
+export type GuidePhase = 'locating' | 'active' | 'complete';
 
 export interface GuideStep {
   id: string;
-  targetGuideId: string; // data-guide-id
-  title: string;
-  instruction: string;
-  expectedAction: 'click' | 'input' | 'select' | 'confirm';
-  canSkip?: boolean;
+  target: string; // data-guide-id
+  tips: string;
+  advance: 'click' | 'visible' | 'input' | 'confirm';
 }
 
 export interface GuideOverlayRootProps {
@@ -68,13 +56,8 @@ export interface GuideOverlayRootProps {
   flowId: 'add-member';
   steps: GuideStep[];
   currentStepIndex: number;
-  observationState: GuideObservationState;
-  highlightToken: string; // guideSessionId + stepId
-  onPrev: () => void;
-  onNext: () => void;
-  onSkip: () => void;
+  phase: GuidePhase;
   onExit: () => void;
-  onRetryLocateTarget: () => void;
 }
 ```
 
@@ -83,42 +66,26 @@ export interface GuideOverlayRootProps {
 ```yaml
 flow_id: add-member
 steps:
-  - id: open-member-overview
-    targetGuideId: cats.overview
-    expectedAction: click
+  - id: open-hub
+    target: hub.trigger
+    advance: click
   - id: click-add-member
-    targetGuideId: cats.add-member
-    expectedAction: click
-  - id: select-client
-    targetGuideId: add-member.client
-    expectedAction: select
-  - id: select-provider-profile
-    targetGuideId: add-member.provider-profile
-    expectedAction: select
-  - id: select-model
-    targetGuideId: add-member.model
-    expectedAction: select
-  - id: confirm-create
-    targetGuideId: add-member.submit
-    expectedAction: click
+    target: cats.overview
+    advance: click
+  - id: click-add-member
+    target: cats.add-member
+    advance: click
   - id: edit-member-profile
-    targetGuideId: member-editor.profile
-    expectedAction: input
-  - id: verify-member-response
-    targetGuideId: member-editor.verify
-    expectedAction: confirm
+    target: member-editor.profile
+    advance: confirm
 ```
 
 ## `data-guide-id` Naming (Phase A Required)
 
+- `hub.trigger`
 - `cats.overview`
 - `cats.add-member`
-- `add-member.client`
-- `add-member.provider-profile`
-- `add-member.model`
-- `add-member.submit`
 - `member-editor.profile`
-- `member-editor.verify`
 
 命名规则：`domain.section.action`，语义化，禁止位置语义（如 left/top/row1）。
 
@@ -126,29 +93,22 @@ steps:
 
 ```text
 hidden
-  -> ready(target found)
-ready
-  -> active(user interacting)
+  -> locating(target not yet found)
+locating
+  -> active(target found)
 active
-  -> success(step validated)
-success
-  -> ready(next step)
+  -> active(next auto-advanced step)
 active
-  -> error(target missing/validation fail)
-error
-  -> ready(retry locate)
-error
-  -> skipped(user skip)
+  -> complete(all steps confirmed)
 any
   -> exited(user exit)
 ```
 
 ### Transition Rules
 
-- `ready -> active`: 用户在目标区域发生预期动作
-- `active -> success`: 当前 step 验证通过
-- `active -> error`: 8s 内未完成预期动作，或目标节点丢失
-- `error -> ready`: 重试定位成功
+- `locating -> active`: 当前 step 目标元素出现在页面中
+- `active -> active`: 用户完成当前 step 预期动作，自动推进到下一步
+- `active -> complete`: 最后一个 `confirm` step 成功，进入完成态并持久化
 - `any -> exited`: 用户点击退出
 
 ## Visual Tokens
@@ -193,12 +153,12 @@ any
 - 自动重试一次（300ms）
 
 2. 定位目标失败（重试后）
-- HUD 切 `error`
-- 显示两按钮：`重试定位` / `跳过此步`
+- HUD 保持 `locating`
+- 等待目标元素重新出现，不提供手动跳步
 
 3. 用户停滞超时（8s）
 - HUD 显示轻提示，不强制中断
-- 保持当前步骤，允许 `下一步/跳过`
+- 保持当前步骤，等待用户继续操作或主动退出
 
 4. 退出
 - 立即销毁 overlay 和 observer
@@ -206,9 +166,8 @@ any
 
 ## Accessibility
 
-- 所有操作按钮必须可键盘触达
-- `Esc` 绑定 `onExit`
-- `Left/Right Arrow` 可映射上一步/下一步（可选）
+- 退出按钮必须可键盘触达
+- 引导期间全局 `Esc` 禁用，避免误退
 - HUD 必须提供 `aria-live="polite"` 文本更新
 - 遮罩不阻断屏幕阅读器读取 HUD 文本
 

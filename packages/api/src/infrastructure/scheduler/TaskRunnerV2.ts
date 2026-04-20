@@ -2,7 +2,7 @@ import { getNextCronMs } from './cron-utils.js';
 import type { DynamicTaskDef, DynamicTaskStore } from './DynamicTaskStore.js';
 import { executeTaskPipeline } from './execute-pipeline.js';
 import type { RunLedger } from './RunLedger.js';
-import { notifyTaskFailed, notifyTaskSucceeded } from './schedule-notify.js';
+import { notifyTaskFailed, notifyTaskSucceeded, SCHEDULER_TOAST_DURATION_MS } from './schedule-notify.js';
 import type { TaskTemplate } from './templates/types.js';
 import type {
   ActorRole,
@@ -339,7 +339,7 @@ export class TaskRunnerV2 {
           type: 'error',
           title: '定时任务错过执行窗口',
           message: `「${label}」原定 ${fireAtIso} 执行，服务当时未运行，任务已自动取消。`,
-          duration: 6000,
+          duration: SCHEDULER_TOAST_DURATION_MS.error,
           lifecycleEvent: 'missed_window',
         },
       });

@@ -86,9 +86,12 @@ export function ThinkingContent({
     typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('export') === 'true';
   const shouldExpand = (isExport && expandInExport) || defaultExpanded;
   const [expanded, setExpanded] = useState(shouldExpand);
+  const userInteracted = useRef(false);
   const hasMounted = useRef(false);
   useEffect(() => {
-    setExpanded((isExport && expandInExport) || defaultExpanded);
+    if (!userInteracted.current) {
+      setExpanded((isExport && expandInExport) || defaultExpanded);
+    }
   }, [isExport, expandInExport, defaultExpanded]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: expanded is intentional — dispatch on toggle
   useLayoutEffect(() => {
@@ -112,6 +115,7 @@ export function ThinkingContent({
       <button
         type="button"
         onClick={() => {
+          userInteracted.current = true;
           setExpanded((v) => !v);
         }}
         className="w-full flex items-center gap-2 text-[11px] font-mono transition-colors"

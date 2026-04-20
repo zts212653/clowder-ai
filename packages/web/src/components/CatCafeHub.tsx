@@ -27,6 +27,7 @@ import { HubLeaderboardTab } from './HubLeaderboardTab';
 import { HubMemoryTab } from './HubMemoryTab';
 import { HubRoutingPolicyTab } from './HubRoutingPolicyTab';
 import { HubToolUsageTab } from './HubToolUsageTab';
+import { MarketplacePanel } from './marketplace/marketplace-panel';
 import { PushSettingsPanel } from './PushSettingsPanel';
 import { VoiceSettingsPanel } from './VoiceSettingsPanel';
 
@@ -38,6 +39,11 @@ export function CatCafeHub() {
   const hubState = useChatStore((s) => s.hubState);
   const closeHub = useChatStore((s) => s.closeHub);
   const guideActive = useGuideStore((s) => s.session !== null);
+  const activeGuideStep = useGuideStore((s) => {
+    const session = s.session;
+    if (!session || session.currentStepIndex >= session.flow.steps.length) return null;
+    return session.flow.steps[session.currentStepIndex];
+  });
   const { cats, getCatById, refresh } = useCatData();
 
   const open = hubState?.open ?? false;
@@ -79,9 +85,17 @@ export function CatCafeHub() {
     if (!isValid) setTab('cats');
   }, [open, tab]);
 
-  const toggleGroup = useCallback((groupId: string) => {
-    setExpandedGroup((prev) => (prev === groupId ? null : groupId));
-  }, []);
+  const toggleGroup = useCallback(
+    (groupId: string) => {
+      setExpandedGroup((prev) => {
+        const isGuideLockedToggle =
+          prev === groupId && activeGuideStep?.advance === 'click' && activeGuideStep.target === `${groupId}.group`;
+        if (isGuideLockedToggle) return prev;
+        return prev === groupId ? null : groupId;
+      });
+    },
+    [activeGuideStep],
+  );
 
   const selectTab = useCallback((tabId: HubTabId) => {
     setTab(tabId);
@@ -189,6 +203,7 @@ export function CatCafeHub() {
         <div className="flex items-center justify-between px-5 pt-4 pb-3" style={{ flexShrink: 0 }}>
           <h2 className="text-base font-bold text-cafe">Cat Caf&eacute; Hub</h2>
           <button
+            type="button"
             onClick={closeHub}
             className="text-cafe-muted hover:text-cafe-secondary text-lg"
             title="关闭"
@@ -254,6 +269,7 @@ export function CatCafeHub() {
             {tab === 'memory' && <HubMemoryTab />}
             {tab === 'rescue' && <HubClaudeRescueSection />}
             {tab === 'leaderboard' && <HubLeaderboardTab />}
+            {tab === 'marketplace' && <MarketplacePanel />}
           </div>
         </div>
         <HubCatEditor

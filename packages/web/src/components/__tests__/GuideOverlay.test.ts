@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrchestrationFlow } from '@/stores/guideStore';
 import { useGuideStore } from '@/stores/guideStore';
-import { computeShieldPanels } from '../GuideOverlay';
+import { computeHUDPosition, computeShieldPanels } from '../GuideOverlay';
 
 /* ── computeShieldPanels geometry tests ── */
 
@@ -53,6 +53,28 @@ describe('computeShieldPanels', () => {
 
     expect(holeRight - holeLeft).toBe(rect.width + pad * 2);
     expect(holeBottom - holeTop).toBe(rect.height + pad * 2);
+  });
+});
+
+describe('computeHUDPosition', () => {
+  it('keeps a 480px horizontal HUD inside the viewport near the right edge', () => {
+    vi.stubGlobal('innerWidth', 640);
+    vi.stubGlobal('innerHeight', 480);
+    const rect = { top: 120, bottom: 180, left: 520, right: 580, width: 60, height: 60 } as DOMRect;
+    const style = computeHUDPosition(rect, { width: 480, height: 160 });
+
+    expect(style.left).toBe(144);
+    expect(style.top).toBe(196);
+  });
+
+  it('keeps a tall media HUD inside the viewport near the bottom edge', () => {
+    vi.stubGlobal('innerWidth', 640);
+    vi.stubGlobal('innerHeight', 360);
+    const rect = { top: 300, bottom: 340, left: 200, right: 260, width: 60, height: 40 } as DOMRect;
+    const style = computeHUDPosition(rect, { width: 280, height: 280 });
+
+    expect(style.left).toBe(90);
+    expect(style.top).toBe(16);
   });
 });
 

@@ -1,3 +1,7 @@
+import type { SchedulerLifecycleEvent, SchedulerMessageExtra, SchedulerToastPayload } from '@cat-cafe/shared';
+
+export type { SchedulerLifecycleEvent, SchedulerMessageExtra, SchedulerToastPayload } from '@cat-cafe/shared';
+
 // ─── F139: Unified Schedule Abstraction ────────────────────
 
 /** Single work item returned by gate — one per subject */
@@ -70,30 +74,6 @@ export interface TaskDisplayMeta {
   category: DisplayCategory;
   description?: string;
   subjectKind?: SubjectKind;
-}
-
-export type SchedulerLifecycleEvent =
-  | 'registered'
-  | 'paused'
-  | 'resumed'
-  | 'deleted'
-  | 'succeeded'
-  | 'failed'
-  | 'missed_window';
-
-export interface SchedulerToastPayload {
-  type: 'success' | 'error' | 'info';
-  title: string;
-  message: string;
-  duration: number;
-  lifecycleEvent: SchedulerLifecycleEvent;
-}
-
-export interface SchedulerMessageExtra {
-  scheduler?: {
-    hiddenTrigger?: boolean;
-    toast?: SchedulerToastPayload;
-  };
 }
 
 /** Phase 4: options for delivering a message to a thread */

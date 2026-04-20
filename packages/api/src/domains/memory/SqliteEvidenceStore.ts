@@ -1,6 +1,9 @@
 // F102: SQLite implementation of IEvidenceStore
 
 import Database from 'better-sqlite3';
+import { EvidenceWriteQueue } from './evidence-write-queue.js';
+import { ContradictionDetector } from './f163-contradiction-detector.js';
+import { type F163Authority, freezeFlags, pathToAuthority } from './f163-types.js';
 import type {
   Edge,
   EvidenceItem,
@@ -9,6 +12,11 @@ import type {
   IEvidenceStore,
   SearchOptions,
 } from './interfaces.js';
+import {
+  compareEvidenceItemsByLexicalBackfill,
+  rankLexicalBackfillRows,
+  splitLexicalBackfillWords,
+} from './lexical-backfill.js';
 import { applyMigrations } from './schema.js';
 import type { VectorStore } from './VectorStore.js';
 
@@ -18,6 +26,8 @@ export interface PassageResult {
   content: string;
   speaker?: string;
   position?: number;
+  /** BM25 relevance score from passage_fts (lower = more relevant) */
+  rank?: number;
   /** AC-I7: ISO8601 timestamp of when the passage was created */
   createdAt?: string;
   /** AC-I8: surrounding passages within the context window */
@@ -34,6 +44,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   private db: Database.Database | null = null;
   private readonly dbPath: string;
   private embedDeps?: EmbedDeps;
+  /** F163: single-writer queue serializes all evidence.sqlite mutations */
+  private readonly writeQueue = new EvidenceWriteQueue();
 
   constructor(dbPath: string, embedDeps?: EmbedDeps) {
     this.dbPath = dbPath;
@@ -61,11 +73,12 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     const bm25Pool = options?.mode === 'hybrid' ? Math.min(Math.max(limit * 4, 20), 100) : limit;
     const trimmed = query.trim();
     if (!trimmed) return [];
+    const lexicalBackfillWords = splitLexicalBackfillWords(trimmed);
 
     // Phase D: resolve scope → kind filter
     // scope='threads' → kind='thread' (P1 fix: was incorrectly mapped to 'session')
     // scope='sessions' → kind='session'
-    // scope='docs'/'memory' → exclude sessions + threads
+    // scope='docs'/'memory' → exclude session/thread digests, keep doc-backed discussions
     // scope='all' → no filter
     const effectiveKind =
       options?.kind ??
@@ -74,12 +87,22 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         : options?.scope === 'sessions'
           ? ('session' as EvidenceKind)
           : undefined);
-    const excludeSession = options?.scope === 'docs' || options?.scope === 'memory';
+    const excludeSessionAndThread = options?.scope === 'docs' || options?.scope === 'memory';
     // F129 AC-A10: exclude pack-knowledge from global search unless explicitly requested
     const excludePackKnowledge = effectiveKind !== 'pack-knowledge';
     // F148 Phase B (AC-B1): threadId filter — scope to a specific thread's evidence
     // Anchor convention: thread-{threadId} (e.g. thread-thread_abc for threadId="thread_abc")
     const threadAnchor = options?.threadId ? `thread-${options.threadId}` : undefined;
+    // F163 Phase B (AC-B3): suppress backstop docs when compression is active
+    let suppressBackstop = false;
+    if (!options?.includeBackstop) {
+      try {
+        const { freezeFlags } = await import('./f163-types.js');
+        suppressBackstop = freezeFlags().compression !== 'off';
+      } catch {
+        // f163-types not available — no suppression
+      }
+    }
     // ── Exact-anchor bypass ──────────────────────────────────────────
     // FTS5 unicode61 tokenizer splits "F042" → "F"+"042" and "ADR-005" → "ADR"+"005".
     // For anchor-shaped queries, do a direct lookup so precision isn't lost.
@@ -92,8 +115,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       anchorSql += ' AND kind = ?';
       anchorParams.push(effectiveKind);
     }
-    if (excludeSession) {
-      anchorSql += " AND kind != 'session'";
+    if (excludeSessionAndThread) {
+      anchorSql += " AND kind != 'session' AND kind != 'thread'";
     }
     if (excludePackKnowledge) {
       anchorSql += " AND kind != 'pack-knowledge'";
@@ -114,6 +137,9 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     if (options?.provenanceTier) {
       anchorSql += ' AND provenance_tier = ?';
       anchorParams.push(options.provenanceTier);
+    }
+    if (suppressBackstop) {
+      anchorSql += " AND activation != 'backstop'";
     }
     const exactRow = this.db?.prepare(anchorSql).get(...anchorParams) as RowShape | undefined;
     if (exactRow) {
@@ -142,8 +168,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           sql += ' AND d.kind = ?';
           params.push(effectiveKind);
         }
-        if (excludeSession) {
-          sql += " AND d.kind != 'session'";
+        if (excludeSessionAndThread) {
+          sql += " AND d.kind != 'session' AND d.kind != 'thread'";
         }
         if (excludePackKnowledge) {
           sql += " AND d.kind != 'pack-knowledge'";
@@ -173,6 +199,10 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           sql += ' AND d.provenance_tier = ?';
           params.push(options.provenanceTier);
         }
+        // F163 Phase B (AC-B3): backstop suppression
+        if (suppressBackstop) {
+          sql += " AND d.activation != 'backstop'";
+        }
 
         // Superseded items sort last (KD-16), archive results deprioritized (P2 fix), authoritative first (F152 AC-A6, P1-2 NULL-safe)
         sql +=
@@ -192,54 +222,68 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       }
     }
 
-    // ── Keyword fallback: search keywords/topics JSON when FTS5 misses ──
-    if (results.length <= 1) {
-      const words = trimmed.split(/\s+/).filter(Boolean);
-      if (words.length > 0) {
-        const kwConditions = words.map(() => 'keywords LIKE ?');
-        let kwSql = `SELECT * FROM evidence_docs WHERE (${kwConditions.join(' OR ')})`;
-        const kwParams: unknown[] = words.map((w) => `%${w.toLowerCase()}%`);
-        if (effectiveKind) {
-          kwSql += ' AND kind = ?';
-          kwParams.push(effectiveKind);
-        }
-        if (excludeSession) {
-          kwSql += " AND kind != 'session'";
-        }
-        if (excludePackKnowledge) {
-          kwSql += " AND kind != 'pack-knowledge'";
-        }
-        if (options?.status) {
-          kwSql += ' AND status = ?';
-          kwParams.push(options.status);
-        }
-        if (options?.keywords?.length) {
-          kwSql += ` AND (${options.keywords.map(() => 'keywords LIKE ?').join(' OR ')})`;
-          kwParams.push(...options.keywords.map((kw) => `%"${kw}"%`));
-        }
-        if (threadAnchor) {
-          kwSql += ' AND anchor = ?';
-          kwParams.push(threadAnchor);
-        }
-        // F152 AC-A6: provenance tier filter
-        if (options?.provenanceTier) {
-          kwSql += ' AND provenance_tier = ?';
-          kwParams.push(options.provenanceTier);
-        }
-        kwSql +=
-          " ORDER BY (superseded_by IS NOT NULL), (source_path LIKE 'archive/%'), (CASE WHEN provenance_tier = 'authoritative' THEN 0 WHEN provenance_tier IS NOT NULL THEN 1 ELSE 2 END), updated_at DESC LIMIT ?";
-        kwParams.push(bm25Pool);
-        try {
-          const kwRows = this.db?.prepare(kwSql).all(...kwParams) as RowShape[];
-          for (const row of kwRows) {
-            if (!seenAnchors.has(row.anchor)) {
-              results.push(rowToItem(row));
-              seenAnchors.add(row.anchor);
-            }
+    // ── Lexical contains backfill: recover substring hits that unicode61 FTS misses ──
+    if (lexicalBackfillWords.length > 0) {
+      const containsConditions = lexicalBackfillWords.map(
+        () => "(LOWER(title) LIKE ? OR LOWER(COALESCE(summary, '')) LIKE ? OR LOWER(COALESCE(keywords, '')) LIKE ?)",
+      );
+      let containsSql = `SELECT * FROM evidence_docs WHERE (${containsConditions.join(' OR ')})`;
+      const containsParams: unknown[] = lexicalBackfillWords.flatMap((word) => {
+        const pattern = `%${word}%`;
+        return [pattern, pattern, pattern];
+      });
+      if (effectiveKind) {
+        containsSql += ' AND kind = ?';
+        containsParams.push(effectiveKind);
+      }
+      if (excludeSessionAndThread) {
+        containsSql += " AND kind != 'session' AND kind != 'thread'";
+      }
+      if (excludePackKnowledge) {
+        containsSql += " AND kind != 'pack-knowledge'";
+      }
+      if (options?.status) {
+        containsSql += ' AND status = ?';
+        containsParams.push(options.status);
+      }
+      if (options?.keywords?.length) {
+        containsSql += ` AND (${options.keywords.map(() => 'keywords LIKE ?').join(' OR ')})`;
+        containsParams.push(...options.keywords.map((kw) => `%"${kw}"%`));
+      }
+      if (threadAnchor) {
+        containsSql += ' AND anchor = ?';
+        containsParams.push(threadAnchor);
+      }
+      if (options?.dateFrom) {
+        containsSql += ' AND updated_at >= ?';
+        containsParams.push(options.dateFrom);
+      }
+      if (options?.dateTo) {
+        containsSql += ' AND updated_at <= ?';
+        containsParams.push(options.dateTo.length === 10 ? `${options.dateTo}T23:59:59` : options.dateTo);
+      }
+      if (options?.provenanceTier) {
+        containsSql += ' AND provenance_tier = ?';
+        containsParams.push(options.provenanceTier);
+      }
+      // F163 Phase B (AC-B3): backstop suppression
+      if (suppressBackstop) {
+        containsSql += " AND activation != 'backstop'";
+      }
+      try {
+        const containsRows = this.db?.prepare(containsSql).all(...containsParams) as RowShape[];
+        const { rows: rankedRows, signals } = rankLexicalBackfillRows(containsRows, lexicalBackfillWords);
+        for (const row of rankedRows) {
+          if (!seenAnchors.has(row.anchor)) {
+            results.push(rowToItem(row));
+            seenAnchors.add(row.anchor);
           }
-        } catch {
-          // keyword search failed — continue with existing results
         }
+        if (signals.size > 0) {
+          results.sort((a, b) => compareEvidenceItemsByLexicalBackfill(a, b, signals, exactRow?.anchor));
+        }
+      } catch {
+        // substring backfill failed — continue with existing results
       }
     }
 
@@ -299,7 +343,21 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     // P1 fix (砚砚 review): depth=raw must stay lexical-only — no passage vectors yet.
     // Short-circuit BEFORE mode split to prevent semantic/hybrid from eating raw results.
     if (options?.depth === 'raw') {
+      // Passage ranking fix: results with passage matches must rank before
+      // doc-only hits so low-limit queries surface message-level content.
+      results.sort((a, b) => {
+        const aHas = a.passages?.length ? 1 : 0;
+        const bHas = b.passages?.length ? 1 : 0;
+        return bHas - aHas; // passage-bearing first, stable within each group
+      });
       return this.enrichWithDrillDown(results.slice(0, limit));
+    }
+
+    // ── F163: Post-retrieval authority boost (fail-open: Task 11) ──
+    try {
+      applyAuthorityBoost(results);
+    } catch {
+      // Kill-switch: boost failure → continue with original ranking
     }
 
     // P2 R2 fix (砚砚): keep full BM25 candidate pool for hybrid RRF,
@@ -321,7 +379,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         return this.enrichWithDrillDown(lexicalResults);
       }
       try {
-        return this.enrichWithDrillDown(await this.semanticNNSearch(query, limit, options));
+        return this.enrichWithDrillDown(await this.semanticNNSearch(query, limit, options, suppressBackstop));
       } catch {
         return this.enrichWithDrillDown(lexicalResults);
       }
@@ -332,7 +390,9 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         return this.enrichWithDrillDown(lexicalResults);
       }
       try {
-        return this.enrichWithDrillDown(await this.hybridRRFSearch(query, lexicalCandidates, limit, options));
+        return this.enrichWithDrillDown(
+          await this.hybridRRFSearch(query, lexicalCandidates, limit, options, suppressBackstop),
+        );
       } catch {
         return this.enrichWithDrillDown(lexicalResults);
       }
@@ -371,7 +431,12 @@ export class SqliteEvidenceStore implements IEvidenceStore {
    * Skips BM25 entirely — queries evidence_vectors directly.
    * Hydrates results from evidence_docs in a single IN(...) query (砚砚: no N+1).
    */
-  private async semanticNNSearch(query: string, limit: number, options?: SearchOptions): Promise<EvidenceItem[]> {
+  private async semanticNNSearch(
+    query: string,
+    limit: number,
+    options?: SearchOptions,
+    suppressBackstop?: boolean,
+  ): Promise<EvidenceItem[]> {
     const pool = Math.min(Math.max(limit * 4, 20), 100); // 砚砚: generous pool, cap 100
     const queryVec = await this.embedDeps!.embedding.embed([query]);
     const nnResults = this.embedDeps!.vectorStore.search(queryVec[0], pool);
@@ -387,14 +452,14 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     const effectiveKind =
       options?.kind ??
       (options?.scope === 'threads' ? 'thread' : options?.scope === 'sessions' ? 'session' : undefined);
-    const excludeSession = options?.scope === 'docs' || options?.scope === 'memory';
+    const excludeSessionAndThread = options?.scope === 'docs' || options?.scope === 'memory';
     const excludePackKnowledge = effectiveKind !== 'pack-knowledge';
     if (effectiveKind) {
       sql += ' AND kind = ?';
       params.push(effectiveKind);
     }
-    if (excludeSession) {
-      sql += " AND kind != 'session'";
+    if (excludeSessionAndThread) {
+      sql += " AND kind != 'session' AND kind != 'thread'";
     }
     if (excludePackKnowledge) {
       sql += " AND kind != 'pack-knowledge'";
@@ -418,6 +483,9 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       sql += ' AND provenance_tier = ?';
       params.push(options.provenanceTier);
     }
+    if (suppressBackstop) {
+      sql += " AND activation != 'backstop'";
+    }
 
     const rows = this.db?.prepare(sql).all(...params) as RowShape[];
     const docMap = new Map(rows.map((r) => [r.anchor, rowToItem(r)]));
@@ -438,6 +506,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     lexicalResults: EvidenceItem[],
     limit: number,
     options?: SearchOptions,
+    suppressBackstop?: boolean,
   ): Promise<EvidenceItem[]> {
     const pool = Math.min(Math.max(limit * 4, 20), 100);
     const queryVec = await this.embedDeps!.embedding.embed([query]);
@@ -474,14 +543,14 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       const effectiveKind =
         options?.kind ??
         (options?.scope === 'threads' ? 'thread' : options?.scope === 'sessions' ? 'session' : undefined);
-      const excludeSession = options?.scope === 'docs' || options?.scope === 'memory';
+      const excludeSessionAndThread = options?.scope === 'docs' || options?.scope === 'memory';
       const excludePackKnowledge = effectiveKind !== 'pack-knowledge';
       if (effectiveKind) {
         sql += ' AND kind = ?';
         params.push(effectiveKind);
       }
-      if (excludeSession) {
-        sql += " AND kind != 'session'";
+      if (excludeSessionAndThread) {
+        sql += " AND kind != 'session' AND kind != 'thread'";
       }
       if (excludePackKnowledge) {
         sql += " AND kind != 'pack-knowledge'";
@@ -505,6 +574,9 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         sql += ' AND provenance_tier = ?';
         params.push(options.provenanceTier);
       }
+      if (suppressBackstop) {
+        sql += " AND activation != 'backstop'";
+      }
 
       const rows = this.db.prepare(sql).all(...params) as RowShape[];
       for (const row of rows) {
@@ -521,54 +593,110 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   }
 
   async upsert(items: EvidenceItem[]): Promise<void> {
-    this.ensureOpen();
-    const db = this.db;
-    if (!db) {
-      throw new Error('Evidence store is closed');
-    }
+    return this.writeQueue.enqueue(async () => {
+      this.ensureOpen();
+      const db = this.db;
+      if (!db) {
+        throw new Error('Evidence store is closed');
+      }
 
-    const stmt = db.prepare(`
+      // F163 Phase C (AC-C1): write-time contradiction detection
+      const flags = freezeFlags();
+      if (flags.contradictionDetection !== 'off') {
+        const detector = new ContradictionDetector(this);
+        for (const item of items) {
+          if (!item.contradicts) {
+            const hits = await detector.check({
+              title: item.title,
+              summary: item.summary,
+              kind: item.kind,
+            });
+            const filtered = hits.filter((h) => h.anchor !== item.anchor);
+            if (filtered.length > 0) {
+              item.contradicts = filtered.map((h) => h.anchor);
+            }
+          }
+        }
+      }
+
+      // F163 Phase B (AC-B5): cascade compression guard
+      // If any item is a summary (summaryOfAnchor set), verify none of its
+      // sourceIds reference docs that are themselves summaries.
+      for (const item of items) {
+        if (item.summaryOfAnchor && item.sourceIds?.length) {
+          const placeholders = item.sourceIds.map(() => '?').join(',');
+          const cascadeHits = db
+            .prepare(
+              `SELECT anchor FROM evidence_docs
+               WHERE anchor IN (${placeholders}) AND summary_of_anchor IS NOT NULL`,
+            )
+            .all(...item.sourceIds) as { anchor: string }[];
+          if (cascadeHits.length > 0) {
+            const hitAnchors = cascadeHits.map((r) => r.anchor).join(', ');
+            throw new Error(`cascade compression prohibited: source(s) [${hitAnchors}] are already summaries`);
+          }
+        }
+      }
+
+      const stmt = db.prepare(`
 				INSERT OR REPLACE INTO evidence_docs
 				(anchor, kind, status, title, summary, keywords, source_path, source_hash,
-				 superseded_by, materialized_from, updated_at, pack_id, provenance_tier, provenance_source, generalizable)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				 superseded_by, materialized_from, updated_at, pack_id, provenance_tier, provenance_source, generalizable,
+				 authority, activation, verified_at,
+				 source_ids, summary_of_anchor, compression_rationale,
+				 contradicts, invalid_at, review_cycle_days)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`);
 
-    const tx = db.transaction((items: EvidenceItem[]) => {
-      for (const item of items) {
-        stmt.run(
-          item.anchor,
-          item.kind,
-          item.status,
-          item.title,
-          item.summary ?? null,
-          item.keywords ? JSON.stringify(item.keywords) : null,
-          item.sourcePath ?? null,
-          item.sourceHash ?? null,
-          item.supersededBy ?? null,
-          item.materializedFrom ?? null,
-          item.updatedAt,
-          item.packId ?? null,
-          item.provenance?.tier ?? null,
-          item.provenance?.source ?? null,
-          item.generalizable == null ? null : item.generalizable ? 1 : 0,
-        );
-      }
-    });
+      const tx = db.transaction((items: EvidenceItem[]) => {
+        for (const item of items) {
+          stmt.run(
+            item.anchor,
+            item.kind,
+            item.status,
+            item.title,
+            item.summary ?? null,
+            item.keywords ? JSON.stringify(item.keywords) : null,
+            item.sourcePath ?? null,
+            item.sourceHash ?? null,
+            item.supersededBy ?? null,
+            item.materializedFrom ?? null,
+            item.updatedAt,
+            item.packId ?? null,
+            item.provenance?.tier ?? null,
+            item.provenance?.source ?? null,
+            item.generalizable == null ? null : item.generalizable ? 1 : 0,
+            item.authority ?? pathToAuthority(item.sourcePath ?? item.anchor),
+            item.activation ?? 'query',
+            item.verifiedAt ?? null,
+            item.sourceIds ? JSON.stringify(item.sourceIds) : null,
+            item.summaryOfAnchor ?? null,
+            item.compressionRationale ?? null,
+            item.contradicts ? JSON.stringify(item.contradicts) : null,
+            item.invalidAt ?? null,
+            item.reviewCycleDays ?? null,
+          );
+        }
+      });
 
-    tx(items);
+      tx(items);
+    });
   }
 
   async deleteByAnchor(anchor: string): Promise<void> {
-    this.ensureOpen();
-    this.db?.prepare('DELETE FROM evidence_docs WHERE anchor = ?').run(anchor);
+    return this.writeQueue.enqueue(() => {
+      this.ensureOpen();
+      this.db?.prepare('DELETE FROM evidence_docs WHERE anchor = ?').run(anchor);
+    });
   }
 
   /** F129: Delete all evidence entries for a given pack_id */
   async deleteByPackId(packId: string): Promise<number> {
-    this.ensureOpen();
-    const result = this.db?.prepare('DELETE FROM evidence_docs WHERE pack_id = ?').run(packId);
-    return result?.changes ?? 0;
+    return this.writeQueue.enqueue(() => {
+      this.ensureOpen();
+      const result = this.db?.prepare('DELETE FROM evidence_docs WHERE pack_id = ?').run(packId);
+      return result?.changes ?? 0;
+    });
   }
 
   async getByAnchor(anchor: string): Promise<EvidenceItem | null> {
@@ -595,13 +723,129 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     return this.db!;
   }
 
+  /** Serialize an arbitrary write through the single-writer queue (F163 AC-A5). */
+  runExclusive<T>(fn: () => T | Promise<T>): Promise<T> {
+    return this.writeQueue.enqueue(fn);
+  }
+
+  /**
+   * F163 Phase B (AC-B2): Create a canonical summary and demote originals to backstop.
+   * Validates: all source anchors exist, no cascade (source is not itself a summary).
+   * Returns the generated summary anchor.
+   */
+  async createSummary(params: {
+    sourceAnchors: string[];
+    title: string;
+    summary: string;
+    rationale: string;
+    kind?: EvidenceItem['kind'];
+  }): Promise<string> {
+    return this.writeQueue.enqueue(() => {
+      this.ensureOpen();
+      const db = this.db;
+      if (!db) throw new Error('Evidence store is closed');
+
+      // Validate all source anchors exist
+      const placeholders = params.sourceAnchors.map(() => '?').join(',');
+      const existing = db
+        .prepare(`SELECT anchor, kind, summary_of_anchor FROM evidence_docs WHERE anchor IN (${placeholders})`)
+        .all(...params.sourceAnchors) as { anchor: string; kind: string; summary_of_anchor: string | null }[];
+
+      const foundAnchors = new Set(existing.map((r) => r.anchor));
+      const missing = params.sourceAnchors.filter((a) => !foundAnchors.has(a));
+      if (missing.length > 0) {
+        throw new Error(`Source anchors not found: ${missing.join(', ')}`);
+      }
+
+      // Cascade guard: none of the sources can be summaries
+      const cascadeHits = existing.filter((r) => r.summary_of_anchor != null);
+      if (cascadeHits.length > 0) {
+        throw new Error(
+          `cascade compression prohibited: source(s) [${cascadeHits.map((r) => r.anchor).join(', ')}] are already summaries`,
+        );
+      }
+
+      // Determine kind: use param override, or majority kind from sources, default 'lesson'
+      const kind = params.kind ?? this.majorityKind(existing.map((r) => r.kind));
+
+      // Generate summary anchor
+      const summaryAnchor = `CS-${Date.now().toString(36)}`;
+      const groupId = `sg-${Date.now().toString(36)}`;
+      const now = new Date().toISOString();
+
+      const tx = db.transaction(() => {
+        // Insert summary doc
+        db.prepare(`
+          INSERT INTO evidence_docs
+          (anchor, kind, status, title, summary, updated_at, authority, activation,
+           source_ids, summary_of_anchor, compression_rationale)
+          VALUES (?, ?, 'active', ?, ?, ?, 'validated', 'query', ?, ?, ?)
+        `).run(
+          summaryAnchor,
+          kind,
+          params.title,
+          params.summary,
+          now,
+          JSON.stringify(params.sourceAnchors),
+          groupId,
+          params.rationale,
+        );
+
+        // Demote originals to backstop
+        db.prepare(`UPDATE evidence_docs SET activation = 'backstop' WHERE anchor IN (${placeholders})`).run(
+          ...params.sourceAnchors,
+        );
+      });
+
+      tx();
+      return summaryAnchor;
+    });
+  }
+
+  /** Pick the most common kind from a list, defaulting to 'lesson' */
+  private majorityKind(kinds: string[]): EvidenceItem['kind'] {
+    const counts = new Map<string, number>();
+    for (const k of kinds) counts.set(k, (counts.get(k) ?? 0) + 1);
+    let best = 'lesson';
+    let bestCount = 0;
+    for (const [k, c] of counts) {
+      if (c > bestCount) {
+        best = k;
+        bestCount = c;
+      }
+    }
+    return best as EvidenceItem['kind'];
+  }
+
+  /**
+   * F163 AC-A3: Query always_on + constitutional docs for physical injection.
+   * Guard: activation=always_on AND authority=constitutional AND status=active.
+   * Synchronous — used at prompt build time, not in search pipeline.
+   */
+  queryAlwaysOn(): Array<{ anchor: string; title: string; summary: string }> {
+    this.ensureOpen();
+    return (
+      (this.db
+        ?.prepare(
+          `SELECT anchor, title, summary
+         FROM evidence_docs
+         WHERE activation = 'always_on'
+           AND authority = 'constitutional'
+           AND status = 'active'`,
+        )
+        .all() as Array<{ anchor: string; title: string; summary: string }>) ?? []
+    );
+  }
+
   // ── Edge operations ─────────────────────────────────────────────────
 
   async addEdge(edge: Edge): Promise<void> {
-    this.ensureOpen();
-    this.db
-      ?.prepare('INSERT OR IGNORE INTO edges (from_anchor, to_anchor, relation) VALUES (?, ?, ?)')
-      .run(edge.fromAnchor, edge.toAnchor, edge.relation);
+    return this.writeQueue.enqueue(() => {
+      this.ensureOpen();
+      this.db
+        ?.prepare('INSERT OR IGNORE INTO edges (from_anchor, to_anchor, relation) VALUES (?, ?, ?)')
+        .run(edge.fromAnchor, edge.toAnchor, edge.relation);
+    });
   }
 
   async getRelated(anchor: string): Promise<Array<{ anchor: string; relation: string }>> {
@@ -617,10 +861,12 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   }
 
   async removeEdge(edge: Edge): Promise<void> {
-    this.ensureOpen();
-    this.db
-      ?.prepare('DELETE FROM edges WHERE from_anchor = ? AND to_anchor = ? AND relation = ?')
-      .run(edge.fromAnchor, edge.toAnchor, edge.relation);
+    return this.writeQueue.enqueue(() => {
+      this.ensureOpen();
+      this.db
+        ?.prepare('DELETE FROM edges WHERE from_anchor = ? AND to_anchor = ? AND relation = ?')
+        .run(edge.fromAnchor, edge.toAnchor, edge.relation);
+    });
   }
 
   // ── Passage operations ─────────────────────────────────────────────
@@ -681,6 +927,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         content: r.content,
         speaker: r.speaker ?? undefined,
         position: r.position ?? undefined,
+        rank: r.rank,
         createdAt: r.created_at ?? undefined,
       }));
 
@@ -754,6 +1001,15 @@ interface RowShape {
   provenance_tier: string | null;
   provenance_source: string | null;
   generalizable: number | null;
+  authority: string | null;
+  activation: string | null;
+  verified_at: string | null;
+  source_ids: string | null;
+  summary_of_anchor: string | null;
+  compression_rationale: string | null;
+  contradicts: string | null;
+  invalid_at: string | null;
+  review_cycle_days: number | null;
 }
 
 function rowToItem(row: RowShape): EvidenceItem {
@@ -778,5 +1034,51 @@ function rowToItem(row: RowShape): EvidenceItem {
     };
   }
   if (row.generalizable != null) item.generalizable = row.generalizable === 1;
+  if (row.authority != null) item.authority = row.authority as EvidenceItem['authority'];
+  if (row.activation != null) item.activation = row.activation as EvidenceItem['activation'];
+  if (row.verified_at != null) item.verifiedAt = row.verified_at;
+  if (row.source_ids != null) item.sourceIds = JSON.parse(row.source_ids);
+  if (row.summary_of_anchor != null) item.summaryOfAnchor = row.summary_of_anchor;
+  if (row.compression_rationale != null) item.compressionRationale = row.compression_rationale;
+  if (row.contradicts != null) item.contradicts = JSON.parse(row.contradicts);
+  if (row.invalid_at != null) item.invalidAt = row.invalid_at;
+  if (row.review_cycle_days != null) item.reviewCycleDays = row.review_cycle_days;
   return item;
+}
+
+// ── F163: Authority boost weights (1.0–1.3 range, spec constraint) ──
+
+const AUTHORITY_WEIGHTS: Record<F163Authority, number> = {
+  constitutional: 1.3,
+  validated: 1.2,
+  candidate: 1.1,
+  observed: 1.0,
+};
+
+/**
+ * F163: Post-retrieval authority boost. Reranks results in-place when
+ * F163_AUTHORITY_BOOST is 'on'. In 'shadow' mode, the boost is computed
+ * but the original order is preserved. In 'off' mode, this is a no-op.
+ */
+function applyAuthorityBoost(results: EvidenceItem[]): void {
+  const flags = freezeFlags();
+  if (flags.authorityBoost === 'off' || results.length < 2) return;
+
+  // RRF-style positional score: 1/(rank+k) keeps adjacent positions close
+  // so the 1.0–1.3 authority weight can meaningfully reorder near-tied items.
+  const K = 60;
+  const scored = results.map((item, i) => ({
+    item,
+    score: (1 / (i + K)) * AUTHORITY_WEIGHTS[(item.authority as F163Authority) ?? 'observed'],
+  }));
+
+  scored.sort((a, b) => b.score - a.score);
+
+  if (flags.authorityBoost === 'on') {
+    // Rewrite results array in-place
+    for (let i = 0; i < results.length; i++) {
+      results[i] = scored[i].item;
+    }
+  }
+  // shadow: order unchanged, but boost was computed (logging in Task 7)
 }

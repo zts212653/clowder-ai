@@ -80,6 +80,15 @@ describe('MissionControlPage', () => {
     expect(backLink?.getAttribute('href')).toBe('/');
   });
 
+  it('does not render the thread sidebar inside mission hub layout', async () => {
+    await act(async () => {
+      root.render(React.createElement(MissionControlPage));
+    });
+    await flush(act);
+
+    expect(container.querySelector('[data-testid="thread-sidebar"]')).toBeNull();
+  });
+
   it('creates backlog items from quick create form', async () => {
     await act(async () => {
       root.render(React.createElement(MissionControlPage));

@@ -6,7 +6,11 @@
 
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
-import { assertRedisIsolationOrThrow, cleanupPrefixedRedisKeys } from './helpers/redis-test-helpers.js';
+import {
+  assertRedisIsolationOrThrow,
+  cleanupPrefixedRedisKeys,
+  redisIsolationSkipReason,
+} from './helpers/redis-test-helpers.js';
 
 const REDIS_URL = process.env.REDIS_URL;
 
@@ -193,7 +197,7 @@ class FakeRedisForTaskStore {
   }
 }
 
-describe('RedisTaskStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false }, () => {
+describe('RedisTaskStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let RedisTaskStore;
   let createRedisClient;
   let redis;

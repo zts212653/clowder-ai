@@ -1,17 +1,19 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type Thread, useChatStore } from '@/stores/chatStore';
+import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
+import { loadThreads as loadCachedThreads } from '@/utils/offline-store';
 import { BootcampIcon } from '../icons/BootcampIcon';
 import { HubIcon } from '../icons/HubIcon';
 import { MemoryIcon } from '../icons/MemoryIcon';
-import { TaskPanel } from '../TaskPanel';
+
 import { readProjectNames, writeProjectNames } from './active-workspace';
 import { DirectoryPickerModal, type NewThreadOptions } from './DirectoryPickerModal';
 import { SectionGroup } from './SectionGroup';
 import { ThreadItem } from './ThreadItem';
+import { pushThreadRouteWithHistory } from './thread-navigation';
 import {
   getProjectPaths,
   mergeLiveActivityIntoThreads,
@@ -30,8 +32,16 @@ interface ThreadSidebarProps {
   onHubClick?: () => void;
 }
 
+function notifyThreadCreateFailure(message: string) {
+  useToastStore.getState().addToast({
+    type: 'error',
+    title: '创建线程失败',
+    message,
+    duration: 6000,
+  });
+}
+
 export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick }: ThreadSidebarProps) {
-  const router = useRouter();
   const {
     threads,
     currentThreadId,
@@ -95,13 +105,24 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
 
   const loadThreads = useCallback(async () => {
     setLoadingThreads(true);
+
+    // F164: Cache-first — show IndexedDB snapshot immediately (skip unread init; API refresh will handle)
+    try {
+      const cached = await loadCachedThreads();
+      if (cached && cached.length > 0) {
+        setThreads(cached);
+      }
+    } catch {
+      // IDB read failure — continue to API
+    }
+
+    // Then fetch fresh data from API (replace snapshot if successful)
     try {
       const res = await apiFetch('/api/threads');
       if (!res.ok) return;
       const data = await res.json();
       const threads = data.threads ?? [];
-      setThreads(threads);
-      // F069: Restore unread state from API
+      setThreads(threads); // Also triggers IDB write-through via chatStore
       const { initThreadUnread } = useChatStore.getState();
       for (const thread of threads) {
         if (thread.unreadCount > 0 || thread.hasUserMention) {
@@ -109,7 +130,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
         }
       }
     } catch {
-      // Silently ignore
+      // API failed — IDB snapshot already displayed (if available)
     } finally {
       setLoadingThreads(false);
     }
@@ -119,6 +140,15 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
     void loadThreads();
     // Fetch global bubble display defaults from Config Hub on mount
     void useChatStore.getState().fetchGlobalBubbleDefaults();
+  }, [loadThreads]);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      void loadThreads();
+      void useChatStore.getState().fetchGlobalBubbleDefaults();
+    };
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
   }, [loadThreads]);
 
   // F070: Fetch governance health for all registered external projects
@@ -139,15 +169,13 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
     })();
   }, []);
 
-  const navigateToThread = useCallback(
-    (threadId: string) => {
-      router.push(threadId === 'default' ? '/' : `/thread/${threadId}`);
-    },
-    [router],
-  );
+  const navigateToThread = useCallback((threadId: string) => {
+    pushThreadRouteWithHistory(threadId, typeof window !== 'undefined' ? window : undefined);
+  }, []);
 
   const createInProject = useCallback(
     async (opts: NewThreadOptions) => {
+      console.log('[createInProject] called with opts=', JSON.stringify(opts));
       setIsCreating(true);
       setShowPicker(false);
       try {
@@ -162,7 +190,12 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
             ...(opts.backlogItemId ? { backlogItemId: opts.backlogItemId } : {}),
           }),
         });
-        if (!res.ok) return;
+        if (!res.ok) {
+          const errBody = await res.text().catch(() => '(no body)');
+          console.error('[createInProject] POST /api/threads failed:', res.status, errBody);
+          notifyThreadCreateFailure('这次创建对话没有成功，请稍后重试。');
+          return;
+        }
         const thread: Thread = await res.json();
 
         // F33: Bind external sessions after thread creation (best-effort, parallel)
@@ -190,8 +223,9 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
           onClose?.();
         }
         await loadThreads();
-      } catch {
-        // Silently ignore
+      } catch (err) {
+        console.error('[createInProject] exception:', err);
+        notifyThreadCreateFailure('网络请求没有完成，创建对话失败。请稍后重试。');
       } finally {
         setIsCreating(false);
       }
@@ -252,15 +286,21 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
           },
         }),
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => '(no body)');
+        console.error('[createBootcampThread] POST /api/threads failed:', res.status, errBody);
+        notifyThreadCreateFailure('训练营线程没有创建成功，请稍后重试。');
+        return;
+      }
       const thread: Thread = await res.json();
       navigateToThread(thread.id);
       if (typeof window !== 'undefined' && window.innerWidth < 768) {
         onClose?.();
       }
       await loadThreads();
-    } catch {
-      // Silently ignore
+    } catch (err) {
+      console.error('[createBootcampThread] exception:', err);
+      notifyThreadCreateFailure('训练营线程创建失败，请检查网络后重试。');
     } finally {
       setIsCreating(false);
     }
@@ -338,17 +378,18 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
 
   const handleSelect = useCallback(
     (threadId: string) => {
+      // Always clear unread badge — user clicking the thread = "I've seen it"
+      useChatStore.getState().clearUnread(threadId);
       if (threadId === currentThreadId) return;
-      // B1.1: Restore projectPath from thread metadata on switch
-      const target = threads.find((t) => t.id === threadId);
-      setCurrentProject(target?.projectPath ?? 'default');
+      // Let the new thread restore projectPath after the route switch.
+      // Pre-navigation global store writes can stall SPA thread navigation.
       navigateToThread(threadId);
       // Auto-close sidebar on mobile after selecting a thread
       if (typeof window !== 'undefined' && window.innerWidth < 768) {
         onClose?.();
       }
     },
-    [currentThreadId, threads, setCurrentProject, navigateToThread, onClose],
+    [currentThreadId, navigateToThread, onClose],
   );
 
   // F095 Phase F: Project action handlers
@@ -480,7 +521,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
               type="button"
               onClick={() => {
                 const fromParam = currentThreadId ? `?from=${encodeURIComponent(currentThreadId)}` : '';
-                router.push(`/memory${fromParam}`);
+                window.location.assign(`/memory${fromParam}`);
                 if (typeof window !== 'undefined' && window.innerWidth < 768) {
                   onClose?.();
                 }
@@ -498,6 +539,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
                 className="text-xs px-2 py-1 rounded-lg border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
                 title="IM Hub"
                 data-testid="sidebar-hub"
+                data-guide-id="im-hub.trigger"
               >
                 <HubIcon className="w-3.5 h-3.5 inline-block -mt-0.5" />
               </button>
@@ -518,7 +560,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
             type="button"
             onClick={() => {
               const fromParam = currentThreadId ? `?from=${encodeURIComponent(currentThreadId)}` : '';
-              router.push(`/mission-hub${fromParam}`);
+              window.location.assign(`/mission-hub${fromParam}`);
               if (typeof window !== 'undefined' && window.innerWidth < 768) {
                 onClose?.();
               }
@@ -804,8 +846,6 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
             </div>
           )}
         </div>
-
-        <TaskPanel />
       </aside>
 
       {showPicker && (

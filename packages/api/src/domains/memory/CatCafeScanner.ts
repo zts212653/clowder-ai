@@ -71,6 +71,8 @@ export class CatCafeScanner implements RepoScanner {
       | 'archived';
 
     const topics = frontmatter?.topics;
+    const sectionKeywords = extractSectionKeywords(content);
+    const keywords = mergeKeywords(Array.isArray(topics) ? (topics as string[]) : [], sectionKeywords);
     const sourcePath = relative(projectRoot, filePath);
 
     return {
@@ -82,7 +84,7 @@ export class CatCafeScanner implements RepoScanner {
         updatedAt: new Date().toISOString(),
         sourcePath,
         ...(summary ? { summary } : {}),
-        ...(Array.isArray(topics) ? { keywords: topics as string[] } : {}),
+        ...(keywords.length > 0 ? { keywords } : {}),
       },
       provenance: { tier: 'authoritative', source: sourcePath },
       rawContent: content,
@@ -322,4 +324,49 @@ function extractSummary(content: string): string | null {
   if (!first) return null;
   const trimmed = first.trim().replace(/\n/g, ' ');
   return trimmed.length > 300 ? `${trimmed.slice(0, 297)}...` : trimmed;
+}
+
+function extractSectionKeywords(content: string): string[] {
+  const keywords: string[] = [];
+  let activeFence: { char: '`' | '~'; length: number } | null = null;
+
+  for (const line of content.split(/\r?\n/)) {
+    const fenceMatch = line.match(/^\s{0,3}([`~]{3,})/);
+    if (fenceMatch) {
+      const marker = fenceMatch[1];
+      const suffix = line.slice(fenceMatch[0].length);
+      const char = marker[0] as '`' | '~';
+      const length = marker.length;
+      if (activeFence == null) {
+        activeFence = { char, length };
+        continue;
+      }
+      if (activeFence.char === char && length >= activeFence.length && suffix.trim() === '') {
+        activeFence = null;
+        continue;
+      }
+    }
+
+    if (activeFence != null) continue;
+
+    const heading = line.match(/^##+\s+(.+)$/)?.[1]?.trim();
+    if (!heading) continue;
+    if (heading.length > 80) continue;
+    keywords.push(heading);
+  }
+  return keywords;
+}
+
+function mergeKeywords(primary: string[], secondary: string[]): string[] {
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  for (const raw of [...primary, ...secondary]) {
+    const value = raw.trim();
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(value);
+  }
+  return merged;
 }

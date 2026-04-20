@@ -1,5 +1,6 @@
 'use client';
 
+import { Press_Start_2P, Silkscreen } from 'next/font/google';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FighterId } from '@/games/pixel-brawl/types';
 
@@ -8,16 +9,14 @@ type GameMode = 'pvai' | 'aivai';
 const ALL_FIGHTERS: FighterId[] = ['opus46', 'opus45', 'codex', 'gpt54'];
 const PVP_FIGHTERS: FighterId[] = ['opus46', 'codex'];
 
-/** Load pixel fonts from Google Fonts */
-function ensureFontsLoaded(): Promise<void> {
-  const id = 'pixel-brawl-fonts';
-  if (document.getElementById(id)) return document.fonts.ready.then(() => {});
-  const link = document.createElement('link');
-  link.id = id;
-  link.rel = 'stylesheet';
-  link.href = 'https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Silkscreen:wght@400;700&display=swap';
-  document.head.appendChild(link);
-  return document.fonts.ready.then(() => {});
+const pressStart2p = Press_Start_2P({ subsets: ['latin'], weight: '400', display: 'swap' });
+const silkscreen = Silkscreen({ subsets: ['latin'], weight: ['400', '700'], display: 'swap' });
+
+async function waitForPixelFonts(): Promise<void> {
+  await Promise.all([
+    document.fonts.load(`16px ${pressStart2p.style.fontFamily}`),
+    document.fonts.load(`16px ${silkscreen.style.fontFamily}`),
+  ]);
 }
 
 export default function PixelBrawlPage() {
@@ -30,8 +29,8 @@ export default function PixelBrawlPage() {
 
     gameRef.current?.destroy(true);
 
-    // Ensure pixel fonts are loaded before Phaser renders text
-    await ensureFontsLoaded();
+    // Ensure local self-hosted fonts are loaded before Phaser renders text.
+    await waitForPixelFonts();
 
     const Phaser = (await import('phaser')).default;
     const { BattleScene } = await import('@/games/pixel-brawl/scenes/BattleScene');
@@ -72,7 +71,7 @@ export default function PixelBrawlPage() {
         width: '100vw',
         height: '100vh',
         backgroundColor: '#000',
-        fontFamily: '"Silkscreen", monospace',
+        fontFamily: silkscreen.style.fontFamily,
       }}
     >
       {!started && (
@@ -91,7 +90,7 @@ export default function PixelBrawlPage() {
               color: '#F1E28A',
               margin: 0,
               letterSpacing: '2px',
-              fontFamily: '"Press Start 2P", monospace',
+              fontFamily: pressStart2p.style.fontFamily,
             }}
           >
             PIXEL BRAWL
@@ -106,7 +105,7 @@ export default function PixelBrawlPage() {
                 backgroundColor: '#1E2430',
                 color: '#00F0FF',
                 border: '2px solid #3A4658',
-                fontFamily: '"Silkscreen", monospace',
+                fontFamily: silkscreen.style.fontFamily,
                 fontSize: '14px',
                 cursor: 'pointer',
               }}
@@ -121,7 +120,7 @@ export default function PixelBrawlPage() {
                 backgroundColor: '#1E2430',
                 color: '#2FA56E',
                 border: '2px solid #3A4658',
-                fontFamily: '"Silkscreen", monospace',
+                fontFamily: silkscreen.style.fontFamily,
                 fontSize: '14px',
                 cursor: 'pointer',
               }}

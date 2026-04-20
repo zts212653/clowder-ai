@@ -16,6 +16,11 @@ import { createModuleLogger } from '../logger.js';
 
 const log = createModuleLogger('ws');
 
+interface QueueProcessorLike {
+  clearPause(threadId: string, catId?: string): void;
+  releaseSlot(threadId: string, catId: string): void;
+}
+
 /**
  * Build the sequence of AgentMessages to broadcast after a successful cancel.
  * Pure function — extracted for testability (avoids duplicating logic in tests).
@@ -50,6 +55,7 @@ export function buildCancelMessages(result: CancelResult): AgentMessage[] {
 export class SocketManager {
   private io: Server;
   private invocationTracker: InvocationTracker | null;
+  private queueProcessor: QueueProcessorLike | null;
   private multiMentionOrchestrator: {
     abortByThread(threadId: string): number;
     abortBySlot?(threadId: string, catId: string): number;
@@ -57,6 +63,7 @@ export class SocketManager {
 
   constructor(httpServer: HttpServer, invocationTracker?: InvocationTracker) {
     this.invocationTracker = invocationTracker ?? null;
+    this.queueProcessor = null;
     this.multiMentionOrchestrator = null;
     const corsOrigins = resolveFrontendCorsOrigins(process.env, console);
     this.io = new Server(httpServer, {
@@ -158,6 +165,10 @@ export class SocketManager {
             for (const msg of buildCancelMessages(result)) {
               this.broadcastAgentMessage(msg, data.threadId);
             }
+            for (const catId of catIds) {
+              this.queueProcessor?.clearPause(data.threadId, catId);
+              this.queueProcessor?.releaseSlot(data.threadId, catId);
+            }
           }
           // F108 + F086: Also abort multi-mention dispatches for this specific cat
           this.multiMentionOrchestrator?.abortBySlot?.(data.threadId, data.catId);
@@ -166,6 +177,15 @@ export class SocketManager {
           // cancelAll returns the catIds that were actually cancelled, so we can
           // scope the orchestrator abort to just those cats — not the entire thread.
           const cancelledCatIds = this.invocationTracker.cancelAll(data.threadId, userId);
+          if (cancelledCatIds.length > 0) {
+            for (const msg of buildCancelMessages({ cancelled: true, catIds: cancelledCatIds })) {
+              this.broadcastAgentMessage(msg, data.threadId);
+            }
+            for (const catId of cancelledCatIds) {
+              this.queueProcessor?.clearPause(data.threadId, catId);
+              this.queueProcessor?.releaseSlot(data.threadId, catId);
+            }
+          }
           // F156 P1-fix: Use per-cat abortBySlot instead of thread-wide abortByThread.
           // abortByThread would kill other users' multi-mention dispatches too.
           for (const catId of cancelledCatIds) {
@@ -186,6 +206,11 @@ export class SocketManager {
     abortBySlot?(threadId: string, catId: string): number;
   }): void {
     this.multiMentionOrchestrator = orch;
+  }
+
+  /** Wire QueueProcessor after bootstrap so WebSocket stop can mirror REST cancel cleanup. */
+  setQueueProcessor(queueProcessor: QueueProcessorLike): void {
+    this.queueProcessor = queueProcessor;
   }
 
   /**

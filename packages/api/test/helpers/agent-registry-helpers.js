@@ -6,6 +6,26 @@
  * to an AgentRegistry instance.
  */
 
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+let sharedTestGlobalConfigRoot = null;
+
+function ensureTestGlobalConfigRoot() {
+  if (!process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT) {
+    if (!sharedTestGlobalConfigRoot) {
+      sharedTestGlobalConfigRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-agent-registry-'));
+      process.on('exit', () => {
+        if (sharedTestGlobalConfigRoot) {
+          rmSync(sharedTestGlobalConfigRoot, { recursive: true, force: true });
+        }
+      });
+    }
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = sharedTestGlobalConfigRoot;
+  }
+}
+
 /**
  * Ensure catRegistry has the three built-in cats registered.
  * Safe to call multiple times (skips if already registered).
@@ -41,6 +61,9 @@ export async function createTestAgentRegistry(services) {
  *   }));
  */
 export async function migrateRouterOpts(oldOpts) {
+  ensureTestGlobalConfigRoot();
+  const { resetMigrationState } = await import('../../dist/config/catalog-accounts.js');
+  resetMigrationState();
   await ensureCatRegistryPopulated();
   const { claudeService, codexService, geminiService, ...rest } = oldOpts;
   const agentRegistry = await createTestAgentRegistry({ claudeService, codexService, geminiService });

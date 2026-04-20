@@ -23,7 +23,7 @@ export const auditRoutes: FastifyPluginAsync<AuditRoutesOptions> = async (app, o
 
   app.get<{ Params: { threadId: string } }>('/api/audit/thread/:threadId', async (request, reply) => {
     const { threadId } = request.params;
-    const userId = resolveUserId(request);
+    const userId = resolveUserId(request, { defaultUserId: 'default-user' });
 
     if (!userId) {
       reply.status(401);

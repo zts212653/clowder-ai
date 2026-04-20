@@ -1,19 +1,20 @@
 /**
  * Skills Route
- * GET /api/skills — Clowder AI 共享 Skills 看板数据
- *
- * 扫描 cat-cafe-skills/ 源目录，检查 Claude/Codex/Gemini/Kimi provider symlink 挂载状态，
- * 解析 BOOTSTRAP.md 提取分类，解析 manifest.yaml 提取触发词。
+ * GET /api/skills — Clowder AI 共享 Skills 看板数据 + staleness/conflicts (ADR-025 Phase 2)
+ * POST /api/skills/sync — Re-sync managed symlinks
+ * POST /api/skills/resolve-conflict — Resolve user/project skill conflict
  */
 
 import { existsSync } from 'node:fs';
-import { readdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FastifyPluginAsync } from 'fastify';
-import { parse as parseYaml } from 'yaml';
-import { readCapabilitiesConfig, resolveRequiredMcpStatus } from '../config/capabilities/capability-orchestrator.js';
+import type { SkillConflict } from '../config/governance/skill-conflict.js';
+import { detectConflicts } from '../config/governance/skill-conflict.js';
+import { resolveConflict, syncSkills, validateSkillName } from '../config/governance/skill-sync.js';
+import type { SkillsStaleness } from '../config/governance/skills-state.js';
+import { checkStaleness, readSkillsState } from '../config/governance/skills-state.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import {
@@ -21,6 +22,13 @@ import {
   isSkillMountedForProvider,
   resolveMainRepoPath,
 } from '../utils/skill-mount.js';
+import {
+  listSkillDirs,
+  parseBootstrap,
+  parseManifestSkillMeta,
+  resolveSkillMcpStatuses,
+  type SkillMcpDependency,
+} from '../utils/skill-parse.js';
 
 interface SkillMount {
   claude: boolean;
@@ -37,11 +45,6 @@ interface SkillEntry {
   requiresMcp?: SkillMcpDependency[];
 }
 
-interface SkillMcpDependency {
-  id: string;
-  status: 'ready' | 'missing' | 'unresolved';
-}
-
 interface SkillsSummary {
   total: number;
   allMounted: boolean;
@@ -51,6 +54,8 @@ interface SkillsSummary {
 interface SkillsResponse {
   skills: SkillEntry[];
   summary: SkillsSummary;
+  staleness: SkillsStaleness | null;
+  conflicts: SkillConflict[];
 }
 
 /** Resolve Clowder AI skills source from module location (stable across cwd/project). */
@@ -65,125 +70,6 @@ function resolveCatCafeSkillsSourceDir(): string {
 }
 
 const CAT_CAFE_SKILLS_SRC = resolveCatCafeSkillsSourceDir();
-
-/** List subdirs that contain SKILL.md */
-async function listSkillDirs(skillsSrc: string): Promise<string[]> {
-  try {
-    const entries = await readdir(skillsSrc, { withFileTypes: true });
-    const names: string[] = [];
-    for (const e of entries) {
-      if (!e.isDirectory() && !e.isSymbolicLink()) continue;
-      try {
-        await readFile(join(skillsSrc, e.name, 'SKILL.md'), 'utf-8');
-        names.push(e.name);
-      } catch {
-        // No SKILL.md, skip
-      }
-    }
-    return names;
-  } catch {
-    return [];
-  }
-}
-
-interface BootstrapEntry {
-  name: string;
-  category: string;
-  trigger: string;
-}
-
-interface SkillMeta {
-  description?: string;
-  triggers?: string[];
-  requiresMcp?: string[];
-}
-
-/** Parse BOOTSTRAP.md to extract skill entries with categories and triggers. */
-async function parseBootstrap(bootstrapPath: string): Promise<Map<string, BootstrapEntry>> {
-  const result = new Map<string, BootstrapEntry>();
-  try {
-    const content = await readFile(bootstrapPath, 'utf-8');
-    const lines = content.split('\n');
-
-    let currentCategory = '';
-    for (const line of lines) {
-      // Detect category headers: ### 分类名
-      const categoryMatch = line.match(/^###\s+(.+)/);
-      if (categoryMatch?.[1]) {
-        currentCategory = categoryMatch[1].trim();
-        continue;
-      }
-      // Detect skill table rows: | `skill-name` | trigger |
-      const rowMatch = line.match(/^\|\s*`([a-z][-a-z0-9]*)`\s*\|\s*(.+?)\s*\|/);
-      if (rowMatch?.[1]) {
-        const name = rowMatch[1];
-        const trigger = rowMatch[2]?.trim() ?? '';
-        result.set(name, { name, category: currentCategory, trigger });
-      }
-    }
-  } catch {
-    // BOOTSTRAP.md not found or unreadable
-  }
-  return result;
-}
-
-/** Parse manifest.yaml and extract skill description/triggers. */
-async function parseManifestSkillMeta(skillsSrcDir: string): Promise<Map<string, SkillMeta>> {
-  const result = new Map<string, SkillMeta>();
-  const manifestPath = join(skillsSrcDir, 'manifest.yaml');
-  try {
-    const content = await readFile(manifestPath, 'utf-8');
-    const parsed = parseYaml(content) as {
-      skills?: Record<string, { description?: unknown; triggers?: unknown; requires_mcp?: unknown }>;
-    } | null;
-    if (!parsed?.skills || typeof parsed.skills !== 'object') return result;
-
-    for (const [name, meta] of Object.entries(parsed.skills)) {
-      const description = typeof meta?.description === 'string' ? meta.description.trim() : undefined;
-      const triggers = Array.isArray(meta?.triggers)
-        ? meta.triggers
-            .filter((v): v is string => typeof v === 'string')
-            .map((s) => s.trim())
-            .filter(Boolean)
-        : undefined;
-      const requiresMcp = Array.isArray(meta?.requires_mcp)
-        ? meta.requires_mcp
-            .filter((value): value is string => typeof value === 'string')
-            .map((value) => value.trim())
-            .filter(Boolean)
-        : undefined;
-      if (description || (triggers && triggers.length > 0) || (requiresMcp && requiresMcp.length > 0)) {
-        result.set(name, {
-          ...(description ? { description } : {}),
-          ...(triggers && triggers.length > 0 ? { triggers } : {}),
-          ...(requiresMcp && requiresMcp.length > 0 ? { requiresMcp } : {}),
-        });
-      }
-    }
-  } catch {
-    // manifest missing or invalid
-  }
-  return result;
-}
-
-async function resolveSkillMcpStatuses(
-  projectRoot: string,
-  manifestMeta: Map<string, SkillMeta>,
-): Promise<Map<string, SkillMcpDependency>> {
-  const capabilities = await readCapabilitiesConfig(projectRoot);
-  const requiredIds = new Set<string>();
-  for (const meta of manifestMeta.values()) {
-    for (const id of meta.requiresMcp ?? []) requiredIds.add(id);
-  }
-
-  const statuses = new Map<string, SkillMcpDependency>();
-  for (const id of requiredIds) {
-    const resolved = await resolveRequiredMcpStatus(id, { capabilities, env: process.env });
-    statuses.set(id, { id, status: resolved.status });
-  }
-
-  return statuses;
-}
 
 export const skillsRoutes: FastifyPluginAsync = async (app) => {
   app.get('/api/skills', async (request, reply) => {
@@ -265,18 +151,86 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
     const unregistered = sourceSkills.filter((n) => !bootstrapNames.has(n));
     const phantom = [...bootstrapNames].filter((n) => !sourceNames.has(n));
     const registrationConsistent = unregistered.length === 0 && phantom.length === 0;
-
     const allMounted = skills.every((s) => s.mounts.claude && s.mounts.codex && s.mounts.gemini && s.mounts.kimi);
+
+    // ADR-025 Phase 2: staleness + conflicts
+    const state = await readSkillsState(projectRoot);
+    const managedNames = state?.managedSkillNames ?? sourceSkills;
+    const [staleness, conflicts] = await Promise.all([
+      checkStaleness(projectRoot, skillsSrc),
+      detectConflicts(projectRoot, home, managedNames),
+    ]);
 
     const response: SkillsResponse = {
       skills,
-      summary: {
-        total: skills.length,
-        allMounted,
-        registrationConsistent,
-      },
+      summary: { total: skills.length, allMounted, registrationConsistent },
+      staleness,
+      conflicts,
     };
 
     return response;
+  });
+
+  app.post('/api/skills/sync', async (request, reply) => {
+    const userId = resolveUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
+    }
+    const body = (request.body ?? {}) as { projectPath?: string };
+    const skillsSrc = CAT_CAFE_SKILLS_SRC;
+    const repoRoot = dirname(skillsSrc);
+    let projectRoot = repoRoot;
+    if (body.projectPath) {
+      const validated = await validateProjectPath(body.projectPath);
+      if (!validated) {
+        reply.status(400);
+        return { error: 'Invalid project path: must be an existing directory under allowed roots' };
+      }
+      projectRoot = validated;
+    }
+
+    const result = await syncSkills(projectRoot, skillsSrc);
+    return result;
+  });
+
+  app.post('/api/skills/resolve-conflict', async (request, reply) => {
+    const userId = resolveUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
+    }
+    const body = (request.body ?? {}) as {
+      skillName?: string;
+      choice?: 'official' | 'mine';
+      projectPath?: string;
+    };
+    if (!body.skillName || !body.choice) {
+      reply.status(400);
+      return { error: 'skillName and choice are required' };
+    }
+    if (body.choice !== 'official' && body.choice !== 'mine') {
+      reply.status(400);
+      return { error: "choice must be 'official' or 'mine'" };
+    }
+    try {
+      validateSkillName(body.skillName);
+    } catch {
+      reply.status(400);
+      return { error: 'Invalid skill name: must be lowercase letters, digits, and hyphens' };
+    }
+    const repoRoot = dirname(CAT_CAFE_SKILLS_SRC);
+    let projectRoot = repoRoot;
+    if (body.projectPath) {
+      const validated = await validateProjectPath(body.projectPath);
+      if (!validated) {
+        reply.status(400);
+        return { error: 'Invalid project path' };
+      }
+      projectRoot = validated;
+    }
+
+    await resolveConflict(projectRoot, homedir(), body.skillName, body.choice);
+    return { ok: true, skillName: body.skillName, choice: body.choice };
   });
 };

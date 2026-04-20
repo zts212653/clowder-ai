@@ -3,7 +3,7 @@
 <EXTREMELY_IMPORTANT>
 你已加载 Cat Café Skills。路由规则定义在 `cat-cafe-skills/manifest.yaml`。
 
-## Skills 列表（30 个）
+## Skills 列表（33 个）
 
 ### 开发流程链
 ```
@@ -15,6 +15,8 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | Skill | 触发场景 | SOP Step |
 |-------|----------|----------|
 | `feat-lifecycle` | 新功能立项/讨论/完成 | — |
+| `guide-authoring` | 编排场景引导 YAML / registry / 标签契约 | — |
+| `guide-interaction` | 命中 Guide Available 后发交互卡片并启动引导 | — |
 | `collaborative-thinking` | brainstorm/多猫讨论/收敛 | — |
 | `expert-panel` | 专家辩论团/竞品分析/技术趋势/showcase | — |
 | `writing-plans` | 写实施计划 | — |
@@ -31,6 +33,7 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `writing-skills` | 写新 skill | — |
 | `pencil-design` | 设计 UI / .pen 文件 | — |
 | `rich-messaging` | 发语音/发图/发卡片/富媒体 | — |
+| `enterprise-workflow` | 企微/飞书文档、表格、待办、会议、日程一键创建 | — |
 | `schedule-tasks` | 定时任务/周期提醒/延迟执行 | — |
 | `hyperfocus-brake` | 铲屎官健康提醒/三猫撒娇打断 | — |
 | `incident-response` | 闯祸了/不可挽回/人很难过 | — |
@@ -57,7 +60,7 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `refs/requirements-checklist-template.md` | 需求点 checklist 模板（B3） |
 | `refs/mcp-callbacks.md` | HTTP callback API 参考 |
 | `refs/rich-blocks.md` | Rich block 创建指南 |
-| `refs/ppt-density-playbook.md` | PPT 密度填充手法（8 种手段） |
+| `refs/ppt-density-playbook.md` | PPT 密度填充手法（9 种手段 + 量化门禁） |
 | `refs/ppt-visual-review.md` | PPT 视觉审查 Gate（D1 布局+D2 审美） |
 | `refs/ppt-style-tile.md` | PPT 风格定调（核心页 CSS 变量） |
 

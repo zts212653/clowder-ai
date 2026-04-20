@@ -1,6 +1,5 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useCallback, useRef, useState } from 'react';
 import type { ChatMessage } from '@/stores/chatStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -8,6 +7,7 @@ import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { getUserId } from '@/utils/userId';
 import { ConfirmDialog } from './ConfirmDialog';
+import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 
 function showErrorToast(title: string, body?: Record<string, unknown>) {
   useToastStore.getState().addToast({
@@ -35,7 +35,6 @@ interface MessageActionsProps {
 export function MessageActions({ message, threadId, children }: MessageActionsProps) {
   const [dialog, setDialog] = useState<DialogState>({ type: 'none' });
   const removeThreadMessage = useChatStore((s) => s.removeThreadMessage);
-  const router = useRouter();
 
   const isUser = message.type === 'user' && !message.catId;
   const isAssistant = message.type === 'assistant' || (message.type === 'user' && !!message.catId);
@@ -121,7 +120,7 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
       });
       if (res.ok) {
         const { threadId: newThreadId } = await res.json();
-        router.push(`/thread/${newThreadId}`);
+        pushThreadRouteWithHistory(newThreadId, typeof window !== 'undefined' ? window : undefined);
       } else {
         const body = await res.json().catch(() => ({}));
         showErrorToast('分支创建失败', body);
@@ -129,7 +128,7 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
     } catch {
       showErrorToast('分支创建失败');
     }
-  }, [dialog, message.id, message.content, threadId, router]);
+  }, [dialog, message.id, message.content, threadId]);
 
   const branchingRef = useRef(false);
   const confirmBranchDirect = useCallback(async () => {
@@ -144,7 +143,7 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
       });
       if (res.ok) {
         const { threadId: newThreadId } = await res.json();
-        router.push(`/thread/${newThreadId}`);
+        pushThreadRouteWithHistory(newThreadId, typeof window !== 'undefined' ? window : undefined);
       } else {
         const body = await res.json().catch(() => ({}));
         showErrorToast('分支创建失败', body);
@@ -154,7 +153,7 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
     } finally {
       branchingRef.current = false;
     }
-  }, [message.id, threadId, router]);
+  }, [message.id, threadId]);
 
   const close = useCallback(() => setDialog({ type: 'none' }), []);
 

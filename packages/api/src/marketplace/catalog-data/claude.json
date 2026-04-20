@@ -1,0 +1,161 @@
+[
+  {
+    "id": "claude-filesystem",
+    "name": "Filesystem",
+    "description": "Read, write, search, and manage files on your local filesystem with directory listing and file operations",
+    "command": "npx",
+    "args": ["-y", "@anthropic-ai/mcp-server-filesystem", "/Users"],
+    "trustLevel": "official",
+    "publisher": "Anthropic",
+    "versionRef": "0.6.2"
+  },
+  {
+    "id": "claude-github",
+    "name": "GitHub",
+    "description": "Interact with GitHub repositories, issues, pull requests, and code search via the GitHub API",
+    "command": "npx",
+    "args": ["-y", "@anthropic-ai/mcp-server-github"],
+    "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "" },
+    "trustLevel": "official",
+    "publisher": "Anthropic",
+    "versionRef": "0.6.2"
+  },
+  {
+    "id": "claude-fetch",
+    "name": "Fetch",
+    "description": "Fetch and extract content from web pages and URLs, converting HTML to readable markdown",
+    "command": "uvx",
+    "args": ["mcp-server-fetch"],
+    "trustLevel": "official",
+    "publisher": "Anthropic",
+    "versionRef": "0.6.2"
+  },
+  {
+    "id": "claude-brave-search",
+    "name": "Brave Search",
+    "description": "Web and local search using the Brave Search API with support for news, videos, and images",
+    "command": "npx",
+    "args": ["-y", "@anthropic-ai/mcp-server-brave-search"],
+    "env": { "BRAVE_API_KEY": "" },
+    "trustLevel": "official",
+    "publisher": "Anthropic",
+    "versionRef": "0.6.2"
+  },
+  {
+    "id": "claude-memory",
+    "name": "Memory",
+    "description": "Persistent knowledge graph memory system for storing and retrieving entities and their relationships",
+    "command": "npx",
+    "args": ["-y", "@anthropic-ai/mcp-server-memory"],
+    "trustLevel": "official",
+    "publisher": "Anthropic",
+    "versionRef": "0.6.2"
+  },
+  {
+    "id": "claude-puppeteer",
+    "name": "Puppeteer",
+    "description": "Browser automation with screenshots, page navigation, form filling, and JavaScript execution",
+    "command": "npx",
+    "args": ["-y", "@anthropic-ai/mcp-server-puppeteer"],
+    "trustLevel": "official",
+    "publisher": "Anthropic",
+    "versionRef": "0.6.2"
+  },
+  {
+    "id": "claude-slack",
+    "name": "Slack",
+    "description": "Read messages, search channels, post updates, and manage Slack workspace communications",
+    "command": "npx",
+    "args": ["-y", "@anthropic-ai/mcp-server-slack"],
+    "env": { "SLACK_BOT_TOKEN": "", "SLACK_TEAM_ID": "" },
+    "trustLevel": "official",
+    "publisher": "Anthropic",
+    "versionRef": "0.6.2"
+  },
+  {
+    "id": "claude-google-maps",
+    "name": "Google Maps",
+    "description": "Location search, geocoding, directions, elevation data, and place details via Google Maps API",
+    "command": "npx",
+    "args": ["-y", "@anthropic-ai/mcp-server-google-maps"],
+    "env": { "GOOGLE_MAPS_API_KEY": "" },
+    "trustLevel": "official",
+    "publisher": "Anthropic",
+    "versionRef": "0.6.2"
+  },
+  {
+    "id": "claude-sequential-thinking",
+    "name": "Sequential Thinking",
+    "description": "Dynamic problem-solving through structured thought sequences with branching and revision capabilities",
+    "command": "npx",
+    "args": ["-y", "@anthropic-ai/mcp-server-sequential-thinking"],
+    "trustLevel": "official",
+    "publisher": "Anthropic",
+    "versionRef": "0.6.2"
+  },
+  {
+    "id": "claude-postgres",
+    "name": "PostgreSQL",
+    "description": "Connect to PostgreSQL databases for querying, schema inspection, and read-only data exploration",
+    "command": "npx",
+    "args": ["-y", "@anthropic-ai/mcp-server-postgres"],
+    "env": { "POSTGRES_CONNECTION_STRING": "" },
+    "trustLevel": "official",
+    "publisher": "Anthropic",
+    "versionRef": "0.6.2"
+  },
+  {
+    "id": "claude-sentry",
+    "name": "Sentry",
+    "description": "Access Sentry error tracking: query issues, view stack traces, and analyze error trends",
+    "command": "npx",
+    "args": ["-y", "@anthropic-ai/mcp-server-sentry"],
+    "env": { "SENTRY_AUTH_TOKEN": "" },
+    "trustLevel": "official",
+    "publisher": "Anthropic",
+    "versionRef": "0.6.2"
+  },
+  {
+    "id": "claude-figma",
+    "name": "Figma",
+    "description": "Access Figma design files, components, and styles for design-to-code workflows and design review",
+    "command": "npx",
+    "args": ["-y", "@anthropic-ai/mcp-server-figma"],
+    "env": { "FIGMA_ACCESS_TOKEN": "" },
+    "trustLevel": "verified",
+    "publisher": "Figma Community",
+    "versionRef": "0.2.1"
+  },
+  {
+    "id": "claude-linear",
+    "name": "Linear",
+    "description": "Manage Linear issues, projects, and cycles — create, search, update tasks and track project progress",
+    "command": "npx",
+    "args": ["-y", "mcp-server-linear"],
+    "env": { "LINEAR_API_KEY": "" },
+    "trustLevel": "verified",
+    "publisher": "Linear Community",
+    "versionRef": "0.3.0"
+  },
+  {
+    "id": "claude-notion",
+    "name": "Notion",
+    "description": "Read, search, and manage Notion pages, databases, and blocks for knowledge management workflows",
+    "command": "npx",
+    "args": ["-y", "mcp-server-notion"],
+    "env": { "NOTION_API_KEY": "" },
+    "trustLevel": "verified",
+    "publisher": "Notion Community",
+    "versionRef": "0.4.0"
+  },
+  {
+    "id": "claude-sqlite",
+    "name": "SQLite",
+    "description": "Query and manage SQLite databases with schema inspection, data exploration, and write operations",
+    "command": "uvx",
+    "args": ["mcp-server-sqlite", "--db-path", ""],
+    "trustLevel": "official",
+    "publisher": "Anthropic",
+    "versionRef": "0.6.2"
+  }
+]

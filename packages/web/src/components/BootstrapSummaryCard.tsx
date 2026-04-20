@@ -1,6 +1,20 @@
 import type { ProjectSummary } from '@/hooks/useIndexState';
 import { HubIcon } from './hub-icons';
 import { MemoryIcon } from './icons/MemoryIcon';
+import { SOURCE_TYPE_COLORS, SOURCE_TYPE_LABELS } from './memory/EvidenceSearch';
+
+// Fallback labels for projects without evidence store (external projects show provenance tiers)
+const TIER_LABELS: Record<string, string> = {
+  authoritative: '核心',
+  derived: '衍生',
+  soft_clue: '线索',
+};
+
+const TIER_COLORS: Record<string, string> = {
+  authoritative: 'bg-cocreator-primary/10 text-cocreator-dark',
+  derived: 'bg-blue-100 text-blue-700',
+  soft_clue: 'bg-green-100 text-green-700',
+};
 
 interface BootstrapSummaryCardProps {
   summary: ProjectSummary;
@@ -10,18 +24,6 @@ interface BootstrapSummaryCardProps {
   onSearchKnowledge?: () => void;
   onGoToMemoryHub?: () => void;
 }
-
-const TIER_LABELS: Record<string, string> = {
-  authoritative: 'Specs',
-  derived: 'Plans',
-  soft_clue: 'Lessons',
-};
-
-const TIER_COLORS: Record<string, string> = {
-  authoritative: 'bg-cocreator-primary/10 text-cocreator-dark',
-  derived: 'bg-blue-100 text-blue-700',
-  soft_clue: 'bg-green-100 text-green-700',
-};
 
 function CheckCircleIcon({ className = 'w-6 h-6' }: { className?: string }) {
   return (
@@ -114,7 +116,21 @@ export function BootstrapSummaryCard({
           )}
         </div>
 
-        {Object.keys(summary.tierCoverage).length > 0 && (
+        {summary.kindCoverage && Object.keys(summary.kindCoverage).length > 0 ? (
+          <div className="ml-16 mt-3">
+            <p className="text-[10px] text-gray-400 mb-1.5">知识覆盖</p>
+            <div className="flex flex-wrap gap-1.5">
+              {Object.entries(summary.kindCoverage).map(([kind, count]) => (
+                <span
+                  key={kind}
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${SOURCE_TYPE_COLORS[kind] ?? 'bg-gray-100 text-gray-600'}`}
+                >
+                  {SOURCE_TYPE_LABELS[kind] ?? kind} · {count}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : Object.keys(summary.tierCoverage).length > 0 ? (
           <div className="ml-16 mt-3">
             <p className="text-[10px] text-gray-400 mb-1.5">覆盖分层</p>
             <div className="flex flex-wrap gap-1.5">
@@ -128,7 +144,7 @@ export function BootstrapSummaryCard({
               ))}
             </div>
           </div>
-        )}
+        ) : null}
 
         <div className="flex items-center gap-2 ml-16 mt-4">
           {onDismiss && (

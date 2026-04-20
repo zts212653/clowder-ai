@@ -66,6 +66,7 @@ Step 3: VERIFY — 逐项检查
     spec checkbox 是记录工具，不是真相源（LL-029）
   - 🔴 新增 MCP 工具 → `MCP_TOOLS_SECTION` 更新了吗？（F086 教训：造了工具猫不知道）
   - 🔴 新增行为规则 → governance digest / shared-rules 注入更新了吗？
+  - 🔴 产出了 SKILL.md 或改了 MCP tool description → 加载 `writing-skills`，用 T0 六要素审查质量（软硬同检）
 
 Step 4: RUNTIME GUARD — 前端证据采集前先做运行态保护
   - 若会话在 `cat-cafe-runtime`，先探活：`curl -sf http://localhost:3004/health`
@@ -183,6 +184,7 @@ pnpm -r --if-present run build → exit 0 ✅
 | 拿 runtime 的 `3003/3004` 页面当成当前 worktree 的验证结果 | 报告里同时写明 `pwd/worktree` 和目标 URL；如果 URL 是 `3003/3004`，默认这是 runtime 证据，不是未合入改动证据 |
 | 截图/录屏/设计稿顺手掉进仓库根目录 | Step 7.5 必查；先移到 `${TMPDIR}/cat-cafe-evidence/...` 或正式归档目录，再继续 |
 | Redis 改动用默认测试命令 | 必须跑 `test:redis`，禁止直连 6399 |
+| 产出了 skill/MCP 但没审查质量 | 加载 `writing-skills`，用 T0 六要素审查（软硬同检） |
 | 只看 spec checkbox 就声称完成/未完成 | 核实 `git log --grep` + `gh pr list` + 实际 commit（LL-029）|
 
 **Red flags — 立刻 STOP**：

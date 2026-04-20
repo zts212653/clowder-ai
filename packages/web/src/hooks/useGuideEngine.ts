@@ -14,8 +14,10 @@ import { apiFetch } from '@/utils/api-client';
  * On completion, notifies backend to transition guideState active → completed.
  */
 export function useGuideEngine() {
+  const currentThreadId = useChatStore((s) => s.currentThreadId);
   const startGuide = useGuideStore((s) => s.startGuide);
   const clearPendingStart = useGuideStore((s) => s.clearPendingStart);
+  const exitGuide = useGuideStore((s) => s.exitGuide);
   const startInFlightRef = useRef<string | null>(null);
   const pendingRetryRef = useRef<string | null>(null);
 
@@ -93,6 +95,13 @@ export function useGuideEngine() {
   const session = useGuideStore((s) => s.session);
   const markCompletionPersisted = useGuideStore((s) => s.markCompletionPersisted);
   const markCompletionFailed = useGuideStore((s) => s.markCompletionFailed);
+
+  useEffect(() => {
+    if (!session?.threadId) return;
+    if (currentThreadId === session.threadId) return;
+    exitGuide();
+  }, [currentThreadId, exitGuide, session?.threadId]);
+
   useEffect(() => {
     if (!session || session.phase !== 'complete') return;
     const { sessionId, threadId } = session;

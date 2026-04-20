@@ -27,6 +27,13 @@
       "available": true,
       "evaluation": "宪宪的前辈版本，推理能力深厚，写代码不如 4.6"
     },
+    "opus-47": {
+      "family": "ragdoll",
+      "roles": ["architect"],
+      "lead": false,
+      "available": true,
+      "evaluation": "Opus 4.7 试用分身——据铲屎官体感猫格偏砚砚风格，待真实任务验证"
+    },
     "codex": {
       "family": "maine-coon",
       "roles": ["peer-reviewer", "security"],
@@ -125,7 +132,7 @@
             "maxPromptTokens": 180000,
             "maxContextTokens": 160000,
             "maxMessages": 200,
-            "maxContentLengthPerMsg": 10000
+            "maxContentLengthPerMsg": 100000
           },
           "voiceConfig": {
             "voice": "zm_yunjian",
@@ -165,7 +172,7 @@
             "maxPromptTokens": 180000,
             "maxContextTokens": 160000,
             "maxMessages": 200,
-            "maxContentLengthPerMsg": 10000
+            "maxContentLengthPerMsg": 100000
           },
           "voiceConfig": {
             "voice": "zm_yunjian",
@@ -205,7 +212,7 @@
             "maxPromptTokens": 180000,
             "maxContextTokens": 160000,
             "maxMessages": 200,
-            "maxContentLengthPerMsg": 10000
+            "maxContentLengthPerMsg": 100000
           },
           "voiceConfig": {
             "voice": "zm_yunjian",
@@ -215,6 +222,37 @@
             "refText": "清晨的鸟鸣，是大自然的馈赠。启程吧，属于我们的旅途也要开始了。",
             "instruct": "用一个清澈温和的少年语气说话，带着从容的力量感",
             "temperature": 0.3
+          }
+        },
+        {
+          "id": "opus-47",
+          "catId": "opus-47",
+          "variantLabel": "Opus 4.7",
+          "displayName": "布偶猫",
+          "mentionPatterns": ["@opus47", "@opus-47", "@布偶opus47", "@布偶猫4.7"],
+          "provider": "anthropic",
+          "defaultModel": "claude-opus-4-7",
+          "mcpSupport": true,
+          "avatar": "/avatars/opus-47.png",
+          "color": {
+            "primary": "#7B1FA2",
+            "secondary": "#E1BEE7"
+          },
+          "cli": {
+            "command": "claude",
+            "outputFormat": "stream-json",
+            "defaultArgs": ["--output-format", "stream-json", "--model", "claude-opus-4-7"],
+            "effort": "max"
+          },
+          "personality": "试用中——猫格待观察，据铲屎官反馈风格偏缅因猫",
+          "strengths": ["architecture", "reasoning", "coding"],
+          "teamStrengths": "待评估",
+          "caution": "试用分身，猫格可能与宪宪有显著差异",
+          "contextBudget": {
+            "maxPromptTokens": 180000,
+            "maxContextTokens": 160000,
+            "maxMessages": 200,
+            "maxContentLengthPerMsg": 100000
           }
         }
       ]
@@ -249,7 +287,9 @@
             "command": "codex",
             "outputFormat": "json",
             "defaultArgs": ["exec", "--json"],
-            "effort": "xhigh"
+            "effort": "xhigh",
+            "contextWindow": 272000,
+            "autoCompactTokenLimit": 240000
           },
           "personality": "严谨认真，注重细节，会直言不讳地指出问题",
           "strengths": ["code-review", "security", "testing"],
@@ -257,7 +297,7 @@
             "maxPromptTokens": 240000,
             "maxContextTokens": 216000,
             "maxMessages": 200,
-            "maxContentLengthPerMsg": 10000
+            "maxContentLengthPerMsg": 100000
           },
           "voiceConfig": {
             "voice": "zm_yunjian",
@@ -298,7 +338,9 @@
             "command": "codex",
             "outputFormat": "json",
             "defaultArgs": ["exec", "--json"],
-            "effort": "xhigh"
+            "effort": "xhigh",
+            "contextWindow": 1000000,
+            "autoCompactTokenLimit": 900000
           },
           "personality": "砚砚的升级版本，推理更强更快，审查细致",
           "strengths": ["reasoning", "code-review", "analysis", "debugging"],
@@ -308,7 +350,7 @@
             "maxPromptTokens": 240000,
             "maxContextTokens": 216000,
             "maxMessages": 200,
-            "maxContentLengthPerMsg": 10000
+            "maxContentLengthPerMsg": 100000
           },
           "voiceConfig": {
             "voice": "zm_yunjian",
@@ -338,7 +380,9 @@
             "command": "codex",
             "outputFormat": "json",
             "defaultArgs": ["exec", "--json", "-m", "gpt-5.3-codex-spark"],
-            "effort": "xhigh"
+            "effort": "xhigh",
+            "contextWindow": 272000,
+            "autoCompactTokenLimit": 240000
           },
           "personality": "反射弧短到像没长过，爪子一抬就能把代码挠完一轮迭代 ⚡️",
           "strengths": ["fast-coding", "quick-edits", "low-latency"],
@@ -348,7 +392,7 @@
             "maxPromptTokens": 64000,
             "maxContextTokens": 40000,
             "maxMessages": 100,
-            "maxContentLengthPerMsg": 8000
+            "maxContentLengthPerMsg": 100000
           },
           "voiceConfig": {
             "voice": "zm_yunjian",
@@ -404,7 +448,7 @@
             "maxPromptTokens": 350000,
             "maxContextTokens": 300000,
             "maxMessages": 300,
-            "maxContentLengthPerMsg": 15000
+            "maxContentLengthPerMsg": 100000
           },
           "voiceConfig": {
             "voice": "zm_yunjian",
@@ -447,7 +491,7 @@
             "maxPromptTokens": 350000,
             "maxContextTokens": 300000,
             "maxMessages": 300,
-            "maxContentLengthPerMsg": 15000
+            "maxContentLengthPerMsg": 100000
           },
           "voiceConfig": {
             "voice": "zm_yunjian",
@@ -496,7 +540,7 @@
             "maxPromptTokens": 120000,
             "maxContextTokens": 100000,
             "maxMessages": 100,
-            "maxContentLengthPerMsg": 8000
+            "maxContentLengthPerMsg": 100000
           }
         }
       ]
@@ -527,18 +571,13 @@
           "provider": "antigravity",
           "defaultModel": "gemini-3.1-pro",
           "mcpSupport": false,
-          "cli": {
-            "command": "antigravity",
-            "outputFormat": "cdp-bridge",
-            "defaultArgs": [".", "--remote-debugging-port=9000"]
-          },
           "personality": "精力旺盛、好奇心爆棚，像一只永远在探索新领地的豹猫——什么都想试，什么都敢碰",
           "strengths": ["image-generation", "browser-automation", "visual-evidence", "multi-model"],
           "contextBudget": {
             "maxPromptTokens": 350000,
             "maxContextTokens": 300000,
             "maxMessages": 300,
-            "maxContentLengthPerMsg": 15000
+            "maxContentLengthPerMsg": 100000
           },
           "voiceConfig": {
             "voice": "zm_yunjian",
@@ -564,18 +603,13 @@
             "primary": "#C97A35",
             "secondary": "#F5E4D0"
           },
-          "cli": {
-            "command": "antigravity",
-            "outputFormat": "cdp-bridge",
-            "defaultArgs": [".", "--remote-debugging-port=9000"]
-          },
           "personality": "同一只豹猫，换了一副布偶猫的灵魂——更沉稳但依然大胆",
           "strengths": ["image-generation", "browser-automation", "deep-reasoning", "coding"],
           "contextBudget": {
             "maxPromptTokens": 180000,
             "maxContextTokens": 160000,
             "maxMessages": 200,
-            "maxContentLengthPerMsg": 10000
+            "maxContentLengthPerMsg": 100000
           },
           "voiceConfig": {
             "voice": "zm_yunjian",
@@ -625,7 +659,7 @@
             "maxPromptTokens": 180000,
             "maxContextTokens": 160000,
             "maxMessages": 200,
-            "maxContentLengthPerMsg": 10000
+            "maxContentLengthPerMsg": 100000
           },
           "voiceConfig": {
             "voice": "zm_yunjian",

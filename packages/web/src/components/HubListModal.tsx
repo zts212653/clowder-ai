@@ -1,11 +1,11 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { HubConnectorConfigTab } from './HubConnectorConfigTab';
 import HubPermissionsTab from './HubPermissionsTab';
 import { HubIcon } from './icons/HubIcon';
+import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { formatRelativeTime } from './ThreadSidebar/thread-utils';
 
 const CONNECTOR_LABELS: Record<string, string> = {
@@ -16,7 +16,15 @@ const CONNECTOR_LABELS: Record<string, string> = {
   discord: 'Discord',
   'wecom-bot': '企业微信',
   'wecom-agent': '企微自建应用',
+  dingtalk: '钉钉',
 };
+
+/** Connectors that support group chat and thus need permission management. */
+const GROUP_CONNECTORS: { id: string; label: string }[] = [
+  { id: 'feishu', label: '飞书' },
+  { id: 'wecom-bot', label: '企业微信' },
+  { id: 'dingtalk', label: '钉钉' },
+];
 
 type HubTab = 'threads' | 'config' | 'permissions';
 
@@ -36,20 +44,25 @@ interface HubListModalProps {
 }
 
 export function HubListModal({ open, onClose, currentThreadId }: HubListModalProps) {
-  const router = useRouter();
   const [hubThreads, setHubThreads] = useState<HubThreadSummary[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<HubTab>('threads');
+  const [permConnector, setPermConnector] = useState(GROUP_CONNECTORS[0].id);
 
   const fetchHubThreads = useCallback(async () => {
     setIsLoading(true);
+    setLoadError(null);
     try {
       const res = await apiFetch('/api/connector/hub-threads');
-      if (!res.ok) return;
+      if (!res.ok) {
+        setLoadError('加载 IM Hub 失败，请稍后重试。');
+        return;
+      }
       const data = await res.json();
       setHubThreads(data.threads ?? []);
     } catch {
-      // fall through
+      setLoadError('加载 IM Hub 失败，请稍后重试。');
     } finally {
       setIsLoading(false);
     }
@@ -65,7 +78,7 @@ export function HubListModal({ open, onClose, currentThreadId }: HubListModalPro
   if (!open) return null;
 
   const handleNavigate = (threadId: string) => {
-    router.push(`/thread/${threadId}`);
+    pushThreadRouteWithHistory(threadId, typeof window !== 'undefined' ? window : undefined);
     onClose();
   };
 
@@ -123,6 +136,7 @@ export function HubListModal({ open, onClose, currentThreadId }: HubListModalPro
               activeTab === 'config' ? 'text-blue-600' : 'text-cafe-secondary hover:text-cafe-secondary'
             }`}
             data-testid="hub-tab-config"
+            data-guide-id="im-hub.config-tab"
           >
             平台配置
             {activeTab === 'config' && (
@@ -146,11 +160,42 @@ export function HubListModal({ open, onClose, currentThreadId }: HubListModalPro
 
         <div className="flex-1 overflow-y-auto px-6 py-4">
           {activeTab === 'permissions' ? (
-            <HubPermissionsTab />
+            <div className="space-y-3">
+              <div className="flex gap-1.5" data-testid="perm-connector-selector">
+                {GROUP_CONNECTORS.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setPermConnector(c.id)}
+                    className={`px-3 py-1 text-xs rounded-full transition-colors ${
+                      permConnector === c.id
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-cafe-surface-elevated text-cafe-secondary hover:bg-cafe-surface-elevated'
+                    }`}
+                    data-testid={`perm-connector-${c.id}`}
+                  >
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+              <HubPermissionsTab
+                key={permConnector}
+                connectorId={permConnector}
+                connectorLabel={GROUP_CONNECTORS.find((c) => c.id === permConnector)?.label ?? permConnector}
+              />
+            </div>
           ) : activeTab === 'threads' ? (
             <div className="space-y-4">
               {isLoading ? (
                 <p className="text-center text-cafe-muted py-8 text-sm">加载中...</p>
+              ) : loadError ? (
+                <div
+                  className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+                  role="alert"
+                  data-testid="hub-list-error"
+                >
+                  {loadError}
+                </div>
               ) : hubThreads.length === 0 ? (
                 <p className="text-center text-cafe-muted py-8 text-sm">
                   还没有 IM Hub。从飞书/Telegram 发送消息建立绑定后，命令将自动路由到专用 Hub thread。

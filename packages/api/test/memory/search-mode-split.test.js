@@ -12,9 +12,9 @@ import { VectorStore } from '../../dist/domains/memory/VectorStore.js';
  * - hybrid = BM25 + NN → RRF fusion
  */
 
-function setupStore() {
+async function setupStore() {
   const store = new SqliteEvidenceStore(':memory:');
-  store.initialize();
+  await store.initialize();
 
   const db = store.getDb();
 
@@ -33,8 +33,8 @@ function setupStore() {
   return { store, vectorStore, db };
 }
 
-function seedDocs(store) {
-  store.upsert([
+async function seedDocs(store) {
+  await store.upsert([
     {
       anchor: 'doc-cat-names',
       kind: 'lesson',
@@ -92,15 +92,15 @@ function createMockEmbedding(queryResponse) {
 describe('Search Mode Split (KD-44)', () => {
   let store, vectorStore, db;
 
-  beforeEach(() => {
-    const setup = setupStore();
+  beforeEach(async () => {
+    const setup = await setupStore();
     store = setup.store;
     vectorStore = setup.vectorStore;
     db = setup.db;
 
     if (!vectorStore) return; // skip if no sqlite-vec
 
-    seedDocs(store);
+    await seedDocs(store);
     seedVectors(vectorStore);
 
     // Wire embedding deps — query for "naming" is close to doc-cat-names vector
@@ -192,13 +192,82 @@ describe('Search Mode Split (KD-44)', () => {
     const results = await store.search('naming', { mode: 'semantic', scope: 'docs', limit: 5 });
     for (const r of results) {
       assert.notEqual(r.kind, 'session', 'scope=docs should exclude sessions');
+      assert.notEqual(r.kind, 'thread', 'scope=docs should exclude thread digests');
     }
+  });
+
+  it('semantic mode scope=docs keeps discussion docs but excludes thread digests', async () => {
+    if (!vectorStore) return;
+    await store.upsert([
+      {
+        anchor: 'doc-f148-discussion',
+        kind: 'discussion',
+        status: 'active',
+        title: 'F148 design discussion',
+        summary: 'vector-only-zebra discussion doc',
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        anchor: 'thread-thread_f148',
+        kind: 'thread',
+        status: 'active',
+        title: 'F148 thread digest',
+        summary: 'vector-only-zebra thread digest',
+        updatedAt: new Date().toISOString(),
+      },
+    ]);
+    vectorStore.upsert('doc-f148-discussion', new Float32Array([0.56, 0.56, 0.56]));
+    vectorStore.upsert('thread-thread_f148', new Float32Array([0.57, 0.57, 0.57]));
+    const mockEmbed = createMockEmbedding(new Float32Array([0.58, 0.58, 0.58]));
+    store.setEmbedDeps({ embedding: mockEmbed, vectorStore, mode: 'on' });
+
+    const results = await store.search('vector-only-zebra', { mode: 'semantic', scope: 'docs', limit: 3 });
+    const anchors = results.map((r) => r.anchor);
+
+    assert.ok(anchors.includes('doc-f148-discussion'), 'scope=docs should keep discussion documents');
+    assert.ok(!anchors.includes('thread-thread_f148'), 'scope=docs should exclude thread digests');
+  });
+
+  it('hybrid mode scope=docs keeps discussion docs but excludes thread digests', async () => {
+    if (!vectorStore) return;
+    await store.upsert([
+      {
+        anchor: 'doc-f148-discussion-hybrid',
+        kind: 'discussion',
+        status: 'active',
+        title: 'F148 hybrid discussion',
+        summary: 'vector-only-zebra hybrid discussion doc',
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        anchor: 'thread-thread_f148_hybrid',
+        kind: 'thread',
+        status: 'active',
+        title: 'F148 hybrid thread digest',
+        summary: 'vector-only-zebra hybrid thread digest',
+        updatedAt: new Date().toISOString(),
+      },
+    ]);
+    vectorStore.upsert('doc-f148-discussion-hybrid', new Float32Array([0.56, 0.56, 0.56]));
+    vectorStore.upsert('thread-thread_f148_hybrid', new Float32Array([0.57, 0.57, 0.57]));
+    const mockEmbed = createMockEmbedding(new Float32Array([0.58, 0.58, 0.58]));
+    store.setEmbedDeps({ embedding: mockEmbed, vectorStore, mode: 'on' });
+
+    const results = await store.search('vector-only-zebra', {
+      mode: 'hybrid',
+      scope: 'docs',
+      limit: 3,
+    });
+    const anchors = results.map((r) => r.anchor);
+
+    assert.ok(anchors.includes('doc-f148-discussion-hybrid'), 'hybrid docs search should keep discussion docs');
+    assert.ok(!anchors.includes('thread-thread_f148_hybrid'), 'hybrid docs search should exclude thread digests');
   });
 
   it('semantic mode filters by provenanceTier (P1-3 fix)', async () => {
     if (!vectorStore) return;
     // Add provenance to existing docs
-    store.upsert([
+    await store.upsert([
       {
         anchor: 'doc-cat-names',
         kind: 'lesson',
@@ -240,7 +309,7 @@ describe('Search Mode Split (KD-44)', () => {
   it('hybrid mode filters by provenanceTier (P1-3 fix)', async () => {
     if (!vectorStore) return;
     // Add provenance to existing docs
-    store.upsert([
+    await store.upsert([
       {
         anchor: 'doc-cat-names',
         kind: 'lesson',
@@ -281,9 +350,9 @@ describe('Search Mode Split (KD-44)', () => {
 describe('G-4: drillDown hints', () => {
   it('thread results get drillDown hint', async () => {
     const store = new SqliteEvidenceStore(':memory:');
-    store.initialize();
+    await store.initialize();
 
-    store.upsert([
+    await store.upsert([
       {
         anchor: 'thread-abc123',
         kind: 'thread',
@@ -321,9 +390,9 @@ describe('G-4: drillDown hints', () => {
 
   it('session results get drillDown hint', async () => {
     const store = new SqliteEvidenceStore(':memory:');
-    store.initialize();
+    await store.initialize();
 
-    store.upsert([
+    await store.upsert([
       {
         anchor: 'session-xyz789',
         kind: 'session',
@@ -346,9 +415,9 @@ describe('G-4: drillDown hints', () => {
 
   it('scope=threads returns kind=thread (not session) with drillDown', async () => {
     const store = new SqliteEvidenceStore(':memory:');
-    store.initialize();
+    await store.initialize();
 
-    store.upsert([
+    await store.upsert([
       {
         anchor: 'thread-t1',
         kind: 'thread',

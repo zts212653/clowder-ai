@@ -104,7 +104,7 @@ export async function buildCatsInfo(threadId: string, deps: CommandInfoDeps): Pr
 
 export async function buildStatusInfo(
   threadId: string,
-  thread: { title?: string | null; createdAt?: number },
+  thread: { title?: string | null; createdAt?: number; preferredCats?: string[] },
   deps: CommandInfoDeps,
 ): Promise<CommandResult> {
   const participants = (await deps.participantStore?.getParticipantsWithActivity(threadId)) ?? [];
@@ -114,16 +114,26 @@ export async function buildStatusInfo(
   const created = new Date(thread.createdAt ?? 0).toLocaleDateString('zh-CN');
   const link = `${deps.frontendBaseUrl}/threads/${threadId}`;
 
+  const lines = [
+    '📊 Thread 状态',
+    `  标题：${title}`,
+    `  创建：${created}`,
+    `  参与猫：${participants.length} 只`,
+    `  最近活跃：${lastActive}`,
+  ];
+
+  // F154 Phase B (AC-B3): show preferred cat info
+  const preferred = thread.preferredCats;
+  if (preferred && preferred.length > 0) {
+    const names = preferred.map((id) => deps.catRoster?.[id]?.displayName ?? id);
+    lines.push(`  首选猫：${names.join(', ')}`);
+  }
+
+  lines.push(`  🔗 ${link}`);
+
   return {
     kind: 'status',
-    response: [
-      '📊 Thread 状态',
-      `  标题：${title}`,
-      `  创建：${created}`,
-      `  参与猫：${participants.length} 只`,
-      `  最近活跃：${lastActive}`,
-      `  🔗 ${link}`,
-    ].join('\n'),
+    response: lines.join('\n'),
     contextThreadId: threadId,
   };
 }

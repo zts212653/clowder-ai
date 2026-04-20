@@ -1,5 +1,5 @@
 /**
- * F139/F140/F320: ConflictCheckTaskSpec — detect PR merge conflicts via injectable check.
+ * F139 + F140 + clowder-ai#320: ConflictCheckTaskSpec — detect PR merge conflicts via injectable check.
  *
  * #320: Reads from unified TaskStore (kind=pr_tracking) instead of PrTrackingStore.
  *

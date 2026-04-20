@@ -34,6 +34,12 @@ interface SessionSummary {
   };
 }
 
+const sessionCache = new Map<string, SessionSummary[]>();
+
+export function __resetSessionChainCacheForTest() {
+  sessionCache.clear();
+}
+
 export interface SessionChainPanelProps {
   threadId: string;
   catInvocations: Record<string, CatInvocationInfo>;
@@ -95,34 +101,43 @@ const DEFAULT_SESSION_COLORS = { border: 'border-cafe/40', badgeBg: 'bg-gray-200
 export function SessionChainPanel({ threadId, catInvocations, onViewSession }: SessionChainPanelProps) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadedThreadId, setLoadedThreadId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [unsealingSessionId, setUnsealingSessionId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // Data is stale when it belongs to a different thread than the one we're viewing
+  const isStale = loadedThreadId !== threadId;
 
   // Re-fetch when any cat's sessionSealed changes
   const sealSignal = Object.values(catInvocations)
     .map((inv) => `${inv.sessionSeq ?? ''}:${inv.sessionSealed ?? ''}`)
     .join(',');
 
-  // Fetch sessions with stale-response guard: if threadId or sealSignal
-  // changes before the response arrives, discard the stale result.
+  // Fetch sessions — stale-while-revalidate: keep old data visible until
+  // the new response arrives, preventing blank flashes on thread switch / F5.
   // biome-ignore lint/correctness/useExhaustiveDependencies: sealSignal+refreshKey intentionally trigger re-fetch
   useEffect(() => {
     let cancelled = false;
-    setSessions([]);
+    const cached = sessionCache.get(threadId);
+    if (cached) {
+      setSessions(cached);
+      setLoadedThreadId(threadId);
+    }
     setLoading(true);
     apiFetch(`/api/threads/${threadId}/sessions`)
       .then(async (res) => {
         if (cancelled) return;
-        if (!res.ok) {
-          setSessions([]);
-          return;
-        }
+        if (!res.ok) return;
         const data = (await res.json()) as { sessions: SessionSummary[] };
-        if (!cancelled) setSessions(data.sessions);
+        if (!cancelled) {
+          sessionCache.set(threadId, data.sessions);
+          setSessions(data.sessions);
+          setLoadedThreadId(threadId);
+        }
       })
       .catch(() => {
-        if (!cancelled) setSessions([]);
+        // Keep stale data visible on transient errors
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -262,6 +277,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                   threadId={threadId}
                   catId={session.catId}
                   onBound={() => setRefreshKey((k) => k + 1)}
+                  disabled={isStale}
                 />
               )}
             </div>
@@ -332,7 +348,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                         onClick={() => {
                           void handleUnseal(session.id);
                         }}
-                        disabled={unsealingSessionId != null}
+                        disabled={unsealingSessionId != null || isStale}
                       >
                         {unsealingSessionId === session.id ? '解封中…' : '解封'}
                       </button>
@@ -351,7 +367,12 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
           threadId={threadId}
           activeCatIds={activeCatIds}
           onBound={() => setRefreshKey((k) => k + 1)}
+          disabled={isStale}
         />
+      )}
+
+      {isStale && sessions.length > 0 && (
+        <div className="text-[10px] text-cafe-muted text-center py-1 animate-pulse">Refreshing...</div>
       )}
 
       {loading && sessions.length === 0 && (

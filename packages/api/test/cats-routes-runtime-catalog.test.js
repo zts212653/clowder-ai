@@ -267,7 +267,7 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     const { writeCatalogAccount } = await import('../dist/config/catalog-accounts.js');
     const { writeCredential } = await import('../dist/config/credentials.js');
     bootstrapCatCatalog(projectRoot, process.env.CAT_TEMPLATE_PATH);
-    // F340: Custom accounts require well-known ID or explicit accountRef binding.
+    // clowder-ai#340: Custom accounts require well-known ID or explicit accountRef binding.
     // Overwrite the 'codex' well-known account with an api_key sponsor account.
     writeCatalogAccount(projectRoot, 'codex', {
       authType: 'api_key',

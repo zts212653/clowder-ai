@@ -219,13 +219,13 @@
     {
       "id": "F037",
       "name": "Agent Swarm 协同模式",
-      "status": "in-progress | **Owner**: 三猫",
+      "status": "done (archived — spawned F049, core concepts landed) | **Owner**: 三猫",
       "file": "F037-agent-swarm.md"
     },
     {
       "id": "F038",
       "name": "Skills 梳理 + 按需发现机制",
-      "status": "in-progress | **Owner**: 三猫",
+      "status": "parked (方向 A 已落地，方向 B 待 skill 数量增长后再做) | **Owner**: 三猫",
       "file": "F038-skills-discovery.md"
     },
     {
@@ -369,7 +369,7 @@
     {
       "id": "F061",
       "name": "Antigravity 接入 — 孟加拉猫（混血家族）",
-      "status": "phase-1-done | **Owner**: Ragdoll Opus 4.6",
+      "status": "phase-2-bridge | **Owner**: Ragdoll Opus 4.6（Phase 2a/2b） · Ragdoll Opus 4.7 试用分身（Phase 2c · 猫猫工具平权）",
       "file": "F061-antigravity-bengal-cat.md"
     },
     {
@@ -627,7 +627,7 @@
     {
       "id": "F102",
       "name": "记忆组件 Adapter 化重构 — IEvidenceStore + 本地索引",
-      "status": "done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-04-04",
+      "status": "done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-04-04 (Phase A~J) | **Reopened**: 2026-04-13 (Phase K) | **Re-closed**: 2026-04-14 (Phase K done, AC-K3/K4 deferred)",
       "file": "F102-memory-adapter-refactor.md"
     },
     {
@@ -723,7 +723,7 @@
     {
       "id": "F118",
       "name": "CLI Liveness Watchdog & Session Recovery — CLI 进程活性守卫 + 会话恢复",
-      "status": "done (GAP-2 D1+D2 merged, D3-D4 open) | **Owner**: Ragdoll + Maine Coon | **Priority**: P0 | **Completed**: 2026-03-14 | **Follow-up Hardening**: closed (PR #492, 2026-03-16) | **GAP-2**: Phase D — D1 merged (PR #1105, 2026-04-12), D2 merged (PR #1108, 2026-04-12), D3-D4 pending",
+      "status": "done (Phase D closed) | **Owner**: Ragdoll + Maine Coon | **Priority**: P0 | **Completed**: 2026-03-14 | **Follow-up Hardening**: closed (PR #492, 2026-03-16) | **GAP-2**: Phase D closed — D1 merged (PR #1105), D2 merged (PR #1108), D3+D4 merged (PR #1109), all 2026-04-12",
       "file": "F118-cli-liveness-watchdog.md"
     },
     {
@@ -807,7 +807,7 @@
     {
       "id": "F132",
       "name": "DingTalk + WeCom Chat Gateway — 钉钉/企微接入",
-      "status": "done | **Completed**: 2026-04-09 | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "done | **Phase A-E Completed**: 2026-04-14 | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F132-dingtalk-wecom-gateway.md"
     },
     {
@@ -885,13 +885,13 @@
     {
       "id": "F145",
       "name": "MCP Portable Provisioning — 声明式 MCP 期望态 + 本机解析",
-      "status": "done | **Owner**: Ragdoll + Maine Coon | **Priority**: P1",
+      "status": "done | **Owner**: Ragdoll + Maine Coon | **Priority**: P1 | **Completed**: 2026-04-12",
       "file": "F145-mcp-portable-provisioning.md"
     },
     {
       "id": "F146",
-      "name": "MCP Marketplace Control Plane — 一键接入 + 多生态聚合",
-      "status": "spec | **Owner**: Maine Coon + Ragdoll | **Priority**: P1",
+      "name": "Capability Marketplace Control Plane — 一键接入 + 多生态聚合",
+      "status": "in-progress | **Owner**: Maine Coon + Ragdoll | **Priority**: P1",
       "file": "F146-mcp-marketplace-control-plane.md"
     },
     {
@@ -909,7 +909,7 @@
     {
       "id": "F149",
       "name": "ACP Runtime Operations — 项目级进程池 + Session Lease",
-      "status": "in-progress | **Owner**: Maine Coon/gpt52 | **Priority**: P1",
+      "status": "done | **Owner**: Maine Coon/gpt52 | **Priority**: P1",
       "file": "F149-acp-runtime-operations.md"
     },
     {
@@ -927,7 +927,7 @@
     {
       "id": "F152",
       "name": "Expedition Memory — 外部项目记忆冷启动 + 经验回流",
-      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1 | **Close Gate**: 代码链已闭环，等待 AC-C5 team lead全链路终验",
       "file": "F152-expedition-memory.md"
     },
     {
@@ -939,37 +939,31 @@
     {
       "id": "F154",
       "name": "Cat Routing Personalization — 全局默认猫 + 首选猫入口 + 单次定向",
-      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P2",
+      "status": "done | **Owner**: Ragdoll | **Priority**: P2",
       "file": "F154-cat-routing-personalization.md"
     },
     {
       "id": "F155",
       "name": "Add-Member Internal Guide UI Spec (Phase A)",
-      "status": "unknown",
+      "status": "spec | **Owner**: Maine Coon/Maine Coon (codex) | **Scope**: 内部场景（添加成员）",
       "file": "F155-add-member-guide-ui-spec.md"
     },
     {
       "id": "F155",
-      "name": "引导场景清单",
-      "status": "unknown",
-      "file": "F155-scene-catalog.md"
-    },
-    {
-      "id": "F155",
       "name": "Scene-Based Guidance Engine — 场景式交互引导",
-      "status": "needs-discussion | **Source**: Community (mindfn) | **Priority**: TBD",
+      "status": "in-progress (Phase A merged in cat-cafe main via PR #1122; Phase B selective intake merged in cat-cafe main via PR #1147) | **Source**: Community (mindfn) | **Priority**: P1 | **Owner**: Maine Coon/gpt52",
       "file": "F155-scene-guidance-engine.md"
     },
     {
       "id": "F155",
       "name": "Scene-Based Bidirectional Guidance Engine",
-      "status": "Phase A accepted / frozen — 基础引导引擎已验收冻结，可开 PR 合入 | **Owner**: 布偶猫/宪宪 | **Priority**: P1",
+      "status": "Phase A accepted / frozen — 基础引导引擎已验收冻结，可开 PR 合入 | **Owner**: Ragdoll/Ragdoll | **Priority**: P1",
       "file": "F155-scene-guidance-phase-a-spec.md"
     },
     {
       "id": "F156",
       "name": "Security Hardening — 实时通道 + 本机信任边界加固",
-      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P0",
+      "status": "spec (Phase E planned) | **Owner**: Ragdoll | **Priority**: P0 | **Completed**: 2026-04-12 (Phase A~D) | **Reopened**: 2026-04-16 (Phase E)",
       "file": "F156-websocket-security-hardening.md"
     },
     {
@@ -989,7 +983,61 @@
       "name": "CatAgent Native Provider — Opt-in API Path",
       "status": "spec | **Owner**: 社区 (bouillipx) + Ragdoll + Maine Coon | **Priority**: P1",
       "file": "F159-catagent-native-provider.md"
+    },
+    {
+      "id": "F160",
+      "name": "毛线球升级 — Thread-Level Persistent Task Board",
+      "status": "done | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F160-task-board-upgrade.md"
+    },
+    {
+      "id": "F161",
+      "name": "ACP Carrier Generalization — 多载体复用同一 Runtime Policy",
+      "status": "spec | **Owner**: TBD | **Priority**: P2",
+      "file": "F161-acp-carrier-generalization.md"
+    },
+    {
+      "id": "F162",
+      "name": "Enterprise Action Toolkit — 官方 CLI 驱动的企业工作流",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F162-enterprise-action-toolkit.md"
+    },
+    {
+      "id": "F163",
+      "name": "Memory Entropy Reduction — 记忆熵减与知识生命周期治理",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F163-memory-entropy-reduction.md"
+    },
+    {
+      "id": "F164",
+      "name": "Thread Snapshot Persistence — 刷新不失忆",
+      "status": "done | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F164-thread-snapshot-persistence.md"
+    },
+    {
+      "id": "F165",
+      "name": "Guided Overfitting — 引导式过拟合 / 养猫路径",
+      "status": "spec | **Owner**: Ragdoll | **Priority**: P2",
+      "file": "F165-guided-overfitting.md"
+    },
+    {
+      "id": "F166",
+      "name": "Cat Order Customization — 猫猫排序自定义",
+      "status": "done | **Owner**: Ragdoll | **Priority**: P2 | **Completed**: 2026-04-17",
+      "file": "F166-cat-order-customization.md"
+    },
+    {
+      "id": "F167",
+      "name": "A2A Chain Quality — 乒乓球熔断 + 虚空传球检测 + 角色护栏",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P0",
+      "file": "F167-a2a-chain-quality.md"
+    },
+    {
+      "id": "F168",
+      "name": "Community Operations Board — 社区事务编排引擎",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F168-community-ops-board.md"
     }
   ],
-  "generated_at": "2026-04-12T07:16:10.724Z"
+  "generated_at": "2026-04-19T14:38:05.641Z"
 }

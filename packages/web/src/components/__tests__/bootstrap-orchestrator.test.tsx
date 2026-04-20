@@ -36,6 +36,7 @@ const mockSummary: ProjectSummary = {
   coreModules: [],
   docsList: [{ path: 'README.md', tier: 'authoritative' }],
   tierCoverage: { authoritative: 1 },
+  kindCoverage: {},
 };
 
 describe('BootstrapOrchestrator', () => {

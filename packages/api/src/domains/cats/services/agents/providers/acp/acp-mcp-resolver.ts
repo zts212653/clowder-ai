@@ -3,8 +3,10 @@
  *
  * Built-in cat-cafe* servers: auto-generated from projectRoot (zero config).
  * External servers (pencil, etc.): read from .mcp.json fallback.
+ * User project servers: merged from userProjectRoot/.mcp.json (F145 Phase E).
  *
  * F145 Phase C: community users can clone + pnpm install without hand-writing .mcp.json.
+ * F145 Phase E: community users' own project MCP servers auto-merge into ACP sessions.
  */
 
 import { readFileSync } from 'node:fs';
@@ -49,9 +51,46 @@ export function resolveBuiltinCatCafeServer(projectRoot: string, name: string): 
 // ─── .mcp.json fallback for external servers ─────────────────────
 
 interface McpJsonEntry {
-  command: string;
+  command?: string;
   args?: string[];
   env?: Record<string, string>;
+  type?: string;
+  url?: string;
+  headers?: Record<string, string>;
+}
+
+/** Convert a .mcp.json entry to the correct AcpMcpServer variant, or null if invalid. */
+function toAcpMcpServer(name: string, entry: McpJsonEntry): AcpMcpServer | null {
+  const isHttp = entry.type === 'http' || entry.type === 'streamableHttp';
+  const isSse = entry.type === 'sse';
+
+  if (isHttp && entry.url) {
+    return {
+      type: 'http' as const,
+      name,
+      url: entry.url,
+      headers: entry.headers ? Object.entries(entry.headers).map(([k, v]) => ({ name: k, value: v })) : [],
+    };
+  }
+  if (isSse && entry.url) {
+    return {
+      type: 'sse' as const,
+      name,
+      url: entry.url,
+      headers: entry.headers ? Object.entries(entry.headers).map(([k, v]) => ({ name: k, value: v })) : [],
+    };
+  }
+  if (entry.command) {
+    return {
+      name,
+      command: entry.command,
+      args: entry.args ?? [],
+      env: entry.env ? Object.entries(entry.env).map(([k, v]) => ({ name: k, value: v })) : [],
+    };
+  }
+  // No valid transport — skip
+  log.warn({ name }, 'MCP server entry has no command and no url — skipping');
+  return null;
 }
 
 function readMcpJson(mcpJsonPath: string): Record<string, McpJsonEntry> {
@@ -76,16 +115,23 @@ function readMcpJson(mcpJsonPath: string): Record<string, McpJsonEntry> {
 /**
  * Resolve MCP servers for an ACP session.
  *
- * Built-in cat-cafe* servers are auto-generated from projectRoot.
- * External servers fall back to .mcp.json.
+ * Three-layer priority (F145 Phase E):
+ *   1. Built-in cat-cafe* — auto-generated from projectRoot (highest)
+ *   2. Whitelist externals — from projectRoot/.mcp.json
+ *   3. User project servers — from userProjectRoot/.mcp.json (lowest, additive)
  *
  * @param projectRoot — monorepo root
  * @param whitelist — server names from cat-config.json mcpWhitelist
+ * @param userProjectRoot — user's project directory (reads .mcp.json, merges all servers)
  * @returns AcpMcpServer[] ready for newSession()
  * @throws when whitelist is non-empty but zero servers could be resolved
  */
-export function resolveAcpMcpServers(projectRoot: string, whitelist: string[]): AcpMcpServer[] {
-  if (!whitelist.length) return [];
+export function resolveAcpMcpServers(
+  projectRoot: string,
+  whitelist: string[],
+  userProjectRoot?: string,
+): AcpMcpServer[] {
+  if (!whitelist.length && !userProjectRoot) return [];
 
   const servers: AcpMcpServer[] = [];
   const externalNames: string[] = [];
@@ -112,12 +158,9 @@ export function resolveAcpMcpServers(projectRoot: string, whitelist: string[]): 
         missing.push(name);
         continue;
       }
-      servers.push({
-        name,
-        command: entry.command,
-        args: entry.args ?? [],
-        env: entry.env ? Object.entries(entry.env).map(([k, v]) => ({ name: k, value: v })) : [],
-      });
+      const server = toAcpMcpServer(name, entry);
+      if (server) servers.push(server);
+      else missing.push(name);
     }
   }
 
@@ -128,13 +171,66 @@ export function resolveAcpMcpServers(projectRoot: string, whitelist: string[]): 
     );
   }
 
-  if (servers.length === 0) {
+  if (whitelist.length > 0 && servers.length === 0) {
     throw new Error(
       `All ${whitelist.length} MCP whitelist entries [${whitelist.join(', ')}] are missing. ` +
         'ACP agent would start with zero MCP servers — aborting to prevent silent tool-call stalls.',
     );
   }
 
-  log.info({ count: servers.length, names: servers.map((s) => s.name), missing }, 'Resolved MCP servers for ACP');
+  // Phase 3 (F145 Phase E): merge user project .mcp.json servers
+  if (userProjectRoot) {
+    const resolvedNames = new Set(servers.map((s) => s.name));
+    const userMcpJsonPath = join(userProjectRoot, '.mcp.json');
+    const userServers = readMcpJson(userMcpJsonPath);
+
+    for (const [name, entry] of Object.entries(userServers)) {
+      if (resolvedNames.has(name)) {
+        log.debug({ name }, 'User project server shadowed by higher-priority server');
+        continue;
+      }
+      const server = toAcpMcpServer(name, entry);
+      if (server) servers.push(server);
+    }
+  }
+
+  log.info(
+    { count: servers.length, names: servers.map((s) => s.name), missing, hasUserProject: !!userProjectRoot },
+    'Resolved MCP servers for ACP',
+  );
+  return servers;
+}
+
+// ─── Per-invoke user project MCP resolution (F145 Phase E) ──────
+
+/**
+ * Resolve MCP servers from a user project's .mcp.json for per-invoke merge.
+ *
+ * Used by GeminiAcpAdapter.invoke() to add user project servers to
+ * base servers already resolved at init time. Servers whose names
+ * are in `exclude` are skipped (higher-priority layer wins).
+ *
+ * Returns [] if .mcp.json is missing or has no mcpServers key.
+ */
+export function resolveUserProjectMcpServers(userProjectRoot: string, exclude: ReadonlySet<string>): AcpMcpServer[] {
+  const mcpJsonPath = join(userProjectRoot, '.mcp.json');
+  const entries = readMcpJson(mcpJsonPath);
+  const servers: AcpMcpServer[] = [];
+
+  for (const [name, entry] of Object.entries(entries)) {
+    if (exclude.has(name)) {
+      log.debug({ name, userProjectRoot }, 'User project server shadowed by base server');
+      continue;
+    }
+    const server = toAcpMcpServer(name, entry);
+    if (server) servers.push(server);
+  }
+
+  if (servers.length > 0) {
+    log.info(
+      { userProjectRoot, count: servers.length, names: servers.map((s) => s.name) },
+      'F145-E: resolved user project MCP servers',
+    );
+  }
   return servers;
 }

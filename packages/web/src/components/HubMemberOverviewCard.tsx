@@ -1,3 +1,4 @@
+import type { DragEvent as ReactDragEvent } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import type { CatConfig, CoCreatorConfig } from './config-viewer-types';
 
@@ -156,41 +157,86 @@ export function HubMemberOverviewCard({
   onEdit,
   onToggleAvailability,
   togglingAvailability = false,
+  draggable = false,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  isDragging = false,
+  guideTargetId,
 }: {
   cat: CatData;
   configCat?: CatConfig;
   onEdit?: (cat: CatData) => void;
   onToggleAvailability?: (cat: CatData) => void;
   togglingAvailability?: boolean;
+  draggable?: boolean;
+  onDragStart?: (cat: CatData, event: ReactDragEvent<HTMLElement>) => void;
+  onDragOver?: (cat: CatData, event: ReactDragEvent<HTMLElement>) => void;
+  onDrop?: (cat: CatData, event: ReactDragEvent<HTMLElement>) => void;
+  onDragEnd?: (cat: CatData, event: ReactDragEvent<HTMLElement>) => void;
+  isDragging?: boolean;
+  guideTargetId?: string;
 }) {
   const status = getStatusBadge(cat);
   const title = [cat.breedDisplayName ?? cat.displayName, cat.nickname].filter(Boolean).join(' · ');
+  const editCard = () => onEdit?.(cat);
 
   return (
     <section
-      role={onEdit ? 'button' : undefined}
-      tabIndex={onEdit ? 0 : undefined}
-      onClick={() => onEdit?.(cat)}
-      onKeyDown={(event) => {
-        if (!onEdit) return;
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          onEdit(cat);
-        }
-      }}
-      className="rounded-[20px] px-[18px] py-[18px] shadow-sm transition hover:shadow-md"
+      data-testid={`cat-card-${cat.id}`}
+      draggable={draggable || undefined}
+      onDragStart={draggable ? (event) => onDragStart?.(cat, event) : undefined}
+      onDragOver={draggable ? (event) => onDragOver?.(cat, event) : undefined}
+      onDrop={draggable ? (event) => onDrop?.(cat, event) : undefined}
+      onDragEnd={draggable ? (event) => onDragEnd?.(cat, event) : undefined}
+      onClick={editCard}
+      className={`rounded-[20px] px-[18px] py-[18px] shadow-sm transition hover:shadow-md ${isDragging ? 'opacity-40' : ''}`}
       style={{ backgroundColor: '#FFFDFC', border: `1px solid ${cat.source === 'runtime' ? '#D9C7EA' : '#F1E7DF'}` }}
     >
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-[17px] font-bold text-[#2D2118]">{title}</h3>
-            {cat.source === 'runtime' ? (
-              <span className="rounded-full bg-[#F3E8FF] px-2 py-0.5 text-[11px] font-semibold text-[#9D7BC7]">
-                动态创建
-              </span>
-            ) : null}
-          </div>
+        <div className="flex items-start gap-2">
+          {draggable ? (
+            <span
+              aria-hidden="true"
+              title="拖动排序"
+              className="mt-1 cursor-grab select-none text-[18px] leading-none text-[#B59A88]"
+            >
+              ⠿
+            </span>
+          ) : null}
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              editCard();
+            }}
+            data-guide-id={guideTargetId}
+            className="min-w-0 flex-1 cursor-pointer text-left"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-[17px] font-bold text-[#2D2118]">{title}</h3>
+              {cat.source === 'runtime' ? (
+                <span className="rounded-full bg-[#F3E8FF] px-2 py-0.5 text-[11px] font-semibold text-[#9D7BC7]">
+                  动态创建
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-2.5 text-[13px] text-[#8A776B]">
+              {getMetaSummary(cat, configCat)}
+              {cat.adapterMode ? (
+                <span
+                  className={`ml-1.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                    cat.adapterMode === 'acp' ? 'bg-[#E8F5E9] text-[#4CAF50]' : 'bg-slate-100 text-slate-500'
+                  }`}
+                >
+                  {cat.adapterMode.toUpperCase()}
+                </span>
+              ) : null}
+            </p>
+
+            <p className="mt-2 text-[13px] text-[#9D7BC7]">{formatMentionPreview(cat.mentionPatterns)}</p>
+          </button>
         </div>
         <button
           type="button"
@@ -205,21 +251,6 @@ export function HubMemberOverviewCard({
           {togglingAvailability ? '切换中...' : status.label}
         </button>
       </div>
-
-      <p className="mt-2.5 text-[13px] text-[#8A776B]">
-        {getMetaSummary(cat, configCat)}
-        {cat.adapterMode ? (
-          <span
-            className={`ml-1.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold ${
-              cat.adapterMode === 'acp' ? 'bg-[#E8F5E9] text-[#4CAF50]' : 'bg-slate-100 text-slate-500'
-            }`}
-          >
-            {cat.adapterMode.toUpperCase()}
-          </span>
-        ) : null}
-      </p>
-
-      <p className="mt-2 text-[13px] text-[#9D7BC7]">{formatMentionPreview(cat.mentionPatterns)}</p>
     </section>
   );
 }

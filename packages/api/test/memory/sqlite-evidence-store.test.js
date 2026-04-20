@@ -144,6 +144,59 @@ describe('SqliteEvidenceStore', () => {
     assert.equal(results[0].anchor, 'F024');
   });
 
+  it('scope=docs excludes session and thread digests but keeps discussion docs', async () => {
+    await store.upsert([
+      {
+        anchor: 'F148',
+        kind: 'feature',
+        status: 'active',
+        title: 'F148: Hierarchical Context Transport',
+        summary: 'DecisionSignals buildThreadMemory coverageMap.searchSuggestions scoreImportance',
+        updatedAt: '2026-04-15T00:00:00Z',
+      },
+      {
+        anchor: 'doc:f148-design-discussion',
+        kind: 'discussion',
+        status: 'active',
+        title: 'F148 design discussion',
+        summary: 'DecisionSignals buildThreadMemory coverageMap.searchSuggestions scoreImportance',
+        updatedAt: '2026-04-15T00:00:00Z',
+      },
+      {
+        anchor: 'thread-thread_f148',
+        kind: 'thread',
+        status: 'active',
+        title: 'F148 thread digest',
+        summary: 'DecisionSignals buildThreadMemory coverageMap.searchSuggestions scoreImportance',
+        updatedAt: '2026-04-15T00:00:00Z',
+      },
+      {
+        anchor: 'session-f148',
+        kind: 'session',
+        status: 'active',
+        title: 'F148 session digest',
+        summary: 'DecisionSignals buildThreadMemory coverageMap.searchSuggestions scoreImportance',
+        updatedAt: '2026-04-15T00:00:00Z',
+      },
+    ]);
+
+    const results = await store.search(
+      'DecisionSignals buildThreadMemory coverageMap.searchSuggestions scoreImportance',
+      {
+        scope: 'docs',
+        mode: 'lexical',
+        limit: 10,
+      },
+    );
+
+    assert.ok(results.some((result) => result.anchor === 'F148'));
+    assert.ok(results.some((result) => result.anchor === 'doc:f148-design-discussion'));
+    assert.ok(
+      results.every((result) => result.kind !== 'thread' && result.kind !== 'session'),
+      'scope=docs should exclude thread/session digests but keep doc-backed discussions',
+    );
+  });
+
   it('search respects limit', async () => {
     const items = Array.from({ length: 10 }, (_, i) => ({
       anchor: `F${String(i).padStart(3, '0')}`,

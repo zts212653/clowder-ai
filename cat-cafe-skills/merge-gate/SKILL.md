@@ -24,9 +24,33 @@ triggers:
 
 1. Reviewer 有**明确放行信号**（"放行"/"LGTM"/"通过"/"可以合入"）
 2. **所有 P1/P2** 已修复且经 reviewer 确认
-3. Review 针对**当前分支/当前工作**（不是历史 review）
+3. Review 针对**当前分支/当前工作**（不是历史 review，且必须覆盖**当前 HEAD SHA**）
 4. BACKLOG 涉及条目已在 feature branch 上标 `[x]`
 5. **`pnpm gate` 全绿**（基于最新 `origin/main` rebase 后的全量 build + test + lint + check）
+
+### Review Continuity Guard（review 是否真的覆盖当前 HEAD）
+
+`pnpm gate`、rebase、fixup、feature index regeneration 都可能让 HEAD 变化。**只要 HEAD 变了，旧 review 默认不自动继承。**
+
+进入 Step 7 之前，author 必须核对：
+
+```bash
+CURRENT_HEAD="$(gh pr view {PR_NUMBER} --json headRefOid --jq '.headRefOid')"
+echo "$CURRENT_HEAD"
+```
+
+- reviewer 放行对应的 SHA = `CURRENT_HEAD` → 通过
+- reviewer 放行时的 SHA ≠ `CURRENT_HEAD` → **停止 merge-gate**
+  - 非行为性 delta（例如 `docs/features/index.json` regenerate、纯 rebase 无代码差异）：
+    reviewer 必须在 thread / PR 上**显式写出**“放行延续到 `{CURRENT_HEAD:0:8}`”
+  - 行为性 delta（代码、测试、配置、接口变化）：
+    重新 review，不能拿旧放行硬套新 HEAD
+- 只改 PR body / comment 不改 commit SHA → 不影响 review 覆盖范围
+
+**作者交接格式**（ping reviewer / 汇报 merge-gate 时必须带）：
+- 当前 HEAD：`{short_sha}`
+- reviewer 已覆盖：`yes/no`
+- 如果 `no`：说明是“请求延续到新 SHA”还是“请求重审”
 
 ### `pnpm gate` — Latest Main 全量门禁（Step 0，开 PR 前必跑）
 
@@ -261,6 +285,7 @@ gh api --paginate repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/comments \
 | 同一个 commit 连续发多条触发 comment | 先做 Step 5.1 去重检查；只有新 commit 才 re-trigger |
 | 触发后立刻轮询或手动重触发 | 5 分钟后查 👀（Step 6.1）；有 👀 = PR tracking 自动通知，不用管；无 👀 = 允许 re-trigger |
 | 修了 P1 不 re-trigger review | 修完 push 后**必须重新触发**云端 review |
+| `pnpm gate` rebase / fixup 后沿用旧 review 直接 merge | 先对齐 `headRefOid`；**只要 HEAD 变了，就拿 reviewer 对新 SHA 的显式延续或重审** |
 | 本地 `git rebase -i` 手动 squash | 用 `gh pr merge --squash`（GitHub 处理） |
 | 本地 merge 后 `gh pr close` | `gh pr close` = 放弃，`gh pr merge` = 合入 |
 | 不等云端 review 直接合入 | 必须等 0 P1/P2 |
@@ -293,10 +318,28 @@ gh api --paginate repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/comments \
 触发这个提示通常代表：
 - 你用了错误句柄（例如 `@chatgpt-codex-connector review`）
 - 或者把触发语句放错位置（body/非模板 comment）
+- **或者 comment body 里带了多行内容**——即使第一行是 `@codex review`，带附加描述（"Please review latest commit..."）在部分场景下仍会被 connector 解析成 code-write 意图
 
 正确做法：
 - 只在 PR comment 使用 `refs/pr-template.md` 的标准触发模板（含短 SHA 与 P1/P2 约束）
 - 先跑去重检查（Step 5.1），同一 SHA 不重复触发
+
+**Fallback：极简格式**（标准模板触发 create-environment bug 时的备用方案）:
+
+```
+@codex review
+```
+
+**就这三个字，整个 comment body 只有一行、无附加说明**。实测对付 connector 解析异常有效（PR #1258 You 实战验证：标准模板失败 → 极简格式 5 分钟内返回 review）。
+
+使用条件：
+- 同一 SHA 已用标准模板触发并失败（create-environment 回复）
+- 或 HEAD 刚变化、codex 对标准模板无 👀 超 5 分钟
+- 极简触发**不再带 SHA/P1/P2 约束** → review 默认覆盖当前 HEAD，P 标签由 reviewer 自行判断
+
+什么时候**不**用极简格式：
+- 首次触发优先走标准模板（信息更全，reviewer 上下文更准）
+- 多 commit 并行审查场景（需要 SHA 锚定时，标准模板不可替代）
 
 ### Q2: PR 里看到小眼睛（👀）是什么意思？
 

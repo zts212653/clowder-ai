@@ -1,4 +1,4 @@
-# F150 Guide Flow: 添加成员
+# F155 Guide Flow: 添加成员
 # P0 验证场景 — 引导到添加成员入口
 # Schema: OrchestrationFlow v2 (tag-based engine)
 
@@ -23,7 +23,7 @@ steps:
     tips: 点击这里开始添加新成员
     advance: click
 
-  - id: edit-member-profile
+  - id: done
     target: member-editor.profile
-    tips: 补充成员信息并点击保存；保存成功后会自动完成本次引导
+    tips: 在同一个成员编辑器里完成 Client、认证账号、默认模型和基本资料填写，然后点击保存；保存成功后会自动完成本次引导
     advance: confirm

@@ -679,6 +679,31 @@ describe('Schedule Routes', () => {
       assert.equal(stored.deliveryThreadId, 'thread-body-auth');
     });
 
+    it('P1: callback-authenticated writes derive actor from verified invocation, not client body/header', async () => {
+      const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-actor-auth');
+      const res = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks',
+        headers: {
+          'x-invocation-id': invocationId,
+          'x-callback-token': callbackToken,
+          'x-cat-cafe-user': 'evil-header-user',
+        },
+        payload: {
+          templateId: 'reminder',
+          trigger: { type: 'once', delayMs: 1000 },
+          createdBy: 'evil-body-cat',
+          params: { message: 'callback-actor-auth', triggerUserId: 'evil-body-user' },
+        },
+      });
+      assert.equal(res.statusCode, 200);
+
+      const stored = store.getAll().find((d) => d.params?.message === 'callback-actor-auth');
+      assert.ok(stored, 'task should be persisted');
+      assert.equal(stored.createdBy, 'opus', 'createdBy must come from callbackAuth.catId');
+      assert.equal(stored.params.triggerUserId, 'user-1', 'triggerUserId must come from callbackAuth.userId');
+    });
+
     it('falls back to callback-auth headers when body credentials are absent', async () => {
       const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-header-auth');
       const res = await appDyn.inject({

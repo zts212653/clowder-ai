@@ -64,7 +64,17 @@ export function DispatchProgress({ digests }: DispatchProgressProps) {
                 </div>
                 {digest.doneWhenResults.map((r) => (
                   <div key={r.criterion} className="flex items-start gap-1.5 text-[11px]">
-                    <span className={r.met ? 'text-green-600' : 'text-red-500'}>{r.met ? '✓' : '✗'}</span>
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="3"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className={`h-3 w-3 shrink-0 ${r.met ? 'text-green-600' : 'text-red-500'}`}
+                    >
+                      <path d={r.met ? 'M20 6L9 17l-5-5' : 'M18 6L6 18M6 6l12 12'} />
+                    </svg>
                     <span className="text-[#6B5D4F]">
                       {r.criterion}
                       {r.evidence && <span className="ml-1 text-[#9A866F]">— {r.evidence}</span>}

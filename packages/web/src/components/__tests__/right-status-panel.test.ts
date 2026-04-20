@@ -37,6 +37,30 @@ describe('RightStatusPanel', () => {
     expect(html).toContain('12');
   });
 
+  it('prefers activeInvocations over stale targetCats when provided by ChatContainer', () => {
+    const html = render({
+      intentMode: 'execute',
+      targetCats: ['codex'],
+      catStatuses: { codex: 'pending', dare: 'streaming' },
+      catInvocations: {},
+      activeInvocations: {
+        'inv-dare-1': { catId: 'dare', mode: 'execute' },
+      },
+      hasActiveInvocation: true,
+      threadId: 'thread-slot-priority',
+      messageSummary: {
+        total: 2,
+        assistant: 1,
+        system: 1,
+        evidence: 0,
+        followup: 0,
+      },
+    });
+
+    expect(html).toContain('dare');
+    expect(html).not.toContain('缅因猫');
+  });
+
   it('shows "空闲" when no target cats', () => {
     const html = render({
       intentMode: null,

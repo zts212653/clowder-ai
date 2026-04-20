@@ -9,7 +9,7 @@ import { join } from 'node:path';
  * This generator produces a config with:
  * - Anthropic provider (via proxy)
  * - Optional OMOC plugin (oh-my-opencode)
- * - No Cat Cafe MCP tools (isolation by design)
+ * - Optional Clowder AI MCP server (deterministic injection via mcpServerPath)
  */
 
 interface OpenCodeConfigOptions {
@@ -102,6 +102,8 @@ export interface OpenCodeRuntimeConfigOptions {
   defaultModel?: string;
   apiType?: OpenCodeApiType;
   hasBaseUrl?: boolean;
+  /** Absolute path to Clowder AI MCP server entry (packages/mcp-server/dist/index.js). */
+  mcpServerPath?: string;
 }
 
 export interface OpenCodeRuntimeConfigDebugSummary {
@@ -150,7 +152,7 @@ export function safeProviderName(name: string): string {
 }
 
 export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOptions): OpenCodeConfig {
-  const { providerName, models, defaultModel, apiType = 'openai', hasBaseUrl = false } = options;
+  const { providerName, models, defaultModel, apiType = 'openai', hasBaseUrl = false, mcpServerPath } = options;
 
   const configName = safeProviderName(providerName);
 
@@ -160,13 +162,12 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
     modelsMap[modelName] = { name: modelName };
   }
 
-  // Remap model prefix when provider name was rewritten
   let configDefaultModel = defaultModel;
   if (configName !== providerName && defaultModel?.startsWith(`${providerName}/`)) {
     configDefaultModel = `${configName}/${defaultModel.slice(providerName.length + 1)}`;
   }
 
-  return {
+  const config: OpenCodeConfig = {
     $schema: 'https://opencode.ai/config.json',
     ...(configDefaultModel ? { model: configDefaultModel } : {}),
     provider: {
@@ -180,6 +181,17 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
       },
     },
   };
+
+  if (mcpServerPath) {
+    config.mcp = {
+      'cat-cafe': {
+        type: 'local',
+        command: ['node', mcpServerPath],
+      },
+    };
+  }
+
+  return config;
 }
 
 function summarizeEnvPlaceholder(value: string | undefined): string | undefined {

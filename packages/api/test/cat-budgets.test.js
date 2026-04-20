@@ -32,7 +32,7 @@ describe('getCatContextBudget', () => {
     assert.strictEqual(budget.maxPromptTokens, 180000);
     assert.strictEqual(budget.maxContextTokens, 160000);
     assert.strictEqual(budget.maxMessages, 200);
-    assert.strictEqual(budget.maxContentLengthPerMsg, 10000);
+    assert.strictEqual(budget.maxContentLengthPerMsg, 100000);
   });
 
   it('codex default budget from cat-config.json', () => {
@@ -40,7 +40,7 @@ describe('getCatContextBudget', () => {
     assert.strictEqual(budget.maxPromptTokens, 240000);
     assert.strictEqual(budget.maxContextTokens, 216000);
     assert.strictEqual(budget.maxMessages, 200);
-    assert.strictEqual(budget.maxContentLengthPerMsg, 10000);
+    assert.strictEqual(budget.maxContentLengthPerMsg, 100000);
   });
 
   it('gemini default budget from cat-config.json', () => {
@@ -48,7 +48,7 @@ describe('getCatContextBudget', () => {
     assert.strictEqual(budget.maxPromptTokens, 350000);
     assert.strictEqual(budget.maxContextTokens, 300000);
     assert.strictEqual(budget.maxMessages, 300);
-    assert.strictEqual(budget.maxContentLengthPerMsg, 15000);
+    assert.strictEqual(budget.maxContentLengthPerMsg, 100000);
   });
 
   it('variant budgets from cat-config.json', () => {
@@ -95,6 +95,19 @@ describe('getCatContextBudget', () => {
     clearBudgetCache();
     const budget = getCatContextBudget('opus');
     assert.strictEqual(budget.maxPromptTokens, 180000);
+  });
+
+  it('per-message content limit accommodates long text input (100K)', () => {
+    const opus = getCatContextBudget('opus');
+    assert.ok(
+      opus.maxContentLengthPerMsg >= 100000,
+      `opus maxContentLengthPerMsg=${opus.maxContentLengthPerMsg} should be >= 100000`,
+    );
+    const codex = getCatContextBudget('codex');
+    assert.ok(
+      codex.maxContentLengthPerMsg >= 100000,
+      `codex maxContentLengthPerMsg=${codex.maxContentLengthPerMsg} should be >= 100000`,
+    );
   });
 
   it('all budget fields are positive numbers', () => {

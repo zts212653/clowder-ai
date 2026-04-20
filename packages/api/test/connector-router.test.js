@@ -832,6 +832,61 @@ describe('ConnectorRouter', () => {
       assert.ok(hubThread.title.includes('猫猫咖啡测试群'), `expected chatName in Hub title, got: ${hubThread.title}`);
       assert.ok(hubThread.title.includes('IM Hub'));
     });
+
+    // ── Bug-8: platform-specific group chat titles ──
+
+    it('wecom-bot group thread title uses 企业微信群聊 (Bug-8)', async () => {
+      const result = await router.route(
+        'wecom-bot',
+        'wecom-grp-1',
+        'hello',
+        'ext-wecom-1',
+        undefined,
+        { id: 'user_1' },
+        'group',
+      );
+      assert.equal(result.kind, 'routed');
+      const thread = threadStore.threads.get(result.threadId);
+      assert.ok(thread);
+      assert.ok(thread.title.includes('企业微信群聊'), `expected 企业微信群聊 in title, got: ${thread.title}`);
+      assert.ok(!thread.title.includes('飞书群聊'), `must not contain 飞书群聊, got: ${thread.title}`);
+    });
+
+    it('dingtalk group thread title uses 钉钉群聊 (Bug-8)', async () => {
+      const result = await router.route(
+        'dingtalk',
+        'dt-grp-1',
+        'hello',
+        'ext-dt-1',
+        undefined,
+        { id: 'user_1' },
+        'group',
+        '测试群',
+      );
+      assert.equal(result.kind, 'routed');
+      const thread = threadStore.threads.get(result.threadId);
+      assert.ok(thread);
+      assert.ok(thread.title.includes('钉钉群聊'), `expected 钉钉群聊 in title, got: ${thread.title}`);
+      assert.ok(thread.title.includes('测试群'), `expected chatName in title, got: ${thread.title}`);
+    });
+
+    it('feishu group thread title still uses 飞书群聊 (Bug-8 regression)', async () => {
+      const result = await router.route(
+        'feishu',
+        'fs-grp-1',
+        'hello',
+        'ext-fs-1',
+        undefined,
+        { id: 'user_1' },
+        'group',
+        '飞书测试群',
+      );
+      assert.equal(result.kind, 'routed');
+      const thread = threadStore.threads.get(result.threadId);
+      assert.ok(thread);
+      assert.ok(thread.title.includes('飞书群聊'), `expected 飞书群聊 in title, got: ${thread.title}`);
+      assert.ok(thread.title.includes('飞书测试群'), `expected chatName in title, got: ${thread.title}`);
+    });
   });
 
   // ── F134 Phase D: Permission tests ──

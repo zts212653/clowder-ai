@@ -13,6 +13,13 @@
       "reason": "Config 文件数接近 warn，均为独立配置项（cat-budgets/cat-config/env 等），暂不拆",
       "expiresAt": "2026-05-01",
       "ticket": "F23"
+    },
+    {
+      "path": "packages/api/src/domains/memory",
+      "owner": "gpt52",
+      "reason": "Memory 域已增长到 34 files；v0.8.0 发版先显式豁免，后续按 retrieval/indexing/distillation 子域拆分",
+      "expiresAt": "2026-05-17",
+      "ticket": "F102"
     }
   ]
 }

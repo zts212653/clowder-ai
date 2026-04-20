@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * F150: Generate guide catalog from YAML source files.
+ * F155: Generate guide catalog from YAML source files.
  *
  * Reads guides/registry.yaml + guides/flows/*.yaml and produces:
  *   packages/web/src/lib/guide-catalog.gen.ts
@@ -83,7 +83,7 @@ for (const entry of registryEntries) {
   const flow = loadFlow(entry.flow_file);
   const errors = validateFlow(flow);
   if (errors.length > 0) {
-    console.error(`\x1b[31m[F150] Flow ${entry.id} validation failed:\x1b[0m`);
+    console.error(`\x1b[31m[F155] Flow ${entry.id} validation failed:\x1b[0m`);
     for (const e of errors) console.error(`  - ${e}`);
     hasError = true;
   } else {
@@ -92,4 +92,4 @@ for (const entry of registryEntries) {
 }
 
 if (hasError) process.exit(1);
-console.log(`\x1b[32m[F150] All ${registryEntries.length} guide flow(s) valid.\x1b[0m`);
+console.log(`\x1b[32m[F155] All ${registryEntries.length} guide flow(s) valid.\x1b[0m`);

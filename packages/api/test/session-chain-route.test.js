@@ -50,22 +50,23 @@ describe('Session Chain Routes', () => {
 
   // --- P1: Auth / identity tests ---
 
-  it('GET /api/threads/:threadId/sessions returns 401 without identity', async () => {
+  it('GET /api/threads/:threadId/sessions returns 401 without identity for untrusted browser origin', async () => {
     await setup();
     const res = await app.inject({
       method: 'GET',
       url: '/api/threads/thread-1/sessions',
-      // no X-Cat-Cafe-User header, no userId query
+      headers: { origin: 'https://evil.example' },
     });
     assert.equal(res.statusCode, 401);
   });
 
-  it('GET /api/sessions/:sessionId returns 401 without identity', async () => {
+  it('GET /api/sessions/:sessionId returns 401 without identity for untrusted browser origin', async () => {
     const store = await setup();
     const record = store.create({ cliSessionId: 'cli-1', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
     const res = await app.inject({
       method: 'GET',
       url: `/api/sessions/${record.id}`,
+      headers: { origin: 'https://evil.example' },
     });
     assert.equal(res.statusCode, 401);
   });
@@ -286,7 +287,7 @@ describe('Session Chain Routes', () => {
     assert.equal(body.contextHealth.source, 'exact');
   });
 
-  it('POST /api/sessions/:sessionId/unseal returns 401 without identity', async () => {
+  it('POST /api/sessions/:sessionId/unseal returns 401 without identity for untrusted browser origin', async () => {
     const store = await setup();
     const sealed = store.create({ cliSessionId: 'cli-sealed', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
     store.update(sealed.id, { status: 'sealed', sealReason: 'threshold', sealedAt: Date.now(), updatedAt: Date.now() });
@@ -294,6 +295,7 @@ describe('Session Chain Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/api/sessions/${sealed.id}/unseal`,
+      headers: { origin: 'https://evil.example' },
     });
     assert.equal(res.statusCode, 401);
   });

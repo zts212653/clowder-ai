@@ -67,6 +67,8 @@ describe('HubSkillsTab', () => {
           allMounted: false,
           registrationConsistent: true,
         },
+        staleness: null,
+        conflicts: [],
       }),
     );
 
@@ -83,7 +85,9 @@ describe('HubSkillsTab', () => {
     expect(text).toContain('cross-cat-handoff');
     expect(text).toContain('部分挂载缺失');
 
-    const badges = [...container.querySelectorAll('span')].filter((node) => node.textContent?.trim() === '✓');
+    const badges = [...container.querySelectorAll('svg')].filter((node) =>
+      node.querySelector('path[d="M20 6L9 17l-5-5"]'),
+    );
     expect(badges).toHaveLength(3);
   });
 });

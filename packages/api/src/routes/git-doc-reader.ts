@@ -49,6 +49,7 @@ async function ensureFetched(cwd: string): Promise<boolean> {
   try {
     await execFileAsync('git', ['fetch', 'origin', 'main', '--quiet'], {
       cwd,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
       timeout: 10_000,
     });
     lastFetchSucceeded = true;

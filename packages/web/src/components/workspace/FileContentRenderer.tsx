@@ -1,6 +1,7 @@
 'use client';
 
 import type { FileData, WorktreeEntry } from '@/hooks/useWorkspace';
+import { HubIcon } from '../hub-icons';
 import { MarkdownContent } from '../MarkdownContent';
 import { CodeViewer } from './CodeViewer';
 import { JsxPreview } from './JsxPreview';
@@ -58,7 +59,7 @@ export function FileContentRenderer({
     if (file.mime.startsWith('audio/'))
       return (
         <div className="flex-1 flex flex-col items-center justify-center bg-[#1E1E24] p-6 gap-3">
-          <span className="text-3xl">{'🎵'}</span>
+          <HubIcon name="music" className="h-8 w-8 text-cafe-secondary" />
           <audio controls src={rawUrl(file.path)} className="w-full max-w-md">
             浏览器不支持音频播放
           </audio>
@@ -77,7 +78,17 @@ export function FileContentRenderer({
       );
     return (
       <div className="flex flex-col items-center justify-center py-8 bg-[#1E1E24] text-cafe-secondary text-xs">
-        <span className="text-2xl mb-2">{'📄'}</span>
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="h-7 w-7 mb-2 text-cafe-muted"
+        >
+          <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7zM14 2v4a2 2 0 0 0 2 2h4M10 9H8M16 13H8M16 17H8" />
+        </svg>
         <p>二进制文件</p>
         <p className="text-[10px] mt-1">
           {file.mime} · {Math.round(file.size / 1024)}KB

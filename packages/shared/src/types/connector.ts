@@ -17,6 +17,39 @@
 /** Shared prefix for scheduler trigger messages that act as reply anchors. */
 export const SCHEDULER_TRIGGER_PREFIX = '[定时任务]';
 
+export type SchedulerLifecycleEvent =
+  | 'registered'
+  | 'paused'
+  | 'resumed'
+  | 'deleted'
+  | 'succeeded'
+  | 'failed'
+  | 'missed_window';
+
+export interface SchedulerToastPayload {
+  type: 'success' | 'error' | 'info';
+  title: string;
+  message: string;
+  duration: number;
+  lifecycleEvent: SchedulerLifecycleEvent;
+}
+
+export interface SchedulerMessageExtra {
+  scheduler?: {
+    hiddenTrigger?: boolean;
+    toast?: SchedulerToastPayload;
+  };
+}
+
+export type ReplyPreviewKind = 'scheduler_trigger';
+
+export interface ReplyPreview {
+  senderCatId: string | null;
+  content: string;
+  deleted?: true;
+  kind?: ReplyPreviewKind;
+}
+
 /** Source metadata attached to connector-transport messages. */
 export interface ConnectorSource {
   /** Stable connector identifier (used for routing + styling) */

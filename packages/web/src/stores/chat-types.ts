@@ -1,3 +1,5 @@
+import type { ReplyPreview, SchedulerMessageExtra } from '@cat-cafe/shared';
+
 /** Content block types matching backend MessageContent */
 export interface TextContent {
   type: 'text';
@@ -252,16 +254,7 @@ export interface ChatMessage {
     /** F098-C1: Explicit target cats from post_message API */
     targetCats?: string[];
     /** Scheduler presentation metadata (hidden trigger / ephemeral lifecycle toast) */
-    scheduler?: {
-      hiddenTrigger?: boolean;
-      toast?: {
-        type: 'success' | 'error' | 'info';
-        title: string;
-        message: string;
-        duration: number;
-        lifecycleEvent: 'registered' | 'paused' | 'resumed' | 'deleted' | 'succeeded' | 'failed' | 'missed_window';
-      };
-    };
+    scheduler?: SchedulerMessageExtra['scheduler'];
     /** F118 AC-C3: Timeout diagnostics for enhanced error display */
     timeoutDiagnostics?: TimeoutDiagnostics;
     /** F070: Governance blocked data for actionable bootstrap card */
@@ -273,6 +266,8 @@ export interface ChatMessage {
   };
   /** F045: Extended thinking content, rendered as collapsible block inside assistant bubble */
   thinking?: string;
+  /** Internal chunk boundaries for robust thinking dedupe when payloads contain the visual separator. */
+  thinkingChunks?: string[];
   /** Message origin: stream = CLI stdout (thinking), callback = MCP post_message (speech), briefing = F148 Phase E context briefing */
   origin?: 'stream' | 'callback' | 'briefing';
   /** F35: Message visibility. undefined/public = visible to all */
@@ -286,7 +281,7 @@ export interface ChatMessage {
   /** F121: ID of the message this is replying to */
   replyTo?: string;
   /** F121: Server-hydrated reply preview (sender + truncated content) */
-  replyPreview?: { senderCatId: string | null; content: string; deleted?: true };
+  replyPreview?: ReplyPreview;
 }
 
 export type ChatMessagePatch = Omit<Partial<ChatMessage>, 'id' | 'type'>;

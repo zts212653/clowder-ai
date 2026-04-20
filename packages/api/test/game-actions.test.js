@@ -269,6 +269,38 @@ describe('POST /api/game/:gameId/action — catId enforcement', () => {
     assert.equal(res.statusCode, 403);
     assert.match(res.json().error, /do not own/);
   });
+
+  it('accepts valid action when callback invocation correlation header is present', async () => {
+    const phase = runtime.currentPhase;
+    const phaseToRole = { night_guard: 'guard', night_wolf: 'wolf', night_seer: 'seer', night_witch: 'witch' };
+    const phaseToAction = { night_guard: 'guard', night_wolf: 'kill', night_seer: 'divine', night_witch: 'heal' };
+
+    const expectedRole = phaseToRole[phase];
+    const actionName = phaseToAction[phase];
+    const seat = runtime.seats.find((s) => s.role === expectedRole);
+    const targetSeat = runtime.seats.find((s) => s.seatId !== seat.seatId && s.alive);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/game/${runtime.gameId}/action`,
+      headers: {
+        'x-cat-id': seat.actorId,
+        'x-cat-cafe-user': THREAD_OWNER,
+        'x-callback-invocation-id': 'inv-game-123',
+      },
+      payload: {
+        round: runtime.round,
+        phase,
+        seat: parseInt(seat.seatId.slice(1)),
+        action: actionName,
+        target: parseInt(targetSeat.seatId.slice(1)),
+        nonce: 'test-nonce-8',
+      },
+    });
+
+    assert.equal(res.statusCode, 200, `Expected 200 but got ${res.statusCode}: ${JSON.stringify(res.json())}`);
+    assert.equal(res.json().accepted, true);
+  });
 });
 
 describe('POST /api/game/:gameId/action — actionNotifier integration', () => {

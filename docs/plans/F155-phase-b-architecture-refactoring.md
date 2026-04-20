@@ -48,7 +48,7 @@ Phase B decouples these without changing user-facing behavior.
 
 ### B-2: GuideRoutingInterceptor (Size: L)
 
-**What**: Extract guide candidate resolution, offered/completed injection, owner/fallback selection, keyword match, and completionAcked write-back from `route-serial.ts` / `route-parallel.ts` into `GuideRoutingInterceptor`.
+**What**: Extract structured guide-state resume, offered/completed injection, owner/fallback selection, selection parsing, and completionAcked write-back from `route-serial.ts` / `route-parallel.ts` into `GuideRoutingInterceptor`.
 
 **Contract** (two-phase design from gpt52):
 
@@ -82,18 +82,17 @@ interface GuideRoutingDecision {
 
 **Constraint**: `prepare()` must be synchronous or microsecond-level (Redis round-trip OK, no external API calls). It's on the hot path of every message routing.
 
-**Supplementary**: Selection parsing `message.match(/^引导流程：(.+)$/)` moves to `GuideOfferPolicy` (decoupling point #9).
+**Supplementary**: Selection parsing `message.match(/^引导流程：(.+)$/)` moves into `GuideRoutingInterceptor` so routing keeps one structured place for guide follow-up decisions.
 
 **Files touched**:
 - `packages/api/src/domains/cats/services/agents/routing/route-serial.ts` (remove ~158 lines)
 - `packages/api/src/domains/cats/services/agents/routing/route-parallel.ts` (remove ~158 lines)
 - `packages/api/src/domains/guides/GuideRoutingInterceptor.ts` (new)
-- `packages/api/src/domains/guides/GuideOfferPolicy.ts` (new)
 
 **Acceptance criteria**:
 - [ ] `route-serial.ts` and `route-parallel.ts` contain zero direct `guideState` reads
 - [ ] Routing core calls only `interceptor.prepare()` and `interceptor.ackVisibleCompletion()`
-- [ ] `GuideOfferPolicy` owns keyword matching and selection parsing
+- [ ] `GuideRoutingInterceptor` owns selection parsing and structured guide-state resume
 - [ ] Interceptor adapter still reads from `thread.guideState` (migration in B-4)
 - [ ] All existing routing tests pass; new interceptor unit tests added
 
@@ -204,20 +203,22 @@ interface GuideSession {
 
 ---
 
-### B-6: Keyword Trigger Strategy Layer (Size: S)
+### B-6: Intent-Driven Guide Resolve Policy (Size: S)
 
-**What**: Replace simple keyword matching with configurable strategy: confidence threshold, user dismiss-rate tracking, explicit action triggers (slash command / button).
+**What**: Replace route-layer keyword triggering with an explicit guide-discovery policy: the cat first decides whether guidance is needed from normal conversation intent, then calls MCP `cat_cafe_get_available_guides()` to inspect the currently available guide catalog and choose the scene. Routing only resumes structured guide state and never synthesizes a fresh guide offer from raw user text.
 
 **Why last**: This is policy, not structure. Doing it earlier mixes "architecture debt" with "match quality" — two separate concerns.
 
 **Files touched**:
-- `packages/api/src/domains/guides/GuideOfferPolicy.ts` (from B-2, extend)
-- `packages/api/src/domains/guides/guide-registry-loader.ts` (confidence config)
+- `packages/api/src/domains/guides/guide-registry-loader.ts` (intent registry + ranking)
+- `packages/api/src/domains/guides/GuideRoutingInterceptor.ts` (remove raw-message trigger path)
+- `packages/api/src/domains/guides/GuidePromptSection.ts` (document MCP-first offer flow)
+- `packages/mcp-server/src/tools/callback-tools.ts` (guide tool descriptions)
+- `cat-cafe-skills/guide-interaction/SKILL.md` (intent-analysis + state-driven interaction guidance)
 
 **Acceptance criteria**:
-- [ ] Each guide flow YAML can specify `triggerStrategy: { mode: 'keyword' | 'explicit' | 'hybrid', confidence?: number }`
-- [ ] Dismiss-rate tracked per user per flow; suppresses re-offer after N dismissals
-- [ ] Explicit triggers (slash command, button) bypass confidence threshold
+- [ ] New guide offers originate from cat intent judgment + MCP `cat_cafe_get_available_guides`, not `/guide` or other raw-text commands
+- [ ] Skill/tool descriptions tell cats to choose between direct explanation and guided walkthrough instead of assuming every help request needs a guide
 - [ ] No guide hijacks normal conversation when user clearly isn't asking for help
 
 **Owner**: gpt52 | **Reviewer**: opus

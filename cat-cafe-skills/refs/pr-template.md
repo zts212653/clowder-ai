@@ -124,7 +124,20 @@ Please review latest commit {SHORT_SHA} for P1/P2 only.
 
 **⚠️ THIS IS NOT A REVIEW-PERMISSION ERROR. THIS MESSAGE IS ABOUT CODE-WRITE ENVIRONMENT PERMISSION.**
 
-通常原因是触发方式错了（句柄错/位置错），不是 reviewer 无法审查。
+原因：云端 codex 本轮**没接单**（后台短暂 bug），bot 默认回复了 env-permission 文案。不是你的触发格式错，也不是 reviewer 无法审查。
+
+**动作：直接补一条 `@codex review` 重新触发即可**（同 SHA 不需要新 commit，铲屎官 2026-04-18 确认这是唯一处理方式）。重发模板：
+
+```
+@codex review
+
+上一条触发（{SHORT_SHA}）收到 "create an environment" 回复 = 云端没接单 bug，重发。
+
+Please review latest commit {SHORT_SHA} for P1/P2 only.
+{其余同标准模板}
+```
+
+容易踩的坑：把这个文案当成"环境没配"/"权限不足"，去点 chatgpt.com 链接配环境——**完全不是**。Bot 就是接单失败了的回声，重发就行。
 
 ### Q2: PR comment 区出现小眼睛（👀）是什么意思？
 

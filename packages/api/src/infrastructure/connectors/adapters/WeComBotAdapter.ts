@@ -71,6 +71,13 @@ export class WeComBotAdapter implements IStreamableOutboundAdapter {
   private wsClient: unknown = null;
   private stopFn: (() => Promise<void>) | null = null;
 
+  // Connection health state — exposed via getConnectionState() for status endpoint
+  private connectionState: 'connected' | 'disconnected' | 'reconnecting' = 'disconnected';
+
+  // Delayed reconnect timer for disconnected_event recovery
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private static readonly RECONNECT_DELAY_MS = 10_000;
+
   // Active streaming sessions (keyed by streamId = platformMessageId)
   private readonly activeStreams = new Map<string, ActiveStream>();
 
@@ -116,6 +123,76 @@ export class WeComBotAdapter implements IStreamableOutboundAdapter {
     this.redis = options.redis;
   }
 
+  // ── Connection Health ──
+
+  getConnectionState(): 'connected' | 'disconnected' | 'reconnecting' {
+    return this.connectionState;
+  }
+
+  /**
+   * Clear stale state after a disconnect — orphaned activeStreams and lastFrameByChat
+   * entries carry stale req_id values that the WeCom server will reject after reconnect.
+   */
+  private clearStaleState(): void {
+    this.activeStreams.clear();
+    this.lastFrameByChat.clear();
+  }
+
+  // ── F132 Phase E: Credential validation ──
+
+  /**
+   * Validate WeCom Bot credentials by attempting a WebSocket connection.
+   * Creates a temporary WSClient, waits for 'authenticated' or 'error', then disconnects.
+   * Returns within `timeoutMs` (default 5s).
+   *
+   * AC-E2: Real WebSocket validation (not stub)
+   */
+  static async validateCredentials(
+    botId: string,
+    secret: string,
+    timeoutMs = 5000,
+  ): Promise<{ valid: boolean; error?: string }> {
+    const { default: AiBot } = await import('@wecom/aibot-node-sdk');
+    const client = new AiBot.WSClient({
+      botId,
+      secret,
+      maxReconnectAttempts: 0,
+    });
+
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        try {
+          client.disconnect();
+        } catch {
+          /* ignore */
+        }
+        resolve({ valid: false, error: 'Connection timeout — check Bot ID and Secret' });
+      }, timeoutMs);
+
+      client.on('authenticated', () => {
+        clearTimeout(timer);
+        try {
+          client.disconnect();
+        } catch {
+          /* ignore */
+        }
+        resolve({ valid: true });
+      });
+
+      client.on('error', (err: Error) => {
+        clearTimeout(timer);
+        try {
+          client.disconnect();
+        } catch {
+          /* ignore */
+        }
+        resolve({ valid: false, error: err.message || 'Connection failed' });
+      });
+
+      client.connect();
+    });
+  }
+
   // ── Inbound: Parse WsFrame Body ──
 
   /**
@@ -157,12 +234,19 @@ export class WeComBotAdapter implements IStreamableOutboundAdapter {
 
     const base = { chatId, messageId, senderId, chatType: chatTypeNorm };
 
+    // Strip leading @mention in group chats — WeCom SDK includes raw `@botName ` prefix
+    // unlike Feishu (structured mention tokens) and DingTalk (SDK strips automatically)
+    const stripGroupMention = (text: string): string => {
+      if (!isGroup) return text;
+      return text.replace(/^@[^\s/]+\s*/, '');
+    };
+
     switch (msgtype) {
       case 'text': {
         const textObj = body.text as { content?: string } | undefined;
         const text = textObj?.content;
         if (!text) return null;
-        return { ...base, text: text.trim() };
+        return { ...base, text: stripGroupMention(text.trim()) };
       }
       case 'image': {
         const imageObj = body.image as { url?: string; aeskey?: string } | undefined;
@@ -195,7 +279,7 @@ export class WeComBotAdapter implements IStreamableOutboundAdapter {
           }
         }
 
-        const text = textParts.join('') || '[图文混排]';
+        const text = stripGroupMention(textParts.join('') || '[图文混排]');
         return { ...base, text, ...(attachments.length > 0 ? { attachments } : {}) };
       }
       case 'voice': {
@@ -558,14 +642,27 @@ export class WeComBotAdapter implements IStreamableOutboundAdapter {
         },
       );
 
-      // Lifecycle events
+      // Lifecycle events — maintain connection health state
       client.on('authenticated', () => {
+        this.connectionState = 'connected';
         this.log.info('[WeComBotAdapter] WebSocket authenticated');
       });
       client.on('disconnected', (reason: string) => {
+        this.connectionState = 'disconnected';
+        this.clearStaleState();
         this.log.warn({ reason }, '[WeComBotAdapter] WebSocket disconnected');
+
+        // SDK sets isManualClose=true on disconnected_event (server kicked us
+        // because "a new connection has been established"), which prevents
+        // automatic reconnection. Schedule our own delayed reconnect — the
+        // competing connection (e.g. validateCredentials) is typically transient
+        // and will have disconnected by the time we retry.
+        if (reason.includes('New connection established')) {
+          this.scheduleReconnect(client);
+        }
       });
       client.on('reconnecting', (attempt: number) => {
+        this.connectionState = 'reconnecting';
         this.log.info({ attempt }, '[WeComBotAdapter] WebSocket reconnecting');
       });
       client.on('error', (error: Error) => {
@@ -591,13 +688,43 @@ export class WeComBotAdapter implements IStreamableOutboundAdapter {
   }
 
   /**
+   * Schedule a delayed reconnect after the SDK refuses to auto-reconnect
+   * (disconnected_event sets isManualClose=true in the SDK).
+   * We call client.connect() directly to bypass the isManualClose flag.
+   */
+  private scheduleReconnect(client: { connect(): void }): void {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+
+    this.connectionState = 'reconnecting';
+    this.log.info(
+      { delayMs: WeComBotAdapter.RECONNECT_DELAY_MS },
+      '[WeComBotAdapter] Scheduling delayed reconnect after server disconnect',
+    );
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.log.info('[WeComBotAdapter] Attempting delayed reconnect');
+      try {
+        client.connect();
+      } catch (err) {
+        this.log.error({ err }, '[WeComBotAdapter] Delayed reconnect failed');
+      }
+    }, WeComBotAdapter.RECONNECT_DELAY_MS);
+  }
+
+  /**
    * Stop the WebSocket connection.
    */
   async stopStream(): Promise<void> {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.stopFn) {
       await this.stopFn();
       this.stopFn = null;
       this.wsClient = null;
+      this.connectionState = 'disconnected';
       this.log.info('[WeComBotAdapter] WebSocket connection stopped');
     }
   }
@@ -814,5 +941,15 @@ export class WeComBotAdapter implements IStreamableOutboundAdapter {
   /** @internal — expose active streams for testing */
   _getActiveStreams(): Map<string, ActiveStream> {
     return this.activeStreams;
+  }
+
+  /** @internal — set connection state for testing */
+  _setConnectionState(state: 'connected' | 'disconnected' | 'reconnecting'): void {
+    this.connectionState = state;
+  }
+
+  /** @internal — clear stale state for testing */
+  _clearStaleState(): void {
+    this.clearStaleState();
   }
 }

@@ -21,6 +21,11 @@ describe('McpPromptInjector', () => {
     assert.equal(needsMcpInjection(false), true);
   });
 
+  it('needsMcpInjection returns false for antigravity provider (no HTTP callback support)', async () => {
+    const { needsMcpInjection } = await import('../dist/domains/cats/services/agents/invocation/McpPromptInjector.js');
+    assert.equal(needsMcpInjection(false, 'antigravity'), false);
+  });
+
   it('buildMcpCallbackInstructions references env var credentials', async () => {
     const { buildMcpCallbackInstructions } = await import(
       '../dist/domains/cats/services/agents/invocation/McpPromptInjector.js'

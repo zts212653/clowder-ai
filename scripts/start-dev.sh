@@ -265,6 +265,7 @@ print_config_summary() {
     echo "  配置来源："
     local key src_var val source
     for key in ANTHROPIC_PROXY_ENABLED ASR_ENABLED TTS_ENABLED LLM_POSTPROCESS_ENABLED \
+               EMBED_ENABLED \
                MESSAGE_TTL_SECONDS THREAD_TTL_SECONDS TASK_TTL_SECONDS SUMMARY_TTL_SECONDS \
                REDIS_PROFILE; do
         val="${!key}"
@@ -301,6 +302,27 @@ resolve_config "REDIS_PROFILE"
 : "${TASK_TTL_SECONDS:=0}"
 : "${SUMMARY_TTL_SECONDS:=0}"
 : "${REDIS_PROFILE:=dev}"
+
+derive_embed_enabled() {
+    local explicit="${EMBED_ENABLED-}"
+    local mode="${EMBED_MODE:-off}"
+    if [ -n "$explicit" ]; then
+        _SRC_EMBED_ENABLED="env/.env override"
+        return
+    fi
+
+    case "$mode" in
+        on|shadow)
+            EMBED_ENABLED=1
+            ;;
+        *)
+            EMBED_ENABLED=0
+            ;;
+    esac
+    _SRC_EMBED_ENABLED="derived from EMBED_MODE=${mode}"
+}
+
+derive_embed_enabled
 
 default_redis_storage_key() {
     local profile="${1:-$REDIS_PROFILE}"

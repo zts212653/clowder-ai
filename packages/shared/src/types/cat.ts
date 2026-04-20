@@ -9,7 +9,7 @@ import { createCatId } from './ids.js';
 
 /**
  * CLI client identity used to invoke a cat (e.g. 'anthropic' → claude CLI, 'openai' → codex CLI).
- * Renamed from CatProvider in F340 P5.
+ * Renamed from CatProvider in clowder-ai#340 P5.
  */
 export type ClientId =
   | 'anthropic'
@@ -22,7 +22,7 @@ export type ClientId =
   | 'a2a'
   | 'catagent';
 
-/** @deprecated F340: Use {@link ClientId} instead. Kept as alias for backward compatibility. */
+/** @deprecated clowder-ai#340: Use {@link ClientId} instead. Kept as alias for backward compatibility. */
 export type CatProvider = ClientId;
 
 /**
@@ -52,7 +52,7 @@ export interface CatConfig {
   readonly mentionPatterns: readonly string[];
   readonly source?: 'seed' | 'runtime';
   readonly accountRef?: string;
-  /** F340 P5: CLI client identity (renamed from `provider`). */
+  /** clowder-ai#340 P5: CLI client identity (renamed from `provider`). */
   readonly clientId: ClientId;
   readonly defaultModel: string;
   readonly mcpSupport: boolean;
@@ -79,7 +79,7 @@ export interface CatConfig {
   readonly sessionChain?: boolean;
   /** F127: Extra CLI --config key=value pairs passed to the client at invocation time. */
   readonly cliConfigArgs?: readonly string[];
-  /** F340 P5: Model provider name for api_key routing (renamed from `ocProviderName`).
+  /** clowder-ai#340 P5: Model provider name for api_key routing (renamed from `ocProviderName`).
    *  e.g. "openrouter", "maas", "deepseek". Runtime assembles provider/model for the -m flag. */
   readonly provider?: string;
 }

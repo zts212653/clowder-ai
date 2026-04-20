@@ -18,3 +18,4 @@ export const GENAI_TOKENS_OUTPUT = 'gen_ai.usage.output_tokens';
 export const AGENT_ID = 'agent.id';
 export const OPERATION_NAME = 'operation.name';
 export const STATUS = 'status';
+export const STREAM_ERROR_PATH = 'cat_cafe.stream_error.path';

@@ -44,6 +44,7 @@ describe('projects-bootstrap routes', () => {
       stateManager,
       bootstrapService: mockBootstrapService,
       socketManager: mockSocketManager,
+      getFingerprint: () => 'current-sha',
     });
     await app.ready();
   });
@@ -71,7 +72,7 @@ describe('projects-bootstrap routes', () => {
 
     it('returns ready for bootstrapped project', async () => {
       const p = join(tmpDir, 'ready');
-      stateManager.startBuilding(p, 'fp:1:full');
+      stateManager.startBuilding(p, 'current-sha');
       stateManager.markReady(p, 10, '{"projectName":"ready"}');
       const res = await app.inject({
         method: 'GET',
@@ -80,6 +81,19 @@ describe('projects-bootstrap routes', () => {
         headers: { 'x-cat-cafe-user': 'test-user' },
       });
       assert.equal(res.json().status, 'ready');
+    });
+
+    it('returns stale when server-side fingerprint differs from stored', async () => {
+      const p = join(tmpDir, 'ready');
+      stateManager.startBuilding(p, 'old-fp');
+      stateManager.markReady(p, 10, '{"projectName":"ready"}');
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/projects/index-state',
+        query: { projectPath: p },
+        headers: { 'x-cat-cafe-user': 'test-user' },
+      });
+      assert.equal(res.json().status, 'stale');
     });
 
     it('returns 400 without projectPath', async () => {
