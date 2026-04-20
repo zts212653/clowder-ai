@@ -69,12 +69,20 @@ team experience（2026-04-09）："这是可观测性基础设施 PR，核心是
 
 方案 B：API 代理 + 自建轻量前端，零外部依赖（不引入 Grafana/Tempo/Sentry）。
 
+**安全约束（Design Gate 缅因猫 review 2026-04-21）：**
+- LocalTraceExporter 必须放在 RedactingSpanProcessor **之后**（redacted fan-out），Hub 只看脱敏后数据
+- Exporter 投影为 redacted DTO 再入 store，不存 SDK span 对象；维护者看 raw 走 TELEMETRY_DEBUG console 通道
+- 按 raw ID 查询时，先 HMAC 查询参数再 match store，不存 raw ID
+- 所有 `/api/telemetry/*` 端点走 Hub session/cookie 鉴权（session-auth.ts），不走 `/ready` 公开模式
+- Ring buffer 双阈值淘汰（maxSpans + maxAgeMs），内存 only，首版不上 SQLite
+- Metrics 直读进程内 Prometheus registry，不 self-fetch localhost:9464
+
 **L1: 数据层（API 侧）**
-1. `LocalTraceExporter` — 自定义 SpanExporter → 内存 ring buffer，按 traceId 索引
-2. `/api/telemetry/metrics` — 从 Prometheus client registry 读当前值，返回结构化 JSON
-3. `/api/telemetry/traces` — 查询 LocalTraceStore，支持按 traceId/invocationId/catId 筛选
-4. `/api/telemetry/health` — 聚合 /ready + liveness + 最近错误率
-5. 时序快照 ring buffer — 定时采样写入内存，支持趋势查询
+1. `LocalTraceExporter` — 自定义 SpanExporter，在 RedactingSpanProcessor 之后消费 redacted spans → 投影为 DTO → 内存 ring buffer（双阈值：maxSpans + maxAgeMs）
+2. `/api/telemetry/metrics` — 直读进程内 Prometheus client registry，返回结构化 JSON（需 session auth）
+3. `/api/telemetry/traces` — 查询 LocalTraceStore，按 HMAC(traceId)/HMAC(invocationId)/HMAC(catId) 筛选（需 session auth）
+4. `/api/telemetry/health` — 聚合 /ready + liveness + 最近错误率（需 session auth，不暴露原始错误细节）
+5. 时序快照 ring buffer — 定时采样 metrics 写入内存，支持趋势查询
 
 **L2: 前端展示**
 6. Hub 新增「观测台」Tab — 总览面板（指标卡片 + 趋势折线图）+ 按猫猫/thread 筛选
@@ -128,13 +136,15 @@ team experience（2026-04-09）："这是可观测性基础设施 PR，核心是
 - [x] AC-D6: `telemetry-debug.test.js` + `start-dev-profile-isolation.test.mjs` + `start-dev-script.test.js` 覆盖 guardrail 与启动链回归
 
 ### Phase E（Hub 内嵌观测台）— clowder-ai#544
-- [ ] AC-E1: LocalTraceExporter 将 spans 写入内存 ring buffer，按 traceId 可查
-- [ ] AC-E2: `/api/telemetry/metrics` 返回当前 metrics 的结构化 JSON
-- [ ] AC-E3: `/api/telemetry/traces` 支持按 traceId/invocationId/catId 筛选
-- [ ] AC-E4: Hub 「观测台」Tab 展示总览面板（关键指标卡片 + 趋势折线图）
-- [ ] AC-E5: Span 瀑布图组件在 invocation 详情页可用
-- [ ] AC-E6: burn-rate 超标时 SystemNoticeBar 弹出 notice
-- [ ] AC-E7: 零额外进程 — 所有逻辑在现有 API + Web 进程内运行
+- [ ] AC-E1: LocalTraceExporter 在 RedactingSpanProcessor **之后** 消费 spans，投影为 redacted DTO 写入内存 ring buffer
+- [ ] AC-E2: Ring buffer 双阈值淘汰（maxSpans + maxAgeMs），不存 SDK span 对象，不存 raw ID
+- [ ] AC-E3: `/api/telemetry/metrics` 直读进程内 Prometheus registry，返回结构化 JSON
+- [ ] AC-E4: `/api/telemetry/traces` 支持按 HMAC(id) 筛选，查询参数先 pseudonymize 再 match
+- [ ] AC-E5: 所有 `/api/telemetry/*` 端点走 session/cookie auth，无 session 返回 401
+- [ ] AC-E6: Hub 「观测台」Tab 展示总览面板（关键指标卡片 + 趋势折线图）
+- [ ] AC-E7: Span 瀑布图组件在 invocation 详情页可用
+- [ ] AC-E8: burn-rate 超标时 SystemNoticeBar 弹出 notice
+- [ ] AC-E9: 零额外进程 — 所有逻辑在现有 API + Web 进程内运行
 
 ## Dependencies
 
@@ -166,3 +176,6 @@ team experience（2026-04-09）："这是可观测性基础设施 PR，核心是
 | KD-10 | NODE_ENV 由启动模式（PROD_WEB/-Dev）决定，不由 profile 决定 | dev:direct + --profile=opensource 是开发模式，不应标 production | 2026-04-20 |
 | KD-11 | Phase E 走方案 B（API 代理 + 自建前端），不引入 Grafana/Tempo/Sentry | 零外部依赖，贴合猫咖数据模型，零额外进程 | 2026-04-21 |
 | KD-12 | Trace 存储用 in-process ring buffer，不引入 Tempo | 零额外进程，保留最近 N 小时即够用 | 2026-04-21 |
+| KD-13 | LocalTraceExporter 放 redactor 之后，Hub 只看脱敏后数据 | 缅因猫 Design Gate：raw span 走 TELEMETRY_DEBUG console，不走 Hub | 2026-04-21 |
+| KD-14 | `/api/telemetry/*` 走 session/cookie auth | 缅因猫 Design Gate：不复制 `/ready` 公开探针模式 | 2026-04-21 |
+| KD-15 | 查询参数先 HMAC 再 match store | 缅因猫 Design Gate：不为查询方便存 raw ID | 2026-04-21 |
