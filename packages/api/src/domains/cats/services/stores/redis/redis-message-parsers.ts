@@ -44,6 +44,17 @@ export function safeParseExtra(raw: string | undefined):
       rich?: RichMessageExtra;
       stream?: { invocationId: string };
       crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
+      scheduler?: {
+        hiddenTrigger?: boolean;
+        toast?: {
+          type: 'success' | 'error' | 'info';
+          title: string;
+          message: string;
+          duration: number;
+          lifecycleEvent: 'registered' | 'paused' | 'resumed' | 'deleted' | 'succeeded' | 'failed' | 'missed_window';
+        };
+      };
+      targetCats?: string[];
     }
   | undefined {
   if (!raw) return undefined;
@@ -55,6 +66,17 @@ export function safeParseExtra(raw: string | undefined):
       rich?: RichMessageExtra;
       stream?: { invocationId: string };
       crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
+      scheduler?: {
+        hiddenTrigger?: boolean;
+        toast?: {
+          type: 'success' | 'error' | 'info';
+          title: string;
+          message: string;
+          duration: number;
+          lifecycleEvent: 'registered' | 'paused' | 'resumed' | 'deleted' | 'succeeded' | 'failed' | 'missed_window';
+        };
+      };
+      targetCats?: string[];
     } = {};
     let hasField = false;
 
@@ -82,6 +104,23 @@ export function safeParseExtra(raw: string | undefined):
           ? { sourceInvocationId: parsed.crossPost.sourceInvocationId }
           : {}),
       };
+      hasField = true;
+    }
+
+    // #481: Preserve scheduler sub-field (hiddenTrigger, toast) through Redis round-trip
+    if (parsed.scheduler && typeof parsed.scheduler === 'object') {
+      const sched: NonNullable<typeof result.scheduler> = {};
+      if (parsed.scheduler.hiddenTrigger === true) sched.hiddenTrigger = true;
+      if (parsed.scheduler.toast && typeof parsed.scheduler.toast === 'object') {
+        sched.toast = parsed.scheduler.toast;
+      }
+      result.scheduler = sched;
+      hasField = true;
+    }
+
+    // #481: Preserve targetCats sub-field through Redis round-trip
+    if (Array.isArray(parsed.targetCats)) {
+      result.targetCats = parsed.targetCats;
       hasField = true;
     }
 

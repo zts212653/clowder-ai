@@ -177,7 +177,7 @@ function pickVariantMention(id: string, config: CatConfig): string {
 
 function buildCallableMentions(currentCatId: CatId): CallableMentionsResult {
   const entries: CallableCatEntry[] = Object.entries(getAllConfigs())
-    .filter(([id]) => id !== currentCatId)
+    .filter(([id]) => id !== currentCatId && isCatAvailable(id))
     .map(([id, config]) => ({ id, config }));
 
   if (entries.length === 0) {
@@ -343,7 +343,7 @@ const WORKFLOW_TRIGGERS: Record<string, string> = {
  */
 function buildTeammateRoster(currentCatId: CatId): string | null {
   const allConfigs = getAllConfigs();
-  const entries = Object.entries(allConfigs).filter(([id]) => id !== currentCatId);
+  const entries = Object.entries(allConfigs).filter(([id]) => id !== currentCatId && isCatAvailable(id));
   if (entries.length === 0) return null;
 
   const rows: string[] = [];
