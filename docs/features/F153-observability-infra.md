@@ -77,6 +77,9 @@ team experience（2026-04-09）："这是可观测性基础设施 PR，核心是
 - Ring buffer 双阈值淘汰（maxSpans + maxAgeMs），内存 only，首版不上 SQLite
 - Metrics 直读进程内 Prometheus registry，不 self-fetch localhost:9464
 
+**设计边界：F153 = descriptive observability plane, not normative eval system。**
+Phase E 只回答"发生了什么"（traces、metrics、健康状态），不做质量判断或打分。记忆命中率、A2A 接力成功率等 eval 色彩的指标留给未来 phase——API/schema 预留扩展点但首版不实现。UI 命名为「观测台 / Observability」，不叫「Eval Dashboard」。
+
 **L1: 数据层（API 侧）**
 1. `LocalTraceExporter` — 自定义 SpanExporter，在 RedactingSpanProcessor 之后消费 redacted spans → 投影为 DTO → 内存 ring buffer（双阈值：maxSpans + maxAgeMs）
 2. `/api/telemetry/metrics` — 直读进程内 Prometheus client registry，返回结构化 JSON（需 session auth）
@@ -179,3 +182,4 @@ team experience（2026-04-09）："这是可观测性基础设施 PR，核心是
 | KD-13 | LocalTraceExporter 放 redactor 之后，Hub 只看脱敏后数据 | 缅因猫 Design Gate：raw span 走 TELEMETRY_DEBUG console，不走 Hub | 2026-04-21 |
 | KD-14 | `/api/telemetry/*` 走 session/cookie auth | 缅因猫 Design Gate：不复制 `/ready` 公开探针模式 | 2026-04-21 |
 | KD-15 | 查询参数先 HMAC 再 match store | 缅因猫 Design Gate：不为查询方便存 raw ID | 2026-04-21 |
+| KD-16 | F153 = descriptive observability，不做 normative eval | Phase E 只展示"发生了什么"，eval 信号留给未来 phase（eval 讨论 2026-04-19） | 2026-04-21 |
