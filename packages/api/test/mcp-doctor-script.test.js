@@ -47,6 +47,22 @@ function writeCapabilities(root, extraCapabilities = []) {
   );
 }
 
+function installSandboxNodeModules(root, { copy = cpSync, link = symlinkSync, platform = process.platform } = {}) {
+  const source = join(repoRoot, 'node_modules');
+  const target = join(root, 'node_modules');
+  const type = platform === 'win32' ? 'junction' : 'dir';
+
+  try {
+    link(source, target, type);
+  } catch (error) {
+    if (platform === 'win32' && error?.code === 'EPERM') {
+      copy(source, target, { recursive: true });
+      return;
+    }
+    throw error;
+  }
+}
+
 function createSandbox(extraCapabilities = []) {
   const root = mkdtempSync(join(tmpdir(), 'cc-mcp-doctor-'));
   tempDirs.push(root);
@@ -57,7 +73,7 @@ function createSandbox(extraCapabilities = []) {
   mkdirSync(join(root, 'packages', 'mcp-server', 'dist'), { recursive: true });
 
   cpSync(doctorScriptSource, join(root, 'scripts', 'mcp-doctor.mjs'));
-  symlinkSync(join(repoRoot, 'node_modules'), join(root, 'node_modules'));
+  installSandboxNodeModules(root);
 
   writeCapabilities(root, extraCapabilities);
   writeFileSync(join(root, '.cat-cafe', 'mcp-resolved.json'), '{}');
@@ -93,6 +109,49 @@ afterEach(async () => {
 });
 
 describe('mcp-doctor.mjs', () => {
+  it('uses a junction when linking sandbox node_modules on win32', () => {
+    const calls = [];
+
+    installSandboxNodeModules('/tmp/fake-root', {
+      platform: 'win32',
+      link: (source, target, type) => {
+        calls.push({ source, target, type });
+      },
+    });
+
+    assert.deepEqual(calls, [
+      {
+        source: join(repoRoot, 'node_modules'),
+        target: '/tmp/fake-root/node_modules',
+        type: 'junction',
+      },
+    ]);
+  });
+
+  it('falls back to copying node_modules when win32 symlink setup is denied', () => {
+    const copied = [];
+
+    installSandboxNodeModules('/tmp/fake-root', {
+      platform: 'win32',
+      link: () => {
+        const error = new Error('EPERM: operation not permitted');
+        error.code = 'EPERM';
+        throw error;
+      },
+      copy: (source, target, options) => {
+        copied.push({ source, target, options });
+      },
+    });
+
+    assert.deepEqual(copied, [
+      {
+        source: join(repoRoot, 'node_modules'),
+        target: '/tmp/fake-root/node_modules',
+        options: { recursive: true },
+      },
+    ]);
+  });
+
   it('resolves stdio commands even when `which` is unavailable', () => {
     const { root, binDir } = createSandbox();
     const result = runDoctor(root, binDir);
