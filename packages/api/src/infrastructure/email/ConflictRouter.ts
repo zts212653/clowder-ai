@@ -1,5 +1,5 @@
 /**
- * F140/F320: ConflictRouter — route merge conflict signals to the correct thread.
+ * F140 + clowder-ai#320: ConflictRouter — route merge conflict signals to the correct thread.
  *
  * #320: Reads from unified TaskStore instead of PrTrackingStore.
  */

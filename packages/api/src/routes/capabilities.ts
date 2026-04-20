@@ -3,6 +3,10 @@
  *
  * GET  /api/capabilities — 返回看板聚合视图 (CapabilityBoardResponse)
  * PATCH /api/capabilities — 开关单个能力 (global or per-cat override)
+ * POST /api/capabilities/mcp/preview — 安装预览 (dry-run)
+ * POST /api/capabilities/mcp/install — 新增/覆盖 MCP
+ * DELETE /api/capabilities/mcp/:id — 软删除/硬删除 MCP
+ * GET /api/capabilities/audit — 审计日志
  *
  * F041 Re-open fixes:
  * - Skill descriptions from SKILL.md frontmatter
@@ -27,6 +31,7 @@ import type {
 import { catRegistry } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { parse as parseYaml } from 'yaml';
+import { appendAuditEntry } from '../config/capabilities/capability-audit.js';
 import {
   bootstrapCapabilities,
   type DiscoveryPaths,
@@ -38,8 +43,10 @@ import {
   readCapabilitiesConfig,
   resolveServersForCat,
   toCapabilityEntry,
+  withCapabilityLock,
   writeCapabilitiesConfig,
 } from '../config/capabilities/capability-orchestrator.js';
+import { isManagedSkill, readSkillsState } from '../config/governance/skills-state.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import {
@@ -464,10 +471,12 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     const geminiProjectSkills = scanResults['gemini-project'];
     const projectKimiSkills = scanResults['kimi-project'];
 
+    // ADR-025: Use skills-state.json + catCafeOwnSkills as source for managed vs external.
+    // Merges both: skills-state.json may be stale (missing newly added official skills),
+    // so catCafeOwnSkills (filesystem scan of cat-cafe-skills/) covers new additions.
+    const skillsState = await readSkillsState(projectRoot);
+
     // F041 bug fix: Also scan cat-cafe-skills/ for project-level skill detection.
-    // User-level skills (e.g. ~/.claude/skills/feat-completion) are symlinks to
-    // {projectRoot}/cat-cafe-skills/feat-completion — listing cat-cafe-skills/
-    // captures them as project-owned regardless of symlink target.
     const catCafeSkillsDir = CAT_CAFE_SKILLS_SRC;
     const catCafeOwnSkills = await listSkillSubdirs(catCafeSkillsDir);
     const hasProjectCatCafeSkillsDir = existsSync(catCafeSkillsDir);
@@ -496,8 +505,13 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     for (const skillName of allSkillNames) {
       const exists = config.capabilities.some((c) => c.type === 'skill' && c.id === skillName);
       if (!exists) {
-        // F041 re-open fix: project-level skills → 'cat-cafe', user-level → 'external'
-        const source = projectSkillNames.has(skillName) ? ('cat-cafe' as const) : ('external' as const);
+        // ADR-025: merge skills-state.json with catCafeOwnSkills to handle stale state.
+        // A skill is cat-cafe if it's in the managed set OR found in cat-cafe-skills/.
+        const isCatCafe =
+          isManagedSkill(skillsState, skillName) ||
+          (catCafeOwnSkills !== null && catCafeOwnSkills.includes(skillName)) ||
+          (!skillsState && projectSkillNames.has(skillName));
+        const source = isCatCafe ? ('cat-cafe' as const) : ('external' as const);
         config.capabilities.push({
           id: skillName,
           type: 'skill',
@@ -510,8 +524,12 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     // Also fix source for existing skills that were incorrectly classified
     for (const cap of config.capabilities) {
       if (cap.type !== 'skill') continue;
-      const shouldBeCatCafe = projectSkillNames.has(cap.id);
-      // Upgrade is safe when we have evidence; downgrade is only safe when cat-cafe-skills scan succeeded.
+      // ADR-025: merge skills-state.json with catCafeOwnSkills (handles stale state)
+      const shouldBeCatCafe =
+        isManagedSkill(skillsState, cap.id) ||
+        (catCafeOwnSkills !== null && catCafeOwnSkills.includes(cap.id)) ||
+        (!skillsState && projectSkillNames.has(cap.id));
+      // Upgrade is safe when we have evidence; downgrade is only safe when scans succeeded.
       if (shouldBeCatCafe && cap.source !== 'cat-cafe') {
         cap.source = 'cat-cafe';
         configDirty = true;
@@ -788,44 +806,60 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       projectRoot = validated;
     }
 
-    const config = await readCapabilitiesConfig(projectRoot);
-    if (!config) {
-      reply.status(404);
-      return { error: 'capabilities.json not found. Run GET first to bootstrap.' };
-    }
+    return withCapabilityLock(projectRoot, async () => {
+      const config = await readCapabilitiesConfig(projectRoot);
+      if (!config) {
+        reply.status(404);
+        return { error: 'capabilities.json not found. Run GET first to bootstrap.' };
+      }
 
-    // Compound lookup: id + type disambiguates same-name MCP/skill entries
-    const capIndex = config.capabilities.findIndex((c) => c.id === body.capabilityId && c.type === body.capabilityType);
-    if (capIndex === -1) {
-      reply.status(404);
-      return { error: `Capability "${body.capabilityId}" (type=${body.capabilityType}) not found` };
-    }
+      const capIndex = config.capabilities.findIndex(
+        (c) => c.id === body.capabilityId && c.type === body.capabilityType,
+      );
+      if (capIndex === -1) {
+        reply.status(404);
+        return { error: `Capability "${body.capabilityId}" (type=${body.capabilityType}) not found` };
+      }
 
-    const cap = config.capabilities[capIndex]!;
+      const cap = config.capabilities[capIndex]!;
+      const beforeSnapshot = structuredClone(cap);
 
-    if (body.scope === 'global') {
-      cap.enabled = body.enabled;
-    } else {
-      // Per-cat override
-      if (!cap.overrides) cap.overrides = [];
-      const existing = cap.overrides.find((o) => o.catId === body.catId!);
-      if (existing) {
-        existing.enabled = body.enabled;
+      if (body.scope === 'global') {
+        cap.enabled = body.enabled;
       } else {
-        cap.overrides.push({ catId: body.catId!, enabled: body.enabled });
+        if (!cap.overrides) cap.overrides = [];
+        const existing = cap.overrides.find((o) => o.catId === body.catId!);
+        if (existing) {
+          existing.enabled = body.enabled;
+        } else {
+          cap.overrides.push({ catId: body.catId!, enabled: body.enabled });
+        }
+        if (body.enabled === cap.enabled) {
+          cap.overrides = cap.overrides.filter((o) => o.catId !== body.catId!);
+          if (cap.overrides.length === 0) delete cap.overrides;
+        }
       }
-      // Clean up: remove override if it matches global (no-op override)
-      if (body.enabled === cap.enabled) {
-        cap.overrides = cap.overrides.filter((o) => o.catId !== body.catId!);
-        if (cap.overrides.length === 0) delete cap.overrides;
-      }
-    }
 
-    // Persist and regenerate CLI configs
-    await writeCapabilitiesConfig(projectRoot, config);
-    await generateCliConfigs(config, getCliConfigPaths(projectRoot));
+      await writeCapabilitiesConfig(projectRoot, config);
+      await generateCliConfigs(config, getCliConfigPaths(projectRoot));
 
-    return { ok: true, capability: cap };
+      await appendAuditEntry(projectRoot, {
+        timestamp: new Date().toISOString(),
+        userId,
+        action: 'toggle',
+        capabilityId: body.capabilityId,
+        before: beforeSnapshot,
+        after: cap,
+      });
+
+      return { ok: true, capability: cap };
+    });
+  });
+
+  // ── F146: MCP write-path routes (preview/install/delete/audit) ──
+  await app.register((await import('./capabilities-mcp-write.js')).capabilitiesMcpWriteRoutes, {
+    getProjectRoot,
+    getCliConfigPaths,
   });
 
   // ── POST /api/governance/confirm — F070: First-time confirmation ──

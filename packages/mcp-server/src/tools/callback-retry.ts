@@ -33,6 +33,7 @@ export async function postJsonWithRetry(
   url: string,
   payload: string,
   retryDelaysMs: number[],
+  extraHeaders?: Record<string, string>,
 ): Promise<CallbackPostResult> {
   let lastError = 'Callback failed';
   let retryable = true;
@@ -41,7 +42,7 @@ export async function postJsonWithRetry(
     try {
       const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...extraHeaders },
         body: payload,
       });
 

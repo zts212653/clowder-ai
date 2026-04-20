@@ -1,8 +1,8 @@
 {
-  "exportedAt": "2026-04-12T07:16:10.641Z",
+  "exportedAt": "2026-04-19T14:38:05.557Z",
   "minTier": "yellow",
-  "exported": 162,
-  "skipped": 1,
+  "exported": 173,
+  "skipped": 2,
   "errors": 0,
-  "skippedFiles": ["F124-voice-comfort-callout.md"]
+  "skippedFiles": ["F124-voice-comfort-callout.md", "F155-scene-catalog.md"]
 }

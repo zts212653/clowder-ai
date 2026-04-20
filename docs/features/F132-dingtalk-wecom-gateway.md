@@ -8,7 +8,7 @@ created: 2026-03-22
 
 # F132: DingTalk + WeCom Chat Gateway — 钉钉/企微接入
 
-> **Status**: done | **Completed**: 2026-04-09 | **Owner**: Ragdoll | **Priority**: P1
+> **Status**: done | **Phase A-E Completed**: 2026-04-14 | **Owner**: Ragdoll | **Priority**: P1
 >
 > **分工**：金渐层（@opencode）实现 → Maine Coon（@codex）review → Ragdoll（@opus）愿景守护
 > 实现过程中不 @ Ragdoll，保持 owner 上下文干净。每个 Phase PR merge 后触发愿景守护。
@@ -196,6 +196,32 @@ F088 已验证的三层架构（Principal Link / Session Binding / Command Layer
 | media | Image element | Picture msg | SDK 上传 | 临时素材 API |
 | streaming | edit card | card streaming | replyStream | ❌ final-only |
 
+### Phase E: WeCom Bot Guided Setup — 企微 Bot 快速接入向导
+
+> **前置**：Phase B~D 已 merged。企微 adapter 代码完整可用，但team lead因手动配置太麻烦一直没验证。本阶段降低接入摩擦。
+
+**问题**：当前企微 Bot 接入需要手动创建 bot → 复制 botId + secret → 粘贴到 .env 或 Hub 表单 → 重启服务。飞书/微信都有一键/扫码流程，企微还是"手抄凭证"模式。
+
+**方案**（路线 A — 无需 WeCom ISV 注册）：
+
+**后端**：
+- `POST /api/connector/wecom-bot/validate` — 拿用户填的 `botId` + `secret` 试连 WebSocket，5s 超时返回 success/fail
+- `POST /api/connector/wecom-bot/disconnect` — 清除凭证 + 停止 adapter
+- **动态激活**：validate 成功后自动保存凭证 + 启动 adapter（不需要重启服务），参照微信 `startWeixinPolling()` 模式
+
+**前端**：
+- `WeComBotSetupPanel.tsx` — 参照 `FeishuQrPanel.tsx` 组件模式：
+  1. 步骤引导：① 登录企微管理后台创建 AI Bot → ② 复制 Bot ID + Secret → ③ 粘贴验证
+  2. 凭证输入表单（botId + secret）
+  3. "测试并连接"按钮（调 validate 端点，真连 WebSocket）
+  4. 连接状态指示器（testing → connected ✅ / error ❌）
+  5. 已连接时显示绿色标记 + 断开连接按钮
+
+**不做什么**：
+- 不做 WeCom ISV 第三方授权（需要在 WeCom 开放平台注册服务商，太重）
+- 不改公共层
+- 不影响已有的 wecom-agent 手动配置流程（Agent 5 个凭证 + 公网回调，不适合向导化）
+
 ## Acceptance Criteria
 
 ### Phase A（DingTalk Adapter — DM 基础）
@@ -248,6 +274,13 @@ F088 已验证的三层架构（Principal Link / Session Binding / Command Layer
 - [x] AC-D4: IM 接入指南文档覆盖钉钉 + 企微 Bot + 企微 Agent 配置步骤
 - [x] AC-D5: 现有飞书/Telegram 功能无回归
 
+### Phase E（WeCom Bot Guided Setup — 快速接入向导） ✅
+- [x] AC-E1: Hub UI 展示 WeCom Bot 步骤向导（3 步：创建 bot → 复制凭证 → 粘贴验证）
+- [x] AC-E2: "测试并连接"按钮真正验证 WebSocket 连接（不是 stub），5s 超时返回结果
+- [x] AC-E3: 验证通过后自动保存凭证并激活 adapter（不需要重启服务）
+- [x] AC-E4: 已连接状态显示绿色标记 + 断开连接按钮（清凭证 + 停 adapter）
+- [x] AC-E5: 公共层零改动
+
 ## 需求点 Checklist
 
 | ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
@@ -294,6 +327,7 @@ F088 已验证的三层架构（Principal Link / Session Binding / Command Layer
 | KD-5 | 钉钉用 AI Card 做流式，不用 plain message edit | 钉钉 plain message 不支持编辑，但 AI Card 支持 create → streaming update → finish 状态机。`soimy/openclaw-channel-dingtalk` 已验证此路径 | 2026-03-22 |
 | KD-6 | 钉钉群聊须对齐飞书 F134 IM Hub 抽象 | team experience"群聊你也得对接上飞书有的功能或者他们的抽象你要接入，IM Hub 里群聊怎么映射你们也要这么干" | 2026-03-23 |
 | KD-7 | **新 IM 接入 11 步清单**（统一架构指南） | 基于飞书/钉钉/Telegram/微信四个已接入平台的模式提炼，新平台改 11 个位置、公共层零改动。详见下方「新 IM 接入清单」 | 2026-03-27 |
+| KD-8 | **企微 Bot 走引导式设置，不走 ISV 扫码授权** | WeCom 没有飞书/微信那样的 QR-to-credential 协议。ClawPro 的扫码授权需要注册 WeCom 服务商（ISV），太重。用引导向导 + 实时 WebSocket 验证，3 分钟完成接入 | 2026-04-14 |
 
 ## 新 IM 接入清单（KD-7 — Adapter-Only Extension）
 
@@ -320,3 +354,4 @@ F088 已验证的三层架构（Principal Link / Session Binding / Command Layer
 - Phase B: 跨 family review（Maine Coon）
 - Phase C: 跨 family review（Maine Coon）— AES/XML 安全实现需额外审查
 - Phase D: 可与 Phase C 合并 review
+- Phase E: 跨 family review（Maine Coon）— 前端 + 后端联动验证

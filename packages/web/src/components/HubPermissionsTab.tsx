@@ -24,7 +24,12 @@ const EMPTY_CONFIG: PermissionConfig = {
   allowedGroups: [],
 };
 
-export default function HubPermissionsTab() {
+interface HubPermissionsTabProps {
+  connectorId: string;
+  connectorLabel: string;
+}
+
+export default function HubPermissionsTab({ connectorId, connectorLabel }: HubPermissionsTabProps) {
   const [config, setConfig] = useState<PermissionConfig>(EMPTY_CONFIG);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -36,7 +41,7 @@ export default function HubPermissionsTab() {
 
   const fetchConfig = useCallback(async () => {
     try {
-      const res = await apiFetch('/api/connector/permissions/feishu');
+      const res = await apiFetch(`/api/connector/permissions/${connectorId}`);
       if (res.ok) {
         const data = await res.json();
         setConfig(data);
@@ -46,7 +51,7 @@ export default function HubPermissionsTab() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [connectorId]);
 
   useEffect(() => {
     fetchConfig();
@@ -56,7 +61,7 @@ export default function HubPermissionsTab() {
     setSaving(true);
     setSaveResult(null);
     try {
-      const res = await apiFetch('/api/connector/permissions/feishu', {
+      const res = await apiFetch(`/api/connector/permissions/${connectorId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
@@ -109,7 +114,7 @@ export default function HubPermissionsTab() {
   return (
     <div className="space-y-4">
       <div className="text-xs text-cafe-muted flex items-center gap-1">
-        <span className="text-blue-500 cursor-pointer">飞书 Feishu</span>
+        <span className="text-blue-500 cursor-pointer">{connectorLabel}</span>
         <span>›</span>
         <span>群聊权限</span>
       </div>

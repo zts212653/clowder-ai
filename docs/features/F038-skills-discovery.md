@@ -8,7 +8,7 @@ created: 2026-02-26
 
 # F038: Skills 梳理 + 按需发现机制
 
-> **Status**: in-progress | **Owner**: 三猫
+> **Status**: parked (方向 A 已落地，方向 B 待 skill 数量增长后再做) | **Owner**: 三猫
 > **Created**: 2026-02-26
 
 ## Why

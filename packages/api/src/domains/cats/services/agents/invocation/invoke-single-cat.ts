@@ -24,6 +24,7 @@ import { resolveBoundAccountRefForCat } from '../../../../../config/cat-account-
 import { isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { getContextWindowFallback } from '../../../../../config/context-window-sizes.js';
 import { getSessionStrategy, shouldTakeAction } from '../../../../../config/session-strategy.js';
+import { assertSafeTestConfigRoot } from '../../../../../config/test-config-write-guard.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import {
   AGENT_ID,
@@ -51,6 +52,7 @@ import type { AgentPaneRegistry } from '../../../../terminal/agent-pane-registry
 import type { TmuxGateway } from '../../../../terminal/tmux-gateway.js';
 import { createPromptDigest } from '../../context/prompt-digest.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
+import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import {
   deriveOpenCodeApiType,
   OC_API_KEY_ENV,
@@ -155,6 +157,7 @@ function deriveProxySlug(profileId: string): string {
 
 /** Register/update upstream mapping in .cat-cafe/proxy-upstreams.json (hot-reloaded by proxy). */
 function registerProxyUpstream(projectRoot: string, slug: string, targetUrl: string): void {
+  assertSafeTestConfigRoot(projectRoot, 'invoke-single-cat.registerProxyUpstream');
   const dir = resolve(projectRoot, '.cat-cafe');
   const filePath = resolve(dir, 'proxy-upstreams.json');
   let upstreams: Record<string, string> = {};
@@ -758,7 +761,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       );
     }
 
-    // F340: Protocol is fully derived from client/provider identity — account.protocol retired.
+    // clowder-ai#340: Protocol is fully derived from client/provider identity — account.protocol retired.
     // Non-opencode clients have a fixed protocol. OpenCode derives protocol from the
     // variant's model provider name or model string prefix, defaulting to anthropic.
     const protocolForProvider: Record<string, string> = {
@@ -875,7 +878,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const modelProviderName = catConfig?.provider?.trim() || undefined;
     const parsedOpenCodeModel =
       provider === 'opencode' && trimmedDefaultModel ? parseOpenCodeModel(trimmedDefaultModel) : null;
-    // F189 intake: determine effective provider + model.
+    // clowder-ai#223 intake: determine effective provider + model.
     // Three cases for defaultModel shape:
     //   1. Canonical "provider/model" where parsed provider === modelProviderName → use as-is
     //   2. Namespaced "ns/model" where parsed prefix ≠ modelProviderName → prefix with modelProviderName
@@ -923,18 +926,26 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         'Resolved OpenCode runtime inputs',
       );
     }
-    // fix(#280): explicit provider name means we must force the F189 path so the
+    // fix(#280): explicit provider name means we must force the clowder-ai#223 path so the
     // effective "provider/model" string is injected into opencode, even for builtin
     // providers. For legacy members without provider name, only synthesize runtime
     // config when the fully-qualified model is not already routable by `opencode models`.
+    //
+    // MCP injection: even known models need a runtime config to get deterministic
+    // Cat Cafe MCP server access (especially in game threads where project-level
+    // opencode.json may not be discoverable).
     const hasExplicitOcProvider = Boolean(modelProviderName);
+    const configuredMcpServerPath = process.env.CAT_CAFE_MCP_SERVER_PATH?.trim();
+    const mcpServerPath = configuredMcpServerPath
+      ? resolve(process.cwd(), configuredMcpServerPath)
+      : resolveDefaultClaudeMcpServerPath();
     if (
       provider === 'opencode' &&
       resolvedAccount != null &&
       resolvedAccount.authType === 'api_key' &&
       effectiveModel &&
       effectiveProviderName &&
-      (hasExplicitOcProvider || !getOpenCodeKnownModels().has(effectiveModel))
+      (hasExplicitOcProvider || !getOpenCodeKnownModels().has(effectiveModel) || mcpServerPath)
     ) {
       // Remap model prefix when provider name collides with OpenCode builtins
       // (e.g. 'openai/gpt-4o' → 'openai-compat/gpt-4o') so the CLI -m arg
@@ -953,6 +964,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         defaultModel: effectiveModel,
         apiType,
         hasBaseUrl: Boolean(resolvedAccount.baseUrl),
+        mcpServerPath,
       } as const;
       openCodeRuntimeConfigPath = writeOpenCodeRuntimeConfig(
         projectRoot,
@@ -1671,21 +1683,25 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
 
       if (shouldRetryWithoutSession && attempt + 1 < maxAttempts) {
-        if (catId === 'gemini') {
-          log.info(
-            {
-              catId,
-              threadId,
-              invocationId,
-              reason: 'missing_session',
-              attempt: attempt + 1,
-              retryAttempt: attempt + 2,
-              elapsedMs: Date.now() - attemptStartedAt,
-              hadSessionId: Boolean(options.sessionId),
-            },
-            'Gemini retrying invoke',
-          );
-        }
+        const retryReason = suppressedPromptLimitError
+          ? 'prompt_token_limit'
+          : suppressedTimeoutError
+            ? 'cli_timeout'
+            : 'missing_session';
+        log.info(
+          {
+            catId,
+            threadId,
+            invocationId,
+            reason: retryReason,
+            retryReason,
+            attempt: attempt + 1,
+            retryAttempt: attempt + 2,
+            elapsedMs: Date.now() - attemptStartedAt,
+            hadSessionId: Boolean(options.sessionId),
+          },
+          'cat retrying invoke (session self-heal)',
+        );
         try {
           await sessionManager.delete(userId, catId, threadId);
         } catch {
@@ -1718,21 +1734,20 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         continue;
       }
       if (shouldRetryOnTransientCliExit && attempt + 1 < maxAttempts) {
-        if (catId === 'gemini') {
-          log.info(
-            {
-              catId,
-              threadId,
-              invocationId,
-              reason: 'transient_cli_exit',
-              attempt: attempt + 1,
-              retryAttempt: attempt + 2,
-              elapsedMs: Date.now() - attemptStartedAt,
-              hadSessionId: Boolean(options.sessionId),
-            },
-            'Gemini retrying invoke',
-          );
-        }
+        log.info(
+          {
+            catId,
+            threadId,
+            invocationId,
+            reason: 'transient_cli_exit',
+            retryReason: 'transient_cli_exit',
+            attempt: attempt + 1,
+            retryAttempt: attempt + 2,
+            elapsedMs: Date.now() - attemptStartedAt,
+            hadSessionId: Boolean(options.sessionId),
+          },
+          'cat retrying invoke (transient CLI exit)',
+        );
         allowTransientRetry = false;
         continue;
       }

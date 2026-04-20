@@ -32,6 +32,7 @@ export const HUB_GROUPS: HubGroup[] = [
       { id: 'routing', label: '配额看板', icon: 'chart-pie' },
       { id: 'tool-usage', label: '工具统计', icon: 'wrench' },
       { id: 'leaderboard', label: '排行榜', icon: 'trophy' },
+      { id: 'marketplace', label: '能力市场', icon: 'store' },
     ],
   },
   {

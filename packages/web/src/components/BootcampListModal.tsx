@@ -1,10 +1,10 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { type Thread, useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { BootcampIcon } from './icons/BootcampIcon';
+import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 
 /** Phase labels for human-readable display */
 const PHASE_LABELS: Record<string, string> = {
@@ -54,7 +54,6 @@ interface BootcampListModalProps {
 }
 
 export function BootcampListModal({ open, onClose, currentThreadId }: BootcampListModalProps) {
-  const router = useRouter();
   const storeThreads = useChatStore((s) => s.threads);
   const setThreads = useChatStore((s) => s.setThreads);
   const [isCreating, setIsCreating] = useState(false);
@@ -92,7 +91,7 @@ export function BootcampListModal({ open, onClose, currentThreadId }: BootcampLi
   if (!open) return null;
 
   const handleNavigate = (threadId: string) => {
-    router.push(`/thread/${threadId}`);
+    pushThreadRouteWithHistory(threadId, typeof window !== 'undefined' ? window : undefined);
     onClose();
   };
 
@@ -103,14 +102,14 @@ export function BootcampListModal({ open, onClose, currentThreadId }: BootcampLi
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: '🎓 猫猫训练营',
+          title: '猫猫训练营',
           bootcampState: { v: 1, phase: 'phase-0-select-cat', startedAt: Date.now() },
         }),
       });
       if (!res.ok) return;
       const thread: Thread = await res.json();
       setThreads([thread, ...storeThreads]);
-      router.push(`/thread/${thread.id}`);
+      pushThreadRouteWithHistory(thread.id, typeof window !== 'undefined' ? window : undefined);
       onClose();
     } finally {
       setIsCreating(false);
@@ -177,7 +176,7 @@ export function BootcampListModal({ open, onClose, currentThreadId }: BootcampLi
                   {/* Top row: title + badge */}
                   <div className="flex items-center justify-between mb-2">
                     <span className={`text-[15px] font-semibold ${isCompleted ? 'text-cafe-secondary' : 'text-cafe'}`}>
-                      {t.title ?? '🎓 猫猫训练营'}
+                      {t.title ?? '猫猫训练营'}
                     </span>
                     <span
                       className={`text-xs font-medium px-2.5 py-1 rounded-full ${
@@ -188,13 +187,13 @@ export function BootcampListModal({ open, onClose, currentThreadId }: BootcampLi
                             : 'bg-amber-100 text-amber-700'
                       }`}
                     >
-                      {isCurrent ? '当前' : isCompleted ? '已完成 ✓' : '进行中'}
+                      {isCurrent ? '当前' : isCompleted ? '已完成' : '进行中'}
                     </span>
                   </div>
                   {/* Meta: task + phase */}
                   <div className="flex items-center justify-between text-[13px] text-cafe-secondary mb-2">
                     <div className="flex items-center gap-4">
-                      {t.selectedTaskId && <span>⭐ {t.selectedTaskId}</span>}
+                      {t.selectedTaskId && <span>{t.selectedTaskId}</span>}
                       <span>
                         Phase {phaseNum}/{PHASE_ORDER.length} · {phaseLabel}
                       </span>

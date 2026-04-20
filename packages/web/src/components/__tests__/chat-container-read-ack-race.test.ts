@@ -114,22 +114,21 @@ vi.mock('@/hooks/useAuthorization', () => ({
 vi.mock('@/hooks/useSplitPaneKeys', () => ({ useSplitPaneKeys: vi.fn() }));
 vi.mock('@/hooks/useCatData', () => ({ useCatData: () => ({ getCatById: () => undefined }) }));
 
-vi.mock('@/components/ChatMessage', () => ({ ChatMessage: () => null }));
-vi.mock('@/components/ChatInput', () => ({ ChatInput: () => null }));
-vi.mock('@/components/ChatContainerHeader', () => ({ ChatContainerHeader: () => null }));
-vi.mock('@/components/ThreadSidebar', () => ({ ThreadSidebar: () => null }));
-vi.mock('@/components/RightStatusPanel', () => ({ RightStatusPanel: () => null }));
-vi.mock('@/components/ParallelStatusBar', () => ({ ParallelStatusBar: () => null }));
-vi.mock('@/components/ThinkingIndicator', () => ({ ThinkingIndicator: () => null }));
-vi.mock('@/components/ConfirmDialog', () => ({ ConfirmDialog: () => null }));
-vi.mock('@/components/MessageNavigator', () => ({ MessageNavigator: () => null }));
-vi.mock('@/components/MessageActions', () => ({
+vi.mock('../ChatMessage', () => ({ ChatMessage: () => null }));
+vi.mock('../ChatInput', () => ({ ChatInput: () => null }));
+vi.mock('../ChatContainerHeader', () => ({ ChatContainerHeader: () => null }));
+vi.mock('../ThreadSidebar', () => ({ ThreadSidebar: () => null }));
+vi.mock('../RightStatusPanel', () => ({ RightStatusPanel: () => null }));
+vi.mock('../ParallelStatusBar', () => ({ ParallelStatusBar: () => null }));
+vi.mock('../ThinkingIndicator', () => ({ ThinkingIndicator: () => null }));
+vi.mock('../MessageNavigator', () => ({ MessageNavigator: () => null }));
+vi.mock('../MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
 }));
-vi.mock('@/components/CatCafeHub', () => ({ CatCafeHub: () => null }));
-vi.mock('@/components/SplitPaneView', () => ({ SplitPaneView: () => null }));
-vi.mock('@/components/MobileStatusSheet', () => ({ MobileStatusSheet: () => null }));
-vi.mock('@/components/QueuePanel', () => ({ QueuePanel: () => null }));
+vi.mock('../CatCafeHub', () => ({ CatCafeHub: () => null }));
+vi.mock('../SplitPaneView', () => ({ SplitPaneView: () => null }));
+vi.mock('../MobileStatusSheet', () => ({ MobileStatusSheet: () => null }));
+vi.mock('../QueuePanel', () => ({ QueuePanel: () => null }));
 vi.mock('@/components/ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }));
 vi.mock('@/components/AuthorizationCard', () => ({ AuthorizationCard: () => null }));
 vi.mock('@/components/WorkspacePanel', () => ({ WorkspacePanel: () => null }));
@@ -188,8 +187,11 @@ describe('F069-R5: read ack via POST /read/latest', () => {
     );
     expect(ackCalls.length).toBe(1);
     expect(ackCalls[0][0]).toContain('thread-A');
-    // POST with no body — server finds latest message
-    expect((ackCalls[0]?.[1] as { method: string }).method).toBe('POST');
+    expect(ackCalls[0]?.[1]).toMatchObject({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
   });
 
   it('fires new POST /read/latest when threadId changes', async () => {

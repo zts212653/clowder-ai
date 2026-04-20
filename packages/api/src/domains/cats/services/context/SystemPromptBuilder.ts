@@ -51,6 +51,18 @@ export interface InvocationContext {
    */
   directMessageFrom?: CatId;
   /**
+   * F167 L1: ping-pong streak warning.
+   * When present (streak >= 2), inject a warning prompt reminding the cat
+   * that they've been bouncing the same pair back and forth — consider
+   * third-party input / wrap up / escalate to 铲屎官 instead of another volley.
+   */
+  pingPongWarning?: {
+    /** The other cat in the ping-pong pair (not this cat). */
+    pairedWith: CatId;
+    /** Current streak count (≥2, <4). */
+    count: number;
+  };
+  /**
    * F046 D3: One-shot feedback injected when previous @mention was not routed.
    * Consumed from threadStore before invocation and cleared after injection.
    */
@@ -122,6 +134,11 @@ export interface InvocationContext {
    * Injected into static identity via buildStaticIdentity → packBlocks.
    */
   packBlocks?: CompiledPackBlocks | null;
+  /**
+   * F163 AC-A3: Pre-fetched always_on + constitutional docs for physical injection.
+   * Populated from SqliteEvidenceStore.queryAlwaysOn() at bootstrap time.
+   */
+  alwaysOnDocs?: readonly { anchor: string; title: string; summary: string }[];
 }
 
 /** Get all cat configs — registry first, fallback to static CAT_CONFIGS */
@@ -202,7 +219,10 @@ function buildCallableMentions(currentCatId: CatId): CallableMentionsResult {
 
 function formatHandleFreeLabel(catId: string, config: CatConfig | undefined): string {
   if (!config) return catId;
-  return `${config.displayName}(${catId})`;
+  // F167 identity anti-spoofing: carry variantLabel when present to disambiguate same-breed variants
+  // (e.g. "布偶猫 Opus 4.7(opus-47)" vs "布偶猫(opus)"), preventing A2A handoff identity confusion.
+  const variantPart = config.variantLabel ? ` ${config.variantLabel}` : '';
+  return `${config.displayName}${variantPart}(${catId})`;
 }
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -216,33 +236,34 @@ const PROVIDER_LABELS: Record<string, string> = {
  * Full specs live in cat-cafe-skills/refs/ (rich-blocks.md, mcp-callbacks.md).
  */
 const MCP_TOOLS_SECTION = `
-MCP 工具用于异步汇报等场景（token 有效期有限）：
+MCP 工具（异步汇报；token 有效期有限）：
 
-**记忆工具（先搜后问）：**
-- cat_cafe_search_evidence: **首选入口** — 搜索知识库。depth=raw 返回消息级细节
-- cat_cafe_reflect: 反思性问题 — 从项目知识中合成洞察
+**记忆工具：**
+- cat_cafe_search_evidence: 首选入口；depth=raw 可看消息级细节
+- cat_cafe_reflect: 反思性合成
 
-**记忆 drill-down 工具（search_evidence 命中后深入）：**
-- cat_cafe_list_session_chain: 列出 thread 的 session 链
-- cat_cafe_read_session_digest: 读 session 摘要（sealed 后可用）
-- cat_cafe_read_session_events: 读 session 事件（支持 raw/chat/handoff 视图）
-- cat_cafe_read_invocation_detail: 读某次 invocation 的所有事件
+**drill-down：**
+- cat_cafe_list_session_chain: 列出 session 链
+- cat_cafe_read_session_digest: 读 session 摘要
+- cat_cafe_read_session_events: 读 session 事件（raw/chat/handoff）
+- cat_cafe_read_invocation_detail: 读单次 invocation 全事件
 
 **协作工具：**
 - cat_cafe_post_message: 异步消息
-- cat_cafe_register_pr_tracking: 注册 PR tracking（review 路由）
-- cat_cafe_get_pending_mentions: 获取 @提及
-- cat_cafe_get_thread_context: 获取对话上下文
-- cat_cafe_list_threads: 列出 thread 摘要
+- cat_cafe_register_pr_tracking: PR tracking
+- cat_cafe_get_pending_mentions: @提及
+- cat_cafe_get_thread_context: thread 上下文
+- cat_cafe_list_threads: thread 摘要
+- cat_cafe_create_task: 🧶 毛线球（持久任务）
 - cat_cafe_update_task: 更新任务状态
-- cat_cafe_create_rich_block: 创建 rich block
-- cat_cafe_generate_document: 生成文档并投递到 IM（MD→DOCX/PDF）— 用户说"生成报告/导出文档/发PDF"时用这个，不要手动 pandoc + create_rich_block（那不会投递到飞书）
-- cat_cafe_get_rich_block_rules: 获取 rich block 规则（fallback）
-- cat_cafe_multi_mention: 并行拉1-3只猫讨论同一问题（先搜后问：必须带searchEvidenceRefs或overrideReason）
+- cat_cafe_create_rich_block: rich block（inline）
+- cat_cafe_generate_document: 文档生成→IM投递
+- cat_cafe_get_rich_block_rules: rich block 规则
+- cat_cafe_multi_mention: 并行拉猫讨论（先搜后问）
 
 ${RICH_BLOCK_SHORT}
-When the user asks to say/show/present something richly, consider rich blocks (audio/card/gallery/checklist/diff); call get_rich_block_rules before first use in a session.
-富消息块规范详见 cat-cafe-skills/refs/rich-blocks.md。`;
+需要富呈现时优先 rich block；首次使用前先 call get_rich_block_rules。
+规范：cat-cafe-skills/refs/rich-blocks.md。`;
 
 /**
  * L0 Governance Digest — always-on first principles & operational floor.
@@ -251,19 +272,23 @@ When the user asks to say/show/present something richly, consider rich blocks (a
  * Design decision: inject compact L0 digest, not full text. See F086 spec.
  */
 const GOVERNANCE_L0_DIGEST = `## 家规（shared-rules.md）
+Rule 0: 规则是边界不是全部。边界之内保留判断力——执行规则时可以问"为什么？在这里适用吗？"认为不适用时用证据说话（Push Back协议：证据+适用性论证+替代方案，这是底线不是仪式）。判断力基于三个自问：①我在做什么（先定角色再动手）②信息源可靠吗（验证不盲信）③方案笨重？（坐标变换——换问题分解方式）
 原则：P1每步产物是终态基座不是脚手架 P2自主跑完SOP不每步问铲屎官（SOP写了下一步→直接做，不问；方向不确定/阻塞→才升级） P3方向正确>速度 P4每个概念只在一处定义 P5可验证才算完成
-世界观：W1猫是Agent不是API W2共享才成团队 W3用户是CVO W4不随地大小便（文件放对目录） W5只回流方法论不回流数据 W6教训追到根因 W7 Knowledge Feed自动提取知识，猫不写标签——主动澄清决策/教训是否成立+提醒铲屎官看Feed W8共享视图——产物端上桌：写完文件/页面/报告→主动用navigate/preview/rich block帮铲屎官打开，不只报路径
-纪律：不冒充其他猫 | 实事求是——结论基于多源证据（代码+commit+PR+文档），顺藤摸瓜查完再下判断，不够就说"还没查完" | @是路由指令——发前问"到我这里结束了吗？" | runtime禁止擅自重启 | 团队用"我们"不用"你们" | BACKLOG等共享状态只在main改，改完立刻commit push | 跨thread阻塞依赖必须双写到可追溯状态（feature doc/workflow/task），消息不是真相源 | commit必须带签名[昵称/模型🐾]（如[宪宪/Opus-46🐾]），不带模型型号=无法区分是谁干的
+世界观：W1猫是Agent不是API W2共享才成团队 W3用户是CVO W4产出放对目录（assets/docs/packages/） W5只回流方法论不回流数据 W6教训追到根因 W7 Knowledge Feed自动提取知识，猫不写标签——主动澄清决策/教训是否成立+提醒铲屎官看Feed W8共享视图——产物端上桌：写完文件/页面/报告→主动用navigate/preview/rich block帮铲屎官打开
+纪律：用自己的身份签名[昵称/模型🐾] | 实事求是——结论基于多源证据（代码+commit+PR+文档），查完再下判断，不够就说"还没查完" | @是路由指令——发前问"到我这里结束了吗？"收到@后三选一：接（我做X）/退（退给@xxx）/升（铲屎官拍板），禁止状态描述代替球权声明（"我先hold/你继续/等以后"都是违禁句式） | runtime操作交铲屎官（只读诊断可以做） | 团队用"我们" | BACKLOG等共享状态只在main改，改完立刻commit push | 跨thread阻塞依赖双写到可追溯状态（feature doc/workflow/task），消息不是真相源 | commit带签名含模型型号（如[宪宪/Opus-46🐾]）
 质量覆盖（对冲CLI"先简单后复杂"——方向错误的加速=浪费）：
-- Bug先定位根因再修，禁止猜测修补。复现→日志→调用链→根因→动手
-- 不确定方向：停→搜→问→确认→再动手，禁止"先做了再说"
+- Bug先定位根因再修。复现→日志→调用链→根因→动手
+- 不确定方向：停→搜→问→确认→再动手
 - "完成"附证据（测试/截图/日志）。Bug先红后绿
 - scope失控→记录；同类错误→提案；有价值经验→Episode→蒸馏→Eval（self-evolution+五级阶梯）
+- 被铲屎官纠正理解偏差时（"不是让你…/你理解错了"等），先完成实际任务，再主动记录evidence到F167 spec（我以为→实际→偏差根因），按self-evolution归档
 Magic Words（铲屎官对你说以下词=手动拉闸，仅铲屎官当前指令触发，引用/复述/讨论历史不触发）：
 -「脚手架」= 你在偷懒写临时方案 → 停，审视产物是否终态，不是→重写
 -「绕路了」= 局部最优但全局绕路 → 停，画出直线路径，丢掉绕路部分
 -「喵约」= 你忘了我们的约定 → 重读本段家规，逐条对照当前行为
--「星星罐子」= P0不可逆风险 → 立刻停止新增副作用（不发新命令、不写新文件、不push），等铲屎官指示`;
+-「星星罐子」= P0不可逆风险 → 立刻停止新增副作用（不发新命令、不写新文件、不push），等铲屎官指示
+-「第一性原理」= 你在堆复杂度代偿无知 → 停，重读 Round 4 数学美学讨论，用 Agent Quality = Capability × Environment Fit 审视当前方案，砍掉认知脚手架只留运行时刹车和认知路径工程
+-「数学之美」= 同「第一性原理」。最优表达在正确坐标系下必然最简——如果方案需要那么多层，说明坐标系选错了`;
 
 /** Per-breed workflow triggers: when to proactively @ other cats.
  *  Keyed by breedId so all variants of a breed share the same workflow. */
@@ -273,23 +298,24 @@ const WORKFLOW_TRIGGERS: Record<string, string> = {
     '- 完成开发/修复 → @缅因猫 请 review',
     '- 修完 review 意见 → @缅因猫 确认修复',
     '- 遇到视觉/体验问题 → @暹罗猫 征询',
-    '- Review 别人代码：每个发现必须有明确立场，禁止说"修不修都行"',
+    '- Review 别人代码：每个发现给明确立场（放行/退回 + 理由）',
   ].join('\n'),
   'maine-coon': [
     '## 工作流（主动 @ 触发点）',
     '- 完成 review → @布偶猫 通知结果',
     '- 修完 bug/feature → @布偶猫 请 review',
-    '- 讨论/独立思考完成，结论需要其他猫跟进 → @ 对应猫',
+    '- serial/handoff 场景且需要对方行动 → @ 对应猫（parallel 模式各自独立，不互 @）',
     '- 发现需要架构决策 → @布偶猫 征询',
-    '- Review 布偶猫代码：每个发现必须有明确立场，禁止说"修不修都行"',
-    '- 收到 review 意见：独立判断，认为自己对就 push back，不全盘接受',
+    '- Review 代码：每个发现给明确立场（放行/退回 + 理由）',
+    '- 收到 review 意见：独立判断，认为自己对就 push back（Rule 0），不全盘接受',
     '',
     '### 执行纪律',
-    '- 加载 Skill 后直接执行第一步，不要复述流程',
-    '- 接球后默认静默执行：收到"放行"后沉默做到下一状态迁移点（BLOCKED / REVIEW READY / DONE）',
-    '- 声明 ≠ 执行：说"我进 merge gate"必须同 turn 加载 skill 并执行，只发消息不调工具 = 空气传球',
-    '- 禁止中途进展汇报、禁止说"你别回我了"',
+    '- 加载 Skill 后直接执行第一步（产出 > 复述）',
+    '- 接球后静默执行：收到"放行"后沉默做到下一状态迁移点（BLOCKED / REVIEW READY / DONE）',
+    '- 声明 = 执行：说"我进 merge gate"必须同 turn 加载 skill 并执行',
+    '- 只发状态迁移消息，中间产物留在代码里',
     '- 完成任务后必须 @ 下一棒',
+    '- 若识别到角色不匹配或方向有问题，先通知对方再执行（Rule 0）',
     '',
     '### 出口一问（发消息前必问）',
     '我这条消息结尾有没有 @ 下一棒？没有 → 是真的不需要，还是我忘了？',
@@ -298,6 +324,15 @@ const WORKFLOW_TRIGGERS: Record<string, string> = {
     '## 工作流（主动 @ 触发点）',
     '- 完成设计/视觉资产 → 分别 @布偶猫 和 @缅因猫 请确认（每只猫各占一行）',
     '- 遇到技术实现问题 → @布偶猫 征询',
+    '',
+    '### 执行纪律',
+    '- 加载 Skill 后直接执行第一步（产出 > 复述）',
+    '- 涉及 UI/前端验证时：通过截图产出证据',
+    '- 接球后静默执行到下一状态点（DONE / HANDOFF）',
+    '- 若识别到角色不匹配或方向有问题，先通知对方再执行（Rule 0）',
+    '',
+    '### 出口一问（发消息前必问）',
+    '我这条消息结尾有没有 @ 下一棒？没有 → 是真的不需要，还是我忘了？',
   ].join('\n'),
 };
 
@@ -475,11 +510,39 @@ export function buildInvocationContext(context: InvocationContext): string {
     `Identity: ${config.displayName}${config.nickname ? `/${config.nickname}` : ''} (@${context.catId}, model=${runtimeModel})`,
   );
 
-  // F042: A2A direct-message reply target.
+  // F042 + F167: A2A direct-message reply target + identity anti-spoofing.
+  // When handoff comes from a same-breed variant (same displayName, different catId),
+  // inject explicit model markers + "not-you" reminder to prevent identity collapse
+  // (e.g. opus-47 receiving from opus-default conflating itself with the 4.6 variant).
   if (context.directMessageFrom && context.directMessageFrom !== context.catId) {
     const fromConfig = getConfig(context.directMessageFrom as string);
     const fromLabel = formatHandleFreeLabel(context.directMessageFrom as string, fromConfig);
-    lines.push(`Direct message from ${fromLabel}; reply to ${fromLabel}`);
+    const fromModel = (() => {
+      try {
+        return getCatModel(context.directMessageFrom as string);
+      } catch {
+        return fromConfig?.defaultModel ?? 'unknown';
+      }
+    })();
+    lines.push(`Direct message from ${fromLabel} [model=${fromModel}]; reply to ${fromLabel}`);
+    // Anti-spoofing fires only for same-breed variant handoffs (displayName collision + catId differs)
+    if (fromConfig && fromConfig.displayName === config.displayName) {
+      const selfVariant = config.variantLabel ?? runtimeModel;
+      const fromVariant = fromConfig.variantLabel ?? fromModel;
+      lines.push(
+        `⚠️ 同族分身提醒：对方是 ${fromVariant}（model=${fromModel}），你是 ${selfVariant}（model=${runtimeModel}）——两个独立分身，不是你的旧版或新版。`,
+      );
+    }
+  }
+
+  // F167 L1: ping-pong streak warning — inject when this cat just received the ball
+  // in a same-pair streak >= 2 (but < 4, else it would have been blocked upstream).
+  if (context.pingPongWarning) {
+    const otherConfig = getConfig(context.pingPongWarning.pairedWith as string);
+    const otherLabel = formatHandleFreeLabel(context.pingPongWarning.pairedWith as string, otherConfig);
+    lines.push(
+      `🏓 乒乓球警告：你和 ${otherLabel} 已连续互相 @ ${context.pingPongWarning.count} 轮。思考是否真的需要再回一棒——第三方介入？收尾给铲屎官？还是这轮可以不 @？再 @ 2 轮将自动熔断。`,
+    );
   }
 
   // Teammates — only list cats actually in this invocation
@@ -498,8 +561,9 @@ export function buildInvocationContext(context: InvocationContext): string {
     lines.push(`当前模式：你是第 ${context.chainIndex}/${context.chainTotal} 只被召唤的猫，请注意前面猫的回复。`, '');
   } else if (context.mode === 'parallel') {
     lines.push(
-      '当前模式：独立思考。你和队友各自独立回答同一问题，给出你自己的观点。',
+      '当前模式：并行模式——独立思考。你和队友各自独立回答同一问题，给出你自己的观点。',
       `重要：你是 ${config.displayName}（@${context.catId}），不要复制或模仿其他猫的自我介绍。`,
+      'F167 L2: @句柄 在并行模式下无路由语义（各猫并发、无先后顺序），不要互相 @；需要提醒队友做后续动作请等串行轮再说。',
       '',
     );
   } else {
@@ -509,8 +573,9 @@ export function buildInvocationContext(context: InvocationContext): string {
   // A2A: Exit check reminder — prevents "chain termination blind spot" where cats finish output
   // without considering whether a teammate needs to act next.
   if (context.mode !== 'parallel' && context.a2aEnabled) {
+    const ccHandle = getCoCreatorConfig().mentionPatterns[0] ?? '@铲屎官';
     lines.push(
-      'A2A 出口检查：回复前问"到我这里结束了吗？"不是 → 谁需要动 → 末尾另起一行行首写 @句柄（句中 @ 无效）。',
+      `A2A 球权检查：@ = 球权转移（行首 @句柄，句中无效）。下一棒是谁？猫 → 末尾行首 @句柄 / 铲屎官需要动 → 末尾行首 ${ccHandle} / 没人 → 不 @。收到 @ 但对方说"我在动" → 矛盾，push back + 立刻接/退/升（诊断≠解决，说完不@=球还在地上）。收了球却说"你等着/你别动" → 球权死锁，禁止——做不了就退回或升级。不 @ 但自己还在干活 → 结尾声明"球在我手上，继续 X"，防止倒装句让人误判你走了。`,
       '',
     );
   }
@@ -619,6 +684,19 @@ export function buildInvocationContext(context: InvocationContext): string {
   // F155: Guide candidate — inline protocol (cats don't have /Skill tool at runtime)
   if (context.guideCandidate) {
     lines.push(...buildGuidePromptLines(context.guideCandidate, context.threadId));
+  }
+
+  // F163 AC-A3: always_on constitutional knowledge injection (physical, not retrieval)
+  if (context.alwaysOnDocs && context.alwaysOnDocs.length > 0) {
+    lines.push('');
+    lines.push('## Constitutional Knowledge (always_on)');
+    lines.push('');
+    for (const doc of context.alwaysOnDocs) {
+      lines.push(`### ${doc.title}`);
+      lines.push('');
+      lines.push(doc.summary);
+      lines.push('');
+    }
   }
 
   // F091: Active Signal articles in discussion context

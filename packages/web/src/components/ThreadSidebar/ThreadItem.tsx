@@ -262,7 +262,17 @@ export function ThreadItem({
               className="flex items-center gap-0.5 ml-1"
               title={`默认: ${preferredCats.map((id) => getCatById(id)?.displayName ?? id).join(', ')}`}
             >
-              <span className="text-[9px] text-cafe-muted">🎯</span>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-2.5 w-2.5 text-cafe-muted shrink-0"
+              >
+                <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />
+              </svg>
               {preferredCats.map((catId) => (
                 <span
                   key={catId}

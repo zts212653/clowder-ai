@@ -70,6 +70,8 @@ describe('MCP Callback Tools', () => {
     assert.equal(body.content, 'Hello from cat!');
     assert.equal(body.invocationId, 'test-invocation');
     assert.equal(body.callbackToken, 'test-token');
+    assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
+    assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
   });
 
   test('handlePostMessage forwards optional threadId for cross-thread posting', async () => {
@@ -135,12 +137,13 @@ describe('MCP Callback Tools', () => {
     assert.equal(result.isError, undefined);
   });
 
-  test('handleGetPendingMentions calls API with auth in query', async () => {
+  test('handleGetPendingMentions calls API with auth in headers', async () => {
     const { handleGetPendingMentions } = await import('../dist/tools/callback-tools.js');
 
-    let capturedUrl;
-    globalThis.fetch = async (url) => {
+    let capturedUrl, capturedOptions;
+    globalThis.fetch = async (url, options) => {
       capturedUrl = url;
+      capturedOptions = options;
       return {
         ok: true,
         json: async () => ({ mentions: [] }),
@@ -153,6 +156,8 @@ describe('MCP Callback Tools', () => {
     assert.ok(capturedUrl.includes('/api/callbacks/pending-mentions'));
     assert.ok(capturedUrl.includes('invocationId=test-invocation'));
     assert.ok(capturedUrl.includes('callbackToken=test-token'));
+    assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
+    assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
   });
 
   test('handleGetThreadContext calls API with limit', async () => {
@@ -416,8 +421,8 @@ describe('MCP Callback Tools', () => {
     assert.ok(capturedUrl.includes('/api/callbacks/reflect'));
     const body = JSON.parse(capturedOptions.body);
     assert.equal(body.query, 'How to reduce context drift?');
-    assert.equal(body.invocationId, 'test-invocation');
-    assert.equal(body.callbackToken, 'test-token');
+    assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
+    assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
   });
 
   test('handleRetainMemory posts content/tags/metadata to callback retain endpoint', async () => {
@@ -619,6 +624,8 @@ describe('MCP Callback Tools', () => {
     assert.equal(body.context, 'Fix for issue #42');
     assert.equal(body.invocationId, 'test-invocation');
     assert.equal(body.callbackToken, 'test-token');
+    assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
+    assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
     assert.ok(result.content[0].text.includes('granted'));
   });
 
@@ -649,9 +656,10 @@ describe('MCP Callback Tools', () => {
   test('handleCheckPermissionStatus queries permission-status endpoint', async () => {
     const { handleCheckPermissionStatus } = await import('../dist/tools/callback-tools.js');
 
-    let capturedUrl;
-    globalThis.fetch = async (url) => {
+    let capturedUrl, capturedOptions;
+    globalThis.fetch = async (url, options) => {
       capturedUrl = url;
+      capturedOptions = options;
       return {
         ok: true,
         json: async () => ({
@@ -670,6 +678,8 @@ describe('MCP Callback Tools', () => {
     assert.ok(capturedUrl.includes('requestId=req-123'));
     assert.ok(capturedUrl.includes('invocationId=test-invocation'));
     assert.ok(capturedUrl.includes('callbackToken=test-token'));
+    assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
+    assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
     assert.ok(result.content[0].text.includes('granted'));
   });
 
@@ -731,6 +741,65 @@ describe('MCP Callback Tools', () => {
 
     assert.equal(result.isError, undefined);
     assert.equal(readdirSync(outboxDir).length, 0, 'stale entry should be dropped after max attempts');
+  });
+
+  // ---- #476: outbox legacy fixup — pre-migration entries have creds in body, not headers ----
+
+  test('flushes pre-#476 outbox entry with creds in body by migrating them to headers', async () => {
+    const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
+
+    // Seed a legacy outbox entry: has invocationId/callbackToken in body, NO headers field
+    const legacyEntry = {
+      id: 'legacy-001',
+      queuedAt: 1,
+      apiUrl: 'http://127.0.0.1:3004',
+      path: '/api/callbacks/post-message',
+      body: {
+        invocationId: 'legacy-inv',
+        callbackToken: 'legacy-tok',
+        content: 'legacy-queued-message',
+        clientMessageId: 'legacy-001',
+      },
+      // NOTE: no "headers" field — this is the pre-#476 format
+      attempts: 0,
+      lastError: 'seeded',
+    };
+    writeFileSync(
+      join(outboxDir, `${legacyEntry.queuedAt}-${legacyEntry.id}.json`),
+      JSON.stringify(legacyEntry),
+      'utf8',
+    );
+
+    const replayedHeaders = [];
+    globalThis.fetch = async (_url, options) => {
+      const body = JSON.parse(options.body);
+      if (body.content === 'legacy-queued-message') {
+        replayedHeaders.push({ ...options.headers });
+      }
+      return {
+        ok: true,
+        json: async () => ({ status: 'ok' }),
+      };
+    };
+
+    const result = await handlePostMessage({
+      content: 'current-after-legacy',
+      clientMessageId: 'current-legacy-001',
+    });
+
+    assert.equal(result.isError, undefined);
+    assert.equal(replayedHeaders.length, 1, 'legacy entry should have been replayed');
+    assert.equal(
+      replayedHeaders[0]['x-invocation-id'],
+      'legacy-inv',
+      'replay must extract invocationId from body into x-invocation-id header',
+    );
+    assert.equal(
+      replayedHeaders[0]['x-callback-token'],
+      'legacy-tok',
+      'replay must extract callbackToken from body into x-callback-token header',
+    );
+    assert.equal(readdirSync(outboxDir).length, 0, 'legacy entry should be drained after success');
   });
 
   // ---- #84: create_rich_block Route A → Route B fallback ----
@@ -894,8 +963,8 @@ describe('MCP Callback Tools', () => {
     assert.equal(body.timeoutMinutes, 8);
     assert.deepEqual(body.searchEvidenceRefs, ['docs/features/F055.md']);
     assert.equal(body.triggerType, 'cross-domain');
-    assert.equal(body.invocationId, 'test-invocation');
-    assert.equal(body.callbackToken, 'test-token');
+    assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
+    assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
   });
 
   test('handleMultiMention rejects missing searchEvidenceRefs and overrideReason', async () => {
@@ -982,8 +1051,8 @@ describe('MCP Callback Tools', () => {
     assert.equal(body.repoFullName, 'zts212653/cat-cafe');
     assert.equal(body.prNumber, 832);
     assert.equal(body.catId, undefined, 'catId must not appear in body when omitted');
-    assert.equal(body.invocationId, 'test-invocation');
-    assert.equal(body.callbackToken, 'test-token');
+    assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
+    assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
   });
 
   test('handleRegisterPrTracking forwards catId when provided (backward compat)', async () => {

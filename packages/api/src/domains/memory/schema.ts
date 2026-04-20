@@ -66,7 +66,37 @@ END`,
 END`,
 ];
 
-export const CURRENT_SCHEMA_VERSION = 12;
+export const CURRENT_SCHEMA_VERSION = 15;
+
+// F163 Phase A: experiment infrastructure tables (cohorts, suggestions, logs)
+export const SCHEMA_V13_TABLES = `
+CREATE TABLE IF NOT EXISTS f163_cohorts (
+  thread_id TEXT PRIMARY KEY,
+  variant_id TEXT NOT NULL,
+  assigned_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS f163_suggestions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  capability TEXT NOT NULL,
+  target_anchor TEXT NOT NULL,
+  action TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  variant_id TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS f163_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  log_type TEXT NOT NULL,
+  variant_id TEXT NOT NULL,
+  effective_flags TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_f163_logs_type ON f163_logs(log_type);
+CREATE INDEX IF NOT EXISTS idx_f163_logs_variant ON f163_logs(variant_id);
+`;
 
 // Phase C: embedding metadata (model/dim version anchor)
 export const SCHEMA_V2 = `
@@ -360,6 +390,66 @@ export function applyMigrations(db: Database.Database): void {
       // Column may already exist from a partial migration
     }
     db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(12, new Date().toISOString());
+  }
+
+  if (currentVersion < 13) {
+    // F163 Phase A: multi-axis metadata + experiment infrastructure
+    try {
+      db.exec("ALTER TABLE evidence_docs ADD COLUMN authority TEXT DEFAULT 'observed'");
+    } catch {
+      // Column may already exist from a partial migration
+    }
+    try {
+      db.exec("ALTER TABLE evidence_docs ADD COLUMN activation TEXT DEFAULT 'query'");
+    } catch {
+      // Column may already exist from a partial migration
+    }
+    try {
+      db.exec('ALTER TABLE evidence_docs ADD COLUMN verified_at TEXT');
+    } catch {
+      // Column may already exist from a partial migration
+    }
+    db.exec(SCHEMA_V13_TABLES);
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(13, new Date().toISOString());
+  }
+
+  if (currentVersion < 14) {
+    // F163 Phase B: non-replacement compression columns
+    try {
+      db.exec('ALTER TABLE evidence_docs ADD COLUMN source_ids TEXT');
+    } catch {
+      // Column may already exist from a partial migration
+    }
+    try {
+      db.exec('ALTER TABLE evidence_docs ADD COLUMN summary_of_anchor TEXT');
+    } catch {
+      // Column may already exist from a partial migration
+    }
+    try {
+      db.exec('ALTER TABLE evidence_docs ADD COLUMN compression_rationale TEXT');
+    } catch {
+      // Column may already exist from a partial migration
+    }
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(14, new Date().toISOString());
+  }
+
+  if (currentVersion < 15) {
+    try {
+      db.exec('ALTER TABLE evidence_docs ADD COLUMN contradicts TEXT');
+    } catch {
+      // Column may already exist from a partial migration
+    }
+    try {
+      db.exec('ALTER TABLE evidence_docs ADD COLUMN invalid_at TEXT');
+    } catch {
+      // Column may already exist from a partial migration
+    }
+    try {
+      db.exec('ALTER TABLE evidence_docs ADD COLUMN review_cycle_days INTEGER');
+    } catch {
+      // Column may already exist from a partial migration
+    }
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(15, new Date().toISOString());
   }
 }
 

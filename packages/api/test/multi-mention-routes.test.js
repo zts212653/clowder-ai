@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
 import Fastify from 'fastify';
+import { registerCallbackAuthHook } from '../dist/routes/callback-auth-prehandler.js';
 import { resetMultiMentionOrchestrator } from '../dist/routes/callback-multi-mention-routes.js';
 
 // Bootstrap catRegistry from CAT_CONFIGS (same as server startup)
@@ -172,6 +173,7 @@ describe('Multi-Mention Routes', () => {
     creds = mockRegistry.register('opus', 'thread-1', 'user-1');
 
     app = Fastify({ logger: false });
+    registerCallbackAuthHook(app, mockRegistry);
 
     const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
 
@@ -197,9 +199,8 @@ describe('Multi-Mention Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
       payload: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
         targets: ['codex'],
         question: 'What do you think?',
         callbackTo: 'opus',
@@ -216,9 +217,8 @@ describe('Multi-Mention Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': 'fake', 'x-callback-token': 'fake' },
       payload: {
-        invocationId: 'fake',
-        callbackToken: 'fake',
         targets: ['codex'],
         question: 'test',
         callbackTo: 'opus',
@@ -232,9 +232,8 @@ describe('Multi-Mention Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
       payload: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
         targets: ['nonexistent-cat'],
         question: 'test',
         callbackTo: 'opus',
@@ -250,9 +249,8 @@ describe('Multi-Mention Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
       payload: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
         targets: ['codex'],
         question: 'test',
         callbackTo: 'nonexistent-cat',
@@ -268,9 +266,8 @@ describe('Multi-Mention Routes', () => {
     await app.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
       payload: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
         targets: ['codex', 'gemini'],
         question: 'Review this design',
         callbackTo: 'opus',
@@ -291,9 +288,8 @@ describe('Multi-Mention Routes', () => {
     await app.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
       payload: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
         targets: ['codex', 'gemini'],
         question: 'Review this design',
         callbackTo: 'opus',
@@ -330,9 +326,8 @@ describe('Multi-Mention Routes', () => {
     await app.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
       payload: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
         targets: ['codex'],
         question: 'What is your opinion?',
         callbackTo: 'opus',
@@ -351,9 +346,8 @@ describe('Multi-Mention Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
       payload: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
         targets: ['codex'],
         question: 'test',
         callbackTo: 'opus',
@@ -367,9 +361,8 @@ describe('Multi-Mention Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
       payload: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
         targets: ['codex'],
         question: 'test',
         callbackTo: 'opus',
@@ -390,9 +383,8 @@ describe('Multi-Mention Routes', () => {
     const createRes = await app.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
       payload: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
         targets: ['codex'],
         question: 'test',
         callbackTo: 'opus',
@@ -404,11 +396,8 @@ describe('Multi-Mention Routes', () => {
     const statusRes = await app.inject({
       method: 'GET',
       url: '/api/callbacks/multi-mention-status',
-      query: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
-        requestId,
-      },
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
+      query: { requestId },
     });
 
     assert.equal(statusRes.statusCode, 200);
@@ -421,11 +410,8 @@ describe('Multi-Mention Routes', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/callbacks/multi-mention-status',
-      query: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
-        requestId: 'nonexistent',
-      },
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
+      query: { requestId: 'nonexistent' },
     });
 
     assert.equal(res.statusCode, 404);
@@ -451,9 +437,8 @@ describe('Multi-Mention Routes', () => {
     await app.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
       payload: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
         targets: ['codex'],
         question: 'Quick question',
         callbackTo: 'opus',
@@ -501,9 +486,8 @@ describe('Multi-Mention Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': codexCreds.invocationId, 'x-callback-token': codexCreds.callbackToken },
       payload: {
-        invocationId: codexCreds.invocationId,
-        callbackToken: codexCreds.callbackToken,
         targets: ['gemini'],
         question: 'Cascading question',
         callbackTo: 'codex',
@@ -541,6 +525,7 @@ describe('Multi-Mention Routes', () => {
 
     // Re-create app with invocationTracker
     const trackerApp = Fastify({ logger: false });
+    registerCallbackAuthHook(trackerApp, mockRegistry);
     const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
     registerMultiMentionRoutes(trackerApp, {
       registry: mockRegistry,
@@ -558,9 +543,8 @@ describe('Multi-Mention Routes', () => {
     await trackerApp.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': callerCreds.invocationId, 'x-callback-token': callerCreds.callbackToken },
       payload: {
-        invocationId: callerCreds.invocationId,
-        callbackToken: callerCreds.callbackToken,
         targets: ['opus', 'gemini'],
         question: 'Test concurrent dispatch',
         callbackTo: 'codex',
@@ -616,6 +600,7 @@ describe('Multi-Mention Routes', () => {
     };
 
     const crashApp = Fastify({ logger: false });
+    registerCallbackAuthHook(crashApp, mockRegistry);
     const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
     registerMultiMentionRoutes(crashApp, {
       registry: mockRegistry,
@@ -632,9 +617,8 @@ describe('Multi-Mention Routes', () => {
     const res = await crashApp.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': crashCreds.invocationId, 'x-callback-token': crashCreds.callbackToken },
       payload: {
-        invocationId: crashCreds.invocationId,
-        callbackToken: crashCreds.callbackToken,
         targets: ['codex'],
         question: 'This will crash',
         callbackTo: 'opus',
@@ -688,6 +672,7 @@ describe('Multi-Mention Routes', () => {
     };
 
     const preAbortApp = Fastify({ logger: false });
+    registerCallbackAuthHook(preAbortApp, mockRegistry);
     const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
     registerMultiMentionRoutes(preAbortApp, {
       registry: mockRegistry,
@@ -704,9 +689,8 @@ describe('Multi-Mention Routes', () => {
     const res = await preAbortApp.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': preCreds.invocationId, 'x-callback-token': preCreds.callbackToken },
       payload: {
-        invocationId: preCreds.invocationId,
-        callbackToken: preCreds.callbackToken,
         targets: ['codex'],
         question: 'After preempt',
         callbackTo: 'opus',
@@ -738,6 +722,7 @@ describe('Multi-Mention Routes', () => {
     };
 
     const capApp = Fastify({ logger: false });
+    registerCallbackAuthHook(capApp, mockRegistry);
     const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
     registerMultiMentionRoutes(capApp, {
       registry: mockRegistry,
@@ -754,9 +739,8 @@ describe('Multi-Mention Routes', () => {
     const res = await capApp.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': capCreds.invocationId, 'x-callback-token': capCreds.callbackToken },
       payload: {
-        invocationId: capCreds.invocationId,
-        callbackToken: capCreds.callbackToken,
         targets: ['codex'],
         question: 'F122 parentInvocationId test',
         callbackTo: 'opus',

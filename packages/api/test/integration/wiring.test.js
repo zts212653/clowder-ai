@@ -19,7 +19,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import { after, before, beforeEach, describe, mock, test } from 'node:test';
+import { after, afterEach, before, beforeEach, describe, mock, test } from 'node:test';
 import Fastify from 'fastify';
 import { migrateRouterOpts } from '../helpers/agent-registry-helpers.js';
 
@@ -162,6 +162,36 @@ function installFakeCliPath() {
 
   return dir;
 }
+
+let originalGlobalConfigRoot;
+let originalHome;
+let testGlobalConfigRoot;
+
+before(() => {
+  originalGlobalConfigRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+  originalHome = process.env.HOME;
+});
+
+beforeEach(async () => {
+  // Isolate catalog/credential writes so invoke-single-cat never touches repo-root config.
+  testGlobalConfigRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-wiring-global-'));
+  process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = testGlobalConfigRoot;
+  process.env.HOME = testGlobalConfigRoot;
+
+  const { resetMigrationState } = await import('../../dist/config/catalog-accounts.js');
+  resetMigrationState();
+});
+
+afterEach(() => {
+  if (testGlobalConfigRoot) {
+    rmSync(testGlobalConfigRoot, { recursive: true, force: true });
+    testGlobalConfigRoot = undefined;
+  }
+  if (originalGlobalConfigRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+  else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = originalGlobalConfigRoot;
+  if (originalHome === undefined) delete process.env.HOME;
+  else process.env.HOME = originalHome;
+});
 
 // ===================================================================
 // Test Suite: AgentRouter + Services wiring
@@ -502,9 +532,8 @@ describe('MCP callback end-to-end flow', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': env.CAT_CAFE_INVOCATION_ID, 'x-callback-token': env.CAT_CAFE_CALLBACK_TOKEN },
       payload: {
-        invocationId: env.CAT_CAFE_INVOCATION_ID,
-        callbackToken: env.CAT_CAFE_CALLBACK_TOKEN,
         content: 'Callback message from cat!',
       },
     });
@@ -551,7 +580,8 @@ describe('MCP callback end-to-end flow', () => {
     const app = await createApp();
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/pending-mentions?invocationId=${invocationId}&callbackToken=${callbackToken}`,
+      url: '/api/callbacks/pending-mentions',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);

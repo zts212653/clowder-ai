@@ -510,6 +510,52 @@ After text`;
     assert.equal(cleaned, '继续落到实现。先补链路和测试。');
   });
 
+  test('P2-3: sanitizeInjectedContent keeps legitimate tool-use JSON examples when prose continues', async () => {
+    const { sanitizeInjectedContent } = await import('../dist/domains/cats/services/agents/routing/route-helpers.js');
+
+    const legitimate = `文档示例：
+
+{"tool_uses":[{"recipient_name":"functions.exec_command","parameters":{"cmd":"pwd"}}]}
+
+上面这个 JSON 只是示例，不是泄漏。`;
+
+    const cleaned = sanitizeInjectedContent(legitimate);
+    assert.equal(cleaned, legitimate);
+  });
+
+  test('P1-4: sanitizeInjectedContent keeps legitimate tool-use JSON examples at response end', async () => {
+    const { sanitizeInjectedContent } = await import('../dist/domains/cats/services/agents/routing/route-helpers.js');
+
+    const legitimate = `文档示例：
+
+{"tool_uses":[{"recipient_name":"functions.exec_command","parameters":{"cmd":"pwd"}}]}`;
+
+    const cleaned = sanitizeInjectedContent(legitimate);
+    assert.equal(cleaned, legitimate);
+  });
+
+  test('P1-5: sanitizeInjectedContent does not treat counterexample prose as an example label', async () => {
+    const { sanitizeInjectedContent } = await import('../dist/domains/cats/services/agents/routing/route-helpers.js');
+
+    const leaked = `This is a counterexample
+
+{"tool_uses":[{"recipient_name":"functions.exec_command","parameters":{"cmd":"pwd"}}]}`;
+
+    const cleaned = sanitizeInjectedContent(leaked);
+    assert.equal(cleaned, 'This is a counterexample');
+  });
+
+  test('P1-6: sanitizeInjectedContent keeps unlabeled English example headers without colon', async () => {
+    const { sanitizeInjectedContent } = await import('../dist/domains/cats/services/agents/routing/route-helpers.js');
+
+    const legitimate = `Example
+
+{"tool_uses":[{"recipient_name":"functions.exec_command","parameters":{"cmd":"pwd"}}]}`;
+
+    const cleaned = sanitizeInjectedContent(legitimate);
+    assert.equal(cleaned, legitimate);
+  });
+
   // --- Phase D: Coverage Map + Thread Memory injection ---
 
   test('AC-D2: smart window includes coverage map JSON', async () => {

@@ -4,8 +4,13 @@
  */
 
 import assert from 'node:assert/strict';
+import { dirname, resolve } from 'node:path';
 import { describe, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
+
+const CAT_TEMPLATE_PATH =
+  process.env.CAT_TEMPLATE_PATH ?? resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'cat-template.json');
 
 describe('SystemPromptBuilder', () => {
   // Dynamic import after build
@@ -147,7 +152,8 @@ describe('SystemPromptBuilder', () => {
       teammates: [],
       mcpAvailable: false,
     });
-    assert.ok(prompt.includes('不冒充'));
+    // Phase 0 正面化: 不冒充 → 用自己的身份签名 (L0 GOVERNANCE_L0_DIGEST)
+    assert.ok(prompt.includes('用自己的身份签名'));
   });
 
   test('is deterministic (identical inputs produce identical output)', async () => {
@@ -165,7 +171,7 @@ describe('SystemPromptBuilder', () => {
     assert.equal(a, b);
   });
 
-  test('output size is under 3200 chars (raised for F102-D17 MCP tools section)', async () => {
+  test('output size stays under 3900 chars after Magic Words + runtime prompt growth', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -176,7 +182,7 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: true,
       promptTags: ['critique'],
     });
-    assert.ok(prompt.length < 3600, `Prompt is ${prompt.length} chars, expected < 3600`);
+    assert.ok(prompt.length < 3900, `Prompt is ${prompt.length} chars, expected < 3900`);
   });
 
   test('returns empty string for unknown catId', async () => {
@@ -274,7 +280,8 @@ describe('SystemPromptBuilder', () => {
     assert.ok(identity.includes('布偶猫'), 'Should contain display name');
     assert.ok(identity.includes('Anthropic'), 'Should contain provider');
     assert.ok(identity.includes('## 协作'), 'Should contain collaboration guide');
-    assert.ok(identity.includes('不冒充'), 'Should contain anti-impersonation rule');
+    // Phase 0 正面化: 不冒充 → 用自己的身份签名 (L0 GOVERNANCE_L0_DIGEST)
+    assert.ok(identity.includes('用自己的身份签名'), 'Should contain identity-signature rule (anti-impersonation)');
     assert.ok(identity.includes('团队用"我们"'), 'Should contain identity contract (folded into L0)');
   });
 
@@ -307,7 +314,7 @@ describe('SystemPromptBuilder', () => {
     const originalConfigs = catRegistry.getAllConfigs();
     catRegistry.reset();
     try {
-      const runtimeConfigs = toAllCatConfigs(loadCatConfig());
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(CAT_TEMPLATE_PATH));
       for (const [id, config] of Object.entries(runtimeConfigs)) {
         catRegistry.register(id, config);
       }
@@ -336,7 +343,7 @@ describe('SystemPromptBuilder', () => {
     const originalConfigs = catRegistry.getAllConfigs();
     catRegistry.reset();
     try {
-      const runtimeConfigs = toAllCatConfigs(loadCatConfig());
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(CAT_TEMPLATE_PATH));
       for (const [id, config] of Object.entries(runtimeConfigs)) {
         catRegistry.register(id, config);
       }
@@ -380,7 +387,7 @@ describe('SystemPromptBuilder', () => {
     const originalConfigs = catRegistry.getAllConfigs();
     catRegistry.reset();
     try {
-      const runtimeConfigs = toAllCatConfigs(loadCatConfig());
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(CAT_TEMPLATE_PATH));
       for (const [id, config] of Object.entries(runtimeConfigs)) {
         catRegistry.register(id, config);
       }
@@ -406,7 +413,7 @@ describe('SystemPromptBuilder', () => {
     const originalConfigs = catRegistry.getAllConfigs();
     catRegistry.reset();
     try {
-      const runtimeConfigs = toAllCatConfigs(loadCatConfig());
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(CAT_TEMPLATE_PATH));
       for (const [id, config] of Object.entries(runtimeConfigs)) {
         catRegistry.register(id, config);
       }
@@ -428,14 +435,13 @@ describe('SystemPromptBuilder', () => {
     }
   });
 
-  test('buildStaticIdentity roster size with full runtime config is under 4100 (raised for F102-D17 MCP tools section)', async () => {
+  test('buildStaticIdentity roster size with full runtime config stays under 4700 chars after Magic Words growth', async () => {
     const { buildSystemPrompt } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
-
     const originalConfigs = catRegistry.getAllConfigs();
     catRegistry.reset();
     try {
-      const runtimeConfigs = toAllCatConfigs(loadCatConfig());
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(CAT_TEMPLATE_PATH));
       for (const [id, config] of Object.entries(runtimeConfigs)) {
         catRegistry.register(id, config);
       }
@@ -449,7 +455,7 @@ describe('SystemPromptBuilder', () => {
         mcpAvailable: true,
         promptTags: ['critique'],
       });
-      assert.ok(prompt.length < 4400, `Full runtime prompt is ${prompt.length} chars, expected < 4400`);
+      assert.ok(prompt.length < 4700, `Full runtime prompt is ${prompt.length} chars, expected < 4700`);
     } finally {
       catRegistry.reset();
       for (const [id, config] of Object.entries(originalConfigs)) {
@@ -494,8 +500,9 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: false,
       a2aEnabled: true,
     });
-    assert.ok(ctx.includes('A2A 出口检查'), 'Should include A2A exit check hint');
-    assert.ok(ctx.includes('句中 @ 无效'), 'Should teach inline @ is invalid for routing');
+    // F064 球权模型: A2A 出口检查 → A2A 球权检查
+    assert.ok(ctx.includes('A2A 球权检查'), 'Should include A2A ball-ownership check hint');
+    assert.ok(ctx.includes('句中无效'), 'Should teach inline @ is invalid for routing');
   });
 
   test('buildInvocationContext does not inject A2A exit check in parallel mode', async () => {
@@ -507,7 +514,33 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: false,
       a2aEnabled: true,
     });
-    assert.ok(!ctx.includes('A2A 出口检查'), 'Parallel mode should not encourage @mention chaining');
+    assert.ok(!ctx.includes('A2A 球权检查'), 'Parallel mode should not encourage @mention chaining');
+  });
+
+  // F167 L2 AC-A6: parallel 模式明确告知 @句柄 无路由语义
+  test('buildInvocationContext injects parallel-mode no-mention hint in parallel mode', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const ctx = buildInvocationContext({
+      catId: 'codex',
+      mode: 'parallel',
+      teammates: ['opus'],
+      mcpAvailable: false,
+      a2aEnabled: true,
+    });
+    assert.ok(ctx.includes('并行模式'), 'parallel mode prompt should mention 并行模式');
+    assert.ok(ctx.includes('无路由语义'), 'parallel mode should say @句柄 无路由语义');
+  });
+
+  test('buildInvocationContext does NOT inject parallel-mode no-mention hint in serial/independent mode', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const ctx = buildInvocationContext({
+      catId: 'codex',
+      mode: 'independent',
+      teammates: ['opus'],
+      mcpAvailable: false,
+      a2aEnabled: true,
+    });
+    assert.ok(!ctx.includes('无路由语义'), 'non-parallel mode should not inject parallel hint');
   });
 
   test('buildInvocationContext injects mention routing feedback when provided', async () => {
@@ -694,7 +727,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('最近活跃'), 'Should not inject when no non-self participant has activity');
   });
 
-  test('buildSystemPrompt size with activeParticipants stays under 3250 chars (raised for F102-D17 MCP tools section)', async () => {
+  test('buildSystemPrompt size with activeParticipants stays under 3900 chars after Magic Words + runtime prompt growth', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -709,7 +742,7 @@ describe('SystemPromptBuilder', () => {
         { catId: 'opus', lastMessageAt: Date.now() - 1000, messageCount: 3 },
       ],
     });
-    assert.ok(prompt.length < 3600, `Prompt with activity is ${prompt.length} chars, expected < 3600`);
+    assert.ok(prompt.length < 3900, `Prompt with activity is ${prompt.length} chars, expected < 3900`);
   });
 
   // --- F042: pinned identity constant + direct-message reply target ---
@@ -752,7 +785,7 @@ describe('SystemPromptBuilder', () => {
     }
   });
 
-  test('buildInvocationContext includes Direct message reply target when provided', async () => {
+  test('buildInvocationContext includes Direct message reply target + sender model (F167 anti-spoofing)', async () => {
     const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const ctx = buildInvocationContext({
       catId: 'codex',
@@ -764,6 +797,37 @@ describe('SystemPromptBuilder', () => {
     assert.match(ctx, /^Direct message from 布偶猫\(opus\)/m);
     assert.ok(ctx.includes('reply to 布偶猫(opus)'));
     assert.ok(!ctx.includes('Direct message from @opus'));
+    // F167 anti-spoofing: handoff must carry sender model marker explicitly
+    assert.ok(ctx.includes('[model='), 'handoff must include sender model marker');
+  });
+
+  // F167 P2 (cloud review 2026-04-18): sender model must also honor runtime env override,
+  // not just static config. Asymmetric resolution (self=runtime, other=static) weakens
+  // identity disambiguation when the sender's model is overridden at runtime.
+  test('buildInvocationContext handoff sender model respects CAT_<ID>_MODEL env override', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+
+    const prev = process.env.CAT_OPUS_MODEL;
+    process.env.CAT_OPUS_MODEL = 'claude-opus-runtime-override';
+    try {
+      const ctx = buildInvocationContext({
+        catId: 'codex',
+        mode: 'independent',
+        teammates: [],
+        mcpAvailable: false,
+        directMessageFrom: 'opus',
+      });
+      assert.ok(
+        ctx.includes('[model=claude-opus-runtime-override]'),
+        'sender [model=...] must use runtime-resolved model, not static defaultModel',
+      );
+    } finally {
+      if (prev === undefined) {
+        delete process.env.CAT_OPUS_MODEL;
+      } else {
+        process.env.CAT_OPUS_MODEL = prev;
+      }
+    }
   });
 
   test('buildInvocationContext supports runtime variant cat IDs (gpt52)', async () => {
@@ -773,7 +837,7 @@ describe('SystemPromptBuilder', () => {
     const originalConfigs = catRegistry.getAllConfigs();
     catRegistry.reset();
     try {
-      const runtimeConfigs = toAllCatConfigs(loadCatConfig());
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(CAT_TEMPLATE_PATH));
       for (const [id, config] of Object.entries(runtimeConfigs)) {
         catRegistry.register(id, config);
       }
@@ -789,6 +853,95 @@ describe('SystemPromptBuilder', () => {
       assert.ok(ctx.includes('@gpt52'));
       assert.match(ctx, /^Direct message from 缅因猫\(codex\)/m);
       assert.ok(ctx.includes('reply to 缅因猫(codex)'));
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(originalConfigs)) {
+        catRegistry.register(id, config);
+      }
+    }
+  });
+
+  // F167 identity anti-spoofing: same-breed variant handoff must disambiguate model
+  // (Uses opus-45 which is in cat-template.json. Equivalent logic applies to opus-47.)
+  test('buildInvocationContext injects same-breed anti-spoofing line when opus-45 receives from opus', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+
+    const originalConfigs = catRegistry.getAllConfigs();
+    catRegistry.reset();
+    try {
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(CAT_TEMPLATE_PATH));
+      for (const [id, config] of Object.entries(runtimeConfigs)) {
+        catRegistry.register(id, config);
+      }
+
+      const ctx = buildInvocationContext({
+        catId: 'opus-45',
+        mode: 'independent',
+        teammates: [],
+        mcpAvailable: false,
+        directMessageFrom: 'opus',
+      });
+      // variant label embedded in self-identity (handle-free label path now carries it)
+      assert.match(ctx, /^Identity:.*opus-45/m);
+      // same-breed sender shows up with model marker (anti-spoofing: explicit model differentiation)
+      assert.ok(ctx.includes('model=claude-opus-4-6'), 'sender model must be claude-opus-4-6');
+      // anti-spoofing notice must fire (same displayName 布偶猫, different catId)
+      assert.ok(
+        ctx.includes('同族分身') || ctx.includes('不是你'),
+        'same-breed handoff must inject anti-spoofing notice',
+      );
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(originalConfigs)) {
+        catRegistry.register(id, config);
+      }
+    }
+  });
+
+  // F167: cross-breed handoff should NOT inject anti-spoofing (false positive guard)
+  test('buildInvocationContext does NOT inject anti-spoofing for cross-breed handoff', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const ctx = buildInvocationContext({
+      catId: 'opus',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+      directMessageFrom: 'codex',
+    });
+    // model marker present (useful context)
+    assert.ok(ctx.includes('model='), 'handoff should carry model marker');
+    // but no anti-spoofing line — different breed = no identity confusion
+    assert.ok(!ctx.includes('同族分身'), 'cross-breed handoff must NOT inject 同族分身 notice');
+  });
+
+  // F167: variant label appears in handle-free label for peers with variantLabel
+  test('formatHandleFreeLabel includes variantLabel (via ping-pong warning path)', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+
+    const originalConfigs = catRegistry.getAllConfigs();
+    catRegistry.reset();
+    try {
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(CAT_TEMPLATE_PATH));
+      for (const [id, config] of Object.entries(runtimeConfigs)) {
+        catRegistry.register(id, config);
+      }
+
+      const ctx = buildInvocationContext({
+        catId: 'opus',
+        mode: 'serial',
+        chainIndex: 2,
+        chainTotal: 3,
+        teammates: [],
+        mcpAvailable: false,
+        pingPongWarning: { pairedWith: 'opus-45', count: 2 },
+      });
+      // variant label must show in ping-pong paired-with label
+      assert.ok(
+        ctx.includes('Opus 4.5'),
+        'ping-pong warning must include variantLabel (Opus 4.5) to disambiguate from other opus variants',
+      );
     } finally {
       catRegistry.reset();
       for (const [id, config] of Object.entries(originalConfigs)) {
@@ -984,7 +1137,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('skill'), 'Should not contain skill reference when null');
   });
 
-  test('buildSystemPrompt size stays under 3300 chars with SOP hint (raised for F102-D17 MCP tools section)', async () => {
+  test('buildSystemPrompt size stays under 3900 chars with SOP hint after Magic Words + runtime prompt growth', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -1001,7 +1154,7 @@ describe('SystemPromptBuilder', () => {
         featureId: 'F073',
       },
     });
-    assert.ok(prompt.length < 3650, `Prompt with SOP hint is ${prompt.length} chars, expected < 3650`);
+    assert.ok(prompt.length < 3900, `Prompt with SOP hint is ${prompt.length} chars, expected < 3900`);
   });
 
   // --- F092: Voice Mode prompt injection ---
@@ -1030,7 +1183,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('Voice Mode ON'), 'Should not include voice mode header');
   });
 
-  test('buildSystemPrompt size stays under 3450 chars with voice mode + SOP hint (raised for F102-D17 MCP tools section)', async () => {
+  test('buildSystemPrompt size stays under 4000 chars with voice mode + SOP hint after Magic Words growth', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -1048,7 +1201,7 @@ describe('SystemPromptBuilder', () => {
       },
       voiceMode: true,
     });
-    assert.ok(prompt.length < 3750, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 3750`);
+    assert.ok(prompt.length < 4000, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 4000`);
   });
 
   test('buildInvocationContext injects bootcamp mode when bootcampState provided', async () => {
@@ -1111,7 +1264,8 @@ describe('SystemPromptBuilder', () => {
     });
     assert.ok(prompt.includes('静默执行'), 'maine-coon prompt must include 静默执行');
     assert.ok(prompt.includes('声明'), 'maine-coon prompt must include 声明 ≠ 执行');
-    assert.ok(prompt.includes('空气传球'), 'maine-coon prompt must include 空气传球 warning');
+    // F064 球权模型: 空气传球 警告并入 "A2A 球权检查" invocation context（矛盾 push back 语义）
+    assert.ok(prompt.includes('push back'), 'maine-coon prompt must include push back (phantom handoff guard)');
     assert.ok(prompt.includes('出口一问'), 'maine-coon prompt must include 出口一问');
   });
 
@@ -1259,7 +1413,7 @@ describe('SystemPromptBuilder', () => {
 
     // Pin: update this hash whenever you add/remove/rename P* or W* sections
     // in shared-rules.md, AND update GOVERNANCE_L0_DIGEST in SystemPromptBuilder.ts
-    const PINNED_HASH = '81d995fc963e0067';
+    const PINNED_HASH = '89989b48ac64c6ee';
     if (PINNED_HASH === '${PLACEHOLDER}') {
       // First run — print hash for pinning
       console.log(`[drift-guard] shared-rules headings hash: ${hash} — pin this value`);

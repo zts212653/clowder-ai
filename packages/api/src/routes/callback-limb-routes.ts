@@ -7,46 +7,42 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { LimbPairingStore } from '../domains/limb/LimbPairingStore.js';
 import type { LimbRegistry } from '../domains/limb/LimbRegistry.js';
 import { RemoteLimbNode } from '../domains/limb/RemoteLimbNode.js';
-import { callbackAuthSchema } from './callback-auth-schema.js';
-import { EXPIRED_CREDENTIALS_ERROR } from './callback-errors.js';
+import { requireCallbackAuth } from './callback-auth-prehandler.js';
 
-const limbListSchema = callbackAuthSchema.extend({
+const limbListSchema = z.object({
   capability: z.string().optional(),
 });
 
-const limbInvokeSchema = callbackAuthSchema.extend({
+const limbInvokeSchema = z.object({
   nodeId: z.string().min(1),
   command: z.string().min(1),
   params: z.record(z.unknown()).optional(),
 });
 
-const limbPairApproveSchema = callbackAuthSchema.extend({
+const limbPairApproveSchema = z.object({
   requestId: z.string().min(1),
 });
 
 export interface CallbackLimbRoutesOptions {
   limbRegistry: LimbRegistry;
-  invocationRegistry: InvocationRegistry;
   pairingStore?: LimbPairingStore;
 }
 
 export function registerCallbackLimbRoutes(
   app: FastifyInstance,
-  { limbRegistry, invocationRegistry, pairingStore }: CallbackLimbRoutesOptions,
+  { limbRegistry, pairingStore }: CallbackLimbRoutesOptions,
 ): void {
   app.post('/api/callback/limb/list', async (request, reply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+
     const parsed = limbListSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ error: parsed.error.message });
 
-    const { invocationId, callbackToken, capability } = parsed.data;
-    const record = invocationRegistry.verify(invocationId, callbackToken);
-    if (!record) {
-      return reply.status(403).send({ error: EXPIRED_CREDENTIALS_ERROR });
-    }
+    const { capability } = parsed.data;
 
     const nodes = capability ? limbRegistry.findByCapability(capability) : limbRegistry.listAvailable();
 
@@ -62,14 +58,13 @@ export function registerCallbackLimbRoutes(
   });
 
   app.post('/api/callback/limb/invoke', async (request, reply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+
     const parsed = limbInvokeSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ error: parsed.error.message });
 
-    const { invocationId, callbackToken, nodeId, command, params } = parsed.data;
-    const record = invocationRegistry.verify(invocationId, callbackToken);
-    if (!record) {
-      return reply.status(403).send({ error: EXPIRED_CREDENTIALS_ERROR });
-    }
+    const { nodeId, command, params } = parsed.data;
 
     const result = await limbRegistry.invoke(nodeId, command, params ?? {}, {
       catId: record.catId,
@@ -81,21 +76,18 @@ export function registerCallbackLimbRoutes(
   // Phase C: Pairing callback routes (for MCP tools)
   if (pairingStore) {
     app.post('/api/callback/limb/pair/list', async (request, reply) => {
-      const parsed = callbackAuthSchema.safeParse(request.body);
-      if (!parsed.success) return reply.status(400).send({ error: parsed.error.message });
-
-      const record = invocationRegistry.verify(parsed.data.invocationId, parsed.data.callbackToken);
-      if (!record) return reply.status(403).send({ error: EXPIRED_CREDENTIALS_ERROR });
+      const record = requireCallbackAuth(request, reply);
+      if (!record) return;
 
       return reply.send({ requests: pairingStore.getPending() });
     });
 
     app.post('/api/callback/limb/pair/approve', async (request, reply) => {
+      const record = requireCallbackAuth(request, reply);
+      if (!record) return;
+
       const parsed = limbPairApproveSchema.safeParse(request.body);
       if (!parsed.success) return reply.status(400).send({ error: parsed.error.message });
-
-      const record = invocationRegistry.verify(parsed.data.invocationId, parsed.data.callbackToken);
-      if (!record) return reply.status(403).send({ error: EXPIRED_CREDENTIALS_ERROR });
 
       const req = pairingStore.approve(parsed.data.requestId);
       if (!req) return reply.status(404).send({ error: 'Pairing request not found' });

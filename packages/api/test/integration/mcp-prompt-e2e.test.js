@@ -72,9 +72,8 @@ describe('MCP Prompt Injection E2E', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: 'Hello from Codex via HTTP callback!',
       },
     });
@@ -117,7 +116,8 @@ describe('MCP Prompt Injection E2E', () => {
     // Simulate Gemini calling GET thread-context with query params
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}`,
+      url: '/api/callbacks/thread-context',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200, `expected 200, got ${response.statusCode}: ${response.body}`);
@@ -134,7 +134,8 @@ describe('MCP Prompt Injection E2E', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/pending-mentions?invocationId=${invocationId}&callbackToken=${callbackToken}`,
+      url: '/api/callbacks/pending-mentions',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200, `expected 200, got ${response.statusCode}: ${response.body}`);
@@ -160,9 +161,8 @@ describe('MCP Prompt Injection E2E', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-task',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         taskId: task.id,
         status: 'doing',
         why: '正在绘制中',

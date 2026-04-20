@@ -1,5 +1,5 @@
 /**
- * F340 — Accounts read/write layer
+ * clowder-ai#340 — Accounts read/write layer
  *
  * Storage: {projectRoot}/.cat-cafe/accounts.json (project-local by default).
  * Override: CAT_CAFE_GLOBAL_CONFIG_ROOT env → uses that root instead.
@@ -12,6 +12,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSy
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import type { AccountConfig } from '@cat-cafe/shared';
+import { assertSafeTestConfigRoot } from './test-config-write-guard.js';
 
 const CONFIG_SUBDIR = '.cat-cafe';
 const ACCOUNTS_FILENAME = 'accounts.json';
@@ -21,6 +22,10 @@ function resolveGlobalRoot(projectRoot?: string): string {
   if (envRoot) return resolve(envRoot);
   if (projectRoot) return resolve(projectRoot);
   return homedir();
+}
+
+function assertSafeCatalogWrite(projectRoot: string | undefined, source: string): void {
+  assertSafeTestConfigRoot(resolveGlobalRoot(projectRoot), source);
 }
 
 export function resolveAccountsPath(projectRoot?: string): string {
@@ -54,6 +59,7 @@ function readAllGlobal(projectRoot?: string): Record<string, AccountConfig> {
     // Fix P1-3: corrupt file → backup + warn, not silent swallow
     const backupPath = `${accountsPath}.bak`;
     try {
+      assertSafeCatalogWrite(projectRoot, 'catalog-accounts.readAllGlobal.backup');
       copyFileSync(accountsPath, backupPath);
     } catch {
       /* best-effort backup */
@@ -64,6 +70,7 @@ function readAllGlobal(projectRoot?: string): Record<string, AccountConfig> {
 }
 
 function writeAllGlobal(accounts: Record<string, AccountConfig>, projectRoot?: string): void {
+  assertSafeCatalogWrite(projectRoot, 'catalog-accounts.writeAllGlobal');
   const accountsPath = resolveAccountsPath(projectRoot);
   mkdirSync(resolve(resolveGlobalRoot(projectRoot), CONFIG_SUBDIR), { recursive: true });
   writeFileAtomic(accountsPath, `${JSON.stringify(accounts, null, 2)}\n`);
@@ -212,7 +219,7 @@ function migrateLegacyFrom(root: string, projectRoot?: string): void {
     const displayName = normalizeDisplayName(typeof p.displayName === 'string' ? p.displayName : undefined);
     const baseUrl = normalizeBaseUrl(typeof p.baseUrl === 'string' ? p.baseUrl : undefined);
     const models = normalizeModels(Array.isArray(p.models) ? p.models.map(String) : undefined);
-    // F340: protocol not migrated — derived at runtime from well-known account IDs.
+    // clowder-ai#340: protocol not migrated — derived at runtime from well-known account IDs.
     accounts[id] = {
       authType: inferLegacyAuthType(p),
       ...(displayName ? { displayName } : {}),
@@ -272,6 +279,7 @@ function migrateLegacyFrom(root: string, projectRoot?: string): void {
     }
   }
   if (credCount > 0) {
+    assertSafeCatalogWrite(projectRoot, 'catalog-accounts.migrateLegacyFrom.credentials');
     mkdirSync(resolve(globalRoot, CONFIG_SUBDIR), { recursive: true });
     writeFileAtomic(credPath, `${JSON.stringify(existing, null, 2)}\n`, 0o600);
   }
@@ -323,7 +331,7 @@ function migrateProjectAccountsToGlobal(projectRoot: string): void {
       skipConflicts: true,
     });
 
-    // F340: project catalog.accounts is intentionally left untouched.
+    // clowder-ai#340: project catalog.accounts is intentionally left untouched.
     // Runtime only reads global accounts.json, so the project section is
     // inert — keeping it provides free rollback compatibility and avoids
     // unnecessary writes to the project catalog file.
@@ -339,7 +347,7 @@ function migrateProjectAccountsToGlobal(projectRoot: string): void {
   }
 }
 
-// ── Homedir legacy migration (picks up secrets written by pre-F340 installer without --project-dir) ──
+// ── Homedir legacy migration (picks up secrets written by pre-clowder-ai#340 installer without --project-dir) ──
 
 const migratedHomedirLegacy = new Set<string>();
 
@@ -368,7 +376,7 @@ function migrateHomedirLegacyProviderProfiles(projectRoot?: string): void {
   }
 }
 
-// ── Homedir credentials.json migration (pre-F340 credentials written directly to homedir) ──
+// ── Homedir credentials.json migration (pre-clowder-ai#340 credentials written directly to homedir) ──
 
 const migratedHomedirCredentials = new Set<string>();
 
@@ -412,6 +420,7 @@ function migrateHomedirCredentials(projectRoot?: string): void {
       }
     }
     if (imported > 0) {
+      assertSafeCatalogWrite(projectRoot, 'catalog-accounts.migrateHomedirCredentials');
       mkdirSync(resolve(globalRoot, CONFIG_SUBDIR), { recursive: true });
       writeFileAtomic(targetCredPath, `${JSON.stringify(targetCreds, null, 2)}\n`, 0o600);
       console.error(

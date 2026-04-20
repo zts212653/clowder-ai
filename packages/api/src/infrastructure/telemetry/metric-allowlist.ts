@@ -10,7 +10,7 @@
  */
 
 import { createAllowListAttributesProcessor, type ViewOptions } from '@opentelemetry/sdk-metrics';
-import { AGENT_ID, GENAI_MODEL, GENAI_SYSTEM, OPERATION_NAME, STATUS } from './genai-semconv.js';
+import { AGENT_ID, GENAI_MODEL, GENAI_SYSTEM, OPERATION_NAME, STATUS, STREAM_ERROR_PATH } from './genai-semconv.js';
 
 /** The ONLY attributes allowed on metric instruments. */
 export const ALLOWED_METRIC_ATTRIBUTES: ReadonlySet<string> = new Set([
@@ -19,6 +19,7 @@ export const ALLOWED_METRIC_ATTRIBUTES: ReadonlySet<string> = new Set([
   GENAI_MODEL,
   OPERATION_NAME,
   STATUS,
+  STREAM_ERROR_PATH,
 ]);
 
 const allowedKeys = [...ALLOWED_METRIC_ATTRIBUTES];

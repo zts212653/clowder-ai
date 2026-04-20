@@ -8,7 +8,7 @@ created: 2026-02-26
 
 # F037: Agent Swarm 协同模式
 
-> **Status**: in-progress | **Owner**: 三猫
+> **Status**: done (archived — spawned F049, core concepts landed) | **Owner**: 三猫
 > **Created**: 2026-02-26
 
 ## Why

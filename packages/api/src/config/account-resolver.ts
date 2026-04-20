@@ -84,7 +84,7 @@ export function resolveAnthropicRuntimeProfile(
 }
 
 // Known builtin OAuth account refs — both legacy names and new naming convention.
-// F340: protocol is derived from client identity, no longer stored on accounts.
+// clowder-ai#340: protocol is derived from client identity, no longer stored on accounts.
 const BUILTIN_ACCOUNT_MAP: Record<string, BuiltinAccountClient> = {
   claude: 'anthropic',
   builtin_anthropic: 'anthropic',
@@ -144,7 +144,7 @@ export function resolveByAccountRef(projectRoot: string, accountRef: string): Ru
  * If preferredAccountRef is given, tries that first.
  * Falls back to the well-known builtin account ID for the client.
  *
- * F340: No longer matches by account.protocol — protocol is derived from
+ * clowder-ai#340: No longer matches by account.protocol — protocol is derived from
  * client identity at runtime, not stored on accounts.
  */
 export function resolveForClient(
@@ -173,7 +173,7 @@ export function resolveForClient(
     return null;
   }
 
-  // F340: Walk the full discovery chain; prefer accounts with credentials.
+  // clowder-ai#340: Walk the full discovery chain; prefer accounts with credentials.
   // This ensures installer-${client} (which holds API keys) is chosen over
   // an OAuth builtin that has no stored credential.
   const normalizedClient = normalizeToClient(client);
@@ -234,7 +234,7 @@ function accountToRuntimeProfile(ref: string, account: AccountConfig, projectRoo
   const apiKey = credential?.apiKey;
 
   const isBuiltin = account.authType === 'oauth';
-  // F340: Derive client and protocol solely from well-known account ID map.
+  // clowder-ai#340: Derive client and protocol solely from well-known account ID map.
   // account.protocol is retired — not read, not written.
   const builtinClient = BUILTIN_ACCOUNT_MAP[ref];
   const builtinProtocol = builtinClient ? protocolForClient(builtinClient) : null;
@@ -257,8 +257,7 @@ export function validateRuntimeProviderBinding(
   profile: RuntimeProviderProfile,
   _defaultModel?: string | null,
 ): string | null {
-  // Allow api_key accounts for google only when using third-party gateways
-  // (explicitly block Google-owned domains to preserve OAuth-only protection)
+  // Allow api_key accounts for google only when using third-party gateways.
   if (clientId === 'google' && profile.kind !== 'builtin') {
     const trimmedBaseUrl = profile.baseUrl?.trim();
     if (!trimmedBaseUrl) {
@@ -271,7 +270,6 @@ export function validateRuntimeProviderBinding(
     if (isOfficialGoogleHostname(hostname)) {
       return 'client "google" requires builtin OAuth for official Google endpoints (api_key only allowed for third-party gateways)';
     }
-    // Third-party gateway with api_key is allowed
     return null;
   }
   const expectedClient = resolveBuiltinClientForProvider(clientId);
@@ -293,7 +291,7 @@ export function validateModelFormatForProvider(
   if (clientId !== 'opencode') return null;
   if (profileKind === 'api_key') {
     const trimmedProvider = providerName?.trim();
-    // F189 intake: provider/model in defaultModel is the primary path.
+    // clowder-ai#223 intake: provider/model in defaultModel is the primary path.
     // provider name is only required when defaultModel is a bare model name.
     // Must match parseOpenCodeModel logic: slash must have content on both sides
     // (rejects trailing slash like "minimax/" and leading slash like "/model").

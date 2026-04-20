@@ -30,6 +30,7 @@ export interface ProjectSummary {
   coreModules: string[];
   docsList: Array<{ path: string; tier: string }>;
   tierCoverage: Record<string, number>;
+  kindCoverage: Record<string, number>;
 }
 
 const MISSING_STATE: IndexState = {

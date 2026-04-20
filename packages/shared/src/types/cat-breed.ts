@@ -42,6 +42,8 @@ export interface CliConfig {
    * Default: 'max' (claude) / 'xhigh' (codex)
    */
   readonly effort?: CliEffortValue;
+  readonly contextWindow?: number;
+  readonly autoCompactTokenLimit?: number;
 }
 
 /**
@@ -66,7 +68,7 @@ export interface CatVariant {
   readonly source?: 'seed' | 'runtime';
   /** F127: member-side binding to a concrete account config (built-in or API key). */
   readonly accountRef?: string;
-  /** F340 P5: CLI client identity (renamed from `provider`). */
+  /** clowder-ai#340 P5: CLI client identity (renamed from `provider`). */
   readonly clientId: ClientId;
   readonly defaultModel: string;
   readonly mcpSupport: boolean;
@@ -94,7 +96,7 @@ export interface CatVariant {
   /** F127: Extra CLI --config key=value pairs passed to the client at invocation time.
    *  Each entry is a raw config string, e.g. 'model_reasoning_effort="low"'. */
   readonly cliConfigArgs?: readonly string[];
-  /** F340 P5: Model provider name for api_key routing (renamed from `ocProviderName`).
+  /** clowder-ai#340 P5: Model provider name for api_key routing (renamed from `ocProviderName`).
    *  e.g. "openrouter", "maas", "deepseek".
    *  Used with api_key auth — runtime assembles `provider/defaultModel` for the -m flag
    *  and generates an OPENCODE_CONFIG runtime config file for the provider. */
@@ -257,7 +259,7 @@ export interface CatCafeConfigV2 {
   readonly reviewPolicy: ReviewPolicy;
   readonly coCreator?: CoCreatorConfig;
   /**
-   * @deprecated F340: Accounts moved to global ~/.cat-cafe/accounts.json.
+   * @deprecated clowder-ai#340: Accounts moved to global ~/.cat-cafe/accounts.json.
    * This field is only read during one-time migration (catalog → global).
    * New code must use catalog-accounts.ts which reads the global file.
    */

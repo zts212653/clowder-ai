@@ -279,6 +279,33 @@ describe('generateOpenCodeRuntimeConfig', () => {
     assert.equal(config.provider.test.npm, '@ai-sdk/openai-compatible');
   });
 
+  test('mcpServerPath injects mcp.cat-cafe section into config', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'anthropic',
+      models: ['anthropic/claude-opus-4-6'],
+      defaultModel: 'anthropic/claude-opus-4-6',
+      apiType: 'anthropic',
+      mcpServerPath: '/absolute/path/to/packages/mcp-server/dist/index.js',
+    });
+
+    assert.ok(config.mcp, 'config must have mcp section when mcpServerPath is provided');
+    assert.deepStrictEqual(config.mcp['cat-cafe'], {
+      type: 'local',
+      command: ['node', '/absolute/path/to/packages/mcp-server/dist/index.js'],
+    });
+  });
+
+  test('mcp section is absent when mcpServerPath is not provided', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'maas',
+      models: ['maas/glm-5'],
+      defaultModel: 'maas/glm-5',
+      apiType: 'openai',
+    });
+
+    assert.strictEqual(config.mcp, undefined, 'config must not have mcp section without mcpServerPath');
+  });
+
   test('summarizeOpenCodeRuntimeConfigForDebug reports provider adapter and model keys', () => {
     const summary = summarizeOpenCodeRuntimeConfigForDebug({
       providerName: 'anthropic',
@@ -319,6 +346,27 @@ describe('writeOpenCodeRuntimeConfig', () => {
       const content = JSON.parse(readFileSync(configPath, 'utf-8'));
       assert.equal(content.model, 'maas/glm-5');
       assert.deepStrictEqual(content.provider.maas.models, { 'glm-5': { name: 'glm-5' } });
+    } finally {
+      rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('persists mcp.cat-cafe section to disk when mcpServerPath is provided', () => {
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'oc-runtime-mcp-'));
+    try {
+      const mcpPath = '/opt/cat-cafe/packages/mcp-server/dist/index.js';
+      const configPath = writeOpenCodeRuntimeConfig(tmpRoot, 'opencode', 'inv-game-001', {
+        providerName: 'anthropic',
+        models: ['anthropic/claude-opus-4-6'],
+        defaultModel: 'anthropic/claude-opus-4-6',
+        apiType: 'anthropic',
+        mcpServerPath: mcpPath,
+      });
+
+      const content = JSON.parse(readFileSync(configPath, 'utf-8'));
+      assert.deepStrictEqual(content.mcp, {
+        'cat-cafe': { type: 'local', command: ['node', mcpPath] },
+      });
     } finally {
       rmSync(tmpRoot, { recursive: true, force: true });
     }

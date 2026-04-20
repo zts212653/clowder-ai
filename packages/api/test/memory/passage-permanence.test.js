@@ -185,7 +185,7 @@ describe('passage permanence (Phase I regression)', () => {
     const builder = new IndexBuilder(store, docsDir, undefined, transcriptDir);
 
     // Must not throw
-    const added = builder.backfillPassagesFromTranscript(threadId);
+    const added = await builder.backfillPassagesFromTranscript(threadId);
     // Valid event should be inserted; bad one skipped
     assert.equal(added, 1, 'should skip event with missing t and insert valid one');
 

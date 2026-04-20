@@ -240,6 +240,6 @@ export function detectInlineActionMentions(
   return found;
 }
 
-// --- F479: Shadow detection — extracted to a2a-shadow-detection.ts ---
+// --- clowder-ai#489: Shadow detection — extracted to a2a-shadow-detection.ts ---
 export type { ShadowDetectionResult, ShadowMiss } from './a2a-shadow-detection.js';
 export { detectInlineActionMentionsWithShadow } from './a2a-shadow-detection.js';

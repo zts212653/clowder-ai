@@ -17,14 +17,14 @@
 #   ./scripts/start-dev.sh --status   — 查看 daemon 状态
 #   ./scripts/start-dev.sh --profile=dev          — 家里开发默认值 (proxy ON, sidecar ON)
 #   ./scripts/start-dev.sh --profile=production   — 日常生产 (proxy OFF, sidecar OFF, TTL=永久)
-#   ./scripts/start-dev.sh --profile=opensource   — 开源演示 (proxy OFF, sidecar OFF, TTL=1天)
+#   ./scripts/start-dev.sh --profile=opensource   — 开源演示 (proxy OFF, sidecar OFF, TTL=永久)
 #   ./scripts/start-dev.sh -- --npm-registry=URL --pip-index-url=URL --hf-endpoint=URL
 #                                               — 显式指定安装/模型下载镜像（仅手动 override）
 #
 # Profile 说明:
 #   dev        — proxy ON, ASR/TTS/LLM ON, TTL=永久, redis-dev
 #   production — proxy OFF, ASR/TTS/LLM OFF, TTL=永久, redis-opensource (日常生产)
-#   opensource — proxy OFF, ASR/TTS/LLM OFF, TTL=86400s, redis-opensource (开源演示)
+#   opensource — proxy OFF, ASR/TTS/LLM OFF, TTL=永久, redis-opensource (开源演示)
 #   (无)       — 保持原有行为（各项 ENABLED 默认 0）
 #
 # .env 中的显式值覆盖 profile 默认值。启动摘要标注每个值的来源。
@@ -225,10 +225,10 @@ apply_profile_defaults() {
             _PROF_ASR_ENABLED=0
             _PROF_TTS_ENABLED=0
             _PROF_LLM_POSTPROCESS_ENABLED=0
-            _PROF_MESSAGE_TTL_SECONDS=86400
-            _PROF_THREAD_TTL_SECONDS=86400
-            _PROF_TASK_TTL_SECONDS=86400
-            _PROF_SUMMARY_TTL_SECONDS=86400
+            _PROF_MESSAGE_TTL_SECONDS=0
+            _PROF_THREAD_TTL_SECONDS=0
+            _PROF_TASK_TTL_SECONDS=0
+            _PROF_SUMMARY_TTL_SECONDS=0
             _PROF_REDIS_PROFILE=opensource
             ;;
         "")
@@ -265,6 +265,7 @@ print_config_summary() {
     echo "  配置来源："
     local key src_var val source
     for key in ANTHROPIC_PROXY_ENABLED ASR_ENABLED TTS_ENABLED LLM_POSTPROCESS_ENABLED \
+               EMBED_ENABLED \
                MESSAGE_TTL_SECONDS THREAD_TTL_SECONDS TASK_TTL_SECONDS SUMMARY_TTL_SECONDS \
                REDIS_PROFILE; do
         val="${!key}"
@@ -301,6 +302,27 @@ resolve_config "REDIS_PROFILE"
 : "${TASK_TTL_SECONDS:=0}"
 : "${SUMMARY_TTL_SECONDS:=0}"
 : "${REDIS_PROFILE:=dev}"
+
+derive_embed_enabled() {
+    local explicit="${EMBED_ENABLED-}"
+    local mode="${EMBED_MODE:-off}"
+    if [ -n "$explicit" ]; then
+        _SRC_EMBED_ENABLED="env/.env override"
+        return
+    fi
+
+    case "$mode" in
+        on|shadow)
+            EMBED_ENABLED=1
+            ;;
+        *)
+            EMBED_ENABLED=0
+            ;;
+    esac
+    _SRC_EMBED_ENABLED="derived from EMBED_MODE=${mode}"
+}
+
+derive_embed_enabled
 
 default_redis_storage_key() {
     local profile="${1:-$REDIS_PROFILE}"
@@ -662,15 +684,27 @@ background_eval_with_null_stdin() {
     register_managed_pid "$!"
 }
 
+api_node_env() {
+    # NODE_ENV is driven by launch mode (--prod-web), not by profile.
+    # Profile controls data isolation (Redis, TTLs, sidecar features);
+    # --prod-web controls whether the API runs in production or dev mode.
+    # dev:direct may carry --profile=opensource but is still development.
+    if [ "$PROD_WEB" = true ]; then
+        printf '%s' 'production'
+    else
+        printf '%s' 'development'
+    fi
+}
+
 api_launch_command() {
-    local env_prefix=""
+    local env_prefix="NODE_ENV=$(api_node_env) "
     if [ "$DEBUG_MODE" = true ]; then
-        env_prefix="LOG_LEVEL=debug "
+        env_prefix="${env_prefix}LOG_LEVEL=debug "
     fi
     if [ "${CAT_CAFE_DIRECT_NO_WATCH:-0}" = "1" ]; then
-        printf '%s' "cd packages/api && exec ${env_prefix}pnpm run start"
+        printf '%s' "cd packages/api && exec env ${env_prefix}pnpm run start"
     else
-        printf '%s' "cd packages/api && exec ${env_prefix}pnpm run dev"
+        printf '%s' "cd packages/api && exec env ${env_prefix}pnpm run dev"
     fi
 }
 

@@ -81,6 +81,7 @@ export async function handleSearchEvidence(input: {
         snippet: string;
         confidence: string;
         sourceType: string;
+        boostSource?: string[];
         passages?: Array<{
           passageId: string;
           content: string;
@@ -96,26 +97,36 @@ export async function handleSearchEvidence(input: {
       }>;
       degraded: boolean;
       degradeReason?: string;
+      effectiveMode?: 'lexical' | 'semantic' | 'hybrid';
+      variantId?: string;
     };
 
+    const degradedBanner = formatDegradedBanner(data.degraded, data.degradeReason, data.effectiveMode);
+
     if (data.results.length === 0) {
-      const prefix = data.degraded ? '[DEGRADED] ' : '';
-      return successResult(`${prefix}No results found for: ${input.query}`);
+      return successResult(
+        degradedBanner
+          ? `${degradedBanner}\n\nNo results found for: ${input.query}`
+          : `No results found for: ${input.query}`,
+      );
     }
 
     const lines: string[] = [];
-    if (data.degraded) {
-      lines.push('[DEGRADED] Evidence store error — results may be incomplete');
+    if (degradedBanner) {
+      lines.push(degradedBanner);
       lines.push('');
     }
 
-    lines.push(`Found ${data.results.length} result(s):`);
+    lines.push(`Found ${data.results.length} result(s)${data.variantId ? ` [variant=${data.variantId}]` : ''}:`);
     lines.push('');
 
     for (const r of data.results) {
       lines.push(`[${r.confidence}] ${r.title}`);
       lines.push(`  anchor: ${r.anchor}`);
       lines.push(`  type: ${r.sourceType}`);
+      if (r.boostSource && r.boostSource.length > 0 && !r.boostSource.every((s) => s === 'legacy')) {
+        lines.push(`  boost: ${r.boostSource.join(', ')}`);
+      }
       const snippet = r.snippet.length > 200 ? `${r.snippet.slice(0, 200)}...` : r.snippet;
       lines.push(`  > ${snippet.replace(/\n/g, ' ')}`);
       // AC-I9: show passage-level detail when depth=raw
@@ -144,6 +155,19 @@ export async function handleSearchEvidence(input: {
     const message = err instanceof Error ? err.message : String(err);
     return errorResult(`Evidence search request failed: ${message}`);
   }
+}
+
+function formatDegradedBanner(
+  degraded: boolean,
+  degradeReason?: string,
+  effectiveMode?: 'lexical' | 'semantic' | 'hybrid',
+): string | null {
+  if (!degraded) return null;
+  if (degradeReason === 'raw_lexical_only') {
+    const modeNote = effectiveMode ? ` (effectiveMode=${effectiveMode})` : '';
+    return `[DEGRADED] depth=raw currently uses lexical retrieval only${modeNote}`;
+  }
+  return '[DEGRADED] Evidence store error — results may be incomplete';
 }
 
 export const evidenceTools = [

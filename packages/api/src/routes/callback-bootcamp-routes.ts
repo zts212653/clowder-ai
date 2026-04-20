@@ -11,8 +11,8 @@ import type { InvocationRegistry } from '../domains/cats/services/agents/invocat
 import { runEnvironmentCheck } from '../domains/cats/services/bootcamp/env-check.js';
 import type { BootcampStateV1, IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { BOOTCAMP_PHASE_ACHIEVEMENTS } from '../domains/leaderboard/achievement-defs.js';
-import { callbackAuthSchema } from './callback-auth-schema.js';
-import { EXPIRED_CREDENTIALS_ERROR } from './callback-errors.js';
+import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { deriveCallbackActor, resolveBoundThreadScope } from './callback-scope-helpers.js';
 
 /** Ordered phase list — index determines valid transitions (forward-only) */
 const PHASE_ORDER = [
@@ -35,7 +35,7 @@ const PHASE_INDEX = new Map(PHASE_ORDER.map((p, i) => [p, i]));
 
 const bootcampPhaseSchema = z.enum([...PHASE_ORDER]);
 
-const updateBootcampStateCallbackSchema = callbackAuthSchema.extend({
+const updateBootcampStateCallbackSchema = z.object({
   threadId: z.string().min(1),
   phase: bootcampPhaseSchema.optional(),
   leadCat: catIdSchema().optional(),
@@ -60,28 +60,27 @@ export function registerCallbackBootcampRoutes(
   const { registry, threadStore } = deps;
 
   app.post('/api/callbacks/update-bootcamp-state', async (request, reply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+    const actor = deriveCallbackActor(record);
+
     const parsed = updateBootcampStateCallbackSchema.safeParse(request.body);
     if (!parsed.success) {
       reply.status(400);
       return { error: 'Invalid request body', details: parsed.error.issues };
     }
 
-    const { invocationId, callbackToken, threadId, ...updates } = parsed.data;
-    const record = registry.verify(invocationId, callbackToken);
-    if (!record) {
-      reply.status(401);
-      return EXPIRED_CREDENTIALS_ERROR;
-    }
+    const { threadId, ...updates } = parsed.data;
 
     // P2: Stale invocation guard — ignore if superseded by newer invocation
-    if (!registry.isLatest(invocationId)) {
+    if (!registry.isLatest(actor.invocationId)) {
       return { status: 'stale_ignored' };
     }
 
-    // P1: Cross-thread binding check — reject if invocation is bound to a different thread
-    if (record.threadId !== threadId) {
-      reply.status(403);
-      return { error: 'Cross-thread write rejected' };
+    const bound = resolveBoundThreadScope(actor, threadId);
+    if (!bound.ok) {
+      reply.status(bound.statusCode);
+      return { error: bound.error };
     }
 
     const thread = await threadStore.get(threadId);
@@ -140,15 +139,15 @@ export function registerCallbackBootcampRoutes(
       const achievementId = BOOTCAMP_PHASE_ACHIEVEMENTS.get(updates.phase);
       if (achievementId) {
         const nonce = Math.random().toString(36).slice(2, 10);
-        const eventId = `bootcamp:${record.userId}:achievement_unlocked:${Date.now()}:${nonce}`;
+        const eventId = `bootcamp:${actor.userId}:achievement_unlocked:${Date.now()}:${nonce}`;
         const eventRes = await app.inject({
           method: 'POST',
           url: '/api/leaderboard/events',
-          headers: { 'x-cat-cafe-user': record.userId },
+          headers: { 'x-cat-cafe-user': actor.userId },
           payload: {
             eventId,
             source: 'bootcamp',
-            catId: record.catId ?? 'system',
+            catId: actor.catId ?? 'system',
             eventType: 'achievement_unlocked',
             payload: { achievementId },
             timestamp: new Date().toISOString(),
@@ -169,33 +168,32 @@ export function registerCallbackBootcampRoutes(
   });
 
   // POST /api/callbacks/bootcamp-env-check — run env check and auto-store results
-  const envCheckCallbackSchema = callbackAuthSchema.extend({
+  const envCheckCallbackSchema = z.object({
     threadId: z.string().min(1),
   });
 
   app.post('/api/callbacks/bootcamp-env-check', async (request, reply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+    const actor = deriveCallbackActor(record);
+
     const parsed = envCheckCallbackSchema.safeParse(request.body);
     if (!parsed.success) {
       reply.status(400);
       return { error: 'Invalid request body', details: parsed.error.issues };
     }
 
-    const { invocationId, callbackToken, threadId } = parsed.data;
-    const record = registry.verify(invocationId, callbackToken);
-    if (!record) {
-      reply.status(401);
-      return EXPIRED_CREDENTIALS_ERROR;
-    }
+    const { threadId } = parsed.data;
 
     // P2: Stale invocation guard
-    if (!registry.isLatest(invocationId)) {
+    if (!registry.isLatest(actor.invocationId)) {
       return { status: 'stale_ignored' };
     }
 
-    // P1: Cross-thread binding check
-    if (record.threadId !== threadId) {
-      reply.status(403);
-      return { error: 'Cross-thread write rejected' };
+    const bound = resolveBoundThreadScope(actor, threadId);
+    if (!bound.ok) {
+      reply.status(bound.statusCode);
+      return { error: bound.error };
     }
 
     const thread = await threadStore.get(threadId);

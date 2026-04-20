@@ -188,8 +188,10 @@ tty_select() {
             read -rsn2 -t 0.1 key </dev/tty 2>/dev/null || true
             local delta
             if delta="$(tty_arrow_delta "$key")"; then
-                if ((delta < 0)); then ((cur > 0)) && ((cur--)) || true
-                elif ((delta > 0)); then ((cur < count-1)) && ((cur++)) || true
+                if ((delta < 0)); then
+                    ((cur > 0)) && ((cur--)) || true
+                elif ((delta > 0)); then
+                    ((cur < count-1)) && ((cur++)) || true
                 fi
                 need_redraw=true
             fi
@@ -262,8 +264,10 @@ tty_multiselect() {
             read -rsn2 -t 0.1 key </dev/tty 2>/dev/null || true
             local delta
             if delta="$(tty_arrow_delta "$key")"; then
-                if ((delta < 0)); then ((cur > 0)) && ((cur--)) || true
-                elif ((delta > 0)); then ((cur < count-1)) && ((cur++)) || true
+                if ((delta < 0)); then
+                    ((cur > 0)) && ((cur--)) || true
+                elif ((delta > 0)); then
+                    ((cur < count-1)) && ((cur++)) || true
                 fi
                 need_redraw=true
             fi
@@ -574,6 +578,7 @@ runtime_worktree_initialized() {
     [[ -d "$runtime_dir" ]] || return 1
     [[ -e "$runtime_dir/.git" ]] || return 1
     git -C "$runtime_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
+
     local resolved_runtime resolved_toplevel resolved_project project_toplevel worktree_line resolved_worktree
     resolved_runtime="$(cd "$runtime_dir" && pwd -P)"
     resolved_toplevel="$(git -C "$runtime_dir" rev-parse --show-toplevel 2>/dev/null || true)"
@@ -602,12 +607,14 @@ resolve_installer_auth_config_root() {
         printf '%s\n' "$CAT_CAFE_GLOBAL_CONFIG_ROOT"
         return 0
     fi
+
     local runtime_dir="${CAT_CAFE_RUNTIME_DIR:-}"
     [[ -n "$runtime_dir" ]] || runtime_dir="$(default_runtime_dir)"
     if runtime_worktree_initialized "$runtime_dir"; then
         (cd "$runtime_dir" && pwd)
         return 0
     fi
+
     printf '%s\n' "$PROJECT_DIR"
 }
 run_install_auth_config() {
@@ -1077,7 +1084,7 @@ configure_agent_auth() {
 
     local auth_sel
     local -a auth_options=(
-        "OAuth / Subscription (recommended / 推荐)" \
+        "OAuth / Subscription (recommended / 推荐)"
         "API Key"
     )
     [[ "$allow_skip" == true ]] && auth_options+=("Skip auth setup (default / configure later / 稍后配置)")

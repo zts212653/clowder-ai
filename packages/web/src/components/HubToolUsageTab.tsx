@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { HubIcon } from './hub-icons';
 
 interface ToolUsageReport {
   period: { from: string; to: string };
@@ -27,10 +28,10 @@ const CAT_LABELS: Record<string, string> = {
 };
 
 /* Cozy Swiss palette — warm tones aligned with Clowder AI design language */
-const CATEGORY_STYLE: Record<string, { color: string; bg: string; label: string; icon: string }> = {
-  native: { color: '#7C6CA8', bg: '#F3F0FA', label: '原生工具', icon: '🔧' },
-  mcp: { color: '#D4915A', bg: '#FDF3EB', label: 'MCP 桥接', icon: '🌉' },
-  skill: { color: '#6BA589', bg: '#EDF7F2', label: '技能调用', icon: '✨' },
+const CATEGORY_STYLE: Record<string, { color: string; bg: string; label: string; iconName: string }> = {
+  native: { color: '#7C6CA8', bg: '#F3F0FA', label: '原生工具', iconName: 'wrench' },
+  mcp: { color: '#D4915A', bg: '#FDF3EB', label: 'MCP 桥接', iconName: 'store' },
+  skill: { color: '#6BA589', bg: '#EDF7F2', label: '技能调用', iconName: 'sparkles' },
 };
 
 const CATEGORIES = ['native', 'mcp', 'skill'] as const;
@@ -107,7 +108,7 @@ export function HubToolUsageTab() {
             <option value="">全部类型</option>
             {CATEGORIES.map((cat) => (
               <option key={cat} value={cat}>
-                {CATEGORY_STYLE[cat].icon} {CATEGORY_STYLE[cat].label}
+                {CATEGORY_STYLE[cat].label}
               </option>
             ))}
           </select>
@@ -137,7 +138,7 @@ export function HubToolUsageTab() {
 
       {!error && total === 0 && !loading && (
         <div className="rounded-xl border border-dashed border-[#E8DDD2] bg-[#FDF8F3] py-10 text-center">
-          <div className="text-2xl">☕</div>
+          <HubIcon name="store" className="h-7 w-7 text-[#A08A76]" />
           <p className="mt-2 text-xs text-[#A08A76]">还没有工具使用记录</p>
           <p className="text-[11px] text-[#C4B5A4]">猫猫们开始工作后，数据会自动出现在这里</p>
         </div>
@@ -172,7 +173,7 @@ function SummaryCards({ total, byCategory }: { total: number; byCategory: Record
             className="rounded-xl border border-gray-100 p-3 text-center"
             style={{ backgroundColor: style.bg }}
           >
-            <div className="text-lg">{style.icon}</div>
+            <HubIcon name={style.iconName} className="h-5 w-5" />
             <div className="text-xl font-bold" style={{ color: style.color }}>
               {count.toLocaleString()}
             </div>
@@ -268,7 +269,7 @@ function TopToolsTable({ tools }: { tools: ToolUsageReport['topTools'] }) {
         return (
           <section key={cat} className="space-y-2 rounded-xl border border-[#E8DDD2] bg-white p-3">
             <h4 className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: style.color }}>
-              <span>{style.icon}</span>
+              <HubIcon name={style.iconName} className="h-3.5 w-3.5" />
               {style.label}
             </h4>
             <div className="space-y-1">

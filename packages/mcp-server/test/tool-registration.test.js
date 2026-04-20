@@ -23,15 +23,12 @@ const EXPECTED_TOOLS = [
   'cat_cafe_cross_post_message',
   'cat_cafe_list_tasks',
   'cat_cafe_update_task',
+  // F160 Phase A: create-task
+  'cat_cafe_create_task',
   'cat_cafe_create_rich_block',
   'cat_cafe_generate_document',
   'cat_cafe_get_rich_block_rules',
   'cat_cafe_register_pr_tracking',
-  // Guide tools
-  'cat_cafe_update_guide_state',
-  'cat_cafe_guide_resolve',
-  'cat_cafe_start_guide',
-  'cat_cafe_guide_control',
   // Workflow SOP tools (F073 P1)
   'cat_cafe_update_workflow',
   // Multi-mention orchestration (F086 M1)
@@ -44,6 +41,11 @@ const EXPECTED_TOOLS = [
   // Bootcamp tools (F087)
   'cat_cafe_update_bootcamp_state',
   'cat_cafe_bootcamp_env_check',
+  // F155 Guide Engine
+  'cat_cafe_update_guide_state',
+  'cat_cafe_guide_resolve',
+  'cat_cafe_start_guide',
+  'cat_cafe_guide_control',
   // Callback-scoped memory tools
   'cat_cafe_retain_memory_callback',
   // Direct evidence/reflect tools
@@ -78,11 +80,6 @@ const EXPECTED_TOOLS = [
   'limb_pair_approve',
   // F101 Phase I: Game action tool
   'cat_cafe_submit_game_action',
-  // F155: Guide lifecycle tools
-  'cat_cafe_update_guide_state',
-  'cat_cafe_start_guide',
-  'cat_cafe_guide_resolve',
-  'cat_cafe_guide_control',
   // F139 Phase 3A: Schedule tools
   'cat_cafe_list_schedule_templates',
   'cat_cafe_preview_scheduled_task',
@@ -101,27 +98,23 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_cross_post_message',
   'cat_cafe_list_tasks',
   'cat_cafe_update_task',
+  'cat_cafe_create_task',
   'cat_cafe_create_rich_block',
   'cat_cafe_generate_document',
   'cat_cafe_get_rich_block_rules',
   'cat_cafe_request_permission',
   'cat_cafe_check_permission_status',
   'cat_cafe_register_pr_tracking',
-  'cat_cafe_update_guide_state',
-  'cat_cafe_guide_resolve',
-  'cat_cafe_start_guide',
-  'cat_cafe_guide_control',
   'cat_cafe_update_workflow',
   'cat_cafe_multi_mention',
   'cat_cafe_start_vote',
   'cat_cafe_update_bootcamp_state',
   'cat_cafe_bootcamp_env_check',
-  'cat_cafe_submit_game_action',
-  // F155: Guide lifecycle tools
   'cat_cafe_update_guide_state',
-  'cat_cafe_start_guide',
   'cat_cafe_guide_resolve',
+  'cat_cafe_start_guide',
   'cat_cafe_guide_control',
+  'cat_cafe_submit_game_action',
   // F139 Phase 3A: Schedule tools
   'cat_cafe_list_schedule_templates',
   'cat_cafe_preview_scheduled_task',
@@ -261,5 +254,86 @@ describe('MCP Server Tool Registration', () => {
     const registered = Object.keys(server._registeredTools);
 
     assert.deepEqual([...registered].sort(), [...EXPECTED_SIGNAL_TOOLS].sort());
+  });
+});
+
+// --- F061 Phase 2: READONLY_ALLOWED_TOOLS whitelist ---
+
+const KNOWN_WRITE_TOOLS = [
+  'cat_cafe_post_message',
+  'cat_cafe_ack_mentions',
+  'cat_cafe_cross_post_message',
+  'cat_cafe_multi_mention',
+  'cat_cafe_update_task',
+  'cat_cafe_create_task',
+  'cat_cafe_create_rich_block',
+  'cat_cafe_generate_document',
+  'cat_cafe_request_permission',
+  'cat_cafe_register_pr_tracking',
+  'cat_cafe_update_workflow',
+  'cat_cafe_start_vote',
+  'cat_cafe_update_bootcamp_state',
+  'cat_cafe_bootcamp_env_check', // writes bootcampState.envCheck via callbackPost
+  'cat_cafe_update_guide_state',
+  'cat_cafe_guide_resolve',
+  'cat_cafe_start_guide',
+  'cat_cafe_guide_control',
+  'cat_cafe_retain_memory_callback',
+  'cat_cafe_mark_generalizable',
+  'cat_cafe_nominate_for_global',
+  'cat_cafe_review_distillation', // POST approve/reject → writes global knowledge
+  'cat_cafe_submit_game_action',
+  'cat_cafe_register_scheduled_task',
+  'cat_cafe_remove_scheduled_task',
+  'cat_cafe_feat_index', // requires callback credentials unavailable in readonly
+  'signal_mark_read',
+  'signal_summarize',
+  'signal_start_study',
+  'signal_save_notes',
+  'signal_generate_podcast',
+  'signal_update_article',
+  'signal_delete_article',
+  'signal_link_thread',
+  'limb_invoke',
+  'limb_pair_approve',
+];
+
+const EXPECTED_READONLY_TOOLS = [
+  'cat_cafe_search_evidence',
+  'cat_cafe_reflect',
+  'cat_cafe_get_rich_block_rules',
+  'cat_cafe_list_session_chain',
+  'cat_cafe_read_session_events',
+  'cat_cafe_read_session_digest',
+  'cat_cafe_read_invocation_detail',
+  'signal_list_inbox',
+  'signal_get_article',
+  'signal_search',
+  'signal_list_studies',
+];
+
+describe('F061 READONLY_ALLOWED_TOOLS whitelist', () => {
+  test('whitelist excludes all known write tools', async () => {
+    const { READONLY_ALLOWED_TOOLS } = await import('../dist/server-toolsets.js');
+    for (const name of KNOWN_WRITE_TOOLS) {
+      assert.ok(!READONLY_ALLOWED_TOOLS.has(name), `Write tool "${name}" must NOT be in readonly whitelist`);
+    }
+  });
+
+  test('whitelist includes all expected readonly tools', async () => {
+    const { READONLY_ALLOWED_TOOLS } = await import('../dist/server-toolsets.js');
+    for (const name of EXPECTED_READONLY_TOOLS) {
+      assert.ok(READONLY_ALLOWED_TOOLS.has(name), `Readonly tool "${name}" must be in whitelist`);
+    }
+  });
+
+  test('whitelist is a subset of all registered tools', async () => {
+    const { READONLY_ALLOWED_TOOLS } = await import('../dist/server-toolsets.js');
+    const { createServer } = await import('../dist/index.js');
+    const server = createServer();
+    const allRegistered = new Set(Object.keys(server._registeredTools));
+    for (const name of READONLY_ALLOWED_TOOLS) {
+      assert.ok(allRegistered.has(name), `Whitelist tool "${name}" does not exist in registered tools`);
+    }
   });
 });

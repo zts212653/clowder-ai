@@ -15,8 +15,6 @@ function renderNotice(message: Partial<ChatMessageType> & Pick<ChatMessageType, 
         {
           id: 'notice-1',
           type: 'connector',
-          content: '',
-          timestamp: Date.now(),
           ...message,
         } as ChatMessageType
       }
@@ -37,10 +35,13 @@ describe('SystemNoticeBar', () => {
       },
     });
 
-    expect(html).toContain('bg-cafe-surface/90');
+    expect(html).toContain('data-notice-tone="info"');
+    expect(html).toContain('system-notice-bar');
     expect(html).toContain('text-cafe-secondary');
     expect(html).not.toContain('bg-blue-50');
     expect(html).not.toContain('text-slate-900');
+    expect(html).not.toMatch(/text-\[#[0-9A-Fa-f]{3,6}\]/);
+    expect(html).not.toMatch(/border-\[#[0-9A-Fa-f]{3,6}\]/);
   });
 
   it('keeps warning emphasis in metadata while leaving the notice body on the shared cafe palette', () => {
@@ -55,10 +56,13 @@ describe('SystemNoticeBar', () => {
       },
     });
 
-    expect(html).toContain('border-[#E8DCCF]');
+    expect(html).toContain('data-notice-tone="warning"');
+    expect(html).toContain('system-notice-bar--alert');
     expect(html).toContain('text-cafe-muted');
     expect(html).toContain('text-cafe-secondary');
     expect(html).not.toContain('bg-amber-50');
     expect(html).not.toContain('text-amber-950');
+    expect(html).not.toMatch(/text-\[#[0-9A-Fa-f]{3,6}\]/);
+    expect(html).not.toMatch(/border-\[#[0-9A-Fa-f]{3,6}\]/);
   });
 });

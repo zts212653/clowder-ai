@@ -14,6 +14,12 @@ import type {
   TriggerSpec,
 } from './types.js';
 
+export const SCHEDULER_TOAST_DURATION_MS = {
+  info: 3200,
+  success: 3200,
+  error: 6000,
+} as const;
+
 /** Compute epoch ms of next fire time for a trigger */
 export function computeNextFireTime(trigger: TriggerSpec): number | null {
   if (trigger.type === 'once') return trigger.fireAt;
@@ -56,7 +62,7 @@ export function notifyTaskRegistered(notify: ScheduleLifecycleNotifier | undefin
     type: 'info',
     title: '定时任务已创建',
     message: `「${label(def)}」下次执行时间：${timeStr}${once}`,
-    duration: 3200,
+    duration: SCHEDULER_TOAST_DURATION_MS.info,
   });
 }
 
@@ -65,7 +71,7 @@ export function notifyTaskPaused(notify: ScheduleLifecycleNotifier | undefined, 
     type: 'info',
     title: '定时任务已暂停',
     message: `「${label(def)}」已暂停`,
-    duration: 3000,
+    duration: SCHEDULER_TOAST_DURATION_MS.info,
   });
 }
 
@@ -76,7 +82,7 @@ export function notifyTaskResumed(notify: ScheduleLifecycleNotifier | undefined,
     type: 'info',
     title: '定时任务已恢复',
     message: `「${label(def)}」下次执行时间：${timeStr}`,
-    duration: 3200,
+    duration: SCHEDULER_TOAST_DURATION_MS.info,
   });
 }
 
@@ -85,7 +91,7 @@ export function notifyTaskDeleted(notify: ScheduleLifecycleNotifier | undefined,
     type: 'info',
     title: '定时任务已删除',
     message: `「${label(def)}」已删除`,
-    duration: 3000,
+    duration: SCHEDULER_TOAST_DURATION_MS.info,
   });
 }
 
@@ -98,7 +104,7 @@ export function notifyTaskSucceeded(notify: ScheduleLifecycleNotifier | undefine
       type: 'success',
       title: '定时任务已完成',
       message: `「${label(def)}」已执行完成，任务已自动结束`,
-      duration: 3200,
+      duration: SCHEDULER_TOAST_DURATION_MS.success,
     });
     return;
   }
@@ -108,7 +114,7 @@ export function notifyTaskSucceeded(notify: ScheduleLifecycleNotifier | undefine
     type: 'success',
     title: '定时任务执行完成',
     message: `「${label(def)}」下次执行时间：${timeStr}`,
-    duration: 3200,
+    duration: SCHEDULER_TOAST_DURATION_MS.success,
   });
 }
 
@@ -121,6 +127,6 @@ export function notifyTaskFailed(
     type: 'error',
     title: '定时任务执行失败',
     message: `「${label(def)}」${errorSummary ? `：${errorSummary.slice(0, 200)}` : ''}`,
-    duration: 6000,
+    duration: SCHEDULER_TOAST_DURATION_MS.error,
   });
 }

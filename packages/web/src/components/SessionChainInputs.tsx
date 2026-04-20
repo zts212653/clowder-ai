@@ -13,10 +13,12 @@ export function BindSessionInput({
   threadId,
   catId,
   onBound,
+  disabled,
 }: {
   threadId: string;
   catId: string;
   onBound: () => void;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState('');
@@ -24,6 +26,7 @@ export function BindSessionInput({
   const ime = useIMEGuard();
 
   const handleBind = async () => {
+    if (disabled) return;
     const trimmed = value.trim();
     if (!trimmed || status === 'saving') return;
     setStatus('saving');
@@ -54,7 +57,8 @@ export function BindSessionInput({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="text-[9px] text-cafe-muted hover:text-cafe-secondary transition-colors"
+        disabled={disabled}
+        className="text-[9px] text-cafe-muted hover:text-cafe-secondary transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
       >
         bind...
       </button>
@@ -85,7 +89,7 @@ export function BindSessionInput({
       <button
         type="button"
         onClick={() => void handleBind()}
-        disabled={status === 'saving' || !value.trim()}
+        disabled={status === 'saving' || !value.trim() || disabled}
         className="text-[9px] px-1.5 py-0.5 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-40 transition-colors"
       >
         {status === 'saving' ? '...' : status === 'ok' ? 'ok' : status === 'error' ? 'err' : 'bind'}

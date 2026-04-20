@@ -147,6 +147,12 @@ async function createSharedDefaultGuideFixture(guideState) {
 
 function createMockDeps(services, appendCalls, threadStore = null, guideSessionStore = null) {
   let counter = 0;
+  const safeThreadStore = threadStore
+    ? {
+        consumeMentionRoutingFeedback: async () => null,
+        ...threadStore,
+      }
+    : null;
   return {
     services,
     invocationDeps: {
@@ -155,10 +161,11 @@ function createMockDeps(services, appendCalls, threadStore = null, guideSessionS
         verify: () => null,
       },
       sessionManager: {
+        get: async () => undefined,
         getOrCreate: async () => ({}),
         resolveWorkingDirectory: () => '/tmp/test',
       },
-      threadStore,
+      threadStore: safeThreadStore,
       guideSessionStore,
       apiUrl: 'http://127.0.0.1:3004',
     },
@@ -192,6 +199,161 @@ function degradationSystemInfos(messages) {
     }
   });
 }
+
+describe('incremental current-message fallback helper', () => {
+  it('does not append raw current message when context already contains current message id', async () => {
+    const { shouldAppendExplicitCurrentMessage } = await import(
+      '../dist/domains/cats/services/agents/routing/route-helpers.js'
+    );
+
+    const result = shouldAppendExplicitCurrentMessage(
+      {
+        contextText:
+          '[对话历史增量 - 未发送过 1 条]\n[Thread opener: 0000000000000002-000001-bbbbbbbb] CURRENT USER MESSAGE\n[/对话历史]',
+        includesCurrentUserMessage: false,
+        currentMessageFilteredOut: false,
+      },
+      '0000000000000002-000001-bbbbbbbb',
+    );
+
+    assert.equal(result, false, 'context containing current message id should suppress raw fallback append');
+  });
+
+  it('still appends raw current message when context truly lacks current message id', async () => {
+    const { shouldAppendExplicitCurrentMessage } = await import(
+      '../dist/domains/cats/services/agents/routing/route-helpers.js'
+    );
+
+    const result = shouldAppendExplicitCurrentMessage(
+      {
+        contextText: '[对话历史增量 - 未发送过 1 条]\n[older-id] older user message\n[/对话历史]',
+        includesCurrentUserMessage: false,
+        currentMessageFilteredOut: false,
+      },
+      '0000000000000002-000001-bbbbbbbb',
+    );
+
+    assert.equal(result, true, 'missing current message id should keep raw fallback append');
+  });
+});
+
+describe('incremental current-message fallback integration', () => {
+  it('routeSerial avoids duplicating current message when smart-window anchor already carries it', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const captureService = createCapturingService('opus', 'ack');
+    const currentUserMessageId = '0000000000000001-000001-aaaaaaaa';
+    const currentText = 'CURRENT USER MESSAGE';
+    const baseTs = Date.now() - 16 * 60_000;
+
+    const unseen = Array.from({ length: 16 }, (_, i) => {
+      const index = i + 1;
+      return {
+        id: index === 1 ? currentUserMessageId : `000000000000000${index}-000001-${String(index).padStart(8, '0')}`,
+        threadId: 'thread1',
+        userId: 'user1',
+        catId: index === 1 ? null : 'codex',
+        content: index === 1 ? currentText : `history-${index}`,
+        mentions: [],
+        timestamp: baseTs + i * 60_000,
+      };
+    });
+
+    const deps = createMockDeps({ opus: captureService }, undefined, {
+      async get() {
+        return {
+          id: 'thread1',
+          title: 'Test Thread',
+          createdBy: 'user1',
+          participants: [],
+          lastActiveAt: Date.now(),
+          createdAt: Date.now(),
+          projectPath: 'default',
+        };
+      },
+      async getParticipantsWithActivity() {
+        return [];
+      },
+      async updateParticipantActivity() {},
+    });
+
+    deps.deliveryCursorStore = {
+      getCursor: async () => undefined,
+      ackCursor: async () => {},
+    };
+    deps.messageStore.getByThreadAfter = async () => unseen;
+
+    for await (const _ of routeSerial(deps, ['opus'], currentText, 'user1', 'thread1', {
+      currentUserMessageId,
+    })) {
+    }
+
+    const prompt = captureService.calls[0];
+    assert.equal(
+      (prompt.match(/CURRENT USER MESSAGE/g) || []).length,
+      1,
+      'current message should appear once even when anchor already contains it',
+    );
+    assert.ok(prompt.includes(currentUserMessageId), 'smart-window anchor should carry current message id');
+  });
+
+  it('routeParallel avoids duplicating current message when smart-window anchor already carries it', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const captureService = createCapturingService('opus', 'ack');
+    const currentUserMessageId = '0000000000000001-000001-aaaaaaaa';
+    const currentText = 'CURRENT USER MESSAGE';
+    const baseTs = Date.now() - 16 * 60_000;
+
+    const unseen = Array.from({ length: 16 }, (_, i) => {
+      const index = i + 1;
+      return {
+        id: index === 1 ? currentUserMessageId : `000000000000000${index}-000001-${String(index).padStart(8, '0')}`,
+        threadId: 'thread1',
+        userId: 'user1',
+        catId: index === 1 ? null : 'codex',
+        content: index === 1 ? currentText : `history-${index}`,
+        mentions: [],
+        timestamp: baseTs + i * 60_000,
+      };
+    });
+
+    const deps = createMockDeps({ opus: captureService }, undefined, {
+      async get() {
+        return {
+          id: 'thread1',
+          title: 'Test Thread',
+          createdBy: 'user1',
+          participants: [],
+          lastActiveAt: Date.now(),
+          createdAt: Date.now(),
+          projectPath: 'default',
+        };
+      },
+      async getParticipantsWithActivity() {
+        return [];
+      },
+      async updateParticipantActivity() {},
+    });
+
+    deps.deliveryCursorStore = {
+      getCursor: async () => undefined,
+      ackCursor: async () => {},
+    };
+    deps.messageStore.getByThreadAfter = async () => unseen;
+
+    for await (const _ of routeParallel(deps, ['opus'], currentText, 'user1', 'thread1', {
+      currentUserMessageId,
+    })) {
+    }
+
+    const prompt = captureService.calls[0];
+    assert.equal(
+      (prompt.match(/CURRENT USER MESSAGE/g) || []).length,
+      1,
+      'current message should appear once even when anchor already contains it',
+    );
+    assert.ok(prompt.includes(currentUserMessageId), 'smart-window anchor should carry current message id');
+  });
+});
 
 describe('routeSerial', () => {
   it('executes single cat and yields text + done', async () => {
@@ -745,6 +907,7 @@ describe('routeSerial resilience', () => {
           verify: () => null,
         },
         sessionManager: {
+          get: async () => undefined,
           getOrCreate: async () => ({}),
           resolveWorkingDirectory: () => '/tmp/test',
         },
@@ -2136,7 +2299,7 @@ describe('routeParallel degradation notification', () => {
 });
 
 describe('routeParallel A2A safety', () => {
-  it('does not chain A2A even when mentions are detected', async () => {
+  it('does not chain A2A even when mentions are detected (F167 L2 AC-A5: mentions NOT persisted in parallel)', async () => {
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
     const appendCalls = [];
     const deps = createMockDeps(
@@ -2156,10 +2319,12 @@ describe('routeParallel A2A safety', () => {
     const handoffs = messages.filter((m) => m.type === 'a2a_handoff');
     assert.equal(handoffs.length, 0, 'parallel mode should never chain A2A');
 
-    // But mentions should still be stored
+    // F167 L2 AC-A5: mentions must be persisted as [] in parallel mode so that
+    // MessageStore.getMentionsFor / pending-mentions flow does NOT surface parallel @ messages.
+    // The raw @ tokens are still captured in the `suppressedMentions` log for observability.
     const opusAppend = appendCalls.find((c) => c.catId === 'opus');
     assert.ok(opusAppend, 'opus response should be stored');
-    assert.deepEqual(opusAppend.mentions, ['codex'], 'mentions should be detected and stored');
+    assert.deepEqual(opusAppend.mentions, [], 'AC-A5: parallel-mode mentions must be []');
   });
 
   it('executes multiple cats independently and yields interleaved messages', async () => {

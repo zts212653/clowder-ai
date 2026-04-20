@@ -41,7 +41,7 @@ describe('F115 AC-C3: proxy fallback to direct upstream', () => {
     process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
     process.env.HOME = root;
 
-    // F340: Use well-known 'claude' ID so resolveForClient('anthropic') discovers it.
+    // clowder-ai#340: Use well-known 'claude' ID so resolveForClient('anthropic') discovers it.
     // Protocol retired — derived at runtime from BUILTIN_ACCOUNT_MAP.
     await writeFile(
       join(catCafeDir, 'cat-catalog.json'),
@@ -152,7 +152,7 @@ describe('F115 AC-C3: proxy fallback to direct upstream', () => {
     process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
     process.env.HOME = root;
 
-    // F340: Use well-known 'claude' ID so resolveForClient('anthropic') discovers it.
+    // clowder-ai#340: Use well-known 'claude' ID so resolveForClient('anthropic') discovers it.
     await writeFile(
       join(catCafeDir, 'cat-catalog.json'),
       JSON.stringify(

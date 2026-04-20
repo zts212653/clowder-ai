@@ -1546,3 +1546,79 @@ describe('F154: /focus + /ask with commandRegistry (P1/P2 regression)', () => {
     assert.equal(asyncCallCompleted, true, 'updatePreferredCats must be awaited before returning');
   });
 });
+
+// ─── F154 Phase B: /status includes preferred cat info (AC-B3) ──────────────
+describe('F154 Phase B: /status preferred cat visibility (AC-B3)', () => {
+  let ConnectorCommandLayer;
+  before(async () => {
+    const mod = await import('../dist/infrastructure/connectors/ConnectorCommandLayer.js');
+    ConnectorCommandLayer = mod.ConnectorCommandLayer;
+  });
+
+  it('/status shows preferred cat name when set', async () => {
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore({
+        connectorId: 'feishu',
+        externalChatId: 'chat1',
+        threadId: 't-pref',
+        userId: 'user1',
+      }),
+      threadStore: stubThreadStore({
+        id: 't-pref',
+        title: 'F154 测试',
+        createdAt: Date.now(),
+        preferredCats: ['opus'],
+      }),
+      frontendBaseUrl: 'https://cafe.example.com',
+      catRoster: {
+        opus: { displayName: 'opus', available: true },
+        codex: { displayName: 'codex', available: true },
+      },
+    });
+    const result = await layer.handle('feishu', 'chat1', 'user1', '/status');
+    assert.equal(result.kind, 'status');
+    assert.ok(result.response.includes('首选猫'), '/status should show preferred cat section');
+    assert.ok(result.response.includes('opus'), '/status should show the preferred cat name');
+  });
+
+  it('/status shows no preferred cat line when preferredCats is empty', async () => {
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore({
+        connectorId: 'feishu',
+        externalChatId: 'chat1',
+        threadId: 't-nopref',
+        userId: 'user1',
+      }),
+      threadStore: stubThreadStore({
+        id: 't-nopref',
+        title: '空偏好测试',
+        createdAt: Date.now(),
+        preferredCats: [],
+      }),
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    const result = await layer.handle('feishu', 'chat1', 'user1', '/status');
+    assert.equal(result.kind, 'status');
+    assert.ok(!result.response.includes('首选猫'), '/status should omit preferred cat line when empty');
+  });
+
+  it('/status shows no preferred cat line when preferredCats is undefined', async () => {
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore({
+        connectorId: 'feishu',
+        externalChatId: 'chat1',
+        threadId: 't-undef',
+        userId: 'user1',
+      }),
+      threadStore: stubThreadStore({
+        id: 't-undef',
+        title: '未设置',
+        createdAt: Date.now(),
+      }),
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    const result = await layer.handle('feishu', 'chat1', 'user1', '/status');
+    assert.equal(result.kind, 'status');
+    assert.ok(!result.response.includes('首选猫'), '/status should omit preferred cat line when undefined');
+  });
+});

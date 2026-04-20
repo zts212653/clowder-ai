@@ -2,8 +2,8 @@
  * B1.1 regression tests: project path restoration on thread switch.
  *
  * Two fix points:
- * 1. ThreadSidebar.handleSelect restores projectPath from threads array
- * 2. ChatContainer restores projectPath on mount (store or API fallback)
+ * 1. ChatContainer restores projectPath after the thread route changes
+ * 2. Existing-thread switches must not pre-write projectPath before navigation
  *
  * We test the logic paths directly since full component render requires
  * too many sub-component mocks for these focused behavioral tests.
@@ -18,7 +18,7 @@ const threads = [
 ];
 
 /**
- * Mirrors the logic in ThreadSidebar.handleSelect and ChatContainer mount:
+ * Mirrors the logic in ChatContainer mount:
  * resolve projectPath from threads array for a given threadId.
  */
 function resolveProjectPath(storeThreads: Array<{ id: string; projectPath: string }>, threadId: string): string {
@@ -44,23 +44,16 @@ describe('B1.1 project path restoration logic', () => {
     expect(resolveProjectPath(threads, 'unknown-thread')).toBe('default');
   });
 
-  it('handleSelect should call setCurrentProject before navigateToThread', () => {
-    // Verify the ordering contract: projectPath must be set before navigation
-    // so that useWorkspace re-fetches with the correct repoRoot
+  it('handleSelect should navigate without pre-writing project state', () => {
     const calls: string[] = [];
-    const setCurrentProject = (path: string) => {
-      calls.push(`setProject:${path}`);
-    };
     const navigateToThread = (id: string) => {
       calls.push(`navigate:${id}`);
     };
 
-    // Simulate handleSelect logic
+    // Simulate handleSelect logic for an existing thread switch.
     const threadId = 'thread-foreign';
-    const target = threads.find((t) => t.id === threadId);
-    setCurrentProject(target?.projectPath ?? 'default');
     navigateToThread(threadId);
 
-    expect(calls).toEqual([`setProject:${FOREIGN_PROJECT}`, 'navigate:thread-foreign']);
+    expect(calls).toEqual(['navigate:thread-foreign']);
   });
 });

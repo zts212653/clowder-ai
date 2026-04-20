@@ -5,11 +5,15 @@
 
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
-import { assertRedisIsolationOrThrow, cleanupPrefixedRedisKeys } from './helpers/redis-test-helpers.js';
+import {
+  assertRedisIsolationOrThrow,
+  cleanupPrefixedRedisKeys,
+  redisIsolationSkipReason,
+} from './helpers/redis-test-helpers.js';
 
 const REDIS_URL = process.env.REDIS_URL;
 
-describe('RedisThreadStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false }, () => {
+describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let RedisThreadStore;
   let createRedisClient;
   let redis;
@@ -439,7 +443,7 @@ describe('ThreadStoreFactory', () => {
   it(
     'returns RedisThreadStore when redis provided',
     {
-      skip: !REDIS_URL ? 'REDIS_URL not set' : false,
+      skip: redisIsolationSkipReason(REDIS_URL),
     },
     async () => {
       assertRedisIsolationOrThrow(REDIS_URL, 'ThreadStoreFactory');

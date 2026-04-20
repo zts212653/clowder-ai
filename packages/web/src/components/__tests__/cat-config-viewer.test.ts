@@ -129,7 +129,7 @@ describe('CatOverviewTab', () => {
     expect(html).toContain('已启用');
     expect(html).toContain('@布偶猫');
     expect(html).toContain('只能编辑，不能新增或删除');
-    expect(html).toContain('点击任意卡片进入成员配置');
+    expect(html).toContain('点击卡片进入成员配置');
     expect(html).toContain('gemini-bridge');
     expect(html).toContain('添加成员');
     expect(html).not.toContain('Owner 信息独立维护');

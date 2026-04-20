@@ -18,8 +18,16 @@ describe('GovernanceBootstrapService', () => {
   beforeEach(async () => {
     catCafeRoot = await mkdtemp(join(tmpdir(), 'cat-cafe-root-'));
     targetProject = await mkdtemp(join(tmpdir(), 'target-project-'));
-    // Create cat-cafe-skills source directory (bootstrap symlinks to it)
-    await mkdir(join(catCafeRoot, 'cat-cafe-skills'), { recursive: true });
+    // Create cat-cafe-skills source directory with sample skills
+    const skillsRoot = join(catCafeRoot, 'cat-cafe-skills');
+    await mkdir(skillsRoot, { recursive: true });
+    // ADR-025: per-skill symlinks need actual skills to link
+    for (const name of ['tdd', 'worktree', 'quality-gate']) {
+      await mkdir(join(skillsRoot, name));
+      await writeFile(join(skillsRoot, name, 'SKILL.md'), `# ${name}`);
+    }
+    // Non-skill dir (no SKILL.md) — should be ignored
+    await mkdir(join(skillsRoot, 'refs'));
   });
 
   afterEach(async () => {
@@ -50,19 +58,35 @@ describe('GovernanceBootstrapService', () => {
     assert.ok(sop.includes('worktree'));
   });
 
-  it('creates skills symlinks for all 4 providers', async () => {
+  it('creates per-skill symlinks for all 4 providers (ADR-025)', async () => {
     const svc = new GovernanceBootstrapService(catCafeRoot);
     await svc.bootstrap(targetProject, { dryRun: false });
 
-    const sourcePath = resolve(catCafeRoot, 'cat-cafe-skills');
+    const skillsRoot = resolve(catCafeRoot, 'cat-cafe-skills');
     for (const dir of ['.claude/skills', '.codex/skills', '.gemini/skills', '.kimi/skills']) {
-      const linkPath = join(targetProject, dir);
-      const stat = await lstat(linkPath);
-      assert.ok(stat.isSymbolicLink(), `${dir} should be a symlink`);
-      const target = await readlink(linkPath);
-      const resolved = resolve(dirname(linkPath), target);
-      assert.equal(resolved, sourcePath, `${dir} should point to cat-cafe-skills`);
+      // Each skill should have its own symlink (not directory-level)
+      for (const skill of ['tdd', 'worktree', 'quality-gate']) {
+        const linkPath = join(targetProject, dir, skill);
+        const st = await lstat(linkPath);
+        assert.ok(st.isSymbolicLink(), `${dir}/${skill} should be a symlink`);
+        const target = await readlink(linkPath);
+        const resolved = resolve(dirname(linkPath), target);
+        assert.equal(resolved, resolve(skillsRoot, skill), `${dir}/${skill} should point to cat-cafe-skills/${skill}`);
+      }
+      // refs/ dir (no SKILL.md) should not be symlinked
+      await assert.rejects(lstat(join(targetProject, dir, 'refs')), { code: 'ENOENT' });
     }
+  });
+
+  it('writes skills-state.json with managed skill names (ADR-025)', async () => {
+    const svc = new GovernanceBootstrapService(catCafeRoot);
+    await svc.bootstrap(targetProject, { dryRun: false });
+
+    const raw = await readFile(join(targetProject, '.cat-cafe', 'skills-state.json'), 'utf-8');
+    const state = JSON.parse(raw);
+    assert.deepStrictEqual(state.managedSkillNames, ['quality-gate', 'tdd', 'worktree']); // sorted
+    assert.ok(state.sourceManifestHash.startsWith('sha256:'));
+    assert.ok(state.lastSyncedAt);
   });
 
   it('appends managed block to existing CLAUDE.md', async () => {

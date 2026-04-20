@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 import { useBrakeStore } from '@/stores/brakeStore';
+import { HubIcon } from './hub-icons';
 
 export function BrakeSettingsPanel() {
   const { settingsEnabled, settingsThreshold, settingsLoading, loadSettings, saveSettings } = useBrakeStore();
@@ -36,7 +37,9 @@ export function BrakeSettingsPanel() {
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-base font-semibold text-cafe">🐾 健康守护</h3>
+        <h3 className="text-base font-semibold text-cafe flex items-center gap-1.5">
+          <HubIcon name="heart-pulse" className="h-4 w-4" /> 健康守护
+        </h3>
         <p className="text-sm text-cafe-secondary mt-1">三猫会在你连续工作一段时间后提醒你休息</p>
       </div>
 

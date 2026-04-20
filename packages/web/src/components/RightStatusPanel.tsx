@@ -8,9 +8,17 @@ import { apiFetch } from '@/utils/api-client';
 import { AuditExplorerPanel } from './audit/AuditExplorerPanel';
 import { CatTokenUsage } from './CatTokenUsage';
 import { PlanBoardPanel } from './PlanBoardPanel';
-import { deriveActiveCats } from './parallel-status-helpers';
 import { SessionChainPanel } from './SessionChainPanel';
-import { type CatStatus, type IntentMode, modeLabel, statusLabel, statusTone, truncateId } from './status-helpers';
+import {
+  type CatStatus,
+  collectSnapshotActiveCats,
+  deriveActiveCats,
+  type IntentMode,
+  modeLabel,
+  statusLabel,
+  statusTone,
+  truncateId,
+} from './status-helpers';
 import { CatInvocationTime, CollapsibleIds } from './status-panel-parts';
 
 export interface RightStatusPanelProps {
@@ -18,6 +26,8 @@ export interface RightStatusPanelProps {
   targetCats: string[];
   catStatuses: Record<string, CatStatus>;
   catInvocations: Record<string, CatInvocationInfo>;
+  activeInvocations?: Record<string, { catId: string; mode: string; startedAt?: number }>;
+  hasActiveInvocation?: boolean;
   threadId: string;
   messageSummary: {
     total: number;
@@ -111,7 +121,7 @@ function ThinkingModeToggle({ threadId }: { threadId: string }) {
   return (
     <div className="flex items-center justify-between">
       <span>
-        心里话: <span className="font-medium">{isDebug ? '🔍 调试' : '🎭 游戏'}</span>
+        心里话: <span className="font-medium">{isDebug ? '调试' : '游戏'}</span>
       </span>
       <button
         onClick={toggle}
@@ -146,14 +156,34 @@ function BubbleDisplayToggle({
   field: 'bubbleThinking' | 'bubbleCli';
 }) {
   const thread = useChatStore((s) => s.threads.find((t) => t.id === threadId));
+  const isLoadingThreads = useChatStore((s) => s.isLoadingThreads);
   const updateLocal = useChatStore((s) => s.updateThreadBubbleDisplay);
+  const globalBubbleDefaults = useChatStore((s) => s.globalBubbleDefaults);
+  const bubbleRestorePending = isLoadingThreads && !thread;
   const current = thread?.[field] ?? 'global';
+  const currentEffective =
+    current === 'global'
+      ? field === 'bubbleThinking'
+        ? globalBubbleDefaults.thinking
+        : globalBubbleDefaults.cliOutput
+      : current;
+  const next = bubbleRestorePending
+    ? null
+    : current === 'global'
+      ? currentEffective === 'expanded'
+        ? 'collapsed'
+        : 'expanded'
+      : BUBBLE_CYCLE[current];
+  const currentLabel = bubbleRestorePending
+    ? '恢复中'
+    : current === 'global'
+      ? `${BUBBLE_LABELS.global}（当前${BUBBLE_LABELS[currentEffective]}）`
+      : BUBBLE_LABELS[current];
   const pendingRef = useRef(false);
 
   const cycle = useCallback(async () => {
-    if (pendingRef.current) return;
+    if (pendingRef.current || bubbleRestorePending || !next) return;
     pendingRef.current = true;
-    const next = BUBBLE_CYCLE[current] ?? 'global';
     updateLocal(threadId, field, next);
     try {
       const res = await apiFetch(`/api/threads/${threadId}`, {
@@ -167,18 +197,19 @@ function BubbleDisplayToggle({
     } finally {
       pendingRef.current = false;
     }
-  }, [threadId, field, current, updateLocal]);
+  }, [threadId, field, next, current, updateLocal, bubbleRestorePending]);
 
   return (
     <div className="flex items-center justify-between">
       <span>
-        {label}: <span className="font-medium">{BUBBLE_LABELS[current]}</span>
+        {label}: <span className="font-medium">{currentLabel}</span>
       </span>
       <button
         onClick={cycle}
+        disabled={bubbleRestorePending}
         className="text-[11px] px-2 py-0.5 rounded-full border border-cafe hover:border-gray-400 hover:bg-cafe-surface-elevated transition-colors"
       >
-        {BUBBLE_LABELS[BUBBLE_CYCLE[current] ?? 'global']}
+        {bubbleRestorePending ? '恢复中...' : BUBBLE_LABELS[next as keyof typeof BUBBLE_LABELS]}
       </button>
     </div>
   );
@@ -320,26 +351,20 @@ export function RightStatusPanel({
   targetCats,
   catStatuses,
   catInvocations,
+  activeInvocations,
+  hasActiveInvocation,
   threadId,
   messageSummary,
   width,
 }: RightStatusPanelProps) {
-  const activeInvocations = useChatStore((s) => s.activeInvocations);
   // F26: Split into active (working now) vs history (appeared before)
   const { activeCats, historyCats } = useMemo(() => {
-    const snapshotCats = Object.entries(catInvocations)
-      .filter(([, inv]) => {
-        const taskProgress = inv.taskProgress;
-        if (!taskProgress || taskProgress.tasks.length === 0) return false;
-        return taskProgress.snapshotStatus !== 'completed';
-      })
-      .map(([catId]) => catId);
-    const slotCats = deriveActiveCats(targetCats, activeInvocations);
-    const active = Array.from(new Set([...slotCats, ...snapshotCats]));
+    const snapshotCats = collectSnapshotActiveCats(catInvocations);
+    const active = deriveActiveCats({ targetCats, snapshotCats, activeInvocations, hasActiveInvocation });
     const allParticipants = new Set([...active, ...Object.keys(catInvocations)]);
     const history = [...allParticipants].filter((c) => !active.includes(c));
     return { activeCats: active, historyCats: history };
-  }, [targetCats, catInvocations, activeInvocations]);
+  }, [targetCats, catInvocations, activeInvocations, hasActiveInvocation]);
 
   const { getCatById } = useCatData();
   const [historyOpen, setHistoryOpen] = useState(false);

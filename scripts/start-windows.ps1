@@ -94,8 +94,8 @@ switch ($Profile_) {
         $profileDefaults = @{
             ANTHROPIC_PROXY_ENABLED = '0'; ASR_ENABLED = '0'
             TTS_ENABLED = '0'; LLM_POSTPROCESS_ENABLED = '0'
-            MESSAGE_TTL_SECONDS = '86400'; THREAD_TTL_SECONDS = '86400'
-            TASK_TTL_SECONDS = '86400'; SUMMARY_TTL_SECONDS = '86400'
+            MESSAGE_TTL_SECONDS = '0'; THREAD_TTL_SECONDS = '0'
+            TASK_TTL_SECONDS = '0'; SUMMARY_TTL_SECONDS = '0'
             REDIS_PROFILE = 'opensource'
         }
     }
@@ -219,9 +219,79 @@ function Stop-PortProcess {
     }
 }
 
+function Get-LoopbackHttpPort {
+    param([string]$Url, [int]$DefaultPort)
+
+    if (-not $Url) {
+        return $null
+    }
+
+    $uri = $null
+    if (-not [System.Uri]::TryCreate($Url, [System.UriKind]::Absolute, [ref]$uri)) {
+        return $null
+    }
+
+    $isLoopbackHost = $uri.Host -eq "localhost"
+    $ipAddress = $null
+    if (-not $isLoopbackHost -and [System.Net.IPAddress]::TryParse($uri.Host, [ref]$ipAddress)) {
+        $isLoopbackHost = [System.Net.IPAddress]::IsLoopback($ipAddress)
+    }
+
+    if (-not $isLoopbackHost) {
+        return $null
+    }
+
+    if ($uri.Port -gt 0) {
+        return $uri.Port
+    }
+
+    return $DefaultPort
+}
+
+function Wait-ForListeningPort {
+    param([int]$Port, [int]$TimeoutSec = 60)
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($listener) {
+            return $true
+        }
+        Start-Sleep -Seconds 1
+    }
+    return $false
+}
+
+$embedMode = if ($env:EMBED_MODE) { $env:EMBED_MODE.Trim().ToLowerInvariant() } else { "off" }
+$embedEnabledRaw = [System.Environment]::GetEnvironmentVariable("EMBED_ENABLED", "Process")
+$embedEnabled = if ($null -ne $embedEnabledRaw -and $embedEnabledRaw -ne "") {
+    @("1", "true", "yes", "on") -contains $embedEnabledRaw.Trim().ToLowerInvariant()
+} else {
+    @("on", "shadow") -contains $embedMode
+}
+$env:EMBED_ENABLED = if ($embedEnabled) { "1" } else { "0" }
+
+$embedPortDefault = if ($env:EMBED_PORT) { [int]$env:EMBED_PORT } else { 9880 }
+$configuredEmbedUrl = if ($env:EMBED_URL) { $env:EMBED_URL.Trim() } else { "" }
+$localEmbedPort = Get-LoopbackHttpPort -Url $configuredEmbedUrl -DefaultPort $embedPortDefault
+$useLocalEmbedSidecar = $embedEnabled -and ((-not $configuredEmbedUrl) -or ($null -ne $localEmbedPort))
+$EmbedPort = if ($useLocalEmbedSidecar) {
+    if ($null -ne $localEmbedPort) { [int]$localEmbedPort } else { $embedPortDefault }
+} else {
+    $embedPortDefault
+}
+$EmbedPidFile = Join-Path $RunDir "embed-$EmbedPort.pid"
+$EmbedLauncher = Join-Path $ProjectRoot "scripts\embed-server.ps1"
+if ($useLocalEmbedSidecar) {
+    $env:EMBED_URL = "http://127.0.0.1:$EmbedPort"
+}
+
 Write-Step "Check ports"
 Stop-PortProcess -Port ([int]$ApiPort) -Name "API" -PidFile $ApiPidFile -ProjectRoot $ProjectRoot
 Stop-PortProcess -Port ([int]$WebPort) -Name "Frontend" -PidFile $WebPidFile -ProjectRoot $ProjectRoot
+if ($useLocalEmbedSidecar) {
+    Stop-PortProcess -Port ([int]$EmbedPort) -Name "Embedding" -PidFile $EmbedPidFile -ProjectRoot $ProjectRoot
+}
 
 # -- Storage (Redis or Memory) -------------------------------
 Write-Step "Storage"
@@ -409,12 +479,45 @@ try {
 
     # Track background jobs for cleanup
     $jobs = @()
+    # NODE_ENV is driven by launch mode (-Dev), not by profile.
+    # Profile controls data isolation (Redis, TTLs, sidecar features);
+    # -Dev controls whether the API runs in development or production mode.
+    $apiNodeEnv = if ($Dev) { 'development' } else { 'production' }
     $runtimeEnvOverrides = @{
         REDIS_URL = $env:REDIS_URL
         MEMORY_STORE = $env:MEMORY_STORE
         CAT_CAFE_MCP_SERVER_PATH = $env:CAT_CAFE_MCP_SERVER_PATH
         API_SERVER_PORT = $ApiPort
         FRONTEND_PORT = $WebPort
+        NODE_ENV = $apiNodeEnv
+        EMBED_URL = $env:EMBED_URL
+        EMBED_PORT = $EmbedPort
+        EMBED_ENABLED = $env:EMBED_ENABLED
+        EMBED_MODE = $env:EMBED_MODE
+    }
+
+    $embedJob = $null
+    if ($useLocalEmbedSidecar) {
+        if (Test-Path $EmbedLauncher) {
+            Write-Host "  Starting Embedding sidecar (port $EmbedPort)..."
+            $embedJob = Start-Job -Name "embed" -ScriptBlock {
+                param($launcherPath, $port)
+                [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+                $OutputEncoding = [System.Text.Encoding]::UTF8
+                & powershell -ExecutionPolicy Bypass -File $launcherPath -Port $port 2>&1
+            } -ArgumentList $EmbedLauncher, $EmbedPort
+            $jobs += $embedJob
+
+            $embedTimeout = if ($env:EMBED_TIMEOUT) { [int]$env:EMBED_TIMEOUT } else { 60 }
+            if (Wait-ForListeningPort -Port ([int]$EmbedPort) -TimeoutSec $embedTimeout) {
+                Set-ManagedProcessId -Port ([int]$EmbedPort) -PidFile $EmbedPidFile
+                Write-Ok "Embedding sidecar ready on port $EmbedPort"
+            } else {
+                Write-Warn "Embedding sidecar did not become ready within ${embedTimeout}s - continuing in fail-open mode"
+            }
+        } else {
+            Write-Warn "Embedding launcher not found at $EmbedLauncher - continuing in fail-open mode"
+        }
     }
 
     # API Server
@@ -503,6 +606,13 @@ try {
     $safeEffectiveRedisUrl = Get-RedactedRedisUrl -RedisUrl $effectiveRedisUrl
     $storageMode = if ($useRedis -and $safeEffectiveRedisUrl) { "Redis ($safeEffectiveRedisUrl)" } elseif ($useRedis) { "Redis (redis://localhost:$RedisPort)" } else { "Memory (restart loses data)" }
     $frontendMode = if ($Dev) { "development (hot reload)" } else { "production (PWA enabled)" }
+    $embeddingMode = if ($embedEnabled) {
+        if ($useLocalEmbedSidecar) { "Local (http://127.0.0.1:$EmbedPort)" }
+        elseif ($configuredEmbedUrl) { "Remote ($configuredEmbedUrl)" }
+        else { "Enabled" }
+    } else {
+        "Off"
+    }
     $logDir = Join-Path $ProjectRoot "data/logs/api"
 
     Write-Host ""
@@ -513,6 +623,7 @@ try {
     Write-Host "  Frontend: http://localhost:$WebPort"
     Write-Host "  API:      http://localhost:$ApiPort"
     Write-Host "  Storage:  $storageMode"
+    Write-Host "  Embed:    $embeddingMode"
     Write-Host "  Frontend: $frontendMode"
     if ($Debug) {
         Write-Host "  Debug:    ON (logs: $logDir)" -ForegroundColor Yellow
@@ -554,6 +665,7 @@ try {
     }
     Clear-ManagedProcessId -PidFile $ApiPidFile
     Clear-ManagedProcessId -PidFile $WebPidFile
+    Clear-ManagedProcessId -PidFile $EmbedPidFile
 
     if ($startedRedis) {
         try {

@@ -1,10 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-
-const pushSpy = vi.fn();
-
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: pushSpy }) }));
+import { CHAT_THREAD_ROUTE_EVENT } from '../ThreadSidebar/thread-navigation';
 
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: (
@@ -48,7 +45,7 @@ describe('ChatMessage Postmark v2 source pill', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
-    pushSpy.mockClear();
+    window.history.replaceState({}, '', '/');
   });
 
   afterEach(() => {
@@ -102,9 +99,14 @@ describe('ChatMessage Postmark v2 source pill', () => {
     expect(pill?.className).toContain('text-[#8D6E63]');
     expect(pill?.className).toContain('hover:bg-[#F5EDE0]');
 
+    const pushStateSpy = vi.spyOn(window.history, 'pushState');
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+
     act(() => {
       pill?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
-    expect(pushSpy).toHaveBeenCalledWith(`/thread/${sourceThreadId}`);
+    expect(pushStateSpy).toHaveBeenCalledWith({}, '', `/thread/${sourceThreadId}`);
+    expect(window.location.pathname).toBe(`/thread/${sourceThreadId}`);
+    expect(dispatchSpy.mock.calls.some(([event]) => event.type === CHAT_THREAD_ROUTE_EVENT)).toBe(true);
   });
 });

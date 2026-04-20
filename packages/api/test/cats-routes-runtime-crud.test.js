@@ -1041,7 +1041,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     );
   });
 
-  it('F189 P1 regression: openrouter + foreign-prefix model preserves full model namespace', async () => {
+  it('clowder-ai#223 P1 regression: openrouter + foreign-prefix model preserves full model namespace', async () => {
     // Regression test for: provider=openrouter + defaultModel=z-ai/glm-4.7
     // The model's first segment "z-ai" is NOT the provider prefix — it is the
     // model's namespace within OpenRouter. stripOwnProviderPrefix must keep it.
@@ -1109,7 +1109,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     );
   });
 
-  it('F189 P1 regression: apiType derived solely from providerName (protocol retired)', async () => {
+  it('clowder-ai#223 P1 regression: apiType derived solely from providerName (protocol retired)', async () => {
     // deriveOpenCodeApiType now only uses providerName; account-level protocol
     // is no longer consulted. This test verifies the new single-source behavior.
     const { deriveOpenCodeApiType } = await import(
@@ -1132,10 +1132,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     }
   });
 
-  it('F189 legacy compat: PATCH allows editing an opencode+api_key member without provider', async () => {
-    // Regression: legacy opencode+api_key configs created before F189 have no
+  it('clowder-ai#223 legacy compat: PATCH allows editing an opencode+api_key member without provider', async () => {
+    // Regression: legacy opencode+api_key configs created before clowder-ai#223 have no
     // provider. Editing these members (e.g. changing defaultModel) must not
-    // fail validation. The invoke path skips the F189 config block when absent.
+    // fail validation. The invoke path skips the clowder-ai#223 config block when absent.
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
     process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
@@ -1464,7 +1464,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const { writeCatalogAccount } = await import('../dist/config/catalog-accounts.js');
     const { writeCredential } = await import('../dist/config/credentials.js');
     bootstrapCatCatalog(projectRoot, process.env.CAT_TEMPLATE_PATH);
-    // F340: Overwrite the 'codex' well-known account with an api_key sponsor
+    // clowder-ai#340: Overwrite the 'codex' well-known account with an api_key sponsor
     writeCatalogAccount(projectRoot, 'codex', {
       authType: 'api_key',
       baseUrl: 'https://api.codex-sponsor.example',

@@ -1,3 +1,4 @@
+import type { DragEvent as ReactDragEvent } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import type { CatConfig, CoCreatorConfig } from './config-viewer-types';
 
@@ -156,18 +157,36 @@ export function HubMemberOverviewCard({
   onEdit,
   onToggleAvailability,
   togglingAvailability = false,
+  draggable = false,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  isDragging = false,
 }: {
   cat: CatData;
   configCat?: CatConfig;
   onEdit?: (cat: CatData) => void;
   onToggleAvailability?: (cat: CatData) => void;
   togglingAvailability?: boolean;
+  draggable?: boolean;
+  onDragStart?: (cat: CatData, event: ReactDragEvent<HTMLElement>) => void;
+  onDragOver?: (cat: CatData, event: ReactDragEvent<HTMLElement>) => void;
+  onDrop?: (cat: CatData, event: ReactDragEvent<HTMLElement>) => void;
+  onDragEnd?: (cat: CatData, event: ReactDragEvent<HTMLElement>) => void;
+  isDragging?: boolean;
 }) {
   const status = getStatusBadge(cat);
   const title = [cat.breedDisplayName ?? cat.displayName, cat.nickname].filter(Boolean).join(' · ');
 
   return (
     <section
+      data-testid={`cat-card-${cat.id}`}
+      draggable={draggable || undefined}
+      onDragStart={draggable ? (event) => onDragStart?.(cat, event) : undefined}
+      onDragOver={draggable ? (event) => onDragOver?.(cat, event) : undefined}
+      onDrop={draggable ? (event) => onDrop?.(cat, event) : undefined}
+      onDragEnd={draggable ? (event) => onDragEnd?.(cat, event) : undefined}
       role={onEdit ? 'button' : undefined}
       tabIndex={onEdit ? 0 : undefined}
       onClick={() => onEdit?.(cat)}
@@ -178,11 +197,20 @@ export function HubMemberOverviewCard({
           onEdit(cat);
         }
       }}
-      className="rounded-[20px] px-[18px] py-[18px] shadow-sm transition hover:shadow-md"
+      className={`rounded-[20px] px-[18px] py-[18px] shadow-sm transition hover:shadow-md ${isDragging ? 'opacity-40' : ''}`}
       style={{ backgroundColor: '#FFFDFC', border: `1px solid ${cat.source === 'runtime' ? '#D9C7EA' : '#F1E7DF'}` }}
     >
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="flex items-start gap-2">
+          {draggable ? (
+            <span
+              aria-hidden="true"
+              title="拖动排序"
+              className="mt-1 cursor-grab select-none text-[18px] leading-none text-[#B59A88]"
+            >
+              ⠿
+            </span>
+          ) : null}
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-[17px] font-bold text-[#2D2118]">{title}</h3>
             {cat.source === 'runtime' ? (

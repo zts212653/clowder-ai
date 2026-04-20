@@ -27,7 +27,7 @@ export function createWakeCatFn(deps: WakeCatDeps): WakeCatFn {
   const { threadStore, invocationQueue, queueProcessor, log } = deps;
 
   return async (params: { threadId: string; catId: CatId; briefing: string; timeoutMs: number }): Promise<void> => {
-    const { threadId, catId, briefing } = params;
+    const { threadId, catId, briefing, timeoutMs } = params;
 
     const thread = await threadStore.get(threadId);
     const userId = thread?.createdBy ?? 'default-user';
@@ -50,7 +50,15 @@ export function createWakeCatFn(deps: WakeCatDeps): WakeCatFn {
     await queueProcessor.tryAutoExecute(threadId);
 
     log.info(
-      { threadId, catId, outcome: result.outcome, entryId: result.entry?.id, gameWake: true },
+      {
+        threadId,
+        catId,
+        outcome: result.outcome,
+        entryId: result.entry?.id,
+        timeoutMs,
+        briefingLen: briefing.length,
+        gameWake: true,
+      },
       '[F101] wakeCat: cat enqueued for game action',
     );
   };

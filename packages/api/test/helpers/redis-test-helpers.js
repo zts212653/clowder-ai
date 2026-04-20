@@ -41,6 +41,16 @@ export function assertRedisIsolationOrThrow(redisUrl, suiteName) {
   }
 }
 
+/**
+ * Shared skip reason for Redis integration suites in the default test run.
+ * These suites should only execute when the isolated Redis guard is explicitly enabled.
+ */
+export function redisIsolationSkipReason(redisUrl) {
+  if (!redisUrl) return 'REDIS_URL not set';
+  if (process.env[ISOLATION_FLAG] !== '1') return 'Redis isolation flag not set';
+  return false;
+}
+
 function normalizePattern(pattern) {
   return pattern.replace(/^cat-cafe:/, '');
 }

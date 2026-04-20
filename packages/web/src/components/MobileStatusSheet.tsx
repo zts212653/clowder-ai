@@ -2,11 +2,16 @@
 
 import { useMemo } from 'react';
 import { formatCatName, useCatData } from '@/hooks/useCatData';
-import { useChatStore } from '@/stores/chatStore';
 import { CatTokenUsage } from './CatTokenUsage';
-import { deriveActiveCats } from './parallel-status-helpers';
 import type { RightStatusPanelProps } from './RightStatusPanel';
-import { modeLabel, statusLabel, statusTone, truncateId } from './status-helpers';
+import {
+  collectSnapshotActiveCats,
+  deriveActiveCats,
+  modeLabel,
+  statusLabel,
+  statusTone,
+  truncateId,
+} from './status-helpers';
 
 interface MobileStatusSheetProps extends RightStatusPanelProps {
   open: boolean;
@@ -24,23 +29,17 @@ export function MobileStatusSheet({
   targetCats,
   catStatuses,
   catInvocations,
+  activeInvocations,
+  hasActiveInvocation,
   threadId,
   messageSummary,
 }: MobileStatusSheetProps) {
   const { getCatById } = useCatData();
-  const activeInvocations = useChatStore((s) => s.activeInvocations);
 
   const activeCats = useMemo(() => {
-    const snapshotCats = Object.entries(catInvocations)
-      .filter(([, inv]) => {
-        const taskProgress = inv.taskProgress;
-        if (!taskProgress || taskProgress.tasks.length === 0) return false;
-        return taskProgress.snapshotStatus !== 'completed';
-      })
-      .map(([catId]) => catId);
-    const slotCats = deriveActiveCats(targetCats, activeInvocations);
-    return Array.from(new Set([...slotCats, ...snapshotCats]));
-  }, [targetCats, catInvocations, activeInvocations]);
+    const snapshotCats = collectSnapshotActiveCats(catInvocations);
+    return deriveActiveCats({ targetCats, snapshotCats, activeInvocations, hasActiveInvocation });
+  }, [targetCats, catInvocations, activeInvocations, hasActiveInvocation]);
 
   const allParticipants = useMemo(() => {
     return [...new Set([...activeCats, ...Object.keys(catInvocations)])];

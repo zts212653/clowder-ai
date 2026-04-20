@@ -40,7 +40,7 @@ export interface RuntimeCatInput {
   commandArgs?: string[];
   cliConfigArgs?: string[];
   contextBudget?: ContextBudget;
-  /** F340 P5: Model provider name (renamed from ocProviderName). */
+  /** clowder-ai#340 P5: Model provider name (renamed from ocProviderName). */
   provider?: string;
 }
 
@@ -65,7 +65,7 @@ export interface RuntimeCatUpdate {
   commandArgs?: string[];
   cliConfigArgs?: string[];
   contextBudget?: ContextBudget | null;
-  /** F340 P5: Model provider name (renamed from ocProviderName). */
+  /** clowder-ai#340 P5: Model provider name (renamed from ocProviderName). */
   provider?: string | null;
   available?: boolean;
 }

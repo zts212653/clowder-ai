@@ -12,6 +12,7 @@ export interface BootstrapRoutesOptions {
   stateManager: IndexStateManager;
   bootstrapService: { bootstrap: ExpeditionBootstrapService['bootstrap'] };
   socketManager: SocketManagerLike;
+  getFingerprint?: (projectPath: string) => string;
 }
 
 export const projectsBootstrapRoutes: FastifyPluginAsync<BootstrapRoutesOptions> = async (app, opts) => {
@@ -38,7 +39,8 @@ export const projectsBootstrapRoutes: FastifyPluginAsync<BootstrapRoutesOptions>
         return { error: 'Project path not allowed' };
       }
 
-      return stateManager.getState(validated, request.query.fingerprint);
+      const fingerprint = request.query.fingerprint ?? opts.getFingerprint?.(validated);
+      return stateManager.getState(validated, fingerprint);
     },
   );
 

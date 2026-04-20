@@ -139,7 +139,7 @@ describe('accounts routes', () => {
       assert.equal(listRes.statusCode, 200);
       const list = listRes.json();
       assert.ok(Array.isArray(list.providers));
-      // F340: activeProfileId removed — activate concept retired
+      // clowder-ai#340: activeProfileId removed — activate concept retired
       assert.equal(list.activeProfileId, undefined);
       const listed = list.providers.find((p) => p.id === created.profile.id);
       assert.ok(listed, 'created profile should appear in list');
@@ -151,7 +151,7 @@ describe('accounts routes', () => {
     }
   });
 
-  // F340: POST /api/accounts/:id/test route removed — incomplete feature with no frontend entry.
+  // clowder-ai#340: POST /api/accounts/:id/test route removed — incomplete feature with no frontend entry.
   // Probe/heuristic protocol inference deleted alongside.
 
   it('rejects blank profile name in create request', async () => {

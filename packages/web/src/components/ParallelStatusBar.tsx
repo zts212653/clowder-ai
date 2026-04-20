@@ -6,8 +6,7 @@ import { hexToRgba } from '@/lib/color-utils';
 import type { TokenUsage } from '@/stores/chat-types';
 import type { CatInvocationInfo } from '@/stores/chatStore';
 import { useChatStore } from '@/stores/chatStore';
-import { deriveActiveCats } from './parallel-status-helpers';
-import { formatCost, formatDuration, formatTokenCount } from './status-helpers';
+import { deriveActiveCats, formatCost, formatDuration, formatTokenCount } from './status-helpers';
 
 function StatusDot({ status }: { status: string }) {
   switch (status) {
@@ -98,19 +97,22 @@ export function aggregateUsage(
 }
 
 export function ParallelStatusBar({ onStop }: { onStop?: () => void }) {
-  const { targetCats, activeInvocations, catStatuses, catInvocations } = useChatStore();
+  const { targetCats, catStatuses, catInvocations, activeInvocations, hasActiveInvocation } = useChatStore();
+  const activeCats = deriveActiveCats({
+    targetCats,
+    activeInvocations,
+    hasActiveInvocation,
+  });
 
-  const displayCats = deriveActiveCats(targetCats, activeInvocations);
+  if (activeCats.length === 0) return null;
 
-  if (displayCats.length === 0) return null;
-
-  const agg = aggregateUsage(catInvocations, displayCats);
+  const agg = aggregateUsage(catInvocations, activeCats);
 
   return (
     <div className="px-5 py-2.5 bg-gradient-to-r from-opus-bg via-codex-bg to-gemini-bg border-b border-cafe">
       <div className="flex items-center gap-4">
         <span className="text-sm font-medium text-cafe-secondary">独立观点采样中</span>
-        {displayCats.map((catId) => (
+        {activeCats.map((catId) => (
           <CatStatusCard
             key={catId}
             catId={catId}

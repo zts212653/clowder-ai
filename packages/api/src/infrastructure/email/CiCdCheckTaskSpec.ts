@@ -1,5 +1,5 @@
 /**
- * F139/F320: CiCdCheckTaskSpec — wraps CiCdCheckPoller.pollOne as a TaskSpec_P1.
+ * F139 + clowder-ai#320: CiCdCheckTaskSpec — wraps CiCdCheckPoller.pollOne as a TaskSpec_P1.
  *
  * #320: Reads from unified TaskStore (kind=pr_tracking) instead of PrTrackingStore.
  *

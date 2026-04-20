@@ -1742,4 +1742,106 @@ describe('background thread socket handling', () => {
       expect(ts.hasActiveInvocation).toBe(true); // codex still active
     });
   });
+
+  describe('regression: background completion clears stale targetCats', () => {
+    it('codex completion clears targetCats so subsequent dare start is clean', () => {
+      const store = useChatStore.getState();
+      // codex is running with a tracked invocation slot
+      store.addThreadActiveInvocation('thread-bg', 'inv-codex-1', 'codex', 'execute');
+      store.replaceThreadTargetCats('thread-bg', ['codex']);
+      store.updateThreadCatStatus('thread-bg', 'codex', 'streaming');
+
+      // codex finishes — done(isFinal) with invocationId
+      simulateBackgroundMessage({
+        type: 'done',
+        catId: 'codex',
+        threadId: 'thread-bg',
+        invocationId: 'inv-codex-1',
+        isFinal: true,
+        timestamp: Date.now(),
+      });
+
+      // targetCats must be empty — no stale codex lingering
+      const ts = useChatStore.getState().getThreadState('thread-bg');
+      expect(ts.targetCats).toEqual([]);
+      expect(ts.catStatuses).toEqual({});
+
+      // Now dare starts via queue auto-dequeue (uses setThreadTargetCats merge)
+      store.setThreadTargetCats('thread-bg', ['dare']);
+      const ts2 = useChatStore.getState().getThreadState('thread-bg');
+      // Must be ['dare'] only, not ['codex', 'dare']
+      expect(ts2.targetCats).toEqual(['dare']);
+    });
+
+    it('multi-cat: catA done does NOT clear targetCats while catB still active', () => {
+      const store = useChatStore.getState();
+      store.addThreadActiveInvocation('thread-bg', 'inv-opus-1', 'opus', 'execute');
+      store.addThreadActiveInvocation('thread-bg', 'inv-codex-1', 'codex', 'execute');
+      store.replaceThreadTargetCats('thread-bg', ['opus', 'codex']);
+
+      // opus finishes — one slot remains
+      simulateBackgroundMessage({
+        type: 'done',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        invocationId: 'inv-opus-1',
+        isFinal: true,
+        timestamp: Date.now(),
+      });
+
+      const ts = useChatStore.getState().getThreadState('thread-bg');
+      // codex slot still active — targetCats must NOT be cleared
+      expect(Object.keys(ts.activeInvocations)).toHaveLength(1);
+      expect(ts.targetCats).toEqual(['opus', 'codex']);
+    });
+
+    it('last cat done clears targetCats in multi-cat scenario', () => {
+      const store = useChatStore.getState();
+      store.addThreadActiveInvocation('thread-bg', 'inv-opus-1', 'opus', 'execute');
+      store.addThreadActiveInvocation('thread-bg', 'inv-codex-1', 'codex', 'execute');
+      store.replaceThreadTargetCats('thread-bg', ['opus', 'codex']);
+
+      // opus finishes first
+      simulateBackgroundMessage({
+        type: 'done',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        invocationId: 'inv-opus-1',
+        isFinal: true,
+        timestamp: Date.now(),
+      });
+
+      // codex finishes — last slot removed
+      simulateBackgroundMessage({
+        type: 'done',
+        catId: 'codex',
+        threadId: 'thread-bg',
+        invocationId: 'inv-codex-1',
+        isFinal: true,
+        timestamp: Date.now(),
+      });
+
+      const ts = useChatStore.getState().getThreadState('thread-bg');
+      expect(ts.targetCats).toEqual([]);
+      expect(ts.catStatuses).toEqual({});
+    });
+
+    it('legacy path without activeInvocations does not clear targetCats', () => {
+      // Simulate legacy done where no activeInvocations were ever set
+      useChatStore.getState().updateThreadCatStatus('thread-bg', 'opus', 'streaming');
+
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: 'final',
+        isFinal: true,
+        timestamp: Date.now(),
+      });
+
+      // catStatus should still be 'done' — not wiped
+      const ts = useChatStore.getState().getThreadState('thread-bg');
+      expect(ts.catStatuses.opus).toBe('done');
+    });
+  });
 });

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { fetchStudyTimeline, type TimelineEntry } from '@/utils/signals-api';
+import { HubIcon } from '../hub-icons';
 
 function formatDate(iso: string): string {
   const d = Date.parse(iso);
@@ -24,10 +25,10 @@ function groupByDate(entries: readonly TimelineEntry[]): Map<string, TimelineEnt
   return groups;
 }
 
-const ARTIFACT_ICONS: Record<string, string> = {
-  note: '📝',
-  podcast: '🎙️',
-  'research-report': '📊',
+const ARTIFACT_ICON_NAMES: Record<string, string> = {
+  note: 'notebook',
+  podcast: 'podcast',
+  'research-report': 'bar-chart',
 };
 
 interface StudyTimelineProps {
@@ -107,7 +108,8 @@ export function StudyTimeline({ days = 7 }: StudyTimelineProps) {
                         key={a.id}
                         className="rounded-full bg-cafe-surface-elevated px-1.5 py-0.5 text-[10px] text-cafe-secondary"
                       >
-                        {ARTIFACT_ICONS[a.kind] ?? '📄'} {a.kind} · {a.state}
+                        <HubIcon name={ARTIFACT_ICON_NAMES[a.kind] ?? 'file-text'} className="inline h-3 w-3" />{' '}
+                        {a.kind} · {a.state}
                       </span>
                     ))}
                   </div>
@@ -120,7 +122,7 @@ export function StudyTimeline({ days = 7 }: StudyTimelineProps) {
                         href={`/thread/${encodeURIComponent(t.threadId)}`}
                         className="rounded-full bg-opus-bg px-1.5 py-0.5 text-[10px] text-opus-dark hover:underline"
                       >
-                        💬 {t.threadId.slice(0, 12)}...
+                        <HubIcon name="message-circle" className="inline h-3 w-3" /> {t.threadId.slice(0, 12)}...
                       </a>
                     ))}
                   </div>

@@ -6,9 +6,11 @@ doc_kind: spec
 created: 2026-03-28
 ---
 
-# F146: MCP Marketplace Control Plane — 一键接入 + 多生态聚合
+# F146: Capability Marketplace Control Plane — 一键接入 + 多生态聚合
 
-> **Status**: spec | **Owner**: Maine Coon + Ragdoll | **Priority**: P1
+> **Scope 扩展（2026-04-18 team lead拍板）**：不止 MCP，覆盖 plugin / skill / tool / connector。UI 标签"能力市场"。
+
+> **Status**: in-progress | **Owner**: Maine Coon + Ragdoll | **Priority**: P1
 
 ## team lead愿景
 
@@ -82,7 +84,7 @@ L3 不直接写入 L1，内部拆成三个状态面：
 - Phase A-B 的实现边界收敛稿
 - F129 Pack ↔ Marketplace 条目映射契约（字段与 installPlan 对齐）
 
-### Phase A: 能力中心写路径（One-click Add/Remove MCP）
+### Phase A: 能力中心写路径（One-click Add/Remove MCP） ✅
 
 在 Hub 能力中心新增 MCP 管理能力：
 
@@ -108,14 +110,27 @@ L3 不直接写入 L1，内部拆成三个状态面：
 - 写入能力必须串行化（锁）或带版本号 CAS，避免双猫并发安装导致覆盖
 - 所有写操作都通过同一编排入口，保证 `capabilities.json`、CLI 配置、probe 状态一致
 
-### Phase B: Marketplace 聚合（4 生态）
+### Phase B: Marketplace 聚合（4 生态）✅
 
-新增 Marketplace Adapter 层，首期即覆盖四家：
+**核心原则（Phase R 结论）**：搜索统一，安装分流。
 
-1. **Codex plugin directory adapter**
-2. **Claude plugin marketplace adapter**
-3. **OpenClaw / ClawHub adapter**
-4. **Antigravity adapter（首期至少完成 discovery + 与 pencil resolver 一致性约束）**
+- **L1 搜索层**统一返回四家 catalog 元数据
+- **L2 安装层**按 `installPlan.mode` 四条通道分流：`direct_mcp | delegated_cli | manual_file | manual_ui`
+- **L3 绑定层**按需加载安全字段（hash/policy/secret_refs）
+
+**接入顺序（修正）**：Claude → Codex → OpenClaw → Antigravity(read-only)
+- Codex 已确认 CLI + JSON-RPC 双通道，字段格式与 Claude 最接近
+- OpenClaw bundle 一词多义需额外 adapter 逻辑，排在 Codex 后
+- Antigravity 仍在 preview，先做 read-only adapter + manual handoff
+
+**三层字段递增**：
+- L1（搜索卡片）：artifact_kind, display_name, ecosystem, source_locator, trust_level, component_summary, transport, artifact_id — 8 个展示字段
+- L2（安装）：+ version_ref, install_scope, tool_policy, installPlan — 加安装字段
+- L3（绑定）：+ binding_snapshot_hash, policy_verdict, secret_refs, publisher_identity — 加安全字段
+
+**Auth 不碰**——遇到需动态授权的包，生成带占位符的配置，Auth 交给引擎原生流。
+
+**字段级映射不可行**——同名不同义（OpenClaw `mcp` 一词两义）、同厂不统一（`serverUrl` vs `httpUrl`）、字段拓扑不同（Codex 拆四份 env）。Adapter 必须按 `host_schema_family` 分模板。
 
 统一输出模型：
 - `packageId`
@@ -138,13 +153,17 @@ L3 不直接写入 L1，内部拆成三个状态面：
 3. 全部安装写审计日志（who/when/what/from）
 4. 所有新增 MCP 必须经过 `mcp:doctor` 验证后才标 ready
 
-供应链硬门禁（首期必须）：
+供应链硬门禁（首期必须，Phase R 调研补充）：
 
 1. 版本不可变 pin（禁止默认漂移到 `@latest`）
 2. 安装来源路径边界校验（白名单源 + 禁止危险 spec）
 3. 禁止 install-time scripts 自动执行（默认 deny）
 4. schema validation 先于执行（manifest/entry 校验不过不安装）
 5. 声明态 vs 实测态 diff gate（声明可用但 probe 失败不得标 ready）
+6. `buildInstallPreview` 红字展示完整 command + args（防 STDIO 注入）— Phase R 发现
+7. `secret_refs` 分离：env 只存 schema `{"API_KEY": "required"}`，运行时从 .env 注入（env 值不进 git）— Phase R 发现
+8. Change detection + re-approval：工具描述变更触发重审 — Phase R 两路共识
+9. 环境预检（Pre-flight check：目标节点是否有 node/python/uvx）— Phase R 补充
 
 Skill 内容安全（防下毒）：
 
@@ -199,43 +218,43 @@ Skill 内容安全（防下毒）：
 
 ## Acceptance Criteria
 
-### Phase R（Research Mode B）
-- [ ] AC-R1: 形成 Claude/Codex/OpenClaw/Antigravity 四方 schema 对照表
-- [ ] AC-R2: 明确三类能力边界：可自动安装 / 需人工确认 / 仅可发现
-- [ ] AC-R3: 给出统一 adapter 最小字段集（必填）+ 各生态扩展字段（可选）
-- [ ] AC-R4: 形成“先做什么、不做什么”的实施收敛结论并回写 F146
-- [ ] AC-R5: 外部文档 URL 逐条验真（可访问 + 内容匹配），形成证据表
-- [ ] AC-R6: 形成 F129 Pack ↔ Marketplace 条目映射契约（kind/metadata/installPlan 对齐）
+### Phase R（Research Mode B）✅
+- [x] AC-R1: 形成 Claude/Codex/OpenClaw/Antigravity 四方 schema 对照表
+- [x] AC-R2: 明确三类能力边界：可自动安装 / 需人工确认 / 仅可发现
+- [x] AC-R3: 给出统一 adapter 最小字段集（必填）+ 各生态扩展字段（可选）
+- [x] AC-R4: 形成”先做什么、不做什么”的实施收敛结论并回写 F146
+- [x] AC-R5: 外部文档 URL 逐条验真（可访问 + 内容匹配），形成证据表
+- [x] AC-R6: 形成 F129 Pack ↔ Marketplace 条目映射契约（kind/metadata/installPlan 对齐）
 
-### Phase A（能力中心写路径）
-- [ ] AC-A1: Hub 可通过 UI 新增 MCP（无需手改 `capabilities.json`）
-- [ ] AC-A2: Hub 可通过 UI 删除 MCP，并触发配置重编排
-- [ ] AC-A3: 新增 MCP 后自动触发 `generateCliConfigs` + `mcp:doctor` 探测
-- [ ] AC-A4: 所有 MCP 写操作有审计日志（用户、时间、变更 diff）
-- [ ] AC-A5: 并发写入安全（锁或 CAS）可验证，双写场景不丢配置
-- [ ] AC-A6: `install preview` 可显示“将写入项 + 将触发探测 + 风险提示”，用户确认后才执行
+### Phase A（能力中心写路径）✅
+- [x] AC-A1: Hub 可通过 UI 新增 MCP（无需手改 `capabilities.json`）
+- [x] AC-A2: Hub 可通过 UI 删除 MCP，并触发配置重编排
+- [x] AC-A3: 新增 MCP 后自动触发 `generateCliConfigs` + `mcp:doctor` 探测
+- [x] AC-A4: 所有 MCP 写操作有审计日志（用户、时间、变更 diff）
+- [x] AC-A5: 并发写入安全（锁或 CAS）可验证，双写场景不丢配置
+- [x] AC-A6: `install preview` 可显示”将写入项 + 将触发探测 + 风险提示”，用户确认后才执行
 
-### Phase B（Marketplace 聚合）
-- [ ] AC-B1: 支持统一搜索接口返回 Codex/Claude/OpenClaw/Antigravity 四方结果
-- [ ] AC-B2: 结果带 `trustLevel`，可按 `official/verified/community` 过滤
-- [ ] AC-B3: 能把 marketplace 条目映射成可执行 `installPlan`
-- [ ] AC-B4: 支持统一搜索接口返回 Antigravity 结果（至少 discovery + metadata）
-- [ ] AC-B5: Antigravity 结果与现有 `pencil` resolver 策略保持一致性（不互相冲突）
-- [ ] AC-B6: 统一搜索结果支持 `kind=pack`，可发现并安装来自 F129 产出的 Pack
+### Phase B（Marketplace 聚合）✅
+- [x] AC-B1: 支持统一搜索接口返回 Codex/Claude/OpenClaw/Antigravity 四方结果
+- [x] AC-B2: 结果带 `trustLevel`，可按 `official/verified/community` 过滤
+- [x] AC-B3: 能把 marketplace 条目映射成可执行 `installPlan`
+- [x] AC-B4: 支持统一搜索接口返回 Antigravity 结果（至少 discovery + metadata）
+- [x] AC-B5: Antigravity 结果与现有 `pencil` resolver 策略保持一致性（不互相冲突）
+- [x] AC-B6: 统一搜索结果支持 `kind=pack`，可发现并安装来自 F129 产出的 Pack
 
-### Phase C（治理与版本）
-- [ ] AC-C1: 默认策略阻止一键安装 `community` 包（需二次确认）
-- [ ] AC-C2: 安装后写入版本锁（source/version/channel）
-- [ ] AC-C3: `mcp:doctor` 能显示“已安装但未就绪”的具体原因
-- [ ] AC-C4: 禁止未通过 probe 的 MCP 直接显示 ready
-- [ ] AC-C5: 禁止 install-time scripts（除非显式审批）
-- [ ] AC-C6: 声明态与实测态出现 diff 时强制告警并阻断 ready
-- [ ] AC-C7: 外来 SKILL.md 安装时必须经过内容安全扫描（prompt injection 检测），不通过则标 `quarantined`
-- [ ] AC-C8: 外来 skill 权限隔离（不允许访问写路径、不允许触发其他 skill、工具调用需逐次确认）
-- [ ] AC-C9: quarantined skill 只有team lead或审核猫显式 approve 后才能激活
-- [ ] AC-C10: 外来 skill 安装时记录不可变指纹（source + version + hash/signature），运行前校验一致性，不一致自动降级 `quarantined`
-- [ ] AC-C11: 外来 skill 首次运行默认最小权限（dry-run/只读），涉及写文件、网络外发、高危工具必须二次确认
-- [ ] AC-C12: 一键 `revoke`（全端停用 + 清理挂载 + 禁止再次激活），60s 内传播到 Hub/CLI/connector 侧
+### Phase C（治理与版本）✅
+- [x] AC-C1: 默认策略阻止一键安装 `community` 包（需二次确认）
+- [x] AC-C2: 安装后写入版本锁（source/version/channel）
+- [x] AC-C3: `mcp:doctor` 能显示”已安装但未就绪”的具体原因
+- [x] AC-C4: 禁止未通过 probe 的 MCP 直接显示 ready
+- [x] AC-C5: 禁止 install-time scripts（除非显式审批）
+- [x] AC-C6: 声明态与实测态出现 diff 时强制告警并阻断 ready
+- [x] AC-C7: 外来 SKILL.md 安装时必须经过内容安全扫描（prompt injection 检测），不通过则标 `quarantined`
+- [x] AC-C8: 外来 skill 权限隔离（不允许访问写路径、不允许触发其他 skill、工具调用需逐次确认）
+- [x] AC-C9: quarantined skill 只有team lead或审核猫显式 approve 后才能激活
+- [x] AC-C10: 外来 skill 安装时记录不可变指纹（source + version + hash/signature），运行前校验一致性，不一致自动降级 `quarantined`
+- [x] AC-C11: 外来 skill 首次运行默认最小权限（dry-run/只读），涉及写文件、网络外发、高危工具必须二次确认
+- [x] AC-C12: 一键 `revoke`（全端停用 + 清理挂载 + 禁止再次激活），60s 内传播到 Hub/CLI/connector 侧
 
 ### Phase D（联动体验）
 - [ ] AC-D1: Skills 页可从 `requires_mcp missing` 直接发起补齐
@@ -275,6 +294,11 @@ Skill 内容安全（防下毒）：
 | KD-5 | Antigravity 不是“可选”，首期必须纳入 discovery 与一致性约束 | 我们已有活跃 `pencil` 生态，不能与 F145 resolver 脱节 | 2026-03-28 |
 | KD-6 | Runtime Connect / OpenAI connectors 在本 feature 里降为 P2 | 对我们当前主路径不是首要堵点，避免 Phase A 扩 scope | 2026-03-28 |
 | KD-7 | 承接 F129 的 Marketplace/Registry owner 职责，Pack 纳入 L3 分发统一模型 | 避免双 Feature 重复建设分发层，明确 owner/consumer 边界 | 2026-04-04 |
+| KD-8 | 字段级直接映射不可行，Adapter 按 `host_schema_family` 分模板 | Phase R 发现同名不同义、同厂不统一、字段拓扑不同 | 2026-04-17 |
+| KD-9 | 接入顺序修正：Claude → Codex → OpenClaw → Antigravity(read-only) | Codex CLI+JSON-RPC 双通道确认，字段与 Claude 最接近；OpenClaw bundle 语义歧义需额外 adapter | 2026-04-17 |
+| KD-10 | Phase B 只做 MCP Server 类能力，Plugin/Skill 做 delegated 降级展示，Apps/Connectors 搁置 | Phase R 两路共识：四家仅 MCP 是公共交集 | 2026-04-17 |
+| KD-11 | trust_level 分级不够用，必须加 version pin + hash + change detection + re-approval | Phase R 假设 5 被反对，两路+规范一致 | 2026-04-17 |
+| KD-12 | 统一 Auth 握手明确搁置，交给各引擎原生流 | 鉴权生命周期异构，Phase R 两路共识 | 2026-04-17 |
 
 ## Review Gate
 

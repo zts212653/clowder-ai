@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 
 describe('GuideOfferPolicy', async () => {
@@ -276,5 +277,14 @@ describe('Explicit trigger end-to-end: /guide resolves by ID', async () => {
       threadId: 'test-thread',
     });
     assert.equal(ctx.candidate, undefined);
+  });
+});
+
+describe('GuideRoutingInterceptor structure guards', () => {
+  test('GuideRoutingInterceptor.ts stays under 350 lines (hard limit)', () => {
+    const sourcePath = new URL('../src/domains/guides/GuideRoutingInterceptor.ts', import.meta.url);
+    const source = readFileSync(sourcePath, 'utf-8');
+    const lineCount = source.split('\n').length;
+    assert.ok(lineCount <= 350, `GuideRoutingInterceptor.ts exceeds 350 lines: ${lineCount}`);
   });
 });

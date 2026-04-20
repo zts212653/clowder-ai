@@ -43,6 +43,24 @@ function runSourceOnly({ sandboxDir, env = {}, extraArgs = [] }) {
   });
 }
 
+function runApiLaunchCommand({ sandboxDir, env = {}, extraArgs = [] }) {
+  const command = [
+    `source scripts/start-dev.sh --source-only ${extraArgs.join(' ')}`,
+    'printf "%s\\n" "$(api_launch_command)"',
+  ].join('; ');
+
+  return spawnSync('bash', ['-lc', command], {
+    cwd: sandboxDir,
+    env: {
+      PATH: process.env.PATH ?? '',
+      HOME: process.env.HOME ?? '',
+      TERM: process.env.TERM ?? 'xterm-256color',
+      ...env,
+    },
+    encoding: 'utf8',
+  });
+}
+
 describe('start-dev strict profile isolation', () => {
   it('ignores inherited shell env for profile-controlled vars when strict mode is on', () => {
     const sandboxDir = createSandbox();
@@ -71,8 +89,8 @@ describe('start-dev strict profile isolation', () => {
       assert.match(result.stdout, /PROXY=0/);
       assert.match(result.stdout, /TTS=0/);
       assert.match(result.stdout, /LLM=0/);
-      assert.match(result.stdout, /EMBED=/);
-      assert.match(result.stdout, /TTL=86400/);
+      assert.match(result.stdout, /EMBED=0/);
+      assert.match(result.stdout, /TTL=0/);
       assert.match(result.stdout, /REDIS_PROFILE=opensource/);
     } finally {
       rmSync(sandboxDir, { recursive: true, force: true });
@@ -120,9 +138,89 @@ describe('start-dev strict profile isolation', () => {
       assert.equal(result.status, 0, result.stderr || result.stdout);
       assert.match(result.stdout, /PROFILE=opensource/);
       assert.match(result.stdout, /ASR=1/);
-      assert.match(result.stdout, /EMBED=/);
+      assert.match(result.stdout, /EMBED=0/);
       assert.match(result.stdout, /TTL=123/);
       assert.match(result.stdout, /REDIS_PROFILE=custom/);
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it('derives EMBED_ENABLED=1 from EMBED_MODE=on when no explicit override is set', () => {
+    const sandboxDir = createSandbox('EMBED_MODE=on\n');
+    try {
+      const result = runSourceOnly({
+        sandboxDir,
+        env: {
+          CAT_CAFE_STRICT_PROFILE_DEFAULTS: '1',
+        },
+        extraArgs: ['--', '--profile=opensource'],
+      });
+
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.match(result.stdout, /PROFILE=opensource/);
+      assert.match(result.stdout, /EMBED=1/);
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it('respects explicit EMBED_ENABLED=0 override even when EMBED_MODE=on', () => {
+    const sandboxDir = createSandbox('EMBED_MODE=on\nEMBED_ENABLED=0\n');
+    try {
+      const result = runSourceOnly({
+        sandboxDir,
+        env: {
+          CAT_CAFE_STRICT_PROFILE_DEFAULTS: '1',
+        },
+        extraArgs: ['--', '--profile=opensource'],
+      });
+
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.match(result.stdout, /PROFILE=opensource/);
+      assert.match(result.stdout, /EMBED=0/);
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it('marks default dev API launches with NODE_ENV=development for child process semantics', () => {
+    const sandboxDir = createSandbox();
+    try {
+      const result = runApiLaunchCommand({ sandboxDir });
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.match(result.stdout, /NODE_ENV=development/, result.stdout);
+      assert.match(result.stdout, /pnpm run dev/, result.stdout);
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it('marks opensource profile API launches WITHOUT --prod-web as NODE_ENV=development (dev:direct path)', () => {
+    const sandboxDir = createSandbox();
+    try {
+      const result = runApiLaunchCommand({
+        sandboxDir,
+        env: { CAT_CAFE_STRICT_PROFILE_DEFAULTS: '1' },
+        extraArgs: ['--', '--profile=opensource'],
+      });
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.match(result.stdout, /NODE_ENV=development/, result.stdout);
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it('marks --prod-web + --profile=opensource API launches as NODE_ENV=production (runtime/start:direct path)', () => {
+    const sandboxDir = createSandbox();
+    try {
+      const result = runApiLaunchCommand({
+        sandboxDir,
+        env: { CAT_CAFE_STRICT_PROFILE_DEFAULTS: '1' },
+        extraArgs: ['--prod-web', '--', '--profile=opensource'],
+      });
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.match(result.stdout, /NODE_ENV=production/, result.stdout);
     } finally {
       rmSync(sandboxDir, { recursive: true, force: true });
     }
@@ -180,6 +278,7 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
       ps1.includes('GetEnvironmentVariable'),
       'start-windows.ps1 must check existing env before applying profile default',
     );
+    assert.ok(ps1.includes('embed-server.ps1'), 'start-windows.ps1 must launch embed-server.ps1 for local embedding');
   });
 
   it('start-windows.ps1 reapplies profile defaults inside Start-Job after .env reload', () => {
@@ -214,6 +313,16 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
 
     assert.ok(ps1.includes('Start-Job'), 'start-windows.ps1 must use Start-Job (which inherits parent process env)');
   });
+
+  it('start-windows.ps1 assigns NODE_ENV inside the API Start-Job', () => {
+    const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+    const jobBlocks = ps1.match(/Start-Job[\s\S]*?-ScriptBlock\s*\{([\s\S]*?)\}\s*-ArgumentList/g);
+    assert.ok(jobBlocks && jobBlocks.length > 0, 'start-windows.ps1 must have Start-Job blocks');
+    const apiJobBlock = jobBlocks.find((b) => b.includes('-Name "api"'));
+    assert.ok(apiJobBlock, 'start-windows.ps1 must have an API Start-Job block');
+    assert.match(ps1, /NODE_ENV\s*=\s*\$apiNodeEnv/, 'Windows runtime env overrides must include NODE_ENV');
+    assert.match(apiJobBlock, /runtimeEnvOverrides/, 'API job must consume runtimeEnvOverrides');
+  });
 });
 
 describe('sync-to-opensource public launch transforms', { skip: !existsSync(SYNC_SCRIPT) }, () => {
@@ -239,10 +348,19 @@ describe('sync-to-opensource public launch transforms', { skip: !existsSync(SYNC
     try {
       const pkg = JSON.parse(readFileSync(resolve(exportDir, 'package.json'), 'utf8'));
       const runtimeScript = readFileSync(resolve(exportDir, 'scripts/runtime-worktree.sh'), 'utf8');
+      const embedScript = readFileSync(resolve(exportDir, 'scripts/embed-server.sh'), 'utf8');
+      const embedPsScript = readFileSync(resolve(exportDir, 'scripts/embed-server.ps1'), 'utf8');
+      const publicEnv = readFileSync(resolve(exportDir, '.env.example'), 'utf8');
+      const setupDoc = readFileSync(resolve(exportDir, 'SETUP.md'), 'utf8');
 
       assert.match(pkg.scripts['dev:direct'], /start-entry\.mjs dev:direct --profile=opensource/);
       assert.match(pkg.scripts['start:direct'], /start-entry\.mjs start:direct --profile=opensource/);
       assert.equal(existsSync(resolve(exportDir, 'scripts/start-entry.mjs')), true);
+      assert.equal(existsSync(resolve(exportDir, 'scripts/embed-api.py')), true);
+      assert.equal(existsSync(resolve(exportDir, 'scripts/embed-server.sh')), true);
+      assert.equal(existsSync(resolve(exportDir, 'scripts/embed-server.ps1')), true);
+      assert.match(embedScript, /sentence-transformers/);
+      assert.match(embedPsScript, /sentence-transformers/);
       assert.equal(
         pkg.scripts['check:start-profile-isolation'],
         'node --test scripts/start-dev-profile-isolation.test.mjs',
@@ -251,6 +369,8 @@ describe('sync-to-opensource public launch transforms', { skip: !existsSync(SYNC
       assert.match(pkg.scripts.check, /check:start-profile-isolation/);
       assert.equal(existsSync(resolve(exportDir, 'scripts/download-source-overrides.sh')), true);
       assert.equal(existsSync(resolve(exportDir, 'scripts/start-dev-profile-isolation.test.mjs')), true);
+      assert.match(publicEnv, /EMBED_MODE=off/);
+      assert.match(setupDoc, /EMBED_MODE=on/);
 
       assert.match(
         runtimeScript,

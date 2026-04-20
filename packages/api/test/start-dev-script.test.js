@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -641,11 +641,80 @@ test('api_launch_command uses exec so wait tracks the long-lived server process'
     scriptPath,
     `
 CAT_CAFE_DIRECT_NO_WATCH=1
+PROD_WEB=true
 printf '%s' "$(api_launch_command)"
 `,
   );
 
-  assert.equal(output, 'cd packages/api && exec pnpm run start');
+  assert.equal(output, 'cd packages/api && exec env NODE_ENV=production pnpm run start');
+});
+
+test('api_launch_command routes multiple env assignments through env before pnpm', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const output = runSourceOnlySnippet(
+    scriptPath,
+    `
+CAT_CAFE_DIRECT_NO_WATCH=1
+PROD_WEB=true
+DEBUG_MODE=true
+printf '%s' "$(api_launch_command)"
+`,
+  );
+
+  assert.equal(output, 'cd packages/api && exec env NODE_ENV=production LOG_LEVEL=debug pnpm run start');
+});
+
+test('api_launch_command output is actually executable: pnpm gets invoked with NODE_ENV propagated', () => {
+  // Regression guard for LL-052: string-literal assertions above can't catch
+  // `exec VAR=val pnpm` (no env) because bash would treat VAR=val as the program
+  // name. This test eval()s the command in a bash sandbox with a pnpm shim on
+  // PATH and asserts the shim actually ran with NODE_ENV=production.
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-real-exec-'));
+  const fakeApiDir = join(tempRoot, 'packages', 'api');
+  const shimDir = join(tempRoot, 'bin');
+  const capturePath = join(tempRoot, 'captured.txt');
+
+  try {
+    mkdirSync(fakeApiDir, { recursive: true });
+    mkdirSync(shimDir, { recursive: true });
+    writeFileSync(
+      join(shimDir, 'pnpm'),
+      `#!/usr/bin/env bash\nprintf 'NODE_ENV=%s\\nARGS=%s\\n' "\${NODE_ENV:-<unset>}" "$*" > "${capturePath}"\n`,
+      'utf8',
+    );
+    chmodSync(join(shimDir, 'pnpm'), 0o755);
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e
+source "${scriptPath}" --source-only >/dev/null 2>&1
+trap - EXIT INT TERM
+CAT_CAFE_DIRECT_NO_WATCH=1
+PROD_WEB=true
+cmd=$(api_launch_command)
+cd "${tempRoot}"
+eval "$cmd"`,
+      ],
+      {
+        encoding: 'utf8',
+        env: baseShellEnv({ PATH: `${shimDir}:${process.env.PATH ?? ''}` }),
+      },
+    );
+
+    assert.equal(
+      result.status,
+      0,
+      `bash failed to exec api_launch_command (would catch broken \`exec VAR=val pnpm\` form)\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
+    const captured = readFileSync(capturePath, 'utf8');
+    assert.match(captured, /NODE_ENV=production/, 'NODE_ENV did not propagate to pnpm');
+    assert.match(captured, /ARGS=run start/, 'pnpm args incorrect');
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
 });
 
 test('frontend_launch_command uses exec in production mode so wait tracks next start', () => {

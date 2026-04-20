@@ -5,9 +5,9 @@
  * Includes high-level POST /api/game/start for frontend-driven game creation.
  */
 
+import { catRegistry } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { getAllCatIdsFromConfig } from '../config/cat-config-loader.js';
 import { createGameDriver } from '../domains/cats/services/game/createGameDriver.js';
 import type { GameDriver } from '../domains/cats/services/game/GameDriver.js';
 import { GameOrchestrator } from '../domains/cats/services/game/GameOrchestrator.js';
@@ -156,8 +156,9 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (app, opt
       return { error: 'detectiveCatId is required for detective mode' };
     }
 
-    // Sanitize catIds against known config
-    const allCatIds = getAllCatIdsFromConfig();
+    // Sanitize catIds against runtime registry (catRegistry is the runtime truth,
+    // while getAllCatIdsFromConfig only reads static config and misses runtime-registered cats)
+    const allCatIds = catRegistry.getAllIds() as string[];
     const sanitized = sanitizeCatIds(rawCatIds, allCatIds);
     const catIds = sanitized.length > 0 ? sanitized : [...allCatIds];
 
@@ -170,46 +171,53 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (app, opt
       reply.status(401);
       return { error: 'Could not determine user identity' };
     }
-    const seats = buildGameSeats({ humanRole, userId, catIds, playerCount: clampedCount });
 
-    // Validate detectiveCatId maps to an actual seat BEFORE creating any persistent resources
-    let resolvedDetectiveSeatId: import('@cat-cafe/shared').SeatId | undefined;
-    if (humanRole === 'detective' && detectiveCatId) {
-      const seat = seats.find((s) => s.actorId === detectiveCatId);
-      if (!seat) {
-        reply.status(400);
-        return { error: 'detectiveCatId does not match any seat in this game' };
-      }
-      resolvedDetectiveSeatId = seat.seatId;
-    }
-
-    // Create independent game thread with play mode (Layer 1 info isolation, KD-40/AC-I9)
-    const ts = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }).replace(' ', '-').replaceAll(':', '');
-    const gameTitle = `狼人杀 — ${clampedCount}人局 (${ts})`;
-    const gameThread = await threadStore.create(userId, gameTitle, `games/${gameType}`);
-    const gameThreadId = gameThread.id;
-    await threadStore.updateThinkingMode(gameThreadId, 'play');
-    await threadStore.updatePin(gameThreadId, true);
-
-    // Store a system message in the game thread for context
-    await appendGameSystemMessage({
-      threadId: gameThreadId,
-      content: `🎮 ${gameTitle} 开始`,
-      messageStore,
-      socketManager,
-    });
-
-    // WerewolfLobby for role assignment, then orchestrator for persistence + broadcast
-    const lobby = new WerewolfLobby();
-    const lobbyRuntime = lobby.createLobby({
-      threadId: gameThreadId,
-      playerCount: clampedCount,
-      players: seats.map((s) => ({ actorType: s.actorType, actorId: s.actorId })),
-    });
-    lobby.startGame(lobbyRuntime);
-
+    // Wrap seat-building through game creation in try/catch so descriptive errors
+    // (e.g. "Not enough cats") reach the frontend instead of generic 500.
     let gameRuntime;
+    let gameThreadId: string;
     try {
+      const seats = buildGameSeats({ humanRole, userId, catIds, playerCount: clampedCount });
+
+      // Validate detectiveCatId maps to an actual seat BEFORE creating any persistent resources
+      let resolvedDetectiveSeatId: import('@cat-cafe/shared').SeatId | undefined;
+      if (humanRole === 'detective' && detectiveCatId) {
+        const seat = seats.find((s) => s.actorId === detectiveCatId);
+        if (!seat) {
+          reply.status(400);
+          return { error: 'detectiveCatId does not match any seat in this game' };
+        }
+        resolvedDetectiveSeatId = seat.seatId;
+      }
+
+      // Create independent game thread with play mode (Layer 1 info isolation, KD-40/AC-I9)
+      const ts = new Date()
+        .toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' })
+        .replace(' ', '-')
+        .replaceAll(':', '');
+      const gameTitle = `狼人杀 — ${clampedCount}人局 (${ts})`;
+      const gameThread = await threadStore.create(userId, gameTitle, `games/${gameType}`);
+      gameThreadId = gameThread.id;
+      await threadStore.updateThinkingMode(gameThreadId, 'play');
+      await threadStore.updatePin(gameThreadId, true);
+
+      // Store a system message in the game thread for context
+      await appendGameSystemMessage({
+        threadId: gameThreadId,
+        content: `🎮 ${gameTitle} 开始`,
+        messageStore,
+        socketManager,
+      });
+
+      // WerewolfLobby for role assignment, then orchestrator for persistence + broadcast
+      const lobby = new WerewolfLobby();
+      const lobbyRuntime = lobby.createLobby({
+        threadId: gameThreadId,
+        playerCount: clampedCount,
+        players: seats.map((s) => ({ actorType: s.actorType, actorId: s.actorId })),
+      });
+      lobby.startGame(lobbyRuntime);
+
       gameRuntime = await orchestrator.startGame({
         threadId: gameThreadId,
         definition: lobbyRuntime.definition,

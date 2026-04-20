@@ -13,6 +13,20 @@ export interface EvidenceSearchParams {
   limit?: number;
 }
 
+/** AC-K2: passage shape matches backend evidence-helpers.ts EvidenceResult.passages */
+interface PassageItem {
+  passageId: string;
+  content: string;
+  speaker?: string;
+  createdAt?: string;
+  context?: Array<{
+    passageId: string;
+    content: string;
+    speaker?: string;
+    createdAt?: string;
+  }>;
+}
+
 interface SearchResultItem {
   title: string;
   anchor: string;
@@ -20,13 +34,15 @@ interface SearchResultItem {
   confidence: string;
   sourceType: string;
   source?: 'project' | 'global';
-  passages?: Array<{ text: string; score?: number }>;
+  passages?: PassageItem[];
 }
 
 interface SearchResponse {
   results: SearchResultItem[];
   degraded: boolean;
   degradeReason?: string;
+  /** AC-K1: actual mode used when depth=raw forces lexical */
+  effectiveMode?: 'lexical' | 'semantic' | 'hybrid';
 }
 
 export const DEPTH_OPTIONS = [
@@ -70,7 +86,9 @@ export function parseInitialQuery(search: string): string {
 export function buildSearchUrl(params: EvidenceSearchParams): string {
   const sp = new URLSearchParams();
   sp.set('q', params.q);
-  if (params.mode) sp.set('mode', params.mode);
+  // AC-K1: depth=raw forces lexical — passage-level vectors not yet available
+  const effectiveMode = params.depth === 'raw' ? 'lexical' : params.mode;
+  if (effectiveMode) sp.set('mode', effectiveMode);
   if (params.scope) sp.set('scope', params.scope);
   if (params.depth) sp.set('depth', params.depth);
   if (params.dimension) sp.set('dimension', params.dimension);
@@ -82,7 +100,8 @@ export function buildSearchUrl(params: EvidenceSearchParams): string {
  * Pure: parse API response into display items.
  */
 export function parseSearchResults(response: SearchResponse): SearchResultItem[] {
-  if (response.degraded) return [];
+  // AC-K1: only discard results for actual errors, not graceful degradation (raw_lexical_only)
+  if (response.degraded && response.degradeReason === 'evidence_store_error') return [];
   return response.results;
 }
 
@@ -170,14 +189,16 @@ export function EvidenceSearch({ initialQuery }: EvidenceSearchProps = {}) {
         <label className="flex items-center gap-1 text-cafe-secondary">
           检索模式:
           <select
-            value={mode}
+            value={depth === 'raw' ? 'lexical' : mode}
             onChange={(e) => setMode(e.target.value as EvidenceSearchParams['mode'])}
-            className="rounded border border-cafe bg-white px-1.5 py-0.5 text-xs"
+            disabled={depth === 'raw'}
+            className="rounded border border-cafe bg-white px-1.5 py-0.5 text-xs disabled:opacity-50"
           >
             <option value="hybrid">混合</option>
             <option value="lexical">精确</option>
             <option value="semantic">语义</option>
           </select>
+          {depth === 'raw' && <span className="text-[10px] text-amber-600">消息级仅支持精确匹配</span>}
         </label>
         <label className="flex items-center gap-1 text-cafe-secondary">
           范围:
@@ -263,13 +284,31 @@ export function EvidenceSearch({ initialQuery }: EvidenceSearchProps = {}) {
             />
             {item.passages && item.passages.length > 0 && (
               <div className="mt-2 space-y-1 border-l-2 border-cocreator-light pl-2">
-                {item.passages.map((p, i) => (
-                  <p key={`${item.anchor}-p${i}`} className="text-xs text-cafe-secondary italic">
-                    {p.text}
-                    {p.score != null && (
-                      <span className="ml-1 text-[10px] text-cafe-secondary/60">({p.score.toFixed(2)})</span>
+                {item.passages.map((p) => (
+                  <div key={p.passageId} className="text-xs text-cafe-secondary">
+                    {p.speaker && <span className="font-medium text-cafe-black">{p.speaker}: </span>}
+                    <span className="italic">{p.content}</span>
+                    {p.createdAt && (
+                      <span className="ml-1 text-[10px] text-cafe-secondary/60">
+                        {new Date(p.createdAt).toLocaleString('zh-CN', {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
                     )}
-                  </p>
+                    {p.context && p.context.length > 0 && (
+                      <div className="ml-3 mt-0.5 space-y-0.5 border-l border-cafe/30 pl-2">
+                        {p.context.map((ctx) => (
+                          <div key={ctx.passageId} className="text-[11px] text-cafe-secondary/70">
+                            {ctx.speaker && <span className="font-medium">{ctx.speaker}: </span>}
+                            <span>{ctx.content}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
             )}

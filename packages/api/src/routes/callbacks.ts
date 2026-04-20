@@ -29,17 +29,19 @@ import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { scoreKeywordRelevance, tokenizeKeyword } from '../utils/keyword-relevance.js';
 import { getFeatureTagId } from './backlog-doc-import.js';
 import { enqueueA2ATargets, triggerA2AInvocation } from './callback-a2a-trigger.js';
-import { callbackAuthSchema } from './callback-auth-schema.js';
+import { registerCallbackAuthHook, requireCallbackAuth } from './callback-auth-prehandler.js';
 import { registerCallbackBootcampRoutes } from './callback-bootcamp-routes.js';
 import { registerCallbackDocumentRoutes } from './callback-document-routes.js';
-import { EXPIRED_CREDENTIALS_ERROR } from './callback-errors.js';
 import { registerCallbackGameRoutes } from './callback-game-routes.js';
 import { registerCallbackGuideRoutes } from './callback-guide-routes.js';
+import { registerCallbackLarkActionRoutes } from './callback-lark-action-routes.js';
 import { registerCallbackLimbRoutes } from './callback-limb-routes.js';
 import { registerCallbackMemoryRoutes } from './callback-memory-routes.js';
 import { getMultiMentionOrchestrator, registerMultiMentionRoutes } from './callback-multi-mention-routes.js';
+import { deriveCallbackActor, resolveScopedThreadId } from './callback-scope-helpers.js';
 import { registerCallbackTaskRoutes } from './callback-task-routes.js';
 import { registerCallbackThreadCatsRoutes } from './callback-thread-cats-routes.js';
+import { registerCallbackWeComActionRoutes } from './callback-wecom-action-routes.js';
 import { registerCallbackWorkflowSopRoutes } from './callback-workflow-sop-routes.js';
 import { type FeatIndexEntry, readFeatIndexEntries } from './feat-index-doc-import.js';
 import { detectUserMention } from './user-mention.js';
@@ -107,7 +109,7 @@ export interface CallbackRoutesOptions {
   };
 }
 
-const postMessageSchema = callbackAuthSchema.extend({
+const postMessageSchema = z.object({
   content: z.string().min(1).max(50000),
   threadId: z.string().min(1).optional(),
   replyTo: z.string().optional(),
@@ -115,31 +117,31 @@ const postMessageSchema = callbackAuthSchema.extend({
   targetCats: z.array(z.string().min(1)).optional(),
 });
 
-const threadContextQuerySchema = callbackAuthSchema.extend({
+const threadContextQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
   threadId: z.string().min(1).optional(), // F-Swarm-6: optional cross-thread read
   catId: z.string().min(1).optional(),
   keyword: z.string().min(1).optional(),
 });
 
-const listThreadsQuerySchema = callbackAuthSchema.extend({
+const listThreadsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
   activeSince: z.coerce.number().int().min(0).optional(),
   keyword: z.string().trim().min(1).max(200).optional(),
 });
 
-const featIndexQuerySchema = callbackAuthSchema.extend({
+const featIndexQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional(),
   featId: z.string().min(1).optional(),
   query: z.string().min(1).optional(),
 });
 
-const pendingMentionsQuerySchema = callbackAuthSchema.extend({
+const pendingMentionsQuerySchema = z.object({
   // Accept both scalar and repeated query params (Fastify may surface string[]).
   includeAcked: z.union([z.string(), z.array(z.string())]).optional(),
 });
 
-const ackMentionsSchema = callbackAuthSchema.extend({
+const ackMentionsSchema = z.object({
   upToMessageId: z.string().min(1),
 });
 
@@ -250,7 +252,7 @@ const richBlockSchema = z.discriminatedUnion('kind', [
     height: z.number().int().min(50).max(2000).optional(),
   }),
 ]);
-const createRichBlockSchema = callbackAuthSchema.extend({
+const createRichBlockSchema = z.object({
   block: richBlockSchema,
 });
 
@@ -308,27 +310,22 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     queueProcessor,
   } = opts;
 
+  // #476: Unified callback auth — extract credentials from headers, decorate request.callbackAuth
+  registerCallbackAuthHook(app, registry);
+
   app.post('/api/callbacks/post-message', async (request, reply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+    const actor = deriveCallbackActor(record);
+
     const parsed = postMessageSchema.safeParse(request.body);
     if (!parsed.success) {
       reply.status(400);
       return { error: 'Invalid request body', details: parsed.error.issues };
     }
 
-    const {
-      invocationId,
-      callbackToken,
-      content,
-      threadId,
-      replyTo,
-      clientMessageId,
-      targetCats: explicitTargetCats,
-    } = parsed.data;
-    const record = registry.verify(invocationId, callbackToken);
-    if (!record) {
-      reply.status(401);
-      return EXPIRED_CREDENTIALS_ERROR;
-    }
+    const { content, threadId, replyTo, clientMessageId, targetCats: explicitTargetCats } = parsed.data;
+    const { invocationId } = actor;
 
     // Stale callback guard (cloud Codex P1 + 缅因猫 R3): reject callbacks from
     // preempted invocations. A newer invocation for the same thread+cat supersedes.
@@ -337,28 +334,28 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return { status: 'stale_ignored', replyTo, ...(clientMessageId ? { clientMessageId } : {}) };
     }
 
-    let effectiveThreadId = record.threadId;
-    if (threadId && threadId !== record.threadId) {
+    let effectiveThreadId = actor.threadId;
+    if (threadId && threadId !== actor.threadId) {
       // DIAG: Cross-thread routing debug (ghost-thread bug — opus session responding in wrong thread)
       app.log.info(
         {
           invocationId,
-          catId: record.catId,
-          recordThreadId: record.threadId,
+          catId: actor.catId,
+          recordThreadId: actor.threadId,
           requestedThreadId: threadId,
         },
         '[DIAG/ghost-thread] post-message: cross-thread detected',
       );
-      if (!threadStore) {
-        reply.status(503);
-        return { error: 'Thread store not configured for cross-thread posting' };
+      const scoped = await resolveScopedThreadId(actor, threadId, {
+        threadStore,
+        threadStoreMissingError: 'Thread store not configured for cross-thread posting',
+        accessDeniedError: 'Thread access denied',
+      });
+      if (!scoped.ok) {
+        reply.status(scoped.statusCode);
+        return { error: scoped.error };
       }
-      const targetThread = await threadStore.get(threadId);
-      if (!targetThread || targetThread.createdBy !== record.userId) {
-        reply.status(403);
-        return { error: 'Thread access denied' };
-      }
-      effectiveThreadId = threadId;
+      effectiveThreadId = scoped.threadId;
     }
 
     // At-least-once de-duplication: retries with same clientMessageId are treated as duplicate.
@@ -375,28 +372,28 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // F088-J hotfix: Consume any buffered rich blocks (e.g. file blocks from generate_document).
     // CLI agents don't go through route-serial, so the buffer must be consumed here.
     // For route-serial agents, the buffer is already consumed before post_message — this is a no-op.
-    const bufferedBlocks = getRichBlockBuffer().consume(effectiveThreadId, record.catId as string, invocationId);
+    const bufferedBlocks = getRichBlockBuffer().consume(effectiveThreadId, actor.catId as string, invocationId);
 
     // F34-b: Resolve voice blocks (audio with text, no url) before storing
     const synthesizer = getVoiceBlockSynthesizer();
     let richBlocks = [...extractedBlocks, ...bufferedBlocks];
     if (synthesizer && richBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
       try {
-        richBlocks = await synthesizer.resolveVoiceBlocks(richBlocks, record.catId as string);
+        richBlocks = await synthesizer.resolveVoiceBlocks(richBlocks, actor.catId as string);
       } catch (err) {
         app.log.error({ err }, '[callbacks/post-message] Voice block synthesis failed');
       }
     }
 
     // F52: Detect cross-thread post (used for both A2A exemption and crossPost metadata)
-    const isCrossThread = effectiveThreadId !== record.threadId;
+    const isCrossThread = effectiveThreadId !== actor.threadId;
 
     // Parse line-start @mentions (A2A rule: only line-start, strip code blocks, single target)
     // Uses parseA2AMentions instead of resolveTargetsAndIntent to avoid
     // participants/default-opus fallback triggering on non-@ messages (P1-1)
     // and inline @mentions triggering invocations (P1-2).
     // F52: Cross-thread posts skip self-reference filter so @codex can trigger target thread's codex
-    const senderCatId = createCatId(record.catId);
+    const senderCatId = createCatId(actor.catId);
     const contentTargets = parseA2AMentions(storedContent, isCrossThread ? undefined : senderCatId);
     // F098-C1: Merge explicit targetCats with content-parsed mentions (deduped)
     // Filter out invalid catIds (e.g. "default-user") — graceful degradation, not 400
@@ -406,7 +403,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         validExplicitTargets.push(createCatId(id));
       } else {
         app.log.warn(
-          { droppedId: id, catId: record.catId, invocationId },
+          { droppedId: id, catId: actor.catId, invocationId },
           '[callbacks/post-message] Dropped invalid catId from targetCats',
         );
       }
@@ -453,7 +450,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
     const mentionsUser = detectUserMention(storedContent);
     const crossPostExtra = isCrossThread
-      ? { crossPost: { sourceThreadId: record.threadId, sourceInvocationId: invocationId } }
+      ? { crossPost: { sourceThreadId: actor.threadId, sourceInvocationId: invocationId } }
       : {};
     const richExtra = richBlocks.length > 0 ? { rich: { v: 1 as const, blocks: richBlocks } } : {};
     const targetCatsExtra = validExplicitTargets.length ? { targetCats: validExplicitTargets } : {};
@@ -503,8 +500,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const hasA2AMentions = mentions.length > 0 && router && invocationRecordStore && effectiveThreadId;
     const willEnqueueToQueue = hasA2AMentions && opts.invocationQueue;
     const storedMsg = await messageStore.append({
-      userId: record.userId,
-      catId: record.catId,
+      userId: actor.userId,
+      catId: actor.catId,
       content: storedContent,
       mentions,
       ...(mentionsUser ? { mentionsUser } : {}),
@@ -522,7 +519,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     socketManager.broadcastAgentMessage(
       {
         type: 'text',
-        catId: record.catId,
+        catId: actor.catId,
         content: storedContent,
         origin: 'callback',
         messageId: storedMsg.id,
@@ -532,7 +529,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           ? {
               extra: {
                 ...(isCrossThread
-                  ? { crossPost: { sourceThreadId: record.threadId, sourceInvocationId: invocationId } }
+                  ? { crossPost: { sourceThreadId: actor.threadId, sourceInvocationId: invocationId } }
                   : {}),
                 ...(validExplicitTargets.length ? { targetCats: validExplicitTargets } : {}),
               },
@@ -553,7 +550,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       socketManager.broadcastAgentMessage(
         {
           type: 'system_info' as const,
-          catId: record.catId,
+          catId: actor.catId,
           content: JSON.stringify({ type: 'rich_block', block, messageId: storedMsg.id }),
           invocationId,
           timestamp: Date.now(),
@@ -578,7 +575,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         {
           targetCats: mentions,
           content: storedContent,
-          userId: record.userId,
+          userId: actor.userId,
           threadId: effectiveThreadId,
           triggerMessage: storedMsg,
           callerCatId: senderCatId,
@@ -612,7 +609,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         .deliver(
           effectiveThreadId,
           storedContent,
-          record.catId,
+          actor.catId,
           richBlocks.length > 0 ? richBlocks : undefined,
           threadMeta,
           'callback',
@@ -632,18 +629,16 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   });
 
   app.get('/api/callbacks/pending-mentions', async (request, reply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+
     const parsed = pendingMentionsQuerySchema.safeParse(request.query);
     if (!parsed.success) {
       reply.status(400);
-      return { error: 'Missing invocationId or callbackToken' };
+      return { error: 'Invalid query parameters' };
     }
 
-    const { invocationId, callbackToken, includeAcked } = parsed.data;
-    const record = registry.verify(invocationId, callbackToken);
-    if (!record) {
-      reply.status(401);
-      return EXPIRED_CREDENTIALS_ERROR;
-    }
+    const { includeAcked } = parsed.data;
 
     const includeAckedValues = Array.isArray(includeAcked) ? includeAcked : includeAcked ? [includeAcked] : [];
     const shouldIncludeAcked = includeAckedValues.some((v) => v === '1' || v.toLowerCase() === 'true');
@@ -651,7 +646,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // DIAG: ghost-thread bug — log which thread this invocation thinks it owns
     app.log.debug(
       {
-        invocationId,
+        invocationId: record.invocationId,
         catId: record.catId,
         threadId: record.threadId,
       },
@@ -683,18 +678,16 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
   // #77: POST /api/callbacks/ack-mentions — explicit ack with 4-way validation
   app.post('/api/callbacks/ack-mentions', async (request, reply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+
     const parsed = ackMentionsSchema.safeParse(request.body);
     if (!parsed.success) {
       reply.status(400);
       return { error: 'Invalid request body', details: parsed.error.issues };
     }
 
-    const { invocationId, callbackToken, upToMessageId } = parsed.data;
-    const record = registry.verify(invocationId, callbackToken);
-    if (!record) {
-      reply.status(401);
-      return EXPIRED_CREDENTIALS_ERROR;
-    }
+    const { upToMessageId } = parsed.data;
 
     if (!deliveryCursorStore) {
       reply.status(501);
@@ -754,18 +747,16 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   });
 
   app.get('/api/callbacks/thread-context', async (request, reply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+
     const parsed = threadContextQuerySchema.safeParse(request.query);
     if (!parsed.success) {
       reply.status(400);
-      return { error: 'Missing invocationId or callbackToken' };
+      return { error: 'Invalid query parameters' };
     }
 
-    const { invocationId, callbackToken, limit, threadId: overrideThreadId, catId: filterCatId, keyword } = parsed.data;
-    const record = registry.verify(invocationId, callbackToken);
-    if (!record) {
-      reply.status(401);
-      return EXPIRED_CREDENTIALS_ERROR;
-    }
+    const { limit, threadId: overrideThreadId, catId: filterCatId, keyword } = parsed.data;
 
     if (filterCatId && filterCatId !== 'user' && !catRegistry.has(filterCatId)) {
       reply.status(400);
@@ -937,18 +928,16 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   });
 
   app.get('/api/callbacks/list-threads', async (request, reply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+
     const parsed = listThreadsQuerySchema.safeParse(request.query);
     if (!parsed.success) {
       reply.status(400);
       return { error: 'Invalid request query', details: parsed.error.issues };
     }
 
-    const { invocationId, callbackToken, limit, activeSince, keyword } = parsed.data;
-    const record = registry.verify(invocationId, callbackToken);
-    if (!record) {
-      reply.status(401);
-      return EXPIRED_CREDENTIALS_ERROR;
-    }
+    const { limit, activeSince, keyword } = parsed.data;
 
     if (!threadStore) {
       reply.status(503);
@@ -982,18 +971,16 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   });
 
   app.get('/api/callbacks/feat-index', async (request, reply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+
     const parsed = featIndexQuerySchema.safeParse(request.query);
     if (!parsed.success) {
       reply.status(400);
       return { error: 'Invalid request query', details: parsed.error.issues };
     }
 
-    const { invocationId, callbackToken, featId, query, limit } = parsed.data;
-    const record = registry.verify(invocationId, callbackToken);
-    if (!record) {
-      reply.status(401);
-      return EXPIRED_CREDENTIALS_ERROR;
-    }
+    const { featId, query, limit } = parsed.data;
 
     const normalizedFeatId = featId ? normalizeFeatId(featId) : undefined;
     const normalizedQuery = query?.trim().toLowerCase();
@@ -1026,7 +1013,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   // TD091: PR tracking registration via MCP callback
   // Cats call this after `gh pr create` to register the PR for Layer 1 routing.
   // Server resolves threadId from invocation record — cat doesn't need to know it.
-  const registerPrTrackingSchema = callbackAuthSchema.extend({
+  const registerPrTrackingSchema = z.object({
     repoFullName: z
       .string()
       .min(1)
@@ -1048,12 +1035,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return { error: 'Invalid request body', details: parsed.error.issues };
     }
 
-    const { invocationId, callbackToken, repoFullName, prNumber } = parsed.data;
-    const record = registry.verify(invocationId, callbackToken);
-    if (!record) {
-      reply.status(401);
-      return EXPIRED_CREDENTIALS_ERROR;
-    }
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+
+    const { repoFullName, prNumber } = parsed.data;
 
     // Use authoritative catId from invocation record, not caller payload.
     const catId = record.catId;
@@ -1110,18 +1095,16 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return { error: 'Invalid request body', details: parsed.error.issues };
     }
 
-    const { invocationId, callbackToken, block } = parsed.data;
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+
+    const { block } = parsed.data;
+    const { invocationId } = record;
 
     // F34-b P2: audio blocks must have at least url or text (R10: trim whitespace)
     if (block.kind === 'audio' && !block.url?.trim() && !block.text?.trim()) {
       reply.status(400);
       return { error: 'audio block requires url or text' };
-    }
-
-    const record = registry.verify(invocationId, callbackToken);
-    if (!record) {
-      reply.status(401);
-      return EXPIRED_CREDENTIALS_ERROR;
     }
 
     if (!registry.isLatest(invocationId)) {
@@ -1158,7 +1141,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   });
 
   // F079 Gap 4: Cat-initiated vote via MCP callback
-  const startVoteCallbackSchema = callbackAuthSchema.extend({
+  const startVoteCallbackSchema = z.object({
     question: z.string().min(1).max(500),
     options: z.array(z.string().min(1).max(100)).min(2).max(20),
     anonymous: z.boolean().optional().default(false),
@@ -1178,15 +1161,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return { error: 'Invalid request body', details: parsed.error.issues };
     }
 
-    const { invocationId, callbackToken, question, options, anonymous, timeoutSec, voters } = parsed.data;
-    const record = registry.verify(invocationId, callbackToken);
-    if (!record) {
-      reply.status(401);
-      return EXPIRED_CREDENTIALS_ERROR;
-    }
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+
+    const { question, options, anonymous, timeoutSec, voters } = parsed.data;
 
     // P1-2 fix: stale invocation guard (parity with post-message, create-rich-block)
-    if (!registry.isLatest(invocationId)) {
+    if (!registry.isLatest(record.invocationId)) {
       return { status: 'stale_ignored' };
     }
 
@@ -1297,7 +1278,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
   if (taskStore) {
     registerCallbackTaskRoutes(app, {
-      registry,
       taskStore,
       socketManager,
       ...(threadStore ? { threadStore } : {}),
@@ -1306,7 +1286,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
   if (opts.workflowSopStore && opts.backlogStore) {
     registerCallbackWorkflowSopRoutes(app, {
-      registry,
       workflowSopStore: opts.workflowSopStore,
       backlogStore: opts.backlogStore,
     });
@@ -1320,14 +1299,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   // Thread cats discovery for MCP
   if (opts.threadStore && opts.agentRegistry) {
     registerCallbackThreadCatsRoutes(app, {
-      registry,
       threadStore: opts.threadStore,
       agentRegistry: opts.agentRegistry,
     });
   }
 
   await registerCallbackMemoryRoutes(app, {
-    registry,
     evidenceStore: opts.evidenceStore,
     markerQueue: opts.markerQueue,
     reflectionService: opts.reflectionService,
@@ -1337,7 +1314,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   if (opts.limbRegistry) {
     registerCallbackLimbRoutes(app, {
       limbRegistry: opts.limbRegistry,
-      invocationRegistry: registry,
       pairingStore: opts.limbPairingStore,
     });
   }
@@ -1345,7 +1321,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   // F086: Multi-mention orchestration routes
   if (router && invocationRecordStore) {
     registerMultiMentionRoutes(app, {
-      registry,
       messageStore,
       socketManager,
       router,
@@ -1363,8 +1338,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   // F088 Phase J2: Document generation callback routes
   registerCallbackDocumentRoutes(app, { registry, socketManager });
 
+  // F162: WeChat Work enterprise action callback routes
+  registerCallbackWeComActionRoutes(app, { registry });
+
+  // F162 Phase B: Lark/Feishu enterprise action callback routes
+  registerCallbackLarkActionRoutes(app, { registry });
+
   // F101: Game action callback for non-Claude cats (OpenCode/Codex/Gemini)
-  registerCallbackGameRoutes(app, { registry });
+  registerCallbackGameRoutes(app);
 
   // F155: Guide engine — state-validated routes with ThreadStore authority
   if (opts.threadStore) {

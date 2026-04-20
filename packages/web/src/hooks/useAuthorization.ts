@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
 
@@ -15,6 +15,12 @@ export interface AuthPendingRequest {
 }
 
 export type RespondScope = 'once' | 'thread' | 'global';
+
+const pendingCacheByThread = new Map<string, AuthPendingRequest[]>();
+
+export function __resetAuthorizationCacheForTest() {
+  pendingCacheByThread.clear();
+}
 
 /* ── Desktop notification + tab title flash ─────────────── */
 function notifyAuthRequest(data: AuthPendingRequest, catLabel: string) {
@@ -74,11 +80,19 @@ export function useAuthorization(threadId: string) {
       const res = await apiFetch(`/api/authorization/pending?threadId=${threadId}`);
       if (res.ok) {
         const data = await res.json();
-        setPending(data.pending ?? []);
+        const nextPending = data.pending ?? [];
+        pendingCacheByThread.set(threadId, nextPending);
+        setPending(nextPending);
       }
     } catch {
       // Best-effort — don't crash on network error
     }
+  }, [threadId]);
+
+  // Restore cached thread-local pending requests before paint; network revalidation
+  // remains best-effort and can land after the current thread is already visible.
+  useLayoutEffect(() => {
+    setPending(pendingCacheByThread.get(threadId) ?? []);
   }, [threadId]);
 
   // Fetch on mount and thread change
@@ -86,21 +100,28 @@ export function useAuthorization(threadId: string) {
     void fetchPending();
   }, [fetchPending]);
 
-  const respond = useCallback(async (requestId: string, granted: boolean, scope: RespondScope, reason?: string) => {
-    try {
-      const res = await apiFetch('/api/authorization/respond', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId, granted, scope, ...(reason ? { reason } : {}) }),
-      });
-      if (res.ok) {
-        // Optimistically remove from local list
-        setPending((prev) => prev.filter((r) => r.requestId !== requestId));
+  const respond = useCallback(
+    async (requestId: string, granted: boolean, scope: RespondScope, reason?: string) => {
+      try {
+        const res = await apiFetch('/api/authorization/respond', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requestId, granted, scope, ...(reason ? { reason } : {}) }),
+        });
+        if (res.ok) {
+          // Optimistically remove from local list
+          setPending((prev) => {
+            const next = prev.filter((r) => r.requestId !== requestId);
+            pendingCacheByThread.set(threadId, next);
+            return next;
+          });
+        }
+      } catch {
+        // Best-effort
       }
-    } catch {
-      // Best-effort
-    }
-  }, []);
+    },
+    [threadId],
+  );
 
   // Track notified request IDs to avoid duplicate notifications
   const notifiedRef = useRef<Set<string>>(new Set());
@@ -108,10 +129,12 @@ export function useAuthorization(threadId: string) {
   // Socket event: new authorization request
   const handleAuthRequest = useCallback(
     (data: AuthPendingRequest) => {
-      setPending((prev) => {
-        if (prev.some((r) => r.requestId === data.requestId)) return prev;
-        return [...prev, data];
-      });
+      const cached = pendingCacheByThread.get(data.threadId) ?? [];
+      const nextCached = cached.some((r) => r.requestId === data.requestId) ? cached : [...cached, data];
+      pendingCacheByThread.set(data.threadId, nextCached);
+      if (data.threadId === threadId) {
+        setPending(nextCached);
+      }
       // Notify outside updater; dedup via ref to handle concurrent-mode replays
       if (!notifiedRef.current.has(data.requestId)) {
         notifiedRef.current.add(data.requestId);
@@ -119,11 +142,16 @@ export function useAuthorization(threadId: string) {
         notifyAuthRequest(data, label);
       }
     },
-    [getCatById],
+    [getCatById, threadId],
   );
 
   // Socket event: authorization resolved (by another client or tab)
   const handleAuthResponse = useCallback((data: { requestId: string }) => {
+    for (const [cachedThreadId, requests] of pendingCacheByThread.entries()) {
+      const next = requests.filter((r) => r.requestId !== data.requestId);
+      if (next.length === requests.length) continue;
+      pendingCacheByThread.set(cachedThreadId, next);
+    }
     setPending((prev) => prev.filter((r) => r.requestId !== data.requestId));
   }, []);
 

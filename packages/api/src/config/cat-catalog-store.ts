@@ -31,7 +31,7 @@ function writeFileAtomic(filePath: string, content: string): void {
   }
 }
 
-/** F340 P5: ClientId values — used to detect old `provider` field holding a clientId. */
+/** clowder-ai#340 P5: ClientId values — used to detect old `provider` field holding a clientId. */
 const CLIENT_ID_VALUES = new Set(['anthropic', 'openai', 'google', 'kimi', 'dare', 'antigravity', 'opencode', 'a2a']);
 
 function collectCatIds(config: CatCafeConfig): Set<string> {
@@ -57,7 +57,7 @@ function readSeedCatIds(templatePath: string): Set<string> {
 }
 
 /**
- * F340: One-time catalog variant migration — rewrites file on disk then never runs again.
+ * clowder-ai#340: One-time catalog variant migration — rewrites file on disk then never runs again.
  *   1. old `provider` (clientId value) → `clientId` (P5 field rename)
  *   2. old `ocProviderName` → `provider` (P5 field rename)
  *   3. old `providerProfileId` → `accountRef` (P5 field rename)
@@ -112,7 +112,7 @@ function migrateCatalogVariants(catalog: CatCafeConfig): { catalog: CatCafeConfi
         dirty = true;
       }
 
-      // F340: Do NOT backfill accountRef for unbound runtime variants.
+      // clowder-ai#340: Do NOT backfill accountRef for unbound runtime variants.
       // Runtime catalog entries are authoritative; missing accountRef stays missing
       // until the user explicitly binds one in the editor.
     }

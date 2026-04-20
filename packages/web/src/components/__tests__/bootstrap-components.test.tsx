@@ -47,6 +47,7 @@ const mockSummary: ProjectSummary = {
     { path: 'docs/ARCH.md', tier: 'derived' },
   ],
   tierCoverage: { authoritative: 1, derived: 1, soft_clue: 2 },
+  kindCoverage: { feature: 10, decision: 3, lesson: 5, phase: 8 },
 };
 
 const scanningProgress: BootstrapProgress = {
@@ -236,14 +237,31 @@ describe('BootstrapSummaryCard', () => {
     expect(html).toContain('bootstrap-summary-card');
   });
 
-  it('shows tier coverage as colored tags (including soft_clue)', () => {
+  it('shows kind coverage with F102 source type labels', () => {
     const html = renderToStaticMarkup(<BootstrapSummaryCard summary={mockSummary} docsIndexed={10} />);
-    expect(html).toContain('Specs');
-    expect(html).toContain('Plans');
-    expect(html).toContain('Lessons');
-    expect(html).toContain('覆盖分层');
-    // P2-2: soft_clue must map to "Lessons", not fall through to raw key
+    expect(html).toContain('功能');
+    expect(html).toContain('决策');
+    expect(html).toContain('教训');
+    expect(html).toContain('阶段');
+    expect(html).toContain('知识覆盖');
+    // Must not leak provenance tier labels into display
+    expect(html).not.toContain('authoritative');
+    expect(html).not.toContain('derived');
     expect(html).not.toContain('soft_clue');
+  });
+
+  it('falls back to tierCoverage when kindCoverage is empty (external projects)', () => {
+    const externalSummary: ProjectSummary = {
+      ...mockSummary,
+      kindCoverage: {},
+      tierCoverage: { authoritative: 5, derived: 3, soft_clue: 1 },
+    };
+    const html = renderToStaticMarkup(<BootstrapSummaryCard summary={externalSummary} docsIndexed={9} />);
+    // Must show tier fallback section, not be empty
+    expect(html).toContain('覆盖分层');
+    expect(html).toContain('核心');
+    expect(html).toContain('衍生');
+    expect(html).toContain('线索');
   });
 
   it('shows duration when provided', () => {
