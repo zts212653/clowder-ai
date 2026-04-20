@@ -136,6 +136,13 @@ class ServiceManager {
       path.join(baseDir, 'data', 'logs', 'api'),
       path.join(baseDir, 'data', 'connector-media'),
       path.join(baseDir, 'uploads'),
+      // Writable "project root" for the API. The install dir (Program Files)
+      // is read-only for non-admin users, but many API code paths resolve
+      // `.cat-cafe/*.json` relative to process.cwd() or findMonorepoRoot(cwd).
+      // Placing a pnpm-workspace.yaml marker here makes findMonorepoRoot pin
+      // to this dir, redirecting all runtime writes out of Program Files.
+      path.join(baseDir, 'project'),
+      path.join(baseDir, 'project', '.cat-cafe'),
     ];
     for (const d of dirs) {
       try {
@@ -144,6 +151,14 @@ class ServiceManager {
         }
       } catch (err) {
         log(`Warning: failed to create directory ${d}: ${err.message}`);
+      }
+    }
+    const marker = path.join(baseDir, 'project', 'pnpm-workspace.yaml');
+    if (!fs.existsSync(marker)) {
+      try {
+        fs.writeFileSync(marker, "packages: []\n", 'utf-8');
+      } catch (err) {
+        log(`Warning: failed to plant workspace marker ${marker}: ${err.message}`);
       }
     }
   }
@@ -167,7 +182,10 @@ class ServiceManager {
   async _startApi(nodeExe, userDataDir) {
     const apiEntry = path.join(this.root, 'packages', 'api', 'dist', 'index.js');
     const envOverrides = this._buildApiEnv(userDataDir);
-    this._startProcess('api', nodeExe, [apiEntry], { envOverrides });
+    // cwd must be a writable dir containing pnpm-workspace.yaml so that the
+    // API's findMonorepoRoot() anchors on it, not on Program Files.
+    const apiCwd = path.join(userDataDir, 'project');
+    this._startProcess('api', nodeExe, [apiEntry], { envOverrides, cwd: apiCwd });
     log('API process spawned, waiting for port ' + this.apiPort);
     await this._waitForPort(this.apiPort, 'API');
   }
