@@ -118,13 +118,7 @@ function referencedArtifactExists(args) {
   const artifactArgs = args.filter(isLocalArtifactArg);
   if (artifactArgs.length === 0) return true;
 
-  return artifactArgs.every((artifactArg) => {
-    const resolved =
-      path.isAbsolute(artifactArg) || WINDOWS_DRIVE_PATH_RE.test(artifactArg)
-        ? artifactArg
-        : path.resolve(repoRoot, artifactArg);
-    return existsSync(resolved);
-  });
+  return artifactArgs.every((artifactArg) => existsSync(resolveArtifactPath(artifactArg)));
 }
 
 function isLocalArtifactArg(value) {
@@ -151,6 +145,17 @@ function isLocalArtifactArg(value) {
   }
 
   return LOCAL_ARTIFACT_EXTENSIONS.has(path.extname(artifactArg).toLowerCase());
+}
+
+function resolveArtifactPath(artifactArg) {
+  if (artifactArg === '~') return homedir();
+  if (artifactArg.startsWith('~/') || artifactArg.startsWith('~\\')) {
+    return path.join(homedir(), artifactArg.slice(2));
+  }
+  if (path.isAbsolute(artifactArg) || WINDOWS_DRIVE_PATH_RE.test(artifactArg)) {
+    return artifactArg;
+  }
+  return path.resolve(repoRoot, artifactArg);
 }
 
 function normalizePencilApp(raw) {

@@ -74,13 +74,14 @@ function createSandbox(extraCapabilities = []) {
   return { root, binDir };
 }
 
-function runDoctor(root, binDir) {
+function runDoctor(root, binDir, envOverrides = {}) {
   return spawnSync(process.execPath, [join(root, 'scripts', 'mcp-doctor.mjs')], {
     cwd: root,
     encoding: 'utf8',
     env: {
       ...process.env,
       PATH: `${binDir}:${process.env.PATH ?? ''}`,
+      ...envOverrides,
     },
   });
 }
@@ -165,5 +166,32 @@ describe('mcp-doctor.mjs', () => {
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.match(result.stdout, /\[ready\] scoped-package — stdio npx/);
+  });
+
+  it('expands home-relative artifact args before checking the filesystem', () => {
+    const { root, binDir } = createSandbox([
+      {
+        id: 'tilde-artifact',
+        type: 'mcp',
+        enabled: true,
+        mcpServer: {
+          transport: 'stdio',
+          command: 'node',
+          args: ['~/tools/server.mjs'],
+        },
+      },
+    ]);
+
+    const homeDir = join(root, 'fake-home');
+    mkdirSync(join(homeDir, 'tools'), { recursive: true });
+    writeFileSync(join(homeDir, 'tools', 'server.mjs'), '// server stub\n');
+
+    const result = runDoctor(root, binDir, {
+      HOME: homeDir,
+      USERPROFILE: homeDir,
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /\[ready\] tilde-artifact — stdio node/);
   });
 });
