@@ -108,8 +108,37 @@ if (-not $SkipBundleDeps) {
     Write-Ok "Skipped (-SkipBundleDeps)"
 }
 
-# Step 3: Bundle Redis portable
-Write-Step "Step 3/5 - Bundle Redis portable"
+# Step 3: Bundle Redis portable + Node.js runtime
+Write-Step "Step 3/5 - Bundle Redis portable + Node.js"
+
+# Node.js portable — without this, clean Windows installs with no system Node
+# cannot spawn the API/Web processes.
+$bundledNode = Join-Path (Join-Path $ProjectRoot "bundled") "node"
+if (Test-Path (Join-Path $bundledNode "node.exe")) {
+    Write-Ok "Node.js portable already present"
+} else {
+    New-Item -ItemType Directory -Path $bundledNode -Force | Out-Null
+    $nodeVersion = "v20.18.1"
+    $nodeArchive = "node-$nodeVersion-win-x64"
+    $nodeZipUrl = "https://nodejs.org/dist/$nodeVersion/$nodeArchive.zip"
+    Write-Host "  Downloading $nodeArchive ..."
+    try {
+        $zipPath = Join-Path $bundledNode "node.zip"
+        Invoke-WebRequest -Uri $nodeZipUrl -OutFile $zipPath -UseBasicParsing -TimeoutSec 180
+        $extractDir = Join-Path $bundledNode "_extract"
+        Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+        $innerDir = Get-ChildItem -Path $extractDir -Directory | Select-Object -First 1
+        if ($innerDir) {
+            Get-ChildItem -Path $innerDir.FullName | Move-Item -Destination $bundledNode -Force
+        }
+        Remove-Item $extractDir -Recurse -Force
+        Remove-Item $zipPath -Force
+        Write-Ok "Node.js portable bundled ($nodeArchive)"
+    } catch {
+        Write-Warn "Node.js download failed — installer will require system Node.js at runtime"
+    }
+}
+
 $bundledRedis = Join-Path (Join-Path $ProjectRoot "bundled") "redis"
 if (Test-Path (Join-Path $bundledRedis "redis-server.exe")) {
     Write-Ok "Redis portable already present"

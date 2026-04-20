@@ -69,6 +69,25 @@ Source: "..\..\bundled\deploy\mcp-server\*";     DestDir: "{app}\packages\mcp-se
 ; the hardcoded CAT_CONFIGS default ("codex") which fox/custom proxies
 ; don't recognize — yielding 404 on every CLI invocation.
 Source: "..\..\cat-template.json";               DestDir: "{app}"; Components: core
+; Repository structure so findMonorepoRoot() resolves correctly at install root.
+; Without pnpm-workspace.yaml at {app}, the monorepo marker walks above Program
+; Files, which breaks docs/skills/package resolution paths in the API.
+Source: "..\..\pnpm-workspace.yaml";             DestDir: "{app}"; Components: core
+Source: "..\..\package.json";                    DestDir: "{app}"; Components: core
+Source: "..\..\cat-config.json";                 DestDir: "{app}"; Components: core; Flags: skipifsourcedoesntexist
+; Skills manifest — loaded by API routes/capabilities.ts when listing available
+; skills. Missing → skills panel shows empty; cats lose skill context.
+Source: "..\..\cat-cafe-skills\*";               DestDir: "{app}\cat-cafe-skills"; \
+  Flags: recursesubdirs createallsubdirs; Components: core
+; Documentation directories used by git-doc-reader and feat-index-doc-import
+; routes (features, threads, architecture). Missing → /api/docs/* returns 404.
+Source: "..\..\docs\*";                          DestDir: "{app}\docs"; \
+  Flags: recursesubdirs createallsubdirs; Components: core
+; Bundled Node.js runtime so clean Windows installs (no system Node) work.
+; service-manager.js resolveNode() prefers {app}\node\node.exe before falling
+; back to `where node`. Source directory produced by build-desktop.ps1.
+Source: "..\..\bundled\node\*";                  DestDir: "{app}\node"; \
+  Flags: recursesubdirs createallsubdirs skipifsourcedoesntexist; Components: core
 ; Desktop scripts (post-install config generation)
 Source: "..\scripts\post-install-offline.ps1";   DestDir: "{app}\scripts"; Components: core
 Source: "..\scripts\generate-desktop-config.ps1"; DestDir: "{app}\scripts"; Components: core

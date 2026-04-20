@@ -19,8 +19,14 @@ function log(msg) {
   try { fs.appendFileSync(LOG_FILE, line); } catch {}
 }
 
-// Resolve node executable: prefer system node over Electron's own node
-function resolveNode() {
+// Resolve node executable: prefer installer-bundled node, then system node,
+// then Electron's own node. A bundled node guarantees clean Windows installs
+// (no pre-existing Node.js) still work.
+function resolveNode(projectRoot) {
+  if (projectRoot) {
+    const bundled = path.join(projectRoot, 'node', 'node.exe');
+    if (fs.existsSync(bundled)) return bundled;
+  }
   try {
     const where = process.platform === 'win32' ? 'where node' : 'which node';
     const result = execSync(where, { timeout: 5000, encoding: 'utf-8' }).trim();
@@ -53,7 +59,7 @@ class ServiceManager {
     log(`projectRoot: ${this.root}`);
 
     // ---- Pre-flight checks ----
-    const nodeExe = resolveNode();
+    const nodeExe = resolveNode(this.root);
     if (!nodeExe) {
       throw new Error('Node.js not found. Please install Node.js >= 20 from https://nodejs.org/');
     }
@@ -136,11 +142,13 @@ class ServiceManager {
       path.join(baseDir, 'data', 'logs', 'api'),
       path.join(baseDir, 'data', 'connector-media'),
       path.join(baseDir, 'uploads'),
-      // Writable "project root" for the API. The install dir (Program Files)
-      // is read-only for non-admin users, but many API code paths resolve
-      // `.cat-cafe/*.json` relative to process.cwd() or findMonorepoRoot(cwd).
-      // Placing a pnpm-workspace.yaml marker here makes findMonorepoRoot pin
-      // to this dir, redirecting all runtime writes out of Program Files.
+      // Writable project root for the API. The install dir (Program Files) is
+      // read-only for non-admin users, but the API writes many files under
+      // {projectRoot}/.cat-cafe/ (cat-catalog.json, governance-registry.json,
+      // packs/, tool-usage-archive.jsonl, accounts.json, credentials.json).
+      // These paths are resolved from findMonorepoRoot(process.cwd()) and have
+      // no per-path env overrides, so the API cwd must be a writable dir with
+      // a pnpm-workspace.yaml marker.
       path.join(baseDir, 'project'),
       path.join(baseDir, 'project', '.cat-cafe'),
     ];
@@ -153,12 +161,49 @@ class ServiceManager {
         log(`Warning: failed to create directory ${d}: ${err.message}`);
       }
     }
-    const marker = path.join(baseDir, 'project', 'pnpm-workspace.yaml');
+    const projectDir = path.join(baseDir, 'project');
+    const marker = path.join(projectDir, 'pnpm-workspace.yaml');
     if (!fs.existsSync(marker)) {
       try {
-        fs.writeFileSync(marker, "packages: []\n", 'utf-8');
+        fs.writeFileSync(marker, 'packages: []\n', 'utf-8');
       } catch (err) {
         log(`Warning: failed to plant workspace marker ${marker}: ${err.message}`);
+      }
+    }
+
+    // Mirror read-only install-dir resources into the project dir via Windows
+    // junctions. Without these, findMonorepoRoot(cwd) resolves to the project
+    // dir but docs/cat-cafe-skills/packages are not under it — so API routes
+    // like /api/docs, capabilities.ts skill listing, and MCP server spawning
+    // (resolve(projectRoot, 'packages/mcp-server/dist/memory.js')) all fail.
+    // Junctions need no admin privileges, just absolute paths.
+    const mirrors = ['cat-cafe-skills', 'docs', 'packages'];
+    for (const name of mirrors) {
+      const src = path.join(this.root, name);
+      const dst = path.join(projectDir, name);
+      if (!fs.existsSync(src)) {
+        log(`Skipping mirror ${name} — source missing at ${src}`);
+        continue;
+      }
+      try {
+        const dstStat = fs.existsSync(dst) ? fs.lstatSync(dst) : null;
+        if (dstStat?.isSymbolicLink() || dstStat?.isDirectory()) continue;
+        fs.symlinkSync(src, dst, 'junction');
+        log(`Mirror junction created: ${dst} -> ${src}`);
+      } catch (err) {
+        log(`Warning: failed to create junction ${dst}: ${err.message}`);
+      }
+    }
+
+    // Copy cat-config.json (legacy bootstrap source). Optional — if missing
+    // the loader falls back to cat-template.json.
+    const legacyConfigSrc = path.join(this.root, 'cat-config.json');
+    const legacyConfigDst = path.join(projectDir, 'cat-config.json');
+    if (fs.existsSync(legacyConfigSrc) && !fs.existsSync(legacyConfigDst)) {
+      try {
+        fs.copyFileSync(legacyConfigSrc, legacyConfigDst);
+      } catch (err) {
+        log(`Warning: failed to copy cat-config.json: ${err.message}`);
       }
     }
   }
@@ -303,7 +348,7 @@ class ServiceManager {
 
   _startNextJs() {
     const webDir = path.join(this.root, 'packages', 'web');
-    const nodeExe = resolveNode() || 'node';
+    const nodeExe = resolveNode(this.root) || 'node';
 
     let nextJs = null;
     // Primary: deployed layout (pnpm deploy --node-linker=hoisted) places next
