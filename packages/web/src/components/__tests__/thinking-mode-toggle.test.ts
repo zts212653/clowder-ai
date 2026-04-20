@@ -81,6 +81,13 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
     contentBlocks: [],
   };
 
+  function findBubbleToggleButton(label: string, buttonLabel: string) {
+    return Array.from(container.querySelectorAll('button')).find((button) => {
+      if (button.textContent !== buttonLabel) return false;
+      return button.parentElement?.textContent?.includes(`${label}:`) ?? false;
+    });
+  }
+
   const getCatById = vi.fn(() => ({
     id: 'opus',
     displayName: '布偶猫',
@@ -184,7 +191,7 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
 
     expect(container.querySelectorAll('.cli-output-md').length).toBe(0);
     expect(container.textContent).not.toContain(THINKING_TEXT);
-    expect(container.textContent).toContain('Thinking: 跟随全局');
+    expect(container.textContent).toContain('Thinking: 恢复中');
 
     act(() => {
       useChatStore.setState({
@@ -340,9 +347,7 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
     expect(container.textContent).toContain(THINKING_TEXT);
     expect(container.querySelectorAll('.cli-output-md').length).toBeGreaterThanOrEqual(1);
 
-    const collapseButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '折叠',
-    );
+    const collapseButton = findBubbleToggleButton('Thinking', '折叠');
     expect(collapseButton).toBeTruthy();
 
     await act(async () => {
@@ -360,7 +365,7 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
     expect(container.textContent).not.toContain(THINKING_TEXT);
   });
 
-  it('bubble toggle first click promotes a global-expanded thread to explicit expanded override', async () => {
+  it('bubble toggle first click turns a global-expanded thread into an explicit collapsed override', async () => {
     const { ChatMessage } = await import('@/components/ChatMessage');
     const { RightStatusPanel } = await import('@/components/RightStatusPanel');
 
@@ -411,23 +416,21 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
     expect(container.textContent).toContain(THINKING_TEXT);
     expect(container.querySelectorAll('.cli-output-md').length).toBeGreaterThanOrEqual(1);
 
-    const expandButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '展开',
-    );
-    expect(expandButton).toBeTruthy();
+    const collapseButton = findBubbleToggleButton('Thinking', '折叠');
+    expect(collapseButton).toBeTruthy();
 
     await act(async () => {
-      expandButton?.click();
+      collapseButton?.click();
       await Promise.resolve();
     });
 
-    expect(container.querySelectorAll('.cli-output-md').length).toBeGreaterThanOrEqual(1);
-    expect(container.textContent).toContain(THINKING_TEXT);
+    expect(container.querySelectorAll('.cli-output-md').length).toBe(0);
+    expect(container.textContent).not.toContain(THINKING_TEXT);
     expect(apiFetchMock).toHaveBeenCalledWith(
       '/api/threads/thread-global',
       expect.objectContaining({
         method: 'PATCH',
-        body: JSON.stringify({ bubbleThinking: 'expanded' }),
+        body: JSON.stringify({ bubbleThinking: 'collapsed' }),
       }),
     );
   });
