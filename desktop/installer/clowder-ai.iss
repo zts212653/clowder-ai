@@ -61,6 +61,8 @@ Source: "..\..\bundled\deploy\api\*";            DestDir: "{app}\packages\api"; 
   Flags: recursesubdirs createallsubdirs; Components: core
 Source: "..\..\bundled\deploy\web\*";            DestDir: "{app}\packages\web"; \
   Flags: recursesubdirs createallsubdirs; Components: core
+Source: "..\..\bundled\deploy\mcp-server\*";     DestDir: "{app}\packages\mcp-server"; \
+  Flags: recursesubdirs createallsubdirs; Components: core
 ; Desktop scripts (post-install config generation)
 Source: "..\scripts\post-install-offline.ps1";   DestDir: "{app}\scripts"; Components: core
 Source: "..\scripts\generate-desktop-config.ps1"; DestDir: "{app}\scripts"; Components: core

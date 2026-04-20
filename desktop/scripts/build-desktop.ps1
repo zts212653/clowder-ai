@@ -78,7 +78,7 @@ if (-not $SkipBundleDeps) {
     New-Item -ItemType Directory -Path $deployRoot -Force | Out-Null
 
     Push-Location $ProjectRoot
-    foreach ($pkg in @('api', 'web')) {
+    foreach ($pkg in @('api', 'web', 'mcp-server')) {
         Write-Host "  Deploying @cat-cafe/$pkg ..." -ForegroundColor Gray
         $out = Join-Path $deployRoot $pkg
         pnpm --filter "@cat-cafe/$pkg" --prod --config.node-linker=hoisted deploy $out
