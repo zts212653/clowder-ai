@@ -1,6 +1,7 @@
-# Clowder AI Desktop
+# Clowder AI Desktop (Windows-only)
 
 基于 Electron 的桌面应用壳层，为 Clowder AI 提供一键启动、系统托盘和独立窗口体验。
+**当前这条交付线只支持 Windows 安装器。macOS / Linux 还不是这次 PR 的支持范围。**
 
 ## 设计哲学
 
@@ -88,9 +89,9 @@ pnpm desktop:pack
 
 打包产物位于 `desktop/dist/win-unpacked/`，包含可直接运行的 `Clowder AI.exe`。
 
-### 完整离线安装包（推荐）
+### 完整离线安装包（推荐，Windows-only）
 
-构建一个独立的 `.exe` 安装程序，**无需网络、无需手动 `pnpm install`**，安装完成后直接可用：
+构建一个独立的 `.exe` 安装程序，**仅面向 Windows**。安装完成后可直接启动，无需再手动 `pnpm install`：
 
 ```bash
 # 一键构建完整安装包（需要 Inno Setup 6）
@@ -126,7 +127,7 @@ pnpm desktop:installer
 | AI CLI 工具 | ⚠️ 部分 | 优先从 bundled tarball 离线安装；无缓存时尝试联网；均失败则提示手动安装 |
 | 自动更新 | ❌ | 需手动下载新版安装包覆盖安装 |
 
-## 安装后首次启动
+## 安装后首次启动（Windows）
 
 安装完成 ≠ 立刻可聊。安装器会完成环境部署，但 **不会替用户完成 provider 认证和账号绑定**。
 
@@ -171,9 +172,9 @@ pnpm desktop:installer
 
 | 平台 | 状态 | 说明 |
 |------|------|------|
-| Windows | ✅ 已验证 | 主要开发目标平台 |
-| macOS | 🔄 待验证 | `service-manager.js` 中已包含跨平台路径逻辑 |
-| Linux | 🔄 待验证 | 同上，需社区验证 |
+| Windows | ✅ 已验证 | 当前 PR 唯一支持的平台与安装器目标 |
+| macOS | ❌ 本 PR 不支持 | 尚无 macOS 安装包、release lane 或 clean-machine 验证 |
+| Linux | ❌ 本 PR 不支持 | 尚无 Linux 安装包、release lane 或 clean-machine 验证 |
 
 ## 相关文档
 
