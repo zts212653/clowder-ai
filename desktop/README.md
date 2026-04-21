@@ -102,17 +102,16 @@ pnpm desktop:installer
 
 构建流程（`desktop/scripts/build-desktop.ps1`）：
 1. 构建 Web 应用（`pnpm build`）
-2. 打包 production `node_modules` 为 `node_modules.tar.gz`
-3. 缓存 AI CLI 工具 tarball（Claude / Codex / Gemini，最佳努力）
+2. `pnpm deploy` 导出 api / web / mcp-server 运行时包（扁平化 node_modules，无 Windows junction）
+3. 下载 Node.js 便携版（ABI 版本与构建机一致，确保 native 模块兼容）
 4. 下载/复制 Windows 便携版 Redis
 5. 构建 Electron 壳（`electron-builder --win --dir`）
 6. 编译 Inno Setup 安装包（`dist/ClowderAI-Setup-x.x.x.exe`）
 
 安装包在目标机器上执行：
-- 复制源码 + 构建产物 + Electron 壳
-- 解压预打包的 `node_modules.tar.gz`（2-5 分钟）
-- 从缓存 tarball 或网络安装 AI CLI 工具（如有）
-- 配置 `.env` 和 skills 软链接
+- 复制运行时包 + 构建产物 + Electron 壳 + 便携 Node.js + 便携 Redis
+- 运行 `post-install-offline.ps1`：生成 `.env`、挂载 skills 软链接
+- 按用户在安装向导中选择的组件，尝试安装 AI CLI 工具（优先 bundled tarball，回退联网）
 - 创建桌面快捷方式
 - 注册表启用 Windows 长路径支持
 
@@ -120,12 +119,36 @@ pnpm desktop:installer
 
 | 特性 | 状态 | 说明 |
 |------|------|------|
-| 零网络安装 | ✅ | `node_modules` + Redis + 构建产物全部预打包 |
+| 零网络安装 | ✅ | 运行时包（pnpm deploy）+ Node.js + Redis + 构建产物全部预打包 |
 | 长路径支持 | ✅ | 安装时自动启用 Windows LongPathsEnabled |
 | 单实例运行 | ✅ | 重复启动会聚焦已有窗口 |
 | 系统托盘 | ✅ | 最小化到托盘，右键菜单 |
 | AI CLI 工具 | ⚠️ 部分 | 优先从 bundled tarball 离线安装；无缓存时尝试联网；均失败则提示手动安装 |
 | 自动更新 | ❌ | 需手动下载新版安装包覆盖安装 |
+
+## 安装后首次启动
+
+安装完成 ≠ 立刻可聊。安装器会完成环境部署，但 **不会替用户完成 provider 认证和账号绑定**。
+
+### 步骤
+
+1. **运行安装包** — 双击 `ClowderAI-Setup-x.x.x.exe`，选择 `Full`（全部 CLI 工具）或 `Minimal`（仅核心）
+2. **等待安装完成** — 安装器自动完成：解包应用 + 便携 Node.js + 便携 Redis → 生成 `.env` → 挂载 skills → 安装所选 CLI 工具
+3. **启动 Clowder AI** — 安装结束后勾选"Launch Clowder AI"，或从桌面快捷方式启动
+4. **配置 Provider** — 打开 Hub → 账号配置，为你要使用的 AI 服务完成认证：
+   - **Claude** — 运行 `claude` 命令完成 Anthropic 登录
+   - **Codex** — 运行 `codex` 命令完成 OpenAI 登录
+   - **Gemini** — 运行 `gemini` 命令完成 Google 登录
+   - **Kimi** — 运行 `kimi` 命令完成 Moonshot 登录
+5. **补装 CLI（如有需要）** — 如果某个 CLI 工具在安装阶段未成功安装，可手动补装。
+   需要系统已安装对应运行时（Node.js/npm 用于前三者，Python/pip 用于 Kimi）：
+   ```bash
+   npm install -g @anthropic-ai/claude-code        # Claude
+   npm install -g @openai/codex                     # Codex
+   npm install -g @google/gemini-cli                # Gemini
+   pip install --user --upgrade kimi-cli            # Kimi（Python）
+   ```
+   > 安装包内已 bundle 便携 Node.js，安装过程中会自动使用。手动补装时需确保系统 PATH 中有 Node.js 或 Python。
 
 ## 调试
 
@@ -141,9 +164,8 @@ pnpm desktop:installer
 | `app` 为 undefined | `ELECTRON_RUN_AS_NODE=1` 被继承 | 使用 `pnpm start` 脚本启动，或手动 `Remove-Item Env:ELECTRON_RUN_AS_NODE` |
 | API 启动失败（Redis PING failed） | Redis 未找到且环境变量冲突 | 检查 `clowder-desktop.log`，确认 `MEMORY_STORE=1` 已正确设置 |
 | Next.js 启动超时 | `.cmd` 批处理在 spawn 中静默失败 | `service-manager.js` 已自动绕过 `.cmd`，直接调用 `node next/dist/bin/next` |
-| 找不到 `node` | PATH 未包含 Node.js | 确保 Node.js 已安装并在系统 PATH 中，或安装到标准路径 `C:\Program Files\nodejs\` |
-| 安装包过大 | `node_modules.tar.gz` 包含所有依赖 | 正常，1.6GB tarball 压缩后约 600-700MB |
-| 安装时解压卡住 | `node_modules.tar.gz` 过大 | 等待 2-5 分钟，PowerShell 窗口会显示进度 |
+| 找不到 `node` | PATH 未包含 Node.js | 安装包已 bundle 便携版 Node.js；开发模式确保 Node.js 在系统 PATH 中 |
+| 安装包过大 | 包含完整运行时环境 | 正常，`pnpm deploy` 扁平化包 + Electron + Node.js + Redis |
 
 ## 平台支持
 
@@ -155,5 +177,4 @@ pnpm desktop:installer
 
 ## 相关文档
 
-- [F138: Windows 安装包方案](../docs/features/F138-windows-installer-package.md)（如有）
-- [F160: Electron 桌面化启动调试](../docs/features/F160-electron-desktop-windows-bootstrap.md)（如有）
+- [PR #540: Electron Desktop 桌面化](https://github.com/zts212653/clowder-ai/pull/540)
