@@ -11,7 +11,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { hmacId } from '../infrastructure/telemetry/hmac.js';
 import type { LocalTraceStore } from '../infrastructure/telemetry/local-trace-store.js';
-import { resolveUserId } from '../utils/request-identity.js';
 
 export interface TelemetryRoutesOptions {
   /** LocalTraceStore ring buffer — injected from initTelemetry(). */
@@ -28,7 +27,7 @@ function requireSession(
   request: import('fastify').FastifyRequest,
   reply: import('fastify').FastifyReply,
 ): string | null {
-  const userId = resolveUserId(request);
+  const userId = (request as import('fastify').FastifyRequest & { sessionUserId?: string }).sessionUserId;
   if (!userId) {
     reply.status(401).send({ error: 'Session required' });
     return null;

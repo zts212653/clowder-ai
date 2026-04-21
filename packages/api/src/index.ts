@@ -1233,6 +1233,7 @@ async function main(): Promise<void> {
   const { telemetryRoutes } = await import('./routes/telemetry.js');
   await app.register(telemetryRoutes, {
     traceStore: telemetryHandle.traceStore,
+    getMetricsText: telemetryHandle.getMetricsText ?? undefined,
   });
 
   // F075 Phase B+C: Game + Achievement stores

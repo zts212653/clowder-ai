@@ -11,7 +11,7 @@
 
 import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
-import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
+import { PrometheusExporter, PrometheusSerializer } from '@opentelemetry/exporter-prometheus';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { BatchLogRecordProcessor } from '@opentelemetry/sdk-logs';
@@ -75,6 +75,8 @@ export interface TelemetryHandle {
   shutdown: () => Promise<void>;
   /** LocalTraceStore ring buffer — null if OTel is disabled. */
   traceStore: LocalTraceStore | null;
+  /** Read Prometheus metrics text from in-process registry — null if OTel is disabled. */
+  getMetricsText: (() => Promise<string>) | null;
 }
 
 let sdk: NodeSDK | null = null;
@@ -86,7 +88,7 @@ let sdk: NodeSDK | null = null;
 export function initTelemetry(config?: TelemetryConfig): TelemetryHandle {
   if (process.env.OTEL_SDK_DISABLED === 'true') {
     log.info('OTel SDK disabled (OTEL_SDK_DISABLED=true)');
-    return { shutdown: async () => {}, traceStore: null };
+    return { shutdown: async () => {}, traceStore: null, getMetricsText: null };
   }
 
   const cfg = { ...DEFAULT_CONFIG, ...config };
@@ -105,7 +107,7 @@ export function initTelemetry(config?: TelemetryConfig): TelemetryHandle {
     validateSalt();
   } catch (err) {
     log.error({ err }, 'OTel SDK disabled: HMAC salt validation failed');
-    return { shutdown: async () => {}, traceStore: null };
+    return { shutdown: async () => {}, traceStore: null, getMetricsText: null };
   }
 
   const resource = resourceFromAttributes({
@@ -125,6 +127,17 @@ export function initTelemetry(config?: TelemetryConfig): TelemetryHandle {
   }
   if (cfg.otlpEnabled) {
     spanProcessors.push(new RedactingSpanProcessor(new BatchSpanProcessor(new OTLPTraceExporter())));
+  } else {
+    // KD-13 fix: Redaction must run even without OTLP, because LocalTraceExporter
+    // sees span.attributes after in-place mutation. Without this, Hub trace store
+    // would contain raw prompt/invocationId when OTLP is disabled.
+    const noopInner: import('@opentelemetry/sdk-trace-node').SpanProcessor = {
+      onStart() {},
+      onEnd() {},
+      shutdown: () => Promise.resolve(),
+      forceFlush: () => Promise.resolve(),
+    };
+    spanProcessors.push(new RedactingSpanProcessor(noopInner));
   }
 
   // F153 Phase E: LocalTraceExporter for Hub embedded observability.
@@ -135,6 +148,7 @@ export function initTelemetry(config?: TelemetryConfig): TelemetryHandle {
   spanProcessors.push(new SimpleSpanProcessor(localExporter));
 
   // --- Metrics: Prometheus scrape + optional OTLP push ---
+  const metricsSerializer = new PrometheusSerializer();
   const prometheusExporter = new PrometheusExporter({
     port: cfg.prometheusPort,
     preventServerStart: false,
@@ -185,5 +199,9 @@ export function initTelemetry(config?: TelemetryConfig): TelemetryHandle {
       }
     },
     traceStore: localExporter.getStore(),
+    getMetricsText: async () => {
+      const { resourceMetrics } = await prometheusExporter.collect();
+      return metricsSerializer.serialize(resourceMetrics);
+    },
   };
 }
