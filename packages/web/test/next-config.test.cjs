@@ -30,9 +30,9 @@ describe('next.config rewrites', () => {
     await withEnv({}, async (config) => {
       const rewrites = await config.rewrites();
       assert.deepEqual(rewrites, [
-        { source: '/api/:path*', destination: 'http://localhost:3002/api/:path*' },
-        { source: '/socket.io/:path*', destination: 'http://localhost:3002/socket.io/:path*' },
-        { source: '/uploads/:path*', destination: 'http://localhost:3002/uploads/:path*' },
+        { source: '/api/:path*', destination: 'http://localhost:3004/api/:path*' },
+        { source: '/socket.io/:path*', destination: 'http://localhost:3004/socket.io/:path*' },
+        { source: '/uploads/:path*', destination: 'http://localhost:3004/uploads/:path*' },
       ]);
     });
   });
