@@ -32,11 +32,17 @@ import {
   GENAI_SYSTEM,
   OPERATION_NAME,
   STATUS,
+  TRIGGER,
 } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import {
   activeInvocations,
+  catInvocationCount,
+  catResponseDuration,
   invocationDuration,
   llmCallDuration,
+  sessionRounds,
+  taskCompleted,
+  taskDuration,
   tokenUsage,
 } from '../../../../../infrastructure/telemetry/instruments.js';
 import { normalizeModel } from '../../../../../infrastructure/telemetry/model-normalizer.js';
@@ -280,6 +286,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     params.a2aTriggerMessageId,
   );
 
+  // F153: Record cat invocation count with trigger type
+  const triggerType = params.a2aTriggerMessageId ? 'mention' : params.parentInvocationId ? 'routing' : 'default';
+  catInvocationCount.add(1, { [AGENT_ID]: catId, [TRIGGER]: triggerType });
+
   // F089: Invocation-level hard timeout — independent of NDJSON stream / CLI timeout.
   // Must be > CLI_TIMEOUT_MS to avoid racing the inner timeout.
   // When CLI_TIMEOUT_MS=0 (disable), fall back to DEFAULT (30min) so invocation still has a ceiling.
@@ -328,6 +338,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   const auditLog = getEventAuditLog();
   const promptDigest = createPromptDigest(prompt);
   const startTime = Date.now();
+
+  let threadCreatedAt: number | undefined;
 
   // F118 AC-C5: Flags for finally block fallback audit (must be before any early return)
   let hadError = false;
@@ -563,6 +575,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     if (threadStore) {
       try {
         const thread = await preflightRace(Promise.resolve(threadStore.get(threadId)), 'threadStore.get', signal);
+        if (thread?.createdAt) threadCreatedAt = thread.createdAt;
         if (thread?.projectPath && thread.projectPath !== 'default') {
           // F101: Game threads use virtual projectPaths (e.g. 'games/werewolf') for
           // categorization only — they are not real filesystem directories. Skip them
@@ -1211,10 +1224,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           try {
             const activeRec = await deps.sessionChainStore.getActive(catId, threadId);
             if (activeRec) {
+              const newCount = (activeRec.messageCount ?? 0) + 1;
               await deps.sessionChainStore.update(activeRec.id, {
-                messageCount: (activeRec.messageCount ?? 0) + 1,
+                messageCount: newCount,
                 updatedAt: Date.now(),
               });
+              sessionRounds.record(newCount, { [AGENT_ID]: catId });
             }
           } catch {
             /* best-effort: messageCount miss won't break invocation */
@@ -1868,6 +1883,13 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const otelAttrs = { [AGENT_ID]: catId, [OPERATION_NAME]: 'invoke', [STATUS]: otelStatus };
     invocationDuration.record(finalDurationMs / 1000, otelAttrs);
     activeInvocations.add(-1, { [AGENT_ID]: catId, [OPERATION_NAME]: 'invoke' });
+
+    // F153: Product-level instruments
+    taskCompleted.add(1, { [AGENT_ID]: catId, [STATUS]: otelStatus });
+    catResponseDuration.record(finalDurationMs / 1000, { [AGENT_ID]: catId, [STATUS]: otelStatus });
+    if (threadCreatedAt) {
+      taskDuration.record((Date.now() - threadCreatedAt) / 1000, { [AGENT_ID]: catId, [STATUS]: otelStatus });
+    }
 
     // F089: Mark agent pane status when invocation completes
     if (deps.agentPaneRegistry?.getByInvocation(invocationId)) {
