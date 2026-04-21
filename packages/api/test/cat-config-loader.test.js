@@ -279,11 +279,12 @@ describe('cat-config-loader', () => {
       assert.throws(() => loadCatConfig(path), /defaultVariantId.*not found/);
     });
 
-    it('rejects invalid provider', () => {
-      const bad = validConfig();
-      bad.breeds[0].variants[0].clientId = 'invalid-provider';
-      const path = writeTempConfig(bad);
-      assert.throws(() => loadCatConfig(path), /Invalid cat config/);
+    it('accepts unknown provider without crashing (#252)', () => {
+      const config = validConfig();
+      config.breeds[0].variants[0].clientId = 'relayclaw';
+      const path = writeTempConfig(config);
+      const result = loadCatConfig(path);
+      assert.ok(result, 'config with unknown clientId should load successfully');
     });
 
     it('accepts dare provider (F050)', () => {

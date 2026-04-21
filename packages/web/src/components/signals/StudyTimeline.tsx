@@ -11,13 +11,22 @@ function formatDate(iso: string): string {
 function formatTime(iso: string): string {
   const d = Date.parse(iso);
   if (Number.isNaN(d)) return '';
-  return new Date(d).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  return new Date(d).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function localDateKey(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function groupByDate(entries: readonly TimelineEntry[]): Map<string, TimelineEntry[]> {
   const groups = new Map<string, TimelineEntry[]>();
   for (const entry of entries) {
-    const dateKey = entry.lastStudiedAt.slice(0, 10);
+    const dateKey = localDateKey(entry.lastStudiedAt);
     const existing = groups.get(dateKey) ?? [];
     existing.push(entry);
     groups.set(dateKey, existing);
