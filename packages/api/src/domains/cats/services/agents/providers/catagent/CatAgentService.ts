@@ -1,26 +1,33 @@
 /**
- * CatAgent Native Provider — F159 Phase C: Minimal Provider
+ * CatAgent Native Provider — F159 Phase D: Read-Only Tools + Agentic Loop
  *
  * Calls Anthropic Messages API directly (no CLI subprocess).
  * Uses raw fetch — no @anthropic-ai/sdk dependency.
  *
- * Security: credentials via account-binding fail-closed (B1),
- * event mapping via catagent-event-bridge (B4).
- * AC-C4: No tools sent to API — tool surface deferred to Phase D.
+ * Phase D adds: read_file / list_files / search_content tools + multi-turn loop.
+ * Loop terminates on terminal stop_reason or MAX_TOOL_TURNS.
+ * tool_use / tool_result events are yielded to upstream audit chain.
  */
 
 import type { CatConfig, CatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
-import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../../types.js';
+import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata, TokenUsage } from '../../../types.js';
+import { mergeTokenUsage } from '../../../types.js';
 import { resolveApiCredentials } from './catagent-credentials.js';
-import { mapAnthropicError, mapAnthropicResponse } from './catagent-event-bridge.js';
+import type { AnthropicMessageResponse, AnthropicToolUseBlock } from './catagent-event-bridge.js';
+import { mapAnthropicError, mapAnthropicResponse, mapAnthropicUsage } from './catagent-event-bridge.js';
+import { buildToolRegistry, findTool, getToolSchemas } from './catagent-read-tools.js';
+import { validateToolInput } from './catagent-tool-guard.js';
+import type { CatAgentTool } from './catagent-tools.js';
 
 const log = createModuleLogger('catagent');
 
 const ANTHROPIC_API_VERSION = '2023-06-01';
 const DEFAULT_BASE_URL = 'https://api.anthropic.com';
 const DEFAULT_MAX_TOKENS = 4096;
+const MAX_TOOL_TURNS = 15;
+const TOOL_RESULT_DIGEST_LIMIT = 500;
 
 interface CatAgentServiceOptions {
   catId: CatId;
@@ -42,7 +49,6 @@ export class CatAgentService implements AgentService {
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
     const now = Date.now();
 
-    // 0. Resolve model (graceful failure — no throw)
     let model: string;
     try {
       model = getCatModel(this.catId as string);
@@ -52,7 +58,6 @@ export class CatAgentService implements AgentService {
       return;
     }
 
-    // 1. Resolve credentials (B1 — fail-closed)
     const credentials = resolveApiCredentials(this.projectRoot, this.catId as string, this.catConfig);
     if (!credentials) {
       log.error(`[${this.catId}] Credential resolution failed — cannot invoke`);
@@ -60,17 +65,14 @@ export class CatAgentService implements AgentService {
       return;
     }
 
-    // 2. Generate session ID (ephemeral, per-invocation)
     const sessionId = `catagent-${now}-${Math.random().toString(36).slice(2, 8)}`;
     const metadata: MessageMetadata = { provider: 'catagent', model, sessionId };
-
-    // 3. Emit session_init
     yield { type: 'session_init', catId: this.catId, sessionId, metadata, timestamp: now };
 
-    // 4. Call Anthropic API and yield response events
     yield* this.callApi(prompt, model, metadata, credentials, options);
   }
 
+  /** Agentic loop: call API → yield events → execute tools → repeat until terminal. */
   private async *callApi(
     prompt: string,
     model: string,
@@ -78,78 +80,185 @@ export class CatAgentService implements AgentService {
     credentials: { apiKey: string; baseURL?: string },
     options?: AgentServiceOptions,
   ): AsyncIterable<AgentMessage> {
-    const baseUrl = credentials.baseURL ?? DEFAULT_BASE_URL;
-    const url = `${baseUrl.replace(/\/+$/, '')}/v1/messages`;
+    const workDir = options?.workingDirectory;
+    const tools = workDir ? await buildToolRegistry(workDir) : [];
+    const toolSchemas = getToolSchemas(tools);
+    const messages: Array<{ role: string; content: unknown }> = [{ role: 'user', content: prompt }];
 
-    const body = JSON.stringify({
-      model,
-      max_tokens: DEFAULT_MAX_TOKENS,
-      messages: [{ role: 'user', content: prompt }],
-      ...(options?.systemPrompt ? { system: options.systemPrompt } : {}),
-      // AC-C4: No tools — tool surface deferred to Phase D
-    });
+    let totalUsage: TokenUsage | undefined;
 
-    log.info(`[${this.catId}] Invoking Anthropic API: model=${model}, prompt=${prompt.length} chars`);
-
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': credentials.apiKey,
-          'anthropic-version': ANTHROPIC_API_VERSION,
-        },
-        body,
-        signal: options?.signal,
-      });
-
-      if (!response.ok) {
-        const errText = await response.text().catch(() => 'unknown error');
-        log.warn(`[${this.catId}] API error ${response.status}: ${errText.slice(0, 200)}`);
-        for (const msg of mapAnthropicError(
-          { status: response.status, message: errText },
-          this.catId,
-          'catagent',
-          model,
-        )) {
-          yield { ...msg, metadata: { ...metadata, ...msg.metadata } };
-        }
+    for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
+      let response: AnthropicMessageResponse;
+      try {
+        response = await this.callApiOnce(messages, toolSchemas, model, credentials, options);
+      } catch (err: unknown) {
+        yield* this.handleFetchError(err, metadata, model, totalUsage);
         return;
       }
 
-      const result = (await response.json()) as Parameters<typeof mapAnthropicResponse>[0];
-      for (const msg of mapAnthropicResponse(result, this.catId, 'catagent')) {
-        yield { ...msg, metadata: { ...metadata, ...msg.metadata } };
-      }
-    } catch (err: unknown) {
-      // AC-C3: AbortSignal cancellation — emit error + done, never dangle
-      if (err instanceof DOMException && err.name === 'AbortError') {
-        log.info(`[${this.catId}] Request aborted`);
+      totalUsage = mergeTokenUsage(totalUsage, mapAnthropicUsage(response.usage));
+      const mapped = mapAnthropicResponse(response, this.catId, 'catagent');
+
+      yield* this.yieldEvents(mapped, metadata, totalUsage);
+      if (mapped.some((m) => m.type === 'done')) return;
+
+      // Non-terminal: execute tool calls and build next turn
+      const toolBlocks = response.content.filter((b): b is AnthropicToolUseBlock => b.type === 'tool_use');
+      if (toolBlocks.length === 0) {
+        const reason = response.stop_reason ?? 'unknown';
+        log.warn(`[${this.catId}] Non-terminal stop_reason "${reason}" with no tool calls`);
         yield {
           type: 'error',
           catId: this.catId,
-          error: 'Request aborted',
+          error: `Unexpected non-terminal response (stop_reason: ${reason}) with no tool calls`,
           metadata,
           timestamp: Date.now(),
         };
         yield {
           type: 'done',
           catId: this.catId,
-          metadata: { ...metadata, usage: { inputTokens: 0, outputTokens: 0 } },
+          metadata: { ...metadata, usage: totalUsage ?? { inputTokens: 0, outputTokens: 0 } },
           timestamp: Date.now(),
         };
         return;
       }
-      const message = err instanceof Error ? err.message : String(err);
-      log.error(`[${this.catId}] Unexpected error: ${message}`);
-      for (const msg of mapAnthropicError({ status: 0, message }, this.catId, 'catagent', model)) {
-        yield { ...msg, metadata: { ...metadata, ...msg.metadata } };
+
+      const toolResults = await this.executeTools(toolBlocks, tools, metadata);
+      for (const r of toolResults) {
+        yield {
+          type: 'tool_result',
+          catId: this.catId,
+          content: r.content.slice(0, TOOL_RESULT_DIGEST_LIMIT),
+          toolName: r.name,
+          metadata,
+          timestamp: Date.now(),
+        };
       }
+      messages.push({ role: 'assistant', content: response.content });
+      messages.push({
+        role: 'user',
+        content: toolResults.map((r) => ({ type: 'tool_result', tool_use_id: r.id, content: r.content })),
+      });
+    }
+
+    log.warn(`[${this.catId}] Tool loop exceeded ${MAX_TOOL_TURNS} turns`);
+    yield {
+      type: 'error',
+      catId: this.catId,
+      error: `Tool loop exceeded ${MAX_TOOL_TURNS} turns`,
+      metadata,
+      timestamp: Date.now(),
+    };
+    yield {
+      type: 'done',
+      catId: this.catId,
+      metadata: { ...metadata, usage: totalUsage ?? { inputTokens: 0, outputTokens: 0 } },
+      timestamp: Date.now(),
+    };
+  }
+
+  private async callApiOnce(
+    messages: Array<{ role: string; content: unknown }>,
+    tools: Array<{ name: string; description: string; input_schema: unknown }>,
+    model: string,
+    credentials: { apiKey: string; baseURL?: string },
+    options?: AgentServiceOptions,
+  ): Promise<AnthropicMessageResponse> {
+    const url = `${(credentials.baseURL ?? DEFAULT_BASE_URL).replace(/\/+$/, '')}/v1/messages`;
+    const body: Record<string, unknown> = { model, max_tokens: DEFAULT_MAX_TOKENS, messages };
+    if (tools.length > 0) body.tools = tools;
+    if (options?.systemPrompt) body.system = options.systemPrompt;
+
+    log.info(`[${this.catId}] API call: model=${model}, turns=${messages.length}`);
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': credentials.apiKey,
+        'anthropic-version': ANTHROPIC_API_VERSION,
+      },
+      body: JSON.stringify(body),
+      signal: options?.signal,
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => 'unknown error');
+      throw Object.assign(new Error(text), { httpStatus: resp.status });
+    }
+    return (await resp.json()) as AnthropicMessageResponse;
+  }
+
+  /** Yield mapped events, fixing done's usage to accumulated total. */
+  private *yieldEvents(
+    mapped: AgentMessage[],
+    metadata: MessageMetadata,
+    totalUsage: TokenUsage | undefined,
+  ): Iterable<AgentMessage> {
+    for (const msg of mapped) {
+      const merged = { ...metadata, ...msg.metadata };
+      yield { ...msg, metadata: msg.type === 'done' ? { ...merged, usage: totalUsage } : merged };
+    }
+  }
+
+  private async executeTools(
+    blocks: AnthropicToolUseBlock[],
+    tools: CatAgentTool[],
+    _metadata: MessageMetadata,
+  ): Promise<Array<{ id: string; name: string; content: string }>> {
+    const results: Array<{ id: string; name: string; content: string }> = [];
+    for (const block of blocks) {
+      const tool = findTool(tools, block.name);
+      if (!tool) {
+        results.push({ id: block.id, name: block.name, content: `Error: unknown tool "${block.name}"` });
+        continue;
+      }
+      try {
+        validateToolInput(tool.schema, block.input);
+        const output = await tool.execute(block.input);
+        results.push({ id: block.id, name: block.name, content: output });
+      } catch (err: unknown) {
+        results.push({
+          id: block.id,
+          name: block.name,
+          content: `Error: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    }
+    return results;
+  }
+
+  private *handleFetchError(
+    err: unknown,
+    metadata: MessageMetadata,
+    model: string,
+    totalUsage: TokenUsage | undefined,
+  ): Iterable<AgentMessage> {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      log.info(`[${this.catId}] Request aborted`);
+      yield { type: 'error', catId: this.catId, error: 'Request aborted', metadata, timestamp: Date.now() };
+      yield {
+        type: 'done',
+        catId: this.catId,
+        metadata: { ...metadata, usage: totalUsage ?? { inputTokens: 0, outputTokens: 0 } },
+        timestamp: Date.now(),
+      };
+      return;
+    }
+    const httpStatus = (err as { httpStatus?: number }).httpStatus;
+    const message = err instanceof Error ? err.message : String(err);
+    const status = httpStatus ?? 0;
+    if (httpStatus) {
+      log.warn(`[${this.catId}] API error ${httpStatus}: ${message.slice(0, 200)}`);
+    } else {
+      log.error(`[${this.catId}] Unexpected error: ${message}`);
+    }
+    for (const msg of mapAnthropicError({ status, message }, this.catId, 'catagent', model)) {
+      const usage = totalUsage ?? msg.metadata?.usage;
+      yield { ...msg, metadata: { ...metadata, ...msg.metadata, usage } };
     }
   }
 }
 
-/** Emit error + done pair — convenience for pre-API failures */
 function emitError(message: string, catId: CatId, model: string, timestamp: number): AgentMessage[] {
   const metadata: MessageMetadata = { provider: 'catagent', model };
   return [
