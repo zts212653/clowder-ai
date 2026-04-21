@@ -502,30 +502,6 @@ pnpm check:lockfile     # Verify lockfile integrity
 pnpm check:features     # Feature doc compliance check
 pnpm check:env-ports    # Env-port drift detection
 
-# === Redis ===
-pnpm redis:user:start   # Start Redis manually
-pnpm redis:user:stop    # Stop Redis
-pnpm redis:user:status  # Check Redis status
-pnpm redis:user:backup  # Manual backup
-
-# Redis auto-backup (cron-based)
-pnpm redis:user:autobackup:install    # Install autobackup cron job
-pnpm redis:user:autobackup:run        # Run backup now
-pnpm redis:user:autobackup:status     # Check autobackup status
-pnpm redis:user:autobackup:uninstall  # Remove autobackup cron job
-
-# === Thread Exports ===
-pnpm threads:sync       # Sync thread exports
-pnpm threads:status     # Check thread export status
-pnpm threads:export:redis              # Export threads from Redis
-pnpm threads:export:redis:dry-run      # Dry-run export
-
-# Thread auto-save (cron-based)
-pnpm threads:autosave:install          # Install autosave cron job
-pnpm threads:autosave:run              # Run autosave now
-pnpm threads:autosave:status           # Check autosave status
-pnpm threads:autosave:uninstall        # Remove autosave cron job
-
 # === Alpha Worktree (pre-release testing) ===
 pnpm alpha:init         # Create alpha worktree (../cat-cafe-alpha)
 pnpm alpha:sync         # Sync alpha worktree to origin/main
