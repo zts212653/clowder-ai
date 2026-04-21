@@ -24,6 +24,7 @@ import { validateSalt } from './hmac.js';
 import { LocalTraceExporter } from './local-trace-exporter.js';
 import type { LocalTraceStore } from './local-trace-store.js';
 import { createMetricAllowlistViews } from './metric-allowlist.js';
+import { MetricsSnapshotStore, parsePrometheusText } from './metrics-snapshot-store.js';
 import { RedactingLogProcessor, RedactingSpanProcessor } from './redactor.js';
 
 const log = createModuleLogger('telemetry');
@@ -77,6 +78,8 @@ export interface TelemetryHandle {
   traceStore: LocalTraceStore | null;
   /** Read Prometheus metrics text from in-process registry — null if OTel is disabled. */
   getMetricsText: (() => Promise<string>) | null;
+  /** MetricsSnapshotStore for time-series trend data — null if OTel is disabled. */
+  metricsSnapshotStore: MetricsSnapshotStore | null;
 }
 
 let sdk: NodeSDK | null = null;
@@ -88,7 +91,7 @@ let sdk: NodeSDK | null = null;
 export function initTelemetry(config?: TelemetryConfig): TelemetryHandle {
   if (process.env.OTEL_SDK_DISABLED === 'true') {
     log.info('OTel SDK disabled (OTEL_SDK_DISABLED=true)');
-    return { shutdown: async () => {}, traceStore: null, getMetricsText: null };
+    return { shutdown: async () => {}, traceStore: null, getMetricsText: null, metricsSnapshotStore: null };
   }
 
   const cfg = { ...DEFAULT_CONFIG, ...config };
@@ -107,7 +110,7 @@ export function initTelemetry(config?: TelemetryConfig): TelemetryHandle {
     validateSalt();
   } catch (err) {
     log.error({ err }, 'OTel SDK disabled: HMAC salt validation failed');
-    return { shutdown: async () => {}, traceStore: null, getMetricsText: null };
+    return { shutdown: async () => {}, traceStore: null, getMetricsText: null, metricsSnapshotStore: null };
   }
 
   const resource = resourceFromAttributes({
@@ -181,6 +184,24 @@ export function initTelemetry(config?: TelemetryConfig): TelemetryHandle {
   });
 
   sdk.start();
+
+  // --- L1.5: MetricsSnapshotStore — periodic sampling for trend data ---
+  const snapshotStore = new MetricsSnapshotStore();
+  const SNAPSHOT_INTERVAL_MS = 30_000;
+  const snapshotTimer = setInterval(async () => {
+    try {
+      const { resourceMetrics } = await prometheusExporter.collect();
+      const text = metricsSerializer.serialize(resourceMetrics);
+      snapshotStore.add({
+        timestamp: Date.now(),
+        metrics: parsePrometheusText(text),
+      });
+    } catch {
+      log.warn('Metrics snapshot sampling failed');
+    }
+  }, SNAPSHOT_INTERVAL_MS);
+  snapshotTimer.unref();
+
   log.info(
     {
       prometheus: cfg.prometheusPort,
@@ -192,6 +213,7 @@ export function initTelemetry(config?: TelemetryConfig): TelemetryHandle {
 
   return {
     shutdown: async () => {
+      clearInterval(snapshotTimer);
       if (sdk) {
         await sdk.shutdown();
         sdk = null;
@@ -203,5 +225,6 @@ export function initTelemetry(config?: TelemetryConfig): TelemetryHandle {
       const { resourceMetrics } = await prometheusExporter.collect();
       return metricsSerializer.serialize(resourceMetrics);
     },
+    metricsSnapshotStore: snapshotStore,
   };
 }

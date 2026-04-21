@@ -19,6 +19,7 @@ import fastifyCookie from '@fastify/cookie';
 import Fastify from 'fastify';
 
 const { LocalTraceStore } = await import('../../dist/infrastructure/telemetry/local-trace-store.js');
+const { MetricsSnapshotStore } = await import('../../dist/infrastructure/telemetry/metrics-snapshot-store.js');
 const { telemetryRoutes } = await import('../../dist/routes/telemetry.js');
 const { hmacId } = await import('../../dist/infrastructure/telemetry/hmac.js');
 const { sessionAuthPlugin, sessionRoute } = await import('../../dist/infrastructure/session-auth.js');
@@ -283,7 +284,9 @@ test('GET /api/telemetry/metrics returns 503 when no reader', async () => {
 
 test('GET /api/telemetry/health returns uptime and store stats', async () => {
   const store = new LocalTraceStore({ maxSpans: 100 });
-  const app = await buildApp({ traceStore: store });
+  const snapshotStore = new MetricsSnapshotStore({ maxSnapshots: 10 });
+  snapshotStore.add({ timestamp: Date.now(), metrics: { x: 1 } });
+  const app = await buildApp({ traceStore: store, metricsSnapshotStore: snapshotStore });
   const cookie = await getSessionCookie(app);
 
   const res = await app.inject({
@@ -295,6 +298,93 @@ test('GET /api/telemetry/health returns uptime and store stats', async () => {
   const body = JSON.parse(res.body);
   assert.ok(typeof body.uptime === 'number');
   assert.ok(body.traceStore !== undefined);
+  assert.ok(body.metricsSnapshotStore !== undefined);
+  assert.equal(body.metricsSnapshotStore.snapshotCount, 1);
   assert.ok(typeof body.timestamp === 'number');
+  app.close();
+});
+
+// ─── Metrics History (L1.5) ───
+
+test('GET /api/telemetry/metrics/history returns 401 without session', async () => {
+  const snapshotStore = new MetricsSnapshotStore({ maxSnapshots: 10 });
+  const app = await buildApp({ metricsSnapshotStore: snapshotStore });
+  const res = await app.inject({ method: 'GET', url: '/api/telemetry/metrics/history' });
+  assert.equal(res.statusCode, 401);
+  app.close();
+});
+
+test('GET /api/telemetry/metrics/history returns 503 when store is null', async () => {
+  const app = await buildApp({ metricsSnapshotStore: null });
+  const cookie = await getSessionCookie(app);
+
+  const res = await app.inject({
+    method: 'GET',
+    url: '/api/telemetry/metrics/history',
+    headers: { cookie },
+  });
+  assert.equal(res.statusCode, 503);
+  app.close();
+});
+
+test('GET /api/telemetry/metrics/history returns snapshots', async () => {
+  const snapshotStore = new MetricsSnapshotStore({ maxSnapshots: 100 });
+  const now = Date.now();
+  snapshotStore.add({ timestamp: now - 2000, metrics: { a: 1 } });
+  snapshotStore.add({ timestamp: now - 1000, metrics: { a: 2 } });
+  snapshotStore.add({ timestamp: now, metrics: { a: 3 } });
+
+  const app = await buildApp({ metricsSnapshotStore: snapshotStore });
+  const cookie = await getSessionCookie(app);
+
+  const res = await app.inject({
+    method: 'GET',
+    url: '/api/telemetry/metrics/history',
+    headers: { cookie },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = JSON.parse(res.body);
+  assert.equal(body.count, 3);
+  assert.equal(body.snapshots.length, 3);
+  app.close();
+});
+
+test('GET /api/telemetry/metrics/history filters by since', async () => {
+  const snapshotStore = new MetricsSnapshotStore({ maxSnapshots: 100 });
+  const now = Date.now();
+  snapshotStore.add({ timestamp: now - 5000, metrics: { old: 1 } });
+  snapshotStore.add({ timestamp: now - 1000, metrics: { recent: 1 } });
+  snapshotStore.add({ timestamp: now, metrics: { latest: 1 } });
+
+  const app = await buildApp({ metricsSnapshotStore: snapshotStore });
+  const cookie = await getSessionCookie(app);
+
+  const res = await app.inject({
+    method: 'GET',
+    url: `/api/telemetry/metrics/history?since=${now - 2000}`,
+    headers: { cookie },
+  });
+  const body = JSON.parse(res.body);
+  assert.equal(body.count, 2);
+  app.close();
+});
+
+test('GET /api/telemetry/metrics/history respects limit', async () => {
+  const snapshotStore = new MetricsSnapshotStore({ maxSnapshots: 100 });
+  const now = Date.now();
+  for (let i = 0; i < 10; i++) {
+    snapshotStore.add({ timestamp: now + i * 1000, metrics: { i } });
+  }
+
+  const app = await buildApp({ metricsSnapshotStore: snapshotStore });
+  const cookie = await getSessionCookie(app);
+
+  const res = await app.inject({
+    method: 'GET',
+    url: '/api/telemetry/metrics/history?limit=3',
+    headers: { cookie },
+  });
+  const body = JSON.parse(res.body);
+  assert.equal(body.count, 3);
   app.close();
 });

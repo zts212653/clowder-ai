@@ -196,6 +196,7 @@ const HOST = process.env.API_SERVER_HOST ?? '127.0.0.1';
 
 let socketManager: SocketManager | null = null;
 let redisClient: RedisClient | null = null;
+let burnRateMonitor: { start(): void; stop(): void } | null = null;
 
 /**
  * Get the SocketManager instance
@@ -292,6 +293,36 @@ async function main(): Promise<void> {
   // Initialize WebSocket manager BEFORE routes (injected via opts, no circular import).
   // IMPORTANT: Socket.io must attach to the SAME server Fastify listens on.
   socketManager = new SocketManager(app.server, invocationTracker);
+
+  // F153 Phase E L3: Burn-rate alerting — push system_notice via WebSocket
+  if (telemetryHandle.getMetricsText) {
+    const { BurnRateMonitor } = await import('./infrastructure/telemetry/burn-rate-monitor.js');
+    burnRateMonitor = new BurnRateMonitor({
+      getMetricsText: telemetryHandle.getMetricsText,
+      onAlert: (alerts) => {
+        const lines = alerts.map((a) => `${a.metric}: ${a.currentValue.toFixed(2)} (threshold: ${a.threshold})`);
+        socketManager?.broadcastToRoom('workspace:global', 'connector_message', {
+          message: {
+            type: 'connector',
+            content: `[Telemetry Alert] Thresholds exceeded:\n${lines.join('\n')}`,
+            source: { presentation: 'system_notice', noticeTone: 'warning' },
+            timestamp: Date.now(),
+          },
+        });
+      },
+      onClear: () => {
+        socketManager?.broadcastToRoom('workspace:global', 'connector_message', {
+          message: {
+            type: 'connector',
+            content: '[Telemetry] All metrics recovered to normal levels.',
+            source: { presentation: 'system_notice', noticeTone: 'info' },
+            timestamp: Date.now(),
+          },
+        });
+      },
+    });
+    burnRateMonitor.start();
+  }
 
   // F085 Phase 4: Platform-level activity tracker (hyperfocus brake)
   const activityTracker = new ActivityTracker();
@@ -1234,6 +1265,7 @@ async function main(): Promise<void> {
   await app.register(telemetryRoutes, {
     traceStore: telemetryHandle.traceStore,
     getMetricsText: telemetryHandle.getMetricsText ?? undefined,
+    metricsSnapshotStore: telemetryHandle.metricsSnapshotStore ?? undefined,
   });
 
   // F075 Phase B+C: Game + Achievement stores
@@ -2314,6 +2346,9 @@ async function main(): Promise<void> {
         exitCode = 1;
         app.log.error(`[api] SocketManager close failed: ${String(err)}`);
       }
+
+      // F153 Phase E L3: Stop burn-rate monitor
+      burnRateMonitor?.stop();
 
       // F152: Flush and shutdown OTel SDK before closing server
       try {

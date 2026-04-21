@@ -11,12 +11,15 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { hmacId } from '../infrastructure/telemetry/hmac.js';
 import type { LocalTraceStore } from '../infrastructure/telemetry/local-trace-store.js';
+import type { MetricsSnapshotStore } from '../infrastructure/telemetry/metrics-snapshot-store.js';
 
 export interface TelemetryRoutesOptions {
   /** LocalTraceStore ring buffer — injected from initTelemetry(). */
   traceStore: LocalTraceStore | null;
   /** Read Prometheus metrics from in-process registry. */
   getMetricsText?: () => Promise<string>;
+  /** MetricsSnapshotStore for time-series trend data. */
+  metricsSnapshotStore?: MetricsSnapshotStore | null;
 }
 
 /**
@@ -101,6 +104,29 @@ export const telemetryRoutes: FastifyPluginAsync<TelemetryRoutesOptions> = async
   });
 
   /**
+   * GET /api/telemetry/metrics/history — time-series metrics snapshots.
+   *
+   * Query params (all optional):
+   *   since — epoch ms cutoff (default: return all)
+   *   limit — max results (default 720, max 720)
+   */
+  app.get<{
+    Querystring: { since?: string; limit?: string };
+  }>('/api/telemetry/metrics/history', async (request, reply) => {
+    if (!requireSession(request, reply)) return;
+
+    if (!opts.metricsSnapshotStore) {
+      return reply.status(503).send({ error: 'Metrics snapshot store not available' });
+    }
+
+    const since = request.query.since ? parseInt(request.query.since, 10) || undefined : undefined;
+    const limit = Math.min(Math.max(1, parseInt(request.query.limit ?? '720', 10) || 720), 720);
+
+    const snapshots = opts.metricsSnapshotStore.query(since, limit);
+    return { snapshots, count: snapshots.length };
+  });
+
+  /**
    * GET /api/telemetry/health — aggregated health status.
    * Combines /ready probe info + trace store stats + uptime.
    */
@@ -108,10 +134,12 @@ export const telemetryRoutes: FastifyPluginAsync<TelemetryRoutesOptions> = async
     if (!requireSession(request, reply)) return;
 
     const traceStats = opts.traceStore?.stats() ?? null;
+    const snapshotStats = opts.metricsSnapshotStore?.stats() ?? null;
 
     return {
       uptime: process.uptime(),
       traceStore: traceStats,
+      metricsSnapshotStore: snapshotStats,
       otelEnabled: !process.env.OTEL_SDK_DISABLED,
       timestamp: Date.now(),
     };
