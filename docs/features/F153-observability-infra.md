@@ -82,7 +82,7 @@ Phase E 只回答"发生了什么"（traces、metrics、健康状态），不做
 
 **L1: 数据层（API 侧）**
 1. `LocalTraceExporter` — 自定义 SpanExporter，在 RedactingSpanProcessor 之后消费 redacted spans → 投影为 DTO → 内存 ring buffer（双阈值：maxSpans + maxAgeMs）
-2. `/api/telemetry/metrics` — 直读进程内 Prometheus client registry，返回结构化 JSON（需 session auth）
+2. `/api/telemetry/metrics` — 直读进程内 Prometheus registry（PrometheusSerializer），返回 `text/plain` Prometheus 格式（需 session auth）
 3. `/api/telemetry/traces` — 查询 LocalTraceStore，按 HMAC(traceId)/HMAC(invocationId)/HMAC(catId) 筛选（需 session auth）
 4. `/api/telemetry/health` — 聚合 /ready + liveness + 最近错误率（需 session auth，不暴露原始错误细节）
 5. 时序快照 ring buffer — 定时采样 metrics 写入内存，支持趋势查询
@@ -149,7 +149,7 @@ Phase E 只回答"发生了什么"（traces、metrics、健康状态），不做
 ### Phase E（Hub 内嵌观测台）— clowder-ai#544
 - [ ] AC-E1: LocalTraceExporter 在 RedactingSpanProcessor **之后** 消费 spans，投影为 redacted DTO 写入内存 ring buffer
 - [ ] AC-E2: Ring buffer 双阈值淘汰（maxSpans + maxAgeMs），不存 SDK span 对象，不存 raw ID
-- [ ] AC-E3: `/api/telemetry/metrics` 直读进程内 Prometheus registry，返回结构化 JSON
+- [ ] AC-E3: `/api/telemetry/metrics` 直读进程内 Prometheus registry，返回 `text/plain` Prometheus 格式
 - [ ] AC-E4: `/api/telemetry/traces` 支持按 HMAC(id) 筛选，查询参数先 pseudonymize 再 match
 - [ ] AC-E5: 所有 `/api/telemetry/*` 端点走 session/cookie auth，无 session 返回 401
 - [ ] AC-E6: Hub 「观测台」Tab 展示总览面板（关键指标卡片 + 趋势折线图）
