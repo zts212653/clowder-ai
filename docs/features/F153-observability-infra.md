@@ -85,7 +85,12 @@ Phase E 只回答"发生了什么"（traces、metrics、健康状态），不做
 2. `/api/telemetry/metrics` — 直读进程内 Prometheus registry（PrometheusSerializer），返回 `text/plain` Prometheus 格式（需 session auth）
 3. `/api/telemetry/traces` — 查询 LocalTraceStore，筛选条件：traceId 原样匹配、invocationId 先 HMAC 再匹配（AC-E4）、catId 走 Class D passthrough 直接匹配（需 session auth）
 4. `/api/telemetry/health` — 聚合 /ready + liveness + 最近错误率（需 session auth，不暴露原始错误细节）
-5. 时序快照 ring buffer — 定时采样 metrics 写入内存，支持趋势查询
+5. **时序快照 ring buffer**（`MetricsSnapshotStore`）
+   - `setInterval`（默认 30s）调用 `PrometheusExporter.collect()` → 序列化为快照 DTO → 写入内存 ring buffer
+   - 快照 DTO：`{ timestamp, metrics: Record<string, number> }`，只保留 gauge/counter 的当前值（非全量 Prometheus 文本）
+   - 双阈值淘汰：maxSnapshots（默认 720 = 6h@30s）+ maxAgeMs（默认 6h）
+   - 新增 API：`GET /api/telemetry/metrics/history?since=<epochMs>&limit=<n>` — 返回时序快照数组（需 session auth）
+   - 前端趋势折线图的数据源；不替代 `/api/telemetry/metrics`（后者仍返回实时 Prometheus text）
 6. **产品级 OTel instruments**（Phase A 的 5 个是基础设施级；这 5 个面向 task/session 产品层）
    - `cat_cafe.task.completed` Counter — 按 agent.id + status(ok/error) 计数任务完成
    - `cat_cafe.task.duration` Histogram — 从 thread 创建到 invocation 结束的秒数（thread 级耗时）
@@ -95,13 +100,44 @@ Phase E 只回答"发生了什么"（traces、metrics、健康状态），不做
    - 记录点：`invoke-single-cat.ts` finally block（task.completed/task.duration/cat.response.duration）、invocationId 创建后（cat.invocation.count）、session messageCount 递增时（session.rounds）
    - `trigger` 属性加入 MetricAttributeAllowlist（D2 enforcement）
 
-**L2: 前端展示**
-6. Hub 新增「观测台」Tab — 总览面板（指标卡片 + 趋势折线图）+ 按猫猫/thread 筛选
-7. Span 瀑布图组件 — 嵌套时间条，在 invocation 详情页展示调用链
-8. 轻量图表库 — 趋势折线图、延迟分布
+**L2: 前端展示（`packages/web`）**
+
+7. **Hub「观测台」Tab**（路由 `/hub/observability`）
+   - 入口：Hub 左侧导航栏新增「观测台」图标，排在「设置」之前
+   - **总览面板**（默认视图）
+     - 指标卡片行：活跃 invocations、近 1h task 完成数（ok/error）、平均响应耗时、session 平均轮数
+     - 趋势折线图：从 `/api/telemetry/metrics/history` 拉时序快照，展示 invocation.duration p50/p95、task.completed rate、token.usage rate
+     - 猫猫选择器：按 agent.id 筛选，切换后所有卡片和图表联动
+   - **Trace 浏览器**（子 Tab）
+     - 表格：spanName / catId / duration / status / timestamp，支持 traceId/catId 搜索
+     - 数据源：`GET /api/telemetry/traces`
+     - 点击行展开 → Span 瀑布图（见 item 8）
+   - **Health 面板**（子 Tab）
+     - 数据源：`GET /api/telemetry/health`
+     - 展示 uptime、OTel 状态、trace store 容量/最旧 span 时间
+   - 数据刷新：30s 轮询（与快照采样对齐），Tab 不可见时暂停
+
+8. **Span 瀑布图组件**（`SpanWaterfall`）
+   - 输入：同 traceId 的 spans 数组（从 `/api/telemetry/traces?traceId=xxx` 获取）
+   - 渲染：按 parentSpanId 构建树，水平时间条嵌套，宽度 = duration 占 trace 总时长比例
+   - 每条 span bar 显示：name、duration、status badge（ok/error）
+   - 点击 bar 展开属性面板：redacted attributes + events 列表
+   - 空 trace 或单 span → 简化卡片视图，不画瀑布
+
+9. **轻量图表库**
+   - 选型：不引入 Chart.js / D3 等重型库；用 SVG + CSS 手写或引入 `uPlot`（~35KB gzip，零依赖）
+   - 组件：`TrendLine`（时序折线）、`DurationDistribution`（延迟分布直方图）、`SparkCard`（迷你折线 + 当前值）
+   - 所有图表接受 `{ timestamp, value }[]` 数组，不耦合 API 响应格式
 
 **L3: 告警**
-9. API 侧 burn-rate 阈值检查（setInterval）→ SystemNoticeBar 推送（复用 F508）
+
+10. **burn-rate 阈值检查**
+    - API 侧 `setInterval`（默认 60s）读取进程内 metrics：error rate、p95 latency、active invocations
+    - 阈值配置：`TELEMETRY_ALERT_ERROR_RATE`（默认 0.3 = 30%）、`TELEMETRY_ALERT_P95_LATENCY_S`（默认 120）、`TELEMETRY_ALERT_ACTIVE_INVOCATIONS`（默认 50）
+    - 超标时通过 SSE/WebSocket 推送 `system_notice` 事件 → 前端 SystemNoticeBar 弹出 notice（复用 F508 层）
+    - notice 内容：哪个指标超标、当前值、阈值，不含 raw trace 数据
+    - 连续 N 次（默认 3）超标才触发（防抖），恢复后自动消除
+    - 首版不持久化告警历史，内存 only
 
 ### Phase F: 后续增强（视 Phase E 落地情况决定）
 
@@ -152,16 +188,20 @@ Phase E 只回答"发生了什么"（traces、metrics、健康状态），不做
 - [ ] AC-E3: `/api/telemetry/metrics` 直读进程内 Prometheus registry，返回 `text/plain` Prometheus 格式
 - [ ] AC-E4: `/api/telemetry/traces` 筛选：traceId 原样匹配，invocationId 先 HMAC 再匹配 store，catId 走 Class D passthrough 直接匹配
 - [ ] AC-E5: 所有 `/api/telemetry/*` 端点走 session/cookie auth，无 session 返回 401
-- [ ] AC-E6: Hub 「观测台」Tab 展示总览面板（关键指标卡片 + 趋势折线图）
-- [ ] AC-E7: Span 瀑布图组件在 invocation 详情页可用
-- [ ] AC-E8: burn-rate 超标时 SystemNoticeBar 弹出 notice
-- [ ] AC-E9: 零额外进程 — 所有逻辑在现有 API + Web 进程内运行
-- [ ] AC-E10: 5 个产品级 instruments 定义在 `instruments.ts`，受 MetricAttributeAllowlist Views 管控
-- [ ] AC-E11: `cat_cafe.task.completed` 在 invocation finally 块中按 status(ok/error) 计数
-- [ ] AC-E12: `cat_cafe.task.duration` 使用 thread.createdAt → invocation end 计算秒数
-- [ ] AC-E13: `cat_cafe.session.rounds` 每轮上报累计 messageCount
-- [ ] AC-E14: `cat_cafe.cat.invocation.count` 按 trigger(default/mention/routing) 区分调用来源
-- [ ] AC-E15: `trigger` 属性在 metric-allowlist.ts 中注册，D2 enforcement 正常工作
+- [ ] AC-E6: `MetricsSnapshotStore` 每 30s 采样，双阈值淘汰，`/api/telemetry/metrics/history` 返回时序数组
+- [ ] AC-E7: Hub「观测台」Tab 总览面板：指标卡片 + 趋势折线图 + 猫猫选择器联动筛选
+- [ ] AC-E8: Trace 浏览器：表格展示 + traceId/catId 搜索 + 点击展开瀑布图
+- [ ] AC-E9: `SpanWaterfall` 组件按 parentSpanId 构建树，水平时间条嵌套渲染，支持属性展开
+- [ ] AC-E10: Health 面板展示 uptime、OTel 状态、trace store 容量
+- [ ] AC-E11: burn-rate 阈值检查（error rate / p95 latency / active invocations），连续 3 次超标触发 SystemNoticeBar
+- [ ] AC-E12: 告警通过 SSE/WebSocket 推送，恢复后自动消除
+- [ ] AC-E13: 零额外进程 — 所有逻辑在现有 API + Web 进程内运行
+- [ ] AC-E14: 5 个产品级 instruments 定义在 `instruments.ts`，受 MetricAttributeAllowlist Views 管控
+- [ ] AC-E15: `cat_cafe.task.completed` 在 invocation finally 块中按 status(ok/error) 计数
+- [ ] AC-E16: `cat_cafe.task.duration` 使用 thread.createdAt → invocation end 计算秒数
+- [ ] AC-E17: `cat_cafe.session.rounds` 每轮上报累计 messageCount
+- [ ] AC-E18: `cat_cafe.cat.invocation.count` 按 trigger(default/mention/routing) 区分调用来源
+- [ ] AC-E19: `trigger` 属性在 metric-allowlist.ts 中注册，D2 enforcement 正常工作
 
 ## Dependencies
 
