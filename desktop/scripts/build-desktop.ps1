@@ -209,8 +209,71 @@ if (Test-Path (Join-Path $bundledRedis "redis-server.exe")) {
     }
 }
 
-# Step 4: Build Electron app
-Write-Step "Step 4/5 - Build Electron shell"
+# Step 4: Bundle CLI tool tarballs for offline installation
+Write-Step "Step 4/6 - Bundle CLI tool tarballs"
+
+$cliToolsDir = Join-Path $bundledDir "cli-tools"
+if (-not (Test-Path $cliToolsDir)) {
+    New-Item -ItemType Directory -Path $cliToolsDir -Force | Out-Null
+}
+
+# Use bundled npm (guaranteed present after Step 3) to pack CLI tarballs.
+$npmCmd = Join-Path $bundledNode "npm.cmd"
+if (-not (Test-Path $npmCmd)) {
+    Write-Err "Bundled npm.cmd not found at $npmCmd — cannot pack CLI tools"
+    exit 1
+}
+
+$cliPackages = @(
+    @{ Name = "claude"; Pkg = "@anthropic-ai/claude-code" },
+    @{ Name = "codex";  Pkg = "@openai/codex" },
+    @{ Name = "gemini"; Pkg = "@google/gemini-cli" }
+)
+
+$cliAllPacked = $true
+foreach ($cli in $cliPackages) {
+    # Reuse existing tarball if already present (idempotent rebuilds)
+    $existing = Get-ChildItem -Path $cliToolsDir -Filter "*.tgz" -ErrorAction SilentlyContinue `
+        | Where-Object { $_.Name -like "*$($cli.Name)*" } | Select-Object -First 1
+    if ($existing) {
+        Write-Ok "$($cli.Name) tarball already present: $($existing.Name)"
+        continue
+    }
+    Write-Host "  Packing $($cli.Pkg) ..." -ForegroundColor Gray
+    try {
+        Push-Location $cliToolsDir
+        & $npmCmd pack $($cli.Pkg) 2>&1 | Out-Null
+        $packExit = $LASTEXITCODE
+        Pop-Location
+        if ($packExit -eq 0) {
+            $packed = Get-ChildItem -Path $cliToolsDir -Filter "*.tgz" -ErrorAction SilentlyContinue `
+                | Where-Object { $_.Name -like "*$($cli.Name)*" } | Select-Object -First 1
+            if ($packed) {
+                Write-Ok "$($cli.Name) tarball packed: $($packed.Name)"
+            } else {
+                Write-Err "$($cli.Name) npm pack succeeded but tarball not found"
+                $cliAllPacked = $false
+            }
+        } else {
+            Write-Err "$($cli.Name) npm pack failed (exit $packExit)"
+            $cliAllPacked = $false
+        }
+    } catch {
+        if ((Get-Location).Path -ne $ProjectRoot) { Pop-Location }
+        Write-Err "$($cli.Name) tarball failed: $_"
+        $cliAllPacked = $false
+    }
+}
+
+if (-not $cliAllPacked) {
+    Write-Err "Some CLI tarballs failed to pack. The installer requires all CLI tools."
+    Write-Err "Ensure network access is available during build."
+    exit 1
+}
+Write-Ok "All CLI tarballs ready under bundled/cli-tools/"
+
+# Step 5: Build Electron app
+Write-Step "Step 5/6 - Build Electron shell"
 $desktopDir = Join-Path $ProjectRoot "desktop"
 $desktopDist = Join-Path $ProjectRoot "desktop-dist"
 
@@ -238,8 +301,8 @@ if (-not $SkipElectronBuild) {
     Write-Ok "Electron build skipped (using existing desktop-dist/)"
 }
 
-# Step 5: Compile Inno Setup installer
-Write-Step "Step 5/5 - Compile installer"
+# Step 6: Compile Inno Setup installer
+Write-Step "Step 6/6 - Compile installer"
 if (-not $SkipInstaller) {
     $issFile = Join-Path (Join-Path (Join-Path $ProjectRoot "desktop") "installer") "clowder-ai.iss"
     $distDir = Join-Path $ProjectRoot "dist"

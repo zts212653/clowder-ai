@@ -97,9 +97,9 @@ Source: "..\..\desktop-dist\win-unpacked\*";     DestDir: "{app}\desktop-dist"; 
 ; Desktop assets (icon used by uninstaller entry)
 Source: "..\assets\*";                           DestDir: "{app}\desktop\assets"; \
   Flags: recursesubdirs createallsubdirs; Components: core
-; CLI tool tarballs (optional, for offline install)
+; CLI tool tarballs (offline install — produced by build-desktop.ps1)
 Source: "..\..\bundled\cli-tools\*";             DestDir: "{app}\bundled\cli-tools"; \
-  Flags: recursesubdirs createallsubdirs skipifsourcedoesntexist; Components: core
+  Flags: recursesubdirs createallsubdirs; Components: core
 ; Portable Redis for Windows
 Source: "..\..\bundled\redis\*";                 DestDir: "{app}\.cat-cafe\redis\windows"; \
   Flags: recursesubdirs createallsubdirs; Components: core

@@ -42,8 +42,26 @@ export function resolveCliCommand(command: string): string | null {
     // fall through to manual search
   }
 
-  // Search common install directories (Unix only)
-  if (!IS_WINDOWS) {
+  // Search common install directories
+  if (IS_WINDOWS) {
+    // npm install -g puts shims in %APPDATA%\npm on Windows (default prefix).
+    // On clean machines where the official Node.js installer never ran, this
+    // directory is not in the system PATH — so `where` misses CLI tools that
+    // were installed by the bundled npm during post-install.
+    const appData = process.env.APPDATA;
+    const localAppData = process.env.LOCALAPPDATA;
+    const winDirs: string[] = [];
+    if (appData) winDirs.push(resolve(appData, 'npm'));
+    if (localAppData) winDirs.push(resolve(localAppData, 'npm'));
+    for (const dir of winDirs) {
+      // Prefer .cmd shim (more reliable for resolveWindowsShimSpawn)
+      const cmdCandidate = resolve(dir, `${command}.cmd`);
+      if (existsSync(cmdCandidate)) {
+        resolvedCache.set(command, cmdCandidate);
+        return cmdCandidate;
+      }
+    }
+  } else {
     const home = process.env.HOME ?? '';
     if (home) {
       for (const dir of UNIX_SEARCH_DIRS) {
