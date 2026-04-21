@@ -100,6 +100,17 @@ export class CatAgentService implements AgentService {
       totalUsage = mergeTokenUsage(totalUsage, result.turnUsage);
 
       if (result.hadStreamError) {
+        const orphanTools = result.contentBlocks.filter((b): b is AnthropicToolUseBlock => b.type === 'tool_use');
+        for (const t of orphanTools) {
+          yield {
+            type: 'tool_result',
+            catId: this.catId,
+            content: 'Error: stream interrupted before tool execution',
+            toolName: t.name,
+            metadata,
+            timestamp: Date.now(),
+          };
+        }
         yield* emitDone(this.catId, metadata, totalUsage);
         return;
       }

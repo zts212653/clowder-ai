@@ -288,6 +288,44 @@ describe('E4: stream error handling', () => {
     assert.ok(done, 'has done (no dangle)');
   });
 
+  test('stream error after tool_use emits failed tool_result to close the pair', async () => {
+    globalThis.fetch = async () => ({
+      ok: true,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: sseStream([
+        { type: 'message_start', message: { id: 'msg1', usage: { input_tokens: 10 } } },
+        { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tu1', name: 'read_file' } },
+        {
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'input_json_delta', partial_json: '{"path":"hello.txt"}' },
+        },
+        { type: 'content_block_stop', index: 0 },
+        { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5 } },
+        // No message_stop — stream interrupted!
+      ]),
+    });
+
+    const svc = new CatAgentService({
+      catId: 'opus',
+      projectRoot: tmpDir,
+      catConfig: { accountRef: 'test-ant' },
+    });
+    const msgs = await collect(svc.invoke('read', { workingDirectory: tmpDir }));
+
+    const toolUse = msgs.find((m) => m.type === 'tool_use');
+    assert.ok(toolUse, 'tool_use was yielded before error');
+    assert.equal(toolUse.toolName, 'read_file');
+
+    const toolResult = msgs.find((m) => m.type === 'tool_result');
+    assert.ok(toolResult, 'failed tool_result emitted to close orphan');
+    assert.ok(toolResult.content.includes('stream interrupted'), 'explains the failure');
+    assert.equal(toolResult.toolName, 'read_file');
+
+    const done = msgs.find((m) => m.type === 'done');
+    assert.ok(done, 'has done');
+  });
+
   test('stream: true is set in request body', async () => {
     let capturedBody = null;
     globalThis.fetch = async (_url, init) => {
