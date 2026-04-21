@@ -89,7 +89,7 @@ class ServiceManager {
 
     // ---- Redis ----
     this.onStatus('Starting Redis...');
-    await this._startRedis();
+    await this._startRedis(userDataDir);
     log(`Redis phase complete. memoryMode=${this.memoryMode}`);
 
     // ---- API ----
@@ -149,6 +149,7 @@ class ServiceManager {
       // These paths are resolved from findMonorepoRoot(process.cwd()) and have
       // no per-path env overrides, so the API cwd must be a writable dir with
       // a pnpm-workspace.yaml marker.
+      path.join(baseDir, 'data', 'redis'),
       path.join(baseDir, 'project'),
       path.join(baseDir, 'project', '.cat-cafe'),
     ];
@@ -275,7 +276,7 @@ class ServiceManager {
     };
   }
 
-  async _startRedis() {
+  async _startRedis(userDataDir) {
     const redisDir = path.join(this.root, '.cat-cafe', 'redis', 'windows');
     const portableRedis = path.join(redisDir, 'redis-server.exe');
 
@@ -300,8 +301,10 @@ class ServiceManager {
       return;
     }
 
+    // Persist data to writable user directory so sessions survive app restart.
+    const redisDataDir = path.join(userDataDir, 'data', 'redis');
     let redisCmd = 'redis-server';
-    let redisArgs = ['--port', '6399', '--save', '', '--appendonly', 'no'];
+    let redisArgs = ['--port', '6399', '--dir', redisDataDir, '--save', '60 1', '--appendonly', 'yes'];
     let redisCwd = this.root;
 
     if (hasPortable) {
