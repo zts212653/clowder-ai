@@ -507,6 +507,23 @@ async function main(): Promise<void> {
   evidenceStoreRef = memoryServices.evidenceStore;
   app.log.info('[api] F102: SQLite memory services initialized');
 
+  // Thread index repair: rebuild ZSet indexes from thread detail hashes if sparse.
+  // Prevents "all threads disappeared" after unclean shutdown.
+  // Must run BEFORE evidence index rebuild — threadListFn reads ZSet indexes.
+  if (threadStore.repairIndex) {
+    const startMs = Date.now();
+    try {
+      const result = await threadStore.repairIndex();
+      if (result.repairedMembers > 0) {
+        app.log.info(
+          `[api] Thread index repair: ${result.repairedMembers} members rebuilt across ${result.repairedUsers} user indexes (${Date.now() - startMs}ms)`,
+        );
+      }
+    } catch (err) {
+      app.log.warn(`[api] Thread index repair failed (non-fatal): ${err}`);
+    }
+  }
+
   // F152 Phase B: Expedition Bootstrap — state manager + service
   const { IndexStateManager } = await import('./domains/memory/IndexStateManager.js');
   const { ExpeditionBootstrapService } = await import('./domains/memory/ExpeditionBootstrapService.js');
