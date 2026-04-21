@@ -4,8 +4,16 @@
 
 .DESCRIPTION
   Called by Inno Setup after file extraction.
-  Steps: generate .env -> mount skills symlinks -> install CLI tools (if bundled or online) -> verify artifacts.
+  Steps: generate .env -> mount skills symlinks -> install CLI tools (if selected) -> verify artifacts.
 #>
+
+param(
+    [Parameter(Mandatory)] [string]$AppDir,
+    [switch]$Claude,
+    [switch]$Codex,
+    [switch]$Gemini,
+    [switch]$Kimi
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -83,7 +91,7 @@ function Install-CliToolFromNetwork {
 }
 
 $ScriptDir = Split-Path -Parent $PSCommandPath
-$ProjectRoot = Split-Path -Parent $ScriptDir
+$ProjectRoot = if ($AppDir) { $AppDir } else { Split-Path -Parent $ScriptDir }
 $BundleDir = Join-Path $ProjectRoot "bundled\cli-tools"
 $StatusFile = Join-Path $ProjectRoot ".cat-cafe\cli-tools-status.json"
 
@@ -153,21 +161,28 @@ if (Test-Path $skillsSource) {
 Write-Step "Step 3/4 - AI CLI tools"
 
 $cliTools = @(
-    @{ Name = "claude"; Label = "Claude"; Pkg = "@anthropic-ai/claude-code" },
-    @{ Name = "codex"; Label = "Codex"; Pkg = "@openai/codex" },
-    @{ Name = "gemini"; Label = "Gemini"; Pkg = "@google/gemini-cli" },
-    @{ Name = "kimi"; Label = "Kimi"; Pkg = "kimi-cli"; Kind = "python" }
+    @{ Name = "claude"; Label = "Claude"; Pkg = "@anthropic-ai/claude-code"; Selected = $Claude.IsPresent },
+    @{ Name = "codex"; Label = "Codex"; Pkg = "@openai/codex"; Selected = $Codex.IsPresent },
+    @{ Name = "gemini"; Label = "Gemini"; Pkg = "@google/gemini-cli"; Selected = $Gemini.IsPresent },
+    @{ Name = "kimi"; Label = "Kimi"; Pkg = "kimi-cli"; Kind = "python"; Selected = $Kimi.IsPresent }
 )
 
-$hasNetwork = Test-NetworkAvailable
-if ($hasNetwork) {
-    Write-Ok "Network available"
+# Only attempt installation for tools the user selected in the installer
+$selectedTools = $cliTools | Where-Object { $_.Selected }
+if (-not $selectedTools) {
+    Write-Ok "No CLI tools selected — skipping"
+    $hasNetwork = $false
 } else {
-    Write-Warn "Network unavailable -- CLI tools can only be installed from bundle"
+    $hasNetwork = Test-NetworkAvailable
+    if ($hasNetwork) {
+        Write-Ok "Network available"
+    } else {
+        Write-Warn "Network unavailable -- CLI tools can only be installed from bundle"
+    }
 }
 
 $status = @{}
-foreach ($tool in $cliTools) {
+foreach ($tool in $selectedTools) {
     $existing = Resolve-Command $tool.Name
     if ($existing) {
         Write-Ok "$($tool.Label) CLI already installed"
@@ -249,8 +264,12 @@ Write-Host ""
 Write-Host "  CLI Tools:" -ForegroundColor Cyan
 foreach ($tool in $cliTools) {
     $s = $status[$tool.Name]
-    $icon = if ($s.installed) { "  [OK]" } else { "  [--]" }
-    $color = if ($s.installed) { "Green" } else { "Yellow" }
-    Write-Host "$icon $($tool.Label)" -ForegroundColor $color
+    if (-not $tool.Selected) {
+        Write-Host "  [--] $($tool.Label) (not selected)" -ForegroundColor DarkGray
+    } elseif ($s -and $s.installed) {
+        Write-Host "  [OK] $($tool.Label)" -ForegroundColor Green
+    } else {
+        Write-Host "  [!!] $($tool.Label) (failed)" -ForegroundColor Yellow
+    }
 }
 Write-Host ""

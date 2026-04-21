@@ -8,9 +8,9 @@
 ;   1. Copies pnpm-deploy output for api + web (flat hoisted node_modules,
 ;      real files — no Windows junctions)
 ;   2. Copies the pre-built Electron shell, portable Redis, and desktop assets
-;   3. Optionally installs Claude/Codex/Gemini CLI tools (requires network)
-;   4. Runs post-install-offline.ps1 for .env / skills setup
-;   5. Creates desktop shortcut to the Electron app
+;   3. Runs post-install-offline.ps1 for .env / skills / CLI tools setup
+;      (CLI installation uses bundled Node — no system npm dependency)
+;   4. Creates desktop shortcut to the Electron app
 
 #define MyAppName      "Clowder AI"
 #define MyAppVersion   "0.2.0"
@@ -115,26 +115,14 @@ Filename: "reg.exe"; \
   Parameters: "add ""HKLM\SYSTEM\CurrentControlSet\Control\FileSystem"" /v LongPathsEnabled /t REG_DWORD /d 1 /f"; \
   StatusMsg: "Enabling long path support..."; \
   Flags: runhidden waituntilterminated; Components: core
-; Lightweight offline post-install
+; Post-install: .env, skills, CLI tools (single source of truth for CLI provisioning).
+; Switch params are only present when the user selected that component — avoids the
+; -File mode pitfall where -Switch $false still sets .IsPresent to $true.
 Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\post-install-offline.ps1"""; \
+  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\post-install-offline.ps1"" -AppDir ""{app}""{code:CliSwitches|}"; \
   StatusMsg: "Configuring Clowder AI..."; \
   Flags: runhidden waituntilterminated; \
   Components: core
-
-; Install individual CLIs if selected (requires network)
-Filename: "npm.cmd"; Parameters: "install -g @anthropic-ai/claude-code"; \
-  StatusMsg: "Installing Claude CLI..."; \
-  Flags: runhidden waituntilterminated; Components: cli_claude
-Filename: "npm.cmd"; Parameters: "install -g @openai/codex"; \
-  StatusMsg: "Installing Codex CLI..."; \
-  Flags: runhidden waituntilterminated; Components: cli_codex
-Filename: "npm.cmd"; Parameters: "install -g @google/gemini-cli"; \
-  StatusMsg: "Installing Gemini CLI..."; \
-  Flags: runhidden waituntilterminated; Components: cli_gemini
-Filename: "npm.cmd"; Parameters: "install -g kimi-cli"; \
-  StatusMsg: "Installing Kimi CLI..."; \
-  Flags: runhidden waituntilterminated; Components: cli_kimi
 
 ; Generate desktop-config.json with selected components
 Filename: "powershell.exe"; \
@@ -153,6 +141,17 @@ begin
     Result := '$true'
   else
     Result := '$false';
+end;
+
+{ Returns only the -Switch flags for CLI components the user selected.
+  Used with -File mode where switches must be absent (not "$false") to be off. }
+function CliSwitches(Param: String): String;
+begin
+  Result := '';
+  if WizardIsComponentSelected('cli_claude') then Result := Result + ' -Claude';
+  if WizardIsComponentSelected('cli_codex')  then Result := Result + ' -Codex';
+  if WizardIsComponentSelected('cli_gemini') then Result := Result + ' -Gemini';
+  if WizardIsComponentSelected('cli_kimi')   then Result := Result + ' -Kimi';
 end;
 
 [UninstallRun]
