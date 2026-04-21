@@ -86,6 +86,14 @@ Phase E 只回答"发生了什么"（traces、metrics、健康状态），不做
 3. `/api/telemetry/traces` — 查询 LocalTraceStore，按 HMAC(traceId)/HMAC(invocationId)/HMAC(catId) 筛选（需 session auth）
 4. `/api/telemetry/health` — 聚合 /ready + liveness + 最近错误率（需 session auth，不暴露原始错误细节）
 5. 时序快照 ring buffer — 定时采样 metrics 写入内存，支持趋势查询
+6. **产品级 OTel instruments**（Phase A 的 5 个是基础设施级；这 5 个面向 task/session 产品层）
+   - `cat_cafe.task.completed` Counter — 按 agent.id + status(ok/error) 计数任务完成
+   - `cat_cafe.task.duration` Histogram — 从 thread 创建到 invocation 结束的秒数（thread 级耗时）
+   - `cat_cafe.session.rounds` Histogram — 累计 session 轮数，每轮上报当前值
+   - `cat_cafe.cat.invocation.count` Counter — 按 agent.id + trigger(default/mention/routing) 计数调用
+   - `cat_cafe.cat.response.duration` Histogram — 单次 invocation 端到端响应耗时（秒）
+   - 记录点：`invoke-single-cat.ts` finally block（task.completed/task.duration/cat.response.duration）、invocationId 创建后（cat.invocation.count）、session messageCount 递增时（session.rounds）
+   - `trigger` 属性加入 MetricAttributeAllowlist（D2 enforcement）
 
 **L2: 前端展示**
 6. Hub 新增「观测台」Tab — 总览面板（指标卡片 + 趋势折线图）+ 按猫猫/thread 筛选
@@ -148,6 +156,12 @@ Phase E 只回答"发生了什么"（traces、metrics、健康状态），不做
 - [ ] AC-E7: Span 瀑布图组件在 invocation 详情页可用
 - [ ] AC-E8: burn-rate 超标时 SystemNoticeBar 弹出 notice
 - [ ] AC-E9: 零额外进程 — 所有逻辑在现有 API + Web 进程内运行
+- [ ] AC-E10: 5 个产品级 instruments 定义在 `instruments.ts`，受 MetricAttributeAllowlist Views 管控
+- [ ] AC-E11: `cat_cafe.task.completed` 在 invocation finally 块中按 status(ok/error) 计数
+- [ ] AC-E12: `cat_cafe.task.duration` 使用 thread.createdAt → invocation end 计算秒数
+- [ ] AC-E13: `cat_cafe.session.rounds` 每轮上报累计 messageCount
+- [ ] AC-E14: `cat_cafe.cat.invocation.count` 按 trigger(default/mention/routing) 区分调用来源
+- [ ] AC-E15: `trigger` 属性在 metric-allowlist.ts 中注册，D2 enforcement 正常工作
 
 ## Dependencies
 
@@ -183,3 +197,4 @@ Phase E 只回答"发生了什么"（traces、metrics、健康状态），不做
 | KD-14 | `/api/telemetry/*` 走 session/cookie auth | 缅因猫 Design Gate：不复制 `/ready` 公开探针模式 | 2026-04-21 |
 | KD-15 | 查询参数先 HMAC 再 match store | 缅因猫 Design Gate：不为查询方便存 raw ID | 2026-04-21 |
 | KD-16 | F153 = descriptive observability，不做 normative eval | Phase E 只展示"发生了什么"，eval 信号留给未来 phase（eval 讨论 2026-04-19） | 2026-04-21 |
+| KD-17 | 补 5 个产品级 instrument（task/session 层），不急于吸收 ActivityEventBus | Phase A 的 5 个是基础设施级；L1-L3 gap 分析显示 task 完成/耗时/轮次信号缺失 | 2026-04-21 |
