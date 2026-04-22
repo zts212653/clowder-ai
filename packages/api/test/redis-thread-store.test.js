@@ -430,6 +430,116 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
     await persistentStore.updateMentionActionabilityMode(thread.id, 'strict');
     assert.equal(await redis.ttl(threadDetailKey(thread.id)), -1);
   });
+
+  // --- ZSet self-heal tests ---
+
+  it('list() recovers threads when ZSet index is lost', async () => {
+    // Create 3 threads for user1
+    const t1 = await store.create('user1', 'Thread A');
+    const t2 = await store.create('user1', 'Thread B');
+    const t3 = await store.create('user1', 'Thread C');
+
+    // Simulate ZSet index loss: delete all entries from user1's ZSet
+    const zsetKey = 'threads:user:user1';
+    await redis.del(zsetKey);
+
+    // Verify ZSet is empty
+    const ids = await redis.zrange(zsetKey, 0, -1);
+    assert.equal(ids.length, 0, 'ZSet should be empty after deletion');
+
+    // list() should trigger self-heal and recover the threads
+    const threads = await store.list('user1');
+    const threadIds = threads.map((t) => t.id);
+
+    // Should include all 3 threads (default is added by list() but doesn't have hash)
+    assert.ok(threadIds.includes(t1.id), 'Thread A should be recovered');
+    assert.ok(threadIds.includes(t2.id), 'Thread B should be recovered');
+    assert.ok(threadIds.includes(t3.id), 'Thread C should be recovered');
+  });
+
+  it('list() self-heal is gated by cooldown', async () => {
+    // Create a thread
+    await store.create('user2', 'Cooldown Test');
+
+    // Delete ZSet
+    await redis.del('threads:user:user2');
+
+    // First list() triggers rebuild
+    const first = await store.list('user2');
+    assert.ok(first.length >= 1, 'First list should recover threads');
+
+    // Delete ZSet again (simulate another loss)
+    await redis.del('threads:user:user2');
+
+    // Second list() within cooldown should NOT rebuild (still returns results from stale cache)
+    // The ZSet remains empty because cooldown blocks rebuild
+    const second = await store.list('user2');
+    // After cooldown-blocked list(), ZSet is still empty so only default thread appears
+    assert.equal(second.length, 1, 'Second list within cooldown returns only default thread');
+    assert.equal(second[0].id, 'default', 'Only default thread without rebuild');
+  });
+
+  it('list() self-heal does not cross users', async () => {
+    // Create threads for user3 and user4
+    await store.create('user3', 'User3 Thread');
+    await store.create('user4', 'User4 Thread');
+
+    // Delete user3's ZSet
+    await redis.del('threads:user:user3');
+
+    // Calling list for user4 should NOT rebuild user3's index
+    const user4Threads = await store.list('user4');
+    assert.ok(
+      user4Threads.some((t) => t.title === 'User4 Thread'),
+      'User4 sees own threads',
+    );
+
+    // user3's ZSet should still be empty (user4's list doesn't trigger user3 repair)
+    const user3Ids = await redis.zrange('threads:user:user3', 0, -1);
+    assert.equal(user3Ids.length, 0, 'User3 ZSet should remain empty');
+  });
+
+  it('repairIndex() rebuilds sparse user indexes', async () => {
+    // Create threads for a repair user
+    await store.create('repair-user', 'Repair Thread 1');
+    await store.create('repair-user', 'Repair Thread 2');
+
+    // Delete the ZSet
+    await redis.del('threads:user:repair-user');
+
+    // Run repairIndex
+    const result = await store.repairIndex();
+    assert.equal(result.repairedUsers, 1);
+    assert.equal(result.repairedMembers, 2);
+
+    // Verify the ZSet is restored
+    const ids = await redis.zrange('threads:user:repair-user', 0, -1);
+    assert.ok(ids.length >= 2, `Expected at least 2 entries in ZSet, got ${ids.length}`);
+  });
+
+  it('repairIndex() detects partial ZSet loss (not just full loss)', async () => {
+    // Create 3 threads for partial-user
+    const t1 = await store.create('partial-user', 'Partial A');
+    const t2 = await store.create('partial-user', 'Partial B');
+    const t3 = await store.create('partial-user', 'Partial C');
+
+    // Remove only t2 from the ZSet (simulate partial index loss)
+    await redis.zrem('threads:user:partial-user', t2.id);
+
+    // Verify ZSet now has 2 entries (missing t2)
+    const idsBefore = await redis.zrange('threads:user:partial-user', 0, -1);
+    assert.equal(idsBefore.length, 2, 'ZSet should have 2 entries after partial loss');
+
+    // repairIndex should detect the missing member and rebuild
+    const result = await store.repairIndex();
+    assert.equal(result.repairedUsers, 1);
+    assert.equal(result.repairedMembers, 1);
+
+    // Verify t2 is back in the ZSet
+    const idsAfter = await redis.zrange('threads:user:partial-user', 0, -1);
+    assert.ok(idsAfter.includes(t2.id), 'Missing thread should be restored in ZSet');
+    assert.equal(idsAfter.length, 3, 'All 3 threads should be in ZSet after repair');
+  });
 });
 
 describe('ThreadStoreFactory', () => {
