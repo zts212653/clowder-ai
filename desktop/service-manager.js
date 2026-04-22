@@ -16,7 +16,9 @@ const LOG_FILE = path.join(process.env.TEMP || 'C:\\Temp', 'clowder-desktop.log'
 function log(msg) {
   const line = `[${new Date().toISOString()}] ${msg}\n`;
   process.stdout.write(line);
-  try { fs.appendFileSync(LOG_FILE, line); } catch {}
+  try {
+    fs.appendFileSync(LOG_FILE, line);
+  } catch {}
 }
 
 // Resolve node executable: prefer installer-bundled node, then system node,
@@ -304,7 +306,7 @@ class ServiceManager {
     // Persist data to writable user directory so sessions survive app restart.
     const redisDataDir = path.join(userDataDir, 'data', 'redis');
     let redisCmd = 'redis-server';
-    let redisArgs = ['--port', '6399', '--dir', redisDataDir, '--save', '60 1', '--appendonly', 'yes'];
+    const redisArgs = ['--port', '6399', '--dir', redisDataDir, '--save', '60 1', '--appendonly', 'yes'];
     let redisCwd = this.root;
 
     if (hasPortable) {
@@ -324,7 +326,9 @@ class ServiceManager {
       log('Redis failed to start — using memory store');
       this.memoryMode = true;
       if (this.procs.redis && !this.procs.redis.killed) {
-        try { this.procs.redis.kill(); } catch {}
+        try {
+          this.procs.redis.kill();
+        } catch {}
       }
       delete this.procs.redis;
     }
@@ -363,10 +367,13 @@ class ServiceManager {
       const pnpmDir = path.join(this.root, 'node_modules', '.pnpm');
       if (fs.existsSync(pnpmDir)) {
         try {
-          const dirs = fs.readdirSync(pnpmDir).filter(d => d.startsWith('next@'));
+          const dirs = fs.readdirSync(pnpmDir).filter((d) => d.startsWith('next@'));
           for (const d of dirs) {
             const candidate = path.join(pnpmDir, d, 'node_modules', 'next', 'dist', 'bin', 'next');
-            if (fs.existsSync(candidate)) { nextJs = candidate; break; }
+            if (fs.existsSync(candidate)) {
+              nextJs = candidate;
+              break;
+            }
           }
         } catch {}
       }
@@ -441,9 +448,15 @@ class ServiceManager {
     return new Promise((resolve) => {
       const sock = new net.Socket();
       sock.setTimeout(300);
-      sock.once('connect', () => { sock.destroy(); resolve(true); });
+      sock.once('connect', () => {
+        sock.destroy();
+        resolve(true);
+      });
       sock.once('error', () => resolve(false));
-      sock.once('timeout', () => { sock.destroy(); resolve(false); });
+      sock.once('timeout', () => {
+        sock.destroy();
+        resolve(false);
+      });
       sock.connect(port, '127.0.0.1');
     });
   }
@@ -453,13 +466,21 @@ class ServiceManager {
       const sock = new net.Socket();
       sock.setTimeout(1000);
       let buffer = '';
-      sock.once('connect', () => { sock.write('PING\r\n'); });
+      sock.once('connect', () => {
+        sock.write('PING\r\n');
+      });
       sock.on('data', (data) => {
         buffer += data.toString();
-        if (buffer.includes('+PONG')) { sock.destroy(); resolve(true); }
+        if (buffer.includes('+PONG')) {
+          sock.destroy();
+          resolve(true);
+        }
       });
       sock.once('error', () => resolve(false));
-      sock.once('timeout', () => { sock.destroy(); resolve(false); });
+      sock.once('timeout', () => {
+        sock.destroy();
+        resolve(false);
+      });
       sock.connect(port, '127.0.0.1');
     });
   }
@@ -472,13 +493,14 @@ class ServiceManager {
         return;
       }
       // Check if the process died while we were waiting
-      const procName = label.toLowerCase().includes('api') ? 'api' :
-                       label.toLowerCase().includes('web') ? 'web' : null;
+      const procName = label.toLowerCase().includes('api') ? 'api' : label.toLowerCase().includes('web') ? 'web' : null;
       if (procName && this.procs[procName]) {
         const proc = this.procs[procName];
         if (proc.exitCode !== null && !proc.killed) {
           log(`[${label}] process exited unexpectedly (code=${proc.exitCode}) during wait`);
-          throw new Error(`${label} process exited with code ${proc.exitCode} before port ${port} was ready. Check ${LOG_FILE} for details.`);
+          throw new Error(
+            `${label} process exited with code ${proc.exitCode} before port ${port} was ready. Check ${LOG_FILE} for details.`,
+          );
         }
       }
       await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
