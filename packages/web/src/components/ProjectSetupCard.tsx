@@ -129,7 +129,13 @@ export function ProjectSetupCard({
       <div className="max-w-[85%] w-full rounded-lg border border-cocreator-primary/20 bg-cocreator-bg/30 p-5">
         {/* Header */}
         <div className="flex items-center gap-4 mb-4">
-          <Image src="/images/setup-cat-idle.png" alt="设置" width={80} height={80} className="flex-shrink-0 object-contain" />
+          <Image
+            src="/images/setup-cat-idle.png"
+            alt="设置"
+            width={80}
+            height={80}
+            className="flex-shrink-0 object-contain"
+          />
           <div>
             <p className="text-sm font-medium text-cafe-black">发现了一片新大陆！</p>
             <p className="text-xs text-gray-500 mt-0.5">
