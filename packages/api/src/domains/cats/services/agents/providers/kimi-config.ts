@@ -24,6 +24,21 @@ export const CAT_CAFE_CALLBACK_ENV_KEYS = [
 
 const KIMI_CONTEXT_TAIL_BYTES = 64 * 1024;
 
+function normalizeKimiApiBaseUrl(baseUrl: string): string {
+  const trimmed = baseUrl.trim();
+  if (!trimmed) return trimmed;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.hostname === 'api.kimi.com' && /^\/coding\/?$/i.test(parsed.pathname)) {
+      parsed.pathname = '/coding/v1';
+      return parsed.toString().replace(/\/$/, '');
+    }
+  } catch {
+    // Fall through to raw string when baseUrl is not a fully-qualified URL.
+  }
+  return trimmed;
+}
+
 export interface KimiModelConfigInfo {
   defaultThinking: boolean;
   capabilities: string[];
@@ -218,7 +233,7 @@ export async function readKimiContextUsedTokens(
 export function buildApiKeyEnv(model: string, callbackEnv?: Record<string, string>): Record<string, string> | null {
   const apiKey = callbackEnv?.CAT_CAFE_KIMI_API_KEY;
   if (!apiKey) return null;
-  const baseUrl = callbackEnv?.CAT_CAFE_KIMI_BASE_URL || DEFAULT_KIMI_BASE_URL;
+  const baseUrl = normalizeKimiApiBaseUrl(callbackEnv?.CAT_CAFE_KIMI_BASE_URL || DEFAULT_KIMI_BASE_URL);
   const configuredModelName = model.trim();
   return {
     KIMI_API_KEY: apiKey,

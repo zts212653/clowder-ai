@@ -1,0 +1,15 @@
+#!/bin/bash
+# .githooks/pre-rebase — Require zdiff3 conflict style before rebasing
+
+set -euo pipefail
+
+STYLE=$(git config --get merge.conflictStyle || true)
+if [[ "$STYLE" != "zdiff3" ]]; then
+  echo "" >&2
+  echo "🚫 REBASE GUARD: merge.conflictStyle must be 'zdiff3' before rebase." >&2
+  echo "   Run: pnpm guards:install" >&2
+  echo "" >&2
+  exit 1
+fi
+
+exit 0

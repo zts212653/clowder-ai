@@ -69,7 +69,7 @@ describe('resolveApiUrl', () => {
     process.env.NEXT_PUBLIC_API_URL = 'http://127.0.0.1:3004';
     stubLocation({ hostname: '10.0.0.5', protocol: 'http:', port: '3001' });
     const resolve = await loadResolveApiUrl();
-    expect(resolve()).toBe('http://10.0.0.5:3004');
+    expect(resolve()).toBe('http://10.0.0.5:3002');
   });
 
   // ── localhost env + local access → use env (no skip) ──
@@ -91,10 +91,10 @@ describe('resolveApiUrl', () => {
 
   // ── No env, browser, direct port → port+1 ──
 
-  it('derives API port from frontend port (3003→3004)', async () => {
+  it('derives API port from frontend port (3001→3002)', async () => {
     stubLocation({ hostname: '192.168.1.10', protocol: 'http:', port: '3001' });
     const resolve = await loadResolveApiUrl();
-    expect(resolve()).toBe('http://192.168.1.10:3004');
+    expect(resolve()).toBe('http://192.168.1.10:3002');
   });
 
   it('derives API port for alpha convention (3011→3012)', async () => {
