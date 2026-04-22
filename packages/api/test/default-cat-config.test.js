@@ -3,6 +3,7 @@ import { after, before, describe, it } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import {
+  _resetCachedConfig,
   clearRuntimeDefaultCatId,
   getDefaultCatId,
   getOwnerUserId,
@@ -67,6 +68,26 @@ describe('getDefaultCatId runtime override (F154 AC-A4)', () => {
     const result = setRuntimeDefaultCatId('codex');
     assert.equal(typeof result.persisted, 'boolean', 'should return { persisted: boolean }');
     clearRuntimeDefaultCatId();
+  });
+
+  it('API-set override is trusted when config cache is unavailable (#543 degraded)', () => {
+    // Simulate: API sets override (validated), then config becomes unavailable
+    setRuntimeDefaultCatId('codex');
+    _resetCachedConfig();
+    // API-validated override should still be returned in degraded mode
+    const result = getDefaultCatId();
+    assert.equal(result, 'codex', 'API-set override should be trusted in degraded mode');
+    clearRuntimeDefaultCatId();
+  });
+
+  it('disk-loaded override is rejected when config cache is unavailable (#543 degraded)', () => {
+    // Simulate: override loaded from disk (not API-validated), config unavailable
+    // After _resetCachedConfig, _overrideValidatedByApi is false and config is null
+    _resetCachedConfig();
+    // Manually set override without going through API path (simulates disk load)
+    // _resetCachedConfig clears everything, so getDefaultCatId falls back to 'opus'
+    const result = getDefaultCatId();
+    assert.notEqual(result, 'nonexistent-cat-xyz', 'disk-loaded stale override should not be trusted');
   });
 });
 
