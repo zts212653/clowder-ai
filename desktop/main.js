@@ -4,6 +4,7 @@
 const { app, BrowserWindow, Menu, Tray, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const ServiceManager = require('./service-manager');
 
 // Single instance lock — prevent multiple Clowder AI processes
@@ -34,7 +35,7 @@ const PROJECT_ROOT = resolveProjectRoot();
 const FRONTEND_PORT = 3003;
 const API_PORT = 3004;
 const APP_URL = `http://localhost:${FRONTEND_PORT}`;
-const DEBUG_LOG = path.join(process.env.TEMP || 'C:\\Temp', 'clowder-main.log');
+const DEBUG_LOG = path.join(process.env.TEMP || os.tmpdir(), 'clowder-main.log');
 
 function dbg(msg) {
   const line = `[main ${new Date().toISOString()}] ${msg}\n`;

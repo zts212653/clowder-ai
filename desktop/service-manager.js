@@ -5,14 +5,24 @@ const { spawn, execSync } = require('child_process');
 const path = require('path');
 const net = require('net');
 const fs = require('fs');
+const os = require('os');
 const crypto = require('crypto');
 
 const POLL_INTERVAL_MS = 500;
 const MAX_WAIT_MS = 120_000;
 const REDIS_FALLBACK_PORT_CHECK_MS = 5_000;
 
-// Log file for diagnosing service startup issues
-const LOG_FILE = path.join(process.env.TEMP || 'C:\\Temp', 'clowder-desktop.log');
+const IS_WIN = process.platform === 'win32';
+const IS_MAC = process.platform === 'darwin';
+const EXE_SUFFIX = IS_WIN ? '.exe' : '';
+// process.arch: 'arm64' | 'x64' — matches electron-builder ${arch} substitution,
+// so extraResources like bundled/redis-darwin-${arch} map directly to these dirs.
+const ARCH_SEG = process.arch === 'arm64' ? 'arm64' : 'x64';
+
+// Log file for diagnosing service startup issues. os.tmpdir() resolves to
+// %TEMP% on Windows and /var/folders/... on macOS, avoiding the old
+// 'C:\\Temp' fallback that broke on non-Windows.
+const LOG_FILE = path.join(os.tmpdir(), 'clowder-desktop.log');
 function log(msg) {
   const line = `[${new Date().toISOString()}] ${msg}\n`;
   process.stdout.write(line);
@@ -20,25 +30,37 @@ function log(msg) {
 }
 
 // Resolve node executable: prefer installer-bundled node, then system node,
-// then Electron's own node. A bundled node guarantees clean Windows installs
-// (no pre-existing Node.js) still work.
+// then Electron's own node. A bundled node guarantees clean installs (no
+// pre-existing Node.js) still work on both Windows and macOS.
 function resolveNode(projectRoot) {
   if (projectRoot) {
-    const bundled = path.join(projectRoot, 'node', 'node.exe');
-    if (fs.existsSync(bundled)) return bundled;
+    // Windows layout (Inno Setup): {root}/node/node.exe
+    // macOS layout (electron-builder extraResources): {root}/node/bin/node
+    const candidates = IS_WIN
+      ? [path.join(projectRoot, 'node', 'node.exe')]
+      : [path.join(projectRoot, 'node', 'bin', 'node')];
+    for (const c of candidates) {
+      if (fs.existsSync(c)) return c;
+    }
   }
   try {
-    const where = process.platform === 'win32' ? 'where node' : 'which node';
-    const result = execSync(where, { timeout: 5000, encoding: 'utf-8' }).trim();
+    const lookupCmd = IS_WIN ? 'where node' : 'which node';
+    const result = execSync(lookupCmd, { timeout: 5000, encoding: 'utf-8' }).trim();
     const first = result.split('\n')[0].trim();
     if (first && fs.existsSync(first)) return first;
   } catch {}
-  const candidates = [
-    'C:\\Program Files\\nodejs\\node.exe',
-    'C:\\Program Files (x86)\\nodejs\\node.exe',
-    path.join(process.env.APPDATA || '', '..', 'Local', 'Programs', 'node', 'node.exe'),
-  ];
-  for (const c of candidates) {
+  const systemCandidates = IS_WIN
+    ? [
+        'C:\\Program Files\\nodejs\\node.exe',
+        'C:\\Program Files (x86)\\nodejs\\node.exe',
+        path.join(process.env.APPDATA || '', '..', 'Local', 'Programs', 'node', 'node.exe'),
+      ]
+    : [
+        '/opt/homebrew/bin/node', // Apple Silicon Homebrew
+        '/usr/local/bin/node',     // Intel Homebrew / manual install
+        '/usr/bin/node',
+      ];
+  for (const c of systemCandidates) {
     if (fs.existsSync(c)) return c;
   }
   return null; // Signal that Node.js is not available
@@ -131,6 +153,11 @@ class ServiceManager {
   }
 
   _getUserDataDir() {
+    if (IS_MAC) {
+      // macOS convention: app data lives under ~/Library/Application Support/
+      const home = process.env.HOME || os.homedir();
+      return path.join(home, 'Library', 'Application Support', 'Clowder AI');
+    }
     const localAppData = process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
     return path.join(localAppData, 'Clowder AI');
   }
@@ -172,12 +199,14 @@ class ServiceManager {
       }
     }
 
-    // Mirror read-only install-dir resources into the project dir via Windows
-    // junctions. Without these, findMonorepoRoot(cwd) resolves to the project
-    // dir but docs/cat-cafe-skills/packages are not under it — so API routes
-    // like /api/docs, capabilities.ts skill listing, and MCP server spawning
+    // Mirror read-only install-dir resources into the project dir via symlinks.
+    // Without these, findMonorepoRoot(cwd) resolves to the project dir but
+    // docs/cat-cafe-skills/packages are not under it — so API routes like
+    // /api/docs, capabilities.ts skill listing, and MCP server spawning
     // (resolve(projectRoot, 'packages/mcp-server/dist/memory.js')) all fail.
-    // Junctions need no admin privileges, just absolute paths.
+    // Windows uses NTFS junctions (no admin needed, absolute paths). macOS
+    // uses plain directory symlinks.
+    const linkType = IS_WIN ? 'junction' : 'dir';
     const mirrors = ['cat-cafe-skills', 'docs', 'packages'];
     for (const name of mirrors) {
       const src = path.join(this.root, name);
@@ -189,10 +218,10 @@ class ServiceManager {
       try {
         const dstStat = fs.existsSync(dst) ? fs.lstatSync(dst) : null;
         if (dstStat?.isSymbolicLink() || dstStat?.isDirectory()) continue;
-        fs.symlinkSync(src, dst, 'junction');
-        log(`Mirror junction created: ${dst} -> ${src}`);
+        fs.symlinkSync(src, dst, linkType);
+        log(`Mirror ${linkType} created: ${dst} -> ${src}`);
       } catch (err) {
-        log(`Warning: failed to create junction ${dst}: ${err.message}`);
+        log(`Warning: failed to create ${linkType} ${dst}: ${err.message}`);
       }
     }
 
@@ -277,8 +306,12 @@ class ServiceManager {
   }
 
   async _startRedis(userDataDir) {
-    const redisDir = path.join(this.root, '.cat-cafe', 'redis', 'windows');
-    const portableRedis = path.join(redisDir, 'redis-server.exe');
+    // Windows:   .cat-cafe/redis/windows/redis-server.exe
+    // macOS:     .cat-cafe/redis/darwin-{arm64|x64}/redis-server
+    // Platform+arch segment matches what build-mac.sh / Inno Setup place on disk.
+    const platformSeg = IS_WIN ? 'windows' : `darwin-${ARCH_SEG}`;
+    const redisDir = path.join(this.root, '.cat-cafe', 'redis', platformSeg);
+    const portableRedis = path.join(redisDir, `redis-server${EXE_SUFFIX}`);
 
     // Already running — verify it is actually Redis
     if (await this._isPortOpen(6399)) {
@@ -332,8 +365,14 @@ class ServiceManager {
 
   _testRedisBinary(exe, cwd) {
     try {
-      execSync(`"${exe}" --version`, { cwd, timeout: 3000, windowsHide: true, stdio: 'ignore' });
-      return true;
+      // spawnSync handles quoting correctly on both platforms without shell
+      const r = require('child_process').spawnSync(exe, ['--version'], {
+        cwd,
+        timeout: 3000,
+        windowsHide: true,
+        stdio: 'ignore',
+      });
+      return r.status === 0;
     } catch (err) {
       log(`Redis binary test error: ${err.message}`);
       return false;
@@ -380,10 +419,16 @@ class ServiceManager {
     if (nextJs) {
       cmd = nodeExe;
       args = [nextJs, 'start', '--port', String(this.frontendPort)];
-    } else {
+    } else if (IS_WIN) {
       cmd = 'cmd.exe';
       const localNext = path.join(webDir, 'node_modules', '.bin', 'next.cmd');
       args = ['/c', fs.existsSync(localNext) ? localNext : 'next.cmd', 'start', '--port', String(this.frontendPort)];
+    } else {
+      // macOS/Linux fallback: spawn node against any next binary on PATH.
+      // In practice 'deployed' above is always found after pnpm deploy, so
+      // this branch only triggers during broken installs.
+      cmd = nodeExe;
+      args = ['-e', 'console.error("next entry not found — reinstall required"); process.exit(1)'];
     }
 
     log(`Starting Next.js: ${cmd} ${args.join(' ')}`);
