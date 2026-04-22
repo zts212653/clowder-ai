@@ -140,6 +140,11 @@ describe('workspace-security', () => {
     assert.ok(mod.isDenylisted('.git/HEAD'));
   });
 
+  it('isDenylisted blocks normalized POSIX paths on every host platform', () => {
+    assert.ok(mod.isDenylisted('secrets/nested/token.txt'));
+    assert.ok(mod.isDenylisted('.git/hooks/pre-commit'));
+  });
+
   it('isDenylisted allows safe paths', () => {
     assert.ok(!mod.isDenylisted('src/index.ts'));
     assert.ok(!mod.isDenylisted('packages/api/src/routes/workspace.ts'));

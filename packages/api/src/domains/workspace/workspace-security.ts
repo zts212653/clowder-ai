@@ -96,7 +96,7 @@ export async function resolveWorkspacePath(root: string, userPath: string): Prom
  * Returns true if the path should be blocked.
  */
 export function isDenylisted(relPath: string): boolean {
-  const segments = relPath.split(sep);
+  const segments = relPath.split(/[\\/]/);
   for (const seg of segments) {
     if (DENYLIST_DIRS.has(seg)) return true;
     for (const pat of DENYLIST_PATTERNS) {
