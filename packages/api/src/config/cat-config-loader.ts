@@ -630,6 +630,8 @@ let _defaultCatId: CatId | null = null;
 let _runtimeDefaultCatId: CatId | null = null;
 /** #543: Whether we've attempted to load the persisted override from disk. */
 let _defaultCatOverrideLoaded = false;
+/** True when the current override was set via API (already validated); false when loaded from disk. */
+let _overrideValidatedByApi = false;
 
 const DEFAULT_CAT_OVERRIDE_FILE = '.cat-cafe/default-cat-override.json';
 
@@ -672,10 +674,11 @@ function persistDefaultCatOverride(catId: CatId | null): boolean {
 }
 
 /** #543 P1: Check that a catId exists in the loaded config AND is roster-available.
- *  When config is unavailable (degraded startup), trusts the override to avoid silent fallback. */
+ *  When config is unavailable (degraded startup), only trusts API-validated overrides;
+ *  disk-loaded overrides are rejected since they may be stale. */
 function isCatKnownAndAvailable(catId: string): boolean {
   const cfg = getCachedConfig();
-  if (!cfg) return true; // Degraded: trust in-memory override rather than silently ignoring it
+  if (!cfg) return _overrideValidatedByApi;
   if (!_catIdToBreed || _catIdToBreedSource !== cfg) {
     _catIdToBreed = buildCatIdToBreedIndex(cfg);
     _catIdToBreedSource = cfg;
@@ -713,7 +716,8 @@ export function getDefaultCatId(): CatId {
  *  Returns { persisted: false } when the disk write failed (#543 P2). */
 export function setRuntimeDefaultCatId(catId: string): { persisted: boolean } {
   _runtimeDefaultCatId = createCatId(catId);
-  _defaultCatOverrideLoaded = true; // Prevent stale disk data from overwriting this in-memory value
+  _defaultCatOverrideLoaded = true;
+  _overrideValidatedByApi = true; // API path already checked catRegistry + availability
   return { persisted: persistDefaultCatOverride(_runtimeDefaultCatId) };
 }
 
@@ -722,6 +726,7 @@ export function setRuntimeDefaultCatId(catId: string): { persisted: boolean } {
 export function clearRuntimeDefaultCatId(): { persisted: boolean } {
   _runtimeDefaultCatId = null;
   _defaultCatOverrideLoaded = true;
+  _overrideValidatedByApi = false;
   return { persisted: persistDefaultCatOverride(null) };
 }
 
@@ -880,6 +885,7 @@ export function _resetCachedConfig(): void {
   _defaultCatId = null;
   _runtimeDefaultCatId = null;
   _defaultCatOverrideLoaded = false;
+  _overrideValidatedByApi = false;
   _cachedRoster = null;
   _cachedReviewPolicy = null;
   _cachedCoCreator = null;
