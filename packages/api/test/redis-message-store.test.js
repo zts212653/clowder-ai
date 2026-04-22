@@ -307,7 +307,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     const base = Date.now();
     const threadId = 'thread-score-deliver-557';
 
-    // msgA sent first (base), msgB sent second (base+100)
+    // msgA sent first (base), msgB sent second (base+100) — both queued
     const msgA = await store.append({
       userId: 'u',
       catId: null,
@@ -315,6 +315,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       mentions: [],
       timestamp: base,
       threadId,
+      deliveryStatus: 'queued',
     });
     const msgB = await store.append({
       userId: 'u',
@@ -323,6 +324,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       mentions: [],
       timestamp: base + 100,
       threadId,
+      deliveryStatus: 'queued',
     });
 
     // Deliver in REVERSE order: msgB delivered early (base+50), msgA delivered late (base+200)
@@ -332,10 +334,14 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
 
     // With deliveredAt scoring: msgB(50) < msgA(200) — B sorts before A
     // With send-time scoring: msgA(0) < msgB(100) — A sorts before B
+    // NOTE: queued messages are filtered from getByThread (isDelivered check),
+    // but after markDelivered they become 'delivered' and are visible.
     const all = await store.getByThread(threadId, 10);
     const order = all.map((m) => m.id);
     const idxA = order.indexOf(msgA.id);
     const idxB = order.indexOf(msgB.id);
+    assert.ok(idxA >= 0, 'msgA should be in results after delivery');
+    assert.ok(idxB >= 0, 'msgB should be in results after delivery');
     assert.ok(idxB < idxA, 'msgB (deliveredAt=base+50) should sort before msgA (deliveredAt=base+200)');
   });
 
@@ -343,7 +349,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     const base = Date.now();
     const threadId = 'thread-cursor-deliver-557';
 
-    // agentReply at base (simulates invocation start time)
+    // agentReply at base (simulates invocation start time) — already delivered (no deliveryStatus)
     const agentReply = await store.append({
       userId: 'u',
       catId: 'opus',
@@ -352,7 +358,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       timestamp: base,
       threadId,
     });
-    // queuedMsg sent at base+10, delivered at base+500 (after agent reply completes)
+    // queuedMsg sent at base+10, queued — delivered at base+500 (after agent reply)
     const queuedMsg = await store.append({
       userId: 'u',
       catId: null,
@@ -360,6 +366,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       mentions: [],
       timestamp: base + 10,
       threadId,
+      deliveryStatus: 'queued',
     });
     await store.markDelivered(queuedMsg.id, base + 500);
 
