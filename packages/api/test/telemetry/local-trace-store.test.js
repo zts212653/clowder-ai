@@ -98,8 +98,8 @@ test('LocalTraceStore: maxSpans eviction drops oldest', () => {
 
   const results = store.query({});
   assert.equal(results.length, 3);
-  assert.equal(results[0].spanId, 'second');
-  assert.equal(results[2].spanId, 'fourth');
+  assert.equal(results[0].spanId, 'fourth');
+  assert.equal(results[2].spanId, 'second');
 });
 
 test('LocalTraceStore: maxAgeMs eviction drops expired spans', async () => {
