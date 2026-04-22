@@ -83,8 +83,8 @@ function OverviewPanel() {
 
   const latest = snapshots.length > 0 ? snapshots[snapshots.length - 1]!.metrics : {};
 
-  const taskOk = sumByPrefix(latest, 'cat_cafe_task_completed', 'status="ok"');
-  const taskErr = sumByPrefix(latest, 'cat_cafe_task_completed', 'status="error"');
+  const invOk = sumByPrefix(latest, 'cat_cafe_invocation_completed', 'status="ok"');
+  const invErr = sumByPrefix(latest, 'cat_cafe_invocation_completed', 'status="error"');
   const invocations = sumByPrefix(latest, 'cat_cafe_cat_invocation_count');
 
   if (loading) return <p className="text-sm text-cafe-muted">...</p>;
@@ -92,18 +92,18 @@ function OverviewPanel() {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <MetricCard label="Task (ok)" value={String(taskOk)} />
+        <MetricCard label="Invocation (ok)" value={String(invOk)} />
         <MetricCard
-          label="Task (error)"
-          value={String(taskErr)}
-          sub={taskOk + taskErr > 0 ? `${((taskErr / (taskOk + taskErr)) * 100).toFixed(1)}% error` : undefined}
+          label="Invocation (error)"
+          value={String(invErr)}
+          sub={invOk + invErr > 0 ? `${((invErr / (invOk + invErr)) * 100).toFixed(1)}% error` : undefined}
         />
         <MetricCard label="Invocations" value={String(invocations)} />
         <MetricCard label="Snapshots" value={`${snapshots.length}`} sub="(last 30min)" />
       </div>
 
       {snapshots.length > 1 && (
-        <TrendChart snapshots={snapshots} metricPrefix="cat_cafe_task_completed" label="Task Completed" />
+        <TrendChart snapshots={snapshots} metricPrefix="cat_cafe_invocation_completed" label="Invocation Completed" />
       )}
     </div>
   );

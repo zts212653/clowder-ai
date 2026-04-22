@@ -38,11 +38,11 @@ import {
   activeInvocations,
   catInvocationCount,
   catResponseDuration,
+  invocationCompleted,
   invocationDuration,
   llmCallDuration,
   sessionRounds,
-  taskCompleted,
-  taskDuration,
+  threadDuration,
   tokenUsage,
 } from '../../../../../infrastructure/telemetry/instruments.js';
 import { normalizeModel } from '../../../../../infrastructure/telemetry/model-normalizer.js';
@@ -1891,10 +1891,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     activeInvocations.add(-1, { [AGENT_ID]: catId, [OPERATION_NAME]: 'invoke' });
 
     // F153: Product-level instruments
-    taskCompleted.add(1, { [AGENT_ID]: catId, [STATUS]: otelStatus });
+    invocationCompleted.add(1, { [AGENT_ID]: catId, [STATUS]: otelStatus });
     catResponseDuration.record(finalDurationMs / 1000, { [AGENT_ID]: catId, [STATUS]: otelStatus });
     if (threadCreatedAt) {
-      taskDuration.record((Date.now() - threadCreatedAt) / 1000, { [AGENT_ID]: catId, [STATUS]: otelStatus });
+      threadDuration.record((Date.now() - threadCreatedAt) / 1000, { [AGENT_ID]: catId, [STATUS]: otelStatus });
     }
 
     // F089: Mark agent pane status when invocation completes

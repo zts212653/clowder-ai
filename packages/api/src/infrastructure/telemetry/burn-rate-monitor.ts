@@ -134,7 +134,7 @@ export class BurnRateMonitor {
     let okTotal = 0;
     let errorTotal = 0;
     for (const [key, value] of Object.entries(metrics)) {
-      if (!key.startsWith('cat_cafe_task_completed')) continue;
+      if (!key.startsWith('cat_cafe_invocation_completed')) continue;
       if (key.includes('status="ok"')) okTotal += value;
       else if (key.includes('status="error"')) errorTotal += value;
     }
@@ -144,12 +144,8 @@ export class BurnRateMonitor {
   }
 
   private findP95Latency(metrics: Record<string, number>): number | null {
-    for (const [key, value] of Object.entries(metrics)) {
-      if (key.startsWith('cat_cafe_cat_response_duration') && key.includes('le="120"')) {
-        return value;
-      }
-    }
-    // Fallback: check if there's a direct p95 summary quantile
+    // Only use summary quantile — histogram bucket values are cumulative counts,
+    // not latency seconds. Using le="120" count as seconds would cause false alerts.
     for (const [key, value] of Object.entries(metrics)) {
       if (key.startsWith('cat_cafe_cat_response_duration') && key.includes('quantile="0.95"')) {
         return value;

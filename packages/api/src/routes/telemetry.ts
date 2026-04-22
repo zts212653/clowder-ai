@@ -12,6 +12,12 @@ import type { FastifyPluginAsync } from 'fastify';
 import { hmacId } from '../infrastructure/telemetry/hmac.js';
 import type { LocalTraceStore } from '../infrastructure/telemetry/local-trace-store.js';
 import type { MetricsSnapshotStore } from '../infrastructure/telemetry/metrics-snapshot-store.js';
+import { parsePrometheusText } from '../infrastructure/telemetry/metrics-snapshot-store.js';
+
+export interface ReadinessResult {
+  status: 'ready' | 'degraded';
+  checks: Record<string, { ok: boolean; ms: number; error?: string }>;
+}
 
 export interface TelemetryRoutesOptions {
   /** LocalTraceStore ring buffer — injected from initTelemetry(). */
@@ -20,6 +26,8 @@ export interface TelemetryRoutesOptions {
   getMetricsText?: () => Promise<string>;
   /** MetricsSnapshotStore for time-series trend data. */
   metricsSnapshotStore?: MetricsSnapshotStore | null;
+  /** Readiness probe — same checks as /ready. */
+  checkReadiness?: () => Promise<ReadinessResult>;
 }
 
 /**
@@ -127,21 +135,52 @@ export const telemetryRoutes: FastifyPluginAsync<TelemetryRoutesOptions> = async
   });
 
   /**
-   * GET /api/telemetry/health — aggregated health status.
-   * Combines /ready probe info + trace store stats + uptime.
+   * GET /api/telemetry/health — aggregated health verdict.
+   * Combines readiness probe + trace/metrics store stats + recent error rate.
    */
   app.get('/api/telemetry/health', async (request, reply) => {
     if (!requireSession(request, reply)) return;
 
+    const readiness = opts.checkReadiness ? await opts.checkReadiness() : null;
     const traceStats = opts.traceStore?.stats() ?? null;
     const snapshotStats = opts.metricsSnapshotStore?.stats() ?? null;
+    const errorRate = await computeRecentErrorRate(opts.getMetricsText);
 
+    const otelEnabled = !process.env.OTEL_SDK_DISABLED;
+    const readinessOk = !readiness || readiness.status === 'ready';
+    const errorRateOk = errorRate === null || errorRate < 0.3;
+    const healthy = readinessOk && errorRateOk;
+
+    if (!healthy) reply.code(503);
     return {
+      status: healthy ? 'healthy' : 'degraded',
       uptime: process.uptime(),
+      otelEnabled,
+      readiness: readiness ?? undefined,
+      errorRate,
       traceStore: traceStats,
       metricsSnapshotStore: snapshotStats,
-      otelEnabled: !process.env.OTEL_SDK_DISABLED,
       timestamp: Date.now(),
     };
   });
 };
+
+async function computeRecentErrorRate(getMetricsText?: () => Promise<string>): Promise<number | null> {
+  if (!getMetricsText) return null;
+  try {
+    const text = await getMetricsText();
+    const metrics = parsePrometheusText(text);
+    let okTotal = 0;
+    let errorTotal = 0;
+    for (const [key, value] of Object.entries(metrics)) {
+      if (!key.startsWith('cat_cafe_invocation_completed')) continue;
+      if (key.includes('status="ok"')) okTotal += value;
+      else if (key.includes('status="error"')) errorTotal += value;
+    }
+    const total = okTotal + errorTotal;
+    if (total === 0) return null;
+    return errorTotal / total;
+  } catch {
+    return null;
+  }
+}

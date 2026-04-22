@@ -131,13 +131,15 @@ export const antigravityStreamErrorExpired = lazy(() =>
   }),
 );
 
-export const taskCompleted = lazy(() =>
-  meter().createCounter('cat_cafe.task.completed', { description: 'Task completion count by cat and outcome' }),
+export const invocationCompleted = lazy(() =>
+  meter().createCounter('cat_cafe.invocation.completed', {
+    description: 'Invocation completion count by cat and outcome',
+  }),
 );
 
-export const taskDuration = lazy(() =>
-  meter().createHistogram('cat_cafe.task.duration', {
-    description: 'Task duration from thread creation to invocation end',
+export const threadDuration = lazy(() =>
+  meter().createHistogram('cat_cafe.thread.duration', {
+    description: 'Thread age from creation to invocation end',
     unit: 's',
   }),
 );

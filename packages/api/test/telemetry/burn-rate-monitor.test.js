@@ -18,7 +18,10 @@ const { BurnRateMonitor } = await import('../../dist/infrastructure/telemetry/bu
 function makeMetricsText({ errorRate = 0, p95 = null, activeInvocations = null } = {}) {
   const ok = errorRate < 1 ? Math.round((1 - errorRate) * 100) : 0;
   const error = Math.round(errorRate * 100);
-  const lines = [`cat_cafe_task_completed{status="ok"} ${ok}`, `cat_cafe_task_completed{status="error"} ${error}`];
+  const lines = [
+    `cat_cafe_invocation_completed{status="ok"} ${ok}`,
+    `cat_cafe_invocation_completed{status="error"} ${error}`,
+  ];
   if (p95 !== null) {
     lines.push(`cat_cafe_cat_response_duration{quantile="0.95"} ${p95}`);
   }

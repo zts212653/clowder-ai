@@ -258,9 +258,11 @@ async function main(): Promise<void> {
   // F152: Readiness check — verifies dependencies are reachable.
   // evidenceStoreRef is set after memoryServices init; handler runs at request time.
   let evidenceStoreRef: { health(): Promise<boolean> } | null = null;
-  app.get('/ready', async (_request, reply) => {
+  async function checkReadiness(): Promise<{
+    status: 'ready' | 'degraded';
+    checks: Record<string, { ok: boolean; ms: number; error?: string }>;
+  }> {
     const checks: Record<string, { ok: boolean; ms: number; error?: string }> = {};
-    // Redis probe
     if (redisClient) {
       const t0 = Date.now();
       try {
@@ -270,9 +272,8 @@ async function main(): Promise<void> {
         checks.redis = { ok: false, ms: Date.now() - t0, error: String(err) };
       }
     } else {
-      checks.redis = { ok: true, ms: 0 }; // memory mode, always ready
+      checks.redis = { ok: true, ms: 0 };
     }
-    // SQLite probe
     if (evidenceStoreRef) {
       const t0 = Date.now();
       try {
@@ -283,8 +284,12 @@ async function main(): Promise<void> {
       }
     }
     const allOk = Object.values(checks).every((c) => c.ok);
-    if (!allOk) reply.code(503);
-    return { status: allOk ? 'ready' : 'degraded', timestamp: Date.now(), checks };
+    return { status: allOk ? 'ready' : 'degraded', checks };
+  }
+  app.get('/ready', async (_request, reply) => {
+    const result = await checkReadiness();
+    if (result.status !== 'ready') reply.code(503);
+    return { ...result, timestamp: Date.now() };
   });
 
   // Create invocation tracker for cancellation support
@@ -1266,6 +1271,7 @@ async function main(): Promise<void> {
     traceStore: telemetryHandle.traceStore,
     getMetricsText: telemetryHandle.getMetricsText ?? undefined,
     metricsSnapshotStore: telemetryHandle.metricsSnapshotStore ?? undefined,
+    checkReadiness,
   });
 
   // F075 Phase B+C: Game + Achievement stores

@@ -101,8 +101,10 @@ export class LocalTraceStore {
     const limit = filter.limit ?? 100;
     const results: TraceSpanDTO[] = [];
 
-    for (const dto of this.buffer) {
+    // Iterate newest-first so the UI shows most recent spans
+    for (let i = this.buffer.length - 1; i >= 0; i--) {
       if (results.length >= limit) break;
+      const dto = this.buffer[i]!;
 
       if (filter.traceId && dto.traceId !== filter.traceId) continue;
       if (filter.invocationId && dto.attributes.invocationId !== filter.invocationId) continue;
