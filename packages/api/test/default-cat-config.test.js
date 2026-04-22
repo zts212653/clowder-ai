@@ -71,23 +71,43 @@ describe('getDefaultCatId runtime override (F154 AC-A4)', () => {
   });
 
   it('API-set override is trusted when config cache is unavailable (#543 degraded)', () => {
-    // Simulate: API sets override (validated), then config becomes unavailable
-    setRuntimeDefaultCatId('codex');
-    _resetCachedConfig();
-    // API-validated override should still be returned in degraded mode
-    const result = getDefaultCatId();
-    assert.equal(result, 'codex', 'API-set override should be trusted in degraded mode');
-    clearRuntimeDefaultCatId();
+    const origPath = process.env.CAT_TEMPLATE_PATH;
+    try {
+      // Point to non-existent template → getCachedConfig() returns null (degraded mode)
+      process.env.CAT_TEMPLATE_PATH = '/tmp/__nonexistent_cat_template__.json';
+      _resetCachedConfig();
+      // API sets override AFTER config is degraded (real scenario: server starts broken,
+      // then owner writes override via PUT which passes catRegistry validation at route level)
+      setRuntimeDefaultCatId('codex');
+      // API-validated override should still be returned in degraded mode
+      const result = getDefaultCatId();
+      assert.equal(result, 'codex', 'API-set override should be trusted in degraded mode');
+    } finally {
+      if (origPath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = origPath;
+      clearRuntimeDefaultCatId();
+      _resetCachedConfig();
+    }
   });
 
   it('disk-loaded override is rejected when config cache is unavailable (#543 degraded)', () => {
-    // Simulate: override loaded from disk (not API-validated), config unavailable
-    // After _resetCachedConfig, _overrideValidatedByApi is false and config is null
-    _resetCachedConfig();
-    // Manually set override without going through API path (simulates disk load)
-    // _resetCachedConfig clears everything, so getDefaultCatId falls back to 'opus'
-    const result = getDefaultCatId();
-    assert.notEqual(result, 'nonexistent-cat-xyz', 'disk-loaded stale override should not be trusted');
+    const origPath = process.env.CAT_TEMPLATE_PATH;
+    try {
+      // Set override via API first, then clear the validated flag to simulate disk-load state
+      setRuntimeDefaultCatId('codex');
+      // Point to non-existent template → degraded mode
+      process.env.CAT_TEMPLATE_PATH = '/tmp/__nonexistent_cat_template__.json';
+      _resetCachedConfig();
+      // After reset: _overrideValidatedByApi=false, config=null
+      // getDefaultCatId should NOT return the override (it was "disk-loaded", not API-validated)
+      const result = getDefaultCatId();
+      assert.notEqual(result, 'codex', 'disk-loaded override should not be trusted in degraded mode');
+    } finally {
+      if (origPath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = origPath;
+      clearRuntimeDefaultCatId();
+      _resetCachedConfig();
+    }
   });
 });
 

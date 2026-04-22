@@ -7,11 +7,15 @@ export function CopyIdButton({ messageId }: { messageId: string }) {
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
 
-  const handleClick = useCallback(() => {
-    void navigator.clipboard.writeText(messageId);
-    setCopied(true);
-    clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => setCopied(false), 1500);
+  const handleClick = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(messageId);
+      setCopied(true);
+      clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard unavailable (insecure context / permission denied) — no-op
+    }
   }, [messageId]);
 
   return (
