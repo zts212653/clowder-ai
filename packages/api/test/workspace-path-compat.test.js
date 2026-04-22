@@ -1,32 +1,38 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
-import { isAbsoluteFilesystemPath, normalizeWorkspaceRelativePath } from '../../shared/src/utils/workspace-paths.ts';
-import { isDenylisted } from '../src/domains/workspace/workspace-security.ts';
+import { before, describe, it } from 'node:test';
+
+let sharedMod;
+let workspaceSecurityMod;
+
+before(async () => {
+  sharedMod = await import('../../shared/dist/utils/workspace-paths.js');
+  workspaceSecurityMod = await import('../dist/domains/workspace/workspace-security.js');
+});
 
 describe('workspace path compatibility helpers', () => {
   it('accepts Windows drive-letter absolute paths', () => {
-    assert.equal(isAbsoluteFilesystemPath('D:\\code\\clowder-ai'), true);
+    assert.equal(sharedMod.isAbsoluteFilesystemPath('D:\\code\\clowder-ai'), true);
   });
 
   it('rejects relative Windows-looking paths', () => {
-    assert.equal(isAbsoluteFilesystemPath('code\\clowder-ai'), false);
+    assert.equal(sharedMod.isAbsoluteFilesystemPath('code\\clowder-ai'), false);
   });
 
   it('normalizes Windows separators to POSIX separators', () => {
-    assert.equal(normalizeWorkspaceRelativePath('packages\\web\\src\\App.tsx'), 'packages/web/src/App.tsx');
+    assert.equal(sharedMod.normalizeWorkspaceRelativePath('packages\\web\\src\\App.tsx'), 'packages/web/src/App.tsx');
   });
 
   it('preserves POSIX relative paths', () => {
-    assert.equal(normalizeWorkspaceRelativePath('packages/web/src/App.tsx'), 'packages/web/src/App.tsx');
+    assert.equal(sharedMod.normalizeWorkspaceRelativePath('packages/web/src/App.tsx'), 'packages/web/src/App.tsx');
   });
 
   it('leaves dot paths untouched', () => {
-    assert.equal(normalizeWorkspaceRelativePath('.'), '.');
+    assert.equal(sharedMod.normalizeWorkspaceRelativePath('.'), '.');
   });
 
   it('keeps denylist checks working for normalized POSIX workspace paths', () => {
-    assert.equal(isDenylisted('secrets/nested/token.txt'), true);
-    assert.equal(isDenylisted('.git/hooks/pre-commit'), true);
-    assert.equal(isDenylisted('packages/api/src/routes/workspace.ts'), false);
+    assert.equal(workspaceSecurityMod.isDenylisted('secrets/nested/token.txt'), true);
+    assert.equal(workspaceSecurityMod.isDenylisted('.git/hooks/pre-commit'), true);
+    assert.equal(workspaceSecurityMod.isDenylisted('packages/api/src/routes/workspace.ts'), false);
   });
 });
