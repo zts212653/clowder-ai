@@ -767,10 +767,12 @@ export class RedisMessageStore {
       deliveredAt: String(deliveredAt),
       deliveryStatus: 'delivered',
     });
-    // #557: Do NOT update sorted set scores — keep messages at their original
-    // send-time position. Overwriting with deliveredAt caused queued messages to
-    // jump after their own replies in the UI. deliveredAt is retained as a hash
-    // field for diagnostics/UI status display.
+    // Update sorted set scores so history queries return messages at delivery
+    // position, not original send-time slot (Bug A: queue message ordering).
+    const scoreStr = String(deliveredAt);
+    pipeline.zadd(MessageKeys.thread(msg.threadId), scoreStr, id);
+    pipeline.zadd(MessageKeys.TIMELINE, scoreStr, id);
+    pipeline.zadd(MessageKeys.user(msg.userId), scoreStr, id);
     await pipeline.exec();
     msg.deliveredAt = deliveredAt;
     msg.deliveryStatus = 'delivered';

@@ -493,6 +493,10 @@ export async function* routeSerial(
         'Invoking cat via invokeSingleCat',
       );
       const leakedPayloadStripper = createLeakedToolCallStreamStripper();
+      // #557: Capture invocation start time for message timestamp.
+      // Using start time (not stream-completion time) keeps agent replies
+      // chronologically before queued user messages that arrive after delivery.
+      const invocationStartedAt = Date.now();
       for await (const msg of invokeSingleCat(deps.invocationDeps, {
         catId,
         service: getService(deps.services, catId),
@@ -923,7 +927,8 @@ export async function* routeSerial(
           }
         }
 
-        const storedTimestamp = Date.now();
+        // #557: Use invocation start time so agent reply sorts before queued user messages
+        const storedTimestamp = invocationStartedAt;
 
         // F061: Detect @co-creator mentions in agent response for browser notification
         mentionsUser = storedContent ? detectUserMention(storedContent) : false;
@@ -1176,7 +1181,7 @@ export async function* routeSerial(
               content: '',
               mentions: [],
               origin: 'stream',
-              timestamp: Date.now(),
+              timestamp: invocationStartedAt, // #557: start time, not completion time
               threadId,
               ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
               ...(thinkingContent ? { thinking: thinkingContent } : {}),
@@ -1249,7 +1254,7 @@ export async function* routeSerial(
             content: '',
             mentions: [],
             origin: 'stream',
-            timestamp: Date.now(),
+            timestamp: invocationStartedAt, // #557: start time, not completion time
             threadId,
             ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
             ...(firstMetadata ? { metadata: firstMetadata } : {}),
