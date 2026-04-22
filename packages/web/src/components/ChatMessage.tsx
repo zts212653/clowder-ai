@@ -11,6 +11,7 @@ import { CatAvatar } from './CatAvatar';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
 import { ConnectorBubble } from './ConnectorBubble';
 import { ContentBlocks } from './ContentBlocks';
+import { CopyIdButton } from './CopyIdButton';
 import { CliOutputBlock } from './cli-output/CliOutputBlock';
 import { toCliEvents } from './cli-output/toCliEvents';
 import { DirectionPill } from './DirectionPill';
@@ -208,7 +209,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
     const coCreatorPrimary = coCreator.color?.primary ?? '#815b5b';
     const coCreatorSecondary = coCreator.color?.secondary ?? '#FFDDD2';
     return (
-      <div data-message-id={message.id} className="flex justify-end gap-2 mb-4 items-start">
+      <div data-message-id={message.id} className="group flex justify-end gap-2 mb-4 items-start">
         <div className="max-w-[75%]">
           <div className="flex justify-end items-center gap-2 mb-1">
             {isWhisper && (
@@ -222,6 +223,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
               <ReplyPill replyPreview={message.replyPreview} replyToId={message.replyTo} getCatById={getCatById} />
             )}
             <span className="text-xs text-cafe-muted">{formatDualTime(message.timestamp, message.deliveredAt)}</span>
+            <CopyIdButton messageId={message.id} />
             <span className="text-xs font-semibold" style={{ color: coCreatorPrimary }}>
               {coCreator.name}
             </span>
@@ -296,6 +298,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
                 {catStyle.label}
               </span>
               <span className="text-xs text-cafe-muted">{formatTime(message.timestamp)}</span>
+              <CopyIdButton messageId={message.id} />
               {isWhisper && (
                 <span
                   className={`text-xs px-1.5 py-0.5 rounded ${isRevealed ? 'bg-cafe-surface-elevated text-cafe-secondary' : 'bg-amber-100 text-amber-600'}`}
