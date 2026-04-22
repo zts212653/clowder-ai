@@ -76,7 +76,7 @@ describe('getDefaultCatId runtime override (F154 AC-A4)', () => {
     try {
       // Point to non-existent template → getCachedConfig() returns null (degraded mode)
       process.env.CAT_TEMPLATE_PATH = '/tmp/__nonexistent_cat_template__.json';
-      _resetCachedConfig();
+      _resetCachedConfig({ includeOverride: true });
       // API sets override AFTER config is degraded (real scenario: server starts broken,
       // then owner writes override via PUT which passes catRegistry validation at route level)
       setRuntimeDefaultCatId('codex');
@@ -87,7 +87,7 @@ describe('getDefaultCatId runtime override (F154 AC-A4)', () => {
       if (origPath === undefined) delete process.env.CAT_TEMPLATE_PATH;
       else process.env.CAT_TEMPLATE_PATH = origPath;
       clearRuntimeDefaultCatId();
-      _resetCachedConfig();
+      _resetCachedConfig({ includeOverride: true });
     }
   });
 
@@ -101,7 +101,7 @@ describe('getDefaultCatId runtime override (F154 AC-A4)', () => {
       writeFileSync(overrideFile, JSON.stringify({ catId: 'codex' }) + '\n', 'utf-8');
       // Point to non-existent template → degraded mode; override file is at same root
       process.env.CAT_TEMPLATE_PATH = '/tmp/__nonexistent_cat_template__.json';
-      _resetCachedConfig();
+      _resetCachedConfig({ includeOverride: true });
       // loadDefaultCatOverride() will find the file and set _runtimeDefaultCatId='codex',
       // but _overrideValidatedByApi remains false (disk-loaded, not API-set).
       // With config unavailable, isCatKnownAndAvailable should reject it.
@@ -113,7 +113,7 @@ describe('getDefaultCatId runtime override (F154 AC-A4)', () => {
       if (origPath === undefined) delete process.env.CAT_TEMPLATE_PATH;
       else process.env.CAT_TEMPLATE_PATH = origPath;
       clearRuntimeDefaultCatId();
-      _resetCachedConfig();
+      _resetCachedConfig({ includeOverride: true });
     }
   });
 });

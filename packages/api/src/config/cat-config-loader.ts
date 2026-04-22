@@ -875,7 +875,7 @@ export function getAcpConfig(catId: string): AcpVariantConfig | undefined {
 }
 
 /** Reset cached config (for testing) */
-export function _resetCachedConfig(): void {
+export function _resetCachedConfig(opts?: { includeOverride?: boolean }): void {
   _cachedConfig = null;
   _configLoadFailed = false;
   _catIdToBreed = null;
@@ -883,9 +883,13 @@ export function _resetCachedConfig(): void {
   _catIdToVariant = null;
   _catIdToVariantSource = null;
   _defaultCatId = null;
-  _runtimeDefaultCatId = null;
-  _defaultCatOverrideLoaded = false;
-  _overrideValidatedByApi = false;
+  // Override state is independent of config cache — preserve across catalog refreshes.
+  // Tests that need fresh override state pass { includeOverride: true }.
+  if (opts?.includeOverride) {
+    _runtimeDefaultCatId = null;
+    _defaultCatOverrideLoaded = false;
+    _overrideValidatedByApi = false;
+  }
   _cachedRoster = null;
   _cachedReviewPolicy = null;
   _cachedCoCreator = null;
