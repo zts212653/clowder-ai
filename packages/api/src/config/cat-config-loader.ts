@@ -654,18 +654,20 @@ function loadDefaultCatOverride(): void {
   }
 }
 
-/** #543: Persist override to disk so it survives restarts. */
-function persistDefaultCatOverride(catId: CatId | null): void {
+/** #543: Persist override to disk so it survives restarts. Returns false on write failure. */
+function persistDefaultCatOverride(catId: CatId | null): boolean {
   try {
     const filePath = defaultCatOverridePath();
     if (catId === null) {
       if (existsSync(filePath)) unlinkSync(filePath);
-      return;
+      return true;
     }
     mkdirSync(dirname(filePath), { recursive: true });
     writeFileSync(filePath, `${JSON.stringify({ catId })}\n`, 'utf-8');
+    return true;
   } catch (err) {
     log.warn({ err }, 'failed to persist default cat override');
+    return false;
   }
 }
 
@@ -676,7 +678,8 @@ function persistDefaultCatOverride(catId: CatId | null): void {
  */
 export function getDefaultCatId(): CatId {
   loadDefaultCatOverride();
-  if (_runtimeDefaultCatId) return _runtimeDefaultCatId;
+  // #543 P1: Skip persisted override if the cat became unavailable after it was set
+  if (_runtimeDefaultCatId && isCatAvailable(_runtimeDefaultCatId)) return _runtimeDefaultCatId;
   if (_defaultCatId) return _defaultCatId;
 
   const config = getCachedConfig();
@@ -692,10 +695,11 @@ export function getDefaultCatId(): CatId {
   return createCatId('opus');
 }
 
-/** F154 AC-A4: Set runtime default cat override. Owner-gated at the API layer. */
-export function setRuntimeDefaultCatId(catId: string): void {
+/** F154 AC-A4: Set runtime default cat override. Owner-gated at the API layer.
+ *  Returns { persisted: false } when the disk write failed (#543 P2). */
+export function setRuntimeDefaultCatId(catId: string): { persisted: boolean } {
   _runtimeDefaultCatId = createCatId(catId);
-  persistDefaultCatOverride(_runtimeDefaultCatId);
+  return { persisted: persistDefaultCatOverride(_runtimeDefaultCatId) };
 }
 
 /** F154 AC-A4: Clear runtime override — falls back to breeds[0]. */
@@ -704,10 +708,10 @@ export function clearRuntimeDefaultCatId(): void {
   persistDefaultCatOverride(null);
 }
 
-/** F154 AC-A4: Check whether a runtime override is active. */
+/** F154 AC-A4: Check whether a runtime override is active and the cat is available. */
 export function hasRuntimeDefaultCatOverride(): boolean {
   loadDefaultCatOverride();
-  return _runtimeDefaultCatId !== null;
+  return _runtimeDefaultCatId !== null && isCatAvailable(_runtimeDefaultCatId);
 }
 
 /** Unified owner userId: configured env or single-user fallback. */

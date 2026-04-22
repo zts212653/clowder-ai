@@ -18,6 +18,7 @@ import {
   getDefaultCatId,
   getOwnerUserId,
   hasRuntimeDefaultCatOverride,
+  isCatAvailable,
   setRuntimeDefaultCatId,
 } from '../config/cat-config-loader.js';
 import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
@@ -397,7 +398,18 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
       return { error: `Unknown catId: ${parsed.data.catId}` };
     }
 
-    setRuntimeDefaultCatId(parsed.data.catId);
-    return { ok: true, catId: parsed.data.catId, isOverride: true };
+    // #543 P1: Reject unavailable cats so the global fallback can't route to a disabled cat
+    if (!isCatAvailable(parsed.data.catId)) {
+      reply.status(400);
+      return { error: `Cat ${parsed.data.catId} is unavailable` };
+    }
+
+    const { persisted } = setRuntimeDefaultCatId(parsed.data.catId);
+    return {
+      ok: true,
+      catId: parsed.data.catId,
+      isOverride: true,
+      ...(persisted ? {} : { warning: 'Override applied in memory but failed to persist — will be lost on restart' }),
+    };
   });
 }
