@@ -146,7 +146,10 @@ export function CatOverviewTab({
           body: JSON.stringify({ catId }),
         });
         if (res.ok) {
+          const data = (await res.json()) as { warning?: string };
           setDefaultCatId(catId);
+          // #543 P2: Surface persist failure so user knows override won't survive restart
+          if (data.warning) setDefaultCatSaveError(data.warning);
         } else {
           setDefaultCatSaveError('保存失败，请重试');
         }

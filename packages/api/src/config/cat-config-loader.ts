@@ -671,6 +671,17 @@ function persistDefaultCatOverride(catId: CatId | null): boolean {
   }
 }
 
+/** #543 P1: Check that a catId exists in the loaded config AND is roster-available. */
+function isCatKnownAndAvailable(catId: string): boolean {
+  const cfg = getCachedConfig();
+  if (!cfg) return false;
+  if (!_catIdToBreed || _catIdToBreedSource !== cfg) {
+    _catIdToBreed = buildCatIdToBreedIndex(cfg);
+    _catIdToBreedSource = cfg;
+  }
+  return _catIdToBreed.has(catId) && isCatAvailable(catId);
+}
+
 /**
  * Get the default cat ID.
  * Priority: runtime override (F154) → breeds[0].defaultVariantId (F32-b R4).
@@ -678,8 +689,10 @@ function persistDefaultCatOverride(catId: CatId | null): boolean {
  */
 export function getDefaultCatId(): CatId {
   loadDefaultCatOverride();
-  // #543 P1: Skip persisted override if the cat became unavailable after it was set
-  if (_runtimeDefaultCatId && isCatAvailable(_runtimeDefaultCatId)) return _runtimeDefaultCatId;
+  // #543 P1: Skip persisted override if the catId is stale (not in config) or unavailable
+  if (_runtimeDefaultCatId && isCatKnownAndAvailable(_runtimeDefaultCatId)) {
+    return _runtimeDefaultCatId;
+  }
   if (_defaultCatId) return _defaultCatId;
 
   const config = getCachedConfig();
@@ -708,10 +721,10 @@ export function clearRuntimeDefaultCatId(): void {
   persistDefaultCatOverride(null);
 }
 
-/** F154 AC-A4: Check whether a runtime override is active and the cat is available. */
+/** F154 AC-A4: Check whether a runtime override is active, known in config, and available. */
 export function hasRuntimeDefaultCatOverride(): boolean {
   loadDefaultCatOverride();
-  return _runtimeDefaultCatId !== null && isCatAvailable(_runtimeDefaultCatId);
+  return _runtimeDefaultCatId !== null && isCatKnownAndAvailable(_runtimeDefaultCatId);
 }
 
 /** Unified owner userId: configured env or single-user fallback. */
