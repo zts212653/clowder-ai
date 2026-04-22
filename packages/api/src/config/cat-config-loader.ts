@@ -65,7 +65,7 @@ const catVariantSchema = z.object({
   mentionPatterns: z.array(mentionPatternSchema).optional(), // F32-b: variant-level mentions
   source: z.enum(['seed', 'runtime']).optional(), // #441: bootstrap-stamped origin
   accountRef: z.string().min(1).optional(), // F127: concrete account binding
-  clientId: z.enum(['anthropic', 'openai', 'google', 'kimi', 'dare', 'antigravity', 'opencode', 'a2a', 'catagent']),
+  clientId: z.string().min(1), // #252: accept unknown providers to avoid full config crash
 
   defaultModel: z.string().min(1),
   mcpSupport: z.boolean(),
@@ -427,7 +427,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         mentionPatterns,
         ...(variant.source != null ? { source: variant.source } : {}),
         ...(variant.accountRef != null ? { accountRef: variant.accountRef } : {}),
-        clientId: variant.clientId,
+        clientId: variant.clientId as ClientId, // #252: Zod now accepts any string; downstream switch/case has default branches
         defaultModel: variant.defaultModel,
         mcpSupport: variant.mcpSupport,
         ...(projectedCommandArgs != null ? { commandArgs: projectedCommandArgs } : {}),

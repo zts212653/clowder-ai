@@ -21,6 +21,7 @@ import { createReadStream } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
+import { isAbsoluteFilesystemPath, normalizeWorkspaceRelativePath } from '@cat-cafe/shared/utils';
 import type { FastifyPluginAsync } from 'fastify';
 import {
   addLinkedRoot,
@@ -206,7 +207,7 @@ async function searchWorkspaceContent(
       break;
     }
 
-    const relPath = relative(root, fullPath);
+    const relPath = normalizeWorkspaceRelativePath(relative(root, fullPath));
     if (isDenylisted(relPath) || !isContentSearchable(relPath)) continue;
 
     const fileStat = await stat(fullPath).catch(() => null);
@@ -253,7 +254,7 @@ async function buildTree(root: string, dirPath: string, depth: number, maxDepth:
     if (SKIP_DIRS.has(entry.name)) continue;
 
     const fullPath = join(dirPath, entry.name);
-    const relPath = relative(root, fullPath);
+    const relPath = normalizeWorkspaceRelativePath(relative(root, fullPath));
 
     if (entry.isDirectory()) {
       if (depth + 1 >= maxDepth) {
@@ -280,7 +281,7 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
   app.get<{ Querystring: { repoRoot?: string } }>('/api/workspace/worktrees', async (request, reply) => {
     const { repoRoot } = request.query;
     if (repoRoot) {
-      if (!repoRoot.startsWith('/')) {
+      if (!isAbsoluteFilesystemPath(repoRoot)) {
         reply.status(400);
         return { error: 'repoRoot must be an absolute path' };
       }
@@ -320,7 +321,7 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
       const root = await getWorktreeRoot(worktreeId);
       const resolved = subpath ? await resolveWorkspacePath(root, subpath) : root;
       const tree = await buildTree(root, resolved, 0, depth);
-      return { root: subpath || '.', worktreeId, tree };
+      return { root: subpath ? normalizeWorkspaceRelativePath(subpath) : '.', worktreeId, tree };
     } catch (e) {
       if (e instanceof WorkspaceSecurityError) {
         reply.status(e.code === 'NOT_FOUND' ? 404 : 403);
@@ -467,7 +468,7 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
         const files = await listWorkspaceFiles(root);
         const lowerQuery = query.toLowerCase();
         const results = files
-          .map((fullPath) => relative(root, fullPath))
+          .map((fullPath) => normalizeWorkspaceRelativePath(relative(root, fullPath)))
           .filter((relPath) => !isDenylisted(relPath) && relPath.toLowerCase().includes(lowerQuery))
           .slice(0, limit)
           .map((relPath) => ({

@@ -66,6 +66,20 @@ export async function resolveWorkspacePath(root: string, userPath: string): Prom
     if (!real.startsWith(realRoot + sep) && real !== realRoot) {
       throw new WorkspaceSecurityError('Symlink escapes workspace root', 'TRAVERSAL');
     }
+    // Re-check denylist on the realpath result — a symlink named "safe"
+    // pointing to ".env" would pass the pre-realpath check above but the
+    // resolved target must still be denied.
+    const realRel = relative(realRoot, real);
+    for (const seg of realRel.split(sep)) {
+      if (DENYLIST_DIRS.has(seg)) {
+        throw new WorkspaceSecurityError(`Access denied: ${seg}`, 'DENIED');
+      }
+      for (const pat of DENYLIST_PATTERNS) {
+        if (pat.test(seg)) {
+          throw new WorkspaceSecurityError(`Access denied: ${seg}`, 'DENIED');
+        }
+      }
+    }
   } catch (e) {
     if (e instanceof WorkspaceSecurityError) throw e;
     // ENOENT = file doesn't exist yet; traversal check above covers it
@@ -82,7 +96,7 @@ export async function resolveWorkspacePath(root: string, userPath: string): Prom
  * Returns true if the path should be blocked.
  */
 export function isDenylisted(relPath: string): boolean {
-  const segments = relPath.split(sep);
+  const segments = relPath.split(/[\\/]/);
   for (const seg of segments) {
     if (DENYLIST_DIRS.has(seg)) return true;
     for (const pat of DENYLIST_PATTERNS) {
