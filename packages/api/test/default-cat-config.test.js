@@ -6,6 +6,7 @@ import {
   clearRuntimeDefaultCatId,
   getDefaultCatId,
   getOwnerUserId,
+  hasRuntimeDefaultCatOverride,
   loadCatConfig,
   setRuntimeDefaultCatId,
   toAllCatConfigs,
@@ -43,6 +44,28 @@ describe('getDefaultCatId runtime override (F154 AC-A4)', () => {
     setRuntimeDefaultCatId('codex');
     setRuntimeDefaultCatId('gemini');
     assert.equal(getDefaultCatId(), 'gemini');
+    clearRuntimeDefaultCatId();
+  });
+
+  it('skips stale catId not present in loaded config (#543 P1)', () => {
+    // Set an override to a catId that doesn't exist in any breed/variant
+    setRuntimeDefaultCatId('nonexistent-cat-xyz');
+    // Should fall through to breeds[0] default, not return the stale catId
+    const result = getDefaultCatId();
+    assert.notEqual(result, 'nonexistent-cat-xyz', 'stale catId should be skipped');
+    assert.equal(result, originalDefault, 'should fall back to breeds[0]');
+    clearRuntimeDefaultCatId();
+  });
+
+  it('hasRuntimeDefaultCatOverride returns false for stale catId (#543 P1)', () => {
+    setRuntimeDefaultCatId('nonexistent-cat-xyz');
+    assert.equal(hasRuntimeDefaultCatOverride(), false, 'stale catId should not count as active override');
+    clearRuntimeDefaultCatId();
+  });
+
+  it('setRuntimeDefaultCatId returns persisted status (#543 P2)', () => {
+    const result = setRuntimeDefaultCatId('codex');
+    assert.equal(typeof result.persisted, 'boolean', 'should return { persisted: boolean }');
     clearRuntimeDefaultCatId();
   });
 });
