@@ -47,7 +47,7 @@ import {
 } from '../../../../../infrastructure/telemetry/instruments.js';
 import { normalizeModel } from '../../../../../infrastructure/telemetry/model-normalizer.js';
 import { emitOtelLog } from '../../../../../infrastructure/telemetry/otel-logger.js';
-import { recordLlmCallSpan, recordToolUseEvent } from '../../../../../infrastructure/telemetry/span-helpers.js';
+import { recordLlmCallSpan, recordToolUseSpan } from '../../../../../infrastructure/telemetry/span-helpers.js';
 import { resolveActiveProjectRoot } from '../../../../../utils/active-project-root.js';
 import { resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { DEFAULT_CLI_TIMEOUT_MS, resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
@@ -264,6 +264,8 @@ export interface InvocationParams {
   readonly parentInvocationId?: string;
   /** F121: The A2A trigger message ID for auto-replyTo */
   readonly a2aTriggerMessageId?: string;
+  /** F153 Phase E: Parent route span — invocation span becomes its child */
+  readonly routeSpan?: import('@opentelemetry/api').Span;
 }
 
 /**
@@ -456,9 +458,13 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   let sessionMutexRelease: (() => void) | undefined;
 
   // F152: Create invocation span for distributed tracing
-  const invocationSpan = tracer.startSpan('cat_cafe.invocation', {
-    attributes: { [AGENT_ID]: catId, [OPERATION_NAME]: 'invoke' },
-  });
+  // F153 Phase E: If a route span exists, make invocation its child
+  const parentCtx = params.routeSpan ? trace.setSpan(context.active(), params.routeSpan) : undefined;
+  const invocationSpan = tracer.startSpan(
+    'cat_cafe.invocation',
+    { attributes: { [AGENT_ID]: catId, [OPERATION_NAME]: 'invoke' } },
+    parentCtx,
+  );
 
   try {
     // F152: Track active invocations — must be inside try so add/sub symmetry
@@ -1471,9 +1477,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       } else {
         outputs.push(attachInvocationIdToTaskProgress(msg));
 
-        // F153 Phase B: Record tool_use as span event (not a span — no duration data available)
+        // F153 Phase E: Record tool_use as child span (zero-duration; shows in trace tree with tool name + category)
         if (msg.type === 'tool_use' && msg.toolName && invocationSpan) {
-          recordToolUseEvent(invocationSpan, catId, msg.toolName, msg.toolInput as Record<string, unknown>);
+          recordToolUseSpan(invocationSpan, catId, msg.toolName, msg.toolInput as Record<string, unknown>);
         }
 
         // F26: Detect task management tools and emit task_progress for frontend

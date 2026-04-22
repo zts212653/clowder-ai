@@ -65,10 +65,123 @@ team experience（2026-04-09）："这是可观测性基础设施 PR，核心是
 5. **guardrail 回归测试** — `telemetry-debug.test.js` 覆盖 env 组合 + exporter ordering
 6. **启动链回归测试** — `start-dev-profile-isolation.test.mjs` / `start-dev-script.test.js` 覆盖 Unix / Windows 的 `NODE_ENV` 注入
 
-### Phase E: 后续增强
+### Phase E: Hub 嵌入式可观测 + Snapshot Store ✅
+
+1. **LocalTraceStore** — 内存 ring buffer（10K span，2h TTL）存储脱敏后的 TraceSpanDTO
+2. **LocalTraceExporter** — OTel SpanExporter，将 ReadableSpan 投影为 DTO 写入 ring buffer
+3. **MetricsSnapshotStore** — 30s 采样 Prometheus 指标，保留时序趋势
+4. **Telemetry API 路由** — `/api/telemetry/traces`、`/traces/stats`、`/metrics`、`/metrics/history`、`/health`
+5. **HubTraceTree** — 前端树形 trace 可视化（`buildForest` 按 `parentSpanId` 组装父子关系）
+6. **burn-rate 告警规则** — SLO-based alerting
+
+### Phase F: Trace 持久化 — 指针关联方案（设计中）
+
+> **Status**: spec | **Owner**: Ragdoll
+> **Trigger**: 重启后 trace 数据全丢（LocalTraceStore 纯内存）
+> **Discussion**: 2026-04-22，三猫讨论（Ragdoll + Sonnet + GPT-5.4）
+
+#### 问题
+
+`LocalTraceStore` 是纯内存 ring buffer，进程重启后所有 span 数据丢失。用户在 Hub Traces tab 看到空白，无法回溯重启前的调用链路。
+
+#### 被否决的方案
+
+| 方案 | 否决理由 |
+|------|----------|
+| SQLite 独立存储 | 引入新持久化层，与 Redis 已有数据冗余 |
+| 完整 span JSON 写入 InvocationRecord | InvocationRecord TTL=0 永久保存，span 数据（3-10 KB/次）会线性膨胀 Redis 内存；所有 `HGETALL` 读路径变重 |
+| 从 Redis thread 数据重建 | InvocationRecord 不含 traceId/spanId/parentSpanId，无法重建 OTel 层次关系 |
+
+#### 选定方案：指针关联 + 消息数据合成
+
+**核心洞察**：Redis 消息存储（`RedisMessageStore`）已经持久化了丰富的执行数据：
+
+| 已有字段 | 可映射的 span 信息 |
+|----------|-------------------|
+| `metadata.usage.durationMs` / `durationApiMs` | span duration |
+| `metadata.usage.inputTokens/outputTokens/cacheReadTokens` | span attributes (token 计数) |
+| `toolEvents[].timestamp` + `label` | tool event 时间和名称 |
+| `message.timestamp` | span endTime（⚠️ 非 startTime，见下方精度说明） |
+| `extra.stream.invocationId` | invocation 关联 |
+
+> **startTime 精度说明**（缅因猫 review）：assistant message 的 `timestamp` 是终态落盘时打的，接近 span **end** 而非 start。合成 span 时应使用 `startTime = timestamp - durationMs`（invocation/cli_session）或 `timestamp - durationApiMs`（llm_call）。只有 user message 的 `timestamp` 可直接作为 `cat_cafe.route` span 的 startTime。
+
+**只需补 OTel 身份指针**（~100 bytes/消息），不需要存完整 span 快照：
+
+```typescript
+// Message.extra.tracing — 新增字段
+interface TracingPointers {
+  traceId: string;        // 32-char hex, OTel trace ID
+  spanId: string;         // 16-char hex, 该消息对应的 span
+  parentSpanId?: string;  // 父 span ID（建立层次关系）
+}
+```
+
+重启时从 Redis 消息数据合成 `TraceSpanDTO`：
+- OTel ID 从 `extra.tracing` 取
+- timing 从 `metadata.usage` 取
+- 工具事件从 `toolEvents` 取
+- token 计数从 `metadata.usage` 取
+
+#### 前置条件（P1 阻塞）
+
+**相关性键不统一**（GPT-5.4 发现，缅因猫 review 修正键名）：
+
+| span 类型 | 是否带 invocationId | 问题 |
+|-----------|-------------------|------|
+| `cat_cafe.route`（根） | ❌ 没带 | Phase E 新增的根 span，需一并统一 |
+| `cat_cafe.invocation`（子） | ❌ 没带 | 按 invocationId 查询查不到 |
+| `cat_cafe.cli_session`（子） | ✅ 带了 | 但用的是 inner registry ID，非 outer InvocationRecord.id |
+| `cat_cafe.llm_call`（子） | ❌ 没带 | 同上 |
+
+**修复**：所有四类 span 统一携带 **`invocationId`**（值 = outer `InvocationRecord.id`）。
+
+> ⚠️ **不引入新键名**：键名必须继续使用 `invocationId`（而非 `recordInvocationId`），因为：
+> 1. `TelemetryRedactor` 只识别 `invocationId` 为 Class C（HMAC pseudonymize）
+> 2. `LocalTraceStore` 查询过滤按 `attributes.invocationId` 匹配
+> 3. `/api/telemetry/traces?invocationId=` 端点依赖此键名
+>
+> 改名会同时破坏脱敏和查询。
+
+#### Span 层级变更
+
+Phase E 实现引入了 `cat_cafe.route` 根 span（`AgentRouter` 创建），`cat_cafe.invocation` 现在是它的子 span。持久化需要覆盖四类 span：
+
+| span | 指针写入位置 | startTime 来源 |
+|------|-------------|---------------|
+| `cat_cafe.route` | user message `extra.tracing` | user message `timestamp`（直接用） |
+| `cat_cafe.invocation` | assistant message `extra.tracing` | `timestamp - durationMs` |
+| `cat_cafe.cli_session` | 同上（共用 assistant message） | `timestamp - durationMs` |
+| `cat_cafe.llm_call` | 同上 | `timestamp - durationApiMs` |
+
+> **tool_use spans 暂不持久化**：当前 MCP 工具 span 是零时长点标记，等 Phase G 获得真实执行边界后再升级持久化策略。
+
+#### extra.tracing 前置改造
+
+`StoredMessage.extra` 当前不含 `tracing` 字段，需要：
+
+1. **类型扩展**：`MessageStore.ts` 的 `extra` 类型加入 `tracing?: TracingPointers`
+2. **Parser 保留**：`redis-message-parsers.ts` round-trip 时保留 `tracing` 字段
+3. **Merge 语义**：`RedisMessageStore.updateExtra()` 当前是整块覆盖（不是 merge），写入 `tracing` 时必须先读再合并，或改为 `HSET` 字段级更新
+
+#### 实施步骤
+
+1. **P1 修复**：统一 `invocationId`（root/cli/llm/route 四类 span 都带，值 = outer InvocationRecord.id）
+2. **写入指针**：invocation 创建 span 时，将 `{ traceId, spanId, parentSpanId }` 写入对应 Message 的 `extra.tracing`
+3. **hydrate 逻辑**：`LocalTraceStore.hydrate(dtos)` 方法，启动时从最近消息合成 span 回填 buffer
+4. **启动流程**：`initTelemetry` 后扫描最近 2h 消息（按 `msg:timeline` sorted set 范围查询），提取有 `extra.tracing` 的消息，合成 DTO 调用 `hydrate()`
+
+#### 写入时机
+
+放在 **outer invocation 的 terminal status transition**（`routes/messages.ts` 中 status 变 `succeeded`/`failed` 的 `update()` 调用处），不是 exporter hook，也不是 inner `invokeSingleCat` finally：
+
+- exporter `onEnd` 时不知道所有 span 是否都结束了
+- inner finally 是 per-cat 的，多猫并发写同一个 record 会互相踩
+- outer terminal transition 是唯一确定"该 invocation 所有工作都完成"的时刻
+
+### Phase G: 后续增强
 
 - Grafana 统一看板
-- burn-rate 告警规则
 - MCP call spans + tool execution duration spans（真实执行边界）
 - 更广的 runtime exporter 级 tracing tests（in-memory exporter 验证父子关系）
 
@@ -101,6 +214,25 @@ team experience（2026-04-09）："这是可观测性基础设施 PR，核心是
 - [x] AC-C4: feedback 写入失败 / hint 发射失败从 silent catch 变为可观测 counter
 - [x] AC-C5: shadow miss metadata 只含 hash + length，不含 raw text
 - [x] AC-C6: regressions 覆盖 strict/shadow 同猫跨行、same-line dual mention、code block / blockquote 排除
+
+### Phase E（Hub 嵌入式可观测 + Snapshot Store）✅
+- [x] AC-E1: `LocalTraceStore` ring buffer 存储脱敏 TraceSpanDTO（10K cap，2h TTL）
+- [x] AC-E2: `LocalTraceExporter` 在 RedactingSpanProcessor 之后运行，只看脱敏属性
+- [x] AC-E3: `GET /api/telemetry/traces` 支持 traceId/invocationId(HMAC)/catId 过滤
+- [x] AC-E4: trace 查询端 HMAC 原始 ID 后匹配（pseudonymized store）
+- [x] AC-E5: 所有 telemetry 端点要求 session 认证
+- [x] AC-E6: `HubTraceTree` 按 `parentSpanId` 构建 forest，树形瀑布图展示父子层次
+- [x] AC-E7: `MetricsSnapshotStore` 30s 采样，`/metrics/history` 返回趋势数据
+
+### Phase F（Trace 持久化 — 指针关联方案）
+- [ ] AC-F1: 四类 span（route/invocation/cli_session/llm_call）统一携带 `invocationId` attribute（值 = outer InvocationRecord.id，键名不变）
+- [ ] AC-F2: Message `extra.tracing` 写入 `{ traceId, spanId, parentSpanId }` 指针（route → user message，invocation/cli/llm → assistant message）
+- [ ] AC-F3: `LocalTraceStore.hydrate()` 从消息数据合成 TraceSpanDTO 并回填 buffer，startTime 使用 `timestamp - duration` 反推（非直接用 message.timestamp）
+- [ ] AC-F4: 冷启动时从最近 2h 消息自动 hydrate，Hub Traces tab 可见历史 span
+- [ ] AC-F5: hydrate 使用 `msg:timeline` sorted set 范围查询，不做全表扫描
+- [ ] AC-F6: 每条消息 tracing 指针增量 ≤ 100 bytes，不存完整 span 快照
+- [ ] AC-F7: `StoredMessage.extra` 类型扩展含 `tracing`，parser round-trip 保留，`updateExtra()` 使用 merge 语义
+- [ ] AC-F8: tool_use spans 暂不持久化（零时长点标记，待 Phase G 升级）
 
 ### Phase D（Runtime 调试 exporter + 启动语义对齐）✅
 - [x] AC-D1: `TELEMETRY_DEBUG` 通过 `ConsoleSpanExporter` 输出 spans，且 regular OTLP pipeline 仍保持 redaction
@@ -137,3 +269,11 @@ team experience（2026-04-09）："这是可观测性基础设施 PR，核心是
 | KD-7 | Phase B 2 轮 review 后放行 intake | P1（脱敏）+ P2（tool_use + scope）全部修完 | 2026-04-12 |
 | KD-8 | clowder-ai#489 双猫重审后放行 merge + absorb | strict/shadow/narrative 三级模型成立；剩余架构偏好降为 non-blocking | 2026-04-15 |
 | KD-9 | `TELEMETRY_DEBUG` 走 default-deny + 启动链显式注入 `NODE_ENV` | 只在真实 dev/test 语义下开放 raw exporter，避免 runtime/profile 脱钩 | 2026-04-18 |
+| KD-10 | Phase F: 否决 SQLite 独立存储 | 铲屎官认为单独一份可观测数据冗余 | 2026-04-22 |
+| KD-11 | Phase F: 否决完整 span JSON 写入 InvocationRecord | GPT-5.4 + Sonnet review: Redis 内存线性膨胀 + HGETALL 读放大 + TTL 生命周期错位 | 2026-04-22 |
+| KD-12 | Phase F: 选定指针关联方案 | 铲屎官洞察：消息数据已含 timing/token/tool 信息，只需补 OTel ID 指针（~100 bytes） | 2026-04-22 |
+| KD-13 | Phase F 前置：统一 `invocationId`（沿用现有键名，值改为 outer record ID）| GPT-5.4 发现不统一；缅因猫 review 修正：不引入新键名 `recordInvocationId`，否则破坏 redactor Class C + trace query | 2026-04-22 |
+| KD-14 | Phase F 纳入 `cat_cafe.route` 根 span | Phase E 实现引入 route 根 span，invocation 已变子 span；hydrate 必须覆盖 route 否则重启后层级断裂 | 2026-04-22 |
+| KD-15 | startTime 用 `timestamp - durationMs` 反推 | assistant message timestamp 是终态落盘时间 ≈ span end；缅因猫 review 发现直接当 startTime 会偏移 | 2026-04-22 |
+| KD-16 | `extra.tracing` 需要 parser + merge 前置改造 | `updateExtra()` 是整块覆盖，parser 不保留未知字段；缅因猫 review 指出需先 widen type + merge 语义 | 2026-04-22 |
+| KD-17 | tool_use spans 暂不持久化 | KD-6 原决策为 event；Phase E 升级为 MCP 工具 span 但仍是零时长；等 Phase G 真实执行边界再持久化 | 2026-04-22 |
