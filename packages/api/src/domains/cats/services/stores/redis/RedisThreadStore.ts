@@ -143,6 +143,9 @@ export class RedisThreadStore implements IThreadStore {
   private readonly redis: RedisClient;
   /** null means no expiration. */
   private readonly ttlSeconds: number | null;
+  /** Guard self-heal scan to avoid re-scanning on every list() when user truly has one thread. */
+  private readonly lastListRepairAt = new Map<string, number>();
+  private static readonly LIST_REPAIR_COOLDOWN_MS = 5 * 60 * 1000;
 
   constructor(redis: RedisClient, options?: { ttlSeconds?: number }) {
     this.redis = redis;
@@ -198,7 +201,7 @@ export class RedisThreadStore implements IThreadStore {
   }
 
   async list(userId: string): Promise<Thread[]> {
-    const ids = await this.redis.zrevrange(ThreadKeys.userList(userId), 0, -1);
+    const ids = await this.loadUserThreadIds(userId);
 
     // Ensure default thread is included
     const hasDefault = ids.includes(DEFAULT_THREAD_ID);
@@ -516,7 +519,7 @@ export class RedisThreadStore implements IThreadStore {
 
   /** F095 Phase D: List soft-deleted threads (trash bin). */
   async listDeleted(userId: string): Promise<Thread[]> {
-    const ids = await this.redis.zrevrange(ThreadKeys.userList(userId), 0, -1);
+    const ids = await this.loadUserThreadIds(userId);
     const threads: Thread[] = [];
     for (const id of ids) {
       const thread = await this.get(id);
@@ -548,6 +551,111 @@ export class RedisThreadStore implements IThreadStore {
     }
     const result = await this.redis.eval(DELETE_THREAD_LUA, keys.length, ...keys, threadId);
     return (result as number) > 0;
+  }
+
+  /**
+   * Startup repair: single-pass scan of thread detail hashes to discover
+   * all userId→threadId→lastActiveAt mappings, then rebuild ZSet indexes
+   * for any with missing members. Returns number of user indexes repaired.
+   *
+   * Single-pass: collects all data in Phase 1, reuses it directly in Phase 2
+   * without calling rebuildUserIndexFromThreadDetails() (which would re-scan).
+   */
+  async repairIndex(userId?: string): Promise<{ repairedUsers: number; repairedMembers: number }> {
+    const userThreadData = await this.collectIndexedThreadsFromDetails(userId);
+    let repairedUsers = 0;
+    let repairedMembers = 0;
+
+    for (const [ownerId, hashData] of userThreadData) {
+      const zsetKey = ThreadKeys.userList(ownerId);
+      const indexedIds = await this.redis.zrange(zsetKey, 0, -1);
+      const indexedSet = new Set(indexedIds);
+      const missing = [...hashData.entries()].filter(([id]) => !indexedSet.has(id));
+
+      if (missing.length > 0) {
+        const zaddArgs: string[] = [];
+        for (const [id, score] of missing) {
+          zaddArgs.push(String(score), id);
+        }
+        const pipeline = this.redis.multi();
+        pipeline.zadd(zsetKey, ...zaddArgs);
+        if (this.ttlSeconds !== null) {
+          pipeline.expire(zsetKey, this.ttlSeconds);
+        }
+        await pipeline.exec();
+        repairedUsers += 1;
+        repairedMembers += missing.length;
+      }
+    }
+
+    return { repairedUsers, repairedMembers };
+  }
+
+  private canAttemptListRepair(userId: string, indexedCount: number): boolean {
+    if (indexedCount > 1) return false;
+    const now = Date.now();
+    const last = this.lastListRepairAt.get(userId) ?? 0;
+    if (now - last < RedisThreadStore.LIST_REPAIR_COOLDOWN_MS) return false;
+    return true;
+  }
+
+  private async loadUserThreadIds(userId: string): Promise<string[]> {
+    let ids = await this.redis.zrevrange(ThreadKeys.userList(userId), 0, -1);
+    if (!this.canAttemptListRepair(userId, ids.length)) {
+      return ids;
+    }
+
+    this.lastListRepairAt.set(userId, Date.now());
+    const repaired = await this.repairIndex(userId);
+    if (repaired.repairedMembers === 0) {
+      return ids;
+    }
+
+    ids = await this.redis.zrevrange(ThreadKeys.userList(userId), 0, -1);
+    return ids;
+  }
+
+  private async collectIndexedThreadsFromDetails(userId?: string): Promise<Map<string, Map<string, number>>> {
+    const scanPattern = `${this.keyPrefix}${ThreadKeys.detail('thread_*')}`;
+    let cursor = '0';
+    const userThreadData = new Map<string, Map<string, number>>();
+
+    do {
+      const [nextCursor, rawKeys] = (await this.redis.scan(cursor, 'MATCH', scanPattern, 'COUNT', 200)) as [
+        string,
+        string[],
+      ];
+      cursor = nextCursor;
+
+      const detailKeys = rawKeys
+        .map((rawKey) => this.stripKeyPrefix(rawKey))
+        .filter((key) => /^thread:thread_[^:]+$/.test(key));
+      if (detailKeys.length === 0) continue;
+
+      const pipeline = this.redis.multi();
+      for (const key of detailKeys) {
+        pipeline.hgetall(key);
+      }
+      const results = await pipeline.exec();
+
+      for (let i = 0; i < detailKeys.length; i += 1) {
+        const data = results?.[i]?.[1];
+        if (!data || typeof data !== 'object') continue;
+        const hash = data as Record<string, string>;
+        if (!hash.id || !hash.createdBy || hash.createdBy === 'system') continue;
+        if (userId && hash.createdBy !== userId) continue;
+
+        const lastActiveAt = Number.parseInt(hash.lastActiveAt ?? '0', 10);
+        let threadMap = userThreadData.get(hash.createdBy);
+        if (!threadMap) {
+          threadMap = new Map<string, number>();
+          userThreadData.set(hash.createdBy, threadMap);
+        }
+        threadMap.set(hash.id, Number.isFinite(lastActiveAt) ? lastActiveAt : 0);
+      }
+    } while (cursor !== '0');
+
+    return userThreadData;
   }
 
   private async createDefaultThread(): Promise<Thread> {
@@ -702,6 +810,15 @@ export class RedisThreadStore implements IThreadStore {
     if (fields.length === 0) return;
     await this.redis.hdel(key, ...fields);
     await this.applyKeyRetention([key]);
+  }
+
+  private get keyPrefix(): string {
+    return (this.redis.options as { keyPrefix?: string }).keyPrefix ?? '';
+  }
+
+  private stripKeyPrefix(raw: string): string {
+    const prefix = this.keyPrefix;
+    return prefix && raw.startsWith(prefix) ? raw.slice(prefix.length) : raw;
   }
 
   private serializeThread(thread: Thread): Record<string, string> {

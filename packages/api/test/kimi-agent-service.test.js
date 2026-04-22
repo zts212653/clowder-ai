@@ -286,6 +286,27 @@ test('api-key mode maps selected model into official kimi env overrides', async 
   }
 });
 
+test('api-key mode normalizes legacy kimi code base url to /coding/v1', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+
+  const promise = collect(
+    service.invoke('Hello', {
+      callbackEnv: {
+        CAT_CAFE_KIMI_API_KEY: 'sk-kimi-secret',
+        CAT_CAFE_KIMI_BASE_URL: 'https://api.kimi.com/coding/',
+        KIMI_SHARE_DIR: mkdtempSync(join(tmpdir(), 'kimi-share-legacy-coding-base-')),
+      },
+    }),
+  );
+  emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
+  await promise;
+
+  const env = spawnFn.mock.calls[0].arguments[2]?.env ?? {};
+  assert.equal(env.KIMI_BASE_URL, 'https://api.kimi.com/coding/v1');
+});
+
 test('injects cat-cafe MCP config file when callback env is present', async () => {
   const shareDir = mkdtempSync(join(tmpdir(), 'kimi-share-mcp-'));
   const projectDir = mkdtempSync(join(tmpdir(), 'kimi-project-mcp-'));

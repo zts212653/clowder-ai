@@ -39,7 +39,9 @@ const DEBUG_LOG = path.join(process.env.TEMP || os.tmpdir(), 'clowder-main.log')
 
 function dbg(msg) {
   const line = `[main ${new Date().toISOString()}] ${msg}\n`;
-  try { fs.appendFileSync(DEBUG_LOG, line); } catch {}
+  try {
+    fs.appendFileSync(DEBUG_LOG, line);
+  } catch {}
 }
 
 dbg(`Electron starting. ELECTRON_RUN_AS_NODE=${process.env.ELECTRON_RUN_AS_NODE}`);
@@ -99,7 +101,9 @@ function createMainWindow() {
     }
   });
 
-  mainWindow.on('closed', () => { mainWindow = null; });
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
 }
 
 function createTray() {
@@ -123,7 +127,10 @@ async function quitApp() {
   if (services) {
     await services.stopAll();
   }
-  if (tray) { tray.destroy(); tray = null; }
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
   app.quit();
 }
 

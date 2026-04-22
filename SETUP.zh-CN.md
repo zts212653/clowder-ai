@@ -502,30 +502,6 @@ pnpm check:lockfile     # 校验 lockfile 完整性
 pnpm check:features     # Feature 文档合规检查
 pnpm check:env-ports    # 环境变量端口漂移检测
 
-# === Redis ===
-pnpm redis:user:start   # 手动启动 Redis
-pnpm redis:user:stop    # 停止 Redis
-pnpm redis:user:status  # 检查 Redis 状态
-pnpm redis:user:backup  # 手动备份
-
-# Redis 自动备份（cron 方式）
-pnpm redis:user:autobackup:install    # 安装自动备份定时任务
-pnpm redis:user:autobackup:run        # 立即执行备份
-pnpm redis:user:autobackup:status     # 查看自动备份状态
-pnpm redis:user:autobackup:uninstall  # 移除自动备份定时任务
-
-# === 线程导出 ===
-pnpm threads:sync       # 同步线程导出
-pnpm threads:status     # 查看线程导出状态
-pnpm threads:export:redis              # 从 Redis 导出线程
-pnpm threads:export:redis:dry-run      # 模拟导出
-
-# 线程自动保存（cron 方式）
-pnpm threads:autosave:install          # 安装自动保存定时任务
-pnpm threads:autosave:run              # 立即执行自动保存
-pnpm threads:autosave:status           # 查看自动保存状态
-pnpm threads:autosave:uninstall        # 移除自动保存定时任务
-
 # === Alpha Worktree（预发布测试）===
 pnpm alpha:init         # 创建 alpha worktree（../cat-cafe-alpha）
 pnpm alpha:sync         # 同步 alpha worktree 到 origin/main
