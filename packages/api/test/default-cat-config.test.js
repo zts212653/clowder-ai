@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { after, before, describe, it } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 import Fastify from 'fastify';
@@ -92,17 +93,23 @@ describe('getDefaultCatId runtime override (F154 AC-A4)', () => {
 
   it('disk-loaded override is rejected when config cache is unavailable (#543 degraded)', () => {
     const origPath = process.env.CAT_TEMPLATE_PATH;
+    const overrideDir = '/tmp/.cat-cafe';
+    const overrideFile = '/tmp/.cat-cafe/default-cat-override.json';
     try {
-      // Set override via API first, then clear the validated flag to simulate disk-load state
-      setRuntimeDefaultCatId('codex');
-      // Point to non-existent template → degraded mode
+      // Create a disk override file at the degraded template root
+      mkdirSync(overrideDir, { recursive: true });
+      writeFileSync(overrideFile, JSON.stringify({ catId: 'codex' }) + '\n', 'utf-8');
+      // Point to non-existent template → degraded mode; override file is at same root
       process.env.CAT_TEMPLATE_PATH = '/tmp/__nonexistent_cat_template__.json';
       _resetCachedConfig();
-      // After reset: _overrideValidatedByApi=false, config=null
-      // getDefaultCatId should NOT return the override (it was "disk-loaded", not API-validated)
+      // loadDefaultCatOverride() will find the file and set _runtimeDefaultCatId='codex',
+      // but _overrideValidatedByApi remains false (disk-loaded, not API-set).
+      // With config unavailable, isCatKnownAndAvailable should reject it.
       const result = getDefaultCatId();
       assert.notEqual(result, 'codex', 'disk-loaded override should not be trusted in degraded mode');
     } finally {
+      if (existsSync(overrideFile)) rmSync(overrideFile);
+      if (existsSync(overrideDir)) rmSync(overrideDir, { recursive: true });
       if (origPath === undefined) delete process.env.CAT_TEMPLATE_PATH;
       else process.env.CAT_TEMPLATE_PATH = origPath;
       clearRuntimeDefaultCatId();
