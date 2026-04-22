@@ -1,8 +1,8 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useChatStore } from '@/stores/chatStore';
 import { IndexStatus } from './memory/IndexStatus';
+import { assignDocumentRoute } from './ThreadSidebar/thread-navigation';
 
 /**
  * F102 Phase J (AC-J7): Memory status tab in Hub Group 3 (监控与治理).
@@ -10,12 +10,11 @@ import { IndexStatus } from './memory/IndexStatus';
  * plus a "打开 Memory Hub" jump button.
  */
 export function HubMemoryTab() {
-  const router = useRouter();
   const currentThreadId = useChatStore((s) => s.currentThreadId);
 
   const openMemory = () => {
     const fromParam = currentThreadId ? `?from=${encodeURIComponent(currentThreadId)}` : '';
-    router.push(`/memory${fromParam}`);
+    assignDocumentRoute(`/memory${fromParam}`, typeof window !== 'undefined' ? window : undefined);
   };
 
   return (

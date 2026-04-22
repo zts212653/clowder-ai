@@ -10,6 +10,12 @@ export interface ThreadNavigationWindow {
   };
 }
 
+export interface DocumentNavigationWindow {
+  location: {
+    assign: (url: string) => void;
+  };
+}
+
 export function getThreadHref(threadId: string): string {
   return threadId === 'default' ? '/' : `/thread/${threadId}`;
 }
@@ -26,5 +32,12 @@ export function pushThreadRouteWithHistory(threadId: string, windowObj: ThreadNa
   if (windowObj.location.pathname === href) return href;
   windowObj.history.pushState({}, '', href);
   windowObj.dispatchEvent(new Event(CHAT_THREAD_ROUTE_EVENT));
+  return href;
+}
+
+export function assignDocumentRoute(href: string, windowObj: DocumentNavigationWindow | undefined): string {
+  if (windowObj) {
+    windowObj.location.assign(href);
+  }
   return href;
 }

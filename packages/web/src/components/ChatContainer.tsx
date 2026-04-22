@@ -1,6 +1,5 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
 import { useAuthorization } from '@/hooks/useAuthorization';
@@ -51,7 +50,7 @@ import { SplitPaneView } from './SplitPaneView';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { ThreadExecutionBar } from './ThreadExecutionBar';
 import { ThreadSidebar } from './ThreadSidebar';
-import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
+import { assignDocumentRoute, pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { VoteActiveBar } from './VoteActiveBar';
 import { type VoteConfig, VoteConfigModal } from './VoteConfigModal';
 import { WorkspacePanel } from './WorkspacePanel';
@@ -473,8 +472,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     [stopHandler, cancelInvocation, threadId],
   );
 
-  const router = useRouter();
-
   const handleZoomToThread = useCallback(
     (tid: string) => {
       setViewMode('single');
@@ -485,13 +482,13 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
 
   const handleSearchKnowledge = useCallback(() => {
     const fromParam = threadId ? `?from=${encodeURIComponent(threadId)}` : '';
-    router.push(`/memory/search${fromParam}`);
-  }, [router, threadId]);
+    assignDocumentRoute(`/memory/search${fromParam}`, typeof window !== 'undefined' ? window : undefined);
+  }, [threadId]);
 
   const handleGoToMemoryHub = useCallback(() => {
     const fromParam = threadId ? `?from=${encodeURIComponent(threadId)}` : '';
-    router.push(`/memory${fromParam}`);
-  }, [router, threadId]);
+    assignDocumentRoute(`/memory${fromParam}`, typeof window !== 'undefined' ? window : undefined);
+  }, [threadId]);
 
   if (viewMode === 'split') {
     return (
