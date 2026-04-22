@@ -1,6 +1,6 @@
 'use client';
 
-import { Press_Start_2P, Silkscreen } from 'next/font/google';
+import localFont from 'next/font/local';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FighterId } from '@/games/pixel-brawl/types';
 
@@ -9,8 +9,14 @@ type GameMode = 'pvai' | 'aivai';
 const ALL_FIGHTERS: FighterId[] = ['opus46', 'opus45', 'codex', 'gpt54'];
 const PVP_FIGHTERS: FighterId[] = ['opus46', 'codex'];
 
-const pressStart2p = Press_Start_2P({ subsets: ['latin'], weight: '400', display: 'swap' });
-const silkscreen = Silkscreen({ subsets: ['latin'], weight: ['400', '700'], display: 'swap' });
+const pressStart2p = localFont({ src: '../../fonts/PressStart2P-Regular.woff2', weight: '400', display: 'swap' });
+const silkscreen = localFont({
+  src: [
+    { path: '../../fonts/Silkscreen-Regular.woff2', weight: '400' },
+    { path: '../../fonts/Silkscreen-Bold.woff2', weight: '700' },
+  ],
+  display: 'swap',
+});
 
 async function waitForPixelFonts(): Promise<void> {
   await Promise.all([
