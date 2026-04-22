@@ -4,7 +4,7 @@
  * Node-only — 前端通过 /api/cats 获取猫数据。
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type {
@@ -628,6 +628,46 @@ export function getMissionHubSelfClaimScope(catId: string, config?: CatCafeConfi
 let _defaultCatId: CatId | null = null;
 /** F154 AC-A4: Runtime override for default cat (set via Hub API, owner-gated). */
 let _runtimeDefaultCatId: CatId | null = null;
+/** #543: Whether we've attempted to load the persisted override from disk. */
+let _defaultCatOverrideLoaded = false;
+
+const DEFAULT_CAT_OVERRIDE_FILE = '.cat-cafe/default-cat-override.json';
+
+function defaultCatOverridePath(): string {
+  const templatePath = process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH;
+  return resolve(dirname(templatePath), DEFAULT_CAT_OVERRIDE_FILE);
+}
+
+/** #543: Load persisted override from disk (once per process). */
+function loadDefaultCatOverride(): void {
+  if (_defaultCatOverrideLoaded) return;
+  _defaultCatOverrideLoaded = true;
+  try {
+    const filePath = defaultCatOverridePath();
+    if (!existsSync(filePath)) return;
+    const data = JSON.parse(readFileSync(filePath, 'utf-8')) as { catId?: string };
+    if (typeof data.catId === 'string' && data.catId) {
+      _runtimeDefaultCatId = createCatId(data.catId);
+    }
+  } catch {
+    // Corrupt or missing file — proceed without override
+  }
+}
+
+/** #543: Persist override to disk so it survives restarts. */
+function persistDefaultCatOverride(catId: CatId | null): void {
+  try {
+    const filePath = defaultCatOverridePath();
+    if (catId === null) {
+      if (existsSync(filePath)) unlinkSync(filePath);
+      return;
+    }
+    mkdirSync(dirname(filePath), { recursive: true });
+    writeFileSync(filePath, `${JSON.stringify({ catId })}\n`, 'utf-8');
+  } catch (err) {
+    log.warn({ err }, 'failed to persist default cat override');
+  }
+}
 
 /**
  * Get the default cat ID.
@@ -635,6 +675,7 @@ let _runtimeDefaultCatId: CatId | null = null;
  * Used as ultimate fallback in AgentRouter when no mentions/participants/preferredCats.
  */
 export function getDefaultCatId(): CatId {
+  loadDefaultCatOverride();
   if (_runtimeDefaultCatId) return _runtimeDefaultCatId;
   if (_defaultCatId) return _defaultCatId;
 
@@ -654,15 +695,18 @@ export function getDefaultCatId(): CatId {
 /** F154 AC-A4: Set runtime default cat override. Owner-gated at the API layer. */
 export function setRuntimeDefaultCatId(catId: string): void {
   _runtimeDefaultCatId = createCatId(catId);
+  persistDefaultCatOverride(_runtimeDefaultCatId);
 }
 
 /** F154 AC-A4: Clear runtime override — falls back to breeds[0]. */
 export function clearRuntimeDefaultCatId(): void {
   _runtimeDefaultCatId = null;
+  persistDefaultCatOverride(null);
 }
 
 /** F154 AC-A4: Check whether a runtime override is active. */
 export function hasRuntimeDefaultCatOverride(): boolean {
+  loadDefaultCatOverride();
   return _runtimeDefaultCatId !== null;
 }
 
@@ -813,6 +857,8 @@ export function _resetCachedConfig(): void {
   _catIdToVariant = null;
   _catIdToVariantSource = null;
   _defaultCatId = null;
+  _runtimeDefaultCatId = null;
+  _defaultCatOverrideLoaded = false;
   _cachedRoster = null;
   _cachedReviewPolicy = null;
   _cachedCoCreator = null;
