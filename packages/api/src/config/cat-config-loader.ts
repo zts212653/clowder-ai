@@ -671,10 +671,11 @@ function persistDefaultCatOverride(catId: CatId | null): boolean {
   }
 }
 
-/** #543 P1: Check that a catId exists in the loaded config AND is roster-available. */
+/** #543 P1: Check that a catId exists in the loaded config AND is roster-available.
+ *  When config is unavailable (degraded startup), trusts the override to avoid silent fallback. */
 function isCatKnownAndAvailable(catId: string): boolean {
   const cfg = getCachedConfig();
-  if (!cfg) return false;
+  if (!cfg) return true; // Degraded: trust in-memory override rather than silently ignoring it
   if (!_catIdToBreed || _catIdToBreedSource !== cfg) {
     _catIdToBreed = buildCatIdToBreedIndex(cfg);
     _catIdToBreedSource = cfg;
@@ -712,13 +713,16 @@ export function getDefaultCatId(): CatId {
  *  Returns { persisted: false } when the disk write failed (#543 P2). */
 export function setRuntimeDefaultCatId(catId: string): { persisted: boolean } {
   _runtimeDefaultCatId = createCatId(catId);
+  _defaultCatOverrideLoaded = true; // Prevent stale disk data from overwriting this in-memory value
   return { persisted: persistDefaultCatOverride(_runtimeDefaultCatId) };
 }
 
-/** F154 AC-A4: Clear runtime override — falls back to breeds[0]. */
-export function clearRuntimeDefaultCatId(): void {
+/** F154 AC-A4: Clear runtime override — falls back to breeds[0].
+ *  Returns { persisted: boolean } so callers know if the override file was removed. */
+export function clearRuntimeDefaultCatId(): { persisted: boolean } {
   _runtimeDefaultCatId = null;
-  persistDefaultCatOverride(null);
+  _defaultCatOverrideLoaded = true;
+  return { persisted: persistDefaultCatOverride(null) };
 }
 
 /** F154 AC-A4: Check whether a runtime override is active, known in config, and available. */

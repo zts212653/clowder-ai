@@ -388,8 +388,15 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
     }
 
     if (parsed.data.catId === null) {
-      clearRuntimeDefaultCatId();
-      return { ok: true, catId: getDefaultCatId(), isOverride: false };
+      const { persisted } = clearRuntimeDefaultCatId();
+      return {
+        ok: true,
+        catId: getDefaultCatId(),
+        isOverride: false,
+        ...(persisted
+          ? {}
+          : { warning: 'Override cleared in memory but failed to remove file — may restore on restart' }),
+      };
     }
 
     // Validate catId is registered
