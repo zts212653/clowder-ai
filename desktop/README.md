@@ -1,7 +1,7 @@
-# Clowder AI Desktop (Windows-only)
+# Clowder AI Desktop
 
 基于 Electron 的桌面应用壳层，为 Clowder AI 提供一键启动、系统托盘和独立窗口体验。
-**当前这条交付线只支持 Windows 安装器。macOS / Linux 还不是这次 PR 的支持范围。**
+当前支持 **Windows 安装器** 和 **macOS DMG 安装器**。
 
 ## 设计哲学
 
@@ -21,11 +21,16 @@ desktop/
 ├── main.js              # Electron 主进程：窗口管理、托盘、生命周期
 ├── preload.js           # 安全的 IPC 桥接（Splash 页面状态通信）
 ├── service-manager.js   # 子进程管理：启动 Redis、API、Next.js
+├── afterPack.js         # electron-builder afterPack hook（补拷 node_modules）
 ├── splash.html          # 启动画面（显示服务启动状态）
 ├── package.json         # Electron 包配置与 electron-builder 构建设置
+├── scripts/
+│   ├── build-mac.sh     # macOS DMG 构建脚本（6 步流水线）
+│   └── build-desktop.ps1 # Windows 安装包构建脚本
 └── assets/
     ├── icon.ico         # Windows 图标
-    └── icon.png         # 通用图标
+    ├── icon.icns        # macOS 图标（由 icon.png 自动生成）
+    └── icon.png         # 通用图标源文件
 ```
 
 ## 前置要求
@@ -87,11 +92,64 @@ powershell .\desktop\scripts\build-desktop.ps1 -SkipWebBuild -SkipBundleDeps
 pnpm desktop:pack
 ```
 
-打包产物位于 `desktop/dist/win-unpacked/`，包含可直接运行的 `Clowder AI.exe`。
+打包产物位于 `desktop/dist/win-unpacked/`（Windows）或 `desktop/dist/mac-arm64/`（macOS），包含可直接运行的应用。
 
-### 完整离线安装包（推荐，Windows-only）
+---
 
-构建一个独立的 `.exe` 安装程序，**仅面向 Windows**。安装完成后可直接启动，无需再手动 `pnpm install`：
+### macOS DMG 安装包
+
+构建独立的 `.dmg` 安装镜像。安装完成后可直接启动，无需额外依赖。
+
+#### 前置要求
+
+- macOS 13+（需要 Xcode Command Line Tools：`xcode-select --install`）
+- pnpm、node（任意 LTS）、bash、curl、tar、make
+- 构建 x64 Redis 需要 Rosetta 2：`softwareupdate --install-rosetta`
+
+#### 构建命令
+
+```bash
+# 完整构建（arm64 + x64 双架构 DMG）
+./desktop/scripts/build-mac.sh
+
+# 仅构建当前架构（Apple Silicon 机器推荐，速度更快）
+./desktop/scripts/build-mac.sh --arch arm64
+
+# 跳过已有缓存步骤（增量构建）
+./desktop/scripts/build-mac.sh --skip-web --skip-deploy --skip-node --skip-redis --skip-cli
+```
+
+#### 构建流程（6 步）
+
+| 步骤 | 内容 | 产物 |
+|------|------|------|
+| 1/6 | `pnpm install && pnpm build` 构建 Web 应用 | `packages/web/.next/` |
+| 2/6 | `pnpm deploy` 导出 api/web/mcp-server 运行时包 | `bundled/deploy/{api,web,mcp-server}/` |
+| 3/6 | 下载 Node.js 便携版（匹配构建机 ABI 版本） | `bundled/node-darwin-{arm64,x64}/` |
+| 4/6 | 从源码编译 Redis（~30s/架构） | `bundled/redis-darwin-{arm64,x64}/` |
+| 5/6 | `npm pack` 打包 CLI 工具（Claude/Codex/Gemini） | `bundled/cli-tools/*.tgz` |
+| 6/6 | 生成 icon.icns + electron-builder 构建 DMG | `dist/ClowderAI-{version}-{arch}.dmg` |
+
+#### 已知注意事项
+
+- **node_modules 补拷**：electron-builder 从 v20.15.2 起不再将 `node_modules` 目录包含在 `extraResources` 中（[electron-builder#3104](https://github.com/electron-userland/electron-builder/issues/3104)）。项目通过 `desktop/afterPack.js` hook 在打包后手动拷贝 `node_modules` 解决此问题。
+- **未签名应用**：代码签名已禁用（`identity=null`）。首次启动需右键 → 打开，或执行：
+  ```bash
+  xattr -cr "/Applications/Clowder AI.app"
+  ```
+
+#### 产物位置
+
+```
+dist/ClowderAI-{version}-arm64.dmg   # Apple Silicon
+dist/ClowderAI-{version}-x64.dmg     # Intel Mac
+```
+
+---
+
+### Windows 安装包
+
+构建一个独立的 `.exe` 安装程序。安装完成后可直接启动，无需再手动 `pnpm install`：
 
 ```bash
 # 一键构建完整安装包（需要 Inno Setup 6）
@@ -155,8 +213,8 @@ pnpm desktop:installer
 
 桌面应用的运行日志会写入系统临时目录：
 
-- **主进程日志**：`%TEMP%\clowder-main.log`
-- **服务管理日志**：`%TEMP%\clowder-desktop.log`
+- **Windows**：`%TEMP%\clowder-main.log` / `%TEMP%\clowder-desktop.log`
+- **macOS**：`$TMPDIR/clowder-main.log` / `$TMPDIR/clowder-desktop.log`
 
 ## 故障排查
 
@@ -172,9 +230,9 @@ pnpm desktop:installer
 
 | 平台 | 状态 | 说明 |
 |------|------|------|
-| Windows | ✅ 已验证 | 当前 PR 唯一支持的平台与安装器目标 |
-| macOS | ❌ 本 PR 不支持 | 尚无 macOS 安装包、release lane 或 clean-machine 验证 |
-| Linux | ❌ 本 PR 不支持 | 尚无 Linux 安装包、release lane 或 clean-machine 验证 |
+| Windows | ✅ 已验证 | Inno Setup 安装器（`dist/ClowderAI-Setup-x.x.x.exe`） |
+| macOS | ✅ 已验证 | DMG 安装镜像，支持 arm64 + x64 双架构 |
+| Linux | ❌ 暂不支持 | 尚无 Linux 安装包 |
 
 ## 相关文档
 
