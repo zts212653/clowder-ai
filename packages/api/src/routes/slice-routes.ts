@@ -25,8 +25,8 @@ export const sliceRoutes: FastifyPluginAsync<SliceRoutesOptions> = async (app, o
     return userId;
   }
 
-  function requireOwnedProject(id: string, userId: string, reply: FastifyReply) {
-    const project = externalProjectStore.getById(id);
+  async function requireOwnedProject(id: string, userId: string, reply: FastifyReply) {
+    const project = await externalProjectStore.getById(id);
     if (!project || project.userId !== userId) {
       void reply.status(404).send({ error: 'Project not found' });
       return null;
@@ -38,7 +38,7 @@ export const sliceRoutes: FastifyPluginAsync<SliceRoutesOptions> = async (app, o
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { projectId } = request.params as { projectId: string };
-    if (!requireOwnedProject(projectId, userId, reply)) return;
+    if (!(await requireOwnedProject(projectId, userId, reply))) return;
 
     const body = request.body as Record<string, unknown>;
     const input: CreateSliceInput = {
@@ -58,7 +58,7 @@ export const sliceRoutes: FastifyPluginAsync<SliceRoutesOptions> = async (app, o
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { projectId } = request.params as { projectId: string };
-    if (!requireOwnedProject(projectId, userId, reply)) return;
+    if (!(await requireOwnedProject(projectId, userId, reply))) return;
 
     const query = request.query as { type?: string };
     const items = query.type
@@ -71,7 +71,7 @@ export const sliceRoutes: FastifyPluginAsync<SliceRoutesOptions> = async (app, o
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { projectId, id } = request.params as { projectId: string; id: string };
-    if (!requireOwnedProject(projectId, userId, reply)) return;
+    if (!(await requireOwnedProject(projectId, userId, reply))) return;
 
     const slice = sliceStore.getById(id);
     if (!slice || slice.projectId !== projectId) {
@@ -84,7 +84,7 @@ export const sliceRoutes: FastifyPluginAsync<SliceRoutesOptions> = async (app, o
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { projectId, id } = request.params as { projectId: string; id: string };
-    if (!requireOwnedProject(projectId, userId, reply)) return;
+    if (!(await requireOwnedProject(projectId, userId, reply))) return;
 
     const existing = sliceStore.getById(id);
     if (!existing || existing.projectId !== projectId) {
@@ -111,7 +111,7 @@ export const sliceRoutes: FastifyPluginAsync<SliceRoutesOptions> = async (app, o
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { projectId } = request.params as { projectId: string };
-    if (!requireOwnedProject(projectId, userId, reply)) return;
+    if (!(await requireOwnedProject(projectId, userId, reply))) return;
 
     const body = request.body as { id1?: string; id2?: string };
     if (!body.id1 || !body.id2) {
@@ -134,7 +134,7 @@ export const sliceRoutes: FastifyPluginAsync<SliceRoutesOptions> = async (app, o
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { projectId, id } = request.params as { projectId: string; id: string };
-    if (!requireOwnedProject(projectId, userId, reply)) return;
+    if (!(await requireOwnedProject(projectId, userId, reply))) return;
 
     const existing = sliceStore.getById(id);
     if (!existing || existing.projectId !== projectId) {

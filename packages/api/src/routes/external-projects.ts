@@ -32,8 +32,8 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
   }
 
   /** Resolves project with ownership check. Returns project or sends 404 and returns null. */
-  function requireOwnedProject(id: string, userId: string, reply: FastifyReply): ExternalProject | null {
-    const project = externalProjectStore.getById(id);
+  async function requireOwnedProject(id: string, userId: string, reply: FastifyReply): Promise<ExternalProject | null> {
+    const project = await externalProjectStore.getById(id);
     if (!project || project.userId !== userId) {
       void reply.status(404).send({ error: 'Project not found' });
       return null;
@@ -56,7 +56,7 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
       return reply.status(400).send({ error: 'name and sourcePath are required' });
     }
     try {
-      const project = externalProjectStore.create(userId, {
+      const project = await externalProjectStore.create(userId, {
         name: body.name,
         description: body.description ?? '',
         sourcePath: body.sourcePath,
@@ -72,7 +72,7 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
   app.get('/api/external-projects', async (request, reply) => {
     const userId = requireUserId(request, reply);
     if (!userId) return;
-    const projects = externalProjectStore.listByUser(userId);
+    const projects = await externalProjectStore.listByUser(userId);
     return reply.send({ projects });
   });
 
@@ -80,7 +80,7 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { id } = request.params as { id: string };
-    const project = requireOwnedProject(id, userId, reply);
+    const project = await requireOwnedProject(id, userId, reply);
     if (!project) return;
     return reply.send({ project });
   });
@@ -89,9 +89,9 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { id } = request.params as { id: string };
-    const project = requireOwnedProject(id, userId, reply);
+    const project = await requireOwnedProject(id, userId, reply);
     if (!project) return;
-    externalProjectStore.delete(id);
+    await externalProjectStore.delete(id);
     return reply.status(204).send();
   });
 
@@ -101,7 +101,7 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { id } = request.params as { id: string };
-    const project = requireOwnedProject(id, userId, reply);
+    const project = await requireOwnedProject(id, userId, reply);
     if (!project) return;
 
     const backlogFullPath = join(project.sourcePath, project.backlogPath);
@@ -114,27 +114,45 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
 
     const rows = parseActiveFeaturesFromBacklog(markdown);
     const existingItems = await backlogStore.listByUser(userId);
-    const existingFeatureIds = new Set(
-      existingItems
-        .filter((item) => item.projectId === project.id)
-        .map((item) => getFeatureTagId(item.tags))
-        .filter(Boolean),
-    );
 
     let created = 0;
     let skipped = 0;
+    let orphans = 0;
     for (const row of rows) {
       const featureId = row.id.toLowerCase();
-      if (existingFeatureIds.has(featureId)) {
+
+      const orphanItems = existingItems.filter((item) => getFeatureTagId(item.tags) === featureId && !item.projectId);
+      if (orphanItems.length > 0) {
+        orphans += orphanItems.length;
+      }
+
+      // 1. Current project already has this feature bound → skip
+      const hasBoundItem = existingItems.some(
+        (item) => item.projectId === project.id && getFeatureTagId(item.tags) === featureId,
+      );
+      if (hasBoundItem) {
         skipped++;
         continue;
       }
+
+      // 2. Orphan items exist for this featureId but lack provenance evidence.
+      //    Do NOT auto-backfill in the hot path — cross-project misattribution risk;
+      //    create a project-bound replacement instead so imports repair visibility
+      //    without mutating historical items that may belong to another project.
+      if (orphanItems.length > 0) {
+        const input = buildBacklogInputFromFeature(row, userId);
+        await backlogStore.create({ ...input, projectId: project.id });
+        created++;
+        continue;
+      }
+
+      // 3. Create new item
       const input = buildBacklogInputFromFeature(row, userId);
       await backlogStore.create({ ...input, projectId: project.id });
       created++;
     }
 
-    return reply.send({ imported: created, skipped, total: rows.length });
+    return reply.send({ imported: created, skipped, total: rows.length, orphans });
   });
 
   // --- Need Audit Frame routes ---
@@ -143,7 +161,7 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { projectId } = request.params as { projectId: string };
-    if (!requireOwnedProject(projectId, userId, reply)) return;
+    if (!(await requireOwnedProject(projectId, userId, reply))) return;
 
     const body = request.body as Record<string, unknown>;
     try {
@@ -166,7 +184,7 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { projectId } = request.params as { projectId: string };
-    if (!requireOwnedProject(projectId, userId, reply)) return;
+    if (!(await requireOwnedProject(projectId, userId, reply))) return;
     const frame = needAuditFrameStore.getByProject(projectId);
     if (!frame) return reply.status(404).send({ error: 'Audit frame not found' });
     return reply.send({ frame });

@@ -67,12 +67,33 @@ team experience（2026-04-09）："这是可观测性基础设施 PR，核心是
 
 ### Phase E: Hub 嵌入式可观测 + Snapshot Store ✅
 
+方案 B：API 代理 + 自建轻量前端，零外部依赖（不引入 Grafana/Tempo/Sentry）。
+
+**安全约束（Design Gate 缅因猫 review 2026-04-21）：**
+- LocalTraceExporter 必须放在 RedactingSpanProcessor **之后**（redacted fan-out），Hub 只看脱敏后数据
+- Exporter 投影为 redacted DTO 再入 store，不存 SDK span 对象；维护者看 raw 走 TELEMETRY_DEBUG console 通道
+- 按 raw ID 查询时，先 HMAC 查询参数再 match store，不存 raw ID
+- 所有 `/api/telemetry/*` 端点走 Hub session/cookie 鉴权（session-auth.ts），不走 `/ready` 公开模式
+- Ring buffer 双阈值淘汰（maxSpans + maxAgeMs），内存 only，首版不上 SQLite
+- Metrics 直读进程内 Prometheus registry，不 self-fetch localhost:9464
+
+**设计边界：F153 = descriptive observability plane, not normative eval system。**
+Phase E 只回答"发生了什么"（traces、metrics、健康状态），不做质量判断或打分。
+
+**实现总结**（L1+L2+L3）：
 1. **LocalTraceStore** — 内存 ring buffer（10K span，2h TTL）存储脱敏后的 TraceSpanDTO
 2. **LocalTraceExporter** — OTel SpanExporter，将 ReadableSpan 投影为 DTO 写入 ring buffer
-3. **MetricsSnapshotStore** — 30s 采样 Prometheus 指标，保留时序趋势
+3. **MetricsSnapshotStore** — 30s 采样 Prometheus 指标，保留时序趋势（720 snapshot cap，6h TTL）
 4. **Telemetry API 路由** — `/api/telemetry/traces`、`/traces/stats`、`/metrics`、`/metrics/history`、`/health`
 5. **HubTraceTree** — 前端树形 trace 可视化（`buildForest` 按 `parentSpanId` 组装父子关系）
-6. **burn-rate 告警规则** — SLO-based alerting
+6. **burn-rate 告警** — SLO-based alerting（error rate / p95 latency / active invocations），WebSocket 推送
+7. **产品级 instruments** — `invocation.completed`、`thread.duration`、`session.rounds`、`cat.invocation.count`、`cat.response.duration`
+
+> **Review P1/P2 修复**（PR #546 review）：
+> - P1: `findP95Latency` histogram bucket 语义错误（cumulative count ≠ seconds）→ 只用 `quantile="0.95"`
+> - P1: `LocalTraceStore.query()` 改为 newest-first 遍历
+> - P2: `/api/telemetry/health` 聚合 `/ready` 探针 + error rate → unified health verdict
+> - P2: `task.*` instruments 重命名为 `invocation.completed` / `thread.duration`（匹配实际语义）
 
 ### Phase F: Trace 持久化 — 指针关联方案（设计中）
 
@@ -242,6 +263,7 @@ Phase E 实现引入了 `cat_cafe.route` 根 span（`AgentRouter` 创建），`c
 - [x] AC-D5: Windows `start-windows.ps1` 通过 API Start-Job 注入同样的 `NODE_ENV` 语义
 - [x] AC-D6: `telemetry-debug.test.js` + `start-dev-profile-isolation.test.mjs` + `start-dev-script.test.js` 覆盖 guardrail 与启动链回归
 
+
 ## Dependencies
 
 - **Related**: F130（API 日志治理 — 同属可观测性，F130 管 logging，F153 管 metrics/tracing）
@@ -269,11 +291,19 @@ Phase E 实现引入了 `cat_cafe.route` 根 span（`AgentRouter` 创建），`c
 | KD-7 | Phase B 2 轮 review 后放行 intake | P1（脱敏）+ P2（tool_use + scope）全部修完 | 2026-04-12 |
 | KD-8 | clowder-ai#489 双猫重审后放行 merge + absorb | strict/shadow/narrative 三级模型成立；剩余架构偏好降为 non-blocking | 2026-04-15 |
 | KD-9 | `TELEMETRY_DEBUG` 走 default-deny + 启动链显式注入 `NODE_ENV` | 只在真实 dev/test 语义下开放 raw exporter，避免 runtime/profile 脱钩 | 2026-04-18 |
-| KD-10 | Phase F: 否决 SQLite 独立存储 | 铲屎官认为单独一份可观测数据冗余 | 2026-04-22 |
-| KD-11 | Phase F: 否决完整 span JSON 写入 InvocationRecord | GPT-5.4 + Sonnet review: Redis 内存线性膨胀 + HGETALL 读放大 + TTL 生命周期错位 | 2026-04-22 |
-| KD-12 | Phase F: 选定指针关联方案 | 铲屎官洞察：消息数据已含 timing/token/tool 信息，只需补 OTel ID 指针（~100 bytes） | 2026-04-22 |
-| KD-13 | Phase F 前置：统一 `invocationId`（沿用现有键名，值改为 outer record ID）| GPT-5.4 发现不统一；缅因猫 review 修正：不引入新键名 `recordInvocationId`，否则破坏 redactor Class C + trace query | 2026-04-22 |
-| KD-14 | Phase F 纳入 `cat_cafe.route` 根 span | Phase E 实现引入 route 根 span，invocation 已变子 span；hydrate 必须覆盖 route 否则重启后层级断裂 | 2026-04-22 |
-| KD-15 | startTime 用 `timestamp - durationMs` 反推 | assistant message timestamp 是终态落盘时间 ≈ span end；缅因猫 review 发现直接当 startTime 会偏移 | 2026-04-22 |
-| KD-16 | `extra.tracing` 需要 parser + merge 前置改造 | `updateExtra()` 是整块覆盖，parser 不保留未知字段；缅因猫 review 指出需先 widen type + merge 语义 | 2026-04-22 |
-| KD-17 | tool_use spans 暂不持久化 | KD-6 原决策为 event；Phase E 升级为 MCP 工具 span 但仍是零时长；等 Phase G 真实执行边界再持久化 | 2026-04-22 |
+| KD-10 | NODE_ENV 由启动模式（PROD_WEB/-Dev）决定，不由 profile 决定 | dev:direct + --profile=opensource 是开发模式，不应标 production | 2026-04-20 |
+| KD-11 | Phase E 走方案 B（API 代理 + 自建前端），不引入 Grafana/Tempo/Sentry | 零外部依赖，贴合猫咖数据模型，零额外进程 | 2026-04-21 |
+| KD-12 | Trace 存储用 in-process ring buffer，不引入 Tempo | 零额外进程，保留最近 N 小时即够用 | 2026-04-21 |
+| KD-13 | LocalTraceExporter 放 redactor 之后，Hub 只看脱敏后数据 | 缅因猫 Design Gate：raw span 走 TELEMETRY_DEBUG console，不走 Hub | 2026-04-21 |
+| KD-14 | `/api/telemetry/*` 走 session/cookie auth | 缅因猫 Design Gate：不复制 `/ready` 公开探针模式 | 2026-04-21 |
+| KD-15 | 查询参数先 HMAC 再 match store | 缅因猫 Design Gate：不为查询方便存 raw ID | 2026-04-21 |
+| KD-16 | F153 = descriptive observability，不做 normative eval | Phase E 只展示"发生了什么"，eval 信号留给未来 phase（eval 讨论 2026-04-19） | 2026-04-21 |
+| KD-17 | 补 5 个产品级 instrument（task/session 层），不急于吸收 ActivityEventBus | Phase A 的 5 个是基础设施级；L1-L3 gap 分析显示 task 完成/耗时/轮次信号缺失 | 2026-04-21 |
+| KD-18 | Phase F: 否决 SQLite 独立存储 | 铲屎官认为单独一份可观测数据冗余 | 2026-04-22 |
+| KD-19 | Phase F: 否决完整 span JSON 写入 InvocationRecord | GPT-5.4 + Sonnet review: Redis 内存线性膨胀 + HGETALL 读放大 + TTL 生命周期错位 | 2026-04-22 |
+| KD-20 | Phase F: 选定指针关联方案 | 铲屎官洞察：消息数据已含 timing/token/tool 信息，只需补 OTel ID 指针（~100 bytes） | 2026-04-22 |
+| KD-21 | Phase F 前置：统一 `invocationId`（沿用现有键名，值改为 outer record ID）| GPT-5.4 发现不统一；缅因猫 review 修正：不引入新键名 `recordInvocationId`，否则破坏 redactor Class C + trace query | 2026-04-22 |
+| KD-22 | Phase F 纳入 `cat_cafe.route` 根 span | Phase E 实现引入 route 根 span，invocation 已变子 span；hydrate 必须覆盖 route 否则重启后层级断裂 | 2026-04-22 |
+| KD-23 | startTime 用 `timestamp - durationMs` 反推 | assistant message timestamp 是终态落盘时间 ≈ span end；缅因猫 review 发现直接当 startTime 会偏移 | 2026-04-22 |
+| KD-24 | `extra.tracing` 需要 parser + merge 前置改造 | `updateExtra()` 是整块覆盖，parser 不保留未知字段；缅因猫 review 指出需先 widen type + merge 语义 | 2026-04-22 |
+| KD-25 | tool_use spans 暂不持久化 | KD-6 原决策为 event；Phase E 升级为 MCP 工具 span 但仍是零时长；等 Phase G 真实执行边界再持久化 | 2026-04-22 |
