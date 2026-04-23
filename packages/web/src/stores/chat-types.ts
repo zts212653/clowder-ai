@@ -484,6 +484,12 @@ export interface QueueEntry {
   autoExecute?: boolean;
   /** F122B: which cat initiated this entry (for A2A handoff display) */
   callerCatId?: string;
+  /** F169: dequeue priority */
+  priority?: 'urgent' | 'normal';
+  /** F169: source category for visual grouping */
+  sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a';
+  /** F169: explicit dequeue position from drag-reorder */
+  position?: number;
 }
 
 /** F39: Message delivery mode — undefined = smart default, 'queue' = enqueue, 'force' = cancel + execute */
