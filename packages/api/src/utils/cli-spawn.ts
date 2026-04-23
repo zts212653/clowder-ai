@@ -4,6 +4,7 @@
  */
 
 import { spawn as nodeSpawn } from 'node:child_process';
+import { dirname, isAbsolute } from 'node:path';
 import type { Span } from '@opentelemetry/api';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import { createModuleLogger } from '../infrastructure/logger.js';
@@ -547,9 +548,20 @@ function defaultSpawn(
     });
   }
 
+  // macOS GUI apps (Electron) have a minimal PATH that excludes version
+  // managers (nvm/fnm/Volta). CLI shims use `#!/usr/bin/env node`, so the
+  // child process must be able to find `node` in its PATH. Prepend the
+  // directory containing the resolved CLI binary — it typically sits next
+  // to the `node` binary that installed it (e.g. ~/.nvm/versions/node/v20/bin/).
+  const env = { ...options.env };
+  if (isAbsolute(command)) {
+    const binDir = dirname(command);
+    env.PATH = env.PATH ? `${binDir}:${env.PATH}` : binDir;
+  }
+
   return nodeSpawn(command, [...args], {
     cwd: options.cwd,
-    env: options.env,
+    env,
     stdio: options.stdio,
   });
 }

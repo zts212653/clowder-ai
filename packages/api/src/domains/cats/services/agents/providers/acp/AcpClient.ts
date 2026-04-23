@@ -12,9 +12,11 @@
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { dirname, isAbsolute } from 'node:path';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
 
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
+import { resolveCliCommandOrBare } from '../../../../../../utils/cli-resolve.js';
 import {
   escapeBashArg,
   escapeCmdArg,
@@ -127,12 +129,20 @@ export class AcpClient {
     const doSpawn = this.config.spawnFn ?? nodeSpawn;
 
     // Mirror cli-spawn.ts on Windows so ACP agents can bypass npm-global .cmd shims.
-    let command = this.config.command;
+    // On macOS GUI apps (Electron), resolve bare command names (e.g. 'gemini') to
+    // full paths via resolveCliCommandOrBare, then inject the bin directory into
+    // PATH so `#!/usr/bin/env node` shims can find the node interpreter.
+    let command = resolveCliCommandOrBare(this.config.command);
     let args = [...this.config.args];
+    const childEnv = { ...process.env, ...this.config.env };
+    if (!IS_WINDOWS && isAbsolute(command)) {
+      const binDir = dirname(command);
+      childEnv.PATH = childEnv.PATH ? `${binDir}:${childEnv.PATH}` : binDir;
+    }
     const spawnOpts: SpawnOptions & { stdio: ['pipe', 'pipe', 'pipe'] } = {
       cwd: this.config.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, ...this.config.env },
+      env: childEnv,
     };
     if (IS_WINDOWS && !this.config.spawnFn) {
       const shimSpawn = resolveWindowsShimSpawn(command, args);
