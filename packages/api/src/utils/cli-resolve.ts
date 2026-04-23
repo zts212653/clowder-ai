@@ -5,13 +5,39 @@
  */
 
 import { execSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const IS_WINDOWS = process.platform === 'win32';
 
-/** Common install directories for CLI tools (non-Windows). */
-const UNIX_SEARCH_DIRS = ['.local/bin', '.claude/bin', '.claude/local/bin'];
+/**
+ * Common install directories for CLI tools (non-Windows, relative to $HOME).
+ * macOS GUI apps (Electron) don't inherit the user's shell PATH, so `which`
+ * misses CLIs installed via nvm / fnm / Volta / Homebrew. We probe these
+ * well-known locations as a fallback.
+ */
+const UNIX_SEARCH_DIRS = [
+  '.local/bin',
+  '.claude/bin',
+  '.claude/local/bin',
+  '.fnm/aliases/default/bin',
+  '.volta/bin',
+  '.nix-profile/bin',
+];
+
+/** Discover nvm-managed Node.js bin directories under ~/.nvm/versions/node/. */
+function collectNvmBinDirs(): string[] {
+  const home = process.env.HOME ?? '';
+  if (!home) return [];
+  const nvmDir = resolve(home, '.nvm/versions/node');
+  try {
+    return readdirSync(nvmDir)
+      .filter((d) => d.startsWith('v'))
+      .map((d) => resolve(nvmDir, d, 'bin'));
+  } catch {
+    return [];
+  }
+}
 
 const resolvedCache = new Map<string, string>();
 
@@ -64,8 +90,17 @@ export function resolveCliCommand(command: string): string | null {
   } else {
     const home = process.env.HOME ?? '';
     if (home) {
+      // Static well-known directories (relative to $HOME)
       for (const dir of UNIX_SEARCH_DIRS) {
         const candidate = resolve(home, dir, command);
+        if (existsSync(candidate)) {
+          resolvedCache.set(command, candidate);
+          return candidate;
+        }
+      }
+      // nvm-managed Node.js versions (absolute paths)
+      for (const binDir of collectNvmBinDirs()) {
+        const candidate = resolve(binDir, command);
         if (existsSync(candidate)) {
           resolvedCache.set(command, candidate);
           return candidate;
