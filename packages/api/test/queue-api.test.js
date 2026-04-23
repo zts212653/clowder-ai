@@ -579,4 +579,59 @@ describe('Queue Management API', () => {
     const body = JSON.parse(res.body);
     assert.equal(body.code, 'CAT_NOT_ACTIVE');
   });
+
+  // ── F169 Task 6: PATCH /queue/reorder ──
+
+  it('PATCH /queue/reorder sets positions on multiple entries (F169)', async () => {
+    const r1 = enqueueEntry(deps.invocationQueue, { content: 'a' });
+    const r2 = enqueueEntry(deps.invocationQueue, { content: 'b' });
+    const r3 = enqueueEntry(deps.invocationQueue, { content: 'c' });
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/threads/t1/queue/reorder',
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: {
+        positions: [
+          { entryId: r3.entry.id, position: 0 },
+          { entryId: r1.entry.id, position: 1 },
+          { entryId: r2.entry.id, position: 2 },
+        ],
+      },
+    });
+    assert.equal(res.statusCode, 200);
+
+    const next = deps.invocationQueue.peekOldestAcrossUsers('t1');
+    assert.equal(next.content, 'c', 'entry c should be first after reorder');
+
+    const emitCalls = deps.socketManager.emitToUser.mock.calls;
+    const updateCall = emitCalls.find((c) => c.arguments[1] === 'queue_updated');
+    assert.ok(updateCall);
+    assert.equal(updateCall.arguments[2].action, 'reordered');
+  });
+
+  it('PATCH /queue/reorder rejects position on processing entry (F169)', async () => {
+    enqueueEntry(deps.invocationQueue, { content: 'a' });
+    deps.invocationQueue.markProcessing('t1', 'user-a');
+    const entries = deps.invocationQueue.list('t1', 'user-a');
+    const processingEntry = entries.find((e) => e.status === 'processing');
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/threads/t1/queue/reorder',
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { positions: [{ entryId: processingEntry.id, position: 0 }] },
+    });
+    assert.equal(res.statusCode, 400);
+  });
+
+  it('PATCH /queue/reorder rejects invalid body (F169)', async () => {
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/threads/t1/queue/reorder',
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { positions: 'not-an-array' },
+    });
+    assert.equal(res.statusCode, 400);
+  });
 });
