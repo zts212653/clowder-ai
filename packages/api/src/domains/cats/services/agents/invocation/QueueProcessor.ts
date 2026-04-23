@@ -500,8 +500,29 @@ export class QueueProcessor {
    */
   private async executeEntry(entry: QueueEntry): Promise<'succeeded' | 'failed' | 'canceled' | 'canceled_by_user'> {
     const { queue, invocationTracker, invocationRecordStore, router, socketManager, messageStore, log } = this.deps;
-    const { threadId, userId, content, targetCats, intent, messageId } = entry;
+    const { threadId, userId, targetCats, intent, messageId } = entry;
     const primaryCat = targetCats[0] ?? 'unknown';
+
+    // F169: user-message batching — collect adjacent matching entries
+    const batchedEntryIds: string[] = [];
+    let content = entry.content;
+    if (entry.source === 'user') {
+      const batch = queue.collectUserBatch(threadId, userId);
+      const sortedTargets = [...entry.targetCats].sort();
+      const matching = batch.filter(
+        (e) =>
+          e.intent === entry.intent &&
+          e.targetCats.length === sortedTargets.length &&
+          [...e.targetCats].sort().every((t, i) => t === sortedTargets[i]),
+      );
+      if (matching.length > 0) {
+        content = content + '\n' + matching.map((e) => e.content).join('\n');
+        for (const be of matching) {
+          queue.markProcessingById(threadId, be.id);
+          batchedEntryIds.push(be.id);
+        }
+      }
+    }
 
     let controller: AbortController | undefined;
     let invocationId: string | undefined;
@@ -855,6 +876,10 @@ export class QueueProcessor {
       // Always cleanup tracker + queue (all target cat slots)
       invocationTracker.completeAll(threadId, targetCats, controller);
       queue.removeProcessedAcrossUsers(threadId, entry.id);
+      // F169: remove batched entries
+      for (const bid of batchedEntryIds) {
+        queue.removeProcessedAcrossUsers(threadId, bid);
+      }
       socketManager.emitToUser(userId, 'queue_updated', {
         threadId,
         queue: queue.list(threadId, userId),

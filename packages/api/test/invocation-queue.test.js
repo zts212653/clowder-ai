@@ -866,4 +866,62 @@ describe('InvocationQueue', () => {
   it('setPosition returns false for non-existent entry', () => {
     assert.equal(queue.setPosition('t1', 'u1', 'nonexistent', 0), false);
   });
+
+  // ── F169 Task 5: collectUserBatch ──
+
+  it('collectUserBatch collects adjacent user entries with same userId+intent+targetCats', () => {
+    queue.enqueue(entry({ content: 'a', source: 'user', targetCats: ['c1'], intent: 'execute' }));
+    queue.enqueue(entry({ content: 'b', source: 'user', targetCats: ['c1'], intent: 'execute' }));
+    queue.enqueue(entry({ content: 'c', source: 'user', targetCats: ['c1'], intent: 'execute' }));
+    const batch = queue.collectUserBatch('t1', 'u1');
+    assert.equal(batch.length, 3);
+    assert.equal(batch.map((e) => e.content).join('\n'), 'a\nb\nc');
+  });
+
+  it('collectUserBatch stops at different intent', () => {
+    queue.enqueue(entry({ content: 'a', source: 'user', targetCats: ['c1'], intent: 'execute' }));
+    queue.enqueue(entry({ content: 'b', source: 'user', targetCats: ['c1'], intent: 'search' }));
+    const batch = queue.collectUserBatch('t1', 'u1');
+    assert.equal(batch.length, 1);
+    assert.equal(batch[0].content, 'a');
+  });
+
+  it('collectUserBatch stops at connector/agent entry', () => {
+    queue.enqueue(entry({ content: 'a', source: 'user', targetCats: ['c1'], intent: 'execute' }));
+    queue.enqueue(entry({ content: 'b', source: 'connector', targetCats: ['c1'], intent: 'execute' }));
+    queue.enqueue(entry({ content: 'c', source: 'user', targetCats: ['c1'], intent: 'execute' }));
+    const batch = queue.collectUserBatch('t1', 'u1');
+    assert.equal(batch.length, 1);
+  });
+
+  it('collectUserBatch does not batch across different targetCats', () => {
+    queue.enqueue(entry({ content: 'a', source: 'user', targetCats: ['c1'], intent: 'execute' }));
+    queue.enqueue(entry({ content: 'b', source: 'user', targetCats: ['c1', 'c2'], intent: 'execute' }));
+    const batch = queue.collectUserBatch('t1', 'u1');
+    assert.equal(batch.length, 1);
+  });
+
+  it('collectUserBatch returns single-entry batch for connector source', () => {
+    queue.enqueue(entry({ content: 'a', source: 'connector', targetCats: ['c1'], intent: 'execute' }));
+    queue.enqueue(entry({ content: 'b', source: 'connector', targetCats: ['c1'], intent: 'execute' }));
+    const batch = queue.collectUserBatch('t1', 'u1');
+    assert.equal(batch.length, 1);
+    assert.equal(batch[0].content, 'a');
+  });
+
+  it('collectUserBatch returns empty array for empty queue', () => {
+    const batch = queue.collectUserBatch('t1', 'u1');
+    assert.equal(batch.length, 0);
+  });
+
+  it('collectUserBatch skips processing entries and starts from first queued', () => {
+    queue.enqueue(entry({ content: 'processing', source: 'user', targetCats: ['c1'], intent: 'execute' }));
+    queue.markProcessing('t1', 'u1');
+    queue.enqueue(entry({ content: 'a', source: 'user', targetCats: ['c1'], intent: 'execute' }));
+    queue.enqueue(entry({ content: 'b', source: 'user', targetCats: ['c1'], intent: 'execute' }));
+    const batch = queue.collectUserBatch('t1', 'u1');
+    assert.equal(batch.length, 2);
+    assert.equal(batch[0].content, 'a');
+    assert.equal(batch[1].content, 'b');
+  });
 });

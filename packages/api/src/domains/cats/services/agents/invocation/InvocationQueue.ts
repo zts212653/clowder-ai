@@ -565,6 +565,38 @@ export class InvocationQueue {
     return false;
   }
 
+  /**
+   * F169: Collect a batch of adjacent user entries for unified execution.
+   * Non-user sources always return a single-entry batch.
+   * User entries batch while: same source, same intent, same targetCats (set equality).
+   * Returns copies — caller is responsible for marking processing.
+   */
+  collectUserBatch(threadId: string, userId: string): QueueEntry[] {
+    const key = this.scopeKey(threadId, userId);
+    const q = this.queues.get(key);
+    if (!q) return [];
+
+    const first = q.find((e) => e.status === 'queued');
+    if (!first) return [];
+    if (first.source !== 'user') return [{ ...first }];
+
+    const batch: QueueEntry[] = [{ ...first }];
+    const firstIdx = q.indexOf(first);
+    const firstTargetsSorted = sorted(first.targetCats);
+    for (let i = firstIdx + 1; i < q.length; i++) {
+      const e = q[i]!;
+      if (e.status !== 'queued') continue;
+      if (
+        e.source !== 'user' ||
+        e.intent !== first.intent ||
+        !arraysEqual(sorted(e.targetCats), firstTargetsSorted)
+      )
+        break;
+      batch.push({ ...e });
+    }
+    return batch;
+  }
+
   /** Whether any user has queued entries for this thread. */
   hasQueuedForThread(threadId: string): boolean {
     for (const [key, q] of this.queues) {

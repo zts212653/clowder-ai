@@ -1284,4 +1284,75 @@ describe('QueueProcessor', () => {
       assert.equal(batchDoneCalls[0].threadId, 't1');
     });
   });
+
+  // ── F169 Task 5: user-message batching at dequeue ──
+
+  describe('user-message batching (F169)', () => {
+    async function waitForQueue(queue, threadId, userId, predicate, timeoutMs = 2000) {
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs) {
+        if (predicate(queue.list(threadId, userId))) return;
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      throw new Error(`waitForQueue timed out after ${timeoutMs}ms`);
+    }
+
+    it('combines adjacent user entries into single routeExecution call', async () => {
+      enqueueEntry(deps.queue, { content: 'msg-a' });
+      enqueueEntry(deps.queue, { content: 'msg-b' });
+      enqueueEntry(deps.queue, { content: 'msg-c' });
+
+      await processor.processNext('t1', 'u1');
+      await waitForQueue(deps.queue, 't1', 'u1', (q) => deps.router.routeExecution.mock.calls.length >= 1);
+
+      assert.equal(deps.router.routeExecution.mock.calls.length, 1, 'should call routeExecution once');
+      const calledContent = deps.router.routeExecution.mock.calls[0].arguments[1];
+      assert.equal(calledContent, 'msg-a\nmsg-b\nmsg-c', 'content should be combined');
+    });
+
+    it('marks all batched entries as processing', async () => {
+      enqueueEntry(deps.queue, { content: 'a' });
+      enqueueEntry(deps.queue, { content: 'b' });
+
+      await processor.processNext('t1', 'u1');
+
+      const remaining = deps.queue.list('t1', 'u1').filter((e) => e.status === 'queued');
+      assert.equal(remaining.length, 0, 'no queued entries should remain after batch');
+    });
+
+    it('does not batch connector entries', async () => {
+      enqueueEntry(deps.queue, { content: 'conn-a', source: 'connector' });
+      enqueueEntry(deps.queue, { content: 'conn-b', source: 'connector' });
+
+      await processor.processNext('t1', 'u1');
+      await waitForQueue(deps.queue, 't1', 'u1', () => deps.router.routeExecution.mock.calls.length >= 1);
+
+      const calledContent = deps.router.routeExecution.mock.calls[0].arguments[1];
+      assert.equal(calledContent, 'conn-a', 'connector entries should not be batched');
+      assert.equal(deps.queue.list('t1', 'u1').filter((e) => e.status === 'queued').length, 1);
+    });
+
+    it('stops batch at different intent', async () => {
+      enqueueEntry(deps.queue, { content: 'exec-a', intent: 'execute' });
+      enqueueEntry(deps.queue, { content: 'search-b', intent: 'search' });
+
+      await processor.processNext('t1', 'u1');
+      await waitForQueue(deps.queue, 't1', 'u1', () => deps.router.routeExecution.mock.calls.length >= 1);
+
+      const calledContent = deps.router.routeExecution.mock.calls[0].arguments[1];
+      assert.equal(calledContent, 'exec-a', 'should only include matching-intent entries');
+    });
+
+    it('removes all batched entries after successful execution', async () => {
+      enqueueEntry(deps.queue, { content: 'a' });
+      enqueueEntry(deps.queue, { content: 'b' });
+      enqueueEntry(deps.queue, { content: 'c' });
+
+      await processor.processNext('t1', 'u1');
+      await waitForQueue(deps.queue, 't1', 'u1', (q) => q.length === 0);
+
+      const all = deps.queue.list('t1', 'u1');
+      assert.equal(all.length, 0, 'all batched entries should be removed after completion');
+    });
+  });
 });
