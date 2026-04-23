@@ -242,23 +242,27 @@ export class InvocationQueue {
     return true;
   }
 
-  /** Mark the first queued entry as processing (stays in array). */
+  /** F169: Mark the highest-priority queued entry as processing (stays in array). */
   markProcessing(threadId: string, userId: string): QueueEntry | null {
     const q = this.queues.get(this.scopeKey(threadId, userId));
     if (!q) return null;
-    const first = q.find((e) => e.status === 'queued');
-    if (!first) return null;
-    first.status = 'processing';
-    first.processingStartedAt = Date.now();
-    return { ...first };
+    const queued = q.filter((e) => e.status === 'queued');
+    if (queued.length === 0) return null;
+    queued.sort(InvocationQueue.compareEntries);
+    const best = queued[0]!;
+    best.status = 'processing';
+    best.processingStartedAt = Date.now();
+    return { ...best };
   }
 
-  /** Peek at the next queued entry without mutating state. */
+  /** F169: Peek at the highest-priority queued entry without mutating state. */
   peekNextQueued(threadId: string, userId: string): QueueEntry | null {
     const q = this.queues.get(this.scopeKey(threadId, userId));
     if (!q) return null;
-    const first = q.find((e) => e.status === 'queued');
-    return first ? { ...first } : null;
+    const queued = q.filter((e) => e.status === 'queued');
+    if (queued.length === 0) return null;
+    queued.sort(InvocationQueue.compareEntries);
+    return { ...queued[0]! };
   }
 
   /** Rollback a processing entry back to queued (undo markProcessing/markProcessingAcrossUsers). */

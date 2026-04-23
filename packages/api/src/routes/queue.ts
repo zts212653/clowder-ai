@@ -295,13 +295,19 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       return { error: 'positions must be an array' };
     }
 
+    const entries = invocationQueue.list(threadId, guard.userId);
     for (const item of body.positions) {
-      const { entryId, position } = item as { entryId: string; position: number };
-      const success = invocationQueue.setPosition(threadId, guard.userId, entryId, position);
-      if (!success) {
+      const { entryId } = item as { entryId: string };
+      const entry = entries.find((e) => e.id === entryId);
+      if (!entry || entry.status === 'processing') {
         reply.status(400);
         return { error: `Cannot reorder entry ${entryId} (not found or processing)` };
       }
+    }
+
+    for (const item of body.positions) {
+      const { entryId, position } = item as { entryId: string; position: number };
+      invocationQueue.setPosition(threadId, guard.userId, entryId, position);
     }
 
     socketManager.emitToUser(guard.userId, 'queue_updated', {

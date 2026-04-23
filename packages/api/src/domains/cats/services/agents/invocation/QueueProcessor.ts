@@ -505,12 +505,14 @@ export class QueueProcessor {
 
     // F169: user-message batching — collect adjacent matching entries
     const batchedEntryIds: string[] = [];
+    const batchedMessageIds: string[] = [];
     let content = entry.content;
     if (entry.source === 'user') {
       const batch = queue.collectUserBatch(threadId, userId);
       const sortedTargets = [...entry.targetCats].sort();
       const matching = batch.filter(
         (e) =>
+          e.source === 'user' &&
           e.intent === entry.intent &&
           e.targetCats.length === sortedTargets.length &&
           [...e.targetCats].sort().every((t, i) => t === sortedTargets[i]),
@@ -520,6 +522,7 @@ export class QueueProcessor {
         for (const be of matching) {
           queue.markProcessingById(threadId, be.id);
           batchedEntryIds.push(be.id);
+          if (be.messageId) batchedMessageIds.push(be.messageId);
         }
       }
     }
@@ -574,7 +577,9 @@ export class QueueProcessor {
 
       // F098-D: Mark queued messages as delivered (set deliveredAt = now)
       // F117: Collect full message objects for frontend bubble rendering
-      const allMessageIds: string[] = [messageId ?? '', ...(entry.mergedMessageIds ?? [])].filter(Boolean);
+      const allMessageIds: string[] = [messageId ?? '', ...(entry.mergedMessageIds ?? []), ...batchedMessageIds].filter(
+        Boolean,
+      );
       const deliveredNow = Date.now();
       const deliveredIds: string[] = [];
       const deliveredMessages: Array<{
@@ -630,7 +635,9 @@ export class QueueProcessor {
 
       // F039 remaining: queued image messages must be visible to cats.
       // Aggregate contentBlocks from the stored user messages (messageId + merged).
-      const messageIds: string[] = [messageId ?? '', ...(entry.mergedMessageIds ?? [])].filter(Boolean);
+      const messageIds: string[] = [messageId ?? '', ...(entry.mergedMessageIds ?? []), ...batchedMessageIds].filter(
+        Boolean,
+      );
       const contentBlocks: unknown[] = [];
       for (const id of messageIds) {
         try {

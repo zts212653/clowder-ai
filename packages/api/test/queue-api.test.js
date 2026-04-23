@@ -634,4 +634,26 @@ describe('Queue Management API', () => {
     });
     assert.equal(res.statusCode, 400);
   });
+
+  it('P2-4: PATCH /queue/reorder does not partial-write on failure', async () => {
+    const r1 = enqueueEntry(deps.invocationQueue, { content: 'a' });
+    enqueueEntry(deps.invocationQueue, { content: 'b' });
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/threads/t1/queue/reorder',
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: {
+        positions: [
+          { entryId: r1.entry.id, position: 5 },
+          { entryId: 'nonexistent', position: 0 },
+        ],
+      },
+    });
+    assert.equal(res.statusCode, 400);
+
+    const entries = deps.invocationQueue.list('t1', 'user-a');
+    const first = entries.find((e) => e.id === r1.entry.id);
+    assert.equal(first.position, undefined, 'first entry position should NOT be written when batch fails');
+  });
 });

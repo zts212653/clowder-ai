@@ -924,4 +924,23 @@ describe('InvocationQueue', () => {
     assert.equal(batch[0].content, 'a');
     assert.equal(batch[1].content, 'b');
   });
+
+  // ── P2-3 fix: markProcessing/peekNextQueued must respect comparator ──
+
+  it('markProcessing respects position override (P2-3)', () => {
+    const rA = queue.enqueue(entry({ content: 'A' }));
+    const rB = queue.enqueue(entry({ content: 'B' }));
+    queue.setPosition('t1', 'u1', rB.entry.id, 0);
+
+    const processing = queue.markProcessing('t1', 'u1');
+    assert.equal(processing.content, 'B', 'markProcessing should pick position-0 entry first');
+  });
+
+  it('peekNextQueued respects priority ordering (P2-3)', () => {
+    queue.enqueue(entry({ content: 'normal', priority: 'normal' }));
+    queue.enqueue(entry({ content: 'urgent', priority: 'urgent' }));
+
+    const next = queue.peekNextQueued('t1', 'u1');
+    assert.equal(next.content, 'urgent', 'peekNextQueued should return urgent entry first');
+  });
 });

@@ -1351,5 +1351,44 @@ describe('QueueProcessor', () => {
       const all = deps.queue.list('t1', 'u1');
       assert.equal(all.length, 0, 'all batched entries should be removed after completion');
     });
+
+    it('P1-1: batched entries messageIds are markDelivered-ed', async () => {
+      deps.messageStore.markDelivered = mock.fn(async (id) => ({
+        id,
+        content: 'c',
+        catId: null,
+        timestamp: Date.now(),
+        mentions: [],
+        userId: 'u1',
+      }));
+
+      const e1 = enqueueEntry(deps.queue, { content: 'first' });
+      deps.queue.backfillMessageId('t1', 'u1', e1.id, 'm1');
+      const e2 = enqueueEntry(deps.queue, { content: 'second' });
+      deps.queue.backfillMessageId('t1', 'u1', e2.id, 'm2');
+
+      await processor.processNext('t1', 'u1');
+      await waitForQueue(deps.queue, 't1', 'u1', () => deps.messageStore.markDelivered.mock.calls.length >= 2);
+
+      const deliveredIds = deps.messageStore.markDelivered.mock.calls.map((c) => c.arguments[0]);
+      assert.ok(deliveredIds.includes('m1'), 'primary entry messageId should be delivered');
+      assert.ok(deliveredIds.includes('m2'), 'batched entry messageId should be delivered');
+    });
+
+    it('P1-2: connector entry is NOT absorbed into user batch', async () => {
+      enqueueEntry(deps.queue, { content: 'user-msg', source: 'user' });
+      enqueueEntry(deps.queue, { content: 'connector-msg', source: 'connector' });
+
+      await processor.processNext('t1', 'u1');
+      await waitForQueue(deps.queue, 't1', 'u1', () => deps.router.routeExecution.mock.calls.length >= 1);
+
+      const calledContent = deps.router.routeExecution.mock.calls[0].arguments[1];
+      assert.equal(calledContent, 'user-msg', 'connector entry must not be batched into user content');
+      assert.equal(
+        deps.queue.list('t1', 'u1').filter((e) => e.status === 'queued').length,
+        1,
+        'connector entry should remain queued',
+      );
+    });
   });
 });
