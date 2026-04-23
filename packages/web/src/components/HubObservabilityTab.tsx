@@ -5,10 +5,13 @@ import { apiFetch } from '@/utils/api-client';
 import { TraceBrowser } from './HubTraceTree';
 
 interface HealthData {
+  status: 'healthy' | 'degraded';
   uptime: number;
+  otelEnabled: boolean;
+  readiness?: { status: 'ready' | 'degraded'; checks: Record<string, { ok: boolean; ms: number; error?: string }> };
+  errorRate: number | null;
   traceStore: { spanCount: number; maxSpans: number; oldestStoredAt: number | null } | null;
   metricsSnapshotStore: { snapshotCount: number; maxSnapshots: number } | null;
-  otelEnabled: boolean;
   timestamp: number;
 }
 
@@ -86,6 +89,10 @@ function OverviewPanel() {
   const invOk = sumByPrefix(latest, 'cat_cafe_invocation_completed', 'status="ok"');
   const invErr = sumByPrefix(latest, 'cat_cafe_invocation_completed', 'status="error"');
   const invocations = sumByPrefix(latest, 'cat_cafe_cat_invocation_count');
+  const durationSum = sumByPrefix(latest, 'cat_cafe_thread_duration_sum');
+  const durationCount = sumByPrefix(latest, 'cat_cafe_thread_duration_count');
+  const avgDuration = durationCount > 0 ? durationSum / durationCount : 0;
+  const sessionRounds = sumByPrefix(latest, 'cat_cafe_session_rounds_total');
 
   if (loading) return <p className="text-sm text-cafe-muted">...</p>;
 
@@ -99,6 +106,8 @@ function OverviewPanel() {
           sub={invOk + invErr > 0 ? `${((invErr / (invOk + invErr)) * 100).toFixed(1)}% error` : undefined}
         />
         <MetricCard label="Invocations" value={String(invocations)} />
+        <MetricCard label="Avg Duration" value={avgDuration > 0 ? `${avgDuration.toFixed(1)}s` : 'N/A'} />
+        <MetricCard label="Session Rounds" value={sessionRounds > 0 ? String(sessionRounds) : 'N/A'} />
         <MetricCard label="Snapshots" value={`${snapshots.length}`} sub="(last 30min)" />
       </div>
 
@@ -162,9 +171,31 @@ function HealthPanel() {
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <MetricCard label="Status" value={health.status === 'healthy' ? '✓ Healthy' : '⚠ Degraded'} />
         <MetricCard label="Uptime" value={formatUptime(health.uptime)} />
         <MetricCard label="OTel" value={health.otelEnabled ? 'Enabled' : 'Disabled'} />
+        <MetricCard
+          label="Error Rate"
+          value={health.errorRate !== null ? `${(health.errorRate * 100).toFixed(1)}%` : 'N/A'}
+        />
+      </div>
+
+      {health.readiness && (
+        <div className="rounded-lg bg-cafe-surface-elevated p-3">
+          <div className="mb-1 text-xs font-medium text-cafe-muted">Readiness Checks</div>
+          {Object.entries(health.readiness.checks).map(([name, check]) => (
+            <div key={name} className="flex items-center gap-2 text-xs">
+              <span className={check.ok ? 'text-green-600' : 'text-red-500'}>{check.ok ? '✓' : '✗'}</span>
+              <span className="text-cafe">{name}</span>
+              <span className="text-cafe-muted">{check.ms}ms</span>
+              {check.error && <span className="text-red-500">{check.error}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
         <MetricCard
           label="Trace Store"
           value={health.traceStore ? `${health.traceStore.spanCount} spans` : 'N/A'}

@@ -282,11 +282,15 @@ test('GET /api/telemetry/metrics returns 503 when no reader', async () => {
 
 // ─── Health ───
 
-test('GET /api/telemetry/health returns uptime and store stats', async () => {
+test('GET /api/telemetry/health returns full health contract', async () => {
   const store = new LocalTraceStore({ maxSpans: 100 });
   const snapshotStore = new MetricsSnapshotStore({ maxSnapshots: 10 });
   snapshotStore.add({ timestamp: Date.now(), metrics: { x: 1 } });
-  const app = await buildApp({ traceStore: store, metricsSnapshotStore: snapshotStore });
+  const checkReadiness = async () => ({
+    status: 'ready',
+    checks: { redis: { ok: true, ms: 2 }, sqlite: { ok: true, ms: 1 } },
+  });
+  const app = await buildApp({ traceStore: store, metricsSnapshotStore: snapshotStore, checkReadiness });
   const cookie = await getSessionCookie(app);
 
   const res = await app.inject({
@@ -296,11 +300,35 @@ test('GET /api/telemetry/health returns uptime and store stats', async () => {
   });
   assert.equal(res.statusCode, 200);
   const body = JSON.parse(res.body);
+  assert.equal(body.status, 'healthy');
   assert.ok(typeof body.uptime === 'number');
   assert.ok(body.traceStore !== undefined);
   assert.ok(body.metricsSnapshotStore !== undefined);
   assert.equal(body.metricsSnapshotStore.snapshotCount, 1);
   assert.ok(typeof body.timestamp === 'number');
+  assert.equal(body.readiness.status, 'ready');
+  assert.ok(body.readiness.checks.redis.ok);
+  assert.ok(body.readiness.checks.sqlite.ok);
+  assert.ok(body.errorRate === null || typeof body.errorRate === 'number');
+  app.close();
+});
+
+test('GET /api/telemetry/health returns 503 when readiness is degraded', async () => {
+  const checkReadiness = async () => ({
+    status: 'degraded',
+    checks: { redis: { ok: false, ms: 0, error: 'connection refused' } },
+  });
+  const app = await buildApp({ checkReadiness });
+  const cookie = await getSessionCookie(app);
+
+  const res = await app.inject({
+    method: 'GET',
+    url: '/api/telemetry/health',
+    headers: { cookie },
+  });
+  assert.equal(res.statusCode, 503);
+  const body = JSON.parse(res.body);
+  assert.equal(body.status, 'degraded');
   app.close();
 });
 

@@ -148,7 +148,8 @@ export const telemetryRoutes: FastifyPluginAsync<TelemetryRoutesOptions> = async
 
     const otelEnabled = !process.env.OTEL_SDK_DISABLED;
     const readinessOk = !readiness || readiness.status === 'ready';
-    const errorRateOk = errorRate === null || errorRate < 0.3;
+    const threshold = Number.parseFloat(process.env.TELEMETRY_ALERT_ERROR_RATE ?? '0.3');
+    const errorRateOk = errorRate === null || errorRate < threshold;
     const healthy = readinessOk && errorRateOk;
 
     if (!healthy) reply.code(503);
