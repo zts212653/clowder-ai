@@ -3,7 +3,7 @@
  *
  * Calls Anthropic Messages API directly with SSE streaming.
  * Phase E adds: per-token text streaming, streaming tool collection,
- * proper EOF validation, and non-streaming fallback.
+ * proper EOF validation. Strict streaming fail-closed — no non-streaming fallback.
  */
 
 import type { CatConfig, CatId } from '@cat-cafe/shared';
