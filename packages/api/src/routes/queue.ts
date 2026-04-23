@@ -289,15 +289,17 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
     if (!guard) return;
 
-    const body = request.body as { positions?: unknown };
-    if (!Array.isArray(body?.positions)) {
+    const reorderSchema = z.object({
+      positions: z.array(z.object({ entryId: z.string(), position: z.number().int().finite() })),
+    });
+    const parseResult = reorderSchema.safeParse(request.body);
+    if (!parseResult.success) {
       reply.status(400);
-      return { error: 'positions must be an array' };
+      return { error: 'Invalid body', details: parseResult.error.issues };
     }
 
     const entries = invocationQueue.list(threadId, guard.userId);
-    for (const item of body.positions) {
-      const { entryId } = item as { entryId: string };
+    for (const { entryId } of parseResult.data.positions) {
       const entry = entries.find((e) => e.id === entryId);
       if (!entry || entry.status === 'processing') {
         reply.status(400);
@@ -305,8 +307,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       }
     }
 
-    for (const item of body.positions) {
-      const { entryId, position } = item as { entryId: string; position: number };
+    for (const { entryId, position } of parseResult.data.positions) {
       invocationQueue.setPosition(threadId, guard.userId, entryId, position);
     }
 
