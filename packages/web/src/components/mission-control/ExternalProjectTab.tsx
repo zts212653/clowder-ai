@@ -166,8 +166,9 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
     try {
       const res = await apiFetch(`/api/external-projects/${project.id}/import-backlog`, { method: 'POST' });
       if (res.ok) {
-        const body = (await res.json()) as { imported: number; skipped: number; total: number };
-        setImportStatus(`导入完成: ${body.imported} 新增, ${body.skipped} 跳过, ${body.total} 总计`);
+        const body = (await res.json()) as { imported: number; skipped: number; total: number; orphans?: number };
+        const orphanStatus = body.orphans ? `，检测到 ${body.orphans} 个历史未绑定项；项目内条目已可见` : '';
+        setImportStatus(`导入完成: ${body.imported} 新增, ${body.skipped} 跳过, ${body.total} 总计${orphanStatus}`);
         void reloadProjectItems();
       } else {
         const body = (await res.json()) as { error?: string };
