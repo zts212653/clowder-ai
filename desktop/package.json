@@ -99,6 +99,7 @@
         "to": ".cat-cafe/redis/darwin-${arch}"
       }
     ],
-    "asar": false
+    "asar": false,
+    "afterPack": "./afterPack.js"
   }
 }
