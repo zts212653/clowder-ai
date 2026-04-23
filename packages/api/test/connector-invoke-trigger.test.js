@@ -1129,7 +1129,7 @@ describe('ConnectorInvokeTrigger', () => {
       );
     });
 
-    it('falls back to direct execution when urgent fallback queue is full', async () => {
+    it.todo('falls back to direct execution when urgent fallback queue is full — F169: handleUrgentTrigger removed in Task 4', async () => {
       trackerMock.setActive('thread-1', 'user-1');
       trackerMock.setCancelDenied(true);
       const trigger = createTrigger();
@@ -1168,7 +1168,7 @@ describe('ConnectorInvokeTrigger', () => {
       assert.strictEqual(canceledFallback.length, 0, 'Direct fallback must not mark invocation canceled');
     });
 
-    it('does not execute urgent fallback on queue-full owner-mismatch race', async () => {
+    it.todo('does not execute urgent fallback on queue-full owner-mismatch race — F169: handleUrgentTrigger removed in Task 4', async () => {
       trackerMock.setActive('thread-1', 'user-1');
       // Fill user-1 queue to full so urgent fallback enqueue returns full.
       const cats = ['codex', 'opus', 'codex', 'opus', 'codex'];
@@ -1237,30 +1237,21 @@ describe('ConnectorInvokeTrigger', () => {
       assert.ok(entries[1].content.includes('Second review'));
     });
 
-    it('emits queue_full_warning when queue is full', async () => {
+    it('connector messages bypass MAX_QUEUE_DEPTH (F169)', async () => {
       trackerMock.setActive('thread-1');
       const trigger = createTrigger();
 
-      // Fill the queue (5 entries = MAX_QUEUE_DEPTH)
-      // Use different targetCats to prevent merge
-      const cats = ['opus', 'codex', 'opus', 'codex', 'opus'];
-      for (let i = 0; i < 5; i++) {
-        trigger.trigger('thread-1', /** @type {any} */ (cats[i]), 'user-1', `msg ${i}`, `msg-${i}`);
+      // Enqueue 7 connector messages — all should succeed (no depth limit for connector)
+      for (let i = 0; i < 7; i++) {
+        trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', `msg ${i}`, `msg-${i}`);
         await waitForTrigger();
       }
 
-      // 6th message should trigger full warning
-      trigger.trigger('thread-1', /** @type {any} */ ('codex'), 'user-1', 'overflow msg', 'msg-overflow');
-      await waitForTrigger();
-
       const fullWarning = socketMock.userEmits.find((e) => e.event === 'queue_full_warning');
-      assert.ok(fullWarning, 'Should emit queue_full_warning');
-      assert.strictEqual(fullWarning.data.source, 'connector');
+      assert.strictEqual(fullWarning, undefined, 'No queue_full_warning for connector source');
 
-      // Should NOT have emitted queue_updated for the overflow
-      const lastUpdate = socketMock.userEmits.filter((e) => e.event === 'queue_updated');
-      // 5 successful enqueues = 5 queue_updated events (but not 6)
-      assert.strictEqual(lastUpdate.length, 5);
+      const entries = queue.list('thread-1', 'user-1');
+      assert.strictEqual(entries.length, 7, 'All 7 connector messages should be enqueued');
     });
 
     it('P1 fix: direct execution calls queueProcessor.onInvocationComplete on success', async () => {

@@ -487,23 +487,14 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         });
         storedUserMessageId = userMessage.id;
 
-        // ③ Backfill / append messageId — distinguish enqueued vs merged
         const queueEntryId = enqueueResult.entry?.id;
         if (queueEntryId) {
-          if (enqueueResult.outcome === 'enqueued') {
-            opts.invocationQueue.backfillMessageId(resolvedThreadId, userId, queueEntryId, userMessage.id);
-          } else {
-            opts.invocationQueue.appendMergedMessageId(resolvedThreadId, userId, queueEntryId, userMessage.id);
-          }
+          opts.invocationQueue.backfillMessageId(resolvedThreadId, userId, queueEntryId, userMessage.id);
         }
       } catch (err) {
-        // Write failed → rollback queue entry (no ghost data)
         const queueEntryId = enqueueResult.entry?.id;
-        if (queueEntryId && enqueueResult.outcome === 'enqueued') {
-          // rollbackEnqueue: preserves merged content from concurrent requests
+        if (queueEntryId) {
           opts.invocationQueue.rollbackEnqueue(resolvedThreadId, userId, queueEntryId);
-        } else if (queueEntryId) {
-          opts.invocationQueue.rollbackMerge(resolvedThreadId, userId, queueEntryId);
         }
         throw err;
       }
@@ -522,7 +513,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         status: 'queued',
         queuePosition: enqueueResult.queuePosition,
         entryId: enqueueResult.entry?.id,
-        merged: enqueueResult.outcome === 'merged',
+        merged: false,
         ...(storedUserMessageId ? { userMessageId: storedUserMessageId } : {}),
       };
     }
@@ -600,24 +591,12 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               });
               const queueEntryId = enqueueResult.entry?.id;
               if (queueEntryId) {
-                if (enqueueResult.outcome === 'enqueued') {
-                  opts.invocationQueue.backfillMessageId(resolvedThreadId, userId, queueEntryId, toctouUserMessage.id);
-                } else {
-                  opts.invocationQueue.appendMergedMessageId(
-                    resolvedThreadId,
-                    userId,
-                    queueEntryId,
-                    toctouUserMessage.id,
-                  );
-                }
+                opts.invocationQueue.backfillMessageId(resolvedThreadId, userId, queueEntryId, toctouUserMessage.id);
               }
             } catch (err) {
-              // Write failed → rollback queue entry (no ghost data)
               const queueEntryId = enqueueResult.entry?.id;
-              if (queueEntryId && enqueueResult.outcome === 'enqueued') {
+              if (queueEntryId) {
                 opts.invocationQueue.rollbackEnqueue(resolvedThreadId, userId, queueEntryId);
-              } else if (queueEntryId) {
-                opts.invocationQueue.rollbackMerge(resolvedThreadId, userId, queueEntryId);
               }
               throw err;
             }
@@ -632,7 +611,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               status: 'queued',
               queuePosition: enqueueResult.queuePosition,
               entryId: enqueueResult.entry?.id,
-              merged: enqueueResult.outcome === 'merged',
+              merged: false,
               userMessageId: toctouUserMessage.id,
             };
           }

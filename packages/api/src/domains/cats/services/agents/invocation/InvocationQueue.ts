@@ -42,7 +42,7 @@ export interface QueueEntry {
 }
 
 export interface EnqueueResult {
-  outcome: 'enqueued' | 'merged' | 'full';
+  outcome: 'enqueued' | 'full';
   entry?: QueueEntry;
   queuePosition?: number;
 }
@@ -88,38 +88,12 @@ export class InvocationQueue {
     const key = this.scopeKey(input.threadId, input.userId);
     const q = this.getOrCreate(key);
 
-    // Check merge with tail — F134: connector messages never merge (different group senders could collide)
-    // Stale defense: never merge into a stale agent entry — its createdAt is too old
-    // for listAutoExecute() to pick up, so merging would silently swallow the new message.
-    const tail = q.length > 0 ? q[q.length - 1] : null;
-    const isStaleTail =
-      tail?.source === 'agent' &&
-      tail.status === 'queued' &&
-      Date.now() - tail.createdAt >= InvocationQueue.STALE_QUEUED_THRESHOLD_MS;
-    if (
-      tail &&
-      !isStaleTail &&
-      tail.status === 'queued' &&
-      tail.source === input.source &&
-      tail.source !== 'connector' &&
-      tail.intent === input.intent &&
-      arraysEqual(sorted(tail.targetCats), sorted(input.targetCats))
-    ) {
-      // Save snapshot for rollback
-      this.preMergeSnapshots.set(tail.id, tail.content);
-      tail.content += `\n${input.content}`;
-      return { outcome: 'merged', entry: { ...tail }, queuePosition: q.indexOf(tail) + 1 };
-    }
-
-    // Capacity check (only non-stale queued entries count)
-    const now = Date.now();
-    const queuedCount = q.filter(
-      (e) =>
-        e.status === 'queued' &&
-        !(e.source === 'agent' && now - e.createdAt >= InvocationQueue.STALE_QUEUED_THRESHOLD_MS),
-    ).length;
-    if (queuedCount >= MAX_QUEUE_DEPTH) {
-      return { outcome: 'full' };
+    // F169: capacity check — only user messages are depth-limited
+    if (input.source === 'user') {
+      const userQueuedCount = q.filter((e) => e.status === 'queued' && e.source === 'user').length;
+      if (userQueuedCount >= MAX_QUEUE_DEPTH) {
+        return { outcome: 'full' };
+      }
     }
 
     const entry: QueueEntry = {

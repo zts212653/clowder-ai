@@ -81,33 +81,33 @@ describe('InvocationQueue', () => {
     assert.equal(queue.size('t1', 'u1'), 1); // only 'b' counts
   });
 
-  // ── Merge ──
+  // ── F169: no merge — every entry is independent ──
 
-  it('merges same-source same-target consecutive entries', () => {
+  it('same-source same-target entries are independent (F169 no merge)', () => {
     const r1 = queue.enqueue(entry({ content: '猫猫' }));
     assert.equal(r1.outcome, 'enqueued');
-
     const r2 = queue.enqueue(entry({ content: '你好' }));
-    assert.equal(r2.outcome, 'merged');
-    assert.equal(r2.entry.content, '猫猫\n你好');
-    assert.equal(queue.size('t1', 'u1'), 1);
+    assert.equal(r2.outcome, 'enqueued');
+    assert.equal(queue.size('t1', 'u1'), 2);
+    assert.equal(queue.list('t1', 'u1')[0].content, '猫猫');
+    assert.equal(queue.list('t1', 'u1')[1].content, '你好');
   });
 
-  it('does NOT merge different-source entries', () => {
+  it('different-source entries are independent', () => {
     queue.enqueue(entry({ source: 'user' }));
     const r2 = queue.enqueue(entry({ source: 'connector' }));
     assert.equal(r2.outcome, 'enqueued');
     assert.equal(queue.size('t1', 'u1'), 2);
   });
 
-  it('does NOT merge different-targetCats entries', () => {
+  it('different-targetCats entries are independent', () => {
     queue.enqueue(entry({ content: '@opus 你好', targetCats: ['opus'] }));
     const r2 = queue.enqueue(entry({ content: '@codex 帮忙看看', targetCats: ['codex'] }));
     assert.equal(r2.outcome, 'enqueued');
     assert.equal(queue.size('t1', 'u1'), 2);
   });
 
-  it('does NOT merge if tail is processing', () => {
+  it('entries after processing entry are independent', () => {
     queue.enqueue(entry({ content: 'first' }));
     queue.markProcessing('t1', 'u1');
     const r2 = queue.enqueue(entry({ content: 'second' }));
@@ -115,16 +115,14 @@ describe('InvocationQueue', () => {
     assert.equal(queue.list('t1', 'u1').length, 2);
   });
 
-  it('does NOT merge different-intent entries', () => {
+  it('different-intent entries are independent', () => {
     queue.enqueue(entry({ intent: 'execute' }));
     const r2 = queue.enqueue(entry({ intent: 'whisper' }));
     assert.equal(r2.outcome, 'enqueued');
     assert.equal(queue.size('t1', 'u1'), 2);
   });
 
-  // ── F134: connector messages never merge ──
-
-  it('does NOT merge consecutive connector entries (F134 group chat safety)', () => {
+  it('consecutive connector entries are independent', () => {
     const r1 = queue.enqueue(entry({ source: 'connector', content: 'msg from user A' }));
     assert.equal(r1.outcome, 'enqueued');
     const r2 = queue.enqueue(entry({ source: 'connector', content: 'msg from user B' }));
@@ -132,11 +130,11 @@ describe('InvocationQueue', () => {
     assert.equal(queue.size('t1', 'u1'), 2);
   });
 
-  it('still merges consecutive user entries (F134 does not affect non-connector)', () => {
+  it('consecutive user entries are independent (F169)', () => {
     queue.enqueue(entry({ source: 'user', content: 'first' }));
     const r2 = queue.enqueue(entry({ source: 'user', content: 'second' }));
-    assert.equal(r2.outcome, 'merged');
-    assert.equal(queue.size('t1', 'u1'), 1);
+    assert.equal(r2.outcome, 'enqueued');
+    assert.equal(queue.size('t1', 'u1'), 2);
   });
 
   it('preserves senderMeta on enqueued connector entry', () => {
@@ -157,31 +155,6 @@ describe('InvocationQueue', () => {
     assert.equal(r.entry.messageId, null);
     queue.backfillMessageId('t1', 'u1', r.entry.id, 'msg-123');
     assert.equal(queue.list('t1', 'u1')[0].messageId, 'msg-123');
-  });
-
-  it('appendMergedMessageId adds to mergedMessageIds (does NOT overwrite messageId)', () => {
-    const r1 = queue.enqueue(entry({ content: 'hi' }));
-    queue.backfillMessageId('t1', 'u1', r1.entry.id, 'msg-1');
-
-    const r2 = queue.enqueue(entry({ content: 'hello' }));
-    assert.equal(r2.outcome, 'merged');
-    queue.appendMergedMessageId('t1', 'u1', r2.entry.id, 'msg-2');
-
-    const e = queue.list('t1', 'u1')[0];
-    assert.equal(e.messageId, 'msg-1'); // NOT overwritten
-    assert.deepEqual(e.mergedMessageIds, ['msg-2']);
-  });
-
-  // ── Merge rollback ──
-
-  it('rollbackMerge restores pre-merge content', () => {
-    queue.enqueue(entry({ content: '猫猫' }));
-    const r2 = queue.enqueue(entry({ content: '你好' }));
-    assert.equal(r2.outcome, 'merged');
-    assert.equal(r2.entry.content, '猫猫\n你好');
-
-    queue.rollbackMerge('t1', 'u1', r2.entry.id);
-    assert.equal(queue.list('t1', 'u1')[0].content, '猫猫');
   });
 
   // ── Move / reorder ──
@@ -330,82 +303,23 @@ describe('InvocationQueue', () => {
     assert.equal(removed, null);
   });
 
-  // ── Cloud R2 P1: rollbackEnqueue must clear preMergeSnapshots ──
+  // ── rollbackEnqueue removes entry (F169: no merge, simplified) ──
 
-  it('rollbackEnqueue clears preMergeSnapshots so subsequent rollbackMerge does not restore ghost content', () => {
-    // A enqueues
+  it('rollbackEnqueue removes the entry from queue', () => {
     const rA = queue.enqueue(entry({ content: 'A msg' }));
-    const entryId = rA.entry.id;
-
-    // B merges into A (same user/source/target/intent)
     queue.enqueue(entry({ content: 'B msg' }));
-
-    // A's write fails → rollbackEnqueue strips A's content, keeps B's
-    queue.rollbackEnqueue('t1', 'u1', entryId);
+    queue.rollbackEnqueue('t1', 'u1', rA.entry.id);
     const afterRollback = queue.list('t1', 'u1');
     assert.equal(afterRollback.length, 1);
     assert.equal(afterRollback[0].content, 'B msg');
-
-    // Now B's write also fails → rollbackMerge should NOT restore A's ghost content
-    queue.rollbackMerge('t1', 'u1', entryId);
-    const afterBRollback = queue.list('t1', 'u1');
-    // Entry should still have B's content (or be removed), NOT A's
-    assert.ok(
-      !afterBRollback[0]?.content.includes('A msg'),
-      'rollbackMerge after rollbackEnqueue should not reintroduce A ghost content',
-    );
   });
 
-  // ── Cloud R3 P2: rollbackEnqueue must promote merged messageId ──
-
-  it('rollbackEnqueue promotes mergedMessageIds[0] to messageId', () => {
-    // A enqueues
-    const rA = queue.enqueue(entry({ content: 'A msg' }));
-    const entryId = rA.entry.id;
-
-    // B merges into A
-    const _rB = queue.enqueue(entry({ content: 'B msg' }));
-
-    // Simulate B's messageStore.append succeeded → appendMergedMessageId
-    queue.appendMergedMessageId('t1', 'u1', entryId, 'msg-B');
-
-    // A's write fails → rollbackEnqueue
-    queue.rollbackEnqueue('t1', 'u1', entryId);
-
-    const remaining = queue.list('t1', 'u1');
-    assert.equal(remaining.length, 1);
-    assert.equal(remaining[0].content, 'B msg');
-    // messageId should be promoted from mergedMessageIds, not null
-    assert.equal(
-      remaining[0].messageId,
-      'msg-B',
-      'rollbackEnqueue should promote surviving mergedMessageIds[0] to messageId',
-    );
-    // mergedMessageIds should have the promoted ID removed
-    assert.ok(!remaining[0].mergedMessageIds.includes('msg-B'), 'promoted ID should be removed from mergedMessageIds');
-  });
-
-  // ── Cloud R2 P2: clear() must purge rollback metadata ──
-
-  it('clear() purges originalContents and preMergeSnapshots', () => {
-    // Enqueue + merge to populate both metadata maps
-    const _rA = queue.enqueue(entry({ content: 'original' }));
-    queue.enqueue(entry({ content: 'merged' })); // merges into A
-
-    // Clear the queue
+  it('clear() purges originalContents metadata', () => {
+    queue.enqueue(entry({ content: 'a' }));
+    queue.enqueue(entry({ content: 'b' }));
     const cleared = queue.clear('t1', 'u1');
-    assert.equal(cleared.length, 1);
+    assert.equal(cleared.length, 2);
     assert.equal(queue.list('t1', 'u1').length, 0);
-
-    // Re-enqueue with same-shape entry — rollbackEnqueue should NOT see stale metadata
-    const rB = queue.enqueue(entry({ content: 'fresh' }));
-    // Simulate: someone else merges
-    queue.enqueue(entry({ content: 'fresh-merge' }));
-    // rollbackEnqueue on the NEW entry should work cleanly
-    queue.rollbackEnqueue('t1', 'u1', rB.entry.id);
-    const remaining = queue.list('t1', 'u1');
-    assert.equal(remaining.length, 1);
-    assert.equal(remaining[0].content, 'fresh-merge');
   });
 
   // ── Stale agent entry defense (review P1/P2) ──
@@ -872,5 +786,41 @@ describe('InvocationQueue', () => {
   it('position field is undefined by default', () => {
     const result = queue.enqueue(entry());
     assert.equal(result.entry.position, undefined);
+  });
+
+  // ── F169: no merge — every message is independent ──
+
+  it('same-source same-target user messages are NOT merged (F169)', () => {
+    queue.enqueue(entry({ content: 'a' }));
+    queue.enqueue(entry({ content: 'b' }));
+    const list = queue.list('t1', 'u1');
+    assert.equal(list.length, 2);
+    assert.equal(list[0].content, 'a');
+    assert.equal(list[1].content, 'b');
+  });
+
+  // ── F169: source-specific capacity ──
+
+  it('connector messages bypass MAX_QUEUE_DEPTH (F169)', () => {
+    for (let i = 0; i < 7; i++) {
+      const r = queue.enqueue(entry({ content: `msg${i}`, source: 'connector', targetCats: ['c1'] }));
+      assert.equal(r.outcome, 'enqueued', `connector entry ${i} should enqueue`);
+    }
+    assert.equal(queue.list('t1', 'u1').length, 7);
+  });
+
+  it('agent messages bypass MAX_QUEUE_DEPTH (F169)', () => {
+    for (let i = 0; i < 7; i++) {
+      const r = queue.enqueue(entry({ content: `msg${i}`, source: 'agent', targetCats: [`c${i}`] }));
+      assert.equal(r.outcome, 'enqueued', `agent entry ${i} should enqueue`);
+    }
+  });
+
+  it('user messages still limited by MAX_QUEUE_DEPTH (F169)', () => {
+    for (let i = 0; i < 5; i++) {
+      queue.enqueue(entry({ content: `msg${i}`, targetCats: [`c${i}`] }));
+    }
+    const r = queue.enqueue(entry({ content: 'overflow', targetCats: ['overflow'] }));
+    assert.equal(r.outcome, 'full');
   });
 });

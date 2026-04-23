@@ -24,7 +24,7 @@ import { getMultiMentionOrchestrator } from '../../routes/callback-multi-mention
 import type { OutboundDeliveryHook, ThreadMeta } from '../connectors/OutboundDeliveryHook.js';
 import type { StreamingOutboundHook } from '../connectors/StreamingOutboundHook.js';
 
-export type TriggerOutcome = 'dispatched' | 'enqueued' | 'merged' | 'full';
+export type TriggerOutcome = 'dispatched' | 'enqueued' | 'full';
 
 export interface ConnectorInvokeTriggerOptions {
   readonly router: AgentRouter;
@@ -148,7 +148,7 @@ export class ConnectorInvokeTrigger {
     message: string,
     messageId: string,
     sender?: { id: string; name?: string },
-  ): 'full' | 'enqueued' | 'merged' {
+  ): 'full' | 'enqueued' {
     const { invocationQueue, socketManager, log } = this.opts;
     const result = invocationQueue.enqueue({
       threadId,
@@ -172,11 +172,7 @@ export class ConnectorInvokeTrigger {
     }
 
     if (result.entry) {
-      if (result.outcome === 'enqueued') {
-        invocationQueue.backfillMessageId(threadId, userId, result.entry.id, messageId);
-      } else if (result.outcome === 'merged') {
-        invocationQueue.appendMergedMessageId(threadId, userId, result.entry.id, messageId);
-      }
+      invocationQueue.backfillMessageId(threadId, userId, result.entry.id, messageId);
     }
 
     socketManager.emitToUser(userId, 'queue_updated', {

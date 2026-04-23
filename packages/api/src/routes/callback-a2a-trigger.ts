@@ -49,7 +49,6 @@ export interface A2ATriggerDeps {
     | 'countAgentEntriesForThread'
     | 'hasQueuedAgentForCat'
     | 'backfillMessageId'
-    | 'appendMergedMessageId'
     | 'list'
   >;
   log: FastifyBaseLogger;
@@ -103,7 +102,7 @@ export async function enqueueA2ATargets(
     const enqueued: CatId[] = [];
     const queueDiagnostics: Array<{
       catId: CatId;
-      outcome: string; // enqueue() returns 'enqueued'|'merged'; 'full' unreachable here (depth guard breaks first)
+      outcome: string;
       entryId?: string;
       createdAt?: number;
     }> = [];
@@ -170,17 +169,10 @@ export async function enqueueA2ATargets(
         entryId: result.entry?.id,
         createdAt: result.entry?.createdAt,
       });
-      if (result.outcome === 'enqueued' || result.outcome === 'merged') {
+      if (result.outcome === 'enqueued') {
         enqueued.push(catId);
-        // AC-B6-P1: Link triggerMessage.id so QueueProcessor.executeEntry can markDelivered.
-        // Use backfillMessageId for new entries, appendMergedMessageId for merged entries
-        // to avoid overwriting the first entry's messageId (cloud P1).
         if (result.entry) {
-          if (result.outcome === 'enqueued') {
-            deps.invocationQueue.backfillMessageId(threadId, opts.userId, result.entry.id, triggerMessageId);
-          } else {
-            deps.invocationQueue.appendMergedMessageId(threadId, opts.userId, result.entry.id, triggerMessageId);
-          }
+          deps.invocationQueue.backfillMessageId(threadId, opts.userId, result.entry.id, triggerMessageId);
         }
       }
     }
