@@ -258,30 +258,42 @@ else
   ok "icon.icns already present"
 fi
 
-# ─── Step 6b: electron-builder — produces DMG per arch ─────────────────
+# ─── Step 6b: electron-builder + hdiutil — produces DMG per arch ──────
 cd "$DESKTOP_DIR"
 if [[ ! -d node_modules ]]; then
   echo "  Installing desktop dependencies ..."
   npm install || die "npm install failed in desktop/"
 fi
 
-# electron-builder writes DMGs into desktop/dist/. Force a clean output dir
-# so per-arch artifacts always match the current build.
+# electron-builder writes into desktop/dist/. Force a clean output dir.
 rm -rf "${DESKTOP_DIR}/dist"
 
-EB_ARGS=("--mac" "dmg")
+# Build .app bundles only (--dir). electron-builder's built-in dmgbuild
+# under-allocates disk image size when afterPack injects large node_modules,
+# causing "No space left on device". We create DMGs ourselves via hdiutil.
+EB_ARGS=("--mac" "dir")
 for arch in "${ARCHS[@]}"; do
   EB_ARGS+=("--$arch")
 done
 echo "  Running: npx electron-builder ${EB_ARGS[*]}"
 npx electron-builder "${EB_ARGS[@]}" || die "electron-builder failed"
 
-# Copy outputs to repo-level dist/ for parity with the Windows flow.
+# Create DMGs from .app bundles using hdiutil (handles large bundles reliably).
 mkdir -p "$DIST_DIR"
-for dmg in "${DESKTOP_DIR}"/dist/*.dmg; do
-  [[ -f "$dmg" ]] || continue
-  cp "$dmg" "${DIST_DIR}/"
-  ok "Copied $(basename "$dmg") -> dist/"
+VERSION="$(node -p "require('./package.json').version")"
+for arch in "${ARCHS[@]}"; do
+  app_dir="${DESKTOP_DIR}/dist/mac-${arch}"
+  dmg_name="ClowderAI-${VERSION}-${arch}.dmg"
+  dmg_out="${DIST_DIR}/${dmg_name}"
+  if [[ ! -d "$app_dir" ]]; then
+    warn "dist/mac-${arch} not found, skipping DMG for ${arch}"
+    continue
+  fi
+  echo "  Creating ${dmg_name} via hdiutil ..."
+  rm -f "$dmg_out"
+  hdiutil create -volname "Clowder AI" -srcfolder "$app_dir" -ov -format UDZO "$dmg_out" \
+    || die "hdiutil create failed for ${arch}"
+  ok "Created ${dmg_name}"
 done
 
 echo ""
