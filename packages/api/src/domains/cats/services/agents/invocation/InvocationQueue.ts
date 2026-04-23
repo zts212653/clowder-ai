@@ -219,18 +219,14 @@ export class InvocationQueue {
     const neighborIdx = direction === 'up' ? sortedIdx - 1 : sortedIdx + 1;
     if (neighborIdx < 0 || neighborIdx >= queued.length) return true;
 
-    const neighbor = queued[neighborIdx]!;
-    if (target.position === undefined || neighbor.position === undefined) {
-      const maxPos = queued.reduce(
-        (max, e) => (e.position !== undefined && e.position > max ? e.position : max),
-        -1,
-      );
-      if (target.position === undefined) target.position = maxPos + 1 + sortedIdx;
-      if (neighbor.position === undefined) neighbor.position = maxPos + 1 + neighborIdx;
+    for (let i = 0; i < queued.length; i++) {
+      queued[i]!.position = i;
     }
-    const tmpPos = target.position;
-    target.position = neighbor.position;
-    neighbor.position = tmpPos;
+    const a = queued[sortedIdx]!;
+    const b = queued[neighborIdx]!;
+    const tmp = a.position!;
+    a.position = b.position!;
+    b.position = tmp;
     return true;
   }
 

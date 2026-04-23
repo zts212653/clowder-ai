@@ -971,6 +971,28 @@ describe('InvocationQueue', () => {
     assert.equal(next.content, 'A', 'after move up, A should be first in comparator');
   });
 
+  it('move(up) on 3+ entries without positions only swaps adjacent pair (R3-P1)', () => {
+    queue.enqueue(entry({ content: 'A' }));
+    queue.enqueue(entry({ content: 'B' }));
+    const rC = queue.enqueue(entry({ content: 'C' }));
+
+    queue.move('t1', 'u1', rC.entry.id, 'up');
+
+    const items = queue.list('t1', 'u1').map((e) => e.content);
+    assert.deepStrictEqual(items, ['A', 'C', 'B'], 'move(C, up) should only swap C and B');
+  });
+
+  it('move(down) on 3+ entries without positions only swaps adjacent pair (R3-P1)', () => {
+    queue.enqueue(entry({ content: 'A' }));
+    const rB = queue.enqueue(entry({ content: 'B' }));
+    queue.enqueue(entry({ content: 'C' }));
+
+    queue.move('t1', 'u1', rB.entry.id, 'down');
+
+    const items = queue.list('t1', 'u1').map((e) => e.content);
+    assert.deepStrictEqual(items, ['A', 'C', 'B'], 'move(B, down) should only swap B and C');
+  });
+
   // ── R2-P2: collectUserBatch returns entries in comparator order ──
 
   it('collectUserBatch returns entries sorted by comparator (R2-P2)', () => {
