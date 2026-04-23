@@ -846,4 +846,31 @@ describe('InvocationQueue', () => {
       'connector-sourced entries should not block A2A text-scan',
     );
   });
+
+  // ── F169: priority / sourceCategory / position fields ──
+
+  it('enqueue preserves priority field', () => {
+    const result = queue.enqueue(entry({ priority: 'urgent', sourceCategory: 'ci' }));
+    assert.equal(result.entry.priority, 'urgent');
+    assert.equal(result.entry.sourceCategory, 'ci');
+  });
+
+  it('defaults priority to normal when omitted', () => {
+    const result = queue.enqueue(entry());
+    assert.equal(result.entry.priority, 'normal');
+    assert.equal(result.entry.sourceCategory, undefined);
+    assert.equal(result.entry.position, undefined);
+  });
+
+  it('priority field survives list() round-trip', () => {
+    queue.enqueue(entry({ priority: 'urgent', sourceCategory: 'review' }));
+    const listed = queue.list('t1', 'u1');
+    assert.equal(listed[0].priority, 'urgent');
+    assert.equal(listed[0].sourceCategory, 'review');
+  });
+
+  it('position field is undefined by default', () => {
+    const result = queue.enqueue(entry());
+    assert.equal(result.entry.position, undefined);
+  });
 });

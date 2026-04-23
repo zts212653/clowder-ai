@@ -33,6 +33,12 @@ export interface QueueEntry {
   callerCatId?: string;
   /** F134: sender identity for connector group chat messages (used for UI display) */
   senderMeta?: { id: string; name?: string };
+  /** F169: queue-internal priority — urgent entries sort before normal in dequeue */
+  priority: 'urgent' | 'normal';
+  /** F169: origin category for visual grouping */
+  sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a';
+  /** F169: user drag-reorder position — explicit values override priority in dequeue */
+  position?: number;
 }
 
 export interface EnqueueResult {
@@ -72,10 +78,11 @@ export class InvocationQueue {
   enqueue(
     input: Omit<
       QueueEntry,
-      'id' | 'status' | 'createdAt' | 'mergedMessageIds' | 'messageId' | 'autoExecute' | 'callerCatId'
+      'id' | 'status' | 'createdAt' | 'mergedMessageIds' | 'messageId' | 'autoExecute' | 'callerCatId' | 'priority' | 'position'
     > & {
       autoExecute?: boolean;
       callerCatId?: string;
+      priority?: 'urgent' | 'normal';
     },
   ): EnqueueResult {
     const key = this.scopeKey(input.threadId, input.userId);
@@ -130,6 +137,9 @@ export class InvocationQueue {
       autoExecute: input.autoExecute ?? false,
       callerCatId: input.callerCatId,
       senderMeta: input.senderMeta,
+      priority: input.priority ?? 'normal',
+      sourceCategory: input.sourceCategory,
+      position: undefined,
     };
     q.push(entry);
     this.originalContents.set(entry.id, input.content);
