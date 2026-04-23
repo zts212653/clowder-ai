@@ -903,6 +903,7 @@ export class RedisBacklogStore implements IBacklogStore {
     if (item.dispatchAttemptId) result.dispatchAttemptId = item.dispatchAttemptId;
     if (item.pendingThreadId) result.pendingThreadId = item.pendingThreadId;
     if (item.kickoffMessageId) result.kickoffMessageId = item.kickoffMessageId;
+    if (item.projectId) result.projectId = item.projectId;
     return result;
   }
 
@@ -932,6 +933,7 @@ export class RedisBacklogStore implements IBacklogStore {
       ...(data.dispatchAttemptId ? { dispatchAttemptId: data.dispatchAttemptId } : {}),
       ...(data.pendingThreadId ? { pendingThreadId: data.pendingThreadId } : {}),
       ...(data.kickoffMessageId ? { kickoffMessageId: data.kickoffMessageId } : {}),
+      ...(data.projectId ? { projectId: data.projectId } : {}),
       ...(approvedAt ? { approvedAt } : {}),
       ...(dispatchedAt ? { dispatchedAt } : {}),
     };

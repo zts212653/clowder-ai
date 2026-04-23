@@ -1,15 +1,23 @@
 /**
- * F076: ExternalProjectStore — in-memory store for external projects
+ * F076: ExternalProjectStore — Redis-backed store for external projects
+ * Falls back to in-memory Map when Redis is not available.
  */
 
 import { resolve } from 'node:path';
 import type { CreateExternalProjectInput, ExternalProject } from '@cat-cafe/shared';
+import type { RedisClient } from '@cat-cafe/shared/utils';
 import { generateSortableId } from '../cats/services/stores/ports/MessageStore.js';
+import { ExternalProjectKeys } from '../cats/services/stores/redis-keys/external-project-keys.js';
 
 export class ExternalProjectStore {
-  private readonly projects = new Map<string, ExternalProject>();
+  private readonly redis: RedisClient | undefined;
+  private readonly fallbackProjects = new Map<string, ExternalProject>();
 
-  create(userId: string, input: CreateExternalProjectInput): ExternalProject {
+  constructor(redis?: RedisClient) {
+    this.redis = redis;
+  }
+
+  async create(userId: string, input: CreateExternalProjectInput): Promise<ExternalProject> {
     if (!input.sourcePath) {
       throw new Error('sourcePath is required');
     }
@@ -31,20 +39,54 @@ export class ExternalProjectStore {
       createdAt: now,
       updatedAt: now,
     };
-    this.projects.set(project.id, project);
+    if (this.redis) {
+      const pipeline = this.redis.multi();
+      pipeline.hset(ExternalProjectKeys.detail(project.id), this.serializeProject(project));
+      pipeline.zadd(ExternalProjectKeys.userList(userId), String(now), project.id);
+      await pipeline.exec();
+    } else {
+      this.fallbackProjects.set(project.id, project);
+    }
     return project;
   }
 
-  listByUser(userId: string): ExternalProject[] {
-    return [...this.projects.values()].filter((p) => p.userId === userId).sort((a, b) => b.id.localeCompare(a.id));
+  async listByUser(userId: string): Promise<ExternalProject[]> {
+    if (this.redis) {
+      const ids = await this.redis.zrevrange(ExternalProjectKeys.userList(userId), 0, -1);
+      if (ids.length === 0) return [];
+
+      const pipeline = this.redis.multi();
+      for (const id of ids) {
+        pipeline.hgetall(ExternalProjectKeys.detail(id));
+      }
+      const rows = await pipeline.exec();
+      if (!rows) return [];
+
+      const result: ExternalProject[] = [];
+      for (const [err, data] of rows) {
+        if (err || !data || typeof data !== 'object') continue;
+        const row = data as Record<string, string>;
+        if (!row.id) continue;
+        result.push(this.hydrateProject(row));
+      }
+      return result;
+    }
+    return [...this.fallbackProjects.values()]
+      .filter((p) => p.userId === userId)
+      .sort((a, b) => b.id.localeCompare(a.id));
   }
 
-  getById(id: string): ExternalProject | null {
-    return this.projects.get(id) ?? null;
+  async getById(id: string): Promise<ExternalProject | null> {
+    if (this.redis) {
+      const data = await this.redis.hgetall(ExternalProjectKeys.detail(id));
+      if (!data || !data.id) return null;
+      return this.hydrateProject(data as Record<string, string>);
+    }
+    return this.fallbackProjects.get(id) ?? null;
   }
 
-  update(id: string, patch: Partial<CreateExternalProjectInput>): ExternalProject | null {
-    const existing = this.projects.get(id);
+  async update(id: string, patch: Partial<CreateExternalProjectInput>): Promise<ExternalProject | null> {
+    const existing = await this.getById(id);
     if (!existing) return null;
     const updated: ExternalProject = {
       ...existing,
@@ -54,11 +96,51 @@ export class ExternalProjectStore {
       ...(patch.backlogPath !== undefined ? { backlogPath: patch.backlogPath } : {}),
       updatedAt: Date.now(),
     };
-    this.projects.set(id, updated);
+    if (this.redis) {
+      await this.redis.hset(ExternalProjectKeys.detail(id), this.serializeProject(updated));
+    } else {
+      this.fallbackProjects.set(id, updated);
+    }
     return updated;
   }
 
-  delete(id: string): boolean {
-    return this.projects.delete(id);
+  async delete(id: string): Promise<boolean> {
+    const project = await this.getById(id);
+    if (!project) return false;
+    if (this.redis) {
+      const pipeline = this.redis.multi();
+      pipeline.del(ExternalProjectKeys.detail(id));
+      pipeline.zrem(ExternalProjectKeys.userList(project.userId), id);
+      await pipeline.exec();
+    } else {
+      this.fallbackProjects.delete(id);
+    }
+    return true;
+  }
+
+  private serializeProject(project: ExternalProject): Record<string, string> {
+    return {
+      id: project.id,
+      userId: project.userId,
+      name: project.name,
+      description: project.description,
+      sourcePath: project.sourcePath,
+      backlogPath: project.backlogPath,
+      createdAt: String(project.createdAt),
+      updatedAt: String(project.updatedAt),
+    };
+  }
+
+  private hydrateProject(data: Record<string, string>): ExternalProject {
+    return {
+      id: data.id ?? '',
+      userId: data.userId ?? '',
+      name: data.name ?? '',
+      description: data.description ?? '',
+      sourcePath: data.sourcePath ?? '',
+      backlogPath: data.backlogPath ?? 'docs/ROADMAP.md',
+      createdAt: Number.parseInt(data.createdAt ?? '0', 10),
+      updatedAt: Number.parseInt(data.updatedAt ?? '0', 10),
+    };
   }
 }
