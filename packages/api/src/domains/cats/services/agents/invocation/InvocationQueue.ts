@@ -78,8 +78,7 @@ export class InvocationQueue {
     if (aHasPos && !bHasPos) return -1;
     if (!aHasPos && bHasPos) return 1;
     if (aHasPos && bHasPos) return a.position! - b.position!;
-    const pDiff =
-      (InvocationQueue.PRIORITY_RANK[a.priority] ?? 1) - (InvocationQueue.PRIORITY_RANK[b.priority] ?? 1);
+    const pDiff = (InvocationQueue.PRIORITY_RANK[a.priority] ?? 1) - (InvocationQueue.PRIORITY_RANK[b.priority] ?? 1);
     if (pDiff !== 0) return pDiff;
     return a.createdAt - b.createdAt;
   }
@@ -99,7 +98,15 @@ export class InvocationQueue {
   enqueue(
     input: Omit<
       QueueEntry,
-      'id' | 'status' | 'createdAt' | 'mergedMessageIds' | 'messageId' | 'autoExecute' | 'callerCatId' | 'priority' | 'position'
+      | 'id'
+      | 'status'
+      | 'createdAt'
+      | 'mergedMessageIds'
+      | 'messageId'
+      | 'autoExecute'
+      | 'callerCatId'
+      | 'priority'
+      | 'position'
     > & {
       autoExecute?: boolean;
       callerCatId?: string;
@@ -338,7 +345,7 @@ export class InvocationQueue {
       const idx = q.findIndex((e) => e.status === 'processing' && e.id === entryId);
       if (idx !== -1) {
         this.originalContents.delete(entryId);
-    
+
         return q.splice(idx, 1)[0] ?? null;
       }
     }
@@ -552,11 +559,7 @@ export class InvocationQueue {
     const firstTargetsSorted = sorted(first.targetCats);
     for (let i = 1; i < queued.length; i++) {
       const e = queued[i]!;
-      if (
-        e.source !== 'user' ||
-        e.intent !== first.intent ||
-        !arraysEqual(sorted(e.targetCats), firstTargetsSorted)
-      )
+      if (e.source !== 'user' || e.intent !== first.intent || !arraysEqual(sorted(e.targetCats), firstTargetsSorted))
         break;
       batch.push({ ...e });
     }

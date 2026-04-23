@@ -90,13 +90,17 @@ function QueueEntryRow({
           ) : (
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#9B7EBD]" />
           )}
-          <span className={`text-xs ${isAgent ? 'text-[#9B7EBD] font-medium' : isUrgent ? 'text-red-600' : 'text-cafe-muted'}`}>
+          <span
+            className={`text-xs ${isAgent ? 'text-[#9B7EBD] font-medium' : isUrgent ? 'text-red-600' : 'text-cafe-muted'}`}
+          >
             {sourceLabel}
           </span>
           {categoryLabel && (
-            <span className={`text-[9px] px-1 py-px rounded font-medium ${
-              isUrgent ? 'bg-red-100 text-red-600' : 'bg-[#9B7EBD]/15 text-[#9B7EBD]'
-            }`}>
+            <span
+              className={`text-[9px] px-1 py-px rounded font-medium ${
+                isUrgent ? 'bg-red-100 text-red-600' : 'bg-[#9B7EBD]/15 text-[#9B7EBD]'
+              }`}
+            >
               {categoryLabel}
             </span>
           )}

@@ -104,7 +104,16 @@ export class ConnectorInvokeTrigger {
 
     // F169: all priorities go through queue — no preemption bypass
     if (invocationTracker.has(threadId, catId)) {
-      return this.enqueueWhileActive(threadId, catId, userId, message, messageId, sender, priority, policy?.sourceCategory);
+      return this.enqueueWhileActive(
+        threadId,
+        catId,
+        userId,
+        message,
+        messageId,
+        sender,
+        priority,
+        policy?.sourceCategory,
+      );
     }
 
     // No active invocation → direct execution (existing flow)
@@ -144,7 +153,9 @@ export class ConnectorInvokeTrigger {
       targetCats: [catId],
       intent: 'execute',
       priority,
-      ...(sourceCategory ? { sourceCategory: sourceCategory as 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' } : {}),
+      ...(sourceCategory
+        ? { sourceCategory: sourceCategory as 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' }
+        : {}),
       ...(sender ? { senderMeta: sender } : {}),
     });
 

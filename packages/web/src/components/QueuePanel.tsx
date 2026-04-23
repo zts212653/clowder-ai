@@ -1,8 +1,8 @@
 'use client';
 
 import { SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
-import { DndContext, closestCenter, type DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
-import { SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
+import { closestCenter, DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { arrayMove, SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useCallback, useMemo, useState } from 'react';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { useChatStore } from '@/stores/chatStore';
@@ -62,13 +62,22 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
   const handleRemove = useCallback(
     async (entryId: string) => {
       const prevQueue = queue;
-      setQueue(threadId, prevQueue.filter((e) => e.id !== entryId));
+      setQueue(
+        threadId,
+        prevQueue.filter((e) => e.id !== entryId),
+      );
       try {
         const res = await apiFetch(`/api/threads/${threadId}/queue/${entryId}`, { method: 'DELETE' });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           setQueue(threadId, prevQueue);
-          addToast({ type: 'error', title: '撤回失败', message: data?.error ?? '撤回失败，请重试', threadId, duration: 5000 });
+          addToast({
+            type: 'error',
+            title: '撤回失败',
+            message: data?.error ?? '撤回失败，请重试',
+            threadId,
+            duration: 5000,
+          });
           return;
         }
         addToast({ type: 'success', title: '已取消', message: '已从队列撤回', threadId, duration: 2500 });
@@ -105,7 +114,8 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        const msg = data?.code === 'ENTRY_PROCESSING' ? '该消息正在处理，无法 steer' : (data?.error ?? 'Steer 失败，请重试');
+        const msg =
+          data?.code === 'ENTRY_PROCESSING' ? '该消息正在处理，无法 steer' : (data?.error ?? 'Steer 失败，请重试');
         addToast({ type: 'error', title: 'Steer 失败', message: msg, threadId, duration: 5000 });
         return;
       }
@@ -128,10 +138,13 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
       const positions = reordered.map((e, i) => ({ entryId: e.id, position: i }));
 
       const prevQueue = queue;
-      setQueue(threadId, queue.map((e) => {
-        const pos = positions.find((p) => p.entryId === e.id);
-        return pos ? { ...e, position: pos.position } : e;
-      }));
+      setQueue(
+        threadId,
+        queue.map((e) => {
+          const pos = positions.find((p) => p.entryId === e.id);
+          return pos ? { ...e, position: pos.position } : e;
+        }),
+      );
 
       try {
         const res = await apiFetch(`/api/threads/${threadId}/queue/reorder`, {
@@ -247,4 +260,3 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
     </div>
   );
 }
-

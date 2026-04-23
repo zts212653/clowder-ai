@@ -45,11 +45,7 @@ export interface A2ATriggerDeps {
   /** F122B: InvocationQueue for agent-sourced entries */
   invocationQueue?: Pick<
     InvocationQueue,
-    | 'enqueue'
-    | 'countAgentEntriesForThread'
-    | 'hasQueuedAgentForCat'
-    | 'backfillMessageId'
-    | 'list'
+    'enqueue' | 'countAgentEntriesForThread' | 'hasQueuedAgentForCat' | 'backfillMessageId' | 'list'
   >;
   log: FastifyBaseLogger;
 }
