@@ -59,7 +59,7 @@ function resolveNode(projectRoot) {
       ]
     : [
         '/opt/homebrew/bin/node', // Apple Silicon Homebrew
-        '/usr/local/bin/node',     // Intel Homebrew / manual install
+        '/usr/local/bin/node', // Intel Homebrew / manual install
         '/usr/bin/node',
       ];
   for (const c of systemCandidates) {
