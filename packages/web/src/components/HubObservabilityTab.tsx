@@ -154,7 +154,7 @@ function HealthPanel() {
   const fetchHealth = useCallback(async () => {
     try {
       const res = await apiFetch('/api/telemetry/health');
-      if (res.ok) setHealth((await res.json()) as HealthData);
+      if (res.ok || res.status === 503) setHealth((await res.json()) as HealthData);
     } catch {
       /* ignore */
     } finally {
