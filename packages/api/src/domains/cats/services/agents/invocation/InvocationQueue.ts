@@ -71,6 +71,29 @@ export class InvocationQueue {
     return q;
   }
 
+  private static readonly PRIORITY_RANK: Record<string, number> = { urgent: 0, normal: 1 };
+
+  /** F169: multi-dimensional entry comparator for dequeue ordering. */
+  private static compareEntries(a: QueueEntry, b: QueueEntry): number {
+    const aHasPos = a.position !== undefined;
+    const bHasPos = b.position !== undefined;
+    if (aHasPos && !bHasPos) return -1;
+    if (!aHasPos && bHasPos) return 1;
+    if (aHasPos && bHasPos) return a.position! - b.position!;
+    const pDiff =
+      (InvocationQueue.PRIORITY_RANK[a.priority] ?? 1) - (InvocationQueue.PRIORITY_RANK[b.priority] ?? 1);
+    if (pDiff !== 0) return pDiff;
+    return a.createdAt - b.createdAt;
+  }
+
+  /** F169: set explicit dequeue position for drag-reorder. */
+  setPosition(threadId: string, userId: string, entryId: string, position: number): boolean {
+    const e = this.findEntry(threadId, userId, entryId);
+    if (!e || e.status !== 'queued') return false;
+    e.position = position;
+    return true;
+  }
+
   /**
    * 预留队列位。容量检查在此完成。
    * 同源同目标的连续消息自动合并。
@@ -310,37 +333,37 @@ export class InvocationQueue {
 
   // ── Cross-user methods (system-level only) ──
 
-  /** Find the oldest queued entry across all users for a thread. */
+  /** F169: Find the highest-priority queued entry across all users for a thread. */
   peekOldestAcrossUsers(threadId: string): QueueEntry | null {
-    let oldest: QueueEntry | null = null;
+    let best: QueueEntry | null = null;
     for (const [key, q] of this.queues) {
       if (!key.startsWith(`${threadId}:`)) continue;
       for (const e of q) {
         if (e.status !== 'queued') continue;
-        if (!oldest || e.createdAt < oldest.createdAt) {
-          oldest = e;
+        if (!best || InvocationQueue.compareEntries(e, best) < 0) {
+          best = e;
         }
       }
     }
-    return oldest ? { ...oldest } : null;
+    return best ? { ...best } : null;
   }
 
-  /** Mark the oldest queued entry across users as processing. */
+  /** F169: Mark the highest-priority queued entry across users as processing. */
   markProcessingAcrossUsers(threadId: string): QueueEntry | null {
-    let oldest: { entry: QueueEntry; key: string } | null = null;
+    let best: { entry: QueueEntry; key: string } | null = null;
     for (const [key, q] of this.queues) {
       if (!key.startsWith(`${threadId}:`)) continue;
       for (const e of q) {
         if (e.status !== 'queued') continue;
-        if (!oldest || e.createdAt < oldest.entry.createdAt) {
-          oldest = { entry: e, key };
+        if (!best || InvocationQueue.compareEntries(e, best.entry) < 0) {
+          best = { entry: e, key };
         }
       }
     }
-    if (!oldest) return null;
-    oldest.entry.status = 'processing';
-    oldest.entry.processingStartedAt = Date.now();
-    return { ...oldest.entry };
+    if (!best) return null;
+    best.entry.status = 'processing';
+    best.entry.processingStartedAt = Date.now();
+    return { ...best.entry };
   }
 
   /** Remove a processing entry across all users for a thread by entryId. */

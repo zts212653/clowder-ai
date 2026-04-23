@@ -823,4 +823,47 @@ describe('InvocationQueue', () => {
     const r = queue.enqueue(entry({ content: 'overflow', targetCats: ['overflow'] }));
     assert.equal(r.outcome, 'full');
   });
+
+  // ── F169: multi-dimensional dequeue ordering ──
+
+  it('urgent entry dequeues before normal via peekOldestAcrossUsers', () => {
+    queue.enqueue(entry({ userId: 'u1', content: 'normal-first', priority: 'normal' }));
+    queue.enqueue(entry({ userId: 'u2', content: 'urgent-second', source: 'connector', targetCats: ['c1'], priority: 'urgent' }));
+    const next = queue.peekOldestAcrossUsers('t1');
+    assert.equal(next.content, 'urgent-second');
+    assert.equal(next.priority, 'urgent');
+  });
+
+  it('same priority orders by createdAt (FIFO)', () => {
+    queue.enqueue(entry({ userId: 'u1', content: 'first', priority: 'normal' }));
+    queue.enqueue(entry({ userId: 'u2', content: 'second', source: 'connector', targetCats: ['c1'], priority: 'normal' }));
+    const next = queue.peekOldestAcrossUsers('t1');
+    assert.equal(next.content, 'first');
+  });
+
+  it('markProcessingAcrossUsers picks urgent before normal', () => {
+    queue.enqueue(entry({ userId: 'u1', content: 'normal', priority: 'normal' }));
+    queue.enqueue(entry({ userId: 'u2', content: 'urgent', source: 'connector', targetCats: ['c1'], priority: 'urgent' }));
+    const picked = queue.markProcessingAcrossUsers('t1');
+    assert.equal(picked.content, 'urgent');
+    assert.equal(picked.status, 'processing');
+  });
+
+  it('explicit position overrides priority in dequeue', () => {
+    queue.enqueue(entry({ userId: 'u1', content: 'urgent-no-pos', source: 'connector', targetCats: ['c1'], priority: 'urgent' }));
+    const r = queue.enqueue(entry({ userId: 'u1', content: 'normal-with-pos', targetCats: ['c2'], priority: 'normal' }));
+    queue.setPosition('t1', 'u1', r.entry.id, 0);
+    const next = queue.peekOldestAcrossUsers('t1');
+    assert.equal(next.content, 'normal-with-pos');
+  });
+
+  it('setPosition returns false for processing entry', () => {
+    queue.enqueue(entry({ content: 'a' }));
+    const processing = queue.markProcessing('t1', 'u1');
+    assert.equal(queue.setPosition('t1', 'u1', processing.id, 0), false);
+  });
+
+  it('setPosition returns false for non-existent entry', () => {
+    assert.equal(queue.setPosition('t1', 'u1', 'nonexistent', 0), false);
+  });
 });
