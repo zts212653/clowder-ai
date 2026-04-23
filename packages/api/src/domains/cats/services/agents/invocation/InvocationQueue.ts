@@ -53,8 +53,6 @@ export class InvocationQueue {
   private readonly log = createModuleLogger('invocation-queue');
   private queues = new Map<string, QueueEntry[]>();
 
-  /** Last pre-merge content per entryId, for rollback */
-  private preMergeSnapshots = new Map<string, string>();
   /** Original content per entryId at enqueue time, for rollbackEnqueue */
   private originalContents = new Map<string, string>();
 
@@ -149,52 +147,9 @@ export class InvocationQueue {
     if (e) e.messageId = messageId;
   }
 
-  /** Append to mergedMessageIds (does NOT overwrite messageId). */
-  appendMergedMessageId(threadId: string, userId: string, entryId: string, messageId: string): void {
-    const e = this.findEntry(threadId, userId, entryId);
-    if (e) e.mergedMessageIds.push(messageId);
-  }
-
-  /** Rollback a merge — restore pre-merge content snapshot. */
-  rollbackMerge(threadId: string, userId: string, entryId: string): void {
-    const e = this.findEntry(threadId, userId, entryId);
-    const snapshot = this.preMergeSnapshots.get(entryId);
-    if (e && snapshot !== undefined) {
-      e.content = snapshot;
-      this.preMergeSnapshots.delete(entryId);
-    }
-  }
-
-  /**
-   * Rollback an enqueued entry's write failure.
-   * If no merges have occurred → remove entry entirely.
-   * If merges exist → strip original content, keep merged content alive.
-   * This prevents a race where request A fails after request B merged into A's entry.
-   */
+  /** Rollback an enqueued entry — remove entirely. */
   rollbackEnqueue(threadId: string, userId: string, entryId: string): void {
-    const e = this.findEntry(threadId, userId, entryId);
-    if (!e) return;
-
-    const origContent = this.originalContents.get(entryId);
-    // Detect merges: content grew beyond original
-    if (origContent !== undefined && e.content !== origContent) {
-      // Strip original content prefix, keep merged content
-      const prefix = `${origContent}\n`;
-      if (e.content.startsWith(prefix)) {
-        e.content = e.content.slice(prefix.length);
-      }
-      // Promote surviving merged message ID so QueueProcessor can link it
-      if (e.mergedMessageIds.length > 0) {
-        e.messageId = e.mergedMessageIds.shift()!;
-      } else {
-        e.messageId = null;
-      }
-      // Clear stale snapshot so rollbackMerge can't reintroduce ghost content
-      this.preMergeSnapshots.delete(entryId);
-    } else {
-      // No merges — safe to remove entirely
-      this.remove(threadId, userId, entryId);
-    }
+    this.remove(threadId, userId, entryId);
     this.originalContents.delete(entryId);
   }
 
@@ -218,7 +173,7 @@ export class InvocationQueue {
     const idx = q.findIndex((e) => e.id === entryId);
     if (idx === -1) return null;
     this.originalContents.delete(entryId);
-    this.preMergeSnapshots.delete(entryId);
+
     return q.splice(idx, 1)[0] ?? null;
   }
 
@@ -242,7 +197,6 @@ export class InvocationQueue {
     if (!q) return [];
     for (const e of q) {
       this.originalContents.delete(e.id);
-      this.preMergeSnapshots.delete(e.id);
     }
     this.queues.delete(key);
     return q;
@@ -327,7 +281,7 @@ export class InvocationQueue {
     const idx = q.findIndex((e) => e.status === 'processing' && e.id === entryId);
     if (idx === -1) return null;
     this.originalContents.delete(entryId);
-    this.preMergeSnapshots.delete(entryId);
+
     return q.splice(idx, 1)[0] ?? null;
   }
 
@@ -373,7 +327,7 @@ export class InvocationQueue {
       const idx = q.findIndex((e) => e.status === 'processing' && e.id === entryId);
       if (idx !== -1) {
         this.originalContents.delete(entryId);
-        this.preMergeSnapshots.delete(entryId);
+    
         return q.splice(idx, 1)[0] ?? null;
       }
     }

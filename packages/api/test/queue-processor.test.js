@@ -418,19 +418,16 @@ describe('QueueProcessor', () => {
 
   // ── F039 remaining bugfix: queue execution should include contentBlocks ──
 
-  it('executeEntry passes aggregated contentBlocks (messageId + mergedMessageIds) to routeExecution', async () => {
-    const contentBlocks1 = [{ type: 'image', url: 'https://example.com/1.png' }];
-    const contentBlocks2 = [{ type: 'image', url: 'https://example.com/2.png' }];
+  it('executeEntry passes contentBlocks from messageId to routeExecution', async () => {
+    const contentBlocks = [{ type: 'image', url: 'https://example.com/1.png' }];
 
     deps.messageStore.getById = mock.fn(async (id) => {
-      if (id === 'm1') return { id: 'm1', contentBlocks: contentBlocks1 };
-      if (id === 'm2') return { id: 'm2', contentBlocks: contentBlocks2 };
+      if (id === 'm1') return { id: 'm1', contentBlocks };
       return null;
     });
 
     const entry = enqueueEntry(deps.queue);
     deps.queue.backfillMessageId('t1', 'u1', entry.id, 'm1');
-    deps.queue.appendMergedMessageId('t1', 'u1', entry.id, 'm2');
 
     await processor.processNext('t1', 'u1');
     await new Promise((r) => setTimeout(r, 50));
@@ -439,7 +436,7 @@ describe('QueueProcessor', () => {
     const call = deps.router.routeExecution.mock.calls[0];
     const opts = call.arguments[6];
     assert.ok(opts && typeof opts === 'object', 'expected opts object');
-    assert.deepEqual(opts.contentBlocks, [...contentBlocks1, ...contentBlocks2]);
+    assert.deepEqual(opts.contentBlocks, contentBlocks);
   });
 
   it('degrades when messageStore.getById throws: still executes without contentBlocks', async () => {
