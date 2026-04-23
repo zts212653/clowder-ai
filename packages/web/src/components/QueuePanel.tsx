@@ -13,6 +13,22 @@ import { type SteerMode, SteerQueuedEntryModal } from './SteerQueuedEntryModal';
 
 const COLLAPSE_THRESHOLD = 4;
 
+const PRIORITY_RANK: Record<string, number> = { urgent: 0, normal: 1 };
+
+export function compareQueueEntries(
+  a: { position?: number; priority?: string; createdAt: number },
+  b: { position?: number; priority?: string; createdAt: number },
+): number {
+  const aHasPos = a.position !== undefined;
+  const bHasPos = b.position !== undefined;
+  if (aHasPos && !bHasPos) return -1;
+  if (!aHasPos && bHasPos) return 1;
+  if (aHasPos && bHasPos) return a.position! - b.position!;
+  const pDiff = (PRIORITY_RANK[a.priority ?? 'normal'] ?? 1) - (PRIORITY_RANK[b.priority ?? 'normal'] ?? 1);
+  if (pDiff !== 0) return pDiff;
+  return a.createdAt - b.createdAt;
+}
+
 interface QueuePanelProps {
   threadId: string;
 }
@@ -35,9 +51,11 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
 
   const visibleEntries = useMemo(
     () =>
-      queue.filter(
-        (e) => e.status === 'queued' && !(e.source === 'connector' && e.content.startsWith(SCHEDULER_TRIGGER_PREFIX)),
-      ),
+      queue
+        .filter(
+          (e) => e.status === 'queued' && !(e.source === 'connector' && e.content.startsWith(SCHEDULER_TRIGGER_PREFIX)),
+        )
+        .sort(compareQueueEntries),
     [queue],
   );
 
