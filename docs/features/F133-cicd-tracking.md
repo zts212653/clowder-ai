@@ -103,7 +103,7 @@ GitHub API 轮询 → CiCdCheckPoller (新)
 2. **CiCdRouter** — 新增独立路由器
    - 不塞 ReviewRouter，独立处理 CI 事件的格式化和投递
    - 共享 `deliverConnectorMessage()` helper（messageStore.append + socket broadcast）
-   - CI 失败 → 投递消息 + `ConnectorInvokeTrigger.trigger()` with `priority: 'urgent'`（与 review 一致，允许抢占）
+   - CI 失败 → 投递消息 + `ConnectorInvokeTrigger.trigger()` with `priority: 'urgent'`（与 review 一致，队列内优先出队；F169 修正：不再走抢占旁路）
    - CI 成功 → 投递消息，不 trigger
    - 当前决策：CI failure 直接 `urgent`（与 review 行为一致）；CI success 仍不 trigger
 
@@ -160,7 +160,7 @@ GitHub API 轮询 → CiCdCheckPoller (新)
 
 ### Phase A（核心投递管道）
 - [x] AC-A1: 注册 PR 后，CI 失败自动投递消息到原始 thread（connector: `github-ci`）
-- [x] AC-A2: CI 失败消息自动唤醒猫（ConnectorInvokeTrigger, priority: `urgent`，可打断正在进行中的通知猫）
+- [x] AC-A2: CI 失败消息自动唤醒猫（ConnectorInvokeTrigger, priority: `urgent`，队列内优先出队；F169 修正：不再打断正在进行中的执行）
 - [x] AC-A3: CI 成功投递消息但不唤醒猫
 - [x] AC-A4: 状态迁移去重 — 同一 headSha + 同一 aggregateBucket 只通知一次
 - [x] AC-A5: 合法状态迁移（pending → fail → success）不被吞掉
@@ -218,7 +218,7 @@ GitHub API 轮询 → CiCdCheckPoller (新)
 2. 提出 `PrTrackingStore` 缺少 patch/update 接口 → 新增 `patchCiState()`
 3. 发现 `ProcessedEmailStore` 5min 窗口去重不适合 CI 状态迁移 → 改用 `headSha + aggregateBucket` 去重
 4. 建议独立 `CiCdRouter` + 独立 bootstrap，不塞 ReviewRouter
-5. Design Gate 建议 CI failure trigger 用 `normal`；后续经team lead确认，升级为 `urgent` 以与 review 抢占行为归一
+5. Design Gate 建议 CI failure trigger 用 `normal`；后续经team lead确认，升级为 `urgent` 以与 review 优先级行为归一（F169 修正：urgent 语义为队列内优先出队，不再走抢占旁路）
 6. 强调 headSha 必须 poll 时覆盖更新，不能只注册时拉一次
 7. PR lifecycle: open 持续轮询，merged/closed 才停
 8. required checks 为空时 fallback 到 all checks
