@@ -943,4 +943,50 @@ describe('InvocationQueue', () => {
     const next = queue.peekNextQueued('t1', 'u1');
     assert.equal(next.content, 'urgent', 'peekNextQueued should return urgent entry first');
   });
+
+  // ── R2-P1: promote() must win over existing position in comparator ──
+
+  it('promote() makes entry win comparator even when another has position=0 (R2-P1)', () => {
+    const rA = queue.enqueue(entry({ content: 'A' }));
+    const rB = queue.enqueue(entry({ content: 'B' }));
+    queue.setPosition('t1', 'u1', rB.entry.id, 0);
+
+    queue.promote('t1', 'u1', rA.entry.id);
+
+    const next = queue.peekNextQueued('t1', 'u1');
+    assert.equal(next.content, 'A', 'promoted entry should beat position=0 in comparator');
+  });
+
+  it('move(up) swaps position with neighbor in comparator order (R2-P1)', () => {
+    const rA = queue.enqueue(entry({ content: 'A' }));
+    const rB = queue.enqueue(entry({ content: 'B' }));
+    queue.setPosition('t1', 'u1', rA.entry.id, 5);
+    queue.setPosition('t1', 'u1', rB.entry.id, 0);
+
+    // B is at position 0 (first), A is at position 5 (second)
+    // move A up → should swap with B
+    queue.move('t1', 'u1', rA.entry.id, 'up');
+
+    const next = queue.peekNextQueued('t1', 'u1');
+    assert.equal(next.content, 'A', 'after move up, A should be first in comparator');
+  });
+
+  // ── R2-P2: collectUserBatch returns entries in comparator order ──
+
+  it('collectUserBatch returns entries sorted by comparator (R2-P2)', () => {
+    queue.enqueue(entry({ content: 'B' }));
+    const rD = queue.enqueue(entry({ content: 'D' }));
+    const rE = queue.enqueue(entry({ content: 'E' }));
+    // Array order: B, D, E. Set positions: D=0, E=1, B=2
+    queue.setPosition('t1', 'u1', rD.entry.id, 0);
+    queue.setPosition('t1', 'u1', rE.entry.id, 1);
+    // B has no position → comparator puts it after positioned entries
+
+    // Mark D as processing (simulating processNext picked it)
+    queue.markProcessing('t1', 'u1');
+
+    const batch = queue.collectUserBatch('t1', 'u1');
+    const contents = batch.map((e) => e.content);
+    assert.deepStrictEqual(contents, ['E', 'B'], 'batch should follow comparator order: E(pos=1) then B(no pos)');
+  });
 });

@@ -177,10 +177,11 @@ export class InvocationQueue {
     return q.splice(idx, 1)[0] ?? null;
   }
 
-  /** Shallow copy of all entries for this user in this thread. */
+  /** Shallow copy of all entries sorted by dequeue priority (comparator order). */
   list(threadId: string, userId: string): QueueEntry[] {
     const q = this.queues.get(this.scopeKey(threadId, userId));
-    return q ? [...q] : [];
+    if (!q) return [];
+    return [...q].sort(InvocationQueue.compareEntries);
   }
 
   /** Count of queued (not processing) entries. */
@@ -203,42 +204,52 @@ export class InvocationQueue {
   }
 
   /**
-   * Move entry up or down within the user's queue.
+   * Move entry up or down in comparator order by swapping positions with its neighbor.
    * Returns false if entry is processing or not found.
    */
   move(threadId: string, userId: string, entryId: string, direction: 'up' | 'down'): boolean {
     const q = this.queues.get(this.scopeKey(threadId, userId));
     if (!q) return false;
-    const idx = q.findIndex((e) => e.id === entryId);
-    if (idx === -1) return false;
-    if (q[idx]?.status === 'processing') return false;
+    const target = q.find((e) => e.id === entryId);
+    if (!target || target.status === 'processing') return false;
 
-    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
-    if (swapIdx < 0 || swapIdx >= q.length) return true; // boundary no-op, idempotent
+    const queued = q.filter((e) => e.status === 'queued');
+    queued.sort(InvocationQueue.compareEntries);
+    const sortedIdx = queued.findIndex((e) => e.id === entryId);
+    const neighborIdx = direction === 'up' ? sortedIdx - 1 : sortedIdx + 1;
+    if (neighborIdx < 0 || neighborIdx >= queued.length) return true;
 
-    const a = q[idx]!;
-    const b = q[swapIdx]!;
-    q[idx] = b;
-    q[swapIdx] = a;
+    const neighbor = queued[neighborIdx]!;
+    if (target.position === undefined || neighbor.position === undefined) {
+      const maxPos = queued.reduce(
+        (max, e) => (e.position !== undefined && e.position > max ? e.position : max),
+        -1,
+      );
+      if (target.position === undefined) target.position = maxPos + 1 + sortedIdx;
+      if (neighbor.position === undefined) neighbor.position = maxPos + 1 + neighborIdx;
+    }
+    const tmpPos = target.position;
+    target.position = neighbor.position;
+    neighbor.position = tmpPos;
     return true;
   }
 
   /**
-   * Promote a queued entry to the front of queued entries (after any processing entries).
+   * Promote a queued entry to first in comparator order by setting its position
+   * below all existing positions.
    * Returns false if not found or entry is processing.
    */
   promote(threadId: string, userId: string, entryId: string): boolean {
     const q = this.queues.get(this.scopeKey(threadId, userId));
     if (!q) return false;
-    const idx = q.findIndex((e) => e.id === entryId);
-    if (idx === -1) return false;
-    const entry = q[idx]!;
-    if (entry.status === 'processing') return false;
+    const entry = q.find((e) => e.id === entryId);
+    if (!entry || entry.status === 'processing') return false;
 
-    q.splice(idx, 1);
-    const firstQueuedIdx = q.findIndex((e) => e.status === 'queued');
-    const insertIdx = firstQueuedIdx === -1 ? q.length : firstQueuedIdx;
-    q.splice(insertIdx, 0, entry);
+    const minPos = q.reduce((min, e) => {
+      if (e.status === 'queued' && e.position !== undefined && e.position < min) return e.position;
+      return min;
+    }, 0);
+    entry.position = minPos - 1;
     return true;
   }
 
@@ -534,16 +545,17 @@ export class InvocationQueue {
     const q = this.queues.get(key);
     if (!q) return [];
 
-    const first = q.find((e) => e.status === 'queued');
-    if (!first) return [];
+    const queued = q.filter((e) => e.status === 'queued');
+    if (queued.length === 0) return [];
+    queued.sort(InvocationQueue.compareEntries);
+
+    const first = queued[0]!;
     if (first.source !== 'user') return [{ ...first }];
 
     const batch: QueueEntry[] = [{ ...first }];
-    const firstIdx = q.indexOf(first);
     const firstTargetsSorted = sorted(first.targetCats);
-    for (let i = firstIdx + 1; i < q.length; i++) {
-      const e = q[i]!;
-      if (e.status !== 'queued') continue;
+    for (let i = 1; i < queued.length; i++) {
+      const e = queued[i]!;
       if (
         e.source !== 'user' ||
         e.intent !== first.intent ||
