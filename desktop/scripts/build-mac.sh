@@ -282,12 +282,15 @@ npx electron-builder "${EB_ARGS[@]}" || die "electron-builder failed"
 mkdir -p "$DIST_DIR"
 VERSION="$(node -p "require('./package.json').version")"
 for arch in "${ARCHS[@]}"; do
-  app_dir="${DESKTOP_DIR}/dist/mac-${arch}"
+  case "$arch" in
+    arm64) app_dir="${DESKTOP_DIR}/dist/mac-arm64" ;;
+    x64) app_dir="${DESKTOP_DIR}/dist/mac" ;;
+    *) die "Unsupported macOS arch: ${arch}" ;;
+  esac
   dmg_name="ClowderAI-${VERSION}-${arch}.dmg"
   dmg_out="${DIST_DIR}/${dmg_name}"
   if [[ ! -d "$app_dir" ]]; then
-    warn "dist/mac-${arch} not found, skipping DMG for ${arch}"
-    continue
+    die "Expected app bundle directory not found for ${arch}: ${app_dir}"
   fi
   echo "  Creating ${dmg_name} via hdiutil ..."
   rm -f "$dmg_out"

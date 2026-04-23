@@ -7,6 +7,10 @@ const path = require('path');
 const fs = require('fs');
 
 exports.default = async function afterPack(context) {
+  if (context.electronPlatformName !== 'darwin') {
+    return;
+  }
+
   const resourcesDir = path.join(context.appOutDir, 'Clowder AI.app', 'Contents', 'Resources');
   const projectRoot = path.resolve(__dirname, '..');
   const deployRoot = path.join(projectRoot, 'bundled', 'deploy');

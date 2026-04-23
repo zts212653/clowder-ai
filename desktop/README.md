@@ -231,7 +231,7 @@ pnpm desktop:installer
 | 平台 | 状态 | 说明 |
 |------|------|------|
 | Windows | ✅ 已验证 | Inno Setup 安装器（`dist/ClowderAI-Setup-x.x.x.exe`） |
-| macOS | ✅ 已验证 | DMG 安装镜像，支持 arm64 + x64 双架构 |
+| macOS | 🔄 验证中 | 已新增 DMG 构建流水线；完整 clean-machine 验证通过前不承诺正式支持 |
 | Linux | ❌ 暂不支持 | 尚无 Linux 安装包 |
 
 ## 相关文档
