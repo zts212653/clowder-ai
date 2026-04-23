@@ -89,10 +89,7 @@ function OverviewPanel() {
   const invOk = sumByPrefix(latest, 'cat_cafe_invocation_completed', 'status="ok"');
   const invErr = sumByPrefix(latest, 'cat_cafe_invocation_completed', 'status="error"');
   const invocations = sumByPrefix(latest, 'cat_cafe_cat_invocation_count');
-  const durationSum = sumByPrefix(latest, 'cat_cafe_thread_duration_sum');
-  const durationCount = sumByPrefix(latest, 'cat_cafe_thread_duration_count');
-  const avgDuration = durationCount > 0 ? durationSum / durationCount : 0;
-  const sessionRounds = sumByPrefix(latest, 'cat_cafe_session_rounds_total');
+  const activeInv = sumByPrefix(latest, 'cat_cafe_invocation_active');
 
   if (loading) return <p className="text-sm text-cafe-muted">...</p>;
 
@@ -106,8 +103,7 @@ function OverviewPanel() {
           sub={invOk + invErr > 0 ? `${((invErr / (invOk + invErr)) * 100).toFixed(1)}% error` : undefined}
         />
         <MetricCard label="Invocations" value={String(invocations)} />
-        <MetricCard label="Avg Duration" value={avgDuration > 0 ? `${avgDuration.toFixed(1)}s` : 'N/A'} />
-        <MetricCard label="Session Rounds" value={sessionRounds > 0 ? String(sessionRounds) : 'N/A'} />
+        <MetricCard label="Active" value={String(activeInv)} />
         <MetricCard label="Snapshots" value={`${snapshots.length}`} sub="(last 30min)" />
       </div>
 
