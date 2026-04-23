@@ -1414,7 +1414,7 @@ async function main(): Promise<void> {
   const { ExternalProjectStore } = await import('./domains/projects/external-project-store.js');
   const { IntentCardStore } = await import('./domains/projects/intent-card-store.js');
   const { NeedAuditFrameStore } = await import('./domains/projects/need-audit-frame-store.js');
-  const externalProjectStore = new ExternalProjectStore();
+  const externalProjectStore = new ExternalProjectStore(redis);
   const intentCardStore = new IntentCardStore();
   const needAuditFrameStore = new NeedAuditFrameStore();
   const { ResolutionStore } = await import('./domains/projects/resolution-store.js');
