@@ -26,6 +26,7 @@ import {
   safeParseMentions,
   safeParseMetadata,
   safeParseToolEvents,
+  serializeExtra,
 } from './redis-message-parsers.js';
 
 const log = createModuleLogger('redis-message-store');
@@ -120,7 +121,7 @@ export class RedisMessageStore {
       contentBlocks: msg.contentBlocks ? JSON.stringify(msg.contentBlocks) : '',
       toolEvents: msg.toolEvents ? JSON.stringify(msg.toolEvents) : '',
       metadata: msg.metadata ? JSON.stringify(msg.metadata) : '',
-      extra: msg.extra ? JSON.stringify(msg.extra) : '',
+      extra: msg.extra ? serializeExtra(msg.extra) : '',
       mentions: JSON.stringify(msg.mentions),
       timestamp: String(msg.timestamp),
       ...(msg.thinking ? { thinking: msg.thinking } : {}),
@@ -752,7 +753,7 @@ export class RedisMessageStore {
   async updateExtra(id: string, extra: NonNullable<StoredMessage['extra']>): Promise<StoredMessage | null> {
     const msg = await this.getById(id);
     if (!msg) return null;
-    await this.redis.hset(MessageKeys.detail(id), { extra: JSON.stringify(extra) });
+    await this.redis.hset(MessageKeys.detail(id), { extra: serializeExtra(extra) });
     msg.extra = extra;
     return msg;
   }

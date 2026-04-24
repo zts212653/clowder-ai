@@ -946,6 +946,7 @@ export async function* routeSerial(
             extra: {
               ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
               ...(ownInvocationId ? { stream: { invocationId: ownInvocationId } } : {}),
+              ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
             },
           });
           storedMsgId = storedMsg.id;
@@ -1184,6 +1185,7 @@ export async function* routeSerial(
               extra: {
                 ...(noTextBlocks.length > 0 ? { rich: { v: 1 as const, blocks: noTextBlocks } } : {}),
                 ...(ownInvocationId ? { stream: { invocationId: ownInvocationId } } : {}),
+                ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
               },
             });
             // F088-P3: Stash rich blocks for outbound delivery (no-text branch)
@@ -1253,7 +1255,14 @@ export async function* routeSerial(
             ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
             ...(firstMetadata ? { metadata: firstMetadata } : {}),
             toolEvents: collectedToolEvents,
-            ...(ownInvocationId ? { extra: { stream: { invocationId: ownInvocationId } } } : {}),
+            ...(ownInvocationId || doneMsg?.tracing
+              ? {
+                  extra: {
+                    ...(ownInvocationId ? { stream: { invocationId: ownInvocationId } } : {}),
+                    ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
+                  },
+                }
+              : {}),
           });
           // #80: Clean up draft only after successful append
           if (deps.draftStore && ownInvocationId) {
