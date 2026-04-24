@@ -864,6 +864,19 @@ export class AgentRouter {
         yield* routeSerial(strategyDeps, targetCats, cleanMessage, userId, threadId, routeOptions);
       }
       routeSpan.setStatus({ code: SpanStatusCode.OK });
+
+      // F153 Phase F KD-22: Write route span tracing to user message for cold start recovery.
+      // The user message was appended before routeExecution, so we backfill via updateExtra.
+      if (userMessageId) {
+        const sc = routeSpan.spanContext();
+        try {
+          await Promise.resolve(
+            this.messageStore.updateExtra(userMessageId, { tracing: { traceId: sc.traceId, spanId: sc.spanId } }),
+          );
+        } catch (backfillErr) {
+          log.warn({ userMessageId, err: backfillErr }, 'Failed to write route tracing to user message');
+        }
+      }
     } catch (err) {
       routeSpan.setStatus({ code: SpanStatusCode.ERROR, message: String(err) });
       throw err;

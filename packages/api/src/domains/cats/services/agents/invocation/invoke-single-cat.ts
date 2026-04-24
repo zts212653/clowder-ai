@@ -569,12 +569,13 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         // Abort while queued is not a runtime error — clean exit
         if (signal?.aborted) {
           const sc = invocationSpan.spanContext();
+          const parentSid = params.routeSpan?.spanContext().spanId;
           yield {
             type: 'done' as const,
             catId,
             isFinal: isLastCat,
             timestamp: Date.now(),
-            tracing: { traceId: sc.traceId, spanId: sc.spanId },
+            tracing: { traceId: sc.traceId, spanId: sc.spanId, ...(parentSid ? { parentSpanId: parentSid } : {}) },
           };
           didComplete = true; // F118 AC-C5: Abort early exit, not force-return
           return;
@@ -1554,7 +1555,18 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             terminalInterruptReason = null;
           }
         }
-        if (out.type === 'done') await finalizeTaskProgress();
+        if (out.type === 'done') {
+          await finalizeTaskProgress();
+          if (!out.tracing) {
+            const sc = invocationSpan.spanContext();
+            const parentSid = params.routeSpan?.spanContext().spanId;
+            out.tracing = {
+              traceId: sc.traceId,
+              spanId: sc.spanId,
+              ...(parentSid ? { parentSpanId: parentSid } : {}),
+            };
+          }
+        }
         yield out;
       }
     };
@@ -1858,12 +1870,13 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     };
     await finalizeTaskProgress();
     const sc = invocationSpan.spanContext();
+    const parentSid = params.routeSpan?.spanContext().spanId;
     yield {
       type: 'done' as const,
       catId,
       isFinal: isLastCat,
       timestamp: Date.now(),
-      tracing: { traceId: sc.traceId, spanId: sc.spanId },
+      tracing: { traceId: sc.traceId, spanId: sc.spanId, ...(parentSid ? { parentSpanId: parentSid } : {}) },
     };
   } finally {
     // F089: Clear invocation hard timeout

@@ -205,6 +205,32 @@ test('F153-F: routeExecution sets invocationId on route span (AC-F1)', () => {
   );
 });
 
+// ── AC-F2: parentSpanId in done messages ──────────────────────────
+
+test('F153-F: done messages include parentSpanId from routeSpan (AC-F2)', () => {
+  const src = readFileSync(
+    resolve(__dirname, '../../src/domains/cats/services/agents/invocation/invoke-single-cat.ts'),
+    'utf8',
+  );
+  const parentSidMatches = src.match(/parentSid.*routeSpan.*spanContext/g) || [];
+  assert.ok(parentSidMatches.length >= 1, 'Should extract parentSpanId from routeSpan.spanContext()');
+  const parentSpanIdInTracing = src.match(/parentSpanId.*parentSid/g) || [];
+  assert.ok(
+    parentSpanIdInTracing.length >= 2,
+    `Should write parentSpanId in at least 2 done yield paths (found ${parentSpanIdInTracing.length})`,
+  );
+});
+
+// ── KD-22: route tracing backfill to user message ─────────────────
+
+test('F153-F: routeExecution backfills route tracing to user message (KD-22)', () => {
+  const src = readFileSync(resolve(__dirname, '../../src/domains/cats/services/agents/routing/AgentRouter.ts'), 'utf8');
+  assert.ok(
+    src.includes('updateExtra') && src.includes('userMessageId') && src.includes('routeSpan.spanContext'),
+    'Should call updateExtra with route span tracing on user message after strategy completes',
+  );
+});
+
 // ── AC-F4: cold start auto-hydrate (source-level) ─────────────────
 
 test('F153-F: hydrateTraceStoreFromRedis uses msg:timeline range query (AC-F4/F5)', () => {
