@@ -106,6 +106,10 @@ dump.rdb.backup*
 # Root-level skills/ (Pencil plugin generated)
 /skills/
 
+# Desktop build artifacts
+desktop/node_modules/
+desktop-dist/
+bundled/
 docs/bug-report/werewolf-investigation/poster-screenshot.png
 .worktrees/
 
