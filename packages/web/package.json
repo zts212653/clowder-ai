@@ -25,6 +25,7 @@
     "@codemirror/theme-one-dark": "^6.1.3",
     "@codemirror/view": "^6.39.16",
     "@dagrejs/dagre": "^2.0.4",
+    "@ducanh2912/next-pwa": "^10.2.9",
     "@ricky0123/vad-web": "^0.0.30",
     "@xterm/addon-attach": "^0.12.0",
     "@xterm/addon-fit": "^0.11.0",
@@ -46,7 +47,6 @@
     "zustand": "^4.5.0"
   },
   "devDependencies": {
-    "@ducanh2912/next-pwa": "^10.2.9",
     "@types/dagre": "^0.7.54",
     "@types/dompurify": "^3.2.0",
     "@types/node": "^20.11.0",

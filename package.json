@@ -48,7 +48,8 @@
     "proxy:anthropic": "node ./scripts/anthropic-proxy.mjs",
     "logs:health": "bash ./scripts/logs-health.sh",
     "clean": "pnpm -r run clean && rm -rf node_modules",
-    "check:start-profile-isolation": "node --test scripts/start-dev-profile-isolation.test.mjs"
+    "check:start-profile-isolation": "node --test scripts/start-dev-profile-isolation.test.mjs",
+    "desktop:installer": "powershell -ExecutionPolicy Bypass -File .\\desktop\\scripts\\build-desktop.ps1"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.1",
