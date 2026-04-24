@@ -826,6 +826,7 @@ export class AgentRouter {
         [ROUTING_TARGET_CATS]: (targetCats as string[]).join(','),
         [ROUTING_INTENT]: intent.intent,
         [ROUTING_STRATEGY]: strategy,
+        ...(options?.parentInvocationId ? { invocationId: options.parentInvocationId } : {}),
       },
     });
 

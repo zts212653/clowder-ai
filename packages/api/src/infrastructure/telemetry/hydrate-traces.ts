@@ -2,7 +2,7 @@
  * F153 Phase F AC-F4/F5: Hydrate LocalTraceStore from Redis messages on cold start.
  *
  * Scans recent messages from msg:timeline, extracts tracing pointers from
- * extra.tracing, synthesizes stub TraceSpanDTOs, and bulk-loads them.
+ * extra.tracing, synthesizes TraceSpanDTOs with real timing/attributes, and bulk-loads them.
  */
 
 import type { RedisClient } from '@cat-cafe/shared/utils';
@@ -30,16 +30,16 @@ export async function hydrateTraceStoreFromRedis(
 
     const pipeline = redis.pipeline();
     for (const id of ids) {
-      pipeline.hmget(MessageKeys.detail(id), 'extra', 'timestamp');
+      pipeline.hmget(MessageKeys.detail(id), 'extra', 'timestamp', 'catId', 'metadata');
     }
     const results = await pipeline.exec();
 
     const dtos: TraceSpanDTO[] = [];
 
     for (const result of results ?? []) {
-      const [err, fields] = result as [Error | null, [string | null, string | null] | null];
+      const [err, fields] = result as [Error | null, (string | null)[] | null];
       if (err || !fields) continue;
-      const [extraStr, timestampStr] = fields;
+      const [extraStr, timestampStr, catIdStr, metadataStr] = fields;
       if (!extraStr) continue;
 
       const extra = safeParseExtra(extraStr);
@@ -48,17 +48,24 @@ export async function hydrateTraceStoreFromRedis(
       const ts = Number.parseInt(timestampStr ?? '0', 10);
       if (!ts) continue;
 
+      const durationMs = parseDurationMs(metadataStr);
+      const startTimeMs = durationMs > 0 ? ts - durationMs : ts;
+
+      const attributes: Record<string, unknown> = {};
+      if (catIdStr) attributes['agent.id'] = catIdStr;
+      if (extra.stream?.invocationId) attributes.invocationId = extra.stream.invocationId;
+
       dtos.push({
         traceId: extra.tracing.traceId,
         spanId: extra.tracing.spanId,
         parentSpanId: extra.tracing.parentSpanId,
         name: 'cat_cafe.invocation.restored',
         kind: 0,
-        startTimeMs: ts,
+        startTimeMs,
         endTimeMs: ts,
-        durationMs: 0,
+        durationMs: durationMs > 0 ? durationMs : ts - startTimeMs,
         status: { code: 0 },
-        attributes: {},
+        attributes,
         events: [],
         storedAt: ts,
       });
@@ -70,5 +77,15 @@ export async function hydrateTraceStoreFromRedis(
     }
   } catch (err) {
     log.warn({ err }, 'Trace store hydration failed (non-fatal)');
+  }
+}
+
+function parseDurationMs(metadataStr: string | null | undefined): number {
+  if (!metadataStr) return 0;
+  try {
+    const meta = JSON.parse(metadataStr);
+    return typeof meta?.usage?.durationMs === 'number' ? meta.usage.durationMs : 0;
+  } catch {
+    return 0;
   }
 }

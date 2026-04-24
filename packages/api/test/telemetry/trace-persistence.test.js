@@ -181,6 +181,30 @@ test('F153-F: invoke-single-cat writes extra.tracing to message (AC-F2)', () => 
   );
 });
 
+// ── AC-F2: tracing pointer in parallel routing ────────────────────
+
+test('F153-F: route-parallel writes extra.tracing to messages (AC-F2)', () => {
+  const src = readFileSync(
+    resolve(__dirname, '../../src/domains/cats/services/agents/routing/route-parallel.ts'),
+    'utf8',
+  );
+  const tracingMatches = src.match(/msg\.tracing/g) || [];
+  assert.ok(
+    tracingMatches.length >= 3,
+    `Parallel routing should write tracing in all 3 append branches (found ${tracingMatches.length})`,
+  );
+});
+
+// ── AC-F1: route span invocationId ────────────────────────────────
+
+test('F153-F: routeExecution sets invocationId on route span (AC-F1)', () => {
+  const src = readFileSync(resolve(__dirname, '../../src/domains/cats/services/agents/routing/AgentRouter.ts'), 'utf8');
+  assert.ok(
+    src.includes("'cat_cafe.route'") && src.includes('invocationId') && src.includes('parentInvocationId'),
+    'Route span should carry invocationId from parentInvocationId',
+  );
+});
+
 // ── AC-F4: cold start auto-hydrate (source-level) ─────────────────
 
 test('F153-F: hydrateTraceStoreFromRedis uses msg:timeline range query (AC-F4/F5)', () => {
@@ -194,6 +218,17 @@ test('F153-F: hydrateTraceStoreFromRedis uses msg:timeline range query (AC-F4/F5
     'Should parse extra field and extract tracing pointers',
   );
   assert.ok(src.includes('traceStore.hydrate'), 'Should call traceStore.hydrate with synthesized DTOs');
+});
+
+test('F153-F: hydrate reads catId/metadata for enriched stubs (AC-F3/KD-23)', () => {
+  const src = readFileSync(resolve(__dirname, '../../src/infrastructure/telemetry/hydrate-traces.ts'), 'utf8');
+  assert.ok(src.includes("'catId'") && src.includes("'metadata'"), 'Should read catId and metadata from hash');
+  assert.ok(src.includes('agent.id'), 'Should set agent.id attribute from catId');
+  assert.ok(src.includes('durationMs'), 'Should compute duration from metadata');
+  assert.ok(
+    src.includes('ts - durationMs') || src.includes('ts -'),
+    'Should derive startTime = timestamp - durationMs (KD-23)',
+  );
 });
 
 test('F153-F: index.ts wires hydrate on cold start (AC-F4)', () => {
