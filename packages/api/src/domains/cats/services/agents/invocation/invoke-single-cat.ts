@@ -32,16 +32,22 @@ import {
   GENAI_SYSTEM,
   OPERATION_NAME,
   STATUS,
+  TRIGGER,
 } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import {
   activeInvocations,
+  catInvocationCount,
+  catResponseDuration,
+  invocationCompleted,
   invocationDuration,
   llmCallDuration,
+  sessionRounds,
+  threadDuration,
   tokenUsage,
 } from '../../../../../infrastructure/telemetry/instruments.js';
 import { normalizeModel } from '../../../../../infrastructure/telemetry/model-normalizer.js';
 import { emitOtelLog } from '../../../../../infrastructure/telemetry/otel-logger.js';
-import { recordLlmCallSpan, recordToolUseEvent } from '../../../../../infrastructure/telemetry/span-helpers.js';
+import { recordLlmCallSpan, recordToolUseSpan } from '../../../../../infrastructure/telemetry/span-helpers.js';
 import { resolveActiveProjectRoot } from '../../../../../utils/active-project-root.js';
 import { resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { DEFAULT_CLI_TIMEOUT_MS, resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
@@ -258,6 +264,8 @@ export interface InvocationParams {
   readonly parentInvocationId?: string;
   /** F121: The A2A trigger message ID for auto-replyTo */
   readonly a2aTriggerMessageId?: string;
+  /** F153 Phase E: Parent route span — invocation span becomes its child */
+  readonly routeSpan?: import('@opentelemetry/api').Span;
 }
 
 /**
@@ -279,6 +287,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     params.parentInvocationId,
     params.a2aTriggerMessageId,
   );
+
+  // F153: Record cat invocation count with trigger type
+  const triggerType = params.a2aTriggerMessageId ? 'mention' : params.parentInvocationId ? 'routing' : 'default';
+  catInvocationCount.add(1, { [AGENT_ID]: catId, [TRIGGER]: triggerType });
 
   // F089: Invocation-level hard timeout — independent of NDJSON stream / CLI timeout.
   // Must be > CLI_TIMEOUT_MS to avoid racing the inner timeout.
@@ -328,6 +340,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   const auditLog = getEventAuditLog();
   const promptDigest = createPromptDigest(prompt);
   const startTime = Date.now();
+
+  let threadCreatedAt: number | undefined;
 
   // F118 AC-C5: Flags for finally block fallback audit (must be before any early return)
   let hadError = false;
@@ -444,9 +458,13 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   let sessionMutexRelease: (() => void) | undefined;
 
   // F152: Create invocation span for distributed tracing
-  const invocationSpan = tracer.startSpan('cat_cafe.invocation', {
-    attributes: { [AGENT_ID]: catId, [OPERATION_NAME]: 'invoke' },
-  });
+  // F153 Phase E: If a route span exists, make invocation its child
+  const parentCtx = params.routeSpan ? trace.setSpan(context.active(), params.routeSpan) : undefined;
+  const invocationSpan = tracer.startSpan(
+    'cat_cafe.invocation',
+    { attributes: { [AGENT_ID]: catId, [OPERATION_NAME]: 'invoke' } },
+    parentCtx,
+  );
 
   try {
     // F152: Track active invocations — must be inside try so add/sub symmetry
@@ -563,6 +581,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     if (threadStore) {
       try {
         const thread = await preflightRace(Promise.resolve(threadStore.get(threadId)), 'threadStore.get', signal);
+        if (thread?.createdAt) threadCreatedAt = thread.createdAt;
         if (thread?.projectPath && thread.projectPath !== 'default') {
           // F101: Game threads use virtual projectPaths (e.g. 'games/werewolf') for
           // categorization only — they are not real filesystem directories. Skip them
@@ -1211,10 +1230,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           try {
             const activeRec = await deps.sessionChainStore.getActive(catId, threadId);
             if (activeRec) {
+              const newCount = (activeRec.messageCount ?? 0) + 1;
               await deps.sessionChainStore.update(activeRec.id, {
-                messageCount: (activeRec.messageCount ?? 0) + 1,
+                messageCount: newCount,
                 updatedAt: Date.now(),
               });
+              sessionRounds.record(newCount, { [AGENT_ID]: catId });
             }
           } catch {
             /* best-effort: messageCount miss won't break invocation */
@@ -1456,9 +1477,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       } else {
         outputs.push(attachInvocationIdToTaskProgress(msg));
 
-        // F153 Phase B: Record tool_use as span event (not a span — no duration data available)
+        // F153 Phase E: Record tool_use as child span (zero-duration; shows in trace tree with tool name + category)
         if (msg.type === 'tool_use' && msg.toolName && invocationSpan) {
-          recordToolUseEvent(invocationSpan, catId, msg.toolName, msg.toolInput as Record<string, unknown>);
+          recordToolUseSpan(invocationSpan, catId, msg.toolName, msg.toolInput as Record<string, unknown>);
         }
 
         // F26: Detect task management tools and emit task_progress for frontend
@@ -1868,6 +1889,13 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const otelAttrs = { [AGENT_ID]: catId, [OPERATION_NAME]: 'invoke', [STATUS]: otelStatus };
     invocationDuration.record(finalDurationMs / 1000, otelAttrs);
     activeInvocations.add(-1, { [AGENT_ID]: catId, [OPERATION_NAME]: 'invoke' });
+
+    // F153: Product-level instruments
+    invocationCompleted.add(1, { [AGENT_ID]: catId, [STATUS]: otelStatus });
+    catResponseDuration.record(finalDurationMs / 1000, { [AGENT_ID]: catId, [STATUS]: otelStatus });
+    if (threadCreatedAt) {
+      threadDuration.record((Date.now() - threadCreatedAt) / 1000, { [AGENT_ID]: catId, [STATUS]: otelStatus });
+    }
 
     // F089: Mark agent pane status when invocation completes
     if (deps.agentPaneRegistry?.getByInvocation(invocationId)) {

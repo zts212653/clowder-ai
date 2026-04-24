@@ -19,3 +19,14 @@ export const AGENT_ID = 'agent.id';
 export const OPERATION_NAME = 'operation.name';
 export const STATUS = 'status';
 export const STREAM_ERROR_PATH = 'cat_cafe.stream_error.path';
+export const TRIGGER = 'trigger';
+
+// --- Tool use span attributes ---
+export const TOOL_NAME = 'tool.name';
+export const TOOL_INPUT_KEYS = 'tool.input_keys';
+export const TOOL_CATEGORY = 'tool.category';
+
+// --- Routing decision span attributes ---
+export const ROUTING_STRATEGY = 'cat_cafe.routing.strategy';
+export const ROUTING_TARGET_CATS = 'cat_cafe.routing.target_cats';
+export const ROUTING_INTENT = 'cat_cafe.routing.intent';

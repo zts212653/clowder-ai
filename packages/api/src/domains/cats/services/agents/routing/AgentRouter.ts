@@ -21,8 +21,14 @@
 import type { CatId, MessageContent } from '@cat-cafe/shared';
 import { catRegistry, escapeRegExp } from '@cat-cafe/shared';
 import type { SessionStore } from '@cat-cafe/shared/utils';
+import { SpanStatusCode, trace } from '@opentelemetry/api';
 import { getDefaultCatId, isCatAvailable } from '../../../../../config/cat-config-loader.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import {
+  ROUTING_INTENT,
+  ROUTING_STRATEGY,
+  ROUTING_TARGET_CATS,
+} from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import type { IntentResult } from '../../context/IntentParser.js';
 import { parseIntent, stripIntentTags } from '../../context/IntentParser.js';
 import { SessionManager } from '../../session/SessionManager.js';
@@ -46,6 +52,7 @@ import { routeParallel } from '../routing/route-parallel.js';
 import { routeSerial } from '../routing/route-serial.js';
 
 const log = createModuleLogger('agent-router');
+const routeTracer = trace.getTracer('cat-cafe-api', '0.1.0');
 
 /** Parsed mention with position for ordering */
 interface ParsedMention {
@@ -724,7 +731,16 @@ export class AgentRouter {
     const resolvedThreadId = threadId ?? DEFAULT_THREAD_ID;
     const targetCats = await this.resolveTargets(message, resolvedThreadId);
     const intent = parseIntent(message, targetCats.length);
+    const strategy = intent.intent === 'ideate' && targetCats.length > 1 ? 'parallel' : 'serial';
     const cleanMessage = stripIntentTags(message);
+
+    const routeSpan = routeTracer.startSpan('cat_cafe.route', {
+      attributes: {
+        [ROUTING_TARGET_CATS]: (targetCats as string[]).join(','),
+        [ROUTING_INTENT]: intent.intent,
+        [ROUTING_STRATEGY]: strategy,
+      },
+    });
 
     // Fetch thread for thinkingMode + update lastActive
     // Default to play mode when no threadStore is available: stream thinking stays isolated.
@@ -755,12 +771,21 @@ export class AgentRouter {
       promptTags: intent.promptTags,
       currentUserMessageId: storedUserMessage.id,
       thinkingMode: legacyThinkingMode,
+      routeSpan,
     };
 
-    if (intent.intent === 'ideate' && targetCats.length > 1) {
-      yield* routeParallel(strategyDeps, targetCats, cleanMessage, userId, resolvedThreadId, routeOptions);
-    } else {
-      yield* routeSerial(strategyDeps, targetCats, cleanMessage, userId, resolvedThreadId, routeOptions);
+    try {
+      if (strategy === 'parallel') {
+        yield* routeParallel(strategyDeps, targetCats, cleanMessage, userId, resolvedThreadId, routeOptions);
+      } else {
+        yield* routeSerial(strategyDeps, targetCats, cleanMessage, userId, resolvedThreadId, routeOptions);
+      }
+      routeSpan.setStatus({ code: SpanStatusCode.OK });
+    } catch (err) {
+      routeSpan.setStatus({ code: SpanStatusCode.ERROR, message: String(err) });
+      throw err;
+    } finally {
+      routeSpan.end();
     }
   }
 
@@ -794,6 +819,15 @@ export class AgentRouter {
     },
   ): AsyncIterable<AgentMessage> {
     const cleanMessage = stripIntentTags(message);
+    const strategy = intent.intent === 'ideate' && targetCats.length > 1 ? 'parallel' : 'serial';
+
+    const routeSpan = routeTracer.startSpan('cat_cafe.route', {
+      attributes: {
+        [ROUTING_TARGET_CATS]: (targetCats as string[]).join(','),
+        [ROUTING_INTENT]: intent.intent,
+        [ROUTING_STRATEGY]: strategy,
+      },
+    });
 
     // Fetch thread for thinkingMode + update lastActive
     // Default to play mode when no threadStore is available: stream thinking stays isolated.
@@ -819,12 +853,21 @@ export class AgentRouter {
       ...(options?.cursorBoundaries ? { cursorBoundaries: options.cursorBoundaries } : {}),
       ...(options?.persistenceContext ? { persistenceContext: options.persistenceContext } : {}),
       ...(options?.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
+      routeSpan,
     };
 
-    if (intent.intent === 'ideate' && targetCats.length > 1) {
-      yield* routeParallel(strategyDeps, targetCats, cleanMessage, userId, threadId, routeOptions);
-    } else {
-      yield* routeSerial(strategyDeps, targetCats, cleanMessage, userId, threadId, routeOptions);
+    try {
+      if (strategy === 'parallel') {
+        yield* routeParallel(strategyDeps, targetCats, cleanMessage, userId, threadId, routeOptions);
+      } else {
+        yield* routeSerial(strategyDeps, targetCats, cleanMessage, userId, threadId, routeOptions);
+      }
+      routeSpan.setStatus({ code: SpanStatusCode.OK });
+    } catch (err) {
+      routeSpan.setStatus({ code: SpanStatusCode.ERROR, message: String(err) });
+      throw err;
+    } finally {
+      routeSpan.end();
     }
   }
 
