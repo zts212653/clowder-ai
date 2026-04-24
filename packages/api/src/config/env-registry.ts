@@ -1395,6 +1395,27 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'telemetry',
     sensitive: false,
   },
+  {
+    name: 'TELEMETRY_ALERT_ERROR_RATE',
+    defaultValue: '0.3',
+    description: 'Burn-rate 告警：错误率阈值（0-1）',
+    category: 'telemetry',
+    sensitive: false,
+  },
+  {
+    name: 'TELEMETRY_ALERT_P95_LATENCY_S',
+    defaultValue: '120',
+    description: 'Burn-rate 告警：P95 延迟阈值（秒）',
+    category: 'telemetry',
+    sensitive: false,
+  },
+  {
+    name: 'TELEMETRY_ALERT_ACTIVE_INVOCATIONS',
+    defaultValue: '50',
+    description: 'Burn-rate 告警：活跃 invocation 数阈值',
+    category: 'telemetry',
+    sensitive: false,
+  },
   // --- antigravity (F061 Bridge) ---
   {
     name: 'ANTIGRAVITY_PORT',

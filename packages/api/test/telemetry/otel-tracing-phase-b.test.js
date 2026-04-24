@@ -157,20 +157,29 @@ test('F153 Phase B: llm_call retrospective span via span-helpers.ts', async (t) 
   });
 });
 
-test('F153 Phase B: tool_use event via span-helpers.ts', async (t) => {
+test('F153 Phase B: tool_use spans via span-helpers.ts', async (t) => {
   const invokeSrc = readFileSync(INVOKE_SRC, 'utf8');
   const helperSrc = readFileSync(SPAN_HELPERS_SRC, 'utf8');
 
-  await t.test('invoke-single-cat delegates to recordToolUseEvent', () => {
-    assert.ok(invokeSrc.includes('recordToolUseEvent'), 'Should call recordToolUseEvent helper');
+  await t.test('invoke-single-cat delegates to recordToolUseSpan', () => {
+    assert.ok(invokeSrc.includes('recordToolUseSpan'), 'Should call recordToolUseSpan helper');
   });
 
-  await t.test('records tool_use as span event, not a zero-duration span', () => {
-    assert.ok(helperSrc.includes("addEvent('tool_use'"), 'Helper should use addEvent for tool_use');
-    assert.ok(!helperSrc.includes("startSpan('cat_cafe.tool_use'"), 'Must NOT create a zero-duration tool_use span');
+  await t.test('creates cat_cafe.tool_use child span for MCP tools', () => {
+    assert.ok(
+      helperSrc.includes('cat_cafe.tool_use') || helperSrc.includes("'cat_cafe.tool_use"),
+      'Helper should create cat_cafe.tool_use span for MCP tools',
+    );
   });
 
-  await t.test('sets tool.name attribute on event', () => {
-    assert.ok(helperSrc.includes("'tool.name'"), 'Helper should set tool.name on event');
+  await t.test('sets tool.name attribute on span', () => {
+    assert.ok(
+      helperSrc.includes('TOOL_NAME') || helperSrc.includes("'tool.name'"),
+      'Helper should set tool.name on span',
+    );
+  });
+
+  await t.test('increments basic_call_count for non-MCP tools', () => {
+    assert.ok(helperSrc.includes("'tool.basic_call_count'"), 'Helper should increment counter for basic tools');
   });
 });

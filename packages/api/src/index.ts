@@ -196,6 +196,7 @@ const HOST = process.env.API_SERVER_HOST ?? '127.0.0.1';
 
 let socketManager: SocketManager | null = null;
 let redisClient: RedisClient | null = null;
+let burnRateMonitor: { start(): void; stop(): void } | null = null;
 
 /**
  * Get the SocketManager instance
@@ -215,7 +216,7 @@ async function main(): Promise<void> {
 
   // F152: Initialize OpenTelemetry SDK (must be early, before routes)
   const { initTelemetry } = await import('./infrastructure/telemetry/init.js');
-  const shutdownTelemetry = initTelemetry();
+  const telemetryHandle = initTelemetry();
 
   const app = Fastify({ logger: customLogger as unknown as import('fastify').FastifyBaseLogger });
 
@@ -257,9 +258,11 @@ async function main(): Promise<void> {
   // F152: Readiness check — verifies dependencies are reachable.
   // evidenceStoreRef is set after memoryServices init; handler runs at request time.
   let evidenceStoreRef: { health(): Promise<boolean> } | null = null;
-  app.get('/ready', async (_request, reply) => {
+  async function checkReadiness(): Promise<{
+    status: 'ready' | 'degraded';
+    checks: Record<string, { ok: boolean; ms: number; error?: string }>;
+  }> {
     const checks: Record<string, { ok: boolean; ms: number; error?: string }> = {};
-    // Redis probe
     if (redisClient) {
       const t0 = Date.now();
       try {
@@ -269,9 +272,8 @@ async function main(): Promise<void> {
         checks.redis = { ok: false, ms: Date.now() - t0, error: String(err) };
       }
     } else {
-      checks.redis = { ok: true, ms: 0 }; // memory mode, always ready
+      checks.redis = { ok: true, ms: 0 };
     }
-    // SQLite probe
     if (evidenceStoreRef) {
       const t0 = Date.now();
       try {
@@ -282,8 +284,12 @@ async function main(): Promise<void> {
       }
     }
     const allOk = Object.values(checks).every((c) => c.ok);
-    if (!allOk) reply.code(503);
-    return { status: allOk ? 'ready' : 'degraded', timestamp: Date.now(), checks };
+    return { status: allOk ? 'ready' : 'degraded', checks };
+  }
+  app.get('/ready', async (_request, reply) => {
+    const result = await checkReadiness();
+    if (result.status !== 'ready') reply.code(503);
+    return { ...result, timestamp: Date.now() };
   });
 
   // Create invocation tracker for cancellation support
@@ -292,6 +298,36 @@ async function main(): Promise<void> {
   // Initialize WebSocket manager BEFORE routes (injected via opts, no circular import).
   // IMPORTANT: Socket.io must attach to the SAME server Fastify listens on.
   socketManager = new SocketManager(app.server, invocationTracker);
+
+  // F153 Phase E L3: Burn-rate alerting — push system_notice via WebSocket
+  if (telemetryHandle.getMetricsText) {
+    const { BurnRateMonitor } = await import('./infrastructure/telemetry/burn-rate-monitor.js');
+    burnRateMonitor = new BurnRateMonitor({
+      getMetricsText: telemetryHandle.getMetricsText,
+      onAlert: (alerts) => {
+        const lines = alerts.map((a) => `${a.metric}: ${a.currentValue.toFixed(2)} (threshold: ${a.threshold})`);
+        socketManager?.broadcastToRoom('workspace:global', 'connector_message', {
+          message: {
+            type: 'connector',
+            content: `[Telemetry Alert] Thresholds exceeded:\n${lines.join('\n')}`,
+            source: { presentation: 'system_notice', noticeTone: 'warning' },
+            timestamp: Date.now(),
+          },
+        });
+      },
+      onClear: () => {
+        socketManager?.broadcastToRoom('workspace:global', 'connector_message', {
+          message: {
+            type: 'connector',
+            content: '[Telemetry] All metrics recovered to normal levels.',
+            source: { presentation: 'system_notice', noticeTone: 'info' },
+            timestamp: Date.now(),
+          },
+        });
+      },
+    });
+    burnRateMonitor.start();
+  }
 
   // F085 Phase 4: Platform-level activity tracker (hyperfocus brake)
   const activityTracker = new ActivityTracker();
@@ -1246,6 +1282,15 @@ async function main(): Promise<void> {
   if (toolUsageCounter) {
     await app.register(toolUsageRoutes, { toolUsageCounter });
   }
+  // F153 Phase E: Hub embedded observability routes
+  const { telemetryRoutes } = await import('./routes/telemetry.js');
+  await app.register(telemetryRoutes, {
+    traceStore: telemetryHandle.traceStore,
+    getMetricsText: telemetryHandle.getMetricsText ?? undefined,
+    metricsSnapshotStore: telemetryHandle.metricsSnapshotStore ?? undefined,
+    checkReadiness,
+  });
+
   // F075 Phase B+C: Game + Achievement stores
   const { GameStore } = await import('./domains/leaderboard/game-store.js');
   const { AchievementStore } = await import('./domains/leaderboard/achievement-store.js');
@@ -2325,9 +2370,12 @@ async function main(): Promise<void> {
         app.log.error(`[api] SocketManager close failed: ${String(err)}`);
       }
 
+      // F153 Phase E L3: Stop burn-rate monitor
+      burnRateMonitor?.stop();
+
       // F152: Flush and shutdown OTel SDK before closing server
       try {
-        await shutdownTelemetry();
+        await telemetryHandle.shutdown();
       } catch (err) {
         app.log.error(`[api] OTel shutdown failed: ${String(err)}`);
       }

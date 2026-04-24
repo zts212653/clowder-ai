@@ -98,6 +98,8 @@ export interface RouteOptions {
   /** F108: Unique invocation ID for WorklistRegistry isolation in concurrent execution.
    *  When provided, worklist is keyed by this ID instead of threadId. */
   parentInvocationId?: string | undefined;
+  /** F153 Phase E: Root route span — invocation spans become children of this. */
+  routeSpan?: import('@opentelemetry/api').Span | undefined;
 }
 
 export interface IncrementalContextResult {

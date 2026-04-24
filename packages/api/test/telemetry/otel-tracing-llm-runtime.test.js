@@ -1,9 +1,9 @@
 /**
- * F153 Phase B: Runtime tracing tests for llm_call spans, tool_use events,
+ * F153 Phase B: Runtime tracing tests for llm_call spans, tool_use spans,
  * and RedactingSpanProcessor end-to-end.
  *
  * Tests call the actual instrumentation helpers (recordLlmCallSpan,
- * recordToolUseEvent) and RedactingSpanProcessor — not raw OTel API.
+ * recordToolUseSpan) and RedactingSpanProcessor — not raw OTel API.
  *
  * Complements otel-tracing-runtime.test.js (cli_session spans).
  * Requires dist/ build — run `pnpm build` in packages/api first.
@@ -20,7 +20,7 @@ const { InMemorySpanExporter, SimpleSpanProcessor } = await import('@opentelemet
 const { NodeTracerProvider } = await import('@opentelemetry/sdk-trace-node');
 
 // Module under test — actual instrumentation helpers used by invoke-single-cat.ts
-const { recordLlmCallSpan, recordToolUseEvent } = await import('../../dist/infrastructure/telemetry/span-helpers.js');
+const { recordLlmCallSpan, recordToolUseSpan } = await import('../../dist/infrastructure/telemetry/span-helpers.js');
 const { RedactingSpanProcessor } = await import('../../dist/infrastructure/telemetry/redactor.js');
 
 // --- Primary provider: unredacted spans ---
@@ -128,14 +128,14 @@ test('F153 runtime: recordLlmCallSpan sets retrospective startTime', async () =>
   assert.ok(Math.abs(startMs - expectedMs) < 100, 'Retrospective startTime should be ~2s before now');
 });
 
-// ── recordToolUseEvent tests ────────────────────────────────────────
+// ── recordToolUseSpan tests (tiered: MCP → child span, basic → counter) ──
 
-test('F153 runtime: recordToolUseEvent adds event with correct attrs', async () => {
+test('F153 runtime: recordToolUseSpan creates child span for MCP tools', async () => {
   exporter.reset();
   const tracer = trace.getTracer('cat-cafe-api-test');
   const invocationSpan = tracer.startSpan('cat_cafe.invocation');
 
-  recordToolUseEvent(invocationSpan, 'opus', 'cat_cafe_post_message', {
+  recordToolUseSpan(invocationSpan, 'opus', 'cat_cafe_post_message', {
     threadId: 'thread_abc',
     content: 'hello',
   });
@@ -143,52 +143,45 @@ test('F153 runtime: recordToolUseEvent adds event with correct attrs', async () 
   invocationSpan.end();
 
   const spans = exporter.getFinishedSpans();
-  const inv = spans.find((s) => s.name === 'cat_cafe.invocation');
-  assert.ok(inv);
-  assert.equal(inv.events.length, 1);
-
-  const evt = inv.events[0];
-  assert.equal(evt.name, 'tool_use');
-  assert.equal(evt.attributes['agent.id'], 'opus');
-  assert.equal(evt.attributes['tool.name'], 'cat_cafe_post_message');
-  assert.equal(evt.attributes['tool.input_keys'], 'threadId,content');
+  const toolSpan = spans.find((s) => s.name.startsWith('cat_cafe.tool_use'));
+  assert.ok(toolSpan, 'Should create cat_cafe.tool_use child span for MCP tool');
+  assert.equal(toolSpan.attributes['tool.name'], 'cat_cafe_post_message');
+  assert.equal(toolSpan.attributes['tool.input_keys'], 'threadId,content');
+  assert.equal(toolSpan.attributes['agent.id'], 'opus');
 });
 
-test('F153 runtime: recordToolUseEvent omits input_keys when no input', async () => {
+test('F153 runtime: recordToolUseSpan increments counter for basic tools', async () => {
   exporter.reset();
   const tracer = trace.getTracer('cat-cafe-api-test');
   const invocationSpan = tracer.startSpan('cat_cafe.invocation');
 
-  recordToolUseEvent(invocationSpan, 'opus', 'Bash');
+  recordToolUseSpan(invocationSpan, 'opus', 'Bash');
+  recordToolUseSpan(invocationSpan, 'opus', 'Read');
+  recordToolUseSpan(invocationSpan, 'opus', 'Edit');
 
   invocationSpan.end();
 
   const spans = exporter.getFinishedSpans();
   const inv = spans.find((s) => s.name === 'cat_cafe.invocation');
   assert.ok(inv);
-  const evt = inv.events[0];
-  assert.equal(evt.attributes['tool.name'], 'Bash');
-  assert.equal(evt.attributes['tool.input_keys'], undefined, 'Should omit input_keys without toolInput');
+  assert.equal(inv.attributes['tool.basic_call_count'], 3, 'Should count 3 basic tool calls');
+  const toolSpans = spans.filter((s) => s.name === 'cat_cafe.tool_use');
+  assert.equal(toolSpans.length, 0, 'Should NOT create spans for basic tools');
 });
 
-test('F153 runtime: multiple recordToolUseEvent calls accumulate', async () => {
+test('F153 runtime: recordToolUseSpan classifies memory tools', async () => {
   exporter.reset();
   const tracer = trace.getTracer('cat-cafe-api-test');
   const invocationSpan = tracer.startSpan('cat_cafe.invocation');
 
-  recordToolUseEvent(invocationSpan, 'opus', 'Read');
-  recordToolUseEvent(invocationSpan, 'opus', 'Edit');
-  recordToolUseEvent(invocationSpan, 'opus', 'Bash');
+  recordToolUseSpan(invocationSpan, 'opus', 'cat_cafe_search_evidence', { query: 'test' });
+
   invocationSpan.end();
 
   const spans = exporter.getFinishedSpans();
-  const inv = spans.find((s) => s.name === 'cat_cafe.invocation');
-  assert.ok(inv);
-  assert.equal(inv.events.length, 3);
-  assert.deepEqual(
-    inv.events.map((e) => e.attributes['tool.name']),
-    ['Read', 'Edit', 'Bash'],
-  );
+  const toolSpan = spans.find((s) => s.name.startsWith('cat_cafe.tool_use'));
+  assert.ok(toolSpan, 'Memory tool should get a child span');
+  assert.equal(toolSpan.attributes['tool.category'], 'memory', 'Should be classified as memory tool');
 });
 
 // ── RedactingSpanProcessor end-to-end ────────────────────────────────
