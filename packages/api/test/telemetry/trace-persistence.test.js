@@ -223,11 +223,17 @@ test('F153-F: done messages include parentSpanId from routeSpan (AC-F2)', () => 
 
 // ── KD-22: route tracing backfill to user message ─────────────────
 
-test('F153-F: routeExecution backfills route tracing to user message (KD-22)', () => {
+test('F153-F: routeExecution backfills route tracing to user message in finally (KD-22)', () => {
   const src = readFileSync(resolve(__dirname, '../../src/domains/cats/services/agents/routing/AgentRouter.ts'), 'utf8');
   assert.ok(
     src.includes('updateExtra') && src.includes('userMessageId') && src.includes('routeSpan.spanContext'),
-    'Should call updateExtra with route span tracing on user message after strategy completes',
+    'Should call updateExtra with route span tracing on user message',
+  );
+  const finallyIdx = src.indexOf('} finally {');
+  const updateExtraIdx = src.indexOf('updateExtra(userMessageId');
+  assert.ok(
+    finallyIdx > 0 && updateExtraIdx > finallyIdx,
+    'updateExtra must be inside finally block so error paths also persist the route root',
   );
 });
 
