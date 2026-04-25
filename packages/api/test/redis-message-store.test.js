@@ -375,7 +375,10 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     // After agent reply cursor: queuedMsg should appear only because score was updated to deliveredAt
     const after = await store.getByThreadAfter(threadId, agentReply.id);
     const ids = after.map((m) => m.id);
-    assert.ok(ids.includes(queuedMsg.id), 'queued msg (deliveredAt=base+500 > cursor=base) should appear after agent reply');
+    assert.ok(
+      ids.includes(queuedMsg.id),
+      'queued msg (deliveredAt=base+500 > cursor=base) should appear after agent reply',
+    );
   });
 
   it('F148: origin=briefing survives append → getById round-trip', async () => {
