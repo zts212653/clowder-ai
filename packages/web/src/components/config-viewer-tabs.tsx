@@ -146,7 +146,10 @@ export function CatOverviewTab({
           body: JSON.stringify({ catId }),
         });
         if (res.ok) {
+          const data = (await res.json()) as { warning?: string };
           setDefaultCatId(catId);
+          // #543 P2: Surface persist failure so user knows override won't survive restart
+          if (data.warning) setDefaultCatSaveError(data.warning);
         } else {
           setDefaultCatSaveError('保存失败，请重试');
         }
@@ -164,7 +167,7 @@ export function CatOverviewTab({
       <HubOverviewToolbar onAddMember={onAddMember} />
       {/* F154 Phase B: Global default cat selector (AC-B2: always visible, even on error) */}
       <DefaultCatSelector
-        cats={cats}
+        cats={cats.filter((c) => c.roster?.available !== false)}
         currentDefaultCatId={defaultCatId ?? ''}
         onSelect={handleDefaultCatSelect}
         isLoading={defaultCatLoading}

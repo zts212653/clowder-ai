@@ -438,6 +438,11 @@ export async function* routeParallel(
     return stripper;
   }
 
+  // #557: Capture invocation start time for message timestamps.
+  // Using start time (not stream-completion time) keeps agent replies
+  // chronologically before queued user messages that arrive after delivery.
+  const invocationStartedAt = Date.now();
+
   for await (const msg of mergeStreams(streams, (idx, err) => {
     log.error({ streamIndex: idx, err }, 'Parallel stream error');
   })) {
@@ -768,7 +773,7 @@ export async function* routeParallel(
             content: storedContent,
             mentions: [],
             origin: 'stream',
-            timestamp: Date.now(),
+            timestamp: invocationStartedAt, // #557: start time, not completion time
             threadId,
             ...(thinking ? { thinking } : {}),
             ...(meta ? { metadata: meta } : {}),
@@ -853,7 +858,7 @@ export async function* routeParallel(
               content: '',
               mentions: [],
               origin: 'stream',
-              timestamp: Date.now(),
+              timestamp: invocationStartedAt, // #557: start time, not completion time
               threadId,
               ...(thinking ? { thinking } : {}),
               ...(meta ? { metadata: meta } : {}),
@@ -928,7 +933,7 @@ export async function* routeParallel(
               content: '',
               mentions: [],
               origin: 'stream',
-              timestamp: Date.now(),
+              timestamp: invocationStartedAt, // #557: start time, not completion time
               threadId,
               ...(thinking ? { thinking } : {}),
               ...(meta ? { metadata: meta } : {}),

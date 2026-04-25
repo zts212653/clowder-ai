@@ -1,5 +1,5 @@
 /**
- * F154 Phase B — DefaultCatSelector: card grid for choosing the global default cat.
+ * F154 Phase B / #543 — DefaultCatSelector: dropdown for choosing the global default cat.
  * AC-B2: Member overview has global default cat selector.
  */
 import React, { act } from 'react';
@@ -75,7 +75,7 @@ vi.mock('@/hooks/useCatData', () => ({
 // Lazy import after mocks
 const { DefaultCatSelector } = await import('@/components/DefaultCatSelector');
 
-describe('DefaultCatSelector (F154 Phase B, AC-B2)', () => {
+describe('DefaultCatSelector (#543: dropdown)', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -100,7 +100,7 @@ describe('DefaultCatSelector (F154 Phase B, AC-B2)', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('renders cat cards for all available cats', () => {
+  it('renders a <select> with options for all cats', () => {
     act(() => {
       root.render(
         React.createElement(DefaultCatSelector, {
@@ -110,13 +110,13 @@ describe('DefaultCatSelector (F154 Phase B, AC-B2)', () => {
         }),
       );
     });
-    // Each cat should have a card
-    expect(container.textContent).toContain('opus');
-    expect(container.textContent).toContain('codex');
-    expect(container.textContent).toContain('gemini');
+    const select = container.querySelector<HTMLSelectElement>('[data-testid="default-cat-select"]');
+    expect(select).not.toBeNull();
+    expect(select!.options.length).toBe(3);
+    expect(select!.value).toBe('opus');
   });
 
-  it('highlights the current default cat with "默认" badge', () => {
+  it('shows current cat color dot', () => {
     act(() => {
       root.render(
         React.createElement(DefaultCatSelector, {
@@ -126,10 +126,9 @@ describe('DefaultCatSelector (F154 Phase B, AC-B2)', () => {
         }),
       );
     });
-    expect(container.textContent).toContain('默认');
-    // Only one badge
-    const badges = container.querySelectorAll('[data-testid="default-badge"]');
-    expect(badges.length).toBe(1);
+    const dot = container.querySelector<HTMLElement>('[data-testid="current-color-dot"]');
+    expect(dot).not.toBeNull();
+    expect(dot!.style.backgroundColor).toBe('rgb(255, 171, 145)'); // #FFAB91
   });
 
   it('shows scope description', () => {
@@ -145,7 +144,7 @@ describe('DefaultCatSelector (F154 Phase B, AC-B2)', () => {
     expect(container.textContent).toContain('新 thread');
   });
 
-  it('calls onSelect when clicking a non-default cat card', () => {
+  it('calls onSelect when changing dropdown value', () => {
     const onSelect = vi.fn();
     act(() => {
       root.render(
@@ -156,28 +155,15 @@ describe('DefaultCatSelector (F154 Phase B, AC-B2)', () => {
         }),
       );
     });
-    // Click the codex card
-    const cards = container.querySelectorAll('[data-testid="default-cat-card"]');
-    const codexCard = [...cards].find((c) => c.textContent?.includes('codex'));
-    expect(codexCard).not.toBeNull();
+    const select = container.querySelector<HTMLSelectElement>('[data-testid="default-cat-select"]');
+    expect(select).not.toBeNull();
     act(() => {
-      codexCard!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      // Simulate selecting codex
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+      nativeInputValueSetter.call(select!, 'codex');
+      select!.dispatchEvent(new Event('change', { bubbles: true }));
     });
     expect(onSelect).toHaveBeenCalledWith('codex');
-  });
-
-  it('shows persona color for each cat card', () => {
-    act(() => {
-      root.render(
-        React.createElement(DefaultCatSelector, {
-          cats: TEST_CATS,
-          currentDefaultCatId: 'opus',
-          onSelect: vi.fn(),
-        }),
-      );
-    });
-    const dots = container.querySelectorAll('[data-testid="card-color-dot"]');
-    expect(dots.length).toBe(3);
   });
 
   it('shows error hint and retry button when fetchError is true (P1-2)', () => {
@@ -193,9 +179,9 @@ describe('DefaultCatSelector (F154 Phase B, AC-B2)', () => {
         }),
       );
     });
-    // Should still render the card grid (AC-B2: selector must be visible)
-    const cards = container.querySelectorAll('[data-testid="default-cat-card"]');
-    expect(cards.length).toBe(3);
+    // Should still render the select
+    const select = container.querySelector('[data-testid="default-cat-select"]');
+    expect(select).not.toBeNull();
     // Should show error hint
     expect(container.textContent).toContain('加载失败');
     // Should have retry button
@@ -219,5 +205,20 @@ describe('DefaultCatSelector (F154 Phase B, AC-B2)', () => {
       );
     });
     expect(container.textContent).toContain('保存失败');
+  });
+
+  it('disables select when loading', () => {
+    act(() => {
+      root.render(
+        React.createElement(DefaultCatSelector, {
+          cats: TEST_CATS,
+          currentDefaultCatId: 'opus',
+          onSelect: vi.fn(),
+          isLoading: true,
+        }),
+      );
+    });
+    const select = container.querySelector<HTMLSelectElement>('[data-testid="default-cat-select"]');
+    expect(select!.disabled).toBe(true);
   });
 });

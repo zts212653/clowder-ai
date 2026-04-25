@@ -162,6 +162,7 @@ function GuideOverlayInner() {
       cancelAnimationFrame(rafId);
       observer.disconnect();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally watching specific sub-properties to avoid re-measuring on unrelated step changes
   }, [
     currentStep?.id,
     currentStep?.advance,
@@ -547,6 +548,7 @@ function useAutoAdvance(step: OrchestrationStep | null, advance: () => void) {
         bindingKeyRef.current = null;
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally watching specific sub-properties to avoid re-binding on unrelated step changes
   }, [step?.id, step?.target, step?.advance]);
 }
 
@@ -657,6 +659,7 @@ function TipsMediaBlock({ metadata }: { metadata: import('@/stores/guideStore').
   if (metadata.type === 'png' && metadata.src) {
     return (
       <div className="flex-shrink-0">
+        {/* eslint-disable-next-line @next/next/no-img-element -- dynamic src from guide metadata */}
         <img
           src={metadata.src}
           alt={metadata.alt ?? ''}

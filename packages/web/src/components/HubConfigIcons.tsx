@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import type { ReactNode } from 'react';
 
 // ── Per-platform visual config (matches .pen wireframe Screen C) ──
@@ -19,58 +20,37 @@ export const PLATFORM_VISUALS: Record<string, PlatformVisual> = {
   feishu: {
     iconBg: '#DBEAFE',
     iconColor: '#2563EB',
-    icon: (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src="/images/connectors/feishu.png" alt="Feishu" className="w-[18px] h-[18px]" />
-    ),
+    icon: <Image src="/images/connectors/feishu.png" alt="Feishu" width={18} height={18} />,
   },
   telegram: {
     iconBg: '#E0F2FE',
     iconColor: '#0284C7',
-    icon: (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src="/images/connectors/telegram.png" alt="Telegram" className="w-[18px] h-[18px]" />
-    ),
+    icon: <Image src="/images/connectors/telegram.png" alt="Telegram" width={18} height={18} />,
   },
   weixin: {
     iconBg: '#D1FAE5',
     iconColor: '#07C160',
-    icon: (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src="/images/connectors/weixin.png" alt="WeChat" className="w-[18px] h-[18px]" />
-    ),
+    icon: <Image src="/images/connectors/weixin.png" alt="WeChat" width={18} height={18} />,
   },
   dingtalk: {
     iconBg: '#CFFAFE',
     iconColor: '#3296FA',
-    icon: (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src="/images/connectors/dingtalk.png" alt="DingTalk" className="w-[18px] h-[18px]" />
-    ),
+    icon: <Image src="/images/connectors/dingtalk.png" alt="DingTalk" width={18} height={18} />,
   },
   'wecom-bot': {
     iconBg: '#E0E7FF',
     iconColor: '#4F46E5',
-    icon: (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src="/images/connectors/wecom-bot.png" alt="WeCom" className="w-[18px] h-[18px]" />
-    ),
+    icon: <Image src="/images/connectors/wecom-bot.png" alt="WeCom" width={18} height={18} />,
   },
   'wecom-agent': {
     iconBg: '#EDE9FE',
     iconColor: '#7C3AED',
-    icon: (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src="/images/connectors/wecom-agent.png" alt="WeCom Agent" className="w-[18px] h-[18px]" />
-    ),
+    icon: <Image src="/images/connectors/wecom-agent.png" alt="WeCom Agent" width={18} height={18} />,
   },
   xiaoyi: {
     iconBg: '#FEE2E2',
     iconColor: '#E11D48',
-    icon: (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src="/images/connectors/xiaoyi.png" alt="XiaoYi" className="w-[18px] h-[18px]" />
-    ),
+    icon: <Image src="/images/connectors/xiaoyi.png" alt="XiaoYi" width={18} height={18} />,
   },
 };
 

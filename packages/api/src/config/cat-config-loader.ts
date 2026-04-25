@@ -4,7 +4,7 @@
  * Node-only — 前端通过 /api/cats 获取猫数据。
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type {
@@ -628,6 +628,63 @@ export function getMissionHubSelfClaimScope(catId: string, config?: CatCafeConfi
 let _defaultCatId: CatId | null = null;
 /** F154 AC-A4: Runtime override for default cat (set via Hub API, owner-gated). */
 let _runtimeDefaultCatId: CatId | null = null;
+/** #543: Whether we've attempted to load the persisted override from disk. */
+let _defaultCatOverrideLoaded = false;
+/** True when the current override was set via API (already validated); false when loaded from disk. */
+let _overrideValidatedByApi = false;
+
+const DEFAULT_CAT_OVERRIDE_FILE = '.cat-cafe/default-cat-override.json';
+
+function defaultCatOverridePath(): string {
+  const templatePath = process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH;
+  return resolve(dirname(templatePath), DEFAULT_CAT_OVERRIDE_FILE);
+}
+
+/** #543: Load persisted override from disk (once per process). */
+function loadDefaultCatOverride(): void {
+  if (_defaultCatOverrideLoaded) return;
+  _defaultCatOverrideLoaded = true;
+  try {
+    const filePath = defaultCatOverridePath();
+    if (!existsSync(filePath)) return;
+    const data = JSON.parse(readFileSync(filePath, 'utf-8')) as { catId?: string };
+    if (typeof data.catId === 'string' && data.catId) {
+      _runtimeDefaultCatId = createCatId(data.catId);
+    }
+  } catch {
+    // Corrupt or missing file — proceed without override
+  }
+}
+
+/** #543: Persist override to disk so it survives restarts. Returns false on write failure. */
+function persistDefaultCatOverride(catId: CatId | null): boolean {
+  try {
+    const filePath = defaultCatOverridePath();
+    if (catId === null) {
+      if (existsSync(filePath)) unlinkSync(filePath);
+      return true;
+    }
+    mkdirSync(dirname(filePath), { recursive: true });
+    writeFileSync(filePath, `${JSON.stringify({ catId })}\n`, 'utf-8');
+    return true;
+  } catch (err) {
+    log.warn({ err }, 'failed to persist default cat override');
+    return false;
+  }
+}
+
+/** #543 P1: Check that a catId exists in the loaded config AND is roster-available.
+ *  When config is unavailable (degraded startup), only trusts API-validated overrides;
+ *  disk-loaded overrides are rejected since they may be stale. */
+function isCatKnownAndAvailable(catId: string): boolean {
+  const cfg = getCachedConfig();
+  if (!cfg) return _overrideValidatedByApi;
+  if (!_catIdToBreed || _catIdToBreedSource !== cfg) {
+    _catIdToBreed = buildCatIdToBreedIndex(cfg);
+    _catIdToBreedSource = cfg;
+  }
+  return _catIdToBreed.has(catId) && isCatAvailable(catId);
+}
 
 /**
  * Get the default cat ID.
@@ -635,7 +692,11 @@ let _runtimeDefaultCatId: CatId | null = null;
  * Used as ultimate fallback in AgentRouter when no mentions/participants/preferredCats.
  */
 export function getDefaultCatId(): CatId {
-  if (_runtimeDefaultCatId) return _runtimeDefaultCatId;
+  loadDefaultCatOverride();
+  // #543 P1: Skip persisted override if the catId is stale (not in config) or unavailable
+  if (_runtimeDefaultCatId && isCatKnownAndAvailable(_runtimeDefaultCatId)) {
+    return _runtimeDefaultCatId;
+  }
   if (_defaultCatId) return _defaultCatId;
 
   const config = getCachedConfig();
@@ -651,19 +712,28 @@ export function getDefaultCatId(): CatId {
   return createCatId('opus');
 }
 
-/** F154 AC-A4: Set runtime default cat override. Owner-gated at the API layer. */
-export function setRuntimeDefaultCatId(catId: string): void {
+/** F154 AC-A4: Set runtime default cat override. Owner-gated at the API layer.
+ *  Returns { persisted: false } when the disk write failed (#543 P2). */
+export function setRuntimeDefaultCatId(catId: string): { persisted: boolean } {
   _runtimeDefaultCatId = createCatId(catId);
+  _defaultCatOverrideLoaded = true;
+  _overrideValidatedByApi = true; // API path already checked catRegistry + availability
+  return { persisted: persistDefaultCatOverride(_runtimeDefaultCatId) };
 }
 
-/** F154 AC-A4: Clear runtime override — falls back to breeds[0]. */
-export function clearRuntimeDefaultCatId(): void {
+/** F154 AC-A4: Clear runtime override — falls back to breeds[0].
+ *  Returns { persisted: boolean } so callers know if the override file was removed. */
+export function clearRuntimeDefaultCatId(): { persisted: boolean } {
   _runtimeDefaultCatId = null;
+  _defaultCatOverrideLoaded = true;
+  _overrideValidatedByApi = false;
+  return { persisted: persistDefaultCatOverride(null) };
 }
 
-/** F154 AC-A4: Check whether a runtime override is active. */
+/** F154 AC-A4: Check whether a runtime override is active, known in config, and available. */
 export function hasRuntimeDefaultCatOverride(): boolean {
-  return _runtimeDefaultCatId !== null;
+  loadDefaultCatOverride();
+  return _runtimeDefaultCatId !== null && isCatKnownAndAvailable(_runtimeDefaultCatId);
 }
 
 /** Unified owner userId: configured env or single-user fallback. */
@@ -805,7 +875,7 @@ export function getAcpConfig(catId: string): AcpVariantConfig | undefined {
 }
 
 /** Reset cached config (for testing) */
-export function _resetCachedConfig(): void {
+export function _resetCachedConfig(opts?: { includeOverride?: boolean }): void {
   _cachedConfig = null;
   _configLoadFailed = false;
   _catIdToBreed = null;
@@ -813,6 +883,13 @@ export function _resetCachedConfig(): void {
   _catIdToVariant = null;
   _catIdToVariantSource = null;
   _defaultCatId = null;
+  // Override state is independent of config cache — preserve across catalog refreshes.
+  // Tests that need fresh override state pass { includeOverride: true }.
+  if (opts?.includeOverride) {
+    _runtimeDefaultCatId = null;
+    _defaultCatOverrideLoaded = false;
+    _overrideValidatedByApi = false;
+  }
   _cachedRoster = null;
   _cachedReviewPolicy = null;
   _cachedCoCreator = null;

@@ -303,81 +303,82 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(msgs[1].mentionsUser, undefined, 'second message should not have mentionsUser');
   });
 
-  it('getByThreadAfter() returns delivered messages whose score shifted forward (Bug A cursor regression)', async () => {
+  it('markDelivered updates sorted set score to deliveredAt (#557)', async () => {
     const base = Date.now();
-    const threadId = 'thread-cursor-deliver';
+    const threadId = 'thread-score-deliver-557';
 
-    // Simulate: msg1 sent at base, msg2 sent at base+1, msg3 (queued) sent at base+2
-    const msg1 = await store.append({
+    // msgA sent first (base), msgB sent second (base+100) — both queued
+    const msgA = await store.append({
       userId: 'u',
       catId: null,
-      content: 'msg1',
+      content: 'msgA-sent-first',
       mentions: [],
       timestamp: base,
       threadId,
+      deliveryStatus: 'queued',
     });
-    const msg2 = await store.append({
+    const msgB = await store.append({
       userId: 'u',
       catId: null,
-      content: 'msg2',
+      content: 'msgB-sent-second',
       mentions: [],
-      timestamp: base + 1,
+      timestamp: base + 100,
       threadId,
-    });
-    const msg3 = await store.append({
-      userId: 'u',
-      catId: null,
-      content: 'msg3-queued',
-      mentions: [],
-      timestamp: base + 2,
-      threadId,
+      deliveryStatus: 'queued',
     });
 
-    // msg3 was queued and delivered later — its score shifts forward
-    await store.markDelivered(msg3.id, base + 500);
+    // Deliver in REVERSE order: msgB delivered early (base+50), msgA delivered late (base+200)
+    // This makes deliveredAt order diverge from send-time order.
+    await store.markDelivered(msgB.id, base + 50);
+    await store.markDelivered(msgA.id, base + 200);
 
-    // Cursor is msg1 — should see msg2 AND msg3 (even though msg3's score shifted)
-    const afterMsg1 = await store.getByThreadAfter(threadId, msg1.id);
-    const ids = afterMsg1.map((m) => m.id);
-    assert.ok(ids.includes(msg2.id), 'msg2 should appear after cursor msg1');
-    assert.ok(ids.includes(msg3.id), 'msg3 (delivered later) should appear after cursor msg1');
-
-    // Cursor is msg2 — should see msg3 (higher score after delivery)
-    const afterMsg2 = await store.getByThreadAfter(threadId, msg2.id);
-    const ids2 = afterMsg2.map((m) => m.id);
-    assert.ok(ids2.includes(msg3.id), 'msg3 should appear after cursor msg2 despite score shift');
+    // With deliveredAt scoring: msgB(50) < msgA(200) — B sorts before A
+    // With send-time scoring: msgA(0) < msgB(100) — A sorts before B
+    // NOTE: queued messages are filtered from getByThread (isDelivered check),
+    // but after markDelivered they become 'delivered' and are visible.
+    const all = await store.getByThread(threadId, 10);
+    const order = all.map((m) => m.id);
+    const idxA = order.indexOf(msgA.id);
+    const idxB = order.indexOf(msgB.id);
+    assert.ok(idxA >= 0, 'msgA should be in results after delivery');
+    assert.ok(idxB >= 0, 'msgB should be in results after delivery');
+    assert.ok(idxB < idxA, 'msgB (deliveredAt=base+50) should sort before msgA (deliveredAt=base+200)');
   });
 
-  it('getByThreadAfter() does not skip same-score messages after deliveredAt shift', async () => {
+  it('getByThreadAfter() uses deliveredAt score for cursor position (#557)', async () => {
     const base = Date.now();
-    const threadId = 'thread-cursor-same-score';
+    const threadId = 'thread-cursor-deliver-557';
 
-    // msg1 sent at base, msg2 sent at base+1
-    const msg1 = await store.append({
+    // agentReply at base (simulates invocation start time) — already delivered (no deliveryStatus)
+    const agentReply = await store.append({
       userId: 'u',
-      catId: null,
-      content: 'early',
+      catId: 'opus',
+      content: 'agent-reply',
       mentions: [],
       timestamp: base,
       threadId,
     });
-    const msg2 = await store.append({
+    // queuedMsg sent BEFORE agent reply (base-10), queued — delivered AFTER (base+500).
+    // Without zadd re-scoring, original timestamp (base-10) < cursor (base), so it would NOT
+    // appear; only deliveredAt re-scoring (base+500 > base) makes it visible after cursor.
+    const queuedMsg = await store.append({
       userId: 'u',
       catId: null,
-      content: 'late-queued',
+      content: 'queued-user-msg',
       mentions: [],
-      timestamp: base + 1,
+      timestamp: base - 10,
       threadId,
+      deliveryStatus: 'queued',
     });
+    await store.markDelivered(queuedMsg.id, base + 500);
 
-    // Both delivered at the same deliveredAt time
-    await store.markDelivered(msg1.id, base + 100);
-    await store.markDelivered(msg2.id, base + 100);
-
-    // Cursor is msg1 — msg2 has the same score but different ID, should still appear
-    const afterMsg1 = await store.getByThreadAfter(threadId, msg1.id);
-    const ids = afterMsg1.map((m) => m.id);
-    assert.ok(ids.includes(msg2.id), 'msg2 with same deliveredAt score should appear via ID tiebreaker');
+    // After agent reply cursor: queuedMsg should appear only because score was updated to deliveredAt
+    const after = await store.getByThreadAfter(threadId, agentReply.id);
+    const ids = after.map((m) => m.id);
+    assert.ok(
+      ids.includes(queuedMsg.id),
+      'queued msg (deliveredAt=base+500 > cursor=base) should appear after agent reply',
+    );
   });
 
   it('F148: origin=briefing survives append → getById round-trip', async () => {
