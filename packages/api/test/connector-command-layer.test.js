@@ -1,3 +1,4 @@
+import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { before, describe, it } from 'node:test';
 
@@ -1261,18 +1262,20 @@ describe('F154: /focus command (AC-A1, AC-A3, AC-A6, AC-A7)', () => {
 
   before(async () => {
     // Set up catRegistry with test cats
-    const { catRegistry, CAT_CONFIGS, createCatId } = await import('@cat-cafe/shared');
+    const { catRegistry, createCatId } = await import('@cat-cafe/shared');
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+    const allConfigs = toAllCatConfigs(loadCatConfig());
     catRegistry.reset();
-    catRegistry.register('opus', { ...CAT_CONFIGS.opus });
+    catRegistry.register('opus', { ...allConfigs.opus });
     catRegistry.register('opus-45', {
-      ...CAT_CONFIGS.opus,
+      ...allConfigs.opus,
       id: createCatId('opus-45'),
       name: '布偶猫 Opus 4.5',
       displayName: '布偶猫 Opus 4.5',
       nickname: undefined,
       mentionPatterns: ['@opus-45'],
     });
-    catRegistry.register('codex', { ...CAT_CONFIGS.codex });
+    catRegistry.register('codex', { ...allConfigs.codex });
 
     const mod = await import('../dist/infrastructure/connectors/ConnectorCommandLayer.js');
     ConnectorCommandLayer = mod.ConnectorCommandLayer;
@@ -1376,10 +1379,12 @@ describe('F154: /ask command (AC-A2, AC-A5, AC-A6)', () => {
   const binding = { connectorId: CID, externalChatId: EXT, threadId: THREAD_ID, userId: UID, createdAt: Date.now() };
 
   before(async () => {
-    const { catRegistry, CAT_CONFIGS, createCatId } = await import('@cat-cafe/shared');
+    const { catRegistry } = await import('@cat-cafe/shared');
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+    const allConfigs = toAllCatConfigs(loadCatConfig());
     catRegistry.reset();
-    catRegistry.register('opus', { ...CAT_CONFIGS.opus });
-    catRegistry.register('codex', { ...CAT_CONFIGS.codex });
+    catRegistry.register('opus', { ...allConfigs.opus });
+    catRegistry.register('codex', { ...allConfigs.codex });
 
     const mod = await import('../dist/infrastructure/connectors/ConnectorCommandLayer.js');
     ConnectorCommandLayer = mod.ConnectorCommandLayer;
@@ -1469,9 +1474,11 @@ describe('F154: /focus + /ask with commandRegistry (P1/P2 regression)', () => {
 
   before(async () => {
     const shared = await import('@cat-cafe/shared');
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+    const allConfigs = toAllCatConfigs(loadCatConfig());
     shared.catRegistry.reset();
-    shared.catRegistry.register('opus', { ...shared.CAT_CONFIGS.opus });
-    shared.catRegistry.register('codex', { ...shared.CAT_CONFIGS.codex });
+    shared.catRegistry.register('opus', { ...allConfigs.opus });
+    shared.catRegistry.register('codex', { ...allConfigs.codex });
     CORE_COMMANDS = shared.CORE_COMMANDS;
 
     const mod = await import('../dist/infrastructure/connectors/ConnectorCommandLayer.js');

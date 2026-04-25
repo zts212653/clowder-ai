@@ -7,18 +7,13 @@
 
 import assert from 'node:assert/strict';
 import { before, beforeEach, describe, test } from 'node:test';
-import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
+import '../helpers/setup-cat-registry.js';
 import Fastify from 'fastify';
 
 const { InvocationRegistry } = await import('../../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
 const { TaskStore } = await import('../../dist/domains/cats/services/stores/ports/TaskStore.js');
 const { MessageStore } = await import('../../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { callbacksRoutes } = await import('../../dist/routes/callbacks.js');
-
-// Ensure catRegistry has opus/codex for ownerCatId validation
-for (const [id, config] of Object.entries(CAT_CONFIGS)) {
-  if (!catRegistry.has(id)) catRegistry.register(id, config);
-}
 
 function createMockSocketManager() {
   const events = [];

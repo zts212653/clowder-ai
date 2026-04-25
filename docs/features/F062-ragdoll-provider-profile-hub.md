@@ -8,8 +8,10 @@ created: 2026-03-05
 
 # F062: Ragdoll账号配置中枢（订阅 / 赞助 API 切换）
 
-> **Status**: done | **Owner**: 三猫
+> **Status**: done → **superseded by F136/clowder-ai#340** | **Owner**: 三猫
 > **Completed**: 2026-03-05
+>
+> ⚠️ **Superseded**: 本 feature 的 provider-profiles 系统已被 F136 统一配置架构（`accounts.json` + `credentials.json`）和 clowder-ai#340 accounts 重构取代。当前实现见 F136 文档。保留本文档作为历史设计记录。
 
 ## Why
 

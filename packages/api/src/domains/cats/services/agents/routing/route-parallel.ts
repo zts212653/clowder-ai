@@ -4,7 +4,7 @@
  */
 
 import type { CatConfig, CatId } from '@cat-cafe/shared';
-import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
+import { catRegistry } from '@cat-cafe/shared';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
 import { getConfigSessionStrategy, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
@@ -41,6 +41,7 @@ import {
   createLeakedToolCallStreamStripper,
   detectContextDegradation,
   getService,
+  getThreadBootcampMemberCount,
   isUserFacingSystemInfoContent,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
@@ -124,6 +125,7 @@ export async function* routeParallel(
       /* best-effort */
     }
   }
+  const bootcampMemberCount = getThreadBootcampMemberCount(routeThread);
 
   // F155: Guide interceptor — resume existing guide state only
   const guideCtx = await prepareGuideContext({
@@ -134,6 +136,7 @@ export async function* routeParallel(
     userId,
     threadId,
     log,
+    dismissTracker: deps.invocationDeps.dismissTracker,
   });
 
   // F148 OQ-2: briefing→invocation link per cat (must be before Promise.all — TDZ fix)
@@ -144,8 +147,7 @@ export async function* routeParallel(
 
   const streams = await Promise.all(
     targetCats.map(async (catId) => {
-      const catConfig: CatConfig | undefined =
-        catRegistry.tryGet(catId as string)?.config ?? CAT_CONFIGS[catId as string];
+      const catConfig: CatConfig | undefined = catRegistry.tryGet(catId as string)?.config;
       const teammates = targetCats.filter((id) => id !== catId);
       // Build identity: static goes in -p content (+ systemPrompt as defense-in-depth), dynamic in -p only.
       // Non-Claude HTTP callback instructions → per-message (session history may be lost on compress).
@@ -221,7 +223,7 @@ export async function* routeParallel(
         ...(sopStageHint ? { sopStageHint } : {}),
         ...(activeSignals ? { activeSignals } : {}),
         ...(voiceMode ? { voiceMode } : {}),
-        ...(bootcampState ? { bootcampState, threadId } : {}),
+        ...(bootcampState ? { bootcampState, threadId, bootcampMemberCount } : {}),
         ...(alwaysOnDocs && alwaysOnInjectionMode === 'on' ? { alwaysOnDocs } : {}),
         ...guideContextForCat(guideCtx, catId, targetCatIds, threadId),
       });

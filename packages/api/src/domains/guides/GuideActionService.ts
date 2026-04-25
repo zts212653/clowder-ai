@@ -13,6 +13,7 @@ import type { GuideStateV1 } from '../cats/services/stores/ports/ThreadStore.js'
 import type { GuideLifecycleDeps, LifecycleResult } from './GuideLifecycleService.js';
 import type { GuideStateBridge } from './GuideSessionRepository.js';
 import {
+  createOfferedState,
   isTerminal,
   transitionToActive,
   transitionToAwaitingChoice,
@@ -54,19 +55,20 @@ export class GuideActionService {
       return { ok: false, code: 400, error: 'guide_flow_invalid', message: (err as Error).message };
     }
 
+    const createActiveState = (): GuideStateV1 =>
+      transitionToActive(
+        createOfferedState({
+          guideId,
+          userId,
+        }),
+      );
+
     const gs = await this.guideStore.get(threadId);
     if (!gs) {
       if (isSharedDefaultThread(thread)) {
         return { ok: false, code: 409, error: 'guide_not_offered', message: 'No guide offered on shared thread' };
       }
-      const created: GuideStateV1 = {
-        v: 1,
-        guideId,
-        status: 'active',
-        userId,
-        offeredAt: Date.now(),
-        startedAt: Date.now(),
-      };
+      const created = createActiveState();
       await this.guideStore.set(threadId, created);
       this.socket.emitToUser(userId, 'guide_start', { guideId, threadId, timestamp: Date.now() });
       guideTransitions.add(1, { 'operation.name': 'guide_start', status: 'success' });
@@ -75,6 +77,20 @@ export class GuideActionService {
     }
 
     if (gs.guideId !== guideId) {
+      if (!canAccessGuideState(thread, gs, userId)) {
+        return { ok: false, code: 403, error: 'Guide access denied' };
+      }
+      if (isTerminal(gs.status)) {
+        const replaced = createActiveState();
+        await this.guideStore.set(threadId, replaced);
+        this.socket.emitToUser(userId, 'guide_start', { guideId, threadId, timestamp: Date.now() });
+        guideTransitions.add(1, { 'operation.name': 'guide_start', status: 'success' });
+        this.log.info(
+          { guideId, threadId, userId, replacedGuideId: gs.guideId },
+          '[F155] guide started (replaced terminal guide state)',
+        );
+        return { ok: true, guideState: replaced };
+      }
       return {
         ok: false,
         code: 400,

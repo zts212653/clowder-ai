@@ -25,7 +25,6 @@ const MOCK_CATS = [
     avatar: '/avatars/opus.png',
     roleDescription: '架构',
     personality: '稳重',
-    source: 'seed',
   },
   {
     id: 'codex',
@@ -39,7 +38,6 @@ const MOCK_CATS = [
     avatar: '/avatars/codex.png',
     roleDescription: 'review',
     personality: 'rigorous',
-    source: 'seed',
   },
   {
     id: 'spark',
@@ -53,7 +51,6 @@ const MOCK_CATS = [
     avatar: '/avatars/spark.png',
     roleDescription: 'fast coding',
     personality: 'sharp',
-    source: 'runtime',
   },
   {
     id: 'gemini25',
@@ -67,7 +64,6 @@ const MOCK_CATS = [
     avatar: '/avatars/gemini25.png',
     roleDescription: 'design',
     personality: 'bold',
-    source: 'seed',
   },
   {
     id: 'antigravity',
@@ -80,7 +76,6 @@ const MOCK_CATS = [
     avatar: '/avatars/antigravity.png',
     roleDescription: 'bridge',
     personality: 'curious',
-    source: 'seed',
   },
 ];
 
@@ -150,7 +145,7 @@ function defaultQuotaApiFetch(path: string) {
             name: 'Claude (OAuth)',
             authType: 'oauth',
             protocol: 'anthropic',
-            builtin: true,
+
             mode: 'subscription',
             models: ['claude-opus-4-6'],
             hasApiKey: false,
@@ -164,7 +159,7 @@ function defaultQuotaApiFetch(path: string) {
             name: 'Codex (OAuth)',
             authType: 'oauth',
             protocol: 'openai',
-            builtin: true,
+
             mode: 'subscription',
             models: ['gpt-5.4'],
             hasApiKey: false,
@@ -178,7 +173,7 @@ function defaultQuotaApiFetch(path: string) {
             name: 'Gemini (OAuth)',
             authType: 'oauth',
             protocol: 'google',
-            builtin: true,
+
             mode: 'subscription',
             models: ['gemini-2.5-pro'],
             hasApiKey: false,
@@ -192,7 +187,7 @@ function defaultQuotaApiFetch(path: string) {
             name: 'Codex Sponsor',
             authType: 'api_key',
             protocol: 'openai',
-            builtin: false,
+
             mode: 'api_key',
             models: ['gpt-5.4-mini'],
             hasApiKey: true,
@@ -256,7 +251,7 @@ describe('HubQuotaBoardTab v2 — glanceable quota board', () => {
 
   it('renders F127 group headings on static render', () => {
     const html = renderToStaticMarkup(React.createElement(HubQuotaBoardTab));
-    expect(html).toContain('内置账号额度（按账号配置）');
+    expect(html).toContain('OAuth 账号额度（按账号配置）');
     expect(html).toContain('API Key 额度（按账号配置）');
     expect(html).toContain('F127 变化说明');
   });
@@ -297,7 +292,7 @@ describe('HubQuotaBoardTab — account pool grouping', () => {
     });
     await flushEffects();
 
-    expect(container.textContent).toContain('内置账号额度（按账号配置）');
+    expect(container.textContent).toContain('OAuth 账号额度（按账号配置）');
     expect(container.textContent).toContain('API Key 额度（按账号配置）');
     expect(container.textContent).toContain('Claude (OAuth)');
     expect(container.textContent).toContain('Codex (OAuth)');

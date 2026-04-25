@@ -12,7 +12,7 @@
  */
 
 import type { CatId } from '@cat-cafe/shared';
-import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
+import { catRegistry } from '@cat-cafe/shared';
 import { isCatAvailable } from '../../../../../config/cat-config-loader.js';
 
 /** Max A2A chain depth, configurable via env (read at call time for hot-reload) */
@@ -82,8 +82,8 @@ export function analyzeA2AMentions(
   // 1. Strip fenced code blocks
   const stripped = text.replace(/```[\s\S]*?```/g, '');
 
-  // F32-a: prefer catRegistry, fallback to static CAT_CONFIGS
-  const allConfigs = Object.keys(catRegistry.getAllConfigs()).length > 0 ? catRegistry.getAllConfigs() : CAT_CONFIGS;
+  // F32-a: read from catRegistry (.cat-cafe/cat-catalog.json)
+  const allConfigs = catRegistry.getAllConfigs();
 
   // 2. Build patterns and sort longest-first to avoid prefix collisions
   const entries: MentionPatternEntry[] = [];
@@ -178,7 +178,7 @@ export function detectInlineActionMentions(
   if (!text) return [];
 
   const stripped = text.replace(/```[\s\S]*?```/g, '');
-  const allConfigs = Object.keys(catRegistry.getAllConfigs()).length > 0 ? catRegistry.getAllConfigs() : CAT_CONFIGS;
+  const allConfigs = catRegistry.getAllConfigs();
 
   const entries: MentionPatternEntry[] = [];
   for (const [id, config] of Object.entries(allConfigs)) {

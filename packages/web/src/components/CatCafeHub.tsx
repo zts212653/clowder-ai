@@ -30,6 +30,7 @@ import { HubRoutingPolicyTab } from './HubRoutingPolicyTab';
 import { HubToolUsageTab } from './HubToolUsageTab';
 import { MarketplacePanel } from './marketplace/marketplace-panel';
 import { PushSettingsPanel } from './PushSettingsPanel';
+import { useConfirm } from './useConfirm';
 import { VoiceSettingsPanel } from './VoiceSettingsPanel';
 
 export type { HubTabId } from './cat-cafe-hub.navigation';
@@ -46,6 +47,7 @@ export function CatCafeHub() {
     return session.flow.steps[session.currentStepIndex];
   });
   const { cats, getCatById, refresh } = useCatData();
+  const confirm = useConfirm();
 
   const open = hubState?.open ?? false;
   const rawRequestedTab = hubState?.tab as HubTabId | undefined;
@@ -177,6 +179,30 @@ export function CatCafeHub() {
     [fetchData, refresh],
   );
 
+  const handleDeleteMember = useCallback(
+    async (cat: (typeof cats)[number]) => {
+      const ok = await confirm({
+        title: '删除确认',
+        message: `确认删除成员「${cat.displayName}」吗？此操作不可撤销。`,
+        variant: 'danger',
+        confirmLabel: '删除',
+      });
+      if (!ok) return;
+      try {
+        const res = await apiFetch(`/api/cats/${cat.id}`, { method: 'DELETE' });
+        if (!res.ok) {
+          const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+          setFetchError((payload.error as string) ?? `删除失败 (${res.status})`);
+          return;
+        }
+        await Promise.all([fetchData(), refresh()]);
+      } catch {
+        setFetchError('删除失败');
+      }
+    },
+    [confirm, fetchData, refresh],
+  );
+
   useEffect(() => {
     if (open) fetchData();
   }, [open, fetchData]);
@@ -194,7 +220,11 @@ export function CatCafeHub() {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={closeHub}>
+    <div
+      className="fixed inset-0 bg-black/30 flex items-center justify-center z-50"
+      onClick={closeHub}
+      data-bootcamp-host="hub-modal"
+    >
       <div
         className="rounded-2xl shadow-xl max-w-4xl w-full mx-4 h-[85vh] flex flex-col"
         style={{ backgroundColor: '#FDF8F3' }}
@@ -209,6 +239,7 @@ export function CatCafeHub() {
             className="text-cafe-muted hover:text-cafe-secondary text-lg"
             title="关闭"
             aria-label="关闭"
+            data-guide-id="hub.close"
           >
             &times;
           </button>
@@ -246,6 +277,7 @@ export function CatCafeHub() {
                   onAddMember={openAddMember}
                   onEditCoCreator={openCoCreatorEditor}
                   onEditMember={openEditMember}
+                  onDeleteMember={handleDeleteMember}
                   onToggleAvailability={handleToggleAvailability}
                   togglingCatId={togglingCatId}
                 />
@@ -278,6 +310,7 @@ export function CatCafeHub() {
           open={editorOpen}
           cat={editingCat}
           draft={createDraft}
+          existingCats={cats}
           onClose={closeEditor}
           onSaved={handleEditorSaved}
         />

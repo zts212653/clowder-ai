@@ -3,6 +3,7 @@
  * 验证 routeSerial / routeParallel 纯函数的基本行为 + A2A worklist
  */
 
+import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
@@ -199,6 +200,41 @@ function degradationSystemInfos(messages) {
     }
   });
 }
+
+describe('bootcamp invocation context', () => {
+  it('uses thread-scoped member count instead of global roster size', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const captureService = createCapturingService('opus', 'ack');
+    const deps = createMockDeps({ opus: captureService }, undefined, {
+      async get() {
+        return {
+          id: 'thread1',
+          title: 'Bootcamp Thread',
+          createdBy: 'user1',
+          participants: [],
+          lastActiveAt: Date.now(),
+          createdAt: Date.now(),
+          projectPath: 'default',
+          bootcampState: {
+            v: 1,
+            phase: 'phase-2-env-check',
+            leadCat: 'opus',
+            startedAt: Date.now(),
+          },
+        };
+      },
+      async getParticipantsWithActivity() {
+        return [];
+      },
+      async updateParticipantActivity() {},
+    });
+
+    for await (const _ of routeParallel(deps, ['opus'], '继续', 'user1', 'thread1')) {
+    }
+
+    assert.match(captureService.calls[0], /members=1/, 'should derive team size from the active thread only');
+  });
+});
 
 describe('incremental current-message fallback helper', () => {
   it('does not append raw current message when context already contains current message id', async () => {

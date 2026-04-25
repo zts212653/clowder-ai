@@ -3,8 +3,14 @@
  */
 
 import assert from 'node:assert/strict';
+import { dirname, resolve } from 'node:path';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+// Explicit path to the repo template — immune to CAT_TEMPLATE_PATH drift across tests.
+const REPO_TEMPLATE_PATH = resolve(__dirname, '..', '..', '..', 'cat-template.json');
 
 describe('parseA2AMentions', () => {
   it('detects line-start @mention (Chinese name)', async () => {
@@ -81,14 +87,17 @@ describe('parseA2AMentions', () => {
     const originalConfigs = catRegistry.getAllConfigs();
     catRegistry.reset();
     try {
-      const runtimeConfigs = toAllCatConfigs(loadCatConfig());
+      // Use explicit path — immune to CAT_TEMPLATE_PATH drift from other tests.
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(REPO_TEMPLATE_PATH));
       for (const [id, config] of Object.entries(runtimeConfigs)) {
         catRegistry.register(id, config);
       }
 
-      const text = '到我这里结束了吗？是的 — 我的编译修复已完成，等待 commit + push 和 CI 结果。\n@opus @gpt52';
+      // @opus and @codex are both roster members; test that multiple @mentions on
+      // a pure handoff line are all routed (no keyword gate required).
+      const text = '到我这里结束了吗？是的 — 我的编译修复已完成，等待 commit + push 和 CI 结果。\n@opus @codex';
       const result = parseA2AMentions(text, 'kimi');
-      assert.deepEqual(result, ['opus', 'gpt52']);
+      assert.deepEqual(result, ['opus', 'codex']);
     } finally {
       catRegistry.reset();
       for (const [id, config] of Object.entries(originalConfigs)) {
@@ -104,12 +113,14 @@ describe('parseA2AMentions', () => {
     const originalConfigs = catRegistry.getAllConfigs();
     catRegistry.reset();
     try {
-      const runtimeConfigs = toAllCatConfigs(loadCatConfig());
+      // Use explicit path — immune to CAT_TEMPLATE_PATH drift from other tests.
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(REPO_TEMPLATE_PATH));
       for (const [id, config] of Object.entries(runtimeConfigs)) {
         catRegistry.register(id, config);
       }
 
-      const text = '@opus 请继续推进，如果需要再找 @gpt52';
+      // Inline @codex mention after prose — should NOT be routed (keyword-gated inline rule).
+      const text = '@opus 请继续推进，如果需要再找 @codex';
       const result = parseA2AMentions(text, 'kimi');
       assert.deepEqual(result, ['opus']);
     } finally {
@@ -228,7 +239,8 @@ describe('parseA2AMentions', () => {
     const originalConfigs = catRegistry.getAllConfigs();
     catRegistry.reset();
     try {
-      const runtimeConfigs = toAllCatConfigs(loadCatConfig());
+      // Use explicit path — immune to CAT_TEMPLATE_PATH drift from other tests.
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(REPO_TEMPLATE_PATH));
       for (const [id, config] of Object.entries(runtimeConfigs)) {
         catRegistry.register(id, config);
       }
@@ -250,7 +262,8 @@ describe('parseA2AMentions', () => {
     const originalConfigs = catRegistry.getAllConfigs();
     catRegistry.reset();
     try {
-      const runtimeConfigs = toAllCatConfigs(loadCatConfig());
+      // Use explicit path — immune to CAT_TEMPLATE_PATH drift from other tests.
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(REPO_TEMPLATE_PATH));
       for (const [id, config] of Object.entries(runtimeConfigs)) {
         catRegistry.register(id, config);
       }
@@ -272,7 +285,8 @@ describe('parseA2AMentions', () => {
     const originalConfigs = catRegistry.getAllConfigs();
     catRegistry.reset();
     try {
-      const runtimeConfigs = toAllCatConfigs(loadCatConfig());
+      // Use explicit path — immune to CAT_TEMPLATE_PATH drift from other tests.
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(REPO_TEMPLATE_PATH));
       for (const [id, config] of Object.entries(runtimeConfigs)) {
         catRegistry.register(id, config);
       }
@@ -294,7 +308,8 @@ describe('parseA2AMentions', () => {
     const originalConfigs = catRegistry.getAllConfigs();
     catRegistry.reset();
     try {
-      const runtimeConfigs = toAllCatConfigs(loadCatConfig());
+      // Use explicit path — immune to CAT_TEMPLATE_PATH drift from other tests.
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(REPO_TEMPLATE_PATH));
       for (const [id, config] of Object.entries(runtimeConfigs)) {
         catRegistry.register(id, config);
       }

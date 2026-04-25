@@ -36,6 +36,7 @@ declare -F background_eval_with_null_stdin >/dev/null
 declare -F wait_for_port_or_exit >/dev/null
 declare -F api_launch_command >/dev/null
 declare -F frontend_launch_command >/dev/null
+declare -F web_production_build_ready >/dev/null
 declare -F default_redis_storage_key >/dev/null
 declare -F default_redis_data_dir >/dev/null
 declare -F default_redis_backup_dir >/dev/null
@@ -729,6 +730,37 @@ printf '%s' "$(frontend_launch_command)"
   );
 
   assert.equal(output, 'cd packages/web && PORT=3013 exec pnpm exec next start -p 3013 -H 0.0.0.0');
+});
+
+test('web_production_build_ready requires BUILD_ID instead of only .next directory', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-web-build-'));
+
+  try {
+    mkdirSync(join(tempRoot, 'packages', 'web', '.next'), { recursive: true });
+
+    const output = runSourceOnlySnippet(
+      scriptPath,
+      `
+PROJECT_DIR="${tempRoot}"
+if web_production_build_ready; then
+  printf 'ready-before|'
+else
+  printf 'missing-before|'
+fi
+printf 'build-id' > "$PROJECT_DIR/packages/web/.next/BUILD_ID"
+if web_production_build_ready; then
+  printf 'ready-after'
+else
+  printf 'missing-after'
+fi
+`,
+    );
+
+    assert.equal(output, 'missing-before|ready-after');
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
 });
 
 test('print_manual_download_source_summary returns zero under set -e even when no overrides are set', () => {

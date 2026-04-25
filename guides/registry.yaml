@@ -23,6 +23,35 @@ guides:
     cross_system: false
     estimated_time: 3min
 
+  - id: bootcamp-add-teammate
+    name: 添加第二只猫猫
+    description: 首次体验引导 — 开发完成后添加第二只猫猫队友来协作
+    flow_file: flows/bootcamp-add-teammate.yaml
+    keywords:
+      - bootcamp
+      - 训练营
+      - 第二只猫
+      - 添加队友
+      - add teammate
+    category: bootcamp
+    priority: P0
+    cross_system: false
+    estimated_time: 5min
+
+  - id: bootcamp-farewell
+    name: 毕业引导
+    description: 训练营完成后的操作指引 — 新会话、训练营入口、@mention 用法
+    flow_file: flows/bootcamp-farewell.yaml
+    keywords:
+      - 毕业
+      - farewell
+      - 训练营完成
+      - graduation
+    category: bootcamp
+    priority: P0
+    cross_system: false
+    estimated_time: 2min
+
   - id: add-account-auth
     name: 添加账户认证
     description: 引导你完成 API Key 认证账号的创建和配置

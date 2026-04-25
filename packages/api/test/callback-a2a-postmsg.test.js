@@ -10,15 +10,8 @@
 
 import assert from 'node:assert/strict';
 import { before, beforeEach, describe, test } from 'node:test';
-import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
+import './helpers/setup-cat-registry.js';
 import Fastify from 'fastify';
-
-// Ensure catRegistry is populated for catId validation tests
-before(() => {
-  for (const [id, config] of Object.entries(CAT_CONFIGS)) {
-    if (!catRegistry.has(id)) catRegistry.register(id, config);
-  }
-});
 
 function createMockSocketManager() {
   const messages = [];

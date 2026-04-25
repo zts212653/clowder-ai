@@ -1,0 +1,25 @@
+# F171 Guide Flow: Bootcamp Farewell
+# Graduation guidance — highlight key UI elements for independent usage.
+# Triggered at phase-10-retro after project completion.
+# Schema: OrchestrationFlow v2 (tag-based engine)
+
+schemaVersion: 1
+id: bootcamp-farewell
+name: 毕业引导
+description: 训练营完成后的操作指引，帮你了解如何独立使用
+
+steps:
+  - id: new-thread-button
+    target: sidebar.new-thread
+    tips: 点击「新会话」可以随时创建新的任务
+    advance: next
+
+  - id: bootcamp-entry
+    target: sidebar.bootcamp
+    tips: 回到训练营可以继续探索新项目，策略和之前一样
+    advance: next
+
+  - id: input-final-tips
+    target: chat.input
+    tips: 同时 @猫A @猫B 会触发对立采样；有任何疑问直接问猫猫，比如「@布偶猫 怎么添加成员」
+    advance: next

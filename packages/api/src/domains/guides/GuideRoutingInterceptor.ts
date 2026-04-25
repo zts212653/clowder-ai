@@ -33,6 +33,7 @@ interface GuideThread {
   id: string;
   createdBy: string;
   guideState?: GuideStateV1;
+  bootcampState?: { phase?: string };
 }
 
 /** Internal state produced by prepare(), consumed by inject/ack. */
@@ -146,6 +147,47 @@ async function resolveExistingCandidate(
 }
 
 // ---------------------------------------------------------------------------
+// Bootcamp → Guide bridge: auto-offer guide at specific bootcamp phases
+// ---------------------------------------------------------------------------
+
+/** Maps bootcamp phases to guide IDs that should be auto-offered. */
+const BOOTCAMP_PHASE_GUIDE_MAP: Record<string, string> = {
+  'phase-7.5-add-teammate': 'bootcamp-add-teammate',
+  'phase-10-retro': 'bootcamp-farewell',
+};
+
+async function resolveBootcampGuide(
+  thread: GuideThread | null | undefined,
+  targetCats: readonly string[],
+  ctx: GuideRoutingContext,
+  dismissTracker?: import('./GuideDismissTracker.js').IGuideDismissTracker,
+): Promise<void> {
+  const phase = thread?.bootcampState?.phase;
+  if (!phase) return;
+  const guideId = BOOTCAMP_PHASE_GUIDE_MAP[phase];
+  if (!guideId) return;
+
+  // Respect user dismissal — don't re-offer guides the user explicitly dismissed
+  if (dismissTracker && thread) {
+    const userId = thread.createdBy ?? 'default-user';
+    const counts = await dismissTracker.getDismissCounts(userId, [guideId]).catch((): Record<string, number> => ({}));
+    if ((counts[guideId] ?? 0) > 0) return;
+  }
+
+  const entry = await resolveRegistryEntry(guideId);
+  if (!entry) return;
+
+  ctx.candidate = {
+    id: guideId,
+    name: entry.name,
+    estimatedTime: entry.estimatedTime,
+    status: 'offered',
+    isNewOffer: true,
+  };
+  ctx.offerOwner = targetCats[0];
+}
+
+// ---------------------------------------------------------------------------
 // Phase 1: Prepare
 // ---------------------------------------------------------------------------
 
@@ -162,8 +204,9 @@ export async function prepareGuideContext(params: {
   userId: string;
   threadId: string;
   log?: { info: (...args: unknown[]) => void };
+  dismissTracker?: import('./GuideDismissTracker.js').IGuideDismissTracker;
 }): Promise<GuideRoutingContext> {
-  const { thread, guideSessionStore, targetCats, message, userId, threadId } = params;
+  const { thread, guideSessionStore, targetCats, message, userId, threadId, dismissTracker } = params;
   const targetCatIds = new Set(targetCats);
   const ctx: GuideRoutingContext = { hiddenForeign: false };
 
@@ -184,6 +227,11 @@ export async function prepareGuideContext(params: {
 
   if (guideState) {
     await resolveExistingCandidate(guideState, message, targetCats, targetCatIds, ctx);
+  }
+
+  // F171: Bootcamp phase → guide bridge (auto-offer before keyword matching)
+  if (!ctx.candidate && !ctx.hiddenForeign) {
+    await resolveBootcampGuide(thread, targetCats, ctx, dismissTracker);
   }
 
   return ctx;

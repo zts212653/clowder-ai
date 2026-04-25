@@ -103,7 +103,14 @@ describe('GET /api/callbacks/thread-cats', () => {
     assert.equal(body.routableNow.length, 1);
     assert.equal(body.routableNow[0].catId, 'opus');
     assert.deepEqual(body.routableNotJoined, []);
-    assert.deepEqual(body.notRoutable, []);
+    // notRoutable may include unavailable cats from the global catRegistry
+    // (e.g. antigravity has available:false in the current roster).
+    // Verify no unexpected routable cats appear there.
+    const notRoutableCatIds = body.notRoutable.map((c) => c.catId);
+    assert.ok(
+      notRoutableCatIds.every((id) => id !== 'opus'),
+      'opus must not appear in notRoutable',
+    );
   });
 
   it('returns 400 when invocation has no threadId', async () => {

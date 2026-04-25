@@ -85,12 +85,11 @@ const baseCatSchema = z.object({
   sessionChain: z.boolean().optional(),
 });
 
-/** Strip trailing slashes from model names — prevents "MiniMax-M2.7/" artifacts. */
-const modelSchema = z
-  .string()
-  .min(1)
-  .transform((v) => v.replace(/\/+$/, ''))
-  .pipe(z.string().min(1));
+/** Strip trailing slashes from model names — prevents "MiniMax-M2.7/" artifacts.
+ *  Empty string is allowed: OAuth/subscription accounts may omit model and
+ *  let the CLI use its built-in default. api_key accounts are validated at
+ *  runtime in validateAccountBindingOrThrow where authType is available. */
+const modelSchema = z.string().transform((v) => v.replace(/\/+$/, ''));
 
 const createNormalCatSchema = baseCatSchema.extend({
   clientId: clientSchema.exclude(['antigravity']),
@@ -148,8 +147,6 @@ function resolveOperator(raw: unknown): string | null {
 function resolveProjectRoot(): string {
   return resolveActiveProjectRoot();
 }
-
-type CatSource = 'seed' | 'runtime';
 
 interface CatResponseMetadata {
   roster: RosterEntry | null;
@@ -300,11 +297,15 @@ async function validateAccountBindingOrThrow(
   if (!runtimeProfile) {
     throw new Error(`provider "${trimmedAccountRef}" not found`);
   }
+  // api_key accounts require an explicit model; OAuth/subscription CLIs have defaults
+  if (runtimeProfile.authType === 'api_key' && !defaultModel?.trim()) {
+    throw new Error('API Key 认证类型需要指定 Model');
+  }
   const compatibilityError = validateRuntimeProviderBinding(client, runtimeProfile, defaultModel);
   if (compatibilityError) {
     throw new Error(compatibilityError);
   }
-  const modelFormatError = validateModelFormatForProvider(client, defaultModel, runtimeProfile.kind, providerName, {
+  const modelFormatError = validateModelFormatForProvider(client, defaultModel, runtimeProfile.authType, providerName, {
     ...options,
     accountModels: runtimeProfile.models,
   });
@@ -354,7 +355,6 @@ async function toCatResponse(
           evaluation: metadata.roster.evaluation,
         }
       : null,
-    source: (cat.source ?? 'runtime') as CatSource,
     adapterMode: cat.clientId === 'google' ? (getAcpConfig(cat.id as string) ? 'acp' : 'cli') : undefined,
   };
 }
@@ -380,7 +380,55 @@ function getManagedCatalogIds(projectRoot: string): Set<string> {
   }
 }
 
-export const catsRoutes: FastifyPluginAsync = async (app) => {
+interface CatsRoutesOptions {
+  onCatalogChanged?: (cats: Record<string, CatConfig>) => Promise<void> | void;
+}
+
+export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opts) => {
+  // GET /api/cat-templates - 获取角色模板（纯灵魂层，不含 client/model 绑定）
+  app.get('/api/cat-templates', async () => {
+    try {
+      const projectRoot = resolveProjectRoot();
+      const templatePath = resolveProjectTemplatePath(projectRoot);
+      const raw = JSON.parse(await import('node:fs').then((fs) => fs.promises.readFile(templatePath, 'utf-8'))) as {
+        roleTemplates?: {
+          id: string;
+          name: string;
+          nickname?: string;
+          avatar: string;
+          color: { primary: string; secondary: string };
+          roleDescription: string;
+          personality: string;
+          teamStrengths?: string;
+        }[];
+        clientDefaults?: Record<string, { defaultModel: string; models: string[] }>;
+      };
+      if (raw.roleTemplates && raw.roleTemplates.length > 0) {
+        return { templates: raw.roleTemplates, clientDefaults: raw.clientDefaults ?? {} };
+      }
+      // Fallback: extract from breeds (legacy)
+      const templateConfig = loadCatConfig(templatePath);
+      const allCats = Object.values(toAllCatConfigs(templateConfig));
+      const templateCats = allCats.filter((c) => c.isDefaultVariant);
+      return {
+        templates: templateCats.map((cat) => ({
+          id: cat.breedId ?? cat.id,
+          name: cat.breedDisplayName ?? cat.displayName ?? cat.name,
+          nickname: cat.nickname,
+          avatar: cat.avatar,
+          color: cat.color,
+          roleDescription: cat.roleDescription,
+          personality: cat.personality,
+          teamStrengths: cat.teamStrengths,
+        })),
+        clientDefaults: {},
+      };
+    } catch (err) {
+      app.log.warn({ err }, 'Failed to load cat templates');
+      return { templates: [], clientDefaults: {} };
+    }
+  });
+
   // GET /api/cats - 获取所有猫猫配置
   app.get('/api/cats', async () => {
     const projectRoot = resolveProjectRoot();
@@ -713,9 +761,7 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
       return { deleted: true, id: request.params.id, updatedBy: operator };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (/cannot delete seed cat/i.test(message)) {
-        reply.status(409);
-      } else if (/not found/i.test(message)) {
+      if (/not found/i.test(message)) {
         reply.status(404);
       } else {
         reply.status(400);

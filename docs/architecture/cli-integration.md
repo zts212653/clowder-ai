@@ -381,46 +381,23 @@ yield { __cliError: true, message: `CLI 异常退出 (code: ${exitCode})` };
 
 ## 配置管理
 
-模型配置支持三层优先级：
+模型配置的运行时来源是 `.cat-cafe/cat-catalog.json`（由 `cat-template.json` 首次启动时 bootstrap 生成）。
 
-```
-环境变量 > cat-config.json > 硬编码默认值
-```
+- `cat-template.json`（repo 根）：种子模板，仅在首次启动且 catalog 不存在时复制生成 catalog。后续不参与运行时读取
+- `.cat-cafe/cat-catalog.json`：唯一运行时配置源。所有猫的增删改查都直接操作此文件
+- 环境变量 `CAT_{CATID}_MODEL`（如 `CAT_OPUS_MODEL`）：可 override 运行时配置，用于调试或临时切换模型。正常使用不需要
 
-**环境变量：**
-```bash
-CAT_OPUS_MODEL=claude-opus-4-6
-CAT_CODEX_MODEL=gpt-5.3-codex
-CAT_GEMINI_MODEL=gemini-3-pro
-```
-
-**配置文件 (`cat-config.json`)：**
+**配置文件格式：**
 ```json
 {
-  "version": 1,
+  "version": 2,
   "breeds": [
     {
-      "catId": "opus",
-      "variants": [{ "defaultModel": "claude-opus-4-6", ... }]
-    },
-    ...
+      "id": "ragdoll",
+      "defaultVariantId": "opus",
+      "variants": [{ "id": "opus", "defaultModel": "claude-opus-4-6", ... }]
+    }
   ]
-}
-```
-
-**读取逻辑 (`cat-models.ts`)：**
-```typescript
-export function getCatModel(catName: 'opus' | 'codex' | 'gemini'): string {
-  // 1. 环境变量最高优先
-  const envValue = process.env[MODEL_ENV_KEYS[catName]];
-  if (envValue?.trim()) return envValue.trim();
-
-  // 2. cat-config.json 次优先
-  const jsonModels = loadModelsFromJson();
-  if (jsonModels[catName]) return jsonModels[catName];
-
-  // 3. 硬编码默认值
-  return CAT_CONFIGS[catName].defaultModel;
 }
 ```
 

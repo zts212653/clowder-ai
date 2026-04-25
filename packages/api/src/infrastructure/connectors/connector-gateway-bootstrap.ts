@@ -12,7 +12,7 @@
 
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { CAT_CONFIGS, type CatId, type ConnectorSource } from '@cat-cafe/shared';
+import { type CatId, type ConnectorSource, catRegistry } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import * as lark from '@larksuiteoapi/node-sdk';
 import type { FastifyBaseLogger } from 'fastify';
@@ -285,10 +285,9 @@ export async function startConnectorGateway(
     }
   }
 
-  // F142: build catRoster from config for /cats and /status display names + availability
-  // F142: build catRoster from CAT_CONFIGS (displayName) + roster (available)
+  // F142: build catRoster from catRegistry (.cat-cafe/cat-catalog.json)
   const catRoster = Object.fromEntries(
-    Object.entries(CAT_CONFIGS).map(([id, config]) => [
+    Object.entries(catRegistry.getAllConfigs()).map(([id, config]) => [
       id,
       { displayName: config.displayName, available: isCatAvailable(id) },
     ]),

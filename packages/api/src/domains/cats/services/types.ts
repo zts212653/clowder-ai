@@ -169,6 +169,9 @@ export interface AgentServiceOptions {
   workingDirectory?: string;
   /** Env vars to pass to CLI process for MCP callback auth */
   callbackEnv?: Record<string, string>;
+  /** F171: User-defined env vars from account config.
+   *  Applied LAST to subprocess env — overrides provider-injected values. */
+  accountEnv?: Record<string, string>;
   /** Rich content blocks (e.g. images) to pass to the CLI agent */
   contentBlocks?: readonly MessageContent[];
   /** Upload directory for resolving image paths */

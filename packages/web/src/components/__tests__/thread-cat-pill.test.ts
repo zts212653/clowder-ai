@@ -22,7 +22,6 @@ const TEST_CATS = [
     clientId: 'anthropic',
     defaultModel: 'claude-opus-4-6',
     isDefaultVariant: true,
-    source: 'seed' as const,
   },
   {
     id: 'codex',
@@ -34,7 +33,6 @@ const TEST_CATS = [
     clientId: 'openai',
     defaultModel: 'gpt-5.3-codex',
     isDefaultVariant: true,
-    source: 'seed' as const,
   },
 ];
 

@@ -105,11 +105,6 @@ export type {
   CatStatus,
   ClientId,
 } from './cat.js';
-export {
-  CAT_CONFIGS,
-  findCatByMention,
-  getAllCatIds,
-} from './cat.js';
 // Cat breed/variant types (Breed+Variant two-layer schema)
 export type {
   // F136 Phase 4: Account config types

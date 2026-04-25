@@ -446,6 +446,18 @@ export class RedisThreadStore implements IThreadStore {
     }
   }
 
+  async updateFirstRunQuestState(
+    threadId: string,
+    state: import('../ports/ThreadStore.js').FirstRunQuestStateV1 | null,
+  ): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    if (state === null) {
+      await this.redis.hdel(key, 'firstRunQuestState');
+    } else {
+      await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, 'firstRunQuestState', JSON.stringify(state));
+    }
+  }
+
   async updateConnectorHubState(threadId: string, state: ConnectorHubStateV1 | null): Promise<void> {
     const key = ThreadKeys.detail(threadId);
     if (state === null) {
@@ -862,6 +874,9 @@ export class RedisThreadStore implements IThreadStore {
     if (thread.bootcampState) {
       result.bootcampState = JSON.stringify(thread.bootcampState);
     }
+    if (thread.firstRunQuestState) {
+      result.firstRunQuestState = JSON.stringify(thread.firstRunQuestState);
+    }
     if (thread.connectorHubState) {
       result.connectorHubState = JSON.stringify(thread.connectorHubState);
     }
@@ -943,6 +958,16 @@ export class RedisThreadStore implements IThreadStore {
         const parsed = JSON.parse(data.bootcampState);
         if (parsed && typeof parsed === 'object' && parsed.v === 1) {
           result.bootcampState = parsed as BootcampStateV1;
+        }
+      } catch {
+        /* ignore malformed JSON */
+      }
+    }
+    if (data.firstRunQuestState) {
+      try {
+        const parsed = JSON.parse(data.firstRunQuestState);
+        if (parsed && typeof parsed === 'object' && parsed.v === 1) {
+          result.firstRunQuestState = parsed as import('../ports/ThreadStore.js').FirstRunQuestStateV1;
         }
       } catch {
         /* ignore malformed JSON */

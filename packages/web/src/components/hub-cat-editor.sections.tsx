@@ -4,6 +4,7 @@ import { useMemo, useRef } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import type { ProfileItem } from './hub-accounts.types';
 import {
+  autoSlug,
   CLIENT_OPTIONS,
   type HubCatEditorFormState,
   joinTags,
@@ -21,26 +22,6 @@ function safeAvatarSrc(value: string): string | null {
   if (!trimmed) return null;
   if (trimmed.startsWith('/uploads/') || trimmed.startsWith('/avatars/')) return trimmed;
   return null;
-}
-
-function autoSlug(name: string, currentId?: string): string {
-  const slug = name
-    .trim()
-    .toLowerCase()
-    .replace(/[\s_]+/g, '-')
-    .replace(/[^a-z0-9-]/g, '')
-    .replace(/^[^a-z]+/, '')
-    .replace(/-+$/, '')
-    .replace(/-{2,}/g, '-')
-    .slice(0, 40);
-
-  if (/^[a-z]/.test(slug)) return slug;
-
-  // Non-ASCII name: keep existing random ID if present
-  if (currentId && /^cat-[a-z0-9]+$/.test(currentId)) return currentId;
-
-  const rand = Math.random().toString(36).substring(2, 10);
-  return `cat-${rand}`;
 }
 
 function currentAliasTags(form: HubCatEditorFormState): string[] {
@@ -308,7 +289,7 @@ function buildCallHint(
   model: string,
   providerName: string,
 ): CallHint | null {
-  if (!profile || profile.builtin || !profile.baseUrl) return null;
+  if (!profile || profile.authType === 'oauth' || !profile.baseUrl) return null;
   const base = profile.baseUrl.replace(/\/+$/, '');
   const hasV1Suffix = /\/v1$/i.test(base);
   // Strip trailing /v1 from base to avoid /v1/v1 duplication when pathSuffix already includes /v1
@@ -397,10 +378,20 @@ export function AccountSection({
               value={form.accountRef}
               options={[
                 { value: '', label: loadingProfiles ? '加载中…' : '请选择认证方式' },
-                ...accountOptions.map((profile) => ({
-                  value: profile.id,
-                  label: profile.builtin ? `${profile.displayName}（内置）` : `${profile.displayName}（API Key）`,
-                })),
+                ...accountOptions
+                  .filter((profile) => {
+                    // Gemini CLI doesn't support custom API endpoints — only show builtin
+                    if (form.clientId === 'google' && profile.authType !== 'oauth') return false;
+                    return true;
+                  })
+                  .map((profile) => ({
+                    value: profile.id,
+                    label: profile.builtin
+                      ? `${profile.displayName}（内置）`
+                      : profile.authType === 'oauth'
+                        ? `${profile.displayName}（OAuth）`
+                        : `${profile.displayName}（API Key）`,
+                  })),
               ]}
               onChange={(value) => onChange({ accountRef: value, defaultModel: '', provider: '' })}
               disabled={loadingProfiles}
@@ -465,22 +456,35 @@ export function AccountSection({
 export function RoutingSection({
   form,
   hasError,
+  reservedPatterns,
   onChange,
 }: {
   cat?: CatData | null;
   form: HubCatEditorFormState;
   hasError?: boolean;
+  /** Lowercase alias set already taken by other cats. */
+  reservedPatterns?: ReadonlySet<string>;
   onChange: (patch: FormPatch) => void;
 }) {
   const aliases = currentAliasTags(form);
+  const validateAlias = useMemo(() => {
+    if (!reservedPatterns?.size) return undefined;
+    return (tag: string) => {
+      if (reservedPatterns.has(tag.toLowerCase())) {
+        return `别名 "${tag}" 已被其他成员使用`;
+      }
+      return null;
+    };
+  }, [reservedPatterns]);
   return (
     <SectionCard title="别名与 @ 路由" tone={hasError ? 'error' : 'neutral'}>
       <TagEditor
         tags={aliases}
         onChange={(tags) => onChange({ mentionPatterns: joinTags(tags) })}
         addLabel="+ 添加"
-        placeholder="@砚砚"
+        placeholder="砚砚"
         emptyLabel="(至少添加 1 个别名，否则无法 @)"
+        validate={validateAlias}
         minCount={1}
       />
       <textarea

@@ -207,7 +207,8 @@ export class ClaudeAgentService implements AgentService {
     // Only pass --model for known Anthropic models. For third-party models
     // (e.g. glm-5 via BigModel/DashScope), ANTHROPIC_MODEL env var is set in
     // buildClaudeEnvOverrides() and --model must be omitted so the CLI honours it.
-    if (!useEnvModelOverride) {
+    // Empty model (OAuth without explicit model) → let CLI use its default.
+    if (!useEnvModelOverride && effectiveModel) {
       args.splice(6, 0, '--model', effectiveModel);
     }
 
@@ -280,13 +281,17 @@ export class ClaudeAgentService implements AgentService {
 
       let sawResultError = false;
       const envOverrides = buildClaudeEnvOverrides(options?.callbackEnv);
+      // F171: Account env vars applied LAST — user overrides provider-injected values
+      if (options?.accountEnv) {
+        for (const [k, v] of Object.entries(options.accountEnv)) envOverrides[k] = v;
+      }
 
       // Debug: log full invocation details (env values redacted by pino redact paths)
       const safeEnvSummary: Record<string, string> = {};
       for (const [k, v] of Object.entries(envOverrides)) {
         if (v === null) {
           safeEnvSummary[k] = '(cleared)';
-        } else if (/key|secret|token|password/i.test(k)) {
+        } else if (/key|secret|token|password|cookie|auth|session|bearer|credential/i.test(k)) {
           safeEnvSummary[k] = v.slice(0, 6) + '***';
         } else {
           safeEnvSummary[k] = v;

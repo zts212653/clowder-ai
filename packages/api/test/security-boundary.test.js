@@ -1,11 +1,49 @@
+import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// F171: bootstrapCatCatalog now creates empty catalogs. To start the API server in tests,
+// we must provide a pre-seeded cat-catalog.json with breeds so getCatModel('opus') succeeds.
+const BUILTIN_ACCOUNT_IDS = {
+  anthropic: 'claude',
+  openai: 'codex',
+  google: 'gemini',
+  kimi: 'kimi',
+  dare: 'dare',
+  opencode: 'opencode',
+};
+
+function buildSeededCatalog(templatePath) {
+  const template = JSON.parse(readFileSync(templatePath, 'utf-8'));
+  const version = template.version ?? 1;
+  const breeds = JSON.parse(JSON.stringify(template.breeds || []));
+  for (const breed of breeds) {
+    for (const variant of breed.variants || []) {
+      if (!variant.accountRef && variant.clientId && BUILTIN_ACCOUNT_IDS[variant.clientId]) {
+        variant.accountRef = BUILTIN_ACCOUNT_IDS[variant.clientId];
+      }
+    }
+  }
+  const roster = template.roster ?? {};
+  const reviewPolicy = template.reviewPolicy ?? {
+    requireDifferentFamily: true,
+    preferActiveInThread: true,
+    preferLead: true,
+    excludeUnavailable: true,
+  };
+  return version >= 2
+    ? { version, breeds, roster, reviewPolicy, ...(template.coCreator ? { coCreator: template.coCreator } : {}) }
+    : { version, breeds };
+}
 
 function once(emitter, event) {
   return new Promise((resolve) => emitter.once(event, resolve));
@@ -69,8 +107,22 @@ test('API binds to 127.0.0.1 by default', async (t) => {
 
   const apiDir = path.resolve(process.cwd());
   const tempRoot = mkdtempSync(path.join(tmpdir(), 'security-boundary-'));
+  // F171: provide a seeded catalog so the spawned API server can resolve cat models.
+  // The template lives 3 levels up from this test file (packages/api/test → repo root).
+  const repoTemplatePath = path.resolve(__dirname, '..', '..', '..', 'cat-template.json');
+  const templateForServer = path.join(tempRoot, 'cat-template.json');
+  writeFileSync(templateForServer, readFileSync(repoTemplatePath, 'utf-8'), 'utf-8');
+  mkdirSync(path.join(tempRoot, '.cat-cafe'), { recursive: true });
+  writeFileSync(
+    path.join(tempRoot, '.cat-cafe', 'cat-catalog.json'),
+    `${JSON.stringify(buildSeededCatalog(repoTemplatePath), null, 2)}\n`,
+    'utf-8',
+  );
+
   const childEnv = {
     ...process.env,
+    CAT_TEMPLATE_PATH: templateForServer,
+    CAT_CAFE_GLOBAL_CONFIG_ROOT: tempRoot,
     API_SERVER_PORT: '0',
     MEMORY_STORE: '1',
     PREVIEW_GATEWAY_ENABLED: '0',

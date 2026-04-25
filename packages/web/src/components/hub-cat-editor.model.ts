@@ -52,6 +52,15 @@ export interface HubCatEditorDraft {
   accountRef?: string;
   defaultModel: string;
   commandArgs?: string;
+  /** F171: template identity fields for bootcamp-guided cat creation */
+  templateName?: string;
+  templateNickname?: string;
+  templateAvatar?: string;
+  templateColorPrimary?: string;
+  templateColorSecondary?: string;
+  templateRoleDescription?: string;
+  templatePersonality?: string;
+  templateTeamStrengths?: string;
 }
 
 export interface StrategyFormState {
@@ -276,23 +285,40 @@ export function filterAccounts(client: ClientId, profiles: ProfileItem[]): Profi
 
 export const filterProfiles = filterAccounts;
 
+export function autoSlug(name: string, currentId?: string): string {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/^[^a-z]+/, '')
+    .replace(/-+$/, '')
+    .replace(/-{2,}/g, '-')
+    .slice(0, 40);
+  if (/^[a-z]/.test(slug)) return slug;
+  if (currentId && /^cat-[a-z0-9]+$/.test(currentId)) return currentId;
+  const rand = Math.random().toString(36).substring(2, 10);
+  return `cat-${rand}`;
+}
+
 export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | null): HubCatEditorFormState {
   const createDraft = !cat ? draft : null;
-  const catId = cat?.id ?? '';
   const persistedCliEffort = cat?.cli?.effort;
-  const mentionPatterns = cat?.mentionPatterns ?? (catId ? [canonicalMentionPattern(catId)] : []);
+  const nameForCreate = createDraft?.templateName ?? '';
+  const catId = cat?.id ?? (nameForCreate ? autoSlug(nameForCreate) : '');
+  const mentionPatterns = cat?.mentionPatterns ?? [];
   return {
     catId,
-    name: cat?.name ?? cat?.displayName ?? '',
-    displayName: cat?.displayName ?? cat?.name ?? '',
-    nickname: cat?.nickname ?? '',
-    avatar: cat?.avatar ?? '',
-    colorPrimary: cat?.color.primary ?? '#9B7EBD',
-    colorSecondary: cat?.color.secondary ?? '#E8DFF5',
+    name: cat?.name ?? cat?.displayName ?? createDraft?.templateName ?? '',
+    displayName: cat?.displayName ?? cat?.name ?? createDraft?.templateName ?? '',
+    nickname: cat?.nickname ?? createDraft?.templateNickname ?? '',
+    avatar: cat?.avatar ?? createDraft?.templateAvatar ?? '',
+    colorPrimary: cat?.color.primary ?? createDraft?.templateColorPrimary ?? '#9B7EBD',
+    colorSecondary: cat?.color.secondary ?? createDraft?.templateColorSecondary ?? '#E8DFF5',
     mentionPatterns: joinTags(mentionPatterns),
-    roleDescription: cat?.roleDescription ?? '',
-    personality: cat?.personality ?? '',
-    teamStrengths: cat?.teamStrengths ?? '',
+    roleDescription: cat?.roleDescription ?? createDraft?.templateRoleDescription ?? '',
+    personality: cat?.personality ?? createDraft?.templatePersonality ?? '',
+    teamStrengths: cat?.teamStrengths ?? createDraft?.templateTeamStrengths ?? '',
     caution: cat?.caution ?? '',
     strengths: cat?.strengths?.join(', ') ?? '',
     clientId: (cat?.clientId as ClientId | undefined) ?? createDraft?.clientId ?? 'anthropic',

@@ -1,7 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { HubAccountItem, type ProfileEditPayload } from '@/components/HubAccountItem';
+import { HubAccountItem } from '@/components/HubAccountItem';
 import type { ProfileItem } from '@/components/hub-accounts.types';
 
 const mockConfirm = vi.fn().mockResolvedValue(true);
@@ -45,91 +45,43 @@ describe('HubAccountItem', () => {
     vi.clearAllMocks();
   });
 
-  it('does not clear modelOverride when saving edit without override changes', async () => {
+  it('clicking the card triggers onEdit for API key accounts', async () => {
     const profile: ProfileItem = {
       id: 'claude-api',
       provider: 'claude-api',
       displayName: 'Claude API',
       name: 'Claude API',
       authType: 'api_key',
-
-      kind: 'api_key',
-      builtin: false,
       mode: 'api_key',
       baseUrl: 'https://api.anthropic.com',
       models: ['claude-opus-4-1'],
-      modelOverride: 'claude-opus-4-1',
       hasApiKey: true,
       createdAt: '2026-03-18T00:00:00.000Z',
       updatedAt: '2026-03-18T00:00:00.000Z',
     };
-    const onSave = vi.fn<(profileId: string, payload: ProfileEditPayload) => Promise<void>>(async () => {});
+    const onEdit = vi.fn();
 
     await act(async () => {
-      root.render(<HubAccountItem profile={profile} busy={false} onSave={onSave} onDelete={() => {}} />);
+      root.render(
+        <HubAccountItem
+          profile={profile}
+          busy={false}
+          onSave={vi.fn(async () => {})}
+          onDelete={() => {}}
+          onEdit={onEdit}
+        />,
+      );
     });
 
+    expect(container.textContent).not.toContain('编辑');
+    expect(container.textContent).toContain('删除');
+
+    // Click the card itself to trigger edit
+    const card = container.querySelector('[class*="rounded-"]') as HTMLElement;
     await act(async () => {
-      queryButton(container, '编辑').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      card.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    await act(async () => {
-      queryButton(container, '保存').dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    expect(onSave).toHaveBeenCalledTimes(1);
-    const payload = onSave.mock.calls[0]![1] as ProfileEditPayload;
-    expect(payload).toMatchObject({
-      displayName: 'Claude API',
-      baseUrl: 'https://api.anthropic.com',
-      models: ['claude-opus-4-1'],
-    });
-    expect(Object.hasOwn(payload, 'modelOverride')).toBe(false);
-  });
-
-  // F340: Protocol editing test removed — protocol is now derived at runtime, no UI for it.
-
-  it('sends empty baseUrl when clearing an API-key account base URL', async () => {
-    const profile: ProfileItem = {
-      id: 'codex-api',
-      provider: 'codex-api',
-      displayName: 'Codex API',
-      name: 'Codex API',
-      authType: 'api_key',
-
-      kind: 'api_key',
-      builtin: false,
-      mode: 'api_key',
-      baseUrl: 'https://api.openai-proxy.dev',
-      models: ['gpt-5.4'],
-      hasApiKey: true,
-      createdAt: '2026-03-18T00:00:00.000Z',
-      updatedAt: '2026-03-18T00:00:00.000Z',
-    };
-    const onSave = vi.fn<(profileId: string, payload: ProfileEditPayload) => Promise<void>>(async () => {});
-
-    await act(async () => {
-      root.render(<HubAccountItem profile={profile} busy={false} onSave={onSave} onDelete={() => {}} />);
-    });
-
-    await act(async () => {
-      queryButton(container, '编辑').dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    const baseUrlInput = container.querySelector('input[placeholder*="API 服务地址"]') as HTMLInputElement | null;
-    if (!baseUrlInput) throw new Error('Missing Base URL input');
-    await act(async () => {
-      const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(baseUrlInput), 'value');
-      descriptor?.set?.call(baseUrlInput, '');
-      baseUrlInput.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-
-    await act(async () => {
-      queryButton(container, '保存').dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    expect(onSave).toHaveBeenCalledTimes(1);
-    const payload = onSave.mock.calls[0]![1] as ProfileEditPayload;
-    expect(payload.baseUrl).toBe('');
+    expect(onEdit).toHaveBeenCalledWith(profile);
   });
 
   it('keeps the + 添加 model entry visible for built-in cards without binding-scope controls', async () => {
@@ -140,8 +92,6 @@ describe('HubAccountItem', () => {
       name: 'Codex (OAuth)',
       authType: 'oauth',
 
-      kind: 'builtin',
-      builtin: true,
       mode: 'subscription',
       models: ['gpt-5.4'],
       hasApiKey: false,
@@ -167,8 +117,6 @@ describe('HubAccountItem', () => {
       name: 'OpenCode (client-auth)',
       authType: 'oauth',
 
-      kind: 'builtin',
-      builtin: true,
       mode: 'subscription',
       models: ['claude-sonnet-4'],
       hasApiKey: false,
@@ -186,16 +134,13 @@ describe('HubAccountItem', () => {
     expect(container.textContent).toContain('OpenCode (client-auth)');
   });
 
-  it('uses password input for API key edits and requires delete confirmation', async () => {
+  it('requires delete confirmation and respects denial', async () => {
     const profile: ProfileItem = {
       id: 'codex-sponsor',
       provider: 'codex-sponsor',
       displayName: 'Codex Sponsor',
       name: 'Codex Sponsor',
       authType: 'api_key',
-
-      kind: 'api_key',
-      builtin: false,
       mode: 'api_key',
       baseUrl: 'https://proxy.example',
       models: ['gpt-5.4'],
@@ -208,18 +153,6 @@ describe('HubAccountItem', () => {
 
     await act(async () => {
       root.render(<HubAccountItem profile={profile} busy={false} onSave={vi.fn(async () => {})} onDelete={onDelete} />);
-    });
-
-    await act(async () => {
-      queryButton(container, '编辑').dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    const apiKeyInput = container.querySelector('input[type="password"]') as HTMLInputElement | null;
-    expect(apiKeyInput).not.toBeNull();
-    expect(apiKeyInput?.getAttribute('autocomplete')).toBe('off');
-
-    await act(async () => {
-      queryButton(container, '取消').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
     await act(async () => {

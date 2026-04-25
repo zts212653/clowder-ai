@@ -42,7 +42,7 @@ test('accounts route accepts kimi api_key account creation', async () => {
     assert.equal(listRes.statusCode, 200);
     const account = listRes.json().providers.find((entry) => entry.displayName === 'Moonshot');
     assert.ok(account, 'Kimi account should be listed');
-    assert.equal(account.kind, 'api_key');
+    assert.equal(account.authType, 'api_key');
   } finally {
     if (previousGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
     else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;

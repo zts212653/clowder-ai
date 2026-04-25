@@ -14,6 +14,38 @@ async function seedTemplate(projectRoot, mutateTemplate) {
   await writeFile(join(projectRoot, 'cat-template.json'), `${JSON.stringify(template, null, 2)}\n`, 'utf-8');
 }
 
+/**
+ * F171: bootstrapCatCatalog() now creates empty catalogs (first-run quest).
+ * Populate breeds from the template into the catalog, stamping default
+ * accountRef and source values that the old bootstrap used to do.
+ */
+const BUILTIN_ACCOUNT_IDS = {
+  anthropic: 'claude',
+  openai: 'codex',
+  google: 'gemini',
+  kimi: 'kimi',
+  dare: 'dare',
+  opencode: 'opencode',
+};
+
+async function seedCatalogBreeds(projectRoot) {
+  const template = JSON.parse(await readFile(join(projectRoot, 'cat-template.json'), 'utf-8'));
+  const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+  const catalog = JSON.parse(await readFile(catalogPath, 'utf-8'));
+  catalog.breeds = structuredClone(template.breeds || []);
+  for (const breed of catalog.breeds) {
+    for (const variant of breed.variants || []) {
+      if (!variant.accountRef && variant.clientId && BUILTIN_ACCOUNT_IDS[variant.clientId]) {
+        variant.accountRef = BUILTIN_ACCOUNT_IDS[variant.clientId];
+      }
+    }
+  }
+  if (template.roster) {
+    catalog.roster = { ...(catalog.roster || {}), ...template.roster };
+  }
+  await writeFile(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`, 'utf-8');
+}
+
 describe('cat account binding', () => {
   it('treats bootstrapped seed cats as inheriting the active bootstrap binding', async () => {
     const { bootstrapCatCatalog, resolveCatCatalogPath } = await import('../dist/config/cat-catalog-store.js');
@@ -26,6 +58,7 @@ describe('cat account binding', () => {
     try {
       await seedTemplate(projectRoot);
       bootstrapCatCatalog(projectRoot, join(projectRoot, 'cat-template.json'));
+      await seedCatalogBreeds(projectRoot);
       const catConfig = toAllCatConfigs(loadCatConfig(resolveCatCatalogPath(projectRoot))).codex;
       assert.ok(catConfig, 'codex should be present in bootstrapped runtime catalog');
       assert.equal(resolveBoundAccountRefForCat(projectRoot, 'codex', catConfig), 'codex');
@@ -51,6 +84,7 @@ describe('cat account binding', () => {
         codexBreed.variants[0].accountRef = 'codex-pinned';
       });
       bootstrapCatCatalog(projectRoot, join(projectRoot, 'cat-template.json'));
+      await seedCatalogBreeds(projectRoot);
       const catConfig = toAllCatConfigs(loadCatConfig(resolveCatCatalogPath(projectRoot))).codex;
       assert.ok(catConfig, 'codex should be present in bootstrapped runtime catalog');
       assert.equal(resolveBoundAccountRefForCat(projectRoot, 'codex', catConfig), 'codex-pinned');
@@ -72,15 +106,28 @@ describe('cat account binding', () => {
     const previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
 
     try {
-      await seedTemplate(projectRoot);
+      // Use 'test-spark' (not 'spark') to avoid collision with the global template's
+      // existing 'spark' variant catId registered by setup-cat-registry.js.
+      await seedTemplate(projectRoot, (template) => {
+        const codexBreed = template.breeds.find((breed) => breed.catId === 'codex');
+        codexBreed.variants.push({
+          id: 'codex-test-spark',
+          catId: 'test-spark',
+          clientId: 'openai',
+          defaultModel: 'gpt-5.4-spark',
+          mcpSupport: false,
+          cli: { command: 'codex', outputFormat: 'json' },
+        });
+      });
       process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
       process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
       bootstrapCatCatalog(projectRoot, process.env.CAT_TEMPLATE_PATH);
+      await seedCatalogBreeds(projectRoot);
 
       const catalogPath = resolveCatCatalogPath(projectRoot);
       const runtimeCatalog = JSON.parse(await readFile(catalogPath, 'utf-8'));
       const codexBreed = runtimeCatalog.breeds.find((breed) => breed.catId === 'codex');
-      const sparkVariant = codexBreed?.variants.find((variant) => variant.catId === 'spark');
+      const sparkVariant = codexBreed?.variants.find((variant) => variant.catId === 'test-spark');
       if (!codexBreed || !codexBreed.variants[0] || !sparkVariant) {
         throw new Error('codex seed variants missing from bootstrapped runtime catalog');
       }
@@ -97,7 +144,7 @@ describe('cat account binding', () => {
 
       const migratedRaw = JSON.parse(await readFile(catalogPath, 'utf-8'));
       const migratedCodexBreed = migratedRaw.breeds.find((breed) => breed.catId === 'codex');
-      const migratedSparkVariant = migratedCodexBreed?.variants.find((variant) => variant.catId === 'spark');
+      const migratedSparkVariant = migratedCodexBreed?.variants.find((variant) => variant.catId === 'test-spark');
       assert.equal(migratedCodexBreed?.variants[0]?.accountRef, 'codex-sponsor');
       assert.equal(migratedSparkVariant?.accountRef, 'codex');
     } finally {
@@ -122,14 +169,27 @@ describe('cat account binding', () => {
     process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
 
     try {
-      await seedTemplate(projectRoot);
+      // Use 'test-spark' (not 'spark') to avoid collision with the global template's
+      // existing 'spark' variant catId registered by setup-cat-registry.js.
+      await seedTemplate(projectRoot, (template) => {
+        const codexBreed = template.breeds.find((breed) => breed.catId === 'codex');
+        codexBreed.variants.push({
+          id: 'codex-test-spark',
+          catId: 'test-spark',
+          clientId: 'openai',
+          defaultModel: 'gpt-5.4-spark',
+          mcpSupport: false,
+          cli: { command: 'codex', outputFormat: 'json' },
+        });
+      });
       process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
       bootstrapCatCatalog(projectRoot, process.env.CAT_TEMPLATE_PATH);
+      await seedCatalogBreeds(projectRoot);
 
       const catalogPath = resolveCatCatalogPath(projectRoot);
       const runtimeCatalog = JSON.parse(await readFile(catalogPath, 'utf-8'));
       const codexBreed = runtimeCatalog.breeds.find((breed) => breed.catId === 'codex');
-      const sparkVariant = codexBreed?.variants.find((variant) => variant.catId === 'spark');
+      const sparkVariant = codexBreed?.variants.find((variant) => variant.catId === 'test-spark');
       if (!codexBreed || !codexBreed.variants[0] || !sparkVariant) {
         throw new Error('codex seed variants missing from bootstrapped runtime catalog');
       }
@@ -153,8 +213,8 @@ describe('cat account binding', () => {
       const migratedCatalog = readCatCatalog(projectRoot);
       const allCats = toAllCatConfigs(migratedCatalog);
       assert.equal(resolveBoundAccountRefForCat(projectRoot, 'codex', allCats.codex), 'codex-sponsor');
-      // Authoritative model: spark's explicit 'codex' binding is returned directly
-      assert.equal(resolveBoundAccountRefForCat(projectRoot, 'spark', allCats.spark), 'codex');
+      // Authoritative model: test-spark's explicit 'codex' binding is returned directly
+      assert.equal(resolveBoundAccountRefForCat(projectRoot, 'test-spark', allCats['test-spark']), 'codex');
     } finally {
       if (previousGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
       else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;
@@ -175,7 +235,7 @@ describe('cat account binding', () => {
     try {
       await seedTemplate(projectRoot);
       bootstrapCatCatalog(projectRoot, join(projectRoot, 'cat-template.json'));
-      await mkdir(join(projectRoot, '.cat-cafe'), { recursive: true });
+      await seedCatalogBreeds(projectRoot);
       await writeFile(
         join(projectRoot, '.cat-cafe', 'accounts.json'),
         JSON.stringify(

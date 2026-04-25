@@ -716,6 +716,10 @@ frontend_launch_command() {
     fi
 }
 
+web_production_build_ready() {
+    [ -f "$PROJECT_DIR/packages/web/.next/BUILD_ID" ]
+}
+
 # Sidecar summary: ready → 地址, failed → 报告, disabled → 静默
 print_sidecar_summary_all() {
     local name state_var port state
@@ -1323,10 +1327,10 @@ main() {
     if [ "$PROD_WEB" = true ]; then
         # Production: next start (PWA + Tailscale 友好)
         echo "  启动 Frontend (端口 $WEB_PORT, production)..."
-        if [ -d "packages/web/.next" ]; then
+        if web_production_build_ready; then
             background_eval_with_null_stdin "$(frontend_launch_command)"
         else
-            echo -e "${RED}  ✗ .next 目录不存在，无法以 production 模式启动${NC}"
+            echo -e "${RED}  ✗ 缺少完整 web production build (.next/BUILD_ID)，无法以 production 模式启动${NC}"
             echo -e "${RED}    请先不带 --quick 运行以执行 next build${NC}"
             exit 1
         fi

@@ -83,9 +83,20 @@ export async function* spawnCli(
   // Default timeout is configurable via CLI_TIMEOUT_MS env var; 0 disables timeout.
   const timeoutMs = resolveCliTimeoutMs(options.timeoutMs);
 
+  // Log only flag names (--foo) and arg count — never raw values.
+  // Multiple providers pass prompt text via different shapes (positional,
+  // --prompt, -p, after --) so pattern-based redaction is unreliable.
+  const flagNames = options.args.filter((a) => a.startsWith('-'));
   log.debug(
-    { command: options.command, argCount: options.args.length, cwd: options.cwd, timeoutMs },
-    'Spawning CLI process',
+    {
+      command: options.command,
+      flagNames,
+      argCount: options.args.length,
+      cwd: options.cwd,
+      timeoutMs,
+      invocationId: options.invocationId,
+    },
+    '[cli-spawn] Spawning CLI process',
   );
 
   const child = doSpawn(options.command, options.args, {

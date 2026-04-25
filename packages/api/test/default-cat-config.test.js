@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
-import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
+import { catRegistry } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import {
   clearRuntimeDefaultCatId,
   getDefaultCatId,
   getOwnerUserId,
+  loadCatConfig,
   setRuntimeDefaultCatId,
+  toAllCatConfigs,
 } from '../dist/config/cat-config-loader.js';
+
+const _allConfigs = toAllCatConfigs(loadCatConfig());
 
 describe('getDefaultCatId runtime override (F154 AC-A4)', () => {
   let originalDefault;
@@ -71,8 +75,8 @@ describe('PUT /api/config/default-cat works without DEFAULT_OWNER_USER_ID', () =
 
   before(async () => {
     catRegistry.reset();
-    catRegistry.register('opus', CAT_CONFIGS.opus);
-    catRegistry.register('codex', CAT_CONFIGS.codex);
+    catRegistry.register('opus', _allConfigs.opus);
+    catRegistry.register('codex', _allConfigs.codex);
     delete process.env.DEFAULT_OWNER_USER_ID;
     clearRuntimeDefaultCatId();
     const { configRoutes } = await import('../dist/routes/config.js');
@@ -107,8 +111,8 @@ describe('GET/PUT /api/config/default-cat (F154 AC-A4)', () => {
   before(async () => {
     // Register cats so catRegistry.has() validation works
     catRegistry.reset();
-    catRegistry.register('opus', CAT_CONFIGS.opus);
-    catRegistry.register('codex', CAT_CONFIGS.codex);
+    catRegistry.register('opus', _allConfigs.opus);
+    catRegistry.register('codex', _allConfigs.codex);
     // Set DEFAULT_OWNER_USER_ID for owner gate
     process.env.DEFAULT_OWNER_USER_ID = OWNER_ID;
     clearRuntimeDefaultCatId();

@@ -42,22 +42,23 @@ const BUILTIN_CLIENT_FOR_ID: Record<string, string> = {
   builtin_opencode: 'opencode',
 };
 
-/** Synthesize a ProviderProfileView-compatible object from AccountConfig (backward compat for Hub UI). */
+/** Synthesize a ProviderProfileView-compatible object from AccountConfig. */
 function accountToView(id: string, account: AccountConfig, apiKeyPresent: boolean) {
   const isBuiltin = account.authType === 'oauth';
   const builtinClient = BUILTIN_CLIENT_FOR_ID[id];
+  const clientId = account.clientId ?? (isBuiltin ? builtinClient : undefined);
   return {
     id,
     name: account.displayName ?? id,
     displayName: account.displayName ?? id,
-    kind: isBuiltin ? 'builtin' : ('api_key' as const),
     authType: account.authType,
     builtin: isBuiltin,
-    ...(isBuiltin && builtinClient ? { clientId: builtinClient } : {}),
+    ...(clientId ? { clientId } : {}),
     ...(account.baseUrl ? { baseUrl: account.baseUrl } : {}),
     models: account.models ? [...account.models] : [],
     hasApiKey: apiKeyPresent,
-    mode: isBuiltin ? ('subscription' as const) : ('api_key' as const),
+    mode: account.authType === 'api_key' ? ('api_key' as const) : ('subscription' as const),
+    ...(account.envVars && Object.keys(account.envVars).length > 0 ? { envVars: { ...account.envVars } } : {}),
     createdAt: '',
     updatedAt: '',
   };
@@ -109,8 +110,25 @@ function findBoundCatIds(projectRoot: string, accountRef: string): string[] | Er
 
 const MONOREPO_ROOT = findMonorepoRoot();
 
+/** F171: POSIX env key — must start with uppercase or _, rest alphanumeric + _. CAT_CAFE_ reserved. */
+const envKeySchema = z.string().regex(/^[A-Z_][A-Za-z0-9_]*$/, 'env key must match [A-Z_][A-Za-z0-9_]*');
+const envVarsSchema = z
+  .record(envKeySchema, z.string())
+  .optional()
+  .transform((vars) => {
+    if (!vars) return vars;
+    // Strip CAT_CAFE_ reserved keys server-side
+    const filtered: Record<string, string> = {};
+    for (const [k, v] of Object.entries(vars)) {
+      if (!k.startsWith('CAT_CAFE_')) filtered[k] = v;
+    }
+    return Object.keys(filtered).length > 0 ? filtered : undefined;
+  });
+
 const authTypeEnum = z.enum(['oauth', 'api_key']);
 const modeEnum = z.enum(['subscription', 'api_key']);
+/** F171: restrict clientId to known clients — prevents silent data rot when frontend truststhis as enum. */
+const accountClientEnum = z.enum(['anthropic', 'openai', 'google', 'kimi', 'dare', 'opencode']);
 
 const projectQuerySchema = z.object({
   projectPath: z.string().optional(),
@@ -120,6 +138,8 @@ const createBodySchema = z
   .object({
     projectPath: z.string().optional(),
     provider: z.string().trim().min(1).optional(),
+    /** F171: Explicit client identity for API key accounts. */
+    clientId: accountClientEnum.optional(),
     name: z.string().trim().min(1).optional(),
     displayName: z.string().trim().min(1).optional(),
     mode: modeEnum.optional(),
@@ -137,6 +157,8 @@ const createBodySchema = z
           .pipe(z.string().min(1)),
       )
       .optional(),
+    /** F171: User-defined env vars injected into agent subprocess. */
+    envVars: envVarsSchema,
   })
   .superRefine((value, ctx) => {
     if (!value.name && !value.displayName) {
@@ -151,6 +173,7 @@ const createBodySchema = z
 const updateBodySchema = z.object({
   projectPath: z.string().optional(),
   provider: z.string().trim().min(1).optional(),
+  clientId: accountClientEnum.optional(),
   name: z.string().trim().min(1).optional(),
   displayName: z.string().trim().min(1).optional(),
   mode: modeEnum.optional(),
@@ -168,6 +191,8 @@ const updateBodySchema = z.object({
         .pipe(z.string().min(1)),
     )
     .optional(),
+  /** F171: User-defined env vars injected into agent subprocess. */
+  envVars: envVarsSchema,
 });
 
 const deleteBodySchema = z.object({
@@ -250,9 +275,11 @@ export const accountsRoutes: FastifyPluginAsync = async (app) => {
       // accountRef binding; system callers use well-known builtin IDs.
       const account: AccountConfig = {
         authType: (body.authType as 'oauth' | 'api_key') ?? 'api_key',
+        ...(body.clientId ? { clientId: body.clientId } : {}),
         ...(body.baseUrl ? { baseUrl: body.baseUrl } : {}),
         ...(body.models ? { models: body.models } : {}),
         ...((body.displayName ?? body.name) ? { displayName: body.displayName ?? body.name } : {}),
+        ...(body.envVars && Object.keys(body.envVars).length > 0 ? { envVars: body.envVars } : {}),
       };
       const existingAccounts = readCatalogAccounts(projectRoot);
       const profileId = deriveAccountId(
@@ -306,6 +333,11 @@ export const accountsRoutes: FastifyPluginAsync = async (app) => {
       // clowder-ai#340: protocol not persisted — derived at runtime from well-known account IDs.
       const account: AccountConfig = {
         authType: (parsed.data.authType as 'oauth' | 'api_key') ?? existing.authType,
+        ...(parsed.data.clientId
+          ? { clientId: parsed.data.clientId }
+          : existing.clientId
+            ? { clientId: existing.clientId }
+            : {}),
         ...(parsed.data.baseUrl != null
           ? { baseUrl: parsed.data.baseUrl || undefined }
           : existing.baseUrl
@@ -315,6 +347,13 @@ export const accountsRoutes: FastifyPluginAsync = async (app) => {
           ? { models: parsed.data.models }
           : existing.models
             ? { models: [...existing.models] }
+            : {}),
+        ...('envVars' in parsed.data
+          ? parsed.data.envVars && Object.keys(parsed.data.envVars).length > 0
+            ? { envVars: parsed.data.envVars }
+            : {}
+          : existing.envVars && Object.keys(existing.envVars).length > 0
+            ? { envVars: { ...existing.envVars } }
             : {}),
         displayName: parsed.data.displayName ?? parsed.data.name ?? existing.displayName ?? params.profileId,
       };

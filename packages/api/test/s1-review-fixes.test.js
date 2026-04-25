@@ -7,6 +7,7 @@
  * P2:   multipart 路径需要提取 idempotencyKey
  */
 
+import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { describe, mock, test } from 'node:test';
 

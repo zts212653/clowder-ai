@@ -58,18 +58,17 @@ export interface ThreadsRoutesOptions {
   guideSessionStore?: import('../domains/guides/GuideSessionRepository.js').IGuideSessionStore;
 }
 
-/** F087: Bootcamp state Zod schema */
+/** F087: Bootcamp state Zod schema (F171 v2 flow) */
 const bootcampPhaseSchema = z.enum([
-  'phase-0-select-cat',
   'phase-1-intro',
   'phase-2-env-check',
   'phase-3-config-help',
-  'phase-3.5-advanced',
   'phase-4-task-select',
   'phase-5-kickoff',
   'phase-6-design',
   'phase-7-dev',
-  'phase-8-review',
+  'phase-7.5-add-teammate',
+  'phase-8-collab',
   'phase-9-complete',
   'phase-10-retro',
   'phase-11-farewell',
@@ -80,6 +79,9 @@ const bootcampStateSchema = z
     phase: bootcampPhaseSchema,
     leadCat: catIdSchema().optional(),
     selectedTaskId: z.string().max(50).optional(),
+    /** F171: sub-step for add-teammate / farewell console guide overlay.
+     *  Free-form string — guide flows evolve and rigid enums cause silent PATCH failures. */
+    guideStep: z.string().max(50).nullable().optional(),
     envCheck: z
       .record(z.object({ ok: z.boolean(), version: z.string().optional(), note: z.string().optional() }))
       .optional(),

@@ -81,22 +81,22 @@ function GuideOverlayInner() {
       : null;
   const isComplete = session ? session.phase === 'complete' : false;
   const usesHorizontalMedia = !!currentStep?.tipsMetadata && currentStep.tipsMetadata.layout === 'horizontal';
+
+  // Auto-dismiss: when last step uses 'auto-confirm', skip the completion popup.
+  // 'confirm' steps still show the popup for explicit user acknowledgement.
+  const lastStep = session ? session.flow.steps[session.flow.steps.length - 1] : null;
+  const isAutoConfirmFinish = lastStep?.advance === 'auto-confirm';
+  useEffect(() => {
+    if (isComplete && isAutoConfirmFinish) exitGuide();
+  }, [isComplete, isAutoConfirmFinish, exitGuide]);
+
   const handleExit = async () => {
     if (session?.threadId) {
-      try {
-        const response = await apiFetch('/api/guide-actions/cancel', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ threadId: session.threadId, guideId: session.flow.id }),
-        });
-        if (!response.ok) {
-          console.error('[GuideOverlay] Failed to persist guide cancellation:', response.status);
-          return;
-        }
-      } catch (error) {
-        console.error('[GuideOverlay] Failed to persist guide cancellation:', error);
-        return;
-      }
+      apiFetch('/api/guide-actions/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ threadId: session.threadId, guideId: session.flow.id }),
+      }).catch(() => {});
     }
     exitGuide();
   };
@@ -174,7 +174,7 @@ function GuideOverlayInner() {
   ]);
 
   // Auto-advance: listen for interaction with target element
-  useAutoAdvance(currentStep, advanceStep, session?.phase === 'active');
+  useAutoAdvance(currentStep, advanceStep);
 
   // A-3: Focus trap — Tab cycles between HUD and target element (passthrough).
   // Escape disabled (KD-14): users must click "退出" button.
@@ -354,7 +354,8 @@ function GuideOverlayInner() {
     : {};
 
   const shieldZ = 1101;
-  const panels = targetRect ? computeShieldPanels(targetRect, pad) : null;
+  // 'next' mode: block target click-through (no hole in shield)
+  const panels = targetRect && currentStep.advance !== 'next' ? computeShieldPanels(targetRect, pad) : null;
 
   return (
     <>
@@ -416,7 +417,7 @@ function GuideOverlayInner() {
         />
       )}
 
-      {/* HUD: tips + exit only */}
+      {/* HUD: tips + exit + optional next button */}
       <GuideHUD
         ref={hudRef}
         step={currentStep}
@@ -426,6 +427,7 @@ function GuideOverlayInner() {
         targetRect={targetRect}
         hudSize={hudSize}
         onExit={handleExit}
+        onNext={currentStep.advance === 'next' ? advanceStep : undefined}
       />
     </>
   );
@@ -433,7 +435,7 @@ function GuideOverlayInner() {
 
 /* ── Auto-advance hook ── */
 
-function useAutoAdvance(step: OrchestrationStep | null, advance: () => void, isActive: boolean) {
+function useAutoAdvance(step: OrchestrationStep | null, advance: () => void) {
   const advanceRef = useRef(advance);
   const listenerCleanupRef = useRef<(() => void) | null>(null);
   const delayedAdvanceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -449,7 +451,7 @@ function useAutoAdvance(step: OrchestrationStep | null, advance: () => void, isA
     }
     bindingKeyRef.current = null;
 
-    if (!step || !isActive) return;
+    if (!step) return;
 
     const target = step.target;
     const advanceType = step.advance;
@@ -469,9 +471,17 @@ function useAutoAdvance(step: OrchestrationStep | null, advance: () => void, isA
       }, delayMs);
     };
 
-    // Small delay after step transition to let UI settle
+    // Poll for both element AND active phase before attaching listener.
+    // Phase is checked via store snapshot (not a dependency) so that
+    // phase → locating transitions don't trigger effect cleanup and
+    // cancel pending advance timers (e.g. hub.close click unmounts element).
     const attachListener = () => {
       if (cancelled) return;
+      const phase = useGuideStore.getState().session?.phase;
+      if (phase !== 'active') {
+        attachTimer = setTimeout(attachListener, 100);
+        return;
+      }
       const el = document.querySelector(selector);
       if (!el) {
         attachTimer = setTimeout(attachListener, 100);
@@ -489,8 +499,8 @@ function useAutoAdvance(step: OrchestrationStep | null, advance: () => void, isA
       }
 
       if (advanceType === 'input') {
-        const handler = () => {
-          const val = (el as HTMLInputElement).value;
+        const handler = (e: Event) => {
+          const val = (e.target as HTMLInputElement).value;
           if (val && val.trim()) {
             scheduleAdvance(500);
           }
@@ -500,7 +510,7 @@ function useAutoAdvance(step: OrchestrationStep | null, advance: () => void, isA
         return;
       }
 
-      if (advanceType === 'confirm') {
+      if (advanceType === 'confirm' || advanceType === 'auto-confirm') {
         const handler = (event: Event) => {
           const detail = (event as CustomEvent<{ target?: string }>).detail;
           if (detail?.target !== target) return;
@@ -513,10 +523,14 @@ function useAutoAdvance(step: OrchestrationStep | null, advance: () => void, isA
         return;
       }
 
-      // 'visible' and 'confirm' auto-advance immediately when target found
+      // 'visible' auto-advances immediately when target found
       if (advanceType === 'visible') {
         advanceRef.current();
+        return;
       }
+
+      // 'next' — no auto-advance; user clicks "下一步" in HUD
+      // (no listener needed)
     };
     attachTimer = setTimeout(attachListener, 100);
 
@@ -533,7 +547,7 @@ function useAutoAdvance(step: OrchestrationStep | null, advance: () => void, isA
         bindingKeyRef.current = null;
       }
     };
-  }, [step?.id, step?.target, step?.advance, isActive]);
+  }, [step?.id, step?.target, step?.advance]);
 }
 
 /* ── Minimal HUD: tips + exit + progress ── */
@@ -546,10 +560,12 @@ interface GuideHUDProps {
   targetRect: DOMRect | null;
   hudSize: { width: number; height: number };
   onExit: () => void;
+  /** Present when advance mode is 'next' — manual step forward button */
+  onNext?: () => void;
 }
 
 const GuideHUD = React.forwardRef<HTMLDivElement, GuideHUDProps>(function GuideHUD(
-  { step, stepIndex, totalSteps, phase, targetRect, hudSize, onExit },
+  { step, stepIndex, totalSteps, phase, targetRect, hudSize, onExit, onNext },
   ref,
 ) {
   const hasMedia = !!step.tipsMetadata;
@@ -600,7 +616,7 @@ const GuideHUD = React.forwardRef<HTMLDivElement, GuideHUDProps>(function GuideH
         <p className="mb-3 text-xs text-[var(--guide-text-secondary)] animate-pulse">正在定位目标元素...</p>
       )}
 
-      {/* Actions: confirm button (when advance=confirm) + exit */}
+      {/* Footer: exit + confirm/next actions */}
       <div className="flex items-center justify-between border-t border-[var(--guide-hud-border)] pt-3">
         <button
           type="button"
@@ -618,6 +634,16 @@ const GuideHUD = React.forwardRef<HTMLDivElement, GuideHUDProps>(function GuideH
             aria-label="已完成该步骤"
           >
             已完成该步骤
+          </button>
+        )}
+        {onNext && (
+          <button
+            type="button"
+            onClick={onNext}
+            className="rounded-lg bg-[var(--guide-cutout-ring)] px-4 py-1.5 text-xs font-medium text-white transition hover:opacity-90"
+            aria-label={stepIndex === totalSteps - 1 ? '完成引导' : '下一步'}
+          >
+            {stepIndex === totalSteps - 1 ? '知道了!' : '下一步'}
           </button>
         )}
       </div>

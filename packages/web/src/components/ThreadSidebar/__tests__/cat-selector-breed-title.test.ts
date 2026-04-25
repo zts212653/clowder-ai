@@ -26,7 +26,6 @@ const ragdollVariants: CatData[] = [
     personality: '',
     variantLabel: 'Custom',
     isDefaultVariant: false,
-    source: 'seed',
   },
   {
     id: 'opus',
@@ -41,7 +40,6 @@ const ragdollVariants: CatData[] = [
     roleDescription: '',
     personality: '',
     isDefaultVariant: true,
-    source: 'seed',
   },
 ];
 

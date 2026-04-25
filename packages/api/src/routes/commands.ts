@@ -3,7 +3,7 @@
  * POST /api/commands/extract-tasks - Extract tasks from conversation
  */
 
-import type { CommandSurface } from '@cat-cafe/shared';
+import { type CommandSurface, catRegistry } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { extractTasks, toCreateTaskInputs } from '../domains/cats/services/orchestration/TaskExtractor.js';
@@ -82,7 +82,7 @@ export const commandsRoutes: FastifyPluginAsync<CommandsRoutesOptions> = async (
     // Get thread history
     const messages = await opts.messageStore.getByThread(threadId, messageCount ?? 50, userId);
 
-    if (messages.length === 0) {
+    if (messages.length === 0 || catRegistry.getAllIds().length === 0) {
       return { tasks: [], degraded: false, count: 0 };
     }
 

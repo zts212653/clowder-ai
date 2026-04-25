@@ -44,23 +44,35 @@ describe('preview auto-open store', () => {
 describe('shouldAcceptAutoOpen (room scope filter)', () => {
   // Session HAS worktreeId → accept exact match or global, reject other worktrees
   it('accepts when session worktreeId matches event worktreeId', () => {
-    expect(shouldAcceptAutoOpen('wt-123', 'wt-123')).toBe(true);
+    expect(shouldAcceptAutoOpen('wt-123', 'wt-123', 'thread-a', 'thread-a')).toBe(true);
   });
 
   it('rejects when session has worktreeId but event has different worktreeId', () => {
-    expect(shouldAcceptAutoOpen('wt-123', 'wt-456')).toBe(false);
+    expect(shouldAcceptAutoOpen('wt-123', 'wt-456', 'thread-a', 'thread-a')).toBe(false);
   });
 
   it('accepts global event when session has worktreeId (cat may omit worktreeId)', () => {
-    expect(shouldAcceptAutoOpen('wt-123', undefined)).toBe(true);
+    expect(shouldAcceptAutoOpen('wt-123', undefined, 'thread-a', 'thread-a')).toBe(true);
+  });
+
+  it('rejects global event from a different thread even when worktree is omitted', () => {
+    expect(shouldAcceptAutoOpen('wt-123', undefined, 'thread-a', 'thread-b')).toBe(false);
   });
 
   // Session has NO worktreeId → accept global only
   it('accepts global event when session has no worktreeId', () => {
-    expect(shouldAcceptAutoOpen(null, undefined)).toBe(true);
+    expect(shouldAcceptAutoOpen(null, undefined, 'thread-a', undefined)).toBe(true);
   });
 
   it('rejects worktree-scoped event when session has no worktreeId', () => {
-    expect(shouldAcceptAutoOpen(null, 'wt-123')).toBe(false);
+    expect(shouldAcceptAutoOpen(null, 'wt-123', 'thread-a', 'thread-a')).toBe(false);
+  });
+
+  it('accepts global event when threadId matches', () => {
+    expect(shouldAcceptAutoOpen(null, undefined, 'thread-a', 'thread-a')).toBe(true);
+  });
+
+  it('rejects global event when threadId differs', () => {
+    expect(shouldAcceptAutoOpen(null, undefined, 'thread-a', 'thread-b')).toBe(false);
   });
 });

@@ -9,7 +9,7 @@
  *   3. Whitespace collapse + trim
  */
 
-import { CAT_CONFIGS, escapeRegExp } from '@cat-cafe/shared';
+import { escapeRegExp } from '@cat-cafe/shared';
 import terms from './voice-terms.json';
 
 export type TermEntry = readonly [RegExp, string];
@@ -57,13 +57,8 @@ function buildSpeechMentionPattern(aliases: string[]): RegExp {
   );
 }
 
-const staticAliases = Array.from(
-  new Set(
-    Object.values(CAT_CONFIGS).flatMap((config) => config.mentionPatterns.map((pattern) => pattern.replace(/^@/, ''))),
-  ),
-).sort((a, b) => b.length - a.length);
-
-let _speechMentionPattern = buildSpeechMentionPattern(staticAliases);
+// Starts empty; refreshSpeechAliases() populates after /api/cats fetch
+let _speechMentionPattern = buildSpeechMentionPattern([]);
 
 /** Refresh speech mention aliases from dynamic cat data (called by useCatData) */
 export function refreshSpeechAliases(cats: Array<{ mentionPatterns: string[] }>): void {

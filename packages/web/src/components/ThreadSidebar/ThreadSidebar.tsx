@@ -281,7 +281,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
           title: '🎓 猫猫训练营',
           bootcampState: {
             v: 1,
-            phase: 'phase-0-select-cat',
+            phase: 'phase-1-intro',
             startedAt: Date.now(),
           },
         }),
@@ -514,6 +514,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
               className="text-xs px-2 py-1 rounded-lg border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 disabled:opacity-40 transition-colors"
               title="猫猫训练营"
               data-testid="sidebar-bootcamp"
+              data-guide-id="sidebar.bootcamp"
             >
               <BootcampIcon className="w-3.5 h-3.5 inline-block -mt-0.5" />
             </button>
@@ -549,6 +550,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
               onClick={() => setShowPicker(true)}
               disabled={isCreating}
               className="text-xs px-2 py-1 rounded-lg bg-cocreator-primary text-white hover:bg-cocreator-dark disabled:opacity-40 transition-colors"
+              data-guide-id="sidebar.new-thread"
             >
               {isCreating ? '...' : '+ 新对话'}
             </button>

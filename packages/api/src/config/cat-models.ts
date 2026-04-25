@@ -2,18 +2,11 @@
  * Cat Model Configuration
  * F32-b: Dynamic env key resolution — CAT_{CATID}_MODEL (uppercased, hyphens → underscores)
  *
- * 优先级: 环境变量 > catRegistry (from cat-config.json) > CAT_CONFIGS 硬编码
- *
- * 环境变量 examples:
- *   CAT_OPUS_MODEL      → 布偶猫模型
- *   CAT_OPUS_45_MODEL   → 布偶猫 4.5 模型 (F32-b variant)
- *   CAT_CODEX_MODEL     → 缅因猫模型
- *   CAT_GEMINI_MODEL    → 暹罗猫模型
- *
- * 或直接修改项目根目录的 cat-config.json
+ * 运行时来源: .cat-cafe/cat-catalog.json（唯一配置源）
+ * 环境变量 CAT_{CATID}_MODEL 可 override，用于调试。
  */
 
-import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
+import { catRegistry } from '@cat-cafe/shared';
 
 /**
  * F32-b: Generate dynamic env key from catId.
@@ -24,9 +17,8 @@ function getCatModelEnvKey(catId: string): string {
 }
 
 /**
- * 获取猫的实际模型
- * F32-b: Dynamic env key + catRegistry as primary source
- * 优先级: 环境变量 > catRegistry (from cat-config.json) > CAT_CONFIGS 硬编码
+ * 获取猫的实际模型。
+ * 运行时读 catRegistry（.cat-cafe/cat-catalog.json），环境变量可 override。
  */
 export function getCatModel(catName: string): string {
   // 1. 环境变量最高优先 (dynamic key: CAT_{CATID}_MODEL)
@@ -36,16 +28,10 @@ export function getCatModel(catName: string): string {
     return envValue;
   }
 
-  // 2. catRegistry (populated from cat-config.json at startup)
+  // 2. catRegistry (populated from .cat-cafe/cat-catalog.json at startup)
   const entry = catRegistry.tryGet(catName);
   if (entry) {
     return entry.config.defaultModel;
-  }
-
-  // 3. 硬编码默认值 (legacy fallback)
-  const config = CAT_CONFIGS[catName];
-  if (config) {
-    return config.defaultModel;
   }
 
   throw new Error(`No model configured for cat "${catName}"`);
@@ -56,7 +42,7 @@ export function getCatModel(catName: string): string {
  */
 export function getAllCatModels(): Record<string, string> {
   const result: Record<string, string> = {};
-  const allIds = catRegistry.getAllIds().length > 0 ? catRegistry.getAllIds().map(String) : Object.keys(CAT_CONFIGS);
+  const allIds = catRegistry.getAllIds().map(String);
   for (const catName of allIds) {
     result[catName] = getCatModel(catName);
   }

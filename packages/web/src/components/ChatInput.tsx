@@ -713,7 +713,7 @@ export function ChatInput({
           </svg>
         </button>
 
-        <div className="flex-1 relative">
+        <div className="flex-1 relative" data-bootcamp-step="chat-input" data-guide-id="chat.input">
           <textarea
             ref={textareaRef}
             value={input}

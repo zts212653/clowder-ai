@@ -2,7 +2,7 @@
  * F32-b Phase 3: Regression test for useCatData in-session retry mechanism.
  *
  * Verifies: first fetch fails → 10s timer → retry succeeds →
- *           cats updated from fallback to API data → no further retries.
+ *           cats updated from empty to API data → no further retries.
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -13,23 +13,6 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 const mockApiFetch = vi.fn();
 vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
-}));
-
-vi.mock('@cat-cafe/shared', () => ({
-  CAT_CONFIGS: {
-    opus: {
-      id: 'opus',
-      displayName: '布偶猫',
-      nickname: '宪宪',
-      color: { primary: '#9B7EBD', secondary: '#E8D5F5' },
-      mentionPatterns: ['@布偶', '@布偶猫', '@opus'],
-      clientId: 'anthropic',
-      defaultModel: 'opus',
-      avatar: '/a.png',
-      roleDescription: 'dev',
-      personality: 'kind',
-    },
-  },
 }));
 
 vi.mock('@/lib/mention-highlight', () => ({ refreshMentionData: vi.fn() }));

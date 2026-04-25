@@ -18,7 +18,7 @@ describe('F087: Thread bootcampState', () => {
     const thread = store.create('user1', 'Bootcamp');
     const state = {
       v: 1,
-      phase: 'phase-0-select-cat',
+      phase: 'phase-1-intro',
       startedAt: Date.now(),
     };
     store.updateBootcampState(thread.id, state);
@@ -30,7 +30,7 @@ describe('F087: Thread bootcampState', () => {
     const thread = store.create('user1', 'Bootcamp');
     store.updateBootcampState(thread.id, {
       v: 1,
-      phase: 'phase-0-select-cat',
+      phase: 'phase-1-intro',
       startedAt: Date.now(),
     });
 
@@ -50,7 +50,7 @@ describe('F087: Thread bootcampState', () => {
     const thread = store.create('user1', 'Bootcamp');
     store.updateBootcampState(thread.id, {
       v: 1,
-      phase: 'phase-0-select-cat',
+      phase: 'phase-1-intro',
       startedAt: Date.now(),
     });
     assert.ok(store.get(thread.id).bootcampState);
@@ -77,7 +77,7 @@ describe('F087: Thread bootcampState', () => {
   it('ignores update on non-existent thread', () => {
     store.updateBootcampState('nonexistent', {
       v: 1,
-      phase: 'phase-0-select-cat',
+      phase: 'phase-1-intro',
       startedAt: Date.now(),
     });
     // Should not throw

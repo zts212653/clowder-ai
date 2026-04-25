@@ -3,6 +3,7 @@
  * 测试历史 context 组装和消息格式化
  */
 
+import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 
@@ -281,7 +282,7 @@ describe('formatMessage — head+tail truncation (#91 regression)', () => {
 describe('cross-post sender variant: distinguish same-family cats', () => {
   before(async () => {
     const { catRegistry } = await import('../node_modules/@cat-cafe/shared/dist/index.js');
-    // Register variant cats that exist in cat-config.json but not in static CAT_CONFIGS
+    // Register variant cats that may not yet be in catRegistry
     if (!catRegistry.has('sonnet')) {
       catRegistry.register('sonnet', {
         id: 'sonnet',
@@ -342,8 +343,19 @@ describe('cross-post sender variant: distinguish same-family cats', () => {
   });
 
   after(async () => {
+    // Re-populate registry after reset — the cats sonnet/opus-45/spark are already registered
+    // by setup-cat-registry.js (they still exist as variant catIds in cat-template.json breeds).
+    // The reset() was originally safe, but after roster pruning the before() is a no-op
+    // (all three are already registered), so reset() only clears everything without re-adding.
+    // Fix: restore from template after reset so subsequent describe blocks (F052) find codex etc.
     const { catRegistry } = await import('../node_modules/@cat-cafe/shared/dist/index.js');
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+    const TEMPLATE_PATH = new URL('../../../cat-template.json', import.meta.url).pathname;
     catRegistry.reset();
+    const allConfigs = toAllCatConfigs(loadCatConfig(TEMPLATE_PATH));
+    for (const [id, config] of Object.entries(allConfigs)) {
+      if (!catRegistry.has(id)) catRegistry.register(id, config);
+    }
   });
 
   test('formatMessage shows 布偶猫(Sonnet) for sonnet catId', async () => {

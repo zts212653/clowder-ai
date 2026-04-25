@@ -13,6 +13,7 @@
  * not by running the full generator (which requires mocking AgentService).
  */
 
+import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 

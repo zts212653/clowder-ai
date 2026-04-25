@@ -122,6 +122,10 @@ export class DareAgentService implements AgentService {
     const cwd = this.darePath;
     // P1-3: Pass API key via child env, not CLI args (avoids ps/audit leakage)
     const childEnv = this.buildEnv(options?.callbackEnv);
+    // F171: Account env vars applied LAST — user overrides provider-injected values
+    if (options?.accountEnv) {
+      for (const [k, v] of Object.entries(options.accountEnv)) childEnv[k] = v;
+    }
     const metadata: MessageMetadata = { provider: 'dare', model: effectiveModel };
 
     try {
@@ -231,7 +235,7 @@ export class DareAgentService implements AgentService {
     const effectiveModel = model ?? this.model;
 
     args.push('--adapter', this.adapter);
-    args.push('--model', effectiveModel);
+    if (effectiveModel) args.push('--model', effectiveModel);
     if (endpoint) {
       args.push('--endpoint', endpoint);
     }

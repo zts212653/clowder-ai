@@ -5,7 +5,7 @@
  * OQ-1 + R2-P2: Token boundary — reject ASCII letter/digit/underscore continuation
  * (e.g. @co-creator123, @co-creator123) but allow CJK text (e.g. @co-creator请看, @铲屎官请看).
  *
- * F067 co-creator config: patterns read from cat-config.json coCreator.mentionPatterns,
+ * F067 co-creator config: patterns read from the resolved cat config coCreator.mentionPatterns,
  * with @co-creator/@铲屎官 always included as fallback defaults.
  */
 

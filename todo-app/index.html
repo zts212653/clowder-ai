@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🐱 猫猫待办清单</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      background: linear-gradient(135deg, #fdf0e8 0%, #fce4f3 100%);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: flex;
+      justify-content: center;
+      padding: 40px 16px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 24px;
+      box-shadow: 0 8px 32px rgba(180, 120, 160, 0.18);
+      width: 100%;
+      max-width: 480px;
+      height: fit-content;
+      overflow: hidden;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #f9a8d4, #c4b5fd);
+      padding: 28px 28px 24px;
+    }
+
+    .header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #fff;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.15);
+    }
+
+    .header .subtitle {
+      font-size: 0.85rem;
+      color: rgba(255,255,255,0.85);
+      margin-top: 4px;
+    }
+
+    .stats {
+      display: flex;
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .stat-chip {
+      background: rgba(255,255,255,0.3);
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 0.78rem;
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .input-area {
+      padding: 20px 24px 0;
+      display: flex;
+      gap: 10px;
+    }
+
+    .input-area input {
+      flex: 1;
+      border: 2px solid #f3e8ff;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 0.95rem;
+      outline: none;
+      transition: border-color 0.2s;
+      color: #4b4b6b;
+    }
+
+    .input-area input:focus { border-color: #c4b5fd; }
+    .input-area input::placeholder { color: #c4aad0; }
+
+    .input-area button {
+      background: linear-gradient(135deg, #f9a8d4, #c4b5fd);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      padding: 10px 18px;
+      font-size: 1.2rem;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+      font-weight: 700;
+    }
+
+    .input-area button:hover { opacity: 0.85; transform: scale(1.06); }
+    .input-area button:active { transform: scale(0.96); }
+
+    .filter-bar {
+      display: flex;
+      gap: 8px;
+      padding: 16px 24px 8px;
+    }
+
+    .filter-btn {
+      border: none;
+      background: #f5f0ff;
+      color: #9b87c6;
+      border-radius: 20px;
+      padding: 5px 14px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .filter-btn.active {
+      background: linear-gradient(135deg, #f9a8d4, #c4b5fd);
+      color: #fff;
+    }
+
+    .todo-list {
+      padding: 4px 24px 24px;
+      list-style: none;
+      min-height: 80px;
+    }
+
+    .todo-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      margin-top: 8px;
+      background: #fdf8ff;
+      border: 1.5px solid #f3e8ff;
+      transition: all 0.2s;
+      animation: slide-in 0.2s ease;
+    }
+
+    @keyframes slide-in {
+      from { opacity: 0; transform: translateY(-8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .todo-item:hover { border-color: #c4b5fd; background: #faf5ff; }
+
+    .todo-item.done {
+      opacity: 0.55;
+      background: #f9fafb;
+      border-color: #e5e7eb;
+    }
+
+    .check-btn {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      border: 2px solid #c4b5fd;
+      background: transparent;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      flex-shrink: 0;
+      transition: all 0.15s;
+    }
+
+    .todo-item.done .check-btn {
+      background: linear-gradient(135deg, #f9a8d4, #c4b5fd);
+      border-color: transparent;
+      color: #fff;
+    }
+
+    .check-btn:hover { transform: scale(1.15); }
+
+    .todo-text {
+      flex: 1;
+      font-size: 0.95rem;
+      color: #4b4b6b;
+      word-break: break-word;
+    }
+
+    .todo-item.done .todo-text {
+      text-decoration: line-through;
+      color: #9ca3af;
+    }
+
+    .cat-tag {
+      font-size: 0.72rem;
+      color: #b8a0d8;
+      flex-shrink: 0;
+    }
+
+    .del-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 1rem;
+      color: #e0b0c8;
+      padding: 2px 4px;
+      border-radius: 6px;
+      transition: all 0.15s;
+      opacity: 0;
+    }
+
+    .todo-item:hover .del-btn { opacity: 1; }
+    .del-btn:hover { color: #e97fa8; background: #fce4f3; }
+
+    .empty {
+      text-align: center;
+      padding: 32px 0;
+      color: #c4aad0;
+      font-size: 0.9rem;
+    }
+
+    .empty .big { font-size: 2.5rem; display: block; margin-bottom: 8px; }
+
+    .clear-btn {
+      display: block;
+      margin: 0 24px 20px;
+      background: none;
+      border: 1.5px dashed #e0d0f0;
+      border-radius: 12px;
+      padding: 8px;
+      width: calc(100% - 48px);
+      color: #c4aad0;
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .clear-btn:hover { border-color: #f9a8d4; color: #e97fa8; background: #fff0f8; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <h1>🐱 猫猫待办清单</h1>
+      <div class="subtitle">每完成一项，就给猫猫一个罐头！</div>
+      <div class="stats">
+        <span class="stat-chip" id="total-chip">共 0 项</span>
+        <span class="stat-chip" id="done-chip">完成 0 项</span>
+      </div>
+    </div>
+
+    <div class="input-area">
+      <input id="task-input" type="text" placeholder="今天要做什么？" maxlength="80" />
+      <button id="add-btn" title="添加">＋</button>
+    </div>
+
+    <div class="filter-bar">
+      <button class="filter-btn active" data-filter="all">全部</button>
+      <button class="filter-btn" data-filter="active">进行中</button>
+      <button class="filter-btn" data-filter="done">已完成</button>
+    </div>
+
+    <ul class="todo-list" id="todo-list"></ul>
+
+    <button class="clear-btn" id="clear-done-btn">🧹 清除已完成</button>
+  </div>
+
+  <script>
+    const CATS = ['🐱','😺','😸','😹','😻','🙀','😼','😽'];
+    const STORAGE_KEY = 'cat-todos-v1';
+
+    let todos = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    let filter = 'all';
+
+    const input    = document.getElementById('task-input');
+    const addBtn   = document.getElementById('add-btn');
+    const list     = document.getElementById('todo-list');
+    const totalEl  = document.getElementById('total-chip');
+    const doneEl   = document.getElementById('done-chip');
+    const clearBtn = document.getElementById('clear-done-btn');
+
+    function save() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(todos));
+    }
+
+    function render() {
+      const visible = todos.filter(t =>
+        filter === 'all'    ? true :
+        filter === 'active' ? !t.done :
+        t.done
+      );
+
+      list.innerHTML = '';
+
+      if (visible.length === 0) {
+        list.innerHTML = `<div class="empty"><span class="big">${filter === 'done' ? '🎉' : '😴'}</span>${
+          filter === 'done' ? '还没有完成的任务哦~' : '没有任务，去摸鱼！'
+        }</div>`;
+      } else {
+        visible.forEach(t => {
+          const li = document.createElement('li');
+          li.className = 'todo-item' + (t.done ? ' done' : '');
+          li.innerHTML = `
+            <button class="check-btn" data-id="${t.id}">${t.done ? '✓' : ''}</button>
+            <span class="todo-text">${escHtml(t.text)}</span>
+            <span class="cat-tag">${t.cat}</span>
+            <button class="del-btn" data-id="${t.id}" title="删除">✕</button>
+          `;
+          list.appendChild(li);
+        });
+      }
+
+      const total = todos.length;
+      const done  = todos.filter(t => t.done).length;
+      totalEl.textContent = `共 ${total} 项`;
+      doneEl.textContent  = `完成 ${done} 项`;
+    }
+
+    function addTodo() {
+      const text = input.value.trim();
+      if (!text) { input.focus(); return; }
+      todos.unshift({ id: Date.now(), text, done: false, cat: CATS[Math.floor(Math.random() * CATS.length)] });
+      input.value = '';
+      save(); render(); input.focus();
+    }
+
+    function escHtml(s) {
+      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    addBtn.addEventListener('click', addTodo);
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') addTodo(); });
+
+    list.addEventListener('click', e => {
+      const checkBtn = e.target.closest('.check-btn');
+      const delBtn   = e.target.closest('.del-btn');
+      if (checkBtn) {
+        const id = Number(checkBtn.dataset.id);
+        const t = todos.find(x => x.id === id);
+        if (t) { t.done = !t.done; save(); render(); }
+      }
+      if (delBtn) {
+        const id = Number(delBtn.dataset.id);
+        todos = todos.filter(x => x.id !== id);
+        save(); render();
+      }
+    });
+
+    clearBtn.addEventListener('click', () => {
+      todos = todos.filter(t => !t.done);
+      save(); render();
+    });
+
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        filter = btn.dataset.filter;
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        render();
+      });
+    });
+
+    render();
+  </script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 /**
  * CatRegistry — 运行时猫猫注册表
  *
- * 服务启动时从 cat-config.json 注册所有猫。
+ * 服务启动时从解析后的运行时猫配置注册所有猫。
  * 路由层和业务逻辑通过 registry 做运行时校验，
  * 替代旧的编译时 CatId union 校验。
  */
@@ -79,7 +79,7 @@ export class CatRegistry {
   }
 }
 
-/** Global singleton — populated at startup from cat-config.json */
+/** Global singleton — populated at startup from the resolved runtime cat config */
 export const catRegistry = new CatRegistry();
 
 /**

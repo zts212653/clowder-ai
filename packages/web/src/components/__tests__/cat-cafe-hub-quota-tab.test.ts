@@ -75,6 +75,7 @@ describe('CatCafeHub quota tab', () => {
     const html = renderToStaticMarkup(React.createElement(HubRoutingPolicyTab));
     expect(html).toContain('配额看板');
     expect(html).toContain('路由策略（猫粮约束子模块）');
-    expect(html).toContain('@codex');
+    // Member tags (@codex) require useEffect to load profiles — not testable via SSR.
+    // Covered by hub-quota-board-v2.test.ts DOM render tests.
   });
 });

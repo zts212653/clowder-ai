@@ -110,7 +110,7 @@ Phase N merge → 碰头（不是"要不要继续"，是"方向对不对"）→ 
 
 ## Reviewer 配对规则
 
-动态匹配自 `cat-config.json`：
+动态匹配自运行时猫配置（repo 根 `cat-template.json` + `.cat-cafe/cat-catalog.json` overlay）：
 1. 跨 family 优先 | 2. 必须有 peer-reviewer 角色 | 3. 必须 available
 4. 优先 lead | 5. 优先活跃猫
 

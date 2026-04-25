@@ -120,7 +120,7 @@ export interface OrchestrationStep {
   id: string;
   target: string;
   tips: string;
-  advance: 'click' | 'visible' | 'input' | 'confirm';
+  advance: 'click' | 'visible' | 'input' | 'confirm' | 'auto-confirm' | 'next';
   page?: string;
   timeoutSec?: number;
   tipsMetadata?: TipsMetadata;
@@ -210,7 +210,7 @@ export function loadGuideFlow(guideId: string): OrchestrationFlow {
     throw new Error(`[F155] Invalid flow file for "${guideId}": missing steps`);
   }
 
-  const validAdvance = new Set(['click', 'visible', 'input', 'confirm']);
+  const validAdvance = new Set(['click', 'visible', 'input', 'confirm', 'auto-confirm', 'next']);
   const flow: OrchestrationFlow = {
     schemaVersion: normalizeFlowSchemaVersion(guideId, parsed.schemaVersion),
     id: parsed.id,

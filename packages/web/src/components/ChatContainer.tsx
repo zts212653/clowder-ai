@@ -20,8 +20,9 @@ import { useVadInterrupt } from '@/hooks/useVadInterrupt';
 import { useVoiceAutoPlay } from '@/hooks/useVoiceAutoPlay';
 import { useVoiceStream } from '@/hooks/useVoiceStream';
 import { useWorkspaceNavigate } from '@/hooks/useWorkspaceNavigate';
-import { type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
+import { type ChatMessage as ChatMessageData, type Thread, useChatStore } from '@/stores/chatStore';
 import { useGameStore } from '@/stores/gameStore';
+import { useGuideStore } from '@/stores/guideStore';
 import { useTaskStore } from '@/stores/taskStore';
 import { apiFetch } from '@/utils/api-client';
 import { computeScrollRecomputeSignal } from '@/utils/scrollRecomputeSignal';
@@ -34,6 +35,12 @@ import { ChatContainerHeader } from './ChatContainerHeader';
 import { ChatInput } from './ChatInput';
 import { ChatMessage } from './ChatMessage';
 import { ConnectionStatusBar } from './ConnectionStatusBar';
+import { FirstRunQuestWizard } from './FirstRunQuestWizard';
+import { BootcampGuideOverlay } from './first-run-quest/BootcampGuideOverlay';
+import { QuestBanner } from './first-run-quest/QuestBanner';
+import { syncLocalBootcampState } from './first-run-quest/syncLocalBootcampState';
+import { useFirstProjectMistakeTipGate } from './first-run-quest/useFirstProjectMistakeTipGate';
+import { useFirstProjectPreviewAutoOpen } from './first-run-quest/useFirstProjectPreviewAutoOpen';
 import { GameOverlayConnector } from './game/GameOverlayConnector';
 import { HubListModal } from './HubListModal';
 import { BootcampIcon } from './icons/BootcampIcon';
@@ -75,6 +82,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     setCurrentThread,
     viewMode,
     setViewMode,
+    isLoading: chatIsLoading,
     clearUnread,
     confirmUnreadAck,
     armUnreadSuppression,
@@ -111,15 +119,17 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // AC-6: research=multi hint from Signal study "多猫研究" button
   const isResearchMode = searchParams?.get('research') === 'multi';
   const { clearTasks } = useTaskStore();
-  const { getCatById, isLoading } = useCatData();
+  const { cats, getCatById, isLoading, hasFetched } = useCatData();
   const workspaceWorktreeId = useChatStore((s) => s.workspaceWorktreeId);
-  usePreviewAutoOpen(workspaceWorktreeId);
+  usePreviewAutoOpen(workspaceWorktreeId, threadId);
   useWorkspaceNavigate(workspaceWorktreeId, threadId);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [statusPanelOpen, setStatusPanelOpen] = useState(true);
   const [mobileStatusOpen, setMobileStatusOpen] = useState(false);
   const [showBootcampList, setShowBootcampList] = useState(false);
   const [showHubList, setShowHubList] = useState(false);
+  const [showFirstRunQuestPrompt, setShowFirstRunQuestPrompt] = useState(false);
+  const [showQuestWizard, setShowQuestWizard] = useState(false);
   // F106: fetch bootcamp count independently of sidebar lifecycle
   // refreshKey increments only on modal close → avoids duplicate fetch on open
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -282,6 +292,199 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // setCurrentThread saves old thread state to map, restores new thread state.
   const setCurrentProject = useChatStore((s) => s.setCurrentProject);
   const storeThreads = useChatStore((s) => s.threads);
+  const setThreads = useChatStore((s) => s.setThreads);
+  const handleSkipFirstRunQuest = useCallback(() => {
+    // Session-only skip — next refresh will re-check backend state
+    setShowFirstRunQuestPrompt(false);
+  }, []);
+  const handleStartFirstRunQuest = useCallback(() => {
+    setShowFirstRunQuestPrompt(false);
+    setShowQuestWizard(true);
+  }, []);
+  const currentBootcampState = storeThreads.find((thread) => thread.id === threadId)?.bootcampState;
+  const currentBootcampPhase = currentBootcampState?.phase;
+  const showFirstProjectMistakeTip = useFirstProjectMistakeTipGate({
+    threadId,
+    phase: currentBootcampPhase,
+    messageCount: messages.length,
+    hasActiveInvocation,
+  });
+  useFirstProjectPreviewAutoOpen({
+    threadId,
+    phase: currentBootcampPhase,
+    messageCount: messages.length,
+    hasActiveInvocation,
+    worktreeId: workspaceWorktreeId,
+  });
+  const mistakeTipAdvanceKeyRef = useRef<string | null>(null);
+  const handleMistakeTipVisible = useCallback(() => {
+    // Read threads fresh from store to keep callback ref stable (avoids resetting
+    // DelayedMistakeTip's 1500ms onVisible timer on every storeThreads change).
+    const currentThread = useChatStore.getState().threads.find((thread) => thread.id === threadId);
+    const raw = currentThread?.bootcampState;
+    if (!raw || raw.phase !== 'phase-7-dev') return;
+
+    const key = `${threadId}:${String(raw.startedAt ?? 'unknown')}:phase-4`;
+    if (mistakeTipAdvanceKeyRef.current === key) return;
+    const nextBootcampState: NonNullable<Thread['bootcampState']> = {
+      ...raw,
+      phase: 'phase-7.5-add-teammate',
+    };
+
+    void apiFetch(`/api/threads/${threadId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        bootcampState: nextBootcampState,
+      }),
+    }).then((res) => {
+      if (res.ok) {
+        mistakeTipAdvanceKeyRef.current = key;
+        syncLocalBootcampState(threadId, nextBootcampState);
+      }
+      return res;
+    });
+  }, [threadId]);
+  // When gate fires (invocation ended with new Phase 4 output), advance immediately
+  useEffect(() => {
+    if (showFirstProjectMistakeTip) {
+      handleMistakeTipVisible();
+    }
+  }, [showFirstProjectMistakeTip, handleMistakeTipVisible]);
+  useEffect(() => {
+    if (currentBootcampPhase !== 'phase-7-dev') {
+      mistakeTipAdvanceKeyRef.current = null;
+    }
+  }, [currentBootcampPhase, threadId]);
+  useEffect(() => {
+    // Pure backend-driven: show prompt only when no cats AND no bootcamp thread
+    const isCurrentBootcamp = Boolean(storeThreads.find((thread) => thread.id === threadId)?.bootcampState);
+    const hasAnyBootcamp = storeThreads.some((t) => t.bootcampState);
+    if (isCurrentBootcamp || hasAnyBootcamp || cats.length > 0 || isLoading) {
+      setShowFirstRunQuestPrompt(false);
+      return;
+    }
+    // Wait for thread store to populate before deciding — prevents flash on page refresh
+    if (storeThreads.length === 0) return;
+    // Only show first-run prompt after a successful cat fetch — prevents false
+    // positives when /api/cats fails transiently (returns [] on network error).
+    if (!hasFetched) return;
+    setShowFirstRunQuestPrompt(true);
+  }, [cats.length, isLoading, hasFetched, storeThreads, threadId]);
+
+  // ── Data sync: re-fetch thread state ──
+  // MCP callbacks update Redis directly; the companion WebSocket `thread_updated`
+  // may not reach this frontend (e.g. worktree port isolation). Re-fetching the
+  // thread ensures the store stays in sync.
+  const syncThreadState = useCallback(() => {
+    apiFetch(`/api/threads/${threadId}`)
+      .then((res) =>
+        res.ok
+          ? (res.json() as Promise<{
+              bootcampState?: Thread['bootcampState'];
+              firstRunQuestState?: { phase: string; firstCatName?: string };
+            }>)
+          : null,
+      )
+      .then((thread) => {
+        if (!thread) return;
+        const local = useChatStore.getState().threads.find((t) => t.id === threadId);
+        if (thread.bootcampState || local?.bootcampState) {
+          syncLocalBootcampState(threadId, thread.bootcampState);
+        }
+        const localQuest = (local as Record<string, unknown> | undefined)?.firstRunQuestState;
+        if (thread.firstRunQuestState || localQuest) {
+          useChatStore.setState((state) => ({
+            threads: state.threads.map((t) =>
+              t.id === threadId ? { ...t, firstRunQuestState: thread.firstRunQuestState } : t,
+            ),
+          }));
+        }
+      })
+      .catch(() => {});
+  }, [threadId]);
+
+  // Sync on invocation end (active → inactive transition)
+  const prevInvocationRef = useRef(hasActiveInvocation);
+  useEffect(() => {
+    const wasActive = prevInvocationRef.current;
+    prevInvocationRef.current = hasActiveInvocation;
+    if (!wasActive || hasActiveInvocation) return;
+    syncThreadState();
+  }, [hasActiveInvocation, syncThreadState]);
+
+  // Sync on mount / thread switch — sidebar may not have loaded yet
+  useEffect(() => {
+    syncThreadState();
+  }, [syncThreadState]);
+
+  // ── Bootcamp add-teammate: trigger guide engine when user interacts with input ──
+  // Subscribe reactively so the effect re-runs when guide exits (session cleared).
+  const activeGuideFlowId = useGuideStore((s) => s.session?.flow.id ?? null);
+  useEffect(() => {
+    if (currentBootcampPhase !== 'phase-7.5-add-teammate') return;
+    // Guide already running — don't re-register
+    if (activeGuideFlowId === 'bootcamp-add-teammate') return;
+    // Prevent re-triggering a guide that already completed for this thread
+    if (useGuideStore.getState().completedGuides.has(`${threadId}::bootcamp-add-teammate`)) return;
+
+    const startGuide = () => {
+      const { session: s, completedGuides: cg } = useGuideStore.getState();
+      if (s?.flow.id === 'bootcamp-add-teammate') return;
+      if (cg.has(`${threadId}::bootcamp-add-teammate`)) return;
+      useGuideStore.getState().reduceServerEvent({
+        action: 'start',
+        guideId: 'bootcamp-add-teammate',
+        threadId,
+      });
+    };
+
+    // Wait for user to type in chat input before starting guide
+    const handler = (e: Event) => {
+      if ((e.target as HTMLElement)?.closest('[data-guide-id="chat.input"]')) {
+        startGuide();
+        document.removeEventListener('input', handler, true);
+      }
+    };
+    document.addEventListener('input', handler, true);
+    return () => {
+      document.removeEventListener('input', handler, true);
+    };
+  }, [currentBootcampPhase, threadId, activeGuideFlowId]);
+
+  // ── Bootcamp farewell: auto-trigger guide after agent finishes at phase-10-retro ──
+  // Guard with both hasActiveInvocation AND chatIsLoading:
+  // - hasActiveInvocation tracks per-slot presence (can briefly go false during A2A handoff)
+  // - chatIsLoading stays true for the entire serial chain (cleared only on isFinal=true)
+  const farewellTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (farewellTimerRef.current) {
+      clearTimeout(farewellTimerRef.current);
+      farewellTimerRef.current = null;
+    }
+    if (currentBootcampPhase !== 'phase-10-retro') return;
+    if (hasActiveInvocation || chatIsLoading) return;
+    if (activeGuideFlowId === 'bootcamp-farewell') return;
+    if (useGuideStore.getState().completedGuides.has(`${threadId}::bootcamp-farewell`)) return;
+
+    farewellTimerRef.current = setTimeout(() => {
+      farewellTimerRef.current = null;
+      const s = useChatStore.getState();
+      if (s.hasActiveInvocation || s.isLoading) return;
+      useGuideStore.getState().reduceServerEvent({
+        action: 'start',
+        guideId: 'bootcamp-farewell',
+        threadId,
+      });
+    }, 800);
+    return () => {
+      if (farewellTimerRef.current) {
+        clearTimeout(farewellTimerRef.current);
+        farewellTimerRef.current = null;
+      }
+    };
+  }, [currentBootcampPhase, threadId, activeGuideFlowId, hasActiveInvocation, chatIsLoading]);
+
   const prevThreadRef = useRef(threadId);
   useEffect(() => {
     if (prevThreadRef.current !== threadId) {
@@ -480,6 +683,23 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     [setViewMode, navigateToThread],
   );
 
+  const handleQuestCreated = useCallback(
+    async (questThreadId: string) => {
+      setShowQuestWizard(false);
+      try {
+        const res = await apiFetch('/api/threads');
+        if (res.ok) {
+          const data = (await res.json()) as { threads: Thread[] };
+          setThreads(data.threads);
+        }
+      } catch {
+        // Ignore refresh errors — navigation is the priority
+      }
+      navigateToThread(questThreadId);
+    },
+    [navigateToThread, setThreads],
+  );
+
   const handleSearchKnowledge = useCallback(() => {
     const fromParam = threadId ? `?from=${encodeURIComponent(threadId)}` : '';
     assignDocumentRoute(`/memory/search${fromParam}`, typeof window !== 'undefined' ? window : undefined);
@@ -572,6 +792,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             ref={scrollContainerRef}
             onScroll={handleScroll}
             className="h-full overflow-y-auto p-4"
+            data-guide-id="bootcamp.preview-result"
+            data-bootcamp-host="chat-messages"
             data-chat-container
           >
             {isLoadingHistory && <div className="text-center py-3 text-sm text-cafe-muted">加载历史消息...</div>}
@@ -590,7 +812,9 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
               <div className="text-center mt-20">
                 <PawIcon className="w-12 h-12 text-cocreator-light mx-auto mb-4" />
                 <p className="text-lg text-cafe-secondary mb-1">欢迎来到 Clowder AI!</p>
-                <p className="text-sm text-cafe-muted">输入 @布偶 召唤布偶猫开始聊天</p>
+                <p className="text-sm text-cafe-muted">
+                  {cats.length > 0 ? '输入 @布偶 召唤布偶猫开始聊天' : '还没有可用成员，先开始新手教程创建第一只猫猫'}
+                </p>
                 {showSetupCard && govStatus && (
                   <div className="mt-6 text-left">
                     <ProjectSetupCard
@@ -686,23 +910,59 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           <QueuePanel threadId={threadId} />
           <VoteActiveBar threadId={threadId} onEnd={() => {}} />
 
+          {!showFirstRunQuestPrompt &&
+            !showQuestWizard &&
+            (() => {
+              const currentThread = storeThreads.find((t) => t.id === threadId);
+              const questState = (currentThread as Record<string, unknown> | undefined)?.firstRunQuestState as
+                | { phase: string; firstCatName?: string }
+                | undefined;
+              if (!questState) return null;
+              return (
+                <QuestBanner
+                  phase={questState.phase}
+                  firstCatName={questState.firstCatName}
+                  onAddSecondCat={() => setShowQuestWizard(true)}
+                  onStartBootcamp={() => setShowBootcampList(true)}
+                  onComplete={() => assignDocumentRoute('/hub', typeof window !== 'undefined' ? window : undefined)}
+                />
+              );
+            })()}
+
           {isResearchMode && (
             <div className="mx-4 mb-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
               多猫研究模式 — 文章上下文已注入。请输入研究问题，猫猫会自动调用 multi_mention 邀请其他猫参与分析。
             </div>
           )}
-          <ChatInput
-            key={threadId}
-            threadId={threadId}
-            onSend={(content, images, whisper, deliveryMode) =>
-              handleSend(content, images, undefined, whisper, deliveryMode)
-            }
-            onStop={handleStop}
-            disabled={connectionStatus.isReadonly}
-            hasActiveInvocation={hasActiveInvocation}
-            uploadStatus={uploadStatus}
-            uploadError={uploadError}
-          />
+          <div
+            className={(() => {
+              if (showFirstRunQuestPrompt || showQuestWizard) return '';
+              const ct = storeThreads.find((t) => t.id === threadId);
+              // Bootcamp phase-1 with no messages: highlight + punch through overlay
+              const bs = ct?.bootcampState as { phase: string } | undefined;
+              if (bs?.phase === 'phase-1-intro' && messages.length === 0) {
+                return 'relative z-[70] quest-input-highlight rounded-xl mx-1';
+              }
+              // Legacy quest support
+              const qs = (ct as Record<string, unknown> | undefined)?.firstRunQuestState as
+                | { phase: string }
+                | undefined;
+              return qs?.phase === 'quest-2-cat-intro' ? 'quest-input-highlight rounded-xl mx-1' : '';
+            })()}
+          >
+            <ChatInput
+              key={threadId}
+              threadId={threadId}
+              onSend={(content, images, whisper, deliveryMode) =>
+                handleSend(content, images, undefined, whisper, deliveryMode)
+              }
+              onStop={handleStop}
+              disabled={connectionStatus.isReadonly}
+              hasActiveInvocation={hasActiveInvocation}
+              uploadStatus={uploadStatus}
+              uploadError={uploadError}
+            />
+          </div>
 
           {/* F101: "Return to game" banner when overlay is minimized */}
           {isGameActive && overlayMinimized && gameView?.threadId === threadId && (
@@ -811,10 +1071,60 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         threadId={threadId}
         messageSummary={messageSummary}
       />
+      {showFirstRunQuestPrompt && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 px-4">
+          <div
+            className="w-full max-w-md rounded-2xl border border-amber-200 bg-white p-6 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-gray-900">开始猫猫新手教程？</h3>
+            <p className="mt-2 text-sm text-gray-600">
+              当前还没有可用成员。我们可以先带你创建第一只猫猫，再开始首个协作任务。
+            </p>
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={handleSkipFirstRunQuest}
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                跳过
+              </button>
+              <button
+                type="button"
+                onClick={handleStartFirstRunQuest}
+                className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-medium text-white hover:bg-amber-600"
+              >
+                开始教程
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <CatCafeHub />
+      <FirstRunQuestWizard
+        open={showQuestWizard}
+        onClose={() => setShowQuestWizard(false)}
+        onCreated={handleQuestCreated}
+      />
       <BootcampListModal open={showBootcampList} onClose={handleBootcampModalClose} currentThreadId={threadId} />
       <HubListModal open={showHubList} onClose={() => setShowHubList(false)} currentThreadId={threadId} />
       {showVoteModal && <VoteConfigModal onSubmit={handleVoteSubmit} onCancel={() => setShowVoteModal(false)} />}
+      {/* Bootcamp guide overlay: intro phase tips + lifecycle tips (phase-7.5 uses guide engine) */}
+      {(() => {
+        if (showFirstRunQuestPrompt || showQuestWizard) return null;
+        const bt = storeThreads.find((t) => t.id === threadId);
+        const raw = bt?.bootcampState;
+        if (!raw) return null;
+        const phase = raw.phase;
+        // Guide engine handles phase-7.5 and phase-10 — no custom overlay needed
+        if (phase === 'phase-7.5-add-teammate' || phase === 'phase-10-retro') return null;
+        const isLifecyclePhase = /^phase-(5|6|7|8|9|10|11)-/.test(phase);
+        if (!isLifecyclePhase && messages.length > 0) return null;
+        const leadCat = cats.find((c) => c.id === raw.leadCat) ?? cats[0];
+        const catName = leadCat?.displayName ?? leadCat?.nickname ?? leadCat?.name;
+        if (!catName) return null;
+        return <BootcampGuideOverlay phase={phase} catName={catName} hasMessages={messages.length > 0} />;
+      })()}
     </div>
   );
 }

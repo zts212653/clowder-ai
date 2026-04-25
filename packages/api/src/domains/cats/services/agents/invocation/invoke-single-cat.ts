@@ -893,6 +893,21 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       if (resolvedAccount.baseUrl) callbackEnv.DARE_ENDPOINT = resolvedAccount.baseUrl;
     }
 
+    // F171: User-defined env vars from account config.
+    // Passed separately via accountEnv — NOT injected into callbackEnv.
+    // callbackEnv is for MCP callback routing; accountEnv is applied LAST
+    // in subprocess env so user vars override provider-injected values.
+    let accountEnv: Record<string, string> | undefined;
+    if (resolvedAccount?.envVars) {
+      const validEnvKey = /^[A-Z_][A-Za-z0-9_]*$/;
+      const filtered: Record<string, string> = {};
+      for (const [k, v] of Object.entries(resolvedAccount.envVars)) {
+        if (!validEnvKey.test(k) || k.startsWith('CAT_CAFE_')) continue;
+        filtered[k] = v;
+      }
+      if (Object.keys(filtered).length > 0) accountEnv = filtered;
+    }
+
     const trimmedDefaultModel = typeof defaultModel === 'string' ? defaultModel.trim() : undefined;
     const modelProviderName = catConfig?.provider?.trim() || undefined;
     const parsedOpenCodeModel =
@@ -1058,6 +1073,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
     const baseOptions: AgentServiceOptions = {
       callbackEnv,
+      ...(accountEnv ? { accountEnv } : {}),
       auditContext: {
         invocationId,
         threadId,
@@ -1553,6 +1569,43 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const shouldTrackGeminiResumeFailures = catId === 'gemini' && Boolean(initialResumeSessionId);
     const resumeFailureCounts: Partial<Record<ResumeFailureKind, number>> = {};
     const maxAttempts = 2;
+
+    // Universal debug log: capture everything needed to diagnose invocation issues.
+    // This is provider-agnostic — every cat (Claude, Codex, Gemini, OpenCode, etc.)
+    // passes through here before service.invoke() is called.
+    {
+      const maskEnv = (env: Record<string, string>): Record<string, string> => {
+        const masked: Record<string, string> = {};
+        for (const [k, v] of Object.entries(env)) {
+          masked[k] = '***';
+        }
+        return masked;
+      };
+      log.debug(
+        {
+          invocationId,
+          catId,
+          threadId,
+          userId,
+          provider: provider ?? 'unknown',
+          protocol: effectiveProtocol ?? 'default',
+          model: defaultModel ?? 'default',
+          accountId: resolvedAccount?.id ?? null,
+          accountAuthType: resolvedAccount?.authType ?? null,
+          sessionId: sessionId ?? null,
+          isResume,
+          injectSystemPrompt,
+          forceReinjection,
+          workingDirectory: workingDirectory ?? null,
+          promptLength: effectivePrompt.length,
+          systemPromptLength: params.systemPrompt?.length ?? 0,
+          callbackEnv: maskEnv(callbackEnv),
+          ...(accountEnv ? { accountEnv: maskEnv(accountEnv) } : {}),
+        },
+        '[invocation] service.invoke() — full context before subprocess launch',
+      );
+    }
+
     let allowSessionRetry = Boolean(sessionId);
     let allowTransientRetry = true;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {

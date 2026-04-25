@@ -253,8 +253,7 @@ describe('GuideOverlay auto-advance lifecycle', () => {
     expect(useGuideStore.getState().session).toBeNull();
   });
 
-  it('keeps the overlay open when guide cancellation returns a non-2xx response', async () => {
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('exits the overlay even when guide cancellation returns a non-2xx response', async () => {
     apiFetchMock.mockResolvedValue({ ok: false, status: 500 });
 
     act(() => {
@@ -274,9 +273,7 @@ describe('GuideOverlay auto-advance lifecycle', () => {
     });
 
     expect(apiFetchMock).toHaveBeenCalledTimes(1);
-    expect(useGuideStore.getState().session?.flow.id).toBe('listener-cleanup');
-
-    consoleErrorSpy.mockRestore();
+    expect(useGuideStore.getState().session).toBeNull();
   });
 
   it('advances confirm steps only after a matching guide:confirm event', () => {

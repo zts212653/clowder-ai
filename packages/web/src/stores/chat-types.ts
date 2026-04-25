@@ -324,6 +324,7 @@ export interface Thread {
 export interface BootcampStateV1 {
   v: 1;
   phase: string;
+  guideStep?: string | null;
   leadCat?: string;
   selectedTaskId?: string;
   envCheck?: Record<string, { ok: boolean; version?: string; note?: string }>;

@@ -115,12 +115,12 @@ let projectRootFallback = '';
  * @param {object} opts
  * @param {string} [opts.provider] - 'anthropic' | 'openai' | 'google' | 'dare' | 'opencode'
  * @param {string} opts.name - display name (used to derive ID)
- * @param {string} [opts.mode] - 'api_key' | 'builtin'
+ * @param {string} [opts.mode] - 'api_key' | 'oauth'
  * @param {string} [opts.baseUrl]
  * @param {string} [opts.apiKey]
  * @param {string[]} [opts.models]
  * @param {boolean} [opts.setActive] - ignored (compat)
- * @returns {{ id: string, kind: string, authType: string, protocol: string, builtin: boolean, displayName: string }}
+ * @returns {{ id: string, authType: string, protocol: string, displayName: string }}
  */
 export async function createProviderProfile(projectRoot, opts) {
   projectRootFallback = projectRoot;
@@ -157,10 +157,8 @@ export async function createProviderProfile(projectRoot, opts) {
 
   return {
     id,
-    kind: isBuiltin ? 'builtin' : 'api_key',
     authType,
     protocol,
-    builtin: isBuiltin,
     displayName: opts.name,
     ...(opts.baseUrl ? { baseUrl: opts.baseUrl } : {}),
     ...(opts.models?.length ? { models: [...opts.models] } : {}),

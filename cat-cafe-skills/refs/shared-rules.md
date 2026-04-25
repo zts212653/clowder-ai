@@ -409,7 +409,7 @@ git show :3:<path>   # THEIRS（main 上的版本）
 
 **机器强制的文件**（三层防御）：
 - `docs/ROADMAP.md`
-- `cat-config.json`
+- `cat-template.json`
 
 | 层 | 机制 | 行为 |
 |----|------|------|

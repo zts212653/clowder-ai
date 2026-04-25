@@ -1,7 +1,7 @@
 /**
  * Cat Config Loader
  * 从 cat-template.json / .cat-cafe/cat-catalog.json 加载 Breed+Variant 配置。
- * Node-only — 前端继续用 shared 包的 CAT_CONFIGS 常量。
+ * Node-only — 前端通过 /api/cats 获取猫数据。
  */
 
 import { readFileSync } from 'node:fs';
@@ -63,11 +63,11 @@ const catVariantSchema = z.object({
   displayName: z.string().min(1).optional(), // F32-b: variant-level displayName
   variantLabel: z.string().min(1).optional(), // F32-b P4: disambiguation label
   mentionPatterns: z.array(mentionPatternSchema).optional(), // F32-b: variant-level mentions
-  source: z.enum(['seed', 'runtime']).optional(), // #441: bootstrap-stamped origin
+  source: z.string().optional(), // #441: legacy field, ignored — kept in schema for old catalog read compat
   accountRef: z.string().min(1).optional(), // F127: concrete account binding
   clientId: z.string().min(1), // #252: accept unknown providers to avoid full config crash
 
-  defaultModel: z.string().min(1),
+  defaultModel: z.string(), // OAuth/subscription CLIs have built-in defaults; api_key validated at route level
   mcpSupport: z.boolean(),
   cli: cliConfigSchema.optional(),
   commandArgs: z.array(z.string().min(1)).optional(), // F127: explicit bridge args (e.g. Antigravity)
@@ -197,14 +197,14 @@ const coCreatorConfigSchema = z.object({
 /** Version 1: breeds only (legacy) */
 const catCafeConfigSchemaV1 = z.object({
   version: z.literal(1),
-  breeds: z.array(catBreedSchema).min(1),
+  breeds: z.array(catBreedSchema),
 });
 
 /** Version 2: breeds + roster + reviewPolicy (F032) + coCreator (F067) */
 const catCafeConfigSchemaV2 = z
   .object({
     version: z.literal(2),
-    breeds: z.array(catBreedSchema).min(1),
+    breeds: z.array(catBreedSchema),
     roster: z.record(z.string(), rosterEntrySchema),
     reviewPolicy: reviewPolicySchema,
     coCreator: coCreatorConfigSchema.optional(),
@@ -289,7 +289,7 @@ function mergeById(base: HasId[], overlay: HasId[]): HasId[] {
     const bItem = baseMap.get(oItem.id);
     result.push(bItem ? (deepMergeConfig(bItem, oItem) as HasId) : oItem);
   }
-  // Preserve base-only items (new items added to cat-config.json but not yet in catalog)
+  // Preserve base-only items (new items added to cat-template.json but not yet in catalog)
   for (const bItem of base) {
     if (!seen.has(bItem.id)) result.push(bItem);
   }
@@ -425,7 +425,6 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         avatar: variant.avatar ?? breed.avatar, // F32-b P4c: variant can override
         color: variant.color ?? breed.color, // F32-b P4c: variant can override
         mentionPatterns,
-        ...(variant.source != null ? { source: variant.source } : {}),
         ...(variant.accountRef != null ? { accountRef: variant.accountRef } : {}),
         clientId: variant.clientId as ClientId, // #252: Zod now accepts any string; downstream switch/case has default branches
         defaultModel: variant.defaultModel,
@@ -554,7 +553,7 @@ let _catIdToBreedSource: CatCafeConfig | null = null;
 
 /**
  * Check if F24 session chain is enabled for a cat.
- * Returns true by default — only false when explicitly disabled in cat-config.json.
+ * Returns true by default — only false when explicitly disabled in the resolved cat config.
  * Gracefully returns true if config file is unreadable (availability over strictness).
  *
  * F32-b: Now resolves variant catIds to their parent breed via index.
@@ -581,7 +580,7 @@ export function isSessionChainEnabled(catId: CatId | string, config?: CatCafeCon
 // ── F33 Phase 2: Session Strategy from config ─────────────────────────
 
 /**
- * Get session strategy config from cat-config.json for a cat.
+ * Get session strategy config from the resolved cat config for a cat.
  * Returns undefined if not configured (caller falls back to code defaults).
  *
  * F33 Phase 2: Same lookup pattern as isSessionChainEnabled — catId → breed → features.
@@ -606,7 +605,7 @@ export function getConfigSessionStrategy(
 }
 
 /**
- * Get Mission Hub self-claim scope from cat-config.json for a cat.
+ * Get Mission Hub self-claim scope from the resolved cat config for a cat.
  * Defaults to 'disabled' when not configured.
  */
 export function getMissionHubSelfClaimScope(catId: string, config?: CatCafeConfig): MissionHubSelfClaimScope {
@@ -648,7 +647,7 @@ export function getDefaultCatId(): CatId {
     return _defaultCatId;
   }
 
-  // Ultimate fallback (should not trigger — config always has at least 1 breed)
+  // Ultimate fallback for zero-member bootstrap mode.
   return createCatId('opus');
 }
 
@@ -693,7 +692,7 @@ function buildCatIdToVariantIndex(config: CatCafeConfig): Map<string, CatVariant
 export type CliEffortLevel = 'low' | 'medium' | 'high' | 'max' | 'xhigh';
 
 /**
- * Get CLI effort level for a cat from cat-config.json.
+ * Get CLI effort level for a cat from the resolved cat config.
  * Default when not configured:
  *   claude (anthropic): 'max'
  *   codex (openai):     'xhigh'
@@ -772,7 +771,7 @@ export interface AcpVariantConfig {
 }
 
 /**
- * Get ACP config for a cat from the raw cat-config.json variant.
+ * Get ACP config for a cat from the resolved raw runtime variant.
  * Returns undefined if the variant has no `acp` section (= use legacy CLI).
  * Reads raw JSON because `acp` is not in the typed CatConfig (intentionally).
  */
@@ -916,7 +915,7 @@ const DEFAULT_CO_CREATOR_MENTION_PATTERNS = ['@co-creator', '@铲屎官'];
 let _cachedCoCreator: CoCreatorConfig | null = null;
 
 /**
- * Get coCreator config from cat-config.json.
+ * Get coCreator config from the resolved cat config.
  * Returns a default config with @co-creator/@铲屎官 patterns when not configured.
  */
 export function getCoCreatorConfig(config?: CatCafeConfig): CoCreatorConfig {

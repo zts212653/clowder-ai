@@ -23,12 +23,14 @@ export type ProviderProfileKind = 'builtin' | 'api_key';
 export interface RuntimeProviderProfile {
   id: string;
   authType: 'oauth' | 'api_key';
-  kind: ProviderProfileKind;
+  kind?: ProviderProfileKind;
   client?: BuiltinAccountClient;
   protocol?: AccountProtocol;
   baseUrl?: string;
   apiKey?: string;
   models?: string[];
+  /** F171: User-defined env vars for agent subprocess injection. */
+  envVars?: Record<string, string>;
 }
 
 export interface AnthropicRuntimeProfile {
@@ -233,11 +235,12 @@ function accountToRuntimeProfile(ref: string, account: AccountConfig, projectRoo
   const credential = readCredential(ref, projectRoot);
   const apiKey = credential?.apiKey;
 
-  const isBuiltin = account.authType === 'oauth';
   // clowder-ai#340: Derive client and protocol solely from well-known account ID map.
   // account.protocol is retired — not read, not written.
   const builtinClient = BUILTIN_ACCOUNT_MAP[ref];
   const builtinProtocol = builtinClient ? protocolForClient(builtinClient) : null;
+  const isOAuth = account.authType === 'oauth';
+  const isBuiltin = !!builtinClient && isOAuth;
   return {
     id: ref,
     authType: account.authType,
@@ -247,6 +250,7 @@ function accountToRuntimeProfile(ref: string, account: AccountConfig, projectRoo
     ...(account.baseUrl ? { baseUrl: account.baseUrl } : {}),
     ...(apiKey ? { apiKey } : {}),
     ...(account.models && account.models.length > 0 ? { models: [...account.models] } : {}),
+    ...(account.envVars && Object.keys(account.envVars).length > 0 ? { envVars: { ...account.envVars } } : {}),
   };
 }
 
@@ -258,7 +262,7 @@ export function validateRuntimeProviderBinding(
   _defaultModel?: string | null,
 ): string | null {
   // Allow api_key accounts for google only when using third-party gateways.
-  if (clientId === 'google' && profile.kind !== 'builtin') {
+  if (clientId === 'google' && profile.authType !== 'oauth') {
     const trimmedBaseUrl = profile.baseUrl?.trim();
     if (!trimmedBaseUrl) {
       return 'client "google" only supports builtin Gemini auth (or third-party with baseUrl)';
@@ -273,7 +277,7 @@ export function validateRuntimeProviderBinding(
     return null;
   }
   const expectedClient = resolveBuiltinClientForProvider(clientId);
-  if (expectedClient && profile.kind === 'builtin' && profile.client && profile.client !== expectedClient) {
+  if (expectedClient && profile.authType === 'oauth' && profile.client && profile.client !== expectedClient) {
     return `bound provider profile "${profile.id}" is incompatible with client "${clientId}"`;
   }
   // Protocol matching removed: protocol is now provider-determined, not an
@@ -284,12 +288,12 @@ export function validateRuntimeProviderBinding(
 export function validateModelFormatForProvider(
   clientId: ClientId,
   defaultModel?: string | null,
-  profileKind?: ProviderProfileKind,
+  authType?: 'oauth' | 'api_key',
   providerName?: string | null,
   options?: { legacyCompat?: boolean; accountModels?: string[] },
 ): string | null {
   if (clientId !== 'opencode') return null;
-  if (profileKind === 'api_key') {
+  if (authType === 'api_key') {
     const trimmedProvider = providerName?.trim();
     // clowder-ai#223 intake: provider/model in defaultModel is the primary path.
     // provider name is only required when defaultModel is a bare model name.

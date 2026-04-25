@@ -4,7 +4,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, test } from 'node:test';
@@ -24,7 +24,7 @@ async function createTmpDir() {
   return dir;
 }
 
-async function buildApp() {
+async function buildApp(opts = {}) {
   const { PackStore } = await import('../dist/domains/packs/PackStore.js');
   const { PackSecurityGuard } = await import('../dist/domains/packs/PackSecurityGuard.js');
   const { PackLoader } = await import('../dist/domains/packs/PackLoader.js');
@@ -36,7 +36,7 @@ async function buildApp() {
   const loader = new PackLoader(store, guard);
 
   const app = Fastify();
-  await app.register(packsRoutes, { packLoader: loader });
+  await app.register(packsRoutes, { packLoader: loader, ...opts });
   await app.ready();
   return app;
 }
@@ -251,5 +251,49 @@ describe('Pack Routes', () => {
     assert.equal(res.statusCode, 400);
     const body = JSON.parse(res.body);
     assert.ok(body.error);
+  });
+
+  test('POST /api/packs/export falls back to cat-template.json when body omits catConfig', async () => {
+    const catTemplatePath = join(await createTmpDir(), 'cat-template.json');
+    const sharedRulesPath = join(await createTmpDir(), 'shared-rules.md');
+    const skillsManifestPath = join(await createTmpDir(), 'manifest.yaml');
+
+    await writeFile(
+      catTemplatePath,
+      JSON.stringify({
+        roster: {
+          opus: { family: 'ragdoll', roles: ['architect'], available: true },
+        },
+        breeds: [
+          {
+            id: 'ragdoll',
+            catId: 'opus',
+            displayName: 'Ragdoll',
+            defaultVariantId: 'v1',
+            variants: [{ id: 'v1', roleDescription: 'Architect', strengths: ['design'] }],
+          },
+        ],
+      }),
+      'utf-8',
+    );
+    await writeFile(sharedRulesPath, '## 铁律\n\n### 铁律 1: Test Rule\nDo not break things.\n', 'utf-8');
+    await writeFile(
+      skillsManifestPath,
+      'skills:\n  test-skill:\n    description: Test\n    triggers: ["test"]\n    sop_step: 1\n',
+      'utf-8',
+    );
+
+    const app = await buildApp({ catTemplatePath, sharedRulesPath, skillsManifestPath });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/packs/export',
+      payload: { name: 'template-fallback-export' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.ok(body.ok);
+
+    assert.equal(body.manifest.name, 'template-fallback-export');
   });
 });

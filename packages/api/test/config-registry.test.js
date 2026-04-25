@@ -102,7 +102,7 @@ describe('ConfigRegistry', () => {
     assert.equal(snapshot.server.redis, 'connected');
   });
 
-  it('populates cats from CAT_CONFIGS', async () => {
+  it('populates cats from runtime config', async () => {
     const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
     const snapshot = collectConfigSnapshot();
 

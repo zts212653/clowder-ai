@@ -14,12 +14,12 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { CatId, MessageContent } from '@cat-cafe/shared';
+import { type CatId, catRegistry, type MessageContent } from '@cat-cafe/shared';
 import type { SessionStore } from '@cat-cafe/shared/utils';
 import multipart from '@fastify/multipart';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { getAllCatIdsFromConfig, getDefaultCatId } from '../config/cat-config-loader.js';
+import { getDefaultCatId } from '../config/cat-config-loader.js';
 import { resolveFrontendBaseUrl } from '../config/frontend-origin.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
@@ -285,10 +285,14 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       }
 
       const DEFAULT_PLAYER_COUNT = 7;
-      const allCatIds = getAllCatIdsFromConfig();
+      const allCatIds = catRegistry.getAllIds();
       const sanitized = parsedGame.catIds ? sanitizeCatIds(parsedGame.catIds, allCatIds) : [];
       // Fallback to all cats if sanitize filtered everything out (or no catIds provided)
       const catIds = sanitized.length > 0 ? sanitized : [...allCatIds];
+      if (catIds.length === 0) {
+        reply.status(400);
+        return { error: '没有可用的猫猫成员，请先在设置中添加一只猫猫', code: 'NO_TARGETS' };
+      }
       const playerCount = parsedGame.playerCount ?? DEFAULT_PLAYER_COUNT;
       const seats = buildGameSeats({
         humanRole: parsedGame.humanRole,
@@ -386,6 +390,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       whisperVisibility === 'whisper' && whisperRecipients?.length
         ? [...new Set(whisperRecipients)]
         : [...resolvedTargetCats];
+    if (targetCats.length === 0) {
+      reply.status(400);
+      return { error: '没有可用的猫猫成员，请先在设置中添加一只猫猫', code: 'NO_TARGETS' };
+    }
     const primaryCat = targetCats[0] ?? 'unknown';
 
     // Server-generated idempotency key if client didn't provide one

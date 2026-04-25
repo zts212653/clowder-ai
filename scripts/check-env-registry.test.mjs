@@ -33,6 +33,7 @@ const ALLOWLIST = new Map([
   ['https_proxy', 'Standard proxy convention (lowercase variant of HTTPS_PROXY)'],
   ['http_proxy', 'Standard proxy convention (lowercase variant of HTTP_PROXY)'],
   ['all_proxy', 'Standard proxy convention (lowercase variant of ALL_PROXY)'],
+  ['COGVIDEO_API_KEY', 'F139 MediaHub CogVideoX provider — mcp-server-local credential'],
 ]);
 
 // ── Extract registered names from env-registry.ts ──

@@ -96,7 +96,6 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     assert.ok(profile);
     assert.equal(profile.id, 'claude');
     assert.equal(profile.authType, 'oauth');
-    assert.equal(profile.kind, 'builtin');
     assert.equal(profile.protocol, 'anthropic');
     assert.equal(profile.apiKey, undefined);
   });
@@ -201,7 +200,7 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     const profile = resolveForClient(projectRoot, 'anthropic');
     assert.ok(profile);
     assert.equal(profile.id, 'claude');
-    assert.equal(profile.kind, 'builtin');
+    assert.equal(profile.authType, 'oauth');
   });
 
   it('resolveForClient finds custom account via preferredAccountRef (not protocol)', async () => {

@@ -51,6 +51,7 @@ export function CatOverviewTab({
   onAddMember,
   onEditCoCreator,
   onEditMember,
+  onDeleteMember,
   onToggleAvailability,
   togglingCatId,
 }: {
@@ -59,6 +60,7 @@ export function CatOverviewTab({
   onAddMember?: () => void;
   onEditCoCreator?: () => void;
   onEditMember?: (cat: CatData) => void;
+  onDeleteMember?: (cat: CatData) => void;
   onToggleAvailability?: (cat: CatData) => void;
   togglingCatId?: string | null;
 }) {
@@ -183,6 +185,7 @@ export function CatOverviewTab({
             cat={catData}
             configCat={config.cats[catData.id]}
             onEdit={onEditMember}
+            onDelete={onDeleteMember}
             onToggleAvailability={onToggleAvailability}
             togglingAvailability={togglingCatId === catData.id}
             guideTargetId={idx === 0 ? 'cats.first-member' : undefined}

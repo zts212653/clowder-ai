@@ -11,8 +11,8 @@ const MAX_DOTS = 18;
 
 type CatLookup = (id: string) => CatData | undefined;
 
-// Some variants use non-hyphen catIds (e.g. gpt52/sonnet/spark/gemini25 in cat-config.json).
-// During the brief pre-/api/cats state, we only have 3 base cats in fallback CAT_CONFIGS,
+// Some variants use non-hyphen catIds (e.g. gpt52/sonnet/spark/gemini25 in the runtime cat config).
+// During the brief pre-/api/cats state, the cat list may be empty,
 // so we map these variant ids to a base cat for color/name consistency.
 const VARIANT_BASE_FALLBACK: Record<string, string> = {
   gpt52: 'codex',

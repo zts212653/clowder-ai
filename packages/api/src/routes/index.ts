@@ -23,6 +23,7 @@ export { externalProjectRoutes } from './external-projects.js';
 export { f163AdminRoutes } from './f163-admin.js';
 export { f163AuditRoutes } from './f163-audit-routes.js';
 export { featureDocDetailRoutes } from './feature-doc-detail.js';
+export { firstRunQuestRoutes } from './first-run-quest.js';
 export { gameRoutes } from './games.js';
 export { governanceStatusRoute } from './governance-status.js';
 export { guideActionRoutes } from './guide-action-routes.js';

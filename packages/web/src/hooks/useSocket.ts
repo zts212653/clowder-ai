@@ -71,7 +71,12 @@ type DebugWebSocket = WebSocket & { __catCafeCloseLoggerAttached?: boolean };
 
 export interface SocketCallbacks {
   onMessage: (msg: AgentMessage) => void;
-  onThreadUpdated?: (data: { threadId: string; title?: string; participants?: string[] }) => void;
+  onThreadUpdated?: (data: {
+    threadId: string;
+    title?: string;
+    participants?: string[];
+    bootcampState?: Record<string, unknown>;
+  }) => void;
   onIntentMode?: (data: { threadId: string; mode: string; targetCats: string[] }) => void;
   /** F118 D2: Earliest signal that cats are being spawned (before intent_mode) */
   onSpawnStarted?: (data: { threadId: string; targetCats: string[]; invocationId: string }) => void;
@@ -483,9 +488,17 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       });
     });
 
-    socket.on('thread_updated', (data: { threadId: string; title?: string; participants?: string[] }) => {
-      callbacksRef.current.onThreadUpdated?.(data);
-    });
+    socket.on(
+      'thread_updated',
+      (data: {
+        threadId: string;
+        title?: string;
+        participants?: string[];
+        bootcampState?: Record<string, unknown>;
+      }) => {
+        callbacksRef.current.onThreadUpdated?.(data);
+      },
+    );
 
     socket.on(
       'intent_mode',

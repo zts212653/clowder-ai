@@ -22,7 +22,6 @@ const MOCK_CATS: CatData[] = [
     avatar: '/a.png',
     roleDescription: '架构、后端、MCP',
     personality: 'kind',
-    source: 'seed' as const,
   },
   {
     id: 'codex',
@@ -36,7 +35,6 @@ const MOCK_CATS: CatData[] = [
     avatar: '/b.png',
     roleDescription: 'review、安全、测试',
     personality: 'strict',
-    source: 'seed' as const,
   },
   {
     id: 'sonnet',
@@ -51,7 +49,6 @@ const MOCK_CATS: CatData[] = [
     avatar: '/d.png',
     roleDescription: '快速灵活',
     personality: 'quick',
-    source: 'seed' as const,
   },
 ];
 
