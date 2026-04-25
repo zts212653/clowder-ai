@@ -19,25 +19,33 @@ import {
 
 const _allConfigs = toAllCatConfigs(loadCatConfig());
 
+const _repoRoot = resolve(fileURLToPath(import.meta.url), '..', '..', '..', '..');
+let _fileDir;
+let _origTemplatePath;
+
+before(() => {
+  _origTemplatePath = process.env.CAT_TEMPLATE_PATH;
+  _fileDir = mkdtempSync(join(tmpdir(), 'cat-cfg-file-'));
+  copyFileSync(join(_repoRoot, 'cat-template.json'), join(_fileDir, 'cat-template.json'));
+  process.env.CAT_TEMPLATE_PATH = join(_fileDir, 'cat-template.json');
+  _resetCachedConfig({ includeOverride: true });
+});
+
+after(() => {
+  clearRuntimeDefaultCatId();
+  if (_origTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+  else process.env.CAT_TEMPLATE_PATH = _origTemplatePath;
+  _resetCachedConfig({ includeOverride: true });
+  rmSync(_fileDir, { recursive: true, force: true });
+});
+
 describe('getDefaultCatId runtime override (F154 AC-A4)', () => {
   let originalDefault;
-  let origTemplatePath;
-  let suiteDir;
   before(() => {
-    origTemplatePath = process.env.CAT_TEMPLATE_PATH;
-    suiteDir = mkdtempSync(join(tmpdir(), 'cat-cfg-override-'));
-    const repoRoot = resolve(fileURLToPath(import.meta.url), '..', '..', '..', '..');
-    copyFileSync(join(repoRoot, 'cat-template.json'), join(suiteDir, 'cat-template.json'));
-    process.env.CAT_TEMPLATE_PATH = join(suiteDir, 'cat-template.json');
-    _resetCachedConfig({ includeOverride: true });
     originalDefault = getDefaultCatId();
   });
   after(() => {
     clearRuntimeDefaultCatId();
-    if (origTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
-    else process.env.CAT_TEMPLATE_PATH = origTemplatePath;
-    _resetCachedConfig({ includeOverride: true });
-    rmSync(suiteDir, { recursive: true, force: true });
   });
 
   it('returns breeds[0] by default', () => {
@@ -87,42 +95,36 @@ describe('getDefaultCatId runtime override (F154 AC-A4)', () => {
   });
 
   it('API-set override is trusted when config cache is unavailable (#543 degraded)', () => {
-    const origPath = process.env.CAT_TEMPLATE_PATH;
+    const degradedDir = mkdtempSync(join(tmpdir(), 'cat-cfg-degraded-'));
     try {
-      // Point to non-existent template → getCachedConfig() returns null (degraded mode)
-      process.env.CAT_TEMPLATE_PATH = '/tmp/__nonexistent_cat_template__.json';
+      process.env.CAT_TEMPLATE_PATH = join(degradedDir, '__nonexistent__.json');
       _resetCachedConfig({ includeOverride: true });
-      // API sets override AFTER config is degraded (real scenario: server starts broken,
-      // then owner writes override via PUT which passes catRegistry validation at route level)
       setRuntimeDefaultCatId('codex');
-      // API-validated override should still be returned in degraded mode
       const result = getDefaultCatId();
       assert.equal(result, 'codex', 'API-set override should be trusted in degraded mode');
     } finally {
-      if (origPath === undefined) delete process.env.CAT_TEMPLATE_PATH;
-      else process.env.CAT_TEMPLATE_PATH = origPath;
       clearRuntimeDefaultCatId();
+      rmSync(degradedDir, { recursive: true, force: true });
+      process.env.CAT_TEMPLATE_PATH = join(_fileDir, 'cat-template.json');
       _resetCachedConfig({ includeOverride: true });
     }
   });
 
   it('disk-loaded override is rejected when config cache is unavailable (#543 degraded)', () => {
-    const origPath = process.env.CAT_TEMPLATE_PATH;
     const isolatedDir = mkdtempSync(join(tmpdir(), 'cat-cfg-test-'));
     const overrideDir = join(isolatedDir, '.cat-cafe');
     const overrideFile = join(overrideDir, 'default-cat-override.json');
     try {
       mkdirSync(overrideDir, { recursive: true });
       writeFileSync(overrideFile, `${JSON.stringify({ catId: 'codex' })}\n`, 'utf-8');
-      process.env.CAT_TEMPLATE_PATH = join(isolatedDir, '__nonexistent_cat_template__.json');
+      process.env.CAT_TEMPLATE_PATH = join(isolatedDir, '__nonexistent__.json');
       _resetCachedConfig({ includeOverride: true });
       const result = getDefaultCatId();
       assert.notEqual(result, 'codex', 'disk-loaded override should not be trusted in degraded mode');
     } finally {
-      rmSync(isolatedDir, { recursive: true, force: true });
-      if (origPath === undefined) delete process.env.CAT_TEMPLATE_PATH;
-      else process.env.CAT_TEMPLATE_PATH = origPath;
       clearRuntimeDefaultCatId();
+      rmSync(isolatedDir, { recursive: true, force: true });
+      process.env.CAT_TEMPLATE_PATH = join(_fileDir, 'cat-template.json');
       _resetCachedConfig({ includeOverride: true });
     }
   });
