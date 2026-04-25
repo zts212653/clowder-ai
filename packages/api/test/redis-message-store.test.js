@@ -358,22 +358,24 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       timestamp: base,
       threadId,
     });
-    // queuedMsg sent at base+10, queued — delivered at base+500 (after agent reply)
+    // queuedMsg sent BEFORE agent reply (base-10), queued — delivered AFTER (base+500).
+    // Without zadd re-scoring, original timestamp (base-10) < cursor (base), so it would NOT
+    // appear; only deliveredAt re-scoring (base+500 > base) makes it visible after cursor.
     const queuedMsg = await store.append({
       userId: 'u',
       catId: null,
       content: 'queued-user-msg',
       mentions: [],
-      timestamp: base + 10,
+      timestamp: base - 10,
       threadId,
       deliveryStatus: 'queued',
     });
     await store.markDelivered(queuedMsg.id, base + 500);
 
-    // After agent reply cursor: queuedMsg should appear (score=base+500 > base)
+    // After agent reply cursor: queuedMsg should appear only because score was updated to deliveredAt
     const after = await store.getByThreadAfter(threadId, agentReply.id);
     const ids = after.map((m) => m.id);
-    assert.ok(ids.includes(queuedMsg.id), 'queued msg (deliveredAt > agent timestamp) should appear after agent reply');
+    assert.ok(ids.includes(queuedMsg.id), 'queued msg (deliveredAt=base+500 > cursor=base) should appear after agent reply');
   });
 
   it('F148: origin=briefing survives append → getById round-trip', async () => {
