@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { after, before, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import {
@@ -20,11 +21,23 @@ const _allConfigs = toAllCatConfigs(loadCatConfig());
 
 describe('getDefaultCatId runtime override (F154 AC-A4)', () => {
   let originalDefault;
+  let origTemplatePath;
+  let suiteDir;
   before(() => {
+    origTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    suiteDir = mkdtempSync(join(tmpdir(), 'cat-cfg-override-'));
+    const repoRoot = resolve(fileURLToPath(import.meta.url), '..', '..', '..', '..');
+    copyFileSync(join(repoRoot, 'cat-template.json'), join(suiteDir, 'cat-template.json'));
+    process.env.CAT_TEMPLATE_PATH = join(suiteDir, 'cat-template.json');
+    _resetCachedConfig({ includeOverride: true });
     originalDefault = getDefaultCatId();
   });
   after(() => {
     clearRuntimeDefaultCatId();
+    if (origTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+    else process.env.CAT_TEMPLATE_PATH = origTemplatePath;
+    _resetCachedConfig({ includeOverride: true });
+    rmSync(suiteDir, { recursive: true, force: true });
   });
 
   it('returns breeds[0] by default', () => {
