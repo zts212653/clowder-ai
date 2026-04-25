@@ -360,17 +360,28 @@ test('P3: real invoke() → callApi() with credential fixture (no test override)
 
   let capturedHeaders = null;
   const prevFetch = globalThis.fetch;
+  const sseData = (d) => `data: ${JSON.stringify(d)}\n\n`;
+  const sseBody = (events) =>
+    new ReadableStream({
+      start(c) {
+        c.enqueue(new TextEncoder().encode(events.map(sseData).join('')));
+        c.close();
+      },
+    });
+
   globalThis.fetch = async (_url, init) => {
     capturedHeaders = init?.headers;
     return {
       ok: true,
-      json: async () => ({
-        id: 'msg_real',
-        model: 'claude-sonnet-4-5-20250929',
-        stop_reason: 'end_turn',
-        content: [{ type: 'text', text: 'Real path' }],
-        usage: { input_tokens: 10, output_tokens: 5 },
-      }),
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: sseBody([
+        { type: 'message_start', message: { id: 'msg_real', usage: { input_tokens: 10 } } },
+        { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+        { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Real path' } },
+        { type: 'content_block_stop', index: 0 },
+        { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } },
+        { type: 'message_stop' },
+      ]),
     };
   };
 

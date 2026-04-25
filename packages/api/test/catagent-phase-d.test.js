@@ -240,12 +240,68 @@ describe('D1: search_content', () => {
 
 // ── AC-D2: Agentic loop (service-level tests with mock fetch) ──
 
+function sseEvent(data) {
+  return `data: ${JSON.stringify(data)}\n\n`;
+}
+
+function sseStream(text) {
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(text));
+      controller.close();
+    },
+  });
+}
+
+function jsonResponseToSSE(resp) {
+  let sse = '';
+  sse += sseEvent({
+    type: 'message_start',
+    message: { id: resp.id, usage: { input_tokens: resp.usage?.input_tokens ?? 0 } },
+  });
+  for (let i = 0; i < resp.content.length; i++) {
+    const block = resp.content[i];
+    if (block.type === 'text') {
+      sse += sseEvent({ type: 'content_block_start', index: i, content_block: { type: 'text', text: '' } });
+      sse += sseEvent({ type: 'content_block_delta', index: i, delta: { type: 'text_delta', text: block.text } });
+      sse += sseEvent({ type: 'content_block_stop', index: i });
+    } else if (block.type === 'tool_use') {
+      sse += sseEvent({
+        type: 'content_block_start',
+        index: i,
+        content_block: { type: 'tool_use', id: block.id, name: block.name },
+      });
+      sse += sseEvent({
+        type: 'content_block_delta',
+        index: i,
+        delta: { type: 'input_json_delta', partial_json: JSON.stringify(block.input) },
+      });
+      sse += sseEvent({ type: 'content_block_stop', index: i });
+    }
+  }
+  sse += sseEvent({
+    type: 'message_delta',
+    delta: { stop_reason: resp.stop_reason },
+    usage: { output_tokens: resp.usage?.output_tokens ?? 0 },
+  });
+  sse += sseEvent({ type: 'message_stop' });
+  return sse;
+}
+
+function mockSseResponse(resp) {
+  return {
+    ok: true,
+    headers: new Headers({ 'content-type': 'text/event-stream' }),
+    body: sseStream(jsonResponseToSSE(resp)),
+  };
+}
+
 function mockAnthropicApi(responses) {
   let callIndex = 0;
   return async (_url, _init) => {
     const resp = responses[callIndex] ?? responses[responses.length - 1];
     callIndex++;
-    return { ok: true, json: async () => resp };
+    return mockSseResponse(resp);
   };
 }
 
@@ -386,16 +442,12 @@ describe('D2: agentic loop', () => {
     let capturedBody = null;
     globalThis.fetch = async (_url, init) => {
       capturedBody = JSON.parse(init.body);
-      return {
-        ok: true,
-        json: async () => ({
-          id: 'msg',
-          model: 'claude-sonnet-4-5-20250929',
-          stop_reason: 'end_turn',
-          content: [{ type: 'text', text: 'no tools' }],
-          usage: { input_tokens: 5, output_tokens: 3 },
-        }),
-      };
+      return mockSseResponse({
+        id: 'msg',
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: 'no tools' }],
+        usage: { input_tokens: 5, output_tokens: 3 },
+      });
     };
 
     const svc = new CatAgentService({ catId: 'opus', projectRoot: tmpDir, catConfig: { accountRef: 'test-ant' } });
@@ -409,16 +461,12 @@ describe('D2: agentic loop', () => {
     let capturedBody = null;
     globalThis.fetch = async (_url, init) => {
       capturedBody = JSON.parse(init.body);
-      return {
-        ok: true,
-        json: async () => ({
-          id: 'msg',
-          model: 'claude-sonnet-4-5-20250929',
-          stop_reason: 'end_turn',
-          content: [{ type: 'text', text: 'with tools' }],
-          usage: { input_tokens: 5, output_tokens: 3 },
-        }),
-      };
+      return mockSseResponse({
+        id: 'msg',
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: 'with tools' }],
+        usage: { input_tokens: 5, output_tokens: 3 },
+      });
     };
 
     const svc = new CatAgentService({ catId: 'opus', projectRoot: tmpDir, catConfig: { accountRef: 'test-ant' } });
@@ -487,16 +535,12 @@ describe('D2: agentic loop', () => {
     globalThis.fetch = async (_url, _init) => {
       callCount++;
       if (callCount === 1) {
-        return {
-          ok: true,
-          json: async () => ({
-            id: 'msg1',
-            model: 'claude-sonnet-4-5-20250929',
-            stop_reason: 'tool_use',
-            content: [{ type: 'tool_use', id: 'tu1', name: 'read_file', input: { path: 'hello.txt' } }],
-            usage: { input_tokens: 10, output_tokens: 5 },
-          }),
-        };
+        return mockSseResponse({
+          id: 'msg1',
+          stop_reason: 'tool_use',
+          content: [{ type: 'tool_use', id: 'tu1', name: 'read_file', input: { path: 'hello.txt' } }],
+          usage: { input_tokens: 10, output_tokens: 5 },
+        });
       }
       // Second call fails
       return { ok: false, status: 500, text: async () => 'Internal server error' };
@@ -516,16 +560,12 @@ describe('D2: agentic loop', () => {
     let callCount = 0;
     globalThis.fetch = async (_url, _init) => {
       callCount++;
-      return {
-        ok: true,
-        json: async () => ({
-          id: `msg${callCount}`,
-          model: 'claude-sonnet-4-5-20250929',
-          stop_reason: 'tool_use',
-          content: [{ type: 'tool_use', id: `tu${callCount}`, name: 'read_file', input: { path: 'hello.txt' } }],
-          usage: { input_tokens: 5, output_tokens: 3 },
-        }),
-      };
+      return mockSseResponse({
+        id: `msg${callCount}`,
+        stop_reason: 'tool_use',
+        content: [{ type: 'tool_use', id: `tu${callCount}`, name: 'read_file', input: { path: 'hello.txt' } }],
+        usage: { input_tokens: 5, output_tokens: 3 },
+      });
     };
 
     const svc = new CatAgentService({ catId: 'opus', projectRoot: tmpDir, catConfig: { accountRef: 'test-ant' } });
