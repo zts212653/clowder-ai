@@ -549,7 +549,7 @@ function useAutoAdvance(step: OrchestrationStep | null, advance: () => void) {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally watching specific sub-properties to avoid re-binding on unrelated step changes
-  }, [step?.id, step?.target, step?.advance, isActive]);
+  }, [step?.id, step?.target, step?.advance]);
 }
 
 /* ── Minimal HUD: tips + exit + progress ── */
