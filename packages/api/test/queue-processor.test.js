@@ -1391,6 +1391,39 @@ describe('QueueProcessor', () => {
       );
     });
 
+    it('P2: urgent entry for busy slot does not block lower-priority entry for free slot', async () => {
+      const slowDeps = stubDeps({
+        invocationTracker: {
+          start: mock.fn(() => new AbortController()),
+          startAll: mock.fn(() => new AbortController()),
+          complete: mock.fn(),
+          completeAll: mock.fn(),
+          has: mock.fn((tid, catId) => catId === 'codex'),
+        },
+      });
+      const slowProcessor = new QueueProcessor(slowDeps);
+
+      // urgent entry for codex (slot busy), normal entry for opus (slot free)
+      enqueueEntry(slowDeps.queue, { content: 'urgent-codex', targetCats: ['codex'], priority: 'urgent' });
+      enqueueEntry(slowDeps.queue, { content: 'normal-opus', targetCats: ['opus'], priority: 'normal' });
+
+      // Trigger across-users chain (simulates codex slot completing, then scanning queue)
+      // codex is still busy (has() returns true), opus is free
+      await slowProcessor.onInvocationComplete('t1', 'opus', 'succeeded');
+      await new Promise((r) => setTimeout(r, 100));
+
+      // opus entry should execute despite urgent codex being first in sort order
+      const routeCalls = slowDeps.router.routeExecution.mock.calls;
+      assert.ok(routeCalls.length >= 1, 'should execute free-slot entry');
+      const calledContent = routeCalls[0].arguments[1];
+      assert.equal(calledContent, 'normal-opus', 'should execute opus entry, skipping busy codex');
+
+      // codex entry should remain queued
+      const codexEntries = slowDeps.queue.list('t1', 'u1').filter((e) => e.content === 'urgent-codex');
+      assert.equal(codexEntries.length, 1, 'codex entry should remain');
+      assert.equal(codexEntries[0].status, 'queued', 'codex entry should still be queued');
+    });
+
     it('P1: duplicate primary does not mark batched entries as processing', async () => {
       let callCount = 0;
       const dupeDeps = stubDeps({

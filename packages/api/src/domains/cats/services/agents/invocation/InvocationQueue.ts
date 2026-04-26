@@ -320,13 +320,15 @@ export class InvocationQueue {
     return best ? { ...best } : null;
   }
 
-  /** F169: Mark the highest-priority queued entry across users as processing. */
-  markProcessingAcrossUsers(threadId: string): QueueEntry | null {
+  /** F169: Mark the highest-priority queued entry across users as processing.
+   *  skipCatIds: skip entries whose primary target cat is in this set (slot busy). */
+  markProcessingAcrossUsers(threadId: string, skipCatIds?: Set<string>): QueueEntry | null {
     let best: { entry: QueueEntry; key: string } | null = null;
     for (const [key, q] of this.queues) {
       if (!key.startsWith(`${threadId}:`)) continue;
       for (const e of q) {
         if (e.status !== 'queued') continue;
+        if (skipCatIds?.has(e.targetCats[0] ?? '')) continue;
         if (!best || InvocationQueue.compareEntries(e, best.entry) < 0) {
           best = { entry: e, key };
         }

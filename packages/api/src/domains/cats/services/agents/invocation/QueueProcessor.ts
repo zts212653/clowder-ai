@@ -405,48 +405,38 @@ export class QueueProcessor {
     catId: string,
   ): Promise<{ started: boolean; entry?: QueueEntry }> {
     this.sweepZombieSlots(threadId);
-    const sk = QueueProcessor.slotKey(threadId, catId);
-    // Mutex check — per-slot
-    if (this.processingSlots.has(sk)) {
-      return { started: false };
+
+    // F169: scan by comparator order, skip entries whose target slot is busy
+    const busyCats = new Set<string>();
+    for (;;) {
+      const entry = this.deps.queue.markProcessingAcrossUsers(threadId, busyCats);
+      if (!entry) return { started: false };
+
+      const entryCat = entry.targetCats[0] ?? catId;
+      const entrySk = QueueProcessor.slotKey(threadId, entryCat);
+
+      if (this.processingSlots.has(entrySk) || this.deps.invocationTracker.has(threadId, entryCat)) {
+        this.deps.queue.rollbackProcessing(threadId, entry.id);
+        busyCats.add(entryCat);
+        continue;
+      }
+
+      this.processingSlots.set(entrySk, Date.now());
+      void this.executeEntry(entry).then(
+        (status) => {
+          this.processingSlots.delete(entrySk);
+          this.onInvocationComplete(threadId, entryCat, status).catch(() => {});
+          this.signalDeliveryBatchDone(threadId, status);
+        },
+        () => {
+          this.processingSlots.delete(entrySk);
+          this.onInvocationComplete(threadId, entryCat, 'failed').catch(() => {});
+          this.signalDeliveryBatchDone(threadId, 'failed');
+        },
+      );
+
+      return { started: true, entry };
     }
-
-    const entry = this.deps.queue.markProcessingAcrossUsers(threadId);
-    if (!entry) return { started: false };
-
-    const entryCat = entry.targetCats[0] ?? catId;
-    const entrySk = QueueProcessor.slotKey(threadId, entryCat);
-
-    // F108 P1-2 fix: check the *entry's* cat slot, not just the completing cat's slot
-    if (this.processingSlots.has(entrySk)) {
-      this.deps.queue.rollbackProcessing(threadId, entry.id);
-      return { started: false };
-    }
-    // Fix: skip if cat already has an active invocation via CLI/messages.ts (not in processingSlots).
-    // Without this, the completion chain would start a duplicate executeEntry that preempts the
-    // CLI's invocation (InvocationTracker.start aborts old controller + InvocationRegistry.create
-    // overwrites latestByThreadCat), causing all subsequent CLI callbacks to return stale_ignored.
-    if (this.deps.invocationTracker.has(threadId, entryCat)) {
-      this.deps.queue.rollbackProcessing(threadId, entry.id);
-      return { started: false };
-    }
-
-    this.processingSlots.set(entrySk, Date.now());
-    // Fire-and-forget execution — chain onInvocationComplete AFTER mutex release
-    void this.executeEntry(entry).then(
-      (status) => {
-        this.processingSlots.delete(entrySk);
-        this.onInvocationComplete(threadId, entryCat, status).catch(() => {});
-        this.signalDeliveryBatchDone(threadId, status);
-      },
-      () => {
-        this.processingSlots.delete(entrySk);
-        this.onInvocationComplete(threadId, entryCat, 'failed').catch(() => {});
-        this.signalDeliveryBatchDone(threadId, 'failed');
-      },
-    );
-
-    return { started: true, entry };
   }
 
   private async tryExecuteNextForUser(

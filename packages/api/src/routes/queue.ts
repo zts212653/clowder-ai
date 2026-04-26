@@ -290,7 +290,17 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     if (!guard) return;
 
     const reorderSchema = z.object({
-      positions: z.array(z.object({ entryId: z.string(), position: z.number().int().finite() })),
+      positions: z
+        .array(z.object({ entryId: z.string(), position: z.number().int().nonnegative().finite() }))
+        .superRefine((items, ctx) => {
+          const ids = new Set<string>();
+          for (const { entryId } of items) {
+            if (ids.has(entryId)) {
+              ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Duplicate entryId: ${entryId}` });
+            }
+            ids.add(entryId);
+          }
+        }),
     });
     const parseResult = reorderSchema.safeParse(request.body);
     if (!parseResult.success) {
