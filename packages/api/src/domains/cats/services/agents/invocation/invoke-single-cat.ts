@@ -25,6 +25,7 @@ import { isSessionChainEnabled } from '../../../../../config/cat-config-loader.j
 import { getContextWindowFallback } from '../../../../../config/context-window-sizes.js';
 import { getSessionStrategy, shouldTakeAction } from '../../../../../config/session-strategy.js';
 import { assertSafeTestConfigRoot } from '../../../../../config/test-config-write-guard.js';
+import { capturePromptIfEnabled } from '../../../../../infrastructure/debug/prompt-capture-bridge.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import {
   AGENT_ID,
@@ -1051,6 +1052,19 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       injectSystemPrompt && params.systemPrompt
         ? `${params.systemPrompt}\n\n---\n\n${promptWithMission}`
         : `${promptWithMission}`;
+
+    // F172: Prompt X-Ray — capture canonical prompt snapshot for debugging
+    capturePromptIfEnabled({
+      catId: catId as string,
+      invocationId,
+      threadId,
+      model: resolvedAccount?.models?.[0] ?? 'unknown',
+      systemPrompt: params.systemPrompt ?? '',
+      missionPrefix: missionPrefix ?? undefined,
+      userPrompt: prompt,
+      effectivePrompt,
+      injectionDecision: { isResume, canSkipOnResume, forceReinjection, injected: injectSystemPrompt },
+    });
 
     // F089 Phase 2+3: Create tmux spawn override for agent-in-pane execution
     let spawnCliOverride: AgentServiceOptions['spawnCliOverride'];
