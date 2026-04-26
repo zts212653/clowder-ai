@@ -1390,5 +1390,35 @@ describe('QueueProcessor', () => {
         'connector entry should remain queued',
       );
     });
+
+    it('P1: duplicate primary does not mark batched entries as processing', async () => {
+      let callCount = 0;
+      const dupeDeps = stubDeps({
+        invocationRecordStore: {
+          create: mock.fn(async () => {
+            callCount++;
+            if (callCount === 1) return { outcome: 'duplicate', invocationId: 'inv-dupe' };
+            return { outcome: 'created', invocationId: `inv-${callCount}` };
+          }),
+          update: mock.fn(async () => {}),
+        },
+      });
+      const dupeProcessor = new QueueProcessor(dupeDeps);
+
+      enqueueEntry(dupeDeps.queue, { content: 'a' });
+      enqueueEntry(dupeDeps.queue, { content: 'b' });
+      enqueueEntry(dupeDeps.queue, { content: 'c' });
+
+      await dupeProcessor.processNext('t1', 'u1');
+      await new Promise((r) => setTimeout(r, 100));
+
+      // Entry 'a' hits duplicate → returns early. With the fix, b and c are NOT
+      // marked processing on the duplicate path. The chain then dequeues b (non-duplicate),
+      // which batches c. So routeExecution sees b+c content, not a+b+c.
+      const routeCalls = dupeDeps.router.routeExecution.mock.calls;
+      assert.ok(routeCalls.length >= 1, 'chain should process remaining entries');
+      const calledContent = routeCalls[0].arguments[1];
+      assert.ok(!calledContent.includes('a'), 'duplicate entry content must not appear in batched execution');
+    });
   });
 });

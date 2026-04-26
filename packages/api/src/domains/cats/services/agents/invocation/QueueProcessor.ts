@@ -503,29 +503,9 @@ export class QueueProcessor {
     const { threadId, userId, targetCats, intent, messageId } = entry;
     const primaryCat = targetCats[0] ?? 'unknown';
 
-    // F169: user-message batching — collect adjacent matching entries
     const batchedEntryIds: string[] = [];
     const batchedMessageIds: string[] = [];
     let content = entry.content;
-    if (entry.source === 'user') {
-      const batch = queue.collectUserBatch(threadId, userId);
-      const sortedTargets = [...entry.targetCats].sort();
-      const matching = batch.filter(
-        (e) =>
-          e.source === 'user' &&
-          e.intent === entry.intent &&
-          e.targetCats.length === sortedTargets.length &&
-          [...e.targetCats].sort().every((t, i) => t === sortedTargets[i]),
-      );
-      if (matching.length > 0) {
-        content = content + '\n' + matching.map((e) => e.content).join('\n');
-        for (const be of matching) {
-          queue.markProcessingById(threadId, be.id);
-          batchedEntryIds.push(be.id);
-          if (be.messageId) batchedMessageIds.push(be.messageId);
-        }
-      }
-    }
 
     let controller: AbortController | undefined;
     let invocationId: string | undefined;
@@ -534,7 +514,7 @@ export class QueueProcessor {
     const cursorBoundaries = new Map<string, string>();
 
     try {
-      // 1. Create InvocationRecord
+      // 1. Create InvocationRecord (before batching — avoid claiming entries on duplicate)
       const createResult = await invocationRecordStore.create({
         threadId,
         userId,
@@ -549,6 +529,28 @@ export class QueueProcessor {
         return 'succeeded';
       }
       invocationId = createResult.invocationId;
+
+      // F169: user-message batching — collect adjacent matching entries
+      // Placed after idempotency check so batched entries aren't dropped on duplicate
+      if (entry.source === 'user') {
+        const batch = queue.collectUserBatch(threadId, userId);
+        const sortedTargets = [...entry.targetCats].sort();
+        const matching = batch.filter(
+          (e) =>
+            e.source === 'user' &&
+            e.intent === entry.intent &&
+            e.targetCats.length === sortedTargets.length &&
+            [...e.targetCats].sort().every((t, i) => t === sortedTargets[i]),
+        );
+        if (matching.length > 0) {
+          content = content + '\n' + matching.map((e) => e.content).join('\n');
+          for (const be of matching) {
+            queue.markProcessingById(threadId, be.id);
+            batchedEntryIds.push(be.id);
+            if (be.messageId) batchedMessageIds.push(be.messageId);
+          }
+        }
+      }
 
       // 2. Start tracking ALL target cats (shared controller for F5/reconnect recovery)
       controller = invocationTracker.startAll(threadId, targetCats, userId);
