@@ -5,6 +5,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { createModuleLogger } from '../logger.js';
+import { pseudonymizeId } from '../telemetry/hmac.js';
 import {
   estimateTokens,
   isPromptCaptureEnabled,
@@ -46,6 +47,7 @@ export function capturePromptIfEnabled(input: CaptureInput): void {
     const data: PromptCapture = {
       captureId,
       invocationId: input.invocationId,
+      hmacInvocationId: pseudonymizeId(input.invocationId),
       catId: input.catId,
       threadId: input.threadId,
       model: input.model,

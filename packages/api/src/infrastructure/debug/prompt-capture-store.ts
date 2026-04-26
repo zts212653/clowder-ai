@@ -16,6 +16,7 @@ const log = createModuleLogger('debug:prompt-capture');
 export interface PromptCapture {
   captureId: string;
   invocationId: string;
+  hmacInvocationId?: string;
   catId: string;
   threadId: string;
   model: string;
@@ -40,6 +41,7 @@ export interface PromptCapture {
 export interface CaptureIndexEntry {
   captureId: string;
   invocationId: string;
+  hmacInvocationId?: string;
   catId: string;
   threadId: string;
   capturedAt: number;
@@ -91,6 +93,7 @@ export class PromptCaptureStore {
         const indexEntry: CaptureIndexEntry = {
           captureId: data.captureId,
           invocationId: data.invocationId,
+          hmacInvocationId: data.hmacInvocationId,
           catId: data.catId,
           threadId: data.threadId,
           capturedAt: data.capturedAt,
@@ -113,6 +116,7 @@ export class PromptCaptureStore {
       const indexEntry: CaptureIndexEntry = {
         captureId: data.captureId,
         invocationId: data.invocationId,
+        hmacInvocationId: data.hmacInvocationId,
         catId: data.catId,
         threadId: data.threadId,
         capturedAt: data.capturedAt,
@@ -141,7 +145,9 @@ export class PromptCaptureStore {
   }
 
   listByInvocation(invocationId: string): CaptureIndexEntry[] {
-    return this.readIndex().filter((e) => e.invocationId === invocationId);
+    return this.readIndex().filter(
+      (e) => e.invocationId === invocationId || e.hmacInvocationId === invocationId,
+    );
   }
 
   listByThread(threadId: string, limit = 20): CaptureIndexEntry[] {
