@@ -532,13 +532,11 @@ export class QueueProcessor {
             e.targetCats.length === sortedTargets.length &&
             [...e.targetCats].sort().every((t, i) => t === sortedTargets[i]),
         );
-        if (matching.length > 0) {
-          content = content + '\n' + matching.map((e) => e.content).join('\n');
-          for (const be of matching) {
-            queue.markProcessingById(threadId, be.id);
-            batchedEntryIds.push(be.id);
-            if (be.messageId) batchedMessageIds.push(be.messageId);
-          }
+        for (const be of matching) {
+          if (!queue.markProcessingById(threadId, be.id)) continue;
+          batchedEntryIds.push(be.id);
+          if (be.messageId) batchedMessageIds.push(be.messageId);
+          content = content + '\n' + be.content;
         }
       }
 
