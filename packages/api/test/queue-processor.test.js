@@ -1282,9 +1282,9 @@ describe('QueueProcessor', () => {
     });
   });
 
-  // ── F169 Task 5: user-message batching at dequeue ──
+  // ── F175 Task 5: user-message batching at dequeue ──
 
-  describe('user-message batching (F169)', () => {
+  describe('user-message batching (F175)', () => {
     async function waitForQueue(queue, threadId, userId, predicate, timeoutMs = 2000) {
       const start = Date.now();
       while (Date.now() - start < timeoutMs) {

@@ -580,9 +580,9 @@ describe('Queue Management API', () => {
     assert.equal(body.code, 'CAT_NOT_ACTIVE');
   });
 
-  // ── F169 Task 6: PATCH /queue/reorder ──
+  // ── F175 Task 6: PATCH /queue/reorder ──
 
-  it('PATCH /queue/reorder sets positions on multiple entries (F169)', async () => {
+  it('PATCH /queue/reorder sets positions on multiple entries (F175)', async () => {
     const r1 = enqueueEntry(deps.invocationQueue, { content: 'a' });
     const r2 = enqueueEntry(deps.invocationQueue, { content: 'b' });
     const r3 = enqueueEntry(deps.invocationQueue, { content: 'c' });
@@ -610,7 +610,7 @@ describe('Queue Management API', () => {
     assert.equal(updateCall.arguments[2].action, 'reordered');
   });
 
-  it('PATCH /queue/reorder rejects position on processing entry (F169)', async () => {
+  it('PATCH /queue/reorder rejects position on processing entry (F175)', async () => {
     enqueueEntry(deps.invocationQueue, { content: 'a' });
     deps.invocationQueue.markProcessing('t1', 'user-a');
     const entries = deps.invocationQueue.list('t1', 'user-a');
@@ -625,7 +625,7 @@ describe('Queue Management API', () => {
     assert.equal(res.statusCode, 400);
   });
 
-  it('PATCH /queue/reorder rejects invalid body (F169)', async () => {
+  it('PATCH /queue/reorder rejects invalid body (F175)', async () => {
     const res = await app.inject({
       method: 'PATCH',
       url: '/api/threads/t1/queue/reorder',

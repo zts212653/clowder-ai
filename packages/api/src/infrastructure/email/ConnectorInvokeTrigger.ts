@@ -42,11 +42,11 @@ export interface ConnectorInvokeTriggerOptions {
 }
 
 export interface ConnectorTriggerPolicy {
-  /** F169: urgent entries get priority dequeue, no preemption */
+  /** F175: urgent entries get priority dequeue, no preemption */
   readonly priority?: 'urgent' | 'normal';
   /** optional reason for diagnostics */
   readonly reason?: string;
-  /** F169: origin category for visual grouping */
+  /** F175: origin category for visual grouping */
   readonly sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a';
   /** F140 Phase C: hint which Skill to auto-load (not a hard constraint — cat can override) */
   readonly suggestedSkill?: string;
@@ -102,7 +102,7 @@ export class ConnectorInvokeTrigger {
     const { invocationTracker } = this.opts;
     const priority = policy?.priority ?? 'normal';
 
-    // F169: all priorities go through queue — no preemption bypass
+    // F175: all priorities go through queue — no preemption bypass
     if (invocationTracker.has(threadId, catId)) {
       return this.enqueueWhileActive(
         threadId,

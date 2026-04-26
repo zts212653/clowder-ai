@@ -359,7 +359,7 @@ describe('POST /api/callbacks/start-vote', () => {
     assert.ok(dispatched, 'voter cats should be dispatched after start-vote');
   });
 
-  test('voters > MAX_QUEUE_DEPTH: all enqueued (F169: agent source bypasses depth limit)', async () => {
+  test('voters > MAX_QUEUE_DEPTH: all enqueued (F175: agent source bypasses depth limit)', async () => {
     const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 
@@ -419,7 +419,7 @@ describe('POST /api/callbacks/start-vote', () => {
 
     assert.equal(res.statusCode, 200);
 
-    // F169: agent source bypasses MAX_QUEUE_DEPTH — all 7 voters should be enqueued
+    // F175: agent source bypasses MAX_QUEUE_DEPTH — all 7 voters should be enqueued
     const queueEntries = invocationQueue.listAutoExecute?.(thread.id) ?? [];
     assert.equal(queueEntries.length, 7, 'all 7 voters should be enqueued (agent bypasses depth limit)');
 

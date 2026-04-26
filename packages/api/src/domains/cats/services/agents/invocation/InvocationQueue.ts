@@ -33,11 +33,11 @@ export interface QueueEntry {
   callerCatId?: string;
   /** F134: sender identity for connector group chat messages (used for UI display) */
   senderMeta?: { id: string; name?: string };
-  /** F169: queue-internal priority — urgent entries sort before normal in dequeue */
+  /** F175: queue-internal priority — urgent entries sort before normal in dequeue */
   priority: 'urgent' | 'normal';
-  /** F169: origin category for visual grouping */
+  /** F175: origin category for visual grouping */
   sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a';
-  /** F169: user drag-reorder position — explicit values override priority in dequeue */
+  /** F175: user drag-reorder position — explicit values override priority in dequeue */
   position?: number;
 }
 
@@ -71,7 +71,7 @@ export class InvocationQueue {
 
   private static readonly PRIORITY_RANK: Record<string, number> = { urgent: 0, normal: 1 };
 
-  /** F169: multi-dimensional entry comparator for dequeue ordering. */
+  /** F175: multi-dimensional entry comparator for dequeue ordering. */
   private static compareEntries(a: QueueEntry, b: QueueEntry): number {
     const aHasPos = a.position !== undefined;
     const bHasPos = b.position !== undefined;
@@ -83,7 +83,7 @@ export class InvocationQueue {
     return a.createdAt - b.createdAt;
   }
 
-  /** F169: set explicit dequeue position for drag-reorder. */
+  /** F175: set explicit dequeue position for drag-reorder. */
   setPosition(threadId: string, userId: string, entryId: string, position: number): boolean {
     const e = this.findEntry(threadId, userId, entryId);
     if (!e || e.status !== 'queued') return false;
@@ -116,7 +116,7 @@ export class InvocationQueue {
     const key = this.scopeKey(input.threadId, input.userId);
     const q = this.getOrCreate(key);
 
-    // F169: capacity check — only user messages are depth-limited
+    // F175: capacity check — only user messages are depth-limited
     if (input.source === 'user') {
       const userQueuedCount = q.filter((e) => e.status === 'queued' && e.source === 'user').length;
       if (userQueuedCount >= MAX_QUEUE_DEPTH) {
@@ -256,7 +256,7 @@ export class InvocationQueue {
     return true;
   }
 
-  /** F169: Mark the highest-priority queued entry as processing (stays in array). */
+  /** F175: Mark the highest-priority queued entry as processing (stays in array). */
   markProcessing(threadId: string, userId: string): QueueEntry | null {
     const q = this.queues.get(this.scopeKey(threadId, userId));
     if (!q) return null;
@@ -269,7 +269,7 @@ export class InvocationQueue {
     return { ...best };
   }
 
-  /** F169: Peek at the highest-priority queued entry without mutating state. */
+  /** F175: Peek at the highest-priority queued entry without mutating state. */
   peekNextQueued(threadId: string, userId: string): QueueEntry | null {
     const q = this.queues.get(this.scopeKey(threadId, userId));
     if (!q) return null;
@@ -305,7 +305,7 @@ export class InvocationQueue {
 
   // ── Cross-user methods (system-level only) ──
 
-  /** F169: Find the highest-priority queued entry across all users for a thread. */
+  /** F175: Find the highest-priority queued entry across all users for a thread. */
   peekOldestAcrossUsers(threadId: string): QueueEntry | null {
     let best: QueueEntry | null = null;
     for (const [key, q] of this.queues) {
@@ -320,7 +320,7 @@ export class InvocationQueue {
     return best ? { ...best } : null;
   }
 
-  /** F169: Mark the highest-priority queued entry across users as processing.
+  /** F175: Mark the highest-priority queued entry across users as processing.
    *  skipCatIds: skip entries whose primary target cat is in this set (slot busy). */
   markProcessingAcrossUsers(threadId: string, skipCatIds?: Set<string>): QueueEntry | null {
     let best: { entry: QueueEntry; key: string } | null = null;
@@ -540,7 +540,7 @@ export class InvocationQueue {
   }
 
   /**
-   * F169: Collect a batch of adjacent user entries for unified execution.
+   * F175: Collect a batch of adjacent user entries for unified execution.
    * Non-user sources always return a single-entry batch.
    * User entries batch while: same source, same intent, same targetCats (set equality).
    * Returns copies — caller is responsible for marking processing.

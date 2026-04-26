@@ -905,7 +905,7 @@ describe('ConnectorInvokeTrigger', () => {
       assert.deepStrictEqual(entries[0].targetCats, ['opus']);
     });
 
-    it('urgent connector enqueues with priority instead of preempting (F169)', async () => {
+    it('urgent connector enqueues with priority instead of preempting (F175)', async () => {
       trackerMock.setActive('thread-1', 'user-1');
       const trigger = createTrigger();
       trigger.trigger(
@@ -922,7 +922,7 @@ describe('ConnectorInvokeTrigger', () => {
       );
       await waitForTrigger();
 
-      assert.strictEqual(trackerMock.cancelCalls.length, 0, 'F169: no preemption — active signal must not be aborted');
+      assert.strictEqual(trackerMock.cancelCalls.length, 0, 'F175: no preemption — active signal must not be aborted');
       assert.strictEqual(routerMock.calls.length, 0, 'Should not execute directly — goes through queue');
 
       const entries = queue.list('thread-1', 'user-1');
@@ -931,7 +931,7 @@ describe('ConnectorInvokeTrigger', () => {
       assert.strictEqual(entries[0].messageId, 'msg-urgent-1');
     });
 
-    it('urgent connector passes sourceCategory to queue entry (F169)', async () => {
+    it('urgent connector passes sourceCategory to queue entry (F175)', async () => {
       trackerMock.setActive('thread-1', 'user-1');
       const trigger = createTrigger();
       trigger.trigger(
@@ -955,7 +955,7 @@ describe('ConnectorInvokeTrigger', () => {
       assert.strictEqual(entries[0].priority, 'urgent');
     });
 
-    it('urgent connector with owner mismatch still enqueues without cancel (F169)', async () => {
+    it('urgent connector with owner mismatch still enqueues without cancel (F175)', async () => {
       trackerMock.setActive('thread-1', 'owner-user');
       const trigger = createTrigger();
       trigger.trigger(
@@ -972,7 +972,7 @@ describe('ConnectorInvokeTrigger', () => {
       );
       await waitForTrigger();
 
-      assert.strictEqual(trackerMock.cancelCalls.length, 0, 'F169: no cancel calls for any urgent trigger');
+      assert.strictEqual(trackerMock.cancelCalls.length, 0, 'F175: no cancel calls for any urgent trigger');
       assert.strictEqual(routerMock.calls.length, 0, 'Should not execute directly');
 
       const entries = queue.list('thread-1', 'user-2');
@@ -980,7 +980,7 @@ describe('ConnectorInvokeTrigger', () => {
       assert.strictEqual(entries[0].priority, 'urgent');
     });
 
-    it('normal priority connector enqueues with priority normal (F169)', async () => {
+    it('normal priority connector enqueues with priority normal (F175)', async () => {
       trackerMock.setActive('thread-1', 'user-1');
       const trigger = createTrigger();
       trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Normal msg', 'msg-normal-1');
@@ -1020,7 +1020,7 @@ describe('ConnectorInvokeTrigger', () => {
       assert.ok(entries[1].content.includes('Second review'));
     });
 
-    it('connector messages bypass MAX_QUEUE_DEPTH (F169)', async () => {
+    it('connector messages bypass MAX_QUEUE_DEPTH (F175)', async () => {
       trackerMock.setActive('thread-1');
       const trigger = createTrigger();
 
@@ -1088,15 +1088,15 @@ describe('ConnectorInvokeTrigger', () => {
     });
   });
 
-  describe('F140 Phase C: suggestedSkill through queue path (F169)', () => {
-    it('suggestedSkill is preserved on queue entry when urgent enqueues (F169)', async () => {
+  describe('F140 Phase C: suggestedSkill through queue path (F175)', () => {
+    it('suggestedSkill is preserved on queue entry when urgent enqueues (F175)', async () => {
       trackerMock.setActive('thread-1', 'user-1');
       const trigger = createTrigger();
       const policy = { priority: 'urgent', reason: 'github_ci_failure', suggestedSkill: 'merge-gate' };
       trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'CI failed', 'msg-urgent', undefined, policy);
       await waitForTrigger();
 
-      assert.strictEqual(routerMock.calls.length, 0, 'F169: urgent does not execute directly');
+      assert.strictEqual(routerMock.calls.length, 0, 'F175: urgent does not execute directly');
       const entries = queue.list('thread-1', 'user-1');
       assert.strictEqual(entries.length, 1, 'Should enqueue urgent message');
       assert.strictEqual(entries[0].priority, 'urgent');

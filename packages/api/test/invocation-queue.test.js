@@ -81,9 +81,9 @@ describe('InvocationQueue', () => {
     assert.equal(queue.size('t1', 'u1'), 1); // only 'b' counts
   });
 
-  // ── F169: no merge — every entry is independent ──
+  // ── F175: no merge — every entry is independent ──
 
-  it('same-source same-target entries are independent (F169 no merge)', () => {
+  it('same-source same-target entries are independent (F175 no merge)', () => {
     const r1 = queue.enqueue(entry({ content: '猫猫' }));
     assert.equal(r1.outcome, 'enqueued');
     const r2 = queue.enqueue(entry({ content: '你好' }));
@@ -130,7 +130,7 @@ describe('InvocationQueue', () => {
     assert.equal(queue.size('t1', 'u1'), 2);
   });
 
-  it('consecutive user entries are independent (F169)', () => {
+  it('consecutive user entries are independent (F175)', () => {
     queue.enqueue(entry({ source: 'user', content: 'first' }));
     const r2 = queue.enqueue(entry({ source: 'user', content: 'second' }));
     assert.equal(r2.outcome, 'enqueued');
@@ -303,7 +303,7 @@ describe('InvocationQueue', () => {
     assert.equal(removed, null);
   });
 
-  // ── rollbackEnqueue removes entry (F169: no merge, simplified) ──
+  // ── rollbackEnqueue removes entry (F175: no merge, simplified) ──
 
   it('rollbackEnqueue removes the entry from queue', () => {
     const rA = queue.enqueue(entry({ content: 'A msg' }));
@@ -761,7 +761,7 @@ describe('InvocationQueue', () => {
     );
   });
 
-  // ── F169: priority / sourceCategory / position fields ──
+  // ── F175: priority / sourceCategory / position fields ──
 
   it('enqueue preserves priority field', () => {
     const result = queue.enqueue(entry({ priority: 'urgent', sourceCategory: 'ci' }));
@@ -788,9 +788,9 @@ describe('InvocationQueue', () => {
     assert.equal(result.entry.position, undefined);
   });
 
-  // ── F169: no merge — every message is independent ──
+  // ── F175: no merge — every message is independent ──
 
-  it('same-source same-target user messages are NOT merged (F169)', () => {
+  it('same-source same-target user messages are NOT merged (F175)', () => {
     queue.enqueue(entry({ content: 'a' }));
     queue.enqueue(entry({ content: 'b' }));
     const list = queue.list('t1', 'u1');
@@ -799,9 +799,9 @@ describe('InvocationQueue', () => {
     assert.equal(list[1].content, 'b');
   });
 
-  // ── F169: source-specific capacity ──
+  // ── F175: source-specific capacity ──
 
-  it('connector messages bypass MAX_QUEUE_DEPTH (F169)', () => {
+  it('connector messages bypass MAX_QUEUE_DEPTH (F175)', () => {
     for (let i = 0; i < 7; i++) {
       const r = queue.enqueue(entry({ content: `msg${i}`, source: 'connector', targetCats: ['c1'] }));
       assert.equal(r.outcome, 'enqueued', `connector entry ${i} should enqueue`);
@@ -809,14 +809,14 @@ describe('InvocationQueue', () => {
     assert.equal(queue.list('t1', 'u1').length, 7);
   });
 
-  it('agent messages bypass MAX_QUEUE_DEPTH (F169)', () => {
+  it('agent messages bypass MAX_QUEUE_DEPTH (F175)', () => {
     for (let i = 0; i < 7; i++) {
       const r = queue.enqueue(entry({ content: `msg${i}`, source: 'agent', targetCats: [`c${i}`] }));
       assert.equal(r.outcome, 'enqueued', `agent entry ${i} should enqueue`);
     }
   });
 
-  it('user messages still limited by MAX_QUEUE_DEPTH (F169)', () => {
+  it('user messages still limited by MAX_QUEUE_DEPTH (F175)', () => {
     for (let i = 0; i < 5; i++) {
       queue.enqueue(entry({ content: `msg${i}`, targetCats: [`c${i}`] }));
     }
@@ -824,7 +824,7 @@ describe('InvocationQueue', () => {
     assert.equal(r.outcome, 'full');
   });
 
-  // ── F169: multi-dimensional dequeue ordering ──
+  // ── F175: multi-dimensional dequeue ordering ──
 
   it('urgent entry dequeues before normal via peekOldestAcrossUsers', () => {
     queue.enqueue(entry({ userId: 'u1', content: 'normal-first', priority: 'normal' }));
@@ -877,7 +877,7 @@ describe('InvocationQueue', () => {
     assert.equal(queue.setPosition('t1', 'u1', 'nonexistent', 0), false);
   });
 
-  // ── F169 Task 5: collectUserBatch ──
+  // ── F175 Task 5: collectUserBatch ──
 
   it('collectUserBatch collects adjacent user entries with same userId+intent+targetCats', () => {
     queue.enqueue(entry({ content: 'a', source: 'user', targetCats: ['c1'], intent: 'execute' }));

@@ -1,5 +1,5 @@
 /**
- * F169 regression + integration tests
+ * F175 regression + integration tests
  * Task 7: #564 scenario + cross-priority auto-dequeue chain
  */
 
@@ -15,7 +15,7 @@ describe('#564 regression: urgent connector does not break A2A chain', () => {
     // 1. Simulate active invocation (signal alive)
     const controller = new AbortController();
 
-    // 2. Urgent connector message arrives and enqueues (F169: no preemption)
+    // 2. Urgent connector message arrives and enqueues (F175: no preemption)
     const result = queue.enqueue({
       threadId: 't1',
       userId: 'u1',

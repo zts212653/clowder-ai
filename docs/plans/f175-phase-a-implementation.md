@@ -1,6 +1,6 @@
-# F169 Phase A: 后端统一 Implementation Plan
+# F175 Phase A: 后端统一 Implementation Plan
 
-**Feature:** F169 — `docs/features/F169-unified-queue-design.md`
+**Feature:** F175 — `docs/features/F175-unified-queue-design.md`
 **Goal:** 消除 urgent bypass、引入 priority ordering、取消强制 merge、支持用户可控编排 — 根治 #564 A2A 链断裂
 **Acceptance Criteria:**
 - AC-A1: `handleUrgentTrigger()` 和 urgent 分支已删除，所有 connector 消息走 `enqueueWhileActive()`
@@ -85,7 +85,7 @@ In `InvocationQueue.ts`:
 **Step 5: Commit**
 ```bash
 git add packages/api/src/domains/cats/services/agents/invocation/InvocationQueue.ts packages/api/test/invocation-queue.test.js
-git commit -m "feat(F169): add priority/sourceCategory/position to QueueEntry"
+git commit -m "feat(F175): add priority/sourceCategory/position to QueueEntry"
 ```
 
 ---
@@ -173,7 +173,7 @@ In `InvocationQueue.ts` enqueue():
 
 **Step 6: Commit**
 ```bash
-git commit -m "feat(F169): remove merge logic + source-specific capacity"
+git commit -m "feat(F175): remove merge logic + source-specific capacity"
 ```
 
 ---
@@ -263,7 +263,7 @@ Update `markProcessingAcrossUsers` (L345-360): same comparator logic.
 
 **Step 5: Commit**
 ```bash
-git commit -m "feat(F169): multi-dimensional dequeue ordering (position > priority > createdAt)"
+git commit -m "feat(F175): multi-dimensional dequeue ordering (position > priority > createdAt)"
 ```
 
 ---
@@ -279,7 +279,7 @@ git commit -m "feat(F169): multi-dimensional dequeue ordering (position > priori
 **Step 1: Write failing tests**
 
 ```javascript
-describe('urgent connector uses queue with priority (F169)', () => {
+describe('urgent connector uses queue with priority (F175)', () => {
   it('urgent message enqueues with priority=urgent instead of preempting', () => {
     // Setup: cat already active
     invocationTracker.start(threadId, catId, userId, controller);
@@ -353,7 +353,7 @@ grep -rn "priority.*urgent" packages/api/src/infrastructure/email/{CiCdCheckTask
 
 **Step 7: Commit**
 ```bash
-git commit -m "feat(F169): delete handleUrgentTrigger — urgent → priority enqueue"
+git commit -m "feat(F175): delete handleUrgentTrigger — urgent → priority enqueue"
 ```
 
 ---
@@ -368,7 +368,7 @@ git commit -m "feat(F169): delete handleUrgentTrigger — urgent → priority en
 **Step 1: Write failing tests**
 
 ```javascript
-describe('user-message batching at dequeue (F169)', () => {
+describe('user-message batching at dequeue (F175)', () => {
   it('collects adjacent user entries with same userId+intent+targetCats', () => {
     queue.enqueue({ threadId, userId, content: 'a', source: 'user', targetCats: ['c1'], intent: 'execute' });
     queue.enqueue({ threadId, userId, content: 'b', source: 'user', targetCats: ['c1'], intent: 'execute' });
@@ -417,7 +417,7 @@ In `InvocationQueue.ts`, add `collectUserBatch()`:
 
 ```typescript
 /**
- * F169: Collect a batch of adjacent user entries for unified execution.
+ * F175: Collect a batch of adjacent user entries for unified execution.
  * Starting from the first queued entry, collects consecutive entries matching:
  * same source=user, same userId, same intent, same targetCats (Set equality).
  * Connector/agent entries are always single-entry batches.
@@ -470,7 +470,7 @@ if (entry.source === 'user') {
 
 **Step 5: Commit**
 ```bash
-git commit -m "feat(F169): user-message batching at dequeue time"
+git commit -m "feat(F175): user-message batching at dequeue time"
 ```
 
 ---
@@ -554,7 +554,7 @@ router.patch('/api/threads/:threadId/queue/reorder', async (req, res) => {
 
 **Step 5: Commit**
 ```bash
-git commit -m "feat(F169): add PATCH /queue/reorder API"
+git commit -m "feat(F175): add PATCH /queue/reorder API"
 ```
 
 ---
@@ -607,7 +607,7 @@ describe('cross-priority auto-dequeue', () => {
 
 **Step 3: Commit**
 ```bash
-git commit -m "test(F169): #564 regression + cross-priority auto-dequeue"
+git commit -m "test(F175): #564 regression + cross-priority auto-dequeue"
 ```
 
 ---
@@ -636,7 +636,7 @@ NODE_ENV=development pnpm --filter @cat-cafe/api test
 
 **Step 4: Commit**
 ```bash
-git commit -m "refactor(F169): remove merge dead code + update references"
+git commit -m "refactor(F175): remove merge dead code + update references"
 ```
 
 ---

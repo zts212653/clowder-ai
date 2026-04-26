@@ -88,7 +88,7 @@ describe('QueueProcessor deliveredAt backfill', () => {
     assert.ok(msgIds.includes('msg-1'), `should mark msg-1 as delivered, got: ${msgIds}`);
   });
 
-  it('calls markDelivered for entry messageId (F169: merge removed)', async () => {
+  it('calls markDelivered for entry messageId (F175: merge removed)', async () => {
     const result = deps.queue.enqueue({
       threadId: 't1',
       userId: 'u1',

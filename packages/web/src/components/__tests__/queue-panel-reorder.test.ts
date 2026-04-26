@@ -1,5 +1,5 @@
 /**
- * F169 Phase B: compareQueueEntries mirrors backend InvocationQueue.compareEntries.
+ * F175 Phase B: compareQueueEntries mirrors backend InvocationQueue.compareEntries.
  * Locks the frontend sorting behavior so optimistic reorder updates render correctly.
  */
 import { describe, expect, it } from 'vitest';
@@ -7,7 +7,7 @@ import { compareQueueEntries } from '../QueuePanel';
 
 const NOW = Date.now();
 
-describe('compareQueueEntries (F169 B1 regression)', () => {
+describe('compareQueueEntries (F175 B1 regression)', () => {
   it('explicit position comes before no position', () => {
     const a = { position: 0, createdAt: NOW + 100 };
     const b = { createdAt: NOW };

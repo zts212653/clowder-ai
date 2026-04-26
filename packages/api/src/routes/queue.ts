@@ -6,7 +6,7 @@
  * POST   /api/threads/:threadId/queue/next          → 手动触发处理下一条
  * POST   /api/threads/:threadId/queue/:entryId/steer → Steer queued entry（立即执行/提到队首）
  * PATCH  /api/threads/:threadId/queue/:entryId/move → 重排序（上移/下移）
- * PATCH  /api/threads/:threadId/queue/reorder       → F169: 批量设置 position（拖拽重排）
+ * PATCH  /api/threads/:threadId/queue/reorder       → F175: 批量设置 position（拖拽重排）
  * DELETE /api/threads/:threadId/queue               → 清空队列
  * POST   /api/threads/:threadId/cancel/:catId       → F122B AC-B9: Per-cat cancel
  */
@@ -283,7 +283,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     },
   );
 
-  // PATCH /api/threads/:threadId/queue/reorder (F169)
+  // PATCH /api/threads/:threadId/queue/reorder (F175)
   app.patch<{ Params: { threadId: string } }>('/api/threads/:threadId/queue/reorder', async (request, reply) => {
     const { threadId } = request.params;
     const guard = await guardThreadOwnership(request, reply, threadStore, threadId);

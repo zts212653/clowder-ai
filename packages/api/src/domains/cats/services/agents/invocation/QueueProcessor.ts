@@ -406,7 +406,7 @@ export class QueueProcessor {
   ): Promise<{ started: boolean; entry?: QueueEntry }> {
     this.sweepZombieSlots(threadId);
 
-    // F169: scan by comparator order, skip entries whose target slot is busy
+    // F175: scan by comparator order, skip entries whose target slot is busy
     const busyCats = new Set<string>();
     for (;;) {
       const entry = this.deps.queue.markProcessingAcrossUsers(threadId, busyCats);
@@ -520,7 +520,7 @@ export class QueueProcessor {
       }
       invocationId = createResult.invocationId;
 
-      // F169: user-message batching — collect adjacent matching entries
+      // F175: user-message batching — collect adjacent matching entries
       // Placed after idempotency check so batched entries aren't dropped on duplicate
       if (entry.source === 'user') {
         const batch = queue.collectUserBatch(threadId, userId);
@@ -873,7 +873,7 @@ export class QueueProcessor {
       // Always cleanup tracker + queue (all target cat slots)
       invocationTracker.completeAll(threadId, targetCats, controller);
       queue.removeProcessedAcrossUsers(threadId, entry.id);
-      // F169: remove batched entries
+      // F175: remove batched entries
       for (const bid of batchedEntryIds) {
         queue.removeProcessedAcrossUsers(threadId, bid);
       }
