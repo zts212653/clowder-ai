@@ -5,10 +5,10 @@
  * Default off — controlled by PROMPT_CAPTURE env var.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFile, appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFile, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { gunzipSync, gzipSync } from 'node:zlib';
+import { gzip, gunzipSync, gzipSync } from 'node:zlib';
 import { createModuleLogger } from '../logger.js';
 
 const log = createModuleLogger('debug:prompt-capture');
@@ -73,14 +73,43 @@ export class PromptCaptureStore {
     }
   }
 
-  capture(data: PromptCapture): string {
+  captureAsync(data: PromptCapture): void {
+    const json = JSON.stringify(data);
+    const fileName = `${data.captureId}.json.gz`;
+    const filePath = join(this.payloadDir, fileName);
+
+    gzip(Buffer.from(json), (gzipErr, compressed) => {
+      if (gzipErr) {
+        log.warn({ err: gzipErr, captureId: data.captureId }, 'Prompt capture gzip failed');
+        return;
+      }
+      writeFile(filePath, compressed, (writeErr) => {
+        if (writeErr) {
+          log.warn({ err: writeErr, captureId: data.captureId }, 'Prompt capture write failed');
+          return;
+        }
+        const indexEntry: CaptureIndexEntry = {
+          captureId: data.captureId,
+          invocationId: data.invocationId,
+          catId: data.catId,
+          threadId: data.threadId,
+          capturedAt: data.capturedAt,
+          promptBytes: data.promptBytes,
+          file: fileName,
+        };
+        appendFile(this.indexPath, `${JSON.stringify(indexEntry)}\n`, (appendErr) => {
+          if (appendErr) log.warn({ err: appendErr }, 'Prompt capture index append failed');
+          this.pruneIfNeeded();
+        });
+      });
+    });
+  }
+
+  captureSync(data: PromptCapture): string {
     try {
       const compressed = gzipSync(JSON.stringify(data));
       const fileName = `${data.captureId}.json.gz`;
-      const filePath = join(this.payloadDir, fileName);
-
-      writeFileSync(filePath, compressed);
-
+      writeFileSync(join(this.payloadDir, fileName), compressed);
       const indexEntry: CaptureIndexEntry = {
         captureId: data.captureId,
         invocationId: data.invocationId,
@@ -90,9 +119,7 @@ export class PromptCaptureStore {
         promptBytes: data.promptBytes,
         file: fileName,
       };
-
-      appendFileSync(this.indexPath, JSON.stringify(indexEntry) + '\n');
-
+      appendFileSync(this.indexPath, `${JSON.stringify(indexEntry)}\n`);
       this.pruneIfNeeded();
       return data.captureId;
     } catch (err) {
@@ -207,14 +234,11 @@ export class PromptCaptureStore {
 
 export function isPromptCaptureEnabled(catId?: string): boolean {
   const mode = process.env.PROMPT_CAPTURE;
-  if (!mode || mode === 'off') return false;
-  if (mode === 'on' || mode === 'failures_only') {
-    const allowedCats = process.env.PROMPT_CAPTURE_CATS;
-    if (!allowedCats) return true;
-    if (!catId) return true;
-    return allowedCats.split(',').some((c) => c.trim() === catId);
-  }
-  return false;
+  if (mode !== 'on') return false;
+  const allowedCats = process.env.PROMPT_CAPTURE_CATS;
+  if (!allowedCats) return true;
+  if (!catId) return true;
+  return allowedCats.split(',').some((c) => c.trim() === catId);
 }
 
 export function estimateTokens(text: string): number {

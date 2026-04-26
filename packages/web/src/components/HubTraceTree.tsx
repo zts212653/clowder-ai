@@ -264,7 +264,7 @@ function SpanDetail({ span }: { span: TraceSpan | undefined }) {
   if (!span) return null;
 
   const invocationId = span.attributes.invocationId as string | undefined;
-  const isInvocationSpan = span.name.includes('invocation') || span.name.includes('route');
+  const hasInvocationId = Boolean(invocationId);
 
   return (
     <div className="rounded-lg bg-cafe-surface-elevated p-3 text-xs">
@@ -273,7 +273,7 @@ function SpanDetail({ span }: { span: TraceSpan | undefined }) {
           <div>
             <span className="text-cafe-muted">spanId:</span> <span className="font-mono">{span.spanId}</span>
           </div>
-          {isInvocationSpan && (
+          {hasInvocationId && (
             <button
               type="button"
               onClick={() => setXrayOpen(!xrayOpen)}
@@ -346,7 +346,7 @@ interface PromptCaptureData {
 type InspectorTab = 'system' | 'user' | 'effective' | 'meta';
 
 function PromptInspector({ invocationId, catId }: { invocationId?: string; catId?: string }) {
-  const [captures, setCaptures] = useState<PromptCaptureData[]>([]);
+  const [_captures, setCaptures] = useState<PromptCaptureData[]>([]);
   const [selected, setSelected] = useState<PromptCaptureData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

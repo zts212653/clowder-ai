@@ -5,7 +5,7 @@
 if (!process.env.NODE_ENV) process.env.NODE_ENV = 'test';
 
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -37,7 +37,7 @@ test('F172: PromptCaptureStore captures and reads back', async () => {
   const store = new PromptCaptureStore({ baseDir: dir });
 
   const capture = makeCapture();
-  store.capture(capture);
+  store.captureSync(capture);
 
   const result = store.read(capture.captureId);
   assert.ok(result);
@@ -60,9 +60,9 @@ test('F172: listByInvocation filters correctly', async () => {
   const dir = join(testDir, 'by-inv');
   const store = new PromptCaptureStore({ baseDir: dir });
 
-  store.capture(makeCapture({ invocationId: 'inv-A' }));
-  store.capture(makeCapture({ invocationId: 'inv-B' }));
-  store.capture(makeCapture({ invocationId: 'inv-A' }));
+  store.captureSync(makeCapture({ invocationId: 'inv-A' }));
+  store.captureSync(makeCapture({ invocationId: 'inv-B' }));
+  store.captureSync(makeCapture({ invocationId: 'inv-A' }));
 
   const results = store.listByInvocation('inv-A');
   assert.equal(results.length, 2);
@@ -73,9 +73,9 @@ test('F172: listByThread filters correctly', async () => {
   const dir = join(testDir, 'by-thread');
   const store = new PromptCaptureStore({ baseDir: dir });
 
-  store.capture(makeCapture({ threadId: 'thread-1' }));
-  store.capture(makeCapture({ threadId: 'thread-2' }));
-  store.capture(makeCapture({ threadId: 'thread-1' }));
+  store.captureSync(makeCapture({ threadId: 'thread-1' }));
+  store.captureSync(makeCapture({ threadId: 'thread-2' }));
+  store.captureSync(makeCapture({ threadId: 'thread-1' }));
 
   const results = store.listByThread('thread-1');
   assert.equal(results.length, 2);
@@ -86,8 +86,8 @@ test('F172: prune removes expired entries', async () => {
   const dir = join(testDir, 'prune');
   const store = new PromptCaptureStore({ baseDir: dir, ttlMs: 100 });
 
-  store.capture(makeCapture({ capturedAt: Date.now() - 5000 }));
-  store.capture(makeCapture({ capturedAt: Date.now() }));
+  store.captureSync(makeCapture({ capturedAt: Date.now() - 5000 }));
+  store.captureSync(makeCapture({ capturedAt: Date.now() }));
 
   const removed = store.prune();
   assert.equal(removed, 1);
@@ -100,7 +100,7 @@ test('F172: prune enforces maxEntries', async () => {
   const store = new PromptCaptureStore({ baseDir: dir, maxEntries: 3 });
 
   for (let i = 0; i < 5; i++) {
-    store.capture(makeCapture());
+    store.captureSync(makeCapture());
   }
 
   store.prune();
@@ -114,7 +114,7 @@ test('F172: gzip compression actually compresses', async () => {
 
   const bigPrompt = 'x'.repeat(10000);
   const capture = makeCapture({ effectivePrompt: bigPrompt, captureId: 'gzip-test' });
-  store.capture(capture);
+  store.captureSync(capture);
 
   const filePath = join(dir, 'payloads', 'gzip-test.json.gz');
   assert.ok(existsSync(filePath));

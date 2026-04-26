@@ -59,7 +59,7 @@ export function capturePromptIfEnabled(input: CaptureInput): void {
       tokenEstimate: estimateTokens(input.effectivePrompt),
     };
 
-    getStore().capture(data);
+    getStore().captureAsync(data);
   } catch (err) {
     log.warn({ err, catId: input.catId }, 'Prompt capture failed (non-fatal)');
   }

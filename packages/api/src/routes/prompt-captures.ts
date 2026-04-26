@@ -44,7 +44,7 @@ export const promptCaptureRoutes: FastifyPluginAsync = async (app) => {
       if (request.query.threadId) {
         return store.listByThread(request.query.threadId, limit);
       }
-      return store.listRecent(limit);
+      return reply.status(400).send({ error: 'Provide invocationId or threadId filter' });
     },
   );
 
