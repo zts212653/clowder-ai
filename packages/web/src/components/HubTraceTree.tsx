@@ -346,7 +346,6 @@ interface PromptCaptureData {
 type InspectorTab = 'system' | 'user' | 'effective' | 'meta';
 
 function PromptInspector({ invocationId, catId }: { invocationId?: string; catId?: string }) {
-  const [_captures, setCaptures] = useState<PromptCaptureData[]>([]);
   const [selected, setSelected] = useState<PromptCaptureData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -373,7 +372,6 @@ function PromptInspector({ invocationId, catId }: { invocationId?: string; catId
         const detailRes = await apiFetch(`/api/debug/prompt-captures/${matching[0].captureId}`);
         if (detailRes.ok) {
           const data = (await detailRes.json()) as PromptCaptureData;
-          setCaptures([data]);
           setSelected(data);
         }
       } catch {
