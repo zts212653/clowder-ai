@@ -427,7 +427,16 @@ function PromptInspector({ invocationId, catId }: { invocationId?: string; catId
       </div>
 
       <div className="mt-2 max-h-[300px] overflow-y-auto">
-        {tab === 'system' && <PromptSection content={selected.systemPrompt} label="System Prompt" />}
+        {tab === 'system' && (
+          <>
+            {!selected.injectionDecision.injected && (
+              <div className="mb-2 rounded bg-amber-50 px-2 py-1 text-[10px] text-amber-700">
+                Resume — system prompt was not injected this turn
+              </div>
+            )}
+            <PromptSection content={selected.systemPrompt} label={selected.injectionDecision.injected ? 'System Prompt' : 'System Prompt (not sent)'} />
+          </>
+        )}
         {tab === 'user' && (
           <>
             {selected.missionPrefix && (
@@ -444,7 +453,8 @@ function PromptInspector({ invocationId, catId }: { invocationId?: string; catId
 }
 
 function PromptTokenBar({ capture }: { capture: PromptCaptureData }) {
-  const sysLen = capture.systemPrompt.length;
+  const injected = capture.injectionDecision.injected;
+  const sysLen = injected ? capture.systemPrompt.length : 0;
   const userLen = capture.userPrompt.length;
   const missionLen = capture.missionPrefix?.length ?? 0;
   const total = capture.effectivePrompt.length || 1;
