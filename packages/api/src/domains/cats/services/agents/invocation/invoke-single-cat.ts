@@ -463,7 +463,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   const parentCtx = params.routeSpan ? trace.setSpan(context.active(), params.routeSpan) : undefined;
   const invocationSpan = tracer.startSpan(
     'cat_cafe.invocation',
-    { attributes: { [AGENT_ID]: catId, [OPERATION_NAME]: 'invoke' } },
+    { attributes: { [AGENT_ID]: catId, [OPERATION_NAME]: 'invoke', invocationId } },
     parentCtx,
   );
 
