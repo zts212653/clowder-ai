@@ -33,7 +33,7 @@ EOF
 port_is_reserved() {
     local port="$1"
     case "$port" in
-        3001|3002|3011|3012|4111) return 0 ;;
+        3003|3004|3011|3012|4111) return 0 ;;
         *) return 1 ;;
     esac
 }
