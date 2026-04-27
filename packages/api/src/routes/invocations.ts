@@ -21,6 +21,7 @@ import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
+import { getDefaultUploadDir } from '../utils/upload-paths.js';
 
 export interface InvocationsRoutesOptions {
   invocationRecordStore: IInvocationRecordStore;
@@ -34,7 +35,7 @@ export interface InvocationsRoutesOptions {
 }
 
 export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = async (app, opts) => {
-  const uploadDir = opts.uploadDir ?? process.env.UPLOAD_DIR ?? './uploads';
+  const uploadDir = getDefaultUploadDir(opts.uploadDir ?? process.env.UPLOAD_DIR);
 
   // GET /api/invocations/:id — query InvocationRecord state
   app.get<{ Params: { id: string } }>('/api/invocations/:id', async (request, reply) => {

@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import { applyTermDictionary, correctTranscription, removeFillers } from '@/utils/transcription-corrector';
+import { beforeEach, describe, expect, it } from 'vitest';
+import {
+  applyTermDictionary,
+  correctTranscription,
+  refreshSpeechAliases,
+  removeFillers,
+} from '@/utils/transcription-corrector';
 
 /* ------------------------------------------------------------------ */
 /*  applyTermDictionary                                                */
@@ -152,6 +157,10 @@ describe('removeFillers', () => {
 /* ------------------------------------------------------------------ */
 
 describe('correctTranscription', () => {
+  beforeEach(() => {
+    refreshSpeechAliases([{ mentionPatterns: ['@砚砚', '@宪宪'] }]);
+  });
+
   it('applies both term replacement and filler removal', () => {
     const input = '嗯那个用 icp 和 type script 开发';
     expect(correctTranscription(input)).toBe('用 MCP 和 TypeScript 开发');

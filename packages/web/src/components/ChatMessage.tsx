@@ -1,6 +1,6 @@
 'use client';
 
-import type { CatData } from '@/hooks/useCatData';
+import { type CatData, formatCatName } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { useTts } from '@/hooks/useTts';
 import { hexToRgba, tintedLight } from '@/lib/color-utils';
@@ -85,7 +85,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
   const catStyle = catData
     ? (() => {
         const breed = BREED_STYLES[catData.breedId ?? ''] ?? DEFAULT_BREED_STYLE;
-        const label = catData.variantLabel ? `${catData.displayName}（${catData.variantLabel}）` : catData.displayName;
+        const label = formatCatName(catData);
         const isCallback = message.origin === 'callback';
         return {
           label,
@@ -414,7 +414,12 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
             />
           )}
           {message.extra?.rich?.blocks && message.extra.rich.blocks.length > 0 && (
-            <RichBlocks blocks={message.extra.rich.blocks} catId={message.catId} messageId={message.id} />
+            <RichBlocks
+              blocks={message.extra.rich.blocks}
+              catId={message.catId}
+              messageId={message.id}
+              messageSource={message.source}
+            />
           )}
           {message.isStreaming && !isStreamOrigin && (
             <span className="inline-block w-1.5 h-4 bg-current animate-pulse ml-0.5 rounded-full opacity-50" />

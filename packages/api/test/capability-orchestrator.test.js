@@ -1,7 +1,7 @@
 // @ts-check
 
 import assert from 'node:assert/strict';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -22,9 +22,11 @@ import {
   parsePencilVersion,
   readCapabilitiesConfig,
   readResolvedMcpState,
+  realignManagedCatCafeServerPaths,
   resolveMachineSpecificServers,
   resolvePencilBinary,
   resolvePencilCommand,
+  resolveRequiredMcpStatus,
   resolveServersForCat,
   writeCapabilitiesConfig,
 } from '../dist/config/capabilities/capability-orchestrator.js';
@@ -39,6 +41,11 @@ async function makeTmpDir(prefix) {
 /** Helper: minimal capabilities.json */
 function makeConfig(capabilities = []) {
   return { version: 1, capabilities };
+}
+
+async function writeExecutable(filePath) {
+  await writeFile(filePath, '#!/bin/sh\nexit 0\n');
+  await chmod(filePath, 0o755);
 }
 
 // ────────── Read/Write capabilities.json ──────────
@@ -128,6 +135,83 @@ describe('deduplicateDiscoveredMcpServers', () => {
 
     assert.equal(deduped.length, 1);
     assert.equal(deduped[0].enabled, true);
+  });
+});
+
+describe('resolveRequiredMcpStatus', () => {
+  it('marks missing local artifact args as unresolved', async () => {
+    const dir = await makeTmpDir('cap-required-artifact');
+    const status = await resolveRequiredMcpStatus('artifact-test', {
+      capabilities: makeConfig([
+        {
+          id: 'artifact-test',
+          type: 'mcp',
+          enabled: true,
+          source: 'external',
+          mcpServer: { command: 'node', args: ['./missing.json'] },
+        },
+      ]),
+      projectRoot: dir,
+    });
+
+    try {
+      assert.equal(status.status, 'unresolved');
+      assert.equal(status.reason, 'command args reference missing local artifact');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts home-relative command paths when the binary exists', async () => {
+    const dir = await makeTmpDir('cap-required-home-command');
+    try {
+      const homeDir = join(dir, 'home');
+      await mkdir(join(homeDir, 'bin'), { recursive: true });
+      const commandPath = join(homeDir, 'bin', 'doctor-bin');
+      await writeExecutable(commandPath);
+
+      const status = await resolveRequiredMcpStatus('home-command', {
+        capabilities: makeConfig([
+          {
+            id: 'home-command',
+            type: 'mcp',
+            enabled: true,
+            source: 'external',
+            mcpServer: { command: '~/bin/doctor-bin', args: [] },
+          },
+        ]),
+        env: { ...process.env, HOME: homeDir, USERPROFILE: homeDir },
+        projectRoot: dir,
+      });
+
+      assert.equal(status.status, 'ready');
+      assert.match(status.reason, /stdio ~\/bin\/doctor-bin/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not treat slash-bearing package specs as local artifacts', async () => {
+    const dir = await makeTmpDir('cap-required-package-spec');
+    const status = await resolveRequiredMcpStatus('package-spec', {
+      capabilities: makeConfig([
+        {
+          id: 'package-spec',
+          type: 'mcp',
+          enabled: true,
+          source: 'external',
+          mcpServer: { command: 'npx', args: ['github:modelcontextprotocol/servers'] },
+        },
+      ]),
+      projectRoot: dir,
+    });
+
+    try {
+      assert.equal(status.status, 'ready');
+      assert.match(status.reason, /stdio npx/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -453,10 +537,10 @@ describe('resolvePencilBinary', () => {
     const vscodeInsidersDir = join(await makeTmpDir('pencil-vsi'), 'extensions');
 
     await mkdir(join(antigravityDir, 'highagency.pencildev-0.6.40-universal', 'out'), { recursive: true });
-    await writeFile(join(antigravityDir, 'highagency.pencildev-0.6.40-universal', PENCIL_BINARY_SUFFIX), '');
+    await writeExecutable(join(antigravityDir, 'highagency.pencildev-0.6.40-universal', PENCIL_BINARY_SUFFIX));
 
     await mkdir(join(cursorDir, 'highagency.pencildev-0.7.1-universal', 'out'), { recursive: true });
-    await writeFile(join(cursorDir, 'highagency.pencildev-0.7.1-universal', PENCIL_BINARY_SUFFIX), '');
+    await writeExecutable(join(cursorDir, 'highagency.pencildev-0.7.1-universal', PENCIL_BINARY_SUFFIX));
 
     // Newer version exists, but the binary is missing. resolvePencilBinary() should
     // skip it and fall back to the newest accessible install instead of returning
@@ -495,7 +579,7 @@ describe('resolvePencilCommand', () => {
     const antigravityDir = join(dir, 'ag');
     await mkdir(join(antigravityDir, 'highagency.pencildev-0.6.40-universal'), { recursive: true });
     const explicitBin = join(dir, 'custom-pencil-bin');
-    await writeFile(explicitBin, '');
+    await writeExecutable(explicitBin);
 
     const resolved = await resolvePencilCommand({
       env: { PENCIL_MCP_BIN: explicitBin, PENCIL_MCP_APP: 'vscode' },
@@ -512,7 +596,7 @@ describe('resolvePencilCommand', () => {
   it('falls back to VS Code when Antigravity is unavailable', async () => {
     const vscodeDir = join(dir, '.vscode', 'extensions');
     await mkdir(join(vscodeDir, 'highagency.pencildev-0.6.41-universal', 'out'), { recursive: true });
-    await writeFile(join(vscodeDir, 'highagency.pencildev-0.6.41-universal', PENCIL_BINARY_SUFFIX), '');
+    await writeExecutable(join(vscodeDir, 'highagency.pencildev-0.6.41-universal', PENCIL_BINARY_SUFFIX));
 
     const resolved = await resolvePencilCommand({
       antigravityDir: join(dir, 'missing-ag'),
@@ -529,9 +613,9 @@ describe('resolvePencilCommand', () => {
     const vscodeDir = join(dir, 'vsc');
     // Both have 0.6.40 — Antigravity as -universal suffix, VS Code without
     await mkdir(join(antigravityDir, 'highagency.pencildev-0.6.40-universal', 'out'), { recursive: true });
-    await writeFile(join(antigravityDir, 'highagency.pencildev-0.6.40-universal', PENCIL_BINARY_SUFFIX), '');
+    await writeExecutable(join(antigravityDir, 'highagency.pencildev-0.6.40-universal', PENCIL_BINARY_SUFFIX));
     await mkdir(join(vscodeDir, 'highagency.pencildev-0.6.40', 'out'), { recursive: true });
-    await writeFile(join(vscodeDir, 'highagency.pencildev-0.6.40', PENCIL_BINARY_SUFFIX), '');
+    await writeExecutable(join(vscodeDir, 'highagency.pencildev-0.6.40', PENCIL_BINARY_SUFFIX));
 
     const resolved = await resolvePencilCommand({
       antigravityDir,
@@ -550,9 +634,9 @@ describe('resolvePencilCommand', () => {
     const vscodeDir = join(dir, 'vsc');
     // Antigravity has older version, VS Code has newer — but env says prefer antigravity
     await mkdir(join(antigravityDir, 'highagency.pencildev-0.6.39-universal', 'out'), { recursive: true });
-    await writeFile(join(antigravityDir, 'highagency.pencildev-0.6.39-universal', PENCIL_BINARY_SUFFIX), '');
+    await writeExecutable(join(antigravityDir, 'highagency.pencildev-0.6.39-universal', PENCIL_BINARY_SUFFIX));
     await mkdir(join(vscodeDir, 'highagency.pencildev-0.6.40', 'out'), { recursive: true });
-    await writeFile(join(vscodeDir, 'highagency.pencildev-0.6.40', PENCIL_BINARY_SUFFIX), '');
+    await writeExecutable(join(vscodeDir, 'highagency.pencildev-0.6.40', PENCIL_BINARY_SUFFIX));
 
     const resolved = await resolvePencilCommand({
       env: { PENCIL_MCP_APP: 'antigravity' },
@@ -572,9 +656,9 @@ describe('resolvePencilCommand', () => {
     const vscodeDir = join(dir, 'vsc');
     // Both have same version — env says vscode-insiders (alias for vscode)
     await mkdir(join(antigravityDir, 'highagency.pencildev-0.6.40-universal', 'out'), { recursive: true });
-    await writeFile(join(antigravityDir, 'highagency.pencildev-0.6.40-universal', PENCIL_BINARY_SUFFIX), '');
+    await writeExecutable(join(antigravityDir, 'highagency.pencildev-0.6.40-universal', PENCIL_BINARY_SUFFIX));
     await mkdir(join(vscodeDir, 'highagency.pencildev-0.6.40', 'out'), { recursive: true });
-    await writeFile(join(vscodeDir, 'highagency.pencildev-0.6.40', PENCIL_BINARY_SUFFIX), '');
+    await writeExecutable(join(vscodeDir, 'highagency.pencildev-0.6.40', PENCIL_BINARY_SUFFIX));
 
     const resolved = await resolvePencilCommand({
       env: { PENCIL_MCP_APP: 'vscode-insiders' },
@@ -592,7 +676,7 @@ describe('resolvePencilCommand', () => {
   it('PENCIL_MCP_APP falls back to any candidate if preferred app has no installations', async () => {
     const vscodeDir = join(dir, 'vsc');
     await mkdir(join(vscodeDir, 'highagency.pencildev-0.6.40', 'out'), { recursive: true });
-    await writeFile(join(vscodeDir, 'highagency.pencildev-0.6.40', PENCIL_BINARY_SUFFIX), '');
+    await writeExecutable(join(vscodeDir, 'highagency.pencildev-0.6.40', PENCIL_BINARY_SUFFIX));
 
     const resolved = await resolvePencilCommand({
       env: { PENCIL_MCP_APP: 'antigravity' },
@@ -736,27 +820,128 @@ describe('bootstrapCapabilities', () => {
   it('uses catCafeRepoRoot for cat-cafe MCP descriptor when provided', async () => {
     const claudeFile = join(dir, '.mcp.json');
     await writeFile(claudeFile, JSON.stringify({ mcpServers: {} }));
+    const origRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    delete process.env.CAT_CAFE_RUNTIME_ROOT;
+    try {
+      const config = await bootstrapCapabilities(
+        dir,
+        {
+          claudeConfig: claudeFile,
+          codexConfig: join(dir, 'nonexistent.toml'),
+          geminiConfig: join(dir, 'nonexistent.json'),
+        },
+        { catCafeRepoRoot: '/host-repo' },
+      );
 
-    const config = await bootstrapCapabilities(
-      dir,
-      {
+      const allIds = ['cat-cafe', 'cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals'];
+      for (const id of allIds) {
+        const cap = config.capabilities.find((c) => c.id === id);
+        assert.ok(cap, `${id} should exist after bootstrap`);
+        assert.equal(cap.type, 'mcp');
+        assert.ok(cap.mcpServer);
+        assert.ok(
+          cap.mcpServer.args[0].includes('/host-repo'),
+          `${id} MCP serverPath should be built from catCafeRepoRoot`,
+        );
+      }
+    } finally {
+      if (origRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = origRuntimeRoot;
+    }
+  });
+
+  it('F061 binary/workspace separation: CAT_CAFE_RUNTIME_ROOT env builds binary paths when no explicit opts', async () => {
+    const claudeFile = join(dir, '.mcp.json');
+    await writeFile(claudeFile, JSON.stringify({ mcpServers: {} }));
+    const originalRuntime = process.env.CAT_CAFE_RUNTIME_ROOT;
+    try {
+      process.env.CAT_CAFE_RUNTIME_ROOT = '/path/to/project-runtime';
+      // No catCafeRepoRoot opt — env should drive resolution. The first
+      // positional arg (`projectRoot`) is the workspace project's API root,
+      // which the orchestrator must NOT use as the binary root anymore.
+      const config = await bootstrapCapabilities(dir, {
         claudeConfig: claudeFile,
         codexConfig: join(dir, 'nonexistent.toml'),
         geminiConfig: join(dir, 'nonexistent.json'),
-      },
-      { catCafeRepoRoot: '/host-repo' },
-    );
+      });
 
-    const allIds = ['cat-cafe', 'cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals'];
-    for (const id of allIds) {
-      const cap = config.capabilities.find((c) => c.id === id);
-      assert.ok(cap, `${id} should exist after bootstrap`);
-      assert.equal(cap.type, 'mcp');
-      assert.ok(cap.mcpServer);
-      assert.ok(
-        cap.mcpServer.args[0].includes('/host-repo'),
-        `${id} MCP serverPath should be built from catCafeRepoRoot`,
+      const splits = ['cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals'];
+      for (const id of splits) {
+        const cap = config.capabilities.find((c) => c.id === id);
+        assert.ok(cap, `${id} should exist`);
+        assert.ok(
+          cap.mcpServer?.args[0].startsWith('/path/to/project-runtime/'),
+          `${id} args[0] should resolve under CAT_CAFE_RUNTIME_ROOT, got ${cap.mcpServer?.args[0]}`,
+        );
+        assert.ok(!cap.mcpServer?.args[0].includes(dir), `${id} args[0] must NOT use the projectRoot positional arg`);
+      }
+    } finally {
+      if (originalRuntime === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = originalRuntime;
+    }
+  });
+
+  it('F061 binary/workspace separation: CAT_CAFE_RUNTIME_ROOT env overrides explicit opts (codex PR #1414 P1-1)', async () => {
+    // Production route shape: routes/capabilities.ts always passes
+    // catCafeRepoRoot from resolveMainRepoPath() (canonical main repo, first
+    // git worktree). When API actually runs from cat-cafe-runtime worktree,
+    // that explicit opt is auto-detected and STALE — env must win so MCP
+    // config points at fresh runtime dist instead of stale main dist.
+    const claudeFile = join(dir, '.mcp.json');
+    await writeFile(claudeFile, JSON.stringify({ mcpServers: {} }));
+    const originalRuntime = process.env.CAT_CAFE_RUNTIME_ROOT;
+    try {
+      process.env.CAT_CAFE_RUNTIME_ROOT = '/runtime-binary';
+      const config = await bootstrapCapabilities(
+        dir,
+        {
+          claudeConfig: claudeFile,
+          codexConfig: join(dir, 'nonexistent.toml'),
+          geminiConfig: join(dir, 'nonexistent.json'),
+        },
+        // simulates `routes/capabilities.ts:426` calling resolveMainRepoPath()
+        { catCafeRepoRoot: '/stale-main-from-resolveMainRepoPath' },
       );
+
+      const collab = config.capabilities.find((c) => c.id === 'cat-cafe-collab');
+      assert.ok(
+        collab?.mcpServer?.args[0].startsWith('/runtime-binary/'),
+        `expected runtime path to win, got ${collab?.mcpServer?.args[0]}`,
+      );
+      assert.ok(
+        !collab?.mcpServer?.args[0].includes('/stale-main-from-resolveMainRepoPath'),
+        'CAT_CAFE_RUNTIME_ROOT must override the auto-detected explicit opt',
+      );
+    } finally {
+      if (originalRuntime === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = originalRuntime;
+    }
+  });
+
+  it('F061 binary/workspace separation: explicit opts still used when env is unset (dev mode)', async () => {
+    const claudeFile = join(dir, '.mcp.json');
+    await writeFile(claudeFile, JSON.stringify({ mcpServers: {} }));
+    const originalRuntime = process.env.CAT_CAFE_RUNTIME_ROOT;
+    try {
+      delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      const config = await bootstrapCapabilities(
+        dir,
+        {
+          claudeConfig: claudeFile,
+          codexConfig: join(dir, 'nonexistent.toml'),
+          geminiConfig: join(dir, 'nonexistent.json'),
+        },
+        { catCafeRepoRoot: '/dev-main-repo' },
+      );
+
+      const collab = config.capabilities.find((c) => c.id === 'cat-cafe-collab');
+      assert.ok(
+        collab?.mcpServer?.args[0].startsWith('/dev-main-repo/'),
+        `dev mode: explicit opt should win when env unset, got ${collab?.mcpServer?.args[0]}`,
+      );
+    } finally {
+      if (originalRuntime === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = originalRuntime;
     }
   });
 });
@@ -930,19 +1115,28 @@ describe('ensureCatCafeMainServer', () => {
     assert.equal(result.migrated, false);
   });
 
-  it('no-op without projectRoot', () => {
-    const config = makeConfig([
-      {
-        id: 'cat-cafe-collab',
-        type: 'mcp',
-        enabled: true,
-        source: 'cat-cafe',
-        mcpServer: { command: 'node', args: ['collab.js'] },
-      },
-    ]);
+  it('falls back to process.cwd() for binary root when no opts (codex PR #1396 R3)', () => {
+    const origRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    delete process.env.CAT_CAFE_RUNTIME_ROOT;
+    try {
+      const config = makeConfig([
+        {
+          id: 'cat-cafe-collab',
+          type: 'mcp',
+          enabled: true,
+          source: 'cat-cafe',
+          mcpServer: { command: 'node', args: ['collab.js'] },
+        },
+      ]);
 
-    const result = ensureCatCafeMainServer(config);
-    assert.equal(result.migrated, false);
+      const result = ensureCatCafeMainServer(config);
+      assert.equal(result.migrated, true, 'ensure should add main server using cwd fallback');
+      const main = result.config.capabilities.find((c) => c.id === 'cat-cafe');
+      assert.ok(main?.mcpServer?.args[0].startsWith(process.cwd()));
+    } finally {
+      if (origRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = origRuntimeRoot;
+    }
   });
 
   it('inherits disabled + overrides + env from split servers (R1 regression)', () => {
@@ -980,23 +1174,129 @@ describe('ensureCatCafeMainServer', () => {
   });
 
   it('uses catCafeRepoRoot for main server path', () => {
+    const origRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    delete process.env.CAT_CAFE_RUNTIME_ROOT;
+    try {
+      const config = makeConfig([
+        {
+          id: 'cat-cafe-memory',
+          type: 'mcp',
+          enabled: true,
+          source: 'cat-cafe',
+          mcpServer: { command: 'node', args: ['memory.js'] },
+        },
+      ]);
+
+      const result = ensureCatCafeMainServer(config, {
+        catCafeRepoRoot: '/custom-root',
+      });
+      assert.equal(result.migrated, true);
+      const main = result.config.capabilities.find((c) => c.id === 'cat-cafe');
+      assert.ok(main);
+      assert.ok(main.mcpServer?.args[0].includes('/custom-root'));
+    } finally {
+      if (origRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = origRuntimeRoot;
+    }
+  });
+
+  it('realigns managed cat-cafe server paths to stable repo root', () => {
+    const origRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    delete process.env.CAT_CAFE_RUNTIME_ROOT;
+    try {
+      const config = makeConfig([
+        {
+          id: 'cat-cafe',
+          type: 'mcp',
+          enabled: true,
+          source: 'cat-cafe',
+          mcpServer: { command: 'node', args: ['/tmp/deleted-worktree/packages/mcp-server/dist/index.js'] },
+        },
+        {
+          id: 'cat-cafe-memory',
+          type: 'mcp',
+          enabled: true,
+          source: 'cat-cafe',
+          mcpServer: { command: 'node', args: ['/tmp/deleted-worktree/packages/mcp-server/dist/memory.js'] },
+        },
+        {
+          id: 'external-tool',
+          type: 'mcp',
+          enabled: true,
+          source: 'external',
+          mcpServer: { command: 'echo', args: ['ok'] },
+        },
+      ]);
+
+      const result = realignManagedCatCafeServerPaths(config, { catCafeRepoRoot: '/stable-root' });
+      assert.equal(result.migrated, true);
+      const main = result.config.capabilities.find((c) => c.id === 'cat-cafe');
+      const memory = result.config.capabilities.find((c) => c.id === 'cat-cafe-memory');
+      const external = result.config.capabilities.find((c) => c.id === 'external-tool');
+      assert.ok(main?.mcpServer?.args[0].includes('/stable-root/packages/mcp-server/dist/index.js'));
+      assert.ok(memory?.mcpServer?.args[0].includes('/stable-root/packages/mcp-server/dist/memory.js'));
+      assert.deepEqual(external?.mcpServer?.args, ['ok']);
+    } finally {
+      if (origRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = origRuntimeRoot;
+    }
+  });
+
+  it('F061 binary/workspace separation: realign activates from CAT_CAFE_RUNTIME_ROOT env alone (no opts)', () => {
     const config = makeConfig([
       {
-        id: 'cat-cafe-memory',
+        id: 'cat-cafe-collab',
         type: 'mcp',
         enabled: true,
         source: 'cat-cafe',
-        mcpServer: { command: 'node', args: ['memory.js'] },
+        mcpServer: { command: 'node', args: ['/main-repo/packages/mcp-server/dist/collab.js'] },
       },
     ]);
+    const originalRuntime = process.env.CAT_CAFE_RUNTIME_ROOT;
+    try {
+      process.env.CAT_CAFE_RUNTIME_ROOT = '/runtime-worktree';
+      // No opts at all — env alone should activate realignment so runtime
+      // startup gets fresh dist paths even when the caller has no projectRoot.
+      const result = realignManagedCatCafeServerPaths(config);
+      assert.equal(result.migrated, true, 'env-only realign should migrate');
+      const collab = result.config.capabilities.find((c) => c.id === 'cat-cafe-collab');
+      assert.ok(
+        collab?.mcpServer?.args[0].includes('/runtime-worktree/packages/mcp-server/dist/collab.js'),
+        `expected runtime path, got ${collab?.mcpServer?.args[0]}`,
+      );
+    } finally {
+      if (originalRuntime === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = originalRuntime;
+    }
+  });
 
-    const result = ensureCatCafeMainServer(config, {
-      catCafeRepoRoot: '/custom-root',
-    });
-    assert.equal(result.migrated, true);
-    const main = result.config.capabilities.find((c) => c.id === 'cat-cafe');
-    assert.ok(main);
-    assert.ok(main.mcpServer?.args[0].includes('/custom-root'));
+  it('F061 binary/workspace separation: realign no-op when neither env nor opts provided', () => {
+    const config = makeConfig([
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/main-repo/packages/mcp-server/dist/collab.js'] },
+      },
+    ]);
+    const originalRuntime = process.env.CAT_CAFE_RUNTIME_ROOT;
+    try {
+      delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      // Without env and without opts, realign should preserve original paths
+      // (no inference from process.cwd — that would clobber valid paths).
+      const result = realignManagedCatCafeServerPaths(config);
+      assert.equal(result.migrated, false, 'no env + no opts should be a no-op');
+      const collab = result.config.capabilities.find((c) => c.id === 'cat-cafe-collab');
+      assert.equal(
+        collab?.mcpServer?.args[0],
+        '/main-repo/packages/mcp-server/dist/collab.js',
+        'paths should not be rewritten without explicit signal',
+      );
+    } finally {
+      if (originalRuntime === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = originalRuntime;
+    }
   });
 });
 
@@ -1236,6 +1536,60 @@ describe('generateCliConfigs', () => {
     assert.ok(data.mcpServers['cat-cafe-collab'], 'valid managed entry should remain');
   });
 
+  it('writes Antigravity global MCP config with readonly cat-cafe env', async () => {
+    if (!catRegistry.has('antigravity')) {
+      catRegistry.register('antigravity', {
+        id: 'antigravity',
+        name: '孟加拉猫',
+        displayName: '孟加拉猫',
+        avatar: '/avatars/antigravity.png',
+        color: { primary: '#D4853A', secondary: '#FAEBDB' },
+        mentionPatterns: ['@antigravity'],
+        clientId: 'antigravity',
+        defaultModel: 'gemini-3.1-pro',
+        mcpSupport: true,
+        roleDescription: 'bridge cat',
+        personality: 'steady',
+      });
+    }
+    const paths = {
+      anthropic: join(dir, '.mcp.json'),
+      openai: join(dir, '.codex', 'config.toml'),
+      google: join(dir, '.gemini', 'settings.json'),
+      antigravity: join(dir, '.gemini', 'antigravity', 'mcp_config.json'),
+    };
+
+    const config = makeConfig([
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['collab.js'] },
+      },
+    ]);
+
+    const originalAwd = process.env.ALLOWED_WORKSPACE_DIRS;
+    const originalWsr = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    delete process.env.ALLOWED_WORKSPACE_DIRS;
+    delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+    try {
+      await generateCliConfigs(config, paths);
+      const data = JSON.parse(await readFile(paths.antigravity, 'utf-8'));
+
+      assert.deepEqual(data.mcpServers['cat-cafe-collab'].env, {
+        CAT_CAFE_API_URL: process.env.CAT_CAFE_API_URL?.trim() || 'http://localhost:3004',
+        CAT_CAFE_READONLY: 'true',
+        ALLOWED_WORKSPACE_DIRS: process.cwd(),
+      });
+    } finally {
+      if (originalAwd === undefined) delete process.env.ALLOWED_WORKSPACE_DIRS;
+      else process.env.ALLOWED_WORKSPACE_DIRS = originalAwd;
+      if (originalWsr === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = originalWsr;
+    }
+  });
+
   it('resolves pencil from env override and records resolved state', async () => {
     const hasAnyCats = catRegistry.getAllIds().length > 0;
     if (!hasAnyCats) return;
@@ -1259,7 +1613,7 @@ describe('generateCliConfigs', () => {
     const originalEnv = process.env.PENCIL_MCP_BIN;
     const originalApp = process.env.PENCIL_MCP_APP;
     const explicitBin = join(dir, 'custom-pencil');
-    await writeFile(explicitBin, '');
+    await writeExecutable(explicitBin);
     process.env.PENCIL_MCP_BIN = explicitBin;
     process.env.PENCIL_MCP_APP = 'vscode';
     try {

@@ -1361,6 +1361,29 @@ describe('WeixinAdapter', () => {
       }
     });
 
+    it('resolves internal /uploads route URLs against CAT_CAFE_API_URL before downloading', async () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      const originalApiUrl = process.env.CAT_CAFE_API_URL;
+      process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:3004';
+      /** @type {string[]} */
+      const seenUrls = [];
+      try {
+        adapter._injectFetch(async (url) => {
+          seenUrls.push(String(url));
+          return {
+            ok: true,
+            arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+          };
+        });
+        const tempPath = await adapter['downloadToTemp']('/uploads/photo.jpg');
+        assert.ok(tempPath, 'download should succeed');
+        assert.equal(seenUrls[0], 'http://127.0.0.1:3004/uploads/photo.jpg');
+      } finally {
+        if (originalApiUrl === undefined) delete process.env.CAT_CAFE_API_URL;
+        else process.env.CAT_CAFE_API_URL = originalApiUrl;
+      }
+    });
+
     it('degrades non-SILK audio to file_item delivery', async () => {
       const adapter = new WeixinAdapter('test-token', noopLog());
       adapter._injectContextToken('user-1', 'ctx-1');

@@ -50,7 +50,7 @@ const MOCK_BOARD = {
       prNumber: 58,
       title: 'Dark mode PR',
       status: 'open',
-      group: 'in-review',
+      group: 'unreplied',
       ownerCatId: 'opus',
       updatedAt: Date.now(),
     },

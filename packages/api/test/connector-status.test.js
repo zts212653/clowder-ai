@@ -88,6 +88,16 @@ describe('buildConnectorStatus', () => {
     assert.equal(telegram.fields[0].currentValue, '••••••••');
   });
 
+  it('does not mark telegram as configured for API keys stored in TELEGRAM_BOT_TOKEN', () => {
+    const result = buildConnectorStatus({
+      TELEGRAM_BOT_TOKEN: 'sk-community-openai-api-key',
+    });
+    const telegram = result.find((p) => p.id === 'telegram');
+    assert.ok(telegram);
+    assert.equal(telegram.configured, false);
+    assert.equal(telegram.fields[0].currentValue, null);
+  });
+
   it('treats placeholder default values as not configured', () => {
     const result = buildConnectorStatus({
       TELEGRAM_BOT_TOKEN: '(未设置 → 不启用)',

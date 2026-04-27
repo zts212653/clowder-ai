@@ -12,13 +12,16 @@ import type { FastifyPluginAsync } from 'fastify';
 import { appendAuditEntry, readAuditLog } from '../config/capabilities/capability-audit.js';
 import { buildInstallPreview } from '../config/capabilities/capability-install.js';
 import {
+  ensureCatCafeMainServer,
   generateCliConfigs,
   readCapabilitiesConfig,
+  realignManagedCatCafeServerPaths,
   withCapabilityLock,
   writeCapabilitiesConfig,
 } from '../config/capabilities/capability-orchestrator.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
+import { resolveMainRepoPath } from '../utils/skill-mount.js';
 import { type McpProbeResult, probeMcpCapability } from './mcp-probe.js';
 
 export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
@@ -28,6 +31,7 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
     openai: string;
     google: string;
     kimi: string;
+    antigravity?: string;
   };
 }> = async (app, opts) => {
   const { getProjectRoot, getCliConfigPaths } = opts;
@@ -88,6 +92,9 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
       if (!config) {
         config = { version: 1, capabilities: [] };
       }
+      const catCafeRepoRoot = await resolveMainRepoPath();
+      config = ensureCatCafeMainServer(config, { catCafeRepoRoot }).config;
+      config = realignManagedCatCafeServerPaths(config, { catCafeRepoRoot }).config;
 
       const existingIdx = config.capabilities.findIndex((c) => c.id === body.id && c.type === 'mcp');
       const before = existingIdx >= 0 ? structuredClone(config.capabilities[existingIdx]) : null;
@@ -175,34 +182,37 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
         reply.status(404);
         return { error: 'capabilities.json not found' };
       }
+      const catCafeRepoRoot = await resolveMainRepoPath();
+      let nextConfig = ensureCatCafeMainServer(config, { catCafeRepoRoot }).config;
+      nextConfig = realignManagedCatCafeServerPaths(nextConfig, { catCafeRepoRoot }).config;
 
-      const idx = config.capabilities.findIndex((c) => c.id === id && c.type === 'mcp');
+      const idx = nextConfig.capabilities.findIndex((c) => c.id === id && c.type === 'mcp');
       if (idx === -1) {
         reply.status(404);
         return { error: `MCP "${id}" not found` };
       }
 
-      const before = structuredClone(config.capabilities[idx]);
+      const before = structuredClone(nextConfig.capabilities[idx]);
 
-      if (hard && config.capabilities[idx].source !== 'external') {
+      if (hard && nextConfig.capabilities[idx].source !== 'external') {
         reply.status(403);
         return {
-          error: `Cannot hard-delete managed MCP "${id}" (source=${config.capabilities[idx].source}). Only external MCPs can be removed.`,
+          error: `Cannot hard-delete managed MCP "${id}" (source=${nextConfig.capabilities[idx].source}). Only external MCPs can be removed.`,
         };
       }
 
       let mode: 'disabled' | 'removed';
       if (hard) {
-        config.capabilities.splice(idx, 1);
+        nextConfig.capabilities.splice(idx, 1);
         mode = 'removed';
       } else {
-        config.capabilities[idx].enabled = false;
-        delete config.capabilities[idx].overrides;
+        nextConfig.capabilities[idx].enabled = false;
+        delete nextConfig.capabilities[idx].overrides;
         mode = 'disabled';
       }
 
-      await writeCapabilitiesConfig(projectRoot, config);
-      await generateCliConfigs(config, getCliConfigPaths(projectRoot));
+      await writeCapabilitiesConfig(projectRoot, nextConfig);
+      await generateCliConfigs(nextConfig, getCliConfigPaths(projectRoot));
 
       await appendAuditEntry(projectRoot, {
         timestamp: new Date().toISOString(),
@@ -210,7 +220,7 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
         action: 'delete',
         capabilityId: id,
         before,
-        after: hard ? null : config.capabilities[idx],
+        after: hard ? null : nextConfig.capabilities[idx],
       });
 
       return { ok: true, mode };

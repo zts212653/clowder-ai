@@ -131,6 +131,7 @@ export function HubAccountsTab() {
         </div>
         <button
           type="button"
+          data-guide-id="accounts.create-form"
           onClick={() => {
             setEditTarget(undefined);
             setShowAuthModal(true);

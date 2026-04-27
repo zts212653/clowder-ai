@@ -13,7 +13,7 @@
 import type { CatConfig, CatId } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
-import { getConfigSessionStrategy, getRoster, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
+import { getConfigSessionStrategy, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { getCatVoice } from '../../../../../config/cat-voices.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import {
@@ -53,9 +53,14 @@ import { buildMcpCallbackInstructions, needsMcpInjection } from '../invocation/M
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { detectInlineActionMentionsWithShadow, getMaxA2ADepth, parseA2AMentions } from '../routing/a2a-mentions.js';
-import { checkRoleCompat, type RoleLookup } from '../routing/role-gate.js';
-import { registerWorklist, unregisterWorklist, updateStreakOnPush } from '../routing/WorklistRegistry.js';
+import {
+  isSubstantiveTool,
+  registerWorklist,
+  unregisterWorklist,
+  updateStreakOnPush,
+} from '../routing/WorklistRegistry.js';
 import { extractContextEvalSignals } from './context-eval.js';
+import { validateRoutingSyntax } from './final-routing-slot.js';
 import { buildBriefingMessage } from './format-briefing.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
@@ -72,9 +77,24 @@ import {
   toStoredToolEvent,
   upsertMaxBoundary,
 } from './route-helpers.js';
+import { appendThinkingChunk, renderThinkingChunks } from './thinking-chunks.js';
+import { shouldWarnVerdictWithoutPass } from './verdict-detect.js';
+import { shouldWarnVoidHold } from './void-hold-detect.js';
 import { buildVoteTally, checkVoteCompletion, extractVoteFromText, VOTE_RESULT_SOURCE } from './vote-intercept.js';
 
 const log = createModuleLogger('route-serial');
+
+function collectStructuredTargetCatsFromInput(input: unknown): string[] {
+  if (!input || typeof input !== 'object') return [];
+
+  const parsed = input as { targetCats?: unknown; targets?: unknown };
+  const values = Array.isArray(parsed.targetCats)
+    ? parsed.targetCats
+    : Array.isArray(parsed.targets)
+      ? parsed.targets
+      : [];
+  return values.filter((value): value is string => typeof value === 'string' && value.length > 0);
+}
 
 export async function* routeSerial(
   deps: RouteStrategyDeps,
@@ -116,6 +136,7 @@ export async function* routeSerial(
   let yieldedFinalDone = false;
   // F27: Track how many worklist entries have had a2a_handoff emitted
   let handoffEmitted = targetCats.length; // Original targets don't get handoff events
+  const activeTrackedA2ASlots = new Set<CatId>();
   // F042 Wave 3: Fetch thread participant activity once before loop (threadId doesn't change).
   let activeParticipants: { catId: CatId; lastMessageAt: number; messageCount: number }[] = [];
   if (deps.invocationDeps.threadStore) {
@@ -359,7 +380,11 @@ export async function* routeSerial(
           catId,
           currentUserMessageId,
           thinkingMode,
-          { effectiveMaxContextTokens: effectiveContextBudget },
+          {
+            effectiveMaxContextTokens: effectiveContextBudget,
+            canonicalFeatureId: sopStageHint?.featureId,
+            threadTitle: routeThread?.title ?? undefined,
+          },
         );
         deliveryBoundaryId = inc.boundaryId;
         if (inc.degradation) {
@@ -453,7 +478,7 @@ export async function* routeSerial(
       }
 
       let textContent = '';
-      let thinkingContent = '';
+      const thinkingChunks: string[] = [];
       let firstMetadata: MessageMetadata | undefined;
       let doneMsg: AgentMessage | undefined;
       let hadError = false;
@@ -467,6 +492,7 @@ export async function* routeSerial(
       const collectedToolEvents: StoredToolEvent[] = [];
       // F148 OQ-2: Collect tool names for context eval signals
       const collectedToolNames: string[] = [];
+      const structuredTargetCats = new Set<string>();
       // F060: Collect rich blocks emitted inline via system_info (not MCP buffer)
       const streamRichBlocks: import('@cat-cafe/shared').RichBlock[] = [];
       // F22 R2 P1-1: Capture own invocationId from stream (not getLatestId)
@@ -493,9 +519,6 @@ export async function* routeSerial(
         'Invoking cat via invokeSingleCat',
       );
       const leakedPayloadStripper = createLeakedToolCallStreamStripper();
-      // #557: Capture invocation start time for message timestamp.
-      // Using start time (not stream-completion time) keeps agent replies
-      // chronologically before queued user messages that arrive after delivery.
       const invocationStartedAt = Date.now();
       for await (const msg of invokeSingleCat(deps.invocationDeps, {
         catId,
@@ -585,7 +608,7 @@ export async function* routeSerial(
             try {
               const parsed = JSON.parse(effectiveMsg.content);
               if (parsed.type === 'thinking' && typeof parsed.text === 'string') {
-                thinkingContent += (thinkingContent ? '\n\n---\n\n' : '') + parsed.text;
+                thinkingChunks.splice(0, thinkingChunks.length, ...appendThinkingChunk(thinkingChunks, parsed.text));
               }
               // F060: Collect inline rich_block for persistence (P1 fix)
               if (parsed.type === 'rich_block' && parsed.block && isValidRichBlock(parsed.block)) {
@@ -599,6 +622,12 @@ export async function* routeSerial(
           const toolEvt = toStoredToolEvent(effectiveMsg);
           if (toolEvt) {
             collectedToolEvents.push(toolEvt);
+          }
+
+          if (effectiveMsg.type === 'tool_use') {
+            for (const target of collectStructuredTargetCatsFromInput(effectiveMsg.toolInput)) {
+              structuredTargetCats.add(target);
+            }
           }
 
           // F148 OQ-2: Collect tool names for context eval
@@ -633,7 +662,7 @@ export async function* routeSerial(
                   catId,
                   content: textContent,
                   ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
-                  ...(thinkingContent ? { thinking: thinkingContent } : {}),
+                  ...(thinkingChunks.length > 0 ? { thinking: renderThinkingChunks(thinkingChunks) } : {}),
                   updatedAt: now,
                 })
                 ?.catch?.(noop);
@@ -658,7 +687,7 @@ export async function* routeSerial(
                     catId,
                     content: textContent,
                     ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
-                    ...(thinkingContent ? { thinking: thinkingContent } : {}),
+                    ...(thinkingChunks.length > 0 ? { thinking: renderThinkingChunks(thinkingChunks) } : {}),
                     updatedAt: now,
                   })
                   ?.catch?.(noop);
@@ -778,6 +807,60 @@ export async function* routeSerial(
           lineStartDetected.add(a2aMentions.length, { 'agent.id': catId as string });
         }
 
+        // F167 Phase H AC-H3/H5 (KD-24): final routing slot validator.
+        // Mechanical slot check with zero intent classifier. Runs BEFORE #417
+        // inline-mention-hint and AC-C7 verdict warn; hit suppresses the system_info
+        // emit on both (but keeps setMentionRoutingFeedback for next-turn correction).
+        const phaseHRosterHandles: string[] = [];
+        {
+          const allCfg = catRegistry.getAllConfigs();
+          for (const cfg of Object.values(allCfg) as CatConfig[]) {
+            for (const pattern of cfg.mentionPatterns) phaseHRosterHandles.push(pattern);
+          }
+        }
+        const phaseHResult = validateRoutingSyntax({
+          text: storedContent,
+          lineStartMentions: a2aMentions,
+          toolNames: collectedToolNames,
+          structuredTargetCats: [...structuredTargetCats],
+          rosterHandles: phaseHRosterHandles,
+        });
+        const phaseHHit = phaseHResult.kind === 'invalid_route_syntax';
+        if (phaseHHit && phaseHResult.kind === 'invalid_route_syntax') {
+          try {
+            const inlineList = phaseHResult.inlineMentions.map((h) => `@${h}`).join(' ');
+            const hintSource = {
+              connector: 'routing-syntax-hint',
+              label: '路由语法提醒',
+              icon: '⚠️',
+              meta: { presentation: 'system_notice', noticeTone: 'warning' },
+            };
+            const stored = await deps.messageStore.append({
+              userId: 'system',
+              catId: null,
+              threadId,
+              content: `[路由语法]: ${inlineList} 写在行中不会触发路由 — 把 @句柄 移到最后一行行首独立一行即可。`,
+              mentions: [],
+              timestamp: Date.now(),
+              source: hintSource,
+            });
+            if (deps.socketManager) {
+              deps.socketManager.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
+                threadId,
+                message: {
+                  id: stored.id,
+                  type: 'connector',
+                  content: stored.content,
+                  source: hintSource,
+                  timestamp: stored.timestamp,
+                },
+              });
+            }
+          } catch {
+            /* non-blocking hint */
+          }
+        }
+
         // #417 / F064 AC-B3: Write-side feedback for inline action-like @mentions
         // clowder-ai#489: counters for detection, shadow, feedback, hint
         if (deps.invocationDeps.threadStore) {
@@ -808,7 +891,9 @@ export async function* routeSerial(
             }
             // #1062: User-visible system message when chain would break
             // (inline action detected but no line-start @ = no routing will happen)
-            if (a2aMentions.length === 0) {
+            // F167 Phase H AC-H5: suppress this legacy hint when Phase H already emitted
+            // routing-syntax-hint for the same turn (dedupe, single authoritative message).
+            if (a2aMentions.length === 0 && !phaseHHit) {
               try {
                 const targets = inlineHits.map((h) => `@${h.catId}`).join(', ');
                 const hintSource = {
@@ -844,6 +929,101 @@ export async function* routeSerial(
                 inlineActionHintEmitFailed.add(1, agentAttr);
               }
             }
+          }
+        }
+
+        // F167 Phase H AC-H5: suppress AC-C7 verdict-without-pass when Phase H hit
+        // (format error is the root cause; verdict-without-pass is the consequence).
+        // 2026-04-25 fix (砚砚 GPT-5.5): pass hasCoCreatorLineStartMention so summary
+        // reports ending with `@co-creator` / `@铲屎官` (legitimate escalation to co-creator)
+        // don't trigger the verdict-no-pass-hint false-positive. parseA2AMentions only
+        // returns cat handles, never co-creator ones.
+        if (
+          !phaseHHit &&
+          shouldWarnVerdictWithoutPass({
+            text: storedContent,
+            lineStartMentions: a2aMentions,
+            toolNames: collectedToolNames,
+            structuredTargetCats: [...structuredTargetCats],
+            hasCoCreatorLineStartMention: storedContent ? detectUserMention(storedContent) : false,
+          })
+        ) {
+          try {
+            const hintSource = {
+              connector: 'verdict-no-pass-hint',
+              label: '球权提醒',
+              icon: '🏓',
+              meta: { presentation: 'system_notice', noticeTone: 'warning' },
+            };
+            const stored = await deps.messageStore.append({
+              userId: 'system',
+              catId: null,
+              threadId,
+              content: '[球权提醒]: 结论后直接传球，不要停在结论 — 末尾加一行行首 @句柄 或调用 `cat_cafe_hold_ball`。',
+              mentions: [],
+              timestamp: Date.now(),
+              source: hintSource,
+            });
+            if (deps.socketManager) {
+              deps.socketManager.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
+                threadId,
+                message: {
+                  id: stored.id,
+                  type: 'connector',
+                  content: stored.content,
+                  source: hintSource,
+                  timestamp: stored.timestamp,
+                },
+              });
+            }
+          } catch {
+            /* non-blocking hint */
+          }
+        }
+
+        // F167 Phase I AC-I1 (KD-25): void hold detection — text says "持球" but
+        // no cat_cafe_hold_ball tool call this turn.声明-动作一致性 check.
+        if (
+          shouldWarnVoidHold({
+            text: storedContent,
+            toolNames: collectedToolNames,
+            lineStartMentions: a2aMentions,
+            structuredTargetCats: [...structuredTargetCats],
+            hasCoCreatorLineStartMention: storedContent ? detectUserMention(storedContent) : false,
+          })
+        ) {
+          try {
+            const hintSource = {
+              connector: 'void-hold-hint',
+              label: '持球提醒',
+              icon: '🏓',
+              meta: { presentation: 'system_notice', noticeTone: 'warning' },
+            };
+            const stored = await deps.messageStore.append({
+              userId: 'system',
+              catId: null,
+              threadId,
+              content:
+                '[持球提醒]: 检测到持球声明但未调用 hold_ball MCP — ' +
+                '文字声明不会设定唤醒计时器，请调用 `cat_cafe_hold_ball` 完成持球或改为传球。',
+              mentions: [],
+              timestamp: Date.now(),
+              source: hintSource,
+            });
+            if (deps.socketManager) {
+              deps.socketManager.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
+                threadId,
+                message: {
+                  id: stored.id,
+                  type: 'connector',
+                  content: stored.content,
+                  source: hintSource,
+                  timestamp: stored.timestamp,
+                },
+              });
+            }
+          } catch {
+            /* non-blocking hint */
           }
         }
 
@@ -927,7 +1107,6 @@ export async function* routeSerial(
           }
         }
 
-        // #557: Use invocation start time so agent reply sorts before queued user messages
         const storedTimestamp = invocationStartedAt;
 
         // F061: Detect @co-creator mentions in agent response for browser notification
@@ -937,6 +1116,12 @@ export async function* routeSerial(
         // (缅因猫 review P1-2: Redis failure must not block done yield)
         let storedMsgId: string | undefined;
         try {
+          // #573: persist with the OUTER cat-cafe parentInvocationId (set by QueueProcessor)
+          // not the INNER CLI invocationId (claude/codex's own session UUID from
+          // invocation_created event). Socket broadcasts use parentInvocationId — if persisted
+          // record carries a different id, frontend creates two bubbles for one logical
+          // response (one from live stream broadcast, one from persisted-msg broadcast).
+          const persistedInvocationId = options.parentInvocationId ?? ownInvocationId;
           const storedMsg = await deps.messageStore.append({
             userId,
             catId,
@@ -946,13 +1131,13 @@ export async function* routeSerial(
             timestamp: storedTimestamp,
             threadId,
             ...(mentionsUser ? { mentionsUser } : {}),
-            ...(thinkingContent ? { thinking: thinkingContent } : {}),
+            ...(thinkingChunks.length > 0 ? { thinking: renderThinkingChunks(thinkingChunks) } : {}),
             ...(firstMetadata ? { metadata: firstMetadata } : {}),
             ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
             ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
             extra: {
               ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
-              ...(ownInvocationId ? { stream: { invocationId: ownInvocationId } } : {}),
+              ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
             },
           });
           storedMsgId = storedMsg.id;
@@ -1020,12 +1205,6 @@ export async function* routeSerial(
         if (a2aMentions.length > 0 && worklistEntry.a2aCount < maxDepth && !signal?.aborted && !queuedMessagesPending) {
           const pendingTail = worklist.slice(index + 1);
           const pendingOriginalTargets = targetCats.slice(index + 1);
-          // F167 L3 AC-A7: lazy-init role lookup once per routeSerial call when a handoff is in play.
-          const roster = getRoster();
-          const roleLookup: RoleLookup = (cid) => {
-            const entry = roster[cid];
-            return entry ? { roles: entry.roles } : undefined;
-          };
           for (const nextCat of a2aMentions) {
             if (worklistEntry.a2aCount >= maxDepth) break;
             // A2A cross-path dedup: skip if this cat is actively processing via callback (InvocationQueue)
@@ -1045,33 +1224,15 @@ export async function* routeSerial(
               }
               continue;
             }
-            // F167 L3: reject handoff when target role cannot accept the action (MVP: designer + coding).
-            // MUST run AFTER dedup checks — otherwise we emit a rejection for a cat that's already
-            // pending as an original target (contradictory: event says rejected but cat still executes).
-            const gate = checkRoleCompat(nextCat, storedContent, roleLookup);
-            if (!gate.allowed) {
-              log.info(
-                { threadId, catId: nextCat, fromCat: catId, action: gate.action, reason: gate.reason },
-                'F167 L3: A2A handoff rejected by role-gate (role/action mismatch)',
-              );
-              yield {
-                type: 'system_info' as AgentMessageType,
-                catId,
-                content: JSON.stringify({
-                  type: 'a2a_role_rejected',
-                  targetCatId: nextCat,
-                  fromCatId: catId,
-                  action: gate.action,
-                  reason: gate.reason,
-                }),
-                timestamp: Date.now(),
-              } as AgentMessage;
-              continue;
-            }
-
-            // F167 L1: ping-pong streak check (canonical enqueue point).
-            // streak=4+ → block enqueue + emit a2a_pingpong_terminated.
-            const streak = updateStreakOnPush(worklistEntry, catId, nextCat);
+            // F167 L1 + Phase D: ping-pong streak check (canonical enqueue point).
+            // callerActivity (substantive tool + output length) gates streak accumulation —
+            // real work / long discussion no longer trips the breaker falsely.
+            // streak=4+ (pure language inertia) → block enqueue + emit a2a_pingpong_terminated.
+            const hadSubstantiveToolCall = collectedToolNames.some((n) => isSubstantiveTool(n));
+            const streak = updateStreakOnPush(worklistEntry, catId, nextCat, {
+              hadSubstantiveToolCall,
+              outputLength: storedContent.length,
+            });
             if (streak.blockPingPong) {
               log.info(
                 { threadId, catId: nextCat, fromCat: catId, count: streak.count },
@@ -1125,6 +1286,10 @@ export async function* routeSerial(
             });
 
           const nextConfig: CatConfig | undefined = catRegistry.tryGet(pendingCat as string)?.config;
+          if (options.invocationController && options.trackA2ASlot && !activeTrackedA2ASlots.has(pendingCat)) {
+            options.trackA2ASlot(threadId, pendingCat, userId, options.invocationController);
+            activeTrackedA2ASlots.add(pendingCat);
+          }
           yield {
             type: 'a2a_handoff' as AgentMessageType,
             catId,
@@ -1140,7 +1305,9 @@ export async function* routeSerial(
         const noTextBlocks = [...bufferedBlocks, ...streamRichBlocks];
         const hasRichBlocks = noTextBlocks.length > 0;
         const shouldPersistNoTextMessage =
-          hasRichBlocks || collectedToolEvents.length > 0 || Boolean(thinkingContent?.trim().length > 0);
+          hasRichBlocks ||
+          collectedToolEvents.length > 0 ||
+          Boolean(renderThinkingChunks(thinkingChunks).trim().length > 0);
         const shouldEmitSilentCompletion = collectedToolEvents.length > 0 && !hasRichBlocks && !sawUserFacingSystemInfo;
 
         log.debug(
@@ -1151,7 +1318,7 @@ export async function* routeSerial(
             sawUserFacingSystemInfo,
             toolCount: collectedToolEvents.length,
             shouldPersist: shouldPersistNoTextMessage,
-            thinkingLen: thinkingContent?.length ?? 0,
+            thinkingLen: renderThinkingChunks(thinkingChunks).length,
           },
           'Cat produced no text — evaluating silent_completion',
         );
@@ -1181,15 +1348,17 @@ export async function* routeSerial(
               content: '',
               mentions: [],
               origin: 'stream',
-              timestamp: invocationStartedAt, // #557: start time, not completion time
+              timestamp: invocationStartedAt,
               threadId,
               ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
-              ...(thinkingContent ? { thinking: thinkingContent } : {}),
+              ...(thinkingChunks.length > 0 ? { thinking: renderThinkingChunks(thinkingChunks) } : {}),
               ...(firstMetadata ? { metadata: firstMetadata } : {}),
               ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
               extra: {
                 ...(noTextBlocks.length > 0 ? { rich: { v: 1 as const, blocks: noTextBlocks } } : {}),
-                ...(ownInvocationId ? { stream: { invocationId: ownInvocationId } } : {}),
+                ...((options.parentInvocationId ?? ownInvocationId)
+                  ? { stream: { invocationId: (options.parentInvocationId ?? ownInvocationId) as string } }
+                  : {}),
               },
             });
             // F088-P3: Stash rich blocks for outbound delivery (no-text branch)
@@ -1254,12 +1423,14 @@ export async function* routeSerial(
             content: '',
             mentions: [],
             origin: 'stream',
-            timestamp: invocationStartedAt, // #557: start time, not completion time
+            timestamp: invocationStartedAt,
             threadId,
             ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
             ...(firstMetadata ? { metadata: firstMetadata } : {}),
             toolEvents: collectedToolEvents,
-            ...(ownInvocationId ? { extra: { stream: { invocationId: ownInvocationId } } } : {}),
+            ...((options.parentInvocationId ?? ownInvocationId)
+              ? { extra: { stream: { invocationId: (options.parentInvocationId ?? ownInvocationId) as string } } }
+              : {}),
           });
           // #80: Clean up draft only after successful append
           if (deps.draftStore && ownInvocationId) {
@@ -1302,6 +1473,46 @@ export async function* routeSerial(
           }
         }
       }
+
+      // F27: Emit a2a_handoff for ALL new A2A targets (both response-text and callback-pushed).
+      // Keep this outside the text branch: callback/tool-only turns can push worklist entries
+      // without producing text, but their child slots still must be tracked before parent done.
+      // We track which targets have already been announced to avoid duplicate handoff events.
+      for (let wi = handoffEmitted; wi < worklist.length; wi++) {
+        const pendingCat = worklist[wi]!;
+        if (wi < targetCats.length) continue; // Skip original targets — not A2A
+
+        // === A2A_HANDOFF 审计 (fire-and-forget, 缅因猫 review P2-3) ===
+        const auditLog = getEventAuditLog();
+        auditLog
+          .append({
+            type: AuditEventTypes.A2A_HANDOFF,
+            threadId,
+            data: {
+              fromCat: catId,
+              toCat: pendingCat,
+              userId,
+              a2aDepth: worklistEntry.a2aCount,
+              maxDepth,
+            },
+          })
+          .catch((err) => {
+            log.warn({ threadId, fromCat: catId, toCat: pendingCat, err }, 'A2A_HANDOFF audit write failed');
+          });
+
+        const nextConfig: CatConfig | undefined = catRegistry.tryGet(pendingCat as string)?.config;
+        if (options.invocationController && options.trackA2ASlot && !activeTrackedA2ASlots.has(pendingCat)) {
+          options.trackA2ASlot(threadId, pendingCat, userId, options.invocationController);
+          activeTrackedA2ASlots.add(pendingCat);
+        }
+        yield {
+          type: 'a2a_handoff' as AgentMessageType,
+          catId,
+          content: `${catConfig?.displayName ?? catId} → ${nextConfig?.displayName ?? pendingCat}`,
+          timestamp: Date.now(),
+        } as AgentMessage;
+      }
+      handoffEmitted = worklist.length;
 
       // Persist error as system message so it survives F5 reload.
       // During streaming, errors render as red badges via ephemeral frontend state.
@@ -1380,6 +1591,7 @@ export async function* routeSerial(
       if (doneMsg) {
         const isFinal = index === worklist.length - 1;
         yield { ...doneMsg, ...(mentionsUser ? { mentionsUser } : {}), isFinal };
+        activeTrackedA2ASlots.delete(catId);
         if (isFinal) yieldedFinalDone = true;
       }
 
@@ -1388,6 +1600,10 @@ export async function* routeSerial(
       index++;
     }
   } finally {
+    if (options.invocationController && options.completeA2ASlots && activeTrackedA2ASlots.size > 0) {
+      options.completeA2ASlots(threadId, [...activeTrackedA2ASlots], options.invocationController);
+    }
+
     // F27: Always unregister worklist, even on error/abort.
     // Pass owner ref so preempting new invocation's worklist is not deleted (缅因猫 R1 P1-1)
     unregisterWorklist(threadId, worklistEntry, options.parentInvocationId);

@@ -415,6 +415,9 @@ start_runtime_worktree() {
     ensure_runtime_start_prereqs
     info "running in-place (deployment mode): $PROJECT_DIR"
     cd "$PROJECT_DIR"
+    # In-place deployment: binary == workspace == PROJECT_DIR
+    export CAT_CAFE_RUNTIME_ROOT="$PROJECT_DIR"
+    export CAT_CAFE_WORKSPACE_ROOT="${CAT_CAFE_WORKSPACE_ROOT:-$PROJECT_DIR}"
     exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 ./scripts/start-dev.sh --prod-web --profile=opensource ${START_ARGS[@]+"${START_ARGS[@]}"}
   fi
 
@@ -444,6 +447,14 @@ start_runtime_worktree() {
 
   info "starting production stack from runtime worktree: $RUNTIME_DIR"
   cd "$RUNTIME_DIR"
+  # F061 PR #1414 — separate runtime binary root from user workspace root so
+  # Antigravity MCP config command points at fresh runtime dist while
+  # ALLOWED_WORKSPACE_DIRS scopes Bengal's shell tools to the user's actual
+  # project (the main cat-cafe repo where they're editing code).
+  export CAT_CAFE_RUNTIME_ROOT="$RUNTIME_DIR"
+  export CAT_CAFE_WORKSPACE_ROOT="${CAT_CAFE_WORKSPACE_ROOT:-$PROJECT_DIR}"
+  info "exporting CAT_CAFE_RUNTIME_ROOT=$CAT_CAFE_RUNTIME_ROOT"
+  info "exporting CAT_CAFE_WORKSPACE_ROOT=$CAT_CAFE_WORKSPACE_ROOT"
   # Runtime = production: auto-inject --prod-web for PWA + Tailscale support.
   # Bash 3.2 + set -u: empty-array expansion can throw "unbound variable".
   exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 ./scripts/start-dev.sh --prod-web --profile=opensource ${START_ARGS[@]+"${START_ARGS[@]}"}

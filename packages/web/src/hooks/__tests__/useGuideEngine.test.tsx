@@ -495,7 +495,7 @@ describe('useGuideEngine duplicate start protection', () => {
 
   it('merges bootcamp phase advance against fresh server state before PATCH', async () => {
     const staleState = {
-      v: 1,
+      v: 1 as const,
       phase: 'phase-7.5-add-teammate',
       startedAt: 1000,
     };

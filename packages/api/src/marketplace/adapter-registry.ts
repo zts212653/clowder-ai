@@ -1,6 +1,7 @@
 import type {
   InstallPlan,
   MarketplaceAdapter,
+  MarketplaceEcosystem,
   MarketplaceSearchQuery,
   MarketplaceSearchResult,
 } from '@cat-cafe/shared';
@@ -46,6 +47,10 @@ export class AdapterRegistry {
   async buildInstallPlan(ecosystem: string, artifactId: string): Promise<InstallPlan> {
     const adapter = this.adapters.get(ecosystem);
     if (!adapter) throw new Error(`No adapter for ecosystem: ${ecosystem}`);
-    return adapter.buildInstallPlan(artifactId);
+    const plan = await adapter.buildInstallPlan(artifactId);
+    if (plan.mode === 'direct_mcp' && plan.mcpEntry && !plan.mcpEntry.ecosystem) {
+      plan.mcpEntry.ecosystem = ecosystem as MarketplaceEcosystem;
+    }
+    return plan;
   }
 }

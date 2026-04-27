@@ -3,9 +3,10 @@ const withPWA = require('@ducanh2912/next-pwa').default;
 const enablePwaInDev = process.env.ENABLE_PWA_IN_DEV === '1';
 
 function resolveApiBaseUrl() {
-  const explicit = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, '');
-  if (explicit) return explicit;
-
+  // Prefer explicit local port over NEXT_PUBLIC_API_URL: SSR rewrites should
+  // hit localhost directly even when the env URL is a public domain (e.g. a
+  // cloud tunnel kept around for webhooks / Host allowlist). Otherwise local
+  // /uploads/* and same-origin fetches would round-trip through the tunnel.
   const apiPort = Number(process.env.API_SERVER_PORT);
   if (Number.isInteger(apiPort) && apiPort > 0) {
     return `http://localhost:${apiPort}`;
@@ -16,6 +17,9 @@ function resolveApiBaseUrl() {
     return `http://localhost:${frontendPort + 1}`;
   }
 
+  const explicit = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, '');
+  if (explicit) return explicit;
+
   return 'http://localhost:3004';
 }
 
@@ -24,6 +28,7 @@ const apiBaseUrl = resolveApiBaseUrl();
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  experimental: { proxyTimeout: 120_000 },
   // 允许 Tailscale 网段设备访问 dev server 的 /_next/* 资源
   allowedDevOrigins: ['100.0.0.0/8'],
   async headers() {

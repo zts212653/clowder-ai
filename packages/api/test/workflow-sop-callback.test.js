@@ -10,14 +10,13 @@ import Fastify from 'fastify';
 const INVOCATION_ID = 'inv-test-001';
 const CALLBACK_TOKEN = 'token-test-001';
 
-// Minimal InvocationRegistry stub
+// Minimal InvocationRegistry stub — returns VerifyResult (F174 Phase A)
 function createStubRegistry() {
   return {
-    verify(invId, token) {
-      if (invId === INVOCATION_ID && token === CALLBACK_TOKEN) {
-        return { catId: 'opus', threadId: 'thread-1', userId: 'test-user' };
-      }
-      return null;
+    async verify(invId, token) {
+      if (invId !== INVOCATION_ID) return { ok: false, reason: 'unknown_invocation' };
+      if (token !== CALLBACK_TOKEN) return { ok: false, reason: 'invalid_token' };
+      return { ok: true, record: { catId: 'opus', threadId: 'thread-1', userId: 'test-user' } };
     },
   };
 }

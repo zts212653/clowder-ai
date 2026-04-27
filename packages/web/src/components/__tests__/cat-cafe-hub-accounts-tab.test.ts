@@ -510,7 +510,7 @@ describe('CatCafeHub provider profiles tab', () => {
 
     const guideTarget = container.querySelector('[data-guide-id="accounts.create-form"]');
     const expandButton = Array.from(container.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('新建 API Key 账号'),
+      button.textContent?.includes('新增账户认证'),
     );
 
     expect(guideTarget).toBeTruthy();
@@ -550,9 +550,9 @@ describe('CatCafeHub provider profiles tab', () => {
     const submitTarget = container.querySelector('[data-guide-id="accounts.create-submit"]');
 
     expect(detailsTarget).toBeTruthy();
-    expect(detailsTarget?.querySelector('input[placeholder*="账号显示名"]')).toBeTruthy();
-    expect(detailsTarget?.querySelector('input[placeholder*="API 服务地址"]')).toBeTruthy();
-    expect(detailsTarget?.querySelector('input[placeholder*="sk-"]')).toBeTruthy();
+    expect(detailsTarget?.querySelector('input[placeholder*="my-claude-account"]')).toBeTruthy();
+    expect(detailsTarget?.querySelector('select')).toBeTruthy();
+    expect(detailsTarget?.textContent).toContain('可用模型');
     expect(submitTarget).toBeTruthy();
     expect(submitTarget?.tagName).toBe('BUTTON');
   });
@@ -633,7 +633,7 @@ describe('CatCafeHub provider profiles tab', () => {
     });
     await flushEffects();
 
-    expect(container.querySelector('input[placeholder*="API 服务地址"]')).toBeTruthy();
+    expect(container.querySelector('[data-guide-id="accounts.create-details"]')).toBeTruthy();
 
     await act(async () => {
       useGuideStore.getState().startGuide(CREATE_FORM_GUIDE_FLOW);
@@ -645,7 +645,7 @@ describe('CatCafeHub provider profiles tab', () => {
     });
     await flushEffects();
 
-    expect(container.querySelector('input[placeholder*="API 服务地址"]')).toBeTruthy();
+    expect(container.querySelector('[data-guide-id="accounts.create-details"]')).toBeTruthy();
   });
 
   it('creates api-key profile from name, url, api key, and supported models only', async () => {

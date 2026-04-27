@@ -122,12 +122,9 @@ describe('useCatData retry mechanism', () => {
 
     const catsCallCount = () => mockApiFetch.mock.calls.filter((call) => call[0] === '/api/cats').length;
 
-    // First fetch resolved (failure) → fallback cats, no breedId
+    // First fetch resolved (failure) → empty runtime catalog, no fallback members
     expect(hookResult.isLoading).toBe(false);
-    expect(hookResult.cats[0].id).toBe('opus');
-    expect(hookResult.cats[0].breedId).toBeUndefined(); // fallback marker
-    expect((hookResult.cats[0] as CatData & { source?: string }).source).toBe('seed');
-    expect((hookResult.cats[0] as CatData & { roster?: unknown }).roster ?? null).toBeNull();
+    expect(hookResult.cats).toEqual([]);
     expect(catsCallCount()).toBe(1);
 
     // Advance 10s → retry timer fires → retryCount increments → re-fetch

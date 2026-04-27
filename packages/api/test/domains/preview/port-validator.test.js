@@ -88,8 +88,7 @@ describe('validatePort', () => {
   });
 
   it('DEFAULT_EXCLUDED_PORTS contains all Clowder AI service ports', () => {
-    // Hub frontend (3003) + Hub API (3004) — ports updated to avoid conflicts
-    const expected = [3003, 3004, 6398, 6399, 18888, 19999, 9876, 9878, 9879, 9877];
+    const expected = [3001, 3002, 6398, 6399, 18888, 19999, 9876, 9878, 9879, 9877];
     for (const port of expected) {
       assert.ok(DEFAULT_EXCLUDED_PORTS.includes(port), `Missing excluded port: ${port}`);
     }

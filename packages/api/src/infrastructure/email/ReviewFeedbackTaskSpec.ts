@@ -38,6 +38,12 @@ export interface ReviewFeedbackTaskSpecOptions {
   readonly pollIntervalMs?: number;
   readonly isEchoComment?: (comment: PrFeedbackComment) => boolean;
   readonly isEchoReview?: (review: PrReviewDecision) => boolean;
+  /**
+   * F140 Phase E.1: bot setup-only conversation noise filter.
+   * Semantically independent from isEchoComment (self-authored echo).
+   * Both predicates return `skip` — OR'd together in gate().
+   */
+  readonly isNoiseComment?: (comment: PrFeedbackComment) => boolean;
 }
 
 export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions): TaskSpec_P1<ReviewFeedbackSignal> {
@@ -121,8 +127,13 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             const allNewReviews = reviews.filter((r) => r.id > reviewCursor);
 
             const commentFilter = opts.isEchoComment;
+            const noiseFilter = opts.isNoiseComment;
             const reviewFilter = opts.isEchoReview;
-            const newComments = commentFilter ? allNewComments.filter((c) => !commentFilter(c)) : allNewComments;
+            const newComments = allNewComments.filter((c) => {
+              if (commentFilter?.(c)) return false;
+              if (noiseFilter?.(c)) return false;
+              return true;
+            });
             const newDecisions = reviewFilter ? allNewReviews.filter((r) => !reviewFilter(r)) : allNewReviews;
 
             const maxCommentId =

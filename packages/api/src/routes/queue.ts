@@ -334,7 +334,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         return { error: '该猫当前未在执行', code: 'CAT_NOT_ACTIVE' };
       }
 
-      const cancelResult = invocationTracker.cancel(threadId, catId, guard.userId, 'user_stop');
+      const cancelResult = invocationTracker.cancel(threadId, catId, guard.userId, 'user_cancel');
       if (cancelResult.cancelled) {
         const scopedResult = { ...cancelResult, catIds: [catId] };
         for (const m of buildCancelMessages(scopedResult)) {

@@ -5,6 +5,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/index.js';
 import type { PortDiscoveryService } from '../domains/preview/port-discovery.js';
 import { validatePort } from '../domains/preview/port-validator.js';
+import { getDefaultUploadDir } from '../utils/upload-paths.js';
 
 interface PreviewRouteOpts {
   portDiscovery: PortDiscoveryService;
@@ -131,7 +132,7 @@ export const previewRoutes: FastifyPluginAsync<PreviewRouteOpts> = async (app, o
     }
     const ext = match[1] === 'jpeg' ? 'jpg' : match[1]!;
     const buffer = Buffer.from(match[2]!, 'base64');
-    const uploadDir = resolve(process.env.UPLOAD_DIR ?? './uploads');
+    const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
     await mkdir(uploadDir, { recursive: true });
     const filename = `screenshot-${Date.now()}-${randomUUID().slice(0, 8)}.${ext}`;
     await writeFile(join(uploadDir, filename), buffer);

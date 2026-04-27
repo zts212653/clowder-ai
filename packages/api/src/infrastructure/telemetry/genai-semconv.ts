@@ -30,3 +30,7 @@ export const TOOL_CATEGORY = 'tool.category';
 export const ROUTING_STRATEGY = 'cat_cafe.routing.strategy';
 export const ROUTING_TARGET_CATS = 'cat_cafe.routing.target_cats';
 export const ROUTING_INTENT = 'cat_cafe.routing.intent';
+
+// --- F174 Phase D1: callback auth failure attributes ---
+export const CALLBACK_TOOL = 'callback.tool';
+export const CALLBACK_REASON = 'callback.reason';

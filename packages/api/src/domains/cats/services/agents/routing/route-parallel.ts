@@ -49,6 +49,7 @@ import {
   toStoredToolEvent,
   upsertMaxBoundary,
 } from './route-helpers.js';
+import { appendThinkingChunk, renderThinkingChunks } from './thinking-chunks.js';
 import { buildVoteTally, checkVoteCompletion, extractVoteFromText, VOTE_RESULT_SOURCE } from './vote-intercept.js';
 
 const log = createModuleLogger('route-parallel');
@@ -282,7 +283,11 @@ export async function* routeParallel(
           catId,
           currentUserMessageId,
           thinkingMode,
-          { effectiveMaxContextTokens: parEffectiveContextBudget },
+          {
+            effectiveMaxContextTokens: parEffectiveContextBudget,
+            canonicalFeatureId: sopStageHint?.featureId,
+            threadTitle: routeThread?.title ?? undefined,
+          },
         );
         boundaryByCat.set(catId, inc.boundaryId);
         if (inc.degradation) {
@@ -399,7 +404,7 @@ export async function* routeParallel(
   }
 
   const catText = new Map<string, string>();
-  const catThinking = new Map<string, string>();
+  const catThinking = new Map<string, string[]>();
   const catMeta = new Map<string, MessageMetadata>();
   const catSawUserFacingSystemInfo = new Map<string, boolean>();
   const catToolEvents = new Map<string, StoredToolEvent[]>();
@@ -438,11 +443,7 @@ export async function* routeParallel(
     return stripper;
   }
 
-  // #557: Capture invocation start time for message timestamps.
-  // Using start time (not stream-completion time) keeps agent replies
-  // chronologically before queued user messages that arrive after delivery.
   const invocationStartedAt = Date.now();
-
   for await (const msg of mergeStreams(streams, (idx, err) => {
     log.error({ streamIndex: idx, err }, 'Parallel stream error');
   })) {
@@ -506,8 +507,8 @@ export async function* routeParallel(
         try {
           const parsed = JSON.parse(effectiveMsg.content);
           if (parsed.type === 'thinking' && typeof parsed.text === 'string') {
-            const prev = catThinking.get(effectiveMsg.catId) ?? '';
-            catThinking.set(effectiveMsg.catId, prev ? `${prev}\n\n---\n\n${parsed.text}` : parsed.text);
+            const prev = catThinking.get(effectiveMsg.catId) ?? [];
+            catThinking.set(effectiveMsg.catId, appendThinkingChunk(prev, parsed.text));
           }
           // F060: Collect inline rich_block for persistence (P1 fix)
           if (parsed.type === 'rich_block' && parsed.block && isValidRichBlock(parsed.block)) {
@@ -583,7 +584,7 @@ export async function* routeParallel(
               catId: effectiveMsg.catId as CatId,
               content: curText,
               ...(curTools && curToolLen > 0 ? { toolEvents: curTools } : {}),
-              ...(curThinking ? { thinking: curThinking } : {}),
+              ...(curThinking && curThinking.length > 0 ? { thinking: renderThinkingChunks(curThinking) } : {}),
               updatedAt: now,
             })
             ?.catch?.(noop);
@@ -608,7 +609,9 @@ export async function* routeParallel(
                 catId: effectiveMsg.catId as CatId,
                 content: curText,
                 ...(curTools && curToolLen > 0 ? { toolEvents: curTools } : {}),
-                ...(curThinkingTool ? { thinking: curThinkingTool } : {}),
+                ...(curThinkingTool && curThinkingTool.length > 0
+                  ? { thinking: renderThinkingChunks(curThinkingTool) }
+                  : {}),
                 updatedAt: now,
               })
               ?.catch?.(noop);
@@ -659,6 +662,11 @@ export async function* routeParallel(
       // recreating an orphan Redis hash key via HSET.
       catInvocationId.delete(msg.catId);
       const bufferedBlocks = getRichBlockBuffer().consume(threadId, msg.catId, ownInvId);
+      // #573 parallel variant: socket broadcasts in messages.ts use the OUTER
+      // parentInvocationId for live bubble identity. Persist formal messages with
+      // the same id; otherwise IDB/live bubbles use parent id while hydration uses
+      // per-cat invocation_created id, creating duplicate bubbles after refresh.
+      const persistedInvocationId = options.parentInvocationId ?? ownInvId;
       let catProducedOutput = false;
       const text = catText.get(msg.catId);
       if (text) {
@@ -773,14 +781,14 @@ export async function* routeParallel(
             content: storedContent,
             mentions: [],
             origin: 'stream',
-            timestamp: invocationStartedAt, // #557: start time, not completion time
+            timestamp: invocationStartedAt,
             threadId,
-            ...(thinking ? { thinking } : {}),
+            ...(thinking && thinking.length > 0 ? { thinking: renderThinkingChunks(thinking) } : {}),
             ...(meta ? { metadata: meta } : {}),
             ...(catTools && catTools.length > 0 ? { toolEvents: catTools } : {}),
             extra: {
               ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
-              ...(ownInvId ? { stream: { invocationId: ownInvId } } : {}),
+              ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
             },
           });
           // F088-P3: Stash rich blocks for outbound delivery
@@ -828,7 +836,9 @@ export async function* routeParallel(
         const hasRichBlocks = noTextBlocks.length > 0;
         const sawUserFacingSystemInfo = catSawUserFacingSystemInfo.get(msg.catId) === true;
         const shouldPersistNoTextMessage =
-          hasRichBlocks || (catTools?.length ?? 0) > 0 || Boolean(thinking?.trim().length ?? 0);
+          hasRichBlocks ||
+          (catTools?.length ?? 0) > 0 ||
+          Boolean(thinking && renderThinkingChunks(thinking).trim().length > 0);
         const shouldEmitSilentCompletion = (catTools?.length ?? 0) > 0 && !hasRichBlocks && !sawUserFacingSystemInfo;
 
         // Diagnostic: if cat ran tools but produced no text, emit a system_info so the
@@ -858,14 +868,14 @@ export async function* routeParallel(
               content: '',
               mentions: [],
               origin: 'stream',
-              timestamp: invocationStartedAt, // #557: start time, not completion time
+              timestamp: invocationStartedAt,
               threadId,
-              ...(thinking ? { thinking } : {}),
+              ...(thinking && thinking.length > 0 ? { thinking: renderThinkingChunks(thinking) } : {}),
               ...(meta ? { metadata: meta } : {}),
               ...(catTools && catTools.length > 0 ? { toolEvents: catTools } : {}),
               extra: {
                 ...(noTextBlocks.length > 0 ? { rich: { v: 1 as const, blocks: noTextBlocks } } : {}),
-                ...(ownInvId ? { stream: { invocationId: ownInvId } } : {}),
+                ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
               },
             });
             // F088-P3: Stash rich blocks for outbound delivery (no-text branch)
@@ -933,12 +943,12 @@ export async function* routeParallel(
               content: '',
               mentions: [],
               origin: 'stream',
-              timestamp: invocationStartedAt, // #557: start time, not completion time
+              timestamp: invocationStartedAt,
               threadId,
-              ...(thinking ? { thinking } : {}),
+              ...(thinking && thinking.length > 0 ? { thinking: renderThinkingChunks(thinking) } : {}),
               ...(meta ? { metadata: meta } : {}),
               toolEvents: catTools,
-              ...(ownInvId ? { extra: { stream: { invocationId: ownInvId } } } : {}),
+              ...(persistedInvocationId ? { extra: { stream: { invocationId: persistedInvocationId } } } : {}),
             });
             // #80: Clean up draft only after successful append
             if (deps.draftStore && ownInvId) {

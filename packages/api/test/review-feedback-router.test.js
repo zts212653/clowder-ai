@@ -233,4 +233,57 @@ describe('buildReviewFeedbackContent', () => {
     assert.ok(content.includes('自动处理'), 'should include action hint section');
     assert.ok(content.includes('merge'), 'APPROVED should mention merge readiness');
   });
+
+  // ── F140 Phase E.1: severity header prepended (AC-E1~E5) ────────
+
+  it('prepends **Review 检测到 P2** header when inline comment has P2 badge', () => {
+    const content = buildReviewFeedbackContent({
+      repoFullName: 'owner/repo',
+      prNumber: 42,
+      newDecisions: [],
+      newComments: [
+        {
+          id: 1,
+          author: 'chatgpt-codex-connector[bot]',
+          body: '![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat) Minor issue',
+          createdAt: '2026-04-24',
+          commentType: 'inline',
+          filePath: 'src/foo.ts',
+          line: 10,
+        },
+      ],
+    });
+    assert.match(content.split('\n')[0], /\*\*Review 检测到 P2\*\*/);
+  });
+
+  it('does NOT add severity header when no severity is present (backward compat)', () => {
+    const content = buildReviewFeedbackContent({
+      repoFullName: 'owner/repo',
+      prNumber: 42,
+      newDecisions: [],
+      newComments: [
+        {
+          id: 1,
+          author: 'bot',
+          body: 'LGTM',
+          createdAt: '2026-04-24',
+          commentType: 'conversation',
+        },
+      ],
+    });
+    assert.ok(!content.includes('Review 检测到'), 'no header when no severity');
+    assert.match(content.split('\n')[0], /📋 \*\*Review Feedback\*\*/);
+  });
+
+  it('picks max severity (P0 > P2) when mixed across comments and decisions', () => {
+    const content = buildReviewFeedbackContent({
+      repoFullName: 'owner/repo',
+      prNumber: 42,
+      newDecisions: [
+        { id: 1, author: 'bot', state: 'COMMENTED', body: '**P0**: critical crash', submittedAt: '2026-04-24' },
+      ],
+      newComments: [{ id: 1, author: 'bot', body: '[P2] naming nit', createdAt: '2026-04-24', commentType: 'inline' }],
+    });
+    assert.match(content.split('\n')[0], /\*\*Review 检测到 P0\*\*/);
+  });
 });

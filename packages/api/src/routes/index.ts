@@ -5,6 +5,7 @@ export { backlogRoutes } from './backlog.js';
 export { bootcampRoutes } from './bootcamp.js';
 export { brakeRoutes } from './brake.js';
 export { callbackAuthRoutes } from './callback-auth.js';
+export { registerCallbackAuthDebugRoute } from './callback-auth-debug.js';
 export { registerCallbackDocsRoutes } from './callback-docs-routes.js';
 export { callbacksRoutes } from './callbacks.js';
 export { capabilitiesRoutes } from './capabilities.js';

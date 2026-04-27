@@ -158,7 +158,7 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
     expect(container.querySelectorAll('.cli-output-md').length).toBe(0);
   });
 
-  it('thread-level bubble override loaded async keeps thinking bubble collapsed during refresh-like hydration', async () => {
+  it('thread-level bubble override loaded async beats initial global default after refresh-like hydration', async () => {
     const { ChatMessage } = await import('@/components/ChatMessage');
     const { RightStatusPanel } = await import('@/components/RightStatusPanel');
 
@@ -192,6 +192,7 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
     expect(container.querySelectorAll('.cli-output-md').length).toBe(0);
     expect(container.textContent).not.toContain(THINKING_TEXT);
     expect(container.textContent).toContain('Thinking: 恢复中');
+    expect(container.textContent).toContain('恢复中...');
 
     act(() => {
       useChatStore.setState({

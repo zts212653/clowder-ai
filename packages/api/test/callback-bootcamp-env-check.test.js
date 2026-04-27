@@ -65,7 +65,7 @@ describe('Callback Bootcamp Env Check', () => {
     const app = await createApp();
 
     const thread = await threadStore.create('user-1', '🎓 训练营');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     const response = await app.inject({
       method: 'POST',
@@ -99,7 +99,7 @@ describe('Callback Bootcamp Env Check', () => {
     const app = await createApp();
 
     const thread = await threadStore.create('user-1', '🎓 训练营');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
     await threadStore.updateBootcampState(thread.id, {
       v: 1,
       phase: 'phase-2-env-check',
@@ -137,7 +137,7 @@ describe('Callback Bootcamp Env Check', () => {
     });
 
     // Invocation with default thread (no threadId passed)
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     const response = await app.inject({
       method: 'POST',
@@ -164,7 +164,7 @@ describe('Callback Bootcamp Env Check', () => {
     });
 
     // Invocation is bound to thread A
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', threadA.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadA.id);
 
     // Try to env-check thread B — should be rejected
     const response = await app.inject({
@@ -185,7 +185,7 @@ describe('Callback Bootcamp Env Check', () => {
 
   test('returns 404 for non-existent thread', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'nonexistent');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'nonexistent');
 
     const response = await app.inject({
       method: 'POST',

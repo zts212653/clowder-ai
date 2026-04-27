@@ -16,6 +16,7 @@ import { usePreviewAutoOpen } from '@/hooks/usePreviewAutoOpen';
 import { useSendMessage } from '@/hooks/useSendMessage';
 import { useSocket } from '@/hooks/useSocket';
 import { useSplitPaneKeys } from '@/hooks/useSplitPaneKeys';
+import { useThreadLiveness, useThreadMessages } from '@/hooks/useThreadScopedSelectors';
 import { useVadInterrupt } from '@/hooks/useVadInterrupt';
 import { useVoiceAutoPlay } from '@/hooks/useVoiceAutoPlay';
 import { useVoiceStream } from '@/hooks/useVoiceStream';
@@ -72,13 +73,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const bottomChromeObserverRef = useRef<ResizeObserver | null>(null);
   const bottomChromeObserverRafRef = useRef<number | null>(null);
   const {
-    messages,
-    hasActiveInvocation,
-    activeInvocations,
-    intentMode,
-    targetCats,
-    catStatuses,
-    catInvocations,
     setCurrentThread,
     viewMode,
     setViewMode,
@@ -88,6 +82,20 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     armUnreadSuppression,
     rightPanelMode,
   } = useChatStore();
+  // F173 Phase C Task 3 — full read-side migration. All thread liveness +
+  // messages now flow through thread-scoped selectors keyed off this
+  // component's `threadId` prop, not the flat current-thread mirror. Closes
+  // AC-C6 race window for the entire ChatContainer surface (Task 2 only
+  // covered hasActiveInvocation; this finishes the job).
+  const messages = useThreadMessages(threadId);
+  const {
+    hasActive: hasActiveInvocation,
+    activeInvocations,
+    catStatuses,
+    catInvocations,
+    intentMode,
+    targetCats,
+  } = useThreadLiveness(threadId);
   const navigateToThread = useCallback((tid: string) => {
     pushThreadRouteWithHistory(tid, typeof window !== 'undefined' ? window : undefined);
   }, []);
@@ -490,7 +498,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     if (prevThreadRef.current !== threadId) {
       // Thread switch: store saves/restores per-thread state automatically
       setCurrentThread(threadId);
-      // Clean up non-thread-scoped refs
+      // F173 A.12 — resetRefs no longer touches suppression markers (invocation-driven cleanup).
+      // It still clears activeRefs / finalizedStreamRef / sawStreamData per the original purpose.
       resetRefs();
       clearTasks();
       prevThreadRef.current = threadId;
@@ -571,6 +580,15 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
 
   const { cancelInvocation, syncRooms, socketConnected } = useSocket(socketCallbacks, threadId);
   const connectionStatus = useConnectionStatus(socketConnected);
+
+  // Single-slot execution can be recovered from queue truth even when the
+  // active-thread flat intentMode has not been restored yet (for example after
+  // queue hydration or a missed intent_mode event). In that case we still need
+  // the top cancel affordance — otherwise the thread looks active in the
+  // execution bar but offers no single-cat cancel control.
+  const showThinkingIndicator =
+    intentMode === 'execute' ||
+    (intentMode == null && hasActiveInvocation && Object.keys(activeInvocations).length === 1);
 
   useVoiceAutoPlay();
   useVoiceStream();
@@ -784,8 +802,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           defaultCatId={targetCats[0] || 'opus'}
         />
 
-        {intentMode === 'ideate' && <ParallelStatusBar onStop={handleStop} />}
-        {intentMode === 'execute' && <ThinkingIndicator onCancel={cancelInvocation} />}
+        {intentMode === 'ideate' && <ParallelStatusBar onStop={handleStop} threadId={threadId} />}
+        {showThinkingIndicator && <ThinkingIndicator onCancel={cancelInvocation} />}
 
         <div className="flex-1 relative overflow-hidden">
           <main

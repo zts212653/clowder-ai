@@ -9,7 +9,7 @@ community_issue: "zts212653/clowder-ai#434"
 
 # F159: CatAgent Native Provider — Opt-in API Path
 
-> **Status**: spec | **Owner**: 社区 (bouillipx) + Ragdoll + Maine Coon | **Priority**: P1
+> **Status**: in-progress | **Owner**: 社区 (bouillipx) + Ragdoll + Maine Coon | **Priority**: P1
 
 ## Why
 
@@ -56,6 +56,16 @@ community_issue: "zts212653/clowder-ai#434"
 2. context compaction / microcompact 是否保留，由实测结果决定
 3. provider 内部 loop/tools/compact 只作为实现细节存在，不得反向污染 Cat Cafe 控制面
 
+### Phase E: SSE Streaming + Fail-Closed Turn Handling
+
+在 Phase D 的 agentic loop 基础上，把 CatAgent 的 API 调用从整轮 JSON 响应升级为逐事件 SSE streaming：
+
+1. 文本 token 按 chunk 实时产出到上游 `type: 'text'` 事件
+2. `tool_use` block 按 block index 收集、重建完整 assistant content，再进入下一轮工具执行
+3. usage 从 `message_start` / `message_delta` 提取，done 事件携带累计 token usage
+4. stream EOF / missing `message_stop` / unclosed content block / orphan `tool_use` 全部走 **strict streaming fail-closed**
+5. 不引入 `@anthropic-ai/sdk`，继续保持 raw `fetch` + 本地 parser 的 provider-owned 实现边界
+
 ## Acceptance Criteria
 
 ### Phase A（RFC 收敛 + ADR 边界）
@@ -80,6 +90,13 @@ community_issue: "zts212653/clowder-ai#434"
 - [ ] AC-D1: read-only tools 只有在宿主层权限边界复用完成后才开放
 - [ ] AC-D2: compact/microcompact 若保留，必须证明不会破坏身份约束和审计链
 
+### Phase E（SSE Streaming + Fail-Closed Turn Handling）
+- [x] AC-E1: text tokens 按 chunk 产出到上游（每个 `text_delta` → 一个 `type: 'text'` AgentMessage）
+- [x] AC-E2: `tool_use` blocks 按 index 收集后执行；完整 assistant content（text + tool_use）按顺序写回消息历史
+- [x] AC-E3: usage 从 stream events 提取（input 来自 `message_start`，output 来自 `message_delta` 快照），最终 `done` 携带累计 usage
+- [x] AC-E4: stream error / disconnect / missing `message_stop` / unclosed block → `error + done`；第一轮错误保留 zero-usage 契约；orphan `tool_use` 发 failed `tool_result`
+- [x] AC-E5: strict streaming fail-closed —— 不做 non-streaming fallback；任意 stream error 直接终止并产出终态
+
 ## 需求点 Checklist
 
 | ID | 需求点（社区原话/转述） | AC 编号 | 验证方式 | 状态 |
@@ -88,7 +105,7 @@ community_issue: "zts212653/clowder-ai#434"
 | R2 | “给这个方向一个正式 feature 编号” | AC-A4 | spec + BACKLOG + issue 链接 | [ ] |
 | R3 | “API path 只作为 opt-in，不改变默认主路径” | AC-A2, AC-C1 | ADR + 配置验证 | [ ] |
 | R4 | “安全三项是硬 gate，不是 backlog” | AC-B1, AC-B2, AC-B3 | 测试 + review 记录 | [ ] |
-| R5 | “如果要做，就按 provider 能力逐步推进” | AC-C2, AC-C4, AC-D1 | phased implementation review | [ ] |
+| R5 | “如果要做，就按 provider 能力逐步推进” | AC-C2, AC-C4, AC-D1, AC-E1, AC-E4 | phased implementation review | [ ] |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC
@@ -119,8 +136,9 @@ community_issue: "zts212653/clowder-ai#434"
 | KD-3 | account-binding / workspace boundary / injection prevention 全部视为 host/provider integration layer 的硬边界 | 安全边界不能下沉成 provider 自行约定 | 2026-04-11 |
 | KD-4 | `feat/catagent` 分支只作为 spike 参考，不作为可直接 merge 的实现分支 | #397 已被定性为 architecture-blocked spike | 2026-04-11 |
 | KD-5 | 为该方向分配正式 feature 编号 F159 | 这是独立、用户可感知的新 provider 能力，不是 F143/F149/F050 的纯子任务 | 2026-04-11 |
+| KD-6 | Phase E 采用 strict streaming fail-closed，不保留 conditional non-streaming fallback | 当前 provider path 更需要清晰审计边界与确定性终态，而不是条件重试复杂度 | 2026-04-24 |
 
 ## Review Gate
 
 - Phase A: Ragdoll + Maine Coon架构 review → team lead拍板
-- Phase B-D: 跨 family review
+- Phase B-E: 跨 family review

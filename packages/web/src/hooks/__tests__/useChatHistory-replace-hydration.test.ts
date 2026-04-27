@@ -235,6 +235,95 @@ describe('useChatHistory replace hydration', () => {
     expect(useChatStore.getState().messages.find((m) => m.id === 'draft-inv-1')).toBeUndefined();
   });
 
+  it('Phase C Task 9 — drops orphan draft from IDB cache when no live invocation claims it', async () => {
+    const history = installDeferredHistoryResponse();
+    const cachedAssistantTs = Date.now() - 1000;
+    // Cached state: contains a stale `draft-orphan-inv` from F164 IDB cache —
+    // this draft was filtered by hotfix3 backend but the cache write happened
+    // before that fix shipped. catInvocations is empty (no live invocation
+    // claims the orphan — Phase C Task 9 should detect this and drop).
+    const cachedMessages: ChatMessage[] = [
+      {
+        id: 'b1',
+        type: 'assistant',
+        catId: 'opus',
+        content: 'cached assistant',
+        timestamp: cachedAssistantTs,
+      },
+      {
+        id: 'draft-orphan-inv',
+        type: 'assistant',
+        catId: 'opus',
+        content: 'stale orphan draft from IDB cache',
+        timestamp: cachedAssistantTs + 100,
+        origin: 'stream',
+        extra: { stream: { invocationId: 'orphan-inv' } },
+      },
+    ];
+    mountReplaceHydrationThread({
+      ...makeThreadBState(cachedAssistantTs, {
+        catInvocations: {}, // 关键：没有 live invocation 关联 'orphan-inv'
+      }),
+      messages: cachedMessages,
+    });
+
+    await history.waitUntilPending();
+    history.expectPending();
+
+    // Server (post-hotfix3) returns clean — no orphan draft
+    await history.resolve({
+      messages: [{ id: 'b1', catId: 'opus', content: 'cached assistant', timestamp: cachedAssistantTs }],
+      hasMore: false,
+    });
+
+    // Pre-Task-9: ghost-tolerance push path would preserve draft-orphan-inv
+    // Post-Task-9: knownToLiveInvocation guard drops it
+    expect(useChatStore.getState().messages.map((m) => m.id)).toEqual(['b1']);
+    expect(useChatStore.getState().messages.find((m) => m.id === 'draft-orphan-inv')).toBeUndefined();
+  });
+
+  it('Phase C Task 9 — preserves just-completed local bubble (msg-* id) when catInvocations cleared by done handler (cloud P1 regression)', async () => {
+    // Cloud Codex P1: original guard dropped any local-only msg whose
+    // invocationId was not in catInvocations. But catInvocations is cleared
+    // by the done handler before server persists — a legitimate completed
+    // bubble (msg-{inv}-{cat}) on fast thread switch would disappear.
+    // Guard now narrowed to id startsWith 'draft-' only.
+    const history = installDeferredHistoryResponse();
+    const cachedAssistantTs = Date.now() - 1000;
+    const cachedMessages: ChatMessage[] = [
+      { id: 'b1', type: 'assistant', catId: 'opus', content: 'cached assistant', timestamp: cachedAssistantTs },
+      {
+        // msg-* shape (NOT draft-*) — live just-completed bubble
+        id: 'msg-just-completed-inv-opus',
+        type: 'assistant',
+        catId: 'opus',
+        content: 'just-completed answer not yet persisted to history',
+        timestamp: cachedAssistantTs + 100,
+        origin: 'stream',
+        isStreaming: false,
+        extra: { stream: { invocationId: 'just-completed-inv' } },
+      },
+    ];
+    mountReplaceHydrationThread({
+      ...makeThreadBState(cachedAssistantTs, {
+        catInvocations: {}, // cleared by done handler — invocationId 'just-completed-inv' not tracked
+      }),
+      messages: cachedMessages,
+    });
+
+    await history.waitUntilPending();
+    history.expectPending();
+
+    // Server hasn't persisted the just-completed bubble yet (lag)
+    await history.resolve({
+      messages: [{ id: 'b1', catId: 'opus', content: 'cached assistant', timestamp: cachedAssistantTs }],
+      hasMore: false,
+    });
+
+    // Just-completed bubble must survive (not a ghost — it's a real answer)
+    expect(useChatStore.getState().messages.map((m) => m.id)).toEqual(['b1', 'msg-just-completed-inv-opus']);
+  });
+
   it('prefers a richer server stream message over a local placeholder for the same invocation', async () => {
     const history = installDeferredHistoryResponse();
     const cachedAssistantTs = Date.now() - 1000;

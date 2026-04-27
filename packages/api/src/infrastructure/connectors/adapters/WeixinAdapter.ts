@@ -712,7 +712,7 @@ export class WeixinAdapter implements IOutboundAdapter {
     let tempFilePath: string | undefined;
 
     // HTTPS URLs: download to temp file first (CDN upload needs a local file)
-    if (filePath.startsWith('https://')) {
+    if (filePath.startsWith('https://') || filePath.startsWith('http://')) {
       const downloaded = await this.downloadToTemp(filePath);
       if (!downloaded) {
         throw new Error(`Media download failed for ${filePath.slice(0, 80)}`);
@@ -867,26 +867,43 @@ export class WeixinAdapter implements IOutboundAdapter {
     }
   }
 
-  /** Download an HTTPS URL to a temp file for CDN upload. */
+  /** Download an internal route URL or HTTPS URL to a temp file for CDN upload. */
   private async downloadToTemp(url: string): Promise<string | null> {
     try {
       const { writeFile } = await import('node:fs/promises');
       const { tmpdir } = await import('node:os');
       const { join, extname } = await import('node:path');
 
-      const res = await this.fetchFn(url, { signal: AbortSignal.timeout(30_000) });
+      const downloadUrl = this.resolveDownloadUrl(url);
+      const res = await this.fetchFn(downloadUrl, { signal: AbortSignal.timeout(30_000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const buf = Buffer.from(await res.arrayBuffer());
       const { randomUUID } = await import('node:crypto');
-      const ext = extname(new URL(url).pathname) || '.tmp';
+      const ext = extname(new URL(downloadUrl).pathname) || '.tmp';
       const tempPath = join(tmpdir(), `cat-cafe-weixin-dl-${Date.now()}-${randomUUID().slice(0, 8)}${ext}`);
       await writeFile(tempPath, buf);
-      this.log.info({ url: url.slice(0, 80), tempPath, size: buf.length }, '[WeixinAdapter] downloadToTemp: success');
+      this.log.info(
+        { url: downloadUrl.slice(0, 80), tempPath, size: buf.length },
+        '[WeixinAdapter] downloadToTemp: success',
+      );
       return tempPath;
     } catch (err) {
       this.log.warn({ err, url: url.slice(0, 80) }, '[WeixinAdapter] downloadToTemp: failed');
       return null;
     }
+  }
+
+  private resolveDownloadUrl(url: string): string {
+    if (url.startsWith('https://') || url.startsWith('http://')) return url;
+    if (url.startsWith('/uploads/') || url.startsWith('/api/connector-media/') || url.startsWith('/api/tts/audio/')) {
+      const apiBase = (
+        process.env.CAT_CAFE_API_URL ??
+        process.env.NEXT_PUBLIC_API_URL ??
+        'http://localhost:3004'
+      ).replace(/\/$/, '');
+      return `${apiBase}${url}`;
+    }
+    return url;
   }
 
   /**

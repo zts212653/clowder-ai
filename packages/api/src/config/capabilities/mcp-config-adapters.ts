@@ -3,10 +3,11 @@
  *
  * 读写三种 MCP 配置格式，归一化为 McpServerDescriptor 内部模型。
  *
- * Claude:  .mcp.json        — { mcpServers: { name: { command, args, env } } }
- * Codex:   .codex/config.toml — [mcp_servers.<name>] command/args/env/enabled
- * Gemini:  .gemini/settings.json — { mcpServers: { name: { command, args, env, cwd } } }
- * Kimi:    .kimi/mcp.json       — { mcpServers: { name: { url|command, args, env, headers } } }
+ * Claude:      .mcp.json                         — { mcpServers: { name: { command, args, env } } }
+ * Codex:       .codex/config.toml               — [mcp_servers.<name>] command/args/env/enabled
+ * Gemini:      .gemini/settings.json            — { mcpServers: { name: { command, args, env, cwd } } }
+ * Antigravity: ~/.gemini/antigravity/mcp_config.json — { mcpServers: { name: { command, args, env, cwd } } }
+ * Kimi:        .kimi/mcp.json                   — { mcpServers: { name: { url|command, args, env, headers } } }
  */
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -29,6 +30,72 @@ const KIMI_CAT_CAFE_ENV_PLACEHOLDERS: Readonly<Record<string, string>> = {
   CAT_CAFE_SIGNAL_USER: '${CAT_CAFE_SIGNAL_USER}',
 };
 
+/**
+ * Resolve the workspace root that Bengal will operate inside (where pwd/git
+ * commands run). Conceptually distinct from the runtime binary root
+ * (where MCP server code lives) — codex review (PR #1414).
+ *
+ * Order of precedence:
+ *   1. ALLOWED_WORKSPACE_DIRS env (highest — explicit user override)
+ *   2. CAT_CAFE_WORKSPACE_ROOT env (separates workspace from runtime binary)
+ *   3. process.cwd() fallback
+ *
+ * Runtime-mode safeguard: when CAT_CAFE_RUNTIME_ROOT is set but no workspace
+ * env is set, process.cwd() == runtime worktree (not the user workspace).
+ * That would scope Bengal's shell tools to runtime internals — wrong. We
+ * log a warning so misconfigured runtime startup is loud instead of silent.
+ */
+let workspaceRuntimeMisconfigWarned = false;
+export function resolveWorkspaceRoot(): string {
+  const allowedFromEnv = process.env.ALLOWED_WORKSPACE_DIRS?.trim();
+  if (allowedFromEnv) return allowedFromEnv;
+  const explicitWorkspace = process.env.CAT_CAFE_WORKSPACE_ROOT?.trim();
+  if (explicitWorkspace) return explicitWorkspace;
+  const runtimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT?.trim();
+  if (runtimeRoot && !workspaceRuntimeMisconfigWarned) {
+    workspaceRuntimeMisconfigWarned = true;
+    // Use console.warn so it shows in pino logger and is visible in startup output
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[mcp-config] CAT_CAFE_RUNTIME_ROOT=${runtimeRoot} is set but neither ` +
+        `CAT_CAFE_WORKSPACE_ROOT nor ALLOWED_WORKSPACE_DIRS is exported. Falling back ` +
+        `to process.cwd() (${process.cwd()}) which equals the runtime worktree — ` +
+        `Bengal's MCP shell tools will operate on runtime internals instead of the ` +
+        `user workspace. Update runtime startup to export CAT_CAFE_WORKSPACE_ROOT.`,
+    );
+  }
+  return process.cwd();
+}
+
+/**
+ * Baseline defaults — only used as fallback when the descriptor doesn't
+ * supply the key. Descriptor / pre-existing config wins for these.
+ *
+ * ALLOWED_WORKSPACE_DIRS lives here (not in enforced) because users may
+ * have a correct value in their existing mcp_config.json that we should
+ * not clobber on regenerate — codex review (PR #1414) P1-2.
+ */
+function buildAntigravityCatCafeEnvBaseline(): Readonly<Record<string, string>> {
+  return {
+    ALLOWED_WORKSPACE_DIRS: resolveWorkspaceRoot(),
+  };
+}
+
+/**
+ * Hard-enforced env keys: writer ALWAYS overwrites regardless of what the
+ * descriptor or pre-existing config says.
+ *  - CAT_CAFE_API_URL: deployment truth — wherever the live API is, that's
+ *    the URL to call back to. Stale legacy URLs would break the callback path.
+ *  - CAT_CAFE_READONLY: security — persistent MCP must stay read-only.
+ *    The descriptor cannot opt out of this boundary.
+ */
+function buildAntigravityCatCafeEnforcedEnv(): Readonly<Record<string, string>> {
+  return {
+    CAT_CAFE_API_URL: process.env.CAT_CAFE_API_URL?.trim() || 'http://localhost:3004',
+    CAT_CAFE_READONLY: 'true',
+  };
+}
+
 function isCatCafeServer(name: string): boolean {
   return name === 'cat-cafe' || name.startsWith('cat-cafe-');
 }
@@ -46,6 +113,21 @@ function ensureKimiCatCafeEnv(name: string, env?: Record<string, string>): Recor
   return {
     ...KIMI_CAT_CAFE_ENV_PLACEHOLDERS,
     ...(env ?? {}),
+  };
+}
+
+function ensureAntigravityCatCafeEnv(name: string, env?: Record<string, string>): Record<string, string> | undefined {
+  if (!isCatCafeServer(name)) return env;
+  // codex review (PR #1414) P1-2: previous merge order put defaults LAST,
+  // so process-derived defaults silently overwrote pre-existing user values.
+  // Correct order:
+  //   1. baseline (fillable defaults, e.g. ALLOWED_WORKSPACE_DIRS) — lowest priority
+  //   2. descriptor env / pre-existing config — wins for user-controllable keys
+  //   3. enforced (CAT_CAFE_API_URL, CAT_CAFE_READONLY) — highest, can't be opted out
+  return {
+    ...buildAntigravityCatCafeEnvBaseline(),
+    ...(env ?? {}),
+    ...buildAntigravityCatCafeEnforcedEnv(),
   };
 }
 
@@ -116,6 +198,22 @@ export async function readKimiMcpConfig(filePath: string): Promise<McpServerDesc
 
   return Object.entries(servers as Record<string, Record<string, unknown>>).map(([name, cfg]) =>
     toDescriptor(name, cfg, true),
+  );
+}
+
+/** Read Antigravity ~/.gemini/antigravity/mcp_config.json → McpServerDescriptor[] */
+export async function readAntigravityMcpConfig(filePath: string): Promise<McpServerDescriptor[]> {
+  const raw = await safeReadFile(filePath);
+  if (!raw) return [];
+
+  const data = safeJsonParse(raw);
+  if (!data) return [];
+
+  const servers = data.mcpServers;
+  if (!servers || typeof servers !== 'object') return [];
+
+  return Object.entries(servers as Record<string, Record<string, unknown>>).map(([name, cfg]) =>
+    toDescriptor(name, normalizeAntigravityConfig(cfg), true),
   );
 }
 
@@ -359,6 +457,50 @@ export async function writeKimiMcpConfig(filePath: string, servers: McpServerDes
   await writeFile(filePath, `${JSON.stringify(existing, null, 2)}\n`, 'utf-8');
 }
 
+/** Write McpServerDescriptor[] → Antigravity ~/.gemini/antigravity/mcp_config.json */
+export async function writeAntigravityMcpConfig(filePath: string, servers: McpServerDescriptor[]): Promise<void> {
+  const raw = await safeReadFile(filePath);
+  let existing: Record<string, unknown> = {};
+  if (raw) {
+    const parsed = safeJsonParse(raw);
+    if (parsed) existing = parsed;
+  }
+
+  const existingMcp: Record<string, unknown> =
+    existing.mcpServers && typeof existing.mcpServers === 'object'
+      ? { ...(existing.mcpServers as Record<string, unknown>) }
+      : {};
+
+  for (const s of servers) {
+    if (s.transport === 'streamableHttp') {
+      delete existingMcp[s.name];
+      continue;
+    }
+    if (!s.command || s.command.trim().length === 0 || !s.enabled) {
+      delete existingMcp[s.name];
+      continue;
+    }
+    const entry: Record<string, unknown> = { command: s.command, args: s.args };
+    const env = ensureAntigravityCatCafeEnv(s.name, s.env);
+    if (env && Object.keys(env).length > 0) entry.env = env;
+    if (s.workingDir) entry.cwd = s.workingDir;
+    existingMcp[s.name] = entry;
+  }
+
+  for (const [name, value] of Object.entries(existingMcp)) {
+    if (!isCatCafeServer(name)) continue;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const cfg = value as Record<string, unknown>;
+    const currentEnv = toStringRecord(cfg.env);
+    cfg.env = ensureAntigravityCatCafeEnv(name, currentEnv);
+    existingMcp[name] = cfg;
+  }
+
+  existing.mcpServers = existingMcp;
+  await ensureDir(filePath);
+  await writeFile(filePath, `${JSON.stringify(existing, null, 2)}\n`, 'utf-8');
+}
+
 // ────────── Helpers ──────────
 
 async function safeReadFile(filePath?: string): Promise<string | null> {
@@ -392,6 +534,13 @@ function toStringRecord(val: unknown): Record<string, string> | undefined {
     result[k] = String(v);
   }
   return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function normalizeAntigravityConfig(cfg: Record<string, unknown>): Record<string, unknown> {
+  if (typeof cfg.serverUrl === 'string' && cfg.serverUrl && typeof cfg.url !== 'string') {
+    return { ...cfg, url: cfg.serverUrl };
+  }
+  return cfg;
 }
 
 function toDescriptor(name: string, cfg: Record<string, unknown>, enabled: boolean): McpServerDescriptor {

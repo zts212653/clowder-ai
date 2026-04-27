@@ -83,7 +83,7 @@ describe('Stop event payload regression', () => {
     const onStop = vi.fn();
 
     act(() => {
-      root.render(React.createElement(ParallelStatusBar, { onStop }));
+      root.render(React.createElement(ParallelStatusBar, { onStop, threadId: 'thread-test' }));
     });
 
     const stopBtn = container.querySelector('[data-testid="parallel-stop-button"]');

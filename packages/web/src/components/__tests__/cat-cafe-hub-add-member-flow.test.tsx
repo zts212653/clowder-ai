@@ -23,6 +23,7 @@ vi.mock('@/hooks/useCatData', () => ({
     isLoading: false,
     getCatById: () => undefined,
     getCatsByBreed: () => new Map(),
+    hasFetched: true,
     refresh: () => Promise.resolve([]),
   }),
 }));
@@ -136,6 +137,9 @@ describe('CatCafeHub add-member entry', () => {
             ],
           }),
         );
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
       }
       if (path === '/api/cats') {
         return Promise.resolve(

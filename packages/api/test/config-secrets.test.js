@@ -57,15 +57,40 @@ describe('POST /api/config/secrets', () => {
       method: 'POST',
       url: '/api/config/secrets',
       headers: { 'x-cat-cafe-user': 'test-user' },
-      payload: { updates: [{ name: 'TELEGRAM_BOT_TOKEN', value: '123:ABC' }] },
+      payload: { updates: [{ name: 'TELEGRAM_BOT_TOKEN', value: '123456:ABCDEF_token' }] },
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.ok, true);
-    assert.equal(process.env.TELEGRAM_BOT_TOKEN, '123:ABC');
+    assert.equal(process.env.TELEGRAM_BOT_TOKEN, '123456:ABCDEF_token');
 
     const envContent = readFileSync(envFilePath, 'utf8');
-    assert.ok(envContent.includes('TELEGRAM_BOT_TOKEN=123:ABC'));
+    assert.ok(envContent.includes('TELEGRAM_BOT_TOKEN=123456:ABCDEF_token'));
+  });
+
+  it('rejects API keys accidentally submitted as TELEGRAM_BOT_TOKEN', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/config/secrets',
+      headers: { 'x-cat-cafe-user': 'test-user' },
+      payload: { updates: [{ name: 'TELEGRAM_BOT_TOKEN', value: 'sk-community-openai-api-key' }] },
+    });
+    assert.equal(res.statusCode, 400);
+    const body = JSON.parse(res.body);
+    assert.ok(body.error.includes('TELEGRAM_BOT_TOKEN'));
+    assert.equal(process.env.TELEGRAM_BOT_TOKEN, undefined);
+  });
+
+  it('rejects too-short Telegram-looking tokens', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/config/secrets',
+      headers: { 'x-cat-cafe-user': 'test-user' },
+      payload: { updates: [{ name: 'TELEGRAM_BOT_TOKEN', value: '123456:ABCDEFGH' }] },
+    });
+    assert.equal(res.statusCode, 400);
+    const body = JSON.parse(res.body);
+    assert.ok(body.error.includes('TELEGRAM_BOT_TOKEN'));
   });
 
   it('rejects non-allowlist var with 400', async () => {

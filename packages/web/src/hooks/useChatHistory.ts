@@ -284,6 +284,28 @@ function mergeReplaceHydrationMessages(
       }
     }
 
+    // F173 Phase C Task 9 — narrow ghost-tolerance guard (cloud Codex P1).
+    // Drop only the precise orphan-draft shape: id startsWith 'draft-' AND
+    // no live invocation in catInvocations claims its invocationId.
+    //
+    // Why narrow to draft-*:
+    //   - IDB-cached orphan drafts (hotfix3-filtered) always carry id
+    //     'draft-{invocationId}' (DraftStore write path).
+    //   - Just-completed live bubbles use 'msg-{inv}-{cat}' shape and may
+    //     have catInvocations cleared by the done handler before the server
+    //     persists them. An overly broad guard would drop those legitimate
+    //     bubbles on a fast thread switch — Codex P1 caught this.
+    //
+    // Result: orphan IDB drafts dropped; live just-completed bubbles preserved
+    // until server GET returns authoritative replacement.
+    if (invocationId && msg.id.startsWith('draft-')) {
+      const knownToLiveInvocation = Object.values(currentCatInvocations).some(
+        (info) => info.invocationId === invocationId,
+      );
+      if (!knownToLiveInvocation) {
+        continue;
+      }
+    }
     mergedMsgs.push(msg);
     preservedLocalCount++;
   }
@@ -316,6 +338,7 @@ export function useChatHistory(threadId: string) {
     hasMore,
     prependHistory,
     replaceMessages,
+    hydrateThread,
     setLoadingHistory,
     clearMessages,
     setCatInvocation,
@@ -537,11 +560,12 @@ export function useChatHistory(threadId: string) {
               `replacedHistory=${mergeResult.stats.replacedHistoryCount}`,
             ].join(','),
           });
-          replaceMessages(mergedMsgs, data.hasMore ?? false);
-          // F164: Snapshot merged messages to IndexedDB (fire-and-forget)
-          if (useChatStore.getState().currentThreadId === fetchForThread) {
-            void saveMessagesSnapshot(fetchForThread, mergedMsgs, data.hasMore ?? false).catch(() => {});
-          }
+          // F173 Phase C Task 5+6+7 — single hydration entry. Atomic
+          // server-authoritative replace + IDB overwrite via writer
+          // (instead of bare replaceMessages + saveMessagesSnapshot pair).
+          // AC-C10: server GET 是 authoritative，IDB snapshot 必须被 GET
+          // 响应覆盖而不是合并。
+          hydrateThread(fetchForThread, mergedMsgs, data.hasMore ?? false);
           return true;
         }
         prependHistory(historyMsgs, data.hasMore ?? false);
@@ -563,7 +587,7 @@ export function useChatHistory(threadId: string) {
         }
       }
     },
-    [setLoadingHistory, prependHistory, replaceMessages, threadId],
+    [setLoadingHistory, prependHistory, replaceMessages, hydrateThread, threadId],
   );
 
   const fetchTasks = useCallback(async () => {

@@ -242,7 +242,9 @@ export function WorkspacePanel() {
     }
     prevThreadRef.current = currentThreadId;
   }, [currentThreadId]); // eslint-disable-line react-hooks/exhaustive-deps
-  // F168: Auto-switch workspace mode based on thread's preferredWorkspaceMode
+  // F168: Auto-switch workspace mode based on thread's preferredWorkspaceMode.
+  // Also resets from 'community' when switching to a thread without a preference,
+  // preventing mode leakage across threads.
   useEffect(() => {
     if (!currentThreadId) return;
     let cancelled = false;
@@ -253,6 +255,8 @@ export function WorkspacePanel() {
         const valid = new Set(['dev', 'recall', 'schedule', 'tasks', 'community']);
         if (thread.preferredWorkspaceMode && valid.has(thread.preferredWorkspaceMode)) {
           setWorkspaceMode(thread.preferredWorkspaceMode as typeof workspaceMode);
+        } else if (useChatStore.getState().workspaceMode === 'community') {
+          setWorkspaceMode('dev');
         }
       })
       .catch(() => {});

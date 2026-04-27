@@ -86,7 +86,7 @@ describe('auto-replyTo for A2A invocations', () => {
 
     // 3. Create InvocationRegistry record with parentInvocationId
     //    (as invokeSingleCat does for A2A-triggered cats)
-    const { invocationId, callbackToken } = registry.create(
+    const { invocationId, callbackToken } = await registry.create(
       'user-1',
       'codex',
       'thread-1',
@@ -160,7 +160,12 @@ describe('auto-replyTo for A2A invocations', () => {
       userMessageId: triggerMsg.id,
     });
 
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex', 'thread-1', createResult.invocationId);
+    const { invocationId, callbackToken } = await registry.create(
+      'user-1',
+      'codex',
+      'thread-1',
+      createResult.invocationId,
+    );
 
     const app = await createApp();
     const response = await app.inject({
@@ -186,7 +191,7 @@ describe('auto-replyTo for A2A invocations', () => {
 
   test('no auto-fill when invocation has no parentInvocationId (direct user message)', async () => {
     // Direct user invocation — no parentInvocationId
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-1');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-1');
 
     const app = await createApp();
     const response = await app.inject({
@@ -234,7 +239,12 @@ describe('auto-replyTo for A2A invocations', () => {
 
     // But the cat's invocation is registered in thread-2
     // (simulates a cross-thread A2A where parent record's threadId doesn't match)
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex', 'thread-2', createResult.invocationId);
+    const { invocationId, callbackToken } = await registry.create(
+      'user-1',
+      'codex',
+      'thread-2',
+      createResult.invocationId,
+    );
 
     const app = await createApp();
     const response = await app.inject({
@@ -278,7 +288,12 @@ describe('auto-replyTo for A2A invocations', () => {
     });
 
     // Cat posts in thread-2 (cross-thread scenario — trigger was in thread-1)
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex', 'thread-2', createResult.invocationId);
+    const { invocationId, callbackToken } = await registry.create(
+      'user-1',
+      'codex',
+      'thread-2',
+      createResult.invocationId,
+    );
 
     const app = await createApp();
     const response = await app.inject({

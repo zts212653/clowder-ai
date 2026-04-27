@@ -2,10 +2,10 @@
 
 import { formatCatName, useCatData } from '@/hooks/useCatData';
 import { useElapsedTime } from '@/hooks/useElapsedTime';
+import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
 import { hexToRgba } from '@/lib/color-utils';
 import type { TokenUsage } from '@/stores/chat-types';
 import type { CatInvocationInfo } from '@/stores/chatStore';
-import { useChatStore } from '@/stores/chatStore';
 import { deriveActiveCats, formatCost, formatDuration, formatTokenCount } from './status-helpers';
 
 function StatusDot({ status }: { status: string }) {
@@ -96,8 +96,16 @@ export function aggregateUsage(
   };
 }
 
-export function ParallelStatusBar({ onStop }: { onStop?: () => void }) {
-  const { targetCats, catStatuses, catInvocations, activeInvocations, hasActiveInvocation } = useChatStore();
+export function ParallelStatusBar({ onStop, threadId }: { onStop?: () => void; threadId: string }) {
+  // F173 Phase C Task 3 — thread-scoped read. Caller (ChatContainer) passes
+  // its threadId so we follow the per-thread liveness, not flat current.
+  const {
+    targetCats,
+    catStatuses,
+    catInvocations,
+    activeInvocations,
+    hasActive: hasActiveInvocation,
+  } = useThreadLiveness(threadId);
   const activeCats = deriveActiveCats({
     targetCats,
     activeInvocations,

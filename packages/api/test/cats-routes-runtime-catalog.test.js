@@ -30,7 +30,7 @@ function makeCatalog(catId, displayName, clientId = 'openai', defaultModel = 'gp
             id: `${catId}-default`,
             clientId,
             defaultModel,
-            mcpSupport: clientId !== 'antigravity',
+            mcpSupport: true,
             cli: { command: clientId === 'antigravity' ? 'antigravity' : 'codex', outputFormat: 'json' },
           },
         ],

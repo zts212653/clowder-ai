@@ -1887,6 +1887,68 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     );
   });
 
+  it('POST and PATCH /api/cats preserve editable variant labels', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: 'runtime-variant',
+        name: '运行时缅因猫',
+        displayName: '缅因猫',
+        variantLabel: 'GPT-5.5',
+        avatar: '/avatars/codex.png',
+        color: { primary: '#16a34a', secondary: '#bbf7d0' },
+        mentionPatterns: ['@runtime-variant'],
+        roleDescription: '代码审查',
+        personality: '严谨',
+        clientId: 'openai',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.5',
+        mcpSupport: true,
+        cli: { command: 'codex', outputFormat: 'json' },
+      }),
+    });
+    assert.equal(createRes.statusCode, 201);
+    assert.equal(JSON.parse(createRes.body).cat.variantLabel, 'GPT-5.5');
+
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-variant',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ variantLabel: 'GPT-5.6' }),
+    });
+    assert.equal(patchRes.statusCode, 200);
+    assert.equal(JSON.parse(patchRes.body).cat.variantLabel, 'GPT-5.6');
+
+    const clearRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-variant',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ variantLabel: null }),
+    });
+    assert.equal(clearRes.statusCode, 200);
+    assert.equal(JSON.parse(clearRes.body).cat.variantLabel, undefined);
+  });
+
   it('DELETE /api/cats/:id allows deletion of any member', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');

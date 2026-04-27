@@ -1276,6 +1276,14 @@ describe('AcpClient', () => {
 
   it('F149-P1: stall fires at ~idleStallMs total idle (not warning + stall)', async () => {
     const { child, clientStdin, agentStdout } = createMockChild();
+    const originalSetTimeout = globalThis.setTimeout;
+    const scheduledDelays = [];
+    globalThis.setTimeout = (callback, delay, ...args) => {
+      if (delay === 50 || delay === 70 || delay === 120) {
+        scheduledDelays.push(delay);
+      }
+      return originalSetTimeout(callback, delay, ...args);
+    };
 
     clientStdin.on('data', (chunk) => {
       for (const line of chunk.toString().trim().split('\n')) {
@@ -1300,7 +1308,6 @@ describe('AcpClient', () => {
     await client.initialize();
     await client.newSession();
 
-    const startMs = Date.now();
     let thrownError = null;
     try {
       for await (const _ of client.promptStream('timing-sess', 'hello', {
@@ -1312,16 +1319,19 @@ describe('AcpClient', () => {
       }
     } catch (err) {
       thrownError = err;
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
     }
-    const elapsedMs = Date.now() - startMs;
 
     assert.ok(thrownError, 'Should throw AcpStreamIdleError');
-    // With correct implementation: stall at ~120ms total
-    // With buggy implementation: stall at ~170ms (50+120)
-    // Allow generous tolerance for CI but catch the 50ms delta
-    assert.ok(
-      elapsedMs < 160,
-      `Stall should fire at ~120ms total idle, but took ${elapsedMs}ms (buggy if >160ms = warning+stall)`,
+    // With correct implementation, the stall timer scheduled after the warning
+    // uses the remaining delay (120 - 50 = 70). The regression scheduled another
+    // full 120ms after warning, which is deterministic to detect without relying
+    // on wall-clock elapsed time under full-suite CPU load.
+    assert.deepEqual(
+      scheduledDelays.slice(-2),
+      [50, 70],
+      `Idle watchdog should schedule warning then remaining stall delay, got ${scheduledDelays.join(', ')}`,
     );
   });
 });

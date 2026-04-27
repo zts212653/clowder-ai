@@ -432,7 +432,7 @@ describe('Schedule Routes', () => {
     });
 
     it('infers deliveryThreadId from callback auth in request body', async () => {
-      const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-from-callback');
+      const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-from-callback');
       const res = await appDyn.inject({
         method: 'POST',
         url: '/api/schedule/tasks/preview',
@@ -449,8 +449,8 @@ describe('Schedule Routes', () => {
     });
 
     it('returns 409 stale invocation error for stale callback auth invocation', async () => {
-      const stale = registry.create('user-1', 'opus', 'thread-from-callback');
-      registry.create('user-1', 'opus', 'thread-from-callback');
+      const stale = await registry.create('user-1', 'opus', 'thread-from-callback');
+      await registry.create('user-1', 'opus', 'thread-from-callback');
 
       const res = await appDyn.inject({
         method: 'POST',
@@ -470,7 +470,7 @@ describe('Schedule Routes', () => {
     });
 
     it('returns 401 for invalid callback credentials in preview (fail-closed, #474)', async () => {
-      const { invocationId } = registry.create('user-1', 'opus', 'thread-preview-invalid');
+      const { invocationId } = await registry.create('user-1', 'opus', 'thread-preview-invalid');
       const res = await appDyn.inject({
         method: 'POST',
         url: '/api/schedule/tasks/preview',
@@ -485,7 +485,10 @@ describe('Schedule Routes', () => {
 
       assert.equal(res.statusCode, 401);
       const body = res.json();
-      assert.ok(body.error.includes('expired'), 'preHandler rejects invalid creds before route handler');
+      // F174 Phase A: preHandler returns structured { error: 'callback_auth_failed', reason: '...' }.
+      // Invalid token (creds wrong) → reason === 'invalid_token'.
+      assert.equal(body.error, 'callback_auth_failed', 'preHandler rejects invalid creds before route handler');
+      assert.ok(['invalid_token', 'unknown_invocation', 'expired'].includes(body.reason));
     });
   });
 
@@ -661,7 +664,7 @@ describe('Schedule Routes', () => {
     });
 
     it('uses callback-auth thread from request body when deliveryThreadId is omitted', async () => {
-      const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-body-auth');
+      const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-body-auth');
       const res = await appDyn.inject({
         method: 'POST',
         url: '/api/schedule/tasks',
@@ -680,7 +683,7 @@ describe('Schedule Routes', () => {
     });
 
     it('P1: callback-authenticated writes derive actor from verified invocation, not client body/header', async () => {
-      const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-actor-auth');
+      const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-actor-auth');
       const res = await appDyn.inject({
         method: 'POST',
         url: '/api/schedule/tasks',
@@ -705,7 +708,7 @@ describe('Schedule Routes', () => {
     });
 
     it('falls back to callback-auth headers when body credentials are absent', async () => {
-      const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-header-auth');
+      const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-header-auth');
       const res = await appDyn.inject({
         method: 'POST',
         url: '/api/schedule/tasks',
@@ -727,7 +730,7 @@ describe('Schedule Routes', () => {
     });
 
     it('prefers explicit deliveryThreadId over callback-auth inferred thread', async () => {
-      const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-from-callback');
+      const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-from-callback');
       const res = await appDyn.inject({
         method: 'POST',
         url: '/api/schedule/tasks',
@@ -747,8 +750,8 @@ describe('Schedule Routes', () => {
     });
 
     it('returns 409 stale invocation error and does not persist for stale callback auth invocation', async () => {
-      const stale = registry.create('user-1', 'opus', 'thread-stale');
-      registry.create('user-1', 'opus', 'thread-stale');
+      const stale = await registry.create('user-1', 'opus', 'thread-stale');
+      await registry.create('user-1', 'opus', 'thread-stale');
 
       const res = await appDyn.inject({
         method: 'POST',
@@ -770,7 +773,7 @@ describe('Schedule Routes', () => {
     });
 
     it('returns 401 and does not persist for invalid callback credentials (fail-closed, #474)', async () => {
-      const { invocationId } = registry.create('user-1', 'opus', 'thread-create-invalid');
+      const { invocationId } = await registry.create('user-1', 'opus', 'thread-create-invalid');
       const res = await appDyn.inject({
         method: 'POST',
         url: '/api/schedule/tasks',
@@ -785,7 +788,10 @@ describe('Schedule Routes', () => {
 
       assert.equal(res.statusCode, 401);
       const body = res.json();
-      assert.ok(body.error.includes('expired'), 'preHandler rejects invalid creds before route handler');
+      // F174 Phase A: preHandler returns structured { error: 'callback_auth_failed', reason: '...' }.
+      // Invalid token (creds wrong) → reason === 'invalid_token'.
+      assert.equal(body.error, 'callback_auth_failed', 'preHandler rejects invalid creds before route handler');
+      assert.ok(['invalid_token', 'unknown_invocation', 'expired'].includes(body.reason));
       const stored = store.getAll().find((d) => d.params?.message === 'invalid-create');
       assert.equal(stored, undefined);
     });

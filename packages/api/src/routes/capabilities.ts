@@ -37,10 +37,12 @@ import {
   type DiscoveryPaths,
   deduplicateDiscoveredMcpServers,
   discoverExternalMcpServers,
+  ensureCatCafeMainServer,
   generateCliConfigs,
   migrateLegacyCatCafeCapability,
   migrateResolverBackedCapabilities,
   readCapabilitiesConfig,
+  realignManagedCatCafeServerPaths,
   resolveServersForCat,
   toCapabilityEntry,
   withCapabilityLock,
@@ -130,8 +132,8 @@ function resolveCatCafeSkillsSourceDir(): string {
 const CAT_CAFE_SKILLS_SRC = resolveCatCafeSkillsSourceDir();
 
 /**
- * P1-1 fix: All CLI config paths are project-level (not user-level).
- * This ensures multi-project isolation — different projects have different configs.
+ * Discovery reads project-local CLI configs for providers that are project scoped.
+ * Antigravity is the exception: its MCP config is global under ~/.gemini/antigravity.
  */
 function getDiscoveryPaths(projectRoot: string) {
   return {
@@ -139,6 +141,7 @@ function getDiscoveryPaths(projectRoot: string) {
     codexConfig: join(projectRoot, '.codex', 'config.toml'),
     geminiConfig: join(projectRoot, '.gemini', 'settings.json'),
     kimiConfig: join(projectRoot, '.kimi', 'mcp.json'),
+    antigravityConfig: join(homedir(), '.gemini', 'antigravity', 'mcp_config.json'),
   };
 }
 
@@ -148,6 +151,7 @@ function getCliConfigPaths(projectRoot: string) {
     openai: join(projectRoot, '.codex', 'config.toml'),
     google: join(projectRoot, '.gemini', 'settings.json'),
     kimi: join(projectRoot, '.kimi', 'mcp.json'),
+    antigravity: join(homedir(), '.gemini', 'antigravity', 'mcp_config.json'),
   };
 }
 
@@ -419,6 +423,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const home = homedir();
+    const catCafeRepoRoot = await resolveMainRepoPath();
 
     // 1. Load or bootstrap capabilities.json
     let config = await readCapabilitiesConfig(projectRoot);
@@ -426,16 +431,18 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       // Multi-project: when bootstrapping a non-cat-cafe project, still point the
       // Cat Cafe MCP server to THIS repo (host), not the managed project root.
       config = await bootstrapCapabilities(projectRoot, getDiscoveryPaths(projectRoot), {
-        catCafeRepoRoot: getProjectRoot(),
+        catCafeRepoRoot,
       });
     } else {
-      const migrated = migrateLegacyCatCafeCapability(config, { catCafeRepoRoot: getProjectRoot() });
+      const migrated = migrateLegacyCatCafeCapability(config, { catCafeRepoRoot });
       const resolverMigrated = migrateResolverBackedCapabilities(migrated.config);
-      if (migrated.migrated || resolverMigrated.migrated) {
-        config = resolverMigrated.config;
+      const mainServerMigrated = ensureCatCafeMainServer(resolverMigrated.config, { catCafeRepoRoot });
+      const pathRealigned = realignManagedCatCafeServerPaths(mainServerMigrated.config, { catCafeRepoRoot });
+      if (migrated.migrated || resolverMigrated.migrated || mainServerMigrated.migrated || pathRealigned.migrated) {
+        config = pathRealigned.config;
         await writeCapabilitiesConfig(projectRoot, config);
       } else {
-        config = migrated.config;
+        config = pathRealigned.config;
       }
     }
 
@@ -562,6 +569,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       codexConfig: join(home, '.codex', 'config.toml'),
       geminiConfig: join(home, '.gemini', 'settings.json'),
       kimiConfig: join(home, '.kimi', 'mcp.json'),
+      antigravityConfig: join(home, '.gemini', 'antigravity', 'mcp_config.json'),
     };
     const [projectLevelServers, userLevelServers] = await Promise.all([
       discoverExternalMcpServers(projectLevelPaths),
@@ -640,6 +648,9 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         source: cap.source,
         enabled: cap.enabled,
         cats,
+        layer: 'L1',
+        ...(cap.ecosystem && { ecosystem: cap.ecosystem }),
+        ...(cap.lockVersion && { lockVersion: cap.lockVersion }),
       };
       const mcpDesc = describeMcpCapability(cap);
       if (mcpDesc) mcpItem.description = mcpDesc;
@@ -665,6 +676,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         source: cap.source,
         enabled: cap.enabled,
         cats,
+        layer: cap.source === 'external' ? 'L3' : 'L2',
       };
       const meta =
         cap.source === 'cat-cafe'

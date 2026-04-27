@@ -6,6 +6,7 @@ export type SignalNavItem = 'chat' | 'signals' | 'sources';
 
 interface SignalNavProps {
   readonly active: SignalNavItem;
+  readonly initialReferrerThread?: string | null;
 }
 
 interface ItemConfig {
@@ -19,20 +20,21 @@ interface ItemConfig {
  * Falls back to store's currentThreadId (last active thread).
  * Same pattern as MissionControlPage referrer-based back button.
  */
-function useReferrerThread(): string | null {
+function useReferrerThread(initialReferrerThread: string | null): string | null {
   const storeThreadId = useChatStore((s) => s.currentThreadId);
-  const [fromParam, setFromParam] = useState<string | null>(null);
+  const [fromParam, setFromParam] = useState<string | null>(initialReferrerThread);
   useEffect(() => {
-    setFromParam(new URLSearchParams(window.location.search).get('from'));
-  }, []);
+    const nextFromParam = new URLSearchParams(window.location.search).get('from');
+    if (nextFromParam) setFromParam(nextFromParam);
+  }, [initialReferrerThread]);
   return useMemo(() => {
     if (fromParam) return fromParam;
     return storeThreadId && storeThreadId !== 'default' ? storeThreadId : null;
   }, [fromParam, storeThreadId]);
 }
 
-export function SignalNav({ active }: SignalNavProps) {
-  const referrerThread = useReferrerThread();
+export function SignalNav({ active, initialReferrerThread = null }: SignalNavProps) {
+  const referrerThread = useReferrerThread(initialReferrerThread);
   const fromSuffix = referrerThread ? `?from=${encodeURIComponent(referrerThread)}` : '';
 
   const items: readonly ItemConfig[] = useMemo(

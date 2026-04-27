@@ -64,7 +64,7 @@ async function parseError(response: Response): Promise<string> {
   }
 }
 
-export function MissionControlPage() {
+export function MissionControlPage({ initialReferrerThread = null }: { initialReferrerThread?: string | null }) {
   const threadSituationRequestSeq = useRef(0);
   const [selfClaimScopes, setSelfClaimScopes] = useState<Record<string, MissionHubSelfClaimScope>>({});
   const [selfClaimPolicyBlocker, setSelfClaimPolicyBlocker] = useState<SelfClaimPolicyBlocker>(null);
@@ -436,10 +436,11 @@ export function MissionControlPage() {
   // AC-H2: Referrer-based back button — remember where we came from
   // Priority: URL ?from= param > store's currentThreadId (last active thread)
   const storeThreadId = useChatStore((s) => s.currentThreadId);
-  const [mcFromParam, setMcFromParam] = useState<string | null>(null);
+  const [mcFromParam, setMcFromParam] = useState<string | null>(initialReferrerThread);
   useEffect(() => {
-    setMcFromParam(new URLSearchParams(window.location.search).get('from'));
-  }, []);
+    const nextFromParam = new URLSearchParams(window.location.search).get('from');
+    if (nextFromParam) setMcFromParam(nextFromParam);
+  }, [initialReferrerThread]);
   const referrerThread = useMemo(() => {
     if (mcFromParam) return mcFromParam;
     return storeThreadId && storeThreadId !== 'default' ? storeThreadId : null;

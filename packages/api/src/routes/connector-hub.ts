@@ -5,6 +5,7 @@ import type { WeComBotAdapter } from '../infrastructure/connectors/adapters/WeCo
 import type { WeixinAdapter } from '../infrastructure/connectors/adapters/WeixinAdapter.js';
 import type { IConnectorPermissionStore } from '../infrastructure/connectors/ConnectorPermissionStore.js';
 import { DefaultFeishuQrBindClient, type FeishuQrBindClient } from '../infrastructure/connectors/FeishuQrBindClient.js';
+import { normalizeTelegramBotToken } from '../infrastructure/connectors/telegram-token.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 export interface ConnectorHubRoutesOptions {
@@ -219,11 +220,27 @@ export interface PlatformStatus {
   steps: PlatformStepStatus[];
 }
 
+function isConfiguredFieldValue(field: ConnectorFieldDef, raw: string | undefined): boolean {
+  if (raw == null || raw === '' || raw.startsWith('(未设置')) return false;
+  if (field.envName === 'TELEGRAM_BOT_TOKEN') return normalizeTelegramBotToken(raw) != null;
+  return true;
+}
+
+function isRequiredFieldSatisfied(field: ConnectorFieldDef, env: Record<string, string | undefined>): boolean {
+  if (field.optional) return true;
+  if (field.requiredWhen) {
+    const rawCondition = env[field.requiredWhen.envName];
+    const conditionValue = rawCondition === 'websocket' ? 'websocket' : 'webhook';
+    if (conditionValue !== field.requiredWhen.value) return true;
+  }
+  return isConfiguredFieldValue(field, env[field.envName]);
+}
+
 export function buildConnectorStatus(env: Record<string, string | undefined> = process.env): PlatformStatus[] {
   return CONNECTOR_PLATFORMS.map((platform) => {
     const fields: PlatformFieldStatus[] = platform.fields.map((f) => {
       const raw = env[f.envName];
-      const isSet = raw != null && raw !== '' && !raw.startsWith('(未设置');
+      const isSet = isConfiguredFieldValue(f, raw);
       const effectiveValue = isSet ? raw : (f.defaultValue ?? null);
       return {
         envName: f.envName,
@@ -237,17 +254,7 @@ export function buildConnectorStatus(env: Record<string, string | undefined> = p
     if (platform.fields.length === 0) {
       configured = false;
     } else {
-      configured = platform.fields.every((f) => {
-        if (f.optional) return true;
-        if (f.requiredWhen) {
-          // Normalize to match runtime: only 'websocket' passes through, everything else → 'webhook'
-          const rawCondition = env[f.requiredWhen.envName];
-          const conditionValue = rawCondition === 'websocket' ? 'websocket' : 'webhook';
-          if (conditionValue !== f.requiredWhen.value) return true;
-        }
-        const raw = env[f.envName];
-        return raw != null && raw !== '' && !raw.startsWith('(未设置');
-      });
+      configured = platform.fields.every((f) => isRequiredFieldSatisfied(f, env));
     }
 
     return {

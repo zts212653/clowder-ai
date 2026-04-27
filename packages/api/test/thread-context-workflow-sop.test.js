@@ -89,7 +89,7 @@ describe('GET thread-context with workflowSop', () => {
     threadStore.linkBacklogItem(thread.id, 'item-73');
 
     // Create invocation for this thread
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     // Seed workflow SOP for the backlog item
     await workflowSopStore.upsert('item-73', 'F073', {}, 'opus');
@@ -133,7 +133,7 @@ describe('GET thread-context with workflowSop', () => {
 
     // Thread without linked backlog item
     const thread = threadStore.create('user-1', 'plain thread', 'default');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     messageStore.append({
       userId: 'user-1',
@@ -167,7 +167,7 @@ describe('GET thread-context with workflowSop', () => {
 
     // Create invocation for user-1 in their own thread
     const ownThread = threadStore.create('user-1', 'My thread', 'default');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', ownThread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', ownThread.id);
 
     // Add a message so thread-context has content
     messageStore.append({
@@ -197,7 +197,7 @@ describe('GET thread-context with workflowSop', () => {
 
     const thread = threadStore.create('user-1', 'F073 test', 'default');
     threadStore.linkBacklogItem(thread.id, 'item-no-sop');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     messageStore.append({
       userId: 'user-1',

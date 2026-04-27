@@ -15,6 +15,8 @@ import { restartConnectorGateway } from '../dist/infrastructure/connectors/conne
 import { createConnectorReloadSubscriber } from '../dist/infrastructure/connectors/connector-reload-subscriber.js';
 import { configSecretsRoutes } from '../dist/routes/config-secrets.js';
 
+const VALID_TELEGRAM_TOKEN = '123456:hot_reload_token';
+
 describe('F136 Phase 2 integration: secrets → event → reload', () => {
   let app;
   let tmpDir;
@@ -56,7 +58,7 @@ describe('F136 Phase 2 integration: secrets → event → reload', () => {
       method: 'POST',
       url: '/api/config/secrets',
       headers: { 'x-cat-cafe-user': 'integrator' },
-      payload: { updates: [{ name: 'TELEGRAM_BOT_TOKEN', value: 'int-token' }] },
+      payload: { updates: [{ name: 'TELEGRAM_BOT_TOKEN', value: VALID_TELEGRAM_TOKEN }] },
     });
     assert.equal(res.statusCode, 200);
 
@@ -73,7 +75,7 @@ describe('F136 Phase 2 integration: secrets → event → reload', () => {
       payload: {
         updates: [
           { name: 'FEISHU_APP_ID', value: 'cli_int' },
-          { name: 'TELEGRAM_BOT_TOKEN', value: 'tok_int' },
+          { name: 'TELEGRAM_BOT_TOKEN', value: VALID_TELEGRAM_TOKEN },
         ],
       },
     });
@@ -121,15 +123,15 @@ describe('F136 Phase 2 integration: secrets → event → reload', () => {
   });
 
   it('no-op write does not trigger restart', async () => {
-    process.env.TELEGRAM_BOT_TOKEN = 'already-set';
+    process.env.TELEGRAM_BOT_TOKEN = VALID_TELEGRAM_TOKEN;
     // Write same value into .env so file also matches
-    writeFileSync(envFilePath, 'TELEGRAM_BOT_TOKEN=already-set\n');
+    writeFileSync(envFilePath, `TELEGRAM_BOT_TOKEN=${VALID_TELEGRAM_TOKEN}\n`);
 
     await app.inject({
       method: 'POST',
       url: '/api/config/secrets',
       headers: { 'x-cat-cafe-user': 'integrator' },
-      payload: { updates: [{ name: 'TELEGRAM_BOT_TOKEN', value: 'already-set' }] },
+      payload: { updates: [{ name: 'TELEGRAM_BOT_TOKEN', value: VALID_TELEGRAM_TOKEN }] },
     });
     await new Promise((r) => setTimeout(r, 100));
     assert.equal(restartCalls.length, 0, 'no restart for no-op');

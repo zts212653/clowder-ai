@@ -439,12 +439,21 @@ function migrateHomedirCredentials(projectRoot?: string): void {
 }
 
 function ensureMigrated(projectRoot: string): void {
-  // #506: migrateHomedirCredentials removed — F340 migration period complete.
-  // Post-migration, all reads/writes use resolveGlobalRoot() which is determined
-  // by CAT_CAFE_GLOBAL_CONFIG_ROOT or projectRoot, not homedir.
+  // #506 source-owned intake: keep legacy homedir migrations for upgrades,
+  // but allow new installs / opensource profile to opt out explicitly.
+  const skipHomedirMigration = process.env.CAT_CAFE_SKIP_HOMEDIR_MIGRATION === '1';
+  if (!skipHomedirMigration) {
+    // Keep the original "credentials first" ordering so skip-existing semantics
+    // still prefer imported secrets before legacy profile migration runs.
+    migrateHomedirCredentials(projectRoot);
+  }
   migrateLegacyProviderProfiles(projectRoot);
   migrateProjectLegacyProviderProfiles(projectRoot);
-  migrateHomedirLegacyProviderProfiles(projectRoot);
+  if (!skipHomedirMigration) {
+    // Preserve the pre-intake ordering: homedir legacy profiles remain after
+    // project-scoped legacy sources, only gated by the new skip flag.
+    migrateHomedirLegacyProviderProfiles(projectRoot);
+  }
   migrateProjectAccountsToGlobal(projectRoot);
 }
 

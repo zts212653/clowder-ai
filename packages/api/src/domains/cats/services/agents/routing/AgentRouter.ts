@@ -810,6 +810,9 @@ export class AgentRouter {
       signal?: AbortSignal;
       queueHasQueuedMessages?: (threadId: string) => boolean;
       hasQueuedOrActiveAgentForCat?: (threadId: string, catId: string) => boolean;
+      invocationController?: AbortController;
+      trackA2ASlot?: (threadId: string, catId: CatId, userId: string, controller: AbortController) => void;
+      completeA2ASlots?: (threadId: string, catIds: readonly CatId[], controller: AbortController) => void;
       /** ADR-008 S3: pass a Map to collect cursor boundaries; caller acks after succeeded */
       cursorBoundaries?: Map<string, string>;
       /** P1-2: pass to track persistence failures across generator boundary */
@@ -847,6 +850,9 @@ export class AgentRouter {
       signal: options?.signal,
       queueHasQueuedMessages: options?.queueHasQueuedMessages,
       hasQueuedOrActiveAgentForCat: options?.hasQueuedOrActiveAgentForCat,
+      invocationController: options?.invocationController,
+      trackA2ASlot: options?.trackA2ASlot,
+      completeA2ASlots: options?.completeA2ASlots,
       promptTags: intent.promptTags,
       currentUserMessageId: userMessageId,
       thinkingMode,

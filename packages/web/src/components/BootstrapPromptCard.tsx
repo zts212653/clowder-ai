@@ -93,7 +93,7 @@ export function BootstrapPromptCard({
             onClick={onStartScan}
             className="px-4 py-2 rounded-lg bg-cocreator-primary hover:bg-cocreator-dark text-white text-xs font-medium transition-colors inline-flex items-center gap-1.5"
           >
-            <PawIcon className="w-3.5 h-3.5" />
+            <PawIcon className="text-sm" />
             {isFailed ? '重试扫描' : isStale ? '更新索引' : '开始扫描'}
           </button>
         </div>

@@ -62,7 +62,27 @@ describe('F052: crossPost self-filter exemption', () => {
 
     const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus');
 
-    assert.equal(result.contextText, '', 'regular self message should still be excluded');
+    assert.ok(!result.contextText.includes('My own regular message'), 'regular self message should still be excluded');
+    assert.ok(result.contextText.includes('[导航]'), 'KD-7: navigation header present even on empty delta');
+  });
+
+  test('whisper not intended for this cat is excluded from baton candidates (P1-R2)', async () => {
+    const whisperMsg = mockMsg({
+      catId: 'codex',
+      content: '@opus 这条是悄悄话给 gemini 的',
+      mentions: ['opus'],
+      visibility: 'whisper',
+      whisperTo: ['gemini'],
+    });
+    const deps = makeDeps([whisperMsg]);
+
+    const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus');
+
+    assert.ok(
+      !result.contextText.includes('悄悄话'),
+      `whisper not intended for opus must not leak into navigation header, got: "${result.contextText}"`,
+    );
+    assert.ok(!result.navigationHeader?.includes('悄悄话'), 'whisper excerpt must not appear in navigation header');
   });
 
   test('other-cat crossPost is also included (no regression)', async () => {

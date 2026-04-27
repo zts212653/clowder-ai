@@ -700,6 +700,33 @@ describe('Thread API', () => {
     });
     assert.equal(res.statusCode, 400);
   });
+
+  it('PATCH /api/threads/:id updates preferredWorkspaceMode', async () => {
+    const thread = threadStore.create('alice', 'Community Thread');
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      payload: { preferredWorkspaceMode: 'community' },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.preferredWorkspaceMode, 'community');
+
+    const fetched = await app.inject({ method: 'GET', url: `/api/threads/${thread.id}` });
+    assert.equal(JSON.parse(fetched.body).preferredWorkspaceMode, 'community');
+  });
+
+  it('PATCH /api/threads/:id rejects invalid preferredWorkspaceMode', async () => {
+    const thread = threadStore.create('alice', 'Bad Mode Thread');
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      payload: { preferredWorkspaceMode: 'nonexistent' },
+    });
+    assert.equal(res.statusCode, 400);
+  });
 });
 
 describe('Thread soft-delete preserves data (Phase D)', () => {

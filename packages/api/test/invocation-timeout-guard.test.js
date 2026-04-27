@@ -56,7 +56,7 @@ describe('invocation-level hard timeout (F089)', () => {
     return {
       registry: {
         create: () => ({ invocationId: `inv-timeout-${++counter}`, callbackToken: `tok-${counter}` }),
-        verify: () => null,
+        verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
       },
       sessionManager: {
         get: async () => undefined,

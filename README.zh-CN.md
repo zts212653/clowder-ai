@@ -65,6 +65,18 @@ Clowder 不绑定模型。当前支持的 Agent CLI：
 
 ## 快速开始
 
+### 方式 A：桌面安装包（推荐）
+
+如果 [Releases 页面](https://github.com/zts212653/clowder-ai/releases) 已经提供桌面安装包，普通用户优先走这条：
+
+- **Windows**：下载 `.exe` 安装包，双击安装，然后从桌面快捷方式或开始菜单启动 Clowder AI。
+- **macOS**：下载 `.dmg`，拖到 Applications 后打开。首次启动如果被 macOS 拦截，右键应用选择 **打开**。
+- **Linux**：暂时没有桌面安装包，请走下面的源码安装，或使用 Linux 一键安装脚本。
+
+桌面安装包会自带应用运行时、便携 Node.js 和 Redis，普通用户不需要手动执行 `pnpm install` 或 `pnpm build`。启动后进入 **Hub → 系统配置 → 账号配置**，连接模型 provider 和 CLI 账号即可。
+
+### 方式 B：源码安装
+
 **前置要求：** [Node.js 20+](https://nodejs.org/) · [pnpm 9+](https://pnpm.io/) · [Redis 7+](https://redis.io/) *（可选 — 用 `--memory` 跳过）* · Git
 
 ```bash

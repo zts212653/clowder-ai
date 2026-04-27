@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetSharedReplacedInvocations } from '@/hooks/shared-replaced-invocations';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
 
 const mockAddMessage = vi.fn();
@@ -114,6 +115,7 @@ describe('useAgentMessages rich_block correlation (Bug A)', () => {
     captured = undefined;
     storeState.messages = [];
     storeState.catInvocations = {};
+    resetSharedReplacedInvocations();
     vi.clearAllMocks();
   });
 
@@ -334,7 +336,15 @@ describe('useAgentMessages rich_block correlation (Bug A)', () => {
     ]);
   });
 
-  it('keeps suppressing unlabeled late chunks until a different invocation is observed', () => {
+  it('unlabeled late chunk fails open after invocation gone — does not pollute callback bubble (砚砚 A.12)', () => {
+    // F173 A.12 — original #586 test asserted "keep suppressing unlabeled chunks until
+    // different invocation observed". 砚砚 round 5 review reversed this: invocationless
+    // flow MUST fail-open (legacy /api/messages emits invocationless agent_messages,
+    // permanent suppression breaks them). The callback content is still protected via
+    // deterministic bubble id (A.3) + store hard-merge by id — late stream chunks
+    // create a NEW bubble (deriveBubbleId fallback `msg-{ts}-{catId}`) instead of
+    // patching the callback bubble. So fail-open trades a small "extra ghost bubble"
+    // risk for unblocking the legitimate invocationless flow.
     act(() => {
       root.render(React.createElement(Harness));
     });
@@ -361,7 +371,7 @@ describe('useAgentMessages rich_block correlation (Bug A)', () => {
       });
     });
 
-    // Invocation slot is gone, but that alone is not enough proof that a new invocation owns this chunk.
+    // Invocation slot is gone — fail-open semantics now allow unlabeled chunks through.
     storeState.catInvocations = {};
     vi.clearAllMocks();
 
@@ -374,16 +384,15 @@ describe('useAgentMessages rich_block correlation (Bug A)', () => {
       });
     });
 
-    expect(mockAddMessage).not.toHaveBeenCalled();
-    expect(mockAppendToMessage).not.toHaveBeenCalled();
-    expect(storeState.messages).toEqual([
-      expect.objectContaining({
-        id: 'msg-callback-old',
-        catId: 'opus',
-        content: 'final answer',
-        origin: 'callback',
-      }),
-    ]);
+    // Callback bubble (`msg-callback-old`) MUST NOT be patched — A.3 deterministic id
+    // routes the new chunk to a DIFFERENT bubble id, never overwrites the callback content.
+    const callbackBubble = storeState.messages.find((m) => m.id === 'msg-callback-old');
+    expect(callbackBubble).toBeDefined();
+    expect(callbackBubble?.content).toBe('final answer');
+    expect(callbackBubble?.origin).toBe('callback');
+    // appendToMessage onto the callback bubble id MUST NOT happen (would overwrite content)
+    const appendToCallbackCalls = mockAppendToMessage.mock.calls.filter((call) => call[0] === 'msg-callback-old');
+    expect(appendToCallbackCalls).toEqual([]);
 
     storeState.catInvocations = { opus: { invocationId: 'inv-new' } };
     vi.clearAllMocks();
@@ -512,6 +521,75 @@ describe('useAgentMessages rich_block correlation (Bug A)', () => {
           rich: {
             v: 1,
             blocks: [expect.objectContaining({ id: 'block-orphan' })],
+          },
+        },
+      }),
+    ]);
+  });
+
+  it('replaces an invocationless rich-block placeholder even when callback carries explicit invocationId', () => {
+    mockAddMessage.mockImplementation((message) => {
+      storeState.messages.push(message);
+    });
+    mockAppendRichBlock.mockImplementation((id: string, block: { id: string }) => {
+      storeState.messages = storeState.messages.map((message) => {
+        if (message.id !== id) return message;
+        const rich = message.extra?.rich ?? { v: 1 as const, blocks: [] };
+        if (rich.blocks.some((candidate) => candidate.id === block.id)) return message;
+        return {
+          ...message,
+          extra: {
+            ...message.extra,
+            rich: {
+              ...rich,
+              blocks: [...rich.blocks, block],
+            },
+          },
+        };
+      });
+    });
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'codex',
+        content: JSON.stringify({ type: 'rich_block', block: { id: 'block-explicit', kind: 'card', v: 1 } }),
+        invocationId: 'inv-explicit',
+      });
+    });
+
+    // F173 hotfix: rich_block with explicit msg.invocationId binds the placeholder
+    // directly (no more invocationless rich-block fallback). The strict-match in
+    // findCallbackReplacementTarget then replaces it cleanly when callback arrives.
+    expect(storeState.messages[0]?.extra?.stream?.invocationId).toBe('inv-explicit');
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'text',
+        catId: 'codex',
+        content: 'command finished with explicit id',
+        origin: 'callback',
+        messageId: 'msg-callback-explicit',
+        invocationId: 'inv-explicit',
+      });
+    });
+
+    expect(storeState.messages).toEqual([
+      expect.objectContaining({
+        id: 'msg-callback-explicit',
+        catId: 'codex',
+        content: 'command finished with explicit id',
+        origin: 'callback',
+        isStreaming: false,
+        extra: {
+          stream: { invocationId: 'inv-explicit' },
+          rich: {
+            v: 1,
+            blocks: [expect.objectContaining({ id: 'block-explicit' })],
           },
         },
       }),

@@ -2,7 +2,7 @@
  * Connector Gateway Bootstrap
  * Wires all connector gateway components together.
  *
- * Follows github-review-bootstrap.ts pattern:
+ * Bootstrap pattern:
  * - Takes options with dependencies
  * - Checks env config before starting
  * - Returns lifecycle handle { stop }
@@ -18,6 +18,7 @@ import * as lark from '@larksuiteoapi/node-sdk';
 import type { FastifyBaseLogger } from 'fastify';
 import { isCatAvailable } from '../../config/cat-config-loader.js';
 import type { ConnectorWebhookHandler, WebhookHandleResult } from '../../routes/connector-webhooks.js';
+import { getDefaultUploadDir } from '../../utils/upload-paths.js';
 import { deliverConnectorMessage } from '../email/deliver-connector-message.js';
 import { DingTalkAdapter } from './adapters/DingTalkAdapter.js';
 import { FeishuAdapter } from './adapters/FeishuAdapter.js';
@@ -47,6 +48,7 @@ import {
 } from './OutboundDeliveryHook.js';
 import { RedisConnectorThreadBindingStore } from './RedisConnectorThreadBindingStore.js';
 import { StreamingOutboundHook } from './StreamingOutboundHook.js';
+import { normalizeTelegramBotToken } from './telegram-token.js';
 
 export interface ConnectorGatewayConfig {
   telegramBotToken?: string | undefined;
@@ -226,7 +228,9 @@ export async function startConnectorGateway(
 ): Promise<ConnectorGatewayHandle | null> {
   const { log } = deps;
 
-  const hasTelegram = Boolean(config.telegramBotToken);
+  const telegramBotToken = normalizeTelegramBotToken(config.telegramBotToken);
+  const hasInvalidTelegramToken = Boolean(config.telegramBotToken?.trim()) && !telegramBotToken;
+  const hasTelegram = telegramBotToken != null;
   const feishuWsMode = config.feishuConnectionMode === 'websocket';
   const hasFeishu = Boolean(
     config.feishuAppId && config.feishuAppSecret && (feishuWsMode || config.feishuVerificationToken),
@@ -245,6 +249,9 @@ export async function startConnectorGateway(
 
   if (!hasTelegram && !hasFeishu && !hasDingTalk && !hasWeComBot && !hasWeComAgent && !hasWeixin && !hasXiaoyi) {
     log.info('[ConnectorGateway] No pre-configured connectors — gateway created for WeChat QR login support');
+  }
+  if (hasInvalidTelegramToken) {
+    log.warn('[ConnectorGateway] Invalid TELEGRAM_BOT_TOKEN format — Telegram connector disabled');
   }
 
   const bindingStore =
@@ -340,8 +347,8 @@ export async function startConnectorGateway(
   });
 
   // ── Telegram (long polling) ──
-  if (hasTelegram) {
-    const telegram = new TelegramAdapter(config.telegramBotToken!, log);
+  if (telegramBotToken) {
+    const telegram = new TelegramAdapter(telegramBotToken, log);
     adapters.set('telegram', telegram);
 
     telegram.startPolling(async (msg) => {
@@ -866,7 +873,7 @@ export async function startConnectorGateway(
   stopFns.push(async () => weixin.stopPolling());
 
   // R3-P1: Resolve route URLs to local file paths for real media delivery
-  const uploadDir = resolve(process.env.UPLOAD_DIR ?? './uploads');
+  const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
   const ttsCacheDir = resolve(process.env.TTS_CACHE_DIR ?? './data/tts-cache');
   const resolvedMediaDir = resolve(mediaDir);
   const webPublicDir = resolve(process.env.WEB_PUBLIC_DIR ?? '../web/public');

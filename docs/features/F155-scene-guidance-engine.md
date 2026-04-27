@@ -5,13 +5,13 @@ topics: [guidance, onboarding, ux, interactive]
 doc_kind: spec
 created: 2026-04-09
 community_issue: "clowder-ai#409"
-community_pr: ["clowder-ai#398", "clowder-ai#457"]
-intake_issue: "cat-cafe#1119"
+community_pr: ["clowder-ai#398", "clowder-ai#457", "clowder-ai#504"]
+intake_issue: "cat-cafe#1294"
 ---
 
 # F155: Scene-Based Guidance Engine — 场景式交互引导
 
-> **Status**: in-progress (Phase A merged in cat-cafe main via PR #1122; Phase B selective intake merged in cat-cafe main via PR #1147) | **Source**: Community (mindfn) | **Priority**: P1 | **Owner**: Maine Coon/gpt52
+> **Status**: in-progress (Phase A merged in cat-cafe main via PR #1122; Phase B selective intake merged in cat-cafe main via PR #1147; guided-scenarios selective intake merged in cat-cafe main via PR #1296) | **Source**: Community (mindfn) | **Priority**: P1 | **Owner**: Maine Coon/gpt52
 
 ## Why
 
@@ -141,6 +141,9 @@ TBD — 待 intake 讨论后确定。
 - 机械分类：67 `safe-cherry-pick` / 1 `brand-guard` / 14 `manual-port`
 - 当前 intake 策略：Phase A / Phase B 均按 selective absorb 回流；Phase B 已完成 `ephemeral guide session` 分层与 extraction seams 的 file-level intake，不做 upstream 全量 replay
 - Phase A intake 已于 2026-04-12 merge 到 cat-cafe main（PR #1122）
+- `clowder-ai#504` 已于 2026-04-20 upstream squash merge（commit `2161cfcb32958c6c665ddfde5611c9fbee674ef8`）
+- guided scenarios selective intake 已于 2026-04-20 merge 到 cat-cafe main（PR #1296, commit `3d886c72a9be7c788b1e461634be9bb711df538b`）；`cat-cafe#1294` 已自动关闭
+- `clowder-ai#504` 机械分类：50 `safe-cherry-pick` / 4 `manual-port`
 
 ### Intake Shape
 
@@ -173,8 +176,13 @@ PR 后半段（04-09 的 20+ commits）连续修了以下问题，说明 `guideS
 ## Upstream Links
 
 - Issue: [clowder-ai#409](https://github.com/zts212653/clowder-ai/issues/409)
+- Issue: [clowder-ai#503](https://github.com/zts212653/clowder-ai/issues/503)
+- Issue: [clowder-ai#542](https://github.com/zts212653/clowder-ai/issues/542)
 - PR: [clowder-ai#398](https://github.com/zts212653/clowder-ai/pull/398)
 - PR: [clowder-ai#457](https://github.com/zts212653/clowder-ai/pull/457)
+- PR: [clowder-ai#504](https://github.com/zts212653/clowder-ai/pull/504)
 - Intake Issue: [cat-cafe#1119](https://github.com/zts212653/cat-cafe/issues/1119)
 - Intake Issue: [cat-cafe#1144](https://github.com/zts212653/cat-cafe/issues/1144)
+- Intake Issue: [cat-cafe#1294](https://github.com/zts212653/cat-cafe/issues/1294)
 - Intake PR: [cat-cafe#1122](https://github.com/zts212653/cat-cafe/pull/1122)
+- Intake PR: [cat-cafe#1296](https://github.com/zts212653/cat-cafe/pull/1296)

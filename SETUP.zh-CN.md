@@ -15,6 +15,22 @@
 
 ## 快速开始
 
+### 先选安装路径
+
+对大多数非开发者用户，如果 Releases 里已经有桌面安装包，优先走安装包：
+
+| 平台 | 推荐路径 | 说明 |
+|------|----------|------|
+| Windows | 从 [Releases](https://github.com/zts212653/clowder-ai/releases) 下载 `.exe` 安装包 | 自带运行时、便携 Node.js、Redis、桌面快捷方式和首次启动配置生成 |
+| macOS | 从 [Releases](https://github.com/zts212653/clowder-ai/releases) 下载 `.dmg` | 拖到 Applications；如果未签名应用被拦截，右键 → **打开** |
+| Linux | 源码安装或 `bash scripts/install.sh` | 暂时没有桌面 AppImage |
+
+启动桌面应用后，进入 **Hub → 系统配置 → 账号配置**，连接 provider API key 和 CLI 账号。安装包负责准备本地运行时，但不会替你完成第三方 provider 登录。
+
+如果你要开发 Clowder、运行指定分支，或者你的平台暂时没有桌面安装包，再走下面的源码安装。
+
+### 源码安装
+
 ```bash
 # 1. 克隆
 git clone https://github.com/zts212653/clowder-ai.git
@@ -501,6 +517,30 @@ pnpm check:deps         # 依赖图检查（depcruise）
 pnpm check:lockfile     # 校验 lockfile 完整性
 pnpm check:features     # Feature 文档合规检查
 pnpm check:env-ports    # 环境变量端口漂移检测
+
+# === Redis ===
+pnpm redis:user:start   # 手动启动 Redis
+pnpm redis:user:stop    # 停止 Redis
+pnpm redis:user:status  # 检查 Redis 状态
+pnpm redis:user:backup  # 手动备份
+
+# Redis 自动备份（cron 方式）
+pnpm redis:user:autobackup:install    # 安装自动备份定时任务
+pnpm redis:user:autobackup:run        # 立即执行备份
+pnpm redis:user:autobackup:status     # 查看自动备份状态
+pnpm redis:user:autobackup:uninstall  # 移除自动备份定时任务
+
+# === 线程导出 ===
+pnpm threads:sync       # 同步线程导出
+pnpm threads:status     # 查看线程导出状态
+pnpm threads:export:redis              # 从 Redis 导出线程
+pnpm threads:export:redis:dry-run      # 模拟导出
+
+# 线程自动保存（cron 方式）
+pnpm threads:autosave:install          # 安装自动保存定时任务
+pnpm threads:autosave:run              # 立即执行自动保存
+pnpm threads:autosave:status           # 查看自动保存状态
+pnpm threads:autosave:uninstall        # 移除自动保存定时任务
 
 # === Alpha Worktree（预发布测试）===
 pnpm alpha:init         # 创建 alpha worktree（../cat-cafe-alpha）

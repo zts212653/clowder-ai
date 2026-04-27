@@ -171,6 +171,30 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
+    name: 'CAT_CAFE_INVOCATION_REGISTRY',
+    defaultValue: '(自动：有 Redis 用 redis，否则 memory)',
+    description: 'F174-B InvocationRegistry 后端选择：redis（重启不丢 callback 鉴权）/ memory（fallback / 测试）',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_AGENT_KEY_SECRET',
+    defaultValue: '(空)',
+    description: 'F178 Persistent MCP Agent-Key Auth — 共享密钥（直接环境变量提供）',
+    category: 'server',
+    sensitive: true,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_AGENT_KEY_FILE',
+    defaultValue: '(空)',
+    description: 'F178 Persistent MCP Agent-Key Auth — 密钥文件路径（CAT_CAFE_AGENT_KEY_SECRET 的备选）',
+    category: 'server',
+    sensitive: true,
+    runtimeEditable: false,
+  },
+  {
     name: 'CAT_CAFE_HOOK_TOKEN',
     defaultValue: '(空)',
     description: 'Hook 回调鉴权 token',
@@ -305,12 +329,39 @@ export const ENV_VARS: EnvDefinition[] = [
     hubVisible: false,
   },
   {
+    name: 'CAT_CAFE_SKIP_HOMEDIR_MIGRATION',
+    defaultValue: '0',
+    description: '跳过 homedir credentials / legacy provider profiles 迁移（新安装或 opensource profile 可显式关闭）',
+    category: 'server',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'ALLOWED_WORKSPACE_DIRS',
     defaultValue: '(未设置)',
     description: 'MCP Server 允许访问的工作目录列表（逗号分隔）',
     category: 'server',
     sensitive: false,
     exampleRecommended: true,
+  },
+  {
+    name: 'CAT_CAFE_RUNTIME_ROOT',
+    defaultValue: '(未设置 → process.cwd())',
+    description:
+      'F061: Clowder AI runtime 二进制根目录（runtime startup 自动 export 为 $RUNTIME_DIR），优先级高于 capability orchestrator 的 auto-detection，用于 Antigravity MCP config args 路径',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_WORKSPACE_ROOT',
+    defaultValue: '(未设置 → process.cwd())',
+    description:
+      'F061: Bengal MCP 工具的 workspace 根目录（runtime startup 自动 export 为 $PROJECT_DIR），用于 Antigravity MCP config 的 ALLOWED_WORKSPACE_DIRS env 注入',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
   },
 
   // --- storage ---
@@ -478,6 +529,14 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
   },
   {
+    name: 'DEFAULT_CAT_ID',
+    defaultValue: '(cat-config 第一个 breed)',
+    description: '默认猫猫 ID（覆盖 cat-config 里的顺序）',
+    category: 'cli',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'CAT_CAFE_MCP_SERVER_PATH',
     defaultValue: '(自动检测)',
     description: 'MCP Server 路径',
@@ -593,6 +652,13 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'CODEX_HOME',
     defaultValue: '~/.codex',
     description: 'Codex CLI home 目录',
+    category: 'cli',
+    sensitive: false,
+  },
+  {
+    name: 'ANTIGRAVITY_BRAIN_HOME',
+    defaultValue: '~/.gemini/antigravity/brain',
+    description: 'Antigravity built-in generate_image brain dir (F172 Phase G scanner)',
     category: 'cli',
     sensitive: false,
   },
@@ -897,7 +963,15 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'GITHUB_AUTHORITATIVE_REVIEW_LOGINS',
     defaultValue: 'chatgpt-codex-connector[bot]',
     description:
-      'Comma-separated GitHub logins whose review feedback is handled by the email channel (authoritative source). F140 API polling skips these to avoid double-delivery.',
+      '[DEPRECATED] F140 Phase E.2 cutover (2026-04-24): Rule B authoritative-source skip removed; this var now only serves as backward-compat fallback for GITHUB_SETUP_NOISE_BOT_LOGINS. Will be removed in a follow-up release.',
+    category: 'connector',
+    sensitive: false,
+  },
+  {
+    name: 'GITHUB_SETUP_NOISE_BOT_LOGINS',
+    defaultValue: 'chatgpt-codex-connector[bot]',
+    description:
+      'Comma-separated GitHub bot logins whose conversation comments may contain Codex setup-only guidance. F140 polling-side setup-noise filter skips those (bot + conversation + setup-only body, no codex review content). Falls back to GITHUB_AUTHORITATIVE_REVIEW_LOGINS for backward compat.',
     category: 'connector',
     sensitive: false,
   },

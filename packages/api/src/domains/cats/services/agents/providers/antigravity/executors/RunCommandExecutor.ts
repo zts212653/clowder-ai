@@ -27,6 +27,43 @@ const FORBIDDEN_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\brm\s+-rf\s+\/(\s|$)/i, reason: 'rm -rf / is always refused' },
   { pattern: /:\(\)\{\s*:\|:/i, reason: 'fork bomb pattern refused' },
 ];
+// Any shell control syntax makes the command unsafe for automatic replay.
+// Keep these guards more explicit than the whitelist itself: if we are unsure
+// whether the shell will evaluate something dynamically, we do not treat it as
+// read-only.
+const SHELL_CONTROL_PATTERN = /[><|;&]/;
+const SHELL_SUBSTITUTION_PATTERN = /[`]/;
+const SHELL_NEWLINE_PATTERN = /[\n\r]/;
+const SHELL_VARIABLE_EXPANSION_PATTERN = /\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[^}]+\})/;
+const READ_ONLY_PATTERNS: RegExp[] = [
+  /^\s*pwd(?:\s|$)/i,
+  /^\s*ls(?:\s|$)/i,
+  /^\s*cat\s+[^><|;&]+$/i,
+  // Keep the git whitelist intentionally narrow: `git branch` is excluded
+  // because flags like -d/-m/-c mutate refs, and we only auto-retry commands
+  // we can prove are read-only.
+  /^\s*git\s+(log|status|rev-parse)(?:\s|$)/i,
+  /^\s*git\s+diff(?:\s|$)/i,
+  /^\s*git\s+show(?:\s|$)/i,
+];
+
+export function getRunCommandRefusalReason(commandLine: string): string | null {
+  for (const { pattern, reason } of FORBIDDEN_PATTERNS) {
+    if (pattern.test(commandLine)) return reason;
+  }
+  return null;
+}
+
+export function isReadOnlyRunCommand(commandLine: string): boolean {
+  if (getRunCommandRefusalReason(commandLine)) return false;
+  if (SHELL_CONTROL_PATTERN.test(commandLine)) return false;
+  if (SHELL_SUBSTITUTION_PATTERN.test(commandLine)) return false;
+  if (SHELL_NEWLINE_PATTERN.test(commandLine)) return false;
+  if (SHELL_VARIABLE_EXPANSION_PATTERN.test(commandLine)) return false;
+  if (commandLine.includes('$(')) return false;
+  if (/\bgit\b/i.test(commandLine) && /(^|[\s'"]+)--output(?:=|\s|['"])/.test(commandLine)) return false;
+  return READ_ONLY_PATTERNS.some((pattern) => pattern.test(commandLine.trim()));
+}
 
 export class RunCommandExecutor implements AntigravityToolExecutor<RunCommandInput, { exitCode: number }> {
   readonly toolName = 'run_command';
@@ -38,26 +75,30 @@ export class RunCommandExecutor implements AntigravityToolExecutor<RunCommandInp
   }
 
   async execute(input: RunCommandInput, ctx: ExecutorContext): Promise<ExecutorResult<{ exitCode: number }>> {
-    for (const { pattern, reason } of FORBIDDEN_PATTERNS) {
-      if (pattern.test(input.commandLine)) {
-        const refused: ExecutorResult<{ exitCode: number }> = { status: 'refused', reason };
-        await ctx.audit.record({
-          tool: this.toolName,
-          cascadeId: ctx.cascadeId,
-          stepIndex: ctx.stepIndex,
-          input,
-          result: refused,
-          timestamp: new Date(),
-        });
-        return refused;
-      }
+    const refusalReason = getRunCommandRefusalReason(input.commandLine);
+    if (refusalReason) {
+      const refused: ExecutorResult<{ exitCode: number }> = { status: 'refused', reason: refusalReason };
+      await ctx.audit.record({
+        tool: this.toolName,
+        cascadeId: ctx.cascadeId,
+        stepIndex: ctx.stepIndex,
+        input,
+        result: refused,
+        timestamp: new Date(),
+      });
+      return refused;
     }
 
     const t0 = Date.now();
     try {
+      // Antigravity LS RunCommand joins `command + args` with spaces and passes
+      // to an outer shell. Sending `{ command: '/bin/sh', args: ['-c', cmd] }`
+      // causes the outer shell to parse "sh -c cmd" only consuming the first
+      // word of cmd — all flags/extra args get discarded. Pass the full command
+      // line directly as `command` with no args so the outer shell handles it
+      // verbatim (pipes, redirects, chained `&&` all work).
       const resp = await this.deps.rpc('RunCommand', {
-        command: '/bin/sh',
-        args: ['-c', input.commandLine],
+        command: input.commandLine,
         cwd: input.cwd,
       });
       const durationMs = Date.now() - t0;

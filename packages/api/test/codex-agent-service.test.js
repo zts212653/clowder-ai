@@ -1259,3 +1259,59 @@ test('Issue #116: turn.completed unblocks done even when process exit is delayed
   assert.equal(done.metadata?.usage?.inputTokens, 100);
   assert.equal(done.metadata?.usage?.outputTokens, 50);
 });
+
+test('[F172] yields system_info rich_block for images found in codex generated_images dir', async () => {
+  const sessionId = 'thread-f172-img';
+  const tmpHome = mkdtempSync(join(import.meta.dirname ?? '.', '.tmp-f172-'));
+  const imgDir = join(tmpHome, '.codex', 'generated_images', sessionId);
+  mkdirSync(imgDir, { recursive: true });
+  writeFileSync(join(imgDir, 'ig_test.png'), Buffer.from('fake-png'));
+
+  const uploadDir = mkdtempSync(join(import.meta.dirname ?? '.', '.tmp-f172-uploads-'));
+
+  const prevHome = process.env.HOME;
+  process.env.HOME = tmpHome;
+
+  try {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ spawnFn });
+
+    const promise = collect(service.invoke('generate an image', { uploadDir }));
+
+    emitCodexEvents(proc, [
+      { type: 'thread.started', thread_id: sessionId },
+      { type: 'item.completed', item: { id: 'msg-1', type: 'agent_message', text: 'Image generated' } },
+      { type: 'turn.completed', usage: { input_tokens: 50, output_tokens: 30 } },
+    ]);
+
+    const msgs = await promise;
+
+    const sysInfos = msgs.filter((m) => m.type === 'system_info');
+    assert.ok(sysInfos.length >= 1, `expected at least 1 system_info, got ${sysInfos.length}`);
+
+    const imgInfo = sysInfos.find((m) => {
+      const parsed = JSON.parse(m.content);
+      return parsed.type === 'rich_block' && parsed.block?.kind === 'media_gallery';
+    });
+    assert.ok(imgInfo, 'should yield a system_info with media_gallery rich block');
+
+    const parsed = JSON.parse(imgInfo.content);
+    assert.match(parsed.block.items[0].url, /^\/uploads\//);
+    assert.match(parsed.block.items[0].url, /\.png$/);
+
+    // AC-E3: provenance is included for archive ground truth
+    assert.ok(parsed.provenance, 'should include provenance for archive');
+    assert.equal(parsed.provenance.provider, 'codex');
+    assert.equal(parsed.provenance.toolName, 'image_gen');
+    assert.match(parsed.provenance.publishedPath, /^\/uploads\//);
+
+    const doneIdx = msgs.findIndex((m) => m.type === 'done');
+    const imgIdx = msgs.indexOf(imgInfo);
+    assert.ok(imgIdx < doneIdx, 'system_info rich block must appear before done');
+  } finally {
+    process.env.HOME = prevHome;
+    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(uploadDir, { recursive: true, force: true });
+  }
+});

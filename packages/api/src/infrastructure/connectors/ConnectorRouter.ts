@@ -9,7 +9,8 @@
  *   4. Broadcast to WebSocket
  *   5. Trigger cat invocation
  *
- * Follows ReviewRouter pattern but for chat platform messages.
+ * Routes inbound chat platform messages (analogous to legacy review-routing pattern,
+ * but for chat connectors instead of GitHub review email).
  *
  * F088 Multi-Platform Chat Gateway
  */

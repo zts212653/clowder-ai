@@ -10,6 +10,7 @@ import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { registerLivenessProbe, unregisterLivenessProbe } from '../infrastructure/telemetry/instruments.js';
 import { emitOtelLog } from '../infrastructure/telemetry/otel-logger.js';
+import { invalidateCliCommand } from './cli-resolve.js';
 import { escapeBashArg, escapeCmdArg, findGitBashPath, resolveWindowsShimSpawn } from './cli-spawn-win.js';
 import { resolveCliTimeoutMs } from './cli-timeout.js';
 import type { ChildProcessLike, CliSpawnOptions, SpawnFn } from './cli-types.js';
@@ -149,6 +150,13 @@ export async function* spawnCli(
   let spawnError: Error | undefined;
   child.once('error', (err: Error) => {
     spawnError = err;
+    // F173 Phase D AC-D1: ENOENT means cached path is stale (binary uninstalled,
+    // symlink rebuild moved target, etc.). Drop the cache entry so the next
+    // resolveCliCommand call re-probes; otherwise we ENOENT-loop forever
+    // until process restart.
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      invalidateCliCommand(options.command);
+    }
   });
 
   let killed = false;
@@ -335,6 +343,23 @@ export async function* spawnCli(
       }
       yield value;
       pendingNext = ndjson.next();
+    }
+
+    if (probe) {
+      await probe.flushPendingWarnings();
+      for (const warning of probe.drainWarnings()) {
+        yield warning;
+        if (
+          options.livenessProbe?.stallAutoKill &&
+          warning.level === 'suspected_stall' &&
+          warning.state === 'idle-silent'
+        ) {
+          stallKilled = true;
+          timedOut = true;
+          processAliveAtTimeout = !childExited;
+          killChild();
+        }
+      }
     }
 
     // Check for spawn error that arrived during/after iteration

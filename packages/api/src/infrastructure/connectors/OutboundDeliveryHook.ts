@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type CatId, catRegistry, type RichBlock } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
+import { resolveInternalRouteUrl } from '../../utils/upload-paths.js';
 import { ConnectorMessageFormatter, type MessageEnvelope, type MessageOrigin } from './ConnectorMessageFormatter.js';
 import type { IConnectorThreadBindingStore } from './ConnectorThreadBindingStore.js';
 import { renderAllRichBlocksPlaintext } from './rich-block-plaintext.js';
@@ -305,10 +306,15 @@ export class OutboundDeliveryHook {
                       const absPath = resolve?.(item.url);
                       if (absPath) {
                         await adapter.sendMedia(binding.externalChatId, { type: 'image', absPath });
-                      } else if (item.url.startsWith('https://')) {
+                      } else if (
+                        item.url.startsWith('https://') ||
+                        item.url.startsWith('/uploads/') ||
+                        item.url.startsWith('/api/connector-media/')
+                      ) {
+                        const resolvedUrl = resolveInternalRouteUrl(item.url);
                         await adapter.sendMedia(binding.externalChatId, {
                           type: 'image',
-                          url: item.url,
+                          url: resolvedUrl,
                         });
                       } else {
                         this.opts.log.warn(

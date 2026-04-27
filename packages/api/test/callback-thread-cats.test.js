@@ -7,10 +7,13 @@ import Fastify from 'fastify';
 
 function stubRegistry(records = new Map()) {
   return {
-    verify: (invocationId, callbackToken) => {
+    verify: async (invocationId, callbackToken) => {
       const record = records.get(invocationId);
-      if (!record || record.callbackToken !== callbackToken) return null;
-      return record;
+      if (!record) return { ok: false, reason: 'unknown_invocation' };
+      if (record.callbackToken !== callbackToken) {
+        return { ok: false, reason: 'invalid_token' };
+      }
+      return { ok: true, record };
     },
   };
 }

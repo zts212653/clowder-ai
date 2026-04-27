@@ -61,17 +61,20 @@ skills:
 
   guide-interaction:
     description: >
-      场景引导交互模式：匹配到引导流程后，向用户提供交互式选择卡片，
-      处理用户选择（开始引导/步骤概览/跳过），启动前端引导 overlay。
-      Use when: 系统注入了 Guide Available（自动触发，不需要手动加载）。
-      Not for: 没有匹配到引导流程的普通对话。
-      Output: 引导选择卡片 + 状态持久化 + 前端引导启动。
+      场景引导交互模式：用户明确在问某项功能怎么做时，先判断该直接解释还是进入交互引导；
+      系统注入了 Guide Matched / Guide Pending / Guide Selection / Guide Active / Guide Completed 时，
+      按状态驱动回复并使用对应 guide MCP 工具。
+      Use when: 系统注入了上述 guide 状态，或用户明确在问某项功能怎么操作。
+      Not for: 普通闲聊、代码实现、没有流程诉求的概念讨论。
+      Output: guide 目录判断 + 交互选择卡片 + 状态持久化 + 前端引导启动。
     triggers:
       - "引导流程"
-      - "guide"
+      - "怎么配置"
+      - "怎么操作"
     not_for:
-      - "没有匹配到引导流程的普通对话"
-    output: "Guide choice card / state persistence / overlay start"
+      - "普通闲聊"
+      - "代码实现"
+    output: "Guide catalog judgment / choice card / state persistence / overlay start"
     next: ["guide-authoring"]
     sop_step: null
 

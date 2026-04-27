@@ -24,10 +24,14 @@ export function resolveApiUrl(): string {
   }
   const envUrl = process.env.NEXT_PUBLIC_API_URL;
   if (envUrl) {
-    // Build-time default (localhost) is wrong when accessed remotely — skip and auto-detect.
     const isLocalhostDefault = /^https?:\/\/(localhost|127\.0\.0\.1)[:/]/.test(envUrl);
-    const isRemoteAccess = location != null && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
-    if (!isLocalhostDefault || !isRemoteAccess) return envUrl;
+    const isLocalAccess = location != null && (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+    const isRemoteAccess = location != null && !isLocalAccess;
+    // Skip envUrl when it mismatches actual access origin:
+    //   - localhost env + remote browser → reverse-proxy users would hit dev's loopback
+    //   - cloud env + local browser → would force a Cloudflare Tunnel round-trip for nothing
+    const mismatch = (isLocalhostDefault && isRemoteAccess) || (!isLocalhostDefault && isLocalAccess);
+    if (!mismatch) return envUrl;
   }
   if (typeof window === 'undefined') return 'http://localhost:3004';
   const protocol = location?.protocol ?? 'http:';
