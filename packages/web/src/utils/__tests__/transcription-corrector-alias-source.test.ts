@@ -1,28 +1,13 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
-afterEach(() => {
-  vi.doUnmock('@cat-cafe/shared');
-  vi.resetModules();
-});
+import { describe, expect, it } from 'vitest';
 
 describe('transcription-corrector alias source', () => {
-  it('follows CAT_CONFIGS mentionPatterns dynamically', async () => {
-    vi.doMock('@cat-cafe/shared', async () => {
-      const actual = await vi.importActual<typeof import('@cat-cafe/shared')>('@cat-cafe/shared');
-      const codexPatterns = [...actual.CAT_CONFIGS.codex.mentionPatterns, '@测试缅因别名'];
-      return {
-        ...actual,
-        CAT_CONFIGS: {
-          ...actual.CAT_CONFIGS,
-          codex: {
-            ...actual.CAT_CONFIGS.codex,
-            mentionPatterns: codexPatterns,
-          },
-        },
-      };
-    });
+  it('picks up mention aliases after refreshSpeechAliases()', async () => {
+    const { correctTranscription, refreshSpeechAliases } = await import('@/utils/transcription-corrector');
+    // Before refresh: no aliases → no correction
+    expect(correctTranscription('at测试缅因别名 出来一下')).toBe('at测试缅因别名 出来一下');
 
-    const { correctTranscription } = await import('@/utils/transcription-corrector');
+    // After refresh with dynamic cat data → corrects
+    refreshSpeechAliases([{ mentionPatterns: ['@测试缅因别名', '@codex'] }]);
     expect(correctTranscription('at测试缅因别名 出来一下')).toBe('@测试缅因别名 出来一下');
   });
 });

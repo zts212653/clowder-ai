@@ -363,7 +363,7 @@ describe('session-strategy Phase 3: runtime overrides', () => {
       // on top of the fully-resolved fallback (config-file → breed → provider → global),
       // not just the provider/global base.
       //
-      // Currently no cats have cat-config.json session strategy, so the fallback
+      // Currently no cats have runtime-config session strategy, so the fallback
       // is provider_default. But the code path is correct: resolveFallbackStrategy()
       // is called first, then runtime overlay is applied.
       const { getSessionStrategyWithSource, getSessionStrategy } = await loadStrategyModule();

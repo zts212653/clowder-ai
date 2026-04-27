@@ -28,7 +28,7 @@ function clientRuntimeLabel(cat: CatData, configCat?: CatConfig) {
   if (accountRef.includes('opencode')) return 'OpenCode';
   if (accountRef.includes('dare')) return 'Dare';
   if (cat.clientId === 'antigravity') return 'Antigravity';
-  if (cat.source === 'runtime' && cat.clientId === 'openai') return 'OpenAI-Compatible';
+  if (cat.clientId === 'openai') return 'OpenAI-Compatible';
   return humanizeClientId(configCat?.clientId ?? cat.clientId);
 }
 
@@ -43,7 +43,7 @@ function accountSummary(cat: CatData) {
     accountRef === 'dare' ||
     accountRef === 'opencode'
   ) {
-    return 'CLI（内置）账号';
+    return 'CLI（OAuth）账号';
   }
   return `CLI（配置） · ${accountRef}`;
 }
@@ -137,12 +137,13 @@ export function HubCoCreatorOverviewCard({ coCreator, onEdit }: { coCreator: CoC
 export function HubOverviewToolbar({ onAddMember }: { onAddMember?: () => void }) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <p className="text-[13px] text-[#8F8075]">全部 · CLI（内置） · CLI（配置） · 未启用</p>
+      <p className="text-[13px] text-[#8F8075]">全部 · CLI（OAuth） · CLI（配置） · 未启用</p>
       <button
         type="button"
         onClick={onAddMember}
         className="rounded-full px-4 py-2 text-sm font-bold text-white"
         style={{ backgroundColor: '#D49266' }}
+        data-bootcamp-step="add-member-button"
         data-guide-id="cats.add-member"
       >
         + 添加成员
@@ -156,6 +157,7 @@ export function HubMemberOverviewCard({
   configCat,
   onEdit,
   onToggleAvailability,
+  onDelete,
   togglingAvailability = false,
   draggable = false,
   onDragStart,
@@ -169,6 +171,7 @@ export function HubMemberOverviewCard({
   configCat?: CatConfig;
   onEdit?: (cat: CatData) => void;
   onToggleAvailability?: (cat: CatData) => void;
+  onDelete?: (cat: CatData) => void;
   togglingAvailability?: boolean;
   draggable?: boolean;
   onDragStart?: (cat: CatData, event: ReactDragEvent<HTMLElement>) => void;
@@ -192,7 +195,7 @@ export function HubMemberOverviewCard({
       onDragEnd={draggable ? (event) => onDragEnd?.(cat, event) : undefined}
       onClick={editCard}
       className={`rounded-[20px] px-[18px] py-[18px] shadow-sm transition hover:shadow-md ${isDragging ? 'opacity-40' : ''}`}
-      style={{ backgroundColor: '#FFFDFC', border: `1px solid ${cat.source === 'runtime' ? '#D9C7EA' : '#F1E7DF'}` }}
+      style={{ backgroundColor: '#FFFDFC', border: '1px solid #D9C7EA' }}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-2">
@@ -214,14 +217,7 @@ export function HubMemberOverviewCard({
             data-guide-id={guideTargetId}
             className="min-w-0 flex-1 cursor-pointer text-left"
           >
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-[17px] font-bold text-[#2D2118]">{title}</h3>
-              {cat.source === 'runtime' ? (
-                <span className="rounded-full bg-[#F3E8FF] px-2 py-0.5 text-[11px] font-semibold text-[#9D7BC7]">
-                  动态创建
-                </span>
-              ) : null}
-            </div>
+            <h3 className="text-[17px] font-bold text-[#2D2118]">{title}</h3>
             <p className="mt-2.5 text-[13px] text-[#8A776B]">
               {getMetaSummary(cat, configCat)}
               {cat.adapterMode ? (
@@ -238,18 +234,40 @@ export function HubMemberOverviewCard({
             <p className="mt-2 text-[13px] text-[#9D7BC7]">{formatMentionPreview(cat.mentionPatterns)}</p>
           </button>
         </div>
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            onToggleAvailability?.(cat);
-          }}
-          disabled={!onToggleAvailability || togglingAvailability}
-          aria-pressed={status.enabled}
-          className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${status.className} disabled:cursor-default`}
-        >
-          {togglingAvailability ? '切换中...' : status.label}
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleAvailability?.(cat);
+            }}
+            disabled={!onToggleAvailability || togglingAvailability}
+            aria-pressed={status.enabled}
+            className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${status.className} disabled:cursor-default`}
+          >
+            {togglingAvailability ? '切换中...' : status.label}
+          </button>
+          {onDelete ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onDelete(cat);
+              }}
+              className="rounded-full bg-red-50 p-1.5 text-red-600 transition hover:bg-red-100"
+              aria-label="删除成员"
+            >
+              <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 fill-none stroke-current" aria-hidden="true">
+                <path
+                  d="M3.5 4.5h9m-7.5 0V3.25h5V4.5m-5.5 0 .5 8h5l.5-8m-4 2v4m2-4v4"
+                  strokeWidth="1.25"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          ) : null}
+        </div>
       </div>
     </section>
   );

@@ -84,7 +84,7 @@ const CVO_LEVELS = [
  */
 export const BOOTCAMP_PHASE_ACHIEVEMENTS: ReadonlyMap<string, string> = new Map([
   ['phase-1-intro', 'bootcamp-enrolled'],
-  ['phase-3-config-help', 'bootcamp-env-ready'],
+  ['phase-4-task-select', 'bootcamp-env-ready'],
   ['phase-5-kickoff', 'bootcamp-first-decision'],
   ['phase-11-farewell', 'bootcamp-graduated'],
 ]);

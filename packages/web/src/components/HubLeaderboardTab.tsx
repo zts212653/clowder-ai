@@ -1,15 +1,19 @@
 'use client';
 
 import type { LeaderboardRange, LeaderboardStatsResponse } from '@cat-cafe/shared';
-import { Fraunces, Plus_Jakarta_Sans } from 'next/font/google';
+import localFont from 'next/font/local';
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { CatHeroCard, MiniRanked, SectionCard, StreakRanked, WorkMetric } from './leaderboard-cards';
 import { AchievementWall, CvoLevelCard, GameArena, SillyCatsList } from './leaderboard-phase-bc';
 
 /* -- Design tokens from designs/f075-cat-leaderboard.pen (lzNOb) -- */
-const fraunces = Fraunces({ subsets: ['latin'], weight: ['500'], display: 'swap' });
-const plusJakartaSans = Plus_Jakarta_Sans({ subsets: ['latin'], weight: ['400', '500', '600'], display: 'swap' });
+const fraunces = localFont({ src: '../fonts/Fraunces-Medium.woff2', weight: '500', display: 'swap' });
+const plusJakartaSans = localFont({
+  src: '../fonts/PlusJakartaSans-Variable.woff2',
+  weight: '400 600',
+  display: 'swap',
+});
 
 const RANGE_OPTIONS: { value: LeaderboardRange; label: string }[] = [
   { value: 'all', label: '全部' },

@@ -51,6 +51,7 @@ export function CatOverviewTab({
   onAddMember,
   onEditCoCreator,
   onEditMember,
+  onDeleteMember,
   onToggleAvailability,
   togglingCatId,
 }: {
@@ -59,6 +60,7 @@ export function CatOverviewTab({
   onAddMember?: () => void;
   onEditCoCreator?: () => void;
   onEditMember?: (cat: CatData) => void;
+  onDeleteMember?: (cat: CatData) => void;
   onToggleAvailability?: (cat: CatData) => void;
   togglingCatId?: string | null;
 }) {
@@ -144,7 +146,10 @@ export function CatOverviewTab({
           body: JSON.stringify({ catId }),
         });
         if (res.ok) {
+          const data = (await res.json()) as { warning?: string };
           setDefaultCatId(catId);
+          // #543 P2: Surface persist failure so user knows override won't survive restart
+          if (data.warning) setDefaultCatSaveError(data.warning);
         } else {
           setDefaultCatSaveError('保存失败，请重试');
         }
@@ -162,7 +167,7 @@ export function CatOverviewTab({
       <HubOverviewToolbar onAddMember={onAddMember} />
       {/* F154 Phase B: Global default cat selector (AC-B2: always visible, even on error) */}
       <DefaultCatSelector
-        cats={cats}
+        cats={cats.filter((c) => c.roster?.available !== false)}
         currentDefaultCatId={defaultCatId ?? ''}
         onSelect={handleDefaultCatSelect}
         isLoading={defaultCatLoading}
@@ -183,6 +188,7 @@ export function CatOverviewTab({
             cat={catData}
             configCat={config.cats[catData.id]}
             onEdit={onEditMember}
+            onDelete={onDeleteMember}
             onToggleAvailability={onToggleAvailability}
             togglingAvailability={togglingCatId === catData.id}
             guideTargetId={idx === 0 ? 'cats.first-member' : undefined}

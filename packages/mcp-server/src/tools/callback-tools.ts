@@ -698,16 +698,15 @@ export const updateBootcampStateInputSchema = {
   threadId: z.string().min(1).describe('Thread ID of the bootcamp thread'),
   phase: z
     .enum([
-      'phase-0-select-cat',
       'phase-1-intro',
       'phase-2-env-check',
       'phase-3-config-help',
-      'phase-3.5-advanced',
       'phase-4-task-select',
       'phase-5-kickoff',
       'phase-6-design',
       'phase-7-dev',
-      'phase-8-review',
+      'phase-7.5-add-teammate',
+      'phase-8-collab',
       'phase-9-complete',
       'phase-10-retro',
       'phase-11-farewell',
@@ -724,6 +723,13 @@ export const updateBootcampStateInputSchema = {
     .record(z.enum(['available', 'unavailable', 'skipped']))
     .optional()
     .describe('Advanced feature status: TTS, ASR, Pencil'),
+  guideStep: z
+    .enum(['open-hub', 'click-add-member', 'fill-form', 'mention-teammate', 'return-to-chat', 'done'])
+    .nullable()
+    .optional()
+    .describe(
+      'Sub-step for the add-teammate guide overlay. Set to "open-hub" when advancing to phase-7.5-add-teammate. Set to null to clear.',
+    ),
   completedAt: z.number().optional().describe('Timestamp when bootcamp was completed (Phase 11)'),
 };
 
@@ -734,6 +740,7 @@ export async function handleUpdateBootcampState(input: {
   selectedTaskId?: string | undefined;
   envCheck?: Record<string, { ok: boolean; version?: string; note?: string }> | undefined;
   advancedFeatures?: Record<string, string> | undefined;
+  guideStep?: string | null | undefined;
   completedAt?: number | undefined;
 }): Promise<ToolResult> {
   const body: Record<string, unknown> = { threadId: input.threadId };
@@ -742,6 +749,7 @@ export async function handleUpdateBootcampState(input: {
   if (input.selectedTaskId !== undefined) body['selectedTaskId'] = input.selectedTaskId;
   if (input.envCheck !== undefined) body['envCheck'] = input.envCheck;
   if (input.advancedFeatures !== undefined) body['advancedFeatures'] = input.advancedFeatures;
+  if (input.guideStep !== undefined) body['guideStep'] = input.guideStep;
   if (input.completedAt !== undefined) body['completedAt'] = input.completedAt;
   return callbackPost('/api/callbacks/update-bootcamp-state', body);
 }

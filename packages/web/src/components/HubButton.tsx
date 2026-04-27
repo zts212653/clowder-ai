@@ -10,6 +10,7 @@ export function HubButton() {
       className="p-1 rounded-lg hover:bg-cocreator-light transition-colors"
       aria-label="Clowder AI Hub"
       title="Clowder AI Hub"
+      data-bootcamp-step="hub-button"
       data-guide-id="hub.trigger"
     >
       <svg

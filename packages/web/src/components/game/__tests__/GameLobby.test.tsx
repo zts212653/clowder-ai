@@ -16,7 +16,6 @@ const mockCats: React.ComponentProps<typeof GameLobby>['cats'] = [
     defaultModel: 'claude-opus-4-6',
     roleDescription: '架构',
     personality: '',
-    source: 'seed',
   },
   {
     id: 'sonnet',
@@ -28,7 +27,6 @@ const mockCats: React.ComponentProps<typeof GameLobby>['cats'] = [
     defaultModel: 'claude-sonnet',
     roleDescription: '快速',
     personality: '',
-    source: 'seed',
   },
   {
     id: 'codex',
@@ -40,7 +38,6 @@ const mockCats: React.ComponentProps<typeof GameLobby>['cats'] = [
     defaultModel: 'gpt-5.3-codex',
     roleDescription: 'review',
     personality: '',
-    source: 'seed',
   },
 ];
 

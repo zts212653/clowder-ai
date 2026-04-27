@@ -1,13 +1,8 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
-import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
+import './helpers/setup-cat-registry.js';
 import { MemoryConnectorThreadBindingStore } from '../dist/infrastructure/connectors/ConnectorThreadBindingStore.js';
 import { OutboundDeliveryHook } from '../dist/infrastructure/connectors/OutboundDeliveryHook.js';
-
-// Bootstrap catRegistry for tests
-for (const [id, config] of Object.entries(CAT_CONFIGS)) {
-  if (!catRegistry.has(id)) catRegistry.register(id, config);
-}
 
 function noopLog() {
   const noop = () => {};

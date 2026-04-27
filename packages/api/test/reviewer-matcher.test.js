@@ -1,45 +1,14 @@
 /**
  * Tests for reviewer-matcher.ts
  * F032: Dynamic reviewer selection
+ *
+ * Current roster has 2 peer-reviewers:
+ *   opus (ragdoll) and codex (maine-coon)
  */
 
+import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
-
-// Mock cat-config-loader before importing reviewer-matcher
-const _mockRoster = {
-  opus: { family: 'ragdoll', roles: ['architect', 'peer-reviewer'], lead: true, available: true, evaluation: 'test' },
-  'opus-45': {
-    family: 'ragdoll',
-    roles: ['architect', 'peer-reviewer'],
-    lead: false,
-    available: true,
-    evaluation: 'test',
-  },
-  sonnet: { family: 'ragdoll', roles: ['assistant'], lead: false, available: true, evaluation: 'test' },
-  codex: {
-    family: 'maine-coon',
-    roles: ['peer-reviewer', 'security'],
-    lead: true,
-    available: true,
-    evaluation: 'test',
-  },
-  gpt52: {
-    family: 'maine-coon',
-    roles: ['peer-reviewer', 'thinker'],
-    lead: false,
-    available: true,
-    evaluation: 'test',
-  },
-  gemini: { family: 'siamese', roles: ['designer'], lead: true, available: true, evaluation: 'test' },
-};
-
-const _mockPolicy = {
-  requireDifferentFamily: true,
-  preferActiveInThread: true,
-  preferLead: true,
-  excludeUnavailable: true,
-};
 
 // We need to test the module with mocked config
 let resolveReviewer, canReview, _getAvailableReviewers;
@@ -55,35 +24,17 @@ describe('reviewer-matcher', () => {
 
   describe('resolveReviewer', () => {
     it('selects different-family reviewer for opus', async () => {
-      // opus is ragdoll, should get maine-coon or siamese reviewer
+      // opus is ragdoll, should get codex (maine-coon, peer-reviewer)
       const result = await resolveReviewer({ author: 'opus' });
 
-      // Should be codex or gpt52 (maine-coon family, has peer-reviewer role)
-      assert.ok(
-        result.reviewer === 'codex' || result.reviewer === 'gpt52',
-        `Expected codex or gpt52, got ${result.reviewer}`,
-      );
+      assert.equal(result.reviewer, 'codex');
       assert.equal(result.isDegraded, false);
     });
 
     it('selects different-family reviewer for codex', async () => {
-      // codex is maine-coon, should get ragdoll reviewer
+      // codex is maine-coon, should get opus (ragdoll, peer-reviewer)
       const result = await resolveReviewer({ author: 'codex' });
 
-      // Should be opus or opus-45 (ragdoll family, has peer-reviewer role)
-      assert.ok(
-        result.reviewer === 'opus' || result.reviewer === 'opus-45',
-        `Expected opus or opus-45, got ${result.reviewer}`,
-      );
-      assert.equal(result.isDegraded, false);
-    });
-
-    it('prefers lead when multiple candidates available', async () => {
-      // For codex, both opus (lead) and opus-45 (not lead) are available
-      // Should prefer opus (lead)
-      const result = await resolveReviewer({ author: 'codex' });
-
-      // Without thread activity, should prefer lead
       assert.equal(result.reviewer, 'opus');
       assert.equal(result.isDegraded, false);
     });
@@ -91,8 +42,8 @@ describe('reviewer-matcher', () => {
     it('returns candidates list', async () => {
       const result = await resolveReviewer({ author: 'opus' });
 
-      // Should include all available peer-reviewers except author
-      assert.ok(result.candidates.length >= 2);
+      // Should include peer-reviewers except author
+      assert.ok(result.candidates.length >= 1);
       assert.ok(!result.candidates.includes('opus')); // author excluded
     });
   });
@@ -105,17 +56,10 @@ describe('reviewer-matcher', () => {
     });
 
     it('rejects non-peer-reviewer', () => {
-      // sonnet has 'assistant' role, not 'peer-reviewer'
-      const result = canReview('sonnet', 'codex');
+      // gemini has 'designer' role, not 'peer-reviewer'
+      const result = canReview('gemini', 'codex');
       assert.equal(result.canReview, false);
       assert.ok(result.reason.includes('peer-reviewer role'));
-    });
-
-    it('rejects same-family when policy requires different', () => {
-      // opus and opus-45 are both ragdoll
-      const result = canReview('opus-45', 'opus');
-      assert.equal(result.canReview, false);
-      assert.ok(result.reason.includes('Same family'));
     });
 
     it('allows different-family peer-reviewer', () => {
@@ -133,9 +77,6 @@ describe('reviewer-matcher', () => {
   });
 
   describe('unavailable cats', () => {
-    // Note: These tests would need mock injection to fully test
-    // For now, we verify the logic works with the current roster
-
     it('handles missing author in roster gracefully', async () => {
       // unknown cat not in roster
       const result = await resolveReviewer({ author: 'unknown-cat' });

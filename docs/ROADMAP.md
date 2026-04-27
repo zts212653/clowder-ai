@@ -45,6 +45,7 @@ created: 2026-02-26
 | F129 | Pack System — Multi-Agent 共创世界的 Mod 生态 | in-progress | Ragdoll | internal | [F129](features/F129-pack-system-multi-agent-mod.md) |
 | F135 | 狸花猫开箱即用 — DARE Out-of-the-Box | spec | bouillipx | community [#195](https://github.com/zts212653/clowder-ai/issues/195) | [F135](features/F135-dare-ootb.md) |
 | F138 | Cat Café Video Studio — AI 视频制作管线 | spec | 金渐层 | internal | [F138](features/F138-video-studio.md) |
+| F171 | First-Run Quest — 首次安装零成员 + 游戏化新手引导 | spec | 缅因猫 + 布偶猫 | internal | [F171](features/F171-first-partner-onboarding.md) |
 | F143 | Hostable Agent Runtime — 统一宿主抽象 | spec | Ragdoll | internal | [F143](features/F143-hostable-agent-runtime.md) |
 | F144 | PPT Forge — AI 演示文稿生成引擎 | in-progress | 三猫 | internal | [F144](features/F144-ppt-forge.md) |
 | F146 | MCP Marketplace Control Plane — 一键接入 + 多生态聚合 | in-progress | Maine Coon + Ragdoll | internal | [F146](features/F146-mcp-marketplace-control-plane.md) |

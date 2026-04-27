@@ -36,6 +36,55 @@ async function rmWithRetry(path, attempts = 5) {
   }
 }
 
+/**
+ * F171: bootstrapCatCatalog() now creates empty catalogs (first-run quest).
+ * Tests that call bootstrapCatCatalog() and then read catalog breeds must call
+ * seedCatalogBreeds() afterwards to populate the catalog from the template.
+ */
+const BUILTIN_ACCOUNT_IDS = {
+  anthropic: 'claude',
+  openai: 'codex',
+  google: 'gemini',
+  kimi: 'kimi',
+  dare: 'dare',
+  opencode: 'opencode',
+};
+
+async function seedCatalogBreeds(projectRoot) {
+  const templatePath = join(projectRoot, 'cat-template.json');
+  const template = JSON.parse(await readFile(templatePath, 'utf-8'));
+  const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+  let catalog;
+  try {
+    catalog = JSON.parse(await readFile(catalogPath, 'utf-8'));
+  } catch {
+    catalog = {};
+  }
+  const version = template.version ?? catalog.version ?? 1;
+  const breeds = JSON.parse(JSON.stringify(template.breeds || []));
+  for (const breed of breeds) {
+    for (const variant of breed.variants || []) {
+      if (!variant.accountRef && variant.clientId && BUILTIN_ACCOUNT_IDS[variant.clientId]) {
+        variant.accountRef = BUILTIN_ACCOUNT_IDS[variant.clientId];
+      }
+    }
+  }
+  const roster = template.roster ?? catalog.roster ?? {};
+  const reviewPolicy = template.reviewPolicy ??
+    catalog.reviewPolicy ?? {
+      requireDifferentFamily: true,
+      preferActiveInThread: true,
+      preferLead: true,
+      excludeUnavailable: true,
+    };
+  const seeded =
+    version >= 2
+      ? { version, breeds, roster, reviewPolicy, ...(template.coCreator ? { coCreator: template.coCreator } : {}) }
+      : { version, breeds };
+  await mkdir(join(projectRoot, '.cat-cafe'), { recursive: true });
+  await writeFile(catalogPath, `${JSON.stringify(seeded, null, 2)}\n`, 'utf-8');
+}
+
 // Shared temp dir — singleton EventAuditLog only initializes once
 let tempDir;
 let invokeSingleCat;
@@ -78,6 +127,17 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const mod = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js');
     invokeSingleCat = mod.invokeSingleCat;
   });
+
+  /** Save/restore CAT_CAFE_GLOBAL_CONFIG_ROOT to prevent test profiles leaking to ~/.cat-cafe/ */
+  let _savedGlobalRoot;
+  function setGlobalRoot(dir) {
+    _savedGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = dir;
+  }
+  function restoreGlobalRoot() {
+    if (_savedGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = _savedGlobalRoot;
+  }
 
   function makeDeps() {
     let counter = 0;
@@ -2753,6 +2813,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const templateRoot = await mkdtemp(join(tmpdir(), 'f127-active-template-'));
     process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = templateRoot;
     await writeFile(join(templateRoot, 'cat-template.json'), '{}', 'utf-8');
+    setGlobalRoot(templateRoot);
     const boundProfile = await createProviderProfile(templateRoot, {
       provider: 'openai',
       name: 'template-bound-openai',
@@ -2802,6 +2863,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     } finally {
       if (previousTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
       else process.env.CAT_TEMPLATE_PATH = previousTemplatePath;
+      restoreGlobalRoot();
       catRegistry.reset();
       for (const [id, config] of Object.entries(registrySnapshot)) {
         catRegistry.register(id, config);
@@ -2902,6 +2964,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     });
 
     bootstrapCatCatalog(root, join(root, 'cat-template.json'));
+    // F171: bootstrapCatCatalog now creates empty catalogs; seed breeds from template.
+    await seedCatalogBreeds(root);
     const catalogPath = resolveCatCatalogPath(root);
     const runtimeCatalog = JSON.parse(await readFile(catalogPath, 'utf-8'));
     const codexBreed = runtimeCatalog.breeds.find((breed) => breed.catId === 'codex');
@@ -3002,6 +3066,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
     process.env.HOME = root;
     bootstrapCatCatalog(root, join(root, 'cat-template.json'));
+    // F171: bootstrapCatCatalog now creates empty catalogs; seed breeds from template.
+    await seedCatalogBreeds(root);
 
     const registrySnapshot = catRegistry.getAllConfigs();
     catRegistry.reset();
@@ -3061,6 +3127,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const apiDir = join(root, 'packages', 'api');
     await mkdir(apiDir, { recursive: true });
     await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+    setGlobalRoot(root);
 
     await createProviderProfile(root, {
       provider: 'openai',
@@ -3123,6 +3190,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       );
     } finally {
       process.chdir(previousCwd);
+      restoreGlobalRoot();
       catRegistry.reset();
       for (const [id, config] of Object.entries(registrySnapshot)) {
         catRegistry.register(id, config);
@@ -3349,6 +3417,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const apiDir = join(root, 'packages', 'api');
     await mkdir(apiDir, { recursive: true });
     await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+    setGlobalRoot(root);
 
     const boundProfile = await createProviderProfile(root, {
       provider: 'openai',
@@ -3404,6 +3473,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       );
     } finally {
       process.chdir(previousCwd);
+      restoreGlobalRoot();
       catRegistry.reset();
       for (const [id, config] of Object.entries(registrySnapshot)) {
         catRegistry.register(id, config);
@@ -3487,6 +3557,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const apiDir = join(root, 'packages', 'api');
     await mkdir(apiDir, { recursive: true });
     await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+    setGlobalRoot(root);
 
     const openrouterProfile = await createProviderProfile(root, {
       provider: 'openai',
@@ -3537,6 +3608,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       assert.ok(messages.some((m) => m.type === 'done'));
     } finally {
       process.chdir(previousCwd);
+      restoreGlobalRoot();
       catRegistry.reset();
       for (const [id, config] of Object.entries(registrySnapshot)) {
         catRegistry.register(id, config);
@@ -4432,6 +4504,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       assert.equal(sealRequests.length, 0, 'should not request seal on approx api_key telemetry');
     } finally {
       process.chdir(previousCwd);
+      restoreGlobalRoot();
       if (previousProxyEnabled === undefined) delete process.env.ANTHROPIC_PROXY_ENABLED;
       else process.env.ANTHROPIC_PROXY_ENABLED = previousProxyEnabled;
       await rmWithRetry(root);
@@ -4453,6 +4526,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const apiDir = join(root, 'packages', 'api');
     await mkdir(apiDir, { recursive: true });
     await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+    setGlobalRoot(root);
     await createProviderProfile(root, {
       provider: 'anthropic',
       name: 'sponsor-gateway',
@@ -4558,6 +4632,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       assert.equal(sealRequests.length, 0, 'should not request seal in api_key mode');
     } finally {
       process.chdir(previousCwd);
+      restoreGlobalRoot();
       if (previousProxyEnabled === undefined) delete process.env.ANTHROPIC_PROXY_ENABLED;
       else process.env.ANTHROPIC_PROXY_ENABLED = previousProxyEnabled;
       _clearTestStrategyOverrides();
@@ -4580,6 +4655,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const apiDir = join(root, 'packages', 'api');
     await mkdir(apiDir, { recursive: true });
     await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+    setGlobalRoot(root);
     await createProviderProfile(root, {
       provider: 'anthropic',
       name: 'sponsor-gateway',
@@ -4671,6 +4747,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       assert.equal(sealRequests.length, 1, 'should request seal in handoff mode');
     } finally {
       process.chdir(previousCwd);
+      restoreGlobalRoot();
       if (previousProxyEnabled === undefined) delete process.env.ANTHROPIC_PROXY_ENABLED;
       else process.env.ANTHROPIC_PROXY_ENABLED = previousProxyEnabled;
       _clearTestStrategyOverrides();

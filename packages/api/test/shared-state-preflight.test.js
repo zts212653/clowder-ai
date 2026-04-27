@@ -181,12 +181,12 @@ describe('checkSharedStatePreflight (integration)', () => {
 
     // Create a feature branch with staged (uncommitted) shared-state — should warn
     execSync('git checkout -b feat/dirty-worktree', { cwd: repo, stdio: 'ignore' });
-    writeFileSync(join(repo, 'cat-config.json'), '{}');
-    execSync('git add cat-config.json', { cwd: repo, stdio: 'ignore' });
+    writeFileSync(join(repo, 'cat-template.json'), '{}');
+    execSync('git add cat-template.json', { cwd: repo, stdio: 'ignore' });
 
     const result = checkSharedStatePreflight(repo);
     assert.equal(result.ok, false, 'uncommitted shared-state on feature branch should still be detected');
-    assert.deepEqual(result.uncommittedFiles, ['cat-config.json']);
+    assert.deepEqual(result.uncommittedFiles, ['cat-template.json']);
     assert.equal(result.unpushedFiles, undefined, 'unpushed should not be checked on feature branch');
   });
 

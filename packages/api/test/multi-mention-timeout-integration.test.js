@@ -6,12 +6,8 @@
 
 import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
-import { CAT_CONFIGS, catRegistry, createCatId } from '@cat-cafe/shared';
-
-// Bootstrap catRegistry
-for (const [id, config] of Object.entries(CAT_CONFIGS)) {
-  if (!catRegistry.has(id)) catRegistry.register(id, config);
-}
+import { createCatId } from '@cat-cafe/shared';
+import './helpers/setup-cat-registry.js';
 
 const { MultiMentionOrchestrator } = await import(
   '../dist/domains/cats/services/agents/routing/MultiMentionOrchestrator.js'

@@ -1,9 +1,111 @@
 {
   "version": 2,
+  "roleTemplates": [
+    {
+      "id": "ragdoll",
+      "name": "布偶猫",
+      "nickname": "宪宪",
+      "avatar": "/avatars/opus.png",
+      "color": {
+        "primary": "#9B7EBD",
+        "secondary": "#E8DFF5"
+      },
+      "roleDescription": "主架构师和核心开发者，擅长深度思考和系统设计",
+      "personality": "温柔但有主见，喜欢深入分析问题，写代码快但注重质量",
+      "teamStrengths": "架构设计、写代码一把好手"
+    },
+    {
+      "id": "maine-coon",
+      "name": "缅因猫",
+      "nickname": "砚砚",
+      "avatar": "/avatars/codex.png",
+      "color": {
+        "primary": "#5B8C5A",
+        "secondary": "#D4E6D3"
+      },
+      "roleDescription": "代码审查专家，擅长安全分析、测试覆盖和代码质量把控",
+      "personality": "严谨认真，注重细节，会直言不讳地指出问题",
+      "teamStrengths": "Review、找 bug、coding 落地"
+    },
+    {
+      "id": "siamese",
+      "name": "暹罗猫",
+      "nickname": "烁烁",
+      "avatar": "/avatars/gemini.png",
+      "color": {
+        "primary": "#5B9BD5",
+        "secondary": "#D6E9F8"
+      },
+      "roleDescription": "视觉设计师和创意顾问，擅长 UI/UX 设计和视觉表达",
+      "personality": "热血奔放，善于用视觉语言表达想法，表达力是全队最强的",
+      "teamStrengths": "审美、前端设计风格、打破常规"
+    },
+    {
+      "id": "dragon-li",
+      "name": "狸花猫",
+      "nickname": "小狸",
+      "avatar": "/avatars/dare.png",
+      "color": {
+        "primary": "#D4A76A",
+        "secondary": "#F5EBD7"
+      },
+      "roleDescription": "确定性执行与审计引擎，擅长零信任验证、状态外化追踪和可重放执行",
+      "personality": "沉默寡言但极其警觉，不会主动亲近但一旦认可就绝对可靠",
+      "teamStrengths": "确定性执行、审计追踪、零信任验证、状态外化"
+    },
+    {
+      "id": "bengal",
+      "name": "孟加拉猫",
+      "nickname": "小捷",
+      "avatar": "/avatars/antigravity.png",
+      "color": {
+        "primary": "#D4853A",
+        "secondary": "#FAEBDB"
+      },
+      "roleDescription": "混血多模型agent，擅长图片生成、浏览器自动化和视觉证据链",
+      "personality": "精力旺盛、好奇心爆棚，什么都想试，什么都敢碰",
+      "teamStrengths": "图片生成、截图录屏、browser automation、多模型切换"
+    },
+    {
+      "id": "golden-chinchilla",
+      "name": "金渐层",
+      "nickname": "金哥",
+      "avatar": "/avatars/opencode.png",
+      "color": {
+        "primary": "#C8A951",
+        "secondary": "#F5EDDA"
+      },
+      "roleDescription": "开源多模型编码 agent，自带多专家编排 + LSP + 主题生态",
+      "personality": "沉稳可靠，什么 provider 都能接，什么任务都能扛",
+      "teamStrengths": "多专家内部编排、LSP 集成、开源生态、provider-agnostic"
+    }
+  ],
+  "clientDefaults": {
+    "claude": {
+      "defaultModel": "claude-sonnet-4-6",
+      "models": [
+        "claude-sonnet-4-6",
+        "claude-opus-4-6",
+        "claude-opus-4-6[1m]",
+        "claude-sonnet-4-5-20250929",
+        "claude-opus-4-5-20251101"
+      ]
+    },
+    "codex": {
+      "defaultModel": "gpt-5.4",
+      "models": ["gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.4"]
+    },
+    "gemini": {
+      "defaultModel": "gemini-2.5-pro",
+      "models": ["gemini-2.5-pro", "gemini-3-flash-preview", "gemini-3.1-pro-preview"]
+    }
+  },
   "coCreator": {
-    "name": "You",
-    "aliases": [],
-    "mentionPatterns": ["@co-creator"]
+    "name": "铲屎官",
+    "nickname": "大当家",
+    "avatar": "/avatars/keeper.png",
+    "aliases": ["You", "Owner"],
+    "mentionPatterns": ["@co-creator", "@owner", "@铲屎官"]
   },
   "roster": {
     "opus": {
@@ -13,20 +115,6 @@
       "available": true,
       "evaluation": "主架构师+全栈开发，深度思考能力强，bug定位是弱项——定位不出来找砚砚(gpt52)"
     },
-    "sonnet": {
-      "family": "ragdoll",
-      "roles": ["assistant"],
-      "lead": false,
-      "available": true,
-      "evaluation": "快速灵活，适合日常对话和轻量任务"
-    },
-    "opus-45": {
-      "family": "ragdoll",
-      "roles": ["architect", "peer-reviewer"],
-      "lead": false,
-      "available": true,
-      "evaluation": "宪宪的前辈版本，推理能力深厚，写代码不如 4.6"
-    },
     "codex": {
       "family": "maine-coon",
       "roles": ["peer-reviewer", "security"],
@@ -34,33 +122,12 @@
       "available": true,
       "evaluation": "代码审查专家，安全意识强，反应快"
     },
-    "gpt52": {
-      "family": "maine-coon",
-      "roles": ["peer-reviewer", "thinker"],
-      "lead": false,
-      "available": true,
-      "evaluation": "深度思考型，审查细致，bug定位一流——宪宪找不到的bug他能找到"
-    },
-    "spark": {
-      "family": "maine-coon",
-      "roles": ["coder"],
-      "lead": false,
-      "available": true,
-      "evaluation": "超快输出 1000+ tokens/s，适合精确点改，不会自动跑测试"
-    },
     "gemini": {
       "family": "siamese",
       "roles": ["designer"],
       "lead": true,
       "available": true,
       "evaluation": "热血小笨蛋！创意丰富，爱发富文本和语音，表达力最强——禁止写代码"
-    },
-    "gemini25": {
-      "family": "siamese",
-      "roles": ["designer"],
-      "lead": false,
-      "available": true,
-      "evaluation": "经典版暹罗猫，创意灵感丰富"
     },
     "dare": {
       "family": "dragon-li",
@@ -473,6 +540,7 @@
       "catId": "dare",
       "name": "狸花猫",
       "displayName": "狸花猫",
+      "nickname": "小狸",
       "avatar": "/avatars/dare.png",
       "color": {
         "primary": "#D4A76A",
@@ -513,7 +581,7 @@
       "catId": "antigravity",
       "name": "孟加拉猫",
       "displayName": "孟加拉猫",
-      "nickname": null,
+      "nickname": "小捷",
       "avatar": "/avatars/antigravity.png",
       "color": {
         "primary": "#D4853A",
@@ -591,7 +659,7 @@
       "catId": "opencode",
       "name": "金渐层",
       "displayName": "金渐层",
-      "nickname": null,
+      "nickname": "金哥",
       "avatar": "/avatars/opencode.png",
       "color": {
         "primary": "#C8A951",
@@ -641,6 +709,7 @@
       "catId": "kimi",
       "name": "梵花猫",
       "displayName": "梵花猫",
+      "nickname": "墨墨",
       "avatar": "/avatars/kimi.png",
       "color": {
         "primary": "#4B5563",

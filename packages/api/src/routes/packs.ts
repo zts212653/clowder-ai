@@ -27,7 +27,7 @@ const exportSchema = z.object({
 
 export interface PacksRoutesOptions {
   packLoader: PackLoader;
-  catConfigPath?: string;
+  catTemplatePath?: string;
   sharedRulesPath?: string;
   skillsManifestPath?: string;
 }
@@ -84,11 +84,11 @@ export const packsRoutes: FastifyPluginAsync<PacksRoutesOptions> = async (app, o
       skillsManifestContent: bodySkills,
     } = parseResult.data;
 
-    // Resolve catConfig: body → file path → error
+    // Resolve catConfig: body → cat-template file path → error
     let catConfig = bodyCatConfig;
-    if (!catConfig && opts.catConfigPath) {
+    if (!catConfig && opts.catTemplatePath) {
       try {
-        catConfig = JSON.parse(await readFile(opts.catConfigPath, 'utf-8'));
+        catConfig = JSON.parse(await readFile(opts.catTemplatePath, 'utf-8'));
       } catch {
         /* file unreadable — fall through to error */
       }

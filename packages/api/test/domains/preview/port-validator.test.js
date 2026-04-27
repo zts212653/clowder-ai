@@ -29,8 +29,8 @@ describe('validatePort', () => {
     assert.match(result.reason, /range/i);
   });
 
-  it('rejects Hub API port (3002)', () => {
-    const result = validatePort(3002);
+  it('rejects Hub API port (3004)', () => {
+    const result = validatePort(3004);
     assert.equal(result.allowed, false);
     assert.match(result.reason, /excluded/i);
   });
@@ -40,8 +40,8 @@ describe('validatePort', () => {
     assert.equal(result.allowed, false);
   });
 
-  it('rejects Hub frontend port (3001)', () => {
-    const result = validatePort(3001);
+  it('rejects Hub frontend port (3003)', () => {
+    const result = validatePort(3003);
     assert.equal(result.allowed, false);
   });
 
@@ -88,7 +88,8 @@ describe('validatePort', () => {
   });
 
   it('DEFAULT_EXCLUDED_PORTS contains all Clowder AI service ports', () => {
-    const expected = [3001, 3002, 6398, 6399, 18888, 19999, 9876, 9878, 9879, 9877];
+    // Hub frontend (3003) + Hub API (3004) — ports updated to avoid conflicts
+    const expected = [3003, 3004, 6398, 6399, 18888, 19999, 9876, 9878, 9879, 9877];
     for (const port of expected) {
       assert.ok(DEFAULT_EXCLUDED_PORTS.includes(port), `Missing excluded port: ${port}`);
     }

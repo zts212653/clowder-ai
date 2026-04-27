@@ -69,6 +69,7 @@ export function TagEditor({
   lockedTags = [],
   tone = 'purple',
   normalize = normalizeTag,
+  validate,
   minCount = 0,
 }: {
   tags: string[];
@@ -79,10 +80,13 @@ export function TagEditor({
   lockedTags?: string[];
   tone?: 'purple' | 'green' | 'orange';
   normalize?: (value: string) => string;
+  /** Return error message if tag is invalid, null if OK. */
+  validate?: (tag: string) => string | null;
   minCount?: number;
 }) {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState('');
+  const [error, setError] = useState<string | null>(null);
   const ime = useIMEGuard();
 
   const commit = () => {
@@ -90,11 +94,18 @@ export function TagEditor({
     if (!nextTag) {
       setAdding(false);
       setDraft('');
+      setError(null);
+      return;
+    }
+    const err = validate?.(nextTag) ?? null;
+    if (err) {
+      setError(err);
       return;
     }
     onChange(mergeTags(tags, nextTag));
     setAdding(false);
     setDraft('');
+    setError(null);
   };
 
   return (
@@ -125,7 +136,10 @@ export function TagEditor({
         <div className="flex flex-wrap items-center gap-2">
           <input
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              if (error) setError(null);
+            }}
             onCompositionStart={ime.onCompositionStart}
             onCompositionEnd={ime.onCompositionEnd}
             onKeyDown={(event) => {
@@ -145,6 +159,7 @@ export function TagEditor({
           >
             添加
           </button>
+          {error && <span className="w-full text-xs text-red-500">{error}</span>}
         </div>
       ) : null}
     </div>

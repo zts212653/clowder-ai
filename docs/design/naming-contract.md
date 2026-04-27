@@ -39,7 +39,7 @@
 - README.md → 替换为 `README.md`（已含 Clowder AI 品牌）
 - CONTRIBUTING.md, SETUP.md → 替换为开源版
 - CLAUDE.md, AGENTS.md, GEMINI.md → 生成通用版
-- cat-config.json → 脱敏版
+- cat-template.json → 脱敏版
 - 端口映射 3003/3004 → 3003/3004
 - Redis 端口：不转换，开源仓也用 6399/6398
 - 个人信息脱敏（You → Owner 等）

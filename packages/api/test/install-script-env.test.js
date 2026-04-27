@@ -401,6 +401,9 @@ cat .env
   }
 });
 
+// CAT_CAFE_BOOTSTRAP_EMPTY_MEMBERS removed — empty catalog is now the default.
+// CAT_CAFE_BOOTSTRAP_SEED_TEMPLATE=1 is dev-only opt-in, not managed by installer.
+
 test('use_registry sets only env vars without writing to user npmrc', () => {
   const tmpHome = mkdtempSync(join(tmpdir(), 'clowder-install-registry-'));
 

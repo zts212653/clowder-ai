@@ -157,6 +157,42 @@ describe('F155 Guide Action Routes (frontend-facing)', () => {
     assert.ok(body.guideState.startedAt);
   });
 
+  test('start: replaces a completed guide when a different guide starts in the same thread', async () => {
+    const app = await createApp();
+    const thread = await seedThread('bootcamp-add-teammate', 'completed');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/guide-actions/start',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+      payload: { threadId: thread.id, guideId: 'bootcamp-farewell' },
+    });
+
+    assert.equal(res.statusCode, 200, 'terminal guide state should be replaceable by a new guide start');
+    const body = JSON.parse(res.body);
+    assert.equal(body.guideState.guideId, 'bootcamp-farewell');
+    assert.equal(body.guideState.status, 'active');
+    assert.equal(body.guideState.userId, 'user-1');
+    assert.ok(body.guideState.startedAt);
+
+    const stored = await guideBridge.get(thread.id);
+    assert.equal(stored?.guideId, 'bootcamp-farewell');
+    assert.equal(stored?.status, 'active');
+    assert.equal(broadcastCalls.length, 0);
+    assert.deepEqual(emitCalls, [
+      {
+        userId: 'user-1',
+        event: 'guide_start',
+        data: {
+          guideId: 'bootcamp-farewell',
+          threadId: thread.id,
+          timestamp: emitCalls[0].data.timestamp,
+        },
+      },
+    ]);
+    assert.equal(typeof emitCalls[0].data.timestamp, 'number');
+  });
+
   test('start: blocks self-heal on shared default thread (prevents state manufacturing)', async () => {
     const app = await createApp();
     const thread = await threadStore.get('default');

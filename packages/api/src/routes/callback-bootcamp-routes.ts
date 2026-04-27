@@ -11,21 +11,27 @@ import type { InvocationRegistry } from '../domains/cats/services/agents/invocat
 import { runEnvironmentCheck } from '../domains/cats/services/bootcamp/env-check.js';
 import type { BootcampStateV1, IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { BOOTCAMP_PHASE_ACHIEVEMENTS } from '../domains/leaderboard/achievement-defs.js';
+import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { deriveCallbackActor, resolveBoundThreadScope } from './callback-scope-helpers.js';
 
-/** Ordered phase list — index determines valid transitions (forward-only) */
+/**
+ * Ordered phase list — index determines valid transitions (forward-only).
+ * Wizard creates thread at phase-1-intro directly (Phase 0 handled by UI).
+ *
+ * F171 v2 flow: first cat develops solo (phases 4-7) → add teammate (7.5) →
+ * collaboration (8) → project complete (9) → farewell guidance (10-11).
+ */
 const PHASE_ORDER = [
-  'phase-0-select-cat',
   'phase-1-intro',
   'phase-2-env-check',
   'phase-3-config-help',
-  'phase-3.5-advanced',
   'phase-4-task-select',
   'phase-5-kickoff',
   'phase-6-design',
   'phase-7-dev',
-  'phase-8-review',
+  'phase-7.5-add-teammate',
+  'phase-8-collab',
   'phase-9-complete',
   'phase-10-retro',
   'phase-11-farewell',
@@ -33,7 +39,36 @@ const PHASE_ORDER = [
 
 const PHASE_INDEX = new Map(PHASE_ORDER.map((p, i) => [p, i]));
 
-const bootcampPhaseSchema = z.enum([...PHASE_ORDER]);
+/**
+ * Allowed legacy skip pairs: "currentPhase→normalizedTarget".
+ * Legacy phase names map to phases multiple steps ahead in the new flow.
+ * Only specific source→target combinations are valid — prevents arbitrary
+ * phase skipping by sending a legacy name from an early phase.
+ */
+const ALLOWED_LEGACY_SKIPS: ReadonlySet<string> = new Set([
+  // phase-4-first-project → phase-7-dev: old flow came after config/task phases
+  'phase-3-config-help→phase-7-dev',
+  'phase-4-task-select→phase-7-dev',
+  'phase-5-kickoff→phase-7-dev',
+  'phase-6-design→phase-7-dev',
+  // phase-3.5-advanced → phase-3-config-help: old flow came after intro/env-check
+  'phase-1-intro→phase-3-config-help',
+  'phase-2-env-check→phase-3-config-help',
+]);
+
+/** Map legacy phase names (pre-F171-v2) to their nearest current equivalent. */
+const LEGACY_PHASE_MAP: Record<string, (typeof PHASE_ORDER)[number]> = {
+  'phase-0-select-cat': 'phase-1-intro',
+  'phase-3.5-advanced': 'phase-3-config-help',
+  'phase-4-first-project': 'phase-7-dev',
+  'phase-4.5-add-teammate': 'phase-7.5-add-teammate',
+  'phase-8-review': 'phase-8-collab',
+};
+
+const bootcampPhaseSchema = z.enum([
+  ...PHASE_ORDER,
+  ...(Object.keys(LEGACY_PHASE_MAP) as (typeof PHASE_ORDER)[number][]),
+]);
 
 const updateBootcampStateCallbackSchema = z.object({
   threadId: z.string().min(1),
@@ -50,14 +85,29 @@ const updateBootcampStateCallbackSchema = z.object({
     )
     .optional(),
   advancedFeatures: z.record(z.enum(['available', 'unavailable', 'skipped'])).optional(),
+  /** F171: sub-step for bootcamp guide overlay */
+  guideStep: z
+    .enum([
+      'open-hub',
+      'click-add-member',
+      'fill-form',
+      'done',
+      'return-to-chat',
+      'mention-teammate',
+      'farewell-new-thread',
+      'farewell-bootcamp',
+      'farewell-input-tips',
+    ])
+    .nullable()
+    .optional(),
   completedAt: z.number().optional(),
 });
 
 export function registerCallbackBootcampRoutes(
   app: FastifyInstance,
-  deps: { registry: InvocationRegistry; threadStore: IThreadStore },
+  deps: { registry: InvocationRegistry; threadStore: IThreadStore; socketManager: SocketManager },
 ): void {
-  const { registry, threadStore } = deps;
+  const { registry, threadStore, socketManager } = deps;
 
   app.post('/api/callbacks/update-bootcamp-state', async (request, reply) => {
     const record = requireCallbackAuth(request, reply);
@@ -71,6 +121,18 @@ export function registerCallbackBootcampRoutes(
     }
 
     const { threadId, ...updates } = parsed.data;
+
+    // Normalize legacy phase names before any downstream logic (PHASE_INDEX lookup,
+    // persistence, achievements). Without this, legacy names pass schema validation
+    // but get rejected by the forward-only transition check or persist stale names.
+    // Track whether normalization occurred — legacy-originated transitions inherently
+    // span multiple phases (e.g. phase-4-first-project → phase-7-dev) so the gap
+    // check must be relaxed while still enforcing forward-only.
+    let phaseWasLegacy = false;
+    if (updates.phase && updates.phase in LEGACY_PHASE_MAP) {
+      phaseWasLegacy = true;
+      updates.phase = LEGACY_PHASE_MAP[updates.phase];
+    }
 
     // P2: Stale invocation guard — ignore if superseded by newer invocation
     if (!registry.isLatest(actor.invocationId)) {
@@ -92,29 +154,55 @@ export function registerCallbackBootcampRoutes(
     // Merge updates into existing bootcampState
     const existing = thread.bootcampState ?? {
       v: 1 as const,
-      phase: 'phase-0-select-cat' as const,
+      phase: 'phase-1-intro' as const,
       startedAt: Date.now(),
     };
 
     // P1 fix: Phase transition must be forward-only (no skipping)
     let validTransition = false;
     if (updates.phase !== undefined) {
-      const currentPhase = existing.phase as (typeof PHASE_ORDER)[number];
-      const currentIdx = PHASE_INDEX.get(currentPhase) ?? 0;
+      const rawPhase = existing.phase as string;
+      const currentPhase = (LEGACY_PHASE_MAP[rawPhase] ?? rawPhase) as (typeof PHASE_ORDER)[number];
+      const currentIdx = PHASE_INDEX.get(currentPhase);
       const targetIdx = PHASE_INDEX.get(updates.phase);
-      if (targetIdx === undefined || targetIdx <= currentIdx) {
-        reply.status(400);
-        return { error: `Invalid phase transition: ${existing.phase} → ${updates.phase} (must advance forward)` };
+      if (currentIdx === undefined) {
+        // Unmapped legacy phase — allow any forward transition (don't block users on upgrade)
+        request.log.warn(
+          { threadId, rawPhase, targetPhase: updates.phase },
+          '[bootcamp] unmapped legacy phase — allowing transition',
+        );
+        validTransition = true;
+      } else {
+        request.log.info(
+          { threadId, currentPhase, targetPhase: updates.phase, currentIdx, targetIdx, catId: record.catId },
+          '[bootcamp] phase transition attempt',
+        );
+        if (targetIdx === undefined || targetIdx <= currentIdx) {
+          request.log.warn(
+            { threadId, currentPhase, targetPhase: updates.phase, reason: 'not-forward' },
+            '[bootcamp] phase transition REJECTED',
+          );
+          reply.status(400);
+          return { error: `Invalid phase transition: ${existing.phase} → ${updates.phase} (must advance forward)` };
+        }
+        // Only allow advancing by 1 step, with defined skip exceptions:
+        // - phase-2-env-check → phase-4-task-select (skip phase-3 when env is OK)
+        // - phase-9-complete → phase-11-farewell (skip retro when farewell guide handles it)
+        const gap = targetIdx - currentIdx;
+        const allowedSkip =
+          (existing.phase === 'phase-2-env-check' && updates.phase === 'phase-4-task-select') ||
+          (existing.phase === 'phase-9-complete' && updates.phase === 'phase-11-farewell');
+        const allowedLegacySkip = phaseWasLegacy && ALLOWED_LEGACY_SKIPS.has(`${currentPhase}→${updates.phase}`);
+        if (gap > 1 && !allowedSkip && !allowedLegacySkip) {
+          request.log.warn(
+            { threadId, currentPhase, targetPhase: updates.phase, gap, reason: 'skip-not-allowed' },
+            '[bootcamp] phase transition REJECTED',
+          );
+          reply.status(400);
+          return { error: `Phase skip not allowed: ${existing.phase} → ${updates.phase} (max 1 step forward)` };
+        }
+        validTransition = true;
       }
-      // Only allow advancing by 1 step (or to the immediately next phase)
-      // Exception: allow skipping phase-3.5-advanced (optional advanced features)
-      const gap = targetIdx - currentIdx;
-      const skippingAdvanced = existing.phase === 'phase-3-config-help' && updates.phase === 'phase-4-task-select';
-      if (gap > 1 && !skippingAdvanced) {
-        reply.status(400);
-        return { error: `Phase skip not allowed: ${existing.phase} → ${updates.phase} (max 1 step forward)` };
-      }
-      validTransition = true;
     }
 
     // Build merged state — spreads preserve existing fields, updates override
@@ -124,9 +212,16 @@ export function registerCallbackBootcampRoutes(
     if (updates.selectedTaskId !== undefined) raw.selectedTaskId = updates.selectedTaskId;
     if (updates.envCheck !== undefined) raw.envCheck = updates.envCheck;
     if (updates.advancedFeatures !== undefined) raw.advancedFeatures = updates.advancedFeatures;
+    if (updates.guideStep !== undefined) raw.guideStep = updates.guideStep;
     if (updates.completedAt !== undefined) raw.completedAt = updates.completedAt;
 
     await threadStore.updateBootcampState(threadId, raw as unknown as BootcampStateV1);
+
+    // Push bootcamp state change to frontend via WebSocket
+    socketManager.broadcastToRoom(`thread:${threadId}`, 'thread_updated', {
+      threadId,
+      bootcampState: raw,
+    });
 
     // Auto-pin thread when bootcamp reaches farewell phase
     if (updates.phase === 'phase-11-farewell') {

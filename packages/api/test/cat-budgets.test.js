@@ -27,7 +27,7 @@ describe('getCatContextBudget', () => {
     clearBudgetCache();
   });
 
-  it('opus default budget from cat-config.json', () => {
+  it('opus default budget from runtime cat config', () => {
     const budget = getCatContextBudget('opus');
     assert.strictEqual(budget.maxPromptTokens, 180000);
     assert.strictEqual(budget.maxContextTokens, 160000);
@@ -35,7 +35,7 @@ describe('getCatContextBudget', () => {
     assert.strictEqual(budget.maxContentLengthPerMsg, 100000);
   });
 
-  it('codex default budget from cat-config.json', () => {
+  it('codex default budget from runtime cat config', () => {
     const budget = getCatContextBudget('codex');
     assert.strictEqual(budget.maxPromptTokens, 240000);
     assert.strictEqual(budget.maxContextTokens, 216000);
@@ -43,7 +43,7 @@ describe('getCatContextBudget', () => {
     assert.strictEqual(budget.maxContentLengthPerMsg, 100000);
   });
 
-  it('gemini default budget from cat-config.json', () => {
+  it('gemini default budget from runtime cat config', () => {
     const budget = getCatContextBudget('gemini');
     assert.strictEqual(budget.maxPromptTokens, 350000);
     assert.strictEqual(budget.maxContextTokens, 300000);
@@ -51,7 +51,7 @@ describe('getCatContextBudget', () => {
     assert.strictEqual(budget.maxContentLengthPerMsg, 100000);
   });
 
-  it('variant budgets from cat-config.json', () => {
+  it('variant budgets from runtime cat config', () => {
     const sonnet = getCatContextBudget('sonnet');
     assert.strictEqual(sonnet.maxPromptTokens, 180000);
     assert.strictEqual(sonnet.maxContextTokens, 160000);

@@ -109,6 +109,10 @@ export class OpenCodeAgentService implements AgentService {
     const args = this.buildArgs(prompt, options?.sessionId, effectiveModel, options?.cliConfigArgs);
     const cwd = options?.workingDirectory;
     const childEnv = this.buildEnv(options?.callbackEnv);
+    // F171: Account env vars applied LAST — user overrides provider-injected values
+    if (options?.accountEnv) {
+      for (const [k, v] of Object.entries(options.accountEnv)) childEnv[k] = v;
+    }
     const envSummary = summarizeOpenCodeEnvForDebug(childEnv);
     const metadata: MessageMetadata = { provider: 'opencode', model: effectiveModel };
     let sessionInitEmitted = false;
@@ -288,7 +292,7 @@ export class OpenCodeAgentService implements AgentService {
     // Do not silently prepend provider prefixes (e.g. anthropic/, openrouter/).
     // The user-configured model string is the source of truth.
     const effectiveModel = model ?? this.model;
-    args.push('-m', effectiveModel);
+    if (effectiveModel) args.push('-m', effectiveModel);
 
     // JSON event stream output
     args.push('--format', 'json');

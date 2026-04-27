@@ -493,7 +493,7 @@ created: 2026-02-26
 - 坑：SOP、CLAUDE.md、AGENTS.md、skill 文件里写死"Ragdoll找Maine Coon review"、"Maine Coon放行才能合入"。当同一物种有多个分身（Opus 4.5/4.6/Sonnet）时，规则指向不明；AGENTS.md 甚至出现"Maine Coon文件里写找Maine Coon review"的自我矛盾。
 - 根因：早期 1 Family = 1 Individual = 1 Role，写死个体名等于写死角色。多分身 + 新猫接入打破了这个等式。
 - 触发条件：新猫/新分身加入时，或同一物种多个分身同时在线时。
-- 修复：规则写"具有 peer-reviewer 角色的跨 family 猫"，不写"Maine Coon"。Roster (cat-config.json) 是唯一事实源，规则引用角色而非个体。
+- 修复：规则写"具有 peer-reviewer 角色的跨 family 猫"，不写"Maine Coon"。Roster (.cat-cafe/cat-catalog.json) 是唯一事实源，规则引用角色而非个体。
 - 防护：F042 Phase B 文档去硬编码 + review 时检查是否有新增的个体名硬编码。
 - 来源锚点：
   - `docs/features/F042-prompt-engineering-audit.md` §1.1
@@ -501,7 +501,7 @@ created: 2026-02-26
   - 2026-02-27 四猫 + 铲屎官讨论
 - 原理：协作规则的持久性取决于它引用的是稳定抽象（角色）还是不稳定实例（个体）。引用个体 = 每次团队变化都要改规则。
 
-- 关联：F042 | F032 | cat-config.json roster
+- 关联：F042 | F032 | .cat-cafe/cat-catalog.json roster
 
 ### LL-026: 身份信息是硬约束常量，不是可推断上下文
 - 状态：draft

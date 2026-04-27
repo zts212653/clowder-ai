@@ -33,16 +33,16 @@ community_issue: "#109"
 
 管理认证凭据，和具体哪只猫无关：
 
-| 账户类型 | 配置项 | 示例 |
+| authType | 配置项 | 示例 |
 |---------|--------|------|
-| Claude 订阅 (OAuth) | 订阅类型 | Max Plan |
-| Claude API Key | apiKey + baseUrl + 可选 modelOverride | `<your-api-key>` + `https://api.anthropic.com` |
-| Codex 订阅 (OAuth) | 订阅类型 | ChatGPT Pro |
-| Codex API Key | apiKey + baseUrl | `sk-...` + `https://api.openai.com` |
-| Gemini 订阅 | CLI 内部 auth | — |
-| 自定义 API Key | apiKey + baseUrl + provider hint | 兼容 OpenAI 协议的任意端点 |
+| `oauth` — Claude | 订阅类型 | Max Plan |
+| `api_key` — Claude | apiKey + baseUrl + 可选 modelOverride | `<your-api-key>` + `https://api.anthropic.com` |
+| `oauth` — Codex | 订阅类型 | ChatGPT Pro |
+| `api_key` — Codex | apiKey + baseUrl | `sk-...` + `https://api.openai.com` |
+| `oauth` — Gemini | CLI 内部 auth | — |
+| `api_key` — 自定义 | apiKey + baseUrl + provider hint | 兼容 OpenAI 协议的任意端点 |
 
-这层是 F062（done）的泛化扩展。
+账号类型由 `authType: 'oauth' | 'api_key'` 唯一决定（F171 移除了冗余的 `builtin` 标记）。这层是 F062（done）的泛化扩展。
 
 #### 第二层：猫猫实例管理（Cat Instances）
 
@@ -142,9 +142,11 @@ community_issue: "#109"
 
 | 组件 | 当前 | 目标 |
 |------|------|------|
-| `cat-config.json` | 唯一真相源，静态 | 预设/seed 数据，可被运行时覆盖 |
+| `cat-template.json` | 品种模板（进 git） | 只读 seed，首次启动 bootstrap 创建空 catalog |
+| `.cat-cafe/cat-catalog.json` | — | 运行时猫实例状态（breeds + roster），支持 CRUD |
+| `.cat-cafe/accounts.json` | — | 运行时账户元数据（authType/clientId/models） |
 | `CatRegistry` | 启动时一次性加载 | 支持运行时增删改 |
-| `provider-profiles` | Anthropic-only | 通用账户管理 |
+| `provider-profiles` | Anthropic-only | 已被 `accounts.json` + `credentials.json` 取代（F136/clowder-ai#340） |
 | `mention-parser.ts` | 从静态 config 读 patterns | 从动态 registry 读 aliases |
 | `a2a-mentions.ts` | 同上 | 同上 |
 | Hub 猫猫总览 | 只读展示 | 可管理（CRUD） |
@@ -152,7 +154,7 @@ community_issue: "#109"
 
 ## 涉及文件
 
-- `cat-config.json` — 保留为 seed/fallback
+- `cat-template.json` — 品种模板（只读 seed，不参与运行时写入）
 - `packages/shared/src/types/cat.ts` — CatConfig 类型增加 `accountRef`、`aliases`
 - `packages/shared/src/registry/CatRegistry.ts` — 支持运行时 mutation
 - `packages/api/src/config/cat-config-loader.ts` — 合并 seed + 动态配置

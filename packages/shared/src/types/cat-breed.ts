@@ -64,8 +64,6 @@ export interface CatVariant {
   /** Independent mention patterns for this variant (F32-b).
    *  Default variant inherits breed mentionPatterns; non-default variants fallback to @catId when unspecified. */
   readonly mentionPatterns?: readonly string[];
-  /** Bootstrap-stamped origin: 'seed' (from template) or 'runtime' (user-created). */
-  readonly source?: 'seed' | 'runtime';
   /** F127: member-side binding to a concrete account config (built-in or API key). */
   readonly accountRef?: string;
   /** clowder-ai#340 P5: CLI client identity (renamed from `provider`). */
@@ -111,7 +109,7 @@ export interface CatFeatures {
   /** F24: Enable session chain (context health tracking, auto-seal, bootstrap).
    *  Default: true. Set false for cats with inaccurate token stats (e.g. Gemini). */
   readonly sessionChain?: boolean;
-  /** F33 Phase 2: Per-breed session strategy override from cat-config.json.
+  /** F33 Phase 2: Per-breed session strategy override from the resolved runtime cat config.
    *  Partial config — merged with provider/global defaults at runtime.
    *  Matches SessionStrategyConfig shape (all fields except strategy are optional). */
   readonly sessionStrategy?: {
@@ -208,9 +206,14 @@ export type AccountProtocol = 'anthropic' | 'openai' | 'openai-responses' | 'goo
  */
 export interface AccountConfig {
   readonly authType: 'oauth' | 'api_key';
+  /** F171: Explicit client identity for API key accounts (e.g. 'anthropic', 'openai'). */
+  readonly clientId?: string;
   readonly baseUrl?: string;
   readonly models?: readonly string[];
   readonly displayName?: string;
+  /** F171: User-defined env vars injected into agent subprocess.
+   *  Keys starting with CAT_CAFE_ are reserved and cannot be overridden. */
+  readonly envVars?: Readonly<Record<string, string>>;
 }
 
 /**

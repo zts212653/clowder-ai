@@ -344,15 +344,20 @@ server.listen(3002,'127.0.0.1',()=>setInterval(()=>{},1000));`,
     tempProcs.push(server);
     await waitForLocalPort(3002);
 
+    const ncFallbackEnv = {
+      ...process.env,
+      API_SERVER_PORT: '3002',
+      PATH: `${binDir}:${process.env.PATH}`,
+      RUNTIME_TEST_PNPM_LOG: logFile,
+    };
+    // Ensure CAT_CAFE_RUNTIME_RESTART_OK is not inherited from the parent env;
+    // this test specifically validates that restart is REFUSED when the API port is active.
+    delete ncFallbackEnv.CAT_CAFE_RUNTIME_RESTART_OK;
+
     const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-sync'], {
       cwd: projectDir,
       encoding: 'utf8',
-      env: {
-        ...process.env,
-        API_SERVER_PORT: '3002',
-        PATH: `${binDir}:${process.env.PATH}`,
-        RUNTIME_TEST_PNPM_LOG: logFile,
-      },
+      env: ncFallbackEnv,
     });
 
     assert.notEqual(result.status, 0);
@@ -378,13 +383,18 @@ server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
     tempProcs.push(server);
     await waitForLocalPort(3010);
 
+    const envFilePortEnv = {
+      ...process.env,
+      CAT_CAFE_RUNTIME_DIR: projectDir,
+    };
+    // Ensure CAT_CAFE_RUNTIME_RESTART_OK is not inherited from the parent env;
+    // this test validates that restart is REFUSED when .env API_SERVER_PORT is active.
+    delete envFilePortEnv.CAT_CAFE_RUNTIME_RESTART_OK;
+
     const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-sync'], {
       cwd: projectDir,
       encoding: 'utf8',
-      env: {
-        ...process.env,
-        CAT_CAFE_RUNTIME_DIR: projectDir,
-      },
+      env: envFilePortEnv,
     });
 
     assert.notEqual(result.status, 0);

@@ -381,7 +381,7 @@
     {
       "id": "F062",
       "name": "Ragdoll账号配置中枢（订阅 / 赞助 API 切换）",
-      "status": "done | **Owner**: 三猫",
+      "status": "done → **superseded by F136/clowder-ai#340** | **Owner**: 三猫",
       "file": "F062-ragdoll-provider-profile-hub.md"
     },
     {
@@ -1037,7 +1037,13 @@
       "name": "Community Operations Board — 社区事务编排引擎",
       "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F168-community-ops-board.md"
+    },
+    {
+      "id": "F171",
+      "name": "First-Run Quest — 首次安装零成员 + 游戏化新手引导",
+      "status": "in-progress (Phase A-B done, C mostly done, D mostly done, E partial)",
+      "file": "F171-first-partner-onboarding.md"
     }
   ],
-  "generated_at": "2026-04-19T14:38:05.641Z"
+  "generated_at": "2026-04-24T19:13:55.656Z"
 }

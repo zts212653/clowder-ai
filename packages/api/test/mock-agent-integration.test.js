@@ -13,14 +13,8 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 
 // Shared registry + helpers
-import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
-
-// Populate built-in cats first
-for (const [id, config] of Object.entries(CAT_CONFIGS)) {
-  if (!catRegistry.has(id)) {
-    catRegistry.register(id, config);
-  }
-}
+import { catRegistry } from '@cat-cafe/shared';
+import './helpers/setup-cat-registry.js';
 
 /** Mock cat config (similar structure to built-in cats) */
 const MOCK_CAT_CONFIG = {

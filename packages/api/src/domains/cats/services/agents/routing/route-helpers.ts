@@ -16,6 +16,7 @@ import { checkContextBudget, type DegradationResult } from '../../orchestration/
 import { DeliveryCursorStore } from '../../stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../../stores/ports/DraftStore.js';
 import type { IMessageStore, StoredMessage, StoredToolEvent } from '../../stores/ports/MessageStore.js';
+import type { Thread } from '../../stores/ports/ThreadStore.js';
 import { canViewMessage } from '../../stores/visibility.js';
 import type { AgentMessage, AgentService } from '../../types.js';
 import type { InvocationDeps } from '../invocation/invoke-single-cat.js';
@@ -163,6 +164,15 @@ export function getService(services: Record<string, AgentService>, catId: CatId)
   const service = services[catId];
   if (!service) throw new Error(`Unknown cat ID: ${catId as string}`);
   return service;
+}
+
+export function getThreadBootcampMemberCount(thread: Thread | null | undefined): number | undefined {
+  if (!thread?.bootcampState) return undefined;
+  const members = new Set<string>(thread.participants);
+  if (thread.bootcampState.leadCat) {
+    members.add(thread.bootcampState.leadCat);
+  }
+  return members.size;
 }
 
 export function shouldHandleCompletedGuide(

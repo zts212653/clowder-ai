@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, afterEach, beforeEach, describe, it } from 'node:test';
@@ -7,19 +7,22 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-import { CAT_CONFIGS, catRegistry, createCatId } from '@cat-cafe/shared';
+import { catRegistry, createCatId } from '@cat-cafe/shared';
+import './helpers/setup-cat-registry.js';
 
 const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
 const { _clearRuntimeOverrides, getRuntimeOverride, setRuntimeOverride } = await import(
   '../dist/config/session-strategy-overrides.js'
 );
+const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
 
 const tempDirs = [];
 let savedTemplatePath;
 
 function resetRegistryToBuiltins() {
   catRegistry.reset();
-  for (const [id, config] of Object.entries(CAT_CONFIGS)) {
+  const allConfigs = toAllCatConfigs(loadCatConfig());
+  for (const [id, config] of Object.entries(allConfigs)) {
     catRegistry.register(id, config);
   }
 }
@@ -72,11 +75,41 @@ function makeTemplate() {
   };
 }
 
+/**
+ * F171: bootstrapCatCatalog() now creates empty catalogs (first-run quest).
+ * Pre-write a catalog with breeds from the template so tests that operate on
+ * template cats still find them. Stamps default accountRef.
+ */
+const BUILTIN_ACCOUNT_IDS = {
+  anthropic: 'claude',
+  openai: 'codex',
+  google: 'gemini',
+  kimi: 'kimi',
+  dare: 'dare',
+  opencode: 'opencode',
+};
+
+function seedCatalogFromTemplate(projectRoot, templatePath) {
+  const tpl = templatePath || join(projectRoot, 'cat-template.json');
+  const template = JSON.parse(readFileSync(tpl, 'utf-8'));
+  for (const breed of template.breeds || []) {
+    for (const variant of breed.variants || []) {
+      if (!variant.accountRef && variant.clientId && BUILTIN_ACCOUNT_IDS[variant.clientId]) {
+        variant.accountRef = BUILTIN_ACCOUNT_IDS[variant.clientId];
+      }
+    }
+  }
+  const catCafeDir = join(projectRoot, '.cat-cafe');
+  mkdirSync(catCafeDir, { recursive: true });
+  writeFileSync(join(catCafeDir, 'cat-catalog.json'), `${JSON.stringify(template, null, 2)}\n`, 'utf-8');
+}
+
 function createProjectRoot() {
   const projectRoot = mkdtempSync(join(tmpdir(), 'cats-route-crud-'));
   tempDirs.push(projectRoot);
   process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
   writeFileSync(join(projectRoot, 'cat-template.json'), JSON.stringify(makeTemplate(), null, 2));
+  seedCatalogFromTemplate(projectRoot);
   return projectRoot;
 }
 
@@ -93,6 +126,7 @@ function createProjectRootFromRepoTemplate() {
   const templateDest = join(projectRoot, 'cat-template.json');
   const repoTemplate = JSON.parse(readFileSync(join(__dirname, '..', '..', '..', 'cat-template.json'), 'utf-8'));
   writeFileSync(templateDest, JSON.stringify(repoTemplate, null, 2));
+  seedCatalogFromTemplate(projectRoot, templateDest);
   process.env.CAT_TEMPLATE_PATH = templateDest;
   return projectRoot;
 }
@@ -1606,11 +1640,8 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
   });
 
   it('PATCH /api/cats/:id allows non-provider edits for unbound opencode seed member', async () => {
-    if (savedTemplatePath === undefined) {
-      delete process.env.CAT_TEMPLATE_PATH;
-    } else {
-      process.env.CAT_TEMPLATE_PATH = savedTemplatePath;
-    }
+    const projectRoot = createProjectRootFromRepoTemplate();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
     const Fastify = (await import('fastify')).default;
     const { catsRoutes } = await import('../dist/routes/cats.js');
@@ -1856,7 +1887,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     );
   });
 
-  it('DELETE /api/cats/:id blocks deletion for seed members', async () => {
+  it('DELETE /api/cats/:id allows deletion of any member', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
@@ -1873,16 +1904,16 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
     });
-    assert.equal(deleteRes.statusCode, 409);
+    assert.equal(deleteRes.statusCode, 200);
     const deleteBody = JSON.parse(deleteRes.body);
-    assert.match(deleteBody.error, /cannot delete seed cat/i);
+    assert.equal(deleteBody.deleted, true);
 
     const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
     assert.equal(listRes.statusCode, 200);
     const listBody = JSON.parse(listRes.body);
     assert.equal(
       listBody.cats.some((cat) => cat.id === 'opus'),
-      true,
+      false,
     );
   });
 });

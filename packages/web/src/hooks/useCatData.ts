@@ -3,10 +3,8 @@
 /**
  * F32-b Phase 3: Central hook for dynamic cat data from /api/cats.
  * Fetches once per session, caches module-level. All consumers share same data.
- * Falls back to static CAT_CONFIGS from @cat-cafe/shared during initial load.
  */
 
-import { CAT_CONFIGS } from '@cat-cafe/shared';
 import { useEffect, useMemo, useState } from 'react';
 import { refreshMentionData } from '@/lib/mention-highlight';
 import { sortCatsByOrder } from '@/lib/sort-cats-by-order';
@@ -56,8 +54,6 @@ export interface CatData {
   breedDisplayName?: string;
   /** F149: Adapter mode for Google provider cats (ACP vs legacy CLI) */
   adapterMode?: 'acp' | 'cli';
-  /** F127: Seed cats come from cat-template.json; runtime cats are added later */
-  source: 'seed' | 'runtime';
   /** F127: Roster metadata used by Hub ownership/lead markers */
   roster?: {
     family: string;
@@ -82,28 +78,6 @@ function notifyListeners(cats: CatData[]): void {
   }
 }
 
-function buildFallbackCats(): CatData[] {
-  return Object.values(CAT_CONFIGS).map((c) => ({
-    id: c.id as string,
-    displayName: c.displayName,
-    nickname: c.nickname,
-    color: { primary: c.color.primary, secondary: c.color.secondary },
-    mentionPatterns: [...c.mentionPatterns],
-    breedId: undefined,
-    clientId: c.clientId,
-    defaultModel: c.defaultModel,
-    avatar: c.avatar,
-    roleDescription: c.roleDescription,
-    personality: c.personality,
-    teamStrengths: c.teamStrengths,
-    caution: c.caution,
-    strengths: c.strengths ? [...c.strengths] : undefined,
-    sessionChain: c.sessionChain,
-    roster: null,
-    source: 'seed',
-  }));
-}
-
 interface FetchResult {
   cats: CatData[];
   fromApi: boolean;
@@ -125,13 +99,12 @@ async function fetchCats(): Promise<FetchResult> {
   try {
     const [catsRes, orderIds] = await Promise.all([apiFetch('/api/cats'), fetchCatOrder()]);
     _catOrder = orderIds;
-    if (!catsRes.ok) return { cats: sortCatsByOrder(buildFallbackCats(), _catOrder), fromApi: false };
+    if (!catsRes.ok) return { cats: [], fromApi: false };
     const data = await catsRes.json();
     const normalized = Array.isArray(data?.cats) ? normalizeCats(data.cats) : null;
-    const cats = normalized ?? buildFallbackCats();
-    return { cats: sortCatsByOrder(cats, _catOrder), fromApi: normalized !== null };
+    return { cats: normalized ? sortCatsByOrder(normalized, _catOrder) : [], fromApi: normalized !== null };
   } catch {
-    return { cats: sortCatsByOrder(buildFallbackCats(), _catOrder), fromApi: false };
+    return { cats: [], fromApi: false };
   }
 }
 
@@ -156,31 +129,35 @@ function normalizeCats(rawCats: unknown[]): CatData[] {
       strengths: Array.isArray(cat.strengths) ? cat.strengths : undefined,
       sessionChain: cat.sessionChain,
       roster: cat.roster ?? null,
-      source: cat.source ?? 'seed',
     };
   });
 }
 
 async function refreshCatsNow(): Promise<FetchResult> {
+  const prev = _cached;
   _cached = null;
   _fetchPromise = fetchCats();
   const result = await _fetchPromise;
   if (result.fromApi) {
     _cached = result.cats;
   } else {
+    // Preserve previous cache on failure — avoids false-empty states during transient outages
+    _cached = prev;
     _fetchPromise = null;
   }
-  refreshMentionData(result.cats);
-  refreshSpeechAliases(result.cats);
-  notifyListeners(result.cats);
-  return result;
+  const effective = result.fromApi ? result.cats : (_cached ?? []);
+  refreshMentionData(effective);
+  refreshSpeechAliases(effective);
+  notifyListeners(effective);
+  return { cats: effective, fromApi: result.fromApi };
 }
 
 // ── Hook ────────────────────────────────────────────────
 
 export function useCatData() {
-  const [cats, setCats] = useState<CatData[]>(() => _cached ?? buildFallbackCats());
+  const [cats, setCats] = useState<CatData[]>(() => _cached ?? []);
   const [isLoading, setIsLoading] = useState(!_cached);
+  const [hasFetched, setHasFetched] = useState(!!_cached);
   const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
@@ -223,6 +200,7 @@ export function useCatData() {
       if (!cancelled) {
         setCats(result);
         setIsLoading(false);
+        if (fromApi) setHasFetched(true);
       }
     });
     return () => {
@@ -236,6 +214,7 @@ export function useCatData() {
       setIsLoading(true);
       const result = await refreshCatsNow();
       setCats(result.cats);
+      if (result.fromApi) setHasFetched(true);
       setIsLoading(false);
       return result.cats;
     },
@@ -260,7 +239,7 @@ export function useCatData() {
     };
   }, [cats]);
 
-  return { cats, isLoading, getCatById, getCatsByBreed, refresh };
+  return { cats, isLoading, hasFetched, getCatById, getCatsByBreed, refresh };
 }
 
 /** Format cat name with optional variant label for multi-variant disambiguation */
@@ -268,9 +247,9 @@ export function formatCatName(cat: { displayName: string; variantLabel?: string 
   return cat.variantLabel ? `${cat.displayName}（${cat.variantLabel}）` : cat.displayName;
 }
 
-/** Get cached cats synchronously (for non-hook contexts). Returns fallback if not loaded. */
+/** Get cached cats synchronously (for non-hook contexts). Returns empty if not loaded. */
 export function getCachedCats(): CatData[] {
-  return _cached ?? buildFallbackCats();
+  return _cached ?? [];
 }
 
 /** Reset module-level cache (for testing) */

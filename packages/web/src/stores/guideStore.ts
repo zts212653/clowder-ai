@@ -24,8 +24,8 @@ export interface OrchestrationStep {
   target: string;
   /** Guide text shown to user (from flow definition, NOT frontend) */
   tips: string;
-  /** How to auto-advance: click target / target becomes visible / input filled / manual confirm */
-  advance: 'click' | 'visible' | 'input' | 'confirm';
+  /** How to advance: click target / visible / input / confirm / auto-confirm / next (manual HUD button) */
+  advance: 'click' | 'visible' | 'input' | 'confirm' | 'auto-confirm' | 'next';
   page?: string;
   timeoutSec?: number;
   /** Rich tips content — card div or static image displayed alongside tips text */
@@ -68,6 +68,8 @@ interface GuideState {
   completionFailed: boolean;
   /** Pending flow to start — set by reduceServerEvent('start'), consumed by useGuideEngine */
   pendingStart: { guideId: string; threadId: string } | null;
+  /** Completed guide keys (`threadId::guideId`) — survives exitGuide, prevents re-offer */
+  completedGuides: ReadonlySet<string>;
   startGuide: (flow: OrchestrationFlow, threadId?: string) => void;
   advanceStep: () => void;
   exitGuide: () => void;
@@ -86,6 +88,7 @@ export const useGuideStore = create<GuideState>((set, get) => ({
   completionPersisted: false,
   completionFailed: false,
   pendingStart: null,
+  completedGuides: new Set<string>(),
 
   startGuide: (flow, threadId) => {
     sessionCounter += 1;
@@ -104,11 +107,16 @@ export const useGuideStore = create<GuideState>((set, get) => ({
   },
 
   advanceStep: () => {
-    const { session } = get();
+    const { session, completedGuides } = get();
     if (!session) return;
     const nextIndex = session.currentStepIndex + 1;
     if (nextIndex >= session.flow.steps.length) {
-      set({ session: { ...session, currentStepIndex: nextIndex, phase: 'complete' } });
+      const key = session.threadId ? `${session.threadId}::${session.flow.id}` : null;
+      const nextCompleted = key ? new Set([...completedGuides, key]) : completedGuides;
+      set({
+        session: { ...session, currentStepIndex: nextIndex, phase: 'complete' },
+        completedGuides: nextCompleted,
+      });
       return;
     }
     set({

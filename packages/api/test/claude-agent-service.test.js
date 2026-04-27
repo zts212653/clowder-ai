@@ -528,9 +528,8 @@ test('passes correct model flag (default and custom)', async () => {
   const args1 = spawnFn1.mock.calls[0].arguments[1];
   const modelIdx1 = args1.indexOf('--model');
   assert.ok(modelIdx1 >= 0);
-  // F32-b: getCatModel('opus') resolves via catRegistry > CAT_CONFIGS fallback.
-  // In test context catRegistry is empty, so this is CAT_CONFIGS['opus'].defaultModel.
-  assert.equal(args1[modelIdx1 + 1], 'claude-sonnet-4-5-20250929');
+  // F32-b: getCatModel('opus') resolves via catRegistry (populated from runtime config).
+  assert.equal(args1[modelIdx1 + 1], 'claude-opus-4-6');
 
   // Custom model (explicit constructor param)
   const proc2 = createMockProcess();
@@ -548,7 +547,7 @@ test('passes correct model flag (default and custom)', async () => {
 
 test('F32-b P1 regression: env var CAT_*_MODEL overrides default when model not passed', async () => {
   // Simulate index.ts pattern: pass catId but NOT model → constructor resolves via getCatModel()
-  // getCatModel() should respect env var > catRegistry > CAT_CONFIGS fallback
+  // getCatModel() should respect env var > catRegistry
   const saved = process.env.CAT_OPUS_MODEL;
   process.env.CAT_OPUS_MODEL = 'env-override-model';
   try {

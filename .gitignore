@@ -43,7 +43,8 @@ packages/web/public/vendor/
 # MCP config (personal, contains local URLs)
 .mcp.json
 
-# F041 capabilities local state (bootstrapped per-machine)
+# Runtime state (bootstrapped per-machine from cat-template.json)
+cat-config.json
 .cat-cafe/
 
 # Claude Code skills — cat-cafe symlinks are tracked; plugin-generated ones are not
@@ -158,3 +159,4 @@ __pycache__/
 
 # Design exports (generated from .pen, regeneratable)
 designs/exports/
+packages/api/test/__b1_parent_a__/

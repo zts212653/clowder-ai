@@ -193,6 +193,8 @@ export function useSendMessage(activeThreadId?: string) {
         }
         setUploadStatus('idle');
         setUploadError(null);
+        // Guide engine: signal that message was sent (advance confirm steps on chat.input)
+        window.dispatchEvent(new CustomEvent('guide:confirm', { detail: { target: 'chat.input' } }));
       } catch (err) {
         // F39: Only clear invocation flags for normal (non-queue, non-force) sends.
         // Queue sends never set them. Force sends target a thread where a cat is

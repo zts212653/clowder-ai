@@ -1,7 +1,7 @@
 import type { GameView } from '@cat-cafe/shared';
 import { useMemo } from 'react';
 import type { SocketCallbacks } from '@/hooks/useSocket';
-import { useChatStore } from '@/stores/chatStore';
+import { type Thread, useChatStore } from '@/stores/chatStore';
 import { useGameStore } from '@/stores/gameStore';
 import { type TaskItem, useTaskStore } from '@/stores/taskStore';
 
@@ -54,6 +54,13 @@ export function useChatSocketCallbacks({
       onThreadUpdated: (data) => {
         if (data.title !== undefined) updateThreadTitle(data.threadId, data.title);
         if (data.participants !== undefined) updateThreadParticipants(data.threadId, data.participants);
+        if (data.bootcampState !== undefined) {
+          useChatStore.setState((state) => ({
+            threads: state.threads.map((t) =>
+              t.id === data.threadId ? { ...t, bootcampState: data.bootcampState as Thread['bootcampState'] } : t,
+            ),
+          }));
+        }
       },
       onIntentMode: (data) => {
         // Socket layer (useSocket) already applies dual-pointer guard + background routing.

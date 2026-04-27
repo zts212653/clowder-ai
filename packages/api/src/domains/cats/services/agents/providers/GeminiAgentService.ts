@@ -201,7 +201,7 @@ export class GeminiAgentService implements AgentService {
     //   gemini --resume <sessionId> -p "<prompt>" -o stream-json
     // Prefer resume when sessionId is available so Gemini follows the same
     // session semantics as Claude/Codex (session-chain + self-heal).
-    const modelArgs = ['--model', effectiveModel];
+    const modelArgs = effectiveModel ? ['--model', effectiveModel] : [];
     const args: string[] = options?.sessionId
       ? ['--resume', options?.sessionId!, ...modelArgs, '-p', effectivePrompt, '-o', 'stream-json', '-y']
       : [...modelArgs, '-p', effectivePrompt, '-o', 'stream-json', '-y'];
@@ -231,7 +231,9 @@ export class GeminiAgentService implements AgentService {
         command: geminiCommand,
         args,
         ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
-        ...(options?.callbackEnv ? { env: options.callbackEnv } : {}),
+        ...(options?.callbackEnv || options?.accountEnv
+          ? { env: { ...(options?.callbackEnv ?? {}), ...(options?.accountEnv ?? {}) } }
+          : {}),
         ...(options?.signal ? { signal: options.signal } : {}),
         ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
         ...(options?.cliSessionId ? { cliSessionId: options.cliSessionId } : {}),

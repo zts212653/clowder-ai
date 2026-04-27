@@ -6,7 +6,15 @@ import { API_URL } from '@/utils/api-client';
  * Fail-closed filter: determines if an auto-open event should be accepted.
  * Exported for testing.
  */
-export function shouldAcceptAutoOpen(sessionWorktreeId: string | null, eventWorktreeId: string | undefined): boolean {
+export function shouldAcceptAutoOpen(
+  sessionWorktreeId: string | null,
+  eventWorktreeId: string | undefined,
+  sessionThreadId: string,
+  eventThreadId: string | undefined,
+): boolean {
+  if (eventThreadId && eventThreadId !== sessionThreadId) {
+    return false;
+  }
   if (sessionWorktreeId) {
     // Session has worktree → accept exact match OR global broadcast (no worktreeId).
     // Reject events from OTHER worktrees (defence-in-depth against cross-session leakage).
@@ -28,7 +36,7 @@ export function shouldAcceptAutoOpen(sessionWorktreeId: string | null, eventWork
  * stores pending auto-open in the store, and switches to workspace mode.
  * WorkspacePanel then consumes the pending state on mount.
  */
-export function usePreviewAutoOpen(worktreeId: string | null) {
+export function usePreviewAutoOpen(worktreeId: string | null, threadId: string) {
   const setPendingPreviewAutoOpen = useChatStore((s) => s.setPendingPreviewAutoOpen);
 
   useEffect(() => {
@@ -50,8 +58,8 @@ export function usePreviewAutoOpen(worktreeId: string | null) {
         socket.emit('join_room', `worktree:${worktreeId}`);
       }
 
-      const handler = (data: { port: number; path?: string; worktreeId?: string }) => {
-        if (!shouldAcceptAutoOpen(worktreeId, data.worktreeId)) return;
+      const handler = (data: { port: number; path?: string; worktreeId?: string; threadId?: string }) => {
+        if (!shouldAcceptAutoOpen(worktreeId, data.worktreeId, threadId, data.threadId)) return;
         // Store triggers rightPanelMode='workspace', which auto-opens the panel
         setPendingPreviewAutoOpen({ port: data.port, path: data.path ?? '/' });
       };
@@ -68,5 +76,5 @@ export function usePreviewAutoOpen(worktreeId: string | null) {
       cancelled = true;
       cleanup?.();
     };
-  }, [worktreeId, setPendingPreviewAutoOpen]);
+  }, [threadId, worktreeId, setPendingPreviewAutoOpen]);
 }

@@ -5,7 +5,8 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
+import { catRegistry } from '@cat-cafe/shared';
+import './helpers/setup-cat-registry.js';
 import {
   bootstrapCapabilities,
   buildCatCafeMcpDescriptor,
@@ -27,11 +28,6 @@ import {
   resolveServersForCat,
   writeCapabilitiesConfig,
 } from '../dist/config/capabilities/capability-orchestrator.js';
-
-// Bootstrap catRegistry so provider-gated tests can resolve cat → provider.
-for (const [id, config] of Object.entries(CAT_CONFIGS)) {
-  if (!catRegistry.has(id)) catRegistry.register(id, config);
-}
 
 /** @param {string} prefix */
 async function makeTmpDir(prefix) {

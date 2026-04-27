@@ -16,7 +16,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
 const GUIDES_DIR = resolve(ROOT, 'guides');
 const REGISTRY_PATH = resolve(GUIDES_DIR, 'registry.yaml');
-const VALID_ADVANCE_TYPES = new Set(['click', 'visible', 'input', 'confirm']);
+const VALID_ADVANCE_TYPES = new Set(['click', 'visible', 'input', 'confirm', 'auto-confirm', 'next']);
 /** Must match GUIDE_TARGET_RE in guide-registry-loader.ts */
 const VALID_TARGET_RE = /^[a-zA-Z0-9._-]+$/;
 

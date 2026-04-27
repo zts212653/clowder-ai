@@ -41,7 +41,7 @@ export function builtinClientLabel(client?: BuiltinAccountClient): string {
 }
 
 export function accountTone(profile: ProfileItem): 'purple' | 'green' | 'orange' {
-  if (profile.builtin) return 'orange';
+  if (profile.authType === 'oauth') return 'orange';
   if (profile.baseUrl?.toLowerCase().includes('google')) return 'green';
   return 'purple';
 }

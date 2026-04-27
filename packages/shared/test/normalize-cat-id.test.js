@@ -2,12 +2,43 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { catRegistry } from '../dist/registry/CatRegistry.js';
 import { normalizeCatId } from '../dist/registry/normalize-cat-id.js';
-import { CAT_CONFIGS } from '../dist/types/cat.js';
 import { createCatId } from '../dist/types/ids.js';
 
-/** Build a CatConfig from CAT_CONFIGS defaults + overrides */
+/** Minimal cat config fixture for testing */
+const TEST_CAT_FIXTURES = {
+  opus: {
+    id: createCatId('opus'),
+    name: '布偶猫',
+    displayName: '布偶猫',
+    nickname: '宪宪',
+    avatar: '/avatars/opus.png',
+    color: { primary: '#9B7EBD', secondary: '#E8D5F5' },
+    mentionPatterns: ['@opus', '@布偶猫', '@宪宪'],
+    clientId: 'anthropic',
+    defaultModel: 'claude-sonnet-4-20250514',
+    mcpSupport: true,
+    roleDescription: 'Lead architect',
+    personality: 'thoughtful',
+  },
+  codex: {
+    id: createCatId('codex'),
+    name: '缅因猫',
+    displayName: '缅因猫',
+    nickname: '砚砚',
+    avatar: '/avatars/codex.png',
+    color: { primary: '#5B8C5A', secondary: '#D0E8CF' },
+    mentionPatterns: ['@codex', '@缅因猫', '@砚砚'],
+    clientId: 'openai',
+    defaultModel: 'o3-mini',
+    mcpSupport: true,
+    roleDescription: 'Code reviewer',
+    personality: 'meticulous',
+  },
+};
+
+/** Build a CatConfig from test fixtures + overrides */
 function makeCatConfig(base, overrides = {}) {
-  return { ...CAT_CONFIGS[base], ...overrides };
+  return { ...TEST_CAT_FIXTURES[base], ...overrides };
 }
 
 describe('normalizeCatId (F154 AC-A3, AC-A7)', () => {

@@ -1,3 +1,4 @@
+import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';

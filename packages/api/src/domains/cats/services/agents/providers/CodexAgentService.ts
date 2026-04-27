@@ -269,7 +269,13 @@ export class CodexAgentService implements AgentService {
     //   - env_key: env var name for the API key
     //   - base_url: API endpoint
     //   - wire_api: "responses" (HTTP, the only supported value)
-    const customBaseUrl = options?.callbackEnv?.OPENAI_BASE_URL ?? options?.callbackEnv?.OPENAI_API_BASE;
+    // Check both callbackEnv and accountEnv — after F171 env separation,
+    // user-configured OPENAI_BASE_URL lives in accountEnv, not callbackEnv.
+    const customBaseUrl =
+      options?.callbackEnv?.OPENAI_BASE_URL ??
+      options?.callbackEnv?.OPENAI_API_BASE ??
+      options?.accountEnv?.OPENAI_BASE_URL ??
+      options?.accountEnv?.OPENAI_API_BASE;
     const customProviderArgs: string[] = customBaseUrl
       ? [
           '--config',
@@ -291,7 +297,11 @@ export class CodexAgentService implements AgentService {
     // Use --config model=... instead of --model to bypass the CLI's built-in metadata lookup
     // for custom providers (non-builtin models trigger a cosmetic warning via --model).
     const cliModel = effectiveModel;
-    const modelArgs: string[] = customBaseUrl ? ['--config', `model=${toTomlString(cliModel)}`] : ['--model', cliModel];
+    const modelArgs: string[] = !cliModel
+      ? []
+      : customBaseUrl
+        ? ['--config', `model=${toTomlString(cliModel)}`]
+        : ['--model', cliModel];
 
     // resume 子命令不接受 --sandbox（sandbox 在创建时已锁定）
     // --add-dir .git: 允许写入 .git/ 目录（index.lock、objects、refs），解锁 git commit
@@ -363,6 +373,15 @@ export class CodexAgentService implements AgentService {
         }
       }
       const codexEnv = applyAuthMode(rawEnv, authMode);
+      // F171: Account env vars applied LAST — user overrides provider-injected values.
+      // Strip OPENAI_BASE_URL/OPENAI_API_BASE if already consumed via --config model_providers
+      // to prevent the deprecated env var from conflicting with the CLI config.
+      if (options?.accountEnv) {
+        for (const [k, v] of Object.entries(options.accountEnv)) {
+          if (customBaseUrl && (k === 'OPENAI_BASE_URL' || k === 'OPENAI_API_BASE')) continue;
+          codexEnv[k] = v;
+        }
+      }
 
       const semanticCompletionController = new AbortController();
 

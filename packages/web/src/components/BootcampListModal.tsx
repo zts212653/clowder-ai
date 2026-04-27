@@ -8,32 +8,30 @@ import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 
 /** Phase labels for human-readable display */
 const PHASE_LABELS: Record<string, string> = {
-  'phase-0-select-cat': '选猫',
-  'phase-1-intro': '天团登场',
+  'phase-1-intro': '自我介绍',
   'phase-2-env-check': '环境检测',
   'phase-3-config-help': '配置帮助',
-  'phase-3.5-advanced': '进阶功能',
-  'phase-4-task-select': '选任务',
-  'phase-5-kickoff': '立项',
+  'phase-4-task-select': '选择任务',
+  'phase-5-kickoff': '确认需求',
   'phase-6-design': '设计',
   'phase-7-dev': '开发',
-  'phase-8-review': 'Review',
+  'phase-7.5-add-teammate': '添加队友',
+  'phase-8-collab': '多猫协作',
   'phase-9-complete': '完成',
   'phase-10-retro': '回顾',
   'phase-11-farewell': '毕业',
 };
 
 const PHASE_ORDER = [
-  'phase-0-select-cat',
   'phase-1-intro',
   'phase-2-env-check',
   'phase-3-config-help',
-  'phase-3.5-advanced',
   'phase-4-task-select',
   'phase-5-kickoff',
   'phase-6-design',
   'phase-7-dev',
-  'phase-8-review',
+  'phase-7.5-add-teammate',
+  'phase-8-collab',
   'phase-9-complete',
   'phase-10-retro',
   'phase-11-farewell',
@@ -103,7 +101,7 @@ export function BootcampListModal({ open, onClose, currentThreadId }: BootcampLi
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: '猫猫训练营',
-          bootcampState: { v: 1, phase: 'phase-0-select-cat', startedAt: Date.now() },
+          bootcampState: { v: 1, phase: 'phase-1-intro', startedAt: Date.now() },
         }),
       });
       if (!res.ok) return;

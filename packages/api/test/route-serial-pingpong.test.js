@@ -12,6 +12,7 @@
  * 共 4 次 invoke，opus 2 次、codex 2 次。
  */
 
+import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';

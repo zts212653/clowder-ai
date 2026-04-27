@@ -1,7 +1,7 @@
-import { CAT_CONFIGS } from '@cat-cafe/shared';
 import { create } from 'zustand';
 import { getBubbleInvocationId } from '@/debug/bubbleIdentity';
 import { recordDebugEvent } from '@/debug/invocationEventDebug';
+import { getCachedCats } from '@/hooks/useCatData';
 import { saveThreadMessages as saveMessagesSnapshot, saveThreads as saveThreadsSnapshot } from '../utils/offline-store';
 import type {
   CatInvocationInfo,
@@ -327,12 +327,13 @@ function fireOwnerMentionNotification(msg: ChatMessage) {
     Notification.requestPermission();
     return;
   }
-  const catConfig = CAT_CONFIGS[msg.catId ?? ''];
-  const catName = catConfig?.displayName ?? msg.catId ?? '猫猫';
+  const cats = getCachedCats();
+  const catData = cats.find((c) => c.id === msg.catId);
+  const catName = catData?.displayName ?? msg.catId ?? '猫猫';
   const preview = typeof msg.content === 'string' ? msg.content.replace(/\n/g, ' ').slice(0, 120) : '';
   new Notification(`${catName} @ 了你`, {
     body: preview,
-    icon: catConfig?.avatar ?? '/favicon.ico',
+    icon: catData?.avatar ?? '/favicon.ico',
     tag: `cocreator-mention-${msg.id}`,
   });
 }

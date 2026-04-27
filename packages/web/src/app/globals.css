@@ -376,6 +376,23 @@ body {
   animation: pulse-subtle 2s ease-in-out infinite;
 }
 
+/* Quest input highlight: gentle amber glow on input area */
+@keyframes quest-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 4px rgba(245, 158, 11, 0.3);
+  }
+  50% {
+    box-shadow:
+      0 0 12px rgba(245, 158, 11, 0.5),
+      0 0 4px rgba(245, 158, 11, 0.2);
+  }
+}
+.quest-input-highlight {
+  animation: quest-glow 2.5s ease-in-out infinite;
+  border-color: rgb(245, 158, 11) !important;
+}
+
 /* F155: Guide Engine Animations — wrapped for reduced-motion (A-3) */
 @keyframes guide-breathe {
   0%,

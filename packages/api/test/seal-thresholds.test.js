@@ -3,6 +3,7 @@
  * F24 Phase B: Per-cat seal threshold configuration.
  */
 
+import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 

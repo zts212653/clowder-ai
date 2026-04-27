@@ -69,7 +69,7 @@ describe('ThreadCatSettings', () => {
       (settingsBtn as HTMLElement).click();
     });
 
-    // Popover should now be open — CatSelector renders cat chips from fallback CAT_CONFIGS
+    // Popover should now be open — CatSelector renders cat chips from /api/cats data
     // Find and click the 布偶猫 chip
     const catChip = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('布偶猫'));
     expect(catChip).toBeTruthy();

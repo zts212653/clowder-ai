@@ -6,15 +6,10 @@
 
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, test } from 'node:test';
-import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
+import './helpers/setup-cat-registry.js';
 import Fastify from 'fastify';
 import { registerCallbackAuthHook } from '../dist/routes/callback-auth-prehandler.js';
 import { resetMultiMentionOrchestrator } from '../dist/routes/callback-multi-mention-routes.js';
-
-// Bootstrap catRegistry from CAT_CONFIGS (same as server startup)
-for (const [id, config] of Object.entries(CAT_CONFIGS)) {
-  if (!catRegistry.has(id)) catRegistry.register(id, config);
-}
 
 // ── Mocks ──────────────────────────────────────────────────────────────
 

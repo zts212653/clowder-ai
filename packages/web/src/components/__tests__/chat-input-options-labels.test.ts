@@ -13,7 +13,6 @@ const FAKE_CATS: CatData[] = [
     avatar: '/avatars/gemini.png',
     roleDescription: '视觉设计师',
     personality: '活泼有创意',
-    source: 'seed',
   },
 ];
 
@@ -29,7 +28,6 @@ const MIXED_CATS: CatData[] = [
     avatar: '/avatars/opus.png',
     roleDescription: '快速变体',
     personality: 'kind',
-    source: 'seed',
   },
   {
     id: 'spark',
@@ -41,7 +39,6 @@ const MIXED_CATS: CatData[] = [
     avatar: '/avatars/spark.png',
     roleDescription: '精确点改',
     personality: 'fast',
-    source: 'seed',
     roster: {
       family: 'maine-coon',
       roles: ['coder'],

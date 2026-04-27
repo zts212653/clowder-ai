@@ -29,6 +29,12 @@ const FLOW_2: OrchestrationFlow = {
   ],
 };
 
+const BOOTCAMP_FLOW: OrchestrationFlow = {
+  id: 'bootcamp-add-teammate',
+  name: 'Bootcamp Add Teammate',
+  steps: [{ id: 'step-1', target: 'cats.add-member', tips: 'Add teammate', advance: 'click' }],
+};
+
 function Harness() {
   useGuideEngine();
   return null;
@@ -39,18 +45,21 @@ function dispatchGuideStart(flowId: string, threadId = 'thread-1') {
 }
 
 function dispatchGuideControl(action: 'next' | 'skip' | 'exit', detail: { guideId?: string; threadId?: string } = {}) {
-  const { guideId = 'add-member', threadId = 'thread-1' } = detail;
-  const controlAction =
-    action === 'next' ? 'control_next' : action === 'skip' ? 'control_skip' : ('control_exit' as const);
-  useGuideStore.getState().reduceServerEvent({ action: controlAction, guideId, threadId });
+  const guideId = detail.guideId ?? useGuideStore.getState().session?.flow.id;
+  const threadId = detail.threadId ?? useGuideStore.getState().session?.threadId;
+  if (!guideId || !threadId) return;
+  useGuideStore.getState().reduceServerEvent({
+    action: action === 'next' ? 'control_next' : action === 'skip' ? 'control_skip' : 'control_exit',
+    guideId,
+    threadId,
+  });
 }
 
 function dispatchGuideComplete(detail: { guideId?: string; threadId?: string } = {}) {
-  useGuideStore.getState().reduceServerEvent({
-    action: 'complete',
-    guideId: detail.guideId ?? 'add-member',
-    threadId: detail.threadId ?? 'thread-1',
-  });
+  const guideId = detail.guideId ?? useGuideStore.getState().session?.flow.id;
+  const threadId = detail.threadId ?? useGuideStore.getState().session?.threadId;
+  if (!guideId || !threadId) return;
+  useGuideStore.getState().reduceServerEvent({ action: 'complete', guideId, threadId });
 }
 
 function deferred<T>() {
@@ -110,7 +119,7 @@ describe('useGuideEngine duplicate start protection', () => {
       await Promise.resolve();
     });
 
-    expect(apiFetchMock).toHaveBeenCalledTimes(1);
+    expect(apiFetchMock.mock.calls.filter(([url]) => url === '/api/guide-flows/add-member')).toHaveLength(1);
 
     await act(async () => {
       pending.resolve({ ok: true, json: async () => FLOW });
@@ -123,7 +132,17 @@ describe('useGuideEngine duplicate start protection', () => {
 
   it('retries only after a new guide:start arrives when the in-flight fetch fails', async () => {
     const firstFetch = deferred<{ ok: boolean; json: () => Promise<OrchestrationFlow> }>();
-    apiFetchMock.mockReturnValueOnce(firstFetch.promise).mockResolvedValueOnce({ ok: true, json: async () => FLOW });
+    let flowFetchCount = 0;
+    apiFetchMock.mockImplementation((url: string) => {
+      if (url === '/api/guide-flows/add-member') {
+        flowFetchCount += 1;
+        return flowFetchCount === 1 ? firstFetch.promise : Promise.resolve({ ok: true, json: async () => FLOW });
+      }
+      if (url === '/api/guide-actions/start') {
+        return Promise.resolve({ ok: true });
+      }
+      throw new Error(`Unexpected apiFetch call: ${url}`);
+    });
 
     act(() => {
       root.render(React.createElement(Harness));
@@ -131,18 +150,22 @@ describe('useGuideEngine duplicate start protection', () => {
 
     await act(async () => {
       dispatchGuideStart('add-member');
-      dispatchGuideStart('add-member');
       await Promise.resolve();
     });
 
-    expect(apiFetchMock).toHaveBeenCalledTimes(1);
+    expect(apiFetchMock.mock.calls.filter(([url]) => url === '/api/guide-flows/add-member')).toHaveLength(1);
+
+    await act(async () => {
+      dispatchGuideStart('add-member');
+      await Promise.resolve();
+    });
 
     await act(async () => {
       firstFetch.reject(new Error('temporary failure'));
       await Promise.resolve();
     });
 
-    expect(apiFetchMock).toHaveBeenCalledTimes(1);
+    expect(apiFetchMock.mock.calls.filter(([url]) => url === '/api/guide-flows/add-member')).toHaveLength(1);
 
     await act(async () => {
       dispatchGuideStart('add-member');
@@ -150,7 +173,7 @@ describe('useGuideEngine duplicate start protection', () => {
       await Promise.resolve();
     });
 
-    expect(apiFetchMock).toHaveBeenCalledTimes(2);
+    expect(apiFetchMock.mock.calls.filter(([url]) => url === '/api/guide-flows/add-member')).toHaveLength(2);
     expect(useGuideStore.getState().session?.flow.id).toBe('add-member');
   });
 
@@ -167,7 +190,9 @@ describe('useGuideEngine duplicate start protection', () => {
       await Promise.resolve();
     });
 
-    useGuideStore.getState().advanceStep();
+    act(() => {
+      useGuideStore.getState().advanceStep();
+    });
     expect(useGuideStore.getState().session?.currentStepIndex).toBe(1);
 
     await act(async () => {
@@ -175,7 +200,7 @@ describe('useGuideEngine duplicate start protection', () => {
       await Promise.resolve();
     });
 
-    expect(apiFetchMock).toHaveBeenCalledTimes(1);
+    expect(apiFetchMock.mock.calls.filter(([url]) => url === '/api/guide-flows/add-member')).toHaveLength(1);
     expect(useGuideStore.getState().session?.currentStepIndex).toBe(1);
   });
 
@@ -304,6 +329,9 @@ describe('useGuideEngine duplicate start protection', () => {
       if (url === '/api/guide-flows/invite-reviewer') {
         return Promise.resolve({ ok: true, json: async () => FLOW_2 });
       }
+      if (url === '/api/guide-actions/start') {
+        return Promise.resolve({ ok: true });
+      }
       if (url === '/api/guide-actions/complete') {
         return completionPending.promise;
       }
@@ -352,6 +380,9 @@ describe('useGuideEngine duplicate start protection', () => {
       if (url === '/api/guide-flows/add-member') {
         return Promise.resolve({ ok: true, json: async () => FLOW });
       }
+      if (url === '/api/guide-actions/start') {
+        return Promise.resolve({ ok: true });
+      }
       if (url === '/api/guide-actions/complete') {
         return Promise.resolve({ ok: false, status: 500 });
       }
@@ -385,6 +416,9 @@ describe('useGuideEngine duplicate start protection', () => {
       if (url === '/api/guide-flows/add-member') {
         return Promise.resolve({ ok: true, json: async () => FLOW });
       }
+      if (url === '/api/guide-actions/start') {
+        return Promise.resolve({ ok: true });
+      }
       if (url === '/api/guide-actions/complete') {
         return Promise.reject(new Error('network failure'));
       }
@@ -411,5 +445,136 @@ describe('useGuideEngine duplicate start protection', () => {
 
     expect(useGuideStore.getState().completionPersisted).toBe(false);
     expect(useGuideStore.getState().completionFailed).toBe(true);
+  });
+
+  it('rolls back completedGuides when completion POST fails after advanceStep reaches the end', async () => {
+    apiFetchMock.mockImplementation((url: string) => {
+      if (url === '/api/guide-flows/add-member') {
+        return Promise.resolve({ ok: true, json: async () => FLOW });
+      }
+      if (url === '/api/guide-actions/start') {
+        return Promise.resolve({ ok: true });
+      }
+      if (url === '/api/guide-actions/complete') {
+        return Promise.resolve({ ok: false, status: 500 });
+      }
+      throw new Error(`Unexpected apiFetch call: ${url}`);
+    });
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    await act(async () => {
+      dispatchGuideStart('add-member');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    act(() => {
+      useGuideStore.getState().advanceStep();
+    });
+    expect(useGuideStore.getState().session?.currentStepIndex).toBe(1);
+
+    act(() => {
+      useGuideStore.getState().advanceStep();
+    });
+    expect(useGuideStore.getState().session?.phase).toBe('complete');
+    expect(useGuideStore.getState().completedGuides.has('thread-1::add-member')).toBe(true);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(useGuideStore.getState().completionFailed).toBe(true);
+    expect(useGuideStore.getState().completedGuides.has('thread-1::add-member')).toBe(false);
+  });
+
+  it('merges bootcamp phase advance against fresh server state before PATCH', async () => {
+    const staleState = {
+      v: 1,
+      phase: 'phase-7.5-add-teammate',
+      startedAt: 1000,
+    };
+    const freshState = {
+      ...staleState,
+      selectedTaskId: 'Q1',
+      envCheck: { node: { ok: true } },
+      advancedFeatures: { tts: 'available' },
+    };
+    let patchBody: unknown;
+
+    apiFetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/guide-flows/bootcamp-add-teammate') {
+        return Promise.resolve({ ok: true, json: async () => BOOTCAMP_FLOW });
+      }
+      if (url === '/api/guide-actions/start') {
+        return Promise.resolve({ ok: true });
+      }
+      if (url === '/api/guide-actions/complete') {
+        return Promise.resolve({ ok: true });
+      }
+      if (url === '/api/threads/thread-1' && !init?.method) {
+        return Promise.resolve({ ok: true, json: async () => ({ bootcampState: freshState }) });
+      }
+      if (url === '/api/threads/thread-1' && init?.method === 'PATCH') {
+        patchBody = init.body;
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            bootcampState: {
+              ...freshState,
+              phase: 'phase-8-collab',
+              guideStep: null,
+            },
+          }),
+        });
+      }
+      throw new Error(`Unexpected apiFetch call: ${url}`);
+    });
+
+    useChatStore.setState({
+      currentThreadId: 'thread-1',
+      threads: [
+        {
+          id: 'thread-1',
+          projectPath: 'default',
+          title: 'Bootcamp',
+          createdBy: 'user1',
+          participants: [],
+          lastActiveAt: 0,
+          createdAt: 0,
+          bootcampState: staleState,
+        },
+      ],
+    });
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    await act(async () => {
+      dispatchGuideStart('bootcamp-add-teammate');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      dispatchGuideComplete({ guideId: 'bootcamp-add-teammate', threadId: 'thread-1' });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(JSON.parse(String(patchBody))).toEqual({
+      bootcampState: {
+        ...freshState,
+        phase: 'phase-8-collab',
+        guideStep: null,
+      },
+    });
   });
 });

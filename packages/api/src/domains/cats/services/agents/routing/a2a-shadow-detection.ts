@@ -8,7 +8,7 @@
 
 import { createHash } from 'node:crypto';
 import type { CatId } from '@cat-cafe/shared';
-import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
+import { catRegistry } from '@cat-cafe/shared';
 import { isCatAvailable } from '../../../../../config/cat-config-loader.js';
 import {
   AFTER_HANDOFF_RE,
@@ -74,7 +74,7 @@ export function detectInlineActionMentionsWithShadow(
   const strictHits = detectInlineActionMentions(text, currentCatId, routedMentions);
 
   const stripped = text.replace(/```[\s\S]*?```/g, '');
-  const allConfigs = Object.keys(catRegistry.getAllConfigs()).length > 0 ? catRegistry.getAllConfigs() : CAT_CONFIGS;
+  const allConfigs = catRegistry.getAllConfigs();
 
   const entries: MentionPatternEntry[] = [];
   for (const [id, config] of Object.entries(allConfigs)) {

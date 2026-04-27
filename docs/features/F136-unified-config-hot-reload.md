@@ -31,7 +31,7 @@ created: 2026-03-23
 | 配置源 | 文件 / 位置 | 当前热更新能力 | 问题 |
 |--------|-------------|----------------|------|
 | **`.env` 环境变量** | 项目根 `.env` | `PATCH /api/config/env` 写 `.env` + 写 `process.env`，但子系统不重新初始化 | Connector gateway 启动时读一次，改了 token 不生效；其他读 `process.env` 的变量倒是立即生效 |
-| **`cat-config.yaml`** | 项目根 `cat-config.yaml` | 无。F127 绕过它搞了 `runtime-cat-catalog.ts`（517 行），直接操作 `cat-catalog.json` | F127 自建了一套独立于 `cat-config.yaml` 的运行时猫猫目录，是team lead所说的「脚手架」 |
+| **`cat-template.json`** | 项目根 `cat-template.json`（原 `cat-config.yaml` 设计在实现中演变为 JSON 模板） | 启动时 seed 一次 | F127 自建了一套独立的运行时猫猫目录（`cat-catalog.json`），已被 F136 收编 |
 | **ConfigStore (F4)** | 内存 + Redis | `PATCH /api/config` 热更新，即时生效 | 只管运行时可变的配置子集（coCreator、budget 等），不覆盖 env 和猫猫配置 |
 | **Provider Profiles (F062)** | `~/.cat-cafe/provider-profiles.json` + `.secrets.local.json` | UI 可编辑，文件写入后需重启生效 | **双真相源**：元信息与 cat-config 的 provider/model 重叠，`provider-binding-compat.ts` 在补缝。Phase 4 将消除 |
 | **猫猫模板** | `cat-template.json` | 启动时加载一次 | 不影响运行时 |
@@ -59,17 +59,26 @@ created: 2026-03-23
 │  ...其他需要的模块                          │
 └────────────────────────────────────────────┘
 
-Phase 4 终态（2026-03-28 决策）:
-┌── 唯一配置真相源 ──────────────────────────┐
-│  cat-config.yaml（不进 git）               │
-│    cats:    猫意图（provider/model/ref）    │
-│    accounts: 账户能力（protocol/baseUrl）   │
-│  cat-config.yaml.example（进 git）         │
+Phase 4 终态（2026-03-28 决策，F171 校准后的实际落地）:
+┌── 模板（进 git）──────────────────────────┐
+│  cat-template.json                         │
+│    roleTemplates: 品种模板（soul/model）   │
+│    clientDefaults: Client 默认模型列表     │
+└────────────────────────────────────────────┘
+┌── 运行时状态（不进 git）──────────────────┐
+│  .cat-cafe/cat-catalog.json                │
+│    breeds: 猫实例（accountRef/model）      │
+│    roster: 成员注册表                      │
+│  .cat-cafe/accounts.json                   │
+│    accountId → {authType, clientId, models} │
 └────────────────────────────────────────────┘
 ┌── 纯钥匙串（零元信息）────────────────────┐
 │  ~/.cat-cafe/credentials.json              │
-│    accountRef → apiKey（纯 key-value）     │
+│    accountId → apiKey/accessToken          │
 └────────────────────────────────────────────┘
+> **设计 vs 实现差异**：原设计用 `cat-config.yaml` 作为统一真相源，
+> 实现中演变为 `cat-template.json`（模板）+ `cat-catalog.json`（猫状态）+ `accounts.json`（账户元数据）三文件分离。
+> 账号类型由 `authType: 'oauth' | 'api_key'` 唯一决定（F171 移除了冗余的 `builtin` 标记和 `ProfileKind` 类型）。
 ```
 
 **核心原则**：
@@ -109,9 +118,10 @@ Phase 4 终态（2026-03-28 决策）:
   - `provider-binding-compat.ts` 的校验是双真相源的症状，不是合理设计
   - A* 方案本质上在合理化两个真相源，偏离 F136 愿景
 
-- [x] **终态：`cat-config` = 唯一配置真相源，`credentials.json` = 纯钥匙串**
+- [x] **终态：统一配置架构，`credentials.json` = 纯钥匙串**
+  > 原始设计用 `cat-config.yaml`，实际落地为 `cat-template.json` + `accounts.json` + `cat-catalog.json` 三文件。以下为原设计示例（保留作历史决策记录）：
   ```yaml
-  # cat-config.yaml（唯一真相源，.example 进 git，实际文件不进 git）
+  # 原设计（cat-config.yaml）— 实际实现用 cat-template.json + accounts.json 替代
   cats:
     opus:
       provider: anthropic
@@ -148,8 +158,8 @@ Phase 4 终态（2026-03-28 决策）:
   - 启动时检测到 legacy env key → 一次性"导入到 credentials"提示
 
 - [x] **模板分发**
-  - `cat-config.yaml.example` 进 git（有结构示例，无真实值）
-  - `cat-config.yaml` 不进 git（用户本地改）
+  - `cat-template.json` 进 git（品种模板 + client 默认模型，无敏感值）
+  - `.cat-cafe/accounts.json` 和 `.cat-cafe/cat-catalog.json` 不进 git（运行时状态）
   - `~/.cat-cafe/credentials.json` 在全局目录，天然不进 git
 
 ### 硬约束补充（2026-03-28，@codex review 补项 — 4 条不补必长技术债）
@@ -165,11 +175,11 @@ Phase 4 终态（2026-03-28 决策）:
   - 理由：oauth/api_key 共存，accessToken 有 TTL，未来需 refresh 机制
   - 纯 string 会导致 oauth 场景回到 ad-hoc 扩展
 
-- [x] **HC-2: 运行时唯一写源 = `cat-catalog.json`（含 accounts 区）**
-  - `cat-config.yaml.example` 只做模板（进 git），首次启动 seed 数据写入 `cat-catalog.json`
-  - Hub CRUD（猫 + 账户）统一写 `cat-catalog.json` → 发 ConfigChangeEvent
-  - 和 F127 现有模式一致（猫 CRUD 已写 cat-catalog），不引入 cat-config vs cat-catalog 新双源
-  - `cat-config.yaml` 是可选的用户初始配置（首次启动时读一次，之后运行时以 cat-catalog 为准）
+- [x] **HC-2: 运行时写源 = `cat-catalog.json`（猫）+ `accounts.json`（账户）**
+  - `cat-template.json` 只做品种模板（进 git），首次启动 bootstrap 创建空 catalog
+  - 猫 CRUD 写 `cat-catalog.json`，账户 CRUD 写 `accounts.json` → 各自发 ConfigChangeEvent
+  - 不引入双源冲突：模板是只读 base，运行时文件是唯一可变源
+  - 首次启动后运行时以 catalog + accounts 为准，模板仅补全缺失的品种默认值
 
 - [x] **HC-3: 迁移窗口可验证规则**
   - 触发时机：首次启动检测到旧 `provider-profiles.json` 或 `.env` 有 `*_API_KEY` → 自动迁移
@@ -192,7 +202,7 @@ Phase 4 终态（2026-03-28 决策）:
   - `CAT_CAFE_GLOBAL_CONFIG_ROOT` 环境变量可用于需要完全隔离的场景
   - 4a/4b 在同一 worktree 连续实施、同一 PR 合入，避免半新半旧双轨
 
-- [x] **文案统一（@gpt52 review 补项）**：用户面对一份配置域（`cat-config`），运行时落盘 `.cat-cafe/cat-catalog.json`，`cat-config.yaml.example` 只做模板不参与运行时——这两句话不矛盾，前者是用户视角，后者是实现细节
+- [x] **文案统一（@gpt52 review 补项）**：用户通过 Hub UI 管理配置，运行时落盘 `.cat-cafe/cat-catalog.json`（猫）+ `.cat-cafe/accounts.json`（账户），`cat-template.json` 只做模板不参与运行时——用户视角是统一的配置管理，实现是分文件存储
 
 ### 已知的具体需求（从 F088 Phase 8 产生）
 
@@ -241,6 +251,7 @@ Phase 4 终态（2026-03-28 决策）:
 - `accountStartupHook()`: legacy source present + empty accounts → hard throw `F136 LL-043`
 - `index.ts`: LL-043 errors propagated alongside HC-5 (not swallowed by best-effort catch)
 - `accountToView()`: non-standard builtins (dare/opencode) emit correct `client` field (fixes duplicate accounts on Hub UI)
+- **F171 简化**：`accountToView()` 不再返回 `builtin` 和 `kind` 字段——前端统一用 `authType: 'oauth' | 'api_key'` 判别账号类型，`ProfileKind` 类型和 `ensureBuiltinAccounts()` fallback 逻辑已移除
 - 3 regression tests (empty providers, corrupt file, legacy+no-accounts) + 1 client field test
 - Cloud review: 3 rounds (P1 → P1 → clean)
 

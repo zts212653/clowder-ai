@@ -35,9 +35,15 @@ describe('F115 AC-C3: proxy fallback to direct upstream', () => {
     const catCafeDir = join(root, '.cat-cafe');
     const previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
     const previousHome = process.env.HOME;
+    const previousTemplatePath = process.env.CAT_TEMPLATE_PATH;
     await mkdir(apiDir, { recursive: true });
     await mkdir(catCafeDir, { recursive: true });
     await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+    // Write a minimal cat-template.json so resolveActiveProjectRoot() picks up `root`
+    // via CAT_TEMPLATE_PATH (which takes priority over findMonorepoRoot). Without this,
+    // setup-cat-registry.js's CAT_TEMPLATE_PATH points to a tmp dir that has no accounts.
+    await writeFile(join(root, 'cat-template.json'), JSON.stringify({ version: 2, breeds: [], roster: {} }), 'utf-8');
+    process.env.CAT_TEMPLATE_PATH = join(root, 'cat-template.json');
     process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
     process.env.HOME = root;
 
@@ -122,6 +128,8 @@ describe('F115 AC-C3: proxy fallback to direct upstream', () => {
       else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
+      if (previousTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = previousTemplatePath;
       if (previousProxyEnabled === undefined) delete process.env.ANTHROPIC_PROXY_ENABLED;
       else process.env.ANTHROPIC_PROXY_ENABLED = previousProxyEnabled;
       if (previousProxyPort === undefined) delete process.env.ANTHROPIC_PROXY_PORT;
@@ -146,9 +154,15 @@ describe('F115 AC-C3: proxy fallback to direct upstream', () => {
     const catCafeDir = join(root, '.cat-cafe');
     const previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
     const previousHome2 = process.env.HOME;
+    const previousTemplatePath2 = process.env.CAT_TEMPLATE_PATH;
     await mkdir(apiDir, { recursive: true });
     await mkdir(catCafeDir, { recursive: true });
     await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+    // Write a minimal cat-template.json so resolveActiveProjectRoot() picks up `root`
+    // via CAT_TEMPLATE_PATH (which takes priority over findMonorepoRoot). Without this,
+    // setup-cat-registry.js's CAT_TEMPLATE_PATH points to a tmp dir that has no accounts.
+    await writeFile(join(root, 'cat-template.json'), JSON.stringify({ version: 2, breeds: [], roster: {} }), 'utf-8');
+    process.env.CAT_TEMPLATE_PATH = join(root, 'cat-template.json');
     process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
     process.env.HOME = root;
 
@@ -231,6 +245,8 @@ describe('F115 AC-C3: proxy fallback to direct upstream', () => {
       else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;
       if (previousHome2 === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome2;
+      if (previousTemplatePath2 === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = previousTemplatePath2;
       if (previousProxyEnabled === undefined) delete process.env.ANTHROPIC_PROXY_ENABLED;
       else process.env.ANTHROPIC_PROXY_ENABLED = previousProxyEnabled;
       if (previousProxyPort === undefined) delete process.env.ANTHROPIC_PROXY_PORT;

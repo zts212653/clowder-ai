@@ -1,10 +1,10 @@
 /**
  * Cat Config Loader
  * 从 cat-template.json / .cat-cafe/cat-catalog.json 加载 Breed+Variant 配置。
- * Node-only — 前端继续用 shared 包的 CAT_CONFIGS 常量。
+ * Node-only — 前端通过 /api/cats 获取猫数据。
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type {
@@ -63,11 +63,11 @@ const catVariantSchema = z.object({
   displayName: z.string().min(1).optional(), // F32-b: variant-level displayName
   variantLabel: z.string().min(1).optional(), // F32-b P4: disambiguation label
   mentionPatterns: z.array(mentionPatternSchema).optional(), // F32-b: variant-level mentions
-  source: z.enum(['seed', 'runtime']).optional(), // #441: bootstrap-stamped origin
+  source: z.string().optional(), // #441: legacy field, ignored — kept in schema for old catalog read compat
   accountRef: z.string().min(1).optional(), // F127: concrete account binding
   clientId: z.string().min(1), // #252: accept unknown providers to avoid full config crash
 
-  defaultModel: z.string().min(1),
+  defaultModel: z.string(), // OAuth/subscription CLIs have built-in defaults; api_key validated at route level
   mcpSupport: z.boolean(),
   cli: cliConfigSchema.optional(),
   commandArgs: z.array(z.string().min(1)).optional(), // F127: explicit bridge args (e.g. Antigravity)
@@ -197,14 +197,14 @@ const coCreatorConfigSchema = z.object({
 /** Version 1: breeds only (legacy) */
 const catCafeConfigSchemaV1 = z.object({
   version: z.literal(1),
-  breeds: z.array(catBreedSchema).min(1),
+  breeds: z.array(catBreedSchema),
 });
 
 /** Version 2: breeds + roster + reviewPolicy (F032) + coCreator (F067) */
 const catCafeConfigSchemaV2 = z
   .object({
     version: z.literal(2),
-    breeds: z.array(catBreedSchema).min(1),
+    breeds: z.array(catBreedSchema),
     roster: z.record(z.string(), rosterEntrySchema),
     reviewPolicy: reviewPolicySchema,
     coCreator: coCreatorConfigSchema.optional(),
@@ -289,7 +289,7 @@ function mergeById(base: HasId[], overlay: HasId[]): HasId[] {
     const bItem = baseMap.get(oItem.id);
     result.push(bItem ? (deepMergeConfig(bItem, oItem) as HasId) : oItem);
   }
-  // Preserve base-only items (new items added to cat-config.json but not yet in catalog)
+  // Preserve base-only items (new items added to cat-template.json but not yet in catalog)
   for (const bItem of base) {
     if (!seen.has(bItem.id)) result.push(bItem);
   }
@@ -425,7 +425,6 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         avatar: variant.avatar ?? breed.avatar, // F32-b P4c: variant can override
         color: variant.color ?? breed.color, // F32-b P4c: variant can override
         mentionPatterns,
-        ...(variant.source != null ? { source: variant.source } : {}),
         ...(variant.accountRef != null ? { accountRef: variant.accountRef } : {}),
         clientId: variant.clientId as ClientId, // #252: Zod now accepts any string; downstream switch/case has default branches
         defaultModel: variant.defaultModel,
@@ -554,7 +553,7 @@ let _catIdToBreedSource: CatCafeConfig | null = null;
 
 /**
  * Check if F24 session chain is enabled for a cat.
- * Returns true by default — only false when explicitly disabled in cat-config.json.
+ * Returns true by default — only false when explicitly disabled in the resolved cat config.
  * Gracefully returns true if config file is unreadable (availability over strictness).
  *
  * F32-b: Now resolves variant catIds to their parent breed via index.
@@ -581,7 +580,7 @@ export function isSessionChainEnabled(catId: CatId | string, config?: CatCafeCon
 // ── F33 Phase 2: Session Strategy from config ─────────────────────────
 
 /**
- * Get session strategy config from cat-config.json for a cat.
+ * Get session strategy config from the resolved cat config for a cat.
  * Returns undefined if not configured (caller falls back to code defaults).
  *
  * F33 Phase 2: Same lookup pattern as isSessionChainEnabled — catId → breed → features.
@@ -606,7 +605,7 @@ export function getConfigSessionStrategy(
 }
 
 /**
- * Get Mission Hub self-claim scope from cat-config.json for a cat.
+ * Get Mission Hub self-claim scope from the resolved cat config for a cat.
  * Defaults to 'disabled' when not configured.
  */
 export function getMissionHubSelfClaimScope(catId: string, config?: CatCafeConfig): MissionHubSelfClaimScope {
@@ -629,6 +628,63 @@ export function getMissionHubSelfClaimScope(catId: string, config?: CatCafeConfi
 let _defaultCatId: CatId | null = null;
 /** F154 AC-A4: Runtime override for default cat (set via Hub API, owner-gated). */
 let _runtimeDefaultCatId: CatId | null = null;
+/** #543: Whether we've attempted to load the persisted override from disk. */
+let _defaultCatOverrideLoaded = false;
+/** True when the current override was set via API (already validated); false when loaded from disk. */
+let _overrideValidatedByApi = false;
+
+const DEFAULT_CAT_OVERRIDE_FILE = '.cat-cafe/default-cat-override.json';
+
+function defaultCatOverridePath(): string {
+  const templatePath = process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH;
+  return resolve(dirname(templatePath), DEFAULT_CAT_OVERRIDE_FILE);
+}
+
+/** #543: Load persisted override from disk (once per process). */
+function loadDefaultCatOverride(): void {
+  if (_defaultCatOverrideLoaded) return;
+  _defaultCatOverrideLoaded = true;
+  try {
+    const filePath = defaultCatOverridePath();
+    if (!existsSync(filePath)) return;
+    const data = JSON.parse(readFileSync(filePath, 'utf-8')) as { catId?: string };
+    if (typeof data.catId === 'string' && data.catId) {
+      _runtimeDefaultCatId = createCatId(data.catId);
+    }
+  } catch {
+    // Corrupt or missing file — proceed without override
+  }
+}
+
+/** #543: Persist override to disk so it survives restarts. Returns false on write failure. */
+function persistDefaultCatOverride(catId: CatId | null): boolean {
+  try {
+    const filePath = defaultCatOverridePath();
+    if (catId === null) {
+      if (existsSync(filePath)) unlinkSync(filePath);
+      return true;
+    }
+    mkdirSync(dirname(filePath), { recursive: true });
+    writeFileSync(filePath, `${JSON.stringify({ catId })}\n`, 'utf-8');
+    return true;
+  } catch (err) {
+    log.warn({ err }, 'failed to persist default cat override');
+    return false;
+  }
+}
+
+/** #543 P1: Check that a catId exists in the loaded config AND is roster-available.
+ *  When config is unavailable (degraded startup), only trusts API-validated overrides;
+ *  disk-loaded overrides are rejected since they may be stale. */
+function isCatKnownAndAvailable(catId: string): boolean {
+  const cfg = getCachedConfig();
+  if (!cfg) return _overrideValidatedByApi;
+  if (!_catIdToBreed || _catIdToBreedSource !== cfg) {
+    _catIdToBreed = buildCatIdToBreedIndex(cfg);
+    _catIdToBreedSource = cfg;
+  }
+  return _catIdToBreed.has(catId) && isCatAvailable(catId);
+}
 
 /**
  * Get the default cat ID.
@@ -636,7 +692,11 @@ let _runtimeDefaultCatId: CatId | null = null;
  * Used as ultimate fallback in AgentRouter when no mentions/participants/preferredCats.
  */
 export function getDefaultCatId(): CatId {
-  if (_runtimeDefaultCatId) return _runtimeDefaultCatId;
+  loadDefaultCatOverride();
+  // #543 P1: Skip persisted override if the catId is stale (not in config) or unavailable
+  if (_runtimeDefaultCatId && isCatKnownAndAvailable(_runtimeDefaultCatId)) {
+    return _runtimeDefaultCatId;
+  }
   if (_defaultCatId) return _defaultCatId;
 
   const config = getCachedConfig();
@@ -648,23 +708,32 @@ export function getDefaultCatId(): CatId {
     return _defaultCatId;
   }
 
-  // Ultimate fallback (should not trigger — config always has at least 1 breed)
+  // Ultimate fallback for zero-member bootstrap mode.
   return createCatId('opus');
 }
 
-/** F154 AC-A4: Set runtime default cat override. Owner-gated at the API layer. */
-export function setRuntimeDefaultCatId(catId: string): void {
+/** F154 AC-A4: Set runtime default cat override. Owner-gated at the API layer.
+ *  Returns { persisted: false } when the disk write failed (#543 P2). */
+export function setRuntimeDefaultCatId(catId: string): { persisted: boolean } {
   _runtimeDefaultCatId = createCatId(catId);
+  _defaultCatOverrideLoaded = true;
+  _overrideValidatedByApi = true; // API path already checked catRegistry + availability
+  return { persisted: persistDefaultCatOverride(_runtimeDefaultCatId) };
 }
 
-/** F154 AC-A4: Clear runtime override — falls back to breeds[0]. */
-export function clearRuntimeDefaultCatId(): void {
+/** F154 AC-A4: Clear runtime override — falls back to breeds[0].
+ *  Returns { persisted: boolean } so callers know if the override file was removed. */
+export function clearRuntimeDefaultCatId(): { persisted: boolean } {
   _runtimeDefaultCatId = null;
+  _defaultCatOverrideLoaded = true;
+  _overrideValidatedByApi = false;
+  return { persisted: persistDefaultCatOverride(null) };
 }
 
-/** F154 AC-A4: Check whether a runtime override is active. */
+/** F154 AC-A4: Check whether a runtime override is active, known in config, and available. */
 export function hasRuntimeDefaultCatOverride(): boolean {
-  return _runtimeDefaultCatId !== null;
+  loadDefaultCatOverride();
+  return _runtimeDefaultCatId !== null && isCatKnownAndAvailable(_runtimeDefaultCatId);
 }
 
 /** Unified owner userId: configured env or single-user fallback. */
@@ -693,7 +762,7 @@ function buildCatIdToVariantIndex(config: CatCafeConfig): Map<string, CatVariant
 export type CliEffortLevel = 'low' | 'medium' | 'high' | 'max' | 'xhigh';
 
 /**
- * Get CLI effort level for a cat from cat-config.json.
+ * Get CLI effort level for a cat from the resolved cat config.
  * Default when not configured:
  *   claude (anthropic): 'max'
  *   codex (openai):     'xhigh'
@@ -772,7 +841,7 @@ export interface AcpVariantConfig {
 }
 
 /**
- * Get ACP config for a cat from the raw cat-config.json variant.
+ * Get ACP config for a cat from the resolved raw runtime variant.
  * Returns undefined if the variant has no `acp` section (= use legacy CLI).
  * Reads raw JSON because `acp` is not in the typed CatConfig (intentionally).
  */
@@ -806,7 +875,7 @@ export function getAcpConfig(catId: string): AcpVariantConfig | undefined {
 }
 
 /** Reset cached config (for testing) */
-export function _resetCachedConfig(): void {
+export function _resetCachedConfig(opts?: { includeOverride?: boolean }): void {
   _cachedConfig = null;
   _configLoadFailed = false;
   _catIdToBreed = null;
@@ -814,6 +883,13 @@ export function _resetCachedConfig(): void {
   _catIdToVariant = null;
   _catIdToVariantSource = null;
   _defaultCatId = null;
+  // Override state is independent of config cache — preserve across catalog refreshes.
+  // Tests that need fresh override state pass { includeOverride: true }.
+  if (opts?.includeOverride) {
+    _runtimeDefaultCatId = null;
+    _defaultCatOverrideLoaded = false;
+    _overrideValidatedByApi = false;
+  }
   _cachedRoster = null;
   _cachedReviewPolicy = null;
   _cachedCoCreator = null;
@@ -916,7 +992,7 @@ const DEFAULT_CO_CREATOR_MENTION_PATTERNS = ['@co-creator', '@铲屎官'];
 let _cachedCoCreator: CoCreatorConfig | null = null;
 
 /**
- * Get coCreator config from cat-config.json.
+ * Get coCreator config from the resolved cat config.
  * Returns a default config with @co-creator/@铲屎官 patterns when not configured.
  */
 export function getCoCreatorConfig(config?: CatCafeConfig): CoCreatorConfig {

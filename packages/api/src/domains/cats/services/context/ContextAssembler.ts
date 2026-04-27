@@ -6,7 +6,7 @@
  * formatMessage() 也被 export route 复用 (聊天记录导出)。
  */
 
-import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
+import { catRegistry } from '@cat-cafe/shared';
 import { estimateTokens } from '../../../../utils/token-counter.js';
 import { isDelivered, type StoredMessage } from '../stores/ports/MessageStore.js';
 
@@ -36,13 +36,13 @@ const DEFAULT_MAX_TOTAL_TOKENS = 2000;
 
 /**
  * Get display name for a message sender.
- * catId === null → user ("铲屎官"), otherwise look up CAT_CONFIGS.
+ * catId === null → user ("铲屎官"), otherwise look up catRegistry.
  * For variant cats (e.g. sonnet, opus-45), includes variantLabel to distinguish same-family members.
  */
 function getSenderName(catId: string | null): string {
   if (catId === null) return '铲屎官';
   const entry = catRegistry.tryGet(catId);
-  const config = entry?.config ?? CAT_CONFIGS[catId];
+  const config = entry?.config;
   if (!config) return catId;
   const variantLabel = config.variantLabel?.trim();
   if (!variantLabel) return config.displayName;

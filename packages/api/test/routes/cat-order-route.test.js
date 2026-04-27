@@ -3,8 +3,11 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
-import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
+import { catRegistry } from '@cat-cafe/shared';
 import Fastify from 'fastify';
+import { loadCatConfig, toAllCatConfigs } from '../../dist/config/cat-config-loader.js';
+
+const _allConfigs = toAllCatConfigs(loadCatConfig());
 
 describe('GET/PUT /api/config/cat-order (F166)', () => {
   let app;
@@ -13,9 +16,9 @@ describe('GET/PUT /api/config/cat-order (F166)', () => {
 
   before(async () => {
     catRegistry.reset();
-    catRegistry.register('opus', CAT_CONFIGS.opus);
-    catRegistry.register('codex', CAT_CONFIGS.codex);
-    catRegistry.register('gemini', CAT_CONFIGS.gemini);
+    catRegistry.register('opus', _allConfigs.opus);
+    catRegistry.register('codex', _allConfigs.codex);
+    catRegistry.register('gemini', _allConfigs.gemini);
     process.env.DEFAULT_OWNER_USER_ID = OWNER_ID;
     projectRoot = await mkdtemp(join(tmpdir(), 'cat-order-route-'));
     const { configRoutes } = await import('../../dist/routes/config.js');

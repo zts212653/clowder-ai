@@ -1,5 +1,6 @@
+import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, afterEach, describe, it } from 'node:test';
@@ -60,7 +61,12 @@ function makeTemplate() {
 function createProjectRoot() {
   const projectRoot = mkdtempSync(join(tmpdir(), 'config-owner-route-'));
   tempDirs.push(projectRoot);
-  writeFileSync(join(projectRoot, 'cat-template.json'), JSON.stringify(makeTemplate(), null, 2));
+  const template = makeTemplate();
+  writeFileSync(join(projectRoot, 'cat-template.json'), JSON.stringify(template, null, 2));
+  // F171: bootstrapCatCatalog now creates empty catalogs. Pre-seed the catalog with
+  // template breeds so conflict detection in assertUniqueMentionAliases finds cat aliases.
+  mkdirSync(join(projectRoot, '.cat-cafe'), { recursive: true });
+  writeFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), JSON.stringify(template, null, 2), 'utf-8');
   return projectRoot;
 }
 

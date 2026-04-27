@@ -3,6 +3,7 @@
  * 验证 routeSerial / routeParallel 纯函数的基本行为 + A2A worklist
  */
 
+import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
@@ -199,6 +200,41 @@ function degradationSystemInfos(messages) {
     }
   });
 }
+
+describe('bootcamp invocation context', () => {
+  it('uses thread-scoped member count instead of global roster size', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const captureService = createCapturingService('opus', 'ack');
+    const deps = createMockDeps({ opus: captureService }, undefined, {
+      async get() {
+        return {
+          id: 'thread1',
+          title: 'Bootcamp Thread',
+          createdBy: 'user1',
+          participants: [],
+          lastActiveAt: Date.now(),
+          createdAt: Date.now(),
+          projectPath: 'default',
+          bootcampState: {
+            v: 1,
+            phase: 'phase-2-env-check',
+            leadCat: 'opus',
+            startedAt: Date.now(),
+          },
+        };
+      },
+      async getParticipantsWithActivity() {
+        return [];
+      },
+      async updateParticipantActivity() {},
+    });
+
+    for await (const _ of routeParallel(deps, ['opus'], '继续', 'user1', 'thread1')) {
+    }
+
+    assert.match(captureService.calls[0], /members=1/, 'should derive team size from the active thread only');
+  });
+});
 
 describe('incremental current-message fallback helper', () => {
   it('does not append raw current message when context already contains current message id', async () => {
@@ -495,6 +531,77 @@ describe('routeSerial', () => {
 上面只是文档示例，不是泄漏。`;
 
     assert.equal(stripLeakedToolCallPayload(example), example);
+  });
+});
+
+describe('agent message timestamp uses invocation start time (#557)', () => {
+  it('routeSerial stores message at invocation start, not stream completion', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+
+    const STREAM_DELAY_MS = 50;
+    // Service that delays before yielding done — simulates non-trivial stream time
+    const delayedService = {
+      async *invoke() {
+        yield { type: 'text', catId: 'opus', content: 'thinking...', timestamp: Date.now() };
+        await new Promise((r) => setTimeout(r, STREAM_DELAY_MS));
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const appendCalls = [];
+    const deps = createMockDeps({ opus: delayedService }, appendCalls);
+
+    const beforeInvocation = Date.now();
+    for await (const _ of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
+      // drain
+    }
+    const afterCompletion = Date.now();
+
+    assert.equal(appendCalls.length, 1, 'should persist one message');
+    const storedTs = appendCalls[0].timestamp;
+    // Stored timestamp should be close to invocation start (within 20ms tolerance),
+    // NOT close to stream completion (which is ~50ms+ later)
+    assert.ok(
+      storedTs - beforeInvocation < 30,
+      `stored timestamp (${storedTs}) should be within 30ms of invocation start (${beforeInvocation}), got delta=${storedTs - beforeInvocation}ms`,
+    );
+    assert.ok(
+      afterCompletion - storedTs >= STREAM_DELAY_MS - 10,
+      `stored timestamp should be at least ${STREAM_DELAY_MS - 10}ms before completion (delta=${afterCompletion - storedTs}ms)`,
+    );
+  });
+
+  it('routeParallel stores message at invocation start, not stream completion', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+
+    const STREAM_DELAY_MS = 50;
+    const delayedService = {
+      async *invoke() {
+        yield { type: 'text', catId: 'opus', content: 'thinking...', timestamp: Date.now() };
+        await new Promise((r) => setTimeout(r, STREAM_DELAY_MS));
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const appendCalls = [];
+    const deps = createMockDeps({ opus: delayedService }, appendCalls);
+
+    const beforeInvocation = Date.now();
+    for await (const _ of routeParallel(deps, ['opus'], 'hello', 'user1', 'thread1')) {
+      // drain
+    }
+    const afterCompletion = Date.now();
+
+    assert.equal(appendCalls.length, 1, 'should persist one message');
+    const storedTs = appendCalls[0].timestamp;
+    assert.ok(
+      storedTs - beforeInvocation < 30,
+      `stored timestamp (${storedTs}) should be within 30ms of invocation start (${beforeInvocation}), got delta=${storedTs - beforeInvocation}ms`,
+    );
+    assert.ok(
+      afterCompletion - storedTs >= STREAM_DELAY_MS - 10,
+      `stored timestamp should be at least ${STREAM_DELAY_MS - 10}ms before completion (delta=${afterCompletion - storedTs}ms)`,
+    );
   });
 });
 

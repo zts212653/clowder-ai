@@ -30,7 +30,6 @@ function minimalCat(id: string): import('@/hooks/useCatData').CatData {
     avatar: '',
     roleDescription: '',
     personality: '',
-    source: 'seed',
   } as import('@/hooks/useCatData').CatData;
 }
 
