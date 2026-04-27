@@ -25,12 +25,16 @@ describe('callback-memory-routes DI (IEvidenceStore path)', () => {
 
   function createMockRegistry() {
     return {
-      verify: () => ({
-        invocationId: 'inv-1',
-        catId: 'opus',
-        userId: 'user-1',
-        threadId: 'thread-1',
-        callbackToken: 'tok-1',
+      // F174 Phase A: verify() returns VerifyResult discriminated union
+      verify: async () => ({
+        ok: true,
+        record: {
+          invocationId: 'inv-1',
+          catId: 'opus',
+          userId: 'user-1',
+          threadId: 'thread-1',
+          callbackToken: 'tok-1',
+        },
       }),
     };
   }

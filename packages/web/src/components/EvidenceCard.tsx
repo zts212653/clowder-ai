@@ -14,6 +14,7 @@ export interface EvidenceResult {
   confidence: EvidenceConfidence;
   sourceType: EvidenceSourceType;
   status?: EvidenceStatus;
+  authority?: string;
 }
 
 const SOURCE_CONFIG: Record<
@@ -115,6 +116,12 @@ export function EvidenceCard({ result }: { result: EvidenceResult }) {
 
         <div className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-700">
           <span className="text-[10px] text-slate-400 font-bold">{source.label}</span>
+          {result.authority && (
+            <>
+              <span className="text-[10px] text-cafe-muted">·</span>
+              <span className="text-[10px] text-slate-500 font-mono">{result.authority}</span>
+            </>
+          )}
           <span className="text-[10px] text-cafe-muted">·</span>
           <ExpandableText
             text={result.anchor}

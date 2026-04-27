@@ -9,6 +9,12 @@
 
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import type { IMessageStore } from '../../stores/ports/MessageStore.js';
+import {
+  accumulateTextAggregate,
+  accumulateTextParts,
+  flattenTextParts,
+  flattenTurnTextParts,
+} from '../text-aggregation.js';
 import type { InvocationQueue, QueueEntry } from './InvocationQueue.js';
 
 /** Minimal interfaces for deps — avoid importing full types for testability */
@@ -19,6 +25,13 @@ interface TrackerLike {
   complete(threadId: string, catId: string, controller?: AbortController): void;
   completeSlot?(threadId: string, catId: string, controller?: AbortController): void;
   completeAll(threadId: string, catIds: string[], controller?: AbortController): void;
+  trackExternalSlot?(
+    threadId: string,
+    catId: string,
+    controller: AbortController,
+    userId?: string,
+    catIds?: string[],
+  ): boolean;
   has(threadId: string, catId?: string): boolean;
 }
 
@@ -106,7 +119,7 @@ export interface QueueProcessorDeps {
 /** F122B B6: Completion hook — called when a queue entry finishes execution. */
 export type EntryCompleteHook = (
   entryId: string,
-  status: 'succeeded' | 'failed' | 'canceled',
+  status: 'succeeded' | 'failed' | 'canceled' | 'canceled_by_user',
   responseText: string,
 ) => void;
 
@@ -262,14 +275,17 @@ export class QueueProcessor {
   async onInvocationComplete(
     threadId: string,
     catId: string,
-    status: 'succeeded' | 'failed' | 'canceled',
+    status: 'succeeded' | 'failed' | 'canceled' | 'canceled_by_user',
   ): Promise<void> {
     const sk = QueueProcessor.slotKey(threadId, catId);
-    if (status === 'succeeded') {
+    if (status === 'succeeded' || status === 'canceled_by_user') {
       this.pausedSlots.delete(sk);
       if (this.deps.queue.hasQueuedForThread(threadId)) {
         await this.tryExecuteNextAcrossUsers(threadId, catId);
         await this.tryAutoExecute(threadId);
+        if (status === 'canceled_by_user') {
+          this.deps.log.info({ threadId, catId }, 'Auto-resumed queued entry after user cancel');
+        }
       }
     } else {
       // canceled or failed → pause ONLY if there are queued entries to manage.
@@ -482,14 +498,14 @@ export class QueueProcessor {
    * Creates InvocationRecord → tracker.start → route execution → complete → cleanup.
    * Returns final status for chain auto-dequeue (called by tryExecuteNext*).
    */
-  private async executeEntry(entry: QueueEntry): Promise<'succeeded' | 'failed' | 'canceled'> {
+  private async executeEntry(entry: QueueEntry): Promise<'succeeded' | 'failed' | 'canceled' | 'canceled_by_user'> {
     const { queue, invocationTracker, invocationRecordStore, router, socketManager, messageStore, log } = this.deps;
     const { threadId, userId, content, targetCats, intent, messageId } = entry;
     const primaryCat = targetCats[0] ?? 'unknown';
 
     let controller: AbortController | undefined;
     let invocationId: string | undefined;
-    let finalStatus: 'succeeded' | 'failed' | 'canceled' = 'failed';
+    let finalStatus: 'succeeded' | 'failed' | 'canceled' | 'canceled_by_user' = 'failed';
     let responseText = '';
     const cursorBoundaries = new Map<string, string>();
 
@@ -653,11 +669,21 @@ export class QueueProcessor {
           ...(controller.signal ? { signal: controller.signal } : {}),
           queueHasQueuedMessages: (tid: string) => queue.hasQueuedUserMessagesForThread(tid),
           hasQueuedOrActiveAgentForCat: (tid: string, catId: string) => queue.hasActiveOrQueuedAgentForCat(tid, catId),
+          invocationController: controller,
+          trackA2ASlot: (tid: string, catId: string, uid: string, ctrl: AbortController) => {
+            invocationTracker.trackExternalSlot?.(tid, catId, ctrl, uid, [catId]);
+          },
+          completeA2ASlots: (tid: string, catIds: readonly string[], ctrl: AbortController) => {
+            for (const catId of catIds) invocationTracker.completeSlot?.(tid, catId, ctrl);
+          },
           cursorBoundaries,
           persistenceContext,
           ...(invocationId ? { parentInvocationId: invocationId } : {}),
         },
       )) {
+        if (controller.signal.aborted) {
+          break;
+        }
         // #768: Broadcast intent_mode on first CLI event — proves CLI is alive.
         if (!intentModeBroadcast) {
           socketManager.broadcastToRoom(`thread:${threadId}`, 'intent_mode', {
@@ -669,7 +695,11 @@ export class QueueProcessor {
           intentModeBroadcast = true;
         }
         if (hook && msg.catId === primaryCat && msg.type === 'text' && (msg as { content?: string }).content) {
-          responseText += (msg as { content?: string }).content;
+          responseText = accumulateTextAggregate(
+            responseText,
+            (msg as { content?: string }).content!,
+            (msg as { textMode?: 'append' | 'replace' }).textMode,
+          );
         }
         if ((msg.type === 'done' || msg.type === 'error') && msg.catId) {
           invocationTracker.completeSlot?.(threadId, msg.catId, controller);
@@ -726,20 +756,26 @@ export class QueueProcessor {
         }
         if (msg.type === 'text' && typeof (msg as Record<string, unknown>).content === 'string') {
           const textContent = (msg as Record<string, unknown>).content as string;
-          collectedTextParts.push(textContent);
+          const textMode = (msg as { textMode?: 'append' | 'replace' }).textMode;
+          accumulateTextParts(collectedTextParts, textContent, textMode);
           if (msg.catId) {
             if (msg.catId !== currentTurnCatId) {
               outboundTurns.push({ catId: msg.catId, textParts: [] });
               currentTurnCatId = msg.catId;
             }
-            outboundTurns[outboundTurns.length - 1].textParts.push(textContent);
+            const turn = outboundTurns[outboundTurns.length - 1];
+            accumulateTextParts(turn.textParts, textContent, textMode);
           }
           if (this.deps.streamingHook) {
-            const accumulated = collectedTextParts.join('');
+            const accumulated =
+              outboundTurns.length > 0 ? flattenTurnTextParts(outboundTurns) : flattenTextParts(collectedTextParts);
             this.deps.streamingHook.onStreamChunk(threadId, accumulated, invocationId).catch((err) => {
               log.warn({ err, threadId }, '[QueueProcessor] StreamingHook.onStreamChunk failed');
             });
           }
+        }
+        if (controller.signal.aborted) {
+          break;
         }
 
         socketManager.broadcastAgentMessage({ ...msg, ...(invocationId ? { invocationId } : {}) }, threadId);
@@ -753,8 +789,8 @@ export class QueueProcessor {
           await router.ackCollectedCursors(userId, threadId, cursorBoundaries);
         }
         await invocationRecordStore.update(invocationId, { status: 'canceled' });
-        finalStatus = 'canceled';
-        return 'canceled';
+        finalStatus = controller.signal.reason === 'user_cancel' ? 'canceled_by_user' : 'canceled';
+        return finalStatus;
       }
 
       // 9. Ack cursors + mark succeeded
@@ -860,7 +896,8 @@ export class QueueProcessor {
     deliveredTurnIndices?: Set<number>,
     preResolvedMeta?: ThreadMetaLike | undefined,
   ): Promise<void> {
-    const finalContent = collectedTextParts.join('');
+    const finalContent =
+      outboundTurns.length > 0 ? flattenTurnTextParts(outboundTurns) : flattenTextParts(collectedTextParts);
 
     // Finalize streaming — ensure start completed before ending
     if (this.deps.streamingHook) {

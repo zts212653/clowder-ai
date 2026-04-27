@@ -102,8 +102,7 @@ describe('F148 Phase E: buildBriefingMessage (AC-E1)', () => {
     assert.equal(msg.catId, null, 'briefing is system-generated, catId=null');
     assert.equal(msg.userId, 'system', 'userId should be system');
     assert.equal(msg.threadId, 'thread-1');
-    assert.ok(msg.content.includes('看到'), 'content is the one-line summary');
-    assert.ok(msg.content.includes('省略'), 'content includes omitted count');
+    assert.ok(msg.content.includes('真相源'), 'content is the navigation summary');
   });
 
   test('has rich block with card kind', () => {
@@ -112,7 +111,7 @@ describe('F148 Phase E: buildBriefingMessage (AC-E1)', () => {
     const card = msg.extra.rich.blocks[0];
     assert.equal(card.kind, 'card', 'rich block should be a card');
     assert.equal(card.tone, 'info', 'should use info tone');
-    assert.ok(card.title.includes('看到'), 'card title should be the summary');
+    assert.ok(card.title.includes('真相源'), 'card title should be the navigation summary');
   });
 
   test('card bodyMarkdown includes expanded details when threadMemory provided', () => {
@@ -131,7 +130,9 @@ describe('F148 Phase E: buildBriefingMessage (AC-E1)', () => {
     assert.ok(card.fields?.length > 0, 'should have fields');
     // Check key fields exist
     const labels = card.fields.map((f) => f.label);
-    assert.ok(labels.some((l) => l.includes('参与者') || l.includes('Participants')));
+    assert.ok(labels.includes('传球'), 'should have baton field');
+    assert.ok(labels.includes('真相源'), 'should have truth source field');
+    assert.ok(labels.includes('下一步'), 'should have next step field');
   });
 
   test('VG-2: bodyMarkdown includes retrieval hints when present', () => {
@@ -266,6 +267,77 @@ describe('F148 Phase E: buildBriefingMessage (AC-E1)', () => {
     const card = msg.extra.rich.blocks[0];
     if (card.bodyMarkdown) {
       assert.ok(!card.bodyMarkdown.includes('深入搜索'), 'no search section when no suggestions');
+    }
+  });
+});
+
+describe('F148 Phase F: Briefing card navigation context (AC-F5)', () => {
+  const baseCoverageMap = {
+    omitted: {
+      count: 22,
+      timeRange: { from: 1712000000000, to: 1712003600000 },
+      participants: ['opus', 'codex'],
+    },
+    burst: { count: 8, timeRange: { from: 1712003600000, to: 1712004000000 } },
+    anchorIds: ['a1'],
+    threadMemory: null,
+    retrievalHints: [],
+  };
+
+  test('AC-F5: bodyMarkdown includes baton info when provided', () => {
+    const msg = buildBriefingMessage(baseCoverageMap, 'thread-1', {
+      baton: {
+        fromMessageId: 'm5',
+        fromSpeaker: 'codex',
+        fromSpeakerDisplay: 'codex',
+        timestamp: 1712004000000,
+        mentionExcerpt: '帮我看看这个 PR',
+        staleHoldWarning: false,
+      },
+    });
+    const card = msg.extra.rich.blocks[0];
+    assert.ok(card.bodyMarkdown, 'should have bodyMarkdown');
+    assert.ok(card.bodyMarkdown.includes('传球'), 'should have baton section');
+    assert.ok(card.bodyMarkdown.includes('codex'), 'should include speaker');
+    assert.ok(card.bodyMarkdown.includes('帮我看看'), 'should include excerpt');
+  });
+
+  test('AC-F5: bodyMarkdown includes stale hold warning', () => {
+    const msg = buildBriefingMessage(baseCoverageMap, 'thread-1', {
+      baton: {
+        fromMessageId: 'm5',
+        fromSpeaker: 'codex',
+        fromSpeakerDisplay: 'codex',
+        timestamp: 1712004000000,
+        mentionExcerpt: '看看',
+        staleHoldWarning: true,
+      },
+    });
+    const card = msg.extra.rich.blocks[0];
+    assert.ok(card.bodyMarkdown.includes('⚠️'), 'should include warning emoji');
+    assert.ok(card.bodyMarkdown.includes('别动'), 'should mention hold');
+  });
+
+  test('AC-F5: bodyMarkdown includes active tasks when provided', () => {
+    const msg = buildBriefingMessage(baseCoverageMap, 'thread-1', {
+      activeTasks: [
+        { id: 't1', title: 'Fix Redis bug', status: 'in-progress', ownerCatId: 'opus' },
+        { id: 't2', title: 'Deploy v2', status: 'todo', ownerCatId: null },
+      ],
+    });
+    const card = msg.extra.rich.blocks[0];
+    assert.ok(card.bodyMarkdown, 'should have bodyMarkdown');
+    assert.ok(card.bodyMarkdown.includes('活跃任务'), 'should have tasks section');
+    assert.ok(card.bodyMarkdown.includes('Fix Redis'), 'should include first task');
+    assert.ok(card.bodyMarkdown.includes('未分配'), 'null owner shows as 未分配');
+  });
+
+  test('AC-F5: omits navigation sections when no baton/tasks', () => {
+    const msg = buildBriefingMessage(baseCoverageMap, 'thread-1', {});
+    const card = msg.extra.rich.blocks[0];
+    if (card.bodyMarkdown) {
+      assert.ok(!card.bodyMarkdown.includes('传球'), 'no baton section');
+      assert.ok(!card.bodyMarkdown.includes('活跃任务'), 'no tasks section');
     }
   });
 });

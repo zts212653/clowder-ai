@@ -65,7 +65,7 @@ describe('POST /api/callbacks/start-vote', () => {
   test('starts a vote with valid credentials', async () => {
     const app = await createApp();
     const thread = threadStore.create('user-1', 'Test');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     const res = await app.inject({
       method: 'POST',
@@ -90,7 +90,7 @@ describe('POST /api/callbacks/start-vote', () => {
   test('broadcasts vote_started via WebSocket', async () => {
     const app = await createApp();
     const thread = threadStore.create('user-1', 'Test');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     await app.inject({
       method: 'POST',
@@ -112,7 +112,7 @@ describe('POST /api/callbacks/start-vote', () => {
   test('persists vote notification message with @mentions', async () => {
     const app = await createApp();
     const thread = threadStore.create('user-1', 'Test');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     await app.inject({
       method: 'POST',
@@ -136,7 +136,7 @@ describe('POST /api/callbacks/start-vote', () => {
   test('returns 409 when active vote already exists', async () => {
     const app = await createApp();
     const thread = threadStore.create('user-1', 'Test');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     // First vote
     await app.inject({
@@ -187,7 +187,7 @@ describe('POST /api/callbacks/start-vote', () => {
   test('returns 400 with fewer than 2 options', async () => {
     const app = await createApp();
     const thread = threadStore.create('user-1', 'Test');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     const res = await app.inject({
       method: 'POST',
@@ -207,7 +207,7 @@ describe('POST /api/callbacks/start-vote', () => {
   test('createdBy is userId, initiatedByCat is catId', async () => {
     const app = await createApp();
     const thread = threadStore.create('user-1', 'Test');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     const res = await app.inject({
       method: 'POST',
@@ -229,9 +229,9 @@ describe('POST /api/callbacks/start-vote', () => {
   test('rejects stale invocation with 200 stale_ignored', async () => {
     const app = await createApp();
     const thread = threadStore.create('user-1', 'Test');
-    const old = registry.create('user-1', 'opus', thread.id);
+    const old = await registry.create('user-1', 'opus', thread.id);
     // Create a newer invocation for same cat+thread, making `old` stale
-    registry.create('user-1', 'opus', thread.id);
+    await registry.create('user-1', 'opus', thread.id);
 
     const res = await app.inject({
       method: 'POST',
@@ -253,7 +253,7 @@ describe('POST /api/callbacks/start-vote', () => {
   test('returns 404 for non-existent thread', async () => {
     const app = await createApp();
     // Create invocation with a threadId that does NOT exist in threadStore
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'non-existent-thread');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'non-existent-thread');
 
     const res = await app.inject({
       method: 'POST',
@@ -274,7 +274,7 @@ describe('POST /api/callbacks/start-vote', () => {
   test('defaults to non-anonymous and 120s timeout', async () => {
     const app = await createApp();
     const thread = threadStore.create('user-1', 'Test');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     const res = await app.inject({
       method: 'POST',
@@ -338,7 +338,7 @@ describe('POST /api/callbacks/start-vote', () => {
     });
 
     const thread = threadStore.create('user-1', 'Test');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     const res = await app.inject({
       method: 'POST',
@@ -403,7 +403,7 @@ describe('POST /api/callbacks/start-vote', () => {
     });
 
     const thread = threadStore.create('user-1', 'Test');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     // 7 voters: queue can hold 5, remaining 2 should fall back to direct dispatch
     const res = await app.inject({

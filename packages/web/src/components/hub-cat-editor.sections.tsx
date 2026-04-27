@@ -80,6 +80,13 @@ export function IdentitySection({
         placeholder="可选，铲屎官给的昵称"
       />
       <TextField
+        label="显示后缀"
+        ariaLabel="Variant Label"
+        value={form.variantLabel}
+        onChange={(value) => onChange({ variantLabel: value })}
+        placeholder="如 GPT-5.5 / Opus 4.7"
+      />
+      <TextField
         label="角色描述"
         ariaLabel="Description"
         value={form.roleDescription}

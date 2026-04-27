@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { applyConnectorSecretUpdates } from '../config/connector-secret-updater.js';
 import { isConnectorSecret } from '../config/connector-secrets-allowlist.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
+import { normalizeTelegramBotToken } from '../infrastructure/connectors/telegram-token.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 
@@ -35,11 +36,15 @@ interface ConfigSecretsRoutesOptions {
   skipLoopbackCheck?: boolean;
 }
 
-function resolveOperator(raw: unknown): string | null {
-  if (typeof raw === 'string' && raw.trim().length > 0) return raw.trim();
-  if (Array.isArray(raw)) {
-    const first = raw[0];
-    if (typeof first === 'string' && first.trim().length > 0) return first.trim();
+function validateSecretUpdate(update: { name: string; value: string | null }): string | null {
+  if (!isConnectorSecret(update.name)) return `'${update.name}' is not in connector secrets allowlist`;
+  if (
+    update.name === 'TELEGRAM_BOT_TOKEN' &&
+    update.value != null &&
+    update.value !== '' &&
+    normalizeTelegramBotToken(update.value) == null
+  ) {
+    return 'TELEGRAM_BOT_TOKEN must look like a Telegram BotFather token (<digits>:<token>)';
   }
   return null;
 }
@@ -71,9 +76,10 @@ export async function configSecretsRoutes(app: FastifyInstance, opts: ConfigSecr
     // Allowlist validation
     const updates = new Map<string, string | null>();
     for (const update of parsed.data.updates) {
-      if (!isConnectorSecret(update.name)) {
+      const validationError = validateSecretUpdate(update);
+      if (validationError) {
         reply.status(400);
-        return { error: `'${update.name}' is not in connector secrets allowlist` };
+        return { error: validationError };
       }
       updates.set(update.name, update.value);
     }

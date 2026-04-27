@@ -74,6 +74,16 @@ function parseFeatureIdsFromFrontmatter(fm) {
   return [...new Set(normalized)];
 }
 
+function isVerificationDoc(frontmatter) {
+  const docKind = String(frontmatter?.doc_kind ?? '')
+    .trim()
+    .toLowerCase();
+  const docType = String(frontmatter?.doc_type ?? '')
+    .trim()
+    .toLowerCase();
+  return docKind === 'verification' || docType === 'verification';
+}
+
 function parseStatus(content) {
   const headerMatch = content.match(/^\uFEFF?---\n[\s\S]*?\n---\n/);
   const body = headerMatch ? content.slice(headerMatch[0].length) : content;
@@ -121,6 +131,10 @@ function inferFeatureRecord(filePath) {
 
   const content = fs.readFileSync(filePath, 'utf8');
   const frontmatter = parseFrontmatter(content) ?? {};
+  if (isVerificationDoc(frontmatter)) {
+    return null;
+  }
+
   const featureIds = parseFeatureIdsFromFrontmatter(frontmatter);
 
   const fileId = normalizeFeatureId(stem);
@@ -154,11 +168,14 @@ function sortByFeatureId(a, b) {
 function runCli() {
   const args = parseArgs(process.argv.slice(2));
   const featureFiles = listFeatureFiles(args.featuresDir);
-  const records = featureFiles.map(inferFeatureRecord).sort(sortByFeatureId);
+  const records = featureFiles.map(inferFeatureRecord).filter(Boolean).sort(sortByFeatureId);
 
+  // Intentionally no `generated_at` timestamp: a derived index that changes
+  // every regeneration produces phantom dirty diffs that confuse session-start
+  // hooks and force noisy commits. Idempotent output keeps the working tree
+  // honest — only real spec changes show up as diffs.
   const index = {
     features: records,
-    generated_at: new Date().toISOString(),
   };
 
   const output = `${JSON.stringify(index, null, 2)}\n`;

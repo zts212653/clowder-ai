@@ -32,12 +32,15 @@ describe('F099 Hub navigation', () => {
     it('openHub("commands") deep-links to specific tab', () => {
       useChatStore.getState().openHub('commands');
       const state = useChatStore.getState().hubState;
-      expect(state).toEqual({ open: true, tab: 'commands' });
+      // F174 D2b-3 cloud P2 #1403: openHub now also stamps subTabNonce so
+      // repeated deep-links re-fire useEffect — match shape, ignore nonce value.
+      expect(state).toMatchObject({ open: true, tab: 'commands' });
+      expect(typeof state?.subTabNonce).toBe('number');
     });
 
     it('openHub("system") deep-links to system tab', () => {
       useChatStore.getState().openHub('system');
-      expect(useChatStore.getState().hubState).toEqual({ open: true, tab: 'system' });
+      expect(useChatStore.getState().hubState).toMatchObject({ open: true, tab: 'system' });
     });
   });
 

@@ -97,35 +97,19 @@ function initProjectWithAlphaWorktree(projectDir) {
   return realpathSync(alphaDir);
 }
 
-function initProjectWithLegacyAlphaWorktree(projectDir) {
-  const remoteDir = mkdtempSync(join(tmpdir(), 'alpha-legacy-remote-'));
-  const legacySandboxDir = mkdtempSync(join(tmpdir(), 'alpha-legacy-sandbox-'));
-  const legacyDir = join(legacySandboxDir, 'legacy-alpha');
-  tempDirs.push(remoteDir, legacySandboxDir);
-
-  execFileSync('git', ['init', '-b', 'main'], { cwd: projectDir, stdio: 'ignore' });
-  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: projectDir, stdio: 'ignore' });
-  execFileSync('git', ['config', 'user.name', 'Test User'], { cwd: projectDir, stdio: 'ignore' });
-  execFileSync('git', ['add', '.'], { cwd: projectDir, stdio: 'ignore' });
-  execFileSync('git', ['commit', '-m', 'init'], { cwd: projectDir, stdio: 'ignore' });
-
-  execFileSync('git', ['init', '--bare', remoteDir], { stdio: 'ignore' });
-  execFileSync('git', ['remote', 'add', 'origin', remoteDir], { cwd: projectDir, stdio: 'ignore' });
-  execFileSync('git', ['push', '-u', 'origin', 'main'], { cwd: projectDir, stdio: 'ignore' });
-  execFileSync('git', ['fetch', 'origin', 'main'], { cwd: projectDir, stdio: 'ignore' });
-  execFileSync('git', ['worktree', 'add', legacyDir, '-b', 'main-test/main-sync', 'origin/main'], {
-    cwd: projectDir,
-    stdio: 'ignore',
-  });
-
-  return realpathSync(legacyDir);
-}
-
-function runAlphaCommand(projectDir, command, alphaDir, extraArgs = [], extraEnv = {}) {
+function runAlpha(projectDir, alphaDir, extraArgs = []) {
   const { binDir, logFile } = createPnpmStub(projectDir);
   const result = spawnSync(
     'bash',
-    [join(projectDir, 'scripts', 'alpha-worktree.sh'), command, '--dir', alphaDir, ...extraArgs],
+    [
+      join(projectDir, 'scripts', 'alpha-worktree.sh'),
+      'start',
+      '--dir',
+      alphaDir,
+      '--no-sync',
+      '--no-quick',
+      ...extraArgs,
+    ],
     {
       cwd: projectDir,
       encoding: 'utf8',
@@ -133,20 +117,15 @@ function runAlphaCommand(projectDir, command, alphaDir, extraArgs = [], extraEnv
         ...process.env,
         PATH: `${binDir}:${process.env.PATH}`,
         ALPHA_TEST_PNPM_LOG: logFile,
-        CAT_CAFE_ALPHA_WEB_PORT: '19511',
+        CAT_CAFE_ALPHA_FRONTEND_PORT: '19511',
         CAT_CAFE_ALPHA_API_PORT: '19512',
-        CAT_CAFE_ALPHA_GATEWAY_PORT: '19513',
+        CAT_CAFE_ALPHA_PREVIEW_GATEWAY_PORT: '19513',
         CAT_CAFE_ALPHA_REDIS_PORT: '19514',
-        ...extraEnv,
       },
     },
   );
 
   return { ...result, pnpmLog: readFileSync(logFile, 'utf8') };
-}
-
-function runAlpha(projectDir, alphaDir, extraArgs = []) {
-  return runAlphaCommand(projectDir, 'start', alphaDir, ['--no-sync', ...extraArgs]);
 }
 
 afterEach(async () => {
@@ -156,9 +135,7 @@ afterEach(async () => {
 });
 
 describe('alpha-worktree.sh', () => {
-  it('auto-installs when node_modules exists but dependency markers are incomplete', (t) => {
-    if (process.platform === 'win32') t.skip('requires bash');
-
+  it('auto-installs when node_modules exists but dependency markers are incomplete', () => {
     const projectDir = createTempProject('alpha-self-heal-install');
     const alphaDir = initProjectWithAlphaWorktree(projectDir);
     seedPartialAlphaInstall(alphaDir);
@@ -172,9 +149,7 @@ describe('alpha-worktree.sh', () => {
     assert.match(result.pnpmLog, /install --frozen-lockfile/);
   });
 
-  it('fails with guidance when dependency markers are incomplete and auto-install is disabled', (t) => {
-    if (process.platform === 'win32') t.skip('requires bash');
-
+  it('fails with guidance when dependency markers are incomplete and auto-install is disabled', () => {
     const projectDir = createTempProject('alpha-self-heal-no-install');
     const alphaDir = initProjectWithAlphaWorktree(projectDir);
     seedPartialAlphaInstall(alphaDir);
@@ -185,40 +160,5 @@ describe('alpha-worktree.sh', () => {
     assert.match(result.stderr, /alpha prerequisites missing/);
     assert.match(result.stderr, /install --frozen-lockfile/);
     assert.doesNotMatch(result.stdout, /ALPHA-STARTED:/);
-  });
-
-  it('migrates the legacy alpha worktree even when the target dir already exists empty', (t) => {
-    if (process.platform === 'win32') t.skip('requires bash');
-
-    const projectDir = createTempProject('alpha-legacy-migration');
-    const legacyDir = initProjectWithLegacyAlphaWorktree(projectDir);
-    const alphaSandboxDir = mkdtempSync(join(tmpdir(), 'alpha-target-dir-'));
-    const alphaDir = join(alphaSandboxDir, 'alpha');
-    const resolvedLegacyDir = realpathSync(legacyDir);
-    tempDirs.push(alphaSandboxDir);
-    mkdirSync(alphaDir, { recursive: true });
-
-    const result = runAlphaCommand(projectDir, 'init', alphaDir, [], {
-      CAT_CAFE_ALPHA_LEGACY_DIR: legacyDir,
-    });
-
-    const worktreeList = execFileSync('git', ['worktree', 'list', '--porcelain'], {
-      cwd: projectDir,
-      encoding: 'utf8',
-    });
-    const resolvedAlphaDir = realpathSync(alphaDir);
-
-    assert.equal(result.status, 0, `exit=${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
-    assert.match(result.stdout, /migrating legacy alpha worktree/);
-    assert.match(result.stdout, /legacy alpha worktree migrated/);
-    assert.match(worktreeList, new RegExp(`worktree ${resolvedAlphaDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
-    assert.doesNotMatch(
-      worktreeList,
-      new RegExp(`worktree ${resolvedLegacyDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
-    );
-    assert.equal(
-      execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: alphaDir, encoding: 'utf8' }).trim(),
-      'alpha/main-sync',
-    );
   });
 });

@@ -22,10 +22,11 @@ function createMockRegistry() {
       records.set(id, { catId, threadId, userId, invocationId: id, callbackToken: token });
       return { invocationId: id, callbackToken: token };
     },
-    verify(invocationId, callbackToken) {
+    async verify(invocationId, callbackToken) {
       const r = records.get(invocationId);
-      if (!r || r.callbackToken !== callbackToken) return null;
-      return r;
+      if (!r) return { ok: false, reason: 'unknown_invocation' };
+      if (r.callbackToken !== callbackToken) return { ok: false, reason: 'invalid_token' };
+      return { ok: true, record: r };
     },
     isLatest() {
       return true;

@@ -387,6 +387,7 @@ describe('Antigravity waiting approval', () => {
       catId: 'antigravity',
       model: 'claude-opus-4-6',
       bridge,
+      modelCapacityRetryDelaysMs: [],
     });
 
     const messages = await collect(service.invoke('test'));
@@ -432,6 +433,7 @@ describe('Antigravity waiting approval', () => {
       catId: 'antigravity',
       model: 'claude-opus-4-6',
       bridge,
+      modelCapacityRetryDelaysMs: [],
     });
 
     const messages = await collect(service.invoke('test'));

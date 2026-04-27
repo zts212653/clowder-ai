@@ -21,7 +21,7 @@ const CONFIG: ConfigData & {
   cats: {
     opus: { displayName: '布偶猫', clientId: 'anthropic', model: 'claude-opus-4-5-20250214', mcpSupport: true },
     codex: { displayName: '缅因猫', clientId: 'openai', model: 'codex-2025-03', mcpSupport: false },
-    antigravity: { displayName: '孟加拉猫', clientId: 'antigravity', model: 'gemini-bridge', mcpSupport: false },
+    antigravity: { displayName: '孟加拉猫', clientId: 'antigravity', model: 'gemini-bridge', mcpSupport: true },
   },
   perCatBudgets: {
     opus: { maxPromptTokens: 150000, maxContextTokens: 200000, maxMessages: 50, maxContentLengthPerMsg: 64000 },

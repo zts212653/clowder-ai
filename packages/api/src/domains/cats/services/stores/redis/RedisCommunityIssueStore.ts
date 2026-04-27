@@ -84,6 +84,7 @@ export class RedisCommunityIssueStore implements ICommunityIssueStore {
       directionCard: null,
       ownerDecision: null,
       relatedFeature: null,
+      guardianAssignment: null,
       lastActivity: { at: now, event: 'created' },
       createdAt: now,
       updatedAt: now,
@@ -189,6 +190,7 @@ export class RedisCommunityIssueStore implements ICommunityIssueStore {
       directionCard: item.directionCard ? JSON.stringify(item.directionCard) : '',
       ownerDecision: item.ownerDecision ?? '',
       relatedFeature: item.relatedFeature ?? '',
+      guardianAssignment: item.guardianAssignment ? JSON.stringify(item.guardianAssignment) : '',
       lastActivityAt: item.lastActivity.at,
       lastActivityEvent: item.lastActivity.event,
       createdAt: item.createdAt,
@@ -212,6 +214,7 @@ export class RedisCommunityIssueStore implements ICommunityIssueStore {
       directionCard: raw.directionCard ? JSON.parse(raw.directionCard) : null,
       ownerDecision: raw.ownerDecision ? (raw.ownerDecision as CommunityIssueItem['ownerDecision']) : null,
       relatedFeature: raw.relatedFeature || null,
+      guardianAssignment: raw.guardianAssignment ? JSON.parse(raw.guardianAssignment) : null,
       lastActivity: {
         at: Number(raw.lastActivityAt),
         event: raw.lastActivityEvent,

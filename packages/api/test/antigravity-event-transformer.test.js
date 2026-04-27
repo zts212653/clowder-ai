@@ -223,6 +223,28 @@ describe('G10: model_capacity error classification', () => {
     assert.match(errMsg.error, /非 Clowder AI/);
   });
 
+  test('ERROR_MESSAGE with quota-reset wording → provider_signal + model_capacity', () => {
+    const steps = [
+      {
+        type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+        status: 'DONE',
+        errorMessage: {
+          error: {
+            userErrorMessage: 'You have exhausted your capacity on this model. Your quota will reset after 0s.',
+          },
+        },
+      },
+    ];
+    const msgs = transformTrajectorySteps(steps, catId, metadata);
+    const warnMsg = msgs.find((m) => m.type === 'provider_signal');
+    assert.ok(warnMsg, 'quota-style capacity error should still emit provider_signal');
+    const errMsg = msgs.find((m) => m.type === 'error');
+    assert.ok(errMsg);
+    assert.equal(errMsg.errorCode, 'model_capacity');
+    assert.match(errMsg.error, /非 Clowder AI/);
+    assert.match(errMsg.error, /quota will reset after 0s/i);
+  });
+
   test('ERROR_MESSAGE with non-capacity error → errorCode upstream_error (unchanged)', () => {
     const steps = [
       {
@@ -268,6 +290,21 @@ describe('Transformer regression', () => {
     const msgs = transformTrajectorySteps(steps, catId, metadata);
     const textMsg = msgs.find((m) => m.type === 'text');
     assert.equal(textMsg.content, 'modified');
+  });
+
+  test('propagates replace mode for corrected snapshot replay', () => {
+    const steps = [
+      {
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        status: 'CORTEX_STEP_STATUS_DONE',
+        catCafeTextMode: 'replace',
+        plannerResponse: { modifiedResponse: '第一段。插入一句。第二段。' },
+      },
+    ];
+    const msgs = transformTrajectorySteps(steps, catId, metadata);
+    const textMsg = msgs.find((m) => m.type === 'text');
+    assert.equal(textMsg.content, '第一段。插入一句。第二段。');
+    assert.equal(textMsg.textMode, 'replace');
   });
 
   test('emits thinking as system_info before text', () => {

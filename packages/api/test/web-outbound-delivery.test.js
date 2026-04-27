@@ -89,6 +89,33 @@ describe('deliverOutboundFromWeb (F088 ISSUE-15)', () => {
     assert.equal(deliverCalls[1].catId, 'codex');
   });
 
+  it('uses turn-based aggregate for stream end when a later turn was replace-mode rewritten', async () => {
+    const opts = makeOpts({
+      outboundHook: mockOutboundHook,
+      streamingHook: mockStreamingHook,
+    });
+    const turns = [
+      { catId: 'opus', textParts: ['First cat. '] },
+      { catId: 'antigravity', textParts: ['Second cat rewritten.'] },
+    ];
+    const ctx = { failed: false, errors: [] };
+
+    await deliverOutboundFromWeb(
+      't-1',
+      'opus',
+      'inv-1',
+      ['Second cat rewritten.'],
+      turns,
+      ctx,
+      undefined,
+      opts,
+      noopLog(),
+    );
+
+    assert.equal(streamCalls.end.length, 1);
+    assert.equal(streamCalls.end[0].text, 'First cat. Second cat rewritten.');
+  });
+
   it('does not call deliver when outboundHook is absent', async () => {
     const opts = makeOpts();
     const turns = [{ catId: 'opus', textParts: ['test'] }];

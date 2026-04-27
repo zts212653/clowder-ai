@@ -91,6 +91,11 @@ export interface CatVariant {
   readonly teamStrengths?: string;
   /** F-Ground-3: Caution note. null = explicitly no caution (overrides breed). */
   readonly caution?: string | null;
+  /** F167 Phase E (KD-20): hard task restrictions — natural-language bans
+   *  (e.g. `["禁止写代码"]`). Surfaced to teammates via buildTeammateRoster
+   *  and to the cat itself via buildStaticIdentity. Data-driven replacement
+   *  for the retired L3 role-gate hardcoded regex. */
+  readonly restrictions?: readonly string[];
   /** F127: Extra CLI --config key=value pairs passed to the client at invocation time.
    *  Each entry is a raw config string, e.g. 'model_reasoning_effort="low"'. */
   readonly cliConfigArgs?: readonly string[];
@@ -156,6 +161,9 @@ export interface CatBreed {
   readonly teamStrengths?: string;
   /** F-Ground-3: Caution note. null = explicitly no caution (overrides breed). */
   readonly caution?: string | null;
+  /** F167 Phase E (KD-20): breed-level hard restrictions; variants may override.
+   *  Natural-language bans (e.g. `["禁止生成图片"]`). */
+  readonly restrictions?: readonly string[];
 }
 
 // ── F032: Roster types for collaboration rules ─────────────────────────

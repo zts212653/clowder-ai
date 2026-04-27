@@ -133,7 +133,7 @@ printf '%s' "$(resolve_installer_auth_config_root)"
 test('installer auth config root ignores parent repo worktrees when project dir has no local git metadata', () => {
   const parentRepoRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-install-auth-parent-repo-'));
   const projectRoot = join(parentRepoRoot, 'deployments', 'cat-cafe');
-  const runtimeRoot = join(tmpdir(), `cat-cafe-parent-runtime-${Date.now()}`);
+  const runtimeRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-parent-runtime-'));
 
   try {
     mkdirSync(projectRoot, { recursive: true });

@@ -83,6 +83,7 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
         : {};
   const common = {
     displayName,
+    variantLabel: trimText(form.variantLabel),
     nickname: trimText(form.nickname),
     avatar: trimText(form.avatar),
     color: {

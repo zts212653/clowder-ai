@@ -118,6 +118,12 @@ export interface AgentMessage {
   catId: CatId;
   /** Text content (for 'text' and 'tool_result' types) */
   content?: string;
+  /**
+   * How the frontend should apply text content.
+   * Default append preserves streaming semantics; replace is used when the
+   * provider emits a full corrected snapshot instead of a pure suffix delta.
+   */
+  textMode?: 'append' | 'replace';
   /** Session ID (for 'session_init' type) */
   sessionId?: string;
   /** ACP transport: sessionId is per-invocation, not a persistent CLI session.

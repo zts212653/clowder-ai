@@ -29,6 +29,7 @@ export class InMemoryCommunityIssueStore implements ICommunityIssueStore {
       directionCard: null,
       ownerDecision: null,
       relatedFeature: null,
+      guardianAssignment: null,
       lastActivity: { at: now, event: 'created' },
       createdAt: now,
       updatedAt: now,

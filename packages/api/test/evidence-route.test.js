@@ -42,6 +42,7 @@ describe('GET /api/evidence/search', () => {
           title: 'ADR-005 Hindsight Integration',
           summary: 'ADR-005 decided single bank strategy for Hindsight integration',
           updatedAt: '2026-01-01T00:00:00Z',
+          authority: 'validated',
         },
         {
           anchor: 'docs/phases/phase-4.0-direction.md',
@@ -50,6 +51,7 @@ describe('GET /api/evidence/search', () => {
           title: 'Phase 4 Direction',
           summary: 'Phase 4 completed with 460 tests',
           updatedAt: '2026-01-01T00:00:00Z',
+          authority: 'candidate',
         },
       ],
     });
@@ -64,9 +66,44 @@ describe('GET /api/evidence/search', () => {
     assert.equal(body.degraded, false);
     assert.equal(body.results.length, 2);
     assert.equal(body.results[0].sourceType, 'decision');
-    assert.equal(body.results[0].confidence, 'mid');
+    // Phase E: confidence = f(rank), rank 0 of 2 → high
+    assert.equal(body.results[0].confidence, 'high');
+    assert.equal(body.results[0].authority, 'validated');
     assert.equal(body.results[1].sourceType, 'phase');
-    assert.equal(body.results[1].confidence, 'mid');
+    // Phase E: rank 1 of 2 → high
+    assert.equal(body.results[1].confidence, 'high');
+    assert.equal(body.results[1].authority, 'candidate');
+  });
+
+  it('Phase E: confidence reflects rank position, not authority', async () => {
+    await setup({
+      search: async () =>
+        Array.from({ length: 6 }, (_, i) => ({
+          anchor: `doc-${i}`,
+          kind: 'feature',
+          status: 'active',
+          title: `Doc ${i}`,
+          summary: `Summary ${i}`,
+          updatedAt: '2026-01-01T00:00:00Z',
+          authority: 'constitutional',
+        })),
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=test',
+    });
+
+    const body = res.json();
+    assert.equal(body.results[0].confidence, 'high');
+    assert.equal(body.results[1].confidence, 'high');
+    assert.equal(body.results[2].confidence, 'mid');
+    assert.equal(body.results[4].confidence, 'mid');
+    assert.equal(body.results[5].confidence, 'low');
+    // all have same authority despite different confidence
+    for (const r of body.results) {
+      assert.equal(r.authority, 'constitutional');
+    }
   });
 
   it('passes query and limit to evidence store', async () => {

@@ -83,6 +83,30 @@ describe('chatStore thinking dedupe', () => {
     expect(msg.thinking).toBe(`${firstThought}\n\n---\n\nShared tail`);
   });
 
+  it('replaces the last chunk when the next thinking block is a strict prefix growth snapshot', () => {
+    const store = useChatStore.getState();
+    store.addMessage(makeAssistant('msg-1'));
+
+    store.setMessageThinking('msg-1', 'First thought');
+    store.setMessageThinking('msg-1', 'First thought with more detail');
+
+    const msg = useChatStore.getState().messages.find((m) => m.id === 'msg-1')!;
+    expect(msg.thinking).toBe('First thought with more detail');
+    expect(msg.thinkingChunks).toEqual(['First thought with more detail']);
+  });
+
+  it('ignores a stale shorter snapshot when a longer thinking chunk already exists', () => {
+    const store = useChatStore.getState();
+    store.addMessage(makeAssistant('msg-1'));
+
+    store.setMessageThinking('msg-1', 'First thought with more detail');
+    store.setMessageThinking('msg-1', 'First thought');
+
+    const msg = useChatStore.getState().messages.find((m) => m.id === 'msg-1')!;
+    expect(msg.thinking).toBe('First thought with more detail');
+    expect(msg.thinkingChunks).toEqual(['First thought with more detail']);
+  });
+
   it('keeps current thinking intact when stale thinkingChunks disagree with the rendered text', () => {
     useChatStore.setState({
       messages: [

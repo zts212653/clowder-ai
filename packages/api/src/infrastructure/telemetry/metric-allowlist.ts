@@ -12,6 +12,8 @@
 import { createAllowListAttributesProcessor, type ViewOptions } from '@opentelemetry/sdk-metrics';
 import {
   AGENT_ID,
+  CALLBACK_REASON,
+  CALLBACK_TOOL,
   GENAI_MODEL,
   GENAI_SYSTEM,
   OPERATION_NAME,
@@ -29,6 +31,8 @@ export const ALLOWED_METRIC_ATTRIBUTES: ReadonlySet<string> = new Set([
   STATUS,
   STREAM_ERROR_PATH,
   TRIGGER,
+  CALLBACK_TOOL,
+  CALLBACK_REASON,
 ]);
 
 const allowedKeys = [...ALLOWED_METRIC_ATTRIBUTES];

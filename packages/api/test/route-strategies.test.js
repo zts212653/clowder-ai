@@ -159,7 +159,7 @@ function createMockDeps(services, appendCalls, threadStore = null, guideSessionS
     invocationDeps: {
       registry: {
         create: () => ({ invocationId: `inv-${++counter}`, callbackToken: `tok-${counter}` }),
-        verify: () => null,
+        verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
       },
       sessionManager: {
         get: async () => undefined,
@@ -1011,7 +1011,7 @@ describe('routeSerial resilience', () => {
       invocationDeps: {
         registry: {
           create: () => ({ invocationId: `inv-${++counter}`, callbackToken: `tok-${counter}` }),
-          verify: () => null,
+          verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
         },
         sessionManager: {
           get: async () => undefined,
@@ -2778,6 +2778,44 @@ describe('routeParallel thinking persistence (F045)', () => {
     assert.equal(appendCalls[0].thinking, 'First thought\n\n---\n\nSecond thought');
   });
 
+  it('deduplicates cumulative thinking snapshots by prefix in parallel mode', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+
+    const cumulativeService = {
+      async *invoke(_prompt) {
+        yield {
+          type: 'system_info',
+          catId: 'opus',
+          content: JSON.stringify({ type: 'invocation_created', invocationId: 'inv-think-2b' }),
+          timestamp: Date.now(),
+        };
+        yield {
+          type: 'system_info',
+          catId: 'opus',
+          content: JSON.stringify({ type: 'thinking', text: 'A' }),
+          timestamp: Date.now(),
+        };
+        yield {
+          type: 'system_info',
+          catId: 'opus',
+          content: JSON.stringify({ type: 'thinking', text: 'A and more' }),
+          timestamp: Date.now(),
+        };
+        yield { type: 'text', catId: 'opus', content: 'done', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const appendCalls = [];
+    const deps = createMockDeps({ opus: cumulativeService }, appendCalls);
+
+    for await (const _msg of routeParallel(deps, ['opus'], 'test', 'user1', 'thread1')) {
+      /* drain */
+    }
+
+    assert.equal(appendCalls[0].thinking, 'A and more');
+  });
+
   it('forwards invocation_created system_info to frontend while still persisting content', async () => {
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
 
@@ -2874,5 +2912,43 @@ describe('routeSerial thinking persistence (F045)', () => {
     );
     assert.ok(invocationCreated, 'routeSerial must forward invocation_created');
     assert.equal(appendCalls.length, 1, 'content persistence should still work');
+  });
+
+  it('deduplicates cumulative thinking snapshots by prefix in serial mode', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+
+    const service = {
+      async *invoke(_prompt) {
+        yield {
+          type: 'system_info',
+          catId: 'opus',
+          content: JSON.stringify({ type: 'invocation_created', invocationId: 'inv-think-s2' }),
+          timestamp: Date.now(),
+        };
+        yield {
+          type: 'system_info',
+          catId: 'opus',
+          content: JSON.stringify({ type: 'thinking', text: 'A' }),
+          timestamp: Date.now(),
+        };
+        yield {
+          type: 'system_info',
+          catId: 'opus',
+          content: JSON.stringify({ type: 'thinking', text: 'A and more' }),
+          timestamp: Date.now(),
+        };
+        yield { type: 'text', catId: 'opus', content: 'Serial answer', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const appendCalls = [];
+    const deps = createMockDeps({ opus: service }, appendCalls);
+
+    for await (const _msg of routeSerial(deps, ['opus'], 'test', 'user1', 'thread1')) {
+      /* drain */
+    }
+
+    assert.equal(appendCalls[0].thinking, 'A and more', 'serial mode should keep only the latest cumulative snapshot');
   });
 });

@@ -57,7 +57,7 @@ describe('useChatCommands hub commands (F12)', () => {
   it('/help opens Hub to commands tab via processCommand', async () => {
     const handled = await act(() => captured?.processCommand('/help'));
     expect(handled).toBe(true);
-    expect(useChatStore.getState().hubState).toEqual({ open: true, tab: 'commands' });
+    expect(useChatStore.getState().hubState).toMatchObject({ open: true, tab: 'commands' });
   });
 
   it('/help does NOT add any message to chat', async () => {
@@ -68,7 +68,7 @@ describe('useChatCommands hub commands (F12)', () => {
   it('/config (no args) opens Hub to system tab via processCommand', async () => {
     const handled = await act(() => captured?.processCommand('/config'));
     expect(handled).toBe(true);
-    expect(useChatStore.getState().hubState).toEqual({ open: true, tab: 'system' });
+    expect(useChatStore.getState().hubState).toMatchObject({ open: true, tab: 'system' });
   });
 
   it('/config (no args) does NOT add any message to chat', async () => {
@@ -91,7 +91,7 @@ describe('useChatCommands hub commands (F12)', () => {
 
   it('openHub/closeHub cycle works', () => {
     useChatStore.getState().openHub('commands');
-    expect(useChatStore.getState().hubState).toEqual({ open: true, tab: 'commands' });
+    expect(useChatStore.getState().hubState).toMatchObject({ open: true, tab: 'commands' });
     useChatStore.getState().closeHub();
     expect(useChatStore.getState().hubState).toBeNull();
   });

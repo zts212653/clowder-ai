@@ -47,6 +47,7 @@ export interface EvidenceResultData {
   snippet: string;
   confidence: 'high' | 'mid' | 'low';
   sourceType: 'decision' | 'phase' | 'discussion' | 'commit';
+  authority?: string;
 }
 
 export interface EvidenceData {
@@ -91,6 +92,8 @@ export interface RichCardBlock {
   fields?: Array<{ label: string; value: string }>;
   /** F066 Phase 4: Optional action buttons */
   actions?: CardAction[];
+  /** F174 D2b-1: opaque metadata for sub-renderer detection (e.g. callback_auth_failure) */
+  meta?: Record<string, unknown>;
 }
 
 export interface RichDiffBlock {
@@ -263,6 +266,15 @@ export interface ChatMessage {
       reasonKind: 'needs_bootstrap' | 'needs_confirmation' | 'files_missing';
       invocationId?: string;
     };
+    /**
+     * F173 a2a-handoff bug fix: marker for system messages that must be
+     * timestamp-ordered into the message list (not appended at end).
+     * a2a_handoff: routing pill ("缅因猫 → 布偶猫") emitted by route-serial,
+     * which can arrive after the next cat's stream bubble due to WebSocket
+     * pipeline race; without marker it ends up visually after the bubble it
+     * should precede.
+     */
+    systemKind?: 'a2a_routing';
   };
   /** F045: Extended thinking content, rendered as collapsible block inside assistant bubble */
   thinking?: string;

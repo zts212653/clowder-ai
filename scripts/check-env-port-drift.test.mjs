@@ -970,6 +970,53 @@ describe(
         'startup acceptance must not reject the exported Preview Gateway default port 4100',
       );
     });
+
+    it('startup acceptance forces watchpack polling for frontend dev server', () => {
+      const gate = readFunctionBody(readSyncScript(), 'run_target_public_gate');
+      assert.match(
+        gate,
+        /run_public_acceptance_env WATCHPACK_POLLING=true PORT=\$accept_web_port\s+\\\s+pnpm --filter @cat-cafe\/web dev -p \$accept_web_port/,
+        'startup acceptance should avoid native watchpack EMFILE failures on release machines with many worktrees',
+      );
+    });
+
+    it('startup acceptance bounds readiness probes by wall-clock deadlines', () => {
+      const content = readSyncScript();
+      const gate = readFunctionBody(content, 'run_target_public_gate');
+      const remainingHelper = readFunctionBody(content, 'remaining_wall_clock_seconds');
+      const timeoutHelper = readFunctionBody(content, 'curl_probe_timeout');
+
+      assert.match(
+        remainingHelper,
+        /remaining=\$\(\( deadline - now \)\)/,
+        'remaining_wall_clock_seconds should calculate time left from an absolute deadline',
+      );
+      assert.match(
+        timeoutHelper,
+        /if \[ "\$remaining" -lt "\$max_timeout" \]; then/,
+        'curl_probe_timeout should cap each probe by the remaining wall-clock budget',
+      );
+      assert.match(
+        gate,
+        /web_deadline=\$\(\( \$\(date \+%s\) \+ web_wait_seconds \)\)/,
+        'frontend readiness should use an absolute deadline derived from PUBLIC_GATE_FRONTEND_WAIT_SECONDS',
+      );
+      assert.match(
+        gate,
+        /remaining="\$\(remaining_wall_clock_seconds "\$web_deadline"\)"/,
+        'frontend readiness should recompute remaining wall-clock time on each probe',
+      );
+      assert.match(
+        gate,
+        /curl_timeout="\$\(curl_probe_timeout "\$remaining" 5\)"/,
+        'frontend readiness should cap each curl probe instead of multiplying a long timeout by loop count',
+      );
+      assert.doesNotMatch(
+        gate,
+        /for i in \$\(seq 1 "\$web_wait_seconds"\)[\s\S]*curl -sf --max-time 30/,
+        'frontend readiness must not multiply a 30s curl timeout by the advertised wait seconds',
+      );
+    });
   },
 );
 

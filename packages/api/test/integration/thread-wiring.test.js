@@ -411,7 +411,7 @@ describe('MCP callback stores message with threadId', () => {
   });
 
   it('post-message callback stores message with invocation threadId', async () => {
-    const { invocationId, callbackToken } = registry.create('alice', 'opus', 'thread-42');
+    const { invocationId, callbackToken } = await registry.create('alice', 'opus', 'thread-42');
 
     const res = await app.inject({
       method: 'POST',

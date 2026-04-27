@@ -72,6 +72,11 @@ export interface CatConfig {
   readonly teamStrengths?: string;
   /** F-Ground-3: Caution note for teammate roster. null = explicitly no warning (overrides breed). */
   readonly caution?: string | null;
+  /** F167 Phase E (KD-20): hard task restrictions — natural-language bans
+   *  (e.g. `["禁止写代码"]`). Surfaced to teammates via buildTeammateRoster
+   *  and to the cat itself via buildStaticIdentity. Data-driven replacement
+   *  for the retired L3 role-gate hardcoded regex. */
+  readonly restrictions?: readonly string[];
   /** F127 Screen 3: editable strength tags */
   readonly strengths?: readonly string[];
   /** F127 Screen 3: whether session chain is enabled for this member */

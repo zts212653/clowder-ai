@@ -357,4 +357,64 @@ describe('VG-3: buildThreadMemory with DecisionSignals', () => {
     assert.deepStrictEqual(result.openQuestions, ['阈值待定'], 'must preserve existing openQuestions');
     assert.deepStrictEqual(result.artifacts, ['F148'], 'must preserve existing artifacts');
   });
+
+  // AC-H2 + G1: recentArtifacts stored as ledger (sorted by updatedAt DESC)
+  it('AC-H2: stores recentArtifacts when provided (sorted by updatedAt DESC)', () => {
+    const artifacts = [
+      { type: 'file', ref: 'src/index.ts', label: 'index.ts', updatedAt: 1000, updatedBy: 'opus', ops: ['edit'] },
+      {
+        type: 'feature-doc',
+        ref: 'docs/features/F148.md',
+        label: 'F148.md',
+        updatedAt: 2000,
+        updatedBy: 'opus',
+        ops: ['edit'],
+      },
+    ];
+    const result = buildThreadMemory(null, baseDigest, 3000, undefined, artifacts);
+    assert.equal(result.recentArtifacts?.length, 2);
+    assert.equal(result.recentArtifacts[0].ref, 'docs/features/F148.md', 'newest first');
+    assert.equal(result.recentArtifacts[1].ref, 'src/index.ts', 'oldest second');
+  });
+
+  it('AC-H2 + G1: appends new artifacts to existing ledger (not overwrite)', () => {
+    const existing = {
+      v: 1,
+      summary: 'Session #1',
+      sessionsIncorporated: 1,
+      updatedAt: Date.now(),
+      recentArtifacts: [{ type: 'file', ref: 'old.ts', label: 'old.ts', updatedAt: 1000, updatedBy: 'opus' }],
+    };
+    const newArtifacts = [
+      { type: 'file', ref: 'new.ts', label: 'new.ts', updatedAt: 2000, updatedBy: 'opus', ops: ['create'] },
+    ];
+    const result = buildThreadMemory(existing, { ...baseDigest, seq: 1 }, 3000, undefined, newArtifacts);
+    assert.equal(result.recentArtifacts?.length, 2, 'should accumulate both entries');
+    assert.equal(result.recentArtifacts?.[0].ref, 'new.ts', 'newest first');
+    assert.equal(result.recentArtifacts?.[1].ref, 'old.ts', 'oldest second');
+  });
+
+  it('AC-H2: preserves existing recentArtifacts when new artifacts param is undefined', () => {
+    const existing = {
+      v: 1,
+      summary: 'Session #1',
+      sessionsIncorporated: 1,
+      updatedAt: Date.now(),
+      recentArtifacts: [{ type: 'pr', ref: 'cat-cafe#1293', label: 'PR #1293', updatedAt: 3000, updatedBy: 'codex' }],
+    };
+    const result = buildThreadMemory(existing, { ...baseDigest, seq: 1 }, 3000);
+    assert.equal(result.recentArtifacts?.length, 1);
+    assert.equal(result.recentArtifacts?.[0].ref, 'cat-cafe#1293');
+  });
+
+  it('AC-H2: backward compat — old memory without recentArtifacts produces no field', () => {
+    const existing = {
+      v: 1,
+      summary: 'Session #1',
+      sessionsIncorporated: 1,
+      updatedAt: Date.now(),
+    };
+    const result = buildThreadMemory(existing, { ...baseDigest, seq: 1 }, 3000);
+    assert.equal(result.recentArtifacts, undefined);
+  });
 });

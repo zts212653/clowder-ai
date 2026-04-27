@@ -451,6 +451,7 @@
       "roleDescription": "视觉设计师和创意顾问，擅长 UI/UX 设计和视觉表达",
       "teamStrengths": "审美、前端设计风格、打破常规",
       "caution": "禁止写代码！幻觉多，不遵守 SOP",
+      "restrictions": ["禁止写代码"],
       "features": {
         "sessionChain": true
       },
@@ -593,7 +594,7 @@
       "caution": "ConnectRPC Bridge；需要本机运行 Antigravity IDE",
       "defaultVariantId": "antigravity-gemini",
       "features": {
-        "sessionChain": false
+        "sessionChain": true
       },
       "variants": [
         {
@@ -601,7 +602,7 @@
           "variantLabel": "Gemini",
           "clientId": "antigravity",
           "defaultModel": "gemini-3.1-pro",
-          "mcpSupport": false,
+          "mcpSupport": true,
           "personality": "精力旺盛、好奇心爆棚，像一只永远在探索新领地的豹猫——什么都想试，什么都敢碰",
           "strengths": ["image-generation", "browser-automation", "visual-evidence", "multi-model"],
           "contextBudget": {

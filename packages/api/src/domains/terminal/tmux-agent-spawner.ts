@@ -228,6 +228,10 @@ export async function* spawnCliInTmux(
   }
 
   try {
+    if (killed) {
+      return { paneId };
+    }
+
     // createReadStream queues open() asynchronously — it doesn't block here.
     // The actual open() blocks at the kernel level until tee connects as writer.
     // rl.close() in killAgent unblocks `for await` even if open() is still pending.

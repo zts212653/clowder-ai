@@ -33,7 +33,7 @@ describe('callback-limb-routes (Fastify injection)', () => {
     invocationRegistry = new InvocationRegistry();
 
     // Create a real invocation so verify() returns a record
-    const creds = invocationRegistry.create('user-1', 'opus', 'thread-1');
+    const creds = await invocationRegistry.create('user-1', 'opus', 'thread-1');
     validInvocationId = creds.invocationId;
     validToken = creds.callbackToken;
 

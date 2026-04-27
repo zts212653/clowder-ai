@@ -47,7 +47,7 @@ export function pathToAuthority(sourcePath: string): F163Authority {
   return 'observed';
 }
 
-/** Phase D: derive user-facing confidence from authority level */
+/** Phase D (kept for backward compat, but no longer used in search route) */
 export function authorityToConfidence(authority: F163Authority | undefined): 'high' | 'mid' | 'low' {
   switch (authority) {
     case 'constitutional':
@@ -60,6 +60,82 @@ export function authorityToConfidence(authority: F163Authority | undefined): 'hi
     default:
       return 'mid';
   }
+}
+
+/** Phase E: confidence = f(rank) — reflects search match quality, not document authority */
+export function rankToConfidence(rank: number): 'high' | 'mid' | 'low' {
+  if (rank <= 1) return 'high';
+  if (rank <= 4) return 'mid';
+  return 'low';
+}
+
+// ── Phase F: Task-scoped Salience Gating ────────────────────────────
+
+export interface SalienceTaskContext {
+  activeFeatureIds: string[];
+  truthSourceRef: string | null;
+  recentArtifactRefs: string[];
+}
+
+interface SalienceDoc {
+  anchor: string;
+  authority?: F163Authority;
+  activation?: F163Activation;
+  keywords?: string[];
+}
+
+/** Phase F: task-scoped salience — 0.0 (irrelevant) to 1.0 (fully relevant / exempt) */
+export function salience(doc: SalienceDoc, ctx: SalienceTaskContext): number {
+  if (doc.activation === 'always_on') return 1.0;
+  const truthRef = ctx.truthSourceRef?.trim() || null;
+  const hasCtx = ctx.activeFeatureIds.length > 0 || truthRef != null || ctx.recentArtifactRefs.length > 0;
+  if (!hasCtx) return 1.0;
+
+  let score = 0.2;
+  const anchor = doc.anchor.toLowerCase();
+  const kws = (doc.keywords ?? []).map((k) => k.toLowerCase());
+
+  for (const fid of ctx.activeFeatureIds) {
+    const f = fid.toLowerCase();
+    if (anchor.includes(f) || kws.some((k) => k.includes(f))) {
+      score += 0.4;
+      break;
+    }
+  }
+
+  if (truthRef) {
+    const ref = truthRef.toLowerCase();
+    if (anchor === ref || anchor.includes(ref) || ref.includes(anchor)) {
+      score += 0.25;
+    }
+  }
+
+  for (const ref of ctx.recentArtifactRefs) {
+    const r = ref.toLowerCase();
+    if (anchor.includes(r) || r.includes(anchor)) {
+      score += 0.15;
+      break;
+    }
+  }
+
+  if (doc.authority === 'constitutional' || doc.authority === 'validated') {
+    score += 0.05;
+  }
+
+  return Math.min(score, 1.0);
+}
+
+/** Phase F: rerank items by salience score. Stable sort — equal scores preserve input order. */
+export function applySalienceRerank<T extends SalienceDoc>(
+  items: T[],
+  ctx: SalienceTaskContext,
+): { items: T[]; scores: number[] } {
+  const indexed = items.map((item, i) => ({ item, score: salience(item, ctx), i }));
+  indexed.sort((a, b) => b.score - a.score || a.i - b.i);
+  return {
+    items: indexed.map((e) => e.item),
+    scores: indexed.map((e) => e.score),
+  };
 }
 
 /**

@@ -158,6 +158,16 @@ created: 2026-03-27
 
 ## Known Issues
 
+### ~~P0: agent-browser headless Chrome 僵尸进程反复出现~~ ✅ Fixed (PR #1407, 2026-04-25)
+
+`agent-browser` MCP server 退出时不清理子进程树（Chrome GPU / Renderer / Storage），僵尸进程持续 100% CPU × 多核 × 数天。
+
+**历史**：04-10 opencode ping + headless Chrome、04-12 headless Chrome、04-18 headless Chrome 导致前端 OOM 崩溃、04-24 一次性 7 个僵尸吃 570% CPU 导致掉电加速。
+
+**修复**：API 启动时 `cleanOrphanAgentBrowserChrome()` 自动扫描并 SIGKILL ppid=1 的 `agent-browser-chrome-*` Chrome 进程。三重过滤防误杀：Chrome 二进制路径前缀 + `--user-data-dir` agent-browser 标记 + ppid===1 孤儿检测。
+
+**仍需**：agent-browser 上游自身修复退出清理（进程树 kill）——当前方案是启动时事后清理，不是根治。
+
 ### Phase D: ~/.claude.json stale override 遮蔽 resolver 输出（2026-04-08 发现）
 
 **症状**：Pencil resolver 正确解析到 VS Code 0.6.39（`--app vscode`），`.mcp.json` 也正确生成，但 Claude Code session 里 pencil 工具始终不可用。Siamese（Gemini ACP）同样不可用。

@@ -98,7 +98,7 @@ describe('Callback Routes', () => {
 
   test('POST post-message succeeds with valid credentials', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     const response = await app.inject({
       method: 'POST',
@@ -149,7 +149,7 @@ describe('Callback Routes', () => {
       outboundHook,
     });
 
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     const response = await app.inject({
       method: 'POST',
@@ -174,7 +174,7 @@ describe('Callback Routes', () => {
 
   test('POST post-message returns 401 for invalid token', async () => {
     const app = await createApp();
-    const { invocationId } = registry.create('user-1', 'opus');
+    const { invocationId } = await registry.create('user-1', 'opus');
 
     const response = await app.inject({
       method: 'POST',
@@ -196,7 +196,7 @@ describe('Callback Routes', () => {
     // Use very short TTL
     registry = new InvocationRegistry({ ttlMs: 1 });
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     // Wait for expiry
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -227,7 +227,7 @@ describe('Callback Routes', () => {
 
   test('POST post-message deduplicates by clientMessageId (at-least-once safe)', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     const first = await app.inject({
       method: 'POST',
@@ -264,7 +264,7 @@ describe('Callback Routes', () => {
     const app = await createApp();
     const threadA = await threadStore.create('user-1', 'thread-a');
     const threadB = await threadStore.create('user-1', 'thread-b');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', threadA.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadA.id);
 
     const response = await app.inject({
       method: 'POST',
@@ -292,7 +292,7 @@ describe('Callback Routes', () => {
     const app = await createApp();
     const threadA = await threadStore.create('user-1', 'thread-a');
     const threadB = await threadStore.create('user-1', 'thread-b');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', threadA.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadA.id);
 
     const response = await app.inject({
       method: 'POST',
@@ -316,7 +316,7 @@ describe('Callback Routes', () => {
 
   test('POST post-message stores targetCats in extra and uses as mentions (F098-C1)', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     const response = await app.inject({
       method: 'POST',
@@ -340,7 +340,7 @@ describe('Callback Routes', () => {
 
   test('POST post-message broadcasts targetCats in real-time socket event (cloud P2)', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     await app.inject({
       method: 'POST',
@@ -363,7 +363,7 @@ describe('Callback Routes', () => {
 
   test('POST post-message single content @mention ignores extra explicit targetCats (A2A fail-closed)', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     const response = await app.inject({
       method: 'POST',
@@ -388,7 +388,7 @@ describe('Callback Routes', () => {
 
   test('POST post-message keeps merged targets when content has multiple @mentions', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     const response = await app.inject({
       method: 'POST',
@@ -413,7 +413,7 @@ describe('Callback Routes', () => {
     const app = await createApp();
     const threadA = await threadStore.create('user-1', 'thread-a');
     const foreignThread = await threadStore.create('user-2', 'thread-foreign');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', threadA.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadA.id);
 
     const response = await app.inject({
       method: 'POST',
@@ -432,7 +432,7 @@ describe('Callback Routes', () => {
 
   test('GET pending-mentions returns mentions for the cat', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     // Add some messages with mentions
     messageStore.append({
@@ -464,7 +464,7 @@ describe('Callback Routes', () => {
 
   test('GET pending-mentions returns empty array when no mentions', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     const response = await app.inject({
       method: 'GET',
@@ -481,7 +481,7 @@ describe('Callback Routes', () => {
 
   test('GET thread-context returns recent messages', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     messageStore.append({
       userId: 'user-1',
@@ -513,7 +513,7 @@ describe('Callback Routes', () => {
 
   test('GET thread-context respects limit parameter', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     for (let i = 0; i < 10; i++) {
       messageStore.append({
@@ -538,7 +538,7 @@ describe('Callback Routes', () => {
 
   test('GET thread-context supports catId filter (cat + user)', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     messageStore.append({
       userId: 'user-1',
@@ -585,7 +585,7 @@ describe('Callback Routes', () => {
 
   test('GET thread-context supports keyword filter (case-insensitive)', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     messageStore.append({
       userId: 'user-1',
@@ -626,7 +626,7 @@ describe('Callback Routes', () => {
 
   test('GET thread-context combines catId + keyword filters', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     messageStore.append({
       userId: 'user-1',
@@ -663,7 +663,7 @@ describe('Callback Routes', () => {
 
   test('GET thread-context rejects unknown catId filter', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     const response = await app.inject({
       method: 'GET',
@@ -680,7 +680,7 @@ describe('Callback Routes', () => {
 
   test('GET thread-context only returns messages from the same user', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     // user-1's message
     messageStore.append({
@@ -713,7 +713,7 @@ describe('Callback Routes', () => {
 
   test('GET thread-context includes contentBlocks (image attachments)', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     messageStore.append({
       userId: 'user-1',
@@ -757,7 +757,7 @@ describe('Callback Routes', () => {
   test('GET thread-context with threadId reads a different thread', async () => {
     const app = await createApp();
     // Invocation scoped to thread-A
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-A');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-A');
 
     // Messages in thread-A (own thread)
     messageStore.append({
@@ -802,7 +802,7 @@ describe('Callback Routes', () => {
 
   test('GET thread-context without threadId reads own thread (default)', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-A');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-A');
 
     messageStore.append({
       userId: 'user-1',
@@ -835,7 +835,7 @@ describe('Callback Routes', () => {
 
   test('GET thread-context cross-thread respects limit', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-A');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-A');
 
     // 5 messages in thread-B
     for (let i = 0; i < 5; i++) {
@@ -867,7 +867,7 @@ describe('Callback Routes', () => {
 
   test('GET list-threads returns user-scoped threads sorted by lastActiveAt desc', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     const oldThread = await threadStore.create('user-1', 'Old thread');
     const newThread = await threadStore.create('user-1', 'New thread');
@@ -918,7 +918,7 @@ describe('Callback Routes', () => {
 
   test('GET list-threads supports activeSince + limit', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     const t1 = await threadStore.create('user-1', 't1');
     const t2 = await threadStore.create('user-1', 't2');
@@ -946,7 +946,7 @@ describe('Callback Routes', () => {
 
   test('GET list-threads filters by keyword (title + threadId)', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     await threadStore.create('user-1', 'Clowder AI Design');
     await threadStore.create('user-1', 'Redis Debugging');
@@ -965,7 +965,7 @@ describe('Callback Routes', () => {
 
   test('GET list-threads validates query params', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     const response = await app.inject({
       method: 'GET',
@@ -981,7 +981,7 @@ describe('Callback Routes', () => {
   test('GET list-threads returns 503 when threadStore is not configured', async () => {
     threadStore = undefined;
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     const response = await app.inject({
       method: 'GET',
@@ -999,7 +999,7 @@ describe('Callback Routes', () => {
     const threadA = await threadStore.create('user-1', 'thread-a');
     const threadB = await threadStore.create('user-1', 'thread-b');
     const threadOther = await threadStore.create('user-2', 'thread-other');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', threadA.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadA.id);
 
     const taskA1 = await taskStore.create({
       threadId: threadA.id,
@@ -1056,7 +1056,7 @@ describe('Callback Routes', () => {
     const app = await createApp();
     const threadA = await threadStore.create('user-1', 'thread-a');
     const foreignThread = await threadStore.create('user-2', 'thread-foreign');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', threadA.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadA.id);
 
     const response = await app.inject({
       method: 'GET',
@@ -1075,7 +1075,7 @@ describe('Callback Routes', () => {
       { featId: 'F043', name: 'MCP Unification', status: 'spec', keyDecisions: ['A', 'B'] },
     ];
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     const response = await app.inject({
       method: 'GET',
@@ -1140,7 +1140,7 @@ describe('Callback Routes', () => {
     threadStore.linkBacklogItem(threadOtherUser.id, backlogOtherUser.id);
 
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
     const response = await app.inject({
       method: 'GET',
       url: '/api/callbacks/feat-index',
@@ -1166,7 +1166,7 @@ describe('Callback Routes', () => {
       },
     };
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     const response = await app.inject({
       method: 'GET',
@@ -1185,7 +1185,7 @@ describe('Callback Routes', () => {
       { featId: 'F043', name: 'MCP Unification', status: 'spec' },
     ];
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     const hit = await app.inject({
       method: 'GET',
@@ -1214,7 +1214,7 @@ describe('Callback Routes', () => {
       { featId: 'F049', name: 'Mission Hub', status: 'done' },
     ];
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     const byFeatId = await app.inject({
       method: 'GET',
@@ -1239,7 +1239,7 @@ describe('Callback Routes', () => {
   test('GET feat-index validates limit max=100', async () => {
     featIndexProvider = async () => [{ featId: 'F043', name: 'MCP Unification', status: 'spec' }];
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     const response = await app.inject({
       method: 'GET',
@@ -1252,7 +1252,7 @@ describe('Callback Routes', () => {
   test('GET feat-index returns 401 for invalid callback credentials', async () => {
     featIndexProvider = async () => [{ featId: 'F043', name: 'MCP Unification', status: 'spec' }];
     const app = await createApp();
-    const { invocationId } = registry.create('user-1', 'opus');
+    const { invocationId } = await registry.create('user-1', 'opus');
 
     const response = await app.inject({
       method: 'GET',
@@ -1264,7 +1264,7 @@ describe('Callback Routes', () => {
 
   test('GET pending-mentions only returns mentions from the same user', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     // user-1 mentions opus
     messageStore.append({
@@ -1298,7 +1298,7 @@ describe('Callback Routes', () => {
   test('GET pending-mentions only returns mentions from the same thread (#75)', async () => {
     const app = await createApp();
     // Create invocation scoped to thread-A
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-A');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-A');
 
     // @opus in thread-A (should be visible)
     messageStore.append({
@@ -1356,7 +1356,7 @@ describe('Callback Routes', () => {
 
   test('GET search-evidence returns results from evidence store', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
     evidenceStore.search = async () => [
       {
         anchor: 'docs/decisions/005-hindsight-integration-decisions.md',
@@ -1385,7 +1385,7 @@ describe('Callback Routes', () => {
 
   test('GET search-evidence passes query and limit to evidence store', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
     let capturedArgs;
     evidenceStore.search = async (query, opts) => {
       capturedArgs = { query, opts };
@@ -1404,7 +1404,7 @@ describe('Callback Routes', () => {
 
   test('GET search-evidence defaults limit to 5', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
     let capturedOpts;
     evidenceStore.search = async (_q, opts) => {
       capturedOpts = opts;
@@ -1422,7 +1422,7 @@ describe('Callback Routes', () => {
 
   test('GET search-evidence degrades when evidence store throws', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
     evidenceStore.search = async () => {
       throw new Error('SQLite error');
     };
@@ -1442,7 +1442,7 @@ describe('Callback Routes', () => {
 
   test('GET search-evidence returns 401 for invalid credentials', async () => {
     const app = await createApp();
-    const { invocationId } = registry.create('user-1', 'codex');
+    const { invocationId } = await registry.create('user-1', 'codex');
 
     const response = await app.inject({
       method: 'GET',
@@ -1455,7 +1455,7 @@ describe('Callback Routes', () => {
 
   test('POST reflect returns reflection text', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
     let capturedQuery;
     reflectionService.reflect = async (query) => {
       capturedQuery = query;
@@ -1480,7 +1480,7 @@ describe('Callback Routes', () => {
 
   test('POST reflect degrades when reflection service throws', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
     reflectionService.reflect = async () => {
       throw new Error('reflection failure');
     };
@@ -1503,7 +1503,7 @@ describe('Callback Routes', () => {
 
   test('POST reflect returns 401 for invalid credentials', async () => {
     const app = await createApp();
-    const { invocationId } = registry.create('user-1', 'codex');
+    const { invocationId } = await registry.create('user-1', 'codex');
 
     const response = await app.inject({
       method: 'POST',
@@ -1519,7 +1519,7 @@ describe('Callback Routes', () => {
 
   test('POST retain-memory submits to marker queue', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
     const submitCalls = [];
     markerQueue.submit = async (marker) => {
       submitCalls.push(marker);
@@ -1547,7 +1547,7 @@ describe('Callback Routes', () => {
 
   test('POST retain-memory returns 401 for invalid callback token', async () => {
     const app = await createApp();
-    const { invocationId } = registry.create('user-1', 'codex');
+    const { invocationId } = await registry.create('user-1', 'codex');
 
     const response = await app.inject({
       method: 'POST',
@@ -1563,7 +1563,7 @@ describe('Callback Routes', () => {
 
   test('POST retain-memory degrades when marker queue throws', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
     markerQueue.submit = async () => {
       throw new Error('queue error');
     };
@@ -1589,9 +1589,9 @@ describe('Callback Routes', () => {
     const app = await createApp();
 
     // Old invocation for opus on thread-1
-    const old = registry.create('user-1', 'opus', 'thread-1');
+    const old = await registry.create('user-1', 'opus', 'thread-1');
     // New invocation supersedes — same thread+cat
-    registry.create('user-1', 'opus', 'thread-1');
+    await registry.create('user-1', 'opus', 'thread-1');
 
     // Old invocation's callback should be rejected (stale)
     const response = await app.inject({
@@ -1616,9 +1616,9 @@ describe('Callback Routes', () => {
     const app = await createApp();
 
     // Old invocation
-    registry.create('user-1', 'opus', 'thread-1');
+    await registry.create('user-1', 'opus', 'thread-1');
     // New invocation supersedes
-    const latest = registry.create('user-1', 'opus', 'thread-1');
+    const latest = await registry.create('user-1', 'opus', 'thread-1');
 
     // Latest invocation's callback should succeed
     const response = await app.inject({
@@ -1643,7 +1643,7 @@ describe('Callback Routes', () => {
 
   test('POST post-message extracts cc_rich blocks and stores them in extra.rich', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-rb');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-rb');
 
     const richPayload = JSON.stringify({
       v: 1,
@@ -1674,7 +1674,7 @@ describe('Callback Routes', () => {
 
   test('POST post-message broadcasts rich_block SSE events for extracted blocks', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-rb2');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-rb2');
 
     const richPayload = JSON.stringify({
       v: 1,
@@ -1713,7 +1713,7 @@ describe('Callback Routes', () => {
 
   test('#454: text broadcast always includes invocationId', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-454-text');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-454-text');
 
     await app.inject({
       method: 'POST',
@@ -1730,7 +1730,7 @@ describe('Callback Routes', () => {
 
   test('#454: rich_block system_info broadcast includes invocationId', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-454-rich');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-454-rich');
 
     const richPayload = JSON.stringify({
       v: 1,
@@ -1753,7 +1753,7 @@ describe('Callback Routes', () => {
 
   test('#454: create-rich-block broadcast includes invocationId', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-454-crb');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-454-crb');
 
     await app.inject({
       method: 'POST',
@@ -1776,7 +1776,7 @@ describe('Callback Routes', () => {
     process.env.UPLOAD_DIR = uploadDir;
     try {
       const app = await createApp();
-      const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-454-doc');
+      const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-454-doc');
 
       const res = await app.inject({
         method: 'POST',
@@ -1803,9 +1803,45 @@ describe('Callback Routes', () => {
     }
   });
 
-  test('POST post-message without cc_rich blocks stores content as-is (no extra.rich)', async () => {
+  test('#573: callback POST broadcasts/persists with parentInvocationId (OUTER) when present, not invocationId (INNER)', async () => {
+    // Setup: create invocation with parentInvocationId — simulates QueueProcessor → routeExecution
+    // → invokeSingleCat hierarchy where the cat-cafe queue-level (OUTER) invocation has spawned
+    // a per-cat (INNER) sub-invocation. callback fires from inside CLI with INNER credentials,
+    // but broadcast/persist must use OUTER for cross-handler dedup with stream broadcasts.
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-rb3');
+    const outerParentInv = 'outer-parent-573';
+    const { invocationId: innerInv, callbackToken } = await registry.create(
+      'user-573',
+      'opus',
+      'thread-573',
+      outerParentInv,
+    );
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': innerInv, 'x-callback-token': callbackToken },
+      payload: { content: 'callback content' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const recent = messageStore.getRecent(10);
+    const stored = recent.find((m) => m.content === 'callback content');
+    assert.ok(stored, 'callback message stored');
+    assert.equal(
+      stored.extra?.stream?.invocationId,
+      outerParentInv,
+      'persisted record uses OUTER parentInvocationId, not INNER',
+    );
+    assert.notEqual(stored.extra?.stream?.invocationId, innerInv, 'must NOT use the INNER per-cat invocation id');
+  });
+
+  test('POST post-message without cc_rich blocks stores content as-is (extra carries stream.invocationId only)', async () => {
+    // #573: callback path now always sets extra.stream.invocationId so frontend's
+    // (catId, invocationId) dedup can correlate callback persistence with stream broadcasts
+    // after F5/hydration. extra.rich must still be absent when no rich blocks were provided.
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-rb3');
 
     const response = await app.inject({
       method: 'POST',
@@ -1818,14 +1854,17 @@ describe('Callback Routes', () => {
     const recent = messageStore.getRecent(10);
     assert.equal(recent.length, 1);
     assert.equal(recent[0].content, 'Plain message, no blocks');
-    assert.equal(recent[0].extra, undefined);
+    // Extra now carries stream.invocationId (#573 alignment with stream/queue broadcasts).
+    assert.ok(recent[0].extra, 'extra is set');
+    assert.equal(recent[0].extra.rich, undefined, 'no rich blocks present');
+    assert.equal(recent[0].extra.stream?.invocationId, invocationId, 'stream.invocationId set to invocation id');
   });
 
   // ---- #85 T7: Route A create-rich-block normalizes type→kind ----
 
   test('POST create-rich-block normalizes type→kind and auto-fills v:1', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-norm');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-norm');
 
     const response = await app.inject({
       method: 'POST',
@@ -1860,7 +1899,7 @@ describe('Callback Routes', () => {
     threadStore.updateThinkingMode(actualThreadId, 'play');
 
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', actualThreadId);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', actualThreadId);
 
     // 10 visible messages first (OLDER timestamps: 1000-1018)
     for (let i = 0; i < 5; i++) {
@@ -1932,7 +1971,7 @@ describe('Callback Routes', () => {
     threadStore.updateThinkingMode(tid, 'play');
 
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', tid);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', tid);
 
     // 3 legacy messages from codex (no origin — pre-feature data)
     for (let i = 0; i < 3; i++) {
@@ -1979,7 +2018,7 @@ describe('Callback Routes', () => {
     threadStore.updateThinkingMode(tid, 'play');
 
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', tid);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', tid);
 
     // 2 legacy untagged from codex (visible)
     messageStore.append({
@@ -2050,7 +2089,7 @@ describe('Callback Routes', () => {
     threadStore.updateThinkingMode(tid, 'play');
 
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', tid);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', tid);
 
     // msg1: low relevance ("redis" matches 1/2 terms)
     messageStore.append({
@@ -2098,7 +2137,7 @@ describe('Callback Routes', () => {
 
   test('GET thread-context response includes threadId field', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-xyz');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-xyz');
 
     messageStore.append({
       userId: 'user-1',
@@ -2123,7 +2162,7 @@ describe('Callback Routes', () => {
 
   test('GET thread-context cross-thread echoes requested threadId', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-home');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-home');
 
     messageStore.append({
       userId: 'user-1',
@@ -2150,7 +2189,7 @@ describe('Callback Routes', () => {
   test('POST register-pr-tracking succeeds with valid input', async () => {
     const app = await createApp();
 
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-pr');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
 
     const response = await app.inject({
       method: 'POST',
@@ -2199,7 +2238,7 @@ describe('Callback Routes', () => {
     const app = await createApp();
 
     // Invocation is opus, payload sends bogus catId — server must ignore payload
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     const response = await app.inject({
       method: 'POST',
@@ -2221,7 +2260,7 @@ describe('Callback Routes', () => {
     const app = await createApp();
 
     // User A registers PR #42
-    const userA = registry.create('user-A', 'opus', 'thread-A');
+    const userA = await registry.create('user-A', 'opus', 'thread-A');
     const regA = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
@@ -2235,7 +2274,7 @@ describe('Callback Routes', () => {
     assert.equal(regA.statusCode, 200);
 
     // User B tries to overwrite PR #42
-    const userB = registry.create('user-B', 'codex', 'thread-B');
+    const userB = await registry.create('user-B', 'codex', 'thread-B');
     const regB = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
@@ -2284,7 +2323,7 @@ describe('Callback Routes', () => {
 
     const app = await createApp();
 
-    const userA = registry.create('user-A', 'opus', 'thread-A');
+    const userA = await registry.create('user-A', 'opus', 'thread-A');
     const first = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
@@ -2296,7 +2335,7 @@ describe('Callback Routes', () => {
     });
     assert.equal(first.statusCode, 200);
 
-    const userB = registry.create('user-B', 'codex', 'thread-B');
+    const userB = await registry.create('user-B', 'codex', 'thread-B');
     const second = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
@@ -2315,7 +2354,7 @@ describe('Callback Routes', () => {
     const app = await createApp();
 
     // User A registers PR #42 from thread-1
-    const inv1 = registry.create('user-A', 'opus', 'thread-1');
+    const inv1 = await registry.create('user-A', 'opus', 'thread-1');
     await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
@@ -2328,7 +2367,7 @@ describe('Callback Routes', () => {
     });
 
     // Same user re-registers from thread-2 (should succeed — update)
-    const inv2 = registry.create('user-A', 'opus', 'thread-2');
+    const inv2 = await registry.create('user-A', 'opus', 'thread-2');
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
@@ -2355,7 +2394,7 @@ describe('Callback Routes', () => {
       socketManager,
       threadStore,
     });
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     const response = await app.inject({
       method: 'POST',
@@ -2377,7 +2416,7 @@ describe('Callback Routes', () => {
     const app = await createApp();
 
     // Invocation is for opencode, but payload says opus
-    const { invocationId, callbackToken } = registry.create('user-1', 'opencode', 'thread-opencode');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opencode', 'thread-opencode');
 
     const response = await app.inject({
       method: 'POST',
@@ -2407,7 +2446,7 @@ describe('Callback Routes', () => {
     const sourceThread = await threadStore.create('user-1', 'Source Thread');
     const targetThread = await threadStore.create('user-1', 'Target Thread');
 
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex', sourceThread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex', sourceThread.id);
 
     const res = await app.inject({
       method: 'POST',
@@ -2435,7 +2474,7 @@ describe('Callback Routes', () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', 'Same Thread');
 
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex', thread.id);
 
     const res = await app.inject({
       method: 'POST',

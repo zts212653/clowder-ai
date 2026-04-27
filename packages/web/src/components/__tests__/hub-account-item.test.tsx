@@ -9,14 +9,11 @@ vi.mock('@/components/useConfirm', () => ({
   useConfirm: () => mockConfirm,
 }));
 
-function queryButton(container: HTMLElement, text: string): HTMLButtonElement {
-  const button = Array.from(container.querySelectorAll('button')).find((candidate) =>
-    candidate.textContent?.includes(text),
-  );
-  if (!button) {
-    throw new Error(`Missing button: ${text}`);
-  }
-  return button as HTMLButtonElement;
+function profileItem(
+  input: Omit<ProfileItem, 'kind' | 'builtin'> & Partial<Pick<ProfileItem, 'kind' | 'builtin'>>,
+): ProfileItem {
+  const builtin = input.builtin ?? input.authType === 'oauth';
+  return { ...input, builtin, kind: input.kind ?? (builtin ? 'builtin' : 'api_key') };
 }
 
 describe('HubAccountItem', () => {
@@ -46,7 +43,7 @@ describe('HubAccountItem', () => {
   });
 
   it('clicking the card triggers onEdit for API key accounts', async () => {
-    const profile: ProfileItem = {
+    const profile = profileItem({
       id: 'claude-api',
       provider: 'claude-api',
       displayName: 'Claude API',
@@ -58,7 +55,7 @@ describe('HubAccountItem', () => {
       hasApiKey: true,
       createdAt: '2026-03-18T00:00:00.000Z',
       updatedAt: '2026-03-18T00:00:00.000Z',
-    };
+    });
     const onEdit = vi.fn();
 
     await act(async () => {
@@ -74,7 +71,7 @@ describe('HubAccountItem', () => {
     });
 
     expect(container.textContent).not.toContain('编辑');
-    expect(container.textContent).toContain('删除');
+    expect(container.querySelector('button[aria-label="删除账号"]')).toBeTruthy();
 
     // Click the card itself to trigger edit
     const card = container.querySelector('[class*="rounded-"]') as HTMLElement;
@@ -85,7 +82,7 @@ describe('HubAccountItem', () => {
   });
 
   it('keeps the + 添加 model entry visible for built-in cards without binding-scope controls', async () => {
-    const profile: ProfileItem = {
+    const profile = profileItem({
       id: 'codex-oauth',
       provider: 'codex-oauth',
       displayName: 'Codex (OAuth)',
@@ -97,7 +94,7 @@ describe('HubAccountItem', () => {
       hasApiKey: false,
       createdAt: '2026-03-18T00:00:00.000Z',
       updatedAt: '2026-03-18T00:00:00.000Z',
-    };
+    });
 
     await act(async () => {
       root.render(<HubAccountItem profile={profile} busy={false} onSave={vi.fn(async () => {})} onDelete={() => {}} />);
@@ -110,7 +107,7 @@ describe('HubAccountItem', () => {
   });
 
   it('hides unsupported 测试 actions for non-api-key profiles', async () => {
-    const profile: ProfileItem = {
+    const profile = profileItem({
       id: 'opencode-client-auth',
       provider: 'opencode-client-auth',
       displayName: 'OpenCode (client-auth)',
@@ -123,7 +120,7 @@ describe('HubAccountItem', () => {
       createdAt: '2026-03-18T00:00:00.000Z',
       updatedAt: '2026-03-18T00:00:00.000Z',
       oauthLikeClient: 'opencode',
-    };
+    });
 
     await act(async () => {
       root.render(<HubAccountItem profile={profile} busy={false} onSave={vi.fn(async () => {})} onDelete={() => {}} />);
@@ -135,7 +132,7 @@ describe('HubAccountItem', () => {
   });
 
   it('requires delete confirmation and respects denial', async () => {
-    const profile: ProfileItem = {
+    const profile = profileItem({
       id: 'codex-sponsor',
       provider: 'codex-sponsor',
       displayName: 'Codex Sponsor',
@@ -147,7 +144,7 @@ describe('HubAccountItem', () => {
       hasApiKey: true,
       createdAt: '2026-03-18T00:00:00.000Z',
       updatedAt: '2026-03-18T00:00:00.000Z',
-    };
+    });
     const onDelete = vi.fn();
     mockConfirm.mockResolvedValue(false);
 
@@ -156,14 +153,18 @@ describe('HubAccountItem', () => {
     });
 
     await act(async () => {
-      queryButton(container, '删除').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="删除账号"]')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(mockConfirm).toHaveBeenCalledTimes(1);
     expect(onDelete).not.toHaveBeenCalled();
 
     mockConfirm.mockResolvedValue(true);
     await act(async () => {
-      queryButton(container, '删除').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="删除账号"]')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(onDelete).toHaveBeenCalledWith('codex-sponsor');
     mockConfirm.mockReset().mockResolvedValue(true);

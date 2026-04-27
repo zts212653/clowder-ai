@@ -1,6 +1,7 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { TelegramAdapter } from '../dist/infrastructure/connectors/adapters/TelegramAdapter.js';
 import { startConnectorGateway } from '../dist/infrastructure/connectors/connector-gateway-bootstrap.js';
 
 function noopLog() {
@@ -226,6 +227,36 @@ describe('ConnectorGateway Bootstrap', () => {
       } else {
         process.env.DEFAULT_OWNER_USER_ID = originalEnv;
       }
+    }
+  });
+
+  it('ignores invalid TELEGRAM_BOT_TOKEN values without starting polling', async () => {
+    const warnings = [];
+    const originalStartPolling = TelegramAdapter.prototype.startPolling;
+    TelegramAdapter.prototype.startPolling = function startPollingShouldNotRun() {
+      throw new Error('Telegram polling should not start for invalid token');
+    };
+
+    const deps = {
+      ...baseDeps,
+      log: {
+        ...noopLog(),
+        warn(...args) {
+          warnings.push(args);
+        },
+      },
+    };
+
+    try {
+      const handle = await startConnectorGateway({ telegramBotToken: 'sk-community-openai-api-key' }, deps);
+      assert.ok(handle, 'Gateway should stay available for other connector surfaces');
+      assert.ok(
+        warnings.some((entry) => String(entry.at(-1)).includes('Invalid TELEGRAM_BOT_TOKEN')),
+        'invalid token should be logged as a configuration warning',
+      );
+      await handle.stop();
+    } finally {
+      TelegramAdapter.prototype.startPolling = originalStartPolling;
     }
   });
 

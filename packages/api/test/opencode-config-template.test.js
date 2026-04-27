@@ -259,6 +259,19 @@ describe('generateOpenCodeRuntimeConfig', () => {
     assert.equal(config.model, 'openai-compat/gpt-4o', 'model prefix must match remapped provider key');
   });
 
+  test('registers defaultModel even when the account model list is stale', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'openai',
+      models: ['qwen3.6-plus', 'Qwen3.6-Max', 'kimi-2.6'],
+      defaultModel: 'openai/qwen3.6-max-preview',
+      apiType: 'openai',
+      hasBaseUrl: true,
+    });
+
+    assert.equal(config.model, 'openai-compat/qwen3.6-max-preview');
+    assert.ok(config.provider['openai-compat'].models?.['qwen3.6-max-preview']);
+  });
+
   test('non-reserved providerName is kept as-is', () => {
     const config = generateOpenCodeRuntimeConfig({
       providerName: 'kimi',

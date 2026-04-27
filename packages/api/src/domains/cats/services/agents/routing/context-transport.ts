@@ -1,6 +1,7 @@
 // F148: Hierarchical Context Transport — pure functions for smart window assembly.
 
 import type { HierarchicalContextConfig } from '../../../../../config/hierarchical-context-config.js';
+import { getSenderName } from '../../context/ContextAssembler.js';
 import type { StoredMessage } from '../../stores/ports/MessageStore.js';
 
 // --- Phase D: Coverage Map (AC-D2) ---
@@ -417,8 +418,9 @@ export function formatAnchors(anchors: ScoredMessage[], truncateLimit: number): 
   return anchors.map((a, i) => {
     const content =
       a.message.content.length > truncateLimit ? `${a.message.content.slice(0, truncateLimit)}...` : a.message.content;
+    const speaker = a.message.source?.label || getSenderName(a.message.catId);
     const label = a.isPrimacy ? 'Thread opener' : `Anchor ${i + 1}/${anchors.length}`;
-    return `[${label}: ${a.message.id}] ${content}`;
+    return `[${label} @${speaker}: ${a.message.id}] ${content}`;
   });
 }
 

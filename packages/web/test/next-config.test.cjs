@@ -1,8 +1,10 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const path = require('node:path');
 const { describe, it } = require('node:test');
 
 const configPath = path.resolve(__dirname, '../next.config.js');
+const packageJsonPath = path.resolve(__dirname, '../package.json');
 const ENV_KEYS = ['NEXT_PUBLIC_API_URL', 'API_SERVER_PORT', 'FRONTEND_PORT'];
 
 function withEnv(overrides, run) {
@@ -58,5 +60,15 @@ describe('next.config rewrites', () => {
       const rewrites = await config.rewrites();
       assert.equal(rewrites[0].destination, 'http://localhost:5001/api/:path*');
     });
+  });
+
+  it('keeps next-pwa in dependencies because next.config requires it at build time', () => {
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+    assert.equal(
+      packageJson.dependencies?.['@ducanh2912/next-pwa'],
+      '^10.2.9',
+      'next.config.js requires @ducanh2912/next-pwa during next build, so it cannot live in devDependencies',
+    );
+    assert.equal(packageJson.devDependencies?.['@ducanh2912/next-pwa'], undefined);
   });
 });

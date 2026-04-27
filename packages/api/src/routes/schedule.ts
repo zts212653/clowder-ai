@@ -99,22 +99,33 @@ interface ScheduleActor {
  *  Panel UI requests have no auth → uses explicit deliveryThreadId or null.
  *  MCP requests have callbackAuth → infer from invocation record.
  *  Invalid credentials are rejected at the preHandler level (fail-closed, #474). */
-function resolveScopedDeliveryThreadId(
+async function resolveScopedDeliveryThreadId(
   callbackAuth: InvocationRecord | undefined,
   body: { deliveryThreadId?: string },
   registry?: InvocationRegistry,
-): { deliveryThreadId: string | null; code: DeliveryThreadResolutionCode | null } {
+): Promise<{ deliveryThreadId: string | null; code: DeliveryThreadResolutionCode | null }> {
   if (!callbackAuth) {
     return { deliveryThreadId: body.deliveryThreadId ?? null, code: null };
   }
-  if (registry && !registry.isLatest(callbackAuth.invocationId)) {
+  if (registry && !(await registry.isLatest(callbackAuth.invocationId))) {
     return { deliveryThreadId: null, code: 'STALE_INVOCATION' };
   }
   if (body.deliveryThreadId) return { deliveryThreadId: body.deliveryThreadId, code: null };
   return { deliveryThreadId: callbackAuth.threadId, code: null };
 }
 
-function deriveScheduleActor(request: FastifyRequest, body: { createdBy?: string }): ScheduleActor {
+/**
+ * F174 Phase F (AC-F1): no longer reads `createdBy` from request body — that
+ * was a spoofable client-asserted field. Browser/Hub-initiated schedules
+ * don't have a cat in the loop, so `createdBy` becomes the literal `'user'`
+ * (the human is the actor). MCP-initiated schedules continue to derive both
+ * fields from the verified callback auth record (the trustworthy source).
+ *
+ * Pre-Phase-F bug surface: `body.createdBy ?? 'unknown'` let any client claim
+ * authorship as any cat id. With the body-fallback removed, the only
+ * authoritative path is `request.callbackAuth.catId` (from preHandler verify).
+ */
+function deriveScheduleActor(request: FastifyRequest, _body: { createdBy?: string }): ScheduleActor {
   if (request.callbackAuth) {
     const actor = deriveCallbackActor(request.callbackAuth);
     return {
@@ -124,8 +135,13 @@ function deriveScheduleActor(request: FastifyRequest, body: { createdBy?: string
   }
   return {
     triggerUserId: resolveHeaderUserId(request) ?? 'default-user',
-    createdBy: body.createdBy ?? 'unknown',
+    createdBy: 'user',
   };
+}
+
+/** Test-only export — exposes deriveScheduleActor without spinning up Fastify. */
+export function deriveScheduleActorForTest(request: FastifyRequest, body: { createdBy?: string }): ScheduleActor {
+  return deriveScheduleActor(request, body);
 }
 
 export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (app, opts) => {
@@ -312,7 +328,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
         }
       : { label: template.label, category: template.category, description: template.description };
 
-    const resolution = resolveScopedDeliveryThreadId(request.callbackAuth, body, registry);
+    const resolution = await resolveScopedDeliveryThreadId(request.callbackAuth, body, registry);
     if (resolution.code === 'STALE_INVOCATION') {
       reply.status(409);
       return {
@@ -396,7 +412,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
         }
       : { label: template.label, category: template.category, description: template.description };
 
-    const resolution = resolveScopedDeliveryThreadId(request.callbackAuth, body, registry);
+    const resolution = await resolveScopedDeliveryThreadId(request.callbackAuth, body, registry);
     if (resolution.code === 'STALE_INVOCATION') {
       reply.status(409);
       return {

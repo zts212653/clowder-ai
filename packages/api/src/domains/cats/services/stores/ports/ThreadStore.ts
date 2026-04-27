@@ -66,6 +66,15 @@ export interface ThreadMemoryV1 {
   openQuestions?: string[];
   /** VG-3: Referenced artifacts — ADRs, Feature IDs (max 8) */
   artifacts?: string[];
+  /** F148 Phase H: Deterministic file/PR artifacts from session seal (max 5) */
+  recentArtifacts?: Array<{
+    type: string;
+    ref: string;
+    label: string;
+    updatedAt: number;
+    updatedBy: string;
+    ops?: string[];
+  }>;
 }
 
 export type MentionRoutingSuppressionReason = 'no_action' | 'cross_paragraph' | 'inline_action';
@@ -305,6 +314,10 @@ export interface IThreadStore {
   updateFirstRunQuestState(threadId: string, state: FirstRunQuestStateV1 | null): void | Promise<void>;
   /** F088 Phase G: Get/update connector hub state. */
   updateConnectorHubState(threadId: string, state: ConnectorHubStateV1 | null): void | Promise<void>;
+  updatePreferredWorkspaceMode(
+    threadId: string,
+    mode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community' | null,
+  ): void | Promise<void>;
   updateLastActive(threadId: string): void | Promise<void>;
   delete(threadId: string): boolean | Promise<boolean>;
   /** F095 Phase D: Soft-delete — mark thread as deleted without removing data. */
@@ -631,6 +644,19 @@ export class ThreadStore implements IThreadStore {
       delete thread.connectorHubState;
     } else {
       thread.connectorHubState = state;
+    }
+  }
+
+  updatePreferredWorkspaceMode(
+    threadId: string,
+    mode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community' | null,
+  ): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (mode === null) {
+      delete thread.preferredWorkspaceMode;
+    } else {
+      thread.preferredWorkspaceMode = mode;
     }
   }
 

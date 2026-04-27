@@ -53,6 +53,26 @@ describe('buildInstallPreview', () => {
     assert.ok(preview.risks.some((r) => r.includes('unresolvable')));
   });
 
+  test('valid ecosystem is preserved', () => {
+    const preview = buildInstallPreview({
+      id: 'eco-mcp',
+      command: 'npx',
+      args: ['server'],
+      ecosystem: 'claude',
+    });
+    assert.equal(preview.entry.ecosystem, 'claude');
+  });
+
+  test('invalid ecosystem is dropped', () => {
+    const preview = buildInstallPreview({
+      id: 'bad-eco-mcp',
+      command: 'npx',
+      args: ['server'],
+      ecosystem: 'not-a-real-ecosystem',
+    });
+    assert.equal(preview.entry.ecosystem, undefined);
+  });
+
   test('env variables passed through', () => {
     const preview = buildInstallPreview({
       id: 'env-mcp',

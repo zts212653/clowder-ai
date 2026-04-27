@@ -9,6 +9,7 @@ import type { ConnectorSource } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import type { ConnectorDeliveryDeps } from './deliver-connector-message.js';
 import { deliverConnectorMessage } from './deliver-connector-message.js';
+import { getMaxSeverity } from './severity-parser.js';
 
 // ── Domain Types (KD-8: richer model) ──────────────────────────────
 
@@ -98,7 +99,17 @@ export class ReviewFeedbackRouter {
 // ── Message Formatting (OQ-2: three-section aggregation) ───────────
 
 export function buildReviewFeedbackContent(signal: ReviewFeedbackSignal): string {
-  const lines: string[] = [`📋 **Review Feedback** — PR #${signal.prNumber} (${signal.repoFullName})`];
+  const lines: string[] = [];
+
+  // F140 Phase E.1: prepend severity header when comments/decisions contain
+  // a recognized P0/P1/P2 marker. Replaces the email-channel "Review 检测到 Px"
+  // header so polling can surface severity without dual-channel notifications.
+  const maxSev = getMaxSeverity(signal.newComments, signal.newDecisions);
+  if (maxSev) {
+    lines.push(`**Review 检测到 ${maxSev}**`, '');
+  }
+
+  lines.push(`📋 **Review Feedback** — PR #${signal.prNumber} (${signal.repoFullName})`);
 
   // Section 1: Review Decisions
   if (signal.newDecisions.length > 0) {

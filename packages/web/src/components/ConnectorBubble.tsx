@@ -2,8 +2,9 @@
 
 import type { ConnectorTailwindTheme } from '@cat-cafe/shared';
 import { getConnectorDefinition } from '@cat-cafe/shared';
+import { useCallback, useState } from 'react';
 import type { ChatMessage as ChatMessageType, MessageContent } from '@/stores/chatStore';
-import { API_URL } from '@/utils/api-client';
+import { API_URL, apiFetch } from '@/utils/api-client';
 import { ConnectorImage, GitHubIcon, SchedulerIcon, SettingsIcon, UsersIcon } from './icons/ConnectorIcons';
 import { BallotIcon } from './icons/VoteIcons';
 import { MarkdownContent } from './MarkdownContent';
@@ -103,6 +104,32 @@ function getConnectorTheme(connector: string | undefined): ConnectorTailwindThem
   return def?.tailwindTheme ?? DEFAULT_CONNECTOR_THEME;
 }
 
+function HoldBallCancelButton({ taskId }: { taskId: string }) {
+  const [state, setState] = useState<'idle' | 'loading' | 'done'>('idle');
+
+  const handleCancel = useCallback(async () => {
+    setState('loading');
+    try {
+      const res = await apiFetch(`/api/callbacks/hold-ball/${encodeURIComponent(taskId)}`, { method: 'DELETE' });
+      setState(res.ok || res.status === 404 ? 'done' : 'idle');
+    } catch {
+      setState('idle');
+    }
+  }, [taskId]);
+
+  if (state === 'done') return <span className="text-xs text-cafe-muted">已取消</span>;
+  return (
+    <button
+      type="button"
+      onClick={handleCancel}
+      disabled={state === 'loading'}
+      className="text-xs px-2 py-0.5 rounded bg-cafe-surface hover:bg-cafe-hover border border-cafe-border disabled:opacity-50 transition-colors"
+    >
+      {state === 'loading' ? '取消中…' : '取消持球'}
+    </button>
+  );
+}
+
 /**
  * F97: Connector message bubble for external information sources (GitHub Review, etc.)
  * Left-aligned, blue-gray theme, distinct from cat/user/system messages.
@@ -148,7 +175,12 @@ export function ConnectorBubble({ message }: ConnectorBubbleProps) {
           className={`${theme.bubble} rounded-2xl rounded-bl-sm px-4 py-3 transition-transform hover:-translate-y-0.5 overflow-hidden`}
         >
           {hasBlocks ? renderContentBlocks(message.contentBlocks!) : <MarkdownContent content={message.content} />}
-          {richBlocks && richBlocks.length > 0 && <RichBlocks blocks={richBlocks} />}
+          {richBlocks && richBlocks.length > 0 && <RichBlocks blocks={richBlocks} messageSource={message.source} />}
+          {source.connector === 'hold-ball' && typeof source.meta?.taskId === 'string' && (
+            <div className="mt-2 pt-2 border-t border-cafe-border">
+              <HoldBallCancelButton taskId={source.meta.taskId} />
+            </div>
+          )}
         </div>
       </div>
     </div>

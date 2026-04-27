@@ -11,11 +11,24 @@
 
 import type { RichBlock } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
-import { Bot, InputFile } from 'grammy';
+import { Bot, GrammyError, InputFile } from 'grammy';
 import type { IStreamableOutboundAdapter } from '../OutboundDeliveryHook.js';
 import { formatTelegramHtml } from './telegram-html-formatter.js';
 
 const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
+const TELEGRAM_POLLING_BACKOFF_MS = [5_000, 15_000, 30_000, 60_000] as const;
+const TELEGRAM_MAX_CONFLICT_RETRIES = 10;
+
+type TelegramStartOptions = Parameters<Bot['start']>[0];
+
+interface TelegramPollingControls {
+  start: (options: TelegramStartOptions) => Promise<void>;
+  stop: () => Promise<void>;
+  close: () => Promise<unknown>;
+  sleep: (ms: number) => Promise<void>;
+  backoffMs: readonly number[];
+  maxConflictRetries: number;
+}
 
 export interface TelegramAttachment {
   type: 'image' | 'file' | 'audio';
@@ -32,6 +45,13 @@ export interface TelegramInboundMessage {
   attachments?: TelegramAttachment[];
 }
 
+function isTelegramConflictError(err: unknown): boolean {
+  if (err instanceof GrammyError) return err.error_code === 409;
+  if (!err || typeof err !== 'object') return false;
+  const errorCode = (err as { error_code?: unknown }).error_code;
+  return errorCode === 409;
+}
+
 export class TelegramAdapter implements IStreamableOutboundAdapter {
   readonly connectorId = 'telegram';
   private readonly bot: Bot;
@@ -43,10 +63,26 @@ export class TelegramAdapter implements IStreamableOutboundAdapter {
     sendDocument: (chatId: number, input: string | InputFile) => Promise<unknown>;
     sendVoice: (chatId: number, input: string | InputFile) => Promise<unknown>;
   } | null = null;
+  private pollingStopped = false;
+  private pollingRunId = 0;
+  private pollingControls: TelegramPollingControls | null = null;
 
   constructor(botToken: string, log: FastifyBaseLogger) {
     this.bot = new Bot(botToken);
     this.log = log;
+  }
+
+  private getPollingControls(): TelegramPollingControls {
+    return (
+      this.pollingControls ?? {
+        start: (options) => this.bot.start(options),
+        stop: () => this.bot.stop(),
+        close: () => this.bot.api.close(),
+        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        backoffMs: TELEGRAM_POLLING_BACKOFF_MS,
+        maxConflictRetries: TELEGRAM_MAX_CONFLICT_RETRIES,
+      }
+    );
   }
 
   /**
@@ -142,6 +178,8 @@ export class TelegramAdapter implements IStreamableOutboundAdapter {
    * Handles text, photo, document, and voice DMs.
    */
   startPolling(handler: (msg: TelegramInboundMessage) => Promise<void>): void {
+    this.pollingStopped = false;
+    const runId = ++this.pollingRunId;
     const handleUpdate = async (ctx: { message?: unknown }) => {
       if (!ctx.message) return;
       const parsed = this.parseUpdate({ message: ctx.message });
@@ -159,18 +197,78 @@ export class TelegramAdapter implements IStreamableOutboundAdapter {
     this.bot.on('message:document', handleUpdate);
     this.bot.on('message:voice', handleUpdate);
 
-    this.bot.start({
-      onStart: () => {
-        this.log.info('[TelegramAdapter] Long polling started');
-      },
-    });
+    void this.runPollingLoop(runId);
+  }
+
+  private async runPollingLoop(runId: number): Promise<void> {
+    const controls = this.getPollingControls();
+    let attempt = 0;
+    while (!this.pollingStopped && runId === this.pollingRunId) {
+      try {
+        await controls.start({
+          onStart: () => {
+            attempt = 0;
+            this.log.info('[TelegramAdapter] Long polling started');
+          },
+        });
+        return;
+      } catch (err) {
+        if (this.pollingStopped || runId !== this.pollingRunId) return;
+
+        if (!isTelegramConflictError(err)) {
+          this.log.error({ err }, '[TelegramAdapter] Long polling failed');
+          return;
+        }
+
+        const shouldRetry = await this.recoverPollingConflict(err, controls, attempt);
+        if (!shouldRetry) return;
+        attempt += 1;
+      }
+    }
+  }
+
+  private async recoverPollingConflict(
+    err: unknown,
+    controls: TelegramPollingControls,
+    attempt: number,
+  ): Promise<boolean> {
+    if (attempt >= controls.maxConflictRetries) {
+      this.log.error({ err, attempts: attempt }, '[TelegramAdapter] 409 conflict retry limit reached');
+      return false;
+    }
+
+    const waitMs =
+      controls.backoffMs[Math.min(attempt, controls.backoffMs.length - 1)] ?? controls.backoffMs.at(-1) ?? 60_000;
+    this.log.warn(
+      { err, attempt: attempt + 1, waitMs },
+      '[TelegramAdapter] 409 conflict; releasing session and retrying',
+    );
+    try {
+      await controls.close();
+    } catch (closeErr) {
+      this.log.warn({ err: closeErr }, '[TelegramAdapter] bot.api.close() failed during 409 recovery');
+    }
+    await controls.sleep(waitMs);
+    return true;
   }
 
   /**
    * Stop long polling gracefully.
    */
   async stopPolling(): Promise<void> {
-    await this.bot.stop();
+    this.pollingStopped = true;
+    this.pollingRunId += 1;
+    const controls = this.getPollingControls();
+    try {
+      await controls.stop();
+    } catch (err) {
+      this.log.warn({ err }, '[TelegramAdapter] bot.stop() failed');
+    }
+    try {
+      await controls.close();
+    } catch (err) {
+      this.log.warn({ err }, '[TelegramAdapter] bot.api.close() failed');
+    }
   }
 
   /**
@@ -266,5 +364,14 @@ export class TelegramAdapter implements IStreamableOutboundAdapter {
     sendVoice: (chatId: number, input: string | InputFile) => Promise<unknown>;
   }): void {
     this.sendMediaFns = fns;
+  }
+
+  /**
+   * Test helper: inject long polling lifecycle controls.
+   * @internal
+   */
+  _injectPollingControls(fns: Partial<TelegramPollingControls>): void {
+    const defaults = this.getPollingControls();
+    this.pollingControls = { ...defaults, ...fns };
   }
 }

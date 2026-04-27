@@ -157,7 +157,8 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
   const configName = safeProviderName(providerName);
 
   const modelsMap: Record<string, { name: string }> = {};
-  for (const rawModel of models) {
+  const modelsToRegister = defaultModel ? [...models, defaultModel] : [...models];
+  for (const rawModel of modelsToRegister) {
     const modelName = stripOwnProviderPrefix(rawModel, providerName);
     modelsMap[modelName] = { name: modelName };
   }

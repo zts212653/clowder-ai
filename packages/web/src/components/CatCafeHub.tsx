@@ -36,6 +36,22 @@ import { VoiceSettingsPanel } from './VoiceSettingsPanel';
 export type { HubTabId } from './cat-cafe-hub.navigation';
 export { findGroupForTab, resolveRequestedHubTab } from './cat-cafe-hub.navigation';
 
+/**
+ * Cloud Codex P1 #1403 (round 9 + 砚砚 P2): pure helper for the render-time
+ * state-sync key. Extracted so we can directly unit-test that the nonce
+ * participates — a top-level integration test is too heavy (CatCafeHub depends
+ * on >20 stores + tab components). Including subTabNonce makes openHub() with
+ * the same (tab, subTab) values still bump the key, forcing setTab() to fire
+ * after the user manually navigated away.
+ */
+export function computeHubSyncKey(
+  open: boolean,
+  normalizedRequestedTab: string | undefined,
+  subTabNonce: number | undefined,
+): string {
+  return open ? `open:${normalizedRequestedTab ?? ''}:${subTabNonce ?? ''}` : 'closed';
+}
+
 /* ─── Main Hub modal ─── */
 export function CatCafeHub() {
   const hubState = useChatStore((s) => s.hubState);
@@ -66,8 +82,12 @@ export function CatCafeHub() {
 
   // P1 fix: Render-time state sync (React 18 "adjusting state on props change" pattern).
   // Avoids first-frame flash that useEffect would cause on deep-link opens.
+  // Cloud Codex P1 #1403 (round 9): include hubState.subTabNonce in syncKey so a
+  // repeated openHub('observability', 'callback-auth') after the user manually
+  // switched to another top-level tab still re-applies setTab(). Otherwise the
+  // value-only diff stayed at 'open:observability' and the click looked broken.
   const [lastSyncKey, setLastSyncKey] = useState('');
-  const syncKey = open ? `open:${normalizedRequestedTab ?? ''}` : 'closed';
+  const syncKey = computeHubSyncKey(open, normalizedRequestedTab, hubState?.subTabNonce);
   if (syncKey !== lastSyncKey) {
     setLastSyncKey(syncKey);
     if (open) {
@@ -297,7 +317,12 @@ export function CatCafeHub() {
             {tab === 'accounts' && <HubAccountsTab />}
             {tab === 'voice' && <VoiceSettingsPanel />}
             {tab === 'notify' && <PushSettingsPanel />}
-            {tab === 'observability' && <HubObservabilityTab />}
+            {tab === 'observability' && (
+              <HubObservabilityTab
+                initialSubTab={hubState?.subTab as 'overview' | 'traces' | 'health' | 'callback-auth' | undefined}
+                subTabNonce={hubState?.subTabNonce}
+              />
+            )}
             {tab === 'governance' && <HubGovernanceTab />}
             {tab === 'health' && <BrakeSettingsPanel />}
             {tab === 'memory' && <HubMemoryTab />}

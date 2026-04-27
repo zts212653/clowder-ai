@@ -22,6 +22,8 @@ export interface EvidenceResult {
   /** F102 Batch 3: knowledge dimension origin — project or global */
   source?: 'project' | 'global';
   status?: EvidenceStatus;
+  /** F163 Phase E: document authority — orthogonal to confidence (which reflects rank) */
+  authority?: string;
   /** F163: boost source attribution — what F163 mechanisms affected this result's ranking */
   boostSource: BoostSource[];
   /** AC-I9: passage-level detail when depth=raw */

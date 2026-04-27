@@ -620,4 +620,81 @@ describe('global accounts (clowder-ai#340)', () => {
       await rm(projectB, { recursive: true, force: true });
     }
   });
+
+  it('skips homedir profile + credentials migrations when CAT_CAFE_SKIP_HOMEDIR_MIGRATION=1', async () => {
+    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    resetMigrationState();
+
+    delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    process.env.CAT_CAFE_SKIP_HOMEDIR_MIGRATION = '1';
+
+    const fakeHome = await mkdtemp(join(tmpdir(), 'fake-home-skip-'));
+    const savedHome = process.env.HOME;
+    process.env.HOME = fakeHome;
+    await mkdir(join(fakeHome, '.cat-cafe'), { recursive: true });
+
+    try {
+      await writeFile(
+        join(fakeHome, '.cat-cafe', 'provider-profiles.json'),
+        JSON.stringify({
+          version: 2,
+          providers: [{ id: 'homedir-account', authType: 'api_key', baseUrl: 'https://home.api/v1' }],
+        }),
+        'utf-8',
+      );
+      await writeFile(
+        join(fakeHome, '.cat-cafe', 'provider-profiles.secrets.local.json'),
+        JSON.stringify({ profiles: { 'homedir-account': { apiKey: 'sk-from-homedir' } } }),
+        'utf-8',
+      );
+
+      const result = readCatalogAccounts(projectRoot);
+      assert.equal(
+        result['homedir-account'],
+        undefined,
+        'skip flag must prevent homedir profile metadata from being migrated into project accounts',
+      );
+      assert.equal(
+        existsSync(join(projectRoot, '.cat-cafe', 'credentials.json')),
+        false,
+        'skip flag must not materialize a credentials.json from homedir data',
+      );
+    } finally {
+      delete process.env.CAT_CAFE_SKIP_HOMEDIR_MIGRATION;
+      process.env.HOME = savedHome;
+      process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = globalRoot;
+      await rm(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  it('skip flag still allows project-scoped legacy migrations', async () => {
+    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    resetMigrationState();
+
+    process.env.CAT_CAFE_SKIP_HOMEDIR_MIGRATION = '1';
+
+    try {
+      await writeFile(
+        join(projectRoot, '.cat-cafe', 'provider-profiles.json'),
+        JSON.stringify({
+          version: 2,
+          providers: [{ id: 'project-account', authType: 'api_key', baseUrl: 'https://project.api/v1' }],
+        }),
+        'utf-8',
+      );
+      await writeFile(
+        join(projectRoot, '.cat-cafe', 'provider-profiles.secrets.local.json'),
+        JSON.stringify({ profiles: { 'project-account': { apiKey: 'sk-from-project' } } }),
+        'utf-8',
+      );
+
+      const result = readCatalogAccounts(projectRoot);
+      assert.equal(result['project-account']?.baseUrl, 'https://project.api/v1');
+      const credsRaw = await readFile(join(globalRoot, '.cat-cafe', 'credentials.json'), 'utf-8');
+      const creds = JSON.parse(credsRaw);
+      assert.equal(creds['project-account']?.apiKey, 'sk-from-project');
+    } finally {
+      delete process.env.CAT_CAFE_SKIP_HOMEDIR_MIGRATION;
+    }
+  });
 });

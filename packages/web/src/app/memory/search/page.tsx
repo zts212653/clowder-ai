@@ -6,5 +6,6 @@ export default function MemorySearchPage({
   searchParams: Record<string, string | string[] | undefined>;
 }) {
   const q = typeof searchParams.q === 'string' ? searchParams.q : '';
-  return <MemoryHub activeTab="search" initialQuery={q} />;
+  const from = typeof searchParams.from === 'string' ? searchParams.from : null;
+  return <MemoryHub activeTab="search" initialQuery={q} initialReferrerThread={from} />;
 }

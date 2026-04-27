@@ -42,13 +42,44 @@ function collectNvmBinDirs(): string[] {
 const resolvedCache = new Map<string, string>();
 
 /**
+ * Drop a cache entry. Accepts EITHER the bare command name (cache key) OR the
+ * resolved absolute path (cache value). cli-spawn doesn't see the bare name
+ * — providers call `resolveCliCommand('claude')` first and pass the resolved
+ * path into spawn, so the spawn-ENOENT site only knows the resolved path.
+ * We have to scan values to make the explicit signal actually hit the cache.
+ *
+ * F173 Phase D AC-D1 (砚砚 P1 fix on PR #1417 round 1) — original
+ * `delete(commandOrPath)` only handled the bare-name case, leaving spawn ENOENT
+ * unable to invalidate via the resolved path it actually has.
+ */
+export function invalidateCliCommand(commandOrPath: string): void {
+  // Bare command name path
+  resolvedCache.delete(commandOrPath);
+  // Resolved absolute path path — scan and delete any entry whose value
+  // equals the given path. There is at most one match per path.
+  for (const [key, value] of resolvedCache) {
+    if (value === commandOrPath) {
+      resolvedCache.delete(key);
+    }
+  }
+}
+
+/**
  * Resolve the full path to a CLI binary.
  * Checks PATH first, then searches common install locations on Unix.
  * Returns the full path if found, or `null` if not found anywhere.
+ *
+ * F173 Phase D AC-D1 — cache hit re-validates `existsSync(cached)` so a binary
+ * that was uninstalled / moved after first resolve is auto-invalidated; we
+ * fall through to re-probe instead of handing callers a stale path that would
+ * spawn ENOENT in a loop until process restart.
  */
 export function resolveCliCommand(command: string): string | null {
   const cached = resolvedCache.get(command);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) {
+    if (existsSync(cached)) return cached;
+    resolvedCache.delete(command);
+  }
 
   // Fast path: already in PATH
   try {

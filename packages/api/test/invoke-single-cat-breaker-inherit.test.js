@@ -49,7 +49,7 @@ describe('F118 D1: failure count inheritance across cli_session_replaced', () =>
           invocationId: `inv-inherit-${++counter}`,
           callbackToken: `tok-${counter}`,
         }),
-        verify: () => null,
+        verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
       },
       sessionManager: {
         get: async () => undefined,

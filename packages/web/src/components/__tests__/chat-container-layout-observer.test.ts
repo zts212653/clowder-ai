@@ -184,7 +184,16 @@ vi.mock('@/hooks/useAuthorization', () => ({
 
 vi.mock('@/hooks/useSplitPaneKeys', () => ({ useSplitPaneKeys: vi.fn() }));
 vi.mock('@/hooks/useChatSocketCallbacks', () => ({ useChatSocketCallbacks: () => ({}) }));
-vi.mock('@/hooks/useCatData', () => ({ useCatData: () => ({ getCatById: () => undefined, isLoading: false }) }));
+vi.mock('@/hooks/useCatData', () => ({
+  useCatData: () => ({
+    cats: [],
+    isLoading: false,
+    hasFetched: true,
+    getCatById: () => undefined,
+    getCatsByBreed: () => new Map(),
+    refresh: async () => [],
+  }),
+}));
 vi.mock('@/hooks/usePreviewAutoOpen', () => ({ usePreviewAutoOpen: vi.fn() }));
 vi.mock('@/hooks/useWorkspaceNavigate', () => ({ useWorkspaceNavigate: vi.fn() }));
 vi.mock('@/hooks/useGovernanceStatus', () => ({
@@ -293,8 +302,9 @@ describe('ChatContainer bottom chrome observer', () => {
       root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
     });
 
-    const firstBottomChrome = container.querySelector('[data-testid="chat-input"]')?.parentElement;
+    const firstBottomChrome = resizeObserverInstances[0]?.observe.mock.calls[0]?.[0] as HTMLElement | undefined;
     expect(firstBottomChrome).toBeTruthy();
+    expect(firstBottomChrome?.querySelector('[data-testid="chat-input"]')).toBeTruthy();
     expect(resizeObserverInstances).toHaveLength(1);
     expect(resizeObserverInstances[0]?.observe.mock.calls[0]?.[0]).toBe(firstBottomChrome);
 
@@ -310,8 +320,9 @@ describe('ChatContainer bottom chrome observer', () => {
       root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
     });
 
-    const secondBottomChrome = container.querySelector('[data-testid="chat-input"]')?.parentElement;
+    const secondBottomChrome = resizeObserverInstances[1]?.observe.mock.calls[0]?.[0] as HTMLElement | undefined;
     expect(secondBottomChrome).toBeTruthy();
+    expect(secondBottomChrome?.querySelector('[data-testid="chat-input"]')).toBeTruthy();
     expect(secondBottomChrome).not.toBe(firstBottomChrome);
     expect(resizeObserverInstances).toHaveLength(2);
     expect(resizeObserverInstances[1]?.observe.mock.calls[0]?.[0]).toBe(secondBottomChrome);

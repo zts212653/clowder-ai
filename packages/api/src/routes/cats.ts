@@ -68,6 +68,7 @@ const baseCatSchema = z.object({
   catId: catIdSchema,
   name: z.string().min(1),
   displayName: z.string().min(1),
+  variantLabel: z.string().optional(),
   nickname: z.string().optional(),
   avatar: z.preprocess(
     (val) => (typeof val === 'string' && val.trim() === '' ? undefined : val),
@@ -103,6 +104,7 @@ const createNormalCatSchema = baseCatSchema.extend({
 const createAntigravityCatSchema = baseCatSchema.extend({
   clientId: z.literal('antigravity'),
   defaultModel: modelSchema,
+  mcpSupport: z.boolean().optional(),
   commandArgs: z.array(z.string().min(1)).min(1).optional(),
 });
 
@@ -111,6 +113,7 @@ const createCatSchema = z.discriminatedUnion('clientId', [createNormalCatSchema,
 const updateCatSchema = z.object({
   name: z.string().min(1).optional(),
   displayName: z.string().min(1).optional(),
+  variantLabel: z.string().nullable().optional(),
   nickname: z.string().optional(),
   avatar: z.string().min(1).optional(),
   color: colorSchema.optional(),
@@ -490,6 +493,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           catId: body.catId,
           name: body.name,
           displayName: body.displayName,
+          variantLabel: body.variantLabel,
           nickname: body.nickname,
           avatar: resolvedAvatar,
           color: body.color,
@@ -504,7 +508,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           sessionChain: body.sessionChain,
           clientId: 'antigravity',
           defaultModel: body.defaultModel,
-          mcpSupport: false,
+          mcpSupport: body.mcpSupport ?? true,
           cli: {
             ...defaultCliForClient('antigravity'),
             ...(body.commandArgs ? { defaultArgs: body.commandArgs } : {}),
@@ -517,6 +521,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           catId: body.catId,
           name: body.name,
           displayName: body.displayName,
+          variantLabel: body.variantLabel,
           nickname: body.nickname,
           avatar: resolvedAvatar,
           color: body.color,
@@ -674,6 +679,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       updateRuntimeCat(projectRoot, request.params.id, {
         ...(body.name !== undefined ? { name: body.name } : {}),
         ...(body.displayName !== undefined ? { displayName: body.displayName } : {}),
+        ...(body.variantLabel !== undefined ? { variantLabel: body.variantLabel } : {}),
         ...(body.nickname !== undefined ? { nickname: body.nickname } : {}),
         ...(body.avatar !== undefined ? { avatar: body.avatar } : {}),
         ...(body.color !== undefined ? { color: body.color } : {}),

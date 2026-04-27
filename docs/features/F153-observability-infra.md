@@ -69,7 +69,7 @@ team experience（2026-04-09）："这是可观测性基础设施 PR，核心是
 
 方案 B：API 代理 + 自建轻量前端，零外部依赖（不引入 Grafana/Tempo/Sentry）。
 
-**安全约束（Design Gate 缅因猫 review 2026-04-21）：**
+**安全约束（Design Gate Maine Coon review 2026-04-21）：**
 - LocalTraceExporter 必须放在 RedactingSpanProcessor **之后**（redacted fan-out），Hub 只看脱敏后数据
 - Exporter 投影为 redacted DTO 再入 store，不存 SDK span 对象；维护者看 raw 走 TELEMETRY_DEBUG console 通道
 - 按 raw ID 查询时，先 HMAC 查询参数再 match store，不存 raw ID
@@ -125,7 +125,7 @@ Phase E 只回答"发生了什么"（traces、metrics、健康状态），不做
 | `message.timestamp` | span endTime（⚠️ 非 startTime，见下方精度说明） |
 | `extra.stream.invocationId` | invocation 关联 |
 
-> **startTime 精度说明**（缅因猫 review）：assistant message 的 `timestamp` 是终态落盘时打的，接近 span **end** 而非 start。合成 span 时应使用 `startTime = timestamp - durationMs`（invocation/cli_session）或 `timestamp - durationApiMs`（llm_call）。只有 user message 的 `timestamp` 可直接作为 `cat_cafe.route` span 的 startTime。
+> **startTime 精度说明**（Maine Coon review）：assistant message 的 `timestamp` 是终态落盘时打的，接近 span **end** 而非 start。合成 span 时应使用 `startTime = timestamp - durationMs`（invocation/cli_session）或 `timestamp - durationApiMs`（llm_call）。只有 user message 的 `timestamp` 可直接作为 `cat_cafe.route` span 的 startTime。
 
 **只需补 OTel 身份指针**（~100 bytes/消息），不需要存完整 span 快照：
 
@@ -146,7 +146,7 @@ interface TracingPointers {
 
 #### 前置条件（P1 阻塞）
 
-**相关性键不统一**（GPT-5.4 发现，缅因猫 review 修正键名）：
+**相关性键不统一**（GPT-5.4 发现，Maine Coon review 修正键名）：
 
 | span 类型 | 是否带 invocationId | 问题 |
 |-----------|-------------------|------|
@@ -263,7 +263,6 @@ Phase E 实现引入了 `cat_cafe.route` 根 span（`AgentRouter` 创建），`c
 - [x] AC-D5: Windows `start-windows.ps1` 通过 API Start-Job 注入同样的 `NODE_ENV` 语义
 - [x] AC-D6: `telemetry-debug.test.js` + `start-dev-profile-isolation.test.mjs` + `start-dev-script.test.js` 覆盖 guardrail 与启动链回归
 
-
 ## Dependencies
 
 - **Related**: F130（API 日志治理 — 同属可观测性，F130 管 logging，F153 管 metrics/tracing）
@@ -294,16 +293,16 @@ Phase E 实现引入了 `cat_cafe.route` 根 span（`AgentRouter` 创建），`c
 | KD-10 | NODE_ENV 由启动模式（PROD_WEB/-Dev）决定，不由 profile 决定 | dev:direct + --profile=opensource 是开发模式，不应标 production | 2026-04-20 |
 | KD-11 | Phase E 走方案 B（API 代理 + 自建前端），不引入 Grafana/Tempo/Sentry | 零外部依赖，贴合猫咖数据模型，零额外进程 | 2026-04-21 |
 | KD-12 | Trace 存储用 in-process ring buffer，不引入 Tempo | 零额外进程，保留最近 N 小时即够用 | 2026-04-21 |
-| KD-13 | LocalTraceExporter 放 redactor 之后，Hub 只看脱敏后数据 | 缅因猫 Design Gate：raw span 走 TELEMETRY_DEBUG console，不走 Hub | 2026-04-21 |
-| KD-14 | `/api/telemetry/*` 走 session/cookie auth | 缅因猫 Design Gate：不复制 `/ready` 公开探针模式 | 2026-04-21 |
-| KD-15 | 查询参数先 HMAC 再 match store | 缅因猫 Design Gate：不为查询方便存 raw ID | 2026-04-21 |
+| KD-13 | LocalTraceExporter 放 redactor 之后，Hub 只看脱敏后数据 | Maine Coon Design Gate：raw span 走 TELEMETRY_DEBUG console，不走 Hub | 2026-04-21 |
+| KD-14 | `/api/telemetry/*` 走 session/cookie auth | Maine Coon Design Gate：不复制 `/ready` 公开探针模式 | 2026-04-21 |
+| KD-15 | 查询参数先 HMAC 再 match store | Maine Coon Design Gate：不为查询方便存 raw ID | 2026-04-21 |
 | KD-16 | F153 = descriptive observability，不做 normative eval | Phase E 只展示"发生了什么"，eval 信号留给未来 phase（eval 讨论 2026-04-19） | 2026-04-21 |
 | KD-17 | 补 5 个产品级 instrument（task/session 层），不急于吸收 ActivityEventBus | Phase A 的 5 个是基础设施级；L1-L3 gap 分析显示 task 完成/耗时/轮次信号缺失 | 2026-04-21 |
-| KD-18 | Phase F: 否决 SQLite 独立存储 | 铲屎官认为单独一份可观测数据冗余 | 2026-04-22 |
+| KD-18 | Phase F: 否决 SQLite 独立存储 | team lead认为单独一份可观测数据冗余 | 2026-04-22 |
 | KD-19 | Phase F: 否决完整 span JSON 写入 InvocationRecord | GPT-5.4 + Sonnet review: Redis 内存线性膨胀 + HGETALL 读放大 + TTL 生命周期错位 | 2026-04-22 |
-| KD-20 | Phase F: 选定指针关联方案 | 铲屎官洞察：消息数据已含 timing/token/tool 信息，只需补 OTel ID 指针（~100 bytes） | 2026-04-22 |
-| KD-21 | Phase F 前置：统一 `invocationId`（沿用现有键名，值改为 outer record ID）| GPT-5.4 发现不统一；缅因猫 review 修正：不引入新键名 `recordInvocationId`，否则破坏 redactor Class C + trace query | 2026-04-22 |
+| KD-20 | Phase F: 选定指针关联方案 | team lead洞察：消息数据已含 timing/token/tool 信息，只需补 OTel ID 指针（~100 bytes） | 2026-04-22 |
+| KD-21 | Phase F 前置：统一 `invocationId`（沿用现有键名，值改为 outer record ID）| GPT-5.4 发现不统一；Maine Coon review 修正：不引入新键名 `recordInvocationId`，否则破坏 redactor Class C + trace query | 2026-04-22 |
 | KD-22 | Phase F 纳入 `cat_cafe.route` 根 span | Phase E 实现引入 route 根 span，invocation 已变子 span；hydrate 必须覆盖 route 否则重启后层级断裂 | 2026-04-22 |
-| KD-23 | startTime 用 `timestamp - durationMs` 反推 | assistant message timestamp 是终态落盘时间 ≈ span end；缅因猫 review 发现直接当 startTime 会偏移 | 2026-04-22 |
-| KD-24 | `extra.tracing` 需要 parser + merge 前置改造 | `updateExtra()` 是整块覆盖，parser 不保留未知字段；缅因猫 review 指出需先 widen type + merge 语义 | 2026-04-22 |
+| KD-23 | startTime 用 `timestamp - durationMs` 反推 | assistant message timestamp 是终态落盘时间 ≈ span end；Maine Coon review 发现直接当 startTime 会偏移 | 2026-04-22 |
+| KD-24 | `extra.tracing` 需要 parser + merge 前置改造 | `updateExtra()` 是整块覆盖，parser 不保留未知字段；Maine Coon review 指出需先 widen type + merge 语义 | 2026-04-22 |
 | KD-25 | tool_use spans 暂不持久化 | KD-6 原决策为 event；Phase E 升级为 MCP 工具 span 但仍是零时长；等 Phase G 真实执行边界再持久化 | 2026-04-22 |

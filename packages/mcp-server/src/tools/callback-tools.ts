@@ -4,24 +4,79 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { normalizeRichBlock } from '@cat-cafe/shared';
+import { readFileSync } from 'node:fs';
+import type { CallbackAuthFailureReason } from '@cat-cafe/shared';
+import { CALLBACK_AUTH_FAILURE_REASONS, isCallbackAuthFailureReason, normalizeRichBlock } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { sendCallbackRequest } from './callback-outbox.js';
+import { extractReasonTag } from './callback-retry.js';
+import { withDegradation } from './degradation.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 
+/**
+ * F174 Phase A — reason taxonomy lives in @cat-cafe/shared (single source of
+ * truth shared with the API). Aliased here for local readability.
+ */
+type AuthFailureReason = CallbackAuthFailureReason;
+const KNOWN_REASONS: ReadonlySet<AuthFailureReason> = new Set(CALLBACK_AUTH_FAILURE_REASONS);
+
+/**
+ * Parse the structured reason tag added by the retry layer (or callbackGet)
+ * into a typed AuthFailureReason. Returns undefined if no tag, the tag is
+ * malformed, or the reason is unknown — callers must handle that case.
+ */
+function parseAuthFailureReason(errorText: string): AuthFailureReason | undefined {
+  const match = /\[reason=([a-z_]+)\]/.exec(errorText);
+  if (!match) return undefined;
+  const reason = match[1];
+  // Use shared type guard so an unknown reason from a future server doesn't
+  // get silently coerced into our local enum.
+  if (reason && isCallbackAuthFailureReason(reason) && KNOWN_REASONS.has(reason)) {
+    return reason;
+  }
+  return undefined;
+}
+
+// F174 Phase E: degradation policy + DEGRADABLE_AUTH_REASONS moved to
+// ./degradation.ts so other write-class tools share a single source of truth.
+
 interface CallbackConfig {
   apiUrl: string;
-  invocationId: string;
-  callbackToken: string;
+  invocationId?: string;
+  callbackToken?: string;
+  agentKeySecret?: string;
 }
 
 export function getCallbackConfig(): CallbackConfig | null {
   const apiUrl = process.env['CAT_CAFE_API_URL'];
+  if (!apiUrl) return null;
+
   const invocationId = process.env['CAT_CAFE_INVOCATION_ID'];
   const callbackToken = process.env['CAT_CAFE_CALLBACK_TOKEN'];
-  if (!apiUrl || !invocationId || !callbackToken) return null;
-  return { apiUrl, invocationId, callbackToken };
+
+  let agentKeySecret = process.env['CAT_CAFE_AGENT_KEY_SECRET'];
+  if (!agentKeySecret) {
+    const keyFile = process.env['CAT_CAFE_AGENT_KEY_FILE'];
+    if (keyFile) {
+      try {
+        agentKeySecret = readFileSync(keyFile, 'utf-8').trim();
+      } catch {
+        // sidecar missing = no agent-key (not an error)
+      }
+    }
+  }
+
+  if (!invocationId && !callbackToken && !agentKeySecret) return null;
+
+  const hasFullInvocation = invocationId && callbackToken;
+  if ((invocationId || callbackToken) && !hasFullInvocation && !agentKeySecret) return null;
+
+  return {
+    apiUrl,
+    ...(hasFullInvocation ? { invocationId, callbackToken } : {}),
+    ...(agentKeySecret ? { agentKeySecret } : {}),
+  };
 }
 
 export const NO_CONFIG_ERROR =
@@ -29,27 +84,23 @@ export const NO_CONFIG_ERROR =
 // ============ HTTP helpers ============
 
 export function buildAuthHeaders(config: CallbackConfig): Record<string, string> {
-  return {
-    'x-invocation-id': config.invocationId,
-    'x-callback-token': config.callbackToken,
-  };
+  if (config.invocationId && config.callbackToken) {
+    return {
+      'x-invocation-id': config.invocationId,
+      'x-callback-token': config.callbackToken,
+    };
+  }
+  if (config.agentKeySecret) {
+    return { 'x-agent-key-secret': config.agentKeySecret };
+  }
+  return {};
 }
 
-function withLegacyAuthBody(config: CallbackConfig, body: Record<string, unknown>): Record<string, unknown> {
-  return {
-    ...body,
-    invocationId: config.invocationId,
-    callbackToken: config.callbackToken,
-  };
-}
-
-function withLegacyAuthQuery(config: CallbackConfig, params?: Record<string, string>): URLSearchParams {
-  return new URLSearchParams({
-    ...(params ?? {}),
-    invocationId: config.invocationId,
-    callbackToken: config.callbackToken,
-  });
-}
+// F174 Phase F (AC-F2): first-party MCP client stopped dual-writing creds to
+// body/query. Headers are now the only place we put credentials. Server still
+// accepts body/query as fallback for legacy MCP clients during the compat
+// window — that fallback usage is tracked via callback-auth-telemetry's
+// `recordLegacyFallbackHit` so we know when it's safe to delete the schema.
 
 export async function callbackPost(
   path: string,
@@ -63,9 +114,7 @@ export async function callbackPost(
     {
       apiUrl: config.apiUrl,
       path,
-      // Compat window: send credentials in both headers and legacy body fields
-      // so a newer MCP client can still talk to an older API during rollout.
-      body: withLegacyAuthBody(config, body),
+      body, // headers-only auth (Phase F AC-F2)
       headers: buildAuthHeaders(config),
     },
     { enableOutbox: options?.enableOutbox === true },
@@ -78,7 +127,7 @@ export async function callbackGet(path: string, params?: Record<string, string>)
   const config = getCallbackConfig();
   if (!config) return errorResult(NO_CONFIG_ERROR);
 
-  const query = withLegacyAuthQuery(config, params);
+  const query = new URLSearchParams(params ?? {}); // headers-only auth (Phase F AC-F2)
   const qs = query.toString();
   const url = qs ? `${config.apiUrl}${path}?${qs}` : `${config.apiUrl}${path}`;
 
@@ -86,7 +135,10 @@ export async function callbackGet(path: string, params?: Record<string, string>)
     const response = await fetch(url, { headers: buildAuthHeaders(config) });
     if (!response.ok) {
       const text = await response.text();
-      return errorResult(`Callback failed (${response.status}): ${text}`);
+      // F174 Phase A: tag structured reason from 401 callback_auth_failed body
+      // so downstream routing matches the postJsonWithRetry error format.
+      const reasonTag = response.status === 401 ? extractReasonTag(text) : '';
+      return errorResult(`Callback failed (${response.status})${reasonTag}: ${text}`);
     }
     return successResult(JSON.stringify(await response.json()));
   } catch (err) {
@@ -97,6 +149,13 @@ export async function callbackGet(path: string, params?: Record<string, string>)
 
 export const postMessageInputSchema = {
   content: z.string().min(1).describe('The message content to post'),
+  threadId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Target thread ID. Required for agent-key auth (persistent agent with no default thread). Omit for invocation auth (defaults to invocation thread).',
+    ),
   replyTo: z.string().optional().describe('Optional message ID to reply to'),
   clientMessageId: z
     .string()
@@ -227,17 +286,26 @@ export async function handlePostMessage(input: {
   clientMessageId?: string | undefined;
   targetCats?: string[] | undefined;
 }): Promise<ToolResult> {
-  const result = await callbackPost(
-    '/api/callbacks/post-message',
-    {
-      content: input.content,
-      ...(input.threadId ? { threadId: input.threadId } : {}),
-      ...(input.replyTo ? { replyTo: input.replyTo } : {}),
-      clientMessageId: input.clientMessageId ?? randomUUID(),
-      ...(input.targetCats?.length ? { targetCats: input.targetCats } : {}),
-    },
-    { enableOutbox: true },
-  );
+  // F174 Phase E (AC-E2/E5): explicit kind:'none' policy. There's no useful
+  // local fallback for post_message — losing the message is preferable to
+  // re-creating server state on a stale invocation. Cats see the structured
+  // `[degrade] reason=...` hint and the existing @mention-textual workaround.
+  const result = await withDegradation({
+    toolName: 'post_message',
+    primary: () =>
+      callbackPost(
+        '/api/callbacks/post-message',
+        {
+          content: input.content,
+          ...(input.threadId ? { threadId: input.threadId } : {}),
+          ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+          clientMessageId: input.clientMessageId ?? randomUUID(),
+          ...(input.targetCats?.length ? { targetCats: input.targetCats } : {}),
+        },
+        { enableOutbox: true },
+      ),
+    policy: { kind: 'none' },
+  });
 
   // Detect stale_ignored: server returned 200 but message was NOT delivered
   // because a newer invocation for the same thread+cat has superseded this one.
@@ -259,17 +327,24 @@ export async function handlePostMessage(input: {
 
   // If post-message failed and content contains @mentions,
   // hint that text-based @mention is always available.
-  // Only mention credential issues when the error actually looks like auth failure.
+  // F174 Phase A: route on the structured reason tag (added by callback-retry)
+  // instead of regex-matching prose. Falls back to "generic failure" hint when
+  // no reason tag is present (e.g. network error, non-auth 4xx).
   if (result.isError && /[@＠]/.test(input.content)) {
     const original = (result.content[0] as { text: string }).text;
-    const lower = original.toLowerCase();
-    const looksLikeCredentialFailure =
-      lower.includes('callback failed (401)') ||
-      lower.includes('invalid or expired callback credentials') ||
-      lower.includes('callback token');
-    const reasonHint = looksLikeCredentialFailure
-      ? '这次 callback 凭证校验失败（可能是 token 过期，也可能 invocation/token 不匹配）。'
-      : '这次 post-message 调用失败。';
+    const reason = parseAuthFailureReason(original);
+    const reasonHint = ((): string => {
+      if (reason === 'expired' || reason === 'unknown_invocation') {
+        return '这次 callback 凭证已过期或对应的 invocation 已不在 registry（可能 API 重启过）。';
+      }
+      if (reason === 'invalid_token') {
+        return '这次 callback token 与 invocation 不匹配（客户端可能传错了凭证）。';
+      }
+      if (reason === 'missing_creds') {
+        return '这次 callback 缺少凭证 header（MCP 客户端环境变量可能没注入）。';
+      }
+      return '这次 post-message 调用失败。';
+    })();
     const hint =
       `\n\n💡 Tip: ${reasonHint}如果你想 @其他猫猫，` +
       '不需要用这个 MCP tool——直接在你的回复文本里另起一行写 @猫名 即可' +
@@ -335,10 +410,17 @@ export async function handleUpdateTask(input: {
   status?: string | undefined;
   why?: string | undefined;
 }): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/update-task', {
-    taskId: input.taskId,
-    ...(input.status ? { status: input.status } : {}),
-    ...(input.why ? { why: input.why } : {}),
+  // F174 Phase E (AC-E2/E5): explicit kind:'none'. Task state lives in Redis;
+  // local fallback would diverge from server truth. Surface `[degrade]` hint.
+  return withDegradation({
+    toolName: 'update_task',
+    primary: () =>
+      callbackPost('/api/callbacks/update-task', {
+        taskId: input.taskId,
+        ...(input.status ? { status: input.status } : {}),
+        ...(input.why ? { why: input.why } : {}),
+      }),
+    policy: { kind: 'none' },
   });
 }
 
@@ -392,8 +474,12 @@ export const createRichBlockInputSchema = {
 
 /**
  * #84: Route A → Route B fallback for rich block creation.
- * Tries direct callback first; on failure, falls back to post_message with cc_rich text
- * (which is extracted server-side after #83 fix).
+ *
+ * F174 Phase E refactor: the typed-reason auth path (expired /
+ * unknown_invocation) now flows through `withDegradation` framework so
+ * other write-class tools can declare the same policy uniformly. The
+ * legacy 403 / "not configured" path predates Phase A typed reasons and
+ * stays inline (preserves pre-Phase-A behavior, marks DEGRADED:true).
  */
 export async function handleCreateRichBlock(input: { block: string }): Promise<ToolResult> {
   let parsed: unknown;
@@ -409,37 +495,45 @@ export async function handleCreateRichBlock(input: { block: string }): Promise<T
   if (!parsed || typeof parsed !== 'object' || !('id' in parsed) || !('kind' in parsed)) {
     return errorResult('Block must include id and kind fields');
   }
+  const block = parsed;
 
-  // Route A: direct rich block callback (buffers for invocation response)
-  const result = await callbackPost(
-    '/api/callbacks/create-rich-block',
-    {
-      block: parsed,
+  const ccRichText = `\`\`\`cc_rich\n${JSON.stringify({ v: 1, blocks: [block] })}\n\`\`\``;
+  const runRouteB = async (): Promise<ToolResult> => {
+    const fallback = await handlePostMessage({
+      content: ccRichText,
+      clientMessageId: randomUUID(),
+    });
+    if (!fallback.isError) {
+      // Cloud Codex P2 (PR #1384): legacy 403/not-configured branch returns
+      // runRouteB() from primary, where the framework treats it as primary
+      // success and skips DEGRADED:true tagging. Mark inline so both paths
+      // (legacy + framework custom degrade) get consistent telemetry. The
+      // framework's markDegraded is idempotent so re-tagging on the custom
+      // path is harmless.
+      return successResult(JSON.stringify({ status: 'ok', route: 'B_fallback', DEGRADED: true }));
+    }
+    return errorResult(
+      `Rich block creation failed (callback token expired or missing). As a workaround, include this in your message text:\n\n${ccRichText}`,
+    );
+  };
+
+  // Phase E: framework handles primary call + auth-degradable fallback.
+  // For the legacy 403/not-configured path (pre-Phase-A), inspect the
+  // returned error text and route to Route B explicitly — preserves the
+  // existing behavior without widening the framework's degradable set
+  // (AC-E3: framework triggers only on 401-degradable reasons).
+  return withDegradation({
+    toolName: 'create_rich_block',
+    primary: async () => {
+      const result = await callbackPost('/api/callbacks/create-rich-block', { block }, { enableOutbox: true });
+      if (!result.isError) return result;
+      const errorText = result.content[0]?.type === 'text' ? result.content[0].text : '';
+      const isLegacyConfigFailure = /\(403\)/.test(errorText) || /not configured/i.test(errorText);
+      if (isLegacyConfigFailure) return runRouteB(); // legacy compat path returns success directly
+      return result; // framework continues with auth-reason inspection
     },
-    { enableOutbox: true },
-  );
-  if (!result.isError) return result;
-
-  // P1 cloud-review: only fallback to Route B for auth/config failures.
-  // Validation errors (400/422) must surface directly, not be silently swallowed.
-  const errorText = result.content[0]?.type === 'text' ? result.content[0].text : '';
-  const isAuthOrConfigFailure = /\(40[13]\)/.test(errorText) || /not configured/i.test(errorText);
-  if (!isAuthOrConfigFailure) return result;
-
-  // Route A auth/config failed — try Route B: cc_rich text via post_message (#83 extracts it server-side)
-  const ccRichText = `\`\`\`cc_rich\n${JSON.stringify({ v: 1, blocks: [parsed] })}\n\`\`\``;
-  const fallback = await handlePostMessage({
-    content: ccRichText,
-    clientMessageId: randomUUID(),
+    policy: { kind: 'custom', degrade: async () => runRouteB() },
   });
-  if (!fallback.isError) {
-    return successResult(JSON.stringify({ status: 'ok', route: 'B_fallback' }));
-  }
-
-  // Both routes failed — return error with embeddable cc_rich hint
-  return errorResult(
-    `Rich block creation failed (callback token expired or missing). As a workaround, include this in your message text:\n\n${ccRichText}`,
-  );
 }
 
 /** F088 Phase J2: Generate a document (PDF/DOCX/MD) from Markdown content */
@@ -516,10 +610,17 @@ export async function handleRegisterPrTracking(input: {
   prNumber: number;
   catId?: string;
 }): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/register-pr-tracking', {
-    repoFullName: input.repoFullName,
-    prNumber: input.prNumber,
-    ...(input.catId ? { catId: input.catId } : {}),
+  // F174 Phase E (AC-E2/E5): explicit kind:'none'. PR tracking is one-shot
+  // registration, no useful local fallback. Surface `[degrade]` hint.
+  return withDegradation({
+    toolName: 'register_pr_tracking',
+    primary: () =>
+      callbackPost('/api/callbacks/register-pr-tracking', {
+        repoFullName: input.repoFullName,
+        prNumber: input.prNumber,
+        ...(input.catId ? { catId: input.catId } : {}),
+      }),
+    policy: { kind: 'none' },
   });
 }
 
@@ -804,8 +905,24 @@ export async function handleGetAvailableGuides(): Promise<ToolResult> {
   return callbackPost('/api/callbacks/get-available-guides', {});
 }
 
+export async function handleGuideResolve(input: { intent: string }): Promise<ToolResult> {
+  return callbackPost('/api/callbacks/guide-resolve', { intent: input.intent });
+}
+
 export async function handleGuideControl(input: { action: string }): Promise<ToolResult> {
   return callbackPost('/api/callbacks/guide-control', { action: input.action });
+}
+
+export async function handleHoldBall(input: {
+  reason: string;
+  nextStep: string;
+  wakeAfterMs: number;
+}): Promise<ToolResult> {
+  return callbackPost('/api/callbacks/hold-ball', {
+    reason: input.reason,
+    nextStep: input.nextStep,
+    wakeAfterMs: input.wakeAfterMs,
+  });
 }
 
 export const callbackTools = [
@@ -1049,6 +1166,17 @@ export const callbackTools = [
     handler: handleGetAvailableGuides,
   },
   {
+    name: 'cat_cafe_guide_resolve',
+    description:
+      'Legacy alias for guide discovery by explicit intent. ' +
+      'Use only when an older prompt or caller still sends a concrete intent string and expects ranked guide matches. ' +
+      'For new code and new prompts, prefer cat_cafe_get_available_guides and let the cat choose based on catalog metadata.',
+    inputSchema: {
+      intent: z.string().min(1).describe('User intent text (e.g. "添加成员", "配置飞书")'),
+    },
+    handler: handleGuideResolve,
+  },
+  {
     name: 'cat_cafe_start_guide',
     description:
       'Start an interactive guided flow on the Console frontend. ' +
@@ -1069,5 +1197,30 @@ export const callbackTools = [
       action: z.enum(['next', 'skip', 'exit']).describe('Guide control action'),
     },
     handler: handleGuideControl,
+  },
+  {
+    name: 'cat_cafe_hold_ball',
+    description:
+      'Declare a bounded ball hold: keep the ball while waiting for a short, predictable condition, then get auto-re-invoked with your context. ' +
+      'Use when: ball is clearly yours + nobody else can advance + short predictable wait ' +
+      '(e.g. CI running, build compiling, PR checks pending) + you know exactly what to do next. ' +
+      'NOT for: need review/approval → @ reviewer or @co-creator; need another cat to act → @ that cat; ' +
+      '"let me think" / "I\'ll hold for now" → hesitation not hold, pick 接/退/升; ' +
+      'review/analysis done → MUST @ author, conclusion ≠ endpoint; status updates → use post_message. ' +
+      'Output: system schedules a one-shot wake-up after wakeAfterMs; you get re-invoked with reason + nextStep as trigger context. ' +
+      'GOTCHA: max 3 holds per (thread, cat) within a rolling ~1h window — 4th call returns 429, you MUST pass (@ another cat or @co-creator). ' +
+      'GOTCHA: the counter is process-local best-effort (in-memory on the API node); API restart or multi-instance deploys may reset it, so do not treat the 429 as a hard security boundary — treat it as a self-discipline guardrail. ' +
+      'GOTCHA: hold is an EXCEPTION state, not a default exit. Most turns should end with @ someone, not hold. ' +
+      'GOTCHA: SINGLE-SLOT per (thread, cat) — calling hold_ball again while a previous hold is pending REPLACES the prior wake (prior taskId cancelled). This is intentional (KD-23): hold = "持一个球" exception, not a queue. If you need to track multiple waiting conditions, merge them into one nextStep (e.g. "等 CI + @co-creator 确认" 合并成一句). Rolling-window counter still ticks per call.',
+    inputSchema: {
+      reason: z.string().min(1).max(500).describe('Why you need to hold the ball (e.g. "tests still running")'),
+      nextStep: z
+        .string()
+        .min(1)
+        .max(500)
+        .describe('What you will do when re-invoked (e.g. "check test results, then @ author")'),
+      wakeAfterMs: z.number().int().min(5000).max(3600000).describe('Delay in ms before system re-invokes you (5s–1h)'),
+    },
+    handler: handleHoldBall,
   },
 ] as const;

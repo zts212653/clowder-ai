@@ -14,12 +14,13 @@ interface McpInstallFormProps {
   projectPath?: string;
   onInstalled: () => void;
   onClose: () => void;
+  prefilledId?: string;
 }
 
 type Transport = 'stdio' | 'streamableHttp';
 
-export function McpInstallForm({ projectPath, onInstalled, onClose }: McpInstallFormProps) {
-  const [id, setId] = useState('');
+export function McpInstallForm({ projectPath, onInstalled, onClose, prefilledId }: McpInstallFormProps) {
+  const [id, setId] = useState(prefilledId ?? '');
   const [transport, setTransport] = useState<Transport>('stdio');
   const [command, setCommand] = useState('');
   const [args, setArgs] = useState('');

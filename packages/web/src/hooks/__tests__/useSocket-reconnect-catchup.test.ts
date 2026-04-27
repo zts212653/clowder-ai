@@ -6,7 +6,7 @@
  * "server done but local had active invocations" and should trigger
  * requestStreamCatchUp so the user sees the response without F5.
  */
-import EventEmitter from 'node:events';
+import EventEmitter from 'events';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -59,6 +59,7 @@ const mockStoreState = {
   setLoading: mockSetLoading,
   setIntentMode: mockSetIntentMode,
   clearCatStatuses: mockClearCatStatuses,
+  clearThreadCatStatuses: vi.fn(),
   setStreaming: mockSetStreaming,
   requestStreamCatchUp: mockRequestStreamCatchUp,
   clearThreadActiveInvocation: mockClearThreadActiveInvocation,

@@ -112,6 +112,46 @@ describe('OutboundDeliveryHook — media delivery integration', () => {
     assert.equal(sendMediaCalls.length, 0);
   });
 
+  it('passes /uploads media_gallery image URL through to sendMedia when resolver cannot resolve absPath', async () => {
+    const { OutboundDeliveryHook } = await import('../dist/infrastructure/connectors/OutboundDeliveryHook.js');
+
+    const sendMediaCalls = [];
+    const mockAdapter = {
+      connectorId: 'weixin',
+      async sendReply() {},
+      async sendMedia(chatId, payload) {
+        sendMediaCalls.push({ chatId, payload });
+      },
+      async sendRichMessage() {},
+    };
+
+    const hook = new OutboundDeliveryHook({
+      bindingStore: {
+        async getByThread() {
+          return [{ connectorId: 'weixin', externalChatId: 'chat2', threadId: 'T2', userId: 'u1', createdAt: 0 }];
+        },
+      },
+      adapters: new Map([['weixin', mockAdapter]]),
+      log: { info() {}, warn() {}, error() {}, debug() {} },
+      mediaPathResolver: () => undefined,
+    });
+
+    await hook.deliver('T2', 'Check image', undefined, [
+      {
+        id: 'block1',
+        kind: 'media_gallery',
+        v: 1,
+        items: [{ url: '/uploads/photo.jpg', type: 'image' }],
+      },
+    ]);
+
+    assert.equal(sendMediaCalls.length, 1);
+    assert.equal(sendMediaCalls[0].payload.type, 'image');
+    assert.ok(sendMediaCalls[0].payload.url.endsWith('/uploads/photo.jpg'), 'URL should end with /uploads/photo.jpg');
+    assert.ok(sendMediaCalls[0].payload.url.startsWith('http'), 'URL should be resolved to absolute HTTP URL');
+    assert.equal(sendMediaCalls[0].payload.absPath, undefined);
+  });
+
   it('does not send media when adapter lacks sendMedia', async () => {
     const { OutboundDeliveryHook } = await import('../dist/infrastructure/connectors/OutboundDeliveryHook.js');
 

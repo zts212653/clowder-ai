@@ -47,7 +47,7 @@ export function ThreadCatStatus({
       {status === 'done' && <span className="text-green-500 text-[10px]">&#10003;</span>}
       {hasUserMention && (
         <span title="猫猫 @ 了你">
-          <PawIcon className="h-3 w-3 text-cafe-secondary" />
+          <PawIcon className="text-xs" />
         </span>
       )}
       {unreadCount > 0 && (

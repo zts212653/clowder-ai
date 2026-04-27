@@ -155,7 +155,7 @@ describe('First-Run Quest Routes', () => {
       payload: { firstCatId: 'opus' },
     });
     const { quest } = JSON.parse(createRes.body);
-    const { invocationId, callbackToken } = registry.create('test-user', 'opus', quest.threadId);
+    const { invocationId, callbackToken } = await registry.create('test-user', 'opus', quest.threadId);
 
     // Advance to task-select (quest starts at quest-2, so go forward to quest-3)
     const updateRes = await app.inject({
@@ -176,6 +176,40 @@ describe('First-Run Quest Routes', () => {
     assert.equal(body.questState.phase, 'quest-3-task-select');
   });
 
+  test('POST /api/callbacks/update-quest-state ignores stale invocations', async () => {
+    const app = await createApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/first-run/quest',
+      headers: { 'x-cat-cafe-user': 'test-user', 'content-type': 'application/json' },
+      payload: { firstCatId: 'opus' },
+    });
+    const { quest } = JSON.parse(createRes.body);
+    const oldInvocation = await registry.create('test-user', 'opus', quest.threadId);
+    await registry.create('test-user', 'opus', quest.threadId);
+
+    const updateRes = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/update-quest-state',
+      headers: {
+        'x-invocation-id': oldInvocation.invocationId,
+        'x-callback-token': oldInvocation.callbackToken,
+        'content-type': 'application/json',
+      },
+      payload: { threadId: quest.threadId, phase: 'quest-3-task-select' },
+    });
+    assert.equal(updateRes.statusCode, 200);
+    assert.deepEqual(JSON.parse(updateRes.body), { status: 'stale_ignored' });
+
+    const getRes = await app.inject({
+      method: 'GET',
+      url: '/api/first-run/quest',
+      headers: { 'x-cat-cafe-user': 'test-user' },
+    });
+    const body = JSON.parse(getRes.body);
+    assert.equal(body.quest.state.phase, 'quest-2-cat-intro');
+  });
+
   test('rejects backward phase transition', async () => {
     const app = await createApp();
     // Create quest
@@ -186,7 +220,7 @@ describe('First-Run Quest Routes', () => {
       payload: {},
     });
     const { quest } = JSON.parse(createRes.body);
-    const { invocationId, callbackToken } = registry.create('test-user', 'opus', quest.threadId);
+    const { invocationId, callbackToken } = await registry.create('test-user', 'opus', quest.threadId);
     const cbHeaders = {
       'x-invocation-id': invocationId,
       'x-callback-token': callbackToken,
@@ -222,7 +256,7 @@ describe('First-Run Quest Routes', () => {
       payload: { firstCatId: 'opus', firstCatName: '宪宪' },
     });
     const { quest } = JSON.parse(createRes.body);
-    const { invocationId, callbackToken } = registry.create('test-user', 'opus', quest.threadId);
+    const { invocationId, callbackToken } = await registry.create('test-user', 'opus', quest.threadId);
 
     // Update with second cat info (must advance forward from quest-2)
     await app.inject({

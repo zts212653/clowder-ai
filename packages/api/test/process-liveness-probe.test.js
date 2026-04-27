@@ -22,6 +22,15 @@ async function waitForBusySilent(probe, { timeoutMs = 3_000, burnMs = 180, settl
   return false;
 }
 
+async function waitForState(probe, expectedState, { timeoutMs = 5_000, settleMs = 100 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (probe.getState() === expectedState) return true;
+    await new Promise((r) => setTimeout(r, settleMs));
+  }
+  return false;
+}
+
 test('new probe starts in active state', () => {
   const probe = new ProcessLivenessProbe(process.pid, { sampleIntervalMs: 100 });
   assert.equal(probe.getState(), 'active');
@@ -140,20 +149,20 @@ test(
       { stdio: 'ignore' },
     );
 
+    let probe = null;
     try {
       // Give child time to start burning CPU
       await new Promise((r) => setTimeout(r, 300));
 
-      const probe = new ProcessLivenessProbe(parent.pid, { sampleIntervalMs: 100 });
+      probe = new ProcessLivenessProbe(parent.pid, { sampleIntervalMs: 100 });
       probe.start();
 
-      // Wait for multiple sampling cycles (single ps -A call) to complete
-      await new Promise((r) => setTimeout(r, 600));
-
+      const reachedBusySilent = await waitForState(probe, 'busy-silent');
       const state = probe.getState();
+      assert.ok(reachedBusySilent, `parent with busy child should reach busy-silent, got ${state}`);
       assert.equal(state, 'busy-silent', `parent with busy child should be busy-silent, got ${state}`);
-      probe.stop();
     } finally {
+      probe?.stop();
       parent.kill('SIGTERM');
     }
   },

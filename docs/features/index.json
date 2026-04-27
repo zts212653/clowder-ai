@@ -369,7 +369,7 @@
     {
       "id": "F061",
       "name": "Antigravity 接入 — 孟加拉猫（混血家族）",
-      "status": "phase-2-bridge | **Owner**: Ragdoll Opus 4.6（Phase 2a/2b） · Ragdoll Opus 4.7 试用分身（Phase 2c · 猫猫工具平权）",
+      "status": "done | **Owner**: Ragdoll Opus 4.6（Phase 2a/2b） · Ragdoll Opus 4.7（Phase 2c · 猫猫工具平权 + Bug-F UX + binary/workspace 分离）",
       "file": "F061-antigravity-bengal-cat.md"
     },
     {
@@ -855,7 +855,7 @@
     {
       "id": "F140",
       "name": "GitHub PR Signals — 冲突检测 + Review Feedback 全来源感知",
-      "status": "done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-03-27",
+      "status": "done | **Owner**: Ragdoll | **Priority**: P1 | **Phase A-D Completed**: 2026-03-27 | **Reopened**: 2026-04-24（Phase E — 通知合流：severity 抽取 + 下线 email 路径） | **Completed**: 2026-04-25",
       "file": "F140-github-pr-automation.md"
     },
     {
@@ -891,7 +891,7 @@
     {
       "id": "F146",
       "name": "Capability Marketplace Control Plane — 一键接入 + 多生态聚合",
-      "status": "in-progress | **Owner**: Maine Coon + Ragdoll | **Priority**: P1",
+      "status": "done | **Completed**: 2026-04-19 | **Owner**: Maine Coon + Ragdoll | **Priority**: P1",
       "file": "F146-mcp-marketplace-control-plane.md"
     },
     {
@@ -903,7 +903,7 @@
     {
       "id": "F148",
       "name": "Hierarchical Context Transport — 分层上下文传输",
-      "status": "done | **Owner**: Ragdoll + Maine Coon | **Priority**: P1 | **Completed**: 2026-04-02",
+      "status": "done | **Owner**: Ragdoll + Maine Coon | **Priority**: P1 | **Phase A-E Completed**: 2026-04-02 | **Reopened**: 2026-04-19（导航轴优化）| **Phase F-H Completed**: 2026-04-21 | **Closed**: 2026-04-25",
       "file": "F148-hierarchical-context-transport.md"
     },
     {
@@ -951,7 +951,7 @@
     {
       "id": "F155",
       "name": "Scene-Based Guidance Engine — 场景式交互引导",
-      "status": "in-progress (Phase A merged in cat-cafe main via PR #1122; Phase B selective intake merged in cat-cafe main via PR #1147) | **Source**: Community (mindfn) | **Priority**: P1 | **Owner**: Maine Coon/gpt52",
+      "status": "in-progress (Phase A merged in cat-cafe main via PR #1122; Phase B selective intake merged in cat-cafe main via PR #1147; guided-scenarios selective intake merged in cat-cafe main via PR #1296) | **Source**: Community (mindfn) | **Priority**: P1 | **Owner**: Maine Coon/gpt52",
       "file": "F155-scene-guidance-engine.md"
     },
     {
@@ -981,7 +981,7 @@
     {
       "id": "F159",
       "name": "CatAgent Native Provider — Opt-in API Path",
-      "status": "spec | **Owner**: 社区 (bouillipx) + Ragdoll + Maine Coon | **Priority**: P1",
+      "status": "in-progress | **Owner**: 社区 (bouillipx) + Ragdoll + Maine Coon | **Priority**: P1",
       "file": "F159-catagent-native-provider.md"
     },
     {
@@ -1005,7 +1005,7 @@
     {
       "id": "F163",
       "name": "Memory Entropy Reduction — 记忆熵减与知识生命周期治理",
-      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-04-26",
       "file": "F163-memory-entropy-reduction.md"
     },
     {
@@ -1035,15 +1035,68 @@
     {
       "id": "F168",
       "name": "Community Operations Board — 社区事务编排引擎",
-      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "done | **Completed**: 2026-04-20 | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F168-community-ops-board.md"
     },
     {
+      "id": "F169",
+      "name": "Agent Memory Reflex — 愿景文档（vision artifact）",
+      "status": "**realized → closed**（B+C 已通过 F148/F163 实现；A team lead拍板关闭，不做持久 Compiled Wiki）",
+      "file": "F169-agent-memory-reflex.md"
+    },
+    {
+      "id": "F170",
+      "name": "Web Chinese Chess — 网页端中国象棋",
+      "status": "done (archived — interview demo delivered, implementation kept on feature branch) | **Owner**: Ragdoll | **Priority**: P2 | **Completed**: 2026-04-20",
+      "file": "F170-web-chinese-chess.md"
+    },
+    {
       "id": "F171",
-      "name": "First-Run Quest — 首次安装零成员 + 游戏化新手引导",
-      "status": "in-progress (Phase A-B done, C mostly done, D mostly done, E partial)",
+      "name": "First Partner Onboarding — 领养第一只猫 / 配置第一位伙伴",
+      "status": "done | **Owner**: Maine Coon/gpt52 | **Priority**: P1 | **Completed**: 2026-04-25",
       "file": "F171-first-partner-onboarding.md"
+    },
+    {
+      "id": "F172",
+      "name": "Generated Image Publication — 内建生图产物归档与富块发布",
+      "status": "done (Phase H merged 2026-04-24) | **Owner**: Ragdoll/opus | **Priority**: P1",
+      "file": "F172-generated-image-publication.md"
+    },
+    {
+      "id": "F173",
+      "name": "前端 Thread-Runtime State 统一（消除 dual write-path & liveness fragmentation）",
+      "status": "done (realized → closed 2026-04-26 23:14) | **Owner**: Ragdoll + Maine Coon GPT-5.5 | **Priority**: P0",
+      "file": "F173-frontend-message-pipeline-unification.md"
+    },
+    {
+      "id": "F174",
+      "name": "Callback Auth Lifecycle & Resilience — 鉴权基础设施持久化、降级与可观测",
+      "status": "done | **Owner**: Ragdoll（Opus-47）+ Maine Coon（GPT-5.4，跨家族独立 review） | **Priority**: P1 | **Completed**: 2026-04-26 (close attempt #3 — D2b-2 rev3 interaction semantics 闭环 + alpha #4 implicit OK)",
+      "file": "F174-callback-auth-lifecycle.md"
+    },
+    {
+      "id": "F175",
+      "name": "Unified Message Queue — 优先级排序 + 用户可控编排",
+      "status": "intake pending | **Owner**: @mindfn (community, original author) + cat-cafe intake reviewer TBD | **Priority**: P1",
+      "file": "F175-unified-message-queue.md"
+    },
+    {
+      "id": "F176",
+      "name": "Native CLI Assistant-Speech vs CLI-Stdout 渲染语义分离",
+      "status": "done (reverted) | ❌ REVERTED 2026-04-26 | **Owner**: Ragdoll（Opus-47） | **Priority**: P1（已撤销）",
+      "file": "F176-native-cli-assistant-speech-rendering.md"
+    },
+    {
+      "id": "F177",
+      "name": "Harness Update — Close Gate 结构化判据 + 四心智专属护栏",
+      "status": "spec | **Owner**: Ragdoll | **Priority**: P0",
+      "file": "F177-harness-update.md"
+    },
+    {
+      "id": "F178",
+      "name": "Persistent MCP Agent-Key Auth — 跨 invocation 写权限",
+      "status": "in-progress | **Owner**: Ragdoll（Ragdoll） | **Reviewer**: Maine Coon（Maine Coon） | **Priority**: P1",
+      "file": "F178-persistent-mcp-agent-key-auth.md"
     }
-  ],
-  "generated_at": "2026-04-24T19:13:55.656Z"
+  ]
 }

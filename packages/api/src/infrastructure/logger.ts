@@ -50,26 +50,32 @@ if (!existsSync(LOG_DIR)) {
   mkdirSync(LOG_DIR, { recursive: true });
 }
 
-const transport = pino.transport({
-  targets: [
-    {
-      target: 'pino/file',
-      options: { destination: 1 },
-      level: 'trace',
-    },
-    {
-      target: 'pino-roll',
-      options: {
-        file: resolve(LOG_DIR, 'api.log'),
-        frequency: 'daily',
-        dateFormat: 'yyyy-MM-dd',
-        limit: { count: RETENTION_FILES },
-        mkdir: true,
-      },
-      level: 'trace',
-    },
-  ],
-});
+const stream =
+  process.env.NODE_ENV === 'test'
+    ? pino.multistream([
+        { level: 'trace', stream: pino.destination(1) },
+        { level: 'trace', stream: pino.destination({ dest: resolve(LOG_DIR, 'api.log'), mkdir: true }) },
+      ])
+    : pino.transport({
+        targets: [
+          {
+            target: 'pino/file',
+            options: { destination: 1 },
+            level: 'trace',
+          },
+          {
+            target: 'pino-roll',
+            options: {
+              file: resolve(LOG_DIR, 'api.log'),
+              frequency: 'daily',
+              dateFormat: 'yyyy-MM-dd',
+              limit: { count: RETENTION_FILES },
+              mkdir: true,
+            },
+            level: 'trace',
+          },
+        ],
+      });
 
 export const logger = pino(
   {
@@ -80,7 +86,7 @@ export const logger = pino(
       censor: '[REDACTED]',
     },
   },
-  transport,
+  stream,
 );
 
 export function createModuleLogger(module: string): pino.Logger {

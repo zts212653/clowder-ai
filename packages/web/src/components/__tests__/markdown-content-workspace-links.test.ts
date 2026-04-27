@@ -9,7 +9,7 @@ Object.assign(globalThis as Record<string, unknown>, { React });
 describe('isRelativeMdLink', () => {
   it('returns true for relative .md links', () => {
     expect(isRelativeMdLink('features/F046.md')).toBe(true);
-    expect(isRelativeMdLink('../BACKLOG.md')).toBe(true);
+    expect(isRelativeMdLink('../ROADMAP.md')).toBe(true);
     expect(isRelativeMdLink('./notes.mdx')).toBe(true);
   });
 
@@ -45,7 +45,7 @@ describe('resolveRelativePath', () => {
   });
 
   it('resolves parent traversal (..)', () => {
-    expect(resolveRelativePath('docs/features', '../BACKLOG.md')).toBe('docs/BACKLOG.md');
+    expect(resolveRelativePath('docs/features', '../ROADMAP.md')).toBe('docs/ROADMAP.md');
   });
 
   it('resolves multiple parent traversals', () => {

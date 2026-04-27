@@ -65,7 +65,11 @@ export interface MultiMentionRouteDeps {
     tryAutoExecute?(threadId: string): Promise<void>;
     registerEntryCompleteHook?(
       entryId: string,
-      hook: (entryId: string, status: 'succeeded' | 'failed' | 'canceled', responseText: string) => void,
+      hook: (
+        entryId: string,
+        status: 'succeeded' | 'failed' | 'canceled' | 'canceled_by_user',
+        responseText: string,
+      ) => void,
     ): void;
     unregisterEntryCompleteHook?(entryId: string): void;
   };
@@ -140,7 +144,7 @@ function dispatchViaQueue(
 
     if ((result.outcome === 'enqueued' || result.outcome === 'merged') && result.entry) {
       queueProcessor.registerEntryCompleteHook?.(result.entry.id, (_entryId, status, responseText) => {
-        if (status === 'canceled') {
+        if (status === 'canceled' || status === 'canceled_by_user') {
           log.info({ requestId, catId }, '[F122B B6] multi-mention queue entry canceled, skipping recordResponse');
           return;
         }

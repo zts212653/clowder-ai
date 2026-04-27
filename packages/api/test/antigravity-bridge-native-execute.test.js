@@ -95,6 +95,105 @@ describe('AntigravityBridge.nativeExecuteAndPush', () => {
     assert.equal(modelArg, 'claude-opus-4-6', 'tool-result writeback must preserve the requested model');
   });
 
+  test('pre-approves run_command permission before invoking RunCommand unary', async () => {
+    const { bridge, rpcMock } = makeBridge();
+    const step = makeStep({ commandLine: 'git log --oneline -5', stepIndex: 23, trajectoryId: 'traj-1' });
+
+    const handled = await bridge.nativeExecuteAndPush(step, {
+      cascadeId: 'c1',
+      cwd: '/tmp',
+      modelName: 'claude-opus-4-6',
+    });
+
+    assert.equal(handled, true);
+    const methods = rpcMock.mock.calls.map((c) => {
+      const args = c.arguments;
+      return typeof args[0] === 'string' ? args[0] : args[1];
+    });
+    const approvalIdx = methods.indexOf('HandleCascadeUserInteraction');
+    const runIdx = methods.indexOf('RunCommand');
+    assert.notEqual(approvalIdx, -1, 'must call HandleCascadeUserInteraction to satisfy PermissionManager first');
+    assert.notEqual(runIdx, -1, 'must still execute RunCommand');
+    assert.ok(approvalIdx < runIdx, 'permission approval must happen before RunCommand unary');
+
+    const approvalCall = rpcMock.mock.calls.find((c) => {
+      const args = c.arguments;
+      const method = typeof args[0] === 'string' ? args[0] : args[1];
+      return method === 'HandleCascadeUserInteraction';
+    });
+    assert.ok(approvalCall, 'approval call should be recorded');
+    const payload =
+      typeof approvalCall.arguments[0] === 'string' ? approvalCall.arguments[1] : approvalCall.arguments[2];
+    assert.deepEqual(payload, {
+      cascadeId: 'c1',
+      interaction: {
+        permission: { allowed: true },
+        trajectoryId: 'traj-1',
+        stepIndex: 23,
+      },
+    });
+  });
+
+  test('permission guard RPC failure does not block RunCommand + pushToolResult fallback', async () => {
+    const { bridge, logDir } = makeBridge();
+    const rpcMock = mock.fn(async (...args) => {
+      const method = typeof args[0] === 'string' ? args[0] : args[1];
+      if (method === 'HandleCascadeUserInteraction') {
+        throw new Error('permission rpc unavailable');
+      }
+      return { stdout: 'probe\n', stderr: '', exitCode: 0 };
+    });
+    Object.getPrototypeOf(bridge).rpc = rpcMock;
+    const registry = new ExecutorRegistry();
+    const audit = new AuditLogger(logDir);
+    registry.register(new RunCommandExecutor({ rpc: rpcMock }));
+    bridge.attachExecutors(registry, audit);
+
+    const step = makeStep({ commandLine: 'git log --oneline -5', stepIndex: 23, trajectoryId: 'traj-1' });
+    const handled = await bridge.nativeExecuteAndPush(step, {
+      cascadeId: 'c1',
+      cwd: '/tmp',
+      modelName: 'claude-opus-4-6',
+    });
+
+    assert.equal(handled, true, 'permission guard should be best-effort, not a hard stop');
+    const methods = rpcMock.mock.calls.map((c) => {
+      const args = c.arguments;
+      return typeof args[0] === 'string' ? args[0] : args[1];
+    });
+    assert.ok(methods.includes('HandleCascadeUserInteraction'));
+    assert.ok(methods.includes('RunCommand'), 'must still execute RunCommand when permission hint fails');
+    assert.ok(methods.includes('CancelCascadeSteps'), 'must still cancel stuck step before writeback');
+    assert.equal(bridge.sendMessage.mock.callCount(), 1, 'must still inject fallback result message');
+  });
+
+  test('refused commands are blocked before permission approval RPC', async () => {
+    const { bridge, rpcMock } = makeBridge();
+    const step = makeStep({ commandLine: 'redis-cli -p 6399 flushall', stepIndex: 23, trajectoryId: 'traj-1' });
+
+    const handled = await bridge.nativeExecuteAndPush(step, {
+      cascadeId: 'c1',
+      cwd: '/tmp',
+      modelName: 'claude-opus-4-6',
+    });
+
+    assert.equal(handled, true, 'bridge should treat refused command as handled without touching LS permission flow');
+    const methods = rpcMock.mock.calls.map((c) => {
+      const args = c.arguments;
+      return typeof args[0] === 'string' ? args[0] : args[1];
+    });
+    assert.equal(
+      methods.includes('HandleCascadeUserInteraction'),
+      false,
+      'unsafe commands must not be permission-approved before local refusal logic runs',
+    );
+    assert.equal(methods.includes('RunCommand'), false, 'unsafe commands must not reach RunCommand unary');
+    assert.ok(methods.includes('CancelCascadeSteps'), 'refused command should still cancel the waiting step');
+    assert.equal(bridge.sendMessage.mock.callCount(), 1, 'refused command should still write back fallback result');
+    const textArg = bridge.sendMessage.mock.calls[0].arguments[1];
+    assert.match(textArg, /Redis 6399 is user sanctum/i);
+  });
+
   test('skips non-WAITING steps', async () => {
     const { bridge, rpcMock } = makeBridge();
     const step = makeStep({ status: 'CORTEX_STEP_STATUS_DONE' });
@@ -103,7 +202,7 @@ describe('AntigravityBridge.nativeExecuteAndPush', () => {
     assert.equal(rpcMock.mock.callCount(), 0);
   });
 
-  test('skips non-run_command steps', async () => {
+  test('returns no_executor for step types not in registry', async () => {
     const { bridge, rpcMock } = makeBridge();
     const step = {
       type: 'CORTEX_STEP_TYPE_RUN_COMMAND',
@@ -111,7 +210,7 @@ describe('AntigravityBridge.nativeExecuteAndPush', () => {
       metadata: { toolCall: { name: 'read_file', argumentsJson: '{}' } },
     };
     const handled = await bridge.nativeExecuteAndPush(step, { cascadeId: 'c1', cwd: '/tmp' });
-    assert.equal(handled, false);
+    assert.equal(handled, 'no_executor', 'step with no matching executor must return no_executor (not false)');
     assert.equal(rpcMock.mock.callCount(), 0);
   });
 
@@ -136,7 +235,7 @@ describe('AntigravityBridge.nativeExecuteAndPush', () => {
         toolCall: {
           id: 'toolu_no_step_info',
           name: 'run_command',
-          argumentsJson: JSON.stringify({ CommandLine: 'echo danger', Cwd: '/tmp' }),
+          argumentsJson: JSON.stringify({ CommandLine: 'echo danger', Cwd: '/tmp', SafeToAutoRun: true }),
         },
       },
     };
@@ -150,7 +249,7 @@ describe('AntigravityBridge.nativeExecuteAndPush', () => {
     assert.equal(cancelCalls.length, 0, 'must not call CancelCascadeSteps without valid stepIndex');
   });
 
-  test('returns false when SafeToAutoRun is not true (respects Antigravity approval metadata)', async () => {
+  test('returns approval_pending when SafeToAutoRun is not true (respects Antigravity approval metadata)', async () => {
     const { bridge, rpcMock } = makeBridge();
     const variants = [
       { CommandLine: 'echo hi', Cwd: '/tmp', SafeToAutoRun: false },
@@ -170,8 +269,8 @@ describe('AntigravityBridge.nativeExecuteAndPush', () => {
       const handled = await bridge.nativeExecuteAndPush(step, { cascadeId: 'c1', cwd: '/tmp' });
       assert.equal(
         handled,
-        false,
-        `must not execute when SafeToAutoRun=${JSON.stringify(args.SafeToAutoRun)} (approval still owed)`,
+        'approval_pending',
+        `must return approval_pending (not false) when SafeToAutoRun=${JSON.stringify(args.SafeToAutoRun)}`,
       );
     }
     // No RPC calls at all — neither RunCommand nor CancelCascadeSteps

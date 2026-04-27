@@ -13,6 +13,7 @@ const { spawnCli, isCliError, isCliTimeout, isLivenessWarning, KILL_GRACE_MS, SE
   await import('../dist/utils/cli-spawn.js');
 const { DEFAULT_CLI_TIMEOUT_MS } = await import('../dist/utils/cli-timeout.js');
 const { isParseError } = await import('../dist/utils/ndjson-parser.js');
+const { ProcessLivenessProbe } = await import('../dist/utils/ProcessLivenessProbe.js');
 
 /** Helper: collect all items from async iterable */
 async function collect(iterable) {
@@ -725,6 +726,56 @@ test('B4: yields alive_but_silent warning during CLI silence', async () => {
   const warnings = results.filter((e) => e?.__livenessWarning);
   assert.ok(warnings.length > 0, 'should have liveness warnings');
   assert.ok(warnings.some((w) => w.level === 'alive_but_silent'));
+});
+
+test('B4 regression: drains pending liveness warning even if stdout closes before next loop drain', async () => {
+  const proc = createMockProcess({ pid: process.pid });
+  const spawnFn = createMockSpawnFn(proc);
+
+  const originalDrainWarnings = ProcessLivenessProbe.prototype.drainWarnings;
+  let releasePendingWarning = false;
+
+  ProcessLivenessProbe.prototype.drainWarnings = function patchedDrainWarnings() {
+    if (!releasePendingWarning) return [];
+    releasePendingWarning = false;
+    return [
+      {
+        __livenessWarning: true,
+        state: 'idle-silent',
+        silenceDurationMs: 120,
+        level: 'alive_but_silent',
+        cpuTimeMs: 0,
+        processAlive: true,
+      },
+    ];
+  };
+
+  try {
+    proc.stdout.write(JSON.stringify({ type: 'init' }) + '\n');
+
+    const promise = collect(
+      spawnCli(
+        {
+          command: 'codex',
+          args: [],
+          timeoutMs: 500,
+          livenessProbe: { sampleIntervalMs: 30, softWarningMs: 80, stallWarningMs: 300 },
+        },
+        { spawnFn },
+      ),
+    );
+
+    await new Promise((r) => setTimeout(r, 40));
+    releasePendingWarning = true;
+    proc.stdout.end();
+    proc._emitter.emit('exit', 0, null);
+
+    const results = await promise;
+    const warnings = results.filter((e) => e?.__livenessWarning);
+    assert.ok(warnings.some((w) => w.level === 'alive_but_silent'));
+  } finally {
+    ProcessLivenessProbe.prototype.drainWarnings = originalDrainWarnings;
+  }
 });
 
 test('B3: dead process triggers immediate cleanup via probe', async () => {

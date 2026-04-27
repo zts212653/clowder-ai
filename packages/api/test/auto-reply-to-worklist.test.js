@@ -92,7 +92,7 @@ describe('auto-replyTo: worklist path (a2aTriggerMessageId)', () => {
     });
 
     // 4. InvocationRegistry with BOTH parentInvocationId AND a2aTriggerMessageId
-    const { invocationId, callbackToken } = registry.create(
+    const { invocationId, callbackToken } = await registry.create(
       'user-1',
       'codex',
       'thread-1',
@@ -141,7 +141,13 @@ describe('auto-replyTo: worklist path (a2aTriggerMessageId)', () => {
       threadId: 'thread-1',
     });
 
-    const { invocationId, callbackToken } = registry.create('user-1', 'sonnet', 'thread-1', 'parent-inv-1', catBMsg.id);
+    const { invocationId, callbackToken } = await registry.create(
+      'user-1',
+      'sonnet',
+      'thread-1',
+      'parent-inv-1',
+      catBMsg.id,
+    );
 
     const app = await createApp();
     const response = await app.inject({

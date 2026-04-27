@@ -14,14 +14,9 @@ interface DefaultCatSelectorProps {
   onRetry?: () => void;
 }
 
-function catLabel(cat: CatData): string {
-  const name = formatCatName(cat);
-  return cat.nickname ? `${name}（${cat.nickname}）` : name;
-}
-
 /**
- * F154 Phase B (AC-B2): Dropdown selector for the global default responder cat.
- * Replaces the card grid (#543) to save vertical space as cat count grows.
+ * F154 Phase B (AC-B2): Dropdown for choosing the global default responder cat.
+ * clowder-ai#543: Migrated from card grid to dropdown for scalability.
  */
 export function DefaultCatSelector({
   cats,
@@ -33,6 +28,7 @@ export function DefaultCatSelector({
   onRetry,
 }: DefaultCatSelectorProps) {
   const currentCat = cats.find((c) => c.id === currentDefaultCatId);
+  const valueInList = currentDefaultCatId && cats.some((c) => c.id === currentDefaultCatId);
 
   return (
     <div className="rounded-xl border border-cafe bg-cafe-surface p-4">
@@ -58,25 +54,32 @@ export function DefaultCatSelector({
         </div>
       )}
       {saveError && <div className="mb-3 text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{saveError}</div>}
-      <div className="flex items-center gap-2.5">
+      <div className="flex items-center gap-2">
         {currentCat && (
           <span
             className="w-3 h-3 rounded-full flex-shrink-0"
             style={{ backgroundColor: currentCat.color.primary }}
-            data-testid="current-color-dot"
+            data-testid="selected-color-dot"
           />
         )}
         <select
           data-testid="default-cat-select"
-          value={currentDefaultCatId}
-          onChange={(e) => onSelect(e.target.value)}
+          value={valueInList ? currentDefaultCatId : ''}
           disabled={isLoading}
-          className={`flex-1 text-sm rounded-lg border border-cafe bg-cafe-surface px-3 py-2 text-cafe-black focus:outline-none focus:ring-1 focus:ring-cocreator-primary ${isLoading ? 'opacity-50 cursor-wait' : ''}`}
+          onChange={(e) => onSelect(e.target.value)}
+          className={`flex-1 rounded-lg border border-cafe bg-cafe-surface px-3 py-2 text-sm text-cafe-black
+            focus:outline-none focus:ring-1 focus:ring-cocreator-primary focus:border-cocreator-primary
+            ${isLoading ? 'opacity-50 cursor-wait' : 'cursor-pointer'}`}
         >
-          {!currentDefaultCatId && <option value="">— 请选择 —</option>}
+          {!valueInList && (
+            <option value="" disabled>
+              {currentDefaultCatId ? '当前默认猫不可用' : '请选择默认猫'}
+            </option>
+          )}
           {cats.map((cat) => (
             <option key={cat.id} value={cat.id}>
-              {catLabel(cat)}
+              {formatCatName(cat)}
+              {cat.nickname ? ` (${cat.nickname})` : ''}
             </option>
           ))}
         </select>

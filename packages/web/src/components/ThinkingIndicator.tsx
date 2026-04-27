@@ -3,7 +3,6 @@
 import { useCatData } from '@/hooks/useCatData';
 import type { CatStatusType, LivenessWarningSnapshot } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
-import { PawIcon } from './icons/PawIcon';
 
 function formatDuration(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -104,9 +103,7 @@ export function ThinkingIndicator({ onCancel }: ThinkingIndicatorProps = {}) {
     return (
       <div className="px-5 py-2 border-b border-cafe bg-cafe-surface-elevated">
         <div className="flex items-center gap-2">
-          <span className="leading-none animate-pulse">
-            <PawIcon className="h-4 w-4 text-cafe-secondary" />
-          </span>
+          <span className="text-sm leading-none animate-pulse">🐾</span>
           <span className="text-sm text-cafe-secondary">{name} 启动中...</span>
         </div>
       </div>
@@ -183,9 +180,7 @@ export function ThinkingIndicator({ onCancel }: ThinkingIndicatorProps = {}) {
   return (
     <div className="px-5 py-2 border-b border-cafe bg-cafe-surface-elevated">
       <div className="flex items-center gap-2">
-        <span className="leading-none animate-pulse">
-          <PawIcon className="h-4 w-4 text-cafe-secondary" />
-        </span>
+        <span className="text-sm leading-none animate-pulse">🐾</span>
         <span className="text-sm text-cafe-secondary">
           {name}
           {status === 'streaming' ? '回复中...' : '思考中...'}

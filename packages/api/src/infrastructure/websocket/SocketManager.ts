@@ -28,13 +28,14 @@ interface QueueProcessorLike {
 export function buildCancelMessages(result: CancelResult): AgentMessage[] {
   if (!result.cancelled) return [];
   const catIds = result.catIds.length > 0 ? result.catIds : ['opus'];
+  const primaryCatId = catIds[0] ?? 'opus';
   const now = Date.now();
   const messages: AgentMessage[] = [];
 
   // Single system_info to avoid "cancel chorus"
   messages.push({
     type: 'system_info',
-    catId: createCatId(catIds[0]!),
+    catId: createCatId(primaryCatId),
     content: '⏹ 已取消',
     timestamp: now,
   });
@@ -158,7 +159,7 @@ export class SocketManager {
         }
         if (data.catId) {
           // F108: Slot-specific cancel
-          const result = this.invocationTracker.cancel(data.threadId, data.catId, userId);
+          const result = this.invocationTracker.cancel(data.threadId, data.catId, userId, 'user_cancel');
           if (result.cancelled) {
             const catIds = result.catIds.length > 0 ? result.catIds : [data.catId];
             log.info({ threadId: data.threadId, catId: data.catId, cats: catIds }, 'Cancelled slot');
@@ -176,7 +177,7 @@ export class SocketManager {
           // F156: Pass userId to cancelAll so it only cancels this user's invocations.
           // cancelAll returns the catIds that were actually cancelled, so we can
           // scope the orchestrator abort to just those cats — not the entire thread.
-          const cancelledCatIds = this.invocationTracker.cancelAll(data.threadId, userId);
+          const cancelledCatIds = this.invocationTracker.cancelAll(data.threadId, userId, 'user_cancel');
           if (cancelledCatIds.length > 0) {
             for (const msg of buildCancelMessages({ cancelled: true, catIds: cancelledCatIds })) {
               this.broadcastAgentMessage(msg, data.threadId);

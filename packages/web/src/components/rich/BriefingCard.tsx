@@ -6,9 +6,9 @@ import type { RichBlock, RichCardBlock } from '@/stores/chat-types';
 import { CafeIcon } from './CafeIcons';
 
 /**
- * F148 VG-2: Collapsible briefing card with source label.
- * Default collapsed — shows only source label + summary title.
- * Expand to see bodyMarkdown + fields.
+ * F148 Briefing Card: navigation-first collapsed view.
+ * Collapsed: header + 3 key fields (传球/真相源/下一���) always visible.
+ * Expanded: full bodyMarkdown details.
  */
 export function BriefingCard({ block: raw }: { block: RichBlock; messageId?: string }) {
   const [expanded, setExpanded] = useState(false);
@@ -17,7 +17,7 @@ export function BriefingCard({ block: raw }: { block: RichBlock; messageId?: str
 
   return (
     <div className="border-l-4 border-l-blue-400 bg-blue-50 dark:bg-blue-950/30 rounded-r-lg overflow-hidden">
-      {/* Source label row */}
+      {/* Header row */}
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
@@ -43,23 +43,24 @@ export function BriefingCard({ block: raw }: { block: RichBlock; messageId?: str
         </svg>
       </button>
 
-      {/* Expanded content */}
-      {expanded && (
+      {/* Navigation fields — always visible */}
+      {block.fields && block.fields.length > 0 && (
+        <div className="px-3 pb-2 grid grid-cols-1 sm:grid-cols-3 gap-1">
+          {block.fields.map((f, i) => (
+            <div key={i} className="text-xs">
+              <span className="text-blue-500 dark:text-blue-400 font-medium">{f.label}</span>
+              <span className="text-cafe-secondary dark:text-gray-400 ml-1">{f.value}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Expanded: full details */}
+      {expanded && block.bodyMarkdown && (
         <div className="px-3 pb-3 pt-1 border-t border-blue-200/50 dark:border-blue-800/50">
-          {block.bodyMarkdown && (
-            <div className="text-xs text-cafe-secondary dark:text-gray-300 [&_.markdown-content]:text-xs [&_p]:mb-1 [&_p:last-child]:mb-0">
-              <MarkdownContent content={block.bodyMarkdown} className="!text-xs" disableCommandPrefix />
-            </div>
-          )}
-          {block.fields && block.fields.length > 0 && (
-            <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-1">
-              {block.fields.map((f, i) => (
-                <div key={i} className="text-xs">
-                  <span className="text-cafe-secondary">{f.label}:</span> <span className="font-mono">{f.value}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          <div className="text-xs text-cafe-secondary dark:text-gray-300 [&_.markdown-content]:text-xs [&_p]:mb-1 [&_p:last-child]:mb-0">
+            <MarkdownContent content={block.bodyMarkdown} className="!text-xs" disableCommandPrefix />
+          </div>
         </div>
       )}
     </div>

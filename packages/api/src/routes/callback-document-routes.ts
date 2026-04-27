@@ -16,6 +16,7 @@ import type { InvocationRegistry } from '../domains/cats/services/agents/invocat
 import { getRichBlockBuffer } from '../domains/cats/services/agents/invocation/RichBlockBuffer.js';
 import { PandocService } from '../infrastructure/document/PandocService.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
+import { getDefaultUploadDir } from '../utils/upload-paths.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 
 const generateDocumentSchema = z.object({
@@ -49,7 +50,7 @@ export function registerCallbackDocumentRoutes(
     const { markdown, format, baseName } = parsed.data;
     const invocationId = record.invocationId;
 
-    if (!deps.registry.isLatest(invocationId)) {
+    if (!(await deps.registry.isLatest(invocationId))) {
       return { status: 'stale_ignored' };
     }
 
@@ -61,7 +62,7 @@ export function registerCallbackDocumentRoutes(
     }
 
     // Copy generated file to uploads directory (P1-1: ensure dir exists)
-    const uploadDir = resolve(process.env.UPLOAD_DIR ?? './uploads');
+    const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
     await mkdir(uploadDir, { recursive: true });
     const uniqueName = `doc-${randomBytes(6).toString('hex')}-${result.fileName}`;
     const destPath = resolve(uploadDir, uniqueName);

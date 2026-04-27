@@ -24,6 +24,7 @@ export interface CommunityIssueItem {
   readonly directionCard: Record<string, unknown> | null;
   readonly ownerDecision: 'accepted' | 'declined' | null;
   readonly relatedFeature: string | null;
+  readonly guardianAssignment: GuardianAssignment | null;
   readonly lastActivity: { readonly at: number; readonly event: string };
   readonly createdAt: number;
   readonly updatedAt: number;
@@ -67,6 +68,50 @@ export interface DirectionCardPayload {
   readonly consensus?: ConsensusResult;
 }
 
+// Phase D: Intake Guardian types
+export interface IntakeChecklistItem {
+  readonly id: string;
+  readonly label: string;
+  readonly required: boolean;
+  readonly evidence?: string;
+  readonly verifiedAt?: number;
+  readonly verifiedBy?: string;
+}
+
+export interface GuardianAssignment {
+  readonly guardianCatId: string;
+  readonly signoffTokenHash: string;
+  readonly requestedAt: number;
+  readonly requestedBy: string;
+  readonly signedOff: boolean;
+  readonly signedOffAt?: number;
+  readonly approved?: boolean;
+  readonly reason?: string;
+  readonly checklist: readonly IntakeChecklistItem[];
+}
+
+export const DEFAULT_INTAKE_CHECKLIST: readonly Omit<IntakeChecklistItem, 'evidence' | 'verifiedAt' | 'verifiedBy'>[] =
+  [
+    { id: 'vision-alignment', label: '愿景对齐：交付物解决了铲屎官的原始需求', required: true },
+    { id: 'test-coverage', label: '测试覆盖：新增行为有对应测试', required: true },
+    { id: 'doc-sync', label: '文档同步：spec/plan/BACKLOG 已更新', required: true },
+    { id: 'no-regression', label: '无回归：现有测试全绿', required: true },
+    { id: 'design-fidelity', label: '设计一致：UI 与设计稿一致（如适用）', required: false },
+  ];
+
+export function validateIntakeChecklist(checklist: readonly IntakeChecklistItem[]): {
+  valid: boolean;
+  missing: readonly string[];
+} {
+  const missing = DEFAULT_INTAKE_CHECKLIST.filter((item) => item.required)
+    .filter((req) => {
+      const found = checklist.find((c) => c.id === req.id);
+      return !found?.evidence;
+    })
+    .map((item) => item.id);
+  return { valid: missing.length === 0, missing };
+}
+
 export interface UpdateCommunityIssueInput {
   readonly state?: IssueState;
   readonly replyState?: ReplyState;
@@ -79,5 +124,6 @@ export interface UpdateCommunityIssueInput {
   readonly directionCard?: Record<string, unknown> | null;
   readonly ownerDecision?: 'accepted' | 'declined' | null;
   readonly relatedFeature?: string | null;
+  readonly guardianAssignment?: GuardianAssignment | null;
   readonly lastActivity?: { readonly at: number; readonly event: string };
 }

@@ -13,8 +13,14 @@ describe('MarkdownContent alias source', () => {
     refreshMentionData([
       {
         id: 'opus',
+        displayName: '布偶猫',
         mentionPatterns: ['@opus', '@布偶猫', '@测试布偶别名'],
-        color: { primary: '#9B7EBD' },
+        color: { primary: '#9B7EBD', secondary: '#C8B6E2' },
+        clientId: 'anthropic',
+        defaultModel: 'test-model',
+        avatar: '',
+        roleDescription: '',
+        personality: '',
       },
     ]);
 

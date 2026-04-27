@@ -68,14 +68,15 @@ describe('cat-config-loader', () => {
       assert.equal(config.breeds[0].id, 'ragdoll');
     });
 
-    it('loads default project cat-template.json when no path/env provided', () => {
+    it('loads default project config when no path/env provided', () => {
       const saved = process.env.CAT_TEMPLATE_PATH;
       delete process.env.CAT_TEMPLATE_PATH;
       try {
         const config = loadCatConfig();
         // F032: version can be 1 or 2 now
         assert.ok(config.version === 1 || config.version === 2);
-        assert.ok(config.breeds.length >= 1);
+        // F171: first-run empty bootstrap allows the default runtime catalog to start with zero members.
+        assert.ok(Array.isArray(config.breeds));
       } finally {
         if (saved === undefined) {
           delete process.env.CAT_TEMPLATE_PATH;
@@ -479,6 +480,13 @@ describe('cat-config-loader', () => {
       assert.equal(isSessionChainEnabled('gemini', config), true);
       assert.equal(isSessionChainEnabled('opus', config), true);
       assert.equal(isSessionChainEnabled('codex', config), true);
+    });
+
+    it('project config keeps antigravity session chain enabled for both variants', () => {
+      const templatePath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../cat-template.json');
+      const config = loadCatConfig(templatePath);
+      assert.equal(isSessionChainEnabled('antigravity', config), true);
+      assert.equal(isSessionChainEnabled('antig-opus', config), true);
     });
 
     it('accepts features with empty object (all defaults)', () => {
@@ -1024,5 +1032,55 @@ describe('GPT-5.2 variant mention aliases in project config', () => {
     const gpt52 = all.gpt52;
     assert.ok(gpt52, 'gpt52 cat config exists');
     assert.ok(gpt52.mentionPatterns.includes('@gpt'));
+  });
+});
+
+/**
+ * F167 Phase E (KD-20): data-driven hard restrictions replace L3 role-gate.
+ * Each cat MAY declare `restrictions: string[]` — natural-language bans
+ * surfaced both to teammates (via buildTeammateRoster) and to the cat itself
+ * (via buildStaticIdentity). No harness-side matching.
+ */
+describe('F167 Phase E: cat-config restrictions', () => {
+  it('variant-level restrictions are preserved in CatConfig', () => {
+    const cfg = validConfig();
+    cfg.breeds[0].variants[0].restrictions = ['禁止写代码'];
+    const loaded = loadCatConfig(writeTempConfig(cfg));
+    const all = toAllCatConfigs(loaded);
+    assert.deepStrictEqual(all.opus.restrictions, ['禁止写代码']);
+  });
+
+  it('breed-level restrictions flow to variant when variant omits them', () => {
+    const cfg = validConfig();
+    cfg.breeds[0].restrictions = ['禁止生成图片'];
+    // variant does not override
+    const loaded = loadCatConfig(writeTempConfig(cfg));
+    const all = toAllCatConfigs(loaded);
+    assert.deepStrictEqual(all.opus.restrictions, ['禁止生成图片']);
+  });
+
+  it('variant restrictions override breed restrictions (no merge)', () => {
+    const cfg = validConfig();
+    cfg.breeds[0].restrictions = ['breed-ban'];
+    cfg.breeds[0].variants[0].restrictions = ['variant-ban'];
+    const loaded = loadCatConfig(writeTempConfig(cfg));
+    const all = toAllCatConfigs(loaded);
+    assert.deepStrictEqual(all.opus.restrictions, ['variant-ban']);
+  });
+
+  it('no restrictions declared → field absent (undefined), not empty array', () => {
+    const cfg = validConfig();
+    // neither breed nor variant set restrictions
+    const loaded = loadCatConfig(writeTempConfig(cfg));
+    const all = toAllCatConfigs(loaded);
+    assert.equal(all.opus.restrictions, undefined);
+  });
+
+  it('live project config: gemini has "禁止写代码" restriction', () => {
+    // Real cat-config.json: validates KD-20 data-driven migration for the
+    // primary flagged case (gemini was being harness-blocked by L3).
+    const config = loadCatConfig();
+    const all = toAllCatConfigs(config);
+    assert.ok(all.gemini?.restrictions?.includes('禁止写代码'), 'live gemini.restrictions must include 禁止写代码');
   });
 });

@@ -22,6 +22,7 @@ export interface RuntimeCatInput {
   breedId?: string;
   name: string;
   displayName: string;
+  variantLabel?: string;
   nickname?: string;
   avatar: string;
   color: CatColor;
@@ -47,6 +48,7 @@ export interface RuntimeCatInput {
 export interface RuntimeCatUpdate {
   name?: string;
   displayName?: string;
+  variantLabel?: string | null;
   nickname?: string;
   avatar?: string;
   color?: CatColor;
@@ -207,6 +209,9 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
       {
         id: variantId,
         clientId: input.clientId,
+        ...(input.variantLabel != null && input.variantLabel.trim().length > 0
+          ? { variantLabel: input.variantLabel.trim() }
+          : {}),
         defaultModel: input.defaultModel,
         mcpSupport: input.mcpSupport,
         cli: input.cli,
@@ -306,6 +311,14 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
       delete variant.displayName;
     } else {
       variant.displayName = patch.displayName;
+    }
+  }
+
+  if (patch.variantLabel !== undefined) {
+    if (patch.variantLabel && patch.variantLabel.trim().length > 0) {
+      variant.variantLabel = patch.variantLabel.trim();
+    } else {
+      delete variant.variantLabel;
     }
   }
 

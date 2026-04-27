@@ -33,6 +33,15 @@ export class F163ExperimentLogger {
       .run(logType, variantId, JSON.stringify(flags), JSON.stringify(payload), new Date().toISOString());
   }
 
+  /** F163 Phase F: Log salience rerank before/after diff */
+  logSalienceRerank(variantId: string, flags: F163FlagSnapshot, payload: Record<string, unknown>): void {
+    this.db
+      .prepare(
+        'INSERT INTO f163_logs (log_type, variant_id, effective_flags, payload, created_at) VALUES (?, ?, ?, ?, ?)',
+      )
+      .run('salience_rerank', variantId, JSON.stringify(flags), JSON.stringify(payload), new Date().toISOString());
+  }
+
   /** F163 Phase B: Log a compression scan action */
   logCompressionScan(variantId: string, flags: F163FlagSnapshot, payload: Record<string, unknown>): void {
     this.db

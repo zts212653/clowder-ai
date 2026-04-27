@@ -2,7 +2,10 @@
 
 import type { RichCardBlock, RichMessageExtra } from '@cat-cafe/shared';
 import type { AppendMessageInput } from '../../stores/ports/MessageStore.js';
+import type { RecentArtifact } from './artifact-tracking.js';
 import type { CoverageMap } from './context-transport.js';
+import type { BatonContext, TaskSummary } from './navigation-context.js';
+import type { RankedSource } from './source-ranking.js';
 
 /** Rich block payload for frontend rendering */
 export interface ContextBriefingBlock {
@@ -10,6 +13,8 @@ export interface ContextBriefingBlock {
   coverageMap: CoverageMap;
   threadMemorySummary?: string;
   anchorSummaries?: string[];
+  baton?: BatonContext;
+  activeTasks?: TaskSummary[];
 }
 
 /** Result from formatContextBriefing */
@@ -56,10 +61,41 @@ export function formatContextBriefing(
   return { summary, richBlock };
 }
 
+function formatBatonField(baton?: BatonContext): string {
+  if (!baton) return '直接 @';
+  const timeStr = new Date(baton.timestamp).toISOString().slice(11, 16);
+  let value = `${baton.fromSpeakerDisplay} → 你 (${timeStr})`;
+  if (baton.staleHoldWarning) value += ' ⚠️';
+  return value;
+}
+
+function formatSourceField(sources?: RankedSource[]): string {
+  if (!sources?.length) return '未定位';
+  const top = sources[0];
+  return top.provenance === 'regex' ? `${top.label} (推断)` : top.label;
+}
+
+function formatNextStepField(sources?: RankedSource[], searchSuggestions?: string[]): string {
+  if (sources?.length) return `先看 ${sources[0].label}: ${sources[0].ref}`;
+  if (searchSuggestions?.length) return `搜索 ${searchSuggestions[0].replace(/[`\n\r\\]/g, ' ').trim()}`;
+  return '搜索 search_evidence() 定位真相源';
+}
+
+function buildNavigationTitle(baton?: BatonContext, sources?: RankedSource[]): string {
+  const parts: string[] = [];
+  if (baton) parts.push(`${baton.fromSpeakerDisplay} → 你`);
+  parts.push(`真相源: ${formatSourceField(sources)}`);
+  return parts.join(' · ');
+}
+
 /** Options for buildBriefingMessage */
 interface BriefingMessageOptions {
   threadMemorySummary?: string;
   anchorSummaries?: string[];
+  baton?: BatonContext;
+  activeTasks?: TaskSummary[];
+  recentArtifacts?: RecentArtifact[];
+  rankedSources?: RankedSource[];
 }
 
 /**
@@ -109,6 +145,32 @@ export function buildBriefingMessage(
     const top2 = coverageMap.threadMemory.openQuestions.slice(0, 2);
     bodyParts.push(`**待决问题**:\n${top2.map((q) => `- ${q}`).join('\n')}`);
   }
+  if (options?.baton) {
+    const b = options.baton;
+    const timeStr = new Date(b.timestamp).toISOString().slice(11, 16);
+    let batonLine = `**传球**: ${b.fromSpeakerDisplay} → 你 (${timeStr})`;
+    if (b.mentionExcerpt) batonLine += ` | 原文: "${b.mentionExcerpt}"`;
+    if (b.staleHoldWarning) batonLine += ' ⚠️ 之前有"别动"指令';
+    bodyParts.push(batonLine);
+  }
+  if (options?.activeTasks?.length) {
+    const taskLines = options.activeTasks.map((t) => {
+      const owner = t.ownerCatId ? `@${t.ownerCatId}` : '未分配';
+      return `- [${t.status}] ${t.title} (${owner})`;
+    });
+    bodyParts.push(`**活跃任务**:\n${taskLines.join('\n')}`);
+  }
+  if (options?.recentArtifacts?.length) {
+    const artifactLines = options.recentArtifacts.map((a) => `- [${a.type}] ${a.label} (${a.updatedBy})`);
+    bodyParts.push(`**最近产物**:\n${artifactLines.join('\n')}`);
+  }
+  if (options?.rankedSources?.length) {
+    const sourceLines = options.rankedSources.map((s) => {
+      const tag = s.provenance === 'regex' ? ' (推断)' : '';
+      return `- [${s.type}] ${s.label}${tag}`;
+    });
+    bodyParts.push(`**真相源**:\n${sourceLines.join('\n')}`);
+  }
   if (coverageMap.retrievalHints.length > 0) {
     bodyParts.push(`**证据召回**:\n${coverageMap.retrievalHints.map((h) => `- ${h}`).join('\n')}`);
   }
@@ -118,17 +180,19 @@ export function buildBriefingMessage(
     );
   }
 
+  const navTitle = buildNavigationTitle(options?.baton, options?.rankedSources);
+
   const card: RichCardBlock = {
     id: 'briefing-1',
     kind: 'card',
     v: 1,
-    title: summary,
+    title: navTitle,
     tone: 'info',
     bodyMarkdown: bodyParts.length > 0 ? bodyParts.join('\n\n') : undefined,
     fields: [
-      { label: '参与者', value: coverageMap.omitted.participants.join(', ') || '—' },
-      { label: '省略消息', value: `${coverageMap.omitted.count} 条` },
-      { label: '看到消息', value: `${coverageMap.burst.count} 条` },
+      { label: '传球', value: formatBatonField(options?.baton) },
+      { label: '真相源', value: formatSourceField(options?.rankedSources) },
+      { label: '下一步', value: formatNextStepField(options?.rankedSources, coverageMap.searchSuggestions) },
     ],
   };
 
@@ -138,7 +202,7 @@ export function buildBriefingMessage(
     threadId,
     userId: 'system',
     catId: null,
-    content: summary,
+    content: navTitle,
     mentions: [],
     timestamp: Date.now(),
     origin: 'briefing',

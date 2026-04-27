@@ -14,6 +14,14 @@ export type {
   A2ATask,
   A2ATaskStatus,
 } from './a2a.js';
+// F178 Phase B: agent-key record + verify result
+export type { AgentKeyRecord, AgentKeyVerifyResult } from './agent-key.js';
+// F178 Phase B: agent-key reason taxonomy
+export {
+  AGENT_KEY_FAILURE_REASONS,
+  type AgentKeyFailureReason,
+  isAgentKeyFailureReason,
+} from './agent-key-reasons.js';
 // Authorization types (猫猫授权系统)
 export type {
   AuthorizationAuditEntry,
@@ -65,6 +73,14 @@ export type {
   BrakeSettings,
   BrakeState,
 } from './brake.js';
+// F174 Phase A: shared reason taxonomy for callback auth failures
+export {
+  CALLBACK_AUTH_FAILURE_REASONS,
+  type CallbackAuthFailureReason,
+  isCallbackAuthFailureReason,
+} from './callback-auth-reasons.js';
+// F178 Phase B: unified callback principal (KD-3)
+export type { CallbackPrincipal } from './callback-principal.js';
 // Capability types (F041 统一能力模型)
 export type {
   BootstrapAction,
@@ -140,13 +156,14 @@ export type {
   ParsedCommand,
   SlashCommandDefinition,
 } from './command.js';
-// Community Issue types (F168 社区事务编排引擎)
 export type {
   CommunityIssueItem,
   ConsensusResult,
   ConsensusState,
   CreateCommunityIssueInput,
   DirectionCardPayload,
+  GuardianAssignment,
+  IntakeChecklistItem,
   IssueState,
   IssueType,
   PrBoardGroup,
@@ -157,6 +174,11 @@ export type {
   TriageEntry,
   UpdateCommunityIssueInput,
   Verdict,
+} from './community-issue.js';
+// Community Issue types (F168 社区事务编排引擎)
+export {
+  DEFAULT_INTAKE_CHECKLIST,
+  validateIntakeChecklist,
 } from './community-issue.js';
 // Connector types (F97 外部信息源抽象)
 export type {

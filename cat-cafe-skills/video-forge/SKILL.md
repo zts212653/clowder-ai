@@ -14,11 +14,11 @@ description: >
 
 ## 核心原则
 
-**视频不是一只猫的活，是三猫流水线 + 铲屎官素材。**
+**视频不是一只猫的活，是多猫流水线 + 铲屎官素材。** 角色按当前 roster 可用猫分配。
 
-- Ragdoll：video-spec 编排 + Remotion 渲染 + 对齐集成
-- Maine Coon：音画同步 QA + 事实审查 + schema review
-- Siamese：节奏/调性审查 + 字幕/排版设计 + retiming 风格把关
+- 主执行猫（当前持球猫）：video-spec 编排 + Remotion 渲染 + 对齐集成
+- QA/审查猫（跨 family）：音画同步 QA + 事实审查 + schema review
+- 视觉把关猫（跨 family）：节奏/调性审查 + 字幕/排版设计 + retiming 风格把关
 - 铲屎官：素材录制 + 粗标时间点 + 剧本确认 + 审片
 
 ### 铁规矩
@@ -47,7 +47,7 @@ description: >
 | 时长目标 | 成片目标时长 | 60s / 3min / 6-8min |
 | 调性 | 整体情绪基调 | 真实生活感 / 高燃极客 / 温馨猫咖 |
 | 受众 | 谁看这个视频 | linux.do 社区 / B 站观众 / 内部 |
-| 配音方案 | 猫猫配音 / 纯字幕 / 原声 | Ragdoll旁白 / 三猫声线 / 无配音 |
+| 配音方案 | 猫猫配音 / 纯字幕 / 原声 | 单猫旁白 / 多猫声线 / 无配音 |
 
 **没有开局参数 = 审查没有标准。开工前必须和铲屎官确认。**
 
@@ -55,18 +55,18 @@ description: >
 
 | 触发 | 场景 | 主导 | 说明 |
 |------|------|------|------|
-| 铲屎官说"做个视频" | **A: Brief + 素材盘点** | Ragdoll | 确认开局参数 + 分镜表 + 素材需求清单 |
-| 铲屎官确认分镜 | **B: 素材入库** | 铲屎官录 + Ragdoll压缩归档 | 素材放 `docs/videos/{project}/assets/`，粗标写 `asset-markers.md` |
-| 素材到齐 | **C: video-spec 冻结** | Ragdoll | 写 video-spec JSON（4 层 segment contract），铲屎官确认 |
-| spec 确认 | **D: 全局配音 + 对齐** | Ragdoll | CosyVoice 全局配音 → Qwen3-ForcedAligner → word_timestamps |
-| 对齐完成 | **E: Remotion 渲染** | Ragdoll | schema → inputProps → preview render |
-| 预览版出来 | **F: 审查 Gate** | 三猫 + 铲屎官 | 见下方审查标准 |
-| 审查通过 | **G: Final Render + 交付** | Ragdoll | 高质量渲染 + 封面导出 + 发布 |
-| 铲屎官不满意 | **R: Patch Loop** | Ragdoll + Siamese | retiming / 重录 / 重写段落 |
+| 铲屎官说"做个视频" | **A: Brief + 素材盘点** | 主执行猫 | 确认开局参数 + 分镜表 + 素材需求清单 |
+| 铲屎官确认分镜 | **B: 素材入库** | 铲屎官录 + 主执行猫压缩归档 | 素材放 `docs/videos/{project}/assets/`，粗标写 `asset-markers.md` |
+| 素材到齐 | **C: video-spec 冻结** | 主执行猫 | 写 video-spec JSON（4 层 segment contract），铲屎官确认 |
+| spec 确认 | **D: 全局配音 + 对齐** | 主执行猫 | CosyVoice 全局配音 → Qwen3-ForcedAligner → word_timestamps |
+| 对齐完成 | **E: Remotion 渲染** | 主执行猫 | schema → inputProps → preview render |
+| 预览版出来 | **F: 审查 Gate** | 全部参与猫 + 铲屎官 | 见下方审查标准 |
+| 审查通过 | **G: Final Render + 交付** | 主执行猫 | 高质量渲染 + 封面导出 + 发布 |
+| 铲屎官不满意 | **R: Patch Loop** | 主执行猫 + 视觉把关猫 | retiming / 重录 / 重写段落 |
 
 ## 审查 Gate（F 场景）
 
-### F1: 音画同步审查（Maine Coon）
+### F1: 音画同步审查（QA/审查猫）
 
 | 级别 | 维度 | 判定 |
 |------|------|------|
@@ -75,7 +75,7 @@ description: >
 | P1 | 音频断裂 | 段间有不自然的静音或跳跃 |
 | P2 | 音量不均 | 原声和配音音量差异大 |
 
-### F2: 节奏/调性审查（Siamese）
+### F2: 节奏/调性审查（视觉把关猫）
 
 | 级别 | 维度 | 判定 |
 |------|------|------|
@@ -97,9 +97,9 @@ description: >
 ### 目录结构
 ```
 docs/videos/{project-name}/
-├── asset-markers.md       ← 素材标注表（铲屎官 + Ragdoll共同编辑）
-├── video-spec.json        ← segment contract（Ragdoll生成）
-├── voice-script.md        ← 配音剧本（Ragdoll草稿 + 铲屎官确认）
+├── asset-markers.md       ← 素材标注表（铲屎官 + 主执行猫共同编辑）
+├── video-spec.json        ← segment contract（主执行猫生成）
+├── voice-script.md        ← 配音剧本（主执行猫草稿 + 铲屎官确认）
 └── assets/                ← 原始素材（gitignore, 仅本地）
     ├── 1-xxx.mov
     ├── 2-xxx.mov
@@ -158,4 +158,4 @@ ffmpeg -i input.mov -c:v libx264 -crf 23 -c:a aac -b:a 128k output.mp4
 
 ## Next Step
 
-路径 B 完整流程跑通后 → `quality-gate`（自检）→ `request-review`（Maine Coon审音画，Siamese审节奏）
+路径 B 完整流程跑通后 → `quality-gate`（自检）→ `request-review`（QA/审查猫审音画，视觉把关猫审节奏）

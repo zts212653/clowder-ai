@@ -147,14 +147,14 @@ export class InvocationTracker {
    * Without requestUserId, cancels all (system/admin action, e.g. thread deletion).
    * Returns the catIds that were actually cancelled (for orchestrator scoping).
    */
-  cancelAll(threadId: string, requestUserId?: string): string[] {
+  cancelAll(threadId: string, requestUserId?: string, abortReason?: string): string[] {
     const prefix = `${threadId}:`;
     const cancelledCatIds: string[] = [];
     for (const [key, inv] of this.active) {
       if (key.startsWith(prefix)) {
         if (requestUserId && inv.userId !== requestUserId) continue;
         cancelledCatIds.push(inv.catId);
-        inv.controller.abort();
+        inv.controller.abort(abortReason);
         this.active.delete(key);
       }
     }
@@ -237,6 +237,28 @@ export class InvocationTracker {
       this.active.set(key, { controller, userId, catId, catIds, startedAt: now, batchController: primaryController });
     }
     return primaryController ?? new AbortController();
+  }
+
+  /**
+   * Track an additional slot that is executed by an already-running route.
+   * Used by routeSerial A2A worklist targets so thread-level queue gates stay
+   * busy after the original cat completes and before the A2A target runs.
+   */
+  trackExternalSlot(
+    threadId: string,
+    catId: string,
+    controller: AbortController,
+    userId: string = 'unknown',
+    catIds: string[] = [catId],
+  ): boolean {
+    if (this.deleting.has(threadId)) return false;
+    const key = this.slotKey(threadId, catId);
+    const existing = this.active.get(key);
+    if (existing && !this.isExpired(key, existing)) {
+      return existing.controller === controller || existing.batchController === controller;
+    }
+    this.active.set(key, { controller, userId, catId, catIds, startedAt: Date.now(), batchController: controller });
+    return true;
   }
 
   /**

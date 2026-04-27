@@ -110,6 +110,16 @@ describe('saveUploadedImages', () => {
 });
 
 describe('extractImagePaths', () => {
+  it('uses packages/api/uploads as the default upload dir regardless of cwd', async () => {
+    const { getDefaultUploadDir } = await import('../dist/utils/upload-paths.js');
+
+    const dir = getDefaultUploadDir();
+    assert.ok(
+      dir.endsWith('/packages/api/uploads'),
+      `expected default upload dir to end with /packages/api/uploads, got ${dir}`,
+    );
+  });
+
   it('extracts absolute paths from /uploads/ URLs', async () => {
     const { extractImagePaths } = await import('../dist/domains/cats/services/agents/providers/image-paths.js');
 

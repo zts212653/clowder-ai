@@ -1,10 +1,10 @@
 /**
  * PR Tracking Store
  * Maps (repoFullName + prNumber) → { catId, threadId, userId }
- * Used by GithubReviewWatcher to route review notifications to the correct cat/thread.
- * Extended by F133 for CI/CD state tracking (patchCiState).
+ * Used by F140 polling (ReviewFeedbackTaskSpec / ConflictCheckTaskSpec) and
+ * F133 CI/CD tracking to route notifications to the correct cat/thread.
  *
- * BACKLOG #81, F133
+ * BACKLOG #81, F133, F140
  */
 
 export interface PrTrackingEntry {

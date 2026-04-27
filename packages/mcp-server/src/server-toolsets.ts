@@ -10,6 +10,7 @@ import {
   richBlockRulesTools,
   scheduleTools,
   sessionChainTools,
+  shellTools,
   signalStudyTools,
   signalsTools,
 } from './tools/index.js';
@@ -44,12 +45,28 @@ export const READONLY_ALLOWED_TOOLS = new Set([
   'signal_get_article',
   'signal_search',
   'signal_list_studies',
+  // Shell exec (F061 Bug-F workaround — read-only whitelist enforced at tool level)
+  'cat_cafe_shell_exec',
+]);
+
+/**
+ * F178 Phase C: Tools unlocked when agent-key credentials are available in
+ * READONLY mode. These are the KD-8 allowlist — callback-authenticated write
+ * tools that persistent agents (Bengal) need. File/shell mutators stay blocked.
+ */
+export const AGENT_KEY_TOOLS = new Set([
+  'cat_cafe_post_message',
+  'cat_cafe_cross_post_message',
+  'cat_cafe_get_thread_context',
+  'cat_cafe_list_threads',
 ]);
 
 const isReadonly = process.env['CAT_CAFE_READONLY'] === 'true';
+const hasAgentKey = !!(process.env['CAT_CAFE_AGENT_KEY_SECRET'] || process.env['CAT_CAFE_AGENT_KEY_FILE']);
 
 function applyReadonlyFilter(tools: readonly ToolDef[]): readonly ToolDef[] {
-  return isReadonly ? tools.filter((t) => READONLY_ALLOWED_TOOLS.has(t.name)) : tools;
+  if (!isReadonly) return tools;
+  return tools.filter((t) => READONLY_ALLOWED_TOOLS.has(t.name) || (hasAgentKey && AGENT_KEY_TOOLS.has(t.name)));
 }
 
 const collabTools: readonly ToolDef[] = applyReadonlyFilter([
@@ -57,6 +74,7 @@ const collabTools: readonly ToolDef[] = applyReadonlyFilter([
   ...richBlockRulesTools,
   ...gameActionTools,
   ...scheduleTools,
+  ...shellTools,
 ]);
 
 const memoryTools: readonly ToolDef[] = applyReadonlyFilter([

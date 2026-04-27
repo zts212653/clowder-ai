@@ -61,7 +61,7 @@ describe('preflight timeout rescues hung invocation', () => {
     const deps = {
       registry: {
         create: () => ({ invocationId: `inv-hang-${++counter}`, callbackToken: `tok-${counter}` }),
-        verify: () => null,
+        verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
       },
       sessionManager: {
         // Simulates a hung Redis: never resolves
@@ -115,7 +115,7 @@ describe('preflight timeout rescues hung invocation', () => {
     const deps = {
       registry: {
         create: () => ({ invocationId: `inv-chain-${++counter}`, callbackToken: `tok-${counter}` }),
-        verify: () => null,
+        verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
       },
       sessionManager: {
         get: async () => 'some-session-id',
@@ -163,7 +163,7 @@ describe('preflight timeout rescues hung invocation', () => {
     const deps = {
       registry: {
         create: () => ({ invocationId: `inv-abort-${++counter}`, callbackToken: `tok-${counter}` }),
-        verify: () => null,
+        verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
       },
       sessionManager: {
         // Hang long enough for abort to fire first

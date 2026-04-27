@@ -1,7 +1,45 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { RightStatusPanel, type RightStatusPanelProps } from '@/components/RightStatusPanel';
+
+const TEST_CATS = [
+  {
+    id: 'opus',
+    displayName: '布偶猫',
+    color: { primary: '#9B7EBD', secondary: '#E8D5F5' },
+    mentionPatterns: ['@opus'],
+    clientId: 'anthropic',
+    defaultModel: 'claude-opus-4-6',
+    avatar: '',
+    roleDescription: '',
+    personality: '',
+  },
+  {
+    id: 'codex',
+    displayName: '缅因猫',
+    color: { primary: '#5B8C5A', secondary: '#D5E8D4' },
+    mentionPatterns: ['@codex'],
+    clientId: 'openai',
+    defaultModel: 'gpt-5.5',
+    avatar: '',
+    roleDescription: '',
+    personality: '',
+  },
+];
+
+vi.mock('@/hooks/useCatData', () => ({
+  formatCatName: (cat: { displayName: string; variantLabel?: string }) =>
+    cat.variantLabel ? `${cat.displayName}（${cat.variantLabel}）` : cat.displayName,
+  useCatData: () => ({
+    cats: TEST_CATS,
+    isLoading: false,
+    hasFetched: true,
+    getCatById: (id: string) => TEST_CATS.find((cat) => cat.id === id),
+    getCatsByBreed: () => new Map(),
+    refresh: async () => TEST_CATS,
+  }),
+}));
 
 function render(props: RightStatusPanelProps): string {
   return renderToStaticMarkup(React.createElement(RightStatusPanel, props));

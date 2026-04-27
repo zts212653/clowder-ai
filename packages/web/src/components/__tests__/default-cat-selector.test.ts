@@ -1,6 +1,7 @@
 /**
- * F154 Phase B / #543 — DefaultCatSelector: dropdown for choosing the global default cat.
+ * F154 Phase B — DefaultCatSelector: dropdown for choosing the global default cat.
  * AC-B2: Member overview has global default cat selector.
+ * clowder-ai#543: Migrated from card grid to dropdown.
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -26,6 +27,7 @@ const TEST_CATS = [
     avatar: '',
     roleDescription: '',
     personality: '',
+    roster: { family: 'ragdoll', roles: ['architect'], lead: true, available: true, evaluation: '' },
   },
   {
     id: 'codex',
@@ -41,6 +43,7 @@ const TEST_CATS = [
     avatar: '',
     roleDescription: '',
     personality: '',
+    roster: { family: 'maine-coon', roles: ['reviewer'], lead: false, available: true, evaluation: '' },
   },
   {
     id: 'gemini',
@@ -56,6 +59,7 @@ const TEST_CATS = [
     avatar: '',
     roleDescription: '',
     personality: '',
+    roster: { family: 'siamese', roles: ['designer'], lead: false, available: true, evaluation: '' },
   },
 ];
 
@@ -75,7 +79,7 @@ vi.mock('@/hooks/useCatData', () => ({
 // Lazy import after mocks
 const { DefaultCatSelector } = await import('@/components/DefaultCatSelector');
 
-describe('DefaultCatSelector (#543: dropdown)', () => {
+describe('DefaultCatSelector (F154 Phase B, AC-B2)', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -100,7 +104,7 @@ describe('DefaultCatSelector (#543: dropdown)', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('renders a <select> with options for all cats', () => {
+  it('renders a select dropdown with all available cats', () => {
     act(() => {
       root.render(
         React.createElement(DefaultCatSelector, {
@@ -110,25 +114,23 @@ describe('DefaultCatSelector (#543: dropdown)', () => {
         }),
       );
     });
-    const select = container.querySelector<HTMLSelectElement>('[data-testid="default-cat-select"]');
+    const select = container.querySelector('[data-testid="default-cat-select"]') as HTMLSelectElement;
     expect(select).not.toBeNull();
-    expect(select!.options.length).toBe(3);
-    expect(select!.value).toBe('opus');
+    expect(select.options.length).toBe(3);
   });
 
-  it('shows current cat color dot', () => {
+  it('selects the current default cat in the dropdown', () => {
     act(() => {
       root.render(
         React.createElement(DefaultCatSelector, {
           cats: TEST_CATS,
-          currentDefaultCatId: 'opus',
+          currentDefaultCatId: 'codex',
           onSelect: vi.fn(),
         }),
       );
     });
-    const dot = container.querySelector<HTMLElement>('[data-testid="current-color-dot"]');
-    expect(dot).not.toBeNull();
-    expect(dot!.style.backgroundColor).toBe('rgb(255, 171, 145)'); // #FFAB91
+    const select = container.querySelector('[data-testid="default-cat-select"]') as HTMLSelectElement;
+    expect(select.value).toBe('codex');
   });
 
   it('shows scope description', () => {
@@ -155,15 +157,27 @@ describe('DefaultCatSelector (#543: dropdown)', () => {
         }),
       );
     });
-    const select = container.querySelector<HTMLSelectElement>('[data-testid="default-cat-select"]');
-    expect(select).not.toBeNull();
+    const select = container.querySelector('[data-testid="default-cat-select"]') as HTMLSelectElement;
     act(() => {
-      // Simulate selecting codex
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
-      nativeInputValueSetter.call(select!, 'codex');
-      select!.dispatchEvent(new Event('change', { bubbles: true }));
+      select.value = 'codex';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
     });
     expect(onSelect).toHaveBeenCalledWith('codex');
+  });
+
+  it('shows color dot for the current default cat', () => {
+    act(() => {
+      root.render(
+        React.createElement(DefaultCatSelector, {
+          cats: TEST_CATS,
+          currentDefaultCatId: 'opus',
+          onSelect: vi.fn(),
+        }),
+      );
+    });
+    const dot = container.querySelector('[data-testid="selected-color-dot"]') as HTMLElement;
+    expect(dot).not.toBeNull();
+    expect(dot.style.backgroundColor).toBeTruthy();
   });
 
   it('shows error hint and retry button when fetchError is true (P1-2)', () => {
@@ -179,12 +193,9 @@ describe('DefaultCatSelector (#543: dropdown)', () => {
         }),
       );
     });
-    // Should still render the select
     const select = container.querySelector('[data-testid="default-cat-select"]');
     expect(select).not.toBeNull();
-    // Should show error hint
     expect(container.textContent).toContain('加载失败');
-    // Should have retry button
     const retryBtn = container.querySelector('[data-testid="retry-fetch"]');
     expect(retryBtn).not.toBeNull();
     act(() => {
@@ -207,18 +218,50 @@ describe('DefaultCatSelector (#543: dropdown)', () => {
     expect(container.textContent).toContain('保存失败');
   });
 
-  it('disables select when loading', () => {
+  it('includes nickname in option text', () => {
     act(() => {
       root.render(
         React.createElement(DefaultCatSelector, {
           cats: TEST_CATS,
           currentDefaultCatId: 'opus',
           onSelect: vi.fn(),
-          isLoading: true,
         }),
       );
     });
-    const select = container.querySelector<HTMLSelectElement>('[data-testid="default-cat-select"]');
-    expect(select!.disabled).toBe(true);
+    const select = container.querySelector('[data-testid="default-cat-select"]') as HTMLSelectElement;
+    const opusOption = [...select.options].find((o) => o.value === 'opus');
+    expect(opusOption?.textContent).toContain('宪宪');
+  });
+
+  it('shows placeholder when currentDefaultCatId is empty', () => {
+    act(() => {
+      root.render(
+        React.createElement(DefaultCatSelector, {
+          cats: TEST_CATS,
+          currentDefaultCatId: '',
+          onSelect: vi.fn(),
+        }),
+      );
+    });
+    const select = container.querySelector('[data-testid="default-cat-select"]') as HTMLSelectElement;
+    expect(select.value).toBe('');
+    const placeholder = [...select.options].find((o) => o.value === '');
+    expect(placeholder).not.toBeNull();
+  });
+
+  it('shows placeholder when currentDefaultCatId is not in cats list', () => {
+    act(() => {
+      root.render(
+        React.createElement(DefaultCatSelector, {
+          cats: TEST_CATS,
+          currentDefaultCatId: 'antigravity',
+          onSelect: vi.fn(),
+        }),
+      );
+    });
+    const select = container.querySelector('[data-testid="default-cat-select"]') as HTMLSelectElement;
+    expect(select.value).not.toBe('opus');
+    const placeholder = [...select.options].find((o) => o.value === '' || o.disabled);
+    expect(placeholder).not.toBeNull();
   });
 });

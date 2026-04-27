@@ -163,6 +163,21 @@ export const catResponseDuration = lazy(() =>
   }),
 );
 
+// --- F174 Phase D1: callback auth observability ---
+
+/**
+ * Counter: callback auth failures by reason / tool / cat.
+ * Attributes (allowlist-filtered):
+ *   - callback.reason: expired | invalid_token | unknown_invocation | missing_creds | stale_invocation
+ *   - callback.tool: refresh-token | post-message | register-pr-tracking | retain-memory | ...
+ *   - agent.id: cat that experienced the failure (omitted when unknown)
+ */
+export const callbackAuthFailures = lazy(() =>
+  meter().createCounter('cat_cafe.callback_auth.failures', {
+    description: 'Callback auth 401 failures by reason / tool / cat (F174 Phase D1)',
+  }),
+);
+
 /** Liveness state type. */
 export type LivenessState = 'dead' | 'idle-silent' | 'busy-silent' | 'active';
 
