@@ -312,6 +312,40 @@ describe('TranscriptWriter', () => {
       );
     });
 
+    test('captures recent visible assistant text for session-continuity bootstrap', async () => {
+      const { TranscriptWriter } = await loadModules();
+      const writer = new TranscriptWriter({ dataDir: tmpDir });
+
+      writer.appendEvent(SESSION_INFO, {
+        type: 'text',
+        catId: 'codex',
+        content: '我接球继续 review，球在我手上。',
+        timestamp: Date.now(),
+      });
+      writer.appendEvent(SESSION_INFO, {
+        type: 'system_info',
+        catId: 'codex',
+        content: JSON.stringify({ type: 'context_health' }),
+        timestamp: Date.now(),
+      });
+      writer.appendEvent(SESSION_INFO, {
+        type: 'assistant',
+        content: [{ type: 'text', text: '@opus\n请继续 merge-gate。' }],
+      });
+
+      const digest = writer.generateExtractiveDigest(SESSION_INFO, {
+        createdAt: 1000,
+        sealedAt: 2000,
+      });
+
+      assert.ok(Array.isArray(digest.recentMessages), 'digest should expose recent visible messages');
+      assert.deepEqual(
+        digest.recentMessages.map((msg) => msg.content),
+        ['我接球继续 review，球在我手上。', '@opus\n请继续 merge-gate。'],
+        'digest should include visible text and exclude system_info noise',
+      );
+    });
+
     test('writes digest.extractive.json during flush', async () => {
       const { TranscriptWriter } = await loadModules();
       const writer = new TranscriptWriter({ dataDir: tmpDir });

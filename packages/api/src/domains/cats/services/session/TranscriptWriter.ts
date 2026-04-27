@@ -50,6 +50,12 @@ export interface ExtractiveDigestV1 {
     invocationId?: string;
     message: string;
   }>;
+  /** Last visible assistant text messages, carried verbatim as reference data for continuity. */
+  recentMessages?: Array<{
+    role: 'assistant';
+    invocationId?: string;
+    content: string;
+  }>;
 }
 
 export interface TranscriptWriterOptions {
@@ -175,6 +181,7 @@ export class TranscriptWriter {
     const toolNames = new Set<string>();
     const filePaths = new Map<string, Set<string>>(); // path → ops
     const errors: ExtractiveDigestV1['errors'] = [];
+    const recentMessages: NonNullable<ExtractiveDigestV1['recentMessages']> = [];
 
     for (const entry of buf) {
       const evt = entry.event;
@@ -219,6 +226,15 @@ export class TranscriptWriter {
           message: (evt.error as string).slice(0, 500),
         });
       }
+
+      const visibleText = extractVisibleAssistantText(evt);
+      if (visibleText) {
+        recentMessages.push({
+          role: 'assistant',
+          ...(entry.invocationId !== undefined ? { invocationId: entry.invocationId } : {}),
+          content: visibleText.slice(0, 1200),
+        });
+      }
     }
 
     return {
@@ -238,6 +254,7 @@ export class TranscriptWriter {
         ops: [...ops],
       })),
       errors,
+      recentMessages: recentMessages.slice(-5),
     };
   }
 
@@ -275,4 +292,35 @@ export class TranscriptWriter {
   private sessionDir(session: TranscriptSessionInfo): string {
     return join(this.dataDir, 'threads', session.threadId, session.catId, 'sessions', session.sessionId);
   }
+}
+
+function extractVisibleAssistantText(evt: Record<string, unknown>): string | null {
+  if (evt.type === 'text' && typeof evt.content === 'string') {
+    return normalizeVisibleText(evt.content);
+  }
+
+  if (evt.type === 'assistant') {
+    const content = evt.content;
+    if (typeof content === 'string') {
+      return normalizeVisibleText(content);
+    }
+    if (Array.isArray(content)) {
+      const text = content
+        .map((part) => {
+          if (!part || typeof part !== 'object') return '';
+          const maybeText = (part as { text?: unknown }).text;
+          return typeof maybeText === 'string' ? maybeText : '';
+        })
+        .filter(Boolean)
+        .join('\n');
+      return normalizeVisibleText(text);
+    }
+  }
+
+  return null;
+}
+
+function normalizeVisibleText(text: string): string | null {
+  const normalized = text.replace(/[\x00-\x08\x0b-\x1f]/g, '').trim();
+  return normalized.length > 0 ? normalized : null;
 }

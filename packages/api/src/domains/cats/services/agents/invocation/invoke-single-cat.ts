@@ -116,6 +116,7 @@ import {
   classifyResumeFailure,
   extractTaskProgress,
   isCliTimeoutError,
+  isContextWindowOverflowError,
   isMissingClaudeSessionError,
   isPromptTokenLimitExceededError,
   isTransientAcpPromptFailure,
@@ -1647,6 +1648,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       };
       let suppressedMissingSessionError: AgentMessage | undefined;
       let suppressedPromptLimitError: AgentMessage | undefined;
+      let suppressedContextOverflowError: AgentMessage | undefined;
       let suppressedTransientCliError: AgentMessage | undefined;
       let suppressedTimeoutError: AgentMessage | undefined;
       let shouldRetryWithoutSession = false;
@@ -1686,6 +1688,15 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           continue;
         }
         if (
+          allowSessionRetry &&
+          !attemptHasContentOutput &&
+          msg.type === 'error' &&
+          isContextWindowOverflowError(msg.error)
+        ) {
+          suppressedContextOverflowError = msg;
+          continue;
+        }
+        if (
           allowTransientRetry &&
           !attemptHasContentOutput &&
           msg.type === 'error' &&
@@ -1712,12 +1723,16 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         if (
           suppressedMissingSessionError ||
           suppressedPromptLimitError ||
+          suppressedContextOverflowError ||
           suppressedTransientCliError ||
           suppressedTimeoutError
         ) {
           if (msg.type === 'done') {
             shouldRetryWithoutSession = Boolean(
-              suppressedMissingSessionError || suppressedPromptLimitError || suppressedTimeoutError,
+              suppressedMissingSessionError ||
+                suppressedPromptLimitError ||
+                suppressedContextOverflowError ||
+                suppressedTimeoutError,
             );
             shouldRetryOnTransientCliExit = Boolean(suppressedTransientCliError);
             break;
@@ -1734,6 +1749,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
               yield out;
             }
             suppressedPromptLimitError = undefined;
+          }
+          if (suppressedContextOverflowError) {
+            for await (const out of streamProcessedOutputs(suppressedContextOverflowError)) {
+              yield out;
+            }
+            suppressedContextOverflowError = undefined;
           }
           if (suppressedTransientCliError) {
             for await (const out of streamProcessedOutputs(suppressedTransientCliError)) {
@@ -1790,9 +1811,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       if (shouldRetryWithoutSession && attempt + 1 < maxAttempts) {
         const retryReason = suppressedPromptLimitError
           ? 'prompt_token_limit'
-          : suppressedTimeoutError
-            ? 'cli_timeout'
-            : 'missing_session';
+          : suppressedContextOverflowError
+            ? 'context_window_overflow'
+            : suppressedTimeoutError
+              ? 'cli_timeout'
+              : 'missing_session';
         log.info(
           {
             catId,
@@ -1864,6 +1887,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
       if (suppressedPromptLimitError) {
         for await (const out of streamProcessedOutputs(suppressedPromptLimitError)) {
+          yield out;
+        }
+      }
+      if (suppressedContextOverflowError) {
+        for await (const out of streamProcessedOutputs(suppressedContextOverflowError)) {
           yield out;
         }
       }
