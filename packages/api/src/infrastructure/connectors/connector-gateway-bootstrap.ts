@@ -198,9 +198,7 @@ export interface ConnectorGatewayHandle {
  */
 export function isWithinBasePath(base: string, resolved: string, nativeSep = sep): boolean {
   return (
-    resolved === base ||
-    resolved.startsWith(base + nativeSep) ||
-    (nativeSep !== '/' && resolved.startsWith(base + '/'))
+    resolved === base || resolved.startsWith(base + nativeSep) || (nativeSep !== '/' && resolved.startsWith(base + '/'))
   );
 }
 
