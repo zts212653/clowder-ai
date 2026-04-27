@@ -267,6 +267,8 @@ export interface InvocationParams {
   readonly a2aTriggerMessageId?: string;
   /** F153 Phase E: Parent route span — invocation span becomes its child */
   readonly routeSpan?: import('@opentelemetry/api').Span;
+  /** F172: Ref slot for caller to capture the invocation span (for mention_dispatch parenting) */
+  readonly invocationSpanRef?: { current?: import('@opentelemetry/api').Span };
 }
 
 /**
@@ -466,6 +468,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     { attributes: { [AGENT_ID]: catId, [OPERATION_NAME]: 'invoke', invocationId } },
     parentCtx,
   );
+  if (params.invocationSpanRef) params.invocationSpanRef.current = invocationSpan;
 
   try {
     // F152: Track active invocations — must be inside try so add/sub symmetry

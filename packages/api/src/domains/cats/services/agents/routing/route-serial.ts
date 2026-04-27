@@ -12,6 +12,8 @@
 
 import type { CatConfig, CatId } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
+import { type Span, context, trace } from '@opentelemetry/api';
+import { AGENT_ID } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
 import { getConfigSessionStrategy, getRoster, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { getCatVoice } from '../../../../../config/cat-voices.js';
@@ -75,6 +77,7 @@ import {
 import { buildVoteTally, checkVoteCompletion, extractVoteFromText, VOTE_RESULT_SOURCE } from './vote-intercept.js';
 
 const log = createModuleLogger('route-serial');
+const routeSerialTracer = trace.getTracer('cat-cafe-api', '0.1.0');
 
 export async function* routeSerial(
   deps: RouteStrategyDeps,
@@ -111,6 +114,10 @@ export async function* routeSerial(
   const worklistEntry = registerWorklist(threadId, worklist, maxDepth, options.parentInvocationId);
 
   let index = 0;
+  // F172: Cross-cat trace propagation — track invocation spans and dispatch parents
+  const catInvocationSpans = new Map<number, Span>();
+  const mentionParentSpan = new Map<number, Span>();
+  const pendingDispatchSpans: { span: Span; lastChildIndex: number }[] = [];
   // done-guarantee: Track whether we yielded a done(isFinal=true) so the finally block can
   // synthesize one if the loop exits early (e.g. signal.aborted break at top of while).
   let yieldedFinalDone = false;
@@ -497,6 +504,9 @@ export async function* routeSerial(
       // Using start time (not stream-completion time) keeps agent replies
       // chronologically before queued user messages that arrive after delivery.
       const invocationStartedAt = Date.now();
+      // F172: Capture invocation span ref; use mention_dispatch span as parent if this cat was @mentioned
+      const spanRef: { current?: Span } = {};
+      const effectiveParentSpan = mentionParentSpan.get(index) ?? options.routeSpan;
       for await (const msg of invokeSingleCat(deps.invocationDeps, {
         catId,
         service: getService(deps.services, catId),
@@ -512,7 +522,8 @@ export async function* routeSerial(
         ...(worklistEntry.a2aTriggerMessageId.get(catId)
           ? { a2aTriggerMessageId: worklistEntry.a2aTriggerMessageId.get(catId) }
           : {}),
-        ...(options.routeSpan ? { routeSpan: options.routeSpan } : {}),
+        ...(effectiveParentSpan ? { routeSpan: effectiveParentSpan } : {}),
+        invocationSpanRef: spanRef,
         isLastCat: false,
       })) {
         // F39 bugfix: stop yielding after cancel (pipe buffer may still drain)
@@ -768,6 +779,9 @@ export async function* routeSerial(
         if (!incrementalMode && thinkingMode === 'debug') {
           previousResponses.push({ catId, content: storedContent });
         }
+
+        // F172: Capture invocation span for this cat (used as parent for mention_dispatch)
+        if (spanRef.current) catInvocationSpans.set(index, spanRef.current);
 
         // A2A mention detection (缅因猫 P1-3: only after full text accumulated)
         // Line-start @mention = always actionable (no keyword gate)
@@ -1026,6 +1040,8 @@ export async function* routeSerial(
             const entry = roster[cid];
             return entry ? { roles: entry.roles } : undefined;
           };
+          // F172: Lazy-init mention_dispatch span (created only when first cat actually pushed)
+          let dispatchSpan: Span | undefined;
           for (const nextCat of a2aMentions) {
             if (worklistEntry.a2aCount >= maxDepth) break;
             // A2A cross-path dedup: skip if this cat is actively processing via callback (InvocationQueue)
@@ -1042,6 +1058,20 @@ export async function* routeSerial(
                 worklistEntry.a2aFrom.set(nextCat, catId);
                 // F121: response-text path — set trigger message for auto-replyTo
                 if (storedMsgId) worklistEntry.a2aTriggerMessageId.set(nextCat, storedMsgId);
+                // F172: Sync trace parent to match updated a2aFrom — lazy-init dispatch span
+                if (!dispatchSpan) {
+                  const mentionerSpan = catInvocationSpans.get(index);
+                  if (mentionerSpan) {
+                    const dispatchCtx = trace.setSpan(context.active(), mentionerSpan);
+                    dispatchSpan = routeSerialTracer.startSpan('cat_cafe.mention_dispatch', {
+                      attributes: { [AGENT_ID]: catId as string, 'mention.targets': a2aMentions.join(',') },
+                    }, dispatchCtx);
+                  }
+                }
+                if (dispatchSpan) {
+                  const dedupIndex = worklist.indexOf(nextCat, index + 1);
+                  if (dedupIndex >= 0) mentionParentSpan.set(dedupIndex, dispatchSpan);
+                }
               }
               continue;
             }
@@ -1091,12 +1121,40 @@ export async function* routeSerial(
               continue;
             }
 
+            // F172: Create mention_dispatch span as child of mentioner's invocation span
+            if (!dispatchSpan) {
+              const mentionerSpan = catInvocationSpans.get(index);
+              if (mentionerSpan) {
+                const dispatchCtx = trace.setSpan(context.active(), mentionerSpan);
+                dispatchSpan = routeSerialTracer.startSpan('cat_cafe.mention_dispatch', {
+                  attributes: {
+                    [AGENT_ID]: catId as string,
+                    'mention.targets': a2aMentions.join(','),
+                  },
+                }, dispatchCtx);
+              }
+            }
+
             worklist.push(nextCat);
             worklistEntry.a2aCount++;
             pendingTail.push(nextCat); // Keep dedup view in sync
             worklistEntry.a2aFrom.set(nextCat, catId);
             // F121: response-text path — set trigger message for auto-replyTo
             if (storedMsgId) worklistEntry.a2aTriggerMessageId.set(nextCat, storedMsgId);
+            // F172: Map pushed cat's worklist index to mention_dispatch span as parent
+            if (dispatchSpan) mentionParentSpan.set(worklist.length - 1, dispatchSpan);
+          }
+          // F172: Track dispatch span for deferred end (after all its children complete)
+          if (dispatchSpan) {
+            let maxChildIdx = -1;
+            for (const [idx, s] of mentionParentSpan) {
+              if (s === dispatchSpan && idx > maxChildIdx) maxChildIdx = idx;
+            }
+            if (maxChildIdx >= 0) {
+              pendingDispatchSpans.push({ span: dispatchSpan, lastChildIndex: maxChildIdx });
+            } else {
+              dispatchSpan.end();
+            }
           }
         }
 
@@ -1383,11 +1441,21 @@ export async function* routeSerial(
         if (isFinal) yieldedFinalDone = true;
       }
 
+      // F172: End dispatch spans whose last child just completed
+      for (const entry of pendingDispatchSpans) {
+        if (index === entry.lastChildIndex) entry.span.end();
+      }
+
       // F27: Advance executedIndex so pushToWorklist knows which cats are done
       worklistEntry.executedIndex = index + 1;
       index++;
     }
   } finally {
+    // F172: End any dispatch spans not yet ended (early abort / error paths)
+    for (const entry of pendingDispatchSpans) {
+      if (index <= entry.lastChildIndex) entry.span.end();
+    }
+
     // F27: Always unregister worklist, even on error/abort.
     // Pass owner ref so preempting new invocation's worklist is not deleted (缅因猫 R1 P1-1)
     unregisterWorklist(threadId, worklistEntry, options.parentInvocationId);
