@@ -73,13 +73,16 @@ export class InvocationQueue {
 
   private static readonly PRIORITY_RANK: Record<string, number> = { urgent: 0, normal: 1 };
 
-  /** F175: multi-dimensional entry comparator for dequeue ordering. */
+  /** F175: multi-dimensional entry comparator for dequeue ordering.
+   *  Position is scoped to same-user entries to prevent cross-user queue-jumping in shared threads. */
   private static compareEntries(a: QueueEntry, b: QueueEntry): number {
-    const aHasPos = a.position !== undefined;
-    const bHasPos = b.position !== undefined;
-    if (aHasPos && !bHasPos) return -1;
-    if (!aHasPos && bHasPos) return 1;
-    if (aHasPos && bHasPos) return a.position! - b.position!;
+    if (a.userId === b.userId) {
+      const aHasPos = a.position !== undefined;
+      const bHasPos = b.position !== undefined;
+      if (aHasPos && !bHasPos) return -1;
+      if (!aHasPos && bHasPos) return 1;
+      if (aHasPos && bHasPos) return a.position! - b.position!;
+    }
     const pDiff = (InvocationQueue.PRIORITY_RANK[a.priority] ?? 1) - (InvocationQueue.PRIORITY_RANK[b.priority] ?? 1);
     if (pDiff !== 0) return pDiff;
     return a.createdAt - b.createdAt;

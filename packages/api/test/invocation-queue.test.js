@@ -877,6 +877,15 @@ describe('InvocationQueue', () => {
     assert.equal(queue.setPosition('t1', 'u1', 'nonexistent', 0), false);
   });
 
+  it('position does not let one user jump ahead of another in cross-user scheduling', () => {
+    queue.enqueue(entry({ userId: 'alice', content: 'alice-first' }));
+    const bobEntry = queue.enqueue(entry({ userId: 'bob', content: 'bob-second' }));
+    queue.setPosition('t1', 'bob', bobEntry.entry.id, 0);
+
+    const next = queue.peekOldestAcrossUsers('t1');
+    assert.equal(next.userId, 'alice', 'alice enqueued first — position should not let bob jump ahead cross-user');
+  });
+
   // ── F175 Task 5: collectUserBatch ──
 
   it('collectUserBatch collects adjacent user entries with same userId+intent+targetCats', () => {
