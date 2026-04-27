@@ -463,6 +463,33 @@ describe('QueueProcessor', () => {
     assert.equal(deps.queue.list('t1', 'u1').length, 1);
   });
 
+  it('enqueueContinuation rate-limits after five continuations per hour for a thread cat', async () => {
+    const capsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 't1',
+        catId: 'opus',
+        mode: 'independent',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-rate-limit',
+        createdAt: Date.now(),
+        seal: { sessionId: 'sess-rate-limit', sessionSeq: 1, reason: 'threshold' },
+      },
+    );
+
+    for (let i = 0; i < 5; i++) {
+      const outcome = processor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
+      assert.equal(outcome.outcome, 'enqueued');
+      deps.queue.clear('t1', 'u1');
+    }
+
+    const sixth = processor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
+
+    assert.equal(sixth.outcome, 'skipped_rate_limited');
+    assert.equal(deps.queue.list('t1', 'u1').length, 0);
+  });
+
   // ── #768: intent_mode deferred until CLI is alive ──
 
   it('#768 regression: intent_mode is NOT broadcast when routeExecution throws before yielding', async () => {
