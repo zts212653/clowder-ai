@@ -97,6 +97,47 @@ describe('ChatMessage author precedence', () => {
     expect(container.textContent).not.toContain('铲屎官');
   });
 
+  it('does not invent a parenthetical label from catId when variantLabel is absent', async () => {
+    const { ChatMessage } = await import('@/components/ChatMessage');
+    const getCatById = vi.fn((id: string) => {
+      if (id !== 'codex') return undefined;
+      return {
+        id: 'codex',
+        displayName: '缅因猫',
+        nickname: '砚砚',
+        color: { primary: '#5B8C5A', secondary: '#E6F2E6' },
+        mentionPatterns: [],
+        breedId: 'maine-coon',
+        clientId: 'openai',
+        defaultModel: 'gpt-5.5',
+        avatar: '/avatars/codex.png',
+        roleDescription: '',
+        personality: '',
+      };
+    });
+
+    const msg = {
+      id: 'm-no-variant',
+      type: 'assistant' as const,
+      catId: 'codex',
+      content: 'done',
+      timestamp: Date.now(),
+      contentBlocks: [],
+    };
+
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          message: msg as never,
+          getCatById: getCatById as never,
+        }),
+      );
+    });
+
+    expect(container.textContent).toContain('缅因猫');
+    expect(container.textContent).not.toContain('缅因猫（Codex）');
+  });
+
   it('uses configured co-creator name and avatar for plain user messages', async () => {
     const { ChatMessage } = await import('@/components/ChatMessage');
     const msg = {

@@ -23,7 +23,7 @@ import {
   WeComCliUnavailableError,
 } from '../infrastructure/enterprise/WeComCliExecutor.js';
 import { callbackAuthSchema } from './callback-auth-schema.js';
-import { EXPIRED_CREDENTIALS_ERROR } from './callback-errors.js';
+import { makeCallbackAuthError } from './callback-errors.js';
 
 const createDocSchema = callbackAuthSchema.extend({
   action: z.literal('create_doc'),
@@ -94,10 +94,10 @@ export function registerCallbackWeComActionRoutes(app: FastifyInstance, deps: { 
     }
 
     const body = parsed.data;
-    const record = deps.registry.verify(body.invocationId, body.callbackToken);
-    if (!record) {
+    const result = await deps.registry.verify(body.invocationId, body.callbackToken);
+    if (!result.ok) {
       reply.status(401);
-      return EXPIRED_CREDENTIALS_ERROR;
+      return makeCallbackAuthError(result.reason);
     }
 
     try {

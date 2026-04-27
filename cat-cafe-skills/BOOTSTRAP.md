@@ -16,7 +16,7 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 |-------|----------|----------|
 | `feat-lifecycle` | 新功能立项/讨论/完成 | — |
 | `guide-authoring` | 编排场景引导 YAML / registry / 标签契约 | — |
-| `guide-interaction` | 命中 Guide Available 后发交互卡片并启动引导 | — |
+| `guide-interaction` | 判断是否需要交互引导，并按 Guide Matched/Pending/Active 等状态驱动回复 | — |
 | `collaborative-thinking` | brainstorm/多猫讨论/收敛 | — |
 | `expert-panel` | 专家辩论团/竞品分析/技术趋势/showcase | — |
 | `writing-plans` | 写实施计划 | — |

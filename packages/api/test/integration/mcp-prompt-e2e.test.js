@@ -66,7 +66,7 @@ describe('MCP Prompt Injection E2E', () => {
     assert.ok(instructions.includes('post-message'));
 
     // 4. Create real credentials (same as invokeSingleCat does)
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex', 'thread-e2e');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex', 'thread-e2e');
 
     // 5. Simulate what Codex would do: POST to post-message with env var values
     const response = await app.inject({
@@ -107,7 +107,7 @@ describe('MCP Prompt Injection E2E', () => {
       threadId: 'thread-e2e',
     });
 
-    const { invocationId, callbackToken } = registry.create('user-1', 'gemini', 'thread-e2e');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'gemini', 'thread-e2e');
 
     // Verify instructions reference the tool name (skill-based)
     const instructions = buildMcpCallbackInstructions({});
@@ -127,7 +127,7 @@ describe('MCP Prompt Injection E2E', () => {
   });
 
   test('injected pending-mentions endpoint succeeds with real credentials', async () => {
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex', 'thread-e2e');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex', 'thread-e2e');
 
     const instructions = buildMcpCallbackInstructions({});
     assert.ok(instructions.includes('pending-mentions'));
@@ -144,7 +144,7 @@ describe('MCP Prompt Injection E2E', () => {
   });
 
   test('injected update-task endpoint succeeds with real credentials', async () => {
-    const { invocationId, callbackToken } = registry.create('user-1', 'gemini', 'thread-e2e');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'gemini', 'thread-e2e');
 
     // Create a task in the same thread
     const task = taskStore.create({

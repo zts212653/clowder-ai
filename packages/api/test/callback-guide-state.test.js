@@ -92,7 +92,7 @@ describe('F155 Guide State Callbacks', () => {
   test('creates initial guide state as "offered"', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', 'test-thread');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     const res = await app.inject({
       method: 'POST',
@@ -111,7 +111,7 @@ describe('F155 Guide State Callbacks', () => {
   test('rejects initial state that is not "offered"', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', 'test-thread');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     const res = await app.inject({
       method: 'POST',
@@ -126,7 +126,7 @@ describe('F155 Guide State Callbacks', () => {
   test('update-guide-state rejects active transition and requires start-guide side effects', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', 'test-thread');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     await guideBridge.set(thread.id, {
       v: 1,
@@ -157,7 +157,7 @@ describe('F155 Guide State Callbacks', () => {
   test('rejects invalid backward transition: active → offered', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', 'test-thread');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     await guideBridge.set(thread.id, {
       v: 1,
@@ -182,7 +182,7 @@ describe('F155 Guide State Callbacks', () => {
   test('rejects re-offering same guide when it is still active', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', 'test-thread');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     await guideBridge.set(thread.id, {
       v: 1,
@@ -207,7 +207,7 @@ describe('F155 Guide State Callbacks', () => {
   test('allows re-offering same guide after it was completed', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', 'test-thread');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     await guideBridge.set(thread.id, {
       v: 1,
@@ -235,7 +235,7 @@ describe('F155 Guide State Callbacks', () => {
     const app = await createApp();
     const thread1 = await threadStore.create('user-1', 'thread-1');
     const thread2 = await threadStore.create('user-1', 'thread-2');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread1.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread1.id);
 
     const res = await app.inject({
       method: 'POST',
@@ -268,7 +268,7 @@ describe('F155 Guide State Callbacks', () => {
   test('update-guide-state rejects cross-user mutation on system-owned default thread', async () => {
     const app = await createApp();
     const thread = await seedDefaultThread('add-member', 'offered', 'guide-owner');
-    const { invocationId, callbackToken } = registry.create('attacker-user', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('attacker-user', 'opus', thread.id);
 
     const res = await app.inject({
       method: 'POST',
@@ -288,7 +288,7 @@ describe('F155 Guide State Callbacks', () => {
   test('start-guide transitions from offered → active and emits socket event', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', 'test-thread');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     await guideBridge.set(thread.id, {
       v: 1,
@@ -330,7 +330,7 @@ describe('F155 Guide State Callbacks', () => {
   test('start-guide emits guide_start only to the guide owner on shared default thread', async () => {
     const app = await createApp();
     const thread = await seedDefaultThread('add-member', 'offered', 'guide-owner');
-    const { invocationId, callbackToken } = registry.create('guide-owner', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('guide-owner', 'opus', thread.id);
 
     const res = await app.inject({
       method: 'POST',
@@ -362,7 +362,7 @@ describe('F155 Guide State Callbacks', () => {
   test('start-guide rejects when no guide is offered', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', 'test-thread');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     const res = await app.inject({
       method: 'POST',
@@ -378,7 +378,7 @@ describe('F155 Guide State Callbacks', () => {
   test('start-guide rejects when guide is already active', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', 'test-thread');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     await guideBridge.set(thread.id, {
       v: 1,
@@ -401,7 +401,7 @@ describe('F155 Guide State Callbacks', () => {
   test('start-guide rejects cross-user start on system-owned default thread', async () => {
     const app = await createApp();
     const thread = await seedDefaultThread('add-member', 'offered', 'guide-owner');
-    const { invocationId, callbackToken } = registry.create('attacker-user', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('attacker-user', 'opus', thread.id);
 
     const res = await app.inject({
       method: 'POST',
@@ -424,7 +424,7 @@ describe('F155 Guide State Callbacks', () => {
   test('guide-control emits socket event when guide is active', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', 'test-thread');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     await guideBridge.set(thread.id, {
       v: 1,
@@ -465,7 +465,7 @@ describe('F155 Guide State Callbacks', () => {
   test('guide-control emits only to the guide owner on shared default thread', async () => {
     const app = await createApp();
     const thread = await seedDefaultThread('add-member', 'active', 'guide-owner');
-    const { invocationId, callbackToken } = registry.create('guide-owner', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('guide-owner', 'opus', thread.id);
 
     const res = await app.inject({
       method: 'POST',
@@ -498,7 +498,7 @@ describe('F155 Guide State Callbacks', () => {
   test('guide-control rejects when no active guide', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', 'test-thread');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     const res = await app.inject({
       method: 'POST',
@@ -514,7 +514,7 @@ describe('F155 Guide State Callbacks', () => {
   test('guide-control exit cancels the guide', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', 'test-thread');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     await guideBridge.set(thread.id, {
       v: 1,
@@ -539,7 +539,7 @@ describe('F155 Guide State Callbacks', () => {
   test('guide-control rejects cross-user control on system-owned default thread', async () => {
     const app = await createApp();
     const thread = await seedDefaultThread('add-member', 'active', 'guide-owner');
-    const { invocationId, callbackToken } = registry.create('attacker-user', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('attacker-user', 'opus', thread.id);
 
     const res = await app.inject({
       method: 'POST',

@@ -280,7 +280,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   const { registry, sessionManager, threadStore, apiUrl } = deps;
   const { catId, service, prompt, userId, threadId, isLastCat, signal: callerSignal } = params;
 
-  const { invocationId, callbackToken } = registry.create(
+  const { invocationId, callbackToken } = await registry.create(
     userId,
     catId,
     threadId,
@@ -334,6 +334,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     CAT_CAFE_CALLBACK_TOKEN: callbackToken,
     CAT_CAFE_USER_ID: userId,
     CAT_CAFE_CAT_ID: catId,
+    // F061 Bug-F cold-start (codex peer review on 47922fe7): cat_cafe_list_session_chain
+    // requires threadId; without it, Bengal's cold-start prompt step 1 fails with
+    // "missing required parameter". Inject the live threadId so prompt template
+    // can resolve to a concrete value.
+    CAT_CAFE_THREAD_ID: threadId,
     ...(process.env.CAT_CAFE_SIGNAL_USER ? { CAT_CAFE_SIGNAL_USER: process.env.CAT_CAFE_SIGNAL_USER } : {}),
   };
 

@@ -103,4 +103,4 @@ description: >
 2. **ChatGPT 图片页面是独立入口**：`/images` 和普通对话 `/` 是分开的
 3. **两个平台都支持 execCommand 注入**
 4. **Gemini 图片更大**（~7MB PNG），ChatGPT 图片更小（~1MB PNG）
-5. **归档到项目**：`cp ~/Downloads/xxx.png → assets/` 或相关目录
+5. **归档到项目**：下载后的图片通过 `publishGeneratedImage()` 发布到 `/uploads/`（F172 共享发布合约），不再需要手动 `cp` 到 assets 目录。发布后自动获得 `/uploads/...` 稳定 URL + `media_gallery` 富块

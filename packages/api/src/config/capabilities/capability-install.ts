@@ -1,4 +1,5 @@
 import type { CapabilityEntry, McpInstallPreview, McpInstallRequest } from '@cat-cafe/shared';
+import { MARKETPLACE_ECOSYSTEMS } from '@cat-cafe/shared';
 
 const CLI_CONFIGS = ['.mcp.json', '.codex/config.toml', '.gemini/settings.json', '.kimi/mcp.json'];
 
@@ -39,6 +40,7 @@ export function buildInstallPreview(req: McpInstallRequest, existingCaps?: Capab
       ...(req.env && { env: req.env }),
       ...(hasResolver && { resolver: req.resolver }),
     },
+    ...(req.ecosystem && MARKETPLACE_ECOSYSTEMS.includes(req.ecosystem) && { ecosystem: req.ecosystem }),
   };
 
   const willProbe = entry.mcpServer?.transport !== 'streamableHttp' && !hasResolver && !!(req.command || req.url);

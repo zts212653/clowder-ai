@@ -12,6 +12,7 @@
 
 import type { CatId, SealResult, SessionStatus } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../infrastructure/logger.js';
+import { extractRecentArtifacts } from '../agents/routing/artifact-tracking.js';
 import { AuditEventTypes, getEventAuditLog } from '../orchestration/EventAuditLog.js';
 import type { ISessionChainStore } from '../stores/ports/SessionChainStore.js';
 import type { ISummaryStore } from '../stores/ports/SummaryStore.js';
@@ -346,11 +347,18 @@ export class SessionSealer implements ISessionSealer {
           // VG-3: Extract decision signals from transcript + summary (best-effort)
           const signals = await this.extractSignals(record);
 
+          const fileArtifacts = extractRecentArtifacts({
+            filesTouched: (digest as unknown as ExtractiveDigestV1).filesTouched ?? [],
+            prTasks: [],
+            catId: record.catId,
+          });
+
           const updated = buildThreadMemory(
             existingMemory,
             digest as unknown as ExtractiveDigestV1,
             maxTokens,
             signals,
+            fileArtifacts.length > 0 ? fileArtifacts : undefined,
           );
           await this.threadStore.updateThreadMemory(record.threadId, updated);
         }

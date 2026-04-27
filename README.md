@@ -71,6 +71,18 @@ Clowder is model-agnostic. Each agent CLI plugs in via a unified output adapter:
 
 ## Quick Start
 
+### Option A: Desktop Installer (Recommended)
+
+If a desktop release asset is available on the [Releases page](https://github.com/zts212653/clowder-ai/releases), use it first:
+
+- **Windows**: download the `.exe` installer, run it, then launch Clowder AI from the desktop shortcut or Start menu.
+- **macOS**: download the `.dmg`, drag the app to Applications, then open it. If macOS blocks the unsigned app on first launch, right-click the app and choose **Open**.
+- **Linux**: no desktop installer yet. Use the source setup below or the one-line Linux installer.
+
+The desktop installer bundles the app runtime, portable Node.js, and Redis, so regular users do **not** need to run `pnpm install` or `pnpm build`. After launch, open **Hub → System Settings → Account Configuration** to connect your model providers and CLI accounts.
+
+### Option B: Source Setup
+
 **Prerequisites:** [Node.js 20+](https://nodejs.org/) · [pnpm 9+](https://pnpm.io/) · [Redis 7+](https://redis.io/) *(optional — use `--memory` to skip)* · Git
 
 ```bash

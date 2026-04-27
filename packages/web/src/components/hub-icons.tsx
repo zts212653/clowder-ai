@@ -55,6 +55,9 @@ const ICON_PATHS: Record<string, string> = {
   user: 'M12 3a5 5 0 1 0 0 10 5 5 0 0 0 0-10zM20 21a8 8 0 0 0-16 0',
   'message-circle': 'M7.9 20A9 9 0 1 0 4 16.1L2 22z',
   music: 'M9 18V5l12-2v13M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 19a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  // F174 D2b-2 (rev): plug icon as the system-level callback-auth health affordance.
+  // Lucide-equivalent simplified plug. Replaces the rejected per-cat dot pattern.
+  plug: 'M9 2v6 M15 2v6 M5 8h14v3a7 7 0 0 1-7 7 7 7 0 0 1-7-7zM12 18v4',
 };
 
 export function HubIcon({ name, className = 'w-5 h-5' }: { name: string; className?: string }) {

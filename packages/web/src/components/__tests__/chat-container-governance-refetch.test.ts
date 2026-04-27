@@ -199,7 +199,16 @@ vi.mock('@/hooks/useAuthorization', () => ({
 
 vi.mock('@/hooks/useSplitPaneKeys', () => ({ useSplitPaneKeys: vi.fn() }));
 vi.mock('@/hooks/useChatSocketCallbacks', () => ({ useChatSocketCallbacks: () => ({}) }));
-vi.mock('@/hooks/useCatData', () => ({ useCatData: () => ({ getCatById: () => undefined, isLoading: false }) }));
+vi.mock('@/hooks/useCatData', () => ({
+  useCatData: () => ({
+    cats: [],
+    isLoading: false,
+    hasFetched: true,
+    getCatById: () => undefined,
+    getCatsByBreed: () => new Map(),
+    refresh: async () => [],
+  }),
+}));
 vi.mock('@/hooks/usePreviewAutoOpen', () => ({ usePreviewAutoOpen: vi.fn() }));
 vi.mock('@/hooks/useWorkspaceNavigate', () => ({ useWorkspaceNavigate: vi.fn() }));
 vi.mock('@/hooks/useGovernanceStatus', () => ({

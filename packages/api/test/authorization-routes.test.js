@@ -68,7 +68,7 @@ describe('POST /api/callbacks/request-permission', () => {
       createdBy: 'user-1',
     });
 
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex', 'thread-1');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex', 'thread-1');
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/request-permission',
@@ -91,7 +91,7 @@ describe('POST /api/callbacks/request-permission', () => {
       createdBy: 'user-1',
     });
 
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex', 'thread-1');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex', 'thread-1');
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/request-permission',
@@ -105,7 +105,7 @@ describe('POST /api/callbacks/request-permission', () => {
 
   test('returns pending when no rule and timeout', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex', 'thread-1');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex', 'thread-1');
 
     const res = await app.inject({
       method: 'POST',
@@ -169,7 +169,7 @@ describe('GET /api/callbacks/permission-status', () => {
 
   test('returns status for existing request', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex', 'thread-1');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex', 'thread-1');
 
     // Create a pending request first
     const createRes = await app.inject({
@@ -197,7 +197,7 @@ describe('GET /api/callbacks/permission-status', () => {
   test('returns 403 when requestId belongs to different cat/thread', async () => {
     const app = await createApp();
     // Cat A creates a request
-    const catA = registry.create('user-1', 'codex', 'thread-1');
+    const catA = await registry.create('user-1', 'codex', 'thread-1');
     const createRes = await app.inject({
       method: 'POST',
       url: '/api/callbacks/request-permission',
@@ -210,7 +210,7 @@ describe('GET /api/callbacks/permission-status', () => {
     const { requestId } = JSON.parse(createRes.body);
 
     // Cat B (different cat/thread) tries to query it
-    const catB = registry.create('user-1', 'opus', 'thread-2');
+    const catB = await registry.create('user-1', 'opus', 'thread-2');
     const res = await app.inject({
       method: 'GET',
       url: `/api/callbacks/permission-status?requestId=${requestId}`,
@@ -223,7 +223,7 @@ describe('GET /api/callbacks/permission-status', () => {
   test('returns 403 when same cat/thread but different invocation', async () => {
     const app = await createApp();
     // Invocation A creates a request
-    const invocA = registry.create('user-1', 'codex', 'thread-1');
+    const invocA = await registry.create('user-1', 'codex', 'thread-1');
     const createRes = await app.inject({
       method: 'POST',
       url: '/api/callbacks/request-permission',
@@ -236,7 +236,7 @@ describe('GET /api/callbacks/permission-status', () => {
     const { requestId } = JSON.parse(createRes.body);
 
     // Invocation B (same cat, same thread, different invocation) tries to query
-    const invocB = registry.create('user-1', 'codex', 'thread-1');
+    const invocB = await registry.create('user-1', 'codex', 'thread-1');
     const res = await app.inject({
       method: 'GET',
       url: `/api/callbacks/permission-status?requestId=${requestId}`,
@@ -248,7 +248,7 @@ describe('GET /api/callbacks/permission-status', () => {
 
   test('returns 404 for nonexistent request', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex', 'thread-1');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex', 'thread-1');
 
     const res = await app.inject({
       method: 'GET',

@@ -10,48 +10,55 @@ const mockSetTargetCats = vi.fn();
 const mockSetCurrentThread = vi.fn();
 const mockClearUnread = vi.fn();
 const mockHandleAgentMessage = vi.fn();
+const mockThinkingIndicator = vi.fn((props?: unknown) => {
+  void props;
+  return null;
+});
 
 let capturedSocketCallbacks: {
   onIntentMode?: (data: { threadId: string; mode: string; targetCats: string[] }) => void;
   onMessage?: (msg: unknown) => void;
 } | null = null;
 
-const mockStoreState = () => ({
-  messages: [],
-  isLoading: false,
-  hasActiveInvocation: false,
-  intentMode: null,
-  targetCats: [],
-  catStatuses: {},
-  catInvocations: {},
-  activeInvocations: {},
-  addMessage: vi.fn(),
-  removeMessage: vi.fn(),
-  setLoading: mockSetLoading,
-  setHasActiveInvocation: mockSetHasActiveInvocation,
-  setIntentMode: mockSetIntentMode,
-  setTargetCats: mockSetTargetCats,
-  clearCatStatuses: vi.fn(),
-  setCurrentThread: mockSetCurrentThread,
-  updateThreadTitle: vi.fn(),
-  setCurrentGame: vi.fn(),
-  currentGame: null,
+function createMockStoreState() {
+  return {
+    messages: [],
+    isLoading: false,
+    hasActiveInvocation: false,
+    intentMode: null,
+    targetCats: [],
+    catStatuses: {},
+    catInvocations: {},
+    activeInvocations: {},
+    addMessage: vi.fn(),
+    removeMessage: vi.fn(),
+    setLoading: mockSetLoading,
+    setHasActiveInvocation: mockSetHasActiveInvocation,
+    setIntentMode: mockSetIntentMode,
+    setTargetCats: mockSetTargetCats,
+    clearCatStatuses: vi.fn(),
+    setCurrentThread: mockSetCurrentThread,
+    updateThreadTitle: vi.fn(),
+    setCurrentGame: vi.fn(),
+    currentGame: null,
 
-  viewMode: 'single' as const,
-  setViewMode: vi.fn(),
-  clearUnread: mockClearUnread,
-  confirmUnreadAck: vi.fn(),
-  armUnreadSuppression: vi.fn(),
-  splitPaneThreadIds: [],
-  setSplitPaneThreadIds: vi.fn(),
-  setSplitPaneTarget: vi.fn(),
-  threads: [],
-});
+    viewMode: 'single' as const,
+    setViewMode: vi.fn(),
+    clearUnread: mockClearUnread,
+    confirmUnreadAck: vi.fn(),
+    armUnreadSuppression: vi.fn(),
+    splitPaneThreadIds: [],
+    setSplitPaneThreadIds: vi.fn(),
+    setSplitPaneTarget: vi.fn(),
+    threads: [],
+  };
+}
+
+let storeState = createMockStoreState();
 
 vi.mock('@/stores/chatStore', () => {
-  const hook = (selector?: (s: ReturnType<typeof mockStoreState>) => unknown) => {
-    const state = mockStoreState();
-    return selector ? selector(state) : state;
+  const hook = (selector?: (s: ReturnType<typeof createMockStoreState>) => unknown) => {
+    return selector ? selector(storeState) : storeState;
   };
   return { useChatStore: hook };
 });
@@ -130,7 +137,9 @@ vi.mock('../ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }))
 vi.mock('../SplitPaneView', () => ({
   SplitPaneView: ({ children }: { children?: React.ReactNode }) => children ?? null,
 }));
-vi.mock('../ThinkingIndicator', () => ({ ThinkingIndicator: () => null }));
+vi.mock('../ThinkingIndicator', () => ({
+  ThinkingIndicator: (props: unknown) => mockThinkingIndicator(props),
+}));
 vi.mock('../ThreadExecutionBar', () => ({ ThreadExecutionBar: () => null }));
 vi.mock('../ThreadSidebar', () => ({ ThreadSidebar: () => null }));
 vi.mock('../VoteActiveBar', () => ({ VoteActiveBar: () => null }));
@@ -156,6 +165,7 @@ describe('ChatContainer intent_mode loading lock', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
+    storeState = createMockStoreState();
     capturedSocketCallbacks = null;
     mockSetLoading.mockClear();
     mockSetHasActiveInvocation.mockClear();
@@ -164,6 +174,7 @@ describe('ChatContainer intent_mode loading lock', () => {
     mockSetCurrentThread.mockClear();
     mockClearUnread.mockClear();
     mockHandleAgentMessage.mockClear();
+    mockThinkingIndicator.mockClear();
   });
 
   afterEach(() => {
@@ -207,6 +218,21 @@ describe('ChatContainer intent_mode loading lock', () => {
     });
 
     expect(mockSetHasActiveInvocation).toHaveBeenCalledWith(true);
+  });
+
+  it('renders ThinkingIndicator when a single active slot exists even if intentMode is missing', () => {
+    storeState.hasActiveInvocation = true;
+    storeState.activeInvocations = {
+      'inv-1': { catId: 'opencode', mode: 'execute', startedAt: Date.now() },
+    };
+    storeState.intentMode = null;
+    storeState.targetCats = [];
+
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
+    });
+
+    expect(mockThinkingIndicator).toHaveBeenCalledTimes(1);
   });
 
   // Cross-thread guard has moved to useSocket (dual-pointer guard).

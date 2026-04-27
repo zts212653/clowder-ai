@@ -28,10 +28,11 @@ function createMockRegistry() {
       records.set(id, { catId, threadId, userId, invocationId: id, callbackToken: token });
       return { invocationId: id, callbackToken: token };
     },
-    verify(invocationId, callbackToken) {
+    async verify(invocationId, callbackToken) {
       const r = records.get(invocationId);
-      if (!r || r.callbackToken !== callbackToken) return null;
-      return r;
+      if (!r) return { ok: false, reason: 'unknown_invocation' };
+      if (r.callbackToken !== callbackToken) return { ok: false, reason: 'invalid_token' };
+      return { ok: true, record: r };
     },
     isLatest: () => true,
     claimClientMessageId: () => true,
@@ -739,6 +740,31 @@ describe('B6: canceled hook skips recordResponse in dispatchViaQueue', () => {
     mockQueueProcessor.simulateComplete(entryId, 'canceled', '');
 
     // Orchestrator should still be running (canceled does NOT count as a response)
+    assert.equal(orch.getStatus(requestId), 'running');
+  });
+
+  test('canceled_by_user hook does not record response in orchestrator', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
+      payload: {
+        targets: ['codex'],
+        question: 'User canceled scenario?',
+        callbackTo: 'opus',
+      },
+    });
+
+    const body = res.json();
+    const requestId = body.requestId;
+    const orch = getMultiMentionOrchestrator();
+
+    assert.equal(orch.getStatus(requestId), 'running');
+
+    const hooks = mockQueueProcessor.getHooks();
+    const [entryId] = hooks.keys();
+    mockQueueProcessor.simulateComplete(entryId, 'canceled_by_user', '');
+
     assert.equal(orch.getStatus(requestId), 'running');
   });
 

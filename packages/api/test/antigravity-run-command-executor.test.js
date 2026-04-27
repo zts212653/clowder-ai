@@ -4,7 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, mock, test } from 'node:test';
 import { AuditLogger } from '../dist/domains/cats/services/agents/providers/antigravity/executors/AuditLogger.js';
-import { RunCommandExecutor } from '../dist/domains/cats/services/agents/providers/antigravity/executors/RunCommandExecutor.js';
+import {
+  isReadOnlyRunCommand,
+  RunCommandExecutor,
+} from '../dist/domains/cats/services/agents/providers/antigravity/executors/RunCommandExecutor.js';
 
 describe('RunCommandExecutor', () => {
   let logDir;
@@ -41,7 +44,12 @@ describe('RunCommandExecutor', () => {
     const [method, payload] = rpc.mock.calls[0].arguments;
     assert.equal(method, 'RunCommand');
     assert.equal(payload.cwd, '/tmp');
-    assert.match(payload.args?.join(' ') ?? '', /echo hi/);
+    // Antigravity LS RunCommand joins command + args with spaces and passes to
+    // an outer shell. Sending `{ command: '/bin/sh', args: ['-c', 'cmd'] }` makes
+    // the outer shell parse "sh -c cmd" only consuming the first word of cmd.
+    // Fix: pass the full command line directly as `command`, no args.
+    assert.equal(payload.command, 'echo hi');
+    assert.equal(payload.args, undefined);
   });
 
   test('refuses Redis 6399 touches', async () => {
@@ -141,5 +149,34 @@ describe('RunCommandExecutor', () => {
   test('toolName is run_command', () => {
     const exec = new RunCommandExecutor({ rpc: mock.fn() });
     assert.equal(exec.toolName, 'run_command');
+  });
+
+  test('isReadOnlyRunCommand only allows the conservative whitelist', () => {
+    assert.equal(isReadOnlyRunCommand('pwd'), true);
+    assert.equal(isReadOnlyRunCommand('ls -la'), true);
+    assert.equal(isReadOnlyRunCommand('git log --oneline -5'), true);
+    assert.equal(isReadOnlyRunCommand('cat README.md'), true);
+    assert.equal(isReadOnlyRunCommand('git diff HEAD~1..HEAD'), true);
+    assert.equal(isReadOnlyRunCommand('git show HEAD~1'), true);
+
+    assert.equal(isReadOnlyRunCommand('git branch'), false);
+    assert.equal(isReadOnlyRunCommand('git branch -d topic'), false);
+    assert.equal(isReadOnlyRunCommand('git log --output=/tmp/out.log'), false);
+    assert.equal(isReadOnlyRunCommand('git log --output /tmp/out.log'), false);
+    assert.equal(isReadOnlyRunCommand('git diff --output=/tmp/out.patch'), false);
+    assert.equal(isReadOnlyRunCommand("git diff '--output=/tmp/out.patch'"), false);
+    assert.equal(isReadOnlyRunCommand("git diff '--output' /tmp/out.patch"), false);
+    assert.equal(isReadOnlyRunCommand('git show --output /tmp/out.patch HEAD~1'), false);
+    assert.equal(isReadOnlyRunCommand('git show "--output=/tmp/out.patch" HEAD~1'), false);
+    assert.equal(isReadOnlyRunCommand('git show "--output" /tmp/out.patch HEAD~1'), false);
+    assert.equal(isReadOnlyRunCommand('git log $(touch /tmp/pwn)'), false);
+    assert.equal(isReadOnlyRunCommand('git log `touch /tmp/pwn`'), false);
+    assert.equal(isReadOnlyRunCommand('git log $HOME'), false);
+    assert.equal(isReadOnlyRunCommand('git log ${HOME}'), false);
+    assert.equal(isReadOnlyRunCommand('pwd\nwhoami'), false);
+    assert.equal(isReadOnlyRunCommand('mkdir -p /tmp/x && date > /tmp/x/run.txt'), false);
+    assert.equal(isReadOnlyRunCommand('curl -fsS https://example.com'), false);
+    assert.equal(isReadOnlyRunCommand('git commit -m nope'), false);
+    assert.equal(isReadOnlyRunCommand('cat README.md | head'), false);
   });
 });

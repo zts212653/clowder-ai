@@ -65,9 +65,9 @@ describe('F155 Guide callback routes', () => {
     return app;
   }
 
-  function createCreds(projectPath = 'default') {
+  async function createCreds(projectPath = 'default') {
     const thread = threadStore.create('user-1', 'Test', projectPath);
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
     return { invocationId, callbackToken, threadId: thread.id };
   }
 
@@ -86,7 +86,7 @@ describe('F155 Guide callback routes', () => {
   describe('POST /api/callbacks/start-guide', () => {
     test('starts guide with valid guideId', async () => {
       const app = await createApp();
-      const { invocationId, callbackToken, threadId } = createCreds();
+      const { invocationId, callbackToken, threadId } = await createCreds();
       await seedGuideState(threadId, 'add-member', 'offered');
 
       const res = await app.inject({
@@ -118,7 +118,7 @@ describe('F155 Guide callback routes', () => {
 
     test('rejects unknown guideId', async () => {
       const app = await createApp();
-      const { invocationId, callbackToken } = createCreds();
+      const { invocationId, callbackToken } = await createCreds();
 
       const res = await app.inject({
         method: 'POST',
@@ -149,9 +149,9 @@ describe('F155 Guide callback routes', () => {
 
     test('returns stale_ignored for non-latest invocation', async () => {
       const app = await createApp();
-      const { invocationId, callbackToken, threadId } = createCreds();
+      const { invocationId, callbackToken, threadId } = await createCreds();
       // Create a newer invocation to make the first one stale
-      registry.create('user-1', 'opus', threadId);
+      await registry.create('user-1', 'opus', threadId);
 
       const res = await app.inject({
         method: 'POST',
@@ -171,7 +171,7 @@ describe('F155 Guide callback routes', () => {
           throw new Error('broken flow yaml');
         },
       });
-      const { invocationId, callbackToken, threadId } = createCreds();
+      const { invocationId, callbackToken, threadId } = await createCreds();
       await seedGuideState(threadId, 'add-member', 'offered');
 
       const res = await app.inject({
@@ -195,7 +195,7 @@ describe('F155 Guide callback routes', () => {
   describe('POST /api/callbacks/get-available-guides', () => {
     test('returns the currently available guide catalog', async () => {
       const app = await createApp();
-      const { invocationId, callbackToken } = createCreds();
+      const { invocationId, callbackToken } = await createCreds();
 
       const res = await app.inject({
         method: 'POST',
@@ -224,7 +224,7 @@ describe('F155 Guide callback routes', () => {
 
     test('keeps the legacy /guide-resolve alias compatible with discovery responses when no intent is provided', async () => {
       const app = await createApp();
-      const { invocationId, callbackToken } = createCreds();
+      const { invocationId, callbackToken } = await createCreds();
 
       const legacyRes = await app.inject({
         method: 'POST',
@@ -241,7 +241,7 @@ describe('F155 Guide callback routes', () => {
 
     test('preserves the legacy /guide-resolve { matches } contract when callers still send intent', async () => {
       const app = await createApp();
-      const { invocationId, callbackToken } = createCreds();
+      const { invocationId, callbackToken } = await createCreds();
 
       const legacyRes = await app.inject({
         method: 'POST',
@@ -267,7 +267,7 @@ describe('F155 Guide callback routes', () => {
           return { memberCardCount: 0 };
         },
       });
-      const { invocationId, callbackToken } = createCreds();
+      const { invocationId, callbackToken } = await createCreds();
 
       const res = await app.inject({
         method: 'POST',
@@ -288,7 +288,7 @@ describe('F155 Guide callback routes', () => {
       const app = await createApp();
       const emptyProjectRoot = mkdtempSync(join(tmpdir(), 'guide-availability-'));
       const registrySnapshot = Object.entries(catRegistry.getAllConfigs());
-      const { invocationId, callbackToken } = createCreds(emptyProjectRoot);
+      const { invocationId, callbackToken } = await createCreds(emptyProjectRoot);
 
       try {
         catRegistry.reset();
@@ -344,7 +344,7 @@ describe('F155 Guide callback routes', () => {
   describe('POST /api/callbacks/guide-control', () => {
     test('emits control action to the invocation user with valid credentials', async () => {
       const app = await createApp();
-      const { invocationId, callbackToken, threadId } = createCreds();
+      const { invocationId, callbackToken, threadId } = await createCreds();
       await seedGuideState(threadId, 'add-member', 'active');
 
       const res = await app.inject({
@@ -376,7 +376,7 @@ describe('F155 Guide callback routes', () => {
 
     test('rejects invalid action', async () => {
       const app = await createApp();
-      const { invocationId, callbackToken } = createCreds();
+      const { invocationId, callbackToken } = await createCreds();
 
       const res = await app.inject({
         method: 'POST',

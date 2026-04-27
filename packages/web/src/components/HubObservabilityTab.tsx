@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { HubCallbackAuthPanel } from './HubCallbackAuthPanel';
 import { TraceBrowser } from './HubTraceTree';
 
 interface HealthData {
@@ -20,23 +21,51 @@ interface MetricsSnapshot {
   metrics: Record<string, number>;
 }
 
-type SubTab = 'overview' | 'traces' | 'health';
+type SubTab = 'overview' | 'traces' | 'health' | 'callback-auth';
 
-export function HubObservabilityTab() {
-  const [subTab, setSubTab] = useState<SubTab>('overview');
+const SUB_TAB_LABELS: Record<SubTab, string> = {
+  overview: '总览',
+  traces: 'Traces',
+  health: '健康',
+  'callback-auth': 'Callback Auth',
+};
+
+const SUB_TABS: SubTab[] = ['overview', 'traces', 'health', 'callback-auth'];
+
+export interface HubObservabilityTabProps {
+  /** F174 D2b-3: open directly into a specific subtab (e.g. when D2b-1 详情 button navigates here). */
+  initialSubTab?: SubTab;
+  /**
+   * F174 D2b-3 cloud P2 #1403: per-openHub nonce. Bumps on every openHub call,
+   * so a second deep-link with SAME (tab, subTab) still re-syncs subTab. Without
+   * this, value-only diff in the useEffect below would silently no-op when a
+   * user manually navigated away and then re-clicked 详情.
+   */
+  subTabNonce?: number;
+}
+
+export function HubObservabilityTab({ initialSubTab = 'overview', subTabNonce }: HubObservabilityTabProps = {}) {
+  const [subTab, setSubTab] = useState<SubTab>(initialSubTab);
+
+  // Sync prop → state on every initialSubTab change OR per-invocation nonce
+  // bump. The nonce dep handles the same-value re-deep-link case (cloud P2).
+  useEffect(() => {
+    setSubTab(initialSubTab);
+  }, [initialSubTab, subTabNonce]);
 
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 border-b border-cafe-border pb-2">
-        {(['overview', 'traces', 'health'] as SubTab[]).map((t) => (
+        {SUB_TABS.map((t) => (
           <button
             key={t}
+            type="button"
             onClick={() => setSubTab(t)}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
               subTab === t ? 'bg-blue-50 text-blue-700' : 'text-cafe-secondary hover:bg-cafe-surface-elevated'
             }`}
           >
-            {{ overview: '总览', traces: 'Traces', health: '健康' }[t]}
+            {SUB_TAB_LABELS[t]}
           </button>
         ))}
       </div>
@@ -44,6 +73,7 @@ export function HubObservabilityTab() {
       {subTab === 'overview' && <OverviewPanel />}
       {subTab === 'traces' && <TraceBrowser />}
       {subTab === 'health' && <HealthPanel />}
+      {subTab === 'callback-auth' && <HubCallbackAuthPanel />}
     </div>
   );
 }

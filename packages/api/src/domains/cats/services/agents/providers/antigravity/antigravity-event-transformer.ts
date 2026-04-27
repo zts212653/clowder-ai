@@ -5,7 +5,15 @@ import type { TrajectoryStep } from './AntigravityBridge.js';
 
 const log = createModuleLogger('antigravity-event-transformer');
 
-const CAPACITY_PATTERNS = [/high traffic/i, /rate limit/i, /too many requests/i, /try again/i, /overloaded/i];
+const CAPACITY_PATTERNS = [
+  /high traffic/i,
+  /rate limit/i,
+  /too many requests/i,
+  /try again/i,
+  /overloaded/i,
+  /exhausted your capacity/i,
+  /quota will reset/i,
+];
 
 export function isCapacityError(message: string): boolean {
   return CAPACITY_PATTERNS.some((p) => p.test(message));
@@ -50,6 +58,13 @@ export function classifyStep(step: TrajectoryStep): StepBucket {
     return 'checkpoint';
   }
 
+  // F172 Phase G: built-in generate_image step — silent in the chat stream;
+  // surfaced via the post-invocation brain scanner that yields a media_gallery
+  // rich block. Suppresses the "unknown step type" log noise.
+  if (step.type === 'CORTEX_STEP_TYPE_GENERATE_IMAGE') {
+    return 'checkpoint';
+  }
+
   // Shape-based fallback for unknown types (e.g. GREP_SEARCH, FILE_EDIT, TERMINAL_COMMAND)
   if (step.toolResult?.success === false) return 'tool_error';
   if (step.toolCall || step.toolResult) return 'tool_pending';
@@ -83,6 +98,7 @@ export function transformTrajectorySteps(
           type: 'text',
           catId,
           content: (pr.modifiedResponse || pr.response)!,
+          ...(step.catCafeTextMode ? { textMode: step.catCafeTextMode } : {}),
           metadata,
           timestamp: Date.now(),
         });

@@ -111,7 +111,7 @@ describe('Callback Game Action', () => {
 
   test('returns 400 with missing required fields', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/submit-game-action',
@@ -126,7 +126,7 @@ describe('Callback Game Action', () => {
   test('proxies valid action to game action route and returns accepted', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', 'game thread');
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex', thread.id);
     const runtime = makeRuntime('game-1', thread.id, 'user-1', 'codex');
     gameStore._set('game-1', runtime);
 
@@ -156,7 +156,7 @@ describe('Callback Game Action', () => {
   test('returns 404 when game does not exist', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', 'game thread');
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex', thread.id);
 
     const response = await app.inject({
       method: 'POST',
@@ -179,7 +179,7 @@ describe('Callback Game Action', () => {
   test('returns 403 when caller is not the actor for the seat', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', 'game thread');
-    const { invocationId, callbackToken } = registry.create('user-1', 'gemini', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'gemini', thread.id);
     const runtime = makeRuntime('game-2', thread.id, 'user-1', 'codex'); // seat owned by codex
     gameStore._set('game-2', runtime);
 
@@ -207,7 +207,7 @@ describe('Callback Game Action', () => {
     const threadB = await threadStore.create('user-1', 'game B thread');
 
     // Invocation bound to threadA
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex', threadA.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex', threadA.id);
 
     // Game belongs to threadB (same user, same cat, different thread)
     const runtime = makeRuntime('game-B', threadB.id, 'user-1', 'codex');

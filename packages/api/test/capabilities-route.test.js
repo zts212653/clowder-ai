@@ -790,6 +790,113 @@ describe('GET /api/capabilities (Fastify)', () => {
     await app.close();
   });
 
+  it('discovers antigravity MCP from homedir instead of a stale project-local file', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+
+    const projectDir = join('/tmp', `cap-route-test-antigravity-home-${Date.now()}`);
+    const homeDir = join('/tmp', `cap-route-test-antigravity-home-root-${Date.now()}`);
+    const prevHome = process.env.HOME;
+    await mkdir(join(projectDir, '.gemini', 'antigravity'), { recursive: true });
+    await mkdir(join(homeDir, '.gemini', 'antigravity'), { recursive: true });
+    await writeCapabilitiesConfig(projectDir, { version: 1, capabilities: [] });
+    await writeFile(
+      join(projectDir, '.gemini', 'antigravity', 'mcp_config.json'),
+      JSON.stringify({
+        mcpServers: {
+          shared_tool: { command: 'project-stale-command', args: ['--stale'] },
+        },
+      }),
+    );
+    await writeFile(
+      join(homeDir, '.gemini', 'antigravity', 'mcp_config.json'),
+      JSON.stringify({
+        mcpServers: {
+          shared_tool: { command: 'home-real-command', args: ['--real'] },
+        },
+      }),
+    );
+
+    process.env.HOME = homeDir;
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200);
+      const config = await readCapabilitiesConfig(projectDir);
+      const discovered = config?.capabilities.find((item) => item.type === 'mcp' && item.id === 'shared_tool');
+      assert.ok(discovered, 'shared_tool should be discovered into capabilities.json');
+      assert.equal(discovered?.mcpServer?.command, 'home-real-command');
+      assert.deepEqual(discovered?.mcpServer?.args, ['--real']);
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('realigns stale managed cat-cafe MCP paths to the stable main repo root on GET', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+    const { resolveMainRepoPath } = await import('../dist/utils/skill-mount.js');
+
+    const projectDir = join('/tmp', `cap-route-test-stale-cat-cafe-path-${Date.now()}`);
+    await mkdir(projectDir, { recursive: true });
+    await writeCapabilitiesConfig(projectDir, {
+      version: 1,
+      capabilities: [
+        {
+          id: 'cat-cafe',
+          type: 'mcp',
+          enabled: true,
+          source: 'cat-cafe',
+          mcpServer: {
+            command: 'node',
+            args: ['/tmp/deleted-worktree/packages/mcp-server/dist/index.js'],
+          },
+        },
+      ],
+    });
+
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200);
+      const stableRoot = await resolveMainRepoPath();
+      const config = await readCapabilitiesConfig(projectDir);
+      const managedEntries = config?.capabilities.filter(
+        (item) => item.type === 'mcp' && item.source === 'cat-cafe' && item.id.startsWith('cat-cafe'),
+      );
+      assert.ok((managedEntries?.length ?? 0) >= 1);
+      for (const entry of managedEntries ?? []) {
+        assert.ok(
+          entry.mcpServer?.args?.[0]?.includes(`${stableRoot}/packages/mcp-server/dist/`),
+          `managed MCP "${entry.id}" should be rewritten to the stable main repo root`,
+        );
+      }
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
   it('returns 400 for invalid projectPath', async () => {
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');

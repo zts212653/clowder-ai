@@ -36,6 +36,8 @@ const storeState = {
     catId?: string;
     content: string;
     isStreaming?: boolean;
+    origin?: string;
+    extra?: { stream?: { invocationId?: string } };
     timestamp: number;
   }>,
   catInvocations: {
@@ -196,6 +198,154 @@ describe('useAgentMessages system_info invocation_created', () => {
     });
 
     expect(mockSetMessageStreamInvocation).toHaveBeenCalledWith('msg-live-1', 'inv-new-2');
+  });
+
+  it('updates activeRefs to the rebound bubble even when it was NOT the prior activeRef target (cloud P1#9, PR#1352)', () => {
+    // Cloud Codex P1#9: when invocation_created rebinds an unbound placeholder that's
+    // NOT the current activeRefs target, activeRefs stays pointing at the OLD bubble.
+    // Subsequent invocationless events would reuse the stale ref → cross-invocation
+    // merge/ghost. Fix: always update activeRefs to the rebound bubble.
+    //
+    // Verification: after invocation_created with two unbound bubbles, an invocationless
+    // tool_use must target the NEWEST (rebound) bubble's id, not the older one.
+    const olderUnboundId = 'msg-older-unbound';
+    const newerUnboundId = 'msg-newer-unbound';
+    const replaceCalls: Array<[string, string]> = [];
+    (storeState as Record<string, unknown>).replaceMessageId = vi.fn((from: string, to: string) => {
+      replaceCalls.push([from, to]);
+      storeState.messages = storeState.messages.map((m) => (m.id === from ? { ...m, id: to } : m));
+    });
+    storeState.messages = [
+      {
+        id: olderUnboundId,
+        type: 'assistant',
+        catId: 'codex',
+        content: 'older unbound',
+        isStreaming: true,
+        origin: 'stream',
+        timestamp: Date.now() - 30_000,
+      } as (typeof storeState.messages)[number],
+      {
+        id: newerUnboundId,
+        type: 'assistant',
+        catId: 'codex',
+        content: 'newer unbound',
+        isStreaming: true,
+        origin: 'stream',
+        timestamp: Date.now(),
+      } as (typeof storeState.messages)[number],
+    ];
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'codex',
+        content: JSON.stringify({ type: 'invocation_created', invocationId: 'inv-rebind' }),
+      });
+    });
+
+    // Rebind targeted the NEWEST (newerUnboundId).
+    const reboundCall = replaceCalls.find(([from]) => from === newerUnboundId);
+    expect(reboundCall, 'rebind must target newest unbound bubble').toBeTruthy();
+    const reboundId = reboundCall![1];
+
+    // Invocationless follow-up must hit the REBOUND id, NOT the older bubble.
+    mockAppendToolEvent.mockClear();
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'tool_use',
+        catId: 'codex',
+        toolName: 'follow_up',
+        toolInput: {},
+      });
+    });
+    expect(
+      mockAppendToolEvent.mock.calls.some((c: unknown[]) => c[0] === olderUnboundId),
+      'follow-up must NOT target older bubble',
+    ).toBe(false);
+    expect(
+      mockAppendToolEvent.mock.calls.some((c: unknown[]) => c[0] === reboundId),
+      'follow-up should target rebound (live) bubble',
+    ).toBe(true);
+  });
+
+  it('rebinds the NEWEST unbound stream bubble (cloud P1, PR#1352) — not the oldest', () => {
+    // Cloud Codex P1 on PR#1352: invocation_created scanned messagesSnapshot
+    // oldest → newest and captured the FIRST unbound placeholder. Under reconnect/
+    // hydration, multiple unbound streaming bubbles can exist for the same cat —
+    // the historical one would get bound, leaving the active live bubble unbound
+    // and reintroducing the ghost/split.
+    //
+    // Fix: prefer activeRefs target if unbound; else iterate newest → oldest.
+    const oldStaleId = 'msg-stale-historical-unbound';
+    const liveActiveId = 'msg-live-active-unbound';
+    const replaceCalls: Array<[string, string]> = [];
+    mockSetMessageStreamInvocation.mockImplementation(() => {
+      // No-op for this test's purpose (we assert via mockSetMessageStreamInvocation calls).
+    });
+    // Track replaceMessageId calls (id transition for unbound → deterministic).
+    const replaceFn = vi.fn((from: string, to: string) => {
+      replaceCalls.push([from, to]);
+    });
+    // Inject replaceMessageId into store — this test's storeState doesn't have it
+    // wired by default, so add it locally.
+    (storeState as Record<string, unknown>).replaceMessageId = replaceFn;
+
+    storeState.messages = [
+      {
+        id: oldStaleId,
+        type: 'assistant',
+        catId: 'codex',
+        content: 'historical unbound bubble (e.g. survived hydration)',
+        isStreaming: true,
+        origin: 'stream',
+        timestamp: Date.now() - 60_000,
+      } as (typeof storeState.messages)[number],
+      {
+        id: liveActiveId,
+        type: 'assistant',
+        catId: 'codex',
+        content: 'live active bubble for the new invocation',
+        isStreaming: true,
+        origin: 'stream',
+        timestamp: Date.now(),
+      } as (typeof storeState.messages)[number],
+    ];
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'codex',
+        content: JSON.stringify({ type: 'invocation_created', invocationId: 'inv-fresh' }),
+      });
+    });
+
+    // The LIVE bubble (newest unbound) must get the invocationId binding.
+    // The historical stale bubble must NOT be picked up.
+    const bindCalls = mockSetMessageStreamInvocation.mock.calls.filter((c) => c[1] === 'inv-fresh');
+    expect(bindCalls, 'exactly one bubble should be bound to inv-fresh').toHaveLength(1);
+    const boundOriginalId = bindCalls[0][0];
+    // boundOriginalId might be liveActiveId itself (if deterministic id derivation hit
+    // fallback) OR the deterministic form. We assert via the upstream replace path:
+    // either replaceMessageId was called from liveActiveId → deterministic, OR the
+    // stream invocation was set directly on liveActiveId.
+    const replacedFromLive = replaceCalls.some(([from]) => from === liveActiveId);
+    const directBindOnLive = boundOriginalId === liveActiveId;
+    expect(replacedFromLive || directBindOnLive, 'live (newest) bubble must be the rebind target').toBe(true);
+    // Critically, the historical stale one is NOT touched.
+    const replacedFromStale = replaceCalls.some(([from]) => from === oldStaleId);
+    expect(replacedFromStale, 'historical stale bubble must NOT be replaced').toBe(false);
+    expect(
+      mockSetMessageStreamInvocation.mock.calls.some(([id]) => id === oldStaleId),
+      'historical stale bubble must NOT receive invocationId binding',
+    ).toBe(false);
   });
 
   it('migrates the active slot and displayed target during sequential handoff recovery', () => {

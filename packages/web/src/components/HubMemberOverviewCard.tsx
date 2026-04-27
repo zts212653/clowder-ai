@@ -71,6 +71,14 @@ function getStatusBadge(cat: CatData) {
   };
 }
 
+function getSessionChainBadge(cat: CatData) {
+  const enabled = cat.sessionChain !== false;
+  return {
+    label: enabled ? 'Session Chain 已开启' : 'Session Chain 未开启',
+    className: enabled ? 'bg-[#E8F5E9] text-[#4CAF50]' : 'bg-slate-100 text-slate-600',
+  };
+}
+
 function formatMentionPreview(patterns: string[], max = 3) {
   const visible = patterns.slice(0, max);
   const rest = patterns.length - visible.length;
@@ -182,6 +190,7 @@ export function HubMemberOverviewCard({
   guideTargetId?: string;
 }) {
   const status = getStatusBadge(cat);
+  const sessionChain = getSessionChainBadge(cat);
   const title = [cat.breedDisplayName ?? cat.displayName, cat.nickname].filter(Boolean).join(' · ');
   const editCard = () => onEdit?.(cat);
 
@@ -231,7 +240,12 @@ export function HubMemberOverviewCard({
               ) : null}
             </p>
 
-            <p className="mt-2 text-[13px] text-[#9D7BC7]">{formatMentionPreview(cat.mentionPatterns)}</p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <p className="text-[13px] text-[#9D7BC7]">{formatMentionPreview(cat.mentionPatterns)}</p>
+              <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${sessionChain.className}`}>
+                {sessionChain.label}
+              </span>
+            </div>
           </button>
         </div>
         <div className="flex items-center gap-1.5">

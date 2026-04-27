@@ -241,5 +241,5 @@ interface OrchestrationStep {
 
 ## Review Gate
 
-- Phase A: Maine Coon(gpt52) 负责安全边界 + 可测性 review
-- Phase B: Maine Coon(gpt52) 安全 review + Siamese(gemini25) 视觉 review
+- Phase A: Maine Coon/gpt52 负责安全边界 + 可测性 review
+- Phase B: Maine Coon/gpt52 安全 review + Siamese/gemini25 视觉 review

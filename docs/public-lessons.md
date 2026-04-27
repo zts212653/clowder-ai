@@ -493,7 +493,7 @@ created: 2026-02-26
 - 坑：SOP、CLAUDE.md、AGENTS.md、skill 文件里写死"Ragdoll找Maine Coon review"、"Maine Coon放行才能合入"。当同一物种有多个分身（Opus 4.5/4.6/Sonnet）时，规则指向不明；AGENTS.md 甚至出现"Maine Coon文件里写找Maine Coon review"的自我矛盾。
 - 根因：早期 1 Family = 1 Individual = 1 Role，写死个体名等于写死角色。多分身 + 新猫接入打破了这个等式。
 - 触发条件：新猫/新分身加入时，或同一物种多个分身同时在线时。
-- 修复：规则写"具有 peer-reviewer 角色的跨 family 猫"，不写"Maine Coon"。Roster (.cat-cafe/cat-catalog.json) 是唯一事实源，规则引用角色而非个体。
+- 修复：规则写"具有 peer-reviewer 角色的跨 family 猫"，不写"Maine Coon"。Roster (cat-config.json) 是唯一事实源，规则引用角色而非个体。
 - 防护：F042 Phase B 文档去硬编码 + review 时检查是否有新增的个体名硬编码。
 - 来源锚点：
   - `docs/features/F042-prompt-engineering-audit.md` §1.1
@@ -501,7 +501,7 @@ created: 2026-02-26
   - 2026-02-27 四猫 + 铲屎官讨论
 - 原理：协作规则的持久性取决于它引用的是稳定抽象（角色）还是不稳定实例（个体）。引用个体 = 每次团队变化都要改规则。
 
-- 关联：F042 | F032 | .cat-cafe/cat-catalog.json roster
+- 关联：F042 | F032 | cat-config.json roster
 
 ### LL-026: 身份信息是硬约束常量，不是可推断上下文
 - 状态：draft
@@ -1076,6 +1076,33 @@ created: 2026-02-26
 - 原理：**`VAR=val command arg` 语法中 `VAR=val` 是"赋值前缀"还是 argv[0] 取决于 command 的类别**——外部程序会被 shell 剥离前缀作为临时 env 传递；builtin（`exec` / `source` / `:`）则直接把前缀当成参数。`env` 这个 POSIX 工具的存在就是为了让"在指定环境下运行程序"成为一个可被任何 builtin/context 调用的显式动作。**任何需要给子进程设环境变量又必须经过 builtin（典型就是 `exec`）的场景，用 `env` 显式承接。**
 
 - 关联：F153 intake clowder-ai#512 | clowder-ai#526 | cat-cafe#1257 | clowder-ai#527
+
+---
+
+### LL-053: 无头 Codex CLI 长任务不能靠 shell 伪后台——要么守住 `session_id`，要么真正 detached spawn
+- 状态：draft
+- 更新时间：2026-04-20
+
+- 坑：在 Codex CLI 无头 `exec_command` 环境里，把长任务写成 `bash ... &`、`nohup ... &`、`disown` 或 `setsid`，CLI 返回后看起来“命令发出去了”，但后台子进程常常已经跟着父命令一起死。于是会误判“还在跑”，实际任务根本没活。
+- 根因：
+  1. **把 shell 作业控制误当成 harness 生命周期控制**：`&` / `nohup` / `disown` / `setsid` 只是 shell 级语义；在无头 CLI harness 里，顶层命令退出后，同一进程树里的后台子进程仍可能被回收。
+  2. **把轮询误当保活**：实测前台长任务拿到 `session_id` 后，即使隔 15 秒再 `write_stdin` 也能正常收尾。轮询只是读取进度/结果，不是给进程“续命”。
+- 触发条件：任何从无头 CLI 里拉 sidecar、proxy、测试服务、长脚本、fire-and-forget worker，尤其是想偷懒用 shell `&` 时。
+- 修复：
+  1. **需要交互/输出**：保持前台，接住 `session_id`，后续继续在同一个 session 上 `write_stdin`
+  2. **需要真正后台脱离**：用 Node `spawn(..., { detached: true, stdio: 'ignore' })` + `child.unref()`，并把日志/结果文件作为外部探针
+- 防护：
+  1. 原生 system prompt 明确禁用“在无头 CLI 里拿 shell 伪后台跑持久任务”
+  2. Fire-and-forget 任务必须同时定义 `pid` / `log` / `result` 探针；没有外部探针，不算启动成功
+  3. 命令已经返回 `session_id` 时，不要重开新命令抢跑；优先续同一个 session
+- 来源锚点：
+  - *(internal reference removed)*
+  - *(internal reference removed)*
+  - *(internal reference removed)*
+  - `packages/api/src/domains/cats/services/agents/providers/GeminiAgentService.ts`
+- 原理：**长任务的关键不是“后台”两个字，而是谁拥有生命周期。** 需要持续交互时，生命周期应该绑在当前 `session_id`；需要任务脱离对话继续跑时，必须显式切换到真正 detached 的进程组，并用外部探针观测。shell 伪后台只是“看起来像分叉了”，不是可靠的 liveness ownership。
+
+- 关联：`assets/system-prompts/cats/codex.md` | *(internal reference removed)*
 
 ---
 

@@ -411,10 +411,14 @@ export function HubCatEditor({ cat, draft, existingCats, open, onClose, onSaved 
     try {
       const catPayload = buildCatPayload(form, cat);
       const rollbackCatPayload = cat ? buildCatPayload(initialState(cat, null), cat) : null;
-      const nextStrategyPayload = cat && strategyForm ? buildStrategyPayload(strategyForm) : null;
-      const baselineStrategyPayload = cat && strategyBaseline ? buildStrategyPayload(strategyBaseline) : null;
+      const strategyEditable = Boolean(
+        cat && form.sessionChain === 'true' && (strategyForm?.sessionChainEnabled ?? true),
+      );
+      const nextStrategyPayload = strategyEditable && strategyForm ? buildStrategyPayload(strategyForm) : null;
+      const baselineStrategyPayload =
+        strategyEditable && strategyBaseline ? buildStrategyPayload(strategyBaseline) : null;
       const strategyChanged =
-        cat && nextStrategyPayload
+        cat && nextStrategyPayload && strategyEditable
           ? JSON.stringify(nextStrategyPayload) !== JSON.stringify(baselineStrategyPayload)
           : false;
 
@@ -513,6 +517,33 @@ export function HubCatEditor({ cat, draft, existingCats, open, onClose, onSaved 
     } catch (err) {
       await rollbackMutations();
       setError(err instanceof Error ? err.message : '保存失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!cat || saving) return;
+    const ok = await confirm({
+      title: '删除确认',
+      message: `确认删除成员「${cat.displayName || cat.name || cat.id}」吗？该操作不可撤销。`,
+      variant: 'danger',
+      confirmLabel: '删除',
+    });
+    if (!ok) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/cats/${cat.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+        setError((payload.error as string) ?? `删除失败 (${res.status})`);
+        return;
+      }
+      await onSaved();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '删除失败');
     } finally {
       setSaving(false);
     }
@@ -630,6 +661,17 @@ export function HubCatEditor({ cat, draft, existingCats, open, onClose, onSaved 
             {buildEditorLoadingNote({ loadingProfiles, loadingStrategy, loadingCodexSettings })}
           </div>
           <div className="flex gap-2">
+            {cat ? (
+              <button
+                type="button"
+                aria-label="删除成员"
+                onClick={handleDelete}
+                disabled={saving}
+                className="rounded-full bg-red-50 px-5 py-2.5 text-sm font-semibold text-red-600 transition hover:bg-red-100 disabled:opacity-50"
+              >
+                删除成员
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={requestClose}

@@ -12,21 +12,39 @@
  * GET    /api/community-board?repo=xxx       → 聚合看板（issues + PR projection）
  */
 
+import { createHash, randomUUID } from 'node:crypto';
+import { type CatId, createCatId, DEFAULT_INTAKE_CHECKLIST, validateIntakeChecklist } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import { getRoster } from '../config/cat-config-loader.js';
+import type { VerifyResult } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { ICommunityIssueStore } from '../domains/cats/services/stores/ports/CommunityIssueStore.js';
+import type { ICommunityPrStore } from '../domains/cats/services/stores/ports/CommunityPrStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { derivePrGroup } from '../domains/community/derivePrGroup.js';
+import { type GhIssueFull, mapGitHubIssue } from '../domains/community/GitHubIssueFetcher.js';
+import { type GhPrFull, type GhPrReview, mapGitHubPr } from '../domains/community/GitHubPrFetcher.js';
+import { resolveGuardian } from '../domains/community/GuardianMatcher.js';
 import { TriageOrchestrator } from '../domains/community/TriageOrchestrator.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { resolveUserId } from '../utils/request-identity.js';
+import { registerCallbackAuthHook } from './callback-auth-prehandler.js';
+
+interface CallbackAuthVerifier {
+  verify(invocationId: string, callbackToken: string): Promise<VerifyResult>;
+}
 
 export interface CommunityIssuesRoutesOptions {
   communityIssueStore: ICommunityIssueStore;
   taskStore: ITaskStore;
   socketManager: SocketManager;
   threadStore?: Pick<IThreadStore, 'create'>;
+  registry?: CallbackAuthVerifier;
+  fetchIssues?: (repo: string) => Promise<GhIssueFull[]>;
+  communityPrStore?: ICommunityPrStore;
+  fetchPrs?: (repo: string) => Promise<GhPrFull[]>;
+  fetchPrReviews?: (repo: string, prNumber: number) => Promise<GhPrReview[]>;
 }
 
 const VALID_ISSUE_TYPES = ['bug', 'feature', 'enhancement', 'question'] as const;
@@ -62,6 +80,10 @@ const updateSchema = z
 
 export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptions> = async (app, opts) => {
   const { communityIssueStore, taskStore, socketManager } = opts;
+
+  if (opts.registry) {
+    registerCallbackAuthHook(app, opts.registry);
+  }
 
   app.post('/api/community-issues', async (request, reply) => {
     const result = createSchema.safeParse(request.body);
@@ -143,6 +165,129 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
       ...(threadId && { assignedThreadId: threadId }),
     });
     return updated;
+  });
+
+  app.post('/api/community-issues/sync', async (request, reply) => {
+    const { repo } = request.query as { repo?: string };
+    if (!repo) {
+      reply.status(400);
+      return { error: 'Missing repo query parameter' };
+    }
+    if (!opts.fetchIssues) {
+      reply.status(501);
+      return { error: 'GitHub issue fetching not configured' };
+    }
+
+    const ghIssues = await opts.fetchIssues(repo);
+    let created = 0;
+    let updated = 0;
+    let unchanged = 0;
+
+    const LOCAL_LIFECYCLE_STATES = new Set(['pending-decision', 'accepted', 'declined']);
+
+    for (const gh of ghIssues) {
+      const mapped = mapGitHubIssue(gh);
+      const replyState = mapped.state === 'unreplied' ? 'unreplied' : 'replied';
+      const existing = await communityIssueStore.getByRepoAndNumber(repo, gh.number);
+      if (!existing) {
+        await communityIssueStore.create({
+          repo,
+          issueNumber: gh.number,
+          issueType: mapped.issueType,
+          title: gh.title,
+        });
+        if (mapped.state !== 'unreplied' || replyState !== 'unreplied') {
+          const fresh = await communityIssueStore.getByRepoAndNumber(repo, gh.number);
+          if (fresh) await communityIssueStore.update(fresh.id, { state: mapped.state, replyState });
+        }
+        created++;
+      } else if (LOCAL_LIFECYCLE_STATES.has(existing.state) && mapped.state !== 'closed') {
+        const titleChanged = existing.title !== gh.title;
+        if (titleChanged) {
+          await communityIssueStore.update(existing.id, { title: gh.title });
+          updated++;
+        } else {
+          unchanged++;
+        }
+      } else if (existing.state !== mapped.state || existing.title !== gh.title || existing.replyState !== replyState) {
+        await communityIssueStore.update(existing.id, { state: mapped.state, title: gh.title, replyState });
+        updated++;
+      } else {
+        unchanged++;
+      }
+    }
+
+    return { repo, created, updated, unchanged, total: ghIssues.length };
+  });
+
+  app.post('/api/community-issues/sync-prs', async (request, reply) => {
+    const { repo } = request.query as { repo?: string };
+    if (!repo) {
+      reply.status(400);
+      return { error: 'Missing repo query parameter' };
+    }
+    if (!opts.fetchPrs || !opts.communityPrStore) {
+      reply.status(501);
+      return { error: 'GitHub PR fetching not configured' };
+    }
+
+    const ghPrs = await opts.fetchPrs(repo);
+    let created = 0;
+    let updated = 0;
+    let unchanged = 0;
+
+    const openPrs = ghPrs.filter((p) => p.state === 'open');
+    const CONCURRENCY = 5;
+    const reviewsByNumber = new Map<number, Array<{ user: string; state: string; commit_id: string }>>();
+    if (opts.fetchPrReviews && openPrs.length > 0) {
+      for (let i = 0; i < openPrs.length; i += CONCURRENCY) {
+        const batch = openPrs.slice(i, i + CONCURRENCY);
+        const results = await Promise.all(batch.map((p) => opts.fetchPrReviews!(repo, p.number).catch(() => [])));
+        for (let j = 0; j < batch.length; j++) reviewsByNumber.set(batch[j].number, results[j]);
+      }
+    }
+
+    for (const pr of ghPrs) {
+      const reviews = reviewsByNumber.get(pr.number) ?? [];
+      const mapped = mapGitHubPr(pr, reviews);
+      const existing = await opts.communityPrStore.getByRepoAndNumber(repo, pr.number);
+
+      if (!existing) {
+        await opts.communityPrStore.create({
+          repo,
+          prNumber: pr.number,
+          title: pr.title,
+          author: pr.user,
+          state: mapped.state,
+          replyState: mapped.replyState,
+          headSha: pr.head_sha,
+          draft: pr.draft,
+        });
+        if (mapped.lastReviewedSha) {
+          const fresh = await opts.communityPrStore.getByRepoAndNumber(repo, pr.number);
+          if (fresh) await opts.communityPrStore.update(fresh.id, { lastReviewedSha: mapped.lastReviewedSha });
+        }
+        created++;
+      } else if (
+        existing.state !== mapped.state ||
+        existing.replyState !== mapped.replyState ||
+        existing.title !== pr.title ||
+        existing.headSha !== pr.head_sha
+      ) {
+        await opts.communityPrStore.update(existing.id, {
+          state: mapped.state,
+          replyState: mapped.replyState,
+          title: pr.title,
+          headSha: pr.head_sha,
+          ...(mapped.lastReviewedSha ? { lastReviewedSha: mapped.lastReviewedSha } : {}),
+        });
+        updated++;
+      } else {
+        unchanged++;
+      }
+    }
+
+    return { repo, created, updated, unchanged, total: ghPrs.length };
   });
 
   const triageCompleteSchema = z.object({
@@ -227,6 +372,178 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
     return communityIssueStore.get(id);
   });
 
+  // --- Phase D: Guardian endpoints ---
+
+  const requestGuardianSchema = z.object({
+    author: z.string().min(1),
+    reviewer: z.string().min(1),
+  });
+
+  app.post('/api/community-issues/:id/request-guardian', async (request, reply) => {
+    if (!request.callbackAuth) {
+      reply.status(401);
+      return { error: 'Callback authentication required' };
+    }
+    const { id } = request.params as { id: string };
+    const result = requestGuardianSchema.safeParse(request.body);
+    if (!result.success) {
+      reply.status(400);
+      return { error: 'Invalid body', details: result.error.issues };
+    }
+
+    const roster = getRoster();
+    const authorId = result.data.author;
+    const reviewerId = result.data.reviewer;
+    if (!roster[authorId]) {
+      reply.status(400);
+      return { error: `Author '${authorId}' not found in roster` };
+    }
+    if (!roster[reviewerId]) {
+      reply.status(400);
+      return { error: `Reviewer '${reviewerId}' not found in roster` };
+    }
+
+    const issue = await communityIssueStore.get(id);
+    if (!issue) {
+      reply.status(404);
+      return { error: 'Community issue not found' };
+    }
+    if (issue.state !== 'accepted') {
+      reply.status(409);
+      return { error: 'Issue must be in accepted state', currentState: issue.state };
+    }
+    if (issue.guardianAssignment) {
+      reply.status(409);
+      return { error: 'Guardian already assigned' };
+    }
+
+    const match = await resolveGuardian({
+      author: createCatId(authorId),
+      reviewer: createCatId(reviewerId),
+    });
+
+    const checklist = DEFAULT_INTAKE_CHECKLIST.map((item) => ({
+      ...item,
+      evidence: undefined,
+      verifiedAt: undefined,
+      verifiedBy: undefined,
+    }));
+
+    const signoffToken = randomUUID();
+    const signoffTokenHash = createHash('sha256').update(signoffToken).digest('hex');
+
+    const guardianCatId = match.guardian as string;
+    const updated = await communityIssueStore.update(id, {
+      guardianAssignment: {
+        guardianCatId,
+        signoffTokenHash,
+        requestedAt: Date.now(),
+        requestedBy: result.data.author,
+        signedOff: false,
+        checklist,
+      },
+    });
+
+    return { ...updated, signoffToken };
+  });
+
+  const guardianSignoffSchema = z.object({
+    catId: z.string().min(1),
+    signoffToken: z.string().min(1),
+    checklist: z.array(
+      z.object({
+        id: z.string(),
+        label: z.string(),
+        required: z.boolean(),
+        evidence: z.string().optional(),
+        verifiedAt: z.number().optional(),
+        verifiedBy: z.string().optional(),
+      }),
+    ),
+    approved: z.boolean(),
+    reason: z.string().optional(),
+  });
+
+  app.post('/api/community-issues/:id/guardian-signoff', async (request, reply) => {
+    if (!request.callbackAuth) {
+      reply.status(401);
+      return { error: 'Callback authentication required' };
+    }
+    const { id } = request.params as { id: string };
+    const result = guardianSignoffSchema.safeParse(request.body);
+    if (!result.success) {
+      reply.status(400);
+      return { error: 'Invalid body', details: result.error.issues };
+    }
+
+    const issue = await communityIssueStore.get(id);
+    if (!issue) {
+      reply.status(404);
+      return { error: 'Community issue not found' };
+    }
+    if (!issue.guardianAssignment) {
+      reply.status(409);
+      return { error: 'No guardian assigned' };
+    }
+    const providedHash = createHash('sha256').update(result.data.signoffToken).digest('hex');
+    if (providedHash !== issue.guardianAssignment.signoffTokenHash) {
+      reply.status(403);
+      return { error: 'Invalid signoff token' };
+    }
+    const callerCatId = request.callbackAuth.catId as string;
+    const signoffRoster = getRoster();
+    if (!signoffRoster[callerCatId]) {
+      reply.status(400);
+      return { error: `Cat '${callerCatId}' not found in roster` };
+    }
+    if (issue.guardianAssignment.guardianCatId !== callerCatId) {
+      reply.status(403);
+      return { error: 'Only the assigned guardian can sign off', expected: issue.guardianAssignment.guardianCatId };
+    }
+
+    if (result.data.approved) {
+      const validation = validateIntakeChecklist(result.data.checklist as any);
+      if (!validation.valid) {
+        reply.status(400);
+        return { error: 'Required checklist items missing evidence', missing: validation.missing };
+      }
+    }
+
+    const updated = await communityIssueStore.update(id, {
+      guardianAssignment: {
+        ...issue.guardianAssignment,
+        signedOff: true,
+        signedOffAt: Date.now(),
+        approved: result.data.approved,
+        reason: result.data.reason,
+        checklist: result.data.checklist,
+      },
+    });
+
+    return updated;
+  });
+
+  app.get('/api/community-issues/:id/guardian-status', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const issue = await communityIssueStore.get(id);
+    if (!issue) {
+      reply.status(404);
+      return { error: 'Community issue not found' };
+    }
+
+    if (!issue.guardianAssignment) {
+      return { hasGuardian: false, signedOff: false, checklistComplete: false, missingItems: [] };
+    }
+
+    const validation = validateIntakeChecklist(issue.guardianAssignment.checklist as any);
+    return {
+      hasGuardian: true,
+      signedOff: issue.guardianAssignment.signedOff,
+      checklistComplete: validation.valid,
+      missingItems: validation.missing,
+    };
+  });
+
   app.get('/api/community-repos', async () => {
     const allIssues = await communityIssueStore.listAll();
     const issueRepos = allIssues.map((i) => i.repo);
@@ -234,7 +551,11 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
     const prTasks = await taskStore.listByKind('pr_tracking');
     const prRepos = prTasks.map((t) => t.subjectKey?.match(/^pr:(.+)#\d+$/)?.[1]).filter(Boolean) as string[];
 
-    const repos = [...new Set([...issueRepos, ...prRepos])].sort();
+    const communityPrRepos = opts.communityPrStore
+      ? [...new Set((await opts.communityPrStore.listAll()).map((p) => p.repo))]
+      : [];
+
+    const repos = [...new Set([...issueRepos, ...prRepos, ...communityPrRepos])].sort();
     return { repos };
   });
 
@@ -251,15 +572,63 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
     const allTasks = await taskStore.listByKind('pr_tracking');
     const repoPrTasks = allTasks.filter((t) => t.subjectKey?.startsWith(subjectPrefix));
 
-    const prItems = repoPrTasks.map((t) => ({
-      taskId: t.id,
-      threadId: t.threadId,
-      title: t.title,
-      status: t.status,
-      group: derivePrGroup(t.automationState, t.status),
-      automationState: t.automationState,
-      updatedAt: t.updatedAt,
-    }));
+    const communityPrs = opts.communityPrStore ? await opts.communityPrStore.listByRepo(repo) : [];
+    const communityPrStateByNumber = new Map(communityPrs.map((p) => [p.prNumber, p.state]));
+
+    const oldGroupToPhaseF: Record<string, string> = {
+      'in-review': 'replied',
+      're-review-needed': 'has-new-activity',
+      'has-conflict': 'has-new-activity',
+      completed: 'merged',
+    };
+
+    const trackedPrItems = repoPrTasks.map((t) => {
+      const oldGroup = derivePrGroup(t.automationState, t.status);
+      let group = oldGroupToPhaseF[oldGroup] ?? oldGroup;
+      const prNumMatch = t.subjectKey?.match(/#(\d+)$/);
+      const prNumber = prNumMatch ? Number(prNumMatch[1]) : null;
+      if (group === 'merged') {
+        const actualState = prNumber != null ? communityPrStateByNumber.get(prNumber) : undefined;
+        if (actualState === 'closed') group = 'closed';
+      }
+      return {
+        taskId: t.id,
+        threadId: t.threadId,
+        prNumber,
+        ownerCatId: t.ownerCatId,
+        title: t.title,
+        status: t.status,
+        group,
+        automationState: t.automationState,
+        updatedAt: t.updatedAt,
+      };
+    });
+    const trackedPrNumbers = new Set(
+      repoPrTasks
+        .map((t) => {
+          const match = t.subjectKey?.match(/#(\d+)$/);
+          return match ? Number(match[1]) : null;
+        })
+        .filter(Boolean),
+    );
+
+    const communityPrItems = communityPrs
+      .filter((p) => !trackedPrNumbers.has(p.prNumber))
+      .map((p) => ({
+        taskId: p.id,
+        prNumber: p.prNumber,
+        title: p.title,
+        author: p.author,
+        state: p.state,
+        status: p.state,
+        replyState: p.replyState,
+        group: p.state !== 'open' ? p.state : p.replyState,
+        headSha: p.headSha,
+        draft: p.draft,
+        updatedAt: p.updatedAt,
+      }));
+
+    const prItems = [...trackedPrItems, ...communityPrItems];
 
     return { repo, issues, prItems };
   });

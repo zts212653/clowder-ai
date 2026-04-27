@@ -198,6 +198,226 @@ describe('F167 L1 AC-A4: callback-a2a-trigger ping-pong circuit breaker', () => 
     }
   });
 
+  test('F167-D1: callback (legacy path) with long content (>200) exempts round-4 streak — no termination', async () => {
+    const original = catRegistry.getAllConfigs();
+    await loadRealRoster();
+    try {
+      const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+      const { registerWorklist, unregisterWorklist, pushToWorklist } = await import(
+        '../dist/domains/cats/services/agents/routing/WorklistRegistry.js'
+      );
+
+      const threadId = 'thread-cb-pp-longcontent-legacy';
+      const entry = registerWorklist(threadId, ['opus'], 20);
+      try {
+        // Preload 3 rounds of ping-pong on the worklist (route-serial-style).
+        pushToWorklist(threadId, ['codex'], 'opus');
+        entry.executedIndex = 1;
+        pushToWorklist(threadId, ['opus'], 'codex');
+        entry.executedIndex = 2;
+        pushToWorklist(threadId, ['codex'], 'opus');
+        entry.executedIndex = 3; // streak = 3
+
+        // Round 4 via callback, but content is > 200 chars (real discussion).
+        const longContent = `${'详细架构分析'.repeat(40)}\n@opus 这段需要你确认`;
+        const socketManager = createMockSocketManager();
+        const result = await enqueueA2ATargets(
+          {
+            router: null,
+            invocationRecordStore: null,
+            socketManager,
+            invocationQueue: undefined,
+            invocationTracker: undefined,
+            queueProcessor: undefined,
+            log: createMockLog(),
+          },
+          {
+            targetCats: ['opus'],
+            content: longContent,
+            userId: 'user1',
+            threadId,
+            triggerMessage: {
+              id: 'msg-cb-long-1',
+              userId: 'user1',
+              catId: 'codex',
+              content: longContent,
+              mentions: ['opus'],
+              timestamp: Date.now(),
+            },
+            callerCatId: 'codex',
+          },
+        );
+
+        assert.deepStrictEqual(result.enqueued, ['opus'], 'long-content round-4 must still enqueue (exempt)');
+        const terminated = socketManager.broadcasts.find(
+          (m) =>
+            m.type === 'system_info' && typeof m.content === 'string' && m.content.includes('a2a_pingpong_terminated'),
+        );
+        assert.ok(!terminated, 'long-content discussion must not trip the breaker on round 4');
+      } finally {
+        unregisterWorklist(threadId, entry);
+      }
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(original)) {
+        catRegistry.register(id, config);
+      }
+    }
+  });
+
+  test('F167-D1: callback (modern InvocationQueue path) with long content (>200) exempts round-4 streak', async () => {
+    const original = catRegistry.getAllConfigs();
+    await loadRealRoster();
+    try {
+      const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+      const { registerWorklist, unregisterWorklist, pushToWorklist } = await import(
+        '../dist/domains/cats/services/agents/routing/WorklistRegistry.js'
+      );
+      const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+
+      const threadId = 'thread-cb-pp-longcontent-modern';
+      const entry = registerWorklist(threadId, ['opus'], 20);
+      try {
+        pushToWorklist(threadId, ['codex'], 'opus');
+        entry.executedIndex = 1;
+        pushToWorklist(threadId, ['opus'], 'codex');
+        entry.executedIndex = 2;
+        pushToWorklist(threadId, ['codex'], 'opus');
+        entry.executedIndex = 3; // streak = 3
+
+        const invocationQueue = new InvocationQueue();
+        const longContent = `${'详细架构分析'.repeat(40)}\n@opus 这段需要你确认`;
+        const socketManager = createMockSocketManager();
+        const result = await enqueueA2ATargets(
+          {
+            router: null,
+            invocationRecordStore: null,
+            socketManager,
+            invocationQueue,
+            invocationTracker: undefined,
+            queueProcessor: undefined,
+            log: createMockLog(),
+          },
+          {
+            targetCats: ['opus'],
+            content: longContent,
+            userId: 'user1',
+            threadId,
+            triggerMessage: {
+              id: 'msg-cb-long-modern-1',
+              userId: 'user1',
+              catId: 'codex',
+              content: longContent,
+              mentions: ['opus'],
+              timestamp: Date.now(),
+            },
+            callerCatId: 'codex',
+          },
+        );
+
+        const terminated = socketManager.broadcasts.find(
+          (m) =>
+            m.type === 'system_info' && typeof m.content === 'string' && m.content.includes('a2a_pingpong_terminated'),
+        );
+        assert.ok(!terminated, 'modern path: long-content discussion must not trip breaker on round 4');
+      } finally {
+        unregisterWorklist(threadId, entry);
+      }
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(original)) {
+        catRegistry.register(id, config);
+      }
+    }
+  });
+
+  test('P1 (cloud Codex review): modern path — hasQueuedAgentForCat skip must NOT mutate streak even with substantive content', async () => {
+    // Reward-hack vector cloud Codex flagged: substantive activity (long content)
+    // triggers streak RESET even when the target is later skipped by
+    // `hasQueuedAgentForCat` dedup guard. After fix: streak only mutates when
+    // the target is about to actually enqueue (post-guards).
+    const original = catRegistry.getAllConfigs();
+    await loadRealRoster();
+    try {
+      const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+      const { registerWorklist, unregisterWorklist, pushToWorklist, getWorklist } = await import(
+        '../dist/domains/cats/services/agents/routing/WorklistRegistry.js'
+      );
+      const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+
+      const threadId = 'thread-cb-pp-codex-p1-modern';
+      const entry = registerWorklist(threadId, ['opus'], 20);
+      try {
+        // Preload streak=3 via inertia pushes (worklist path, no activity = legacy accumulation).
+        pushToWorklist(threadId, ['codex'], 'opus');
+        entry.executedIndex = 1;
+        pushToWorklist(threadId, ['opus'], 'codex');
+        entry.executedIndex = 2;
+        pushToWorklist(threadId, ['codex'], 'opus');
+        entry.executedIndex = 3; // streak=3
+
+        // Preload InvocationQueue with 'opus' so dedup skips the callback.
+        const invocationQueue = new InvocationQueue();
+        invocationQueue.enqueue({
+          threadId,
+          userId: 'user1',
+          content: 'existing',
+          source: 'agent',
+          targetCats: ['opus'],
+          intent: 'execute',
+          autoExecute: true,
+          callerCatId: 'somecat',
+        });
+        assert.ok(invocationQueue.hasQueuedAgentForCat(threadId, 'opus'), 'precondition: opus already queued');
+
+        const socketManager = createMockSocketManager();
+        const longContent = `${'详细架构分析'.repeat(40)}\n@opus 请看`; // >200 chars → substantive
+        const result = await enqueueA2ATargets(
+          {
+            router: null,
+            invocationRecordStore: null,
+            socketManager,
+            invocationQueue,
+            invocationTracker: undefined,
+            queueProcessor: undefined,
+            log: createMockLog(),
+          },
+          {
+            targetCats: ['opus'],
+            content: longContent,
+            userId: 'user1',
+            threadId,
+            triggerMessage: {
+              id: 'msg-cb-codex-p1',
+              userId: 'user1',
+              catId: 'codex',
+              content: longContent,
+              mentions: ['opus'],
+              timestamp: Date.now(),
+            },
+            callerCatId: 'codex',
+          },
+        );
+
+        assert.deepStrictEqual(result.enqueued, [], 'dedup must skip — nothing enqueued');
+        // KEY assertion: streak must stay at 3 (no reset by substantive activity)
+        const currentEntry = getWorklist(threadId);
+        assert.equal(
+          currentEntry?.streakPair?.count,
+          3,
+          'streak must NOT reset to 1 when hasQueuedAgentForCat dedup skipped the enqueue (cloud Codex P1)',
+        );
+      } finally {
+        unregisterWorklist(threadId, entry);
+      }
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(original)) {
+        catRegistry.register(id, config);
+      }
+    }
+  });
+
   test('streak<4 via callback (normal push) → enqueues + no terminated broadcast', async () => {
     const original = catRegistry.getAllConfigs();
     await loadRealRoster();

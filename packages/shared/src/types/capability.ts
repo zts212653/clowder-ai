@@ -5,6 +5,8 @@
  * 配置编排器从此格式生成三种 CLI 配置 (.mcp.json / .codex/config.toml / .gemini/settings.json)。
  */
 
+import type { MarketplaceEcosystem } from './marketplace.js';
+
 /** MCP transport type — stdio (default) or remote HTTP (TD104) */
 export type McpTransport = 'stdio' | 'streamableHttp';
 
@@ -56,6 +58,8 @@ export interface CapabilityEntry {
   mcpServer?: Omit<McpServerDescriptor, 'name' | 'enabled' | 'source'>;
   /** Source origin */
   source: 'cat-cafe' | 'external';
+  /** F146-D: Source ecosystem when installed from marketplace */
+  ecosystem?: MarketplaceEcosystem;
   /** F146-C: Version lock (AC-C2) */
   lockVersion?: LockVersion;
   /** F146-C: Persistent probe state (AC-C3/C4/C6) */
@@ -92,6 +96,12 @@ export interface CapabilityBoardItem {
   tools?: McpToolInfo[];
   /** MCP connection status (only when ?probe=true) */
   connectionStatus?: 'connected' | 'disconnected' | 'unknown';
+  /** F146-D: Capability layer (L1=MCP, L2=Skill, L3=Extension) */
+  layer?: 'L1' | 'L2' | 'L3';
+  /** F146-D: Source ecosystem (from marketplace install) */
+  ecosystem?: MarketplaceEcosystem;
+  /** F146-D: Version lock info (from Phase C install governance) */
+  lockVersion?: LockVersion;
 }
 
 /** Lightweight MCP tool info for board display */
@@ -257,6 +267,7 @@ export interface McpInstallRequest {
   env?: Record<string, string>;
   resolver?: string;
   projectPath?: string;
+  ecosystem?: MarketplaceEcosystem;
 }
 
 /** POST /api/capabilities/mcp/preview response */

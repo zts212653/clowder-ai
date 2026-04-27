@@ -171,4 +171,78 @@ describe('AntigravityAgentService (Bridge) — diagnostics', () => {
     assert.ok(textMsg);
     assert.equal(textMsg.metadata.diagnostics, undefined, 'successful responses should not have diagnostics');
   });
+
+  // F172 Phase H: image-only response must not be flagged as empty_response.
+  // Phase G surfaces generated images via the brain scanner / system_info rich
+  // block, so an invocation that yields only a GENERATE_IMAGE step (no
+  // plannerResponse text) is a valid user-visible output.
+  test('image-only invocation (single GENERATE_IMAGE step) does NOT emit empty_response', async () => {
+    const bridge = createMockBridge();
+    // Verbatim shape from runtime log (cascade 678b53ee, Phase G fixture).
+    bridge.pollForSteps = async function* () {
+      yield {
+        steps: [
+          {
+            type: 'CORTEX_STEP_TYPE_GENERATE_IMAGE',
+            status: 'CORTEX_STEP_STATUS_DONE',
+            metadata: { toolCall: { name: 'generate_image' } },
+            generateImage: {
+              imageName: 'bengal_image_only',
+              modelName: 'gemini-3.1-flash-image',
+              generatedMedia: { mimeType: 'image/jpeg', uri: 'opaque' },
+            },
+          },
+        ],
+        cursor: { baselineStepCount: 0, lastDeliveredStepCount: 1, terminalSeen: true, lastActivityAt: Date.now() },
+      };
+    };
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'claude-opus-4-6', bridge });
+    const messages = await collect(service.invoke('画一张'));
+
+    const errMsg = messages.find((m) => m.type === 'error' && m.errorCode === 'empty_response');
+    assert.equal(
+      errMsg,
+      undefined,
+      `image-only response must not trigger empty_response (got: ${JSON.stringify(errMsg)})`,
+    );
+    // The invocation must still complete normally with a `done` event.
+    const doneMsg = messages.find((m) => m.type === 'done');
+    assert.ok(doneMsg, 'image-only invocation should still yield done');
+  });
+
+  // F172 Phase H pre-register #2: also covers Phase F's toolResult-path publisher.
+  // If antigravity ever surfaces a saved-at path with no plannerResponse text, the
+  // legacy publisher in publishAntigravityImages still produces a rich block —
+  // empty_response must NOT fire in that case either.
+  test('image-only invocation via Phase F toolResult path also bypasses empty_response', async () => {
+    const bridge = createMockBridge();
+    bridge.pollForSteps = async function* () {
+      yield {
+        steps: [
+          {
+            type: 'CORTEX_STEP_TYPE_TOOL_RESULT',
+            status: 'CORTEX_STEP_STATUS_DONE',
+            toolResult: {
+              toolName: 'generate_image',
+              success: true,
+              output: 'Generated image is saved at /tmp/some-fake-path.png.',
+            },
+          },
+        ],
+        cursor: { baselineStepCount: 0, lastDeliveredStepCount: 1, terminalSeen: true, lastActivityAt: Date.now() },
+      };
+    };
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'claude-opus-4-6', bridge });
+    const messages = await collect(service.invoke('画一张'));
+
+    // The fake path won't actually publish (file doesn't exist), but the
+    // empty_response predicate is decided BEFORE publish using the collected
+    // candidate paths — that's exactly the false-positive shape we're guarding.
+    const errMsg = messages.find((m) => m.type === 'error' && m.errorCode === 'empty_response');
+    assert.equal(
+      errMsg,
+      undefined,
+      `Phase F image-only path must not trigger empty_response (got: ${JSON.stringify(errMsg)})`,
+    );
+  });
 });

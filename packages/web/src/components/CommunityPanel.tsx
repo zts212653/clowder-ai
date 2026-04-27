@@ -5,6 +5,14 @@ import { CommunityPanelFilters, TIME_RANGES } from '@/components/CommunityPanelF
 import { PR_ICON, TYPE_ICONS } from '@/components/community-panel-icons';
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
 
+function relativeTime(ts: number): string {
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return '刚刚';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}分钟前`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}小时前`;
+  return `${Math.floor(diff / 86_400_000)}天前`;
+}
+
 interface CommunityIssueItem {
   id: string;
   repo: string;
@@ -21,10 +29,14 @@ interface CommunityIssueItem {
 
 interface PrBoardItem {
   taskId: string;
-  threadId: string;
+  threadId?: string | null;
   title: string;
   status: string;
   group: string;
+  prNumber?: number | null;
+  ownerCatId?: string | null;
+  author?: string;
+  replyState?: string;
   updatedAt: number;
 }
 
@@ -44,10 +56,11 @@ const ISSUE_SECTIONS = [
 ] as const;
 
 const PR_SECTIONS = [
-  { key: 'in-review', label: '审核中' },
-  { key: 're-review-needed', label: '需重审' },
-  { key: 'has-conflict', label: '有冲突' },
-  { key: 'completed', label: '已完成' },
+  { key: 'unreplied', label: 'PR 未回复' },
+  { key: 'replied', label: 'PR 已回复' },
+  { key: 'has-new-activity', label: '有新动态' },
+  { key: 'merged', label: '已合入' },
+  { key: 'closed', label: '已关闭' },
 ] as const;
 
 const ISSUE_STATE_COLORS: Record<string, string> = {
@@ -60,10 +73,11 @@ const ISSUE_STATE_COLORS: Record<string, string> = {
 };
 
 const PR_GROUP_COLORS: Record<string, string> = {
-  'in-review': 'text-cafe-crosspost',
-  're-review-needed': 'text-amber-600',
-  'has-conflict': 'text-cafe-accent',
-  completed: 'text-green-600',
+  unreplied: 'text-cafe-accent',
+  replied: 'text-green-600',
+  'has-new-activity': 'text-amber-600',
+  merged: 'text-green-600',
+  closed: 'text-gray-400',
 };
 
 const AUTO_REFRESH_MS = 5 * 60 * 1000;
@@ -115,8 +129,18 @@ function IssueRow({
       className={`flex items-center gap-2 px-3 py-1.5 hover:bg-cafe-surface-elevated/30 text-xs ${item.assignedThreadId ? 'cursor-pointer' : 'cursor-default opacity-70'}`}
     >
       <span className={color}>{icon}</span>
-      <span className="text-cafe-muted text-[10px]">#{item.issueNumber}</span>
+      <a
+        href={`https://github.com/${item.repo}/issues/${item.issueNumber}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        className="text-cafe-muted text-[10px] hover:text-cafe-accent hover:underline"
+      >
+        #{item.issueNumber}
+      </a>
       <span className="truncate flex-1 text-cafe-secondary">{item.title}</span>
+      {item.assignedCatId && <span className="text-[10px] text-cafe-accent/60">{item.assignedCatId}</span>}
+      <span className="text-[10px] text-cafe-muted">{relativeTime(item.updatedAt)}</span>
       {item.state === 'unreplied' && (
         <button
           type="button"
@@ -137,7 +161,15 @@ function IssueRow({
   );
 }
 
-function PrRow({ item, onNavigate }: { item: PrBoardItem; onNavigate: (threadId: string) => void }) {
+function PrRow({
+  item,
+  repo,
+  onNavigate,
+}: {
+  item: PrBoardItem;
+  repo: string;
+  onNavigate: (threadId: string) => void;
+}) {
   const color = PR_GROUP_COLORS[item.group] ?? 'text-cafe-muted';
   const handleClick = () => {
     if (item.threadId) onNavigate(item.threadId);
@@ -149,8 +181,21 @@ function PrRow({ item, onNavigate }: { item: PrBoardItem; onNavigate: (threadId:
       className={`flex items-center gap-2 px-3 py-1.5 hover:bg-cafe-surface-elevated/30 text-xs ${item.threadId ? 'cursor-pointer' : 'cursor-default opacity-70'}`}
     >
       <span className={color}>{PR_ICON}</span>
+      {item.prNumber != null && (
+        <a
+          href={`https://github.com/${repo}/pull/${item.prNumber}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="text-cafe-muted text-[10px] hover:text-cafe-accent hover:underline"
+        >
+          #{item.prNumber}
+        </a>
+      )}
       <span className="truncate flex-1 text-cafe-secondary">{item.title}</span>
-      <span className="text-[10px] text-cafe-muted">{item.status}</span>
+      {item.author && <span className="text-[10px] text-cafe-muted">@{item.author}</span>}
+      {item.ownerCatId && <span className="text-[10px] text-cafe-accent/60">{item.ownerCatId}</span>}
+      <span className="text-[10px] text-cafe-muted">{relativeTime(item.updatedAt)}</span>
     </div>
   );
 }
@@ -164,7 +209,8 @@ export function CommunityPanel({ threadId }: { threadId?: string }) {
     declined: true,
   });
   const [collapsedPrs, setCollapsedPrs] = useState<Record<string, boolean>>({
-    completed: true,
+    merged: true,
+    closed: true,
   });
   const [stateFilter, setStateFilter] = useState('all');
   const [catFilter, setCatFilter] = useState('all');
@@ -185,6 +231,22 @@ export function CommunityPanel({ threadId }: { threadId?: string }) {
       setLoading(false);
     }
   }, [repo]);
+
+  const handleSync = useCallback(async () => {
+    if (!repo) return;
+    setLoading(true);
+    try {
+      await Promise.all([
+        fetch(`/api/community-issues/sync?repo=${encodeURIComponent(repo)}`, { method: 'POST' }),
+        fetch(`/api/community-issues/sync-prs?repo=${encodeURIComponent(repo)}`, { method: 'POST' }),
+      ]);
+      await fetchBoard();
+    } catch {
+      /* network error — keep stale data */
+    } finally {
+      setLoading(false);
+    }
+  }, [repo, fetchBoard]);
 
   useEffect(() => {
     fetchBoard();
@@ -252,7 +314,7 @@ export function CommunityPanel({ threadId }: { threadId?: string }) {
         onTimeRangeChange={setTimeRange}
         uniqueCats={uniqueCats}
         loading={loading}
-        onSync={fetchBoard}
+        onSync={handleSync}
       />
 
       {/* Stats */}
@@ -315,7 +377,9 @@ export function CommunityPanel({ threadId }: { threadId?: string }) {
                       onToggle={() => setCollapsedPrs((p) => ({ ...p, [sec.key]: !p[sec.key] }))}
                     />
                     {!isCollapsed &&
-                      items.map((item) => <PrRow key={item.taskId} item={item} onNavigate={navigateToThread} />)}
+                      items.map((item) => (
+                        <PrRow key={item.taskId} item={item} repo={board?.repo ?? repo} onNavigate={navigateToThread} />
+                      ))}
                   </div>
                 );
               })}

@@ -109,7 +109,7 @@ export async function registerCallbackGuideRoutes(
     }
 
     const { threadId, guideId, status, currentStep } = parsed.data;
-    if (!registry.isLatest(record.invocationId)) return { status: 'stale_ignored' };
+    if (!(await registry.isLatest(record.invocationId))) return { status: 'stale_ignored' };
     if (record.threadId !== threadId) {
       reply.status(403);
       return { error: 'Cross-thread write rejected' };
@@ -143,7 +143,7 @@ export async function registerCallbackGuideRoutes(
       return { error: 'Invalid request', details: parsed.error.issues };
     }
     const { guideId } = parsed.data;
-    if (!registry.isLatest(record.invocationId)) return { status: 'stale_ignored' };
+    if (!(await registry.isLatest(record.invocationId))) return { status: 'stale_ignored' };
 
     const result = await lifecycle.startGuideCallback({
       threadId: record.threadId,
@@ -195,7 +195,7 @@ export async function registerCallbackGuideRoutes(
       return { error: 'Invalid request', details: parsed.error.issues };
     }
     const { action } = parsed.data;
-    if (!registry.isLatest(record.invocationId)) return { status: 'stale_ignored' };
+    if (!(await registry.isLatest(record.invocationId))) return { status: 'stale_ignored' };
 
     const result = await lifecycle.controlGuide({
       threadId: record.threadId,

@@ -43,6 +43,20 @@ function makeStubSocketManager() {
   };
 }
 
+function makeInvocationRecordStore(records = {}) {
+  const byId = new Map(Object.entries(records));
+  return {
+    create: () => {
+      throw new Error('not implemented');
+    },
+    get: async (id) => byId.get(id) ?? null,
+    update: () => {
+      throw new Error('not implemented');
+    },
+    getByIdempotencyKey: () => null,
+  };
+}
+
 describe('GET /api/messages — draft merge (#80)', () => {
   /** @type {MessageStore} */
   let messageStore;
@@ -64,6 +78,47 @@ describe('GET /api/messages — draft merge (#80)', () => {
       draftStore,
     });
     return app;
+  }
+
+  async function buildAppWithInvocationRecords(records) {
+    const app = Fastify({ logger: false });
+    await app.register(messagesRoutes, {
+      registry: makeStubRegistry(),
+      messageStore,
+      socketManager: makeStubSocketManager(),
+      router: makeStubRouter(),
+      draftStore,
+      invocationRecordStore: makeInvocationRecordStore(records),
+    });
+    return app;
+  }
+
+  async function buildAppWithInvocationRecordStore(invocationRecordStore) {
+    const app = Fastify({ logger: false });
+    await app.register(messagesRoutes, {
+      registry: makeStubRegistry(),
+      messageStore,
+      socketManager: makeStubSocketManager(),
+      router: makeStubRouter(),
+      draftStore,
+      invocationRecordStore,
+    });
+    return app;
+  }
+
+  function makeInvocationRecord(invocationId, status, ts = Date.now()) {
+    return {
+      id: invocationId,
+      threadId: 'thread-1',
+      userId: 'user-1',
+      userMessageId: 'msg-user',
+      targetCats: ['opus'],
+      intent: 'execute',
+      status,
+      idempotencyKey: `key-${invocationId}`,
+      createdAt: ts - 1000,
+      updatedAt: ts,
+    };
   }
 
   it('includes active drafts on first page (no cursor)', async () => {
@@ -181,6 +236,156 @@ describe('GET /api/messages — draft merge (#80)', () => {
     // Formal message should still be there
     const formal = body.messages.find((m) => m.content === 'Completed message');
     assert(formal, 'Formal message should be present');
+  });
+
+  it('keeps draft when invocation record is still running (F173 hotfix3)', async () => {
+    const ts = Date.now();
+    draftStore.upsert({
+      userId: 'user-1',
+      threadId: 'thread-1',
+      invocationId: 'inv-running',
+      catId: 'opus',
+      content: 'Still streaming...',
+      updatedAt: ts,
+    });
+
+    const app = await buildAppWithInvocationRecords({
+      'inv-running': makeInvocationRecord('inv-running', 'running', ts),
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-1',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const draft = body.messages.find((m) => m.id === 'draft-inv-running');
+    assert(draft, 'Running invocation draft should remain visible');
+    assert.equal(draft.content, 'Still streaming...');
+    assert.equal(draftStore.getByThread('user-1', 'thread-1').length, 1, 'Running draft should not be deleted');
+  });
+
+  it('filters and deletes orphan draft when invocation record is missing (F173 hotfix3)', async () => {
+    const ts = Date.now();
+    draftStore.upsert({
+      userId: 'user-1',
+      threadId: 'thread-1',
+      invocationId: 'inv-orphan',
+      catId: 'opus',
+      content: 'Zombie draft from missing invocation',
+      updatedAt: ts,
+    });
+
+    const app = await buildAppWithInvocationRecords({});
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-1',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const orphan = body.messages.find((m) => m.id === 'draft-inv-orphan');
+    assert.equal(orphan, undefined, 'Orphan draft should not appear in GET /api/messages response');
+    assert.equal(draftStore.getByThread('user-1', 'thread-1').length, 0, 'Orphan draft should be deleted');
+  });
+
+  it('filters and deletes draft when invocation record is no longer running (F173 hotfix3)', async () => {
+    const ts = Date.now();
+    draftStore.upsert({
+      userId: 'user-1',
+      threadId: 'thread-1',
+      invocationId: 'inv-failed',
+      catId: 'opus',
+      content: 'Failed invocation draft',
+      updatedAt: ts,
+    });
+
+    const app = await buildAppWithInvocationRecords({
+      'inv-failed': makeInvocationRecord('inv-failed', 'failed', ts),
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-1',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const failedDraft = body.messages.find((m) => m.id === 'draft-inv-failed');
+    assert.equal(failedDraft, undefined, 'Non-running invocation draft should not appear');
+    assert.equal(draftStore.getByThread('user-1', 'thread-1').length, 0, 'Non-running draft should be deleted');
+  });
+
+  for (const status of ['succeeded', 'canceled']) {
+    it(`filters and deletes draft when invocation record is ${status} (F173 hotfix3)`, async () => {
+      const ts = Date.now();
+      const invocationId = `inv-${status}`;
+      draftStore.upsert({
+        userId: 'user-1',
+        threadId: 'thread-1',
+        invocationId,
+        catId: 'opus',
+        content: `${status} invocation draft`,
+        updatedAt: ts,
+      });
+
+      const app = await buildAppWithInvocationRecords({
+        [invocationId]: makeInvocationRecord(invocationId, status, ts),
+      });
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/messages?threadId=thread-1',
+        headers: { 'x-cat-cafe-user': 'user-1' },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.body);
+      const terminalDraft = body.messages.find((m) => m.id === `draft-${invocationId}`);
+      assert.equal(terminalDraft, undefined, 'Terminal invocation draft should not appear');
+      assert.equal(draftStore.getByThread('user-1', 'thread-1').length, 0, 'Terminal draft should be deleted');
+    });
+  }
+
+  it('keeps draft visible when invocation record lookup fails (F173 hotfix3)', async () => {
+    const ts = Date.now();
+    draftStore.upsert({
+      userId: 'user-1',
+      threadId: 'thread-1',
+      invocationId: 'inv-redis-blip',
+      catId: 'opus',
+      content: 'Draft during transient invocation store failure',
+      updatedAt: ts,
+    });
+
+    const app = await buildAppWithInvocationRecordStore({
+      create: () => {
+        throw new Error('not implemented');
+      },
+      get: async () => {
+        throw new Error('transient redis read failure');
+      },
+      update: () => {
+        throw new Error('not implemented');
+      },
+      getByIdempotencyKey: () => null,
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-1',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const draft = body.messages.find((m) => m.id === 'draft-inv-redis-blip');
+    assert(draft, 'Draft should remain visible when liveness lookup is unavailable');
+    assert.equal(
+      draftStore.getByThread('user-1', 'thread-1').length,
+      1,
+      'Draft should not be deleted when liveness lookup fails',
+    );
   });
 
   it('userId isolation: cannot see other user drafts', async () => {

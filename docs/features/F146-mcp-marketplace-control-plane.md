@@ -10,7 +10,7 @@ created: 2026-03-28
 
 > **Scope 扩展（2026-04-18 team lead拍板）**：不止 MCP，覆盖 plugin / skill / tool / connector。UI 标签"能力市场"。
 
-> **Status**: in-progress | **Owner**: Maine Coon + Ragdoll | **Priority**: P1
+> **Status**: done | **Completed**: 2026-04-19 | **Owner**: Maine Coon + Ragdoll | **Priority**: P1
 
 ## team lead愿景
 
@@ -256,10 +256,10 @@ Skill 内容安全（防下毒）：
 - [x] AC-C11: 外来 skill 首次运行默认最小权限（dry-run/只读），涉及写文件、网络外发、高危工具必须二次确认
 - [x] AC-C12: 一键 `revoke`（全端停用 + 清理挂载 + 禁止再次激活），60s 内传播到 Hub/CLI/connector 侧
 
-### Phase D（联动体验）
-- [ ] AC-D1: Skills 页可从 `requires_mcp missing` 直接发起补齐
-- [ ] AC-D2: 能力中心可按 `L1/L2/L3` 分层过滤
-- [ ] AC-D3: UI 中可追踪每个 MCP 的来源生态（Codex/Claude/OpenClaw/Antigravity）
+### Phase D（联动体验）✅
+- [x] AC-D1: Skills 页可从 `requires_mcp missing` 直接发起补齐
+- [x] AC-D2: 能力中心可按 `L1/L2/L3` 分层过滤
+- [x] AC-D3: UI 中可追踪每个 MCP 的来源生态（Codex/Claude/OpenClaw/Antigravity）
 
 ## Dependencies
 

@@ -113,6 +113,39 @@ describe('G6: connection invalidation and reconnect', () => {
     assert.equal(result, 'idle-cascade', 'should reuse IDLE cascade');
   });
 
+  test('startCascade auto-recovers on ECONNREFUSED via rpcSafe', async () => {
+    const bridge = createBridge();
+    let rpcCallCount = 0;
+
+    mock.method(bridge, 'rpc', async (_conn, method) => {
+      rpcCallCount++;
+      if (rpcCallCount === 1 && method === 'StartCascade') {
+        throw new Error('connect ECONNREFUSED 127.0.0.1:62743');
+      }
+      if (method === 'GetUserStatus') return { cascadeModelConfigData: [] };
+      if (method === 'StartCascade') return { cascadeId: 'recovered-cascade' };
+      return {};
+    });
+
+    const cascadeId = await bridge.startCascade();
+    assert.equal(cascadeId, 'recovered-cascade', 'should recover after ECONNREFUSED');
+    assert.ok(rpcCallCount >= 2, 'should have retried the RPC');
+  });
+
+  test('rpcSafe does NOT retry on non-connection errors', async () => {
+    const bridge = createBridge();
+    mock.method(bridge, 'rpc', async (_conn, method) => {
+      if (method === 'GetUserStatus') return { cascadeModelConfigData: [] };
+      throw new Error('LS StartCascade: 500 — internal server error');
+    });
+
+    await assert.rejects(
+      () => bridge.startCascade(),
+      /500 — internal server error/,
+      'non-connection errors should propagate without retry',
+    );
+  });
+
   test('pollForSteps invalidates connection on RPC error then retries', async () => {
     const bridge = createBridge();
     let callCount = 0;

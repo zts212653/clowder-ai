@@ -101,6 +101,36 @@ describe('AntigravityAgentService (Bridge)', () => {
     assert.ok(sentPrompt.includes('Edit bar.ts'), 'original prompt preserved');
   });
 
+  test('injects callback fallback instructions when callbackEnv is available', async () => {
+    const bridge = createMockBridge();
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'gemini-3.1-pro', bridge });
+    await collect(
+      service.invoke('Read the latest thread context', {
+        callbackEnv: {
+          CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+          CAT_CAFE_INVOCATION_ID: 'inv-123',
+          CAT_CAFE_CALLBACK_TOKEN: 'tok-456',
+        },
+      }),
+    );
+
+    const sentPrompt = bridge.sendMessage.mock.calls[0].arguments[1];
+    assert.ok(sentPrompt.includes('Cat Cafe callback fallback'), 'should describe fallback path');
+    assert.match(
+      sentPrompt,
+      /如果当前环境已挂载只读 Cat Cafe MCP/,
+      'should describe native readonly MCP conditionally',
+    );
+    assert.doesNotMatch(sentPrompt, /当前没有原生 MCP 注入/, 'should not claim native MCP is absent');
+    assert.ok(sentPrompt.includes('/api/callbacks/thread-context?invocationId=inv-123&callbackToken=tok-456'));
+    assert.ok(sentPrompt.includes('/api/callbacks/post-message'));
+    assert.ok(sentPrompt.includes('/api/callbacks/instructions'));
+    assert.ok(
+      !sentPrompt.includes('/api/callbacks/instructions?invocationId=inv-123&callbackToken=tok-456'),
+      'public instructions endpoint must not embed live callback credentials',
+    );
+  });
+
   test('sanitizes control characters in workingDirectory to prevent prompt injection', async () => {
     const bridge = createMockBridge();
     const service = new AntigravityAgentService({ catId: 'antigravity', model: 'gemini-3.1-pro', bridge });

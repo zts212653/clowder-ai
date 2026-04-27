@@ -508,4 +508,101 @@ describe('thinking is stripped from delta replay steps', () => {
       'replay step must NOT carry thinking — it was already delivered in the first batch',
     );
   });
+
+  test('replay step emits only the non-overlapping suffix for non-prefix rewrites', async () => {
+    const bridge = createBridge();
+    let callCount = 0;
+    const trajectories = [
+      {
+        status: 'CASCADE_RUN_STATUS_RUNNING',
+        numTotalSteps: 1,
+        trajectory: {
+          steps: [
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'DONE',
+              plannerResponse: {
+                modifiedResponse: '第一段。第二段。',
+              },
+            },
+          ],
+        },
+      },
+      {
+        status: 'CASCADE_RUN_STATUS_IDLE',
+        numTotalSteps: 1,
+        trajectory: {
+          steps: [
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'DONE',
+              plannerResponse: {
+                modifiedResponse: '第二段。第三段。',
+              },
+            },
+          ],
+        },
+      },
+    ];
+    mock.method(bridge, 'getTrajectory', async () => trajectories[callCount++]);
+    mock.method(bridge, 'getTrajectorySteps', async () => []);
+
+    const yielded = [];
+    for await (const batch of bridge.pollForSteps('cascade-1', 0, 5000, 50)) {
+      yielded.push(batch);
+    }
+
+    assert.equal(yielded.length, 2, 'should emit initial + overlap-aware replay batch');
+    const replayStep = yielded[1].steps[0];
+    assert.equal(replayStep.plannerResponse.modifiedResponse, '第三段。');
+  });
+
+  test('non-prefix rewrite replays full corrected snapshot with replace mode', async () => {
+    const bridge = createBridge();
+    let callCount = 0;
+    const trajectories = [
+      {
+        status: 'CASCADE_RUN_STATUS_RUNNING',
+        numTotalSteps: 1,
+        trajectory: {
+          steps: [
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'DONE',
+              plannerResponse: {
+                modifiedResponse: '第一段。第二段。',
+              },
+            },
+          ],
+        },
+      },
+      {
+        status: 'CASCADE_RUN_STATUS_IDLE',
+        numTotalSteps: 1,
+        trajectory: {
+          steps: [
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'DONE',
+              plannerResponse: {
+                modifiedResponse: '第一段。插入一句。第二段。',
+              },
+            },
+          ],
+        },
+      },
+    ];
+    mock.method(bridge, 'getTrajectory', async () => trajectories[callCount++]);
+    mock.method(bridge, 'getTrajectorySteps', async () => []);
+
+    const yielded = [];
+    for await (const batch of bridge.pollForSteps('cascade-1', 0, 5000, 50)) {
+      yielded.push(batch);
+    }
+
+    assert.equal(yielded.length, 2, 'should emit initial + rewrite replay batch');
+    const replayStep = yielded[1].steps[0];
+    assert.equal(replayStep.plannerResponse.modifiedResponse, '第一段。插入一句。第二段。');
+    assert.equal(replayStep.catCafeTextMode, 'replace');
+  });
 });

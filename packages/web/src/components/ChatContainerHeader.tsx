@@ -94,7 +94,9 @@ export function ChatContainerHeader({
         )}
         {/* F056 Phase D: Theme toggle */}
         <ThemeToggle />
-        {/* F099 P1-2: Hub gear in top bar — always reachable even when right panel shows workspace */}
+        {/* F099 P1-2: Hub gear in top bar — always reachable even when right panel shows workspace.
+            F174 D2b-2 (rev2): callback-auth failure badge merges into HubButton itself
+            (no separate top-bar icon — top-bar real estate is scarce). */}
         <HubButton />
         {/* Mobile/tablet: status sheet trigger */}
         <button

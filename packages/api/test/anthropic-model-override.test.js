@@ -77,7 +77,7 @@ describe('anthropic protocol model override from account.models', () => {
     const deps = {
       registry: {
         create: () => ({ invocationId: 'inv-model-override', callbackToken: 'tok-model' }),
-        verify: () => null,
+        verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
       },
       sessionManager: {
         get: async () => undefined,
@@ -172,7 +172,7 @@ describe('anthropic protocol model override from account.models', () => {
     const deps = {
       registry: {
         create: () => ({ invocationId: 'inv-no-model', callbackToken: 'tok-no-model' }),
-        verify: () => null,
+        verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
       },
       sessionManager: {
         get: async () => undefined,

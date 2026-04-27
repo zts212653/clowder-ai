@@ -11,11 +11,11 @@ description: >
 
 ## 核心原则
 
-**PPT 不是一个人的活，是三猫流水线。**
+**PPT 不是一个人的活，是多猫流水线。** 角色按当前 roster 可用猫分配。
 
-- Ragdoll：内容规划 + HTML 制作 + density gate
-- Maine Coon：布局/信息审查 + Export Truth Gate
-- Siamese：审美/品牌审查 + 风格定调
+- 主执行猫（当前持球猫）：内容规划 + HTML 制作 + density gate
+- QA/审查猫（跨 family）：布局/信息审查 + Export Truth Gate
+- 视觉把关猫（跨 family）：审美/品牌审查 + 风格定调
 
 ## 开局参数（必须声明）
 
@@ -33,14 +33,14 @@ description: >
 
 | 触发 | 场景 | 主导 | 详细文档 |
 |------|------|------|---------|
-| 铲屎官说"做个 PPT" | **A: 内容规划** | Ragdoll | 主 skill 最小规则（ref 待补） |
-| 大纲确认 | **B: 风格定调** | Siamese审 + Ragdoll做 | [ppt-style-tile.md](../refs/ppt-style-tile.md) |
-| 风格确认 | **C: Slide 批量制作** | Ragdoll | [ppt-slide-authoring.md](../refs/ppt-slide-authoring.md) |
-| Slide 做完 | **D: 视觉审查 Gate** | Maine Coon(D1) + Siamese(D2) | [ppt-visual-review.md](../refs/ppt-visual-review.md) |
-| 审查通过 | **E: Export Truth Gate** | Maine Coon | 主 skill 最小规则（ref 待补） |
-| 导出验证通过 | **F: 交付** | Ragdoll | [ppt-delivery.md](../refs/ppt-delivery.md) |
-| 需要对比竞品 | **G: Benchmark 对拍** | Maine Coon + Siamese | 主 skill 最小规则（ref 待补） |
-| 铲屎官不满意 / 连续 2 轮 P1>0 | **R: 翻盘重来** | 三猫 | 主 skill 最小规则（ref 待补） |
+| 铲屎官说"做个 PPT" | **A: 内容规划** | 主执行猫 | 主 skill 最小规则（ref 待补） |
+| 大纲确认 | **B: 风格定调** | 视觉把关猫审 + 主执行猫做 | [ppt-style-tile.md](../refs/ppt-style-tile.md) |
+| 风格确认 | **C: Slide 批量制作** | 主执行猫 | [ppt-slide-authoring.md](../refs/ppt-slide-authoring.md) |
+| Slide 做完 | **D: 视觉审查 Gate** | QA/审查猫(D1) + 视觉把关猫(D2) | [ppt-visual-review.md](../refs/ppt-visual-review.md) |
+| 审查通过 | **E: Export Truth Gate** | QA/审查猫 | 主 skill 最小规则（ref 待补） |
+| 导出验证通过 | **F: 交付** | 主执行猫 | [ppt-delivery.md](../refs/ppt-delivery.md) |
+| 需要对比竞品 | **G: Benchmark 对拍** | QA/审查猫 + 视觉把关猫 | 主 skill 最小规则（ref 待补） |
+| 铲屎官不满意 / 连续 2 轮 P1>0 | **R: 翻盘重来** | 全部参与猫 | 主 skill 最小规则（ref 待补） |
 
 ## 还没拆成 ref 的场景（当前最小真相源）
 
@@ -80,7 +80,7 @@ description: >
 
 ## 审查维度速查
 
-### D1: 布局/信息审查（Maine Coon）
+### D1: 布局/信息审查（QA/审查猫）
 
 | 级别 | 维度 | 判定 |
 |------|------|------|
@@ -88,7 +88,7 @@ description: >
 | P1 | 信息失败 | 没讲清重点 / 层级错 / 受众看不懂 |
 | P1 | 密度失衡 | 该密不密 / 该疏不疏 |
 
-### D2: 审美/品牌审查（Siamese）
+### D2: 审美/品牌审查（视觉把关猫）
 
 | 级别 | 维度 | 判定 |
 |------|------|------|

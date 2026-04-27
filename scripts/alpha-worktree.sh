@@ -6,23 +6,26 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEFAULT_ALPHA_DIR="$(cd "$PROJECT_DIR/.." && pwd)/cat-cafe-alpha"
 DEFAULT_LEGACY_ALPHA_DIR="$(cd "$PROJECT_DIR/.." && pwd)/cat-cafe-main-test"
+DEFAULT_ALPHA_BRANCH="alpha/main-sync"
+DEFAULT_LEGACY_ALPHA_BRANCH="main-test/main-sync"
 
-ALPHA_DIR="${CAT_CAFE_ALPHA_DIR:-$DEFAULT_ALPHA_DIR}"
-LEGACY_ALPHA_DIR="${CAT_CAFE_ALPHA_LEGACY_DIR:-$DEFAULT_LEGACY_ALPHA_DIR}"
-ALPHA_BRANCH="${CAT_CAFE_ALPHA_BRANCH:-alpha/main-sync}"
-LEGACY_ALPHA_BRANCH="${CAT_CAFE_ALPHA_LEGACY_BRANCH:-main-test/main-sync}"
-REMOTE_NAME="${CAT_CAFE_ALPHA_REMOTE:-origin}"
-
-ALPHA_WEB_PORT="${CAT_CAFE_ALPHA_WEB_PORT:-3011}"
-ALPHA_API_PORT="${CAT_CAFE_ALPHA_API_PORT:-3012}"
-ALPHA_GATEWAY_PORT="${CAT_CAFE_ALPHA_GATEWAY_PORT:-4111}"
-ALPHA_REDIS_PORT="${CAT_CAFE_ALPHA_REDIS_PORT:-6398}"
-ALPHA_REDIS_URL="${CAT_CAFE_ALPHA_REDIS_URL:-redis://localhost:${ALPHA_REDIS_PORT}}"
-
+ALPHA_DIR="${CAT_CAFE_ALPHA_DIR:-${CAT_CAFE_MAIN_TEST_DIR:-$DEFAULT_ALPHA_DIR}}"
+LEGACY_ALPHA_DIR="${CAT_CAFE_MAIN_TEST_DIR:-$DEFAULT_LEGACY_ALPHA_DIR}"
+ALPHA_BRANCH="${CAT_CAFE_ALPHA_BRANCH:-$DEFAULT_ALPHA_BRANCH}"
+LEGACY_ALPHA_BRANCH="${CAT_CAFE_MAIN_TEST_BRANCH:-$DEFAULT_LEGACY_ALPHA_BRANCH}"
+REMOTE_NAME="${CAT_CAFE_ALPHA_REMOTE:-${CAT_CAFE_MAIN_TEST_REMOTE:-origin}}"
+ENV_SOURCE_FILE="${CAT_CAFE_ALPHA_ENV_SOURCE:-${CAT_CAFE_MAIN_TEST_ENV_SOURCE:-$PROJECT_DIR/.env}}"
+ALPHA_FRONTEND_PORT="${CAT_CAFE_ALPHA_FRONTEND_PORT:-${CAT_CAFE_MAIN_TEST_FRONTEND_PORT:-3011}}"
+ALPHA_API_PORT="${CAT_CAFE_ALPHA_API_PORT:-${CAT_CAFE_MAIN_TEST_API_PORT:-3012}}"
+ALPHA_PREVIEW_GATEWAY_PORT="${CAT_CAFE_ALPHA_PREVIEW_GATEWAY_PORT:-${CAT_CAFE_MAIN_TEST_PREVIEW_GATEWAY_PORT:-4111}}"
+ALPHA_REDIS_PORT="${CAT_CAFE_ALPHA_REDIS_PORT:-${CAT_CAFE_MAIN_TEST_REDIS_PORT:-6398}}"
+ALPHA_REDIS_PROFILE="${CAT_CAFE_ALPHA_REDIS_PROFILE:-${CAT_CAFE_MAIN_TEST_REDIS_PROFILE:-worktree}}"
 FORCE=false
 RUN_INSTALL=true
 SYNC_BEFORE_START=true
+QUICK_START=true
 START_ARGS=()
+SOURCE_ONLY=false
 
 usage() {
   cat <<'EOF'
@@ -31,7 +34,7 @@ Cat Cafe Alpha Worktree Manager
 Usage:
   ./scripts/alpha-worktree.sh init   [--dir PATH] [--branch NAME] [--remote NAME] [--no-install]
   ./scripts/alpha-worktree.sh sync   [--dir PATH] [--branch NAME] [--remote NAME] [--force] [--no-install]
-  ./scripts/alpha-worktree.sh start  [--dir PATH] [--branch NAME] [--remote NAME] [--force] [--no-sync] [--] [start-dev args...]
+  ./scripts/alpha-worktree.sh start  [--dir PATH] [--branch NAME] [--remote NAME] [--force] [--no-sync] [--no-install] [--no-quick] [--] [start-dev args...]
   ./scripts/alpha-worktree.sh status [--dir PATH] [--branch NAME] [--remote NAME]
 
 Defaults:
@@ -39,12 +42,16 @@ Defaults:
   --branch alpha/main-sync
   --remote origin
 
-Alpha ports:
-  frontend=3011 api=3012 preview-gateway=4111 redis=6398
+Ports:
+  frontend: 3011
+  api:      3012
+  preview:  4111
+  redis:    6398
 
-Notes:
-  alpha mirrors origin/main for post-merge acceptance.
-  legacy ../cat-cafe-main-test is auto-migrated when detected.
+Behavior:
+  start auto-syncs origin/main with ff-only, reuses the root .env for secrets,
+  launches the isolated alpha stack with sidecars disabled, and auto-migrates
+  an existing ../cat-cafe-main-test worktree into ../cat-cafe-alpha.
 EOF
 }
 
@@ -55,21 +62,6 @@ info() {
 die() {
   echo "[alpha-worktree] ERROR: $*" >&2
   exit 1
-}
-
-join_by() {
-  local delim="$1"
-  shift || true
-  local first=true
-  local value
-  for value in "$@"; do
-    if [ "$first" = true ]; then
-      printf '%s' "$value"
-      first=false
-    else
-      printf '%s%s' "$delim" "$value"
-    fi
-  done
 }
 
 abs_path() {
@@ -94,21 +86,18 @@ abs_path() {
   printf '%s/%s\n' "${dir%/}" "${base%/}"
 }
 
-registered_worktree_paths() {
-  git -C "$PROJECT_DIR" worktree list --porcelain | awk '/^worktree / {print substr($0, 10)}'
-}
-
-worktree_exists() {
-  registered_worktree_paths | grep -Fxq "$ALPHA_DIR"
-}
-
-legacy_worktree_exists() {
-  registered_worktree_paths | grep -Fxq "$LEGACY_ALPHA_DIR"
-}
-
 require_git_repo() {
   git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
     || die "project dir is not a git repository: $PROJECT_DIR"
+}
+
+worktree_exists() {
+  git -C "$PROJECT_DIR" worktree list --porcelain | awk '/^worktree / {print substr($0, 10)}' | grep -Fxq "$ALPHA_DIR"
+}
+
+legacy_worktree_exists() {
+  [ "$LEGACY_ALPHA_DIR" != "$ALPHA_DIR" ] || return 1
+  git -C "$PROJECT_DIR" worktree list --porcelain | awk '/^worktree / {print substr($0, 10)}' | grep -Fxq "$LEGACY_ALPHA_DIR"
 }
 
 ensure_remote_exists() {
@@ -116,119 +105,80 @@ ensure_remote_exists() {
     || die "remote '$REMOTE_NAME' not found"
 }
 
-probe_port_with_lsof() {
-  local port="$1"
-  lsof -nP -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1
-}
-
-probe_port_with_ss() {
-  local port="$1"
-  ss -ltn "( sport = :$port )" 2>/dev/null | awk 'NR > 1 { found = 1; exit } END { exit found ? 0 : 1 }'
-}
-
-probe_port_with_nc() {
-  local port="$1"
-  nc -z 127.0.0.1 "$port" >/dev/null 2>&1 || nc -z localhost "$port" >/dev/null 2>&1
-}
-
-probe_port_with_dev_tcp() {
-  local port="$1"
-  (exec 3<>"/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1 || (exec 3<>"/dev/tcp/localhost/$port") >/dev/null 2>&1
-}
-
-port_is_listening() {
-  local port="$1"
-
-  if command -v lsof >/dev/null 2>&1 && probe_port_with_lsof "$port"; then
+resolve_env_source_file() {
+  if [ -f "$ENV_SOURCE_FILE" ]; then
+    printf '%s\n' "$ENV_SOURCE_FILE"
     return 0
   fi
-  if command -v ss >/dev/null 2>&1 && probe_port_with_ss "$port"; then
-    return 0
-  fi
-  if command -v nc >/dev/null 2>&1 && probe_port_with_nc "$port"; then
-    return 0
-  fi
-  if probe_port_with_dev_tcp "$port"; then
+
+  local sibling_source
+  sibling_source="$(cd "$PROJECT_DIR/.." && pwd -P)/cat-cafe/.env"
+  if [ "$sibling_source" != "$ENV_SOURCE_FILE" ] && [ -f "$sibling_source" ]; then
+    printf '%s\n' "$sibling_source"
     return 0
   fi
 
   return 1
 }
 
-alpha_stack_running() {
-  port_is_listening "$ALPHA_WEB_PORT" || port_is_listening "$ALPHA_API_PORT" || port_is_listening "$ALPHA_GATEWAY_PORT"
-}
-
-print_yes_no() {
-  if "$@"; then
-    echo "yes"
-  else
-    echo "no"
-  fi
+is_api_running() {
+  lsof -nP -iTCP:"$ALPHA_API_PORT" -sTCP:LISTEN -t >/dev/null 2>&1
 }
 
 ensure_alpha_clean() {
   local dirty
   dirty=$(git -C "$ALPHA_DIR" status --short -uno 2>/dev/null || true)
-  if [ -z "$dirty" ] || [ "$FORCE" = "true" ]; then
-    return 0
+  if [ -n "$dirty" ] && [ "$FORCE" != "true" ]; then
+    die "alpha worktree has local changes. Commit/stash first, or re-run with --force."
   fi
-
-  local drift_files
-  drift_files=$(git -C "$ALPHA_DIR" diff HEAD --name-only 2>/dev/null || true)
-  if [ "$drift_files" = "pnpm-lock.yaml" ]; then
-    info "lock drift detected — stashing before sync"
-    git -C "$ALPHA_DIR" stash push -m "alpha-lock-drift-pre-sync-stash" -- pnpm-lock.yaml
-    return 0
-  fi
-
-  die "alpha worktree has local changes. Commit/stash first, or re-run with --force."
 }
 
 ensure_alpha_branch() {
-  local branch
-  branch=$(git -C "$ALPHA_DIR" rev-parse --abbrev-ref HEAD)
-  if [ "$branch" != "$ALPHA_BRANCH" ]; then
-    die "alpha worktree is on branch '$branch', expected '$ALPHA_BRANCH'"
-  fi
-}
+  local branch dirty
 
-migrate_legacy_alpha_worktree() {
-  if worktree_exists || ! legacy_worktree_exists; then
+  branch=$(git -C "$ALPHA_DIR" rev-parse --abbrev-ref HEAD)
+  if [ "$branch" = "$ALPHA_BRANCH" ]; then
     return 0
   fi
 
-  if [ -e "$ALPHA_DIR" ]; then
-    if [ -n "$(ls -A "$ALPHA_DIR" 2>/dev/null || true)" ]; then
-      return 0
-    fi
-    rmdir "$ALPHA_DIR" || die "failed to clear empty alpha target dir before legacy migration: $ALPHA_DIR"
+  dirty=$(git -C "$ALPHA_DIR" status --short -uno 2>/dev/null || true)
+  if [ -n "$dirty" ] && [ "$FORCE" != "true" ]; then
+    die "alpha worktree is on branch '$branch' with local changes. Commit/stash first, or re-run with --force."
   fi
 
-  info "migrating legacy alpha worktree from $LEGACY_ALPHA_DIR"
+  git -C "$ALPHA_DIR" fetch "$REMOTE_NAME" main
 
-  local legacy_branch
-  legacy_branch=$(git -C "$LEGACY_ALPHA_DIR" rev-parse --abbrev-ref HEAD)
-  case "$legacy_branch" in
-    "$ALPHA_BRANCH")
-      ;;
-    "$LEGACY_ALPHA_BRANCH")
-      if git -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$ALPHA_BRANCH"; then
-        git -C "$LEGACY_ALPHA_DIR" checkout "$ALPHA_BRANCH" >/dev/null 2>&1 \
-          || die "legacy worktree could not checkout existing '$ALPHA_BRANCH'"
-      else
-        git -C "$LEGACY_ALPHA_DIR" branch -m "$ALPHA_BRANCH"
-      fi
-      ;;
-    *)
-      die "legacy alpha worktree is on branch '$legacy_branch', expected '$LEGACY_ALPHA_BRANCH' or '$ALPHA_BRANCH'"
-      ;;
-  esac
+  if [ "$branch" = "$LEGACY_ALPHA_BRANCH" ] && ! git -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$ALPHA_BRANCH"; then
+    info "renaming legacy branch '$LEGACY_ALPHA_BRANCH' to '$ALPHA_BRANCH'"
+    git -C "$ALPHA_DIR" branch -m "$LEGACY_ALPHA_BRANCH" "$ALPHA_BRANCH"
+    git -C "$ALPHA_DIR" branch --set-upstream-to="$REMOTE_NAME/main" "$ALPHA_BRANCH" >/dev/null 2>&1 || true
+    return 0
+  fi
 
-  mkdir -p "$(dirname "$ALPHA_DIR")"
-  git -C "$PROJECT_DIR" worktree move "$LEGACY_ALPHA_DIR" "$ALPHA_DIR" \
-    || die "failed to move legacy alpha worktree to $ALPHA_DIR"
-  info "legacy alpha worktree migrated to $ALPHA_DIR"
+  info "repairing alpha worktree branch from '$branch' to '$ALPHA_BRANCH'"
+  if git -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$ALPHA_BRANCH"; then
+    git -C "$ALPHA_DIR" checkout "$ALPHA_BRANCH"
+  else
+    git -C "$ALPHA_DIR" checkout -B "$ALPHA_BRANCH" "$REMOTE_NAME/main"
+  fi
+}
+
+print_alpha_env_exports() {
+  cat <<EOF
+export REDIS_PORT=$ALPHA_REDIS_PORT
+export REDIS_URL=redis://localhost:$ALPHA_REDIS_PORT
+export REDIS_PROFILE=$ALPHA_REDIS_PROFILE
+export API_SERVER_PORT=$ALPHA_API_PORT
+export FRONTEND_PORT=$ALPHA_FRONTEND_PORT
+export PREVIEW_GATEWAY_PORT=$ALPHA_PREVIEW_GATEWAY_PORT
+export NEXT_PUBLIC_API_URL=http://localhost:$ALPHA_API_PORT
+export ANTHROPIC_PROXY_ENABLED=0
+export ASR_ENABLED=0
+export TTS_ENABLED=0
+export LLM_POSTPROCESS_ENABLED=0
+export EMBED_ENABLED=0
+export EMBED_MODE=off
+EOF
 }
 
 install_alpha_dependencies() {
@@ -249,7 +199,7 @@ ensure_alpha_dependencies() {
   fi
 
   local joined_missing
-  joined_missing=$(join_by ", " "${missing[@]}")
+  joined_missing=$(IFS=', '; echo "${missing[*]}")
   info "detected missing alpha prerequisites: $joined_missing"
 
   if [ "$RUN_INSTALL" != "true" ]; then
@@ -259,17 +209,84 @@ ensure_alpha_dependencies() {
   install_alpha_dependencies
 }
 
+source_env_if_present() {
+  local resolved_env
+  resolved_env="$(resolve_env_source_file || true)"
+
+  if [ -n "$resolved_env" ]; then
+    ENV_SOURCE_FILE="$resolved_env"
+    info "sourcing env from $ENV_SOURCE_FILE"
+    set -a
+    # shellcheck disable=SC1090
+    source "$ENV_SOURCE_FILE"
+    set +a
+  else
+    info "env source not found, continuing without it: $ENV_SOURCE_FILE"
+  fi
+}
+
+apply_alpha_env() {
+  export REDIS_PORT="$ALPHA_REDIS_PORT"
+  export REDIS_URL="redis://localhost:$ALPHA_REDIS_PORT"
+  export REDIS_PROFILE="$ALPHA_REDIS_PROFILE"
+  export API_SERVER_PORT="$ALPHA_API_PORT"
+  export FRONTEND_PORT="$ALPHA_FRONTEND_PORT"
+  export PREVIEW_GATEWAY_PORT="$ALPHA_PREVIEW_GATEWAY_PORT"
+  export NEXT_PUBLIC_API_URL="http://localhost:$ALPHA_API_PORT"
+  export ANTHROPIC_PROXY_ENABLED=0
+  export ASR_ENABLED=0
+  export TTS_ENABLED=0
+  export LLM_POSTPROCESS_ENABLED=0
+  export EMBED_ENABLED=0
+  export EMBED_MODE=off
+
+  # Next.js dev only reads .env files relative to its own cwd (packages/web/),
+  # not monorepo root .env, and does not always pick up exported NEXT_PUBLIC_*
+  # env vars at build time. Write packages/web/.env.local so the alpha frontend
+  # always points at ALPHA_API_PORT instead of falling back to the runtime API port.
+  if [ -d "$ALPHA_DIR/packages/web" ]; then
+    cat > "$ALPHA_DIR/packages/web/.env.local" <<EOF
+# Auto-generated by scripts/alpha-worktree.sh — do not edit by hand.
+NEXT_PUBLIC_API_URL=http://localhost:$ALPHA_API_PORT
+EOF
+  fi
+}
+
+migrate_legacy_alpha_worktree() {
+  legacy_worktree_exists || return 1
+  worktree_exists && return 0
+
+  mkdir -p "$(dirname "$ALPHA_DIR")"
+
+  if [ -e "$ALPHA_DIR" ] && [ -n "$(ls -A "$ALPHA_DIR" 2>/dev/null || true)" ]; then
+    die "target alpha path exists and is not empty: $ALPHA_DIR"
+  fi
+
+  info "migrating legacy main-test worktree from $LEGACY_ALPHA_DIR to $ALPHA_DIR"
+  git -C "$PROJECT_DIR" worktree move "$LEGACY_ALPHA_DIR" "$ALPHA_DIR"
+}
+
 init_alpha_worktree() {
   require_git_repo
   ensure_remote_exists
-  migrate_legacy_alpha_worktree
 
   if worktree_exists; then
     info "alpha worktree already exists: $ALPHA_DIR"
     return 0
   fi
 
+  if legacy_worktree_exists; then
+    migrate_legacy_alpha_worktree
+    ensure_alpha_branch
+    if [ "$RUN_INSTALL" = "true" ]; then
+      install_alpha_dependencies
+    fi
+    info "alpha worktree ready at $ALPHA_DIR"
+    return 0
+  fi
+
   mkdir -p "$(dirname "$ALPHA_DIR")"
+
   if [ -e "$ALPHA_DIR" ] && [ -n "$(ls -A "$ALPHA_DIR" 2>/dev/null || true)" ]; then
     die "target path exists and is not an empty alpha worktree: $ALPHA_DIR"
   fi
@@ -295,49 +312,41 @@ init_alpha_worktree() {
 sync_alpha_worktree() {
   require_git_repo
   ensure_remote_exists
-  migrate_legacy_alpha_worktree
   worktree_exists || die "alpha worktree not found at $ALPHA_DIR (run init first)"
-
-  if alpha_stack_running && [ "$FORCE" != "true" ]; then
-    die "alpha ports appear active; stop alpha before sync, or re-run with --force."
-  fi
 
   ensure_alpha_clean
   ensure_alpha_branch
 
   info "syncing alpha worktree with $REMOTE_NAME/main (ff-only)"
   git -C "$ALPHA_DIR" fetch "$REMOTE_NAME" main
-  if ! git -C "$ALPHA_DIR" merge --ff-only "$REMOTE_NAME/main" 2>/dev/null; then
-    die "alpha sync failed (ff-only merge rejected)"
-  fi
+  git -C "$ALPHA_DIR" merge --ff-only "$REMOTE_NAME/main"
 
   if [ "$RUN_INSTALL" = "true" ]; then
     install_alpha_dependencies
+
+    local lock_drift
+    lock_drift=$(git -C "$ALPHA_DIR" diff --name-only 2>/dev/null || true)
+    if [ "$lock_drift" = "pnpm-lock.yaml" ]; then
+      info "lock drift detected — stashing instead of committing"
+      git -C "$ALPHA_DIR" stash push -m "alpha-lock-drift-auto-stash" -- pnpm-lock.yaml
+    fi
   fi
 
-  info "alpha sync complete"
+  info "sync complete"
 }
 
 status_alpha_worktree() {
   require_git_repo
-  migrate_legacy_alpha_worktree
-
   if ! worktree_exists; then
     echo "alpha worktree: missing"
     echo "expected path: $ALPHA_DIR"
+    echo "legacy_path: $LEGACY_ALPHA_DIR"
     echo "branch: $ALPHA_BRANCH"
-    echo "frontend_port: $ALPHA_WEB_PORT"
-    echo "api_port: $ALPHA_API_PORT"
-    echo "preview_gateway_port: $ALPHA_GATEWAY_PORT"
-    echo "redis_port: $ALPHA_REDIS_PORT"
-    echo "web_running: $(print_yes_no port_is_listening "$ALPHA_WEB_PORT")"
-    echo "api_running: $(print_yes_no port_is_listening "$ALPHA_API_PORT")"
-    echo "preview_gateway_running: $(print_yes_no port_is_listening "$ALPHA_GATEWAY_PORT")"
-    echo "redis_running: $(print_yes_no port_is_listening "$ALPHA_REDIS_PORT")"
-    exit 0
+    echo "remote: $REMOTE_NAME"
+    return 0
   fi
 
-  local branch head dirty ahead behind
+  local branch head dirty ahead behind api_running env_source_display resolved_env
   branch=$(git -C "$ALPHA_DIR" rev-parse --abbrev-ref HEAD)
   head=$(git -C "$ALPHA_DIR" rev-parse --short HEAD)
   dirty=$(git -C "$ALPHA_DIR" status --short | wc -l | awk '{print $1}')
@@ -345,6 +354,16 @@ status_alpha_worktree() {
   git -C "$ALPHA_DIR" fetch "$REMOTE_NAME" main >/dev/null 2>&1 || true
   ahead=$(git -C "$ALPHA_DIR" rev-list --count "$REMOTE_NAME/main..HEAD" 2>/dev/null || echo "0")
   behind=$(git -C "$ALPHA_DIR" rev-list --count "HEAD..$REMOTE_NAME/main" 2>/dev/null || echo "0")
+  api_running="no"
+  if is_api_running; then
+    api_running="yes"
+  fi
+
+  env_source_display="$ENV_SOURCE_FILE"
+  resolved_env="$(resolve_env_source_file || true)"
+  if [ -n "$resolved_env" ]; then
+    env_source_display="$resolved_env"
+  fi
 
   echo "alpha worktree: $ALPHA_DIR"
   echo "branch: $branch"
@@ -352,24 +371,22 @@ status_alpha_worktree() {
   echo "dirty_files: $dirty"
   echo "ahead_of_${REMOTE_NAME}/main: $ahead"
   echo "behind_${REMOTE_NAME}/main: $behind"
-  echo "frontend_port: $ALPHA_WEB_PORT"
+  echo "api_running: $api_running"
+  echo "frontend_port: $ALPHA_FRONTEND_PORT"
   echo "api_port: $ALPHA_API_PORT"
-  echo "preview_gateway_port: $ALPHA_GATEWAY_PORT"
+  echo "preview_gateway_port: $ALPHA_PREVIEW_GATEWAY_PORT"
   echo "redis_port: $ALPHA_REDIS_PORT"
-  echo "web_running: $(print_yes_no port_is_listening "$ALPHA_WEB_PORT")"
-  echo "api_running: $(print_yes_no port_is_listening "$ALPHA_API_PORT")"
-  echo "preview_gateway_running: $(print_yes_no port_is_listening "$ALPHA_GATEWAY_PORT")"
-  echo "redis_running: $(print_yes_no port_is_listening "$ALPHA_REDIS_PORT")"
+  echo "env_source: $env_source_display"
 }
 
 start_alpha_worktree() {
+  if ! worktree_exists && legacy_worktree_exists; then
+    migrate_legacy_alpha_worktree
+  fi
+
   if ! worktree_exists; then
     info "alpha worktree missing; initializing first"
     init_alpha_worktree
-  fi
-
-  if alpha_stack_running && [ "$FORCE" != "true" ]; then
-    die "alpha ports already appear active. Use 'pnpm alpha:status' to inspect, or re-run with --force."
   fi
 
   if [ "$SYNC_BEFORE_START" = "true" ]; then
@@ -378,26 +395,30 @@ start_alpha_worktree() {
 
   ensure_alpha_dependencies
 
-  info "starting alpha stack from $ALPHA_DIR"
+  source_env_if_present
+  apply_alpha_env
+
+  info "starting isolated alpha stack from worktree: $ALPHA_DIR"
+  info "ports: frontend=$ALPHA_FRONTEND_PORT api=$ALPHA_API_PORT preview=$ALPHA_PREVIEW_GATEWAY_PORT redis=$ALPHA_REDIS_PORT"
+
   cd "$ALPHA_DIR"
-  exec env \
-    FRONTEND_PORT="$ALPHA_WEB_PORT" \
-    API_SERVER_PORT="$ALPHA_API_PORT" \
-    PREVIEW_GATEWAY_PORT="$ALPHA_GATEWAY_PORT" \
-    REDIS_PORT="$ALPHA_REDIS_PORT" \
-    REDIS_URL="$ALPHA_REDIS_URL" \
-    CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 \
-    ./scripts/start-dev.sh --prod-web --profile=opensource ${START_ARGS[@]+"${START_ARGS[@]}"}
+
+  local cmd=("./scripts/start-dev.sh")
+  if [ "$QUICK_START" = "true" ]; then
+    cmd+=("--quick")
+  fi
+
+  exec "${cmd[@]}" ${START_ARGS[@]+"${START_ARGS[@]}"}
 }
 
-COMMAND="${1:-status}"
-if [ "$COMMAND" = "--help" ] || [ "$COMMAND" = "-h" ]; then
-  usage
-  exit 0
+if [[ "${1:-}" == "--source-only" ]]; then
+  SOURCE_ONLY=true
+else
+  COMMAND="${1:-status}"
+  shift || true
 fi
-shift || true
 
-while [ $# -gt 0 ]; do
+while [ "$SOURCE_ONLY" != "true" ] && [ $# -gt 0 ]; do
   case "$1" in
     --dir)
       [ $# -ge 2 ] || die "--dir requires a path"
@@ -414,6 +435,11 @@ while [ $# -gt 0 ]; do
       REMOTE_NAME="$2"
       shift 2
       ;;
+    --env-file)
+      [ $# -ge 2 ] || die "--env-file requires a path"
+      ENV_SOURCE_FILE="$(abs_path "$2")"
+      shift 2
+      ;;
     --force)
       FORCE=true
       shift
@@ -426,8 +452,8 @@ while [ $# -gt 0 ]; do
       SYNC_BEFORE_START=false
       shift
       ;;
-    --sync)
-      SYNC_BEFORE_START=true
+    --no-quick)
+      QUICK_START=false
       shift
       ;;
     --)
@@ -435,23 +461,15 @@ while [ $# -gt 0 ]; do
       START_ARGS=("$@")
       break
       ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
     *)
-      if [ "$COMMAND" = "start" ]; then
-        START_ARGS+=("$1")
-        shift
-      else
-        die "unknown option: $1"
-      fi
+      die "unknown argument: $1"
       ;;
   esac
 done
 
-ALPHA_DIR="$(abs_path "$ALPHA_DIR")"
-LEGACY_ALPHA_DIR="$(abs_path "$LEGACY_ALPHA_DIR")"
+if [ "$SOURCE_ONLY" = "true" ]; then
+  return 0 2>/dev/null || exit 0
+fi
 
 case "$COMMAND" in
   init)
@@ -466,11 +484,10 @@ case "$COMMAND" in
   status)
     status_alpha_worktree
     ;;
-  help)
+  help|-h|--help)
     usage
     ;;
   *)
-    usage
     die "unknown command: $COMMAND"
     ;;
 esac

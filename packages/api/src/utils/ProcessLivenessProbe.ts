@@ -95,6 +95,20 @@ export class ProcessLivenessProbe {
     return warnings;
   }
 
+  /**
+   * Final flush for shutdown races:
+   * stdout can close before the next generator loop drains a warning that was
+   * already queued by an in-flight sample. Wait briefly for that sample to land
+   * so callers can drain pending warnings before exit, but do not synthesize
+   * any new warnings during shutdown.
+   */
+  async flushPendingWarnings(): Promise<void> {
+    const deadline = Date.now() + Math.max(this.config.sampleIntervalMs, 50);
+    while (this.sampling && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  }
+
   /** Whether bounded extension applies (busy-silent) */
   shouldExtendTimeout(): boolean {
     return this.getState() === 'busy-silent';

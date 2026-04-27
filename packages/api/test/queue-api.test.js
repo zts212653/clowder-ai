@@ -559,6 +559,7 @@ describe('Queue Management API', () => {
     const body = JSON.parse(res.body);
     assert.equal(body.ok, true);
     assert.equal(body.cancelled, true);
+    assert.deepEqual(deps.invocationTracker.cancel.mock.calls[0].arguments, ['t1', 'opus', 'user-a', 'user_cancel']);
 
     // Should broadcast done for opus
     const doneCalls = deps.socketManager.broadcastAgentMessage.mock.calls.filter((c) => c.arguments[0].type === 'done');

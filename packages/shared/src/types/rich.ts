@@ -46,6 +46,12 @@ export interface RichCardBlock extends RichBlockBase {
   fields?: Array<{ label: string; value: string }>;
   /** F066 Phase 4: Optional action buttons displayed at the bottom of the card */
   actions?: CardAction[];
+  /**
+   * F174 D2b-1: opaque structured metadata for downstream renderers to detect
+   * specialised card sub-kinds (e.g. `meta.kind: 'callback_auth_failure'` enables
+   * the dedicated in-context observability renderer). Default cards leave it empty.
+   */
+  meta?: Record<string, unknown>;
 }
 
 export interface RichDiffBlock extends RichBlockBase {

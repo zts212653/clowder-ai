@@ -27,12 +27,17 @@ import type { InvocationTracker } from '../domains/cats/services/agents/invocati
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type { PersistenceContext } from '../domains/cats/services/agents/routing/route-helpers.js';
 import { resetStreak } from '../domains/cats/services/agents/routing/WorklistRegistry.js';
+import {
+  accumulateTextAggregate,
+  accumulateTextParts,
+  flattenTextParts,
+  flattenTurnTextParts,
+} from '../domains/cats/services/agents/text-aggregation.js';
 import { createGameDriver } from '../domains/cats/services/game/createGameDriver.js';
 import type { GameDriver } from '../domains/cats/services/game/GameDriver.js';
 import { GameOrchestrator } from '../domains/cats/services/game/GameOrchestrator.js';
 import { WerewolfLobby } from '../domains/cats/services/game/werewolf/WerewolfLobby.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
-
 import { getPushNotificationService } from '../domains/cats/services/push/PushNotificationService.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
@@ -45,6 +50,7 @@ import { isSystemUserMessage } from '../domains/cats/services/stores/visibility.
 import { mergeTokenUsage, type TokenUsage } from '../domains/cats/services/types.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
+import { getDefaultUploadDir } from '../utils/upload-paths.js';
 
 /** F088 ISSUE-15: Minimal outbound delivery interface — avoids importing full OutboundDeliveryHook. */
 interface OutboundDeliveryHookLike {
@@ -77,6 +83,8 @@ interface StreamingHookLike {
 import { normalizeErrorMessage } from '../utils/normalize-error.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { buildGameSeats, parseGameCommand, sanitizeCatIds } from './game-command-interceptor.js';
+import type { HoldBallCancelDeps } from './hold-ball-cancel.js';
+import { cancelPendingHoldsForThread } from './hold-ball-cancel.js';
 import { sendMessageSchema } from './messages.schema.js';
 import { parseMultipart } from './parse-multipart.js';
 
@@ -113,9 +121,26 @@ export interface MessagesRoutesOptions {
   outboundHook?: OutboundDeliveryHookLike;
   /** F088 ISSUE-15: Streaming hook for connector platforms (late-bound after gateway bootstrap) */
   streamingHook?: StreamingHookLike;
+  /** F167 Phase J: deps for auto-cancelling pending hold-ball tasks on user message */
+  holdBallCancelDeps?: HoldBallCancelDeps;
 }
 
 const log = createModuleLogger('routes/messages');
+
+function tryAutoCancelPendingHolds(threadId: string, deps: HoldBallCancelDeps | undefined): void {
+  if (!deps) return;
+  try {
+    const cancelled = cancelPendingHoldsForThread(threadId, deps);
+    if (cancelled.length > 0) {
+      log.info(
+        { threadId, cancelledCount: cancelled.length, taskIds: cancelled.map((t) => t.id) },
+        'F167 Phase J: auto-cancelled pending hold-ball tasks on user message',
+      );
+    }
+  } catch (err) {
+    log.warn({ threadId, err }, 'F167 Phase J: failed to auto-cancel pending holds');
+  }
+}
 
 const getMessagesSchema = z.object({
   limit: z.coerce.number().int().min(1).max(10000).default(50),
@@ -144,7 +169,7 @@ export function shouldMarkDecisionNotification(content: string): boolean {
 }
 
 export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (app, opts) => {
-  const uploadDir = opts.uploadDir ?? process.env.UPLOAD_DIR ?? './uploads';
+  const uploadDir = getDefaultUploadDir(opts.uploadDir ?? process.env.UPLOAD_DIR);
 
   // Register multipart parser for image uploads
   await app.register(multipart, {
@@ -490,6 +515,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         action: enqueueResult.outcome,
       });
 
+      tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps);
+
       reply.status(202);
       return {
         status: 'queued',
@@ -599,6 +626,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               queue: opts.invocationQueue.list(resolvedThreadId, userId),
               action: enqueueResult.outcome,
             });
+            tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps);
             reply.status(202);
             return {
               status: 'queued',
@@ -704,6 +732,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         timestamp: Date.now(),
       });
 
+      tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps);
+
       // ⑤ Background: execute cat invocation via routeExecution
       void (async () => {
         const HEARTBEAT_INTERVAL_MS = 30_000;
@@ -715,7 +745,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         }, HEARTBEAT_INTERVAL_MS);
 
         // F39: Track final status for queue auto-dequeue
-        let finalStatus: 'succeeded' | 'failed' | 'canceled' = 'failed';
+        let finalStatus: 'succeeded' | 'failed' | 'canceled' | 'canceled_by_user' = 'failed';
 
         // F088 ISSUE-15: Hoisted so catch/abort branches can clean up streaming sessions
         let streamStartPromise: Promise<void> | undefined;
@@ -736,9 +766,6 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           const collectedUsage = new Map<string, TokenUsage>();
           // F070: track governance block errorCode for recoverable failure marking
           let governanceErrorCode: string | undefined;
-          // Aggregate streamed assistant text for push summary/decision classification.
-          let assistantReplyContent = '';
-
           // F088 ISSUE-15: Collect per-turn content for outbound delivery to connector platforms
           const outboundTurns: Array<{
             catId: string;
@@ -760,7 +787,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           // User stop can win the race before CLI produces the first event.
           // Do not re-arm frontend state with spawn_started/intent_mode after abort.
           if (controller?.signal.aborted) {
-            finalStatus = 'canceled';
+            finalStatus = controller.signal.reason === 'user_cancel' ? 'canceled_by_user' : 'canceled';
             await opts.invocationRecordStore?.update(createResult.invocationId, {
               status: 'canceled',
             });
@@ -797,6 +824,13 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                       opts.invocationQueue?.hasActiveOrQueuedAgentForCat(tid, catId) ?? false,
                   }
                 : {}),
+              ...(controller ? { invocationController: controller } : {}),
+              trackA2ASlot: (tid: string, catId: string, uid: string, ctrl: AbortController) => {
+                opts.invocationTracker?.trackExternalSlot(tid, catId, ctrl, uid, [catId]);
+              },
+              completeA2ASlots: (tid: string, catIds: readonly string[], ctrl: AbortController) => {
+                for (const catId of catIds) opts.invocationTracker?.completeSlot?.(tid, catId, ctrl);
+              },
               cursorBoundaries,
               persistenceContext,
               parentInvocationId: createResult.invocationId,
@@ -827,9 +861,6 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             }
             // F39 bugfix: stop broadcasting after cancel (drain pipe buffer silently)
             if (controller?.signal.aborted) break;
-            if (msg.type === 'text' && msg.content) {
-              assistantReplyContent += msg.content;
-            }
             if (msg.type === 'done' && msg.catId && msg.metadata?.usage) {
               collectedUsage.set(msg.catId, mergeTokenUsage(collectedUsage.get(msg.catId), msg.metadata.usage));
             }
@@ -859,17 +890,20 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             }
             if (msg.type === 'text' && typeof (msg as unknown as Record<string, unknown>).content === 'string') {
               const textContent = (msg as unknown as Record<string, unknown>).content as string;
-              collectedTextParts.push(textContent);
+              const textMode = (msg as { textMode?: 'append' | 'replace' }).textMode;
+              accumulateTextParts(collectedTextParts, textContent, textMode);
               if (msg.catId) {
                 if (msg.catId !== currentTurnCatId) {
                   outboundTurns.push({ catId: msg.catId, textParts: [] });
                   currentTurnCatId = msg.catId;
                 }
-                outboundTurns[outboundTurns.length - 1].textParts.push(textContent);
+                const turn = outboundTurns[outboundTurns.length - 1];
+                accumulateTextParts(turn.textParts, textContent, textMode);
               }
               // F088 ISSUE-15: Forward streaming chunks to external platforms
               if (opts.streamingHook) {
-                const accumulated = collectedTextParts.join('');
+                const accumulated =
+                  outboundTurns.length > 0 ? flattenTurnTextParts(outboundTurns) : flattenTextParts(collectedTextParts);
                 opts.streamingHook
                   .onStreamChunk(resolvedThreadId, accumulated, createResult.invocationId)
                   .catch((streamErr) => {
@@ -891,7 +925,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           // and the generator ends normally (no throw), the break exits the loop but
           // post-loop code would still run ack+succeeded. Guard explicitly.
           if (controller?.signal.aborted) {
-            finalStatus = 'canceled';
+            finalStatus = controller.signal.reason === 'user_cancel' ? 'canceled_by_user' : 'canceled';
             await opts.invocationRecordStore?.update(createResult.invocationId, {
               status: 'canceled',
             });
@@ -974,7 +1008,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             const pushSvc = getPushNotificationService();
             if (pushSvc) {
               const catNames = targetCats.join(', ');
-              const assistantText = assistantReplyContent.trim();
+              const assistantText = (
+                outboundTurns.length > 0 ? flattenTurnTextParts(outboundTurns) : flattenTextParts(collectedTextParts)
+              ).trim();
               const needsDecision = assistantText.length > 0 ? shouldMarkDecisionNotification(assistantText) : false;
               const pushBodySource = assistantText || '猫猫已处理，请打开会话查看详情';
               pushSvc
@@ -1013,7 +1049,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         } catch (err) {
           // F39 bugfix: detect abort (cancel/force) vs real failure
           if (controller?.signal.aborted) {
-            finalStatus = 'canceled';
+            finalStatus = controller.signal.reason === 'user_cancel' ? 'canceled_by_user' : 'canceled';
             await opts.invocationRecordStore?.update(createResult.invocationId, {
               status: 'canceled',
             });
@@ -1266,7 +1302,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
     // #80: Merge active streaming drafts (first page only — no before cursor)
     if (!before && opts.draftStore) {
-      const drafts = await opts.draftStore.getByThread(userId, resolvedThreadId);
+      const draftStore = opts.draftStore;
+      const drafts = await draftStore.getByThread(userId, resolvedThreadId);
       // #80 fix-B diagnostic: trace draft merge for F5 recovery verification
       if (drafts.length > 0) {
         request.log.info(
@@ -1290,6 +1327,51 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             if (invId) formalInvocationIds.add(invId);
           }
           activeDrafts = activeDrafts.filter((d) => !formalInvocationIds.has(d.invocationId));
+        }
+        // F173 Phase A hotfix3: draft persistence can outlive its invocation
+        // record when an invocation crashes or is replaced before a formal
+        // message is written. Such orphan drafts produce zombie bubbles on F5.
+        if (activeDrafts.length > 0 && opts.invocationRecordStore) {
+          const invocationRecordStore = opts.invocationRecordStore;
+          const orphanDrafts: typeof activeDrafts = [];
+          const checkedActiveDrafts: typeof activeDrafts = [];
+          for (const draft of activeDrafts) {
+            let record;
+            try {
+              record = await invocationRecordStore.get(draft.invocationId);
+            } catch (error) {
+              request.log.warn(
+                { err: error, threadId: resolvedThreadId, draftId: draft.invocationId },
+                '#80 draft merge: invocation liveness lookup failed',
+              );
+              checkedActiveDrafts.push(draft);
+              continue;
+            }
+            if (record?.status === 'running' && record.threadId === resolvedThreadId && record.userId === userId) {
+              checkedActiveDrafts.push(draft);
+            } else {
+              orphanDrafts.push(draft);
+            }
+          }
+          activeDrafts = checkedActiveDrafts;
+
+          if (orphanDrafts.length > 0) {
+            const deleteResults = await Promise.allSettled(
+              orphanDrafts.map((d) => draftStore.delete(userId, resolvedThreadId, d.invocationId)),
+            );
+            const failedDeletes = deleteResults.filter((r) => r.status === 'rejected').length;
+            const logPayload = {
+              threadId: resolvedThreadId,
+              orphanCount: orphanDrafts.length,
+              failedDeletes,
+              draftIds: orphanDrafts.map((d) => d.invocationId),
+            };
+            if (failedDeletes > 0) {
+              request.log.warn(logPayload, '#80 draft merge: filtered orphan drafts');
+            } else {
+              request.log.info(logPayload, '#80 draft merge: filtered orphan drafts');
+            }
+          }
         }
         // P2: stable sort by updatedAt for parallel multi-cat drafts
         activeDrafts.sort((a, b) => a.updatedAt - b.updatedAt);
@@ -1358,7 +1440,8 @@ export async function deliverOutboundFromWeb(
   opts: MessagesRoutesOptions,
   logger: typeof log,
 ): Promise<void> {
-  const finalContent = collectedTextParts.join('');
+  const finalContent =
+    outboundTurns.length > 0 ? flattenTurnTextParts(outboundTurns) : flattenTextParts(collectedTextParts);
 
   if (opts.streamingHook) {
     if (streamStartPromise) {

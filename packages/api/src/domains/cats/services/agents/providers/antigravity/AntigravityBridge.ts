@@ -6,9 +6,10 @@ import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import { discoverAntigravityLS } from './antigravity-ls-discovery.js';
 import { diffDeliveredSteps } from './antigravity-step-delta.js';
 import { RAW_RESPONSE_CAP, TRACE_ENABLED, TRACED_METHODS, traceLog } from './antigravity-trace.js';
-import type { AuditSink } from './executors/AntigravityToolExecutor.js';
+import type { AuditSink, ExecutorResult } from './executors/AntigravityToolExecutor.js';
 import type { ExecutorRegistry } from './executors/ExecutorRegistry.js';
 import { formatToolResult } from './executors/formatToolResult.js';
+import { getRunCommandRefusalReason } from './executors/RunCommandExecutor.js';
 
 const log = createModuleLogger('antigravity-bridge');
 
@@ -28,6 +29,8 @@ export interface BridgeConnection {
 export interface TrajectoryStep {
   type: string;
   status: string;
+  /** Internal replay hint for Cat Cafe consumers; never sent by Antigravity LS directly. */
+  catCafeTextMode?: 'append' | 'replace';
   plannerResponse?: {
     response?: string;
     modifiedResponse?: string;
@@ -59,6 +62,19 @@ export interface TrajectoryStep {
     stdout?: string;
     stderr?: string;
     exitCode?: number;
+  };
+  /** Antigravity built-in `generate_image` step payload. Present on
+   *  `CORTEX_STEP_TYPE_GENERATE_IMAGE` steps; the produced file lands at
+   *  `<brain>/<cascadeId>/<imageName>_<timestamp>.<ext>` (F172 Phase G). */
+  generateImage?: {
+    prompt?: string;
+    imageName?: string;
+    modelName?: string;
+    generatedMedia?: {
+      mimeType?: string;
+      inlineData?: string;
+      uri?: string;
+    };
   };
   error?: { shortError?: string; fullError?: string };
 }
@@ -117,27 +133,28 @@ export class AntigravityBridge {
    * Resolves connection lazily. Keeps the private rpc() signature internal.
    */
   async callRpc<T = Record<string, unknown>>(method: string, payload: unknown): Promise<T> {
-    const conn = await this.ensureConnected();
-    return this.rpc<T>(conn, method, payload);
+    return this.rpcSafe<T>(method, payload);
   }
 
   /**
    * F061 Phase 2c Task 5: Coordinator for native tool execution.
    * Dispatches a WAITING RUN_COMMAND step through the executor registry,
    * then pushes the result back via pushToolResult.
-   * Returns true iff the step was handled; callers use this to gate polling behavior.
+   * Returns true on success, 'approval_pending' when SafeToAutoRun is not set,
+   * 'no_executor' when no executor matches (caller should fail-fast), or false for
+   * all other early exits (kill-switch, missing registry, bad args — caller should not fail-fast).
    * Opt out via `ANTIGRAVITY_NATIVE_EXECUTOR=0` env var.
    */
   async nativeExecuteAndPush(
     step: TrajectoryStep,
     opts: { cascadeId: string; cwd: string; modelName?: string },
-  ): Promise<boolean> {
+  ): Promise<true | 'approval_pending' | 'no_executor' | false> {
     if (process.env.ANTIGRAVITY_NATIVE_EXECUTOR === '0') return false;
     if (!this.executorRegistry || !this.executorAudit) return false;
     if (step.status !== 'CORTEX_STEP_STATUS_WAITING') return false;
 
     const executor = this.executorRegistry.resolve(step);
-    if (!executor) return false;
+    if (!executor) return 'no_executor' as const;
 
     const argsJson = step.metadata?.toolCall?.argumentsJson;
     if (!argsJson) return false;
@@ -152,7 +169,8 @@ export class AntigravityBridge {
     // Respect Antigravity's approval metadata: only auto-execute steps the model
     // explicitly marked as safe-to-auto-run. SafeToAutoRun=false / missing → fall
     // back to normal approval flow (user or autoApprove via HandleCascadeUserInteraction).
-    if (args.SafeToAutoRun !== true) return false;
+    // Return 'approval_pending' (truthy) so callers can distinguish from genuinely unsupported steps (false).
+    if (args.SafeToAutoRun !== true) return 'approval_pending';
 
     const commandLine = ((args.CommandLine as string | undefined) ?? (args.commandLine as string | undefined))?.trim();
     if (!commandLine) return false;
@@ -166,6 +184,36 @@ export class AntigravityBridge {
         'nativeExecuteAndPush: stepIndex missing from sourceTrajectoryStepInfo, skipping to avoid cancelling wrong step',
       );
       return false;
+    }
+
+    // Run local refusal rules before signaling LS-side approval. Otherwise an
+    // unsafe command could be permission-approved upstream before our native
+    // executor decides to refuse it.
+    const refusalReason = getRunCommandRefusalReason(commandLine);
+    if (refusalReason) {
+      const result: ExecutorResult<unknown> = { status: 'refused', reason: refusalReason };
+      await this.executorAudit.record({
+        tool: executor.toolName,
+        cascadeId: opts.cascadeId,
+        stepIndex,
+        input,
+        result,
+        timestamp: new Date(),
+      });
+      await this.pushToolResult(opts.cascadeId, stepIndex, result, input, opts.modelName);
+      return true;
+    }
+
+    // Stage 1: try to satisfy LS PermissionManager before invoking the native executor.
+    // If the hint RPC itself fails, still continue to the writeback fallback path.
+    try {
+      await this.approveInteraction(opts.cascadeId, {
+        permission: { allowed: true },
+        trajectoryId,
+        stepIndex,
+      });
+    } catch (err) {
+      log.warn(`nativeExecuteAndPush: permission guard RPC failed (continuing): ${err}`);
     }
 
     const result = await executor.execute(input, {
@@ -198,14 +246,12 @@ export class AntigravityBridge {
     return this.conn;
   }
   async startCascade(): Promise<string> {
-    const conn = await this.ensureConnected();
-    const resp = await this.rpc<{ cascadeId?: string }>(conn, 'StartCascade', { source: 0 });
+    const resp = await this.rpcSafe<{ cascadeId?: string }>('StartCascade', { source: 0 });
     if (!resp.cascadeId) throw new Error('StartCascade: no cascadeId returned');
     log.debug(`cascade created: ${resp.cascadeId}`);
     return resp.cascadeId;
   }
   async sendMessage(cascadeId: string, text: string, modelName?: string): Promise<number> {
-    const conn = await this.ensureConnected();
     const traj = await this.getTrajectory(cascadeId);
     const stepsBefore = traj.numTotalSteps ?? 0;
     const modelId = modelName ? this.modelMap[modelName] : undefined;
@@ -219,18 +265,16 @@ export class AntigravityBridge {
         },
       },
     };
-    await this.rpc(conn, 'SendUserCascadeMessage', payload);
+    await this.rpcSafe('SendUserCascadeMessage', payload);
     return stepsBefore;
   }
   async getTrajectorySteps(cascadeId: string): Promise<TrajectoryStep[]> {
-    const conn = await this.ensureConnected();
-    const resp = await this.rpc<{ steps?: TrajectoryStep[] }>(conn, 'GetCascadeTrajectorySteps', { cascadeId });
+    const resp = await this.rpcSafe<{ steps?: TrajectoryStep[] }>('GetCascadeTrajectorySteps', { cascadeId });
     return resp.steps ?? [];
   }
 
   async getTrajectory(cascadeId: string): Promise<CascadeTrajectory> {
-    const conn = await this.ensureConnected();
-    return this.rpc<CascadeTrajectory>(conn, 'GetCascadeTrajectory', { cascadeId });
+    return this.rpcSafe<CascadeTrajectory>('GetCascadeTrajectory', { cascadeId });
   }
 
   async *pollForSteps(
@@ -400,15 +444,28 @@ export class AntigravityBridge {
     return newCascadeId;
   }
 
+  resetSession(threadId: string, catId?: string): void {
+    this.loadSessionMap();
+
+    const key = catId ? `${threadId}:${catId}` : threadId;
+    this.sessionMap.delete(key);
+    this.deletedKeys.add(key);
+
+    if (catId) {
+      this.sessionMap.delete(threadId);
+      this.deletedKeys.add(threadId);
+    }
+
+    this.persistSessionMap();
+  }
+
   async resolveOutstandingSteps(cascadeId: string): Promise<void> {
-    const conn = await this.ensureConnected();
-    await this.rpc(conn, 'ResolveOutstandingSteps', { cascadeId });
+    await this.rpcSafe('ResolveOutstandingSteps', { cascadeId });
     log.info(`resolved outstanding steps for cascade ${cascadeId}`);
   }
 
   async approveInteraction(cascadeId: string, interaction: Record<string, unknown>): Promise<void> {
-    const conn = await this.ensureConnected();
-    await this.rpc(conn, 'HandleCascadeUserInteraction', { cascadeId, interaction });
+    await this.rpcSafe('HandleCascadeUserInteraction', { cascadeId, interaction });
     log.info(`approved interaction for cascade ${cascadeId}`);
   }
 
@@ -426,8 +483,7 @@ export class AntigravityBridge {
     modelName?: string,
   ): Promise<void> {
     try {
-      const conn = await this.ensureConnected();
-      await this.rpc(conn, 'CancelCascadeSteps', { cascadeId, stepIndices: [stepIndex] });
+      await this.rpcSafe('CancelCascadeSteps', { cascadeId, stepIndices: [stepIndex] });
     } catch (err) {
       log.warn(`pushToolResult: CancelCascadeSteps failed (continuing): ${err}`);
     }
@@ -441,9 +497,7 @@ export class AntigravityBridge {
   }
   async refreshModelMap(): Promise<void> {
     try {
-      const conn = await this.ensureConnected();
-      const resp = await this.rpc<{ cascadeModelConfigData?: { modelId?: string; displayName?: string }[] }>(
-        conn,
+      const resp = await this.rpcSafe<{ cascadeModelConfigData?: { modelId?: string; displayName?: string }[] }>(
         'GetUserStatus',
         {},
       );
@@ -458,6 +512,26 @@ export class AntigravityBridge {
   }
   invalidateConnection(): void {
     this.conn = null;
+  }
+
+  private isConnectionError(err: unknown): boolean {
+    const msg = String(err);
+    return msg.includes('ECONNREFUSED') || msg.includes('ECONNRESET') || msg.includes('EHOSTUNREACH');
+  }
+
+  private async rpcSafe<T = Record<string, unknown>>(method: string, payload: unknown): Promise<T> {
+    let conn = await this.ensureConnected();
+    try {
+      return await this.rpc<T>(conn, method, payload);
+    } catch (err) {
+      if (this.isConnectionError(err)) {
+        log.warn(`connection lost on ${method}, rediscovering LS...`);
+        this.invalidateConnection();
+        conn = await this.ensureConnected();
+        return this.rpc<T>(conn, method, payload);
+      }
+      throw err;
+    }
   }
   private loadSessionMap(): void {
     if (this.sessionMapLoaded) return;

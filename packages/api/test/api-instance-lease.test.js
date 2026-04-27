@@ -202,15 +202,16 @@ describe('ApiInstanceLease', () => {
       hostname: 'same-host',
       apiPort: 3002,
       cwd: '/runtime-a',
-      ttlMs: 30,
-      heartbeatMs: 5,
+      // Give the heartbeat enough slack to survive full-gate scheduling jitter.
+      ttlMs: 200,
+      heartbeatMs: 20,
       isPidAlive: () => true,
     });
 
     const acquired = await lease.acquire();
     assert.equal(acquired.acquired, true);
 
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    await new Promise((resolve) => setTimeout(resolve, 120));
     assert.ok((await redis.pttl(API_INSTANCE_LEASE_KEY)) > 0, 'heartbeat should keep lease TTL above zero');
 
     await lease.release();

@@ -79,4 +79,35 @@ describe('F163 ExperimentLogger', () => {
     const count = db.prepare('SELECT count(*) AS c FROM f163_logs').get();
     assert.equal(count.c, 3);
   });
+
+  it('logSalienceRerank records before/after ranking diff (AC-F6)', () => {
+    process.env.F163_RETRIEVAL_RERANK = 'shadow';
+    const flags = freezeFlags();
+    const vid = computeVariantId(flags);
+
+    const payload = {
+      query: 'F102 memory',
+      resultCount: 3,
+      salienceRerank: {
+        taskContext: { activeFeatureIds: ['F163'], truthSourceRef: null, recentArtifactRefs: [] },
+        before: ['anchor-a', 'anchor-b', 'anchor-c'],
+        after: ['anchor-b', 'anchor-a', 'anchor-c'],
+        scores: [0.95, 0.35, 0.3],
+      },
+    };
+    logger.logSalienceRerank(vid, flags, payload);
+
+    const row = db.prepare('SELECT * FROM f163_logs WHERE log_type = ?').get('salience_rerank');
+    assert.ok(row, 'should have inserted a salience_rerank row');
+    assert.equal(row.variant_id, vid);
+
+    const parsed = JSON.parse(row.payload);
+    assert.equal(parsed.query, 'F102 memory');
+    assert.deepEqual(parsed.salienceRerank.before, ['anchor-a', 'anchor-b', 'anchor-c']);
+    assert.deepEqual(parsed.salienceRerank.after, ['anchor-b', 'anchor-a', 'anchor-c']);
+    assert.deepEqual(parsed.salienceRerank.scores, [0.95, 0.35, 0.3]);
+
+    const storedFlags = JSON.parse(row.effective_flags);
+    assert.equal(storedFlags.retrievalRerank, 'shadow');
+  });
 });

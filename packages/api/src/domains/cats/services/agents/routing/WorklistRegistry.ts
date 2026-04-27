@@ -65,6 +65,29 @@ export interface WorklistEntry {
 const PINGPONG_WARN_THRESHOLD = 2;
 const PINGPONG_BLOCK_THRESHOLD = 4;
 
+/**
+ * F167 Phase D (KD-18): tools that are routing/holding themselves, not work evidence.
+ * These MUST NOT count as "substantive work" — otherwise MCP routing paths would
+ * always bypass the ping-pong breaker (breaker 被打穿).
+ *
+ * Match via substring so provider-prefixed names like
+ * `mcp__cat-cafe__cat_cafe_post_message` also match.
+ */
+const NON_SUBSTANTIVE_TOOL_PATTERNS: readonly string[] = [
+  'cat_cafe_post_message',
+  'cat_cafe_multi_mention',
+  'cat_cafe_hold_ball',
+] as const;
+
+/**
+ * F167 Phase D: returns true iff the given tool name represents substantive work
+ * (anything except pure routing / holding). Empty string → false (defensive).
+ */
+export function isSubstantiveTool(toolName: string): boolean {
+  if (!toolName) return false;
+  return !NON_SUBSTANTIVE_TOOL_PATTERNS.some((p) => toolName.includes(p));
+}
+
 /** F167 L1: two cat pairs are the same if they share the same unordered set of cats. */
 function samePair(a: { from: CatId; to: CatId }, bFrom: CatId, bTo: CatId): boolean {
   return (a.from === bFrom && a.to === bTo) || (a.from === bTo && a.to === bFrom);
@@ -77,10 +100,48 @@ export interface StreakResult {
   count: number;
 }
 
-export function updateStreakOnPush(entry: WorklistEntry, callerCatId: CatId, target: CatId): StreakResult {
+/**
+ * F167 Phase D: upstream caller's activity signature, used to decide whether
+ * a same-pair push is "work" (exempt from streak) or "language inertia" (streak++).
+ */
+export interface CallerActivity {
+  /** True iff any tool_use in this turn passed `isSubstantiveTool()` (non-routing). */
+  hadSubstantiveToolCall: boolean;
+  /** Length of the stored output text in characters. */
+  outputLength: number;
+}
+
+/** F167 Phase D: output length threshold above which text is considered real discussion. */
+const OUTPUT_LEN_T = 200;
+
+/**
+ * F167 Phase D: a same-pair push is exempt from streak accumulation iff the
+ * caller was doing real work (substantive tool call) OR producing long content
+ * (architecture discussion). Both-false (short text + only routing tools) is
+ * the "pure language inertia" signature that deserves to be counted.
+ */
+function isSubstantiveActivity(activity?: CallerActivity): boolean {
+  if (!activity) return false;
+  return activity.hadSubstantiveToolCall || activity.outputLength > OUTPUT_LEN_T;
+}
+
+export function updateStreakOnPush(
+  entry: WorklistEntry,
+  callerCatId: CatId,
+  target: CatId,
+  activity?: CallerActivity,
+): StreakResult {
   if (entry.streakPair && samePair(entry.streakPair, callerCatId, target)) {
-    entry.streakPair.count++;
-    // Track latest direction so consumers can identify who just received the ball
+    // F167 Phase D: same-pair push. On pure language inertia (short text + no
+    // substantive tool) → streak++. On substantive work / long discussion →
+    // RESET to 1 (not merely "skip increment"): a real-work round BREAKS any
+    // prior inertia streak, otherwise `3 short + 1 substantive + 1 short`
+    // would still block on round 5 (gpt52 review P1-1).
+    if (!isSubstantiveActivity(activity)) {
+      entry.streakPair.count++;
+    } else {
+      entry.streakPair.count = 1;
+    }
     entry.streakPair.from = callerCatId;
     entry.streakPair.to = target;
   } else {
@@ -184,6 +245,7 @@ export function pushToWorklist(
   callerCatId?: CatId,
   parentInvocationId?: string,
   triggerMessageId?: string,
+  callerActivity?: CallerActivity,
 ): PushResult {
   const key = registryKey(threadId, parentInvocationId);
   const entry = registry.get(key);
@@ -195,26 +257,36 @@ export function pushToWorklist(
     if (currentCat !== callerCatId) return { added: [], reason: 'caller_mismatch' };
   }
 
-  // F167 L1: ping-pong streak — only 1:1 A2A pushes count (caller + single target).
+  // Only dedup against pending tail (from executedIndex onward) — computed
+  // first so streak check can peek at the outcome (cloud Codex P1).
+  const pending = entry.list.slice(entry.executedIndex);
+
+  // F167 L1 + Phase D: ping-pong streak — only 1:1 A2A pushes count (caller + single target).
   // Fan-out (multi-target) and non-A2A (no caller) pushes never update or consult streak.
+  // Streak mutation MUST be gated on actual enqueue (post-dedup, post-depth) —
+  // otherwise a push that gets skipped could still reset or increment the counter,
+  // which would let repeated dedup'd long-content callbacks "clear" a near-blocked
+  // streak without a real handoff (cloud Codex P1 on PR #1349).
   let warnPingPong = false;
   let pairCount = 0;
   if (callerCatId !== undefined && cats.length === 1) {
-    const streak = updateStreakOnPush(entry, callerCatId, cats[0]);
-    if (streak.blockPingPong) {
-      return {
-        added: [],
-        reason: 'pingpong_terminated',
-        blockPingPong: true,
-        pairCount: streak.count,
-      };
+    const target = cats[0];
+    const wouldEnqueue = entry.a2aCount < entry.maxDepth && !pending.includes(target);
+    if (wouldEnqueue) {
+      const streak = updateStreakOnPush(entry, callerCatId, target, callerActivity);
+      if (streak.blockPingPong) {
+        return {
+          added: [],
+          reason: 'pingpong_terminated',
+          blockPingPong: true,
+          pairCount: streak.count,
+        };
+      }
+      warnPingPong = streak.warnPingPong;
+      pairCount = streak.count;
     }
-    warnPingPong = streak.warnPingPong;
-    pairCount = streak.count;
+    // else: dedup or depth would skip → do not touch streak state
   }
-
-  // Only dedup against pending tail (from executedIndex onward)
-  const pending = entry.list.slice(entry.executedIndex);
 
   const added: CatId[] = [];
   let hitDepthLimit = false;

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-const { resolveCliCommand, resolveCliCommandOrBare, formatCliNotFoundError } = await import(
+const { resolveCliCommand, resolveCliCommandOrBare, formatCliNotFoundError, invalidateCliCommand } = await import(
   '../dist/utils/cli-resolve.js'
 );
 
@@ -117,6 +117,125 @@ test(
       process.env.HOME = tempRoot;
       const result = resolveCliCommand(cmdName);
       assert.equal(result, fakeBin, 'should find binary in HOME/.local/bin');
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+// --- F173 Phase D AC-D1/D2: cache invalidation on stale entry ---
+
+test(
+  'resolveCliCommand auto-invalidates cached path that no longer exists (AC-D1)',
+  { skip: process.platform === 'win32' && 'Unix-only fixture (HOME fallback)' },
+  () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'cli-resolve-invalidate-'));
+    const localBin = join(tempRoot, '.local', 'bin');
+    mkdirSync(localBin, { recursive: true });
+
+    // Use distinct command name per run to avoid cache pollution from earlier tests
+    const cmdName = `fake-stale-cli-${process.pid}-${Date.now()}`;
+    const fakeBin = join(localBin, cmdName);
+    writeFileSync(fakeBin, '#!/bin/sh\necho ok\n', { mode: 0o755 });
+
+    const originalHome = process.env.HOME;
+    try {
+      process.env.HOME = tempRoot;
+      const first = resolveCliCommand(cmdName);
+      assert.equal(first, fakeBin, 'first resolve should populate cache');
+
+      // Simulate binary deletion (uninstall / symlink rebuild that moved target)
+      rmSync(fakeBin);
+
+      // Without auto-invalidation this returns the stale path → caller would
+      // spawn ENOENT forever until process restart.
+      const second = resolveCliCommand(cmdName);
+      assert.equal(second, null, 'second resolve must drop stale cache and return null');
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'invalidateCliCommand accepts resolved absolute path (砚砚 P1: cli-spawn ENOENT site only has the resolved path)',
+  { skip: process.platform === 'win32' && 'Unix-only fixture (HOME fallback)' },
+  () => {
+    // Two HOMEs: first probe finds binary at tempRootA, then we switch HOME to
+    // tempRootB (empty) and call invalidate by the absolute path from tempRootA.
+    // Binary at tempRootA is NOT deleted, so existsSync auto-invalidation can't
+    // mask a buggy invalidate-by-path: cache hit would still return the stale path.
+    const tempRootA = mkdtempSync(join(tmpdir(), 'cli-resolve-by-path-A-'));
+    const tempRootB = mkdtempSync(join(tmpdir(), 'cli-resolve-by-path-B-'));
+    const localBinA = join(tempRootA, '.local', 'bin');
+    mkdirSync(localBinA, { recursive: true });
+
+    const cmdName = `fake-bypath-cli-${process.pid}-${Date.now()}`;
+    const fakeBinA = join(localBinA, cmdName);
+    writeFileSync(fakeBinA, '#!/bin/sh\necho ok\n', { mode: 0o755 });
+
+    const originalHome = process.env.HOME;
+    try {
+      process.env.HOME = tempRootA;
+      assert.equal(resolveCliCommand(cmdName), fakeBinA, 'first resolve caches key=cmdName value=fakeBinA');
+
+      // Switch HOME so re-probe would return null. Binary at tempRootA stays,
+      // so existsSync(fakeBinA) on cache hit returns TRUE → cached value still
+      // valid from the cache's POV. Only an actual cache delete drops it.
+      process.env.HOME = tempRootB;
+
+      // cli-spawn ENOENT site calls invalidateCliCommand(options.command) where
+      // options.command is the resolved absolute path (cli-resolve cache value),
+      // not the bare command name (cache key). Buggy invalidate-by-key-only would
+      // silently no-op here, leaving cache stale.
+      invalidateCliCommand(fakeBinA);
+
+      assert.equal(
+        resolveCliCommand(cmdName),
+        null,
+        'after invalidate-by-path, cache is dropped → re-probes in tempRootB → null',
+      );
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      rmSync(tempRootA, { recursive: true, force: true });
+      rmSync(tempRootB, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'resolveCliCommand re-resolves after invalidateCliCommand even when cache was valid (AC-D1 explicit signal)',
+  { skip: process.platform === 'win32' && 'Unix-only fixture (HOME fallback)' },
+  () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'cli-resolve-explicit-invalidate-'));
+    const oldBin = join(tempRoot, '.local', 'bin');
+    const newBin = join(tempRoot, '.claude', 'bin');
+    mkdirSync(oldBin, { recursive: true });
+    mkdirSync(newBin, { recursive: true });
+
+    const cmdName = `fake-rebuild-cli-${process.pid}-${Date.now()}`;
+    const oldPath = join(oldBin, cmdName);
+    const newPath = join(newBin, cmdName);
+    writeFileSync(oldPath, '#!/bin/sh\necho v1\n', { mode: 0o755 });
+
+    const originalHome = process.env.HOME;
+    try {
+      process.env.HOME = tempRoot;
+      assert.equal(resolveCliCommand(cmdName), oldPath, 'first resolve picks .local/bin');
+
+      // Rebuild moves binary to a different probe directory (simulates an
+      // installer migration). Without explicit invalidate, cache still serves
+      // the old path even though .claude/bin would be the new truth.
+      rmSync(oldPath);
+      writeFileSync(newPath, '#!/bin/sh\necho v2\n', { mode: 0o755 });
+
+      invalidateCliCommand(cmdName);
+      assert.equal(resolveCliCommand(cmdName), newPath, 'after invalidate, fallback search picks .claude/bin');
     } finally {
       if (originalHome === undefined) delete process.env.HOME;
       else process.env.HOME = originalHome;

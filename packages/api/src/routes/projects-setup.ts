@@ -25,6 +25,8 @@ const SAFE_URL_PATTERN = /^(https:\/\/|git@)/;
 
 /** Clone timeout in ms */
 const CLONE_TIMEOUT_MS = 120_000;
+/** Remote existence probe timeout in ms */
+const CLONE_PROBE_TIMEOUT_MS = 15_000;
 
 interface CloneResult {
   ok: boolean;
@@ -72,6 +74,33 @@ async function gitClone(url: string, targetPath: string): Promise<CloneResult> {
       },
     );
     // Extra safety: kill on abort
+    ac.signal.addEventListener('abort', () => {
+      child.kill('SIGTERM');
+    });
+  });
+}
+
+async function gitProbeRemote(url: string): Promise<CloneResult> {
+  return new Promise((resolve) => {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), CLONE_PROBE_TIMEOUT_MS);
+    const child = execFile(
+      'git',
+      ['ls-remote', '--heads', url, 'HEAD'],
+      {
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+        signal: ac.signal,
+        timeout: CLONE_PROBE_TIMEOUT_MS,
+      },
+      (err, _stdout, stderr) => {
+        clearTimeout(timer);
+        if (!err) return resolve({ ok: true });
+        const exitCode = (err as NodeJS.ErrnoException & { code?: number | string }).code;
+        const numericExit = typeof exitCode === 'number' ? exitCode : null;
+        const killed = (err as { killed?: boolean }).killed ?? false;
+        resolve(classifyGitError(numericExit, stderr, killed));
+      },
+    );
     ac.signal.addEventListener('abort', () => {
       child.kill('SIGTERM');
     });
@@ -154,6 +183,11 @@ export const projectSetupRoute: FastifyPluginAsync<ProjectSetupRouteOptions> = a
           errorKind: 'not_empty',
           error: 'Directory is not empty. Clone requires an empty directory.',
         };
+      }
+      const probe = await gitProbeRemote(gitCloneUrl);
+      if (!probe.ok) {
+        reply.status(502);
+        return { ok: false, errorKind: probe.errorKind, error: probe.error };
       }
       const result = await gitClone(gitCloneUrl, validated);
       if (!result.ok) {

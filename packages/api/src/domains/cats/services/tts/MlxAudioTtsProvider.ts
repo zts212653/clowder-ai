@@ -17,6 +17,44 @@ export interface MlxAudioTtsProviderOptions {
   readonly timeoutMs?: number;
 }
 
+/**
+ * Calculate dynamic synthesis timeout from text length.
+ *
+ * Empirical: Qwen3-TTS Base ~19 tokens/s clone-mode (observed 2026-04-27);
+ * each Chinese char ≈ 3 audio tokens. Clone-mode warmup absorbs refAudio
+ * loading + model swap (~60 s); non-clone just needs a small network buffer
+ * (~5 s) since the model stays warm.
+ *
+ * Two-axis guard:
+ * - **floor**: caller's `baseTimeoutMs` is always honored — even above the
+ *   hard cap — so callers tuning for slow / cold-start hosts get exactly
+ *   what they asked for. There is no separate "clone floor"; the 60 s clone
+ *   warmup that's already added to the dynamic estimate provides the minimum.
+ * - **dynamic**: generation_time + warmup, scales linearly with text length.
+ *   Bounded above by `TTS_TIMEOUT_HARD_CAP_MS` (600 s, 10 min) to prevent a
+ *   runaway estimate compounding with VoiceBlockSynthesizer's retry into
+ *   >20 min lockup when caller relies on default timeoutMs.
+ *
+ * Result = `max(min(dynamic, hard_cap), caller_baseTimeoutMs)`.
+ *
+ * @internal Exported for tests; do not depend on this from other modules.
+ */
+export const TTS_TIMEOUT_HARD_CAP_MS = 600_000;
+const TTS_TOKENS_PER_CHAR = 3;
+const TTS_CLONE_TPS = 15;
+const TTS_NON_CLONE_TPS = 25;
+const TTS_CLONE_WARMUP_MS = 60_000;
+const TTS_NON_CLONE_WARMUP_MS = 5_000;
+
+export function calculateTimeout(text: string, hasCloneParams: boolean, baseTimeoutMs: number): number {
+  const tokensPerSec = hasCloneParams ? TTS_CLONE_TPS : TTS_NON_CLONE_TPS;
+  const warmupMs = hasCloneParams ? TTS_CLONE_WARMUP_MS : TTS_NON_CLONE_WARMUP_MS;
+  const tokensEst = text.length * TTS_TOKENS_PER_CHAR;
+  const dynamicMs = Math.ceil((tokensEst / tokensPerSec) * 1000) + warmupMs;
+  const cappedDynamicMs = Math.min(dynamicMs, TTS_TIMEOUT_HARD_CAP_MS);
+  return Math.max(cappedDynamicMs, baseTimeoutMs);
+}
+
 export class MlxAudioTtsProvider implements ITtsProvider {
   readonly id = 'mlx-audio';
   readonly model: string;
@@ -46,9 +84,11 @@ export class MlxAudioTtsProvider implements ITtsProvider {
       ...(request.temperature != null ? { temperature: request.temperature } : {}),
     });
 
-    // Clone mode (ref_audio/instruct) is much slower — use longer timeout
+    // Dynamic timeout: prevents premature abort while server is still generating.
+    // Long voice messages (~400 chars) routinely exceeded the old 120 s clone-mode
+    // hard cap; calculateTimeout scales with text length.
     const hasCloneParams = !!(request.refAudio || request.instruct);
-    const effectiveTimeout = hasCloneParams ? Math.max(this.timeoutMs, 120_000) : this.timeoutMs;
+    const effectiveTimeout = calculateTimeout(request.text, hasCloneParams, this.timeoutMs);
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), effectiveTimeout);

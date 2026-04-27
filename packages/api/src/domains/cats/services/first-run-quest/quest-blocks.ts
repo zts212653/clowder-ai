@@ -33,7 +33,7 @@ export const QUEST_TASKS = [
   {
     id: 'FRQ-3',
     icon: '📝',
-    label: 'Hello Clowder',
+    label: 'Hello Cat Cafe',
     description: '创建一个欢迎页面，展示你的 AI 团队 (~3分钟)',
     difficulty: 1,
   },

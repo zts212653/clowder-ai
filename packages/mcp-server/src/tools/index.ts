@@ -102,6 +102,13 @@ export {
   sessionChainTools,
   sessionSearchInputSchema,
 } from './session-chain-tools.js';
+export {
+  getShellExecRefusalReason,
+  handleShellExec,
+  isReadOnlyShellCommand,
+  shellExecInputSchema,
+  shellTools,
+} from './shell-tools.js';
 export { signalStudyTools } from './signal-study-tools.js';
 export {
   handleSignalGetArticle,

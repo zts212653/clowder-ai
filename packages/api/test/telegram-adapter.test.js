@@ -15,6 +15,25 @@ function noopLog() {
   };
 }
 
+function recordingLog() {
+  const entries = { info: [], warn: [], error: [] };
+  const log = {
+    info: (...args) => entries.info.push(args),
+    warn: (...args) => entries.warn.push(args),
+    error: (...args) => entries.error.push(args),
+    debug: () => {},
+    trace: () => {},
+    fatal: () => {},
+    child: () => log,
+  };
+  return { entries, log };
+}
+
+async function flushPollingLoop() {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 describe('TelegramAdapter', () => {
   describe('parseUpdate()', () => {
     it('extracts text message from update', () => {
@@ -164,6 +183,76 @@ describe('TelegramAdapter', () => {
 
       assert.ok(sendCalls[0].text.includes('✅ Done'));
       assert.ok(sendCalls[0].text.includes('☐ Pending'));
+    });
+  });
+
+  describe('startPolling()', () => {
+    it('releases the Telegram session and retries after a 409 polling conflict', async () => {
+      const { entries, log } = recordingLog();
+      const adapter = new TelegramAdapter('test-token', log);
+      let startCalls = 0;
+      let closeCalls = 0;
+      const sleeps = [];
+
+      adapter._injectPollingControls({
+        start: async (options) => {
+          startCalls += 1;
+          if (startCalls === 1) {
+            throw { error_code: 409, description: 'Conflict: terminated by other getUpdates request' };
+          }
+          options?.onStart?.();
+        },
+        close: async () => {
+          closeCalls += 1;
+        },
+        sleep: async (ms) => {
+          sleeps.push(ms);
+        },
+        backoffMs: [5],
+        maxConflictRetries: 2,
+      });
+
+      adapter.startPolling(async () => {});
+      await flushPollingLoop();
+
+      assert.equal(startCalls, 2);
+      assert.equal(closeCalls, 1);
+      assert.deepEqual(sleeps, [5]);
+      assert.ok(
+        entries.warn.some((entry) => String(entry.at(-1)).includes('409 conflict')),
+        '409 conflict should be logged as a retryable warning',
+      );
+      assert.equal(entries.error.length, 0);
+    });
+
+    it('logs non-409 polling startup failures without retrying', async () => {
+      const { entries, log } = recordingLog();
+      const adapter = new TelegramAdapter('test-token', log);
+      let startCalls = 0;
+      let closeCalls = 0;
+
+      adapter._injectPollingControls({
+        start: async () => {
+          startCalls += 1;
+          throw { error_code: 404, description: 'Not Found' };
+        },
+        close: async () => {
+          closeCalls += 1;
+        },
+        sleep: async () => {
+          throw new Error('non-409 errors must not sleep');
+        },
+      });
+
+      adapter.startPolling(async () => {});
+      await flushPollingLoop();
+
+      assert.equal(startCalls, 1);
+      assert.equal(closeCalls, 0);
+      assert.ok(
+        entries.error.some((entry) => String(entry.at(-1)).includes('Long polling failed')),
+        'non-409 polling failures should be logged',
+      );
     });
   });
 

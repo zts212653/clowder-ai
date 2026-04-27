@@ -581,13 +581,64 @@ describe('F148 Phase C: formatAnchors', () => {
     ];
     const lines = formatAnchors(anchors, 500);
     assert.equal(lines.length, 2);
-    assert.ok(lines[0].startsWith('[Thread opener:'), `primacy should be labeled, got: ${lines[0].slice(0, 30)}`);
+    assert.ok(
+      lines[0].startsWith('[Thread opener @'),
+      `primacy should be labeled with speaker, got: ${lines[0].slice(0, 40)}`,
+    );
     assert.ok(lines[0].length < 600, 'should truncate long content');
     assert.ok(lines[1].includes('short msg'));
   });
 
   it('returns empty for no anchors', () => {
     assert.deepStrictEqual(formatAnchors([], 500), []);
+  });
+
+  it('prefers source.label over getSenderName for connector-origin anchors (cloud P2)', () => {
+    resetSeq();
+    const anchors = [
+      {
+        message: makeMsg({
+          catId: null,
+          content: 'CI build failed on commit abc123',
+          source: { label: 'GitHub CI' },
+        }),
+        score: 4,
+        signals: { structural: 2, positional: 0, relevance: 2 },
+        isPrimacy: false,
+      },
+    ];
+    const lines = formatAnchors(anchors, 500);
+    assert.equal(lines.length, 1);
+    assert.ok(
+      lines[0].includes('GitHub CI'),
+      `connector anchor should show source.label 'GitHub CI', got: ${lines[0]}`,
+    );
+    assert.ok(!lines[0].includes('铲屎官'), `connector anchor must NOT be misattributed as 铲屎官, got: ${lines[0]}`);
+  });
+
+  it('includes speaker name in anchor labels (Bug: missing speaker attribution)', () => {
+    resetSeq();
+    const anchors = [
+      {
+        message: makeMsg({ catId: null, content: 'What should we do about Redis config?' }),
+        score: 5,
+        signals: { structural: 0, positional: 5, relevance: 0 },
+        isPrimacy: true,
+      },
+      {
+        message: makeMsg({ catId: 'opus', content: 'I suggest we use cluster mode' }),
+        score: 3,
+        signals: { structural: 1, positional: 0, relevance: 2 },
+        isPrimacy: false,
+      },
+    ];
+    const lines = formatAnchors(anchors, 500);
+    assert.equal(lines.length, 2);
+    assert.ok(lines[0].includes('铲屎官'), `user anchor should show '铲屎官', got: ${lines[0]}`);
+    assert.ok(
+      lines[1].includes('opus') || lines[1].includes('宪宪') || lines[1].includes('布偶猫'),
+      `cat anchor should include speaker name, got: ${lines[1]}`,
+    );
   });
 });
 

@@ -6,13 +6,16 @@ import { describe, it } from 'node:test';
 import Fastify from 'fastify';
 
 describe('Callback Auth PreHandler (#476)', () => {
-  /** Minimal InvocationRegistry mock */
+  /** Minimal InvocationRegistry mock — returns VerifyResult (F174 Phase A). */
   function createMockRegistry(records = new Map()) {
     return {
-      verify(invocationId, callbackToken) {
+      async verify(invocationId, callbackToken) {
         const record = records.get(invocationId);
-        if (!record || record.callbackToken !== callbackToken) return null;
-        return record;
+        if (!record) return { ok: false, reason: 'unknown_invocation' };
+        if (record.callbackToken !== callbackToken) {
+          return { ok: false, reason: 'invalid_token' };
+        }
+        return { ok: true, record };
       },
     };
   }
@@ -65,14 +68,68 @@ describe('Callback Auth PreHandler (#476)', () => {
     await app.close();
   });
 
-  it('returns 401 when headers are missing and handler requires auth', async () => {
+  it('returns 401 with reason:unknown_invocation when handler requires auth but no preHandler decoration', async () => {
+    // Headers absent → preHandler is no-op → callbackAuth undefined → requireCallbackAuth 401s.
+    // The reason emitted by requireCallbackAuth is `unknown_invocation` (we don't actually
+    // know whether creds were never supplied or were invalid — `unknown` is the safe default).
     const registry = createMockRegistry();
     const app = await buildApp(registry);
 
     const res = await app.inject({ method: 'GET', url: '/test/require-auth' });
     assert.equal(res.statusCode, 401);
     const body = res.json();
-    assert.ok(body.error.includes('expired'));
+    assert.equal(body.error, 'callback_auth_failed');
+    assert.equal(body.reason, 'unknown_invocation');
+    assert.ok(typeof body.message === 'string');
+    assert.ok(typeof body.hint === 'string');
+    await app.close();
+  });
+
+  // F174 Phase A — Structured failure reasons surfaced from preHandler (KD-4)
+  it('returns 401 with reason:invalid_token when token mismatches', async () => {
+    const registry = createMockRegistry(new Map([['inv-001', VALID_RECORD]]));
+    const app = await buildApp(registry);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/test/require-auth',
+      headers: { 'x-invocation-id': 'inv-001', 'x-callback-token': 'wrong-token' },
+    });
+
+    assert.equal(res.statusCode, 401);
+    const body = res.json();
+    assert.equal(body.error, 'callback_auth_failed');
+    assert.equal(body.reason, 'invalid_token');
+    await app.close();
+  });
+
+  it('returns 401 with reason:unknown_invocation when invocationId not in registry', async () => {
+    const registry = createMockRegistry(); // empty
+    const app = await buildApp(registry);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/test/require-auth',
+      headers: { 'x-invocation-id': 'never-seen', 'x-callback-token': 'any' },
+    });
+
+    assert.equal(res.statusCode, 401);
+    assert.equal(res.json().reason, 'unknown_invocation');
+    await app.close();
+  });
+
+  it('returns 401 with reason:missing_creds when only one header present', async () => {
+    const registry = createMockRegistry(new Map([['inv-001', VALID_RECORD]]));
+    const app = await buildApp(registry);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/test/require-auth',
+      headers: { 'x-invocation-id': 'inv-001' }, // missing token
+    });
+
+    assert.equal(res.statusCode, 401);
+    assert.equal(res.json().reason, 'missing_creds');
     await app.close();
   });
 

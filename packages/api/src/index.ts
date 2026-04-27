@@ -3,6 +3,7 @@
  * 后端 API 入口
  */
 
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { type CatConfig, type CatId, CORE_COMMANDS, catRegistry } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
@@ -28,13 +29,21 @@ import { initRuntimeOverrides } from './config/session-strategy-overrides.js';
 import { assertStorageReady } from './config/storage-guard.js';
 import { createTaskProgressStore } from './domains/cats/services/agents/invocation/createTaskProgressStore.js';
 import { InvocationQueue } from './domains/cats/services/agents/invocation/InvocationQueue.js';
-import { InvocationRegistry } from './domains/cats/services/agents/invocation/InvocationRegistry.js';
+import {
+  InvocationRegistry,
+  selectInvocationBackendKind,
+} from './domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { InvocationTracker } from './domains/cats/services/agents/invocation/InvocationTracker.js';
 import type {
   InvocationRecordStoreLike,
   RouterLike,
 } from './domains/cats/services/agents/invocation/QueueProcessor.js';
 import { QueueProcessor } from './domains/cats/services/agents/invocation/QueueProcessor.js';
+import {
+  resolveAcpBootstrapArgs,
+  resolveAcpBootstrapCommand,
+  resolveAcpBootstrapCwd,
+} from './domains/cats/services/agents/providers/acp/acp-bootstrap-cwd.js';
 import { AntigravityAgentService } from './domains/cats/services/agents/providers/antigravity/AntigravityAgentService.js';
 import { AgentRegistry } from './domains/cats/services/agents/registry/AgentRegistry.js';
 import { AuthorizationManager } from './domains/cats/services/auth/AuthorizationManager.js';
@@ -99,17 +108,13 @@ import {
   CiCdRouter,
   ConflictRouter,
   ConnectorInvokeTrigger,
-  GhCliReviewContentFetcher,
-  MemoryProcessedEmailStore,
   ReviewFeedbackRouter,
-  ReviewRouter,
-  startGithubReviewWatcher,
-  stopGithubReviewWatcher,
 } from './infrastructure/email/index.js';
 import { runSchedulerReplyUserIdBackfill } from './infrastructure/scheduler/scheduler-reply-userid-backfill.js';
 import { securityHeadersPlugin } from './infrastructure/security-headers.js';
 import { sessionAuthPlugin, sessionRoute } from './infrastructure/session-auth.js';
 import { SocketManager } from './infrastructure/websocket/index.js';
+import { CallbackAuthSystemMessageNotifier } from './routes/callback-auth-system-message.js';
 import { configSecretsRoutes } from './routes/config-secrets.js';
 import { connectorWebhookRoutes } from './routes/connector-webhooks.js';
 import { gameRoutes } from './routes/games.js';
@@ -157,6 +162,7 @@ import {
   quotaRoutes,
   reflectRoutes,
   refluxRoutes,
+  registerCallbackAuthDebugRoute,
   registerCallbackDocsRoutes,
   resolutionRoutes,
   sessionChainRoutes,
@@ -191,6 +197,7 @@ import { threadExportRoutes } from './routes/thread-export.js';
 import { ApiInstanceLease, type ApiInstanceLeaseInvalidation } from './services/ApiInstanceLease.js';
 import { findMonorepoRoot } from './utils/monorepo-root.js';
 import { resolveUserId } from './utils/request-identity.js';
+import { getDefaultUploadDir } from './utils/upload-paths.js';
 
 const PORT = parseInt(process.env.API_SERVER_PORT ?? '3004', 10);
 const HOST = process.env.API_SERVER_HOST ?? '127.0.0.1';
@@ -357,10 +364,31 @@ async function main(): Promise<void> {
   });
 
   // Create shared service instances for MCP callback flow
-  const registry = new InvocationRegistry();
   const redisUrl = process.env.REDIS_URL;
   const redis = redisUrl ? createRedisClient({ url: redisUrl }) : undefined;
   redisClient = redis ?? null;
+
+  // F174 Phase B: select InvocationRegistry backend.
+  // - 'redis' (default when Redis available): API restart no longer drops tokens
+  // - 'memory' (fallback / opt-out): pre-Phase-B in-memory behavior
+  // - if Redis unavailable, force memory regardless of env (degraded mode)
+  // F174-B P2 fix (cloud Codex review #1363): reject unsupported env values
+  // via shared helper. Silent fallback masks typos (REDUS=...) -> user thinks
+  // Redis is active but actually in-memory (defeats Phase B). Throw on unknown.
+  const registryBackendKind = selectInvocationBackendKind(process.env.CAT_CAFE_INVOCATION_REGISTRY, !!redis);
+  const registry =
+    registryBackendKind === 'redis' && redis
+      ? new InvocationRegistry({
+          backend: new (
+            await import('./domains/cats/services/agents/invocation/RedisAuthInvocationBackend.js')
+          ).RedisAuthInvocationBackend(redis),
+        })
+      : new InvocationRegistry();
+  app.log.info(`[api] InvocationRegistry backend: ${registryBackendKind === 'redis' && redis ? 'redis' : 'memory'}`);
+
+  const { AgentKeyRegistry } = await import('./domains/cats/services/agents/agent-key/AgentKeyRegistry.js');
+  const agentKeyRegistry = new AgentKeyRegistry();
+  app.log.info('[api] AgentKeyRegistry initialized (memory backend)');
 
   // Fail-closed: refuse to start without Redis unless explicitly opted into memory mode.
   // Also verify Redis is actually reachable (PING), not just configured.
@@ -929,6 +957,8 @@ async function main(): Promise<void> {
             const { AcpProcessPool } = await import('./domains/cats/services/agents/providers/acp/AcpProcessPool.js');
             const { AcpClient } = await import('./domains/cats/services/agents/providers/acp/AcpClient.js');
             const acpProjectRoot = findMonorepoRoot();
+            const acpCommand = resolveAcpBootstrapCommand(acpProjectRoot, acpConfig.command);
+            const acpArgs = resolveAcpBootstrapArgs(acpProjectRoot, acpConfig.startupArgs);
             const poolKey = { projectPath: acpProjectRoot, providerProfile: id };
             // Shared pool per variant — reused across cats with same variant
             if (!acpPoolRegistry.has(id)) {
@@ -941,9 +971,9 @@ async function main(): Promise<void> {
                 acpConfig,
                 () =>
                   new AcpClient({
-                    command: acpConfig.command,
-                    args: acpConfig.startupArgs,
-                    cwd: acpProjectRoot,
+                    command: acpCommand,
+                    args: acpArgs,
+                    cwd: resolveAcpBootstrapCwd(acpProjectRoot, id),
                   }),
               );
               acpPoolRegistry.set(id, pool);
@@ -1226,6 +1256,7 @@ async function main(): Promise<void> {
     queueProcessor,
     ...(f101GameStore ? { gameStore: f101GameStore } : {}),
     ...(f101SharedDriver ? { autoPlayer: f101SharedDriver } : {}),
+    holdBallCancelDeps: { dynamicTaskStore, taskRunner: taskRunnerV2 },
   };
   await app.register(messagesRoutes, messagesOpts);
   await app.register(queueRoutes, {
@@ -1367,10 +1398,17 @@ async function main(): Promise<void> {
   const limbPairingStore = new LimbPairingStore();
   registerLimbNodeRoutes(app, { limbRegistry, pairingStore: limbPairingStore });
 
+  // F174 D2b-1 — single notifier instance shared between callback auth preHandler
+  // (posts in-context surface on 401) and the hide-similar debug endpoint
+  // (lets the user 24h-suppress a (reason, tool, catId) tuple).
+  const callbackAuthNotifier = new CallbackAuthSystemMessageNotifier({ messageStore, socketManager });
+
   const callbackOpts = {
     registry,
+    agentKeyRegistry,
     messageStore,
     socketManager,
+    callbackAuthNotifier,
     taskStore,
     backlogStore,
     threadStore,
@@ -1389,8 +1427,21 @@ async function main(): Promise<void> {
     limbRegistry,
     limbPairingStore,
     guideSessionStore,
+    holdBallDeps: {
+      registry,
+      taskRunner: taskRunnerV2,
+      templateRegistry,
+      dynamicTaskStore,
+      messageStore,
+      socketManager,
+      threadStore,
+    },
   } as Parameters<typeof callbacksRoutes>[1];
   await app.register(callbacksRoutes, callbackOpts);
+
+  // F174 Phase D1 — callback auth failure telemetry debug endpoint (AC-D3).
+  // D2b-1 adds POST /api/debug/callback-auth/hide-similar (24h opt-out) when notifier is wired.
+  registerCallbackAuthDebugRoute(app, { notifier: callbackAuthNotifier });
 
   // Authorization system — 猫猫动态权限 (Redis-backed when available)
   const authRuleStore = createAuthorizationRuleStore(redis);
@@ -1450,7 +1501,97 @@ async function main(): Promise<void> {
     });
   }
   await app.register(tasksRoutes, { taskStore, socketManager });
-  await app.register(communityIssueRoutes, { communityIssueStore, taskStore, socketManager });
+  const fetchIssuesForSync = async (repo: string) => {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const execFileAsync = promisify(execFile);
+    const { stdout } = await execFileAsync(
+      'gh',
+      [
+        'api',
+        `/repos/${repo}/issues`,
+        '--method',
+        'GET',
+        '--jq',
+        '.[] | select(.pull_request == null) | {number, title, state, labels: [.labels[].name], comments, user: .user.login, html_url}',
+        '--paginate',
+        '-f',
+        'state=all',
+        '-f',
+        'per_page=100',
+      ],
+      { timeout: 60_000 },
+    );
+    if (!stdout.trim()) return [];
+    return stdout
+      .trim()
+      .split('\n')
+      .map((line: string) => JSON.parse(line));
+  };
+  const fetchPrsForSync = async (repo: string) => {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const execFileAsync = promisify(execFile);
+    const { stdout } = await execFileAsync(
+      'gh',
+      [
+        'api',
+        `/repos/${repo}/pulls`,
+        '--method',
+        'GET',
+        '--jq',
+        '.[] | {number, title, state, merged_at: .merged_at, user: .user.login, head_sha: .head.sha, draft, labels: [.labels[].name], updated_at: .updated_at}',
+        '--paginate',
+        '-f',
+        'state=all',
+        '-f',
+        'per_page=100',
+      ],
+      { timeout: 60_000 },
+    );
+    if (!stdout.trim()) return [];
+    return stdout
+      .trim()
+      .split('\n')
+      .map((line: string) => JSON.parse(line));
+  };
+  const fetchPrReviewsForSync = async (_repo: string, prNumber: number) => {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const execFileAsync = promisify(execFile);
+    const { stdout } = await execFileAsync(
+      'gh',
+      [
+        'api',
+        '--paginate',
+        `/repos/${_repo}/pulls/${prNumber}/reviews`,
+        '--method',
+        'GET',
+        '--jq',
+        '.[] | {user: .user.login, state, commit_id}',
+      ],
+      { timeout: 30_000 },
+    );
+    if (!stdout.trim()) return [];
+    return stdout
+      .trim()
+      .split('\n')
+      .map((line: string) => JSON.parse(line));
+  };
+  const { InMemoryCommunityPrStore } = await import(
+    './domains/cats/services/stores/memory/InMemoryCommunityPrStore.js'
+  );
+  const communityPrStore = new InMemoryCommunityPrStore();
+  await app.register(communityIssueRoutes, {
+    communityIssueStore,
+    taskStore,
+    socketManager,
+    registry,
+    fetchIssues: fetchIssuesForSync,
+    communityPrStore,
+    fetchPrs: fetchPrsForSync,
+    fetchPrReviews: fetchPrReviewsForSync,
+  });
   await app.register(backlogRoutes, { backlogStore, threadStore, messageStore });
 
   // F076: External projects + Need Audit
@@ -1679,7 +1820,7 @@ async function main(): Promise<void> {
   });
 
   // Serve uploaded files (images)
-  const uploadDir = process.env.UPLOAD_DIR ?? './uploads';
+  const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
   await app.register(uploadsRoutes, { uploadDir });
 
   // F088: Serve downloaded connector media files
@@ -1719,20 +1860,6 @@ async function main(): Promise<void> {
 
   // F-BLOAT: Progressive disclosure docs endpoints (no auth, static content)
   await app.register(registerCallbackDocsRoutes);
-
-  // GitHub Review Watcher stores + routes (BACKLOG #81)
-  // Must register routes BEFORE app.listen()
-  const processedEmailStore = new MemoryProcessedEmailStore();
-  const reviewRouter = new ReviewRouter({
-    taskStore,
-    processedEmailStore,
-    threadStore,
-    messageStore,
-    socketManager,
-    log: app.log,
-    defaultUserId: 'default-user',
-    reviewContentFetcher: new GhCliReviewContentFetcher(app.log),
-  });
 
   // F088: Register connector webhook routes BEFORE listen (Fastify requires it)
   const connectorWebhookHandlers = new Map<string, import('./routes/connector-webhooks.js').ConnectorWebhookHandler>();
@@ -1840,6 +1967,14 @@ async function main(): Promise<void> {
     }
   }
 
+  // F145 P0: Kill orphan agent-browser headless Chrome processes from previous sessions.
+  try {
+    const { cleanOrphanAgentBrowserChrome } = await import('./utils/orphan-chrome-cleaner.js');
+    await cleanOrphanAgentBrowserChrome(app.log);
+  } catch (err) {
+    app.log.warn(`[api] Orphan Chrome cleanup failed (best-effort): ${String(err)}`);
+  }
+
   // F118 Hardening: Global session reaper — startup sweep + periodic scan.
   // Reconciles sessions stuck in 'sealing' state that the per-invoke lazy
   // reaper would never visit (e.g., threads with no subsequent invocations).
@@ -1886,6 +2021,7 @@ async function main(): Promise<void> {
         openai: join(root, '.codex', 'config.toml'),
         google: join(root, '.gemini', 'settings.json'),
         kimi: join(root, '.kimi', 'mcp.json'),
+        antigravity: join(homedir(), '.gemini', 'antigravity', 'mcp_config.json'),
       });
       app.log.info('[api] CLI configs regenerated at startup');
     }
@@ -1914,7 +2050,7 @@ async function main(): Promise<void> {
     }
   }
 
-  // Phase 3b: connector invoke trigger (auto-invoke cat after review email routing)
+  // F140 Phase 3b: connector invoke trigger (auto-invoke cat after review feedback delivery via polling)
   const frontendBaseUrl = resolveFrontendBaseUrl(process.env, app.log);
   const invokeTrigger = new ConnectorInvokeTrigger({
     router,
@@ -1935,8 +2071,9 @@ async function main(): Promise<void> {
     log: app.log,
   });
 
-  // F140: Shared feedback filter (Rule C) — used by BOTH email watcher and API polling
+  // F140: Feedback filter (Rule A self-authored only post-E.2 cutover)
   const { createGitHubFeedbackFilter } = await import('./infrastructure/email/github-feedback-filter.js');
+  const { createSetupNoiseFilter } = await import('./infrastructure/email/setup-noise-filter.js');
   let selfGitHubLogin: string | undefined;
   try {
     const { execFile } = await import('node:child_process');
@@ -1947,23 +2084,26 @@ async function main(): Promise<void> {
   } catch {
     app.log.warn('[api] F140: could not resolve GitHub login — self-filter disabled');
   }
-  const authoritativeLogins = (process.env.GITHUB_AUTHORITATIVE_REVIEW_LOGINS || 'chatgpt-codex-connector[bot]')
+  const feedbackFilter = createGitHubFeedbackFilter({ selfGitHubLogin });
+
+  // F140 Phase E.2 cutover: setup-noise bot allowlist env name切换
+  // GITHUB_SETUP_NOISE_BOT_LOGINS (new, post-E.2 semantics) takes precedence;
+  // GITHUB_AUTHORITATIVE_REVIEW_LOGINS (legacy E.1 借壳) falls back for
+  // backward compat — will be removed in a follow-up release.
+  const setupNoiseBotLogins = (
+    process.env.GITHUB_SETUP_NOISE_BOT_LOGINS ||
+    process.env.GITHUB_AUTHORITATIVE_REVIEW_LOGINS ||
+    'chatgpt-codex-connector[bot]'
+  )
     .split(',')
     .map((s: string) => s.trim())
     .filter(Boolean);
-  const feedbackFilter = createGitHubFeedbackFilter({
-    selfGitHubLogin,
-    authoritativeReviewLogins: authoritativeLogins,
-  });
-  app.log.info(`[api] F140: authoritative review logins=${authoritativeLogins.join(', ')}`);
+  app.log.info(`[api] F140: setup-noise bot logins=${setupNoiseBotLogins.join(', ')}`);
 
-  // Start email watcher AFTER listen (non-blocking, best-effort)
-  await startGithubReviewWatcher({
-    log: app.log,
-    reviewRouter,
-    invokeTrigger,
-    feedbackFilter,
-  });
+  const setupNoiseFilter = createSetupNoiseFilter(setupNoiseBotLogins);
+
+  // F140 Phase E.3 cleanup (2026-04-25): email/IMAP watcher source files removed.
+  // Polling (ReviewFeedbackTaskSpec) is the sole truth source for review feedback.
 
   // F139 Phase 4b: late-bind invokeTrigger so templates can wake cats
   taskRunnerV2.setInvokeTrigger(invokeTrigger);
@@ -2028,7 +2168,7 @@ async function main(): Promise<void> {
     );
 
     // F140: review-feedback with ReviewFeedbackRouter (KD-11 replaces review-comments)
-    // feedbackFilter already created above (shared with email watcher — Rule C)
+    // feedbackFilter created above — Rule A only post-E.2 cutover (self-authored skip)
 
     const fetchPaginated = async (endpoint: string) => {
       const { execFile } = await import('node:child_process');
@@ -2087,9 +2227,12 @@ async function main(): Promise<void> {
         reviewFeedbackRouter,
         invokeTrigger,
         log: app.log,
-        // Unified feedback filter (Rule A: self-authored, Rule B: authoritative review bot)
+        // F140 Phase E.2 cutover: Rule A only (self-authored skip). Authoritative bot
+        // review feedback is now delivered through this polling channel — Rule B dropped.
         isEchoComment: (c) => feedbackFilter.shouldSkipComment(c),
         isEchoReview: (r) => feedbackFilter.shouldSkipReview(r),
+        // F140 Phase E.1: bot setup-only conversation noise (polling-side)
+        isNoiseComment: setupNoiseFilter,
       }),
     );
     app.log.info('[api] F139/F140: cicd-check, conflict-check, review-feedback specs registered');
@@ -2338,13 +2481,6 @@ async function main(): Promise<void> {
         } catch (err) {
           app.log.error(`[api] Redis BGSAVE failed: ${String(err)}`);
         }
-      }
-
-      // Stop GitHub review watcher
-      try {
-        await stopGithubReviewWatcher();
-      } catch (err) {
-        app.log.error(`[api] GithubReviewWatcher stop failed: ${String(err)}`);
       }
 
       taskRunnerV2.stop();

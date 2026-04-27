@@ -109,7 +109,7 @@ describe('Mention Ack (#77)', () => {
     const _m2 = appendMention('thread-A', '@opus task 2', 2000);
     const m3 = appendMention('thread-A', '@opus task 3', 3000);
 
-    const sess1 = registry.create('user-1', 'opus', 'thread-A');
+    const sess1 = await registry.create('user-1', 'opus', 'thread-A');
     const pending1 = await getPending(app, sess1.invocationId, sess1.callbackToken);
     assert.equal(pending1.mentions.length, 3);
     assert.equal(pending1.mentions[0].id, m1.id);
@@ -120,7 +120,7 @@ describe('Mention Ack (#77)', () => {
     assert.equal(ack1.body.status, 'ok');
 
     // Session #2: should see 0 pending
-    const sess2 = registry.create('user-1', 'opus', 'thread-A');
+    const sess2 = await registry.create('user-1', 'opus', 'thread-A');
     const pending2 = await getPending(app, sess2.invocationId, sess2.callbackToken);
     assert.equal(pending2.mentions.length, 0);
 
@@ -138,14 +138,14 @@ describe('Mention Ack (#77)', () => {
     appendMention('thread-A', '@opus task 1', 1000);
     appendMention('thread-A', '@opus task 2', 2000);
 
-    const sess1 = registry.create('user-1', 'opus', 'thread-A');
+    const sess1 = await registry.create('user-1', 'opus', 'thread-A');
     const pending1 = await getPending(app, sess1.invocationId, sess1.callbackToken);
     assert.equal(pending1.mentions.length, 2);
 
     // Session #1 crashes — no ack
 
     // Session #2: should see SAME mentions (not lost)
-    const sess2 = registry.create('user-1', 'opus', 'thread-A');
+    const sess2 = await registry.create('user-1', 'opus', 'thread-A');
     const pending2 = await getPending(app, sess2.invocationId, sess2.callbackToken);
     assert.equal(pending2.mentions.length, 2);
     assert.equal(pending2.mentions[0].id, pending1.mentions[0].id);
@@ -165,7 +165,7 @@ describe('Mention Ack (#77)', () => {
     assert.ok(m1.id < m2.id);
     assert.ok(m2.id < m3.id);
 
-    const sess = registry.create('user-1', 'opus', 'thread-A');
+    const sess = await registry.create('user-1', 'opus', 'thread-A');
     const pending = await getPending(app, sess.invocationId, sess.callbackToken);
     assert.equal(pending.mentions.length, 3);
 
@@ -199,7 +199,7 @@ describe('Mention Ack (#77)', () => {
     const mOtherThread = appendMention('thread-B', '@opus other-thread', 3000);
 
     // Nonexistent messageId
-    const sess = registry.create('user-1', 'opus', 'thread-A');
+    const sess = await registry.create('user-1', 'opus', 'thread-A');
 
     // 400: nonexistent
     const r1 = await ackMentions(app, sess.invocationId, sess.callbackToken, 'nonexistent-id');
@@ -233,14 +233,14 @@ describe('Mention Ack (#77)', () => {
 
     // First, create a message and ack it
     const m0 = appendMention('thread-A', '@opus old msg', 1000);
-    const sess1 = registry.create('user-1', 'opus', 'thread-A');
+    const sess1 = await registry.create('user-1', 'opus', 'thread-A');
     await ackMentions(app, sess1.invocationId, sess1.callbackToken, m0.id);
 
     // Now m0's ID is the cursor. Even if m0 is later deleted/expired,
     // the cursor still has its ID. New messages after it are still visible.
     const m1 = appendMention('thread-A', '@opus new msg', 2000);
 
-    const sess2 = registry.create('user-1', 'opus', 'thread-A');
+    const sess2 = await registry.create('user-1', 'opus', 'thread-A');
     const pending = await getPending(app, sess2.invocationId, sess2.callbackToken);
 
     // In-memory: string comparison m1.id > m0.id → m1 is returned
@@ -258,7 +258,7 @@ describe('Mention Ack (#77)', () => {
       msgs.push(appendMention('thread-A', `@opus task ${i}`, 1000 + i));
     }
 
-    const sess = registry.create('user-1', 'opus', 'thread-A');
+    const sess = await registry.create('user-1', 'opus', 'thread-A');
 
     // get_pending_mentions returns first 20 (limit=20)
     const pending = await getPending(app, sess.invocationId, sess.callbackToken);
@@ -284,7 +284,7 @@ describe('Mention Ack (#77)', () => {
       msgs.push(appendMention('thread-A', `@opus task ${i}`, 1000 + i));
     }
 
-    const sess = registry.create('user-1', 'opus', 'thread-A');
+    const sess = await registry.create('user-1', 'opus', 'thread-A');
 
     // Round 1: get oldest 20
     const round1 = await getPending(app, sess.invocationId, sess.callbackToken);
@@ -322,7 +322,7 @@ describe('Mention Ack (#77)', () => {
     const m2 = appendMention('thread-A', '@opus before seal 2', 2000);
 
     // Session #1 processes and acks
-    const sess1 = registry.create('user-1', 'opus', 'thread-A');
+    const sess1 = await registry.create('user-1', 'opus', 'thread-A');
     const pending1 = await getPending(app, sess1.invocationId, sess1.callbackToken);
     assert.equal(pending1.mentions.length, 2);
     await ackMentions(app, sess1.invocationId, sess1.callbackToken, m2.id);
@@ -333,7 +333,7 @@ describe('Mention Ack (#77)', () => {
     const m3 = appendMention('thread-A', '@opus after seal', 3000);
 
     // Session #2 (same user, same thread) — inherits cursor
-    const sess2 = registry.create('user-1', 'opus', 'thread-A');
+    const sess2 = await registry.create('user-1', 'opus', 'thread-A');
     const pending2 = await getPending(app, sess2.invocationId, sess2.callbackToken);
     assert.equal(pending2.mentions.length, 1);
     assert.equal(pending2.mentions[0].id, m3.id);
@@ -349,7 +349,7 @@ describe('Mention Ack (#77)', () => {
     const app = await createApp();
 
     const m1 = appendMention('thread-A', '@opus cleanup test', 1000);
-    const sess = registry.create('user-1', 'opus', 'thread-A');
+    const sess = await registry.create('user-1', 'opus', 'thread-A');
     await ackMentions(app, sess.invocationId, sess.callbackToken, m1.id);
 
     // Verify cursor exists
@@ -372,7 +372,7 @@ describe('Mention Ack (#77)', () => {
     appendMention('thread-A', '@opus msg 1', 1000);
     appendMention('thread-A', '@opus msg 2', 2000);
 
-    const sess = registry.create('user-1', 'opus', 'thread-A');
+    const sess = await registry.create('user-1', 'opus', 'thread-A');
     const pending = await getPending(app, sess.invocationId, sess.callbackToken);
     assert.equal(pending.mentions.length, 2);
     // Ascending order (oldest first)
@@ -388,7 +388,7 @@ describe('Mention Ack (#77)', () => {
     const m1 = appendMention('thread-A', '@opus acked msg 1', 1000);
     const m2 = appendMention('thread-A', '@opus acked msg 2', 2000);
 
-    const sess = registry.create('user-1', 'opus', 'thread-A');
+    const sess = await registry.create('user-1', 'opus', 'thread-A');
     await ackMentions(app, sess.invocationId, sess.callbackToken, m2.id);
 
     const pendingDefault = await getPending(app, sess.invocationId, sess.callbackToken);
@@ -410,7 +410,7 @@ describe('Mention Ack (#77)', () => {
       mentions.push(appendMention('thread-A', `@opus msg ${i}`, i * 1000));
     }
 
-    const sess = registry.create('user-1', 'opus', 'thread-A');
+    const sess = await registry.create('user-1', 'opus', 'thread-A');
     await ackMentions(app, sess.invocationId, sess.callbackToken, mentions[9].id);
 
     const pendingIncludeAcked = await getPending(app, sess.invocationId, sess.callbackToken, { includeAcked: '1' });
@@ -430,7 +430,7 @@ describe('Mention Ack (#77)', () => {
 
   test('ack-mentions returns 401 for invalid credentials', async () => {
     const app = await createApp();
-    const { invocationId } = registry.create('user-1', 'opus', 'thread-A');
+    const { invocationId } = await registry.create('user-1', 'opus', 'thread-A');
 
     const res = await app.inject({
       method: 'POST',
@@ -464,7 +464,7 @@ describe('Mention Ack (#77)', () => {
 
     const owner = registerWorklist(threadId, ['codex'], 5);
     try {
-      const sender = registry.create('user-1', 'codex', threadId);
+      const sender = await registry.create('user-1', 'codex', threadId);
       const r1 = await postMessage(app, sender.invocationId, sender.callbackToken, '@opus review please take a look');
       assert.equal(r1.statusCode, 200);
       assert.equal(r1.body.status, 'ok');
@@ -479,7 +479,7 @@ describe('Mention Ack (#77)', () => {
       const cursor = await deliveryCursorStore.getMentionAckCursor('user-1', 'opus', threadId);
       assert.equal(cursor, triggerMessage.id);
 
-      const opus = registry.create('user-1', 'opus', threadId);
+      const opus = await registry.create('user-1', 'opus', threadId);
       const pending = await getPending(app, opus.invocationId, opus.callbackToken);
       assert.equal(pending.mentions.length, 0);
     } finally {
@@ -505,7 +505,7 @@ describe('Mention Ack (#77)', () => {
 
     const owner = registerWorklist(threadId, ['codex'], 5);
     try {
-      const sender = registry.create('user-1', 'codex', threadId);
+      const sender = await registry.create('user-1', 'codex', threadId);
 
       const r1 = await postMessage(app, sender.invocationId, sender.callbackToken, '@opus review');
       assert.equal(r1.statusCode, 200);
@@ -518,7 +518,7 @@ describe('Mention Ack (#77)', () => {
       const cursor1 = await deliveryCursorStore.getMentionAckCursor('user-1', 'opus', threadId);
       assert.equal(cursor1, trigger1.id);
 
-      const opus1 = registry.create('user-1', 'opus', threadId);
+      const opus1 = await registry.create('user-1', 'opus', threadId);
       const pending1 = await getPending(app, opus1.invocationId, opus1.callbackToken);
       assert.equal(pending1.mentions.length, 0);
 
@@ -544,7 +544,7 @@ describe('Mention Ack (#77)', () => {
       assert.ok(cursor2 >= cursor1);
       assert.ok(cursor2 >= trigger1.id);
 
-      const opus2 = registry.create('user-1', 'opus', threadId);
+      const opus2 = await registry.create('user-1', 'opus', threadId);
       const pending2 = await getPending(app, opus2.invocationId, opus2.callbackToken);
       assert.equal(pending2.mentions.length, 0);
     } finally {

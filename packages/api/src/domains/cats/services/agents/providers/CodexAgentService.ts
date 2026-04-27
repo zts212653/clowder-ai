@@ -33,6 +33,7 @@ import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata, 
 import type { AuditLogSink, RawArchiveSink } from '../providers/codex-audit-hooks.js';
 import { extractCommandExecutionLifecycle, sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
 import { type CodexStreamState, transformCodexEvent } from '../providers/codex-event-transform.js';
+import { scanAndPublishCodexImages } from '../providers/codex-image-scanner.js';
 import {
   type CodexSessionContextSnapshotResolver,
   createCodexSessionContextSnapshotResolver,
@@ -635,6 +636,28 @@ export class CodexAgentService implements AgentService {
             },
             '[codex] failed to resolve session context snapshot',
           );
+        }
+      }
+
+      // F172 Phase B: Scan for generated images and publish to /uploads/
+      if (metadata.sessionId) {
+        try {
+          const published = await scanAndPublishCodexImages({
+            codexSessionId: metadata.sessionId,
+            uploadDir: options?.uploadDir,
+            codexHome: rawEnv.HOME ? join(rawEnv.HOME, '.codex') : undefined,
+          });
+          for (const img of published) {
+            yield {
+              type: 'system_info' as const,
+              catId: this.catId,
+              content: JSON.stringify({ type: 'rich_block', block: img.richBlock, provenance: img.provenance }),
+              metadata,
+              timestamp: Date.now(),
+            };
+          }
+        } catch (err) {
+          log.warn({ sessionId: metadata.sessionId, err }, '[F172] codex image scan failed');
         }
       }
 

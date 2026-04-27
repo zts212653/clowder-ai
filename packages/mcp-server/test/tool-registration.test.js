@@ -32,6 +32,7 @@ const EXPECTED_TOOLS = [
   // Guide tools
   'cat_cafe_update_guide_state',
   'cat_cafe_get_available_guides',
+  'cat_cafe_guide_resolve',
   'cat_cafe_start_guide',
   'cat_cafe_guide_control',
   // Workflow SOP tools (F073 P1)
@@ -85,6 +86,9 @@ const EXPECTED_TOOLS = [
   'cat_cafe_preview_scheduled_task',
   'cat_cafe_register_scheduled_task',
   'cat_cafe_remove_scheduled_task',
+  'cat_cafe_hold_ball',
+  // F061 Bug-F workaround: MCP shell exec for read-only commands
+  'cat_cafe_shell_exec',
 ];
 
 const EXPECTED_COLLAB_TOOLS = [
@@ -107,6 +111,7 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_register_pr_tracking',
   'cat_cafe_update_guide_state',
   'cat_cafe_get_available_guides',
+  'cat_cafe_guide_resolve',
   'cat_cafe_start_guide',
   'cat_cafe_guide_control',
   'cat_cafe_update_workflow',
@@ -120,6 +125,9 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_preview_scheduled_task',
   'cat_cafe_register_scheduled_task',
   'cat_cafe_remove_scheduled_task',
+  'cat_cafe_hold_ball',
+  // F061 Bug-F workaround: MCP shell exec for read-only commands
+  'cat_cafe_shell_exec',
 ];
 
 const EXPECTED_MEMORY_TOOLS = [
@@ -199,7 +207,7 @@ describe('MCP Server Tool Registration', () => {
     assert.ok(checkTool, 'check_permission_status tool should exist');
   });
 
-  test('post_message schema must NOT expose threadId (#316 regression guard)', async () => {
+  test('post_message schema exposes threadId as optional (F178 agent-key auth)', async () => {
     const { createServer } = await import('../dist/index.js');
     const server = createServer();
 
@@ -207,8 +215,12 @@ describe('MCP Server Tool Registration', () => {
     assert.ok(postTool, 'post_message tool should exist');
     const shapeKeys = Object.keys(postTool.inputSchema.shape);
     assert.ok(
-      !shapeKeys.includes('threadId'),
-      'post_message must NOT expose threadId — use cross_post_message for cross-thread posting (#316)',
+      shapeKeys.includes('threadId'),
+      'post_message must expose threadId for agent-key auth (F178 — no default invocation thread)',
+    );
+    assert.ok(
+      postTool.inputSchema._def.shape().threadId.isOptional(),
+      'post_message threadId must be optional (backward-compatible for invocation auth)',
     );
   });
 
@@ -296,6 +308,7 @@ const KNOWN_WRITE_TOOLS = [
   'cat_cafe_submit_game_action',
   'cat_cafe_register_scheduled_task',
   'cat_cafe_remove_scheduled_task',
+  'cat_cafe_hold_ball', // callbackPost → writes scheduled task
   'cat_cafe_feat_index', // requires callback credentials unavailable in readonly
   'signal_mark_read',
   'signal_summarize',
@@ -321,6 +334,8 @@ const EXPECTED_READONLY_TOOLS = [
   'signal_get_article',
   'signal_search',
   'signal_list_studies',
+  // F061 Bug-F workaround: read-only shell exec whitelist enforced at handler level
+  'cat_cafe_shell_exec',
 ];
 
 describe('F061 READONLY_ALLOWED_TOOLS whitelist', () => {

@@ -3,6 +3,10 @@ import { useCatData } from '@/hooks/useCatData';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import type { ThreadState } from '@/stores/chat-types';
 import { API_URL } from '@/utils/api-client';
+// F174 D2b-2 (rev): per-cat callback-auth dot was rejected (铲屎官 alpha 反馈
+// "莫名其妙的颜色" — 16px participant avatars lacked any affordance). Status now
+// surfaces system-level via <CallbackAuthHealthIndicator /> in ChatContainerHeader,
+// and per-cat (with "AFFECTED CATS" affordance) inside HubCallbackAuthPanel.
 import { CatAvatar } from '../CatAvatar';
 import { HubIcon } from '../icons/HubIcon';
 import { PawIcon } from '../icons/PawIcon';
@@ -254,7 +258,7 @@ export function ThreadItem({
             participants.map((catId) => <CatAvatar key={catId} catId={catId} size={16} />)
           ) : id !== 'default' ? (
             <>
-              <PawIcon className="w-3 h-3 text-cafe-muted" />
+              <PawIcon className="text-xs" />
               <span className="text-[10px] text-cafe-muted">还没有猫猫加入</span>
             </>
           ) : null}

@@ -88,7 +88,7 @@ export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoo
     <div className="flex flex-col h-screen h-dvh">
       {/* Toolbar — matches single-mode header style */}
       <header className="border-b border-cocreator-light px-5 py-3 bg-cocreator-bg flex items-center gap-2 flex-shrink-0">
-        <PawIcon className="w-6 h-6 text-cocreator-primary" />
+        <PawIcon className="text-2xl" />
         <div className="flex-1 min-w-0">
           <h1 className="text-lg font-bold text-cafe-black">Clowder AI</h1>
           <p className="text-xs text-cafe-secondary">分屏模式</p>

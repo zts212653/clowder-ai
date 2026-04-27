@@ -14,12 +14,11 @@ import { useGuideStore } from '@/stores/guideStore';
 import { useToastStore } from '@/stores/toastStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
 import { getUserId } from '@/utils/userId';
+// F173 Phase E: isInvocationReplaced 检查已下沉到 useAgentMessages.handleAgentMessage
+// dispatch entry，useSocket 不再做 active path drop guard。
 import { reconnectGame } from './useGameReconnect';
-import {
-  type BackgroundAgentMessage,
-  clearBackgroundStreamRefForActiveEvent,
-  handleBackgroundAgentMessage,
-} from './useSocket-background';
+// F173 Phase E (KD-1): bg refs + background message processing moved into
+// useAgentMessages — useSocket no longer dispatches active vs background.
 import { loadJoinedRoomsFromSession, saveJoinedRoomsToSession } from './useSocket-persistence';
 import { handleVoiceChunk, handleVoiceStreamEnd, handleVoiceStreamStart } from './useVoiceStream';
 
@@ -138,13 +137,40 @@ const STALE_RECENT_ENGAGEMENT_MS = 5 * 60_000;
 let reconcileGeneration = 0;
 /** Per-thread last-probe timestamp used by the watchdog cooldown. */
 const staleProbeCooldown = new Map<string, number>();
+/** Per-thread epoch used to invalidate stale live queue-processing hydrates. */
+const liveQueueHydrateEpoch = new Map<string, number>();
+
+function bumpLiveQueueHydrateEpoch(threadId: string): number {
+  const next = (liveQueueHydrateEpoch.get(threadId) ?? 0) + 1;
+  liveQueueHydrateEpoch.set(threadId, next);
+  return next;
+}
+
+function getLiveQueueHydrateEpoch(threadId: string): number {
+  return liveQueueHydrateEpoch.get(threadId) ?? 0;
+}
+
+function hasStaleActiveThreadPresentation(state: ReturnType<typeof useChatStore.getState>, threadId: string): boolean {
+  if (state.currentThreadId !== threadId) return false;
+  if (state.messages.some((msg) => msg.type === 'assistant' && msg.isStreaming)) return true;
+  if (state.intentMode === 'execute' && state.targetCats.length > 0) return true;
+  return Object.values(state.catStatuses ?? {}).some((status) =>
+    ['spawning', 'pending', 'streaming', 'alive_but_silent', 'suspected_stall'].includes(status),
+  );
+}
 
 /**
  * Query /queue for one thread and reconcile local state against server truth.
  * Shared by reconnect reconciliation and the stale-watchdog probe.
  * `shouldAbort` lets the caller bail out when a newer reconciliation supersedes it.
+ *
+ * Exported for tests (F173 PR-C Task 10 — fixture asserts mirror invariant).
  */
-async function reconcileThreadWithServer(threadId: string, shouldAbort: () => boolean, source: string): Promise<void> {
+export async function reconcileThreadWithServer(
+  threadId: string,
+  shouldAbort: () => boolean,
+  source: string,
+): Promise<void> {
   try {
     const res = await apiFetch(`/api/threads/${threadId}/queue`);
     if (shouldAbort()) return;
@@ -161,17 +187,15 @@ async function reconcileThreadWithServer(threadId: string, shouldAbort: () => bo
       // Server still processing — re-hydrate local slots to match server truth.
       // Stale hydrated/mismatched invocationIds get replaced so done(isFinal)
       // cleanup works correctly when the response finishes.
+      // F173 PR-C Task 10: thread-scoped writers throughout — flat is mirror, no
+      // active vs background branch needed.
       const serverActiveCats = serverSlots.map((s) => s.catId);
       store.clearThreadActiveInvocation(threadId);
       store.replaceThreadTargetCats(threadId, serverActiveCats);
       for (const slot of serverSlots) {
         store.updateThreadCatStatus(threadId, slot.catId, 'streaming');
         const syntheticId = `hydrated-${threadId}-${slot.catId}`;
-        if (isActiveThread) {
-          store.addActiveInvocation(syntheticId, slot.catId, 'execute', slot.startedAt);
-        } else {
-          store.addThreadActiveInvocation(threadId, syntheticId, slot.catId, 'execute', slot.startedAt);
-        }
+        store.addThreadActiveInvocation(threadId, syntheticId, slot.catId, 'execute', slot.startedAt);
       }
       console.log(`[ws] ${source} reconciliation: re-hydrated active slots from server`, {
         threadId,
@@ -180,36 +204,35 @@ async function reconcileThreadWithServer(threadId: string, shouldAbort: () => bo
       return;
     }
 
-    if (isActiveThread && store.hasActiveInvocation) {
-      // Reconciliation is stale-state repair, not a real completion event.
-      // Use the non-stamping clear so idle-thread recency is not artificially bumped.
-      store.clearThreadActiveInvocation(threadId);
-      store.setLoading(false);
-      store.setIntentMode(null);
-      store.clearCatStatuses();
-      for (const msg of store.messages) {
-        if (msg.type === 'assistant' && msg.isStreaming) {
-          store.setStreaming(msg.id, false);
-        }
-      }
-      // Server finished but done(isFinal) was lost → fetch missed messages so user doesn't need F5
-      store.requestStreamCatchUp(threadId);
-      console.log(`[ws] ${source} reconciliation: cleared stale active-thread invocation state`, { threadId });
-    } else if (!isActiveThread) {
-      const ts = store.getThreadState(threadId);
-      if (ts.hasActiveInvocation) {
-        store.clearThreadActiveInvocation(threadId);
-        store.setThreadLoading(threadId, false);
-        for (const msg of ts.messages) {
-          if (msg.type === 'assistant' && msg.isStreaming) {
-            store.setThreadMessageStreaming(threadId, msg.id, false);
-          }
-        }
-        console.log(`[ws] ${source} reconciliation: cleared stale background-thread invocation state`, {
-          threadId,
-        });
+    // F173 PR-C Task 10: server-no-slots clear path also goes through thread-scoped
+    // writers. Active-thread staleness check still uses flat (`hasActiveInvocation`
+    // + `hasStaleActiveThreadPresentation`) since stream/loading lingering is the
+    // active-only Direction 2/3 condition; background only checks ThreadState.
+    const ts = store.getThreadState(threadId);
+    const shouldClear = isActiveThread
+      ? store.hasActiveInvocation || hasStaleActiveThreadPresentation(store, threadId)
+      : ts.hasActiveInvocation;
+    if (!shouldClear) return;
+
+    store.clearThreadActiveInvocation(threadId);
+    store.setThreadLoading(threadId, false);
+    store.setThreadIntentMode(threadId, null);
+    store.clearThreadCatStatuses(threadId);
+    const messagesToCheck = isActiveThread ? store.messages : ts.messages;
+    for (const msg of messagesToCheck) {
+      if (msg.type === 'assistant' && msg.isStreaming) {
+        store.setThreadMessageStreaming(threadId, msg.id, false);
       }
     }
+    if (isActiveThread) {
+      // Server finished but done(isFinal) was lost — or local stream UI lingered
+      // after the slot ended. Fetch missed messages so user doesn't need F5.
+      store.requestStreamCatchUp(threadId);
+    }
+    console.log(
+      `[ws] ${source} reconciliation: cleared stale ${isActiveThread ? 'active-thread' : 'background-thread'} invocation state`,
+      { threadId },
+    );
   } catch {
     // Non-critical — don't break the caller
   }
@@ -255,6 +278,7 @@ function reconcileInvocationStateOnReconnect(activeThreadId: string | null): voi
  * Watchdog for two failure modes of the done/intent_mode pipeline on a live socket:
  *  Direction 1 — done(isFinal) dropped: hasActiveInvocation=true but the slot went quiet.
  *  Direction 2 — intent_mode dropped: server has a live slot but UI shows idle (no cancel button).
+ *  Direction 3 — local stream/cat-status UI lingered after server already finished.
  *
  * Active-thread truth lives in flat state (`state.hasActiveInvocation`, `state.activeInvocations`,
  * `state.messages`), not in `state.threadStates[currentThreadId]` — `setCurrentThread` only saves
@@ -297,7 +321,9 @@ function checkForStaleActiveInvocations(): void {
       // nothing to reconcile, and keying off "any recent activity" probes
       // healthy threads for 5 minutes after normal completion.
       const lastMsg = state.messages?.[state.messages.length - 1];
-      if (lastMsg?.type === 'user') {
+      if (hasStaleActiveThreadPresentation(state, currentThreadId)) {
+        toProbe.add(currentThreadId);
+      } else if (lastMsg?.type === 'user') {
         const lastActivity = lastMsg.deliveredAt ?? lastMsg.timestamp ?? 0;
         if (now - lastActivity < STALE_RECENT_ENGAGEMENT_MS) {
           toProbe.add(currentThreadId);
@@ -320,10 +346,8 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
   const pendingGuideStartsRef = useRef<Map<string, { guideId: string; threadId: string; timestamp: number }>>(
     new Map(),
   );
-  const bgStreamRefsRef = useRef<Map<string, { id: string; threadId: string; catId: string }>>(new Map());
-  const bgReplacedInvocationsRef = useRef<Map<string, string>>(new Map());
-  const bgFinalizedRefsRef = useRef<Map<string, string>>(new Map());
-  const bgSeqRef = useRef(0);
+  // F173 Phase E (KD-1): bg refs (bgStreamRefs / bgFinalizedRefs / bgSeq) moved to
+  // useAgentMessages — single dispatch handler owns them now。
   const userIdRef = useRef(getUserId());
   const threadIdRef = useRef(threadId);
   threadIdRef.current = threadId;
@@ -444,17 +468,12 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     });
 
     socket.on('agent_message', (msg: AgentMessage) => {
-      const routeThread = threadIdRef.current;
-      const storeThread = useChatStore.getState().currentThreadId;
-
-      // Active thread requires BOTH route-level and store-level agreement.
-      // This blocks a switch-window race where route already points to thread-B
-      // but flat store still belongs to thread-A.
-      const isActiveThreadMessage = Boolean(
-        msg.threadId && routeThread && storeThread && msg.threadId === routeThread && msg.threadId === storeThread,
-      );
-      // If either pointer is temporarily unavailable during thread switch,
-      // route thread-tagged events to background to avoid mutating stale flat state.
+      // F173 KD-4 — single-pointer routing.
+      // store.currentThreadId is the only source of truth. routeThread (URL ref)
+      // is removed because it caused the reverse-race ghost bubbles: when store
+      // had switched to B but URL ref was still A, events for B were mis-routed
+      // to background, creating bg-{ts}-{cat}-{seq} ghost bubbles whose
+      // invocationId came from stale thread-state — never matched on F5 hydration.
       recordInvocationEvent({
         event: msg.type === 'done' ? 'done' : 'agent_message',
         threadId: msg.threadId,
@@ -462,30 +481,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
         isFinal: msg.isFinal === true,
       });
 
-      // Defensive fallback for malformed legacy payloads (threadId missing).
-      if (!msg.threadId) {
-        callbacksRef.current.onMessage(msg);
-        clearBackgroundStreamRefForActiveEvent(msg, bgStreamRefsRef.current);
-        return;
-      }
-
-      // Active thread → full processing via onMessage (streaming, tool events, etc.)
-      if (isActiveThreadMessage) {
-        callbacksRef.current.onMessage(msg);
-        clearBackgroundStreamRefForActiveEvent(msg, bgStreamRefsRef.current);
-        return;
-      }
-
-      // Background thread → delegated handler
-      handleBackgroundAgentMessage(msg as BackgroundAgentMessage, {
-        store: useChatStore.getState(),
-        bgStreamRefs: bgStreamRefsRef.current,
-        finalizedBgRefs: bgFinalizedRefsRef.current,
-        replacedInvocations: bgReplacedInvocationsRef.current,
-        nextBgSeq: () => bgSeqRef.current++,
-        addToast: (toast) => useToastStore.getState().addToast(toast),
-        clearDoneTimeout: callbacksRef.current.clearDoneTimeout,
-      });
+      // F173 Phase E (KD-1 handler unification): single dispatch.
+      // useAgentMessages.handleAgentMessage 现在自己路由 active vs background，并管 bg refs。
+      // useSocket 只做 socket-event-level 概念（recordInvocationEvent + 转发 callback）。
+      callbacksRef.current.onMessage(msg);
     });
 
     socket.on(
@@ -503,7 +502,6 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     socket.on(
       'intent_mode',
       (data: { threadId: string; mode: string; targetCats: string[]; invocationId?: string }) => {
-        const routeThread = threadIdRef.current;
         const storeThread = useChatStore.getState().currentThreadId;
         recordInvocationEvent({
           event: 'intent_mode',
@@ -511,12 +509,8 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
           mode: data.mode,
         });
 
-        // Dual-pointer guard: both route and store must agree for active-thread processing.
-        // Mirrors agent_message pattern — blocks switch-window race where route already
-        // points to thread-B but flat store still belongs to thread-A.
-        const isActiveThread = Boolean(
-          data.threadId && routeThread && storeThread && data.threadId === routeThread && data.threadId === storeThread,
-        );
+        // F173 KD-4 — single-pointer routing (store as truth source). See agent_message comment.
+        const isActiveThread = Boolean(data.threadId && storeThread && data.threadId === storeThread);
 
         if (isActiveThread) {
           callbacksRef.current.onIntentMode?.(data);
@@ -570,12 +564,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
 
     // F118 D2: spawn_started — earliest per-cat spawning signal (fires before intent_mode).
     socket.on('spawn_started', (data: { threadId: string; targetCats: string[]; invocationId: string }) => {
-      const routeThread = threadIdRef.current;
       const storeThread = useChatStore.getState().currentThreadId;
 
-      const isActiveThread = Boolean(
-        data.threadId && routeThread && storeThread && data.threadId === routeThread && data.threadId === storeThread,
-      );
+      // F173 KD-4 — single-pointer routing (store as truth source). See agent_message comment.
+      const isActiveThread = Boolean(data.threadId && storeThread && data.threadId === storeThread);
 
       if (isActiveThread) {
         callbacksRef.current.onSpawnStarted?.(data);
@@ -648,10 +640,40 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     socket.on('queue_updated', (data: { threadId: string; queue: unknown[]; action: string }) => {
       const store = useChatStore.getState();
       store.setQueue(data.threadId, data.queue as import('../stores/chat-types').QueueEntry[]);
-      // Queue processor started executing an entry: restore active invocation marker
-      // so ChatInput can show "正在回复中" and Stop/queue controls after thread switches/F5.
+      // Queue processor started executing an entry: restore the coarse "active"
+      // marker immediately, then hydrate current-thread slot truth from /queue.
+      // This covers the gap where processing resumes before intent_mode lands:
+      // without slot hydration, the top single-cat cancel can stay hidden even
+      // though the server is already executing this thread.
       if (data.action === 'processing') {
         store.setThreadHasActiveInvocation(data.threadId, true);
+        if (data.threadId === store.currentThreadId) {
+          const epoch = bumpLiveQueueHydrateEpoch(data.threadId);
+          void reconcileThreadWithServer(
+            data.threadId,
+            () =>
+              useChatStore.getState().currentThreadId !== data.threadId ||
+              getLiveQueueHydrateEpoch(data.threadId) !== epoch,
+            'QueueProcessing',
+          );
+        }
+      }
+      if (data.action === 'completed') {
+        bumpLiveQueueHydrateEpoch(data.threadId);
+        if (data.threadId === store.currentThreadId) {
+          const epoch = getLiveQueueHydrateEpoch(data.threadId);
+          // Queue `completed` is the thread-terminal signal for this processing
+          // path. We invalidate the earlier processing-time hydrate here, then
+          // fetch `/queue` once more so a stale response that already won the
+          // race gets actively cleared instead of lingering until watchdog.
+          void reconcileThreadWithServer(
+            data.threadId,
+            () =>
+              useChatStore.getState().currentThreadId !== data.threadId ||
+              getLiveQueueHydrateEpoch(data.threadId) !== epoch,
+            'QueueCompleted',
+          );
+        }
       }
       // P1 fix: 'processing' means continue/auto-dequeue resumed the queue — clear paused state
       if (data.action === 'processing' || data.action === 'cleared') {
@@ -696,6 +718,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       const store = useChatStore.getState();
       store.setQueue(data.threadId, data.queue as import('../stores/chat-types').QueueEntry[]);
       store.setQueuePaused(data.threadId, true, data.reason);
+      bumpLiveQueueHydrateEpoch(data.threadId);
       if (isDebugEnabled()) {
         recordInvocationEvent({
           event: 'queue_paused',

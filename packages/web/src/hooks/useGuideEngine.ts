@@ -28,7 +28,6 @@ export function useGuideEngine() {
   const clearPendingStart = useGuideStore((s) => s.clearPendingStart);
   const exitGuide = useGuideStore((s) => s.exitGuide);
   const startInFlightRef = useRef<string | null>(null);
-  const pendingRetryRef = useRef<string | null>(null);
 
   // React to pendingStart changes from Zustand (set by Socket.io or InteractiveBlock)
   const pendingStart = useGuideStore((s) => s.pendingStart);
@@ -49,10 +48,7 @@ export function useGuideEngine() {
     const trigger = async () => {
       const startKey = `${threadId}::${guideId}`;
       if (!isActiveThread() || hasActiveSession()) return;
-      if (startInFlightRef.current === startKey) {
-        pendingRetryRef.current = startKey;
-        return;
-      }
+      if (startInFlightRef.current === startKey) return;
       startInFlightRef.current = startKey;
       try {
         const res = await apiFetch(`/api/guide-flows/${encodeURIComponent(guideId)}`);
@@ -79,12 +75,6 @@ export function useGuideEngine() {
       } finally {
         if (startInFlightRef.current === startKey) {
           startInFlightRef.current = null;
-        }
-        if (pendingRetryRef.current === startKey && isActiveThread() && !hasActiveSession()) {
-          pendingRetryRef.current = null;
-          queueMicrotask(() => {
-            void trigger();
-          });
         }
       }
     };

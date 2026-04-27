@@ -5,7 +5,7 @@
 
 import assert from 'node:assert';
 import { afterEach, describe, it } from 'node:test';
-import { MlxAudioTtsProvider } from '../dist/domains/cats/services/tts/MlxAudioTtsProvider.js';
+import { calculateTimeout, MlxAudioTtsProvider } from '../dist/domains/cats/services/tts/MlxAudioTtsProvider.js';
 
 describe('MlxAudioTtsProvider', () => {
   const originalFetch = globalThis.fetch;
@@ -174,5 +174,72 @@ describe('MlxAudioTtsProvider', () => {
     assert.strictEqual(capturedBody.instruct, undefined, 'instruct should be absent');
     // temperature is not sent when not provided
     assert.strictEqual(capturedBody.temperature, undefined, 'temperature should be absent');
+  });
+});
+
+describe('calculateTimeout', () => {
+  // ── Clone mode (60s warmup absorbs refAudio load) ───────────
+  it('short clone text gets generation + 60s warmup', () => {
+    // 50 chars * 3 = 150 tokens / 15 tps = 10s + 60s warmup = 70s
+    assert.strictEqual(calculateTimeout('a'.repeat(50), true, 30_000), 70_000);
+  });
+
+  it('long clone text scales linearly', () => {
+    // 500 chars * 3 = 1500 tokens / 15 tps = 100s + 60s warmup = 160s
+    assert.strictEqual(calculateTimeout('a'.repeat(500), true, 30_000), 160_000);
+  });
+
+  it('410-char clone (regression case from 2026-04-27) gets 142s — comfortably above prior 120s', () => {
+    // 410 * 3 = 1230 tokens / 15 tps = 82s + 60s warmup = 142s
+    // Prior fixed cap was 120s; bumped to 142s after cloud codex round 3 P1
+    // pointed out 30s warmup was too tight (gave 112s, less than prior guard).
+    assert.strictEqual(calculateTimeout('a'.repeat(410), true, 30_000), 142_000);
+  });
+
+  it('clone honors high caller baseTimeoutMs (P2 round 1: slow/cold-start hosts)', () => {
+    // 50 chars * 3 / 15 = 10s + 60s = 70s; caller wants 180s, max wins
+    assert.strictEqual(calculateTimeout('a'.repeat(50), true, 180_000), 180_000);
+  });
+
+  it('caller baseTimeoutMs ABOVE hard cap is honored, not clamped (P2 round 2)', () => {
+    // Caller passes 1_200_000 ms (20 min) for a very slow host. Old
+    // `Math.min(..., 600_000)` would have clamped to 10 min. Hard cap now
+    // bounds only the dynamic estimate.
+    assert.strictEqual(calculateTimeout('a'.repeat(50), true, 1_200_000), 1_200_000);
+  });
+
+  // ── Non-clone (5s warmup, fast-fail preserved) ───────────────
+  it('non-clone short text PRESERVES baseTimeoutMs fast-fail (P1-1 regression guard)', () => {
+    // 10 chars * 3 / 25 = 1.2s + 5s = 6.2s; baseTimeoutMs 30s floor wins.
+    // Pre-fix bug had this as 61.2s when warmup was a single 60s for both modes.
+    assert.strictEqual(calculateTimeout('a'.repeat(10), false, 30_000), 30_000);
+  });
+
+  it('non-clone empty text uses baseTimeoutMs floor', () => {
+    assert.strictEqual(calculateTimeout('', false, 90_000), 90_000);
+  });
+
+  it('non-clone long text scales past floor', () => {
+    // 1000 chars * 3 / 25 = 120s + 5s = 125s
+    assert.strictEqual(calculateTimeout('a'.repeat(1000), false, 30_000), 125_000);
+  });
+
+  // ── P1-2 fix: hard cap on dynamic estimate ───────────────────
+  it('5000-char clone with default base is clamped to 600s hard cap', () => {
+    // 5000 * 3 / 15 = 1000s + 60s = 1060s, capped to 600s; base 30s loses.
+    // Prevents runaway timeout × VoiceBlockSynthesizer retry → 35min lockup.
+    assert.strictEqual(calculateTimeout('a'.repeat(5000), true, 30_000), 600_000);
+  });
+
+  it('10000-char non-clone with default base is clamped to 600s hard cap', () => {
+    // 10000 * 3 / 25 = 1200s + 5s = 1205s, capped to 600s.
+    assert.strictEqual(calculateTimeout('a'.repeat(10_000), false, 30_000), 600_000);
+  });
+
+  // ── Boundary ─────────────────────────────────────────────────
+  it('clone just under hard-cap threshold stays dynamic', () => {
+    // 2700 chars * 3 / 15 = 540s + 60s = 600s — exactly at cap, capped to 600s.
+    // 2690 chars: 538 * 1000 = 538s + 60s = 598s, just under cap.
+    assert.strictEqual(calculateTimeout('a'.repeat(2690), true, 30_000), 598_000);
   });
 });

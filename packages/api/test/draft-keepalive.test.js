@@ -38,7 +38,7 @@ function createMockDeps(services) {
     invocationDeps: {
       registry: {
         create: () => ({ invocationId: `inv-${++counter}`, callbackToken: `tok-${counter}` }),
-        verify: () => null,
+        verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
       },
       sessionManager: {
         getOrCreate: async () => ({}),

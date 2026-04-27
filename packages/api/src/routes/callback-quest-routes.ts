@@ -38,7 +38,7 @@ export function registerCallbackQuestRoutes(
     const actor = deriveCallbackActor(record);
 
     // P2: Stale invocation guard — ignore if superseded by newer invocation
-    if (!registry.isLatest(actor.invocationId)) {
+    if (!(await registry.isLatest(actor.invocationId))) {
       return { status: 'stale_ignored' };
     }
 

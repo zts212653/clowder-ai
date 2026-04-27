@@ -104,6 +104,25 @@ describe('QueueProcessor', () => {
     assert.equal(pausedCall.arguments[2].reason, 'canceled');
   });
 
+  it('canceled_by_user → auto-dequeues and does not emit queue_paused', async () => {
+    deps.queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'resume after cancel',
+      source: 'user',
+      targetCats: ['opus'],
+      intent: 'execute',
+    });
+
+    await processor.onInvocationComplete('t1', 'opus', 'canceled_by_user');
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    assert.ok(deps.invocationTracker.startAll.mock.calls.length > 0, 'user cancel should auto-resume queued work');
+    const emitCalls = deps.socketManager.emitToUser.mock.calls;
+    const pausedCall = emitCalls.find((c) => c.arguments[1] === 'queue_paused');
+    assert.equal(pausedCall, undefined, 'user cancel should not pause the queue');
+  });
+
   it('canceled with processing-only queue → does not emit queue_paused', async () => {
     enqueueEntry(deps.queue);
     // Simulate steer immediate: queued entry is promoted to processing before the canceled cleanup runs.
@@ -115,6 +134,47 @@ describe('QueueProcessor', () => {
     const emitCalls = deps.socketManager.emitToUser.mock.calls;
     const pausedCall = emitCalls.find((c) => c.arguments[1] === 'queue_paused');
     assert.equal(pausedCall, undefined);
+  });
+
+  it('user cancel during queued execution stops broadcasting late agent events', async () => {
+    let controller;
+    deps.invocationTracker.startAll.mock.mockImplementation(() => {
+      controller = new AbortController();
+      return controller;
+    });
+    deps.router.routeExecution = mock.fn(async function* () {
+      yield { type: 'text', catId: 'opus', content: 'before cancel', timestamp: Date.now() };
+      controller.abort('user_cancel');
+      yield { type: 'text', catId: 'opus', content: 'after cancel', timestamp: Date.now() };
+      yield { type: 'done', catId: 'opus', isFinal: true, timestamp: Date.now() };
+    });
+
+    enqueueEntry(deps.queue);
+
+    const result = await processor.processNext('t1', 'u1');
+    assert.equal(result.started, true);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    const broadcasts = deps.socketManager.broadcastAgentMessage.mock.calls.map((call) => call.arguments[0]);
+    assert.ok(
+      broadcasts.some((msg) => msg.type === 'text' && msg.content === 'before cancel'),
+      'pre-cancel text should be broadcast',
+    );
+    assert.equal(
+      broadcasts.some((msg) => msg.type === 'text' && msg.content === 'after cancel'),
+      false,
+      'post-cancel text must not be broadcast',
+    );
+    assert.equal(
+      broadcasts.some((msg) => msg.type === 'done' && msg.catId === 'opus'),
+      false,
+      'post-cancel done from the stale producer must not be broadcast',
+    );
+
+    const canceledUpdate = deps.invocationRecordStore.update.mock.calls.find(
+      (call) => call.arguments[1]?.status === 'canceled',
+    );
+    assert.ok(canceledUpdate, 'aborted queued invocation should be recorded as canceled');
   });
 
   it('failed → pauses queue, emits queue_paused', async () => {
@@ -879,6 +939,56 @@ describe('QueueProcessor', () => {
         streamingHook.cleanupPlaceholders.mock.calls.length >= 1,
         'cleanupPlaceholders should be called on successful delivery',
       );
+    });
+
+    it('replace-mode text overwrites server-side aggregated outbound and streaming content', async () => {
+      const deliverCalls = [];
+      const outboundHook = {
+        deliver: mock.fn(async (threadId, content, catId) => {
+          deliverCalls.push({ threadId, content, catId });
+        }),
+      };
+      const streamingHook = {
+        onStreamStart: mock.fn(async () => {}),
+        onStreamChunk: mock.fn(async () => {}),
+        onStreamEnd: mock.fn(async () => {}),
+        cleanupPlaceholders: mock.fn(async () => {}),
+      };
+
+      const hookDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* () {
+            yield { type: 'text', catId: 'opus', content: '第一段。第二段。', timestamp: Date.now() };
+            yield {
+              type: 'text',
+              catId: 'opus',
+              content: '第一段。插入一句。第二段。',
+              textMode: 'replace',
+              timestamp: Date.now(),
+            };
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+        outboundHook,
+        streamingHook,
+        threadMetaLookup: mock.fn(async () => undefined),
+      });
+      const hookProcessor = new QueueProcessor(hookDeps);
+
+      const entry = enqueueEntry(hookDeps.queue);
+      hookDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+      await hookProcessor.processNext('t1', 'u1');
+      await waitFor(() => deliverCalls.length >= 1);
+
+      assert.equal(deliverCalls[0].content, '第一段。插入一句。第二段。');
+      const lastChunkCall = streamingHook.onStreamChunk.mock.calls.at(-1);
+      assert.ok(lastChunkCall, 'streaming hook should receive chunks');
+      assert.equal(lastChunkCall.arguments[1], '第一段。插入一句。第二段。');
+      const endCall = streamingHook.onStreamEnd.mock.calls.at(-1);
+      assert.ok(endCall, 'streaming hook should receive final end');
+      assert.equal(endCall.arguments[1], '第一段。插入一句。第二段。');
     });
 
     it('multi-cat execution: outboundHook.deliver called per-turn with each catId', async () => {

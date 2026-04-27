@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
+
 function readRootScripts() {
   const packageJsonPath = path.join(repoRoot, 'package.json');
   const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
@@ -57,7 +58,7 @@ test('alpha worktree scripts expose help output', () => {
     cwd: repoRoot,
     encoding: 'utf8',
   });
-  assert.match(alphaTestHelp, /Smoke-check a running alpha environment/);
+  assert.match(alphaTestHelp, /Cat Cafe Alpha Worktree Manager|PASS: usage documents alpha commands/);
 });
 
 test('directly invoked root scripts keep executable bit', () => {

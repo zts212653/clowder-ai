@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { HubIcon } from './hub-icons';
+import { McpInstallForm } from './McpInstallForm';
 
 interface SkillMount {
   claude: boolean;
@@ -60,7 +61,19 @@ function MountBadge({ mounted }: { mounted: boolean }) {
   );
 }
 
-function CategoryGroup({ category, skills }: { category: string; skills: SkillEntry[] }) {
+function CategoryGroup({
+  category,
+  skills,
+  installMcpId,
+  onInstallMcp,
+  onInstallDone,
+}: {
+  category: string;
+  skills: SkillEntry[];
+  installMcpId: string | null;
+  onInstallMcp: (mcpId: string) => void;
+  onInstallDone: () => void;
+}) {
   return (
     <section className="rounded-lg border border-cafe bg-cafe-surface-elevated/70 p-3">
       <h3 className="text-xs font-semibold text-cafe-secondary mb-2">{category}</h3>
@@ -94,7 +107,7 @@ function CategoryGroup({ category, skills }: { category: string; skills: SkillEn
                       skill.requiresMcp?.map((dep) => (
                         <span
                           key={`${skill.name}:${dep.id}`}
-                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                             dep.status === 'ready'
                               ? 'bg-emerald-100 text-emerald-700'
                               : dep.status === 'missing'
@@ -103,6 +116,15 @@ function CategoryGroup({ category, skills }: { category: string; skills: SkillEn
                           }`}
                         >
                           {dep.id}:{dep.status}
+                          {dep.status === 'missing' && (
+                            <button
+                              type="button"
+                              onClick={() => onInstallMcp(dep.id)}
+                              className="ml-0.5 underline hover:no-underline"
+                            >
+                              补齐
+                            </button>
+                          )}
                         </span>
                       ))
                     )}
@@ -125,6 +147,16 @@ function CategoryGroup({ category, skills }: { category: string; skills: SkillEn
           </tbody>
         </table>
       </div>
+      {installMcpId && (
+        <div className="mt-3 rounded-lg border border-cafe-accent/20 bg-cafe-surface p-3">
+          <McpInstallForm
+            key={installMcpId}
+            prefilledId={installMcpId}
+            onInstalled={onInstallDone}
+            onClose={onInstallDone}
+          />
+        </div>
+      )}
     </section>
   );
 }
@@ -217,6 +249,7 @@ export function HubSkillsTab() {
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [resolving, setResolving] = useState<string | null>(null);
+  const [installTarget, setInstallTarget] = useState<{ mcpId: string; category: string } | null>(null);
   const addToast = useToastStore((s) => s.addToast);
 
   const fetchSkills = useCallback(async () => {
@@ -313,7 +346,17 @@ export function HubSkillsTab() {
         ))}
 
       {categoryOrder.map((cat) => (
-        <CategoryGroup key={cat} category={cat} skills={grouped.get(cat)!} />
+        <CategoryGroup
+          key={cat}
+          category={cat}
+          skills={grouped.get(cat)!}
+          installMcpId={installTarget?.category === cat ? installTarget.mcpId : null}
+          onInstallMcp={(mcpId) => setInstallTarget({ mcpId, category: cat })}
+          onInstallDone={() => {
+            setInstallTarget(null);
+            fetchSkills();
+          }}
+        />
       ))}
 
       <div className="rounded-lg border border-cafe bg-cafe-surface-elevated/70 p-3">

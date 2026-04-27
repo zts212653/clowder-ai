@@ -9,10 +9,12 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { F163ExperimentLogger } from '../domains/memory/f163-experiment-logger.js';
 import {
-  authorityToConfidence,
+  applySalienceRerank,
   computeVariantId,
   freezeFlags,
   getOrAssignCohort,
+  rankToConfidence,
+  type SalienceTaskContext,
 } from '../domains/memory/f163-types.js';
 import type { IEvidenceStore, IIndexBuilder, IKnowledgeResolver } from '../domains/memory/interfaces.js';
 import { type BoostSource, type EvidenceResult, mapKindToSourceType } from './evidence-helpers.js';
@@ -29,6 +31,9 @@ const searchSchema = z.object({
   contextWindow: z.coerce.number().int().min(1).max(5).optional(),
   threadId: z.string().optional(),
   dimension: z.enum(['project', 'global', 'all']).optional(),
+  activeFeatureIds: z.string().optional(),
+  truthSourceRef: z.string().optional(),
+  recentArtifactRefs: z.string().optional(),
 });
 
 export type { EvidenceConfidence, EvidenceSourceType } from './evidence-helpers.js';
@@ -79,7 +84,21 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       return { error: 'Invalid query parameters', details: parseResult.error.issues };
     }
 
-    const { q, limit, scope, mode, depth, dateFrom, dateTo, contextWindow, threadId, dimension } = parseResult.data;
+    const {
+      q,
+      limit,
+      scope,
+      mode,
+      depth,
+      dateFrom,
+      dateTo,
+      contextWindow,
+      threadId,
+      dimension,
+      activeFeatureIds: rawFeatureIds,
+      truthSourceRef,
+      recentArtifactRefs: rawArtifactRefs,
+    } = parseResult.data;
 
     const effectiveLimit = limit ?? 5;
     // AC-K1: depth=raw forces lexical-only (passage-level vectors not yet available)
@@ -115,13 +134,42 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       const resolvedSources = resolveResult?.sources;
       // Tag per-result source when dimension is explicit (single-source)
       const singleSource = resolvedSources && resolvedSources.length === 1 ? resolvedSources[0] : undefined;
-      const results: EvidenceResult[] = items.map((item) => ({
+
+      // Phase F: assemble task context for salience gating (no-op when absent)
+      const salienceCtx: SalienceTaskContext = {
+        activeFeatureIds: rawFeatureIds
+          ? rawFeatureIds
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : [],
+        truthSourceRef: truthSourceRef ?? null,
+        recentArtifactRefs: rawArtifactRefs
+          ? rawArtifactRefs
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : [],
+      };
+
+      // Phase F: compute salience rerank for both shadow and on (shadow = log only)
+      const salienceResult = f163Flags.retrievalRerank !== 'off' ? applySalienceRerank(items, salienceCtx) : null;
+
+      // P1-1 fix: only apply reranked order to user-visible results when fully enabled
+      const reranked =
+        salienceResult && f163Flags.retrievalRerank === 'on' ? salienceResult : { items, scores: items.map(() => 1.0) };
+
+      const effectiveBoostSource: BoostSource[] =
+        f163Flags.retrievalRerank === 'on' ? [...boostSource, 'retrieval_rerank'] : boostSource;
+
+      const results: EvidenceResult[] = reranked.items.map((item, index) => ({
         title: item.title,
         anchor: item.anchor,
         snippet: item.summary ?? '',
-        confidence: authorityToConfidence(item.authority),
+        confidence: rankToConfidence(index),
         sourceType: mapKindToSourceType(item.kind),
-        boostSource,
+        boostSource: effectiveBoostSource,
+        ...(item.authority ? { authority: item.authority } : {}),
         ...(singleSource ? { source: singleSource } : {}),
         ...(item.passages ? { passages: item.passages } : {}),
       }));
@@ -137,7 +185,21 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       // P1-5: log search to f163_logs for experiment evidence chain
       if (anyF163Active && db) {
         try {
-          new F163ExperimentLogger(db).logSearch(variantId, f163Flags, { query: q, resultCount: results.length });
+          const logger = new F163ExperimentLogger(db);
+          logger.logSearch(variantId, f163Flags, { query: q, resultCount: results.length });
+          // Phase F: salience rerank shadow diff (AC-F6) — logs in both shadow and on
+          if (salienceResult) {
+            logger.logSalienceRerank(variantId, f163Flags, {
+              query: q,
+              resultCount: results.length,
+              salienceRerank: {
+                taskContext: salienceCtx,
+                before: items.map((i) => i.anchor),
+                after: salienceResult.items.map((i) => i.anchor),
+                scores: salienceResult.scores,
+              },
+            });
+          }
         } catch {
           /* fail-open: logging failure does not block search */
         }

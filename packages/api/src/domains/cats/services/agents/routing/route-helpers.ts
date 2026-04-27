@@ -20,6 +20,7 @@ import type { Thread } from '../../stores/ports/ThreadStore.js';
 import { canViewMessage } from '../../stores/visibility.js';
 import type { AgentMessage, AgentService } from '../../types.js';
 import type { InvocationDeps } from '../invocation/invoke-single-cat.js';
+import { extractRecentArtifacts, mergeLedger, sortAndCapArtifacts } from './artifact-tracking.js';
 import type { CoverageMap } from './context-transport.js';
 import {
   buildCoverageMap,
@@ -31,6 +32,8 @@ import {
   scrubToolPayloads,
   selectAnchors,
 } from './context-transport.js';
+import { extractBatonContext, formatNavigationHeader, summarizeActiveTasks } from './navigation-context.js';
+import { rankArtifactSources } from './source-ranking.js';
 
 /** Minimal broadcast interface — avoids coupling routing layer to SocketManager concrete class */
 export interface RouteBroadcaster {
@@ -53,6 +56,8 @@ export interface RouteStrategyDeps {
   evidenceStore?: import('../../../../memory/interfaces.js').IEvidenceStore;
   /** F150: Tool usage counter (fire-and-forget INCR on tool_use events) */
   toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
+  /** F148 Phase F: Task store for navigation context (optional, fail-open) */
+  taskStore?: import('../../stores/ports/TaskStore.js').ITaskStore;
 }
 
 /** Mutable context for tracking persistence failures across the generator boundary.
@@ -99,6 +104,12 @@ export interface RouteOptions {
   /** F108: Unique invocation ID for WorklistRegistry isolation in concurrent execution.
    *  When provided, worklist is keyed by this ID instead of threadId. */
   parentInvocationId?: string | undefined;
+  /** Parent invocation controller used to keep A2A worklist slots tied to the same cancel signal. */
+  invocationController?: AbortController | undefined;
+  /** Register an A2A worklist target with the outer invocation tracker before it executes. */
+  trackA2ASlot?: ((threadId: string, catId: CatId, userId: string, controller: AbortController) => void) | undefined;
+  /** Cleanup registered A2A worklist slots if the route exits before every target emits done. */
+  completeA2ASlots?: ((threadId: string, catIds: readonly CatId[], controller: AbortController) => void) | undefined;
   /** F153 Phase E: Root route span — invocation spans become children of this. */
   routeSpan?: import('@opentelemetry/api').Span | undefined;
 }
@@ -119,7 +130,13 @@ export interface IncrementalContextResult {
   briefingContext?: {
     threadMemorySummary?: string;
     anchorSummaries?: string[];
+    baton?: import('./navigation-context.js').BatonContext;
+    activeTasks?: import('./navigation-context.js').TaskSummary[];
+    recentArtifacts?: import('./artifact-tracking.js').RecentArtifact[];
+    rankedSources?: import('./source-ranking.js').RankedSource[];
   };
+  /** F148 Phase F: Navigation context header (injected on ALL paths — KD-7) */
+  navigationHeader?: string;
 }
 
 /**
@@ -561,6 +578,9 @@ export interface IncrementalContextOptions {
    * so the assembled context + system parts never exceed the model's input limit.
    */
   effectiveMaxContextTokens?: number;
+  recentFilesTouched?: Array<{ path: string; ops: string[] }>;
+  canonicalFeatureId?: string;
+  threadTitle?: string;
 }
 
 export async function assembleIncrementalContext(
@@ -607,6 +627,73 @@ export async function assembleIncrementalContext(
       unseen.some((m) => m.id === currentUserMessageId),
   );
 
+  // F148 Phase F (KD-7): Navigation context — injected on ALL paths (cold + warm)
+  // P1 fix: extract baton from unseen (pre-stream-filter) so cat→cat @ mentions via stream are visible
+  const batonCandidates = unseen.filter(
+    (m) => (m.userId !== 'system' || m.catId !== null) && m.origin !== 'briefing' && canViewMessage(m, viewer),
+  );
+  const baton = extractBatonContext(batonCandidates, catId);
+  let activeTasks: import('./navigation-context.js').TaskSummary[] = [];
+  let allThreadTasks: import('./artifact-tracking.js').ArtifactExtractionInput['prTasks'] = [];
+  if (deps.taskStore) {
+    try {
+      const tasks = await Promise.resolve(deps.taskStore.listByThread(threadId));
+      activeTasks = summarizeActiveTasks(tasks);
+      allThreadTasks = tasks;
+    } catch {
+      // fail-open: tasks stay empty
+    }
+  }
+
+  const recentArtifacts = extractRecentArtifacts({
+    filesTouched: options?.recentFilesTouched ?? [],
+    prTasks: allThreadTasks,
+    catId,
+  });
+
+  // G1→G2 bridge: read stored ledger from threadMemory to merge with current-invocation artifacts
+  let storedLedgerArtifacts: import('./artifact-tracking.js').RecentArtifact[] = [];
+  const threadStore = deps.invocationDeps.threadStore;
+  if (threadStore) {
+    try {
+      const mem = await Promise.resolve(threadStore.getThreadMemory(threadId));
+      if (mem && Array.isArray(mem.recentArtifacts) && mem.recentArtifacts.length > 0) {
+        storedLedgerArtifacts = mem.recentArtifacts as import('./artifact-tracking.js').RecentArtifact[];
+      }
+    } catch {
+      // fail-open: ranking degrades to current-invocation only
+    }
+  }
+  const mergedLedger = mergeLedger(storedLedgerArtifacts, recentArtifacts);
+
+  const rankedSources = rankArtifactSources(
+    mergedLedger,
+    allThreadTasks.map((t) => ({ kind: t.kind, subjectKey: t.subjectKey ?? null, title: t.title, status: t.status })),
+    { canonicalFeatureId: options?.canonicalFeatureId, threadTitle: options?.threadTitle },
+  );
+  const topSource = rankedSources[0] ?? null;
+  const bestNextSource = topSource ? `先看 ${topSource.label}: ${topSource.ref}` : undefined;
+  const navigationHeader = formatNavigationHeader({
+    baton,
+    tasks: activeTasks,
+    artifacts: recentArtifacts,
+    truthSource: topSource ? { label: topSource.label, ref: topSource.ref, provenance: topSource.provenance } : null,
+    bestNextSource,
+  });
+
+  log.info({
+    f148: 'navigation-header',
+    threadId,
+    catId,
+    hasBaton: baton !== null,
+    batonFrom: baton?.fromSpeakerDisplay ?? null,
+    taskCount: activeTasks.length,
+    artifactCount: recentArtifacts.length,
+    headerLength: navigationHeader.length,
+    unseenCount: unseen.length,
+    batonCandidateCount: batonCandidates.length,
+  });
+
   // F148: Smart window — cold mention detection
   // P1-review: short-circuit on count first — avoid O(n) tokenize when count already triggers
   const hcConfig = DEFAULT_HIERARCHICAL_CONTEXT;
@@ -639,6 +726,12 @@ export async function assembleIncrementalContext(
       hcConfig,
       cursor,
       options,
+      navigationHeader,
+      baton,
+      activeTasks,
+      recentArtifacts,
+      rankedSources,
+      storedLedgerArtifacts,
     );
   }
 
@@ -655,8 +748,14 @@ export async function assembleIncrementalContext(
 
   if (capped.length === 0) {
     return cursor
-      ? { contextText: '', boundaryId: cursor, includesCurrentUserMessage, currentMessageFilteredOut }
-      : { contextText: '', includesCurrentUserMessage, currentMessageFilteredOut };
+      ? {
+          contextText: navigationHeader,
+          boundaryId: cursor,
+          includesCurrentUserMessage,
+          currentMessageFilteredOut,
+          navigationHeader,
+        }
+      : { contextText: navigationHeader, includesCurrentUserMessage, currentMessageFilteredOut, navigationHeader };
   }
 
   const truncateLimit = budget.maxContentLengthPerMsg;
@@ -680,11 +779,12 @@ export async function assembleIncrementalContext(
     const zeroBudgetDegradation = `⚠️ 增量上下文预算耗尽: 系统提示已占满 prompt 预算，${capped.length} 条未读消息全部丢弃`;
     const zeroBoundaryId = capped[capped.length - 1]?.id;
     return {
-      contextText: '',
+      contextText: navigationHeader,
       boundaryId: zeroBoundaryId,
       includesCurrentUserMessage: false,
       currentMessageFilteredOut,
       degradation: zeroBudgetDegradation,
+      navigationHeader,
     };
   }
 
@@ -720,8 +820,19 @@ export async function assembleIncrementalContext(
 
   if (finalCapped.length === 0) {
     return cursor
-      ? { contextText: '', boundaryId: cursor, includesCurrentUserMessage: false, currentMessageFilteredOut }
-      : { contextText: '', includesCurrentUserMessage: false, currentMessageFilteredOut };
+      ? {
+          contextText: navigationHeader,
+          boundaryId: cursor,
+          includesCurrentUserMessage: false,
+          currentMessageFilteredOut,
+          navigationHeader,
+        }
+      : {
+          contextText: navigationHeader,
+          includesCurrentUserMessage: false,
+          currentMessageFilteredOut,
+          navigationHeader,
+        };
   }
 
   let degradation: string | undefined;
@@ -735,11 +846,12 @@ export async function assembleIncrementalContext(
 
   const boundaryId = finalCapped[finalCapped.length - 1]?.id;
   return {
-    contextText: `[对话历史增量 - 未发送过 ${finalCapped.length} 条]\n${finalLines.join('\n')}\n[/对话历史]`,
+    contextText: `${navigationHeader}\n[对话历史增量 - 未发送过 ${finalCapped.length} 条]\n${finalLines.join('\n')}\n[/对话历史]`,
     boundaryId,
     includesCurrentUserMessage: finalIncludesCurrentUserMessage,
     currentMessageFilteredOut,
     degradation,
+    navigationHeader,
   };
 }
 
@@ -757,6 +869,12 @@ async function assembleSmartWindowContext(
   hcConfig: import('../../../../../config/hierarchical-context-config.js').HierarchicalContextConfig,
   _cursor: string | undefined,
   options: IncrementalContextOptions | undefined,
+  navigationHeader: string,
+  baton: import('./navigation-context.js').BatonContext | null,
+  activeTasks: import('./navigation-context.js').TaskSummary[],
+  recentArtifacts: import('./artifact-tracking.js').RecentArtifact[],
+  rankedSources: import('./source-ranking.js').RankedSource[],
+  preReadStoredArtifacts: import('./artifact-tracking.js').RecentArtifact[],
 ): Promise<IncrementalContextResult> {
   const budget = getCatContextBudget(catId as string);
   const truncateLimit = budget.maxContentLengthPerMsg;
@@ -819,6 +937,7 @@ async function assembleSmartWindowContext(
 
   // 3.7 Phase D: Fetch thread memory (fail-open)
   let threadMemorySummary = '';
+  const storedFileArtifacts = preReadStoredArtifacts;
   let threadMemoryMeta: {
     available: boolean;
     sessionsIncorporated: number;
@@ -848,6 +967,7 @@ async function assembleSmartWindowContext(
           summary = summary.slice(0, lo) + '…';
         }
         threadMemorySummary = summary;
+        // storedFileArtifacts already pre-read via preReadStoredArtifacts (G1→G2 bridge)
         threadMemoryMeta = {
           available: true,
           sessionsIncorporated: mem.sessionsIncorporated,
@@ -1017,7 +1137,7 @@ async function assembleSmartWindowContext(
 
   const contextText =
     sections.length > 0
-      ? `[对话历史增量 - 智能窗口: ${omitted.length} 条已摘要, ${finalBurstMsgs.length} 条详细]\n${sections.join('\n')}\n[/对话历史]`
+      ? `${navigationHeader}\n[对话历史增量 - 智能窗口: ${omitted.length} 条已摘要, ${finalBurstMsgs.length} 条详细]\n${sections.join('\n')}\n[/对话历史]`
       : '';
 
   // Final hard cap: envelope overhead may push total over budget
@@ -1041,6 +1161,14 @@ async function assembleSmartWindowContext(
     briefingContext: {
       ...(threadMemorySummary ? { threadMemorySummary } : {}),
       ...(finalAnchorLines.length > 0 ? { anchorSummaries: finalAnchorLines } : {}),
+      ...(baton ? { baton } : {}),
+      ...(activeTasks.length > 0 ? { activeTasks } : {}),
+      ...(() => {
+        const merged = mergeLedger(storedFileArtifacts, recentArtifacts);
+        return merged.length > 0 ? { recentArtifacts: merged } : {};
+      })(),
+      ...(rankedSources.length > 0 ? { rankedSources } : {}),
     },
+    navigationHeader,
   };
 }

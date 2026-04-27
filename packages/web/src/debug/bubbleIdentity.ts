@@ -20,6 +20,27 @@ export function getBubbleInvocationId(msg: ChatMessage): string | undefined {
   return undefined;
 }
 
+/**
+ * F173 A.3 — Deterministic bubble ID derivation.
+ *
+ * When a stream/callback event has a known invocationId + catId, derive a
+ * deterministic bubble ID `msg-{invocationId}-{catId}`. Two handlers (active,
+ * background) creating the "same" bubble for the same invocation will land on
+ * the same ID — so hydration merge dedups by ID, no ghost survives.
+ *
+ * Fallback (no invocationId) uses the caller-supplied fallback (typically a
+ * timestamp+seq), preserving prior behavior for events that arrive before
+ * invocation_created binds the ID.
+ */
+export function deriveBubbleId(
+  invocationId: string | undefined | null,
+  catId: string | undefined | null,
+  fallback: () => string,
+): string {
+  if (invocationId && catId) return `msg-${invocationId}-${catId}`;
+  return fallback();
+}
+
 export function getBubbleOriginPhase(msg: ChatMessage): BubbleOriginPhase {
   if (msg.id.startsWith('draft-')) return 'draft';
   if (msg.origin === 'stream' || msg.isStreaming) return 'stream';

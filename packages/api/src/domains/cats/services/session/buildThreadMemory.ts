@@ -1,5 +1,5 @@
 /**
- * buildThreadMemory — F065 Phase B + F148 VG-3
+ * buildThreadMemory — F065 Phase B + F148 VG-3 + Phase G
  * Pure function: merges existing ThreadMemory with a new extractive digest,
  * producing an updated rolling summary. Rule-based (no LLM).
  *
@@ -9,6 +9,7 @@
  * 3. Trim oldest lines from end if over maxTokens
  * 4. Increment sessionsIncorporated
  * 5. VG-3: Merge DecisionSignals into structured decisions/openQuestions/artifacts
+ * 6. G1: Artifact ledger — append+dedup+cap (cumulative, not overwrite)
  */
 
 import { estimateTokens } from '../../../../utils/token-counter.js';
@@ -64,6 +65,27 @@ function formatSessionLine(digest: ExtractiveDigestV1, sessionNumber: number): s
 const MAX_DECISIONS = 8;
 const MAX_OPEN_QUESTIONS = 5;
 const MAX_ARTIFACTS = 8;
+const MAX_LEDGER_ENTRIES = 20;
+
+type LedgerEntry = NonNullable<ThreadMemoryV1['recentArtifacts']>[number];
+
+function mergeArtifactLedger(
+  existing: ThreadMemoryV1['recentArtifacts'],
+  incoming: ThreadMemoryV1['recentArtifacts'],
+): LedgerEntry[] | undefined {
+  const existingArr = existing ?? [];
+  const incomingArr = incoming ?? [];
+  if (existingArr.length === 0 && incomingArr.length === 0) return undefined;
+
+  const byRef = new Map<string, LedgerEntry>();
+  for (const a of existingArr) byRef.set(a.ref, a);
+  for (const a of incomingArr) {
+    const prev = byRef.get(a.ref);
+    if (!prev || a.updatedAt >= prev.updatedAt) byRef.set(a.ref, a);
+  }
+
+  return [...byRef.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_LEDGER_ENTRIES);
+}
 
 /** Deduplicate strings by substring containment */
 function dedupStrings(items: string[]): string[] {
@@ -80,6 +102,7 @@ export function buildThreadMemory(
   newDigest: ExtractiveDigestV1,
   maxTokens: number,
   signals?: DecisionSignals,
+  recentArtifacts?: ThreadMemoryV1['recentArtifacts'],
 ): ThreadMemoryV1 {
   // R1 P1-1: session number comes from digest.seq (1-based display), not merge count
   const sessionNumber = newDigest.seq + 1;
@@ -134,6 +157,9 @@ export function buildThreadMemory(
     if (Array.isArray(existing.artifacts) && existing.artifacts.length > 0)
       result.artifacts = existing.artifacts.slice(0, MAX_ARTIFACTS);
   }
+
+  const ledger = mergeArtifactLedger(existing?.recentArtifacts, recentArtifacts);
+  if (ledger) result.recentArtifacts = ledger;
 
   return result;
 }

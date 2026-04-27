@@ -21,6 +21,8 @@ const useCatDataSpy = vi.fn(() => ({
 
 vi.mock('@/hooks/useCatData', () => ({
   useCatData: useCatDataSpy,
+  formatCatName: (cat: { displayName: string; variantLabel?: string }) =>
+    cat.variantLabel ? `${cat.displayName}（${cat.variantLabel}）` : cat.displayName,
 }));
 
 // ── Stub TTS hook (ChatMessage uses it) ──

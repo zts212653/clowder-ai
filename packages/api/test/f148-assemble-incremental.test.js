@@ -431,13 +431,16 @@ describe('F148 review fixes', () => {
     const ctx = result.contextText;
 
     // AC-C3: primacy anchor (thread opener) must be present
-    assert.ok(ctx.includes('[Thread opener:'), `primacy anchor missing. contextText starts with: ${ctx.slice(0, 300)}`);
+    assert.ok(
+      ctx.includes('[Thread opener @'),
+      `primacy anchor missing. contextText starts with: ${ctx.slice(0, 300)}`,
+    );
     // AC-C2: should have at least one scored anchor
-    assert.ok(ctx.includes('[Thread opener:') || ctx.includes('[Anchor'), 'at least one anchor expected');
+    assert.ok(ctx.includes('[Thread opener @') || ctx.includes('[Anchor'), 'at least one anchor expected');
     // Order: tombstone < anchors < burst
     const tombstoneIdx = ctx.indexOf('[System: skipped');
     const anchorIdx = Math.min(
-      ctx.indexOf('[Thread opener:') >= 0 ? ctx.indexOf('[Thread opener:') : Infinity,
+      ctx.indexOf('[Thread opener @') >= 0 ? ctx.indexOf('[Thread opener @') : Infinity,
       ctx.indexOf('[Anchor') >= 0 ? ctx.indexOf('[Anchor') : Infinity,
     );
     assert.ok(tombstoneIdx >= 0, 'tombstone expected');
@@ -475,7 +478,7 @@ describe('F148 review fixes', () => {
     // The anchor should include msg[0] (primacy) but sanitized.
     // The legitimate smart window header contains 智能窗口 once; the poison adds a second.
     // Count occurrences: only 1 allowed (the system header), not 2 (anchor leak).
-    if (result.contextText.includes('[Thread opener:')) {
+    if (result.contextText.includes('[Thread opener @')) {
       const envelopeCount = (result.contextText.match(/智能窗口/g) || []).length;
       assert.ok(envelopeCount <= 1, `Anchor must not leak extra envelope markers (found ${envelopeCount} occurrences)`);
       assert.ok(!result.contextText.includes('50 条已摘要'), 'Fake envelope values from anchor must be sanitized');

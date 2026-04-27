@@ -337,10 +337,11 @@ describe('AgentRouter + Services wiring', () => {
     await collect(router.route('user-1', 'hello'));
 
     const env = claudeSpawn._calls[0].options.env;
-    const record = registry.verify(env.CAT_CAFE_INVOCATION_ID, env.CAT_CAFE_CALLBACK_TOKEN);
-    assert.ok(record, 'credentials should be verifiable');
-    assert.equal(record.userId, 'user-1');
-    assert.equal(record.catId, 'opus');
+    // F174 Phase A/B: verify() returns Promise<VerifyResult>
+    const result = await registry.verify(env.CAT_CAFE_INVOCATION_ID, env.CAT_CAFE_CALLBACK_TOKEN);
+    assert.equal(result.ok, true, 'credentials should be verifiable');
+    assert.equal(result.record.userId, 'user-1');
+    assert.equal(result.record.catId, 'opus');
   });
 
   // --- MessageStore 接线验证 ---
@@ -574,7 +575,7 @@ describe('MCP callback end-to-end flow', () => {
     await collect(router.route('user-1', '@opus help'));
 
     // 2. Create a fresh invocation for opus (simulating a new CLI invocation)
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     // 3. Query pending mentions
     const app = await createApp();

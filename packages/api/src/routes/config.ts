@@ -34,6 +34,7 @@ import { updateRuntimeCoCreator } from '../config/runtime-cat-catalog.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
+import { getDefaultUploadDir } from '../utils/upload-paths.js';
 import { configCatOrderRoutes } from './config-cat-order.js';
 
 const patchSchema = z.object({
@@ -262,7 +263,7 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
           runtimeLogs: resolve(apiCwd, './data/logs/api'),
           cliArchive: resolve(apiCwd, process.env.CLI_RAW_ARCHIVE_DIR ?? './data/cli-raw-archive'),
           redisDevSandbox: resolve(home, '.cat-cafe/redis-dev-sandbox'),
-          uploads: resolve(apiCwd, process.env.UPLOAD_DIR ?? './uploads'),
+          uploads: getDefaultUploadDir(process.env.UPLOAD_DIR),
         },
       },
     };
@@ -360,6 +361,15 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
 
   // ── F154 AC-A4: Default cat runtime override (owner-gated) ──────────
 
+  function persistDefaultCatToEnv(catId: string | null): void {
+    const current = existsSync(envFilePath) ? readFileSync(envFilePath, 'utf8') : '';
+    const updates = new Map<string, string | null>([['DEFAULT_CAT_ID', catId]]);
+    const next = applyEnvUpdatesToFile(current, updates);
+    writeFileSync(envFilePath, next, 'utf8');
+    if (catId) process.env.DEFAULT_CAT_ID = catId;
+    else delete process.env.DEFAULT_CAT_ID;
+  }
+
   app.get('/api/config/default-cat', async () => ({
     catId: getDefaultCatId(),
     isOverride: hasRuntimeDefaultCatOverride(),
@@ -388,15 +398,9 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
     }
 
     if (parsed.data.catId === null) {
-      const { persisted } = clearRuntimeDefaultCatId();
-      return {
-        ok: true,
-        catId: getDefaultCatId(),
-        isOverride: false,
-        ...(persisted
-          ? {}
-          : { warning: 'Override cleared in memory but failed to remove file — may restore on restart' }),
-      };
+      persistDefaultCatToEnv(null);
+      clearRuntimeDefaultCatId();
+      return { ok: true, catId: getDefaultCatId(), isOverride: false };
     }
 
     // Validate catId is registered
@@ -405,18 +409,13 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
       return { error: `Unknown catId: ${parsed.data.catId}` };
     }
 
-    // #543 P1: Reject unavailable cats so the global fallback can't route to a disabled cat
     if (!isCatAvailable(parsed.data.catId)) {
       reply.status(400);
       return { error: `Cat ${parsed.data.catId} is unavailable` };
     }
 
-    const { persisted } = setRuntimeDefaultCatId(parsed.data.catId);
-    return {
-      ok: true,
-      catId: parsed.data.catId,
-      isOverride: true,
-      ...(persisted ? {} : { warning: 'Override applied in memory but failed to persist — will be lost on restart' }),
-    };
+    persistDefaultCatToEnv(parsed.data.catId);
+    setRuntimeDefaultCatId(parsed.data.catId);
+    return { ok: true, catId: parsed.data.catId, isOverride: true };
   });
 }
