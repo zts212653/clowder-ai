@@ -1365,6 +1365,32 @@ describe('QueueProcessor', () => {
       assert.equal(all.length, 0, 'all batched entries should be removed after completion');
     });
 
+    it('P1: failed execution rolls back batched entries instead of dropping them', async () => {
+      const failDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* () {
+            throw new Error('CLI spawn failed');
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+      });
+      const failProcessor = new QueueProcessor(failDeps);
+
+      enqueueEntry(failDeps.queue, { content: 'primary' });
+      enqueueEntry(failDeps.queue, { content: 'batched-a' });
+      enqueueEntry(failDeps.queue, { content: 'batched-b' });
+
+      await failProcessor.processNext('t1', 'u1');
+      await new Promise((r) => setTimeout(r, 100));
+
+      const remaining = failDeps.queue.list('t1', 'u1');
+      const queued = remaining.filter((e) => e.status === 'queued');
+      assert.ok(queued.length >= 2, `batched entries should be rolled back to queued, got ${queued.length}`);
+      const contents = queued.map((e) => e.content);
+      assert.ok(contents.includes('batched-a'), 'batched-a should be preserved');
+      assert.ok(contents.includes('batched-b'), 'batched-b should be preserved');
+    });
+
     it('P1-1: batched entries messageIds are markDelivered-ed', async () => {
       deps.messageStore.markDelivered = mock.fn(async (id) => ({
         id,

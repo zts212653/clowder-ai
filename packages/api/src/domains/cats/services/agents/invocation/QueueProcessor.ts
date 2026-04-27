@@ -876,9 +876,15 @@ export class QueueProcessor {
       // Always cleanup tracker + queue (all target cat slots)
       invocationTracker.completeAll(threadId, targetCats, controller);
       queue.removeProcessedAcrossUsers(threadId, entry.id);
-      // F175: remove batched entries
-      for (const bid of batchedEntryIds) {
-        queue.removeProcessedAcrossUsers(threadId, bid);
+      // F175: on success remove batched entries; on failure/cancel rollback so they can retry
+      if (finalStatus === 'succeeded') {
+        for (const bid of batchedEntryIds) {
+          queue.removeProcessedAcrossUsers(threadId, bid);
+        }
+      } else {
+        for (const bid of batchedEntryIds) {
+          queue.rollbackProcessing(threadId, bid);
+        }
       }
       socketManager.emitToUser(userId, 'queue_updated', {
         threadId,
