@@ -48,6 +48,7 @@ import type { Thread, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadSto
 import { getStreamingTtsRegistry, StreamingTtsChunker } from '../../tts/StreamingTtsChunker.js';
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
 import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
+import { buildCapsuleFromRouteState } from '../invocation/CollaborationContinuityCapsule.js';
 import { invokeSingleCat } from '../invocation/invoke-single-cat.js';
 import { buildMcpCallbackInstructions, needsMcpInjection } from '../invocation/McpPromptInjector.js';
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
@@ -303,15 +304,17 @@ export async function* routeSerial(
         }
       }
 
+      const invocationMode = worklist.length > 1 ? 'serial' : 'independent';
+      const a2aEnabled = worklistEntry.a2aCount < maxDepth;
       const invocationContext = buildInvocationContext({
         catId,
-        mode: worklist.length > 1 ? 'serial' : 'independent',
+        mode: invocationMode,
         chainIndex: index + 1,
         chainTotal: worklist.length,
         teammates,
         mcpAvailable,
         ...(promptTags && promptTags.length > 0 ? { promptTags } : {}),
-        a2aEnabled: worklistEntry.a2aCount < maxDepth,
+        a2aEnabled,
         ...(directMessageFrom ? { directMessageFrom } : {}),
         ...(pingPongWarning ? { pingPongWarning } : {}),
         ...(mentionRoutingFeedback ? { mentionRoutingFeedback } : {}),
@@ -323,6 +326,19 @@ export async function* routeSerial(
         ...(bootcampState ? { bootcampState, threadId, bootcampMemberCount } : {}),
         ...(alwaysOnDocs && alwaysOnInjectionMode === 'on' ? { alwaysOnDocs } : {}),
         ...guideContextForCat(guideCtx, catId, targetCatIds, threadId),
+      });
+      const continuityCapsule = buildCapsuleFromRouteState({
+        threadId,
+        catId: catId as string,
+        ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
+        mode: invocationMode,
+        chainIndex: index + 1,
+        chainTotal: worklist.length,
+        ...(directMessageFrom ? { directMessageFrom: directMessageFrom as string } : {}),
+        ...(streamReplyTo ? { a2aTriggerMessageId: streamReplyTo } : {}),
+        a2aEnabled,
+        a2aDepth: worklistEntry.a2aCount,
+        maxA2ADepth: maxDepth,
       });
 
       // F24 Phase E: Bootstrap context for Session #2+
@@ -534,6 +550,7 @@ export async function* routeSerial(
         ...(signal ? { signal } : {}),
         ...(staticIdentity ? { systemPrompt: staticIdentity } : {}),
         ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
+        continuityCapsule,
         // F121: Pass A2A trigger message ID for auto-replyTo threading
         ...(worklistEntry.a2aTriggerMessageId.get(catId)
           ? { a2aTriggerMessageId: worklistEntry.a2aTriggerMessageId.get(catId) }

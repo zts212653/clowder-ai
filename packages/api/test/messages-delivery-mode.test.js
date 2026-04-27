@@ -9,6 +9,9 @@ import Fastify from 'fastify';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 const { InvocationRegistry } = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
+const { buildCapsuleFromRouteState, completeCapsuleForSeal } = await import(
+  '../dist/domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js'
+);
 
 /** Build a complete deps object for messagesRoutes */
 function buildDeps(overrides = {}) {
@@ -57,6 +60,11 @@ function buildDeps(overrides = {}) {
       update: mock.fn(async () => {}),
     },
     invocationQueue,
+    queueProcessor: {
+      clearPause: mock.fn(),
+      onInvocationComplete: mock.fn(async () => {}),
+      enqueueContinuation: mock.fn(() => ({ outcome: 'enqueued' })),
+    },
     threadStore: {
       get: mock.fn(async () => ({
         id: 'thread-1',
@@ -314,6 +322,49 @@ describe('POST /api/messages deliveryMode', () => {
     assert.equal(typeof options?.queueHasQueuedMessages, 'function');
     assert.equal(options.queueHasQueuedMessages('thread-1'), true);
     assert.equal(options.queueHasQueuedMessages('thread-x'), false);
+  });
+
+  it('immediate execution schedules continuation when route emits seal capsule and succeeds', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+    const capsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 'thread-1',
+        catId: 'opus',
+        mode: 'independent',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-seal',
+        createdAt: Date.now(),
+        seal: { sessionId: 'sess-1', sessionSeq: 1, reason: 'threshold' },
+      },
+    );
+    deps.router.routeExecution.mock.mockImplementation(async function* () {
+      yield {
+        type: 'system_info',
+        catId: 'opus',
+        content: JSON.stringify({ type: 'session_seal_requested', continuityCapsule: capsule }),
+        timestamp: Date.now(),
+      };
+      yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '触发 seal', threadId: 'thread-1', deliveryMode: 'immediate' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.equal(deps.queueProcessor.enqueueContinuation.mock.calls.length, 1);
+    const call = deps.queueProcessor.enqueueContinuation.mock.calls[0].arguments[0];
+    assert.equal(call.threadId, 'thread-1');
+    assert.equal(call.userId, 'user-1');
+    assert.equal(call.catId, 'opus');
+    assert.equal(call.capsule.seal.sessionId, 'sess-1');
   });
 
   // ── P1-1: multipart deliveryMode extraction ──

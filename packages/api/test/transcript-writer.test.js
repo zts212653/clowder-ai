@@ -346,6 +346,37 @@ describe('TranscriptWriter', () => {
       );
     });
 
+    test('captures latest continuity capsule from session seal system_info', async () => {
+      const { TranscriptWriter } = await loadModules();
+      const writer = new TranscriptWriter({ dataDir: tmpDir });
+
+      const continuityCapsule = {
+        v: 1,
+        threadId: 'thread-1',
+        catId: 'codex',
+        mode: 'independent',
+        a2aEnabled: true,
+        ballState: 'in_progress',
+        continuationReason: 'threshold_seal',
+        createdAt: 1234,
+        invocationId: 'inv-1',
+        seal: { sessionId: 'sess-1', sessionSeq: 1, reason: 'threshold' },
+      };
+      writer.appendEvent(SESSION_INFO, {
+        type: 'system_info',
+        catId: 'codex',
+        content: JSON.stringify({ type: 'session_seal_requested', continuityCapsule }),
+        timestamp: Date.now(),
+      });
+
+      const digest = writer.generateExtractiveDigest(SESSION_INFO, {
+        createdAt: 1000,
+        sealedAt: 2000,
+      });
+
+      assert.deepEqual(digest.continuityCapsule, continuityCapsule);
+    });
+
     test('writes digest.extractive.json during flush', async () => {
       const { TranscriptWriter } = await loadModules();
       const writer = new TranscriptWriter({ dataDir: tmpDir });

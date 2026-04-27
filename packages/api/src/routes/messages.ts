@@ -21,6 +21,10 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { getDefaultCatId } from '../config/cat-config-loader.js';
 import { resolveFrontendBaseUrl } from '../config/frontend-origin.js';
+import {
+  type CollaborationContinuityCapsuleV1,
+  extractContinuityCapsuleFromAgentMessage,
+} from '../domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
@@ -28,7 +32,6 @@ import type { QueueProcessor } from '../domains/cats/services/agents/invocation/
 import type { PersistenceContext } from '../domains/cats/services/agents/routing/route-helpers.js';
 import { resetStreak } from '../domains/cats/services/agents/routing/WorklistRegistry.js';
 import {
-  accumulateTextAggregate,
   accumulateTextParts,
   flattenTextParts,
   flattenTurnTextParts,
@@ -760,6 +763,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           const collectedUsage = new Map<string, TokenUsage>();
           // F070: track governance block errorCode for recoverable failure marking
           let governanceErrorCode: string | undefined;
+          let continuationCapsule: CollaborationContinuityCapsuleV1 | null = null;
+
           // F088 ISSUE-15: Collect per-turn content for outbound delivery to connector platforms
           const outboundTurns: Array<{
             catId: string;
@@ -855,6 +860,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             }
             // F39 bugfix: stop broadcasting after cancel (drain pipe buffer silently)
             if (controller?.signal.aborted) break;
+            continuationCapsule = extractContinuityCapsuleFromAgentMessage(msg) ?? continuationCapsule;
             if (msg.type === 'done' && msg.catId && msg.metadata?.usage) {
               collectedUsage.set(msg.catId, mergeTokenUsage(collectedUsage.get(msg.catId), msg.metadata.usage));
             }
@@ -997,6 +1003,15 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 : {}),
             });
             finalStatus = 'succeeded';
+
+            if (continuationCapsule) {
+              opts.queueProcessor?.enqueueContinuation({
+                threadId: resolvedThreadId,
+                userId,
+                catId: primaryCat,
+                capsule: continuationCapsule,
+              });
+            }
 
             // Push notification: cat(s) finished responding
             const pushSvc = getPushNotificationService();

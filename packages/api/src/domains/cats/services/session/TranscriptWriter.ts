@@ -14,6 +14,10 @@
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import {
+  type CollaborationContinuityCapsuleV1,
+  extractContinuityCapsuleFromSystemInfo,
+} from '../agents/invocation/CollaborationContinuityCapsule.js';
 
 export interface TranscriptSessionInfo {
   sessionId: string;
@@ -56,6 +60,8 @@ export interface ExtractiveDigestV1 {
     invocationId?: string;
     content: string;
   }>;
+  /** Latest structured collaboration control-flow state captured at a seal boundary. */
+  continuityCapsule?: CollaborationContinuityCapsuleV1;
 }
 
 export interface TranscriptWriterOptions {
@@ -182,6 +188,7 @@ export class TranscriptWriter {
     const filePaths = new Map<string, Set<string>>(); // path → ops
     const errors: ExtractiveDigestV1['errors'] = [];
     const recentMessages: NonNullable<ExtractiveDigestV1['recentMessages']> = [];
+    let continuityCapsule: CollaborationContinuityCapsuleV1 | undefined;
 
     for (const entry of buf) {
       const evt = entry.event;
@@ -226,6 +233,9 @@ export class TranscriptWriter {
           message: (evt.error as string).slice(0, 500),
         });
       }
+      if (evtType === 'system_info' && typeof evt.content === 'string') {
+        continuityCapsule = extractContinuityCapsuleFromSystemInfo(evt.content) ?? continuityCapsule;
+      }
 
       const visibleText = extractVisibleAssistantText(evt);
       if (visibleText) {
@@ -255,6 +265,7 @@ export class TranscriptWriter {
       })),
       errors,
       recentMessages: recentMessages.slice(-5),
+      ...(continuityCapsule ? { continuityCapsule } : {}),
     };
   }
 

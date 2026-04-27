@@ -1471,6 +1471,111 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     );
   });
 
+  it('self-heal fresh retry preserves continuity capsule when retry triggers threshold seal', async () => {
+    const { buildCapsuleFromRouteState } = await import(
+      '../dist/domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js'
+    );
+    const activeRecord = {
+      id: 'sess-retry-seal',
+      catId: 'codex',
+      threadId: 'thread-retry-seal',
+      userId: 'user-retry-seal',
+      seq: 0,
+      status: 'active',
+      compressionCount: 0,
+    };
+    let invokeCount = 0;
+    const sealRequests = [];
+    const service = {
+      async *invoke() {
+        invokeCount++;
+        if (invokeCount === 1) {
+          yield {
+            type: 'error',
+            catId: 'codex',
+            error: 'No conversation found with session ID: stale-sess',
+            timestamp: Date.now(),
+          };
+          yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+          return;
+        }
+        yield {
+          type: 'done',
+          catId: 'codex',
+          timestamp: Date.now(),
+          metadata: {
+            provider: 'openai',
+            model: 'gpt-5.5',
+            usage: {
+              inputTokens: 90000,
+              outputTokens: 100,
+              contextWindowSize: 100000,
+            },
+          },
+        };
+      },
+    };
+
+    const deps = {
+      ...makeDeps(),
+      sessionManager: {
+        get: async () => 'stale-sess',
+        store: async () => {},
+        delete: async () => {},
+        resolveWorkingDirectory: () => '/tmp/test',
+      },
+      sessionChainStore: {
+        getChain: async () => [activeRecord],
+        getActive: async () => activeRecord,
+        create: async () => activeRecord,
+        update: async () => activeRecord,
+      },
+      sessionSealer: {
+        requestSeal: async (input) => {
+          sealRequests.push(input);
+          return { accepted: true, status: 'sealing' };
+        },
+        finalize: async () => {},
+        reconcileStuck: async () => 0,
+        reconcileAllStuck: async () => 0,
+      },
+    };
+
+    const msgs = await collect(
+      invokeSingleCat(deps, {
+        catId: 'codex',
+        service,
+        prompt: 'test',
+        userId: 'user-retry-seal',
+        threadId: 'thread-retry-seal',
+        isLastCat: true,
+        continuityCapsule: buildCapsuleFromRouteState({
+          threadId: 'thread-retry-seal',
+          catId: 'codex',
+          mode: 'independent',
+          a2aEnabled: true,
+        }),
+      }),
+    );
+
+    assert.equal(invokeCount, 2, 'should retry once after stale session error');
+    assert.equal(sealRequests.length, 1, 'retry attempt should still be eligible to seal');
+    const sealEvent = msgs.find((m) => {
+      if (m.type !== 'system_info') return false;
+      try {
+        return JSON.parse(m.content).type === 'session_seal_requested';
+      } catch {
+        return false;
+      }
+    });
+    assert.ok(sealEvent, 'retry seal should emit session_seal_requested');
+    const sealPayload = JSON.parse(sealEvent.content);
+    assert.equal(sealPayload.continuityCapsule.threadId, 'thread-retry-seal');
+    assert.equal(sealPayload.continuityCapsule.catId, 'codex');
+    assert.equal(sealPayload.continuityCapsule.continuationReason, 'threshold_seal');
+    assert.equal(sealPayload.continuityCapsule.seal.sessionId, 'sess-retry-seal');
+  });
+
   it('session self-heal: does not retry on non-session errors', async () => {
     let invokeCount = 0;
     const sessionDeletes = [];

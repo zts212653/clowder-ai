@@ -111,6 +111,7 @@ import type { ISessionChainStore } from '../../stores/ports/SessionChainStore.js
 import type { IThreadStore } from '../../stores/ports/ThreadStore.js';
 import type { AgentMessage, AgentService, AgentServiceOptions } from '../../types.js';
 import type { InvocationRegistry } from '../invocation/InvocationRegistry.js';
+import { completeCapsuleForSeal, type RouteStateContinuityCapsule } from './CollaborationContinuityCapsule.js';
 import type { ResumeFailureKind } from './invoke-helpers.js';
 import {
   classifyResumeFailure,
@@ -267,6 +268,8 @@ export interface InvocationParams {
   readonly a2aTriggerMessageId?: string;
   /** F153 Phase E: Parent route span — invocation span becomes its child */
   readonly routeSpan?: import('@opentelemetry/api').Span;
+  /** #502 PR2: structured route control state to persist on threshold seal. */
+  readonly continuityCapsule?: RouteStateContinuityCapsule;
 }
 
 /**
@@ -1467,7 +1470,20 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                           });
                           if (sealResult.accepted) {
                             sessionManager.delete(userId, catId, threadId).catch(() => {});
-                            outputs.push({
+                            const sealTimestamp = Date.now();
+                            const continuityCapsule = params.continuityCapsule
+                              ? completeCapsuleForSeal(params.continuityCapsule, {
+                                  invocationId,
+                                  createdAt: sealTimestamp,
+                                  seal: {
+                                    sessionId: activeRecord.id,
+                                    sessionSeq: activeRecord.seq + 1,
+                                    reason: action.reason,
+                                    healthSnapshot: health,
+                                  },
+                                })
+                              : undefined;
+                            const sealInfoMessage = {
                               type: 'system_info' as const,
                               catId,
                               content: JSON.stringify({
@@ -1477,9 +1493,25 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                                 sessionSeq: activeRecord.seq + 1,
                                 reason: action.reason,
                                 healthSnapshot: health,
+                                ...(continuityCapsule ? { continuityCapsule } : {}),
                               }),
-                              timestamp: Date.now(),
-                            });
+                              timestamp: sealTimestamp,
+                            };
+                            outputs.push(sealInfoMessage);
+                            if (deps.transcriptWriter) {
+                              const sessInfo: TranscriptSessionInfo = {
+                                sessionId: activeRecord.id,
+                                threadId,
+                                catId: activeRecord.catId,
+                                cliSessionId: activeRecord.cliSessionId,
+                                seq: activeRecord.seq,
+                              };
+                              deps.transcriptWriter.appendEvent(
+                                sessInfo,
+                                sealInfoMessage as unknown as Record<string, unknown>,
+                                invocationId,
+                              );
+                            }
                             deps.sessionSealer.finalize({ sessionId: activeRecord.id }).catch(() => {});
                           }
                         }

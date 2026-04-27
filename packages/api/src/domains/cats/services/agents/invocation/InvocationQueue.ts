@@ -542,6 +542,20 @@ export class InvocationQueue {
     return false;
   }
 
+  /** Check for any queued/processing entry targeting a cat, regardless of source. */
+  hasPendingForCat(threadId: string, catId: string, opts?: { excludeEntryId?: string }): boolean {
+    for (const [key, q] of this.queues) {
+      if (!key.startsWith(`${threadId}:`)) continue;
+      for (const e of q) {
+        if (opts?.excludeEntryId && e.id === opts.excludeEntryId) continue;
+        if ((e.status === 'queued' || e.status === 'processing') && e.targetCats.includes(catId)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   /** F122B: Mark a specific entry as processing by ID (cross-user). */
   markProcessingById(threadId: string, entryId: string): boolean {
     for (const [key, q] of this.queues) {
