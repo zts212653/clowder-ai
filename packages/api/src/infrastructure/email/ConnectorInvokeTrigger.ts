@@ -113,6 +113,7 @@ export class ConnectorInvokeTrigger {
         sender,
         priority,
         policy?.sourceCategory,
+        policy?.suggestedSkill,
       );
     }
 
@@ -143,6 +144,7 @@ export class ConnectorInvokeTrigger {
     sender?: { id: string; name?: string },
     priority: 'urgent' | 'normal' = 'normal',
     sourceCategory?: string,
+    suggestedSkill?: string,
   ): 'full' | 'enqueued' {
     const { invocationQueue, socketManager, log } = this.opts;
     const result = invocationQueue.enqueue({
@@ -157,6 +159,7 @@ export class ConnectorInvokeTrigger {
         ? { sourceCategory: sourceCategory as 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' }
         : {}),
       ...(sender ? { senderMeta: sender } : {}),
+      ...(suggestedSkill ? { suggestedSkill } : {}),
     });
 
     if (result.outcome === 'full') {

@@ -39,6 +39,8 @@ export interface QueueEntry {
   sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a';
   /** F175: user drag-reorder position — explicit values override priority in dequeue */
   position?: number;
+  /** F175: skill hint for connector triggers — flows through as promptTags on execution */
+  suggestedSkill?: string;
 }
 
 export interface EnqueueResult {
@@ -107,10 +109,12 @@ export class InvocationQueue {
       | 'callerCatId'
       | 'priority'
       | 'position'
+      | 'suggestedSkill'
     > & {
       autoExecute?: boolean;
       callerCatId?: string;
       priority?: 'urgent' | 'normal';
+      suggestedSkill?: string;
     },
   ): EnqueueResult {
     const key = this.scopeKey(input.threadId, input.userId);
@@ -141,6 +145,7 @@ export class InvocationQueue {
       senderMeta: input.senderMeta,
       priority: input.priority ?? 'normal',
       sourceCategory: input.sourceCategory,
+      suggestedSkill: input.suggestedSkill,
       position: undefined,
     };
     q.push(entry);

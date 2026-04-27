@@ -681,7 +681,7 @@ export class QueueProcessor {
         threadId,
         messageId,
         targetCats,
-        { intent },
+        { intent, ...(entry.suggestedSkill ? { promptTags: [`skill:${entry.suggestedSkill}`] } : {}) },
         {
           ...(contentBlocks.length > 0 ? { contentBlocks } : {}),
           ...(controller.signal ? { signal: controller.signal } : {}),
