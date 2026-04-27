@@ -11,7 +11,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, sep } from 'node:path';
 import { type CatId, type ConnectorSource, catRegistry } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import * as lark from '@larksuiteoapi/node-sdk';
@@ -190,6 +190,16 @@ export interface ConnectorGatewayHandle {
   /** F132 bugfix: live adapter getter for health reporting (instance changes on restart) */
   readonly getWeComBotAdapter: () => WeComBotAdapter | null;
   stop(): Promise<void>;
+}
+
+/**
+ * Path traversal guard for media route -> local file resolution.
+ * Accepts mixed "/" URLs even on Windows where native separator is "\".
+ */
+export function isWithinBasePath(base: string, resolved: string, nativeSep = sep): boolean {
+  return (
+    resolved === base || resolved.startsWith(base + nativeSep) || (nativeSep !== '/' && resolved.startsWith(base + '/'))
+  );
 }
 
 export function loadConnectorGatewayConfig(): ConnectorGatewayConfig {
@@ -874,7 +884,7 @@ export async function startConnectorGateway(
     // Phase J P1: guard against path traversal (e.g. /uploads/../../etc/passwd)
     const safeResolve = (base: string, suffix: string): string | undefined => {
       const resolved = resolve(base, suffix);
-      if (!(resolved.startsWith(base + '/') || resolved === base)) return undefined;
+      if (!isWithinBasePath(base, resolved)) return undefined;
       return existsSync(resolved) ? resolved : undefined;
     };
     if (url.startsWith('/uploads/')) return safeResolve(uploadDir, url.slice('/uploads/'.length));
