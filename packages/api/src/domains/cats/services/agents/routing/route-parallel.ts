@@ -26,6 +26,7 @@ import type { StoredToolEvent } from '../../stores/ports/MessageStore.js';
 import type { Thread, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
 import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
+import { buildCapsuleFromRouteState } from '../invocation/CollaborationContinuityCapsule.js';
 import { invokeSingleCat } from '../invocation/invoke-single-cat.js';
 import { buildMcpCallbackInstructions, needsMcpInjection } from '../invocation/McpPromptInjector.js';
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
@@ -228,6 +229,13 @@ export async function* routeParallel(
         ...(alwaysOnDocs && alwaysOnInjectionMode === 'on' ? { alwaysOnDocs } : {}),
         ...guideContextForCat(guideCtx, catId, targetCatIds, threadId),
       });
+      const continuityCapsule = buildCapsuleFromRouteState({
+        threadId,
+        catId: catId as string,
+        ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
+        mode: 'parallel',
+        a2aEnabled: false,
+      });
 
       const targetContentBlocks = routeContentBlocksForCat(catId, contentBlocks);
       const targetUploadDir = targetContentBlocks ? uploadDir : undefined;
@@ -393,6 +401,7 @@ export async function* routeParallel(
         ...(signal ? { signal } : {}),
         ...(staticIdentity ? { systemPrompt: staticIdentity } : {}),
         ...(options.routeSpan ? { routeSpan: options.routeSpan } : {}),
+        continuityCapsule,
         isLastCat: false,
       });
     }),

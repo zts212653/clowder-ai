@@ -611,6 +611,57 @@ describe('QueueProcessor', () => {
     }
   });
 
+  it('continuation dispatch skips stale queued agent work before starting the fresh continuation', async () => {
+    const originalNow = Date.now;
+    let now = 3_000_000;
+    Date.now = () => now;
+    const routeContents = [];
+    try {
+      const dispatchDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* (_userId, content, _threadId, _messageId, targetCats) {
+            routeContents.push(content);
+            yield { type: 'text', catId: targetCats[0], content: 'ok', timestamp: Date.now() };
+            yield { type: 'done', catId: targetCats[0], timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+      });
+      const dispatchProcessor = new QueueProcessor(dispatchDeps);
+      enqueueEntry(dispatchDeps.queue, {
+        source: 'agent',
+        targetCats: ['opus'],
+        content: 'stale queued zombie',
+      });
+      now += InvocationQueue.STALE_QUEUED_THRESHOLD_MS + 1;
+      const capsule = completeCapsuleForSeal(
+        buildCapsuleFromRouteState({
+          threadId: 't1',
+          catId: 'opus',
+          mode: 'independent',
+          a2aEnabled: true,
+        }),
+        {
+          invocationId: 'inv-fresh-continuation',
+          createdAt: now,
+          seal: { sessionId: 'sess-fresh-continuation', sessionSeq: 1, reason: 'threshold' },
+        },
+      );
+
+      const outcome = dispatchProcessor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
+      assert.equal(outcome.outcome, 'enqueued');
+
+      await dispatchProcessor.onInvocationComplete('t1', 'opus', 'succeeded');
+      await new Promise((r) => setTimeout(r, 80));
+
+      assert.ok(routeContents.length > 0, 'fresh continuation should be dispatched');
+      assert.match(routeContents[0], /\[System Continuation\]/);
+      assert.doesNotMatch(routeContents[0], /stale queued zombie/);
+    } finally {
+      Date.now = originalNow;
+    }
+  });
+
   it('enqueueContinuation rate-limits after five continuations per hour for a thread cat', async () => {
     const capsule = completeCapsuleForSeal(
       buildCapsuleFromRouteState({
