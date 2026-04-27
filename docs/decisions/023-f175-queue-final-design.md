@@ -22,13 +22,13 @@ issue #564 暴露了这个旁路的实际危害：opus 在 A2A round 2 执行中
 
 ### 1. Priority 是排序维度，不是旁路
 
-删除 `handleUrgentTrigger()` 和所有 urgent 分支。所有消息（user / connector / agent）走 `enqueueWhileActive()`，`priority: 'urgent'` 的语义从"抢占当前执行"变为"在队列内优先出队"。
+删除 `handleUrgentTrigger()` 和所有 urgent 分支。active-slot 时所有消息（user / connector / agent）走 `enqueueWhileActive()`；idle slot 保留 fast path 直接执行。`priority: 'urgent'` 的语义从"抢占当前执行"变为"在队列内优先出队"。消除的是 urgent bypass（active 时的旁路抢占），不是 idle fast path。
 
 ### 2. 多维排序 comparator
 
 ```
 compareEntries(a, b):
-  1. explicit position（用户拖动）— 有 > 无，小 > 大
+  1. explicit position（用户拖动）— 有 > 无，小 > 大（仅同 userId 条目间比较；shared thread 中不同用户的拖动互不干扰）
   2. priority（urgent=0 > normal=1）
   3. createdAt（FIFO 兜底）
 ```

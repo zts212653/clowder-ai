@@ -29,7 +29,7 @@ F133 KD-4 记录了 urgent 抢占的原始设计意图："失败消息应抢占�
 **1. 消除 urgent bypass**
 
 - 删除 `ConnectorInvokeTrigger.handleUrgentTrigger()` 和 urgent 分支（L105-118, L228-234）
-- 所有消息（user / connector / agent）走 `enqueueWhileActive()`，透传 `priority` 和 `sourceCategory`
+- active-slot 时所有消息（user / connector / agent）走 `enqueueWhileActive()`，透传 `priority` 和 `sourceCategory`；idle slot 保留 fast path 直接执行
 - 4 个 urgent 调用方不改（仍设 `priority: 'urgent'`），语义从"抢占"变为"优先出队"
 
 **2. QueueEntry 扩展**
@@ -47,13 +47,13 @@ interface QueueEntry {
 
 ```
 peekOldestAcrossUsers(threadId):
-  1. 显式 position（用户手动拖动）— 最高优先
+  1. 显式 position（用户手动拖动）— 同 userId 内最高优先（跨用户不干扰）
   2. priority（urgent > normal）
   3. sourceCategory 同优先级内 FIFO
   4. createdAt 兜底
 ```
 
-只有显式手动 position 的 entry 才覆盖 priority；未手动排序的 entry 仍按 `priority → createdAt` 默认出队。
+只有显式手动 position 的 entry 才覆盖 priority（仅同 userId 条目间比较；shared thread 中不同用户的拖动互不干扰）；未手动排序的 entry 仍按 `priority → createdAt` 默认出队。
 
 **4. 取消用户消息强制 merge + 出队时 user-message batching**
 
@@ -121,7 +121,7 @@ QueueProcessor 出队时：
 ## Acceptance Criteria
 
 ### Phase A（后端统一）
-- [ ] AC-A1: `handleUrgentTrigger()` 和 urgent 分支已删除，所有 connector 消息走 `enqueueWhileActive()`
+- [ ] AC-A1: `handleUrgentTrigger()` 和 urgent 分支已删除，active-slot 时所有 connector 消息走 `enqueueWhileActive()`（idle slot 保留 fast path）
 - [ ] AC-A2: QueueEntry 有 `priority` 字段，4 个 urgent 调用方正确透传
 - [ ] AC-A3: 出队逻辑 priority-first — urgent 消息在 normal 前面被处理
 - [ ] AC-A4: 用户手动 position 覆盖 priority 排序（仅显式设置时）
@@ -160,7 +160,7 @@ QueueProcessor 出队时：
 | 取消 merge 后用户消息 batching 判定条件遗漏 | 严格对齐现有 merge 条件（userId + intent + targetCats Set equality），不能少不能多 |
 | priority ordering 改变出队顺序可能影响现有用户体验 | urgent 消息本来就走 bypass 不在队列里，现在进队列但排前面，用户可见性反而提高 |
 | connector/agent 队列无硬上限可能 runaway | 现有 guard 组合覆盖主要场景（去重 + depth limit + stale 清理），实践中监控 |
-| 前端拖动排序和后端 position 的一致性 | position 是 optional number，未设置时走默认排序，设置时绝对优先 |
+| 前端拖动排序和后端 position 的一致性 | position 是 optional number，未设置时走默认排序，设置时同 userId 内优先（跨用户不干扰） |
 
 ## Key Decisions
 
@@ -170,7 +170,7 @@ QueueProcessor 出队时：
 | KD-2 | Priority 是排序维度不是旁路 | urgent 消息自动置顶但在队列内，用户可见可控；不再有绕过队列的抢占路径 | 2026-04-23 |
 | KD-3 | 队列容量按 source 分别限制 | user 消息有上限（防刷屏），connector/agent 不限制 — 系统消息不应因队列满而丢弃 | 2026-04-23 |
 | KD-4 | 跨优先级自动 dequeue | "猫猫不主动停"的协作语义；用户要停可以 steer/cancel | 2026-04-24 |
-| KD-5 | 拖动排序覆盖 priority（仅显式 position） | CVO 用户意图至上；未手动排序的 entry 仍按 priority 排序 | 2026-04-24 |
+| KD-5 | 拖动排序覆盖 priority（仅同 userId 内显式 position） | CVO 用户意图至上；跨用户不干扰，未手动排序的 entry 仍按 priority 排序 | 2026-04-24 |
 | KD-6 | 不做通用 targetCat batching | 跨 source 的 batching 是新执行语义，回归面不可控，留作独立 design issue | 2026-04-24 |
 | KD-7 | signal.aborted 安全门控保留 | 正确的并发保护，修复的是 signal 被错误 abort，不是门控本身 | 2026-04-24 |
 
