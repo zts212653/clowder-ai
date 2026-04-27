@@ -427,6 +427,46 @@ describe('InvocationQueue', () => {
     );
   });
 
+  it('hasQueuedForThread prunes stale queued agent entries instead of leaving ghost rows', () => {
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'stale handoff',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+    const listed = queue.list('t1', 'system');
+    listed[0].createdAt = Date.now() - InvocationQueue.STALE_QUEUED_THRESHOLD_MS - 1;
+
+    assert.equal(queue.hasQueuedForThread('t1'), false);
+    assert.equal(queue.list('t1', 'system').length, 0, 'stale agent row must be physically removed');
+  });
+
+  it('markProcessingAcrossUsers prunes stale queued agent entries before selecting fresh work', () => {
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'stale handoff',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+    const stale = queue.list('t1', 'system');
+    stale[0].createdAt = Date.now() - InvocationQueue.STALE_QUEUED_THRESHOLD_MS - 1;
+
+    queue.enqueue(entry({ userId: 'alice', content: 'fresh user work' }));
+    const marked = queue.markProcessingAcrossUsers('t1');
+
+    assert.equal(marked.userId, 'alice');
+    assert.equal(marked.content, 'fresh user work');
+    assert.equal(queue.list('t1', 'system').length, 0, 'stale agent row must not survive dispatch scan');
+  });
+
   // ── F122B: agent source + autoExecute ──
 
   it('accepts agent source with autoExecute and callerCatId', () => {
