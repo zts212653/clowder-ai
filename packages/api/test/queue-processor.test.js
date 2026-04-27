@@ -588,7 +588,7 @@ describe('QueueProcessor', () => {
     assert.equal(deps.queue.list('t1', 'u1').length, 1);
   });
 
-  it('enqueueContinuation ignores stale queued entries when checking existing pending work', async () => {
+  it('enqueueContinuation respects old queued agent work when checking existing pending work', async () => {
     const originalNow = Date.now;
     let now = 1_000_000;
     Date.now = () => now;
@@ -611,8 +611,8 @@ describe('QueueProcessor', () => {
 
       const outcome = processor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
 
-      assert.equal(outcome.outcome, 'enqueued');
-      assert.equal(outcome.entry?.targetCats[0], 'opus');
+      assert.equal(outcome.outcome, 'skipped_existing_entry');
+      assert.equal(deps.queue.list('t1', 'u1').length, 1, 'old queued agent work must not be dropped');
     } finally {
       Date.now = originalNow;
     }
@@ -683,7 +683,7 @@ describe('QueueProcessor', () => {
     }
   });
 
-  it('continuation dispatch skips stale queued agent work before starting the fresh continuation', async () => {
+  it('continuation dispatch preserves old queued agent work when the slot frees', async () => {
     const originalNow = Date.now;
     let now = 3_000_000;
     Date.now = () => now;
@@ -703,7 +703,7 @@ describe('QueueProcessor', () => {
       enqueueEntry(dispatchDeps.queue, {
         source: 'agent',
         targetCats: ['opus'],
-        content: 'stale queued zombie',
+        content: 'old queued handoff',
       });
       now += InvocationQueue.STALE_QUEUED_THRESHOLD_MS + 1;
       const capsule = completeCapsuleForSeal(
@@ -721,14 +721,13 @@ describe('QueueProcessor', () => {
       );
 
       const outcome = dispatchProcessor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
-      assert.equal(outcome.outcome, 'enqueued');
+      assert.equal(outcome.outcome, 'skipped_existing_entry');
 
       await dispatchProcessor.onInvocationComplete('t1', 'opus', 'succeeded');
       await new Promise((r) => setTimeout(r, 80));
 
-      assert.ok(routeContents.length > 0, 'fresh continuation should be dispatched');
-      assert.match(routeContents[0], /\[System Continuation\]/);
-      assert.doesNotMatch(routeContents[0], /stale queued zombie/);
+      assert.ok(routeContents.length > 0, 'old queued agent work should be dispatched');
+      assert.match(routeContents[0], /old queued handoff/);
     } finally {
       Date.now = originalNow;
     }
@@ -1125,7 +1124,7 @@ describe('QueueProcessor', () => {
       assert.equal(deps.invocationTracker.startAll.mock.calls.length, 0, 'should not execute user entries');
     });
 
-    it('prunes stale queued autoExecute entries older than threshold', async () => {
+    it('executes old queued autoExecute entries older than threshold when the slot is free', async () => {
       enqueueEntry(deps.queue, {
         userId: 'system',
         source: 'agent',
@@ -1141,8 +1140,12 @@ describe('QueueProcessor', () => {
       await processor.tryAutoExecute('t1');
       await new Promise((r) => setTimeout(r, 50));
 
-      assert.equal(deps.invocationTracker.startAll.mock.calls.length, 0, 'stale autoExecute entry must not start');
-      assert.equal(deps.queue.list('t1', 'system').length, 0, 'stale autoExecute entry must be removed');
+      assert.equal(deps.invocationTracker.startAll.mock.calls.length, 1, 'old autoExecute entry must still start');
+      assert.equal(
+        deps.queue.list('t1', 'system').length,
+        0,
+        'old autoExecute entry should be removed after execution',
+      );
     });
 
     it('autoExecute entry bypasses pause state', async () => {

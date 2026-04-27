@@ -188,6 +188,7 @@ export class TranscriptWriter {
     const filePaths = new Map<string, Set<string>>(); // path → ops
     const errors: ExtractiveDigestV1['errors'] = [];
     const recentMessages: NonNullable<ExtractiveDigestV1['recentMessages']> = [];
+    const recentMessageByStream = new Map<string, NonNullable<ExtractiveDigestV1['recentMessages']>[number]>();
     let continuityCapsule: CollaborationContinuityCapsuleV1 | undefined;
 
     for (const entry of buf) {
@@ -237,13 +238,33 @@ export class TranscriptWriter {
         continuityCapsule = extractContinuityCapsuleFromSystemInfo(evt.content) ?? continuityCapsule;
       }
 
-      const visibleText = extractVisibleAssistantText(evt);
+      const streamKey =
+        evtType === 'text' && entry.invocationId !== undefined
+          ? `${entry.invocationId}:${typeof evt.catId === 'string' ? evt.catId : session.catId}`
+          : null;
+      const visibleText = extractVisibleAssistantText(evt, { trim: streamKey === null });
       if (visibleText) {
-        recentMessages.push({
-          role: 'assistant',
-          ...(entry.invocationId !== undefined ? { invocationId: entry.invocationId } : {}),
-          content: visibleText.slice(0, 1200),
-        });
+        if (streamKey) {
+          const existing = recentMessageByStream.get(streamKey);
+          if (existing) {
+            existing.content = coalesceVisibleText(existing.content, visibleText, evt.textMode).slice(0, 1200);
+            moveToEnd(recentMessages, existing);
+          } else {
+            const message = {
+              role: 'assistant' as const,
+              ...(entry.invocationId !== undefined ? { invocationId: entry.invocationId } : {}),
+              content: visibleText.slice(0, 1200),
+            };
+            recentMessages.push(message);
+            recentMessageByStream.set(streamKey, message);
+          }
+        } else {
+          recentMessages.push({
+            role: 'assistant',
+            ...(entry.invocationId !== undefined ? { invocationId: entry.invocationId } : {}),
+            content: visibleText.slice(0, 1200),
+          });
+        }
       }
     }
 
@@ -305,15 +326,15 @@ export class TranscriptWriter {
   }
 }
 
-function extractVisibleAssistantText(evt: Record<string, unknown>): string | null {
+function extractVisibleAssistantText(evt: Record<string, unknown>, opts?: { trim?: boolean }): string | null {
   if (evt.type === 'text' && typeof evt.content === 'string') {
-    return normalizeVisibleText(evt.content);
+    return normalizeVisibleText(evt.content, opts);
   }
 
   if (evt.type === 'assistant') {
     const content = evt.content;
     if (typeof content === 'string') {
-      return normalizeVisibleText(content);
+      return normalizeVisibleText(content, opts);
     }
     if (Array.isArray(content)) {
       const text = content
@@ -324,14 +345,30 @@ function extractVisibleAssistantText(evt: Record<string, unknown>): string | nul
         })
         .filter(Boolean)
         .join('\n');
-      return normalizeVisibleText(text);
+      return normalizeVisibleText(text, opts);
     }
   }
 
   return null;
 }
 
-function normalizeVisibleText(text: string): string | null {
-  const normalized = text.replace(/[\x00-\x08\x0b-\x1f]/g, '').trim();
-  return normalized.length > 0 ? normalized : null;
+function normalizeVisibleText(text: string, opts?: { trim?: boolean }): string | null {
+  const sanitized = text.replace(/[\x00-\x08\x0b-\x1f]/g, '');
+  if (sanitized.trim().length === 0) return null;
+  return opts?.trim === false ? sanitized : sanitized.trim();
+}
+
+function coalesceVisibleText(existing: string, next: string, textMode: unknown): string {
+  if (textMode === 'replace') {
+    return next;
+  }
+  return `${existing}${next}`;
+}
+
+function moveToEnd<T>(items: T[], item: T): void {
+  const index = items.indexOf(item);
+  if (index >= 0 && index !== items.length - 1) {
+    items.splice(index, 1);
+    items.push(item);
+  }
 }

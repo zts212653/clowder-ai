@@ -346,6 +346,43 @@ describe('TranscriptWriter', () => {
       );
     });
 
+    test('coalesces streamed text chunks before keeping recent messages', async () => {
+      const { TranscriptWriter } = await loadModules();
+      const writer = new TranscriptWriter({ dataDir: tmpDir });
+
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'text', catId: 'codex', content: 'Hello ', textMode: 'append', timestamp: Date.now() },
+        'inv-stream',
+      );
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'text', catId: 'codex', content: 'world', textMode: 'append', timestamp: Date.now() },
+        'inv-stream',
+      );
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'text', catId: 'codex', content: 'Draft', textMode: 'replace', timestamp: Date.now() },
+        'inv-replace',
+      );
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'text', catId: 'codex', content: 'Final answer', textMode: 'replace', timestamp: Date.now() },
+        'inv-replace',
+      );
+
+      const digest = writer.generateExtractiveDigest(SESSION_INFO, {
+        createdAt: 1000,
+        sealedAt: 2000,
+      });
+
+      assert.deepEqual(
+        digest.recentMessages.map((msg) => msg.content),
+        ['Hello world', 'Final answer'],
+        'stream chunks should not occupy separate recent message slots',
+      );
+    });
+
     test('captures latest continuity capsule from session seal system_info', async () => {
       const { TranscriptWriter } = await loadModules();
       const writer = new TranscriptWriter({ dataDir: tmpDir });

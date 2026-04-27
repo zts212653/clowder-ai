@@ -322,9 +322,9 @@ describe('InvocationQueue', () => {
     assert.equal(queue.list('t1', 'u1').length, 0);
   });
 
-  // ── Stale agent entry defense (review P1/P2) ──
+  // ── Old queued agent entry defense (review P1/P2) ──
 
-  it('enqueue does NOT merge into stale agent tail entry', () => {
+  it('enqueue keeps old agent tail entry live while preserving F175 no-merge semantics', () => {
     queue.enqueue({
       threadId: 't1',
       userId: 'system',
@@ -339,7 +339,7 @@ describe('InvocationQueue', () => {
     const listed = queue.list('t1', 'system');
     listed[0].createdAt = Date.now() - 120_000;
 
-    // New A2A handoff for same cat — must NOT merge into stale tail
+    // New A2A handoff for same cat stays independent under F175, and the old entry is not pruned.
     const r2 = queue.enqueue({
       threadId: 't1',
       userId: 'system',
@@ -350,15 +350,11 @@ describe('InvocationQueue', () => {
       autoExecute: true,
       callerCatId: 'opus',
     });
-    assert.equal(r2.outcome, 'enqueued', 'must create fresh entry, not merge into stale tail');
-    // Fresh entry must have its own createdAt (not inherited stale timestamp)
-    assert.ok(
-      r2.entry.createdAt > Date.now() - 5_000,
-      'fresh entry createdAt must be recent, not inherited from stale tail',
-    );
+    assert.equal(r2.outcome, 'enqueued', 'F175 keeps queued entries independent instead of merging');
+    assert.equal(queue.list('t1', 'system').length, 2, 'old queued agent work is still live pending work');
   });
 
-  it('countAgentEntriesForThread excludes stale queued agent entries', () => {
+  it('countAgentEntriesForThread includes old queued agent entries', () => {
     queue.enqueue({
       threadId: 't1',
       userId: 'system',
@@ -385,13 +381,13 @@ describe('InvocationQueue', () => {
 
     assert.equal(
       queue.countAgentEntriesForThread('t1'),
-      1,
-      'stale queued agent entries must not count toward A2A depth limit',
+      2,
+      'old queued agent entries still count because they are pending work, not zombies',
     );
   });
 
-  it('enqueue does NOT return full when capacity is only occupied by stale agent entries', () => {
-    // Fill to MAX_QUEUE_DEPTH with agent entries, then backdate them all to stale
+  it('agent enqueue bypasses user depth while old queued agent entries remain pending work', () => {
+    // Fill to MAX_QUEUE_DEPTH with agent entries, then backdate them all.
     for (let i = 0; i < 5; i++) {
       queue.enqueue({
         threadId: 't1',
@@ -409,7 +405,7 @@ describe('InvocationQueue', () => {
       e.createdAt = Date.now() - 120_000; // stale (> 60s threshold)
     }
 
-    // New enqueue must succeed — stale entries should not block capacity
+    // F175 only depth-limits user messages; agent work bypasses user queue depth but remains counted.
     const r = queue.enqueue({
       threadId: 't1',
       userId: 'system',
@@ -420,14 +416,11 @@ describe('InvocationQueue', () => {
       autoExecute: true,
       callerCatId: 'opus',
     });
-    assert.equal(
-      r.outcome,
-      'enqueued',
-      'stale queued agent entries must not consume capacity — otherwise thread locks up until restart',
-    );
+    assert.equal(r.outcome, 'enqueued');
+    assert.equal(queue.countAgentEntriesForThread('t1'), 6);
   });
 
-  it('hasQueuedForThread prunes stale queued agent entries instead of leaving ghost rows', () => {
+  it('hasQueuedForThread keeps old queued agent entries visible for dispatch', () => {
     queue.enqueue({
       threadId: 't1',
       userId: 'system',
@@ -441,11 +434,11 @@ describe('InvocationQueue', () => {
     const listed = queue.list('t1', 'system');
     listed[0].createdAt = Date.now() - InvocationQueue.STALE_QUEUED_THRESHOLD_MS - 1;
 
-    assert.equal(queue.hasQueuedForThread('t1'), false);
-    assert.equal(queue.list('t1', 'system').length, 0, 'stale agent row must be physically removed');
+    assert.equal(queue.hasQueuedForThread('t1'), true);
+    assert.equal(queue.list('t1', 'system').length, 1, 'old agent row must remain queued for dispatch');
   });
 
-  it('markProcessingAcrossUsers prunes stale queued agent entries before selecting fresh work', () => {
+  it('markProcessingAcrossUsers dispatches old queued agent entries instead of deleting them', () => {
     queue.enqueue({
       threadId: 't1',
       userId: 'system',
@@ -462,9 +455,9 @@ describe('InvocationQueue', () => {
     queue.enqueue(entry({ userId: 'alice', content: 'fresh user work' }));
     const marked = queue.markProcessingAcrossUsers('t1');
 
-    assert.equal(marked.userId, 'alice');
-    assert.equal(marked.content, 'fresh user work');
-    assert.equal(queue.list('t1', 'system').length, 0, 'stale agent row must not survive dispatch scan');
+    assert.equal(marked.userId, 'system');
+    assert.equal(marked.content, 'stale handoff');
+    assert.equal(queue.list('t1', 'system')[0].status, 'processing');
   });
 
   // ── F122B: agent source + autoExecute ──
@@ -549,7 +542,7 @@ describe('InvocationQueue', () => {
     assert.equal(queue.hasQueuedAgentForCat('t1', 'opus'), false, 'user entries should not block A2A dedup');
   });
 
-  it('hasQueuedAgentForCat returns false for stale queued entry (> STALE_QUEUED_THRESHOLD_MS)', () => {
+  it('hasQueuedAgentForCat returns true for old queued entry (> STALE_QUEUED_THRESHOLD_MS)', () => {
     queue.enqueue({
       threadId: 't1',
       userId: 'system',
@@ -565,8 +558,8 @@ describe('InvocationQueue', () => {
     listed[0].createdAt = Date.now() - 120_000;
     assert.equal(
       queue.hasQueuedAgentForCat('t1', 'codex'),
-      false,
-      'stale queued entry (>60s) must NOT block A2A callback dedup — causes permanent routing deadlock',
+      true,
+      'old queued entry (>60s) remains valid pending work and should block duplicate A2A enqueue',
     );
   });
 
@@ -586,7 +579,7 @@ describe('InvocationQueue', () => {
     assert.equal(queue.hasQueuedAgentForCat('t1', 'codex'), false);
   });
 
-  it('listAutoExecute ignores stale queued entries older than threshold', () => {
+  it('listAutoExecute includes old queued entries older than threshold', () => {
     queue.enqueue({
       threadId: 't1',
       userId: 'system',
@@ -614,11 +607,11 @@ describe('InvocationQueue', () => {
     listed[1].createdAt = Date.now() - InvocationQueue.STALE_QUEUED_THRESHOLD_MS - 1;
 
     const autoEntries = queue.listAutoExecute('t1');
-    assert.equal(autoEntries.length, 1, 'stale queued autoExecute entries must be filtered out');
-    assert.equal(autoEntries[0].targetCats[0], 'codex');
+    assert.equal(autoEntries.length, 2, 'old queued autoExecute entries must remain dispatchable');
+    assert.deepEqual(autoEntries.map((entry) => entry.targetCats[0]).sort(), ['codex', 'opencode']);
   });
 
-  // ── hasActiveOrQueuedAgentForCat: processing + fresh queued block, stale queued does not ──
+  // ── hasActiveOrQueuedAgentForCat: processing + queued entries block, regardless of queued age ──
 
   it('hasActiveOrQueuedAgentForCat returns true for fresh queued entry (cross-path dedup)', () => {
     queue.enqueue({
@@ -638,7 +631,7 @@ describe('InvocationQueue', () => {
     );
   });
 
-  it('hasActiveOrQueuedAgentForCat returns false for stale queued entry (> threshold)', () => {
+  it('hasActiveOrQueuedAgentForCat returns true for old queued entry (> threshold)', () => {
     queue.enqueue({
       threadId: 't1',
       userId: 'system',
@@ -654,8 +647,8 @@ describe('InvocationQueue', () => {
     q[0].createdAt = Date.now() - 120_000; // 2 minutes ago
     assert.equal(
       queue.hasActiveOrQueuedAgentForCat('t1', 'codex'),
-      false,
-      'stale queued entry (>60s) must NOT block text-scan A2A — may never execute',
+      true,
+      'old queued entry (>60s) is still pending work and must block duplicate text-scan A2A',
     );
   });
 

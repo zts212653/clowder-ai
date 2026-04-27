@@ -384,15 +384,11 @@ export class InvocationQueue {
 
   /** F122B: List all queued autoExecute entries for a thread (for scanning past busy slots). */
   listAutoExecute(threadId: string): QueueEntry[] {
-    const now = Date.now();
     const result: QueueEntry[] = [];
     for (const [key, q] of this.queues) {
       if (!key.startsWith(`${threadId}:`)) continue;
       for (const e of q) {
         if (e.status !== 'queued' || !e.autoExecute) continue;
-        // Keep auto-execute scan consistent with dedup guard semantics:
-        // stale queued entries must not be picked up indefinitely.
-        if (now - e.createdAt >= InvocationQueue.STALE_QUEUED_THRESHOLD_MS) continue;
         result.push({ ...e });
       }
     }
@@ -400,17 +396,14 @@ export class InvocationQueue {
   }
 
   /** F122B: Count queued+processing agent-sourced entries for a thread (depth tracking).
-   *  Stale defense: queued entries older than STALE_QUEUED_THRESHOLD_MS are excluded
-   *  so zombie entries don't eat up the A2A depth quota. */
+   *  Queued entries are valid pending work regardless of age; processing entries
+   *  have their own stale guard in hasActiveOrQueuedAgentForCat/hasPendingForCat. */
   countAgentEntriesForThread(threadId: string): number {
-    const now = Date.now();
     let count = 0;
     for (const [key, q] of this.queues) {
       if (!key.startsWith(`${threadId}:`)) continue;
       for (const e of q) {
         if (e.source !== 'agent') continue;
-        // Exclude stale queued entries (zombie defense) — processing entries always count
-        if (e.status === 'queued' && now - e.createdAt >= InvocationQueue.STALE_QUEUED_THRESHOLD_MS) continue;
         count++;
       }
     }
@@ -420,34 +413,12 @@ export class InvocationQueue {
   /** F122B: Check if a specific cat already has a queued agent entry for this thread.
    *  Used by callback-a2a-trigger for dedup — only checks 'queued' so that new handoffs
    *  can still be enqueued while an earlier entry is processing.
-   *
-   *  Stale defense: entries older than STALE_QUEUED_THRESHOLD_MS are ignored.
-   *  Without this, a zombie queued entry (e.g. from a canceled invocation that
-   *  didn't clean up) would permanently block all subsequent @mentions for that
-   *  cat in that thread until server restart. */
+   */
   hasQueuedAgentForCat(threadId: string, catId: string): boolean {
-    const now = Date.now();
     for (const [key, q] of this.queues) {
       if (!key.startsWith(`${threadId}:`)) continue;
       for (const e of q) {
         if (e.source === 'agent' && e.status === 'queued' && e.targetCats.includes(catId)) {
-          const queuedAge = now - e.createdAt;
-          if (queuedAge >= InvocationQueue.STALE_QUEUED_THRESHOLD_MS) {
-            this.log?.warn(
-              {
-                threadId,
-                catId,
-                matchedEntry: {
-                  entryId: e.id,
-                  status: e.status,
-                  queuedAgeMs: queuedAge,
-                  userId: key.split(':')[1] ?? '',
-                },
-              },
-              '[DIAG] hasQueuedAgentForCat: ignoring stale queued entry (zombie defense)',
-            );
-            continue;
-          }
           return true;
         }
       }
@@ -463,12 +434,10 @@ export class InvocationQueue {
    * Zombie processing entries (invocation hung without cleanup) are ignored to
    * prevent permanent A2A routing deadlock.
    *
-   * 'queued' entries only block if created within STALE_QUEUED_THRESHOLD_MS — fresh entries
-   * are legitimate pending dispatches that tryAutoExecute will pick up.
-   * Stale queued entries (older than threshold) are ignored — they may never execute
-   * (tryAutoExecute can fail to start them if the slot stays busy), and blocking
-   * on them causes permanent A2A deadlock.
+   * 'queued' entries always block: they are legitimate pending dispatches and
+   * listAutoExecute/markProcessingAcrossUsers will still pick them up after a long wait.
    */
+  /** @deprecated queued agent entries are no longer expired by age; retained for old migration tests. */
   static readonly STALE_QUEUED_THRESHOLD_MS = 60_000;
   static readonly STALE_PROCESSING_THRESHOLD_MS = 600_000; // 10 minutes
 
@@ -519,23 +488,20 @@ export class InvocationQueue {
         }
 
         if (e.status === 'queued') {
-          const queuedAge = now - e.createdAt;
-          if (queuedAge < InvocationQueue.STALE_QUEUED_THRESHOLD_MS) {
-            this.log?.info(
-              {
-                threadId,
-                catId,
-                matchedEntry: {
-                  entryId: e.id,
-                  status: e.status,
-                  queuedAgeMs: queuedAge,
-                  userId: key.split(':')[1] ?? '',
-                },
+          this.log?.info(
+            {
+              threadId,
+              catId,
+              matchedEntry: {
+                entryId: e.id,
+                status: e.status,
+                queuedAgeMs: now - e.createdAt,
+                userId: key.split(':')[1] ?? '',
               },
-              '[DIAG] hasActiveOrQueuedAgentForCat hit',
-            );
-            return true;
-          }
+            },
+            '[DIAG] hasActiveOrQueuedAgentForCat hit',
+          );
+          return true;
         }
       }
     }
@@ -552,23 +518,6 @@ export class InvocationQueue {
         if (!e.targetCats.includes(catId)) continue;
 
         if (e.status === 'queued') {
-          const queuedAge = now - e.createdAt;
-          if (e.source === 'agent' && queuedAge >= InvocationQueue.STALE_QUEUED_THRESHOLD_MS) {
-            this.log?.warn(
-              {
-                threadId,
-                catId,
-                matchedEntry: {
-                  entryId: e.id,
-                  status: e.status,
-                  queuedAgeMs: queuedAge,
-                  userId: key.split(':')[1] ?? '',
-                },
-              },
-              '[DIAG] hasPendingForCat: ignoring stale queued entry (zombie defense)',
-            );
-            continue;
-          }
           return true;
         }
 
