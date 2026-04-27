@@ -16,9 +16,7 @@ const servers = [];
 
 function reservedRuntimePorts() {
   const source = readFileSync(reviewStartSource, 'utf8');
-  return source.includes('3003|3004|3011|3012|4111')
-    ? { web: '3003', api: '3004' }
-    : { web: '3001', api: '3002' };
+  return source.includes('3003|3004|3011|3012|4111') ? { web: '3003', api: '3004' } : { web: '3001', api: '3002' };
 }
 
 function createSandbox() {
