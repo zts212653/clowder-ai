@@ -1008,7 +1008,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               opts.queueProcessor?.enqueueContinuation({
                 threadId: resolvedThreadId,
                 userId,
-                catId: primaryCat,
+                catId: continuationCapsule.catId,
                 capsule: continuationCapsule,
               });
             }

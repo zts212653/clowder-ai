@@ -102,10 +102,13 @@ export function formatContinuationPrompt(capsule: CollaborationContinuityCapsule
 }
 
 export function extractContinuityCapsuleFromAgentMessage(
-  msg: { type?: unknown; content?: unknown } | undefined,
+  msg: { type?: unknown; content?: unknown; catId?: unknown } | undefined,
 ): CollaborationContinuityCapsuleV1 | null {
   if (!msg || msg.type !== 'system_info' || typeof msg.content !== 'string') return null;
-  return extractContinuityCapsuleFromSystemInfo(msg.content);
+  const capsule = extractContinuityCapsuleFromSystemInfo(msg.content);
+  if (!capsule) return null;
+  if (typeof msg.catId === 'string' && msg.catId.length > 0 && msg.catId !== capsule.catId) return null;
+  return capsule;
 }
 
 export function extractContinuityCapsuleFromSystemInfo(content: string): CollaborationContinuityCapsuleV1 | null {

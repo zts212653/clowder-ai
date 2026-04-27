@@ -544,11 +544,52 @@ export class InvocationQueue {
 
   /** Check for any queued/processing entry targeting a cat, regardless of source. */
   hasPendingForCat(threadId: string, catId: string, opts?: { excludeEntryId?: string }): boolean {
+    const now = Date.now();
     for (const [key, q] of this.queues) {
       if (!key.startsWith(`${threadId}:`)) continue;
       for (const e of q) {
         if (opts?.excludeEntryId && e.id === opts.excludeEntryId) continue;
-        if ((e.status === 'queued' || e.status === 'processing') && e.targetCats.includes(catId)) {
+        if (!e.targetCats.includes(catId)) continue;
+
+        if (e.status === 'queued') {
+          const queuedAge = now - e.createdAt;
+          if (e.source === 'agent' && queuedAge >= InvocationQueue.STALE_QUEUED_THRESHOLD_MS) {
+            this.log?.warn(
+              {
+                threadId,
+                catId,
+                matchedEntry: {
+                  entryId: e.id,
+                  status: e.status,
+                  queuedAgeMs: queuedAge,
+                  userId: key.split(':')[1] ?? '',
+                },
+              },
+              '[DIAG] hasPendingForCat: ignoring stale queued entry (zombie defense)',
+            );
+            continue;
+          }
+          return true;
+        }
+
+        if (e.status === 'processing') {
+          const processingAge = now - (e.processingStartedAt ?? e.createdAt);
+          if (processingAge >= InvocationQueue.STALE_PROCESSING_THRESHOLD_MS) {
+            this.log?.warn(
+              {
+                threadId,
+                catId,
+                matchedEntry: {
+                  entryId: e.id,
+                  status: e.status,
+                  processingAgeMs: processingAge,
+                  userId: key.split(':')[1] ?? '',
+                },
+              },
+              '[DIAG] hasPendingForCat: ignoring stale processing entry (zombie defense)',
+            );
+            continue;
+          }
           return true;
         }
       }

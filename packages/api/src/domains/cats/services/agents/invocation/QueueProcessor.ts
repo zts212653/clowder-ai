@@ -995,7 +995,7 @@ export class QueueProcessor {
           queue.removeProcessedAcrossUsers(threadId, bid);
         }
         if (continuationCapsule) {
-          this.enqueueContinuation({ threadId, userId, catId: primaryCat, capsule: continuationCapsule });
+          this.enqueueContinuation({ threadId, userId, catId: continuationCapsule.catId, capsule: continuationCapsule });
         }
       } else {
         for (const bid of batchedEntryIds) {

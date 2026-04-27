@@ -367,6 +367,53 @@ describe('POST /api/messages deliveryMode', () => {
     assert.equal(call.capsule.seal.sessionId, 'sess-1');
   });
 
+  it('immediate multi-cat execution schedules continuation for the capsule owner cat', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+    deps.router.resolveTargetsAndIntent.mock.mockImplementation(async () => ({
+      targetCats: ['opus', 'codex'],
+      intent: { intent: 'execute' },
+    }));
+    const capsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 'thread-1',
+        catId: 'codex',
+        mode: 'parallel',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-codex-seal',
+        createdAt: Date.now(),
+        seal: { sessionId: 'sess-codex', sessionSeq: 1, reason: 'threshold' },
+      },
+    );
+    deps.router.routeExecution.mock.mockImplementation(async function* () {
+      yield {
+        type: 'system_info',
+        catId: 'codex',
+        content: JSON.stringify({ type: 'session_seal_requested', continuityCapsule: capsule }),
+        timestamp: Date.now(),
+      };
+      yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '触发 codex seal', threadId: 'thread-1', deliveryMode: 'immediate' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.equal(deps.queueProcessor.enqueueContinuation.mock.calls.length, 1);
+    const call = deps.queueProcessor.enqueueContinuation.mock.calls[0].arguments[0];
+    assert.equal(call.threadId, 'thread-1');
+    assert.equal(call.userId, 'user-1');
+    assert.equal(call.catId, 'codex');
+    assert.equal(call.capsule.seal.sessionId, 'sess-codex');
+  });
+
   // ── P1-1: multipart deliveryMode extraction ──
 
   it('multipart request with deliveryMode=force → cancels and executes immediately', async () => {
