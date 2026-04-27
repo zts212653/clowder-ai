@@ -153,6 +153,15 @@ export class InvocationQueue {
     return { outcome: 'enqueued', entry: { ...entry }, queuePosition: q.length };
   }
 
+  /** Check if any entry in the thread already carries this messageId (connector retry dedup). */
+  hasEntryWithMessageId(threadId: string, messageId: string): boolean {
+    for (const [key, q] of this.queues) {
+      if (!key.startsWith(threadId + ':')) continue;
+      if (q.some((e) => e.messageId === messageId || e.mergedMessageIds?.includes(messageId))) return true;
+    }
+    return false;
+  }
+
   /** Backfill messageId on a new entry (null → value). */
   backfillMessageId(threadId: string, userId: string, entryId: string, messageId: string): void {
     const e = this.findEntry(threadId, userId, entryId);

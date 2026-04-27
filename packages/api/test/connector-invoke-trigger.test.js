@@ -1102,6 +1102,27 @@ describe('ConnectorInvokeTrigger', () => {
       assert.strictEqual(entries[0].priority, 'urgent');
     });
 
+    it('connector retry with same messageId does not create duplicate queue entry', async () => {
+      trackerMock.setActive('thread-1', 'user-1');
+      const trigger = createTrigger();
+      const policy = { priority: 'urgent', reason: 'webhook_retry' };
+
+      // First trigger — should enqueue
+      const r1 = trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'CI failed', 'msg-retry-1', undefined, policy);
+      assert.strictEqual(r1, 'enqueued');
+      assert.strictEqual(queue.list('thread-1', 'user-1').length, 1);
+
+      // Second trigger with same messageId — should be deduped
+      const r2 = trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'CI failed', 'msg-retry-1', undefined, policy);
+      assert.strictEqual(r2, 'enqueued', 'Duplicate should return enqueued (idempotent)');
+      assert.strictEqual(queue.list('thread-1', 'user-1').length, 1, 'Queue should still have exactly 1 entry');
+
+      // Different messageId — should enqueue normally
+      const r3 = trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'New event', 'msg-different', undefined, policy);
+      assert.strictEqual(r3, 'enqueued');
+      assert.strictEqual(queue.list('thread-1', 'user-1').length, 2, 'Different messageId should enqueue');
+    });
+
     it('suggestedSkill passes through to direct execution when no active invocation', async () => {
       const trigger = createTrigger();
       const policy = { priority: 'urgent', reason: 'github_ci_failure', suggestedSkill: 'merge-gate' };
