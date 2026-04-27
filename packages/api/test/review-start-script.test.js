@@ -14,11 +14,6 @@ const reviewStartSource = join(repoRoot, 'scripts', 'review-start.sh');
 const tempDirs = [];
 const servers = [];
 
-function reservedRuntimePorts() {
-  const source = readFileSync(reviewStartSource, 'utf8');
-  return source.includes('3003|3004|3011|3012|4111') ? { web: '3003', api: '3004' } : { web: '3001', api: '3002' };
-}
-
 function createSandbox() {
   const root = mkdtempSync(join(tmpdir(), 'cc-review-start-'));
   tempDirs.push(root);
@@ -98,7 +93,7 @@ describe('review-start.sh', () => {
 
   it('rejects documented runtime reserved ports', () => {
     const { root, binDir } = createSandbox();
-    const ports = reservedRuntimePorts();
+    const ports = { web: '3003', api: '3004' };
 
     const result = spawnSync(
       'bash',
