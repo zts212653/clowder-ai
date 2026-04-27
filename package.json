@@ -68,14 +68,7 @@
     "proxy:anthropic": "node ./scripts/anthropic-proxy.mjs",
     "logs:health": "bash ./scripts/logs-health.sh",
     "clean": "pnpm -r run clean && rm -rf node_modules",
-    "check:start-profile-isolation": "node --test scripts/start-dev-profile-isolation.test.mjs",
-    "desktop:prepare": "npm --prefix ./desktop install --include=dev",
-    "desktop:dev": "pnpm desktop:prepare && npm --prefix ./desktop run start",
-    "desktop:dev:unix": "env -u ELECTRON_RUN_AS_NODE pnpm desktop:prepare && env -u ELECTRON_RUN_AS_NODE npm --prefix ./desktop run start",
-    "desktop:pack": "pnpm desktop:prepare && npm --prefix ./desktop run pack",
-    "desktop:build": "pnpm desktop:prepare && npm --prefix ./desktop run dist",
-    "desktop:build:mac": "bash ./desktop/scripts/build-mac.sh",
-    "desktop:installer": "powershell -ExecutionPolicy Bypass -File .\\desktop\\scripts\\build-desktop.ps1"
+    "check:start-profile-isolation": "node --test scripts/start-dev-profile-isolation.test.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.1",
