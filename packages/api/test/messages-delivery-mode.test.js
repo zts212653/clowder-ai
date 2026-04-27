@@ -121,7 +121,7 @@ describe('POST /api/messages deliveryMode', () => {
     assert.equal(queueUpdate.arguments[2].action, 'enqueued');
   });
 
-  it('queue mode → merges same-user consecutive messages', async () => {
+  it('queue mode → same-user consecutive messages are independent entries (F175: no merge)', async () => {
     deps.invocationTracker.has.mock.mockImplementation(() => true);
 
     // First message
@@ -132,7 +132,7 @@ describe('POST /api/messages deliveryMode', () => {
       payload: { content: '第一条', threadId: 'thread-1', deliveryMode: 'queue' },
     });
 
-    // Second message — same user, same target → should merge
+    // Second message — same user, same target → independent entry (F175)
     const res = await app.inject({
       method: 'POST',
       url: '/api/messages',
@@ -143,13 +143,13 @@ describe('POST /api/messages deliveryMode', () => {
     assert.equal(res.statusCode, 202);
     const body = JSON.parse(res.body);
     assert.equal(body.status, 'queued');
-    assert.equal(body.merged, true);
+    assert.equal(body.merged, false, 'F175: no merge, each message is independent');
 
-    // Queue should have 1 entry (merged)
+    // Queue should have 2 separate entries
     const queue = deps.invocationQueue.list('thread-1', 'user-1');
-    assert.equal(queue.length, 1);
-    assert.ok(queue[0].content.includes('第一条'));
-    assert.ok(queue[0].content.includes('第二条'));
+    assert.equal(queue.length, 2);
+    assert.equal(queue[0].content, '第一条');
+    assert.equal(queue[1].content, '第二条');
   });
 
   it('queue mode → returns 429 when queue full (no ghost message)', async () => {

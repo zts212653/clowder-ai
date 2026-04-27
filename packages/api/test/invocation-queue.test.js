@@ -81,33 +81,33 @@ describe('InvocationQueue', () => {
     assert.equal(queue.size('t1', 'u1'), 1); // only 'b' counts
   });
 
-  // ── Merge ──
+  // ── F175: no merge — every entry is independent ──
 
-  it('merges same-source same-target consecutive entries', () => {
+  it('same-source same-target entries are independent (F175 no merge)', () => {
     const r1 = queue.enqueue(entry({ content: '猫猫' }));
     assert.equal(r1.outcome, 'enqueued');
-
     const r2 = queue.enqueue(entry({ content: '你好' }));
-    assert.equal(r2.outcome, 'merged');
-    assert.equal(r2.entry.content, '猫猫\n你好');
-    assert.equal(queue.size('t1', 'u1'), 1);
+    assert.equal(r2.outcome, 'enqueued');
+    assert.equal(queue.size('t1', 'u1'), 2);
+    assert.equal(queue.list('t1', 'u1')[0].content, '猫猫');
+    assert.equal(queue.list('t1', 'u1')[1].content, '你好');
   });
 
-  it('does NOT merge different-source entries', () => {
+  it('different-source entries are independent', () => {
     queue.enqueue(entry({ source: 'user' }));
     const r2 = queue.enqueue(entry({ source: 'connector' }));
     assert.equal(r2.outcome, 'enqueued');
     assert.equal(queue.size('t1', 'u1'), 2);
   });
 
-  it('does NOT merge different-targetCats entries', () => {
+  it('different-targetCats entries are independent', () => {
     queue.enqueue(entry({ content: '@opus 你好', targetCats: ['opus'] }));
     const r2 = queue.enqueue(entry({ content: '@codex 帮忙看看', targetCats: ['codex'] }));
     assert.equal(r2.outcome, 'enqueued');
     assert.equal(queue.size('t1', 'u1'), 2);
   });
 
-  it('does NOT merge if tail is processing', () => {
+  it('entries after processing entry are independent', () => {
     queue.enqueue(entry({ content: 'first' }));
     queue.markProcessing('t1', 'u1');
     const r2 = queue.enqueue(entry({ content: 'second' }));
@@ -115,16 +115,14 @@ describe('InvocationQueue', () => {
     assert.equal(queue.list('t1', 'u1').length, 2);
   });
 
-  it('does NOT merge different-intent entries', () => {
+  it('different-intent entries are independent', () => {
     queue.enqueue(entry({ intent: 'execute' }));
     const r2 = queue.enqueue(entry({ intent: 'whisper' }));
     assert.equal(r2.outcome, 'enqueued');
     assert.equal(queue.size('t1', 'u1'), 2);
   });
 
-  // ── F134: connector messages never merge ──
-
-  it('does NOT merge consecutive connector entries (F134 group chat safety)', () => {
+  it('consecutive connector entries are independent', () => {
     const r1 = queue.enqueue(entry({ source: 'connector', content: 'msg from user A' }));
     assert.equal(r1.outcome, 'enqueued');
     const r2 = queue.enqueue(entry({ source: 'connector', content: 'msg from user B' }));
@@ -132,11 +130,11 @@ describe('InvocationQueue', () => {
     assert.equal(queue.size('t1', 'u1'), 2);
   });
 
-  it('still merges consecutive user entries (F134 does not affect non-connector)', () => {
+  it('consecutive user entries are independent (F175)', () => {
     queue.enqueue(entry({ source: 'user', content: 'first' }));
     const r2 = queue.enqueue(entry({ source: 'user', content: 'second' }));
-    assert.equal(r2.outcome, 'merged');
-    assert.equal(queue.size('t1', 'u1'), 1);
+    assert.equal(r2.outcome, 'enqueued');
+    assert.equal(queue.size('t1', 'u1'), 2);
   });
 
   it('preserves senderMeta on enqueued connector entry', () => {
@@ -157,31 +155,6 @@ describe('InvocationQueue', () => {
     assert.equal(r.entry.messageId, null);
     queue.backfillMessageId('t1', 'u1', r.entry.id, 'msg-123');
     assert.equal(queue.list('t1', 'u1')[0].messageId, 'msg-123');
-  });
-
-  it('appendMergedMessageId adds to mergedMessageIds (does NOT overwrite messageId)', () => {
-    const r1 = queue.enqueue(entry({ content: 'hi' }));
-    queue.backfillMessageId('t1', 'u1', r1.entry.id, 'msg-1');
-
-    const r2 = queue.enqueue(entry({ content: 'hello' }));
-    assert.equal(r2.outcome, 'merged');
-    queue.appendMergedMessageId('t1', 'u1', r2.entry.id, 'msg-2');
-
-    const e = queue.list('t1', 'u1')[0];
-    assert.equal(e.messageId, 'msg-1'); // NOT overwritten
-    assert.deepEqual(e.mergedMessageIds, ['msg-2']);
-  });
-
-  // ── Merge rollback ──
-
-  it('rollbackMerge restores pre-merge content', () => {
-    queue.enqueue(entry({ content: '猫猫' }));
-    const r2 = queue.enqueue(entry({ content: '你好' }));
-    assert.equal(r2.outcome, 'merged');
-    assert.equal(r2.entry.content, '猫猫\n你好');
-
-    queue.rollbackMerge('t1', 'u1', r2.entry.id);
-    assert.equal(queue.list('t1', 'u1')[0].content, '猫猫');
   });
 
   // ── Move / reorder ──
@@ -330,82 +303,23 @@ describe('InvocationQueue', () => {
     assert.equal(removed, null);
   });
 
-  // ── Cloud R2 P1: rollbackEnqueue must clear preMergeSnapshots ──
+  // ── rollbackEnqueue removes entry (F175: no merge, simplified) ──
 
-  it('rollbackEnqueue clears preMergeSnapshots so subsequent rollbackMerge does not restore ghost content', () => {
-    // A enqueues
+  it('rollbackEnqueue removes the entry from queue', () => {
     const rA = queue.enqueue(entry({ content: 'A msg' }));
-    const entryId = rA.entry.id;
-
-    // B merges into A (same user/source/target/intent)
     queue.enqueue(entry({ content: 'B msg' }));
-
-    // A's write fails → rollbackEnqueue strips A's content, keeps B's
-    queue.rollbackEnqueue('t1', 'u1', entryId);
+    queue.rollbackEnqueue('t1', 'u1', rA.entry.id);
     const afterRollback = queue.list('t1', 'u1');
     assert.equal(afterRollback.length, 1);
     assert.equal(afterRollback[0].content, 'B msg');
-
-    // Now B's write also fails → rollbackMerge should NOT restore A's ghost content
-    queue.rollbackMerge('t1', 'u1', entryId);
-    const afterBRollback = queue.list('t1', 'u1');
-    // Entry should still have B's content (or be removed), NOT A's
-    assert.ok(
-      !afterBRollback[0]?.content.includes('A msg'),
-      'rollbackMerge after rollbackEnqueue should not reintroduce A ghost content',
-    );
   });
 
-  // ── Cloud R3 P2: rollbackEnqueue must promote merged messageId ──
-
-  it('rollbackEnqueue promotes mergedMessageIds[0] to messageId', () => {
-    // A enqueues
-    const rA = queue.enqueue(entry({ content: 'A msg' }));
-    const entryId = rA.entry.id;
-
-    // B merges into A
-    const _rB = queue.enqueue(entry({ content: 'B msg' }));
-
-    // Simulate B's messageStore.append succeeded → appendMergedMessageId
-    queue.appendMergedMessageId('t1', 'u1', entryId, 'msg-B');
-
-    // A's write fails → rollbackEnqueue
-    queue.rollbackEnqueue('t1', 'u1', entryId);
-
-    const remaining = queue.list('t1', 'u1');
-    assert.equal(remaining.length, 1);
-    assert.equal(remaining[0].content, 'B msg');
-    // messageId should be promoted from mergedMessageIds, not null
-    assert.equal(
-      remaining[0].messageId,
-      'msg-B',
-      'rollbackEnqueue should promote surviving mergedMessageIds[0] to messageId',
-    );
-    // mergedMessageIds should have the promoted ID removed
-    assert.ok(!remaining[0].mergedMessageIds.includes('msg-B'), 'promoted ID should be removed from mergedMessageIds');
-  });
-
-  // ── Cloud R2 P2: clear() must purge rollback metadata ──
-
-  it('clear() purges originalContents and preMergeSnapshots', () => {
-    // Enqueue + merge to populate both metadata maps
-    const _rA = queue.enqueue(entry({ content: 'original' }));
-    queue.enqueue(entry({ content: 'merged' })); // merges into A
-
-    // Clear the queue
+  it('clear() purges originalContents metadata', () => {
+    queue.enqueue(entry({ content: 'a' }));
+    queue.enqueue(entry({ content: 'b' }));
     const cleared = queue.clear('t1', 'u1');
-    assert.equal(cleared.length, 1);
+    assert.equal(cleared.length, 2);
     assert.equal(queue.list('t1', 'u1').length, 0);
-
-    // Re-enqueue with same-shape entry — rollbackEnqueue should NOT see stale metadata
-    const rB = queue.enqueue(entry({ content: 'fresh' }));
-    // Simulate: someone else merges
-    queue.enqueue(entry({ content: 'fresh-merge' }));
-    // rollbackEnqueue on the NEW entry should work cleanly
-    queue.rollbackEnqueue('t1', 'u1', rB.entry.id);
-    const remaining = queue.list('t1', 'u1');
-    assert.equal(remaining.length, 1);
-    assert.equal(remaining[0].content, 'fresh-merge');
   });
 
   // ── Stale agent entry defense (review P1/P2) ──
@@ -845,5 +759,275 @@ describe('InvocationQueue', () => {
       false,
       'connector-sourced entries should not block A2A text-scan',
     );
+  });
+
+  // ── F175: priority / sourceCategory / position fields ──
+
+  it('enqueue preserves priority field', () => {
+    const result = queue.enqueue(entry({ priority: 'urgent', sourceCategory: 'ci' }));
+    assert.equal(result.entry.priority, 'urgent');
+    assert.equal(result.entry.sourceCategory, 'ci');
+  });
+
+  it('defaults priority to normal when omitted', () => {
+    const result = queue.enqueue(entry());
+    assert.equal(result.entry.priority, 'normal');
+    assert.equal(result.entry.sourceCategory, undefined);
+    assert.equal(result.entry.position, undefined);
+  });
+
+  it('priority field survives list() round-trip', () => {
+    queue.enqueue(entry({ priority: 'urgent', sourceCategory: 'review' }));
+    const listed = queue.list('t1', 'u1');
+    assert.equal(listed[0].priority, 'urgent');
+    assert.equal(listed[0].sourceCategory, 'review');
+  });
+
+  it('position field is undefined by default', () => {
+    const result = queue.enqueue(entry());
+    assert.equal(result.entry.position, undefined);
+  });
+
+  // ── F175: no merge — every message is independent ──
+
+  it('same-source same-target user messages are NOT merged (F175)', () => {
+    queue.enqueue(entry({ content: 'a' }));
+    queue.enqueue(entry({ content: 'b' }));
+    const list = queue.list('t1', 'u1');
+    assert.equal(list.length, 2);
+    assert.equal(list[0].content, 'a');
+    assert.equal(list[1].content, 'b');
+  });
+
+  // ── F175: source-specific capacity ──
+
+  it('connector messages bypass MAX_QUEUE_DEPTH (F175)', () => {
+    for (let i = 0; i < 7; i++) {
+      const r = queue.enqueue(entry({ content: `msg${i}`, source: 'connector', targetCats: ['c1'] }));
+      assert.equal(r.outcome, 'enqueued', `connector entry ${i} should enqueue`);
+    }
+    assert.equal(queue.list('t1', 'u1').length, 7);
+  });
+
+  it('agent messages bypass MAX_QUEUE_DEPTH (F175)', () => {
+    for (let i = 0; i < 7; i++) {
+      const r = queue.enqueue(entry({ content: `msg${i}`, source: 'agent', targetCats: [`c${i}`] }));
+      assert.equal(r.outcome, 'enqueued', `agent entry ${i} should enqueue`);
+    }
+  });
+
+  it('user messages still limited by MAX_QUEUE_DEPTH (F175)', () => {
+    for (let i = 0; i < 5; i++) {
+      queue.enqueue(entry({ content: `msg${i}`, targetCats: [`c${i}`] }));
+    }
+    const r = queue.enqueue(entry({ content: 'overflow', targetCats: ['overflow'] }));
+    assert.equal(r.outcome, 'full');
+  });
+
+  // ── F175: multi-dimensional dequeue ordering ──
+
+  it('urgent entry dequeues before normal via peekOldestAcrossUsers', () => {
+    queue.enqueue(entry({ userId: 'u1', content: 'normal-first', priority: 'normal' }));
+    queue.enqueue(
+      entry({ userId: 'u2', content: 'urgent-second', source: 'connector', targetCats: ['c1'], priority: 'urgent' }),
+    );
+    const next = queue.peekOldestAcrossUsers('t1');
+    assert.equal(next.content, 'urgent-second');
+    assert.equal(next.priority, 'urgent');
+  });
+
+  it('same priority orders by createdAt (FIFO)', () => {
+    queue.enqueue(entry({ userId: 'u1', content: 'first', priority: 'normal' }));
+    queue.enqueue(
+      entry({ userId: 'u2', content: 'second', source: 'connector', targetCats: ['c1'], priority: 'normal' }),
+    );
+    const next = queue.peekOldestAcrossUsers('t1');
+    assert.equal(next.content, 'first');
+  });
+
+  it('markProcessingAcrossUsers picks urgent before normal', () => {
+    queue.enqueue(entry({ userId: 'u1', content: 'normal', priority: 'normal' }));
+    queue.enqueue(
+      entry({ userId: 'u2', content: 'urgent', source: 'connector', targetCats: ['c1'], priority: 'urgent' }),
+    );
+    const picked = queue.markProcessingAcrossUsers('t1');
+    assert.equal(picked.content, 'urgent');
+    assert.equal(picked.status, 'processing');
+  });
+
+  it('explicit position overrides priority in dequeue', () => {
+    queue.enqueue(
+      entry({ userId: 'u1', content: 'urgent-no-pos', source: 'connector', targetCats: ['c1'], priority: 'urgent' }),
+    );
+    const r = queue.enqueue(
+      entry({ userId: 'u1', content: 'normal-with-pos', targetCats: ['c2'], priority: 'normal' }),
+    );
+    queue.setPosition('t1', 'u1', r.entry.id, 0);
+    const next = queue.peekOldestAcrossUsers('t1');
+    assert.equal(next.content, 'normal-with-pos');
+  });
+
+  it('setPosition returns false for processing entry', () => {
+    queue.enqueue(entry({ content: 'a' }));
+    const processing = queue.markProcessing('t1', 'u1');
+    assert.equal(queue.setPosition('t1', 'u1', processing.id, 0), false);
+  });
+
+  it('setPosition returns false for non-existent entry', () => {
+    assert.equal(queue.setPosition('t1', 'u1', 'nonexistent', 0), false);
+  });
+
+  it('position does not let one user jump ahead of another in cross-user scheduling', () => {
+    queue.enqueue(entry({ userId: 'alice', content: 'alice-first' }));
+    const bobEntry = queue.enqueue(entry({ userId: 'bob', content: 'bob-second' }));
+    queue.setPosition('t1', 'bob', bobEntry.entry.id, 0);
+
+    const next = queue.peekOldestAcrossUsers('t1');
+    assert.equal(next.userId, 'alice', 'alice enqueued first — position should not let bob jump ahead cross-user');
+  });
+
+  // ── F175 Task 5: collectUserBatch ──
+
+  it('collectUserBatch collects adjacent user entries with same userId+intent+targetCats', () => {
+    queue.enqueue(entry({ content: 'a', source: 'user', targetCats: ['c1'], intent: 'execute' }));
+    queue.enqueue(entry({ content: 'b', source: 'user', targetCats: ['c1'], intent: 'execute' }));
+    queue.enqueue(entry({ content: 'c', source: 'user', targetCats: ['c1'], intent: 'execute' }));
+    const batch = queue.collectUserBatch('t1', 'u1');
+    assert.equal(batch.length, 3);
+    assert.equal(batch.map((e) => e.content).join('\n'), 'a\nb\nc');
+  });
+
+  it('collectUserBatch stops at different intent', () => {
+    queue.enqueue(entry({ content: 'a', source: 'user', targetCats: ['c1'], intent: 'execute' }));
+    queue.enqueue(entry({ content: 'b', source: 'user', targetCats: ['c1'], intent: 'search' }));
+    const batch = queue.collectUserBatch('t1', 'u1');
+    assert.equal(batch.length, 1);
+    assert.equal(batch[0].content, 'a');
+  });
+
+  it('collectUserBatch stops at connector/agent entry', () => {
+    queue.enqueue(entry({ content: 'a', source: 'user', targetCats: ['c1'], intent: 'execute' }));
+    queue.enqueue(entry({ content: 'b', source: 'connector', targetCats: ['c1'], intent: 'execute' }));
+    queue.enqueue(entry({ content: 'c', source: 'user', targetCats: ['c1'], intent: 'execute' }));
+    const batch = queue.collectUserBatch('t1', 'u1');
+    assert.equal(batch.length, 1);
+  });
+
+  it('collectUserBatch does not batch across different targetCats', () => {
+    queue.enqueue(entry({ content: 'a', source: 'user', targetCats: ['c1'], intent: 'execute' }));
+    queue.enqueue(entry({ content: 'b', source: 'user', targetCats: ['c1', 'c2'], intent: 'execute' }));
+    const batch = queue.collectUserBatch('t1', 'u1');
+    assert.equal(batch.length, 1);
+  });
+
+  it('collectUserBatch returns single-entry batch for connector source', () => {
+    queue.enqueue(entry({ content: 'a', source: 'connector', targetCats: ['c1'], intent: 'execute' }));
+    queue.enqueue(entry({ content: 'b', source: 'connector', targetCats: ['c1'], intent: 'execute' }));
+    const batch = queue.collectUserBatch('t1', 'u1');
+    assert.equal(batch.length, 1);
+    assert.equal(batch[0].content, 'a');
+  });
+
+  it('collectUserBatch returns empty array for empty queue', () => {
+    const batch = queue.collectUserBatch('t1', 'u1');
+    assert.equal(batch.length, 0);
+  });
+
+  it('collectUserBatch skips processing entries and starts from first queued', () => {
+    queue.enqueue(entry({ content: 'processing', source: 'user', targetCats: ['c1'], intent: 'execute' }));
+    queue.markProcessing('t1', 'u1');
+    queue.enqueue(entry({ content: 'a', source: 'user', targetCats: ['c1'], intent: 'execute' }));
+    queue.enqueue(entry({ content: 'b', source: 'user', targetCats: ['c1'], intent: 'execute' }));
+    const batch = queue.collectUserBatch('t1', 'u1');
+    assert.equal(batch.length, 2);
+    assert.equal(batch[0].content, 'a');
+    assert.equal(batch[1].content, 'b');
+  });
+
+  // ── P2-3 fix: markProcessing/peekNextQueued must respect comparator ──
+
+  it('markProcessing respects position override (P2-3)', () => {
+    const rA = queue.enqueue(entry({ content: 'A' }));
+    const rB = queue.enqueue(entry({ content: 'B' }));
+    queue.setPosition('t1', 'u1', rB.entry.id, 0);
+
+    const processing = queue.markProcessing('t1', 'u1');
+    assert.equal(processing.content, 'B', 'markProcessing should pick position-0 entry first');
+  });
+
+  it('peekNextQueued respects priority ordering (P2-3)', () => {
+    queue.enqueue(entry({ content: 'normal', priority: 'normal' }));
+    queue.enqueue(entry({ content: 'urgent', priority: 'urgent' }));
+
+    const next = queue.peekNextQueued('t1', 'u1');
+    assert.equal(next.content, 'urgent', 'peekNextQueued should return urgent entry first');
+  });
+
+  // ── R2-P1: promote() must win over existing position in comparator ──
+
+  it('promote() makes entry win comparator even when another has position=0 (R2-P1)', () => {
+    const rA = queue.enqueue(entry({ content: 'A' }));
+    const rB = queue.enqueue(entry({ content: 'B' }));
+    queue.setPosition('t1', 'u1', rB.entry.id, 0);
+
+    queue.promote('t1', 'u1', rA.entry.id);
+
+    const next = queue.peekNextQueued('t1', 'u1');
+    assert.equal(next.content, 'A', 'promoted entry should beat position=0 in comparator');
+  });
+
+  it('move(up) swaps position with neighbor in comparator order (R2-P1)', () => {
+    const rA = queue.enqueue(entry({ content: 'A' }));
+    const rB = queue.enqueue(entry({ content: 'B' }));
+    queue.setPosition('t1', 'u1', rA.entry.id, 5);
+    queue.setPosition('t1', 'u1', rB.entry.id, 0);
+
+    // B is at position 0 (first), A is at position 5 (second)
+    // move A up → should swap with B
+    queue.move('t1', 'u1', rA.entry.id, 'up');
+
+    const next = queue.peekNextQueued('t1', 'u1');
+    assert.equal(next.content, 'A', 'after move up, A should be first in comparator');
+  });
+
+  it('move(up) on 3+ entries without positions only swaps adjacent pair (R3-P1)', () => {
+    queue.enqueue(entry({ content: 'A' }));
+    queue.enqueue(entry({ content: 'B' }));
+    const rC = queue.enqueue(entry({ content: 'C' }));
+
+    queue.move('t1', 'u1', rC.entry.id, 'up');
+
+    const items = queue.list('t1', 'u1').map((e) => e.content);
+    assert.deepStrictEqual(items, ['A', 'C', 'B'], 'move(C, up) should only swap C and B');
+  });
+
+  it('move(down) on 3+ entries without positions only swaps adjacent pair (R3-P1)', () => {
+    queue.enqueue(entry({ content: 'A' }));
+    const rB = queue.enqueue(entry({ content: 'B' }));
+    queue.enqueue(entry({ content: 'C' }));
+
+    queue.move('t1', 'u1', rB.entry.id, 'down');
+
+    const items = queue.list('t1', 'u1').map((e) => e.content);
+    assert.deepStrictEqual(items, ['A', 'C', 'B'], 'move(B, down) should only swap B and C');
+  });
+
+  // ── R2-P2: collectUserBatch returns entries in comparator order ──
+
+  it('collectUserBatch returns entries sorted by comparator (R2-P2)', () => {
+    queue.enqueue(entry({ content: 'B' }));
+    const rD = queue.enqueue(entry({ content: 'D' }));
+    const rE = queue.enqueue(entry({ content: 'E' }));
+    // Array order: B, D, E. Set positions: D=0, E=1, B=2
+    queue.setPosition('t1', 'u1', rD.entry.id, 0);
+    queue.setPosition('t1', 'u1', rE.entry.id, 1);
+    // B has no position → comparator puts it after positioned entries
+
+    // Mark D as processing (simulating processNext picked it)
+    queue.markProcessing('t1', 'u1');
+
+    const batch = queue.collectUserBatch('t1', 'u1');
+    const contents = batch.map((e) => e.content);
+    assert.deepStrictEqual(contents, ['E', 'B'], 'batch should follow comparator order: E(pos=1) then B(no pos)');
   });
 });

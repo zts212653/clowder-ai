@@ -151,7 +151,7 @@ export interface ConnectorGatewayDeps {
       message: string,
       messageId: string,
       ...args: unknown[]
-    ): 'dispatched' | 'enqueued' | 'merged' | 'full';
+    ): 'dispatched' | 'enqueued' | 'full';
   };
   readonly socketManager?:
     | {

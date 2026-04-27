@@ -359,7 +359,7 @@ describe('POST /api/callbacks/start-vote', () => {
     assert.ok(dispatched, 'voter cats should be dispatched after start-vote');
   });
 
-  test('voters > MAX_QUEUE_DEPTH: first 5 enqueued, remaining fall back to direct dispatch', async () => {
+  test('voters > MAX_QUEUE_DEPTH: all enqueued (F175: agent source bypasses depth limit)', async () => {
     const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 
@@ -419,11 +419,11 @@ describe('POST /api/callbacks/start-vote', () => {
 
     assert.equal(res.statusCode, 200);
 
-    // Queue should have exactly 5 entries (MAX_QUEUE_DEPTH)
+    // F175: agent source bypasses MAX_QUEUE_DEPTH — all 7 voters should be enqueued
     const queueEntries = invocationQueue.listAutoExecute?.(thread.id) ?? [];
-    assert.equal(queueEntries.length, 5, 'queue should hold exactly 5 entries (MAX_QUEUE_DEPTH)');
+    assert.equal(queueEntries.length, 7, 'all 7 voters should be enqueued (agent bypasses depth limit)');
 
-    // Fallback direct dispatch should have been called with the remaining 2
-    assert.equal(fallbackTargets.length, 2, 'remaining 2 voters should fall back to direct dispatch');
+    // No fallback needed — all fit in queue
+    assert.equal(fallbackTargets.length, 0, 'no fallback needed when agent source bypasses depth limit');
   });
 });

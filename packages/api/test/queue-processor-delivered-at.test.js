@@ -88,8 +88,7 @@ describe('QueueProcessor deliveredAt backfill', () => {
     assert.ok(msgIds.includes('msg-1'), `should mark msg-1 as delivered, got: ${msgIds}`);
   });
 
-  it('calls markDelivered for merged messageIds too', async () => {
-    // Enqueue first message
+  it('calls markDelivered for entry messageId (F175: merge removed)', async () => {
     const result = deps.queue.enqueue({
       threadId: 't1',
       userId: 'u1',
@@ -100,18 +99,13 @@ describe('QueueProcessor deliveredAt backfill', () => {
     });
     deps.queue.backfillMessageId('t1', 'u1', result.entry.id, 'msg-1');
 
-    // Merge second message
-    deps.queue.appendMergedMessageId('t1', 'u1', result.entry.id, 'msg-2');
-
-    // Trigger execution
     await processor.onInvocationComplete('t1', 'opus', 'succeeded');
     await new Promise((r) => setTimeout(r, 100));
 
     const calls = deps.messageStore.markDelivered.mock.calls;
     const msgIds = calls.map((c) => c.arguments[0]);
 
-    assert.ok(msgIds.includes('msg-1'), 'should mark primary msg-1');
-    assert.ok(msgIds.includes('msg-2'), 'should mark merged msg-2');
+    assert.ok(msgIds.includes('msg-1'), 'should mark msg-1 as delivered');
   });
 
   it('passes a reasonable timestamp (close to now)', async () => {

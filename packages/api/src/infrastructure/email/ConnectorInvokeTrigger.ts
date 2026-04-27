@@ -20,11 +20,11 @@ import type { PersistenceContext } from '../../domains/cats/services/agents/rout
 import type { IInvocationRecordStore } from '../../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import { mergeTokenUsage, type TokenUsage } from '../../domains/cats/services/types.js';
 import type { SocketManager } from '../../infrastructure/websocket/index.js';
-import { getMultiMentionOrchestrator } from '../../routes/callback-multi-mention-routes.js';
+
 import type { OutboundDeliveryHook, ThreadMeta } from '../connectors/OutboundDeliveryHook.js';
 import type { StreamingOutboundHook } from '../connectors/StreamingOutboundHook.js';
 
-export type TriggerOutcome = 'dispatched' | 'enqueued' | 'merged' | 'full';
+export type TriggerOutcome = 'dispatched' | 'enqueued' | 'full';
 
 export interface ConnectorInvokeTriggerOptions {
   readonly router: AgentRouter;
@@ -42,10 +42,12 @@ export interface ConnectorInvokeTriggerOptions {
 }
 
 export interface ConnectorTriggerPolicy {
-  /** urgent: preempt active invocation, normal: enqueue behind active work */
+  /** F175: urgent entries get priority dequeue, no preemption */
   readonly priority?: 'urgent' | 'normal';
   /** optional reason for diagnostics */
   readonly reason?: string;
+  /** F175: origin category for visual grouping */
+  readonly sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a';
   /** F140 Phase C: hint which Skill to auto-load (not a hard constraint — cat can override) */
   readonly suggestedSkill?: string;
 }
@@ -100,27 +102,19 @@ export class ConnectorInvokeTrigger {
     const { invocationTracker } = this.opts;
     const priority = policy?.priority ?? 'normal';
 
-    // Urgent connector policy: preempt active invocation in the same thread.
-    // Used for GitHub review comments so cats don't get stuck behind long queue chatter.
-    if (priority === 'urgent' && invocationTracker.has(threadId, catId)) {
-      this.handleUrgentTrigger(
+    // F175: all priorities go through queue — no preemption bypass
+    if (invocationTracker.has(threadId, catId)) {
+      return this.enqueueWhileActive(
         threadId,
         catId,
         userId,
         message,
         messageId,
-        policy?.reason,
         sender,
+        priority,
+        policy?.sourceCategory,
         policy?.suggestedSkill,
-      ).catch((err) => {
-        this.opts.log.error(`[ConnectorInvokeTrigger] Unhandled: ${err instanceof Error ? err.message : String(err)}`);
-      });
-      return 'dispatched';
-    }
-
-    // Normal connector policy: if this cat is already running in this thread, enqueue.
-    if (invocationTracker.has(threadId, catId)) {
-      return this.enqueueWhileActive(threadId, catId, userId, message, messageId, sender);
+      );
     }
 
     // No active invocation → direct execution (existing flow)
@@ -148,8 +142,20 @@ export class ConnectorInvokeTrigger {
     message: string,
     messageId: string,
     sender?: { id: string; name?: string },
-  ): 'full' | 'enqueued' | 'merged' {
+    priority: 'urgent' | 'normal' = 'normal',
+    sourceCategory?: string,
+    suggestedSkill?: string,
+  ): 'full' | 'enqueued' {
     const { invocationQueue, socketManager, log } = this.opts;
+
+    if (invocationQueue.hasEntryWithMessageId(threadId, messageId)) {
+      log.info(
+        { threadId, messageId },
+        '[ConnectorInvokeTrigger] Duplicate connector message already queued, skipping',
+      );
+      return 'enqueued';
+    }
+
     const result = invocationQueue.enqueue({
       threadId,
       userId,
@@ -157,7 +163,12 @@ export class ConnectorInvokeTrigger {
       source: 'connector',
       targetCats: [catId],
       intent: 'execute',
+      priority,
+      ...(sourceCategory
+        ? { sourceCategory: sourceCategory as 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' }
+        : {}),
       ...(sender ? { senderMeta: sender } : {}),
+      ...(suggestedSkill ? { suggestedSkill } : {}),
     });
 
     if (result.outcome === 'full') {
@@ -172,11 +183,7 @@ export class ConnectorInvokeTrigger {
     }
 
     if (result.entry) {
-      if (result.outcome === 'enqueued') {
-        invocationQueue.backfillMessageId(threadId, userId, result.entry.id, messageId);
-      } else if (result.outcome === 'merged') {
-        invocationQueue.appendMergedMessageId(threadId, userId, result.entry.id, messageId);
-      }
+      invocationQueue.backfillMessageId(threadId, userId, result.entry.id, messageId);
     }
 
     socketManager.emitToUser(userId, 'queue_updated', {
@@ -189,99 +196,6 @@ export class ConnectorInvokeTrigger {
       '[ConnectorInvokeTrigger] Queued (active invocation running)',
     );
     return result.outcome;
-  }
-
-  private async handleUrgentTrigger(
-    threadId: string,
-    catId: CatId,
-    userId: string,
-    message: string,
-    messageId: string,
-    reason?: string,
-    sender?: { id: string; name?: string },
-    suggestedSkill?: string,
-  ): Promise<void> {
-    const { invocationTracker, invocationRecordStore, log } = this.opts;
-    const idempotencyKey = `connector-${messageId}`;
-    const activeOwner = invocationTracker.getUserId(threadId, catId);
-    if (activeOwner && activeOwner !== userId) {
-      this.enqueueWhileActive(threadId, catId, userId, message, messageId, sender);
-      return;
-    }
-
-    // Claim idempotency winner before any cancel side-effect.
-    const createResult = await invocationRecordStore.create({
-      threadId,
-      userId,
-      targetCats: [catId],
-      intent: 'execute',
-      idempotencyKey,
-    });
-    if (createResult.outcome === 'duplicate') {
-      log.info(
-        { threadId, catId, invocationId: createResult.invocationId },
-        '[ConnectorInvokeTrigger] Urgent duplicate ignored',
-      );
-      return;
-    }
-
-    const cancelResult = invocationTracker.cancel(threadId, catId, userId, 'preempted');
-    // F108 P1-4 fix: abort only the target cat's dispatches, not the entire thread
-    getMultiMentionOrchestrator().abortBySlot(threadId, catId);
-    log.info(
-      { threadId, catId, cancelled: cancelResult.cancelled, reason: reason ?? 'connector_urgent' },
-      '[ConnectorInvokeTrigger] Urgent connector preempt',
-    );
-
-    if (cancelResult.cancelled || !invocationTracker.has(threadId, catId)) {
-      if (cancelResult.cancelled) {
-        this.opts.queueProcessor?.clearPause(threadId, catId);
-      }
-      await this.executeInBackground(
-        threadId,
-        catId,
-        userId,
-        message,
-        messageId,
-        createResult.invocationId,
-        undefined,
-        suggestedSkill,
-        sender,
-      );
-      return;
-    }
-
-    if (invocationTracker.has(threadId, catId)) {
-      // Avoid queue race: enqueue first while thread is still observed active.
-      const enqueueOutcome = this.enqueueWhileActive(threadId, catId, userId, message, messageId, sender);
-      if (enqueueOutcome !== 'full') {
-        await invocationRecordStore.update(createResult.invocationId, {
-          status: 'canceled',
-          error: 'urgent preempt fallback to queue',
-        });
-        return;
-      }
-      const activeOwner = invocationTracker.getUserId(threadId, catId);
-      if (activeOwner && activeOwner !== userId) {
-        await invocationRecordStore.update(createResult.invocationId, {
-          status: 'failed',
-          error: 'urgent fallback queue full with owner mismatch',
-        });
-        return;
-      }
-    }
-
-    await this.executeInBackground(
-      threadId,
-      catId,
-      userId,
-      message,
-      messageId,
-      createResult.invocationId,
-      undefined,
-      suggestedSkill,
-      sender,
-    );
   }
 
   private async executeInBackground(

@@ -33,10 +33,18 @@ export interface QueueEntry {
   callerCatId?: string;
   /** F134: sender identity for connector group chat messages (used for UI display) */
   senderMeta?: { id: string; name?: string };
+  /** F175: queue-internal priority — urgent entries sort before normal in dequeue */
+  priority: 'urgent' | 'normal';
+  /** F175: origin category for visual grouping */
+  sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a';
+  /** F175: user drag-reorder position — explicit values override priority in dequeue */
+  position?: number;
+  /** F175: skill hint for connector triggers — flows through as promptTags on execution */
+  suggestedSkill?: string;
 }
 
 export interface EnqueueResult {
-  outcome: 'enqueued' | 'merged' | 'full';
+  outcome: 'enqueued' | 'full';
   entry?: QueueEntry;
   queuePosition?: number;
 }
@@ -47,8 +55,6 @@ export class InvocationQueue {
   private readonly log = createModuleLogger('invocation-queue');
   private queues = new Map<string, QueueEntry[]>();
 
-  /** Last pre-merge content per entryId, for rollback */
-  private preMergeSnapshots = new Map<string, string>();
   /** Original content per entryId at enqueue time, for rollbackEnqueue */
   private originalContents = new Map<string, string>();
 
@@ -65,6 +71,31 @@ export class InvocationQueue {
     return q;
   }
 
+  private static readonly PRIORITY_RANK: Record<string, number> = { urgent: 0, normal: 1 };
+
+  /** F175: multi-dimensional entry comparator for dequeue ordering.
+   *  Position is scoped to same-user entries to prevent cross-user queue-jumping in shared threads. */
+  private static compareEntries(a: QueueEntry, b: QueueEntry): number {
+    if (a.userId === b.userId) {
+      const aHasPos = a.position !== undefined;
+      const bHasPos = b.position !== undefined;
+      if (aHasPos && !bHasPos) return -1;
+      if (!aHasPos && bHasPos) return 1;
+      if (aHasPos && bHasPos) return a.position! - b.position!;
+    }
+    const pDiff = (InvocationQueue.PRIORITY_RANK[a.priority] ?? 1) - (InvocationQueue.PRIORITY_RANK[b.priority] ?? 1);
+    if (pDiff !== 0) return pDiff;
+    return a.createdAt - b.createdAt;
+  }
+
+  /** F175: set explicit dequeue position for drag-reorder. */
+  setPosition(threadId: string, userId: string, entryId: string, position: number): boolean {
+    const e = this.findEntry(threadId, userId, entryId);
+    if (!e || e.status !== 'queued') return false;
+    e.position = position;
+    return true;
+  }
+
   /**
    * 预留队列位。容量检查在此完成。
    * 同源同目标的连续消息自动合并。
@@ -72,47 +103,32 @@ export class InvocationQueue {
   enqueue(
     input: Omit<
       QueueEntry,
-      'id' | 'status' | 'createdAt' | 'mergedMessageIds' | 'messageId' | 'autoExecute' | 'callerCatId'
+      | 'id'
+      | 'status'
+      | 'createdAt'
+      | 'mergedMessageIds'
+      | 'messageId'
+      | 'autoExecute'
+      | 'callerCatId'
+      | 'priority'
+      | 'position'
+      | 'suggestedSkill'
     > & {
       autoExecute?: boolean;
       callerCatId?: string;
+      priority?: 'urgent' | 'normal';
+      suggestedSkill?: string;
     },
   ): EnqueueResult {
     const key = this.scopeKey(input.threadId, input.userId);
     const q = this.getOrCreate(key);
 
-    // Check merge with tail — F134: connector messages never merge (different group senders could collide)
-    // Stale defense: never merge into a stale agent entry — its createdAt is too old
-    // for listAutoExecute() to pick up, so merging would silently swallow the new message.
-    const tail = q.length > 0 ? q[q.length - 1] : null;
-    const isStaleTail =
-      tail?.source === 'agent' &&
-      tail.status === 'queued' &&
-      Date.now() - tail.createdAt >= InvocationQueue.STALE_QUEUED_THRESHOLD_MS;
-    if (
-      tail &&
-      !isStaleTail &&
-      tail.status === 'queued' &&
-      tail.source === input.source &&
-      tail.source !== 'connector' &&
-      tail.intent === input.intent &&
-      arraysEqual(sorted(tail.targetCats), sorted(input.targetCats))
-    ) {
-      // Save snapshot for rollback
-      this.preMergeSnapshots.set(tail.id, tail.content);
-      tail.content += `\n${input.content}`;
-      return { outcome: 'merged', entry: { ...tail }, queuePosition: q.indexOf(tail) + 1 };
-    }
-
-    // Capacity check (only non-stale queued entries count)
-    const now = Date.now();
-    const queuedCount = q.filter(
-      (e) =>
-        e.status === 'queued' &&
-        !(e.source === 'agent' && now - e.createdAt >= InvocationQueue.STALE_QUEUED_THRESHOLD_MS),
-    ).length;
-    if (queuedCount >= MAX_QUEUE_DEPTH) {
-      return { outcome: 'full' };
+    // F175: capacity check — only user messages are depth-limited
+    if (input.source === 'user') {
+      const userQueuedCount = q.filter((e) => e.status === 'queued' && e.source === 'user').length;
+      if (userQueuedCount >= MAX_QUEUE_DEPTH) {
+        return { outcome: 'full' };
+      }
     }
 
     const entry: QueueEntry = {
@@ -130,10 +146,23 @@ export class InvocationQueue {
       autoExecute: input.autoExecute ?? false,
       callerCatId: input.callerCatId,
       senderMeta: input.senderMeta,
+      priority: input.priority ?? 'normal',
+      sourceCategory: input.sourceCategory,
+      suggestedSkill: input.suggestedSkill,
+      position: undefined,
     };
     q.push(entry);
     this.originalContents.set(entry.id, input.content);
     return { outcome: 'enqueued', entry: { ...entry }, queuePosition: q.length };
+  }
+
+  /** Check if any entry in the thread already carries this messageId (connector retry dedup). */
+  hasEntryWithMessageId(threadId: string, messageId: string): boolean {
+    for (const [key, q] of this.queues) {
+      if (!key.startsWith(threadId + ':')) continue;
+      if (q.some((e) => e.messageId === messageId || e.mergedMessageIds?.includes(messageId))) return true;
+    }
+    return false;
   }
 
   /** Backfill messageId on a new entry (null → value). */
@@ -142,52 +171,9 @@ export class InvocationQueue {
     if (e) e.messageId = messageId;
   }
 
-  /** Append to mergedMessageIds (does NOT overwrite messageId). */
-  appendMergedMessageId(threadId: string, userId: string, entryId: string, messageId: string): void {
-    const e = this.findEntry(threadId, userId, entryId);
-    if (e) e.mergedMessageIds.push(messageId);
-  }
-
-  /** Rollback a merge — restore pre-merge content snapshot. */
-  rollbackMerge(threadId: string, userId: string, entryId: string): void {
-    const e = this.findEntry(threadId, userId, entryId);
-    const snapshot = this.preMergeSnapshots.get(entryId);
-    if (e && snapshot !== undefined) {
-      e.content = snapshot;
-      this.preMergeSnapshots.delete(entryId);
-    }
-  }
-
-  /**
-   * Rollback an enqueued entry's write failure.
-   * If no merges have occurred → remove entry entirely.
-   * If merges exist → strip original content, keep merged content alive.
-   * This prevents a race where request A fails after request B merged into A's entry.
-   */
+  /** Rollback an enqueued entry — remove entirely. */
   rollbackEnqueue(threadId: string, userId: string, entryId: string): void {
-    const e = this.findEntry(threadId, userId, entryId);
-    if (!e) return;
-
-    const origContent = this.originalContents.get(entryId);
-    // Detect merges: content grew beyond original
-    if (origContent !== undefined && e.content !== origContent) {
-      // Strip original content prefix, keep merged content
-      const prefix = `${origContent}\n`;
-      if (e.content.startsWith(prefix)) {
-        e.content = e.content.slice(prefix.length);
-      }
-      // Promote surviving merged message ID so QueueProcessor can link it
-      if (e.mergedMessageIds.length > 0) {
-        e.messageId = e.mergedMessageIds.shift()!;
-      } else {
-        e.messageId = null;
-      }
-      // Clear stale snapshot so rollbackMerge can't reintroduce ghost content
-      this.preMergeSnapshots.delete(entryId);
-    } else {
-      // No merges — safe to remove entirely
-      this.remove(threadId, userId, entryId);
-    }
+    this.remove(threadId, userId, entryId);
     this.originalContents.delete(entryId);
   }
 
@@ -211,14 +197,15 @@ export class InvocationQueue {
     const idx = q.findIndex((e) => e.id === entryId);
     if (idx === -1) return null;
     this.originalContents.delete(entryId);
-    this.preMergeSnapshots.delete(entryId);
+
     return q.splice(idx, 1)[0] ?? null;
   }
 
-  /** Shallow copy of all entries for this user in this thread. */
+  /** Shallow copy of all entries sorted by dequeue priority (comparator order). */
   list(threadId: string, userId: string): QueueEntry[] {
     const q = this.queues.get(this.scopeKey(threadId, userId));
-    return q ? [...q] : [];
+    if (!q) return [];
+    return [...q].sort(InvocationQueue.compareEntries);
   }
 
   /** Count of queued (not processing) entries. */
@@ -235,69 +222,78 @@ export class InvocationQueue {
     if (!q) return [];
     for (const e of q) {
       this.originalContents.delete(e.id);
-      this.preMergeSnapshots.delete(e.id);
     }
     this.queues.delete(key);
     return q;
   }
 
   /**
-   * Move entry up or down within the user's queue.
+   * Move entry up or down in comparator order by swapping positions with its neighbor.
    * Returns false if entry is processing or not found.
    */
   move(threadId: string, userId: string, entryId: string, direction: 'up' | 'down'): boolean {
     const q = this.queues.get(this.scopeKey(threadId, userId));
     if (!q) return false;
-    const idx = q.findIndex((e) => e.id === entryId);
-    if (idx === -1) return false;
-    if (q[idx]?.status === 'processing') return false;
+    const target = q.find((e) => e.id === entryId);
+    if (!target || target.status === 'processing') return false;
 
-    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
-    if (swapIdx < 0 || swapIdx >= q.length) return true; // boundary no-op, idempotent
+    const queued = q.filter((e) => e.status === 'queued');
+    queued.sort(InvocationQueue.compareEntries);
+    const sortedIdx = queued.findIndex((e) => e.id === entryId);
+    const neighborIdx = direction === 'up' ? sortedIdx - 1 : sortedIdx + 1;
+    if (neighborIdx < 0 || neighborIdx >= queued.length) return true;
 
-    const a = q[idx]!;
-    const b = q[swapIdx]!;
-    q[idx] = b;
-    q[swapIdx] = a;
+    for (let i = 0; i < queued.length; i++) {
+      queued[i]!.position = i;
+    }
+    const a = queued[sortedIdx]!;
+    const b = queued[neighborIdx]!;
+    const tmp = a.position!;
+    a.position = b.position!;
+    b.position = tmp;
     return true;
   }
 
   /**
-   * Promote a queued entry to the front of queued entries (after any processing entries).
+   * Promote a queued entry to first in comparator order by setting its position
+   * below all existing positions.
    * Returns false if not found or entry is processing.
    */
   promote(threadId: string, userId: string, entryId: string): boolean {
     const q = this.queues.get(this.scopeKey(threadId, userId));
     if (!q) return false;
-    const idx = q.findIndex((e) => e.id === entryId);
-    if (idx === -1) return false;
-    const entry = q[idx]!;
-    if (entry.status === 'processing') return false;
+    const entry = q.find((e) => e.id === entryId);
+    if (!entry || entry.status === 'processing') return false;
 
-    q.splice(idx, 1);
-    const firstQueuedIdx = q.findIndex((e) => e.status === 'queued');
-    const insertIdx = firstQueuedIdx === -1 ? q.length : firstQueuedIdx;
-    q.splice(insertIdx, 0, entry);
+    const minPos = q.reduce((min, e) => {
+      if (e.status === 'queued' && e.position !== undefined && e.position < min) return e.position;
+      return min;
+    }, 0);
+    entry.position = minPos - 1;
     return true;
   }
 
-  /** Mark the first queued entry as processing (stays in array). */
+  /** F175: Mark the highest-priority queued entry as processing (stays in array). */
   markProcessing(threadId: string, userId: string): QueueEntry | null {
     const q = this.queues.get(this.scopeKey(threadId, userId));
     if (!q) return null;
-    const first = q.find((e) => e.status === 'queued');
-    if (!first) return null;
-    first.status = 'processing';
-    first.processingStartedAt = Date.now();
-    return { ...first };
+    const queued = q.filter((e) => e.status === 'queued');
+    if (queued.length === 0) return null;
+    queued.sort(InvocationQueue.compareEntries);
+    const best = queued[0]!;
+    best.status = 'processing';
+    best.processingStartedAt = Date.now();
+    return { ...best };
   }
 
-  /** Peek at the next queued entry without mutating state. */
+  /** F175: Peek at the highest-priority queued entry without mutating state. */
   peekNextQueued(threadId: string, userId: string): QueueEntry | null {
     const q = this.queues.get(this.scopeKey(threadId, userId));
     if (!q) return null;
-    const first = q.find((e) => e.status === 'queued');
-    return first ? { ...first } : null;
+    const queued = q.filter((e) => e.status === 'queued');
+    if (queued.length === 0) return null;
+    queued.sort(InvocationQueue.compareEntries);
+    return { ...queued[0]! };
   }
 
   /** Rollback a processing entry back to queued (undo markProcessing/markProcessingAcrossUsers). */
@@ -320,43 +316,45 @@ export class InvocationQueue {
     const idx = q.findIndex((e) => e.status === 'processing' && e.id === entryId);
     if (idx === -1) return null;
     this.originalContents.delete(entryId);
-    this.preMergeSnapshots.delete(entryId);
+
     return q.splice(idx, 1)[0] ?? null;
   }
 
   // ── Cross-user methods (system-level only) ──
 
-  /** Find the oldest queued entry across all users for a thread. */
+  /** F175: Find the highest-priority queued entry across all users for a thread. */
   peekOldestAcrossUsers(threadId: string): QueueEntry | null {
-    let oldest: QueueEntry | null = null;
+    let best: QueueEntry | null = null;
     for (const [key, q] of this.queues) {
       if (!key.startsWith(`${threadId}:`)) continue;
       for (const e of q) {
         if (e.status !== 'queued') continue;
-        if (!oldest || e.createdAt < oldest.createdAt) {
-          oldest = e;
+        if (!best || InvocationQueue.compareEntries(e, best) < 0) {
+          best = e;
         }
       }
     }
-    return oldest ? { ...oldest } : null;
+    return best ? { ...best } : null;
   }
 
-  /** Mark the oldest queued entry across users as processing. */
-  markProcessingAcrossUsers(threadId: string): QueueEntry | null {
-    let oldest: { entry: QueueEntry; key: string } | null = null;
+  /** F175: Mark the highest-priority queued entry across users as processing.
+   *  skipCatIds: skip entries whose primary target cat is in this set (slot busy). */
+  markProcessingAcrossUsers(threadId: string, skipCatIds?: Set<string>): QueueEntry | null {
+    let best: { entry: QueueEntry; key: string } | null = null;
     for (const [key, q] of this.queues) {
       if (!key.startsWith(`${threadId}:`)) continue;
       for (const e of q) {
         if (e.status !== 'queued') continue;
-        if (!oldest || e.createdAt < oldest.entry.createdAt) {
-          oldest = { entry: e, key };
+        if (skipCatIds?.has(e.targetCats[0] ?? '')) continue;
+        if (!best || InvocationQueue.compareEntries(e, best.entry) < 0) {
+          best = { entry: e, key };
         }
       }
     }
-    if (!oldest) return null;
-    oldest.entry.status = 'processing';
-    oldest.entry.processingStartedAt = Date.now();
-    return { ...oldest.entry };
+    if (!best) return null;
+    best.entry.status = 'processing';
+    best.entry.processingStartedAt = Date.now();
+    return { ...best.entry };
   }
 
   /** Remove a processing entry across all users for a thread by entryId. */
@@ -366,7 +364,7 @@ export class InvocationQueue {
       const idx = q.findIndex((e) => e.status === 'processing' && e.id === entryId);
       if (idx !== -1) {
         this.originalContents.delete(entryId);
-        this.preMergeSnapshots.delete(entryId);
+
         return q.splice(idx, 1)[0] ?? null;
       }
     }
@@ -556,6 +554,35 @@ export class InvocationQueue {
       }
     }
     return false;
+  }
+
+  /**
+   * F175: Collect a batch of adjacent user entries for unified execution.
+   * Non-user sources always return a single-entry batch.
+   * User entries batch while: same source, same intent, same targetCats (set equality).
+   * Returns copies — caller is responsible for marking processing.
+   */
+  collectUserBatch(threadId: string, userId: string): QueueEntry[] {
+    const key = this.scopeKey(threadId, userId);
+    const q = this.queues.get(key);
+    if (!q) return [];
+
+    const queued = q.filter((e) => e.status === 'queued');
+    if (queued.length === 0) return [];
+    queued.sort(InvocationQueue.compareEntries);
+
+    const first = queued[0]!;
+    if (first.source !== 'user') return [{ ...first }];
+
+    const batch: QueueEntry[] = [{ ...first }];
+    const firstTargetsSorted = sorted(first.targetCats);
+    for (let i = 1; i < queued.length; i++) {
+      const e = queued[i]!;
+      if (e.source !== 'user' || e.intent !== first.intent || !arraysEqual(sorted(e.targetCats), firstTargetsSorted))
+        break;
+      batch.push({ ...e });
+    }
+    return batch;
   }
 
   /** Whether any user has queued entries for this thread. */

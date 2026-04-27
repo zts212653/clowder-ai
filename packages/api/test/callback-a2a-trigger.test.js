@@ -1154,7 +1154,6 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
         return false;
       },
       backfillMessageId() {},
-      appendMergedMessageId() {},
       list() {
         return [{ id: 'q-1', status: 'queued' }];
       },
@@ -1304,7 +1303,6 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
         return catId === 'opus';
       },
       backfillMessageId() {},
-      appendMergedMessageId() {},
       list() {
         return [];
       },
@@ -1373,7 +1371,6 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
         return false;
       },
       backfillMessageId() {},
-      appendMergedMessageId() {},
       list() {
         return [];
       },
