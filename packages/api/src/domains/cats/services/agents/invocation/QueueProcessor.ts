@@ -505,12 +505,16 @@ export class QueueProcessor {
 
     try {
       // 1. Create InvocationRecord (before batching — avoid claiming entries on duplicate)
+      // Connector-sourced entries use connector-${messageId} to match the direct-execution
+      // idempotency path, so retries after queue processing are also caught persistently.
+      const idempotencyKey =
+        entry.source === 'connector' && messageId ? `connector-${messageId}` : `queue-${entry.id}`;
       const createResult = await invocationRecordStore.create({
         threadId,
         userId,
         targetCats,
         intent,
-        idempotencyKey: `queue-${entry.id}`,
+        idempotencyKey,
       });
 
       if (createResult.outcome === 'duplicate') {

@@ -284,6 +284,19 @@ describe('QueueProcessor', () => {
     assert.ok(createArg.idempotencyKey.startsWith('queue-'));
   });
 
+  it('connector-sourced entry uses connector-${messageId} idempotency key', async () => {
+    const entry = enqueueEntry(deps.queue, { source: 'connector' });
+    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-conn-1');
+
+    await processor.processNext('t1', 'u1');
+    await new Promise((r) => setTimeout(r, 50));
+
+    const createCalls = deps.invocationRecordStore.create.mock.calls;
+    assert.ok(createCalls.length > 0);
+    const createArg = createCalls[0].arguments[0];
+    assert.strictEqual(createArg.idempotencyKey, 'connector-msg-conn-1');
+  });
+
   // ── P1-2 fix: isPaused state tracking ──
 
   it('isPaused returns true after canceled when queue has entries', async () => {
