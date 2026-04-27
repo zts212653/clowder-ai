@@ -271,6 +271,73 @@ test('F153-F: index.ts wires hydrate on cold start (AC-F4)', () => {
   );
 });
 
+// ── P1-1: updateExtra merge semantics (behavior-level) ──────────────
+
+test('F153-F: updateExtra merges tracing into existing extra fields (P1-1)', async () => {
+  const { serializeExtra, safeParseExtra } = await import(
+    '../../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+  );
+
+  const original = {
+    rich: { v: 1, blocks: [{ kind: 'text', id: 'b1', data: { text: 'hello' } }] },
+    targetCats: ['opus'],
+    stream: { invocationId: 'inv-001' },
+  };
+
+  const tracingPatch = {
+    tracing: {
+      traceId: 'aaaa1111bbbb2222cccc3333dddd4444',
+      spanId: '1122334455667788',
+    },
+  };
+
+  const merged = { ...original, ...tracingPatch };
+  const serialized = serializeExtra(merged);
+  const parsed = safeParseExtra(serialized);
+
+  assert.ok(parsed, 'Should parse merged extra');
+  assert.ok(parsed.tracing, 'Should have tracing field');
+  assert.equal(parsed.tracing.traceId, 'aaaa1111bbbb2222cccc3333dddd4444');
+  assert.ok(parsed.rich, 'Should preserve existing rich field');
+  assert.ok(parsed.stream, 'Should preserve existing stream field');
+  assert.equal(parsed.stream.invocationId, 'inv-001', 'Should preserve stream.invocationId');
+});
+
+// ── P1-2: pointer-only hydrate scope (behavior-level) ────────────────
+
+test('F153-F: hydrated DTOs are pointer-only restored stubs, not full hierarchy', async () => {
+  const { LocalTraceStore } = await import('../../dist/infrastructure/telemetry/local-trace-store.js');
+
+  const store = new LocalTraceStore({ maxSpans: 100 });
+  const now = Date.now();
+
+  const dtos = [
+    makeDTO({
+      traceId: 'trace-abc',
+      spanId: 'span-1',
+      name: 'cat_cafe.invocation.restored',
+      attributes: { 'agent.id': 'opus', invocationId: 'inv-001' },
+      storedAt: now,
+    }),
+    makeDTO({
+      traceId: 'trace-abc',
+      spanId: 'span-2',
+      parentSpanId: 'span-1',
+      name: 'cat_cafe.invocation.restored',
+      attributes: { 'agent.id': 'sonnet' },
+      storedAt: now - 1000,
+    }),
+  ];
+
+  store.hydrate(dtos);
+  const results = store.query({ traceId: 'trace-abc' });
+  assert.equal(results.length, 2, 'Both stubs should be queryable');
+  assert.ok(
+    results.every((r) => r.name === 'cat_cafe.invocation.restored'),
+    'All restored spans should be flat stubs (no route/cli_session/llm_call hierarchy)',
+  );
+});
+
 // ── Helper ──────────────────────────────────────────────────────────
 
 function makeDTO(overrides = {}) {

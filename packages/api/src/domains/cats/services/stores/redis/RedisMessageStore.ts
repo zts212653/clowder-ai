@@ -749,12 +749,13 @@ export class RedisMessageStore {
     return count;
   }
 
-  /** F096: Update message extra data (for interactive block state persistence). */
+  /** F096: Update message extra data (merge semantics — preserves existing fields). */
   async updateExtra(id: string, extra: NonNullable<StoredMessage['extra']>): Promise<StoredMessage | null> {
     const msg = await this.getById(id);
     if (!msg) return null;
-    await this.redis.hset(MessageKeys.detail(id), { extra: serializeExtra(extra) });
-    msg.extra = extra;
+    const merged = { ...msg.extra, ...extra };
+    await this.redis.hset(MessageKeys.detail(id), { extra: serializeExtra(merged) });
+    msg.extra = merged;
     return msg;
   }
 

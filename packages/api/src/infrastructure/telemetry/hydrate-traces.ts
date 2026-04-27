@@ -1,8 +1,11 @@
 /**
  * F153 Phase F AC-F4/F5: Hydrate LocalTraceStore from Redis messages on cold start.
  *
- * Scans recent messages from msg:timeline, extracts tracing pointers from
- * extra.tracing, synthesizes TraceSpanDTOs with real timing/attributes, and bulk-loads them.
+ * Pointer-only restoration: scans recent messages, extracts tracing pointers
+ * from extra.tracing, and creates stub DTOs with real timing. Does NOT restore
+ * the full route/invocation/cli_session/llm_call span hierarchy — all restored
+ * spans appear as flat `cat_cafe.invocation.restored` entries. Full semantic
+ * reconstruction is deferred to a follow-up slice.
  */
 
 import type { RedisClient } from '@cat-cafe/shared/utils';
