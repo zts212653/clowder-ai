@@ -67,7 +67,7 @@ describe('resolveApiUrl', () => {
 
   it('skips 127.0.0.1 env when accessed remotely', async () => {
     process.env.NEXT_PUBLIC_API_URL = 'http://127.0.0.1:3004';
-    stubLocation({ hostname: '10.0.0.5', protocol: 'http:', port: '3001' });
+    stubLocation({ hostname: '10.0.0.5', protocol: 'http:', port: '3003' });
     const resolve = await loadResolveApiUrl();
     expect(resolve()).toBe('http://10.0.0.5:3004');
   });
@@ -76,7 +76,7 @@ describe('resolveApiUrl', () => {
 
   it('uses localhost env when accessed locally', async () => {
     process.env.NEXT_PUBLIC_API_URL = 'http://localhost:3004';
-    stubLocation({ hostname: 'localhost', port: '3001' });
+    stubLocation({ hostname: 'localhost', port: '3003' });
     const resolve = await loadResolveApiUrl();
     expect(resolve()).toBe('http://localhost:3004');
   });
@@ -86,7 +86,7 @@ describe('resolveApiUrl', () => {
 
   it('skips cloud env when accessed from localhost (avoids tunnel round-trip)', async () => {
     process.env.NEXT_PUBLIC_API_URL = 'https://api.clowder-ai.com';
-    stubLocation({ hostname: 'localhost', protocol: 'http:', port: '3001' });
+    stubLocation({ hostname: 'localhost', protocol: 'http:', port: '3003' });
     const resolve = await loadResolveApiUrl();
     expect(resolve()).toBe('http://localhost:3004');
   });
@@ -109,7 +109,7 @@ describe('resolveApiUrl', () => {
   // ── No env, browser, direct port → port+1 ──
 
   it('derives API port from frontend port (3003→3004)', async () => {
-    stubLocation({ hostname: '192.168.1.10', protocol: 'http:', port: '3001' });
+    stubLocation({ hostname: '192.168.1.10', protocol: 'http:', port: '3003' });
     const resolve = await loadResolveApiUrl();
     expect(resolve()).toBe('http://192.168.1.10:3004');
   });
