@@ -453,6 +453,78 @@ describe('QueueProcessor', () => {
     assert.match(routeContents[1], /Cat: codex/);
   });
 
+  it('threshold seal capsules in queued multi-cat execution resume every sealed cat', async () => {
+    let routeCalls = 0;
+    const routeTargetCats = [];
+    const opusCapsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 't1',
+        catId: 'opus',
+        mode: 'parallel',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-opus-seal',
+        createdAt: Date.now(),
+        seal: { sessionId: 'sess-opus', sessionSeq: 1, reason: 'threshold' },
+      },
+    );
+    const codexCapsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 't1',
+        catId: 'codex',
+        mode: 'parallel',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-codex-seal',
+        createdAt: Date.now(),
+        seal: { sessionId: 'sess-codex', sessionSeq: 1, reason: 'threshold' },
+      },
+    );
+    const sealDeps = stubDeps({
+      router: {
+        routeExecution: mock.fn(async function* (_userId, _content, _threadId, _messageId, targetCats) {
+          routeCalls++;
+          routeTargetCats.push([...targetCats]);
+          if (routeCalls === 1) {
+            yield {
+              type: 'system_info',
+              catId: 'opus',
+              content: JSON.stringify({ type: 'session_seal_requested', continuityCapsule: opusCapsule }),
+              timestamp: Date.now(),
+            };
+            yield {
+              type: 'system_info',
+              catId: 'codex',
+              content: JSON.stringify({ type: 'session_seal_requested', continuityCapsule: codexCapsule }),
+              timestamp: Date.now(),
+            };
+          } else {
+            yield { type: 'text', catId: targetCats[0], content: 'continued', timestamp: Date.now() };
+          }
+          yield { type: 'done', catId: targetCats[0], timestamp: Date.now() };
+        }),
+        ackCollectedCursors: mock.fn(async () => {}),
+      },
+    });
+    const sealProcessor = new QueueProcessor(sealDeps);
+    const entry = enqueueEntry(sealDeps.queue, { targetCats: ['opus', 'codex'], content: 'parallel work' });
+    sealDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+    const result = await sealProcessor.processNext('t1', 'u1');
+    assert.equal(result.started, true);
+
+    await new Promise((r) => setTimeout(r, 250));
+
+    assert.equal(routeCalls, 3, 'both sealed cats should get continuation runs');
+    assert.deepEqual(routeTargetCats[0], ['opus', 'codex']);
+    assert.deepEqual(
+      routeTargetCats.slice(1).sort((a, b) => a[0].localeCompare(b[0])),
+      [['codex'], ['opus']],
+    );
+  });
+
   it('threshold seal capsule does not enqueue continuation when execution fails afterward', async () => {
     const capsule = completeCapsuleForSeal(
       buildCapsuleFromRouteState({

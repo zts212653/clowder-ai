@@ -414,6 +414,75 @@ describe('POST /api/messages deliveryMode', () => {
     assert.equal(call.capsule.seal.sessionId, 'sess-codex');
   });
 
+  it('immediate multi-cat execution schedules continuation for every sealed cat', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+    deps.router.resolveTargetsAndIntent.mock.mockImplementation(async () => ({
+      targetCats: ['opus', 'codex'],
+      intent: { intent: 'execute' },
+    }));
+    const opusCapsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 'thread-1',
+        catId: 'opus',
+        mode: 'parallel',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-opus-seal',
+        createdAt: Date.now(),
+        seal: { sessionId: 'sess-opus', sessionSeq: 1, reason: 'threshold' },
+      },
+    );
+    const codexCapsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 'thread-1',
+        catId: 'codex',
+        mode: 'parallel',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-codex-seal',
+        createdAt: Date.now(),
+        seal: { sessionId: 'sess-codex', sessionSeq: 1, reason: 'threshold' },
+      },
+    );
+    deps.router.routeExecution.mock.mockImplementation(async function* () {
+      yield {
+        type: 'system_info',
+        catId: 'opus',
+        content: JSON.stringify({ type: 'session_seal_requested', continuityCapsule: opusCapsule }),
+        timestamp: Date.now(),
+      };
+      yield {
+        type: 'system_info',
+        catId: 'codex',
+        content: JSON.stringify({ type: 'session_seal_requested', continuityCapsule: codexCapsule }),
+        timestamp: Date.now(),
+      };
+      yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '触发多猫 seal', threadId: 'thread-1', deliveryMode: 'immediate' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.equal(deps.queueProcessor.enqueueContinuation.mock.calls.length, 2);
+    const calls = deps.queueProcessor.enqueueContinuation.mock.calls
+      .map((call) => call.arguments[0])
+      .sort((a, b) => a.catId.localeCompare(b.catId));
+    assert.equal(calls[0].catId, 'codex');
+    assert.equal(calls[0].capsule.seal.sessionId, 'sess-codex');
+    assert.equal(calls[1].catId, 'opus');
+    assert.equal(calls[1].capsule.seal.sessionId, 'sess-opus');
+  });
+
   // ── P1-1: multipart deliveryMode extraction ──
 
   it('multipart request with deliveryMode=force → cancels and executes immediately', async () => {

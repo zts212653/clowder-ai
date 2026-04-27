@@ -612,7 +612,7 @@ export class QueueProcessor {
     let finalStatus: 'succeeded' | 'failed' | 'canceled' | 'canceled_by_user' = 'failed';
     let responseText = '';
     const cursorBoundaries = new Map<string, string>();
-    let continuationCapsule: CollaborationContinuityCapsuleV1 | null = null;
+    const continuationCapsules = new Map<string, CollaborationContinuityCapsuleV1>();
 
     try {
       // 1. Create InvocationRecord (before batching — avoid claiming entries on duplicate)
@@ -833,7 +833,10 @@ export class QueueProcessor {
             (msg as { textMode?: 'append' | 'replace' }).textMode,
           );
         }
-        continuationCapsule = extractContinuityCapsuleFromAgentMessage(msg) ?? continuationCapsule;
+        const continuationCapsule = extractContinuityCapsuleFromAgentMessage(msg);
+        if (continuationCapsule) {
+          continuationCapsules.set(continuationCapsule.catId, continuationCapsule);
+        }
         if ((msg.type === 'done' || msg.type === 'error') && msg.catId) {
           invocationTracker.completeSlot?.(threadId, msg.catId, controller);
         }
@@ -994,8 +997,13 @@ export class QueueProcessor {
         for (const bid of batchedEntryIds) {
           queue.removeProcessedAcrossUsers(threadId, bid);
         }
-        if (continuationCapsule) {
-          this.enqueueContinuation({ threadId, userId, catId: continuationCapsule.catId, capsule: continuationCapsule });
+        for (const continuationCapsule of continuationCapsules.values()) {
+          this.enqueueContinuation({
+            threadId,
+            userId,
+            catId: continuationCapsule.catId,
+            capsule: continuationCapsule,
+          });
         }
       } else {
         for (const bid of batchedEntryIds) {

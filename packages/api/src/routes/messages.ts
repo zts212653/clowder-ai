@@ -763,7 +763,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           const collectedUsage = new Map<string, TokenUsage>();
           // F070: track governance block errorCode for recoverable failure marking
           let governanceErrorCode: string | undefined;
-          let continuationCapsule: CollaborationContinuityCapsuleV1 | null = null;
+          const continuationCapsules = new Map<string, CollaborationContinuityCapsuleV1>();
 
           // F088 ISSUE-15: Collect per-turn content for outbound delivery to connector platforms
           const outboundTurns: Array<{
@@ -860,7 +860,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             }
             // F39 bugfix: stop broadcasting after cancel (drain pipe buffer silently)
             if (controller?.signal.aborted) break;
-            continuationCapsule = extractContinuityCapsuleFromAgentMessage(msg) ?? continuationCapsule;
+            const continuationCapsule = extractContinuityCapsuleFromAgentMessage(msg);
+            if (continuationCapsule) {
+              continuationCapsules.set(continuationCapsule.catId, continuationCapsule);
+            }
             if (msg.type === 'done' && msg.catId && msg.metadata?.usage) {
               collectedUsage.set(msg.catId, mergeTokenUsage(collectedUsage.get(msg.catId), msg.metadata.usage));
             }
@@ -1004,7 +1007,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             });
             finalStatus = 'succeeded';
 
-            if (continuationCapsule) {
+            for (const continuationCapsule of continuationCapsules.values()) {
               opts.queueProcessor?.enqueueContinuation({
                 threadId: resolvedThreadId,
                 userId,
