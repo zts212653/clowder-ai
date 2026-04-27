@@ -149,7 +149,10 @@ export class ConnectorInvokeTrigger {
     const { invocationQueue, socketManager, log } = this.opts;
 
     if (invocationQueue.hasEntryWithMessageId(threadId, messageId)) {
-      log.info({ threadId, messageId }, '[ConnectorInvokeTrigger] Duplicate connector message already queued, skipping');
+      log.info(
+        { threadId, messageId },
+        '[ConnectorInvokeTrigger] Duplicate connector message already queued, skipping',
+      );
       return 'enqueued';
     }
 
