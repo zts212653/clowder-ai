@@ -57,9 +57,18 @@ team lead在 Codex 原生体验中使用 **Steer**：当消息在队列里等待
   - 立即执行（取消当前猫）
   - 提到队首（不取消）
 
+### Reorder（F175 扩展）
+
+F175 在 Steer 基础上扩展了用户可控编排能力：
+
+- **Drag & Drop 排序**：QueuePanel 支持拖动排序（`@dnd-kit`），拖拽后通过 `PATCH /queue/reorder` 批量设置 position
+- **Reorder API**：`PATCH /api/threads/:threadId/queue/reorder`，body: `{ positions: [{ entryId, position }] }`
+- **排序语义**：显式 position（用户拖动）> priority（urgent > normal）> createdAt（FIFO）
+- **Optimistic UI**：前端立即按 position 重排，失败时 rollback
+
 ## Key Decisions
 
-- Steer 不改动消息内容（不做“编辑/追加内容”），只做“执行优先级/立即执行”的控制面
+- Steer 不改动消息内容（不做”编辑/追加内容”），只做”执行优先级/立即执行”的控制面
 - `processing` 不提供 Steer：运行中纠偏属于更大能力（需要运行中注入/重路由），本 feature 不扩大范围
 
 ## Risk / Blast Radius

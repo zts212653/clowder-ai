@@ -124,13 +124,13 @@ describe('createWakeCatFn', () => {
     assert.equal(enqueuedEntries[0].userId, 'default-user');
   });
 
-  it('handles merged queue entries without crash', async () => {
+  it('handles second enqueue without crash', async () => {
     const { deps, autoExecuteCalls, setEnqueueResult } = createMockDeps();
-    setEnqueueResult({ outcome: 'merged', entry: { id: 'entry-2' } });
+    setEnqueueResult({ outcome: 'enqueued', entry: { id: 'entry-2' } });
     const wakeCat = createWakeCatFn(deps);
 
     await wakeCat({ threadId: 'thread-game-1', catId: 'codex', briefing: 'Seer briefing', timeoutMs: 30000 });
 
-    assert.equal(autoExecuteCalls.length, 1, 'should still auto-execute after merge');
+    assert.equal(autoExecuteCalls.length, 1, 'should auto-execute after enqueue');
   });
 });

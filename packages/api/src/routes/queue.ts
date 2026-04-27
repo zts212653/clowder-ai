@@ -6,6 +6,7 @@
  * POST   /api/threads/:threadId/queue/next          → 手动触发处理下一条
  * POST   /api/threads/:threadId/queue/:entryId/steer → Steer queued entry（立即执行/提到队首）
  * PATCH  /api/threads/:threadId/queue/:entryId/move → 重排序（上移/下移）
+ * PATCH  /api/threads/:threadId/queue/reorder       → F175: 批量设置 position（拖拽重排）
  * DELETE /api/threads/:threadId/queue               → 清空队列
  * POST   /api/threads/:threadId/cancel/:catId       → F122B AC-B9: Per-cat cancel
  */
@@ -281,6 +282,52 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       return { ok: true };
     },
   );
+
+  // PATCH /api/threads/:threadId/queue/reorder (F175)
+  app.patch<{ Params: { threadId: string } }>('/api/threads/:threadId/queue/reorder', async (request, reply) => {
+    const { threadId } = request.params;
+    const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
+    if (!guard) return;
+
+    const reorderSchema = z.object({
+      positions: z
+        .array(z.object({ entryId: z.string(), position: z.number().int().nonnegative().finite() }))
+        .superRefine((items, ctx) => {
+          const ids = new Set<string>();
+          for (const { entryId } of items) {
+            if (ids.has(entryId)) {
+              ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Duplicate entryId: ${entryId}` });
+            }
+            ids.add(entryId);
+          }
+        }),
+    });
+    const parseResult = reorderSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      reply.status(400);
+      return { error: 'Invalid body', details: parseResult.error.issues };
+    }
+
+    const entries = invocationQueue.list(threadId, guard.userId);
+    for (const { entryId } of parseResult.data.positions) {
+      const entry = entries.find((e) => e.id === entryId);
+      if (!entry || entry.status === 'processing') {
+        reply.status(400);
+        return { error: `Cannot reorder entry ${entryId} (not found or processing)` };
+      }
+    }
+
+    for (const { entryId, position } of parseResult.data.positions) {
+      invocationQueue.setPosition(threadId, guard.userId, entryId, position);
+    }
+
+    socketManager.emitToUser(guard.userId, 'queue_updated', {
+      threadId,
+      queue: invocationQueue.list(threadId, guard.userId),
+      action: 'reordered',
+    });
+    return { ok: true };
+  });
 
   // DELETE /api/threads/:threadId/queue
   app.delete<{ Params: { threadId: string } }>('/api/threads/:threadId/queue', async (request, reply) => {

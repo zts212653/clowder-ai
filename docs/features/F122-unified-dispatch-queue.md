@@ -273,6 +273,7 @@ QueuePanel 只显示 `status='queued'` 的条目（`QueuePanel.tsx:142`），条
 ## Dependencies
 
 - **Evolved from**: F108（slot-aware InvocationTracker 是 F122 的基础设施）
+- **Evolved to**: F175（消息队列统一 — 消除最后的 urgent bypass，executor unification: complete）
 - **Related**: F117（message delivery lifecycle — 用户消息的投递生命周期）
 - **Related**: F027（A2A worklist pattern 的原始设计）
 

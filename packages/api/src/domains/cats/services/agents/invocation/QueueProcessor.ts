@@ -405,48 +405,38 @@ export class QueueProcessor {
     catId: string,
   ): Promise<{ started: boolean; entry?: QueueEntry }> {
     this.sweepZombieSlots(threadId);
-    const sk = QueueProcessor.slotKey(threadId, catId);
-    // Mutex check — per-slot
-    if (this.processingSlots.has(sk)) {
-      return { started: false };
+
+    // F175: scan by comparator order, skip entries whose target slot is busy
+    const busyCats = new Set<string>();
+    for (;;) {
+      const entry = this.deps.queue.markProcessingAcrossUsers(threadId, busyCats);
+      if (!entry) return { started: false };
+
+      const entryCat = entry.targetCats[0] ?? catId;
+      const entrySk = QueueProcessor.slotKey(threadId, entryCat);
+
+      if (this.processingSlots.has(entrySk) || this.deps.invocationTracker.has(threadId, entryCat)) {
+        this.deps.queue.rollbackProcessing(threadId, entry.id);
+        busyCats.add(entryCat);
+        continue;
+      }
+
+      this.processingSlots.set(entrySk, Date.now());
+      void this.executeEntry(entry).then(
+        (status) => {
+          this.processingSlots.delete(entrySk);
+          this.onInvocationComplete(threadId, entryCat, status).catch(() => {});
+          this.signalDeliveryBatchDone(threadId, status);
+        },
+        () => {
+          this.processingSlots.delete(entrySk);
+          this.onInvocationComplete(threadId, entryCat, 'failed').catch(() => {});
+          this.signalDeliveryBatchDone(threadId, 'failed');
+        },
+      );
+
+      return { started: true, entry };
     }
-
-    const entry = this.deps.queue.markProcessingAcrossUsers(threadId);
-    if (!entry) return { started: false };
-
-    const entryCat = entry.targetCats[0] ?? catId;
-    const entrySk = QueueProcessor.slotKey(threadId, entryCat);
-
-    // F108 P1-2 fix: check the *entry's* cat slot, not just the completing cat's slot
-    if (this.processingSlots.has(entrySk)) {
-      this.deps.queue.rollbackProcessing(threadId, entry.id);
-      return { started: false };
-    }
-    // Fix: skip if cat already has an active invocation via CLI/messages.ts (not in processingSlots).
-    // Without this, the completion chain would start a duplicate executeEntry that preempts the
-    // CLI's invocation (InvocationTracker.start aborts old controller + InvocationRegistry.create
-    // overwrites latestByThreadCat), causing all subsequent CLI callbacks to return stale_ignored.
-    if (this.deps.invocationTracker.has(threadId, entryCat)) {
-      this.deps.queue.rollbackProcessing(threadId, entry.id);
-      return { started: false };
-    }
-
-    this.processingSlots.set(entrySk, Date.now());
-    // Fire-and-forget execution — chain onInvocationComplete AFTER mutex release
-    void this.executeEntry(entry).then(
-      (status) => {
-        this.processingSlots.delete(entrySk);
-        this.onInvocationComplete(threadId, entryCat, status).catch(() => {});
-        this.signalDeliveryBatchDone(threadId, status);
-      },
-      () => {
-        this.processingSlots.delete(entrySk);
-        this.onInvocationComplete(threadId, entryCat, 'failed').catch(() => {});
-        this.signalDeliveryBatchDone(threadId, 'failed');
-      },
-    );
-
-    return { started: true, entry };
   }
 
   private async tryExecuteNextForUser(
@@ -500,8 +490,12 @@ export class QueueProcessor {
    */
   private async executeEntry(entry: QueueEntry): Promise<'succeeded' | 'failed' | 'canceled' | 'canceled_by_user'> {
     const { queue, invocationTracker, invocationRecordStore, router, socketManager, messageStore, log } = this.deps;
-    const { threadId, userId, content, targetCats, intent, messageId } = entry;
+    const { threadId, userId, targetCats, intent, messageId } = entry;
     const primaryCat = targetCats[0] ?? 'unknown';
+
+    const batchedEntryIds: string[] = [];
+    const batchedMessageIds: string[] = [];
+    let content = entry.content;
 
     let controller: AbortController | undefined;
     let invocationId: string | undefined;
@@ -510,13 +504,16 @@ export class QueueProcessor {
     const cursorBoundaries = new Map<string, string>();
 
     try {
-      // 1. Create InvocationRecord
+      // 1. Create InvocationRecord (before batching — avoid claiming entries on duplicate)
+      // Connector-sourced entries use connector-${messageId} to match the direct-execution
+      // idempotency path, so retries after queue processing are also caught persistently.
+      const idempotencyKey = entry.source === 'connector' && messageId ? `connector-${messageId}` : `queue-${entry.id}`;
       const createResult = await invocationRecordStore.create({
         threadId,
         userId,
         targetCats,
         intent,
-        idempotencyKey: `queue-${entry.id}`,
+        idempotencyKey,
       });
 
       if (createResult.outcome === 'duplicate') {
@@ -525,6 +522,26 @@ export class QueueProcessor {
         return 'succeeded';
       }
       invocationId = createResult.invocationId;
+
+      // F175: user-message batching — collect adjacent matching entries
+      // Placed after idempotency check so batched entries aren't dropped on duplicate
+      if (entry.source === 'user') {
+        const batch = queue.collectUserBatch(threadId, userId);
+        const sortedTargets = [...entry.targetCats].sort();
+        const matching = batch.filter(
+          (e) =>
+            e.source === 'user' &&
+            e.intent === entry.intent &&
+            e.targetCats.length === sortedTargets.length &&
+            [...e.targetCats].sort().every((t, i) => t === sortedTargets[i]),
+        );
+        for (const be of matching) {
+          if (!queue.markProcessingById(threadId, be.id)) continue;
+          batchedEntryIds.push(be.id);
+          if (be.messageId) batchedMessageIds.push(be.messageId);
+          content = content + '\n' + be.content;
+        }
+      }
 
       // 2. Start tracking ALL target cats (shared controller for F5/reconnect recovery)
       controller = invocationTracker.startAll(threadId, targetCats, userId);
@@ -553,7 +570,9 @@ export class QueueProcessor {
 
       // F098-D: Mark queued messages as delivered (set deliveredAt = now)
       // F117: Collect full message objects for frontend bubble rendering
-      const allMessageIds: string[] = [messageId ?? '', ...(entry.mergedMessageIds ?? [])].filter(Boolean);
+      const allMessageIds: string[] = [messageId ?? '', ...(entry.mergedMessageIds ?? []), ...batchedMessageIds].filter(
+        Boolean,
+      );
       const deliveredNow = Date.now();
       const deliveredIds: string[] = [];
       const deliveredMessages: Array<{
@@ -609,7 +628,9 @@ export class QueueProcessor {
 
       // F039 remaining: queued image messages must be visible to cats.
       // Aggregate contentBlocks from the stored user messages (messageId + merged).
-      const messageIds: string[] = [messageId ?? '', ...(entry.mergedMessageIds ?? [])].filter(Boolean);
+      const messageIds: string[] = [messageId ?? '', ...(entry.mergedMessageIds ?? []), ...batchedMessageIds].filter(
+        Boolean,
+      );
       const contentBlocks: unknown[] = [];
       for (const id of messageIds) {
         try {
@@ -663,7 +684,7 @@ export class QueueProcessor {
         threadId,
         messageId,
         targetCats,
-        { intent },
+        { intent, ...(entry.suggestedSkill ? { promptTags: [`skill:${entry.suggestedSkill}`] } : {}) },
         {
           ...(contentBlocks.length > 0 ? { contentBlocks } : {}),
           ...(controller.signal ? { signal: controller.signal } : {}),
@@ -855,6 +876,16 @@ export class QueueProcessor {
       // Always cleanup tracker + queue (all target cat slots)
       invocationTracker.completeAll(threadId, targetCats, controller);
       queue.removeProcessedAcrossUsers(threadId, entry.id);
+      // F175: on success remove batched entries; on failure/cancel rollback so they can retry
+      if (finalStatus === 'succeeded') {
+        for (const bid of batchedEntryIds) {
+          queue.removeProcessedAcrossUsers(threadId, bid);
+        }
+      } else {
+        for (const bid of batchedEntryIds) {
+          queue.rollbackProcessing(threadId, bid);
+        }
+      }
       socketManager.emitToUser(userId, 'queue_updated', {
         threadId,
         queue: queue.list(threadId, userId),

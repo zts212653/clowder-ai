@@ -110,7 +110,7 @@ export interface ConnectorRouterOptions {
       contentBlocks?: readonly MessageContent[],
       policy?: unknown,
       sender?: { id: string; name?: string },
-    ): 'dispatched' | 'enqueued' | 'merged' | 'full';
+    ): 'dispatched' | 'enqueued' | 'full';
   };
   readonly socketManager?:
     | {

@@ -1076,8 +1076,8 @@
     },
     {
       "id": "F175",
-      "name": "Unified Message Queue — 优先级排序 + 用户可控编排",
-      "status": "intake pending | **Owner**: @mindfn (community, original author) + cat-cafe intake reviewer TBD | **Priority**: P1",
+      "name": "消息队列统一设计 — 优先级排序 + 用户可控编排",
+      "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F175-unified-message-queue.md"
     },
     {

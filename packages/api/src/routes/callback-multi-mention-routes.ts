@@ -142,7 +142,7 @@ function dispatchViaQueue(
       callerCatId: initiator,
     });
 
-    if ((result.outcome === 'enqueued' || result.outcome === 'merged') && result.entry) {
+    if (result.outcome === 'enqueued' && result.entry) {
       queueProcessor.registerEntryCompleteHook?.(result.entry.id, (_entryId, status, responseText) => {
         if (status === 'canceled' || status === 'canceled_by_user') {
           log.info({ requestId, catId }, '[F122B B6] multi-mention queue entry canceled, skipping recordResponse');
