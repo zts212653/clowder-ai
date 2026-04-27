@@ -581,7 +581,11 @@ describe('QueueProcessor', () => {
     let now = 2_000_000;
     Date.now = () => now;
     try {
-      const entry = enqueueEntry(deps.queue, { targetCats: ['opus'], source: 'agent', content: 'stale processing work' });
+      const entry = enqueueEntry(deps.queue, {
+        targetCats: ['opus'],
+        source: 'agent',
+        content: 'stale processing work',
+      });
       deps.queue.markProcessingById('t1', entry.id);
       now += InvocationQueue.STALE_PROCESSING_THRESHOLD_MS + 1;
       const capsule = completeCapsuleForSeal(
