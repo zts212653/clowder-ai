@@ -8,6 +8,7 @@ import { catRegistry } from '@cat-cafe/shared';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
 import { getConfigSessionStrategy, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import { ROUTE_TOTAL_CATS_INVOKED, ROUTE_TOTAL_TOKENS } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import { estimateTokens } from '../../../../../utils/token-counter.js';
 import {
   ackGuideCompletion,
@@ -144,7 +145,10 @@ export async function* routeParallel(
   // F148 OQ-2: Collect tool names and coverage maps per cat for context eval
   const catToolNames = new Map<string, string[]>();
   const catCoverageMap = new Map<string, ContextEvalInput['coverageMap']>();
+  let routeTotalTokens = 0;
+  let keepaliveTimer: ReturnType<typeof setInterval> | undefined;
 
+  try {
   const streams = await Promise.all(
     targetCats.map(async (catId) => {
       const catConfig: CatConfig | undefined = catRegistry.tryGet(catId as string)?.config;
@@ -425,7 +429,6 @@ export async function* routeParallel(
 
   // Issue #83: Independent keepalive timer — touch draft every 60s during long tool calls.
   const KEEPALIVE_INTERVAL_MS = 60_000;
-  let keepaliveTimer: ReturnType<typeof setInterval> | undefined;
   // Track which cats have had their keepalive started
   let keepaliveStarted = false;
 
@@ -514,6 +517,9 @@ export async function* routeParallel(
             const arr = catStreamRichBlocks.get(effectiveMsg.catId) ?? [];
             arr.push(parsed.block);
             catStreamRichBlocks.set(effectiveMsg.catId, arr);
+          }
+          if (parsed.type === 'invocation_usage' && parsed.usage) {
+            routeTotalTokens += (parsed.usage.inputTokens ?? 0) + (parsed.usage.outputTokens ?? 0);
           }
         } catch {
           /* ignore parse errors */
@@ -1057,10 +1063,17 @@ export async function* routeParallel(
       timestamp: Date.now(),
     } as AgentMessage;
   }
+  } finally {
+    // F172: Set route aggregate attributes before span ends (AgentRouter calls routeSpan.end())
+    if (options.routeSpan) {
+      options.routeSpan.setAttribute(ROUTE_TOTAL_CATS_INVOKED, targetCats.length);
+      options.routeSpan.setAttribute(ROUTE_TOTAL_TOKENS, routeTotalTokens);
+    }
 
-  // Issue #83: Stop keepalive timer — streaming loop has exited.
-  if (keepaliveTimer) {
-    clearInterval(keepaliveTimer);
-    keepaliveTimer = undefined;
+    // Issue #83: Stop keepalive timer — streaming loop has exited.
+    if (keepaliveTimer) {
+      clearInterval(keepaliveTimer);
+      keepaliveTimer = undefined;
+    }
   }
 }

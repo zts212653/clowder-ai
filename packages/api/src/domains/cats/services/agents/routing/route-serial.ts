@@ -13,7 +13,7 @@
 import type { CatConfig, CatId } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
 import { type Span, context, trace } from '@opentelemetry/api';
-import { AGENT_ID } from '../../../../../infrastructure/telemetry/genai-semconv.js';
+import { AGENT_ID, ROUTE_HAS_A2A_HANDOFF, ROUTE_TOTAL_CATS_INVOKED, ROUTE_TOTAL_TOKENS } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
 import { getConfigSessionStrategy, getRoster, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { getCatVoice } from '../../../../../config/cat-voices.js';
@@ -118,6 +118,7 @@ export async function* routeSerial(
   const catInvocationSpans = new Map<number, Span>();
   const mentionParentSpan = new Map<number, Span>();
   const pendingDispatchSpans: { span: Span; lastChildIndex: number }[] = [];
+  let routeTotalTokens = 0;
   // done-guarantee: Track whether we yielded a done(isFinal=true) so the finally block can
   // synthesize one if the loop exits early (e.g. signal.aborted break at top of while).
   let yieldedFinalDone = false;
@@ -601,6 +602,9 @@ export async function* routeSerial(
               // F060: Collect inline rich_block for persistence (P1 fix)
               if (parsed.type === 'rich_block' && parsed.block && isValidRichBlock(parsed.block)) {
                 streamRichBlocks.push(parsed.block);
+              }
+              if (parsed.type === 'invocation_usage' && parsed.usage) {
+                routeTotalTokens += (parsed.usage.inputTokens ?? 0) + (parsed.usage.outputTokens ?? 0);
               }
             } catch {
               /* ignore parse errors */
@@ -1451,6 +1455,13 @@ export async function* routeSerial(
       index++;
     }
   } finally {
+    // F172: Set route aggregate attributes before span ends (AgentRouter calls routeSpan.end())
+    if (options.routeSpan) {
+      options.routeSpan.setAttribute(ROUTE_TOTAL_CATS_INVOKED, index);
+      options.routeSpan.setAttribute(ROUTE_TOTAL_TOKENS, routeTotalTokens);
+      options.routeSpan.setAttribute(ROUTE_HAS_A2A_HANDOFF, worklist.length > targetCats.length);
+    }
+
     // F172: End any dispatch spans not yet ended (early abort / error paths)
     for (const entry of pendingDispatchSpans) {
       if (index <= entry.lastChildIndex) entry.span.end();

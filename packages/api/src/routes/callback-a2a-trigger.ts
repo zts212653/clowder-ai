@@ -74,6 +74,8 @@ export async function enqueueA2ATargets(
     callerCatId?: CatId;
     /** F108: parentInvocationId for concurrent worklist isolation. */
     parentInvocationId?: string;
+    /** F172: Caller's OTel trace context for cross-route A2A trace propagation. */
+    callerTraceContext?: { traceId: string; spanId: string; traceFlags: number };
   },
 ): Promise<{ enqueued: CatId[]; fallback: boolean }> {
   const { log } = deps;
@@ -195,6 +197,7 @@ export async function enqueueA2ATargets(
         intent: 'execute',
         autoExecute: true,
         callerCatId: callerCatId ?? undefined,
+        callerTraceContext: opts.callerTraceContext,
       });
       queueDiagnostics.push({
         catId,
@@ -389,6 +392,7 @@ export async function triggerA2AInvocation(
     userId: string;
     threadId: string;
     triggerMessage: StoredMessage;
+    callerTraceContext?: { traceId: string; spanId: string; traceFlags: number };
   },
 ): Promise<void> {
   const { router, invocationRecordStore, socketManager, invocationTracker, log } = deps;
@@ -474,6 +478,7 @@ export async function triggerA2AInvocation(
       for await (const msg of router.routeExecution(userId, content, threadId, triggerMessage.id, targetCats, intent, {
         ...(controller?.signal ? { signal: controller.signal } : {}),
         parentInvocationId: createResult.invocationId,
+        callerTraceContext: opts.callerTraceContext,
       })) {
         // #768: Broadcast intent_mode on first CLI event — proves CLI is alive.
         if (!intentModeBroadcast) {

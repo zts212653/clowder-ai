@@ -21,7 +21,7 @@
 import type { CatId, MessageContent } from '@cat-cafe/shared';
 import { catRegistry, escapeRegExp } from '@cat-cafe/shared';
 import type { SessionStore } from '@cat-cafe/shared/utils';
-import { SpanStatusCode, trace } from '@opentelemetry/api';
+import { SpanStatusCode, context as ctxApi, trace } from '@opentelemetry/api';
 import { getDefaultCatId, isCatAvailable } from '../../../../../config/cat-config-loader.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import {
@@ -816,10 +816,22 @@ export class AgentRouter {
       persistenceContext?: PersistenceContext;
       /** F108: parentInvocationId for WorklistRegistry concurrent isolation */
       parentInvocationId?: string;
+      /** F172: Caller's OTel trace context for cross-route A2A trace propagation */
+      callerTraceContext?: { traceId: string; spanId: string; traceFlags: number };
     },
   ): AsyncIterable<AgentMessage> {
     const cleanMessage = stripIntentTags(message);
     const strategy = intent.intent === 'ideate' && targetCats.length > 1 ? 'parallel' : 'serial';
+
+    // F172: If caller provided trace context, create routeSpan as child of caller's span
+    const parentCtx = options?.callerTraceContext
+      ? trace.setSpanContext(ctxApi.active(), {
+          traceId: options.callerTraceContext.traceId,
+          spanId: options.callerTraceContext.spanId,
+          traceFlags: options.callerTraceContext.traceFlags,
+          isRemote: true,
+        })
+      : undefined;
 
     const routeSpan = routeTracer.startSpan('cat_cafe.route', {
       attributes: {
@@ -827,7 +839,7 @@ export class AgentRouter {
         [ROUTING_INTENT]: intent.intent,
         [ROUTING_STRATEGY]: strategy,
       },
-    });
+    }, parentCtx);
 
     // Fetch thread for thinkingMode + update lastActive
     // Default to play mode when no threadStore is available: stream thinking stays isolated.

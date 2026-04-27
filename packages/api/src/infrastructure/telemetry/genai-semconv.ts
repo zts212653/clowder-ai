@@ -30,3 +30,9 @@ export const TOOL_CATEGORY = 'tool.category';
 export const ROUTING_STRATEGY = 'cat_cafe.routing.strategy';
 export const ROUTING_TARGET_CATS = 'cat_cafe.routing.target_cats';
 export const ROUTING_INTENT = 'cat_cafe.routing.intent';
+
+// --- Route aggregate attributes (set at route completion) ---
+export const ROUTE_TOTAL_CATS_INVOKED = 'route.total_cats_invoked';
+export const ROUTE_TOTAL_TOKENS = 'route.total_tokens';
+export const ROUTE_HAS_A2A_HANDOFF = 'route.has_a2a_handoff';
+export const THREAD_ID = 'thread.id';

@@ -585,6 +585,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           triggerMessage: storedMsg,
           callerCatId: senderCatId,
           parentInvocationId: record.parentInvocationId,
+          callerTraceContext: record.traceContext,
         },
       );
 
@@ -1261,6 +1262,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         threadId: record.threadId,
         triggerMessage: notificationMsg,
         callerCatId: record.catId as CatId,
+        callerTraceContext: record.traceContext,
       };
       try {
         const { enqueued } = await enqueueA2ATargets(a2aDeps, a2aOpts);

@@ -33,6 +33,8 @@ export interface QueueEntry {
   callerCatId?: string;
   /** F134: sender identity for connector group chat messages (used for UI display) */
   senderMeta?: { id: string; name?: string };
+  /** F172: Caller's OTel trace context for cross-route A2A trace propagation */
+  callerTraceContext?: { traceId: string; spanId: string; traceFlags: number };
 }
 
 export interface EnqueueResult {
@@ -72,10 +74,11 @@ export class InvocationQueue {
   enqueue(
     input: Omit<
       QueueEntry,
-      'id' | 'status' | 'createdAt' | 'mergedMessageIds' | 'messageId' | 'autoExecute' | 'callerCatId'
+      'id' | 'status' | 'createdAt' | 'mergedMessageIds' | 'messageId' | 'autoExecute' | 'callerCatId' | 'callerTraceContext'
     > & {
       autoExecute?: boolean;
       callerCatId?: string;
+      callerTraceContext?: { traceId: string; spanId: string; traceFlags: number };
     },
   ): EnqueueResult {
     const key = this.scopeKey(input.threadId, input.userId);
@@ -89,9 +92,15 @@ export class InvocationQueue {
       tail?.source === 'agent' &&
       tail.status === 'queued' &&
       Date.now() - tail.createdAt >= InvocationQueue.STALE_QUEUED_THRESHOLD_MS;
+    // F172: Never merge agent entries from different callers — different callerTraceContext
+    // means different causality chains; merging would corrupt the trace parent link.
+    const traceContextMismatch =
+      input.source === 'agent' &&
+      (tail?.callerTraceContext?.spanId ?? null) !== (input.callerTraceContext?.spanId ?? null);
     if (
       tail &&
       !isStaleTail &&
+      !traceContextMismatch &&
       tail.status === 'queued' &&
       tail.source === input.source &&
       tail.source !== 'connector' &&
@@ -130,6 +139,7 @@ export class InvocationQueue {
       autoExecute: input.autoExecute ?? false,
       callerCatId: input.callerCatId,
       senderMeta: input.senderMeta,
+      callerTraceContext: input.callerTraceContext,
     };
     q.push(entry);
     this.originalContents.set(entry.id, input.content);

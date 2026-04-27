@@ -656,6 +656,7 @@ export class QueueProcessor {
           cursorBoundaries,
           persistenceContext,
           ...(invocationId ? { parentInvocationId: invocationId } : {}),
+          ...(entry.callerTraceContext ? { callerTraceContext: entry.callerTraceContext } : {}),
         },
       )) {
         // #768: Broadcast intent_mode on first CLI event — proves CLI is alive.

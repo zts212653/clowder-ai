@@ -28,6 +28,8 @@ export interface InvocationRecord {
   parentInvocationId?: string;
   /** F121: The A2A trigger message ID — the @mention message that caused this cat to be invoked */
   a2aTriggerMessageId?: string;
+  /** F172: OTel trace context for cross-route A2A trace propagation */
+  traceContext?: { traceId: string; spanId: string; traceFlags: number };
   /** In-invocation idempotency keys for callback post-message de-duplication. */
   clientMessageIds: Set<string>;
   createdAt: number;
@@ -168,6 +170,12 @@ export class InvocationRegistry {
 
     record.clientMessageIds.add(clientMessageId);
     return true;
+  }
+
+  /** F172: Store OTel trace context on an invocation (for cross-route A2A propagation). */
+  setTraceContext(invocationId: string, ctx: { traceId: string; spanId: string; traceFlags: number }): void {
+    const record = this.records.get(invocationId);
+    if (record) record.traceContext = ctx;
   }
 
   /**

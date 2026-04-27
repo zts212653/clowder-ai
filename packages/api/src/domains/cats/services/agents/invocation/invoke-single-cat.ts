@@ -470,6 +470,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   );
   if (params.invocationSpanRef) params.invocationSpanRef.current = invocationSpan;
 
+  // F172: Store trace context in InvocationRecord for cross-route A2A propagation
+  const sc = invocationSpan.spanContext();
+  deps.registry.setTraceContext(invocationId, { traceId: sc.traceId, spanId: sc.spanId, traceFlags: sc.traceFlags });
+
   try {
     // F152: Track active invocations — must be inside try so add/sub symmetry
     // is guaranteed by the finally block, even on generator early abort.
