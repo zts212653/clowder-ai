@@ -508,14 +508,19 @@ export class InvocationQueue {
     return false;
   }
 
-  /** Check for any queued/processing entry targeting a cat, regardless of source. */
-  hasPendingForCat(threadId: string, catId: string, opts?: { excludeEntryId?: string }): boolean {
+  /** Check for any queued/processing entry targeting a cat, optionally narrowed by source. */
+  hasPendingForCat(
+    threadId: string,
+    catId: string,
+    opts?: { excludeEntryId?: string; sources?: QueueEntry['source'][] },
+  ): boolean {
     const now = Date.now();
     for (const [key, q] of this.queues) {
       if (!key.startsWith(`${threadId}:`)) continue;
       for (const e of q) {
         if (opts?.excludeEntryId && e.id === opts.excludeEntryId) continue;
         if (!e.targetCats.includes(catId)) continue;
+        if (opts?.sources && !opts.sources.includes(e.source)) continue;
 
         if (e.status === 'queued') {
           return true;

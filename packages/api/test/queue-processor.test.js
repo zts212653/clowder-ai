@@ -566,7 +566,7 @@ describe('QueueProcessor', () => {
     assert.equal(failDeps.router.routeExecution.mock.calls.length, 1, 'must not start continuation after failure');
   });
 
-  it('enqueueContinuation skips when any queued same-cat entry already exists', async () => {
+  it('enqueueContinuation preserves seal work when queued user work already exists', async () => {
     enqueueEntry(deps.queue, { targetCats: ['opus'], source: 'user', content: 'new user work' });
     const capsule = completeCapsuleForSeal(
       buildCapsuleFromRouteState({
@@ -584,8 +584,11 @@ describe('QueueProcessor', () => {
 
     const outcome = processor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
 
-    assert.equal(outcome.outcome, 'skipped_existing_entry');
-    assert.equal(deps.queue.list('t1', 'u1').length, 1);
+    assert.equal(outcome.outcome, 'enqueued');
+    const queue = deps.queue.list('t1', 'u1');
+    assert.equal(queue.length, 2);
+    assert.equal(queue[0].content, 'new user work');
+    assert.match(queue[1].content, /Continue the same structured work from the sealed session/);
   });
 
   it('enqueueContinuation respects old queued agent work when checking existing pending work', async () => {
@@ -618,7 +621,7 @@ describe('QueueProcessor', () => {
     }
   });
 
-  it('enqueueContinuation still respects old queued user work when checking existing pending work', async () => {
+  it('enqueueContinuation preserves seal work behind old queued user work', async () => {
     const originalNow = Date.now;
     let now = 1_500_000;
     Date.now = () => now;
@@ -641,8 +644,11 @@ describe('QueueProcessor', () => {
 
       const outcome = processor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
 
-      assert.equal(outcome.outcome, 'skipped_existing_entry');
-      assert.equal(deps.queue.list('t1', 'u1').length, 1);
+      assert.equal(outcome.outcome, 'enqueued');
+      const queue = deps.queue.list('t1', 'u1');
+      assert.equal(queue.length, 2);
+      assert.equal(queue[0].content, 'old but real user work');
+      assert.match(queue[1].content, /Continue the same structured work from the sealed session/);
     } finally {
       Date.now = originalNow;
     }
