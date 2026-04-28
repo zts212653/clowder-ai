@@ -629,6 +629,7 @@ describe('QueueProcessor', () => {
       targetCats: ['opus'],
       source: 'agent',
       sourceCategory: 'continuation',
+      continuationKey: 't1:opus:inv-duplicate-window:sess-duplicate-window:1',
       content: 'pending continuation work',
     });
     const capsule = completeCapsuleForSeal(
@@ -649,6 +650,59 @@ describe('QueueProcessor', () => {
 
     assert.equal(outcome.outcome, 'skipped_existing_entry');
     assert.equal(processor.continuationWindows.has('t1:opus'), false);
+  });
+
+  it('enqueueContinuation preserves distinct sealed work while deduping the same seal item', async () => {
+    const firstCapsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 't1',
+        catId: 'opus',
+        mode: 'independent',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-first-seal',
+        createdAt: Date.now(),
+        seal: { sessionId: 'sess-first-seal', sessionSeq: 1, reason: 'threshold' },
+      },
+    );
+    const secondCapsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 't1',
+        catId: 'opus',
+        mode: 'independent',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-second-seal',
+        createdAt: Date.now(),
+        seal: { sessionId: 'sess-second-seal', sessionSeq: 2, reason: 'threshold' },
+      },
+    );
+
+    const first = processor.enqueueContinuation({
+      threadId: 't1',
+      userId: 'u1',
+      catId: 'opus',
+      capsule: firstCapsule,
+    });
+    const duplicateFirst = processor.enqueueContinuation({
+      threadId: 't1',
+      userId: 'u1',
+      catId: 'opus',
+      capsule: firstCapsule,
+    });
+    const second = processor.enqueueContinuation({
+      threadId: 't1',
+      userId: 'u1',
+      catId: 'opus',
+      capsule: secondCapsule,
+    });
+
+    assert.equal(first.outcome, 'enqueued');
+    assert.equal(duplicateFirst.outcome, 'skipped_existing_entry');
+    assert.equal(second.outcome, 'enqueued');
+    assert.equal(deps.queue.list('t1', 'u1').length, 2);
   });
 
   it('enqueueContinuation preserves seal work behind old queued user work', async () => {

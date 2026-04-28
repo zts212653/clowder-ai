@@ -37,6 +37,8 @@ export interface QueueEntry {
   priority: 'urgent' | 'normal';
   /** F175: origin category for visual grouping */
   sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' | 'continuation';
+  /** Queue-internal dedup key for agent control-flow work. */
+  continuationKey?: string;
   /** F175: user drag-reorder position — explicit values override priority in dequeue */
   position?: number;
   /** F175: skill hint for connector triggers — flows through as promptTags on execution */
@@ -148,6 +150,7 @@ export class InvocationQueue {
       senderMeta: input.senderMeta,
       priority: input.priority ?? 'normal',
       sourceCategory: input.sourceCategory,
+      continuationKey: input.continuationKey,
       suggestedSkill: input.suggestedSkill,
       position: undefined,
     };
@@ -516,6 +519,7 @@ export class InvocationQueue {
       excludeEntryId?: string;
       sources?: QueueEntry['source'][];
       sourceCategories?: NonNullable<QueueEntry['sourceCategory']>[];
+      continuationKey?: string;
     },
   ): boolean {
     const now = Date.now();
@@ -528,6 +532,7 @@ export class InvocationQueue {
         if (opts?.sourceCategories) {
           if (!e.sourceCategory || !opts.sourceCategories.includes(e.sourceCategory)) continue;
         }
+        if (opts?.continuationKey !== undefined && e.continuationKey !== opts.continuationKey) continue;
 
         if (e.status === 'queued') {
           return true;

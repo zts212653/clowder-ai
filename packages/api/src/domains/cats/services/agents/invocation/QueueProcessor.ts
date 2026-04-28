@@ -342,6 +342,12 @@ export class QueueProcessor {
     return { outcome: 'enqueued', entry: result.entry };
   }
 
+  private static continuationKey(capsule: CollaborationContinuityCapsuleV1): string {
+    const seal = capsule.seal;
+    const sealPart = seal ? `${seal.sessionId}:${seal.sessionSeq}` : `created:${capsule.createdAt}`;
+    return `${capsule.threadId}:${capsule.catId}:${capsule.invocationId ?? 'unknown-invocation'}:${sealPart}`;
+  }
+
   private setContinuationWindow(key: string, recent: number[]): void {
     if (recent.length === 0) {
       this.continuationWindows.delete(key);
