@@ -67,7 +67,7 @@ export interface TraceStoreStats {
 }
 
 const DEFAULT_MAX_SPANS = 10_000;
-const DEFAULT_MAX_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
+const DEFAULT_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 export class LocalTraceStore {
   private readonly buffer: TraceSpanDTO[] = [];
