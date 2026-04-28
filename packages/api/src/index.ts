@@ -435,6 +435,13 @@ async function main(): Promise<void> {
       log: app.log,
     });
   }
+
+  // F153 Phase F AC-F4: Hydrate trace store from Redis messages on cold start
+  if (telemetryHandle.traceStore && redis) {
+    const { hydrateTraceStoreFromRedis } = await import('./infrastructure/telemetry/hydrate-traces.js');
+    void hydrateTraceStoreFromRedis(telemetryHandle.traceStore, redis).catch(() => {});
+  }
+
   const backlogStore = createBacklogStore(redis);
   const workflowSopStore = createWorkflowSopStore(redis);
   const summaryStore = createSummaryStore(redis);

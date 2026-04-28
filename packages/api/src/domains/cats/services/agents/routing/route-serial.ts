@@ -1138,6 +1138,7 @@ export async function* routeSerial(
             extra: {
               ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
               ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
+              ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
             },
           });
           storedMsgId = storedMsg.id;
@@ -1359,6 +1360,7 @@ export async function* routeSerial(
                 ...((options.parentInvocationId ?? ownInvocationId)
                   ? { stream: { invocationId: (options.parentInvocationId ?? ownInvocationId) as string } }
                   : {}),
+                ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
               },
             });
             // F088-P3: Stash rich blocks for outbound delivery (no-text branch)
@@ -1428,8 +1430,15 @@ export async function* routeSerial(
             ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
             ...(firstMetadata ? { metadata: firstMetadata } : {}),
             toolEvents: collectedToolEvents,
-            ...((options.parentInvocationId ?? ownInvocationId)
-              ? { extra: { stream: { invocationId: (options.parentInvocationId ?? ownInvocationId) as string } } }
+            ...((options.parentInvocationId ?? ownInvocationId) || doneMsg?.tracing
+              ? {
+                  extra: {
+                    ...((options.parentInvocationId ?? ownInvocationId)
+                      ? { stream: { invocationId: (options.parentInvocationId ?? ownInvocationId) as string } }
+                      : {}),
+                    ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
+                  },
+                }
               : {}),
           });
           // #80: Clean up draft only after successful append

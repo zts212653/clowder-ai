@@ -128,6 +128,21 @@ export class LocalTraceStore {
     };
   }
 
+  /**
+   * Bulk-load historical DTOs (e.g. from Redis messages on restart).
+   * Skips expired entries, respects maxSpans, and merges with existing buffer.
+   */
+  hydrate(dtos: TraceSpanDTO[]): void {
+    const cutoff = Date.now() - this.maxAgeMs;
+    const fresh = dtos.filter((d) => d.storedAt >= cutoff);
+    const merged = [...fresh, ...this.buffer].sort((a, b) => a.storedAt - b.storedAt);
+    this.buffer.length = 0;
+    const start = Math.max(0, merged.length - this.maxSpans);
+    for (let i = start; i < merged.length; i++) {
+      this.buffer.push(merged[i]!);
+    }
+  }
+
   /** Clear all stored spans. */
   clear(): void {
     this.buffer.length = 0;

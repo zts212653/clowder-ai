@@ -467,7 +467,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   const parentCtx = params.routeSpan ? trace.setSpan(context.active(), params.routeSpan) : undefined;
   const invocationSpan = tracer.startSpan(
     'cat_cafe.invocation',
-    { attributes: { [AGENT_ID]: catId, [OPERATION_NAME]: 'invoke' } },
+    { attributes: { [AGENT_ID]: catId, [OPERATION_NAME]: 'invoke', invocationId } },
     parentCtx,
   );
 
@@ -573,7 +573,15 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       } catch (err) {
         // Abort while queued is not a runtime error — clean exit
         if (signal?.aborted) {
-          yield { type: 'done' as const, catId, isFinal: isLastCat, timestamp: Date.now() };
+          const sc = invocationSpan.spanContext();
+          const parentSid = params.routeSpan?.spanContext().spanId;
+          yield {
+            type: 'done' as const,
+            catId,
+            isFinal: isLastCat,
+            timestamp: Date.now(),
+            tracing: { traceId: sc.traceId, spanId: sc.spanId, ...(parentSid ? { parentSpanId: parentSid } : {}) },
+          };
           didComplete = true; // F118 AC-C5: Abort early exit, not force-return
           return;
         }
@@ -1324,12 +1332,19 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           // Only create when durationApiMs is available — providers without timing data
           // (Codex, Gemini, Kimi) would produce misleading 0-duration spans.
           if (invocationSpan && msg.metadata.usage.durationApiMs) {
-            recordLlmCallSpan(invocationSpan, catId, providerSystem, modelBucket, {
-              durationApiMs: msg.metadata.usage.durationApiMs,
-              inputTokens: msg.metadata.usage.inputTokens,
-              outputTokens: msg.metadata.usage.outputTokens,
-              cacheReadTokens: msg.metadata.usage.cacheReadTokens,
-            });
+            recordLlmCallSpan(
+              invocationSpan,
+              catId,
+              providerSystem,
+              modelBucket,
+              {
+                durationApiMs: msg.metadata.usage.durationApiMs,
+                inputTokens: msg.metadata.usage.inputTokens,
+                outputTokens: msg.metadata.usage.outputTokens,
+                cacheReadTokens: msg.metadata.usage.cacheReadTokens,
+              },
+              invocationId,
+            );
           }
 
           outputs.push({
@@ -1561,7 +1576,18 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             terminalInterruptReason = null;
           }
         }
-        if (out.type === 'done') await finalizeTaskProgress();
+        if (out.type === 'done') {
+          await finalizeTaskProgress();
+          if (!out.tracing) {
+            const sc = invocationSpan.spanContext();
+            const parentSid = params.routeSpan?.spanContext().spanId;
+            out.tracing = {
+              traceId: sc.traceId,
+              spanId: sc.spanId,
+              ...(parentSid ? { parentSpanId: parentSid } : {}),
+            };
+          }
+        }
         yield out;
       }
     };
@@ -1901,7 +1927,15 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       timestamp: Date.now(),
     };
     await finalizeTaskProgress();
-    yield { type: 'done' as const, catId, isFinal: isLastCat, timestamp: Date.now() };
+    const sc = invocationSpan.spanContext();
+    const parentSid = params.routeSpan?.spanContext().spanId;
+    yield {
+      type: 'done' as const,
+      catId,
+      isFinal: isLastCat,
+      timestamp: Date.now(),
+      tracing: { traceId: sc.traceId, spanId: sc.spanId, ...(parentSid ? { parentSpanId: parentSid } : {}) },
+    };
   } finally {
     // F089: Clear invocation hard timeout
     if (invocationTimer) clearTimeout(invocationTimer);

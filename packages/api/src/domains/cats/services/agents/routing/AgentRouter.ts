@@ -829,6 +829,7 @@ export class AgentRouter {
         [ROUTING_TARGET_CATS]: (targetCats as string[]).join(','),
         [ROUTING_INTENT]: intent.intent,
         [ROUTING_STRATEGY]: strategy,
+        ...(options?.parentInvocationId ? { invocationId: options.parentInvocationId } : {}),
       },
     });
 
@@ -873,6 +874,18 @@ export class AgentRouter {
       routeSpan.setStatus({ code: SpanStatusCode.ERROR, message: String(err) });
       throw err;
     } finally {
+      // F153 Phase F KD-22: Write route span tracing to user message for cold start recovery.
+      // Runs in finally so both success and error paths persist the route root pointer.
+      if (userMessageId) {
+        const sc = routeSpan.spanContext();
+        try {
+          await Promise.resolve(
+            this.messageStore.updateExtra(userMessageId, { tracing: { traceId: sc.traceId, spanId: sc.spanId } }),
+          );
+        } catch (backfillErr) {
+          log.warn({ userMessageId, err: backfillErr }, 'Failed to write route tracing to user message');
+        }
+      }
       routeSpan.end();
     }
   }

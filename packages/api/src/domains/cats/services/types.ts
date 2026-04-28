@@ -153,6 +153,8 @@ export interface AgentMessage {
   mentionsUser?: boolean;
   /** F108: Invocation ID — allows frontend to distinguish messages from concurrent invocations */
   invocationId?: string;
+  /** F153-F: OTel span context for trace persistence (written to message extra.tracing) */
+  tracing?: { traceId: string; spanId: string; parentSpanId?: string };
   /** F070: Structured error code for recoverable failures (e.g. GOVERNANCE_BOOTSTRAP_REQUIRED) */
   errorCode?: string;
   /** When this message was created */

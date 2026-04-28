@@ -37,6 +37,7 @@ export function recordLlmCallSpan(
   providerSystem: string,
   modelBucket: string,
   usage: LlmCallUsage,
+  invocationId?: string,
 ): void {
   const parentCtx = trace.setSpan(context.active(), invocationSpan);
   const spanStartTime = new Date(Date.now() - usage.durationApiMs);
@@ -50,6 +51,7 @@ export function recordLlmCallSpan(
         ...(usage.inputTokens ? { 'gen_ai.usage.input_tokens': usage.inputTokens } : {}),
         ...(usage.outputTokens ? { 'gen_ai.usage.output_tokens': usage.outputTokens } : {}),
         ...(usage.cacheReadTokens ? { 'gen_ai.usage.cache_read_tokens': usage.cacheReadTokens } : {}),
+        ...(invocationId ? { invocationId } : {}),
       },
       startTime: spanStartTime,
     },
