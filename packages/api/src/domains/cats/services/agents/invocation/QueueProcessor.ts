@@ -342,6 +342,14 @@ export class QueueProcessor {
     return { outcome: 'enqueued', entry: result.entry };
   }
 
+  private setContinuationWindow(key: string, recent: number[]): void {
+    if (recent.length === 0) {
+      this.continuationWindows.delete(key);
+      return;
+    }
+    this.continuationWindows.set(key, recent);
+  }
+
   /** F151: Check if thread has any queued or processing entries (used by delivery-batch-done signal). */
   isThreadBusy(threadId: string): boolean {
     if (this.deps.queue.hasQueuedForThread(threadId)) return true;

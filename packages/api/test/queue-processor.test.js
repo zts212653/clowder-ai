@@ -621,6 +621,28 @@ describe('QueueProcessor', () => {
     }
   });
 
+  it('enqueueContinuation does not retain empty continuation window after skipped duplicate', async () => {
+    enqueueEntry(deps.queue, { targetCats: ['opus'], source: 'agent', content: 'pending continuation work' });
+    const capsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 't1',
+        catId: 'opus',
+        mode: 'independent',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-duplicate-window',
+        createdAt: Date.now(),
+        seal: { sessionId: 'sess-duplicate-window', sessionSeq: 1, reason: 'threshold' },
+      },
+    );
+
+    const outcome = processor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
+
+    assert.equal(outcome.outcome, 'skipped_existing_entry');
+    assert.equal(processor.continuationWindows.has('t1:opus'), false);
+  });
+
   it('enqueueContinuation preserves seal work behind old queued user work', async () => {
     const originalNow = Date.now;
     let now = 1_500_000;
