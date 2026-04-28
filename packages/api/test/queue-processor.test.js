@@ -591,7 +591,7 @@ describe('QueueProcessor', () => {
     assert.match(queue[1].content, /Continue the same structured work from the sealed session/);
   });
 
-  it('enqueueContinuation respects old queued agent work when checking existing pending work', async () => {
+  it('enqueueContinuation preserves seal work behind queued agent work', async () => {
     const originalNow = Date.now;
     let now = 1_000_000;
     Date.now = () => now;
@@ -614,15 +614,23 @@ describe('QueueProcessor', () => {
 
       const outcome = processor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
 
-      assert.equal(outcome.outcome, 'skipped_existing_entry');
-      assert.equal(deps.queue.list('t1', 'u1').length, 1, 'old queued agent work must not be dropped');
+      assert.equal(outcome.outcome, 'enqueued');
+      const queue = deps.queue.list('t1', 'u1');
+      assert.equal(queue.length, 2);
+      assert.equal(queue[0].content, 'stale queued work', 'old queued agent work must not be dropped');
+      assert.match(queue[1].content, /Continue the same structured work from the sealed session/);
     } finally {
       Date.now = originalNow;
     }
   });
 
   it('enqueueContinuation does not retain empty continuation window after skipped duplicate', async () => {
-    enqueueEntry(deps.queue, { targetCats: ['opus'], source: 'agent', content: 'pending continuation work' });
+    enqueueEntry(deps.queue, {
+      targetCats: ['opus'],
+      source: 'agent',
+      sourceCategory: 'continuation',
+      content: 'pending continuation work',
+    });
     const capsule = completeCapsuleForSeal(
       buildCapsuleFromRouteState({
         threadId: 't1',
@@ -749,13 +757,20 @@ describe('QueueProcessor', () => {
       );
 
       const outcome = dispatchProcessor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
-      assert.equal(outcome.outcome, 'skipped_existing_entry');
+      assert.equal(outcome.outcome, 'enqueued');
+      assert.equal(dispatchDeps.queue.list('t1', 'u1').length, 2, 'continuation should wait behind agent work');
 
       await dispatchProcessor.onInvocationComplete('t1', 'opus', 'succeeded');
       await new Promise((r) => setTimeout(r, 80));
 
       assert.ok(routeContents.length > 0, 'old queued agent work should be dispatched');
       assert.match(routeContents[0], /old queued handoff/);
+
+      await dispatchProcessor.onInvocationComplete('t1', 'opus', 'succeeded');
+      await new Promise((r) => setTimeout(r, 80));
+
+      assert.ok(routeContents.length > 1, 'seal continuation should dispatch after queued agent work');
+      assert.match(routeContents[1], /Continue the same structured work from the sealed session/);
     } finally {
       Date.now = originalNow;
     }

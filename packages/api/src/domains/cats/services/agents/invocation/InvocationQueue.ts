@@ -36,7 +36,7 @@ export interface QueueEntry {
   /** F175: queue-internal priority — urgent entries sort before normal in dequeue */
   priority: 'urgent' | 'normal';
   /** F175: origin category for visual grouping */
-  sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a';
+  sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' | 'continuation';
   /** F175: user drag-reorder position — explicit values override priority in dequeue */
   position?: number;
   /** F175: skill hint for connector triggers — flows through as promptTags on execution */
@@ -512,7 +512,11 @@ export class InvocationQueue {
   hasPendingForCat(
     threadId: string,
     catId: string,
-    opts?: { excludeEntryId?: string; sources?: QueueEntry['source'][] },
+    opts?: {
+      excludeEntryId?: string;
+      sources?: QueueEntry['source'][];
+      sourceCategories?: NonNullable<QueueEntry['sourceCategory']>[];
+    },
   ): boolean {
     const now = Date.now();
     for (const [key, q] of this.queues) {
@@ -521,6 +525,9 @@ export class InvocationQueue {
         if (opts?.excludeEntryId && e.id === opts.excludeEntryId) continue;
         if (!e.targetCats.includes(catId)) continue;
         if (opts?.sources && !opts.sources.includes(e.source)) continue;
+        if (opts?.sourceCategories) {
+          if (!e.sourceCategory || !opts.sourceCategories.includes(e.sourceCategory)) continue;
+        }
 
         if (e.status === 'queued') {
           return true;
