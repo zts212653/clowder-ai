@@ -18,6 +18,7 @@ import {
   type CollaborationContinuityCapsuleV1,
   extractContinuityCapsuleFromSystemInfo,
 } from '../agents/invocation/CollaborationContinuityCapsule.js';
+import { stripLeakedToolCallPayload } from '../agents/routing/route-helpers.js';
 
 export interface TranscriptSessionInfo {
   sessionId: string;
@@ -247,8 +248,16 @@ export class TranscriptWriter {
         if (streamKey) {
           const existing = recentMessageByStream.get(streamKey);
           if (existing) {
-            existing.content = coalesceVisibleText(existing.content, visibleText, evt.textMode).slice(0, 1200);
-            moveToEnd(recentMessages, existing);
+            const content = normalizeVisibleText(coalesceVisibleText(existing.content, visibleText, evt.textMode), {
+              trim: false,
+            });
+            if (content) {
+              existing.content = content.slice(0, 1200);
+              moveToEnd(recentMessages, existing);
+            } else {
+              removeItem(recentMessages, existing);
+              recentMessageByStream.delete(streamKey);
+            }
           } else {
             const message = {
               role: 'assistant' as const,
@@ -353,7 +362,7 @@ function extractVisibleAssistantText(evt: Record<string, unknown>, opts?: { trim
 }
 
 function normalizeVisibleText(text: string, opts?: { trim?: boolean }): string | null {
-  const sanitized = text.replace(/[\x00-\x08\x0b-\x1f]/g, '');
+  const sanitized = stripLeakedToolCallPayload(text.replace(/[\x00-\x08\x0b-\x1f]/g, ''));
   if (sanitized.trim().length === 0) return null;
   return opts?.trim === false ? sanitized : sanitized.trim();
 }
@@ -370,5 +379,12 @@ function moveToEnd<T>(items: T[], item: T): void {
   if (index >= 0 && index !== items.length - 1) {
     items.splice(index, 1);
     items.push(item);
+  }
+}
+
+function removeItem<T>(items: T[], item: T): void {
+  const index = items.indexOf(item);
+  if (index >= 0) {
+    items.splice(index, 1);
   }
 }
