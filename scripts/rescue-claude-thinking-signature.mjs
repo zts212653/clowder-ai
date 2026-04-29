@@ -35,23 +35,28 @@ function readRequiredValue(argv, index, flagName) {
   return value;
 }
 
+const MIN_VALID_SIGNATURE_LENGTH = 300;
+
+export function hasShortThinkingSignature(entry) {
+  if (!entry || typeof entry !== 'object' || entry.type !== 'assistant') return false;
+  if (!entry.message || entry.message.role !== 'assistant' || !Array.isArray(entry.message.content)) return false;
+  return entry.message.content.some(
+    (item) =>
+      item &&
+      typeof item === 'object' &&
+      item.type === 'thinking' &&
+      typeof item.signature === 'string' &&
+      item.signature.length < MIN_VALID_SIGNATURE_LENGTH,
+  );
+}
+
 export function isPureThinkingAssistantTurn(entry) {
-  if (!entry || typeof entry !== 'object') return false;
-  if (entry.type !== 'assistant') return false;
-  const message = entry.message;
-  if (!message || typeof message !== 'object') return false;
-  if (message.role !== 'assistant') return false;
-  const content = message.content;
+  if (!entry || typeof entry !== 'object' || entry.type !== 'assistant') return false;
+  if (!entry.message || entry.message.role !== 'assistant' || !Array.isArray(entry.message.content)) return false;
   return (
-    Array.isArray(content) &&
-    content.length > 0 &&
-    content.every(
-      (item) =>
-        item &&
-        typeof item === 'object' &&
-        item.type === 'thinking' &&
-        typeof item.signature === 'string' &&
-        item.signature.length > 0,
+    entry.message.content.length > 0 &&
+    entry.message.content.every(
+      (item) => item && typeof item === 'object' && item.type === 'thinking' && typeof item.signature === 'string',
     )
   );
 }
@@ -86,6 +91,21 @@ export function stripPureThinkingAssistantTurns(rawContent) {
   };
 }
 
+function hasBrokenThinkingSignature(rawContent) {
+  if (INVALID_THINKING_SIGNATURE_RE.test(rawContent)) return true;
+
+  for (const line of rawContent.split('\n')) {
+    if (line.trim().length === 0) continue;
+    try {
+      if (hasShortThinkingSignature(JSON.parse(line))) return true;
+    } catch {
+      // Ignore malformed lines while scanning; they are not rescue targets.
+    }
+  }
+
+  return false;
+}
+
 async function walkJsonlFiles(rootDir) {
   const results = [];
   const stack = [rootDir];
@@ -117,7 +137,7 @@ export async function findBrokenSessionFiles(rootDir = defaultProjectsRoot()) {
   for (const filePath of files) {
     try {
       const content = await fs.readFile(filePath, 'utf8');
-      if (INVALID_THINKING_SIGNATURE_RE.test(content)) broken.push(filePath);
+      if (hasBrokenThinkingSignature(content)) broken.push(filePath);
     } catch {
       // Ignore unreadable files and keep scanning the rest.
     }
