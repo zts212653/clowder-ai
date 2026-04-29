@@ -619,6 +619,8 @@ export class QueueProcessor {
         userId: string;
         contentBlocks?: readonly unknown[];
         extra?: Record<string, unknown>;
+        origin?: string;
+        replyTo?: string;
       }> = [];
       for (const mid of allMessageIds) {
         try {
@@ -634,6 +636,8 @@ export class QueueProcessor {
               userId: result.userId,
               contentBlocks: result.contentBlocks,
               ...(result.extra ? { extra: result.extra as Record<string, unknown> } : {}),
+              ...(result.origin ? { origin: result.origin } : {}),
+              ...(result.replyTo ? { replyTo: result.replyTo } : {}),
             });
           }
         } catch {

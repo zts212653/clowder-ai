@@ -765,6 +765,8 @@ export interface ChatState {
       timestamp: number;
       contentBlocks?: readonly unknown[];
       extra?: Record<string, unknown>;
+      origin?: 'stream' | 'callback' | 'briefing';
+      replyTo?: string;
     }>,
   ) => void;
 
@@ -980,6 +982,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 ...(sm.catId ? { catId: sm.catId } : {}),
                 contentBlocks: sm.contentBlocks as ChatMessage['contentBlocks'],
                 ...(sm.extra ? { extra: sm.extra as ChatMessage['extra'] } : {}),
+                ...(sm.origin ? { origin: sm.origin } : {}),
+                ...(sm.replyTo ? { replyTo: sm.replyTo } : {}),
               });
             }
           }

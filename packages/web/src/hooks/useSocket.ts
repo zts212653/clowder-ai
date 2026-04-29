@@ -709,6 +709,8 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
           userId: string;
           contentBlocks?: readonly unknown[];
           extra?: Record<string, unknown>;
+          origin?: 'stream' | 'callback' | 'briefing';
+          replyTo?: string;
         }>;
       }) => {
         useChatStore.getState().markMessagesDelivered(data.threadId, data.messageIds, data.deliveredAt, data.messages);
