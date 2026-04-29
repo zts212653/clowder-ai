@@ -395,6 +395,29 @@ describe('Queue Management API', () => {
     assert.equal(res.statusCode, 409);
   });
 
+  it('PATCH /queue/:entryId/move rejects system continuation entries (409)', async () => {
+    const continuation = enqueueEntry(deps.invocationQueue, {
+      content: 'continue sealed work',
+      source: 'agent',
+      sourceCategory: 'continuation',
+      continuationKey: 't1:opus:inv-1:sess-1:1',
+      autoExecute: true,
+    });
+    enqueueEntry(deps.invocationQueue, { content: 'user work', targetCats: ['codex'] });
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/t1/queue/${continuation.entry.id}/move`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { direction: 'down' },
+    });
+    const body = JSON.parse(res.body);
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(body.code, 'ENTRY_POSITION_LOCKED');
+    assert.equal(deps.invocationQueue.list('t1', 'user-a')[0].id, continuation.entry.id);
+  });
+
   // ── Functional: POST steer ──
 
   it('POST /queue/:entryId/steer promote moves entry to front of queued entries', async () => {
@@ -412,6 +435,27 @@ describe('Queue Management API', () => {
     const queue = deps.invocationQueue.list('t1', 'user-a');
     assert.equal(queue[0].content, 'second');
     assert.equal(queue[1].content, 'first');
+  });
+
+  it('POST /queue/:entryId/steer promote rejects system continuation entries (409)', async () => {
+    const continuation = enqueueEntry(deps.invocationQueue, {
+      content: 'continue sealed work',
+      source: 'agent',
+      sourceCategory: 'continuation',
+      continuationKey: 't1:opus:inv-1:sess-1:1',
+      autoExecute: true,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${continuation.entry.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { mode: 'promote' },
+    });
+    const body = JSON.parse(res.body);
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(body.code, 'ENTRY_POSITION_LOCKED');
   });
 
   it('POST /queue/:entryId/steer returns 409 when entry is processing', async () => {
@@ -623,6 +667,28 @@ describe('Queue Management API', () => {
       payload: { positions: [{ entryId: processingEntry.id, position: 0 }] },
     });
     assert.equal(res.statusCode, 400);
+  });
+
+  it('PATCH /queue/reorder rejects position on system continuation entry (F175)', async () => {
+    const continuation = enqueueEntry(deps.invocationQueue, {
+      content: 'continue sealed work',
+      source: 'agent',
+      sourceCategory: 'continuation',
+      continuationKey: 't1:opus:inv-1:sess-1:1',
+      autoExecute: true,
+    });
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/threads/t1/queue/reorder',
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { positions: [{ entryId: continuation.entry.id, position: 99 }] },
+    });
+    const body = JSON.parse(res.body);
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(body.code, 'ENTRY_POSITION_LOCKED');
+    assert.equal(deps.invocationQueue.list('t1', 'user-a')[0].id, continuation.entry.id);
   });
 
   it('PATCH /queue/reorder rejects invalid body (F175)', async () => {

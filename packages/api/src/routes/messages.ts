@@ -21,6 +21,10 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { getDefaultCatId } from '../config/cat-config-loader.js';
 import { resolveFrontendBaseUrl } from '../config/frontend-origin.js';
+import {
+  type CollaborationContinuityCapsuleV1,
+  extractContinuityCapsuleFromAgentMessage,
+} from '../domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
@@ -28,7 +32,6 @@ import type { QueueProcessor } from '../domains/cats/services/agents/invocation/
 import type { PersistenceContext } from '../domains/cats/services/agents/routing/route-helpers.js';
 import { resetStreak } from '../domains/cats/services/agents/routing/WorklistRegistry.js';
 import {
-  accumulateTextAggregate,
   accumulateTextParts,
   flattenTextParts,
   flattenTurnTextParts,
@@ -433,12 +436,12 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // Whisper / @mention use cat-specific isCatBusy; broadcast uses thread-wide isThreadBusy.
     const hasActive = (() => {
       if (!opts.invocationTracker) {
-        return opts.queueProcessor?.isThreadBusy(resolvedThreadId) ?? false;
+        return opts.queueProcessor?.isThreadBusy?.(resolvedThreadId) ?? false;
       }
       if (whisperVisibility === 'whisper' && primaryCat !== 'unknown') {
         return (
           opts.invocationTracker.has(resolvedThreadId, primaryCat) ||
-          (opts.queueProcessor?.isCatBusy(resolvedThreadId, primaryCat) ?? false)
+          (opts.queueProcessor?.isCatBusy?.(resolvedThreadId, primaryCat) ?? false)
         );
       }
       if (hasMentions) {
@@ -446,11 +449,11 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           (cat) =>
             cat !== 'unknown' &&
             (opts.invocationTracker!.has(resolvedThreadId, cat) ||
-              (opts.queueProcessor?.isCatBusy(resolvedThreadId, cat) ?? false)),
+              (opts.queueProcessor?.isCatBusy?.(resolvedThreadId, cat) ?? false)),
         );
       }
       return (
-        opts.invocationTracker.has(resolvedThreadId) || (opts.queueProcessor?.isThreadBusy(resolvedThreadId) ?? false)
+        opts.invocationTracker.has(resolvedThreadId) || (opts.queueProcessor?.isThreadBusy?.(resolvedThreadId) ?? false)
       );
     })();
     const mode = deliveryMode ?? (hasActive ? 'queue' : 'immediate');
@@ -760,6 +763,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           const collectedUsage = new Map<string, TokenUsage>();
           // F070: track governance block errorCode for recoverable failure marking
           let governanceErrorCode: string | undefined;
+          const continuationCapsules = new Map<string, CollaborationContinuityCapsuleV1>();
+
           // F088 ISSUE-15: Collect per-turn content for outbound delivery to connector platforms
           const outboundTurns: Array<{
             catId: string;
@@ -855,6 +860,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             }
             // F39 bugfix: stop broadcasting after cancel (drain pipe buffer silently)
             if (controller?.signal.aborted) break;
+            const continuationCapsule = extractContinuityCapsuleFromAgentMessage(msg);
+            if (continuationCapsule) {
+              continuationCapsules.set(continuationCapsule.catId, continuationCapsule);
+            }
             if (msg.type === 'done' && msg.catId && msg.metadata?.usage) {
               collectedUsage.set(msg.catId, mergeTokenUsage(collectedUsage.get(msg.catId), msg.metadata.usage));
             }
@@ -997,6 +1006,15 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 : {}),
             });
             finalStatus = 'succeeded';
+
+            for (const continuationCapsule of continuationCapsules.values()) {
+              opts.queueProcessor?.enqueueContinuation({
+                threadId: resolvedThreadId,
+                userId,
+                catId: continuationCapsule.catId,
+                capsule: continuationCapsule,
+              });
+            }
 
             // Push notification: cat(s) finished responding
             const pushSvc = getPushNotificationService();
