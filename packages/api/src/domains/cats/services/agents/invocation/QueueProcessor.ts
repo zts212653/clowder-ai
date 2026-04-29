@@ -273,11 +273,14 @@ export class QueueProcessor {
     return undefined;
   }
 
+  /** #595: auto-recovery delay for failed/canceled slots (ms) */
+  private static readonly PAUSE_RECOVERY_DELAY_MS = 10_000;
+
   /**
    * System-level entry: called when an invocation completes.
    * F108: Now slot-aware — catId identifies which slot completed.
    * - succeeded → auto-dequeue oldest across users
-   * - canceled/failed → pause slot, notify relevant users
+   * - canceled/failed → pause slot, notify users, auto-recover after delay
    */
   async onInvocationComplete(
     threadId: string,
@@ -302,6 +305,21 @@ export class QueueProcessor {
       }
       this.pausedSlots.set(sk, status);
       this.emitPausedToQueuedUsers(threadId, status);
+
+      // #595: auto-recover paused slot after delay — prevents indefinite stuck state
+      setTimeout(() => {
+        if (this.pausedSlots.get(sk) !== status) return;
+        this.pausedSlots.delete(sk);
+        this.deps.log.info(
+          { threadId, catId, status },
+          '[QueueProcessor] Auto-recovering paused slot after timeout (#595)',
+        );
+        if (this.deps.queue.hasQueuedForThread(threadId)) {
+          void this.tryExecuteNextAcrossUsers(threadId, catId).catch((err) => {
+            this.deps.log.error({ err, threadId, catId }, '[QueueProcessor] Auto-recovery dequeue failed');
+          });
+        }
+      }, QueueProcessor.PAUSE_RECOVERY_DELAY_MS);
     }
   }
 

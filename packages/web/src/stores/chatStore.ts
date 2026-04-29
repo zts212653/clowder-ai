@@ -971,10 +971,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (!existingIds.has(sm.id)) {
               updated.push({
                 id: sm.id,
-                type: 'user',
+                // #607: cat-originated messages (A2A triggers) have catId set
+                type: sm.catId ? 'assistant' : 'user',
                 content: sm.content,
                 timestamp: sm.timestamp,
                 deliveredAt,
+                ...(sm.catId ? { catId: sm.catId } : {}),
                 contentBlocks: sm.contentBlocks as ChatMessage['contentBlocks'],
               });
             }
