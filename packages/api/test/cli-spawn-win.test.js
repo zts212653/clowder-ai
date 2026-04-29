@@ -184,6 +184,17 @@ test('resolveWindowsShimSpawn uses the current Node executable for direct shim l
   });
 });
 
+test('resolveWindowsShimSpawn directly launches native exe shim targets', () => {
+  const shimExe = join(tmpdir(), 'claude.exe');
+
+  const resolved = resolveWindowsShimSpawn('claude', ['--print'], shimExe);
+
+  assert.deepEqual(resolved, {
+    command: shimExe,
+    args: ['--print'],
+  });
+});
+
 test('resolveCmdShimScript skips sibling node.exe and resolves the actual script (#247)', () => {
   // Portable Node installs place node.exe alongside the .cmd shim.
   // The shim references both %~dp0\node.exe (launcher) and %~dp0\node_modules\...\bin\opencode (script).
@@ -384,6 +395,23 @@ test('parseShimFile resolves extensionless entrypoints when no .js match exists'
 
   try {
     assert.equal(parseShimFile(cmdPath), scriptPath);
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('parseShimFile resolves native exe entrypoints when the shim directly launches a CLI binary', () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cli-spawn-win-parse-native-exe-'));
+  mkdirSync(join(tempRoot, 'node_modules', '@anthropic-ai', 'claude-code', 'bin'), { recursive: true });
+
+  const cmdPath = join(tempRoot, 'claude.cmd');
+  const exePath = join(tempRoot, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe');
+
+  writeFileSync(cmdPath, '"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe" %*\r\n', 'utf8');
+  writeFileSync(exePath, 'MZ fake native exe', 'utf8');
+
+  try {
+    assert.equal(parseShimFile(cmdPath), exePath);
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }

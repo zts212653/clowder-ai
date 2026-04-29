@@ -11,7 +11,7 @@ import { createModuleLogger } from '../infrastructure/logger.js';
 import { registerLivenessProbe, unregisterLivenessProbe } from '../infrastructure/telemetry/instruments.js';
 import { emitOtelLog } from '../infrastructure/telemetry/otel-logger.js';
 import { invalidateCliCommand } from './cli-resolve.js';
-import { escapeBashArg, escapeCmdArg, findGitBashPath, resolveWindowsShimSpawn } from './cli-spawn-win.js';
+import { resolveWindowsSpawnPlan } from './cli-spawn-win.js';
 import { resolveCliTimeoutMs } from './cli-timeout.js';
 import type { ChildProcessLike, CliSpawnOptions, SpawnFn } from './cli-types.js';
 import { isParseError, parseNDJSON } from './ndjson-parser.js';
@@ -552,35 +552,35 @@ function defaultSpawn(
   },
 ): ChildProcessLike {
   if (IS_WINDOWS) {
-    const shimSpawn = resolveWindowsShimSpawn(command, args);
-    if (shimSpawn) {
+    const spawnPlan = resolveWindowsSpawnPlan(command, args);
+    if (spawnPlan.mode === 'shim') {
       log.debug(
-        { original: command, resolved: shimSpawn.command, argCount: shimSpawn.args.length },
+        {
+          original: command,
+          resolved: spawnPlan.command,
+          argCount: spawnPlan.args.length,
+          mode: spawnPlan.mode,
+          shell: spawnPlan.shell,
+        },
         'Windows shim resolved',
       );
-      return nodeSpawn(shimSpawn.command, shimSpawn.args, {
-        cwd: options.cwd,
-        env: options.env,
-        stdio: options.stdio,
-      });
+    } else {
+      log.debug(
+        {
+          original: command,
+          resolved: spawnPlan.command,
+          argCount: spawnPlan.args.length,
+          mode: spawnPlan.mode,
+          shell: spawnPlan.shell,
+        },
+        'Windows spawn plan resolved',
+      );
     }
-    // Prefer Git Bash (UTF-8 native) over cmd.exe (GBK codepage corrupts CJK args)
-    const gitBash = findGitBashPath();
-    if (gitBash) {
-      log.debug({ command, shell: gitBash }, 'Windows shim unresolved, falling back to Git Bash');
-      return nodeSpawn(escapeBashArg(command), args.map(escapeBashArg), {
-        cwd: options.cwd,
-        env: options.env,
-        stdio: options.stdio,
-        shell: gitBash,
-      });
-    }
-    log.debug({ command, shell: true }, 'Windows shim unresolved, falling back to cmd.exe');
-    return nodeSpawn(escapeCmdArg(command), args.map(escapeCmdArg), {
+    return nodeSpawn(spawnPlan.command, spawnPlan.args, {
       cwd: options.cwd,
       env: options.env,
       stdio: options.stdio,
-      shell: true,
+      ...(spawnPlan.shell !== undefined ? { shell: spawnPlan.shell } : {}),
     });
   }
 
