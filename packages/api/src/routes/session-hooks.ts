@@ -11,9 +11,14 @@
  * corresponding Cat Cafe SessionRecord via `getByCliSessionId()`.
  */
 
+import type { SessionRecord } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { z } from 'zod';
 import { getSessionStrategy } from '../config/session-strategy.js';
+import {
+  completeCapsuleForCompact,
+  isCollaborationContinuityCapsuleV1,
+} from '../domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js';
 import type { ISessionSealer } from '../domains/cats/services/session/SessionSealer.js';
 import type { TranscriptReader } from '../domains/cats/services/session/TranscriptReader.js';
 import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
@@ -39,6 +44,23 @@ interface SessionHooksRouteOptions extends FastifyPluginOptions {
 
 export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHooksRouteOptions): Promise<void> {
   const { sessionChainStore, sessionSealer, transcriptReader, hookToken } = opts;
+
+  function compactContinuityFor(record: SessionRecord) {
+    const capsule = completeCapsuleForCompact(record.continuityCapsule, { createdAt: Date.now() });
+    if (!capsule) return undefined;
+    return {
+      capsule,
+      diagnostics: {
+        source: 'active_session_route_state',
+        boundary: 'compact_boundary',
+        generated: true,
+        threadId: record.threadId,
+        catId: record.catId,
+        sessionId: record.id,
+        compressionCount: record.compressionCount ?? 0,
+      },
+    };
+  }
 
   // Hook authentication guard — fail-closed: always requires valid token
   app.addHook('onRequest', async (request, reply) => {
@@ -92,11 +114,13 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
         reply.status(409);
         return { error: 'Session disappeared during compression increment (race)', sessionId: record.id };
       }
+      const updated = await sessionChainStore.get(record.id);
       return reply.send({
         action: 'compress_allowed',
         sessionId: record.id,
         compressionCount: newCount,
         strategy: 'compress',
+        ...(updated ? { continuity: compactContinuityFor(updated) } : {}),
       });
     }
 
@@ -109,12 +133,14 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
         return { error: 'Session disappeared during compression increment (race)', sessionId: record.id };
       }
       if (newCount <= max) {
+        const updated = await sessionChainStore.get(record.id);
         return reply.send({
           action: 'compress_allowed',
           sessionId: record.id,
           compressionCount: newCount,
           maxCompressions: max,
           strategy: 'hybrid',
+          ...(updated ? { continuity: compactContinuityFor(updated) } : {}),
         });
       }
       // At or over max → seal with max_compressions reason (not the hook's reason)
@@ -168,6 +194,20 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
       return { error: 'No session found for this CLI session ID' };
     }
 
+    const activeCompactContinuity =
+      record.status === 'active' && (record.compressionCount ?? 0) > 0 ? compactContinuityFor(record) : undefined;
+    if (activeCompactContinuity) {
+      return reply.send({
+        sessionId: record.id,
+        status: record.status,
+        seq: record.seq,
+        catId: record.catId,
+        threadId: record.threadId,
+        digest: null,
+        continuity: activeCompactContinuity,
+      });
+    }
+
     // Get the full chain for this cat+thread, find the latest sealed session
     const chain = await sessionChainStore.getChain(record.catId, record.threadId);
     const sealedSessions = chain
@@ -187,6 +227,9 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
       reply.status(404);
       return { error: 'Digest not found for latest sealed session' };
     }
+    const sealedCapsule = isCollaborationContinuityCapsuleV1(digest.continuityCapsule)
+      ? digest.continuityCapsule
+      : undefined;
 
     return reply.send({
       sessionId: latest.id,
@@ -195,6 +238,21 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
       threadId: latest.threadId,
       sealedAt: latest.sealedAt,
       digest,
+      ...(sealedCapsule
+        ? {
+            continuity: {
+              capsule: sealedCapsule,
+              diagnostics: {
+                source: 'sealed_session_digest',
+                boundary: sealedCapsule.continuationReason,
+                generated: true,
+                threadId: latest.threadId,
+                catId: latest.catId,
+                sessionId: latest.id,
+              },
+            },
+          }
+        : {}),
     });
   });
 

@@ -194,6 +194,67 @@ describe('Session Hooks Routes', () => {
       assert.deepEqual(body.digest.toolsUsed, ['Read', 'Bash']);
     });
 
+    it('returns sealed digest continuity diagnostics when digest has capsule', async () => {
+      const storeMod = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const sealerMod = await import('../dist/domains/cats/services/session/SessionSealer.js');
+      const routeMod = await import('../dist/routes/session-hooks.js');
+
+      const sessionChainStore = new storeMod.SessionChainStore();
+      const record = sessionChainStore.create({
+        cliSessionId: 'cli-sealed-capsule',
+        threadId: 'thread-sealed-capsule',
+        catId: 'opus',
+        userId: 'user-1',
+      });
+      sessionChainStore.update(record.id, {
+        status: 'sealed',
+        sealedAt: Date.now(),
+      });
+
+      const continuityCapsule = {
+        v: 1,
+        threadId: 'thread-sealed-capsule',
+        catId: 'opus',
+        mode: 'independent',
+        a2aEnabled: true,
+        ballState: 'in_progress',
+        continuationReason: 'threshold_seal',
+        createdAt: 1234,
+        invocationId: 'inv-sealed',
+        seal: { sessionId: record.id, sessionSeq: 1, reason: 'threshold' },
+      };
+      const digestData = {
+        timeRange: { createdAt: 1000, sealedAt: 2000, durationMs: 1000 },
+        toolsUsed: ['Read'],
+        filesTouched: [],
+        errors: [],
+        continuityCapsule,
+      };
+      const transcriptReader = mockTranscriptReader({ [record.id]: digestData });
+      const sessionSealer = new sealerMod.SessionSealer(sessionChainStore);
+      const app = Fastify();
+      await app.register(routeMod.sessionHooksRoutes, {
+        sessionChainStore,
+        sessionSealer,
+        transcriptReader,
+        hookToken: DEFAULT_HOOK_TOKEN,
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/sessions/latest-digest?cliSessionId=cli-sealed-capsule',
+        headers: authHeaders(),
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.payload);
+      assert.deepEqual(body.continuity.capsule, continuityCapsule);
+      assert.equal(body.continuity.diagnostics.source, 'sealed_session_digest');
+      assert.equal(body.continuity.diagnostics.boundary, 'threshold_seal');
+      assert.equal(body.continuity.diagnostics.sessionId, record.id);
+    });
+
     it('returns 400 when cliSessionId is missing', async () => {
       const { app } = await setup();
 
@@ -237,6 +298,131 @@ describe('Session Hooks Routes', () => {
       assert.equal(res.statusCode, 404);
       const body = JSON.parse(res.payload);
       assert.ok(body.error.includes('No sealed sessions'));
+    });
+
+    it('returns compact continuity fallback for active compacted session without sealed digest', async () => {
+      const { app, sessionChainStore } = await setup();
+      const record = sessionChainStore.create({
+        cliSessionId: 'cli-active-compact',
+        threadId: 'thread-compact',
+        catId: 'opus',
+        userId: 'user-1',
+      });
+      record.compressionCount = 1;
+      record.continuityCapsule = {
+        v: 1,
+        threadId: 'thread-compact',
+        catId: 'opus',
+        mode: 'serial',
+        chainIndex: 1,
+        chainTotal: 2,
+        directMessageFrom: 'codex',
+        a2aTriggerMessageId: 'msg-a2a',
+        a2aEnabled: true,
+        a2aDepth: 1,
+        maxA2ADepth: 15,
+        ballState: 'in_progress',
+        continuationReason: 'threshold_seal',
+      };
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/sessions/latest-digest?cliSessionId=cli-active-compact',
+        headers: authHeaders(),
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.payload);
+      assert.equal(body.status, 'active');
+      assert.equal(body.digest, null);
+      assert.equal(body.continuity.diagnostics.source, 'active_session_route_state');
+      assert.equal(body.continuity.capsule.continuationReason, 'compact_boundary');
+      assert.equal(body.continuity.capsule.directMessageFrom, 'codex');
+      assert.equal(body.continuity.capsule.a2aTriggerMessageId, 'msg-a2a');
+    });
+
+    it('prefers current active compact continuity over older sealed digest', async () => {
+      const storeMod = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const sealerMod = await import('../dist/domains/cats/services/session/SessionSealer.js');
+      const routeMod = await import('../dist/routes/session-hooks.js');
+
+      const sessionChainStore = new storeMod.SessionChainStore();
+      const oldRecord = sessionChainStore.create({
+        cliSessionId: 'cli-old-sealed',
+        threadId: 'thread-compact-with-history',
+        catId: 'opus',
+        userId: 'user-1',
+      });
+      sessionChainStore.update(oldRecord.id, {
+        status: 'sealed',
+        sealedAt: Date.now() - 1000,
+      });
+      const activeRecord = sessionChainStore.create({
+        cliSessionId: 'cli-active-compact-with-history',
+        threadId: 'thread-compact-with-history',
+        catId: 'opus',
+        userId: 'user-1',
+      });
+      sessionChainStore.update(activeRecord.id, {
+        compressionCount: 1,
+        continuityCapsule: {
+          v: 1,
+          threadId: 'thread-compact-with-history',
+          catId: 'opus',
+          mode: 'serial',
+          chainIndex: 2,
+          chainTotal: 2,
+          directMessageFrom: 'codex',
+          a2aTriggerMessageId: 'msg-current',
+          a2aEnabled: true,
+          a2aDepth: 1,
+          maxA2ADepth: 15,
+          ballState: 'in_progress',
+          continuationReason: 'threshold_seal',
+        },
+      });
+
+      const oldDigest = {
+        timeRange: { createdAt: 1000, sealedAt: 2000, durationMs: 1000 },
+        toolsUsed: ['OldTool'],
+        filesTouched: [],
+        errors: [],
+        continuityCapsule: {
+          v: 1,
+          threadId: 'thread-compact-with-history',
+          catId: 'opus',
+          mode: 'independent',
+          a2aEnabled: false,
+          ballState: 'completed',
+          continuationReason: 'threshold_seal',
+          createdAt: 1000,
+          seal: { sessionId: oldRecord.id, sessionSeq: 1, reason: 'threshold' },
+        },
+      };
+      const transcriptReader = mockTranscriptReader({ [oldRecord.id]: oldDigest });
+      const sessionSealer = new sealerMod.SessionSealer(sessionChainStore);
+      const app = Fastify();
+      await app.register(routeMod.sessionHooksRoutes, {
+        sessionChainStore,
+        sessionSealer,
+        transcriptReader,
+        hookToken: DEFAULT_HOOK_TOKEN,
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/sessions/latest-digest?cliSessionId=cli-active-compact-with-history',
+        headers: authHeaders(),
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.payload);
+      assert.equal(body.sessionId, activeRecord.id);
+      assert.equal(body.digest, null);
+      assert.equal(body.continuity.diagnostics.source, 'active_session_route_state');
+      assert.equal(body.continuity.capsule.continuationReason, 'compact_boundary');
+      assert.equal(body.continuity.capsule.a2aTriggerMessageId, 'msg-current');
     });
   });
 
@@ -287,6 +473,58 @@ describe('Session Hooks Routes', () => {
         const updated = sessionChainStore.get(record.id);
         assert.equal(updated.compressionCount, 1);
         assert.equal(updated.status, 'active', 'session should remain active');
+      } finally {
+        _clearTestStrategyOverrides();
+      }
+    });
+
+    it('compress strategy returns compact continuity capsule from active route state', async () => {
+      await loadStrategyHelpers();
+      _setTestStrategyOverride('opus', {
+        strategy: 'compress',
+        thresholds: { warn: 0.75, action: 0.85 },
+        turnBudget: 12_000,
+        safetyMargin: 4_000,
+      });
+
+      try {
+        const { app, sessionChainStore } = await setup();
+        const record = sessionChainStore.create({
+          cliSessionId: 'cli-compress-capsule',
+          threadId: 'thread-compact',
+          catId: 'opus',
+          userId: 'user-1',
+        });
+        record.continuityCapsule = {
+          v: 1,
+          threadId: 'thread-compact',
+          catId: 'opus',
+          mode: 'serial',
+          chainIndex: 1,
+          chainTotal: 2,
+          directMessageFrom: 'codex',
+          a2aTriggerMessageId: 'msg-a2a',
+          a2aEnabled: true,
+          a2aDepth: 1,
+          maxA2ADepth: 15,
+          ballState: 'in_progress',
+          continuationReason: 'threshold_seal',
+        };
+
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/sessions/seal',
+          headers: authHeaders(),
+          payload: { cliSessionId: 'cli-compress-capsule', reason: 'claude-code-compact-auto' },
+        });
+
+        assert.equal(res.statusCode, 200);
+        const body = JSON.parse(res.payload);
+        assert.equal(body.action, 'compress_allowed');
+        assert.equal(body.continuity?.diagnostics?.source, 'active_session_route_state');
+        assert.equal(body.continuity?.capsule?.continuationReason, 'compact_boundary');
+        assert.equal(body.continuity?.capsule?.directMessageFrom, 'codex');
+        assert.equal(body.continuity?.capsule?.a2aTriggerMessageId, 'msg-a2a');
       } finally {
         _clearTestStrategyOverrides();
       }

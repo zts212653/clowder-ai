@@ -28,6 +28,7 @@ export type SessionRecordPatch = Partial<
     | 'sealedAt'
     | 'updatedAt'
     | 'compressionCount'
+    | 'continuityCapsule'
     | 'consecutiveRestoreFailures'
   >
 >;
@@ -175,6 +176,7 @@ export class SessionChainStore implements ISessionChainStore {
     if (patch.sealReason !== undefined) record.sealReason = patch.sealReason;
     if (patch.sealedAt !== undefined) record.sealedAt = patch.sealedAt;
     if (patch.compressionCount !== undefined) record.compressionCount = patch.compressionCount;
+    if (patch.continuityCapsule !== undefined) record.continuityCapsule = patch.continuityCapsule;
     if (patch.consecutiveRestoreFailures !== undefined)
       record.consecutiveRestoreFailures = patch.consecutiveRestoreFailures;
     record.updatedAt = patch.updatedAt ?? Date.now();

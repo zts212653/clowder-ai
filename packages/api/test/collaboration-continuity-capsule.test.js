@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 const {
   buildCapsuleFromRouteState,
+  completeCapsuleForCompact,
   completeCapsuleForSeal,
   formatContinuationPrompt,
   isCollaborationContinuityCapsuleV1,
@@ -62,6 +63,62 @@ describe('CollaborationContinuityCapsule', () => {
     assert.equal(isCollaborationContinuityCapsuleV1(capsule), true);
     assert.equal(capsule.invocationId, 'inv-1');
     assert.equal(capsule.seal.sessionId, 'sess-1');
+  });
+
+  it('completes compact capsule from route state without requiring a sealed digest', () => {
+    const partial = buildCapsuleFromRouteState({
+      threadId: 'thread-compact',
+      catId: 'codex',
+      mode: 'serial',
+      chainIndex: 1,
+      chainTotal: 2,
+      directMessageFrom: 'opus',
+      a2aTriggerMessageId: 'msg-a2a',
+      a2aEnabled: true,
+    });
+
+    const capsule = completeCapsuleForCompact(partial, { createdAt: 5678 });
+
+    assert.equal(isCollaborationContinuityCapsuleV1(capsule), true);
+    assert.equal(capsule.continuationReason, 'compact_boundary');
+    assert.equal(capsule.createdAt, 5678);
+    assert.equal(capsule.directMessageFrom, 'opus');
+    assert.equal(capsule.a2aTriggerMessageId, 'msg-a2a');
+    assert.equal(capsule.seal, undefined);
+  });
+
+  it('rejects malformed compact capsules instead of injecting untrusted state', () => {
+    assert.equal(
+      completeCapsuleForCompact({
+        v: 1,
+        threadId: 'thread-compact',
+        catId: 'codex',
+        mode: 'serial',
+        a2aEnabled: true,
+        ballState: 'in_progress',
+        continuationReason: 'compact_boundary',
+        directMessageFrom: '',
+      }),
+      null,
+    );
+  });
+
+  it('rejects already-completed sealed capsules as compact route state', () => {
+    const sealed = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 'thread-compact',
+        catId: 'codex',
+        mode: 'independent',
+        a2aEnabled: false,
+      }),
+      {
+        invocationId: 'inv-old',
+        createdAt: 1234,
+        seal: { sessionId: 'sess-old', sessionSeq: 1, reason: 'threshold' },
+      },
+    );
+
+    assert.equal(completeCapsuleForCompact(sealed), null);
   });
 
   it('formats continuation prompt as system control text, not assistant prose replay', () => {

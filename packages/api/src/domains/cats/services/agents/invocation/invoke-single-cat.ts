@@ -1143,6 +1143,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                   // This is normal — NOT a "session replaced" event. Just update the tracked ID.
                   await deps.sessionChainStore.update(existing.id, {
                     cliSessionId: msg.sessionId,
+                    ...(params.continuityCapsule ? { continuityCapsule: params.continuityCapsule } : {}),
                     updatedAt: Date.now(),
                   });
                 } else {
@@ -1189,19 +1190,33 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                     if (inheritedFailures > 0) {
                       await deps.sessionChainStore.update(newRec.id, {
                         consecutiveRestoreFailures: inheritedFailures,
+                        ...(params.continuityCapsule ? { continuityCapsule: params.continuityCapsule } : {}),
+                      });
+                    } else if (params.continuityCapsule) {
+                      await deps.sessionChainStore.update(newRec.id, {
+                        continuityCapsule: params.continuityCapsule,
                       });
                     }
                   }
                 }
+              } else if (params.continuityCapsule) {
+                await deps.sessionChainStore.update(existing.id, {
+                  continuityCapsule: params.continuityCapsule,
+                });
               }
             } else {
               // No active session (first invocation or previous was sealed)
-              await deps.sessionChainStore.create({
+              const newRec = await deps.sessionChainStore.create({
                 cliSessionId: msg.sessionId,
                 threadId,
                 catId,
                 userId,
               });
+              if (params.continuityCapsule) {
+                await deps.sessionChainStore.update(newRec.id, {
+                  continuityCapsule: params.continuityCapsule,
+                });
+              }
             }
           } catch {
             // Best-effort — don't break the invocation chain
@@ -1493,7 +1508,21 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                                 sessionSeq: activeRecord.seq + 1,
                                 reason: action.reason,
                                 healthSnapshot: health,
-                                ...(continuityCapsule ? { continuityCapsule } : {}),
+                                ...(continuityCapsule
+                                  ? {
+                                      continuityCapsule,
+                                      continuityDiagnostics: {
+                                        source: 'route_state',
+                                        boundary: continuityCapsule.continuationReason,
+                                        generated: true,
+                                        persistedVia: 'session_seal_requested',
+                                        threadId,
+                                        catId,
+                                        invocationId,
+                                        sessionId: activeRecord.id,
+                                      },
+                                    }
+                                  : {}),
                               }),
                               timestamp: sealTimestamp,
                             };

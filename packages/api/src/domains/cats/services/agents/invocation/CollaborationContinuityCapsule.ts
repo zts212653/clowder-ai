@@ -78,6 +78,18 @@ export function completeCapsuleForSeal(
   };
 }
 
+export function completeCapsuleForCompact(
+  capsule: unknown,
+  completion: { createdAt?: number } = {},
+): CollaborationContinuityCapsuleV1 | null {
+  if (!isRouteStateContinuityCapsule(capsule)) return null;
+  return {
+    ...capsule,
+    continuationReason: 'compact_boundary',
+    createdAt: completion.createdAt ?? Date.now(),
+  };
+}
+
 export function formatContinuationPrompt(capsule: CollaborationContinuityCapsuleV1): string {
   const sealReason = capsule.seal?.reason ?? capsule.continuationReason;
   const modeLine =
@@ -145,6 +157,28 @@ export function isCollaborationContinuityCapsuleV1(value: unknown): value is Col
     if (!isPositiveInteger(value.seal.sessionSeq)) return false;
     if (!isNonEmptyString(value.seal.reason)) return false;
   }
+  return true;
+}
+
+export function isRouteStateContinuityCapsule(value: unknown): value is RouteStateContinuityCapsule {
+  if (!isRecord(value)) return false;
+  if (value.v !== 1) return false;
+  if (!isNonEmptyString(value.threadId)) return false;
+  if (!isNonEmptyString(value.catId)) return false;
+  if (!isContinuityMode(value.mode)) return false;
+  if (typeof value.a2aEnabled !== 'boolean') return false;
+  if (!isBallState(value.ballState)) return false;
+  if (!isContinuationReason(value.continuationReason)) return false;
+  if (value.invocationId !== undefined) return false;
+  if (value.createdAt !== undefined) return false;
+  if (value.seal !== undefined) return false;
+  if (value.parentInvocationId !== undefined && !isNonEmptyString(value.parentInvocationId)) return false;
+  if (value.chainIndex !== undefined && !isPositiveInteger(value.chainIndex)) return false;
+  if (value.chainTotal !== undefined && !isPositiveInteger(value.chainTotal)) return false;
+  if (value.directMessageFrom !== undefined && !isNonEmptyString(value.directMessageFrom)) return false;
+  if (value.a2aTriggerMessageId !== undefined && !isNonEmptyString(value.a2aTriggerMessageId)) return false;
+  if (value.a2aDepth !== undefined && !isNonNegativeInteger(value.a2aDepth)) return false;
+  if (value.maxA2ADepth !== undefined && !isNonNegativeInteger(value.maxA2ADepth)) return false;
   return true;
 }
 

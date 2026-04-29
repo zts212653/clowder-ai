@@ -743,6 +743,50 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(active.status, 'active');
   });
 
+  it('stores route-state continuity capsule on SessionRecord during session_init', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const { buildCapsuleFromRouteState } = await import(
+      '../dist/domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js'
+    );
+    const sessionChainStore = new SessionChainStore();
+    const continuityCapsule = buildCapsuleFromRouteState({
+      threadId: 'thread-f24-continuity',
+      catId: 'opus',
+      mode: 'serial',
+      chainIndex: 1,
+      chainTotal: 2,
+      directMessageFrom: 'codex',
+      a2aTriggerMessageId: 'msg-current',
+      a2aEnabled: true,
+      a2aDepth: 1,
+      maxA2ADepth: 15,
+    });
+
+    const service = {
+      async *invoke() {
+        yield { type: 'session_init', catId: 'opus', sessionId: 'cli-continuity', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const deps = { ...makeDeps(), sessionChainStore };
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'test',
+        userId: 'user1',
+        threadId: 'thread-f24-continuity',
+        isLastCat: true,
+        continuityCapsule,
+      }),
+    );
+
+    const active = sessionChainStore.getActive('opus', 'thread-f24-continuity');
+    assert.ok(active, 'should have created an active SessionRecord');
+    assert.deepEqual(active.continuityCapsule, continuityCapsule);
+  });
+
   it('F24: updates cliSessionId when session_init arrives for existing active record', async () => {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const sessionChainStore = new SessionChainStore();
@@ -1574,6 +1618,9 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(sealPayload.continuityCapsule.catId, 'codex');
     assert.equal(sealPayload.continuityCapsule.continuationReason, 'threshold_seal');
     assert.equal(sealPayload.continuityCapsule.seal.sessionId, 'sess-retry-seal');
+    assert.equal(sealPayload.continuityDiagnostics.source, 'route_state');
+    assert.equal(sealPayload.continuityDiagnostics.boundary, 'threshold_seal');
+    assert.equal(sealPayload.continuityDiagnostics.persistedVia, 'session_seal_requested');
   });
 
   it('session self-heal: does not retry on non-session errors', async () => {
