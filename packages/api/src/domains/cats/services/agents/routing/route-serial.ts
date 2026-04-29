@@ -96,6 +96,14 @@ function collectStructuredTargetCatsFromInput(input: unknown): string[] {
   return values.filter((value): value is string => typeof value === 'string' && value.length > 0);
 }
 
+function isPostMessageToolName(toolName: string | undefined): boolean {
+  return toolName?.endsWith('cat_cafe_post_message') ?? false;
+}
+
+function confirmsPostMessagePersistence(content: string | undefined): boolean {
+  return content?.includes('"status":"ok"') || content?.includes('"status":"duplicate"') || false;
+}
+
 export async function* routeSerial(
   deps: RouteStrategyDeps,
   targetCats: CatId[],
@@ -636,16 +644,14 @@ export async function* routeSerial(
           // F148 OQ-2: Collect tool names for context eval
           if (effectiveMsg.type === 'tool_use' && effectiveMsg.toolName) {
             collectedToolNames.push(effectiveMsg.toolName);
-            if (effectiveMsg.toolName.endsWith('cat_cafe_post_message')) awaitingCallbackResult = true;
+            if (isPostMessageToolName(effectiveMsg.toolName)) awaitingCallbackResult = true;
           }
           // #573: Confirm callback persistence via tool_result success
           if (effectiveMsg.type === 'tool_result' && awaitingCallbackResult) {
-            awaitingCallbackResult = false;
-            if (
-              effectiveMsg.content?.includes('"status":"ok"') ||
-              effectiveMsg.content?.includes('"status":"duplicate"')
-            )
+            if (confirmsPostMessagePersistence(effectiveMsg.content)) {
               callbackPostConfirmed = true;
+              awaitingCallbackResult = false;
+            }
           }
 
           // F150: Fire-and-forget tool usage counter

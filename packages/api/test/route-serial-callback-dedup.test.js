@@ -151,4 +151,43 @@ describe('#573: stream store dedup when cat_cafe_post_message used', () => {
     const streamAppends = appendCalls.filter((m) => m.origin === 'stream' && m.catId === 'opus');
     assert.equal(streamAppends.length, 1, 'should persist stream output when callback failed');
   });
+
+  it('keeps waiting for cat_cafe_post_message success across unrelated tool_result events', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appendCalls = [];
+
+    const interleavedService = {
+      async *invoke() {
+        yield { type: 'text', catId: 'opus', content: 'Posting via callback.', timestamp: Date.now() };
+        yield {
+          type: 'tool_use',
+          catId: 'opus',
+          toolName: 'mcp:cat-cafe/cat_cafe_post_message',
+          toolInput: '{}',
+          timestamp: Date.now(),
+        };
+        yield {
+          type: 'tool_result',
+          catId: 'opus',
+          content: 'command output from another tool',
+          timestamp: Date.now(),
+        };
+        yield {
+          type: 'tool_result',
+          catId: 'opus',
+          content: '{"status":"ok","threadId":"thread-1"}',
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const deps = createMockDeps({ opus: interleavedService }, appendCalls);
+    for await (const msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
+      // drain
+    }
+
+    const streamAppends = appendCalls.filter((m) => m.origin === 'stream' && m.catId === 'opus');
+    assert.equal(streamAppends.length, 0, 'unrelated tool_result must not clear pending callback confirmation');
+  });
 });

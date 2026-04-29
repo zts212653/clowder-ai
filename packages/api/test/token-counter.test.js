@@ -59,6 +59,13 @@ describe('estimateTokens', () => {
     }, 'estimateTokens must not throw on special-token literals');
     assert.ok(count > 0, `expected positive token count, got ${count}`);
   });
+
+  it('counts GPT special-token literals as ordinary text, not one control token', () => {
+    const sentinel = `<|${'endoftext'}|>`;
+    const count = estimateTokens(sentinel);
+
+    assert.ok(count > 1, `special-token literal should be plain text count, got ${count}`);
+  });
 });
 
 describe('estimateTokensFromMessages', () => {
