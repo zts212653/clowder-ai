@@ -628,7 +628,14 @@ export class QueueProcessor {
           const result = await messageStore.markDelivered(mid, deliveredNow);
           if (result) {
             deliveredIds.push(mid);
-            const preview = result.replyTo ? await hydrateReplyPreview(messageStore, result.replyTo) : null;
+            let preview: Awaited<ReturnType<typeof hydrateReplyPreview>> | null = null;
+            if (result.replyTo) {
+              try {
+                preview = await hydrateReplyPreview(messageStore, result.replyTo);
+              } catch {
+                /* best-effort: preview failure must not drop the delivered message */
+              }
+            }
             deliveredMessages.push({
               id: result.id,
               content: result.content,
