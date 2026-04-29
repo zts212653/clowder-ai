@@ -21,6 +21,10 @@ packages/web/public/vendor/
 .env.local
 .env.*.local
 
+# Local overlay files (#603 .local convention)
+*.local.md
+*.local-override.md
+
 # IDE & AI tools
 .idea/
 .vscode/
