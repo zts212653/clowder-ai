@@ -53,6 +53,10 @@ export interface EnqueueResult {
 
 const MAX_QUEUE_DEPTH = 5;
 
+export function isSystemPinnedQueueEntry(entry: Pick<QueueEntry, 'source' | 'sourceCategory'>): boolean {
+  return entry.source === 'agent' && entry.sourceCategory === 'continuation';
+}
+
 export class InvocationQueue {
   private readonly log = createModuleLogger('invocation-queue');
   private queues = new Map<string, QueueEntry[]>();
@@ -78,6 +82,11 @@ export class InvocationQueue {
   /** F175: multi-dimensional entry comparator for dequeue ordering.
    *  Position is scoped to same-user entries to prevent cross-user queue-jumping in shared threads. */
   private static compareEntries(a: QueueEntry, b: QueueEntry): number {
+    const aPinned = isSystemPinnedQueueEntry(a);
+    const bPinned = isSystemPinnedQueueEntry(b);
+    if (aPinned && !bPinned) return -1;
+    if (!aPinned && bPinned) return 1;
+
     if (a.userId === b.userId) {
       const aHasPos = a.position !== undefined;
       const bHasPos = b.position !== undefined;
@@ -94,6 +103,7 @@ export class InvocationQueue {
   setPosition(threadId: string, userId: string, entryId: string, position: number): boolean {
     const e = this.findEntry(threadId, userId, entryId);
     if (!e || e.status !== 'queued') return false;
+    if (isSystemPinnedQueueEntry(e)) return false;
     e.position = position;
     return true;
   }
@@ -239,6 +249,7 @@ export class InvocationQueue {
     if (!q) return false;
     const target = q.find((e) => e.id === entryId);
     if (!target || target.status === 'processing') return false;
+    if (isSystemPinnedQueueEntry(target)) return false;
 
     const queued = q.filter((e) => e.status === 'queued');
     queued.sort(InvocationQueue.compareEntries);
@@ -267,6 +278,7 @@ export class InvocationQueue {
     if (!q) return false;
     const entry = q.find((e) => e.id === entryId);
     if (!entry || entry.status === 'processing') return false;
+    if (isSystemPinnedQueueEntry(entry)) return false;
 
     const minPos = q.reduce((min, e) => {
       if (e.status === 'queued' && e.position !== undefined && e.position < min) return e.position;

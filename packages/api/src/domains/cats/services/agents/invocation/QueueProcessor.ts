@@ -325,6 +325,7 @@ export class QueueProcessor {
       intent: 'execute',
       autoExecute: true,
       callerCatId: catId,
+      priority: 'urgent',
     });
     if (result.outcome === 'full' || !result.entry) {
       this.setContinuationWindow(key, recent);

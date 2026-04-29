@@ -14,7 +14,10 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
+import {
+  type InvocationQueue,
+  isSystemPinnedQueueEntry,
+} from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
@@ -188,6 +191,10 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         reply.status(409);
         return { error: '条目正在处理中，无法 steer', code: 'ENTRY_PROCESSING' };
       }
+      if (isSystemPinnedQueueEntry(entry)) {
+        reply.status(409);
+        return { error: '系统续接条目不可手动调整位置', code: 'ENTRY_POSITION_LOCKED' };
+      }
 
       const { mode } = parseResult.data;
       if (mode === 'promote') {
@@ -271,6 +278,10 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         reply.status(409);
         return { error: '正在处理中的条目不可移动', code: 'ENTRY_PROCESSING' };
       }
+      if (isSystemPinnedQueueEntry(entry)) {
+        reply.status(409);
+        return { error: '系统续接条目不可手动调整位置', code: 'ENTRY_POSITION_LOCKED' };
+      }
 
       invocationQueue.move(threadId, guard.userId, entryId, parseResult.data.direction);
       socketManager.emitToUser(guard.userId, 'queue_updated', {
@@ -311,9 +322,17 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     const entries = invocationQueue.list(threadId, guard.userId);
     for (const { entryId } of parseResult.data.positions) {
       const entry = entries.find((e) => e.id === entryId);
-      if (!entry || entry.status === 'processing') {
+      if (!entry) {
         reply.status(400);
-        return { error: `Cannot reorder entry ${entryId} (not found or processing)` };
+        return { error: `Cannot reorder entry ${entryId} (not found)` };
+      }
+      if (entry.status === 'processing') {
+        reply.status(400);
+        return { error: `Cannot reorder entry ${entryId} (processing)` };
+      }
+      if (isSystemPinnedQueueEntry(entry)) {
+        reply.status(409);
+        return { error: '系统续接条目不可手动调整位置', code: 'ENTRY_POSITION_LOCKED' };
       }
     }
 

@@ -142,4 +142,27 @@ describe('CollaborationContinuityCapsule', () => {
     assert.match(prompt, /thread-1/);
     assert.doesNotMatch(prompt, /Ready for gpt52 review/);
   });
+
+  it('formats continuation prompt with a required current worktree and thread-state check', () => {
+    const capsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 'thread-1',
+        catId: 'codex',
+        mode: 'independent',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-1',
+        createdAt: 1234,
+        seal: { sessionId: 'sess-1', sessionSeq: 1, reason: 'threshold' },
+      },
+    );
+
+    const prompt = formatContinuationPrompt(capsule);
+
+    assert.match(prompt, /first collect current execution context/i);
+    assert.match(prompt, /worktree/i);
+    assert.match(prompt, /git status --short --branch/i);
+    assert.match(prompt, /do not create a new worktree/i);
+  });
 });

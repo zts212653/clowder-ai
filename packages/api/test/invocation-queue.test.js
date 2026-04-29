@@ -188,6 +188,42 @@ describe('InvocationQueue', () => {
     assert.equal(queue.move('t1', 'u1', r1.entry.id, 'up'), true);
   });
 
+  it('system continuation stays first even when user entries have explicit positions', () => {
+    queue.enqueue(
+      entry({
+        content: 'continue sealed work',
+        source: 'agent',
+        sourceCategory: 'continuation',
+        continuationKey: 't1:opus:inv-1:sess-1:1',
+        autoExecute: true,
+      }),
+    );
+    const user = queue.enqueue(entry({ content: 'new user request', targetCats: ['codex'] }));
+
+    assert.equal(queue.setPosition('t1', 'u1', user.entry.id, 0), true);
+
+    assert.equal(queue.list('t1', 'u1')[0].content, 'continue sealed work');
+    assert.equal(queue.peekOldestAcrossUsers('t1').content, 'continue sealed work');
+  });
+
+  it('system continuation entries cannot be moved, promoted, or assigned user positions', () => {
+    const continuation = queue.enqueue(
+      entry({
+        content: 'continue sealed work',
+        source: 'agent',
+        sourceCategory: 'continuation',
+        continuationKey: 't1:opus:inv-1:sess-1:1',
+        autoExecute: true,
+      }),
+    );
+    queue.enqueue(entry({ content: 'new user request', targetCats: ['codex'] }));
+
+    assert.equal(queue.setPosition('t1', 'u1', continuation.entry.id, 9), false);
+    assert.equal(queue.move('t1', 'u1', continuation.entry.id, 'down'), false);
+    assert.equal(queue.promote('t1', 'u1', continuation.entry.id), false);
+    assert.equal(queue.list('t1', 'u1')[0].content, 'continue sealed work');
+  });
+
   // ── Clear ──
 
   it('clear returns all removed entries', () => {

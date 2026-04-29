@@ -566,7 +566,7 @@ describe('QueueProcessor', () => {
     assert.equal(failDeps.router.routeExecution.mock.calls.length, 1, 'must not start continuation after failure');
   });
 
-  it('enqueueContinuation preserves seal work when queued user work already exists', async () => {
+  it('enqueueContinuation pins seal work ahead of queued user work without dropping either', async () => {
     enqueueEntry(deps.queue, { targetCats: ['opus'], source: 'user', content: 'new user work' });
     const capsule = completeCapsuleForSeal(
       buildCapsuleFromRouteState({
@@ -587,11 +587,11 @@ describe('QueueProcessor', () => {
     assert.equal(outcome.outcome, 'enqueued');
     const queue = deps.queue.list('t1', 'u1');
     assert.equal(queue.length, 2);
-    assert.equal(queue[0].content, 'new user work');
-    assert.match(queue[1].content, /Continue the same structured work from the sealed session/);
+    assert.match(queue[0].content, /Continue the same structured work from the sealed session/);
+    assert.equal(queue[1].content, 'new user work');
   });
 
-  it('enqueueContinuation preserves seal work behind queued agent work', async () => {
+  it('enqueueContinuation pins seal work ahead of queued agent work without dropping either', async () => {
     const originalNow = Date.now;
     let now = 1_000_000;
     Date.now = () => now;
@@ -617,8 +617,8 @@ describe('QueueProcessor', () => {
       assert.equal(outcome.outcome, 'enqueued');
       const queue = deps.queue.list('t1', 'u1');
       assert.equal(queue.length, 2);
-      assert.equal(queue[0].content, 'stale queued work', 'old queued agent work must not be dropped');
-      assert.match(queue[1].content, /Continue the same structured work from the sealed session/);
+      assert.match(queue[0].content, /Continue the same structured work from the sealed session/);
+      assert.equal(queue[1].content, 'stale queued work', 'old queued agent work must not be dropped');
     } finally {
       Date.now = originalNow;
     }
@@ -705,7 +705,7 @@ describe('QueueProcessor', () => {
     assert.equal(deps.queue.list('t1', 'u1').length, 2);
   });
 
-  it('enqueueContinuation preserves seal work behind old queued user work', async () => {
+  it('enqueueContinuation pins seal work ahead of old queued user work without dropping either', async () => {
     const originalNow = Date.now;
     let now = 1_500_000;
     Date.now = () => now;
@@ -731,8 +731,8 @@ describe('QueueProcessor', () => {
       assert.equal(outcome.outcome, 'enqueued');
       const queue = deps.queue.list('t1', 'u1');
       assert.equal(queue.length, 2);
-      assert.equal(queue[0].content, 'old but real user work');
-      assert.match(queue[1].content, /Continue the same structured work from the sealed session/);
+      assert.match(queue[0].content, /Continue the same structured work from the sealed session/);
+      assert.equal(queue[1].content, 'old but real user work');
     } finally {
       Date.now = originalNow;
     }
@@ -773,7 +773,7 @@ describe('QueueProcessor', () => {
     }
   });
 
-  it('continuation dispatch preserves old queued agent work when the slot frees', async () => {
+  it('continuation dispatch runs seal continuation first and preserves old queued agent work', async () => {
     const originalNow = Date.now;
     let now = 3_000_000;
     Date.now = () => now;
@@ -817,14 +817,14 @@ describe('QueueProcessor', () => {
       await dispatchProcessor.onInvocationComplete('t1', 'opus', 'succeeded');
       await new Promise((r) => setTimeout(r, 80));
 
-      assert.ok(routeContents.length > 0, 'old queued agent work should be dispatched');
-      assert.match(routeContents[0], /old queued handoff/);
+      assert.ok(routeContents.length > 0, 'seal continuation should be dispatched first');
+      assert.match(routeContents[0], /Continue the same structured work from the sealed session/);
 
       await dispatchProcessor.onInvocationComplete('t1', 'opus', 'succeeded');
       await new Promise((r) => setTimeout(r, 80));
 
-      assert.ok(routeContents.length > 1, 'seal continuation should dispatch after queued agent work');
-      assert.match(routeContents[1], /Continue the same structured work from the sealed session/);
+      assert.ok(routeContents.length > 1, 'old queued agent work should still dispatch after continuation');
+      assert.match(routeContents[1], /old queued handoff/);
     } finally {
       Date.now = originalNow;
     }

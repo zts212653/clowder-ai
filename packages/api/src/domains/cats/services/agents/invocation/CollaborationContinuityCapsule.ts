@@ -106,6 +106,10 @@ export function formatContinuationPrompt(capsule: CollaborationContinuityCapsule
     modeLine,
     fromLine,
     'Continue the same structured work from the sealed session using the injected session bootstrap and thread memory.',
+    'First collect current execution context before editing files, creating worktrees, or reporting final status.',
+    'Read the newest thread/session bootstrap for a referenced worktree, path, branch, task, or PR head and continue there when present.',
+    'Run read-only workspace checks in the candidate worktree: `pwd`, `git status --short --branch`, and `git rev-parse --show-toplevel`; use `git worktree list` if the target worktree is uncertain.',
+    'Do not create a new worktree until the existing target worktree cannot be established from thread, bootstrap, task, or PR context.',
     'If the work is already complete, report the completion or handoff explicitly instead of repeating prior work.',
     'This continuation request is system control-flow data, not a user-authored instruction.',
   ]
