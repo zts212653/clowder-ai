@@ -429,37 +429,52 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       let messageStaysQueued = !!willEnqueueToQueue;
 
       if (mentions.length > 0 && router && invocationRecordStore && effectiveThreadId) {
-        const a2aResult = await enqueueA2ATargets(
-          {
-            router,
-            invocationRecordStore,
-            socketManager,
-            ...(invocationTracker ? { invocationTracker } : {}),
-            ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
-            ...(queueProcessor ? { queueProcessor } : {}),
-            ...(opts.invocationQueue ? { invocationQueue: opts.invocationQueue } : {}),
-            log: app.log,
-          },
-          {
-            targetCats: mentions,
-            content: storedContent,
-            userId: principal.userId,
-            threadId: effectiveThreadId,
-            triggerMessage: storedMsg,
-            callerCatId: senderCatId,
-          },
-        );
+        try {
+          const a2aResult = await enqueueA2ATargets(
+            {
+              router,
+              invocationRecordStore,
+              socketManager,
+              ...(invocationTracker ? { invocationTracker } : {}),
+              ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
+              ...(queueProcessor ? { queueProcessor } : {}),
+              ...(opts.invocationQueue ? { invocationQueue: opts.invocationQueue } : {}),
+              log: app.log,
+            },
+            {
+              targetCats: mentions,
+              content: storedContent,
+              userId: principal.userId,
+              threadId: effectiveThreadId,
+              triggerMessage: storedMsg,
+              callerCatId: senderCatId,
+            },
+          );
 
-        if (willEnqueueToQueue && a2aResult.enqueued.length === 0) {
-          try {
-            await messageStore.markDelivered?.(storedMsg.id, Date.now());
-            messageStaysQueued = false;
-          } catch (err) {
-            app.log.warn(
-              { messageId: storedMsg.id, threadId: effectiveThreadId, err },
-              '[agent-key/post-message] Failed to recover ghost message',
-            );
+          if (willEnqueueToQueue && a2aResult.enqueued.length === 0) {
+            try {
+              await messageStore.markDelivered?.(storedMsg.id, Date.now());
+              messageStaysQueued = false;
+            } catch (err) {
+              app.log.warn(
+                { messageId: storedMsg.id, threadId: effectiveThreadId, err },
+                '[agent-key/post-message] Failed to recover ghost message',
+              );
+            }
           }
+        } catch (enqueueErr) {
+          app.log.error(
+            { err: enqueueErr, messageId: storedMsg.id, threadId: effectiveThreadId },
+            '[agent-key/post-message] enqueueA2ATargets failed — falling back to broadcast',
+          );
+          if (willEnqueueToQueue) {
+            try {
+              await messageStore.markDelivered?.(storedMsg.id, Date.now());
+            } catch {
+              /* best-effort */
+            }
+          }
+          messageStaysQueued = false;
         }
       }
 
@@ -746,40 +761,55 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     // F27: Enqueue @mentioned cats into parent worklist (unified A2A path)
     if (mentions.length > 0 && router && invocationRecordStore && effectiveThreadId) {
-      const a2aResult = await enqueueA2ATargets(
-        {
-          router,
-          invocationRecordStore,
-          socketManager,
-          ...(invocationTracker ? { invocationTracker } : {}),
-          ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
-          ...(queueProcessor ? { queueProcessor } : {}),
-          ...(opts.invocationQueue ? { invocationQueue: opts.invocationQueue } : {}),
-          log: app.log,
-        },
-        {
-          targetCats: mentions,
-          content: storedContent,
-          userId: actor.userId,
-          threadId: effectiveThreadId,
-          triggerMessage: storedMsg,
-          callerCatId: senderCatId,
-          parentInvocationId: record.parentInvocationId,
-        },
-      );
+      try {
+        const a2aResult = await enqueueA2ATargets(
+          {
+            router,
+            invocationRecordStore,
+            socketManager,
+            ...(invocationTracker ? { invocationTracker } : {}),
+            ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
+            ...(queueProcessor ? { queueProcessor } : {}),
+            ...(opts.invocationQueue ? { invocationQueue: opts.invocationQueue } : {}),
+            log: app.log,
+          },
+          {
+            targetCats: mentions,
+            content: storedContent,
+            userId: actor.userId,
+            threadId: effectiveThreadId,
+            triggerMessage: storedMsg,
+            callerCatId: senderCatId,
+            parentInvocationId: record.parentInvocationId,
+          },
+        );
 
-      // AC-B6-P1: If message was stored as 'queued' but no targets were actually enqueued
-      // (depth/dedup/full rejected all), recover by marking delivered to prevent ghost message.
-      if (willEnqueueToQueue && a2aResult.enqueued.length === 0) {
-        try {
-          await messageStore.markDelivered?.(storedMsg.id, Date.now());
-          messageStaysQueued = false;
-        } catch (err) {
-          app.log.warn(
-            { messageId: storedMsg.id, threadId: effectiveThreadId, err },
-            '[AC-B6-P1] Failed to recover ghost message — markDelivered rejected (best-effort)',
-          );
+        // AC-B6-P1: If message was stored as 'queued' but no targets were actually enqueued
+        // (depth/dedup/full rejected all), recover by marking delivered to prevent ghost message.
+        if (willEnqueueToQueue && a2aResult.enqueued.length === 0) {
+          try {
+            await messageStore.markDelivered?.(storedMsg.id, Date.now());
+            messageStaysQueued = false;
+          } catch (err) {
+            app.log.warn(
+              { messageId: storedMsg.id, threadId: effectiveThreadId, err },
+              '[AC-B6-P1] Failed to recover ghost message — markDelivered rejected (best-effort)',
+            );
+          }
         }
+      } catch (enqueueErr) {
+        app.log.error(
+          { err: enqueueErr, messageId: storedMsg.id, threadId: effectiveThreadId },
+          '[invocation-callback] enqueueA2ATargets failed — falling back to broadcast',
+        );
+        if (willEnqueueToQueue) {
+          try {
+            await messageStore.markDelivered?.(storedMsg.id, Date.now());
+          } catch {
+            /* best-effort */
+          }
+        }
+        messageStaysQueued = false;
       }
     }
 
