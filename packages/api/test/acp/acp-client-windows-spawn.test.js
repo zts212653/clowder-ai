@@ -134,4 +134,51 @@ describe('AcpClient Windows default spawn path', () => {
     assert.equal(captured.options?.shell, undefined);
     assert.deepEqual(captured.options?.stdio, ['pipe', 'pipe', 'pipe']);
   });
+
+  it('spawns native .exe commands directly when spawnFn is omitted', async () => {
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+    assert.ok(platformDescriptor, 'expected process.platform descriptor');
+    Object.defineProperty(process, 'platform', { ...platformDescriptor, value: 'win32' });
+    restorePlatform = () => Object.defineProperty(process, 'platform', platformDescriptor);
+
+    const tempRoot = mkdtempSync(join(tmpdir(), 'acp-win-native-exe-'));
+    const exePath = join(tempRoot, 'gemini.exe');
+    writeFileSync(exePath, 'fake exe\n', 'utf8');
+
+    const { child, clientStdin, agentStdout } = createMockChild();
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        if (!line) continue;
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        }
+      }
+    });
+
+    /** @type {{ command?: string; args?: string[]; options?: import('node:child_process').SpawnOptions }} */
+    const captured = {};
+    originalSpawn = childProcess.spawn;
+    childProcess.spawn = (command, args, options) => {
+      captured.command = command;
+      captured.args = args;
+      captured.options = options;
+      return /** @type {any} */ (child);
+    };
+    syncBuiltinESMExports();
+
+    const { AcpClient } = await import(`${ACP_CLIENT_MODULE}?win-native-exe-test=${Date.now()}`);
+    client = new AcpClient({
+      command: exePath,
+      args: ['--acp', '--approval-mode', 'yolo'],
+      cwd: tempRoot,
+    });
+    const result = await client.initialize();
+
+    assert.equal(result.agentInfo.name, 'test');
+    assert.equal(captured.command, exePath);
+    assert.deepEqual(captured.args, ['--acp', '--approval-mode', 'yolo']);
+    assert.equal(captured.options?.shell, undefined);
+    assert.deepEqual(captured.options?.stdio, ['pipe', 'pipe', 'pipe']);
+  });
 });

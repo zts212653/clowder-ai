@@ -17,12 +17,7 @@ import { createInterface, type Interface as ReadlineInterface } from 'node:readl
 
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import { resolveCliCommandOrBare } from '../../../../../../utils/cli-resolve.js';
-import {
-  escapeBashArg,
-  escapeCmdArg,
-  findGitBashPath,
-  resolveWindowsShimSpawn,
-} from '../../../../../../utils/cli-spawn-win.js';
+import { resolveWindowsSpawnPlan } from '../../../../../../utils/cli-spawn-win.js';
 import type {
   AcpAgentRequest,
   AcpContentBlock,
@@ -145,24 +140,20 @@ export class AcpClient {
       env: childEnv,
     };
     if (IS_WINDOWS && !this.config.spawnFn) {
-      const shimSpawn = resolveWindowsShimSpawn(command, args);
-      if (shimSpawn) {
-        log.debug({ original: command, resolved: shimSpawn.command }, 'ACP: Windows shim resolved');
-        command = shimSpawn.command;
-        args = shimSpawn.args;
-      } else {
-        const gitBash = findGitBashPath();
-        if (gitBash) {
-          log.debug({ command, shell: gitBash }, 'ACP: Windows fallback to Git Bash');
-          command = escapeBashArg(command);
-          args = args.map(escapeBashArg);
-          spawnOpts.shell = gitBash;
-        } else {
-          log.debug({ command, shell: true }, 'ACP: Windows fallback to cmd.exe');
-          command = escapeCmdArg(command);
-          args = args.map(escapeCmdArg);
-          spawnOpts.shell = true;
-        }
+      const spawnPlan = resolveWindowsSpawnPlan(command, args);
+      log.debug(
+        {
+          original: command,
+          resolved: spawnPlan.command,
+          mode: spawnPlan.mode,
+          shell: spawnPlan.shell,
+        },
+        'ACP: Windows spawn plan resolved',
+      );
+      command = spawnPlan.command;
+      args = spawnPlan.args;
+      if (spawnPlan.shell !== undefined) {
+        spawnOpts.shell = spawnPlan.shell;
       }
     }
 
