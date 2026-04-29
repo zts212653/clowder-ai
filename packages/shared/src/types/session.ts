@@ -31,6 +31,8 @@ export interface SessionRecord {
   sealReason?: 'threshold' | 'manual' | 'error' | (string & {});
   /** F33: Number of CLI compressions in this session (hybrid strategy) */
   compressionCount?: number;
+  /** Structured collaboration control-flow state used across compact/seal/resume boundaries. */
+  continuityCapsule?: unknown;
   /** F118 AC-C6: Consecutive restore failures for overflow circuit breaker */
   consecutiveRestoreFailures?: number;
   readonly createdAt: number;

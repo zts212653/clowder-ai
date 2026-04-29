@@ -87,6 +87,11 @@ export function isPromptTokenLimitExceededError(message: string | undefined): bo
   return /(prompt token count|input tokens?).*exceeds the limit of \d+/i.test(message);
 }
 
+export function isContextWindowOverflowError(message: string | undefined): boolean {
+  if (!message) return false;
+  return /ran out of room|context window|context_window/i.test(message);
+}
+
 export function isCliTimeoutError(message: string | undefined): boolean {
   if (!message) return false;
   return /CLI (?:响应超时|idle-silent 超时)/i.test(message);

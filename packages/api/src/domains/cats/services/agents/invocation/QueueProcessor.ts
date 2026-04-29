@@ -15,6 +15,12 @@ import {
   flattenTextParts,
   flattenTurnTextParts,
 } from '../text-aggregation.js';
+import {
+  type CollaborationContinuityCapsuleV1,
+  extractContinuityCapsuleFromAgentMessage,
+  formatContinuationPrompt,
+  isCollaborationContinuityCapsuleV1,
+} from './CollaborationContinuityCapsule.js';
 import type { InvocationQueue, QueueEntry } from './InvocationQueue.js';
 
 /** Minimal interfaces for deps — avoid importing full types for testability */
@@ -123,6 +129,14 @@ export type EntryCompleteHook = (
   responseText: string,
 ) => void;
 
+export type ContinuationEnqueueOutcome =
+  | 'enqueued'
+  | 'skipped_missing_capsule'
+  | 'skipped_invalid_capsule'
+  | 'skipped_existing_entry'
+  | 'skipped_rate_limited'
+  | 'queue_full';
+
 export class QueueProcessor {
   private deps: QueueProcessorDeps;
   /** F108: Per-slot mutex — prevents concurrent double-start per (thread, cat) pair.
@@ -134,6 +148,10 @@ export class QueueProcessor {
   private entryCompleteHooks = new Map<string, EntryCompleteHook>();
   /** F118 D4: max age before a processingSlot is considered zombie (default 2.5× CLI timeout = 75min) */
   private processingSlotTtlMs: number;
+  /** #502 PR2: bounded auto-continuation guard, in-memory per process. */
+  private continuationWindows = new Map<string, number[]>();
+  private static readonly CONTINUATION_WINDOW_MS = 60 * 60 * 1000;
+  private static readonly MAX_CONTINUATIONS_PER_WINDOW = 5;
 
   constructor(deps: QueueProcessorDeps, opts?: { processingSlotTtlMs?: number }) {
     this.deps = deps;
@@ -237,6 +255,106 @@ export class QueueProcessor {
     const startedAt = this.processingSlots.get(QueueProcessor.slotKey(threadId, catId));
     if (startedAt !== undefined && Date.now() - startedAt < this.processingSlotTtlMs) return true;
     return this.deps.queue.hasQueuedOrProcessingForCat(threadId, catId);
+  }
+
+  enqueueContinuation(input: {
+    threadId: string;
+    userId: string;
+    catId: string;
+    capsule?: CollaborationContinuityCapsuleV1 | null;
+    excludeEntryId?: string;
+  }): { outcome: ContinuationEnqueueOutcome; entry?: QueueEntry } {
+    const { threadId, userId, catId, capsule, excludeEntryId } = input;
+    if (!capsule) {
+      this.deps.log.warn({ threadId, catId }, '[QueueProcessor] continuation skipped: missing capsule');
+      return { outcome: 'skipped_missing_capsule' };
+    }
+    if (!isCollaborationContinuityCapsuleV1(capsule)) {
+      this.deps.log.warn({ threadId, catId }, '[QueueProcessor] continuation skipped: invalid capsule');
+      return { outcome: 'skipped_invalid_capsule' };
+    }
+    if (capsule.threadId !== threadId || capsule.catId !== catId) {
+      this.deps.log.warn(
+        {
+          threadId,
+          catId,
+          capsuleThreadId: capsule.threadId,
+          capsuleCatId: capsule.catId,
+        },
+        '[QueueProcessor] continuation skipped: capsule target mismatch',
+      );
+      return { outcome: 'skipped_invalid_capsule' };
+    }
+
+    const now = Date.now();
+    const key = `${threadId}:${catId}`;
+    const recent = (this.continuationWindows.get(key) ?? []).filter(
+      (t) => now - t < QueueProcessor.CONTINUATION_WINDOW_MS,
+    );
+    if (recent.length >= QueueProcessor.MAX_CONTINUATIONS_PER_WINDOW) {
+      this.setContinuationWindow(key, recent);
+      this.deps.log.warn({ threadId, catId }, '[QueueProcessor] continuation skipped: rate limited');
+      return { outcome: 'skipped_rate_limited' };
+    }
+
+    const continuationKey = QueueProcessor.continuationKey(capsule);
+    if (
+      this.deps.queue.hasPendingForCat(threadId, catId, {
+        excludeEntryId,
+        sources: ['agent'],
+        sourceCategories: ['continuation'],
+        continuationKey,
+      })
+    ) {
+      this.setContinuationWindow(key, recent);
+      this.deps.log.info(
+        { threadId, catId, continuationKey },
+        '[QueueProcessor] continuation skipped: pending entry exists',
+      );
+      return { outcome: 'skipped_existing_entry' };
+    }
+
+    const result = this.deps.queue.enqueue({
+      threadId,
+      userId,
+      content: formatContinuationPrompt(capsule),
+      source: 'agent',
+      sourceCategory: 'continuation',
+      continuationKey,
+      targetCats: [catId],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: catId,
+      priority: 'urgent',
+    });
+    if (result.outcome === 'full' || !result.entry) {
+      this.setContinuationWindow(key, recent);
+      this.deps.log.warn({ threadId, catId }, '[QueueProcessor] continuation skipped: queue full');
+      return { outcome: 'queue_full' };
+    }
+
+    recent.push(now);
+    this.setContinuationWindow(key, recent);
+    this.deps.socketManager.emitToUser(userId, 'queue_updated', {
+      threadId,
+      queue: this.deps.queue.list(threadId, userId),
+      action: 'continuation_enqueued',
+    });
+    return { outcome: 'enqueued', entry: result.entry };
+  }
+
+  private static continuationKey(capsule: CollaborationContinuityCapsuleV1): string {
+    const seal = capsule.seal;
+    const sealPart = seal ? `${seal.sessionId}:${seal.sessionSeq}` : `created:${capsule.createdAt}`;
+    return `${capsule.threadId}:${capsule.catId}:${capsule.invocationId ?? 'unknown-invocation'}:${sealPart}`;
+  }
+
+  private setContinuationWindow(key: string, recent: number[]): void {
+    if (recent.length === 0) {
+      this.continuationWindows.delete(key);
+      return;
+    }
+    this.continuationWindows.set(key, recent);
   }
 
   /** F151: Check if thread has any queued or processing entries (used by delivery-batch-done signal). */
@@ -509,6 +627,7 @@ export class QueueProcessor {
     let finalStatus: 'succeeded' | 'failed' | 'canceled' | 'canceled_by_user' = 'failed';
     let responseText = '';
     const cursorBoundaries = new Map<string, string>();
+    const continuationCapsules = new Map<string, CollaborationContinuityCapsuleV1>();
 
     try {
       // 1. Create InvocationRecord (before batching — avoid claiming entries on duplicate)
@@ -729,6 +848,10 @@ export class QueueProcessor {
             (msg as { textMode?: 'append' | 'replace' }).textMode,
           );
         }
+        const continuationCapsule = extractContinuityCapsuleFromAgentMessage(msg);
+        if (continuationCapsule) {
+          continuationCapsules.set(continuationCapsule.catId, continuationCapsule);
+        }
         if ((msg.type === 'done' || msg.type === 'error') && msg.catId) {
           invocationTracker.completeSlot?.(threadId, msg.catId, controller);
         }
@@ -846,6 +969,7 @@ export class QueueProcessor {
 
       return 'succeeded';
     } catch (err) {
+      finalStatus = 'failed';
       log.error({ threadId, entryId: entry.id, err }, '[QueueProcessor] executeEntry failed');
       // F148 fix: ack cursors for cats that completed before the exception
       if (cursorBoundaries.size > 0) {
@@ -887,6 +1011,14 @@ export class QueueProcessor {
       if (finalStatus === 'succeeded') {
         for (const bid of batchedEntryIds) {
           queue.removeProcessedAcrossUsers(threadId, bid);
+        }
+        for (const continuationCapsule of continuationCapsules.values()) {
+          this.enqueueContinuation({
+            threadId,
+            userId,
+            catId: continuationCapsule.catId,
+            capsule: continuationCapsule,
+          });
         }
       } else {
         for (const bid of batchedEntryIds) {

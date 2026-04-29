@@ -312,6 +312,219 @@ describe('TranscriptWriter', () => {
       );
     });
 
+    test('captures recent visible assistant text for session-continuity bootstrap', async () => {
+      const { TranscriptWriter } = await loadModules();
+      const writer = new TranscriptWriter({ dataDir: tmpDir });
+
+      writer.appendEvent(SESSION_INFO, {
+        type: 'text',
+        catId: 'codex',
+        content: '我接球继续 review，球在我手上。',
+        timestamp: Date.now(),
+      });
+      writer.appendEvent(SESSION_INFO, {
+        type: 'system_info',
+        catId: 'codex',
+        content: JSON.stringify({ type: 'context_health' }),
+        timestamp: Date.now(),
+      });
+      writer.appendEvent(SESSION_INFO, {
+        type: 'assistant',
+        content: [{ type: 'text', text: '@opus\n请继续 merge-gate。' }],
+      });
+
+      const digest = writer.generateExtractiveDigest(SESSION_INFO, {
+        createdAt: 1000,
+        sealedAt: 2000,
+      });
+
+      assert.ok(Array.isArray(digest.recentMessages), 'digest should expose recent visible messages');
+      assert.deepEqual(
+        digest.recentMessages.map((msg) => msg.content),
+        ['我接球继续 review，球在我手上。', '@opus\n请继续 merge-gate。'],
+        'digest should include visible text and exclude system_info noise',
+      );
+    });
+
+    test('coalesces streamed text chunks before keeping recent messages', async () => {
+      const { TranscriptWriter } = await loadModules();
+      const writer = new TranscriptWriter({ dataDir: tmpDir });
+
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'text', catId: 'codex', content: 'Hello ', textMode: 'append', timestamp: Date.now() },
+        'inv-stream',
+      );
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'text', catId: 'codex', content: 'world', textMode: 'append', timestamp: Date.now() },
+        'inv-stream',
+      );
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'text', catId: 'codex', content: 'Draft', textMode: 'replace', timestamp: Date.now() },
+        'inv-replace',
+      );
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'text', catId: 'codex', content: 'Final answer', textMode: 'replace', timestamp: Date.now() },
+        'inv-replace',
+      );
+
+      const digest = writer.generateExtractiveDigest(SESSION_INFO, {
+        createdAt: 1000,
+        sealedAt: 2000,
+      });
+
+      assert.deepEqual(
+        digest.recentMessages.map((msg) => msg.content),
+        ['Hello world', 'Final answer'],
+        'stream chunks should not occupy separate recent message slots',
+      );
+    });
+
+    test('preserves repeated-cat turn boundaries within one invocation', async () => {
+      const { TranscriptWriter } = await loadModules();
+      const writer = new TranscriptWriter({ dataDir: tmpDir });
+
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'text', catId: 'codex', content: 'Codex first ', textMode: 'append', timestamp: Date.now() },
+        'inv-route',
+      );
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'text', catId: 'codex', content: 'turn', textMode: 'append', timestamp: Date.now() },
+        'inv-route',
+      );
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'text', catId: 'opus', content: 'Opus middle turn', textMode: 'append', timestamp: Date.now() },
+        'inv-route',
+      );
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'text', catId: 'codex', content: 'Codex second turn', textMode: 'append', timestamp: Date.now() },
+        'inv-route',
+      );
+
+      const digest = writer.generateExtractiveDigest(SESSION_INFO, {
+        createdAt: 1000,
+        sealedAt: 2000,
+      });
+
+      assert.deepEqual(
+        digest.recentMessages.map((msg) => msg.content),
+        ['Codex first turn', 'Opus middle turn', 'Codex second turn'],
+        'same-cat streams separated by another visible turn must remain distinct recent messages',
+      );
+    });
+
+    test('excludes leaked tool-call payloads from recent visible messages', async () => {
+      const { TranscriptWriter } = await loadModules();
+      const writer = new TranscriptWriter({ dataDir: tmpDir });
+
+      writer.appendEvent(
+        SESSION_INFO,
+        {
+          type: 'text',
+          catId: 'codex',
+          content: `先看实现，再补测试。
+
+{"tool_uses":[{"recipient_name":"functions.exec_command","parameters":{"cmd":"sed -n '1,220p' foo.ts"}}]}`,
+          timestamp: Date.now(),
+        },
+        'inv-leak',
+      );
+
+      const digest = writer.generateExtractiveDigest(SESSION_INFO, {
+        createdAt: 1000,
+        sealedAt: 2000,
+      });
+
+      assert.deepEqual(
+        digest.recentMessages.map((msg) => msg.content),
+        ['先看实现，再补测试。'],
+        'digest should match the stripped user-visible assistant text',
+      );
+      assert.ok(digest.recentMessages.every((msg) => !msg.content.includes('tool_uses')));
+      assert.ok(digest.recentMessages.every((msg) => !msg.content.includes('recipient_name')));
+    });
+
+    test('excludes leaked tool-call payloads split across streamed text chunks', async () => {
+      const { TranscriptWriter } = await loadModules();
+      const writer = new TranscriptWriter({ dataDir: tmpDir });
+
+      writer.appendEvent(
+        SESSION_INFO,
+        {
+          type: 'text',
+          catId: 'codex',
+          content: `先看实现，再补测试。
+
+{`,
+          textMode: 'append',
+          timestamp: Date.now(),
+        },
+        'inv-split-leak',
+      );
+      writer.appendEvent(
+        SESSION_INFO,
+        {
+          type: 'text',
+          catId: 'codex',
+          content: `"tool_uses":[{"recipient_name":"functions.exec_command","parameters":{"cmd":"echo leaked"}}]}`,
+          textMode: 'append',
+          timestamp: Date.now(),
+        },
+        'inv-split-leak',
+      );
+
+      const digest = writer.generateExtractiveDigest(SESSION_INFO, {
+        createdAt: 1000,
+        sealedAt: 2000,
+      });
+
+      assert.deepEqual(
+        digest.recentMessages.map((msg) => msg.content),
+        ['先看实现，再补测试。'],
+        'digest should strip payloads that only become detectable after stream coalescing',
+      );
+      assert.ok(digest.recentMessages.every((msg) => !msg.content.includes('tool_uses')));
+      assert.ok(digest.recentMessages.every((msg) => !msg.content.includes('recipient_name')));
+    });
+
+    test('captures latest continuity capsule from session seal system_info', async () => {
+      const { TranscriptWriter } = await loadModules();
+      const writer = new TranscriptWriter({ dataDir: tmpDir });
+
+      const continuityCapsule = {
+        v: 1,
+        threadId: 'thread-1',
+        catId: 'codex',
+        mode: 'independent',
+        a2aEnabled: true,
+        ballState: 'in_progress',
+        continuationReason: 'threshold_seal',
+        createdAt: 1234,
+        invocationId: 'inv-1',
+        seal: { sessionId: 'sess-1', sessionSeq: 1, reason: 'threshold' },
+      };
+      writer.appendEvent(SESSION_INFO, {
+        type: 'system_info',
+        catId: 'codex',
+        content: JSON.stringify({ type: 'session_seal_requested', continuityCapsule }),
+        timestamp: Date.now(),
+      });
+
+      const digest = writer.generateExtractiveDigest(SESSION_INFO, {
+        createdAt: 1000,
+        sealedAt: 2000,
+      });
+
+      assert.deepEqual(digest.continuityCapsule, continuityCapsule);
+    });
+
     test('writes digest.extractive.json during flush', async () => {
       const { TranscriptWriter } = await loadModules();
       const writer = new TranscriptWriter({ dataDir: tmpDir });

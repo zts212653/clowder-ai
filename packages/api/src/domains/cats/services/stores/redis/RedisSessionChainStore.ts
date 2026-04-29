@@ -224,6 +224,9 @@ export class RedisSessionChainStore implements ISessionChainStore {
     if (patch.compressionCount !== undefined) {
       pairs.push('compressionCount', String(patch.compressionCount));
     }
+    if (patch.continuityCapsule !== undefined) {
+      pairs.push('continuityCapsule', JSON.stringify(patch.continuityCapsule));
+    }
     if (patch.consecutiveRestoreFailures !== undefined) {
       pairs.push('consecutiveRestoreFailures', String(patch.consecutiveRestoreFailures));
     }
@@ -273,6 +276,8 @@ export class RedisSessionChainStore implements ISessionChainStore {
   private hydrate(data: Record<string, string>): SessionRecord {
     const contextHealth = safeParseJson<ContextHealth>(data.contextHealth);
     const lastUsage = safeParseJson<SessionUsageSnapshot>(data.lastUsage);
+    const continuityCapsule =
+      data.continuityCapsule !== undefined ? safeParseJson<unknown>(data.continuityCapsule) : undefined;
     const sealReason = data.sealReason as SessionRecord['sealReason'] | undefined;
     const sealedAt = data.sealedAt ? parseInt(data.sealedAt, 10) : undefined;
     const compressionCount = data.compressionCount ? parseInt(data.compressionCount, 10) : undefined;
@@ -294,6 +299,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
       ...(sealReason ? { sealReason } : {}),
       ...(sealedAt ? { sealedAt } : {}),
       ...(compressionCount !== undefined ? { compressionCount } : {}),
+      ...(continuityCapsule !== undefined && continuityCapsule !== null ? { continuityCapsule } : {}),
       ...(consecutiveRestoreFailures !== undefined ? { consecutiveRestoreFailures } : {}),
       createdAt: parseInt(data.createdAt!, 10),
       updatedAt: parseInt(data.updatedAt!, 10),

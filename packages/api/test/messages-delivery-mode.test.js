@@ -9,6 +9,9 @@ import Fastify from 'fastify';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 const { InvocationRegistry } = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
+const { buildCapsuleFromRouteState, completeCapsuleForSeal } = await import(
+  '../dist/domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js'
+);
 
 /** Build a complete deps object for messagesRoutes */
 function buildDeps(overrides = {}) {
@@ -57,6 +60,11 @@ function buildDeps(overrides = {}) {
       update: mock.fn(async () => {}),
     },
     invocationQueue,
+    queueProcessor: {
+      clearPause: mock.fn(),
+      onInvocationComplete: mock.fn(async () => {}),
+      enqueueContinuation: mock.fn(() => ({ outcome: 'enqueued' })),
+    },
     threadStore: {
       get: mock.fn(async () => ({
         id: 'thread-1',
@@ -314,6 +322,165 @@ describe('POST /api/messages deliveryMode', () => {
     assert.equal(typeof options?.queueHasQueuedMessages, 'function');
     assert.equal(options.queueHasQueuedMessages('thread-1'), true);
     assert.equal(options.queueHasQueuedMessages('thread-x'), false);
+  });
+
+  it('immediate execution schedules continuation when route emits seal capsule and succeeds', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+    const capsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 'thread-1',
+        catId: 'opus',
+        mode: 'independent',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-seal',
+        createdAt: Date.now(),
+        seal: { sessionId: 'sess-1', sessionSeq: 1, reason: 'threshold' },
+      },
+    );
+    deps.router.routeExecution.mock.mockImplementation(async function* () {
+      yield {
+        type: 'system_info',
+        catId: 'opus',
+        content: JSON.stringify({ type: 'session_seal_requested', continuityCapsule: capsule }),
+        timestamp: Date.now(),
+      };
+      yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '触发 seal', threadId: 'thread-1', deliveryMode: 'immediate' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.equal(deps.queueProcessor.enqueueContinuation.mock.calls.length, 1);
+    const call = deps.queueProcessor.enqueueContinuation.mock.calls[0].arguments[0];
+    assert.equal(call.threadId, 'thread-1');
+    assert.equal(call.userId, 'user-1');
+    assert.equal(call.catId, 'opus');
+    assert.equal(call.capsule.seal.sessionId, 'sess-1');
+  });
+
+  it('immediate multi-cat execution schedules continuation for the capsule owner cat', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+    deps.router.resolveTargetsAndIntent.mock.mockImplementation(async () => ({
+      targetCats: ['opus', 'codex'],
+      intent: { intent: 'execute' },
+    }));
+    const capsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 'thread-1',
+        catId: 'codex',
+        mode: 'parallel',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-codex-seal',
+        createdAt: Date.now(),
+        seal: { sessionId: 'sess-codex', sessionSeq: 1, reason: 'threshold' },
+      },
+    );
+    deps.router.routeExecution.mock.mockImplementation(async function* () {
+      yield {
+        type: 'system_info',
+        catId: 'codex',
+        content: JSON.stringify({ type: 'session_seal_requested', continuityCapsule: capsule }),
+        timestamp: Date.now(),
+      };
+      yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '触发 codex seal', threadId: 'thread-1', deliveryMode: 'immediate' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.equal(deps.queueProcessor.enqueueContinuation.mock.calls.length, 1);
+    const call = deps.queueProcessor.enqueueContinuation.mock.calls[0].arguments[0];
+    assert.equal(call.threadId, 'thread-1');
+    assert.equal(call.userId, 'user-1');
+    assert.equal(call.catId, 'codex');
+    assert.equal(call.capsule.seal.sessionId, 'sess-codex');
+  });
+
+  it('immediate multi-cat execution schedules continuation for every sealed cat', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+    deps.router.resolveTargetsAndIntent.mock.mockImplementation(async () => ({
+      targetCats: ['opus', 'codex'],
+      intent: { intent: 'execute' },
+    }));
+    const opusCapsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 'thread-1',
+        catId: 'opus',
+        mode: 'parallel',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-opus-seal',
+        createdAt: Date.now(),
+        seal: { sessionId: 'sess-opus', sessionSeq: 1, reason: 'threshold' },
+      },
+    );
+    const codexCapsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 'thread-1',
+        catId: 'codex',
+        mode: 'parallel',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-codex-seal',
+        createdAt: Date.now(),
+        seal: { sessionId: 'sess-codex', sessionSeq: 1, reason: 'threshold' },
+      },
+    );
+    deps.router.routeExecution.mock.mockImplementation(async function* () {
+      yield {
+        type: 'system_info',
+        catId: 'opus',
+        content: JSON.stringify({ type: 'session_seal_requested', continuityCapsule: opusCapsule }),
+        timestamp: Date.now(),
+      };
+      yield {
+        type: 'system_info',
+        catId: 'codex',
+        content: JSON.stringify({ type: 'session_seal_requested', continuityCapsule: codexCapsule }),
+        timestamp: Date.now(),
+      };
+      yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '触发多猫 seal', threadId: 'thread-1', deliveryMode: 'immediate' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.equal(deps.queueProcessor.enqueueContinuation.mock.calls.length, 2);
+    const calls = deps.queueProcessor.enqueueContinuation.mock.calls
+      .map((call) => call.arguments[0])
+      .sort((a, b) => a.catId.localeCompare(b.catId));
+    assert.equal(calls[0].catId, 'codex');
+    assert.equal(calls[0].capsule.seal.sessionId, 'sess-codex');
+    assert.equal(calls[1].catId, 'opus');
+    assert.equal(calls[1].capsule.seal.sessionId, 'sess-opus');
   });
 
   // ── P1-1: multipart deliveryMode extraction ──

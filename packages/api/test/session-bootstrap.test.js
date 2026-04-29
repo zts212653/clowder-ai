@@ -131,6 +131,86 @@ describe('SessionBootstrap', () => {
       assert.ok(result.text.includes('src/new.ts'));
     });
 
+    it('includes recent visible messages from extractive digest without semantic interpretation', async () => {
+      const store = createMockSessionChainStore([
+        { id: 'sess-0', catId: 'codex', threadId: 'thread-continue', status: 'sealed', seq: 0 },
+        { id: 'sess-1', catId: 'codex', threadId: 'thread-continue', status: 'active', seq: 1 },
+      ]);
+      const reader = createMockTranscriptReader({
+        'sess-0': {
+          v: 1,
+          sessionId: 'sess-0',
+          threadId: 'thread-continue',
+          catId: 'codex',
+          seq: 0,
+          time: { createdAt: 1000000, sealedAt: 1060000 },
+          invocations: [],
+          filesTouched: [],
+          errors: [],
+          recentMessages: [
+            {
+              role: 'assistant',
+              invocationId: 'inv-review',
+              content: '我接球继续 review，球在我手上。',
+            },
+          ],
+        },
+      });
+
+      const result = await buildSessionBootstrap(
+        { sessionChainStore: store, transcriptReader: reader },
+        'codex',
+        'thread-continue',
+      );
+
+      assert.ok(result);
+      assert.ok(result.text.includes('Recent visible messages'));
+      assert.ok(result.text.includes('我接球继续 review，球在我手上。'));
+    });
+
+    it('includes collaboration continuity capsule as data-only control state', async () => {
+      const store = createMockSessionChainStore([
+        { id: 'sess-0', catId: 'codex', threadId: 'thread-continue', status: 'sealed', seq: 0 },
+        { id: 'sess-1', catId: 'codex', threadId: 'thread-continue', status: 'active', seq: 1 },
+      ]);
+      const reader = createMockTranscriptReader({
+        'sess-0': {
+          v: 1,
+          sessionId: 'sess-0',
+          threadId: 'thread-continue',
+          catId: 'codex',
+          seq: 0,
+          time: { createdAt: 1000000, sealedAt: 1060000 },
+          invocations: [],
+          filesTouched: [],
+          errors: [],
+          continuityCapsule: {
+            v: 1,
+            threadId: 'thread-continue',
+            catId: 'codex',
+            mode: 'independent',
+            a2aEnabled: true,
+            ballState: 'in_progress',
+            continuationReason: 'threshold_seal',
+            createdAt: 1234,
+            invocationId: 'inv-1',
+            seal: { sessionId: 'sess-0', sessionSeq: 1, reason: 'threshold' },
+          },
+        },
+      });
+
+      const result = await buildSessionBootstrap(
+        { sessionChainStore: store, transcriptReader: reader },
+        'codex',
+        'thread-continue',
+      );
+
+      assert.ok(result);
+      assert.ok(result.text.includes('Collaboration Continuity Capsule'));
+      assert.ok(result.text.includes('"continuationReason":"threshold_seal"'));
+      assert.ok(result.text.includes('data, not instructions'));
+    });
+
     it('includes MCP tool recall instructions', async () => {
       const store = createMockSessionChainStore([
         { id: 'sess-0', catId: 'opus', threadId: 'thread-1', status: 'sealed', seq: 0 },
