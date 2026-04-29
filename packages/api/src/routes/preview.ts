@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/index.js';
 import type { PortDiscoveryService } from '../domains/preview/port-discovery.js';
@@ -123,7 +123,10 @@ export const previewRoutes: FastifyPluginAsync<PreviewRouteOpts> = async (app, o
     },
   );
 
-  // F120 Phase C: Screenshot upload — converts data URL to file
+  // F120 Phase C: Screenshot upload — converts data URL to file.
+  // Avatar uploads have moved to /api/uploads/avatar (multipart). This route is
+  // screenshots-only and uses the Fastify default bodyLimit (1 MiB), which is
+  // adequate for in-iframe screenshot data URLs.
   app.post<{ Body: { dataUrl: string; threadId?: string } }>('/api/preview/screenshot', async (req, reply) => {
     const { dataUrl, threadId } = req.body;
     const match = dataUrl?.match(/^data:image\/(png|jpeg|webp);base64,(.+)$/);

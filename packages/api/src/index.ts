@@ -114,6 +114,7 @@ import { runSchedulerReplyUserIdBackfill } from './infrastructure/scheduler/sche
 import { securityHeadersPlugin } from './infrastructure/security-headers.js';
 import { sessionAuthPlugin, sessionRoute } from './infrastructure/session-auth.js';
 import { SocketManager } from './infrastructure/websocket/index.js';
+import { avatarsRoutes } from './routes/avatars.js';
 import { CallbackAuthSystemMessageNotifier } from './routes/callback-auth-system-message.js';
 import { configSecretsRoutes } from './routes/config-secrets.js';
 import { connectorWebhookRoutes } from './routes/connector-webhooks.js';
@@ -1680,6 +1681,7 @@ async function main(): Promise<void> {
       socketManager?.broadcastToRoom(room, event, data);
     },
   });
+  await app.register(avatarsRoutes);
   await app.register(skillsRoutes);
   await app.register(memoryRoutes, { memoryStore, threadStore });
 

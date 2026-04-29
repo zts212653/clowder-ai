@@ -1,5 +1,6 @@
 import type { DragEvent as ReactDragEvent } from 'react';
 import type { CatData } from '@/hooks/useCatData';
+import { AvatarImageWithFallback } from './AvatarImageWithFallback';
 import type { CatConfig, CoCreatorConfig } from './config-viewer-types';
 
 function safeAvatarSrc(value: string | null | undefined): string | null {
@@ -112,9 +113,11 @@ export function HubCoCreatorOverviewCard({ coCreator, onEdit }: { coCreator: CoC
             style={{ backgroundColor: primary }}
           >
             {avatarSrc ? (
-              // biome-ignore lint/performance/noImgElement: co-creator avatar may be runtime upload URL
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={avatarSrc} alt={`${coCreator.name} avatar`} className="h-full w-full object-cover" />
+              <AvatarImageWithFallback
+                src={avatarSrc}
+                alt={`${coCreator.name} avatar`}
+                className="h-full w-full object-cover"
+              />
             ) : (
               'ME'
             )}

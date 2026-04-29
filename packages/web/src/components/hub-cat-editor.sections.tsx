@@ -2,6 +2,7 @@
 
 import { useMemo, useRef } from 'react';
 import type { CatData } from '@/hooks/useCatData';
+import { AvatarImageWithFallback } from './AvatarImageWithFallback';
 import type { ProfileItem } from './hub-accounts.types';
 import {
   autoSlug,
@@ -104,9 +105,7 @@ export function IdentitySection({
         >
           <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#E8DCCF] bg-white text-[10px] text-[#8A776B]">
             {avatarSrc ? (
-              // biome-ignore lint/performance/noImgElement: avatar path may be runtime upload URL
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={avatarSrc} alt="Avatar preview" className="h-full w-full object-cover" />
+              <AvatarImageWithFallback src={avatarSrc} alt="Avatar preview" className="h-full w-full object-cover" />
             ) : (
               <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" role="img" aria-label="Default avatar">
                 <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2Zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8Zm-2-9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm4 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" />

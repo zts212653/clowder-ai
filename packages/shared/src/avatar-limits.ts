@@ -1,0 +1,1 @@
+export const AVATAR_RAW_FILE_LIMIT_BYTES = 10 * 1024 * 1024;

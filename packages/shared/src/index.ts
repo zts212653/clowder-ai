@@ -7,6 +7,8 @@
  * Import from '@cat-cafe/shared/utils' instead.
  */
 
+// Export avatar size limits (shared between API route bodyLimit and frontend size gate)
+export * from './avatar-limits.js';
 // Export shared CLI effort helpers
 export * from './cli-effort.js';
 // Export command parser + core commands (F142 Phase B)
