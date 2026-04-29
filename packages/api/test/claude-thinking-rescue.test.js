@@ -76,6 +76,29 @@ describe('ClaudeThinkingRescue', () => {
     });
   });
 
+  it('findBrokenClaudeThinkingSessions detects empty thinking signatures without an API error entry', async () => {
+    const { findBrokenClaudeThinkingSessions } = await import(
+      '../dist/domains/cats/services/session/ClaudeThinkingRescue.js'
+    );
+
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-thinking-rescue-api-'));
+    const projectsRoot = path.join(tmp, 'projects');
+    await fs.mkdir(projectsRoot, { recursive: true });
+
+    const brokenFile = path.join(projectsRoot, 'empty-signature.jsonl');
+    await fs.writeFile(brokenFile, `${buildPureThinkingAssistantTurn('empty-signature', '')}\n`, 'utf8');
+
+    const result = await findBrokenClaudeThinkingSessions({ rootDir: projectsRoot });
+
+    assert.equal(result.sessions.length, 1);
+    assert.deepEqual(result.sessions[0], {
+      sessionId: 'empty-signature',
+      transcriptPath: brokenFile,
+      removableThinkingTurns: 1,
+      detectedBy: 'short_signature',
+    });
+  });
+
   it('rescueClaudeThinkingSessions repairs selected sessions and reports structured results', async () => {
     const { rescueClaudeThinkingSessions } = await import(
       '../dist/domains/cats/services/session/ClaudeThinkingRescue.js'
@@ -115,6 +138,41 @@ describe('ClaudeThinkingRescue', () => {
     const repaired = await fs.readFile(brokenFile, 'utf8');
     assert.ok(repaired.includes('survivor'));
     assert.ok(!repaired.includes('"type":"thinking"'));
+  });
+
+  it('rescueClaudeThinkingSessions strips pure thinking turns with empty signatures', async () => {
+    const { rescueClaudeThinkingSessions } = await import(
+      '../dist/domains/cats/services/session/ClaudeThinkingRescue.js'
+    );
+
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-thinking-rescue-api-'));
+    const projectsRoot = path.join(tmp, 'projects');
+    const backupDir = path.join(tmp, 'backups');
+    await fs.mkdir(projectsRoot, { recursive: true });
+
+    const brokenFile = path.join(projectsRoot, 'empty-signature.jsonl');
+    await fs.writeFile(
+      brokenFile,
+      [
+        buildPureThinkingAssistantTurn('empty-signature', ''),
+        buildHealthyAssistantTurn('empty-signature', 'survivor'),
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = await rescueClaudeThinkingSessions({
+      targets: [{ sessionId: 'empty-signature', transcriptPath: brokenFile }],
+      backupDir,
+      now: 1_772_947_520_000,
+    });
+
+    assert.equal(result.status, 'ok');
+    assert.equal(result.results[0].status, 'repaired');
+    assert.equal(result.results[0].removedTurns, 1);
+
+    const repaired = await fs.readFile(brokenFile, 'utf8');
+    assert.ok(repaired.includes('survivor'));
+    assert.ok(!repaired.includes('"signature":""'));
   });
 
   it('rescueClaudeThinkingSessions returns partial when repaired and skipped results coexist', async () => {
