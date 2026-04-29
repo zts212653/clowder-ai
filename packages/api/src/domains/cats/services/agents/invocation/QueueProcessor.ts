@@ -130,6 +130,7 @@ export class QueueProcessor {
   private processingSlots = new Map<string, number>();
   /** F108: Per-slot pause tracking (set on canceled/failed, cleared on next execution) */
   private pausedSlots = new Map<string, 'canceled' | 'failed'>();
+  private pauseEpoch = new Map<string, number>();
   /** F122B B6: Per-entry completion hooks (for multi-mention response aggregation). */
   private entryCompleteHooks = new Map<string, EntryCompleteHook>();
   /** F118 D4: max age before a processingSlot is considered zombie (default 2.5× CLI timeout = 75min) */
@@ -290,6 +291,7 @@ export class QueueProcessor {
     const sk = QueueProcessor.slotKey(threadId, catId);
     if (status === 'succeeded' || status === 'canceled_by_user') {
       this.pausedSlots.delete(sk);
+      this.pauseEpoch.delete(sk);
       if (this.deps.queue.hasQueuedForThread(threadId)) {
         await this.tryExecuteNextAcrossUsers(threadId, catId);
         await this.tryAutoExecute(threadId);
@@ -301,15 +303,19 @@ export class QueueProcessor {
       // canceled or failed → pause ONLY if there are queued entries to manage.
       if (!this.deps.queue.hasQueuedForThread(threadId)) {
         this.pausedSlots.delete(sk);
+        this.pauseEpoch.delete(sk);
         return;
       }
+      const epoch = (this.pauseEpoch.get(sk) ?? 0) + 1;
+      this.pauseEpoch.set(sk, epoch);
       this.pausedSlots.set(sk, status);
       this.emitPausedToQueuedUsers(threadId, status);
 
       // #595: auto-recover paused slot after delay — prevents indefinite stuck state
       setTimeout(() => {
-        if (this.pausedSlots.get(sk) !== status) return;
+        if (this.pauseEpoch.get(sk) !== epoch) return;
         this.pausedSlots.delete(sk);
+        this.pauseEpoch.delete(sk);
         this.deps.log.info(
           { threadId, catId, status },
           '[QueueProcessor] Auto-recovering paused slot after timeout (#595)',
@@ -331,11 +337,15 @@ export class QueueProcessor {
    */
   clearPause(threadId: string, catId?: string): void {
     if (catId) {
-      this.pausedSlots.delete(QueueProcessor.slotKey(threadId, catId));
+      const sk = QueueProcessor.slotKey(threadId, catId);
+      this.pausedSlots.delete(sk);
+      this.pauseEpoch.delete(sk);
     } else {
-      // Backward compat: clear all paused slots for this thread
       for (const key of [...this.pausedSlots.keys()]) {
-        if (key.startsWith(`${threadId}:`)) this.pausedSlots.delete(key);
+        if (key.startsWith(`${threadId}:`)) {
+          this.pausedSlots.delete(key);
+          this.pauseEpoch.delete(key);
+        }
       }
     }
   }
@@ -608,6 +618,7 @@ export class QueueProcessor {
         mentions: readonly string[];
         userId: string;
         contentBlocks?: readonly unknown[];
+        extra?: Record<string, unknown>;
       }> = [];
       for (const mid of allMessageIds) {
         try {
@@ -622,6 +633,7 @@ export class QueueProcessor {
               mentions: result.mentions,
               userId: result.userId,
               contentBlocks: result.contentBlocks,
+              ...(result.extra ? { extra: result.extra as Record<string, unknown> } : {}),
             });
           }
         } catch {

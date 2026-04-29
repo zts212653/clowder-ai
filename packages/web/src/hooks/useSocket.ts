@@ -708,6 +708,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
           mentions: readonly string[];
           userId: string;
           contentBlocks?: readonly unknown[];
+          extra?: Record<string, unknown>;
         }>;
       }) => {
         useChatStore.getState().markMessagesDelivered(data.threadId, data.messageIds, data.deliveredAt, data.messages);
