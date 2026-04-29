@@ -454,13 +454,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           if (willEnqueueToQueue && a2aResult.enqueued.length === 0) {
             try {
               await messageStore.markDelivered?.(storedMsg.id, Date.now());
-              messageStaysQueued = false;
             } catch (err) {
               app.log.warn(
                 { messageId: storedMsg.id, threadId: effectiveThreadId, err },
-                '[agent-key/post-message] Failed to recover ghost message',
+                '[agent-key/post-message] Failed to recover ghost message — broadcasting anyway',
               );
             }
+            messageStaysQueued = false;
           }
         } catch (enqueueErr) {
           app.log.error(
@@ -789,13 +789,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         if (willEnqueueToQueue && a2aResult.enqueued.length === 0) {
           try {
             await messageStore.markDelivered?.(storedMsg.id, Date.now());
-            messageStaysQueued = false;
           } catch (err) {
             app.log.warn(
               { messageId: storedMsg.id, threadId: effectiveThreadId, err },
-              '[AC-B6-P1] Failed to recover ghost message — markDelivered rejected (best-effort)',
+              '[AC-B6-P1] Failed to recover ghost message — broadcasting anyway',
             );
           }
+          messageStaysQueued = false;
         }
       } catch (enqueueErr) {
         app.log.error(
