@@ -11,7 +11,13 @@ import { createModuleLogger } from '../infrastructure/logger.js';
 import { registerLivenessProbe, unregisterLivenessProbe } from '../infrastructure/telemetry/instruments.js';
 import { emitOtelLog } from '../infrastructure/telemetry/otel-logger.js';
 import { invalidateCliCommand } from './cli-resolve.js';
-import { escapeBashArg, escapeCmdArg, findGitBashPath, resolveWindowsShimSpawn } from './cli-spawn-win.js';
+import {
+  escapeBashArg,
+  escapeCmdArg,
+  findGitBashPath,
+  resolveWindowsShimSpawn,
+  shouldDirectSpawnNativeExe,
+} from './cli-spawn-win.js';
 import { resolveCliTimeoutMs } from './cli-timeout.js';
 import type { ChildProcessLike, CliSpawnOptions, SpawnFn } from './cli-types.js';
 import { isParseError, parseNDJSON } from './ndjson-parser.js';
@@ -559,6 +565,18 @@ function defaultSpawn(
         'Windows shim resolved',
       );
       return nodeSpawn(shimSpawn.command, shimSpawn.args, {
+        cwd: options.cwd,
+        env: options.env,
+        stdio: options.stdio,
+      });
+    }
+    // Native PE32+ binaries (e.g. modern claude.exe, codex.exe shipped as
+    // standalone executables) have no parseable .cmd shim. Spawn directly
+    // via argv to skip shell-based quoting (Git Bash `-c "<long-cmd>"`
+    // chokes on unbalanced quotes inside long prompts → exit code 2).
+    if (shouldDirectSpawnNativeExe(command)) {
+      log.debug({ command, argCount: args.length }, 'Windows native .exe direct spawn');
+      return nodeSpawn(command, [...args], {
         cwd: options.cwd,
         env: options.env,
         stdio: options.stdio,

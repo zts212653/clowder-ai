@@ -45,7 +45,7 @@ export function extractBareName(command: string): string {
 /**
  * Try to extract an entry script from a .cmd shim file by parsing its content.
  * Handles both relative (%~dp0, %dp0, %dp0%) and absolute (%APPDATA%, etc.) paths.
- * Prefers .js matches, falls back to extensionless entrypoints.
+ * Prefers .js matches, falls back to extensionless entrypoints, then native .exe entrypoints.
  */
 export function parseShimFile(cmdPath: string): string | null {
   if (!existsSync(cmdPath)) return null;
@@ -85,6 +85,17 @@ export function parseShimFile(cmdPath: string): string | null {
     const tail = scriptPath.split(/[/\\]/).pop() ?? '';
     if (/\.exe$/i.test(tail) && !/^node(\.exe)?$/i.test(tail) && existsSync(scriptPath)) {
       return scriptPath;
+    }
+  }
+
+  // Third pass: native executable entrypoints (e.g. @anthropic-ai/claude-code/bin/claude.exe).
+  // Keep skipping node.exe launchers; those are shim preludes, not the CLI entry.
+  for (const match of matches) {
+    const raw = match[1].replace(/\\/g, '/').replace(/\s+%\*.*$/, '');
+    const basename = raw.split('/').pop() ?? '';
+    if (/\.exe$/i.test(raw) && !/^node\.exe$/i.test(basename)) {
+      const exePath = join(shimDir, raw);
+      if (existsSync(exePath)) return exePath;
     }
   }
 
@@ -173,12 +184,42 @@ export function resolveWindowsShimSpawn(
   const shimScript = shimScriptOverride ?? resolveCmdShimScript(command);
   if (!shimScript) return null;
   if (/\.exe$/i.test(shimScript)) {
-    return { command: shimScript, args: [...args] };
+    return {
+      command: shimScript,
+      args: [...args],
+    };
   }
   return {
     command: process.execPath,
     args: [shimScript, ...args],
   };
+}
+
+/**
+ * Whether to spawn a Windows native .exe directly via argv (no shell).
+ *
+ * Recent Anthropic / Codex CLI releases ship as standalone PE32+ binaries
+ * (e.g. `claude.exe` 250MB+). They have no .cmd shim parseable by
+ * resolveCmdShimScript — bin/claude.exe is the entry, and the npm shim
+ * (when present) just re-launches the same .exe. Falling through to the
+ * Git Bash shell path passes the (potentially huge) prompt as a `-c`
+ * string, where any unbalanced quote in the multi-line content triggers
+ * `bash: -c: line N: unexpected EOF` (exit 2) before claude.exe even
+ * starts.
+ *
+ * Native exe + argv mode skips shell parsing entirely — child_process
+ * passes args via the Win32 CreateProcess argv array, so quoting is the
+ * exe's problem (it is, in fact, well-behaved).
+ */
+export function shouldDirectSpawnNativeExe(
+  command: string,
+  options: { platform?: NodeJS.Platform; exists?: (p: string) => boolean } = {},
+): boolean {
+  const platform = options.platform ?? process.platform;
+  if (platform !== 'win32') return false;
+  if (!/\.exe$/i.test(command)) return false;
+  const fileExists = options.exists ?? existsSync;
+  return fileExists(command);
 }
 
 /**
