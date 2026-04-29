@@ -88,17 +88,6 @@ export function parseShimFile(cmdPath: string): string | null {
     }
   }
 
-  // Third pass: native executable entrypoints (e.g. @anthropic-ai/claude-code/bin/claude.exe).
-  // Keep skipping node.exe launchers; those are shim preludes, not the CLI entry.
-  for (const match of matches) {
-    const raw = match[1].replace(/\\/g, '/').replace(/\s+%\*.*$/, '');
-    const basename = raw.split('/').pop() ?? '';
-    if (/\.exe$/i.test(raw) && !/^node\.exe$/i.test(basename)) {
-      const exePath = join(shimDir, raw);
-      if (existsSync(exePath)) return exePath;
-    }
-  }
-
   return null;
 }
 
