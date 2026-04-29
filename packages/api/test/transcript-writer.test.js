@@ -383,6 +383,43 @@ describe('TranscriptWriter', () => {
       );
     });
 
+    test('preserves repeated-cat turn boundaries within one invocation', async () => {
+      const { TranscriptWriter } = await loadModules();
+      const writer = new TranscriptWriter({ dataDir: tmpDir });
+
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'text', catId: 'codex', content: 'Codex first ', textMode: 'append', timestamp: Date.now() },
+        'inv-route',
+      );
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'text', catId: 'codex', content: 'turn', textMode: 'append', timestamp: Date.now() },
+        'inv-route',
+      );
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'text', catId: 'opus', content: 'Opus middle turn', textMode: 'append', timestamp: Date.now() },
+        'inv-route',
+      );
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'text', catId: 'codex', content: 'Codex second turn', textMode: 'append', timestamp: Date.now() },
+        'inv-route',
+      );
+
+      const digest = writer.generateExtractiveDigest(SESSION_INFO, {
+        createdAt: 1000,
+        sealedAt: 2000,
+      });
+
+      assert.deepEqual(
+        digest.recentMessages.map((msg) => msg.content),
+        ['Codex first turn', 'Opus middle turn', 'Codex second turn'],
+        'same-cat streams separated by another visible turn must remain distinct recent messages',
+      );
+    });
+
     test('excludes leaked tool-call payloads from recent visible messages', async () => {
       const { TranscriptWriter } = await loadModules();
       const writer = new TranscriptWriter({ dataDir: tmpDir });

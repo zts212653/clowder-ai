@@ -247,7 +247,7 @@ export class TranscriptWriter {
       if (visibleText) {
         if (streamKey) {
           const existing = recentMessageByStream.get(streamKey);
-          if (existing) {
+          if (existing && recentMessages[recentMessages.length - 1] === existing) {
             const content = normalizeVisibleText(coalesceVisibleText(existing.content, visibleText, evt.textMode), {
               trim: false,
             });
