@@ -767,6 +767,7 @@ export interface ChatState {
       extra?: Record<string, unknown>;
       origin?: 'stream' | 'callback' | 'briefing';
       replyTo?: string;
+      replyPreview?: { senderCatId: string | null; content: string; deleted?: boolean; kind?: string };
     }>,
   ) => void;
 
@@ -984,6 +985,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 ...(sm.extra ? { extra: sm.extra as ChatMessage['extra'] } : {}),
                 ...(sm.origin ? { origin: sm.origin } : {}),
                 ...(sm.replyTo ? { replyTo: sm.replyTo } : {}),
+                ...(sm.replyPreview ? { replyPreview: sm.replyPreview as ChatMessage['replyPreview'] } : {}),
               });
             }
           }
@@ -994,6 +996,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return updated;
       };
 
+      const newInserts = serverMessages?.filter((sm) => !idSet.has(sm.id)).length ?? 0;
+
       if (threadId === state.currentThreadId) {
         return { messages: updateMsgs(state.messages) };
       }
@@ -1002,7 +1006,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return {
         threadStates: {
           ...state.threadStates,
-          [threadId]: { ...existing, messages: updateMsgs(existing.messages) },
+          [threadId]: {
+            ...existing,
+            messages: updateMsgs(existing.messages),
+            ...(newInserts > 0
+              ? {
+                  unreadCount: (existing.unreadCount ?? 0) + newInserts,
+                  lastActivity: deliveredAt,
+                }
+              : {}),
+          },
         },
       };
     }),

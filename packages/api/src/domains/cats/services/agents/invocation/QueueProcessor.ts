@@ -8,7 +8,7 @@
  */
 
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
-import type { IMessageStore } from '../../stores/ports/MessageStore.js';
+import { hydrateReplyPreview, type IMessageStore } from '../../stores/ports/MessageStore.js';
 import {
   accumulateTextAggregate,
   accumulateTextParts,
@@ -621,12 +621,14 @@ export class QueueProcessor {
         extra?: Record<string, unknown>;
         origin?: string;
         replyTo?: string;
+        replyPreview?: { senderCatId: string | null; content: string; deleted?: boolean; kind?: string };
       }> = [];
       for (const mid of allMessageIds) {
         try {
           const result = await messageStore.markDelivered(mid, deliveredNow);
           if (result) {
             deliveredIds.push(mid);
+            const preview = result.replyTo ? await hydrateReplyPreview(messageStore, result.replyTo) : null;
             deliveredMessages.push({
               id: result.id,
               content: result.content,
@@ -638,6 +640,7 @@ export class QueueProcessor {
               ...(result.extra ? { extra: result.extra as Record<string, unknown> } : {}),
               ...(result.origin ? { origin: result.origin } : {}),
               ...(result.replyTo ? { replyTo: result.replyTo } : {}),
+              ...(preview ? { replyPreview: preview } : {}),
             });
           }
         } catch {
