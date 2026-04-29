@@ -83,7 +83,13 @@ for arg in "$@"; do
 done
 
 # 加载环境变量 (放最前面，后续函数需要端口号)
-# 默认读取 .env；.env.local 仅用于 DARE 相关白名单键，避免全量覆盖引发配置漂移。
+# 优先级 (#603 .local convention):
+#   .env.local source 后覆盖 .env 同名键。
+#   对于 managed startup keys（端口等）：
+#     默认模式: CLI env > .env.local > .env（CLI 值在 source 后恢复）
+#     RESPECT_DOTENV_PORTS 模式: .env.local > .env（CLI 端口值不恢复）
+#   对于其他键: .env.local > .env（无 CLI 恢复机制）
+#   安全注意: .env.local 全量 source，不再限于 DARE 白名单。
 CLI_FRONTEND_PORT_OVERRIDE="${FRONTEND_PORT-}"
 CLI_API_SERVER_PORT_OVERRIDE="${API_SERVER_PORT-}"
 CLI_REDIS_PORT_OVERRIDE="${REDIS_PORT-}"
@@ -95,7 +101,6 @@ CLI_ANTHROPIC_PROXY_PORT_OVERRIDE="${ANTHROPIC_PROXY_PORT-}"
 CLI_WHISPER_PORT_OVERRIDE="${WHISPER_PORT-}"
 CLI_TTS_PORT_OVERRIDE="${TTS_PORT-}"
 CLI_LLM_POSTPROCESS_PORT_OVERRIDE="${LLM_POSTPROCESS_PORT-}"
-PREFER_DOTENV_PORTS="${CAT_CAFE_RESPECT_DOTENV_PORTS:-0}"
 
 clear_inherited_profile_env() {
     [ "${CAT_CAFE_STRICT_PROFILE_DEFAULTS:-0}" = "1" ] || return 0
@@ -115,6 +120,14 @@ if [ -f .env ]; then
     source .env
     set +a
 fi
+
+if [ -f .env.local ]; then
+    set -a
+    source .env.local
+    set +a
+fi
+
+PREFER_DOTENV_PORTS="${CAT_CAFE_RESPECT_DOTENV_PORTS:-0}"
 
 restore_cli_override() {
     local name="$1"
@@ -137,33 +150,6 @@ if [ "$PREFER_DOTENV_PORTS" != "1" ]; then
     restore_cli_override "LLM_POSTPROCESS_PORT" "$CLI_LLM_POSTPROCESS_PORT_OVERRIDE"
 fi
 
-load_dare_env_from_local() {
-    local env_file=".env.local"
-    [ -f "$env_file" ] || return 0
-
-    local key raw value
-    for key in \
-        DARE_PATH \
-        DARE_ADAPTER \
-        DARE_API_KEY \
-        DARE_ENDPOINT \
-        OPENROUTER_API_KEY \
-        OPENROUTER_BASE_URL \
-        OPENAI_API_KEY \
-        OPENAI_BASE_URL \
-        ANTHROPIC_API_KEY \
-        ANTHROPIC_BASE_URL; do
-        raw=$(grep -E "^${key}=" "$env_file" | tail -n1 || true)
-        [ -n "$raw" ] || continue
-        value="${raw#*=}"
-        # 去掉包裹引号（兼容 key="value" / key='value'）
-        value="${value%\"}"; value="${value#\"}"
-        value="${value%\'}"; value="${value#\'}"
-        export "$key=$value"
-    done
-}
-
-load_dare_env_from_local
 apply_manual_download_source_overrides
 
 default_redis_port() {
