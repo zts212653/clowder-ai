@@ -236,6 +236,73 @@ describe('bootcamp invocation context', () => {
   });
 });
 
+describe('routeParallel collaboration continuity', () => {
+  it('includes continuity capsule in threshold seal payload for parallel invocations', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const activeRecord = {
+      id: 'sess-parallel-seal',
+      catId: 'codex',
+      threadId: 'thread-parallel-seal',
+      userId: 'user1',
+      seq: 0,
+      status: 'active',
+      compressionCount: 0,
+    };
+    const service = {
+      async *invoke() {
+        yield {
+          type: 'done',
+          catId: 'codex',
+          timestamp: Date.now(),
+          metadata: {
+            provider: 'openai',
+            model: 'gpt-5.5',
+            usage: {
+              inputTokens: 90_000,
+              outputTokens: 100,
+              contextWindowSize: 100_000,
+            },
+          },
+        };
+      },
+    };
+    const deps = createMockDeps({ codex: service });
+    deps.invocationDeps.sessionManager.delete = async () => {};
+    deps.invocationDeps.sessionChainStore = {
+      getChain: async () => [activeRecord],
+      getActive: async () => activeRecord,
+      update: async () => activeRecord,
+      create: async () => activeRecord,
+    };
+    deps.invocationDeps.sessionSealer = {
+      requestSeal: async () => ({ accepted: true, status: 'sealing' }),
+      finalize: async () => {},
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
+    };
+
+    const events = [];
+    for await (const msg of routeParallel(deps, ['codex'], 'parallel seal', 'user1', 'thread-parallel-seal')) {
+      events.push(msg);
+    }
+
+    const sealEvent = events.find((m) => {
+      if (m.type !== 'system_info') return false;
+      try {
+        return JSON.parse(m.content).type === 'session_seal_requested';
+      } catch {
+        return false;
+      }
+    });
+    assert.ok(sealEvent, 'parallel threshold seal should emit session_seal_requested');
+    const payload = JSON.parse(sealEvent.content);
+    assert.equal(payload.continuityCapsule.threadId, 'thread-parallel-seal');
+    assert.equal(payload.continuityCapsule.catId, 'codex');
+    assert.equal(payload.continuityCapsule.mode, 'parallel');
+    assert.equal(payload.continuityCapsule.seal.sessionId, 'sess-parallel-seal');
+  });
+});
+
 describe('incremental current-message fallback helper', () => {
   it('does not append raw current message when context already contains current message id', async () => {
     const { shouldAppendExplicitCurrentMessage } = await import(

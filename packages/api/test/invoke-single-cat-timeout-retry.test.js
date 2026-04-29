@@ -130,6 +130,96 @@ describe('#774 CLI timeout retry on session resume', () => {
     );
   });
 
+  it('resume + context-window overflow + no substantive output → drops session and retries fresh', async () => {
+    let attempt = 0;
+    const optionsSeen = [];
+    const service = {
+      async *invoke(_prompt, opts) {
+        attempt++;
+        optionsSeen.push(opts);
+        if (opts?.sessionId) {
+          yield {
+            type: 'error',
+            catId: 'codex',
+            error:
+              "Codex CLI: CLI 异常退出 (code: 1, signal: none)\n最近流错误:\n- Codex ran out of room in the model's context window. Start a new thread or clear earlier history before retrying.",
+            timestamp: Date.now(),
+          };
+          yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+        } else {
+          yield { type: 'text', catId: 'codex', content: 'continued in fresh session', timestamp: Date.now() };
+          yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+        }
+      },
+    };
+
+    const sessionDeletes = [];
+    const updateCalls = [];
+    const deps = makeDeps({
+      sessionManager: {
+        get: async () => 'cli-sess-full',
+        getOrCreate: async () => ({}),
+        store: async () => {},
+        delete: async (userId, catId, threadId) => {
+          sessionDeletes.push(`${userId}:${catId}:${threadId}`);
+        },
+        resolveWorkingDirectory: () => '/tmp/test',
+      },
+      sessionChainStore: {
+        getChain: () => [
+          {
+            id: 'sess-full',
+            cliSessionId: 'cli-sess-full',
+            status: 'active',
+            consecutiveRestoreFailures: 0,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ],
+        getActive: async () => ({
+          id: 'sess-full',
+          cliSessionId: 'cli-sess-full',
+          consecutiveRestoreFailures: 0,
+        }),
+        update: async (id, patch) => {
+          updateCalls.push({ id, patch });
+        },
+      },
+      sessionSealer: {
+        reconcileStuck: async () => {},
+      },
+    });
+
+    const msgs = await collect(
+      invokeSingleCat(deps, {
+        catId: 'codex',
+        service,
+        prompt: 'test overflow retry',
+        userId: 'u1',
+        threadId: 't-overflow-retry',
+        systemPrompt: 'system identity',
+      }),
+    );
+
+    assert.equal(attempt, 2, 'should retry once after dropping the poisoned resumed session');
+    assert.equal(optionsSeen[0].sessionId, 'cli-sess-full', 'first attempt should resume');
+    assert.equal(optionsSeen[1].sessionId, undefined, 'retry should be fresh');
+    assert.deepEqual(sessionDeletes, ['u1:codex:t-overflow-retry'], 'should delete stale session before retry');
+    assert.ok(
+      updateCalls.some((call) => call.patch.consecutiveRestoreFailures === 1),
+      'should increment restore failure count before retry',
+    );
+    assert.ok(
+      msgs.some((m) => m.type === 'text' && m.content === 'continued in fresh session'),
+      'fresh retry result should be streamed',
+    );
+    assert.equal(
+      msgs.some((m) => m.type === 'error' && String(m.error).includes('ran out of room')),
+      false,
+      'first-attempt overflow error should be suppressed when retry succeeds',
+    );
+  });
+
   it('resume + timeout + substantive model output → does NOT retry', async () => {
     let attempt = 0;
     const service = {

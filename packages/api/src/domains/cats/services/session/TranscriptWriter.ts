@@ -14,6 +14,11 @@
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import {
+  type CollaborationContinuityCapsuleV1,
+  extractContinuityCapsuleFromSystemInfo,
+} from '../agents/invocation/CollaborationContinuityCapsule.js';
+import { stripLeakedToolCallPayload } from '../agents/routing/route-helpers.js';
 
 export interface TranscriptSessionInfo {
   sessionId: string;
@@ -50,6 +55,14 @@ export interface ExtractiveDigestV1 {
     invocationId?: string;
     message: string;
   }>;
+  /** Last visible assistant text messages, carried verbatim as reference data for continuity. */
+  recentMessages?: Array<{
+    role: 'assistant';
+    invocationId?: string;
+    content: string;
+  }>;
+  /** Latest structured collaboration control-flow state captured at a seal boundary. */
+  continuityCapsule?: CollaborationContinuityCapsuleV1;
 }
 
 export interface TranscriptWriterOptions {
@@ -175,6 +188,9 @@ export class TranscriptWriter {
     const toolNames = new Set<string>();
     const filePaths = new Map<string, Set<string>>(); // path → ops
     const errors: ExtractiveDigestV1['errors'] = [];
+    const recentMessages: NonNullable<ExtractiveDigestV1['recentMessages']> = [];
+    const recentMessageByStream = new Map<string, NonNullable<ExtractiveDigestV1['recentMessages']>[number]>();
+    let continuityCapsule: CollaborationContinuityCapsuleV1 | undefined;
 
     for (const entry of buf) {
       const evt = entry.event;
@@ -219,6 +235,46 @@ export class TranscriptWriter {
           message: (evt.error as string).slice(0, 500),
         });
       }
+      if (evtType === 'system_info' && typeof evt.content === 'string') {
+        continuityCapsule = extractContinuityCapsuleFromSystemInfo(evt.content) ?? continuityCapsule;
+      }
+
+      const streamKey =
+        evtType === 'text' && entry.invocationId !== undefined
+          ? `${entry.invocationId}:${typeof evt.catId === 'string' ? evt.catId : session.catId}`
+          : null;
+      const visibleText = extractVisibleAssistantText(evt, { trim: streamKey === null });
+      if (visibleText) {
+        if (streamKey) {
+          const existing = recentMessageByStream.get(streamKey);
+          if (existing && recentMessages[recentMessages.length - 1] === existing) {
+            const content = normalizeVisibleText(coalesceVisibleText(existing.content, visibleText, evt.textMode), {
+              trim: false,
+            });
+            if (content) {
+              existing.content = content.slice(0, 1200);
+              moveToEnd(recentMessages, existing);
+            } else {
+              removeItem(recentMessages, existing);
+              recentMessageByStream.delete(streamKey);
+            }
+          } else {
+            const message = {
+              role: 'assistant' as const,
+              ...(entry.invocationId !== undefined ? { invocationId: entry.invocationId } : {}),
+              content: visibleText.slice(0, 1200),
+            };
+            recentMessages.push(message);
+            recentMessageByStream.set(streamKey, message);
+          }
+        } else {
+          recentMessages.push({
+            role: 'assistant',
+            ...(entry.invocationId !== undefined ? { invocationId: entry.invocationId } : {}),
+            content: visibleText.slice(0, 1200),
+          });
+        }
+      }
     }
 
     return {
@@ -238,6 +294,8 @@ export class TranscriptWriter {
         ops: [...ops],
       })),
       errors,
+      recentMessages: recentMessages.slice(-5),
+      ...(continuityCapsule ? { continuityCapsule } : {}),
     };
   }
 
@@ -274,5 +332,59 @@ export class TranscriptWriter {
   /** Compute session directory path. */
   private sessionDir(session: TranscriptSessionInfo): string {
     return join(this.dataDir, 'threads', session.threadId, session.catId, 'sessions', session.sessionId);
+  }
+}
+
+function extractVisibleAssistantText(evt: Record<string, unknown>, opts?: { trim?: boolean }): string | null {
+  if (evt.type === 'text' && typeof evt.content === 'string') {
+    return normalizeVisibleText(evt.content, opts);
+  }
+
+  if (evt.type === 'assistant') {
+    const content = evt.content;
+    if (typeof content === 'string') {
+      return normalizeVisibleText(content, opts);
+    }
+    if (Array.isArray(content)) {
+      const text = content
+        .map((part) => {
+          if (!part || typeof part !== 'object') return '';
+          const maybeText = (part as { text?: unknown }).text;
+          return typeof maybeText === 'string' ? maybeText : '';
+        })
+        .filter(Boolean)
+        .join('\n');
+      return normalizeVisibleText(text, opts);
+    }
+  }
+
+  return null;
+}
+
+function normalizeVisibleText(text: string, opts?: { trim?: boolean }): string | null {
+  const sanitized = stripLeakedToolCallPayload(text.replace(/[\x00-\x08\x0b-\x1f]/g, ''));
+  if (sanitized.trim().length === 0) return null;
+  return opts?.trim === false ? sanitized : sanitized.trim();
+}
+
+function coalesceVisibleText(existing: string, next: string, textMode: unknown): string {
+  if (textMode === 'replace') {
+    return next;
+  }
+  return `${existing}${next}`;
+}
+
+function moveToEnd<T>(items: T[], item: T): void {
+  const index = items.indexOf(item);
+  if (index >= 0 && index !== items.length - 1) {
+    items.splice(index, 1);
+    items.push(item);
+  }
+}
+
+function removeItem<T>(items: T[], item: T): void {
+  const index = items.indexOf(item);
+  if (index >= 0) {
+    items.splice(index, 1);
   }
 }

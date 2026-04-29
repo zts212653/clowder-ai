@@ -112,27 +112,119 @@ printf '%s' "$CAT_CAFE_MCP_SERVER_PATH"
   assert.equal(output, explicitPath);
 });
 
-test('load_dare_env_from_local whitelists anthropic key+endpoint overrides', () => {
-  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
-  const output = runSourceOnlySnippet(
-    scriptPath,
-    `
-tmp_dir=$(mktemp -d)
-trap 'rm -rf "$tmp_dir"' RETURN
-cd "$tmp_dir"
-cat > .env.local <<'EOF'
-DARE_API_KEY=sk-dare-local
-DARE_ENDPOINT=https://dare-proxy.example/v1
-ANTHROPIC_API_KEY=sk-ant-local
-ANTHROPIC_BASE_URL=https://anthropic-proxy.example
-EOF
-unset DARE_API_KEY DARE_ENDPOINT ANTHROPIC_API_KEY ANTHROPIC_BASE_URL
-load_dare_env_from_local
-printf '%s|%s|%s|%s' "$DARE_API_KEY" "$DARE_ENDPOINT" "$ANTHROPIC_API_KEY" "$ANTHROPIC_BASE_URL"
-`,
-  );
+function createTempProject() {
+  const tmp = mkdtempSync(join(tmpdir(), 'env-local-'));
+  const scriptsDir = join(tmp, 'scripts');
+  mkdirSync(scriptsDir);
+  const realScriptsDir = resolve(process.cwd(), '../../scripts');
+  cpSync(join(realScriptsDir, 'start-dev.sh'), join(scriptsDir, 'start-dev.sh'));
+  cpSync(join(realScriptsDir, 'download-source-overrides.sh'), join(scriptsDir, 'download-source-overrides.sh'));
+  chmodSync(join(scriptsDir, 'start-dev.sh'), 0o755);
+  return tmp;
+}
 
-  assert.equal(output, 'sk-dare-local|https://dare-proxy.example/v1|sk-ant-local|https://anthropic-proxy.example');
+test('.env.local overrides same-name keys from .env (#603)', () => {
+  const tmp = createTempProject();
+  try {
+    writeFileSync(join(tmp, '.env'), 'FRONTEND_PORT=3003\nPREVIEW_GATEWAY_PORT=4099\n');
+    writeFileSync(join(tmp, '.env.local'), 'FRONTEND_PORT=3013\nPREVIEW_GATEWAY_PORT=4199\n');
+    const scriptPath = join(tmp, 'scripts', 'start-dev.sh');
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e\nsource "${scriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s|%s' "$FRONTEND_PORT" "$PREVIEW_GATEWAY_PORT"`,
+      ],
+      {
+        encoding: 'utf8',
+        env: baseShellEnv({ CAT_CAFE_RESPECT_DOTENV_PORTS: '1' }),
+      },
+    );
+
+    assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.equal(result.stdout.trim(), '3013|4199');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('CLI env vars beat .env.local for port keys in default mode (#603)', () => {
+  const tmp = createTempProject();
+  try {
+    writeFileSync(join(tmp, '.env'), 'FRONTEND_PORT=3003\nAPI_SERVER_PORT=3004\n');
+    writeFileSync(join(tmp, '.env.local'), 'FRONTEND_PORT=3013\nAPI_SERVER_PORT=3014\n');
+    const scriptPath = join(tmp, 'scripts', 'start-dev.sh');
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e\nsource "${scriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s|%s' "$FRONTEND_PORT" "$API_SERVER_PORT"`,
+      ],
+      {
+        encoding: 'utf8',
+        env: baseShellEnv({ FRONTEND_PORT: '3099', API_SERVER_PORT: '3098' }),
+      },
+    );
+
+    assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.equal(result.stdout.trim(), '3099|3098');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('.env.local beats CLI env in respect-dotenv-ports mode (#603)', () => {
+  const tmp = createTempProject();
+  try {
+    writeFileSync(join(tmp, '.env'), 'FRONTEND_PORT=3003\n');
+    writeFileSync(join(tmp, '.env.local'), 'FRONTEND_PORT=3013\n');
+    const scriptPath = join(tmp, 'scripts', 'start-dev.sh');
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e\nsource "${scriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s' "$FRONTEND_PORT"`,
+      ],
+      {
+        encoding: 'utf8',
+        env: baseShellEnv({ FRONTEND_PORT: '3099', CAT_CAFE_RESPECT_DOTENV_PORTS: '1' }),
+      },
+    );
+
+    assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.equal(result.stdout.trim(), '3013');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('.env.local can activate respect-dotenv-ports mode (#603)', () => {
+  const tmp = createTempProject();
+  try {
+    writeFileSync(join(tmp, '.env'), 'FRONTEND_PORT=3003\n');
+    writeFileSync(join(tmp, '.env.local'), 'CAT_CAFE_RESPECT_DOTENV_PORTS=1\nFRONTEND_PORT=3013\n');
+    const scriptPath = join(tmp, 'scripts', 'start-dev.sh');
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e\nsource "${scriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s' "$FRONTEND_PORT"`,
+      ],
+      {
+        encoding: 'utf8',
+        env: baseShellEnv({ FRONTEND_PORT: '3099' }),
+      },
+    );
+
+    assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.equal(result.stdout.trim(), '3013');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('explicit port env vars override .env values for direct startup', () => {
