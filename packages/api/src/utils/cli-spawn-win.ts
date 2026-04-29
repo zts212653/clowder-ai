@@ -31,6 +31,15 @@ export interface WindowsShimSpawn {
   args: string[];
 }
 
+export type WindowsSpawnMode = 'shim' | 'native-exe' | 'git-bash' | 'cmd';
+
+export interface WindowsSpawnPlan {
+  command: string;
+  args: string[];
+  mode: WindowsSpawnMode;
+  shell?: true | string;
+}
+
 /**
  * Extract the bare command name from a path or command string.
  * e.g. 'C:\Users\Admin\bin\claude.cmd' → 'claude'
@@ -209,6 +218,42 @@ export function shouldDirectSpawnNativeExe(
   if (!/\.exe$/i.test(command)) return false;
   const fileExists = options.exists ?? existsSync;
   return fileExists(command);
+}
+
+export function resolveWindowsSpawnPlan(command: string, args: readonly string[]): WindowsSpawnPlan {
+  const shimSpawn = resolveWindowsShimSpawn(command, args);
+  if (shimSpawn) {
+    return {
+      command: shimSpawn.command,
+      args: shimSpawn.args,
+      mode: 'shim',
+    };
+  }
+
+  if (shouldDirectSpawnNativeExe(command)) {
+    return {
+      command,
+      args: [...args],
+      mode: 'native-exe',
+    };
+  }
+
+  const gitBash = findGitBashPath();
+  if (gitBash) {
+    return {
+      command: escapeBashArg(command),
+      args: args.map(escapeBashArg),
+      mode: 'git-bash',
+      shell: gitBash,
+    };
+  }
+
+  return {
+    command: escapeCmdArg(command),
+    args: args.map(escapeCmdArg),
+    mode: 'cmd',
+    shell: true,
+  };
 }
 
 /**
