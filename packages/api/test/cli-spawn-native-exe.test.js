@@ -18,10 +18,7 @@ describe('shouldDirectSpawnNativeExe', () => {
   });
 
   test('case-insensitive .exe match', () => {
-    assert.equal(
-      shouldDirectSpawnNativeExe('C:\\bin\\Tool.EXE', { platform: 'win32', exists: trueExists }),
-      true,
-    );
+    assert.equal(shouldDirectSpawnNativeExe('C:\\bin\\Tool.EXE', { platform: 'win32', exists: trueExists }), true);
   });
 
   test('false when .exe does not exist on disk', () => {
@@ -35,18 +32,9 @@ describe('shouldDirectSpawnNativeExe', () => {
   });
 
   test('false for non-.exe on Windows', () => {
-    assert.equal(
-      shouldDirectSpawnNativeExe('C:\\bin\\claude.cmd', { platform: 'win32', exists: trueExists }),
-      false,
-    );
-    assert.equal(
-      shouldDirectSpawnNativeExe('C:\\bin\\claude.bat', { platform: 'win32', exists: trueExists }),
-      false,
-    );
-    assert.equal(
-      shouldDirectSpawnNativeExe('claude', { platform: 'win32', exists: trueExists }),
-      false,
-    );
+    assert.equal(shouldDirectSpawnNativeExe('C:\\bin\\claude.cmd', { platform: 'win32', exists: trueExists }), false);
+    assert.equal(shouldDirectSpawnNativeExe('C:\\bin\\claude.bat', { platform: 'win32', exists: trueExists }), false);
+    assert.equal(shouldDirectSpawnNativeExe('claude', { platform: 'win32', exists: trueExists }), false);
   });
 
   test('false on non-Windows platforms regardless of extension', () => {
