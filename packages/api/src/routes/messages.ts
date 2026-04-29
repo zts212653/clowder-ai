@@ -436,12 +436,12 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // Whisper / @mention use cat-specific isCatBusy; broadcast uses thread-wide isThreadBusy.
     const hasActive = (() => {
       if (!opts.invocationTracker) {
-        return opts.queueProcessor?.isThreadBusy(resolvedThreadId) ?? false;
+        return opts.queueProcessor?.isThreadBusy?.(resolvedThreadId) ?? false;
       }
       if (whisperVisibility === 'whisper' && primaryCat !== 'unknown') {
         return (
           opts.invocationTracker.has(resolvedThreadId, primaryCat) ||
-          (opts.queueProcessor?.isCatBusy(resolvedThreadId, primaryCat) ?? false)
+          (opts.queueProcessor?.isCatBusy?.(resolvedThreadId, primaryCat) ?? false)
         );
       }
       if (hasMentions) {
@@ -449,11 +449,11 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           (cat) =>
             cat !== 'unknown' &&
             (opts.invocationTracker!.has(resolvedThreadId, cat) ||
-              (opts.queueProcessor?.isCatBusy(resolvedThreadId, cat) ?? false)),
+              (opts.queueProcessor?.isCatBusy?.(resolvedThreadId, cat) ?? false)),
         );
       }
       return (
-        opts.invocationTracker.has(resolvedThreadId) || (opts.queueProcessor?.isThreadBusy(resolvedThreadId) ?? false)
+        opts.invocationTracker.has(resolvedThreadId) || (opts.queueProcessor?.isThreadBusy?.(resolvedThreadId) ?? false)
       );
     })();
     const mode = deliveryMode ?? (hasActive ? 'queue' : 'immediate');
