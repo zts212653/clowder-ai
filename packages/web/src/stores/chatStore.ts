@@ -996,13 +996,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return updated;
       };
 
-      const newInserts = serverMessages?.filter((sm) => !idSet.has(sm.id)).length ?? 0;
-
       if (threadId === state.currentThreadId) {
         return { messages: updateMsgs(state.messages) };
       }
       const existing = state.threadStates[threadId];
       if (!existing) return state;
+      const priorIds = new Set(existing.messages.map((m) => m.id));
+      const newInserts = serverMessages?.filter((sm) => !priorIds.has(sm.id)).length ?? 0;
       return {
         threadStates: {
           ...state.threadStates,
