@@ -711,7 +711,12 @@ export async function* routeSerial(
           if (effectiveMsg.type === 'tool_result') {
             const hasConfirmingContent = confirmsPostMessagePersistence(effectiveMsg.content);
             const completedToolName = consumePendingToolResult(pendingToolResults, effectiveMsg, hasConfirmingContent);
-            if (awaitingCallbackResult && completedToolName && isPostMessageToolName(completedToolName) && hasConfirmingContent) {
+            if (
+              awaitingCallbackResult &&
+              completedToolName &&
+              isPostMessageToolName(completedToolName) &&
+              hasConfirmingContent
+            ) {
               callbackPostConfirmed = true;
               awaitingCallbackResult = false;
             }
