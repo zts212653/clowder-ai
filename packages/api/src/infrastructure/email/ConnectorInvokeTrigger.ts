@@ -103,7 +103,8 @@ export class ConnectorInvokeTrigger {
     const priority = policy?.priority ?? 'normal';
 
     // F175: all priorities go through queue — no preemption bypass
-    if (invocationTracker.has(threadId, catId)) {
+    // #555: Also check queueProcessor.isCatBusy() to cover tracker gap (cat-specific).
+    if (invocationTracker.has(threadId, catId) || (this.opts.queueProcessor?.isCatBusy(threadId, catId) ?? false)) {
       return this.enqueueWhileActive(
         threadId,
         catId,

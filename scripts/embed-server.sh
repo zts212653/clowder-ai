@@ -38,6 +38,11 @@ if [ "$PLATFORM" = "Darwin" ] && [ "$ARCH" = "arm64" ]; then
     echo "  安装依赖: mlx + mlx-embeddings ..."
     pip install --quiet mlx mlx-embeddings fastapi uvicorn numpy
   fi
+  # #586: Also install fallback deps so sentence-transformers path works if MLX fails
+  if ! python3 -c "import sentence_transformers" 2>/dev/null; then
+    echo "  安装 fallback 依赖: sentence-transformers + torch ..."
+    pip install --quiet sentence-transformers torch
+  fi
 else
   if ! python3 -c "import sentence_transformers" 2>/dev/null; then
     echo "  安装依赖: sentence-transformers + torch ..."

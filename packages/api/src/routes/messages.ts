@@ -428,15 +428,30 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // Whisper → check target cat's slot (side-dispatch to idle cat)
     // Broadcast with explicit @mention → any target busy = queue (P1 review fix)
     // Broadcast without @mention → thread-level check (any active → queue)
+    // #555: Cover the gap between one invocation ending (tracker cleared) and the
+    // next starting from queue (tracker not yet registered).
+    // Whisper / @mention use cat-specific isCatBusy; broadcast uses thread-wide isThreadBusy.
     const hasActive = (() => {
-      if (!opts.invocationTracker) return false;
+      if (!opts.invocationTracker) {
+        return opts.queueProcessor?.isThreadBusy(resolvedThreadId) ?? false;
+      }
       if (whisperVisibility === 'whisper' && primaryCat !== 'unknown') {
-        return opts.invocationTracker.has(resolvedThreadId, primaryCat);
+        return (
+          opts.invocationTracker.has(resolvedThreadId, primaryCat) ||
+          (opts.queueProcessor?.isCatBusy(resolvedThreadId, primaryCat) ?? false)
+        );
       }
       if (hasMentions) {
-        return targetCats.some((cat) => cat !== 'unknown' && opts.invocationTracker!.has(resolvedThreadId, cat));
+        return targetCats.some(
+          (cat) =>
+            cat !== 'unknown' &&
+            (opts.invocationTracker!.has(resolvedThreadId, cat) ||
+              (opts.queueProcessor?.isCatBusy(resolvedThreadId, cat) ?? false)),
+        );
       }
-      return opts.invocationTracker.has(resolvedThreadId);
+      return (
+        opts.invocationTracker.has(resolvedThreadId) || (opts.queueProcessor?.isThreadBusy(resolvedThreadId) ?? false)
+      );
     })();
     const mode = deliveryMode ?? (hasActive ? 'queue' : 'immediate');
     log.debug({ threadId: resolvedThreadId, targetCats, intent: intent.intent, mode, hasActive }, 'Dispatch decision');

@@ -1042,6 +1042,7 @@ describe('ConnectorInvokeTrigger', () => {
       // so queued follow-ups stall forever. This test verifies the fix.
       const qpCalls = /** @type {Array<{threadId: string, catId: string, status: string}>} */ ([]);
       const mockQueueProcessor = /** @type {any} */ ({
+        isCatBusy: () => false,
         async onInvocationComplete(threadId, catId, status) {
           qpCalls.push({ threadId, catId, status });
         },
@@ -1060,6 +1061,7 @@ describe('ConnectorInvokeTrigger', () => {
     it('P1 fix: direct execution calls queueProcessor.onInvocationComplete on failure', async () => {
       const qpCalls = /** @type {Array<{threadId: string, catId: string, status: string}>} */ ([]);
       const mockQueueProcessor = /** @type {any} */ ({
+        isCatBusy: () => false,
         async onInvocationComplete(threadId, catId, status) {
           qpCalls.push({ threadId, catId, status });
         },
@@ -1093,7 +1095,7 @@ describe('ConnectorInvokeTrigger', () => {
       trackerMock.setActive('thread-1', 'user-1');
       const trigger = createTrigger();
       const policy = { priority: 'urgent', reason: 'github_ci_failure', suggestedSkill: 'merge-gate' };
-      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'CI failed', 'msg-urgent', undefined, policy);
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'CI failed', 'msg-skill', undefined, policy);
       await waitForTrigger();
 
       assert.strictEqual(routerMock.calls.length, 0, 'F175: urgent does not execute directly');
@@ -1160,6 +1162,30 @@ describe('ConnectorInvokeTrigger', () => {
       assert.ok(
         intent.promptTags.includes('skill:merge-gate'),
         `promptTags should include 'skill:merge-gate' but got: ${JSON.stringify(intent.promptTags)}`,
+      );
+    });
+
+    it('queued path preserves suggestedSkill in QueueEntry (#564 regression)', async () => {
+      trackerMock.setActive('thread-1', 'user-1');
+      const trigger = createTrigger();
+      const policy = { priority: 'urgent', reason: 'github_ci_failure', suggestedSkill: 'receive-review' };
+      trigger.trigger(
+        'thread-1',
+        /** @type {any} */ ('opus'),
+        'user-1',
+        'Review changes requested',
+        'msg-queue-skill',
+        undefined,
+        policy,
+      );
+      await waitForTrigger();
+
+      const entries = queue.list('thread-1', 'user-1');
+      assert.strictEqual(entries.length, 1, 'Should enqueue');
+      assert.strictEqual(
+        entries[0].suggestedSkill,
+        'receive-review',
+        'suggestedSkill must be preserved in queue entry',
       );
     });
   });

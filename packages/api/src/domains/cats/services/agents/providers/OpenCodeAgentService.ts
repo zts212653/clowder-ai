@@ -297,18 +297,24 @@ export class OpenCodeAgentService implements AgentService {
     // JSON event stream output
     args.push('--format', 'json');
 
-    // User-defined CLI args from the member editor.
-    // Each entry is passed as-is (e.g. "--variant low" → args.push('--variant', 'low')).
-    // No implicit mapping — the user writes the exact flags the CLI expects.
+    // User-defined CLI args from the member editor (#567).
+    // User args win when they overlap with system-injected flags.
+    const userParts: string[] = [];
     for (const arg of cliConfigArgs ?? []) {
-      const parts = arg.trim().split(/\s+/);
-      args.push(...parts);
+      userParts.push(...arg.trim().split(/\s+/));
     }
+    const userFlags = new Set(userParts.filter((p) => p.startsWith('-')));
+    const deduped: string[] = [];
+    for (let i = 0; i < args.length; i++) {
+      if (args[i].startsWith('-') && userFlags.has(args[i])) {
+        if (i + 1 < args.length && !args[i + 1].startsWith('-')) i++;
+        continue;
+      }
+      deduped.push(args[i]);
+    }
+    deduped.push(...userParts, prompt);
 
-    // Prompt as positional arg
-    args.push(prompt);
-
-    return args;
+    return deduped;
   }
 
   private buildEnv(callbackEnv?: Record<string, string>): Record<string, string | null> {

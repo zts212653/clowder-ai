@@ -232,6 +232,13 @@ export class QueueProcessor {
     return this.deps.queue.hasActiveOrQueuedAgentForCat(threadId, catId);
   }
 
+  /** #555: Cat-specific busy check — covers processingSlots + queue entries for this cat. */
+  isCatBusy(threadId: string, catId: string): boolean {
+    const startedAt = this.processingSlots.get(QueueProcessor.slotKey(threadId, catId));
+    if (startedAt !== undefined && Date.now() - startedAt < this.processingSlotTtlMs) return true;
+    return this.deps.queue.hasQueuedOrProcessingForCat(threadId, catId);
+  }
+
   /** F151: Check if thread has any queued or processing entries (used by delivery-batch-done signal). */
   isThreadBusy(threadId: string): boolean {
     if (this.deps.queue.hasQueuedForThread(threadId)) return true;

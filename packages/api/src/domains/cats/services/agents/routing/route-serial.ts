@@ -492,6 +492,9 @@ export async function* routeSerial(
       const collectedToolEvents: StoredToolEvent[] = [];
       // F148 OQ-2: Collect tool names for context eval signals
       const collectedToolNames: string[] = [];
+      // #573: Track confirmed cat_cafe_post_message callback persistence
+      let callbackPostConfirmed = false;
+      let awaitingCallbackResult = false;
       const structuredTargetCats = new Set<string>();
       // F060: Collect rich blocks emitted inline via system_info (not MCP buffer)
       const streamRichBlocks: import('@cat-cafe/shared').RichBlock[] = [];
@@ -633,6 +636,16 @@ export async function* routeSerial(
           // F148 OQ-2: Collect tool names for context eval
           if (effectiveMsg.type === 'tool_use' && effectiveMsg.toolName) {
             collectedToolNames.push(effectiveMsg.toolName);
+            if (effectiveMsg.toolName.endsWith('cat_cafe_post_message')) awaitingCallbackResult = true;
+          }
+          // #573: Confirm callback persistence via tool_result success
+          if (effectiveMsg.type === 'tool_result' && awaitingCallbackResult) {
+            awaitingCallbackResult = false;
+            if (
+              effectiveMsg.content?.includes('"status":"ok"') ||
+              effectiveMsg.content?.includes('"status":"duplicate"')
+            )
+              callbackPostConfirmed = true;
           }
 
           // F150: Fire-and-forget tool usage counter
@@ -1112,41 +1125,47 @@ export async function* routeSerial(
         // F061: Detect @co-creator mentions in agent response for browser notification
         mentionsUser = storedContent ? detectUserMention(storedContent) : false;
 
+        // #573: skip stream store only when callback confirmed persistence (not just invocation)
+        const callbackAlreadyStored = callbackPostConfirmed;
+
         // Store with actual mentions — degrade on failure to ensure done reaches frontend
         // (缅因猫 review P1-2: Redis failure must not block done yield)
         let storedMsgId: string | undefined;
         try {
           // #573: persist with the OUTER cat-cafe parentInvocationId (set by QueueProcessor)
-          // not the INNER CLI invocationId (claude/codex's own session UUID from
-          // invocation_created event). Socket broadcasts use parentInvocationId — if persisted
-          // record carries a different id, frontend creates two bubbles for one logical
-          // response (one from live stream broadcast, one from persisted-msg broadcast).
           const persistedInvocationId = options.parentInvocationId ?? ownInvocationId;
-          const storedMsg = await deps.messageStore.append({
-            userId,
-            catId,
-            content: storedContent,
-            mentions: a2aMentions,
-            origin: 'stream',
-            timestamp: storedTimestamp,
-            threadId,
-            ...(mentionsUser ? { mentionsUser } : {}),
-            ...(thinkingChunks.length > 0 ? { thinking: renderThinkingChunks(thinkingChunks) } : {}),
-            ...(firstMetadata ? { metadata: firstMetadata } : {}),
-            ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
-            ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
-            extra: {
-              ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
-              ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
-              ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
-            },
-          });
-          storedMsgId = storedMsg.id;
-          // F088-P3: Stash rich blocks for outbound delivery
-          if (options.persistenceContext && allRichBlocks.length > 0) {
-            options.persistenceContext.richBlocks = allRichBlocks;
+          if (!callbackAlreadyStored) {
+            const storedMsg = await deps.messageStore.append({
+              userId,
+              catId,
+              content: storedContent,
+              mentions: a2aMentions,
+              origin: 'stream',
+              timestamp: storedTimestamp,
+              threadId,
+              ...(mentionsUser ? { mentionsUser } : {}),
+              ...(thinkingChunks.length > 0 ? { thinking: renderThinkingChunks(thinkingChunks) } : {}),
+              ...(firstMetadata ? { metadata: firstMetadata } : {}),
+              ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
+              ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
+              extra: {
+                ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
+                ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
+                ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
+              },
+            });
+            storedMsgId = storedMsg.id;
+            // F088-P3: Stash rich blocks for outbound delivery
+            if (options.persistenceContext && allRichBlocks.length > 0) {
+              options.persistenceContext.richBlocks = allRichBlocks;
+            }
+          } else {
+            log.info(
+              { threadId, catId: catId as string },
+              'Stream store skipped — cat_cafe_post_message callback already persisted',
+            );
           }
-          // #80: Clean up draft only after successful append (guard: keep draft if append fails)
+          // #80: Clean up draft after message is persisted (either via append or callback)
           if (deps.draftStore && ownInvocationId) {
             deps.draftStore.delete(userId, threadId, ownInvocationId)?.catch?.(noop);
           }
@@ -1404,7 +1423,10 @@ export async function* routeSerial(
             content: JSON.stringify({
               type: 'silent_completion',
               detail: `${catConfig?.displayName ?? (catId as string)} completed without textual output.`,
-              toolCount: 0,
+              toolCount: collectedToolEvents.length,
+              provider: firstMetadata?.provider,
+              model: firstMetadata?.model,
+              invocationId: ownInvocationId,
             }),
             timestamp: Date.now(),
           } as AgentMessage;

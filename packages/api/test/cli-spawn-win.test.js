@@ -409,6 +409,137 @@ test('parseShimFile prefers .js match over extensionless when both exist', () =>
   }
 });
 
+test('parseShimFile resolves absolute %APPDATA% paths in .cmd shims (#284)', () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cli-spawn-win-appdata-shim-'));
+  const originalAppData = process.env.APPDATA;
+  const fakeAppData = join(tempRoot, 'appdata');
+
+  mkdirSync(join(fakeAppData, 'npm', 'node_modules', '@anthropic-ai', 'claude-code'), { recursive: true });
+
+  const cmdPath = join(tempRoot, 'claude.cmd');
+  const scriptPath = join(fakeAppData, 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
+
+  writeFileSync(
+    cmdPath,
+    '@IF EXIST "%~dp0\\node.exe" (\r\n  "%~dp0\\node.exe" "%APPDATA%\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js" %*\r\n) ELSE (\r\n  node "%APPDATA%\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js" %*\r\n)\r\n',
+    'utf8',
+  );
+  writeFileSync(scriptPath, 'console.log("ok");\n', 'utf8');
+
+  try {
+    process.env.APPDATA = fakeAppData;
+    const resolved = parseShimFile(cmdPath);
+    assert.equal(resolved, scriptPath);
+  } finally {
+    if (originalAppData === undefined) {
+      delete process.env.APPDATA;
+    } else {
+      process.env.APPDATA = originalAppData;
+    }
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('parseShimFile prefers relative %dp0 paths over absolute %APPDATA% paths', () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cli-spawn-win-prefer-rel-'));
+  const originalAppData = process.env.APPDATA;
+  const fakeAppData = join(tempRoot, 'appdata');
+
+  mkdirSync(join(tempRoot, 'node_modules', 'pkg'), { recursive: true });
+  mkdirSync(join(fakeAppData, 'npm', 'node_modules', 'pkg'), { recursive: true });
+
+  const cmdPath = join(tempRoot, 'test.cmd');
+  const relScript = join(tempRoot, 'node_modules', 'pkg', 'cli.js');
+  const absScript = join(fakeAppData, 'npm', 'node_modules', 'pkg', 'cli.js');
+
+  writeFileSync(
+    cmdPath,
+    '@"%dp0\\node_modules\\pkg\\cli.js" "%APPDATA%\\npm\\node_modules\\pkg\\cli.js" %*\r\n',
+    'utf8',
+  );
+  writeFileSync(relScript, 'console.log("rel");\n', 'utf8');
+  writeFileSync(absScript, 'console.log("abs");\n', 'utf8');
+
+  try {
+    process.env.APPDATA = fakeAppData;
+    const resolved = parseShimFile(cmdPath);
+    assert.equal(resolved, relScript, 'relative path should be preferred over absolute');
+  } finally {
+    if (originalAppData === undefined) {
+      delete process.env.APPDATA;
+    } else {
+      process.env.APPDATA = originalAppData;
+    }
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('parseShimFile resolves native .exe entrypoints when no .js or extensionless match (#234)', () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cli-spawn-win-exe-target-'));
+  mkdirSync(join(tempRoot, 'node_modules', '@anthropic-ai', 'claude-code', 'bin'), { recursive: true });
+
+  const cmdPath = join(tempRoot, 'claude.cmd');
+  const exePath = join(tempRoot, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe');
+
+  writeFileSync(
+    cmdPath,
+    '@IF EXIST "%~dp0\\node.exe" (\r\n  "%~dp0\\node.exe" "%~dp0\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe" %*\r\n)\r\n',
+    'utf8',
+  );
+  writeFileSync(exePath, 'MZ fake exe', 'utf8');
+
+  try {
+    const resolved = parseShimFile(cmdPath);
+    assert.equal(resolved, exePath, 'must resolve to claude.exe, not node.exe');
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('parseShimFile skips sibling node.exe and resolves claude.exe in native .exe pass (#247 regression)', () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cli-spawn-win-exe-node-sibling-'));
+  mkdirSync(join(tempRoot, 'node_modules', '@anthropic-ai', 'claude-code', 'bin'), { recursive: true });
+
+  const cmdPath = join(tempRoot, 'claude.cmd');
+  const fakeNodeExe = join(tempRoot, 'node.exe');
+  const claudeExe = join(tempRoot, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe');
+
+  writeFileSync(
+    cmdPath,
+    [
+      '@ECHO off',
+      'SETLOCAL',
+      'SET dp0=%~dp0',
+      'IF EXIST "%dp0%\\node.exe" (',
+      '  "%dp0%\\node.exe" "%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe" %*',
+      ') ELSE (',
+      '  "%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe" %*',
+      ')',
+    ].join('\r\n'),
+    'utf8',
+  );
+  writeFileSync(fakeNodeExe, 'MZ fake node', 'utf8');
+  writeFileSync(claudeExe, 'MZ fake claude', 'utf8');
+
+  try {
+    const resolved = parseShimFile(cmdPath);
+    assert.equal(resolved, claudeExe, 'must resolve to claude.exe, not node.exe');
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('resolveWindowsShimSpawn spawns native .exe directly instead of via node (#234)', () => {
+  const exePath = join(tmpdir(), 'claude-shim-exe-test.exe');
+
+  const resolved = resolveWindowsShimSpawn('claude', ['--json', '-p', 'hello'], exePath);
+
+  assert.deepEqual(resolved, {
+    command: exePath,
+    args: ['--json', '-p', 'hello'],
+  });
+});
+
 // --- resolveCmdShimScript full-path tests ---
 
 test('resolveCmdShimScript resolves full .cmd path directly without where fallback', () => {

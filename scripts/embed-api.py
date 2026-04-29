@@ -169,14 +169,27 @@ def _encode_mlx(texts: List[str]) -> np.ndarray:
     import mlx.core as mx
     from mlx_embeddings.utils import generate
 
-    # mlx-embeddings generate() returns an mlx array
+    # mlx-embeddings generate() may return an mlx array, or a BaseModelOutput
+    # wrapper containing text_embeds / last_hidden_state (#586).
     output = generate(mlx_model, mlx_tokenizer, texts)
+
+    # Unwrap BaseModelOutput if present (check value, not just attribute)
+    if hasattr(output, 'text_embeds') and output.text_embeds is not None:
+        output = output.text_embeds
+    elif hasattr(output, 'last_hidden_state') and output.last_hidden_state is not None:
+        output = output.last_hidden_state
 
     # Convert to numpy
     if hasattr(output, 'numpy'):
         raw = np.array(output)
-    else:
+    elif hasattr(output, 'tolist'):
         raw = np.array(output.tolist())
+    else:
+        raw = np.array(output)
+
+    # Pool 3D last_hidden_state (batch × seq × hidden) → 2D (batch × hidden)
+    if raw.ndim == 3:
+        raw = raw.mean(axis=1)
 
     # MRL truncation to target dim
     truncated = raw[:, :embed_dim]
@@ -258,6 +271,10 @@ def main():
         try:
             import torch
             from sentence_transformers import SentenceTransformer
+        except ImportError:
+            log.error("Fallback deps missing: pip install sentence-transformers torch")
+            return False
+        try:
             fallback_model = model_name.replace("mlx-community/", "").replace("-4bit-DWQ", "").replace("-4bit", "")
             if "Qwen3-Embedding" in fallback_model:
                 fallback_model = "Qwen/" + fallback_model

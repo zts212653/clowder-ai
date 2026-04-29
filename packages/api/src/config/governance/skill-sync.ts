@@ -33,11 +33,12 @@ async function ensureCorrectSymlink(linkPath: string, target: string): Promise<v
     const s = await lstat(linkPath);
     if (s.isSymbolicLink()) {
       const existing = await readlink(linkPath);
-      if (existing === target) return; // Already correct
-      await rm(linkPath); // Wrong target — remove and recreate
+      if (existing === target) return;
+      await rm(linkPath);
     } else {
-      // Non-symlink exists — skip (don't clobber real directories)
-      return;
+      // Non-symlink (real dir/file) at a managed skill path — replace it (#327).
+      // Without this, sync silently skips → governance re-offers → confirm loop.
+      await rm(linkPath, { recursive: true });
     }
   } catch {
     // Doesn't exist — fine, we'll create it

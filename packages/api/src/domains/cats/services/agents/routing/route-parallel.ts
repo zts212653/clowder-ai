@@ -921,7 +921,10 @@ export async function* routeParallel(
             content: JSON.stringify({
               type: 'silent_completion',
               detail: `${msg.catId} completed without textual output.`,
-              toolCount: 0,
+              toolCount: catToolEvents.get(msg.catId)?.length ?? 0,
+              provider: catMeta.get(msg.catId)?.provider,
+              model: catMeta.get(msg.catId)?.model,
+              invocationId: ownInvId,
             }),
             timestamp: Date.now(),
           } as AgentMessage;

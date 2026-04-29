@@ -116,7 +116,14 @@ export class DareAgentService implements AgentService {
     }
 
     const endpoint = this.resolveEndpoint(options?.callbackEnv);
-    const args = this.buildArgs(prompt, options?.workingDirectory, options?.sessionId, endpoint, effectiveModel);
+    const args = this.buildArgs(
+      prompt,
+      options?.workingDirectory,
+      options?.sessionId,
+      endpoint,
+      effectiveModel,
+      options?.cliConfigArgs,
+    );
     // P1-1: cwd must ALWAYS be darePath (where `python -m client` can find the module).
     // Thread's workingDirectory goes to --workspace instead.
     const cwd = this.darePath;
@@ -230,6 +237,7 @@ export class DareAgentService implements AgentService {
     sessionId?: string,
     endpoint?: string,
     model?: string,
+    cliConfigArgs?: readonly string[],
   ): string[] {
     const args = ['-m', 'client'];
     const effectiveModel = model ?? this.model;
@@ -252,6 +260,45 @@ export class DareAgentService implements AgentService {
       args.push('--session-id', sessionId);
     }
     args.push('--task', prompt, '--auto-approve', '--headless');
+
+    // User-defined CLI args from the member editor (#567).
+    // DARE: `python -m client <root> run <sub>` — protect Python launcher,
+    // dedup root and sub segments separately so flags land in the correct position.
+    const userParts: string[] = [];
+    for (const arg of cliConfigArgs ?? []) {
+      userParts.push(...arg.trim().split(/\s+/));
+    }
+    if (userParts.length > 0) {
+      const userFlags = new Set(userParts.filter((p) => p.startsWith('-')));
+      const dedup = (seg: string[]): string[] => {
+        const out: string[] = [];
+        for (let i = 0; i < seg.length; i++) {
+          if (seg[i].startsWith('-') && userFlags.has(seg[i])) {
+            if (i + 1 < seg.length && !seg[i + 1].startsWith('-')) i++;
+            continue;
+          }
+          out.push(seg[i]);
+        }
+        return out;
+      };
+      const runIdx = args.indexOf('run');
+      const rootSeg = args.slice(2, runIdx);
+      const subSeg = args.slice(runIdx + 1);
+      const dareRootFlags = new Set(['--adapter', '--model', '--endpoint', '--workspace']);
+      const userRoot: string[] = [];
+      const userSub: string[] = [];
+      for (let i = 0; i < userParts.length; i++) {
+        if (userParts[i].startsWith('-') && dareRootFlags.has(userParts[i])) {
+          userRoot.push(userParts[i]);
+          if (i + 1 < userParts.length && !userParts[i + 1].startsWith('-')) {
+            userRoot.push(userParts[++i]);
+          }
+        } else {
+          userSub.push(userParts[i]);
+        }
+      }
+      return ['-m', 'client', ...dedup(rootSeg), ...userRoot, 'run', ...dedup(subSeg), ...userSub];
+    }
 
     return args;
   }

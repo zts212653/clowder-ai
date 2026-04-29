@@ -260,9 +260,21 @@ export class CodexAgentService implements AgentService {
       : [];
     const catCafeMcpArgs = buildCatCafeMcpConfigArgs(options?.workingDirectory, options?.callbackEnv);
     const gitRepoArgs = buildGitRepoArgs(options?.workingDirectory);
-    // User-defined CLI args from the member editor — passed as-is, no implicit wrapping.
+    // User-defined CLI args from the member editor (#567) — passed as-is, no implicit wrapping.
     // Each entry is split by whitespace (e.g. "--config model_reasoning_effort=\"low\"").
     const userConfigArgs = (options?.cliConfigArgs ?? []).flatMap((arg) => arg.trim().split(/\s+/));
+    // Collect user --config keys so system-injected duplicates can be skipped.
+    const userConfigKeys = new Set<string>();
+    const userFlagSet = new Set<string>();
+    for (let i = 0; i < userConfigArgs.length; i++) {
+      const a = userConfigArgs[i];
+      if (a === '--config' && i + 1 < userConfigArgs.length) {
+        const key = userConfigArgs[i + 1].split('=')[0];
+        if (key) userConfigKeys.add(key);
+      } else if (a.startsWith('-')) {
+        userFlagSet.add(a);
+      }
+    }
 
     // Codex CLI deprecated OPENAI_BASE_URL env var.
     // Configure a custom model provider via --config model_providers.*
@@ -310,17 +322,36 @@ export class CodexAgentService implements AgentService {
     // 这是预期行为——新建会话即可获得 .git 写入权限。
     const promptArgs = ['--', effectivePrompt];
 
+    // Dedup: skip system --config/--flag pairs that the user explicitly overrides (#567).
+    const dedup = (src: string[]): string[] => {
+      const out: string[] = [];
+      for (let i = 0; i < src.length; i++) {
+        if (src[i] === '--config' && i + 1 < src.length) {
+          const key = src[i + 1].split('=')[0];
+          if (userConfigKeys.has(key)) {
+            i++;
+            continue;
+          }
+        } else if (src[i].startsWith('-') && userFlagSet.has(src[i])) {
+          if (i + 1 < src.length && !src[i + 1].startsWith('-')) i++;
+          continue;
+        }
+        out.push(src[i]);
+      }
+      return out;
+    };
+
     const args: string[] = options?.sessionId
       ? [
           'exec',
           'resume',
           options.sessionId,
           '--json',
-          ...modelArgs,
-          ...reasoningArgs,
-          ...contextWindowArgs,
-          ...approvalArgs,
-          ...customProviderArgs,
+          ...dedup(modelArgs),
+          ...dedup(reasoningArgs),
+          ...dedup(contextWindowArgs),
+          ...dedup(approvalArgs),
+          ...dedup(customProviderArgs),
           ...userConfigArgs,
           ...gitRepoArgs,
           ...catCafeMcpArgs,
@@ -330,15 +361,15 @@ export class CodexAgentService implements AgentService {
       : [
           'exec',
           '--json',
-          ...modelArgs,
-          ...reasoningArgs,
-          ...contextWindowArgs,
+          ...dedup(modelArgs),
+          ...dedup(reasoningArgs),
+          ...dedup(contextWindowArgs),
           '--sandbox',
           sandboxMode,
           '--add-dir',
           '.git',
-          ...approvalArgs,
-          ...customProviderArgs,
+          ...dedup(approvalArgs),
+          ...dedup(customProviderArgs),
           ...userConfigArgs,
           ...gitRepoArgs,
           ...catCafeMcpArgs,

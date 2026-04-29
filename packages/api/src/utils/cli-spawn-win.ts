@@ -44,7 +44,7 @@ export function extractBareName(command: string): string {
 
 /**
  * Try to extract an entry script from a .cmd shim file by parsing its content.
- * Handles standard npm shims that use %~dp0\..., %dp0\..., or %dp0%\... relative paths.
+ * Handles both relative (%~dp0, %dp0, %dp0%) and absolute (%APPDATA%, etc.) paths.
  * Prefers .js matches, falls back to extensionless entrypoints.
  */
 export function parseShimFile(cmdPath: string): string | null {
@@ -52,25 +52,39 @@ export function parseShimFile(cmdPath: string): string | null {
   const shimContent = readFileSync(cmdPath, 'utf-8');
   const shimDir = dirname(cmdPath);
 
-  // Match %~dp0\..., %dp0\..., and %dp0%\... relative paths
-  // Capture everything after the dp0 prefix up to a quote or line end
-  const matches = [...shimContent.matchAll(/%~?dp0%?\\([^"\r\n]+)/gi)];
+  const candidates: string[] = [];
 
-  // First pass: prefer paths ending in .js
-  for (const match of matches) {
+  // Relative paths: %~dp0\..., %dp0\..., %dp0%\...
+  for (const match of shimContent.matchAll(/%~?dp0%?\\([^"\r\n]+)/gi)) {
     const raw = match[1].replace(/\\/g, '/').replace(/\s+%\*.*$/, '');
-    if (/\.js$/i.test(raw)) {
-      const scriptPath = join(shimDir, raw);
-      if (existsSync(scriptPath)) return scriptPath;
+    candidates.push(join(shimDir, raw));
+  }
+
+  // Absolute paths via environment variables (#284): %APPDATA%\..., %LOCALAPPDATA%\..., etc.
+  for (const match of shimContent.matchAll(/%([A-Z_][A-Z0-9_]*)%\\([^"\r\n]+)/gi)) {
+    if (/^~?dp0$/i.test(match[1])) continue;
+    const envValue = process.env[match[1]];
+    if (!envValue) continue;
+    const raw = match[2].replace(/\\/g, '/').replace(/\s+%\*.*$/, '');
+    candidates.push(join(envValue, raw));
+  }
+
+  for (const scriptPath of candidates) {
+    if (/\.js$/i.test(scriptPath) && existsSync(scriptPath)) return scriptPath;
+  }
+
+  for (const scriptPath of candidates) {
+    const tail = scriptPath.split(/[/\\]/).pop() ?? '';
+    if (!/\.\w+$/i.test(tail) && !/^node(\.exe)?$/i.test(tail) && existsSync(scriptPath)) {
+      return scriptPath;
     }
   }
 
-  // Second pass: extensionless entrypoints (e.g. opencode-ai/bin/opencode)
-  for (const match of matches) {
-    const raw = match[1].replace(/\\/g, '/').replace(/\s+%\*.*$/, '');
-    if (!/\.\w+$/i.test(raw) && !/^node(\.exe)?$/i.test(raw.split('/').pop() ?? '')) {
-      const scriptPath = join(shimDir, raw);
-      if (existsSync(scriptPath)) return scriptPath;
+  // Third pass: native .exe entrypoints (e.g. claude.exe in Claude Code 2.1+)
+  for (const scriptPath of candidates) {
+    const tail = scriptPath.split(/[/\\]/).pop() ?? '';
+    if (/\.exe$/i.test(tail) && !/^node(\.exe)?$/i.test(tail) && existsSync(scriptPath)) {
+      return scriptPath;
     }
   }
 
@@ -158,6 +172,9 @@ export function resolveWindowsShimSpawn(
 ): WindowsShimSpawn | null {
   const shimScript = shimScriptOverride ?? resolveCmdShimScript(command);
   if (!shimScript) return null;
+  if (/\.exe$/i.test(shimScript)) {
+    return { command: shimScript, args: [...args] };
+  }
   return {
     command: process.execPath,
     args: [shimScript, ...args],

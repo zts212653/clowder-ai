@@ -43,6 +43,22 @@ describe('estimateTokens', () => {
     assert.ok(count > 0, 'should be positive');
     assert.ok(elapsed < 2000, `took ${elapsed}ms, expected < 2000ms`);
   });
+
+  // Regression for #591: js-tiktoken's default disallowedSpecial='all' would
+  // throw on any GPT control-token literal embedded in user text, taking down
+  // the entire routing pipeline. We use the encoder only for local budget
+  // estimation, so special tokens must be counted as regular text.
+  it('does not throw on text containing GPT special-token literals', () => {
+    const sentinel = `<|${'endoftext'}|>`;
+    const fimPrefix = `<|${'fim_prefix'}|>`;
+    const message = `Discussion of prompt injection: ${sentinel} and ${fimPrefix} should be safe to count.`;
+
+    let count = 0;
+    assert.doesNotThrow(() => {
+      count = estimateTokens(message);
+    }, 'estimateTokens must not throw on special-token literals');
+    assert.ok(count > 0, `expected positive token count, got ${count}`);
+  });
 });
 
 describe('estimateTokensFromMessages', () => {
@@ -88,5 +104,23 @@ describe('estimateTokensFromMessages', () => {
     const count = estimateTokensFromMessages(messages, 5000);
     const textOnly = estimateTokens('text content');
     assert.equal(count, textOnly);
+  });
+
+  // Regression for #591: a single message containing a GPT control-token
+  // literal would crash assembleIncrementalContext for an entire thread.
+  it('does not throw when a message contains GPT special-token literals', () => {
+    const sentinel = `<|${'endoftext'}|>`;
+    const messages = [
+      { content: `Hello ${sentinel} world` },
+      {
+        content: '',
+        contentBlocks: [{ type: 'text', text: `Block with ${sentinel}` }],
+      },
+    ];
+    let count = 0;
+    assert.doesNotThrow(() => {
+      count = estimateTokensFromMessages(messages, 5000);
+    }, 'estimateTokensFromMessages must not throw on special-token literals');
+    assert.ok(count > 0, `expected positive token count, got ${count}`);
   });
 });

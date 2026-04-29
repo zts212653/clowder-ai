@@ -122,7 +122,7 @@ describe('transformAcpEvent', () => {
     assert.equal(result.toolName, undefined);
   });
 
-  it('tool_call_update → tool_use (incremental)', () => {
+  it('tool_call_update → tool_use (Gemini CLI emits updates without initial tool_call)', () => {
     const update = {
       sessionId: 's1',
       update: {

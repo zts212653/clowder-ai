@@ -18,13 +18,19 @@ function getEncoder() {
   return encoder;
 }
 
+// js-tiktoken's encode() defaults to disallowedSpecial='all', which throws on
+// any GPT control-token literal (e.g. <|endoftext|>) embedded in user text.
+// Since we only use the encoder for local budget estimation, treat all special
+// tokens as regular text. See issue #591.
+const ALLOW_ALL_SPECIAL = 'all' as const;
+
 /**
  * Estimate token count for a text string.
  * Returns 0 for empty/falsy input.
  */
 export function estimateTokens(text: string): number {
   if (!text) return 0;
-  return getEncoder().encode(text).length;
+  return getEncoder().encode(text, ALLOW_ALL_SPECIAL).length;
 }
 
 interface MessageLike {
@@ -44,7 +50,7 @@ export function estimateTokensFromMessages(messages: MessageLike[], maxContentLe
     // Primary content field
     if (msg.content) {
       const truncated = msg.content.length > maxContentLength ? msg.content.slice(0, maxContentLength) : msg.content;
-      total += enc.encode(truncated).length;
+      total += enc.encode(truncated, ALLOW_ALL_SPECIAL).length;
     }
 
     // ContentBlocks — text only
@@ -52,7 +58,7 @@ export function estimateTokensFromMessages(messages: MessageLike[], maxContentLe
       for (const block of msg.contentBlocks) {
         if (block.type === 'text' && block.text) {
           const truncated = block.text.length > maxContentLength ? block.text.slice(0, maxContentLength) : block.text;
-          total += enc.encode(truncated).length;
+          total += enc.encode(truncated, ALLOW_ALL_SPECIAL).length;
         }
       }
     }
