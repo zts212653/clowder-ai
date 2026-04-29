@@ -611,6 +611,28 @@ describe('InvocationQueue', () => {
     assert.deepEqual(autoEntries.map((entry) => entry.targetCats[0]).sort(), ['codex', 'opencode']);
   });
 
+  it('hasQueuedOrProcessingForCat treats old queued autoExecute entries as busy', () => {
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'stale but still dispatchable',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+
+    const listed = queue.list('t1', 'system');
+    listed[0].createdAt = Date.now() - InvocationQueue.STALE_QUEUED_THRESHOLD_MS - 1;
+
+    assert.equal(
+      queue.hasQueuedOrProcessingForCat('t1', 'codex'),
+      true,
+      'busy check must match listAutoExecute: old queued autoExecute work is still dispatchable',
+    );
+  });
+
   // ── hasActiveOrQueuedAgentForCat: processing + queued entries block, regardless of queued age ──
 
   it('hasActiveOrQueuedAgentForCat returns true for fresh queued entry (cross-path dedup)', () => {
