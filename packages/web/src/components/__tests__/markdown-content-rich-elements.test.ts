@@ -89,6 +89,6 @@ describe('MarkdownContent h4-h6 headings', () => {
   it('renders h6 with muted color', () => {
     const html = render('###### Heading 6');
     expect(html).toContain('<h6');
-    expect(html).toContain('text-gray-500');
+    expect(html).toContain('text-cafe-secondary');
   });
 });

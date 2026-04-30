@@ -121,7 +121,7 @@ function readMcpJson(mcpJsonPath: string): Record<string, McpJsonEntry> {
  *   3. User project servers — from userProjectRoot/.mcp.json (lowest, additive)
  *
  * @param projectRoot — monorepo root
- * @param whitelist — server names from cat-config.json mcpWhitelist
+ * @param whitelist — server names from cat-catalog.json mcpWhitelist
  * @param userProjectRoot — user's project directory (reads .mcp.json, merges all servers)
  * @returns AcpMcpServer[] ready for newSession()
  * @throws when whitelist is non-empty but zero servers could be resolved

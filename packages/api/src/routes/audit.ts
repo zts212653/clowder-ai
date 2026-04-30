@@ -12,6 +12,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import { canAccessThread } from '../domains/guides/guide-state-access.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
 export interface AuditRoutesOptions {
@@ -36,7 +37,7 @@ export const auditRoutes: FastifyPluginAsync<AuditRoutesOptions> = async (app, o
       return { error: 'Thread not found' };
     }
 
-    if (thread.createdBy !== userId) {
+    if (!canAccessThread(thread, userId)) {
       reply.status(403);
       return { error: 'Access denied' };
     }

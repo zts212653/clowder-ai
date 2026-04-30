@@ -128,6 +128,32 @@ skills:
     sop_step: null
     merged_from: null
 
+  # ── Console 前端开发 ──
+  console-dev:
+    description: >
+      Console 前端开发流程管控：设计语言对齐 → 效果图确认 → Token 合规开发 → 视觉自检。
+      Use when: 开发/修改 Console 前端页面、组件、样式；修复 UI 不一致问题；新增页面或重构布局。
+      Not for: 纯后端 API 开发、纯逻辑/hook 重构（无视觉变化）、游戏模式 UI（werewolf-cute 有独立 token）。
+      Output: 符合 Design System 规范的前端代码 + 视觉自检通过。
+    triggers:
+      - "console"
+      - "前端"
+      - "UI"
+      - "页面"
+      - "样式"
+      - "布局"
+      - "设计"
+      - "border"
+      - "框线"
+    not_for:
+      - "纯后端 API"
+      - "纯 hook 重构"
+      - "游戏模式 UI"
+    output: "Design System compliant frontend code + visual self-check pass"
+    next: ["worktree", "tdd", "quality-gate"]
+    sop_step: null
+    merged_from: null
+
   # ── 计划编写 ──
   writing-plans:
     description: >
@@ -900,8 +926,10 @@ sop_navigation:
     hard_rules:
       - "worktree 开之前必须 main 双向同步 (ahead=0 behind=0)"
       - "Redis 只用 6398，禁碰 6399"
+      - "有视觉变化的前端改动必须先过 console-dev 的设计对齐步骤"
     pitfalls:
       - "跳过 Design Gate 直接写代码"
+      - "前端组件不查 Design System 直接写样式"
       - "压缩后忘了当前在做什么"
   quality_gate:
     suggested_skill: quality-gate

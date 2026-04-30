@@ -146,6 +146,10 @@ docs/discussions/**/sources/*.pdf
 # Playwright MCP cache
 .playwright-mcp/
 
+# Playwright / test runner output
+test-results/
+test-cli-raw-archive/
+
 # SQLite runtime databases (Hindsight evidence store + World Engine)
 evidence.sqlite
 evidence.sqlite-shm

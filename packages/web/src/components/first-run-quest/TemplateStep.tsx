@@ -45,17 +45,17 @@ export function TemplateStep({ onSelect }: TemplateStepProps) {
   }, []);
 
   if (loading) {
-    return <p className="py-8 text-center text-sm text-gray-400">加载角色模板中...</p>;
+    return <p className="py-8 text-center text-sm text-cafe-muted">加载角色模板中...</p>;
   }
 
   if (templates.length === 0) {
-    return <p className="py-8 text-center text-sm text-gray-400">暂无可用角色模板</p>;
+    return <p className="py-8 text-center text-sm text-cafe-muted">暂无可用角色模板</p>;
   }
 
   return (
     <div>
-      <h4 className="mb-1 text-sm font-semibold text-gray-700">选择一个角色模板</h4>
-      <p className="mb-4 text-xs text-gray-500">每只猫猫都有自己的性格和特长，选一只你喜欢的！</p>
+      <h4 className="mb-1 text-sm font-semibold text-cafe-secondary">选择一个角色模板</h4>
+      <p className="mb-4 text-xs text-cafe-muted">每只猫猫都有自己的性格和特长，选一只你喜欢的！</p>
       <div className="grid max-h-[50vh] gap-3 overflow-y-auto pr-1">
         {templates.map((t) => (
           <button
@@ -67,8 +67,8 @@ export function TemplateStep({ onSelect }: TemplateStepProps) {
             }}
             className={`flex items-start gap-3 rounded-xl border p-3 text-left transition ${
               selected === t.id
-                ? 'border-amber-400 bg-amber-50 shadow-sm'
-                : 'border-gray-200 bg-white hover:border-amber-200 hover:bg-amber-50/30'
+                ? 'border-conn-amber-ring bg-conn-amber-bg shadow-sm'
+                : 'border-[var(--console-border-soft)] bg-cafe-surface hover:border-conn-amber-ring hover:bg-conn-amber-bg/30'
             }`}
           >
             <div
@@ -79,11 +79,11 @@ export function TemplateStep({ onSelect }: TemplateStepProps) {
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <span className="font-semibold text-gray-900">{t.name}</span>
-                {t.nickname && <span className="text-xs text-gray-400">{t.nickname}</span>}
+                <span className="font-semibold text-cafe">{t.name}</span>
+                {t.nickname && <span className="text-xs text-cafe-muted">{t.nickname}</span>}
               </div>
-              <p className="mt-0.5 line-clamp-1 text-xs text-gray-500">{t.roleDescription}</p>
-              <p className="mt-0.5 line-clamp-1 text-xs text-gray-400">{t.personality}</p>
+              <p className="mt-0.5 line-clamp-1 text-xs text-cafe-muted">{t.roleDescription}</p>
+              <p className="mt-0.5 line-clamp-1 text-xs text-cafe-muted">{t.personality}</p>
             </div>
           </button>
         ))}

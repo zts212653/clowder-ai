@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- Next config stays CommonJS for next-pwa interop. */
 const withPWA = require('@ducanh2912/next-pwa').default;
 
 const enablePwaInDev = process.env.ENABLE_PWA_IN_DEV === '1';
@@ -28,6 +29,7 @@ const apiBaseUrl = resolveApiBaseUrl();
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  transpilePackages: ['@xterm/xterm'],
   experimental: { proxyTimeout: 120_000 },
   // 允许 Tailscale 网段设备访问 dev server 的 /_next/* 资源
   allowedDevOrigins: ['100.0.0.0/8'],
@@ -35,7 +37,9 @@ const nextConfig = {
     // F156 D-3: Strict CSP baseline.
     // Next.js hydration requires 'unsafe-inline' for scripts — nonce-based CSP
     // needs middleware (future work). Blocking 'unsafe-eval' prevents eval() injection.
-    const csp = ["frame-ancestors 'none'", "script-src 'self' 'unsafe-inline'", "object-src 'none'"].join('; ');
+    const isDev = process.env.NODE_ENV === 'development';
+    const scriptSrc = isDev ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'" : "script-src 'self' 'unsafe-inline'";
+    const csp = ["frame-ancestors 'none'", scriptSrc, "object-src 'none'"].join('; ');
     return [
       {
         source: '/:path*',
@@ -47,6 +51,10 @@ const nextConfig = {
     ];
   },
   webpack: (config) => {
+    // Keep pnpm symlink paths inside packages/web so Next's CSS handling sees
+    // node_modules styles (for example @xterm/xterm/css/xterm.css) as in-root
+    // dependencies during next dev.
+    config.resolve.symlinks = false;
     // Suppress onnxruntime-web "Critical dependency" warnings — dynamic require() in
     // minified bundle is expected and cannot be statically analyzed by webpack.
     config.ignoreWarnings = [{ module: /onnxruntime-web/ }];

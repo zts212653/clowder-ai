@@ -33,12 +33,12 @@ export function ImagePreview({ files, onRemove }: ImagePreviewProps) {
             <img
               src={urls[i]}
               alt={file.name}
-              className="w-16 h-16 object-cover rounded-lg border border-cafe cursor-pointer hover:opacity-90 transition-opacity"
+              className="w-16 h-16 object-cover rounded-lg border border-[var(--console-border-soft)] cursor-pointer hover:opacity-90 transition-opacity"
               onClick={() => setLightboxIdx(i)}
             />
             <button
               onClick={() => onRemove(i)}
-              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[var(--color-conn-red-text)] text-[var(--cafe-surface)] text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
               title={`移除 ${file.name}`}
               aria-label={`Remove ${file.name}`}
             >

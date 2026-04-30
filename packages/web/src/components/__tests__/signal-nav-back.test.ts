@@ -106,8 +106,8 @@ describe('SignalNav back button', () => {
     });
 
     const links = Array.from(container.querySelectorAll('a'));
-    const signalsLink = links.find((a) => a.textContent === 'Signals');
-    const sourcesLink = links.find((a) => a.textContent === 'Sources');
+    const signalsLink = links.find((a) => a.textContent === '收件箱');
+    const sourcesLink = links.find((a) => a.textContent === '信号源');
 
     expect(signalsLink?.getAttribute('href')).toContain('?from=thread_abc');
     expect(sourcesLink?.getAttribute('href')).toContain('?from=thread_abc');

@@ -47,7 +47,7 @@ export function BatchActionBar({ selectedIds, onClear, onComplete }: BatchAction
         type="button"
         disabled={busy}
         onClick={() => void doBatch('update', { status: 'read' })}
-        className="rounded border border-cafe px-2 py-1 hover:bg-cafe-surface-elevated disabled:opacity-50"
+        className="rounded border border-[var(--console-border-soft)] px-2 py-1 hover:bg-cafe-surface-elevated disabled:opacity-50"
       >
         标记已读
       </button>
@@ -55,7 +55,7 @@ export function BatchActionBar({ selectedIds, onClear, onComplete }: BatchAction
         type="button"
         disabled={busy}
         onClick={() => void doBatch('update', { status: 'archived' })}
-        className="rounded border border-cafe px-2 py-1 hover:bg-cafe-surface-elevated disabled:opacity-50"
+        className="rounded border border-[var(--console-border-soft)] px-2 py-1 hover:bg-cafe-surface-elevated disabled:opacity-50"
       >
         归档
       </button>
@@ -63,7 +63,7 @@ export function BatchActionBar({ selectedIds, onClear, onComplete }: BatchAction
         type="button"
         disabled={busy}
         onClick={() => setShowTagInput((v) => !v)}
-        className="rounded border border-cafe px-2 py-1 hover:bg-cafe-surface-elevated disabled:opacity-50"
+        className="rounded border border-[var(--console-border-soft)] px-2 py-1 hover:bg-cafe-surface-elevated disabled:opacity-50"
       >
         加标签
       </button>
@@ -71,7 +71,7 @@ export function BatchActionBar({ selectedIds, onClear, onComplete }: BatchAction
         type="button"
         disabled={busy}
         onClick={() => void doBatch('delete')}
-        className="rounded border border-red-200 px-2 py-1 text-red-600 hover:bg-red-50 disabled:opacity-50"
+        className="rounded border border-conn-red-ring px-2 py-1 text-conn-red-text hover:bg-conn-red-bg disabled:opacity-50"
       >
         删除
       </button>
@@ -87,7 +87,7 @@ export function BatchActionBar({ selectedIds, onClear, onComplete }: BatchAction
               }
             }}
             placeholder="标签名..."
-            className="rounded border border-cafe px-2 py-1 text-xs"
+            className="rounded border border-[var(--console-border-soft)] px-2 py-1 text-xs"
           />
           <button
             type="button"

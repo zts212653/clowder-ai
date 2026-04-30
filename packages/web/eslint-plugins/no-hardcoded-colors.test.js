@@ -27,6 +27,10 @@ tester.run('no-hardcoded-colors', rule, {
     { code: '<div style={{ color: "var(--cafe-text)" }} />' },
     // Non-JSX strings with colors (not in className/style)
     { code: 'const hex = "#FF0000";' },
+    // CSS variable accent/gradient/outline are allowed
+    { code: '<input className="accent-[var(--conn-emerald-text)]" />' },
+    { code: '<div className="from-[var(--cafe-accent)] to-[var(--cafe-accent-hover)]" />' },
+    { code: '<button className="focus:outline-[var(--conn-blue-text)]" />' },
   ],
 
   invalid: [
@@ -104,6 +108,26 @@ tester.run('no-hardcoded-colors', rule, {
     {
       code: '<div className={x ? `bg-white ${y}` : "bg-black"} />',
       errors: [{ messageId: 'noRawTailwindColor' }, { messageId: 'noRawTailwindColor' }],
+    },
+    // Accent with hardcoded hex
+    {
+      code: '<input className="accent-[#77A777]" />',
+      errors: [{ messageId: 'noArbitraryColor' }],
+    },
+    // Accent with raw Tailwind color
+    {
+      code: '<input className="accent-yellow-500" />',
+      errors: [{ messageId: 'noRawTailwindColor' }],
+    },
+    // Gradient from/to with raw colors
+    {
+      code: '<div className="from-amber-500 to-orange-500" />',
+      errors: [{ messageId: 'noRawTailwindColor' }, { messageId: 'noRawTailwindColor' }],
+    },
+    // Focus outline with raw color
+    {
+      code: '<button className="focus:outline-blue-400" />',
+      errors: [{ messageId: 'noRawTailwindColor' }],
     },
   ],
 });

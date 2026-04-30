@@ -88,7 +88,7 @@ describe('TaskBoardPanel', () => {
     mockTasks = makeTasks();
     const { TaskBoardPanel } = await import('../TaskBoardPanel');
     const html = renderToStaticMarkup(<TaskBoardPanel />);
-    expect(html).toContain('bg-red-50');
+    expect(html).toContain('bg-conn-red-bg');
   });
 
   it('shows empty state with guidance when no tasks', async () => {

@@ -16,7 +16,7 @@ function TaskStatusIcon({ status }: { status: 'completed' | 'in_progress' | 'pen
   if (status === 'completed') {
     return (
       <svg
-        className="w-3.5 h-3.5 text-emerald-600"
+        className="w-3.5 h-3.5 text-conn-emerald-text"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -29,7 +29,7 @@ function TaskStatusIcon({ status }: { status: 'completed' | 'in_progress' | 'pen
   if (status === 'in_progress') {
     return (
       <svg
-        className="w-3.5 h-3.5 text-blue-600 animate-spin"
+        className="w-3.5 h-3.5 text-[var(--color-cafe-accent)] animate-spin"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -70,11 +70,11 @@ function PlanCard({ catId, threadId, inv }: { catId: string; threadId: string; i
     status === 'completed' ? '已完成' : status === 'interrupted' ? '已中断' : status === 'running' ? '运行中' : null;
   const statusTone =
     status === 'completed'
-      ? 'bg-green-100 text-green-700'
+      ? 'bg-conn-emerald-bg text-conn-emerald-text'
       : status === 'interrupted'
-        ? 'bg-rose-100 text-rose-700'
+        ? 'bg-conn-red-bg text-conn-red-text'
         : status === 'running'
-          ? 'bg-blue-100 text-blue-700'
+          ? 'bg-[var(--color-cafe-accent)]/10 text-[var(--color-cafe-accent)]'
           : 'bg-cafe-surface-elevated text-cafe-secondary';
 
   return (
@@ -93,7 +93,7 @@ function PlanCard({ catId, threadId, inv }: { catId: string; threadId: string; i
         </div>
         {status === 'interrupted' && (
           <button
-            className="text-[10px] px-2 py-0.5 rounded-full border border-cafe hover:border-gray-400 hover:bg-cafe-surface-elevated transition-colors"
+            className="text-[10px] px-2 py-0.5 rounded-full border border-[var(--console-border-soft)] hover:border-cafe hover:bg-cafe-surface-elevated transition-colors"
             onClick={async () => {
               if (await confirm({ title: '继续任务', message: '确认继续上次任务？' })) {
                 void handleSend(buildContinueMessage(catId, tp), undefined, threadId);
@@ -120,9 +120,9 @@ function PlanCard({ catId, threadId, inv }: { catId: string; threadId: string; i
           );
         })}
       </div>
-      <div className="mt-1 ml-3.5 h-1 bg-gray-200 rounded-full overflow-hidden">
+      <div className="mt-1 ml-3.5 h-1 bg-[var(--console-pill-bg)] rounded-full overflow-hidden">
         <div
-          className="h-full bg-green-500 rounded-full transition-all duration-300"
+          className="h-full bg-[var(--color-conn-emerald-text)] rounded-full transition-all duration-300"
           style={{ width: `${Math.round((completed / tasks.length) * 100)}%` }}
         />
       </div>
@@ -163,9 +163,9 @@ export function PlanBoardPanel({ threadId, catInvocations }: PlanBoardPanelProps
   if (totalCats === 0) return null;
 
   return (
-    <section className="rounded-lg border border-cafe bg-cafe-surface-elevated/70 p-3">
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-xs font-semibold text-cafe-secondary">猫猫祟祟 ({totalCats})</h3>
+    <section className="rounded-[10px] bg-[var(--console-card-bg)] p-2.5">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-[11px] font-bold text-cafe-secondary">猫猫祟祟 ({totalCats})</h3>
       </div>
 
       {/* Running cats */}
@@ -180,10 +180,10 @@ export function PlanBoardPanel({ threadId, catInvocations }: PlanBoardPanelProps
 
       {/* Completed cats — folded */}
       {completedCats.length > 0 && (
-        <div className="mt-2 border-t border-cafe pt-2">
+        <div className="mt-2 border-t border-[var(--console-border-soft)] pt-2">
           <button
             onClick={() => setCompletedOpen((v) => !v)}
-            className="w-full flex items-center justify-between text-[10px] text-cafe-secondary hover:text-cafe-secondary"
+            className="flex w-full items-center justify-between text-[10px] text-cafe-secondary hover:text-cafe"
           >
             <span>已完成 ({completedCats.length})</span>
             <span>{completedOpen ? '▲' : '▼'}</span>

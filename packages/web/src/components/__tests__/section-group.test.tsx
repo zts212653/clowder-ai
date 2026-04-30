@@ -79,7 +79,6 @@ describe('SectionGroup pin button', () => {
     expect(onToggle).not.toHaveBeenCalled();
   });
 
-  // Cloud P2: auto-repeat keydown should not re-trigger pin toggle
   it('ignores repeated Space keydown events (key held down)', () => {
     const onPin = vi.fn();
     const { container } = renderToContainer(
@@ -96,12 +95,82 @@ describe('SectionGroup pin button', () => {
     );
     const pinBtn = container.querySelector('[data-testid="project-pin-btn"]')!;
     act(() => {
-      // First press — should fire
       pinBtn.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, repeat: false }));
-      // Auto-repeat events — should be ignored
       pinBtn.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, repeat: true }));
       pinBtn.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, repeat: true }));
     });
     expect(onPin).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SectionGroup toggle button accessibility', () => {
+  it('toggle button is keyboard-focusable and has aria-expanded', () => {
+    const { container } = renderToContainer(
+      <SectionGroup label="Test" count={2} isCollapsed={false} onToggle={() => {}}>
+        <div>child</div>
+      </SectionGroup>,
+    );
+    const toggleBtn = container.querySelector('button[aria-expanded]') as HTMLButtonElement;
+    expect(toggleBtn).toBeTruthy();
+    expect(toggleBtn.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('toggle button aria-expanded reflects collapsed state', () => {
+    const { container } = renderToContainer(
+      <SectionGroup label="Test" count={2} isCollapsed={true} onToggle={() => {}}>
+        <div>child</div>
+      </SectionGroup>,
+    );
+    const toggleBtn = container.querySelector('button[aria-expanded]') as HTMLButtonElement;
+    expect(toggleBtn.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('fires onToggle when Enter is pressed on toggle button', () => {
+    const onToggle = vi.fn();
+    const { container } = renderToContainer(
+      <SectionGroup label="Test" count={2} isCollapsed={false} onToggle={onToggle}>
+        <div>child</div>
+      </SectionGroup>,
+    );
+    const toggleBtn = container.querySelector('button[aria-expanded]') as HTMLButtonElement;
+    act(() => {
+      toggleBtn.click();
+    });
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it('action buttons are siblings of toggle, not children (no button-in-button)', () => {
+    const { container } = renderToContainer(
+      <SectionGroup
+        label="Test"
+        count={2}
+        isCollapsed={false}
+        onToggle={() => {}}
+        onToggleProjectPin={() => {}}
+        isProjectPinned={false}
+        onQuickCreate={() => {}}
+      >
+        <div>child</div>
+      </SectionGroup>,
+    );
+    const toggleBtn = container.querySelector('button[aria-expanded]')!;
+    const nestedInteractive = toggleBtn.querySelectorAll('[role="button"], button, input, select, textarea');
+    expect(nestedInteractive.length).toBe(0);
+  });
+
+  it('quick-create click does not trigger onToggle', () => {
+    const onToggle = vi.fn();
+    const onCreate = vi.fn();
+    const { container } = renderToContainer(
+      <SectionGroup label="Test" count={2} isCollapsed={false} onToggle={onToggle} onQuickCreate={onCreate}>
+        <div>child</div>
+      </SectionGroup>,
+    );
+    const createBtn = container.querySelector('[data-testid="quick-create-btn"]')!;
+    act(() => {
+      createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    expect(onToggle).not.toHaveBeenCalled();
   });
 });

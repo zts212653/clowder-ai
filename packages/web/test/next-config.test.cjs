@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- Node test stays CommonJS to mirror next.config loading. */
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -5,7 +6,7 @@ const { describe, it } = require('node:test');
 
 const configPath = path.resolve(__dirname, '../next.config.js');
 const packageJsonPath = path.resolve(__dirname, '../package.json');
-const ENV_KEYS = ['NEXT_PUBLIC_API_URL', 'API_SERVER_PORT', 'FRONTEND_PORT'];
+const ENV_KEYS = ['NEXT_PUBLIC_API_URL', 'API_SERVER_PORT', 'FRONTEND_PORT', 'NODE_ENV'];
 
 function withEnv(overrides, run) {
   const snapshot = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
@@ -59,6 +60,26 @@ describe('next.config rewrites', () => {
     await withEnv({ FRONTEND_PORT: '5000' }, async (config) => {
       const rewrites = await config.rewrites();
       assert.equal(rewrites[0].destination, 'http://localhost:5001/api/:path*');
+    });
+  });
+
+  it('includes unsafe-eval in dev CSP so Next HMR can boot', async () => {
+    await withEnv({ NODE_ENV: 'development' }, async (config) => {
+      const headers = await config.headers();
+      const catchAll = headers.find((entry) => entry.source === '/:path*');
+      const csp = catchAll.headers.find((header) => header.key === 'Content-Security-Policy');
+
+      assert.ok(csp.value.includes("'unsafe-eval'"), `dev CSP must allow unsafe-eval, got: ${csp.value}`);
+    });
+  });
+
+  it('keeps unsafe-eval out of non-dev CSP', async () => {
+    await withEnv({ NODE_ENV: 'production' }, async (config) => {
+      const headers = await config.headers();
+      const catchAll = headers.find((entry) => entry.source === '/:path*');
+      const csp = catchAll.headers.find((header) => header.key === 'Content-Security-Policy');
+
+      assert.ok(!csp.value.includes("'unsafe-eval'"), `prod CSP must not allow unsafe-eval, got: ${csp.value}`);
     });
   });
 

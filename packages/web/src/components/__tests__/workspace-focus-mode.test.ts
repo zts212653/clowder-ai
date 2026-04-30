@@ -1,20 +1,10 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /* ---- Structural guard: every focusable pane must have an entry trigger ---- */
-describe('WorkspacePanel focus entry coverage', () => {
-  const PANE_TYPES = ['browser', 'file', 'terminal', 'git', 'changes'] as const;
-  const src = fs.readFileSync(path.resolve(__dirname, '../WorkspacePanel.tsx'), 'utf-8');
-
-  for (const pane of PANE_TYPES) {
-    it(`has setFocusedPane('${pane}') entry trigger`, () => {
-      expect(src).toContain(`setFocusedPane('${pane}')`);
-    });
-  }
-});
+/* Moved to a separate node-environment test to avoid jsdom/node incompatibility.
+   The guard is still enforced in workspace-focus-mode-structural.test.ts */
 
 /* ---- Mock heavy child components ---- */
 vi.mock('@/components/workspace/BrowserPanel', () => ({

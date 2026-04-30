@@ -7,7 +7,7 @@ import type { CatStrategyEntry } from './hub-strategy-types';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-lg border border-cafe bg-cafe-surface-elevated/70 p-3">
+    <section className="rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface-elevated/70 p-3">
       <h3 className="text-xs font-semibold text-cafe-secondary mb-2">{title}</h3>
       {children}
     </section>
@@ -38,7 +38,7 @@ export function HubStrategyTab() {
   }, [fetchData]);
 
   if (error) {
-    return <p className="text-sm text-red-500 bg-red-50 rounded-lg px-3 py-2">{error}</p>;
+    return <p className="text-sm text-conn-red-text bg-conn-red-bg rounded-lg px-3 py-2">{error}</p>;
   }
   if (!cats) {
     return <p className="text-sm text-cafe-muted">加载中...</p>;

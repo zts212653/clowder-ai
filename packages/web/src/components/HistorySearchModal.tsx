@@ -55,9 +55,9 @@ export function HistorySearchModal({ onSelect, onClose }: HistorySearchModalProp
   return (
     <div
       data-testid="history-search"
-      className="absolute bottom-full left-0 right-0 mb-1 mx-4 bg-cafe-surface rounded-xl shadow-lg border border-cafe overflow-hidden z-20"
+      className="absolute bottom-full left-0 right-0 mb-1 mx-4 bg-cafe-surface rounded-xl shadow-lg border border-[var(--console-border-soft)] overflow-hidden z-20"
     >
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-cafe-subtle">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--console-border-soft)]">
         <span className="text-xs text-cafe-muted font-mono">Ctrl+R</span>
         <input
           ref={inputRef}
@@ -67,7 +67,7 @@ export function HistorySearchModal({ onSelect, onClose }: HistorySearchModalProp
           onCompositionStart={ime.onCompositionStart}
           onCompositionEnd={ime.onCompositionEnd}
           placeholder="Search history..."
-          className="flex-1 text-sm outline-none bg-transparent placeholder:text-gray-300"
+          className="flex-1 text-sm outline-none bg-transparent placeholder:text-cafe-muted"
         />
         <button onClick={onClose} className="text-cafe-muted hover:text-cafe-secondary text-xs">
           Esc
@@ -93,7 +93,7 @@ export function HistorySearchModal({ onSelect, onClose }: HistorySearchModalProp
           </button>
         ))}
       </div>
-      <div className="px-3 py-1 text-[10px] text-cafe-muted border-t border-cafe-subtle">
+      <div className="px-3 py-1 text-[10px] text-cafe-muted border-t border-[var(--console-border-soft)]">
         {'\u2191\u2193 \u9009\u62E9 \u00B7 Enter \u786E\u8BA4 \u00B7 Esc \u5173\u95ED'}
       </div>
     </div>

@@ -1,17 +1,23 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { resolveLayoutThreadId } from '../layout';
+import ClassicHome from '../../classic/page';
+import { resolveLayoutThreadId } from '../../classic/route-state';
+import ClassicThreadPage from '../../classic/thread/[threadId]/page';
 import Home from '../page';
-import ThreadPage from '../thread/[threadId]/page';
 
-describe('chat route markers', () => {
-  it('renders a stable marker for the default thread route', () => {
+describe('console and classic route markers', () => {
+  it('renders a stable marker for the console default route', () => {
     const html = renderToStaticMarkup(<Home />);
     expect(html).toContain('data-thread-route="default"');
   });
 
-  it('renders the active thread id into the page tree', () => {
-    const html = renderToStaticMarkup(<ThreadPage params={{ threadId: 'thread-123' }} />);
+  it('renders a stable marker for the classic default route', () => {
+    const html = renderToStaticMarkup(<ClassicHome />);
+    expect(html).toContain('data-thread-route="default"');
+  });
+
+  it('renders the active thread id into the classic page tree', () => {
+    const html = renderToStaticMarkup(<ClassicThreadPage params={{ threadId: 'thread-123' }} />);
     expect(html).toContain('data-thread-route="thread-123"');
   });
 

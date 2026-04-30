@@ -139,7 +139,7 @@ export function AccordionSection({
                         : undefined
                 }
               >
-                <span style={isActive ? { color: group.color } : { color: '#9ca3af' }}>
+                <span style={isActive ? { color: group.color } : { color: 'var(--cafe-text-muted)' }}>
                   <HubIcon name={tab.icon} className="h-4 w-4" />
                 </span>
                 <span className={isActive ? 'font-medium' : 'text-cafe-secondary'}>{tab.label}</span>

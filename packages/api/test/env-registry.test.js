@@ -152,6 +152,21 @@ describe('env-registry', () => {
     assert.ok(def, 'DEFAULT_OWNER_USER_ID should be in registry');
     assert.equal(def.runtimeEditable, false, 'trust anchor must not be editable from Hub');
   });
+
+  it('marks PREVIEW_GATEWAY_PORT as restartRequired despite being editable', () => {
+    const def = ENV_VARS.find((v) => v.name === 'PREVIEW_GATEWAY_PORT');
+    assert.ok(def, 'PREVIEW_GATEWAY_PORT should be in registry');
+    assert.equal(def.runtimeEditable, true, 'should be editable');
+    assert.equal(def.restartRequired, true, 'port change needs restart');
+  });
+
+  it('marks server infrastructure vars as restartRequired', () => {
+    for (const name of ['API_SERVER_HOST', 'UPLOAD_DIR', 'FRONTEND_URL', 'FRONTEND_PORT']) {
+      const def = ENV_VARS.find((v) => v.name === name);
+      assert.ok(def, `${name} should be in registry`);
+      assert.equal(def.restartRequired, true, `${name} should require restart`);
+    }
+  });
 });
 
 describe('maskUrlCredentials', () => {
@@ -218,6 +233,16 @@ describe('buildEnvSummary', () => {
   it('returns same number of entries as ENV_VARS', () => {
     const summary = buildEnvSummary();
     assert.ok(summary.length < ENV_VARS.length);
+  });
+
+  it('includes restartRequired metadata in summary entries', () => {
+    const summary = buildEnvSummary();
+    const preview = summary.find((v) => v.name === 'PREVIEW_GATEWAY_PORT');
+    assert.ok(preview, 'PREVIEW_GATEWAY_PORT should be in summary');
+    assert.equal(preview.restartRequired, true);
+    const frontendUrl = summary.find((v) => v.name === 'FRONTEND_URL');
+    assert.ok(frontendUrl, 'FRONTEND_URL should be in summary');
+    assert.equal(frontendUrl.restartRequired, true);
   });
 
   it('hides per-cat runtime budget env vars from hub summary', () => {

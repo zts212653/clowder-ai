@@ -27,8 +27,8 @@ const REQUEST_TIMEOUT_MS = 2_500;
 const FAILURE_THRESHOLD = 2;
 
 function getInitialBrowserOnline(): boolean {
-  if (typeof navigator === 'undefined') return true;
-  return navigator.onLine;
+  if (typeof window === 'undefined' || typeof window.navigator?.onLine !== 'boolean') return true;
+  return window.navigator.onLine;
 }
 
 async function probePublicEndpoint(path: string): Promise<ConnectionLevel> {

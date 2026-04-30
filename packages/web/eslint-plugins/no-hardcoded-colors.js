@@ -12,8 +12,10 @@
  * Allows:
  *   - Semantic cat tokens: bg-opus-primary, text-codex-dark, etc.
  *   - Cafe tokens: bg-cafe-white, text-cafe-black
+ *   - Connector tokens: bg-conn-emerald-bg, text-conn-red-text, etc.
  *   - Werewolf tokens: bg-ww-base, text-ww-main, etc.
  *   - CSS variable references: var(--)
+ *   - Overlay backdrops: bg-black/{opacity} (structural, not semantic)
  *   - Colors in comments
  *   - Non-UI contexts (data objects, constants defining token values)
  */
@@ -75,9 +77,12 @@ const arbitraryColorPattern =
 // Hex in style props
 const hexPattern = /#(?:[0-9a-fA-F]{3,4}){1,2}\b/;
 
-// Allowed semantic prefixes (cat tokens, cafe tokens, werewolf tokens)
-const SEMANTIC_PREFIXES = ['opus', 'codex', 'gemini', 'dare', 'cocreator', 'cafe', 'ww'];
+// Allowed semantic prefixes (cat tokens, cafe tokens, connector tokens, werewolf tokens)
+const SEMANTIC_PREFIXES = ['opus', 'codex', 'gemini', 'dare', 'cocreator', 'cafe', 'conn', 'ww', 'guide'];
 const semanticPattern = new RegExp(`\\b(?:${TW_PREFIXES.join('|')})-(?:${SEMANTIC_PREFIXES.join('|')})-`);
+
+// Structural patterns allowed without semantic tokens
+const STRUCTURAL_ALLOWLIST = [/\bbg-black\/\d+\b/, /\bhover:bg-black\/\d+\b/];
 
 /** @type {import('eslint').Rule.RuleModule} */
 const rule = {
@@ -102,15 +107,13 @@ const rule = {
       // Split into class names for Tailwind checks
       const classes = value.split(/\s+/);
       for (const cls of classes) {
-        // Skip semantic tokens
         if (semanticPattern.test(cls)) continue;
+        if (STRUCTURAL_ALLOWLIST.some((re) => re.test(cls))) continue;
 
-        // Check raw Tailwind colors
         if (rawColorPattern.test(cls)) {
           context.report({ node, messageId: 'noRawTailwindColor', data: { value: cls } });
         }
 
-        // Check arbitrary colors
         if (arbitraryColorPattern.test(cls)) {
           context.report({ node, messageId: 'noArbitraryColor', data: { value: cls } });
         }

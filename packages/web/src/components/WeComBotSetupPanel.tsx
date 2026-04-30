@@ -78,16 +78,16 @@ export function WeComBotSetupPanel({ configured, onConnected, onDisconnected }: 
   if (state === 'connected' || (configured && state !== 'error' && state !== 'testing')) {
     return (
       <div className="space-y-2" data-testid="wecom-bot-connected">
-        <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2.5">
-          <span className="text-green-600">
+        <div className="flex items-center gap-2 rounded-[20px] border border-conn-emerald-ring bg-conn-emerald-bg px-3 py-2.5">
+          <span className="text-conn-emerald-text">
             <CheckCircleIcon />
           </span>
-          <span className="text-sm font-medium text-green-700">WeCom Bot connected</span>
+          <span className="text-sm font-medium text-conn-emerald-text">WeCom Bot connected</span>
           <button
             type="button"
             onClick={handleDisconnect}
             disabled={disconnecting}
-            className="ml-auto text-xs font-medium text-red-500 hover:text-red-700 transition-colors disabled:opacity-50"
+            className="ml-auto text-xs font-medium text-conn-red-text hover:text-conn-red-text transition-colors disabled:opacity-50"
             data-testid="wecom-bot-disconnect"
           >
             {disconnecting ? 'Disconnecting...' : 'Disconnect'}
@@ -113,7 +113,7 @@ export function WeComBotSetupPanel({ configured, onConnected, onDisconnected }: 
             placeholder="e.g. xianxian_bot"
             value={botId}
             onChange={(e) => setBotId(e.target.value)}
-            className="w-full h-9 px-3 text-[13px] bg-cafe-surface-elevated border border-cafe rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition-colors"
+            className="w-full h-9 px-3 text-[13px] bg-cafe-surface-elevated border border-[var(--console-border-soft)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--color-cafe-accent)]/30 focus:border-[var(--color-cafe-accent)] transition-colors"
             data-testid="wecom-bot-id-input"
           />
         </div>
@@ -127,7 +127,7 @@ export function WeComBotSetupPanel({ configured, onConnected, onDisconnected }: 
             placeholder="Paste secret here"
             value={secret}
             onChange={(e) => setSecret(e.target.value)}
-            className="w-full h-9 px-3 text-[13px] bg-cafe-surface-elevated border border-cafe rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition-colors"
+            className="w-full h-9 px-3 text-[13px] bg-cafe-surface-elevated border border-[var(--console-border-soft)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--color-cafe-accent)]/30 focus:border-[var(--color-cafe-accent)] transition-colors"
             data-testid="wecom-bot-secret-input"
           />
         </div>
@@ -135,7 +135,7 @@ export function WeComBotSetupPanel({ configured, onConnected, onDisconnected }: 
 
       {errorMsg && (
         <p
-          className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2 border border-red-200"
+          className="text-xs text-conn-red-text bg-conn-red-bg rounded-[20px] px-3 py-2 border border-conn-red-ring"
           data-testid="wecom-bot-error"
         >
           {errorMsg}
@@ -151,7 +151,8 @@ export function WeComBotSetupPanel({ configured, onConnected, onDisconnected }: 
         <button
           type="button"
           onClick={handleValidate}
-          className="flex items-center gap-1.5 rounded-lg bg-[#7B68EE] px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-[#6A5ACD]"
+          // eslint-disable-next-line cafe/no-hardcoded-colors -- WeCom brand purple
+          className="flex items-center gap-1.5 rounded-lg bg-[#7B68EE] px-4 py-2 text-[13px] font-semibold text-[var(--cafe-surface)] transition-colors hover:bg-[#6A5ACD]"
           data-testid="wecom-bot-validate"
         >
           <WifiIcon />

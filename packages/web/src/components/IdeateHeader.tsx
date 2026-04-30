@@ -9,7 +9,7 @@ import { PawIcon } from './icons/PawIcon';
  */
 export function IdeateHeader() {
   return (
-    <div className="px-5 py-2.5 bg-gradient-to-r from-opus-bg via-codex-bg to-gemini-bg border-b border-cafe">
+    <div className="px-5 py-2.5 bg-gradient-to-r from-opus-bg via-codex-bg to-gemini-bg border-b border-[var(--console-border-soft)]">
       <div className="flex items-center gap-2">
         <span className="animate-pulse">
           <PawIcon className="text-base" />

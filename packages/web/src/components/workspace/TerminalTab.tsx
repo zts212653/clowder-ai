@@ -7,7 +7,6 @@ import { API_URL, apiFetch } from '@/utils/api-client';
 
 import { AgentPaneList } from './AgentPaneList';
 import { AgentPaneViewer } from './AgentPaneViewer';
-import '@xterm/xterm/css/xterm.css';
 
 interface TerminalTabProps {
   worktreeId: string;

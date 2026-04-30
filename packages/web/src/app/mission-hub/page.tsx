@@ -1,10 +1,5 @@
-import { MissionControlPage } from '@/components/mission-control/MissionControlPage';
+import { MissionHubView } from '@/components/mission-control/MissionHubView';
 
-export default function MissionHubPage({
-  searchParams,
-}: {
-  searchParams: Record<string, string | string[] | undefined>;
-}) {
-  const from = typeof searchParams.from === 'string' ? searchParams.from : null;
-  return <MissionControlPage initialReferrerThread={from} />;
+export default function MissionHubPage() {
+  return <MissionHubView />;
 }

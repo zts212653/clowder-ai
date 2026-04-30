@@ -13,10 +13,10 @@ interface AuditEntry {
 }
 
 const ACTION_LABELS: Record<string, { text: string; color: string }> = {
-  install: { text: '安装', color: 'text-green-600 bg-green-50' },
-  delete: { text: '删除', color: 'text-red-600 bg-red-50' },
-  update: { text: '更新', color: 'text-blue-600 bg-blue-50' },
-  toggle: { text: '开关', color: 'text-amber-600 bg-amber-50' },
+  install: { text: '安装', color: 'text-conn-emerald-text bg-conn-emerald-bg' },
+  delete: { text: '删除', color: 'text-conn-red-text bg-conn-red-bg' },
+  update: { text: '更新', color: 'text-[var(--color-cafe-accent)] bg-[var(--color-cafe-accent)]/10' },
+  toggle: { text: '开关', color: 'text-conn-amber-text bg-conn-amber-bg' },
 };
 
 export function CapabilityAuditLog({ projectPath }: { projectPath?: string }) {
@@ -46,11 +46,11 @@ export function CapabilityAuditLog({ projectPath }: { projectPath?: string }) {
   }, [expanded, fetchAudit]);
 
   return (
-    <div className="border-t border-slate-100/60 pt-3 mt-2">
+    <div className="border-t border-cafe-subtle/60 pt-3 mt-2">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600 transition-colors"
+        className="flex items-center gap-1.5 text-xs text-cafe-muted hover:text-cafe-secondary transition-colors"
       >
         <svg
           className={`w-3 h-3 transition-transform ${expanded ? 'rotate-90' : ''}`}
@@ -68,13 +68,13 @@ export function CapabilityAuditLog({ projectPath }: { projectPath?: string }) {
 
       {expanded && (
         <div className="mt-2 max-h-48 overflow-y-auto">
-          {loading && <p className="text-xs text-slate-400">加载中...</p>}
-          {!loading && entries.length === 0 && <p className="text-xs text-slate-400">暂无记录</p>}
+          {loading && <p className="text-xs text-cafe-muted">加载中...</p>}
+          {!loading && entries.length === 0 && <p className="text-xs text-cafe-muted">暂无记录</p>}
           {entries.map((e, i) => {
-            const label = ACTION_LABELS[e.action] ?? { text: e.action, color: 'text-slate-500 bg-slate-50' };
+            const label = ACTION_LABELS[e.action] ?? { text: e.action, color: 'text-cafe-muted bg-conn-slate-bg' };
             return (
               <div key={`${e.timestamp}-${i}`} className="flex items-center gap-2 py-1 text-xs">
-                <span className="text-slate-300 w-28 shrink-0 tabular-nums">
+                <span className="text-cafe-muted w-28 shrink-0 tabular-nums">
                   {new Date(e.timestamp).toLocaleString('zh-CN', {
                     month: '2-digit',
                     day: '2-digit',
@@ -83,8 +83,8 @@ export function CapabilityAuditLog({ projectPath }: { projectPath?: string }) {
                   })}
                 </span>
                 <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${label.color}`}>{label.text}</span>
-                <span className="text-slate-600 font-medium truncate">{e.capabilityId}</span>
-                <span className="text-slate-300 truncate">{e.userId}</span>
+                <span className="text-cafe-secondary font-medium truncate">{e.capabilityId}</span>
+                <span className="text-cafe-muted truncate">{e.userId}</span>
               </div>
             );
           })}

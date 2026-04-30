@@ -77,6 +77,12 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
       return { error: 'Required: id (string)' };
     }
 
+    const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim();
+    if (ownerId && userId !== ownerId) {
+      reply.status(403);
+      return { error: 'Only the owner can install/update MCP servers' };
+    }
+
     let projectRoot = getProjectRoot();
     if (body.projectPath) {
       const validated = await validateProjectPath(body.projectPath);
@@ -116,9 +122,23 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
             error: `Cannot overwrite managed MCP "${body.id}" (source=${existing.source}). Only external MCPs can be installed over.`,
           };
         }
+        const mergedMcpServer =
+          existing.mcpServer && entry.mcpServer
+            ? { ...existing.mcpServer, ...entry.mcpServer }
+            : (entry.mcpServer ?? existing.mcpServer);
+        if (mergedMcpServer) {
+          if (mergedMcpServer.transport === 'streamableHttp') {
+            delete mergedMcpServer.resolver;
+            delete mergedMcpServer.workingDir;
+          } else {
+            delete mergedMcpServer.url;
+            delete mergedMcpServer.headers;
+          }
+        }
         config.capabilities[existingIdx] = {
           ...existing,
           ...entry,
+          mcpServer: mergedMcpServer,
           overrides: existing.overrides,
         };
       } else {
@@ -151,6 +171,82 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
         capability: entry,
         probe: probeResult ? { connectionStatus: probeResult.connectionStatus, tools: probeResult.tools } : null,
       };
+    });
+  });
+
+  // ── PATCH /api/capabilities/mcp/:id/env — update env vars after install ──
+  app.patch('/api/capabilities/mcp/:id/env', async (request, reply) => {
+    const userId = resolveUserId(request);
+    const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim();
+    if (!ownerId) {
+      reply.status(403);
+      return { error: 'MCP env write requires DEFAULT_OWNER_USER_ID to be configured' };
+    }
+    if (!userId || userId !== ownerId) {
+      reply.status(403);
+      return { error: 'Only the owner can modify MCP env vars' };
+    }
+
+    const { id } = request.params as { id: string };
+    const body = request.body as { env?: Record<string, string>; projectPath?: string } | undefined;
+    if (!body?.env || typeof body.env !== 'object' || Array.isArray(body.env)) {
+      reply.status(400);
+      return { error: 'Required: env (plain object with key-value pairs)' };
+    }
+    const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+    for (const [k, v] of Object.entries(body.env)) {
+      if (!ENV_KEY_RE.test(k) || typeof v !== 'string') {
+        reply.status(400);
+        return {
+          error: `Invalid env entry: key must match [A-Za-z_][A-Za-z0-9_]*, value must be string (got key="${k}")`,
+        };
+      }
+    }
+
+    let projectRoot = getProjectRoot();
+    if (body.projectPath) {
+      const validated = await validateProjectPath(body.projectPath);
+      if (!validated) {
+        reply.status(400);
+        return { error: 'Invalid project path' };
+      }
+      projectRoot = validated;
+    }
+
+    return withCapabilityLock(projectRoot, async () => {
+      const config = await readCapabilitiesConfig(projectRoot);
+      if (!config) {
+        reply.status(404);
+        return { error: 'capabilities.json not found' };
+      }
+
+      const idx = config.capabilities.findIndex((c) => c.id === id && c.type === 'mcp');
+      if (idx === -1) {
+        reply.status(404);
+        return { error: `MCP "${id}" not found` };
+      }
+
+      const before = structuredClone(config.capabilities[idx]);
+      const cap = config.capabilities[idx];
+      if (!cap.mcpServer) {
+        reply.status(400);
+        return { error: `Capability "${id}" is not an MCP server` };
+      }
+      cap.mcpServer.env = { ...cap.mcpServer.env, ...body.env };
+
+      await writeCapabilitiesConfig(projectRoot, config);
+      await generateCliConfigs(config, getCliConfigPaths(projectRoot));
+
+      await appendAuditEntry(projectRoot, {
+        timestamp: new Date().toISOString(),
+        userId,
+        action: 'update',
+        capabilityId: id,
+        before,
+        after: config.capabilities[idx],
+      });
+
+      return { ok: true, capability: config.capabilities[idx] };
     });
   });
 

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * F153 Phase E: HealthPanel renders degraded (503) health data.
  *

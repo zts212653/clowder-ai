@@ -43,7 +43,7 @@ export function BrakeSettingsPanel() {
         <p className="text-sm text-cafe-secondary mt-1">三猫会在你连续工作一段时间后提醒你休息</p>
       </div>
 
-      <div className="rounded-lg border border-cafe bg-cafe-surface-elevated/70 p-4 space-y-4">
+      <div className="rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface-elevated/70 p-4 space-y-4">
         {/* Toggle */}
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium text-cafe-secondary">启用健康守护</span>
@@ -53,7 +53,7 @@ export function BrakeSettingsPanel() {
             aria-checked={settingsEnabled}
             onClick={handleToggle}
             className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${
-              settingsEnabled ? 'bg-blue-600' : 'bg-gray-200'
+              settingsEnabled ? 'bg-[var(--color-cafe-accent)]' : 'bg-[var(--console-pill-bg)]'
             }`}
           >
             <span
@@ -77,7 +77,7 @@ export function BrakeSettingsPanel() {
             step={15}
             value={settingsThreshold}
             onChange={handleThresholdChange}
-            className="w-full accent-blue-600"
+            className="w-full accent-[var(--conn-blue-text)]"
           />
           <div className="flex justify-between text-xs text-cafe-muted mt-0.5">
             <span>30 min</span>
@@ -86,8 +86,8 @@ export function BrakeSettingsPanel() {
         </div>
 
         {/* Night mode info */}
-        <div className="rounded-md bg-indigo-50 border border-indigo-100 px-3 py-2">
-          <p className="text-xs text-indigo-600 flex items-center gap-1">
+        <div className="rounded-md bg-conn-sky-bg border border-conn-sky-ring px-3 py-2">
+          <p className="text-xs text-conn-sky-text flex items-center gap-1">
             <svg
               className="w-3.5 h-3.5 flex-shrink-0"
               fill="none"

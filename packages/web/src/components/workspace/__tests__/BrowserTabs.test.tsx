@@ -25,7 +25,7 @@ describe('BrowserTabBar', () => {
       <BrowserTabBar tabs={tabs} activeTabId="a" onSelect={() => {}} onClose={() => {}} onAdd={() => {}} />,
     );
     // Active tab has a distinctive background
-    expect(html).toContain('bg-[#FDF8F3]');
+    expect(html).toContain('bg-[var(--console-card-bg)]');
   });
 
   it('renders add button', () => {

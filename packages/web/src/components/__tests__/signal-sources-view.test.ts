@@ -43,7 +43,7 @@ describe('SignalSourcesView', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('renders visit link for each source url', async () => {
+  it('renders source name and status for each source', async () => {
     mocks.fetchSignalSources.mockResolvedValueOnce([
       {
         id: 'anthropic-news',
@@ -64,11 +64,8 @@ describe('SignalSourcesView', () => {
       await Promise.resolve();
     });
 
-    const visitLink = Array.from(container.querySelectorAll('a[href="https://www.anthropic.com/news"]')).find((item) =>
-      item.textContent?.includes('访问'),
-    );
-    expect(visitLink).not.toBeNull();
-    expect(visitLink?.textContent ?? '').toContain('访问');
+    expect(container.textContent).toContain('Anthropic Newsroom');
+    expect(container.textContent).toContain('正常');
   });
 
   const SAMPLE_SOURCE = {

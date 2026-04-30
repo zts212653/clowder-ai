@@ -3,11 +3,30 @@
   "extends": ["next/core-web-vitals", "next/typescript"],
   "plugins": ["cafe"],
   "rules": {
-    "cafe/no-hardcoded-colors": "warn"
+    "cafe/no-hardcoded-colors": "error"
   },
   "settings": {
     "cafe": {
       "note": "F056 Phase A-0: Design system governance. See docs/features/F056-cat-cafe-design-language.md"
     }
-  }
+  },
+  "overrides": [
+    {
+      "files": [
+        "src/components/workspace/TerminalTab.tsx",
+        "src/components/workspace/AgentPaneViewer.tsx",
+        "src/components/workspace/AgentPaneList.tsx",
+        "src/components/workspace/DiffViewer.tsx",
+        "src/components/workspace/CodeViewer.tsx",
+        "src/components/cli-output/CliOutputBlock.tsx",
+        "src/components/ThinkingContent.tsx",
+        "src/components/TimeoutDiagnosticsPanel.tsx",
+        "src/components/cat-cafe-hub.navigation.tsx",
+        "src/app/pixel-brawl/**"
+      ],
+      "rules": {
+        "cafe/no-hardcoded-colors": "warn"
+      }
+    }
+  ]
 }

@@ -10,7 +10,7 @@ import { useChatStore } from '@/stores/chatStore';
 
 const cafeTheme = EditorView.theme(
   {
-    '&': { backgroundColor: '#1E1E24', color: '#FDF8F3' },
+    '&': { backgroundColor: '#1E1E24', color: 'var(--console-card-bg)' },
     '.cm-gutters': { backgroundColor: '#1E1E24', color: '#815B5B', borderRight: '1px solid #2a2a32' },
     '.cm-activeLineGutter': { backgroundColor: '#2a2a32' },
     '.cm-activeLine': { backgroundColor: 'rgba(155, 126, 189, 0.08)' },
@@ -174,7 +174,7 @@ export function CodeViewer({
           type="button"
           onClick={handleSave}
           disabled={saving}
-          className="absolute bottom-3 right-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 text-white text-[11px] font-medium shadow-lg hover:bg-green-500 disabled:opacity-50 transition-colors z-10 animate-fade-in"
+          className="absolute bottom-3 right-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-conn-emerald-bg text-[var(--cafe-surface)] text-[11px] font-medium shadow-lg hover:bg-conn-emerald-bg/80 disabled:opacity-50 transition-colors z-10 animate-fade-in"
           title="保存 (Cmd+S)"
         >
           {saving ? '保存中...' : '保存'}
@@ -185,7 +185,7 @@ export function CodeViewer({
         <button
           type="button"
           onClick={handleAddToChat}
-          className="absolute top-2 right-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cocreator-primary text-white text-[11px] font-medium shadow-lg hover:bg-cocreator-dark transition-colors z-10 animate-fade-in"
+          className="console-button-primary absolute top-2 right-3 z-10 flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-[var(--cafe-surface)] shadow-lg animate-fade-in"
           title="引用到聊天"
         >
           <AddToChatIcon />

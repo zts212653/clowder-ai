@@ -28,7 +28,7 @@ describe('MarkdownContent file path linking', () => {
     // Bare path (not in backticks) — linkified by withMentionsAndLinks in <p>
     const html = render('See /packages/api/src/routes/messages.ts:42 for details');
     expect(html).toContain('vscode://file/packages/api/src/routes/messages.ts:42');
-    expect(html).toContain('text-blue-400');
+    expect(html).toContain('text-[var(--color-cafe-accent)]');
   });
 
   it('renders relative paths as styled span when PROJECT_ROOT is not set', () => {
@@ -37,6 +37,6 @@ describe('MarkdownContent file path linking', () => {
     // Without PROJECT_ROOT, relative paths become styled <span>, not <a> links
     expect(html).toContain('packages/web/src/app/page.tsx:10');
     expect(html).not.toContain('vscode://file');
-    expect(html).toContain('text-blue-400');
+    expect(html).toContain('text-[var(--color-cafe-accent)]');
   });
 });

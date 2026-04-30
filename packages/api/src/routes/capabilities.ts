@@ -42,6 +42,7 @@ import {
   migrateLegacyCatCafeCapability,
   migrateResolverBackedCapabilities,
   readCapabilitiesConfig,
+  readResolvedMcpState,
   realignManagedCatCafeServerPaths,
   resolveServersForCat,
   toCapabilityEntry,
@@ -632,6 +633,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     // 5. Build board items from capabilities.json
     const catIds = catRegistry.getAllIds().map((id) => id as string);
     const items: CapabilityBoardItem[] = [];
+    const resolvedMcpState = await readResolvedMcpState(projectRoot);
 
     // MCP capabilities
     for (const cap of config.capabilities) {
@@ -654,6 +656,18 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       };
       const mcpDesc = describeMcpCapability(cap);
       if (mcpDesc) mcpItem.description = mcpDesc;
+      if (cap.mcpServer) {
+        const { env, headers, ...safe } = cap.mcpServer;
+        const resolved = resolvedMcpState[cap.id];
+        mcpItem.mcpServer = {
+          ...safe,
+          envKeys: env ? Object.keys(env) : [],
+          headerKeys: headers ? Object.keys(headers) : [],
+          ...(resolved?.status === 'resolved' && resolved.command
+            ? { resolvedCommand: resolved.command, resolvedArgs: resolved.args ?? [] }
+            : {}),
+        };
+      }
       items.push(mcpItem);
     }
 

@@ -175,28 +175,28 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
   };
 
   return (
-    <section className="rounded-lg border border-cafe bg-cafe-surface-elevated/70 p-3">
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-xs font-semibold text-cafe-secondary">Session Chain</h3>
-        <span className="text-[10px] text-cafe-muted">
+    <section className="rounded-[10px] bg-[var(--console-card-bg)] p-[9px]">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-[11px] font-bold text-cafe-secondary">Session Chain</h3>
+        <span className="text-[8px] font-bold text-cafe-muted">
           {sessions.length} session{sessions.length !== 1 ? 's' : ''}
         </span>
       </div>
 
       {actionError && (
-        <div className="mb-2 rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] text-red-700">
+        <div className="mb-2 rounded border border-conn-red-ring bg-conn-red-bg px-2 py-1 text-[10px] text-conn-red-text">
           {actionError}
         </div>
       )}
 
       {/* Post-compact safety alert */}
       {hasRecentCompact && (
-        <div className="mb-2 px-2 py-1.5 rounded bg-amber-50 border border-amber-200">
+        <div className="mb-2 px-2 py-1.5 rounded bg-conn-amber-bg border border-conn-amber-ring">
           <div className="flex items-center gap-1.5">
-            <span className="text-amber-600 text-xs">&#9888;</span>
-            <span className="text-[10px] font-medium text-amber-700">Post-compact safety active</span>
+            <span className="text-conn-amber-text text-xs">&#9888;</span>
+            <span className="text-[10px] font-medium text-conn-amber-text">Post-compact safety active</span>
           </div>
-          <p className="text-[9px] text-amber-600 mt-0.5 ml-4">
+          <p className="text-[9px] text-conn-amber-text mt-0.5 ml-4">
             High-risk ops may be blocked after context compression
           </p>
         </div>
@@ -222,14 +222,14 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
         return (
           <div key={session.id} className="mb-2">
             <div className="flex items-center gap-1 mb-1">
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500" />
-              <span className="text-[9px] font-bold text-green-600 uppercase tracking-wider">Active</span>
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-conn-emerald-text)]" />
+              <span className="text-[9px] font-bold text-conn-emerald-text uppercase tracking-wider">Active</span>
             </div>
             <div
               data-testid="session-card-active"
               data-cat-id={session.catId}
-              className="rounded-md border-[1.5px] bg-cafe-surface p-2.5 shadow-sm"
-              style={{ borderColor: colors.border }}
+              className="rounded-md bg-[var(--console-card-soft-bg)] p-2.5"
+              style={{ boxShadow: `inset 3px 0 0 ${colors.border}` }}
             >
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-1.5">
@@ -249,7 +249,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                 Started {timeAgo(session.createdAt)}
                 {session.messageCount > 0 ? ` · ${session.messageCount} msgs` : ''}
                 {(session.compressionCount ?? 0) > 0 && (
-                  <span className="text-amber-500"> · {session.compressionCount} compress</span>
+                  <span className="text-conn-amber-text"> · {session.compressionCount} compress</span>
                 )}
               </div>
               {/* Token counts + cache: prefer live invocation, fallback to persisted */}
@@ -267,7 +267,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                       <span className="text-cafe-muted ml-0.5">↑</span>
                     </span>
                   )}
-                  {cachePct > 0 && <span className="text-green-600">cached {cachePct}%</span>}
+                  {cachePct > 0 && <span className="text-conn-emerald-text">cached {cachePct}%</span>}
                 </div>
               )}
               {/* Context health bar (already shows % internally, no duplicate text) */}
@@ -300,17 +300,17 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                   key={session.id}
                   data-testid="session-card-sealed"
                   data-cat-id={session.catId}
-                  className="flex items-center gap-2 rounded border bg-cafe-surface px-2.5 py-1.5"
-                  style={{ borderColor: sealedColors.border }}
+                  className="flex items-center gap-2 rounded bg-[var(--console-card-soft-bg)] px-2.5 py-1.5"
+                  style={{ boxShadow: `inset 2px 0 0 ${sealedColors.border}` }}
                 >
                   <div
                     className={`flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center ${
-                      session.sealReason?.includes('compact') ? 'bg-amber-100' : 'bg-cafe-surface-elevated'
+                      session.sealReason?.includes('compact') ? 'bg-conn-amber-bg' : 'bg-cafe-surface-elevated'
                     }`}
                   >
                     <span
                       className={`text-[10px] ${
-                        session.sealReason?.includes('compact') ? 'text-amber-500' : 'text-cafe-muted'
+                        session.sealReason?.includes('compact') ? 'text-conn-amber-text' : 'text-cafe-muted'
                       }`}
                     >
                       &#128274;
@@ -343,7 +343,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                       {onViewSession && (
                         <button
                           type="button"
-                          className="text-[10px] px-2 py-0.5 rounded border border-cafe text-cafe-secondary hover:bg-cafe-surface-elevated"
+                          className="text-[10px] px-2 py-0.5 rounded border border-[var(--console-border-soft)] text-cafe-secondary hover:bg-cafe-surface-elevated"
                           onClick={() => onViewSession(session.id, session.catId)}
                         >
                           查看
@@ -351,7 +351,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                       )}
                       <button
                         type="button"
-                        className="text-[10px] px-2 py-0.5 rounded border border-blue-200 text-blue-600 hover:bg-blue-50 disabled:opacity-50"
+                        className="text-[10px] px-2 py-0.5 rounded border border-[var(--color-cafe-accent)]/20 text-[var(--color-cafe-accent)] hover:bg-[var(--color-cafe-accent)]/5 disabled:opacity-50"
                         onClick={() => {
                           void handleUnseal(session.id);
                         }}

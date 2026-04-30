@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { detectRoutePrefix, getThreadHref } from '@/components/ThreadSidebar/thread-navigation';
 import { fetchStudyTimeline, type TimelineEntry } from '@/utils/signals-api';
 import { HubIcon } from '../hub-icons';
 
@@ -79,7 +80,7 @@ export function StudyTimeline({ days = 7 }: StudyTimelineProps) {
               key={d}
               type="button"
               onClick={() => setSelectedDays(d)}
-              className={`rounded-full px-2 py-0.5 text-xs ${selectedDays === d ? 'bg-opus-primary text-white' : 'border border-cafe text-cafe-secondary hover:bg-cafe-surface-elevated'}`}
+              className={`rounded-full px-2 py-0.5 text-xs ${selectedDays === d ? 'bg-opus-primary text-[var(--cafe-surface)]' : 'border border-[var(--console-border-soft)] text-cafe-secondary hover:bg-cafe-surface-elevated'}`}
             >
               {d}天
             </button>
@@ -88,7 +89,7 @@ export function StudyTimeline({ days = 7 }: StudyTimelineProps) {
       </div>
 
       {loading && <p className="text-xs text-cafe-muted">加载中...</p>}
-      {error && <p className="text-xs text-red-500">{error}</p>}
+      {error && <p className="text-xs text-conn-red-text">{error}</p>}
 
       {!loading && entries.length === 0 && (
         <p className="text-xs text-cafe-muted">最近 {selectedDays} 天没有学习活动。</p>
@@ -99,7 +100,10 @@ export function StudyTimeline({ days = 7 }: StudyTimelineProps) {
           <div className="mb-2 text-xs font-semibold text-cafe-secondary">{formatDate(group[0].lastStudiedAt)}</div>
           <div className="space-y-2 border-l-2 border-opus-light pl-3">
             {group.map((entry) => (
-              <div key={entry.articleId} className="rounded-lg border border-cafe bg-cafe-surface p-2.5">
+              <div
+                key={entry.articleId}
+                className="rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface p-2.5"
+              >
                 <div className="flex items-start justify-between gap-2">
                   <a
                     href={`/signals?article=${encodeURIComponent(entry.articleId)}`}
@@ -128,7 +132,7 @@ export function StudyTimeline({ days = 7 }: StudyTimelineProps) {
                     {entry.threads.map((t) => (
                       <a
                         key={t.threadId}
-                        href={`/thread/${encodeURIComponent(t.threadId)}`}
+                        href={getThreadHref(t.threadId, detectRoutePrefix())}
                         className="rounded-full bg-opus-bg px-1.5 py-0.5 text-[10px] text-opus-dark hover:underline"
                       >
                         <HubIcon name="message-circle" className="inline h-3 w-3" /> {t.threadId.slice(0, 12)}...

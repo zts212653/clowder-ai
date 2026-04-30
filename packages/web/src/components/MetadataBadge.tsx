@@ -55,13 +55,13 @@ export function MetadataBadge({ metadata }: MetadataBadgeProps) {
           {cachePct != null && cachePct > 0 && (
             <>
               <span className="text-cafe-muted"> · </span>
-              <span className="text-emerald-500/80 tabular-nums">cached {cachePct}%</span>
+              <span className="text-conn-emerald-text tabular-nums">cached {cachePct}%</span>
             </>
           )}
           {usage.costUsd != null && (
             <>
               <span className="text-cafe-muted"> · </span>
-              <span className="text-amber-500 animate-cost-glow tabular-nums">{formatCost(usage.costUsd)}</span>
+              <span className="text-conn-amber-text animate-cost-glow tabular-nums">{formatCost(usage.costUsd)}</span>
             </>
           )}
         </span>

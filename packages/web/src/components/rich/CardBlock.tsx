@@ -7,10 +7,10 @@ import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 
 const TONE_STYLES: Record<string, string> = {
-  info: 'border-l-blue-400 bg-blue-50 dark:bg-blue-950/30',
-  success: 'border-l-green-400 bg-green-50 dark:bg-green-950/30',
-  warning: 'border-l-yellow-400 bg-yellow-50 dark:bg-yellow-950/30',
-  danger: 'border-l-red-400 bg-red-50 dark:bg-red-950/30',
+  info: 'border-l-[var(--color-cafe-accent)]/60 bg-[var(--color-cafe-accent)]/5 dark:bg-[var(--color-cafe-accent)]/10',
+  success: 'border-l-conn-emerald-ring bg-conn-emerald-bg dark:bg-conn-emerald-bg',
+  warning: 'border-l-conn-amber-ring bg-conn-amber-bg dark:bg-conn-amber-bg',
+  danger: 'border-l-conn-red-ring bg-conn-red-bg dark:bg-conn-red-bg',
 };
 
 export function CardBlock({ block, messageId }: { block: RichCardBlock; messageId?: string }) {
@@ -65,7 +65,7 @@ export function CardBlock({ block, messageId }: { block: RichCardBlock; messageI
     <div className={`border-l-4 rounded-r-lg p-3 ${toneStyle}`}>
       <div className="font-medium text-sm">{block.title}</div>
       {block.bodyMarkdown && (
-        <div className="mt-1 text-xs text-cafe-secondary dark:text-gray-300 [&_.markdown-content]:text-xs [&_p]:mb-1 [&_p:last-child]:mb-0">
+        <div className="mt-1 text-xs text-cafe-secondary dark:text-cafe-muted [&_.markdown-content]:text-xs [&_p]:mb-1 [&_p:last-child]:mb-0">
           <MarkdownContent content={block.bodyMarkdown} className="!text-xs" disableCommandPrefix />
         </div>
       )}
@@ -87,14 +87,14 @@ export function CardBlock({ block, messageId }: { block: RichCardBlock; messageI
               type="button"
               disabled={loading}
               onClick={() => handleAction(a.action, a.payload)}
-              className="text-xs px-2 py-1 rounded bg-yellow-100 dark:bg-yellow-900/40 hover:bg-yellow-200 dark:hover:bg-yellow-800/50 text-yellow-800 dark:text-yellow-200 border border-yellow-300 dark:border-yellow-700 disabled:opacity-50 transition-colors"
+              className="text-xs px-2 py-1 rounded bg-conn-amber-bg hover:opacity-80 text-conn-amber-text border border-conn-amber-ring disabled:opacity-50 transition-colors"
             >
               {loading ? '合成中...' : a.label}
             </button>
           ))}
         </div>
       )}
-      {error && <div className="mt-1 text-xs text-red-500">{error}</div>}
+      {error && <div className="mt-1 text-xs text-conn-red-text">{error}</div>}
     </div>
   );
 }

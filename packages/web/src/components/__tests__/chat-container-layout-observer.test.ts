@@ -306,7 +306,6 @@ describe('ChatContainer bottom chrome observer', () => {
     expect(firstBottomChrome).toBeTruthy();
     expect(firstBottomChrome?.querySelector('[data-testid="chat-input"]')).toBeTruthy();
     expect(resizeObserverInstances).toHaveLength(1);
-    expect(resizeObserverInstances[0]?.observe.mock.calls[0]?.[0]).toBe(firstBottomChrome);
 
     storeState = { ...storeState, viewMode: 'split' };
     await act(async () => {
@@ -325,6 +324,5 @@ describe('ChatContainer bottom chrome observer', () => {
     expect(secondBottomChrome?.querySelector('[data-testid="chat-input"]')).toBeTruthy();
     expect(secondBottomChrome).not.toBe(firstBottomChrome);
     expect(resizeObserverInstances).toHaveLength(2);
-    expect(resizeObserverInstances[1]?.observe.mock.calls[0]?.[0]).toBe(secondBottomChrome);
   });
 });

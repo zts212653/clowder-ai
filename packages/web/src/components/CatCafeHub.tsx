@@ -136,10 +136,6 @@ export function CatCafeHub() {
     setEditorOpen(true);
   }, []);
 
-  const openCoCreatorEditor = useCallback(() => {
-    setCoCreatorEditorOpen(true);
-  }, []);
-
   const closeEditor = useCallback(() => {
     setEditorOpen(false);
     setEditingCat(null);
@@ -272,7 +268,7 @@ export function CatCafeHub() {
     >
       <div
         className="rounded-2xl shadow-xl max-w-4xl w-full mx-4 h-[85vh] flex flex-col"
-        style={{ backgroundColor: '#FDF8F3' }}
+        style={{ backgroundColor: 'var(--console-card-bg)' }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -291,7 +287,7 @@ export function CatCafeHub() {
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 pb-4 space-y-3" style={{ minHeight: 0 }}>
-          {fetchError && <p className="text-sm text-red-500 bg-red-50 rounded-lg px-3 py-2">{fetchError}</p>}
+          {fetchError && <p className="text-sm text-conn-red-text bg-conn-red-bg rounded-lg px-3 py-2">{fetchError}</p>}
 
           {/* Accordion navigation */}
           <div className="space-y-2">
@@ -320,7 +316,6 @@ export function CatCafeHub() {
                   config={config}
                   cats={cats}
                   onAddMember={openAddMember}
-                  onEditCoCreator={openCoCreatorEditor}
                   onEditMember={openEditMember}
                   onDeleteMember={handleDeleteMember}
                   onToggleAvailability={handleToggleAvailability}

@@ -55,7 +55,7 @@ export function ConfirmDialog({
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={onCancel}>
       <div
-        className="bg-cafe-surface rounded-xl shadow-xl p-6 max-w-sm w-full mx-4"
+        className="bg-cafe-surface rounded-xl border border-[var(--cafe-border)] shadow-xl p-6 max-w-sm w-full mx-4"
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-base font-semibold mb-2">{title}</h3>
@@ -67,7 +67,7 @@ export function ConfirmDialog({
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             placeholder={inputPlaceholder}
-            className="w-full border border-cafe rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-300"
+            className="w-full border border-[var(--console-border-soft)] rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-conn-sky-ring"
           />
         )}
         <div className="flex justify-end gap-2">
@@ -80,8 +80,10 @@ export function ConfirmDialog({
           <button
             onClick={onConfirm}
             disabled={!canConfirm}
-            className={`px-4 py-2 text-sm text-white rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-              isDanger ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-500 hover:bg-blue-600'
+            className={`px-4 py-2 text-sm text-[var(--cafe-surface)] rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+              isDanger
+                ? 'bg-[var(--color-conn-red-text)] hover:opacity-90'
+                : 'bg-[var(--color-cafe-accent)] hover:opacity-90'
             }`}
           >
             {confirmLabel}

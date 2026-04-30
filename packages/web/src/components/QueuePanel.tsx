@@ -176,12 +176,14 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
   return (
     <div
       className={`border-t mx-4 mb-1 rounded-xl overflow-hidden ${
-        queuePaused ? 'border-amber-200 bg-amber-50/50' : 'border-[#9B7EBD]/20 bg-[#9B7EBD]/5'
+        queuePaused
+          ? 'border-conn-amber-ring bg-conn-amber-bg/50'
+          : 'border-[var(--color-opus-primary)]/20 bg-[var(--color-opus-primary)]/5'
       }`}
     >
       {/* Header */}
       <div
-        className={`flex items-center justify-between px-3 py-2 ${queuePaused ? 'bg-amber-100/60' : 'bg-[#9B7EBD]/10'}`}
+        className={`flex items-center justify-between px-3 py-2 ${queuePaused ? 'bg-conn-amber-bg/60' : 'bg-[var(--color-opus-primary)]/10'}`}
       >
         <div className="flex items-center gap-2">
           <svg className="w-4 h-4 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
@@ -190,7 +192,9 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
           <span className="text-xs font-medium text-cafe-secondary">{queuePaused ? '队列已暂停' : '排队中'}</span>
           <span
             className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
-              queuePaused ? 'bg-amber-200 text-amber-700' : 'bg-[#9B7EBD]/20 text-[#9B7EBD]'
+              queuePaused
+                ? 'bg-conn-amber-bg text-conn-amber-text'
+                : 'bg-[var(--color-opus-primary)]/20 text-[var(--color-opus-primary)]'
             }`}
           >
             {visibleEntries.length}
@@ -200,7 +204,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
           {queuePaused && (
             <button
               onClick={handleContinue}
-              className="text-xs px-2 py-1 rounded-md bg-emerald-500 text-white hover:bg-emerald-600 transition-colors"
+              className="text-xs px-2 py-1 rounded-md bg-conn-emerald-text text-[var(--cafe-surface)] hover:opacity-90 transition-colors"
             >
               继续
             </button>
@@ -211,14 +215,14 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
           >
             {isCollapsed ? '展开' : '收起'}
           </button>
-          <button onClick={handleClear} className="text-xs text-cafe-muted hover:text-red-500 transition-colors">
+          <button onClick={handleClear} className="text-xs text-cafe-muted hover:text-conn-red-text transition-colors">
             清空
           </button>
         </div>
       </div>
 
       {queuePaused && (
-        <div className="px-3 py-1.5 text-xs text-amber-600 border-b border-amber-200/60">{pauseLabel}</div>
+        <div className="px-3 py-1.5 text-xs text-conn-amber-text border-b border-conn-amber-ring/60">{pauseLabel}</div>
       )}
 
       {!isCollapsed && (

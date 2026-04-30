@@ -34,7 +34,7 @@ describe('ThreadCatStatus', () => {
     );
     expect(html).toContain('ᓚᘏᗢ');
     expect(html).toContain('animate-cat-bounce');
-    expect(html).toContain('text-amber-500');
+    expect(html).toContain('text-conn-amber-text');
   });
 
   it('shows green cat + check when done', () => {
@@ -42,7 +42,7 @@ describe('ThreadCatStatus', () => {
       React.createElement(ThreadCatStatus, { threadState: makeState({ opus: 'done' }), unreadCount: 0 }),
     );
     expect(html).toContain('ᓚᘏᗢ');
-    expect(html).toContain('text-green-500');
+    expect(html).toContain('text-conn-emerald-text');
     expect(html).toContain('✓');
   });
 
@@ -52,7 +52,7 @@ describe('ThreadCatStatus', () => {
     );
     expect(html).toContain('ᓚᘏᗢ');
     expect(html).toContain('animate-cat-shake');
-    expect(html).toContain('text-red-500');
+    expect(html).toContain('text-conn-red-text');
   });
 
   it('shows unread badge', () => {
@@ -60,7 +60,7 @@ describe('ThreadCatStatus', () => {
       React.createElement(ThreadCatStatus, { threadState: makeState({}), unreadCount: 5 }),
     );
     expect(html).toContain('5');
-    expect(html).toContain('bg-amber-500');
+    expect(html).toContain('bg-conn-amber-bg');
   });
 
   it('caps unread at 99+', () => {
@@ -88,7 +88,7 @@ describe('ThreadCatStatus', () => {
         unreadCount: 0,
       }),
     );
-    expect(html).toContain('text-red-500');
+    expect(html).toContain('text-conn-red-text');
   });
 
   it('shows paw badge when hasUserMention is true', () => {
@@ -111,8 +111,8 @@ describe('ThreadCatStatus', () => {
         hasUserMention: true,
       }),
     );
-    expect(html).toContain('bg-red-500');
-    expect(html).not.toContain('bg-amber-500');
+    expect(html).toContain('bg-conn-red-bg');
+    expect(html).not.toContain('bg-conn-amber-bg');
   });
 
   it('shows amber unread badge when no user mention', () => {
@@ -123,7 +123,7 @@ describe('ThreadCatStatus', () => {
         hasUserMention: false,
       }),
     );
-    expect(html).toContain('bg-amber-500');
+    expect(html).toContain('bg-conn-amber-bg');
   });
 
   it('renders paw even with zero unread when hasUserMention', () => {

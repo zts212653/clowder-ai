@@ -116,7 +116,7 @@ function VoicePlaybackControls({ playbackState }: { playbackState: PlaybackState
       <button
         type="button"
         onClick={isPaused ? resumeAudio : pauseAudio}
-        className="p-1 rounded-lg text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors"
+        className="p-1 rounded-lg text-conn-emerald-text hover:bg-conn-emerald-bg dark:hover:bg-conn-emerald-bg/20 transition-colors"
         aria-label={isPaused ? '继续播放' : '暂停'}
         title={isPaused ? '继续播放' : '暂停'}
       >
@@ -133,7 +133,7 @@ function VoicePlaybackControls({ playbackState }: { playbackState: PlaybackState
       <button
         type="button"
         onClick={skipAudio}
-        className="p-1 rounded-lg text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors"
+        className="p-1 rounded-lg text-conn-emerald-text hover:bg-conn-emerald-bg dark:hover:bg-conn-emerald-bg/20 transition-colors"
         aria-label="跳过当前"
         title="跳过当前"
       >
@@ -170,19 +170,16 @@ export function VoiceCompanionButton({ threadId, defaultCatId }: VoiceCompanionB
       <button
         type="button"
         onClick={handleClick}
-        className={`
-          p-1 rounded-lg transition-colors
-          ${
-            isActive
-              ? 'text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20'
-              : 'text-cafe-secondary hover:bg-cocreator-light'
-          }
-        `}
+        className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
+          isActive
+            ? 'bg-conn-emerald-bg text-conn-emerald-text hover:opacity-80'
+            : 'bg-[var(--console-voice-companion)] text-[var(--cafe-surface)] hover:opacity-80'
+        }`}
         aria-label={isActive ? '停止语音陪伴' : '语音陪伴'}
         title={isActive ? '停止语音陪伴' : '语音陪伴'}
       >
         <svg
-          className={`w-5 h-5${isActive ? ' animate-pulse' : ''}`}
+          className={`w-4 h-4${isActive ? ' animate-pulse' : ''}`}
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"

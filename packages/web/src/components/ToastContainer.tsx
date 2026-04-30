@@ -26,12 +26,17 @@ function ToastCard({ toast }: { toast: ToastItem }) {
         ? 'border-l-green-400'
         : 'border-l-amber-400';
 
-  const icon = toast.type === 'error' ? 'text-red-500' : toast.type === 'success' ? 'text-green-500' : 'text-amber-500';
+  const icon =
+    toast.type === 'error'
+      ? 'text-conn-red-text'
+      : toast.type === 'success'
+        ? 'text-conn-emerald-text'
+        : 'text-conn-amber-text';
 
   return (
     <div
       className={`
-        bg-cafe-surface rounded-lg shadow-lg border border-cafe-subtle border-l-4 ${borderColor}
+        bg-cafe-surface rounded-lg shadow-lg border border-[var(--console-border-soft)] border-l-4 ${borderColor}
         px-4 py-3 max-w-xs pointer-events-auto
         ${toast.exiting ? 'animate-toast-out' : 'animate-toast-in'}
       `}

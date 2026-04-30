@@ -134,12 +134,12 @@ export function TraceBrowser() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="traceId or catId..."
-          className="flex-1 rounded-lg border border-cafe-border bg-cafe-surface px-3 py-1.5 text-sm text-cafe placeholder:text-cafe-muted focus:border-blue-400 focus:outline-none"
+          className="flex-1 rounded-lg border border-cafe-border bg-cafe-surface px-3 py-1.5 text-sm text-cafe placeholder:text-cafe-muted focus:border-[var(--color-cafe-accent)] focus:outline-none"
         />
         <button
           type="button"
           onClick={fetchTraces}
-          className="rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+          className="rounded-lg bg-[var(--color-cafe-accent)]/10 px-3 py-1.5 text-xs font-medium text-[var(--color-cafe-accent)] hover:opacity-90"
         >
           Search
         </button>
@@ -182,7 +182,7 @@ function TraceCard({ trace, expanded, onToggle }: { trace: TraceGroup; expanded:
         </span>
         <span className="text-[10px] tabular-nums text-cafe-secondary">{trace.totalDurationMs.toFixed(0)}ms</span>
         {trace.hasError && (
-          <span className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-700">error</span>
+          <span className="rounded bg-conn-red-bg px-1.5 py-0.5 text-[10px] font-medium text-conn-red-text">error</span>
         )}
         <span className="text-[10px] text-cafe-muted">{new Date(trace.startTime).toLocaleTimeString()}</span>
       </button>
@@ -223,7 +223,7 @@ function TreeWaterfall({
           <div
             key={node.span.spanId}
             onClick={() => onSelectSpan(selected ? null : node.span.spanId)}
-            className={`flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 transition-colors hover:bg-cafe-surface-elevated ${selected ? 'bg-blue-50/70' : ''}`}
+            className={`flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 transition-colors hover:bg-cafe-surface-elevated ${selected ? 'bg-[var(--color-cafe-accent)]/10' : ''}`}
           >
             <div
               className="flex items-center gap-1 truncate text-[10px]"
@@ -244,7 +244,7 @@ function TreeWaterfall({
             )}
             <div className="relative h-3 flex-1 rounded bg-cafe-surface-elevated">
               <div
-                className={`absolute h-full rounded ${statusOk ? 'bg-blue-400' : 'bg-red-400'}`}
+                className={`absolute h-full rounded ${statusOk ? 'bg-[var(--color-cafe-accent)]' : 'bg-[var(--color-conn-red-text)]'}`}
                 style={{ left: `${left}%`, width: `${width}%` }}
               />
             </div>

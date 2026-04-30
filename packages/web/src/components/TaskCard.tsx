@@ -37,9 +37,9 @@ const STATUS_STYLES: Record<TaskStatus, { text: string; border: string; pillBg: 
     pillBg: 'bg-cafe-surface-elevated text-cafe-muted',
   },
   done: {
-    text: 'text-green-600',
+    text: 'text-conn-emerald-text',
     border: 'border-l-green-600',
-    pillBg: 'bg-green-50 text-green-600 dark:bg-green-950/20',
+    pillBg: 'bg-conn-emerald-bg text-conn-emerald-text',
   },
 };
 
@@ -67,7 +67,7 @@ export function TaskCard({
 
   return (
     <div
-      className={`border-l-4 ${style.border} bg-cafe-surface-elevated border border-cafe rounded-xl p-3 mx-3 mb-1.5 hover:-translate-y-0.5 transition-transform ease-out`}
+      className={`border-l-4 ${style.border} bg-cafe-surface-elevated border border-[var(--console-border-soft)] rounded-xl p-3 mx-3 mb-1.5 hover:-translate-y-0.5 transition-transform ease-out`}
     >
       <div className="flex items-center gap-2">
         {/* Title */}
@@ -94,7 +94,7 @@ export function TaskCard({
 
       {/* Expanded details */}
       {expanded && (
-        <div className="mt-2 pt-2 border-t border-cafe">
+        <div className="mt-2 pt-2 border-t border-[var(--console-border-soft)]">
           {task.why && <p className="text-xs text-cafe-muted leading-relaxed">{task.why}</p>}
           <p className="text-[10px] text-cafe-muted mt-1">
             {formatRelativeTime(task.createdAt)} · {task.createdBy === 'user' ? '铲屎官' : task.createdBy}

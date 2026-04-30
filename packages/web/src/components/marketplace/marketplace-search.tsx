@@ -87,7 +87,7 @@ export function MarketplaceSearch() {
           onChange={handleInput}
           onKeyDown={handleKeyDown}
           placeholder="搜索能力..."
-          className="w-full rounded-lg border border-cafe-border bg-white py-2 pl-9 pr-3 text-sm text-cafe placeholder:text-cafe-muted focus:border-purple-300 focus:outline-none focus:ring-1 focus:ring-purple-200"
+          className="w-full max-w-[400px] rounded-lg border border-cafe-border bg-[var(--console-card-bg)] py-2 pl-9 pr-3 text-sm text-cafe placeholder:text-cafe-muted focus:border-conn-purple-ring focus:outline-none focus:ring-1 focus:ring-conn-purple-ring"
         />
       </div>
 
@@ -96,7 +96,7 @@ export function MarketplaceSearch() {
           onClick={() => setEcosystemFilter([])}
           className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
             isAll
-              ? 'border-transparent bg-cafe-text text-white'
+              ? 'border-transparent bg-cafe-text text-[var(--cafe-surface)]'
               : 'border-cafe-border bg-cafe-surface text-cafe-secondary hover:bg-cafe-surface-elevated'
           }`}
         >
@@ -110,7 +110,7 @@ export function MarketplaceSearch() {
               onClick={() => toggleEcosystem(eco)}
               className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
                 active
-                  ? 'border-transparent bg-cafe-text text-white'
+                  ? 'border-transparent bg-cafe-text text-[var(--cafe-surface)]'
                   : 'border-cafe-border bg-cafe-surface text-cafe-secondary hover:bg-cafe-surface-elevated'
               }`}
             >
@@ -126,7 +126,7 @@ export function MarketplaceSearch() {
           onClick={() => setTrustFilter([])}
           className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
             isTrustAll
-              ? 'border-transparent bg-cafe-text text-white'
+              ? 'border-transparent bg-cafe-text text-[var(--cafe-surface)]'
               : 'border-cafe-border bg-cafe-surface text-cafe-secondary hover:bg-cafe-surface-elevated'
           }`}
         >
@@ -140,7 +140,7 @@ export function MarketplaceSearch() {
               onClick={() => toggleTrust(level)}
               className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
                 active
-                  ? 'border-transparent bg-cafe-text text-white'
+                  ? 'border-transparent bg-cafe-text text-[var(--cafe-surface)]'
                   : 'border-cafe-border bg-cafe-surface text-cafe-secondary hover:bg-cafe-surface-elevated'
               }`}
             >

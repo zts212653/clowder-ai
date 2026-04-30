@@ -1,11 +1,16 @@
 import type { Metadata, Viewport } from 'next';
+import { AppShell } from '@/components/AppShell';
 import { BrakeModal } from '@/components/BrakeModal';
 import { GuideOverlay } from '@/components/GuideOverlay';
 import { SessionBootstrap } from '@/components/SessionBootstrap';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import { ToastContainer } from '@/components/ToastContainer';
 import { ConfirmProvider } from '@/components/useConfirm';
+import '@xterm/xterm/css/xterm.css';
+import './theme-tokens.css';
 import './globals.css';
+import './console-shell.css';
+import './console-controls.css';
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -39,7 +44,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-screen">
         <SessionBootstrap />
         <ThemeProvider>
-          <ConfirmProvider>{children}</ConfirmProvider>
+          <ConfirmProvider>
+            <AppShell>{children}</AppShell>
+          </ConfirmProvider>
           <BrakeModal />
           <GuideOverlay />
           <ToastContainer />

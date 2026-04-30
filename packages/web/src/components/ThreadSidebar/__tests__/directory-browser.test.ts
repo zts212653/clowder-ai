@@ -257,6 +257,23 @@ describe('DirectoryBrowser', () => {
     await flush();
 
     expect(container.textContent).toContain('当前项目');
+    const activeRow = container.querySelector(`button[title="${activePath}"]`) as HTMLButtonElement;
+    expect(activeRow).toBeTruthy();
+    expect(activeRow.className).toContain('bg-[var(--console-active-bg)]');
+    expect(activeRow.className).not.toContain('bg-cocreator-bg');
+  });
+
+  it('uses console control classes for primary and secondary actions', async () => {
+    mockApiFetch.mockReturnValueOnce(jsonOk(makeBrowseResult(HOME, [], null)));
+    render();
+    await flush();
+
+    const cancelBtn = findButtonByText('取消');
+    const selectBtn = findButtonByText('选择此目录');
+    expect(cancelBtn).toBeTruthy();
+    expect(selectBtn).toBeTruthy();
+    expect(cancelBtn?.className).toContain('console-button-secondary');
+    expect(selectBtn?.className).toContain('console-button-primary');
   });
 
   // ── Error handling ────────────────────────────────────

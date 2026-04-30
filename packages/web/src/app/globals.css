@@ -2,345 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
-/* === Cat Cafe Design System — F056 Three-Layer Token Architecture === */
-
-/* --- Layer 1: Base Palette (raw colors, never used directly in components) --- */
-:root {
-  --cat-cream-white: #fdf8f3;
-  --cat-soft-blue: #81d4fa;
-  --cat-warm-brown: #8d6e63;
-  --cat-paw-pink: #ffab91;
-  --cat-deep-ink: #1e1e24;
-  --cat-muted-stone: #666666;
-  --cat-light-sand: #f5ede3;
-  --cat-border-tan: #e0d5c7;
-
-  /* --- Layer 2: Semantic Tokens (what components use) --- */
-  --cafe-surface: var(--cat-cream-white);
-  --cafe-surface-elevated: var(--cat-light-sand);
-  --cafe-surface-sunken: #f0e8dd;
-  --cafe-text: var(--cat-deep-ink);
-  --cafe-text-secondary: var(--cat-muted-stone);
-  --cafe-text-muted: #888888;
-  --cafe-border: var(--cat-border-tan);
-  --cafe-border-subtle: #ebe3d9;
-  --cafe-accent: var(--cat-paw-pink);
-  --cafe-accent-hover: #ff9a7a;
-  --cafe-crosspost: var(--cat-soft-blue);
-  --cafe-interactive: #85655a;
-
-  /* --- Layer 3: Agent Persona (cat identity colors) --- */
-  --color-base-white: var(--cat-cream-white);
-  --color-base-black: var(--cat-deep-ink);
-
-  --color-opus-primary: #9b7ebd;
-  --color-opus-light: #d4c1ec;
-  --color-opus-dark: #6d5a8c;
-  --color-opus-bg: #f3eaf8;
-
-  --color-codex-primary: #5b8c5a;
-  --color-codex-light: #8fb98e;
-  --color-codex-dark: #3a5f39;
-  --color-codex-bg: #eaf6ea;
-
-  --color-gemini-primary: #5b9bd5;
-  --color-gemini-light: #9cc0e7;
-  --color-gemini-dark: #3a6fa5;
-  --color-gemini-bg: #eaf4fb;
-
-  --color-kimi-primary: #4b5563;
-  --color-kimi-light: #e5e7eb;
-  --color-kimi-dark: #1f2937;
-  --color-kimi-bg: #f9fafb;
-
-  --color-dare-primary: #d4a76a;
-  --color-dare-light: #e8c99b;
-  --color-dare-dark: #8b6f47;
-  --color-dare-bg: #fbf5ec;
-
-  --color-cocreator-primary: #e29578;
-  --color-cocreator-light: #ffddd2;
-  --color-cocreator-dark: #815b5b;
-  --color-cocreator-bg: #fff5f2;
-
-  /* --- Connector Identity Colors (light defaults) --- */
-  --conn-slate-bg: #f1f5f9;
-  --conn-slate-ring: #e2e8f0;
-  --conn-slate-text: #334155;
-  --conn-slate-hover: #0f172a;
-  --conn-slate-bubble-bg: #f8fafc;
-  --conn-slate-bubble-border: #e2e8f0;
-
-  --conn-gray-bg: #f3f4f6;
-  --conn-gray-ring: #d1d5db;
-  --conn-gray-text: #1f2937;
-  --conn-gray-hover: #000000;
-  --conn-gray-bubble-bg: #f9fafb;
-  --conn-gray-bubble-border: #d1d5db;
-
-  --conn-amber-bg: #fef3c7;
-  --conn-amber-ring: #fde68a;
-  --conn-amber-text: #b45309;
-  --conn-amber-hover: #78350f;
-  --conn-amber-bubble-bg: #fffbeb;
-  --conn-amber-bubble-border: #fde68a;
-
-  --conn-purple-bg: #f3e8ff;
-  --conn-purple-ring: #e9d5ff;
-  --conn-purple-text: #7e22ce;
-  --conn-purple-hover: #581c87;
-  --conn-purple-bubble-bg: #faf5ff;
-  --conn-purple-bubble-border: #e9d5ff;
-
-  --conn-emerald-bg: #d1fae5;
-  --conn-emerald-ring: #a7f3d0;
-  --conn-emerald-text: #047857;
-  --conn-emerald-hover: #064e3b;
-  --conn-emerald-bubble-bg: #ecfdf5;
-  --conn-emerald-bubble-border: #a7f3d0;
-
-  --conn-blue-bg: #dbeafe;
-  --conn-blue-ring: #bfdbfe;
-  --conn-blue-text: #1d4ed8;
-  --conn-blue-hover: #1e3a8a;
-  --conn-blue-bubble-bg: #eff6ff;
-  --conn-blue-bubble-border: #bfdbfe;
-
-  --conn-sky-bg: #e0f2fe;
-  --conn-sky-ring: #bae6fd;
-  --conn-sky-text: #0369a1;
-  --conn-sky-hover: #0c4a6e;
-  --conn-sky-bubble-bg: #f0f9ff;
-  --conn-sky-bubble-border: #bae6fd;
-
-  --conn-cyan-bg: #cffafe;
-  --conn-cyan-ring: #a5f3fc;
-  --conn-cyan-text: #0e7490;
-  --conn-cyan-hover: #164e63;
-  --conn-cyan-bubble-bg: #ecfeff;
-  --conn-cyan-bubble-border: #a5f3fc;
-
-  --conn-red-bg: #fee2e2;
-  --conn-red-ring: #fecaca;
-  --conn-red-text: #b91c1c;
-  --conn-red-hover: #7f1d1d;
-  --conn-red-bubble-bg: #fef2f2;
-  --conn-red-bubble-border: #fecaca;
-
-  --conn-indigo-bg: #e0e7ff;
-  --conn-indigo-ring: #c7d2fe;
-  --conn-indigo-text: #4338ca;
-  --conn-indigo-hover: #312e81;
-  --conn-indigo-bubble-bg: #eef2ff;
-  --conn-indigo-bubble-border: #c7d2fe;
-
-  --conn-violet-bg: #ede9fe;
-  --conn-violet-ring: #ddd6fe;
-  --conn-violet-text: #6d28d9;
-  --conn-violet-hover: #4c1d95;
-  --conn-violet-bubble-bg: #f5f3ff;
-  --conn-violet-bubble-border: #ddd6fe;
-
-  --conn-green-bg: #dcfce7;
-  --conn-green-ring: #bbf7d0;
-  --conn-green-text: #15803d;
-  --conn-green-hover: #14532d;
-  --conn-green-bubble-bg: #f0fdf4;
-  --conn-green-bubble-border: #bbf7d0;
-
-  /* Legacy aliases (consumed by body selector + existing components) */
-  --bg-app: var(--cafe-surface);
-  --text-primary: var(--cafe-text);
-  --text-secondary: var(--cafe-text-secondary);
-  --border-radius-base: 16px;
-  --spacing-unit: 8px;
-
-  /* F155: Guide Engine Tokens */
-  --guide-overlay-bg: rgba(12, 16, 24, 0.62);
-  --guide-cutout-ring: #d4853a;
-  --guide-cutout-shadow: rgba(212, 133, 58, 0.35);
-  --guide-hud-bg: #fffdf8;
-  --guide-hud-border: #e7dac7;
-  --guide-text-primary: #2b251f;
-  --guide-text-secondary: #6f6257;
-  --guide-success: #2f9e44;
-  --guide-error: #d94848;
-  --guide-z-overlay: 1100;
-  --guide-z-hud: 1110;
-  --guide-z-pulse: 1120;
-  --guide-radius: 14px;
-  --guide-gap: 12px;
-  --guide-motion-fast: 160ms;
-  --guide-motion-normal: 260ms;
-  --guide-breathe-animation: guide-breathe 1.8s ease-in-out infinite;
-  --guide-transition-duration: var(--guide-motion-normal);
-
-  /* Tier 3 System Notice tokens (light) */
-  --notice-info-label: #5f7d9a;
-  --notice-info-icon: #6488b0;
-  --notice-info-border: #d9e5f1;
-  --notice-warning-label: #9a6a32;
-  --notice-warning-icon: #b7791f;
-  --notice-warning-border: #e8dccf;
-  --notice-error-label: #a45d5d;
-  --notice-error-icon: #c76b6b;
-  --notice-error-border: #f0deda;
-  --notice-error-surface: #fff8f7;
-  --notice-enter-duration: 0.4s;
-  --notice-enter-easing: cubic-bezier(0.23, 1, 0.32, 1);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    --guide-breathe-animation: none;
-    --guide-transition-duration: 0ms;
-    --notice-enter-duration: 0ms;
-  }
-}
-
-/* --- Dark Mode: override semantic tokens only --- */
-[data-theme="dark"] {
-  /* Warm dark surfaces — NOT pure black, Cozy Swiss warmth preserved */
-  --cafe-surface: #1c1917;
-  --cafe-surface-elevated: #292524;
-  --cafe-surface-sunken: #0c0a09;
-  --cafe-text: #faf9f7;
-  --cafe-text-secondary: #a8a29e;
-  --cafe-text-muted: #78716c;
-  --cafe-border: #44403c;
-  --cafe-border-subtle: #33302c;
-  --cafe-accent: #ffb899;
-  --cafe-accent-hover: #ffc5aa;
-  --cafe-crosspost: #64b5f6;
-  --cafe-interactive: #b0937a;
-
-  /* Legacy aliases auto-update via semantic layer */
-  --bg-app: var(--cafe-surface);
-  --text-primary: var(--cafe-text);
-  --text-secondary: var(--cafe-text-secondary);
-
-  /* Cocreator brand colors — adapted for dark mode */
-  --color-cocreator-primary: #e29578;
-  --color-cocreator-light: #44403c;
-  --color-cocreator-dark: #d4a494;
-  --color-cocreator-bg: var(--cafe-surface-elevated);
-
-  /* Invert base tokens for dark mode (text-cafe-black → light, bg-cafe-white → dark) */
-  --color-base-white: var(--cafe-surface);
-  --color-base-black: var(--cafe-text);
-
-  /* Agent persona bg overrides for dark */
-  --color-opus-bg: rgba(155, 126, 189, 0.15);
-  --color-codex-bg: rgba(91, 140, 90, 0.15);
-  --color-gemini-bg: rgba(91, 155, 213, 0.15);
-  --color-kimi-bg: rgba(75, 85, 99, 0.18);
-  --color-dare-bg: rgba(212, 167, 106, 0.15);
-
-  /* Connector dark mode overrides — muted translucent backgrounds, lighter text */
-  --conn-slate-bg: rgba(148, 163, 184, 0.15);
-  --conn-slate-ring: rgba(148, 163, 184, 0.25);
-  --conn-slate-text: #cbd5e1;
-  --conn-slate-hover: #e2e8f0;
-  --conn-slate-bubble-bg: rgba(30, 41, 59, 0.35);
-  --conn-slate-bubble-border: rgba(71, 85, 105, 0.6);
-
-  --conn-gray-bg: rgba(156, 163, 175, 0.15);
-  --conn-gray-ring: rgba(156, 163, 175, 0.25);
-  --conn-gray-text: #d1d5db;
-  --conn-gray-hover: #e5e7eb;
-  --conn-gray-bubble-bg: rgba(31, 41, 55, 0.35);
-  --conn-gray-bubble-border: rgba(75, 85, 99, 0.6);
-
-  --conn-amber-bg: rgba(245, 158, 11, 0.15);
-  --conn-amber-ring: rgba(245, 158, 11, 0.25);
-  --conn-amber-text: #fcd34d;
-  --conn-amber-hover: #fde68a;
-  --conn-amber-bubble-bg: rgba(120, 53, 15, 0.35);
-  --conn-amber-bubble-border: rgba(180, 83, 9, 0.5);
-
-  --conn-purple-bg: rgba(168, 85, 247, 0.15);
-  --conn-purple-ring: rgba(168, 85, 247, 0.25);
-  --conn-purple-text: #d8b4fe;
-  --conn-purple-hover: #e9d5ff;
-  --conn-purple-bubble-bg: rgba(88, 28, 135, 0.35);
-  --conn-purple-bubble-border: rgba(126, 34, 206, 0.5);
-
-  --conn-emerald-bg: rgba(16, 185, 129, 0.15);
-  --conn-emerald-ring: rgba(16, 185, 129, 0.25);
-  --conn-emerald-text: #6ee7b7;
-  --conn-emerald-hover: #a7f3d0;
-  --conn-emerald-bubble-bg: rgba(6, 78, 59, 0.35);
-  --conn-emerald-bubble-border: rgba(4, 120, 87, 0.5);
-
-  --conn-blue-bg: rgba(59, 130, 246, 0.15);
-  --conn-blue-ring: rgba(59, 130, 246, 0.25);
-  --conn-blue-text: #93c5fd;
-  --conn-blue-hover: #bfdbfe;
-  --conn-blue-bubble-bg: rgba(30, 58, 138, 0.35);
-  --conn-blue-bubble-border: rgba(29, 78, 216, 0.5);
-
-  --conn-sky-bg: rgba(14, 165, 233, 0.15);
-  --conn-sky-ring: rgba(14, 165, 233, 0.25);
-  --conn-sky-text: #7dd3fc;
-  --conn-sky-hover: #bae6fd;
-  --conn-sky-bubble-bg: rgba(7, 89, 133, 0.35);
-  --conn-sky-bubble-border: rgba(3, 105, 161, 0.5);
-
-  --conn-cyan-bg: rgba(6, 182, 212, 0.15);
-  --conn-cyan-ring: rgba(6, 182, 212, 0.25);
-  --conn-cyan-text: #67e8f9;
-  --conn-cyan-hover: #a5f3fc;
-  --conn-cyan-bubble-bg: rgba(21, 94, 117, 0.35);
-  --conn-cyan-bubble-border: rgba(14, 116, 144, 0.5);
-
-  --conn-red-bg: rgba(239, 68, 68, 0.15);
-  --conn-red-ring: rgba(239, 68, 68, 0.25);
-  --conn-red-text: #fca5a5;
-  --conn-red-hover: #fecaca;
-  --conn-red-bubble-bg: rgba(127, 29, 29, 0.35);
-  --conn-red-bubble-border: rgba(185, 28, 28, 0.5);
-
-  --conn-indigo-bg: rgba(99, 102, 241, 0.15);
-  --conn-indigo-ring: rgba(99, 102, 241, 0.25);
-  --conn-indigo-text: #a5b4fc;
-  --conn-indigo-hover: #c7d2fe;
-  --conn-indigo-bubble-bg: rgba(49, 46, 129, 0.35);
-  --conn-indigo-bubble-border: rgba(67, 56, 202, 0.5);
-
-  --conn-violet-bg: rgba(139, 92, 246, 0.15);
-  --conn-violet-ring: rgba(139, 92, 246, 0.25);
-  --conn-violet-text: #c4b5fd;
-  --conn-violet-hover: #ddd6fe;
-  --conn-violet-bubble-bg: rgba(76, 29, 149, 0.35);
-  --conn-violet-bubble-border: rgba(109, 40, 217, 0.5);
-
-  --conn-green-bg: rgba(34, 197, 94, 0.15);
-  --conn-green-ring: rgba(34, 197, 94, 0.25);
-  --conn-green-text: #86efac;
-  --conn-green-hover: #bbf7d0;
-  --conn-green-bubble-bg: rgba(20, 83, 45, 0.35);
-  --conn-green-bubble-border: rgba(21, 128, 61, 0.5);
-
-  /* Tier 3 System Notice tokens (dark) */
-  --notice-info-label: #8fa8c4;
-  --notice-info-icon: #7fa0c8;
-  --notice-info-border: rgba(100, 136, 176, 0.32);
-  --notice-warning-label: #caa06f;
-  --notice-warning-icon: #d9a347;
-  --notice-warning-border: rgba(183, 121, 31, 0.32);
-  --notice-error-label: #cf9595;
-  --notice-error-icon: #d98989;
-  --notice-error-border: rgba(199, 107, 107, 0.32);
-  --notice-error-surface: rgba(199, 107, 107, 0.08);
-}
-
 body {
   font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  color: var(--text-primary);
-  background: var(--bg-app);
+  color: var(--cafe-text);
+  background: var(--cafe-surface);
 }
 
-/* === Mobile PWA: safe-area insets for notched devices === */
 @supports (padding-top: env(safe-area-inset-top)) {
   .safe-area-top {
     padding-top: env(safe-area-inset-top, 0px);
@@ -372,6 +39,7 @@ body {
     box-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
   }
 }
+
 .animate-pulse-subtle {
   animation: pulse-subtle 2s ease-in-out infinite;
 }
@@ -461,7 +129,6 @@ body {
     animation: none;
   }
 
-  /* Disable breathe ring and transitions on guide overlay elements */
   [style*="guide-breathe"] {
     animation: none !important;
   }
@@ -471,35 +138,40 @@ body {
   animation: guide-error-shake 0.3s ease-out;
 }
 
-/* Tier 3 System Notice — tone binding + entrance animation */
 [data-notice-tone="info"] {
   --notice-label: var(--notice-info-label);
   --notice-icon: var(--notice-info-icon);
   --notice-border: var(--notice-info-border);
   --notice-surface: var(--cafe-surface);
 }
+
 [data-notice-tone="warning"] {
   --notice-label: var(--notice-warning-label);
   --notice-icon: var(--notice-warning-icon);
   --notice-border: var(--notice-warning-border);
   --notice-surface: var(--cafe-surface);
 }
+
 [data-notice-tone="error"] {
   --notice-label: var(--notice-error-label);
   --notice-icon: var(--notice-error-icon);
   --notice-border: var(--notice-error-border);
   --notice-surface: var(--notice-error-surface);
 }
+
 .system-notice-bar__label {
   color: var(--notice-label);
 }
+
 .system-notice-bar__icon {
   color: var(--notice-icon);
 }
+
 .system-notice-bar {
   border: 1px solid var(--notice-border);
   background: color-mix(in srgb, var(--notice-surface) 90%, transparent);
 }
+
 @keyframes system-notice-enter {
   from {
     opacity: 0;
@@ -510,6 +182,7 @@ body {
     transform: translateY(0);
   }
 }
+
 @media (prefers-reduced-motion: no-preference) {
   .system-notice-bar {
     animation: system-notice-enter var(--notice-enter-duration) var(--notice-enter-easing);
@@ -535,57 +208,39 @@ body {
   }
 }
 
-/* === F101 AC-D5: Werewolf Cute Theme (狼人猫猫风) === */
-/* Token-only layer: components consume these vars, no hardcoded colors */
 [data-theme="werewolf-cute"] {
-  /* Backgrounds */
-  --ww-bg-base: #0b1020; /* Moon Indigo — shell background */
-  --ww-bg-card: #2a2340; /* Grape Mist — card/panel surfaces */
-  --ww-bg-surface: #1a1835; /* Deep Grape — chat bubbles, input fields */
-  --ww-bg-topbar: #0d1428; /* Darker Indigo — top bar */
-
-  /* Text */
-  --ww-text-main: #e2e8f0; /* Soft white */
-  --ww-text-muted: #94a3b8; /* Slate gray */
-  --ww-text-dim: #64748b; /* Dim slate */
-
-  /* Accents */
-  --ww-accent-danger: #d45a6a; /* Claw Red — kill/vote/key actions */
-  --ww-accent-cute: #f2b7a8; /* Cat Peach — hover/avatar border/secondary */
-  --ww-accent-success: #8bd7c8; /* Moon Mint — guard/success */
-  --ww-accent-info: #e6c36a; /* Lantern Gold — divine/tips */
-
-  /* State indicators */
+  --ww-bg-base: #0b1020;
+  --ww-bg-card: #2a2340;
+  --ww-bg-surface: #1a1835;
+  --ww-bg-topbar: #0d1428;
+  --ww-text-main: #e2e8f0;
+  --ww-text-muted: #94a3b8;
+  --ww-text-dim: #64748b;
+  --ww-accent-danger: #d45a6a;
+  --ww-accent-cute: #f2b7a8;
+  --ww-accent-success: #8bd7c8;
+  --ww-accent-info: #e6c36a;
   --ww-state-alive: var(--ww-accent-cute);
   --ww-state-dead: #475569;
   --ww-state-speaking: var(--ww-accent-info);
   --ww-state-active: var(--ww-accent-cute);
-
-  /* Role colors (God View event flow) */
   --ww-role-wolf: var(--ww-accent-danger);
   --ww-role-seer: var(--ww-accent-info);
-  --ww-role-witch: #c084fc; /* Soft purple */
+  --ww-role-witch: #c084fc;
   --ww-role-guard: var(--ww-accent-success);
   --ww-role-villager: var(--ww-text-muted);
-
-  /* Faction colors (result screen) */
   --ww-faction-wolf: var(--ww-accent-danger);
   --ww-faction-village: var(--ww-accent-success);
-
-  /* Translucent variants (explicit, no /opacity modifier) */
-  --ww-danger-soft: rgba(212, 90, 106, 0.1); /* Claw Red 10% — wolf row bg */
-  --ww-info-soft: rgba(230, 195, 106, 0.3); /* Lantern Gold 30% — MVP border */
-  --ww-subtle-soft: rgba(242, 183, 168, 0.08); /* Cat Peach 8% — table dividers */
-  --ww-cute-soft: rgba(242, 183, 168, 0.1); /* Cat Peach 10% — selected preset */
-  --ww-base-overlay: rgba(11, 16, 32, 0.9); /* Moon Indigo 90% — modal backdrop */
-
-  /* Borders & shadows */
-  --ww-border-subtle: rgba(242, 183, 168, 0.15); /* Cat Peach 15% */
-  --ww-border-active: rgba(242, 183, 168, 0.4); /* Cat Peach 40% */
-  --ww-shadow-glow: rgba(212, 90, 106, 0.25); /* Claw Red glow */
+  --ww-danger-soft: rgba(212, 90, 106, 0.1);
+  --ww-info-soft: rgba(230, 195, 106, 0.3);
+  --ww-subtle-soft: rgba(242, 183, 168, 0.08);
+  --ww-cute-soft: rgba(242, 183, 168, 0.1);
+  --ww-base-overlay: rgba(11, 16, 32, 0.9);
+  --ww-border-subtle: rgba(242, 183, 168, 0.15);
+  --ww-border-active: rgba(242, 183, 168, 0.4);
+  --ww-shadow-glow: rgba(212, 90, 106, 0.25);
 }
 
-/* Day phase: same hues, brightness +10%, saturation -8% */
 [data-theme="werewolf-cute"][data-phase="day"] {
   --ww-bg-base: #111828;
   --ww-bg-card: #302a4a;
@@ -595,29 +250,47 @@ body {
   --ww-border-subtle: rgba(242, 183, 168, 0.2);
 }
 
-/* Night phase: slightly deeper, cooler */
 [data-theme="werewolf-cute"][data-phase="night"] {
   --ww-bg-base: #080c18;
   --ww-bg-card: #221d38;
   --ww-bg-surface: #151230;
   --ww-bg-topbar: #0a0e1e;
-  --ww-accent-cute: #e8a99a; /* Slightly muted peach at night */
-  --ww-shadow-glow: rgba(212, 90, 106, 0.35); /* Stronger red glow */
+  --ww-accent-cute: #e8a99a;
+  --ww-shadow-glow: rgba(212, 90, 106, 0.35);
 }
 
-/* F097: Dark-theme table overrides for CLI output + Thinking bubbles */
 .cli-output-md thead {
   background: rgba(255, 255, 255, 0.06);
 }
+
 .cli-output-md th {
   border-color: rgba(255, 255, 255, 0.12);
   color: #cbd5e1;
 }
+
 .cli-output-md td {
   border-color: rgba(255, 255, 255, 0.08);
   color: #94a3b8;
 }
+
 .cli-output-md code {
   background: rgba(255, 255, 255, 0.08);
   color: #e2e8f0;
+}
+
+/* Quest input highlight: gentle amber glow on input area */
+@keyframes quest-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 4px rgba(245, 158, 11, 0.3);
+  }
+  50% {
+    box-shadow:
+      0 0 12px rgba(245, 158, 11, 0.5),
+      0 0 4px rgba(245, 158, 11, 0.2);
+  }
+}
+.quest-input-highlight {
+  animation: quest-glow 2.5s ease-in-out infinite;
+  border-color: rgb(245, 158, 11) !important;
 }

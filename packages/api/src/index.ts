@@ -171,6 +171,8 @@ import {
   registerCallbackAuthDebugRoute,
   registerCallbackDocsRoutes,
   resolutionRoutes,
+  rulesRoutes,
+  servicesRoutes,
   sessionChainRoutes,
   sessionHooksRoutes,
   sessionStrategyConfigRoutes,
@@ -1732,6 +1734,8 @@ async function main(): Promise<void> {
   });
   await app.register(avatarsRoutes);
   await app.register(skillsRoutes);
+  await app.register(servicesRoutes);
+  await app.register(rulesRoutes);
   await app.register(memoryRoutes, { memoryStore, threadStore });
 
   // Session chain (F24)
@@ -2075,6 +2079,10 @@ async function main(): Promise<void> {
     }
   }, GLOBAL_REAPER_INTERVAL_MS);
   globalReaperTimer.unref();
+
+  // F170 Phase 3e: Start continuous service health heartbeat (60s interval)
+  const { startHealthHeartbeat } = await import('./domains/services/service-registry.js');
+  startHealthHeartbeat();
 
   // Log server startup to audit log (best-effort: don't crash if audit dir unwritable)
   const auditLog = getEventAuditLog();

@@ -132,16 +132,16 @@ export function WorkspaceFileViewer({
     <div className="flex-1 flex flex-col min-h-0 animate-fade-in">
       {/* Tab bar */}
       {openTabs.length > 0 && (
-        <div className="flex bg-[#1E1E24] border-b border-[#2a2a32] overflow-x-auto scrollbar-none">
+        <div className="flex bg-[var(--terminal-bg)] border-b border-[var(--terminal-border)] overflow-x-auto scrollbar-none">
           {openTabs.map((tab) => (
             <button
               key={tab}
               type="button"
               onClick={() => setOpenFile(tab)}
-              className={`group flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-mono border-r border-[#2a2a32] flex-shrink-0 transition-colors ${
+              className={`group flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-mono border-r border-[var(--terminal-border)] flex-shrink-0 transition-colors ${
                 tab === openFilePath
-                  ? 'bg-[#2a2a32] text-gray-200'
-                  : 'text-cafe-secondary hover:text-cafe-muted hover:bg-[#252530]'
+                  ? 'bg-[var(--terminal-border)] text-cafe-muted'
+                  : 'text-cafe-secondary hover:text-cafe-muted hover:bg-[var(--terminal-border)]'
               }`}
               title={tab}
             >
@@ -171,7 +171,7 @@ export function WorkspaceFileViewer({
       )}
 
       {/* Toolbar */}
-      <div className="px-3 py-1 bg-[#1E1E24] flex items-center justify-between">
+      <div className="px-3 py-1 bg-[var(--terminal-bg)] flex items-center justify-between">
         <div className="flex items-center gap-2 min-w-0">
           {file.size > 0 && (
             <span className="text-[9px] text-cafe-secondary font-mono flex-shrink-0">
@@ -203,7 +203,7 @@ export function WorkspaceFileViewer({
               active={jsxPreview}
               onClick={onToggleJsxPreview}
               title={jsxPreview ? '\u5207\u6362\u5230\u6E90\u7801' : '\u9884\u89C8 JSX/TSX'}
-              activeClass="bg-blue-600/80 text-white hover:bg-blue-500"
+              activeClass="bg-[var(--color-cafe-accent)]/80 text-[var(--cafe-surface)] hover:bg-[var(--color-cafe-accent)]"
             >
               {jsxPreview ? 'Preview' : 'Code'}
             </ToolbarBtn>
@@ -241,7 +241,7 @@ export function WorkspaceFileViewer({
               active={editMode}
               onClick={onToggleEdit}
               title={editMode ? '\u9000\u51FA\u7F16\u8F91' : '\u7F16\u8F91\u6587\u4EF6'}
-              activeClass="bg-green-600/80 text-white hover:bg-green-500"
+              activeClass="bg-conn-emerald-bg/80 text-[var(--cafe-surface)] hover:bg-conn-emerald-bg"
             >
               {editMode ? '\u7F16\u8F91\u4E2D' : '\u7F16\u8F91'}
             </ToolbarBtn>
@@ -263,7 +263,9 @@ export function WorkspaceFileViewer({
       </div>
 
       {saveError && (
-        <div className="px-3 py-1.5 text-[10px] text-red-400 bg-red-900/20 border-b border-red-900/30">{saveError}</div>
+        <div className="px-3 py-1.5 text-[10px] text-conn-red-text bg-conn-red-bg/20 border-b border-conn-red-ring/30">
+          {saveError}
+        </div>
       )}
 
       {pendingExternalSha && (
@@ -304,7 +306,7 @@ export function WorkspaceFileViewer({
       />
 
       {file.truncated && (
-        <div className="px-3 py-1.5 text-[10px] text-amber-400 bg-[#1E1E24] border-t border-amber-900/30">
+        <div className="px-3 py-1.5 text-[10px] text-conn-amber-text bg-[var(--terminal-bg)] border-t border-conn-amber-ring/30">
           \u6587\u4EF6\u5DF2\u622A\u65AD (超过 1MB)
         </div>
       )}
@@ -328,7 +330,7 @@ function ToolbarBtn({
   onClick: () => void;
   title: string;
 }) {
-  const ac = activeClass ?? 'bg-cocreator-primary/80 text-white hover:bg-cocreator-primary';
+  const ac = activeClass ?? 'bg-cafe-accent text-[var(--cafe-surface)] hover:bg-cafe-accent/90';
   return (
     <button
       type="button"

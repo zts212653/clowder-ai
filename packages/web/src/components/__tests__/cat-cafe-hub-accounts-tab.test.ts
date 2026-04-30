@@ -94,19 +94,6 @@ const SETTINGS_GUIDE_FLOW = {
   steps: [{ id: 'expand-settings', target: 'settings.group', tips: '展开系统配置分组', advance: 'click' as const }],
 };
 
-const CREATE_FORM_GUIDE_FLOW = {
-  id: 'add-api-key-account',
-  name: '新建 API Key 账号',
-  steps: [
-    {
-      id: 'open-create-form',
-      target: 'accounts.create-form',
-      tips: '展开新建 API Key 账号表单',
-      advance: 'click' as const,
-    },
-  ],
-};
-
 describe('CatCafeHub provider profiles tab', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -243,7 +230,7 @@ describe('CatCafeHub provider profiles tab', () => {
     });
     await flushEffects();
 
-    expect(container.textContent).toContain('账号配置');
+    expect(container.textContent).toContain('+ 新增账户认证');
     expect(container.textContent).toContain('Claude (OAuth)');
     expect(container.textContent).toContain('Codex (OAuth)');
     expect(container.textContent).toContain('Gemini (OAuth)');
@@ -452,8 +439,9 @@ describe('CatCafeHub provider profiles tab', () => {
     });
     await flushEffects();
 
-    expect(container.textContent).toContain('oauth');
-    expect(container.textContent).toContain('系统配置 > 账号配置');
+    // F179: HubAccountItem cards show host + auth type (OAuth / API Key) instead of status badges
+    expect(container.textContent).toContain('API Key');
+    expect(container.textContent).toContain('+ 新增账户认证');
     expect(container.textContent).toContain('+ 新增账户认证');
     expect(container.textContent).not.toContain('默认/覆盖模型');
 
@@ -489,7 +477,7 @@ describe('CatCafeHub provider profiles tab', () => {
     expect(container.textContent).not.toContain('测试');
   });
 
-  it('anchors the create-form guide target on the expand button itself', async () => {
+  it('anchors the account-list guide target on the list container', async () => {
     mockApiFetch.mockImplementation((path: string) => {
       if (path.startsWith('/api/accounts')) {
         return Promise.resolve(
@@ -508,18 +496,16 @@ describe('CatCafeHub provider profiles tab', () => {
     });
     await flushEffects();
 
-    const guideTarget = container.querySelector('[data-guide-id="accounts.create-form"]');
-    const expandButton = Array.from(container.querySelectorAll('button')).find((button) =>
+    const guideTarget = container.querySelector('[data-guide-id="accounts.account-list"]');
+    const addButton = Array.from(container.querySelectorAll('button')).find((button) =>
       button.textContent?.includes('新增账户认证'),
     );
 
     expect(guideTarget).toBeTruthy();
-    expect(expandButton).toBeTruthy();
-    expect(guideTarget).toBe(expandButton);
-    expect(guideTarget?.tagName).toBe('BUTTON');
+    expect(addButton).toBeTruthy();
   });
 
-  it('exposes actionable guide targets for the expanded account details and submit button', async () => {
+  it('opens unified auth modal with form inputs when add button is clicked', async () => {
     mockApiFetch.mockImplementation((path: string) => {
       if (path.startsWith('/api/accounts')) {
         return Promise.resolve(
@@ -538,23 +524,18 @@ describe('CatCafeHub provider profiles tab', () => {
     });
     await flushEffects();
 
-    const expandButton = container.querySelector('[data-guide-id="accounts.create-form"]') as HTMLButtonElement | null;
-    expect(expandButton).toBeTruthy();
+    const addButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('新增账户认证'),
+    );
+    expect(addButton).toBeTruthy();
 
     await act(async () => {
-      expandButton?.click();
+      addButton?.click();
     });
     await flushEffects();
 
-    const detailsTarget = container.querySelector('[data-guide-id="accounts.create-details"]');
-    const submitTarget = container.querySelector('[data-guide-id="accounts.create-submit"]');
-
-    expect(detailsTarget).toBeTruthy();
-    expect(detailsTarget?.querySelector('input[placeholder*="my-claude-account"]')).toBeTruthy();
-    expect(detailsTarget?.querySelector('select')).toBeTruthy();
-    expect(detailsTarget?.textContent).toContain('可用模型');
-    expect(submitTarget).toBeTruthy();
-    expect(submitTarget?.tagName).toBe('BUTTON');
+    // Modal should be open with auth form
+    expect(document.body.textContent).toContain('添加账户认证');
   });
 
   it('keeps settings expanded when the current guide step targets settings.group', async () => {
@@ -606,7 +587,7 @@ describe('CatCafeHub provider profiles tab', () => {
     expect(container.querySelector('[data-guide-id="settings.accounts"]')).toBeTruthy();
   });
 
-  it('keeps the create-form expanded when the current guide step targets accounts.create-form', async () => {
+  it('opens auth modal which contains form inputs for API key creation', async () => {
     mockApiFetch.mockImplementation((path: string) => {
       if (path.startsWith('/api/accounts')) {
         return Promise.resolve(
@@ -625,27 +606,18 @@ describe('CatCafeHub provider profiles tab', () => {
     });
     await flushEffects();
 
-    const expandButton = container.querySelector('[data-guide-id="accounts.create-form"]') as HTMLButtonElement | null;
-    expect(expandButton).toBeTruthy();
+    const addButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('新增账户认证'),
+    );
+    expect(addButton).toBeTruthy();
 
     await act(async () => {
-      expandButton?.click();
+      addButton?.click();
     });
     await flushEffects();
 
-    expect(container.querySelector('[data-guide-id="accounts.create-details"]')).toBeTruthy();
-
-    await act(async () => {
-      useGuideStore.getState().startGuide(CREATE_FORM_GUIDE_FLOW);
-      useGuideStore.getState().setPhase('active');
-    });
-
-    await act(async () => {
-      expandButton?.click();
-    });
-    await flushEffects();
-
-    expect(container.querySelector('[data-guide-id="accounts.create-details"]')).toBeTruthy();
+    // Modal should open with auth creation form
+    expect(document.body.textContent).toContain('添加账户认证');
   });
 
   it('creates api-key profile from name, url, api key, and supported models only', async () => {
@@ -917,10 +889,9 @@ describe('CatCafeHub provider profiles tab', () => {
     expect(profileList?.textContent).not.toContain('Dare (client-auth)');
     expect(container.textContent).not.toContain('全部');
     expect(container.textContent).not.toContain('内置认证');
-    // F171: cards are clickable for edit — no separate edit buttons
-    expect(
-      Array.from(container.querySelectorAll('button')).filter((button) => button.textContent?.includes('编辑')),
-    ).toHaveLength(0);
+    // F170: "预览/编辑" label removed — cards themselves are clickable buttons
+    expect(container.textContent).not.toContain('预览 / 编辑');
+    expect(container.textContent).not.toContain('预览 →');
   });
 
   it('does not expose 测试 buttons on provider cards', async () => {

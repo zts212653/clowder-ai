@@ -12,9 +12,9 @@ interface PodcastPlayerProps {
 
 const SPEAKER_COLORS: Record<string, string> = {
   宪宪: 'text-opus-dark bg-opus-bg',
-  砚砚: 'text-emerald-700 bg-emerald-50',
+  砚砚: 'text-conn-emerald-text bg-conn-emerald-bg',
   host: 'text-opus-dark bg-opus-bg',
-  guest: 'text-emerald-700 bg-emerald-50',
+  guest: 'text-conn-emerald-text bg-conn-emerald-bg',
 };
 
 function speakerStyle(speaker: string): string {
@@ -233,7 +233,7 @@ export function PodcastPlayer({ articleId, podcasts, onArtifactCreated }: Podcas
             type="button"
             disabled={generating}
             onClick={() => void handleGenerate('deep')}
-            className="rounded border border-cafe px-2 py-0.5 text-[10px] text-cafe-secondary hover:bg-cafe-surface-elevated disabled:opacity-50"
+            className="rounded border border-[var(--console-border-soft)] px-2 py-0.5 text-[10px] text-cafe-secondary hover:bg-cafe-surface-elevated disabled:opacity-50"
           >
             深度版
           </button>
@@ -241,7 +241,7 @@ export function PodcastPlayer({ articleId, podcasts, onArtifactCreated }: Podcas
       </div>
 
       {pendingPodcasts.length > 0 && (
-        <p className="mt-1 text-[10px] text-amber-600">{pendingPodcasts.length} 个播客正在生成中...</p>
+        <p className="mt-1 text-[10px] text-conn-amber-text">{pendingPodcasts.length} 个播客正在生成中...</p>
       )}
 
       {readyPodcasts.length > 1 && (
@@ -253,8 +253,8 @@ export function PodcastPlayer({ articleId, podcasts, onArtifactCreated }: Podcas
               onClick={() => void loadScript(p.id)}
               className={`rounded px-2 py-0.5 text-[10px] ${
                 selectedId === p.id
-                  ? 'bg-opus-primary text-white'
-                  : 'border border-cafe text-cafe-secondary hover:bg-cafe-surface-elevated'
+                  ? 'bg-opus-primary text-[var(--cafe-surface)]'
+                  : 'border border-[var(--console-border-soft)] text-cafe-secondary hover:bg-cafe-surface-elevated'
               }`}
             >
               {p.id.slice(0, 8)}
@@ -263,12 +263,12 @@ export function PodcastPlayer({ articleId, podcasts, onArtifactCreated }: Podcas
         </div>
       )}
 
-      {error && <p className="mt-1 text-[10px] text-red-500">{error}</p>}
+      {error && <p className="mt-1 text-[10px] text-conn-red-text">{error}</p>}
       {loading && <p className="mt-1 text-[10px] text-cafe-muted">加载中...</p>}
 
       {script && (
-        <div className="mt-2 rounded-md border border-cafe bg-cafe-surface">
-          <div className="flex items-center justify-between border-b border-cafe-subtle px-3 py-1.5">
+        <div className="mt-2 rounded-md border border-[var(--console-border-soft)] bg-cafe-surface">
+          <div className="flex items-center justify-between border-b border-[var(--console-border-soft)] px-3 py-1.5">
             <span className="text-[10px] text-cafe-muted">
               {script.mode === 'deep' ? '深度版' : '精华版'} · {script.segments.length} 段
             </span>

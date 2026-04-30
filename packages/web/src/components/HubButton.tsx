@@ -59,7 +59,7 @@ export function HubButton() {
   return (
     <button
       onClick={handleClick}
-      className="relative p-1 rounded-lg hover:bg-cocreator-light transition-colors"
+      className="relative p-1 rounded-lg hover:bg-[var(--console-hover-bg)] transition-colors"
       aria-label={tooltip}
       title={tooltip}
       data-bootcamp-step="hub-button"
@@ -89,7 +89,7 @@ export function HubButton() {
           // 即使未来 cap 字符变长也不会撑爆。
           style={{
             backgroundColor: badgeColor,
-            color: '#FFFFFF',
+            color: 'var(--cafe-surface)',
             maxWidth: '22px',
             overflow: 'hidden',
             textOverflow: 'ellipsis',

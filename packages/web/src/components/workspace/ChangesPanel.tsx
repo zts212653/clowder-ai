@@ -16,10 +16,10 @@ interface DiffData {
 }
 
 const statusLabels: Record<string, { label: string; color: string }> = {
-  M: { label: 'M', color: 'text-amber-400' },
-  A: { label: 'A', color: 'text-green-400' },
-  D: { label: 'D', color: 'text-red-400' },
-  R: { label: 'R', color: 'text-blue-400' },
+  M: { label: 'M', color: 'text-conn-amber-text' },
+  A: { label: 'A', color: 'text-conn-emerald-text' },
+  D: { label: 'D', color: 'text-conn-red-text' },
+  R: { label: 'R', color: 'text-[var(--color-cafe-accent)]' },
   '?': { label: 'U', color: 'text-cafe-muted' },
   '??': { label: 'U', color: 'text-cafe-muted' },
 };
@@ -70,24 +70,24 @@ export function ChangesPanel({ worktreeId, basisPct }: ChangesPanelProps) {
     <div className="flex flex-col min-h-0 flex-1">
       {/* Changed files list */}
       <div
-        className="flex-shrink-0 overflow-y-auto border-b border-cocreator-light/40"
+        className="flex-shrink-0 overflow-y-auto border-b border-[var(--console-border-soft)]"
         style={{ maxHeight: `${basisPct}%` }}
       >
-        <div className="px-3 py-1.5 flex items-center justify-between sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
-          <span className="text-[10px] text-cocreator-dark/50 font-semibold uppercase tracking-wider">
+        <div className="sticky top-0 flex items-center justify-between bg-cafe-white/95 px-3 py-1.5 backdrop-blur-sm">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-cafe-muted">
             {data ? `${data.changedFiles.length} changed` : 'Changes'}
           </span>
           <button
             type="button"
             onClick={fetchDiff}
             disabled={loading}
-            className="text-[10px] text-cocreator-dark/40 hover:text-cocreator-dark transition-colors disabled:opacity-50"
+            className="rounded-md px-2 py-1 text-[10px] text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-secondary disabled:opacity-50"
             title="Refresh"
           >
             {loading ? '...' : '↻'}
           </button>
         </div>
-        {error && <div className="px-3 py-1.5 text-[10px] text-red-500">{error}</div>}
+        {error && <div className="px-3 py-1.5 text-[10px] text-conn-red-text">{error}</div>}
         {data?.changedFiles.map((f) => {
           const info = getStatusInfo(f.status);
           return (
@@ -95,8 +95,8 @@ export function ChangesPanel({ worktreeId, basisPct }: ChangesPanelProps) {
               key={f.path}
               type="button"
               onClick={() => setSelectedFile(selectedFile === f.path ? null : f.path)}
-              className={`w-full text-left px-3 py-1 flex items-center gap-1.5 hover:bg-cocreator-bg/60 transition-colors ${
-                selectedFile === f.path ? 'bg-cocreator-bg/80' : ''
+              className={`flex w-full items-center gap-1.5 px-3 py-1 text-left transition-colors hover:bg-[var(--console-hover-bg)] ${
+                selectedFile === f.path ? 'bg-[var(--console-active-bg)]' : ''
               }`}
             >
               <span className={`text-[10px] font-mono font-bold w-3 ${info.color}`}>{info.label}</span>
@@ -114,7 +114,7 @@ export function ChangesPanel({ worktreeId, basisPct }: ChangesPanelProps) {
       </div>
 
       {/* Diff viewer */}
-      <div className="flex-1 min-h-0 overflow-auto bg-[#16161c]">
+      <div className="flex-1 min-h-0 overflow-auto bg-[var(--terminal-bg-deep)]">
         {data?.diff ? (
           <DiffViewer diff={data.diff} filePath={selectedFile ?? undefined} />
         ) : (

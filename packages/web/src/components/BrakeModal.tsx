@@ -26,12 +26,12 @@ const MESSAGES: Record<1 | 2 | 3, { catId: string; nickname: string; text: strin
 };
 
 const LEVEL_STYLE: Record<1 | 2 | 3, { border: string; bg: string; title: string }> = {
-  1: { border: 'border-amber-300', bg: 'bg-amber-50', title: '休息时间到啦！' },
-  2: { border: 'border-orange-400', bg: 'bg-orange-50', title: '猫猫们有点担心你了！' },
-  3: { border: 'border-red-400', bg: 'bg-red-50', title: '三猫紧急拦截！' },
+  1: { border: 'border-conn-amber-ring', bg: 'bg-[var(--console-card-bg,#fffdfb)]', title: '休息时间到啦！' },
+  2: { border: 'border-conn-amber-ring', bg: 'bg-[var(--console-card-bg,#fffdfb)]', title: '猫猫们有点担心你了！' },
+  3: { border: 'border-conn-red-ring', bg: 'bg-[var(--console-card-bg,#fffdfb)]', title: '三猫紧急拦截！' },
 };
 
-const NIGHT_STYLE = { border: 'border-indigo-300', bg: 'bg-indigo-50/80' };
+const NIGHT_STYLE = { border: 'border-conn-purple-ring', bg: 'bg-[var(--console-card-bg)]' };
 
 /** Compact urgency badge for avatar corner (emoji-free) */
 const CAT_ALERT_BADGE: Record<1 | 2 | 3, string> = {
@@ -118,7 +118,7 @@ export function BrakeModal() {
       >
         {/* Header */}
         <div className="text-center">
-          <h2 className={`text-lg font-bold ${nightMode ? 'text-indigo-200' : ''}`}>
+          <h2 className={`text-lg font-bold ${nightMode ? 'text-conn-sky-text' : ''}`}>
             {nightMode ? '深夜了，猫猫们想你休息' : style.title}
           </h2>
           <p className="text-sm text-cafe-secondary mt-1">已专注工作 {activeMinutes} 分钟</p>
@@ -130,7 +130,7 @@ export function BrakeModal() {
             <div key={msg.catId} className="flex items-start gap-3">
               <div className="relative shrink-0">
                 <CatAvatar catId={msg.catId} size={48} />
-                <span className="absolute -bottom-1 -right-1 text-[10px] px-1 py-0.5 rounded bg-cafe-surface/90 border border-cafe">
+                <span className="absolute -bottom-1 -right-1 text-[10px] px-1 py-0.5 rounded bg-cafe-surface/90 border border-[var(--console-border-soft)]">
                   {alertBadge}
                 </span>
               </div>
@@ -164,7 +164,7 @@ export function BrakeModal() {
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="例：正在修复线上 P0 故障"
-              className="w-full border border-cafe rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300"
+              className="w-full border border-[var(--console-border-soft)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-conn-amber-ring"
               onCompositionStart={ime.onCompositionStart}
               onCompositionEnd={ime.onCompositionEnd}
               onKeyDown={(e) => {
@@ -181,7 +181,7 @@ export function BrakeModal() {
             type="button"
             onClick={() => checkin('rest')}
             disabled={submitting}
-            className="w-full py-2.5 rounded-xl text-sm font-medium text-white bg-green-500 hover:bg-green-600 transition-colors disabled:opacity-50"
+            className="w-full py-2.5 rounded-xl text-sm font-medium text-[var(--cafe-surface)] bg-conn-emerald-text hover:opacity-90 transition-colors disabled:opacity-50"
           >
             立刻休息（5 分钟）
           </button>
@@ -189,7 +189,7 @@ export function BrakeModal() {
             type="button"
             onClick={() => checkin('wrap_up')}
             disabled={submitting}
-            className="w-full py-2.5 rounded-xl text-sm font-medium text-white bg-amber-500 hover:bg-amber-600 transition-colors disabled:opacity-50"
+            className="w-full py-2.5 rounded-xl text-sm font-medium text-[var(--cafe-surface)] bg-conn-amber-bg hover:opacity-90 transition-colors disabled:opacity-50"
           >
             收尾（10 分钟）
           </button>
@@ -204,7 +204,7 @@ export function BrakeModal() {
             </button>
           )}
           {bypassDisabled && (
-            <p className="text-center text-xs text-red-400 py-1">
+            <p className="text-center text-xs text-conn-red-text py-1">
               紧急跳过次数已用完（4 小时内 3 次），请选择休息或收尾
             </p>
           )}

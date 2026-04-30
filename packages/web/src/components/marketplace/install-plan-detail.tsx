@@ -63,7 +63,10 @@ export function InstallPlanDetail({
     }
   })();
 
-  const trustColor = result.trustLevel === 'community' ? 'bg-amber-50 text-amber-700' : 'bg-green-50 text-green-700';
+  const trustColor =
+    result.trustLevel === 'community'
+      ? 'bg-conn-amber-bg text-conn-amber-text'
+      : 'bg-conn-emerald-bg text-conn-emerald-text';
 
   return (
     <div className="space-y-4">
@@ -77,8 +80,8 @@ export function InstallPlanDetail({
       </div>
 
       <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-50">
-          <HubIcon name="settings" className="h-5 w-5 text-purple-500" />
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-conn-purple-bg">
+          <HubIcon name="settings" className="h-5 w-5 text-conn-purple-text" />
         </div>
         <div className="flex-1">
           <h3 className="text-sm font-semibold text-cafe">{result.displayName}</h3>
@@ -93,7 +96,7 @@ export function InstallPlanDetail({
 
       <p className="text-xs leading-relaxed text-cafe-secondary">{result.componentSummary}</p>
 
-      <div className="rounded-lg border border-cafe-border bg-white p-3">
+      <div className="rounded-lg border border-cafe-border bg-[var(--console-card-bg)] p-3">
         <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-cafe">
           <HubIcon name="settings" className="h-3.5 w-3.5" /> 安装配置
         </p>
@@ -115,7 +118,7 @@ export function InstallPlanDetail({
       </div>
 
       {plan.mcpEntry?.env && Object.keys(plan.mcpEntry.env).length > 0 && (
-        <div className="rounded-lg border border-cafe-border bg-white p-3">
+        <div className="rounded-lg border border-cafe-border bg-[var(--console-card-bg)] p-3">
           <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-cafe">
             <HubIcon name="key" className="h-3.5 w-3.5" /> 环境变量 (可选)
           </p>
@@ -126,7 +129,7 @@ export function InstallPlanDetail({
       )}
 
       {plan.manualSteps && plan.manualSteps.length > 0 && (
-        <div className="rounded-lg border border-cafe-border bg-white p-3">
+        <div className="rounded-lg border border-cafe-border bg-[var(--console-card-bg)] p-3">
           <p className="mb-2 text-xs font-medium text-cafe">手动步骤</p>
           <ol className="list-inside list-decimal space-y-1 text-xs text-cafe-secondary">
             {plan.manualSteps.map((step, i) => (
@@ -152,7 +155,7 @@ export function InstallPlanDetail({
         <button
           onClick={handleAction}
           disabled={!canAct}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-cafe-accent)] py-2.5 text-sm font-medium text-[var(--cafe-surface)] transition-colors hover:opacity-90 disabled:opacity-50"
         >
           <HubIcon name={action.icon} className="h-4 w-4" />
           {copied ? '已复制!' : action.label}

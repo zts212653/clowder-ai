@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { formatCatName, useCatData } from '@/hooks/useCatData';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
@@ -49,7 +49,8 @@ export function ThreadCatPill({ threadId }: ThreadCatPillProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
 
   const thread = threads.find((t) => t.id === threadId);
-  const preferredCats: string[] = thread?.preferredCats ?? [];
+  const rawCats = thread?.preferredCats;
+  const preferredCats = useMemo(() => rawCats ?? [], [rawCats]);
 
   // Sync local selection when prop changes or popover closes; clear stale error on reopen
   useEffect(() => {
@@ -146,8 +147,8 @@ export function ThreadCatPill({ threadId }: ThreadCatPillProps) {
         onClick={() => setIsOpen(!isOpen)}
         className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border transition-colors text-xs ${
           cat
-            ? 'border-cocreator-light hover:bg-cocreator-light'
-            : 'border-dashed border-cafe-muted hover:border-cocreator-light hover:bg-cocreator-light'
+            ? 'border-[var(--console-border-soft)] hover:bg-[var(--console-hover-bg)]'
+            : 'border-dashed border-cafe-muted hover:border-[var(--console-border-soft)] hover:bg-[var(--console-hover-bg)]'
         }`}
         data-testid="thread-cat-pill"
       >
@@ -169,16 +170,19 @@ export function ThreadCatPill({ threadId }: ThreadCatPillProps) {
         <div
           ref={popoverRef}
           style={getPopoverStyle()}
-          className="bg-cafe-surface rounded-lg shadow-lg border border-cafe z-50 flex flex-col"
+          className="bg-cafe-surface rounded-lg shadow-lg border border-[var(--console-border-soft)] z-50 flex flex-col"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="p-3 overflow-y-auto max-h-[50vh]">
             <CatSelector selectedCats={selectedCats} onSelectionChange={handleSelectionChange} />
           </div>
-          <div className="flex items-center justify-between px-3 pb-3 pt-2 border-t border-cafe-subtle flex-shrink-0">
-            {saveError && <span className="text-[10px] text-red-400">保存失败</span>}
+          <div className="flex items-center justify-between px-3 pb-3 pt-2 border-t border-[var(--console-border-soft)] flex-shrink-0">
+            {saveError && <span className="text-[10px] text-conn-red-text">保存失败</span>}
             {!saveError && selectedCats.length > 0 && (
-              <button onClick={() => setSelectedCats([])} className="text-[10px] text-cafe-muted hover:text-red-400">
+              <button
+                onClick={() => setSelectedCats([])}
+                className="text-[10px] text-cafe-muted hover:text-conn-red-text"
+              >
                 清除
               </button>
             )}
@@ -195,7 +199,7 @@ export function ThreadCatPill({ threadId }: ThreadCatPillProps) {
               <button
                 onClick={() => void handleSave()}
                 disabled={!hasChanged || isSaving}
-                className="text-xs px-2 py-0.5 rounded bg-cocreator-primary text-white hover:bg-cocreator-dark disabled:opacity-40"
+                className="console-button-primary text-xs px-2 py-0.5 disabled:opacity-40"
               >
                 {isSaving ? '...' : '保存'}
               </button>

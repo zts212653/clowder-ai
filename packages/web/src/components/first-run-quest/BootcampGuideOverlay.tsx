@@ -42,10 +42,10 @@ export function BootcampGuideOverlay({ catName, phase, hasMessages }: BootcampGu
       <div className="fixed inset-0 z-[60] bg-black/30" style={{ pointerEvents: 'auto' }} />
       <style>{`[data-bootcamp-step="chat-input"] { position: relative; z-index: 65 !important; }`}</style>
       <div className="pointer-events-none fixed bottom-24 left-1/2 -translate-x-1/2 z-[66]">
-        <div className="rounded-xl border border-amber-300 bg-amber-50 px-5 py-3 shadow-xl animate-fade-in">
+        <div className="rounded-xl border border-conn-amber-ring bg-conn-amber-bg px-5 py-3 shadow-xl animate-fade-in">
           <div className="flex items-center gap-2">
             <span className="text-lg">👇</span>
-            <span className="text-sm font-medium text-amber-800">{tip}</span>
+            <span className="text-sm font-medium text-conn-amber-text">{tip}</span>
           </div>
         </div>
       </div>

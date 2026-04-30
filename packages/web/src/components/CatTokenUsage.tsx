@@ -107,7 +107,9 @@ export function CatTokenUsage({ catId, usage, contextHealth }: CatTokenUsageProp
       {/* Cost + duration row */}
       <div className="flex items-center gap-2 text-[10px]">
         {usage.costUsd != null && (
-          <span className="text-amber-600 font-medium tabular-nums animate-cost-glow">{formatCost(usage.costUsd)}</span>
+          <span className="text-conn-amber-text font-medium tabular-nums animate-cost-glow">
+            {formatCost(usage.costUsd)}
+          </span>
         )}
         {usage.numTurns != null && usage.numTurns > 1 && (
           <span className="text-cafe-muted">{usage.numTurns} turns</span>

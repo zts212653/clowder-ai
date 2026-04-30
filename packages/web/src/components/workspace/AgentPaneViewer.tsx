@@ -5,8 +5,6 @@ import { Terminal } from '@xterm/xterm';
 import { useEffect, useRef, useState } from 'react';
 import { API_URL } from '@/utils/api-client';
 
-import '@xterm/xterm/css/xterm.css';
-
 interface AgentPaneViewerProps {
   worktreeId: string;
   paneId: string;

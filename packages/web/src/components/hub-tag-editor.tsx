@@ -12,9 +12,10 @@ function mergeTags(tags: string[], nextTag: string): string[] {
 }
 
 function pillClass(tone: 'purple' | 'green' | 'orange') {
-  if (tone === 'green') return 'border-[#CFE5D5] bg-[#E8F5E9] text-[#4F7B50]';
-  if (tone === 'orange') return 'border-[#E8C9AF] bg-[#F7EEE6] text-[#C8946B]';
-  return 'border-[#D9C5EF] bg-[#F3EDFA] text-[#8B68B7]';
+  if (tone === 'green') return 'border-conn-emerald-ring bg-conn-emerald-bg text-conn-emerald-text';
+  if (tone === 'orange')
+    return 'border-[var(--console-border-soft)] bg-[var(--console-pill-bg)] text-[var(--cafe-accent)]';
+  return 'border-conn-purple-ring bg-conn-purple-bg text-[var(--color-opus-primary)]';
 }
 
 export function TagPillList({
@@ -33,7 +34,7 @@ export function TagPillList({
   const locked = useMemo(() => new Set(lockedTags), [lockedTags]);
 
   if (tags.length === 0) {
-    return <span className="text-sm italic text-[#8A776B]">{emptyLabel}</span>;
+    return <span className="text-sm italic text-cafe-muted">{emptyLabel}</span>;
   }
 
   return (
@@ -150,16 +151,16 @@ export function TagEditor({
               }
             }}
             placeholder={placeholder}
-            className="min-w-[220px] flex-1 rounded-xl border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-2 text-sm text-[#2D2118] outline-none transition focus:border-[#D49266] focus:ring-2 focus:ring-[#F5D2B8]"
+            className="min-w-[220px] flex-1 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-pill-bg)] px-3 py-2 text-sm text-cafe outline-none transition focus:border-[var(--cafe-accent)] focus:ring-2 focus:ring-conn-amber-ring"
           />
           <button
             type="button"
             onClick={commit}
-            className="rounded-full border border-[#D49266] bg-[#FFF1E3] px-3 py-1.5 text-xs font-medium text-[#9A5A2C]"
+            className="rounded-full border border-[var(--cafe-accent)] bg-[var(--console-card-bg)] px-3 py-1.5 text-xs font-medium text-conn-amber-text"
           >
             添加
           </button>
-          {error && <span className="w-full text-xs text-red-500">{error}</span>}
+          {error && <span className="w-full text-xs text-conn-red-text">{error}</span>}
         </div>
       ) : null}
     </div>

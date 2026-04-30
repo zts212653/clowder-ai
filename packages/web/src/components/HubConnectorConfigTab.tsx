@@ -36,9 +36,40 @@ interface PlatformStatus {
   name: string;
   nameEn: string;
   configured: boolean;
+  connectionState?: 'connected' | 'disconnected' | 'reconnecting' | 'unknown';
+  lastHeartbeat?: number | null;
   fields: PlatformFieldStatus[];
   docsUrl: string;
   steps: PlatformStepStatus[];
+}
+
+function connStateColor(p: PlatformStatus): string {
+  if (p.connectionState === 'connected') return 'text-conn-emerald-text';
+  if (p.connectionState === 'reconnecting') return 'text-conn-amber-text';
+  if (p.configured) return 'text-conn-emerald-text';
+  return 'text-cafe-muted';
+}
+
+function connStateIcon(p: PlatformStatus) {
+  if (p.connectionState === 'connected') return <StatusDotConnected />;
+  if (p.connectionState === 'reconnecting') return <StatusDotIdle />;
+  if (p.configured) return <StatusDotConnected />;
+  return <StatusDotIdle />;
+}
+
+function connStateLabel(p: PlatformStatus): string {
+  if (p.connectionState === 'connected') return '已连接';
+  if (p.connectionState === 'reconnecting') return '重连中';
+  if (p.connectionState === 'disconnected' && p.configured) return '已配置 · 未连接';
+  if (p.configured) return '已配置';
+  return '未配置';
+}
+
+function formatHeartbeat(ts: number): string {
+  const ago = Math.floor((Date.now() - ts) / 1000);
+  if (ago < 60) return `${ago}s ago`;
+  if (ago < 3600) return `${Math.floor(ago / 60)}m ago`;
+  return `${Math.floor(ago / 3600)}h ago`;
 }
 
 export function HubConnectorConfigTab() {
@@ -52,6 +83,7 @@ export function HubConnectorConfigTab() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [saveResult, setSaveResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const fetchStatus = useCallback(async () => {
@@ -122,6 +154,24 @@ export function HubConnectorConfigTab() {
     }
   };
 
+  const handleTestConnection = async (platformId: string) => {
+    setTesting(true);
+    setSaveResult(null);
+    try {
+      const res = await apiFetch(`/api/connector/${platformId}/test`, { method: 'POST' });
+      const data = await res.json();
+      setSaveResult({
+        type: data.ok ? 'success' : 'error',
+        message: data.message ?? (data.ok ? '连接正常' : (data.error ?? '测试失败')),
+      });
+      await fetchStatus();
+    } catch {
+      setSaveResult({ type: 'error', message: '网络错误' });
+    } finally {
+      setTesting(false);
+    }
+  };
+
   if (isLoading) {
     return <p className="text-center text-cafe-muted py-8 text-sm">加载中...</p>;
   }
@@ -146,38 +196,42 @@ export function HubConnectorConfigTab() {
         return (
           <div
             key={platform.id}
-            className="border border-cafe rounded-2xl overflow-hidden"
+            className="console-list-card rounded-2xl overflow-hidden shadow-[0_12px_30px_rgba(43,33,26,0.08)]"
             data-testid={`platform-card-${platform.id}`}
             data-guide-id={`connector.${platform.id}`}
+            data-active={isExpanded ? 'true' : 'false'}
           >
             <button
               type="button"
               onClick={() => handleExpand(platform.id)}
-              className={`w-full flex items-center gap-3 px-4 py-3.5 transition-colors ${isExpanded ? 'bg-sky-50' : 'hover:bg-cafe-surface-elevated'}`}
+              className="flex w-full items-center gap-3 px-4 py-4 transition-colors"
             >
               <span
-                className="flex items-center justify-center w-9 h-9 rounded-[10px] shrink-0"
+                className="console-pill flex h-11 w-11 items-center justify-center rounded-[12px] shrink-0"
                 style={{ backgroundColor: v.iconBg, color: v.iconColor }}
               >
                 {v.icon}
               </span>
               <span className="flex-1 text-left min-w-0">
-                <span className="block text-[15px] font-semibold text-cafe">
+                <span className="block text-[15px] font-extrabold text-cafe">
                   {platform.name} {platform.nameEn !== platform.name ? platform.nameEn : ''}
                 </span>
-                <span
-                  className={`flex items-center gap-1 text-xs ${platform.configured ? 'text-green-600' : 'text-cafe-muted'}`}
-                >
-                  {platform.configured ? <StatusDotConnected /> : <StatusDotIdle />}
-                  {platform.configured ? '已配置' : '未配置'}
+                <span className={`flex items-center gap-1 text-xs ${connStateColor(platform)}`}>
+                  {connStateIcon(platform)}
+                  {connStateLabel(platform)}
+                  {platform.lastHeartbeat && (
+                    <span className="text-cafe-muted ml-1">· {formatHeartbeat(platform.lastHeartbeat)}</span>
+                  )}
                 </span>
               </span>
-              <span className="text-cafe-muted shrink-0">{isExpanded ? <ChevronDown /> : <ChevronRight />}</span>
+              <span className="console-pill flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-cafe-muted">
+                {isExpanded ? <ChevronDown /> : <ChevronRight />}
+              </span>
             </button>
 
             {/* F132 Phase E: WeCom Bot guided setup — dedicated panel with validate+connect */}
             {isExpanded && platform.id === 'wecom-bot' && (
-              <div className="border-t border-cafe-subtle px-4 py-4 space-y-3.5">
+              <div className="console-code-pane space-y-3.5 px-4 py-4">
                 {guideSteps.map((step, idx) => (
                   <div key={idx} className="space-y-1.5">
                     <div className="flex items-center gap-1.5">
@@ -190,7 +244,7 @@ export function HubConnectorConfigTab() {
                           href={platform.docsUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex items-center gap-1.5 text-xs text-blue-600 bg-sky-50 rounded-lg px-3 py-2 hover:bg-sky-100 transition-colors"
+                          className="console-inline-link"
                         >
                           <ExternalLinkIcon />
                           <span>developer.work.weixin.qq.com → WeCom AI Bot docs</span>
@@ -212,7 +266,7 @@ export function HubConnectorConfigTab() {
             )}
 
             {isExpanded && platform.id === 'weixin' && (
-              <div className="border-t border-cafe-subtle px-4 py-4 space-y-3.5">
+              <div className="console-code-pane space-y-3.5 px-4 py-4">
                 {filteredSteps.map((step, idx) => (
                   <div key={idx} className="space-y-1.5">
                     <div className="flex items-center gap-1.5">
@@ -232,7 +286,7 @@ export function HubConnectorConfigTab() {
             )}
 
             {isExpanded && platform.id !== 'weixin' && platform.id !== 'wecom-bot' && (
-              <div className="border-t border-cafe-subtle px-4 py-4 space-y-3.5">
+              <div className="console-code-pane space-y-3.5 px-4 py-4">
                 {guideSteps.map((step, idx) => (
                   <div key={idx} className="space-y-1.5">
                     <div className="flex items-center gap-1.5">
@@ -245,7 +299,7 @@ export function HubConnectorConfigTab() {
                           href={platform.docsUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex items-center gap-1.5 text-xs text-blue-600 bg-sky-50 rounded-lg px-3 py-2 hover:bg-sky-100 transition-colors"
+                          className="console-inline-link"
                         >
                           <ExternalLinkIcon />
                           <span>{new URL(platform.docsUrl).hostname} → 查看官方文档</span>
@@ -276,7 +330,7 @@ export function HubConnectorConfigTab() {
                         >
                           {field.label}
                           {field.sensitive && (
-                            <span className="text-amber-500 ml-1 inline-flex align-middle">
+                            <span className="text-conn-amber-text ml-1 inline-flex align-middle">
                               <LockIcon />
                             </span>
                           )}
@@ -286,7 +340,7 @@ export function HubConnectorConfigTab() {
                             id={`config-${field.envName}`}
                             value={fieldValues[field.envName] ?? field.currentValue ?? 'webhook'}
                             onChange={(e) => setFieldValues((prev) => ({ ...prev, [field.envName]: e.target.value }))}
-                            className="w-full h-9 px-3 text-[13px] bg-cafe-surface-elevated border border-cafe rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition-colors"
+                            className="console-form-input py-2.5 text-[13px]"
                             data-testid={`field-${field.envName}`}
                           >
                             <option value="webhook">Webhook（需公网 URL）</option>
@@ -305,7 +359,7 @@ export function HubConnectorConfigTab() {
                             }
                             value={fieldValues[field.envName] ?? ''}
                             onChange={(e) => setFieldValues((prev) => ({ ...prev, [field.envName]: e.target.value }))}
-                            className="w-full h-9 px-3 text-[13px] bg-cafe-surface-elevated border border-cafe rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition-colors"
+                            className="console-form-input py-2.5 text-[13px]"
                             data-testid={`field-${field.envName}`}
                           />
                         )}
@@ -321,10 +375,10 @@ export function HubConnectorConfigTab() {
                   </div>
                   {saveResult && (
                     <div
-                      className={`text-xs px-3 py-2 rounded-lg ml-[26px] ${
+                      className={`ml-[26px] rounded-[16px] px-3 py-2 text-xs ${
                         saveResult.type === 'success'
-                          ? 'bg-green-50 text-green-700 border border-green-200'
-                          : 'bg-red-50 text-red-700 border border-red-200'
+                          ? 'bg-conn-emerald-bg text-conn-emerald-text border border-conn-emerald-ring'
+                          : 'bg-conn-red-bg text-conn-red-text border border-conn-red-ring'
                       }`}
                       data-testid="save-result"
                     >
@@ -334,17 +388,18 @@ export function HubConnectorConfigTab() {
                   <div className="flex items-center gap-2 ml-[26px]">
                     <button
                       type="button"
-                      className="flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium text-cafe-secondary bg-cafe-surface border border-cafe rounded-lg hover:bg-cafe-surface-elevated transition-colors"
-                      onClick={() => setSaveResult({ type: 'success', message: '连接测试功能即将上线' })}
+                      className="console-button-secondary text-[13px]"
+                      disabled={testing}
+                      onClick={() => handleTestConnection(platform.id)}
                     >
                       <WifiIcon />
-                      测试连接
+                      {testing ? '测试中...' : '测试连接'}
                     </button>
                     <button
                       type="button"
                       onClick={() => handleSave(platform)}
                       disabled={saving}
-                      className="px-4 py-2 text-[13px] font-semibold text-white bg-blue-500 hover:bg-blue-600 rounded-lg transition-colors disabled:opacity-50"
+                      className="console-button-primary text-[13px] disabled:opacity-50"
                       data-testid={`save-${platform.id}`}
                     >
                       {saving ? '保存中...' : '保存配置'}
@@ -357,9 +412,9 @@ export function HubConnectorConfigTab() {
         );
       })}
 
-      <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-[10px] px-3.5 py-2.5">
+      <div className="console-card-soft flex items-center gap-2 rounded-[18px] px-3.5 py-3">
         <StatusDotConnected />
-        <span className="text-xs font-medium text-green-700">配置保存后自动生效，无需重启</span>
+        <span className="text-xs font-medium text-conn-emerald-text">配置保存后自动生效，无需重启</span>
       </div>
     </div>
   );

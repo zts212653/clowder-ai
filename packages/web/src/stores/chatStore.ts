@@ -232,15 +232,6 @@ const MAX_BLOB_MESSAGES = 200;
 const UI_THINKING_EXPANDED_KEY = 'catcafe.ui.thinkingExpandedByDefault';
 const THINKING_CHUNK_SEPARATOR = '\n\n---\n\n';
 
-function loadUiThinkingExpandedByDefault(): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    return window.localStorage.getItem(UI_THINKING_EXPANDED_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
 function persistUiThinkingExpandedByDefault(next: boolean) {
   if (typeof window === 'undefined') return;
   try {
@@ -1020,7 +1011,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   threads: [],
   isLoadingThreads: true,
   isOfflineSnapshot: false,
-  uiThinkingExpandedByDefault: loadUiThinkingExpandedByDefault(),
+  uiThinkingExpandedByDefault: false,
   globalBubbleDefaults: {
     // Always start collapsed — server config overwrites via fetchGlobalBubbleDefaults().
     // Previously used localStorage as initial fallback, but this races with thread loading:

@@ -215,6 +215,8 @@ export interface PlatformStatus {
   name: string;
   nameEn: string;
   configured: boolean;
+  connectionState: 'connected' | 'disconnected' | 'reconnecting' | 'unknown';
+  lastHeartbeat: number | null;
   fields: PlatformFieldStatus[];
   docsUrl: string;
   steps: PlatformStepStatus[];
@@ -262,6 +264,8 @@ export function buildConnectorStatus(env: Record<string, string | undefined> = p
       name: platform.name,
       nameEn: platform.nameEn,
       configured,
+      connectionState: configured ? ('unknown' as const) : ('disconnected' as const),
+      lastHeartbeat: null,
       fields,
       docsUrl: platform.docsUrl,
       steps: platform.steps,
@@ -304,17 +308,54 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
     const weixinStatus = status.find((p) => p.id === 'weixin');
     if (weixinStatus) {
       const adapter = opts.weixinAdapter;
-      weixinStatus.configured = adapter != null && adapter.hasBotToken() && adapter.isPolling();
+      const isLive = adapter != null && adapter.hasBotToken() && adapter.isPolling();
+      weixinStatus.configured = isLive;
+      weixinStatus.connectionState = isLive ? 'connected' : 'disconnected';
     }
     // F132 bugfix: WeCom Bot live health — override "configured" with actual connection state.
-    // When getter is wired (gateway started) but returns null (adapter stopped/not started),
-    // force configured=false to avoid false green light from env var check.
     const wecomBotStatus = status.find((p) => p.id === 'wecom-bot');
     if (wecomBotStatus && opts.getWeComBotAdapter) {
       const adapter = opts.getWeComBotAdapter();
-      wecomBotStatus.configured = adapter?.getConnectionState() === 'connected';
+      const state = adapter?.getConnectionState() ?? 'disconnected';
+      wecomBotStatus.configured = state === 'connected';
+      wecomBotStatus.connectionState = state;
+      wecomBotStatus.lastHeartbeat = adapter?.getLastHeartbeat() ?? null;
     }
     return { platforms: status };
+  });
+
+  app.post<{ Params: { platform: string } }>('/api/connector/:platform/test', async (request, reply) => {
+    const userId = requireTrustedHubIdentity(request, reply);
+    if (!userId) return { error: 'Identity required' };
+
+    const { platform } = request.params;
+    const def = CONNECTOR_PLATFORMS.find((p) => p.id === platform);
+    if (!def) {
+      reply.status(404);
+      return { ok: false, error: `Unknown platform: ${platform}` };
+    }
+
+    if (platform === 'weixin') {
+      const adapter = opts.weixinAdapter;
+      const ok = adapter != null && adapter.hasBotToken() && adapter.isPolling();
+      return { ok, message: ok ? '微信网关连接正常' : '微信网关未连接，请扫码登录' };
+    }
+    if (platform === 'wecom-bot') {
+      const adapter = opts.getWeComBotAdapter?.();
+      const state = adapter?.getConnectionState() ?? 'disconnected';
+      return {
+        ok: state === 'connected',
+        message: state === 'connected' ? '企微机器人 WebSocket 已连接' : `当前状态: ${state}`,
+      };
+    }
+
+    const status = buildConnectorStatus();
+    const platformStatus = status.find((p) => p.id === platform);
+    if (!platformStatus?.configured) {
+      return { ok: false, error: '平台尚未配置，请先填写凭证并保存' };
+    }
+
+    return { ok: true, message: `${def.name} 凭证已配置，连接器将在下次启动时自动连接` };
   });
 
   app.post('/api/connector/feishu/qrcode', async (request, reply) => {

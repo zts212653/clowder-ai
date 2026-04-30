@@ -4,10 +4,14 @@ import type { InstallMode, MarketplaceEcosystem, TrustLevel } from '@cat-cafe/sh
 import { HubIcon } from '../hub-icons';
 
 const ECOSYSTEM_STYLES: Record<MarketplaceEcosystem, { bg: string; text: string; label: string }> = {
-  claude: { bg: 'bg-purple-50', text: 'text-purple-600 border-purple-300', label: 'Claude' },
-  codex: { bg: 'bg-emerald-50', text: 'text-emerald-600 border-emerald-300', label: 'Codex' },
-  openclaw: { bg: 'bg-red-50', text: 'text-red-600 border-red-300', label: 'OpenClaw' },
-  antigravity: { bg: 'bg-blue-50', text: 'text-blue-600 border-blue-300', label: 'Antigravity' },
+  claude: { bg: 'bg-conn-purple-bg', text: 'text-conn-purple-text border-conn-purple-ring', label: 'Claude' },
+  codex: { bg: 'bg-conn-emerald-bg', text: 'text-conn-emerald-text border-conn-emerald-ring', label: 'Codex' },
+  openclaw: { bg: 'bg-conn-red-bg', text: 'text-conn-red-text border-conn-red-ring', label: 'OpenClaw' },
+  antigravity: {
+    bg: 'bg-[var(--color-cafe-accent)]/10',
+    text: 'text-[var(--color-cafe-accent)] border-[var(--color-cafe-accent)]/30',
+    label: 'Antigravity',
+  },
 };
 
 export function EcosystemBadge({ ecosystem }: { ecosystem: MarketplaceEcosystem }) {
@@ -23,9 +27,14 @@ export function EcosystemBadge({ ecosystem }: { ecosystem: MarketplaceEcosystem 
 }
 
 const TRUST_STYLES: Record<TrustLevel, { bg: string; text: string; label: string; iconName: string }> = {
-  official: { bg: 'bg-green-50', text: 'text-green-700', label: 'official', iconName: 'shield' },
-  verified: { bg: 'bg-green-50', text: 'text-green-700', label: 'verified', iconName: 'check' },
-  community: { bg: 'bg-blue-50', text: 'text-blue-700', label: 'community', iconName: 'users' },
+  official: { bg: 'bg-conn-emerald-bg', text: 'text-conn-emerald-text', label: 'official', iconName: 'shield' },
+  verified: { bg: 'bg-conn-emerald-bg', text: 'text-conn-emerald-text', label: 'verified', iconName: 'check' },
+  community: {
+    bg: 'bg-[var(--color-cafe-accent)]/10',
+    text: 'text-[var(--color-cafe-accent)]',
+    label: 'community',
+    iconName: 'users',
+  },
 };
 
 export function TrustBadge({ level }: { level: TrustLevel }) {
@@ -39,10 +48,15 @@ export function TrustBadge({ level }: { level: TrustLevel }) {
 }
 
 const MODE_STYLES: Record<InstallMode, { bg: string; text: string; label: string; iconName: string }> = {
-  direct_mcp: { bg: 'bg-green-50', text: 'text-green-700', label: '一键安装', iconName: 'zap' },
-  delegated_cli: { bg: 'bg-blue-50', text: 'text-blue-700', label: 'CLI 安装', iconName: 'terminal' },
-  manual_file: { bg: 'bg-orange-50', text: 'text-orange-700', label: '手动配置', iconName: 'file-text' },
-  manual_ui: { bg: 'bg-orange-50', text: 'text-orange-700', label: '手动配置', iconName: 'file-text' },
+  direct_mcp: { bg: 'bg-conn-emerald-bg', text: 'text-conn-emerald-text', label: '一键安装', iconName: 'zap' },
+  delegated_cli: {
+    bg: 'bg-[var(--color-cafe-accent)]/10',
+    text: 'text-[var(--color-cafe-accent)]',
+    label: 'CLI 安装',
+    iconName: 'terminal',
+  },
+  manual_file: { bg: 'bg-conn-amber-bg', text: 'text-conn-amber-text', label: '手动配置', iconName: 'file-text' },
+  manual_ui: { bg: 'bg-conn-amber-bg', text: 'text-conn-amber-text', label: '手动配置', iconName: 'file-text' },
 };
 
 export function InstallModeBadge({ mode }: { mode: InstallMode }) {

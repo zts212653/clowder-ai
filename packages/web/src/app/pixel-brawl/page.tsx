@@ -87,7 +87,7 @@ export default function PixelBrawlPage() {
             flexDirection: 'column',
             alignItems: 'center',
             gap: '24px',
-            color: '#E8DFC7',
+            color: 'var(--console-border-soft)',
           }}
         >
           <h1
@@ -101,7 +101,7 @@ export default function PixelBrawlPage() {
           >
             PIXEL BRAWL
           </h1>
-          <p style={{ fontSize: '12px', color: '#3A4658', margin: 0 }}>Clowder AI Fighting Demo</p>
+          <p style={{ fontSize: '12px', color: 'var(--cafe-text-secondary)', margin: 0 }}>Clowder AI Fighting Demo</p>
           <div style={{ display: 'flex', gap: '16px', marginTop: '16px' }}>
             <button
               type="button"
@@ -134,7 +134,7 @@ export default function PixelBrawlPage() {
               Player vs AI
             </button>
           </div>
-          <p style={{ fontSize: '10px', color: '#3A4658', margin: 0 }}>
+          <p style={{ fontSize: '10px', color: 'var(--cafe-text-secondary)', margin: 0 }}>
             Player: A/D move | J attack | K skill | R restart
           </p>
         </div>

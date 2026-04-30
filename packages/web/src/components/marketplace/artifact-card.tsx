@@ -13,7 +13,7 @@ export function ArtifactCard({
   return (
     <button
       onClick={() => onSelect(result)}
-      className="w-full rounded-xl border border-cafe-border bg-white p-4 text-left shadow-sm transition-colors hover:border-purple-200 hover:shadow-md"
+      className="w-full rounded-xl border border-cafe-border bg-[var(--console-card-bg)] p-4 text-left shadow-sm transition-colors hover:border-conn-purple-ring hover:shadow-md"
     >
       <div className="flex items-start justify-between gap-2">
         <span className="text-sm font-semibold text-cafe">{result.displayName}</span>

@@ -11,10 +11,10 @@ type CatStatus = 'spawning' | 'pending' | 'streaming' | 'done' | 'error' | 'aliv
 export type CallbackAuthStatus = 'healthy' | 'degraded' | 'broken' | 'unknown';
 
 const CALLBACK_AUTH_STATUS_COLOR: Record<CallbackAuthStatus, string> = {
-  healthy: '#22C55E',
-  degraded: '#F59E0B',
-  broken: '#EF4444',
-  unknown: '#A89386',
+  healthy: 'var(--conn-emerald-text)',
+  degraded: 'var(--conn-amber-text)',
+  broken: 'var(--conn-red-text)',
+  unknown: 'var(--cafe-text-muted)',
 };
 
 interface CatAvatarProps {
@@ -113,7 +113,7 @@ export function CatAvatar({
                 width: dotSize,
                 height: dotSize,
                 backgroundColor: CALLBACK_AUTH_STATUS_COLOR[callbackAuthStatus],
-                border: `${dotBorder}px solid #FFFFFF`,
+                border: `${dotBorder}px solid var(--cafe-surface)`,
               }}
             />
           ) : (
@@ -128,7 +128,7 @@ export function CatAvatar({
                 width: dotSize,
                 height: dotSize,
                 backgroundColor: CALLBACK_AUTH_STATUS_COLOR[callbackAuthStatus],
-                border: `${dotBorder}px solid #FFFFFF`,
+                border: `${dotBorder}px solid var(--cafe-surface)`,
               }}
             />
           )}

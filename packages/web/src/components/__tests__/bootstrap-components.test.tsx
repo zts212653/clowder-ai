@@ -181,7 +181,7 @@ describe('BootstrapPromptCard', () => {
     expect(html).toContain('数据安全');
   });
 
-  it('uses cocreator color classes', () => {
+  it('uses console accent token classes', () => {
     const html = renderToStaticMarkup(
       <BootstrapPromptCard
         indexState={missingState}
@@ -191,8 +191,9 @@ describe('BootstrapPromptCard', () => {
         onSnooze={() => {}}
       />,
     );
-    expect(html).toContain('cocreator-primary');
-    expect(html).toContain('cocreator-bg');
+    expect(html).toContain('console-border-soft');
+    expect(html).toContain('console-card-soft-bg');
+    expect(html).toContain('console-button-primary');
   });
 });
 
@@ -222,9 +223,10 @@ describe('BootstrapProgressPill', () => {
     expect(html).toContain('5 / 20 文档');
   });
 
-  it('uses cocreator colors', () => {
+  it('uses console accent colors', () => {
     const html = renderToStaticMarkup(<BootstrapProgressPill progress={scanningProgress} />);
-    expect(html).toContain('cocreator-primary');
+    expect(html).toContain('bg-cafe-accent');
+    expect(html).toContain('console-border-soft');
   });
 });
 
@@ -282,10 +284,16 @@ describe('BootstrapSummaryCard', () => {
     expect(html).toContain('disabled');
   });
 
-  it('uses green color theme', () => {
-    const html = renderToStaticMarkup(<BootstrapSummaryCard summary={mockSummary} docsIndexed={10} />);
-    expect(html).toContain('green-200');
-    expect(html).toContain('green-50');
+  it('keeps success styling while using console accent tiers', () => {
+    const externalSummary: ProjectSummary = {
+      ...mockSummary,
+      kindCoverage: {},
+      tierCoverage: { authoritative: 5, derived: 3, soft_clue: 1 },
+    };
+    const html = renderToStaticMarkup(<BootstrapSummaryCard summary={externalSummary} docsIndexed={10} />);
+    expect(html).toContain('conn-emerald-ring');
+    expect(html).toContain('conn-emerald-bg');
+    expect(html).toContain('console-active-bg');
   });
 
   it('renders SVG icons instead of emoji', () => {
@@ -338,6 +346,6 @@ describe('BootstrapAutoNotice', () => {
     expect(html).toContain('bootstrap-auto-notice');
     expect(html).toContain('正在自动建立记忆索引');
     expect(html).toContain('治理初始化完成');
-    expect(html).toContain('amber');
+    expect(html).toContain('warning');
   });
 });

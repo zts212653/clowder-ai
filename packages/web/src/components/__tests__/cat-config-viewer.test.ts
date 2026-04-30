@@ -44,7 +44,7 @@ const CATS: CatData[] = [
     color: { primary: '#6366f1', secondary: '#818cf8' },
     mentionPatterns: ['@opus', '@布偶猫'],
     avatar: '',
-    roleDescription: '',
+    roleDescription: '核心架构师',
     personality: '',
     roster: {
       family: 'ragdoll',
@@ -65,7 +65,7 @@ const CATS: CatData[] = [
     color: { primary: '#22c55e', secondary: '#4ade80' },
     mentionPatterns: ['@codex', '@缅因猫'],
     avatar: '',
-    roleDescription: '',
+    roleDescription: '代码审查与安全',
     personality: '',
     roster: {
       family: 'maine-coon',
@@ -86,7 +86,7 @@ const CATS: CatData[] = [
     color: { primary: '#f59e0b', secondary: '#fcd34d' },
     mentionPatterns: ['@antigravity', '@孟加拉猫'],
     avatar: '',
-    roleDescription: '',
+    roleDescription: '浏览器自动化',
     personality: '',
     roster: {
       family: 'bengal',
@@ -99,7 +99,7 @@ const CATS: CatData[] = [
 ];
 
 describe('CatOverviewTab', () => {
-  it('renders the screen-2 overview as owner-first summary cards without budget internals', () => {
+  it('renders member cards with name, role and model — no budget internals', () => {
     const html = renderToStaticMarkup(
       React.createElement(CatOverviewTab, {
         config: CONFIG,
@@ -109,47 +109,22 @@ describe('CatOverviewTab', () => {
         onToggleAvailability: () => {},
       }),
     );
-    expect(html).toContain('Co-worker');
-    expect(html).toContain('Owner');
-    expect(html).toContain('#E29578');
-    expect(html).toContain('/avatars/owner-custom.png');
-    expect(html.indexOf('Co-worker')).toBeLessThan(html.indexOf('布偶猫 · 宪宪'));
-    expect(html).toContain('全部');
-    expect(html).toContain('CLI（OAuth）');
-    expect(html).toContain('CLI（配置）');
-    expect(html).toContain('已停用');
-    expect(html.indexOf('+ 添加成员')).toBeLessThan(html.indexOf('布偶猫 · 宪宪'));
-    expect(html).toContain('布偶猫 · 宪宪');
-    expect(html).toContain('缅因猫 · 砚砚');
-    expect(html).toContain('孟加拉猫 · 阿吉');
-    expect(html).toContain('CLI（OAuth）账号');
-    expect(html).toContain('CLI（配置） · sponsor1');
-    expect(html).toContain('已启用');
-    expect(html).toContain('停用成员');
-    expect(html).toContain('启用成员');
-    expect(html).toContain('@布偶猫');
-    expect(html).toContain('只能编辑，不能新增或删除');
-    expect(html).toContain('点击卡片进入成员配置');
-    expect(html).toContain('gemini-bridge');
+    expect(html).toContain('布偶猫 宪宪');
+    expect(html).toContain('缅因猫 砚砚');
+    expect(html).toContain('孟加拉猫 阿吉');
+    expect(html).toContain('核心架构师');
     expect(html).toContain('添加成员');
-    expect(html).not.toContain('Owner 信息独立维护');
-    expect(html).not.toContain('Locked');
-    expect(html).not.toContain('border-dashed');
-    expect(html).not.toContain('md:grid-cols-2');
-    expect(html).not.toContain('Client');
-    expect(html).not.toContain('Account');
-    expect(html).not.toContain('Model');
+    expect(html).toContain('gemini-bridge');
     expect(html).not.toContain('Prompt 上限');
     expect(html).not.toContain('150k tokens');
     expect(html).not.toContain('原生 (--mcp-config)');
     expect(html).not.toContain('HTTP 回调注入');
     expect(html).not.toContain('>编辑<');
     expect(html).not.toContain('编辑成员');
-    expect(html).not.toContain('Lead');
     expect(html).not.toContain('npx antigravity --bridge');
   });
 
-  it('anchors the first-member guide target to the edit-only control, not the whole card', () => {
+  it('anchors the first-member guide target to the card section', () => {
     const html = renderToStaticMarkup(
       React.createElement(CatOverviewTab, {
         config: CONFIG,
@@ -161,12 +136,9 @@ describe('CatOverviewTab', () => {
     root.innerHTML = html;
 
     const guideTarget = root.querySelector('[data-guide-id="cats.first-member"]');
-
     expect(guideTarget).toBeTruthy();
-    expect(guideTarget?.tagName).toBe('BUTTON');
-    expect(guideTarget?.closest('section')?.textContent).toContain('布偶猫 · 宪宪');
-    expect(guideTarget?.textContent).toContain('布偶猫 · 宪宪');
-    expect(guideTarget?.textContent).not.toContain('已启用');
+    expect(guideTarget?.tagName).toBe('SECTION');
+    expect(guideTarget?.textContent).toContain('布偶猫 宪宪');
   });
 });
 

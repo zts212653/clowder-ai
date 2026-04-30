@@ -34,7 +34,7 @@ triggers:
 
 ### Reviewer 匹配规则
 
-从 `cat-config.json` 动态匹配，**三猫都不能 review 自己的代码**：
+从猫猫名册（`cat-template.json` + `.cat-cafe/cat-catalog.json`）动态匹配，**三猫都不能 review 自己的代码**：
 
 ```
 优先级（从高到低）：

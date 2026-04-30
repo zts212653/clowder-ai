@@ -17,9 +17,6 @@ vi.mock('@/components/ThreadCatPill', () => ({
 vi.mock('@/components/ExportButton', () => ({
   ExportButton: () => null,
 }));
-vi.mock('@/components/HubButton', () => ({
-  HubButton: () => null,
-}));
 vi.mock('@/components/ThemeToggle', () => ({
   ThemeToggle: () => null,
 }));
@@ -91,47 +88,13 @@ describe('ChatContainerHeader thread indicator', () => {
     expect(renderHeader('default').textContent).toContain('大厅');
   });
 
-  it('shows thread title and project name when a specific thread is selected', () => {
+  it('shows thread title when a specific thread is selected', () => {
     const rendered = renderHeader('thread_xyz');
     expect(rendered.textContent).toContain('讨论 F095 设计');
-    expect(rendered.textContent).toContain('cat-cafe');
   });
 
   it('shows "未命名对话" when thread has no title', () => {
     mockStore.threads = [{ ...TEST_THREADS[0], id: 'thread_no_title', title: null }];
     expect(renderHeader('thread_no_title').textContent).toContain('未命名对话');
-  });
-
-  it('hides sentinel projectPath "default" from thread label', () => {
-    mockStore.threads = [{ ...TEST_THREADS[0], id: 'thread_sentinel', projectPath: 'default' }];
-    const rendered = renderHeader('thread_sentinel');
-    expect(rendered.textContent).toContain('讨论 F095 设计');
-    expect(rendered.textContent).not.toContain('default');
-  });
-
-  it('preserves "default" label for real path ending in /default', () => {
-    mockStore.threads = [{ ...TEST_THREADS[0], id: 'thread_real_default', projectPath: '/tmp/default' }];
-    const rendered = renderHeader('thread_real_default');
-    expect(rendered.textContent).toContain('讨论 F095 设计');
-    expect(rendered.textContent).toContain('default');
-  });
-
-  it('extracts basename from Windows backslash path', () => {
-    mockStore.threads = [{ ...TEST_THREADS[0], id: 'thread_win', projectPath: 'C:\\Users\\dev\\my-app' }];
-    expect(renderHeader('thread_win').textContent).toContain('my-app');
-  });
-
-  it('maps internal basename to brand name when NEXT_PUBLIC_BRAND_NAME is set', () => {
-    const origEnv = process.env.NEXT_PUBLIC_BRAND_NAME;
-    process.env.NEXT_PUBLIC_BRAND_NAME = 'Clowder AI';
-    try {
-      mockStore.threads = [{ ...TEST_THREADS[0], id: 'thread_brand', projectPath: '/home/user/cat-cafe' }];
-      const rendered = renderHeader('thread_brand');
-      expect(rendered.textContent).toContain('Clowder AI');
-      expect(rendered.textContent).not.toContain('cat-cafe');
-    } finally {
-      if (origEnv === undefined) delete process.env.NEXT_PUBLIC_BRAND_NAME;
-      else process.env.NEXT_PUBLIC_BRAND_NAME = origEnv;
-    }
   });
 });

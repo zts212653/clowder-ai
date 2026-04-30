@@ -17,7 +17,7 @@ export function FocusModeButton({ label = '专注', disabled, className, onClick
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`px-2 py-1 rounded-md text-[10px] font-medium transition-colors bg-cocreator-primary/10 text-cocreator-primary border border-cocreator-primary/20 hover:bg-cocreator-primary/15 disabled:opacity-30 disabled:cursor-not-allowed ${className ?? ''}`}
+      className={`rounded-md border border-[var(--console-border-soft)] bg-[var(--console-active-bg)] px-2 py-1 text-[10px] font-medium text-cafe-accent transition-colors hover:bg-[var(--console-hover-bg)] disabled:cursor-not-allowed disabled:opacity-30 ${className ?? ''}`}
     >
       {label}
     </button>

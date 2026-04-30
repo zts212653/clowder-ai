@@ -11,7 +11,7 @@ const CAT_VOICE_COLORS: Record<string, { bg: string; bar: string }> = {
   gemini: { bg: 'bg-[var(--color-gemini-bg)]', bar: 'bg-[var(--color-gemini-primary)]' },
   kimi: { bg: 'bg-[var(--color-kimi-bg)]', bar: 'bg-[var(--color-kimi-primary)]' },
 };
-const DEFAULT_VOICE_COLORS = { bg: 'bg-cafe-surface-elevated dark:bg-gray-800', bar: 'bg-gray-400' };
+const DEFAULT_VOICE_COLORS = { bg: 'bg-[var(--console-card-bg)]', bar: 'bg-cafe-surface-sunken' };
 
 export function AudioBlock({ block, catId }: { block: RichAudioBlock; catId?: string }) {
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -162,14 +162,14 @@ export function AudioBlock({ block, catId }: { block: RichAudioBlock; catId?: st
 
           {/* Duration */}
           {audioDuration > 0 && (
-            <span className="text-[11px] text-cafe-secondary dark:text-gray-400 flex-shrink-0 tabular-nums">
+            <span className="text-[11px] text-cafe-secondary dark:text-cafe-muted flex-shrink-0 tabular-nums">
               {formatDuration(audioDuration)}
             </span>
           )}
         </button>
 
         {/* Voice text transcript */}
-        <div className="text-[11px] text-cafe-muted dark:text-gray-500 pl-1 max-w-[420px] whitespace-pre-wrap break-words leading-relaxed">
+        <div className="text-[11px] text-cafe-muted dark:text-cafe-secondary pl-1 max-w-[420px] whitespace-pre-wrap break-words leading-relaxed">
           {block.text}
         </div>
 
@@ -180,10 +180,10 @@ export function AudioBlock({ block, catId }: { block: RichAudioBlock; catId?: st
 
   // Generic audio block mode (existing style)
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-cafe dark:border-gray-700 bg-cafe-surface-elevated dark:bg-gray-900/40 px-3 py-2">
+    <div className="flex items-center gap-3 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2">
       <button
         onClick={toggle}
-        className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-500 hover:bg-blue-600 text-white flex items-center justify-center transition-colors"
+        className="flex-shrink-0 w-8 h-8 rounded-full bg-[var(--color-cafe-accent)] hover:opacity-90 text-[var(--cafe-surface)] flex items-center justify-center transition-colors"
         title={playing ? '暂停' : '播放'}
         aria-label={playing ? 'Pause' : 'Play'}
       >
@@ -201,11 +201,11 @@ export function AudioBlock({ block, catId }: { block: RichAudioBlock; catId?: st
 
       <div className="flex-1 min-w-0">
         {block.title && (
-          <div className="text-xs font-medium text-cafe-secondary dark:text-gray-300 truncate">{block.title}</div>
+          <div className="text-xs font-medium text-cafe-secondary dark:text-cafe-muted truncate">{block.title}</div>
         )}
-        <div className="mt-1 h-1 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+        <div className="mt-1 h-1 bg-[var(--console-pill-bg)] rounded-full overflow-hidden">
           <div
-            className="h-full bg-blue-400 rounded-full transition-[width] duration-200"
+            className="h-full bg-[var(--color-cafe-accent)]/70 rounded-full transition-[width] duration-200"
             style={{ width: `${progress * 100}%` }}
           />
         </div>

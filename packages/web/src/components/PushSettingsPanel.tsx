@@ -77,9 +77,9 @@ export function PushSettingsPanel() {
     return (
       <div className="space-y-3">
         <h3 className="text-base font-semibold text-cafe">推送通知</h3>
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 space-y-2">
-          <p className="text-sm text-amber-900 font-medium">{environmentHint ?? '当前浏览器不支持推送通知。'}</p>
-          <p className="text-xs text-amber-700">
+        <div className="rounded-xl border border-conn-amber-ring bg-conn-amber-bg px-4 py-4 space-y-2">
+          <p className="text-sm text-conn-amber-text font-medium">{environmentHint ?? '当前浏览器不支持推送通知。'}</p>
+          <p className="text-xs text-conn-amber-text">
             iPhone 用户请将 Clowder AI 添加到主屏幕后再开启推送（Safari 普通标签页不支持 Web Push）。
           </p>
         </div>
@@ -100,37 +100,41 @@ export function PushSettingsPanel() {
         </p>
       </div>
 
-      <div className="rounded-xl border border-cafe bg-cafe-surface p-4 space-y-3">
+      <div className="rounded-xl border border-[var(--console-border-soft)] bg-cafe-surface p-4 space-y-3">
         <div className="text-sm font-medium text-cafe">通知能力矩阵</div>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
-          <div className="rounded-lg border border-cafe bg-cafe-surface-elevated px-3 py-2">
+          <div className="rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface-elevated px-3 py-2">
             <div className="text-cafe-secondary">浏览器支持</div>
-            <div className="font-semibold text-emerald-700">已支持</div>
+            <div className="font-semibold text-conn-emerald-text">已支持</div>
           </div>
-          <div className="rounded-lg border border-cafe bg-cafe-surface-elevated px-3 py-2">
+          <div className="rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface-elevated px-3 py-2">
             <div className="text-cafe-secondary">权限状态</div>
             <div
-              className={`font-semibold ${permission === 'granted' ? 'text-emerald-700' : permission === 'denied' ? 'text-rose-700' : 'text-amber-700'}`}
+              className={`font-semibold ${permission === 'granted' ? 'text-conn-emerald-text' : permission === 'denied' ? 'text-conn-red-text' : 'text-conn-amber-text'}`}
             >
               {describePermission(permission)}
             </div>
           </div>
-          <div className="rounded-lg border border-cafe bg-cafe-surface-elevated px-3 py-2">
+          <div className="rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface-elevated px-3 py-2">
             <div className="text-cafe-secondary">推送服务</div>
-            <div className={`font-semibold ${status?.capability.enabled ? 'text-emerald-700' : 'text-amber-700'}`}>
+            <div
+              className={`font-semibold ${status?.capability.enabled ? 'text-conn-emerald-text' : 'text-conn-amber-text'}`}
+            >
               {status?.capability.enabled ? '已启用' : '未启用'}
             </div>
           </div>
-          <div className="rounded-lg border border-cafe bg-cafe-surface-elevated px-3 py-2">
+          <div className="rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface-elevated px-3 py-2">
             <div className="text-cafe-secondary">设备订阅</div>
-            <div className={`font-semibold ${status?.subscription.count ? 'text-emerald-700' : 'text-amber-700'}`}>
+            <div
+              className={`font-semibold ${status?.subscription.count ? 'text-conn-emerald-text' : 'text-conn-amber-text'}`}
+            >
               {status?.subscription.count ?? 0} 台
             </div>
           </div>
-          <div className="rounded-lg border border-cafe bg-cafe-surface-elevated px-3 py-2">
+          <div className="rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface-elevated px-3 py-2">
             <div className="text-cafe-secondary">最近投递</div>
             <div
-              className={`font-semibold ${status?.delivery.lastResult === 'ok' ? 'text-emerald-700' : status?.delivery.lastResult === 'error' ? 'text-rose-700' : 'text-cafe-secondary'}`}
+              className={`font-semibold ${status?.delivery.lastResult === 'ok' ? 'text-conn-emerald-text' : status?.delivery.lastResult === 'error' ? 'text-conn-red-text' : 'text-cafe-secondary'}`}
             >
               {describeDelivery(status?.delivery.lastResult ?? 'not_attempted', status?.delivery.lastError ?? null)}
             </div>
@@ -148,9 +152,9 @@ export function PushSettingsPanel() {
       </div>
 
       {mappedHints.length > 0 && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <div className="text-sm font-medium text-amber-900">修复建议</div>
-          <ul className="mt-2 space-y-1 text-xs text-amber-800 list-disc pl-4">
+        <div className="rounded-xl border border-conn-amber-ring bg-conn-amber-bg px-4 py-3">
+          <div className="text-sm font-medium text-conn-amber-text">修复建议</div>
+          <ul className="mt-2 space-y-1 text-xs text-conn-amber-text list-disc pl-4">
             {mappedHints.map((hint) => (
               <li key={hint}>{hint}</li>
             ))}
@@ -159,7 +163,7 @@ export function PushSettingsPanel() {
       )}
 
       {status?.subscription.targets && status.subscription.targets.length > 0 && (
-        <div className="rounded-xl border border-cafe bg-cafe-surface px-4 py-3">
+        <div className="rounded-xl border border-[var(--console-border-soft)] bg-cafe-surface px-4 py-3">
           <div className="text-sm font-medium text-cafe">已绑定设备</div>
           <ul className="mt-2 space-y-1 text-xs text-cafe-secondary">
             {status.subscription.targets.slice(0, 3).map((target) => (
@@ -173,8 +177,8 @@ export function PushSettingsPanel() {
       )}
 
       {lastTestSummary && (
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-700 space-y-1">
-          <div className="text-sm font-medium text-slate-900">最近测试</div>
+        <div className="rounded-xl border border-[var(--console-border-soft)] bg-cafe-surface px-4 py-3 text-xs text-cafe-secondary space-y-1">
+          <div className="text-sm font-medium text-cafe">最近测试</div>
           {lastTestMessage && <p>{lastTestMessage}</p>}
           <p>
             尝试 {lastTestSummary.attempted} · 成功 {lastTestSummary.delivered} · 失败 {lastTestSummary.failed} · 清理{' '}
@@ -184,17 +188,17 @@ export function PushSettingsPanel() {
       )}
 
       {environmentHint && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
-          <p className="text-xs text-amber-700">{environmentHint}</p>
+        <div className="bg-conn-amber-bg border border-conn-amber-ring rounded-lg px-4 py-3">
+          <p className="text-xs text-conn-amber-text">{environmentHint}</p>
         </div>
       )}
       {lastError && (
-        <div className="bg-rose-50 border border-rose-200 rounded-lg px-4 py-3">
-          <p className="text-xs text-rose-700">{lastError}</p>
+        <div className="bg-conn-red-bg border border-conn-red-ring rounded-lg px-4 py-3">
+          <p className="text-xs text-conn-red-text">{lastError}</p>
         </div>
       )}
 
-      <div className="flex items-center justify-between rounded-xl border border-cafe bg-cafe-surface-elevated px-4 py-3">
+      <div className="flex items-center justify-between rounded-xl border border-[var(--console-border-soft)] bg-cafe-surface-elevated px-4 py-3">
         <div>
           <p className="text-sm font-medium text-cafe-secondary">{isSubscribed ? '已开启推送' : '推送已关闭'}</p>
           <p className="text-xs text-cafe-secondary">
@@ -206,8 +210,8 @@ export function PushSettingsPanel() {
           disabled={isLoading}
           className={`px-4 py-1.5 text-sm rounded-lg font-medium transition-colors ${
             isSubscribed
-              ? 'bg-gray-200 text-cafe-secondary hover:bg-gray-300'
-              : 'bg-blue-600 text-white hover:bg-blue-700'
+              ? 'bg-[var(--console-pill-bg)] text-cafe-secondary hover:bg-[var(--console-hover-bg)]'
+              : 'bg-[var(--color-cafe-accent)] text-[var(--cafe-surface)] hover:opacity-90'
           } disabled:opacity-50`}
         >
           {isLoading ? '处理中...' : isSubscribed ? '关闭' : '开启'}
@@ -221,7 +225,7 @@ export function PushSettingsPanel() {
             void handleSendTest();
           }}
           disabled={isTesting || isLoading}
-          className="text-xs text-blue-600 hover:text-blue-800 underline"
+          className="text-xs text-[var(--color-cafe-accent)] hover:opacity-80 underline"
         >
           {isTesting ? '发送中...' : '发送测试通知'}
         </button>

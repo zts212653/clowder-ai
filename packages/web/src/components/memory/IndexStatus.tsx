@@ -75,7 +75,7 @@ export function getConfigVars(vars: EnvVar[]): EnvVar[] {
 
 function StatusRow({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="flex items-center justify-between border-b border-cafe/50 py-2 last:border-b-0">
+    <div className="flex items-center justify-between border-b border-[var(--console-border-soft)] py-2 last:border-b-0">
       <span className="text-xs text-cafe-secondary">{label}</span>
       <span className="text-sm font-medium text-cafe-black">{value}</span>
     </div>
@@ -133,9 +133,9 @@ export function IndexStatus() {
 
   if (error) {
     return (
-      <div data-testid="index-status" className="rounded-lg border border-red-200 bg-red-50 p-4">
-        <p className="text-sm text-red-600">{error}</p>
-        <button type="button" onClick={fetchAll} className="mt-2 text-xs text-red-700 underline">
+      <div data-testid="index-status" className="rounded-[20px] border border-conn-red-ring bg-conn-red-bg p-4">
+        <p className="text-sm text-conn-red-text">{error}</p>
+        <button type="button" onClick={fetchAll} className="mt-2 text-xs text-conn-red-text underline">
           重试
         </button>
       </div>
@@ -154,13 +154,15 @@ export function IndexStatus() {
     <div data-testid="index-status" className="space-y-4">
       {/* Health badge */}
       <div className="flex items-center gap-2">
-        <span className={`inline-block h-2.5 w-2.5 rounded-full ${status.healthy ? 'bg-green-500' : 'bg-red-500'}`} />
+        <span
+          className={`inline-block h-2.5 w-2.5 rounded-full ${status.healthy ? 'bg-conn-emerald-text' : 'bg-conn-red-text'}`}
+        />
         <span className="text-sm font-medium text-cafe-black">{status.healthy ? 'Healthy' : 'Unhealthy'}</span>
         {status.reason && <span className="text-xs text-cafe-secondary">({status.reason})</span>}
       </div>
 
       {/* Stats */}
-      <div className="rounded-lg border border-cafe bg-white p-3">
+      <div className="rounded-lg bg-[var(--console-card-bg)] p-3">
         <StatusRow label="Backend" value={status.backend} />
         <StatusRow label="Documents" value={status.docsCount} />
         <StatusRow label="Threads" value={status.threadsCount} />
@@ -175,7 +177,7 @@ export function IndexStatus() {
 
       {/* Feature flags */}
       {evidenceVars.length > 0 && (
-        <div className="rounded-lg border border-cafe bg-white p-3">
+        <div className="rounded-lg bg-[var(--console-card-bg)] p-3">
           <h3 className="mb-2 text-xs font-semibold text-cafe-black">功能开关</h3>
           {evidenceVars.map((v) => {
             const isOn = v.currentValue === 'on';
@@ -184,7 +186,7 @@ export function IndexStatus() {
             return (
               <div
                 key={v.name}
-                className="flex items-center justify-between border-b border-cafe/50 py-2 last:border-b-0"
+                className="flex items-center justify-between border-b border-[var(--console-border-soft)] py-2 last:border-b-0"
               >
                 <div className="flex-1 pr-3">
                   <div className="text-xs font-medium text-cafe-black">{v.name}</div>
@@ -195,14 +197,14 @@ export function IndexStatus() {
                     type="button"
                     disabled={isUpdating}
                     onClick={() => toggleEnvVar(v.name, v.currentValue)}
-                    className={`relative h-5 w-9 rounded-full transition-colors ${isOn ? 'bg-green-500' : 'bg-gray-300'} ${isUpdating ? 'opacity-50' : ''}`}
+                    className={`relative h-5 w-9 rounded-full transition-colors ${isOn ? 'bg-conn-emerald-text' : 'bg-cafe-surface-sunken'} ${isUpdating ? 'opacity-50' : ''}`}
                   >
                     <span
-                      className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${isOn ? 'translate-x-4' : ''}`}
+                      className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-cafe-surface shadow transition-transform ${isOn ? 'translate-x-4' : ''}`}
                     />
                   </button>
                 ) : (
-                  <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                  <span className="rounded bg-conn-amber-bg px-1.5 py-0.5 text-[10px] font-medium text-conn-amber-text">
                     {v.currentValue}
                   </span>
                 )}
@@ -214,11 +216,11 @@ export function IndexStatus() {
 
       {/* Config reference — all non-toggle evidence env vars */}
       {configVars.length > 0 && (
-        <div className="rounded-lg border border-cafe bg-white p-3">
+        <div className="rounded-lg bg-[var(--console-card-bg)] p-3">
           <h3 className="mb-2 text-xs font-semibold text-cafe-black">配置参考</h3>
           <p className="mb-2 text-[10px] text-cafe-secondary">以下配置需在 .env 中设置，修改后重启生效。</p>
           {configVars.map((v) => (
-            <div key={v.name} className="border-b border-cafe/50 py-2 last:border-b-0">
+            <div key={v.name} className="border-b border-[var(--console-border-soft)] py-2 last:border-b-0">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium font-mono text-cafe-black">{v.name}</span>
                 <span className="text-[10px] font-mono text-cafe-secondary truncate max-w-[50%] text-right">
@@ -232,11 +234,7 @@ export function IndexStatus() {
       )}
 
       {/* Refresh button */}
-      <button
-        type="button"
-        onClick={fetchAll}
-        className="rounded-lg border border-cafe bg-white px-3 py-1.5 text-xs text-cafe-secondary transition-colors hover:bg-cafe-surface"
-      >
+      <button type="button" onClick={fetchAll} className="console-button-ghost text-xs px-3 py-1.5">
         刷新状态
       </button>
     </div>

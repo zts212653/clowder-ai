@@ -19,13 +19,13 @@ const LEVEL_LABEL: Record<ConnectionLevel, string> = {
 
 const LEVEL_CLASS: Record<ConnectionLevel, string> = {
   online: 'border-codex-light bg-codex-bg text-codex-dark',
-  degraded: 'border-cocreator-light bg-cocreator-bg text-cocreator-dark',
-  offline: 'border-cafe bg-cafe-surface-sunken text-cafe-muted',
+  degraded: 'border-[var(--console-border-soft)] bg-[var(--console-hover-bg)] text-cafe-secondary',
+  offline: 'border-[var(--console-border-soft)] bg-cafe-surface-sunken text-cafe-muted',
 };
 
 const LEVEL_DOT_COLOR: Record<ConnectionLevel, string> = {
   online: 'var(--color-codex-primary)',
-  degraded: 'var(--color-cocreator-primary)',
+  degraded: 'var(--color-cafe-accent)',
   offline: 'var(--cafe-text-muted)',
 };
 
@@ -64,7 +64,7 @@ export function ConnectionStatusBar({
 
   return (
     <section
-      className="mx-auto mb-3 w-full max-w-3xl rounded-2xl border border-cafe-subtle bg-cafe-surface p-3 shadow-sm backdrop-blur"
+      className="mx-auto mb-3 w-full max-w-3xl rounded-2xl border border-[var(--console-border-soft)] bg-cafe-surface p-3 shadow-sm backdrop-blur"
       data-testid="connection-status-bar"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -79,7 +79,7 @@ export function ConnectionStatusBar({
       </div>
 
       {(isOfflineSnapshot || isReadonly) && (
-        <div className="mt-2 rounded-xl border border-cocreator-light bg-cocreator-bg px-3 py-2 text-xs text-cocreator-dark">
+        <div className="mt-2 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-hover-bg)] px-3 py-2 text-xs text-cafe-secondary">
           {isReadonly
             ? '当前网络不可用，输入区已切换为只读模式。恢复连接后可继续发送消息。'
             : '当前展示的是本地离线快照（最后一次成功缓存的消息）。'}
