@@ -8,7 +8,7 @@
  */
 
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
-import type { IMessageStore } from '../../stores/ports/MessageStore.js';
+import { hydrateReplyPreview, type IMessageStore } from '../../stores/ports/MessageStore.js';
 import {
   accumulateTextAggregate,
   accumulateTextParts,
@@ -144,6 +144,7 @@ export class QueueProcessor {
   private processingSlots = new Map<string, number>();
   /** F108: Per-slot pause tracking (set on canceled/failed, cleared on next execution) */
   private pausedSlots = new Map<string, 'canceled' | 'failed'>();
+  private pauseEpoch = new Map<string, number>();
   /** F122B B6: Per-entry completion hooks (for multi-mention response aggregation). */
   private entryCompleteHooks = new Map<string, EntryCompleteHook>();
   /** F118 D4: max age before a processingSlot is considered zombie (default 2.5× CLI timeout = 75min) */
@@ -426,11 +427,14 @@ export class QueueProcessor {
     return undefined;
   }
 
+  /** #595: auto-recovery delay for failed/canceled slots (ms) */
+  private static readonly PAUSE_RECOVERY_DELAY_MS = 10_000;
+
   /**
    * System-level entry: called when an invocation completes.
    * F108: Now slot-aware — catId identifies which slot completed.
    * - succeeded → auto-dequeue oldest across users
-   * - canceled/failed → pause slot, notify relevant users
+   * - canceled/failed → pause slot, notify users, auto-recover after delay
    */
   async onInvocationComplete(
     threadId: string,
@@ -453,8 +457,25 @@ export class QueueProcessor {
         this.pausedSlots.delete(sk);
         return;
       }
+      const epoch = (this.pauseEpoch.get(sk) ?? 0) + 1;
+      this.pauseEpoch.set(sk, epoch);
       this.pausedSlots.set(sk, status);
       this.emitPausedToQueuedUsers(threadId, status);
+
+      // #595: auto-recover paused slot after delay — prevents indefinite stuck state
+      setTimeout(() => {
+        if (this.pauseEpoch.get(sk) !== epoch) return;
+        this.pausedSlots.delete(sk);
+        this.deps.log.info(
+          { threadId, catId, status },
+          '[QueueProcessor] Auto-recovering paused slot after timeout (#595)',
+        );
+        if (this.deps.queue.hasQueuedForThread(threadId)) {
+          void this.tryExecuteNextAcrossUsers(threadId, catId).catch((err) => {
+            this.deps.log.error({ err, threadId, catId }, '[QueueProcessor] Auto-recovery dequeue failed');
+          });
+        }
+      }, QueueProcessor.PAUSE_RECOVERY_DELAY_MS);
     }
   }
 
@@ -466,11 +487,13 @@ export class QueueProcessor {
    */
   clearPause(threadId: string, catId?: string): void {
     if (catId) {
-      this.pausedSlots.delete(QueueProcessor.slotKey(threadId, catId));
+      const sk = QueueProcessor.slotKey(threadId, catId);
+      this.pausedSlots.delete(sk);
     } else {
-      // Backward compat: clear all paused slots for this thread
       for (const key of [...this.pausedSlots.keys()]) {
-        if (QueueProcessor.slotMatchesThread(key, threadId)) this.pausedSlots.delete(key);
+        if (QueueProcessor.slotMatchesThread(key, threadId)) {
+          this.pausedSlots.delete(key);
+        }
       }
     }
   }
@@ -744,12 +767,25 @@ export class QueueProcessor {
         mentions: readonly string[];
         userId: string;
         contentBlocks?: readonly unknown[];
+        extra?: Record<string, unknown>;
+        origin?: string;
+        replyTo?: string;
+        replyPreview?: { senderCatId: string | null; content: string; deleted?: boolean; kind?: string };
+        mentionsUser?: boolean;
       }> = [];
       for (const mid of allMessageIds) {
         try {
           const result = await messageStore.markDelivered(mid, deliveredNow);
           if (result) {
             deliveredIds.push(mid);
+            let preview: Awaited<ReturnType<typeof hydrateReplyPreview>> | null = null;
+            if (result.replyTo) {
+              try {
+                preview = await hydrateReplyPreview(messageStore, result.replyTo);
+              } catch {
+                /* best-effort: preview failure must not drop the delivered message */
+              }
+            }
             deliveredMessages.push({
               id: result.id,
               content: result.content,
@@ -758,6 +794,11 @@ export class QueueProcessor {
               mentions: result.mentions,
               userId: result.userId,
               contentBlocks: result.contentBlocks,
+              ...(result.extra ? { extra: result.extra as Record<string, unknown> } : {}),
+              ...(result.origin ? { origin: result.origin } : {}),
+              ...(result.replyTo ? { replyTo: result.replyTo } : {}),
+              ...(preview ? { replyPreview: preview } : {}),
+              ...(result.mentionsUser ? { mentionsUser: true } : {}),
             });
           }
         } catch {
