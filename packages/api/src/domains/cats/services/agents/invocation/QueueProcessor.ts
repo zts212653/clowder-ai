@@ -191,7 +191,32 @@ export class QueueProcessor {
   }
 
   private static slotKey(threadId: string, catId: string): string {
-    return `${threadId}:${catId}`;
+    return JSON.stringify([threadId, catId]);
+  }
+
+  private static slotMatchesThread(key: string, threadId: string): boolean {
+    return QueueProcessor.parseSlotKey(key)?.threadId === threadId;
+  }
+
+  private static parseSlotKey(key: string): { threadId: string; catId: string } | null {
+    try {
+      const parsed = JSON.parse(key);
+      if (
+        Array.isArray(parsed) &&
+        parsed.length === 2 &&
+        typeof parsed[0] === 'string' &&
+        typeof parsed[1] === 'string'
+      ) {
+        return { threadId: parsed[0], catId: parsed[1] };
+      }
+    } catch {
+      // Legacy in-memory keys from older code are not expected after restart.
+    }
+    const legacySep = key.indexOf(':');
+    if (legacySep > 0) {
+      return { threadId: key.slice(0, legacySep), catId: key.slice(legacySep + 1) };
+    }
+    return null;
   }
 
   /**
@@ -200,15 +225,14 @@ export class QueueProcessor {
    * The tracker check prevents false-positive cleanup of genuinely slow invocations.
    */
   private sweepZombieSlots(threadId: string): void {
-    const prefix = `${threadId}:`;
     const now = Date.now();
     const ttl = this.processingSlotTtlMs;
     for (const [key, startedAt] of this.processingSlots) {
-      if (!key.startsWith(prefix)) continue;
+      if (!QueueProcessor.slotMatchesThread(key, threadId)) continue;
       if (now - startedAt <= ttl) continue;
       // Only release if tracker also has no active invocation — double-confirm zombie
-      const parts = key.split(':');
-      const catId = parts.slice(1).join(':');
+      const catId = QueueProcessor.parseSlotKey(key)?.catId;
+      if (!catId) continue;
       if (!this.deps.invocationTracker.has(threadId, catId)) {
         this.processingSlots.delete(key);
         this.deps.log.warn({ threadId, catId, ageMs: now - startedAt }, '[F118 D4] zombie processingSlot released');
@@ -225,7 +249,7 @@ export class QueueProcessor {
     }
     // Backward compat: check if any slot for this thread is paused
     for (const key of this.pausedSlots.keys()) {
-      if (key.startsWith(`${threadId}:`)) {
+      if (QueueProcessor.slotMatchesThread(key, threadId)) {
         if (this.deps.queue.hasQueuedForThread(threadId)) return true;
       }
     }
@@ -361,9 +385,20 @@ export class QueueProcessor {
   /** F151: Check if thread has any queued or processing entries (used by delivery-batch-done signal). */
   isThreadBusy(threadId: string): boolean {
     if (this.deps.queue.hasQueuedForThread(threadId)) return true;
-    const prefix = `${threadId}:`;
     for (const key of this.processingSlots.keys()) {
-      if (key.startsWith(prefix)) return true;
+      if (QueueProcessor.slotMatchesThread(key, threadId)) return true;
+    }
+    return false;
+  }
+
+  /** Active execution only; queued leftovers are not enough to keep new broadcasts in queue mode. */
+  hasActiveExecution(threadId: string): boolean {
+    if (this.deps.invocationTracker.has(threadId)) return true;
+    this.sweepZombieSlots(threadId);
+    const now = Date.now();
+    for (const [key, startedAt] of this.processingSlots) {
+      if (!QueueProcessor.slotMatchesThread(key, threadId)) continue;
+      if (now - startedAt < this.processingSlotTtlMs) return true;
     }
     return false;
   }
@@ -387,7 +422,7 @@ export class QueueProcessor {
     }
     // Backward compat: return first paused slot's reason
     for (const [key, reason] of this.pausedSlots.entries()) {
-      if (key.startsWith(`${threadId}:`)) return reason;
+      if (QueueProcessor.slotMatchesThread(key, threadId)) return reason;
     }
     return undefined;
   }
@@ -460,7 +495,7 @@ export class QueueProcessor {
       this.pauseEpoch.delete(sk);
     } else {
       for (const key of [...this.pausedSlots.keys()]) {
-        if (key.startsWith(`${threadId}:`)) {
+        if (QueueProcessor.slotMatchesThread(key, threadId)) {
           this.pausedSlots.delete(key);
           this.pauseEpoch.delete(key);
         }
@@ -486,7 +521,7 @@ export class QueueProcessor {
    */
   releaseThread(threadId: string): void {
     for (const key of [...this.processingSlots.keys()]) {
-      if (key.startsWith(`${threadId}:`)) this.processingSlots.delete(key);
+      if (QueueProcessor.slotMatchesThread(key, threadId)) this.processingSlots.delete(key);
     }
   }
 

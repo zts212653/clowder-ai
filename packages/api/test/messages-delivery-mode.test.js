@@ -261,6 +261,36 @@ describe('POST /api/messages deliveryMode', () => {
     assert.equal(deps.invocationQueue.list('thread-1', 'user-1').length, 0);
   });
 
+  it('default broadcast with queued leftovers but no active invocation → executes immediately', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+    deps.queueProcessor = {
+      isThreadBusy: mock.fn(() => true),
+      isCatBusy: mock.fn(() => false),
+      onInvocationComplete: mock.fn(async () => {}),
+    };
+    deps.invocationQueue.enqueue({
+      threadId: 'thread-1',
+      userId: 'user-1',
+      content: 'queued-leftover',
+      source: 'user',
+      targetCats: ['opus'],
+      intent: 'execute',
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: 'new broadcast', threadId: 'thread-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.status, 'processing');
+    assert.ok(deps.invocationRecordStore.create.mock.calls.length > 0);
+    assert.equal(deps.invocationQueue.list('thread-1', 'user-1').length, 1, 'leftover queue must not grow');
+  });
+
   it('aborted invocation does not emit spawn_started after stop wins the race', async () => {
     const controller = new AbortController();
     let releaseRunningUpdate;

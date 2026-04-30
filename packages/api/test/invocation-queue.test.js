@@ -812,6 +812,24 @@ describe('InvocationQueue', () => {
     );
   });
 
+  it('hasQueuedOrProcessingForCat does not match another thread by prefix collision', () => {
+    queue.enqueue({
+      threadId: 't1:child',
+      userId: 'u1',
+      content: 'queued in another thread',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+    });
+
+    assert.equal(
+      queue.hasQueuedOrProcessingForCat('t1', 'codex'),
+      false,
+      'thread t1 must not inherit queued entries from thread t1:child',
+    );
+    assert.equal(queue.hasQueuedOrProcessingForCat('t1:child', 'codex'), true);
+  });
+
   // ── hasQueuedUserMessagesForThread: fairness gate must only count user-sourced entries ──
 
   it('hasQueuedUserMessagesForThread returns false when only agent entries are queued', () => {
