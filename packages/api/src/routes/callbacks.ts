@@ -425,67 +425,90 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
       const replyPreview = validatedReplyTo ? await hydrateReplyPreview(messageStore, validatedReplyTo) : undefined;
 
-      socketManager.broadcastAgentMessage(
-        {
-          type: 'text',
-          catId: principal.catId,
-          content: storedContent,
-          origin: 'callback',
-          messageId: storedMsg.id,
-          invocationId: storedMsg.id,
-          ...(validExplicitTargets.length ? { extra: { targetCats: validExplicitTargets } } : {}),
-          ...(mentionsUser ? { mentionsUser } : {}),
-          ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
-          ...(replyPreview ? { replyPreview } : {}),
-          timestamp: Date.now(),
-        },
-        effectiveThreadId,
-      );
+      // #607: Track whether message stays queued — defer broadcast until delivery decision
+      let messageStaysQueued = !!willEnqueueToQueue;
 
-      for (const block of richBlocks) {
+      if (mentions.length > 0 && router && invocationRecordStore && effectiveThreadId) {
+        try {
+          const a2aResult = await enqueueA2ATargets(
+            {
+              router,
+              invocationRecordStore,
+              socketManager,
+              ...(invocationTracker ? { invocationTracker } : {}),
+              ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
+              ...(queueProcessor ? { queueProcessor } : {}),
+              ...(opts.invocationQueue ? { invocationQueue: opts.invocationQueue } : {}),
+              log: app.log,
+            },
+            {
+              targetCats: mentions,
+              content: storedContent,
+              userId: principal.userId,
+              threadId: effectiveThreadId,
+              triggerMessage: storedMsg,
+              callerCatId: senderCatId,
+            },
+          );
+
+          if (willEnqueueToQueue && a2aResult.enqueued.length === 0) {
+            try {
+              await messageStore.markDelivered?.(storedMsg.id, Date.now());
+            } catch (err) {
+              app.log.warn(
+                { messageId: storedMsg.id, threadId: effectiveThreadId, err },
+                '[agent-key/post-message] Failed to recover ghost message — broadcasting anyway',
+              );
+            }
+            messageStaysQueued = false;
+          }
+        } catch (enqueueErr) {
+          app.log.error(
+            { err: enqueueErr, messageId: storedMsg.id, threadId: effectiveThreadId },
+            '[agent-key/post-message] enqueueA2ATargets failed — falling back to broadcast',
+          );
+          if (willEnqueueToQueue) {
+            try {
+              await messageStore.markDelivered?.(storedMsg.id, Date.now());
+            } catch {
+              /* best-effort */
+            }
+          }
+          messageStaysQueued = false;
+        }
+      }
+
+      // #607: Only broadcast when message is not queued — queued messages are
+      // broadcast later via messages_delivered when QueueProcessor delivers them
+      if (!messageStaysQueued) {
         socketManager.broadcastAgentMessage(
           {
-            type: 'system_info' as const,
+            type: 'text',
             catId: principal.catId,
-            content: JSON.stringify({ type: 'rich_block', block, messageId: storedMsg.id }),
+            content: storedContent,
+            origin: 'callback',
+            messageId: storedMsg.id,
             invocationId: storedMsg.id,
+            ...(validExplicitTargets.length ? { extra: { targetCats: validExplicitTargets } } : {}),
+            ...(mentionsUser ? { mentionsUser } : {}),
+            ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
+            ...(replyPreview ? { replyPreview } : {}),
             timestamp: Date.now(),
           },
           effectiveThreadId,
         );
-      }
 
-      if (mentions.length > 0 && router && invocationRecordStore && effectiveThreadId) {
-        const a2aResult = await enqueueA2ATargets(
-          {
-            router,
-            invocationRecordStore,
-            socketManager,
-            ...(invocationTracker ? { invocationTracker } : {}),
-            ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
-            ...(queueProcessor ? { queueProcessor } : {}),
-            ...(opts.invocationQueue ? { invocationQueue: opts.invocationQueue } : {}),
-            log: app.log,
-          },
-          {
-            targetCats: mentions,
-            content: storedContent,
-            userId: principal.userId,
-            threadId: effectiveThreadId,
-            triggerMessage: storedMsg,
-            callerCatId: senderCatId,
-          },
-        );
-
-        if (willEnqueueToQueue && a2aResult.enqueued.length === 0) {
-          try {
-            await messageStore.markDelivered?.(storedMsg.id, Date.now());
-          } catch (err) {
-            app.log.warn(
-              { messageId: storedMsg.id, threadId: effectiveThreadId, err },
-              '[agent-key/post-message] Failed to recover ghost message',
-            );
-          }
+        for (const block of richBlocks) {
+          socketManager.broadcastAgentMessage(
+            {
+              type: 'system_info' as const,
+              catId: principal.catId,
+              content: JSON.stringify({ type: 'rich_block', block, messageId: storedMsg.id }),
+              invocationId: storedMsg.id,
+              timestamp: Date.now(),
+            },
+            effectiveThreadId,
+          );
         }
       }
 
@@ -733,87 +756,103 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // F121: Hydrate reply preview for broadcast
     const replyPreview = validatedReplyTo ? await hydrateReplyPreview(messageStore, validatedReplyTo) : undefined;
 
-    socketManager.broadcastAgentMessage(
-      {
-        type: 'text',
-        catId: actor.catId,
-        content: storedContent,
-        origin: 'callback',
-        messageId: storedMsg.id,
-        // #573: broadcast with effectiveInvId (parent/outer) so frontend's
-        // (catId, invocationId) dedup matches stream broadcasts.
-        invocationId: effectiveInvId,
-        // F52+F098-C1: Include crossPost + targetCats in real-time broadcast
-        ...(isCrossThread || validExplicitTargets.length
-          ? {
-              extra: {
-                ...(isCrossThread
-                  ? { crossPost: { sourceThreadId: actor.threadId, sourceInvocationId: effectiveInvId } }
-                  : {}),
-                ...(validExplicitTargets.length ? { targetCats: validExplicitTargets } : {}),
-              },
-            }
-          : {}),
-        ...(mentionsUser ? { mentionsUser } : {}),
-        ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
-        ...(replyPreview ? { replyPreview } : {}),
-        timestamp: Date.now(),
-      },
-      effectiveThreadId,
-    );
+    // #607: Track whether message stays queued — defer broadcast until delivery decision
+    let messageStaysQueued = !!willEnqueueToQueue;
 
-    // #83: Broadcast each extracted rich block as SSE event for live rendering
-    // P2 cloud-review: include messageId for frontend correlation
-    // #454/573: include effectiveInvId (parent/outer) so frontend can exact-match
-    // callback to stream bubble.
-    for (const block of richBlocks) {
+    // F27: Enqueue @mentioned cats into parent worklist (unified A2A path)
+    if (mentions.length > 0 && router && invocationRecordStore && effectiveThreadId) {
+      try {
+        const a2aResult = await enqueueA2ATargets(
+          {
+            router,
+            invocationRecordStore,
+            socketManager,
+            ...(invocationTracker ? { invocationTracker } : {}),
+            ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
+            ...(queueProcessor ? { queueProcessor } : {}),
+            ...(opts.invocationQueue ? { invocationQueue: opts.invocationQueue } : {}),
+            log: app.log,
+          },
+          {
+            targetCats: mentions,
+            content: storedContent,
+            userId: actor.userId,
+            threadId: effectiveThreadId,
+            triggerMessage: storedMsg,
+            callerCatId: senderCatId,
+            parentInvocationId: record.parentInvocationId,
+          },
+        );
+
+        // AC-B6-P1: If message was stored as 'queued' but no targets were actually enqueued
+        // (depth/dedup/full rejected all), recover by marking delivered to prevent ghost message.
+        if (willEnqueueToQueue && a2aResult.enqueued.length === 0) {
+          try {
+            await messageStore.markDelivered?.(storedMsg.id, Date.now());
+          } catch (err) {
+            app.log.warn(
+              { messageId: storedMsg.id, threadId: effectiveThreadId, err },
+              '[AC-B6-P1] Failed to recover ghost message — broadcasting anyway',
+            );
+          }
+          messageStaysQueued = false;
+        }
+      } catch (enqueueErr) {
+        app.log.error(
+          { err: enqueueErr, messageId: storedMsg.id, threadId: effectiveThreadId },
+          '[invocation-callback] enqueueA2ATargets failed — falling back to broadcast',
+        );
+        if (willEnqueueToQueue) {
+          try {
+            await messageStore.markDelivered?.(storedMsg.id, Date.now());
+          } catch {
+            /* best-effort */
+          }
+        }
+        messageStaysQueued = false;
+      }
+    }
+
+    // #607: Only broadcast when message is not queued — queued messages are
+    // broadcast later via messages_delivered when QueueProcessor delivers them
+    if (!messageStaysQueued) {
       socketManager.broadcastAgentMessage(
         {
-          type: 'system_info' as const,
+          type: 'text',
           catId: actor.catId,
-          content: JSON.stringify({ type: 'rich_block', block, messageId: storedMsg.id }),
+          content: storedContent,
+          origin: 'callback',
+          messageId: storedMsg.id,
           invocationId: effectiveInvId,
+          ...(isCrossThread || validExplicitTargets.length
+            ? {
+                extra: {
+                  ...(isCrossThread
+                    ? { crossPost: { sourceThreadId: actor.threadId, sourceInvocationId: effectiveInvId } }
+                    : {}),
+                  ...(validExplicitTargets.length ? { targetCats: validExplicitTargets } : {}),
+                },
+              }
+            : {}),
+          ...(mentionsUser ? { mentionsUser } : {}),
+          ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
+          ...(replyPreview ? { replyPreview } : {}),
           timestamp: Date.now(),
         },
         effectiveThreadId,
       );
-    }
 
-    // F27: Enqueue @mentioned cats into parent worklist (unified A2A path)
-    if (mentions.length > 0 && router && invocationRecordStore && effectiveThreadId) {
-      const a2aResult = await enqueueA2ATargets(
-        {
-          router,
-          invocationRecordStore,
-          socketManager,
-          ...(invocationTracker ? { invocationTracker } : {}),
-          ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
-          ...(queueProcessor ? { queueProcessor } : {}),
-          ...(opts.invocationQueue ? { invocationQueue: opts.invocationQueue } : {}),
-          log: app.log,
-        },
-        {
-          targetCats: mentions,
-          content: storedContent,
-          userId: actor.userId,
-          threadId: effectiveThreadId,
-          triggerMessage: storedMsg,
-          callerCatId: senderCatId,
-          parentInvocationId: record.parentInvocationId,
-        },
-      );
-
-      // AC-B6-P1: If message was stored as 'queued' but no targets were actually enqueued
-      // (depth/dedup/full rejected all), recover by marking delivered to prevent ghost message.
-      if (willEnqueueToQueue && a2aResult.enqueued.length === 0) {
-        try {
-          await messageStore.markDelivered?.(storedMsg.id, Date.now());
-        } catch (err) {
-          app.log.warn(
-            { messageId: storedMsg.id, threadId: effectiveThreadId, err },
-            '[AC-B6-P1] Failed to recover ghost message — markDelivered rejected (best-effort)',
-          );
-        }
+      for (const block of richBlocks) {
+        socketManager.broadcastAgentMessage(
+          {
+            type: 'system_info' as const,
+            catId: actor.catId,
+            content: JSON.stringify({ type: 'rich_block', block, messageId: storedMsg.id }),
+            invocationId: effectiveInvId,
+            timestamp: Date.now(),
+          },
+          effectiveThreadId,
+        );
       }
     }
 

@@ -1120,8 +1120,11 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           clearInterval(heartbeatInterval);
           opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
           // F39: Notify queue processor for auto-dequeue chain
-          opts.queueProcessor?.onInvocationComplete(resolvedThreadId, primaryCat, finalStatus).catch(() => {
-            /* best-effort, don't crash background task */
+          opts.queueProcessor?.onInvocationComplete(resolvedThreadId, primaryCat, finalStatus).catch((err) => {
+            log.error(
+              { err, threadId: resolvedThreadId, catId: primaryCat, finalStatus },
+              '[messages] onInvocationComplete failed — queued messages may be stuck (#595)',
+            );
           });
         }
       })();

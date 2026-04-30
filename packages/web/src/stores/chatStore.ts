@@ -764,6 +764,11 @@ export interface ChatState {
       catId: string | null;
       timestamp: number;
       contentBlocks?: readonly unknown[];
+      extra?: Record<string, unknown>;
+      origin?: 'stream' | 'callback' | 'briefing';
+      replyTo?: string;
+      replyPreview?: { senderCatId: string | null; content: string; deleted?: boolean; kind?: string };
+      mentionsUser?: boolean;
     }>,
   ) => void;
 
@@ -971,11 +976,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (!existingIds.has(sm.id)) {
               updated.push({
                 id: sm.id,
-                type: 'user',
+                // #607: cat-originated messages (A2A triggers) have catId set
+                type: sm.catId ? 'assistant' : 'user',
                 content: sm.content,
                 timestamp: sm.timestamp,
                 deliveredAt,
+                ...(sm.catId ? { catId: sm.catId } : {}),
                 contentBlocks: sm.contentBlocks as ChatMessage['contentBlocks'],
+                ...(sm.extra ? { extra: sm.extra as ChatMessage['extra'] } : {}),
+                ...(sm.origin ? { origin: sm.origin } : {}),
+                ...(sm.replyTo ? { replyTo: sm.replyTo } : {}),
+                ...(sm.replyPreview ? { replyPreview: sm.replyPreview as ChatMessage['replyPreview'] } : {}),
+                ...(sm.mentionsUser ? { mentionsUser: true } : {}),
               });
             }
           }
@@ -987,14 +999,48 @@ export const useChatStore = create<ChatState>((set, get) => ({
       };
 
       if (threadId === state.currentThreadId) {
+        if (serverMessages && typeof document !== 'undefined' && !document.hasFocus()) {
+          const existingIds = new Set(state.messages.map((m) => m.id));
+          const newMention = serverMessages.find((sm) => sm.mentionsUser && !existingIds.has(sm.id));
+          if (newMention) {
+            fireOwnerMentionNotification({
+              id: newMention.id,
+              type: newMention.catId ? 'assistant' : 'user',
+              content: newMention.content,
+              timestamp: newMention.timestamp,
+              ...(newMention.catId ? { catId: newMention.catId } : {}),
+            } as ChatMessage);
+          }
+        }
         return { messages: updateMsgs(state.messages) };
       }
-      const existing = state.threadStates[threadId];
-      if (!existing) return state;
+      const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
+      const priorIds = new Set(existing.messages.map((m) => m.id));
+      const newInserts = serverMessages?.filter((sm) => !priorIds.has(sm.id)).length ?? 0;
+      const newMentionMsg = serverMessages?.find((sm) => sm.mentionsUser && !priorIds.has(sm.id));
+      if (newMentionMsg) {
+        fireOwnerMentionNotification({
+          id: newMentionMsg.id,
+          type: newMentionMsg.catId ? 'assistant' : 'user',
+          content: newMentionMsg.content,
+          timestamp: newMentionMsg.timestamp,
+          ...(newMentionMsg.catId ? { catId: newMentionMsg.catId } : {}),
+        } as ChatMessage);
+      }
       return {
         threadStates: {
           ...state.threadStates,
-          [threadId]: { ...existing, messages: updateMsgs(existing.messages) },
+          [threadId]: {
+            ...existing,
+            messages: updateMsgs(existing.messages),
+            ...(newInserts > 0
+              ? {
+                  unreadCount: (existing.unreadCount ?? 0) + newInserts,
+                  lastActivity: deliveredAt,
+                }
+              : {}),
+            ...(newMentionMsg ? { hasUserMention: true } : {}),
+          },
         },
       };
     }),
