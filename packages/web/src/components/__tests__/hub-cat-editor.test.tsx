@@ -1075,7 +1075,7 @@ describe('HubCatEditor', () => {
 
     const providerSelect = queryField<HTMLSelectElement>(container, 'select[aria-label="认证信息"]');
     const optionLabels = Array.from(providerSelect.options).map((option) => option.textContent ?? '');
-    expect(optionLabels).toContain('Gemini (OAuth)（内置）');
+    expect(optionLabels).toContain('Gemini (OAuth)（OAuth）');
     expect(optionLabels).not.toContain('Gemini Proxy（API Key）');
     expect(optionLabels).not.toContain('Google Official API（API Key）');
   });
