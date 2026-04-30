@@ -444,7 +444,6 @@ export class QueueProcessor {
     const sk = QueueProcessor.slotKey(threadId, catId);
     if (status === 'succeeded' || status === 'canceled_by_user') {
       this.pausedSlots.delete(sk);
-      this.pauseEpoch.delete(sk);
       if (this.deps.queue.hasQueuedForThread(threadId)) {
         await this.tryExecuteNextAcrossUsers(threadId, catId);
         await this.tryAutoExecute(threadId);
@@ -456,7 +455,6 @@ export class QueueProcessor {
       // canceled or failed → pause ONLY if there are queued entries to manage.
       if (!this.deps.queue.hasQueuedForThread(threadId)) {
         this.pausedSlots.delete(sk);
-        this.pauseEpoch.delete(sk);
         return;
       }
       const epoch = (this.pauseEpoch.get(sk) ?? 0) + 1;
@@ -468,7 +466,6 @@ export class QueueProcessor {
       setTimeout(() => {
         if (this.pauseEpoch.get(sk) !== epoch) return;
         this.pausedSlots.delete(sk);
-        this.pauseEpoch.delete(sk);
         this.deps.log.info(
           { threadId, catId, status },
           '[QueueProcessor] Auto-recovering paused slot after timeout (#595)',
@@ -492,12 +489,10 @@ export class QueueProcessor {
     if (catId) {
       const sk = QueueProcessor.slotKey(threadId, catId);
       this.pausedSlots.delete(sk);
-      this.pauseEpoch.delete(sk);
     } else {
       for (const key of [...this.pausedSlots.keys()]) {
         if (QueueProcessor.slotMatchesThread(key, threadId)) {
           this.pausedSlots.delete(key);
-          this.pauseEpoch.delete(key);
         }
       }
     }
