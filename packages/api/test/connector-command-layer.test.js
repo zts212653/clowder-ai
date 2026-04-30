@@ -91,7 +91,7 @@ describe('ConnectorCommandLayer', () => {
     assert.equal(result.kind, 'where');
     assert.ok(result.response.includes('thread-a'));
     assert.ok(result.response.includes('飞书测试'));
-    assert.ok(result.response.includes('cafe.example.com'));
+    assert.ok(result.response.includes('https://cafe.example.com/thread/thread-a'));
   });
 
   it('/where returns helpful message when no binding exists', async () => {
@@ -135,7 +135,7 @@ describe('ConnectorCommandLayer', () => {
     assert.equal(result.kind, 'new');
     assert.ok(result.newActiveThreadId);
     assert.ok(result.response.includes('新话题'));
-    assert.ok(result.response.includes('cafe.example.com'));
+    assert.ok(result.response.includes('https://cafe.example.com/thread/'));
   });
 
   it('/new without title still creates thread', async () => {

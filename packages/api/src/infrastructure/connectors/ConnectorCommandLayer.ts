@@ -166,7 +166,7 @@ export class ConnectorCommandLayer {
     }
     const thread = await this.deps.threadStore.get(binding.threadId);
     const title = thread?.title ?? '(无标题)';
-    const deepLink = `${this.deps.frontendBaseUrl}/threads/${binding.threadId}`;
+    const deepLink = `${this.deps.frontendBaseUrl}/thread/${binding.threadId}`;
     return {
       kind: 'where',
       contextThreadId: binding.threadId,
@@ -183,7 +183,7 @@ export class ConnectorCommandLayer {
     const effectiveTitle = title?.trim() ? title.trim() : undefined;
     const thread = await this.deps.threadStore.create(userId, effectiveTitle);
     await this.deps.bindingStore.bind(connectorId, externalChatId, thread.id, userId);
-    const deepLink = `${this.deps.frontendBaseUrl}/threads/${thread.id}`;
+    const deepLink = `${this.deps.frontendBaseUrl}/thread/${thread.id}`;
     const titleDisplay = effectiveTitle ? ` "${effectiveTitle}"` : '';
     return {
       kind: 'new',
@@ -237,7 +237,7 @@ export class ConnectorCommandLayer {
     }
     await this.deps.bindingStore.bind(connectorId, externalChatId, match.id, userId);
     const title = match.title ?? '(无标题)';
-    const deepLink = `${this.deps.frontendBaseUrl}/threads/${match.id}`;
+    const deepLink = `${this.deps.frontendBaseUrl}/thread/${match.id}`;
     return {
       kind: 'use',
       newActiveThreadId: match.id,

@@ -112,7 +112,7 @@ export async function buildStatusInfo(
 
   const title = thread.title || '(无标题)';
   const created = new Date(thread.createdAt ?? 0).toLocaleDateString('zh-CN');
-  const link = `${deps.frontendBaseUrl}/threads/${threadId}`;
+  const link = `${deps.frontendBaseUrl}/thread/${threadId}`;
 
   const lines = [
     '📊 Thread 状态',
