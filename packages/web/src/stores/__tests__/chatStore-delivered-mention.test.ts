@@ -29,9 +29,9 @@ describe('markMessagesDelivered mentionsUser notification', () => {
   it('active thread + blurred: fires notification for new mention', () => {
     vi.stubGlobal('document', { hasFocus: () => false });
 
-    useChatStore.getState().markMessagesDelivered('thread-1', ['m1'], NOW + 1, [
-      serverMsg('m1', { catId: 'opus', mentionsUser: true }),
-    ]);
+    useChatStore
+      .getState()
+      .markMessagesDelivered('thread-1', ['m1'], NOW + 1, [serverMsg('m1', { catId: 'opus', mentionsUser: true })]);
 
     expect(notifySpy).toHaveBeenCalledTimes(1);
     expect(notifySpy.mock.calls[0][0]).toContain('@');
@@ -40,17 +40,17 @@ describe('markMessagesDelivered mentionsUser notification', () => {
   it('active thread + focused: does NOT fire notification', () => {
     vi.stubGlobal('document', { hasFocus: () => true });
 
-    useChatStore.getState().markMessagesDelivered('thread-1', ['m1'], NOW + 1, [
-      serverMsg('m1', { catId: 'opus', mentionsUser: true }),
-    ]);
+    useChatStore
+      .getState()
+      .markMessagesDelivered('thread-1', ['m1'], NOW + 1, [serverMsg('m1', { catId: 'opus', mentionsUser: true })]);
 
     expect(notifySpy).not.toHaveBeenCalled();
   });
 
   it('background thread: fires notification for new mention', () => {
-    useChatStore.getState().markMessagesDelivered('thread-bg', ['m1'], NOW + 1, [
-      serverMsg('m1', { catId: 'opus', mentionsUser: true }),
-    ]);
+    useChatStore
+      .getState()
+      .markMessagesDelivered('thread-bg', ['m1'], NOW + 1, [serverMsg('m1', { catId: 'opus', mentionsUser: true })]);
 
     expect(notifySpy).toHaveBeenCalledTimes(1);
     const ts = useChatStore.getState().threadStates['thread-bg'];
@@ -89,9 +89,9 @@ describe('markMessagesDelivered mentionsUser notification', () => {
       },
     });
 
-    useChatStore.getState().markMessagesDelivered('thread-bg', ['m1'], NOW + 1, [
-      serverMsg('m1', { catId: 'opus', mentionsUser: true }),
-    ]);
+    useChatStore
+      .getState()
+      .markMessagesDelivered('thread-bg', ['m1'], NOW + 1, [serverMsg('m1', { catId: 'opus', mentionsUser: true })]);
 
     expect(notifySpy).not.toHaveBeenCalled();
     expect(useChatStore.getState().threadStates['thread-bg']?.hasUserMention).toBe(false);
