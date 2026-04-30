@@ -111,8 +111,8 @@ export function useConnectionStatus(socketConnected?: boolean | null): Connectio
   const runProbe = useCallback(async () => {
     if (!browserOnline || !probesEnabled) return;
     const [apiLevel, readyLevel, catsLevel] = await Promise.all([
-      probePublicEndpoint('/health'),
-      probePublicEndpoint('/ready'),
+      probePublicEndpoint('/api/health'),
+      probePublicEndpoint('/api/ready'),
       probeCatsAvailability(),
     ]);
     if (!mountedRef.current) return;
