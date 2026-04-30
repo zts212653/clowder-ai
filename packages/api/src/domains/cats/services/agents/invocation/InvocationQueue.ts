@@ -68,6 +68,10 @@ export class InvocationQueue {
     return `${threadId}:${userId}`;
   }
 
+  private queueMatchesThread(q: QueueEntry[], threadId: string): boolean {
+    return q.some((entry) => entry.threadId === threadId);
+  }
+
   private getOrCreate(key: string): QueueEntry[] {
     let q = this.queues.get(key);
     if (!q) {
@@ -171,8 +175,8 @@ export class InvocationQueue {
 
   /** Check if any entry in the thread already carries this messageId (connector retry dedup). */
   hasEntryWithMessageId(threadId: string, messageId: string): boolean {
-    for (const [key, q] of this.queues) {
-      if (!key.startsWith(threadId + ':')) continue;
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
       if (q.some((e) => e.messageId === messageId || e.mergedMessageIds?.includes(messageId))) return true;
     }
     return false;
@@ -313,8 +317,8 @@ export class InvocationQueue {
 
   /** Rollback a processing entry back to queued (undo markProcessing/markProcessingAcrossUsers). */
   rollbackProcessing(threadId: string, entryId: string): boolean {
-    for (const [key, q] of this.queues) {
-      if (!key.startsWith(`${threadId}:`)) continue;
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
       const entry = q.find((e) => e.id === entryId && e.status === 'processing');
       if (entry) {
         entry.status = 'queued';
@@ -340,8 +344,8 @@ export class InvocationQueue {
   /** F175: Find the highest-priority queued entry across all users for a thread. */
   peekOldestAcrossUsers(threadId: string): QueueEntry | null {
     let best: QueueEntry | null = null;
-    for (const [key, q] of this.queues) {
-      if (!key.startsWith(`${threadId}:`)) continue;
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
       for (const e of q) {
         if (e.status !== 'queued') continue;
         if (!best || InvocationQueue.compareEntries(e, best) < 0) {
@@ -355,27 +359,27 @@ export class InvocationQueue {
   /** F175: Mark the highest-priority queued entry across users as processing.
    *  skipCatIds: skip entries whose primary target cat is in this set (slot busy). */
   markProcessingAcrossUsers(threadId: string, skipCatIds?: Set<string>): QueueEntry | null {
-    let best: { entry: QueueEntry; key: string } | null = null;
-    for (const [key, q] of this.queues) {
-      if (!key.startsWith(`${threadId}:`)) continue;
+    let best: QueueEntry | null = null;
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
       for (const e of q) {
         if (e.status !== 'queued') continue;
         if (skipCatIds?.has(e.targetCats[0] ?? '')) continue;
-        if (!best || InvocationQueue.compareEntries(e, best.entry) < 0) {
-          best = { entry: e, key };
+        if (!best || InvocationQueue.compareEntries(e, best) < 0) {
+          best = e;
         }
       }
     }
     if (!best) return null;
-    best.entry.status = 'processing';
-    best.entry.processingStartedAt = Date.now();
-    return { ...best.entry };
+    best.status = 'processing';
+    best.processingStartedAt = Date.now();
+    return { ...best };
   }
 
   /** Remove a processing entry across all users for a thread by entryId. */
   removeProcessedAcrossUsers(threadId: string, entryId: string): QueueEntry | null {
-    for (const [key, q] of this.queues) {
-      if (!key.startsWith(`${threadId}:`)) continue;
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
       const idx = q.findIndex((e) => e.status === 'processing' && e.id === entryId);
       if (idx !== -1) {
         this.originalContents.delete(entryId);
@@ -389,10 +393,9 @@ export class InvocationQueue {
   /** Get unique userIds that have entries (any status) for this thread. */
   listUsersForThread(threadId: string): string[] {
     const users: string[] = [];
-    for (const [key, q] of this.queues) {
-      if (!key.startsWith(`${threadId}:`) || q.length === 0) continue;
-      const userId = key.slice(threadId.length + 1);
-      users.push(userId);
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId) || q.length === 0) continue;
+      users.push(q[0]!.userId);
     }
     return users;
   }
@@ -400,8 +403,8 @@ export class InvocationQueue {
   /** F122B: List all queued autoExecute entries for a thread (for scanning past busy slots). */
   listAutoExecute(threadId: string): QueueEntry[] {
     const result: QueueEntry[] = [];
-    for (const [key, q] of this.queues) {
-      if (!key.startsWith(`${threadId}:`)) continue;
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
       for (const e of q) {
         if (e.status !== 'queued' || !e.autoExecute) continue;
         result.push({ ...e });
@@ -415,8 +418,8 @@ export class InvocationQueue {
    *  have their own stale guard in hasActiveOrQueuedAgentForCat/hasPendingForCat. */
   countAgentEntriesForThread(threadId: string): number {
     let count = 0;
-    for (const [key, q] of this.queues) {
-      if (!key.startsWith(`${threadId}:`)) continue;
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
       for (const e of q) {
         if (e.source !== 'agent') continue;
         count++;
@@ -430,8 +433,8 @@ export class InvocationQueue {
    *  can still be enqueued while an earlier entry is processing.
    */
   hasQueuedAgentForCat(threadId: string, catId: string): boolean {
-    for (const [key, q] of this.queues) {
-      if (!key.startsWith(`${threadId}:`)) continue;
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
       for (const e of q) {
         if (e.source === 'agent' && e.status === 'queued' && e.targetCats.includes(catId)) {
           return true;
@@ -458,8 +461,8 @@ export class InvocationQueue {
 
   hasActiveOrQueuedAgentForCat(threadId: string, catId: string): boolean {
     const now = Date.now();
-    for (const [key, q] of this.queues) {
-      if (!key.startsWith(`${threadId}:`)) continue;
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
       for (const e of q) {
         if (e.source !== 'agent' || !e.targetCats.includes(catId)) continue;
 
@@ -478,7 +481,7 @@ export class InvocationQueue {
                   entryId: e.id,
                   status: e.status,
                   processingAgeMs: processingAge,
-                  userId: key.split(':')[1] ?? '',
+                  userId: e.userId,
                 },
               },
               '[DIAG] hasActiveOrQueuedAgentForCat hit',
@@ -494,7 +497,7 @@ export class InvocationQueue {
                 entryId: e.id,
                 status: e.status,
                 processingAgeMs: processingAge,
-                userId: key.split(':')[1] ?? '',
+                userId: e.userId,
               },
             },
             '[DIAG] hasActiveOrQueuedAgentForCat: ignoring stale processing entry (zombie defense)',
@@ -511,7 +514,7 @@ export class InvocationQueue {
                 entryId: e.id,
                 status: e.status,
                 queuedAgeMs: now - e.createdAt,
-                userId: key.split(':')[1] ?? '',
+                userId: e.userId,
               },
             },
             '[DIAG] hasActiveOrQueuedAgentForCat hit',
@@ -535,8 +538,8 @@ export class InvocationQueue {
     },
   ): boolean {
     const now = Date.now();
-    for (const [key, q] of this.queues) {
-      if (!key.startsWith(`${threadId}:`)) continue;
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
       for (const e of q) {
         if (opts?.excludeEntryId && e.id === opts.excludeEntryId) continue;
         if (!e.targetCats.includes(catId)) continue;
@@ -561,7 +564,7 @@ export class InvocationQueue {
                   entryId: e.id,
                   status: e.status,
                   processingAgeMs: processingAge,
-                  userId: key.split(':')[1] ?? '',
+                  userId: e.userId,
                 },
               },
               '[DIAG] hasPendingForCat: ignoring stale processing entry (zombie defense)',
@@ -577,8 +580,8 @@ export class InvocationQueue {
 
   /** F122B: Mark a specific entry as processing by ID (cross-user). */
   markProcessingById(threadId: string, entryId: string): boolean {
-    for (const [key, q] of this.queues) {
-      if (!key.startsWith(`${threadId}:`)) continue;
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
       const entry = q.find((e) => e.id === entryId && e.status === 'queued');
       if (entry) {
         entry.status = 'processing';
@@ -623,8 +626,8 @@ export class InvocationQueue {
    *  entries are ignored to prevent zombie entries from permanently blocking a cat. */
   hasQueuedOrProcessingForCat(threadId: string, catId: string): boolean {
     const now = Date.now();
-    for (const [key, q] of this.queues) {
-      if (!key.startsWith(`${threadId}:`)) continue;
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
       for (const e of q) {
         if (!e.targetCats.includes(catId)) continue;
         if (e.status === 'queued') {
@@ -641,8 +644,8 @@ export class InvocationQueue {
 
   /** Whether any user has queued entries for this thread. */
   hasQueuedForThread(threadId: string): boolean {
-    for (const [key, q] of this.queues) {
-      if (!key.startsWith(`${threadId}:`)) continue;
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
       if (q.some((e) => e.status === 'queued')) return true;
     }
     return false;
@@ -655,8 +658,8 @@ export class InvocationQueue {
    * the A2A text-scan fairness gate in routeSerial.
    */
   hasQueuedUserMessagesForThread(threadId: string): boolean {
-    for (const [key, q] of this.queues) {
-      if (!key.startsWith(`${threadId}:`)) continue;
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
       if (q.some((e) => e.status === 'queued' && e.source === 'user')) return true;
     }
     return false;

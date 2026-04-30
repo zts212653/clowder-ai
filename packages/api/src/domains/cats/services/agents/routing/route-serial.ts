@@ -97,6 +97,56 @@ function collectStructuredTargetCatsFromInput(input: unknown): string[] {
   return values.filter((value): value is string => typeof value === 'string' && value.length > 0);
 }
 
+function isPostMessageToolName(toolName: string | undefined): boolean {
+  if (!toolName) return false;
+  if (toolName.endsWith('cat_cafe_post_message')) return true;
+  return toolName === 'mcp:cat-cafe/post_message' || toolName === 'cat_cafe_post_message';
+}
+
+function confirmsPostMessagePersistence(content: string | undefined): boolean {
+  return content?.includes('"status":"ok"') || content?.includes('"status":"duplicate"') || false;
+}
+
+function inferToolResultName(msg: AgentMessage): string | undefined {
+  if (msg.toolName) return msg.toolName;
+  const firstLine = msg.content?.trimStart().split('\n', 1)[0]?.trim();
+  if (!firstLine) return undefined;
+  const mcpLabel = firstLine.match(/^(mcp:[^\s]+)\s+\(/);
+  if (mcpLabel?.[1]) return mcpLabel[1];
+  if (firstLine.startsWith('command: ')) return 'command_execution';
+  return undefined;
+}
+
+function toolNamesMatch(a: string, b: string): boolean {
+  return a === b || (isPostMessageToolName(a) && isPostMessageToolName(b));
+}
+
+function consumePendingToolResult(
+  pendingToolResults: string[],
+  msg: AgentMessage,
+  hasConfirmingContent: boolean,
+): string | undefined {
+  const resultToolName = inferToolResultName(msg);
+  if (resultToolName) {
+    const pendingIndex = pendingToolResults.findIndex((name) => toolNamesMatch(name, resultToolName));
+    if (pendingIndex !== -1) pendingToolResults.splice(pendingIndex, 1);
+    return resultToolName;
+  }
+
+  const firstPending = pendingToolResults[0];
+  if (!firstPending) return undefined;
+
+  if (!isPostMessageToolName(firstPending)) {
+    return pendingToolResults.shift();
+  }
+
+  if (hasConfirmingContent && pendingToolResults.length === 1) {
+    return pendingToolResults.shift();
+  }
+
+  return undefined;
+}
+
 export async function* routeSerial(
   deps: RouteStrategyDeps,
   targetCats: CatId[],
@@ -508,6 +558,7 @@ export async function* routeSerial(
       const collectedToolEvents: StoredToolEvent[] = [];
       // F148 OQ-2: Collect tool names for context eval signals
       const collectedToolNames: string[] = [];
+      const pendingToolResults: string[] = [];
       // #573: Track confirmed cat_cafe_post_message callback persistence
       let callbackPostConfirmed = false;
       let awaitingCallbackResult = false;
@@ -653,16 +704,22 @@ export async function* routeSerial(
           // F148 OQ-2: Collect tool names for context eval
           if (effectiveMsg.type === 'tool_use' && effectiveMsg.toolName) {
             collectedToolNames.push(effectiveMsg.toolName);
-            if (effectiveMsg.toolName.endsWith('cat_cafe_post_message')) awaitingCallbackResult = true;
+            pendingToolResults.push(effectiveMsg.toolName);
+            if (isPostMessageToolName(effectiveMsg.toolName)) awaitingCallbackResult = true;
           }
           // #573: Confirm callback persistence via tool_result success
-          if (effectiveMsg.type === 'tool_result' && awaitingCallbackResult) {
-            awaitingCallbackResult = false;
+          if (effectiveMsg.type === 'tool_result') {
+            const hasConfirmingContent = confirmsPostMessagePersistence(effectiveMsg.content);
+            const completedToolName = consumePendingToolResult(pendingToolResults, effectiveMsg, hasConfirmingContent);
             if (
-              effectiveMsg.content?.includes('"status":"ok"') ||
-              effectiveMsg.content?.includes('"status":"duplicate"')
-            )
+              awaitingCallbackResult &&
+              completedToolName &&
+              isPostMessageToolName(completedToolName) &&
+              hasConfirmingContent
+            ) {
               callbackPostConfirmed = true;
+              awaitingCallbackResult = false;
+            }
           }
 
           // F150: Fire-and-forget tool usage counter
