@@ -776,6 +776,7 @@ export class QueueProcessor {
         origin?: string;
         replyTo?: string;
         replyPreview?: { senderCatId: string | null; content: string; deleted?: boolean; kind?: string };
+        mentionsUser?: boolean;
       }> = [];
       for (const mid of allMessageIds) {
         try {
@@ -802,6 +803,7 @@ export class QueueProcessor {
               ...(result.origin ? { origin: result.origin } : {}),
               ...(result.replyTo ? { replyTo: result.replyTo } : {}),
               ...(preview ? { replyPreview: preview } : {}),
+              ...(result.mentionsUser ? { mentionsUser: true } : {}),
             });
           }
         } catch {

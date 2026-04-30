@@ -712,6 +712,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
           origin?: 'stream' | 'callback' | 'briefing';
           replyTo?: string;
           replyPreview?: { senderCatId: string | null; content: string; deleted?: boolean; kind?: string };
+          mentionsUser?: boolean;
         }>;
       }) => {
         useChatStore.getState().markMessagesDelivered(data.threadId, data.messageIds, data.deliveredAt, data.messages);

@@ -768,6 +768,7 @@ export interface ChatState {
       origin?: 'stream' | 'callback' | 'briefing';
       replyTo?: string;
       replyPreview?: { senderCatId: string | null; content: string; deleted?: boolean; kind?: string };
+      mentionsUser?: boolean;
     }>,
   ) => void;
 
@@ -986,6 +987,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 ...(sm.origin ? { origin: sm.origin } : {}),
                 ...(sm.replyTo ? { replyTo: sm.replyTo } : {}),
                 ...(sm.replyPreview ? { replyPreview: sm.replyPreview as ChatMessage['replyPreview'] } : {}),
+                ...(sm.mentionsUser ? { mentionsUser: true } : {}),
               });
             }
           }
@@ -1002,6 +1004,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
       const priorIds = new Set(existing.messages.map((m) => m.id));
       const newInserts = serverMessages?.filter((sm) => !priorIds.has(sm.id)).length ?? 0;
+      const hasMention = serverMessages?.some((sm) => sm.mentionsUser) ?? false;
+      if (hasMention) {
+        const mentionMsg = serverMessages?.find((sm) => sm.mentionsUser && !priorIds.has(sm.id));
+        if (mentionMsg) {
+          fireOwnerMentionNotification({
+            id: mentionMsg.id,
+            type: mentionMsg.catId ? 'assistant' : 'user',
+            content: mentionMsg.content,
+            timestamp: mentionMsg.timestamp,
+            ...(mentionMsg.catId ? { catId: mentionMsg.catId } : {}),
+          } as ChatMessage);
+        }
+      }
       return {
         threadStates: {
           ...state.threadStates,
@@ -1014,6 +1029,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   lastActivity: deliveredAt,
                 }
               : {}),
+            ...(hasMention ? { hasUserMention: true } : {}),
           },
         },
       };
