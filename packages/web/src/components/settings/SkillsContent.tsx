@@ -17,16 +17,7 @@ export function SkillsContent() {
   return (
     <div className="flex gap-5">
       <div className="min-w-0 flex-1 space-y-5">
-        <SettingsPageHeader title="Skill 管理" subtitle="点击卡片预览/编辑">
-          <button
-            type="button"
-            disabled
-            title="新增 Skill 功能即将上线"
-            className="flex shrink-0 items-center justify-center rounded-[10px] bg-[var(--cafe-accent,#C65F3D)] px-3.5 h-[34px] text-[13px] font-bold text-[var(--cafe-surface)] opacity-50 cursor-not-allowed"
-          >
-            新增 Skill
-          </button>
-        </SettingsPageHeader>
+        <SettingsPageHeader title="Skill 管理" subtitle="点击卡片预览/编辑" />
 
         <ProjectSelector
           resolvedPath={cap.resolvedProjectPath}

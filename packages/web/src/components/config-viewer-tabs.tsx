@@ -50,6 +50,7 @@ export function CatOverviewTab({
   cats,
   onAddMember,
   onEditMember,
+  onEditCoCreator,
   onDeleteMember,
   onToggleAvailability,
   togglingCatId,
@@ -58,6 +59,7 @@ export function CatOverviewTab({
   cats: CatData[];
   onAddMember?: () => void;
   onEditMember?: (cat: CatData) => void;
+  onEditCoCreator?: () => void;
   onDeleteMember?: (cat: CatData) => void;
   onToggleAvailability?: (cat: CatData) => void;
   togglingCatId?: string | null;
@@ -196,7 +198,8 @@ export function CatOverviewTab({
         {config.coCreator && (
           <section
             data-testid="owner-card"
-            className="flex h-24 items-center gap-4 rounded-2xl bg-[var(--console-card-bg)] px-5 py-[18px] shadow-[0_12px_30px_rgba(43,33,26,0.08)]"
+            onClick={() => onEditCoCreator?.()}
+            className="flex h-24 cursor-pointer items-center gap-4 rounded-2xl bg-[var(--console-card-bg)] px-5 py-[18px] shadow-[0_12px_30px_rgba(43,33,26,0.08)] transition-shadow hover:shadow-[0_12px_30px_rgba(43,33,26,0.12)]"
           >
             {config.coCreator.avatar ? (
               <img

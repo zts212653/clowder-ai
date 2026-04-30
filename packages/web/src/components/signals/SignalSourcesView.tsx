@@ -107,11 +107,12 @@ export function SignalSourcesView({ initialReferrerThread = null }: { initialRef
             <h1 className="text-2xl font-bold text-cafe">信号源</h1>
             <p className="mt-1 text-[13px] text-cafe-secondary">管理抓取来源、优先级和健康状态</p>
           </div>
-          <div className="flex items-center gap-3">
-            <SignalAddSourceButton />
-            <SignalNav active="sources" initialReferrerThread={initialReferrerThread} />
-          </div>
+          <SignalAddSourceButton />
         </header>
+
+        <div className="flex h-[38px] items-center gap-2">
+          <SignalNav active="sources" initialReferrerThread={initialReferrerThread} />
+        </div>
 
         <div className="flex gap-3.5">
           <SourceStatCard label="总信源" value={stats.total} />

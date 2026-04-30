@@ -91,9 +91,9 @@ export function McpManageContent() {
             const expanded = expandedId === item.id;
             const subInfo =
               item.mcpServer?.transport === 'streamableHttp'
-                ? item.mcpServer.url
+                ? `http · ${item.mcpServer.url}`
                 : item.mcpServer?.command
-                  ? `${item.mcpServer.command}${item.mcpServer.args?.length ? ` ${item.mcpServer.args.join(' ')}` : ''}`
+                  ? `stdio · ${item.mcpServer.command}${item.mcpServer.args?.length ? ` ${item.mcpServer.args.join(' ')}` : ''}`
                   : undefined;
             return (
               <div

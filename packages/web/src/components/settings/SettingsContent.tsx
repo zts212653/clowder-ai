@@ -6,6 +6,7 @@ import { apiFetch } from '@/utils/api-client';
 import { CatOverviewTab, type ConfigData, SystemTab } from '../config-viewer-tabs';
 import { HubAccountsTab } from '../HubAccountsTab';
 import { HubCatEditor } from '../HubCatEditor';
+import { HubCoCreatorEditor } from '../HubCoCreatorEditor';
 import { HubConnectorConfigTab } from '../HubConnectorConfigTab';
 import { HubEnvFilesTab } from '../HubEnvFilesTab';
 import { PushSettingsPanel } from '../PushSettingsPanel';
@@ -33,6 +34,7 @@ export function SettingsContent({ section }: SettingsContentProps) {
   const [editingCat, setEditingCat] = useState<(typeof cats)[number] | null>(null);
   const [createDraft, setCreateDraft] = useState<Parameters<typeof HubCatEditor>[0]['draft']>(null);
   const [togglingCatId, setTogglingCatId] = useState<string | null>(null);
+  const [coCreatorEditorOpen, setCoCreatorEditorOpen] = useState(false);
 
   const fetchData = useCallback(async () => {
     setFetchError(null);
@@ -85,23 +87,6 @@ export function SettingsContent({ section }: SettingsContentProps) {
   const setupState = resolveConsoleSetupState(section, fetchError);
   const meta = SETTINGS_SECTIONS.find((s) => s.id === section) ?? SETTINGS_SECTIONS[0];
 
-  if (section === 'members' && editorOpen) {
-    return (
-      <HubCatEditor
-        open
-        variant="inline"
-        cat={editingCat}
-        draft={createDraft}
-        onClose={() => {
-          setEditorOpen(false);
-          setEditingCat(null);
-          setCreateDraft(null);
-        }}
-        onSaved={handleEditorSaved}
-      />
-    );
-  }
-
   if (section === 'im') return <HubConnectorConfigTab />;
   if (section === 'skills') return <SkillsContent />;
   if (section === 'mcp') return <McpManageContent />;
@@ -124,6 +109,7 @@ export function SettingsContent({ section }: SettingsContentProps) {
               setEditingCat(cat);
               setEditorOpen(true);
             }}
+            onEditCoCreator={() => setCoCreatorEditorOpen(true)}
             onToggleAvailability={handleToggleAvailability}
             togglingCatId={togglingCatId}
           />
@@ -171,6 +157,27 @@ export function SettingsContent({ section }: SettingsContentProps) {
     <>
       <SettingsPageHeader title={meta.label} subtitle={meta.description} />
       {sectionContent}
+      {editorOpen && (
+        <HubCatEditor
+          open
+          cat={editingCat}
+          draft={createDraft}
+          onClose={() => {
+            setEditorOpen(false);
+            setEditingCat(null);
+            setCreateDraft(null);
+          }}
+          onSaved={handleEditorSaved}
+        />
+      )}
+      {coCreatorEditorOpen && config && (
+        <HubCoCreatorEditor
+          open
+          coCreator={config.coCreator}
+          onClose={() => setCoCreatorEditorOpen(false)}
+          onSaved={handleEditorSaved}
+        />
+      )}
     </>
   );
 }
