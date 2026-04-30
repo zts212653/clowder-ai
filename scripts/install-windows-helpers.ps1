@@ -236,6 +236,9 @@ function Get-RedactedRedisUrl {
     }
 }
 
+# Legacy: formats auth args for redis-cli CLI invocation (--user, -a).
+# RESP-based functions (Test-RedisReachable, Send-RedisShutdown) parse
+# credentials directly from the URL and do NOT use this function.
 function Get-RedisAuthArgs {
     param([string]$RedisUrl)
     if (-not $RedisUrl) { return @() }
