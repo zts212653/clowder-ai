@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback } from 'react';
 import { SettingsContent } from './SettingsContent';
 import { SettingsNav } from './SettingsNav';
-import { DEFAULT_SECTION, SETTINGS_SECTIONS } from './settings-nav-config';
+import { DEFAULT_SECTION } from './settings-nav-config';
 
 function SettingsShellInner() {
   const router = useRouter();
@@ -17,8 +17,6 @@ function SettingsShellInner() {
     },
     [router],
   );
-
-  const sectionMeta = SETTINGS_SECTIONS.find((s) => s.id === activeSection) ?? SETTINGS_SECTIONS[0];
 
   return (
     <div className="console-shell flex h-full min-h-0 overflow-hidden bg-[var(--console-shell-bg)]">
@@ -36,10 +34,6 @@ function SettingsShellInner() {
 
       <div className="min-w-0 flex-1 overflow-y-auto">
         <div className="space-y-5 px-8 py-7">
-          <div>
-            <h2 className="text-xl font-bold text-cafe">{sectionMeta.label}</h2>
-            <p className="mt-1 text-[13px] text-cafe-secondary">{sectionMeta.description}</p>
-          </div>
           <SettingsContent section={activeSection} />
         </div>
       </div>

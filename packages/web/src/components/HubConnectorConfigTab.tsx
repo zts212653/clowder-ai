@@ -161,7 +161,16 @@ export function HubConnectorConfigTab() {
 
   return (
     <div className="space-y-5">
-      <SettingsPageHeader title="IM 对接" subtitle="连接状态与回调配置" />
+      <SettingsPageHeader title="IM 对接" subtitle="连接状态与回调配置">
+        <button
+          type="button"
+          disabled
+          title="新增 IM 功能即将上线"
+          className="flex shrink-0 items-center justify-center rounded-[10px] bg-[var(--cafe-accent,#C65F3D)] px-3.5 h-[34px] text-[13px] font-bold text-[var(--cafe-surface)] opacity-50 cursor-not-allowed"
+        >
+          新增 IM
+        </button>
+      </SettingsPageHeader>
 
       {platforms.map((platform) => {
         const isExpanded = expandedId === platform.id;
@@ -198,9 +207,9 @@ export function HubConnectorConfigTab() {
                   {platform.name}
                   {platform.nameEn !== platform.name ? ` ${platform.nameEn}` : ''}
                 </span>
-                <span className="block text-[11px] text-cafe-muted">
-                  {platform.lastHeartbeat ? formatHeartbeat(platform.lastHeartbeat) : connStatePill(platform).label}
-                </span>
+                {platform.lastHeartbeat && (
+                  <span className="block text-[11px] text-cafe-muted">{formatHeartbeat(platform.lastHeartbeat)}</span>
+                )}
               </span>
               <span
                 className={`shrink-0 rounded-[13px] px-2.5 py-1 text-xs font-semibold ${connStatePill(platform).className}`}

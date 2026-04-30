@@ -16,8 +16,10 @@ import { OpsContent } from './OpsContent';
 import { PluginsContent } from './PluginsContent';
 import { RulesPromptsContent } from './RulesPromptsContent';
 import { ServiceStatusPanel } from './ServiceStatusPanel';
+import { SettingsPageHeader } from './SettingsPageHeader';
 import { SettingsPlaceholder } from './SettingsPlaceholder';
 import { SkillsContent } from './SkillsContent';
+import { SETTINGS_SECTIONS } from './settings-nav-config';
 
 interface SettingsContentProps {
   section: string;
@@ -81,85 +83,95 @@ export function SettingsContent({ section }: SettingsContentProps) {
   );
 
   const setupState = resolveConsoleSetupState(section, fetchError);
+  const meta = SETTINGS_SECTIONS.find((s) => s.id === section) ?? SETTINGS_SECTIONS[0];
 
-  switch (section) {
-    case 'members':
-      if (setupState) return <ConsoleSetupState {...setupState} />;
-      if (editorOpen) {
-        return (
-          <HubCatEditor
-            open
-            variant="inline"
-            cat={editingCat}
-            draft={createDraft}
-            onClose={() => {
-              setEditorOpen(false);
+  if (section === 'members' && editorOpen) {
+    return (
+      <HubCatEditor
+        open
+        variant="inline"
+        cat={editingCat}
+        draft={createDraft}
+        onClose={() => {
+          setEditorOpen(false);
+          setEditingCat(null);
+          setCreateDraft(null);
+        }}
+        onSaved={handleEditorSaved}
+      />
+    );
+  }
+
+  if (section === 'im') return <HubConnectorConfigTab />;
+  if (section === 'skills') return <SkillsContent />;
+
+  const sectionContent = (() => {
+    switch (section) {
+      case 'members':
+        if (setupState) return <ConsoleSetupState {...setupState} />;
+        return config ? (
+          <CatOverviewTab
+            config={config}
+            cats={cats}
+            onAddMember={() => {
               setEditingCat(null);
               setCreateDraft(null);
+              setEditorOpen(true);
             }}
-            onSaved={handleEditorSaved}
+            onEditMember={(cat) => {
+              setCreateDraft(null);
+              setEditingCat(cat);
+              setEditorOpen(true);
+            }}
+            onToggleAvailability={handleToggleAvailability}
+            togglingCatId={togglingCatId}
           />
+        ) : (
+          <p className="text-sm text-cafe-muted">加载中...</p>
         );
-      }
-      return config ? (
-        <CatOverviewTab
-          config={config}
-          cats={cats}
-          onAddMember={() => {
-            setEditingCat(null);
-            setCreateDraft(null);
-            setEditorOpen(true);
-          }}
-          onEditMember={(cat) => {
-            setCreateDraft(null);
-            setEditingCat(cat);
-            setEditorOpen(true);
-          }}
-          onToggleAvailability={handleToggleAvailability}
-          togglingCatId={togglingCatId}
-        />
-      ) : (
-        <p className="text-sm text-cafe-muted">加载中...</p>
-      );
-    case 'accounts':
-      return <HubAccountsTab />;
-    case 'im':
-      return <HubConnectorConfigTab />;
-    case 'skills':
-      return <SkillsContent />;
-    case 'mcp':
-      return <McpManageContent />;
-    case 'plugins':
-      return <PluginsContent />;
-    case 'voice':
-      return (
-        <div className="space-y-6">
-          <VoiceSettingsPanel />
-          <ServiceStatusPanel
-            filterFeatures={['voice-input', 'voice-output', 'voice-companion', 'voice-postprocess']}
-            title="语音服务状态"
-          />
-        </div>
-      );
-    case 'system':
-      if (setupState) return <ConsoleSetupState {...setupState} />;
-      return (
-        <div className="space-y-6">
-          {config ? (
-            <SystemTab config={config} onConfigChange={fetchData} />
-          ) : (
-            <p className="text-sm text-cafe-muted">加载中...</p>
-          )}
-          <HubEnvFilesTab />
-        </div>
-      );
-    case 'rules':
-      return <RulesPromptsContent />;
-    case 'notify':
-      return <PushSettingsPanel />;
-    case 'ops':
-      return <OpsContent />;
-    default:
-      return <SettingsPlaceholder section={section} description="此分区即将上线" />;
-  }
+      case 'accounts':
+        return <HubAccountsTab />;
+      case 'mcp':
+        return <McpManageContent />;
+      case 'plugins':
+        return <PluginsContent />;
+      case 'voice':
+        return (
+          <div className="space-y-6">
+            <VoiceSettingsPanel />
+            <ServiceStatusPanel
+              filterFeatures={['voice-input', 'voice-output', 'voice-companion', 'voice-postprocess']}
+              title="语音服务状态"
+            />
+          </div>
+        );
+      case 'system':
+        if (setupState) return <ConsoleSetupState {...setupState} />;
+        return (
+          <div className="space-y-6">
+            {config ? (
+              <SystemTab config={config} onConfigChange={fetchData} />
+            ) : (
+              <p className="text-sm text-cafe-muted">加载中...</p>
+            )}
+            <HubEnvFilesTab />
+          </div>
+        );
+      case 'rules':
+        return <RulesPromptsContent />;
+      case 'notify':
+        return <PushSettingsPanel />;
+      case 'ops':
+        return <OpsContent />;
+      default:
+        return <SettingsPlaceholder section={section} description="此分区即将上线" />;
+    }
+  })();
+
+  return (
+    <>
+      <SettingsPageHeader title={meta.label} subtitle={meta.description} />
+      {sectionContent}
+    </>
+  );
 }
