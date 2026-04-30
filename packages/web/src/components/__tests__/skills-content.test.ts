@@ -50,9 +50,9 @@ vi.mock('@/components/settings/SkillPreviewModal', () => ({
 import { SkillsContent } from '@/components/settings/SkillsContent';
 
 describe('SkillsContent', () => {
-  it('renders skill cards with toggle switch and per-cat button', () => {
+  it('renders header, marketplace rail, and loading skeleton', () => {
     const html = renderToStaticMarkup(React.createElement(SkillsContent));
-    expect(html).toContain('新增 Skill');
+    expect(html).toContain('Skill 管理');
     expect(html).toContain('Skill 市场');
     expect(html).toContain('marketplace');
   });
@@ -62,8 +62,8 @@ describe('SkillsContent', () => {
     expect(html).toContain('animate-pulse');
   });
 
-  it('has project selector in toolbar area', () => {
+  it('does not render disabled add button', () => {
     const html = renderToStaticMarkup(React.createElement(SkillsContent));
-    expect(html).toContain('新增 Skill');
+    expect(html).not.toContain('新增 Skill');
   });
 });
