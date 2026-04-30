@@ -104,6 +104,7 @@ export function SettingsContent({ section }: SettingsContentProps) {
 
   if (section === 'im') return <HubConnectorConfigTab />;
   if (section === 'skills') return <SkillsContent />;
+  if (section === 'mcp') return <McpManageContent />;
 
   const sectionContent = (() => {
     switch (section) {
@@ -131,8 +132,6 @@ export function SettingsContent({ section }: SettingsContentProps) {
         );
       case 'accounts':
         return <HubAccountsTab />;
-      case 'mcp':
-        return <McpManageContent />;
       case 'plugins':
         return <PluginsContent />;
       case 'voice':
