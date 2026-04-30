@@ -999,23 +999,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
       };
 
       if (threadId === state.currentThreadId) {
+        if (serverMessages && typeof document !== 'undefined' && !document.hasFocus()) {
+          const existingIds = new Set(state.messages.map((m) => m.id));
+          const newMention = serverMessages.find((sm) => sm.mentionsUser && !existingIds.has(sm.id));
+          if (newMention) {
+            fireOwnerMentionNotification({
+              id: newMention.id,
+              type: newMention.catId ? 'assistant' : 'user',
+              content: newMention.content,
+              timestamp: newMention.timestamp,
+              ...(newMention.catId ? { catId: newMention.catId } : {}),
+            } as ChatMessage);
+          }
+        }
         return { messages: updateMsgs(state.messages) };
       }
       const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
       const priorIds = new Set(existing.messages.map((m) => m.id));
       const newInserts = serverMessages?.filter((sm) => !priorIds.has(sm.id)).length ?? 0;
-      const hasMention = serverMessages?.some((sm) => sm.mentionsUser) ?? false;
-      if (hasMention) {
-        const mentionMsg = serverMessages?.find((sm) => sm.mentionsUser && !priorIds.has(sm.id));
-        if (mentionMsg) {
-          fireOwnerMentionNotification({
-            id: mentionMsg.id,
-            type: mentionMsg.catId ? 'assistant' : 'user',
-            content: mentionMsg.content,
-            timestamp: mentionMsg.timestamp,
-            ...(mentionMsg.catId ? { catId: mentionMsg.catId } : {}),
-          } as ChatMessage);
-        }
+      const newMentionMsg = serverMessages?.find((sm) => sm.mentionsUser && !priorIds.has(sm.id));
+      if (newMentionMsg) {
+        fireOwnerMentionNotification({
+          id: newMentionMsg.id,
+          type: newMentionMsg.catId ? 'assistant' : 'user',
+          content: newMentionMsg.content,
+          timestamp: newMentionMsg.timestamp,
+          ...(newMentionMsg.catId ? { catId: newMentionMsg.catId } : {}),
+        } as ChatMessage);
       }
       return {
         threadStates: {
@@ -1029,7 +1039,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   lastActivity: deliveredAt,
                 }
               : {}),
-            ...(hasMention ? { hasUserMention: true } : {}),
+            ...(newMentionMsg ? { hasUserMention: true } : {}),
           },
         },
       };
