@@ -20,15 +20,17 @@ interface HubAccountItemProps {
   onEdit?: (profileId: string) => void;
 }
 
-function summaryText(profile: ProfileItem): string | null {
-  if (profile.builtin) return profile.authType === 'oauth' ? 'OAuth' : '内置';
-  const host = profile.baseUrl?.replace(/^https?:\/\//, '') ?? '(未设置)';
-  return `${host} · ${profile.authType === 'oauth' ? 'OAuth' : 'API Key'}`;
+function summaryText(profile: ProfileItem): string {
+  const parts: string[] = [];
+  if (profile.baseUrl) {
+    parts.push(profile.baseUrl.replace(/^https?:\/\//, ''));
+  }
+  parts.push(profile.authType === 'oauth' ? 'OAuth' : 'API Key');
+  return parts.join(' · ');
 }
 
 export function HubAccountItem({ profile, busy, onDelete, onEdit }: HubAccountItemProps) {
   const confirm = useConfirm();
-  const editable = !profile.builtin && !!onEdit;
 
   const handleDelete = async () => {
     const ok = await confirm({
@@ -42,10 +44,10 @@ export function HubAccountItem({ profile, busy, onDelete, onEdit }: HubAccountIt
 
   return (
     <div
-      className={`flex h-24 items-center gap-4 rounded-2xl bg-[var(--console-card-bg)] px-5 py-[18px] shadow-[0_12px_30px_rgba(43,33,26,0.08)] transition-shadow hover:shadow-[0_12px_30px_rgba(43,33,26,0.12)] ${editable ? 'cursor-pointer' : ''}`}
-      onClick={() => editable && onEdit(profile.id)}
+      className="flex h-24 cursor-pointer items-center gap-4 rounded-2xl bg-[var(--console-card-bg)] px-5 py-[18px] shadow-[0_12px_30px_rgba(43,33,26,0.08)] transition-shadow hover:shadow-[0_12px_30px_rgba(43,33,26,0.12)]"
+      onClick={() => onEdit?.(profile.id)}
     >
-      <svg className="h-[18px] w-[18px] shrink-0 text-cafe-muted" viewBox="0 0 24 24" fill="currentColor">
+      <svg className="h-[18px] w-[18px] shrink-0 cursor-grab text-cafe-muted" viewBox="0 0 24 24" fill="currentColor">
         <circle cx="9" cy="5" r="1.5" />
         <circle cx="15" cy="5" r="1.5" />
         <circle cx="9" cy="12" r="1.5" />
@@ -59,21 +61,15 @@ export function HubAccountItem({ profile, busy, onDelete, onEdit }: HubAccountIt
       </div>
 
       <div className="flex shrink-0 items-center" onClick={(e) => e.stopPropagation()}>
-        {profile.builtin ? (
-          <div className="flex h-[30px] w-[30px] items-center justify-center rounded-[9px] bg-[var(--console-card-soft-bg)]">
-            <HubIcon name="shield" className="h-4 w-4 text-cafe-muted" />
-          </div>
-        ) : (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={handleDelete}
-            className={`flex h-[30px] w-[30px] items-center justify-center rounded-[9px] bg-[var(--console-card-soft-bg)] transition-opacity hover:opacity-80 ${busy ? 'opacity-50' : ''}`}
-            title="删除"
-          >
-            <HubIcon name="trash" className="h-4 w-4 text-[var(--cafe-accent)]" />
-          </button>
-        )}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={handleDelete}
+          className={`flex h-[30px] w-[30px] items-center justify-center rounded-[9px] bg-[var(--console-card-soft-bg)] transition-opacity hover:opacity-80 ${busy ? 'opacity-50' : ''}`}
+          title="删除"
+        >
+          <HubIcon name="trash" className="h-4 w-4 text-[var(--cafe-accent)]" />
+        </button>
       </div>
     </div>
   );

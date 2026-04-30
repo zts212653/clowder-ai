@@ -6,9 +6,9 @@ import { assignDocumentRoute, CLASSIC_WORLD_PREFIX, getThreadIdFromPathname } fr
 
 const NAV_ITEMS = [
   { id: 'home', path: '/', label: '对话', match: (p: string) => p === '/' || p.startsWith('/thread/') },
+  { id: 'memory', path: '/memory', label: '记忆', match: (p: string) => p.startsWith('/memory') },
   { id: 'mission', path: '/mission', label: 'Mission Hub', match: (p: string) => p.startsWith('/mission') },
   { id: 'signals', path: '/signals', label: '信号', match: (p: string) => p.startsWith('/signals') },
-  { id: 'memory', path: '/memory', label: '记忆', match: (p: string) => p.startsWith('/memory') },
 ] as const;
 
 function ChatIcon({ className = 'w-5 h-5' }: { className?: string }) {

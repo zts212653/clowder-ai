@@ -1,10 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { HubAccountItem, type ProfileEditPayload } from './HubAccountItem';
 import type { AccountsResponse, ProfileItem } from './hub-accounts.types';
-import { normalizeBuiltinClientIds, resolveAccountActionId } from './hub-accounts.view';
 import { type UnifiedAuthEditData, UnifiedAuthModal } from './UnifiedAuthModal';
 
 export function HubAccountsTab() {
@@ -97,15 +96,10 @@ export function HubAccountsTab() {
     [callApi, fetchAccounts],
   );
 
-  const displayAccounts = useMemo(() => normalizeBuiltinClientIds(data?.providers ?? []), [data?.providers]);
-  const builtinAccounts = useMemo(() => displayAccounts.filter((a) => a.builtin), [displayAccounts]);
-  const customAccounts = useMemo(() => displayAccounts.filter((a) => !a.builtin), [displayAccounts]);
-  const displayCards = useMemo(() => [...builtinAccounts, ...customAccounts], [builtinAccounts, customAccounts]);
-
   const handleEdit = useCallback(
     (profileId: string) => {
-      const account = displayAccounts.find((a) => a.id === profileId) as ProfileItem | undefined;
-      if (!account || account.builtin) return;
+      const account = (data?.providers ?? []).find((a) => a.id === profileId) as ProfileItem | undefined;
+      if (!account) return;
       setEditTarget({
         id: account.id,
         displayName: account.displayName,
@@ -117,7 +111,7 @@ export function HubAccountsTab() {
       });
       setShowAuthModal(true);
     },
-    [displayAccounts],
+    [data?.providers],
   );
 
   if (loading) return <p className="text-sm text-cafe-muted">加载中...</p>;
@@ -141,6 +135,8 @@ export function HubAccountsTab() {
         <p className="mt-1 max-w-[220px] text-xs text-cafe-muted">无法加载账号列表，请检查服务连接后刷新重试</p>
       </div>
     );
+
+  const accounts = data.providers;
 
   return (
     <div className="space-y-5">
@@ -166,13 +162,13 @@ export function HubAccountsTab() {
         className="flex flex-col gap-3.5"
         data-guide-id="accounts.account-list"
       >
-        {displayCards.map((account) => (
+        {accounts.map((account) => (
           <HubAccountItem
             key={account.id}
             profile={account}
-            busy={busyId === resolveAccountActionId(account)}
-            onSave={(_id, payload) => saveAccount(resolveAccountActionId(account), payload)}
-            onDelete={() => deleteAccount(resolveAccountActionId(account))}
+            busy={busyId === account.id}
+            onSave={(_id, payload) => saveAccount(account.id, payload)}
+            onDelete={() => deleteAccount(account.id)}
             onEdit={handleEdit}
           />
         ))}

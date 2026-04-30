@@ -10,10 +10,19 @@ vi.mock('@/components/useConfirm', () => ({
 }));
 
 function profileItem(
-  input: Omit<ProfileItem, 'kind' | 'builtin'> & Partial<Pick<ProfileItem, 'kind' | 'builtin'>>,
+  input: Partial<ProfileItem> & Pick<ProfileItem, 'id' | 'displayName' | 'name' | 'authType'>,
 ): ProfileItem {
-  const builtin = input.builtin ?? input.authType === 'oauth';
-  return { ...input, builtin, kind: input.kind ?? (builtin ? 'builtin' : 'api_key') };
+  return {
+    provider: input.id,
+    kind: input.authType === 'oauth' ? 'builtin' : 'api_key',
+    builtin: input.authType === 'oauth',
+    mode: input.authType === 'oauth' ? 'subscription' : 'api_key',
+    models: [],
+    hasApiKey: input.authType === 'api_key',
+    createdAt: '2026-03-18T00:00:00.000Z',
+    updatedAt: '2026-03-18T00:00:00.000Z',
+    ...input,
+  };
 }
 
 describe('HubAccountItem', () => {
@@ -42,21 +51,14 @@ describe('HubAccountItem', () => {
     vi.clearAllMocks();
   });
 
-  it('non-builtin card shows only trash icon, no pencil', async () => {
+  it('API key card shows trash button', async () => {
     const profile = profileItem({
       id: 'claude-api',
-      provider: 'claude-api',
       displayName: 'Claude API',
       name: 'Claude API',
       authType: 'api_key',
-      kind: 'api_key',
-      builtin: false,
-      mode: 'api_key',
       baseUrl: 'https://api.anthropic.com',
       models: ['claude-opus-4-1'],
-      hasApiKey: true,
-      createdAt: '2026-03-18T00:00:00.000Z',
-      updatedAt: '2026-03-18T00:00:00.000Z',
     });
 
     await act(async () => {
@@ -64,21 +66,15 @@ describe('HubAccountItem', () => {
     });
 
     expect(container.querySelector('button[title="删除"]')).toBeTruthy();
-    expect(container.querySelector('button[title="编辑"]')).toBeNull();
   });
 
-  it('builtin card shows no action buttons', async () => {
+  it('OAuth card also shows trash button', async () => {
     const profile = profileItem({
       id: 'codex-oauth',
-      provider: 'codex-oauth',
       displayName: 'Codex (OAuth)',
       name: 'Codex (OAuth)',
       authType: 'oauth',
-      mode: 'subscription',
       models: ['gpt-5.4'],
-      hasApiKey: false,
-      createdAt: '2026-03-18T00:00:00.000Z',
-      updatedAt: '2026-03-18T00:00:00.000Z',
     });
 
     await act(async () => {
@@ -86,25 +82,17 @@ describe('HubAccountItem', () => {
     });
 
     expect(container.textContent).toContain('OAuth');
-    expect(container.querySelector('button[title="删除"]')).toBeNull();
-    expect(container.querySelector('button[title="编辑"]')).toBeNull();
+    expect(container.querySelector('button[title="删除"]')).toBeTruthy();
   });
 
-  it('shows host + auth type summary for non-builtin', async () => {
+  it('shows host + auth type summary for API key accounts', async () => {
     const profile = profileItem({
       id: 'codex-sponsor',
-      provider: 'codex-sponsor',
       displayName: 'Codex Sponsor',
       name: 'Codex Sponsor',
       authType: 'api_key',
-      kind: 'api_key',
-      builtin: false,
-      mode: 'api_key',
       baseUrl: 'https://proxy.example',
       models: ['gpt-5.4'],
-      hasApiKey: true,
-      createdAt: '2026-03-18T00:00:00.000Z',
-      updatedAt: '2026-03-18T00:00:00.000Z',
     });
 
     await act(async () => {
@@ -112,48 +100,32 @@ describe('HubAccountItem', () => {
     });
 
     expect(container.textContent).toContain('Codex Sponsor');
+    expect(container.textContent).toContain('proxy.example');
     expect(container.textContent).toContain('API Key');
   });
 
-  it('shows host placeholder when no baseUrl', async () => {
-    const profile: ProfileItem = {
+  it('shows auth type only when no baseUrl', async () => {
+    const profile = profileItem({
       id: 'no-url',
-      provider: 'custom',
       displayName: 'No URL',
       name: 'No URL',
       authType: 'api_key',
-      kind: 'api_key',
-      builtin: false,
-      mode: 'api_key',
-      models: [],
-      hasApiKey: false,
-      createdAt: '2026-03-18T00:00:00.000Z',
-      updatedAt: '2026-03-18T00:00:00.000Z',
-    };
+    });
 
     await act(async () => {
       root.render(<HubAccountItem profile={profile} busy={false} onSave={vi.fn(async () => {})} onDelete={() => {}} />);
     });
 
-    expect(container.textContent).toContain('(未设置)');
     expect(container.textContent).toContain('API Key');
   });
 
   it('trash button triggers confirm before calling onDelete', async () => {
     const profile = profileItem({
       id: 'deletable',
-      provider: 'custom',
       displayName: 'Deletable Account',
       name: 'Deletable',
       authType: 'api_key',
-      kind: 'api_key',
-      builtin: false,
-      mode: 'api_key',
       baseUrl: 'https://custom.api',
-      models: [],
-      hasApiKey: true,
-      createdAt: '2026-04-01T00:00:00.000Z',
-      updatedAt: '2026-04-01T00:00:00.000Z',
     });
     const onDelete = vi.fn();
 
@@ -172,21 +144,13 @@ describe('HubAccountItem', () => {
     expect(onDelete).toHaveBeenCalledWith('deletable');
   });
 
-  it('clicking non-builtin card body triggers onEdit (no pencil icon)', async () => {
+  it('clicking card body triggers onEdit', async () => {
     const profile = profileItem({
       id: 'editable-api',
-      provider: 'custom',
       displayName: 'Editable Account',
       name: 'Editable',
       authType: 'api_key',
-      kind: 'api_key',
-      builtin: false,
-      mode: 'api_key',
       baseUrl: 'https://custom.api',
-      models: [],
-      hasApiKey: true,
-      createdAt: '2026-04-01T00:00:00.000Z',
-      updatedAt: '2026-04-01T00:00:00.000Z',
     });
     const onEdit = vi.fn();
 
@@ -202,32 +166,22 @@ describe('HubAccountItem', () => {
       );
     });
 
-    expect(container.querySelector('button[title="编辑"]')).toBeNull();
-
-    const cardBody = Array.from(container.querySelectorAll('button')).find((btn) =>
-      btn.textContent?.includes('Editable Account'),
-    );
-    expect(cardBody).toBeTruthy();
+    const card = container.querySelector('[class*="cursor-pointer"]') as HTMLElement;
+    expect(card).toBeTruthy();
 
     await act(async () => {
-      cardBody!.click();
+      card.click();
     });
 
     expect(onEdit).toHaveBeenCalledWith('editable-api');
   });
 
-  it('builtin card body is not clickable', async () => {
+  it('OAuth card body is also clickable for editing', async () => {
     const profile = profileItem({
-      id: 'builtin-oauth',
-      provider: 'builtin-oauth',
-      displayName: 'Built-in OAuth',
-      name: 'Built-in OAuth',
+      id: 'oauth-edit',
+      displayName: 'OAuth Account',
+      name: 'OAuth Account',
       authType: 'oauth',
-      mode: 'subscription',
-      models: [],
-      hasApiKey: false,
-      createdAt: '2026-04-01T00:00:00.000Z',
-      updatedAt: '2026-04-01T00:00:00.000Z',
     });
     const onEdit = vi.fn();
 
@@ -243,14 +197,14 @@ describe('HubAccountItem', () => {
       );
     });
 
-    const cardBody = container.querySelector('button[disabled]');
-    expect(cardBody).toBeTruthy();
+    const card = container.querySelector('[class*="cursor-pointer"]') as HTMLElement;
+    expect(card).toBeTruthy();
 
     await act(async () => {
-      cardBody!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      card.click();
     });
 
-    expect(onEdit).not.toHaveBeenCalled();
+    expect(onEdit).toHaveBeenCalledWith('oauth-edit');
   });
 
   it('trash button does NOT call onDelete when confirm is cancelled', async () => {
@@ -258,17 +212,9 @@ describe('HubAccountItem', () => {
 
     const profile = profileItem({
       id: 'keep-me',
-      provider: 'custom',
       displayName: 'Keep Me',
       name: 'Keep Me',
       authType: 'api_key',
-      kind: 'api_key',
-      builtin: false,
-      mode: 'api_key',
-      models: [],
-      hasApiKey: true,
-      createdAt: '2026-04-01T00:00:00.000Z',
-      updatedAt: '2026-04-01T00:00:00.000Z',
     });
     const onDelete = vi.fn();
 
