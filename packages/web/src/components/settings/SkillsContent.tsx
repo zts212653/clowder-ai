@@ -5,6 +5,7 @@ import type { CapabilityBoardItem } from '../capability-board-ui';
 import { HubIcon } from '../hub-icons';
 import { MarketplacePanel } from '../marketplace/marketplace-panel';
 import { PerCatToggles, ProjectSelector, ToggleSwitch } from './capability-settings-ui';
+import { SettingsPageHeader } from './SettingsPageHeader';
 import { SkillPreviewModal } from './SkillPreviewModal';
 import { useCapabilityState } from './useCapabilityState';
 
@@ -14,25 +15,25 @@ export function SkillsContent() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   return (
-    <div className="flex gap-6">
-      <div className="min-w-0 flex-1">
-        <div className="mb-5 flex items-center justify-between">
-          <ProjectSelector
-            resolvedPath={cap.resolvedProjectPath}
-            knownProjects={cap.knownProjects}
-            currentSelection={cap.projectPath}
-            onSwitch={cap.switchProject}
-          />
+    <div className="flex gap-5">
+      <div className="min-w-0 flex-1 space-y-5">
+        <SettingsPageHeader title="Skill 管理" subtitle="点击卡片预览/编辑">
           <button
             type="button"
             disabled
             title="新增 Skill 功能即将上线"
-            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-[var(--cafe-accent,#C65F3D)] px-3.5 py-2 text-[13px] font-semibold text-[var(--cafe-surface)] opacity-50 cursor-not-allowed"
+            className="flex shrink-0 items-center justify-center rounded-[10px] bg-[var(--cafe-accent,#C65F3D)] px-3.5 h-[34px] text-[13px] font-bold text-[var(--cafe-surface)] opacity-50 cursor-not-allowed"
           >
-            <HubIcon name="plus" className="h-3.5 w-3.5" />
             新增 Skill
           </button>
-        </div>
+        </SettingsPageHeader>
+
+        <ProjectSelector
+          resolvedPath={cap.resolvedProjectPath}
+          knownProjects={cap.knownProjects}
+          currentSelection={cap.projectPath}
+          onSwitch={cap.switchProject}
+        />
 
         {cap.loading && (
           <div className="space-y-3">
@@ -120,12 +121,10 @@ export function SkillsContent() {
         </div>
       </div>
 
-      <aside className="hidden w-[280px] shrink-0 lg:block">
+      <aside className="hidden w-[320px] shrink-0 lg:block">
         <div className="sticky top-0 rounded-2xl bg-[var(--console-card-bg)] p-4 shadow-[0_8px_24px_rgba(43,33,26,0.05)]">
           <h3 className="text-sm font-bold text-cafe">Skill 市场</h3>
-          <p className="mt-1 mb-4 text-xs text-cafe-secondary">
-            查询可用 Skill；安装后进入左侧列表。市场永远在右侧 rail，不与数据页混排。
-          </p>
+          <p className="mt-1 mb-4 text-xs text-cafe-secondary">查询可用 Skill；安装后进入左侧列表。</p>
           <MarketplacePanel />
         </div>
       </aside>

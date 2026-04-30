@@ -4,18 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useGuideStore } from '@/stores/guideStore';
 import { apiFetch } from '@/utils/api-client';
 import { FeishuQrPanel } from './FeishuQrPanel';
-import {
-  ChevronDown,
-  ChevronRight,
-  DEFAULT_VISUAL,
-  ExternalLinkIcon,
-  LockIcon,
-  PLATFORM_VISUALS,
-  StatusDotConnected,
-  StatusDotIdle,
-  StepBadge,
-  WifiIcon,
-} from './HubConfigIcons';
+import { DEFAULT_VISUAL, ExternalLinkIcon, LockIcon, PLATFORM_VISUALS, StepBadge, WifiIcon } from './HubConfigIcons';
+import { SettingsPageHeader } from './settings/SettingsPageHeader';
 import { WeComBotSetupPanel } from './WeComBotSetupPanel';
 import { WeixinQrPanel } from './WeixinQrPanel';
 
@@ -43,26 +33,15 @@ interface PlatformStatus {
   steps: PlatformStepStatus[];
 }
 
-function connStateColor(p: PlatformStatus): string {
-  if (p.connectionState === 'connected') return 'text-conn-emerald-text';
-  if (p.connectionState === 'reconnecting') return 'text-conn-amber-text';
-  if (p.configured) return 'text-conn-emerald-text';
-  return 'text-cafe-muted';
-}
-
-function connStateIcon(p: PlatformStatus) {
-  if (p.connectionState === 'connected') return <StatusDotConnected />;
-  if (p.connectionState === 'reconnecting') return <StatusDotIdle />;
-  if (p.configured) return <StatusDotConnected />;
-  return <StatusDotIdle />;
-}
-
-function connStateLabel(p: PlatformStatus): string {
-  if (p.connectionState === 'connected') return '已连接';
-  if (p.connectionState === 'reconnecting') return '重连中';
-  if (p.connectionState === 'disconnected' && p.configured) return '已配置 · 未连接';
-  if (p.configured) return '已配置';
-  return '未配置';
+function connStatePill(p: PlatformStatus): { label: string; className: string } {
+  if (p.connectionState === 'connected')
+    return { label: '已连接', className: 'bg-[var(--console-pill-bg)] text-cafe-interactive' };
+  if (p.connectionState === 'reconnecting')
+    return { label: '重连中', className: 'bg-conn-amber-bg text-conn-amber-text' };
+  if (p.connectionState === 'disconnected' && p.configured)
+    return { label: '已配置', className: 'bg-[var(--console-pill-bg)] text-cafe-secondary' };
+  if (p.configured) return { label: '已配置', className: 'bg-[var(--console-pill-bg)] text-cafe-interactive' };
+  return { label: '未配置', className: 'bg-[var(--console-pill-bg)] text-cafe-muted' };
 }
 
 function formatHeartbeat(ts: number): string {
@@ -181,7 +160,9 @@ export function HubConnectorConfigTab() {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-5">
+      <SettingsPageHeader title="IM 对接" subtitle="连接状态与回调配置" />
+
       {platforms.map((platform) => {
         const isExpanded = expandedId === platform.id;
         const v = PLATFORM_VISUALS[platform.id] ?? DEFAULT_VISUAL;
@@ -204,28 +185,27 @@ export function HubConnectorConfigTab() {
             <button
               type="button"
               onClick={() => handleExpand(platform.id)}
-              className="flex w-full items-center gap-3 px-4 py-4 transition-colors"
+              className="flex w-full items-center gap-4 px-5 py-[18px] transition-colors"
             >
               <span
-                className="console-pill flex h-11 w-11 items-center justify-center rounded-[12px] shrink-0"
+                className="flex h-11 w-11 items-center justify-center rounded-[12px] shrink-0"
                 style={{ backgroundColor: v.iconBg, color: v.iconColor }}
               >
                 {v.icon}
               </span>
-              <span className="flex-1 text-left min-w-0">
+              <span className="flex-1 text-left min-w-0 space-y-1">
                 <span className="block text-[15px] font-extrabold text-cafe">
-                  {platform.name} {platform.nameEn !== platform.name ? platform.nameEn : ''}
+                  {platform.name}
+                  {platform.nameEn !== platform.name ? ` ${platform.nameEn}` : ''}
                 </span>
-                <span className={`flex items-center gap-1 text-xs ${connStateColor(platform)}`}>
-                  {connStateIcon(platform)}
-                  {connStateLabel(platform)}
-                  {platform.lastHeartbeat && (
-                    <span className="text-cafe-muted ml-1">· {formatHeartbeat(platform.lastHeartbeat)}</span>
-                  )}
+                <span className="block text-[11px] text-cafe-muted">
+                  {platform.lastHeartbeat ? formatHeartbeat(platform.lastHeartbeat) : connStatePill(platform).label}
                 </span>
               </span>
-              <span className="console-pill flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-cafe-muted">
-                {isExpanded ? <ChevronDown /> : <ChevronRight />}
+              <span
+                className={`shrink-0 rounded-[13px] px-2.5 py-1 text-xs font-semibold ${connStatePill(platform).className}`}
+              >
+                {connStatePill(platform).label}
               </span>
             </button>
 
@@ -412,10 +392,7 @@ export function HubConnectorConfigTab() {
         );
       })}
 
-      <div className="console-card-soft flex items-center gap-2 rounded-[18px] px-3.5 py-3">
-        <StatusDotConnected />
-        <span className="text-xs font-medium text-conn-emerald-text">配置保存后自动生效，无需重启</span>
-      </div>
+      <p className="text-xs text-cafe-muted">配置保存后自动生效，无需重启。</p>
     </div>
   );
 }
