@@ -81,7 +81,10 @@ if (-not $SkipBundleDeps) {
     foreach ($pkg in @('api', 'web', 'mcp-server')) {
         Write-Host "  Deploying @cat-cafe/$pkg ..." -ForegroundColor Gray
         $out = Join-Path $deployRoot $pkg
-        pnpm --filter "@cat-cafe/$pkg" --prod --config.node-linker=hoisted deploy $out
+        # Runtime services launch package entrypoints directly; they do not use
+        # node_modules/.bin shims. Disabling bin links avoids a pnpm 9 hoisted
+        # deploy failure on windows-2025 runners while keeping real-file deps.
+        pnpm --filter "@cat-cafe/$pkg" --prod --config.node-linker=hoisted --config.bin-links=false deploy $out
         if ($LASTEXITCODE -ne 0) { Write-Err "pnpm deploy @cat-cafe/$pkg failed"; Pop-Location; exit 1 }
     }
     Pop-Location
