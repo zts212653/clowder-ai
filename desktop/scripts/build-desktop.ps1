@@ -80,7 +80,7 @@ if (-not $SkipBundleDeps) {
     # Exclude the deploy target from Windows Defender real-time scanning.
     # Without this, Defender locks freshly-written files in .bin/ causing
     # EPERM even when bin-links are disabled via CLI flag.
-    try { Add-MpExclusion -Path $deployRoot -ErrorAction SilentlyContinue } catch {}
+    try { Add-MpPreference -ExclusionPath $deployRoot -ErrorAction SilentlyContinue } catch {}
 
     # Force disable bin-link creation via env var. The CLI flag
     # --config.bin-links=false is not propagated by pnpm deploy's internal
