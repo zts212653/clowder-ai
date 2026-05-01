@@ -29,6 +29,9 @@ test('windows desktop build script restores npm_config_bin_links after deploy', 
 
   assert.match(buildScript, /\$prevBinLinks = \$env:npm_config_bin_links/);
   assert.match(buildScript, /\$env:npm_config_bin_links = "false"/);
-  assert.match(buildScript, /if \(\$null -eq \$prevBinLinks\)\s*\{\s*Remove-Item Env:npm_config_bin_links -ErrorAction SilentlyContinue/s);
+  assert.match(
+    buildScript,
+    /if \(\$null -eq \$prevBinLinks\)\s*\{\s*Remove-Item Env:npm_config_bin_links -ErrorAction SilentlyContinue/s,
+  );
   assert.match(buildScript, /else\s*\{\s*\$env:npm_config_bin_links = \$prevBinLinks/s);
 });
