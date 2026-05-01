@@ -24,20 +24,20 @@ test('windows desktop build script cleans up temporary Defender exclusions', asy
   assert.match(buildScript, /finally\s*\{[\s\S]*Remove-MpPreference -ExclusionPath \$deployRoot[\s\S]*\}/);
 });
 
-test('windows desktop build script disables bin-links via pnpm user-level config', async () => {
+test('windows desktop build script pre-places npmrc in deploy targets and retries on EPERM', async () => {
   const buildScript = await readFile(desktopBuildScriptPath, 'utf8');
 
-  assert.match(buildScript, /pnpm config set bin-links false/);
-  assert.match(buildScript, /pnpm config delete bin-links/);
-  assert.match(buildScript, /finally\s*\{[\s\S]*pnpm config delete bin-links[\s\S]*\}/);
+  assert.match(buildScript, /New-Item -ItemType Directory -Path \$out -Force/);
+  assert.match(buildScript, /Set-Content -Path \(Join-Path \$out "\.npmrc"\)/);
+  assert.match(buildScript, /bin-links=false/);
+  assert.match(buildScript, /for \(\$attempt = 1; \$attempt -le 3/);
+  assert.match(buildScript, /Start-Sleep -Seconds 5/);
 });
 
-test('windows desktop build script cleans up both pnpm config and Defender in finally block', async () => {
+test('windows desktop build script Defender cleanup runs in finally block', async () => {
   const buildScript = await readFile(desktopBuildScriptPath, 'utf8');
 
   const finallyMatch = buildScript.match(/finally\s*\{([\s\S]*?)\}\s*\n\s*if \(\$deployFailed\)/);
   assert.ok(finallyMatch, 'finally block with cleanup must exist');
-  const finallyBody = finallyMatch[1];
-  assert.match(finallyBody, /pnpm config delete bin-links/);
-  assert.match(finallyBody, /Remove-MpPreference -ExclusionPath \$deployRoot/);
+  assert.match(finallyMatch[1], /Remove-MpPreference -ExclusionPath \$deployRoot/);
 });

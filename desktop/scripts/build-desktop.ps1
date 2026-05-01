@@ -77,19 +77,14 @@ if (-not $SkipBundleDeps) {
     if (Test-Path $deployRoot) { Remove-Item $deployRoot -Recurse -Force }
     New-Item -ItemType Directory -Path $deployRoot -Force | Out-Null
 
-    # pnpm deploy's internal install ignores CLI flags, env vars, and
-    # project-root .npmrc for bin-links — it only reads user-level config.
-    # Set it via `pnpm config` (writes ~/.npmrc) and clean up after.
-    $binLinksDisabled = $false
+    # pnpm deploy ignores every external bin-links=false config source (CLI,
+    # env var, project .npmrc, user .npmrc).  Two mitigations:
+    #   1. Pre-place .npmrc inside each deploy target so the internal install
+    #      reads bin-links=false from its own project directory.
+    #   2. Retry loop — Windows Defender can lock freshly-written .bin/ files;
+    #      a brief pause usually lets the scan finish.
     $defenderExclusionAdded = $false
     $deployFailed = $false
-
-    try {
-        pnpm config set bin-links false 2>$null
-        $binLinksDisabled = $true
-    } catch {
-        Write-Host "  pnpm config set bin-links failed: $($_.Exception.Message)" -ForegroundColor Yellow
-    }
 
     try {
         Add-MpPreference -ExclusionPath $deployRoot -ErrorAction Stop
@@ -102,10 +97,21 @@ if (-not $SkipBundleDeps) {
         Push-Location $ProjectRoot
         try {
             foreach ($pkg in @('api', 'web', 'mcp-server')) {
-                Write-Host "  Deploying @cat-cafe/$pkg ..." -ForegroundColor Gray
                 $out = Join-Path $deployRoot $pkg
-                pnpm --filter "@cat-cafe/$pkg" --prod --config.node-linker=hoisted deploy $out
-                if ($LASTEXITCODE -ne 0) { throw "pnpm deploy @cat-cafe/$pkg failed" }
+                $deployed = $false
+                for ($attempt = 1; $attempt -le 3; $attempt++) {
+                    if ($attempt -gt 1) {
+                        Write-Host "  Retry $attempt/3 for @cat-cafe/$pkg ..." -ForegroundColor Yellow
+                        Start-Sleep -Seconds 5
+                        if (Test-Path $out) { Remove-Item $out -Recurse -Force }
+                    }
+                    New-Item -ItemType Directory -Path $out -Force | Out-Null
+                    Set-Content -Path (Join-Path $out ".npmrc") -Value "bin-links=false`n" -NoNewline -Encoding utf8
+                    Write-Host "  Deploying @cat-cafe/$pkg ..." -ForegroundColor Gray
+                    pnpm --filter "@cat-cafe/$pkg" --prod --config.node-linker=hoisted deploy $out 2>&1
+                    if ($LASTEXITCODE -eq 0) { $deployed = $true; break }
+                }
+                if (-not $deployed) { throw "pnpm deploy @cat-cafe/$pkg failed after 3 attempts" }
             }
         } finally {
             Pop-Location
@@ -114,9 +120,6 @@ if (-not $SkipBundleDeps) {
         Write-Err $_.Exception.Message
         $deployFailed = $true
     } finally {
-        if ($binLinksDisabled) {
-            pnpm config delete bin-links 2>$null
-        }
         if ($defenderExclusionAdded) {
             try { Remove-MpPreference -ExclusionPath $deployRoot -ErrorAction SilentlyContinue } catch {}
         }
