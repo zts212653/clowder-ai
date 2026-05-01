@@ -263,13 +263,16 @@ function ToolsSection({
 
   const prevStatus = useRef(status);
   useEffect(() => {
-    if (prevStatus.current === 'streaming' && !isStreaming && !toolsUserInteracted.current) {
+    if (prevStatus.current !== 'streaming' && isStreaming) {
+      toolsUserInteracted.current = false;
+      setToolsExpanded(true);
+    } else if (prevStatus.current === 'streaming' && !isStreaming && !toolsUserInteracted.current) {
       setToolsExpanded(false);
     }
     prevStatus.current = status;
   }, [status, isStreaming]);
 
-  if (isStreaming && !toolsExpanded) {
+  if (isStreaming && !toolsExpanded && !toolsUserInteracted.current) {
     setToolsExpanded(true);
   }
 
@@ -335,13 +338,16 @@ export function CliOutputBlock({
   const userInteracted = useRef(false);
   const hasMounted = useRef(false);
 
-  if (forceExpanded && !expanded) {
+  if (forceExpanded && !expanded && !userInteracted.current) {
     setExpanded(true);
   }
 
   const prevStatusRef = useRef(status);
   useEffect(() => {
-    if (prevStatusRef.current === 'streaming' && status !== 'streaming' && !userInteracted.current) {
+    if (prevStatusRef.current !== 'streaming' && status === 'streaming') {
+      userInteracted.current = false;
+      setExpanded(true);
+    } else if (prevStatusRef.current === 'streaming' && status !== 'streaming' && !userInteracted.current) {
       setExpanded(defaultExpanded);
     }
     prevStatusRef.current = status;
