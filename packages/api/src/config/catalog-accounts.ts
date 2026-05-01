@@ -16,6 +16,32 @@ import { assertSafeTestConfigRoot } from './test-config-write-guard.js';
 
 const CONFIG_SUBDIR = '.cat-cafe';
 const ACCOUNTS_FILENAME = 'accounts.json';
+const BUILTIN_ACCOUNT_REFS = new Set([
+  'claude',
+  'codex',
+  'gemini',
+  'kimi',
+  'dare',
+  'opencode',
+  'anthropic',
+  'openai',
+  'google',
+  'builtin_anthropic',
+  'builtin_openai',
+  'builtin_google',
+  'builtin_kimi',
+  'builtin_dare',
+  'builtin_opencode',
+]);
+const INSTALLER_ACCOUNT_REFS = new Set([
+  'installer-anthropic',
+  'installer-openai',
+  'installer-google',
+  'installer-kimi',
+  'installer-dare',
+  'installer-opencode',
+  'installer-managed',
+]);
 
 function resolveGlobalRoot(projectRoot?: string): string {
   const envRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
@@ -149,6 +175,54 @@ function inferLegacyAuthType(profile: Record<string, unknown>): AccountConfig['a
   );
 }
 
+function collectAccountRefs(value: unknown, refs: Set<string>): void {
+  if (Array.isArray(value)) {
+    for (const item of value) collectAccountRefs(item, refs);
+    return;
+  }
+  if (typeof value !== 'object' || value === null) return;
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    if ((key === 'accountRef' || key === 'providerProfileId') && typeof nested === 'string' && nested.trim()) {
+      refs.add(nested.trim());
+    } else collectAccountRefs(nested, refs);
+  }
+}
+
+function collectRootCatalogAccountKeys(value: unknown, refs: Set<string>): void {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return;
+  const accounts = (value as Record<string, unknown>).accounts;
+  if (typeof accounts !== 'object' || accounts === null || Array.isArray(accounts)) return;
+  for (const ref of Object.keys(accounts)) {
+    const normalized = ref.trim();
+    if (normalized) refs.add(normalized);
+  }
+}
+
+function readProjectAccountRefs(projectRoot: string): Set<string> {
+  const refs = new Set<string>();
+  const catalogPath = resolve(projectRoot, CONFIG_SUBDIR, 'cat-catalog.json');
+  if (!existsSync(catalogPath)) return refs;
+  try {
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    collectAccountRefs(catalog, refs);
+    collectRootCatalogAccountKeys(catalog, refs);
+  } catch {
+    return refs;
+  }
+  return refs;
+}
+
+function isInstallerAccountRef(ref: string): boolean {
+  return INSTALLER_ACCOUNT_REFS.has(ref);
+}
+
+// Cross-root homedir legacy import is an upgrade rescue path, not global account sync.
+// Keep installer/builtin compatibility and project-bound custom accounts, but do not
+// copy old experimental profiles into every project-local runtime.
+function shouldImportCrossRootHomedirAccount(ref: string, referencedRefs: Set<string>): boolean {
+  return BUILTIN_ACCOUNT_REFS.has(ref) || isInstallerAccountRef(ref) || referencedRefs.has(ref);
+}
+
 /** Merge source accounts into global, preserving existing keys. */
 function mergeIntoGlobal(
   source: Record<string, AccountConfig>,
@@ -183,7 +257,11 @@ function mergeIntoGlobal(
 // ── Legacy provider-profiles.json → accounts.json migration ──
 
 /** Migrate legacy provider-profiles.json + secrets from a given root into global accounts. */
-function migrateLegacyFrom(root: string, projectRoot?: string): void {
+function migrateLegacyFrom(
+  root: string,
+  projectRoot?: string,
+  opts?: { shouldImportAccount?: (ref: string, account: AccountConfig) => boolean },
+): void {
   const metaPath = resolve(root, CONFIG_SUBDIR, 'provider-profiles.json');
   if (!existsSync(metaPath)) return;
   const meta = JSON.parse(readFileSync(metaPath, 'utf-8'));
@@ -220,12 +298,14 @@ function migrateLegacyFrom(root: string, projectRoot?: string): void {
     const baseUrl = normalizeBaseUrl(typeof p.baseUrl === 'string' ? p.baseUrl : undefined);
     const models = normalizeModels(Array.isArray(p.models) ? p.models.map(String) : undefined);
     // clowder-ai#340: protocol not migrated — derived at runtime from well-known account IDs.
-    accounts[id] = {
+    const account: AccountConfig = {
       authType: inferLegacyAuthType(p),
       ...(displayName ? { displayName } : {}),
       ...(baseUrl ? { baseUrl } : {}),
       ...(models ? { models } : {}),
     };
+    if (opts?.shouldImportAccount && !opts.shouldImportAccount(id, account)) continue;
+    accounts[id] = account;
   }
   const { merged } = mergeIntoGlobal(accounts, projectRoot, { skipConflicts: true });
   const mergedSet = new Set(merged);
@@ -351,25 +431,33 @@ function migrateProjectAccountsToGlobal(projectRoot: string): void {
 
 const migratedHomedirLegacy = new Set<string>();
 
+function projectScopedMigrationKey(resolvedTarget: string, projectRoot?: string): string {
+  return `${resolvedTarget}\0${projectRoot ? resolve(projectRoot) : ''}`;
+}
+
 function migrateHomedirLegacyProviderProfiles(projectRoot?: string): void {
   const globalRoot = resolveGlobalRoot(projectRoot);
   const resolvedTarget = resolve(globalRoot);
-  if (migratedHomedirLegacy.has(resolvedTarget)) return;
+  const migrationKey = projectScopedMigrationKey(resolvedTarget, projectRoot);
+  if (migratedHomedirLegacy.has(migrationKey)) return;
   const home = homedir();
   if (resolvedTarget === resolve(home)) {
     // Global root IS homedir — already covered by migrateLegacyProviderProfiles.
-    migratedHomedirLegacy.add(resolvedTarget);
+    migratedHomedirLegacy.add(migrationKey);
     return;
   }
   try {
-    migrateLegacyFrom(home, projectRoot);
-    migratedHomedirLegacy.add(resolvedTarget);
+    const referencedRefs = projectRoot ? readProjectAccountRefs(projectRoot) : new Set<string>();
+    migrateLegacyFrom(home, projectRoot, {
+      shouldImportAccount: (ref) => shouldImportCrossRootHomedirAccount(ref, referencedRefs),
+    });
+    migratedHomedirLegacy.add(migrationKey);
   } catch (err) {
     // Only swallow parse/read errors (corrupt homedir files). Re-throw account
     // conflicts and other migration errors so callers get a fail-fast signal.
     if (err instanceof SyntaxError || (err instanceof Error && err.message.includes('ENOENT'))) {
       console.error('[catalog-accounts] homedir legacy→global migration failed (corrupt source, skipped):', err);
-      migratedHomedirLegacy.add(resolvedTarget);
+      migratedHomedirLegacy.add(migrationKey);
     } else {
       throw err;
     }
@@ -383,21 +471,22 @@ const migratedHomedirCredentials = new Set<string>();
 function migrateHomedirCredentials(projectRoot?: string): void {
   const globalRoot = resolveGlobalRoot(projectRoot);
   const resolvedTarget = resolve(globalRoot);
-  if (migratedHomedirCredentials.has(resolvedTarget)) return;
+  const migrationKey = projectScopedMigrationKey(resolvedTarget, projectRoot);
+  if (migratedHomedirCredentials.has(migrationKey)) return;
   const home = homedir();
   if (resolvedTarget === resolve(home)) {
-    migratedHomedirCredentials.add(resolvedTarget);
+    migratedHomedirCredentials.add(migrationKey);
     return;
   }
   const homeCredPath = resolve(home, CONFIG_SUBDIR, 'credentials.json');
   if (!existsSync(homeCredPath)) {
-    migratedHomedirCredentials.add(resolvedTarget);
+    migratedHomedirCredentials.add(migrationKey);
     return;
   }
   try {
     const homeCreds = JSON.parse(readFileSync(homeCredPath, 'utf-8'));
     if (typeof homeCreds !== 'object' || homeCreds === null || Array.isArray(homeCreds)) {
-      migratedHomedirCredentials.add(resolvedTarget);
+      migratedHomedirCredentials.add(migrationKey);
       return;
     }
     const targetCredPath = resolve(globalRoot, CONFIG_SUBDIR, 'credentials.json');
@@ -413,8 +502,15 @@ function migrateHomedirCredentials(projectRoot?: string): void {
       }
     }
     let imported = 0;
+    const referencedRefs = projectRoot ? readProjectAccountRefs(projectRoot) : new Set<string>();
+    const targetAccounts = readAllGlobal(projectRoot);
     for (const [ref, entry] of Object.entries(homeCreds)) {
-      if (typeof entry === 'object' && entry !== null && !(ref in targetCreds)) {
+      if (
+        typeof entry === 'object' &&
+        entry !== null &&
+        !(ref in targetCreds) &&
+        (ref in targetAccounts || shouldImportCrossRootHomedirAccount(ref, referencedRefs))
+      ) {
         targetCreds[ref] = entry;
         imported++;
       }
@@ -427,11 +523,11 @@ function migrateHomedirCredentials(projectRoot?: string): void {
         `[catalog-accounts] homedir credentials.json: ${imported} credential(s) merged into ${resolvedTarget}`,
       );
     }
-    migratedHomedirCredentials.add(resolvedTarget);
+    migratedHomedirCredentials.add(migrationKey);
   } catch (err) {
     if (err instanceof SyntaxError || (err instanceof Error && err.message.includes('ENOENT'))) {
       console.error('[catalog-accounts] homedir credentials.json migration failed (corrupt source, skipped):', err);
-      migratedHomedirCredentials.add(resolvedTarget);
+      migratedHomedirCredentials.add(migrationKey);
     } else {
       throw err;
     }

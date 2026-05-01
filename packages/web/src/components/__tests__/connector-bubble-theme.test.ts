@@ -136,7 +136,7 @@ describe('ConnectorBubble theme', () => {
         connector: 'github-review',
         label: 'GitHub Review',
         icon: '🔔',
-        url: 'https://github.com/zts212653/cat-cafe/pull/97',
+        url: 'https://github.com/zts212653/clowder-ai/pull/97',
       },
     };
 
@@ -160,7 +160,7 @@ describe('ConnectorBubble theme', () => {
         connector: 'github-ci',
         label: 'GitHub CI/CD',
         icon: 'github',
-        url: 'https://github.com/zts212653/cat-cafe/actions/runs/123',
+        url: 'https://github.com/zts212653/clowder-ai/actions/runs/123',
       },
     };
 

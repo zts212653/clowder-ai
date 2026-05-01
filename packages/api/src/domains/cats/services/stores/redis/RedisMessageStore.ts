@@ -15,8 +15,13 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
-import type { AppendMessageInput, StoredMessage } from '../ports/MessageStore.js';
-import { DEFAULT_THREAD_ID, generateSortableId, isDelivered } from '../ports/MessageStore.js';
+import type { AppendMessageInput, StoredMessage, StreamMetadataAugmentInput } from '../ports/MessageStore.js';
+import {
+  applyStreamMetadataAugment,
+  DEFAULT_THREAD_ID,
+  generateSortableId,
+  isDelivered,
+} from '../ports/MessageStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import { isSystemUserMessage } from '../visibility.js';
 import {
@@ -757,6 +762,23 @@ export class RedisMessageStore {
     await this.redis.hset(MessageKeys.detail(id), { extra: serializeExtra(merged) });
     msg.extra = merged;
     return msg;
+  }
+
+  async augmentStreamMetadata(id: string, patch: StreamMetadataAugmentInput): Promise<StoredMessage | null> {
+    const msg = await this.getById(id);
+    if (!msg) return null;
+    const augmented = applyStreamMetadataAugment(msg, patch);
+    const fields: Record<string, string> = {};
+    if (patch.thinking && augmented.thinking) fields.thinking = augmented.thinking;
+    if (patch.metadata && augmented.metadata) fields.metadata = JSON.stringify(augmented.metadata);
+    if (patch.toolEvents?.length && augmented.toolEvents) fields.toolEvents = JSON.stringify(augmented.toolEvents);
+    if (patch.replyTo && augmented.replyTo) fields.replyTo = augmented.replyTo;
+    if (patch.mentionsUser && augmented.mentionsUser) fields.mentionsUser = '1';
+    if (patch.extra && augmented.extra) fields.extra = serializeExtra(augmented.extra);
+    if (Object.keys(fields).length > 0) {
+      await this.redis.hset(MessageKeys.detail(id), fields);
+    }
+    return augmented;
   }
 
   /** F098-D: Mark a queued message as delivered (set deliveredAt timestamp). */

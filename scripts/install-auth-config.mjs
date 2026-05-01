@@ -29,6 +29,32 @@ const BUILTIN_ACCOUNT_SPECS = [
 const CONFIG_SUBDIR = '.cat-cafe';
 const TEST_SANDBOX_ENV = 'CAT_CAFE_TEST_SANDBOX';
 const TEST_SANDBOX_ALLOW_UNSAFE_ROOT_ENV = 'CAT_CAFE_TEST_SANDBOX_ALLOW_UNSAFE_ROOT';
+const BUILTIN_ACCOUNT_REFS = new Set([
+  'claude',
+  'codex',
+  'gemini',
+  'kimi',
+  'dare',
+  'opencode',
+  'anthropic',
+  'openai',
+  'google',
+  'builtin_anthropic',
+  'builtin_openai',
+  'builtin_google',
+  'builtin_kimi',
+  'builtin_dare',
+  'builtin_opencode',
+]);
+const INSTALLER_ACCOUNT_REFS = new Set([
+  'installer-anthropic',
+  'installer-openai',
+  'installer-google',
+  'installer-kimi',
+  'installer-dare',
+  'installer-opencode',
+  'installer-managed',
+]);
 // NOTE: duplicated in packages/api/src/config/test-config-write-guard.ts because this
 // standalone script cannot import the TS helper directly. Keep the two guards in sync.
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -316,9 +342,58 @@ function builtinAccountIdForClient(client) {
   return spec.id;
 }
 
+function collectAccountRefs(value, refs) {
+  if (Array.isArray(value)) {
+    for (const item of value) collectAccountRefs(item, refs);
+    return;
+  }
+  if (!value || typeof value !== 'object') return;
+  for (const [key, nested] of Object.entries(value)) {
+    if ((key === 'accountRef' || key === 'providerProfileId') && typeof nested === 'string' && nested.trim()) {
+      refs.add(nested.trim());
+    } else collectAccountRefs(nested, refs);
+  }
+}
+
+function collectRootCatalogAccountKeys(value, refs) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+  const accounts = value.accounts;
+  if (!accounts || typeof accounts !== 'object' || Array.isArray(accounts)) return;
+  for (const ref of Object.keys(accounts)) {
+    const normalized = ref.trim();
+    if (normalized) refs.add(normalized);
+  }
+}
+
+function readProjectAccountRefs(projectDir) {
+  const refs = new Set();
+  if (!projectDir) return refs;
+  const catalogFile = path.join(projectDir, CONFIG_SUBDIR, 'cat-catalog.json');
+  if (!existsSync(catalogFile)) return refs;
+  try {
+    const catalog = readJson(catalogFile, {});
+    collectAccountRefs(catalog, refs);
+    collectRootCatalogAccountKeys(catalog, refs);
+  } catch {
+    return refs;
+  }
+  return refs;
+}
+
+function isInstallerAccountRef(ref) {
+  return INSTALLER_ACCOUNT_REFS.has(ref);
+}
+
+// Cross-root homedir legacy import is an upgrade rescue path, not global account sync.
+// Keep installer/builtin compatibility and project-bound custom accounts, but do not
+// copy old experimental profiles into every project-local runtime.
+function shouldImportCrossRootHomedirAccount(ref, referencedRefs) {
+  return BUILTIN_ACCOUNT_REFS.has(ref) || isInstallerAccountRef(ref) || referencedRefs.has(ref);
+}
+
 // ── Legacy migration (v2/v3 provider-profiles → accounts+credentials) ──
 
-function migrateLegacyProfiles(projectDir) {
+function migrateLegacyProfiles(projectDir, opts = {}) {
   const profileDir = projectDir ? path.join(projectDir, CONFIG_SUBDIR) : globalDir();
   const metaFile = path.join(profileDir, 'provider-profiles.json');
   if (!existsSync(metaFile)) return;
@@ -345,6 +420,7 @@ function migrateLegacyProfiles(projectDir) {
         ? { models: normalizeModels(p.models.map(String)) }
         : {}),
     };
+    if (opts.shouldImportAccount && !opts.shouldImportAccount(id, normalizedAccount)) continue;
     legacyAccounts[id] = normalizedAccount;
     if (id in accounts) continue;
     accounts[id] = normalizedAccount;
@@ -383,7 +459,10 @@ function migrateAllLegacySources(projectDir) {
   const home = homedir();
   if (path.resolve(resolveGlobalRoot()) !== path.resolve(home)) {
     try {
-      migrateLegacyProfiles(home);
+      const referencedRefs = readProjectAccountRefs(projectDir);
+      migrateLegacyProfiles(home, {
+        shouldImportAccount: (ref) => shouldImportCrossRootHomedirAccount(ref, referencedRefs),
+      });
     } catch {
       // Best-effort: don't block operation if homedir legacy files are corrupt.
     }

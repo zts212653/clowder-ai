@@ -154,9 +154,9 @@ team lead愿景（2026-04-02）：
 
 | # | Gap | 类型 | GitHub Issue | 状态 |
 |---|-----|------|-------------|------|
-| VG-1 | `coverageMap.retrievalHints` 硬编码空数组，briefing 卡片"证据 N 条"永远显示 0 | bug | [#916](https://github.com/zts212653/cat-cafe/issues/916) / PR #919 | ✅ merged |
-| VG-2 | briefing 卡片 UX：来源标识 + 默认折叠 + 展开态 retrieval hints（team lead runtime 实测反馈 2026-04-02） | enhancement | [#917](https://github.com/zts212653/cat-cafe/issues/917) / PR #920 | ✅ merged |
-| VG-3 | threadMemory 是文件操作账本，缺决策/产物粒度（含 GPT Pro structured state ledger 建议） | enhancement | [#918](https://github.com/zts212653/cat-cafe/issues/918) / PR #922 | ✅ merged |
+| VG-1 | `coverageMap.retrievalHints` 硬编码空数组，briefing 卡片"证据 N 条"永远显示 0 | bug | [#916](https://github.com/zts212653/clowder-ai/issues/916) / PR #919 | ✅ merged |
+| VG-2 | briefing 卡片 UX：来源标识 + 默认折叠 + 展开态 retrieval hints（team lead runtime 实测反馈 2026-04-02） | enhancement | [#917](https://github.com/zts212653/clowder-ai/issues/917) / PR #920 | ✅ merged |
+| VG-3 | threadMemory 是文件操作账本，缺决策/产物粒度（含 GPT Pro structured state ledger 建议） | enhancement | [#918](https://github.com/zts212653/clowder-ai/issues/918) / PR #922 | ✅ merged |
 
 ### VG-3 设计方案（2026-04-02 Ragdoll + Maine Coon Spark 收敛）
 

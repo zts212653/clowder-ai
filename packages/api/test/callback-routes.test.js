@@ -169,6 +169,8 @@ describe('Callback Routes', () => {
     assert.ok(deliverArgs.threadMeta, 'threadMeta should be passed to deliver');
     assert.ok(deliverArgs.threadMeta.threadShortId, 'threadMeta should have threadShortId');
     assert.ok(deliverArgs.threadMeta.deepLinkUrl, 'threadMeta should have deepLinkUrl');
+    assert.match(deliverArgs.threadMeta.deepLinkUrl, /\/thread\//);
+    assert.ok(!deliverArgs.threadMeta.deepLinkUrl.includes('/threads/'));
     assert.equal(deliverArgs.origin, 'callback', 'origin should be callback for post-message');
   });
 

@@ -1,0 +1,191 @@
+name: Release Desktop Installers
+
+# Builds Cat Cafe desktop installers (mac DMG arm64+x64, Windows .exe)
+# and uploads them to the GitHub release that triggered the workflow.
+#
+# Triggers:
+#   - release.published — automatic on release publish
+#   - workflow_dispatch — manual run for dry-runs (won't upload assets)
+#
+# F179: Desktop Installer Release Pipeline
+# See docs/features/F179-desktop-installer-release-pipeline.md
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version override (e.g. 0.9.1) for dry-run builds without a release"
+        required: false
+        type: string
+
+concurrency:
+  group: release-desktop-${{ github.event.release.tag_name || github.event.inputs.version || github.sha }}
+  cancel-in-progress: false
+
+# softprops/action-gh-release@v2 needs contents: write to attach assets to a
+# release. Repo default_workflow_permissions is read-only on both cat-cafe and
+# clowder-ai (verified via gh api .../actions/permissions/workflow), so we
+# elevate at the workflow level rather than at the org level.
+permissions:
+  contents: write
+
+jobs:
+  build-mac:
+    name: Build macOS DMG (arm64 + x64)
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version from release tag
+        id: version
+        shell: bash
+        run: |
+          if [[ -n "${{ github.event.release.tag_name }}" ]]; then
+            VERSION="${{ github.event.release.tag_name }}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          # Strip leading 'v' if present (v0.9.1 -> 0.9.1)
+          VERSION="${VERSION#v}"
+          if [[ -z "$VERSION" ]]; then
+            echo "::error::No version resolved (need release.tag_name or workflow_dispatch.inputs.version)"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION"
+
+      - name: Sync desktop/package.json version
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Use Node to safely update JSON (avoids sed quoting hazards)
+          node -e "
+            const fs = require('fs');
+            const path = 'desktop/package.json';
+            const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+            pkg.version = '$VERSION';
+            fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
+            console.log('desktop/package.json version =', pkg.version);
+          "
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Build macOS DMG installers
+        env:
+          CATCAFE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          chmod +x desktop/scripts/build-mac.sh
+          ./desktop/scripts/build-mac.sh
+
+      - name: List build artifacts
+        run: ls -la dist/
+
+      - name: Upload DMG to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/CatCafe-*-arm64.dmg
+            dist/CatCafe-*-x64.dmg
+          fail_on_unmatched_files: true
+
+      - name: Upload DMG as workflow artifact (dry-run)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg-${{ steps.version.outputs.version }}
+          path: dist/CatCafe-*.dmg
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows Installer (.exe)
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version from release tag
+        id: version
+        shell: bash
+        run: |
+          if [[ -n "${{ github.event.release.tag_name }}" ]]; then
+            VERSION="${{ github.event.release.tag_name }}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          VERSION="${VERSION#v}"
+          if [[ -z "$VERSION" ]]; then
+            echo "::error::No version resolved"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION"
+
+      - name: Sync desktop/package.json version
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          node -e "
+            const fs = require('fs');
+            const path = 'desktop/package.json';
+            const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+            pkg.version = '$VERSION';
+            fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
+            console.log('desktop/package.json version =', pkg.version);
+          "
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install Inno Setup
+        # Inno Setup is required to compile cat-cafe.iss into the final .exe
+        # installer. windows-latest does not ship with it by default.
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $env:Path += ";C:\Program Files (x86)\Inno Setup 6"
+          iscc.exe /? | Select-Object -First 1
+
+      - name: Build Windows installer
+        env:
+          CATCAFE_VERSION: ${{ steps.version.outputs.version }}
+        shell: pwsh
+        run: |
+          .\desktop\scripts\build-desktop.ps1
+
+      - name: List build artifacts
+        shell: pwsh
+        run: Get-ChildItem dist\
+
+      - name: Upload installer to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/CatCafe-Setup-*.exe
+          fail_on_unmatched_files: true
+
+      - name: Upload installer as workflow artifact (dry-run)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-${{ steps.version.outputs.version }}
+          path: dist/CatCafe-Setup-*.exe
+          if-no-files-found: error

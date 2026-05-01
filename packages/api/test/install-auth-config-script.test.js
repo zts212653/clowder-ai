@@ -176,6 +176,198 @@ test('client-auth set oauth sanitizes malformed builtin default models before wr
   }
 });
 
+test('client-auth set ignores unreferenced homedir legacy experiment profiles', () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-homedir-legacy-filter-'));
+  const fakeHome = mkdtempSync(join(tmpdir(), 'clowder-install-fake-home-'));
+
+  try {
+    const profileDir = join(fakeHome, '.cat-cafe');
+    mkdirSync(profileDir, { recursive: true });
+    writeFileSync(
+      join(profileDir, 'provider-profiles.json'),
+      `${JSON.stringify(
+        {
+          version: 2,
+          providers: [
+            { id: 'installer-openai', authType: 'api_key', baseUrl: 'https://api.openai.com/v1' },
+            { id: 'agent-teams-local', authType: 'api_key', displayName: 'Agent Teams Local' },
+            {
+              id: 'codex-sponsor',
+              authType: 'api_key',
+              displayName: 'codex-sponsor',
+              baseUrl: 'https://openai.example/v1',
+              models: ['gpt-5.4'],
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+    writeFileSync(
+      join(profileDir, 'provider-profiles.secrets.local.json'),
+      `${JSON.stringify(
+        {
+          profiles: {
+            'installer-openai': { apiKey: 'sk-installer-openai' },
+            'agent-teams-local': { apiKey: 'sk-agent-teams-local' },
+            'codex-sponsor': { apiKey: 'sk-codex-sponsor' },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+
+    runHelperWithEnv(['client-auth', 'set', '--project-dir', projectRoot, '--client', 'codex', '--mode', 'oauth'], {
+      HOME: fakeHome,
+    });
+
+    const { accounts, credentials } = readInstallerState(projectRoot);
+    assert.equal(accounts.codex?.authType, 'oauth');
+    assert.equal(accounts['installer-openai']?.baseUrl, 'https://api.openai.com/v1');
+    assert.equal(credentials['installer-openai']?.apiKey, 'sk-installer-openai');
+    assert.equal(accounts['agent-teams-local'], undefined, 'unreferenced homedir experiment must not migrate');
+    assert.equal(accounts['codex-sponsor'], undefined, 'unreferenced homedir fixture must not migrate');
+    assert.equal(credentials['agent-teams-local'], undefined, 'skipped experiment credential must not migrate');
+    assert.equal(credentials['codex-sponsor'], undefined, 'skipped fixture credential must not migrate');
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+    rmSync(fakeHome, { recursive: true, force: true });
+  }
+});
+
+test('client-auth set imports homedir legacy profile referenced by catalog.accounts', () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-homedir-catalog-accounts-'));
+  const fakeHome = mkdtempSync(join(tmpdir(), 'clowder-install-fake-home-catalog-accounts-'));
+
+  try {
+    const runtimeDir = join(projectRoot, '.cat-cafe');
+    mkdirSync(runtimeDir, { recursive: true });
+    writeFileSync(
+      join(runtimeDir, 'cat-catalog.json'),
+      `${JSON.stringify(
+        {
+          version: 2,
+          breeds: [],
+          roster: {},
+          reviewPolicy: {},
+          accounts: {
+            'legacy-custom': {
+              authType: 'api_key',
+              baseUrl: 'https://legacy-custom.example/v1',
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+
+    const profileDir = join(fakeHome, '.cat-cafe');
+    mkdirSync(profileDir, { recursive: true });
+    writeFileSync(
+      join(profileDir, 'provider-profiles.json'),
+      `${JSON.stringify(
+        {
+          version: 2,
+          providers: [{ id: 'legacy-custom', authType: 'api_key', baseUrl: 'https://legacy-custom.example/v1' }],
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+    writeFileSync(
+      join(profileDir, 'provider-profiles.secrets.local.json'),
+      `${JSON.stringify({ profiles: { 'legacy-custom': { apiKey: 'sk-legacy-custom' } } }, null, 2)}\n`,
+      'utf8',
+    );
+
+    runHelperWithEnv(['client-auth', 'set', '--project-dir', projectRoot, '--client', 'codex', '--mode', 'oauth'], {
+      HOME: fakeHome,
+    });
+
+    const { accounts, credentials } = readInstallerState(projectRoot);
+    assert.equal(accounts.codex?.authType, 'oauth');
+    assert.equal(accounts['legacy-custom']?.baseUrl, 'https://legacy-custom.example/v1');
+    assert.equal(credentials['legacy-custom']?.apiKey, 'sk-legacy-custom');
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+    rmSync(fakeHome, { recursive: true, force: true });
+  }
+});
+
+test('client-auth set imports homedir legacy profile referenced by providerProfileId', () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-homedir-provider-profile-id-'));
+  const fakeHome = mkdtempSync(join(tmpdir(), 'clowder-install-fake-home-provider-profile-id-'));
+
+  try {
+    const runtimeDir = join(projectRoot, '.cat-cafe');
+    mkdirSync(runtimeDir, { recursive: true });
+    writeFileSync(
+      join(runtimeDir, 'cat-catalog.json'),
+      `${JSON.stringify(
+        {
+          version: 2,
+          breeds: [
+            {
+              id: 'legacy-custom',
+              variants: [{ id: 'legacy-custom-default', providerProfileId: 'legacy-provider-profile' }],
+            },
+          ],
+          roster: {},
+          reviewPolicy: {},
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+
+    const profileDir = join(fakeHome, '.cat-cafe');
+    mkdirSync(profileDir, { recursive: true });
+    writeFileSync(
+      join(profileDir, 'provider-profiles.json'),
+      `${JSON.stringify(
+        {
+          version: 2,
+          providers: [
+            {
+              id: 'legacy-provider-profile',
+              authType: 'api_key',
+              baseUrl: 'https://legacy-provider.example/v1',
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+    writeFileSync(
+      join(profileDir, 'provider-profiles.secrets.local.json'),
+      `${JSON.stringify({ profiles: { 'legacy-provider-profile': { apiKey: 'sk-legacy-provider' } } }, null, 2)}\n`,
+      'utf8',
+    );
+
+    runHelperWithEnv(['client-auth', 'set', '--project-dir', projectRoot, '--client', 'codex', '--mode', 'oauth'], {
+      HOME: fakeHome,
+    });
+
+    const { accounts, credentials } = readInstallerState(projectRoot);
+    assert.equal(accounts.codex?.authType, 'oauth');
+    assert.equal(accounts['legacy-provider-profile']?.baseUrl, 'https://legacy-provider.example/v1');
+    assert.equal(credentials['legacy-provider-profile']?.apiKey, 'sk-legacy-provider');
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+    rmSync(fakeHome, { recursive: true, force: true });
+  }
+});
+
 test('claude-profile create and remove keeps installer-managed account in sync', () => {
   const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-claude-profile-'));
 

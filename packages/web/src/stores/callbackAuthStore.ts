@@ -154,22 +154,30 @@ export const useCallbackAuthStore = create<CallbackAuthState>((set, get) => ({
   },
   markViewed: async () => {
     try {
-      // Cloud Codex P2 #1425 round 1: pass `viewedUpTo` = snapshot's effective
-      // "as of" server-side timestamp so we only ack failures already in the
-      // rendered snapshot. Without this, panel mount → markViewed advances
-      // lastViewedAt to "now", permanently clearing failures that occurred
-      // between last 30s poll and panel open (notification loss window).
-      const initialSnap = get().snapshot;
-      const viewedUpTo = initialSnap ? initialSnap.startedAt + initialSnap.uptimeMs : undefined;
-      const body = viewedUpTo !== undefined ? JSON.stringify({ viewedUpTo }) : undefined;
+      // F174 D2b-1 alpha #6 fix: 铲屎官 reported "小红点点进去看板没消除".
+      //
+      // Original Cloud P2 round 1 design: pass viewedUpTo = snapshot's
+      // server-side "as of" timestamp to avoid ack'ing failures user hasn't
+      // seen (snapshot 30s lag). But this was over-engineered against the
+      // real user mental model: opening the panel = "I've reviewed the
+      // current 24h state, ack everything to now".
+      //
+      // The "user might miss failures arriving between snapshot and now"
+      // concern is theoretical — those failures will surface on next poll
+      // (server-side counter still increments), and the user just opened
+      // the panel deliberately to look at callback auth state. Treating
+      // panel-open as full-state ack is the simpler, more intuitive model.
+      //
+      // Trade-off accepted: failures arriving in the snapshot-to-now gap
+      // get auto-ack'd. They show up in next-poll'd snapshot's recentSamples
+      // (history preserved) but don't trigger an unread-badge re-appear.
+      // For active-failure scenarios, badge will re-populate on next failure
+      // anyway. For idle-cat scenarios (alpha #6 root case), badge cleanly
+      // clears on panel open and stays cleared.
+      //
+      // Server defaults to Date.now() when no body provided.
       const res = await apiFetch('/api/debug/callback-auth/mark-viewed', {
         method: 'POST',
-        ...(body
-          ? {
-              headers: { 'content-type': 'application/json' },
-              body,
-            }
-          : {}),
       });
       if (!res.ok) return; // silently no-op on error — badge will catch up on next poll
       // Cloud Codex P2 #1425 round 2: don't blindly zero — derive optimistic
@@ -185,20 +193,18 @@ export const useCallbackAuthStore = create<CallbackAuthState>((set, get) => ({
       // recomputes the badge correctly instead of overwriting fresh aggregate
       // with stale-snapshot data.
       const json = (await res.json().catch(() => null)) as { lastViewedAt?: number } | null;
-      const serverCutoff = typeof json?.lastViewedAt === 'number' ? json.lastViewedAt : (viewedUpTo ?? Date.now());
+      const serverCutoff = typeof json?.lastViewedAt === 'number' ? json.lastViewedAt : Date.now();
       const currentCutoff = get().pendingMarkViewedCutoff ?? 0;
-      // Cloud Codex P1 #1425 round 6: use `effectiveCutoff` (Math.max) for
-      // BOTH optimistic compute AND cutoff persistence. Round 5 made cutoff
-      // monotonic but optimisticUnviewed still computed from raw serverCutoff
-      // — when overlapping markViewed responses arrive out of order, the
-      // older response would re-inflate unviewedFailures24h because its
-      // smaller serverCutoff includes more samples. Computing from
-      // effectiveCutoff prevents the badge re-appearing.
+      // Cloud Codex P1 #1425 round 6: monotonic max — overlapping markViewed
+      // responses out of order must NOT regress the cutoff watermark.
       const effectiveCutoff = Math.max(currentCutoff, serverCutoff);
       const latestSnap = get().snapshot;
-      // Cloud Codex P2 #1425 round 5: use `>=` to mirror server's same-ms
-      // safe-side bias — a failure at exactly cutoff ms could be pre- or
-      // post-snapshot, so count it as unviewed (don't drop).
+      // alpha #6 fix: with viewedUpTo defaulting to server `now`, all samples
+      // in current snapshot are by definition <= server cutoff (they happened
+      // before the POST). Optimistic clear to 0 is correct; any newer failures
+      // arriving after the POST will surface on next poll naturally (server
+      // counter > effectiveCutoff). Filter retained for defensive consistency
+      // with applySnapshot stale-snapshot patch (Cloud P2 round 4).
       const optimisticUnviewed = latestSnap
         ? latestSnap.recentSamples.filter((s) => s.at >= effectiveCutoff).length
         : 0;

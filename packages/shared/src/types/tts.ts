@@ -65,6 +65,8 @@ export interface TtsStreamEvent {
   readonly type: 'chunk' | 'done' | 'error';
   readonly index?: number;
   readonly total?: number;
+  readonly sourceIndex?: number;
+  readonly sourceTotal?: number;
   readonly audioBase64?: string;
   readonly text?: string;
   readonly durationSec?: number;

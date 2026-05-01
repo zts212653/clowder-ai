@@ -45,7 +45,7 @@ describe('invocationEventDebug', () => {
     expect((window as typeof window & { __catCafeDebug?: unknown }).__catCafeDebug).toBeTruthy();
   });
 
-  it('exposes dumpBubbleTimeline() and returns only bubble lifecycle events', () => {
+  it('exposes dumpBubbleTimeline() and returns only bubble lifecycle/invariant events', () => {
     configureDebug({ enabled: true });
     ensureWindowDebugApi();
 
@@ -66,6 +66,23 @@ describe('invocationEventDebug', () => {
       invocationId: 'inv-1',
       origin: 'stream',
     } as Parameters<typeof recordDebugEvent>[0]);
+    recordDebugEvent({
+      event: 'bubble_invariant_violation',
+      threadId: 'thread-a',
+      timestamp: 3,
+      actorId: 'opus',
+      canonicalInvocationId: 'inv-1',
+      bubbleKind: 'assistant_text',
+      eventType: 'callback_final',
+      originPhase: 'callback/history',
+      sourcePath: 'callback',
+      existingMessageId: 'msg-stream-1',
+      incomingMessageId: 'msg-callback-1',
+      seq: 7,
+      recoveryAction: 'quarantine',
+      violationKind: 'duplicate',
+      level: 'warn',
+    } as Parameters<typeof recordDebugEvent>[0]);
 
     const debugApi = (
       window as typeof window & {
@@ -74,13 +91,15 @@ describe('invocationEventDebug', () => {
     ).__catCafeDebug;
 
     expect(debugApi?.dumpBubbleTimeline).toBeTypeOf('function');
+    const dumpBubbleTimeline = debugApi?.dumpBubbleTimeline;
+    if (!dumpBubbleTimeline) throw new Error('dumpBubbleTimeline not mounted');
 
-    const dump = JSON.parse(debugApi!.dumpBubbleTimeline!({ rawThreadId: true })) as {
+    const dump = JSON.parse(dumpBubbleTimeline({ rawThreadId: true })) as {
       meta: { count: number };
       events: Array<Record<string, unknown>>;
     };
 
-    expect(dump.meta.count).toBe(1);
+    expect(dump.meta.count).toBe(2);
     expect(dump.events).toEqual([
       expect.objectContaining({
         event: 'bubble_lifecycle',
@@ -91,6 +110,21 @@ describe('invocationEventDebug', () => {
         messageId: 'msg-stream-1',
         invocationId: 'inv-1',
         origin: 'stream',
+      }),
+      expect.objectContaining({
+        event: 'bubble_invariant_violation',
+        actorId: 'opus',
+        canonicalInvocationId: 'inv-1',
+        bubbleKind: 'assistant_text',
+        eventType: 'callback_final',
+        originPhase: 'callback/history',
+        sourcePath: 'callback',
+        existingMessageId: 'msg-stream-1',
+        incomingMessageId: 'msg-callback-1',
+        seq: 7,
+        recoveryAction: 'quarantine',
+        violationKind: 'duplicate',
+        level: 'warn',
       }),
     ]);
   });

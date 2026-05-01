@@ -3,7 +3,6 @@
  * 后端 API 入口
  */
 
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { type CatConfig, type CatId, CORE_COMMANDS, catRegistry } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
@@ -14,6 +13,7 @@ import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyReply } from 'fastify';
 import { resolveAnthropicRuntimeProfile, resolveForClient } from './config/account-resolver.js';
 import { generateCliConfigs, readCapabilitiesConfig } from './config/capabilities/capability-orchestrator.js';
+import { resolveStartupCliConfigContext } from './config/capabilities/startup-cli-config.js';
 import { resolveBoundAccountRefForCat } from './config/cat-account-binding.js';
 import { getCatContextBudget } from './config/cat-budgets.js';
 import {
@@ -99,6 +99,7 @@ import { AgentPaneRegistry } from './domains/terminal/agent-pane-registry.js';
 import { TmuxGateway } from './domains/terminal/tmux-gateway.js';
 import { CommandRegistry } from './infrastructure/commands/CommandRegistry.js';
 import { parseManifestSlashCommands } from './infrastructure/commands/manifest-commands.js';
+import { buildThreadDeepLink } from './infrastructure/connectors/connector-command-helpers.js';
 import {
   loadConnectorGatewayConfig,
   startConnectorGateway,
@@ -122,6 +123,7 @@ import { connectorWebhookRoutes } from './routes/connector-webhooks.js';
 import { gameRoutes } from './routes/games.js';
 import {
   accountsRoutes,
+  agentHooksRoutes,
   auditRoutes,
   authorizationRoutes,
   backlogRoutes,
@@ -396,6 +398,15 @@ async function main(): Promise<void> {
   const { AgentKeyRegistry } = await import('./domains/cats/services/agents/agent-key/AgentKeyRegistry.js');
   const agentKeyRegistry = new AgentKeyRegistry();
   app.log.info('[api] AgentKeyRegistry initialized (memory backend)');
+  try {
+    const { ensureAntigravityAgentKeySidecar } = await import(
+      './domains/cats/services/agents/agent-key/antigravity-agent-key-sidecar.js'
+    );
+    const sidecar = await ensureAntigravityAgentKeySidecar(agentKeyRegistry);
+    app.log.info(`[api] Antigravity agent-key sidecar ready: ${sidecar.filePath} (${sidecar.catId}/${sidecar.userId})`);
+  } catch (err) {
+    app.log.warn(`[api] Antigravity agent-key sidecar setup failed (best-effort): ${String(err)}`);
+  }
 
   // Fail-closed: refuse to start without Redis unless explicitly opted into memory mode.
   // Also verify Redis is actually reachable (PING), not just configured.
@@ -1633,6 +1644,7 @@ async function main(): Promise<void> {
   await app.register(summariesRoutes, { summaryStore, socketManager });
   await app.register(projectsRoutes);
   await app.register(mkdirRoute);
+  await app.register(agentHooksRoutes);
   await app.register(governanceStatusRoute);
   await app.register(projectSetupRoute, {
     memoryBootstrapService: expeditionBootstrapService as { bootstrap: (p: string, o?: unknown) => Promise<unknown> },
@@ -2028,19 +2040,13 @@ async function main(): Promise<void> {
     app.log.warn(`[api] Audit log write failed (best-effort): ${String(err)}`);
   }
 
-  // Best-effort: regenerate CLI configs at startup so .gemini/settings.json
-  // always has the latest env placeholders (Gemini MCP env injection)
+  // Best-effort: regenerate CLI configs at startup so runtime-derived env
+  // (Gemini placeholders, Antigravity sidecar key files) reaches CLI config.
   try {
-    const root = process.cwd();
-    const capConfig = await readCapabilitiesConfig(root);
+    const { projectRoot, paths } = resolveStartupCliConfigContext(process.cwd());
+    const capConfig = await readCapabilitiesConfig(projectRoot);
     if (capConfig) {
-      await generateCliConfigs(capConfig, {
-        anthropic: join(root, '.mcp.json'),
-        openai: join(root, '.codex', 'config.toml'),
-        google: join(root, '.gemini', 'settings.json'),
-        kimi: join(root, '.kimi', 'mcp.json'),
-        antigravity: join(homedir(), '.gemini', 'antigravity', 'mcp_config.json'),
-      });
+      await generateCliConfigs(capConfig, paths);
       app.log.info('[api] CLI configs regenerated at startup');
     }
   } catch (err) {
@@ -2083,7 +2089,7 @@ async function main(): Promise<void> {
       return {
         threadShortId: threadId.slice(0, 15),
         threadTitle: thread.title ?? undefined,
-        deepLinkUrl: `${frontendBaseUrl}/threads/${threadId}`,
+        deepLinkUrl: buildThreadDeepLink(frontendBaseUrl, threadId),
       };
     },
     log: app.log,
@@ -2435,7 +2441,7 @@ async function main(): Promise<void> {
         return {
           threadShortId: threadId.slice(0, 15),
           threadTitle: thread.title ?? undefined,
-          deepLinkUrl: `${frontendBaseUrl}/threads/${threadId}`,
+          deepLinkUrl: buildThreadDeepLink(frontendBaseUrl, threadId),
         };
       });
 

@@ -16,6 +16,7 @@ export interface CatRegistryEntry {
 
 export class CatRegistry {
   private entries = new Map<string, CatRegistryEntry>();
+  private revision = 0;
 
   /**
    * Register a cat. Throws on duplicate ID.
@@ -25,6 +26,7 @@ export class CatRegistry {
       throw new Error(`Cat "${catId}" is already registered`);
     }
     this.entries.set(catId, { config });
+    this.revision += 1;
   }
 
   has(catId: string): boolean {
@@ -61,6 +63,10 @@ export class CatRegistry {
     return result;
   }
 
+  getRevision(): number {
+    return this.revision;
+  }
+
   /**
    * Non-empty tuple for z.enum() compat (if needed).
    * Throws if registry is empty.
@@ -76,6 +82,7 @@ export class CatRegistry {
   /** Clear all entries. For testing only. */
   reset(): void {
     this.entries.clear();
+    this.revision += 1;
   }
 }
 

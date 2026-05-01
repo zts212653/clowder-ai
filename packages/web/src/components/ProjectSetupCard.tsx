@@ -8,6 +8,7 @@ import Image from 'next/image';
 import { useCallback, useState } from 'react';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { apiFetch } from '@/utils/api-client';
+import { AgentHookHealthNotice, type AgentHookStatusResponse } from './AgentHookHealthNotice';
 import { HubIcon } from './hub-icons';
 
 /* Anime-style cat illustrations generated via Gemini */
@@ -18,6 +19,11 @@ interface ProjectSetupCardProps {
   isGitRepo: boolean;
   gitAvailable: boolean;
   onComplete: () => void;
+  agentHookHealth?: AgentHookStatusResponse | null;
+  agentHookHealthError?: string | null;
+  agentHookSyncing?: boolean;
+  agentHookSynced?: boolean;
+  onSyncAgentHooks?: () => void | Promise<void>;
 }
 
 type CardState = 'idle' | 'processing' | 'done' | 'error';
@@ -38,6 +44,11 @@ export function ProjectSetupCard({
   isGitRepo,
   gitAvailable,
   onComplete,
+  agentHookHealth,
+  agentHookHealthError,
+  agentHookSyncing,
+  agentHookSynced,
+  onSyncAgentHooks,
 }: ProjectSetupCardProps) {
   const [state, setState] = useState<CardState>('idle');
   const [cloneUrl, setCloneUrl] = useState('');
@@ -156,6 +167,16 @@ export function ProjectSetupCard({
 
         {state === 'idle' && (
           <div className="space-y-3">
+            {onSyncAgentHooks && (
+              <AgentHookHealthNotice
+                health={agentHookHealth ? agentHookHealth : null}
+                error={agentHookHealthError}
+                syncing={agentHookSyncing}
+                synced={agentHookSynced}
+                onSync={onSyncAgentHooks}
+              />
+            )}
+
             <p className="text-xs text-gray-500 font-medium">请选择你的开荒方式：</p>
 
             {/* Option 1: Clone (recommended) */}

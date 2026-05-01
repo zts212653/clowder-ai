@@ -13,6 +13,8 @@ import DOMPurify from 'dompurify';
 
 export function sanitizeWidgetHtml(html: string): string {
   return DOMPurify.sanitize(html, {
+    // Widgets are complete HTML documents — preserve <html>/<head>/<style>
+    WHOLE_DOCUMENT: true,
     // Keep <script> — widget functionality needs it
     ADD_TAGS: ['script'],
     // Block data exfiltration vectors

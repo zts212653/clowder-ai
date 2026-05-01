@@ -570,11 +570,26 @@ describe('writeKimiMcpConfig', () => {
 
 describe('writeAntigravityMcpConfig', () => {
   /** @type {string} */ let dir;
+  /** @type {string | undefined} */ let originalAgentKeyFile;
+  /** @type {string | undefined} */ let originalAgentKeyFiles;
+  /** @type {string | undefined} */ let originalAgentKeySecret;
 
   beforeEach(async () => {
     dir = await makeTmpDir('antigravity-write');
+    originalAgentKeyFile = process.env.CAT_CAFE_AGENT_KEY_FILE;
+    originalAgentKeyFiles = process.env.CAT_CAFE_AGENT_KEY_FILES;
+    originalAgentKeySecret = process.env.CAT_CAFE_AGENT_KEY_SECRET;
+    delete process.env.CAT_CAFE_AGENT_KEY_FILE;
+    delete process.env.CAT_CAFE_AGENT_KEY_FILES;
+    delete process.env.CAT_CAFE_AGENT_KEY_SECRET;
   });
   afterEach(async () => {
+    if (originalAgentKeyFile === undefined) delete process.env.CAT_CAFE_AGENT_KEY_FILE;
+    else process.env.CAT_CAFE_AGENT_KEY_FILE = originalAgentKeyFile;
+    if (originalAgentKeyFiles === undefined) delete process.env.CAT_CAFE_AGENT_KEY_FILES;
+    else process.env.CAT_CAFE_AGENT_KEY_FILES = originalAgentKeyFiles;
+    if (originalAgentKeySecret === undefined) delete process.env.CAT_CAFE_AGENT_KEY_SECRET;
+    else process.env.CAT_CAFE_AGENT_KEY_SECRET = originalAgentKeySecret;
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -600,6 +615,43 @@ describe('writeAntigravityMcpConfig', () => {
       else process.env.ALLOWED_WORKSPACE_DIRS = originalAwd;
       if (originalWsr === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
       else process.env.CAT_CAFE_WORKSPACE_ROOT = originalWsr;
+    }
+  });
+
+  it('passes agent-key sidecar file path to managed cat-cafe servers', async () => {
+    const file = join(dir, 'mcp_config.json');
+    const keyFile = join(dir, 'agent-key.secret');
+    const keyFiles = JSON.stringify({ antigravity: keyFile, 'antig-opus': join(dir, 'antig-opus.secret') });
+    const originalKeyFile = process.env.CAT_CAFE_AGENT_KEY_FILE;
+    const originalKeyFiles = process.env.CAT_CAFE_AGENT_KEY_FILES;
+    try {
+      process.env.CAT_CAFE_AGENT_KEY_FILE = keyFile;
+      process.env.CAT_CAFE_AGENT_KEY_FILES = keyFiles;
+      await writeAntigravityMcpConfig(file, [
+        { name: 'cat-cafe-collab', command: 'node', args: ['collab.js'], enabled: true, source: 'cat-cafe' },
+      ]);
+
+      const raw = JSON.parse(await readFile(file, 'utf-8'));
+      assert.equal(
+        raw.mcpServers['cat-cafe-collab'].env.CAT_CAFE_AGENT_KEY_FILE,
+        keyFile,
+        'persistent Antigravity MCP needs the sidecar path so agent-key tools appear in tools/list',
+      );
+      assert.equal(
+        raw.mcpServers['cat-cafe-collab'].env.CAT_CAFE_AGENT_KEY_FILES,
+        keyFiles,
+        'shared Antigravity MCP needs variant-scoped sidecar file mapping for correct cat identity',
+      );
+      assert.equal(
+        raw.mcpServers['cat-cafe-collab'].env.CAT_CAFE_AGENT_KEY_SECRET,
+        undefined,
+        'long-lived agent-key secret must not be written directly into mcp_config.json',
+      );
+    } finally {
+      if (originalKeyFile === undefined) delete process.env.CAT_CAFE_AGENT_KEY_FILE;
+      else process.env.CAT_CAFE_AGENT_KEY_FILE = originalKeyFile;
+      if (originalKeyFiles === undefined) delete process.env.CAT_CAFE_AGENT_KEY_FILES;
+      else process.env.CAT_CAFE_AGENT_KEY_FILES = originalKeyFiles;
     }
   });
 

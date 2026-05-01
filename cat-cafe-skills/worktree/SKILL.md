@@ -98,7 +98,61 @@ pnpm test
 | **开发 Redis** | **6398** | 猫猫开发测试，随便折腾 |
 
 **Worktree 中启动服务 = 必须用 6398。**
-不设置 REDIS_URL 就启动服务 = 回落到 6399 = 数据丢失风险。
+不设置 REDIS_URL 就启动服务 = 回落到 6399 = 数据丢失风险（LL-015）。
+
+## 多 Worktree 并发：WORKTREE_PORT_OFFSET
+
+F182 大赛 / 多猫并发开发时，6 个 worktree 同时跑各自服务不打架。
+
+**OFFSET 必须 ≤ 0**（向下减避 production Redis (sacred)），范围 [-100, 0]，10 倍数。`offset=0` 留给 alpha 默认。
+
+| OFFSET | Redis | API | Web | NEXT_PUBLIC_API_URL |
+|---|---|---|---|---|
+| 0（alpha 默认） | 6398 | 3102 | 5102 | http://localhost:3102 |
+| -10 | 6388 | 3112 | 5112 | http://localhost:3112 |
+| -20 | 6378 | 3122 | 5122 | http://localhost:3122 |
+| ... | ... | ... | ... | ... |
+| -60 | 6338 | 3162 | 5162 | http://localhost:3162 |
+
+派生公式：`非 Redis = base - OFFSET`（OFFSET 是负数 → 端口向上加），`Redis = 6398 + OFFSET`（向下减）。
+
+### 启用方式
+
+```bash
+# 1. .env 设置 OFFSET + 禁用 sidecar（多猫并发 worktree 默认）
+cat > .env <<EOF
+WORKTREE_PORT_OFFSET=-10
+PREVIEW_GATEWAY_PORT=0
+ANTHROPIC_PROXY_ENABLED=0
+ASR_ENABLED=0
+TTS_ENABLED=0
+LLM_POSTPROCESS_ENABLED=0
+EMBED_ENABLED=0
+EMBED_MODE=off
+EOF
+
+# 2. 启动用 pnpm dev:direct 或 bash scripts/start-dev.sh
+#    ⚠️ 不要用 `pnpm dev`！它走 pnpm -r --parallel run dev，绕过 OFFSET preflight
+pnpm dev:direct
+```
+
+### 优先级（重要）
+
+OFFSET 非 0 时，**派生值优先级高于 `.env` 和 `CAT_CAFE_RESPECT_DOTENV_PORTS`**。即使 `.env` 里硬写了 `REDIS_URL=...:6398` 也会被派生值覆盖。这是 LL-015 防回归——避免"端口数字看起来对了但 ioredis 实际连了 6399"的事故。
+
+### 诊断
+
+```bash
+pnpm check:worktree-port-offset   # 验证全部 7 个大赛 OFFSET 派生 + 端口无冲突
+```
+
+诊断脚本是 CI 用，**不是唯一 gate**——唯一 gate 是 `start-dev.sh` 内置 preflight（启动时主动派生端口、强制 export sidecar=0、unset Redis dir 让重派生；OFFSET 派生失败 / Redis 圣域 6399 拒绝启动）。
+
+### Sidecar 处理
+
+多 worktree 并发默认**全禁用** sidecar（Preview Gateway / Anthropic Proxy / Whisper / TTS / LLM Postprocess / Embedding）。OFFSET 模式下 preflight 会**主动 export 0** 这些 sidecar 标志（不依赖用户 .env），即便用户配置了 `EMBED_MODE=on` 或 profile=dev 想拉起 proxy 也会被覆盖——无需用户手动禁用。启用 sidecar 但又不 offset 化 → 端口冲突。
+
+详细设计见 [*(internal reference removed)*](../../feature-specs/2026-04-30-worktree-port-offset.md)。
 
 ## 合入后清理
 

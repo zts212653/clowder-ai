@@ -77,6 +77,8 @@ interface AgentMsg {
   content?: string;
   textMode?: 'append' | 'replace';
   error?: string;
+  /** Structured backend/provider error code. Some provider errors are recoverable mid-run. */
+  errorCode?: string;
   isFinal?: boolean;
   metadata?: { provider: string; model: string; sessionId?: string; usage?: import('../stores/chat-types').TokenUsage };
   /** Tool name (for 'tool_use' events from backend) */
@@ -132,6 +134,11 @@ function findLatestActiveInvocationIdForCat(
   return undefined;
 }
 
+function isRecoverableInFlightError(msg: { type: string; errorCode?: string; isFinal?: boolean }): boolean {
+  if (msg.type !== 'error' || msg.isFinal === true) return false;
+  return msg.errorCode === 'upstream_error' || msg.errorCode === 'tool_error';
+}
+
 export interface BackgroundAgentMessage {
   type: string;
   catId: string;
@@ -143,6 +150,8 @@ export interface BackgroundAgentMessage {
   toolName?: string;
   toolInput?: Record<string, unknown>;
   error?: string;
+  /** Structured backend/provider error code. Some provider errors are recoverable mid-run. */
+  errorCode?: string;
   isFinal?: boolean;
   metadata?: { provider: string; model: string; sessionId?: string; usage?: TokenUsage };
   /** F52: Cross-thread origin metadata */
@@ -1064,8 +1073,11 @@ export function handleBackgroundAgentMessage(
   }
 
   if (msg.type === 'error') {
+    const recoverableInFlightError = isRecoverableInFlightError(msg);
     markThreadInvocationActive(msg, options);
-    stopTrackedStream(streamKey, msg, options);
+    if (!recoverableInFlightError) {
+      stopTrackedStream(streamKey, msg, options);
+    }
     options.store.addMessageToThread(msg.threadId, {
       id: `bg-err-${msg.timestamp}-${msg.catId}-${options.nextBgSeq()}`,
       type: 'system',
@@ -1074,7 +1086,9 @@ export function handleBackgroundAgentMessage(
       content: `Error: ${msg.error ?? 'Unknown error'}`,
       timestamp: msg.timestamp,
     });
-    options.store.updateThreadCatStatus(msg.threadId, msg.catId, 'error');
+    if (!recoverableInFlightError) {
+      options.store.updateThreadCatStatus(msg.threadId, msg.catId, 'error');
+    }
     if (msg.isFinal) {
       // #80 fix-C: Clear timeout guard for error(isFinal) path
       options.clearDoneTimeout?.(msg.threadId);
@@ -2834,49 +2848,52 @@ export function useAgentMessages() {
         if (msg.catId) clearPendingTimeoutDiag(msg.catId);
 
         if (!isStaleError) {
-          setCatStatus(msg.catId, 'error');
-          const currentProgress = useChatStore.getState().catInvocations?.[msg.catId]?.taskProgress;
-          if (currentProgress?.tasks?.length) {
-            setCatInvocation(msg.catId, {
-              taskProgress: {
-                ...currentProgress,
-                snapshotStatus: 'interrupted',
-                interruptReason: msg.error ?? 'Unknown error',
-                lastUpdate: Date.now(),
-              },
-            });
-          }
-          let messageId = getOrRecoverActiveAssistantMessageId(msg.catId, undefined, {
-            ...(msg.invocationId ? { invocationId: msg.invocationId } : {}),
-          });
-          // Cloud R15 + P1#1 + P1#7 permissive fallback (see done path for full rationale).
-          if (!messageId && msg.invocationId) {
-            const slotFreshConfirmed = ((): boolean => {
-              const s = useChatStore.getState();
-              const suffix = `-${msg.catId}`;
-              const normalize = (k: string | undefined): string | undefined =>
-                k && k.endsWith(suffix) ? k.slice(0, -suffix.length) : k;
-              const entries = Object.entries(s.activeInvocations ?? {});
-              for (let i = entries.length - 1; i >= 0; i--) {
-                const [key, info] = entries[i]!;
-                if (info.catId !== msg.catId || key.startsWith('hydrated-')) continue;
-                return normalize(key) === msg.invocationId;
-              }
-              return false;
-            })();
-            const permissive = useChatStore.getState().messages.findLast((m) => {
-              if (m.type !== 'assistant' || m.catId !== msg.catId || !m.isStreaming) return false;
-              if (slotFreshConfirmed) return true;
-              const bound = m.extra?.stream?.invocationId;
-              return !bound || bound === msg.invocationId;
-            });
-            if (permissive) {
-              messageId = permissive.id;
+          const recoverableInFlightError = isRecoverableInFlightError(msg);
+          if (!recoverableInFlightError) {
+            setCatStatus(msg.catId, 'error');
+            const currentProgress = useChatStore.getState().catInvocations?.[msg.catId]?.taskProgress;
+            if (currentProgress?.tasks?.length) {
+              setCatInvocation(msg.catId, {
+                taskProgress: {
+                  ...currentProgress,
+                  snapshotStatus: 'interrupted',
+                  interruptReason: msg.error ?? 'Unknown error',
+                  lastUpdate: Date.now(),
+                },
+              });
             }
-          }
-          if (messageId) {
-            setStreaming(messageId, false);
-            deleteActive(msg.catId);
+            let messageId = getOrRecoverActiveAssistantMessageId(msg.catId, undefined, {
+              ...(msg.invocationId ? { invocationId: msg.invocationId } : {}),
+            });
+            // Cloud R15 + P1#1 + P1#7 permissive fallback (see done path for full rationale).
+            if (!messageId && msg.invocationId) {
+              const slotFreshConfirmed = ((): boolean => {
+                const s = useChatStore.getState();
+                const suffix = `-${msg.catId}`;
+                const normalize = (k: string | undefined): string | undefined =>
+                  k && k.endsWith(suffix) ? k.slice(0, -suffix.length) : k;
+                const entries = Object.entries(s.activeInvocations ?? {});
+                for (let i = entries.length - 1; i >= 0; i--) {
+                  const [key, info] = entries[i]!;
+                  if (info.catId !== msg.catId || key.startsWith('hydrated-')) continue;
+                  return normalize(key) === msg.invocationId;
+                }
+                return false;
+              })();
+              const permissive = useChatStore.getState().messages.findLast((m) => {
+                if (m.type !== 'assistant' || m.catId !== msg.catId || !m.isStreaming) return false;
+                if (slotFreshConfirmed) return true;
+                const bound = m.extra?.stream?.invocationId;
+                return !bound || bound === msg.invocationId;
+              });
+              if (permissive) {
+                messageId = permissive.id;
+              }
+            }
+            if (messageId) {
+              setStreaming(messageId, false);
+              deleteActive(msg.catId);
+            }
           }
 
           addMessage({

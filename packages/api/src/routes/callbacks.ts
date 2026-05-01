@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { resolveFrontendBaseUrl } from '../config/frontend-origin.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
+import { MessageDeliveryService } from '../domains/cats/services/agents/invocation/MessageDeliveryService.js';
 import { getRichBlockBuffer } from '../domains/cats/services/agents/invocation/RichBlockBuffer.js';
 import { parseA2AMentions } from '../domains/cats/services/agents/routing/a2a-mentions.js';
 import { extractRichFromText } from '../domains/cats/services/agents/routing/rich-block-extract.js';
@@ -24,6 +25,7 @@ import type { IThreadStore, VotingStateV1 } from '../domains/cats/services/store
 import { canViewMessage } from '../domains/cats/services/stores/visibility.js';
 import { getVoiceBlockSynthesizer } from '../domains/cats/services/tts/VoiceBlockSynthesizer.js';
 import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domains/memory/interfaces.js';
+import { buildThreadDeepLink } from '../infrastructure/connectors/connector-command-helpers.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { scoreKeywordRelevance, tokenizeKeyword } from '../utils/keyword-relevance.js';
@@ -406,8 +408,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       const extraParts = { ...richExtra, ...targetCatsExtra };
       const extra = Object.keys(extraParts).length > 0 ? extraParts : undefined;
 
-      const hasA2AMentions = mentions.length > 0 && router && invocationRecordStore && effectiveThreadId;
-      const willEnqueueToQueue = hasA2AMentions && opts.invocationQueue;
+      const hasA2AMentions = !!(mentions.length > 0 && router && invocationRecordStore && effectiveThreadId);
+      const willEnqueueToQueue = !!(hasA2AMentions && opts.invocationQueue);
 
       const storedMsg = await messageStore.append({
         threadId: effectiveThreadId,
@@ -425,15 +427,17 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
       const replyPreview = validatedReplyTo ? await hydrateReplyPreview(messageStore, validatedReplyTo) : undefined;
 
-      // #607: Track whether message stays queued — defer broadcast until delivery decision
-      let messageStaysQueued = !!willEnqueueToQueue;
-
-      if (mentions.length > 0 && router && invocationRecordStore && effectiveThreadId) {
-        try {
-          const a2aResult = await enqueueA2ATargets(
+      const deliveryDecision = await MessageDeliveryService.resolveCallbackDeliveryDecision({
+        canEnqueueA2A: hasA2AMentions,
+        willEnqueueToQueue,
+        messageId: storedMsg.id,
+        threadId: effectiveThreadId,
+        log: app.log,
+        enqueueA2A: () =>
+          enqueueA2ATargets(
             {
-              router,
-              invocationRecordStore,
+              router: router!,
+              invocationRecordStore: invocationRecordStore!,
               socketManager,
               ...(invocationTracker ? { invocationTracker } : {}),
               ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
@@ -449,38 +453,15 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
               triggerMessage: storedMsg,
               callerCatId: senderCatId,
             },
-          );
-
-          if (willEnqueueToQueue && a2aResult.enqueued.length === 0) {
-            try {
-              await messageStore.markDelivered?.(storedMsg.id, Date.now());
-            } catch (err) {
-              app.log.warn(
-                { messageId: storedMsg.id, threadId: effectiveThreadId, err },
-                '[agent-key/post-message] Failed to recover ghost message — broadcasting anyway',
-              );
-            }
-            messageStaysQueued = false;
-          }
-        } catch (enqueueErr) {
-          app.log.error(
-            { err: enqueueErr, messageId: storedMsg.id, threadId: effectiveThreadId },
-            '[agent-key/post-message] enqueueA2ATargets failed — falling back to broadcast',
-          );
-          if (willEnqueueToQueue) {
-            try {
-              await messageStore.markDelivered?.(storedMsg.id, Date.now());
-            } catch {
-              /* best-effort */
-            }
-          }
-          messageStaysQueued = false;
-        }
-      }
+          ),
+        markDelivered: (deliveredAt) => messageStore.markDelivered?.(storedMsg.id, deliveredAt),
+        zeroEnqueuedWarnMessage: '[agent-key/post-message] Failed to recover ghost message — broadcasting anyway',
+        enqueueFailureMessage: '[agent-key/post-message] enqueueA2ATargets failed — falling back to broadcast',
+      });
 
       // #607: Only broadcast when message is not queued — queued messages are
-      // broadcast later via messages_delivered when QueueProcessor delivers them
-      if (!messageStaysQueued) {
+      // broadcast later via messages_delivered when QueueProcessor delivers them.
+      if (deliveryDecision.shouldBroadcastNow) {
         socketManager.broadcastAgentMessage(
           {
             type: 'text',
@@ -518,7 +499,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         const threadMeta = {
           threadShortId: effectiveThreadId.slice(0, 15),
           threadTitle: thread?.title ?? undefined,
-          deepLinkUrl: `${frontendBase}/threads/${effectiveThreadId}`,
+          deepLinkUrl: buildThreadDeepLink(frontendBase, effectiveThreadId),
         };
         opts.outboundHook
           .deliver(
@@ -730,8 +711,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // AC-B6-P1: When A2A mentions will be enqueued (invocationQueue available),
     // store with deliveryStatus:'queued' so ContextAssembler excludes this message
     // from other invocations' context until QueueProcessor.executeEntry marks it delivered.
-    const hasA2AMentions = mentions.length > 0 && router && invocationRecordStore && effectiveThreadId;
-    const willEnqueueToQueue = hasA2AMentions && opts.invocationQueue;
+    const hasA2AMentions = !!(mentions.length > 0 && router && invocationRecordStore && effectiveThreadId);
+    const willEnqueueToQueue = !!(hasA2AMentions && opts.invocationQueue);
     // #573: persisted record's extra.stream.invocationId aligned to effectiveInvId
     // (parent/outer) so F5/hydration broadcasts match what live broadcasts use.
     // Merge with any existing extra (cross-post / explicit targets) without losing it.
@@ -756,16 +737,18 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // F121: Hydrate reply preview for broadcast
     const replyPreview = validatedReplyTo ? await hydrateReplyPreview(messageStore, validatedReplyTo) : undefined;
 
-    // #607: Track whether message stays queued — defer broadcast until delivery decision
-    let messageStaysQueued = !!willEnqueueToQueue;
-
     // F27: Enqueue @mentioned cats into parent worklist (unified A2A path)
-    if (mentions.length > 0 && router && invocationRecordStore && effectiveThreadId) {
-      try {
-        const a2aResult = await enqueueA2ATargets(
+    const deliveryDecision = await MessageDeliveryService.resolveCallbackDeliveryDecision({
+      canEnqueueA2A: hasA2AMentions,
+      willEnqueueToQueue,
+      messageId: storedMsg.id,
+      threadId: effectiveThreadId,
+      log: app.log,
+      enqueueA2A: () =>
+        enqueueA2ATargets(
           {
-            router,
-            invocationRecordStore,
+            router: router!,
+            invocationRecordStore: invocationRecordStore!,
             socketManager,
             ...(invocationTracker ? { invocationTracker } : {}),
             ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
@@ -782,40 +765,15 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             callerCatId: senderCatId,
             parentInvocationId: record.parentInvocationId,
           },
-        );
-
-        // AC-B6-P1: If message was stored as 'queued' but no targets were actually enqueued
-        // (depth/dedup/full rejected all), recover by marking delivered to prevent ghost message.
-        if (willEnqueueToQueue && a2aResult.enqueued.length === 0) {
-          try {
-            await messageStore.markDelivered?.(storedMsg.id, Date.now());
-          } catch (err) {
-            app.log.warn(
-              { messageId: storedMsg.id, threadId: effectiveThreadId, err },
-              '[AC-B6-P1] Failed to recover ghost message — broadcasting anyway',
-            );
-          }
-          messageStaysQueued = false;
-        }
-      } catch (enqueueErr) {
-        app.log.error(
-          { err: enqueueErr, messageId: storedMsg.id, threadId: effectiveThreadId },
-          '[invocation-callback] enqueueA2ATargets failed — falling back to broadcast',
-        );
-        if (willEnqueueToQueue) {
-          try {
-            await messageStore.markDelivered?.(storedMsg.id, Date.now());
-          } catch {
-            /* best-effort */
-          }
-        }
-        messageStaysQueued = false;
-      }
-    }
+        ),
+      markDelivered: (deliveredAt) => messageStore.markDelivered?.(storedMsg.id, deliveredAt),
+      zeroEnqueuedWarnMessage: '[AC-B6-P1] Failed to recover ghost message — broadcasting anyway',
+      enqueueFailureMessage: '[invocation-callback] enqueueA2ATargets failed — falling back to broadcast',
+    });
 
     // #607: Only broadcast when message is not queued — queued messages are
-    // broadcast later via messages_delivered when QueueProcessor delivers them
-    if (!messageStaysQueued) {
+    // broadcast later via messages_delivered when QueueProcessor delivers them.
+    if (deliveryDecision.shouldBroadcastNow) {
       socketManager.broadcastAgentMessage(
         {
           type: 'text',
@@ -823,7 +781,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           content: storedContent,
           origin: 'callback',
           messageId: storedMsg.id,
+          // #573: broadcast with effectiveInvId (parent/outer) so frontend's
+          // (catId, invocationId) dedup matches stream broadcasts.
           invocationId: effectiveInvId,
+          // F52+F098-C1: Include crossPost + targetCats in real-time broadcast
           ...(isCrossThread || validExplicitTargets.length
             ? {
                 extra: {
@@ -842,6 +803,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         effectiveThreadId,
       );
 
+      // #83: Broadcast each extracted rich block as SSE event for live rendering
+      // P2 cloud-review: include messageId for frontend correlation
+      // #454/573: include effectiveInvId (parent/outer) so frontend can exact-match
+      // callback to stream bubble.
       for (const block of richBlocks) {
         socketManager.broadcastAgentMessage(
           {
@@ -862,7 +827,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       const threadMeta = {
         threadShortId: effectiveThreadId.slice(0, 15),
         threadTitle: thread?.title ?? undefined,
-        deepLinkUrl: `${frontendBase}/threads/${effectiveThreadId}`,
+        deepLinkUrl: buildThreadDeepLink(frontendBase, effectiveThreadId),
       };
       opts.outboundHook
         .deliver(
@@ -882,6 +847,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     return {
       status: 'ok',
       threadId: effectiveThreadId,
+      messageId: storedMsg.id,
       ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
       ...(clientMessageId ? { clientMessageId } : {}),
     };

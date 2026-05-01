@@ -8,6 +8,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 
@@ -222,6 +223,14 @@ describe('MCP Server Tool Registration', () => {
       postTool.inputSchema._def.shape().threadId.isOptional(),
       'post_message threadId must be optional (backward-compatible for invocation auth)',
     );
+    assert.ok(
+      shapeKeys.includes('agentKeyCatId'),
+      'post_message must expose agentKeyCatId for shared persistent MCP variant identity',
+    );
+    assert.ok(
+      postTool.inputSchema._def.shape().agentKeyCatId.isOptional(),
+      'post_message agentKeyCatId stays schema-optional for invocation auth; shared persistent agent-key auth requires it at runtime',
+    );
   });
 
   test('cross_post_message schema must REQUIRE threadId', async () => {
@@ -236,6 +245,24 @@ describe('MCP Server Tool Registration', () => {
       crossTool.inputSchema._def.shape().threadId.isOptional() === false,
       'cross_post_message threadId must be required (not optional)',
     );
+    assert.ok(
+      shapeKeys.includes('agentKeyCatId'),
+      'cross_post_message must expose agentKeyCatId for shared persistent MCP variant identity',
+    );
+  });
+
+  test('thread-context and list-threads expose agentKeyCatId for shared persistent MCP identity', async () => {
+    const { createServer } = await import('../dist/index.js');
+    const server = createServer();
+
+    const contextTool = server._registeredTools.cat_cafe_get_thread_context;
+    const listTool = server._registeredTools.cat_cafe_list_threads;
+    assert.ok(contextTool, 'get_thread_context tool should exist');
+    assert.ok(listTool, 'list_threads tool should exist');
+    assert.ok(Object.keys(contextTool.inputSchema.shape).includes('agentKeyCatId'));
+    assert.ok(contextTool.inputSchema._def.shape().agentKeyCatId.isOptional());
+    assert.ok(Object.keys(listTool.inputSchema.shape).includes('agentKeyCatId'));
+    assert.ok(listTool.inputSchema._def.shape().agentKeyCatId.isOptional());
   });
 
   test('deprecated file tools are not registered', async () => {
@@ -361,5 +388,30 @@ describe('F061 READONLY_ALLOWED_TOOLS whitelist', () => {
     for (const name of READONLY_ALLOWED_TOOLS) {
       assert.ok(allRegistered.has(name), `Whitelist tool "${name}" does not exist in registered tools`);
     }
+  });
+
+  test('readonly mode exposes agent-key tools when only CAT_CAFE_AGENT_KEY_FILES is configured', () => {
+    const distIndexUrl = new URL('../dist/index.js', import.meta.url).href;
+    const script = `
+      process.env.CAT_CAFE_READONLY = 'true';
+      delete process.env.CAT_CAFE_AGENT_KEY_SECRET;
+      delete process.env.CAT_CAFE_AGENT_KEY_FILE;
+      process.env.CAT_CAFE_AGENT_KEY_FILES = JSON.stringify({
+        antigravity: '/tmp/antigravity.secret',
+        'antig-opus': '/tmp/antig-opus.secret',
+      });
+      const { createServer } = await import(${JSON.stringify(distIndexUrl)});
+      const server = createServer();
+      const names = Object.keys(server._registeredTools);
+      if (!names.includes('cat_cafe_post_message') || !names.includes('cat_cafe_get_thread_context')) {
+        console.error(JSON.stringify(names.sort()));
+        process.exit(1);
+      }
+    `;
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      cwd: process.cwd(),
+      encoding: 'utf-8',
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
   });
 });

@@ -220,6 +220,39 @@ describe('chatStore multi-thread state', () => {
       ]);
     });
 
+    it('TD112: merges a server draft into an existing stream placeholder by invocation identity', () => {
+      useChatStore.getState().addMessage({
+        id: 'msg-inv-live-codex',
+        type: 'assistant',
+        catId: 'codex',
+        content: 'live partial',
+        origin: 'stream',
+        isStreaming: true,
+        extra: { stream: { invocationId: 'inv-live' } },
+        timestamp: Date.now(),
+      });
+      useChatStore.getState().addMessage({
+        id: 'draft-inv-live',
+        type: 'assistant',
+        catId: 'codex',
+        content: 'server draft partial',
+        origin: 'stream',
+        extra: { stream: { invocationId: 'inv-live' } },
+        timestamp: Date.now() + 1,
+      });
+
+      const messages = useChatStore.getState().messages;
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toEqual(
+        expect.objectContaining({
+          id: 'msg-inv-live-codex',
+          catId: 'codex',
+          content: 'server draft partial',
+          extra: { stream: { invocationId: 'inv-live' } },
+        }),
+      );
+    });
+
     it('replaces an optimistic background-thread message id in place', () => {
       useChatStore.getState().addMessageToThread('thread-b', makeMsg('temp-user-2', 'background'));
 

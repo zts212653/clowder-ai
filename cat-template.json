@@ -156,6 +156,13 @@
       "lead": true,
       "available": true,
       "evaluation": "中文长文理解与总结强，适合中文表达、资料整理与结构化输出"
+    },
+    "opus-47": {
+      "family": "opus-47",
+      "roles": ["architect"],
+      "lead": false,
+      "available": true,
+      "evaluation": "Opus 4.7 试用分身——据铲屎官体感猫格偏砚砚风格，待真实任务验证"
     }
   },
   "reviewPolicy": {
@@ -629,7 +636,7 @@
           "mentionPatterns": ["@antig-opus", "@孟加拉opus", "@antigravity-claude"],
           "clientId": "antigravity",
           "defaultModel": "claude-opus-4-6",
-          "mcpSupport": false,
+          "mcpSupport": true,
           "avatar": "/avatars/antig-opus.png",
           "color": {
             "primary": "#C97A35",
@@ -740,6 +747,57 @@
             "maxMessages": 200,
             "maxContentLengthPerMsg": 100000
           }
+        }
+      ]
+    },
+    {
+      "id": "opus-47",
+      "catId": "opus-47",
+      "name": "布偶猫 Opus 4.7",
+      "displayName": "布偶猫",
+      "nickname": "宪宪",
+      "avatar": "/avatars/opus-47.png",
+      "color": {
+        "primary": "#7B1FA2",
+        "secondary": "#E1BEE7"
+      },
+      "mentionPatterns": ["@opus47", "@opus-47", "@布偶opus47", "@布偶猫4.7"],
+      "roleDescription": "Opus 4.7 试用分身，能力与猫格待评估",
+      "teamStrengths": "待评估",
+      "caution": "试用分身，猫格可能与宪宪有显著差异",
+      "defaultVariantId": "opus-47-default",
+      "variants": [
+        {
+          "id": "opus-47-default",
+          "catId": "opus-47",
+          "variantLabel": "Opus 4.7",
+          "clientId": "anthropic",
+          "defaultModel": "claude-opus-4-7",
+          "mcpSupport": true,
+          "cli": {
+            "command": "claude",
+            "outputFormat": "stream-json",
+            "defaultArgs": ["--output-format", "stream-json", "--model", "claude-opus-4-7"],
+            "effort": "max"
+          },
+          "personality": "试用中——猫格待观察，据铲屎官反馈风格偏缅因猫",
+          "strengths": ["architecture", "reasoning", "coding"],
+          "contextBudget": {
+            "maxPromptTokens": 180000,
+            "maxContextTokens": 160000,
+            "maxMessages": 200,
+            "maxContentLengthPerMsg": 100000
+          },
+          "voiceConfig": {
+            "voice": "zm_yunjian",
+            "langCode": "zh",
+            "speed": 1,
+            "refAudio": "genshin/万叶/vo_kazuha_dialog_greetingMorning.wav",
+            "refText": "清晨的鸟鸣，是大自然的馈赠。启程吧，属于我们的旅途也要开始了。",
+            "instruct": "用一个清澈温和的少年语气说话，带着从容的力量感",
+            "temperature": 0.3
+          },
+          "accountRef": "claude"
         }
       ]
     }

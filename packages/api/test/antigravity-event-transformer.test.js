@@ -258,6 +258,24 @@ describe('G10: model_capacity error classification', () => {
     assert.ok(errMsg);
     assert.equal(errMsg.errorCode, 'upstream_error', 'non-capacity errors stay upstream_error');
   });
+
+  test('ERROR_MESSAGE invalid tool call explains live MCP tool-list / agent-key cause', () => {
+    const steps = [
+      {
+        type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+        status: 'DONE',
+        errorMessage: { error: { userErrorMessage: 'The model produced an invalid tool call.' } },
+      },
+    ];
+    const msgs = transformTrajectorySteps(steps, catId, metadata);
+    const errMsg = msgs.find((m) => m.type === 'error');
+    assert.ok(errMsg);
+    assert.equal(errMsg.errorCode, 'upstream_error');
+    assert.match(errMsg.error, /invalid tool call/i);
+    assert.match(errMsg.error, /live MCP tool list/i);
+    assert.match(errMsg.error, /agent-key tools/i);
+    assert.match(errMsg.error, /cat_cafe_get_thread_context/);
+  });
 });
 
 // ── Existing transformer behavior (regression) ────────────────────

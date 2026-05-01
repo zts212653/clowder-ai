@@ -48,24 +48,60 @@ interface CallbackConfig {
   agentKeySecret?: string;
 }
 
-export function getCallbackConfig(): CallbackConfig | null {
+interface AgentKeyOptions {
+  agentKeyCatId?: string;
+}
+
+function readAgentKeyFile(path: string | undefined): string | undefined {
+  if (!path) return undefined;
+  try {
+    return readFileSync(path, 'utf-8').trim();
+  } catch {
+    // sidecar missing = no agent-key (not an error)
+    return undefined;
+  }
+}
+
+function parseAgentKeyFileMap(raw: string | undefined): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const files: Record<string, string> = {};
+    for (const [catId, filePath] of Object.entries(parsed)) {
+      if (typeof filePath === 'string' && filePath.trim()) {
+        files[catId] = filePath.trim();
+      }
+    }
+    return files;
+  } catch {
+    return {};
+  }
+}
+
+function resolveAgentKeySecret(options?: AgentKeyOptions): string | undefined {
+  const requestedCatId = options?.agentKeyCatId?.trim();
+  const variantMapRaw = process.env['CAT_CAFE_AGENT_KEY_FILES']?.trim();
+  if (requestedCatId) {
+    const variantFiles = parseAgentKeyFileMap(variantMapRaw);
+    return readAgentKeyFile(variantFiles[requestedCatId]);
+  }
+
+  if (variantMapRaw) return undefined;
+
+  const agentKeySecret = process.env['CAT_CAFE_AGENT_KEY_SECRET'];
+  if (agentKeySecret) return agentKeySecret;
+
+  return readAgentKeyFile(process.env['CAT_CAFE_AGENT_KEY_FILE']);
+}
+
+export function getCallbackConfig(options?: AgentKeyOptions): CallbackConfig | null {
   const apiUrl = process.env['CAT_CAFE_API_URL'];
   if (!apiUrl) return null;
 
   const invocationId = process.env['CAT_CAFE_INVOCATION_ID'];
   const callbackToken = process.env['CAT_CAFE_CALLBACK_TOKEN'];
-
-  let agentKeySecret = process.env['CAT_CAFE_AGENT_KEY_SECRET'];
-  if (!agentKeySecret) {
-    const keyFile = process.env['CAT_CAFE_AGENT_KEY_FILE'];
-    if (keyFile) {
-      try {
-        agentKeySecret = readFileSync(keyFile, 'utf-8').trim();
-      } catch {
-        // sidecar missing = no agent-key (not an error)
-      }
-    }
-  }
+  const agentKeySecret = resolveAgentKeySecret(options);
 
   if (!invocationId && !callbackToken && !agentKeySecret) return null;
 
@@ -80,7 +116,7 @@ export function getCallbackConfig(): CallbackConfig | null {
 }
 
 export const NO_CONFIG_ERROR =
-  'Clowder AI callback not configured. Missing CAT_CAFE_API_URL, CAT_CAFE_INVOCATION_ID, or CAT_CAFE_CALLBACK_TOKEN environment variables.';
+  'Clowder AI callback not configured. Missing callback credentials, agent-key credentials, or required agentKeyCatId for shared Antigravity MCP.';
 // ============ HTTP helpers ============
 
 export function buildAuthHeaders(config: CallbackConfig): Record<string, string> {
@@ -105,9 +141,9 @@ export function buildAuthHeaders(config: CallbackConfig): Record<string, string>
 export async function callbackPost(
   path: string,
   body: Record<string, unknown>,
-  options?: { enableOutbox?: boolean },
+  options?: { enableOutbox?: boolean; agentKeyCatId?: string },
 ): Promise<ToolResult> {
-  const config = getCallbackConfig();
+  const config = getCallbackConfig({ agentKeyCatId: options?.agentKeyCatId });
   if (!config) return errorResult(NO_CONFIG_ERROR);
 
   const result = await sendCallbackRequest(
@@ -123,8 +159,12 @@ export async function callbackPost(
   return errorResult(result.error);
 }
 
-export async function callbackGet(path: string, params?: Record<string, string>): Promise<ToolResult> {
-  const config = getCallbackConfig();
+export async function callbackGet(
+  path: string,
+  params?: Record<string, string>,
+  options?: AgentKeyOptions,
+): Promise<ToolResult> {
+  const config = getCallbackConfig(options);
   if (!config) return errorResult(NO_CONFIG_ERROR);
 
   const query = new URLSearchParams(params ?? {}); // headers-only auth (Phase F AC-F2)
@@ -146,6 +186,14 @@ export async function callbackGet(path: string, params?: Record<string, string>)
     return errorResult(`Callback request failed: ${message}`);
   }
 }
+
+const agentKeyCatIdSchema = z
+  .string()
+  .min(1)
+  .optional()
+  .describe(
+    'Persistent-agent identity selector. Required for shared Antigravity MCP (antigravity or antig-opus) so agent-key auth uses the matching sidecar key; otherwise callback config fails closed. Ignored when full invocation credentials are present.',
+  );
 
 export const postMessageInputSchema = {
   content: z.string().min(1).describe('The message content to post'),
@@ -169,6 +217,7 @@ export const postMessageInputSchema = {
     .describe(
       'Optional explicit target cat IDs. Merged with @mentions parsed from content. Used for direction rendering in frontend. Use get_thread_cats to discover valid catIds.',
     ),
+  agentKeyCatId: agentKeyCatIdSchema,
 };
 
 export const getPendingMentionsInputSchema = {
@@ -209,6 +258,7 @@ export const getThreadContextInputSchema = {
     .describe(
       'Optional: filter and rank messages by keyword relevance. Multi-word keywords are tokenized and scored (0-1). Results sorted by relevance when keyword is provided.',
     ),
+  agentKeyCatId: agentKeyCatIdSchema,
 };
 
 export const listThreadsInputSchema = {
@@ -226,6 +276,7 @@ export const listThreadsInputSchema = {
     .max(200)
     .optional()
     .describe('Optional: filter threads whose title or threadId contains this keyword (case-insensitive).'),
+  agentKeyCatId: agentKeyCatIdSchema,
 };
 
 export const featIndexInputSchema = {
@@ -267,6 +318,7 @@ export const crossPostMessageInputSchema = {
     .max(200)
     .optional()
     .describe('Optional idempotency key for at-least-once delivery de-duplication'),
+  agentKeyCatId: agentKeyCatIdSchema,
 };
 
 export const listTasksInputSchema = {
@@ -285,6 +337,7 @@ export async function handlePostMessage(input: {
   replyTo?: string | undefined;
   clientMessageId?: string | undefined;
   targetCats?: string[] | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   // F174 Phase E (AC-E2/E5): explicit kind:'none' policy. There's no useful
   // local fallback for post_message — losing the message is preferable to
@@ -302,7 +355,7 @@ export async function handlePostMessage(input: {
           clientMessageId: input.clientMessageId ?? randomUUID(),
           ...(input.targetCats?.length ? { targetCats: input.targetCats } : {}),
         },
-        { enableOutbox: true },
+        { enableOutbox: true, agentKeyCatId: input.agentKeyCatId },
       ),
     policy: { kind: 'none' },
   });
@@ -372,25 +425,35 @@ export async function handleGetThreadContext(input: {
   threadId?: string | undefined;
   catId?: string | undefined;
   keyword?: string | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
-  return callbackGet('/api/callbacks/thread-context', {
-    ...(input.limit ? { limit: String(input.limit) } : {}),
-    ...(input.threadId ? { threadId: input.threadId } : {}),
-    ...(input.catId ? { catId: input.catId } : {}),
-    ...(input.keyword ? { keyword: input.keyword } : {}),
-  });
+  return callbackGet(
+    '/api/callbacks/thread-context',
+    {
+      ...(input.limit ? { limit: String(input.limit) } : {}),
+      ...(input.threadId ? { threadId: input.threadId } : {}),
+      ...(input.catId ? { catId: input.catId } : {}),
+      ...(input.keyword ? { keyword: input.keyword } : {}),
+    },
+    { agentKeyCatId: input.agentKeyCatId },
+  );
 }
 
 export async function handleListThreads(input: {
   limit?: number | undefined;
   activeSince?: number | undefined;
   keyword?: string | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
-  return callbackGet('/api/callbacks/list-threads', {
-    ...(input.limit ? { limit: String(input.limit) } : {}),
-    ...(input.activeSince !== undefined ? { activeSince: String(input.activeSince) } : {}),
-    ...(input.keyword ? { keyword: input.keyword } : {}),
-  });
+  return callbackGet(
+    '/api/callbacks/list-threads',
+    {
+      ...(input.limit ? { limit: String(input.limit) } : {}),
+      ...(input.activeSince !== undefined ? { activeSince: String(input.activeSince) } : {}),
+      ...(input.keyword ? { keyword: input.keyword } : {}),
+    },
+    { agentKeyCatId: input.agentKeyCatId },
+  );
 }
 
 export async function handleFeatIndex(input: {
@@ -441,12 +504,14 @@ export async function handleCrossPostMessage(input: {
   content: string;
   replyTo?: string | undefined;
   clientMessageId?: string | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   return handlePostMessage({
     threadId: input.threadId,
     content: input.content,
     ...(input.replyTo ? { replyTo: input.replyTo } : {}),
     ...(input.clientMessageId ? { clientMessageId: input.clientMessageId } : {}),
+    ...(input.agentKeyCatId ? { agentKeyCatId: input.agentKeyCatId } : {}),
   });
 }
 

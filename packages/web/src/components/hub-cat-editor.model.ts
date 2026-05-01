@@ -145,6 +145,26 @@ export function normalizeMentionPattern(value: string): string {
   return trimmed.startsWith('@') ? trimmed : `@${trimmed}`;
 }
 
+export function deriveModelMentionPattern(model: string): string {
+  const modelId = model.trim().split('/').filter(Boolean).at(-1)?.trim();
+  if (!modelId) return '';
+  const alias = modelId
+    .replace(/^[@.]+/, '')
+    .replace(/\s+/g, '-')
+    .replace(/[^A-Za-z0-9_.-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[._-]+|[._-]+$/g, '');
+  return alias ? normalizeMentionPattern(alias) : '';
+}
+
+export function withDefaultModelMentionPattern(form: HubCatEditorFormState): HubCatEditorFormState {
+  const modelAlias = deriveModelMentionPattern(form.defaultModel);
+  if (!modelAlias) return form;
+  const aliases = splitMentionPatterns(form.mentionPatterns).map(normalizeMentionPattern).filter(Boolean);
+  if (aliases.length > 0) return form;
+  return { ...form, mentionPatterns: joinTags([modelAlias]) };
+}
+
 export function canonicalMentionPattern(catId: string): string {
   return normalizeMentionPattern(catId);
 }

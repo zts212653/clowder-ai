@@ -161,4 +161,36 @@ describe('QueueProcessor zombie defense (F118 D4)', () => {
     const result = await processor.processNext('t1', 'u1');
     assert.ok(result.started, 'processNext should succeed after sweeping zombie');
   });
+
+  it('isThreadBusy ignores stale processingSlot when tracker has no active slot', (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: T0 });
+    const deps = stubDeps();
+    const processor = new QueueProcessor(deps, { processingSlotTtlMs: SHORT_TTL });
+
+    /** @type {any} */ (processor).processingSlots.set('t1:opus', T0);
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+
+    t.mock.timers.tick(SHORT_TTL + 1);
+
+    assert.equal(
+      processor.isThreadBusy('t1'),
+      false,
+      'stale processingSlots without a live tracker entry must not permanently mark the thread busy',
+    );
+    assert.equal(/** @type {any} */ (processor).processingSlots.has('t1:opus'), false, 'zombie slot should be swept');
+  });
+
+  it('isThreadBusy preserves stale processingSlot while tracker still has active slot', (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: T0 });
+    const deps = stubDeps();
+    const processor = new QueueProcessor(deps, { processingSlotTtlMs: SHORT_TTL });
+
+    /** @type {any} */ (processor).processingSlots.set('t1:opus', T0);
+    deps.invocationTracker.has.mock.mockImplementation(() => true);
+
+    t.mock.timers.tick(SHORT_TTL + 1);
+
+    assert.equal(processor.isThreadBusy('t1'), true, 'live tracker entry should keep a slow invocation busy');
+    assert.equal(/** @type {any} */ (processor).processingSlots.has('t1:opus'), true, 'live slot should be preserved');
+  });
 });

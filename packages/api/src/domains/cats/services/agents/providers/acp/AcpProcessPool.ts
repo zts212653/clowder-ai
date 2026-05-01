@@ -232,7 +232,12 @@ export class AcpProcessPool {
       state: 'initializing',
       idleTimer: null,
     };
-    await client.initialize();
+    try {
+      await client.initialize();
+    } catch (err) {
+      await client.close().catch(() => {});
+      throw err;
+    }
     entry.state = 'ready';
     log.info({ poolKey }, 'ACP process spawned (cold start)');
     return entry;

@@ -243,7 +243,8 @@ describe('deliverOutboundFromWeb (F088 ISSUE-15)', () => {
     assert.equal(deliverCalls.length, 1);
     assert.ok(deliverCalls[0].threadMeta);
     assert.equal(deliverCalls[0].threadMeta.threadTitle, 'Test Thread');
-    assert.ok(deliverCalls[0].threadMeta.deepLinkUrl.includes('t-1'));
+    assert.match(deliverCalls[0].threadMeta.deepLinkUrl, /\/thread\/t-1$/);
+    assert.ok(!deliverCalls[0].threadMeta.deepLinkUrl.includes('/threads/'));
   });
 });
 

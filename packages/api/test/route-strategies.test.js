@@ -2883,6 +2883,39 @@ describe('routeParallel thinking persistence (F045)', () => {
     assert.equal(appendCalls[0].thinking, 'A and more');
   });
 
+  it('persists replacement text snapshots without appending stale text in parallel mode', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+
+    const service = {
+      async *invoke(_prompt) {
+        yield {
+          type: 'system_info',
+          catId: 'opus',
+          content: JSON.stringify({ type: 'invocation_created', invocationId: 'inv-replace-parallel' }),
+          timestamp: Date.now(),
+        };
+        yield { type: 'text', catId: 'opus', content: 'draft answer', timestamp: Date.now() };
+        yield {
+          type: 'text',
+          catId: 'opus',
+          content: 'final corrected answer',
+          textMode: 'replace',
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const appendCalls = [];
+    const deps = createMockDeps({ opus: service }, appendCalls);
+
+    for await (const _msg of routeParallel(deps, ['opus'], 'test', 'user1', 'thread1')) {
+      /* drain */
+    }
+
+    assert.equal(appendCalls[0].content, 'final corrected answer');
+  });
+
   it('forwards invocation_created system_info to frontend while still persisting content', async () => {
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
 
@@ -3017,5 +3050,38 @@ describe('routeSerial thinking persistence (F045)', () => {
     }
 
     assert.equal(appendCalls[0].thinking, 'A and more', 'serial mode should keep only the latest cumulative snapshot');
+  });
+
+  it('persists replacement text snapshots without appending stale text in serial mode', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+
+    const service = {
+      async *invoke(_prompt) {
+        yield {
+          type: 'system_info',
+          catId: 'opus',
+          content: JSON.stringify({ type: 'invocation_created', invocationId: 'inv-replace-serial' }),
+          timestamp: Date.now(),
+        };
+        yield { type: 'text', catId: 'opus', content: 'draft answer', timestamp: Date.now() };
+        yield {
+          type: 'text',
+          catId: 'opus',
+          content: 'final corrected answer',
+          textMode: 'replace',
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const appendCalls = [];
+    const deps = createMockDeps({ opus: service }, appendCalls);
+
+    for await (const _msg of routeSerial(deps, ['opus'], 'test', 'user1', 'thread1')) {
+      /* drain */
+    }
+
+    assert.equal(appendCalls[0].content, 'final corrected answer');
   });
 });

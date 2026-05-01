@@ -105,7 +105,7 @@ function sanitizeEvent(input: DebugEventInput): StoredDebugEvent {
       continue;
     }
 
-    if (key === 'origin' && (value === 'stream' || value === 'callback')) {
+    if (key === 'origin' && (value === 'stream' || value === 'callback' || value === 'briefing')) {
       out.origin = value;
       continue;
     }
@@ -118,16 +118,41 @@ function sanitizeEvent(input: DebugEventInput): StoredDebugEvent {
         key === 'routeThreadId' ||
         key === 'storeThreadId' ||
         key === 'catId' ||
+        key === 'actorId' ||
         key === 'messageId' ||
-        key === 'invocationId') &&
+        key === 'existingMessageId' ||
+        key === 'incomingMessageId' ||
+        key === 'invocationId' ||
+        key === 'canonicalInvocationId' ||
+        key === 'bubbleKind' ||
+        key === 'eventType' ||
+        key === 'originPhase' ||
+        key === 'sourcePath' ||
+        key === 'recoveryAction' ||
+        key === 'violationKind') &&
       typeof value === 'string'
     ) {
       out[key] = value;
       continue;
     }
 
-    if (key === 'queueLength' && typeof value === 'number' && Number.isFinite(value)) {
-      out.queueLength = value;
+    if ((key === 'existingMessageId' || key === 'incomingMessageId') && value === null) {
+      out[key] = null;
+      continue;
+    }
+
+    if ((key === 'queueLength' || key === 'seq') && typeof value === 'number' && Number.isFinite(value)) {
+      out[key] = value;
+      continue;
+    }
+
+    if (key === 'seq' && value === null) {
+      out.seq = null;
+      continue;
+    }
+
+    if (key === 'level' && (value === 'warn' || value === 'error')) {
+      out.level = value;
       continue;
     }
 
@@ -235,7 +260,9 @@ export function dumpDebugEvents(options: DebugDumpOptions = {}): DebugDumpResult
 
 export function dumpBubbleTimeline(options: DebugDumpOptions = {}): DebugDumpResult {
   const rawThreadId = options.rawThreadId === true;
-  const events = makeDumpEvents(rawThreadId).filter((item) => item.event === 'bubble_lifecycle');
+  const events = makeDumpEvents(rawThreadId).filter(
+    (item) => item.event === 'bubble_lifecycle' || item.event === 'bubble_invariant_violation',
+  );
   return makeDumpResult(events, rawThreadId);
 }
 

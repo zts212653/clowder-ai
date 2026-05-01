@@ -4,15 +4,22 @@ related_features: [F039, F047, F117, F122, F133, F167]
 topics: [queue, dispatch, priority, invocation, connector, architecture]
 doc_kind: spec
 created: 2026-04-24
+intake_source: clowder-ai#575
 ---
 
 # F175: 消息队列统一设计 — 优先级排序 + 用户可控编排
 
 > **Status**: spec | **Owner**: Ragdoll | **Priority**: P1
+>
+> **Inbound source**: [clowder-ai#575](https://github.com/zts212653/clowder-ai/pull/575)
+> **Original tag**: clowder-ai 仓内编号为 F169（unified-queue-design）
+> **Rename reason**: cat-cafe 本地 F169 已被 `agent-memory-reflex` vision 文档占用，同号不同物会污染 search_evidence（参见 `feedback_fake_feat_anchor_is_poison`）。已要求 mindfn 在 PR #575 源头完成 F169 → F175 rename。
+>
+> **Fixes**: clowder-ai#564 — urgent connector 消息不再通过 bypass 抢占 A2A 链，改走队列内优先级排序。
 
 ## Why
 
-issue #564 现场案例：opus 在 A2A round 2 执行中，CI failure 通知以 `priority: 'urgent'` 到达 → `handleUrgentTrigger()` 直接抢占 → `signal.abort()` → opus 回复中的 `@gpt52` mention 被检测但路由被 `signal.aborted` 门控阻止 → 静默丢弃。用户无任何提示。
+clowder-ai#564 现场案例：opus 在 A2A round 2 执行中，CI failure 通知以 `priority: 'urgent'` 到达 → `handleUrgentTrigger()` 直接抢占 → `signal.abort()` → opus 回复中的 `@gpt52` mention 被检测但路由被 `signal.aborted` 门控阻止 → 静默丢弃。用户无任何提示。
 
 根因不是单个 bug，而是三个设计债务的叠加：
 
@@ -174,25 +181,8 @@ QueueProcessor 出队时：
 | KD-6 | 不做通用 targetCat batching | 跨 source 的 batching 是新执行语义，回归面不可控，留作独立 design issue | 2026-04-24 |
 | KD-7 | signal.aborted 安全门控保留 | 正确的并发保护，修复的是 signal 被错误 abort，不是门控本身 | 2026-04-24 |
 
-## Timeline
-
-| 日期 | 事件 |
-|------|------|
-| 2026-04-23 | #564 issue 创建，根因分析 + 设计调查 |
-| 2026-04-24 | Maintainer review 完成，设计共识达成，立项 F175 |
-
 ## Review Gate
 
 - Phase A: maintainer review（zts212653 家的猫）+ 跨家族 review
 - Phase B: 跨家族 review
-- Phase C: 铲屎官确认 spec 变更
-
-## Links
-
-| 类型 | 路径 | 说明 |
-|------|------|------|
-| **Issue** | [#564](https://github.com/zts212653/clowder-ai/issues/564) | 原始 issue + 设计讨论 |
-| **Feature** | `docs/features/F122-unified-dispatch-queue.md` | F122 执行通道统一（本次收尾） |
-| **Feature** | `docs/features/F133-cicd-tracking.md` | F133 CI/CD Tracking（urgent 语义来源） |
-| **Feature** | `docs/features/F039-message-queue-delivery.md` | F039 消息排队投递原始设计 |
-| **Feature** | `docs/features/F047-queue-steer.md` | F047 Queue Steer |
+- Phase C: team lead确认 spec 变更

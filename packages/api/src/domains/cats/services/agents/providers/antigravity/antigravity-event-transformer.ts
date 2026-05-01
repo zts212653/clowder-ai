@@ -19,6 +19,22 @@ export function isCapacityError(message: string): boolean {
   return CAPACITY_PATTERNS.some((p) => p.test(message));
 }
 
+function isInvalidToolCallError(message: string): boolean {
+  return /invalid tool call|produced an invalid tool/i.test(message);
+}
+
+function formatAntigravityUpstreamError(message: string): string {
+  if (!isInvalidToolCallError(message)) return message;
+  return (
+    `Antigravity 上游拒绝了一次 invalid tool call：${message} ` +
+    '这类 ERROR_MESSAGE 没有回传 attempted toolName；通常是模型调用了不在 live MCP tool list 里的工具。' +
+    'Cat Cafe 的 agent-key tools ' +
+    '(cat_cafe_post_message, cat_cafe_get_thread_context, cat_cafe_list_threads, cat_cafe_cross_post_message) ' +
+    '只有在持久 Antigravity MCP 进程拿到 CAT_CAFE_AGENT_KEY_FILE(S) 后才会出现；' +
+    '在它们可见前，请改用只读 MCP 工具或 HTTP callback fallback。'
+  );
+}
+
 export type StepBucket =
   | 'terminal_output'
   | 'partial_output'
@@ -194,7 +210,7 @@ export function transformTrajectorySteps(
           const errorText =
             errorCode === 'model_capacity'
               ? `⚠️ 上游模型服务端容量不足（服务器繁忙），非 Clowder AI 系统故障。原始信息：${rawText}`
-              : rawText;
+              : formatAntigravityUpstreamError(rawText);
           messages.push({
             type: 'error',
             catId,

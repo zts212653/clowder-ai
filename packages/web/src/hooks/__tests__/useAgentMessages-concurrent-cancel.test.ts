@@ -237,6 +237,39 @@ describe('F108 P1: concurrent cancel isolation', () => {
     expect(mockClearCatStatuses).toHaveBeenCalled();
     expect(mockSetLoading).toHaveBeenCalledWith(false);
   });
+
+  it('recoverable non-final error keeps the invocation cancelable while showing the error', () => {
+    storeState.activeInvocations = {
+      'inv-antig': { catId: 'antig-opus', mode: 'execute', startedAt: Date.now() },
+    };
+
+    act(() => root.render(React.createElement(Harness)));
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'error',
+        catId: 'antig-opus',
+        invocationId: 'inv-antig',
+        error: 'The model produced an invalid tool call.',
+        errorCode: 'upstream_error',
+        isFinal: false,
+      });
+    });
+
+    expect(mockAddMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'system',
+        variant: 'error',
+        content: 'Error: The model produced an invalid tool call.',
+      }),
+    );
+    expect(mockSetCatStatus).not.toHaveBeenCalledWith('antig-opus', 'error');
+    expect(mockSetStreaming).not.toHaveBeenCalledWith(expect.any(String), false);
+    expect(mockRemoveActiveInvocation).not.toHaveBeenCalled();
+    expect(storeState.activeInvocations).toEqual({
+      'inv-antig': { catId: 'antig-opus', mode: 'execute', startedAt: expect.any(Number) },
+    });
+  });
 });
 
 /**

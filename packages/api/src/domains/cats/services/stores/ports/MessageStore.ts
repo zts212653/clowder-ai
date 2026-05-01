@@ -57,7 +57,7 @@ export interface StoredMessage {
   toolEvents?: readonly StoredToolEvent[];
   /** Provider/model metadata (for cat messages) */
   metadata?: MessageMetadata;
-  /** F22+F52+F098-C1+F153-F: Extensible extra data (rich blocks, stream metadata, cross-post origin, explicit targets, tracing pointers) */
+  /** F022+F052+F098-C1+F153-F: Extensible extra data (rich blocks, stream metadata, cross-post origin, explicit targets, tracing pointers) */
   extra?: {
     rich?: RichMessageExtra;
     stream?: { invocationId: string };
@@ -81,7 +81,7 @@ export interface StoredMessage {
   whisperTo?: readonly CatId[];
   /** F35: Timestamp when a whisper was revealed (made public). Present = revealed */
   revealedAt?: number;
-  /** F97: External connector source. Present = connector message (not user/cat) */
+  /** F097: External connector source. Present = connector message (not user/cat) */
   source?: ConnectorSource;
   /** F098-D: Timestamp when a queued message was actually dequeued and processed by a cat */
   deliveredAt?: number;
@@ -108,6 +108,95 @@ export type AppendMessageInput = Omit<StoredMessage, 'id' | 'threadId'> & {
    */
   idempotencyKey?: string;
 };
+
+/**
+ * Stream-only metadata collected by route-serial after a callback message was
+ * already persisted. It may augment the callback bubble, but must not replace
+ * its canonical content/origin.
+ */
+export interface StreamMetadataAugmentInput {
+  toolEvents?: readonly StoredToolEvent[];
+  metadata?: MessageMetadata;
+  thinking?: string;
+  replyTo?: string;
+  mentionsUser?: boolean;
+  extra?: NonNullable<StoredMessage['extra']>;
+}
+
+function richBlockDedupeKey(block: unknown, index: number): string {
+  if (block && typeof block === 'object' && 'id' in block) {
+    const id = (block as { id?: unknown }).id;
+    if (typeof id === 'string' && id.length > 0) return `id:${id}`;
+  }
+  try {
+    return `json:${JSON.stringify(block)}`;
+  } catch {
+    return `index:${index}`;
+  }
+}
+
+function mergeRichExtra(existing?: RichMessageExtra, incoming?: RichMessageExtra): RichMessageExtra | undefined {
+  if (!existing && !incoming) return undefined;
+  const blocks = [...(existing?.blocks ?? [])];
+  const seen = new Set(blocks.map((block, index) => richBlockDedupeKey(block, index)));
+  for (const block of incoming?.blocks ?? []) {
+    const key = richBlockDedupeKey(block, blocks.length);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    blocks.push(block);
+  }
+  return { v: 1, blocks };
+}
+
+export function mergeMessageExtra(
+  existing: StoredMessage['extra'] | undefined,
+  incoming: StoredMessage['extra'] | undefined,
+): StoredMessage['extra'] | undefined {
+  if (!existing && !incoming) return undefined;
+  const merged = { ...(existing ?? {}), ...(incoming ?? {}) };
+  const rich = mergeRichExtra(existing?.rich, incoming?.rich);
+  if (rich) merged.rich = rich;
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+export function mergeStoredToolEvents(
+  existing: readonly StoredToolEvent[] | undefined,
+  incoming: readonly StoredToolEvent[] | undefined,
+): readonly StoredToolEvent[] | undefined {
+  if (!incoming || incoming.length === 0) return existing;
+  if (!existing || existing.length === 0) return [...incoming];
+  const merged = [...existing];
+  const seen = new Set(merged.map((event) => event.id));
+  for (const event of incoming) {
+    if (seen.has(event.id)) continue;
+    seen.add(event.id);
+    merged.push(event);
+  }
+  return merged;
+}
+
+export function applyStreamMetadataAugment(msg: StoredMessage, patch: StreamMetadataAugmentInput): StoredMessage {
+  if (patch.thinking && patch.thinking.trim().length > 0) {
+    msg.thinking = patch.thinking;
+  }
+  if (patch.metadata) {
+    msg.metadata = { ...(msg.metadata ?? {}), ...patch.metadata };
+  }
+  if (patch.toolEvents && patch.toolEvents.length > 0) {
+    msg.toolEvents = mergeStoredToolEvents(msg.toolEvents, patch.toolEvents);
+  }
+  if (patch.replyTo && !msg.replyTo) {
+    msg.replyTo = patch.replyTo;
+  }
+  if (patch.mentionsUser) {
+    msg.mentionsUser = true;
+  }
+  if (patch.extra) {
+    const mergedExtra = mergeMessageExtra(msg.extra, patch.extra);
+    if (mergedExtra) msg.extra = mergedExtra;
+  }
+  return msg;
+}
 
 /**
  * Common interface for message stores (in-memory and Redis).
@@ -168,6 +257,11 @@ export interface IMessageStore {
   updateExtra(
     id: string,
     extra: NonNullable<StoredMessage['extra']>,
+  ): StoredMessage | null | Promise<StoredMessage | null>;
+  /** #1462: augment callback-persisted messages with metadata collected only on the stream path. */
+  augmentStreamMetadata(
+    id: string,
+    patch: StreamMetadataAugmentInput,
   ): StoredMessage | null | Promise<StoredMessage | null>;
   /** F098-D: Mark a queued message as delivered (set deliveredAt). Returns null if not found. */
   markDelivered(id: string, deliveredAt: number): StoredMessage | null | Promise<StoredMessage | null>;
@@ -526,6 +620,12 @@ export class MessageStore {
     if (!msg) return null;
     msg.extra = extra;
     return msg;
+  }
+
+  augmentStreamMetadata(id: string, patch: StreamMetadataAugmentInput): StoredMessage | null {
+    const msg = this.messages.find((m) => m.id === id);
+    if (!msg) return null;
+    return applyStreamMetadataAugment(msg, patch);
   }
 
   /**

@@ -500,14 +500,36 @@ function findAssistantDuplicate(messages: ChatMessage[], incoming: ChatMessage):
   return -1;
 }
 
+function mergeRichBlocks(existingBlocks: RichBlock[] = [], incomingBlocks: RichBlock[] = []): RichBlock[] | undefined {
+  const merged: RichBlock[] = [];
+  const seen = new Set<string>();
+  for (const block of [...existingBlocks, ...incomingBlocks]) {
+    if (seen.has(block.id)) continue;
+    seen.add(block.id);
+    merged.push(block);
+  }
+  return merged.length > 0 ? merged : undefined;
+}
+
 /** Merge incoming message into existing, preferring callback content over stream */
 function mergeAssistantBubble(existing: ChatMessage, incoming: ChatMessage): ChatMessage {
   // Bridge rule: backfill invocationId from callback into stream placeholder
   const incomingInvId = getBubbleInvocationId(incoming);
   const existingInvId = getBubbleInvocationId(existing);
-  const mergedExtra = { ...existing.extra };
-  if (incomingInvId && !existingInvId) {
-    mergedExtra.stream = { ...mergedExtra.stream, invocationId: incomingInvId };
+  const mergedExtra: ChatMessage['extra'] = { ...existing.extra, ...incoming.extra };
+  const mergedRichBlocks = mergeRichBlocks(existing.extra?.rich?.blocks, incoming.extra?.rich?.blocks);
+  if (mergedRichBlocks) {
+    mergedExtra.rich = { v: 1, blocks: mergedRichBlocks };
+  }
+  const needsStreamMerge = [existing.extra?.stream, incoming.extra?.stream, incomingInvId && !existingInvId].some(
+    Boolean,
+  );
+  if (needsStreamMerge) {
+    mergedExtra.stream = {
+      ...existing.extra?.stream,
+      ...incoming.extra?.stream,
+      ...(incomingInvId && !existingInvId ? { invocationId: incomingInvId } : {}),
+    };
   }
   if (incoming.extra?.crossPost) {
     mergedExtra.crossPost = incoming.extra.crossPost;
@@ -522,7 +544,10 @@ function mergeAssistantBubble(existing: ChatMessage, incoming: ChatMessage): Cha
     isStreaming: false,
     // Merge metadata (incoming takes precedence)
     ...(incoming.metadata ? { metadata: incoming.metadata } : {}),
-    // Preserve extra from existing (CLI Output) + merge stream identity + crossPost
+    ...(incoming.deliveredAt ? { deliveredAt: incoming.deliveredAt } : {}),
+    ...(incoming.replyTo ? { replyTo: incoming.replyTo } : {}),
+    ...(incoming.replyPreview ? { replyPreview: incoming.replyPreview } : {}),
+    // Preserve extra from existing (CLI Output/rich blocks) + merge callback metadata
     extra: Object.keys(mergedExtra).length > 0 ? mergedExtra : undefined,
     ...(incoming.mentionsUser ? { mentionsUser: true } : {}),
   };
@@ -969,73 +994,82 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const updateMsgs = (msgs: ChatMessage[]) => {
         // Update deliveredAt on existing messages
         const updated = msgs.map((m) => (idSet.has(m.id) ? { ...m, deliveredAt } : m));
+        const insertedIds = new Set<string>();
+        const mentionMessages: ChatMessage[] = [];
         // F117: Insert user bubbles for queue-sent messages not yet in the store
         if (serverMessages) {
           const existingIds = new Set(updated.map((m) => m.id));
           for (const sm of serverMessages) {
-            if (!existingIds.has(sm.id)) {
-              updated.push({
-                id: sm.id,
-                // #607: cat-originated messages (A2A triggers) have catId set
-                type: sm.catId ? 'assistant' : 'user',
-                content: sm.content,
-                timestamp: sm.timestamp,
-                deliveredAt,
-                ...(sm.catId ? { catId: sm.catId } : {}),
-                contentBlocks: sm.contentBlocks as ChatMessage['contentBlocks'],
-                ...(sm.extra ? { extra: sm.extra as ChatMessage['extra'] } : {}),
-                ...(sm.origin ? { origin: sm.origin } : {}),
-                ...(sm.replyTo ? { replyTo: sm.replyTo } : {}),
-                ...(sm.replyPreview ? { replyPreview: sm.replyPreview as ChatMessage['replyPreview'] } : {}),
-                ...(sm.mentionsUser ? { mentionsUser: true } : {}),
-              });
+            if (existingIds.has(sm.id)) continue;
+            const incoming: ChatMessage = {
+              id: sm.id,
+              // #607: cat-originated messages (A2A triggers) have catId set
+              type: sm.catId ? 'assistant' : 'user',
+              content: sm.content,
+              timestamp: sm.timestamp,
+              deliveredAt,
+              ...(sm.catId ? { catId: sm.catId } : {}),
+              contentBlocks: sm.contentBlocks as ChatMessage['contentBlocks'],
+              ...(sm.extra ? { extra: sm.extra as ChatMessage['extra'] } : {}),
+              ...(sm.origin ? { origin: sm.origin } : {}),
+              ...(sm.replyTo ? { replyTo: sm.replyTo } : {}),
+              ...(sm.replyPreview ? { replyPreview: sm.replyPreview as ChatMessage['replyPreview'] } : {}),
+              ...(sm.mentionsUser ? { mentionsUser: true } : {}),
+            };
+
+            const dupIdx = findAssistantDuplicate(updated, incoming);
+            if (dupIdx >= 0) {
+              const existing = updated[dupIdx]!;
+              updated[dupIdx] = {
+                ...mergeAssistantBubble(existing, incoming),
+                id: incoming.id,
+              };
+              existingIds.add(incoming.id);
+              if (incoming.mentionsUser && !existing.mentionsUser) {
+                mentionMessages.push(incoming);
+              }
+            } else {
+              updated.push(incoming);
+              existingIds.add(incoming.id);
+              insertedIds.add(incoming.id);
+              if (incoming.mentionsUser) {
+                mentionMessages.push(incoming);
+              }
             }
           }
           // Re-sort: delivered messages use deliveredAt so they appear at delivery
           // position (current tail), not their original send-time slot.
           updated.sort((a, b) => (a.deliveredAt ?? a.timestamp) - (b.deliveredAt ?? b.timestamp));
         }
-        return updated;
+        return { messages: updated, insertedIds, mentionMessages };
       };
 
       if (threadId === state.currentThreadId) {
-        if (serverMessages && typeof document !== 'undefined' && !document.hasFocus()) {
-          const existingIds = new Set(state.messages.map((m) => m.id));
-          const newMention = serverMessages.find((sm) => sm.mentionsUser && !existingIds.has(sm.id));
+        const result = updateMsgs(state.messages);
+        if (typeof document !== 'undefined' && !document.hasFocus()) {
+          const newMention = result.mentionMessages[0];
           if (newMention) {
-            fireOwnerMentionNotification({
-              id: newMention.id,
-              type: newMention.catId ? 'assistant' : 'user',
-              content: newMention.content,
-              timestamp: newMention.timestamp,
-              ...(newMention.catId ? { catId: newMention.catId } : {}),
-            } as ChatMessage);
+            fireOwnerMentionNotification(newMention);
           }
         }
-        return { messages: updateMsgs(state.messages) };
+        return { messages: result.messages };
       }
-      const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
-      const priorIds = new Set(existing.messages.map((m) => m.id));
-      const newInserts = serverMessages?.filter((sm) => !priorIds.has(sm.id)).length ?? 0;
-      const newMentionMsg = serverMessages?.find((sm) => sm.mentionsUser && !priorIds.has(sm.id));
+      const existing = state.threadStates[threadId] || { ...DEFAULT_THREAD_STATE };
+      const result = updateMsgs(existing.messages);
+      const newInserts = result.insertedIds.size;
+      const newMentionMsg = result.mentionMessages[0];
       if (newMentionMsg) {
-        fireOwnerMentionNotification({
-          id: newMentionMsg.id,
-          type: newMentionMsg.catId ? 'assistant' : 'user',
-          content: newMentionMsg.content,
-          timestamp: newMentionMsg.timestamp,
-          ...(newMentionMsg.catId ? { catId: newMentionMsg.catId } : {}),
-        } as ChatMessage);
+        fireOwnerMentionNotification(newMentionMsg);
       }
       return {
         threadStates: {
           ...state.threadStates,
           [threadId]: {
             ...existing,
-            messages: updateMsgs(existing.messages),
+            messages: result.messages,
             ...(newInserts > 0
               ? {
-                  unreadCount: (existing.unreadCount ?? 0) + newInserts,
+                  unreadCount: existing.unreadCount + newInserts,
                   lastActivity: deliveredAt,
                 }
               : {}),

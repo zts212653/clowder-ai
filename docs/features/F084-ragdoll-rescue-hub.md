@@ -148,4 +148,4 @@ team lead要的是：
 
 - 本地 peer review：Ragdoll/Ragdoll放行（0 P1 / 0 P2，P2 修复后确认通过）
 - 云端 review：`Codex Review: Didn't find any major issues`
-- PR 合入：[#305](https://github.com/zts212653/cat-cafe/pull/305)
+- PR 合入：[#305](https://github.com/zts212653/clowder-ai/pull/305)

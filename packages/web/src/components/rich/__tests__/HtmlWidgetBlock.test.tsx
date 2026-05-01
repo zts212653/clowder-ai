@@ -121,6 +121,21 @@ describe('HtmlWidgetBlock', () => {
     expect(html).toContain('link');
   });
 
+  it('preserves <style> in <head> for full HTML documents (WHOLE_DOCUMENT regression)', () => {
+    const block = {
+      id: 'w-style',
+      kind: 'html_widget' as const,
+      v: 1 as const,
+      html: '<html><head><style>body{background:#0f0f1a;color:white;}.flow{display:flex;}</style></head><body><div class="flow">Styled</div></body></html>',
+    };
+    const html = renderToStaticMarkup(<HtmlWidgetBlock block={block} />);
+    // srcDoc content is HTML-encoded in renderToStaticMarkup output
+    expect(html).toContain('&lt;style&gt;');
+    expect(html).toContain('background');
+    expect(html).toContain('display:flex');
+    expect(html).toContain('Styled');
+  });
+
   it('preserves safe HTML and scripts (widget functionality)', () => {
     const block = {
       id: 'w9',

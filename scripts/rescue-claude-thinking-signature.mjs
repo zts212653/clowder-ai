@@ -12,7 +12,7 @@ const HELP = `Usage:
 
 Options:
   --session <id>     Repair a specific Claude session transcript by session id
-  --all-broken       Scan ~/.claude/projects for sessions that already logged the invalid signature error
+  --all-broken       Scan ~/.claude/projects for broken sessions (API error entries or empty/short signatures)
   --root <dir>       Override Claude projects root (default: ~/.claude/projects)
   --backup-dir <dir> Override backup directory (default: ~/.claude/backups)
   --dry-run          Print what would change without writing files

@@ -262,6 +262,7 @@ describe('ConnectorCommandLayer', () => {
     assert.equal(result.kind, 'use');
     assert.equal(result.newActiveThreadId, 'thread-target-xyz');
     assert.ok(result.response.includes('目标Thread'));
+    assert.ok(result.response.includes('https://cafe.example.com/thread/thread-target-xyz'));
   });
 
   it('/use with no match returns error', async () => {
@@ -910,6 +911,7 @@ describe('ConnectorCommandLayer', () => {
       assert.equal(result.kind, 'status');
       assert.ok(result.response.includes('F142 开发'));
       assert.ok(result.response.includes('2')); // participant count
+      assert.ok(result.response.includes('https://cafe.example.com/thread/t-bound'));
       assert.equal(result.contextThreadId, 't-bound');
     });
 

@@ -55,6 +55,21 @@ type StoreState = {
 };
 
 const mockGovRefetch = vi.fn();
+const mockUseAgentHookHealth = vi.fn();
+
+const staleAgentHookHealth = {
+  status: 'missing',
+  targets: [
+    {
+      name: 'hooks/session-start',
+      status: 'missing',
+      drifted: true,
+      reason: 'target file does not exist',
+      targetPath: '/home/user/session-start-recall.sh',
+      diff: { kind: 'text', message: 'target file is missing' },
+    },
+  ],
+};
 
 const makeStoreState = (): StoreState => ({
   messages: [],
@@ -224,6 +239,9 @@ vi.mock('@/hooks/useGovernanceStatus', () => ({
     refetch: mockGovRefetch,
   }),
 }));
+vi.mock('@/hooks/useAgentHookHealth', () => ({
+  useAgentHookHealth: (options: { enabled?: boolean } = {}) => mockUseAgentHookHealth(options),
+}));
 vi.mock('@/hooks/useIndexState', () => ({
   useIndexState: () => ({
     state: 'idle',
@@ -289,6 +307,14 @@ describe('ChatContainer governance refetch', () => {
     root = createRoot(container);
     storeState = makeStoreState();
     mockGovRefetch.mockReset();
+    mockUseAgentHookHealth.mockReset();
+    mockUseAgentHookHealth.mockReturnValue({
+      health: null,
+      error: null,
+      syncing: false,
+      synced: false,
+      sync: vi.fn(),
+    });
   });
 
   afterEach(() => {
@@ -310,5 +336,23 @@ describe('ChatContainer governance refetch', () => {
     });
 
     expect(mockGovRefetch).not.toHaveBeenCalled();
+  });
+
+  it('does not render stale agent hook health outside project threads', async () => {
+    storeState.currentProjectPath = 'default';
+    mockUseAgentHookHealth.mockReturnValue({
+      health: staleAgentHookHealth,
+      error: null,
+      syncing: false,
+      synced: false,
+      sync: vi.fn(),
+    });
+
+    await act(async () => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-a' }));
+    });
+
+    expect(mockUseAgentHookHealth).toHaveBeenCalledWith({ enabled: false });
+    expect(container.textContent).not.toContain('Agent 运行 Hook 需要同步');
   });
 });

@@ -1,0 +1,115 @@
+{
+  "name": "cat-cafe-desktop",
+  "version": "0.2.0",
+  "description": "Cat Cafe Desktop - Multi-Agent Collaboration Platform",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac dmg --arm64 --x64"
+  },
+  "author": "Cat Cafe",
+  "license": "AGPL-3.0-only",
+  "devDependencies": {
+    "electron": "35.7.5",
+    "electron-builder": "26.8.1"
+  },
+  "build": {
+    "appId": "ai.catcafe.desktop",
+    "productName": "Cat Cafe",
+    "artifactName": "CatCafe-${version}-${arch}.${ext}",
+    "win": {
+      "target": "dir",
+      "icon": "assets/icon.ico"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.developer-tools",
+      "icon": "assets/icon.icns",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "extraResources": [
+        {
+          "from": "../bundled/node-darwin-${arch}",
+          "to": "node"
+        },
+        {
+          "from": "../bundled/redis-darwin-${arch}",
+          "to": ".cat-cafe/redis/darwin-${arch}"
+        }
+      ]
+    },
+    "dmg": {
+      "writeUpdateInfo": false
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "service-manager.js",
+      "splash.html",
+      "assets/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../bundled/deploy/api",
+        "to": "packages/api"
+      },
+      {
+        "from": "../bundled/deploy/web",
+        "to": "packages/web"
+      },
+      {
+        "from": "../bundled/deploy/mcp-server",
+        "to": "packages/mcp-server"
+      },
+      {
+        "from": "../cat-template.json",
+        "to": "cat-template.json"
+      },
+      {
+        "from": "../pnpm-workspace.yaml",
+        "to": "pnpm-workspace.yaml"
+      },
+      {
+        "from": "../package.json",
+        "to": "package.json"
+      },
+      {
+        "from": "../cat-config.json",
+        "to": "cat-config.json"
+      },
+      {
+        "from": "../cat-cafe-skills",
+        "to": "cat-cafe-skills"
+      },
+      {
+        "from": "../.claude/hooks/user-level",
+        "to": ".claude/hooks/user-level"
+      },
+      {
+        "from": "./scripts/sync-agent-hooks-offline.mjs",
+        "to": "scripts/sync-agent-hooks-offline.mjs"
+      },
+      {
+        "from": "../docs",
+        "to": "docs"
+      },
+      {
+        "from": "../bundled/cli-tools",
+        "to": "bundled/cli-tools"
+      }
+    ],
+    "asar": false,
+    "afterPack": "./afterPack.js"
+  }
+}

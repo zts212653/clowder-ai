@@ -150,6 +150,75 @@ if [ "$PREFER_DOTENV_PORTS" != "1" ]; then
     restore_cli_override "LLM_POSTPROCESS_PORT" "$CLI_LLM_POSTPROCESS_PORT_OVERRIDE"
 fi
 
+# === F182 大赛 / 多 worktree 并发：WORKTREE_PORT_OFFSET 派生 + 主动覆盖 ===
+# 砚砚 review: cat-cafe/docs/plans/2026-04-30-worktree-port-offset.md
+# OFFSET 非 0 时主动覆盖（不是检查）：
+#   - 端口派生值优先级高于 .env.local + CAT_CAFE_RESPECT_DOTENV_PORTS
+#   - Sidecar **强制 export 0**（不依赖用户配置 — 否则 profile=dev 会重置回 1，砚砚 review P1-1）
+#   - REDIS_DATA_DIR / REDIS_BACKUP_DIR **unset** 让后续 default_redis_*_dir 用新 port 重派生（P1-2）
+apply_worktree_port_offset() {
+    local offset="${WORKTREE_PORT_OFFSET:-0}"
+    [ "$offset" = "0" ] && return 0
+
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    # 云端 Codex P1（双重）：
+    #   1. stderr 不能合并进 eval 输入（Node warning / NODE_OPTIONS 输出会被当 shell 代码）
+    #   2. set -e 下命令替换非零退出会立即 shell exit，不让后续 if 检查到 — 必须用
+    #      `if ! cmd` 包裹（if 内部不触发 set -e exit），不能用 `cmd; status=$?` 两步
+    local derive_stdout derive_stderr_file
+    # 云端 Codex P1：BSD/macOS mktemp 要求 X 必须在末尾，`.XXXXXX.stderr` 会被拒
+    # （too few X's in template）。用完整路径写法两边兼容。
+    derive_stderr_file="$(mktemp "${TMPDIR:-/tmp}/derive-worktree-ports.XXXXXX")"
+    if ! derive_stdout="$(node "$script_dir/derive-worktree-ports.mjs" "$offset" 2>"$derive_stderr_file")"; then
+        local derive_stderr
+        derive_stderr="$(cat "$derive_stderr_file")"
+        rm -f "$derive_stderr_file"
+        echo "[start-dev] WORKTREE_PORT_OFFSET=$offset 派生失败: ${derive_stderr:-<no stderr>}" >&2
+        exit 2
+    fi
+    # 透传 stderr（Node warning 等让用户看见，但不进 eval）
+    if [ -s "$derive_stderr_file" ]; then
+        cat "$derive_stderr_file" >&2
+    fi
+    rm -f "$derive_stderr_file"
+
+    # 派生值压过 .env.local 任何残留（LL-015 防回归）
+    # 只 eval stdout，stderr 已分离（防命令注入）
+    eval "$derive_stdout"
+    export REDIS_URL="redis://localhost:${REDIS_PORT}"
+
+    # 圣域防御（defense-in-depth — derive-worktree-ports.mjs 已挡）
+    if [ "$REDIS_PORT" = "6399" ]; then
+        echo "[start-dev] 拒绝使用 Redis 圣域 6399！" >&2
+        exit 2
+    fi
+
+    # === 主动 export sidecar 禁用（砚砚 review P1-1）===
+    # resolve_config (line 274) 优先级：env_val > _PROF_ > 默认。
+    # 主动 export 0 → resolve_config 看到非空 env_val → 保留 0，不被 profile=dev 重置回 1
+    # EMBED_ENABLED + EMBED_MODE 双保险（derive_embed_enabled line 333 的两条派生路径）
+    export ANTHROPIC_PROXY_ENABLED=0
+    export ASR_ENABLED=0
+    export TTS_ENABLED=0
+    export LLM_POSTPROCESS_ENABLED=0
+    export EMBED_ENABLED=0
+    export EMBED_MODE=off
+    # PREVIEW_GATEWAY_PORT=0 让 kill_managed_ports (line 619) 不去碰 4100 端口
+    export PREVIEW_GATEWAY_PORT=0
+
+    # === Redis data/backup dir 重派生（砚砚 review P1-2）===
+    # unset 让 line 380/388 的 default_redis_*_dir(profile, port) 用新派生的 REDIS_PORT 重派生
+    # 同时 unset CLI_*_OVERRIDE 防 line 377/385 复活 .env.local 旧值
+    unset REDIS_DATA_DIR REDIS_BACKUP_DIR
+    unset CLI_REDIS_DATA_DIR_OVERRIDE CLI_REDIS_BACKUP_DIR_OVERRIDE
+
+    echo "[start-dev] WORKTREE_PORT_OFFSET=$offset → REDIS_PORT=$REDIS_PORT REDIS_URL=$REDIS_URL API=$API_SERVER_PORT WEB=$FRONTEND_PORT API_URL=$NEXT_PUBLIC_API_URL"
+    echo "[start-dev] WORKTREE_PORT_OFFSET=$offset → sidecar 全禁用 + Redis dir 待 default_redis_*_dir 重派生"
+}
+
+apply_worktree_port_offset
+
 apply_manual_download_source_overrides
 
 default_redis_port() {

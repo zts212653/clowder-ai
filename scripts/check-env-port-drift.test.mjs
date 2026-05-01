@@ -144,6 +144,15 @@ function readYamlTopLevelList(relPath, sectionName) {
   return parseYamlTopLevelList(readFileSync(resolve(ROOT, relPath), 'utf-8'), sectionName);
 }
 
+function assertPortableClaudeHookTemplate(template) {
+  assert.doesNotMatch(template, /(?:\/(?:Users|home)\/[^"'\s]+|[A-Za-z]:(?:\/|\\\\+)Users(?:\/|\\\\+)[^"'\s]+)/);
+}
+
+function readClaudeHookTemplateCommands(template) {
+  const parsed = JSON.parse(template);
+  return [parsed.hooks.SessionStart[0].hooks[0].command, parsed.hooks.Stop[0].hooks[0].command];
+}
+
 function readSyncScript() {
   return readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
 }
@@ -447,6 +456,22 @@ describe(
       );
     });
 
+    it('_sanitize-rules.pl keeps api-client port+1 tests internally consistent', () => {
+      const content = readFileSync(resolve(ROOT, 'scripts/_sanitize-rules.pl'), 'utf-8');
+      assert.ok(
+        content.includes("s#port: '3001'#port: '3003'#g"),
+        'api-client-resolve test input ports should transform alongside expected port+1 assertions',
+      );
+    });
+
+    it('sync-to-opensource.sh runs sanitizer over CommonJS test files', () => {
+      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
+      assert.ok(
+        content.includes('-name "*.cjs"'),
+        'sync sanitizer should include .cjs files such as packages/web/test/next-config.test.cjs',
+      );
+    });
+
     it('sync-to-opensource.sh transforms start-dev.sh API fallback to 3004', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
       const expected = "'s/API_PORT=$" + '{API_SERVER_PORT:-3002}/API_PORT=$' + "{API_SERVER_PORT:-3004}/g'";
@@ -554,6 +579,178 @@ excluded:
           `sync-manifest should export ${scriptPath} instead of deleting it from clowder-ai`,
         );
       }
+    });
+
+    it('sync-manifest exports root package check script targets', () => {
+      const managedScripts = readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts');
+      const requiredScripts = [
+        'scripts/check-followup-tails.mjs',
+        'scripts/derive-worktree-ports.mjs',
+        'scripts/derive-worktree-ports.test.mjs',
+        'scripts/check-worktree-port-offset.mjs',
+      ];
+
+      for (const scriptPath of requiredScripts) {
+        assert.ok(
+          managedScripts.includes(scriptPath),
+          `sync-manifest should export ${scriptPath} because root package.json references it`,
+        );
+      }
+    });
+
+    it('sync-manifest exports F180 user-level hook truth source', () => {
+      const managedScripts = readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts');
+      const requiredHookScripts = [
+        '.claude/hooks/user-level/session-start-recall.sh',
+        '.claude/hooks/user-level/session-stop-check.sh',
+      ];
+
+      for (const scriptPath of requiredHookScripts) {
+        assert.ok(
+          managedScripts.includes(scriptPath),
+          `sync-manifest should export ${scriptPath} so open-source users have hook templates`,
+        );
+      }
+    });
+
+    it('sync-manifest exports a portable F180 Claude settings hook template', () => {
+      const managedFiles = readYamlTopLevelList('sync-manifest.yaml', 'managed_files');
+      const templatePath = '.claude/hooks/user-level/claude-settings.template.json';
+
+      assert.ok(
+        managedFiles.includes(templatePath),
+        `sync-manifest should export ${templatePath} as the Claude settings hook template`,
+      );
+
+      const template = readFileSync(resolve(ROOT, templatePath), 'utf-8');
+      assertPortableClaudeHookTemplate(template);
+      assert.doesNotThrow(() => JSON.parse(template));
+
+      const commands = readClaudeHookTemplateCommands(template);
+      assert.deepEqual(commands, [
+        '"$HOME/.claude/hooks/session-start-recall.sh"',
+        '"$HOME/.claude/hooks/session-stop-check.sh"',
+      ]);
+    });
+
+    it('F180 Claude settings hook template guard rejects maintainer absolute-path variants', () => {
+      const absolutePathTemplates = [
+        '{"hooks":{"SessionStart":[{"hooks":[{"command":"/home/alice/.claude/hooks/session-start-recall.sh"}]}]}}',
+        '{"hooks":{"SessionStart":[{"hooks":[{"command":"C:/Users/Alice/.claude/hooks/session-start-recall.sh"}]}]}}',
+        '{"hooks":{"SessionStart":[{"hooks":[{"command":"C:\\\\Users\\\\Alice\\\\.claude\\\\hooks\\\\session-start-recall.sh"}]}]}}',
+      ];
+
+      for (const template of absolutePathTemplates) {
+        assert.throws(() => assertPortableClaudeHookTemplate(template));
+      }
+    });
+
+    it('source install/setup attempts F180 agent hook sync as a nonfatal step', () => {
+      const install = readFileSync(resolve(ROOT, 'scripts/install.sh'), 'utf-8');
+      const setup = readFileSync(resolve(ROOT, 'scripts/setup.sh'), 'utf-8');
+
+      for (const [name, content] of [
+        ['install.sh', install],
+        ['setup.sh', setup],
+      ]) {
+        assert.match(content, /sync_agent_hooks_best_effort\(\)/, `${name} should call the shared hook sync step`);
+        assert.match(
+          content,
+          /pnpm exec tsx scripts\/sync-system-prompts\.ts --apply --agent-hooks-only/,
+          `${name} should reuse sync-system-prompts hook targets without syncing non-hook prompts`,
+        );
+        assert.match(
+          content,
+          /Agent CLI hook sync failed[\s\S]*continuing/,
+          `${name} should warn and continue when hook sync fails`,
+        );
+      }
+    });
+
+    it('sync-system-prompts agent hook mode also configures Claude settings', () => {
+      const content = readFileSync(resolve(ROOT, 'scripts/sync-system-prompts.ts'), 'utf-8');
+
+      assert.match(
+        content,
+        /syncClaudeSettings/,
+        'agent hook sync CLI should reuse the same Claude settings merge helper as the Hub sync API',
+      );
+      assert.match(
+        content,
+        /if\s*\(\s*isAgentHooksOnly\s*&&\s*!isDryRun\s*\)[\s\S]*await syncClaudeSettings\(syncTargetRoot\)/,
+        '--agent-hooks-only --apply must configure Claude settings, not only copy hook scripts and Codex hooks',
+      );
+    });
+
+    it('desktop installer bundles F180 hook truth source and offline sync helper', () => {
+      const inno = readFileSync(resolve(ROOT, 'desktop/installer/cat-cafe.iss'), 'utf-8');
+      const desktopPackage = readFileSync(resolve(ROOT, 'desktop/package.json'), 'utf-8');
+
+      assert.match(
+        inno,
+        /Source: "\.\.\\\.\.\\\.claude\\hooks\\user-level\\\*";\s+DestDir: "\{app\}\\\.claude\\hooks\\user-level"/,
+        'Windows installer should ship the user-level hook truth source',
+      );
+      assert.match(
+        inno,
+        /Source: "\.\.\\scripts\\sync-agent-hooks-offline\.mjs";\s+DestDir: "\{app\}\\scripts"/,
+        'Windows installer should ship the offline hook sync helper',
+      );
+      assert.match(
+        desktopPackage,
+        /"from": "\.\.\/\.claude\/hooks\/user-level"[\s\S]*"to": "\.claude\/hooks\/user-level"/,
+        'macOS DMG resources should ship the user-level hook truth source',
+      );
+      assert.match(
+        desktopPackage,
+        /"from": "\.\/scripts\/sync-agent-hooks-offline\.mjs"[\s\S]*"to": "scripts\/sync-agent-hooks-offline\.mjs"/,
+        'macOS DMG resources should ship the offline hook sync helper',
+      );
+    });
+
+    it('desktop installer runs F180 agent hook sync under the invoking user profile', () => {
+      const inno = readFileSync(resolve(ROOT, 'desktop/installer/cat-cafe.iss'), 'utf-8');
+      const postInstall = readFileSync(resolve(ROOT, 'desktop/scripts/post-install-offline.ps1'), 'utf-8');
+      const adminPostInstallEntry = inno.match(
+        /; Post-install:[\s\S]*?Filename: "powershell\.exe";[\s\S]*?Components: core/,
+      )?.[0];
+
+      assert.match(
+        inno,
+        /-AgentHooksOnly[\s\S]*Flags: runhidden waituntilterminated runasoriginaluser/,
+        'Windows installer should run user-level hook sync with original user credentials, not the elevated admin profile',
+      );
+      assert.ok(adminPostInstallEntry, 'Windows installer should keep the elevated post-install entry');
+      assert.doesNotMatch(
+        adminPostInstallEntry,
+        /-AgentHooksOnly/,
+        'admin post-install step should not also run AgentHooksOnly in the elevated profile',
+      );
+      assert.match(
+        postInstall,
+        /sync-agent-hooks-offline\.mjs/,
+        'post-install should invoke the offline hook sync helper',
+      );
+      assert.match(
+        postInstall,
+        /\$targetRoot = Resolve-AgentHookTargetRoot[\s\S]*--target-root[\s\S]*\$targetRoot/,
+        'offline helper should receive the resolved user profile explicitly as --target-root',
+      );
+      assert.match(
+        postInstall,
+        /Agent CLI hook sync failed[\s\S]*Hub health check can repair it later/,
+        'post-install hook sync failure should be a nonfatal warning',
+      );
+    });
+
+    it('desktop first-run mirrors F180 hook truth source into the writable API project', () => {
+      const serviceManager = readFileSync(resolve(ROOT, 'desktop/service-manager.js'), 'utf-8');
+
+      assert.match(
+        serviceManager,
+        /const mirrors = \['\.claude', 'cat-cafe-skills', 'docs', 'packages'\]/,
+        'desktop service manager should mirror .claude into the writable project root for API hook health',
+      );
     });
 
     it('sync-to-opensource.sh transforms AgentRouter.ts API port to 3004', () => {

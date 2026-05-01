@@ -39,11 +39,29 @@ const CLIENT_ID_VALUES = new Set(['anthropic', 'openai', 'google', 'kimi', 'dare
  *   1. old `provider` (clientId value) → `clientId` (P5 field rename)
  *   2. old `ocProviderName` → `provider` (P5 field rename)
  *   3. old `providerProfileId` → `accountRef` (P5 field rename)
+ *   4. drop legacy variants whose catId is now a standalone top-level breed
+ *      (e.g. `ragdoll.variants[opus-47]` after opus-47 was promoted to its own breed) —
+ *      otherwise toAllCatConfigs throws Duplicate catId on startup.
+ *
+ * `externalStandaloneBreedIds` lets the caller surface breed.ids from the template
+ * even when the runtime catalog hasn't picked them up yet — without it, a legacy
+ * catalog merged with a new-shape template still trips the duplicate-catId crash.
+ *
  * Bootstrap creates an empty catalog; template breeds are used as a menu when adding members.
  */
-function migrateCatalogVariants(catalog: CatCafeConfig): { catalog: CatCafeConfig; dirty: boolean } {
+function migrateCatalogVariants(
+  catalog: CatCafeConfig,
+  externalStandaloneBreedIds?: ReadonlySet<string>,
+): { catalog: CatCafeConfig; dirty: boolean } {
   let dirty = false;
   const next = structuredClone(catalog) as CatCafeConfig;
+
+  // Step 4 prep: union the catalog's own breed ids with any external ones (template)
+  // so legacy variants are dropped even when the catalog itself hasn't grown the new breed yet.
+  const standaloneBreedIds = new Set<string>(externalStandaloneBreedIds ?? []);
+  for (const breed of next.breeds as unknown as Record<string, unknown>[]) {
+    if (typeof breed.id === 'string') standaloneBreedIds.add(breed.id);
+  }
 
   for (const breed of next.breeds as unknown as Record<string, unknown>[]) {
     const variants = Array.isArray(breed.variants) ? (breed.variants as Record<string, unknown>[]) : [];
@@ -93,6 +111,29 @@ function migrateCatalogVariants(catalog: CatCafeConfig): { catalog: CatCafeConfi
       // clowder-ai#340: Do NOT backfill accountRef for unbound runtime variants.
       // Runtime catalog entries are authoritative; missing accountRef stays missing
       // until the user explicitly binds one in the editor.
+    }
+  }
+
+  // Step 4: drop legacy variants whose catId now belongs to a standalone top-level breed.
+  // Triggered when a cat (e.g. opus-47) was previously a sub-variant of another breed
+  // (ragdoll) and later got promoted to its own breed. Without this normalization,
+  // toAllCatConfigs() throws Duplicate catId at startup once both forms coexist.
+  for (const breed of next.breeds as unknown as Record<string, unknown>[]) {
+    const breedId = typeof breed.id === 'string' ? breed.id : undefined;
+    const breedDefaultCatId = typeof breed.catId === 'string' ? breed.catId : undefined;
+    const variants = Array.isArray(breed.variants) ? (breed.variants as Record<string, unknown>[]) : [];
+    if (variants.length === 0) continue;
+    const filtered = variants.filter((variant) => {
+      const variantCatId = (typeof variant.catId === 'string' ? variant.catId : undefined) ?? breedDefaultCatId;
+      if (!variantCatId) return true;
+      // Keep variants whose catId matches their own breed's id (legitimate single-variant breed).
+      if (variantCatId === breedId) return true;
+      // Drop only when catId points to a *different* standalone top-level breed.
+      return !standaloneBreedIds.has(variantCatId);
+    });
+    if (filtered.length !== variants.length) {
+      breed.variants = filtered;
+      dirty = true;
     }
   }
 
@@ -172,13 +213,40 @@ export function resolveCatCatalogPath(projectRoot: string): string {
   return safePath(projectRoot, CONFIG_SUBDIR, CAT_CATALOG_FILENAME);
 }
 
+/**
+ * Best-effort read of breed.id values from a sibling cat-template.json.
+ * Returns an empty set if the template is missing or unreadable — migration
+ * still works against catalog-only ids in that case.
+ */
+function readTemplateBreedIds(projectRoot: string): Set<string> {
+  const ids = new Set<string>();
+  let templateRaw: string;
+  try {
+    templateRaw = readFileSync(safePath(projectRoot, 'cat-template.json'), 'utf-8');
+  } catch {
+    return ids;
+  }
+  try {
+    const json = JSON.parse(templateRaw) as { breeds?: Array<{ id?: unknown }> };
+    for (const breed of json.breeds ?? []) {
+      if (typeof breed.id === 'string') ids.add(breed.id);
+    }
+  } catch {
+    // Malformed template — treat as no external ids.
+  }
+  return ids;
+}
+
 export function readCatCatalogRaw(projectRoot: string): string | null {
   const catalogPath = resolveCatCatalogPath(projectRoot);
   if (!existsSync(catalogPath)) return null;
   const raw = readFileSync(catalogPath, 'utf-8');
   try {
     const parsed = JSON.parse(raw) as CatCafeConfig;
-    const migrated = migrateCatalogVariants(parsed);
+    // Hand the migration template breed.ids so it can detect legacy variants
+    // that were promoted to standalone breeds in template but not yet here.
+    const templateBreedIds = readTemplateBreedIds(projectRoot);
+    const migrated = migrateCatalogVariants(parsed, templateBreedIds);
     if (migrated.dirty) {
       const nextRaw = `${JSON.stringify(migrated.catalog, null, 2)}\n`;
       writeFileAtomic(catalogPath, nextRaw);

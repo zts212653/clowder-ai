@@ -33,6 +33,7 @@ import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { mergeStreams } from '../invocation/stream-merge.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { parseA2AMentions } from '../routing/a2a-mentions.js';
+import { accumulateTextAggregate } from '../text-aggregation.js';
 import { type ContextEvalInput, extractContextEvalSignals } from './context-eval.js';
 import { buildBriefingMessage } from './format-briefing.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
@@ -506,7 +507,14 @@ export async function* routeParallel(
         }
       }
       if (effectiveMsg.type === 'text' && effectiveMsg.content && effectiveMsg.catId) {
-        catText.set(effectiveMsg.catId, (catText.get(effectiveMsg.catId) ?? '') + effectiveMsg.content);
+        catText.set(
+          effectiveMsg.catId,
+          accumulateTextAggregate(
+            catText.get(effectiveMsg.catId) ?? '',
+            effectiveMsg.content,
+            (effectiveMsg as { textMode?: 'append' | 'replace' }).textMode,
+          ),
+        );
       }
       // F045: Accumulate thinking blocks per cat for persistence (F5 recovery)
       if (effectiveMsg.type === 'system_info' && effectiveMsg.content && effectiveMsg.catId) {
@@ -573,6 +581,7 @@ export async function* routeParallel(
         const lastLen = catFlushLen.get(effectiveMsg.catId) ?? 0;
         const curText = catText.get(effectiveMsg.catId) ?? '';
         const charDelta = curText.length - lastLen;
+        const isReplaceText = (effectiveMsg as { textMode?: 'append' | 'replace' }).textMode === 'replace';
 
         const lastToolLen = catFlushToolLen.get(effectiveMsg.catId) ?? 0;
         const curTools = catToolEvents.get(effectiveMsg.catId);
@@ -581,8 +590,8 @@ export async function* routeParallel(
         const neverFlushedCat = lastLen === 0 && lastToolLen === 0;
         if (
           effectiveMsg.type === 'text' &&
-          charDelta > 0 &&
-          (neverFlushedCat || now - lastFlush >= FLUSH_INTERVAL_MS || charDelta >= FLUSH_CHAR_DELTA)
+          charDelta !== 0 &&
+          (neverFlushedCat || isReplaceText || now - lastFlush >= FLUSH_INTERVAL_MS || charDelta >= FLUSH_CHAR_DELTA)
         ) {
           const curThinking = catThinking.get(effectiveMsg.catId);
           deps.draftStore

@@ -112,3 +112,15 @@ created: 2026-03-13
 
 - 跨家族 review（Maine Coon review SystemPromptBuilder + feat-lifecycle 改动）
 - team lead亲自验收（用真实 magic word 测试猫的反应）
+
+## F177 Phase B 补充：第 7 个 Magic Word「下次一定」
+
+> 2026-04-29 | 由 F177 Phase B 新增 | 设计确认者：47（反向治理——被治理者确认判据设计）
+
+| 触发词 | 含义 | 猫的动作 | 主要适用对象 |
+|--------|------|---------|-------------|
+| **「下次一定」** | 你在把"未做"包装成"已规划" | 停，审视当前产物每一条"后续/future/next phase"——能做的现在做，做不了的走 cvo_signoff，不准留尾巴 | 全猫适用，47 为主要发病对象 |
+
+**蚊帐机制**：magic word 表只放「下次一定」一个（team lead好喊），但 F177 Phase A 的 quality-gate follow-up 字样扫描（`check-followup-tails.mjs`）同时覆盖语义同族关键词列表。
+
+**47 专属自检协议**：7 个发病时刻 + 对家猫盲审 quality-gate，详见 `cat-cafe-skills/refs/shared-rules.md`「47 自检协议」。

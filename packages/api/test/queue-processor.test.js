@@ -87,6 +87,32 @@ describe('QueueProcessor', () => {
     await new Promise((r) => setTimeout(r, 50));
   });
 
+  it('succeeded + stale user queued entry → auto-dequeues and starts execution', async () => {
+    const entry = enqueueEntry(deps.queue, { source: 'user' });
+    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+    deps.queue.list('t1', 'u1')[0].createdAt = Date.now() - InvocationQueue.STALE_QUEUED_THRESHOLD_MS - 1;
+
+    await processor.onInvocationComplete('t1', 'opus', 'succeeded');
+
+    assert.ok(
+      deps.invocationTracker.startAll.mock.calls.length > 0,
+      'stale user queued entry is still pending work and should be dispatched on completion',
+    );
+  });
+
+  it('succeeded + stale connector queued entry → auto-dequeues and starts execution', async () => {
+    const entry = enqueueEntry(deps.queue, { source: 'connector' });
+    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-connector-1');
+    deps.queue.list('t1', 'u1')[0].createdAt = Date.now() - InvocationQueue.STALE_QUEUED_THRESHOLD_MS - 1;
+
+    await processor.onInvocationComplete('t1', 'opus', 'succeeded');
+
+    assert.ok(
+      deps.invocationTracker.startAll.mock.calls.length > 0,
+      'stale connector queued entry is still pending work and should be dispatched on completion',
+    );
+  });
+
   it('succeeded + empty queue → no action', async () => {
     await processor.onInvocationComplete('t1', 'opus', 'succeeded');
     assert.equal(deps.invocationTracker.startAll.mock.calls.length, 0);
@@ -105,6 +131,55 @@ describe('QueueProcessor', () => {
     const pausedCall = emitCalls.find((c) => c.arguments[1] === 'queue_paused');
     assert.ok(pausedCall, 'should emit queue_paused');
     assert.equal(pausedCall.arguments[2].reason, 'canceled');
+  });
+
+  it('failed + stale user queued entry → pauses queue instead of treating it as empty', async () => {
+    const entry = enqueueEntry(deps.queue, { source: 'user' });
+    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+    deps.queue.list('t1', 'u1')[0].createdAt = Date.now() - InvocationQueue.STALE_QUEUED_THRESHOLD_MS - 1;
+
+    await processor.onInvocationComplete('t1', 'opus', 'failed');
+
+    assert.equal(processor.isPaused('t1', 'opus'), true, 'stale user work should still keep the slot paused');
+    const pausedCall = deps.socketManager.emitToUser.mock.calls.find((c) => c.arguments[1] === 'queue_paused');
+    assert.ok(pausedCall, 'should emit queue_paused for stale user work');
+    assert.equal(pausedCall.arguments[2].reason, 'failed');
+  });
+
+  it('canceled + stale connector queued entry → pauses queue instead of treating it as empty', async () => {
+    const entry = enqueueEntry(deps.queue, { source: 'connector' });
+    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-connector-1');
+    deps.queue.list('t1', 'u1')[0].createdAt = Date.now() - InvocationQueue.STALE_QUEUED_THRESHOLD_MS - 1;
+
+    await processor.onInvocationComplete('t1', 'opus', 'canceled');
+
+    assert.equal(processor.isPaused('t1', 'opus'), true, 'stale connector work should still keep the slot paused');
+    const pausedCall = deps.socketManager.emitToUser.mock.calls.find((c) => c.arguments[1] === 'queue_paused');
+    assert.ok(pausedCall, 'should emit queue_paused for stale connector work');
+    assert.equal(pausedCall.arguments[2].reason, 'canceled');
+  });
+
+  it('failed + stale user queued entry → #595 auto-recovery starts dispatch after pause delay', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const entry = enqueueEntry(deps.queue, { source: 'user' });
+    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+    deps.queue.list('t1', 'u1')[0].createdAt = Date.now() - InvocationQueue.STALE_QUEUED_THRESHOLD_MS - 1;
+
+    await processor.onInvocationComplete('t1', 'opus', 'failed');
+    assert.equal(processor.isPaused('t1', 'opus'), true);
+
+    t.mock.timers.tick(10_000);
+
+    assert.equal(deps.queue.list('t1', 'u1')[0].status, 'processing');
+    assert.equal(processor.isPaused('t1', 'opus'), false);
+  });
+
+  it('isThreadBusy treats stale queued user work as busy until it is dispatched or cleared', () => {
+    enqueueEntry(deps.queue, { source: 'user' });
+    deps.queue.list('t1', 'u1')[0].createdAt = Date.now() - InvocationQueue.STALE_QUEUED_THRESHOLD_MS - 1;
+
+    assert.equal(deps.queue.hasQueuedForThread('t1'), false, 'freshness gate should ignore stale user work');
+    assert.equal(processor.isThreadBusy('t1'), true, 'delivery-batch-done must not close while stale work is pending');
   });
 
   it('canceled_by_user → auto-dequeues and does not emit queue_paused', async () => {

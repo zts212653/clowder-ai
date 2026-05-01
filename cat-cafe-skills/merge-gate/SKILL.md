@@ -193,12 +193,60 @@ if [ "$SIGNED_OFF" != "true" ]; then
   exit 1
 fi
 
+# 6.8 Hotfix Cross-Cat Review Gate（F177 Phase E）🔴
+# 运行检测脚本（不纯依赖 label — 脚本扫 commit messages + PR title）
+HOTFIX_OUTPUT="$(PR_NUMBER={PR_NUMBER} node scripts/check-hotfix-pattern.mjs --apply-label {PR_NUMBER} 2>&1 || true)"
+HOTFIX_JSON="$(echo "$HOTFIX_OUTPUT" | tail -1)"
+if ! echo "$HOTFIX_JSON" | jq empty 2>/dev/null; then
+  echo "❌ Hotfix 检测脚本输出无效 JSON，停止 merge-gate（fail-closed）"
+  echo "Output: $HOTFIX_OUTPUT"
+  exit 1
+fi
+IS_HOTFIX="$(echo "$HOTFIX_JSON" | jq -r '.hotfix // false')"
+LABEL_ERROR="$(echo "$HOTFIX_JSON" | jq -r '.labelError // empty')"
+if [ -n "$LABEL_ERROR" ]; then
+  echo "⚠️ Hotfix label 添加失败: $LABEL_ERROR — 请手动: gh pr edit {PR_NUMBER} --add-label hotfix"
+fi
+if [ "$IS_HOTFIX" = "true" ]; then
+  PR_AUTHOR="$(gh pr view {PR_NUMBER} --json author --jq '.author.login')"
+  REVIEWERS="$(gh pr view {PR_NUMBER} --json reviews --jq '[.reviews[] | select(.state == "APPROVED") | .author.login] | unique | join(",")')"
+  if [ -z "$REVIEWERS" ] || echo "$REVIEWERS" | grep -q "^${PR_AUTHOR}$"; then
+    echo "❌ Hotfix PR 必须有跨猫 review 放行（禁止 self-merge）"
+    echo "   Author: $PR_AUTHOR | Approved by: ${REVIEWERS:-none}"
+    exit 1
+  fi
+  echo "✅ Hotfix cross-cat review: Author=$PR_AUTHOR, Approved by=$REVIEWERS"
+fi
+```
+
+```bash
 # 7. Squash merge（GitHub 处理，禁止本地 squash！）
 gh pr merge {PR_NUMBER} --squash --delete-branch
 
 # 7.5 Phase 文档同步（每次 merge 必做！）🔴
 # → 见下方「Phase 文档同步」章节
+```
 
+### Step 7.6: Hotfix 升级 Review Cron 注册（F177 Phase E）🔴
+
+**触发条件**：Step 6.8 检测到 `IS_HOTFIX = true` 时执行；否则跳过直接进 Step 8。
+
+**时机**：merge 完成后、清理前。`delayMs: 1209600000`（14 天）从注册时刻起算 ≈ 合入后 14 天。
+
+**操作**：调用 MCP 工具 `cat_cafe_register_scheduled_task`：
+
+| 参数 | 值 |
+|------|------|
+| `templateId` | `"reminder"` |
+| `trigger` | `{"type":"once","delayMs":1209600000}` （14 天） |
+| `label` | `"Hotfix 升级 review — PR #{PR_NUMBER}"` |
+| `description` | `"2 周升级 review：PR #{PR_NUMBER} 是 hotfix，需要三选一处置"` |
+| `category` | `"pr"` |
+| `params` | `{"message":"Hotfix PR #{PR_NUMBER} 合入已满 2 周。请三选一处置：1. 升级正式修复（开 feat）2. 接受永久方案（标记 permanent）3. 已不再相关（代码已重写/删除，标记 obsolete）"}` |
+
+**Fail-closed**：MCP 调用失败 → **停止 merge-gate，不执行 Step 8（清理）**。排查 MCP 连接后重试；连续失败 → 通知铲屎官手动注册 reminder 后继续。
+
+```bash
 # 8. 更新本地 + 清理（fail-closed）
 # ⚠️ 发现脏工作树就停止，不要“即兴”用 git stash -u 清理。
 # 原因：git stash -u/--include-untracked 会删除 untracked 文件（内部 git clean），

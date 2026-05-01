@@ -21,7 +21,7 @@ import { getVoiceBlockSynthesizer } from '../domains/cats/services/tts/VoiceBloc
 import { resolveUserId } from '../utils/request-identity.js';
 
 const synthesizeSchema = z.object({
-  text: z.string().min(1).max(5000),
+  text: z.string().min(1).max(20000),
   catId: z.string().optional(),
   voice: z.string().optional(),
   langCode: z.string().optional(),
@@ -145,7 +145,7 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
   // ── F066 Phase 4: Resynthesize endpoint ─────────────────────
 
   const resynthesizeSchema = z.object({
-    text: z.string().min(1).max(5000),
+    text: z.string().min(1).max(20000),
     catId: z.string().min(1),
   });
 
@@ -186,7 +186,7 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
   // ── F111: SSE Streaming synthesis endpoint ─────────────────────
 
   const streamSchema = z.object({
-    text: z.string().min(1).max(10000),
+    text: z.string().min(1).max(50000),
     catId: z.string().optional(),
     voice: z.string().optional(),
     langCode: z.string().optional(),
@@ -243,6 +243,7 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
     };
 
     const startTime = Date.now();
+    let successfulChunks = 0;
 
     for (let i = 0; i < chunks.length; i++) {
       if (reply.raw.destroyed || reply.raw.writableEnded) {
@@ -285,26 +286,31 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
 
         sendEvent({
           type: 'chunk',
-          index: i,
+          index: successfulChunks,
           total: chunks.length,
+          sourceIndex: i,
+          sourceTotal: chunks.length,
           audioBase64,
           text: chunk.text,
           durationSec: result.durationSec,
           format: result.format,
         });
+        successfulChunks++;
       } catch (err) {
-        request.log.error({ err, index: i }, '[TTS-STREAM] chunk synthesis failed');
-        sendEvent({
-          type: 'error',
-          error: err instanceof Error ? err.message : 'synthesis failed',
-        });
-        reply.raw.end();
-        return;
+        request.log.error({ err, index: i, total: chunks.length }, '[TTS-STREAM] chunk synthesis failed, skipping');
       }
     }
 
-    request.log.info({ totalMs: Date.now() - startTime, chunks: chunks.length }, '[TTS-STREAM] complete');
-    sendEvent({ type: 'done' });
+    if (successfulChunks === 0) {
+      request.log.error({ totalMs: Date.now() - startTime, chunks: chunks.length }, '[TTS-STREAM] all chunks failed');
+      sendEvent({ type: 'error', error: 'All chunks failed synthesis' });
+    } else {
+      request.log.info(
+        { totalMs: Date.now() - startTime, chunks: chunks.length, successfulChunks },
+        '[TTS-STREAM] complete',
+      );
+      sendEvent({ type: 'done', total: successfulChunks });
+    }
     reply.raw.end();
   });
 

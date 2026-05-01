@@ -287,6 +287,36 @@ skills:
     sop_step: [4, 5, 6]
     merged_from: ["merge-approval-gate", "requesting-cloud-review", "finishing-a-development-branch"]
 
+  # ── 开源项目拆解 ──
+  open-source-teardown:
+    description: >
+      明星开源项目拆解：从宣传/PPT/README 进入源码，验证真实架构、明星特性、算法含量、营销水分、可学习点和不 follow 的 tradeoff。
+      Use when: 铲屎官要求拆解热门 GitHub 项目、竞品 agent/runtime、外部 skill/tool 框架，或问“它到底有什么真本事/我们能学什么”。
+      Not for: 普通资料搜索（用 deep-research）、社区 issue/PR 运营（用 opensource-ops）、只需要架构头脑风暴（用 collaborative-thinking）。
+      Output: feature-discussions/YYYY-MM-DD-{project}-deep-dive/ 下的代码证据报告 + 对比结论 + 候选 lesson/skill。
+      GOTCHA: 不许只看 README 下判断；每个明星特性必须追到代码路径、状态突变点、反馈闭环和算法输入输出。
+    triggers:
+      - "拆解明星开源项目"
+      - "拆解开源项目"
+      - "竞品拆解"
+      - "热门 GitHub 项目"
+      - "它有什么真本事"
+      - "我们能学什么"
+      - "marketing vs reality"
+      - "算法含量"
+      - "拆解 hermes"
+      - "看看 letta 怎么做的"
+      - "codex cli 源码"
+      - "agent runtime 拆解"
+    not_for:
+      - "普通资料搜索"
+      - "社区 issue/PR 运营"
+      - "只需要架构头脑风暴"
+    output: "Code-evidence teardown report + Cat Cafe comparison + candidate lessons"
+    next: ["collaborative-thinking", "writing-skills", "deep-research"]
+    sop_step: null
+    merged_from: null
+
   # ── 自我进化 ──
   self-evolution:
     description: >

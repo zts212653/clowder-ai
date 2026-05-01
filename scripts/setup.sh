@@ -34,6 +34,19 @@ for arg in "$@"; do
 done
 apply_manual_download_source_overrides
 
+sync_agent_hooks_best_effort() {
+    echo "  Syncing Agent CLI hooks..."
+    local log_file
+    log_file="$(mktemp)"
+    if pnpm exec tsx scripts/sync-system-prompts.ts --apply --agent-hooks-only >"$log_file" 2>&1; then
+        echo -e "  ${GREEN}✓${NC} Agent CLI hooks synced"
+    else
+        echo -e "  ${YELLOW}⚠${NC} Agent CLI hook sync failed — continuing; Hub health check can repair it later"
+        tail -5 "$log_file" 2>/dev/null | sed 's/^/    /' || true
+    fi
+    rm -f "$log_file"
+}
+
 echo ""
 echo -e "${BOLD}🐱 Cat Cafe — Interactive Setup${NC}"
 echo -e "${BOLD}猫猫咖啡 — 交互式安装向导${NC}"
@@ -451,6 +464,7 @@ else
     echo -e "  ${YELLOW}⚠${NC} cat-cafe-skills/ not found — skills will not be available"
     echo "     You can link them later by re-running this script after cloning cat-cafe-skills."
 fi
+sync_agent_hooks_best_effort
 
 # ── Step 6: Summary ─────────────────────────────────────────
 

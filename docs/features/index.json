@@ -777,7 +777,7 @@
     {
       "id": "F127",
       "name": "猫猫管理重构 — 账户配置与猫猫实例分离，支持动态创建猫 + 自定义别名 @ 路由",
-      "status": "in-progress (intake + fix done, AC 部分验收) | **Owner**: 金渐层 + Maine Coon | **Priority**: P1",
+      "status": "done | **Completed**: 2026-04-29 | **Owner**: 金渐层 + Maine Coon | **Priority**: P1",
       "file": "F127-cat-instance-management.md"
     },
     {
@@ -1089,7 +1089,7 @@
     {
       "id": "F177",
       "name": "Harness Update — Close Gate 结构化判据 + 四心智专属护栏",
-      "status": "spec | **Owner**: Ragdoll | **Priority**: P0",
+      "status": "done | **Completed**: 2026-04-29 | **Owner**: Ragdoll(46 总负责) + Maine Coon(Maine Coon) + 孟加拉猫(46代言)，按 Phase 分主笔 | **Priority**: P0",
       "file": "F177-harness-update.md"
     },
     {
@@ -1097,6 +1097,42 @@
       "name": "Persistent MCP Agent-Key Auth — 跨 invocation 写权限",
       "status": "in-progress | **Owner**: Ragdoll（Ragdoll） | **Reviewer**: Maine Coon（Maine Coon） | **Priority**: P1",
       "file": "F178-persistent-mcp-agent-key-auth.md"
+    },
+    {
+      "id": "F179",
+      "name": "Desktop Installer Release Pipeline — 自动化产出 Win/Mac 安装包并附 release",
+      "status": "in-progress | **Owner**: Ragdoll（Opus-47/Ragdoll） | **Reviewer**: Maine Coon（GPT-5.5/Maine Coon） | **Priority**: P1",
+      "file": "F179-desktop-installer-release-pipeline.md"
+    },
+    {
+      "id": "F180",
+      "name": "Agent CLI Hook Health and Sync",
+      "status": "in-progress (Phase A+B merged via PR #1476; Phase C AC-C5 merged via PR #1477; Phase C AC-C1~C3 merged via PR #1478; Phase C AC-C4 + Phase D field repair station merged via PR #1479; AC-D4/open-source closure pending) | **Owner**: Maine Coon/Maine Coon | **Priority**: P1",
+      "file": "F180-agent-cli-hook-health.md"
+    },
+    {
+      "id": "F181",
+      "name": "Reserved Feature Slot — 待补充需求锚点",
+      "status": "idea | **Owner**: 待定 | **Priority**: TBD",
+      "file": "F181-reserved-feature-slot.md"
+    },
+    {
+      "id": "F182",
+      "name": "Cat Roster Lifecycle Toggle — 成员启停的全链路降级反馈",
+      "status": "spec | **Owner**: Ragdoll（Ragdoll/Opus 4.7） | **Reviewer**: Ragdoll（@opus 4.6）+ Maine Coon（@codex/Maine Coon） | **Priority**: P1",
+      "file": "F182-cat-roster-lifecycle-toggle.md"
+    },
+    {
+      "id": "F183",
+      "name": "Bubble Pipeline Architecture Consolidation — 消息气泡管线架构收敛",
+      "status": "in-progress | **Owner**: Ragdoll/Ragdoll (Opus-47) 牵头 | **Priority**: P1",
+      "file": "F183-bubble-pipeline-architecture-consolidation.md"
+    },
+    {
+      "id": "F184",
+      "name": "ChatMessage Rendering Mount Investigation — F176 撤销后未查的 DOM 缺失真 bug",
+      "status": "spec | **Owner**: 待定（建议跨 family review；候选 47 牵头 + Maine Coon review） | **Priority**: P2",
+      "file": "F184-chatmessage-rendering-mount-investigation.md"
     }
   ]
 }

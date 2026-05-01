@@ -26,6 +26,47 @@ describe('MessageStore', () => {
     assert.equal(store.size, 1);
   });
 
+  test('augmentStreamMetadata() enriches callback messages without replacing canonical content', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const store = new MessageStore();
+    const callbackMsg = store.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'Callback content remains canonical',
+      mentions: [],
+      timestamp: 1,
+      origin: 'callback',
+      extra: { rich: { v: 1, blocks: [{ id: 'callback-card', kind: 'card', v: 1, title: 'Callback' }] } },
+    });
+
+    const updated = store.augmentStreamMetadata(callbackMsg.id, {
+      thinking: 'stream thinking',
+      metadata: { provider: 'mock', model: 'test' },
+      toolEvents: [{ id: 'tool-1', type: 'tool_use', label: 'post_message', timestamp: 2 }],
+      mentionsUser: true,
+      extra: {
+        stream: { invocationId: 'parent-inv' },
+        tracing: { traceId: 'trace-1', spanId: 'span-1' },
+        rich: { v: 1, blocks: [{ id: 'stream-card', kind: 'card', v: 1, title: 'Stream' }] },
+      },
+    });
+
+    assert.ok(updated);
+    assert.equal(updated.content, 'Callback content remains canonical');
+    assert.equal(updated.origin, 'callback');
+    assert.equal(updated.thinking, 'stream thinking');
+    assert.deepEqual(updated.metadata, { provider: 'mock', model: 'test' });
+    assert.equal(updated.toolEvents.length, 1);
+    assert.equal(updated.mentionsUser, true);
+    assert.deepEqual(updated.extra.stream, { invocationId: 'parent-inv' });
+    assert.deepEqual(updated.extra.tracing, { traceId: 'trace-1', spanId: 'span-1' });
+    assert.deepEqual(
+      updated.extra.rich.blocks.map((block) => block.id),
+      ['callback-card', 'stream-card'],
+    );
+  });
+
   test('getRecent() returns last N messages', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 

@@ -73,6 +73,21 @@ export type {
   BrakeSettings,
   BrakeState,
 } from './brake.js';
+// F183 Phase B0: Bubble pipeline identity contract + invariant diagnostics
+export {
+  BUBBLE_EVENT_TYPES,
+  BUBBLE_KINDS,
+  type BubbleEventType,
+  type BubbleInvariantViolation,
+  type BubbleKind,
+  type BubbleOriginPhase,
+  type BubbleRecoveryAction,
+  type BubbleSourcePath,
+  type BubbleStableIdentity,
+  type BubbleViolationKind,
+  isBubbleEventType,
+  isBubbleKind,
+} from './bubble-pipeline.js';
 // F174 Phase A: shared reason taxonomy for callback auth failures
 export {
   CALLBACK_AUTH_FAILURE_REASONS,

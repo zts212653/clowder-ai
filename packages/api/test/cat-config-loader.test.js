@@ -941,17 +941,18 @@ describe('F32-b P4c: Sonnet variant in project config', () => {
     assert.notDeepEqual(all.sonnet.color, all.opus.color);
   });
 
-  it('total cat count is 13 (opus + sonnet + opus-45 + codex + gpt52 + spark + gemini + gemini25 + kimi + dare + antigravity + antig-opus + opencode)', () => {
+  it('total cat count is 14 (opus + sonnet + opus-45 + opus-47 + codex + gpt52 + spark + gemini + gemini25 + kimi + dare + antigravity + antig-opus + opencode)', () => {
     // Use template directly to avoid catalog overlay pollution from earlier tests
     const templatePath =
       process.env.CAT_TEMPLATE_PATH ??
       resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'cat-template.json');
     const config = loadCatConfig(templatePath);
     const all = toAllCatConfigs(config);
-    assert.equal(Object.keys(all).length, 13);
+    assert.equal(Object.keys(all).length, 14);
     assert.ok(all.opus);
     assert.ok(all.sonnet);
     assert.ok(all['opus-45']);
+    assert.ok(all['opus-47']);
     assert.ok(all.codex);
     assert.ok(all.gpt52);
     assert.ok(all.spark); // F032 Phase E: new cat added
@@ -970,6 +971,13 @@ describe('F32-b P4c: Sonnet variant in project config', () => {
     // F061 Phase 2: CLI/CDP removed, Bridge handles communication
     assert.equal(all.antigravity.cli, undefined);
     assert.equal(all['antig-opus'].cli, undefined);
+  });
+
+  it('antigravity variants advertise MCP support through managed Antigravity config', () => {
+    const config = loadCatConfig();
+    const all = toAllCatConfigs(config);
+    assert.equal(all.antigravity.mcpSupport, true);
+    assert.equal(all['antig-opus'].mcpSupport, true);
   });
 });
 

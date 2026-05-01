@@ -1571,8 +1571,14 @@ describe('generateCliConfigs', () => {
 
     const originalAwd = process.env.ALLOWED_WORKSPACE_DIRS;
     const originalWsr = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    const originalAgentKeyFile = process.env.CAT_CAFE_AGENT_KEY_FILE;
+    const originalAgentKeyFiles = process.env.CAT_CAFE_AGENT_KEY_FILES;
+    const originalAgentKeySecret = process.env.CAT_CAFE_AGENT_KEY_SECRET;
     delete process.env.ALLOWED_WORKSPACE_DIRS;
     delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+    delete process.env.CAT_CAFE_AGENT_KEY_FILE;
+    delete process.env.CAT_CAFE_AGENT_KEY_FILES;
+    delete process.env.CAT_CAFE_AGENT_KEY_SECRET;
     try {
       await generateCliConfigs(config, paths);
       const data = JSON.parse(await readFile(paths.antigravity, 'utf-8'));
@@ -1587,6 +1593,12 @@ describe('generateCliConfigs', () => {
       else process.env.ALLOWED_WORKSPACE_DIRS = originalAwd;
       if (originalWsr === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
       else process.env.CAT_CAFE_WORKSPACE_ROOT = originalWsr;
+      if (originalAgentKeyFile === undefined) delete process.env.CAT_CAFE_AGENT_KEY_FILE;
+      else process.env.CAT_CAFE_AGENT_KEY_FILE = originalAgentKeyFile;
+      if (originalAgentKeyFiles === undefined) delete process.env.CAT_CAFE_AGENT_KEY_FILES;
+      else process.env.CAT_CAFE_AGENT_KEY_FILES = originalAgentKeyFiles;
+      if (originalAgentKeySecret === undefined) delete process.env.CAT_CAFE_AGENT_KEY_SECRET;
+      else process.env.CAT_CAFE_AGENT_KEY_SECRET = originalAgentKeySecret;
     }
   });
 

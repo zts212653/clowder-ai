@@ -794,7 +794,7 @@
           ],
           "provider": "antigravity",
           "defaultModel": "claude-opus-4-6",
-          "mcpSupport": false,
+          "mcpSupport": true,
           "avatar": "/avatars/antig-opus.png",
           "color": {
             "primary": "#C97A35",

@@ -525,7 +525,7 @@ describe('global accounts (clowder-ai#340)', () => {
     }
   });
 
-  it('migrates legacy credentials from homedir when globalRoot differs from homedir', async () => {
+  it('migrates well-known installer credentials from homedir when globalRoot differs from homedir', async () => {
     const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
@@ -544,24 +544,28 @@ describe('global accounts (clowder-ai#340)', () => {
         join(fakeHome, '.cat-cafe', 'provider-profiles.json'),
         JSON.stringify({
           version: 2,
-          providers: [{ id: 'homedir-account', authType: 'api_key', baseUrl: 'https://home.api/v1' }],
+          providers: [{ id: 'installer-openai', authType: 'api_key', baseUrl: 'https://home.api/v1' }],
         }),
         'utf-8',
       );
       await writeFile(
         join(fakeHome, '.cat-cafe', 'provider-profiles.secrets.local.json'),
-        JSON.stringify({ profiles: { 'homedir-account': { apiKey: 'sk-from-homedir' } } }),
+        JSON.stringify({ profiles: { 'installer-openai': { apiKey: 'sk-from-homedir' } } }),
         'utf-8',
       );
 
       // projectRoot is a separate directory — no legacy files there
       const result = readCatalogAccounts(projectRoot);
-      assert.equal(result['homedir-account']?.baseUrl, 'https://home.api/v1', 'account from homedir must be migrated');
+      assert.equal(
+        result['installer-openai']?.baseUrl,
+        'https://home.api/v1',
+        'installer account from homedir must be migrated',
+      );
 
       // Credentials should be migrated to globalRoot (= projectRoot when env unset)
       const credRaw = await readFile(join(projectRoot, '.cat-cafe', 'credentials.json'), 'utf-8');
       const creds = JSON.parse(credRaw);
-      assert.equal(creds['homedir-account']?.apiKey, 'sk-from-homedir', 'API key from homedir must be migrated');
+      assert.equal(creds['installer-openai']?.apiKey, 'sk-from-homedir', 'API key from homedir must be migrated');
     } finally {
       process.env.HOME = savedHome;
       // Restore env for subsequent tests
@@ -570,7 +574,7 @@ describe('global accounts (clowder-ai#340)', () => {
     }
   });
 
-  it('migrates homedir credentials to multiple projects in the same process', async () => {
+  it('migrates homedir installer credentials to multiple projects in the same process', async () => {
     const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
@@ -588,34 +592,332 @@ describe('global accounts (clowder-ai#340)', () => {
         join(fakeHome, '.cat-cafe', 'provider-profiles.json'),
         JSON.stringify({
           version: 2,
-          providers: [{ id: 'homedir-account', authType: 'api_key', baseUrl: 'https://home.api/v1' }],
+          providers: [{ id: 'installer-openai', authType: 'api_key', baseUrl: 'https://home.api/v1' }],
         }),
         'utf-8',
       );
       await writeFile(
         join(fakeHome, '.cat-cafe', 'provider-profiles.secrets.local.json'),
-        JSON.stringify({ profiles: { 'homedir-account': { apiKey: 'sk-from-homedir' } } }),
+        JSON.stringify({ profiles: { 'installer-openai': { apiKey: 'sk-from-homedir' } } }),
         'utf-8',
       );
 
       // First project migrates successfully
       const resultA = readCatalogAccounts(projectRoot);
-      assert.equal(resultA['homedir-account']?.baseUrl, 'https://home.api/v1', 'projectA must get homedir account');
+      assert.equal(resultA['installer-openai']?.baseUrl, 'https://home.api/v1', 'projectA must get homedir account');
 
       // Second project must ALSO get the homedir credentials (not skipped by boolean cache)
       const resultB = readCatalogAccounts(projectB);
       assert.equal(
-        resultB['homedir-account']?.baseUrl,
+        resultB['installer-openai']?.baseUrl,
         'https://home.api/v1',
         'projectB must also get homedir account',
       );
 
       const credRawB = await readFile(join(projectB, '.cat-cafe', 'credentials.json'), 'utf-8');
       const credsB = JSON.parse(credRawB);
-      assert.equal(credsB['homedir-account']?.apiKey, 'sk-from-homedir', 'projectB must also get homedir API key');
+      assert.equal(credsB['installer-openai']?.apiKey, 'sk-from-homedir', 'projectB must also get homedir API key');
     } finally {
       process.env.HOME = savedHome;
       process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = globalRoot;
+      await rm(fakeHome, { recursive: true, force: true });
+      await rm(projectB, { recursive: true, force: true });
+    }
+  });
+
+  it('imports homedir credentials for legacy project catalog.accounts refs', async () => {
+    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    resetMigrationState();
+
+    const fakeHome = await mkdtemp(join(tmpdir(), 'fake-home-catalog-accounts-creds-'));
+    await mkdir(join(fakeHome, '.cat-cafe'), { recursive: true });
+    const savedHome = process.env.HOME;
+    process.env.HOME = fakeHome;
+
+    try {
+      await writeFile(
+        join(projectRoot, '.cat-cafe', 'cat-catalog.json'),
+        JSON.stringify({
+          version: 2,
+          breeds: [],
+          roster: {},
+          reviewPolicy: {},
+          accounts: {
+            'legacy-custom': {
+              authType: 'api_key',
+              baseUrl: 'https://legacy-custom.example/v1',
+            },
+          },
+        }),
+        'utf-8',
+      );
+      await writeFile(
+        join(fakeHome, '.cat-cafe', 'credentials.json'),
+        JSON.stringify({ 'legacy-custom': { apiKey: 'sk-legacy-custom' } }),
+        'utf-8',
+      );
+
+      const result = readCatalogAccounts(projectRoot);
+      assert.equal(result['legacy-custom']?.baseUrl, 'https://legacy-custom.example/v1');
+
+      const credsRaw = await readFile(join(globalRoot, '.cat-cafe', 'credentials.json'), 'utf-8');
+      const creds = JSON.parse(credsRaw);
+      assert.equal(creds['legacy-custom']?.apiKey, 'sk-legacy-custom');
+    } finally {
+      process.env.HOME = savedHome;
+      await rm(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  it('does not import unreferenced homedir legacy experiments into project-local accounts', async () => {
+    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    resetMigrationState();
+
+    delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+
+    const fakeHome = await mkdtemp(join(tmpdir(), 'fake-home-unreferenced-legacy-'));
+    await mkdir(join(fakeHome, '.cat-cafe'), { recursive: true });
+    const savedHome = process.env.HOME;
+    process.env.HOME = fakeHome;
+
+    try {
+      await writeFile(
+        join(fakeHome, '.cat-cafe', 'provider-profiles.json'),
+        JSON.stringify({
+          version: 2,
+          providers: [
+            { id: 'installer-openai', authType: 'api_key', baseUrl: 'https://api.openai.com/v1' },
+            { id: 'agent-teams-local', authType: 'api_key', displayName: 'Agent Teams Local' },
+            {
+              id: 'codex-sponsor',
+              authType: 'api_key',
+              displayName: 'codex-sponsor',
+              baseUrl: 'https://openai.example/v1',
+              models: ['gpt-5.4'],
+            },
+          ],
+        }),
+        'utf-8',
+      );
+      await writeFile(
+        join(fakeHome, '.cat-cafe', 'provider-profiles.secrets.local.json'),
+        JSON.stringify({
+          profiles: {
+            'installer-openai': { apiKey: 'sk-installer-openai' },
+            'agent-teams-local': { apiKey: 'sk-agent-teams-local' },
+            'codex-sponsor': { apiKey: 'sk-codex-sponsor' },
+          },
+        }),
+        'utf-8',
+      );
+
+      const result = readCatalogAccounts(projectRoot);
+      assert.ok(result['installer-openai'], 'well-known installer account should still migrate');
+      assert.equal(result['agent-teams-local'], undefined, 'unreferenced homedir experiment must not migrate');
+      assert.equal(result['codex-sponsor'], undefined, 'unreferenced homedir test fixture must not migrate');
+
+      const credsRaw = await readFile(join(projectRoot, '.cat-cafe', 'credentials.json'), 'utf-8');
+      const creds = JSON.parse(credsRaw);
+      assert.equal(creds['installer-openai']?.apiKey, 'sk-installer-openai');
+      assert.equal(creds['agent-teams-local'], undefined, 'skipped experiment credential must not migrate');
+      assert.equal(creds['codex-sponsor'], undefined, 'skipped fixture credential must not migrate');
+    } finally {
+      process.env.HOME = savedHome;
+      process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = globalRoot;
+      await rm(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  it('imports a homedir legacy account when the project catalog references it', async () => {
+    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    resetMigrationState();
+
+    delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+
+    const fakeHome = await mkdtemp(join(tmpdir(), 'fake-home-referenced-legacy-'));
+    await mkdir(join(fakeHome, '.cat-cafe'), { recursive: true });
+    const savedHome = process.env.HOME;
+    process.env.HOME = fakeHome;
+
+    try {
+      await writeFile(
+        join(projectRoot, '.cat-cafe', 'cat-catalog.json'),
+        JSON.stringify({
+          version: 2,
+          breeds: [
+            {
+              id: 'custom',
+              variants: [{ id: 'custom-default', accountRef: 'modelarts-shared' }],
+            },
+          ],
+          roster: {},
+          reviewPolicy: {},
+        }),
+        'utf-8',
+      );
+      await writeFile(
+        join(fakeHome, '.cat-cafe', 'provider-profiles.json'),
+        JSON.stringify({
+          version: 2,
+          providers: [
+            {
+              id: 'modelarts-shared',
+              authType: 'api_key',
+              displayName: 'ModelArts Shared',
+              baseUrl: 'https://api.modelarts-maas.com/v2',
+              models: ['glm-5'],
+            },
+          ],
+        }),
+        'utf-8',
+      );
+      await writeFile(
+        join(fakeHome, '.cat-cafe', 'provider-profiles.secrets.local.json'),
+        JSON.stringify({ profiles: { 'modelarts-shared': { apiKey: 'sk-modelarts' } } }),
+        'utf-8',
+      );
+
+      const result = readCatalogAccounts(projectRoot);
+      assert.equal(result['modelarts-shared']?.baseUrl, 'https://api.modelarts-maas.com/v2');
+
+      const credsRaw = await readFile(join(projectRoot, '.cat-cafe', 'credentials.json'), 'utf-8');
+      const creds = JSON.parse(credsRaw);
+      assert.equal(creds['modelarts-shared']?.apiKey, 'sk-modelarts');
+    } finally {
+      process.env.HOME = savedHome;
+      process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = globalRoot;
+      await rm(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  it('imports a homedir legacy account when the project catalog references legacy providerProfileId', async () => {
+    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    resetMigrationState();
+
+    delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+
+    const fakeHome = await mkdtemp(join(tmpdir(), 'fake-home-provider-profile-id-'));
+    await mkdir(join(fakeHome, '.cat-cafe'), { recursive: true });
+    const savedHome = process.env.HOME;
+    process.env.HOME = fakeHome;
+
+    try {
+      await writeFile(
+        join(projectRoot, '.cat-cafe', 'cat-catalog.json'),
+        JSON.stringify({
+          version: 2,
+          breeds: [
+            {
+              id: 'legacy-custom',
+              variants: [{ id: 'legacy-custom-default', providerProfileId: 'legacy-provider-profile' }],
+            },
+          ],
+          roster: {},
+          reviewPolicy: {},
+        }),
+        'utf-8',
+      );
+      await writeFile(
+        join(fakeHome, '.cat-cafe', 'provider-profiles.json'),
+        JSON.stringify({
+          version: 2,
+          providers: [
+            {
+              id: 'legacy-provider-profile',
+              authType: 'api_key',
+              displayName: 'Legacy Provider Profile',
+              baseUrl: 'https://legacy-provider.example/v1',
+            },
+          ],
+        }),
+        'utf-8',
+      );
+      await writeFile(
+        join(fakeHome, '.cat-cafe', 'provider-profiles.secrets.local.json'),
+        JSON.stringify({ profiles: { 'legacy-provider-profile': { apiKey: 'sk-legacy-provider' } } }),
+        'utf-8',
+      );
+
+      const result = readCatalogAccounts(projectRoot);
+      assert.equal(result['legacy-provider-profile']?.baseUrl, 'https://legacy-provider.example/v1');
+
+      const credsRaw = await readFile(join(projectRoot, '.cat-cafe', 'credentials.json'), 'utf-8');
+      const creds = JSON.parse(credsRaw);
+      assert.equal(creds['legacy-provider-profile']?.apiKey, 'sk-legacy-provider');
+    } finally {
+      process.env.HOME = savedHome;
+      process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = globalRoot;
+      await rm(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  it('imports project-referenced homedir legacy accounts across shared global roots', async () => {
+    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    resetMigrationState();
+
+    const fakeHome = await mkdtemp(join(tmpdir(), 'fake-home-shared-global-legacy-'));
+    const projectB = await mkdtemp(join(tmpdir(), 'project-b-shared-global-'));
+    await mkdir(join(fakeHome, '.cat-cafe'), { recursive: true });
+    await mkdir(join(projectB, '.cat-cafe'), { recursive: true });
+    const savedHome = process.env.HOME;
+    process.env.HOME = fakeHome;
+
+    try {
+      await writeFile(
+        join(projectRoot, '.cat-cafe', 'cat-catalog.json'),
+        JSON.stringify({
+          version: 2,
+          breeds: [{ id: 'custom-a', variants: [{ id: 'custom-a-default', accountRef: 'modelarts-a' }] }],
+          roster: {},
+          reviewPolicy: {},
+        }),
+        'utf-8',
+      );
+      await writeFile(
+        join(projectB, '.cat-cafe', 'cat-catalog.json'),
+        JSON.stringify({
+          version: 2,
+          breeds: [{ id: 'custom-b', variants: [{ id: 'custom-b-default', accountRef: 'modelarts-b' }] }],
+          roster: {},
+          reviewPolicy: {},
+        }),
+        'utf-8',
+      );
+      await writeFile(
+        join(fakeHome, '.cat-cafe', 'provider-profiles.json'),
+        JSON.stringify({
+          version: 2,
+          providers: [
+            { id: 'modelarts-a', authType: 'api_key', baseUrl: 'https://modelarts-a.example/v1' },
+            { id: 'modelarts-b', authType: 'api_key', baseUrl: 'https://modelarts-b.example/v1' },
+          ],
+        }),
+        'utf-8',
+      );
+      await writeFile(
+        join(fakeHome, '.cat-cafe', 'provider-profiles.secrets.local.json'),
+        JSON.stringify({
+          profiles: {
+            'modelarts-a': { apiKey: 'sk-modelarts-a' },
+            'modelarts-b': { apiKey: 'sk-modelarts-b' },
+          },
+        }),
+        'utf-8',
+      );
+
+      const resultA = readCatalogAccounts(projectRoot);
+      assert.equal(resultA['modelarts-a']?.baseUrl, 'https://modelarts-a.example/v1');
+      assert.equal(resultA['modelarts-b'], undefined, 'projectA must not import projectB-only account');
+
+      const resultB = readCatalogAccounts(projectB);
+      assert.equal(resultB['modelarts-b']?.baseUrl, 'https://modelarts-b.example/v1');
+
+      const credsRaw = await readFile(join(globalRoot, '.cat-cafe', 'credentials.json'), 'utf-8');
+      const creds = JSON.parse(credsRaw);
+      assert.equal(creds['modelarts-a']?.apiKey, 'sk-modelarts-a');
+      assert.equal(creds['modelarts-b']?.apiKey, 'sk-modelarts-b');
+    } finally {
+      process.env.HOME = savedHome;
       await rm(fakeHome, { recursive: true, force: true });
       await rm(projectB, { recursive: true, force: true });
     }

@@ -10,9 +10,9 @@ created: 2026-03-20
 
 > **Status**: done | **Completed**: 2026-03-20 | **Owner**: 金渐层 | **Reviewer**: Maine Coon | **Priority**: P1
 >
-> **Phase A merged**: PR [#600](https://github.com/zts212653/cat-cafe/pull/600) — `22e148ad` (2026-03-20)
-> Reviewed by Maine Coon (gpt52) — 8 rounds. Closes [#594](https://github.com/zts212653/cat-cafe/issues/594).
-> **Phase B+C merged**: PR [#601](https://github.com/zts212653/cat-cafe/pull/601) — `8e89df73` (2026-03-20)
+> **Phase A merged**: PR [#600](https://github.com/zts212653/clowder-ai/pull/600) — `22e148ad` (2026-03-20)
+> Reviewed by Maine Coon (gpt52) — 8 rounds. Closes [#594](https://github.com/zts212653/clowder-ai/issues/594).
+> **Phase B+C merged**: PR [#601](https://github.com/zts212653/clowder-ai/pull/601) — `8e89df73` (2026-03-20)
 > Reviewed by Maine Coon (gpt52) — 2 rounds. console.* 全量迁移 + logs:health 脚本。
 >
 
@@ -20,7 +20,7 @@ created: 2026-03-20
 
 team lead在排查飞书语音上传问题时发现（2026-03-20）：Fastify logger 只配了 stdout，没有 file transport。所有运行日志只在终端输出，terminal 关了就没了。一个多月裸奔。
 
-Issue: [#594](https://github.com/zts212653/cat-cafe/issues/594)
+Issue: [#594](https://github.com/zts212653/clowder-ai/issues/594)
 
 实际病灶比 issue 描述更大：
 - **Fastify logger**（pino）只有 stdout，无文件落盘（`index.ts` L182-186）

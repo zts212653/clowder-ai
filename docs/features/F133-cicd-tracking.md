@@ -201,7 +201,7 @@ GitHub API 轮询 → CiCdCheckPoller (新)
 | KD-1 | CI/CD 通知复用现有 Review 消息管道（messageStore → socket → trigger） | 投递体验一致；不需要新建管道；ConnectorSource 协议已支持 | 2026-03-23 |
 | KD-2 | 数据源用 PR 级 rollup（`gh pr view --json statusCheckRollup`），不用 raw Checks API | 一次请求拿 headSha + lifecycle + 聚合状态；覆盖 Checks + commit statuses 两套体系；Maine Coon Design Gate 提出 | 2026-03-23 |
 | KD-3 | 只 track 已注册 PR | 零噪音；复用现有 register_pr_tracking 入口 | 2026-03-23 |
-| KD-4 | CI 失败唤醒猫（priority: urgent），CI 成功只投递消息 | 与 `github-review` 行为归一；失败消息通过队列内优先级排序（而非抢占旁路）优先出队（F175 修正：urgent 语义从"抢占"改为"队首优先级"） | 2026-03-24 |
+| KD-4 | CI 失败唤醒猫（priority: urgent），CI 成功只投递消息 | 与 `github-review` 行为归一；失败消息通过队列内优先级排序（而非抢占旁路）优先出队（F175 修正：urgent 语义从“抢占”改为“队首优先级”） | 2026-03-24 |
 | KD-5 | 独立 CiCdRouter，不塞 ReviewRouter | ReviewRouter 把 review 专属的去重/内容抓取/格式化混在一起，硬塞 CI 会耦死两个数据源；抽共享 deliverConnectorMessage() helper | 2026-03-23 |
 | KD-6 | 独立 github-ci-bootstrap.ts | lifecycle 和日志独立，不复用 review bootstrap 语义 | 2026-03-23 |
 | KD-7 | PrTrackingStore 新增 patchCiState()，不复用 register() | register() 会整 hash 重写并刷新 registeredAt，把注册和运行态状态更新混成一个操作 | 2026-03-23 |

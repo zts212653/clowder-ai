@@ -43,7 +43,11 @@ import {
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
 import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
-import { hydrateReplyPreview, type StoredToolEvent } from '../../stores/ports/MessageStore.js';
+import {
+  hydrateReplyPreview,
+  type StoredToolEvent,
+  type StreamMetadataAugmentInput,
+} from '../../stores/ports/MessageStore.js';
 import type { Thread, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
 import { getStreamingTtsRegistry, StreamingTtsChunker } from '../../tts/StreamingTtsChunker.js';
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
@@ -60,6 +64,7 @@ import {
   unregisterWorklist,
   updateStreakOnPush,
 } from '../routing/WorklistRegistry.js';
+import { accumulateTextAggregate } from '../text-aggregation.js';
 import { extractContextEvalSignals } from './context-eval.js';
 import { validateRoutingSyntax } from './final-routing-slot.js';
 import { buildBriefingMessage } from './format-briefing.js';
@@ -103,8 +108,58 @@ function isPostMessageToolName(toolName: string | undefined): boolean {
   return toolName === 'mcp:cat-cafe/post_message' || toolName === 'cat_cafe_post_message';
 }
 
-function confirmsPostMessagePersistence(content: string | undefined): boolean {
-  return content?.includes('"status":"ok"') || content?.includes('"status":"duplicate"') || false;
+type CallbackPostResult = {
+  confirmed: boolean;
+  messageId?: string;
+  threadId?: string;
+};
+
+function collectCallbackPostResultCandidates(content: string): string[] {
+  const candidates = new Set<string>();
+  const trimmed = content.trim();
+  if (trimmed) candidates.add(trimmed);
+  for (const line of trimmed.split(/\r?\n/)) {
+    const candidate = line.trim();
+    if (candidate.startsWith('{') && candidate.endsWith('}')) candidates.add(candidate);
+  }
+  const jsonStart = trimmed.indexOf('{');
+  if (jsonStart > 0) candidates.add(trimmed.slice(jsonStart));
+  return [...candidates];
+}
+
+function callbackPostResultFromPayload(parsed: {
+  status?: unknown;
+  messageId?: unknown;
+  threadId?: unknown;
+}): CallbackPostResult | null {
+  const confirmed = parsed.status === 'ok' || parsed.status === 'duplicate';
+  if (!confirmed && parsed.status === undefined) return null;
+  return {
+    confirmed,
+    ...(typeof parsed.messageId === 'string' && parsed.messageId.length > 0 ? { messageId: parsed.messageId } : {}),
+    ...(typeof parsed.threadId === 'string' && parsed.threadId.length > 0 ? { threadId: parsed.threadId } : {}),
+  };
+}
+
+function parseCallbackPostResult(content: string | undefined): {
+  confirmed: boolean;
+  messageId?: string;
+  threadId?: string;
+} {
+  if (!content) return { confirmed: false };
+  for (const candidate of collectCallbackPostResultCandidates(content)) {
+    try {
+      const parsed = JSON.parse(candidate) as { status?: unknown; messageId?: unknown; threadId?: unknown };
+      const result = callbackPostResultFromPayload(parsed);
+      if (result) return result;
+    } catch {
+      // Try the next candidate shape.
+    }
+  }
+
+  return {
+    confirmed: /"status"\s*:\s*"(ok|duplicate)"/.test(content),
+  };
 }
 
 function inferToolResultName(msg: AgentMessage): string | undefined {
@@ -125,11 +180,13 @@ function consumePendingToolResult(
   pendingToolResults: string[],
   msg: AgentMessage,
   hasConfirmingContent: boolean,
+  hasCallbackPostEvidence: boolean,
 ): string | undefined {
   const resultToolName = inferToolResultName(msg);
   if (resultToolName) {
     const pendingIndex = pendingToolResults.findIndex((name) => toolNamesMatch(name, resultToolName));
-    if (pendingIndex !== -1) pendingToolResults.splice(pendingIndex, 1);
+    if (pendingIndex === -1) return undefined;
+    pendingToolResults.splice(pendingIndex, 1);
     return resultToolName;
   }
 
@@ -140,11 +197,21 @@ function consumePendingToolResult(
     return pendingToolResults.shift();
   }
 
+  if (hasConfirmingContent && hasCallbackPostEvidence) {
+    return pendingToolResults.shift();
+  }
+
   if (hasConfirmingContent && pendingToolResults.length === 1) {
     return pendingToolResults.shift();
   }
 
   return undefined;
+}
+
+function hasStreamMetadataPatch(patch: StreamMetadataAugmentInput): boolean {
+  return Boolean(
+    patch.thinking || patch.metadata || patch.toolEvents?.length || patch.replyTo || patch.mentionsUser || patch.extra,
+  );
 }
 
 export async function* routeSerial(
@@ -558,10 +625,11 @@ export async function* routeSerial(
       const collectedToolEvents: StoredToolEvent[] = [];
       // F148 OQ-2: Collect tool names for context eval signals
       const collectedToolNames: string[] = [];
-      const pendingToolResults: string[] = [];
       // #573: Track confirmed cat_cafe_post_message callback persistence
       let callbackPostConfirmed = false;
+      let callbackPostMessageId: string | undefined;
       let awaitingCallbackResult = false;
+      const pendingToolResults: string[] = [];
       const structuredTargetCats = new Set<string>();
       // F060: Collect rich blocks emitted inline via system_info (not MCP buffer)
       const streamRichBlocks: import('@cat-cafe/shared').RichBlock[] = [];
@@ -668,7 +736,11 @@ export async function* routeSerial(
           }
 
           if (effectiveMsg.type === 'text' && effectiveMsg.content) {
-            textContent += effectiveMsg.content;
+            textContent = accumulateTextAggregate(
+              textContent,
+              effectiveMsg.content,
+              (effectiveMsg as { textMode?: 'append' | 'replace' }).textMode,
+            );
             voiceChunker?.feed(effectiveMsg.content);
           }
           // F045: Accumulate thinking blocks for persistence (F5 recovery)
@@ -709,16 +781,22 @@ export async function* routeSerial(
           }
           // #573: Confirm callback persistence via tool_result success
           if (effectiveMsg.type === 'tool_result') {
-            const hasConfirmingContent = confirmsPostMessagePersistence(effectiveMsg.content);
-            const completedToolName = consumePendingToolResult(pendingToolResults, effectiveMsg, hasConfirmingContent);
+            const callbackResult = parseCallbackPostResult(effectiveMsg.content);
+            const completedToolName = consumePendingToolResult(
+              pendingToolResults,
+              effectiveMsg,
+              callbackResult.confirmed,
+              Boolean(callbackResult.messageId && callbackResult.threadId),
+            );
             if (
               awaitingCallbackResult &&
               completedToolName &&
               isPostMessageToolName(completedToolName) &&
-              hasConfirmingContent
+              callbackResult.confirmed
             ) {
               callbackPostConfirmed = true;
               awaitingCallbackResult = false;
+              if (callbackResult.messageId) callbackPostMessageId = callbackResult.messageId;
             }
           }
 
@@ -735,11 +813,15 @@ export async function* routeSerial(
           if (deps.draftStore && ownInvocationId) {
             const now = Date.now();
             const charDelta = textContent.length - lastFlushLen;
+            const isReplaceText = (effectiveMsg as { textMode?: 'append' | 'replace' }).textMode === 'replace';
             const neverFlushed = lastFlushLen === 0 && lastFlushToolLen === 0;
             if (
               effectiveMsg.type === 'text' &&
-              charDelta > 0 &&
-              (neverFlushed || now - lastFlushTime >= FLUSH_INTERVAL_MS || charDelta >= FLUSH_CHAR_DELTA)
+              charDelta !== 0 &&
+              (neverFlushed ||
+                isReplaceText ||
+                now - lastFlushTime >= FLUSH_INTERVAL_MS ||
+                charDelta >= FLUSH_CHAR_DELTA)
             ) {
               deps.draftStore
                 .upsert({
@@ -1235,9 +1317,41 @@ export async function* routeSerial(
             }
           } else {
             log.info(
-              { threadId, catId: catId as string },
+              { threadId, catId: catId as string, callbackMessageId: callbackPostMessageId },
               'Stream store skipped — cat_cafe_post_message callback already persisted',
             );
+            if (callbackPostMessageId) {
+              const metadataPatch: StreamMetadataAugmentInput = {
+                ...(thinkingChunks.length > 0 ? { thinking: renderThinkingChunks(thinkingChunks) } : {}),
+                ...(firstMetadata ? { metadata: firstMetadata } : {}),
+                ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
+                ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
+                ...(mentionsUser ? { mentionsUser } : {}),
+              };
+              const extraParts = {
+                ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
+                ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
+                ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
+              };
+              if (Object.keys(extraParts).length > 0) metadataPatch.extra = extraParts;
+
+              if (hasStreamMetadataPatch(metadataPatch)) {
+                try {
+                  const augmented = await deps.messageStore.augmentStreamMetadata(callbackPostMessageId, metadataPatch);
+                  if (!augmented) {
+                    log.warn(
+                      { threadId, catId: catId as string, callbackMessageId: callbackPostMessageId },
+                      'Callback message metadata augment skipped: message not found',
+                    );
+                  }
+                } catch (augmentErr) {
+                  log.warn(
+                    { threadId, catId: catId as string, callbackMessageId: callbackPostMessageId, err: augmentErr },
+                    'Callback message metadata augment failed; continuing without duplicate stream append',
+                  );
+                }
+              }
+            }
           }
           // #80: Clean up draft after message is persisted (either via append or callback)
           if (deps.draftStore && ownInvocationId) {

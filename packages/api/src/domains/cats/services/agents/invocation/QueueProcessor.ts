@@ -244,13 +244,13 @@ export class QueueProcessor {
   isPaused(threadId: string, catId?: string): boolean {
     if (catId) {
       return (
-        this.pausedSlots.has(QueueProcessor.slotKey(threadId, catId)) && this.deps.queue.hasQueuedForThread(threadId)
+        this.pausedSlots.has(QueueProcessor.slotKey(threadId, catId)) && this.hasDispatchableQueuedForThread(threadId)
       );
     }
     // Backward compat: check if any slot for this thread is paused
     for (const key of this.pausedSlots.keys()) {
       if (QueueProcessor.slotMatchesThread(key, threadId)) {
-        if (this.deps.queue.hasQueuedForThread(threadId)) return true;
+        if (this.hasDispatchableQueuedForThread(threadId)) return true;
       }
     }
     return false;
@@ -384,7 +384,8 @@ export class QueueProcessor {
 
   /** F151: Check if thread has any queued or processing entries (used by delivery-batch-done signal). */
   isThreadBusy(threadId: string): boolean {
-    if (this.deps.queue.hasQueuedForThread(threadId)) return true;
+    if (this.hasDispatchableQueuedForThread(threadId)) return true;
+    this.sweepZombieSlots(threadId);
     for (const key of this.processingSlots.keys()) {
       if (QueueProcessor.slotMatchesThread(key, threadId)) return true;
     }
@@ -444,7 +445,7 @@ export class QueueProcessor {
     const sk = QueueProcessor.slotKey(threadId, catId);
     if (status === 'succeeded' || status === 'canceled_by_user') {
       this.pausedSlots.delete(sk);
-      if (this.deps.queue.hasQueuedForThread(threadId)) {
+      if (this.hasDispatchableQueuedForThread(threadId)) {
         await this.tryExecuteNextAcrossUsers(threadId, catId);
         await this.tryAutoExecute(threadId);
         if (status === 'canceled_by_user') {
@@ -453,7 +454,7 @@ export class QueueProcessor {
       }
     } else {
       // canceled or failed → pause ONLY if there are queued entries to manage.
-      if (!this.deps.queue.hasQueuedForThread(threadId)) {
+      if (!this.hasDispatchableQueuedForThread(threadId)) {
         this.pausedSlots.delete(sk);
         return;
       }
@@ -470,7 +471,7 @@ export class QueueProcessor {
           { threadId, catId, status },
           '[QueueProcessor] Auto-recovering paused slot after timeout (#595)',
         );
-        if (this.deps.queue.hasQueuedForThread(threadId)) {
+        if (this.hasDispatchableQueuedForThread(threadId)) {
           void this.tryExecuteNextAcrossUsers(threadId, catId).catch((err) => {
             this.deps.log.error({ err, threadId, catId }, '[QueueProcessor] Auto-recovery dequeue failed');
           });
@@ -582,6 +583,10 @@ export class QueueProcessor {
   }
 
   // ── Internal ──
+
+  private hasDispatchableQueuedForThread(threadId: string): boolean {
+    return this.deps.queue.hasDispatchableQueuedForThread(threadId);
+  }
 
   private async tryExecuteNextAcrossUsers(
     threadId: string,

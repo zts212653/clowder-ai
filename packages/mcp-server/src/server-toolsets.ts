@@ -62,7 +62,11 @@ export const AGENT_KEY_TOOLS = new Set([
 ]);
 
 const isReadonly = process.env['CAT_CAFE_READONLY'] === 'true';
-const hasAgentKey = !!(process.env['CAT_CAFE_AGENT_KEY_SECRET'] || process.env['CAT_CAFE_AGENT_KEY_FILE']);
+const hasAgentKey = !!(
+  process.env['CAT_CAFE_AGENT_KEY_SECRET'] ||
+  process.env['CAT_CAFE_AGENT_KEY_FILE'] ||
+  process.env['CAT_CAFE_AGENT_KEY_FILES']
+);
 
 function applyReadonlyFilter(tools: readonly ToolDef[]): readonly ToolDef[] {
   if (!isReadonly) return tools;

@@ -193,11 +193,21 @@ function registerProxyUpstream(projectRoot: string, slug: string, targetUrl: str
  */
 const _prevContextFill = new Map<string, number>();
 const _needsReinjection = new Set<string>();
+const _staticIdentityRegistryRevision = new Map<string, number>();
 
 /** @internal Exposed for testing */
 export function _resetCompressionDetection(): void {
   _prevContextFill.clear();
   _needsReinjection.clear();
+}
+
+/** @internal Exposed for testing */
+export function _resetStaticIdentityRegistryRevisionForTests(): void {
+  _staticIdentityRegistryRevision.clear();
+}
+
+function sessionIdentityKey(userId: string, catId: CatId, threadId: string): string {
+  return `${userId}:${catId as string}:${threadId}`;
 }
 
 /**
@@ -1058,7 +1068,22 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const canSkipOnResume = isSessionChainEnabled(catId);
     const compressionKey = `${userId}:${catId as string}:${threadId}`;
     const forceReinjection = _needsReinjection.delete(compressionKey);
-    const injectSystemPrompt = !canSkipOnResume || !isResume || forceReinjection;
+    const registryRevision = catRegistry.getRevision();
+    const identityKey = sessionIdentityKey(userId, catId, threadId);
+    const lastStaticIdentityRevision = _staticIdentityRegistryRevision.get(identityKey);
+    const registryChangedSinceStaticIdentity =
+      canSkipOnResume &&
+      isResume &&
+      lastStaticIdentityRevision !== undefined &&
+      lastStaticIdentityRevision !== registryRevision;
+    const injectSystemPrompt = !canSkipOnResume || !isResume || forceReinjection || registryChangedSinceStaticIdentity;
+    if (canSkipOnResume) {
+      if (injectSystemPrompt) {
+        _staticIdentityRegistryRevision.set(identityKey, registryRevision);
+      } else if (isResume && lastStaticIdentityRevision === undefined) {
+        _staticIdentityRegistryRevision.set(identityKey, registryRevision);
+      }
+    }
 
     // Prepend staticIdentity to prompt when injection is needed
     // F070-P2: missionPrefix (dispatch context) is prepended for external projects

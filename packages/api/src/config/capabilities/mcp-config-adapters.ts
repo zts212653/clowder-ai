@@ -76,9 +76,14 @@ export function resolveWorkspaceRoot(): string {
  * not clobber on regenerate — codex review (PR #1414) P1-2.
  */
 function buildAntigravityCatCafeEnvBaseline(): Readonly<Record<string, string>> {
-  return {
+  const env: Record<string, string> = {
     ALLOWED_WORKSPACE_DIRS: resolveWorkspaceRoot(),
   };
+  const agentKeyFile = process.env.CAT_CAFE_AGENT_KEY_FILE?.trim();
+  if (agentKeyFile) env.CAT_CAFE_AGENT_KEY_FILE = agentKeyFile;
+  const agentKeyFiles = process.env.CAT_CAFE_AGENT_KEY_FILES?.trim();
+  if (agentKeyFiles) env.CAT_CAFE_AGENT_KEY_FILES = agentKeyFiles;
+  return env;
 }
 
 /**
@@ -118,6 +123,8 @@ function ensureKimiCatCafeEnv(name: string, env?: Record<string, string>): Recor
 
 function ensureAntigravityCatCafeEnv(name: string, env?: Record<string, string>): Record<string, string> | undefined {
   if (!isCatCafeServer(name)) return env;
+  const safeEnv = { ...(env ?? {}) };
+  delete safeEnv.CAT_CAFE_AGENT_KEY_SECRET;
   // codex review (PR #1414) P1-2: previous merge order put defaults LAST,
   // so process-derived defaults silently overwrote pre-existing user values.
   // Correct order:
@@ -126,7 +133,7 @@ function ensureAntigravityCatCafeEnv(name: string, env?: Record<string, string>)
   //   3. enforced (CAT_CAFE_API_URL, CAT_CAFE_READONLY) — highest, can't be opted out
   return {
     ...buildAntigravityCatCafeEnvBaseline(),
-    ...(env ?? {}),
+    ...safeEnv,
     ...buildAntigravityCatCafeEnforcedEnv(),
   };
 }

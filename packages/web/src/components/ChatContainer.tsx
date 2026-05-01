@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useAgentHookHealth } from '@/hooks/useAgentHookHealth';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
 import { useAuthorization } from '@/hooks/useAuthorization';
 import { useCatData } from '@/hooks/useCatData';
@@ -28,6 +29,7 @@ import { useTaskStore } from '@/stores/taskStore';
 import { apiFetch } from '@/utils/api-client';
 import { computeScrollRecomputeSignal } from '@/utils/scrollRecomputeSignal';
 import { getUserId } from '@/utils/userId';
+import { AgentHookHealthNotice, shouldRenderAgentHookHealthNotice } from './AgentHookHealthNotice';
 import { AuthorizationCard } from './AuthorizationCard';
 import { BootcampListModal } from './BootcampListModal';
 import { BootstrapOrchestrator } from './BootstrapOrchestrator';
@@ -528,6 +530,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // F113-E: Fetch governance status for the current project (drives ProjectSetupCard)
   const currentProjectPath = useChatStore((s) => s.currentProjectPath);
   const { status: govStatus, refetch: govRefetch } = useGovernanceStatus(currentProjectPath);
+  const isProjectThread = !!currentProjectPath && currentProjectPath !== 'default' && currentProjectPath !== 'lobby';
+  const agentHookHealth = useAgentHookHealth({ enabled: isProjectThread });
   const [setupDone, setSetupDone] = useState(false);
   // Show card when: needs setup (idle) OR just completed setup (done) — only in empty threads
   const showSetupCard = !!(
@@ -544,6 +548,15 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       setSetupDone(false);
     }
   }, [threadId]);
+  const showAgentHookNotice =
+    isProjectThread &&
+    !showSetupCard &&
+    shouldRenderAgentHookHealthNotice({
+      health: agentHookHealth.health,
+      error: agentHookHealth.error,
+      syncing: agentHookHealth.syncing,
+      synced: agentHookHealth.synced,
+    });
 
   // F152 Phase B: memory bootstrap state
   const {
@@ -823,6 +836,19 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
               checkedAt={connectionStatus.checkedAt}
               isOfflineSnapshot={isOfflineSnapshot}
             />
+            {showAgentHookNotice && (
+              <div className="mb-3 flex justify-center text-left">
+                <div className="max-w-[85%] w-full">
+                  <AgentHookHealthNotice
+                    health={agentHookHealth.health}
+                    error={agentHookHealth.error}
+                    syncing={agentHookHealth.syncing}
+                    synced={agentHookHealth.synced}
+                    onSync={agentHookHealth.sync}
+                  />
+                </div>
+              </div>
+            )}
             {!hasMore && messages.length > 0 && (
               <div className="text-center py-3 text-xs text-cafe-muted">没有更多消息了</div>
             )}
@@ -841,6 +867,11 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                       isEmptyDir={govStatus.isEmptyDir}
                       isGitRepo={govStatus.isGitRepo}
                       gitAvailable={govStatus.gitAvailable}
+                      agentHookHealth={agentHookHealth.health}
+                      agentHookHealthError={agentHookHealth.error}
+                      agentHookSyncing={agentHookHealth.syncing}
+                      agentHookSynced={agentHookHealth.synced}
+                      onSyncAgentHooks={agentHookHealth.sync}
                       onComplete={() => {
                         setSetupDone(true);
                         govRefetch();

@@ -168,6 +168,44 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(before[1].content, 'msg4');
   });
 
+  it('augmentStreamMetadata() persists stream-only metadata onto callback messages', async () => {
+    const msg = await store.append({
+      userId: 'u',
+      catId: 'opus',
+      content: 'callback canonical',
+      mentions: [],
+      timestamp: Date.now(),
+      origin: 'callback',
+      extra: { rich: { v: 1, blocks: [{ id: 'callback-card', kind: 'card', v: 1, title: 'Callback' }] } },
+    });
+
+    await store.augmentStreamMetadata(msg.id, {
+      thinking: 'stream thinking',
+      metadata: { provider: 'mock', model: 'test' },
+      toolEvents: [{ id: 'te-1', type: 'tool_result', label: 'post_message ok', timestamp: Date.now() }],
+      mentionsUser: true,
+      extra: {
+        stream: { invocationId: 'parent-inv' },
+        tracing: { traceId: 'trace-1', spanId: 'span-1' },
+        rich: { v: 1, blocks: [{ id: 'stream-card', kind: 'card', v: 1, title: 'Stream' }] },
+      },
+    });
+
+    const refetched = await store.getById(msg.id);
+    assert.equal(refetched.content, 'callback canonical');
+    assert.equal(refetched.origin, 'callback');
+    assert.equal(refetched.thinking, 'stream thinking');
+    assert.deepEqual(refetched.metadata, { provider: 'mock', model: 'test' });
+    assert.equal(refetched.toolEvents.length, 1);
+    assert.equal(refetched.mentionsUser, true);
+    assert.deepEqual(refetched.extra.stream, { invocationId: 'parent-inv' });
+    assert.deepEqual(refetched.extra.tracing, { traceId: 'trace-1', spanId: 'span-1' });
+    assert.deepEqual(
+      refetched.extra.rich.blocks.map((block) => block.id),
+      ['callback-card', 'stream-card'],
+    );
+  });
+
   it('hardDelete clears toolEvents from returned object and Redis', async () => {
     const msg = await store.append({
       userId: 'u',

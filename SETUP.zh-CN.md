@@ -618,6 +618,5 @@ CORS_ALLOW_PRIVATE_NETWORK=true
 
 **前端连不上 API？**
 - 本地开发确认 `.env` 里有 `NEXT_PUBLIC_API_URL=http://localhost:3004`
-- 反向代理场景下前端会自动探测同源 API —— 确保 Nginx 把 `/api/` 和 `/socket.io/` 代理到 3004 端口。状态探针使用 `/api/health` 和 `/api/ready`，不需要额外为根路径 `/health` 或 `/ready` 写代理规则。
-- 把 `FRONTEND_URL` 设置为用户浏览器实际打开的公网 origin；否则 Host/Origin 校验会拒绝 API 和 Socket.IO 请求。
+- 反向代理场景下前端会自动探测同源 API —— 确保 Nginx 把 `/api/` 和 `/socket.io/` 代理到 3004 端口
 - API 必须在前端加载前启动

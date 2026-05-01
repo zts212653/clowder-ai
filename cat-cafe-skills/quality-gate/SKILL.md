@@ -60,6 +60,33 @@ Step 2: CREATE — 建检查清单
   - 列出每一个 AC / 功能点 / 边界条件
   - 列出 Discussion 里的 UX 描述和场景
 
+Step 2.5: CLOSE GATE MATRIX + FOLLOW-UP TAIL SCAN（F177 Phase A）🔴
+  - 检查 CloseGateReport 是否已生成（schema: `cat-cafe-skills/refs/close-gate.md`）
+  - 每个 unmet AC 是否三选一处置（immediate / delete / cvo_signoff）
+  - **Follow-up tail scan**：扫以下文本来源，命中阻塞关键词 = BLOCKED：
+    - 来源：close report、PR body、commit messages、spec 中 AC 注释、review 反馈回复
+    - 阻塞关键词（不区分大小写）：
+      `follow-up` `followup` `deferred` `next phase` `next PR` `P2` `stub` `TD`
+      `后续` `留个尾巴` `先这样` `下次一定` `回头` `以后再` `will address later`
+      `out of scope`（作为 close 借口时）`MVP 先上`（作为 close 借口时）
+    - 豁免：spec 的 Why/Risk/History 章节中引用历史上下文时使用这些词不触发
+  - cvo_signoff 四件套完整性验证（proposal + cvo message + quote + scope）
+  - 🔴 **47 盲审规则**（F177 Phase B）：若 PR 作者是 opus-47，quality-gate 必须由对家猫执行（Maine Coon优先，46 兜底）。审核者由 reviewer/系统指定，47 无选择权，47 的自评不计入放行判据
+  - 🔴 **hotfix 自检禁止**（F177 Phase E）：执行 `node scripts/check-hotfix-pattern.mjs`，若检测到 hotfix 模式，作者不得自行通过 quality-gate——必须由另一只猫执行 quality-gate。原因：hotfix 心态容易自我说服"够用了"，跨猫审视打破惯性
+  - 🔴 **Ragdoll search→Read 检查**（F177 Phase F）：若执行者是Ragdoll家族（46 / 47 / 4.5 / Sonnet），检查本次 session 的 search 行为：
+    1. 有 `search_evidence` 调用命中 doc anchor（高/中置信度）吗？
+    2. 命中后有对应的 `Read` 调用去读源文件吗？
+    3. 输出中包含精确数字/版本号/日期但没有 Read 证据吗？
+    → 三条件同时满足 = **BLOCKED**："这个精确结论你 Read 源文件了吗？摘要是索引不是答案。"
+    → 豁免：架构方案/假设性讨论（不含精确数字的推理不触发）；通过 Grep/LSP 获取的精确信息不触发
+  - 🔴 **Siamese edit scope 检查**（F177 Phase C）：若 PR 作者是Siamese，检查改动文件是否超出白名单（designs/ docs/ assets/ 根目录.md）。碰 packages/ src/ 的改动必须有对应 handoff 记录或 Dry Run Gate 通过证据（build + test pass）
+
+Step 2.6: FALLBACK LAYER CHECK（F177 Phase D）🔴
+  - 执行：`node scripts/check-fallback-layers.mjs` 扫描 PR diff
+  - 同一文件新增 ≥3 层 fallback 或累计 ≥5 层 → 触发坐标系自检
+  - 自检三问：①修坐标系还是补错误坐标系？②坐标变换能否消除？③每层为什么不能去掉？
+  - 层数合理时在报告中说明理由；不合理时重构后再过 gate
+
 Step 3: VERIFY — 逐项检查
   - 代码在哪？有测试覆盖？边界处理了？
   - 🔴 交付物必须核实 commit/PR 状态（git log --grep + gh pr list）

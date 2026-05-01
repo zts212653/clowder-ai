@@ -38,7 +38,7 @@ export function safeParseContentBlocks(raw: string | undefined): readonly Messag
   }
 }
 
-/** F22+F52: Parse extra field (contains rich blocks, stream metadata, cross-post origin) */
+/** F022+F052: Parse extra field (contains rich blocks, stream metadata, cross-post origin) */
 export function safeParseExtra(raw: string | undefined):
   | {
       rich?: RichMessageExtra;
@@ -161,7 +161,7 @@ export function serializeExtra(extra: NonNullable<StoredMessage['extra']>): stri
   return JSON.stringify({ ...rest, tracing: compact });
 }
 
-/** F97: Parse connector source field */
+/** F097: Parse connector source field */
 export function safeParseConnectorSource(raw: string | undefined): ConnectorSource | undefined {
   if (!raw) return undefined;
   try {

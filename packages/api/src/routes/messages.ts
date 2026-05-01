@@ -51,6 +51,7 @@ import type { ISummaryStore } from '../domains/cats/services/stores/ports/Summar
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { isSystemUserMessage } from '../domains/cats/services/stores/visibility.js';
 import { mergeTokenUsage, type TokenUsage } from '../domains/cats/services/types.js';
+import { buildThreadDeepLink } from '../infrastructure/connectors/connector-command-helpers.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
@@ -433,7 +434,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // Broadcast without @mention → thread-level check (any active → queue)
     // #555: Cover the gap between one invocation ending (tracker cleared) and the
     // next starting from queue (tracker not yet registered).
-    // Whisper / @mention use cat-specific isCatBusy; broadcast uses thread-wide isThreadBusy.
+    // Whisper / @mention use cat-specific isCatBusy; broadcast uses active execution,
+    // not queued leftovers, to avoid enqueue-only dead ends.
     const hasActive = (() => {
       if (!opts.invocationTracker) {
         return opts.queueProcessor?.hasActiveExecution?.(resolvedThreadId) ?? false;
@@ -1344,12 +1346,17 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           }
           activeDrafts = activeDrafts.filter((d) => !formalInvocationIds.has(d.invocationId));
         }
-        // F173 Phase A hotfix3: draft persistence can outlive its invocation
-        // record when an invocation crashes or is replaced before a formal
-        // message is written. Such orphan drafts produce zombie bubbles on F5.
+        // F173 Phase A hotfix3 / stream-catchup repair:
+        // Draft persistence can outlive its invocation record when an invocation
+        // crashes or is replaced before a formal message is written. Filter those
+        // orphan drafts from the response, but do not delete from the GET path:
+        // a stale/missing InvocationRecord can be corrected by the active
+        // InvocationTracker, while real zombies still expire by DraftStore TTL or
+        // explicit completion/cancel cleanup.
         if (activeDrafts.length > 0 && opts.invocationRecordStore) {
           const invocationRecordStore = opts.invocationRecordStore;
           const orphanDrafts: typeof activeDrafts = [];
+          const orphanDetails: Array<Record<string, unknown>> = [];
           const checkedActiveDrafts: typeof activeDrafts = [];
           for (const draft of activeDrafts) {
             let record;
@@ -1363,30 +1370,57 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               checkedActiveDrafts.push(draft);
               continue;
             }
-            if (record?.status === 'running' && record.threadId === resolvedThreadId && record.userId === userId) {
+            const recordActive =
+              record?.status === 'running' && record.threadId === resolvedThreadId && record.userId === userId;
+            let trackerActive = false;
+            let trackerSlotStartedAt: number | null = null;
+            let trackerUserId: string | null = null;
+            if (!recordActive && opts.invocationTracker) {
+              try {
+                const trackerSlot = opts.invocationTracker
+                  .getActiveSlots(resolvedThreadId)
+                  .find((slot) => slot.catId === draft.catId && slot.startedAt <= draft.updatedAt);
+                if (trackerSlot) {
+                  trackerSlotStartedAt = trackerSlot.startedAt;
+                  trackerUserId = opts.invocationTracker.getUserId(resolvedThreadId, draft.catId);
+                  trackerActive = trackerUserId === userId;
+                }
+              } catch (error) {
+                request.log.warn(
+                  { err: error, threadId: resolvedThreadId, draftId: draft.invocationId, catId: draft.catId },
+                  '#80 draft merge: tracker liveness lookup failed',
+                );
+                checkedActiveDrafts.push(draft);
+                continue;
+              }
+            }
+            if (recordActive || trackerActive) {
               checkedActiveDrafts.push(draft);
             } else {
               orphanDrafts.push(draft);
+              orphanDetails.push({
+                draftId: draft.invocationId,
+                catId: draft.catId,
+                draftUpdatedAt: draft.updatedAt,
+                recordStatus: record?.status ?? null,
+                recordThreadId: record?.threadId ?? null,
+                recordUserId: record?.userId ?? null,
+                trackerSlotStartedAt,
+                trackerUserId,
+              });
             }
           }
           activeDrafts = checkedActiveDrafts;
 
           if (orphanDrafts.length > 0) {
-            const deleteResults = await Promise.allSettled(
-              orphanDrafts.map((d) => draftStore.delete(userId, resolvedThreadId, d.invocationId)),
-            );
-            const failedDeletes = deleteResults.filter((r) => r.status === 'rejected').length;
             const logPayload = {
               threadId: resolvedThreadId,
               orphanCount: orphanDrafts.length,
-              failedDeletes,
               draftIds: orphanDrafts.map((d) => d.invocationId),
+              orphanDetails,
+              cleanup: 'ttl_or_completion',
             };
-            if (failedDeletes > 0) {
-              request.log.warn(logPayload, '#80 draft merge: filtered orphan drafts');
-            } else {
-              request.log.info(logPayload, '#80 draft merge: filtered orphan drafts');
-            }
+            request.log.info(logPayload, '#80 draft merge: filtered orphan drafts');
           }
         }
         // P2: stable sort by updatedAt for parallel multi-cat drafts
@@ -1494,7 +1528,7 @@ export async function deliverOutboundFromWeb(
         threadMeta = {
           threadShortId: threadId.slice(0, 15),
           threadTitle: resolved.title ?? undefined,
-          deepLinkUrl: `${frontendBase}/threads/${threadId}`,
+          deepLinkUrl: buildThreadDeepLink(frontendBase, threadId),
         };
       }
     }

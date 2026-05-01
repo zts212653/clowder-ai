@@ -618,6 +618,5 @@ This opt-in trusts browsers from RFC 1918 private networks (`10.x.x.x`, `172.16-
 
 **Frontend can't connect to API?**
 - For local dev, `NEXT_PUBLIC_API_URL=http://localhost:3004` should be in `.env`
-- Behind a reverse proxy, the frontend auto-detects the API at the same origin — make sure Nginx proxies `/api/` and `/socket.io/` to port 3004. The status probes use `/api/health` and `/api/ready`, so no special root `/health` or `/ready` proxy rule is required.
-- Set `FRONTEND_URL` to the public origin users open in the browser; otherwise Host/Origin checks will reject API and Socket.IO requests.
+- Behind a reverse proxy, the frontend auto-detects the API at the same origin — make sure Nginx proxies `/api/` and `/socket.io/` to port 3004
 - API must be running before frontend loads

@@ -473,6 +473,54 @@ describe('markViewed — Cloud P2 #1425 round 2 reconcile-from-snapshot', () => 
     expect(useCallbackAuthStore.getState().aggregate.unviewedFailures24h).toBe(2);
   });
 
+  it('alpha #6 fix: panel mount markViewed clears all 24h failures (offline cat scenario)', async () => {
+    // 铲屎官 alpha #6 root case: cat went offline after generating 60 failures,
+    // user opens panel, badge should clear. Original viewedUpTo=snapshot 设计
+    // didn't reliably clear (over-cautious). 新设计 markViewed POSTs without
+    // body → server uses now() → lastViewedAt > all sample.at → optimistic
+    // clear filters to 0.
+    resetStore();
+    const samples = Array.from({ length: 60 }, (_, i) => ({
+      at: 1_000 + i * 10, // 60 samples at 1000-1590ms (all old)
+      reason: 'expired',
+      tool: 'register_pr_tracking',
+      catId: 'opus',
+    }));
+    useCallbackAuthStore.getState().applySnapshot({
+      ...baseSnapshot,
+      startedAt: 0,
+      uptimeMs: 2_000, // server snapshot fetched at 2_000
+      recentSamples: samples,
+      recent24h: {
+        totalFailures: 60,
+        byReason: { expired: 60 },
+        byTool: { register_pr_tracking: 60 },
+        byCat: { opus: 60 },
+      },
+      unviewedFailures24h: 60,
+    });
+    expect(useCallbackAuthStore.getState().aggregate.unviewedFailures24h).toBe(60);
+
+    // Panel mounts → markViewed POSTs without body → server returns
+    // lastViewedAt = "now" (e.g. 100_000, much later than all sample.at)
+    const originalFetch = (globalThis as { fetch?: typeof fetch }).fetch;
+    (globalThis as { fetch?: typeof fetch }).fetch = (async () =>
+      ({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, viewedAt: 100_000, lastViewedAt: 100_000 }),
+      }) as Response) as typeof fetch;
+    try {
+      await useCallbackAuthStore.getState().markViewed();
+    } finally {
+      (globalThis as { fetch?: typeof fetch }).fetch = originalFetch;
+    }
+
+    // CRITICAL: badge clears to 0 (all 60 samples have at < 100_000 cutoff)
+    expect(useCallbackAuthStore.getState().aggregate.unviewedFailures24h).toBe(0);
+    expect(useCallbackAuthStore.getState().pendingMarkViewedCutoff).toBe(100_000);
+  });
+
   it('non-ok response: aggregate unchanged (badge surface remains)', async () => {
     resetStore();
     useCallbackAuthStore.getState().applySnapshot({

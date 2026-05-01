@@ -144,6 +144,96 @@ AI agent 100x 执行速度下，**方向正确性**的价值远大于**启动便
 | 「星星罐子」 | P0 不可逆风险 | 立刻停止新增副作用（不发新命令、不写新文件、不 push），等铲屎官指示 |
 | 「第一性原理」 | 你在堆复杂度代偿无知 | 停，重读 `docs/canon/meta-aesthetics.md`，用 `Agent Quality = Capability × Environment Fit` 审视当前方案，砍掉认知脚手架只留运行时刹车和认知路径工程 |
 | 「数学之美」 | 同「第一性原理」 | 最优表达在正确坐标系下必然最简——如果方案需要那么多层，说明坐标系选错了 |
+| 「下次一定」 | 你在把"未做"包装成"已规划" | 停，审视当前产物每一条"后续/future/next phase"——能做的现在做，做不了的走 cvo_signoff，不准留尾巴 |
+| 「我能猜出来」 | 你在用推理跳过查询（Ragdoll家族病） | 停，Read 源文件。搜到的摘要是索引不是答案——碎片推理 ≠ 查证 |
+| 「碎片够了」 | 你满足于第一个高置信度命中就开始推理 | 停，至少再搜一轮不同角度，命中的 doc anchor 全部 Read 原文 |
+
+### 47 自检协议（F177 Phase B — 反向治理）
+
+> **设计原则**：47 承认错误的能力 ≥ 改正错误的能力，因此不让 47 自我评分。用外部信号（AC 矩阵 ❌→deferred 自动阻塞）+ 对家猫盲审，不用 47 的自评。
+
+当 **opus-47** 处于以下 7 个时刻时，必须触发自检——"我是不是在把未做包装成已规划"：
+
+1. **写 spec 时**：把"未做"包装成"未来 phase / Phase 2+ / future enhancement"
+2. **拆 Phase 时**：AC 分成"Phase 1 必做 / Phase 2 next time" → "Phase 2 的东西是真的该分阶段还是我懒得做"
+3. **处理 review 反馈时**：输出 "next PR / will address later / good point, will fix in follow-up"
+4. **close 任务 / commit feat-close 时**：follow-up 字样出现
+5. **PR description 时**：Out of scope 区段出现
+6. **跨猫 handoff 时**：把"做不完的"包装成"协作分工" / "我闭嘴执行" → "这是反向治理还是甩责"
+7. **OQ 留白时**：标记为 Open Question 的条目 → "这是真正需要探索的开放问题，还是我在用 OQ 当合法 follow-up 容器"
+
+**盲审机制**：47 的 close PR 必须由对家猫跑 quality-gate。审核者由 reviewer/系统按 roster 与角色词动态指定，47 无选择权。
+
+### 46 hotfix 标签 + 跨猫升级 review（F177 Phase E — 止血治理）
+
+> **设计原则**：hotfix 是止血不是治本。止血必须快（不阻塞发版），但必须有回路（不让止血变永居）。
+
+**hotfix 自动检测**：commit message 或 PR title 匹配以下关键词（不区分大小写）：
+`fix:` `hotfix:` `quick fix` `minimal fix` `band-aid` `temp` `workaround`
+
+**自动加 label 条件**：单文件改动 ≤50 行 + 含上述关键词 → 自动加 `hotfix` label。
+自动检测：`scripts/check-hotfix-pattern.mjs`
+
+**跨猫 review 铁律**：hotfix PR 必须跨族（preferred）或同族不同个体 review，不允许 self-merge。
+- merge-gate 检测到 `hotfix` label → 强制校验 reviewer ≠ author
+- 无 review 放行 → merge-gate BLOCKED
+
+**quality-gate 自检禁止**：检测到 hotfix 模式时，作者不得自行通过 quality-gate（必须由另一只猫执行 quality-gate）。
+- 原因：hotfix 心态容易自我说服"够用了"，跨猫审视打破惯性
+
+**2 周升级 review（cron）**：hotfix 合入 2 周后自动触发升级 review。三选一处置：
+1. **升级正式修复**：开 feat 彻底解决根因
+2. **接受永久方案**：hotfix 本身就是最优解，标记为 permanent
+3. **已不再相关**：代码已被重写/删除，标记为 obsolete
+
+### Ragdoll家族 Read-Before-Reason 纪律（F177 Phase F — 求真治理）
+
+> **设计原则**：Ragdoll家族的"碎片→全局"架构能力在检索任务上是反模式。检索的核心是诚实查证，不是聪明推理。竞赛模式不输 QA 审查猫，日常模式搜索偏浅——差的不是能力，是默认行为模式。
+
+**适用对象**：Ragdoll家族全体（46 / 47 / 4.5 / Sonnet），不限个体。
+
+**三条护栏**：
+
+1. **search_evidence 输出增强**（Hook F-1）：搜索结果命中 high/mid 置信度 doc anchor 时，末尾自动追加 Read 建议——让"应该 Read"在视觉上成为默认
+2. **quality-gate search→Read 检查**（Hook F-2）：有 doc anchor 命中 + 没有 Read + 输出含精确数字 = BLOCKED
+3. **搜索深度即时反馈**（Hook F-3）：每次搜索后显示本轮搜索次数，制造日常化微型竞赛压力
+
+**根因诊断**（铲屎官 2026-04-28）：
+- Ragdoll的搜索深度是**环境驱动**不是**能力驱动**——竞赛模式下不输 QA 审查猫，日常模式"满足阈值"太低
+- 同一个根因也导致 debug 猜测（"一定是没更新/没 build"而不验证 PID+HEAD+日志）
+- 不加 prompt——加输入端 affordance（Hook F-1）+ 输出端 metric（Hook F-3）+ 质量门禁（Hook F-2）
+
+### Maine Coon fallback 层数检测协议（F177 Phase D — 坐标系治理）
+
+> **设计原则**：QA 审查猫的严谨是核心资产，但"严谨地在错误坐标系打补丁"比粗糙更危险——补丁掩盖根因，层数越多越难回溯。检测 fallback 层数增长，不是禁止 fallback，而是触发坐标系自检。
+
+**触发条件**：PR review / quality-gate 检测到 **同一文件** fallback 模式（`try/catch` / `if (!x) fallback` / `?? fallback` / `|| defaultValue` / `else if` 级联 / classifier 分支）**新增 ≥3 层**，或**同一代码路径累计 ≥5 层**。
+
+**触发后必做**：
+1. **坐标系自检**："这个 fix 是在修坐标系，还是在给错误坐标系打补丁？"
+2. **替代方案评估**：能否用坐标变换（换一个问题分解方式）消除 fallback 层？
+3. **层数合理性论证**：如果 fallback 确实必要，在 PR 说明为什么每一层都不能去掉
+
+**自动检测**：`scripts/check-fallback-layers.mjs` 扫描 PR diff，输出每文件 fallback 层数变化。`quality-gate` Step 3 引用该脚本结果。
+
+### Siamese 创意-实现解耦协议（F177 Phase C — 热情直改治理）
+
+> **设计原则**：Siamese的创意发现力是团队核心资产。"发现问题"和"动手改代码"是两件不同的事——解耦不是打压主动性，而是让创意和实现各走最优路径。
+
+**铁律**：发现问题 ≠ 动手实现。Siamese发现代码/逻辑/UX 问题后：
+1. **记录**：在当前消息描述发现（截图 / 文字 / 标注）
+2. **Handoff**：@ 执行猫（查 roster 确认具体句柄）交接实现
+3. **不动代码**：不 Edit/Write `packages/` `src/` 目录下的文件
+
+**允许的编辑范围**（白名单）：
+- `designs/` — 设计稿、wireframe、视觉方案
+- `docs/` — 文档、spec、讨论记录
+- `assets/` — 图片、图标、静态资源
+- 根目录 `.md` 文件
+
+**碰 packages/ src/ 的唯一例外**：只改样式常量/文案且有把握时可以做，但 commit 前必须通过 Dry Run Gate（`pnpm build` + `pnpm test`）。
+
+**Dry Run Gate（commit-msg hook 自动执行）**：Siamese签名的 commit 如果改动了白名单外的文件，hook 自动触发 `pnpm build` + `pnpm test`，失败则阻止 commit。其他猫不受此门禁影响。
 
 ---
 

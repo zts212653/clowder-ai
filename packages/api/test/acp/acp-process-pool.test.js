@@ -368,4 +368,30 @@ describe('AcpProcessPool', () => {
       assert.strictEqual(pool.getMetrics().liveProcessCount, 0);
     });
   });
+
+  describe('initialize failure cleanup', () => {
+    test('child process is closed when initialize throws', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      const spawnedClients = [];
+      const failingFactory = () => {
+        const client = createMockClient();
+        spawnedClients.push(client);
+        const origInit = client.initialize.bind(client);
+        client.initialize = async () => {
+          await origInit();
+          throw new Error('ACP timeout: initialize did not respond within 60000ms');
+        };
+        return client;
+      };
+
+      pool = new AcpProcessPool(defaultPoolConfig, defaultVariantConfig, failingFactory);
+      await assert.rejects(() => pool.acquire(key1), /initialize did not respond/);
+
+      assert.strictEqual(spawnedClients.length, 1);
+      assert.strictEqual(spawnedClients[0]._isClosed(), true, 'leaked client must be closed');
+      assert.strictEqual(pool.getMetrics().liveProcessCount, 0);
+    });
+  });
 });

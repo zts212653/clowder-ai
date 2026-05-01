@@ -2816,6 +2816,139 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     );
   });
 
+  it('F127 V-1: invokes a runtime-created cat in a new session with the refreshed roster', async () => {
+    const originalConfigs = catRegistry.getAllConfigs();
+    const promptsSeen = [];
+    const service = {
+      async *invoke(prompt) {
+        promptsSeen.push(prompt);
+        yield { type: 'text', catId: 'runtime-spark', content: 'runtime ok', timestamp: Date.now() };
+        yield { type: 'done', catId: 'runtime-spark', timestamp: Date.now() };
+      },
+    };
+
+    try {
+      catRegistry.register('runtime-spark', {
+        ...originalConfigs.codex,
+        id: 'runtime-spark',
+        displayName: '火花猫',
+        nickname: '小火花',
+        mentionPatterns: ['@runtime-spark'],
+        defaultModel: 'gpt-5.4-mini',
+        roleDescription: '快速执行',
+      });
+
+      const msgs = await collect(
+        invokeSingleCat(makeDeps(), {
+          catId: 'runtime-spark',
+          service,
+          prompt: 'ping',
+          systemPrompt: 'Roster includes @runtime-spark',
+          userId: 'u1',
+          threadId: 'thread-f127-runtime-new-session',
+          isLastCat: true,
+        }),
+      );
+
+      assert.match(promptsSeen[0], /Roster includes @runtime-spark/, 'new dynamic cat sessions must receive roster');
+      assert.ok(
+        msgs.some(
+          (message) => message.type === 'text' && message.catId === 'runtime-spark' && message.content === 'runtime ok',
+        ),
+        'runtime-created cat should invoke and stream a normal response',
+      );
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(originalConfigs)) {
+        catRegistry.register(id, config);
+      }
+    }
+  });
+
+  it('F127 V-2: re-injects systemPrompt on resume when runtime cat registry changes', async () => {
+    const mod = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js');
+    mod._resetCompressionDetection();
+    mod._resetStaticIdentityRegistryRevisionForTests?.();
+
+    const originalConfigs = catRegistry.getAllConfigs();
+    const promptsSeen = [];
+    const optionsSeen = [];
+    let storedSession;
+    let callCount = 0;
+    const service = {
+      async *invoke(prompt, options) {
+        promptsSeen.push(prompt);
+        optionsSeen.push({ ...options });
+        callCount += 1;
+        if (callCount === 1) {
+          yield { type: 'session_init', catId: 'opus', sessionId: 'sess-f127-roster', timestamp: Date.now() };
+        }
+        yield { type: 'text', catId: 'opus', content: 'ok', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    deps.sessionManager = {
+      get: async () => storedSession,
+      store: async (_userId, _catId, _threadId, sessionId) => {
+        storedSession = sessionId;
+      },
+      delete: async () => {
+        storedSession = undefined;
+      },
+    };
+
+    try {
+      await collect(
+        invokeSingleCat(deps, {
+          catId: 'opus',
+          service,
+          prompt: 'turn 1',
+          systemPrompt: 'Roster v1',
+          userId: 'u1',
+          threadId: 'thread-f127-roster',
+          isLastCat: true,
+        }),
+      );
+
+      catRegistry.register('runtime-spark', {
+        ...originalConfigs.codex,
+        displayName: '火花猫',
+        nickname: '小火花',
+        mentionPatterns: ['@runtime-spark'],
+        defaultModel: 'gpt-5.4-mini',
+        roleDescription: '快速执行',
+      });
+
+      await collect(
+        invokeSingleCat(deps, {
+          catId: 'opus',
+          service,
+          prompt: 'turn 2',
+          systemPrompt: 'Roster v2 includes @runtime-spark',
+          userId: 'u1',
+          threadId: 'thread-f127-roster',
+          isLastCat: true,
+        }),
+      );
+
+      assert.equal(optionsSeen[1].sessionId, 'sess-f127-roster', 'second turn must still resume existing CLI session');
+      assert.match(
+        promptsSeen[1],
+        /Roster v2 includes @runtime-spark/,
+        'runtime registry change must refresh roster even on resume',
+      );
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(originalConfigs)) {
+        catRegistry.register(id, config);
+      }
+      mod._resetCompressionDetection();
+      mod._resetStaticIdentityRegistryRevisionForTests?.();
+    }
+  });
+
   it('F-BLOAT: compression detection flags re-injection when tokens drop >60%', async () => {
     // Reset compression detection state
     const mod = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js');

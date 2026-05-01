@@ -25,6 +25,7 @@ import {
   splitMentionPatterns,
   toCodexRuntimeSettings,
   toStrategyForm,
+  withDefaultModelMentionPattern,
 } from './hub-cat-editor.model';
 import { AccountSection, IdentitySection, RoutingSection } from './hub-cat-editor.sections';
 import { AdvancedRuntimeSection } from './hub-cat-editor-advanced';
@@ -389,7 +390,8 @@ export function HubCatEditor({ cat, draft, existingCats, open, onClose, onSaved 
         errors.account = true;
         errorMessages.push('请使用 provider/model 格式（如 minimax/MiniMax-M2.7），或填写 Provider 名称');
       }
-      if (splitMentionPatterns(form.mentionPatterns).length === 0) {
+      const effectiveCreateForm = selectedProfile?.authType === 'api_key' ? withDefaultModelMentionPattern(form) : form;
+      if (splitMentionPatterns(effectiveCreateForm.mentionPatterns).length === 0) {
         errors.routing = true;
         errorMessages.push('别名');
       }
@@ -409,7 +411,9 @@ export function HubCatEditor({ cat, draft, existingCats, open, onClose, onSaved 
       }
     };
     try {
-      const catPayload = buildCatPayload(form, cat);
+      const effectiveForm =
+        !cat && selectedProfile?.authType === 'api_key' ? withDefaultModelMentionPattern(form) : form;
+      const catPayload = buildCatPayload(effectiveForm, cat);
       const rollbackCatPayload = cat ? buildCatPayload(initialState(cat, null), cat) : null;
       const strategyEditable = Boolean(
         cat && form.sessionChain === 'true' && (strategyForm?.sessionChainEnabled ?? true),

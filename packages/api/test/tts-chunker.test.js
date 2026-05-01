@@ -134,4 +134,61 @@ describe('TtsChunker', () => {
       }
     });
   });
+
+  describe('MAX_CHUNK_CHARS guard', () => {
+    it('force-splits unpunctuated text at 500 chars', () => {
+      const result = chunkText('a'.repeat(1200));
+      assert.equal(result.length, 3);
+      assert.equal(result[0].text.length, 500);
+      assert.equal(result[1].text.length, 500);
+      assert.equal(result[2].text.length, 200);
+    });
+
+    it('does not split text exactly at 500 chars', () => {
+      const result = chunkText('b'.repeat(500));
+      assert.equal(result.length, 1);
+      assert.equal(result[0].text.length, 500);
+    });
+
+    it('splits at 501 chars', () => {
+      const result = chunkText('c'.repeat(501));
+      assert.equal(result.length, 2);
+      assert.equal(result[0].text.length, 500);
+      assert.equal(result[1].text.length, 1);
+    });
+
+    it('punctuation still takes priority over max-chars for short text', () => {
+      const result = chunkText('这是一个测试。这是另一个测试。');
+      assert.equal(result.length, 2);
+      assert.ok(result[0].text.length < 500);
+    });
+
+    it('preserves all text after force-split (no data loss)', () => {
+      const input = 'x'.repeat(1500);
+      const result = chunkText(input);
+      const reconstructed = result.map((c) => c.text).join('');
+      assert.equal(reconstructed.length, 1500);
+    });
+
+    it('prefers word boundary over mid-word split', () => {
+      // 10-char words joined by spaces: "abcdefghij abcdefghij ..."
+      const word = 'abcdefghij';
+      const words = Array(50).fill(word).join(' '); // 549 chars
+      const result = chunkText(words);
+      assert.ok(result.length >= 2, 'Should split long text');
+      for (const chunk of result) {
+        const parts = chunk.text.split(' ');
+        for (const p of parts) {
+          assert.equal(p, word, `Word should be intact, got: "${p}"`);
+        }
+      }
+    });
+
+    it('preserves all text with spaces after word-boundary split', () => {
+      const longInput = Array(120).fill('hello').join(' '); // 120*5 + 119 = 719 chars
+      const result = chunkText(longInput);
+      const reconstructed = result.map((c) => c.text).join(' ');
+      assert.equal(reconstructed, longInput);
+    });
+  });
 });

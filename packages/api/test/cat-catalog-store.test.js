@@ -709,4 +709,77 @@ describe('cat-catalog-store', () => {
   });
 
   // clowder-ai#340: removed api_key bootstrap model fallback test — filterBootstrapCatalog + bootstrapBindings deleted
+
+  it('drops legacy variants whose catId is a standalone breed in the template', () => {
+    // Real-world repro: template has been updated to a new shape (opus-47 promoted to
+    // its own top-level breed), but the runtime catalog is still on the *old* shape
+    // (opus-47 nested under ragdoll.variants). Without consulting template breed.ids,
+    // migration would not detect the legacy variant — toAllCatConfigs() then throws
+    // Duplicate catId once template+catalog are deep-merged.
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-template-driven-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+
+    // Template = new shape with opus-47 as a standalone breed
+    const templateConfig = validConfig();
+    templateConfig.breeds.push({
+      id: 'opus-47',
+      catId: 'opus-47',
+      name: '布偶猫 Opus 4.7',
+      displayName: '布偶猫',
+      avatar: '/avatars/opus-47.png',
+      color: { primary: '#7B1FA2', secondary: '#E1BEE7' },
+      mentionPatterns: ['@opus-47'],
+      roleDescription: 'Opus 4.7',
+      defaultVariantId: 'opus-47-default',
+      variants: [
+        {
+          id: 'opus-47-default',
+          catId: 'opus-47',
+          clientId: 'anthropic',
+          defaultModel: 'claude-opus-4-7',
+          mcpSupport: true,
+          cli: { command: 'claude', outputFormat: 'stream-json' },
+        },
+      ],
+    });
+    writeFileSync(templatePath, JSON.stringify(templateConfig, null, 2));
+
+    // Runtime catalog = legacy shape — opus-47 still nested under ragdoll, NO standalone breed
+    const runtimeConfig = validConfig();
+    runtimeConfig.breeds[0].variants.push({
+      id: 'legacy-opus-47',
+      catId: 'opus-47',
+      variantLabel: 'Opus 4.7 (legacy)',
+      displayName: '布偶猫',
+      mentionPatterns: ['@opus-47'],
+      provider: 'anthropic',
+      defaultModel: 'claude-opus-4-7',
+      mcpSupport: true,
+      cli: { command: 'claude', outputFormat: 'stream-json' },
+    });
+    mkdirSync(join(projectRoot, '.cat-cafe'), { recursive: true });
+    writeFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), JSON.stringify(runtimeConfig, null, 2));
+
+    bootstrapCatCatalog(projectRoot, templatePath);
+    const hydrated = JSON.parse(readFileSync(resolveCatCatalogPath(projectRoot), 'utf-8'));
+
+    const ragdoll = hydrated.breeds.find((b) => b.id === 'ragdoll');
+    assert.equal(
+      ragdoll.variants.find((v) => v.catId === 'opus-47'),
+      undefined,
+      'legacy ragdoll/variants[opus-47] should be removed because template promoted opus-47 to its own breed',
+    );
+    // Default variant whose catId matches its own breed must NOT be dropped
+    assert.ok(
+      ragdoll.variants.find((v) => v.id === 'opus-default'),
+      'opus-default (catId matches own breed) should be preserved',
+    );
+    // Catalog itself does NOT need to grow the standalone breed — deep merge with
+    // template will surface it. Migration is purely about removing the legacy duplicate.
+    assert.equal(
+      hydrated.breeds.find((b) => b.id === 'opus-47'),
+      undefined,
+      'catalog should not grow the standalone breed by itself; deep merge handles that',
+    );
+  });
 });

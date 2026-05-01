@@ -43,6 +43,7 @@ export function anchorToHref(anchor: string | undefined): string | null {
 }
 
 const SEARCH_TOOL_NAMES = ['search_evidence', 'cat_cafe_search_evidence'];
+const UNKNOWN_QUERY = '(unknown)';
 
 /**
  * Check if a tool_use label refers to search_evidence.
@@ -63,12 +64,109 @@ function parseDetail(detail?: string): { query?: string; q?: string; mode?: stri
   }
 }
 
-/**
- * Parse result count from the "Found N result(s):" header line.
- */
 function parseResultCountFromText(text: string): number | undefined {
-  const match = text.match(/^Found (\d+) result\(s\):/m);
+  const match = text.match(/^(?:Evidence search results:\s*)?Found (\d+) result\(s\)(?::|\s|$)/m);
   return match ? Number.parseInt(match[1], 10) : undefined;
+}
+
+function parseJsonStringLiteral(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    return typeof parsed === 'string' ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseJsonStringPrefix(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  return parseJsonStringLiteral(`"${raw.replace(/…$/, '')}"`);
+}
+
+interface ResultQueryMatch {
+  query: string;
+  kind: 'exact' | 'prefix';
+}
+
+function parseResultQueryFromText(text: string): ResultQueryMatch | undefined {
+  const foundMatch = text.match(
+    /^(?:Evidence search results:\s*)?Found \d+ result\(s\) for ("(?:\\.|[^"\\])*")(?:\s+\[[^\]\n]+\])?:?/m,
+  );
+  const foundQuery = parseJsonStringLiteral(foundMatch?.[1]);
+  if (foundQuery != null) return { query: foundQuery, kind: 'exact' };
+
+  const foundPrefixMatch = text.match(/^(?:Evidence search results:\s*)?Found \d+ result\(s\) for "((?:\\.|[^"\\])*)/m);
+  const foundQueryPrefix = parseJsonStringPrefix(foundPrefixMatch?.[1]);
+  if (foundQueryPrefix) return { query: foundQueryPrefix, kind: 'prefix' };
+
+  const errorMatch = text.match(/(?:^|\n)Evidence search (?:request )?failed for ("(?:\\.|[^"\\])*")(?: \(\d+\))?:?/m);
+  const errorQuery = parseJsonStringLiteral(errorMatch?.[1]);
+  if (errorQuery != null) return { query: errorQuery, kind: 'exact' };
+
+  const errorPrefixMatch = text.match(/(?:^|\n)Evidence search (?:request )?failed for "((?:\\.|[^"\\])*)/m);
+  const errorQueryPrefix = parseJsonStringPrefix(errorPrefixMatch?.[1]);
+  if (errorQueryPrefix) return { query: errorQueryPrefix, kind: 'prefix' };
+
+  const noResultMatch = text.match(/(?:^|\n)(?:Evidence search results:\s*)?No results found for:\s*(.+)$/m);
+  const noResultQuery = noResultMatch?.[1]?.trim();
+  if (!noResultQuery) return undefined;
+  if (noResultQuery.endsWith('…')) {
+    return { query: noResultQuery.replace(/…$/, ''), kind: 'prefix' };
+  }
+  return { query: noResultQuery, kind: 'exact' };
+}
+
+function hasEvidenceResultMarker(text: string): boolean {
+  return /(?:^|\n)Evidence search results:/m.test(text);
+}
+
+function hasLegacyEvidenceMetadata(text: string): boolean {
+  return [/(?:^|\n)\s+(?:anchor|type):\s+.+/m, /(?:^|\n)📊 本轮第 /m].some((pattern) => pattern.test(text));
+}
+
+function isSearchEvidenceResultText(text: string): boolean {
+  const hasResultMarker = hasEvidenceResultMarker(text);
+  const hasResultCount = parseResultCountFromText(text) != null;
+  const hasNoResult = /(?:^|\n)(?:Evidence search results:\s*)?No results found for:/m.test(text);
+  const hasEvidenceError = [
+    /(?:^|\n)Evidence search (?:request )?failed(?: for "(?:\\.|[^"\\])*")?(?: \(\d+\))?:?/m,
+    /(?:^|\n)Evidence search (?:request )?failed for "(?:\\.|[^"\\])*/m,
+  ].some((pattern) => pattern.test(text));
+
+  if (hasEvidenceError) return true;
+  if (hasResultMarker) {
+    if (hasResultCount) return true;
+    return hasNoResult;
+  }
+  if (!hasResultCount) return false;
+  return hasLegacyEvidenceMetadata(text);
+}
+
+function findPendingSearchIndex(pendingSearches: RecallEvent[], resultQuery: ResultQueryMatch | undefined): number {
+  if (resultQuery == null) return 0;
+
+  let pendingIndex = -1;
+  if (resultQuery.kind === 'exact') {
+    pendingIndex = pendingSearches.findIndex((recall) => recall.query === resultQuery.query);
+  } else {
+    const prefixMatches = pendingSearches
+      .map((recall, index) => ({ recall, index }))
+      .filter(({ recall }) => recall.query.startsWith(resultQuery.query));
+    pendingIndex = prefixMatches.length === 1 ? prefixMatches[0].index : -1;
+  }
+
+  if (pendingIndex >= 0) return pendingIndex;
+
+  return pendingSearches.findIndex((recall) => recall.query === UNKNOWN_QUERY);
+}
+
+function applyResultToRecall(recall: RecallEvent, text: string, resultQuery?: ResultQueryMatch): void {
+  if (recall.query === UNKNOWN_QUERY && resultQuery?.kind === 'exact') {
+    recall.query = resultQuery.query;
+  }
+  recall.resultCount = parseResultCountFromText(text) ?? 0;
+  recall.results = parseTextResults(text);
 }
 
 /**
@@ -122,40 +220,46 @@ export function parseTextResults(text: string): RecallResultItem[] {
 /**
  * Pure: filter ToolEvents to extract search_evidence calls with paired results.
  *
- * Pairing logic: after a search_evidence tool_use, the NEXT tool_result
- * (any label) is its result. Production tool_result labels are generic
- * "${catId} ← result", not the tool name.
+ * Pairing logic: search_evidence tool_result labels are generic
+ * "${catId} ← result", not the tool name. Providers may also emit several
+ * tool_use events before their results. New evidence output includes the query,
+ * so prefer query matching; legacy untagged output falls back to FIFO.
  */
 export function filterRecallEvents(events: ToolEvent[]): RecallEvent[] {
   const recalls: RecallEvent[] = [];
+  const pendingSearches: RecallEvent[] = [];
 
   for (let i = 0; i < events.length; i++) {
     const evt = events[i];
-    if (evt.type !== 'tool_use' || !isSearchEvidence(evt.label)) continue;
 
-    const params = parseDetail(evt.detail);
-    const recall: RecallEvent = {
-      id: evt.id,
-      query: params.query || params.q || '(unknown)',
-      mode: params.mode,
-      scope: params.scope,
-      timestamp: evt.timestamp,
-    };
+    if (evt.type === 'tool_use' && isSearchEvidence(evt.label)) {
+      const params = parseDetail(evt.detail);
+      const recall: RecallEvent = {
+        id: evt.id,
+        query: params.query || params.q || UNKNOWN_QUERY,
+        mode: params.mode,
+        scope: params.scope,
+        timestamp: evt.timestamp,
+      };
 
-    // Pair with the next tool_result (by position, not label)
-    for (let j = i + 1; j < events.length; j++) {
-      const next = events[j];
-      if (next.type === 'tool_result') {
-        const text = next.detail ?? '';
-        recall.resultCount = parseResultCountFromText(text) ?? 0;
-        recall.results = parseTextResults(text);
-        break;
-      }
-      // If we hit another tool_use before finding a result, stop looking
-      if (next.type === 'tool_use') break;
+      recalls.push(recall);
+      pendingSearches.push(recall);
+      continue;
     }
 
-    recalls.push(recall);
+    if (evt.type === 'tool_result' && pendingSearches.length > 0) {
+      const text = evt.detail ?? '';
+      if (isSearchEvidenceResultText(text)) {
+        const resultQuery = parseResultQueryFromText(text);
+        const pendingIndex = findPendingSearchIndex(pendingSearches, resultQuery);
+        if (pendingIndex >= 0) {
+          const pending = pendingSearches[pendingIndex];
+          if (!pending) continue;
+          applyResultToRecall(pending, text, resultQuery);
+          pendingSearches.splice(pendingIndex, 1);
+        }
+      }
+    }
   }
 
   return recalls;

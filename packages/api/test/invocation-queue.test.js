@@ -298,6 +298,48 @@ describe('InvocationQueue', () => {
     assert.equal(queue.hasQueuedForThread('t1'), true);
   });
 
+  it('hasQueuedForThread ignores stale queued entries', () => {
+    queue.enqueue(entry({ userId: 'alice' }));
+    const listed = queue.list('t1', 'alice');
+    listed[0].createdAt = Date.now() - InvocationQueue.STALE_QUEUED_THRESHOLD_MS - 1;
+
+    assert.equal(
+      queue.hasQueuedForThread('t1'),
+      false,
+      'stale queued entries must not permanently force thread-wide broadcast messages into queue mode',
+    );
+  });
+
+  it('hasDispatchableQueuedForThread keeps stale user entries visible for dispatch', () => {
+    queue.enqueue(entry({ userId: 'alice', source: 'user' }));
+    const listed = queue.list('t1', 'alice');
+    listed[0].createdAt = Date.now() - InvocationQueue.STALE_QUEUED_THRESHOLD_MS - 1;
+
+    assert.equal(queue.hasQueuedForThread('t1'), false, 'freshness/fairness gate should still ignore stale user work');
+    assert.equal(
+      queue.hasDispatchableQueuedForThread('t1'),
+      true,
+      'dispatch gate must still see stale user work as pending queue work',
+    );
+  });
+
+  it('hasDispatchableQueuedForThread keeps stale connector entries visible for dispatch', () => {
+    queue.enqueue(entry({ userId: 'alice', source: 'connector' }));
+    const listed = queue.list('t1', 'alice');
+    listed[0].createdAt = Date.now() - InvocationQueue.STALE_QUEUED_THRESHOLD_MS - 1;
+
+    assert.equal(
+      queue.hasQueuedForThread('t1'),
+      false,
+      'freshness/fairness gate should still ignore stale connector work',
+    );
+    assert.equal(
+      queue.hasDispatchableQueuedForThread('t1'),
+      true,
+      'dispatch gate must still see stale connector work as pending queue work',
+    );
+  });
+
   // ── Cross-thread isolation ──
 
   it('different threads are fully isolated', () => {
@@ -745,6 +787,24 @@ describe('InvocationQueue', () => {
     assert.equal(queue.hasActiveOrQueuedAgentForCat('t1', 'codex'), false);
   });
 
+  it('hasQueuedOrProcessingForCat does not match another thread by prefix collision', () => {
+    queue.enqueue({
+      threadId: 't1:child',
+      userId: 'u1',
+      content: 'queued in another thread',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+    });
+
+    assert.equal(
+      queue.hasQueuedOrProcessingForCat('t1', 'codex'),
+      false,
+      'thread t1 must not inherit queued entries from thread t1:child',
+    );
+    assert.equal(queue.hasQueuedOrProcessingForCat('t1:child', 'codex'), true);
+  });
+
   it('hasActiveOrQueuedAgentForCat still blocks for fresh processing entry (< STALE_PROCESSING_THRESHOLD)', () => {
     queue.enqueue({
       threadId: 't1',
@@ -810,24 +870,6 @@ describe('InvocationQueue', () => {
       false,
       'stale processing entry (11 min) must NOT block text-scan — zombie defense',
     );
-  });
-
-  it('hasQueuedOrProcessingForCat does not match another thread by prefix collision', () => {
-    queue.enqueue({
-      threadId: 't1:child',
-      userId: 'u1',
-      content: 'queued in another thread',
-      source: 'user',
-      targetCats: ['codex'],
-      intent: 'execute',
-    });
-
-    assert.equal(
-      queue.hasQueuedOrProcessingForCat('t1', 'codex'),
-      false,
-      'thread t1 must not inherit queued entries from thread t1:child',
-    );
-    assert.equal(queue.hasQueuedOrProcessingForCat('t1:child', 'codex'), true);
   });
 
   // ── hasQueuedUserMessagesForThread: fairness gate must only count user-sourced entries ──

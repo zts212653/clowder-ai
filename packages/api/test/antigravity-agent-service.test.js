@@ -101,6 +101,24 @@ describe('AntigravityAgentService (Bridge)', () => {
     assert.ok(sentPrompt.includes('Edit bar.ts'), 'original prompt preserved');
   });
 
+  test('appends local image path hints from uploaded image contentBlocks', async () => {
+    const bridge = createMockBridge();
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'gemini-3.1-pro', bridge });
+    await collect(
+      service.invoke('Describe this image', {
+        contentBlocks: [{ type: 'image', url: '/uploads/cat-photo.jpg' }],
+        uploadDir: '/tmp/cat-cafe-uploads',
+      }),
+    );
+
+    const sentPrompt = bridge.sendMessage.mock.calls[0].arguments[1];
+    assert.ok(sentPrompt.includes('Describe this image'), 'original prompt preserved');
+    assert.ok(
+      sentPrompt.includes('[Local image path: /tmp/cat-cafe-uploads/cat-photo.jpg]'),
+      'Antigravity prompt must expose uploaded image as a local path hint',
+    );
+  });
+
   test('injects callback fallback instructions when callbackEnv is available', async () => {
     const bridge = createMockBridge();
     const service = new AntigravityAgentService({ catId: 'antigravity', model: 'gemini-3.1-pro', bridge });

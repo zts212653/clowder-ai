@@ -1,4 +1,5 @@
 export { accountsRoutes } from './accounts.js';
+export { agentHooksRoutes } from './agent-hooks.js';
 export { auditRoutes } from './audit.js';
 export { authorizationRoutes } from './authorization.js';
 export { backlogRoutes } from './backlog.js';

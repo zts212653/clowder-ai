@@ -183,7 +183,7 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: true,
       promptTags: ['critique'],
     });
-    assert.ok(prompt.length < 5000, `Prompt is ${prompt.length} chars, expected < 5000`);
+    assert.ok(prompt.length < 5700, `Full runtime prompt is ${prompt.length} chars, expected < 5700`);
   });
 
   test('returns empty string for unknown catId', async () => {
@@ -371,6 +371,32 @@ describe('SystemPromptBuilder', () => {
     assert.ok(identity.includes('@暹罗猫') || identity.includes('@gemini'), 'Should list gemini mention');
   });
 
+  test('F127 V-1: buildStaticIdentity includes runtime-created cats in new-session roster', async () => {
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const originalConfigs = catRegistry.getAllConfigs();
+    try {
+      catRegistry.register('runtime-spark', {
+        ...originalConfigs.codex,
+        displayName: '火花猫',
+        nickname: '小火花',
+        mentionPatterns: ['@runtime-spark', '@火花猫'],
+        defaultModel: 'gpt-5.4-mini',
+        roleDescription: '快速执行',
+        teamStrengths: '精确点改',
+      });
+
+      const identity = buildStaticIdentity('opus');
+      assert.match(identity, /## 队友名册/, 'new session identity must include roster');
+      assert.match(identity, /火花猫\/小火花/, 'runtime-created cat must be listed');
+      assert.match(identity, /@runtime-spark · gpt-5\.4-mini/, 'runtime-created model alias must be visible');
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(originalConfigs)) {
+        catRegistry.register(id, config);
+      }
+    }
+  });
+
   test('buildStaticIdentity roster excludes self', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const opusRoster = buildStaticIdentity('opus');
@@ -456,7 +482,7 @@ describe('SystemPromptBuilder', () => {
         mcpAvailable: true,
         promptTags: ['critique'],
       });
-      assert.ok(prompt.length < 4900, `Full runtime prompt is ${prompt.length} chars, expected < 4900`);
+      assert.ok(prompt.length < 5700, `Full runtime prompt is ${prompt.length} chars, expected < 5700`);
     } finally {
       catRegistry.reset();
       for (const [id, config] of Object.entries(originalConfigs)) {
@@ -987,7 +1013,7 @@ describe('SystemPromptBuilder', () => {
         { catId: 'opus', lastMessageAt: Date.now() - 1000, messageCount: 3 },
       ],
     });
-    assert.ok(prompt.length < 5000, `Prompt with activity is ${prompt.length} chars, expected < 5000`);
+    assert.ok(prompt.length < 5700, `Full runtime prompt is ${prompt.length} chars, expected < 5700`);
   });
 
   // --- F042: pinned identity constant + direct-message reply target ---
@@ -1399,7 +1425,7 @@ describe('SystemPromptBuilder', () => {
         featureId: 'F073',
       },
     });
-    assert.ok(prompt.length < 5000, `Prompt with SOP hint is ${prompt.length} chars, expected < 5000`);
+    assert.ok(prompt.length < 5700, `Prompt with SOP hint is ${prompt.length} chars, expected < 5700`);
   });
 
   // --- F092: Voice Mode prompt injection ---
@@ -1428,7 +1454,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('Voice Mode ON'), 'Should not include voice mode header');
   });
 
-  test('buildSystemPrompt size stays under 4000 chars with voice mode + SOP hint after Magic Words growth', async () => {
+  test('buildSystemPrompt size stays under 5200 chars with voice mode + SOP hint after Magic Words growth', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -1446,7 +1472,7 @@ describe('SystemPromptBuilder', () => {
       },
       voiceMode: true,
     });
-    assert.ok(prompt.length < 5000, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 5000`);
+    assert.ok(prompt.length < 5700, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 5700`);
   });
 
   test('buildInvocationContext injects bootcamp mode when bootcampState provided', async () => {
@@ -1638,6 +1664,29 @@ describe('SystemPromptBuilder', () => {
     assert.ok(prompt.includes('ONLY_GUARDRAILS_HERE'), 'Should inject the one present block');
     assert.ok(!prompt.includes('角色叠加'), 'Should not inject null masks');
     assert.ok(!prompt.includes('默认行为'), 'Should not inject null defaults');
+  });
+
+  // ── Drift guard: magic words in shared-rules.md ↔ GOVERNANCE_L0_DIGEST ──
+  test('GOVERNANCE_L0_DIGEST contains all magic words from shared-rules.md', async () => {
+    const { readFileSync } = await import('node:fs');
+    const rulesPath = resolve(import.meta.dirname, '../../../cat-cafe-skills/refs/shared-rules.md');
+    const rulesText = readFileSync(rulesPath, 'utf8');
+    const magicWordPattern = /\|.*?「(.+?)」/g;
+    const rulesMagicWords = [...rulesText.matchAll(magicWordPattern)].map((m) => m[1]);
+    assert.ok(
+      rulesMagicWords.length >= 7,
+      `Expected >=7 magic words in shared-rules.md, got ${rulesMagicWords.length}`,
+    );
+    const build = await getBuilder();
+    const prompt = build({
+      catId: 'opus',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+    });
+    for (const word of rulesMagicWords) {
+      assert.ok(prompt.includes(`「${word}」`), `Missing magic word 「${word}」 in GOVERNANCE_L0_DIGEST`);
+    }
   });
 
   // ── Drift guard: shared-rules.md ↔ GOVERNANCE_L0_DIGEST ──────

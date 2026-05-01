@@ -212,6 +212,62 @@ describe('Antigravity waiting approval', () => {
     assert.equal(texts[0].content, 'probed ok');
   });
 
+  test('service auto-approves approval_pending RUN_COMMAND even when cursor.awaitingUserInput is false', async () => {
+    const resolveOutstandingSteps = mock.fn(async () => {});
+    const waitingStep = {
+      type: 'CORTEX_STEP_TYPE_RUN_COMMAND',
+      status: 'CORTEX_STEP_STATUS_WAITING',
+      metadata: {
+        toolCall: {
+          id: 'toolu_waiting_without_cursor_flag',
+          name: 'run_command',
+          argumentsJson: JSON.stringify({ CommandLine: 'echo hi', Cwd: '/tmp', SafeToAutoRun: false }),
+        },
+      },
+    };
+    const bridge = {
+      ...createMockServiceBridge({ resolveOutstandingSteps }),
+      nativeExecuteAndPush: mock.fn(async (step) =>
+        step.type === 'CORTEX_STEP_TYPE_RUN_COMMAND' ? 'approval_pending' : false,
+      ),
+      pollForSteps: mock.fn(async function* () {
+        yield {
+          steps: [waitingStep],
+          cursor: {
+            baselineStepCount: 0,
+            lastDeliveredStepCount: 0,
+            terminalSeen: false,
+            lastActivityAt: Date.now(),
+            awaitingUserInput: false,
+          },
+        };
+        yield {
+          steps: [
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'DONE',
+              plannerResponse: { response: 'approved without waiting for stall' },
+            },
+          ],
+          cursor: { baselineStepCount: 0, lastDeliveredStepCount: 1, terminalSeen: true, lastActivityAt: Date.now() },
+        };
+      }),
+    };
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'claude-opus-4-6', bridge });
+
+    const messages = await collect(service.invoke('run command'));
+
+    assert.equal(resolveOutstandingSteps.mock.calls.length, 1, 'approval_pending should trigger immediate resolve');
+    assert.equal(resolveOutstandingSteps.mock.calls[0].arguments[0], 'test-cascade-001');
+    assert.equal(
+      messages.some((msg) => msg.type === 'liveness_signal'),
+      false,
+      'successful immediate auto-approve should not show waiting UI',
+    );
+    const text = messages.find((msg) => msg.type === 'text');
+    assert.equal(text?.content, 'approved without waiting for stall');
+  });
+
   test('P1: probe retry resumes from last delivered cursor, not from stepsBefore', async () => {
     const resolveOutstandingSteps = mock.fn(async () => {});
     let callCount = 0;

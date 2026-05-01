@@ -20,6 +20,8 @@ import {
 } from '../../../../../../infrastructure/telemetry/instruments.js';
 import { normalizeModel } from '../../../../../../infrastructure/telemetry/model-normalizer.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../../types.js';
+import { appendLocalImagePathHints } from '../image-cli-bridge.js';
+import { extractImagePaths } from '../image-paths.js';
 import { AntigravityBridge, type BridgeConnection, type TrajectoryStep } from './AntigravityBridge.js';
 import { classifyStep, transformTrajectorySteps } from './antigravity-event-transformer.js';
 import {
@@ -86,7 +88,7 @@ function buildCallbackFallbackInstructions(callbackEnv?: Record<string, string>)
   const catId = callbackEnv?.CAT_CAFE_CAT_ID?.trim() ?? 'antig-opus';
   if (!apiUrl || !invocationId || !callbackToken) return '';
 
-  return `\n[Cat Cafe callback fallback]\n如果当前环境已挂载只读 Cat Cafe MCP（常见为 search_evidence / reflect / session-chain / signals），这些读工具可直接使用。当前 invocation / thread 的写回凭证不会随原生 MCP 一起注入；如需读取当前 thread 上下文或回贴消息，请直接用 run_command 调 HTTP callback。\n- 当前 thread 上下文: curl -fsS "${apiUrl}/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}&limit=20"\n- 带关键词过滤: curl -fsS "${apiUrl}/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}&keyword=review"\n- 发消息回当前 thread: curl -fsS -X POST "${apiUrl}/api/callbacks/post-message" -H 'Content-Type: application/json' -d '{"invocationId":"${invocationId}","callbackToken":"${callbackToken}","content":"<message>"}'\n- 完整文档（public / static，无需凭证）: curl -fsS "${apiUrl}/api/callbacks/instructions"\n\n[Cold-start onboarding — 新 cascade 必读]\nAntigravity 持久 cascade 累积过多 step 时（>200）会因 context 撑爆产生 empty PLANNER_RESPONSE，这时铲屎官可能让你 New Cascade 重启。**新 cascade 是 fresh state，你之前的工作记忆会丢**。第一次回应铲屎官前，**先把上下文找回来**——只需要用 readonly MCP 白名单里的工具，不依赖任何 callback 凭证。当前 thread / cat 已经在 prompt 里给你了：threadId="${threadId ?? ''}", catId="${catId}"，照搬即可。\n1. **读上几次 session 的工作记忆**：cat_cafe_list_session_chain({ threadId: "${threadId ?? ''}", catId: "${catId}", limit: 5 }) 拿到最近 session 列表 → 对最近的 1-2 个 sessionId 调 cat_cafe_read_session_digest({ sessionId }) 看你之前在做什么、卡在哪、已交付什么。这是最浓缩的"自己脑子里的活"摘要。\n2. **找当前 feature 文档**：从 session digest 里能抠出 feature ID（F0xx）或关键词，cat_cafe_search_evidence({ query: "<feature ID 或关键词>", scope: "docs", mode: "hybrid" }) 拿真相源（spec / 决策 / lessons）。\n3. **如需更细的工作过程证据**：cat_cafe_read_session_events({ sessionId, limit: 50 }) 看单个 session 内具体调了哪些工具、产生了哪些消息。\n4. 把"我是 Bengal Cat 孟加拉猫，刚被 New Cascade 重启，读了 session chain 最近 X 个 digest，理解了上下文是 ___，正在做的是 ___，准备继续 ___"作为开场白回给铲屎官，让他看到你已经找回记忆。\n这一套约 2-4 次 tool 调用，比让铲屎官手把手 onboard 快得多。所有用到的工具（list_session_chain / read_session_digest / read_session_events / search_evidence）都在 readonly MCP 白名单，无需 callback 凭证、无 UI 审批。\n\n[F061 Bug-F workaround — shell exec via MCP]\n当 Antigravity UI permission gate 拦截 pwd / git 等只读命令时（user denied permission），优先用 MCP 工具 cat_cafe_shell_exec 代替 cascade run_command。cat_cafe_shell_exec 走 MCP stdio，不经 cascade UI gate。**只读命令白名单（严格）**：pwd / ls / cat / git log|status|rev-parse|diff|show。**路径参数必须在 ALLOWED_WORKSPACE_DIRS 范围内**（和 file-tools 同边界）。**默认 cwd 自动指向 workspace 根目录**（ALLOWED_WORKSPACE_DIRS 第一项），所以**不传 cwd 参数也能直接跑**——例如 cat_cafe_shell_exec({ commandLine: "git log --oneline -3" }) 立即返回结果，无需手动指定 cwd。**不在 whitelist 的工具**（curl / rm / mkdir / git branch|checkout|commit / npm install 等）**仍需走 cascade run_command + 用户 UI 审批**。注意：上面说的 "curl 调 HTTP callback" 路径是独立的——thread-context / post-message / instructions 这些 HTTP callback 仍必须用 curl via cascade run_command（需要用户批准一次），不走 cat_cafe_shell_exec。`;
+  return `\n[Cat Cafe callback fallback]\n如果当前环境已挂载只读 Cat Cafe MCP（常见为 search_evidence / reflect / session-chain / signals），这些读工具可直接使用。共享 Antigravity MCP 的 agent-key 工具（post_message / get_thread_context / list_threads / cross_post_message）必须带 agentKeyCatId="${catId}"，这样 Gemini/Claude variant 会使用各自身份的 sidecar key。当前 invocation / thread 的写回凭证也可通过 run_command 调 HTTP callback。\n- 当前 thread 上下文: curl -fsS "${apiUrl}/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}&limit=20"\n- 带关键词过滤: curl -fsS "${apiUrl}/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}&keyword=review"\n- 发消息回当前 thread: curl -fsS -X POST "${apiUrl}/api/callbacks/post-message" -H 'Content-Type: application/json' -d '{"invocationId":"${invocationId}","callbackToken":"${callbackToken}","content":"<message>"}'\n- 完整文档（public / static，无需凭证）: curl -fsS "${apiUrl}/api/callbacks/instructions"\n\n[Cold-start onboarding — 新 cascade 必读]\nAntigravity 持久 cascade 累积过多 step 时（>200）会因 context 撑爆产生 empty PLANNER_RESPONSE，这时铲屎官可能让你 New Cascade 重启。**新 cascade 是 fresh state，你之前的工作记忆会丢**。第一次回应铲屎官前，**先把上下文找回来**——只需要用 readonly MCP 白名单里的工具，不依赖任何 callback 凭证。当前 thread / cat 已经在 prompt 里给你了：threadId="${threadId ?? ''}", catId="${catId}"，照搬即可。\n1. **读上几次 session 的工作记忆**：cat_cafe_list_session_chain({ threadId: "${threadId ?? ''}", catId: "${catId}", limit: 5 }) 拿到最近 session 列表 → 对最近的 1-2 个 sessionId 调 cat_cafe_read_session_digest({ sessionId }) 看你之前在做什么、卡在哪、已交付什么。这是最浓缩的"自己脑子里的活"摘要。\n2. **找当前 feature 文档**：从 session digest 里能抠出 feature ID（F0xx）或关键词，cat_cafe_search_evidence({ query: "<feature ID 或关键词>", scope: "docs", mode: "hybrid" }) 拿真相源（spec / 决策 / lessons）。\n3. **如需更细的工作过程证据**：cat_cafe_read_session_events({ sessionId, limit: 50 }) 看单个 session 内具体调了哪些工具、产生了哪些消息。\n4. 把"我是 Bengal Cat 孟加拉猫，刚被 New Cascade 重启，读了 session chain 最近 X 个 digest，理解了上下文是 ___，正在做的是 ___，准备继续 ___"作为开场白回给铲屎官，让他看到你已经找回记忆。\n这一套约 2-4 次 tool 调用，比让铲屎官手把手 onboard 快得多。所有用到的工具（list_session_chain / read_session_digest / read_session_events / search_evidence）都在 readonly MCP 白名单，无需 callback 凭证、无 UI 审批。\n\n[F061 Bug-F workaround — shell exec via MCP]\n当 Antigravity UI permission gate 拦截 pwd / git 等只读命令时（user denied permission），优先用 MCP 工具 cat_cafe_shell_exec 代替 cascade run_command。cat_cafe_shell_exec 走 MCP stdio，不经 cascade UI gate。**只读命令白名单（严格）**：pwd / ls / cat / git log|status|rev-parse|diff|show。**路径参数必须在 ALLOWED_WORKSPACE_DIRS 范围内**（和 file-tools 同边界）。**默认 cwd 自动指向 workspace 根目录**（ALLOWED_WORKSPACE_DIRS 第一项），所以**不传 cwd 参数也能直接跑**——例如 cat_cafe_shell_exec({ commandLine: "git log --oneline -3" }) 立即返回结果，无需手动指定 cwd。**不在 whitelist 的工具**（curl / rm / mkdir / git branch|checkout|commit / npm install 等）**仍需走 cascade run_command + 用户 UI 审批**。注意：上面说的 "curl 调 HTTP callback" 路径是独立的——thread-context / post-message / instructions 这些 HTTP callback 仍必须用 curl via cascade run_command（需要用户批准一次），不走 cat_cafe_shell_exec。`;
 }
 
 export interface AntigravityAgentServiceOptions {
@@ -166,12 +168,14 @@ export class AntigravityAgentService implements AgentService {
         ? `\n[Workspace: ${sanitizedDir}]\nAll file paths must be relative to this workspace root. Do not use absolute paths.`
         : '';
       const callbackFallback = buildCallbackFallbackInstructions(options?.callbackEnv);
+      const imagePaths = extractImagePaths(options?.contentBlocks, options?.uploadDir);
+      const promptBody = appendLocalImagePathHints(prompt, imagePaths);
 
       const effectivePrompt = options?.systemPrompt
-        ? `${options.systemPrompt}${workspaceHint}${callbackFallback}\n\n---\n\n${prompt}`
+        ? `${options.systemPrompt}${workspaceHint}${callbackFallback}\n\n---\n\n${promptBody}`
         : workspaceHint || callbackFallback
-          ? `${`${workspaceHint}${callbackFallback}`.trimStart()}\n\n---\n\n${prompt}`
-          : prompt;
+          ? `${`${workspaceHint}${callbackFallback}`.trimStart()}\n\n---\n\n${promptBody}`
+          : promptBody;
 
       const threadId = options?.auditContext?.threadId ?? `ephemeral-${Date.now()}`;
       let cascadeId = await this.bridge.getOrCreateSession(threadId, this.catId as string);
@@ -314,9 +318,14 @@ export class AntigravityAgentService implements AgentService {
               continue;
             }
             if (batch.steps.length > 0) {
-              autoApproveAttempted = false;
-              stallProbed = false;
-              lastDelivered = batch.cursor.lastDeliveredStepCount;
+              const previousLastDelivered = lastDelivered;
+              const nextLastDelivered = batch.cursor.lastDeliveredStepCount;
+              const deliveryAdvanced = nextLastDelivered > previousLastDelivered;
+              if (deliveryAdvanced) {
+                autoApproveAttempted = false;
+                stallProbed = false;
+              }
+              lastDelivered = nextLastDelivered;
 
               totalStepsSeen += batch.steps.length;
               lastBatchStepTypes = batch.steps.map((s) => s.type);
@@ -662,6 +671,27 @@ export class AntigravityAgentService implements AgentService {
                     // advanced a local tool path, so later capacity errors must
                     // not be treated as safely undispatched.
                     attemptHasNativeDispatch = true;
+                  }
+                  if (handled === 'approval_pending') {
+                    if (self.autoApprove && !autoApproveAttempted) {
+                      autoApproveAttempted = true;
+                      try {
+                        await self.bridge.resolveOutstandingSteps(cascadeId);
+                        log.info(`auto-approved pending native tool interaction for cascade ${cascadeId}`);
+                        continue;
+                      } catch (err) {
+                        log.warn(`auto-approve pending native tool interaction failed: ${err}`);
+                      }
+                    }
+                    yield {
+                      type: 'liveness_signal' as const,
+                      catId: self.catId,
+                      content: JSON.stringify({ type: 'info', message: 'Antigravity 正在等待权限批准' }),
+                      metadata,
+                      errorCode: 'waiting_approval',
+                      timestamp: Date.now(),
+                    };
+                    continue;
                   }
                   if (handled === true && toolCallId) handledToolCallIds.add(toolCallId);
                   if (

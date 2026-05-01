@@ -7,7 +7,7 @@ created: 2026-02-26
 
 # Cat Cafe Feature Roadmap
 
-> 维护者：三猫 | 最后更新：2026-04-15
+> 维护者：三猫 | 最后更新：2026-04-30（F183 + F184 联合立项）
 >
 > **规则**：只放活跃 Feature（idea/spec/in-progress/review），done 后移除。
 > 详细信息见 `docs/features/Fxxx-*.md`。
@@ -39,7 +39,6 @@ created: 2026-02-26
 | F119 | 谁是卧底 — 坏猫战术推理游戏 #2 | spec | Ragdoll | internal | [F119](features/F119-who-is-spy-game.md) |
 | F124 | Apple Ecosystem × Cat Café 语音交互系统 — iOS/watchOS/AirPods | spec | Ragdoll | internal | [F124](features/F124-apple-ecosystem-voice-interaction.md) |
 | F126 | 四肢控制面 — Cat Café Limb Control Plane | in-progress | Ragdoll | internal | [F126](features/F126-limb-control-plane.md) |
-| F127 | 猫猫管理重构 — 账户配置与猫猫实例分离，动态创建猫 + 自定义别名 @ 路由 | in-progress | 金渐层 + Maine Coon | community [#109](https://github.com/zts212653/clowder-ai/issues/109) | [F127](features/F127-cat-instance-management.md) |
 | F128 | Cat-Initiated Thread Creation — 猫程序化创建 Thread | spec | 待定 | community [#82](https://github.com/zts212653/clowder-ai/issues/82) | [F128](features/F128-cat-create-thread.md) |
 | F129 | Pack System — Multi-Agent 共创世界的 Mod 生态 | in-progress | Ragdoll | internal | [F129](features/F129-pack-system-multi-agent-mod.md) |
 | F135 | 狸花猫开箱即用 — DARE Out-of-the-Box | spec | bouillipx | community [#195](https://github.com/zts212653/clowder-ai/issues/195) | [F135](features/F135-dare-ootb.md) |
@@ -58,5 +57,10 @@ created: 2026-02-26
 | F167 | A2A Chain Quality — 乒乓球熔断 + 虚空传球检测 + 角色护栏 | spec | Ragdoll | internal | [F167](features/F167-a2a-chain-quality.md) |
 | F169 | Agent Memory Reflex — 愿景文档（vision artifact） | vision | 三猫 | internal | [F169](features/F169-agent-memory-reflex.md) |
 | F175 | Unified Message Queue — 优先级排序 + 用户可控编排（urgent bypass 收口）| spec | @mindfn (community) | community [#575](https://github.com/zts212653/clowder-ai/pull/575) | [F175](features/F175-unified-message-queue.md) |
-| F177 | Harness Update — Close Gate 结构化判据 + 四心智专属护栏 | spec | Ragdoll | internal | [F177](features/F177-harness-update.md) |
 | F178 | Persistent MCP Agent-Key Auth — 跨 invocation 写权限（F061 Bug-H follow-up） | spec | Ragdoll | internal | [F178](features/F178-persistent-mcp-agent-key-auth.md) |
+| F179 | Desktop Installer Release Pipeline — Win NSIS + Mac DMG 自动附 release | spec | Ragdoll | community (v0.9.0 反馈) | [F179](features/F179-desktop-installer-release-pipeline.md) |
+| F180 | Agent CLI Hook Health and Sync — user-level hook 检测 + 一键同步 | in-progress | Maine Coon/Maine Coon | community [#614](https://github.com/zts212653/clowder-ai/issues/614) | [F180](features/F180-agent-cli-hook-health.md) |
+| F181 | Reserved Feature Slot — 待补充需求锚点 | idea | 待定 | internal | [F181](features/F181-reserved-feature-slot.md) |
+| F182 | Cat Roster Lifecycle Toggle — 成员启停的全链路降级反馈 | spec | Ragdoll（Ragdoll/Opus 4.7） | internal | [F182](features/F182-cat-roster-lifecycle-toggle.md) |
+| F183 | Bubble Pipeline Architecture Consolidation — 消息气泡管线架构收敛（统一身份契约 + Single Writer + IDB invalidation + 序列号补偿） | in-progress | Ragdoll（Ragdoll/Opus 4.7）牵头 | internal | [F183](features/F183-bubble-pipeline-architecture-consolidation.md) |
+| F184 | ChatMessage Rendering Mount Investigation — F176 撤销后真 bug（DOM 缺失）独立排查 | spec | 待定 | internal | [F184](features/F184-chatmessage-rendering-mount-investigation.md) |

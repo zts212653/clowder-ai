@@ -75,6 +75,16 @@ triggers:
 
 如果你 push back 了但你错了：陈述事实然后继续，不要长篇道歉。
 
+### Fallback 层数检测（F177 Phase D）🔴
+
+Review 代码时，自动执行 `node scripts/check-fallback-layers.mjs` 检测 fallback 模式增长。
+同一文件新增 ≥3 层 fallback → 触发坐标系自检（三问）：
+1. 这个 fix 是在修坐标系，还是在给错误坐标系打补丁？
+2. 能否用坐标变换（换一个问题分解方式）消除这些 fallback 层？
+3. 每一层 fallback 为什么不能去掉？
+
+review 报告中必须包含 fallback 层数分析结果。
+
 **Review 有零分歧 = 走过场**（反顺从规则）。真正的 review 需要技术争论。
 
 ## 流程

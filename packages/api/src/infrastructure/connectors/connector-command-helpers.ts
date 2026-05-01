@@ -26,6 +26,10 @@ export interface CommandInfoDeps {
   frontendBaseUrl: string;
 }
 
+export function buildThreadDeepLink(frontendBaseUrl: string, threadId: string): string {
+  return `${frontendBaseUrl}/thread/${threadId}`;
+}
+
 /** AC-B7: structured audit log for slash command execution */
 export function auditSlashCommand(trimmed: string, duration: number, registry?: CommandRegistry): void {
   const cmd = trimmed.split(/\s+/)[0]?.toLowerCase();
@@ -112,7 +116,7 @@ export async function buildStatusInfo(
 
   const title = thread.title || '(无标题)';
   const created = new Date(thread.createdAt ?? 0).toLocaleDateString('zh-CN');
-  const link = `${deps.frontendBaseUrl}/thread/${threadId}`;
+  const link = buildThreadDeepLink(deps.frontendBaseUrl, threadId);
 
   const lines = [
     '📊 Thread 状态',
