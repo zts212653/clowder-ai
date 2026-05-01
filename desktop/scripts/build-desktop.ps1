@@ -77,17 +77,52 @@ if (-not $SkipBundleDeps) {
     if (Test-Path $deployRoot) { Remove-Item $deployRoot -Recurse -Force }
     New-Item -ItemType Directory -Path $deployRoot -Force | Out-Null
 
-    Push-Location $ProjectRoot
-    foreach ($pkg in @('api', 'web', 'mcp-server')) {
-        Write-Host "  Deploying @cat-cafe/$pkg ..." -ForegroundColor Gray
-        $out = Join-Path $deployRoot $pkg
-        # Runtime services launch package entrypoints directly; they do not use
-        # node_modules/.bin shims. Disabling bin links avoids a pnpm 9 hoisted
-        # deploy failure on windows-2025 runners while keeping real-file deps.
-        pnpm --filter "@cat-cafe/$pkg" --prod --config.node-linker=hoisted --config.bin-links=false deploy $out
-        if ($LASTEXITCODE -ne 0) { Write-Err "pnpm deploy @cat-cafe/$pkg failed"; Pop-Location; exit 1 }
+    # Force disable bin-link creation via env var. The CLI flag
+    # --config.bin-links=false is not propagated by pnpm deploy's internal
+    # install step; the env var is the only reliable override.
+    $prevBinLinks = $env:npm_config_bin_links
+    $defenderExclusionAdded = $false
+    $deployFailed = $false
+
+    # Temporarily exclude the deploy target from Defender scanning. Defender can
+    # lock freshly-written files in .bin/ during pnpm deploy; remove the
+    # exclusion before continuing so the host is not left with a broad bypass.
+    try {
+        Add-MpPreference -ExclusionPath $deployRoot -ErrorAction Stop
+        $defenderExclusionAdded = $true
+    } catch {
+        Write-Host "  Defender exclusion skipped: $($_.Exception.Message)" -ForegroundColor Yellow
     }
-    Pop-Location
+
+    try {
+        $env:npm_config_bin_links = "false"
+
+        Push-Location $ProjectRoot
+        try {
+            foreach ($pkg in @('api', 'web', 'mcp-server')) {
+                Write-Host "  Deploying @cat-cafe/$pkg ..." -ForegroundColor Gray
+                $out = Join-Path $deployRoot $pkg
+                pnpm --filter "@cat-cafe/$pkg" --prod --config.node-linker=hoisted deploy $out
+                if ($LASTEXITCODE -ne 0) { throw "pnpm deploy @cat-cafe/$pkg failed" }
+            }
+        } finally {
+            Pop-Location
+        }
+    } catch {
+        Write-Err $_.Exception.Message
+        $deployFailed = $true
+    } finally {
+        if ($null -eq $prevBinLinks) {
+            Remove-Item Env:npm_config_bin_links -ErrorAction SilentlyContinue
+        } else {
+            $env:npm_config_bin_links = $prevBinLinks
+        }
+        if ($defenderExclusionAdded) {
+            try { Remove-MpPreference -ExclusionPath $deployRoot -ErrorAction SilentlyContinue } catch {}
+        }
+    }
+
+    if ($deployFailed) { exit 1 }
 
     # Web's pre-built .next artifact is not copied by `pnpm deploy` (it's outside
     # the package `files` field), so inject it explicitly.
