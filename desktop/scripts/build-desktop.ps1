@@ -77,21 +77,20 @@ if (-not $SkipBundleDeps) {
     if (Test-Path $deployRoot) { Remove-Item $deployRoot -Recurse -Force }
     New-Item -ItemType Directory -Path $deployRoot -Force | Out-Null
 
-    # Force disable bin-link creation for pnpm deploy's internal install step.
-    # `pnpm deploy` has ignored both the CLI flag and npm_config env override on
-    # Windows release runners, so write a temporary project-level .npmrc and
-    # restore it before leaving this step.
-    $prevBinLinks = $env:npm_config_bin_links
-    $npmrcPath = Join-Path $ProjectRoot ".npmrc"
-    $npmrcHadOriginal = Test-Path $npmrcPath
-    $npmrcOriginalContent = if ($npmrcHadOriginal) { Get-Content $npmrcPath -Raw } else { $null }
+    # pnpm deploy's internal install ignores CLI flags, env vars, and
+    # project-root .npmrc for bin-links — it only reads user-level config.
+    # Set it via `pnpm config` (writes ~/.npmrc) and clean up after.
+    $binLinksDisabled = $false
     $defenderExclusionAdded = $false
     $deployFailed = $false
-    $npmrcRestoreFailed = $false
 
-    # Temporarily exclude the deploy target from Defender scanning. Defender can
-    # lock freshly-written files in .bin/ during pnpm deploy; remove the
-    # exclusion before continuing so the host is not left with a broad bypass.
+    try {
+        pnpm config set bin-links false 2>$null
+        $binLinksDisabled = $true
+    } catch {
+        Write-Host "  pnpm config set bin-links failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+
     try {
         Add-MpPreference -ExclusionPath $deployRoot -ErrorAction Stop
         $defenderExclusionAdded = $true
@@ -100,18 +99,6 @@ if (-not $SkipBundleDeps) {
     }
 
     try {
-        $env:npm_config_bin_links = "false"
-        $npmrcDeployContent = if ($npmrcHadOriginal) {
-            $npmrcOriginalContent -replace "(?m)^\s*bin-links\s*=.*\r?\n?", ""
-        } else {
-            ""
-        }
-        if ($npmrcDeployContent.Length -gt 0 -and -not $npmrcDeployContent.EndsWith("`n")) {
-            $npmrcDeployContent += "`n"
-        }
-        $npmrcDeployContent += "bin-links=false`n"
-        Set-Content -Path $npmrcPath -Value $npmrcDeployContent -NoNewline -Encoding utf8
-
         Push-Location $ProjectRoot
         try {
             foreach ($pkg in @('api', 'web', 'mcp-server')) {
@@ -127,29 +114,15 @@ if (-not $SkipBundleDeps) {
         Write-Err $_.Exception.Message
         $deployFailed = $true
     } finally {
-        if ($null -eq $prevBinLinks) {
-            Remove-Item Env:npm_config_bin_links -ErrorAction SilentlyContinue
-        } else {
-            $env:npm_config_bin_links = $prevBinLinks
-        }
-        try {
-            if ($npmrcHadOriginal) {
-                Set-Content -Path $npmrcPath -Value $npmrcOriginalContent -NoNewline -Encoding utf8
-            } else {
-                if (Test-Path $npmrcPath) {
-                    Remove-Item $npmrcPath -ErrorAction Stop
-                }
-            }
-        } catch {
-            Write-Err "Failed to restore temporary .npmrc: $($_.Exception.Message)"
-            $npmrcRestoreFailed = $true
+        if ($binLinksDisabled) {
+            pnpm config delete bin-links 2>$null
         }
         if ($defenderExclusionAdded) {
             try { Remove-MpPreference -ExclusionPath $deployRoot -ErrorAction SilentlyContinue } catch {}
         }
     }
 
-    if ($deployFailed -or $npmrcRestoreFailed) { exit 1 }
+    if ($deployFailed) { exit 1 }
 
     # Web's pre-built .next artifact is not copied by `pnpm deploy` (it's outside
     # the package `files` field), so inject it explicitly.

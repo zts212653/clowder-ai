@@ -24,40 +24,20 @@ test('windows desktop build script cleans up temporary Defender exclusions', asy
   assert.match(buildScript, /finally\s*\{[\s\S]*Remove-MpPreference -ExclusionPath \$deployRoot[\s\S]*\}/);
 });
 
-test('windows desktop build script restores npm_config_bin_links after deploy', async () => {
+test('windows desktop build script disables bin-links via pnpm user-level config', async () => {
   const buildScript = await readFile(desktopBuildScriptPath, 'utf8');
 
-  assert.match(buildScript, /\$prevBinLinks = \$env:npm_config_bin_links/);
-  assert.match(buildScript, /\$env:npm_config_bin_links = "false"/);
-  assert.match(
-    buildScript,
-    /if \(\$null -eq \$prevBinLinks\)\s*\{\s*Remove-Item Env:npm_config_bin_links -ErrorAction SilentlyContinue/s,
-  );
-  assert.match(buildScript, /else\s*\{\s*\$env:npm_config_bin_links = \$prevBinLinks/s);
+  assert.match(buildScript, /pnpm config set bin-links false/);
+  assert.match(buildScript, /pnpm config delete bin-links/);
+  assert.match(buildScript, /finally\s*\{[\s\S]*pnpm config delete bin-links[\s\S]*\}/);
 });
 
-test('windows desktop build script restores temporary pnpm deploy npmrc config', async () => {
+test('windows desktop build script cleans up both pnpm config and Defender in finally block', async () => {
   const buildScript = await readFile(desktopBuildScriptPath, 'utf8');
 
-  assert.match(buildScript, /\$npmrcPath = Join-Path \$ProjectRoot "\.npmrc"/);
-  assert.match(buildScript, /\$npmrcOriginalContent = if \(\$npmrcHadOriginal\) \{ Get-Content \$npmrcPath -Raw \}/);
-  assert.match(buildScript, /bin-links=false`n/);
-  assert.match(buildScript, /Set-Content -Path \$npmrcPath -Value \$npmrcDeployContent -NoNewline -Encoding utf8/);
-  assert.match(
-    buildScript,
-    /if \(\$npmrcHadOriginal\)\s*\{\s*Set-Content -Path \$npmrcPath -Value \$npmrcOriginalContent -NoNewline -Encoding utf8/s,
-  );
-  assert.match(buildScript, /else\s*\{\s*if \(Test-Path \$npmrcPath\) \{\s*Remove-Item \$npmrcPath -ErrorAction Stop/s);
-});
-
-test('windows desktop build script cannot skip Defender cleanup when npmrc restore fails', async () => {
-  const buildScript = await readFile(desktopBuildScriptPath, 'utf8');
-
-  assert.match(buildScript, /\$npmrcRestoreFailed = \$false/);
-  assert.match(
-    buildScript,
-    /try\s*\{\s*if \(\$npmrcHadOriginal\)[\s\S]*\}\s*catch\s*\{[\s\S]*\$npmrcRestoreFailed = \$true[\s\S]*\}\s*if \(\$defenderExclusionAdded\)/,
-  );
-  assert.doesNotMatch(buildScript, /Remove-Item \$npmrcPath -ErrorAction SilentlyContinue/);
-  assert.match(buildScript, /if \(\$deployFailed -or \$npmrcRestoreFailed\) \{ exit 1 \}/);
+  const finallyMatch = buildScript.match(/finally\s*\{([\s\S]*?)\}\s*\n\s*if \(\$deployFailed\)/);
+  assert.ok(finallyMatch, 'finally block with cleanup must exist');
+  const finallyBody = finallyMatch[1];
+  assert.match(finallyBody, /pnpm config delete bin-links/);
+  assert.match(finallyBody, /Remove-MpPreference -ExclusionPath \$deployRoot/);
 });
