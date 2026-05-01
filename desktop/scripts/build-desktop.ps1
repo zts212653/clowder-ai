@@ -387,6 +387,19 @@ if (-not $SkipInstaller) {
     $catCafeVersion = if ($env:CATCAFE_VERSION) { $env:CATCAFE_VERSION } else { $pkgJson.version }
     Write-Host "  Inno Setup MyAppVersion = $catCafeVersion" -ForegroundColor Cyan
 
+    $isccDir = Split-Path $iscc -Parent
+    $zhIsl = Join-Path $isccDir "Languages\ChineseSimplified.isl"
+    if (-not (Test-Path $zhIsl)) {
+        $unofficial = Join-Path $isccDir "Languages\Unofficial\ChineseSimplified.isl"
+        if (Test-Path $unofficial) {
+            Copy-Item $unofficial $zhIsl
+        } else {
+            $url = "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseSimplified.isl"
+            Invoke-WebRequest -Uri $url -OutFile $zhIsl -ErrorAction Stop
+        }
+        Write-Host "  Installed ChineseSimplified.isl" -ForegroundColor Gray
+    }
+
     & $iscc "/DMyAppVersion=$catCafeVersion" $issFile
     if ($LASTEXITCODE -ne 0) { Write-Err "Inno Setup compilation failed"; exit 1 }
     Write-Ok "Installer built"
