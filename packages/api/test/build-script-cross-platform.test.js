@@ -24,14 +24,12 @@ test('windows desktop build script cleans up temporary Defender exclusions', asy
   assert.match(buildScript, /finally\s*\{[\s\S]*Remove-MpPreference -ExclusionPath \$deployRoot[\s\S]*\}/);
 });
 
-test('windows desktop build script pre-places npmrc in deploy targets and retries on EPERM', async () => {
+test('windows desktop build script retries pnpm deploy on EPERM', async () => {
   const buildScript = await readFile(desktopBuildScriptPath, 'utf8');
 
-  assert.match(buildScript, /New-Item -ItemType Directory -Path \$out -Force/);
-  assert.match(buildScript, /Set-Content -Path \(Join-Path \$out "\.npmrc"\)/);
-  assert.match(buildScript, /bin-links=false/);
   assert.match(buildScript, /for \(\$attempt = 1; \$attempt -le 3/);
-  assert.match(buildScript, /Start-Sleep -Seconds 5/);
+  assert.match(buildScript, /Start-Sleep -Seconds 10/);
+  assert.match(buildScript, /Remove-Item \$out -Recurse -Force/);
 });
 
 test('windows desktop build script Defender cleanup runs in finally block', async () => {

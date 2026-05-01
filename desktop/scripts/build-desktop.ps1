@@ -77,12 +77,9 @@ if (-not $SkipBundleDeps) {
     if (Test-Path $deployRoot) { Remove-Item $deployRoot -Recurse -Force }
     New-Item -ItemType Directory -Path $deployRoot -Force | Out-Null
 
-    # pnpm deploy ignores every external bin-links=false config source (CLI,
-    # env var, project .npmrc, user .npmrc).  Two mitigations:
-    #   1. Pre-place .npmrc inside each deploy target so the internal install
-    #      reads bin-links=false from its own project directory.
-    #   2. Retry loop — Windows Defender can lock freshly-written .bin/ files;
-    #      a brief pause usually lets the scan finish.
+    # pnpm deploy creates .bin/ shims on Windows that Defender can lock,
+    # causing EPERM.  pnpm deploy also requires an empty target directory.
+    # Retry with a delay lets Defender finish scanning before the next attempt.
     $defenderExclusionAdded = $false
     $deployFailed = $false
 
@@ -102,11 +99,9 @@ if (-not $SkipBundleDeps) {
                 for ($attempt = 1; $attempt -le 3; $attempt++) {
                     if ($attempt -gt 1) {
                         Write-Host "  Retry $attempt/3 for @cat-cafe/$pkg ..." -ForegroundColor Yellow
-                        Start-Sleep -Seconds 5
-                        if (Test-Path $out) { Remove-Item $out -Recurse -Force }
+                        Start-Sleep -Seconds 10
                     }
-                    New-Item -ItemType Directory -Path $out -Force | Out-Null
-                    Set-Content -Path (Join-Path $out ".npmrc") -Value "bin-links=false`n" -NoNewline -Encoding utf8
+                    if (Test-Path $out) { Remove-Item $out -Recurse -Force }
                     Write-Host "  Deploying @cat-cafe/$pkg ..." -ForegroundColor Gray
                     pnpm --filter "@cat-cafe/$pkg" --prod --config.node-linker=hoisted deploy $out 2>&1
                     if ($LASTEXITCODE -eq 0) { $deployed = $true; break }
