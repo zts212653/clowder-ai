@@ -122,24 +122,17 @@ $WebPidFile = if ($RunDir) { Join-Path $RunDir "web-$WebPort.pid" } else { $null
 Stop-PortProcess -Port $ApiPort -Name "API Server" -PidFile $ApiPidFile -ProjectRoot $ProjectRoot
 Stop-PortProcess -Port $WebPort -Name "Frontend" -PidFile $WebPidFile -ProjectRoot $ProjectRoot
 
-# Stop Redis if running on our port
-$redisCommands = $null
+# Stop Redis if running on our managed port.
+# Only shut down Redis when:
+# 1. No external REDIS_URL is configured (we manage the instance), OR
+# 2. REDIS_URL points to our managed port (localhost:$RedisPort)
 $redisLayout = if ($ProjectRoot) { Resolve-PortableRedisLayout -ProjectRoot $ProjectRoot } else { $null }
 $redisPidFile = if ($redisLayout) { Join-Path $redisLayout.Data "redis-$RedisPort.pid" } else { $null }
-if ($ProjectRoot) {
-    $redisCommands = Resolve-PortableRedisBinaries -ProjectRoot $ProjectRoot
-}
-if (-not $redisCommands) {
-    $redisCommands = Resolve-GlobalRedisBinaries
-}
 
 if ($configuredRedisUrl -and -not (Test-LocalRedisUrl -RedisUrl $configuredRedisUrl -RedisPort $RedisPort)) {
     Write-Warn "Skipping local Redis shutdown because REDIS_URL points to an external host"
 } else {
     try {
-        if (-not $redisCommands -or -not $redisCommands.CliPath) {
-            throw "redis-cli unavailable"
-        }
         $redisConnections = Get-NetTCPConnection -LocalPort $RedisPort -State Listen -ErrorAction SilentlyContinue
         if (-not $redisConnections) {
             Write-Warn "Redis (port $RedisPort) - not running"
@@ -158,11 +151,9 @@ if ($configuredRedisUrl -and -not (Test-LocalRedisUrl -RedisUrl $configuredRedis
             if ($ownedRedisConnections.Count -eq 0) {
                 Write-Warn "Redis (port $RedisPort) - no Clowder-owned listener found"
             } else {
-                $redisCli = $redisCommands.CliPath
-                $redisAuthArgs = Get-RedisAuthArgs -RedisUrl $configuredRedisUrl
-                $redisPing = & $redisCli -p $RedisPort @redisAuthArgs ping 2>$null
-                if ($redisPing -eq "PONG") {
-                    & $redisCli -p $RedisPort @redisAuthArgs shutdown save 2>$null
+                $shutdownUrl = if ($configuredRedisUrl) { $configuredRedisUrl } else { "redis://localhost:$RedisPort" }
+                if (Test-RedisReachable -RedisUrl $shutdownUrl) {
+                    Send-RedisShutdown -RedisUrl $shutdownUrl
                     Write-Ok "Redis stopped (port $RedisPort)"
                 } else {
                     Write-Warn "Redis (port $RedisPort) - not running"

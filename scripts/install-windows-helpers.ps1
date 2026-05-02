@@ -236,6 +236,9 @@ function Get-RedactedRedisUrl {
     }
 }
 
+# Legacy: formats auth args for redis-cli CLI invocation (--user, -a).
+# RESP-based functions (Test-RedisReachable, Send-RedisShutdown) parse
+# credentials directly from the URL and do NOT use this function.
 function Get-RedisAuthArgs {
     param([string]$RedisUrl)
     if (-not $RedisUrl) { return @() }
@@ -254,6 +257,148 @@ function Get-RedisAuthArgs {
         return $authArgs
     } catch {}
     return @()
+}
+
+function Format-RedisRespCommand {
+    param([string[]]$Args)
+
+    $parts = "*$($Args.Count)`r`n"
+    foreach ($arg in $Args) {
+        $byteLength = [System.Text.Encoding]::UTF8.GetByteCount($arg)
+        $parts += "`$$byteLength`r`n$arg`r`n"
+    }
+    return $parts
+}
+
+# Pure-PowerShell Redis connectivity check via TCP + RESP PING/PONG.
+# Replaces redis-cli dependency for local and WSL-based Redis instances.
+function Test-RedisReachable {
+    param(
+        [string]$RedisUrl,
+        [int]$TimeoutMs = 3000
+    )
+
+    if (-not $RedisUrl) {
+        return $false
+    }
+
+    $uri = $null
+    if (-not [System.Uri]::TryCreate($RedisUrl, [System.UriKind]::Absolute, [ref]$uri)) {
+        return $false
+    }
+
+    $hostName = $uri.Host
+    $port = if ($uri.Port -gt 0) { $uri.Port } else { 6379 }
+
+    $client = $null
+    try {
+        $client = [System.Net.Sockets.TcpClient]::new()
+        $connectTask = $client.ConnectAsync($hostName, $port)
+        if (-not $connectTask.Wait($TimeoutMs) -or -not $client.Connected) {
+            return $false
+        }
+
+        $stream = $client.GetStream()
+        $stream.ReadTimeout = $TimeoutMs
+        $stream.WriteTimeout = $TimeoutMs
+        $writer = [System.IO.StreamWriter]::new($stream, [System.Text.Encoding]::UTF8)
+        $writer.AutoFlush = $true
+        $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
+
+        # AUTH if credentials embedded in URL
+        if ($uri.UserInfo) {
+            $parts = $uri.UserInfo -split ":", 2
+            $username = [System.Uri]::UnescapeDataString($parts[0])
+            $password = if ($parts.Count -ge 2) { [System.Uri]::UnescapeDataString($parts[1]) } else { "" }
+
+            if ($parts.Count -ge 2 -and $username) {
+                $authCmd = Format-RedisRespCommand -Args @("AUTH", $username, $password)
+            } elseif ($username) {
+                $authCmd = Format-RedisRespCommand -Args @("AUTH", $username)
+            } else {
+                $authCmd = Format-RedisRespCommand -Args @("AUTH", $password)
+            }
+            $writer.Write($authCmd)
+            $authLine = $reader.ReadLine()
+            if ($authLine -notmatch '^\+OK') {
+                return $false
+            }
+        }
+
+        # PING
+        $writer.Write((Format-RedisRespCommand -Args @("PING")))
+        $pingLine = $reader.ReadLine()
+        return $pingLine -eq '+PONG'
+    } catch {
+        return $false
+    } finally {
+        if ($client) { $client.Dispose() }
+    }
+}
+
+# Send SHUTDOWN SAVE via RESP, replacing redis-cli shutdown save.
+function Send-RedisShutdown {
+    param(
+        [string]$RedisUrl,
+        [int]$TimeoutMs = 3000
+    )
+
+    if (-not $RedisUrl) {
+        return $false
+    }
+
+    $uri = $null
+    if (-not [System.Uri]::TryCreate($RedisUrl, [System.UriKind]::Absolute, [ref]$uri)) {
+        return $false
+    }
+
+    $hostName = $uri.Host
+    $port = if ($uri.Port -gt 0) { $uri.Port } else { 6379 }
+
+    $client = $null
+    try {
+        $client = [System.Net.Sockets.TcpClient]::new()
+        $connectTask = $client.ConnectAsync($hostName, $port)
+        if (-not $connectTask.Wait($TimeoutMs) -or -not $client.Connected) {
+            return $false
+        }
+
+        $stream = $client.GetStream()
+        $stream.ReadTimeout = $TimeoutMs
+        $stream.WriteTimeout = $TimeoutMs
+        $writer = [System.IO.StreamWriter]::new($stream, [System.Text.Encoding]::UTF8)
+        $writer.AutoFlush = $true
+        $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
+
+        # AUTH if needed
+        if ($uri.UserInfo) {
+            $parts = $uri.UserInfo -split ":", 2
+            $username = [System.Uri]::UnescapeDataString($parts[0])
+            $password = if ($parts.Count -ge 2) { [System.Uri]::UnescapeDataString($parts[1]) } else { "" }
+
+            if ($parts.Count -ge 2 -and $username) {
+                $authCmd = Format-RedisRespCommand -Args @("AUTH", $username, $password)
+            } elseif ($username) {
+                $authCmd = Format-RedisRespCommand -Args @("AUTH", $username)
+            } else {
+                $authCmd = Format-RedisRespCommand -Args @("AUTH", $password)
+            }
+            $writer.Write($authCmd)
+            $authLine = $reader.ReadLine()
+            if ($authLine -notmatch '^\+OK') {
+                return $false
+            }
+        }
+
+        # SHUTDOWN SAVE
+        $writer.Write((Format-RedisRespCommand -Args @("SHUTDOWN", "SAVE")))
+        $reader.ReadLine() | Out-Null
+        return $true
+    } catch {
+        return $false
+    } finally {
+        if ($client) { $client.Dispose() }
+    }
 }
 
 function Get-RedisServerAuthArgs {
