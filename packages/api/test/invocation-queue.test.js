@@ -81,6 +81,19 @@ describe('InvocationQueue', () => {
     assert.equal(queue.size('t1', 'u1'), 1); // only 'b' counts
   });
 
+  it('same idempotencyKey replays are deduped to one active entry', () => {
+    const first = queue.enqueue(entry({ content: 'first', idempotencyKey: 'idem-1' }));
+    assert.equal(first.outcome, 'enqueued');
+    assert.equal(first.deduped, undefined);
+
+    const replay = queue.enqueue(entry({ content: 'replay', idempotencyKey: 'idem-1' }));
+    assert.equal(replay.outcome, 'enqueued');
+    assert.equal(replay.deduped, true);
+    assert.equal(replay.entry.id, first.entry.id);
+    assert.equal(queue.size('t1', 'u1'), 1);
+    assert.equal(queue.list('t1', 'u1')[0].content, 'first');
+  });
+
   // ── F175: no merge — every entry is independent ──
 
   it('same-source same-target entries are independent (F175 no merge)', () => {

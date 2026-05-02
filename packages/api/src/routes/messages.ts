@@ -467,6 +467,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       const enqueueResult = opts.invocationQueue.enqueue({
         threadId: resolvedThreadId,
         userId,
+        idempotencyKey: resolvedIdempotencyKey,
         content,
         source: 'user',
         targetCats,
@@ -489,35 +490,39 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         };
       }
 
-      let storedUserMessageId: string | null = null;
+      let storedUserMessageId: string | null = enqueueResult.entry?.messageId ?? null;
 
       // ② Write user message (F117: mark as queued — invisible until dequeue)
-      try {
-        const userMessage = await opts.messageStore.append({
-          userId,
-          catId: null,
-          content,
-          mentions: targetCats,
-          timestamp: Date.now(),
-          threadId: resolvedThreadId,
-          deliveryStatus: 'queued', // F117: not visible in history/context/mentions until delivered
-          ...(contentBlocks ? { contentBlocks } : {}),
-          ...(whisperVisibility && whisperRecipients
-            ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
-            : {}),
-        });
-        storedUserMessageId = userMessage.id;
+      // If enqueue returned a deduped active entry, reuse existing messageId and skip append.
+      if (!enqueueResult.deduped) {
+        try {
+          const userMessage = await opts.messageStore.append({
+            userId,
+            catId: null,
+            content,
+            mentions: targetCats,
+            timestamp: Date.now(),
+            threadId: resolvedThreadId,
+            idempotencyKey: resolvedIdempotencyKey,
+            deliveryStatus: 'queued', // F117: not visible in history/context/mentions until delivered
+            ...(contentBlocks ? { contentBlocks } : {}),
+            ...(whisperVisibility && whisperRecipients
+              ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
+              : {}),
+          });
+          storedUserMessageId = userMessage.id;
 
-        const queueEntryId = enqueueResult.entry?.id;
-        if (queueEntryId) {
-          opts.invocationQueue.backfillMessageId(resolvedThreadId, userId, queueEntryId, userMessage.id);
+          const queueEntryId = enqueueResult.entry?.id;
+          if (queueEntryId) {
+            opts.invocationQueue.backfillMessageId(resolvedThreadId, userId, queueEntryId, userMessage.id);
+          }
+        } catch (err) {
+          const queueEntryId = enqueueResult.entry?.id;
+          if (queueEntryId) {
+            opts.invocationQueue.rollbackEnqueue(resolvedThreadId, userId, queueEntryId);
+          }
+          throw err;
         }
-      } catch (err) {
-        const queueEntryId = enqueueResult.entry?.id;
-        if (queueEntryId) {
-          opts.invocationQueue.rollbackEnqueue(resolvedThreadId, userId, queueEntryId);
-        }
-        throw err;
       }
 
       // Emit queue update to this user only (privacy: scopeKey isolation)
@@ -578,6 +583,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             const enqueueResult = opts.invocationQueue.enqueue({
               threadId: resolvedThreadId,
               userId,
+              idempotencyKey: resolvedIdempotencyKey,
               content,
               source: 'user',
               targetCats,
@@ -595,31 +601,35 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             }
             // F122 R1-gpt52 P1-1: Wrap append+backfill in try/catch with rollback,
             // matching original queue path (lines 340-374) to prevent ghost queue entries.
-            let toctouUserMessage: { id: string };
-            try {
-              toctouUserMessage = await opts.messageStore.append({
-                userId,
-                catId: null,
-                content,
-                mentions: targetCats,
-                timestamp: Date.now(),
-                threadId: resolvedThreadId,
-                deliveryStatus: 'queued',
-                ...(contentBlocks ? { contentBlocks } : {}),
-                ...(whisperVisibility && whisperRecipients
-                  ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
-                  : {}),
-              });
-              const queueEntryId = enqueueResult.entry?.id;
-              if (queueEntryId) {
-                opts.invocationQueue.backfillMessageId(resolvedThreadId, userId, queueEntryId, toctouUserMessage.id);
+            let toctouUserMessageId: string | null = enqueueResult.entry?.messageId ?? null;
+            if (!enqueueResult.deduped) {
+              try {
+                const toctouUserMessage = await opts.messageStore.append({
+                  userId,
+                  catId: null,
+                  content,
+                  mentions: targetCats,
+                  timestamp: Date.now(),
+                  threadId: resolvedThreadId,
+                  idempotencyKey: resolvedIdempotencyKey,
+                  deliveryStatus: 'queued',
+                  ...(contentBlocks ? { contentBlocks } : {}),
+                  ...(whisperVisibility && whisperRecipients
+                    ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
+                    : {}),
+                });
+                toctouUserMessageId = toctouUserMessage.id;
+                const queueEntryId = enqueueResult.entry?.id;
+                if (queueEntryId) {
+                  opts.invocationQueue.backfillMessageId(resolvedThreadId, userId, queueEntryId, toctouUserMessage.id);
+                }
+              } catch (err) {
+                const queueEntryId = enqueueResult.entry?.id;
+                if (queueEntryId) {
+                  opts.invocationQueue.rollbackEnqueue(resolvedThreadId, userId, queueEntryId);
+                }
+                throw err;
               }
-            } catch (err) {
-              const queueEntryId = enqueueResult.entry?.id;
-              if (queueEntryId) {
-                opts.invocationQueue.rollbackEnqueue(resolvedThreadId, userId, queueEntryId);
-              }
-              throw err;
             }
             opts.socketManager.emitToUser(userId, 'queue_updated', {
               threadId: resolvedThreadId,
@@ -633,7 +643,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               queuePosition: enqueueResult.queuePosition,
               entryId: enqueueResult.entry?.id,
               merged: false,
-              userMessageId: toctouUserMessage.id,
+              ...(toctouUserMessageId ? { userMessageId: toctouUserMessageId } : {}),
             };
           }
           // No queue available — thread is busy but we can't queue. Reject.
