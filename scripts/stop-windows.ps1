@@ -129,22 +129,7 @@ Stop-PortProcess -Port $WebPort -Name "Frontend" -PidFile $WebPidFile -ProjectRo
 $redisLayout = if ($ProjectRoot) { Resolve-PortableRedisLayout -ProjectRoot $ProjectRoot } else { $null }
 $redisPidFile = if ($redisLayout) { Join-Path $redisLayout.Data "redis-$RedisPort.pid" } else { $null }
 
-$isExternalRedis = $false
-if ($configuredRedisUrl) {
-    $uri = $null
-    if ([System.Uri]::TryCreate($configuredRedisUrl, [System.UriKind]::Absolute, [ref]$uri)) {
-        $isLoopback = $uri.Host -eq "localhost"
-        $ipAddress = $null
-        if (-not $isLoopback -and [System.Net.IPAddress]::TryParse($uri.Host, [ref]$ipAddress)) {
-            $isLoopback = [System.Net.IPAddress]::IsLoopback($ipAddress)
-        }
-        if (-not $isLoopback) {
-            $isExternalRedis = $true
-        }
-    }
-}
-
-if ($isExternalRedis) {
+if ($configuredRedisUrl -and -not (Test-LocalRedisUrl -RedisUrl $configuredRedisUrl -RedisPort $RedisPort)) {
     Write-Warn "Skipping local Redis shutdown because REDIS_URL points to an external host"
 } else {
     try {

@@ -305,24 +305,24 @@ $redisJob = $null
 $redisLogFile = Join-Path $redisLayout.Logs "redis-$RedisPort.log"
 $redisPidFile = Join-Path $redisLayout.Data "redis-$RedisPort.pid"
 $configuredRedisUrl = if ($env:REDIS_URL) { $env:REDIS_URL.Trim() } else { "" }
+$configuredIsManagedRedis = $configuredRedisUrl -and (Test-LocalRedisUrl -RedisUrl $configuredRedisUrl -RedisPort $RedisPort)
+$useExternalRedis = $useRedis -and $configuredRedisUrl -and -not $configuredIsManagedRedis
 $safeConfiguredRedisUrl = Get-RedactedRedisUrl -RedisUrl $configuredRedisUrl
 
 if ($useRedis) {
-    if ($configuredRedisUrl) {
-        # User configured a Redis URL — validate connectivity, never manage the process.
-        if (Test-RedisReachable -RedisUrl $configuredRedisUrl) {
-            Write-Ok "Redis reachable at $safeConfiguredRedisUrl"
-            $env:REDIS_URL = $configuredRedisUrl
-        } else {
-            Write-Warn "Redis not reachable at $safeConfiguredRedisUrl - falling back to memory storage"
-            Write-Warn "Check your REDIS_URL or use -Memory to skip Redis."
-            $useRedis = $false
-        }
+    if ($configuredRedisUrl -and (Test-RedisReachable -RedisUrl $configuredRedisUrl)) {
+        # A configured reachable Redis endpoint can be used without redis-cli.
+        Write-Ok "Redis reachable at $safeConfiguredRedisUrl"
+        $env:REDIS_URL = $configuredRedisUrl
+    } elseif ($useExternalRedis) {
+        Write-Warn "Redis not reachable at $safeConfiguredRedisUrl - falling back to memory storage"
+        Write-Warn "Check your REDIS_URL or use -Memory to skip Redis."
+        $useRedis = $false
     } else {
-        # No REDIS_URL configured — use managed Redis on $RedisPort.
+        # No reachable configured Redis endpoint; manage Redis on $RedisPort.
         $localUrl = "redis://localhost:$RedisPort"
         if (Test-RedisReachable -RedisUrl $localUrl) {
-            # Redis already listening on our managed port — verify ownership.
+            # Redis already listening on our managed port; verify ownership.
             $redisConnections = Get-NetTCPConnection -LocalPort $RedisPort -State Listen -ErrorAction SilentlyContinue
             $hasNonClowder = $false
             if ($redisConnections) {
@@ -340,9 +340,13 @@ if ($useRedis) {
                 throw "Redis port $RedisPort is in use by a non-Clowder process"
             }
             Write-Ok "Redis already running on port $RedisPort"
-            $env:REDIS_URL = $localUrl
+            if ($configuredRedisUrl) {
+                $env:REDIS_URL = $configuredRedisUrl
+            } else {
+                $env:REDIS_URL = "redis://localhost:$RedisPort"
+            }
         } else {
-            # Not running — try to start our own Redis.
+            # Not running; try to start our own Redis.
             Write-Warn "Redis not running on port $RedisPort"
             $redisCommands = Resolve-PortableRedisBinaries -ProjectRoot $ProjectRoot
             if (-not $redisCommands) {
@@ -374,9 +378,14 @@ if ($useRedis) {
                         & $launcherPath @launcherArgs 2>&1
                     } -ArgumentList $redisServerPath, $redisArgs
                     Start-Sleep -Seconds 2
-                    if (Test-RedisReachable -RedisUrl $localUrl) {
+                    $managedProbeUrl = if ($configuredRedisUrl) { $configuredRedisUrl } else { $localUrl }
+                    if (Test-RedisReachable -RedisUrl $managedProbeUrl) {
                         Write-Ok "Redis started on port $RedisPort"
-                        $env:REDIS_URL = $localUrl
+                        if ($configuredRedisUrl) {
+                            $env:REDIS_URL = $configuredRedisUrl
+                        } else {
+                            $env:REDIS_URL = "redis://localhost:$RedisPort"
+                        }
                         $startedRedis = $true
                     } else {
                         Write-Warn "Redis start failed - falling back to memory storage"

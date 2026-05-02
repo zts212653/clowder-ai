@@ -106,6 +106,12 @@ test('Windows Redis auth helpers decode percent-escaped ACL credentials before i
   );
 });
 
+test('Windows RESP helpers use UTF-8 byte counts for bulk string lengths', () => {
+  assert.match(helpersScript, /function Format-RedisRespCommand/);
+  assert.match(helpersScript, /\[System\.Text\.Encoding\]::UTF8\.GetByteCount\(\$arg\)/);
+  assert.doesNotMatch(helpersScript, /\$\(\$arg\.Length\)/);
+});
+
 test('Windows portable Redis defers REDIS_URL to runtime instead of hardcoding localhost:6379', () => {
   assert.match(uiHelpersScript, /function Apply-InstallerRedisPlan/);
   assert.match(uiHelpersScript, /Add-InstallerEnvDelete \$State "REDIS_URL"/);
@@ -156,6 +162,8 @@ test('Windows installer prefers plain portable Redis zips before service bundles
 test('Windows Redis URL handling validates connectivity with RESP and detects external backends for shutdown skip', () => {
   assert.match(startWindowsScript, /Test-RedisReachable -RedisUrl \$configuredRedisUrl/);
   assert.match(helpersScript, /Format-RedisRespCommand -Args @\("PING"\)/);
+  assert.match(startWindowsScript, /Test-LocalRedisUrl -RedisUrl \$configuredRedisUrl -RedisPort \$RedisPort/);
+  assert.match(stopWindowsScript, /Test-LocalRedisUrl -RedisUrl \$configuredRedisUrl -RedisPort \$RedisPort/);
   assert.match(
     stopWindowsScript,
     /\$configuredRedisUrl = Get-InstallerEnvValueFromFile -EnvFile \$envFile -Key "REDIS_URL"\s+if \(-not \$configuredRedisUrl -and \$env:REDIS_URL\) \{\s+\$configuredRedisUrl = \$env:REDIS_URL\.Trim\(\)\s+\}/,

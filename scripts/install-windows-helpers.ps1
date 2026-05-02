@@ -264,7 +264,8 @@ function Format-RedisRespCommand {
 
     $parts = "*$($Args.Count)`r`n"
     foreach ($arg in $Args) {
-        $parts += "`$$($arg.Length)`r`n$arg`r`n"
+        $byteLength = [System.Text.Encoding]::UTF8.GetByteCount($arg)
+        $parts += "`$$byteLength`r`n$arg`r`n"
     }
     return $parts
 }
