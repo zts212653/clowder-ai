@@ -3,7 +3,6 @@
 import type { SignalSource } from '@cat-cafe/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchSignalSources, triggerSourceFetch, updateSignalSource } from '@/utils/signals-api';
-import { SignalAddSourceButton } from './SignalAddSourceButton';
 import { SignalNav } from './SignalNav';
 
 function SourceStatCard({ label, value, warning }: { label: string; value: number; warning?: boolean }) {
@@ -107,7 +106,6 @@ export function SignalSourcesView({ initialReferrerThread = null }: { initialRef
             <h1 className="text-2xl font-bold text-cafe">信号源</h1>
             <p className="mt-1 text-[13px] text-cafe-secondary">管理抓取来源、优先级和健康状态</p>
           </div>
-          <SignalAddSourceButton />
         </header>
 
         <div className="flex h-[38px] items-center gap-2">

@@ -87,12 +87,9 @@ describe('resolvePluginStatuses', () => {
   it('service plugins show available when no matching features exist', () => {
     const result = resolvePluginStatuses([], true);
     const voice = result.find((p) => p.id === 'voice-companion');
-    const browser = result.find((p) => p.id === 'browser-automation');
 
     expect(voice?.status).toBe('available');
     expect(voice?.statusLabel).toBe('未连接');
-    expect(browser?.status).toBe('available');
-    expect(browser?.statusLabel).toBe('未连接');
   });
 
   it('platform status is independent of service registry contents', () => {

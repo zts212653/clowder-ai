@@ -18,7 +18,6 @@ import {
   updateSignalArticle,
 } from '@/utils/signals-api';
 import { filterSignalArticles, type SignalArticleFilters } from '@/utils/signals-view';
-import { SignalAddSourceButton } from './SignalAddSourceButton';
 import { SignalArticleDetail as SignalArticleDetailPanel } from './SignalArticleDetail';
 import { SignalArticleList } from './SignalArticleList';
 import { SignalNav } from './SignalNav';
@@ -256,61 +255,11 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
             <h1 className="text-2xl font-bold text-cafe">信号</h1>
             <p className="mt-1 text-[13px] text-cafe-secondary">浏览、筛选和研读来自信源的文章</p>
           </div>
-          <SignalAddSourceButton />
         </header>
 
-        <form onSubmit={handleSearchSubmit} className="flex h-[38px] items-center gap-2">
+        <div className="flex h-[38px] items-center gap-2">
           <SignalNav active="signals" initialReferrerThread={initialReferrerThread} />
-          <div className="flex-1" />
-          <div className="flex items-center gap-2 rounded-lg bg-[var(--console-field-bg)] px-3 h-9 border border-transparent">
-            <svg
-              className="h-[15px] w-[15px] text-cafe-muted"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-            <input
-              value={filters.query}
-              onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))}
-              onCompositionStart={ime.onCompositionStart}
-              onCompositionEnd={ime.onCompositionEnd}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && ime.isComposing()) event.preventDefault();
-              }}
-              placeholder="搜索信号..."
-              className="w-[280px] bg-transparent text-xs text-cafe outline-none placeholder:text-cafe-muted"
-            />
-          </div>
-          <select
-            value={filters.status}
-            onChange={(event) => handleStatusTab(event.target.value as SignalArticleFilters['status'])}
-            className="h-[34px] w-[118px] appearance-none rounded-lg border border-transparent bg-[var(--console-field-bg)] px-2.5 text-xs text-cafe-secondary outline-none"
-            name="status"
-          >
-            <option value="inbox">Inbox</option>
-            <option value="starred">收藏</option>
-            <option value="read">已读</option>
-            <option value="archived">归档</option>
-            <option value="all">全部状态</option>
-          </select>
-          <select
-            value={filters.source}
-            onChange={(event) => setFilters((current) => ({ ...current, source: event.target.value }))}
-            name="source"
-            className="h-[34px] w-[118px] appearance-none rounded-lg border border-transparent bg-[var(--console-field-bg)] px-2.5 text-xs text-cafe-secondary outline-none"
-          >
-            <option value="all">全部来源</option>
-            {sources.map((source) => (
-              <option key={source} value={source}>
-                {source}
-              </option>
-            ))}
-          </select>
-        </form>
+        </div>
 
         {error && (
           <div className="console-status-chip" data-status="error">
@@ -320,6 +269,46 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
 
         <div className="flex min-h-0 flex-1 gap-[18px]">
           <div className="flex w-[420px] shrink-0 flex-col gap-1 overflow-y-auto rounded-[18px] bg-[var(--console-panel-bg)] p-2">
+            <form onSubmit={handleSearchSubmit} className="flex flex-wrap items-center gap-1.5 px-1 pb-1">
+              <div className="flex flex-1 items-center gap-1.5 rounded-lg bg-[var(--console-field-bg)] px-2.5 h-8 border border-transparent">
+                <svg className="h-[13px] w-[13px] text-cafe-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <input
+                  value={filters.query}
+                  onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))}
+                  onCompositionStart={ime.onCompositionStart}
+                  onCompositionEnd={ime.onCompositionEnd}
+                  onKeyDown={(event) => { if (event.key === 'Enter' && ime.isComposing()) event.preventDefault(); }}
+                  placeholder="搜索信号..."
+                  className="min-w-0 flex-1 bg-transparent text-xs text-cafe outline-none placeholder:text-cafe-muted"
+                />
+              </div>
+              <select
+                value={filters.status}
+                onChange={(event) => handleStatusTab(event.target.value as SignalArticleFilters['status'])}
+                className="h-8 appearance-none rounded-lg border border-transparent bg-[var(--console-field-bg)] px-2 text-[11px] text-cafe-secondary outline-none"
+                name="status"
+              >
+                <option value="inbox">Inbox</option>
+                <option value="starred">收藏</option>
+                <option value="read">已读</option>
+                <option value="archived">归档</option>
+                <option value="all">全部</option>
+              </select>
+              <select
+                value={filters.source}
+                onChange={(event) => setFilters((current) => ({ ...current, source: event.target.value }))}
+                name="source"
+                className="h-8 appearance-none rounded-lg border border-transparent bg-[var(--console-field-bg)] px-2 text-[11px] text-cafe-secondary outline-none"
+              >
+                <option value="all">全部来源</option>
+                {sources.map((source) => (
+                  <option key={source} value={source}>{source}</option>
+                ))}
+              </select>
+            </form>
             <p className="px-2 pb-1 text-xs font-semibold text-cafe-muted">共 {filteredItems.length} 篇</p>
             <SignalArticleList
               items={filteredItems}

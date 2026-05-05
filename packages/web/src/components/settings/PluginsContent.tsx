@@ -9,6 +9,7 @@ import {
   settingsResourceCardClass,
   settingsResourceRowClass,
 } from '../SettingsResourceCard';
+import { GithubConfigPanel } from './GithubConfigPanel';
 
 interface PluginDef {
   id: string;
@@ -24,22 +25,6 @@ interface PluginDef {
 interface ServiceState {
   manifest: { id: string; enablesFeatures: string[] };
   status: 'running' | 'stopped' | 'unknown' | 'error';
-}
-
-interface GitHubField {
-  envName: string;
-  label: string;
-  sensitive: boolean;
-  currentValue: string | null;
-}
-
-interface GitHubPlatformStatus {
-  id: string;
-  fields: GitHubField[];
-}
-
-interface ConnectorStatusResponse {
-  platforms?: GitHubPlatformStatus[];
 }
 
 const PLUGIN_CATALOG: Omit<PluginDef, 'status' | 'statusLabel'>[] = [
@@ -59,14 +44,6 @@ const PLUGIN_CATALOG: Omit<PluginDef, 'status' | 'statusLabel'>[] = [
     iconBg: '#d4764e',
     source: 'service',
   },
-  {
-    id: 'browser-automation',
-    name: 'Browser Automation',
-    description: '通过 Chrome MCP 进行浏览器自动化操作和 UI 验证',
-    icon: 'puzzle',
-    iconBg: '#0f9d58',
-    source: 'service',
-  },
 ];
 
 const STATUS_BADGE: Record<string, { bg: string; text: string }> = {
@@ -77,7 +54,6 @@ const STATUS_BADGE: Record<string, { bg: string; text: string }> = {
 
 const SERVICE_FEATURE_MAP: Record<string, string[]> = {
   'voice-companion': ['voice-input', 'voice-output', 'voice-companion'],
-  'browser-automation': ['browser-automation-mcp'],
 };
 
 export function resolvePluginStatuses(services: ServiceState[], apiReachable: boolean): PluginDef[] {
@@ -110,82 +86,45 @@ export function PluginsContent() {
   const [plugins, setPlugins] = useState<PluginDef[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [githubFields, setGithubFields] = useState<GitHubField[]>([]);
-  const [githubValues, setGithubValues] = useState<Record<string, string>>({});
-  const [githubSaving, setGithubSaving] = useState(false);
-  const [githubSaveResult, setGithubSaveResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [serviceToggles, setServiceToggles] = useState<Record<string, boolean>>({});
 
   const resolveStatus = useCallback(async () => {
-    let services: ServiceState[] = [];
-    let apiReachable = false;
     try {
       const res = await apiFetch('/api/services');
       if (res.ok) {
-        apiReachable = true;
         const data = (await res.json()) as { services: ServiceState[] };
-        services = data.services;
+        setPlugins(resolvePluginStatuses(data.services, true));
+      } else {
+        setPlugins(resolvePluginStatuses([], false));
       }
     } catch {
-      /* unavailable */
+      setPlugins(resolvePluginStatuses([], false));
     }
-
-    setPlugins(resolvePluginStatuses(services, apiReachable));
     setLoading(false);
   }, []);
 
-  const fetchGithubFields = useCallback(async () => {
+  const handleServiceToggle = useCallback(async (e: React.MouseEvent, serviceId: string, enabled: boolean) => {
+    e.stopPropagation();
+    setServiceToggles((prev) => ({ ...prev, [serviceId]: true }));
     try {
-      const res = await apiFetch('/api/connector/status');
-      if (!res.ok) return;
-      const data = (await res.json()) as ConnectorStatusResponse | GitHubPlatformStatus[];
-      const platforms = Array.isArray(data) ? data : (data.platforms ?? []);
-      const gh = platforms.find((p) => p.id === 'github');
-      setGithubFields(gh?.fields ?? []);
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  const handleSaveGithubConfig = useCallback(async () => {
-    const updates = githubFields
-      .filter((field) => githubValues[field.envName] !== undefined)
-      .map((field) => ({ name: field.envName, value: githubValues[field.envName] || null }));
-
-    if (updates.length === 0) {
-      setGithubSaveResult({ type: 'error', message: '请填写至少一个配置项' });
-      return;
-    }
-
-    setGithubSaving(true);
-    setGithubSaveResult(null);
-    try {
-      const res = await apiFetch('/api/config/secrets', {
+      const res = await apiFetch(`/api/services/${serviceId}/toggle`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ updates }),
+        body: JSON.stringify({ enabled }),
       });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as Record<string, string>;
-        setGithubSaveResult({ type: 'error', message: data.error ?? '保存失败' });
-        return;
+      if (res.ok) {
+        if (enabled) {
+          await apiFetch(`/api/services/${serviceId}/start`, { method: 'POST' });
+        } else {
+          await apiFetch(`/api/services/${serviceId}/stop`, { method: 'POST' });
+        }
+        await resolveStatus();
       }
-      setGithubValues({});
-      setGithubSaveResult({ type: 'success', message: 'GitHub 配置已保存' });
-      await fetchGithubFields();
-    } catch {
-      setGithubSaveResult({ type: 'error', message: '网络错误' });
-    } finally {
-      setGithubSaving(false);
-    }
-  }, [githubFields, githubValues, fetchGithubFields]);
-
-  useEffect(() => {
-    resolveStatus();
+    } catch { /* best effort */ }
+    setServiceToggles((prev) => ({ ...prev, [serviceId]: false }));
   }, [resolveStatus]);
 
-  useEffect(() => {
-    if (expandedId === 'github' && githubFields.length === 0) fetchGithubFields();
-  }, [expandedId, githubFields.length, fetchGithubFields]);
+  useEffect(() => { void resolveStatus(); }, [resolveStatus]);
 
   if (loading) return <p className="text-sm text-cafe-muted">加载中...</p>;
 
@@ -194,91 +133,56 @@ export function PluginsContent() {
       {plugins.map((plugin) => {
         const badge = STATUS_BADGE[plugin.status];
         const isExpanded = expandedId === plugin.id;
+        const isService = plugin.source === 'service';
+        const isToggling = serviceToggles[plugin.id] ?? false;
+        const isRunning = plugin.status === 'active';
         return (
           <article key={plugin.id} className={settingsResourceCardClass}>
-            <button
-              type="button"
-              className={`${settingsResourceRowClass} w-full text-left`}
-              onClick={() => {
-                setExpandedId(isExpanded ? null : plugin.id);
-                setGithubSaveResult(null);
-              }}
-            >
-              <div className={settingsResourceAvatarClass} style={{ backgroundColor: plugin.iconBg }}>
-                <HubIcon name={plugin.icon} className="h-5 w-5 text-[var(--cafe-surface)]" />
+            {isService ? (
+              <div className={`${settingsResourceRowClass} w-full`}>
+                <div className={settingsResourceAvatarClass} style={{ backgroundColor: plugin.iconBg }}>
+                  <HubIcon name={plugin.icon} className="h-5 w-5 text-[var(--cafe-surface)]" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[15px] font-extrabold text-cafe">{plugin.name}</p>
+                  <p className="mt-0.5 text-xs text-cafe-secondary">{plugin.description}</p>
+                  <p className="mt-0.5 text-[11px] text-cafe-muted">扩展服务</p>
+                </div>
+                <div className={settingsResourceActionGroupClass}>
+                  <button
+                    type="button"
+                    disabled={isToggling}
+                    onClick={(e) => void handleServiceToggle(e, plugin.id, !isRunning)}
+                    className={`flex-shrink-0 rounded-[13px] px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                      isRunning ? 'bg-conn-emerald-bg text-conn-emerald-text' : 'bg-cafe-surface-sunken text-cafe-muted'
+                    } disabled:opacity-50`}
+                  >
+                    {isToggling ? '...' : isRunning ? '已启用' : '已停用'}
+                  </button>
+                </div>
               </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-[15px] font-extrabold text-cafe">{plugin.name}</p>
-                <p className="mt-0.5 text-xs text-cafe-secondary">{plugin.description}</p>
-                <p className="mt-0.5 text-[11px] text-cafe-muted">
-                  {plugin.source === 'platform' ? '内置插件' : '扩展服务'}
-                </p>
-              </div>
-              <div className={settingsResourceActionGroupClass}>
-                <span
-                  className={`flex-shrink-0 rounded-[13px] px-2.5 py-0.5 text-[11px] font-medium ${badge.bg} ${badge.text}`}
-                >
-                  {plugin.statusLabel}
-                </span>
-              </div>
-            </button>
-            {isExpanded && plugin.id === 'github' && (
-              <div className="border-t border-[var(--console-border)] px-4 py-3">
-                <p className="mb-2 text-[12px] font-bold text-cafe-secondary">配置项</p>
-                {githubFields.length === 0 ? (
-                  <p className="text-[12px] text-cafe-muted">加载配置项...</p>
-                ) : (
-                  <div className="space-y-2">
-                    {githubFields.map((field) => (
-                      <div key={field.envName}>
-                        <label
-                          htmlFor={`plugin-config-${field.envName}`}
-                          className="mb-1 block text-xs font-medium text-cafe-secondary"
-                        >
-                          {field.label}
-                        </label>
-                        <input
-                          id={`plugin-config-${field.envName}`}
-                          type={field.sensitive ? 'password' : 'text'}
-                          placeholder={
-                            field.sensitive
-                              ? field.currentValue
-                                ? '已设置（输入新值覆盖）'
-                                : '未配置'
-                              : (field.currentValue ?? '未配置')
-                          }
-                          value={githubValues[field.envName] ?? ''}
-                          onChange={(e) => setGithubValues((prev) => ({ ...prev, [field.envName]: e.target.value }))}
-                          className="console-form-input py-2.5 text-[13px]"
-                          data-testid={`field-${field.envName}`}
-                        />
-                      </div>
-                    ))}
-                    {githubSaveResult && (
-                      <div
-                        className={`rounded-[16px] px-3 py-2 text-xs ${
-                          githubSaveResult.type === 'success'
-                            ? 'border border-conn-emerald-ring bg-conn-emerald-bg text-conn-emerald-text'
-                            : 'border border-conn-red-ring bg-conn-red-bg text-conn-red-text'
-                        }`}
-                      >
-                        {githubSaveResult.message}
-                      </div>
-                    )}
-                    <div className="flex justify-end">
-                      <button
-                        type="button"
-                        onClick={handleSaveGithubConfig}
-                        disabled={githubSaving}
-                        className="console-button-primary text-[13px] disabled:opacity-50"
-                      >
-                        {githubSaving ? '保存中...' : '保存 GitHub 配置'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
+            ) : (
+              <button
+                type="button"
+                className={`${settingsResourceRowClass} w-full text-left`}
+                onClick={() => setExpandedId(isExpanded ? null : plugin.id)}
+              >
+                <div className={settingsResourceAvatarClass} style={{ backgroundColor: plugin.iconBg }}>
+                  <HubIcon name={plugin.icon} className="h-5 w-5 text-[var(--cafe-surface)]" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[15px] font-extrabold text-cafe">{plugin.name}</p>
+                  <p className="mt-0.5 text-xs text-cafe-secondary">{plugin.description}</p>
+                  <p className="mt-0.5 text-[11px] text-cafe-muted">内置插件</p>
+                </div>
+                <div className={settingsResourceActionGroupClass}>
+                  <span className={`flex-shrink-0 rounded-[13px] px-2.5 py-0.5 text-[11px] font-medium ${badge.bg} ${badge.text}`}>
+                    {plugin.statusLabel}
+                  </span>
+                </div>
+              </button>
             )}
+            {isExpanded && plugin.id === 'github' && <GithubConfigPanel />}
           </article>
         );
       })}

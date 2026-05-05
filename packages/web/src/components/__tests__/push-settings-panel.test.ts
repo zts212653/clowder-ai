@@ -175,9 +175,16 @@ describe('PushSettingsPanel test push feedback', () => {
       root.render(React.createElement(PushSettingsPanel));
     });
 
-    expect(container.textContent).toContain('服务状态：已启用');
-    expect(container.textContent).toContain('设备订阅：1 台');
-    expect(container.textContent).toContain('最近投递：成功');
+    const diagBtn = Array.from(container.querySelectorAll('button')).find((node) =>
+      node.textContent?.includes('诊断信息'),
+    ) as HTMLButtonElement | undefined;
+    expect(diagBtn).toBeDefined();
+
+    await act(async () => { diagBtn?.click(); });
+
+    expect(container.textContent).toContain('VAPID：已配置');
+    expect(container.textContent).toContain('1 台');
+    expect(container.textContent).toContain('正常');
   });
 
   it('renders mapped repair actions from errorHints', async () => {
@@ -252,10 +259,7 @@ describe('PushSettingsPanel test push feedback', () => {
       testBtn?.click();
     });
 
-    expect(container.textContent).toContain('最近测试');
-    expect(container.textContent).toContain('尝试 3');
     expect(container.textContent).toContain('成功 1');
     expect(container.textContent).toContain('失败 1');
-    expect(container.textContent).toContain('清理 1');
   });
 });

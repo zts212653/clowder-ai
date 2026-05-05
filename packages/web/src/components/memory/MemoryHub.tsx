@@ -30,7 +30,7 @@ export function MemoryHub({ activeTab = 'feed', initialQuery, initialReferrerThr
   const isFeed = activeTab === 'feed';
   return (
     <div className="flex h-full flex-col bg-[var(--console-panel-bg)]" data-testid="memory-hub">
-      <div className="flex flex-1 flex-col overflow-hidden m-3 gap-[18px] px-9 py-8">
+      <div className="flex flex-1 flex-col overflow-hidden rounded-[18px] bg-[var(--console-shell-bg)] shadow-[var(--console-shadow-soft)] m-3 gap-[18px] px-9 py-8">
         <header className="flex items-center gap-4">
           <div>
             <h1 className="text-2xl font-bold text-cafe">记忆</h1>

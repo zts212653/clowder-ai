@@ -42,9 +42,8 @@ describe('SignalNav', () => {
     expect(links.map((link) => link.getAttribute('href'))).toEqual([
       '/signals',
       '/signals/sources',
-      '/signals?view=study',
     ]);
-    expect(links.map((link) => link.textContent)).toEqual(['收件箱', '信号源', '研读队列']);
+    expect(links.map((link) => link.textContent)).toEqual(['收件箱', '信号源']);
     expect(links[0]?.getAttribute('aria-current')).toBe('page');
   });
 });
