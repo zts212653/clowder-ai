@@ -36,6 +36,7 @@ export function IdentitySection({
   avatarUploading,
   onChange,
   onAvatarUpload,
+  onRefAudioUpload,
 }: {
   cat?: CatData | null;
   form: HubCatEditorFormState;
@@ -43,6 +44,7 @@ export function IdentitySection({
   avatarUploading: boolean;
   onChange: (patch: FormPatch) => void;
   onAvatarUpload: (file: File) => Promise<void>;
+  onRefAudioUpload: (file: File) => Promise<void>;
 }) {
   const strengthTags = splitStrengthTags(form.strengths);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -200,7 +202,7 @@ export function IdentitySection({
         />
       </div>
 
-      <VoiceConfigSection form={form} onChange={onChange} />
+      <VoiceConfigSection form={form} onChange={onChange} onRefAudioUpload={onRefAudioUpload} />
     </SectionCard>
   );
 }
@@ -213,12 +215,59 @@ const VOICE_LANG_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'ja', label: '日本語 (ja)' },
 ];
 
+function refAudioDisplayName(path: string): string {
+  if (!path) return '';
+  const segments = path.replace(/\\/g, '/').split('/');
+  return segments[segments.length - 1] ?? path;
+}
+
+function RefAudioField({ value, onUpload }: { value: string; onUpload: (file: File) => Promise<void> }) {
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const filename = refAudioDisplayName(value);
+
+  return (
+    <div className="flex flex-col gap-1.5 text-cafe sm:flex-row sm:items-center sm:gap-[14px]">
+      <span className="text-[12px] font-bold text-cafe-secondary sm:w-[150px] sm:shrink-0">Ref Audio</span>
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <span
+          className="flex-1 truncate rounded-[10px] bg-[var(--console-field-bg)] px-3 py-1.5 text-[13px] leading-5 text-cafe-black"
+          title={value}
+        >
+          {filename || <span className="text-cafe-muted">未设置</span>}
+        </span>
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          className="shrink-0 rounded-[10px] bg-[var(--console-field-bg)] px-3 py-1.5 text-[12px] font-bold text-cafe-secondary transition hover:opacity-80"
+        >
+          上传
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="audio/wav,audio/mpeg,audio/mp3,audio/webm,audio/ogg,.wav,.mp3,.webm,.ogg"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            void onUpload(file).finally(() => {
+              if (fileRef.current) fileRef.current.value = '';
+            });
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function VoiceConfigSection({
   form,
   onChange,
+  onRefAudioUpload,
 }: {
   form: HubCatEditorFormState;
   onChange: (patch: Partial<HubCatEditorFormState>) => void;
+  onRefAudioUpload: (file: File) => Promise<void>;
 }) {
   const hasVoiceConfig = !!(form.voiceVoice || form.voiceLangCode);
   const [expanded, setExpanded] = useState(hasVoiceConfig);
@@ -254,12 +303,9 @@ function VoiceConfigSection({
             onChange={(value) => onChange({ voiceSpeed: value })}
             placeholder="1.0"
           />
-          <TextField
-            label="Ref Audio"
-            ariaLabel="Reference Audio Path"
+          <RefAudioField
             value={form.voiceRefAudio}
-            onChange={(value) => onChange({ voiceRefAudio: value })}
-            placeholder="genshin/流浪者/vo_wanderer_dialog.wav"
+            onUpload={onRefAudioUpload}
           />
           <TextField
             label="Ref Text"

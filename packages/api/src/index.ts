@@ -118,6 +118,7 @@ import { securityHeadersPlugin } from './infrastructure/security-headers.js';
 import { sessionAuthPlugin, sessionRoute } from './infrastructure/session-auth.js';
 import { SocketManager } from './infrastructure/websocket/index.js';
 import { avatarsRoutes } from './routes/avatars.js';
+import { refAudioUploadRoutes } from './routes/ref-audio-upload.js';
 import { CallbackAuthSystemMessageNotifier } from './routes/callback-auth-system-message.js';
 import { configSecretsRoutes } from './routes/config-secrets.js';
 import { connectorWebhookRoutes } from './routes/connector-webhooks.js';
@@ -1733,6 +1734,7 @@ async function main(): Promise<void> {
     },
   });
   await app.register(avatarsRoutes);
+  await app.register(refAudioUploadRoutes);
   await app.register(skillsRoutes);
   await app.register(servicesRoutes);
   await app.register(rulesRoutes);
@@ -1907,8 +1909,7 @@ async function main(): Promise<void> {
 
   // F34: TTS Provider (mlx-audio → Python TTS server)
   const ttsRegistry = new TtsRegistry();
-  const ttsUrl = process.env.TTS_URL ?? 'http://localhost:9879';
-  ttsRegistry.register(new MlxAudioTtsProvider({ baseUrl: ttsUrl }));
+  ttsRegistry.register(new MlxAudioTtsProvider());
   const ttsCacheDir = process.env.TTS_CACHE_DIR ?? './data/tts-cache';
   await app.register(ttsRoutes, { ttsRegistry, cacheDir: ttsCacheDir });
   initVoiceBlockSynthesizer(ttsRegistry, ttsCacheDir);
@@ -2016,6 +2017,11 @@ async function main(): Promise<void> {
   app.log.info(`[api] Server running on ${address}`);
   app.log.info(`[ws] WebSocket server ready`);
 
+  // Auto-start enabled services (fire-and-forget)
+  import('./domains/services/service-autostart.js')
+    .then((m) => m.autoStartEnabledServices(app.log))
+    .catch((err) => app.log.warn('[services] auto-start init failed: %s', err));
+
   // F156: Friendly hint for private network access
   if (HOST === '0.0.0.0' && process.env.CORS_ALLOW_PRIVATE_NETWORK !== 'true') {
     app.log.warn(
@@ -2079,10 +2085,6 @@ async function main(): Promise<void> {
     }
   }, GLOBAL_REAPER_INTERVAL_MS);
   globalReaperTimer.unref();
-
-  // F170 Phase 3e: Start continuous service health heartbeat (60s interval)
-  const { startHealthHeartbeat } = await import('./domains/services/service-registry.js');
-  startHealthHeartbeat();
 
   // Log server startup to audit log (best-effort: don't crash if audit dir unwritable)
   const auditLog = getEventAuditLog();
