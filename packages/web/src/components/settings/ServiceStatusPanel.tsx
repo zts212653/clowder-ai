@@ -39,6 +39,8 @@ const STATUS_CONFIG: Record<ServiceStatus, { dot: string; label: string }> = {
   unknown: { dot: 'bg-cafe-surface-sunken', label: '未知' },
 };
 
+const CARD_CLASS = 'rounded-xl bg-[var(--console-card-bg)] shadow-[0_8px_22px_rgba(43,33,26,0.04)]';
+
 interface ServiceStatusPanelProps {
   filterFeatures?: string[];
   title?: string;
@@ -93,72 +95,70 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
   if (services.length === 0) return null;
 
   return (
-    <section className="console-section-shell rounded-xl p-5 md:p-6">
+    <div className="space-y-3">
       {title && (
-        <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.22em] text-cafe-muted">{title}</p>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cafe-muted">{title}</p>
       )}
-      <div className="space-y-2">
-        {services.map((s) => {
-          const m = s.manifest;
-          const isRunning = s.status === 'running';
-          const hasStart = !!m.scripts?.start;
-          const hasInstall = !!m.scripts?.install;
-          const busy = acting?.startsWith(`${m.id}:`) ?? false;
-          const statusCfg = STATUS_CONFIG[s.status];
+      {services.map((s) => {
+        const m = s.manifest;
+        const isRunning = s.status === 'running';
+        const hasStart = !!m.scripts?.start;
+        const hasInstall = !!m.scripts?.install;
+        const busy = acting?.startsWith(`${m.id}:`) ?? false;
+        const statusCfg = STATUS_CONFIG[s.status];
 
-          return (
-            <div key={m.id} className="console-list-card flex items-center gap-4 rounded-xl px-4 py-4">
-              <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${statusCfg.dot}`} />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-cafe">{m.name}</p>
-                <p className="mt-0.5 truncate text-xs text-cafe-muted">
-                  {m.type}{m.port ? ` · :${m.port}` : ''} · {statusCfg.label}
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                {s.error && (
-                  <span className="text-[11px] text-conn-red-text" title={s.error}>
-                    {s.error.length > 20 ? `${s.error.slice(0, 20)}…` : s.error}
-                  </span>
-                )}
-                {!hasStart && !hasInstall && (
-                  <span className="text-[11px] text-cafe-muted">不可管理</span>
-                )}
-                {!hasStart && hasInstall && (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => handleAction(m.id, 'install')}
-                    className="console-button-secondary px-3 py-1 text-xs disabled:opacity-40"
-                  >
-                    {busy && acting === `${m.id}:install` ? '安装中...' : '安装'}
-                  </button>
-                )}
-                {hasStart && !isRunning && (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => handleAction(m.id, 'start')}
-                    className="console-button-secondary px-3 py-1 text-xs disabled:opacity-40"
-                  >
-                    {busy && acting === `${m.id}:start` ? '启动中...' : '启动'}
-                  </button>
-                )}
-                {isRunning && (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => handleAction(m.id, 'stop')}
-                    className="console-button-secondary px-3 py-1 text-xs disabled:opacity-40"
-                  >
-                    {busy && acting === `${m.id}:stop` ? '停止中...' : '停止'}
-                  </button>
-                )}
-              </div>
+        return (
+          <div key={m.id} className={`${CARD_CLASS} flex items-center gap-4 px-5 py-4`}>
+            <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${statusCfg.dot}`} />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-cafe">{m.name}</p>
+              <p className="mt-0.5 truncate text-xs text-cafe-muted">
+                {m.type}{m.port ? ` · :${m.port}` : ''} · {statusCfg.label}
+              </p>
             </div>
-          );
-        })}
-      </div>
-    </section>
+            <div className="flex shrink-0 items-center gap-2">
+              {s.error && (
+                <span className="text-[11px] text-conn-red-text" title={s.error}>
+                  {s.error.length > 20 ? `${s.error.slice(0, 20)}…` : s.error}
+                </span>
+              )}
+              {!hasStart && !hasInstall && (
+                <span className="text-[11px] text-cafe-muted">不可管理</span>
+              )}
+              {!hasStart && hasInstall && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => handleAction(m.id, 'install')}
+                  className="console-button-secondary px-3 py-1 text-xs disabled:opacity-40"
+                >
+                  {busy && acting === `${m.id}:install` ? '安装中...' : '安装'}
+                </button>
+              )}
+              {hasStart && !isRunning && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => handleAction(m.id, 'start')}
+                  className="console-button-secondary px-3 py-1 text-xs disabled:opacity-40"
+                >
+                  {busy && acting === `${m.id}:start` ? '启动中...' : '启动'}
+                </button>
+              )}
+              {isRunning && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => handleAction(m.id, 'stop')}
+                  className="console-button-secondary px-3 py-1 text-xs disabled:opacity-40"
+                >
+                  {busy && acting === `${m.id}:stop` ? '停止中...' : '停止'}
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
