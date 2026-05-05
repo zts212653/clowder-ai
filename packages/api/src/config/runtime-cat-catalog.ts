@@ -43,6 +43,15 @@ export interface RuntimeCatInput {
   contextBudget?: ContextBudget;
   /** clowder-ai#340 P5: Model provider name (renamed from ocProviderName). */
   provider?: string;
+  voiceConfig?: {
+    voice: string;
+    langCode: string;
+    speed?: number;
+    refAudio?: string;
+    refText?: string;
+    instruct?: string;
+    temperature?: number;
+  };
 }
 
 export interface RuntimeCatUpdate {
@@ -239,6 +248,7 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
           ? { caution: input.caution && input.caution.trim().length > 0 ? input.caution.trim() : null }
           : {}),
         ...(input.strengths ? { strengths: input.strengths } : {}),
+        ...(input.voiceConfig ? { voiceConfig: input.voiceConfig } : {}),
       },
     ],
   } as unknown as CatBreed;
