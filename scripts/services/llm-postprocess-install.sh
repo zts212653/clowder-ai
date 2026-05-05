@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# scripts/llm-postprocess-install.sh
+# scripts/services/llm-postprocess-install.sh
 # Install dependencies for LLM post-processing service (venv + mlx-vlm).
 set -euo pipefail
 
 VENV_DIR="${HOME}/.cat-cafe/llm-venv"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/download-source-overrides.sh"
+source "$SCRIPT_DIR/../download-source-overrides.sh"
 apply_manual_download_source_overrides
 
 if [ ! -d "$VENV_DIR" ]; then

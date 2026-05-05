@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# scripts/tts-install.sh
+# scripts/services/tts-install.sh
 # Install dependencies for TTS service (venv + mlx-audio).
 set -euo pipefail
 
 VENV_DIR="${HOME}/.cat-cafe/tts-venv"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/download-source-overrides.sh"
+source "$SCRIPT_DIR/../download-source-overrides.sh"
 apply_manual_download_source_overrides
 
 if [ ! -d "$VENV_DIR" ]; then

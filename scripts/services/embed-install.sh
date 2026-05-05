@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/embed-install.sh
+# scripts/services/embed-install.sh
 # Install dependencies for Embedding service (venv + mlx-embeddings / sentence-transformers).
 set -euo pipefail
 

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# scripts/llm-postprocess-server.sh
+# scripts/services/llm-postprocess-server.sh
 # Start local LLM post-processing server for Cat Cafe voice input (MLX backend).
 #
 # Pipeline position:  Whisper ASR → **LLM post-edit** → term dictionary → filler removal
 #
 # Usage:
-#   ./scripts/llm-postprocess-server.sh                                            # default: Qwen3.5-35B-A3B MoE
-#   ./scripts/llm-postprocess-server.sh mlx-community/Qwen3.5-35B-A3B-4bit        # explicit
+#   ./scripts/services/llm-postprocess-server.sh                                            # default: Qwen3.5-35B-A3B MoE
+#   ./scripts/services/llm-postprocess-server.sh mlx-community/Qwen3.5-35B-A3B-4bit        # explicit
 #
-# Prerequisites: run scripts/llm-postprocess-install.sh first.
+# Prerequisites: run scripts/services/llm-postprocess-install.sh first.
 
 set -euo pipefail
 
@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ ! -d "$VENV_DIR" ]; then
   echo "ERROR: 虚拟环境不存在: $VENV_DIR"
-  echo "请先运行安装: scripts/llm-postprocess-install.sh"
+  echo "请先运行安装: scripts/services/llm-postprocess-install.sh"
   exit 1
 fi
 source "$VENV_DIR/bin/activate"

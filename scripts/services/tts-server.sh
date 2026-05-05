@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# scripts/tts-server.sh
+# scripts/services/tts-server.sh
 # Start local TTS server for Cat Cafe voice output.
 #
 # Usage:
-#   ./scripts/tts-server.sh                                  # default: qwen3-clone + Qwen3-TTS Base
-#   ./scripts/tts-server.sh mlx-community/Kokoro-82M-bf16    # explicit Kokoro model
-#   TTS_PROVIDER=edge-tts ./scripts/tts-server.sh            # edge-tts fallback
+#   ./scripts/services/tts-server.sh                                  # default: qwen3-clone + Qwen3-TTS Base
+#   ./scripts/services/tts-server.sh mlx-community/Kokoro-82M-bf16    # explicit Kokoro model
+#   TTS_PROVIDER=edge-tts ./scripts/services/tts-server.sh            # edge-tts fallback
 #
-# Prerequisites: run scripts/tts-install.sh first.
+# Prerequisites: run scripts/services/tts-install.sh first.
 
 set -euo pipefail
 
@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ ! -d "$VENV_DIR" ]; then
   echo "ERROR: 虚拟环境不存在: $VENV_DIR"
-  echo "请先运行安装: scripts/tts-install.sh"
+  echo "请先运行安装: scripts/services/tts-install.sh"
   exit 1
 fi
 source "$VENV_DIR/bin/activate"

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# scripts/whisper-server.sh
+# scripts/services/whisper-server.sh
 # Start local Whisper ASR server for Cat Cafe voice input (MLX backend).
 #
 # Usage:
-#   ./scripts/whisper-server.sh                                            # default: large-v3-turbo
-#   ./scripts/whisper-server.sh mlx-community/whisper-small                # smaller model
+#   ./scripts/services/whisper-server.sh                                            # default: large-v3-turbo
+#   ./scripts/services/whisper-server.sh mlx-community/whisper-small                # smaller model
 #
-# Prerequisites: run scripts/whisper-install.sh first.
+# Prerequisites: run scripts/services/whisper-install.sh first.
 # First run will download the model from HuggingFace (~3GB for large-v3-turbo).
 
 set -euo pipefail
@@ -18,7 +18,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ ! -d "$VENV_DIR" ]; then
   echo "ERROR: 虚拟环境不存在: $VENV_DIR"
-  echo "请先运行安装: scripts/whisper-install.sh"
+  echo "请先运行安装: scripts/services/whisper-install.sh"
   exit 1
 fi
 source "$VENV_DIR/bin/activate"

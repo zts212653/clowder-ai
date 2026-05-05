@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# scripts/whisper-install.sh
+# scripts/services/whisper-install.sh
 # Install dependencies for Whisper ASR service (venv + mlx-whisper).
 set -euo pipefail
 
 VENV_DIR="${HOME}/.cat-cafe/whisper-venv"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/download-source-overrides.sh"
+source "$SCRIPT_DIR/../download-source-overrides.sh"
 apply_manual_download_source_overrides
 
 if [ ! -d "$VENV_DIR" ]; then
