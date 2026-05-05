@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { HubIcon } from '../hub-icons';
 
 interface ServiceManifest {
   id: string;
@@ -162,9 +163,15 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
                   type="button"
                   disabled={busy}
                   onClick={() => handleAction(m.id, 'uninstall')}
-                  className="console-button-ghost px-3 py-1 text-xs text-cafe-muted disabled:opacity-40"
+                  className="inline-flex items-center justify-center rounded-lg p-1.5 text-cafe-muted transition-colors hover:bg-cafe-surface-sunken hover:text-cafe-secondary disabled:opacity-40"
+                  title="卸载"
+                  aria-label="卸载"
                 >
-                  {busy && acting === `${m.id}:uninstall` ? '卸载中...' : '卸载'}
+                  {busy && acting === `${m.id}:uninstall` ? (
+                    <span className="text-[11px]">...</span>
+                  ) : (
+                    <HubIcon name="trash" className="h-4 w-4" />
+                  )}
                 </button>
               )}
             </div>

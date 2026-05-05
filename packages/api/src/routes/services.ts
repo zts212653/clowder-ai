@@ -44,6 +44,14 @@ function openLogFd(serviceId: string): number | null {
   }
 }
 
+function checkServiceOwner(request: Parameters<typeof resolveUserId>[0]): string | null {
+  const userId = resolveUserId(request);
+  if (!userId) return 'Authentication required';
+  const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim();
+  if (ownerId && userId !== ownerId) return 'Only the owner can manage services';
+  return null;
+}
+
 export const servicesRoutes: FastifyPluginAsync = async (app) => {
   app.get('/api/services', async () => {
     const known = getKnownServices();
@@ -65,15 +73,10 @@ export const servicesRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post<{ Params: { id: string } }>('/api/services/:id/start', async (request, reply) => {
-    const userId = resolveUserId(request);
-    const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim();
-    if (!ownerId) {
+    const ownerErr = checkServiceOwner(request);
+    if (ownerErr) {
       reply.status(403);
-      return { error: 'Service management requires DEFAULT_OWNER_USER_ID to be configured' };
-    }
-    if (!userId || userId !== ownerId) {
-      reply.status(403);
-      return { error: 'Only the owner can manage services' };
+      return { error: ownerErr };
     }
     const { id } = request.params;
     const manifest = getServiceById(id);
@@ -120,15 +123,10 @@ export const servicesRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post<{ Params: { id: string } }>('/api/services/:id/stop', async (request, reply) => {
-    const userId = resolveUserId(request);
-    const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim();
-    if (!ownerId) {
+    const ownerErr = checkServiceOwner(request);
+    if (ownerErr) {
       reply.status(403);
-      return { error: 'Service management requires DEFAULT_OWNER_USER_ID to be configured' };
-    }
-    if (!userId || userId !== ownerId) {
-      reply.status(403);
-      return { error: 'Only the owner can manage services' };
+      return { error: ownerErr };
     }
     const { id } = request.params;
     const manifest = getServiceById(id);
@@ -186,15 +184,10 @@ export const servicesRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post<{ Params: { id: string } }>('/api/services/:id/install', async (request, reply) => {
-    const userId = resolveUserId(request);
-    const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim();
-    if (!ownerId) {
+    const ownerErr = checkServiceOwner(request);
+    if (ownerErr) {
       reply.status(403);
-      return { error: 'Service management requires DEFAULT_OWNER_USER_ID to be configured' };
-    }
-    if (!userId || userId !== ownerId) {
-      reply.status(403);
-      return { error: 'Only the owner can manage services' };
+      return { error: ownerErr };
     }
     const { id } = request.params;
     const manifest = getServiceById(id);
@@ -240,15 +233,10 @@ export const servicesRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post<{ Params: { id: string } }>('/api/services/:id/uninstall', async (request, reply) => {
-    const userId = resolveUserId(request);
-    const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim();
-    if (!ownerId) {
+    const ownerErr = checkServiceOwner(request);
+    if (ownerErr) {
       reply.status(403);
-      return { error: 'Service management requires DEFAULT_OWNER_USER_ID to be configured' };
-    }
-    if (!userId || userId !== ownerId) {
-      reply.status(403);
-      return { error: 'Only the owner can manage services' };
+      return { error: ownerErr };
     }
     const { id } = request.params;
     const manifest = getServiceById(id);
@@ -294,15 +282,10 @@ export const servicesRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get<{ Params: { id: string } }>('/api/services/:id/logs', async (request, reply) => {
-    const userId = resolveUserId(request);
-    const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim();
-    if (!ownerId) {
+    const ownerErr = checkServiceOwner(request);
+    if (ownerErr) {
       reply.status(403);
-      return { error: 'Service management requires DEFAULT_OWNER_USER_ID to be configured' };
-    }
-    if (!userId || userId !== ownerId) {
-      reply.status(403);
-      return { error: 'Only the owner can view service logs' };
+      return { error: ownerErr };
     }
     const { id } = request.params;
     const manifest = getServiceById(id);
