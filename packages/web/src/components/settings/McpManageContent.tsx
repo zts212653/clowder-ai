@@ -158,10 +158,12 @@ export function McpManageContent() {
                         disabled={removing}
                         onClick={(e) => {
                           e.stopPropagation();
-                          cap.handleDisableMcp(item);
+                          if (window.confirm(`确认卸载 MCP "${item.id}"？卸载后需重新安装。`)) {
+                            cap.handleRemoveMcp(item);
+                          }
                         }}
-                        title="禁用此 MCP"
-                        aria-label="禁用此 MCP"
+                        title="卸载此 MCP"
+                        aria-label="卸载此 MCP"
                         tone="danger"
                       >
                         <HubIcon name="trash" className="h-4 w-4" />

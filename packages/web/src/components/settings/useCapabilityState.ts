@@ -87,11 +87,11 @@ export function useCapabilityState(filterType: 'skill' | 'mcp') {
     [fetchItems, filterType, projectPath],
   );
 
-  const handleDisableMcp = useCallback(
+  const handleRemoveMcp = useCallback(
     async (item: CapabilityBoardItem) => {
       setDisabling(item.id);
       try {
-        const query = new URLSearchParams();
+        const query = new URLSearchParams({ hard: 'true' });
         if (projectPath) query.set('projectPath', projectPath);
         const res = await apiFetch(`/api/capabilities/mcp/${encodeURIComponent(item.id)}?${query}`, {
           method: 'DELETE',
@@ -137,7 +137,7 @@ export function useCapabilityState(filterType: 'skill' | 'mcp') {
     disabling,
     switchProject,
     handleToggle,
-    handleDisableMcp,
+    handleRemoveMcp,
     handleDisableSkill,
     refetch: () => fetchItems(projectPath ?? undefined),
   };
