@@ -21,6 +21,7 @@ import type { VoiceConfig } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
 import { resolveBreedId } from './breed-resolver.js';
 import { getAllCatIdsFromConfig, loadCatConfig } from './cat-config-loader.js';
+import { getDefaultUploadDir } from '../utils/upload-paths.js';
 
 const VOICE_ENV_KEYS = {
   opus: 'CAT_OPUS_TTS_VOICE',
@@ -45,6 +46,15 @@ function characterVoiceBaseDir(): string {
   if (process.env.CHARACTER_VOICE_DIR) return process.env.CHARACTER_VOICE_DIR;
   if (process.env.GENSHIN_VOICE_DIR) return dirname(process.env.GENSHIN_VOICE_DIR);
   return join(homedir(), 'projects/relay-station/GPT-SoVITS/character-models');
+}
+
+function resolveRefAudioPath(refAudio: string, characterBaseDir: string): string {
+  if (refAudio.startsWith('/uploads/')) {
+    const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
+    return join(uploadDir, refAudio.slice('/uploads/'.length));
+  }
+  if (isAbsolute(refAudio)) return refAudio;
+  return join(characterBaseDir, refAudio);
 }
 
 /**
@@ -126,8 +136,7 @@ function loadVoicesFromJson(): Record<string, VoiceConfig> {
         if (variant.voiceConfig) {
           const catId = variant.catId ?? breed.catId;
           const vc = variant.voiceConfig;
-          cachedJsonVoices[catId] =
-            vc.refAudio && !isAbsolute(vc.refAudio) ? { ...vc, refAudio: join(baseDir, vc.refAudio) } : vc;
+          cachedJsonVoices[catId] = vc.refAudio ? { ...vc, refAudio: resolveRefAudioPath(vc.refAudio, baseDir) } : vc;
         }
       }
     }

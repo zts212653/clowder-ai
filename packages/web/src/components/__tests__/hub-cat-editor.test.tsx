@@ -287,6 +287,13 @@ describe('HubCatEditor', () => {
       maxContextTokens: '',
       maxMessages: '',
       maxContentLengthPerMsg: '',
+      voiceVoice: '',
+      voiceLangCode: '',
+      voiceSpeed: '',
+      voiceRefAudio: '',
+      voiceRefText: '',
+      voiceInstruct: '',
+      voiceTemperature: '',
     } as HubCatEditorFormState & { cliEffort: string };
 
     const payload = buildCatPayload(form, null) as Record<string, unknown>;
@@ -1956,7 +1963,7 @@ describe('HubCatEditor', () => {
       'Background Color',
       '注意事项',
       'Strengths',
-      '▸ Voice Config（点击展开）',
+      '▸ Voice Config',
     ]);
     expect(container.textContent).toContain('运行时持久化');
   });
@@ -2147,7 +2154,7 @@ describe('HubCatEditor', () => {
     expect(container.textContent).toContain('擅长领域');
     expect(container.textContent).toContain('注意事项');
     expect(container.textContent).toContain('Strengths');
-    expect(container.textContent).toContain('▸ Voice Config（点击展开）');
+    expect(container.textContent).toContain('▸ Voice Config');
     expect(container.textContent).toContain('别名与 @ 路由');
     expect(container.textContent).toContain('认证与模型');
     expect(container.textContent).toContain('Session Chain');

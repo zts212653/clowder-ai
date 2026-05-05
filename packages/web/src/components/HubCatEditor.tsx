@@ -366,7 +366,7 @@ export function HubCatEditor({
     setError(null);
     try {
       const result = await uploadRefAudioAsset(file);
-      patchForm({ voiceRefAudio: result.path });
+      patchForm({ voiceRefAudio: result.url });
     } catch (err) {
       setError(err instanceof Error ? err.message : '参考音频上传失败');
     }

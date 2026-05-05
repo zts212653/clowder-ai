@@ -6,14 +6,24 @@ import type { FastifyPluginAsync } from 'fastify';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
 
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024; // 10 MiB
-const ACCEPTED_AUDIO_MIME = ['audio/wav', 'audio/x-wav', 'audio/mpeg', 'audio/mp3', 'audio/webm', 'audio/ogg'] as const;
 
-function extForAudioMime(mime: string): string {
-  if (mime.includes('wav')) return 'wav';
-  if (mime.includes('mpeg') || mime.includes('mp3')) return 'mp3';
-  if (mime.includes('webm')) return 'webm';
-  if (mime.includes('ogg')) return 'ogg';
-  return 'wav';
+type DetectedAudioType = 'wav' | 'mp3' | 'ogg' | 'webm';
+
+function detectAudioType(buffer: Buffer): DetectedAudioType | null {
+  if (buffer.length < 12) return null;
+  // WAV: "RIFF" .... "WAVE"
+  if (
+    buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
+    buffer[8] === 0x57 && buffer[9] === 0x41 && buffer[10] === 0x56 && buffer[11] === 0x45
+  ) return 'wav';
+  // MP3: ID3 tag or MPEG sync word
+  if (buffer[0] === 0x49 && buffer[1] === 0x44 && buffer[2] === 0x33) return 'mp3';
+  if (buffer[0] === 0xff && (buffer[1]! & 0xe0) === 0xe0) return 'mp3';
+  // OGG: "OggS"
+  if (buffer[0] === 0x4f && buffer[1] === 0x67 && buffer[2] === 0x67 && buffer[3] === 0x53) return 'ogg';
+  // WebM: EBML header (0x1A 0x45 0xDF 0xA3)
+  if (buffer[0] === 0x1a && buffer[1] === 0x45 && buffer[2] === 0xdf && buffer[3] === 0xa3) return 'webm';
+  return null;
 }
 
 export const refAudioUploadRoutes: FastifyPluginAsync = async (app) => {
@@ -47,20 +57,19 @@ export const refAudioUploadRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    if (!(ACCEPTED_AUDIO_MIME as readonly string[]).includes(file.mimetype)) {
+    const detected = detectAudioType(buffer);
+    if (!detected) {
       return reply.status(415).send({
-        error: 'Unsupported audio type. Allowed: wav, mp3, webm, ogg',
-        code: 'UNSUPPORTED_MEDIA_TYPE',
+        error: 'Unrecognized audio format. Supported: WAV, MP3, OGG, WebM',
+        code: 'AUDIO_FORMAT_UNRECOGNIZED',
       });
     }
 
-    const ext = extForAudioMime(file.mimetype);
     const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
     await mkdir(uploadDir, { recursive: true });
-    const filename = `ref-audio-${Date.now()}-${randomUUID().slice(0, 8)}.${ext}`;
-    const absPath = join(uploadDir, filename);
-    await writeFile(absPath, buffer);
+    const filename = `ref-audio-${Date.now()}-${randomUUID().slice(0, 8)}.${detected}`;
+    await writeFile(join(uploadDir, filename), buffer);
 
-    return { url: `/uploads/${filename}`, path: absPath };
+    return { url: `/uploads/${filename}` };
   });
 };
