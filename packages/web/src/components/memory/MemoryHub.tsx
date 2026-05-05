@@ -58,8 +58,8 @@ export function MemoryHub({ activeTab = 'feed', initialQuery, initialReferrerThr
           )}
           {activeTab === 'status' && (
             <div className="space-y-6" data-testid="memory-tab-status">
-              <IndexStatus />
               <ServiceStatusPanel filterFeatures={['memory-semantic-search']} title="语义搜索服务" />
+              <IndexStatus />
             </div>
           )}
         </main>
