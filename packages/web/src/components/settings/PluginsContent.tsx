@@ -86,7 +86,6 @@ export function PluginsContent() {
   const [plugins, setPlugins] = useState<PluginDef[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [serviceToggles, setServiceToggles] = useState<Record<string, boolean>>({});
 
   const resolveStatus = useCallback(async () => {
     try {
@@ -103,27 +102,6 @@ export function PluginsContent() {
     setLoading(false);
   }, []);
 
-  const handleServiceToggle = useCallback(async (e: React.MouseEvent, serviceId: string, enabled: boolean) => {
-    e.stopPropagation();
-    setServiceToggles((prev) => ({ ...prev, [serviceId]: true }));
-    try {
-      const res = await apiFetch(`/api/services/${serviceId}/toggle`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled }),
-      });
-      if (res.ok) {
-        if (enabled) {
-          await apiFetch(`/api/services/${serviceId}/start`, { method: 'POST' });
-        } else {
-          await apiFetch(`/api/services/${serviceId}/stop`, { method: 'POST' });
-        }
-        await resolveStatus();
-      }
-    } catch { /* best effort */ }
-    setServiceToggles((prev) => ({ ...prev, [serviceId]: false }));
-  }, [resolveStatus]);
-
   useEffect(() => { void resolveStatus(); }, [resolveStatus]);
 
   if (loading) return <p className="text-sm text-cafe-muted">加载中...</p>;
@@ -133,12 +111,9 @@ export function PluginsContent() {
       {plugins.map((plugin) => {
         const badge = STATUS_BADGE[plugin.status];
         const isExpanded = expandedId === plugin.id;
-        const isService = plugin.source === 'service';
-        const isToggling = serviceToggles[plugin.id] ?? false;
-        const isRunning = plugin.status === 'active';
         return (
           <article key={plugin.id} className={settingsResourceCardClass}>
-            {isService ? (
+            {plugin.source === 'service' ? (
               <div className={`${settingsResourceRowClass} w-full`}>
                 <div className={settingsResourceAvatarClass} style={{ backgroundColor: plugin.iconBg }}>
                   <HubIcon name={plugin.icon} className="h-5 w-5 text-[var(--cafe-surface)]" />
@@ -146,19 +121,12 @@ export function PluginsContent() {
                 <div className="min-w-0 flex-1">
                   <p className="text-[15px] font-extrabold text-cafe">{plugin.name}</p>
                   <p className="mt-0.5 text-xs text-cafe-secondary">{plugin.description}</p>
-                  <p className="mt-0.5 text-[11px] text-cafe-muted">扩展服务</p>
+                  <p className="mt-0.5 text-[11px] text-cafe-muted">扩展服务 · 在「系统」标签管理</p>
                 </div>
                 <div className={settingsResourceActionGroupClass}>
-                  <button
-                    type="button"
-                    disabled={isToggling}
-                    onClick={(e) => void handleServiceToggle(e, plugin.id, !isRunning)}
-                    className={`flex-shrink-0 rounded-[13px] px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
-                      isRunning ? 'bg-conn-emerald-bg text-conn-emerald-text' : 'bg-cafe-surface-sunken text-cafe-muted'
-                    } disabled:opacity-50`}
-                  >
-                    {isToggling ? '...' : isRunning ? '已启用' : '已停用'}
-                  </button>
+                  <span className={`flex-shrink-0 rounded-[13px] px-2.5 py-0.5 text-[11px] font-medium ${badge.bg} ${badge.text}`}>
+                    {plugin.statusLabel}
+                  </span>
                 </div>
               </div>
             ) : (
