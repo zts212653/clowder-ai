@@ -239,6 +239,60 @@ export const servicesRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
+  app.post<{ Params: { id: string } }>('/api/services/:id/uninstall', async (request, reply) => {
+    const userId = resolveUserId(request);
+    const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim();
+    if (!ownerId) {
+      reply.status(403);
+      return { error: 'Service management requires DEFAULT_OWNER_USER_ID to be configured' };
+    }
+    if (!userId || userId !== ownerId) {
+      reply.status(403);
+      return { error: 'Only the owner can manage services' };
+    }
+    const { id } = request.params;
+    const manifest = getServiceById(id);
+    if (!manifest) {
+      reply.status(404);
+      return { error: `Service "${id}" not found` };
+    }
+    if (!manifest.scripts.uninstall) {
+      return { ok: true, message: `${manifest.name} has no uninstall script` };
+    }
+
+    const scriptPath = resolveScriptPath(manifest.scripts.uninstall);
+    if (!existsSync(scriptPath)) {
+      reply.status(400);
+      return { error: `Uninstall script not found: ${scriptPath}` };
+    }
+
+    try {
+      const child = spawn('bash', [scriptPath], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env },
+      });
+      let output = '';
+      child.stdout?.on('data', (d: Buffer) => {
+        output += d.toString();
+      });
+      child.stderr?.on('data', (d: Buffer) => {
+        output += d.toString();
+      });
+      const code = await new Promise<number | null>((res, rej) => {
+        child.on('error', rej);
+        child.on('close', (c) => res(c));
+      });
+
+      if (code !== 0) {
+        return { ok: false, error: `Uninstall failed (exit ${code})`, output: output.slice(-2000) };
+      }
+      return { ok: true, message: `${manifest.name} uninstalled successfully` };
+    } catch {
+      reply.status(500);
+      return { ok: false, error: `Failed to run uninstall script for ${manifest.name}` };
+    }
+  });
+
   app.get<{ Params: { id: string } }>('/api/services/:id/logs', async (request, reply) => {
     const userId = resolveUserId(request);
     const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim();

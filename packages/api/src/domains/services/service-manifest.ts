@@ -28,6 +28,7 @@ export type ServiceStatus = 'running' | 'stopped' | 'unknown' | 'error';
 export interface ServiceState {
   manifest: ServiceManifest;
   status: ServiceStatus;
+  installed: boolean;
   lastChecked: number | null;
   healthDetail?: Record<string, unknown>;
   error?: string;

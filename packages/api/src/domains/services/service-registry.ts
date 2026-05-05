@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { resolve } from 'node:path';
 import type { ServiceManifest, ServiceState, ServiceStatus } from './service-manifest.js';
 
 const KNOWN_SERVICES: ServiceManifest[] = [
@@ -15,6 +18,7 @@ const KNOWN_SERVICES: ServiceManifest[] = [
     scripts: {
       install: 'scripts/whisper-install.sh',
       start: 'scripts/whisper-server.sh',
+      uninstall: 'scripts/whisper-uninstall.sh',
     },
     enablesFeatures: ['voice-input', 'connector-stt'],
     configVars: ['WHISPER_URL', 'NEXT_PUBLIC_WHISPER_URL'],
@@ -33,6 +37,7 @@ const KNOWN_SERVICES: ServiceManifest[] = [
     scripts: {
       install: 'scripts/tts-install.sh',
       start: 'scripts/tts-server.sh',
+      uninstall: 'scripts/tts-uninstall.sh',
     },
     enablesFeatures: ['voice-output', 'voice-companion'],
     configVars: ['TTS_URL'],
@@ -51,6 +56,7 @@ const KNOWN_SERVICES: ServiceManifest[] = [
     scripts: {
       install: 'scripts/embed-install.sh',
       start: 'scripts/embed-server.sh',
+      uninstall: 'scripts/embed-uninstall.sh',
     },
     enablesFeatures: ['memory-semantic-search'],
     configVars: ['EMBED_URL', 'EMBED_PORT'],
@@ -69,6 +75,7 @@ const KNOWN_SERVICES: ServiceManifest[] = [
     scripts: {
       install: 'scripts/llm-postprocess-install.sh',
       start: 'scripts/llm-postprocess-server.sh',
+      uninstall: 'scripts/llm-postprocess-uninstall.sh',
     },
     enablesFeatures: ['voice-postprocess'],
     configVars: ['NEXT_PUBLIC_LLM_POSTPROCESS_URL'],
@@ -117,6 +124,17 @@ async function probeHealth(
   }
 }
 
+function resolveVenvPath(venvPath: string): string {
+  if (venvPath.startsWith('~/')) return resolve(homedir(), venvPath.slice(2));
+  return resolve(venvPath);
+}
+
+export function checkInstalled(manifest: ServiceManifest): boolean {
+  const venv = manifest.prerequisites?.venvPath;
+  if (!venv) return true;
+  return existsSync(resolveVenvPath(venv));
+}
+
 export function getKnownServices(): ServiceManifest[] {
   return KNOWN_SERVICES;
 }
@@ -130,6 +148,7 @@ export async function getServiceState(manifest: ServiceManifest): Promise<Servic
   return {
     manifest,
     status: probe.status,
+    installed: checkInstalled(manifest),
     lastChecked: Date.now(),
     healthDetail: probe.detail,
     error: probe.error,

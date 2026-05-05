@@ -18,6 +18,7 @@ interface ServiceManifest {
     install?: string;
     start?: string;
     stop?: string;
+    uninstall?: string;
   };
   configVars?: string[];
 }
@@ -27,6 +28,7 @@ type ServiceStatus = 'running' | 'stopped' | 'unknown' | 'error';
 interface ServiceState {
   manifest: ServiceManifest;
   status: ServiceStatus;
+  installed: boolean;
   lastChecked: number | null;
   healthDetail?: Record<string, unknown>;
   error?: string;
@@ -74,7 +76,7 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
   }, [fetchServices]);
 
   const handleAction = useCallback(
-    async (id: string, action: 'start' | 'stop' | 'install') => {
+    async (id: string, action: 'start' | 'stop' | 'install' | 'uninstall') => {
       setActing(`${id}:${action}`);
       try {
         const res = await apiFetch(`/api/services/${id}/${action}`, { method: 'POST' });
@@ -102,18 +104,21 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
       {services.map((s) => {
         const m = s.manifest;
         const isRunning = s.status === 'running';
-        const hasStart = !!m.scripts?.start;
+        const installed = s.installed;
         const hasInstall = !!m.scripts?.install;
+        const hasUninstall = !!m.scripts?.uninstall;
+        const hasStart = !!m.scripts?.start;
         const busy = acting?.startsWith(`${m.id}:`) ?? false;
-        const statusCfg = STATUS_CONFIG[s.status];
+        const statusLabel = !installed ? '未安装' : STATUS_CONFIG[s.status].label;
+        const statusDot = !installed ? 'bg-conn-amber-text' : STATUS_CONFIG[s.status].dot;
 
         return (
           <div key={m.id} className={`${CARD_CLASS} flex items-center gap-4 px-5 py-4`}>
-            <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${statusCfg.dot}`} />
+            <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${statusDot}`} />
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium text-cafe">{m.name}</p>
               <p className="mt-0.5 truncate text-xs text-cafe-muted">
-                {m.type}{m.port ? ` · :${m.port}` : ''} · {statusCfg.label}
+                {m.type}{m.port ? ` · :${m.port}` : ''} · {statusLabel}
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-2">
@@ -122,10 +127,7 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
                   {s.error.length > 20 ? `${s.error.slice(0, 20)}…` : s.error}
                 </span>
               )}
-              {!hasStart && !hasInstall && (
-                <span className="text-[11px] text-cafe-muted">不可管理</span>
-              )}
-              {hasInstall && !isRunning && (
+              {!installed && hasInstall && (
                 <button
                   type="button"
                   disabled={busy}
@@ -135,7 +137,7 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
                   {busy && acting === `${m.id}:install` ? '安装中...' : '安装'}
                 </button>
               )}
-              {hasStart && !isRunning && (
+              {installed && !isRunning && hasStart && (
                 <button
                   type="button"
                   disabled={busy}
@@ -153,6 +155,16 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
                   className="console-button-secondary px-3 py-1 text-xs disabled:opacity-40"
                 >
                   {busy && acting === `${m.id}:stop` ? '停止中...' : '停止'}
+                </button>
+              )}
+              {installed && !isRunning && hasUninstall && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => handleAction(m.id, 'uninstall')}
+                  className="console-button-ghost px-3 py-1 text-xs text-cafe-muted disabled:opacity-40"
+                >
+                  {busy && acting === `${m.id}:uninstall` ? '卸载中...' : '卸载'}
                 </button>
               )}
             </div>
