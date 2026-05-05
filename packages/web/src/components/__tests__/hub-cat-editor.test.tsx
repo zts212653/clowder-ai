@@ -136,6 +136,13 @@ describe('HubCatEditor', () => {
       maxContextTokens: '',
       maxMessages: '',
       maxContentLengthPerMsg: '',
+      voiceVoice: '',
+      voiceLangCode: '',
+      voiceSpeed: '',
+      voiceRefAudio: '',
+      voiceRefText: '',
+      voiceInstruct: '',
+      voiceTemperature: '',
     };
     const existingCat = {
       id: 'runtime-codex',
@@ -182,6 +189,13 @@ describe('HubCatEditor', () => {
       maxContextTokens: '',
       maxMessages: '',
       maxContentLengthPerMsg: '',
+      voiceVoice: '',
+      voiceLangCode: '',
+      voiceSpeed: '',
+      voiceRefAudio: '',
+      voiceRefText: '',
+      voiceInstruct: '',
+      voiceTemperature: '',
     };
     const existingCat = {
       id: 'runtime-codex',
@@ -227,6 +241,13 @@ describe('HubCatEditor', () => {
       maxContextTokens: '',
       maxMessages: '',
       maxContentLengthPerMsg: '',
+      voiceVoice: '',
+      voiceLangCode: '',
+      voiceSpeed: '',
+      voiceRefAudio: '',
+      voiceRefText: '',
+      voiceInstruct: '',
+      voiceTemperature: '',
     };
 
     const payload = buildCatPayload(form, null) as Record<string, unknown>;

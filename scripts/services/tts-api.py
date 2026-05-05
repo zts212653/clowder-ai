@@ -48,16 +48,9 @@ log = logging.getLogger("tts-api")
 
 app = FastAPI(title="Cat Cafe TTS Server")
 
-ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:3001",
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_methods=["POST", "GET"],
     allow_headers=["*"],
 )
@@ -275,7 +268,10 @@ class Qwen3CloneAdapter(TtsAdapter):
             ) from exc
 
         if ref_audio and not Path(ref_audio).exists():
-            raise RuntimeError(f"Reference audio not found: {ref_audio}")
+            log.warning("Reference audio not found: %s — falling back to voice ID mode", ref_audio)
+            ref_audio = None
+            ref_text = None
+            instruct = None
 
         output_dir = Path(tempfile.mkdtemp(prefix="cat-cafe-tts-clone-"))
         try:

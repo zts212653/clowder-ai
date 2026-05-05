@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import { AvatarImageWithFallback } from './AvatarImageWithFallback';
 import type { ProfileItem } from './hub-accounts.types';
@@ -200,15 +200,91 @@ export function IdentitySection({
         />
       </div>
 
-      <div className="flex items-center gap-[14px]">
-        <span className="w-[150px] shrink-0 text-[12px] font-bold text-cafe-secondary">&nbsp;</span>
-        <div className="flex min-w-0 flex-1 items-center rounded-[10px] bg-[var(--console-field-bg)] px-3 h-[34px]">
-          <p className="text-[12px] font-bold text-[var(--console-voice-hint)]">
-            ▸ Voice Config（点击展开）&ensp;需对接和启用语音功能后才支持配置
-          </p>
-        </div>
-      </div>
+      <VoiceConfigSection form={form} onChange={onChange} />
     </SectionCard>
+  );
+}
+
+const VOICE_LANG_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: '', label: '未设置' },
+  { value: 'z', label: '中文 (z)' },
+  { value: 'zh', label: '中文 (zh)' },
+  { value: 'en-us', label: 'English (en-us)' },
+  { value: 'ja', label: '日本語 (ja)' },
+];
+
+function VoiceConfigSection({
+  form,
+  onChange,
+}: {
+  form: HubCatEditorFormState;
+  onChange: (patch: Partial<HubCatEditorFormState>) => void;
+}) {
+  const hasVoiceConfig = !!(form.voiceVoice || form.voiceLangCode);
+  const [expanded, setExpanded] = useState(hasVoiceConfig);
+  const summary = hasVoiceConfig ? `${form.voiceLangCode || '?'}` : '';
+
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="flex min-w-0 flex-1 items-center rounded-[10px] bg-[var(--console-field-bg)] px-3 h-[34px] w-full text-left"
+      >
+        <p className="text-[12px] font-bold text-[var(--console-voice-hint)]">
+          {expanded ? '▾' : '▸'} Voice Config{summary ? ` — ${summary}` : ''}
+        </p>
+      </button>
+      {expanded && (
+        <div className="space-y-2">
+          <SelectField
+            label="Lang Code"
+            value={form.voiceLangCode}
+            options={VOICE_LANG_OPTIONS}
+            onChange={(value) => {
+              const patch: Partial<HubCatEditorFormState> = { voiceLangCode: value };
+              if (value && !form.voiceVoice) patch.voiceVoice = 'zm_yunjian';
+              onChange(patch);
+            }}
+          />
+          <TextField
+            label="Speed"
+            ariaLabel="Voice Speed"
+            value={form.voiceSpeed}
+            onChange={(value) => onChange({ voiceSpeed: value })}
+            placeholder="1.0"
+          />
+          <TextField
+            label="Ref Audio"
+            ariaLabel="Reference Audio Path"
+            value={form.voiceRefAudio}
+            onChange={(value) => onChange({ voiceRefAudio: value })}
+            placeholder="genshin/流浪者/vo_wanderer_dialog.wav"
+          />
+          <TextField
+            label="Ref Text"
+            ariaLabel="Reference Audio Text"
+            value={form.voiceRefText}
+            onChange={(value) => onChange({ voiceRefText: value })}
+            placeholder="参考音频对应的文本"
+          />
+          <TextField
+            label="Instruct"
+            ariaLabel="Voice Style Instruction"
+            value={form.voiceInstruct}
+            onChange={(value) => onChange({ voiceInstruct: value })}
+            placeholder="如：用一个调皮狡黠的少年语气说话"
+          />
+          <TextField
+            label="Temperature"
+            ariaLabel="Voice Temperature"
+            value={form.voiceTemperature}
+            onChange={(value) => onChange({ voiceTemperature: value })}
+            placeholder="0.3"
+          />
+        </div>
+      )}
+    </div>
   );
 }
 

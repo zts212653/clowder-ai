@@ -52,6 +52,15 @@ export interface CatData {
   isDefaultVariant?: boolean;
   /** F32-b P4: Breed-level display name (e.g. "布偶猫"), for group headings */
   breedDisplayName?: string;
+  voiceConfig?: {
+    voice: string;
+    langCode: string;
+    speed?: number;
+    refAudio?: string;
+    refText?: string;
+    instruct?: string;
+    temperature?: number;
+  };
   /** F149: Adapter mode for Google provider cats (ACP vs legacy CLI) */
   adapterMode?: 'acp' | 'cli';
   /** F127: Roster metadata used by Hub ownership/lead markers */

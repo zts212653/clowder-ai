@@ -13,11 +13,11 @@ Requires: pip install mlx-whisper fastapi uvicorn
 """
 
 import argparse
-import asyncio
 import logging
 import signal
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 import mlx_whisper
@@ -31,16 +31,9 @@ log = logging.getLogger("whisper-api")
 
 app = FastAPI(title="Cat Cafe Whisper Server")
 
-ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:3001",
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_methods=["POST", "GET"],
     allow_headers=["*"],
 )
@@ -48,8 +41,7 @@ app.add_middleware(
 model_path: str = ""
 model_loaded: bool = False
 
-# Serialize GPU access — mlx doesn't handle concurrent transcriptions well
-_transcribe_lock = asyncio.Lock()
+_transcribe_lock = threading.Lock()
 
 
 @app.post("/v1/audio/transcriptions")
@@ -74,9 +66,8 @@ async def transcribe(
         tmp_path = tmp.name
 
     try:
-        async with _transcribe_lock:
-            result = await asyncio.to_thread(
-                mlx_whisper.transcribe,
+        with _transcribe_lock:
+            result = mlx_whisper.transcribe(
                 tmp_path,
                 path_or_hf_repo=model_path,
                 language=language if language else None,
