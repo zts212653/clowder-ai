@@ -2,6 +2,7 @@
 
 import type { InstallPlan, MarketplaceSearchResult } from '@cat-cafe/shared';
 import { useCallback, useState } from 'react';
+import { apiFetch } from '@/utils/api-client';
 import { HubIcon } from '../hub-icons';
 import { EcosystemBadge, InstallModeBadge, TrustBadge } from './marketplace-badges';
 
@@ -24,38 +25,67 @@ function ConfigRow({ label, value }: { label: string; value: string }) {
 export function InstallPlanDetail({
   result,
   plan,
+  projectPath,
   onBack,
+  onInstalled,
 }: {
   result: MarketplaceSearchResult;
   plan: InstallPlan;
+  projectPath?: string;
   onBack: () => void;
+  onInstalled?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [installResult, setInstallResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const action = MODE_ACTION[plan.mode] ?? MODE_ACTION.manual_file;
 
-  const handleAction = useCallback(() => {
+  const handleAction = useCallback(async () => {
+    if (plan.mode === 'direct_mcp' && plan.mcpEntry) {
+      setInstalling(true);
+      setInstallResult(null);
+      try {
+        const payload = projectPath ? { ...plan.mcpEntry, projectPath } : plan.mcpEntry;
+        const res = await apiFetch('/api/capabilities/mcp/install', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as Record<string, string>;
+          setInstallResult({ type: 'error', message: data.error ?? `安装失败 (${res.status})` });
+          return;
+        }
+        setInstallResult({ type: 'success', message: '已安装，MCP 配置已写入' });
+        onInstalled?.();
+      } catch {
+        setInstallResult({ type: 'error', message: '网络错误' });
+      } finally {
+        setInstalling(false);
+      }
+      return;
+    }
+
     let text = '';
     if (plan.mode === 'delegated_cli' && plan.delegatedCommand) {
       text = plan.delegatedCommand;
     } else if (plan.mode === 'manual_file' && plan.mcpEntry) {
       text = JSON.stringify(plan.mcpEntry, null, 2);
-    } else if (plan.mode === 'direct_mcp') {
-      return;
     }
     if (text) {
       navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
-  }, [plan]);
+  }, [plan, projectPath, onInstalled]);
 
   const canAct = (() => {
     switch (plan.mode) {
       case 'delegated_cli':
         return !!plan.delegatedCommand;
       case 'manual_file':
-        return !!plan.mcpEntry;
       case 'direct_mcp':
+        return !!plan.mcpEntry;
       case 'manual_ui':
         return false;
       default:
@@ -151,14 +181,26 @@ export function InstallPlanDetail({
             : '社区贡献服务，使用前请审查'}
       </div>
 
+      {installResult && (
+        <div
+          className={`rounded-lg px-3 py-2 text-xs ${
+            installResult.type === 'success'
+              ? 'border border-conn-emerald-ring bg-conn-emerald-bg text-conn-emerald-text'
+              : 'border border-conn-red-ring bg-conn-red-bg text-conn-red-text'
+          }`}
+        >
+          {installResult.message}
+        </div>
+      )}
+
       <div>
         <button
           onClick={handleAction}
-          disabled={!canAct}
+          disabled={!canAct || installing}
           className="flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-cafe-accent)] py-2.5 text-sm font-medium text-[var(--cafe-surface)] transition-colors hover:opacity-90 disabled:opacity-50"
         >
           <HubIcon name={action.icon} className="h-4 w-4" />
-          {copied ? '已复制!' : action.label}
+          {installing ? '安装中...' : copied ? '已复制!' : action.label}
         </button>
         <p className="mt-1.5 text-center text-[10px] text-cafe-muted">{action.hint}</p>
       </div>

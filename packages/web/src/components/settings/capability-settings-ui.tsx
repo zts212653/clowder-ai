@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 import type { CapabilityBoardItem, CatFamily } from '../capability-board-ui';
+import { SettingsResourceToggleSwitch } from '../SettingsResourceCard';
 import { projectDisplayName } from './useCapabilityState';
 
 const AVATAR_COLORS = ['#C65F3D', '#8B6E5A', '#A0522D', '#7B6B63', '#9B7653', '#6F5946'];
@@ -23,19 +24,7 @@ export function ToggleSwitch({
   onClick: (e: React.MouseEvent) => void;
   title?: string;
 }) {
-  return (
-    <button
-      type="button"
-      disabled={busy}
-      onClick={onClick}
-      className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors ${busy ? 'opacity-50' : 'cursor-pointer'} ${enabled ? 'bg-[var(--cafe-accent,#C65F3D)]' : 'bg-[var(--console-border-soft)]'}`}
-      title={title ?? (enabled ? '禁用' : '启用')}
-    >
-      <span
-        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-cafe-surface shadow transition-transform ${enabled ? 'translate-x-[18px]' : 'translate-x-[2px]'} mt-[2px]`}
-      />
-    </button>
-  );
+  return <SettingsResourceToggleSwitch enabled={enabled} busy={busy} onClick={onClick} title={title} />;
 }
 
 export function ProjectSelector({
@@ -67,7 +56,7 @@ export function ProjectSelector({
         id="cap-project-select"
         value={currentSelection ?? ''}
         onChange={(e) => onSwitch(e.target.value || null)}
-        className="min-w-0 flex-1 truncate rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-soft-bg)] px-2 py-1.5 text-xs text-cafe-secondary"
+        className="min-w-0 flex-1 truncate rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-field-bg)] px-2 py-1.5 text-xs text-cafe-secondary"
       >
         <option value="">{projectDisplayName(resolvedPath)}</option>
         {allPaths

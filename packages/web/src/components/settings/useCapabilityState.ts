@@ -29,7 +29,7 @@ export function useCapabilityState(filterType: 'skill' | 'mcp') {
       try {
         const query = new URLSearchParams();
         if (forProject) query.set('projectPath', forProject);
-        query.set('probe', 'true');
+        if (filterType === 'mcp') query.set('probe', 'true');
         const res = await apiFetch(`/api/capabilities?${query.toString()}`);
         if (!res.ok) return;
         const data = (await res.json()) as CapabilityBoardResponse;
@@ -106,6 +106,25 @@ export function useCapabilityState(filterType: 'skill' | 'mcp') {
     [fetchItems, projectPath],
   );
 
+  const handleDisableSkill = useCallback(
+    async (item: CapabilityBoardItem) => {
+      setDisabling(item.id);
+      try {
+        const query = new URLSearchParams();
+        if (projectPath) query.set('projectPath', projectPath);
+        const res = await apiFetch(`/api/capabilities/skill/${encodeURIComponent(item.id)}?${query}`, {
+          method: 'DELETE',
+        });
+        if (res.ok) await fetchItems(projectPath ?? undefined);
+      } catch {
+        /* ignore */
+      } finally {
+        setDisabling(null);
+      }
+    },
+    [fetchItems, projectPath],
+  );
+
   return {
     items,
     catFamilies,
@@ -119,6 +138,7 @@ export function useCapabilityState(filterType: 'skill' | 'mcp') {
     switchProject,
     handleToggle,
     handleDisableMcp,
+    handleDisableSkill,
     refetch: () => fetchItems(projectPath ?? undefined),
   };
 }

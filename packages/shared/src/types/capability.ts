@@ -74,6 +74,8 @@ export interface CapabilitiesConfig {
   capabilities: CapabilityEntry[];
   /** F070: Governance pack metadata for this project */
   governancePack?: GovernancePackMeta;
+  /** F179: External skills explicitly uninstalled via Hub — survives filesystem re-scan */
+  removedExternalSkills?: string[];
 }
 
 /** Capabilities board response — what the GET API returns */

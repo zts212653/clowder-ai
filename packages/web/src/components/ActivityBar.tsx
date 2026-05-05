@@ -1,6 +1,7 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
+import { useCafeTheme } from '@/hooks/useCafeTheme';
 import { MemoryIcon } from './icons/MemoryIcon';
 import { assignDocumentRoute, CLASSIC_WORLD_PREFIX, getThreadIdFromPathname } from './ThreadSidebar/thread-navigation';
 
@@ -91,6 +92,7 @@ interface ActivityBarProps {
 
 export function ActivityBar({ className }: ActivityBarProps) {
   const pathname = usePathname() ?? '/';
+  const { toggleTheme } = useCafeTheme();
 
   const handleNav = (path: string) => {
     const prefix = pathname.startsWith(CLASSIC_WORLD_PREFIX) ? CLASSIC_WORLD_PREFIX : '';
@@ -133,10 +135,7 @@ export function ActivityBar({ className }: ActivityBarProps) {
       <div className="mt-auto flex flex-col items-center gap-1.5">
         <button
           type="button"
-          onClick={() => {
-            const html = document.documentElement;
-            html.setAttribute('data-theme', html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
-          }}
+          onClick={toggleTheme}
           className="flex h-10 w-10 items-center justify-center rounded-[9px] bg-[var(--console-rail-item)] hover:bg-[var(--console-hover-bg)] transition-all"
           title="切换主题"
         >

@@ -58,16 +58,14 @@ export function MarketplaceSearch() {
 
   const toggleEcosystem = useCallback(
     (eco: MarketplaceEcosystem) => {
-      const next = ecosystemFilter.includes(eco) ? ecosystemFilter.filter((e) => e !== eco) : [...ecosystemFilter, eco];
-      setEcosystemFilter(next);
+      setEcosystemFilter(ecosystemFilter.includes(eco) ? [] : [eco]);
     },
     [ecosystemFilter, setEcosystemFilter],
   );
 
   const toggleTrust = useCallback(
     (level: TrustLevel) => {
-      const next = trustFilter.includes(level) ? trustFilter.filter((l) => l !== level) : [...trustFilter, level];
-      setTrustFilter(next);
+      setTrustFilter(trustFilter.includes(level) ? [] : [level]);
     },
     [trustFilter, setTrustFilter],
   );
@@ -96,7 +94,7 @@ export function MarketplaceSearch() {
           onClick={() => setEcosystemFilter([])}
           className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
             isAll
-              ? 'border-transparent bg-cafe-text text-[var(--cafe-surface)]'
+              ? 'border-[var(--cafe-accent)] bg-[var(--cafe-accent)] text-[var(--cafe-accent-foreground)]'
               : 'border-cafe-border bg-cafe-surface text-cafe-secondary hover:bg-cafe-surface-elevated'
           }`}
         >
@@ -110,7 +108,7 @@ export function MarketplaceSearch() {
               onClick={() => toggleEcosystem(eco)}
               className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
                 active
-                  ? 'border-transparent bg-cafe-text text-[var(--cafe-surface)]'
+                  ? 'border-[var(--cafe-accent)] bg-[var(--cafe-accent)] text-[var(--cafe-accent-foreground)]'
                   : 'border-cafe-border bg-cafe-surface text-cafe-secondary hover:bg-cafe-surface-elevated'
               }`}
             >
@@ -126,7 +124,7 @@ export function MarketplaceSearch() {
           onClick={() => setTrustFilter([])}
           className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
             isTrustAll
-              ? 'border-transparent bg-cafe-text text-[var(--cafe-surface)]'
+              ? 'border-[var(--cafe-accent)] bg-[var(--cafe-accent)] text-[var(--cafe-accent-foreground)]'
               : 'border-cafe-border bg-cafe-surface text-cafe-secondary hover:bg-cafe-surface-elevated'
           }`}
         >
@@ -140,7 +138,7 @@ export function MarketplaceSearch() {
               onClick={() => toggleTrust(level)}
               className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
                 active
-                  ? 'border-transparent bg-cafe-text text-[var(--cafe-surface)]'
+                  ? 'border-[var(--cafe-accent)] bg-[var(--cafe-accent)] text-[var(--cafe-accent-foreground)]'
                   : 'border-cafe-border bg-cafe-surface text-cafe-secondary hover:bg-cafe-surface-elevated'
               }`}
             >

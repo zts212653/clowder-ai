@@ -336,16 +336,9 @@ function EnvVarsSection({
                       <span className="truncate text-cafe-muted">{v.description}</span>
                     </div>
                     <div className="text-[11px] text-cafe-muted">默认: {v.defaultValue}</div>
-                    {!isEditableVariable(v) && (
-                      <div
-                        className={`font-mono text-[11px] ${v.currentValue ? 'text-cafe-secondary' : 'text-cafe-muted'}`}
-                      >
-                        {v.currentValue ?? '未设置'}
-                      </div>
-                    )}
                   </div>
-                  {isEditableVariable(v) ? (
-                    <div className="space-y-1">
+                  <div className="space-y-1">
+                    {isEditableVariable(v) ? (
                       <input
                         aria-label={v.name}
                         type={isSensitiveEditable(v) ? 'password' : 'text'}
@@ -361,17 +354,17 @@ function EnvVarsSection({
                               ? '保持当前值（已脱敏）'
                               : v.defaultValue
                         }
-                        className="console-form-input rounded-[10px] px-3 py-2 font-mono text-xs text-cafe-secondary"
+                        className="console-form-input rounded-[10px] bg-[var(--console-field-bg)] px-3 py-2 font-mono text-xs text-cafe-secondary"
                       />
-                      {buildVariableHint(v) ? (
-                        <div className="text-[11px] leading-5 text-cafe-muted">{buildVariableHint(v)}</div>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <div className="rounded-[10px] bg-[var(--console-active-bg)] px-3 py-2 text-[11px] text-cafe-muted">
-                      只读变量（认证凭证 / 仅启动期生效）
-                    </div>
-                  )}
+                    ) : (
+                      <div className="rounded-[10px] bg-[var(--console-active-bg)] px-3 py-2 font-mono text-xs text-cafe-muted">
+                        {v.currentValue ?? v.defaultValue}
+                      </div>
+                    )}
+                    {buildVariableHint(v) ? (
+                      <div className="text-[11px] leading-5 text-cafe-muted">{buildVariableHint(v)}</div>
+                    ) : null}
+                  </div>
                 </div>
               ))}
             </div>
@@ -422,7 +415,7 @@ function DataDirsSection({ dataDirs, projectRoot }: { dataDirs: DataDirs; projec
   );
 }
 
-export function HubEnvFilesTab() {
+export function HubEnvFilesTab({ excludeCategories }: { excludeCategories?: string[] } = {}) {
   const [data, setData] = useState<EnvSummaryData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -525,8 +518,14 @@ export function HubEnvFilesTab() {
     <div className="space-y-4">
       <PageIntro />
       <EnvVarsSection
-        categories={data.categories}
-        variables={data.variables}
+        categories={
+          excludeCategories
+            ? Object.fromEntries(Object.entries(data.categories).filter(([k]) => !excludeCategories.includes(k)))
+            : data.categories
+        }
+        variables={
+          excludeCategories ? data.variables.filter((v) => !excludeCategories.includes(v.category)) : data.variables
+        }
         drafts={drafts}
         isDirty={isDirty}
         pendingRestartCount={pendingRestartCount}

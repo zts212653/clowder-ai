@@ -39,8 +39,12 @@ describe('SignalNav', () => {
     });
 
     const links = Array.from(container.querySelectorAll('a'));
-    expect(links.map((link) => link.getAttribute('href'))).toEqual(['/', '/signals', '/signals/sources']);
-    expect(links.map((link) => link.textContent)).toEqual(['返回线程', '收件箱', '信号源']);
-    expect(links[1]?.getAttribute('aria-current')).toBe('page');
+    expect(links.map((link) => link.getAttribute('href'))).toEqual([
+      '/signals',
+      '/signals/sources',
+      '/signals?view=study',
+    ]);
+    expect(links.map((link) => link.textContent)).toEqual(['收件箱', '信号源', '研读队列']);
+    expect(links[0]?.getAttribute('aria-current')).toBe('page');
   });
 });

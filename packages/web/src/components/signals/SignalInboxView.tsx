@@ -262,7 +262,7 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
         <form onSubmit={handleSearchSubmit} className="flex h-[38px] items-center gap-2">
           <SignalNav active="signals" initialReferrerThread={initialReferrerThread} />
           <div className="flex-1" />
-          <div className="flex items-center gap-2 rounded-lg bg-[var(--console-card-soft-bg)] px-3 h-9 border border-transparent">
+          <div className="flex items-center gap-2 rounded-lg bg-[var(--console-field-bg)] px-3 h-9 border border-transparent">
             <svg
               className="h-[15px] w-[15px] text-cafe-muted"
               viewBox="0 0 24 24"
@@ -288,7 +288,7 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
           <select
             value={filters.status}
             onChange={(event) => handleStatusTab(event.target.value as SignalArticleFilters['status'])}
-            className="h-[34px] w-[118px] appearance-none rounded-lg border border-transparent bg-[var(--console-card-soft-bg)] px-2.5 text-xs text-cafe-secondary outline-none"
+            className="h-[34px] w-[118px] appearance-none rounded-lg border border-transparent bg-[var(--console-field-bg)] px-2.5 text-xs text-cafe-secondary outline-none"
             name="status"
           >
             <option value="inbox">Inbox</option>
@@ -301,7 +301,7 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
             value={filters.source}
             onChange={(event) => setFilters((current) => ({ ...current, source: event.target.value }))}
             name="source"
-            className="h-[34px] w-[118px] appearance-none rounded-lg border border-transparent bg-[var(--console-card-soft-bg)] px-2.5 text-xs text-cafe-secondary outline-none"
+            className="h-[34px] w-[118px] appearance-none rounded-lg border border-transparent bg-[var(--console-field-bg)] px-2.5 text-xs text-cafe-secondary outline-none"
           >
             <option value="all">全部来源</option>
             {sources.map((source) => (
@@ -320,6 +320,7 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
 
         <div className="flex min-h-0 flex-1 gap-[18px]">
           <div className="flex w-[420px] shrink-0 flex-col gap-1 overflow-y-auto rounded-[18px] bg-[var(--console-panel-bg)] p-2">
+            <p className="px-2 pb-1 text-xs font-semibold text-cafe-muted">共 {filteredItems.length} 篇</p>
             <SignalArticleList
               items={filteredItems}
               selectedArticleId={selectedArticleId}

@@ -10,6 +10,7 @@ import { HubCoCreatorEditor } from '../HubCoCreatorEditor';
 import { HubConnectorConfigTab } from '../HubConnectorConfigTab';
 import { HubEnvFilesTab } from '../HubEnvFilesTab';
 import { PushSettingsPanel } from '../PushSettingsPanel';
+import { useConfirm } from '../useConfirm';
 import { VoiceSettingsPanel } from '../VoiceSettingsPanel';
 import { ConsoleSetupState, resolveConsoleSetupState } from './console-setup-state';
 import { McpManageContent } from './McpManageContent';
@@ -35,6 +36,7 @@ export function SettingsContent({ section }: SettingsContentProps) {
   const [createDraft, setCreateDraft] = useState<Parameters<typeof HubCatEditor>[0]['draft']>(null);
   const [togglingCatId, setTogglingCatId] = useState<string | null>(null);
   const [coCreatorEditorOpen, setCoCreatorEditorOpen] = useState(false);
+  const confirm = useConfirm();
 
   const fetchData = useCallback(async () => {
     setFetchError(null);
@@ -84,6 +86,31 @@ export function SettingsContent({ section }: SettingsContentProps) {
     [fetchData, refresh],
   );
 
+  const handleDeleteMember = useCallback(
+    async (cat: (typeof cats)[number]) => {
+      const ok = await confirm({
+        title: '删除确认',
+        message: `确认删除成员「${cat.displayName}」吗？此操作不可撤销。`,
+        variant: 'danger',
+        confirmLabel: '删除',
+      });
+      if (!ok) return;
+      setFetchError(null);
+      try {
+        const res = await apiFetch(`/api/cats/${cat.id}`, { method: 'DELETE' });
+        if (!res.ok) {
+          const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+          setFetchError((payload.error as string) ?? `删除失败 (${res.status})`);
+          return;
+        }
+        await Promise.all([fetchData(), refresh()]);
+      } catch {
+        setFetchError('删除失败');
+      }
+    },
+    [confirm, fetchData, refresh],
+  );
+
   const setupState = resolveConsoleSetupState(section, fetchError);
   const meta = SETTINGS_SECTIONS.find((s) => s.id === section) ?? SETTINGS_SECTIONS[0];
 
@@ -110,6 +137,7 @@ export function SettingsContent({ section }: SettingsContentProps) {
               setEditorOpen(true);
             }}
             onEditCoCreator={() => setCoCreatorEditorOpen(true)}
+            onDeleteMember={handleDeleteMember}
             onToggleAvailability={handleToggleAvailability}
             togglingCatId={togglingCatId}
           />
@@ -139,7 +167,7 @@ export function SettingsContent({ section }: SettingsContentProps) {
             ) : (
               <p className="text-sm text-cafe-muted">加载中...</p>
             )}
-            <HubEnvFilesTab />
+            <HubEnvFilesTab excludeCategories={['connector']} />
           </div>
         );
       case 'rules':

@@ -5,11 +5,12 @@
  * connection + tool metadata for the Capability Center UI.
  */
 
+import { resolve } from 'node:path';
 import type { CapabilityEntry, McpToolInfo } from '@cat-cafe/shared';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { StdioServerParameters } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { resolvePencilCommand } from '../config/capabilities/capability-orchestrator.js';
+import { resolveBinaryRoot, resolvePencilCommand } from '../config/capabilities/capability-orchestrator.js';
 
 export interface McpProbeResult {
   connectionStatus: 'connected' | 'disconnected' | 'unknown';
@@ -106,7 +107,7 @@ export async function probeMcpCapability(
   if (!capability.mcpServer) return { connectionStatus: 'unknown' };
 
   let command = capability.mcpServer.command;
-  let args = capability.mcpServer.args;
+  let args = [...(capability.mcpServer.args ?? [])];
   if ((!command || command.trim().length === 0) && capability.mcpServer.resolver === 'pencil') {
     const resolved = await resolvePencilCommand();
     if (!resolved) return { connectionStatus: 'unknown' };
@@ -114,6 +115,19 @@ export async function probeMcpCapability(
     args = resolved.args;
   }
   if (!command || command.trim().length === 0) return { connectionStatus: 'unknown' };
+
+  // For built-in cat-cafe MCP servers, re-resolve args to use the actual
+  // binary root rather than the persisted path which may point at a stale
+  // worktree. Uses projectRoot (repo root) as explicit fallback since
+  // process.cwd() may be a subdirectory (e.g. packages/api).
+  if (capability.source === 'cat-cafe' && args.length > 0) {
+    const binaryRoot = resolveBinaryRoot(options.projectRoot);
+    args = args.map((arg) => {
+      const match = arg.match(/packages\/mcp-server\/dist\/(.+\.js)$/);
+      if (match) return resolve(binaryRoot, 'packages/mcp-server/dist', match[1]);
+      return arg;
+    });
+  }
 
   const timeoutMs = resolveProbeTimeoutMs(capability, options.timeoutMs);
   const deadlineMs = Date.now() + timeoutMs;

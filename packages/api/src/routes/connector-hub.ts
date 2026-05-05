@@ -63,6 +63,7 @@ interface PlatformDef {
   id: string;
   name: string;
   nameEn: string;
+  category?: 'im' | 'plugin';
   fields: ConnectorFieldDef[];
   docsUrl: string;
   /** Steps displayed in the guided wizard — may be mode-filtered */
@@ -90,6 +91,8 @@ export const CONNECTOR_PLATFORMS: PlatformDef[] = [
         sensitive: true,
         requiredWhen: { envName: 'FEISHU_CONNECTION_MODE', value: 'webhook' },
       },
+      { envName: 'FEISHU_BOT_OPEN_ID', label: 'Bot Open ID（高级）', sensitive: false, optional: true },
+      { envName: 'FEISHU_ADMIN_OPEN_IDS', label: '管理员 Open IDs（高级）', sensitive: false, optional: true },
     ],
     docsUrl:
       'https://open.feishu.cn/document/home/introduction-to-custom-app-development/self-built-application-development-process',
@@ -182,12 +185,46 @@ export const CONNECTOR_PLATFORMS: PlatformDef[] = [
     id: 'weixin',
     name: '微信',
     nameEn: 'WeChat Personal',
-    fields: [],
+    fields: [
+      { envName: 'WEIXIN_BOT_TOKEN', label: 'Gateway Token（高级）', sensitive: true, optional: true },
+      { envName: 'WEIXIN_VOICE_ITEM_MODE', label: '语音消息模式（高级）', sensitive: false, optional: true },
+      { envName: 'WEIXIN_ENABLE_UNSAFE_VOICE_MODES', label: '启用实验语音模式', sensitive: false, optional: true },
+      {
+        envName: 'WEIXIN_CAPTURE_INBOUND_VOICE_MEDIA',
+        label: '采集入站语音（调试）',
+        sensitive: false,
+        optional: true,
+      },
+    ],
     docsUrl: 'https://chatbot.weixin.qq.com/',
     steps: [
       { text: '点击「生成二维码」按钮' },
       { text: '使用微信扫描二维码并确认授权' },
       { text: '授权成功后自动连接，无需重启服务' },
+    ],
+  },
+  {
+    id: 'github',
+    name: 'GitHub',
+    nameEn: 'GitHub',
+    category: 'plugin',
+    fields: [
+      { envName: 'GITHUB_TOKEN', label: 'Personal Access Token', sensitive: true },
+      {
+        envName: 'GITHUB_SETUP_NOISE_BOT_LOGINS',
+        label: 'Noise 过滤 Bot 列表',
+        sensitive: false,
+        optional: true,
+        defaultValue: 'chatgpt-codex-connector[bot]',
+      },
+      { envName: 'GITHUB_MCP_PAT', label: 'MCP 专用 Token', sensitive: true, optional: true },
+    ],
+    docsUrl:
+      'https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens',
+    steps: [
+      { text: '创建 GitHub Personal Access Token（需 repo + notifications 权限）' },
+      { text: '填写 Token 后自动启用 PR Tracking、Review Router、CI/CD Monitor' },
+      { text: '可选：配置 Noise 过滤 Bot 列表以减少 setup-only 评论噪音' },
     ],
   },
 ];
@@ -214,6 +251,7 @@ export interface PlatformStatus {
   id: string;
   name: string;
   nameEn: string;
+  category?: 'im' | 'plugin';
   configured: boolean;
   connectionState: 'connected' | 'disconnected' | 'reconnecting' | 'unknown';
   lastHeartbeat: number | null;
@@ -263,6 +301,7 @@ export function buildConnectorStatus(env: Record<string, string | undefined> = p
       id: platform.id,
       name: platform.name,
       nameEn: platform.nameEn,
+      ...(platform.category ? { category: platform.category } : {}),
       configured,
       connectionState: configured ? ('unknown' as const) : ('disconnected' as const),
       lastHeartbeat: null,

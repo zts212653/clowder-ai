@@ -25,6 +25,7 @@ interface PlatformStatus {
   id: string;
   name: string;
   nameEn: string;
+  category?: 'im' | 'plugin';
   configured: boolean;
   connectionState?: 'connected' | 'disconnected' | 'reconnecting' | 'unknown';
   lastHeartbeat?: number | null;
@@ -35,13 +36,13 @@ interface PlatformStatus {
 
 function connStatePill(p: PlatformStatus): { label: string; className: string } {
   if (p.connectionState === 'connected')
-    return { label: '已连接', className: 'bg-[var(--console-pill-bg)] text-cafe-interactive' };
+    return { label: '已连接', className: 'bg-conn-emerald-bg text-conn-emerald-text' };
   if (p.connectionState === 'reconnecting')
     return { label: '重连中', className: 'bg-conn-amber-bg text-conn-amber-text' };
   if (p.connectionState === 'disconnected' && p.configured)
-    return { label: '已配置', className: 'bg-[var(--console-pill-bg)] text-cafe-secondary' };
-  if (p.configured) return { label: '已配置', className: 'bg-[var(--console-pill-bg)] text-cafe-interactive' };
-  return { label: '未配置', className: 'bg-[var(--console-pill-bg)] text-cafe-muted' };
+    return { label: '已配置', className: 'bg-conn-amber-bg text-conn-amber-text' };
+  if (p.configured) return { label: '已配置', className: 'bg-conn-amber-bg text-conn-amber-text' };
+  return { label: '未配置', className: 'bg-cafe-surface-sunken text-cafe-muted' };
 }
 
 function formatHeartbeat(ts: number): string {
@@ -71,7 +72,8 @@ export function HubConnectorConfigTab() {
       const res = await apiFetch('/api/connector/status');
       if (!res.ok) return;
       const data = await res.json();
-      setPlatforms(data.platforms ?? []);
+      const all: PlatformStatus[] = data.platforms ?? [];
+      setPlatforms(all.filter((p) => p.category !== 'plugin'));
     } catch {
       // fall through
     } finally {
@@ -177,7 +179,7 @@ export function HubConnectorConfigTab() {
         return (
           <div
             key={platform.id}
-            className="console-list-card rounded-2xl overflow-hidden shadow-[0_12px_30px_rgba(43,33,26,0.08)]"
+            className="console-list-card rounded-2xl overflow-hidden shadow-[0_12px_30px_rgba(43,33,26,0.08)] hover:shadow-[0_12px_30px_rgba(43,33,26,0.12)]"
             data-testid={`platform-card-${platform.id}`}
             data-guide-id={`connector.${platform.id}`}
             data-active={isExpanded ? 'true' : 'false'}
@@ -392,7 +394,7 @@ export function HubConnectorConfigTab() {
         );
       })}
 
-      <p className="text-xs text-cafe-muted">配置保存后自动生效，无需重启。</p>
+      <p className="text-xs text-cafe-muted">配置保存后需重启连接器生效。</p>
     </div>
   );
 }

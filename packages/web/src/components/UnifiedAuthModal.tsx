@@ -205,37 +205,43 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
     }
   };
 
+  const titleLabel = isEdit
+    ? `编辑账户认证 / ${isOAuth ? 'OAuth' : 'API Key'}`
+    : `添加账户认证 / ${isOAuth ? 'OAuth' : 'API Key'}`;
+
+  const fieldInputClass =
+    'w-full rounded-[10px] border border-transparent bg-[var(--console-field-bg)] px-3 h-10 text-[13px] text-cafe outline-none placeholder:text-cafe-muted transition focus:border-cafe-accent focus:ring-2 focus:ring-cafe-accent/30';
+
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/30 px-4" onClick={handleClose}>
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 px-4" onClick={handleClose}>
       <div
-        className="w-full max-w-[600px] rounded-2xl bg-[var(--console-card-bg)] p-6 shadow-[0_24px_56px_rgba(43,33,26,0.14)]"
+        className="flex w-full max-w-[824px] flex-col overflow-hidden rounded-[28px] bg-[var(--console-card-bg)] px-7 py-6 shadow-[0_22px_48px_rgba(43,33,26,0.13)]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="mb-1 flex justify-end">
+        <div className="flex items-center gap-4">
+          <p className="text-[13px] font-extrabold text-[var(--console-modal-title)]">{titleLabel}</p>
+          <div className="flex-1" />
           <button
             type="button"
             onClick={handleClose}
-            className="rounded-full p-1 text-cafe-muted hover:bg-cafe-surface-elevated hover:text-cafe-muted"
             aria-label="关闭"
+            className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-[var(--console-modal-close-bg)] text-lg font-extrabold leading-none text-[var(--console-modal-close-fg)]"
           >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            &times;
           </button>
         </div>
 
-        <p className="mb-1 text-[11px] text-cafe-secondary">{isEdit ? '编辑账户' : '系统配置 > 账户配置 > 添加认证'}</p>
-        <h4 className="mb-4 text-base font-semibold text-cafe">{isEdit ? '编辑账户认证' : '添加账户认证'}</h4>
-
-        {/* Mode toggle */}
-        <div className={`mb-4 flex rounded-lg bg-[var(--console-card-soft-bg)] p-0.5 ${isEdit ? 'opacity-50' : ''}`}>
+        {/* Auth type toggle */}
+        <div
+          className={`mt-4 flex items-center gap-1 rounded-[14px] bg-[var(--console-field-bg)] p-1 ${isEdit ? 'opacity-50' : ''}`}
+        >
           <button
             type="button"
             onClick={() => !isEdit && setAuthMode('oauth')}
-            className={`flex-1 rounded-md py-1.5 text-xs font-medium transition ${
-              isOAuth ? 'bg-[var(--cafe-accent)] text-[var(--cafe-surface)] shadow-sm' : 'text-cafe-muted'
-            } ${isEdit ? 'cursor-not-allowed' : !isOAuth ? 'hover:bg-cafe-surface-elevated' : ''}`}
+            className={`flex h-[38px] flex-1 items-center justify-center rounded-[10px] text-[13px] font-extrabold transition ${
+              isOAuth ? 'bg-[var(--cafe-accent)] text-[var(--cafe-surface)]' : 'text-cafe-secondary hover:text-cafe'
+            } ${isEdit ? 'cursor-not-allowed' : ''}`}
             disabled={isEdit}
           >
             OAuth
@@ -243,40 +249,38 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
           <button
             type="button"
             onClick={() => !isEdit && setAuthMode('api_key')}
-            className={`flex-1 rounded-md py-1.5 text-xs font-medium transition ${
-              !isOAuth ? 'bg-[var(--cafe-accent)] text-[var(--cafe-surface)] shadow-sm' : 'text-cafe-muted'
-            } ${isEdit ? 'cursor-not-allowed' : isOAuth ? 'hover:bg-cafe-surface-elevated' : ''}`}
+            className={`flex h-[38px] flex-1 items-center justify-center rounded-[10px] text-[13px] font-extrabold transition ${
+              !isOAuth ? 'bg-[var(--cafe-accent)] text-[var(--cafe-surface)]' : 'text-cafe-secondary hover:text-cafe'
+            } ${isEdit ? 'cursor-not-allowed' : ''}`}
             disabled={isEdit}
           >
             API Key
           </button>
         </div>
 
-        <div className="space-y-3" data-guide-id="accounts.create-details">
-          {/* 账号名称 — always shown */}
-          <div>
-            <label className="mb-1 block text-xs font-medium text-cafe-muted">账号名称</label>
+        <div className="mt-4 space-y-[18px]" data-guide-id="accounts.create-details">
+          {/* 账号名称 */}
+          <div className="space-y-[7px]">
+            <label className="block text-[13px] font-extrabold text-cafe-secondary">账号名称</label>
             <input
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               placeholder="例如: my-claude-account"
-              className="w-full rounded-lg bg-[var(--console-active-bg)] px-3 py-2 text-sm text-cafe outline-none placeholder:text-cafe-muted"
+              className={fieldInputClass}
             />
           </div>
 
           {/* OAuth mode: Client dropdown */}
           {isOAuth && (
-            <div>
-              <label className="mb-1 block text-xs font-medium text-cafe-muted">Client</label>
+            <div className="space-y-[7px]">
+              <label className="block text-[13px] font-extrabold text-cafe-secondary">Client</label>
               {initialClientId ? (
-                <p className="w-full rounded-lg bg-[var(--console-active-bg)] px-3 py-2 text-sm text-cafe">
-                  {builtinClientLabel(initialClientId)}
-                </p>
+                <p className={fieldInputClass}>{builtinClientLabel(initialClientId)}</p>
               ) : (
                 <select
                   value={clientId}
                   onChange={(e) => setClientId(e.target.value as BuiltinAccountClient)}
-                  className="w-full rounded-lg bg-[var(--console-active-bg)] px-3 py-2 text-sm text-cafe outline-none"
+                  className={fieldInputClass}
                 >
                   {CLIENT_OPTIONS.map((c) => (
                     <option key={c} value={c}>
@@ -291,17 +295,17 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
           {/* API Key mode: Base URL + API Key */}
           {!isOAuth && (
             <>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-cafe-muted">API 服务地址 (Base URL)</label>
+              <div className="space-y-[7px]">
+                <label className="block text-[13px] font-extrabold text-cafe-secondary">API 服务地址 (Base URL)</label>
                 <input
                   value={baseUrl}
                   onChange={(e) => setBaseUrl(e.target.value)}
                   placeholder="https://api.openai.com/v1"
-                  className="w-full rounded-lg bg-[var(--console-active-bg)] px-3 py-2 text-sm text-cafe outline-none placeholder:text-cafe-muted"
+                  className={fieldInputClass}
                 />
               </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-cafe-muted">
+              <div className="space-y-[7px]">
+                <label className="block text-[13px] font-extrabold text-cafe-secondary">
                   API Key{isEdit && '（留空保持不变）'}
                 </label>
                 <input
@@ -313,15 +317,15 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
                     setError(null);
                   }}
                   placeholder={isEdit ? '••••••••••••' : 'sk-...'}
-                  className="w-full rounded-lg bg-[var(--console-active-bg)] px-3 py-2 text-sm text-cafe outline-none placeholder:text-cafe-muted"
+                  className={fieldInputClass}
                 />
               </div>
             </>
           )}
 
           {/* 可用模型 */}
-          <div>
-            <label className="mb-1 block text-xs font-medium text-cafe-muted">可用模型</label>
+          <div className="space-y-[7px]">
+            <label className="block text-[13px] font-extrabold text-cafe-secondary">可用模型</label>
             <TagEditor
               tags={models}
               tone="purple"
@@ -331,41 +335,39 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
               onChange={setModels}
               minCount={0}
             />
-            {/* Model suggestions for builtin clients */}
-            {isOAuth &&
-              (MODEL_SUGGESTIONS[initialClientId ?? clientId] ?? []).filter((m) => !models.includes(m)).length > 0 && (
-                <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                  <span className="text-[10px] text-cafe-secondary">推荐</span>
-                  {(MODEL_SUGGESTIONS[initialClientId ?? clientId] ?? [])
-                    .filter((m) => !models.includes(m))
-                    .map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        onClick={() => setModels([...models, m])}
-                        className="rounded-full bg-[var(--console-card-soft-bg)] px-2 py-0.5 text-[10px] text-cafe-muted transition hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent"
-                      >
-                        + {m}
-                      </button>
-                    ))}
-                </div>
-              )}
+            {(MODEL_SUGGESTIONS[initialClientId ?? clientId] ?? []).filter((m) => !models.includes(m)).length > 0 && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] text-cafe-secondary">推荐</span>
+                {(MODEL_SUGGESTIONS[initialClientId ?? clientId] ?? [])
+                  .filter((m) => !models.includes(m))
+                  .map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setModels([...models, m])}
+                      className="rounded-full bg-[var(--console-field-bg)] px-2.5 py-0.5 text-[11px] text-cafe-muted transition hover:text-cafe-accent"
+                    >
+                      + {m}
+                    </button>
+                  ))}
+              </div>
+            )}
           </div>
 
           {/* F171: 高级配置 — collapsible env var injection */}
-          <div className="rounded-lg bg-[var(--console-card-soft-bg)]">
+          <div className="rounded-[14px] border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4">
             <button
               type="button"
               onClick={() => setAdvancedOpen((v) => !v)}
-              className="flex w-full items-center gap-1 px-3 py-2 text-xs font-medium text-cafe-muted hover:bg-cafe-surface-elevated"
+              className="flex items-center text-[14px] font-extrabold text-cafe-secondary"
             >
-              <span className="text-[10px]">{advancedOpen ? '\u25BE' : '\u25B8'}</span>
-              高级配置 (可选)
+              <span className="mr-1 text-[11px]">{advancedOpen ? '\u25BE' : '\u25B8'}</span>
+              高级配置（可选）
             </button>
             {advancedOpen && (
               <div className="px-3 pb-3 pt-2">
-                <p className="mb-2 text-[10px] text-cafe-secondary">
-                  自定义环境变量，启动 agent 时注入子进程 (CAT_CAFE_ 前缀为保留变量)
+                <p className="mb-2 text-[12px] font-bold text-[var(--console-advanced-hint)]">
+                  自定义环境变量，启动 agent 时注入子进程（CAT_CAFE_ 前缀为保留变量）
                 </p>
                 <div className="space-y-1.5">
                   {envEntries.map((entry, i) => (
@@ -378,13 +380,13 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
                           setEnvEntries(next);
                         }}
                         placeholder="KEY"
-                        className={`w-[38%] rounded px-2 py-1 font-mono text-xs outline-none placeholder:text-cafe-muted ${
+                        className={`w-[38%] rounded-[10px] border border-transparent px-3 py-1.5 font-mono text-xs outline-none placeholder:text-cafe-muted ${
                           entry.key.trim() && !isValidEnvKey(entry.key.trim())
-                            ? 'border border-conn-red-ring bg-conn-red-bg text-conn-red-text'
-                            : 'bg-[var(--console-active-bg)] text-cafe'
+                            ? 'border-conn-red-ring bg-conn-red-bg text-conn-red-text'
+                            : 'bg-[var(--console-field-bg)] text-cafe'
                         }`}
                       />
-                      <span className="text-[10px] text-cafe-muted">=</span>
+                      <span className="text-[11px] font-bold text-cafe-muted">=</span>
                       <input
                         value={entry.value}
                         onChange={(e) => {
@@ -393,7 +395,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
                           setEnvEntries(next);
                         }}
                         placeholder="value"
-                        className="flex-1 rounded bg-[var(--console-active-bg)] px-2 py-1 font-mono text-xs text-cafe outline-none placeholder:text-cafe-muted"
+                        className="flex-1 rounded-[10px] border border-transparent bg-[var(--console-field-bg)] px-3 py-1.5 font-mono text-xs text-cafe outline-none placeholder:text-cafe-muted"
                       />
                       <button
                         type="button"
@@ -415,7 +417,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
                 <button
                   type="button"
                   onClick={() => setEnvEntries([...envEntries, { key: '', value: '' }])}
-                  className="mt-2 text-[10px] font-medium text-cafe-accent hover:opacity-80"
+                  className="mt-2.5 text-[13px] font-extrabold text-[var(--cafe-accent)] hover:opacity-80"
                 >
                   + 添加变量
                 </button>
@@ -433,7 +435,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
             data-guide-id="accounts.create-submit"
             onClick={handleSubmit}
             disabled={saving || !canSubmit}
-            className="rounded-lg bg-[var(--cafe-accent)] px-5 py-2 text-sm font-semibold text-[var(--cafe-surface)] transition hover:bg-[var(--cafe-accent-hover)] disabled:opacity-50"
+            className="h-8 rounded-[10px] bg-[var(--cafe-accent)] px-4 text-[13px] font-extrabold text-[var(--cafe-surface)] transition hover:bg-[var(--cafe-accent-hover)] disabled:opacity-50"
           >
             {saving ? '保存中...' : '保存'}
           </button>

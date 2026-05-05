@@ -2,7 +2,7 @@ import Link from 'next/link';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 
-export type SignalNavItem = 'chat' | 'signals' | 'sources';
+export type SignalNavItem = 'signals' | 'sources' | 'study';
 
 interface SignalNavProps {
   readonly active: SignalNavItem;
@@ -36,14 +36,16 @@ function useReferrerThread(initialReferrerThread: string | null): string | null 
 export function SignalNav({ active, initialReferrerThread = null }: SignalNavProps) {
   const referrerThread = useReferrerThread(initialReferrerThread);
   const fromSuffix = referrerThread ? `?from=${encodeURIComponent(referrerThread)}` : '';
-
+  const studyHref = referrerThread
+    ? `/signals?from=${encodeURIComponent(referrerThread)}&view=study`
+    : '/signals?view=study';
   const items: readonly ItemConfig[] = useMemo(
     () => [
       { id: 'signals' as const, href: `/signals${fromSuffix}`, label: '收件箱' },
       { id: 'sources' as const, href: `/signals/sources${fromSuffix}`, label: '信号源' },
-      { id: 'chat' as const, href: `/signals${fromSuffix}?view=study`, label: '研读队列' },
+      { id: 'study' as const, href: studyHref, label: '研读队列' },
     ],
-    [fromSuffix],
+    [fromSuffix, studyHref],
   );
 
   return (

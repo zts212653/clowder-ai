@@ -9,7 +9,7 @@
 .console-form-input {
   width: 100%;
   border: none;
-  background: var(--console-code-bg);
+  background: var(--console-field-bg);
   color: var(--cafe-text);
   border-radius: 0.5rem;
   padding: 0.5rem 0.75rem;

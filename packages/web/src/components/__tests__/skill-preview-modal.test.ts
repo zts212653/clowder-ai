@@ -9,14 +9,13 @@ vi.mock('@/utils/api-client', () => ({
 import { SkillPreviewModal } from '@/components/settings/SkillPreviewModal';
 
 describe('SkillPreviewModal', () => {
-  it('renders modal with skill name and triggers', () => {
+  it('renders skill name and description once', () => {
     const html = renderToStaticMarkup(
       React.createElement(SkillPreviewModal, {
         skillId: 'test-skill',
         skillName: 'test-skill',
         description: 'A test skill',
         triggers: ['hello', 'world'],
-        category: 'testing',
         onClose: () => {},
       }),
     );
@@ -24,9 +23,22 @@ describe('SkillPreviewModal', () => {
     expect(html).toContain('A test skill');
     expect(html).toContain('hello');
     expect(html).toContain('world');
-    expect(html).toContain('testing');
-    expect(html).toContain('只读预览');
-    expect(html).toContain('cat-cafe-skills/test-skill');
+    expect(html.match(/A test skill/g)).toHaveLength(1);
+  });
+
+  it('has X close button and no bottom buttons', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(SkillPreviewModal, {
+        skillId: 'x',
+        skillName: 'x',
+        onClose: () => {},
+      }),
+    );
+    expect(html).toContain('aria-label="关闭"');
+    expect(html).not.toContain('>关闭</button>');
+    expect(html).not.toContain('编辑配置');
+    expect(html).not.toContain('安装依赖');
+    expect(html).not.toContain('依赖安装');
   });
 
   it('shows loading state initially', () => {
@@ -40,15 +52,34 @@ describe('SkillPreviewModal', () => {
     expect(html).toContain('加载中');
   });
 
-  it('renders close button and degradation note', () => {
+  it('does not render uninstall button (moved to list card)', () => {
     const html = renderToStaticMarkup(
       React.createElement(SkillPreviewModal, {
-        skillId: 'x',
-        skillName: 'x',
+        skillId: 'ext-skill',
+        skillName: 'ext-skill',
         onClose: () => {},
       }),
     );
-    expect(html).toContain('关闭');
-    expect(html).toContain('配置编辑功能开发中');
+    expect(html).not.toContain('卸载 Skill');
+  });
+
+  it('uses the designed modal structure', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(SkillPreviewModal, {
+        skillId: 'browser-automation',
+        skillName: 'browser-automation',
+        description: '浏览外部网站、处理登录态流程、采集截图与操作证据。',
+        triggers: ['外部网站', '截图', '登录', '自动化', '证据', '路由', '额外'],
+        category: 'browser',
+        onClose: () => {},
+      }),
+    );
+
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain('skill-preview-modal');
+    expect(html).toContain('max-w-[620px]');
+    expect(html).toContain('rounded-[24px]');
+    expect(html).toContain('+1');
+    expect(html).not.toContain('触发：额外');
   });
 });

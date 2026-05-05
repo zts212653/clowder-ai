@@ -541,6 +541,66 @@ describe('GET /api/connector/hub-threads', () => {
 const { WeComBotAdapter } = await import('../dist/infrastructure/connectors/adapters/WeComBotAdapter.js');
 
 describe('GET /api/connector/status — WeCom Bot live health', () => {
+  it('exposes GitHub plugin platform with active fields and category', async () => {
+    const app = Fastify();
+    try {
+      await app.register(connectorHubRoutes, {
+        threadStore: {
+          async list() {
+            return [];
+          },
+        },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/connector/status',
+        headers: AUTH_HEADERS,
+      });
+      const body = JSON.parse(res.body);
+      const github = body.platforms.find((p) => p.id === 'github');
+
+      assert.ok(github, 'github platform must exist in status');
+      assert.equal(github.category, 'plugin', 'github must have category=plugin');
+      assert.deepEqual(
+        github.fields.map((field) => field.envName),
+        ['GITHUB_TOKEN', 'GITHUB_SETUP_NOISE_BOT_LOGINS', 'GITHUB_MCP_PAT'],
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('IM platforms do not have category=plugin', async () => {
+    const app = Fastify();
+    try {
+      await app.register(connectorHubRoutes, {
+        threadStore: {
+          async list() {
+            return [];
+          },
+        },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/connector/status',
+        headers: AUTH_HEADERS,
+      });
+      const body = JSON.parse(res.body);
+      const imPlatforms = body.platforms.filter((p) => p.category !== 'plugin');
+
+      assert.ok(imPlatforms.length > 0, 'should have at least one IM platform');
+      for (const p of imPlatforms) {
+        assert.notEqual(p.id, 'github', 'github must not appear in IM-filtered list');
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
   it('P1: shows configured=false when adapter getter returns null (not false green from env)', async () => {
     const savedBotId = process.env.WECOM_BOT_ID;
     const savedSecret = process.env.WECOM_BOT_SECRET;

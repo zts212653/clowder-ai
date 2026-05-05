@@ -136,4 +136,34 @@ describe('McpManageContent', () => {
     const settingsBtn = container.querySelector('button[title="编辑配置"]');
     expect(settingsBtn).toBeNull();
   });
+
+  it('uses the shared settings resource-card contract for MCP rows and actions', async () => {
+    await act(async () => {
+      root.render(React.createElement(McpManageContent));
+    });
+
+    const card = Array.from(container.querySelectorAll('.settings-resource-card')).find((candidate) =>
+      candidate.textContent?.includes('custom-mcp'),
+    );
+    expect(card).toBeTruthy();
+    expect(card?.querySelector('button[title="禁用此 MCP"]')?.className).toContain('settings-resource-action');
+    expect(card?.querySelector('button[title="按猫开关"]')?.className).toContain('settings-resource-action');
+    expect(card?.querySelector('button[title="禁用"]')?.className).toContain('settings-resource-toggle');
+  });
+
+  it('orders MCP card actions as enable switch, per-cat, then disable', async () => {
+    await act(async () => {
+      root.render(React.createElement(McpManageContent));
+    });
+
+    const card = Array.from(container.querySelectorAll('.settings-resource-card')).find((candidate) =>
+      candidate.textContent?.includes('custom-mcp'),
+    );
+    expect(card).toBeTruthy();
+
+    const actionTitles = Array.from(card?.querySelectorAll('.settings-resource-actions button') ?? []).map((button) =>
+      button.getAttribute('title'),
+    );
+    expect(actionTitles).toEqual(['禁用', '按猫开关', '禁用此 MCP']);
+  });
 });

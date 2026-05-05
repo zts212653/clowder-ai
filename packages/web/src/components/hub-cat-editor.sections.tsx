@@ -96,18 +96,33 @@ export function IdentitySection({
         placeholder="角色定位，如 代码审查专家"
       />
 
-      <div className="flex items-center gap-3">
-        <span className="w-[140px] shrink-0 text-[13px] font-medium text-cafe">Avatar</span>
+      <TextField
+        label="擅长领域"
+        ariaLabel="Team Strengths"
+        value={form.teamStrengths}
+        onChange={(value) => onChange({ teamStrengths: value })}
+        placeholder="如 架构设计、安全分析"
+      />
+      <TextField
+        label="性格特征"
+        ariaLabel="Personality"
+        value={form.personality}
+        onChange={(value) => onChange({ personality: value })}
+        placeholder="如 温柔但有主见"
+      />
+
+      <div className="flex items-center gap-[14px]">
+        <span className="w-[150px] shrink-0 text-[12px] font-bold text-cafe-secondary">Avatar</span>
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="flex items-center gap-2 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-soft-bg)] px-3 py-1.5 text-sm text-cafe transition hover:border-cafe-accent"
+          className="flex h-9 items-center gap-2 rounded-[10px] bg-[var(--console-field-bg)] px-3 text-[13px] font-bold text-cafe-secondary transition hover:opacity-80"
         >
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] text-[10px] text-cafe-secondary">
+          <div className="flex h-[30px] w-[30px] shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--console-card-bg)] text-[10px] text-cafe-secondary">
             {avatarSrc ? (
               <AvatarImageWithFallback src={avatarSrc} alt="Avatar preview" className="h-full w-full object-cover" />
             ) : (
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" role="img" aria-label="Default avatar">
+              <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" role="img" aria-label="Default avatar">
                 <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2Zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8Zm-2-9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm4 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" />
               </svg>
             )}
@@ -135,16 +150,16 @@ export function IdentitySection({
         />
       </div>
 
-      <div className="flex items-center gap-3">
-        <span className="w-[140px] shrink-0 text-[13px] font-medium text-cafe">Background Color</span>
-        <div className="flex items-center gap-2">
+      <div className="flex items-center gap-[14px]">
+        <span className="w-[150px] shrink-0 text-[12px] font-bold text-cafe-secondary">Background Color</span>
+        <div className="flex items-center gap-2.5">
           <label title="Primary">
             <input
               type="color"
               aria-label="Background Color Primary"
               value={form.colorPrimary}
               onChange={(event) => onChange({ colorPrimary: event.target.value })}
-              className="h-8 w-8 cursor-pointer rounded border-0 bg-transparent p-0"
+              className="h-6 w-6 cursor-pointer rounded border-0 bg-transparent p-0"
             />
           </label>
           <label title="Secondary">
@@ -153,26 +168,11 @@ export function IdentitySection({
               aria-label="Background Color Secondary"
               value={form.colorSecondary}
               onChange={(event) => onChange({ colorSecondary: event.target.value })}
-              className="h-8 w-8 cursor-pointer rounded border-0 bg-transparent p-0"
+              className="h-6 w-6 cursor-pointer rounded border-0 bg-transparent p-0"
             />
           </label>
         </div>
       </div>
-
-      <TextField
-        label="擅长领域"
-        ariaLabel="Team Strengths"
-        value={form.teamStrengths}
-        onChange={(value) => onChange({ teamStrengths: value })}
-        placeholder="如 架构设计、安全分析"
-      />
-      <TextField
-        label="性格特征"
-        ariaLabel="Personality"
-        value={form.personality}
-        onChange={(value) => onChange({ personality: value })}
-        placeholder="如 温柔但有主见"
-      />
       <TextField
         label="注意事项"
         ariaLabel="Caution"
@@ -182,7 +182,7 @@ export function IdentitySection({
       />
 
       <div className="flex items-start gap-3">
-        <span className="w-[140px] shrink-0 pt-1 text-[13px] font-medium text-cafe">Strengths</span>
+        <span className="w-[150px] shrink-0 pt-1 text-[12px] font-bold text-cafe-secondary">Strengths</span>
         <div className="min-w-0 flex-1">
           <TagEditor
             tags={strengthTags}
@@ -200,9 +200,13 @@ export function IdentitySection({
         />
       </div>
 
-      <div className="rounded-[10px] border border-dashed border-[var(--console-border-soft)] bg-[var(--console-card-soft-bg)] px-3 py-2">
-        <p className="text-[13px] font-semibold text-cafe-secondary">▸ Voice Config (点击展开)</p>
-        <p className="mt-0.5 text-[11px] leading-4 text-cafe-muted">需对接和启用语音功能后才支持配置</p>
+      <div className="flex items-center gap-[14px]">
+        <span className="w-[150px] shrink-0 text-[12px] font-bold text-cafe-secondary">&nbsp;</span>
+        <div className="flex min-w-0 flex-1 items-center rounded-[10px] bg-[var(--console-field-bg)] px-3 h-[34px]">
+          <p className="text-[12px] font-bold text-[var(--console-voice-hint)]">
+            ▸ Voice Config（点击展开）&ensp;需对接和启用语音功能后才支持配置
+          </p>
+        </div>
       </div>
     </SectionCard>
   );
@@ -248,8 +252,8 @@ function ComboField({
 }) {
   const listId = `combo-${label.replace(/\s+/g, '-').toLowerCase()}`;
   return (
-    <label className="flex flex-col gap-1.5 text-cafe sm:flex-row sm:items-center sm:gap-3">
-      <span className="text-[13px] font-semibold text-cafe-secondary sm:w-[140px] sm:shrink-0">
+    <label className="flex flex-col gap-1.5 text-cafe sm:flex-row sm:items-center sm:gap-[14px]">
+      <span className="text-[12px] font-bold text-cafe-secondary sm:w-[150px] sm:shrink-0">
         {label}
         {required && <span className="ml-0.5 text-conn-red-text">*</span>}
       </span>
@@ -259,7 +263,7 @@ function ComboField({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           list={listId}
-          className="w-full rounded-[10px] border border-[var(--console-border-soft)] bg-[var(--console-card-soft-bg)] px-3.5 py-2 text-[14px] leading-5 text-cafe-black placeholder:text-cafe-muted outline-none transition focus:border-cafe-accent focus:ring-2 focus:ring-cafe-accent/30"
+          className="w-full rounded-[10px] border border-transparent bg-[var(--console-field-bg)] px-3 py-1.5 text-[13px] leading-5 text-cafe-black placeholder:text-cafe-muted outline-none transition focus:border-cafe-accent focus:ring-2 focus:ring-cafe-accent/30"
           placeholder={placeholder}
         />
         <datalist id={listId}>
@@ -435,14 +439,14 @@ export function AccountSection({
             form.defaultModel.trim() &&
             !form.defaultModel.includes('/') &&
             !form.provider.trim() ? (
-              <div className="rounded-[10px] border border-dashed border-[var(--console-border-soft)] bg-[var(--console-card-soft-bg)] px-3 py-2">
+              <div className="rounded-[10px] bg-[var(--console-field-bg)] px-3 py-2">
                 <p className="text-[11px] leading-4 text-cafe-secondary">
                   建议使用 `providerId/modelId` 格式（例如 `openai/gpt-5.4`），部分 provider 需要前缀才能正确路由。
                 </p>
               </div>
             ) : null}
             {callHint ? (
-              <div className="rounded-[10px] border border-dashed border-[var(--console-border-soft)] bg-[var(--console-card-soft-bg)] px-3 py-2">
+              <div className="rounded-[10px] bg-[var(--console-field-bg)] px-3 py-2">
                 <p className="whitespace-pre-wrap text-[11px] leading-4 text-cafe-secondary">
                   {callHint.label}
                   <span className="font-semibold text-cafe">{callHint.url}</span>

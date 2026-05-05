@@ -29,7 +29,9 @@ const CONFIG: ConfigData & {
   },
   a2a: { enabled: true, maxDepth: 2 },
   memory: { enabled: true, maxKeysPerThread: 50 },
+  codexExecution: { model: 'codex-mini-latest', authMode: 'oauth' as const, passModelArg: true },
   governance: { degradationEnabled: true, doneTimeoutMs: 300000, heartbeatIntervalMs: 30000 },
+  ui: { bubbleDefaults: { thinking: 'collapsed' as const, cliOutput: 'expanded' as const } },
 };
 
 const CATS: CatData[] = [
@@ -140,6 +142,25 @@ describe('CatOverviewTab', () => {
     expect(guideTarget?.tagName).toBe('SECTION');
     expect(guideTarget?.textContent).toContain('布偶猫 宪宪');
   });
+
+  it('uses the shared settings resource-card contract for member rows and actions', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(CatOverviewTab, {
+        config: CONFIG,
+        cats: CATS,
+        onEditMember: () => {},
+        onDeleteMember: () => {},
+        onToggleAvailability: () => {},
+      }),
+    );
+    const root = document.createElement('div');
+    root.innerHTML = html;
+
+    const firstCard = root.querySelector('[data-guide-id="cats.first-member"]');
+    expect(firstCard?.className).toContain('settings-resource-card');
+    expect(firstCard?.querySelector('button[aria-label="删除成员"]')?.className).toContain('settings-resource-action');
+    expect(firstCard?.querySelector('button[aria-pressed]')?.className).toContain('settings-resource-toggle');
+  });
 });
 
 describe('SystemTab', () => {
@@ -162,18 +183,17 @@ describe('SystemTab', () => {
     expect(html).toContain('30s');
   });
 
-  it('renders codex execution config', () => {
-    const nextConfig = {
-      ...CONFIG,
-      codexExecution: {
-        model: 'gpt-5.3-codex',
-        authMode: 'oauth',
-        passModelArg: true,
-      },
-    } as unknown as ConfigData;
+  it('renders bubble defaults section', () => {
+    const html = renderToStaticMarkup(React.createElement(SystemTab, { config: CONFIG }));
+    expect(html).toContain('气泡显示');
+    expect(html).toContain('Thinking');
+    expect(html).toContain('CLI');
+  });
 
-    const html = renderToStaticMarkup(React.createElement(SystemTab, { config: nextConfig }));
-    expect(html).toContain('gpt-5.3-codex');
+  it('renders codex execution section', () => {
+    const html = renderToStaticMarkup(React.createElement(SystemTab, { config: CONFIG }));
+    expect(html).toContain('Codex 推理执行');
+    expect(html).toContain('codex-mini-latest');
     expect(html).toContain('oauth');
   });
 });

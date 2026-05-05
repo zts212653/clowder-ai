@@ -112,6 +112,88 @@ describe('MCP install — owner gate', () => {
   });
 });
 
+// ── Redacted payload safeguard ─────────────────────────────
+
+describe('MCP install — redacted payload rejection', () => {
+  /** @type {string} */ let dir;
+  /** @type {import('fastify').FastifyInstance} */ let app;
+
+  beforeEach(async () => {
+    dir = makeTmpDir();
+    app = await buildApp(dir);
+  });
+  afterEach(async () => {
+    restoreEnv();
+    await app.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('rejects payload with redacted placeholder in args', async () => {
+    setEnv('DEFAULT_OWNER_USER_ID', undefined);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/capabilities/mcp/install',
+      headers: { 'x-cat-cafe-user': 'test-user' },
+      payload: { id: 'test-mcp', command: 'npx', args: ['-s', '••••••'] },
+    });
+
+    assert.equal(res.statusCode, 400);
+    assert.match(JSON.parse(res.payload).error, /redacted/i);
+  });
+
+  it('rejects payload with redacted placeholder in url', async () => {
+    setEnv('DEFAULT_OWNER_USER_ID', undefined);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/capabilities/mcp/install',
+      headers: { 'x-cat-cafe-user': 'test-user' },
+      payload: { id: 'test-http', transport: 'streamableHttp', url: 'http://example.com?token=••••••' },
+    });
+
+    assert.equal(res.statusCode, 400);
+    assert.match(JSON.parse(res.payload).error, /redacted/i);
+  });
+
+  it('update preserves existing args when payload omits them', async () => {
+    setEnv('DEFAULT_OWNER_USER_ID', undefined);
+    await writeCapabilitiesConfig(dir, {
+      version: 1,
+      capabilities: [
+        {
+          id: 'preserve-test',
+          type: 'mcp',
+          enabled: true,
+          source: 'external',
+          mcpServer: {
+            transport: 'stdio',
+            command: 'npx',
+            args: ['-s', 'real-secret-value', 'serve'],
+          },
+        },
+      ],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/capabilities/mcp/install',
+      headers: { 'x-cat-cafe-user': 'test-user' },
+      payload: { id: 'preserve-test', command: 'npx-v2' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    const config = await readCapabilitiesConfig(dir);
+    const cap = config.capabilities.find((c) => c.id === 'preserve-test');
+    assert.equal(cap.mcpServer.command, 'npx-v2');
+    assert.deepEqual(
+      cap.mcpServer.args,
+      ['-s', 'real-secret-value', 'serve'],
+      'existing args must be preserved when not in payload',
+    );
+  });
+});
+
 // ── Transport-aware merge ───────────────────────────────
 
 describe('MCP install — transport-aware merge', () => {
@@ -237,5 +319,75 @@ describe('MCP install — transport-aware merge', () => {
     assert.ok(cap?.mcpServer);
     assert.equal(cap.mcpServer.command, 'new-cmd');
     assert.equal(cap.mcpServer.env?.SECRET_KEY, 'sk-keep-me', 'existing env must be preserved');
+  });
+});
+
+// ── Skill DELETE — owner gate ─────────────────────────────
+
+describe('Skill DELETE — owner gate', () => {
+  /** @type {string} */ let dir;
+  /** @type {import('fastify').FastifyInstance} */ let app;
+
+  beforeEach(async () => {
+    dir = makeTmpDir();
+    app = await buildApp(dir);
+  });
+  afterEach(async () => {
+    restoreEnv();
+    await app.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('rejects non-owner with 403', async () => {
+    setEnv('DEFAULT_OWNER_USER_ID', OWNER);
+    await writeCapabilitiesConfig(dir, {
+      version: 1,
+      capabilities: [{ id: 'ext-skill', type: 'skill', enabled: true, source: 'external' }],
+    });
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/api/capabilities/skill/ext-skill',
+      headers: { 'x-cat-cafe-user': OTHER },
+    });
+
+    assert.equal(res.statusCode, 403);
+    assert.match(JSON.parse(res.payload).error, /owner/i);
+  });
+
+  it('allows owner to delete external skill', async () => {
+    setEnv('DEFAULT_OWNER_USER_ID', OWNER);
+    await writeCapabilitiesConfig(dir, {
+      version: 1,
+      capabilities: [{ id: 'ext-skill', type: 'skill', enabled: true, source: 'external' }],
+    });
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/api/capabilities/skill/ext-skill',
+      headers: { 'x-cat-cafe-user': OWNER },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const config = await readCapabilitiesConfig(dir);
+    assert.ok(!config.capabilities.find((c) => c.id === 'ext-skill'));
+    assert.ok(config.removedExternalSkills?.includes('ext-skill'));
+  });
+
+  it('rejects deletion of managed skill with 403', async () => {
+    setEnv('DEFAULT_OWNER_USER_ID', OWNER);
+    await writeCapabilitiesConfig(dir, {
+      version: 1,
+      capabilities: [{ id: 'managed-skill', type: 'skill', enabled: true, source: 'cat-cafe' }],
+    });
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/api/capabilities/skill/managed-skill',
+      headers: { 'x-cat-cafe-user': OWNER },
+    });
+
+    assert.equal(res.statusCode, 403);
+    assert.match(JSON.parse(res.payload).error, /managed/i);
   });
 });

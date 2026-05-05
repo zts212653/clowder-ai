@@ -5,6 +5,13 @@ import type { CapabilityBoardItem } from '../capability-board-ui';
 import { HubIcon } from '../hub-icons';
 import { McpConfigModal, type McpConfigModalProps } from '../McpConfigModal';
 import { MarketplacePanel } from '../marketplace/marketplace-panel';
+import {
+  SettingsResourceIconButton,
+  settingsResourceActionGroupClass,
+  settingsResourceAvatarClass,
+  settingsResourceCardClass,
+  settingsResourceRowClass,
+} from '../SettingsResourceCard';
 import { PerCatToggles, ProjectSelector, ToggleSwitch } from './capability-settings-ui';
 import { SettingsPageHeader } from './SettingsPageHeader';
 import { useCapabilityState } from './useCapabilityState';
@@ -12,6 +19,8 @@ import { useCapabilityState } from './useCapabilityState';
 interface ModalState {
   editId?: string;
   editData?: McpConfigModalProps['editData'];
+  readOnly?: boolean;
+  tools?: { name: string; description?: string }[];
 }
 
 export function McpManageContent() {
@@ -20,18 +29,21 @@ export function McpManageContent() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const handleCardClick = useCallback((item: CapabilityBoardItem) => {
-    if (item.source !== 'external') return;
+    const readOnly = item.source !== 'external';
     setModal({
       editId: item.id,
+      readOnly,
+      tools: item.tools,
       editData: item.mcpServer
         ? {
             transport: item.mcpServer.transport,
-            command: item.mcpServer.command,
-            args: item.mcpServer.args,
-            url: item.mcpServer.url,
+            command: readOnly ? item.mcpServer.command : undefined,
+            args: readOnly ? item.mcpServer.args : undefined,
+            url: readOnly ? item.mcpServer.url : undefined,
             env: item.mcpServer.env,
             headers: item.mcpServer.headers,
             envKeys: item.mcpServer.envKeys,
+            resolver: item.mcpServer.resolver,
           }
         : undefined,
     });
@@ -96,12 +108,14 @@ export function McpManageContent() {
                   ? `stdio · ${item.mcpServer.command}${item.mcpServer.args?.length ? ` ${item.mcpServer.args.join(' ')}` : ''}`
                   : undefined;
             return (
-              <div
-                key={item.id}
-                className="rounded-2xl bg-[var(--console-card-bg)] px-5 py-[18px] shadow-[0_12px_30px_rgba(43,33,26,0.08)] transition-shadow hover:shadow-[0_12px_30px_rgba(43,33,26,0.12)]"
-              >
-                <div className="flex items-center gap-4">
-                  <svg className="h-[18px] w-[18px] shrink-0 text-cafe-muted" viewBox="0 0 24 24" fill="currentColor">
+              <div key={item.id} className={settingsResourceCardClass}>
+                <div className={settingsResourceRowClass}>
+                  <svg
+                    className="h-[18px] w-[18px] shrink-0 text-cafe-muted"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    aria-hidden="true"
+                  >
                     <circle cx="9" cy="5" r="1.5" />
                     <circle cx="15" cy="5" r="1.5" />
                     <circle cx="9" cy="12" r="1.5" />
@@ -112,43 +126,16 @@ export function McpManageContent() {
                   <button
                     type="button"
                     onClick={() => handleCardClick(item)}
-                    disabled={!editable}
-                    className={`flex min-w-0 flex-1 items-center gap-4 text-left ${editable ? 'cursor-pointer' : 'cursor-default'}`}
+                    className="flex min-w-0 flex-1 cursor-pointer items-center gap-4 text-left"
                   >
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[12px] bg-[var(--console-active-bg)] text-sm font-bold text-cafe-interactive">
-                      {item.id.charAt(0).toUpperCase()}
-                    </div>
+                    <div className={settingsResourceAvatarClass}>{item.id.charAt(0).toUpperCase()}</div>
                     <div className="min-w-0 flex-1">
                       <p className="text-[15px] font-extrabold text-cafe">{item.id}</p>
                       <p className="mt-0.5 truncate text-xs text-cafe-secondary">{item.description || '—'}</p>
                       {subInfo && <p className="mt-0.5 truncate text-[11px] font-mono text-cafe-muted">{subInfo}</p>}
                     </div>
                   </button>
-                  <div className="flex shrink-0 items-center gap-2">
-                    {editable && (
-                      <button
-                        type="button"
-                        disabled={removing}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          cap.handleDisableMcp(item);
-                        }}
-                        className={`rounded-md p-1.5 text-cafe-muted hover:bg-[var(--console-card-soft-bg)] hover:text-[var(--console-stop,#f26767)] transition-colors ${removing ? 'opacity-50' : ''}`}
-                        title="禁用此 MCP"
-                      >
-                        <HubIcon name="trash" className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                    {cap.catFamilies.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setExpandedId(expanded ? null : item.id)}
-                        className="rounded-md p-1.5 text-cafe-muted hover:bg-[var(--console-card-soft-bg)] hover:text-cafe-secondary transition-colors"
-                        title="按猫开关"
-                      >
-                        <HubIcon name="users" className="h-3.5 w-3.5" />
-                      </button>
-                    )}
+                  <div className={settingsResourceActionGroupClass}>
                     <ToggleSwitch
                       enabled={item.enabled}
                       busy={busy}
@@ -157,6 +144,29 @@ export function McpManageContent() {
                         cap.handleToggle(item, !item.enabled);
                       }}
                     />
+                    {cap.catFamilies.length > 0 && (
+                      <SettingsResourceIconButton
+                        onClick={() => setExpandedId(expanded ? null : item.id)}
+                        title="按猫开关"
+                        aria-label="按猫开关"
+                      >
+                        <HubIcon name="users" className="h-4 w-4" />
+                      </SettingsResourceIconButton>
+                    )}
+                    {editable && (
+                      <SettingsResourceIconButton
+                        disabled={removing}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          cap.handleDisableMcp(item);
+                        }}
+                        title="禁用此 MCP"
+                        aria-label="禁用此 MCP"
+                        tone="danger"
+                      >
+                        <HubIcon name="trash" className="h-4 w-4" />
+                      </SettingsResourceIconButton>
+                    )}
                   </div>
                 </div>
                 {expanded && (
@@ -177,7 +187,11 @@ export function McpManageContent() {
         <div className="sticky top-0 rounded-2xl bg-[var(--console-card-bg)] p-4 shadow-[0_8px_24px_rgba(43,33,26,0.05)]">
           <h3 className="text-sm font-bold text-cafe">MCP 市场</h3>
           <p className="mt-1 mb-4 text-xs text-cafe-secondary">查询可用 MCP；安装后进入左侧列表。</p>
-          <MarketplacePanel />
+          <MarketplacePanel
+            artifactKinds={['mcp_server']}
+            projectPath={cap.projectPath ?? undefined}
+            onInstalled={cap.refetch}
+          />
         </div>
       </aside>
 
@@ -186,6 +200,8 @@ export function McpManageContent() {
           projectPath={cap.projectPath ?? undefined}
           editId={modal.editId}
           editData={modal.editData}
+          readOnly={modal.readOnly}
+          tools={modal.tools}
           onSaved={handleSaved}
           onClose={() => setModal(null)}
         />

@@ -3,7 +3,8 @@
  *
  * POST /api/capabilities/mcp/preview — install dry-run
  * POST /api/capabilities/mcp/install — create/overwrite MCP
- * DELETE /api/capabilities/mcp/:id — soft/hard delete
+ * DELETE /api/capabilities/mcp/:id — soft/hard delete MCP
+ * DELETE /api/capabilities/skill/:id — remove external skill
  * GET /api/capabilities/audit — audit log reader
  */
 
@@ -77,6 +78,17 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
       return { error: 'Required: id (string)' };
     }
 
+    const REDACTED = '••••••';
+    const hasRedacted =
+      body.args?.some((a) => a.includes(REDACTED)) || body.url?.includes(REDACTED) || body.command?.includes(REDACTED);
+    if (hasRedacted) {
+      reply.status(400);
+      return {
+        error:
+          'Payload contains redacted placeholder values. Omit unchanged secret fields instead of sending placeholders.',
+      };
+    }
+
     const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim();
     if (ownerId && userId !== ownerId) {
       reply.status(403);
@@ -122,23 +134,29 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
             error: `Cannot overwrite managed MCP "${body.id}" (source=${existing.source}). Only external MCPs can be installed over.`,
           };
         }
-        const mergedMcpServer =
-          existing.mcpServer && entry.mcpServer
-            ? { ...existing.mcpServer, ...entry.mcpServer }
-            : (entry.mcpServer ?? existing.mcpServer);
-        if (mergedMcpServer) {
-          if (mergedMcpServer.transport === 'streamableHttp') {
-            delete mergedMcpServer.resolver;
-            delete mergedMcpServer.workingDir;
-          } else {
-            delete mergedMcpServer.url;
-            delete mergedMcpServer.headers;
-          }
+        const patch: Record<string, unknown> = {};
+        if (body.command !== undefined) patch.command = body.command;
+        if (body.args !== undefined) patch.args = body.args;
+        if (body.url !== undefined) patch.url = body.url;
+        if (body.headers !== undefined) patch.headers = body.headers;
+        if (body.env !== undefined) patch.env = body.env;
+        if (body.resolver !== undefined) patch.resolver = body.resolver;
+        if (body.transport !== undefined) patch.transport = body.transport;
+
+        const mergedMcpServer = existing.mcpServer
+          ? { ...existing.mcpServer, ...patch }
+          : { ...(entry.mcpServer ?? {}), ...patch };
+        if (mergedMcpServer.transport === 'streamableHttp') {
+          delete mergedMcpServer.resolver;
+          delete mergedMcpServer.workingDir;
+        } else {
+          delete mergedMcpServer.url;
+          delete mergedMcpServer.headers;
         }
         config.capabilities[existingIdx] = {
           ...existing,
           ...entry,
-          mcpServer: mergedMcpServer,
+          mcpServer: mergedMcpServer as typeof existing.mcpServer,
           overrides: existing.overrides,
         };
       } else {
@@ -320,6 +338,78 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
       });
 
       return { ok: true, mode };
+    });
+  });
+
+  // ── DELETE /api/capabilities/skill/:id — remove external skill ──
+  app.delete('/api/capabilities/skill/:id', async (request, reply) => {
+    const userId = resolveUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
+    }
+    const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim();
+    if (ownerId && userId !== ownerId) {
+      reply.status(403);
+      return { error: 'Only the owner can uninstall skills' };
+    }
+
+    const { id } = request.params as { id: string };
+    const query = request.query as Record<string, string>;
+
+    let projectRoot = getProjectRoot();
+    if (query.projectPath) {
+      const validated = await validateProjectPath(query.projectPath);
+      if (!validated) {
+        reply.status(400);
+        return { error: 'Invalid project path' };
+      }
+      projectRoot = validated;
+    }
+
+    return withCapabilityLock(projectRoot, async () => {
+      const config = await readCapabilitiesConfig(projectRoot);
+      if (!config) {
+        reply.status(404);
+        return { error: 'capabilities.json not found' };
+      }
+      const catCafeRepoRoot = await resolveMainRepoPath();
+      let nextConfig = ensureCatCafeMainServer(config, { catCafeRepoRoot }).config;
+      nextConfig = realignManagedCatCafeServerPaths(nextConfig, { catCafeRepoRoot }).config;
+
+      const idx = nextConfig.capabilities.findIndex((c) => c.id === id && c.type === 'skill');
+      if (idx === -1) {
+        reply.status(404);
+        return { error: `Skill "${id}" not found` };
+      }
+
+      if (nextConfig.capabilities[idx].source !== 'external') {
+        reply.status(403);
+        return {
+          error: `Cannot uninstall managed skill "${id}" (source=${nextConfig.capabilities[idx].source}). Only external skills can be removed.`,
+        };
+      }
+
+      const before = structuredClone(nextConfig.capabilities[idx]);
+      nextConfig.capabilities.splice(idx, 1);
+      if (!nextConfig.removedExternalSkills) nextConfig.removedExternalSkills = [];
+      if (!nextConfig.removedExternalSkills.includes(id)) {
+        nextConfig.removedExternalSkills.push(id);
+      }
+
+      await writeCapabilitiesConfig(projectRoot, nextConfig);
+      await generateCliConfigs(nextConfig, getCliConfigPaths(projectRoot));
+
+      await appendAuditEntry(projectRoot, {
+        timestamp: new Date().toISOString(),
+        userId,
+        action: 'delete',
+        capabilityId: id,
+        before,
+        after: null,
+      });
+
+      return { ok: true, mode: 'removed' };
     });
   });
 

@@ -6,7 +6,7 @@ import { apiFetch } from '@/utils/api-client';
 import type { ConfigData } from './config-viewer-types';
 import type { TemplateCard } from './first-run-quest/TemplateStep';
 import type { AccountsResponse, ProfileItem } from './hub-accounts.types';
-import { buildEditorLoadingNote, uploadAvatarAsset } from './hub-cat-editor.client';
+import { uploadAvatarAsset } from './hub-cat-editor.client';
 import {
   autoSlug,
   buildCatPayload,
@@ -562,6 +562,8 @@ export function HubCatEditor({
     }
   };
 
+  const overlayTitle = cat ? '成员配置 / 预览与编辑' : '添加成员';
+
   const editorHeader = (
     <div className="flex shrink-0 items-start justify-between px-7 py-5">
       <div className="flex items-center gap-2">
@@ -577,14 +579,19 @@ export function HubCatEditor({
             </svg>
           </button>
         )}
-        <p className="text-[13px] font-semibold text-conn-emerald-text">{cat ? '编辑成员' : '添加成员'}</p>
+        <p
+          id={variant === 'overlay' ? 'member-editor-title' : undefined}
+          className="text-[13px] font-extrabold text-[var(--console-modal-title)]"
+        >
+          {variant === 'overlay' ? overlayTitle : cat ? '编辑成员' : '添加成员'}
+        </p>
       </div>
       {variant === 'overlay' && (
         <button
           type="button"
           onClick={requestClose}
-          className="text-2xl leading-none text-cafe-muted"
-          aria-label="关闭"
+          className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-[var(--console-modal-close-bg)] text-lg font-extrabold leading-none text-[var(--console-modal-close-fg)] transition hover:opacity-80"
+          aria-label="关闭成员配置"
         >
           ×
         </button>
@@ -597,17 +604,20 @@ export function HubCatEditor({
       {!cat && templates.length > 0 && (
         <section
           data-guide-id="add-member.template-picker"
-          className="space-y-2 rounded-[20px] bg-[var(--console-card-soft-bg)] p-[18px]"
+          className="space-y-3 rounded-[18px] bg-[var(--console-card-bg)] p-[18px] shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
         >
-          <h4 className="text-[15px] font-bold text-cafe">模板快选（可选）</h4>
-          <div className="flex flex-wrap gap-2">
+          <h4 className="text-base font-extrabold text-cafe">成员模板</h4>
+          <p className="text-xs font-semibold text-cafe-secondary">
+            从内置成员模板开始，选择后自动填充身份、模型与运行时默认值。
+          </p>
+          <div className="flex flex-wrap gap-2.5">
             <button
               type="button"
               onClick={() => handleTemplateSelect(null)}
-              className={`rounded-full px-3 py-1.5 text-sm transition ${
+              className={`h-8 rounded-2xl px-3.5 text-[13px] font-extrabold transition ${
                 selectedTemplateId === 'custom'
                   ? 'bg-[var(--cafe-accent)] text-[var(--cafe-surface)]'
-                  : 'bg-[var(--console-pill-bg)] text-cafe-secondary hover:bg-[var(--console-pill-bg)]'
+                  : 'bg-[var(--console-field-bg)] text-[var(--console-template-text)]'
               }`}
             >
               自定义
@@ -617,10 +627,10 @@ export function HubCatEditor({
                 key={t.id}
                 type="button"
                 onClick={() => handleTemplateSelect(selectedTemplateId === t.id ? null : t)}
-                className={`rounded-full px-3 py-1.5 text-sm transition ${
+                className={`h-8 rounded-2xl px-3.5 text-[13px] font-extrabold transition ${
                   selectedTemplateId === t.id
                     ? 'bg-[var(--cafe-accent)] text-[var(--cafe-surface)]'
-                    : 'bg-[var(--console-pill-bg)] text-cafe-secondary hover:bg-[var(--console-pill-bg)]'
+                    : 'bg-[var(--console-field-bg)] text-[var(--console-template-text)]'
                 }`}
               >
                 {t.nickname ?? t.name}
@@ -668,42 +678,26 @@ export function HubCatEditor({
       />
       <PersistenceBanner />
       {error ? <p className="rounded-2xl bg-conn-red-bg px-4 py-3 text-sm text-conn-red-text">{error}</p> : null}
-    </div>
-  );
-
-  const editorFooter = (
-    <div
-      className={`flex shrink-0 items-center justify-between px-7 py-4 ${variant === 'inline' ? 'border-t border-[var(--console-border-soft)]' : 'bg-[var(--console-card-bg)]'}`}
-    >
-      <div className="text-xs leading-5 text-cafe-muted">
-        {buildEditorLoadingNote({ loadingProfiles, loadingStrategy, loadingCodexSettings })}
-      </div>
-      <div className="flex gap-2">
+      <div className="flex items-center justify-between pt-4">
         {cat ? (
           <button
             type="button"
-            aria-label="删除成员"
             onClick={handleDelete}
-            disabled={saving}
-            className="rounded-full bg-conn-red-bg px-5 py-2.5 text-sm font-semibold text-conn-red-text transition hover:bg-conn-red-bg disabled:opacity-50"
+            aria-label="删除成员"
+            className="text-[13px] font-bold text-cafe-muted transition hover:text-conn-red-text"
           >
             删除成员
           </button>
-        ) : null}
-        <button
-          type="button"
-          onClick={requestClose}
-          className="rounded-full bg-[var(--console-pill-bg)] px-5 py-2.5 text-sm font-semibold text-cafe-muted transition hover:bg-[var(--console-pill-bg)]"
-        >
-          取消
-        </button>
+        ) : (
+          <span />
+        )}
         <button
           type="button"
           onClick={handleSave}
           disabled={saving || saveBlockedByProfileBinding}
-          className="rounded-full bg-[var(--cafe-accent)] px-5 py-2.5 text-sm font-semibold text-[var(--cafe-surface)] transition hover:bg-[var(--cafe-accent-hover,#C88254)] disabled:opacity-50"
+          className="h-8 rounded-[10px] bg-[var(--cafe-accent)] px-4 text-[13px] font-extrabold text-[var(--cafe-surface)] transition hover:bg-[var(--cafe-accent-hover)] disabled:opacity-50"
         >
-          {saving ? '保存中…' : cat ? '保存修改' : '保存'}
+          {saving ? '保存中…' : '保存'}
         </button>
       </div>
     </div>
@@ -714,7 +708,6 @@ export function HubCatEditor({
       <div className="flex h-full flex-col" data-guide-id="member-editor.profile" data-bootcamp-step="cat-editor">
         {editorHeader}
         {editorBody}
-        {editorFooter}
       </div>
     );
   }
@@ -726,14 +719,16 @@ export function HubCatEditor({
       data-bootcamp-host="cat-editor-modal"
     >
       <div
-        className="flex max-h-[88vh] w-full max-w-[600px] flex-col rounded-[32px] bg-[var(--console-card-bg)] shadow-[0_24px_56px_rgba(43,33,26,0.14)]"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="member-editor-title"
+        className="member-editor-modal flex max-h-[88vh] w-full max-w-[720px] flex-col overflow-hidden rounded-[28px] bg-[var(--console-card-bg)] shadow-[0_22px_48px_rgba(43,33,26,0.13)]"
         data-guide-id="member-editor.profile"
         onClick={(event) => event.stopPropagation()}
         data-bootcamp-step="cat-editor"
       >
         {editorHeader}
         {editorBody}
-        {editorFooter}
       </div>
     </div>
   );

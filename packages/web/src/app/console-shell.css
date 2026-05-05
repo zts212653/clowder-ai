@@ -9,6 +9,7 @@
   --console-border-strong: #d4c4b6;
   --console-shadow: 0 8px 32px rgba(43, 37, 32, 0.04);
   --console-shadow-soft: 0 8px 24px rgba(43, 37, 32, 0.03);
+  --console-field-bg: #f8f1ea;
   --console-active-bg: #ead8cd;
   --console-hover-bg: #f0e6dc;
   --console-rail-bg: #eee6dc;
@@ -17,6 +18,21 @@
   --console-input-stroke: #e49a7d;
   --console-voice-companion: #8e72b8;
   --console-stop: #f26767;
+  --console-runtime-bg: #eef8f0;
+  --console-runtime-field-bg: #e4f3e6;
+  --console-runtime-label: #5d795f;
+  --console-runtime-title: #426b4a;
+  --console-runtime-muted: #6d7e6d;
+  --console-runtime-hint: #7e8f7e;
+  --console-runtime-group-bg: #f8fef8;
+  --console-persistence-bg: #fff4dd;
+  --console-modal-title: #6f3a2c;
+  --console-modal-close-bg: #f1e7de;
+  --console-modal-close-fg: #6f5a50;
+  --console-advanced-hint: #a9826d;
+  --console-template-text: #5d4b42;
+  --console-voice-hint: #7b6a5f;
+  --console-skill-pill-bg: #f3e1d6;
   --console-inspector-bg: #f4ece4;
   --console-inspector-gradient: linear-gradient(180deg, #faf4ee 0%, #f6efe7 50%, #eee6dc 100%);
   --console-button-emphasis: #4a3d33;
@@ -37,11 +53,27 @@
   --console-border-strong: color-mix(in srgb, var(--cafe-border) 94%, white 6%);
   --console-shadow: 0 24px 56px rgba(0, 0, 0, 0.34);
   --console-shadow-soft: 0 14px 34px rgba(0, 0, 0, 0.24);
+  --console-field-bg: color-mix(in srgb, var(--cafe-surface-sunken) 92%, white 8%);
   --console-active-bg: color-mix(in srgb, var(--cafe-accent) 26%, var(--console-card-bg) 74%);
   --console-hover-bg: color-mix(in srgb, var(--cafe-crosspost) 14%, var(--console-card-bg) 86%);
   --console-rail-bg: #14110f;
   --console-rail-item: #241f1b;
   --console-rail-active: #302722;
+  --console-runtime-bg: color-mix(in srgb, #10b981 12%, var(--console-card-bg) 88%);
+  --console-runtime-field-bg: color-mix(in srgb, #10b981 18%, var(--console-card-bg) 82%);
+  --console-runtime-label: #6ee7b7;
+  --console-runtime-title: #6ee7b7;
+  --console-runtime-muted: #6ee7b7aa;
+  --console-runtime-hint: #6ee7b799;
+  --console-runtime-group-bg: color-mix(in srgb, #10b981 8%, var(--console-card-bg) 92%);
+  --console-persistence-bg: color-mix(in srgb, var(--cafe-accent) 16%, var(--console-card-bg) 84%);
+  --console-modal-title: #d4a08a;
+  --console-modal-close-bg: color-mix(in srgb, var(--cafe-surface) 74%, white 6%);
+  --console-modal-close-fg: #b8a495;
+  --console-advanced-hint: #b8a495;
+  --console-template-text: #c4a58f;
+  --console-voice-hint: #a99585;
+  --console-skill-pill-bg: color-mix(in srgb, var(--cafe-accent) 20%, var(--console-card-bg) 80%);
   --console-inspector-bg: color-mix(in srgb, var(--console-panel-bg) 92%, black 8%);
   --console-inspector-gradient: linear-gradient(180deg, #1e1915 0%, #1a1512 50%, #14110f 100%);
   --console-button-emphasis: #a08977;
@@ -124,10 +156,20 @@
   background: var(--console-active-bg);
 }
 
+.console-list-card[data-guide-id^="connector."][data-active="true"] {
+  background: var(--console-card-bg);
+}
+
 .console-code-pane,
 .console-table-shell {
   border: 1px solid var(--console-border-soft);
   background: var(--console-code-bg);
+}
+
+.console-list-card[data-guide-id^="connector."] .console-code-pane {
+  border-width: 1px 0 0;
+  border-color: var(--console-border);
+  background: var(--console-card-bg);
 }
 
 .console-pill {

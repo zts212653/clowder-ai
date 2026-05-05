@@ -1,5 +1,6 @@
 'use client';
 
+import type { MarketplaceArtifactKind } from '@cat-cafe/shared';
 import { useCallback, useEffect } from 'react';
 import { useMarketplaceStore } from '@/stores/marketplaceStore';
 import { HubIcon } from '../hub-icons';
@@ -21,7 +22,21 @@ function LoadingSkeleton() {
   );
 }
 
-export function MarketplacePanel() {
+export function MarketplacePanel({
+  artifactKinds,
+  projectPath,
+  onInstalled,
+}: {
+  artifactKinds?: MarketplaceArtifactKind[];
+  projectPath?: string;
+  onInstalled?: () => void;
+} = {}) {
+  const setArtifactKindsFilter = useMarketplaceStore((s) => s.setArtifactKindsFilter);
+  useEffect(() => {
+    if (artifactKinds) setArtifactKindsFilter(artifactKinds);
+    return () => setArtifactKindsFilter([]);
+  }, [artifactKinds, setArtifactKindsFilter]);
+
   const results = useMarketplaceStore((s) => s.results);
   const selectedResult = useMarketplaceStore((s) => s.selectedResult);
   const installPlan = useMarketplaceStore((s) => s.installPlan);
@@ -50,7 +65,15 @@ export function MarketplacePanel() {
   }, [clearSelection]);
 
   if (selectedResult && installPlan) {
-    return <InstallPlanDetail result={selectedResult} plan={installPlan} onBack={clearSelection} />;
+    return (
+      <InstallPlanDetail
+        result={selectedResult}
+        plan={installPlan}
+        projectPath={projectPath}
+        onBack={clearSelection}
+        onInstalled={onInstalled}
+      />
+    );
   }
 
   return (

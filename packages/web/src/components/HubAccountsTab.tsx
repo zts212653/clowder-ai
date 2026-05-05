@@ -142,6 +142,10 @@ export function HubAccountsTab() {
     <div className="space-y-5">
       {error && <p className="text-sm text-conn-red-text bg-conn-red-bg rounded-lg px-3 py-2">{error}</p>}
 
+      <div className="flex items-center justify-between text-xs text-cafe-muted">
+        <span>存储路径: {data.configRoot ?? `${data.projectPath}/.cat-cafe`}</span>
+      </div>
+
       <div className="flex items-center justify-end">
         <button
           type="button"

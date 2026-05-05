@@ -12,14 +12,7 @@ interface SkillPreviewModalProps {
   onClose: () => void;
 }
 
-export function SkillPreviewModal({
-  skillId,
-  skillName,
-  description,
-  triggers,
-  category,
-  onClose,
-}: SkillPreviewModalProps) {
+export function SkillPreviewModal({ skillId, skillName, description, triggers, onClose }: SkillPreviewModalProps) {
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -48,7 +41,7 @@ export function SkillPreviewModal({
       }
     })();
     return () => {
-      reqRef.current++;
+      reqRef.current = id + 1;
     };
   }, [skillId]);
 
@@ -67,87 +60,73 @@ export function SkillPreviewModal({
     return () => window.removeEventListener('keydown', handler);
   }, [onClose]);
 
-  const letter = skillName.charAt(0).toUpperCase();
-  const localPath = `cat-cafe-skills/${skillId}`;
-
+  const triggerList = triggers?.filter(Boolean) ?? [];
+  const [showAllTriggers, setShowAllTriggers] = useState(false);
+  const visibleTriggers = showAllTriggers ? triggerList : triggerList.slice(0, 6);
+  const hiddenTriggerCount = showAllTriggers ? 0 : Math.max(triggerList.length - 6, 0);
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm"
       onClick={handleBackdrop}
     >
       <div
-        className="relative mx-4 w-full max-w-[600px] rounded-2xl bg-[var(--console-card-bg)] shadow-[0_24px_56px_rgba(43,33,26,0.14)]"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="skill-preview-title"
+        className="skill-preview-modal relative flex max-h-[calc(100vh-32px)] w-full max-w-[620px] flex-col overflow-hidden rounded-[24px] bg-[var(--console-card-bg)] p-[26px] shadow-[0_20px_48px_rgba(43,33,26,0.14)]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start gap-4 p-6 pb-4">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--cafe-accent,#C65F3D)]/15 text-sm font-bold text-[var(--cafe-accent,#C65F3D)]">
-            {letter}
+        <div className="flex shrink-0 items-center gap-[14px]">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[12px] bg-[var(--console-active-bg)] text-[18px] font-bold text-[var(--console-modal-title)]">
+            ✎
           </div>
-          <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-bold text-cafe">预览 Skill：{skillName}</h2>
-            <p className="mt-0.5 text-xs text-cafe-secondary">
-              {description || '点击 Skill 卡片打开只读预览；这里展示 SKILL.md 内容、触发条件、依赖和验证状态。'}
-            </p>
-          </div>
-          <span className="shrink-0 rounded-full bg-[var(--console-card-soft-bg)] px-2.5 py-1 text-[10px] font-semibold text-cafe-secondary">
-            只读预览
-          </span>
+          <h2 id="skill-preview-title" className="min-w-0 flex-1 text-[20px] font-extrabold text-cafe">
+            {skillName}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="关闭"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] text-[16px] text-cafe-muted transition hover:bg-[var(--console-modal-close-bg)] hover:text-[var(--console-modal-close-fg)]"
+          >
+            ✕
+          </button>
         </div>
 
-        <div className="max-h-[60vh] overflow-y-auto p-6 space-y-5">
-          <section>
-            <h3 className="mb-2 text-sm font-semibold text-cafe">SKILL.md 内容预览</h3>
-            <div className="rounded-xl bg-[var(--console-shell-bg)] p-4">
-              {loading && <p className="text-xs text-cafe-muted">加载中...</p>}
-              {error && <p className="text-xs text-conn-red-text">{error}</p>}
-              {content && (
-                <pre className="max-h-[20rem] overflow-auto text-[12px] leading-6 text-cafe-secondary whitespace-pre-wrap">
-                  {content}
-                </pre>
+        {description && <p className="mt-3 text-[13px] leading-[1.4] text-cafe-secondary">{description}</p>}
+
+        <div className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto">
+          {triggerList.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {visibleTriggers.map((trigger) => (
+                <span
+                  key={trigger}
+                  className="rounded-[14px] bg-[var(--console-panel-bg)] px-2.5 py-1 text-[12px] font-bold text-[var(--console-modal-title)]"
+                >
+                  {trigger}
+                </span>
+              ))}
+              {hiddenTriggerCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllTriggers(true)}
+                  className="rounded-[14px] bg-[var(--console-panel-bg)] px-2.5 py-1 text-[12px] font-bold text-cafe-muted hover:text-cafe transition-colors"
+                >
+                  +{hiddenTriggerCount}
+                </button>
               )}
             </div>
-          </section>
+          )}
 
-          <div className="flex gap-6">
-            <div className="flex-1">
-              <h4 className="mb-1.5 text-xs font-semibold text-cafe-muted">触发词</h4>
-              <div className="flex flex-wrap gap-1.5">
-                {triggers?.length ? (
-                  triggers.map((t) => (
-                    <span
-                      key={t}
-                      className="rounded-full bg-[var(--cafe-accent,#C65F3D)]/10 px-2.5 py-0.5 text-[11px] font-medium text-[var(--cafe-accent,#C65F3D)]"
-                    >
-                      {t}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-xs text-cafe-muted">无触发词</span>
-                )}
-              </div>
-            </div>
-            <div className="flex-1">
-              <h4 className="mb-1.5 text-xs font-semibold text-cafe-muted">本地路径</h4>
-              <p className="text-xs text-cafe-secondary font-mono">{localPath}</p>
-            </div>
-          </div>
-
-          {category && (
-            <div>
-              <h4 className="mb-1.5 text-xs font-semibold text-cafe-muted">分类</h4>
-              <p className="text-xs text-cafe-secondary">{category}</p>
+          {content && (
+            <div className="rounded-[16px] bg-[var(--console-panel-bg)] p-4">
+              <pre className="max-h-[40vh] overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-6 text-cafe-secondary">
+                {content}
+              </pre>
             </div>
           )}
-        </div>
-
-        <div className="flex items-center justify-end gap-3 px-6 py-4">
-          <span className="mr-auto text-[10px] text-cafe-muted">配置编辑功能开发中</span>
-          <button
-            onClick={onClose}
-            className="rounded-lg px-4 py-2 text-sm font-medium text-cafe-secondary hover:bg-[var(--console-card-soft-bg)] transition-colors"
-          >
-            关闭
-          </button>
+          {loading && <p className="text-xs text-cafe-muted">加载中...</p>}
+          {error && <p className="text-xs font-semibold text-conn-red-text">{error}</p>}
         </div>
       </div>
     </div>

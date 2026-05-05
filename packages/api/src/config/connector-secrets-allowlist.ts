@@ -26,6 +26,9 @@ export const CONNECTOR_SECRETS_ALLOWLIST: ReadonlySet<string> = new Set([
   'XIAOYI_AK',
   'XIAOYI_SK',
   'XIAOYI_AGENT_ID',
+  'GITHUB_TOKEN',
+  'GITHUB_SETUP_NOISE_BOT_LOGINS',
+  'GITHUB_MCP_PAT',
 ]);
 
 export function isConnectorSecret(name: string): boolean {

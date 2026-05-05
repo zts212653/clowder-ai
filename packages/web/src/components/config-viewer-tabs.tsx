@@ -15,6 +15,11 @@ import type { ConfigData } from './config-viewer-types';
 import { DefaultCatSelector } from './DefaultCatSelector';
 import { HubMemberOverviewCard } from './HubMemberOverviewCard';
 import { HubIcon } from './hub-icons';
+import {
+  settingsResourceActionGroupClass,
+  settingsResourceCardClass,
+  settingsResourceRowClass,
+} from './SettingsResourceCard';
 
 /** Move srcId to the position of targetId within ids. Returns a new array. */
 function reorderIds(ids: string[], srcId: string, targetId: string): string[] {
@@ -199,7 +204,7 @@ export function CatOverviewTab({
           <section
             data-testid="owner-card"
             onClick={() => onEditCoCreator?.()}
-            className="flex h-24 cursor-pointer items-center gap-4 rounded-2xl bg-[var(--console-card-bg)] px-5 py-[18px] shadow-[0_12px_30px_rgba(43,33,26,0.08)] transition-shadow hover:shadow-[0_12px_30px_rgba(43,33,26,0.12)]"
+            className={`${settingsResourceCardClass} ${settingsResourceRowClass} cursor-pointer`}
           >
             {config.coCreator.avatar ? (
               <img
@@ -228,9 +233,11 @@ export function CatOverviewTab({
                 })()}
               </p>
             </div>
-            <span className="shrink-0 rounded-full bg-[var(--console-pill-bg)] px-2.5 py-0.5 text-[11px] text-cafe-muted">
-              Owner
-            </span>
+            <div className={settingsResourceActionGroupClass}>
+              <span className="shrink-0 rounded-full bg-[var(--console-pill-bg)] px-2.5 py-0.5 text-[11px] text-cafe-muted">
+                Owner
+              </span>
+            </div>
           </section>
         )}
         {displayCats.map((catData, idx) => (
@@ -317,6 +324,7 @@ function BubbleToggle({
     <div className="flex items-center justify-between border-b border-[var(--console-border-soft)] py-2 text-xs text-cafe-secondary last:border-b-0">
       <span>{label}</span>
       <button
+        type="button"
         onClick={toggle}
         className="console-pill rounded-full px-3 py-1 text-[11px] transition-colors hover:text-cafe"
       >

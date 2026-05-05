@@ -35,6 +35,7 @@ export interface CapabilityBoardItem {
     env?: Record<string, string>;
     envKeys?: string[];
     headerKeys?: string[];
+    resolver?: string;
   };
   layer?: 'L1' | 'L2' | 'L3';
   ecosystem?: 'claude' | 'codex' | 'openclaw' | 'antigravity';

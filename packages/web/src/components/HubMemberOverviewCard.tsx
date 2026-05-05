@@ -2,6 +2,13 @@ import type { DragEvent as ReactDragEvent } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import type { CatConfig } from './config-viewer-types';
 import { HubIcon } from './hub-icons';
+import {
+  SettingsResourceIconButton,
+  SettingsResourceToggleSwitch,
+  settingsResourceActionGroupClass,
+  settingsResourceCardClass,
+  settingsResourceRowClass,
+} from './SettingsResourceCard';
 
 function GripIcon({ className }: { className?: string }) {
   return (
@@ -67,7 +74,7 @@ export function HubMemberOverviewCard({
       onDrop={draggable ? (e) => onDrop?.(cat, e) : undefined}
       onDragEnd={draggable ? (e) => onDragEnd?.(cat, e) : undefined}
       onClick={() => onEdit?.(cat)}
-      className={`flex h-24 cursor-pointer items-center gap-4 rounded-2xl bg-[var(--console-card-bg)] px-5 py-[18px] shadow-[0_12px_30px_rgba(43,33,26,0.08)] transition-shadow hover:shadow-[0_12px_30px_rgba(43,33,26,0.12)] ${isDragging ? 'opacity-40' : ''}`}
+      className={`${settingsResourceCardClass} ${settingsResourceRowClass} ${onEdit ? 'cursor-pointer' : ''} ${isDragging ? 'opacity-40' : ''}`}
       data-guide-id={guideTargetId}
     >
       {draggable && <GripIcon className="h-[18px] w-[18px] shrink-0 cursor-grab text-cafe-muted" />}
@@ -77,29 +84,30 @@ export function HubMemberOverviewCard({
         <p className="mt-1 text-[12px] text-cafe-secondary">{getMemberSubtitle(cat, configCat)}</p>
       </div>
 
-      <div className="flex shrink-0 items-center gap-2.5" onClick={(e) => e.stopPropagation()}>
-        <button
-          type="button"
-          onClick={() => onToggleAvailability?.(cat)}
+      <div className={settingsResourceActionGroupClass}>
+        <SettingsResourceToggleSwitch
+          enabled={isAvailable}
+          busy={togglingAvailability}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleAvailability?.(cat);
+          }}
           disabled={!onToggleAvailability || togglingAvailability}
-          aria-pressed={isAvailable}
-          aria-label={isAvailable ? '已启用，点击禁用' : '未启用，点击启用'}
-          className={`relative h-[22px] w-10 rounded-full transition-colors disabled:cursor-default ${isAvailable ? 'bg-[var(--cafe-accent)]' : 'bg-[var(--console-border-soft)]'}`}
-        >
-          <span
-            className={`absolute top-[3px] h-4 w-4 rounded-full bg-[var(--console-card-bg)] transition-[left] ${isAvailable ? 'left-[21px]' : 'left-[3px]'}`}
-          />
-        </button>
+          ariaPressed={isAvailable}
+          ariaLabel={isAvailable ? '已启用，点击禁用' : '未启用，点击启用'}
+        />
 
         {onDelete && (
-          <button
-            type="button"
-            onClick={() => onDelete(cat)}
-            className="flex h-[30px] w-[30px] items-center justify-center rounded-[9px] bg-[var(--console-hover-bg)] transition-opacity hover:opacity-80"
+          <SettingsResourceIconButton
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(cat);
+            }}
             aria-label="删除成员"
+            tone="danger"
           >
-            <HubIcon name="trash" className="h-4 w-4 text-[var(--cafe-accent)]" />
-          </button>
+            <HubIcon name="trash" className="h-4 w-4" />
+          </SettingsResourceIconButton>
         )}
       </div>
     </section>

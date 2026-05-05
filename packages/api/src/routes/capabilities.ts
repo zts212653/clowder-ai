@@ -132,6 +132,77 @@ function resolveCatCafeSkillsSourceDir(): string {
 
 const CAT_CAFE_SKILLS_SRC = resolveCatCafeSkillsSourceDir();
 
+const SECRET_FLAG_EXACT = new Set([
+  '-s',
+  '--secret',
+  '--token',
+  '--key',
+  '--password',
+  '--api-key',
+  '--apikey',
+  '--auth',
+]);
+const SECRET_FLAG_CONTAINS = /secret|token|password|auth|credential|\bkey\b/i;
+const SECRET_VALUE_PATTERN = /^(sk-|ghp_|gho_|ghu_|xoxb-|xoxp-)|Bearer\s|^Authorization:/i;
+const ENV_LIKE_SECRET = /^[A-Z][A-Z0-9_]*(SECRET|TOKEN|PASSWORD|KEY|AUTH|CREDENTIAL)[A-Z0-9_]*=.+/;
+
+function isSecretFlag(flag: string): boolean {
+  const lower = flag.toLowerCase();
+  if (SECRET_FLAG_EXACT.has(lower)) return true;
+  if (lower.startsWith('--') && SECRET_FLAG_CONTAINS.test(lower)) return true;
+  return false;
+}
+
+export function sanitizeArgsForDisplay(args: string[]): string[] {
+  const result: string[] = [];
+  let redactNext = false;
+  for (const arg of args) {
+    if (redactNext) {
+      result.push('••••••');
+      redactNext = false;
+      continue;
+    }
+    const eqIdx = arg.indexOf('=');
+    if (eqIdx > 0) {
+      const flagPart = arg.slice(0, eqIdx);
+      if (isSecretFlag(flagPart) || isSecretFlag(`--${flagPart}`)) {
+        result.push(`${arg.slice(0, eqIdx + 1)}••••••`);
+        continue;
+      }
+      if (ENV_LIKE_SECRET.test(arg)) {
+        result.push(`${arg.slice(0, eqIdx + 1)}••••••`);
+        continue;
+      }
+    }
+    if (eqIdx < 0 && isSecretFlag(arg)) {
+      result.push(arg);
+      redactNext = true;
+      continue;
+    }
+    if (SECRET_VALUE_PATTERN.test(arg)) {
+      result.push('••••••');
+      continue;
+    }
+    result.push(arg);
+  }
+  return result;
+}
+
+export function sanitizeUrlForDisplay(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.password) parsed.password = '••••••';
+    for (const key of [...parsed.searchParams.keys()]) {
+      if (/token|key|secret|auth|password/i.test(key)) {
+        parsed.searchParams.set(key, '••••••');
+      }
+    }
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 /**
  * Discovery reads project-local CLI configs for providers that are project scoped.
  * Antigravity is the exception: its MCP config is global under ~/.gemini/antigravity.
@@ -509,16 +580,24 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     }
 
     let configDirty = false;
+    const removedSet = new Set(config.removedExternalSkills ?? []);
     // Add newly discovered skills
     for (const skillName of allSkillNames) {
+      const isCatCafe =
+        isManagedSkill(skillsState, skillName) ||
+        (catCafeOwnSkills !== null && catCafeOwnSkills.includes(skillName)) ||
+        (!skillsState && projectSkillNames.has(skillName));
+      if (removedSet.has(skillName)) {
+        if (isCatCafe) {
+          removedSet.delete(skillName);
+          configDirty = true;
+        } else {
+          continue;
+        }
+      }
       const exists = config.capabilities.some((c) => c.type === 'skill' && c.id === skillName);
       if (!exists) {
         // ADR-025: merge skills-state.json with catCafeOwnSkills to handle stale state.
-        // A skill is cat-cafe if it's in the managed set OR found in cat-cafe-skills/.
-        const isCatCafe =
-          isManagedSkill(skillsState, skillName) ||
-          (catCafeOwnSkills !== null && catCafeOwnSkills.includes(skillName)) ||
-          (!skillsState && projectSkillNames.has(skillName));
         const source = isCatCafe ? ('cat-cafe' as const) : ('external' as const);
         config.capabilities.push({
           id: skillName,
@@ -554,6 +633,9 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         configDirty = true;
       }
     }
+    // Sync removedExternalSkills back (may have been cleaned above)
+    config.removedExternalSkills = removedSet.size > 0 ? [...removedSet] : undefined;
+
     // Prune stale skills no longer on filesystem.
     // Guard: only prune when ALL provider scans succeeded (no null returns).
     if (allScansOk) {
@@ -661,10 +743,12 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         const resolved = resolvedMcpState[cap.id];
         mcpItem.mcpServer = {
           ...safe,
+          args: sanitizeArgsForDisplay(safe.args ?? []),
+          ...(safe.url ? { url: sanitizeUrlForDisplay(safe.url) } : {}),
           envKeys: env ? Object.keys(env) : [],
           headerKeys: headers ? Object.keys(headers) : [],
           ...(resolved?.status === 'resolved' && resolved.command
-            ? { resolvedCommand: resolved.command, resolvedArgs: resolved.args ?? [] }
+            ? { resolvedCommand: resolved.command, resolvedArgs: sanitizeArgsForDisplay(resolved.args ?? []) }
             : {}),
         };
       }
