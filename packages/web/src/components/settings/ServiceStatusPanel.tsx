@@ -125,7 +125,7 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
               {!hasStart && !hasInstall && (
                 <span className="text-[11px] text-cafe-muted">不可管理</span>
               )}
-              {!hasStart && hasInstall && (
+              {hasInstall && !isRunning && (
                 <button
                   type="button"
                   disabled={busy}

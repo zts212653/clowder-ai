@@ -13,6 +13,7 @@ const KNOWN_SERVICES: ServiceManifest[] = [
       packages: ['mlx-whisper', 'fastapi', 'uvicorn'],
     },
     scripts: {
+      install: 'scripts/whisper-install.sh',
       start: 'scripts/whisper-server.sh',
     },
     enablesFeatures: ['voice-input', 'connector-stt'],
@@ -30,6 +31,7 @@ const KNOWN_SERVICES: ServiceManifest[] = [
       packages: ['mlx-audio', 'fastapi', 'uvicorn'],
     },
     scripts: {
+      install: 'scripts/tts-install.sh',
       start: 'scripts/tts-server.sh',
     },
     enablesFeatures: ['voice-output', 'voice-companion'],
@@ -47,6 +49,7 @@ const KNOWN_SERVICES: ServiceManifest[] = [
       packages: ['sentence-transformers', 'fastapi', 'uvicorn'],
     },
     scripts: {
+      install: 'scripts/embed-install.sh',
       start: 'scripts/embed-server.sh',
     },
     enablesFeatures: ['memory-semantic-search'],
@@ -60,8 +63,11 @@ const KNOWN_SERVICES: ServiceManifest[] = [
     healthEndpoint: '/health',
     prerequisites: {
       runtime: 'python3.10+',
+      venvPath: '~/.cat-cafe/llm-venv',
+      packages: ['mlx-vlm', 'fastapi', 'uvicorn', 'pydantic'],
     },
     scripts: {
+      install: 'scripts/llm-postprocess-install.sh',
       start: 'scripts/llm-postprocess-server.sh',
     },
     enablesFeatures: ['voice-postprocess'],
