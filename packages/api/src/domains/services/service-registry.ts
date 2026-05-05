@@ -67,17 +67,6 @@ const KNOWN_SERVICES: ServiceManifest[] = [
     enablesFeatures: ['voice-postprocess'],
     configVars: ['NEXT_PUBLIC_LLM_POSTPROCESS_URL'],
   },
-  {
-    id: 'playwright',
-    name: 'Playwright 浏览器自动化',
-    type: 'node',
-    prerequisites: {
-      packages: ['playwright'],
-    },
-    scripts: {},
-    enablesFeatures: ['browser-automation-mcp'],
-    configVars: [],
-  },
 ];
 
 export function resolveHealthUrl(manifest: ServiceManifest): string | null {

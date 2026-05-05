@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { ServiceStatusPanel } from '../settings/ServiceStatusPanel';
 import { KnowledgeFeed } from '../workspace/KnowledgeFeed';
 import { EvidenceSearch } from './EvidenceSearch';
 import { IndexStatus } from './IndexStatus';
@@ -56,8 +57,9 @@ export function MemoryHub({ activeTab = 'feed', initialQuery, initialReferrerThr
             </div>
           )}
           {activeTab === 'status' && (
-            <div data-testid="memory-tab-status">
+            <div className="space-y-6" data-testid="memory-tab-status">
               <IndexStatus />
+              <ServiceStatusPanel filterFeatures={['memory-semantic-search']} title="语义搜索服务" />
             </div>
           )}
         </main>

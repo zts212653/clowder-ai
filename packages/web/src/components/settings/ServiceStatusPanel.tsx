@@ -15,6 +15,7 @@ interface ServiceManifest {
     packages?: string[];
   };
   scripts?: {
+    install?: string;
     start?: string;
     stop?: string;
   };
@@ -175,7 +176,11 @@ export function ServiceStatusPanel({ filterFeatures, title, expandable }: Servic
                 </div>
               </div>
               {showDetail && isExpanded && (
-                <ServiceDetail service={s} onHealthCheck={() => handleHealthCheck(s.manifest.id)} />
+                <ServiceDetail
+                  service={s}
+                  onHealthCheck={() => handleHealthCheck(s.manifest.id)}
+                  onStateChange={handleRefresh}
+                />
               )}
             </div>
           );
@@ -185,8 +190,43 @@ export function ServiceStatusPanel({ filterFeatures, title, expandable }: Servic
   );
 }
 
-function ServiceDetail({ service, onHealthCheck }: { service: ServiceState; onHealthCheck: () => void }) {
+function ServiceDetail({
+  service,
+  onHealthCheck,
+  onStateChange,
+}: {
+  service: ServiceState;
+  onHealthCheck: () => void;
+  onStateChange: () => void;
+}) {
   const m = service.manifest;
+  const [acting, setActing] = useState<string | null>(null);
+  const [actionResult, setActionResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const callAction = useCallback(
+    async (action: 'start' | 'stop' | 'install') => {
+      setActing(action);
+      setActionResult(null);
+      try {
+        const res = await apiFetch(`/api/services/${m.id}/${action}`, { method: 'POST' });
+        const data = (await res.json().catch(() => ({}))) as Record<string, string>;
+        setActionResult({
+          ok: res.ok,
+          message: data.message ?? data.error ?? (res.ok ? '操作成功' : `失败 (${res.status})`),
+        });
+        if (res.ok) onStateChange();
+      } catch {
+        setActionResult({ ok: false, message: '网络错误' });
+      } finally {
+        setActing(null);
+      }
+    },
+    [m.id, onStateChange],
+  );
+
+  const canStart = service.status !== 'running' && !!m.scripts?.start;
+  const canStop = service.status === 'running' && (!!m.scripts?.stop || !!m.port);
+
   return (
     <div className="console-card-soft mt-4 space-y-3 rounded-xl px-4 py-4 text-xs text-cafe-muted">
       <div className="console-data-grid">
@@ -245,9 +285,53 @@ function ServiceDetail({ service, onHealthCheck }: { service: ServiceState; onHe
         </div>
       )}
 
-      <button type="button" onClick={onHealthCheck} className="console-button-secondary">
-        检查健康
-      </button>
+      {actionResult && (
+        <div
+          className={`rounded-lg px-3 py-2 text-xs ${
+            actionResult.ok
+              ? 'border border-conn-emerald-ring bg-conn-emerald-bg text-conn-emerald-text'
+              : 'border border-conn-red-ring bg-conn-red-bg text-conn-red-text'
+          }`}
+        >
+          {actionResult.message}
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={onHealthCheck} className="console-button-secondary">
+          检查健康
+        </button>
+        {canStart && (
+          <button
+            type="button"
+            disabled={!!acting}
+            onClick={() => callAction('start')}
+            className="console-button-secondary"
+          >
+            {acting === 'start' ? '启动中...' : '启动'}
+          </button>
+        )}
+        {canStop && (
+          <button
+            type="button"
+            disabled={!!acting}
+            onClick={() => callAction('stop')}
+            className="console-button-secondary"
+          >
+            {acting === 'stop' ? '停止中...' : '停止'}
+          </button>
+        )}
+        {m.scripts?.install && (
+          <button
+            type="button"
+            disabled={!!acting}
+            onClick={() => callAction('install')}
+            className="console-button-secondary"
+          >
+            {acting === 'install' ? '安装中...' : '安装依赖'}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
