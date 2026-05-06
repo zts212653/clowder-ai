@@ -8,7 +8,7 @@ created: 2026-04-23
 
 # F179: Console 功能体系重构
 
-> **Status**: spec | Owner: 布偶猫/宪宪
+> **Status**: doing | Owner: 布偶猫/宪宪
 
 ## Why
 
@@ -281,29 +281,29 @@ Service Manifest **不是单独的设置页**，而是嵌入到各功能区域�
 ## Acceptance Criteria
 
 ### Phase 1
-- [ ] AC-1a: 侧边栏 Activity Bar 展示 4 个一级图标（对话/信号/记忆/设置），点击切换路由
-- [ ] AC-1b: /settings 独立路由页替代 Hub 弹窗，左侧分类导航 + 右侧详表
-- [ ] AC-1c: 移除顶栏信号铃铛、Hub 齿轮，移除侧边栏 Bootcamp/Memory Hub/IM Hub 按钮
-- [ ] AC-1d: 语音伴侣按钮仅在 TTS/STT 服务可用时展示
-- [ ] AC-1e: 现有 Hub tab 组件在 /settings 中正常渲染和交互
-- [ ] AC-1f: 旧路由（/mission-control）重定向到对应新路由
-- [ ] AC-1g: MCP 管理页面支持 STDIO/HTTP 双模式连接表单（参考 Codex 模式）
-- [ ] AC-1h: 插件/集成页面展示已安装插件列表 + 启用/禁用 + 配置表单
-- [ ] AC-1i: 系统配置页面展示运行时配置项（Bubble 默认值、A2A、记忆、Codex、治理）
+- [x] AC-1a: 侧边栏 Activity Bar 展示 4 个一级图标（对话/信号/记忆/设置），点击切换路由
+- [x] AC-1b: /settings 独立路由页替代 Hub 弹窗，左侧分类导航 + 右侧详表
+- [x] AC-1c: 移除顶栏信号铃铛、Hub 齿轮，移除侧边栏 Bootcamp/Memory Hub/IM Hub 按钮
+- [/] AC-1d: 语音伴侣按钮仅在 TTS/STT 服务可用时展示 — 按钮存在但条件展示逻辑待完善
+- [x] AC-1e: 现有 Hub tab 组件在 /settings 中正常渲染和交互
+- [x] AC-1f: 旧路由（/mission-control）重定向到对应新路由
+- [x] AC-1g: MCP 管理页面支持 STDIO/HTTP 双模式连接表单（参考 Codex 模式）
+- [x] AC-1h: 插件/集成页面展示已安装插件列表 + 启用/禁用 + 配置表单
+- [x] AC-1i: 系统配置页面展示运行时配置项（Bubble 默认值、A2A、记忆、Codex、治理）
 
 ### Phase 2
-- [ ] AC-2a: env-registry 每个变量带 restartRequired 元数据，前端展示状态标签
+- [x] AC-2a: env-registry 每个变量带 restartRequired 元数据，前端展示状态标签
 - [ ] AC-2b: 修改需重启配置项后，页面顶部展示 Pending Changes Banner
-- [ ] AC-2c: IM 连接器各平台独立配置卡片 + 状态灯 + 测试连接
-- [ ] AC-2d: Settings 页面搜索框可跨分区搜索配置项
+- [x] AC-2c: IM 连接器各平台独立配置卡片 + 状态灯 + 测试连接
+- [/] AC-2d: Settings 页面搜索框可跨分区搜索配置项 — 搜索框已有，跨分区联动待完善
 - [ ] AC-2e: cat-config.json 相关代码引用清理完毕
 
 ### Phase 3
-- [ ] AC-3a: ServiceManifest 接口定义 + 至少 2 个服务注册（TTS/STT）
-- [ ] AC-3b: /api/services/* API 支持查询状态/安装/启停/日志
-- [ ] AC-3c: 语音管理页面内联展示 TTS/STT 服务状态和操作按钮
-- [ ] AC-3d: MCP 安装后 env vars 可编辑，保存后自动 sync CLI 配置
-- [ ] AC-3e: 内置 cat-cafe MCP 回调 env 只读展示
+- [x] AC-3a: ServiceManifest 接口定义 + 至少 2 个服务注册（TTS/STT） — 4 个服务已注册（whisper-stt/mlx-tts/embedding-model/llm-postprocess）
+- [x] AC-3b: /api/services/* API 支持查询状态/安装/启停/日志
+- [x] AC-3c: 语音管理页面内联展示 TTS/STT 服务状态和操作按钮
+- [/] AC-3d: MCP 安装后 env vars 可编辑，保存后自动 sync CLI 配置 — 编辑可用，sync 机制部分实现
+- [x] AC-3e: 内置 cat-cafe MCP 回调 env 只读展示
 
 ### Phase 4
 - [ ] AC-4a: Feature Placement Decision Tree 文档化并纳入 SOP
