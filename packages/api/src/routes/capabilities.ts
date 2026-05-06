@@ -191,14 +191,21 @@ export function sanitizeArgsForDisplay(args: string[]): string[] {
 export function sanitizeUrlForDisplay(url: string): string {
   try {
     const parsed = new URL(url);
-    if (parsed.username) parsed.username = '••••••';
-    if (parsed.password) parsed.password = '••••••';
+    const hadUser = !!parsed.username;
+    const hadPass = !!parsed.password;
+    parsed.username = '';
+    parsed.password = '';
     for (const key of [...parsed.searchParams.keys()]) {
       if (/token|key|secret|auth|password/i.test(key)) {
         parsed.searchParams.set(key, '••••••');
       }
     }
-    return parsed.toString();
+    let result = parsed.toString();
+    if (hadUser || hadPass) {
+      const cred = hadUser && hadPass ? '••••••:••••••@' : '••••••@';
+      result = result.replace('://', `://${cred}`);
+    }
+    return result;
   } catch {
     return url;
   }

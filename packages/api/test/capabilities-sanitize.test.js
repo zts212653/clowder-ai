@@ -99,7 +99,8 @@ describe('sanitizeUrlForDisplay', () => {
   it('redacts password in URL', () => {
     const result = sanitizeUrlForDisplay('http://user:secret@example.com/path');
     assert.ok(!result.includes('secret'), 'password must not appear in output');
-    assert.ok(result.includes('user'));
+    assert.ok(!result.includes('user'), 'username must be redacted');
+    assert.ok(result.includes('••••••'), 'redacted placeholder must appear');
     assert.ok(result.includes('example.com'));
   });
 
