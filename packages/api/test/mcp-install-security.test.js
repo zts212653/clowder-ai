@@ -320,6 +320,47 @@ describe('MCP install — transport-aware merge', () => {
     assert.equal(cap.mcpServer.command, 'new-cmd');
     assert.equal(cap.mcpServer.env?.SECRET_KEY, 'sk-keep-me', 'existing env must be preserved');
   });
+
+  it('update merges headers instead of replacing them', async () => {
+    setEnv('DEFAULT_OWNER_USER_ID', undefined);
+    await writeCapabilitiesConfig(dir, {
+      version: 1,
+      capabilities: [
+        {
+          id: 'header-merge',
+          type: 'mcp',
+          enabled: true,
+          source: 'external',
+          mcpServer: {
+            transport: 'streamableHttp',
+            url: 'http://example.com/mcp',
+            command: '',
+            args: [],
+            headers: { Authorization: 'Bearer old-token', 'X-Custom': 'keep-me' },
+          },
+        },
+      ],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/capabilities/mcp/install',
+      headers: { 'x-cat-cafe-user': 'test-user' },
+      payload: {
+        id: 'header-merge',
+        transport: 'streamableHttp',
+        url: 'http://example.com/mcp',
+        headers: { Authorization: 'Bearer new-token' },
+      },
+    });
+    assert.equal(res.statusCode, 200);
+
+    const config = await readCapabilitiesConfig(dir);
+    const cap = config.capabilities.find((c) => c.id === 'header-merge');
+    assert.ok(cap?.mcpServer);
+    assert.equal(cap.mcpServer.headers?.Authorization, 'Bearer new-token', 'updated header must reflect new value');
+    assert.equal(cap.mcpServer.headers?.['X-Custom'], 'keep-me', 'unmentioned headers must be preserved');
+  });
 });
 
 // ── Skill DELETE — owner gate ─────────────────────────────
