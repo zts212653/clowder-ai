@@ -276,133 +276,151 @@ export function HubConnectorConfigTab() {
             )}
 
             {isExpanded && platform.id !== 'weixin' && platform.id !== 'wecom-bot' && (
-              <div className="console-code-pane space-y-3.5 px-4 py-4">
-                {guideSteps.map((step, idx) => (
-                  <div key={idx} className="space-y-1.5">
-                    <div className="flex items-center gap-1.5">
-                      <StepBadge num={idx + 1} />
-                      <span className="text-[13px] font-medium text-cafe">{step.text}</span>
+              <div className="px-4 py-4 space-y-4">
+                <div className="rounded-2xl overflow-hidden bg-[var(--console-field-bg)]">
+                  <div className="bg-conn-sky-bg px-4 py-3 flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-lg bg-conn-sky-ring flex items-center justify-center text-conn-sky-text">
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z"
+                        />
+                      </svg>
                     </div>
-                    {idx === 0 && (
-                      <div className="ml-[26px] space-y-2.5">
-                        <a
-                          href={platform.docsUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="console-inline-link"
-                        >
-                          <ExternalLinkIcon />
-                          <span>{new URL(platform.docsUrl).hostname} → 查看官方文档</span>
-                        </a>
-                        {platform.id === 'feishu' && (
-                          <FeishuQrPanel
-                            configured={platform.configured}
-                            onConfirmed={() => void fetchStatus()}
-                            onDisconnected={() => void fetchStatus()}
-                          />
-                        )}
-                      </div>
-                    )}
+                    <div>
+                      <div className="font-semibold text-sm">基础配置</div>
+                      <div className="text-xs text-cafe-secondary">应用凭证与连接设置</div>
+                    </div>
                   </div>
-                ))}
-
-                <div className="space-y-2">
-                  <div className="flex items-center gap-1.5">
-                    <StepBadge num={guideSteps.length + 1} />
-                    <span className="text-[13px] font-medium text-cafe">填写应用凭证</span>
-                  </div>
-                  <div className="ml-[26px] space-y-2.5">
-                    {platform.fields.map((field) => (
-                      <div key={field.envName}>
-                        <label
-                          htmlFor={`config-${field.envName}`}
-                          className="block text-xs font-medium text-cafe-secondary mb-1"
-                        >
-                          {field.label}
-                          {field.sensitive && (
-                            <span className="text-conn-amber-text ml-1 inline-flex align-middle">
-                              <LockIcon />
-                            </span>
-                          )}
-                        </label>
-                        {field.envName === 'FEISHU_CONNECTION_MODE' ? (
-                          <select
-                            id={`config-${field.envName}`}
-                            value={fieldValues[field.envName] ?? field.currentValue ?? 'webhook'}
-                            onChange={(e) => setFieldValues((prev) => ({ ...prev, [field.envName]: e.target.value }))}
-                            className="console-form-input py-2.5 text-[13px]"
-                            data-testid={`field-${field.envName}`}
-                          >
-                            <option value="webhook">Webhook（需公网 URL）</option>
-                            <option value="websocket">WebSocket 长连接（无需公网）</option>
-                          </select>
-                        ) : (
-                          <input
-                            id={`config-${field.envName}`}
-                            type={field.sensitive ? 'password' : 'text'}
-                            placeholder={
-                              field.sensitive
-                                ? field.currentValue
-                                  ? '已设置（输入新值覆盖）'
-                                  : '未设置'
-                                : (field.currentValue ?? '未设置')
-                            }
-                            value={fieldValues[field.envName] ?? ''}
-                            onChange={(e) => setFieldValues((prev) => ({ ...prev, [field.envName]: e.target.value }))}
-                            className="console-form-input py-2.5 text-[13px]"
-                            data-testid={`field-${field.envName}`}
-                          />
+                  <div className="p-4 space-y-3.5">
+                    {guideSteps.map((step, idx) => (
+                      <div key={idx} className="space-y-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <StepBadge num={idx + 1} />
+                          <span className="text-[13px] font-medium text-cafe">{step.text}</span>
+                        </div>
+                        {idx === 0 && (
+                          <div className="ml-[26px] space-y-2.5">
+                            <a
+                              href={platform.docsUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="console-inline-link"
+                            >
+                              <ExternalLinkIcon />
+                              <span>{new URL(platform.docsUrl).hostname} → 查看官方文档</span>
+                            </a>
+                            {platform.id === 'feishu' && (
+                              <FeishuQrPanel
+                                configured={platform.configured}
+                                onConfirmed={() => void fetchStatus()}
+                                onDisconnected={() => void fetchStatus()}
+                              />
+                            )}
+                          </div>
                         )}
                       </div>
                     ))}
+
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-1.5">
+                        <StepBadge num={guideSteps.length + 1} />
+                        <span className="text-[13px] font-medium text-cafe">填写应用凭证</span>
+                      </div>
+                      <div className="ml-[26px] space-y-2.5">
+                        {platform.fields.map((field) => (
+                          <div key={field.envName}>
+                            <label
+                              htmlFor={`config-${field.envName}`}
+                              className="block text-xs font-medium text-cafe-secondary mb-1"
+                            >
+                              {field.label}
+                              {field.sensitive && (
+                                <span className="text-conn-amber-text ml-1 inline-flex align-middle">
+                                  <LockIcon />
+                                </span>
+                              )}
+                            </label>
+                            {field.envName === 'FEISHU_CONNECTION_MODE' ? (
+                              <select
+                                id={`config-${field.envName}`}
+                                value={fieldValues[field.envName] ?? field.currentValue ?? 'webhook'}
+                                onChange={(e) =>
+                                  setFieldValues((prev) => ({ ...prev, [field.envName]: e.target.value }))
+                                }
+                                className="console-form-input py-2.5 text-[13px]"
+                                data-testid={`field-${field.envName}`}
+                              >
+                                <option value="webhook">Webhook（需公网 URL）</option>
+                                <option value="websocket">WebSocket 长连接（无需公网）</option>
+                              </select>
+                            ) : (
+                              <input
+                                id={`config-${field.envName}`}
+                                type={field.sensitive ? 'password' : 'text'}
+                                placeholder={
+                                  field.sensitive
+                                    ? field.currentValue
+                                      ? '已设置（输入新值覆盖）'
+                                      : '未设置'
+                                    : (field.currentValue ?? '未设置')
+                                }
+                                value={fieldValues[field.envName] ?? ''}
+                                onChange={(e) =>
+                                  setFieldValues((prev) => ({ ...prev, [field.envName]: e.target.value }))
+                                }
+                                className="console-form-input py-2.5 text-[13px]"
+                                data-testid={`field-${field.envName}`}
+                              />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {saveResult && (
+                      <div
+                        className={`rounded-[16px] px-3 py-2 text-xs ${
+                          saveResult.type === 'success'
+                            ? 'bg-conn-emerald-bg text-conn-emerald-text border border-conn-emerald-ring'
+                            : 'bg-conn-red-bg text-conn-red-text border border-conn-red-ring'
+                        }`}
+                        data-testid="save-result"
+                      >
+                        {saveResult.message}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="console-button-secondary text-[13px]"
+                        disabled={testing}
+                        onClick={() => handleTestConnection(platform.id)}
+                      >
+                        <WifiIcon />
+                        {testing ? '测试中...' : '测试连接'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSave(platform)}
+                        disabled={saving}
+                        className="console-button-primary text-[13px] disabled:opacity-50"
+                        data-testid={`save-${platform.id}`}
+                      >
+                        {saving ? '保存中...' : '保存配置'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
             )}
 
             {isExpanded && PERMISSION_CONNECTORS[platform.id] && (
-              <div className="console-code-pane px-4 py-4">
-                <p className="text-[13px] font-semibold text-cafe mb-3">群聊权限</p>
+              <div className="px-4 pb-4">
                 <Suspense fallback={<p className="text-xs text-cafe-muted">加载中...</p>}>
-                  <HubPermissionsTab connectorId={platform.id} connectorLabel={PERMISSION_CONNECTORS[platform.id]} />
+                  <HubPermissionsTab connectorId={platform.id} />
                 </Suspense>
-              </div>
-            )}
-
-            {isExpanded && platform.id !== 'weixin' && platform.id !== 'wecom-bot' && (
-              <div className="console-code-pane px-4 py-4 space-y-2">
-                {saveResult && (
-                  <div
-                    className={`rounded-[16px] px-3 py-2 text-xs ${
-                      saveResult.type === 'success'
-                        ? 'bg-conn-emerald-bg text-conn-emerald-text border border-conn-emerald-ring'
-                        : 'bg-conn-red-bg text-conn-red-text border border-conn-red-ring'
-                    }`}
-                    data-testid="save-result"
-                  >
-                    {saveResult.message}
-                  </div>
-                )}
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    className="console-button-secondary text-[13px]"
-                    disabled={testing}
-                    onClick={() => handleTestConnection(platform.id)}
-                  >
-                    <WifiIcon />
-                    {testing ? '测试中...' : '测试连接'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSave(platform)}
-                    disabled={saving}
-                    className="console-button-primary text-[13px] disabled:opacity-50"
-                    data-testid={`save-${platform.id}`}
-                  >
-                    {saving ? '保存中...' : '保存配置'}
-                  </button>
-                </div>
               </div>
             )}
           </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CoCreatorConfig } from '@/components/config-viewer-types';
 import { useAgentHookHealth } from '@/hooks/useAgentHookHealth';
@@ -127,7 +127,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const altActionName = useGameStore((s) => s.altActionName);
   const overlayMinimized = useGameStore((s) => s.overlayMinimized);
 
-  const searchParams = useSearchParams();
+  const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   const isExport = searchParams?.get('export') === 'true';
   const isResearchMode = searchParams?.get('research') === 'multi';
   const { clearTasks } = useTaskStore();

@@ -184,11 +184,7 @@ export function HubListModal({ open, onClose, currentThreadId }: HubListModalPro
                   </button>
                 ))}
               </div>
-              <HubPermissionsTab
-                key={permConnector}
-                connectorId={permConnector}
-                connectorLabel={GROUP_CONNECTORS.find((c) => c.id === permConnector)?.label ?? permConnector}
-              />
+              <HubPermissionsTab key={permConnector} connectorId={permConnector} />
             </div>
           ) : activeTab === 'threads' ? (
             <div className="space-y-4">
