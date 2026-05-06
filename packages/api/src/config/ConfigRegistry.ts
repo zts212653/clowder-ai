@@ -87,7 +87,13 @@ export function collectConfigSnapshot(): ConfigSnapshot {
   }
 
   // A2A
+  const a2aEnabled = parseBoolean(env.A2A_ENABLED, true);
   const a2aMaxDepth = Number(env.MAX_A2A_DEPTH) || 15;
+
+  // Governance
+  const govDegradationEnabled = parseBoolean(env.GOVERNANCE_DEGRADATION_ENABLED, true);
+  const govDoneTimeoutMs = Number(env.GOVERNANCE_DONE_TIMEOUT_MS) || 5 * 60 * 1000;
+  const govHeartbeatIntervalMs = Number(env.GOVERNANCE_HEARTBEAT_INTERVAL_MS) || 30_000;
   const defaultCodexModel = catRegistry.has('codex') ? getCatModel('codex') : 'codex';
   const codexExecutionModel = env.CAT_CODEX_EXEC_MODEL?.trim() || defaultCodexModel;
   const codexExecutionAuthMode = parseEnum<CodexAuthMode>(env.CODEX_AUTH_MODE, ['oauth', 'api_key', 'auto'], 'oauth');
@@ -122,16 +128,16 @@ export function collectConfigSnapshot(): ConfigSnapshot {
     upload: { maxFileSize, maxFiles },
     server: { port, host, redis },
     cats,
-    a2a: { enabled: true, maxDepth: a2aMaxDepth },
+    a2a: { enabled: a2aEnabled, maxDepth: a2aMaxDepth },
     memory: { enabled: true, maxKeysPerThread: 50 },
     f102: {
       embedMode: env.EMBED_MODE ?? 'off',
       abstractiveEnabled: env.F102_ABSTRACTIVE === 'on',
     },
     governance: {
-      degradationEnabled: true,
-      doneTimeoutMs: 5 * 60 * 1000,
-      heartbeatIntervalMs: 30_000,
+      degradationEnabled: govDegradationEnabled,
+      doneTimeoutMs: govDoneTimeoutMs,
+      heartbeatIntervalMs: govHeartbeatIntervalMs,
     },
     deliberate: { status: 'types_only' },
     codexExecution: {

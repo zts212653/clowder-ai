@@ -17,20 +17,33 @@ export async function autoStartEnabledServices(log: Logger): Promise<void> {
   const configs = getAllServiceConfigs();
   const services = getKnownServices();
 
-  for (const manifest of services) {
-    const cfg = configs[manifest.id];
-    if (!cfg?.enabled) continue;
+  const enabled = services.filter((m) => configs[m.id]?.enabled);
+  if (enabled.length === 0) {
+    log.info('[services] No services enabled');
+    return;
+  }
+
+  log.info('[services] %d service(s) enabled: %s', enabled.length, enabled.map((m) => m.name).join(', '));
+
+  for (const manifest of enabled) {
+    const cfg = configs[manifest.id]!;
     if (!manifest.scripts.start) continue;
     if (!checkInstalled(manifest)) {
-      log.warn('[services] %s is enabled but not installed — skipping auto-start', manifest.name);
+      log.warn('[services] ✗ %s — enabled but not installed (run install from Settings)', manifest.name);
       continue;
     }
 
     const state = await getServiceState(manifest);
-    if (state.status === 'running' || state.status === 'starting') continue;
+    if (state.status === 'running' || state.status === 'starting') {
+      log.info('[services] ✓ %s — already running (port %s)', manifest.name, manifest.port ?? '?');
+      continue;
+    }
 
     const scriptPath = resolve(REPO_ROOT, manifest.scripts.start);
-    if (!existsSync(scriptPath)) continue;
+    if (!existsSync(scriptPath)) {
+      log.warn('[services] ✗ %s — start script not found: %s', manifest.name, manifest.scripts.start);
+      continue;
+    }
 
     const env: Record<string, string> = { ...process.env } as Record<string, string>;
     if (cfg.selectedModel) {
@@ -38,7 +51,7 @@ export async function autoStartEnabledServices(log: Logger): Promise<void> {
       if (envKey) env[envKey] = cfg.selectedModel;
     }
 
-    log.info('[services] Auto-starting %s ...', manifest.name);
+    log.info('[services] ⟳ %s — starting (port %s)...', manifest.name, manifest.port ?? '?');
     try {
       const child = spawn('bash', [scriptPath], {
         detached: true,
@@ -48,7 +61,7 @@ export async function autoStartEnabledServices(log: Logger): Promise<void> {
       child.on('error', () => {});
       child.unref();
     } catch {
-      log.warn('[services] Failed to auto-start %s', manifest.name);
+      log.warn('[services] ✗ %s — failed to spawn start script', manifest.name);
     }
   }
 }

@@ -30,13 +30,15 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   const [inputValue, setInputValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const confirmBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (open) {
       setInputValue('');
-      setTimeout(() => inputRef.current?.focus(), 50);
+      if (requireInput) setTimeout(() => inputRef.current?.focus(), 50);
+      else setTimeout(() => confirmBtnRef.current?.focus(), 50);
     }
-  }, [open]);
+  }, [open, requireInput]);
 
   useEffect(() => {
     if (!open) return;
@@ -53,7 +55,7 @@ export function ConfirmDialog({
   const isDanger = variant === 'danger';
 
   return (
-    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={onCancel}>
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-[100]" onClick={onCancel}>
       <div
         className="bg-cafe-surface rounded-xl border border-[var(--cafe-border)] shadow-xl p-6 max-w-sm w-full mx-4"
         onClick={(e) => e.stopPropagation()}
@@ -78,12 +80,13 @@ export function ConfirmDialog({
             {cancelLabel}
           </button>
           <button
+            ref={confirmBtnRef}
             onClick={onConfirm}
             disabled={!canConfirm}
-            className={`px-4 py-2 text-sm text-[var(--cafe-surface)] rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+            className={`px-4 py-2 text-sm text-[var(--cafe-surface)] rounded-lg transition-colors focus:outline-none focus:ring-2 disabled:opacity-40 disabled:cursor-not-allowed ${
               isDanger
-                ? 'bg-[var(--color-conn-red-text)] hover:opacity-90'
-                : 'bg-[var(--color-cafe-accent)] hover:opacity-90'
+                ? 'bg-conn-red-text hover:opacity-90 focus:ring-conn-red-ring'
+                : 'bg-[var(--cafe-accent)] hover:opacity-90 focus:ring-[var(--cafe-accent)]/40'
             }`}
           >
             {confirmLabel}

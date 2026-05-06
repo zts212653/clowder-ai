@@ -1,7 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { CatOverviewTab, type ConfigData, SystemTab } from '@/components/config-viewer-tabs';
+import { CatOverviewTab, type ConfigData } from '@/components/config-viewer-tabs';
 import type { CatData } from '@/hooks/useCatData';
 
 const CONFIG: ConfigData & {
@@ -160,40 +160,5 @@ describe('CatOverviewTab', () => {
     expect(firstCard?.className).toContain('settings-resource-card');
     expect(firstCard?.querySelector('button[aria-label="删除成员"]')?.className).toContain('settings-resource-action');
     expect(firstCard?.querySelector('button[aria-pressed]')?.className).toContain('settings-resource-toggle');
-  });
-});
-
-describe('SystemTab', () => {
-  it('renders A2A config', () => {
-    const html = renderToStaticMarkup(React.createElement(SystemTab, { config: CONFIG }));
-    expect(html).toContain('A2A');
-    expect(html).toContain('2');
-  });
-
-  it('renders memory config', () => {
-    const html = renderToStaticMarkup(React.createElement(SystemTab, { config: CONFIG }));
-    expect(html).toContain('记忆');
-    expect(html).toContain('50');
-  });
-
-  it('renders governance config', () => {
-    const html = renderToStaticMarkup(React.createElement(SystemTab, { config: CONFIG }));
-    expect(html).toContain('治理');
-    expect(html).toContain('300s');
-    expect(html).toContain('30s');
-  });
-
-  it('renders bubble defaults section', () => {
-    const html = renderToStaticMarkup(React.createElement(SystemTab, { config: CONFIG }));
-    expect(html).toContain('气泡显示');
-    expect(html).toContain('Thinking');
-    expect(html).toContain('CLI');
-  });
-
-  it('renders codex execution section', () => {
-    const html = renderToStaticMarkup(React.createElement(SystemTab, { config: CONFIG }));
-    expect(html).toContain('Codex 推理执行');
-    expect(html).toContain('codex-mini-latest');
-    expect(html).toContain('oauth');
   });
 });

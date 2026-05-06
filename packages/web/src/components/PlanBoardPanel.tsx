@@ -60,7 +60,7 @@ function PlanCard({ catId, threadId, inv }: { catId: string; threadId: string; i
   const { getCatById } = useCatData();
   const { handleSend } = useSendMessage(threadId);
   const cat = getCatById(catId);
-  const dotColor = cat?.color.primary ?? '#9CA3AF';
+  const dotColor = cat?.color.primary ?? 'var(--console-cat-fallback)';
   const tp = inv.taskProgress!;
   const { tasks } = tp;
   const completed = tasks.filter((t) => t.status === 'completed').length;

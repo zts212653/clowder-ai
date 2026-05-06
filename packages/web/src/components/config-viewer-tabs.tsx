@@ -1,15 +1,6 @@
-import {
-  type DragEvent as ReactDragEvent,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { type DragEvent as ReactDragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type CatData, saveCatOrder } from '@/hooks/useCatData';
 import { sortCatsByOrder } from '@/lib/sort-cats-by-order';
-import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import type { ConfigData } from './config-viewer-types';
 import { DefaultCatSelector } from './DefaultCatSelector';
@@ -30,25 +21,6 @@ function reorderIds(ids: string[], srcId: string, targetId: string): string[] {
 }
 
 export type { Capabilities, CatConfig, ConfigData, ContextBudget } from './config-viewer-types';
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="rounded-xl bg-[var(--console-card-bg)] p-4 md:p-5">
-      <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-cafe-muted">{title}</h3>
-      {children}
-    </section>
-  );
-}
-
-function KV({ label, value }: { label: string; value: string | number | boolean }) {
-  const display = typeof value === 'boolean' ? (value ? '是' : '否') : String(value);
-  return (
-    <div className="flex justify-between border-b border-[var(--console-border-soft)] py-2 text-xs text-cafe-secondary last:border-b-0">
-      <span>{label}</span>
-      <span className="font-medium text-right">{display}</span>
-    </div>
-  );
-}
 
 export function CatOverviewTab({
   config,
@@ -276,103 +248,6 @@ export function CatOverviewTab({
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-type BubbleDefault = 'expanded' | 'collapsed';
-
-function BubbleToggle({
-  label,
-  value,
-  configKey,
-  onChanged,
-}: {
-  label: string;
-  value: BubbleDefault;
-  configKey: string;
-  onChanged: () => void;
-}) {
-  const pendingRef = useRef(false);
-  const [optimistic, setOptimistic] = useState<BubbleDefault | null>(null);
-  const display = optimistic ?? value;
-
-  const toggle = useCallback(async () => {
-    if (pendingRef.current) return;
-    pendingRef.current = true;
-    const next: BubbleDefault = display === 'collapsed' ? 'expanded' : 'collapsed';
-    setOptimistic(next);
-    try {
-      const res = await apiFetch('/api/config', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: configKey, value: next }),
-      });
-      if (res.ok) {
-        setOptimistic(null);
-        onChanged();
-        void useChatStore.getState().fetchGlobalBubbleDefaults();
-      } else setOptimistic(null);
-    } catch {
-      setOptimistic(null);
-    } finally {
-      pendingRef.current = false;
-    }
-  }, [display, configKey, onChanged]);
-
-  return (
-    <div className="flex items-center justify-between border-b border-[var(--console-border-soft)] py-2 text-xs text-cafe-secondary last:border-b-0">
-      <span>{label}</span>
-      <button
-        type="button"
-        onClick={toggle}
-        className="console-pill rounded-full px-3 py-1 text-[11px] transition-colors hover:text-cafe"
-      >
-        {display === 'expanded' ? '展开' : '折叠'}
-      </button>
-    </div>
-  );
-}
-
-export function SystemTab({ config, onConfigChange }: { config: ConfigData; onConfigChange?: () => void }) {
-  const handleChanged = useCallback(() => onConfigChange?.(), [onConfigChange]);
-
-  return (
-    <div className="space-y-6">
-      <Section title="气泡显示">
-        <BubbleToggle
-          label="Thinking 默认"
-          value={config.ui?.bubbleDefaults?.thinking ?? 'collapsed'}
-          configKey="ui.bubble.thinking"
-          onChanged={handleChanged}
-        />
-        <BubbleToggle
-          label="CLI 气泡默认"
-          value={config.ui?.bubbleDefaults?.cliOutput ?? 'collapsed'}
-          configKey="ui.bubble.cliOutput"
-          onChanged={handleChanged}
-        />
-      </Section>
-      <Section title="A2A 猫猫互调">
-        <KV label="启用" value={config.a2a.enabled} />
-        <KV label="最大深度" value={config.a2a.maxDepth} />
-      </Section>
-      <Section title="记忆 (F3-lite)">
-        <KV label="启用" value={config.memory.enabled} />
-        <KV label="每线程最大 key 数" value={config.memory.maxKeysPerThread} />
-      </Section>
-      {config.codexExecution ? (
-        <Section title="Codex 推理执行">
-          <KV label="Model" value={config.codexExecution.model} />
-          <KV label="Auth Mode" value={config.codexExecution.authMode} />
-          <KV label="Pass --model Arg" value={config.codexExecution.passModelArg} />
-        </Section>
-      ) : null}
-      <Section title="治理 & 降级">
-        <KV label="降级策略启用" value={config.governance.degradationEnabled} />
-        <KV label="Done 超时" value={`${config.governance.doneTimeoutMs / 1000}s`} />
-        <KV label="Heartbeat 间隔" value={`${config.governance.heartbeatIntervalMs / 1000}s`} />
-      </Section>
     </div>
   );
 }

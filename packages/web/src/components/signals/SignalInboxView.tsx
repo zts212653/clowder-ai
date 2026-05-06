@@ -270,8 +270,14 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
         <div className="flex min-h-0 flex-1 gap-[18px]">
           <div className="flex w-[420px] shrink-0 flex-col gap-1 overflow-y-auto rounded-[18px] bg-[var(--console-panel-bg)] p-2">
             <form onSubmit={handleSearchSubmit} className="flex flex-wrap items-center gap-1.5 px-1 pb-1">
-              <div className="flex flex-1 items-center gap-1.5 rounded-lg bg-[var(--console-field-bg)] px-2.5 h-8 border border-transparent">
-                <svg className="h-[13px] w-[13px] text-cafe-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <div className="flex flex-1 items-center gap-1.5 rounded-lg bg-[var(--console-card-bg)] px-2.5 h-8 shadow-[0_1px_3px_rgba(43,33,26,0.06)]">
+                <svg
+                  className="h-[13px] w-[13px] text-cafe-muted"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
                   <circle cx="11" cy="11" r="8" />
                   <line x1="21" y1="21" x2="16.65" y2="16.65" />
                 </svg>
@@ -280,7 +286,9 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
                   onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))}
                   onCompositionStart={ime.onCompositionStart}
                   onCompositionEnd={ime.onCompositionEnd}
-                  onKeyDown={(event) => { if (event.key === 'Enter' && ime.isComposing()) event.preventDefault(); }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && ime.isComposing()) event.preventDefault();
+                  }}
                   placeholder="搜索信号..."
                   className="min-w-0 flex-1 bg-transparent text-xs text-cafe outline-none placeholder:text-cafe-muted"
                 />
@@ -288,7 +296,7 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
               <select
                 value={filters.status}
                 onChange={(event) => handleStatusTab(event.target.value as SignalArticleFilters['status'])}
-                className="h-8 appearance-none rounded-lg border border-transparent bg-[var(--console-field-bg)] px-2 text-[11px] text-cafe-secondary outline-none"
+                className="h-8 appearance-none rounded-lg bg-[var(--console-card-bg)] px-2 text-[11px] text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] outline-none"
                 name="status"
               >
                 <option value="inbox">Inbox</option>
@@ -301,11 +309,13 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
                 value={filters.source}
                 onChange={(event) => setFilters((current) => ({ ...current, source: event.target.value }))}
                 name="source"
-                className="h-8 appearance-none rounded-lg border border-transparent bg-[var(--console-field-bg)] px-2 text-[11px] text-cafe-secondary outline-none"
+                className="h-8 appearance-none rounded-lg bg-[var(--console-card-bg)] px-2 text-[11px] text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] outline-none"
               >
                 <option value="all">全部来源</option>
                 {sources.map((source) => (
-                  <option key={source} value={source}>{source}</option>
+                  <option key={source} value={source}>
+                    {source}
+                  </option>
                 ))}
               </select>
             </form>
@@ -314,6 +324,7 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
               items={filteredItems}
               selectedArticleId={selectedArticleId}
               onSelect={handleSelectArticle}
+              onStatusChange={handleStatusChange}
             />
           </div>
           <div className="min-w-0 flex-1 overflow-y-auto rounded-[20px] bg-[var(--console-card-bg)] p-[22px] shadow-[0_10px_28px_rgba(43,33,26,0.04)]">

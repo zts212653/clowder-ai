@@ -1,18 +1,19 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useChatStore } from '@/stores/chatStore';
-import { assignDocumentRoute } from './ThreadSidebar/thread-navigation';
 
 /**
  * F102 Phase J (AC-J7): Memory quick-link in Hub Group 3 (监控与治理).
  * Links to the dedicated Memory Hub page instead of duplicating IndexStatus here.
  */
 export function HubMemoryTab() {
+  const router = useRouter();
   const currentThreadId = useChatStore((s) => s.currentThreadId);
 
   const openMemory = () => {
     const fromParam = currentThreadId ? `?from=${encodeURIComponent(currentThreadId)}` : '';
-    assignDocumentRoute(`/memory${fromParam}`, typeof window !== 'undefined' ? window : undefined);
+    router.push(`/memory${fromParam}`);
   };
 
   return (

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { loadSignalSources, resolveSignalPaths, saveSignalSources } from '../domains/signals/config/sources-loader.js';
 import { SignalArticleQueryService } from '../domains/signals/services/article-query-service.js';
 import { backfillSourceContent } from '../domains/signals/services/backfill-content.js';
+import { enrichArticleContent } from '../domains/signals/services/enrich-article.js';
 import { runSignalFetchScheduler } from '../domains/signals/services/fetch-scheduler.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
@@ -129,6 +130,23 @@ export const signalsRoutes: FastifyPluginAsync = async (app) => {
     }
 
     return { article };
+  });
+
+  app.post('/api/signals/articles/:id/enrich', async (request, reply) => {
+    if (!requireIdentity(request, reply)) {
+      return { error: 'Identity required' };
+    }
+    const params = request.params as { id?: string };
+    if (!params.id?.trim()) {
+      reply.status(400);
+      return { error: 'Article id is required' };
+    }
+    const result = await enrichArticleContent(params.id, paths);
+    if (!result) {
+      reply.status(404);
+      return { error: 'Article not found' };
+    }
+    return { article: result.article, enriched: result.enriched, reason: result.reason };
   });
 
   app.get('/api/signals/articles/by-url', async (request, reply) => {

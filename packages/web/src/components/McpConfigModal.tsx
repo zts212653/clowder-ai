@@ -338,14 +338,14 @@ export function McpConfigModal({
               {tools && tools.length > 0 ? (
                 <div className="max-h-[30vh] space-y-1 overflow-y-auto">
                   {tools.map((t) => (
-                    <div key={t.name} className="rounded-[10px] bg-[var(--console-active-bg)] px-3 py-2">
+                    <div key={t.name} className="rounded-[10px] bg-[var(--console-panel-bg)] px-3 py-2">
                       <p className="text-[13px] font-bold text-cafe">{t.name}</p>
                       {t.description && <p className="mt-0.5 text-[11px] text-cafe-muted">{t.description}</p>}
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="rounded-[10px] bg-[var(--console-active-bg)] px-3 py-2.5 text-[12px] text-cafe-muted">
+                <div className="rounded-[10px] bg-[var(--console-panel-bg)] px-3 py-2.5 text-[12px] text-cafe-muted">
                   未探测到工具（服务未连接或无已注册工具）
                 </div>
               )}

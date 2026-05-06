@@ -71,7 +71,7 @@ export function SplitPaneCell({
         <span className="text-xs font-medium text-cafe-secondary truncate flex-1">{threadTitle}</span>
         {threadState.isLoading && <span className="w-1.5 h-1.5 rounded-full bg-conn-amber-bg animate-pulse" />}
         {threadState.unreadCount > 0 && (
-          <span className="text-[9px] bg-conn-amber-bg text-[var(--cafe-surface)] rounded-full px-1 min-w-[14px] text-center">
+          <span className="text-[9px] bg-conn-amber-text text-[var(--cafe-surface)] rounded-full px-1 min-w-[14px] text-center">
             {threadState.unreadCount > 99 ? '99+' : threadState.unreadCount}
           </span>
         )}

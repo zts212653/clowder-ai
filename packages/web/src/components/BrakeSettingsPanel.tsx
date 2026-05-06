@@ -43,7 +43,7 @@ export function BrakeSettingsPanel() {
         <p className="text-sm text-cafe-secondary mt-1">三猫会在你连续工作一段时间后提醒你休息</p>
       </div>
 
-      <div className="rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface-elevated/70 p-4 space-y-4">
+      <div className="console-list-card rounded-2xl p-4 space-y-4 shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
         {/* Toggle */}
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium text-cafe-secondary">启用健康守护</span>

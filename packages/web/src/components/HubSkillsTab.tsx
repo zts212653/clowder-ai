@@ -75,7 +75,7 @@ function CategoryGroup({
   onInstallDone: () => void;
 }) {
   return (
-    <section className="rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface-elevated/70 p-3">
+    <section className="console-list-card rounded-2xl shadow-[0_12px_30px_rgba(43,33,26,0.08)] p-3">
       <h3 className="text-xs font-semibold text-cafe-secondary mb-2">{category}</h3>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
@@ -363,7 +363,7 @@ export function HubSkillsTab() {
         />
       ))}
 
-      <div className="rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface-elevated/70 p-3">
+      <div className="console-list-card rounded-2xl shadow-[0_12px_30px_rgba(43,33,26,0.08)] p-3">
         <div className="flex items-center gap-4 text-xs">
           <span className="font-semibold text-cafe-secondary">{data.summary.total} skills</span>
           <span className={data.summary.allMounted ? 'text-conn-emerald-text' : 'text-conn-amber-text'}>

@@ -303,10 +303,7 @@ function VoiceConfigSection({
             onChange={(value) => onChange({ voiceSpeed: value })}
             placeholder="1.0"
           />
-          <RefAudioField
-            value={form.voiceRefAudio}
-            onUpload={onRefAudioUpload}
-          />
+          <RefAudioField value={form.voiceRefAudio} onUpload={onRefAudioUpload} />
           <TextField
             label="Ref Text"
             ariaLabel="Reference Audio Text"

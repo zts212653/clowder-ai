@@ -1,4 +1,5 @@
 import type { SignalArticleStatus, StudyMeta } from '@cat-cafe/shared';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
@@ -48,11 +49,15 @@ export function SignalArticleDetail({
   onCreateCollection,
   onCollectionChanged,
 }: SignalArticleDetailProps) {
+  const router = useRouter();
   const [pendingTag, setPendingTag] = useState('');
   const [noteText, setNoteText] = useState('');
   const [noteOpen, setNoteOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [expandContent, setExpandContent] = useState(false);
+  const [enrichedContent, setEnrichedContent] = useState<string | null>(null);
+  const [enriching, setEnriching] = useState(false);
+  const [enrichError, setEnrichError] = useState<string | null>(null);
   const pendingTagInputRef = useRef<HTMLInputElement>(null);
   const normalizedPendingTag = pendingTag.trim();
   const ime = useIMEGuard();
@@ -64,6 +69,9 @@ export function SignalArticleDetail({
     setNoteText(article.note ?? '');
     setNoteOpen(!!article.note);
     setConfirmDelete(false);
+    setExpandContent(false);
+    setEnrichedContent(null);
+    setEnrichError(null);
   }
 
   const saveNote = useCallback(async () => {
@@ -154,11 +162,40 @@ export function SignalArticleDetail({
       if (!res.ok) return;
       const data = (await res.json()) as { threadId: string };
       const query = new URLSearchParams({ signal: article.id, source: article.source });
-      window.location.href = `${getThreadHref(data.threadId, detectRoutePrefix())}?${query.toString()}`;
+      router.push(`${getThreadHref(data.threadId, detectRoutePrefix())}?${query.toString()}`);
     } finally {
       setDiscussLoading(false);
     }
   }, [article, discussLoading]);
+
+  const REASON_LABEL: Record<string, string> = {
+    already_enriched: '已获取过全文',
+    no_better_content: '原始页面无可提取正文',
+    fetch_403: '原始页面拒绝访问 (403)',
+    fetch_404: '原始页面不存在 (404)',
+  };
+
+  const handleExpand = useCallback(async () => {
+    if (expandContent) { setExpandContent(false); setEnrichError(null); return; }
+    if (!article || enrichedContent || enriching) { setExpandContent(true); return; }
+    setEnriching(true);
+    setEnrichError(null);
+    try {
+      const res = await apiFetch(`/api/signals/articles/${encodeURIComponent(article.id)}/enrich`, { method: 'POST' });
+      if (res.ok) {
+        const data = (await res.json()) as { article?: { content?: string }; enriched?: boolean; reason?: string };
+        if (data.article?.content && data.article.content.length > (article.content?.length ?? 0)) {
+          setEnrichedContent(data.article.content);
+        } else if (data.reason && data.reason !== 'already_enriched') {
+          setEnrichError(REASON_LABEL[data.reason] ?? `获取失败: ${data.reason}`);
+        }
+      }
+    } catch {
+      setEnrichError('网络请求失败');
+    }
+    setEnriching(false);
+    setExpandContent(true);
+  }, [article, expandContent, enrichedContent, enriching]);
 
   const addPendingTag = useCallback(async () => {
     if (!article) {
@@ -224,7 +261,7 @@ export function SignalArticleDetail({
           disabled={discussLoading}
           className="rounded-md bg-opus-bg px-3 py-1.5 text-xs text-opus-dark transition-opacity hover:opacity-80 disabled:opacity-50"
         >
-          {discussLoading ? '正在创建讨论...' : '在对话中讨论'}
+          {discussLoading ? '正在跳转...' : studyMeta?.threads?.length ? '继续讨论' : '在对话中讨论'}
         </button>
       </div>
       {article.summary && (
@@ -251,17 +288,21 @@ export function SignalArticleDetail({
           <h3 className="text-xs font-semibold text-cafe-secondary">正文</h3>
           <button
             type="button"
-            onClick={() => setExpandContent((prev) => !prev)}
-            className="text-xs text-opus-dark hover:underline"
+            onClick={() => void handleExpand()}
+            disabled={enriching}
+            className="text-xs text-opus-dark hover:underline disabled:opacity-50"
           >
-            {expandContent ? '收起' : '展开阅读'}
+            {enriching ? '正在获取全文…' : expandContent ? '收起' : '展开阅读'}
           </button>
         </div>
         <div
-          className={`mt-1 overflow-y-auto rounded-lg bg-[var(--console-card-soft-bg)] p-3 text-sm text-cafe-black ${expandContent ? '' : 'max-h-[300px]'}`}
+          className={`mt-1 rounded-lg bg-[var(--console-card-soft-bg)] p-3 text-sm text-cafe-black ${expandContent ? '' : 'max-h-[300px] overflow-y-auto'}`}
         >
-          <MarkdownContent content={article.content || '（无正文）'} />
+          <MarkdownContent content={enrichedContent || article.content || '（无正文）'} />
         </div>
+        {enrichError && (
+          <p className="mt-2 text-xs text-conn-amber-text">{enrichError}</p>
+        )}
       </section>
       <section className="mt-4">
         <h3 className="text-xs font-semibold text-cafe-secondary">标签</h3>
@@ -291,7 +332,7 @@ export function SignalArticleDetail({
               }
             }}
             placeholder="添加标签"
-            className="flex-1 rounded-md bg-[var(--console-active-bg)] px-2 py-1.5 text-xs text-cafe outline-none"
+            className="flex-1 rounded-md bg-[var(--console-field-bg)] px-2 py-1.5 text-xs text-cafe outline-none"
           />
           <button
             type="button"
@@ -320,7 +361,7 @@ export function SignalArticleDetail({
                 onBlur={() => void saveNote()}
                 placeholder="写下你的笔记..."
                 rows={3}
-                className="w-full rounded-md bg-[var(--console-active-bg)] px-3 py-2 text-sm text-cafe outline-none"
+                className="w-full rounded-md bg-[var(--console-field-bg)] px-3 py-2 text-sm text-cafe outline-none"
               />
               <button
                 type="button"
@@ -337,21 +378,21 @@ export function SignalArticleDetail({
         <button
           type="button"
           onClick={() => void onStatusChange(article.id, 'inbox')}
-          className="console-button-ghost text-xs px-3 py-1.5"
+          className="rounded-md bg-[var(--console-card-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] transition hover:text-cafe"
         >
           设为 Inbox
         </button>
         <button
           type="button"
           onClick={() => void onStatusChange(article.id, 'read')}
-          className="rounded-md bg-[var(--console-active-bg)] px-3 py-1.5 text-xs text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)]"
+          className="rounded-md bg-[var(--console-card-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] transition hover:text-cafe"
         >
           标记已读
         </button>
         <button
           type="button"
           onClick={() => void onStatusChange(article.id, 'starred')}
-          className="rounded-md border border-conn-amber-ring px-3 py-1.5 text-xs text-conn-amber-text hover:bg-conn-amber-bg"
+          className="rounded-md bg-conn-amber-bg px-3 py-1.5 text-xs font-medium text-conn-amber-text transition hover:opacity-80"
         >
           收藏
         </button>
@@ -362,14 +403,14 @@ export function SignalArticleDetail({
               <button
                 type="button"
                 onClick={() => void handleDelete()}
-                className="rounded-md border border-conn-red-ring px-3 py-1.5 text-xs text-conn-red-text hover:bg-conn-red-bg"
+                className="rounded-md bg-conn-red-bg px-3 py-1.5 text-xs font-medium text-conn-red-text transition hover:opacity-80"
               >
                 删除
               </button>
               <button
                 type="button"
                 onClick={() => setConfirmDelete(false)}
-                className="rounded-md bg-[var(--console-active-bg)] px-3 py-1.5 text-xs text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)]"
+                className="rounded-md bg-[var(--console-card-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] transition hover:text-cafe"
               >
                 取消
               </button>
@@ -378,7 +419,7 @@ export function SignalArticleDetail({
             <button
               type="button"
               onClick={() => setConfirmDelete(true)}
-              className="rounded-md border border-conn-red-ring px-3 py-1.5 text-xs text-conn-red-text hover:bg-conn-red-bg"
+              className="rounded-md bg-conn-red-bg px-3 py-1.5 text-xs font-medium text-conn-red-text transition hover:opacity-80"
             >
               删除
             </button>

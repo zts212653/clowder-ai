@@ -151,7 +151,10 @@ export function IndexStatus() {
   }
 
   return (
-    <div data-testid="index-status" className="space-y-4 rounded-xl bg-[var(--console-card-bg)] p-5 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
+    <div
+      data-testid="index-status"
+      className="space-y-4 rounded-xl bg-[var(--console-card-bg)] p-5 shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
+    >
       {/* Health badge */}
       <div className="flex items-center gap-2">
         <span

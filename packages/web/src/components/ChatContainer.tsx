@@ -1,10 +1,13 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAgentHookHealth } from '@/hooks/useAgentHookHealth';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
 import { useAuthorization } from '@/hooks/useAuthorization';
 import { useCatData } from '@/hooks/useCatData';
+import type { CoCreatorConfig } from '@/components/config-viewer-types';
+import { primeCoCreatorConfigCache, useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { useChatHistory } from '@/hooks/useChatHistory';
 import { useChatSocketCallbacks } from '@/hooks/useChatSocketCallbacks';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
@@ -33,7 +36,8 @@ import { AgentHookHealthNotice, shouldRenderAgentHookHealthNotice } from './Agen
 import { AuthorizationCard } from './AuthorizationCard';
 import { BootcampListModal } from './BootcampListModal';
 import { BootstrapOrchestrator } from './BootstrapOrchestrator';
-import { CatCafeHub } from './CatCafeHub';
+import { HubCatEditor } from './HubCatEditor';
+import { HubCoCreatorEditor } from './HubCoCreatorEditor';
 import { ChatContainerHeader } from './ChatContainerHeader';
 import { ChatInput } from './ChatInput';
 import { ChatMessage } from './ChatMessage';
@@ -59,7 +63,7 @@ import { SplitPaneView } from './SplitPaneView';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { ThreadExecutionBar } from './ThreadExecutionBar';
 import { ThreadSidebar } from './ThreadSidebar';
-import { assignDocumentRoute, detectRoutePrefix, pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
+import { detectRoutePrefix, pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { VoteActiveBar } from './VoteActiveBar';
 import { type VoteConfig, VoteConfigModal } from './VoteConfigModal';
 import { WorkspacePanel } from './WorkspacePanel';
@@ -70,6 +74,7 @@ interface ChatContainerProps {
 }
 
 export function ChatContainer({ threadId }: ChatContainerProps) {
+  const router = useRouter();
   const bottomChromeRef = useRef<HTMLDivElement | null>(null);
   const bottomChromeObserverRef = useRef<ResizeObserver | null>(null);
   const bottomChromeObserverRafRef = useRef<number | null>(null);
@@ -122,11 +127,13 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const altActionName = useGameStore((s) => s.altActionName);
   const overlayMinimized = useGameStore((s) => s.overlayMinimized);
 
-  // Export mode: ?export=true triggers print-friendly layout (no scroll containers)
-  const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
-  const isExport = searchParams?.get('export') === 'true';
-  // AC-6: research=multi hint from Signal study "多猫研究" button
-  const isResearchMode = searchParams?.get('research') === 'multi';
+  const [isExport, setIsExport] = useState(false);
+  const [isResearchMode, setIsResearchMode] = useState(false);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setIsExport(params.get('export') === 'true');
+    setIsResearchMode(params.get('research') === 'multi');
+  }, []);
   const { clearTasks } = useTaskStore();
   const { cats, getCatById, isLoading, hasFetched } = useCatData();
   const workspaceWorktreeId = useChatStore((s) => s.workspaceWorktreeId);
@@ -722,13 +729,13 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
 
   const handleSearchKnowledge = useCallback(() => {
     const fromParam = threadId ? `?from=${encodeURIComponent(threadId)}` : '';
-    assignDocumentRoute(`/memory/search${fromParam}`, typeof window !== 'undefined' ? window : undefined);
-  }, [threadId]);
+    router.push(`/memory/search${fromParam}`);
+  }, [threadId, router]);
 
   const handleGoToMemoryHub = useCallback(() => {
     const fromParam = threadId ? `?from=${encodeURIComponent(threadId)}` : '';
-    assignDocumentRoute(`/memory${fromParam}`, typeof window !== 'undefined' ? window : undefined);
-  }, [threadId]);
+    router.push(`/memory${fromParam}`);
+  }, [threadId, router]);
 
   if (viewMode === 'split') {
     return (
@@ -740,7 +747,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           uploadError={uploadError}
           onZoomToThread={handleZoomToThread}
         />
-        <CatCafeHub />
+        <StandaloneMemberEditor />
+        <StandaloneCoCreatorEditor />
       </>
     );
   }
@@ -947,7 +955,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                   firstCatName={questState.firstCatName}
                   onAddSecondCat={() => setShowQuestWizard(true)}
                   onStartBootcamp={() => setShowBootcampList(true)}
-                  onComplete={() => assignDocumentRoute('/hub', typeof window !== 'undefined' ? window : undefined)}
+                  onComplete={() => router.push('/settings')}
                 />
               );
             })()}
@@ -1123,7 +1131,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           </div>
         </div>
       )}
-      <CatCafeHub />
+      <StandaloneMemberEditor />
+      <StandaloneCoCreatorEditor />
       <FirstRunQuestWizard
         open={showQuestWizard}
         onClose={() => setShowQuestWizard(false)}
@@ -1149,4 +1158,41 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       })()}
     </div>
   );
+}
+
+function StandaloneMemberEditor() {
+  const targetCatId = useChatStore((s) => s.memberEditorTarget);
+  const closeMemberEditor = useChatStore((s) => s.closeMemberEditor);
+  const { cats, refresh } = useCatData();
+  const cat = targetCatId ? cats.find((c) => c.id === targetCatId) ?? null : null;
+  const handleSaved = useCallback(async () => {
+    await refresh();
+  }, [refresh]);
+
+  return (
+    <HubCatEditor
+      open={Boolean(targetCatId) && Boolean(cat)}
+      cat={cat}
+      draft={null}
+      existingCats={cats}
+      onClose={closeMemberEditor}
+      onSaved={handleSaved}
+      hideDelete
+    />
+  );
+}
+
+function StandaloneCoCreatorEditor() {
+  const open = useChatStore((s) => s.coCreatorEditorOpen);
+  const close = useChatStore((s) => s.closeCoCreatorEditor);
+  const coCreator = useCoCreatorConfig();
+  const handleSaved = useCallback(async () => {
+    const res = await apiFetch('/api/config');
+    if (res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { config?: { coCreator?: CoCreatorConfig } };
+      if (body.config?.coCreator) primeCoCreatorConfigCache(body.config.coCreator);
+    }
+  }, []);
+
+  return <HubCoCreatorEditor open={open} coCreator={coCreator} onClose={close} onSaved={handleSaved} />;
 }

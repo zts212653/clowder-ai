@@ -1,10 +1,11 @@
-import type { SignalArticle } from '@cat-cafe/shared';
+import type { SignalArticle, SignalArticleStatus } from '@cat-cafe/shared';
 import { SignalTierBadge } from './SignalTierBadge';
 
 interface SignalArticleListProps {
   readonly items: readonly SignalArticle[];
   readonly selectedArticleId: string | null;
   readonly onSelect: (article: SignalArticle) => void;
+  readonly onStatusChange?: (articleId: string, status: SignalArticleStatus) => void;
   readonly selectedIds?: ReadonlySet<string>;
   readonly onToggleSelect?: (articleId: string) => void;
 }
@@ -26,6 +27,7 @@ export function SignalArticleList({
   items,
   selectedArticleId,
   onSelect,
+  onStatusChange,
   selectedIds,
   onToggleSelect,
 }: SignalArticleListProps) {
@@ -99,7 +101,27 @@ export function SignalArticleList({
                   {article.source} · {formatDate(article.fetchedAt)}
                 </p>
               </div>
-              <SignalTierBadge tier={article.tier} />
+              <div className="flex shrink-0 items-center gap-1.5">
+                <SignalTierBadge tier={article.tier} />
+                {onStatusChange && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); void onStatusChange(article.id, 'read'); }}
+                      className="rounded-md bg-[var(--console-card-bg)] px-2 py-1 text-[10px] font-semibold text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] transition hover:text-cafe"
+                    >
+                      已读
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); void onStatusChange(article.id, 'starred'); }}
+                      className="rounded-md bg-conn-amber-bg px-2 py-1 text-[10px] font-semibold text-conn-amber-text transition hover:opacity-80"
+                    >
+                      收藏
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           </li>
         );

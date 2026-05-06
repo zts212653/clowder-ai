@@ -56,7 +56,7 @@ function CatInvocationCard({
 }) {
   const { getCatById } = useCatData();
   const cat = getCatById(catId);
-  const dotColor = cat?.color.primary ?? '#9CA3AF';
+  const dotColor = cat?.color.primary ?? 'var(--console-cat-fallback)';
   return (
     <div className="text-xs">
       <div className="flex items-center gap-1.5 mb-1">
@@ -406,7 +406,7 @@ export function RightStatusPanel({
           <div className="space-y-2">
             {activeCats.map((catId) => {
               const cat = getCatById(catId);
-              const dotColor = cat?.color.primary ?? '#9CA3AF';
+              const dotColor = cat?.color.primary ?? 'var(--console-cat-fallback)';
               const status = catStatuses[catId] ?? 'pending';
               const inv = catInvocations[catId];
               return (
@@ -455,7 +455,7 @@ export function RightStatusPanel({
                     <div key={catId} className="flex items-center gap-2 text-xs text-cafe-muted">
                       <span
                         className="inline-block h-2 w-2 rounded-full opacity-50"
-                        style={{ backgroundColor: cat?.color.primary ?? '#9CA3AF' }}
+                        style={{ backgroundColor: cat?.color.primary ?? 'var(--console-cat-fallback)' }}
                       />
                       {cat ? formatCatName(cat) : catId}
                     </div>

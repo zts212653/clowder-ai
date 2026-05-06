@@ -55,7 +55,7 @@ export function QuestBanner({ phase, firstCatName, onAddSecondCat, onStartBootca
             <button
               type="button"
               onClick={onStartBootcamp}
-              className="rounded-lg bg-conn-amber-bg px-3 py-1.5 text-sm font-medium text-[var(--cafe-surface)] transition hover:bg-conn-amber-bg"
+              className="rounded-lg bg-conn-amber-text px-3 py-1.5 text-sm font-medium text-[var(--cafe-surface)] transition hover:opacity-90"
             >
               开始新手训练营
             </button>
@@ -84,7 +84,7 @@ export function QuestBanner({ phase, firstCatName, onAddSecondCat, onStartBootca
             <button
               type="button"
               onClick={onAddSecondCat}
-              className="mt-2 rounded-lg bg-conn-amber-bg px-3 py-1.5 text-sm font-medium text-[var(--cafe-surface)] transition hover:bg-conn-amber-bg"
+              className="mt-2 rounded-lg bg-conn-amber-text px-3 py-1.5 text-sm font-medium text-[var(--cafe-surface)] transition hover:opacity-90"
             >
               再来一只猫猫！
             </button>

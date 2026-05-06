@@ -149,7 +149,7 @@ export function SignalSourcesView({ initialReferrerThread = null }: { initialRef
               <span className="flex-1 truncate text-[13px] font-bold text-cafe">{source.name}</span>
               <StatusPill enabled={source.enabled} />
               <span
-                className="rounded-lg bg-[var(--console-active-bg)] px-2.5 py-1 text-xs text-cafe-secondary"
+                className="rounded-lg bg-[var(--console-field-bg)] px-2.5 py-1 text-xs text-cafe-secondary"
                 style={{ width: 96 }}
               >
                 Tier {source.tier ?? 1}
@@ -158,7 +158,7 @@ export function SignalSourcesView({ initialReferrerThread = null }: { initialRef
                 type="button"
                 disabled={fetchingIds.has(source.id)}
                 onClick={() => void doFetch(source.id)}
-                className="rounded-lg bg-[var(--console-active-bg)] px-2.5 py-1 text-xs font-semibold text-cafe-secondary transition-colors hover:text-cafe disabled:opacity-50"
+                className="rounded-lg bg-[var(--console-field-bg)] px-2.5 py-1 text-xs font-semibold text-cafe-secondary transition-colors hover:text-cafe disabled:opacity-50"
               >
                 {fetchingIds.has(source.id) ? '抓取中...' : 'Fetch'}
               </button>
@@ -170,7 +170,7 @@ export function SignalSourcesView({ initialReferrerThread = null }: { initialRef
                   'rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors',
                   source.enabled
                     ? 'bg-conn-emerald-bg text-conn-emerald-text'
-                    : 'bg-[var(--console-active-bg)] text-cafe-secondary',
+                    : 'bg-[var(--console-field-bg)] text-cafe-secondary',
                 ].join(' ')}
               >
                 {updatingId === source.id ? '...' : source.enabled ? 'ON' : 'OFF'}

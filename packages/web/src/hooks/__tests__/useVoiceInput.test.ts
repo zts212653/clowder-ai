@@ -15,6 +15,13 @@ vi.mock('@/stores/voiceSettingsStore', () => ({
     }),
 }));
 
+vi.mock('@/utils/api-client', () => ({
+  apiFetch: vi.fn().mockResolvedValue({
+    ok: true,
+    json: () => Promise.resolve({ endpoints: {} }),
+  }),
+}));
+
 /* ── Mock infrastructure ── */
 
 function createMockTrack() {

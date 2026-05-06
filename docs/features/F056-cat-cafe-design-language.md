@@ -230,7 +230,7 @@ Token contract 落地后，分桶跑 codemod：
 
 ### Phase D
 - [x] AC-D1: ThemeProvider + useTheme + useCafeTheme hook 落地，组件不再直接吃 hex
-- [ ] AC-D2: Dark mode 全站可切换，light/dark 截图对比无视觉异常
+- [/] AC-D2: Dark mode 全站可切换 — token 层完成（console-shell.css + theme-tokens.css 全量 dark variants），组件级审计进行中
 - [ ] AC-D3: next-intl 接入 + 术语词表独立文件，fork 改一张表即可换术语
 - [ ] AC-D4: tenant.config 可配品牌资产（logo/favicon/themeColor/配色 preset）
 

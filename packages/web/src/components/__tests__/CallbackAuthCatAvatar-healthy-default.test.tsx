@@ -39,10 +39,6 @@ vi.mock('@/stores/callbackAuthStore', () => ({
   useCallbackAuthAvailable: () => mockAvailable,
 }));
 
-vi.mock('@/stores/chatStore', () => ({
-  useChatStore: (selector: (s: { openHub: (...a: unknown[]) => void }) => unknown) => selector({ openHub: () => {} }),
-}));
-
 import { CallbackAuthCatAvatar } from '../CallbackAuthCatAvatar';
 
 Object.assign(globalThis as Record<string, unknown>, { React });

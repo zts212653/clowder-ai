@@ -4,7 +4,9 @@ import { fileURLToPath } from 'node:url';
 import type { ServiceConfig } from './service-manifest.js';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../..');
-const CONFIG_PATH = resolve(REPO_ROOT, '.cat-cafe/services.json');
+const CONFIG_PATH = process.env.CAT_CAFE_SERVICES_CONFIG
+  ? resolve(process.env.CAT_CAFE_SERVICES_CONFIG)
+  : resolve(REPO_ROOT, '.cat-cafe/services.json');
 
 type ServiceConfigMap = Record<string, ServiceConfig>;
 
@@ -23,7 +25,7 @@ function load(): ServiceConfigMap {
 
 function save(data: ServiceConfigMap): void {
   mkdirSync(dirname(CONFIG_PATH), { recursive: true });
-  writeFileSync(CONFIG_PATH, JSON.stringify(data, null, 2) + '\n');
+  writeFileSync(CONFIG_PATH, `${JSON.stringify(data, null, 2)}\n`);
   cache = data;
 }
 

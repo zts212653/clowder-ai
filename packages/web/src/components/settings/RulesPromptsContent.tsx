@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 
 interface RuleFile {
@@ -32,7 +32,7 @@ const FILE_LABELS: Record<string, string> = {
 export function RulesPromptsContent() {
   const [data, setData] = useState<RulesData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [expandedFile, setExpandedFile] = useState<string | null>(null);
+  const [previewFile, setPreviewFile] = useState<{ file: RuleFile; label: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -63,8 +63,6 @@ export function RulesPromptsContent() {
   }
   if (!data) return <p className="text-sm text-cafe-muted">加载中...</p>;
 
-  const toggle = (path: string) => setExpandedFile((prev) => (prev === path ? null : path));
-
   return (
     <div className="space-y-6">
       <Section
@@ -76,8 +74,7 @@ export function RulesPromptsContent() {
           <RuleFileCard
             key={file.path}
             file={file}
-            expanded={expandedFile === file.path}
-            onToggle={() => toggle(file.path)}
+            onClick={() => setPreviewFile({ file, label: FILE_LABELS[file.path] ?? file.path })}
           />
         ))}
       </Section>
@@ -92,11 +89,14 @@ export function RulesPromptsContent() {
             key={guide.path}
             file={guide}
             label={PROVIDER_LABELS[guide.provider]}
-            expanded={expandedFile === guide.path}
-            onToggle={() => toggle(guide.path)}
+            onClick={() => setPreviewFile({ file: guide, label: PROVIDER_LABELS[guide.provider] ?? guide.path })}
           />
         ))}
       </Section>
+
+      {previewFile && (
+        <RulePreviewModal label={previewFile.label} file={previewFile.file} onClose={() => setPreviewFile(null)} />
+      )}
     </div>
   );
 }
@@ -113,7 +113,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="console-section-shell rounded-xl p-5 md:p-6">
+    <section className="console-list-card rounded-2xl p-5 md:p-6 shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1.5">
           <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cafe-muted">Governance</p>
@@ -129,22 +129,12 @@ function Section({
   );
 }
 
-function RuleFileCard({
-  file,
-  label,
-  expanded,
-  onToggle,
-}: {
-  file: RuleFile;
-  label?: string;
-  expanded: boolean;
-  onToggle: () => void;
-}) {
+function RuleFileCard({ file, label, onClick }: { file: RuleFile; label?: string; onClick: () => void }) {
   const displayLabel = label ?? FILE_LABELS[file.path] ?? file.path;
 
   if (!file.exists) {
     return (
-      <div className="console-list-card rounded-xl px-4 py-4">
+      <div className="console-list-card rounded-2xl px-4 py-4 shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
         <div className="flex items-center justify-between gap-3">
           <p className="text-sm font-medium text-cafe">{displayLabel}</p>
           <span className="console-status-chip" data-status="error">
@@ -159,40 +149,89 @@ function RuleFileCard({
   const lineCount = file.content.split('\n').length;
 
   return (
-    <div className="console-list-card rounded-xl overflow-hidden" data-active={expanded ? 'true' : 'false'}>
-      <button onClick={onToggle} className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm font-medium text-cafe">{displayLabel}</p>
-            <span className="console-status-chip" data-status="info">
-              {expanded ? '已展开' : '可预览'}
-            </span>
-          </div>
-          <p className="mt-1 text-xs text-cafe-muted">
-            {file.path} · {lineCount} 行
-          </p>
+    <button
+      onClick={onClick}
+      className="console-list-card flex w-full items-center justify-between gap-3 rounded-2xl px-4 py-4 text-left shadow-[0_12px_30px_rgba(43,33,26,0.08)] transition-colors hover:bg-[var(--console-hover-bg)]"
+    >
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-sm font-medium text-cafe">{displayLabel}</p>
+          <span className="console-status-chip" data-status="info">
+            可预览
+          </span>
         </div>
-        <span className="console-pill flex h-10 w-10 items-center justify-center rounded-full text-cafe-secondary">
-          <svg
-            className={`h-4 w-4 flex-shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`}
-            viewBox="0 0 20 20"
-            fill="currentColor"
+        <p className="mt-1 text-xs text-cafe-muted">
+          {file.path} · {lineCount} 行
+        </p>
+      </div>
+      <span className="console-pill flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-cafe-secondary">
+        <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+          <path
+            fillRule="evenodd"
+            d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
+            clipRule="evenodd"
+          />
+        </svg>
+      </span>
+    </button>
+  );
+}
+
+function RulePreviewModal({ label, file, onClose }: { label: string; file: RuleFile; onClose: () => void }) {
+  const handleBackdrop = useCallback(
+    (e: React.MouseEvent) => {
+      if (e.target === e.currentTarget) onClose();
+    },
+    [onClose],
+  );
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  const lineCount = file.content.split('\n').length;
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm"
+      onClick={handleBackdrop}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="relative flex max-h-[calc(100vh-32px)] w-full max-w-[620px] flex-col overflow-hidden rounded-[24px] bg-[var(--console-card-bg)] p-[26px] shadow-[0_20px_48px_rgba(43,33,26,0.14)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex shrink-0 items-center gap-[14px]">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[12px] bg-[var(--console-active-bg)] text-[18px] font-bold text-[var(--console-modal-title)]">
+            📜
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-[20px] font-extrabold text-cafe">{label}</h2>
+            <p className="text-xs text-cafe-muted">
+              {file.path} · {lineCount} 行
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="关闭"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] text-[16px] text-cafe-muted transition hover:bg-[var(--console-modal-close-bg)] hover:text-[var(--console-modal-close-fg)]"
           >
-            <path
-              fillRule="evenodd"
-              d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
-              clipRule="evenodd"
-            />
-          </svg>
-        </span>
-      </button>
-      {expanded && (
-        <div className="console-code-pane">
-          <pre className="max-h-[32rem] overflow-x-auto overflow-y-auto px-4 py-4 text-[12px] leading-6 text-cafe-secondary whitespace-pre-wrap">
+            ✕
+          </button>
+        </div>
+
+        <div className="mt-4 min-h-0 flex-1 overflow-y-auto rounded-[16px] bg-[var(--console-panel-bg)] p-4">
+          <pre className="max-h-[50vh] overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-6 text-cafe-secondary">
             {file.content}
           </pre>
         </div>
-      )}
+      </div>
     </div>
   );
 }

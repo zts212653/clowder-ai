@@ -36,14 +36,6 @@ const PLUGIN_CATALOG: Omit<PluginDef, 'status' | 'statusLabel'>[] = [
     iconBg: '#24292e',
     source: 'platform',
   },
-  {
-    id: 'voice-companion',
-    name: '语音陪伴',
-    description: '语音输入/输出和实时陪伴对话模式',
-    icon: 'mic',
-    iconBg: '#d4764e',
-    source: 'service',
-  },
 ];
 
 const STATUS_BADGE: Record<string, { bg: string; text: string }> = {
@@ -52,9 +44,7 @@ const STATUS_BADGE: Record<string, { bg: string; text: string }> = {
   available: { bg: 'bg-cafe-surface-sunken', text: 'text-cafe-muted' },
 };
 
-const SERVICE_FEATURE_MAP: Record<string, string[]> = {
-  'voice-companion': ['voice-input', 'voice-output', 'voice-companion'],
-};
+const SERVICE_FEATURE_MAP: Record<string, string[]> = {};
 
 export function resolvePluginStatuses(services: ServiceState[], apiReachable: boolean): PluginDef[] {
   const runningFeatures = new Set<string>();
@@ -102,7 +92,9 @@ export function PluginsContent() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { void resolveStatus(); }, [resolveStatus]);
+  useEffect(() => {
+    void resolveStatus();
+  }, [resolveStatus]);
 
   if (loading) return <p className="text-sm text-cafe-muted">加载中...</p>;
 
@@ -124,7 +116,9 @@ export function PluginsContent() {
                   <p className="mt-0.5 text-[11px] text-cafe-muted">扩展服务 · 在「系统」标签管理</p>
                 </div>
                 <div className={settingsResourceActionGroupClass}>
-                  <span className={`flex-shrink-0 rounded-[13px] px-2.5 py-0.5 text-[11px] font-medium ${badge.bg} ${badge.text}`}>
+                  <span
+                    className={`flex-shrink-0 rounded-[13px] px-2.5 py-0.5 text-[11px] font-medium ${badge.bg} ${badge.text}`}
+                  >
                     {plugin.statusLabel}
                   </span>
                 </div>
@@ -144,7 +138,9 @@ export function PluginsContent() {
                   <p className="mt-0.5 text-[11px] text-cafe-muted">内置插件</p>
                 </div>
                 <div className={settingsResourceActionGroupClass}>
-                  <span className={`flex-shrink-0 rounded-[13px] px-2.5 py-0.5 text-[11px] font-medium ${badge.bg} ${badge.text}`}>
+                  <span
+                    className={`flex-shrink-0 rounded-[13px] px-2.5 py-0.5 text-[11px] font-medium ${badge.bg} ${badge.text}`}
+                  >
                     {plugin.statusLabel}
                   </span>
                 </div>

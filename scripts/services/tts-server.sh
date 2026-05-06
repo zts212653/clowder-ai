@@ -12,7 +12,7 @@
 set -euo pipefail
 
 VENV_DIR="${HOME}/.cat-cafe/tts-venv"
-MODEL="${1:-mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16}"
+MODEL="${TTS_MODEL:-${1:-mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16}}"
 PORT="${TTS_PORT:-9879}"
 PROVIDER="${TTS_PROVIDER:-qwen3-clone}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

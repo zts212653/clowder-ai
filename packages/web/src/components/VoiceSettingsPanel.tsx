@@ -11,7 +11,7 @@ const BUILT_IN_ENTRIES = Object.entries(builtInTerms as Record<string, string>).
 
 function Section({ eyebrow, title, children }: { eyebrow: string; title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-xl bg-[var(--console-card-bg)] p-5 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
+    <section className="console-list-card rounded-2xl p-5 shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
       <div className="space-y-1.5 mb-3">
         <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cafe-muted">{eyebrow}</p>
         <h3 className="text-sm font-semibold text-cafe-secondary">{title}</h3>

@@ -89,7 +89,7 @@ export function GovernanceBlockedCard({ projectPath, reasonKind, invocationId }:
                 <button
                   type="button"
                   onClick={handleBootstrap}
-                  className="text-sm px-3 py-1.5 rounded-md bg-conn-amber-bg text-[var(--cafe-surface)] hover:opacity-90 transition-colors"
+                  className="text-sm px-3 py-1.5 rounded-md bg-conn-amber-text text-[var(--cafe-surface)] hover:opacity-90 transition-colors"
                 >
                   初始化治理并继续
                 </button>
@@ -107,7 +107,7 @@ export function GovernanceBlockedCard({ projectPath, reasonKind, invocationId }:
                   <button
                     type="button"
                     onClick={handleBootstrap}
-                    className="text-sm px-3 py-1.5 rounded-md bg-conn-amber-bg text-[var(--cafe-surface)] hover:opacity-90 transition-colors"
+                    className="text-sm px-3 py-1.5 rounded-md bg-conn-amber-text text-[var(--cafe-surface)] hover:opacity-90 transition-colors"
                   >
                     重试
                   </button>

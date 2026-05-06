@@ -483,15 +483,11 @@ export function ThreadSidebar({ onClose, className, routePrefix = '' }: ThreadSi
               onClick={() => setShowBootcampList(true)}
               className="relative flex h-8 w-8 items-center justify-center rounded-lg text-conn-amber-text transition-colors hover:bg-conn-amber-bg/60"
               data-testid="sidebar-bootcamp"
+              data-guide-id="sidebar.bootcamp"
               title={bootcampCount > 0 ? `我的训练营（${bootcampCount}）` : '开始训练营'}
               aria-label={bootcampCount > 0 ? `我的训练营（${bootcampCount}）` : '开始训练营'}
             >
               <BootcampIcon className="h-4 w-4" />
-              {bootcampCount > 0 && (
-                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-conn-amber-bg px-1 text-[9px] font-bold text-[var(--cafe-surface)]">
-                  {bootcampCount > 9 ? '9+' : bootcampCount}
-                </span>
-              )}
             </button>
             <button
               type="button"
@@ -817,8 +813,10 @@ function DeleteConfirmDialog({
   const [typedName, setTypedName] = useState('');
   const confirmed = !isSystem || typedName === title;
   const confirmInputRef = useRef<HTMLInputElement>(null);
+  const confirmBtnRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (isSystem) confirmInputRef.current?.focus();
+    else setTimeout(() => confirmBtnRef.current?.focus(), 50);
   }, [isSystem]);
 
   return (
@@ -856,12 +854,13 @@ function DeleteConfirmDialog({
             取消
           </button>
           <button
+            ref={confirmBtnRef}
             onClick={onConfirm}
             disabled={!confirmed}
-            className={`px-3 py-1.5 text-sm rounded-lg text-[var(--cafe-surface)] transition-colors ${
+            className={`px-3 py-1.5 text-sm rounded-lg text-[var(--cafe-surface)] transition-colors focus:outline-none focus:ring-2 ${
               isSystem
-                ? 'bg-conn-red-bg hover:bg-conn-red-ring disabled:bg-conn-red-bg/60 disabled:cursor-not-allowed'
-                : 'bg-conn-amber-bg hover:bg-conn-amber-bg'
+                ? 'bg-conn-red-text hover:opacity-90 focus:ring-conn-red-ring disabled:opacity-40 disabled:cursor-not-allowed'
+                : 'bg-conn-amber-text hover:opacity-90 focus:ring-conn-amber-ring'
             }`}
           >
             {isSystem ? '确认删除' : '移入回收站'}

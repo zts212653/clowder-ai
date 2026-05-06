@@ -37,9 +37,28 @@
   --console-inspector-gradient: linear-gradient(180deg, #faf4ee 0%, #f6efe7 50%, #eee6dc 100%);
   --console-button-emphasis: #4a3d33;
   --console-button-emphasis-hover: #5e4f43;
+  --console-cat-fallback: #9CA3AF;
+  --console-cli-tool-fg: #E2E8F0;
+  --console-cli-check-fg: #22D3EE;
+  --console-cli-paw-fg: #64748B;
+  --console-diag-border: rgba(208, 128, 104, 0.2);
+  --console-diag-key: #C4A0E8;
+  --console-diag-val: #D89575;
+  --console-status-connected: #16A34A;
+  --console-status-idle: #9CA3AF;
   --terminal-bg: #1e1e24;
   --terminal-bg-deep: #16161c;
   --terminal-border: #2a2a32;
+  --terminal-text: #a9b1d6;
+  --terminal-text-muted: #888888;
+  --terminal-text-dim: #666666;
+  --terminal-text-error: #f7768e;
+  --terminal-text-warn: #e0af68;
+  --terminal-text-success: #9ece6a;
+  --terminal-button-border: #444444;
+  --terminal-button-text: #aaaaaa;
+  --terminal-error-border: #6b3030;
+  --terminal-selected-bg: #2a2b3d;
 }
 
 [data-theme="dark"] {
@@ -76,8 +95,19 @@
   --console-skill-pill-bg: color-mix(in srgb, var(--cafe-accent) 20%, var(--console-card-bg) 80%);
   --console-inspector-bg: color-mix(in srgb, var(--console-panel-bg) 92%, black 8%);
   --console-inspector-gradient: linear-gradient(180deg, #1e1915 0%, #1a1512 50%, #14110f 100%);
+  --console-voice-companion: #b89ee0;
+  --console-input-stroke: #c47a5d;
   --console-button-emphasis: #a08977;
   --console-button-emphasis-hover: #b8a495;
+  --console-cat-fallback: #6b7280;
+  --console-cli-tool-fg: #94a3b8;
+  --console-cli-check-fg: #06b6d4;
+  --console-cli-paw-fg: #94a3b8;
+  --console-diag-border: rgba(208, 128, 104, 0.15);
+  --console-diag-key: #a78bdb;
+  --console-diag-val: #c48060;
+  --console-status-connected: #22c55e;
+  --console-status-idle: #6b7280;
 }
 
 .console-shell {
@@ -167,8 +197,7 @@
 }
 
 .console-list-card[data-guide-id^="connector."] .console-code-pane {
-  border-width: 1px 0 0;
-  border-color: var(--console-border);
+  border-width: 0;
   background: var(--console-card-bg);
 }
 

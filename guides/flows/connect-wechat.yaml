@@ -8,14 +8,14 @@ name: 对接微信
 description: 引导你完成微信渠道的接入和扫码配置
 
 steps:
-  - id: open-im-hub
-    target: im-hub.trigger
-    tips: 点击这里打开 IM Hub
+  - id: open-hub
+    target: hub.trigger
+    tips: 点击这里打开设置
     advance: click
 
-  - id: go-to-config
-    target: im-hub.config-tab
-    tips: 切换到平台配置页面
+  - id: go-to-im
+    target: settings.im
+    tips: 点击进入 IM 对接页面
     advance: click
 
   - id: expand-wechat

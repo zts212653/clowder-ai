@@ -650,7 +650,7 @@ export function ChatInput({
         />
       )}
 
-      <div className="flex gap-2 items-end p-4 pt-2">
+      <div className="flex gap-2 items-center p-4 pt-2">
         {/* Mobile: + toggle button */}
         <button
           onClick={() => setMobileToolbar((v) => !v)}

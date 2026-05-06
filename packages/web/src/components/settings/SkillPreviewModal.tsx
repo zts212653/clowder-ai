@@ -66,7 +66,7 @@ export function SkillPreviewModal({ skillId, skillName, description, triggers, o
   const hiddenTriggerCount = showAllTriggers ? 0 : Math.max(triggerList.length - 6, 0);
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm"
       onClick={handleBackdrop}
     >
       <div

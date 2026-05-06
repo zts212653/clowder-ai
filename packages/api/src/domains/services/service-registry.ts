@@ -1,6 +1,8 @@
+import { execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
+import { getServiceConfig, setServiceConfig } from './service-config.js';
 import type { ServiceManifest, ServiceState, ServiceStatus } from './service-manifest.js';
 
 const KNOWN_SERVICES: ServiceManifest[] = [
@@ -14,6 +16,28 @@ const KNOWN_SERVICES: ServiceManifest[] = [
       runtime: 'python3.10+',
       venvPath: '~/.cat-cafe/whisper-venv',
       packages: ['mlx-whisper', 'fastapi', 'uvicorn'],
+      models: [
+        {
+          name: 'mlx-community/whisper-large-v3-turbo',
+          size: '~1.5GB',
+          autoDownload: true,
+          isDefault: true,
+          description: '速度快、质量高（推荐）',
+        },
+        {
+          name: 'mlx-community/whisper-large-v3-mlx',
+          size: '~3GB',
+          autoDownload: true,
+          description: '最高质量，速度较慢',
+        },
+        {
+          name: 'mlx-community/whisper-small-mlx',
+          size: '~500MB',
+          autoDownload: true,
+          description: '轻量版，适合低配机器',
+        },
+      ],
+      estimatedMinutes: 5,
     },
     scripts: {
       install: 'scripts/services/whisper-install.sh',
@@ -33,6 +57,16 @@ const KNOWN_SERVICES: ServiceManifest[] = [
       runtime: 'python3.10+',
       venvPath: '~/.cat-cafe/tts-venv',
       packages: ['mlx-audio', 'fastapi', 'uvicorn'],
+      models: [
+        {
+          name: 'mlx-community/Kokoro-82M-bf16',
+          size: '~160MB',
+          autoDownload: true,
+          isDefault: true,
+          description: '轻量高质量语音合成',
+        },
+      ],
+      estimatedMinutes: 3,
     },
     scripts: {
       install: 'scripts/services/tts-install.sh',
@@ -52,6 +86,16 @@ const KNOWN_SERVICES: ServiceManifest[] = [
       runtime: 'python3.10+',
       venvPath: '~/.cat-cafe/embed-venv',
       packages: ['sentence-transformers', 'fastapi', 'uvicorn'],
+      models: [
+        {
+          name: 'mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ',
+          size: '~400MB',
+          autoDownload: true,
+          isDefault: true,
+          description: '轻量语义向量模型',
+        },
+      ],
+      estimatedMinutes: 3,
     },
     scripts: {
       install: 'scripts/services/embed-install.sh',
@@ -71,6 +115,28 @@ const KNOWN_SERVICES: ServiceManifest[] = [
       runtime: 'python3.10+',
       venvPath: '~/.cat-cafe/llm-venv',
       packages: ['mlx-vlm', 'fastapi', 'uvicorn', 'pydantic'],
+      models: [
+        {
+          name: 'mlx-community/Qwen3.5-35B-A3B-4bit',
+          size: '~20GB',
+          autoDownload: true,
+          isDefault: true,
+          description: '高质量纠错，需大内存(48GB+)',
+        },
+        {
+          name: 'mlx-community/Qwen2.5-7B-Instruct-4bit',
+          size: '~4GB',
+          autoDownload: true,
+          description: '轻量版，16GB内存可用',
+        },
+        {
+          name: 'mlx-community/Qwen2.5-14B-Instruct-4bit',
+          size: '~8GB',
+          autoDownload: true,
+          description: '中等质量，32GB内存推荐',
+        },
+      ],
+      estimatedMinutes: 30,
     },
     scripts: {
       install: 'scripts/services/llm-postprocess-install.sh',
@@ -82,15 +148,32 @@ const KNOWN_SERVICES: ServiceManifest[] = [
   },
 ];
 
-export function resolveHealthUrl(manifest: ServiceManifest): string | null {
-  if (!manifest.port || !manifest.healthEndpoint) return null;
+export function resolveServicePort(manifest: ServiceManifest): number | null {
+  const cfg = getServiceConfig(manifest.id);
+  if (cfg.port) return cfg.port;
+  if (manifest.port) return manifest.port;
+  return null;
+}
+
+export function resolveServiceEndpoint(idOrManifest: string | ServiceManifest): string | null {
+  const manifest = typeof idOrManifest === 'string' ? KNOWN_SERVICES.find((s) => s.id === idOrManifest) : idOrManifest;
+  if (!manifest) return null;
+
+  const port = resolveServicePort(manifest);
+  if (port) return `http://localhost:${port}`;
+
   for (const envVar of manifest.configVars) {
     const val = process.env[envVar];
-    if (!val) continue;
-    if (val.startsWith('http')) return `${val}${manifest.healthEndpoint}`;
-    if (/^\d+$/.test(val)) return `http://127.0.0.1:${val}${manifest.healthEndpoint}`;
+    if (val?.startsWith('http')) return val;
   }
-  return `http://127.0.0.1:${manifest.port}${manifest.healthEndpoint}`;
+  return null;
+}
+
+export function resolveHealthUrl(manifest: ServiceManifest): string | null {
+  if (!manifest.healthEndpoint) return null;
+  const endpoint = resolveServiceEndpoint(manifest);
+  if (!endpoint) return null;
+  return `${endpoint}${manifest.healthEndpoint}`;
 }
 
 async function probeHealth(
@@ -105,6 +188,7 @@ async function probeHealth(
     const res = await fetch(url, { signal: controller.signal });
     if (!res.ok) return { status: 'error', error: `HTTP ${res.status}` };
     const detail = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (detail.status === 'loading') return { status: 'starting', detail };
     return { status: 'running', detail };
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
@@ -135,6 +219,23 @@ export function checkInstalled(manifest: ServiceManifest): boolean {
   return existsSync(resolveVenvPath(venv));
 }
 
+function isScriptRunning(scriptPath: string | undefined): boolean {
+  if (!scriptPath) return false;
+  const name = basename(scriptPath);
+  try {
+    const out = execSync(`pgrep -f "${name}"`, { encoding: 'utf-8', timeout: 2000 });
+    return out.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function detectProcessStatus(manifest: ServiceManifest): ServiceStatus | null {
+  if (isScriptRunning(manifest.scripts.install)) return 'installing';
+  if (isScriptRunning(manifest.scripts.start)) return 'starting';
+  return null;
+}
+
 export function getKnownServices(): ServiceManifest[] {
   return KNOWN_SERVICES;
 }
@@ -145,10 +246,18 @@ export function getServiceById(id: string): ServiceManifest | undefined {
 
 export async function getServiceState(manifest: ServiceManifest): Promise<ServiceState> {
   const probe = await probeHealth(manifest);
+  let { status } = probe;
+  if (status === 'stopped' || status === 'unknown') {
+    const processStatus = detectProcessStatus(manifest);
+    if (processStatus) status = processStatus;
+  }
+  const config = getServiceConfig(manifest.id);
   return {
     manifest,
-    status: probe.status,
+    status,
     installed: checkInstalled(manifest),
+    enabled: config.enabled,
+    selectedModel: config.selectedModel,
     lastChecked: Date.now(),
     healthDetail: probe.detail,
     error: probe.error,
@@ -157,31 +266,4 @@ export async function getServiceState(manifest: ServiceManifest): Promise<Servic
 
 export async function getAllServiceStates(): Promise<ServiceState[]> {
   return Promise.all(KNOWN_SERVICES.map(getServiceState));
-}
-
-const cachedStates = new Map<string, ServiceState>();
-let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
-
-export function startHealthHeartbeat(intervalMs = 60_000): void {
-  if (heartbeatInterval) return;
-  heartbeatInterval = setInterval(async () => {
-    for (const manifest of KNOWN_SERVICES) {
-      const state = await getServiceState(manifest);
-      cachedStates.set(manifest.id, state);
-    }
-  }, intervalMs);
-  if (typeof heartbeatInterval === 'object' && 'unref' in heartbeatInterval) {
-    heartbeatInterval.unref();
-  }
-}
-
-export function stopHealthHeartbeat(): void {
-  if (heartbeatInterval) {
-    clearInterval(heartbeatInterval);
-    heartbeatInterval = null;
-  }
-}
-
-export function getCachedServiceState(id: string): ServiceState | undefined {
-  return cachedStates.get(id);
 }

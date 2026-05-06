@@ -3,6 +3,7 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
+import webpush from 'web-push';
 import { z } from 'zod';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { PushNotificationService } from '../domains/cats/services/push/PushNotificationService.js';
@@ -123,6 +124,17 @@ export const pushRoutes: FastifyPluginAsync<PushRoutesOptions> = async (app, opt
     }
   }
 
+  // POST /api/push/generate-vapid — 一键生成 VAPID 密钥对
+  app.post('/api/push/generate-vapid', async (request, reply) => {
+    const userId = resolveUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required (X-Cat-Cafe-User header)' };
+    }
+    const keys = webpush.generateVAPIDKeys();
+    return { publicKey: keys.publicKey, privateKey: keys.privateKey };
+  });
+
   // GET /api/push/vapid-public-key — 前端获取 VAPID 公钥
   // enabled = pushService is fully configured (both VAPID keys present)
   app.get('/api/push/vapid-public-key', async () => {
@@ -141,10 +153,12 @@ export const pushRoutes: FastifyPluginAsync<PushRoutesOptions> = async (app, opt
     }
 
     const subscriptions = await pushSubscriptionStore.listByUser(userId);
+    const envHasVapid = Boolean(process.env.VAPID_PUBLIC_KEY) && Boolean(process.env.VAPID_PRIVATE_KEY);
     const capability = {
       enabled: Boolean(vapidPublicKey) && Boolean(pushService),
-      vapidPublicKeyConfigured: Boolean(vapidPublicKey),
+      vapidPublicKeyConfigured: Boolean(vapidPublicKey) || envHasVapid,
       pushServiceConfigured: Boolean(pushService),
+      pendingRestart: envHasVapid && !pushService,
     };
     const delivery = getDeliverySnapshot(userId);
     const errorHints: string[] = [];

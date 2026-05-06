@@ -280,7 +280,7 @@ export function ThreadItem({
                 <span
                   key={catId}
                   className="inline-block w-1.5 h-1.5 rounded-full"
-                  style={{ backgroundColor: getCatById(catId)?.color.primary ?? '#9CA3AF' }}
+                  style={{ backgroundColor: getCatById(catId)?.color.primary ?? 'var(--console-cat-fallback)' }}
                 />
               ))}
             </div>

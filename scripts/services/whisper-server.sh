@@ -12,7 +12,7 @@
 set -euo pipefail
 
 VENV_DIR="${HOME}/.cat-cafe/whisper-venv"
-MODEL="${1:-mlx-community/whisper-large-v3-turbo}"
+MODEL="${WHISPER_MODEL:-${1:-mlx-community/whisper-large-v3-turbo}}"
 PORT="${WHISPER_PORT:-9876}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

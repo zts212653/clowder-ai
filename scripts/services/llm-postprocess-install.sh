@@ -16,4 +16,13 @@ source "$VENV_DIR/bin/activate"
 
 echo "  安装依赖: mlx-vlm fastapi uvicorn pydantic ..."
 pip install --quiet mlx-vlm "httpx[socks]" torchvision fastapi uvicorn pydantic
+
+MODEL="${LLM_POSTPROCESS_MODEL:-mlx-community/Qwen3.5-35B-A3B-4bit}"
+echo "  预下载模型: $MODEL ..."
+python3 -c "
+import sys
+from huggingface_hub import snapshot_download
+snapshot_download(sys.argv[1])
+print('模型下载完成。')
+" "$MODEL"
 echo "安装完成。"

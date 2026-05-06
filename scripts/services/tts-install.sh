@@ -16,4 +16,13 @@ source "$VENV_DIR/bin/activate"
 
 echo "  安装依赖: mlx-audio + misaki[zh] ..."
 pip install --quiet mlx-audio 'misaki[zh]' fastapi uvicorn 'httpx[socks]' num2words spacy phonemizer
+
+TTS_MODEL="${TTS_MODEL:-mlx-community/Kokoro-82M-bf16}"
+echo "  预下载模型: $TTS_MODEL ..."
+python3 -c "
+import sys
+from huggingface_hub import snapshot_download
+snapshot_download(sys.argv[1])
+print('模型下载完成。')
+" "$TTS_MODEL"
 echo "安装完成。"

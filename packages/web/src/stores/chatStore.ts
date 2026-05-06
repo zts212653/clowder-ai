@@ -968,14 +968,13 @@ export interface ChatState {
   pendingChatInsert: { threadId: string; text: string } | null;
   setPendingChatInsert: (insert: { threadId: string; text: string } | null) => void;
 
-  // ── Hub modal (F12) ──
-  // F174 D2b-3 cloud P2 #1403: subTabNonce bumps on every openHub call so a
-  // second deep-link with the SAME (tab, subTab) still triggers a re-sync —
-  // value-only diff in HubObservabilityTab's useEffect would silently no-op.
-  hubState: { open: boolean; tab?: string; subTab?: string; subTabNonce?: number } | null;
-  /** F174 D2b-3: optional subTab for deep-linking into observability sub-routes etc. */
-  openHub: (tab?: string, subTab?: string) => void;
-  closeHub: () => void;
+  // ── Standalone member editor (avatar click) ──
+  memberEditorTarget: string | null;
+  openMemberEditor: (catId: string) => void;
+  closeMemberEditor: () => void;
+  coCreatorEditorOpen: boolean;
+  openCoCreatorEditor: () => void;
+  closeCoCreatorEditor: () => void;
 
   // ── F079: Vote modal ──
   showVoteModal: boolean;
@@ -1320,19 +1319,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
   pendingChatInsert: null,
   setPendingChatInsert: (insert) => set({ pendingChatInsert: insert }),
 
-  hubState: null,
-  openHub: (tab, subTab) =>
-    set({
-      hubState: {
-        open: true,
-        tab,
-        subTab,
-        // Per-invocation nonce so HubObservabilityTab.useEffect fires even when
-        // (tab, subTab) values repeat (e.g. user navigates away then re-clicks 详情).
-        subTabNonce: Date.now() + Math.random(),
-      },
-    }),
-  closeHub: () => set({ hubState: null }),
+  memberEditorTarget: null,
+  openMemberEditor: (catId) => set({ memberEditorTarget: catId }),
+  closeMemberEditor: () => set({ memberEditorTarget: null }),
+  coCreatorEditorOpen: false,
+  openCoCreatorEditor: () => set({ coCreatorEditorOpen: true }),
+  closeCoCreatorEditor: () => set({ coCreatorEditorOpen: false }),
+
   showVoteModal: false,
   setShowVoteModal: (show) => set({ showVoteModal: show }),
 

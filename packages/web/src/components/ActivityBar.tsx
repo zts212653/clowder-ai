@@ -1,9 +1,13 @@
 'use client';
 
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useCallback } from 'react';
 import { useCafeTheme } from '@/hooks/useCafeTheme';
+import { usePinnedSections } from '@/hooks/usePinnedSections';
+import { HubIcon } from './hub-icons';
 import { MemoryIcon } from './icons/MemoryIcon';
-import { assignDocumentRoute, CLASSIC_WORLD_PREFIX, getThreadIdFromPathname } from './ThreadSidebar/thread-navigation';
+import { SETTINGS_SECTIONS } from './settings/settings-nav-config';
+import { CLASSIC_WORLD_PREFIX, getThreadIdFromPathname } from './ThreadSidebar/thread-navigation';
 
 const NAV_ITEMS = [
   { id: 'home', path: '/', label: '对话', match: (p: string) => p === '/' || p.startsWith('/thread/') },
@@ -90,22 +94,92 @@ interface ActivityBarProps {
   className?: string;
 }
 
+function PinnedSections({ pinned, onNav }: { pinned: readonly string[]; onNav: (path: string) => void }) {
+  const searchParams = useSearchParams();
+  const activeSection = searchParams?.get('s') ?? '';
+  const isStandalone = searchParams?.get('standalone') === '1';
+
+  const pinnedSections = pinned
+    .map((id) => SETTINGS_SECTIONS.find((s) => s.id === id))
+    .filter((s): s is (typeof SETTINGS_SECTIONS)[number] => s != null);
+
+  if (pinnedSections.length === 0) return null;
+
+  return (
+    <>
+      <div className="my-1 h-px w-6 bg-[var(--console-border-soft)] opacity-50" />
+      {pinnedSections.map((sec) => {
+        const active = isStandalone && activeSection === sec.id;
+        return (
+          <button
+            key={sec.id}
+            type="button"
+            onClick={() => onNav(`/settings?s=${sec.id}&standalone=1`)}
+            className={`flex h-10 w-10 items-center justify-center rounded-[9px] transition-all ${
+              active
+                ? 'bg-[var(--console-rail-active)] shadow-[0_5px_14px_rgba(43,37,32,0.07)]'
+                : 'bg-[var(--console-rail-item)] hover:bg-[var(--console-hover-bg)]'
+            }`}
+            title={sec.label}
+            aria-current={active ? 'page' : undefined}
+          >
+            <HubIcon name={sec.icon} className="h-[18px] w-[18px]" />
+          </button>
+        );
+      })}
+    </>
+  );
+}
+
+function SettingsButton({ pathname, onNav }: { pathname: string; onNav: (path: string) => void }) {
+  const searchParams = useSearchParams();
+  const isSettingsRoute = pathname.startsWith('/settings');
+  const isStandalone = isSettingsRoute && searchParams?.get('standalone') === '1';
+  const isSettings = isSettingsRoute && !isStandalone;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onNav('/settings')}
+      className={`flex h-10 w-10 items-center justify-center rounded-[9px] transition-all ${
+        isSettings
+          ? 'bg-[var(--console-rail-active)] shadow-[0_5px_14px_rgba(43,37,32,0.07)]'
+          : 'bg-[var(--console-rail-item)] hover:bg-[var(--console-hover-bg)]'
+      }`}
+      title="设置"
+      aria-current={isSettings ? 'page' : undefined}
+      data-guide-id="hub.trigger"
+    >
+      <SettingsIcon className="h-5 w-5" />
+    </button>
+  );
+}
+
 export function ActivityBar({ className }: ActivityBarProps) {
   const pathname = usePathname() ?? '/';
+  const router = useRouter();
   const { toggleTheme } = useCafeTheme();
+  const { pinned } = usePinnedSections();
 
-  const handleNav = (path: string) => {
-    const prefix = pathname.startsWith(CLASSIC_WORLD_PREFIX) ? CLASSIC_WORLD_PREFIX : '';
-    const threadId = getThreadIdFromPathname(pathname, prefix);
-    let referrer = threadId !== 'default' ? threadId : null;
-    if (!referrer && typeof window !== 'undefined') {
-      referrer = new URLSearchParams(window.location.search).get('from');
-    }
-    const from = referrer && path !== '/' ? `?from=${encodeURIComponent(referrer)}` : '';
-    assignDocumentRoute(`${path}${from}`, typeof window !== 'undefined' ? window : undefined);
-  };
-
-  const isSettings = pathname.startsWith('/settings');
+  const handleNav = useCallback(
+    (path: string) => {
+      const prefix = pathname.startsWith(CLASSIC_WORLD_PREFIX) ? CLASSIC_WORLD_PREFIX : '';
+      const threadId = getThreadIdFromPathname(pathname, prefix);
+      let referrer = threadId !== 'default' ? threadId : null;
+      if (!referrer && typeof window !== 'undefined') {
+        referrer = new URLSearchParams(window.location.search).get('from');
+      }
+      if (referrer && path === '/') {
+        router.push(`${prefix}/thread/${encodeURIComponent(referrer)}`);
+      } else if (referrer) {
+        const sep = path.includes('?') ? '&' : '?';
+        router.push(`${path}${sep}from=${encodeURIComponent(referrer)}`);
+      } else {
+        router.push(path);
+      }
+    },
+    [pathname, router],
+  );
 
   return (
     <nav
@@ -127,11 +201,17 @@ export function ActivityBar({ className }: ActivityBarProps) {
             }`}
             title={item.label}
             aria-current={active ? 'page' : undefined}
+            data-guide-id={`nav.${item.id}`}
           >
             <Icon className="h-5 w-5" />
           </button>
         );
       })}
+
+      <Suspense>
+        <PinnedSections pinned={pinned} onNav={handleNav} />
+      </Suspense>
+
       <div className="mt-auto flex flex-col items-center gap-1.5">
         <button
           type="button"
@@ -141,19 +221,20 @@ export function ActivityBar({ className }: ActivityBarProps) {
         >
           <ThemeIcon className="h-5 w-5" />
         </button>
-        <button
-          type="button"
-          onClick={() => handleNav('/settings')}
-          className={`flex h-10 w-10 items-center justify-center rounded-[9px] transition-all ${
-            isSettings
-              ? 'bg-[var(--console-rail-active)] shadow-[0_5px_14px_rgba(43,37,32,0.07)]'
-              : 'bg-[var(--console-rail-item)] hover:bg-[var(--console-hover-bg)]'
-          }`}
-          title="设置"
-          aria-current={isSettings ? 'page' : undefined}
+        <Suspense
+          fallback={
+            <button
+              type="button"
+              className="flex h-10 w-10 items-center justify-center rounded-[9px] bg-[var(--console-rail-item)] transition-all"
+              title="设置"
+              data-guide-id="hub.trigger"
+            >
+              <SettingsIcon className="h-5 w-5" />
+            </button>
+          }
         >
-          <SettingsIcon className="h-5 w-5" />
-        </button>
+          <SettingsButton pathname={pathname} onNav={handleNav} />
+        </Suspense>
       </div>
     </nav>
   );

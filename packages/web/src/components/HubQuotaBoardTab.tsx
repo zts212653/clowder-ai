@@ -198,7 +198,7 @@ export function HubQuotaBoardTab() {
   ];
 
   return (
-    <section className="space-y-3 rounded-[20px] border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-[18px]">
+    <section className="console-list-card space-y-3 rounded-2xl p-[18px] shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
       <div className="flex items-center justify-between gap-3">
         <h3 className="text-[17px] font-bold text-cafe">配额看板</h3>
         <div className="flex items-center gap-3">
@@ -228,7 +228,7 @@ export function HubQuotaBoardTab() {
         <PoolGroupSection key={group.id} group={group} />
       ))}
 
-      <section className="rounded-[16px] border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-4 py-3">
+      <section className="rounded-2xl bg-[var(--console-field-bg)] px-4 py-3">
         <p className="text-[13px] font-bold text-[var(--cafe-accent)]">更新说明</p>
         <p className="mt-1 text-[13px] leading-6 text-cafe-muted">
           1. 从猫粮看板改名为配额看板
@@ -247,7 +247,7 @@ export function HubQuotaBoardTab() {
 function PoolGroupSection({ group }: { group: AccountQuotaPoolGroup }) {
   return (
     <section
-      className={`rounded-[20px] border px-4 py-4 ${group.tone === 'success' ? 'border-conn-emerald-ring bg-conn-emerald-bg' : 'border-[var(--console-border-soft)] bg-[var(--console-card-bg)]'}`}
+      className={`rounded-2xl px-4 py-4 ${group.tone === 'success' ? 'bg-conn-emerald-bg' : 'bg-[var(--console-field-bg)]'}`}
     >
       <h4 className="text-[17px] font-bold text-cafe">{group.title}</h4>
       <p
@@ -290,7 +290,7 @@ function PoolSection({
   const dotClass = worstUtil >= 0 ? riskDotClass(worstUtil) : 'text-cafe-muted';
 
   return (
-    <div className="rounded-[16px] border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-4 py-3">
+    <div className="console-list-card rounded-2xl px-4 py-3 shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
       <div className="mb-1 flex flex-wrap items-center gap-2">
         <span className={`text-xs ${dotClass}`} aria-hidden="true">
           {'\u25CF'}

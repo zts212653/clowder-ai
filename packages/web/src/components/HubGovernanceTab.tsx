@@ -134,7 +134,7 @@ export function HubGovernanceTab() {
         </button>
       </div>
 
-      <div className="border rounded-lg overflow-hidden">
+      <div className="console-list-card rounded-2xl overflow-hidden shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
         <table className="w-full text-sm">
           <thead className="bg-cafe-surface-elevated text-left">
             <tr>

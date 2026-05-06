@@ -25,6 +25,7 @@ function buildVoiceConfig(form: HubCatEditorFormState) {
     ...(Number.isFinite(temperature) && temperature >= 0 ? { temperature } : {}),
   };
 }
+
 import { defaultMcpSupportForClient } from './hub-cat-editor.protocols';
 
 function trimText(value: unknown): string {

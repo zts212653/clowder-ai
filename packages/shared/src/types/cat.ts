@@ -6,7 +6,6 @@
 import type { CliConfig, ContextBudget } from './cat-breed.js';
 import type { CatId, SessionId } from './ids.js';
 import type { VoiceConfig } from './tts.js';
-import { createCatId } from './ids.js';
 
 /**
  * CLI client identity used to invoke a cat (e.g. 'anthropic' → claude CLI, 'openai' → codex CLI).

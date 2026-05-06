@@ -184,31 +184,26 @@ export function DirectoryPickerModal({
     // biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop click-to-close
     <div
       role="presentation"
-      className="fixed inset-0 bg-black/30 flex items-center justify-center z-50"
+      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4"
       onClick={(e) => {
         if (modalRef.current && !modalRef.current.contains(e.target as Node)) onCancel();
       }}
     >
       <div
         ref={modalRef}
-        className="bg-cafe-surface rounded-xl border border-[var(--cafe-border)] shadow-2xl w-full max-w-[640px] mx-4 max-h-[85vh] flex flex-col overflow-hidden"
+        className="w-full max-w-[640px] max-h-[85vh] flex flex-col overflow-hidden rounded-[28px] bg-[var(--console-card-bg)] shadow-[0_22px_48px_rgba(43,33,26,0.13)]"
       >
         {/* ── Header + Title ── */}
-        <div className="px-5 pt-4 pb-3 border-b border-[var(--console-border-soft)]">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-base font-semibold text-cafe-black">新建对话</h2>
+        <div className="px-7 pt-6 pb-4">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-[13px] font-extrabold text-[var(--console-modal-title)]">新建对话</p>
             <button
               type="button"
               onClick={onCancel}
-              className="text-cafe-muted hover:text-cafe-secondary transition-colors p-1"
+              aria-label="关闭"
+              className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-[var(--console-modal-close-bg)] text-lg font-extrabold leading-none text-[var(--console-modal-close-fg)] transition hover:opacity-80"
             >
-              <svg aria-hidden="true" className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
-                <path
-                  fillRule="evenodd"
-                  d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-                  clipRule="evenodd"
-                />
-              </svg>
+              &times;
             </button>
           </div>
           <input
@@ -217,12 +212,12 @@ export function DirectoryPickerModal({
             onChange={(e) => setThreadTitle(e.target.value)}
             placeholder="对话标题（可选）"
             maxLength={200}
-            className="w-full rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface px-3 py-2 text-sm focus:border-cafe-accent focus:outline-none focus:ring-1 focus:ring-cafe-accent/20"
+            className="w-full rounded-[10px] border border-transparent bg-[var(--console-field-bg)] px-3 h-10 text-[13px] text-cafe outline-none placeholder:text-cafe-muted transition focus:border-cafe-accent focus:ring-2 focus:ring-cafe-accent/30"
           />
         </div>
 
         {/* ── Project list (PRIMARY ACTION — takes most space, hidden when browser is open) ── */}
-        <div className={`overflow-y-auto px-5 py-3 space-y-1 ${showBrowser ? 'hidden' : 'flex-1 min-h-[180px]'}`}>
+        <div className={`overflow-y-auto px-7 py-3 space-y-1 ${showBrowser ? 'hidden' : 'flex-1 min-h-[180px]'}`}>
           <div className="text-[10px] text-cafe-muted font-medium mb-1">选择项目</div>
 
           {cwdPath && !existingProjects.includes(cwdPath) && (
@@ -308,7 +303,7 @@ export function DirectoryPickerModal({
 
         {/* ── Options bar: feat + pin + cats toggle (hidden when browser is open) ── */}
         <div
-          className={`px-5 py-2 border-t border-[var(--console-border-soft)] flex items-center gap-3 flex-wrap ${showBrowser ? 'hidden' : ''}`}
+          className={`px-7 py-2 border-t border-[var(--console-border-soft)] flex items-center gap-3 flex-wrap ${showBrowser ? 'hidden' : ''}`}
         >
           {backlogItems.length > 0 && (
             <div className="flex-1 min-w-[140px]">
@@ -359,7 +354,7 @@ export function DirectoryPickerModal({
 
         {/* ── Cat selector (collapsed by default, hidden when browser is open) ── */}
         {catsExpanded && !showBrowser && (
-          <div className="px-5 py-2 border-t border-[var(--console-border-soft)] overflow-y-auto max-h-[40vh]">
+          <div className="px-7 py-2 border-t border-[var(--console-border-soft)] overflow-y-auto max-h-[40vh]">
             <CatSelector selectedCats={selectedCats} onSelectionChange={setSelectedCats} />
             {/* F33: Session binding */}
             {selectedCats.length > 0 && (
@@ -426,7 +421,7 @@ export function DirectoryPickerModal({
         )}
 
         {/* ── Bottom: browse button + path input + confirm ── */}
-        <div className="px-5 py-3 border-t border-[var(--console-border-soft)] space-y-2 flex-shrink-0">
+        <div className="px-7 py-4 border-t border-[var(--console-border-soft)] space-y-2 flex-shrink-0">
           <div className="flex gap-2">
             <button
               type="button"
@@ -448,7 +443,7 @@ export function DirectoryPickerModal({
                 if (e.key === 'Enter' && !ime.isComposing()) handlePathSubmit();
               }}
               placeholder="或输入路径..."
-              className="flex-1 rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface px-3 py-2 text-xs focus:border-cafe-accent focus:outline-none focus:ring-1 focus:ring-cafe-accent/20"
+              className="flex-1 rounded-[10px] border border-transparent bg-[var(--console-field-bg)] px-3 h-10 text-[13px] text-cafe outline-none placeholder:text-cafe-muted transition focus:border-cafe-accent focus:ring-2 focus:ring-cafe-accent/30"
             />
             {pathInput.trim() && (
               <button

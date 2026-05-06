@@ -119,7 +119,7 @@ export default function HubPermissionsTab({ connectorId, connectorLabel }: HubPe
         <span>群聊权限</span>
       </div>
 
-      <div className="border border-[var(--console-border-soft)] rounded-xl overflow-hidden">
+      <div className="console-list-card rounded-2xl overflow-hidden shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
         {/* Header */}
         <div className="bg-conn-emerald-bg px-4 py-3 flex items-center gap-3">
           <div className="w-9 h-9 rounded-lg bg-conn-emerald-ring flex items-center justify-center text-conn-emerald-text">

@@ -55,10 +55,10 @@ function CatStatusCard({
   return (
     <div
       className="flex items-center gap-1.5 px-2.5 py-1 rounded-full"
-      style={{ backgroundColor: bgColor ?? '#f3f4f6' }}
+      style={{ backgroundColor: bgColor ?? 'var(--console-pill-bg)' }}
     >
       <StatusDot status={status} />
-      <span className="text-xs font-medium" style={{ color: cat?.color.primary ?? '#4b5563' }}>
+      <span className="text-xs font-medium" style={{ color: cat?.color.primary ?? 'var(--cafe-text-secondary)' }}>
         {cat ? formatCatName(cat) : catId}
       </span>
       {timeDisplay && <span className="text-xs text-cafe-secondary ml-0.5">{timeDisplay}</span>}

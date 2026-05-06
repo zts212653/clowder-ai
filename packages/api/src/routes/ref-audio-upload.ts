@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import multipart from '@fastify/multipart';
 import type { FastifyPluginAsync } from 'fastify';
+import { resolveUserId } from '../utils/request-identity.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
 
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024; // 10 MiB
@@ -13,9 +14,16 @@ function detectAudioType(buffer: Buffer): DetectedAudioType | null {
   if (buffer.length < 12) return null;
   // WAV: "RIFF" .... "WAVE"
   if (
-    buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
-    buffer[8] === 0x57 && buffer[9] === 0x41 && buffer[10] === 0x56 && buffer[11] === 0x45
-  ) return 'wav';
+    buffer[0] === 0x52 &&
+    buffer[1] === 0x49 &&
+    buffer[2] === 0x46 &&
+    buffer[3] === 0x46 &&
+    buffer[8] === 0x57 &&
+    buffer[9] === 0x41 &&
+    buffer[10] === 0x56 &&
+    buffer[11] === 0x45
+  )
+    return 'wav';
   // MP3: ID3 tag or MPEG sync word
   if (buffer[0] === 0x49 && buffer[1] === 0x44 && buffer[2] === 0x33) return 'mp3';
   if (buffer[0] === 0xff && (buffer[1]! & 0xe0) === 0xe0) return 'mp3';
@@ -43,6 +51,10 @@ export const refAudioUploadRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post('/api/uploads/ref-audio', async (req, reply) => {
+    if (!resolveUserId(req)) {
+      return reply.status(401).send({ error: 'Identity required', code: 'AUTH_REQUIRED' });
+    }
+
     const file = await req.file();
     if (!file) {
       return reply.status(400).send({ error: 'No file uploaded', code: 'NO_FILE' });

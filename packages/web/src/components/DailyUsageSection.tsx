@@ -87,7 +87,7 @@ export function DailyUsageSection() {
   const grandTotal = report?.grandTotal;
 
   return (
-    <section className="rounded-xl border border-[var(--console-border-soft)] bg-cafe-surface p-4 space-y-3">
+    <section className="console-list-card rounded-2xl shadow-[0_12px_30px_rgba(43,33,26,0.08)] p-4 space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-cafe">近 7 日猫粮消耗</h3>
         <button

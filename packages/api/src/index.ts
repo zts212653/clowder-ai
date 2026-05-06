@@ -118,7 +118,6 @@ import { securityHeadersPlugin } from './infrastructure/security-headers.js';
 import { sessionAuthPlugin, sessionRoute } from './infrastructure/session-auth.js';
 import { SocketManager } from './infrastructure/websocket/index.js';
 import { avatarsRoutes } from './routes/avatars.js';
-import { refAudioUploadRoutes } from './routes/ref-audio-upload.js';
 import { CallbackAuthSystemMessageNotifier } from './routes/callback-auth-system-message.js';
 import { configSecretsRoutes } from './routes/config-secrets.js';
 import { connectorWebhookRoutes } from './routes/connector-webhooks.js';
@@ -202,6 +201,7 @@ import {
 import { knowledgeFeedRoutes } from './routes/knowledge-feed.js';
 import { marketplaceRoutes } from './routes/marketplace.js';
 import { previewRoutes } from './routes/preview.js';
+import { refAudioUploadRoutes } from './routes/ref-audio-upload.js';
 import { terminalRoutes } from './routes/terminal.js';
 import { threadExportRoutes } from './routes/thread-export.js';
 import { ApiInstanceLease, type ApiInstanceLeaseInvalidation } from './services/ApiInstanceLease.js';
@@ -1911,7 +1911,7 @@ async function main(): Promise<void> {
   const ttsRegistry = new TtsRegistry();
   ttsRegistry.register(new MlxAudioTtsProvider());
   const ttsCacheDir = process.env.TTS_CACHE_DIR ?? './data/tts-cache';
-  await app.register(ttsRoutes, { ttsRegistry, cacheDir: ttsCacheDir });
+  await app.register(ttsRoutes, { ttsRegistry, cacheDir: ttsCacheDir, messageStore });
   initVoiceBlockSynthesizer(ttsRegistry, ttsCacheDir);
   initStreamingTtsRegistry(ttsRegistry);
   startTtsCacheCleaner(ttsCacheDir);
@@ -1919,7 +1919,11 @@ async function main(): Promise<void> {
   // C1+C2: Web Push Notifications (optional — requires VAPID keys)
   const vapidPublicKey = process.env.VAPID_PUBLIC_KEY ?? '';
   const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY ?? '';
-  const vapidSubject = process.env.VAPID_SUBJECT ?? 'mailto:cat-cafe@localhost';
+  const vapidSubjectRaw = process.env.VAPID_SUBJECT ?? 'mailto:cat-cafe@localhost';
+  const vapidSubject =
+    vapidSubjectRaw.includes('@') && !vapidSubjectRaw.startsWith('mailto:') && !vapidSubjectRaw.startsWith('http')
+      ? `mailto:${vapidSubjectRaw}`
+      : vapidSubjectRaw;
   const pushSubscriptionStore = createPushSubscriptionStore(redis);
   const pushService =
     vapidPublicKey && vapidPrivateKey

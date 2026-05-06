@@ -160,7 +160,7 @@ export function HubToolUsageTab() {
 function SummaryCards({ total, byCategory }: { total: number; byCategory: Record<string, number> }) {
   return (
     <div className="grid grid-cols-4 gap-3">
-      <div className="rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3 text-center">
+      <div className="console-list-card rounded-2xl shadow-[0_12px_30px_rgba(43,33,26,0.08)] p-3 text-center">
         <div className="text-2xl font-bold text-cafe">{total.toLocaleString()}</div>
         <div className="text-[11px] text-cafe-muted">总调用</div>
       </div>
@@ -170,7 +170,7 @@ function SummaryCards({ total, byCategory }: { total: number; byCategory: Record
         return (
           <div
             key={cat}
-            className="rounded-xl border border-[var(--console-border-soft)] p-3 text-center"
+            className="rounded-2xl p-3 text-center shadow-[0_12px_30px_rgba(43,33,26,0.08)]"
             style={{ backgroundColor: style.bg }}
           >
             <HubIcon name={style.iconName} className="h-5 w-5" />
@@ -196,7 +196,7 @@ function DailyTrend({ daily }: { daily: ToolUsageReport['daily'] }) {
   const sorted = [...daily].reverse();
 
   return (
-    <section className="space-y-3 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4">
+    <section className="space-y-3 console-list-card rounded-2xl shadow-[0_12px_30px_rgba(43,33,26,0.08)] p-4">
       <div className="flex items-center justify-between">
         <h4 className="text-xs font-semibold text-cafe">每日使用趋势</h4>
         <div className="flex gap-4 text-[10px]">
@@ -269,7 +269,7 @@ function TopToolsTable({ tools }: { tools: ToolUsageReport['topTools'] }) {
         return (
           <section
             key={cat}
-            className="space-y-2 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3"
+            className="space-y-2 console-list-card rounded-2xl shadow-[0_12px_30px_rgba(43,33,26,0.08)] p-3"
           >
             <h4 className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: style.color }}>
               <HubIcon name={style.iconName} className="h-3.5 w-3.5" />
@@ -313,7 +313,7 @@ function ByCatSection({ byCat }: { byCat: Record<string, Record<string, number>>
   if (entries.length === 0) return null;
 
   return (
-    <section className="space-y-3 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4">
+    <section className="space-y-3 console-list-card rounded-2xl shadow-[0_12px_30px_rgba(43,33,26,0.08)] p-4">
       <h4 className="text-xs font-semibold text-cafe">猫猫工具使用分布</h4>
       <div className="space-y-2">
         {entries.map(([catId, cats]) => {

@@ -70,7 +70,7 @@ function WrenchIcon({ color }: { color?: string }) {
       height="11"
       viewBox="0 0 24 24"
       fill="none"
-      stroke={color || '#E2E8F0'}
+      stroke={color || 'var(--console-cli-tool-fg)'}
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -89,7 +89,7 @@ function CheckIcon() {
       height="12"
       viewBox="0 0 24 24"
       fill="none"
-      stroke="#22D3EE"
+      stroke="var(--console-cli-check-fg)"
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -127,7 +127,7 @@ function PawPrint() {
       height="12"
       viewBox="0 0 24 24"
       fill="none"
-      stroke="#64748B"
+      stroke="var(--console-cli-paw-fg)"
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -243,9 +243,9 @@ function ToolRow({
         {/* Status icon */}
         {isActive ? <LoaderIcon color={accentLight} /> : hasResult ? <CheckIcon /> : null}
         {/* Wrench icon — design: #E2E8F0 normal, #F5F3FF active */}
-        <WrenchIcon color={isActive ? accentVeryLight : '#E2E8F0'} />
+        <WrenchIcon color={isActive ? accentVeryLight : 'var(--console-cli-tool-fg)'} />
         {/* Tool label (full) */}
-        <span className="truncate" style={{ color: isActive ? accentVeryLight : '#E2E8F0' }}>
+        <span className="truncate" style={{ color: isActive ? accentVeryLight : 'var(--console-cli-tool-fg)' }}>
           <span className="font-medium">{event.label?.split(' ')[0]}</span>
           {event.label?.includes(' ') && (
             <span

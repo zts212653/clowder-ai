@@ -29,7 +29,7 @@ export function CardBlock({ block, messageId }: { block: RichCardBlock; messageI
         const res = await apiFetch('/api/tts/resynthesize', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: payload.text, catId: payload.catId }),
+          body: JSON.stringify({ text: payload.text, catId: payload.catId, messageId, blockId: block.id }),
         });
 
         if (!res.ok) {

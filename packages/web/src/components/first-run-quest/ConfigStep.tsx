@@ -213,7 +213,7 @@ export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
         onClick={() => onComplete({ accountRef: selectedProfileId, model: selectedModel })}
         className={`w-full rounded-lg py-2.5 text-sm font-semibold transition ${
           canProceed
-            ? 'bg-conn-amber-bg text-[var(--cafe-surface)] hover:bg-conn-amber-bg'
+            ? 'bg-conn-amber-text text-[var(--cafe-surface)] hover:opacity-90'
             : 'cursor-not-allowed bg-cafe-surface-elevated text-cafe-muted'
         }`}
       >

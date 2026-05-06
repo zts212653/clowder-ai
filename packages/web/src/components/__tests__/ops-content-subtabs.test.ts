@@ -42,7 +42,7 @@ describe('OpsContent sub-tabs', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('renders all 6 subsection tabs', () => {
+  it('renders all 5 subsection tabs', () => {
     act(() => {
       root.render(React.createElement(OpsContent));
     });
@@ -50,8 +50,7 @@ describe('OpsContent sub-tabs', () => {
     const tabLabels = buttons.map((b) => b.textContent);
     expect(tabLabels).toContain('使用统计');
     expect(tabLabels).toContain('排行榜');
-    expect(tabLabels).toContain('记忆索引');
-    expect(tabLabels).toContain('系统健康');
+    expect(tabLabels).toContain('治理与刹车');
     expect(tabLabels).toContain('命令速查');
     expect(tabLabels).toContain('紧急救援');
   });

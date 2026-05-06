@@ -12,9 +12,9 @@
  *  - actions: 详情 (跳 HubObservabilityTab) / 重试 (todo) / 隐藏类似消息 (24h opt-out)
  */
 
+import { useRouter } from 'next/navigation';
 import { useCallback, useState } from 'react';
 import type { RichCardBlock } from '@/stores/chat-types';
-import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 
 const REASON_LABEL: Record<string, string> = {
@@ -47,16 +47,15 @@ function formatRelative(failedAt: number): string {
 }
 
 export function CallbackAuthFailureBlock({ block }: { block: RichCardBlock }) {
+  const router = useRouter();
   const meta = block.meta as CallbackAuthMeta | undefined;
   const [hidden, setHidden] = useState(false);
   const [hideError, setHideError] = useState<string | null>(null);
   const [hidePending, setHidePending] = useState(false);
 
-  const openHub = useChatStore((s) => s.openHub);
-
   const handleOpenDetails = useCallback(() => {
-    openHub('observability', 'callback-auth');
-  }, [openHub]);
+    router.push('/settings?s=ops');
+  }, [router]);
 
   const handleHide = useCallback(async () => {
     if (!meta) return;
@@ -184,7 +183,7 @@ export function CallbackAuthFailureBlock({ block }: { block: RichCardBlock }) {
           disabled={hidden || hidePending}
           className="text-[11px] disabled:cursor-not-allowed"
           style={{
-            color: hidden ? '#16A34A' : 'var(--cafe-text-muted)',
+            color: hidden ? 'var(--console-status-connected)' : 'var(--cafe-text-muted)',
             textDecoration: hidden ? 'none' : 'underline',
           }}
           onClick={handleHide}

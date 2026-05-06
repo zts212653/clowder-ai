@@ -29,6 +29,9 @@ export const CONNECTOR_SECRETS_ALLOWLIST: ReadonlySet<string> = new Set([
   'GITHUB_TOKEN',
   'GITHUB_SETUP_NOISE_BOT_LOGINS',
   'GITHUB_MCP_PAT',
+  'VAPID_PUBLIC_KEY',
+  'VAPID_PRIVATE_KEY',
+  'VAPID_SUBJECT',
 ]);
 
 export function isConnectorSecret(name: string): boolean {

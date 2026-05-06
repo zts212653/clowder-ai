@@ -241,7 +241,7 @@ export function WorkspaceFileViewer({
               active={editMode}
               onClick={onToggleEdit}
               title={editMode ? '\u9000\u51FA\u7F16\u8F91' : '\u7F16\u8F91\u6587\u4EF6'}
-              activeClass="bg-conn-emerald-bg/80 text-[var(--cafe-surface)] hover:bg-conn-emerald-bg"
+              activeClass="bg-conn-emerald-text text-[var(--cafe-surface)] hover:opacity-90"
             >
               {editMode ? '\u7F16\u8F91\u4E2D' : '\u7F16\u8F91'}
             </ToolbarBtn>

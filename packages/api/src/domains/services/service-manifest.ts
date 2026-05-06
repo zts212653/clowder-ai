@@ -9,7 +9,14 @@ export interface ServiceManifest {
     runtime?: string;
     venvPath?: string;
     packages?: string[];
-    models?: { name: string; size: string; autoDownload: boolean }[];
+    models?: {
+      name: string;
+      size: string;
+      autoDownload: boolean;
+      isDefault?: boolean;
+      description?: string;
+    }[];
+    estimatedMinutes?: number;
   };
 
   scripts: {
@@ -23,12 +30,27 @@ export interface ServiceManifest {
   configVars: string[];
 }
 
-export type ServiceStatus = 'running' | 'stopped' | 'unknown' | 'error';
+export type ServiceStatus = 'running' | 'starting' | 'installing' | 'stopped' | 'unknown' | 'error';
+
+export interface ServiceConfig {
+  enabled: boolean;
+  selectedModel?: string;
+  port?: number;
+}
+
+export const MODEL_ENV_VARS: Record<string, string> = {
+  'whisper-stt': 'WHISPER_MODEL',
+  'mlx-tts': 'TTS_MODEL',
+  'embedding-model': 'EMBED_MODEL',
+  'llm-postprocess': 'LLM_POSTPROCESS_MODEL',
+};
 
 export interface ServiceState {
   manifest: ServiceManifest;
   status: ServiceStatus;
   installed: boolean;
+  enabled: boolean;
+  selectedModel?: string;
   lastChecked: number | null;
   healthDetail?: Record<string, unknown>;
   error?: string;

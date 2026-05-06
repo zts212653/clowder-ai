@@ -35,16 +35,9 @@ log = logging.getLogger("qwen3-asr")
 
 app = FastAPI(title="Cat Cafe Qwen3-ASR Server")
 
-ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:3001",
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_methods=["POST", "GET"],
     allow_headers=["*"],
 )

@@ -122,6 +122,9 @@
   --conn-green-bubble-bg: #f0fdf4;
   --conn-green-bubble-border: #bbf7d0;
 
+  --push-notify-icon-bg: #e8614d;
+  --push-schedule-icon-bg: #5b8def;
+
   --bg-app: var(--cafe-surface);
   --text-primary: var(--cafe-text);
   --text-secondary: var(--cafe-text-secondary);
@@ -269,6 +272,17 @@
   --conn-green-hover: #bbf7d0;
   --conn-green-bubble-bg: rgba(20, 83, 45, 0.35);
   --conn-green-bubble-border: rgba(21, 128, 61, 0.5);
+  --push-notify-icon-bg: #c74a3a;
+  --push-schedule-icon-bg: #4a78d4;
+  --guide-overlay-bg: rgba(0, 0, 0, 0.72);
+  --guide-cutout-ring: #e09a52;
+  --guide-cutout-shadow: rgba(224, 154, 82, 0.22);
+  --guide-hud-bg: #292524;
+  --guide-hud-border: #44403c;
+  --guide-text-primary: #faf9f7;
+  --guide-text-secondary: #a8a29e;
+  --guide-success: #4ade80;
+  --guide-error: #ef6868;
   --notice-info-label: #8fa8c4;
   --notice-info-icon: #7fa0c8;
   --notice-info-border: rgba(100, 136, 176, 0.32);

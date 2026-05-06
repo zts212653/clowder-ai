@@ -39,10 +39,7 @@ describe('SignalNav', () => {
     });
 
     const links = Array.from(container.querySelectorAll('a'));
-    expect(links.map((link) => link.getAttribute('href'))).toEqual([
-      '/signals',
-      '/signals/sources',
-    ]);
+    expect(links.map((link) => link.getAttribute('href'))).toEqual(['/signals', '/signals/sources']);
     expect(links.map((link) => link.textContent)).toEqual(['收件箱', '信号源']);
     expect(links[0]?.getAttribute('aria-current')).toBe('page');
   });

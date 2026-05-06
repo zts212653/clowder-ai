@@ -51,7 +51,7 @@ export function CatAvatar({
 
   const isStreaming = status === 'streaming';
   const isError = status === 'error';
-  const ringColor = cat?.color.primary ?? '#9CA3AF'; // gray-400 fallback
+  const ringColor = cat?.color.primary ?? 'var(--console-cat-fallback)';
   const glowShadow = isStreaming && cat ? `0 0 10px ${hexToRgba(ringColor, 0.5)}` : undefined;
 
   // F174 D2b-2: dot is ~28% of avatar size (min 8px), absolute positioned bottom-right.
@@ -68,7 +68,7 @@ export function CatAvatar({
         style={{
           width: size,
           height: size,
-          ['--tw-ring-color' as string]: isError ? '#ef4444' : ringColor,
+          ['--tw-ring-color' as string]: isError ? 'var(--console-stop)' : ringColor,
           boxShadow: glowShadow,
         }}
       >

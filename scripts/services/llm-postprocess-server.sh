@@ -13,7 +13,7 @@
 set -euo pipefail
 
 VENV_DIR="${HOME}/.cat-cafe/llm-venv"
-MODEL="${1:-mlx-community/Qwen3.5-35B-A3B-4bit}"
+MODEL="${LLM_POSTPROCESS_MODEL:-${1:-mlx-community/Qwen3.5-35B-A3B-4bit}}"
 PORT="${LLM_POSTPROCESS_PORT:-9878}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

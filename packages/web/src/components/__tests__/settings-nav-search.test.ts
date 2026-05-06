@@ -10,6 +10,9 @@ vi.mock('@/stores/chatStore', () => {
   const hook = Object.assign(() => ({}), { getState: () => ({}) });
   return { useChatStore: hook };
 });
+vi.mock('@/hooks/usePinnedSections', () => ({
+  usePinnedSections: () => ({ pinned: [], pin: vi.fn(), unpin: vi.fn(), isPinned: () => false }),
+}));
 
 import { SettingsNav } from '../settings/SettingsNav';
 
@@ -42,7 +45,7 @@ describe('SettingsNav search filtering', () => {
     act(() => {
       root.render(React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn() }));
     });
-    const buttons = Array.from(container.querySelectorAll('button'));
+    const buttons = Array.from(container.querySelectorAll('[data-active]'));
     expect(buttons).toHaveLength(11);
     expect(container.textContent).toContain('规则与 SOP');
   });
@@ -53,7 +56,7 @@ describe('SettingsNav search filtering', () => {
         React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn(), searchQuery: '语音' }),
       );
     });
-    const buttons = Array.from(container.querySelectorAll('button'));
+    const buttons = Array.from(container.querySelectorAll('[data-active]'));
     expect(buttons).toHaveLength(1);
     expect(buttons[0].textContent).toContain('语音管理');
   });
@@ -64,7 +67,7 @@ describe('SettingsNav search filtering', () => {
         React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn(), searchQuery: 'telegram' }),
       );
     });
-    const buttons = Array.from(container.querySelectorAll('button'));
+    const buttons = Array.from(container.querySelectorAll('[data-active]'));
     expect(buttons).toHaveLength(1);
     expect(buttons[0].textContent).toContain('IM 对接');
   });
@@ -75,7 +78,7 @@ describe('SettingsNav search filtering', () => {
         React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn(), searchQuery: '家规' }),
       );
     });
-    const buttons = Array.from(container.querySelectorAll('button'));
+    const buttons = Array.from(container.querySelectorAll('[data-active]'));
     expect(buttons).toHaveLength(1);
     expect(buttons[0].textContent).toContain('规则与 SOP');
   });
@@ -86,7 +89,7 @@ describe('SettingsNav search filtering', () => {
         React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn(), searchQuery: 'zzzznotfound' }),
       );
     });
-    const buttons = Array.from(container.querySelectorAll('button'));
+    const buttons = Array.from(container.querySelectorAll('[data-active]'));
     expect(buttons).toHaveLength(0);
     expect(container.textContent).toContain('没有匹配的设置分区');
   });
@@ -96,8 +99,8 @@ describe('SettingsNav search filtering', () => {
       root.render(React.createElement(SettingsNav, { activeSection: 'voice', onSelect: vi.fn() }));
     });
 
-    const buttons = Array.from(container.querySelectorAll('button'));
-    const active = buttons.find((b) => b.textContent?.includes('语音管理'));
+    const navButtons = Array.from(container.querySelectorAll('[data-active]'));
+    const active = navButtons.find((b) => b.textContent?.includes('语音管理'));
     expect(active).toBeTruthy();
     expect(active?.className).toContain('font-medium');
   });

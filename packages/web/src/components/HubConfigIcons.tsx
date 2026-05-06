@@ -128,7 +128,7 @@ export function TriangleAlertIcon() {
 export function StatusDotConnected() {
   return (
     <svg className="w-2.5 h-2.5 flex-shrink-0" viewBox="0 0 10 10">
-      <circle cx="5" cy="5" r="5" fill="#16A34A" />
+      <circle cx="5" cy="5" r="5" fill="var(--console-status-connected)" />
     </svg>
   );
 }
@@ -137,7 +137,7 @@ export function StatusDotConnected() {
 export function StatusDotIdle() {
   return (
     <svg className="w-2.5 h-2.5 flex-shrink-0" viewBox="0 0 10 10">
-      <circle cx="5" cy="5" r="4" fill="none" stroke="#9CA3AF" strokeWidth="2" />
+      <circle cx="5" cy="5" r="4" fill="none" stroke="var(--console-status-idle)" strokeWidth="2" />
     </svg>
   );
 }

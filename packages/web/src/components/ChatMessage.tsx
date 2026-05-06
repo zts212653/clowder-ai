@@ -252,9 +252,12 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
             )}
           </div>
         </div>
-        <div
-          className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 ring-2 flex items-center justify-center text-[11px] font-bold text-[var(--cafe-surface)]"
+        <button
+          type="button"
+          onClick={() => useChatStore.getState().openCoCreatorEditor()}
+          className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 ring-2 flex items-center justify-center text-[11px] font-bold text-[var(--cafe-surface)] cursor-pointer hover:opacity-80 transition-opacity"
           style={{ backgroundColor: coCreatorPrimary, boxShadow: `0 0 0 2px ${coCreatorSecondary}` }}
+          title={coCreator.name}
         >
           {coCreator.avatar ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -271,7 +274,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
           ) : (
             'ME'
           )}
-        </div>
+        </button>
       </div>
     );
   }
@@ -293,7 +296,16 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
 
   return (
     <div data-message-id={message.id} className="group flex gap-2 mb-4 items-start">
-      {catData && <CatAvatar catId={message.catId!} size={32} status={message.isStreaming ? 'streaming' : undefined} />}
+      {catData && (
+        <button
+          type="button"
+          onClick={() => useChatStore.getState().openMemberEditor(message.catId!)}
+          className="cursor-pointer flex-shrink-0"
+          title={`查看${formatCatName(catData)}详情`}
+        >
+          <CatAvatar catId={message.catId!} size={32} status={message.isStreaming ? 'streaming' : undefined} />
+        </button>
+      )}
       <div className="max-w-[85%] md:max-w-[75%] min-w-0">
         {catStyle && (
           <div className="mb-1 flex flex-col gap-1 min-w-0">

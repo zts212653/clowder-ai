@@ -20,8 +20,11 @@ import logging
 import signal
 import sys
 import time
+import threading
 
-from mlx_vlm import load, generate
+import mlx.core as mx
+import mlx_lm
+import mlx_vlm
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -33,23 +36,15 @@ log = logging.getLogger("llm-postprocess")
 
 app = FastAPI(title="Cat Cafe LLM Post-Process Server")
 
-ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:3001",
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_methods=["POST", "GET"],
     allow_headers=["*"],
 )
 
-model_ref = {"model": None, "processor": None, "path": "", "loaded": False}
+model_ref = {"model": None, "processor": None, "path": "", "loaded": False, "error": False, "backend": "unknown"}
 
-# Serialize GPU access — MLX doesn't handle concurrent generation well
 _generate_lock = asyncio.Lock()
 
 SYSTEM_PROMPT = (
@@ -97,24 +92,32 @@ async def refine(req: RefineRequest):
         {"role": "user", "content": user_msg},
     ]
 
-    prompt = model_ref["processor"].apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True,
-        enable_thinking=False,  # suppress CoT output, not the capability
-    )
+    template_kwargs = dict(tokenize=False, add_generation_prompt=True)
+    try:
+        prompt = model_ref["processor"].apply_chat_template(
+            messages, **template_kwargs, enable_thinking=False,
+        )
+    except TypeError:
+        prompt = model_ref["processor"].apply_chat_template(messages, **template_kwargs)
+
+    gen_fn = mlx_lm.generate if model_ref["backend"] == "mlx-lm" else mlx_vlm.generate
+
+    def _generate_sync():
+        mx.new_thread_local_stream(mx.gpu)
+        return gen_fn(
+            model_ref["model"],
+            model_ref["processor"],
+            prompt,
+            max_tokens=len(text) * 2 + 50,
+            temperature=0.1,
+        )
 
     t0 = time.monotonic()
     try:
         async with _generate_lock:
-            result = await asyncio.to_thread(
-                generate,
-                model_ref["model"],
-                model_ref["processor"],
-                prompt,
-                max_tokens=len(text) * 2 + 50,  # Allow some expansion but cap it
-                temperature=0.1,  # Low temperature for deterministic correction
-            )
+            result = await asyncio.to_thread(_generate_sync)
         latency_ms = int((time.monotonic() - t0) * 1000)
-        refined = result.text.strip()
+        refined = (result if isinstance(result, str) else result.text).strip()
 
         # Safety: if LLM output is suspiciously different or empty, fall back to original
         max_output_len = max(len(text) * 2.5, 80)  # short inputs get a minimum allowance
@@ -134,8 +137,40 @@ async def health():
     return {
         "status": "ok" if model_ref["loaded"] else "loading",
         "model": model_ref["path"] or "none",
-        "backend": "mlx-vlm",
+        "backend": model_ref["backend"],
     }
+
+
+def _load_model_sync(model_path: str):
+    """Load model in background thread — tries mlx_lm first, falls back to mlx_vlm."""
+    log.info("Loading model (first run downloads from HuggingFace)...")
+    try:
+        model, tokenizer = mlx_lm.load(model_path)
+        model_ref["model"] = model
+        model_ref["processor"] = tokenizer
+        model_ref["backend"] = "mlx-lm"
+        model_ref["loaded"] = True
+        log.info("Model loaded via mlx-lm! Endpoint ready: /v1/text/refine")
+        return
+    except Exception:
+        log.info("mlx-lm failed, trying mlx-vlm...")
+    try:
+        model, processor = mlx_vlm.load(model_path)
+        model_ref["model"] = model
+        model_ref["processor"] = processor
+        model_ref["backend"] = "mlx-vlm"
+        model_ref["loaded"] = True
+        log.info("Model loaded via mlx-vlm! Endpoint ready: /v1/text/refine")
+    except Exception:
+        log.exception("Failed to load model '%s' with both backends", model_path)
+        model_ref["error"] = True
+
+
+@app.on_event("startup")
+async def _startup_load():
+    """Start model loading in a background thread so health is immediately reachable."""
+    t = threading.Thread(target=_load_model_sync, args=(model_ref["path"],), daemon=True)
+    t.start()
 
 
 def main():
@@ -158,18 +193,7 @@ def main():
     model_ref["path"] = args.model
     log.info("=== Cat Cafe LLM Post-Process Server (MLX) ===")
     log.info("Model: %s | Port: %d", args.model, args.port)
-    log.info("Loading model (first run downloads from HuggingFace)...")
 
-    try:
-        model, processor = load(args.model)
-        model_ref["model"] = model
-        model_ref["processor"] = processor
-        model_ref["loaded"] = True
-    except Exception:
-        log.exception("Failed to load model '%s'", args.model)
-        sys.exit(1)
-
-    log.info("Model loaded! API: http://localhost:%d/v1/text/refine", args.port)
     uvicorn.run(app, host="127.0.0.1", port=args.port)
 
 

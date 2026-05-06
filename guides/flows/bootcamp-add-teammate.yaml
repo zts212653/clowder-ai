@@ -15,7 +15,7 @@ steps:
     advance: click
 
   - id: go-to-cats
-    target: cats.overview
+    target: settings.members
     tips: 进入成员管理页面
     advance: click
 
@@ -35,8 +35,8 @@ steps:
     advance: confirm
 
   - id: return-to-chat
-    target: hub.close
-    tips: 关闭设置页面，回到对话
+    target: nav.home
+    tips: 点击对话图标，回到聊天界面
     advance: click
 
   - id: mention-teammate

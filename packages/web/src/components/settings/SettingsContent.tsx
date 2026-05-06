@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
-import { CatOverviewTab, type ConfigData, SystemTab } from '../config-viewer-tabs';
+import { CatOverviewTab, type ConfigData } from '../config-viewer-tabs';
 import { HubAccountsTab } from '../HubAccountsTab';
 import { HubCatEditor } from '../HubCatEditor';
 import { HubCoCreatorEditor } from '../HubCoCreatorEditor';
@@ -160,16 +160,7 @@ export function SettingsContent({ section }: SettingsContentProps) {
         );
       case 'system':
         if (setupState) return <ConsoleSetupState {...setupState} />;
-        return (
-          <div className="space-y-6">
-            {config ? (
-              <SystemTab config={config} onConfigChange={fetchData} />
-            ) : (
-              <p className="text-sm text-cafe-muted">加载中...</p>
-            )}
-            <HubEnvFilesTab excludeCategories={['connector']} />
-          </div>
-        );
+        return <HubEnvFilesTab excludeCategories={['connector']} />;
       case 'rules':
         return <RulesPromptsContent />;
       case 'notify':

@@ -42,6 +42,7 @@ interface HubCatEditorProps {
   onClose: () => void;
   onSaved: () => Promise<void> | void;
   variant?: 'overlay' | 'inline';
+  hideDelete?: boolean;
 }
 
 export function HubCatEditor({
@@ -52,6 +53,7 @@ export function HubCatEditor({
   onClose,
   onSaved,
   variant = 'overlay',
+  hideDelete = false,
 }: HubCatEditorProps) {
   const confirm = useConfirm();
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
@@ -572,7 +574,7 @@ export function HubCatEditor({
     }
   };
 
-  const overlayTitle = cat ? '成员配置 / 预览与编辑' : '添加成员';
+  const overlayTitle = cat ? (cat.displayName || cat.name || cat.id) : '添加成员';
 
   const editorHeader = (
     <div className="flex shrink-0 items-start justify-between px-7 py-5">
@@ -593,7 +595,7 @@ export function HubCatEditor({
           id={variant === 'overlay' ? 'member-editor-title' : undefined}
           className="text-[13px] font-extrabold text-[var(--console-modal-title)]"
         >
-          {variant === 'overlay' ? overlayTitle : cat ? '编辑成员' : '添加成员'}
+          {variant === 'overlay' ? overlayTitle : cat ? (cat.displayName || cat.name || cat.id) : '添加成员'}
         </p>
       </div>
       {variant === 'overlay' && (
@@ -690,7 +692,7 @@ export function HubCatEditor({
       <PersistenceBanner />
       {error ? <p className="rounded-2xl bg-conn-red-bg px-4 py-3 text-sm text-conn-red-text">{error}</p> : null}
       <div className="flex items-center justify-between pt-4">
-        {cat ? (
+        {cat && !hideDelete ? (
           <button
             type="button"
             onClick={handleDelete}

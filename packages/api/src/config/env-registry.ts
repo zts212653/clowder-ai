@@ -18,6 +18,8 @@ export type EnvCategory =
   | 'server'
   | 'storage'
   | 'budget'
+  | 'a2a'
+  | 'governance'
   | 'cli'
   | 'proxy'
   | 'connector'
@@ -26,7 +28,6 @@ export type EnvCategory =
   | 'gemini'
   | 'kimi'
   | 'tts'
-  | 'stt'
   | 'frontend'
   | 'push'
   | 'signal'
@@ -69,6 +70,8 @@ export const ENV_CATEGORIES: Record<EnvCategory, string> = {
   server: '服务器',
   storage: '存储',
   budget: '猫猫预算',
+  a2a: 'A2A 猫猫互调',
+  governance: '治理 & 降级',
   cli: 'CLI',
   proxy: 'Anthropic 代理网关',
   connector: '平台接入 (Telegram/飞书)',
@@ -77,7 +80,6 @@ export const ENV_CATEGORIES: Record<EnvCategory, string> = {
   gemini: '暹罗猫 (Gemini)',
   kimi: 'Kimi',
   tts: '语音合成 (TTS)',
-  stt: '语音识别 (STT)',
   frontend: '前端',
   push: '推送通知',
   signal: 'Signal 信号源',
@@ -520,7 +522,35 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'MAX_A2A_DEPTH',
     defaultValue: '15',
     description: 'A2A 猫猫互调最大深度',
-    category: 'budget',
+    category: 'a2a',
+    sensitive: false,
+  },
+  {
+    name: 'A2A_ENABLED',
+    defaultValue: 'true',
+    description: 'A2A 猫猫互调总开关',
+    category: 'a2a',
+    sensitive: false,
+  },
+  {
+    name: 'GOVERNANCE_DEGRADATION_ENABLED',
+    defaultValue: 'true',
+    description: '降级策略总开关',
+    category: 'governance',
+    sensitive: false,
+  },
+  {
+    name: 'GOVERNANCE_DONE_TIMEOUT_MS',
+    defaultValue: '300000',
+    description: 'Done 超时（毫秒）',
+    category: 'governance',
+    sensitive: false,
+  },
+  {
+    name: 'GOVERNANCE_HEARTBEAT_INTERVAL_MS',
+    defaultValue: '30000',
+    description: 'Heartbeat 间隔（毫秒）',
+    category: 'governance',
     sensitive: false,
   },
   {
@@ -1159,9 +1189,10 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'TTS_URL',
     defaultValue: 'http://localhost:9879',
-    description: 'TTS 服务地址 (Qwen3-TTS)',
+    description: 'TTS 服务地址（由 Service Manifest 管理）',
     category: 'tts',
     sensitive: false,
+    hubVisible: false,
   },
   {
     name: 'TTS_CACHE_DIR',
@@ -1186,13 +1217,14 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
 
-  // --- stt ---
+  // --- stt (managed by Service Manifest) ---
   {
     name: 'WHISPER_URL',
     defaultValue: 'http://localhost:9876',
-    description: 'Whisper STT 服务地址（服务端）',
-    category: 'stt',
+    description: 'Whisper STT 服务地址（由 Service Manifest 管理）',
+    category: 'tts',
     sensitive: false,
+    hubVisible: false,
   },
 
   // --- connector media ---
@@ -1210,22 +1242,6 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'NEXT_PUBLIC_API_URL',
     defaultValue: 'http://localhost:3004',
     description: '前端连接的 API 地址',
-    category: 'frontend',
-    sensitive: false,
-    runtimeEditable: false,
-  },
-  {
-    name: 'NEXT_PUBLIC_WHISPER_URL',
-    defaultValue: 'http://localhost:9876',
-    description: 'Whisper ASR 服务地址',
-    category: 'frontend',
-    sensitive: false,
-    runtimeEditable: false,
-  },
-  {
-    name: 'NEXT_PUBLIC_LLM_POSTPROCESS_URL',
-    defaultValue: 'http://localhost:9878',
-    description: 'LLM 后处理服务地址',
     category: 'frontend',
     sensitive: false,
     runtimeEditable: false,
@@ -1427,9 +1443,18 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'EMBED_URL',
     defaultValue: 'http://127.0.0.1:9880',
-    description: 'Embedding 服务地址（独立 Python GPU 进程 scripts/embed-api.py）',
+    description: 'Embedding 服务地址（由 Service Manifest 管理）',
     category: 'evidence',
     sensitive: false,
+    hubVisible: false,
+  },
+  {
+    name: 'EMBED_PORT',
+    defaultValue: '9880',
+    description: 'Embedding 服务端口（由 Service Manifest 管理）',
+    category: 'evidence',
+    sensitive: false,
+    hubVisible: false,
   },
   {
     name: 'EVIDENCE_DB',
@@ -1466,13 +1491,6 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'evidence',
     sensitive: true,
     runtimeEditable: true,
-  },
-  {
-    name: 'EMBED_PORT',
-    defaultValue: '9880',
-    description: 'Embedding 服务端口（仅在 EMBED_URL 未设置时使用）',
-    category: 'evidence',
-    sensitive: false,
   },
 
   // --- quota ---

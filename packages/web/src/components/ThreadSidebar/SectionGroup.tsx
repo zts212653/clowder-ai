@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 
-/** F070: governance status dot colors */
+/** F070: governance status dot colors — use solid tones for 2px dots */
 const GOV_STATUS_DOT: Record<string, { color: string; title: string }> = {
-  healthy: { color: 'bg-conn-emerald-bg', title: '治理正常' },
-  stale: { color: 'bg-conn-amber-bg', title: '治理过期' },
-  missing: { color: 'bg-conn-red-bg', title: '治理缺失' },
-  'never-synced': { color: 'bg-cafe-surface-sunken', title: '未同步治理' },
+  healthy: { color: 'bg-conn-emerald-text', title: '治理正常' },
+  stale: { color: 'bg-conn-amber-text', title: '治理过期' },
+  missing: { color: 'bg-conn-red-text', title: '治理缺失' },
+  'never-synced': { color: 'bg-cafe-muted', title: '未同步治理' },
 };
 
 /** Section icon SVG paths (extracted to reduce JSX noise) */
@@ -26,7 +26,7 @@ const ICON_COLORS: Record<string, string> = {
   star: 'text-conn-amber-text',
   clock: 'text-cafe-muted',
   archive: 'text-cafe-muted',
-  system: 'text-[var(--color-cafe-accent)]',
+  system: 'text-cafe-accent',
 };
 
 interface SectionGroupProps {
