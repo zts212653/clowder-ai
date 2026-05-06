@@ -1,242 +1,255 @@
 'use client';
 
-import type { TaskItem, TaskStatus } from '@cat-cafe/shared';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { apiFetch } from '@/utils/api-client';
+import { DependencyGraphTab } from './DependencyGraphTab';
+import { ExternalProjectTab } from './ExternalProjectTab';
+import { FeatureRowList } from './FeatureRowList';
+import { ImportProjectModal } from './ImportProjectModal';
+import { QuickCreateForm } from './QuickCreateForm';
+import { SuggestionDrawer } from './SuggestionDrawer';
+import { ThreadSituationPanel } from './ThreadSituationPanel';
+import type { RightPanelTab } from './useMissionHubData';
+import { useMissionHubData } from './useMissionHubData';
+import { WorkflowSopPanel } from './WorkflowSopPanel';
 
-function StatCard({ label, value, warning }: { label: string; value: number; warning?: boolean }) {
+function StatusDot({ color, label, textColor }: { color: string; label: string; textColor: string }) {
   return (
-    <div
-      className="flex flex-1 flex-col gap-1 rounded-2xl bg-[var(--console-card-bg)] p-4 shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
-      style={{ height: 92 }}
-    >
-      <span className={`text-[22px] font-bold ${warning ? 'text-conn-amber-text' : 'text-cafe'}`}>{value}</span>
-      <span className="text-xs text-cafe-secondary">{label}</span>
-    </div>
+    <span className="flex items-center gap-1.5">
+      <span className={`h-2 w-2 rounded-full ${color}`} />
+      <span className={`text-[13px] font-semibold ${textColor}`}>{label}</span>
+    </span>
   );
 }
 
-const STATUS_LABEL: Record<TaskStatus, string> = {
-  todo: '待处理',
-  doing: '进行中',
-  blocked: '阻塞',
-  done: '已完成',
-};
-const STATUS_BG_CLASS: Record<TaskStatus, string> = {
-  todo: 'bg-[var(--console-pill-bg)]',
-  doing: 'bg-[var(--console-pill-bg)]',
-  blocked: 'bg-conn-amber-bg',
-  done: 'bg-conn-emerald-bg',
-};
+const TAB_BASE = 'px-4 py-2 text-[13px] font-semibold transition-colors rounded-lg';
+const TAB_ACTIVE = `${TAB_BASE} bg-[var(--console-active-bg)] text-cafe`;
+const TAB_IDLE = `${TAB_BASE} text-cafe-muted hover:text-cafe-secondary`;
 
-function TaskQueueCard({ task, selected, onClick }: { task: TaskItem; selected: boolean; onClick: () => void }) {
+const RIGHT_TAB_BASE = 'px-3 py-1.5 text-xs font-medium transition-colors';
+const RIGHT_TAB_ACTIVE = `${RIGHT_TAB_BASE} border-b-2 border-[var(--cafe-accent)] text-cafe`;
+const RIGHT_TAB_IDLE = `${RIGHT_TAB_BASE} text-cafe-muted hover:text-cafe-secondary`;
+
+function TabButton({
+  active,
+  onClick,
+  label,
+  testId,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  testId?: string;
+}) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={[
-        'flex w-full items-center gap-3 rounded-[14px] bg-[var(--console-card-bg)] px-3 text-left transition-shadow',
-        selected ? 'shadow-[0_8px_22px_rgba(43,33,26,0.04)] ring-1 ring-[var(--cafe-accent,#C65F3D)]' : '',
-      ].join(' ')}
-      style={{ height: 82 }}
-    >
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[var(--console-active-bg)]">
-        <svg
-          className="h-4 w-4 text-cafe"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          aria-hidden="true"
-        >
-          <path d="M9 11l3 3L22 4" />
-          <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
-        </svg>
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-semibold text-cafe">{task.title}</p>
-        <p className="mt-0.5 truncate text-xs text-cafe-secondary">{task.why || '—'}</p>
-      </div>
-      <span className={`shrink-0 rounded-xl px-2.5 py-0.5 text-[11px] font-medium ${STATUS_BG_CLASS[task.status]}`}>
-        {STATUS_LABEL[task.status]}
-      </span>
+    <button type="button" onClick={onClick} className={active ? TAB_ACTIVE : TAB_IDLE} data-testid={testId}>
+      {label}
     </button>
   );
 }
 
-function MissionInspector({ task }: { task: TaskItem | null }) {
+function RightTabButton({
+  tab,
+  current,
+  onClick,
+  label,
+  testId,
+}: {
+  tab: RightPanelTab;
+  current: RightPanelTab;
+  onClick: (t: RightPanelTab) => void;
+  label: string;
+  testId?: string;
+}) {
   return (
-    <div className="flex w-80 shrink-0 flex-col gap-3.5 overflow-y-auto rounded-[18px] bg-[var(--console-card-bg)] p-[18px] shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
-      {task ? (
-        <>
-          <h3 className="text-lg font-bold text-cafe">当前任务</h3>
-          <p className="text-[13px] leading-[1.35] text-cafe-secondary">{task.title}</p>
-          {task.why && <p className="text-xs text-cafe-secondary">{task.why}</p>}
-          {task.ownerCatId && (
-            <span className="self-start rounded-full bg-[var(--console-pill-bg)] px-3 py-1 text-xs font-bold text-[var(--cafe-interactive,#6F3A2C)]">
-              Owner: {task.ownerCatId}
-            </span>
-          )}
-          <div className="mt-auto text-[11px] text-cafe-muted">
-            创建于 {new Date(task.createdAt).toLocaleDateString('zh-CN')}
-          </div>
-        </>
-      ) : (
-        <>
-          <h3 className="text-lg font-bold text-cafe">当前任务</h3>
-          <p className="text-[13px] text-cafe-secondary">选择左侧任务查看详情</p>
-        </>
-      )}
-    </div>
+    <button
+      type="button"
+      className={tab === current ? RIGHT_TAB_ACTIVE : RIGHT_TAB_IDLE}
+      onClick={() => onClick(tab)}
+      data-testid={testId}
+    >
+      {label}
+    </button>
   );
 }
 
 export function MissionHubView() {
-  const [tasks, setTasks] = useState<TaskItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
-  const [createTitle, setCreateTitle] = useState('');
-  const [createWhy, setCreateWhy] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-
-  const loadTasks = useCallback(async () => {
-    try {
-      const res = await apiFetch('/api/callbacks/list-tasks?kind=work');
-      if (res.ok) {
-        const data: { tasks?: TaskItem[] } = await res.json();
-        setTasks(data.tasks ?? []);
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadTasks();
-  }, [loadTasks]);
-
-  const handleCreateTask = useCallback(async () => {
-    const title = createTitle.trim();
-    if (!title) return;
-    setSubmitting(true);
-    try {
-      const res = await apiFetch('/api/tasks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ threadId: 'default', title, why: createWhy.trim(), createdBy: 'user' }),
-      });
-      if (res.ok) {
-        setCreateTitle('');
-        setCreateWhy('');
-        setShowCreate(false);
-        await loadTasks();
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  }, [createTitle, createWhy, loadTasks]);
-
-  const stats = useMemo(() => {
-    const count = (s: TaskStatus) => tasks.filter((t) => t.status === s).length;
-    return { pending: count('todo'), reviewing: count('doing'), blocked: count('blocked') };
-  }, [tasks]);
-
-  const activeTasks = useMemo(() => tasks.filter((t) => t.status !== 'done'), [tasks]);
-  const selected = tasks.find((t) => t.id === selectedId) ?? null;
+  const d = useMissionHubData();
 
   return (
     <div className="h-full bg-[var(--console-panel-bg)]">
-      <div className="flex h-full flex-col overflow-hidden rounded-[18px] bg-[var(--console-shell-bg)] shadow-[var(--console-shadow-soft)] m-3 gap-5 px-9 py-8">
-        <header className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-cafe">Mission Hub</h1>
-            <p className="mt-1 text-[13px] text-cafe-secondary">管理任务、执行队列和交付门禁</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setShowCreate((v) => !v)}
-            className="flex items-center gap-2 rounded-lg bg-[var(--cafe-accent,#C65F3D)] px-3.5 text-[13px] font-semibold text-[var(--cafe-surface)] hover:opacity-90 transition-opacity"
-            style={{ height: 36 }}
-            title="新建任务"
-          >
-            <svg
-              className="h-[15px] w-[15px]"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              aria-hidden="true"
+      <div className="flex h-full flex-col overflow-hidden rounded-[18px] bg-[var(--console-shell-bg)] shadow-[var(--console-shadow-soft)] m-3">
+        {/* Header */}
+        <header className="flex items-center justify-between px-7 py-4 border-b border-[var(--console-border-soft)]">
+          <div className="flex items-center gap-3">
+            <a
+              href={d.backHref}
+              className="inline-flex items-center gap-1 rounded-lg border border-[var(--console-border-soft)] px-2.5 py-1.5 text-xs font-medium text-[var(--cafe-accent)] hover:bg-[var(--console-pill-bg)] transition-colors"
+              data-testid="mc-back-to-chat"
             >
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            新建任务
-          </button>
-        </header>
-
-        {showCreate && (
-          <div className="flex items-center gap-2 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3">
-            <input
-              value={createTitle}
-              onChange={(e) => setCreateTitle(e.target.value)}
-              placeholder="任务标题"
-              className="flex-1 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-field-bg)] px-3 py-1.5 text-sm text-cafe outline-none focus:border-[var(--cafe-accent)]"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.nativeEvent.isComposing) void handleCreateTask();
-              }}
-            />
-            <input
-              value={createWhy}
-              onChange={(e) => setCreateWhy(e.target.value)}
-              placeholder="一句话描述价值（选填）"
-              className="flex-1 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-field-bg)] px-3 py-1.5 text-sm text-cafe outline-none focus:border-[var(--cafe-accent)]"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.nativeEvent.isComposing) void handleCreateTask();
-              }}
-            />
+              <svg
+                className="h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden="true"
+              >
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+              返回
+            </a>
+            <h1 className="text-lg font-bold text-cafe">Mission Hub</h1>
+          </div>
+          <div className="flex items-center gap-2">
             <button
               type="button"
-              disabled={submitting || !createTitle.trim()}
-              onClick={() => void handleCreateTask()}
-              className="rounded-lg bg-[var(--cafe-accent,#C65F3D)] px-3 py-1.5 text-xs font-semibold text-[var(--cafe-surface)] disabled:opacity-40"
+              onClick={() => void d.handleImportFromDocs()}
+              disabled={d.submitting}
+              className="rounded-lg border border-[var(--console-border-soft)] px-3 py-1.5 text-xs font-medium text-cafe-secondary hover:bg-[var(--console-pill-bg)] disabled:opacity-40 transition-colors"
+              data-testid="mc-import-docs"
             >
-              创建
+              导入 Backlog
             </button>
+            <button
+              type="button"
+              onClick={() => d.setShowImportModal(true)}
+              className="rounded-lg border border-[var(--console-border-soft)] px-3 py-1.5 text-xs font-medium text-cafe-secondary hover:bg-[var(--console-pill-bg)] transition-colors"
+              data-testid="mc-import-project"
+            >
+              + 导入项目
+            </button>
+          </div>
+        </header>
+
+        {d.showImportModal && (
+          <ImportProjectModal
+            onClose={() => d.setShowImportModal(false)}
+            onImported={() => void d.handleImportFromDocs()}
+          />
+        )}
+
+        {/* Tabs + Status */}
+        <div className="flex items-center justify-between px-7 py-2.5 border-b border-[var(--console-border-soft)]">
+          <div className="flex items-center gap-1">
+            <TabButton
+              active={d.activeTab === 'features'}
+              onClick={() => d.setActiveTab('features')}
+              label="功能列表"
+              testId="mc-tab-features"
+            />
+            <TabButton
+              active={d.activeTab === 'dependencies'}
+              onClick={() => d.setActiveTab('dependencies')}
+              label="依赖全景"
+              testId="mc-tab-dependencies"
+            />
+            {d.projects.map((p) => (
+              <TabButton key={p.id} active={d.activeTab === p.id} onClick={() => d.setActiveTab(p.id)} label={p.name} />
+            ))}
+          </div>
+          <div className="flex items-center gap-4">
+            <StatusDot color="bg-conn-amber-text" label={`${d.pendingCount} 待审批`} textColor="text-conn-amber-text" />
+            <StatusDot color="bg-conn-blue-text" label={`${d.activeCount} 执行中`} textColor="text-conn-blue-text" />
+            <StatusDot
+              color="bg-conn-emerald-text"
+              label={`${d.doneCount} 已完成`}
+              textColor="text-conn-emerald-text"
+            />
+          </div>
+        </div>
+
+        {d.error && (
+          <div
+            className="mx-7 mt-3 rounded-xl border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-xs text-conn-red-text"
+            role="alert"
+            data-testid="mc-error"
+          >
+            {d.error}
           </div>
         )}
 
-        <div className="flex gap-3.5">
-          <StatCard label="待处理任务" value={stats.pending} />
-          <StatCard label="审查中" value={stats.reviewing} />
-          <StatCard label="需要 CVO 决策" value={stats.blocked} warning />
+        {/* Main content */}
+        <div className="min-h-0 flex-1 overflow-auto">
+          {d.activeProject ? (
+            <div className="p-6">
+              <ExternalProjectTab project={d.activeProject} />
+            </div>
+          ) : d.activeTab === 'features' ? (
+            <div className="grid min-h-0 grid-cols-1 gap-4 p-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+              <div className="space-y-4">
+                <QuickCreateForm disabled={d.submitting} onCreate={d.handleCreate} />
+                <FeatureRowList
+                  items={d.items}
+                  threadsByBacklogId={d.threadsByBacklogId}
+                  threadCountByFeature={d.threadCountByFeature}
+                  threadsByFeatureId={d.threadsByFeatureId}
+                  selectedItemId={d.selectedItemId}
+                  onSelectItem={d.setSelectedItemId}
+                />
+              </div>
+              {/* Right panel */}
+              <div className="flex min-h-0 flex-col rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)]">
+                <div className="flex border-b border-[var(--console-border-soft)] px-2 pt-1">
+                  <RightTabButton
+                    tab="suggestion"
+                    current={d.rightPanelTab}
+                    onClick={d.setRightPanelTab}
+                    label="建议详情"
+                    testId="mc-right-tab-suggestion"
+                  />
+                  <RightTabButton
+                    tab="sop"
+                    current={d.rightPanelTab}
+                    onClick={d.setRightPanelTab}
+                    label="SOP"
+                    testId="mc-right-tab-sop"
+                  />
+                  <RightTabButton
+                    tab="threads"
+                    current={d.rightPanelTab}
+                    onClick={d.setRightPanelTab}
+                    label="线程态势"
+                    testId="mc-right-tab-threads"
+                  />
+                </div>
+                <div className="flex-1 overflow-auto">
+                  {d.rightPanelTab === 'suggestion' && (
+                    <SuggestionDrawer
+                      item={d.selectedItem}
+                      submitting={d.submitting}
+                      selectedPhase={d.selectedPhase}
+                      selfClaimScopes={d.selfClaimScopes}
+                      selfClaimPolicyBlocker={d.selfClaimPolicyBlocker}
+                      onChangePhase={d.setSelectedPhase}
+                      onSuggest={d.handleSuggest}
+                      onApprove={d.handleApprove}
+                      onReject={d.handleReject}
+                      onSelfClaim={d.handleSelfClaim}
+                      onAcquireLease={d.handleAcquireLease}
+                      onHeartbeatLease={d.handleHeartbeatLease}
+                      onReleaseLease={d.handleReleaseLease}
+                      onReclaimLease={d.handleReclaimLease}
+                    />
+                  )}
+                  {d.rightPanelTab === 'sop' && <WorkflowSopPanel backlogItemId={d.selectedItemId} />}
+                  {d.rightPanelTab === 'threads' && (
+                    <ThreadSituationPanel
+                      dispatchedItems={d.dispatchedItems}
+                      loading={d.threadsLoading}
+                      threadsByBacklogId={d.threadsByBacklogId}
+                      threadsByFeatureId={d.threadsByFeatureId}
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="p-6">
+              <DependencyGraphTab items={d.items} />
+            </div>
+          )}
         </div>
 
-        <div className="flex min-h-0 flex-1 gap-[18px]">
-          <div className="flex flex-1 flex-col gap-2 overflow-y-auto rounded-[18px] bg-[var(--console-panel-bg)] p-2">
-            <div className="flex h-[42px] items-center justify-between px-2">
-              <h2 className="text-base font-bold text-cafe">任务队列</h2>
-              <span className="rounded-xl bg-[var(--console-pill-bg)] px-2.5 py-0.5 text-xs text-cafe-secondary">
-                本周
-              </span>
-            </div>
-            {loading ? (
-              <p className="px-2 text-sm text-cafe-secondary">加载中...</p>
-            ) : activeTasks.length === 0 ? (
-              <p className="px-2 text-sm text-cafe-secondary">暂无活跃任务</p>
-            ) : (
-              activeTasks.map((task) => (
-                <TaskQueueCard
-                  key={task.id}
-                  task={task}
-                  selected={task.id === selectedId}
-                  onClick={() => setSelectedId(task.id === selectedId ? null : task.id)}
-                />
-              ))
-            )}
-          </div>
-          <MissionInspector task={selected} />
-        </div>
+        {d.loading && d.items.length === 0 && <p className="px-7 py-2 text-xs text-cafe-muted">加载 backlog 中...</p>}
       </div>
     </div>
   );
