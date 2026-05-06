@@ -881,7 +881,11 @@ describe('PUT /api/connector/:connectorId/config — owner guard', () => {
     writeFileSync(envFilePath, 'EXISTING=keep\n');
     const app = Fastify();
     await app.register(connectorHubRoutes, {
-      threadStore: { async list() { return []; } },
+      threadStore: {
+        async list() {
+          return [];
+        },
+      },
       envFilePath,
       ...opts,
     });
