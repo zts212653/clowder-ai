@@ -145,7 +145,7 @@ const HubPermissionsTab = forwardRef<HubPermissionsTabHandle, HubPermissionsTabP
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               <StepBadge num={1} />
-              <span className="text-[13px] font-medium text-cafe">群白名单</span>
+              <span className="text-xs font-medium text-cafe-secondary">群白名单</span>
             </div>
             <button
               onClick={() => setConfig((prev) => ({ ...prev, whitelistEnabled: !prev.whitelistEnabled }))}
@@ -217,7 +217,7 @@ const HubPermissionsTab = forwardRef<HubPermissionsTabHandle, HubPermissionsTabP
         <div className="space-y-2">
           <div className="flex items-center gap-1.5">
             <StepBadge num={2} />
-            <span className="text-[13px] font-medium text-cafe">管理员</span>
+            <span className="text-xs font-medium text-cafe-secondary">管理员</span>
           </div>
           <p className="text-xs text-cafe-secondary">管理员可使用 /allow-group、/deny-group、/new、/use 等管理命令</p>
 
@@ -276,7 +276,7 @@ const HubPermissionsTab = forwardRef<HubPermissionsTabHandle, HubPermissionsTabP
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               <StepBadge num={3} />
-              <span className="text-[13px] font-medium text-cafe">群聊命令仅管理员</span>
+              <span className="text-xs font-medium text-cafe-secondary">群聊命令仅管理员</span>
             </div>
             <button
               onClick={() => setConfig((prev) => ({ ...prev, commandAdminOnly: !prev.commandAdminOnly }))}

@@ -657,38 +657,6 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
     return store.getConfig(connectorId);
   });
 
-  app.put('/api/connector/permissions/:connectorId', async (request, reply) => {
-    const userId = requireTrustedHubIdentity(request, reply);
-    if (!userId) return { error: 'Identity required' };
-    const { connectorId } = request.params as { connectorId: string };
-    const store = opts.permissionStore;
-    if (!store) {
-      reply.status(503);
-      return { error: 'Permission store not available' };
-    }
-    const body = request.body as {
-      whitelistEnabled?: boolean;
-      commandAdminOnly?: boolean;
-      adminOpenIds?: string[];
-      allowedGroups?: Array<{ externalChatId: string; label?: string }>;
-    };
-    if (body.whitelistEnabled !== undefined) {
-      await store.setWhitelistEnabled(connectorId, body.whitelistEnabled);
-    }
-    if (body.commandAdminOnly !== undefined) {
-      await store.setCommandAdminOnly(connectorId, body.commandAdminOnly);
-    }
-    if (body.adminOpenIds !== undefined) {
-      await store.setAdminOpenIds(connectorId, body.adminOpenIds);
-    }
-    if (body.allowedGroups !== undefined) {
-      const current = await store.listAllowedGroups(connectorId);
-      for (const g of current) await store.denyGroup(connectorId, g.externalChatId);
-      for (const g of body.allowedGroups) await store.allowGroup(connectorId, g.externalChatId, g.label);
-    }
-    return store.getConfig(connectorId);
-  });
-
   // ── Unified connector config save ──
 
   app.put<{ Params: { connectorId: string } }>('/api/connector/:connectorId/config', async (request, reply) => {
