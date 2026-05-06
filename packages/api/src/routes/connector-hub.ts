@@ -670,6 +670,11 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
   app.put<{ Params: { connectorId: string } }>('/api/connector/:connectorId/config', async (request, reply) => {
     const userId = requireTrustedHubIdentity(request, reply);
     if (!userId) return { error: 'Identity required' };
+    const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim();
+    if (ownerId && userId !== ownerId) {
+      reply.status(403);
+      return { error: 'Only the owner can modify connector configuration' };
+    }
     const { connectorId } = request.params;
     const body = request.body as {
       secrets?: Array<{ name: string; value: string | null }>;
@@ -690,6 +695,11 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
     if (!allowedFields) {
       reply.status(400);
       return { error: `Unknown connector: ${connectorId}` };
+    }
+
+    if (body.permissions && !opts.permissionStore) {
+      reply.status(503);
+      return { error: 'Permission store is not available' };
     }
 
     if (body.secrets && body.secrets.length > 0) {
@@ -731,10 +741,6 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
 
     let permissions;
     const store = opts.permissionStore;
-    if (body.permissions && !store) {
-      reply.status(503);
-      return { error: 'Permission store is not available' };
-    }
     if (body.permissions && store) {
       const p = body.permissions;
       if (p.whitelistEnabled !== undefined) await store.setWhitelistEnabled(connectorId, p.whitelistEnabled);
