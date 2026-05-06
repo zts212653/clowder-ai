@@ -4,14 +4,14 @@
       "path": "packages/api/src/routes",
       "owner": "opus",
       "reason": "Routes 按功能已分文件，ADR-010 重构 scope 不含 routes，后续评估是否拆子目录",
-      "expiresAt": "2026-05-01",
+      "expiresAt": "2026-06-01",
       "ticket": "F23"
     },
     {
       "path": "packages/api/src/config",
       "owner": "opus",
       "reason": "Config 文件数接近 warn，均为独立配置项（cat-budgets/cat-config/env 等），暂不拆",
-      "expiresAt": "2026-05-01",
+      "expiresAt": "2026-06-01",
       "ticket": "F23"
     },
     {
