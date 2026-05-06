@@ -4,6 +4,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
+import { buildWindowsStatus } from './lib/platform-status.mjs';
 
 const ROOT = resolve(process.cwd());
 const SYNC_SCRIPT = resolve(ROOT, 'scripts/sync-to-opensource.sh');
@@ -231,6 +232,93 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
   it('package.json scripts.start routes through start-entry.mjs', () => {
     const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'));
     assert.match(pkg.scripts.start, /start-entry\.mjs start\b/, 'pnpm start must route through start-entry.mjs');
+  });
+
+  it('package.json scripts.start:status routes through start-entry.mjs for Windows pnpm shells', () => {
+    const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'));
+
+    assert.match(
+      pkg.scripts['start:status'],
+      /start-entry\.mjs status\b/,
+      'pnpm start:status must not invoke ./scripts/start-dev.sh directly',
+    );
+  });
+
+  it('Windows status succeeds only when required API and web PID files are running', () => {
+    const sandboxDir = mkdtempSync(join(tmpdir(), 'cc-windows-status-'));
+    try {
+      const runDir = join(sandboxDir, '.cat-cafe', 'run', 'windows');
+      mkdirSync(runDir, { recursive: true });
+      writeFileSync(join(runDir, 'api-3004.pid'), '41\n');
+      writeFileSync(join(runDir, 'web-3003.pid'), '42\n');
+      writeFileSync(join(runDir, 'embed-9878.pid'), '999\n');
+
+      const result = buildWindowsStatus({
+        projectRoot: sandboxDir,
+        env: {},
+        pidIsRunning: (pid) => pid === 41 || pid === 42,
+      });
+
+      assert.equal(result.exitCode, 0);
+      assert.deepEqual(result.lines, [
+        'Cat Cafe Windows status',
+        '  api-3004: running (PID: 41)',
+        '  web-3003: running (PID: 42)',
+      ]);
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it('Windows status fails when optional or stale PID files exist but a required service is missing', () => {
+    const sandboxDir = mkdtempSync(join(tmpdir(), 'cc-windows-status-'));
+    try {
+      const runDir = join(sandboxDir, '.cat-cafe', 'run', 'windows');
+      mkdirSync(runDir, { recursive: true });
+      writeFileSync(join(runDir, 'api-3004.pid'), '41\n');
+      writeFileSync(join(runDir, 'embed-9878.pid'), '999\n');
+
+      const result = buildWindowsStatus({
+        projectRoot: sandboxDir,
+        env: {},
+        pidIsRunning: (pid) => pid === 41 || pid === 999,
+      });
+
+      assert.equal(result.exitCode, 1);
+      assert.deepEqual(result.lines, [
+        'Cat Cafe Windows status',
+        '  api-3004: running (PID: 41)',
+        '  web-3003: not running (missing PID file)',
+      ]);
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it('Windows status reads active ports from .env before falling back to open-source defaults', () => {
+    const sandboxDir = mkdtempSync(join(tmpdir(), 'cc-windows-status-'));
+    try {
+      writeFileSync(join(sandboxDir, '.env'), 'API_SERVER_PORT=3112\nFRONTEND_PORT=3111\n');
+      const runDir = join(sandboxDir, '.cat-cafe', 'run', 'windows');
+      mkdirSync(runDir, { recursive: true });
+      writeFileSync(join(runDir, 'api-3112.pid'), '51\n');
+      writeFileSync(join(runDir, 'web-3111.pid'), '52\n');
+
+      const result = buildWindowsStatus({
+        projectRoot: sandboxDir,
+        env: {},
+        pidIsRunning: (pid) => pid === 51 || pid === 52,
+      });
+
+      assert.equal(result.exitCode, 0);
+      assert.deepEqual(result.lines, [
+        'Cat Cafe Windows status',
+        '  api-3112: running (PID: 51)',
+        '  web-3111: running (PID: 52)',
+      ]);
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
   });
 
   it('start-entry.mjs sets CAT_CAFE_PROFILE and CAT_CAFE_STRICT_PROFILE_DEFAULTS for Windows when --profile is present', () => {

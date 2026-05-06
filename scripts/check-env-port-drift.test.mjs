@@ -335,6 +335,24 @@ describe(`Code-side port defaults are internally consistent (${repoLabel}: API=$
     );
   });
 
+  it(`platform-status.mjs API status fallback is ${expectedApiPort}`, () => {
+    const fallback = readTsFallback('scripts/lib/platform-status.mjs', /DEFAULT_API_PORT = '(\d+)'/);
+    assert.equal(
+      fallback,
+      expectedApiPort,
+      `platform-status API status fallback should be ${expectedApiPort}, got ${fallback}`,
+    );
+  });
+
+  it(`platform-status.mjs Frontend status fallback is ${expectedFrontendPort}`, () => {
+    const fallback = readTsFallback('scripts/lib/platform-status.mjs', /DEFAULT_WEB_PORT = '(\d+)'/);
+    assert.equal(
+      fallback,
+      expectedFrontendPort,
+      `platform-status Frontend status fallback should be ${expectedFrontendPort}, got ${fallback}`,
+    );
+  });
+
   it(`AgentRouter.ts API port fallback is ${expectedApiPort}`, () => {
     const fallback = readTsFallback(
       'packages/api/src/domains/cats/services/agents/routing/AgentRouter.ts',

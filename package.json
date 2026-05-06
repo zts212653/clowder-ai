@@ -9,7 +9,7 @@
     "guards:install": "bash ./scripts/install-git-guards.sh",
     "start": "node ./scripts/start-entry.mjs start",
     "stop": "./scripts/start-dev.sh --stop",
-    "start:status": "./scripts/start-dev.sh --status",
+    "start:status": "node ./scripts/start-entry.mjs status",
     "start:direct": "node ./scripts/start-entry.mjs start:direct --profile=opensource",
     "dev:direct": "node ./scripts/start-entry.mjs dev:direct --profile=opensource",
     "review:start": "bash ./scripts/review-start.sh",
