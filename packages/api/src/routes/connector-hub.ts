@@ -671,7 +671,11 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
     const userId = requireTrustedHubIdentity(request, reply);
     if (!userId) return { error: 'Identity required' };
     const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim();
-    if (ownerId && userId !== ownerId) {
+    if (!ownerId) {
+      reply.status(403);
+      return { error: 'Connector config write requires DEFAULT_OWNER_USER_ID to be configured' };
+    }
+    if (userId !== ownerId) {
       reply.status(403);
       return { error: 'Only the owner can modify connector configuration' };
     }

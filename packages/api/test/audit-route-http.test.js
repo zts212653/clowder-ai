@@ -41,14 +41,36 @@ describe('audit route HTTP-level access control', () => {
     assert.equal(res.statusCode, 200);
   });
 
-  it('returns 200 for any user accessing the shared default thread', async () => {
+  it('returns 403 for non-owner accessing the shared default thread (owner unconfigured)', async () => {
+    delete process.env.DEFAULT_OWNER_USER_ID;
     await buildApp({ default: { id: 'default', createdBy: 'system' } });
     const res = await app.inject({
       method: 'GET',
       url: '/api/audit/thread/default',
       headers: { 'x-cat-cafe-user': 'user-bob' },
     });
+    assert.equal(res.statusCode, 403);
+  });
+
+  it('returns 200 for configured owner accessing the shared default thread', async () => {
+    process.env.DEFAULT_OWNER_USER_ID = 'owner-admin';
+    await buildApp({ default: { id: 'default', createdBy: 'system' } });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/audit/thread/default',
+      headers: { 'x-cat-cafe-user': 'owner-admin' },
+    });
+    delete process.env.DEFAULT_OWNER_USER_ID;
     assert.equal(res.statusCode, 200);
+  });
+
+  it('returns 401 for unauthenticated request', async () => {
+    await buildApp({ 'thread-123': { id: 'thread-123', createdBy: 'user-alice' } });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/audit/thread/thread-123',
+    });
+    assert.equal(res.statusCode, 401);
   });
 
   it('returns 403 for non-default system-owned thread', async () => {
