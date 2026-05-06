@@ -871,3 +871,72 @@ describe('POST /api/connector/wecom-bot/disconnect', () => {
     await app.close();
   });
 });
+
+describe('PUT /api/connector/:connectorId/config — owner guard', () => {
+  const OWNER_ID = 'owner-admin';
+
+  async function buildConfigApp(opts = {}) {
+    const tmpDir = mkdtempSync(join(os.tmpdir(), 'conn-cfg-'));
+    const envFilePath = join(tmpDir, '.env');
+    writeFileSync(envFilePath, 'EXISTING=keep\n');
+    const app = Fastify();
+    await app.register(connectorHubRoutes, {
+      threadStore: { async list() { return []; } },
+      envFilePath,
+      ...opts,
+    });
+    await app.ready();
+    return { app, envFilePath };
+  }
+
+  it('returns 403 when DEFAULT_OWNER_USER_ID is not configured', async () => {
+    delete process.env.DEFAULT_OWNER_USER_ID;
+    const { app, envFilePath } = await buildConfigApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/connector/telegram/config',
+      headers: { 'x-cat-cafe-user': 'anyone', 'content-type': 'application/json' },
+      payload: JSON.stringify({ secrets: [{ name: 'TELEGRAM_BOT_TOKEN', value: '123456:ABC' }] }),
+    });
+    assert.equal(res.statusCode, 403);
+    const env = readFileSync(envFilePath, 'utf8');
+    assert.ok(!env.includes('TELEGRAM_BOT_TOKEN'), '.env must not be mutated');
+    await app.close();
+  });
+
+  it('returns 403 for non-owner user', async () => {
+    process.env.DEFAULT_OWNER_USER_ID = OWNER_ID;
+    const { app, envFilePath } = await buildConfigApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/connector/telegram/config',
+      headers: { 'x-cat-cafe-user': 'attacker', 'content-type': 'application/json' },
+      payload: JSON.stringify({ secrets: [{ name: 'TELEGRAM_BOT_TOKEN', value: '123456:ABC' }] }),
+    });
+    assert.equal(res.statusCode, 403);
+    const env = readFileSync(envFilePath, 'utf8');
+    assert.ok(!env.includes('TELEGRAM_BOT_TOKEN'), '.env must not be mutated');
+    delete process.env.DEFAULT_OWNER_USER_ID;
+    await app.close();
+  });
+
+  it('returns 200 for owner and writes secrets', async () => {
+    process.env.DEFAULT_OWNER_USER_ID = OWNER_ID;
+    const { app, envFilePath } = await buildConfigApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/connector/telegram/config',
+      headers: { 'x-cat-cafe-user': OWNER_ID, 'content-type': 'application/json' },
+      payload: JSON.stringify({ secrets: [{ name: 'TELEGRAM_BOT_TOKEN', value: '123456:ABCdefghij_test' }] }),
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.ok, true);
+    const env = readFileSync(envFilePath, 'utf8');
+    assert.match(env, /TELEGRAM_BOT_TOKEN=123456:ABCdefghij_test/);
+    assert.match(env, /EXISTING=keep/);
+    delete process.env.DEFAULT_OWNER_USER_ID;
+    delete process.env.TELEGRAM_BOT_TOKEN;
+    await app.close();
+  });
+});
