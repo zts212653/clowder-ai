@@ -284,11 +284,20 @@ export function HubConnectorConfigTab() {
                 <div className="flex items-center justify-end gap-2">
                   <button
                     type="button"
+                    className="console-button-secondary text-[13px]"
+                    disabled={testing}
+                    onClick={() => handleTestConnection(platform.id)}
+                  >
+                    <WifiIcon />
+                    {testing ? '测试中...' : '测试连接'}
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => handleSave(platform)}
                     disabled={saving}
                     className="console-button-primary text-[13px] disabled:opacity-50"
                   >
-                    {saving ? '保存中...' : '保存权限配置'}
+                    {saving ? '保存中...' : '保存配置'}
                   </button>
                 </div>
               </div>

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
-import { CheckCircleIcon, SpinnerIcon, WifiIcon } from './HubConfigIcons';
+import { CheckCircleIcon, SpinnerIcon } from './HubConfigIcons';
 
 type SetupState = 'idle' | 'testing' | 'connected' | 'error';
 
@@ -142,22 +142,11 @@ export function WeComBotSetupPanel({ configured, onConnected, onDisconnected }: 
         </p>
       )}
 
-      {state === 'testing' ? (
+      {state === 'testing' && (
         <div className="flex items-center gap-2 text-sm text-cafe-secondary">
           <SpinnerIcon />
           <span>Testing WebSocket connection...</span>
         </div>
-      ) : (
-        <button
-          type="button"
-          onClick={handleValidate}
-          // eslint-disable-next-line cafe/no-hardcoded-colors -- WeCom brand purple
-          className="flex items-center gap-1.5 rounded-lg bg-[#7B68EE] px-4 py-2 text-[13px] font-semibold text-[var(--cafe-surface)] transition-colors hover:bg-[#6A5ACD]"
-          data-testid="wecom-bot-validate"
-        >
-          <WifiIcon />
-          测试连接
-        </button>
       )}
     </div>
   );
