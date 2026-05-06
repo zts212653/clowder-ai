@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { applyConnectorSecretUpdates } from '../config/connector-secret-updater.js';
 import { isConnectorSecret } from '../config/connector-secrets-allowlist.js';
+import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import { DEFAULT_THREAD_ID, type IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { WeComBotAdapter } from '../infrastructure/connectors/adapters/WeComBotAdapter.js';
 import type { WeixinAdapter } from '../infrastructure/connectors/adapters/WeixinAdapter.js';
@@ -659,6 +660,11 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
 
   // ── Unified connector config save ──
 
+  const platformFieldIndex = new Map<string, Set<string>>();
+  for (const p of CONNECTOR_PLATFORMS) {
+    platformFieldIndex.set(p.id, new Set(p.fields.map((f) => f.envName)));
+  }
+
   app.put<{ Params: { connectorId: string } }>('/api/connector/:connectorId/config', async (request, reply) => {
     const userId = requireTrustedHubIdentity(request, reply);
     if (!userId) return { error: 'Identity required' };
@@ -671,13 +677,28 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
         adminOpenIds?: string[];
         allowedGroups?: Array<{ externalChatId: string; label?: string }>;
       };
-    };
+    } | null;
+
+    if (!body || typeof body !== 'object') {
+      reply.status(400);
+      return { error: 'Request body required' };
+    }
+
+    const allowedFields = platformFieldIndex.get(connectorId);
+    if (!allowedFields) {
+      reply.status(400);
+      return { error: `Unknown connector: ${connectorId}` };
+    }
 
     if (body.secrets && body.secrets.length > 0) {
       for (const s of body.secrets) {
         if (!isConnectorSecret(s.name)) {
           reply.status(400);
           return { error: `'${s.name}' is not in connector secrets allowlist` };
+        }
+        if (!allowedFields.has(s.name)) {
+          reply.status(400);
+          return { error: `'${s.name}' does not belong to connector '${connectorId}'` };
         }
         if (
           s.name === 'TELEGRAM_BOT_TOKEN' &&
@@ -690,6 +711,16 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
         }
       }
       await applyConnectorSecretUpdates(body.secrets, { envFilePath: opts.envFilePath });
+
+      const auditLog = getEventAuditLog();
+      try {
+        await auditLog.append({
+          type: AuditEventTypes.CONFIG_UPDATED,
+          data: { target: 'secrets', keys: body.secrets.map((s) => s.name), operator: userId },
+        });
+      } catch (err) {
+        request.log.warn({ err }, 'connector config audit append failed');
+      }
     }
 
     let permissions;
