@@ -114,40 +114,38 @@ export function HubConnectorConfigTab() {
   const handleSave = async (platform: PlatformStatus) => {
     setSaving(true);
     setSaveResult(null);
-    const errors: string[] = [];
 
-    const updates = platform.fields
+    const secrets = platform.fields
       .filter((f) => fieldValues[f.envName] !== undefined)
       .map((f) => ({ name: f.envName, value: fieldValues[f.envName] || null }));
 
-    if (updates.length > 0) {
-      try {
-        const res = await apiFetch('/api/config/secrets', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ updates }),
-        });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          errors.push(data.error ?? '凭证保存失败');
-        } else {
+    const permissions = permissionsRef.current?.getConfig();
+
+    try {
+      const res = await apiFetch(`/api/connector/${platform.id}/config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...(secrets.length > 0 ? { secrets } : {}),
+          ...(permissions ? { permissions } : {}),
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setSaveResult({ type: 'error', message: data.error ?? '保存失败' });
+      } else {
+        const data = await res.json().catch(() => ({}));
+        if (secrets.length > 0) {
           setFieldValues({});
           await fetchStatus();
         }
-      } catch {
-        errors.push('凭证保存网络错误');
+        if (data.permissions && permissionsRef.current) {
+          permissionsRef.current.applyConfig(data.permissions);
+        }
+        setSaveResult({ type: 'success', message: '配置已保存，连接器正在自动重连...' });
       }
-    }
-
-    if (permissionsRef.current) {
-      const ok = await permissionsRef.current.save();
-      if (!ok) errors.push('权限保存失败');
-    }
-
-    if (errors.length > 0) {
-      setSaveResult({ type: 'error', message: errors.join('；') });
-    } else {
-      setSaveResult({ type: 'success', message: '配置已保存，连接器正在自动重连...' });
+    } catch {
+      setSaveResult({ type: 'error', message: '保存网络错误' });
     }
     setSaving(false);
   };

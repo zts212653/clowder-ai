@@ -26,7 +26,8 @@ const EMPTY_CONFIG: PermissionConfig = {
 };
 
 export interface HubPermissionsTabHandle {
-  save(): Promise<boolean>;
+  getConfig(): PermissionConfig;
+  applyConfig(c: PermissionConfig): void;
 }
 
 interface HubPermissionsTabProps {
@@ -65,25 +66,14 @@ const HubPermissionsTab = forwardRef<HubPermissionsTabHandle, HubPermissionsTabP
   useImperativeHandle(
     ref,
     () => ({
-      async save() {
-        try {
-          const res = await apiFetch(`/api/connector/permissions/${connectorId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(config),
-          });
-          if (res.ok) {
-            const data = await res.json();
-            setConfig(data);
-            return true;
-          }
-          return false;
-        } catch {
-          return false;
-        }
+      getConfig() {
+        return config;
+      },
+      applyConfig(c: PermissionConfig) {
+        setConfig(c);
       },
     }),
-    [config, connectorId],
+    [config],
   );
 
   const addGroup = () => {

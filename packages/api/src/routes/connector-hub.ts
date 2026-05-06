@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { applyConnectorSecretUpdates } from '../config/connector-secret-updater.js';
+import { isConnectorSecret } from '../config/connector-secrets-allowlist.js';
 import { DEFAULT_THREAD_ID, type IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { WeComBotAdapter } from '../infrastructure/connectors/adapters/WeComBotAdapter.js';
 import type { WeixinAdapter } from '../infrastructure/connectors/adapters/WeixinAdapter.js';
@@ -686,5 +687,58 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
       for (const g of body.allowedGroups) await store.allowGroup(connectorId, g.externalChatId, g.label);
     }
     return store.getConfig(connectorId);
+  });
+
+  // ── Unified connector config save ──
+
+  app.put<{ Params: { connectorId: string } }>('/api/connector/:connectorId/config', async (request, reply) => {
+    const userId = requireTrustedHubIdentity(request, reply);
+    if (!userId) return { error: 'Identity required' };
+    const { connectorId } = request.params;
+    const body = request.body as {
+      secrets?: Array<{ name: string; value: string | null }>;
+      permissions?: {
+        whitelistEnabled?: boolean;
+        commandAdminOnly?: boolean;
+        adminOpenIds?: string[];
+        allowedGroups?: Array<{ externalChatId: string; label?: string }>;
+      };
+    };
+
+    if (body.secrets && body.secrets.length > 0) {
+      for (const s of body.secrets) {
+        if (!isConnectorSecret(s.name)) {
+          reply.status(400);
+          return { error: `'${s.name}' is not in connector secrets allowlist` };
+        }
+        if (
+          s.name === 'TELEGRAM_BOT_TOKEN' &&
+          s.value != null &&
+          s.value !== '' &&
+          normalizeTelegramBotToken(s.value) == null
+        ) {
+          reply.status(400);
+          return { error: 'TELEGRAM_BOT_TOKEN format invalid' };
+        }
+      }
+      await applyConnectorSecretUpdates(body.secrets, { envFilePath: opts.envFilePath });
+    }
+
+    let permissions;
+    const store = opts.permissionStore;
+    if (body.permissions && store) {
+      const p = body.permissions;
+      if (p.whitelistEnabled !== undefined) await store.setWhitelistEnabled(connectorId, p.whitelistEnabled);
+      if (p.commandAdminOnly !== undefined) await store.setCommandAdminOnly(connectorId, p.commandAdminOnly);
+      if (p.adminOpenIds !== undefined) await store.setAdminOpenIds(connectorId, p.adminOpenIds);
+      if (p.allowedGroups !== undefined) {
+        const current = await store.listAllowedGroups(connectorId);
+        for (const g of current) await store.denyGroup(connectorId, g.externalChatId);
+        for (const g of p.allowedGroups) await store.allowGroup(connectorId, g.externalChatId, g.label);
+      }
+      permissions = await store.getConfig(connectorId);
+    }
+
+    return { ok: true, permissions };
   });
 };
