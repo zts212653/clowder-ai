@@ -83,18 +83,6 @@ export function SkillsContent() {
                   </div>
                 </button>
                 <div className={settingsResourceActionGroupClass}>
-                  {item.source === 'external' && (
-                    <SettingsResourceIconButton
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        cap.handleDisableSkill(item);
-                      }}
-                      title="卸载 Skill"
-                      aria-label="卸载 Skill"
-                    >
-                      <HubIcon name="trash-2" className="h-4 w-4" />
-                    </SettingsResourceIconButton>
-                  )}
                   {cap.catFamilies.length > 0 && (
                     <SettingsResourceIconButton
                       onClick={() => setExpandedId(expanded ? null : item.id)}
@@ -112,6 +100,18 @@ export function SkillsContent() {
                       cap.handleToggle(item, !item.enabled);
                     }}
                   />
+                  {item.source === 'external' && (
+                    <SettingsResourceIconButton
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        cap.handleDisableSkill(item);
+                      }}
+                      title="卸载 Skill"
+                      aria-label="卸载 Skill"
+                    >
+                      <HubIcon name="trash" className="h-4 w-4" />
+                    </SettingsResourceIconButton>
+                  )}
                 </div>
               </div>
               {expanded && (
