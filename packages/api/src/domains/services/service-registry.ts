@@ -162,6 +162,8 @@ export function resolveServiceEndpoint(idOrManifest: string | ServiceManifest): 
   for (const envVar of manifest.configVars) {
     const val = process.env[envVar];
     if (val?.startsWith('http')) return val;
+    const parsed = val ? Number.parseInt(val, 10) : Number.NaN;
+    if (Number.isFinite(parsed) && parsed > 0) return `http://localhost:${parsed}`;
   }
 
   const port = resolveServicePort(manifest);
