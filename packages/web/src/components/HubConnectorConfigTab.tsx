@@ -228,37 +228,78 @@ export function HubConnectorConfigTab() {
 
             {/* F132 Phase E: WeCom Bot guided setup — dedicated panel with validate+connect */}
             {isExpanded && platform.id === 'wecom-bot' && (
-              <div className="console-code-pane space-y-3.5 px-4 py-4">
-                {guideSteps.map((step, idx) => (
-                  <div key={idx} className="space-y-1.5">
-                    <div className="flex items-center gap-1.5">
-                      <StepBadge num={idx + 1} />
-                      <span className="text-[13px] font-medium text-cafe">{step.text}</span>
-                    </div>
-                    {idx === 0 && (
-                      <div className="ml-[26px]">
-                        <a
-                          href={platform.docsUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="console-inline-link"
-                        >
-                          <ExternalLinkIcon />
-                          <span>developer.work.weixin.qq.com → WeCom AI Bot docs</span>
-                        </a>
+              <div className="px-4 py-4 space-y-4">
+                <div className="console-list-card rounded-2xl overflow-hidden shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
+                  <div className="console-code-pane space-y-3.5 px-4 py-4">
+                    {guideSteps.map((step, idx) => (
+                      <div key={idx} className="space-y-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <StepBadge num={idx + 1} />
+                          <span className="text-[13px] font-medium text-cafe">{step.text}</span>
+                        </div>
+                        {idx === 0 && (
+                          <div className="ml-[26px]">
+                            <a
+                              href={platform.docsUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="console-inline-link"
+                            >
+                              <ExternalLinkIcon />
+                              <span>developer.work.weixin.qq.com → WeCom AI Bot docs</span>
+                            </a>
+                          </div>
+                        )}
+                        {idx === guideSteps.length - 1 && (
+                          <div className="ml-[26px]">
+                            <WeComBotSetupPanel
+                              configured={platform.configured}
+                              onConnected={() => void fetchStatus()}
+                              onDisconnected={() => void fetchStatus()}
+                            />
+                          </div>
+                        )}
                       </div>
-                    )}
-                    {idx === guideSteps.length - 1 && (
-                      <div className="ml-[26px]">
-                        <WeComBotSetupPanel
-                          configured={platform.configured}
-                          onConnected={() => void fetchStatus()}
-                          onDisconnected={() => void fetchStatus()}
-                        />
-                      </div>
-                    )}
+                    ))}
                   </div>
-                ))}
+                </div>
+
+                {PERMISSION_CONNECTORS[platform.id] && (
+                  <Suspense fallback={<p className="text-xs text-cafe-muted">加载中...</p>}>
+                    <HubPermissionsTab ref={permissionsRef} connectorId={platform.id} />
+                  </Suspense>
+                )}
+
+                {saveResult && (
+                  <div
+                    className={`rounded-[16px] px-3 py-2 text-xs ${
+                      saveResult.type === 'success'
+                        ? 'bg-conn-emerald-bg text-conn-emerald-text border border-conn-emerald-ring'
+                        : 'bg-conn-red-bg text-conn-red-text border border-conn-red-ring'
+                    }`}
+                  >
+                    {saveResult.message}
+                  </div>
+                )}
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    className="console-button-secondary text-[13px]"
+                    disabled={testing}
+                    onClick={() => handleTestConnection(platform.id)}
+                  >
+                    <WifiIcon />
+                    {testing ? '测试中...' : '测试连接'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSave(platform)}
+                    disabled={saving}
+                    className="console-button-primary text-[13px] disabled:opacity-50"
+                  >
+                    {saving ? '保存中...' : '保存配置'}
+                  </button>
+                </div>
               </div>
             )}
 

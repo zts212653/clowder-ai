@@ -108,6 +108,7 @@ export function SkillsContent() {
                       }}
                       title="卸载 Skill"
                       aria-label="卸载 Skill"
+                      tone="danger"
                     >
                       <HubIcon name="trash" className="h-4 w-4" />
                     </SettingsResourceIconButton>
