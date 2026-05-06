@@ -38,6 +38,7 @@ export interface CiCdRouterOptions {
   readonly taskStore: ITaskStore;
   readonly deliveryDeps: ConnectorDeliveryDeps;
   readonly log: FastifyBaseLogger;
+  readonly notifySkip?: (threadId: string, reason: string) => void;
 }
 
 export class CiCdRouter {
@@ -57,6 +58,10 @@ export class CiCdRouter {
     }
 
     if (task.automationState?.ci?.enabled === false) {
+      if (!task.automationState.ci.skipNotified) {
+        this.opts.notifySkip?.(task.threadId, 'ci_automation_disabled');
+        await taskStore.patchAutomationState(task.id, { ci: { skipNotified: true } });
+      }
       return { kind: 'skipped', reason: `CI tracking disabled for ${poll.repoFullName}#${poll.prNumber}` };
     }
 

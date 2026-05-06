@@ -236,6 +236,40 @@ describe('MaterializationService', () => {
     });
   });
 
+  it('materialize tags frontmatter with collection metadata when marker has targetCollectionId (F186 AC-A10)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const marker = await queue.submit({
+      content: 'A method extracted from lexander world',
+      source: 'opus:t1',
+      status: 'captured',
+      targetKind: 'lesson',
+      sourceCollectionId: 'world:lexander',
+      targetCollectionId: 'global:methods',
+    });
+    await queue.transition(marker.id, 'approved');
+
+    const result = await service.materialize(marker.id);
+    const md = readFileSync(result.outputPath, 'utf-8');
+    assert.ok(md.includes('target_collection: global:methods'), 'frontmatter should contain target_collection');
+    assert.ok(md.includes('source_collection: world:lexander'), 'frontmatter should contain source_collection');
+  });
+
+  it('materialize omits collection fields when marker has no targetCollectionId (backwards compat)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const marker = await queue.submit({
+      content: 'Legacy lesson without collection routing',
+      source: 'opus:t1',
+      status: 'captured',
+      targetKind: 'lesson',
+    });
+    await queue.transition(marker.id, 'approved');
+
+    const result = await service.materialize(marker.id);
+    const md = readFileSync(result.outputPath, 'utf-8');
+    assert.ok(!md.includes('target_collection'), 'should not have target_collection');
+    assert.ok(!md.includes('source_collection'), 'should not have source_collection');
+  });
+
   it('e2e: submit → approve → materialize → .md exists + marker=materialized + reindexed', async () => {
     const { MaterializationService } = await import('../../dist/domains/memory/MaterializationService.js');
     let reindexedPaths = [];

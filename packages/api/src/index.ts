@@ -21,6 +21,7 @@ import {
   getAcpConfig,
   getAllCatIdsFromConfig,
   getConfigSessionStrategy,
+  getDefaultCatId,
   isCatAvailable,
   toAllCatConfigs,
 } from './config/cat-config-loader.js';
@@ -152,6 +153,7 @@ import {
   invocationsRoutes,
   leaderboardEventsRoutes,
   leaderboardRoutes,
+  libraryRoutes,
   memoryPublishRoutes,
   memoryRoutes,
   messageActionsRoutes,
@@ -192,6 +194,7 @@ import {
   workspaceEditRoutes,
   workspaceGitRoutes,
   workspaceRoutes,
+  worldRoutes,
 } from './routes/index.js';
 import { knowledgeFeedRoutes } from './routes/knowledge-feed.js';
 import { marketplaceRoutes } from './routes/marketplace.js';
@@ -315,6 +318,10 @@ async function main(): Promise<void> {
   // Initialize WebSocket manager BEFORE routes (injected via opts, no circular import).
   // IMPORTANT: Socket.io must attach to the SAME server Fastify listens on.
   socketManager = new SocketManager(app.server, invocationTracker);
+
+  // F063: Workspace file change watcher — pushes file-changed events to clients
+  const { setupWorkspaceFileWatcher } = await import('./domains/workspace/workspace-file-watcher.js');
+  setupWorkspaceFileWatcher(socketManager.getIO());
 
   // F153 Phase E L3: Burn-rate alerting — push system_notice via WebSocket
   if (telemetryHandle.getMetricsText) {
@@ -1179,6 +1186,18 @@ async function main(): Promise<void> {
     dailyTimer.unref();
   }
 
+  // F093: World Engine — runtime store + coordinator + context provider
+  const { SqliteWorldStore } = await import('./domains/world/SqliteWorldStore.js');
+  const { WorldRuntimeCoordinator } = await import('./domains/world/WorldRuntimeCoordinator.js');
+  const { WorldContextProvider } = await import('./domains/world/WorldContextProvider.js');
+  const { WorldKnowledgeAdapter } = await import('./domains/world/WorldKnowledgeAdapter.js');
+  const worldDbPath = process.env.WORLD_DB ?? resolve(repoRoot, 'world.sqlite');
+  const worldStore = new SqliteWorldStore(worldDbPath);
+  await worldStore.initialize();
+  const worldCoordinator = new WorldRuntimeCoordinator(worldStore);
+  const worldKnowledgeAdapter = new WorldKnowledgeAdapter(memoryServices.evidenceStore);
+  const worldContextProvider = new WorldContextProvider(worldStore, worldKnowledgeAdapter);
+
   // Shared AgentRouter — used by messagesRoutes and invocationsRoutes
   router = new AgentRouter({
     agentRegistry,
@@ -1205,6 +1224,8 @@ async function main(): Promise<void> {
     ...(toolUsageCounter ? { toolUsageCounter } : {}),
     guideSessionStore,
     dismissTracker,
+    worldContextProvider,
+    worldStore,
   });
 
   // F39: Message queue delivery
@@ -1315,6 +1336,12 @@ async function main(): Promise<void> {
     });
   }
   await app.register(catsRoutes);
+
+  // F182 Phase D: disable-impact endpoint
+  {
+    const { registerDisableImpactRoute } = await import('./routes/disable-impact.js');
+    registerDisableImpactRoute(app, { taskStore, dynamicTaskStore });
+  }
 
   // F149 Phase C: ACP pool diagnostics endpoint (gated by env flag)
   app.get('/api/diagnostics/acp-pool', async (_req, reply) => {
@@ -1526,6 +1553,10 @@ async function main(): Promise<void> {
     });
   }
   await app.register(tasksRoutes, { taskStore, socketManager });
+
+  // F093: World Engine — routes (store + coordinator initialized above, before AgentRouter)
+  await app.register(worldRoutes, { worldStore, coordinator: worldCoordinator });
+
   const fetchIssuesForSync = async (repo: string) => {
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
@@ -1754,6 +1785,7 @@ async function main(): Promise<void> {
   const { f163AuditRoutes } = await import('./routes/f163-audit-routes.js');
   await app.register(f163AuditRoutes, {
     evidenceStore: memoryServices.evidenceStore as unknown as Parameters<typeof f163AuditRoutes>[1]['evidenceStore'],
+    knowledgeResolver: memoryServices.knowledgeResolver,
   });
 
   // F152 Phase C: Distillation routes (global lesson reflow)
@@ -1792,7 +1824,22 @@ async function main(): Promise<void> {
     markerQueue: memoryServices.markerQueue,
     db: memoryServices.store.getDb(),
     materializationService: memoryServices.materializationService,
+    catalog: memoryServices.catalog,
   });
+
+  // F186: Library catalog API (Phase D: includes external collections + dataDir for register endpoint)
+  if (memoryServices.catalog) {
+    const libraryStores =
+      memoryServices.collectionStores ?? new Map<string, import('./domains/memory/interfaces.js').IEvidenceStore>();
+    if (!libraryStores.has('project:cat-cafe')) libraryStores.set('project:cat-cafe', memoryServices.store);
+    if (memoryServices.globalStore && !libraryStores.has('global:methods'))
+      libraryStores.set('global:methods', memoryServices.globalStore);
+    await app.register(libraryRoutes, {
+      catalog: memoryServices.catalog,
+      stores: libraryStores,
+      dataDir: memoryServices.dataDir,
+    });
+  }
 
   // Memory governance (publish workflow)
   const governanceStore = new MemoryGovernanceStore();
@@ -2144,6 +2191,17 @@ async function main(): Promise<void> {
       taskStore,
       deliveryDeps,
       log: app.log,
+      notifySkip: (threadId, reason) => {
+        socketManager?.broadcastAgentMessage(
+          {
+            type: 'system_info',
+            catId: getDefaultCatId(),
+            content: JSON.stringify({ type: 'connector_skip', reason, threadId }),
+            timestamp: Date.now(),
+          },
+          threadId,
+        );
+      },
     });
 
     // F140: ConflictRouter (state-transition dedup + KD-9 fingerprint reset)

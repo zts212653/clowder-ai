@@ -149,6 +149,14 @@ const STATUS_LABEL: Record<CliStatus, string> = {
   failed: 'failed',
   interrupted: 'interrupted',
 };
+const TEXT_PREVIEW_MAX_CHARS = 48;
+
+function appendPreviewChar(preview: string, char: string): string {
+  if (/\s/.test(char)) {
+    return preview && !preview.endsWith(' ') ? `${preview} ` : preview;
+  }
+  return `${preview}${char}`;
+}
 
 function formatDuration(ms: number): string {
   const s = Math.round(ms / 1000);
@@ -156,6 +164,20 @@ function formatDuration(ms: number): string {
   const m = Math.floor(s / 60);
   const rem = s % 60;
   return rem > 0 ? `${m}m${rem}s` : `${m}m`;
+}
+
+function buildTextPreview(events: CliEvent[]): string {
+  let preview = '';
+  for (const event of events) {
+    if (event.kind !== 'text') continue;
+    for (const char of event.content ?? '') {
+      preview = appendPreviewChar(preview, char);
+      if (preview.length > TEXT_PREVIEW_MAX_CHARS) {
+        return `${preview.slice(0, TEXT_PREVIEW_MAX_CHARS)}…`;
+      }
+    }
+  }
+  return preview.trimEnd();
 }
 
 function buildSummary(events: CliEvent[], status: CliStatus): string {
@@ -170,13 +192,16 @@ function buildSummary(events: CliEvent[], status: CliStatus): string {
     const last = [...events].reverse().find((e) => e.kind === 'tool_use');
     return `CLI Output · ${statusLabel}${last ? ` · ${last.label}...` : ''}`;
   }
+  const textPreview = buildTextPreview(events);
   if (toolCount > 0) {
-    return `CLI Output · ${statusLabel} · ${toolCount} tool${toolCount > 1 ? 's' : ''}${duration}`;
+    const stdout = textPreview ? ` · stdout: ${textPreview}` : '';
+    return `CLI Output · ${statusLabel} · ${toolCount} tool${toolCount > 1 ? 's' : ''}${duration}${stdout}`;
   }
   const lineCount = events
     .filter((e) => e.kind === 'text')
     .reduce((n, e) => n + (e.content?.split('\n').length ?? 0), 0);
-  return `CLI Output · ${statusLabel} · ${lineCount} line${lineCount !== 1 ? 's' : ''}${duration}`;
+  const stdout = textPreview ? ` · ${textPreview}` : '';
+  return `CLI Output · ${statusLabel} · ${lineCount} line${lineCount !== 1 ? 's' : ''}${duration}${stdout}`;
 }
 
 /* ── Tool row — design: [status] [wrench] [name] [detail] [result] ── */
@@ -400,8 +425,8 @@ export function CliOutputBlock({
         <span style={{ color: accent }}>
           <ChevronIcon expanded={expanded} />
         </span>
-        <span className="font-medium">{summary}</span>
-        <span className="ml-auto flex items-center gap-1" style={{ color: '#64748B', fontSize: 10 }}>
+        <span className="font-medium min-w-0 truncate text-left">{summary}</span>
+        <span className="ml-auto flex items-center gap-1 flex-shrink-0" style={{ color: '#64748B', fontSize: 10 }}>
           {thinkingMode === 'debug' ? (
             <>
               <PawPrint />

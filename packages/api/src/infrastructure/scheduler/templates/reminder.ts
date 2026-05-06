@@ -48,7 +48,9 @@ export const reminderTemplate: TaskTemplate = {
 
           // Wake a cat to act on the trigger message
           if (ctx.invokeTrigger) {
-            ctx.invokeTrigger.trigger(tid, catId, triggerUserId, content, messageId);
+            ctx.invokeTrigger.trigger(tid, catId, triggerUserId, content, messageId, undefined, {
+              sourceCategory: 'scheduled',
+            });
           }
         },
       },

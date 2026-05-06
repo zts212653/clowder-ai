@@ -27,6 +27,10 @@ const mockClearThreadActiveInvocation = vi.fn();
 const mockResetThreadInvocationState = vi.fn();
 const mockSetThreadMessageStreaming = vi.fn();
 const mockGetThreadState = vi.fn(() => ({ messages: [] }));
+// F183 B1.2.2: active text stream → reducer → replaceMessages
+const mockReplaceMessages = vi.fn((msgs: unknown[]) => {
+  storeState.messages = msgs as typeof storeState.messages;
+});
 
 const storeState = {
   messages: [] as Array<{
@@ -60,6 +64,8 @@ const storeState = {
   patchMessage: mockPatchMessage,
 
   addMessageToThread: mockAddMessageToThread,
+  replaceMessages: mockReplaceMessages,
+  hasMore: true,
   clearThreadActiveInvocation: mockClearThreadActiveInvocation,
   resetThreadInvocationState: mockResetThreadInvocationState,
   setThreadMessageStreaming: mockSetThreadMessageStreaming,
@@ -289,7 +295,12 @@ describe('useAgentMessages placeholder recovery', () => {
       });
     });
 
-    const localBubble = mockAddMessage.mock.calls.at(-1)?.[0];
+    // F183 B1.2.3: new stream bubble may go via reducer + replaceMessages instead of addMessage
+    const localBubble =
+      mockAddMessage.mock.calls.at(-1)?.[0] ??
+      (mockReplaceMessages.mock.calls.at(-1)?.[0] as Array<{ id?: string; catId?: string }> | undefined)?.find?.(
+        (m) => m.catId === 'opus',
+      );
     expect(localBubble?.id).toBeTruthy();
 
     // Hydration replaces the optimistic/local bubble with the persisted server message.
@@ -337,15 +348,20 @@ describe('useAgentMessages placeholder recovery', () => {
       });
     });
 
-    expect(mockAddMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'assistant',
-        catId: 'codex',
-        origin: 'stream',
-        replyTo: 'msg-parent-1',
-        replyPreview: { senderCatId: 'opus', content: '@缅因猫 帮忙看一下' },
-      }),
+    // F183 B1.2.3 wire-up: new stream bubble 走 reducer + replaceMessages，
+    // replyTo/replyPreview 走 mockPatchMessage 单独 patch。检查最终状态而非 API。
+    const newBubble =
+      storeState.messages.find((m) => m.catId === 'codex' && m.origin === 'stream') ??
+      mockAddMessage.mock.calls.map((c) => c[0]).find((m) => m.catId === 'codex' && m.origin === 'stream');
+    expect(newBubble).toMatchObject({ type: 'assistant', catId: 'codex', origin: 'stream' });
+    // replyTo/replyPreview should be set via either addMessage payload or follow-up patchMessage
+    const patchedReply = mockPatchMessage.mock.calls.find(
+      (c) => c[1]?.replyTo === 'msg-parent-1' && c[1]?.replyPreview?.senderCatId === 'opus',
     );
+    expect(
+      newBubble?.replyTo === 'msg-parent-1' || !!patchedReply,
+      'replyTo + replyPreview must be applied via addMessage or follow-up patchMessage',
+    ).toBe(true);
   });
 
   it('replaces stream bubble content instead of appending on replace-mode text', () => {

@@ -108,6 +108,32 @@ describe('F183 bubble invariant gate', () => {
     ).toThrow(/duplicate stable bubble identity/);
   });
 
+  // F183 Phase E AC-E2 — end-to-end integration: a duplicate stable identity
+  // surfaced by `findBubbleStoreInvariantViolations` flows through
+  // `recordBubbleInvariantViolation` and (under BUBBLE_INVARIANT_STRICT=1)
+  // throws — closing TD112 (chatStore duplicate identity) + TD114
+  // (duplicate diagnostics/assertions) end to end.
+  it('AC-E2 (TD112+TD114): violation flow throws under strict mode end-to-end', async () => {
+    const { vi } = await import('vitest');
+    const { recordBubbleInvariantViolation } = await import('../../debug/bubbleInvariantDiagnostics');
+    vi.stubEnv('BUBBLE_INVARIANT_STRICT', '1');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const violations = findBubbleStoreInvariantViolations(
+      [msg('stream-1', { origin: 'stream' }), msg('callback-1', { origin: 'callback' })],
+      {
+        threadId: 'thread-1',
+        eventType: 'callback_final',
+        sourcePath: 'callback',
+      },
+    );
+    expect(violations.length).toBe(1);
+    // Mirrors the production wire-up in useAgentMessages.ts: violations from
+    // reducer/store are forwarded to recordBubbleInvariantViolation('warn').
+    // Under strict mode the warn-level call still throws.
+    expect(() => recordBubbleInvariantViolation(violations[0]!, 'warn')).toThrow(/bubble invariant violation/);
+    vi.unstubAllEnvs();
+  });
+
   it('detects phase regression when stream arrives after callback/history', () => {
     const violation = validateIncomingBubbleEvent(
       [msg('final-1', { origin: 'callback' })],

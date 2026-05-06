@@ -58,6 +58,10 @@ export interface RouteStrategyDeps {
   toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
   /** F148 Phase F: Task store for navigation context (optional, fail-open) */
   taskStore?: import('../../stores/ports/TaskStore.js').ITaskStore;
+  /** F093: World context provider for world-building mode (optional, fail-open) */
+  worldContextProvider?: import('../../../../world/WorldContextProvider.js').WorldContextProvider;
+  /** F093: World store for thread→world lookup (optional, fail-open) */
+  worldStore?: import('../../../../world/interfaces.js').IWorldStore;
 }
 
 /** Mutable context for tracking persistence failures across the generator boundary.

@@ -35,7 +35,10 @@ const BLOCKED_PATTERNS = [
   /迭代再补/,
 ];
 
-const EXEMPT_PREFIXES = [/^docs\(F\d+\):\s*(update|expand|refine)\s+spec\b/i];
+const EXEMPT_PREFIXES = [
+  /^docs\(F\d+\):\s*(update|expand|refine)\s+spec\b/i,
+  /\[red\]/i, // TDD red-phase commits — "stub" is placeholder for failing tests, not deferred work
+];
 
 function scanText(text, source) {
   const hits = [];

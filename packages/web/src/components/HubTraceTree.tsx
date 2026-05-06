@@ -127,7 +127,7 @@ export function TraceBrowser() {
   const traces = groupByTrace(spans);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" data-guide-id="observability.trace-browser">
       <div className="flex gap-2">
         <input
           type="text"

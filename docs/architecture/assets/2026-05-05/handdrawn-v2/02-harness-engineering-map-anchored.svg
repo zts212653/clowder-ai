@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2600" height="1900" viewBox="0 0 2600 1900">
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#8a6f45" flood-opacity="0.13"/></filter>
+    <style><![CDATA[text{font-family:"PingFang SC", "Hiragino Sans GB", "STHeiti", "Arial Unicode MS", sans-serif;letter-spacing:0}.mono{font-family:"SFMono-Regular","Menlo",monospace}]]></style>
+  </defs>
+  <rect width="100%" height="100%" fill="#fffaf0"/>
+  <path d="M0,90 C420,25 760,110 1120,50 C1550,-5 1980,82 2600,22 L2600,0 L0,0 Z" fill="#f8efe0" opacity="0.92"/>
+  <text x="1300" y="74" text-anchor="middle" font-size="52" font-weight="900" fill="#24313a">Harness Engineering 六+一构件映射图</text>
+  <text x="1300" y="121" text-anchor="middle" font-size="25" font-weight="700" fill="#64748b">中文社区六大件 = 二次综合清单；下方 OAI / ANT / FOW 写的是具体外部概念锚点</text>
+  <text x="1300" y="155" text-anchor="middle" font-size="22" font-weight="800" fill="#7c3aed">Cat Cafe 补第七类：Collaboration Semantics / Ball Ownership</text>
+<g>
+    <rect x="60" y="190" width="790" height="470" rx="28" fill="#e7f8df" stroke="#16a34a" stroke-width="4" filter="url(#shadow)"/>
+    <g opacity="0.16"><circle cx="792" cy="242" r="15.75" fill="#16a34a"/><circle cx="768.9" cy="223.1" r="8.4" fill="#16a34a"/><circle cx="784.65" cy="212.6" r="8.4" fill="#16a34a"/><circle cx="802.5" cy="212.6" r="8.4" fill="#16a34a"/><circle cx="818.25" cy="224.15" r="8.4" fill="#16a34a"/></g>
+    <rect x="84" y="212" width="742" height="42" rx="21" fill="#16a34a" opacity="0.96"/><text x="455" y="241" text-anchor="middle" font-size="22" font-weight="850" fill="white">1. Durable State</text>
+    <text x="94" y="282" text-anchor="start" font-size="18" font-weight="850" fill="#16a34a"><tspan x="94" dy="0">Cat Cafe 落地</tspan></text>
+    <text x="102" y="316" text-anchor="start" font-size="23" font-weight="680" fill="#24313a"><tspan x="102" dy="0">docs/ 真相源 · evidence.sqlite</tspan><tspan x="102" dy="27.139999999999997">Session Chain / Thread / Task</tspan><tspan x="102" dy="27.139999999999997">InvocationQueue 接住状态迁移</tspan></text>
+    <line x1="94" y1="408" x2="816" y2="408" stroke="#16a34a" stroke-width="2" opacity="0.28"/>
+    <text x="94" y="440" text-anchor="start" font-size="18" font-weight="850" fill="#16a34a"><tspan x="94" dy="0">外部概念锚点（不是来源归属）</tspan></text>
+    <rect x="96" y="461" width="58" height="28" rx="14" fill="white" stroke="#16a34a" stroke-width="2.5"/><text x="125" y="482" text-anchor="middle" font-size="15" font-weight="900" fill="#16a34a">OAI</text><text x="168" y="482" font-size="18" font-weight="650" fill="#24313a">docs as system of record / plans / observability</text>
+    <rect x="96" y="502" width="58" height="28" rx="14" fill="white" stroke="#16a34a" stroke-width="2.5"/><text x="125" y="523" text-anchor="middle" font-size="15" font-weight="900" fill="#16a34a">ANT</text><text x="168" y="523" font-size="18" font-weight="650" fill="#24313a">structured handoff / session log / getEvents()</text>
+    <rect x="96" y="543" width="58" height="28" rx="14" fill="white" stroke="#16a34a" stroke-width="2.5"/><text x="125" y="564" text-anchor="middle" font-size="15" font-weight="900" fill="#16a34a">FOW</text><text x="168" y="564" font-size="18" font-weight="650" fill="#24313a">context engineering / harnessability 基础</text>
+    <text x="102" y="613" text-anchor="start" font-size="18" font-weight="650" fill="#64748b"><tspan x="102" dy="0">共识：context window 不是 durable state</tspan></text>
+  </g><g>
+    <rect x="905" y="190" width="790" height="470" rx="28" fill="#fff0d7" stroke="#f97316" stroke-width="4" filter="url(#shadow)"/>
+    <g opacity="0.16"><circle cx="1637" cy="242" r="15.75" fill="#f97316"/><circle cx="1613.9" cy="223.1" r="8.4" fill="#f97316"/><circle cx="1629.65" cy="212.6" r="8.4" fill="#f97316"/><circle cx="1647.5" cy="212.6" r="8.4" fill="#f97316"/><circle cx="1663.25" cy="224.15" r="8.4" fill="#f97316"/></g>
+    <rect x="929" y="212" width="742" height="42" rx="21" fill="#f97316" opacity="0.96"/><text x="1300" y="241" text-anchor="middle" font-size="22" font-weight="850" fill="white">2. Plans &amp; Decomposition</text>
+    <text x="939" y="282" text-anchor="start" font-size="18" font-weight="850" fill="#f97316"><tspan x="939" dy="0">Cat Cafe 落地</tspan></text>
+    <text x="947" y="316" text-anchor="start" font-size="23" font-weight="680" fill="#24313a"><tspan x="947" dy="0">feat-lifecycle → Design Gate</tspan><tspan x="947" dy="27.139999999999997">writing-plans → Phase 拆分</tspan><tspan x="947" dy="27.139999999999997">AC → evidence · Close Gate</tspan></text>
+    <line x1="939" y1="408" x2="1661" y2="408" stroke="#f97316" stroke-width="2" opacity="0.28"/>
+    <text x="939" y="440" text-anchor="start" font-size="18" font-weight="850" fill="#f97316"><tspan x="939" dy="0">外部概念锚点（不是来源归属）</tspan></text>
+    <rect x="941" y="461" width="58" height="28" rx="14" fill="white" stroke="#f97316" stroke-width="2.5"/><text x="970" y="482" text-anchor="middle" font-size="15" font-weight="900" fill="#f97316">OAI</text><text x="1013" y="482" font-size="18" font-weight="650" fill="#24313a">execution plans as first-class artifacts</text>
+    <rect x="941" y="502" width="58" height="28" rx="14" fill="white" stroke="#f97316" stroke-width="2.5"/><text x="970" y="523" text-anchor="middle" font-size="15" font-weight="900" fill="#f97316">ANT</text><text x="1013" y="523" font-size="18" font-weight="650" fill="#24313a">planner / generator / evaluator / initializer</text>
+    <rect x="941" y="543" width="58" height="28" rx="14" fill="white" stroke="#f97316" stroke-width="2.5"/><text x="970" y="564" text-anchor="middle" font-size="15" font-weight="900" fill="#f97316">FOW</text><text x="1013" y="564" font-size="18" font-weight="650" fill="#24313a">Guides: specs / plans / rules</text>
+    <text x="947" y="613" text-anchor="start" font-size="18" font-weight="650" fill="#64748b"><tspan x="947" dy="0">计划不是自由文本，必须能验收</tspan></text>
+  </g><g>
+    <rect x="1750" y="190" width="790" height="470" rx="28" fill="#fee2e2" stroke="#dc2626" stroke-width="4" filter="url(#shadow)"/>
+    <g opacity="0.16"><circle cx="2482" cy="242" r="15.75" fill="#dc2626"/><circle cx="2458.9" cy="223.1" r="8.4" fill="#dc2626"/><circle cx="2474.65" cy="212.6" r="8.4" fill="#dc2626"/><circle cx="2492.5" cy="212.6" r="8.4" fill="#dc2626"/><circle cx="2508.25" cy="224.15" r="8.4" fill="#dc2626"/></g>
+    <rect x="1774" y="212" width="742" height="42" rx="21" fill="#dc2626" opacity="0.96"/><text x="2145" y="241" text-anchor="middle" font-size="22" font-weight="850" fill="white">3. Feedback Loops</text>
+    <text x="1784" y="282" text-anchor="start" font-size="18" font-weight="850" fill="#dc2626"><tspan x="1784" dy="0">Cat Cafe 落地</tspan></text>
+    <text x="1792" y="316" text-anchor="start" font-size="23" font-weight="680" fill="#24313a"><tspan x="1792" dy="0">pnpm gate · CI · trace</tspan><tspan x="1792" dy="27.139999999999997">跨族 review · 愿景守护</tspan><tspan x="1792" dy="27.139999999999997">Magic Words / CVO 拉闸</tspan></text>
+    <line x1="1784" y1="408" x2="2506" y2="408" stroke="#dc2626" stroke-width="2" opacity="0.28"/>
+    <text x="1784" y="440" text-anchor="start" font-size="18" font-weight="850" fill="#dc2626"><tspan x="1784" dy="0">外部概念锚点（不是来源归属）</tspan></text>
+    <rect x="1786" y="461" width="58" height="28" rx="14" fill="white" stroke="#dc2626" stroke-width="2.5"/><text x="1815" y="482" text-anchor="middle" font-size="15" font-weight="900" fill="#dc2626">OAI</text><text x="1858" y="482" font-size="18" font-weight="650" fill="#24313a">agent review / CI / logs / metrics / doc gardening</text>
+    <rect x="1786" y="502" width="58" height="28" rx="14" fill="white" stroke="#dc2626" stroke-width="2.5"/><text x="1815" y="523" text-anchor="middle" font-size="15" font-weight="900" fill="#dc2626">ANT</text><text x="1858" y="523" font-size="18" font-weight="650" fill="#24313a">evaluator / QA loop / Playwright MCP / trace reading</text>
+    <rect x="1786" y="543" width="58" height="28" rx="14" fill="white" stroke="#dc2626" stroke-width="2.5"/><text x="1815" y="564" text-anchor="middle" font-size="15" font-weight="900" fill="#dc2626">FOW</text><text x="1858" y="564" font-size="18" font-weight="650" fill="#24313a">Sensors: computational vs inferential</text>
+    <text x="1792" y="613" text-anchor="start" font-size="18" font-weight="650" fill="#64748b"><tspan x="1792" dy="0">多样性 reviewer 是结构性质量来源</tspan></text>
+  </g><g>
+    <rect x="60" y="700" width="790" height="470" rx="28" fill="#e7f0ff" stroke="#2563eb" stroke-width="4" filter="url(#shadow)"/>
+    <g opacity="0.16"><circle cx="792" cy="752" r="15.75" fill="#2563eb"/><circle cx="768.9" cy="733.1" r="8.4" fill="#2563eb"/><circle cx="784.65" cy="722.6" r="8.4" fill="#2563eb"/><circle cx="802.5" cy="722.6" r="8.4" fill="#2563eb"/><circle cx="818.25" cy="734.15" r="8.4" fill="#2563eb"/></g>
+    <rect x="84" y="722" width="742" height="42" rx="21" fill="#2563eb" opacity="0.96"/><text x="455" y="751" text-anchor="middle" font-size="22" font-weight="850" fill="white">4. Legibility</text>
+    <text x="94" y="792" text-anchor="start" font-size="18" font-weight="850" fill="#2563eb"><tspan x="94" dy="0">Cat Cafe 落地</tspan></text>
+    <text x="102" y="826" text-anchor="start" font-size="23" font-weight="680" fill="#24313a"><tspan x="102" dy="0">search_evidence · source note</tspan><tspan x="102" dy="27.139999999999997">Hub 明厨亮灶 / InvocationTracker</tspan><tspan x="102" dy="27.139999999999997">rich block 结构化呈现</tspan></text>
+    <line x1="94" y1="918" x2="816" y2="918" stroke="#2563eb" stroke-width="2" opacity="0.28"/>
+    <text x="94" y="950" text-anchor="start" font-size="18" font-weight="850" fill="#2563eb"><tspan x="94" dy="0">外部概念锚点（不是来源归属）</tspan></text>
+    <rect x="96" y="971" width="58" height="28" rx="14" fill="white" stroke="#2563eb" stroke-width="2.5"/><text x="125" y="992" text-anchor="middle" font-size="15" font-weight="900" fill="#2563eb">OAI</text><text x="168" y="992" font-size="18" font-weight="650" fill="#24313a">UI / logs / metrics / traces visible to Codex</text>
+    <rect x="96" y="1012" width="58" height="28" rx="14" fill="white" stroke="#2563eb" stroke-width="2.5"/><text x="125" y="1033" text-anchor="middle" font-size="15" font-weight="900" fill="#2563eb">ANT</text><text x="168" y="1033" font-size="18" font-weight="650" fill="#24313a">structured artifacts for next agent handoff</text>
+    <rect x="96" y="1053" width="58" height="28" rx="14" fill="white" stroke="#2563eb" stroke-width="2.5"/><text x="125" y="1074" text-anchor="middle" font-size="15" font-weight="900" fill="#2563eb">FOW</text><text x="168" y="1074" font-size="18" font-weight="650" fill="#24313a">ambient affordances / harnessability</text>
+    <text x="102" y="1123" text-anchor="start" font-size="18" font-weight="650" fill="#64748b"><tspan x="102" dy="0">看不见等于不存在</tspan></text>
+  </g><g>
+    <rect x="905" y="700" width="790" height="470" rx="28" fill="#f0e8ff" stroke="#7c3aed" stroke-width="4" filter="url(#shadow)"/>
+    <g opacity="0.16"><circle cx="1637" cy="752" r="15.75" fill="#7c3aed"/><circle cx="1613.9" cy="733.1" r="8.4" fill="#7c3aed"/><circle cx="1629.65" cy="722.6" r="8.4" fill="#7c3aed"/><circle cx="1647.5" cy="722.6" r="8.4" fill="#7c3aed"/><circle cx="1663.25" cy="734.15" r="8.4" fill="#7c3aed"/></g>
+    <rect x="929" y="722" width="742" height="42" rx="21" fill="#7c3aed" opacity="0.96"/><text x="1300" y="751" text-anchor="middle" font-size="22" font-weight="850" fill="white">5. Tool Mediation</text>
+    <text x="939" y="792" text-anchor="start" font-size="18" font-weight="850" fill="#7c3aed"><tspan x="939" dy="0">Cat Cafe 落地</tspan></text>
+    <text x="947" y="826" text-anchor="start" font-size="23" font-weight="680" fill="#24313a"><tspan x="947" dy="0">MCP + Skill 认知路标</tspan><tspan x="947" dy="27.139999999999997">SystemPromptBuilder / Guide 注入</tspan><tspan x="947" dy="27.139999999999997">工具入口硬 gate（F086）</tspan></text>
+    <line x1="939" y1="918" x2="1661" y2="918" stroke="#7c3aed" stroke-width="2" opacity="0.28"/>
+    <text x="939" y="950" text-anchor="start" font-size="18" font-weight="850" fill="#7c3aed"><tspan x="939" dy="0">外部概念锚点（不是来源归属）</tspan></text>
+    <rect x="941" y="971" width="58" height="28" rx="14" fill="white" stroke="#7c3aed" stroke-width="2.5"/><text x="970" y="992" text-anchor="middle" font-size="15" font-weight="900" fill="#7c3aed">OAI</text><text x="1013" y="992" font-size="18" font-weight="650" fill="#24313a">standard dev tools / repo skills / gh / scripts</text>
+    <rect x="941" y="1012" width="58" height="28" rx="14" fill="white" stroke="#7c3aed" stroke-width="2.5"/><text x="970" y="1033" text-anchor="middle" font-size="15" font-weight="900" fill="#7c3aed">ANT</text><text x="1013" y="1033" font-size="18" font-weight="650" fill="#24313a">tool routing / MCP proxy / sandbox as hands</text>
+    <rect x="941" y="1053" width="58" height="28" rx="14" fill="white" stroke="#7c3aed" stroke-width="2.5"/><text x="970" y="1074" text-anchor="middle" font-size="15" font-weight="900" fill="#7c3aed">FOW</text><text x="1013" y="1074" font-size="18" font-weight="650" fill="#24313a">CLI / scripts / codemods as computational controls</text>
+    <text x="947" y="1123" text-anchor="start" font-size="18" font-weight="650" fill="#64748b"><tspan x="947" dy="0">工具要放在猫已经会走的路上</tspan></text>
+  </g><g>
+    <rect x="1750" y="700" width="790" height="470" rx="28" fill="#d9fbf2" stroke="#0f766e" stroke-width="4" filter="url(#shadow)"/>
+    <g opacity="0.16"><circle cx="2482" cy="752" r="15.75" fill="#0f766e"/><circle cx="2458.9" cy="733.1" r="8.4" fill="#0f766e"/><circle cx="2474.65" cy="722.6" r="8.4" fill="#0f766e"/><circle cx="2492.5" cy="722.6" r="8.4" fill="#0f766e"/><circle cx="2508.25" cy="734.15" r="8.4" fill="#0f766e"/></g>
+    <rect x="1774" y="722" width="742" height="42" rx="21" fill="#0f766e" opacity="0.96"/><text x="2145" y="751" text-anchor="middle" font-size="22" font-weight="850" fill="white">6. Entropy Control</text>
+    <text x="1784" y="792" text-anchor="start" font-size="18" font-weight="850" fill="#0f766e"><tspan x="1784" dy="0">Cat Cafe 落地</tspan></text>
+    <text x="1792" y="826" text-anchor="start" font-size="23" font-weight="680" fill="#24313a"><tspan x="1792" dy="0">F163 知识生命周期</tspan><tspan x="1792" dy="27.139999999999997">Build to Delete 判别式</tspan><tspan x="1792" dy="27.139999999999997">skeleton / explanation / probe</tspan></text>
+    <line x1="1784" y1="918" x2="2506" y2="918" stroke="#0f766e" stroke-width="2" opacity="0.28"/>
+    <text x="1784" y="950" text-anchor="start" font-size="18" font-weight="850" fill="#0f766e"><tspan x="1784" dy="0">外部概念锚点（不是来源归属）</tspan></text>
+    <rect x="1786" y="971" width="58" height="28" rx="14" fill="white" stroke="#0f766e" stroke-width="2.5"/><text x="1815" y="992" text-anchor="middle" font-size="15" font-weight="900" fill="#0f766e">OAI</text><text x="1858" y="992" font-size="18" font-weight="650" fill="#24313a">golden principles / cleanup agents / AI slop GC</text>
+    <rect x="1786" y="1012" width="58" height="28" rx="14" fill="white" stroke="#0f766e" stroke-width="2.5"/><text x="1815" y="1033" text-anchor="middle" font-size="15" font-weight="900" fill="#0f766e">ANT</text><text x="1858" y="1033" font-size="18" font-weight="650" fill="#24313a">re-review harness after model upgrades; delete scaffold</text>
+    <rect x="1786" y="1053" width="58" height="28" rx="14" fill="white" stroke="#0f766e" stroke-width="2.5"/><text x="1815" y="1074" text-anchor="middle" font-size="15" font-weight="900" fill="#0f766e">FOW</text><text x="1858" y="1074" font-size="18" font-weight="650" fill="#24313a">steering loop / keep quality left</text>
+    <text x="1792" y="1123" text-anchor="start" font-size="18" font-weight="650" fill="#64748b"><tspan x="1792" dy="0">我们额外治理 harness 自身的熵</tspan></text>
+  </g>
+  <rect x="60" y="1228" width="2480" height="420" rx="28" fill="#fff7d6" stroke="#b45309" stroke-width="4" filter="url(#shadow)"/>
+  <g><circle cx="160" cy="1340" r="58" fill="#b45309" opacity="0.9" stroke="#334155" stroke-width="3"/><path d="M 119.4 1328.4 C 154.2 1287.8, 186.1 1308.1, 201.76 1337.1" fill="none" stroke="white" stroke-width="7.54" opacity=".85"/><path d="M 114.75999999999999 1356.24 C 154.2 1334.2, 178.56 1363.2, 207.56 1348.12" fill="none" stroke="white" stroke-width="6.96" opacity=".85"/></g>
+  <rect x="250" y="1262" width="830" height="42" rx="21" fill="#b45309" opacity="0.96"/><text x="665" y="1291" text-anchor="middle" font-size="22" font-weight="850" fill="white">7. Collaboration Semantics（六大件之外）</text>
+  <text x="260" y="1340" text-anchor="start" font-size="22" font-weight="900" fill="#b45309"><tspan x="260" dy="0">Cat Cafe 独有落地</tspan></text>
+  <text x="280" y="1382" text-anchor="start" font-size="28" font-weight="720" fill="#24313a"><tspan x="280" dy="0">@ 行首路由 · targetCats · hold_ball</tspan><tspan x="280" dy="34.72">InvocationQueue 统一执行平面 · Delivery Status</tspan><tspan x="280" dy="34.72">接 / 退 / 升三选一 · 跨族 review · CVO 终裁</tspan></text>
+  <line x1="1280" y1="1290" x2="1280" y2="1596" stroke="#b45309" stroke-width="3" opacity="0.34"/>
+  <text x="1340" y="1342" text-anchor="start" font-size="24" font-weight="900" fill="#b45309"><tspan x="1340" dy="0">为什么不是六大件里某一项？</tspan></text>
+  <text x="1340" y="1388" text-anchor="start" font-size="28" font-weight="720" fill="#24313a"><tspan x="1340" dy="0">它定义的是多 agent 之间“球权”如何真实迁移。</tspan><tspan x="1340" dy="35.84">纯文字声明不算状态迁移；必须有 tool call / commit / verdict / hold_ball 等现实动作。</tspan><tspan x="1340" dy="35.84">外部六大件覆盖 agent harness 底座，但不完整覆盖 multi-agent collaboration harness。</tspan></text>
+  <g opacity="0.16"><circle cx="2380" cy="1332" r="24" fill="#b45309"/><circle cx="2344.8" cy="1303.2" r="12.8" fill="#b45309"/><circle cx="2368.8" cy="1287.2" r="12.8" fill="#b45309"/><circle cx="2396" cy="1287.2" r="12.8" fill="#b45309"/><circle cx="2420" cy="1304.8" r="12.8" fill="#b45309"/></g>
+  <rect x="120" y="1700" width="2360" height="118" rx="34" fill="#ffffff" stroke="#334155" stroke-width="3" opacity="0.92"/>
+  <text x="150" y="1744" font-size="24" font-weight="850" fill="#24313a">图例与口径：</text>
+  <text x="350" y="1744" font-size="23" font-weight="700" fill="#24313a">OAI = OpenAI harness engineering；ANT = Anthropic long-running / managed agents；FOW = Fowler / Thoughtworks guides + sensors。</text>
+  <text x="150" y="1788" font-size="23" font-weight="700" fill="#dc2626">这些不是官方一一对应分类；是为了把中文社区六大件映射回各家具体问题域。</text>
+  <text x="2450" y="1848" text-anchor="end" font-size="20" font-weight="700" fill="#64748b">valid_as_of: 2026-05-06 · anchored detail version</text>
+</svg>

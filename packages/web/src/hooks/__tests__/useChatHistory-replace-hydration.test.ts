@@ -698,6 +698,82 @@ describe('useChatHistory replace hydration', () => {
     expect(useChatStore.getState().messages.find((m) => m.id === 'server-msg-2')?.thinkingChunks).toBeUndefined();
   });
 
+  it('reconciles local stream placeholder against the LATER history bubble when history has dual-bubble for one invocation (cloud P1 — last-wins streamKey)', async () => {
+    // Cloud Codex P1 (PR #1521): refactor to unified stable-identity Map
+    // changed streamKey collision behavior from last-wins (Map.set overwrite)
+    // to first-wins (`!has(streamKey)` guard). When a single invocation has
+    // both a stream bubble and a later callback bubble persisted to history
+    // (legacy/migration scenario), reconciliation must target the LATER
+    // (callback) bubble — otherwise a richer local placeholder can replace
+    // the earlier stream bubble, leaving a stale local row pretending to be
+    // the stream bubble while the authoritative callback already exists at
+    // the next index. Test guards against the first-wins regression.
+    const history = installDeferredHistoryResponse();
+    const cachedAssistantTs = Date.now() - 5_000;
+    const now = Date.now();
+
+    mountReplaceHydrationThread(
+      makeThreadBState(cachedAssistantTs, {
+        catInvocations: { opus: { invocationId: 'inv-dual', startedAt: now - 3_000 } },
+      }),
+    );
+
+    // Local stream placeholder: richer content than server-stream-X so that
+    // the same-phase richness comparison would prefer local over stream-X
+    // — this is what makes the regression visible (last-wins safely
+    // routes local to callback-X where phase priority drops it).
+    act(() => {
+      useChatStore.getState().addMessage({
+        id: 'live-stream-X',
+        type: 'assistant',
+        catId: 'opus',
+        content: 'LOCAL_LIVE_PLACEHOLDER_RICHER_THAN_THIN_SERVER_STREAM',
+        timestamp: now - 1_500,
+        isStreaming: true,
+        origin: 'stream',
+        extra: { stream: { invocationId: 'inv-dual' } },
+      });
+    });
+
+    await history.waitUntilPending();
+    history.expectPending();
+
+    await history.resolve({
+      messages: [
+        { id: 'b1', catId: 'opus', content: 'cached assistant', timestamp: cachedAssistantTs },
+        // Earlier stream bubble (thin) — would be the first-wins target.
+        {
+          id: 'server-stream-X',
+          catId: 'opus',
+          content: 'thin',
+          origin: 'stream',
+          timestamp: now - 2_000,
+          extra: { stream: { invocationId: 'inv-dual' } },
+        },
+        // Later callback bubble (final state) — must be the reconciliation target.
+        {
+          id: 'server-callback-X',
+          catId: 'opus',
+          content: 'final callback answer',
+          origin: 'callback',
+          timestamp: now - 1_000,
+          extra: { stream: { invocationId: 'inv-dual' } },
+        },
+      ],
+      hasMore: false,
+    });
+
+    // Both authoritative server bubbles must survive untouched; the local
+    // placeholder must be reconciled away against the callback bubble
+    // (phase priority drops local). First-wins regression would replace
+    // server-stream-X with live-stream-X.
+    expect(useChatStore.getState().messages.map((m) => m.id)).toEqual(['b1', 'server-stream-X', 'server-callback-X']);
+    expect(useChatStore.getState().messages.find((m) => m.id === 'live-stream-X')).toBeUndefined();
+    expect(useChatStore.getState().messages.find((m) => m.id === 'server-stream-X')).toEqual(
+      expect.objectContaining({ content: 'thin', origin: 'stream' }),
+    );
+  });
+
   it('preserves local blob URLs when a kept stream bubble survives replace hydration', async () => {
     const history = installDeferredHistoryResponse();
     const cachedAssistantTs = Date.now() - 1000;

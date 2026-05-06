@@ -301,8 +301,9 @@ describe('CliOutputBlock', () => {
         }),
       );
     });
-    // Initially collapsed — no tool details
-    expect(container.textContent).not.toContain('Looks good.');
+    // Initially collapsed — summary can preview stdout, but the body is not mounted.
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeNull();
+    expect(container.textContent).not.toContain('200 lines');
 
     // Click to expand
     const button = container.querySelector('button');
@@ -310,13 +311,15 @@ describe('CliOutputBlock', () => {
     act(() => {
       button?.click();
     });
-    expect(container.textContent).toContain('Looks good.');
+    const expandedBody = container.querySelector('[data-testid="cli-output-body"]');
+    expect(expandedBody).toBeTruthy();
+    expect(expandedBody?.textContent).toContain('Looks good.');
 
     // Click to collapse
     act(() => {
       button?.click();
     });
-    expect(container.textContent).not.toContain('Looks good.');
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeNull();
   });
 
   it('shows failed status text', () => {

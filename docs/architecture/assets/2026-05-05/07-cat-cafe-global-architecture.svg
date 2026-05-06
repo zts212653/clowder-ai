@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1920" viewBox="0 0 2400 1920">
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#8a6f45" flood-opacity="0.14"/>
+    </filter>
+    <filter id="soft">
+      <feTurbulence type="fractalNoise" baseFrequency="0.025" numOctaves="2" seed="12" result="noise"/>
+      <feColorMatrix in="noise" type="saturate" values="0"/>
+      <feBlend in="SourceGraphic" mode="multiply"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 z" fill="#344054"/>
+    </marker>
+    <marker id="arrowRed" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 z" fill="#dc2626"/>
+    </marker>
+    <style><![CDATA[
+      text { font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Arial Unicode MS", sans-serif; letter-spacing: 0; }
+      .title { font-weight: 800; fill: #263238; }
+      .subtitle { fill: #667085; }
+      .label { font-weight: 700; fill: #263238; }
+      .small { fill: #667085; }
+      .mono { font-family: "SFMono-Regular", "Menlo", "Consolas", monospace; }
+    ]]></style>
+  </defs>
+  <rect width="100%" height="100%" fill="#fffaf0"/>
+  <path d="M0,70 C420,10 760,95 1120,42 C1440,-4 1660,42 2100,16 L2100,0 L0,0 Z" fill="#f8efe0" opacity="0.8"/>
+
+
+  <text x="1200" y="70" text-anchor="middle" opacity="1" class="title"><tspan x="1200" dy="0" fill="#263238" font-weight="850" font-size="48">Cat Cafe 全局架构总图 2026-05</tspan></text>
+  <text x="1200" y="112" text-anchor="middle" opacity="1" class=""><tspan x="1200" dy="0" fill="#667085" font-weight="600" font-size="24">从 CVO 到猫、从产品面到队列、从记忆到治理：一张看全貌</tspan></text>
+
+
+
+    <rect x="90" y="150" width="2220" height="170" rx="28" fill="#f9731612" stroke="#f97316" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+
+
+    <circle cx="152" cy="235" r="38" fill="white" stroke="#f97316" stroke-width="4"/>
+    <text x="152" y="248" text-anchor="middle" font-size="36" font-weight="900" fill="#f97316">1</text>
+    <text x="208" y="198" font-size="30" font-weight="900" fill="#f97316">CVO / Human Direction Layer</text>
+    <text x="220" y="242" text-anchor="start" opacity="1" class=""><tspan x="220" dy="0" fill="#263238" font-weight="760" font-size="23">愿景 · 拍板 · 纠偏 · Magic Words · 验收 · eval 信号</tspan><tspan x="220" dy="27.139999999999997" fill="#263238" font-weight="760" font-size="23">人不是逐步审批器，而是方向与判断力的来源</tspan></text>
+
+
+
+    <rect x="90" y="345" width="2220" height="170" rx="28" fill="#7c3aed12" stroke="#7c3aed" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+
+
+    <circle cx="152" cy="430" r="38" fill="white" stroke="#7c3aed" stroke-width="4"/>
+    <text x="152" y="443" text-anchor="middle" font-size="36" font-weight="900" fill="#7c3aed">2</text>
+    <text x="208" y="393" font-size="30" font-weight="900" fill="#7c3aed">Product Surfaces Layer</text>
+    <text x="220" y="437" text-anchor="start" opacity="1" class=""><tspan x="220" dy="0" fill="#263238" font-weight="760" font-size="23">Hub / Workspace：对话 · 监控 · 知识 · 导航</tspan><tspan x="220" dy="27.139999999999997" fill="#263238" font-weight="760" font-size="23">Rich Block / Preview / Audio / image gallery · 外部 IM：飞书 · 企微 · Telegram · Email</tspan></text>
+
+
+
+    <rect x="90" y="540" width="2220" height="170" rx="28" fill="#0f766e12" stroke="#0f766e" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+
+
+    <circle cx="152" cy="625" r="38" fill="white" stroke="#0f766e" stroke-width="4"/>
+    <text x="152" y="638" text-anchor="middle" font-size="36" font-weight="900" fill="#0f766e">3</text>
+    <text x="208" y="588" font-size="30" font-weight="900" fill="#0f766e">Collaboration Semantics Layer</text>
+    <text x="220" y="632" text-anchor="start" opacity="1" class=""><tspan x="220" dy="0" fill="#263238" font-weight="760" font-size="23">猫猫身份：布偶/Claude · 缅因/GPT · 暹罗/Gemini（身份/引擎，不是岗位）</tspan><tspan x="220" dy="27.139999999999997" fill="#263238" font-weight="760" font-size="23">A2A：@ 行首路由 · targetCats · multi_mention · hold_ball · 接/退/升 · 跨族 review · CVO 终裁</tspan></text>
+
+
+
+    <rect x="90" y="735" width="2220" height="170" rx="28" fill="#2563eb12" stroke="#2563eb" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+
+
+    <circle cx="152" cy="820" r="38" fill="white" stroke="#2563eb" stroke-width="4"/>
+    <text x="152" y="833" text-anchor="middle" font-size="36" font-weight="900" fill="#2563eb">4</text>
+    <text x="208" y="783" font-size="30" font-weight="900" fill="#2563eb">Unified Execution Plane</text>
+    <text x="220" y="827" text-anchor="start" opacity="1" class=""><tspan x="220" dy="0" fill="#263238" font-weight="760" font-size="23">InvocationQueue：user / agent / multi_mention 统一入队</tspan><tspan x="220" dy="27.139999999999997" fill="#263238" font-weight="760" font-size="23">QueueProcessor：自动执行、暂停、恢复、取消 · InvocationTracker：谁在跑/等/完成 · SessionBootstrap：窄口上下文</tspan></text>
+
+
+
+    <rect x="90" y="930" width="2220" height="170" rx="28" fill="#16a34a12" stroke="#16a34a" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+
+
+    <circle cx="152" cy="1015" r="38" fill="white" stroke="#16a34a" stroke-width="4"/>
+    <text x="152" y="1028" text-anchor="middle" font-size="36" font-weight="900" fill="#16a34a">5</text>
+    <text x="208" y="978" font-size="30" font-weight="900" fill="#16a34a">Shared State / Memory Layer</text>
+    <text x="220" y="1022" text-anchor="start" opacity="1" class=""><tspan x="220" dy="0" fill="#263238" font-weight="760" font-size="23">Thread / Task / Workflow / Session Chain · docs 真相源 · evidence.sqlite · LibraryCatalog</tspan><tspan x="220" dy="27.139999999999997" fill="#263238" font-weight="760" font-size="23">Knowledge Feed · F163 熵减 · F186 图书馆联邦 · F152 外部项目冷启动与经验回流</tspan></text>
+
+
+
+    <rect x="90" y="1125" width="2220" height="170" rx="28" fill="#2563eb12" stroke="#2563eb" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+
+
+    <circle cx="152" cy="1210" r="38" fill="white" stroke="#2563eb" stroke-width="4"/>
+    <text x="152" y="1223" text-anchor="middle" font-size="36" font-weight="900" fill="#2563eb">6</text>
+    <text x="208" y="1173" font-size="30" font-weight="900" fill="#2563eb">Runtime / Tools / Storage Layer</text>
+    <text x="220" y="1217" text-anchor="start" opacity="1" class=""><tspan x="220" dy="0" fill="#263238" font-weight="760" font-size="23">Hub React + Zustand → API Fastify · Provider Adapters：Claude / GPT / Gemini / OpenCode</tspan><tspan x="220" dy="27.139999999999997" fill="#263238" font-weight="760" font-size="23">MCP Servers：core / collab / memory / signals / external · Tools：exec / browser / GitHub / image_gen / Pencil · Redis 6399 圣域 / 6398 隔离 / SQLite / git</tspan></text>
+
+
+
+    <rect x="90" y="1320" width="2220" height="170" rx="28" fill="#dc262612" stroke="#dc2626" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+
+
+    <circle cx="152" cy="1405" r="38" fill="white" stroke="#dc2626" stroke-width="4"/>
+    <text x="152" y="1418" text-anchor="middle" font-size="36" font-weight="900" fill="#dc2626">7</text>
+    <text x="208" y="1368" font-size="30" font-weight="900" fill="#dc2626">Governance / Evolution Layer</text>
+    <text x="220" y="1412" text-anchor="start" opacity="1" class=""><tspan x="220" dy="0" fill="#263238" font-weight="760" font-size="23">SOP Gates：feat → design → plan → tdd → quality → review → merge · shared-rules / ADR / lessons / Knowledge Feed</tspan><tspan x="220" dy="27.139999999999997" fill="#263238" font-weight="760" font-size="23">F177：hotfix 治理 · fallback 层数检测 · 创意实现解耦 · Build to Delete：skeleton / explanation / probe / sunset</tspan></text>
+
+
+  <line x1="1200" y1="328" x2="1200" y2="338" stroke="#344054" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/><line x1="1200" y1="523" x2="1200" y2="533" stroke="#344054" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/><line x1="1200" y1="718" x2="1200" y2="728" stroke="#344054" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/><line x1="1200" y1="913" x2="1200" y2="923" stroke="#344054" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/><line x1="1200" y1="1108" x2="1200" y2="1118" stroke="#344054" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/><line x1="1200" y1="1303" x2="1200" y2="1313" stroke="#344054" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/>
+
+
+    <rect x="110" y="1548" width="680" height="235" rx="28" fill="#fff7ed" stroke="#f97316" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    <rect x="134" y="1526" width="140" height="44" rx="22" fill="#f97316" opacity="0.96"/><text x="152" y="1556" font-size="25" font-weight="800" fill="white">任务链</text>
+
+  <text x="185" y="1622" text-anchor="start" opacity="1" class=""><tspan x="185" dy="0" fill="#263238" font-weight="840" font-size="28">CVO 目标</tspan><tspan x="185" dy="33.6" fill="#263238" font-weight="840" font-size="28">→ 球权</tspan><tspan x="185" dy="33.6" fill="#263238" font-weight="840" font-size="28">→ 执行平面</tspan><tspan x="185" dy="33.6" fill="#263238" font-weight="840" font-size="28">→ 工具运行</tspan><tspan x="185" dy="33.6" fill="#263238" font-weight="840" font-size="28">→ 可见产出</tspan></text>
+
+    <rect x="860" y="1548" width="680" height="235" rx="28" fill="#dcfce7" stroke="#16a34a" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    <rect x="884" y="1526" width="140" height="44" rx="22" fill="#16a34a" opacity="0.96"/><text x="902" y="1556" font-size="25" font-weight="800" fill="white">记忆链</text>
+
+  <text x="935" y="1622" text-anchor="start" opacity="1" class=""><tspan x="935" dy="0" fill="#263238" font-weight="840" font-size="28">docs / events</tspan><tspan x="935" dy="33.6" fill="#263238" font-weight="840" font-size="28">→ 编译索引</tspan><tspan x="935" dy="33.6" fill="#263238" font-weight="840" font-size="28">→ recall / drill-down</tspan><tspan x="935" dy="33.6" fill="#263238" font-weight="840" font-size="28">→ 反馈 / 教训</tspan><tspan x="935" dy="33.6" fill="#263238" font-weight="840" font-size="28">→ 回流到知识层</tspan></text>
+
+    <rect x="1610" y="1548" width="680" height="235" rx="28" fill="#fee2e2" stroke="#dc2626" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    <rect x="1634" y="1526" width="140" height="44" rx="22" fill="#dc2626" opacity="0.96"/><text x="1652" y="1556" font-size="25" font-weight="800" fill="white">治理链</text>
+
+  <text x="1685" y="1622" text-anchor="start" opacity="1" class=""><tspan x="1685" dy="0" fill="#263238" font-weight="840" font-size="28">真实运行信号</tspan><tspan x="1685" dy="33.6" fill="#263238" font-weight="840" font-size="28">→ 规则判断</tspan><tspan x="1685" dy="33.6" fill="#263238" font-weight="840" font-size="28">→ 删除 / 升级规则</tspan><tspan x="1685" dy="33.6" fill="#263238" font-weight="840" font-size="28">→ ADR / lessons</tspan><tspan x="1685" dy="33.6" fill="#263238" font-weight="840" font-size="28">→ 回到运行</tspan></text>
+
+
+    <rect x="430" y="1810" width="1540" height="70" rx="24" fill="#fffbeb" stroke="#d97706" stroke-width="3" stroke-dasharray="" opacity="1" filter=""/>
+
+
+  <text x="1200" y="1855" text-anchor="middle" opacity="1" class=""><tspan x="1200" dy="0" fill="#92400e" font-weight="850" font-size="25">这不是图 1 Hero，也不是图 5 Runtime Stack；它是 article v2 附录的一张全局技术索引图。</tspan></text>
+  <text x="2290" y="1900" text-anchor="end" opacity="1" class=""><tspan x="2290" dy="0" fill="#667085" font-weight="700" font-size="20">valid_as_of: 2026-05-06 · replacement for architecture-overview-illustrated-by-codex.png</tspan></text>
+
+</svg>

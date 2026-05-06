@@ -143,6 +143,13 @@ function toTomlString(value: string): string {
  * Ensure Codex subprocess always receives cat-cafe MCP server config
  * based on the current thread working directory.
  */
+const CAT_CAFE_MCP_SERVER_ENTRIES = [
+  ['cat-cafe', 'index.js'],
+  ['cat-cafe-collab', 'collab.js'],
+  ['cat-cafe-memory', 'memory.js'],
+  ['cat-cafe-signals', 'signals.js'],
+] as const;
+
 function buildCatCafeMcpConfigArgs(workingDirectory?: string, callbackEnv?: Record<string, string>): string[] {
   const candidateRoots: string[] = [];
   if (workingDirectory) candidateRoots.push(workingDirectory);
@@ -153,24 +160,17 @@ function buildCatCafeMcpConfigArgs(workingDirectory?: string, callbackEnv?: Reco
   const fileDir = dirname(fileURLToPath(import.meta.url));
   candidateRoots.push(resolve(fileDir, '../../../../../../../..'));
 
-  let serverPath: string | undefined;
+  let mcpDistDir: string | undefined;
   for (const root of candidateRoots) {
-    const candidate = resolve(root, 'packages/mcp-server/dist/index.js');
-    if (existsSync(candidate)) {
-      serverPath = candidate;
+    const candidate = resolve(root, 'packages/mcp-server/dist');
+    if (existsSync(resolve(candidate, 'index.js'))) {
+      mcpDistDir = candidate;
       break;
     }
   }
-  if (!serverPath) return [];
+  if (!mcpDistDir) return [];
 
-  const args = [
-    '--config',
-    'mcp_servers.cat-cafe.command="node"',
-    '--config',
-    `mcp_servers.cat-cafe.args=[${toTomlString(serverPath)}]`,
-    '--config',
-    'mcp_servers.cat-cafe.enabled=true',
-  ];
+  const args: string[] = [];
 
   const callbackKeys = [
     'CAT_CAFE_API_URL',
@@ -180,10 +180,24 @@ function buildCatCafeMcpConfigArgs(workingDirectory?: string, callbackEnv?: Reco
     'CAT_CAFE_CAT_ID',
     'CAT_CAFE_SIGNAL_USER',
   ] as const;
-  for (const key of callbackKeys) {
-    const value = callbackEnv?.[key];
-    if (!value) continue;
-    args.push('--config', `mcp_servers.cat-cafe.env.${key}=${toTomlString(value)}`);
+  for (const [serverName, entrypoint] of CAT_CAFE_MCP_SERVER_ENTRIES) {
+    const serverPath = resolve(mcpDistDir, entrypoint);
+    if (!existsSync(serverPath)) continue;
+
+    args.push(
+      '--config',
+      `mcp_servers.${serverName}.command="node"`,
+      '--config',
+      `mcp_servers.${serverName}.args=[${toTomlString(serverPath)}]`,
+      '--config',
+      `mcp_servers.${serverName}.enabled=true`,
+    );
+
+    for (const key of callbackKeys) {
+      const value = callbackEnv?.[key];
+      if (!value) continue;
+      args.push('--config', `mcp_servers.${serverName}.env.${key}=${toTomlString(value)}`);
+    }
   }
 
   return args;

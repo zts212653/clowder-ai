@@ -148,6 +148,12 @@ function mockInvocationTracker() {
       has(threadId) {
         return activeThreads.has(threadId);
       },
+      tryStartThread(threadId, catId, userId, catIds) {
+        if (activeThreads.has(threadId)) return null;
+        starts.push({ threadId, catId, userId, catIds });
+        activeThreads.add(threadId);
+        return new AbortController();
+      },
     },
   };
 }
@@ -364,8 +370,7 @@ describe('Queue Integration (E2E scenarios)', () => {
   it('bugfix: ConnectorInvokeTrigger abort mid-loop → should NOT ack or mark succeeded', async () => {
     // Setup: no active invocation so trigger goes to direct execution
     const controller = new AbortController();
-    trackerMock.tracker.start = () => {
-      trackerMock.starts.push({ direct: true });
+    trackerMock.tracker.tryStartThread = () => {
       trackerMock.activeThreads.add('thread-1');
       return controller;
     };

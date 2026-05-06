@@ -57,6 +57,7 @@ export const webDigestTemplate: TaskTemplate = {
             });
             ctx.invokeTrigger.trigger(tid, catId, triggerUserId, triggerContent, messageId, undefined, {
               reason: 'scheduled_web_digest_browser_fetch',
+              sourceCategory: 'scheduled',
               suggestedSkill: 'browser-automation',
             });
             return;

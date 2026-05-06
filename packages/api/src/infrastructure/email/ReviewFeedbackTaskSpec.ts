@@ -206,6 +206,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             const policy: ConnectorTriggerPolicy = {
               priority: hasChangesRequested ? 'urgent' : 'normal',
               reason: 'github_review_feedback',
+              sourceCategory: 'review',
               suggestedSkill,
             };
             opts.invokeTrigger.trigger(

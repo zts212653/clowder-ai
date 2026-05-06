@@ -5,7 +5,7 @@
  * 纯函数，无副作用。读取 catRegistry 生成身份上下文。
  */
 
-import type { CatConfig, CatId, CompiledPackBlocks } from '@cat-cafe/shared';
+import type { CatConfig, CatId, CompiledPackBlocks, WorldContextEnvelope } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
 import {
   catHasRole,
@@ -149,6 +149,11 @@ export interface InvocationContext {
    * Populated from SqliteEvidenceStore.queryAlwaysOn() at bootstrap time.
    */
   alwaysOnDocs?: readonly { anchor: string; title: string; summary: string }[];
+  /**
+   * F093: World context envelope for world-building mode.
+   * When present, injects world state (characters, scene, canon) into the prompt.
+   */
+  worldContext?: WorldContextEnvelope;
 }
 
 /** Get all cat configs from catRegistry (.cat-cafe/cat-catalog.json) */
@@ -769,6 +774,37 @@ export function buildInvocationContext(context: InvocationContext): string {
   // F155: Guide candidate — inline protocol (cats don't have /Skill tool at runtime)
   if (context.guideCandidate) {
     lines.push(...buildGuidePromptLines(context.guideCandidate, context.threadId));
+  }
+
+  // F093: World context envelope — inject world state for world-building mode
+  if (context.worldContext) {
+    const wc = context.worldContext;
+    lines.push('');
+    lines.push(`## 🌍 World: ${wc.world.name} [${wc.world.status}]`);
+    if (wc.world.constitution) lines.push(`Constitution: ${wc.world.constitution}`);
+    lines.push(`Scene: ${wc.scene.name} [${wc.scene.status}]`);
+    if (wc.characters.length > 0) {
+      lines.push('Characters:');
+      for (const ch of wc.characters) {
+        const identity = ch.coreIdentity?.name ?? ch.characterId;
+        const drive = ch.innerDrive?.motivation ? ` — ${ch.innerDrive.motivation}` : '';
+        lines.push(`- ${identity}${drive}`);
+      }
+    }
+    if (wc.canonSummary.length > 0) {
+      lines.push('Established canon:');
+      for (const cs of wc.canonSummary) lines.push(`- ${cs.summary}`);
+    }
+    if (wc.recentEvents.length > 0) {
+      lines.push(`Recent events (${wc.recentEvents.length}):`);
+      for (const ev of wc.recentEvents.slice(-5)) {
+        lines.push(`- [${ev.type}] ${JSON.stringify(ev.payload)}`);
+      }
+    }
+    if (wc.careLoopHint) {
+      lines.push(`Care hint: ${wc.careLoopHint.trigger} → ${wc.careLoopHint.suggestion}`);
+    }
+    lines.push('');
   }
 
   // F163 AC-A3: always_on constitutional knowledge injection (physical, not retrieval)

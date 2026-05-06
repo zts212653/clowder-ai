@@ -294,6 +294,14 @@ export interface ChatMessage {
   replyTo?: string;
   /** F121: Server-hydrated reply preview (sender + truncated content) */
   replyPreview?: ReplyPreview;
+  /**
+   * F183 Phase D — set when this message was hydrated from the IndexedDB
+   * snapshot (offline-store). Used by `mergeReplaceHydrationMessages` to
+   * differentiate cache-derived vs live state: cache copies do NOT get the
+   * preserve-local treatment when API history wins. Stripped before
+   * persisting back to IDB so the marker doesn't leak into the snapshot.
+   */
+  cachedFrom?: 'idb';
 }
 
 export type ChatMessagePatch = Omit<Partial<ChatMessage>, 'id' | 'type'>;

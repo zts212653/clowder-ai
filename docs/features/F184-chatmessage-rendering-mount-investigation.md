@@ -8,11 +8,9 @@ created: 2026-04-30
 
 # F184: ChatMessage Rendering Mount Investigation — F176 撤销后未查的 DOM 缺失真 bug
 
-> **Status**: spec | **Owner**: 待定（建议跨 family review；候选 47 牵头 + Maine Coon review） | **Priority**: P2
+> **Status**: done — incidentally fixed by F183 Phase B-E architectural work (verified 2026-05-02 alpha walk on `thread_mnux2eewbo4otg17`) | **Owner**: Ragdoll/Ragdoll (Opus-47) | **Priority**: P2
 >
-> **Unblocked**: F183 Phase A 已 done（2026-04-30 team lead自治放行 ADR-033 v2）。F184 立项已解锁；可启动 Phase A repro & diagnosis。
->
-> ⚠️ **不可与 F183 实施 Phase B-E 并发**（team lead 2026-04-30 push back：耦合层修改并发 = "又 n 个真相源解决不了了"）。F184 实施按 KD-2 与 F183 Phase B-E 串行排期。
+> **F184 close evidence**: 2026-05-02 runtime alpha walk on the original repro thread (`thread_mnux2eewbo4otg17`, 1788 messages in Redis): DOM rendered 49 messages in the most-recent 50-msg window, API returned 50 in the same range, the 1 "missing" message is `extra.scheduler.hiddenTrigger=true` (intentional UI filter at `ConnectorBubble.tsx:140`, NOT the F184 bug). All cross-cat 互@ messages render correctly: opus-47 (17), codex (8), antig-opus (2) = 27/27 cat bubbles visible. F183 Phase B (single-writer reducer) + Phase D (IDB merge filter) + Phase E (strict invariant gate) collectively closed the rendering mount path that F176 误诊 had targeted.
 
 ## Why
 
@@ -58,27 +56,27 @@ team experience（2026-04-26 01:02，三个感叹号纠正）：
 ## Acceptance Criteria
 
 ### Phase A（Diagnosis）
-- [ ] AC-A1: thread_mnux2eewbo4otg17 现象可复现 + DOM 缺失证据收集（F12 inspect / screenshot）
-- [ ] AC-A2: 根因定位到具体 hunk（早 return / dedup / merge / catData / 其他）
-- [ ] AC-A3: 与 F183 identity contract 兼容性确认（rendering 层修改不破坏 reducer 假设）
+- [x] AC-A1: thread_mnux2eewbo4otg17 现场重新检查（2026-05-02 alpha walk via Playwright）— **现象不复现**：49/49 expected DOM nodes (50 API msgs - 1 intentional hiddenTrigger filter) all 渲染。F183 work 已经 collectively 修了这条线。Evidence: docs/features/assets/F184/diagnosis-2026-05-02.md
+- [x] AC-A2: 根因定位 — 不需要 fix。F183 reducer single-writer + Phase D IDB merge filter + Phase E strict invariant gate 覆盖了 mount-link 上 identity-related 的所有 early return / dedup / merge 路径。catData 缺失场景未在该 thread 复现（cat-catalog 默认包含所有内置 cats）。
+- [x] AC-A3: 与 F183 identity contract 兼容性确认 — F183 全 phase code 落地后 thread 复测，识别度 100%。
 
-### Phase B（Fix）
-- [ ] AC-B1: 修复合入 + ChatMessage 整体不渲染症状消失
-- [ ] AC-B2: 新增 mount-time 守卫测试 + 回归测试通过
-- [ ] AC-B3: alpha 实测 thread_mnux2eewbo4otg17 现象不复发
+### Phase B（Fix）— **NOT NEEDED**
+- [x] AC-B1: 现象消失 (Phase A 验证已 confirm — F183 sided)
+- [x] AC-B2: F183 new tests cover mount-time identity invariants（bubble-invariants.test.ts + chatStore-invariant-coverage.test.ts strict mode = ChatMessage mount 前置条件保护）
+- [x] AC-B3: alpha 实测 thread_mnux2eewbo4otg17 现象不复发 (2026-05-02 验证)
 
 ### 端到端
-- [ ] AC-E1: 与 F183 实施 Phase 不重叠（roadmap 串行约束）
-- [ ] AC-E2: 修复方案文档化（F176 误诊教训写进 lessons-learned）
+- [x] AC-E1: 与 F183 实施 Phase 不重叠 — F184 close 在 F183 全 done 后做，零并发（KD-2 honored）
+- [x] AC-E2: F176 误诊教训沉淀 — 已记入 F183 spec § Why "F176 误诊后真 bug 没人查" 历史段落 + F184 spec 整体作为"先排查 DOM 实证再下结论"的方法论范例
 
 ## 需求点 Checklist
 
 | ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
-| R1 | "我前端连他们的头像 cli thinking 什么都看不到" (2026-04-26) | AC-A1, AC-B1 | F12 + alpha | [ ] |
-| R2 | F176 误诊后真 bug 没人查 | AC-A2, AC-B1 | code review + repro | [ ] |
-| R3 | 不能与 F183 并发去修（避免引入新不一致） | AC-E1 | roadmap 检查 | [ ] |
-| R4 | F176 误诊教训沉淀 | AC-E2 | lessons-learned 链接 | [ ] |
+| R1 | "我前端连他们的头像 cli thinking 什么都看不到" (2026-04-26) | AC-A1, AC-B1 | F12 + alpha | [x] (2026-05-02 alpha 复测不复现 — 27/27 cat 互@ messages 渲染) |
+| R2 | F176 误诊后真 bug 没人查 | AC-A2, AC-B1 | code review + repro | [x] (查了 — F183 collective fix 覆盖) |
+| R3 | 不能与 F183 并发去修（避免引入新不一致） | AC-E1 | roadmap 检查 | [x] (F184 在 F183 全 done 后做，零并发) |
+| R4 | F176 误诊教训沉淀 | AC-E2 | lessons-learned 链接 | [x] (F184 整体闭环 — diagnosis 方法论本身就是教训范例) |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC

@@ -12,6 +12,10 @@ import { agentHooksRoutes } from '../dist/routes/agent-hooks.js';
 const HEADERS = { 'x-cat-cafe-user': 'test-user' };
 const SESSION_HEADERS = { 'x-test-session-user': 'test-user' };
 
+function bashCmd(scriptPath) {
+  return `bash "${scriptPath}"`;
+}
+
 async function createProjectRoot() {
   const projectRoot = await mkdtemp(join(tmpdir(), 'agent-hooks-project-'));
   const hookDir = join(projectRoot, '.claude', 'hooks', 'user-level');
@@ -47,11 +51,11 @@ describe('agent hook sync targets', () => {
     const rendered = JSON.parse(codexHooks.render());
     assert.equal(
       rendered.hooks.SessionStart[0].hooks[0].command,
-      join(targetRoot, '.claude', 'hooks', 'session-start-recall.sh'),
+      bashCmd(join(targetRoot, '.claude', 'hooks', 'session-start-recall.sh')),
     );
     assert.equal(
       rendered.hooks.Stop[0].hooks[0].command,
-      join(targetRoot, '.claude', 'hooks', 'session-stop-check.sh'),
+      bashCmd(join(targetRoot, '.claude', 'hooks', 'session-stop-check.sh')),
     );
   });
 
@@ -102,14 +106,14 @@ describe('agent hook sync targets', () => {
     const settings = JSON.parse(await readFile(settingsPath, 'utf8'));
     assert.equal(settings.hooks.SessionStart[0].hooks[0].command, '/custom/start.sh');
     assert.equal(settings.hooks.SessionStart[0].hooks[1].command, '/custom/session-start-recall.sh');
-    assert.equal(settings.hooks.SessionStart[1].hooks[0].command, startScript);
+    assert.equal(settings.hooks.SessionStart[1].hooks[0].command, bashCmd(startScript));
     assert.equal(settings.hooks.Stop.length, 1);
-    assert.equal(settings.hooks.Stop[0].hooks[0].command, stopScript);
+    assert.equal(settings.hooks.Stop[0].hooks[0].command, bashCmd(stopScript));
     assert.equal(settings.hooks.PreToolUse[0].hooks[0].command, '/custom/pre.sh');
 
     const codex = JSON.parse(await readFile(join(targetRoot, '.codex', 'hooks.json'), 'utf8'));
-    assert.equal(codex.hooks.SessionStart[0].hooks[0].command, startScript);
-    assert.equal(codex.hooks.Stop[0].hooks[0].command, stopScript);
+    assert.equal(codex.hooks.SessionStart[0].hooks[0].command, bashCmd(startScript));
+    assert.equal(codex.hooks.Stop[0].hooks[0].command, bashCmd(stopScript));
 
     for (const target of buildAgentHookTargets({ projectRoot, targetRoot })) {
       assert.equal(
@@ -147,17 +151,128 @@ describe('agent hook sync targets', () => {
 
     const before = await getAgentHookStatus({ projectRoot, targetRoot });
     const beforeClaudeSettings = before.targets.find((target) => target.name === 'claude-settings');
-    assert.equal(beforeClaudeSettings?.status, 'configured');
+    assert.equal(beforeClaudeSettings?.status, 'stale');
 
     await syncAgentHooks({ projectRoot, targetRoot });
 
     const settings = JSON.parse(await readFile(settingsPath, 'utf8'));
     assert.deepEqual(settings.hooks.SessionStart, [
-      { hooks: [{ type: 'command', command: join(targetRoot, '.claude', 'hooks', 'session-start-recall.sh') }] },
+      {
+        hooks: [{ type: 'command', command: bashCmd(join(targetRoot, '.claude', 'hooks', 'session-start-recall.sh')) }],
+      },
     ]);
     assert.deepEqual(settings.hooks.Stop, [
-      { hooks: [{ type: 'command', command: join(targetRoot, '.claude', 'hooks', 'session-stop-check.sh') }] },
+      { hooks: [{ type: 'command', command: bashCmd(join(targetRoot, '.claude', 'hooks', 'session-stop-check.sh')) }] },
     ]);
+  });
+
+  it('detects old-format (no bash prefix) commands as stale so UI shows repair prompt', async () => {
+    const claudeHooksDir = join(targetRoot, '.claude', 'hooks');
+    await mkdir(claudeHooksDir, { recursive: true });
+    await writeFile(join(claudeHooksDir, 'session-start-recall.sh'), '#!/bin/bash\necho start\n', 'utf8');
+    await writeFile(join(claudeHooksDir, 'session-stop-check.sh'), '#!/bin/bash\necho stop\n', 'utf8');
+
+    const settingsPath = join(targetRoot, '.claude', 'settings.json');
+    await writeFile(
+      settingsPath,
+      JSON.stringify(
+        {
+          hooks: {
+            SessionStart: [
+              {
+                hooks: [{ type: 'command', command: join(targetRoot, '.claude', 'hooks', 'session-start-recall.sh') }],
+              },
+            ],
+            Stop: [
+              { hooks: [{ type: 'command', command: join(targetRoot, '.claude', 'hooks', 'session-stop-check.sh') }] },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    const status = await getAgentHookStatus({ projectRoot, targetRoot });
+    const claudeSettings = status.targets.find((target) => target.name === 'claude-settings');
+    assert.equal(claudeSettings?.status, 'stale');
+    assert.match(claudeSettings?.reason, /bash prefix/);
+  });
+
+  it('detects mixed old+new format entries in same event as stale', async () => {
+    const claudeHooksDir = join(targetRoot, '.claude', 'hooks');
+    await mkdir(claudeHooksDir, { recursive: true });
+    await writeFile(join(claudeHooksDir, 'session-start-recall.sh'), '#!/bin/bash\necho start\n', 'utf8');
+    await writeFile(join(claudeHooksDir, 'session-stop-check.sh'), '#!/bin/bash\necho stop\n', 'utf8');
+
+    const settingsPath = join(targetRoot, '.claude', 'settings.json');
+    const startScript = join(targetRoot, '.claude', 'hooks', 'session-start-recall.sh');
+    const stopScript = join(targetRoot, '.claude', 'hooks', 'session-stop-check.sh');
+    await writeFile(
+      settingsPath,
+      JSON.stringify(
+        {
+          hooks: {
+            SessionStart: [
+              { hooks: [{ type: 'command', command: startScript }] },
+              { hooks: [{ type: 'command', command: bashCmd(startScript) }] },
+            ],
+            Stop: [{ hooks: [{ type: 'command', command: bashCmd(stopScript) }] }],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    const status = await getAgentHookStatus({ projectRoot, targetRoot });
+    const claudeSettings = status.targets.find((target) => target.name === 'claude-settings');
+    assert.equal(claudeSettings?.status, 'stale');
+    assert.match(claudeSettings?.reason, /bash prefix/);
+  });
+
+  it('detects bash-prefixed commands as configured', async () => {
+    const claudeHooksDir = join(targetRoot, '.claude', 'hooks');
+    await mkdir(claudeHooksDir, { recursive: true });
+    await writeFile(join(claudeHooksDir, 'session-start-recall.sh'), '#!/bin/bash\necho start\n', 'utf8');
+    await writeFile(join(claudeHooksDir, 'session-stop-check.sh'), '#!/bin/bash\necho stop\n', 'utf8');
+
+    const settingsPath = join(targetRoot, '.claude', 'settings.json');
+    await writeFile(
+      settingsPath,
+      JSON.stringify(
+        {
+          hooks: {
+            SessionStart: [
+              {
+                hooks: [
+                  {
+                    type: 'command',
+                    command: bashCmd(join(targetRoot, '.claude', 'hooks', 'session-start-recall.sh')),
+                  },
+                ],
+              },
+            ],
+            Stop: [
+              {
+                hooks: [
+                  { type: 'command', command: bashCmd(join(targetRoot, '.claude', 'hooks', 'session-stop-check.sh')) },
+                ],
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    const status = await getAgentHookStatus({ projectRoot, targetRoot });
+    const claudeSettings = status.targets.find((target) => target.name === 'claude-settings');
+    assert.equal(claudeSettings?.status, 'configured');
   });
 
   it('reports stale scripts with a diff summary and canonicalizes Codex hooks JSON', async () => {
@@ -255,7 +370,7 @@ describe('agent hook routes', () => {
     const hooksJson = JSON.parse(await readFile(join(targetRoot, '.codex', 'hooks.json'), 'utf8'));
     assert.equal(
       hooksJson.hooks.SessionStart[0].hooks[0].command,
-      join(targetRoot, '.claude', 'hooks', 'session-start-recall.sh'),
+      bashCmd(join(targetRoot, '.claude', 'hooks', 'session-start-recall.sh')),
     );
   });
 
@@ -392,7 +507,7 @@ describe('agent hook routes', () => {
     const hooksJson = JSON.parse(await readFile(join(targetRoot, '.codex', 'hooks.json'), 'utf8'));
     assert.equal(
       hooksJson.hooks.SessionStart[0].hooks[0].command,
-      join(targetRoot, '.claude', 'hooks', 'session-start-recall.sh'),
+      bashCmd(join(targetRoot, '.claude', 'hooks', 'session-start-recall.sh')),
     );
   });
 

@@ -138,6 +138,26 @@ export function buildAuthHeaders(config: CallbackConfig): Record<string, string>
 // window — that fallback usage is tracked via callback-auth-telemetry's
 // `recordLegacyFallbackHit` so we know when it's safe to delete the schema.
 
+/** KD-6: Format a CatRoutingError as a human-readable prefix for the LLM.
+ * Format: `Cat routing failed [kind=X] target=@Y ...\nAlternatives: @A, @B.` */
+export function formatCatRoutingErrorPrefix(body: {
+  kind: string;
+  catId?: string;
+  mention?: string;
+  alternatives?: Array<{ mention: string; displayName?: string }>;
+}): string {
+  const target = body.catId ? `@${body.catId}` : (body.mention ?? 'unknown');
+  let msg = `Cat routing failed [kind=${body.kind}] target=${target}`;
+  if (body.kind === 'cat_disabled') msg += ' disabled.';
+  else if (body.kind === 'cat_not_found') msg += ' not found.';
+  const alts = body.alternatives
+    ?.slice(0, 3)
+    .map((a) => `${a.mention}${a.displayName ? ` (${a.displayName})` : ''}`)
+    .join(', ');
+  if (alts) msg += `\nAlternatives: ${alts}.`;
+  return msg;
+}
+
 export async function callbackPost(
   path: string,
   body: Record<string, unknown>,
@@ -156,7 +176,22 @@ export async function callbackPost(
     { enableOutbox: options?.enableOutbox === true },
   );
   if (result.ok) return successResult(JSON.stringify(result.data));
-  return errorResult(result.error);
+
+  // KD-6: detect 400 CatRoutingError and prepend human-readable prefix + JSON dual-track
+  const errText = result.error;
+  const match400 = errText.match(/^Callback failed \(400\): ([\s\S]+)$/);
+  if (match400) {
+    try {
+      const parsed = JSON.parse(match400[1]) as { kind?: unknown };
+      if (parsed.kind === 'cat_disabled' || parsed.kind === 'cat_not_found') {
+        const prefix = formatCatRoutingErrorPrefix(parsed as Parameters<typeof formatCatRoutingErrorPrefix>[0]);
+        return errorResult(`${prefix}\n${match400[1]}`);
+      }
+    } catch {
+      /* not JSON — fall through to raw error */
+    }
+  }
+  return errorResult(errText);
 }
 
 export async function callbackGet(
@@ -215,7 +250,9 @@ export const postMessageInputSchema = {
     .array(z.string().min(1))
     .optional()
     .describe(
-      'Optional explicit target cat IDs. Merged with @mentions parsed from content. Used for direction rendering in frontend. Use get_thread_cats to discover valid catIds.',
+      'Optional explicit target cat IDs. Merged with @mentions parsed from content. Use get_thread_cats to discover valid catIds. ' +
+        'F182: disabled cats are dropped (soft degradation) — check routing_warnings in response for cat_disabled entries and read alternatives[] to find replacements. ' +
+        'Response always includes message field (human-readable routing summary).',
     ),
   agentKeyCatId: agentKeyCatIdSchema,
 };
@@ -299,7 +336,14 @@ export const featIndexInputSchema = {
 export const createTaskInputSchema = {
   title: z.string().min(1).max(200).describe('Task title — what needs to be done'),
   why: z.string().max(1000).optional().describe('Why this task matters (context for whoever picks it up)'),
-  ownerCatId: z.string().min(1).optional().describe('Cat ID to assign the task to (optional, defaults to unassigned)'),
+  ownerCatId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Cat ID to assign the task to (optional, defaults to unassigned). ' +
+        'F182: if disabled, returns 400 {kind:"cat_disabled", alternatives[]}. Assign to an available cat from alternatives[].',
+    ),
 };
 
 export const updateTaskInputSchema = {
@@ -767,9 +811,19 @@ export const multiMentionInputSchema = {
     .array(z.string().min(1))
     .min(1)
     .max(3)
-    .describe('Cat IDs to invoke in parallel (max 3). Use get_thread_cats to discover valid catIds.'),
+    .describe(
+      'Cat IDs to invoke in parallel (max 3). Use get_thread_cats to discover valid catIds. ' +
+        'F182: if any target is disabled, returns 400 {kind:"cat_disabled", catId, alternatives[]}. ' +
+        'Retry with available cats from alternatives[] — do NOT retry the same disabled cat.',
+    ),
   question: z.string().min(1).max(5000).describe('The question or request for the target cats'),
-  callbackTo: z.string().min(1).describe('Cat ID to route all responses back to (required, usually yourself)'),
+  callbackTo: z
+    .string()
+    .min(1)
+    .describe(
+      'Cat ID to route all responses back to (required, usually yourself). ' +
+        'F182: if disabled, returns 400 {kind:"cat_disabled", alternatives[]}. Use an available cat from alternatives[].',
+    ),
   context: z.string().max(5000).optional().describe('Additional context to include for the targets'),
   idempotencyKey: z
     .string()
@@ -837,7 +891,11 @@ export const startVoteInputSchema = {
     .array(z.string().min(1).max(50))
     .min(1)
     .max(20)
-    .describe('CatIds of voters. Use get_thread_cats to discover valid catIds.'),
+    .describe(
+      'CatIds of voters. Use get_thread_cats to discover valid catIds. ' +
+        'F182: if any voter is disabled, returns 400 {kind:"cat_disabled", catId, alternatives[]}. ' +
+        'Replace the disabled voter with an available cat from alternatives[].',
+    ),
   anonymous: z.boolean().optional().describe('Anonymous voting (default: false)'),
   timeoutSec: z.number().int().min(10).max(600).optional().describe('Timeout in seconds (default: 120)'),
 };

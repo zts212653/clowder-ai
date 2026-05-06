@@ -543,7 +543,7 @@
     {
       "id": "F088",
       "name": "Multi-Platform Chat Gateway — 聊天平台接入网关",
-      "status": "done | **Completed**: 2026-04-10 | **Owner**: Ragdoll",
+      "status": "follow-up-planned | **Core Completed**: 2026-04-10 | **Owner**: Ragdoll",
       "file": "F088-multi-platform-chat-gateway.md"
     },
     {
@@ -573,7 +573,7 @@
     {
       "id": "F093",
       "name": "Cats & U — 陪伴式共创世界引擎",
-      "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F093-cats-and-u-world-engine.md"
     },
     {
@@ -1077,7 +1077,7 @@
     {
       "id": "F175",
       "name": "消息队列统一设计 — 优先级排序 + 用户可控编排",
-      "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "phase-a-done | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F175-unified-message-queue.md"
     },
     {
@@ -1101,7 +1101,7 @@
     {
       "id": "F179",
       "name": "Desktop Installer Release Pipeline — 自动化产出 Win/Mac 安装包并附 release",
-      "status": "in-progress | **Owner**: Ragdoll（Opus-47/Ragdoll） | **Reviewer**: Maine Coon（GPT-5.5/Maine Coon） | **Priority**: P1",
+      "status": "in-progress (Phase B: AC-B3 pending cross-cat verification) | **Owner**: Ragdoll（Opus-47/Ragdoll） | **Reviewer**: Maine Coon（GPT-5.5/Maine Coon） | **Priority**: P1",
       "file": "F179-desktop-installer-release-pipeline.md"
     },
     {
@@ -1119,20 +1119,38 @@
     {
       "id": "F182",
       "name": "Cat Roster Lifecycle Toggle — 成员启停的全链路降级反馈",
-      "status": "spec | **Owner**: Ragdoll（Ragdoll/Opus 4.7） | **Reviewer**: Ragdoll（@opus 4.6）+ Maine Coon（@codex/Maine Coon） | **Priority**: P1",
+      "status": "done | **Owner**: Ragdoll（Ragdoll/Sonnet 4.6）| **Reviewer**: Maine Coon（Maine Coon/GPT-5.5） | **Priority**: P1 | **Completed**: 2026-05-04",
       "file": "F182-cat-roster-lifecycle-toggle.md"
     },
     {
       "id": "F183",
       "name": "Bubble Pipeline Architecture Consolidation — 消息气泡管线架构收敛",
-      "status": "in-progress | **Owner**: Ragdoll/Ragdoll (Opus-47) 牵头 | **Priority**: P1",
+      "status": "done | **Owner**: Ragdoll/Ragdoll (Opus-47) 牵头 | **Priority**: P1",
       "file": "F183-bubble-pipeline-architecture-consolidation.md"
     },
     {
       "id": "F184",
       "name": "ChatMessage Rendering Mount Investigation — F176 撤销后未查的 DOM 缺失真 bug",
-      "status": "spec | **Owner**: 待定（建议跨 family review；候选 47 牵头 + Maine Coon review） | **Priority**: P2",
+      "status": "done — incidentally fixed by F183 Phase B-E architectural work (verified 2026-05-02 alpha walk on `thread_mnux2eewbo4otg17`) | **Owner**: Ragdoll/Ragdoll (Opus-47) | **Priority**: P2",
       "file": "F184-chatmessage-rendering-mount-investigation.md"
+    },
+    {
+      "id": "F185",
+      "name": "入口级判忙策略分层 — ADR-034 实施",
+      "status": "done | **Owner**: Ragdoll/Ragdoll | **Priority**: P1",
+      "file": "F185-dispatch-busy-gate-unification.md"
+    },
+    {
+      "id": "F186",
+      "name": "图书馆记忆架构（多域知识联邦）",
+      "status": "done | **Completed**: 2026-05-06 | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F186-library-memory-architecture.md"
+    },
+    {
+      "id": "F187",
+      "name": "Thread Labels — 用户自定义标签 + Sidebar 筛选 + 猫猫辅助分类",
+      "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F187-thread-labels.md"
     }
   ]
 }

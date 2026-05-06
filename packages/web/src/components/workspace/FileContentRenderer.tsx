@@ -23,6 +23,7 @@ export interface FileContentRendererProps {
   mdHasSelection: boolean;
   onMdAddToChat: () => void;
   onSave: (c: string) => Promise<void>;
+  onDirtyChange?: (dirty: boolean) => void;
   rawUrl: (p: string) => string;
   revealInFinder: (path: string) => void;
 }
@@ -45,6 +46,7 @@ export function FileContentRenderer({
   mdHasSelection,
   onMdAddToChat,
   onSave,
+  onDirtyChange,
   rawUrl,
   revealInFinder,
 }: FileContentRendererProps) {
@@ -160,6 +162,7 @@ export function FileContentRenderer({
       scrollToLine={scrollToLine}
       editable={editMode}
       onSave={onSave}
+      onDirtyChange={onDirtyChange}
       branch={currentWorktree?.branch}
     />
   );

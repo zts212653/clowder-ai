@@ -113,6 +113,28 @@ guides:
     cross_system: false
     estimated_time: 3min
 
+  - id: view-observability
+    name: 查看可观测性
+    description: 引导你打开 Hub 可观测性面板，查看 traces、metrics 和健康状态
+    flow_file: flows/view-observability.yaml
+    keywords:
+      - 可观测性
+      - 监控
+      - traces
+      - trace
+      - traceId
+      - telemetry
+      - metrics
+      - health
+      - No traces found
+      - 怎么看 trace
+      - 怎么打开可观测性
+      - 查看调用链
+    category: monitoring
+    priority: P1
+    cross_system: false
+    estimated_time: 2min
+
   - id: connect-wechat
     name: 对接微信
     description: 引导你完成微信渠道的接入和扫码配置

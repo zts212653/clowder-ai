@@ -95,6 +95,10 @@ function readUserHook(projectRoot: string, name: string): string {
   return readFileSync(path, 'utf-8');
 }
 
+function bashCommand(scriptPath: string): string {
+  return `bash "${scriptPath.replace(/\\/g, '/')}"`;
+}
+
 export function renderCodexHooksJson(targetRoot: string): string {
   const config = {
     hooks: {
@@ -103,7 +107,7 @@ export function renderCodexHooksJson(targetRoot: string): string {
           hooks: [
             {
               type: 'command',
-              command: join(targetRoot, '.claude', 'hooks', 'session-start-recall.sh'),
+              command: bashCommand(join(targetRoot, '.claude', 'hooks', 'session-start-recall.sh')),
             },
           ],
         },
@@ -113,7 +117,7 @@ export function renderCodexHooksJson(targetRoot: string): string {
           hooks: [
             {
               type: 'command',
-              command: join(targetRoot, '.claude', 'hooks', 'session-stop-check.sh'),
+              command: bashCommand(join(targetRoot, '.claude', 'hooks', 'session-stop-check.sh')),
             },
           ],
         },

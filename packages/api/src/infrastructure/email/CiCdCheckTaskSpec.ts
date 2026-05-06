@@ -82,6 +82,7 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
           const policy: ConnectorTriggerPolicy = {
             priority: isFail ? 'urgent' : 'normal',
             reason: isFail ? 'github_ci_failure' : 'github_ci_pass',
+            sourceCategory: 'ci',
             suggestedSkill: isFail ? undefined : 'merge-gate',
           };
           opts.invokeTrigger.trigger(

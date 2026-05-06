@@ -23,6 +23,11 @@ describe('MemoryHub module wiring', () => {
     expect(typeof mod.MemoryIcon).toBe('function');
   });
 
+  it('CollectionCatalog exports correctly', async () => {
+    const mod = await import('@/components/memory/CollectionCatalog');
+    expect(typeof mod.CollectionCatalog).toBe('function');
+  });
+
   it('route pages export default components', async () => {
     const feed = await import('@/app/memory/page');
     expect(typeof feed.default).toBe('function');
@@ -30,5 +35,14 @@ describe('MemoryHub module wiring', () => {
     expect(typeof search.default).toBe('function');
     const status = await import('@/app/memory/status/page');
     expect(typeof status.default).toBe('function');
+    const catalog = await import('@/app/memory/catalog/page');
+    expect(typeof catalog.default).toBe('function');
+    const graph = await import('@/app/memory/graph/page');
+    expect(typeof graph.default).toBe('function');
+  });
+
+  it('CollectionGraph exports correctly', async () => {
+    const mod = await import('@/components/memory/CollectionGraph');
+    expect(typeof mod.CollectionGraph).toBe('function');
   });
 });

@@ -250,8 +250,12 @@ export class IndexBuilder implements IIndexBuilder {
     }
 
     // Phase D: auto-extract edges from frontmatter cross-references (AC-D18, KD-29)
+    // Phase F: clear both legacy 'related' and normalized 'related_to'; write 'related_to' with provenance
     await this.store.runExclusive(() => {
-      this.store.getDb().prepare("DELETE FROM edges WHERE relation = 'related'").run();
+      this.store
+        .getDb()
+        .prepare("DELETE FROM edges WHERE relation IN ('related', 'related_to') AND provenance = 'frontmatter'")
+        .run();
     });
 
     for (const scanned of scannedItems) {
@@ -265,7 +269,12 @@ export class IndexBuilder implements IIndexBuilder {
       if (Array.isArray(relatedFeatures)) {
         for (const ref of relatedFeatures) {
           if (typeof ref === 'string' && ref !== anchor) {
-            await this.store.addEdge({ fromAnchor: anchor, toAnchor: ref, relation: 'related' });
+            await this.store.addEdge({
+              fromAnchor: anchor,
+              toAnchor: ref,
+              relation: 'related_to',
+              provenance: 'frontmatter',
+            });
           }
         }
       }

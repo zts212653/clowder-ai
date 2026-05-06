@@ -8,7 +8,7 @@ created: 2026-04-28
 
 # F179: Desktop Installer Release Pipeline — 自动化产出 Win/Mac 安装包并附 release
 
-> **Status**: in-progress | **Owner**: Ragdoll（Opus-47/Ragdoll） | **Reviewer**: Maine Coon（GPT-5.5/Maine Coon） | **Priority**: P1
+> **Status**: in-progress (Phase B: AC-B3 pending cross-cat verification) | **Owner**: Ragdoll（Opus-47/Ragdoll） | **Reviewer**: Maine Coon（GPT-5.5/Maine Coon） | **Priority**: P1
 >
 > **Phase A done (2026-04-28, PR #1445 merged at b25b73034)**: 基础设施搭建完成。Maine Coon六轮 review 抓 5 个 P1 + 1 个 P2 全部 0 误报，每条都不在 diff 内的依赖闭包问题（permissions / sync-manifest workflow / rerun semantics / desktop 闭包 / regex \b 边界 / extraResources cross-platform 漂移 / darwin leak regex slash+dest path）。Phase B 待 v0.9.1 release 触发后实测验证。
 
@@ -79,9 +79,9 @@ v0.9.0 release notes 写 "Windows NSIS installer" 是术语写错了——实际
 
 ### Phase A
 - [x] AC-A1: 版本号同步机制——build 脚本接受 `CATCAFE_VERSION` 环境变量并注入到 `cat-cafe.iss` + `desktop/package.json`（cat-cafe.iss 用 `#ifndef MyAppVersion` + iscc /D 注入）
-- [ ] AC-A2: 本地（Mac）跑 `desktop/scripts/build-mac.sh` 能产 `CatCafe-X.Y.Z-arm64.dmg` + `CatCafe-X.Y.Z-x64.dmg`（留 Phase B 实测）
+- [x] AC-A2: 本地（Mac）跑 `desktop/scripts/build-mac.sh` 能产 `CatCafe-X.Y.Z-arm64.dmg` + `CatCafe-X.Y.Z-x64.dmg`（v0.9.1 workflow 实测验证）
 - [x] AC-A3: `.github/workflows/release-desktop.yml` 存在，触发条件 `on.release.types = [published]` + 顶层 `permissions: contents: write`
-- [ ] AC-A4: workflow 双 job（macos-latest + windows-latest）build 成功（留 Phase B 实测）
+- [x] AC-A4: workflow 双 job（macos-latest + windows-latest）build 成功（v0.9.1 workflow 实测验证）
 - [x] AC-A5: build artifacts 自动 upload 到触发 workflow 的 release（softprops/action-gh-release@v2，release event 才 upload，dispatch event 走 artifact）
 - [x] AC-A6: `cat-cafe-skills/refs/opensource-ops-outbound-sync.md` 加 "Release Asset Gate" 章节（Step 11）
 - [x] AC-A7: v0.9.0 release notes 加 forward pointer ✅；clowder-ai pinned self-build issue 留 Phase B 完成时给准确命令
@@ -93,9 +93,14 @@ v0.9.0 release notes 写 "Windows NSIS installer" 是术语写错了——实际
 - `desktop/package.json`: 拆 `extraResources`，darwin node/redis 移到 `mac.extraResources`，避免 Win build 吃 mac-only path
 - `desktop/scripts/build-desktop.ps1`: 加 win-build 防回归断言（separator-agnostic regex 抓 source folder + destination path）
 
+**Phase B hotfix（Ragdoll/Opus-46 接力Maine Coon/Codex 完成，4 轮 CI 迭代）：**
+- `desktop/scripts/build-desktop.ps1`: pnpm deploy retry 3×10s + Windows Defender exclusion/cleanup in try/finally（bin-links EPERM）
+- `desktop/scripts/build-desktop.ps1`: Inno Setup ChineseSimplified.isl auto-download（chocolatey 6.7.1 缺文件）
+- `packages/api/test/build-script-cross-platform.test.js`: 4 项回归测试（cross-platform copy、Defender cleanup、retry loop、finally block）
+
 ### Phase B
-- [ ] AC-B1: v0.9.1 release 创建后，workflow 触发成功
-- [ ] AC-B2: v0.9.1 release page 含 mac dmg (arm64+x64) + win exe (x64) 共 3 个 assets
+- [x] AC-B1: v0.9.1 release 创建后，workflow 触发成功（release.published 自动触发，双 job 均 green）
+- [x] AC-B2: v0.9.1 release page 含 mac dmg (arm64+x64) + win exe (x64) 共 3 个 assets（CatCafe-0.9.1-arm64.dmg 1112MB + CatCafe-0.9.1-x64.dmg 1120MB + CatCafe-Setup-0.9.1.exe 435MB）
 - [ ] AC-B3: 跨猫验证（非作者非 reviewer）能下载并启动安装包
 
 ## Dependencies

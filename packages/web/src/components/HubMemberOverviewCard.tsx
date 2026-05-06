@@ -61,7 +61,7 @@ function getStatusBadge(cat: CatData) {
   if (cat.roster?.available === false) {
     return {
       enabled: false,
-      label: '未启用',
+      label: '已停用',
       className: 'bg-slate-100 text-slate-600',
     };
   }
@@ -71,6 +71,8 @@ function getStatusBadge(cat: CatData) {
     className: 'bg-[#E8F5E9] text-[#4CAF50]',
   };
 }
+
+type StatusBadge = ReturnType<typeof getStatusBadge>;
 
 function getSessionChainBadge(cat: CatData) {
   const enabled = cat.sessionChain !== false;
@@ -148,7 +150,7 @@ export function HubCoCreatorOverviewCard({ coCreator, onEdit }: { coCreator: CoC
 export function HubOverviewToolbar({ onAddMember }: { onAddMember?: () => void }) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <p className="text-[13px] text-[#8F8075]">全部 · CLI（OAuth） · CLI（配置） · 未启用</p>
+      <p className="text-[13px] text-[#8F8075]">全部 · 已启用 · 已停用 · CLI（OAuth） · CLI（配置）</p>
       <button
         type="button"
         onClick={onAddMember}
@@ -159,6 +161,45 @@ export function HubOverviewToolbar({ onAddMember }: { onAddMember?: () => void }
       >
         + 添加成员
       </button>
+    </div>
+  );
+}
+
+function AvailabilityControls({
+  cat,
+  status,
+  onToggleAvailability,
+  togglingAvailability,
+}: {
+  cat: CatData;
+  status: StatusBadge;
+  onToggleAvailability?: (cat: CatData) => void;
+  togglingAvailability: boolean;
+}) {
+  const actionLabel = status.enabled ? '停用成员' : '启用成员';
+  const actionTitle = `${actionLabel}：${cat.displayName}`;
+  const actionClass = status.enabled
+    ? 'bg-red-50 text-red-600 hover:bg-red-100'
+    : 'bg-[#E8F5E9] text-[#4CAF50] hover:bg-[#D7EED9]';
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${status.className}`}>{status.label}</span>
+      {onToggleAvailability ? (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleAvailability(cat);
+          }}
+          disabled={togglingAvailability}
+          title={actionTitle}
+          aria-label={actionTitle}
+          className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition disabled:cursor-default disabled:opacity-50 ${actionClass}`}
+        >
+          {togglingAvailability ? '切换中...' : actionLabel}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -196,6 +237,9 @@ export function HubMemberOverviewCard({
   const sessionChain = getSessionChainBadge(cat);
   const title = [cat.breedDisplayName ?? cat.displayName, cat.nickname].filter(Boolean).join(' · ');
   const editCard = () => onEdit?.(cat);
+  const cardStyle = status.enabled
+    ? { backgroundColor: '#FFFDFC', border: '1px solid #D9C7EA' }
+    : { backgroundColor: '#F8FAFC', border: '1px solid #CBD5E1' };
 
   return (
     <section
@@ -207,7 +251,7 @@ export function HubMemberOverviewCard({
       onDragEnd={draggable ? (event) => onDragEnd?.(cat, event) : undefined}
       onClick={editCard}
       className={`rounded-[20px] px-[18px] py-[18px] shadow-sm transition hover:shadow-md ${isDragging ? 'opacity-40' : ''}`}
-      style={{ backgroundColor: '#FFFDFC', border: '1px solid #D9C7EA' }}
+      style={cardStyle}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-2">
@@ -252,18 +296,12 @@ export function HubMemberOverviewCard({
           </button>
         </div>
         <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              onToggleAvailability?.(cat);
-            }}
-            disabled={!onToggleAvailability || togglingAvailability}
-            aria-pressed={status.enabled}
-            className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${status.className} disabled:cursor-default`}
-          >
-            {togglingAvailability ? '切换中...' : status.label}
-          </button>
+          <AvailabilityControls
+            cat={cat}
+            status={status}
+            onToggleAvailability={onToggleAvailability}
+            togglingAvailability={togglingAvailability}
+          />
           {onDelete ? (
             <button
               type="button"

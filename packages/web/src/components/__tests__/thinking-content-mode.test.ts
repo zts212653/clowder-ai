@@ -59,13 +59,17 @@ afterEach(() => {
   container.remove();
 });
 
+// Empty content + tool events → CLI Output present (toolEvents trigger it) but the
+// stream-final-speech default-expand heuristic does NOT trigger (no content to surface).
+// This keeps the original "default collapsed" intent of these tests focused on Thinking.
 const thinkingMessage = {
   id: 'msg-1',
   type: 'assistant' as const,
   catId: 'opus',
-  content: 'CLI stream output text',
+  content: '',
   thinking: 'Extended reasoning content here',
   origin: 'stream' as const,
+  toolEvents: [{ id: 't1', type: 'tool_use' as const, label: 'opus → Read', timestamp: 100 }],
   timestamp: Date.now(),
   isStreaming: false,
 };

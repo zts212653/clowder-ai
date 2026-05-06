@@ -55,6 +55,11 @@ const storeState = {
   setMessageThinking: mockSetMessageThinking,
 
   addMessageToThread: mockAddMessageToThread,
+  // F183 B1.2.3: active stream new-bubble path → reducer → replaceMessages
+  replaceMessages: vi.fn((msgs: unknown[]) => {
+    storeState.messages = msgs as typeof storeState.messages;
+  }),
+  hasMore: true,
   clearThreadActiveInvocation: mockClearThreadActiveInvocation,
   resetThreadInvocationState: mockResetThreadInvocationState,
   setThreadMessageStreaming: mockSetThreadMessageStreaming,
@@ -124,7 +129,13 @@ describe('useAgentMessages system_info web_search', () => {
       });
     });
 
-    const assistantMsgId = mockAddMessage.mock.calls.find((call) => call[0]?.type === 'assistant')?.[0]?.id;
+    // F183 B1.2.3: new stream bubble may go via reducer + replaceMessages instead of addMessage
+    const replaceMessagesMock = storeState.replaceMessages as ReturnType<typeof vi.fn>;
+    const assistantMsgId =
+      (mockAddMessage.mock.calls.find((call) => call[0]?.type === 'assistant')?.[0]?.id as string | undefined) ??
+      (replaceMessagesMock.mock.calls
+        .flatMap((c) => c[0] as Array<{ type?: string; id?: string }>)
+        .find((m) => m.type === 'assistant')?.id as string | undefined);
     expect(typeof assistantMsgId).toBe('string');
 
     act(() => {

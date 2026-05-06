@@ -1428,9 +1428,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             let trackerUserId: string | null = null;
             if (!recordActive && opts.invocationTracker) {
               try {
+                const draftCreatedAt = draft.createdAt ?? draft.updatedAt;
                 const trackerSlot = opts.invocationTracker
                   .getActiveSlots(resolvedThreadId)
-                  .find((slot) => slot.catId === draft.catId && slot.startedAt <= draft.updatedAt);
+                  .find((slot) => slot.catId === draft.catId && slot.startedAt <= draftCreatedAt);
                 if (trackerSlot) {
                   trackerSlotStartedAt = trackerSlot.startedAt;
                   trackerUserId = opts.invocationTracker.getUserId(resolvedThreadId, draft.catId);
@@ -1452,6 +1453,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               orphanDetails.push({
                 draftId: draft.invocationId,
                 catId: draft.catId,
+                draftCreatedAt: draft.createdAt ?? draft.updatedAt,
                 draftUpdatedAt: draft.updatedAt,
                 recordStatus: record?.status ?? null,
                 recordThreadId: record?.threadId ?? null,

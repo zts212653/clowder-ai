@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2200" height="1650" viewBox="0 0 2200 1650">
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#8a6f45" flood-opacity="0.14"/>
+    </filter>
+    <filter id="soft">
+      <feTurbulence type="fractalNoise" baseFrequency="0.025" numOctaves="2" seed="12" result="noise"/>
+      <feColorMatrix in="noise" type="saturate" values="0"/>
+      <feBlend in="SourceGraphic" mode="multiply"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 z" fill="#344054"/>
+    </marker>
+    <marker id="arrowRed" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 z" fill="#dc2626"/>
+    </marker>
+    <style><![CDATA[
+      text { font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Arial Unicode MS", sans-serif; letter-spacing: 0; }
+      .title { font-weight: 800; fill: #263238; }
+      .subtitle { fill: #667085; }
+      .label { font-weight: 700; fill: #263238; }
+      .small { fill: #667085; }
+      .mono { font-family: "SFMono-Regular", "Menlo", "Consolas", monospace; }
+    ]]></style>
+  </defs>
+  <rect width="100%" height="100%" fill="#fffaf0"/>
+  <path d="M0,70 C420,10 760,95 1120,42 C1440,-4 1660,42 2100,16 L2100,0 L0,0 Z" fill="#f8efe0" opacity="0.8"/>
+  
+  
+  <text x="1100" y="70" text-anchor="middle" opacity="1" class="title"><tspan x="1100" dy="0" fill="#263238" font-weight="850" font-size="48">图 4.1：飞轮扩展 — 减 × 出 × 联</tspan></text>
+  <text x="1100" y="112" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#667085" font-weight="600" font-size="24">F163 让知识能减；F152 让方法论能出去；F186 让跨域知识能联起来</tspan></text>
+
+  
+    <rect x="90" y="165" width="2020" height="335" rx="34" fill="#dcfce7" stroke="#16a34a" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    <rect x="114" y="143" width="420" height="44" rx="22" fill="#16a34a" opacity="0.96"/><text x="132" y="173" font-size="25" font-weight="800" fill="white">F163 减：让知识能证明自己</text>
+  
+  <text x="1100" y="232" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#263238" font-weight="850" font-size="27">问题：知识只有“增”没有“减”，越积越噪，过期决策还会继续误导 agent</tspan></text>
+  <text x="1100" y="277" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#16a34a" font-weight="850" font-size="25">解法：每条知识自带证明链，多维判断，不是一刀切</tspan></text>
+  
+    <rect x="170" y="320" width="430" height="112" rx="24" fill="white" stroke="#16a34a" stroke-width="3" filter="url(#shadow)"/>
+    <text x="385" y="362" text-anchor="middle" opacity="1" class=""><tspan x="385" dy="0" fill="#16a34a" font-weight="900" font-size="25">authority</tspan></text>
+    <text x="385" y="398" text-anchor="middle" opacity="1" class=""><tspan x="385" dy="0" fill="#667085" font-weight="760" font-size="19">谁说的？来源多可靠</tspan></text>
+  
+  
+    <rect x="650" y="320" width="430" height="112" rx="24" fill="white" stroke="#16a34a" stroke-width="3" filter="url(#shadow)"/>
+    <text x="865" y="362" text-anchor="middle" opacity="1" class=""><tspan x="865" dy="0" fill="#16a34a" font-weight="900" font-size="25">activation</tspan></text>
+    <text x="865" y="398" text-anchor="middle" opacity="1" class=""><tspan x="865" dy="0" fill="#667085" font-weight="760" font-size="19">最近还被引用吗</tspan></text>
+  
+  
+    <rect x="1130" y="320" width="430" height="112" rx="24" fill="white" stroke="#16a34a" stroke-width="3" filter="url(#shadow)"/>
+    <text x="1345" y="362" text-anchor="middle" opacity="1" class=""><tspan x="1345" dy="0" fill="#16a34a" font-weight="900" font-size="25">criticality</tspan></text>
+    <text x="1345" y="398" text-anchor="middle" opacity="1" class=""><tspan x="1345" dy="0" fill="#667085" font-weight="760" font-size="19">多重要，错了多危险</tspan></text>
+  
+  
+    <rect x="1610" y="320" width="430" height="112" rx="24" fill="white" stroke="#16a34a" stroke-width="3" filter="url(#shadow)"/>
+    <text x="1825" y="362" text-anchor="middle" opacity="1" class=""><tspan x="1825" dy="0" fill="#16a34a" font-weight="900" font-size="25">verify_date</tspan></text>
+    <text x="1825" y="398" text-anchor="middle" opacity="1" class=""><tspan x="1825" dy="0" fill="#667085" font-weight="760" font-size="19">多久没验证，过期了吗</tspan></text>
+  
+  <text x="1100" y="472" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#16a34a" font-weight="850" font-size="24">效果：高权威但过期 ≠ 低权威但活跃；为图 4 左轮的 stale detect / contradiction flag 提供工程实现</tspan></text>
+
+  <line x1="1100" y1="520" x2="1100" y2="585" stroke="#344054" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/>
+  <rect x="940" y="540" width="320" height="44" rx="22" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="1100" y="570.16" text-anchor="middle" font-size="24" font-weight="700" fill="#16a34a">知识质量有保障</text>
+
+  
+    <rect x="90" y="610" width="2020" height="385" rx="34" fill="#f5f3ff" stroke="#7c3aed" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    <rect x="114" y="588" width="420" height="44" rx="22" fill="#7c3aed" opacity="0.96"/><text x="132" y="618" font-size="25" font-weight="800" fill="white">F152 出：把飞轮带到新地方</text>
+  
+  <text x="1100" y="677" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#263238" font-weight="850" font-size="27">问题：方法论锁在 Cat Cafe 自己家，外部项目还是从零摸索</tspan></text>
+  <text x="1100" y="722" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#7c3aed" font-weight="850" font-size="25">解法：猫猫驻场冷启动，和铲屎官一起做 AI native 改造，再把经验带回来</tspan></text>
+  
+    <rect x="235" y="798" width="220" height="118" rx="24" fill="white" stroke="#16a34a" stroke-width="3" filter="url(#shadow)"/>
+    <text x="345" y="842" text-anchor="middle" opacity="1" class=""><tspan x="345" dy="0" fill="#16a34a" font-weight="900" font-size="25">Cat Cafe</tspan></text>
+    <text x="345" y="878" text-anchor="middle" opacity="1" class=""><tspan x="345" dy="0" fill="#667085" font-weight="760" font-size="18">双飞轮方法论</tspan></text>
+  
+  
+    <rect x="745" y="798" width="220" height="118" rx="24" fill="white" stroke="#7c3aed" stroke-width="3" filter="url(#shadow)"/>
+    <text x="855" y="842" text-anchor="middle" opacity="1" class=""><tspan x="855" dy="0" fill="#7c3aed" font-weight="900" font-size="25">F152 远征</tspan></text>
+    <text x="855" y="878" text-anchor="middle" opacity="1" class=""><tspan x="855" dy="0" fill="#667085" font-weight="760" font-size="18">冷启动记忆 / 驻场</tspan></text>
+  
+  
+    <rect x="1255" y="798" width="220" height="118" rx="24" fill="white" stroke="#2563eb" stroke-width="3" filter="url(#shadow)"/>
+    <text x="1365" y="842" text-anchor="middle" opacity="1" class=""><tspan x="1365" dy="0" fill="#2563eb" font-weight="900" font-size="25">外部项目</tspan></text>
+    <text x="1365" y="878" text-anchor="middle" opacity="1" class=""><tspan x="1365" dy="0" fill="#667085" font-weight="760" font-size="18">AI native 改造</tspan></text>
+  
+  
+    <rect x="1705" y="798" width="220" height="118" rx="24" fill="white" stroke="#f97316" stroke-width="3" filter="url(#shadow)"/>
+    <text x="1815" y="842" text-anchor="middle" opacity="1" class=""><tspan x="1815" dy="0" fill="#f97316" font-weight="900" font-size="25">经验回流</tspan></text>
+    <text x="1815" y="878" text-anchor="middle" opacity="1" class=""><tspan x="1815" dy="0" fill="#667085" font-weight="760" font-size="18">决策 / 教训 / 模式</tspan></text>
+  
+  <line x1="455" y1="857" x2="735" y2="857" stroke="#7c3aed" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/>
+  <line x1="965" y1="857" x2="1245" y2="857" stroke="#7c3aed" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/>
+  <line x1="1475" y1="857" x2="1695" y2="857" stroke="#f97316" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/>
+  <path d="M 1815 930 C 1500 1002, 670 1002, 350 930" fill="none" stroke="#f97316" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/>
+  <text x="1100" y="960" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#7c3aed" font-weight="850" font-size="23">类比 Palantir FDE：不是卖工具，而是把平台能力带到现场做改造</tspan></text>
+
+  <line x1="1100" y1="1018" x2="1100" y2="1084" stroke="#344054" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/>
+  <rect x="915" y="1038" width="370" height="44" rx="22" fill="#ffedd5" stroke="#f97316" stroke-width="2"/>
+  <text x="1100" y="1068.16" text-anchor="middle" font-size="24" font-weight="700" fill="#f97316">经验从外部回来了</text>
+
+  
+    <rect x="90" y="1110" width="2020" height="390" rx="34" fill="#dbeafe" stroke="#2563eb" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    <rect x="114" y="1088" width="392" height="44" rx="22" fill="#2563eb" opacity="0.96"/><text x="132" y="1118" font-size="25" font-weight="800" fill="white">F186 联：让所有知识互通</text>
+  
+  <text x="1100" y="1177" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#263238" font-weight="850" font-size="27">问题：回流经验散落在不同项目 / 方法论库里，猫开工时搜不到</tspan></text>
+  <text x="1100" y="1222" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#2563eb" font-weight="850" font-size="25">解法：多域联邦检索，不统一存储，但统一发现和路由</tspan></text>
+  
+    <rect x="210" y="1280" width="220" height="118" rx="24" fill="white" stroke="#16a34a" stroke-width="3" filter="url(#shadow)"/>
+    <text x="320" y="1324" text-anchor="middle" opacity="1" class=""><tspan x="320" dy="0" fill="#16a34a" font-weight="900" font-size="25">Cat Cafe</tspan></text>
+    <text x="320" y="1360" text-anchor="middle" opacity="1" class=""><tspan x="320" dy="0" fill="#667085" font-weight="760" font-size="18">本项目 docs</tspan></text>
+  
+  
+    <rect x="510" y="1280" width="220" height="118" rx="24" fill="white" stroke="#7c3aed" stroke-width="3" filter="url(#shadow)"/>
+    <text x="620" y="1324" text-anchor="middle" opacity="1" class=""><tspan x="620" dy="0" fill="#7c3aed" font-weight="900" font-size="25">项目 A</tspan></text>
+    <text x="620" y="1360" text-anchor="middle" opacity="1" class=""><tspan x="620" dy="0" fill="#667085" font-weight="760" font-size="18">外部项目知识</tspan></text>
+  
+  
+    <rect x="810" y="1280" width="220" height="118" rx="24" fill="white" stroke="#f97316" stroke-width="3" filter="url(#shadow)"/>
+    <text x="920" y="1324" text-anchor="middle" opacity="1" class=""><tspan x="920" dy="0" fill="#f97316" font-weight="900" font-size="25">项目 B</tspan></text>
+    <text x="920" y="1360" text-anchor="middle" opacity="1" class=""><tspan x="920" dy="0" fill="#667085" font-weight="760" font-size="18">另一套真相源</tspan></text>
+  
+  
+    <rect x="1110" y="1280" width="220" height="118" rx="24" fill="white" stroke="#0f766e" stroke-width="3" filter="url(#shadow)"/>
+    <text x="1220" y="1324" text-anchor="middle" opacity="1" class=""><tspan x="1220" dy="0" fill="#0f766e" font-weight="900" font-size="25">方法论库</tspan></text>
+    <text x="1220" y="1360" text-anchor="middle" opacity="1" class=""><tspan x="1220" dy="0" fill="#667085" font-weight="760" font-size="18">跨项目经验</tspan></text>
+  
+  
+    <rect x="1440" y="1265" width="290" height="140" rx="24" fill="white" stroke="#2563eb" stroke-width="3" stroke-dasharray="" opacity="1" filter=""/>
+    
+  
+  <text x="1585" y="1315" text-anchor="middle" opacity="1" class=""><tspan x="1585" dy="0" fill="#2563eb" font-weight="850" font-size="21">LibraryCatalog</tspan><tspan x="1585" dy="24.779999999999998" fill="#2563eb" font-weight="850" font-size="21">元数据注册</tspan><tspan x="1585" dy="24.779999999999998" fill="#2563eb" font-weight="850" font-size="21">truth source / review 策略</tspan></text>
+  
+    <rect x="1800" y="1265" width="250" height="140" rx="24" fill="white" stroke="#2563eb" stroke-width="3" stroke-dasharray="" opacity="1" filter=""/>
+    
+  
+  <text x="1925" y="1315" text-anchor="middle" opacity="1" class=""><tspan x="1925" dy="0" fill="#2563eb" font-weight="850" font-size="21">LibraryResolver</tspan><tspan x="1925" dy="24.779999999999998" fill="#2563eb" font-weight="850" font-size="21">联邦搜索</tspan><tspan x="1925" dy="24.779999999999998" fill="#2563eb" font-weight="850" font-size="21">跨域返回结果</tspan></text>
+  <line x1="430" y1="1338" x2="500" y2="1338" stroke="#2563eb" stroke-width="4"  stroke-linecap="round" marker-end="url(#arrow)"/>
+  <line x1="730" y1="1338" x2="800" y2="1338" stroke="#2563eb" stroke-width="4"  stroke-linecap="round" marker-end="url(#arrow)"/>
+  <line x1="1030" y1="1338" x2="1100" y2="1338" stroke="#2563eb" stroke-width="4"  stroke-linecap="round" marker-end="url(#arrow)"/>
+  <line x1="1330" y1="1338" x2="1432" y2="1338" stroke="#2563eb" stroke-width="4"  stroke-linecap="round" marker-end="url(#arrow)"/>
+  <line x1="1730" y1="1338" x2="1792" y2="1338" stroke="#2563eb" stroke-width="4"  stroke-linecap="round" marker-end="url(#arrow)"/>
+  <text x="1100" y="1462" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#2563eb" font-weight="850" font-size="24">例：搜“Redis 踩坑”→ 命中本项目 + 外部项目 + 方法论库的相关教训</tspan></text>
+
+  
+    <rect x="220" y="1530" width="1760" height="74" rx="24" fill="#fffbeb" stroke="#d97706" stroke-width="3" stroke-dasharray="" opacity="1" filter=""/>
+    
+  
+  <text x="1100" y="1578" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#92400e" font-weight="850" font-size="25">闭环：减 → 出 → 联 → 联邦知识回到图 4 左飞轮 → 再由 F163 熵减清理；飞轮不只在自己家转。</tspan></text>
+  
+</svg>

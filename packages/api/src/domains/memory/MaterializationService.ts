@@ -65,17 +65,17 @@ export class MaterializationService implements IMaterializationService {
     }
 
     // Write .md file with frontmatter
-    const md = [
+    const frontmatter = [
       '---',
       `anchor: ${anchor}`,
       `doc_kind: ${kind}`,
       `materialized_from: ${markerId}`,
       `created: ${new Date().toISOString().split('T')[0]}`,
-      '---',
-      '',
-      marker.content,
-      '',
-    ].join('\n');
+    ];
+    if (marker.targetCollectionId) frontmatter.push(`target_collection: ${marker.targetCollectionId}`);
+    if (marker.sourceCollectionId) frontmatter.push(`source_collection: ${marker.sourceCollectionId}`);
+    frontmatter.push('---');
+    const md = [...frontmatter, '', marker.content, ''].join('\n');
     writeFileSync(outputPath, md);
 
     // Git commit the materialized file (parameterized — no shell interpolation)

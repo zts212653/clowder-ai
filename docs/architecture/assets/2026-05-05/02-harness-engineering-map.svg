@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2200" height="1650" viewBox="0 0 2200 1650">
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#8a6f45" flood-opacity="0.14"/>
+    </filter>
+    <filter id="soft">
+      <feTurbulence type="fractalNoise" baseFrequency="0.025" numOctaves="2" seed="12" result="noise"/>
+      <feColorMatrix in="noise" type="saturate" values="0"/>
+      <feBlend in="SourceGraphic" mode="multiply"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 z" fill="#344054"/>
+    </marker>
+    <marker id="arrowRed" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 z" fill="#dc2626"/>
+    </marker>
+    <style><![CDATA[
+      text { font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Arial Unicode MS", sans-serif; letter-spacing: 0; }
+      .title { font-weight: 800; fill: #263238; }
+      .subtitle { fill: #667085; }
+      .label { font-weight: 700; fill: #263238; }
+      .small { fill: #667085; }
+      .mono { font-family: "SFMono-Regular", "Menlo", "Consolas", monospace; }
+    ]]></style>
+  </defs>
+  <rect width="100%" height="100%" fill="#fffaf0"/>
+  <path d="M0,70 C420,10 760,95 1120,42 C1440,-4 1660,42 2100,16 L2100,0 L0,0 Z" fill="#f8efe0" opacity="0.8"/>
+  
+  
+  <text x="1100" y="70" text-anchor="middle" opacity="1" class="title"><tspan x="1100" dy="0" fill="#263238" font-weight="850" font-size="48">Cat Cafe Harness Engineering：六大件 + 第七类</tspan></text>
+  <text x="1100" y="112" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#667085" font-weight="600" font-size="24">行业六大构件我们全有落地；多猫协作还需要协作语义与球权治理</tspan></text>
+  <rect x="720" y="132" width="760" height="44" rx="22" fill="#ede7ff" stroke="#7c3aed" stroke-width="2"/>
+  <text x="1100" y="162.84" text-anchor="middle" font-size="26" font-weight="700" fill="#7c3aed">Agent Quality = Model Capability × Environment Fit</text>
+
+  
+  
+    <rect x="80" y="220" width="630" height="345" rx="24" fill="#ffffff" stroke="#16a34a" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    
+  
+  <rect x="102" y="240" width="586" height="44" rx="22" fill="#16a34a22" stroke="#16a34a" stroke-width="2"/>
+  <text x="395" y="270.16" text-anchor="middle" font-size="24" font-weight="700" fill="#16a34a">1. Durable State</text>
+  <text x="114" y="312" text-anchor="start" opacity="1" class=""><tspan x="114" dy="0" fill="#263238" font-weight="650" font-size="23">docs/ 真相源</tspan><tspan x="114" dy="28.75" fill="#263238" font-weight="650" font-size="23">evidence.sqlite 编译层</tspan><tspan x="114" dy="28.75" fill="#263238" font-weight="650" font-size="23">Session Chain / Thread</tspan><tspan x="114" dy="28.75" fill="#263238" font-weight="650" font-size="23">Task / Workflow / InvocationQueue</tspan></text>
+  <line x1="110" y1="439" x2="680" y2="439" stroke="#16a34a" stroke-width="2" opacity="0.24"/>
+  <text x="114" y="469" text-anchor="start" opacity="1" class=""><tspan x="114" dy="0" fill="#16a34a" font-weight="850" font-size="17">外部概念锚点</tspan></text>
+  
+      <rect x="114" y="483" width="52" height="24" rx="12" fill="#e0f2fe" stroke="#2563eb" stroke-width="2"/>
+      <text x="140" y="501" text-anchor="middle" font-size="14" font-weight="900" fill="#2563eb">OAI</text>
+      <text x="180" y="501" font-size="16" font-weight="650" fill="#263238">docs / plans / worktree SOR</text>
+    
+      <rect x="114" y="511" width="52" height="24" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+      <text x="140" y="529" text-anchor="middle" font-size="14" font-weight="900" fill="#7c3aed">ANT</text>
+      <text x="180" y="529" font-size="16" font-weight="650" fill="#263238">structured handoff / session log</text>
+    
+      <rect x="114" y="539" width="52" height="24" rx="12" fill="#ffedd5" stroke="#f97316" stroke-width="2"/>
+      <text x="140" y="557" text-anchor="middle" font-size="14" font-weight="900" fill="#f97316">FOW</text>
+      <text x="180" y="557" font-size="16" font-weight="650" fill="#263238">context engineering / harnessability</text>
+    
+  <text x="676" y="541" text-anchor="end" opacity="1" class=""><tspan x="676" dy="0" fill="#667085" font-weight="700" font-size="17">→ 图5 Shared State</tspan></text>
+  
+  
+  
+    <rect x="785" y="220" width="630" height="345" rx="24" fill="#ffffff" stroke="#f97316" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    
+  
+  <rect x="807" y="240" width="586" height="44" rx="22" fill="#f9731622" stroke="#f97316" stroke-width="2"/>
+  <text x="1100" y="270.16" text-anchor="middle" font-size="24" font-weight="700" fill="#f97316">2. Plans &amp; Decomposition</text>
+  <text x="819" y="312" text-anchor="start" opacity="1" class=""><tspan x="819" dy="0" fill="#263238" font-weight="650" font-size="23">feat-lifecycle → Design Gate</tspan><tspan x="819" dy="28.75" fill="#263238" font-weight="650" font-size="23">writing-plans → Phase 拆分</tspan><tspan x="819" dy="28.75" fill="#263238" font-weight="650" font-size="23">AC 对 evidence · Close Gate 三选一</tspan><tspan x="819" dy="28.75" fill="#263238" font-weight="650" font-size="23">不许留 follow-up 尾巴</tspan></text>
+  <line x1="815" y1="439" x2="1385" y2="439" stroke="#f97316" stroke-width="2" opacity="0.24"/>
+  <text x="819" y="469" text-anchor="start" opacity="1" class=""><tspan x="819" dy="0" fill="#f97316" font-weight="850" font-size="17">外部概念锚点</tspan></text>
+  
+      <rect x="819" y="483" width="52" height="24" rx="12" fill="#e0f2fe" stroke="#2563eb" stroke-width="2"/>
+      <text x="845" y="501" text-anchor="middle" font-size="14" font-weight="900" fill="#2563eb">OAI</text>
+      <text x="885" y="501" font-size="16" font-weight="650" fill="#263238">execution plans as artifacts</text>
+    
+      <rect x="819" y="511" width="52" height="24" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+      <text x="845" y="529" text-anchor="middle" font-size="14" font-weight="900" fill="#7c3aed">ANT</text>
+      <text x="885" y="529" font-size="16" font-weight="650" fill="#263238">planner / feature decomposition</text>
+    
+      <rect x="819" y="539" width="52" height="24" rx="12" fill="#ffedd5" stroke="#f97316" stroke-width="2"/>
+      <text x="845" y="557" text-anchor="middle" font-size="14" font-weight="900" fill="#f97316">FOW</text>
+      <text x="885" y="557" font-size="16" font-weight="650" fill="#263238">guides: specs / plans / rules</text>
+    
+  <text x="1381" y="541" text-anchor="end" opacity="1" class=""><tspan x="1381" dy="0" fill="#667085" font-weight="700" font-size="17">→ SOP / Gates</tspan></text>
+  
+  
+  
+    <rect x="1490" y="220" width="630" height="345" rx="24" fill="#ffffff" stroke="#dc2626" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    
+  
+  <rect x="1512" y="240" width="586" height="44" rx="22" fill="#dc262622" stroke="#dc2626" stroke-width="2"/>
+  <text x="1805" y="270.16" text-anchor="middle" font-size="24" font-weight="700" fill="#dc2626">3. Feedback Loops</text>
+  <text x="1524" y="312" text-anchor="start" opacity="1" class=""><tspan x="1524" dy="0" fill="#263238" font-weight="650" font-size="23">Computational: lint / test / gate / CI</tspan><tspan x="1524" dy="28.75" fill="#263238" font-weight="650" font-size="23">Inferential: 跨族 review / 愿景守护</tspan><tspan x="1524" dy="28.75" fill="#263238" font-weight="650" font-size="23">Human Runtime: Magic Words 拉闸</tspan><tspan x="1524" dy="28.75" fill="#263238" font-weight="650" font-size="23">CVO 漏斗决策</tspan></text>
+  <line x1="1520" y1="439" x2="2090" y2="439" stroke="#dc2626" stroke-width="2" opacity="0.24"/>
+  <text x="1524" y="469" text-anchor="start" opacity="1" class=""><tspan x="1524" dy="0" fill="#dc2626" font-weight="850" font-size="17">外部概念锚点</tspan></text>
+  
+      <rect x="1524" y="483" width="52" height="24" rx="12" fill="#e0f2fe" stroke="#2563eb" stroke-width="2"/>
+      <text x="1550" y="501" text-anchor="middle" font-size="14" font-weight="900" fill="#2563eb">OAI</text>
+      <text x="1590" y="501" font-size="16" font-weight="650" fill="#263238">agent reviews / CI / traces</text>
+    
+      <rect x="1524" y="511" width="52" height="24" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+      <text x="1550" y="529" text-anchor="middle" font-size="14" font-weight="900" fill="#7c3aed">ANT</text>
+      <text x="1590" y="529" font-size="16" font-weight="650" fill="#263238">evaluator / QA loop / trace reading</text>
+    
+      <rect x="1524" y="539" width="52" height="24" rx="12" fill="#ffedd5" stroke="#f97316" stroke-width="2"/>
+      <text x="1550" y="557" text-anchor="middle" font-size="14" font-weight="900" fill="#f97316">FOW</text>
+      <text x="1590" y="557" font-size="16" font-weight="650" fill="#263238">sensors: computational + inferential</text>
+    
+  <text x="2086" y="541" text-anchor="end" opacity="1" class=""><tspan x="2086" dy="0" fill="#667085" font-weight="700" font-size="17">→ 图3 verdict</tspan></text>
+  
+
+  
+  
+    <rect x="80" y="630" width="630" height="365" rx="24" fill="#ffffff" stroke="#2563eb" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    
+  
+  <rect x="102" y="650" width="586" height="44" rx="22" fill="#2563eb22" stroke="#2563eb" stroke-width="2"/>
+  <text x="395" y="680.16" text-anchor="middle" font-size="24" font-weight="700" fill="#2563eb">4. Legibility</text>
+  <text x="114" y="722" text-anchor="start" opacity="1" class=""><tspan x="114" dy="0" fill="#263238" font-weight="650" font-size="23">search_evidence（增强 grep）</tspan><tspan x="114" dy="28.75" fill="#263238" font-weight="650" font-size="23">Hub 明厨亮灶</tspan><tspan x="114" dy="28.75" fill="#263238" font-weight="650" font-size="23">InvocationTracker：谁在跑 / 谁在等</tspan><tspan x="114" dy="28.75" fill="#263238" font-weight="650" font-size="23">confidence / authority / sourceType</tspan><tspan x="114" dy="28.75" fill="#263238" font-weight="650" font-size="23">看不见等于不存在</tspan></text>
+  <line x1="110" y1="869" x2="680" y2="869" stroke="#2563eb" stroke-width="2" opacity="0.24"/>
+  <text x="114" y="899" text-anchor="start" opacity="1" class=""><tspan x="114" dy="0" fill="#2563eb" font-weight="850" font-size="17">外部概念锚点</tspan></text>
+  
+      <rect x="114" y="913" width="52" height="24" rx="12" fill="#e0f2fe" stroke="#2563eb" stroke-width="2"/>
+      <text x="140" y="931" text-anchor="middle" font-size="14" font-weight="900" fill="#2563eb">OAI</text>
+      <text x="180" y="931" font-size="16" font-weight="650" fill="#263238">UI / logs / metrics / repo visible</text>
+    
+      <rect x="114" y="941" width="52" height="24" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+      <text x="140" y="959" text-anchor="middle" font-size="14" font-weight="900" fill="#7c3aed">ANT</text>
+      <text x="180" y="959" font-size="16" font-weight="650" fill="#263238">structured artifacts for next agent</text>
+    
+      <rect x="114" y="969" width="52" height="24" rx="12" fill="#ffedd5" stroke="#f97316" stroke-width="2"/>
+      <text x="140" y="987" text-anchor="middle" font-size="14" font-weight="900" fill="#f97316">FOW</text>
+      <text x="180" y="987" font-size="16" font-weight="650" fill="#263238">ambient affordances / harnessability</text>
+    
+  <text x="676" y="971" text-anchor="end" opacity="1" class=""><tspan x="676" dy="0" fill="#667085" font-weight="700" font-size="17">→ 图5 API / Hub</tspan></text>
+  
+  
+  
+    <rect x="785" y="630" width="630" height="365" rx="24" fill="#ffffff" stroke="#7c3aed" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    
+  
+  <rect x="807" y="650" width="586" height="44" rx="22" fill="#7c3aed22" stroke="#7c3aed" stroke-width="2"/>
+  <text x="1100" y="680.16" text-anchor="middle" font-size="24" font-weight="700" fill="#7c3aed">5. Tool Mediation</text>
+  <text x="819" y="722" text-anchor="start" opacity="1" class=""><tspan x="819" dy="0" fill="#263238" font-weight="650" font-size="23">MCP + Skill 认知路标</tspan><tspan x="819" dy="28.75" fill="#263238" font-weight="650" font-size="23">SystemPromptBuilder</tspan><tspan x="819" dy="28.75" fill="#263238" font-weight="650" font-size="23">入口硬 gate (F086)</tspan><tspan x="819" dy="28.75" fill="#263238" font-weight="650" font-size="23">Dynamic Injection</tspan><tspan x="819" dy="28.75" fill="#263238" font-weight="650" font-size="23">猫砂盆放在猫已经去的地方</tspan></text>
+  <line x1="815" y1="869" x2="1385" y2="869" stroke="#7c3aed" stroke-width="2" opacity="0.24"/>
+  <text x="819" y="899" text-anchor="start" opacity="1" class=""><tspan x="819" dy="0" fill="#7c3aed" font-weight="850" font-size="17">外部概念锚点</tspan></text>
+  
+      <rect x="819" y="913" width="52" height="24" rx="12" fill="#e0f2fe" stroke="#2563eb" stroke-width="2"/>
+      <text x="845" y="931" text-anchor="middle" font-size="14" font-weight="900" fill="#2563eb">OAI</text>
+      <text x="885" y="931" font-size="16" font-weight="650" fill="#263238">dev tools / gh / scripts / skills</text>
+    
+      <rect x="819" y="941" width="52" height="24" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+      <text x="845" y="959" text-anchor="middle" font-size="14" font-weight="900" fill="#7c3aed">ANT</text>
+      <text x="885" y="959" font-size="16" font-weight="650" fill="#263238">harness routes tools; sandbox hands</text>
+    
+      <rect x="819" y="969" width="52" height="24" rx="12" fill="#ffedd5" stroke="#f97316" stroke-width="2"/>
+      <text x="845" y="987" text-anchor="middle" font-size="14" font-weight="900" fill="#f97316">FOW</text>
+      <text x="885" y="987" font-size="16" font-weight="650" fill="#263238">computational controls / codemods</text>
+    
+  <text x="1381" y="971" text-anchor="end" opacity="1" class=""><tspan x="1381" dy="0" fill="#667085" font-weight="700" font-size="17">→ L1/L3 Tooling</tspan></text>
+  
+  
+  
+    <rect x="1490" y="630" width="630" height="365" rx="24" fill="#ffffff" stroke="#0f766e" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    
+  
+  <rect x="1512" y="650" width="586" height="44" rx="22" fill="#0f766e22" stroke="#0f766e" stroke-width="2"/>
+  <text x="1805" y="680.16" text-anchor="middle" font-size="24" font-weight="700" fill="#0f766e">6. Entropy Control</text>
+  <text x="1524" y="722" text-anchor="start" opacity="1" class=""><tspan x="1524" dy="0" fill="#263238" font-weight="650" font-size="23">F163 知识生命周期</tspan><tspan x="1524" dy="28.75" fill="#263238" font-weight="650" font-size="23">Build to Delete 判别式</tspan><tspan x="1524" dy="28.75" fill="#263238" font-weight="650" font-size="23">skeleton / explanation / probe</tspan><tspan x="1524" dy="28.75" fill="#263238" font-weight="650" font-size="23">ADR-031（Sunset 纪律）</tspan><tspan x="1524" dy="28.75" fill="#263238" font-weight="650" font-size="23">代码熵 + harness 自身熵</tspan></text>
+  <line x1="1520" y1="869" x2="2090" y2="869" stroke="#0f766e" stroke-width="2" opacity="0.24"/>
+  <text x="1524" y="899" text-anchor="start" opacity="1" class=""><tspan x="1524" dy="0" fill="#0f766e" font-weight="850" font-size="17">外部概念锚点</tspan></text>
+  
+      <rect x="1524" y="913" width="52" height="24" rx="12" fill="#e0f2fe" stroke="#2563eb" stroke-width="2"/>
+      <text x="1550" y="931" text-anchor="middle" font-size="14" font-weight="900" fill="#2563eb">OAI</text>
+      <text x="1590" y="931" font-size="16" font-weight="650" fill="#263238">doc gardening / cleanup tasks</text>
+    
+      <rect x="1524" y="941" width="52" height="24" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+      <text x="1550" y="959" text-anchor="middle" font-size="14" font-weight="900" fill="#7c3aed">ANT</text>
+      <text x="1590" y="959" font-size="16" font-weight="650" fill="#263238">re-review scaffold after upgrades</text>
+    
+      <rect x="1524" y="969" width="52" height="24" rx="12" fill="#ffedd5" stroke="#f97316" stroke-width="2"/>
+      <text x="1550" y="987" text-anchor="middle" font-size="14" font-weight="900" fill="#f97316">FOW</text>
+      <text x="1590" y="987" font-size="16" font-weight="650" fill="#263238">steering loop / keep quality left</text>
+    
+  <text x="2086" y="971" text-anchor="end" opacity="1" class=""><tspan x="2086" dy="0" fill="#667085" font-weight="700" font-size="17">→ 图4 双飞轮</tspan></text>
+  
+
+  
+    <rect x="180" y="1090" width="1840" height="370" rx="30" fill="#fff7ed" stroke="#f97316" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    <rect x="204" y="1068" width="728" height="44" rx="22" fill="#f97316" opacity="0.96"/><text x="222" y="1098" font-size="25" font-weight="800" fill="white">7. Collaboration Semantics</text>
+  
+  <text x="1100" y="1150" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#f97316" font-weight="900" font-size="35">六大件之外，Cat Cafe 独有</tspan></text>
+  <text x="280" y="1225" text-anchor="start" opacity="1" class=""><tspan x="280" dy="0" fill="#263238" font-weight="760" font-size="32">@ 路由 · targetCats · hold_ball · 接 / 退 / 升三选一</tspan><tspan x="280" dy="40" fill="#263238" font-weight="760" font-size="32">统一执行平面：InvocationQueue 接住所有 handoff</tspan><tspan x="280" dy="40" fill="#263238" font-weight="760" font-size="32">跨厂商多样性：Claude × GPT × Gemini = 结构性纠错</tspan><tspan x="280" dy="40" fill="#263238" font-weight="760" font-size="32">CVO 终裁：愿景层拍板，执行层自治</tspan><tspan x="280" dy="40" fill="#263238" font-weight="760" font-size="32">核心定律：状态迁移必须由现实动作产生</tspan></text>
+  
+  <g>
+    <path d="M 1643.2 1245.8 C 1615.9 1284.8, 1660.36 1312.1, 1690 1298.84 C 1719.64 1312.88, 1764.1 1284.8, 1736.8 1245.8" fill="#e7b76b" stroke="#344054" stroke-width="2.34"/>
+    <path d="M 1647.88 1209.92 L 1672.84 1180.28 L 1685.32 1213.04" fill="#fef3c7" stroke="#344054" stroke-width="2.34"/>
+    <path d="M 1732.12 1209.92 L 1707.16 1180.28 L 1694.68 1213.04" fill="#fef3c7" stroke="#344054" stroke-width="2.34"/>
+    <ellipse cx="1690" cy="1238" rx="49.92" ry="42.9" fill="#fef3c7" stroke="#344054" stroke-width="2.34"/>
+    <circle cx="1672.84" cy="1231.76" r="4.68" fill="#263238"/>
+    <circle cx="1707.16" cy="1231.76" r="4.68" fill="#263238"/>
+    <path d="M 1683.76 1245.8 Q 1690 1252.04 1696.24 1245.8" fill="none" stroke="#344054" stroke-width="2.34" stroke-linecap="round"/>
+    <path d="M 1679.86 1252.04 Q 1690 1259.84 1700.14 1252.04" fill="none" stroke="#344054" stroke-width="1.9500000000000002" stroke-linecap="round"/>
+    <path d="M 1652.56 1244.24 L 1623.7 1238" stroke="#344054" stroke-width="1.56" stroke-linecap="round"/>
+    <path d="M 1652.56 1252.04 L 1624.48 1256.72" stroke="#344054" stroke-width="1.56" stroke-linecap="round"/>
+    <path d="M 1727.44 1244.24 L 1756.3 1238" stroke="#344054" stroke-width="1.56" stroke-linecap="round"/>
+    <path d="M 1727.44 1252.04 L 1755.52 1256.72" stroke="#344054" stroke-width="1.56" stroke-linecap="round"/>
+    <rect x="1629.16" y="1292.6" width="121.68" height="45.24" rx="17.16" fill="#7c3aed" opacity="0.96"/>
+    <text x="1690" y="1314.44" text-anchor="middle" font-size="18.72" font-weight="800" fill="white">多猫</text>
+    <text x="1690" y="1334.72" text-anchor="middle" font-size="14.040000000000001" font-weight="600" fill="white" opacity="0.92">协作协议</text>
+  </g>
+  
+  <g>
+    <circle cx="1565" cy="1310" r="42" fill="#f97316" opacity="0.88" stroke="#344054" stroke-width="3"/>
+    <path d="M 1535.6 1297.4 C 1558.7 1272.2, 1583.9 1280.6, 1596.92 1305.8" fill="none" stroke="white" stroke-width="5.04" opacity="0.86"/>
+    <path d="M 1531.4 1320.5 C 1560.8 1305.8, 1577.6 1326.8, 1600.7 1314.2" fill="none" stroke="white" stroke-width="4.62" opacity="0.86"/>
+    <path d="M 1558.7 1274.3 C 1550.3 1307.9, 1571.3 1324.7, 1558.7 1346.12" fill="none" stroke="white" stroke-width="4.2" opacity="0.86"/>
+  </g>
+  <line x1="1470" y1="1310" x2="1525" y2="1310" stroke="#f97316" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/>
+  <line x1="1605" y1="1310" x2="1662" y2="1310" stroke="#f97316" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/>
+
+  
+    <rect x="300" y="1520" width="1600" height="82" rx="24" fill="#fffbeb" stroke="#d97706" stroke-width="3" stroke-dasharray="" opacity="1" filter=""/>
+    
+  
+  <text x="1100" y="1572" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#92400e" font-weight="750" font-size="24">六大件 = 中文社区综合归纳；OAI / ANT / FOW 是外部概念锚点，不是官方一一对应分类。详见 concept-map-2026-05-05.md。</tspan></text>
+  
+</svg>

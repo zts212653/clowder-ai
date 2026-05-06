@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1200" viewBox="0 0 1800 1200">
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#8a6f45" flood-opacity="0.14"/>
+    </filter>
+    <filter id="soft">
+      <feTurbulence type="fractalNoise" baseFrequency="0.025" numOctaves="2" seed="12" result="noise"/>
+      <feColorMatrix in="noise" type="saturate" values="0"/>
+      <feBlend in="SourceGraphic" mode="multiply"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 z" fill="#344054"/>
+    </marker>
+    <marker id="arrowRed" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 z" fill="#dc2626"/>
+    </marker>
+    <style><![CDATA[
+      text { font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Arial Unicode MS", sans-serif; letter-spacing: 0; }
+      .title { font-weight: 800; fill: #263238; }
+      .subtitle { fill: #667085; }
+      .label { font-weight: 700; fill: #263238; }
+      .small { fill: #667085; }
+      .mono { font-family: "SFMono-Regular", "Menlo", "Consolas", monospace; }
+    ]]></style>
+  </defs>
+  <rect width="100%" height="100%" fill="#fffaf0"/>
+  <path d="M0,70 C420,10 760,95 1120,42 C1440,-4 1660,42 2100,16 L2100,0 L0,0 Z" fill="#f8efe0" opacity="0.8"/>
+  
+  
+  <text x="900" y="70" text-anchor="middle" opacity="1" class="title"><tspan x="900" dy="0" fill="#263238" font-weight="850" font-size="48">Cat Cafe 运行时技术栈：代码在哪，改什么影响什么</tspan></text>
+  <text x="900" y="112" text-anchor="middle" opacity="1" class=""><tspan x="900" dy="0" fill="#667085" font-weight="600" font-size="24">Hub → Fastify API → Provider / MCP / Storage；6399 是 runtime 用户数据圣域</tspan></text>
+
+  
+    <rect x="110" y="165" width="1580" height="245" rx="28" fill="#ede7ff" stroke="#7c3aed" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    <rect x="134" y="143" width="140" height="44" rx="22" fill="#7c3aed" opacity="0.96"/><text x="152" y="173" font-size="25" font-weight="800" fill="white">用户交互</text>
+  
+  <text x="190" y="245" text-anchor="start" opacity="1" class=""><tspan x="190" dy="0" fill="#263238" font-weight="820" font-size="30">Hub (React + Zustand)</tspan><tspan x="190" dy="38.4" fill="#263238" font-weight="820" font-size="30">Workspace：对话 / 监控 / 知识 / 导航</tspan><tspan x="190" dy="38.4" fill="#263238" font-weight="820" font-size="30">Rich Block / Preview / Audio</tspan><tspan x="190" dy="38.4" fill="#263238" font-weight="820" font-size="30">WebSocket：实时 bubble stream</tspan></text>
+  
+    <rect x="1120" y="230" width="460" height="120" rx="24" fill="#ffffff" stroke="#f97316" stroke-width="3" stroke-dasharray="" opacity="1" filter=""/>
+    
+  
+  <text x="1350" y="282" text-anchor="middle" opacity="1" class=""><tspan x="1350" dy="0" fill="#f97316" font-weight="850" font-size="27">外部 IM</tspan><tspan x="1350" dy="32.94" fill="#f97316" font-weight="850" font-size="27">飞书 · 企微 · Telegram · Email</tspan></text>
+  <line x1="900" y1="432" x2="900" y2="505" stroke="#344054" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/>
+  <text x="955" y="475" text-anchor="start" opacity="1" class=""><tspan x="955" dy="0" fill="#667085" font-weight="800" font-size="23">HTTP / WS</tspan></text>
+
+  
+    <rect x="110" y="510" width="1580" height="285" rx="28" fill="#dbeafe" stroke="#2563eb" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    <rect x="134" y="488" width="364" height="44" rx="22" fill="#2563eb" opacity="0.96"/><text x="152" y="518" font-size="25" font-weight="800" fill="white">API (Fastify)</text>
+  
+  <text x="190" y="590" text-anchor="start" opacity="1" class=""><tspan x="190" dy="0" fill="#263238" font-weight="820" font-size="29">InvocationQueue → QueueProcessor</tspan><tspan x="190" dy="35.38" fill="#263238" font-weight="820" font-size="29">AgentRouter → Provider Adapters (Claude / GPT / Gemini)</tspan><tspan x="190" dy="35.38" fill="#263238" font-weight="820" font-size="29">SessionBootstrap（窄口注入）</tspan><tspan x="190" dy="35.38" fill="#263238" font-weight="820" font-size="29">A2A Callback → 统一执行平面</tspan><tspan x="190" dy="35.38" fill="#263238" font-weight="820" font-size="29">Transport Gateway（外部触达）</tspan></text>
+  
+  <g>
+    
+    <path d="M 1259.08 577.72 L 1274.44 559.48 L 1282.12 579.64" fill="#f8fafc" stroke="#344054" stroke-width="1.44"/>
+    <path d="M 1310.92 577.72 L 1295.56 559.48 L 1287.88 579.64" fill="#f8fafc" stroke="#344054" stroke-width="1.44"/>
+    <ellipse cx="1285" cy="595" rx="30.72" ry="26.4" fill="#f8fafc" stroke="#344054" stroke-width="1.44"/>
+    <circle cx="1274.44" cy="591.16" r="2.88" fill="#263238"/>
+    <circle cx="1295.56" cy="591.16" r="2.88" fill="#263238"/>
+    <path d="M 1281.16 599.8 Q 1285 603.64 1288.84 599.8" fill="none" stroke="#344054" stroke-width="1.44" stroke-linecap="round"/>
+    <path d="M 1278.76 603.64 Q 1285 608.44 1291.24 603.64" fill="none" stroke="#344054" stroke-width="1.2" stroke-linecap="round"/>
+    <path d="M 1261.96 598.84 L 1244.2 595" stroke="#344054" stroke-width="0.96" stroke-linecap="round"/>
+    <path d="M 1261.96 603.64 L 1244.68 606.52" stroke="#344054" stroke-width="0.96" stroke-linecap="round"/>
+    <path d="M 1308.04 598.84 L 1325.8 595" stroke="#344054" stroke-width="0.96" stroke-linecap="round"/>
+    <path d="M 1308.04 603.64 L 1325.32 606.52" stroke="#344054" stroke-width="0.96" stroke-linecap="round"/>
+    <rect x="1247.56" y="628.6" width="74.88" height="27.84" rx="10.559999999999999" fill="#7c3aed" opacity="0.96"/>
+    <text x="1285" y="642.04" text-anchor="middle" font-size="11.52" font-weight="800" fill="white">Claude</text>
+    <text x="1285" y="654.52" text-anchor="middle" font-size="8.64" font-weight="600" fill="white" opacity="0.92">adapter</text>
+  </g>
+  
+  <g>
+    <path d="M 1406.2 599.8 C 1389.4 623.8, 1416.76 640.6, 1435 632.44 C 1453.24 641.08, 1480.6 623.8, 1463.8 599.8" fill="#d6a45f" stroke="#344054" stroke-width="1.44"/>
+    <path d="M 1409.08 577.72 L 1424.44 559.48 L 1432.12 579.64" fill="#fef3c7" stroke="#344054" stroke-width="1.44"/>
+    <path d="M 1460.92 577.72 L 1445.56 559.48 L 1437.88 579.64" fill="#fef3c7" stroke="#344054" stroke-width="1.44"/>
+    <ellipse cx="1435" cy="595" rx="30.72" ry="26.4" fill="#fef3c7" stroke="#344054" stroke-width="1.44"/>
+    <circle cx="1424.44" cy="591.16" r="2.88" fill="#263238"/>
+    <circle cx="1445.56" cy="591.16" r="2.88" fill="#263238"/>
+    <path d="M 1431.16 599.8 Q 1435 603.64 1438.84 599.8" fill="none" stroke="#344054" stroke-width="1.44" stroke-linecap="round"/>
+    <path d="M 1428.76 603.64 Q 1435 608.44 1441.24 603.64" fill="none" stroke="#344054" stroke-width="1.2" stroke-linecap="round"/>
+    <path d="M 1411.96 598.84 L 1394.2 595" stroke="#344054" stroke-width="0.96" stroke-linecap="round"/>
+    <path d="M 1411.96 603.64 L 1394.68 606.52" stroke="#344054" stroke-width="0.96" stroke-linecap="round"/>
+    <path d="M 1458.04 598.84 L 1475.8 595" stroke="#344054" stroke-width="0.96" stroke-linecap="round"/>
+    <path d="M 1458.04 603.64 L 1475.32 606.52" stroke="#344054" stroke-width="0.96" stroke-linecap="round"/>
+    <rect x="1397.56" y="628.6" width="74.88" height="27.84" rx="10.559999999999999" fill="#2563eb" opacity="0.96"/>
+    <text x="1435" y="642.04" text-anchor="middle" font-size="11.52" font-weight="800" fill="white">GPT</text>
+    <text x="1435" y="654.52" text-anchor="middle" font-size="8.64" font-weight="600" fill="white" opacity="0.92">adapter</text>
+  </g>
+  
+  <g>
+    
+    <path d="M 1559.08 577.72 L 1574.44 559.48 L 1582.12 579.64" fill="#e0f2fe" stroke="#344054" stroke-width="1.44"/>
+    <path d="M 1610.92 577.72 L 1595.56 559.48 L 1587.88 579.64" fill="#e0f2fe" stroke="#344054" stroke-width="1.44"/>
+    <ellipse cx="1585" cy="595" rx="30.72" ry="26.4" fill="#e0f2fe" stroke="#344054" stroke-width="1.44"/>
+    <circle cx="1574.44" cy="591.16" r="2.88" fill="#263238"/>
+    <circle cx="1595.56" cy="591.16" r="2.88" fill="#263238"/>
+    <path d="M 1581.16 599.8 Q 1585 603.64 1588.84 599.8" fill="none" stroke="#344054" stroke-width="1.44" stroke-linecap="round"/>
+    <path d="M 1578.76 603.64 Q 1585 608.44 1591.24 603.64" fill="none" stroke="#344054" stroke-width="1.2" stroke-linecap="round"/>
+    <path d="M 1561.96 598.84 L 1544.2 595" stroke="#344054" stroke-width="0.96" stroke-linecap="round"/>
+    <path d="M 1561.96 603.64 L 1544.68 606.52" stroke="#344054" stroke-width="0.96" stroke-linecap="round"/>
+    <path d="M 1608.04 598.84 L 1625.8 595" stroke="#344054" stroke-width="0.96" stroke-linecap="round"/>
+    <path d="M 1608.04 603.64 L 1625.32 606.52" stroke="#344054" stroke-width="0.96" stroke-linecap="round"/>
+    <rect x="1547.56" y="628.6" width="74.88" height="27.84" rx="10.559999999999999" fill="#0f766e" opacity="0.96"/>
+    <text x="1585" y="642.04" text-anchor="middle" font-size="11.52" font-weight="800" fill="white">Gemini</text>
+    <text x="1585" y="654.52" text-anchor="middle" font-size="8.64" font-weight="600" fill="white" opacity="0.92">adapter</text>
+  </g>
+
+  <line x1="640" y1="814" x2="520" y2="900" stroke="#344054" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/>
+  <line x1="1160" y1="814" x2="1280" y2="900" stroke="#344054" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/>
+
+  
+    <rect x="110" y="910" width="745" height="215" rx="28" fill="#f5f3ff" stroke="#7c3aed" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    <rect x="134" y="888" width="308" height="44" rx="22" fill="#7c3aed" opacity="0.96"/><text x="152" y="918" font-size="25" font-weight="800" fill="white">MCP Servers</text>
+  
+  <text x="190" y="972" text-anchor="start" opacity="1" class=""><tspan x="190" dy="0" fill="#263238" font-weight="820" font-size="27">cat-cafe (core)</tspan><tspan x="190" dy="31.049999999999997" fill="#263238" font-weight="820" font-size="27">cat-cafe-collab</tspan><tspan x="190" dy="31.049999999999997" fill="#263238" font-weight="820" font-size="27">cat-cafe-memory</tspan><tspan x="190" dy="31.049999999999997" fill="#263238" font-weight="820" font-size="27">cat-cafe-signals</tspan><tspan x="190" dy="31.049999999999997" fill="#263238" font-weight="820" font-size="27">external MCPs</tspan></text>
+
+  
+    <rect x="945" y="910" width="745" height="215" rx="28" fill="#dcfce7" stroke="#16a34a" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    <rect x="969" y="888" width="196" height="44" rx="22" fill="#16a34a" opacity="0.96"/><text x="987" y="918" font-size="25" font-weight="800" fill="white">Storage</text>
+  
+  <rect x="1015" y="968" width="560" height="44" rx="18" fill="#fee2e2" opacity="0.45"/>
+  <text x="1025" y="988" text-anchor="start" opacity="1" class=""><tspan x="1025" dy="0" fill="#263238" font-weight="820" font-size="27">Redis 6399：runtime / 用户数据圣域</tspan><tspan x="1025" dy="31.86" fill="#263238" font-weight="820" font-size="27">Redis 6398：worktree / alpha / test 隔离</tspan><tspan x="1025" dy="31.86" fill="#263238" font-weight="820" font-size="27">SQLite：evidence.sqlite</tspan><tspan x="1025" dy="31.86" fill="#263238" font-weight="820" font-size="27">docs/：真相源</tspan><tspan x="1025" dy="31.86" fill="#263238" font-weight="820" font-size="27">git：版本控制 / 审计</tspan></text>
+  <text x="1570" y="1000" text-anchor="start" opacity="1" class=""><tspan x="1570" dy="0" fill="#dc2626" font-weight="900" font-size="22">6399 圣域</tspan></text>
+  
+</svg>

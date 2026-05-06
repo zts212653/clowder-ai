@@ -106,6 +106,7 @@ describe('CatOverviewTab', () => {
         cats: CATS,
         onAddMember: () => {},
         onEditMember: () => {},
+        onToggleAvailability: () => {},
       }),
     );
     expect(html).toContain('Co-worker');
@@ -116,7 +117,7 @@ describe('CatOverviewTab', () => {
     expect(html).toContain('全部');
     expect(html).toContain('CLI（OAuth）');
     expect(html).toContain('CLI（配置）');
-    expect(html).toContain('未启用');
+    expect(html).toContain('已停用');
     expect(html.indexOf('+ 添加成员')).toBeLessThan(html.indexOf('布偶猫 · 宪宪'));
     expect(html).toContain('布偶猫 · 宪宪');
     expect(html).toContain('缅因猫 · 砚砚');
@@ -124,6 +125,8 @@ describe('CatOverviewTab', () => {
     expect(html).toContain('CLI（OAuth）账号');
     expect(html).toContain('CLI（配置） · sponsor1');
     expect(html).toContain('已启用');
+    expect(html).toContain('停用成员');
+    expect(html).toContain('启用成员');
     expect(html).toContain('@布偶猫');
     expect(html).toContain('只能编辑，不能新增或删除');
     expect(html).toContain('点击卡片进入成员配置');

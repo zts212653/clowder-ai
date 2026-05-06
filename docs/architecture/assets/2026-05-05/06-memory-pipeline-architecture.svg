@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1860" viewBox="0 0 2400 1860">
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#8a6f45" flood-opacity="0.14"/>
+    </filter>
+    <filter id="soft">
+      <feTurbulence type="fractalNoise" baseFrequency="0.025" numOctaves="2" seed="12" result="noise"/>
+      <feColorMatrix in="noise" type="saturate" values="0"/>
+      <feBlend in="SourceGraphic" mode="multiply"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 z" fill="#344054"/>
+    </marker>
+    <marker id="arrowRed" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 z" fill="#dc2626"/>
+    </marker>
+    <style><![CDATA[
+      text { font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Arial Unicode MS", sans-serif; letter-spacing: 0; }
+      .title { font-weight: 800; fill: #263238; }
+      .subtitle { fill: #667085; }
+      .label { font-weight: 700; fill: #263238; }
+      .small { fill: #667085; }
+      .mono { font-family: "SFMono-Regular", "Menlo", "Consolas", monospace; }
+    ]]></style>
+  </defs>
+  <rect width="100%" height="100%" fill="#fffaf0"/>
+  <path d="M0,70 C420,10 760,95 1120,42 C1440,-4 1660,42 2100,16 L2100,0 L0,0 Z" fill="#f8efe0" opacity="0.8"/>
+
+
+  <text x="1200" y="70" text-anchor="middle" opacity="1" class="title"><tspan x="1200" dy="0" fill="#263238" font-weight="850" font-size="48">记忆系统管线架构 2026-05：从项目索引到图书馆联邦</tspan></text>
+  <text x="1200" y="112" text-anchor="middle" opacity="1" class=""><tspan x="1200" dy="0" fill="#667085" font-weight="600" font-size="24">记忆不是 RAG API，而是 truth source → scanner/gate → compiled index → resolver → recall → lifecycle governance</tspan></text>
+
+
+
+    <rect x="95" y="170" width="1560" height="212" rx="30" fill="#16a34a12" stroke="#16a34a" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+
+
+    <circle cx="165" cy="276" r="42" fill="white" stroke="#16a34a" stroke-width="4"/>
+    <text x="165" y="286" text-anchor="middle" font-size="24" font-weight="900" fill="#16a34a">TS</text>
+    <rect x="233" y="192" width="520" height="44" rx="22" fill="#16a34a22" stroke="#16a34a" stroke-width="2"/>
+  <text x="493" y="222.5" text-anchor="middle" font-size="25" font-weight="700" fill="#16a34a">1. Truth Sources 真相源</text>
+    <text x="243" y="264" text-anchor="start" opacity="1" class=""><tspan x="243" dy="0" fill="#263238" font-weight="850" font-size="25">所有知识先有可追溯来源，索引只是编译产物</tspan></text>
+    <text x="243" y="306" text-anchor="start" opacity="1" class=""><tspan x="243" dy="0" fill="#263238" font-weight="700" font-size="22">project docs / ADR / lessons / discussions / markers</tspan><tspan x="243" dy="26.84" fill="#263238" font-weight="700" font-size="22">global methods / shared rules / skills</tspan><tspan x="243" dy="26.84" fill="#263238" font-weight="700" font-size="22">external collections：F152 外部项目、lexander、domain notes</tspan></text>
+
+
+
+    <rect x="95" y="410" width="1560" height="212" rx="30" fill="#f9731612" stroke="#f97316" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+
+
+    <circle cx="165" cy="516" r="42" fill="white" stroke="#f97316" stroke-width="4"/>
+    <text x="165" y="526" text-anchor="middle" font-size="24" font-weight="900" fill="#f97316">SCAN</text>
+    <rect x="233" y="432" width="520" height="44" rx="22" fill="#f9731622" stroke="#f97316" stroke-width="2"/>
+  <text x="493" y="462.5" text-anchor="middle" font-size="25" font-weight="700" fill="#f97316">2. Scanner + Safety Gates</text>
+    <text x="243" y="504" text-anchor="start" opacity="1" class=""><tspan x="243" dy="0" fill="#263238" font-weight="850" font-size="25">先判断能不能入库，再 chunk / embed</tspan></text>
+    <text x="243" y="546" text-anchor="start" opacity="1" class=""><tspan x="243" dy="0" fill="#263238" font-weight="700" font-size="22">CatCafeScanner / GenericRepoScanner / StructuredScanner</tspan><tspan x="243" dy="26.84" fill="#263238" font-weight="700" font-size="22">SecretScanner before chunk/embed；prompt boundary：外部 AGENTS.md 只是 evidence data</tspan><tspan x="243" dy="26.84" fill="#263238" font-weight="700" font-size="22">provenance.tier：authoritative / derived / soft_clue</tspan></text>
+
+
+
+    <rect x="95" y="650" width="1560" height="212" rx="30" fill="#2563eb12" stroke="#2563eb" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+
+
+    <circle cx="165" cy="756" r="42" fill="white" stroke="#2563eb" stroke-width="4"/>
+    <text x="165" y="766" text-anchor="middle" font-size="24" font-weight="900" fill="#2563eb">IDX</text>
+    <rect x="233" y="672" width="520" height="44" rx="22" fill="#2563eb22" stroke="#2563eb" stroke-width="2"/>
+  <text x="493" y="702.5" text-anchor="middle" font-size="25" font-weight="700" fill="#2563eb">3. Compiled Indexes 编译层</text>
+    <text x="243" y="744" text-anchor="start" opacity="1" class=""><tspan x="243" dy="0" fill="#263238" font-weight="850" font-size="25">每个域有自己的索引，坏了可从 truth source 重建</tspan></text>
+    <text x="243" y="786" text-anchor="start" opacity="1" class=""><tspan x="243" dy="0" fill="#263238" font-weight="700" font-size="22">evidence.sqlite（project:cat-cafe） · global_knowledge.sqlite（global:methods）</tspan><tspan x="243" dy="26.84" fill="#263238" font-weight="700" font-size="22">library/{collectionId}/index.sqlite（F186 多域 Collection）</tspan><tspan x="243" dy="26.84" fill="#263238" font-weight="700" font-size="22">LibraryCatalog：只存 metadata / policy / route，不存正文</tspan></text>
+
+
+
+    <rect x="95" y="890" width="1560" height="212" rx="30" fill="#7c3aed12" stroke="#7c3aed" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+
+
+    <circle cx="165" cy="996" r="42" fill="white" stroke="#7c3aed" stroke-width="4"/>
+    <text x="165" y="1006" text-anchor="middle" font-size="24" font-weight="900" fill="#7c3aed">Q</text>
+    <rect x="233" y="912" width="520" height="44" rx="22" fill="#7c3aed22" stroke="#7c3aed" stroke-width="2"/>
+  <text x="493" y="942.5" text-anchor="middle" font-size="25" font-weight="700" fill="#7c3aed">4. LibraryResolver / KnowledgeResolver 查询层</text>
+    <text x="243" y="984" text-anchor="start" opacity="1" class=""><tspan x="243" dy="0" fill="#263238" font-weight="850" font-size="25">联邦 fan-out + RRF，把多域结果分组返回</tspan></text>
+    <text x="243" y="1026" text-anchor="start" opacity="1" class=""><tspan x="243" dy="0" fill="#263238" font-weight="700" font-size="22">lexical：BM25 / Feature ID / 精确术语；semantic：vector / 跨语言</tspan><tspan x="243" dy="26.84" fill="#263238" font-weight="700" font-size="22">hybrid：BM25 + vector + RRF（日常默认）</tspan><tspan x="243" dy="26.84" fill="#263238" font-weight="700" font-size="22">route：scope(docs/threads/sessions) + dimension + collections</tspan></text>
+
+
+
+    <rect x="95" y="1130" width="1560" height="212" rx="30" fill="#0f766e12" stroke="#0f766e" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+
+
+    <circle cx="165" cy="1236" r="42" fill="white" stroke="#0f766e" stroke-width="4"/>
+    <text x="165" y="1246" text-anchor="middle" font-size="24" font-weight="900" fill="#0f766e">RC</text>
+    <rect x="233" y="1152" width="520" height="44" rx="22" fill="#0f766e22" stroke="#0f766e" stroke-width="2"/>
+  <text x="493" y="1182.5" text-anchor="middle" font-size="25" font-weight="700" fill="#0f766e">5. Recall Surfaces 给猫用的面</text>
+    <text x="243" y="1224" text-anchor="start" opacity="1" class=""><tspan x="243" dy="0" fill="#263238" font-weight="850" font-size="25">猫开工前不是猜，而是从共享记忆接住上下文</tspan></text>
+    <text x="243" y="1266" text-anchor="start" opacity="1" class=""><tspan x="243" dy="0" fill="#263238" font-weight="700" font-size="22">SessionBootstrap：窄口上下文 + task snapshot + recall instructions</tspan><tspan x="243" dy="26.84" fill="#263238" font-weight="700" font-size="22">search_evidence：主动检索；raw drill-down：thread/session/event 原文追溯</tspan><tspan x="243" dy="26.84" fill="#263238" font-weight="700" font-size="22">Memory Lens / Typed Graph：跨 collection anchor 关系可视</tspan></text>
+
+
+
+    <rect x="95" y="1370" width="1560" height="212" rx="30" fill="#dc262612" stroke="#dc2626" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+
+
+    <circle cx="165" cy="1476" r="42" fill="white" stroke="#dc2626" stroke-width="4"/>
+    <text x="165" y="1486" text-anchor="middle" font-size="24" font-weight="900" fill="#dc2626">LC</text>
+    <rect x="233" y="1392" width="520" height="44" rx="22" fill="#dc262622" stroke="#dc2626" stroke-width="2"/>
+  <text x="493" y="1422.5" text-anchor="middle" font-size="25" font-weight="700" fill="#dc2626">6. Lifecycle Governance 生命周期治理</text>
+    <text x="243" y="1464" text-anchor="start" opacity="1" class=""><tspan x="243" dy="0" fill="#263238" font-weight="850" font-size="25">知识会被审核、证明、过期检测和重新索引</tspan></text>
+    <text x="243" y="1506" text-anchor="start" opacity="1" class=""><tspan x="243" dy="0" fill="#263238" font-weight="700" font-size="22">Knowledge Feed：自动提取候选 → owner review → materialize</tspan><tspan x="243" dy="26.84" fill="#263238" font-weight="700" font-size="22">F163 四维证明链：authority / activation / criticality / verify_date</tspan><tspan x="243" dy="26.84" fill="#263238" font-weight="700" font-size="22">stale detection / contradiction flagging / entropy reduction → reindex</tspan></text>
+
+
+  <line x1="875" y1="398" x2="875" y2="398" stroke="#344054" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/><line x1="875" y1="638" x2="875" y2="638" stroke="#344054" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/><line x1="875" y1="878" x2="875" y2="878" stroke="#344054" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/><line x1="875" y1="1118" x2="875" y2="1118" stroke="#344054" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/><line x1="875" y1="1358" x2="875" y2="1358" stroke="#344054" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/>
+  <text x="907" y="440" text-anchor="start" opacity="1" class=""><tspan x="907" dy="0" fill="#667085" font-weight="800" font-size="18">scan / bind dry-run / hash</tspan></text><text x="907" y="680" text-anchor="start" opacity="1" class=""><tspan x="907" dy="0" fill="#667085" font-weight="800" font-size="18">chunk / embed / rebuild</tspan></text><text x="907" y="920" text-anchor="start" opacity="1" class=""><tspan x="907" dy="0" fill="#667085" font-weight="800" font-size="18">fan-out / timeout / RRF</tspan></text><text x="907" y="1160" text-anchor="start" opacity="1" class=""><tspan x="907" dy="0" fill="#667085" font-weight="800" font-size="18">recall / drill-down / bootstrap</tspan></text><text x="907" y="1400" text-anchor="start" opacity="1" class=""><tspan x="907" dy="0" fill="#667085" font-weight="800" font-size="18">feedback / marker / usage signal</tspan></text>
+
+
+    <rect x="1715" y="210" width="600" height="1330" rx="34" fill="#fff7ed" stroke="#f97316" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    <rect x="1739" y="188" width="168" height="44" rx="22" fill="#f97316" opacity="0.96"/><text x="1757" y="218" font-size="25" font-weight="800" fill="white">右侧治理旁路</text>
+
+  <text x="2015" y="290" text-anchor="middle" opacity="1" class=""><tspan x="2015" dy="0" fill="#f97316" font-weight="900" font-size="32">为什么它不只是 RAG？</tspan></text>
+  <text x="1788" y="370" text-anchor="start" opacity="1" class=""><tspan x="1788" dy="0" fill="#263238" font-weight="760" font-size="24">1. 安全先于索引</tspan><tspan x="1788" dy="29.759999999999998" fill="#263238" font-weight="760" font-size="24">   Secret gate 在 chunk/embed 前执行</tspan><tspan x="1788" dy="29.759999999999998" fill="#263238" font-weight="760" font-size="24"></tspan><tspan x="1788" dy="29.759999999999998" fill="#263238" font-weight="760" font-size="24">2. 记忆是数据，不是指令</tspan><tspan x="1788" dy="29.759999999999998" fill="#263238" font-weight="760" font-size="24">   外部 prompt-like 文件不进 system prompt</tspan><tspan x="1788" dy="29.759999999999998" fill="#263238" font-weight="760" font-size="24"></tspan><tspan x="1788" dy="29.759999999999998" fill="#263238" font-weight="760" font-size="24">3. 联邦优先，不统一存储</tspan><tspan x="1788" dy="29.759999999999998" fill="#263238" font-weight="760" font-size="24">   Collection 独立治理、独立 review 策略</tspan><tspan x="1788" dy="29.759999999999998" fill="#263238" font-weight="760" font-size="24"></tspan><tspan x="1788" dy="29.759999999999998" fill="#263238" font-weight="760" font-size="24">4. 搜索结果带权威语义</tspan><tspan x="1788" dy="29.759999999999998" fill="#263238" font-weight="760" font-size="24">   confidence / authority / reviewStatus</tspan><tspan x="1788" dy="29.759999999999998" fill="#263238" font-weight="760" font-size="24"></tspan><tspan x="1788" dy="29.759999999999998" fill="#263238" font-weight="760" font-size="24">5. 知识能证明自己仍成立</tspan><tspan x="1788" dy="29.759999999999998" fill="#263238" font-weight="760" font-size="24">   authority × activation × criticality × verify_date</tspan><tspan x="1788" dy="29.759999999999998" fill="#263238" font-weight="760" font-size="24"></tspan><tspan x="1788" dy="29.759999999999998" fill="#263238" font-weight="760" font-size="24">6. 人和猫都能浏览关系</tspan><tspan x="1788" dy="29.759999999999998" fill="#263238" font-weight="760" font-size="24">   Memory Lens / Typed Graph / Graph tab</tspan></text>
+
+    <rect x="1765" y="1318" width="500" height="150" rx="24" fill="white" stroke="#f97316" stroke-width="3" stroke-dasharray="" opacity="1" filter=""/>
+
+
+  <text x="2015" y="1362" text-anchor="middle" opacity="1" class=""><tspan x="2015" dy="0" fill="#f97316" font-weight="850" font-size="24">F102：本地 SQLite 记忆基座</tspan><tspan x="2015" dy="28.799999999999997" fill="#f97316" font-weight="850" font-size="24">F152：外部项目冷启动</tspan><tspan x="2015" dy="28.799999999999997" fill="#f97316" font-weight="850" font-size="24">F163：知识熵减证明链</tspan><tspan x="2015" dy="28.799999999999997" fill="#f97316" font-weight="850" font-size="24">F186：图书馆联邦</tspan></text>
+
+
+    <rect x="210" y="1640" width="1980" height="92" rx="26" fill="#fffbeb" stroke="#d97706" stroke-width="3" stroke-dasharray="" opacity="1" filter=""/>
+
+
+  <text x="1200" y="1698" text-anchor="middle" opacity="1" class=""><tspan x="1200" dy="0" fill="#92400e" font-weight="850" font-size="27">关键原则：索引是加速器，不是真相。真相源始终是 docs / collections 中人能读、能改、能 git 追溯的文件。</tspan></text>
+  <text x="2280" y="1810" text-anchor="end" opacity="1" class=""><tspan x="2280" dy="0" fill="#667085" font-weight="700" font-size="20">valid_as_of: 2026-05-06 · article v2 replacement for memory-architecture-illustrated-by-codex.png</tspan></text>
+
+</svg>

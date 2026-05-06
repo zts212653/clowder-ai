@@ -343,6 +343,90 @@ describe('TelegramAdapter', () => {
     });
   });
 
+  // K1: Telegram duplicate fix — placeholder chatId tracking + deleteMessage
+  describe('sendPlaceholder() and deleteMessage()', () => {
+    it('sendPlaceholder stores chatId mapping for later deletion', async () => {
+      const adapter = new TelegramAdapter('test-token', noopLog());
+      const sendCalls = [];
+      const deleteCalls = [];
+
+      adapter._injectBotApiSendMessage(async (chatId, _text) => {
+        sendCalls.push(chatId);
+        return { message_id: 42 };
+      });
+      adapter._injectBotApiDeleteMessage(async (chatId, msgId) => {
+        deleteCalls.push({ chatId, msgId });
+      });
+
+      const msgId = await adapter.sendPlaceholder('1001', '猫猫思考中…');
+      assert.equal(msgId, '42');
+      assert.deepEqual(sendCalls, [1001]);
+
+      await adapter.deleteMessage(msgId);
+      assert.equal(deleteCalls.length, 1);
+      assert.equal(deleteCalls[0].chatId, 1001);
+      assert.equal(deleteCalls[0].msgId, 42);
+    });
+
+    it('deleteMessage is no-op for unknown platformMessageId', async () => {
+      const adapter = new TelegramAdapter('test-token', noopLog());
+      const deleteCalls = [];
+      adapter._injectBotApiDeleteMessage(async (chatId, msgId) => {
+        deleteCalls.push({ chatId, msgId });
+      });
+
+      await assert.doesNotReject(() => adapter.deleteMessage('9999'));
+      assert.equal(deleteCalls.length, 0);
+    });
+
+    it('deleteMessage cleans up mapping after deletion (no double-delete)', async () => {
+      const adapter = new TelegramAdapter('test-token', noopLog());
+      const deleteCalls = [];
+
+      adapter._injectBotApiSendMessage(async (_chatId, _text) => ({ message_id: 77 }));
+      adapter._injectBotApiDeleteMessage(async (chatId, msgId) => {
+        deleteCalls.push({ chatId, msgId });
+      });
+
+      const msgId = await adapter.sendPlaceholder('2002', 'placeholder');
+      await adapter.deleteMessage(msgId);
+      await adapter.deleteMessage(msgId); // second call must be no-op
+
+      assert.equal(deleteCalls.length, 1, 'should only delete once');
+    });
+
+    it('deleteMessage uses explicit externalChatId over map when provided (multi-chat same message_id)', async () => {
+      // Telegram message_id is only unique within a single chat.
+      // When two chats produce the same message_id, the Map alone is unreliable.
+      // The caller (StreamingOutboundHook) must pass externalChatId explicitly.
+      const adapter = new TelegramAdapter('test-token', noopLog());
+      const deleteCalls = [];
+      let callCount = 0;
+
+      adapter._injectBotApiSendMessage(async (_chatId, _text) => {
+        callCount++;
+        return { message_id: 42 }; // both chats return same message_id
+      });
+      adapter._injectBotApiDeleteMessage(async (chatId, msgId) => {
+        deleteCalls.push({ chatId, msgId });
+      });
+
+      const msgId1 = await adapter.sendPlaceholder('1001', 'placeholder chat 1');
+      const msgId2 = await adapter.sendPlaceholder('2002', 'placeholder chat 2');
+      assert.equal(msgId1, '42');
+      assert.equal(msgId2, '42');
+
+      // Caller provides externalChatId explicitly — must delete from correct chat
+      await adapter.deleteMessage(msgId1, '1001');
+      assert.equal(deleteCalls.length, 1);
+      assert.equal(deleteCalls[0].chatId, 1001, 'must delete from chat 1001, not 2002');
+
+      await adapter.deleteMessage(msgId2, '2002');
+      assert.equal(deleteCalls.length, 2);
+      assert.equal(deleteCalls[1].chatId, 2002, 'must delete from chat 2002');
+    });
+  });
+
   // P1-2: textContent must not be discarded when both text and blocks present
   describe('sendRichMessage() text preservation', () => {
     it('includes textContent in HTML output alongside blocks', async () => {

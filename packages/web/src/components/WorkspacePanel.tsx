@@ -151,6 +151,10 @@ export function WorkspacePanel() {
     fetchSubtree,
     fetchWorktrees,
     revealInFinder,
+    pendingExternalSha,
+    setEditDirty,
+    applyExternalChange,
+    dismissExternalChange,
   } = useWorkspace();
 
   const setWorktreeId = useChatStore((s) => s.setWorkspaceWorktreeId);
@@ -606,6 +610,10 @@ export function WorkspacePanel() {
             onToggleHtmlPreview={() => setHtmlPreview((p) => !p)}
             onToggleJsxPreview={() => setJsxPreview((p) => !p)}
             onSave={handleSave}
+            onDirtyChange={setEditDirty}
+            pendingExternalSha={pendingExternalSha}
+            onApplyExternalChange={applyExternalChange}
+            onDismissExternalChange={dismissExternalChange}
             revealInFinder={revealInFinder}
           />
         </WorkspaceFocusShell>
@@ -1093,6 +1101,10 @@ export function WorkspacePanel() {
                           onToggleHtmlPreview={() => setHtmlPreview((p) => !p)}
                           onToggleJsxPreview={() => setJsxPreview((p) => !p)}
                           onSave={handleSave}
+                          onDirtyChange={setEditDirty}
+                          pendingExternalSha={pendingExternalSha}
+                          onApplyExternalChange={applyExternalChange}
+                          onDismissExternalChange={dismissExternalChange}
                           revealInFinder={revealInFinder}
                           onFocusMode={() => setFocusedPane('file')}
                         />

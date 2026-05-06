@@ -265,4 +265,77 @@ describe('Callback routes: agent-key auth path', () => {
     });
     assert.equal(res.statusCode, 200);
   });
+
+  // ---- F182 P1-1: agent_key path must use resolveCatTarget (not catRegistry.has) ----
+
+  test('F182 P1-1: agent-key post-message with disabled targetCat returns routing_warnings (soft degradation)', async () => {
+    const app = await createApp();
+    const { secret } = await issueKey();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-agent-key-secret': secret },
+      payload: { content: 'hello', threadId: ownedThreadId, targetCats: ['antigravity'] },
+    });
+
+    assert.equal(res.statusCode, 200, `expected soft-degradation 200, got ${res.statusCode}: ${res.body}`);
+    const body = JSON.parse(res.body);
+    assert.ok(Array.isArray(body.routing_warnings), 'must have routing_warnings array');
+    assert.equal(body.routing_warnings.length, 1, 'must have 1 routing warning for disabled cat');
+    assert.equal(body.routing_warnings[0].kind, 'cat_disabled', 'warning kind must be cat_disabled');
+    assert.equal(body.routing_warnings[0].catId, 'antigravity');
+  });
+
+  test('F182 P1-1: agent-key post-message drops disabled cat from persisted mentions', async () => {
+    const app = await createApp();
+    const { secret } = await issueKey();
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-agent-key-secret': secret },
+      payload: { content: 'hello', threadId: ownedThreadId, targetCats: ['antigravity'] },
+    });
+
+    const messages = await messageStore.getByThread(ownedThreadId);
+    const lastMsg = messages[messages.length - 1];
+    assert.ok(lastMsg, 'message must be persisted');
+    assert.ok(!lastMsg.mentions.includes('antigravity'), 'disabled cat must NOT be in persisted mentions');
+  });
+
+  test('F182 P1-1: agent-key post-message with disabled targetCat includes KD-7 message field', async () => {
+    const app = await createApp();
+    const { secret } = await issueKey();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-agent-key-secret': secret },
+      payload: { content: 'hello', threadId: ownedThreadId, targetCats: ['antigravity'] },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.ok(typeof body.message === 'string' && body.message.length > 0, 'must have KD-7 message field');
+  });
+
+  // F182 AC-C1 allExplicitFailed: agent_key path must match invocation path contract
+  test('F182 P1-1: agent-key post-message all-disabled targetCats returns isError:true + routed:[]', async () => {
+    const app = await createApp();
+    const { secret } = await issueKey();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-agent-key-secret': secret },
+      // 'hello' has no @mention so contentTargets=[] + antigravity is disabled → allExplicitFailed
+      payload: { content: 'hello', threadId: ownedThreadId, targetCats: ['antigravity'] },
+    });
+
+    assert.equal(res.statusCode, 200, `expected 200 soft-degradation, got ${res.statusCode}: ${res.body}`);
+    const body = JSON.parse(res.body);
+    assert.equal(body.isError, true, 'allExplicitFailed must set isError:true');
+    assert.deepEqual(body.routed, [], 'allExplicitFailed must return routed:[]');
+  });
 });

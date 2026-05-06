@@ -18,7 +18,7 @@
  * 虽然参数可选（兼容测试），但生产代码必须显式传入。
  */
 
-import type { CatId, MessageContent } from '@cat-cafe/shared';
+import type { CatId, CatRoutingError, MessageContent } from '@cat-cafe/shared';
 import { catRegistry, escapeRegExp } from '@cat-cafe/shared';
 import type { SessionStore } from '@cat-cafe/shared/utils';
 import { SpanStatusCode, trace } from '@opentelemetry/api';
@@ -50,6 +50,7 @@ import type { AgentRegistry } from '../registry/AgentRegistry.js';
 import type { PersistenceContext, RouteStrategyDeps } from '../routing/route-helpers.js';
 import { routeParallel } from '../routing/route-parallel.js';
 import { routeSerial } from '../routing/route-serial.js';
+import { resolveCatTarget } from './cat-target-resolver.js';
 
 const log = createModuleLogger('agent-router');
 const routeTracer = trace.getTracer('cat-cafe-api', '0.1.0');
@@ -179,6 +180,10 @@ export interface AgentRouterOptions {
   guideSessionStore?: import('../../../../guides/GuideSessionRepository.js').IGuideSessionStore;
   /** F155 B-6: Dismiss tracker for guide offer suppression */
   dismissTracker?: import('../../../../guides/GuideDismissTracker.js').IGuideDismissTracker;
+  /** F093: World context provider for world-building mode */
+  worldContextProvider?: import('../../../../world/WorldContextProvider.js').WorldContextProvider;
+  /** F093: World store for thread→world lookup */
+  worldStore?: import('../../../../world/interfaces.js').IWorldStore;
 }
 
 /**
@@ -225,6 +230,9 @@ export class AgentRouter {
   private guideSessionStore?: import('../../../../guides/GuideSessionRepository.js').IGuideSessionStore;
   /** F155 B-6 */
   private dismissTracker?: import('../../../../guides/GuideDismissTracker.js').IGuideDismissTracker;
+  /** F093 */
+  private worldContextProvider?: import('../../../../world/WorldContextProvider.js').WorldContextProvider;
+  private worldStore?: import('../../../../world/interfaces.js').IWorldStore;
   private speechMentionRe: RegExp;
 
   private rebuildRuntimeCaches(agentRegistry: AgentRegistry): void {
@@ -265,6 +273,8 @@ export class AgentRouter {
     this.toolUsageCounter = options.toolUsageCounter;
     this.guideSessionStore = options.guideSessionStore;
     this.dismissTracker = options.dismissTracker;
+    this.worldContextProvider = options.worldContextProvider;
+    this.worldStore = options.worldStore;
   }
 
   refreshFromRegistry(agentRegistry: AgentRegistry): void {
@@ -368,16 +378,9 @@ export class AgentRouter {
 
   /**
    * F32-b: Parse @mentions with longest-match-first + token boundary.
-   * Prevents `@opus-45` from also matching `@opus` via consumed interval exclusion.
-   *
-   * Algorithm:
-   * 1. Collect ALL patterns from ALL cats, sort by length descending (longest first)
-   * 2. For each pattern, find all occurrences in the message
-   * 3. Check token boundary (char after pattern must be whitespace/punctuation/EOF)
-   * 4. Check consumed intervals (skip if already matched by a longer pattern)
-   * 5. Deduplicate by catId, preserve first-occurrence ordering
+   * F182 KD-10: match-time resolver check (different patch from a2a-mentions pattern-build stage).
    */
-  private parseMentions(message: string): CatId[] {
+  private parseMentions(message: string): { mentions: CatId[]; routing_warnings: CatRoutingError[] } {
     const lowerMessage = this.normalizeSpeechMentions(message).toLowerCase();
 
     // 1. Collect all mentionPatterns → catId, sorted by length descending
@@ -394,6 +397,7 @@ export class AgentRouter {
     const consumed: Array<[number, number]> = []; // [start, end)
     const mentions: ParsedMention[] = [];
     const seenCats = new Set<string>();
+    const routing_warnings: CatRoutingError[] = [];
 
     for (const { pattern, catId } of allPatterns) {
       let searchFrom = 0;
@@ -402,38 +406,33 @@ export class AgentRouter {
         if (pos === -1) break;
 
         const end = pos + pattern.length;
-
-        // Token boundary: char after pattern must be whitespace/punctuation/EOF
         const charAfter = lowerMessage[end];
         const isEndBoundary = !charAfter || /[\s,.:;!?()[\]{}<>，。！？、：；（）【】《》「」『』〈〉]/.test(charAfter);
-
-        // Not in an already-consumed interval
         const isConsumed = consumed.some(([s, e]) => pos >= s && pos < e);
 
         if (isEndBoundary && !isConsumed) {
           consumed.push([pos, end]);
-          if (!isCatAvailable(catId as string)) {
-            searchFrom = pos + 1;
-            continue;
-          }
-          if (!seenCats.has(catId as string)) {
+          // F182 KD-10: resolver check at match-time (not isCatAvailable)
+          const resolved = resolveCatTarget(catId as string);
+          if ('error' in resolved) {
+            if (!seenCats.has(catId as string)) {
+              seenCats.add(catId as string);
+              routing_warnings.push(resolved.error);
+            }
+          } else if (!seenCats.has(catId as string)) {
             seenCats.add(catId as string);
             mentions.push({ catId, position: pos });
           } else {
-            // Shortest alias may appear earlier; update to earliest position
             const existing = mentions.find((m) => m.catId === catId);
-            if (existing && pos < existing.position) {
-              existing.position = pos;
-            }
+            if (existing && pos < existing.position) existing.position = pos;
           }
         }
         searchFrom = pos + 1;
       }
     }
 
-    // 5. Return ordered by first occurrence
     mentions.sort((a, b) => a.position - b.position);
-    return mentions.map((m) => m.catId);
+    return { mentions: mentions.map((m) => m.catId), routing_warnings };
   }
 
   /**
@@ -544,10 +543,14 @@ export class AgentRouter {
 
   /**
    * F078: Unified mention parser — group mentions first, then individual.
+   * F182: returns routing_warnings from individual parseMentions.
    */
-  private async parseAllMentions(message: string, threadId: string): Promise<CatId[]> {
+  private async parseAllMentions(
+    message: string,
+    threadId: string,
+  ): Promise<{ mentions: CatId[]; routing_warnings: CatRoutingError[] }> {
     const groupResult = await this.parseGroupMentions(message, threadId);
-    if (groupResult !== null) return groupResult;
+    if (groupResult !== null) return { mentions: groupResult, routing_warnings: [] };
     return this.parseMentions(message);
   }
 
@@ -557,7 +560,7 @@ export class AgentRouter {
    * Does NOT mutate thread participants.
    */
   private async peekTargets(message: string, threadId: string): Promise<CatId[]> {
-    const mentionedCats = await this.parseAllMentions(message, threadId);
+    const { mentions: mentionedCats } = await this.parseAllMentions(message, threadId);
     if (mentionedCats.length > 0) return mentionedCats;
 
     if (this.threadStore) {
@@ -609,7 +612,7 @@ export class AgentRouter {
 
   /** Resolve target cats and persist new mentions as thread participants */
   private async resolveTargets(message: string, threadId: string): Promise<CatId[]> {
-    const mentionedCats = await this.parseAllMentions(message, threadId);
+    const { mentions: mentionedCats } = await this.parseAllMentions(message, threadId);
 
     if (mentionedCats.length > 0) {
       if (this.threadStore) {
@@ -693,6 +696,8 @@ export class AgentRouter {
       ...(this.packStore ? { packStore: this.packStore } : {}),
       ...(this.evidenceStore ? { evidenceStore: this.evidenceStore } : {}),
       ...(this.toolUsageCounter ? { toolUsageCounter: this.toolUsageCounter } : {}),
+      ...(this.worldContextProvider ? { worldContextProvider: this.worldContextProvider } : {}),
+      ...(this.worldStore ? { worldStore: this.worldStore } : {}),
     };
   }
 
@@ -707,7 +712,7 @@ export class AgentRouter {
     options?: { persist?: boolean },
   ): Promise<{ targetCats: CatId[]; intent: IntentResult; hasMentions: boolean }> {
     const resolvedThreadId = threadId ?? DEFAULT_THREAD_ID;
-    const hasMentions = (await this.parseAllMentions(message, resolvedThreadId)).length > 0;
+    const hasMentions = (await this.parseAllMentions(message, resolvedThreadId)).mentions.length > 0;
     const targetCats = options?.persist
       ? await this.resolveTargets(message, resolvedThreadId)
       : await this.peekTargets(message, resolvedThreadId);

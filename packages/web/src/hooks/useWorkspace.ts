@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
-import { apiFetch } from '@/utils/api-client';
+import { API_URL, apiFetch } from '@/utils/api-client';
 
 export interface WorktreeEntry {
   id: string;
@@ -172,6 +172,83 @@ export function useWorkspace() {
     else setFile(null);
   }, [openFilePath, fetchFile]);
 
+  // File-change watcher: auto-reload when file is modified externally
+  const [pendingExternalSha, setPendingExternalSha] = useState<string | null>(null);
+  const editDirtyRef = useRef(false);
+  const fileShaRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    fileShaRef.current = file?.sha256 ?? null;
+  }, [file?.sha256]);
+
+  const setEditDirty = useCallback(
+    (dirty: boolean) => {
+      editDirtyRef.current = dirty;
+      if (!dirty && pendingExternalSha) {
+        setPendingExternalSha(null);
+        if (openFilePath) fetchFile(openFilePath);
+      }
+    },
+    [pendingExternalSha, openFilePath, fetchFile],
+  );
+
+  const applyExternalChange = useCallback(() => {
+    setPendingExternalSha(null);
+    if (openFilePath) fetchFile(openFilePath);
+  }, [openFilePath, fetchFile]);
+
+  const dismissExternalChange = useCallback(() => {
+    setPendingExternalSha(null);
+  }, []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional reset on file switch
+  useEffect(() => {
+    setPendingExternalSha(null);
+  }, [openFilePath]);
+
+  useEffect(() => {
+    if (!worktreeId || !openFilePath) return;
+    let cancelled = false;
+    let cleanup: (() => void) | null = null;
+
+    import('socket.io-client').then(({ io }) => {
+      if (cancelled) return;
+      const apiUrl = new URL(API_URL);
+      const socket = io(`${apiUrl.protocol}//${apiUrl.host}`, {
+        transports: ['websocket'],
+        forceNew: true,
+      });
+
+      socket.on('connect', () => {
+        socket.emit('workspace:watch-file', {
+          worktreeId,
+          path: openFilePath,
+          sha256: fileShaRef.current,
+        });
+      });
+
+      socket.on('workspace:file-changed', (data: { worktreeId: string; path: string; sha256: string }) => {
+        if (data.path !== openFilePath || data.worktreeId !== worktreeId) return;
+        if (data.sha256 === fileShaRef.current) return;
+        if (editDirtyRef.current) {
+          setPendingExternalSha(data.sha256);
+        } else {
+          fetchFile(openFilePath);
+        }
+      });
+
+      cleanup = () => {
+        socket.emit('workspace:unwatch-file');
+        socket.disconnect();
+      };
+    });
+
+    return () => {
+      cancelled = true;
+      cleanup?.();
+    };
+  }, [worktreeId, openFilePath, fetchFile]);
+
   // Single-mode search helper (filename or content)
   const searchSingle = useCallback(
     async (query: string, type: 'content' | 'filename'): Promise<SearchResult[]> => {
@@ -248,6 +325,7 @@ export function useWorkspace() {
     loading,
     searchLoading,
     error,
+    pendingExternalSha,
     fetchWorktrees,
     fetchTree,
     fetchSubtree,
@@ -255,5 +333,8 @@ export function useWorkspace() {
     search,
     setSearchResults,
     revealInFinder,
+    setEditDirty,
+    applyExternalChange,
+    dismissExternalChange,
   };
 }

@@ -1,6 +1,20 @@
 import { access, readdir, readFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 
+export interface EvidenceFreshness {
+  status: 'fresh' | 'stale' | 'unknown';
+  checkedAt: string;
+  headCommit?: string;
+  watermarkCommit?: string;
+  reason?: 'commit_match' | 'commit_mismatch' | 'watermark_missing' | 'head_unavailable';
+}
+
+export interface EvidenceReimportTrigger {
+  status: 'triggered' | 'cooldown' | 'skipped' | 'disabled' | 'failed';
+  reason?: string;
+  nextAllowedAt?: string;
+}
+
 export type EvidenceSourceType =
   | 'decision'
   | 'phase'

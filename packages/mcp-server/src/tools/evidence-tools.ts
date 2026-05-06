@@ -45,6 +45,18 @@ export const searchEvidenceInputSchema = {
     .describe(
       'Filter results to a specific thread. Only returns evidence from that thread digest. For reading raw messages, use get_thread_context instead.',
     ),
+  dimension: z
+    .enum(['project', 'global', 'library', 'collection', 'all'])
+    .optional()
+    .describe(
+      'Knowledge dimension: project (default, local docs), library (all registered collections incl. external), collection (specific collections via collections param), all (DEPRECATED legacy alias for project+global — use library or collection for multi-collection search)',
+    ),
+  collections: z
+    .string()
+    .optional()
+    .describe(
+      'Comma-separated collection IDs to search (e.g. "world:lexander,global:methods"). Only effective with dimension=collection',
+    ),
 };
 
 export async function handleSearchEvidence(input: {
@@ -57,6 +69,8 @@ export async function handleSearchEvidence(input: {
   dateTo?: string | undefined;
   contextWindow?: number | undefined;
   threadId?: string | undefined;
+  dimension?: string | undefined;
+  collections?: string | undefined;
 }): Promise<ToolResult> {
   const params = new URLSearchParams({ q: input.query });
   if (input.limit != null) params.set('limit', String(input.limit));
@@ -67,6 +81,8 @@ export async function handleSearchEvidence(input: {
   if (input.dateTo) params.set('dateTo', input.dateTo);
   if (input.contextWindow != null) params.set('contextWindow', String(input.contextWindow));
   if (input.threadId) params.set('threadId', input.threadId);
+  if (input.dimension) params.set('dimension', input.dimension);
+  if (input.collections) params.set('collections', input.collections);
 
   const url = `${API_URL}/api/evidence/search?${params.toString()}`;
   const queryLabel = JSON.stringify(input.query);

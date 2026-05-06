@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
+import { dirname, resolve } from 'node:path';
 import { describe, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const TEMPLATE_PATH = resolve(__dirname, '..', '..', '..', 'cat-template.json');
 
 describe('Antigravity provider registration', () => {
   test('cat-config-loader accepts antigravity provider', async () => {
     const { loadCatConfig } = await import('../dist/config/cat-config-loader.js');
-    const config = loadCatConfig();
+    const config = loadCatConfig(TEMPLATE_PATH);
     const bengal = config.breeds.find((b) => b.id === 'bengal');
     assert.ok(bengal, 'bengal breed should exist in config');
     assert.ok(bengal.variants.length > 0, 'bengal should have variants');

@@ -347,7 +347,7 @@ describe('SqliteEvidenceStore', () => {
     const related = await store.getRelated('F042');
     assert.equal(related.length, 1);
     assert.equal(related[0].anchor, 'F100');
-    assert.equal(related[0].relation, 'related');
+    assert.equal(related[0].relation, 'related_to');
 
     // Reverse lookup works too
     const reverse = await store.getRelated('F100');

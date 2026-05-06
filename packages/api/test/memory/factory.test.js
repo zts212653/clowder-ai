@@ -49,6 +49,24 @@ describe('createMemoryServices', () => {
     assert.equal(services.vectorStore, undefined);
   });
 
+  it('creates LibraryCatalog with 2 built-in collections (AC-A3)', async () => {
+    const { createMemoryServices } = await import('../../dist/domains/memory/factory.js');
+
+    const services = await createMemoryServices({
+      type: 'sqlite',
+      sqlitePath: ':memory:',
+      docsRoot: '/tmp/f186-test-docs',
+    });
+
+    assert.ok(services.catalog, 'catalog should exist');
+    const collections = services.catalog.list();
+    assert.ok(collections.length >= 1, 'at least project collection');
+    const project = collections.find((c) => c.kind === 'project');
+    assert.ok(project, 'project collection registered');
+    assert.equal(project.sensitivity, 'internal');
+    assert.equal(project.root, '/tmp/f186-test-docs');
+  });
+
   it('embedMode=on creates embedding service (HTTP client, fail-open)', async () => {
     const { createMemoryServices } = await import('../../dist/domains/memory/factory.js');
 

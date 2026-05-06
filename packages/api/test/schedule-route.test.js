@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Database from 'better-sqlite3';
 import Fastify from 'fastify';
+import './helpers/setup-cat-registry.js';
 
 describe('Schedule Routes', () => {
   let app, db, ledger, runner, taskStore;
@@ -570,6 +571,23 @@ describe('Schedule Routes', () => {
       assert.equal(triggerCalls.length, 1);
       assert.equal(triggerCalls[0][1], 'opus', 'should fall back to opus when no targetCatId');
       runnerNoCat.stop();
+    });
+
+    it('cloud-P1: stores canonical catId when @mention alias format is sent', async () => {
+      const createRes = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks',
+        headers: { 'x-cat-cafe-user': 'u1' },
+        payload: {
+          templateId: 'reminder',
+          trigger: { type: 'interval', ms: 60000 },
+          params: { message: 'alias-canonicalize-test', targetCatId: '@codex' },
+        },
+      });
+      assert.equal(createRes.statusCode, 200, `expected 200, got ${createRes.statusCode}: ${createRes.body}`);
+      const stored = store.getAll().find((d) => d.params?.message === 'alias-canonicalize-test');
+      assert.ok(stored, 'task should be persisted');
+      assert.equal(stored.params.targetCatId, 'codex', 'must store canonical catId not @mention alias');
     });
   });
 

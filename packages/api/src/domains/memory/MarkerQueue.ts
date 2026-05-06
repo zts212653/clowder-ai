@@ -26,6 +26,11 @@ export class MarkerQueue implements IMarkerQueue {
       createdAt: new Date().toISOString(),
     };
     if (input.targetKind) marker.targetKind = input.targetKind;
+    if (input.sourceCollectionId) marker.sourceCollectionId = input.sourceCollectionId;
+    if (input.sourceSensitivity) marker.sourceSensitivity = input.sourceSensitivity;
+    if (input.targetCollectionId) marker.targetCollectionId = input.targetCollectionId;
+    if (input.promoteReviewStatus) marker.promoteReviewStatus = input.promoteReviewStatus;
+    if (input.secretScanFingerprint) marker.secretScanFingerprint = input.secretScanFingerprint;
 
     this.writeYaml(marker);
     return marker;
@@ -43,7 +48,7 @@ export class MarkerQueue implements IMarkerQueue {
     });
   }
 
-  async transition(id: string, to: MarkerStatus): Promise<void> {
+  async transition(id: string, to: MarkerStatus, patch?: Partial<Marker>): Promise<void> {
     validateMarkerId(id);
     const filePath = join(this.markersDir, `${id}.yaml`);
     if (!existsSync(filePath)) {
@@ -57,6 +62,11 @@ export class MarkerQueue implements IMarkerQueue {
     // to prevent path traversal via tampered YAML content
     marker.id = id;
     marker.status = to;
+    if (patch?.targetCollectionId) marker.targetCollectionId = patch.targetCollectionId;
+    if (patch?.sourceCollectionId) marker.sourceCollectionId = patch.sourceCollectionId;
+    if (patch?.sourceSensitivity) marker.sourceSensitivity = patch.sourceSensitivity;
+    if (patch?.promoteReviewStatus) marker.promoteReviewStatus = patch.promoteReviewStatus;
+    if (patch?.secretScanFingerprint) marker.secretScanFingerprint = patch.secretScanFingerprint;
     this.writeYaml(marker);
   }
 
@@ -95,6 +105,11 @@ export class MarkerQueue implements IMarkerQueue {
       `created_at: ${marker.createdAt}`,
     ];
     if (marker.targetKind) lines.push(`target_kind: ${marker.targetKind}`);
+    if (marker.sourceCollectionId) lines.push(`source_collection_id: ${marker.sourceCollectionId}`);
+    if (marker.sourceSensitivity) lines.push(`source_sensitivity: ${marker.sourceSensitivity}`);
+    if (marker.targetCollectionId) lines.push(`target_collection_id: ${marker.targetCollectionId}`);
+    if (marker.promoteReviewStatus) lines.push(`promote_review_status: ${marker.promoteReviewStatus}`);
+    if (marker.secretScanFingerprint) lines.push(`secret_scan_fingerprint: ${marker.secretScanFingerprint}`);
     lines.push(`content: |`);
     for (const line of marker.content.split('\n')) {
       lines.push(`  ${line}`);
@@ -145,8 +160,14 @@ export class MarkerQueue implements IMarkerQueue {
       status: status as MarkerStatus,
       createdAt,
     };
-    const tk = fields.target_kind;
-    if (tk) marker.targetKind = tk as NonNullable<Marker['targetKind']>;
+    if (fields.target_kind) marker.targetKind = fields.target_kind as NonNullable<Marker['targetKind']>;
+    if (fields.source_collection_id) marker.sourceCollectionId = fields.source_collection_id;
+    if (fields.source_sensitivity)
+      marker.sourceSensitivity = fields.source_sensitivity as NonNullable<Marker['sourceSensitivity']>;
+    if (fields.target_collection_id) marker.targetCollectionId = fields.target_collection_id;
+    if (fields.promote_review_status)
+      marker.promoteReviewStatus = fields.promote_review_status as NonNullable<Marker['promoteReviewStatus']>;
+    if (fields.secret_scan_fingerprint) marker.secretScanFingerprint = fields.secret_scan_fingerprint;
     return marker;
   }
 }

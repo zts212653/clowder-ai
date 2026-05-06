@@ -31,6 +31,10 @@ interface WorkspaceFileViewerProps {
   onToggleHtmlPreview: () => void;
   onToggleJsxPreview: () => void;
   onSave: (content: string) => Promise<void>;
+  onDirtyChange?: (dirty: boolean) => void;
+  pendingExternalSha?: string | null;
+  onApplyExternalChange?: () => void;
+  onDismissExternalChange?: () => void;
   revealInFinder: (path: string) => void;
   onFocusMode?: () => void;
   focusDisabled?: boolean;
@@ -74,6 +78,10 @@ export function WorkspaceFileViewer({
   onToggleHtmlPreview,
   onToggleJsxPreview,
   onSave,
+  onDirtyChange,
+  pendingExternalSha,
+  onApplyExternalChange,
+  onDismissExternalChange,
   revealInFinder,
   onFocusMode,
   focusDisabled,
@@ -258,6 +266,20 @@ export function WorkspaceFileViewer({
         <div className="px-3 py-1.5 text-[10px] text-red-400 bg-red-900/20 border-b border-red-900/30">{saveError}</div>
       )}
 
+      {pendingExternalSha && (
+        <div className="px-3 py-1.5 text-[10px] text-amber-300 bg-amber-900/20 border-b border-amber-900/30 flex items-center justify-between">
+          <span>文件已被外部修改</span>
+          <span className="flex gap-2">
+            <button type="button" onClick={onApplyExternalChange} className="underline hover:text-amber-200">
+              重新加载
+            </button>
+            <button type="button" onClick={onDismissExternalChange} className="underline hover:text-amber-200">
+              忽略
+            </button>
+          </span>
+        </div>
+      )}
+
       {/* File content */}
       <FileContentRenderer
         file={file}
@@ -276,6 +298,7 @@ export function WorkspaceFileViewer({
         mdHasSelection={mdHasSelection}
         onMdAddToChat={handleMdAddToChat}
         onSave={onSave}
+        onDirtyChange={onDirtyChange}
         rawUrl={rawUrl}
         revealInFinder={revealInFinder}
       />

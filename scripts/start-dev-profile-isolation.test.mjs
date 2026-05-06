@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
-import { buildWindowsStatus } from './lib/platform-status.mjs';
+import { buildWindowsStatus, resolveWindowsStatusPorts } from './lib/platform-status.mjs';
 
 const ROOT = resolve(process.cwd());
 const SYNC_SCRIPT = resolve(ROOT, 'scripts/sync-to-opensource.sh');
@@ -247,23 +247,24 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
   it('Windows status succeeds only when required API and web PID files are running', () => {
     const sandboxDir = mkdtempSync(join(tmpdir(), 'cc-windows-status-'));
     try {
+      const { apiPort, webPort } = resolveWindowsStatusPorts({ projectRoot: sandboxDir, env: {} });
       const runDir = join(sandboxDir, '.cat-cafe', 'run', 'windows');
       mkdirSync(runDir, { recursive: true });
-      writeFileSync(join(runDir, 'api-3004.pid'), '41\n');
-      writeFileSync(join(runDir, 'web-3003.pid'), '42\n');
+      writeFileSync(join(runDir, `api-${apiPort}.pid`), '41\n');
+      writeFileSync(join(runDir, `web-${webPort}.pid`), '42\n');
       writeFileSync(join(runDir, 'embed-9878.pid'), '999\n');
 
       const result = buildWindowsStatus({
         projectRoot: sandboxDir,
         env: {},
-        pidIsRunning: (pid) => pid === 41 || pid === 42,
+        pidIsRunning: (pid) => new Set([41, 42]).has(pid),
       });
 
       assert.equal(result.exitCode, 0);
       assert.deepEqual(result.lines, [
         'Cat Cafe Windows status',
-        '  api-3004: running (PID: 41)',
-        '  web-3003: running (PID: 42)',
+        `  api-${apiPort}: running (PID: 41)`,
+        `  web-${webPort}: running (PID: 42)`,
       ]);
     } finally {
       rmSync(sandboxDir, { recursive: true, force: true });
@@ -273,29 +274,30 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
   it('Windows status fails when optional or stale PID files exist but a required service is missing', () => {
     const sandboxDir = mkdtempSync(join(tmpdir(), 'cc-windows-status-'));
     try {
+      const { apiPort, webPort } = resolveWindowsStatusPorts({ projectRoot: sandboxDir, env: {} });
       const runDir = join(sandboxDir, '.cat-cafe', 'run', 'windows');
       mkdirSync(runDir, { recursive: true });
-      writeFileSync(join(runDir, 'api-3004.pid'), '41\n');
+      writeFileSync(join(runDir, `api-${apiPort}.pid`), '41\n');
       writeFileSync(join(runDir, 'embed-9878.pid'), '999\n');
 
       const result = buildWindowsStatus({
         projectRoot: sandboxDir,
         env: {},
-        pidIsRunning: (pid) => pid === 41 || pid === 999,
+        pidIsRunning: (pid) => new Set([41, 999]).has(pid),
       });
 
       assert.equal(result.exitCode, 1);
       assert.deepEqual(result.lines, [
         'Cat Cafe Windows status',
-        '  api-3004: running (PID: 41)',
-        '  web-3003: not running (missing PID file)',
+        `  api-${apiPort}: running (PID: 41)`,
+        `  web-${webPort}: not running (missing PID file)`,
       ]);
     } finally {
       rmSync(sandboxDir, { recursive: true, force: true });
     }
   });
 
-  it('Windows status reads active ports from .env before falling back to open-source defaults', () => {
+  it('Windows status reads active ports from .env before falling back to home defaults', () => {
     const sandboxDir = mkdtempSync(join(tmpdir(), 'cc-windows-status-'));
     try {
       writeFileSync(join(sandboxDir, '.env'), 'API_SERVER_PORT=3112\nFRONTEND_PORT=3111\n');
@@ -307,7 +309,7 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
       const result = buildWindowsStatus({
         projectRoot: sandboxDir,
         env: {},
-        pidIsRunning: (pid) => pid === 51 || pid === 52,
+        pidIsRunning: (pid) => new Set([51, 52]).has(pid),
       });
 
       assert.equal(result.exitCode, 0);

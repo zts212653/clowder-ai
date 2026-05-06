@@ -359,6 +359,58 @@ describe('CiCdRouter', () => {
       assert.ok(result.reason.includes('disabled'));
       assert.strictEqual(messageMock.messages.length, 0);
     });
+
+    it('R2-P1-A: automation off calls notifySkip with threadId and reason', async () => {
+      const skipCalls = /** @type {Array<{threadId: string, reason: string}>} */ ([]);
+      const router = new CiCdRouter({
+        taskStore: prTracking.taskStore,
+        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
+        log: noopLog(),
+        notifySkip: (threadId, reason) => {
+          skipCalls.push({ threadId, reason });
+        },
+      });
+      const task = prTracking.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
+      prTracking.taskStore.patchAutomationState(task.id, { ci: { enabled: false } });
+
+      await router.route(makePollResult());
+
+      assert.strictEqual(skipCalls.length, 1, 'notifySkip must be called for automation off');
+      assert.strictEqual(skipCalls[0].threadId, 'thread-abc');
+      assert.strictEqual(skipCalls[0].reason, 'ci_automation_disabled');
+    });
+
+    it('cloud-P2: automation off notifySkip fires only once across multiple polls', async () => {
+      const skipCalls = /** @type {Array<{threadId: string, reason: string}>} */ ([]);
+      const router = new CiCdRouter({
+        taskStore: prTracking.taskStore,
+        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
+        log: noopLog(),
+        notifySkip: (threadId, reason) => {
+          skipCalls.push({ threadId, reason });
+        },
+      });
+      const task = prTracking.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
+      prTracking.taskStore.patchAutomationState(task.id, { ci: { enabled: false } });
+
+      await router.route(makePollResult());
+      await router.route(makePollResult());
+      await router.route(makePollResult());
+
+      assert.strictEqual(skipCalls.length, 1, 'notifySkip must fire only once, not on every poll cycle');
+    });
   });
 
   // ── Socket broadcast ────────────────────────────────────────────
