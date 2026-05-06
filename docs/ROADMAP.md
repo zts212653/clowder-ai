@@ -63,8 +63,5 @@ created: 2026-02-26
 | F185 | Desktop Installer Release Pipeline — Win NSIS + Mac DMG 自动附 release | spec | Ragdoll | community (v0.9.0 反馈) | [F185](features/F185-desktop-installer-release-pipeline.md) |
 | F180 | Agent CLI Hook Health and Sync — user-level hook 检测 + 一键同步 | in-progress | Maine Coon/Maine Coon | community [#614](https://github.com/zts212653/clowder-ai/issues/614) | [F180](features/F180-agent-cli-hook-health.md) |
 | F181 | Reserved Feature Slot — 待补充需求锚点 | idea | 待定 | internal | [F181](features/F181-reserved-feature-slot.md) |
-| F182 | Cat Roster Lifecycle Toggle — 成员启停的全链路降级反馈 | spec | Ragdoll（Ragdoll/Opus 4.7） | internal | [F182](features/F182-cat-roster-lifecycle-toggle.md) |
-| F183 | Bubble Pipeline Architecture Consolidation — 消息气泡管线架构收敛（统一身份契约 + Single Writer + IDB invalidation + 序列号补偿） | in-progress | Ragdoll（Ragdoll/Opus 4.7）牵头 | internal | [F183](features/F183-bubble-pipeline-architecture-consolidation.md) |
-| F184 | ChatMessage Rendering Mount Investigation — F176 撤销后真 bug（DOM 缺失）独立排查 | spec | 待定 | internal | [F184](features/F184-chatmessage-rendering-mount-investigation.md) |
 | F186 | Service Manifest — ML 服务统一管理 | doing | 布偶猫/宪宪 | internal | [F186](features/F186-service-manifest.md) |
 | F187 | Thread Labels — 用户自定义标签 + Sidebar 筛选 + 猫猫辅助分类 | spec | Ragdoll | internal | [F187](features/F187-thread-labels.md) |
