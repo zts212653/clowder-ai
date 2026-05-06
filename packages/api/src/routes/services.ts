@@ -234,15 +234,21 @@ export const servicesRoutes: FastifyPluginAsync = async (app) => {
         child.on('error', rej);
         child.on('close', () => res());
       });
-      const pids = stdout.trim().split('\n').filter(Boolean);
-      for (const pid of pids) {
+      const myPid = process.pid;
+      const safePids = stdout
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((s) => Number(s))
+        .filter((n) => Number.isFinite(n) && n > 0 && n !== myPid);
+      for (const pid of safePids) {
         try {
-          process.kill(Number(pid), 'SIGTERM');
+          process.kill(pid, 'SIGTERM');
         } catch {
           /* already gone */
         }
       }
-      return { ok: true, message: `${manifest.name} stopped (${pids.length} process(es))` };
+      return { ok: true, message: `${manifest.name} stopped (${safePids.length} process(es))` };
     } catch {
       return { ok: false, error: 'Failed to stop service' };
     }
