@@ -159,13 +159,14 @@ export function resolveServiceEndpoint(idOrManifest: string | ServiceManifest): 
   const manifest = typeof idOrManifest === 'string' ? KNOWN_SERVICES.find((s) => s.id === idOrManifest) : idOrManifest;
   if (!manifest) return null;
 
-  const port = resolveServicePort(manifest);
-  if (port) return `http://localhost:${port}`;
-
   for (const envVar of manifest.configVars) {
     const val = process.env[envVar];
     if (val?.startsWith('http')) return val;
   }
+
+  const port = resolveServicePort(manifest);
+  if (port) return `http://localhost:${port}`;
+
   return null;
 }
 

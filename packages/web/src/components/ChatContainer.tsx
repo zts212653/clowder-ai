@@ -1,15 +1,15 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { CoCreatorConfig } from '@/components/config-viewer-types';
 import { useAgentHookHealth } from '@/hooks/useAgentHookHealth';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
 import { useAuthorization } from '@/hooks/useAuthorization';
 import { useCatData } from '@/hooks/useCatData';
-import type { CoCreatorConfig } from '@/components/config-viewer-types';
-import { primeCoCreatorConfigCache, useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { useChatHistory } from '@/hooks/useChatHistory';
 import { useChatSocketCallbacks } from '@/hooks/useChatSocketCallbacks';
+import { primeCoCreatorConfigCache, useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { godAction, submitAction } from '@/hooks/useGameApi';
 import { reconnectGame } from '@/hooks/useGameReconnect';
@@ -36,8 +36,6 @@ import { AgentHookHealthNotice, shouldRenderAgentHookHealthNotice } from './Agen
 import { AuthorizationCard } from './AuthorizationCard';
 import { BootcampListModal } from './BootcampListModal';
 import { BootstrapOrchestrator } from './BootstrapOrchestrator';
-import { HubCatEditor } from './HubCatEditor';
-import { HubCoCreatorEditor } from './HubCoCreatorEditor';
 import { ChatContainerHeader } from './ChatContainerHeader';
 import { ChatInput } from './ChatInput';
 import { ChatMessage } from './ChatMessage';
@@ -49,6 +47,8 @@ import { syncLocalBootcampState } from './first-run-quest/syncLocalBootcampState
 import { useFirstProjectMistakeTipGate } from './first-run-quest/useFirstProjectMistakeTipGate';
 import { useFirstProjectPreviewAutoOpen } from './first-run-quest/useFirstProjectPreviewAutoOpen';
 import { GameOverlayConnector } from './game/GameOverlayConnector';
+import { HubCatEditor } from './HubCatEditor';
+import { HubCoCreatorEditor } from './HubCoCreatorEditor';
 import { BootcampIcon } from './icons/BootcampIcon';
 import { PawIcon } from './icons/PawIcon';
 import { MessageActions } from './MessageActions';
@@ -127,13 +127,9 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const altActionName = useGameStore((s) => s.altActionName);
   const overlayMinimized = useGameStore((s) => s.overlayMinimized);
 
-  const [isExport, setIsExport] = useState(false);
-  const [isResearchMode, setIsResearchMode] = useState(false);
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    setIsExport(params.get('export') === 'true');
-    setIsResearchMode(params.get('research') === 'multi');
-  }, []);
+  const searchParams = useSearchParams();
+  const isExport = searchParams?.get('export') === 'true';
+  const isResearchMode = searchParams?.get('research') === 'multi';
   const { clearTasks } = useTaskStore();
   const { cats, getCatById, isLoading, hasFetched } = useCatData();
   const workspaceWorktreeId = useChatStore((s) => s.workspaceWorktreeId);
@@ -1164,7 +1160,7 @@ function StandaloneMemberEditor() {
   const targetCatId = useChatStore((s) => s.memberEditorTarget);
   const closeMemberEditor = useChatStore((s) => s.closeMemberEditor);
   const { cats, refresh } = useCatData();
-  const cat = targetCatId ? cats.find((c) => c.id === targetCatId) ?? null : null;
+  const cat = targetCatId ? (cats.find((c) => c.id === targetCatId) ?? null) : null;
   const handleSaved = useCallback(async () => {
     await refresh();
   }, [refresh]);
