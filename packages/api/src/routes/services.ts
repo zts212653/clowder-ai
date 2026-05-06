@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import { getOwnerUserId } from '../config/cat-config-loader.js';
 import { getServiceConfig, setServiceConfig } from '../domains/services/service-config.js';
 import { MODEL_ENV_VARS } from '../domains/services/service-manifest.js';
 import {
@@ -82,8 +83,7 @@ function isServiceProcess(pid: number, manifest: { scripts: { start?: string } }
 function checkServiceOwner(request: Parameters<typeof resolveUserId>[0]): string | null {
   const userId = resolveUserId(request);
   if (!userId) return 'Authentication required';
-  const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim();
-  if (!ownerId) return 'Service management requires DEFAULT_OWNER_USER_ID to be configured';
+  const ownerId = getOwnerUserId();
   if (userId !== ownerId) return 'Only the owner can manage services';
   return null;
 }
