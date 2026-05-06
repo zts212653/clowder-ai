@@ -277,7 +277,7 @@ export function HubConnectorConfigTab() {
 
             {isExpanded && platform.id !== 'weixin' && platform.id !== 'wecom-bot' && (
               <div className="px-4 py-4 space-y-4">
-                <div className="rounded-2xl overflow-hidden bg-[var(--console-field-bg)]">
+                <div className="console-list-card rounded-2xl overflow-hidden shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
                   <div className="bg-conn-sky-bg px-4 py-3 flex items-center gap-3">
                     <div className="w-9 h-9 rounded-lg bg-conn-sky-ring flex items-center justify-center text-conn-sky-text">
                       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -378,40 +378,40 @@ export function HubConnectorConfigTab() {
                         ))}
                       </div>
                     </div>
-
-                    {saveResult && (
-                      <div
-                        className={`rounded-[16px] px-3 py-2 text-xs ${
-                          saveResult.type === 'success'
-                            ? 'bg-conn-emerald-bg text-conn-emerald-text border border-conn-emerald-ring'
-                            : 'bg-conn-red-bg text-conn-red-text border border-conn-red-ring'
-                        }`}
-                        data-testid="save-result"
-                      >
-                        {saveResult.message}
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        className="console-button-secondary text-[13px]"
-                        disabled={testing}
-                        onClick={() => handleTestConnection(platform.id)}
-                      >
-                        <WifiIcon />
-                        {testing ? '测试中...' : '测试连接'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleSave(platform)}
-                        disabled={saving}
-                        className="console-button-primary text-[13px] disabled:opacity-50"
-                        data-testid={`save-${platform.id}`}
-                      >
-                        {saving ? '保存中...' : '保存配置'}
-                      </button>
-                    </div>
                   </div>
+                </div>
+
+                {saveResult && (
+                  <div
+                    className={`rounded-[16px] px-3 py-2 text-xs ${
+                      saveResult.type === 'success'
+                        ? 'bg-conn-emerald-bg text-conn-emerald-text border border-conn-emerald-ring'
+                        : 'bg-conn-red-bg text-conn-red-text border border-conn-red-ring'
+                    }`}
+                    data-testid="save-result"
+                  >
+                    {saveResult.message}
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="console-button-secondary text-[13px]"
+                    disabled={testing}
+                    onClick={() => handleTestConnection(platform.id)}
+                  >
+                    <WifiIcon />
+                    {testing ? '测试中...' : '测试连接'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSave(platform)}
+                    disabled={saving}
+                    className="console-button-primary text-[13px] disabled:opacity-50"
+                    data-testid={`save-${platform.id}`}
+                  >
+                    {saving ? '保存中...' : '保存配置'}
+                  </button>
                 </div>
               </div>
             )}

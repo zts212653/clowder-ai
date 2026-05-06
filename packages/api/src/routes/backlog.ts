@@ -490,6 +490,11 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
   });
 
   app.delete<{ Params: { id: string } }>('/api/backlog/items/:id', async (request, reply) => {
+    const userId = resolveUserId(request, {});
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required' };
+    }
     const deleted = await backlogStore.delete(request.params.id);
     if (!deleted) {
       reply.status(404);

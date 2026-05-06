@@ -209,8 +209,6 @@ export default function HubPermissionsTab({ connectorId }: HubPermissionsTabProp
             )}
           </div>
 
-          <hr className="border-[var(--console-border-soft)] dark:border-cafe" />
-
           {/* Section 2: Admin List */}
           <div className="space-y-2">
             <div className="flex items-center gap-2">
@@ -265,8 +263,6 @@ export default function HubPermissionsTab({ connectorId }: HubPermissionsTabProp
               </div>
             </div>
           </div>
-
-          <hr className="border-[var(--console-border-soft)] dark:border-cafe" />
 
           {/* Section 3: Command Admin Only */}
           <div className="space-y-2">
