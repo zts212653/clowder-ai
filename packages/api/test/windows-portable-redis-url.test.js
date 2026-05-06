@@ -112,6 +112,12 @@ test('Windows RESP helpers use UTF-8 byte counts for bulk string lengths', () =>
   assert.doesNotMatch(helpersScript, /\$\(\$arg\.Length\)/);
 });
 
+test('Windows RESP probes write raw bytes instead of StreamWriter to avoid BOM corruption', () => {
+  assert.doesNotMatch(helpersScript, /\[System\.IO\.StreamWriter\]::new\(\$stream/);
+  assert.match(helpersScript, /\$utf8NoBom\.GetBytes\(/);
+  assert.match(helpersScript, /\$stream\.Write\(\$.*Bytes, 0, \$.*Bytes\.Length\)/);
+});
+
 test('Windows portable Redis defers REDIS_URL to runtime instead of hardcoding localhost:6379', () => {
   assert.match(uiHelpersScript, /function Apply-InstallerRedisPlan/);
   assert.match(uiHelpersScript, /Add-InstallerEnvDelete \$State "REDIS_URL"/);
@@ -161,7 +167,7 @@ test('Windows installer prefers plain portable Redis zips before service bundles
 
 test('Windows Redis URL handling validates connectivity with RESP and detects external backends for shutdown skip', () => {
   assert.match(startWindowsScript, /Test-RedisReachable -RedisUrl \$configuredRedisUrl/);
-  assert.match(helpersScript, /Format-RedisRespCommand -Args @\("PING"\)/);
+  assert.match(helpersScript, /Format-RedisRespCommand -CommandArgs @\("PING"\)/);
   assert.match(startWindowsScript, /Test-LocalRedisUrl -RedisUrl \$configuredRedisUrl -RedisPort \$RedisPort/);
   assert.match(stopWindowsScript, /Test-LocalRedisUrl -RedisUrl \$configuredRedisUrl -RedisPort \$RedisPort/);
   assert.match(

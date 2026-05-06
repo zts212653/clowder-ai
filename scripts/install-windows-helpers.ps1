@@ -260,10 +260,10 @@ function Get-RedisAuthArgs {
 }
 
 function Format-RedisRespCommand {
-    param([string[]]$Args)
+    param([string[]]$CommandArgs)
 
-    $parts = "*$($Args.Count)`r`n"
-    foreach ($arg in $Args) {
+    $parts = "*$($CommandArgs.Count)`r`n"
+    foreach ($arg in $CommandArgs) {
         $byteLength = [System.Text.Encoding]::UTF8.GetByteCount($arg)
         $parts += "`$$byteLength`r`n$arg`r`n"
     }
@@ -301,8 +301,7 @@ function Test-RedisReachable {
         $stream = $client.GetStream()
         $stream.ReadTimeout = $TimeoutMs
         $stream.WriteTimeout = $TimeoutMs
-        $writer = [System.IO.StreamWriter]::new($stream, [System.Text.Encoding]::UTF8)
-        $writer.AutoFlush = $true
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
         $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
 
         # AUTH if credentials embedded in URL
@@ -312,13 +311,14 @@ function Test-RedisReachable {
             $password = if ($parts.Count -ge 2) { [System.Uri]::UnescapeDataString($parts[1]) } else { "" }
 
             if ($parts.Count -ge 2 -and $username) {
-                $authCmd = Format-RedisRespCommand -Args @("AUTH", $username, $password)
+                $authCmd = Format-RedisRespCommand -CommandArgs @("AUTH", $username, $password)
             } elseif ($username) {
-                $authCmd = Format-RedisRespCommand -Args @("AUTH", $username)
+                $authCmd = Format-RedisRespCommand -CommandArgs @("AUTH", $username)
             } else {
-                $authCmd = Format-RedisRespCommand -Args @("AUTH", $password)
+                $authCmd = Format-RedisRespCommand -CommandArgs @("AUTH", $password)
             }
-            $writer.Write($authCmd)
+            $authBytes = $utf8NoBom.GetBytes($authCmd)
+            $stream.Write($authBytes, 0, $authBytes.Length)
             $authLine = $reader.ReadLine()
             if ($authLine -notmatch '^\+OK') {
                 return $false
@@ -326,10 +326,16 @@ function Test-RedisReachable {
         }
 
         # PING
-        $writer.Write((Format-RedisRespCommand -Args @("PING")))
+        $pingBytes = $utf8NoBom.GetBytes((Format-RedisRespCommand -CommandArgs @("PING")))
+        $stream.Write($pingBytes, 0, $pingBytes.Length)
         $pingLine = $reader.ReadLine()
-        return $pingLine -eq '+PONG'
+        if ($pingLine -eq '+PONG') {
+            return $true
+        }
+        Write-Warn "Redis 'PING' received: $pingLine"
+        return $false
     } catch {
+        Write-Warn $_
         return $false
     } finally {
         if ($client) { $client.Dispose() }
@@ -366,8 +372,7 @@ function Send-RedisShutdown {
         $stream = $client.GetStream()
         $stream.ReadTimeout = $TimeoutMs
         $stream.WriteTimeout = $TimeoutMs
-        $writer = [System.IO.StreamWriter]::new($stream, [System.Text.Encoding]::UTF8)
-        $writer.AutoFlush = $true
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
         $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
 
         # AUTH if needed
@@ -377,13 +382,14 @@ function Send-RedisShutdown {
             $password = if ($parts.Count -ge 2) { [System.Uri]::UnescapeDataString($parts[1]) } else { "" }
 
             if ($parts.Count -ge 2 -and $username) {
-                $authCmd = Format-RedisRespCommand -Args @("AUTH", $username, $password)
+                $authCmd = Format-RedisRespCommand -CommandArgs @("AUTH", $username, $password)
             } elseif ($username) {
-                $authCmd = Format-RedisRespCommand -Args @("AUTH", $username)
+                $authCmd = Format-RedisRespCommand -CommandArgs @("AUTH", $username)
             } else {
-                $authCmd = Format-RedisRespCommand -Args @("AUTH", $password)
+                $authCmd = Format-RedisRespCommand -CommandArgs @("AUTH", $password)
             }
-            $writer.Write($authCmd)
+            $authBytes = $utf8NoBom.GetBytes($authCmd)
+            $stream.Write($authBytes, 0, $authBytes.Length)
             $authLine = $reader.ReadLine()
             if ($authLine -notmatch '^\+OK') {
                 return $false
@@ -391,10 +397,12 @@ function Send-RedisShutdown {
         }
 
         # SHUTDOWN SAVE
-        $writer.Write((Format-RedisRespCommand -Args @("SHUTDOWN", "SAVE")))
+        $shutdownBytes = $utf8NoBom.GetBytes((Format-RedisRespCommand -CommandArgs @("SHUTDOWN", "SAVE")))
+        $stream.Write($shutdownBytes, 0, $shutdownBytes.Length)
         $reader.ReadLine() | Out-Null
         return $true
     } catch {
+        Write-Warn $_
         return $false
     } finally {
         if ($client) { $client.Dispose() }
