@@ -378,49 +378,47 @@ export function HubConnectorConfigTab() {
                         ))}
                       </div>
                     </div>
-
-                    {saveResult && (
-                      <div
-                        className={`rounded-[16px] px-3 py-2 text-xs ${
-                          saveResult.type === 'success'
-                            ? 'bg-conn-emerald-bg text-conn-emerald-text border border-conn-emerald-ring'
-                            : 'bg-conn-red-bg text-conn-red-text border border-conn-red-ring'
-                        }`}
-                        data-testid="save-result"
-                      >
-                        {saveResult.message}
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        className="console-button-secondary text-[13px]"
-                        disabled={testing}
-                        onClick={() => handleTestConnection(platform.id)}
-                      >
-                        <WifiIcon />
-                        {testing ? '测试中...' : '测试连接'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleSave(platform)}
-                        disabled={saving}
-                        className="console-button-primary text-[13px] disabled:opacity-50"
-                        data-testid={`save-${platform.id}`}
-                      >
-                        {saving ? '保存中...' : '保存配置'}
-                      </button>
-                    </div>
                   </div>
                 </div>
-              </div>
-            )}
 
-            {isExpanded && PERMISSION_CONNECTORS[platform.id] && (
-              <div className="px-4 pb-4">
-                <Suspense fallback={<p className="text-xs text-cafe-muted">加载中...</p>}>
-                  <HubPermissionsTab connectorId={platform.id} />
-                </Suspense>
+                {PERMISSION_CONNECTORS[platform.id] && (
+                  <Suspense fallback={<p className="text-xs text-cafe-muted">加载中...</p>}>
+                    <HubPermissionsTab connectorId={platform.id} />
+                  </Suspense>
+                )}
+
+                {saveResult && (
+                  <div
+                    className={`rounded-[16px] px-3 py-2 text-xs ${
+                      saveResult.type === 'success'
+                        ? 'bg-conn-emerald-bg text-conn-emerald-text border border-conn-emerald-ring'
+                        : 'bg-conn-red-bg text-conn-red-text border border-conn-red-ring'
+                    }`}
+                    data-testid="save-result"
+                  >
+                    {saveResult.message}
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="console-button-secondary text-[13px]"
+                    disabled={testing}
+                    onClick={() => handleTestConnection(platform.id)}
+                  >
+                    <WifiIcon />
+                    {testing ? '测试中...' : '测试连接'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSave(platform)}
+                    disabled={saving}
+                    className="console-button-primary text-[13px] disabled:opacity-50"
+                    data-testid={`save-${platform.id}`}
+                  >
+                    {saving ? '保存中...' : '保存配置'}
+                  </button>
+                </div>
               </div>
             )}
           </div>
