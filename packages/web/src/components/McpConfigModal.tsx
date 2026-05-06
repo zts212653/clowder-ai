@@ -113,19 +113,6 @@ export function McpConfigModal({
         return;
       }
 
-      if (isEdit && payload.env) {
-        const envRes = await apiFetch(`/api/capabilities/mcp/${encodeURIComponent(id.trim())}/env`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ env: payload.env, projectPath }),
-        });
-        if (!envRes.ok) {
-          const data = (await envRes.json().catch(() => ({}))) as Record<string, string>;
-          setError(data.error ?? `环境变量更新失败 (${envRes.status})`);
-          return;
-        }
-      }
-
       onSaved();
       onClose();
     } catch {
@@ -133,7 +120,7 @@ export function McpConfigModal({
     } finally {
       setSaving(false);
     }
-  }, [id, isEdit, buildPayload, onSaved, onClose, projectPath]);
+  }, [id, buildPayload, onSaved, onClose]);
 
   return (
     <div
