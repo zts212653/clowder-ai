@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { HubIcon } from '../hub-icons';
 import {
@@ -69,6 +70,7 @@ interface ServiceStatusPanelProps {
 }
 
 export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanelProps) {
+  const addToast = useToastStore((s) => s.addToast);
   const [services, setServices] = useState<ServiceState[]>([]);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<Set<string>>(new Set());
@@ -199,11 +201,22 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
       const key = `${m.id}:toggle`;
       setActing((prev) => new Set(prev).add(key));
       try {
-        await apiFetch(`/api/services/${m.id}/toggle`, {
+        const res = await apiFetch(`/api/services/${m.id}/toggle`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ enabled: nextEnabled }),
         });
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+          addToast({
+            type: 'error',
+            title: `${m.name} ${nextEnabled ? '启用' : '禁用'}失败`,
+            message: (body as { error?: string }).error ?? `HTTP ${res.status}`,
+            duration: 5000,
+          });
+          return;
+        }
 
         if (nextEnabled && s.status !== 'running' && s.status !== 'starting') {
           await handleAction(m.id, 'start');
@@ -213,7 +226,7 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
           await fetchServices();
         }
       } catch {
-        /* ignore */
+        addToast({ type: 'error', title: '网络错误', message: `无法连接到服务管理 API`, duration: 5000 });
       } finally {
         setActing((prev) => {
           const next = new Set(prev);
@@ -222,7 +235,7 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
         });
       }
     },
-    [fetchServices, handleAction],
+    [fetchServices, handleAction, addToast],
   );
 
   if (loading) return null;
@@ -293,7 +306,7 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
           </div>
         );
       })}
-      {installPreview && installPreview.prerequisites && (
+      {installPreview?.prerequisites && (
         <InstallPreviewModal
           open={!!installPreview}
           serviceName={installPreview.name}
