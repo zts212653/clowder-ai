@@ -191,6 +191,7 @@ export function sanitizeArgsForDisplay(args: string[]): string[] {
 export function sanitizeUrlForDisplay(url: string): string {
   try {
     const parsed = new URL(url);
+    if (parsed.username) parsed.username = '••••••';
     if (parsed.password) parsed.password = '••••••';
     for (const key of [...parsed.searchParams.keys()]) {
       if (/token|key|secret|auth|password/i.test(key)) {

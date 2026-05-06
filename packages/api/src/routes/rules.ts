@@ -9,6 +9,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FastifyPluginAsync } from 'fastify';
+import { resolveUserId } from '../utils/request-identity.js';
 
 function findProjectRoot(): string {
   let dir = dirname(fileURLToPath(import.meta.url));
@@ -60,6 +61,10 @@ export const rulesRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get<{ Params: { name: string } }>('/api/rules/skill/:name', async (request, reply) => {
+    if (!resolveUserId(request)) {
+      reply.status(401);
+      return { error: 'Authentication required' };
+    }
     const { name } = request.params;
     if (!/^[a-z][a-z0-9-]*$/i.test(name)) {
       reply.status(400);

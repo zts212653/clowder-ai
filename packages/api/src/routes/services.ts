@@ -1,5 +1,5 @@
 import { execSync, spawn } from 'node:child_process';
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FastifyPluginAsync } from 'fastify';
@@ -38,8 +38,18 @@ function readLogTail(serviceId: string, lines = 100): string[] {
   const logPath = resolve(resolveLogDir(), `${serviceId}.log`);
   if (!existsSync(logPath)) return [];
   try {
-    const content = readFileSync(logPath, 'utf-8');
-    return content.split('\n').slice(-lines).filter(Boolean);
+    const fd = openSync(logPath, 'r');
+    try {
+      const stat = fstatSync(fd);
+      const maxRead = 256 * 1024;
+      const readSize = Math.min(stat.size, maxRead);
+      if (readSize === 0) return [];
+      const buf = Buffer.alloc(readSize);
+      readSync(fd, buf, 0, readSize, Math.max(0, stat.size - readSize));
+      return buf.toString('utf-8').split('\n').slice(-lines).filter(Boolean);
+    } finally {
+      closeSync(fd);
+    }
   } catch {
     return [];
   }
@@ -141,7 +151,7 @@ export const servicesRoutes: FastifyPluginAsync = async (app) => {
     }
 
     if (manifest.port) {
-      const pgrep = spawn('pgrep', ['-f', manifest.scripts.start.replace(/.*\//, '')], {
+      const pgrep = spawn('pgrep', ['-f', manifest.scripts.start], {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       let pout = '';
@@ -317,14 +327,19 @@ export const servicesRoutes: FastifyPluginAsync = async (app) => {
           env,
         });
         let output = '';
+        const MAX_OUTPUT = 8192;
+        const appendOutput = (s: string) => {
+          output += s;
+          if (output.length > MAX_OUTPUT) output = output.slice(-MAX_OUTPUT);
+        };
         child.stdout?.on('data', (d: Buffer) => {
           const s = d.toString();
-          output += s;
+          appendOutput(s);
           appendLog(id, s);
         });
         child.stderr?.on('data', (d: Buffer) => {
           const s = d.toString();
-          output += s;
+          appendOutput(s);
           appendLog(id, s);
         });
         const code = await new Promise<number | null>((res, rej) => {
@@ -333,6 +348,7 @@ export const servicesRoutes: FastifyPluginAsync = async (app) => {
         });
 
         if (code !== 0) {
+          reply.status(422);
           return { ok: false, error: `Install failed (exit ${code})`, output: output.slice(-2000) };
         }
 
@@ -393,14 +409,19 @@ export const servicesRoutes: FastifyPluginAsync = async (app) => {
         env: { ...process.env },
       });
       let output = '';
+      const MAX_OUTPUT = 8192;
+      const appendOutput = (s: string) => {
+        output += s;
+        if (output.length > MAX_OUTPUT) output = output.slice(-MAX_OUTPUT);
+      };
       child.stdout?.on('data', (d: Buffer) => {
         const s = d.toString();
-        output += s;
+        appendOutput(s);
         appendLog(id, s);
       });
       child.stderr?.on('data', (d: Buffer) => {
         const s = d.toString();
-        output += s;
+        appendOutput(s);
         appendLog(id, s);
       });
       const code = await new Promise<number | null>((res, rej) => {
@@ -409,6 +430,7 @@ export const servicesRoutes: FastifyPluginAsync = async (app) => {
       });
 
       if (code !== 0) {
+        reply.status(422);
         return { ok: false, error: `Uninstall failed (exit ${code})`, output: output.slice(-2000) };
       }
       return { ok: true, message: `${manifest.name} uninstalled successfully` };

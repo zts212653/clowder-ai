@@ -731,6 +731,10 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
 
     let permissions;
     const store = opts.permissionStore;
+    if (body.permissions && !store) {
+      reply.status(503);
+      return { error: 'Permission store is not available' };
+    }
     if (body.permissions && store) {
       const p = body.permissions;
       if (p.whitelistEnabled !== undefined) await store.setWhitelistEnabled(connectorId, p.whitelistEnabled);

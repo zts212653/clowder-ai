@@ -6,13 +6,16 @@ import { apiFetch } from '@/utils/api-client';
 import { correctTranscription, mergeTermEntries, type TermEntry } from '@/utils/transcription-corrector';
 
 let _serviceEndpoints: Record<string, string | null> | null = null;
+let _endpointsFetchedAt = 0;
+const ENDPOINTS_TTL_MS = 30_000;
 async function getServiceEndpoints(): Promise<Record<string, string | null>> {
-  if (_serviceEndpoints) return _serviceEndpoints;
+  if (_serviceEndpoints && Date.now() - _endpointsFetchedAt < ENDPOINTS_TTL_MS) return _serviceEndpoints;
   try {
     const res = await apiFetch('/api/services/endpoints');
     if (res.ok) {
       const data = (await res.json()) as { endpoints: Record<string, string | null> };
       _serviceEndpoints = data.endpoints;
+      _endpointsFetchedAt = Date.now();
     }
   } catch {
     // Leave null so next call retries

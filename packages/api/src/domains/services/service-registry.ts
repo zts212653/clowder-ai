@@ -1,7 +1,7 @@
 import { execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { getServiceConfig, setServiceConfig } from './service-config.js';
 import type { ServiceManifest, ServiceState, ServiceStatus } from './service-manifest.js';
 
@@ -224,9 +224,8 @@ export function checkInstalled(manifest: ServiceManifest): boolean {
 
 function isScriptRunning(scriptPath: string | undefined): boolean {
   if (!scriptPath) return false;
-  const name = basename(scriptPath);
   try {
-    const out = execSync(`pgrep -f "${name}"`, { encoding: 'utf-8', timeout: 2000 });
+    const out = execSync(`pgrep -f "${scriptPath}"`, { encoding: 'utf-8', timeout: 2000 });
     return out.trim().length > 0;
   } catch {
     return false;

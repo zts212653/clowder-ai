@@ -1,7 +1,7 @@
 'use client';
 
-import { usePathname } from 'next/navigation';
-import { Suspense, useEffect, useState } from 'react';
+import { usePathname, useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
 import { ActivityBar } from './ActivityBar';
 import { ThreadSidebar } from './ThreadSidebar';
 import { detectRoutePrefix } from './ThreadSidebar/thread-navigation';
@@ -16,10 +16,8 @@ const SIDEBAR_HIDDEN_ROUTES = ['/settings', '/signals', '/memory', '/mission'];
 
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname() ?? '/';
-  const [isExport, setIsExport] = useState(false);
-  useEffect(() => {
-    setIsExport(new URLSearchParams(window.location.search).get('export') === 'true');
-  }, []);
+  const searchParams = useSearchParams();
+  const isExport = searchParams.get('export') === 'true';
   if (isExport || CHROMELESS_ROUTES.some((r) => pathname.startsWith(r))) {
     return <>{children}</>;
   }

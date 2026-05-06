@@ -100,6 +100,14 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
     fetchServices();
   }, [fetchServices]);
 
+  useEffect(() => {
+    const ref = pollRef.current;
+    return () => {
+      for (const iv of ref.values()) clearInterval(iv);
+      ref.clear();
+    };
+  }, []);
+
   const startLogPoll = useCallback((id: string) => {
     if (pollRef.current.has(id)) return;
     const iv = setInterval(async () => {
@@ -175,7 +183,7 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
         }
         await fetchServices();
       } catch {
-        /* ignore */
+        stopLogPoll(id);
       } finally {
         if (longRunning) stopLogPoll(id);
         setActing((prev) => {

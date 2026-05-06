@@ -165,6 +165,7 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
       } else {
         config.capabilities.push(entry);
       }
+      const savedCapability = existingIdx >= 0 ? config.capabilities[existingIdx] : entry;
 
       await writeCapabilitiesConfig(projectRoot, config);
       await generateCliConfigs(config, getCliConfigPaths(projectRoot));
@@ -175,7 +176,7 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
         action: before ? 'update' : 'install',
         capabilityId: body.id,
         before,
-        after: entry,
+        after: savedCapability,
       });
 
       let probeResult: McpProbeResult | null = null;
@@ -189,7 +190,7 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
 
       return {
         ok: true,
-        capability: entry,
+        capability: savedCapability,
         probe: probeResult ? { connectionStatus: probeResult.connectionStatus, tools: probeResult.tools } : null,
       };
     });
@@ -277,6 +278,11 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
     if (!userId) {
       reply.status(401);
       return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
+    }
+    const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim();
+    if (ownerId && userId !== ownerId) {
+      reply.status(403);
+      return { error: 'Only the owner can delete MCP servers' };
     }
 
     const { id } = request.params as { id: string };
@@ -422,6 +428,11 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
     if (!userId) {
       reply.status(401);
       return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
+    }
+    const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim();
+    if (ownerId && userId !== ownerId) {
+      reply.status(403);
+      return { error: 'Only the owner can view the audit log' };
     }
     let projectRoot = getProjectRoot();
     const query = request.query as { projectPath?: string; limit?: string };
