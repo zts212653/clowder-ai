@@ -12,9 +12,9 @@
  *   pnpm dev:direct          → start-entry.mjs dev:direct [--debug] [--quick] [--memory]
  */
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { basename, dirname, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runWindowsStatus } from './lib/platform-status.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '..');
@@ -24,79 +24,9 @@ const IS_WINDOWS = process.platform === 'win32';
 // First positional arg is the mode (start | start:direct | dev:direct | status)
 const [mode, ...rest] = process.argv.slice(2);
 
-function pidIsRunning(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    if (error?.code === 'EPERM') return true;
-    return false;
-  }
-}
-
-function readDotEnvValues(dotEnvPath) {
-  if (!existsSync(dotEnvPath)) return {};
-
-  const values = {};
-  for (const rawLine of readFileSync(dotEnvPath, 'utf8').split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#')) continue;
-    const separatorIndex = line.indexOf('=');
-    if (separatorIndex <= 0) continue;
-
-    const key = line.slice(0, separatorIndex).trim();
-    const value = line
-      .slice(separatorIndex + 1)
-      .trim()
-      .replace(/^['"]|['"]$/g, '');
-    values[key] = value;
-  }
-  return values;
-}
-
-function getConfigValue(dotEnv, key) {
-  return dotEnv[key] || process.env[key];
-}
-
-function runWindowsStatus() {
-  const runDir = resolve(projectRoot, '.cat-cafe', 'run', 'windows');
-  if (!existsSync(runDir)) {
-    console.log(`Cat Cafe Windows services not running (no run directory: ${runDir})`);
-    process.exit(1);
-  }
-
-  const dotEnv = readDotEnvValues(resolve(projectRoot, '.env'));
-  const apiPort = getConfigValue(dotEnv, 'API_SERVER_PORT') ?? '3004';
-  const webPort = getConfigValue(dotEnv, 'FRONTEND_PORT') ?? '3003';
-  const requiredServices = [
-    { label: 'api', pidFile: `api-${apiPort}.pid`, running: false },
-    { label: 'web', pidFile: `web-${webPort}.pid`, running: false },
-  ];
-
-  console.log('Cat Cafe Windows status');
-  for (const service of requiredServices) {
-    const pidPath = resolve(runDir, service.pidFile);
-    const label = basename(service.pidFile, '.pid');
-    if (!existsSync(pidPath)) {
-      console.log(`  ${label}: not running (missing PID file)`);
-      continue;
-    }
-
-    const pid = Number.parseInt(readFileSync(pidPath, 'utf8').trim(), 10);
-    if (Number.isNaN(pid)) {
-      console.log(`  ${label}: invalid PID file`);
-      continue;
-    }
-    service.running = pidIsRunning(pid);
-    console.log(`  ${label}: ${service.running ? 'running' : 'not running'} (PID: ${pid})`);
-  }
-
-  process.exit(requiredServices.every((service) => service.running) ? 0 : 1);
-}
-
 if (mode === 'status') {
   if (IS_WINDOWS) {
-    runWindowsStatus();
+    runWindowsStatus({ projectRoot });
   } else {
     const child = spawn('bash', [resolve(__dirname, 'start-dev.sh'), '--status'], {
       cwd: projectRoot,
