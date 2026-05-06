@@ -41,7 +41,14 @@ function TaskQueueCard({ task, selected, onClick }: { task: TaskItem; selected: 
       style={{ height: 82 }}
     >
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[var(--console-active-bg)]">
-        <svg className="h-4 w-4 text-cafe" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <svg
+          className="h-4 w-4 text-cafe"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          aria-hidden="true"
+        >
           <path d="M9 11l3 3L22 4" />
           <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
         </svg>
@@ -88,6 +95,10 @@ export function MissionHubView() {
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [createTitle, setCreateTitle] = useState('');
+  const [createWhy, setCreateWhy] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const loadTasks = useCallback(async () => {
     try {
@@ -104,6 +115,27 @@ export function MissionHubView() {
   useEffect(() => {
     void loadTasks();
   }, [loadTasks]);
+
+  const handleCreateTask = useCallback(async () => {
+    const title = createTitle.trim();
+    if (!title) return;
+    setSubmitting(true);
+    try {
+      const res = await apiFetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ threadId: 'default', title, why: createWhy.trim(), createdBy: 'user' }),
+      });
+      if (res.ok) {
+        setCreateTitle('');
+        setCreateWhy('');
+        setShowCreate(false);
+        await loadTasks();
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }, [createTitle, createWhy, loadTasks]);
 
   const stats = useMemo(() => {
     const count = (s: TaskStatus) => tasks.filter((t) => t.status === s).length;
@@ -123,18 +155,56 @@ export function MissionHubView() {
           </div>
           <button
             type="button"
-            disabled
-            className="flex items-center gap-2 rounded-lg bg-[var(--cafe-accent,#C65F3D)] px-3.5 text-[13px] font-semibold text-[var(--cafe-surface)] opacity-50 cursor-not-allowed"
+            onClick={() => setShowCreate((v) => !v)}
+            className="flex items-center gap-2 rounded-lg bg-[var(--cafe-accent,#C65F3D)] px-3.5 text-[13px] font-semibold text-[var(--cafe-surface)] hover:opacity-90 transition-opacity"
             style={{ height: 36 }}
-            title="任务创建功能即将上线"
+            title="新建任务"
           >
-            <svg className="h-[15px] w-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <svg
+              className="h-[15px] w-[15px]"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              aria-hidden="true"
+            >
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
             新建任务
           </button>
         </header>
+
+        {showCreate && (
+          <div className="flex items-center gap-2 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3">
+            <input
+              value={createTitle}
+              onChange={(e) => setCreateTitle(e.target.value)}
+              placeholder="任务标题"
+              className="flex-1 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-field-bg)] px-3 py-1.5 text-sm text-cafe outline-none focus:border-[var(--cafe-accent)]"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.nativeEvent.isComposing) void handleCreateTask();
+              }}
+            />
+            <input
+              value={createWhy}
+              onChange={(e) => setCreateWhy(e.target.value)}
+              placeholder="一句话描述价值（选填）"
+              className="flex-1 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-field-bg)] px-3 py-1.5 text-sm text-cafe outline-none focus:border-[var(--cafe-accent)]"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.nativeEvent.isComposing) void handleCreateTask();
+              }}
+            />
+            <button
+              type="button"
+              disabled={submitting || !createTitle.trim()}
+              onClick={() => void handleCreateTask()}
+              className="rounded-lg bg-[var(--cafe-accent,#C65F3D)] px-3 py-1.5 text-xs font-semibold text-[var(--cafe-surface)] disabled:opacity-40"
+            >
+              创建
+            </button>
+          </div>
+        )}
 
         <div className="flex gap-3.5">
           <StatCard label="待处理任务" value={stats.pending} />
