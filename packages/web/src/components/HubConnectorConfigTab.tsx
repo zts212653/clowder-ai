@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { useGuideStore } from '@/stores/guideStore';
 import { apiFetch } from '@/utils/api-client';
 import { FeishuQrPanel } from './FeishuQrPanel';
@@ -8,6 +8,14 @@ import { DEFAULT_VISUAL, ExternalLinkIcon, LockIcon, PLATFORM_VISUALS, StepBadge
 import { SettingsPageHeader } from './settings/SettingsPageHeader';
 import { WeComBotSetupPanel } from './WeComBotSetupPanel';
 import { WeixinQrPanel } from './WeixinQrPanel';
+
+const HubPermissionsTab = lazy(() => import('./HubPermissionsTab'));
+
+const PERMISSION_CONNECTORS: Record<string, string> = {
+  feishu: '飞书',
+  'wecom-bot': '企业微信',
+  dingtalk: '钉钉',
+};
 
 interface PlatformFieldStatus {
   envName: string;
@@ -388,6 +396,18 @@ export function HubConnectorConfigTab() {
                     </button>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {isExpanded && PERMISSION_CONNECTORS[platform.id] && (
+              <div className="console-code-pane px-4 py-4">
+                <p className="text-[13px] font-semibold text-cafe mb-3">群聊权限</p>
+                <Suspense fallback={<p className="text-xs text-cafe-muted">加载中...</p>}>
+                  <HubPermissionsTab
+                    connectorId={platform.id}
+                    connectorLabel={PERMISSION_CONNECTORS[platform.id]}
+                  />
+                </Suspense>
               </div>
             )}
           </div>

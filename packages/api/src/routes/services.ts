@@ -67,8 +67,7 @@ function appendLog(serviceId: string, chunk: string): void {
 function checkServiceOwner(request: Parameters<typeof resolveUserId>[0]): string | null {
   const userId = resolveUserId(request);
   if (!userId) return 'Authentication required';
-  const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim();
-  if (!ownerId) return 'DEFAULT_OWNER_USER_ID not configured — service management disabled';
+  const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim() || 'default-user';
   if (userId !== ownerId) return 'Only the owner can manage services';
   return null;
 }
