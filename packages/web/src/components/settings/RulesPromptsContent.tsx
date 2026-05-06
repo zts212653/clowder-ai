@@ -116,7 +116,6 @@ function Section({
     <section className="console-list-card rounded-2xl p-5 md:p-6 shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1.5">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cafe-muted">Governance</p>
           <h3 className="text-lg font-semibold tracking-[-0.03em] text-cafe">{title}</h3>
           <p className="max-w-2xl text-sm leading-6 text-cafe-secondary">{description}</p>
         </div>
