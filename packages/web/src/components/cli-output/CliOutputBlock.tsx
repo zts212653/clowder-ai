@@ -429,7 +429,10 @@ export function CliOutputBlock({
           <ChevronIcon expanded={expanded} />
         </span>
         <span className="font-medium min-w-0 truncate text-left">{summary}</span>
-        <span className="ml-auto flex items-center gap-1 flex-shrink-0" style={{ color: 'var(--cafe-text-secondary)', fontSize: 10 }}>
+        <span
+          className="ml-auto flex items-center gap-1 flex-shrink-0"
+          style={{ color: 'var(--cafe-text-secondary)', fontSize: 10 }}
+        >
           {thinkingMode === 'debug' ? (
             <>
               <PawPrint />
