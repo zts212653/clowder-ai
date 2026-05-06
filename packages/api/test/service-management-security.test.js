@@ -52,7 +52,7 @@ describe('service management security — real route', () => {
       assert.ok(body.error.includes('Authentication'));
     });
 
-    test('no DEFAULT_OWNER_USER_ID configured → 403 (falls back to default-user)', async () => {
+    test('no DEFAULT_OWNER_USER_ID configured → 403 (fail-closed)', async () => {
       delete process.env.DEFAULT_OWNER_USER_ID;
       const res = await app.inject({
         method: 'POST',
@@ -62,7 +62,7 @@ describe('service management security — real route', () => {
       });
       assert.equal(res.statusCode, 403);
       const body = JSON.parse(res.body);
-      assert.ok(body.error.includes('Only the owner'));
+      assert.ok(body.error.includes('DEFAULT_OWNER_USER_ID'));
     });
 
     test('non-owner user → 403', async () => {
