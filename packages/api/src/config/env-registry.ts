@@ -1232,7 +1232,7 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'CAT_CAFE_SERVICES_CONFIG',
     defaultValue: '.cat-cafe/services.json',
     description: '本地服务状态配置文件路径',
-    category: 'system',
+    category: 'server',
     sensitive: false,
     hubVisible: false,
   },
