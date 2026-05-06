@@ -79,8 +79,14 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
     }
 
     const REDACTED = '••••••';
+    const objHasRedacted = (obj?: Record<string, string>) =>
+      obj && Object.values(obj).some((v) => typeof v === 'string' && v.includes(REDACTED));
     const hasRedacted =
-      body.args?.some((a) => a.includes(REDACTED)) || body.url?.includes(REDACTED) || body.command?.includes(REDACTED);
+      body.args?.some((a) => a.includes(REDACTED)) ||
+      body.url?.includes(REDACTED) ||
+      body.command?.includes(REDACTED) ||
+      objHasRedacted(body.env) ||
+      objHasRedacted(body.headers);
     if (hasRedacted) {
       reply.status(400);
       return {

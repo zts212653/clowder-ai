@@ -156,6 +156,39 @@ describe('MCP install — redacted payload rejection', () => {
     assert.match(JSON.parse(res.payload).error, /redacted/i);
   });
 
+  it('rejects payload with redacted placeholder in env', async () => {
+    setEnv('DEFAULT_OWNER_USER_ID', undefined);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/capabilities/mcp/install',
+      headers: { 'x-cat-cafe-user': 'test-user' },
+      payload: { id: 'test-env', command: 'node', env: { API_KEY: '••••••' } },
+    });
+
+    assert.equal(res.statusCode, 400);
+    assert.match(JSON.parse(res.payload).error, /redacted/i);
+  });
+
+  it('rejects payload with redacted placeholder in headers', async () => {
+    setEnv('DEFAULT_OWNER_USER_ID', undefined);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/capabilities/mcp/install',
+      headers: { 'x-cat-cafe-user': 'test-user' },
+      payload: {
+        id: 'test-hdr',
+        transport: 'streamableHttp',
+        url: 'http://example.com',
+        headers: { Authorization: '••••••' },
+      },
+    });
+
+    assert.equal(res.statusCode, 400);
+    assert.match(JSON.parse(res.payload).error, /redacted/i);
+  });
+
   it('update preserves existing args when payload omits them', async () => {
     setEnv('DEFAULT_OWNER_USER_ID', undefined);
     await writeCapabilitiesConfig(dir, {
