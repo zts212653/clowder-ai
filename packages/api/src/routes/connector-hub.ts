@@ -660,6 +660,8 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
 
   // ── Unified connector config save ──
 
+  const LOOPBACK_ADDRS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
   const platformFieldIndex = new Map<string, Set<string>>();
   for (const p of CONNECTOR_PLATFORMS) {
     platformFieldIndex.set(p.id, new Set(p.fields.map((f) => f.envName)));
@@ -691,6 +693,10 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
     }
 
     if (body.secrets && body.secrets.length > 0) {
+      if (!LOOPBACK_ADDRS.has(request.ip)) {
+        reply.status(403);
+        return { error: 'Secrets endpoint is loopback-only' };
+      }
       for (const s of body.secrets) {
         if (!isConnectorSecret(s.name)) {
           reply.status(400);
