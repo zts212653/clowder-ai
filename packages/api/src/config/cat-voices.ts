@@ -16,7 +16,7 @@
  */
 
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { VoiceConfig } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
@@ -48,21 +48,26 @@ function characterVoiceBaseDir(): string {
   return join(homedir(), 'projects/relay-station/GPT-SoVITS/character-models');
 }
 
+export function isWithinBase(base: string, target: string): boolean {
+  const rel = relative(base, target);
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+}
+
 function resolveRefAudioPath(refAudio: string, characterBaseDir: string): string {
   if (refAudio.startsWith('/uploads/')) {
     const uploadDir = resolve(getDefaultUploadDir(process.env.UPLOAD_DIR));
     const resolved = resolve(uploadDir, refAudio.slice('/uploads/'.length));
-    if (!resolved.startsWith(uploadDir)) return join(uploadDir, 'invalid-ref');
+    if (!isWithinBase(uploadDir, resolved)) return join(uploadDir, 'invalid-ref');
     return resolved;
   }
   if (isAbsolute(refAudio)) {
     const baseDir = resolve(characterBaseDir);
-    if (!resolve(refAudio).startsWith(baseDir)) return join(baseDir, 'invalid-ref');
+    if (!isWithinBase(baseDir, resolve(refAudio))) return join(baseDir, 'invalid-ref');
     return refAudio;
   }
   const baseDir = resolve(characterBaseDir);
   const resolved = resolve(baseDir, refAudio);
-  if (!resolved.startsWith(baseDir)) return join(baseDir, 'invalid-ref');
+  if (!isWithinBase(baseDir, resolved)) return join(baseDir, 'invalid-ref');
   return resolved;
 }
 
