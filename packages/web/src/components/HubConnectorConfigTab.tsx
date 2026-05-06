@@ -1,10 +1,11 @@
 'use client';
 
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useGuideStore } from '@/stores/guideStore';
 import { apiFetch } from '@/utils/api-client';
 import { FeishuQrPanel } from './FeishuQrPanel';
 import { DEFAULT_VISUAL, ExternalLinkIcon, LockIcon, PLATFORM_VISUALS, StepBadge, WifiIcon } from './HubConfigIcons';
+import type { HubPermissionsTabHandle } from './HubPermissionsTab';
 import { SettingsPageHeader } from './settings/SettingsPageHeader';
 import { WeComBotSetupPanel } from './WeComBotSetupPanel';
 import { WeixinQrPanel } from './WeixinQrPanel';
@@ -73,6 +74,7 @@ export function HubConnectorConfigTab() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [saveResult, setSaveResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const permissionsRef = useRef<HubPermissionsTabHandle>(null);
 
   const fetchStatus = useCallback(async () => {
     setIsLoading(true);
@@ -110,37 +112,44 @@ export function HubConnectorConfigTab() {
   };
 
   const handleSave = async (platform: PlatformStatus) => {
-    // F136 Phase 2: all connector fields go through /api/config/secrets (hot-reload enabled)
+    setSaving(true);
+    setSaveResult(null);
+    const errors: string[] = [];
+
     const updates = platform.fields
       .filter((f) => fieldValues[f.envName] !== undefined)
       .map((f) => ({ name: f.envName, value: fieldValues[f.envName] || null }));
 
-    if (updates.length === 0) {
-      setSaveResult({ type: 'error', message: '请填写至少一个配置项' });
-      return;
+    if (updates.length > 0) {
+      try {
+        const res = await apiFetch('/api/config/secrets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ updates }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          errors.push(data.error ?? '凭证保存失败');
+        } else {
+          setFieldValues({});
+          await fetchStatus();
+        }
+      } catch {
+        errors.push('凭证保存网络错误');
+      }
     }
 
-    setSaving(true);
-    setSaveResult(null);
-    try {
-      const res = await apiFetch('/api/config/secrets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ updates }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setSaveResult({ type: 'error', message: data.error ?? '保存失败' });
-        return;
-      }
-      setSaveResult({ type: 'success', message: '配置已保存，连接器正在自动重连...' });
-      setFieldValues({});
-      await fetchStatus();
-    } catch {
-      setSaveResult({ type: 'error', message: '网络错误' });
-    } finally {
-      setSaving(false);
+    if (permissionsRef.current) {
+      const ok = await permissionsRef.current.save();
+      if (!ok) errors.push('权限保存失败');
     }
+
+    if (errors.length > 0) {
+      setSaveResult({ type: 'error', message: errors.join('；') });
+    } else {
+      setSaveResult({ type: 'success', message: '配置已保存，连接器正在自动重连...' });
+    }
+    setSaving(false);
   };
 
   const handleTestConnection = async (platformId: string) => {
@@ -383,7 +392,7 @@ export function HubConnectorConfigTab() {
 
                 {PERMISSION_CONNECTORS[platform.id] && (
                   <Suspense fallback={<p className="text-xs text-cafe-muted">加载中...</p>}>
-                    <HubPermissionsTab connectorId={platform.id} />
+                    <HubPermissionsTab ref={permissionsRef} connectorId={platform.id} />
                   </Suspense>
                 )}
 
@@ -399,7 +408,7 @@ export function HubConnectorConfigTab() {
                     {saveResult.message}
                   </div>
                 )}
-                <div className="flex items-center gap-2">
+                <div className="flex items-center justify-end gap-2">
                   <button
                     type="button"
                     className="console-button-secondary text-[13px]"
