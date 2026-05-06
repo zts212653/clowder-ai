@@ -158,7 +158,7 @@ const HubPermissionsTab = forwardRef<HubPermissionsTabHandle, HubPermissionsTabP
           </div>
           <p className="ml-[26px] text-xs text-cafe-secondary">开启后，仅白名单内的群可使用 bot</p>
           {config.whitelistEnabled && (
-            <div className="space-y-1.5">
+            <div className="ml-[26px] space-y-1.5">
               {config.allowedGroups.map((g) => (
                 <div
                   key={g.externalChatId}
@@ -192,13 +192,13 @@ const HubPermissionsTab = forwardRef<HubPermissionsTabHandle, HubPermissionsTabP
                   value={newGroupId}
                   onChange={(e) => setNewGroupId(e.target.value)}
                   placeholder="chat_id"
-                  className="console-form-input flex-1 py-2.5 text-[13px]"
+                  className="console-form-input flex-1 min-w-0 py-2.5 text-[13px]"
                 />
                 <input
                   value={newGroupLabel}
                   onChange={(e) => setNewGroupLabel(e.target.value)}
                   placeholder="群名（可选）"
-                  className="console-form-input flex-1 py-2.5 text-[13px]"
+                  className="console-form-input flex-1 min-w-0 py-2.5 text-[13px]"
                 />
                 <button
                   onClick={addGroup}
@@ -221,7 +221,7 @@ const HubPermissionsTab = forwardRef<HubPermissionsTabHandle, HubPermissionsTabP
           <p className="ml-[26px] text-xs text-cafe-secondary">
             管理员可使用 /allow-group、/deny-group、/new、/use 等管理命令
           </p>
-          <div className="space-y-1.5">
+          <div className="ml-[26px] space-y-1.5">
             {config.adminOpenIds.map((id, i) => (
               <div
                 key={id}
@@ -255,7 +255,7 @@ const HubPermissionsTab = forwardRef<HubPermissionsTabHandle, HubPermissionsTabP
                 value={newAdminId}
                 onChange={(e) => setNewAdminId(e.target.value)}
                 placeholder="open_id (ou_xxxx...)"
-                className="console-form-input flex-1 py-2.5 text-[13px]"
+                className="console-form-input flex-1 min-w-0 py-2.5 text-[13px]"
                 onCompositionStart={ime.onCompositionStart}
                 onCompositionEnd={ime.onCompositionEnd}
                 onKeyDown={(e) => e.key === 'Enter' && !ime.isComposing() && addAdmin()}
@@ -291,7 +291,7 @@ const HubPermissionsTab = forwardRef<HubPermissionsTabHandle, HubPermissionsTabP
             开启后，非管理员在群聊发 /threads /new /use 会收到提示
           </p>
           {config.commandAdminOnly && (
-            <div className="flex items-center gap-2 px-3 py-2 bg-conn-red-bg rounded-lg text-xs text-conn-red-text">
+            <div className="ml-[26px] flex items-center gap-2 px-3 py-2 bg-conn-red-bg rounded-lg text-xs text-conn-red-text">
               <svg
                 className="w-3.5 h-3.5 text-conn-red-text shrink-0"
                 fill="none"
