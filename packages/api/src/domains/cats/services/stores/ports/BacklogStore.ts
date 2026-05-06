@@ -40,6 +40,7 @@ export interface IBacklogStore {
   create(input: CreateBacklogItemInput): BacklogItem | Promise<BacklogItem>;
   refreshMetadata(itemId: string, input: RefreshBacklogItemInput): BacklogItem | null | Promise<BacklogItem | null>;
   get(itemId: string, userId?: string): BacklogItem | null | Promise<BacklogItem | null>;
+  delete(itemId: string): boolean | Promise<boolean>;
   listByUser(userId: string): BacklogItem[] | Promise<BacklogItem[]>;
   suggestClaim(itemId: string, input: SuggestBacklogClaimInput): BacklogItem | null | Promise<BacklogItem | null>;
   decideClaim(itemId: string, input: DecideBacklogClaimInput): BacklogItem | null | Promise<BacklogItem | null>;
@@ -166,6 +167,10 @@ export class BacklogStore implements IBacklogStore {
     if (!item) return null;
     if (userId && item.userId !== userId) return null;
     return item;
+  }
+
+  delete(itemId: string): boolean {
+    return this.items.delete(itemId);
   }
 
   listByUser(userId: string): BacklogItem[] {

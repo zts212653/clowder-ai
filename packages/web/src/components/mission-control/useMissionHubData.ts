@@ -195,6 +195,15 @@ export function useMissionHubData() {
       }),
     [loadItems, setSelectedItemId, withGuard],
   );
+  const handleDelete = useCallback(
+    async (itemId: string) =>
+      withGuard(async () => {
+        await ba.deleteItem(itemId);
+        if (selectedItemId === itemId) setSelectedItemId(null);
+        await loadItems();
+      }),
+    [loadItems, selectedItemId, setSelectedItemId, withGuard],
+  );
   const handleSuggest = useCallback(
     async (p: { itemId: string; catId: string; why: string; plan: string; requestedPhase: ThreadPhase }) =>
       withGuard(async () => {
@@ -334,6 +343,7 @@ export function useMissionHubData() {
     setRightPanelTab,
     setShowImportModal,
     handleCreate,
+    handleDelete,
     handleSuggest,
     handleApprove,
     handleReject,

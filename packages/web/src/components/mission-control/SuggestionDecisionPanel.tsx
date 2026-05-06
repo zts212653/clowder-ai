@@ -26,7 +26,7 @@ export function SuggestionDecisionPanel({
   return (
     <div className="mt-4 space-y-2">
       {item.status === 'approved' && (
-        <p className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2 py-1.5 text-xs text-cafe-secondary">
+        <p className="rounded-lg bg-[var(--console-field-bg)] px-2 py-1.5 text-xs text-cafe-secondary">
           该任务已批准但尚未派发，可手动重试派发。
         </p>
       )}
@@ -40,7 +40,7 @@ export function SuggestionDecisionPanel({
         <select
           value={selectedPhase}
           onChange={(event) => onChangePhase(event.target.value as ThreadPhase)}
-          className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] px-2 py-1.5 text-xs text-cafe"
+          className="console-form-input mt-1 w-full text-xs"
           data-testid="mc-approve-phase"
         >
           <option value="coding">coding</option>
@@ -52,7 +52,7 @@ export function SuggestionDecisionPanel({
         type="button"
         disabled={submitting}
         onClick={() => void onApprove({ itemId: item.id, threadPhase: selectedPhase })}
-        className="w-full rounded-lg bg-cafe px-3 py-2 text-xs font-semibold text-[var(--cafe-surface)] disabled:opacity-40"
+        className="console-button-primary w-full disabled:opacity-40"
         data-testid="mc-approve-submit"
       >
         {item.status === 'approved' ? '重试派发' : '批准并派发'}
@@ -64,7 +64,7 @@ export function SuggestionDecisionPanel({
             <input
               value={rejectNote}
               onChange={(event) => onChangeRejectNote(event.target.value)}
-              className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] px-2 py-1.5 text-xs text-cafe"
+              className="console-form-input mt-1 w-full text-xs"
               data-testid="mc-reject-note"
             />
           </label>
@@ -72,7 +72,7 @@ export function SuggestionDecisionPanel({
             type="button"
             disabled={submitting}
             onClick={() => void onReject({ itemId: item.id, note: rejectNote.trim() || undefined })}
-            className="w-full rounded-lg border border-[var(--console-border-soft)] px-3 py-2 text-xs font-semibold text-cafe-secondary disabled:opacity-40"
+            className="console-button-secondary w-full disabled:opacity-40"
             data-testid="mc-reject-submit"
           >
             拒绝并回到 Open

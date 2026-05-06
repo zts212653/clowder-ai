@@ -5,7 +5,7 @@ import { buildConnectorStatus } from '../dist/routes/connector-hub.js';
 describe('buildConnectorStatus', () => {
   it('returns all platforms as not configured when env is empty', () => {
     const result = buildConnectorStatus({});
-    assert.equal(result.length, 7);
+    assert.equal(result.length, 8);
 
     const xiaoyi = result.find((p) => p.id === 'xiaoyi');
     assert.ok(xiaoyi);
@@ -15,7 +15,7 @@ describe('buildConnectorStatus', () => {
     const feishu = result.find((p) => p.id === 'feishu');
     assert.ok(feishu);
     assert.equal(feishu.configured, false);
-    assert.equal(feishu.fields.length, 4);
+    assert.equal(feishu.fields.length, 6);
     for (const f of feishu.fields) {
       if (f.envName === 'FEISHU_CONNECTION_MODE') {
         assert.equal(f.currentValue, 'webhook', 'CONNECTION_MODE should default to webhook');
@@ -44,8 +44,8 @@ describe('buildConnectorStatus', () => {
 
     const weixin = result.find((p) => p.id === 'weixin');
     assert.ok(weixin);
-    assert.equal(weixin.configured, false);
-    assert.equal(weixin.fields.length, 0);
+    assert.equal(weixin.configured, true, 'weixin has all-optional fields so configured=true from env alone');
+    assert.equal(weixin.fields.length, 4);
   });
 
   it('marks feishu as configured when all 3 fields are set', () => {

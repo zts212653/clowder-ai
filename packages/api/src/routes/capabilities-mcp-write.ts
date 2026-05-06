@@ -139,7 +139,10 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
         if (body.args !== undefined) patch.args = body.args;
         if (body.url !== undefined) patch.url = body.url;
         if (body.headers !== undefined) patch.headers = body.headers;
-        if (body.env !== undefined) patch.env = body.env;
+        if (body.env !== undefined) {
+          const existingEnv = (existing.mcpServer?.env as Record<string, string> | undefined) ?? {};
+          patch.env = { ...existingEnv, ...body.env };
+        }
         if (body.resolver !== undefined) patch.resolver = body.resolver;
         if (body.transport !== undefined) patch.transport = body.transport;
 

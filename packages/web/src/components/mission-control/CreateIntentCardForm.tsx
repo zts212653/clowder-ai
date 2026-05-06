@@ -81,7 +81,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
   };
 
   return (
-    <div className="space-y-3 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4">
+    <div className="space-y-3 rounded-xl bg-[var(--console-card-bg)] p-4 shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
       <h3 className="text-sm font-bold text-cafe">新建 Intent Card</h3>
 
       {/* Original text */}
@@ -92,7 +92,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
           onChange={(e) => setOriginalText(e.target.value)}
           rows={3}
           placeholder="粘贴 PRD 原文片段..."
-          className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface px-3 py-2 text-xs text-cafe focus:border-[var(--cafe-accent)] focus:outline-none"
+          className="console-form-input mt-1 w-full text-xs"
         />
       </label>
 
@@ -113,7 +113,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
               value={f.value}
               onChange={(e) => f.set(e.target.value)}
               placeholder={f.ph}
-              className="mt-0.5 w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1 text-xs focus:border-[var(--cafe-accent)] focus:outline-none"
+              className="console-form-input mt-0.5 w-full text-xs"
             />
           </label>
         ))}
@@ -126,7 +126,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
           <select
             value={sourceTag}
             onChange={(e) => setSourceTag(e.target.value as SourceTag)}
-            className="mt-0.5 w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1 text-xs"
+            className="console-form-input mt-0.5 w-full text-xs"
           >
             <option value="Q">Q — 客户口述</option>
             <option value="O">O — 现场观察</option>
@@ -140,7 +140,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
           <select
             value={confidence}
             onChange={(e) => setConfidence(Number(e.target.value))}
-            className="mt-0.5 w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1 text-xs"
+            className="console-form-input mt-0.5 w-full text-xs"
           >
             <option value={1}>1 — 低</option>
             <option value={2}>2 — 中</option>
@@ -158,7 +158,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
             value={sourceDetail}
             onChange={(e) => setSourceDetail(e.target.value)}
             placeholder="PRD section 3.2"
-            className="mt-0.5 w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1 text-xs focus:border-[var(--cafe-accent)] focus:outline-none"
+            className="console-form-input mt-0.5 w-full text-xs"
           />
         </label>
         <label className="block">
@@ -168,7 +168,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
             value={decisionOwner}
             onChange={(e) => setDecisionOwner(e.target.value)}
             placeholder="Product Owner"
-            className="mt-0.5 w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1 text-xs focus:border-[var(--cafe-accent)] focus:outline-none"
+            className="console-form-input mt-0.5 w-full text-xs"
           />
         </label>
       </div>
@@ -201,18 +201,14 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
       )}
 
       <div className="flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded-lg border border-[var(--console-border-soft)] px-4 py-1.5 text-xs font-medium text-cafe-secondary hover:bg-[var(--console-pill-bg)]"
-        >
+        <button type="button" onClick={onCancel} className="console-button-secondary">
           取消
         </button>
         <button
           type="button"
           onClick={() => void handleSubmit()}
           disabled={submitting}
-          className="rounded-lg bg-[var(--cafe-accent)] px-4 py-1.5 text-xs font-medium text-[var(--cafe-surface)] hover:bg-[var(--cafe-accent-hover,#7A6139)] disabled:opacity-40"
+          className="console-button-primary disabled:opacity-40"
         >
           {submitting ? '创建中...' : '创建'}
         </button>

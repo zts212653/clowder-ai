@@ -116,10 +116,7 @@ export function WorkflowSopPanel({ backlogItemId }: WorkflowSopPanelProps) {
 
   if (!backlogItemId) {
     return (
-      <section
-        className="rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3"
-        data-testid="mc-workflow-sop"
-      >
+      <section className="p-3" data-testid="mc-workflow-sop">
         <p className="text-[11px] text-cafe-muted">选择一个 backlog 项查看 SOP 状态</p>
       </section>
     );
@@ -127,10 +124,7 @@ export function WorkflowSopPanel({ backlogItemId }: WorkflowSopPanelProps) {
 
   if (loading) {
     return (
-      <section
-        className="rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3"
-        data-testid="mc-workflow-sop"
-      >
+      <section className="p-3" data-testid="mc-workflow-sop">
         <p className="text-[11px] text-cafe-muted">加载 SOP 告示牌中...</p>
       </section>
     );
@@ -138,10 +132,7 @@ export function WorkflowSopPanel({ backlogItemId }: WorkflowSopPanelProps) {
 
   if (fetchError) {
     return (
-      <section
-        className="rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3"
-        data-testid="mc-workflow-sop"
-      >
+      <section className="p-3" data-testid="mc-workflow-sop">
         <p className="text-[11px] text-conn-red-text">{fetchError}</p>
       </section>
     );
@@ -149,11 +140,8 @@ export function WorkflowSopPanel({ backlogItemId }: WorkflowSopPanelProps) {
 
   if (!sop) {
     return (
-      <section
-        className="rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3"
-        data-testid="mc-workflow-sop"
-      >
-        <p className="rounded-lg border border-dashed border-[var(--console-border-soft)] px-2 py-2 text-[11px] text-cafe-muted">
+      <section className="p-3" data-testid="mc-workflow-sop">
+        <p className="rounded-lg bg-[var(--console-field-bg)] px-2 py-2 text-[11px] text-cafe-muted">
           暂无 SOP 告示牌数据
         </p>
       </section>
@@ -163,10 +151,7 @@ export function WorkflowSopPanel({ backlogItemId }: WorkflowSopPanelProps) {
   const checkEntries = Object.entries(sop.checks) as [keyof WorkflowSop['checks'], CheckStatus][];
 
   return (
-    <section
-      className="rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3"
-      data-testid="mc-workflow-sop"
-    >
+    <section className="p-3" data-testid="mc-workflow-sop">
       {/* Header */}
       <div className="mb-2">
         <h2 className="text-sm font-semibold text-cafe">SOP 告示牌</h2>
@@ -179,7 +164,7 @@ export function WorkflowSopPanel({ backlogItemId }: WorkflowSopPanelProps) {
       </div>
 
       {/* Baton holder + next skill */}
-      <div className="mb-3 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2.5 py-2">
+      <div className="mb-3 rounded-xl bg-[var(--console-field-bg)] px-2.5 py-2">
         <p className="text-[11px] text-cafe-secondary">
           接力棒：
           <span className="font-semibold text-cafe" data-testid="sop-baton-holder">
@@ -194,10 +179,7 @@ export function WorkflowSopPanel({ backlogItemId }: WorkflowSopPanelProps) {
       </div>
 
       {/* Resume capsule */}
-      <div
-        className="mb-3 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2.5 py-2"
-        data-testid="sop-resume-capsule"
-      >
+      <div className="mb-3 rounded-xl bg-[var(--console-field-bg)] px-2.5 py-2" data-testid="sop-resume-capsule">
         <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-cafe-muted">Resume Capsule</p>
         <p className="text-[11px] text-cafe">
           <span className="font-medium text-cafe-secondary">Goal：</span>

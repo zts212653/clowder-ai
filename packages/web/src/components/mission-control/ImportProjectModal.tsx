@@ -45,7 +45,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onClose}>
       <div
-        className="w-full max-w-md rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-6 shadow-lg"
+        className="w-full max-w-md rounded-2xl bg-[var(--console-card-bg)] p-6 shadow-[0_12px_30px_rgba(43,33,26,0.08)]"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="mb-4 text-base font-bold text-cafe">导入项目</h2>
@@ -58,7 +58,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. studio-flow"
-              className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface px-3 py-2 text-sm text-cafe focus:border-[var(--cafe-accent)] focus:outline-none"
+              className="console-form-input mt-1 w-full text-sm"
             />
           </label>
 
@@ -69,7 +69,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
               value={sourcePath}
               onChange={(e) => setSourcePath(e.target.value)}
               placeholder="/home/user/studio-flow"
-              className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface px-3 py-2 text-sm text-cafe focus:border-[var(--cafe-accent)] focus:outline-none"
+              className="console-form-input mt-1 w-full text-sm"
             />
           </label>
 
@@ -79,7 +79,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
               type="text"
               value={backlogPath}
               onChange={(e) => setBacklogPath(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface px-3 py-2 text-sm text-cafe focus:border-[var(--cafe-accent)] focus:outline-none"
+              className="console-form-input mt-1 w-full text-sm"
             />
           </label>
 
@@ -90,7 +90,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="简要描述"
-              className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface px-3 py-2 text-sm text-cafe focus:border-[var(--cafe-accent)] focus:outline-none"
+              className="console-form-input mt-1 w-full text-sm"
             />
           </label>
         </div>
@@ -102,18 +102,14 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
         )}
 
         <div className="mt-4 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg border border-[var(--console-border-soft)] px-4 py-1.5 text-xs font-medium text-cafe-secondary hover:bg-[var(--console-pill-bg)]"
-          >
+          <button type="button" onClick={onClose} className="console-button-secondary">
             取消
           </button>
           <button
             type="button"
             onClick={() => void handleSubmit()}
             disabled={submitting}
-            className="rounded-lg bg-[var(--cafe-accent)] px-4 py-1.5 text-xs font-medium text-[var(--cafe-surface)] hover:bg-[var(--cafe-accent-hover,#7A6139)] disabled:opacity-40"
+            className="console-button-primary disabled:opacity-40"
           >
             {submitting ? '导入中...' : '导入'}
           </button>

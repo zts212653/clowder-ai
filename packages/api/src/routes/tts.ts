@@ -181,6 +181,10 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
 
       if (messageStore && parsed.data.messageId && parsed.data.blockId) {
         const msg = await messageStore.getById(parsed.data.messageId);
+        if (msg && msg.userId !== userId) {
+          reply.status(403);
+          return { error: 'Not authorized to update this message' };
+        }
         if (msg?.extra?.rich) {
           const blocks = msg.extra.rich.blocks.map((b) =>
             b.id === parsed.data.blockId

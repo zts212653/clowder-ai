@@ -75,36 +75,17 @@ export function MissionHubView() {
   const d = useMissionHubData();
 
   return (
-    <div className="h-full bg-[var(--console-panel-bg)]">
-      <div className="flex h-full flex-col overflow-hidden rounded-[18px] bg-[var(--console-shell-bg)] shadow-[var(--console-shadow-soft)] m-3">
+    <div className="flex h-full flex-col bg-[var(--console-panel-bg)]">
+      <div className="flex flex-1 flex-col overflow-hidden rounded-[18px] bg-[var(--console-shell-bg)] shadow-[var(--console-shadow-soft)] m-3">
         {/* Header */}
-        <header className="flex items-center justify-between px-7 py-4 border-b border-[var(--console-border-soft)]">
-          <div className="flex items-center gap-3">
-            <a
-              href={d.backHref}
-              className="inline-flex items-center gap-1 rounded-lg border border-[var(--console-border-soft)] px-2.5 py-1.5 text-xs font-medium text-[var(--cafe-accent)] hover:bg-[var(--console-pill-bg)] transition-colors"
-              data-testid="mc-back-to-chat"
-            >
-              <svg
-                className="h-4 w-4"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                aria-hidden="true"
-              >
-                <polyline points="15 18 9 12 15 6" />
-              </svg>
-              返回
-            </a>
-            <h1 className="text-lg font-bold text-cafe">Mission Hub</h1>
-          </div>
+        <header className="flex items-center justify-between px-7 py-4">
+          <h1 className="text-lg font-bold text-cafe">Mission Hub</h1>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => void d.handleImportFromDocs()}
               disabled={d.submitting}
-              className="rounded-lg border border-[var(--console-border-soft)] px-3 py-1.5 text-xs font-medium text-cafe-secondary hover:bg-[var(--console-pill-bg)] disabled:opacity-40 transition-colors"
+              className="console-button-secondary disabled:opacity-40"
               data-testid="mc-import-docs"
             >
               导入 Backlog
@@ -112,7 +93,7 @@ export function MissionHubView() {
             <button
               type="button"
               onClick={() => d.setShowImportModal(true)}
-              className="rounded-lg border border-[var(--console-border-soft)] px-3 py-1.5 text-xs font-medium text-cafe-secondary hover:bg-[var(--console-pill-bg)] transition-colors"
+              className="console-button-secondary"
               data-testid="mc-import-project"
             >
               + 导入项目
@@ -128,7 +109,7 @@ export function MissionHubView() {
         )}
 
         {/* Tabs + Status */}
-        <div className="flex items-center justify-between px-7 py-2.5 border-b border-[var(--console-border-soft)]">
+        <div className="flex items-center justify-between px-7 py-2.5">
           <div className="flex items-center gap-1">
             <TabButton
               active={d.activeTab === 'features'}
@@ -184,11 +165,12 @@ export function MissionHubView() {
                   threadsByFeatureId={d.threadsByFeatureId}
                   selectedItemId={d.selectedItemId}
                   onSelectItem={d.setSelectedItemId}
+                  onDeleteItem={d.handleDelete}
                 />
               </div>
               {/* Right panel */}
-              <div className="flex min-h-0 flex-col rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)]">
-                <div className="flex border-b border-[var(--console-border-soft)] px-2 pt-1">
+              <div className="flex min-h-0 flex-col rounded-2xl bg-[var(--console-card-bg)] shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
+                <div className="flex border-b border-[var(--console-border-soft)] px-3 pt-2">
                   <RightTabButton
                     tab="suggestion"
                     current={d.rightPanelTab}

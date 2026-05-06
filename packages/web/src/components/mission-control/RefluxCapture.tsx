@@ -75,11 +75,11 @@ export function RefluxCapture({ projectId, patterns, onUpdate }: RefluxCapturePr
 
       {/* Capture form */}
       {showForm && (
-        <div className="space-y-2 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4">
+        <div className="space-y-2 rounded-lg bg-[var(--console-card-bg)] shadow-[0_12px_30px_rgba(43,33,26,0.08)] p-4">
           <select
             value={category}
             onChange={(e) => setCategory(e.target.value as RefluxCategory)}
-            className="w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1.5 text-xs text-cafe"
+            className="console-form-input"
           >
             {CATEGORY_OPTIONS.map((c) => (
               <option key={c} value={c}>
@@ -91,21 +91,21 @@ export function RefluxCapture({ projectId, patterns, onUpdate }: RefluxCapturePr
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="标题"
-            className="w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1.5 text-xs text-cafe"
+            className="console-form-input"
           />
           <textarea
             value={insight}
             onChange={(e) => setInsight(e.target.value)}
             placeholder="Insight..."
             rows={3}
-            className="w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1.5 text-xs text-cafe"
+            className="console-form-input"
           />
           <textarea
             value={evidence}
             onChange={(e) => setEvidence(e.target.value)}
             placeholder="Evidence..."
             rows={2}
-            className="w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1.5 text-xs text-cafe"
+            className="console-form-input"
           />
           <button
             type="button"
@@ -128,10 +128,7 @@ export function RefluxCapture({ projectId, patterns, onUpdate }: RefluxCapturePr
           {patterns.map((p) => {
             const style = CATEGORY_STYLES[p.category];
             return (
-              <div
-                key={p.id}
-                className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3 text-xs"
-              >
+              <div key={p.id} className="rounded-lg bg-[var(--console-field-bg)] p-3 text-xs">
                 <div className="mb-1 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${style.bg} ${style.text}`}>

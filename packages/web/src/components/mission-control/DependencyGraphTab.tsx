@@ -110,7 +110,7 @@ export function DependencyGraphTab({ items }: DependencyGraphTabProps) {
   return (
     <div data-testid="mc-dep-graph">
       {/* Toolbar: scope filter + stats */}
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-[var(--console-card-bg)] shadow-[0_12px_30px_rgba(43,33,26,0.08)] px-3 py-2">
         <div className="flex items-center gap-2">
           {(Object.keys(SCOPE_LABELS) as DagScope[]).map((s) => (
             <button
@@ -134,7 +134,7 @@ export function DependencyGraphTab({ items }: DependencyGraphTabProps) {
       </div>
 
       {/* Legend */}
-      <div className="mb-3 flex flex-wrap items-center gap-4 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2">
+      <div className="mb-3 flex flex-wrap items-center gap-4 rounded-xl bg-[var(--console-card-bg)] shadow-[0_12px_30px_rgba(43,33,26,0.08)] px-3 py-2">
         <LegendDot color="#E4A853" label="待审批" />
         <LegendDot color="#5B9BD5" label="执行中" />
         <LegendDot color="#7CB87C" label="已完成" />
@@ -150,11 +150,11 @@ export function DependencyGraphTab({ items }: DependencyGraphTabProps) {
 
       {/* DAG graph or empty state */}
       {filtered.length === 0 ? (
-        <div className="flex items-center justify-center rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] py-16 text-sm text-cafe-muted">
+        <div className="flex items-center justify-center rounded-xl bg-[var(--console-card-bg)] shadow-[0_12px_30px_rgba(43,33,26,0.08)] py-16 text-sm text-cafe-muted">
           当前筛选无有依赖关系的 Feature — 尝试切换到「全部」或刷新依赖数据
         </div>
       ) : (
-        <div className="h-[500px] w-full rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)]">
+        <div className="h-[500px] w-full rounded-xl bg-[var(--console-card-bg)] shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -185,7 +185,7 @@ function NodeDetailPanel({ data, onClose }: { data: FeatureNodeData; onClose: ()
   const colors = STATUS_COLORS[data.status];
   return (
     <div
-      className="mt-3 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4"
+      className="mt-3 rounded-xl bg-[var(--console-card-bg)] shadow-[0_12px_30px_rgba(43,33,26,0.08)] p-4"
       data-testid="mc-dep-node-detail"
     >
       <div className="flex items-center justify-between">

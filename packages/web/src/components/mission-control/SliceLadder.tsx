@@ -123,10 +123,7 @@ export function SliceLadder({ projectId, slices, onUpdate }: SliceLadderProps) {
             const isExpanded = expanded.has(slice.id);
             const nextStatus = NEXT_STATUS[slice.status];
             return (
-              <div
-                key={slice.id}
-                className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3 text-xs"
-              >
+              <div key={slice.id} className="rounded-lg bg-[var(--console-field-bg)] p-3 text-xs">
                 <div className="flex items-center gap-2">
                   <div className="flex flex-col gap-0.5">
                     <button

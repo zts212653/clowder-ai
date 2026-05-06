@@ -1100,6 +1100,12 @@
     },
     {
       "id": "F179",
+      "name": "Console 功能体系重构",
+      "status": "doing | Owner: 布偶猫/宪宪",
+      "file": "F179-console-architecture-restructure.md"
+    },
+    {
+      "id": "F179",
       "name": "Desktop Installer Release Pipeline — 自动化产出 Win/Mac 安装包并附 release",
       "status": "in-progress (Phase B: AC-B3 pending cross-cat verification) | **Owner**: Ragdoll（Opus-47/Ragdoll） | **Reviewer**: Maine Coon（GPT-5.5/Maine Coon） | **Priority**: P1",
       "file": "F179-desktop-installer-release-pipeline.md"
@@ -1109,6 +1115,12 @@
       "name": "Agent CLI Hook Health and Sync",
       "status": "in-progress (Phase A+B merged via PR #1476; Phase C AC-C5 merged via PR #1477; Phase C AC-C1~C3 merged via PR #1478; Phase C AC-C4 + Phase D field repair station merged via PR #1479; AC-D4/open-source closure pending) | **Owner**: Maine Coon/Maine Coon | **Priority**: P1",
       "file": "F180-agent-cli-hook-health.md"
+    },
+    {
+      "id": "F180",
+      "name": "Service Manifest — ML 服务统一管理",
+      "status": "doing | **Owner**: 布偶猫/宪宪",
+      "file": "F180-service-manifest.md"
     },
     {
       "id": "F181",

@@ -42,7 +42,7 @@ export function SuggestionOpenForm({
 }: SuggestionOpenFormProps) {
   return (
     <form
-      className="mt-4 space-y-2"
+      className="mt-4 space-y-3"
       onSubmit={(event) => {
         event.preventDefault();
         if (!catId || !why.trim() || !plan.trim()) return;
@@ -55,12 +55,12 @@ export function SuggestionOpenForm({
         });
       }}
     >
-      <label className="block text-[11px] font-medium text-cafe-secondary">
-        建议领取猫猫
+      <div>
+        <p className="text-xs font-semibold text-cafe">建议领取猫猫</p>
         <select
           value={catId}
           onChange={(event) => onCatIdChange(event.target.value)}
-          className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] px-2 py-1.5 text-xs text-cafe"
+          className="console-form-input mt-1.5 text-xs"
           data-testid="mc-suggest-cat"
         >
           {catOptions.map((option) => (
@@ -69,29 +69,29 @@ export function SuggestionOpenForm({
             </option>
           ))}
         </select>
-      </label>
-      <label className="block text-[11px] font-medium text-cafe-secondary">
-        Why
+      </div>
+      <div>
+        <p className="text-xs font-semibold text-cafe">Why</p>
         <textarea
           value={why}
           onChange={(event) => onWhyChange(event.target.value)}
-          className="mt-1 h-16 w-full rounded-lg border border-[var(--console-border-soft)] px-2 py-1.5 text-xs text-cafe"
+          className="console-form-input mt-1.5 h-16 w-full text-xs"
           data-testid="mc-suggest-why"
         />
-      </label>
-      <label className="block text-[11px] font-medium text-cafe-secondary">
-        Plan
+      </div>
+      <div>
+        <p className="text-xs font-semibold text-cafe">Plan</p>
         <textarea
           value={plan}
           onChange={(event) => onPlanChange(event.target.value)}
-          className="mt-1 h-16 w-full rounded-lg border border-[var(--console-border-soft)] px-2 py-1.5 text-xs text-cafe"
+          className="console-form-input mt-1.5 h-16 w-full text-xs"
           data-testid="mc-suggest-plan"
         />
-      </label>
+      </div>
       <button
         type="submit"
         disabled={submitting || catOptions.length === 0}
-        className="w-full rounded-lg bg-cafe px-3 py-2 text-xs font-semibold text-[var(--cafe-surface)] disabled:opacity-40"
+        className="console-button-primary w-full disabled:opacity-40"
         data-testid="mc-suggest-submit"
       >
         提交建议领取

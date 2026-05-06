@@ -357,45 +357,6 @@ export function HubConnectorConfigTab() {
                     ))}
                   </div>
                 </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center gap-1.5">
-                    <StepBadge num={filteredSteps.length} />
-                    <span className="text-[13px] font-medium text-cafe">测试连接并保存</span>
-                  </div>
-                  {saveResult && (
-                    <div
-                      className={`ml-[26px] rounded-[16px] px-3 py-2 text-xs ${
-                        saveResult.type === 'success'
-                          ? 'bg-conn-emerald-bg text-conn-emerald-text border border-conn-emerald-ring'
-                          : 'bg-conn-red-bg text-conn-red-text border border-conn-red-ring'
-                      }`}
-                      data-testid="save-result"
-                    >
-                      {saveResult.message}
-                    </div>
-                  )}
-                  <div className="flex items-center gap-2 ml-[26px]">
-                    <button
-                      type="button"
-                      className="console-button-secondary text-[13px]"
-                      disabled={testing}
-                      onClick={() => handleTestConnection(platform.id)}
-                    >
-                      <WifiIcon />
-                      {testing ? '测试中...' : '测试连接'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSave(platform)}
-                      disabled={saving}
-                      className="console-button-primary text-[13px] disabled:opacity-50"
-                      data-testid={`save-${platform.id}`}
-                    >
-                      {saving ? '保存中...' : '保存配置'}
-                    </button>
-                  </div>
-                </div>
               </div>
             )}
 
@@ -403,11 +364,45 @@ export function HubConnectorConfigTab() {
               <div className="console-code-pane px-4 py-4">
                 <p className="text-[13px] font-semibold text-cafe mb-3">群聊权限</p>
                 <Suspense fallback={<p className="text-xs text-cafe-muted">加载中...</p>}>
-                  <HubPermissionsTab
-                    connectorId={platform.id}
-                    connectorLabel={PERMISSION_CONNECTORS[platform.id]}
-                  />
+                  <HubPermissionsTab connectorId={platform.id} connectorLabel={PERMISSION_CONNECTORS[platform.id]} />
                 </Suspense>
+              </div>
+            )}
+
+            {isExpanded && platform.id !== 'weixin' && platform.id !== 'wecom-bot' && (
+              <div className="console-code-pane px-4 py-4 space-y-2">
+                {saveResult && (
+                  <div
+                    className={`rounded-[16px] px-3 py-2 text-xs ${
+                      saveResult.type === 'success'
+                        ? 'bg-conn-emerald-bg text-conn-emerald-text border border-conn-emerald-ring'
+                        : 'bg-conn-red-bg text-conn-red-text border border-conn-red-ring'
+                    }`}
+                    data-testid="save-result"
+                  >
+                    {saveResult.message}
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="console-button-secondary text-[13px]"
+                    disabled={testing}
+                    onClick={() => handleTestConnection(platform.id)}
+                  >
+                    <WifiIcon />
+                    {testing ? '测试中...' : '测试连接'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSave(platform)}
+                    disabled={saving}
+                    className="console-button-primary text-[13px] disabled:opacity-50"
+                    data-testid={`save-${platform.id}`}
+                  >
+                    {saving ? '保存中...' : '保存配置'}
+                  </button>
+                </div>
               </div>
             )}
           </div>

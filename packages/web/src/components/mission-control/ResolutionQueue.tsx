@@ -92,12 +92,8 @@ export function ResolutionQueue({ projectId, resolutions, cards, onUpdate }: Res
 
       {/* Add Question form */}
       {showForm && (
-        <div className="space-y-2 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4">
-          <select
-            value={cardId}
-            onChange={(e) => setCardId(e.target.value)}
-            className="w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1.5 text-xs text-cafe"
-          >
+        <div className="space-y-2 rounded-lg bg-[var(--console-card-bg)] shadow-[0_12px_30px_rgba(43,33,26,0.08)] p-4">
+          <select value={cardId} onChange={(e) => setCardId(e.target.value)} className="console-form-input">
             <option value="">选择 Card...</option>
             {cards.map((c) => (
               <option key={c.id} value={c.id}>
@@ -105,11 +101,7 @@ export function ResolutionQueue({ projectId, resolutions, cards, onUpdate }: Res
               </option>
             ))}
           </select>
-          <select
-            value={path}
-            onChange={(e) => setPath(e.target.value as NonNullPath)}
-            className="w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1.5 text-xs text-cafe"
-          >
+          <select value={path} onChange={(e) => setPath(e.target.value as NonNullPath)} className="console-form-input">
             {PATH_OPTIONS.map((p) => (
               <option key={p} value={p}>
                 {p}
@@ -121,14 +113,14 @@ export function ResolutionQueue({ projectId, resolutions, cards, onUpdate }: Res
             onChange={(e) => setQuestion(e.target.value)}
             placeholder="问题..."
             rows={2}
-            className="w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1.5 text-xs text-cafe"
+            className="console-form-input"
           />
           <textarea
             value={recommendation}
             onChange={(e) => setRecommendation(e.target.value)}
             placeholder="建议..."
             rows={2}
-            className="w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1.5 text-xs text-cafe"
+            className="console-form-input"
           />
           <button
             type="button"
@@ -151,10 +143,7 @@ export function ResolutionQueue({ projectId, resolutions, cards, onUpdate }: Res
           {resolutions.map((item) => {
             const style = STATUS_STYLES[item.status] ?? STATUS_STYLES.open;
             return (
-              <div
-                key={item.id}
-                className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3 text-xs"
-              >
+              <div key={item.id} className="rounded-lg bg-[var(--console-field-bg)] p-3 text-xs">
                 <div className="mb-1 flex items-center gap-2">
                   <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${style.bg} ${style.text}`}>
                     {item.status}
@@ -175,7 +164,7 @@ export function ResolutionQueue({ projectId, resolutions, cards, onUpdate }: Res
                       value={answerText[item.id] ?? ''}
                       onChange={(e) => setAnswerText((prev) => ({ ...prev, [item.id]: e.target.value }))}
                       placeholder="回答..."
-                      className="flex-1 rounded border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1 text-xs"
+                      className="console-form-input flex-1"
                     />
                     <button
                       type="button"

@@ -22,6 +22,7 @@ interface FeatureRowListProps {
   threadsByFeatureId?: Record<string, ThreadSituationSummary[]>;
   selectedItemId: string | null;
   onSelectItem: (id: string) => void;
+  onDeleteItem?: (id: string) => Promise<void>;
 }
 
 const STATUS_DOT: Record<BacklogStatus, string> = {
@@ -81,11 +82,12 @@ export function FeatureRowList({
   threadsByFeatureId = {},
   selectedItemId,
   onSelectItem,
+  onDeleteItem,
 }: FeatureRowListProps) {
   const groups = useMemo(() => groupByFeature(items), [items]);
   const activeGroups = useMemo(() => groups.filter(([, fi]) => !isAllDone(fi)), [groups]);
   const doneGroups = useMemo(() => groups.filter(([, fi]) => isAllDone(fi)), [groups]);
-  const [expandedFeature, setExpandedFeature] = useState<string | null>(null);
+  const [expandedFeature, setExpandedFeature] = useState<string | null>('Untagged');
   const [doneExpanded, setDoneExpanded] = useState(false);
 
   return (
@@ -102,6 +104,7 @@ export function FeatureRowList({
           onToggle={() => setExpandedFeature(expandedFeature === tag ? null : tag)}
           selectedItemId={selectedItemId}
           onSelectItem={onSelectItem}
+          onDeleteItem={onDeleteItem}
         />
       ))}
 
@@ -133,6 +136,7 @@ export function FeatureRowList({
                   onToggle={() => setExpandedFeature(expandedFeature === tag ? null : tag)}
                   selectedItemId={selectedItemId}
                   onSelectItem={onSelectItem}
+                  onDeleteItem={onDeleteItem}
                 />
               ))}
             </div>
@@ -153,6 +157,7 @@ function FeatureRow({
   onToggle,
   selectedItemId,
   onSelectItem,
+  onDeleteItem,
 }: {
   tag: string;
   featureItems: BacklogItem[];
@@ -163,6 +168,7 @@ function FeatureRow({
   onToggle: () => void;
   selectedItemId: string | null;
   onSelectItem: (id: string) => void;
+  onDeleteItem?: (id: string) => Promise<void>;
 }) {
   const status = featureStatus(featureItems);
   const name = featureName(featureItems);
@@ -175,12 +181,12 @@ function FeatureRow({
 
   return (
     <div
-      className={`rounded-xl border ${expanded ? 'border-[var(--cafe-accent)] border-2' : 'border-[var(--console-border-soft)]'} bg-[var(--console-card-bg)] overflow-hidden`}
+      className={`rounded-xl overflow-hidden bg-[var(--console-card-bg)] shadow-[0_12px_30px_rgba(43,33,26,0.08)] ${expanded ? 'ring-1 ring-[var(--cafe-accent)]/40' : ''}`}
       data-testid={`mc-feature-row-${tag}`}
     >
       <button type="button" onClick={onToggle} className="flex w-full items-center gap-3 px-4 py-3 text-left">
         <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${STATUS_DOT[status]}`} />
-        <span className="w-11 shrink-0 text-[13px] font-bold text-[var(--cafe-accent)]">{tag}</span>
+        <span className="shrink-0 text-[13px] font-bold text-[var(--cafe-accent)]">{tag}</span>
         <span className="min-w-0 flex-1 truncate text-sm text-cafe">{name ?? featureItems[0]?.title ?? ''}</span>
         <span className={`shrink-0 rounded-md px-2 py-0.5 text-[11px] font-semibold ${badge.bg} ${badge.text}`}>
           {badge.label}
@@ -214,41 +220,67 @@ function FeatureRow({
               <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-cafe-muted">任务进度</p>
               <div className="space-y-1.5">
                 {featureItems.map((item) => (
-                  <button
+                  <div
                     key={item.id}
-                    type="button"
-                    onClick={() => onSelectItem(item.id)}
-                    className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors ${
+                    className={`group flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs transition-colors ${
                       selectedItemId === item.id ? 'bg-[var(--console-pill-bg)]' : 'hover:bg-[var(--console-card-bg)]'
                     }`}
                   >
-                    {item.status === 'done' ? (
-                      <svg
-                        className="h-4 w-4 shrink-0 text-conn-emerald-text"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
+                    <button
+                      type="button"
+                      onClick={() => onSelectItem(item.id)}
+                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                    >
+                      {item.status === 'done' ? (
+                        <svg
+                          className="h-4 w-4 shrink-0 text-conn-emerald-text"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                          <polyline points="22 4 12 14.01 9 11.01" />
+                        </svg>
+                      ) : item.status === 'dispatched' ? (
+                        <span className="h-4 w-4 shrink-0 rounded-full border-2 border-conn-amber-ring" />
+                      ) : (
+                        <span className="h-4 w-4 shrink-0 rounded-full border-2 border-[var(--console-border-soft)]" />
+                      )}
+                      <span
+                        className={`min-w-0 truncate ${item.status === 'done' ? 'text-cafe-muted line-through' : 'text-cafe'}`}
                       >
-                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-                        <polyline points="22 4 12 14.01 9 11.01" />
-                      </svg>
-                    ) : item.status === 'dispatched' ? (
-                      <span className="h-4 w-4 shrink-0 rounded-full border-2 border-conn-amber-ring" />
-                    ) : (
-                      <span className="h-4 w-4 shrink-0 rounded-full border-2 border-[var(--console-border-soft)]" />
-                    )}
-                    <span className={item.status === 'done' ? 'text-cafe-muted line-through' : 'text-cafe'}>
-                      {item.title}
-                    </span>
+                        {item.title}
+                      </span>
+                    </button>
                     <span
-                      className={`ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${STATUS_BADGE[item.status].bg} ${STATUS_BADGE[item.status].text}`}
+                      className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${STATUS_BADGE[item.status].bg} ${STATUS_BADGE[item.status].text}`}
                     >
                       {STATUS_BADGE[item.status].label}
                     </span>
-                  </button>
+                    {onDeleteItem && item.status === 'open' && (
+                      <button
+                        type="button"
+                        onClick={() => void onDeleteItem(item.id)}
+                        className="shrink-0 text-cafe-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-conn-red-text"
+                        title="删除"
+                      >
+                        <svg
+                          className="h-3.5 w-3.5"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="M18 6 6 18M6 6l12 12" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
                 ))}
               </div>
               {featureItems[0]?.dependencies && (

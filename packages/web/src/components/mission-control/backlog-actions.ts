@@ -114,6 +114,11 @@ export async function reclaimLease(payload: { itemId: string }): Promise<void> {
   await postBacklog(itemPath(payload.itemId, 'lease/reclaim'));
 }
 
+export async function deleteItem(itemId: string): Promise<void> {
+  const res = await apiFetch(`/api/backlog/items/${encodeURIComponent(itemId)}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(await parseError(res));
+}
+
 export async function importActiveFeatures(): Promise<void> {
   await postBacklog('/api/backlog/import-active-features');
 }

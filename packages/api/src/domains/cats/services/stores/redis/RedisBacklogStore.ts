@@ -470,6 +470,16 @@ export class RedisBacklogStore implements IBacklogStore {
     return item;
   }
 
+  async delete(itemId: string): Promise<boolean> {
+    const data = await this.redis.hgetall(BacklogKeys.detail(itemId));
+    if (!data || !data.id) return false;
+    const pipeline = this.redis.multi();
+    pipeline.del(BacklogKeys.detail(itemId));
+    if (data.userId) pipeline.zrem(BacklogKeys.userList(data.userId), itemId);
+    await pipeline.exec();
+    return true;
+  }
+
   async listByUser(userId: string): Promise<BacklogItem[]> {
     const ids = await this.redis.zrevrange(BacklogKeys.userList(userId), 0, -1);
     if (ids.length === 0) return [];

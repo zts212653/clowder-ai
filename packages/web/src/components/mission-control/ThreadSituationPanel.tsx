@@ -36,23 +36,20 @@ export function ThreadSituationPanel({
   threadsByFeatureId = {},
 }: ThreadSituationPanelProps) {
   return (
-    <section
-      className="min-h-0 rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3"
-      data-testid="mc-thread-situation"
-    >
+    <section className="min-h-0 p-3" data-testid="mc-thread-situation">
       <div className="mb-2">
         <h2 className="text-sm font-semibold text-cafe">线程态势</h2>
         <p className="text-[11px] text-cafe-secondary">Dispatched 项的执行面状态一览</p>
       </div>
 
       {dispatchedItems.length === 0 && (
-        <p className="rounded-lg border border-dashed border-[var(--console-border-soft)] px-2 py-2 text-[11px] text-cafe-muted">
+        <p className="rounded-lg bg-[var(--console-field-bg)] px-3 py-2 text-[11px] text-cafe-muted">
           暂无执行中的 backlog 项
         </p>
       )}
 
       {dispatchedItems.length > 0 && loading && (
-        <p className="rounded-lg border border-dashed border-[var(--console-border-soft)] px-2 py-2 text-[11px] text-cafe-muted">
+        <p className="rounded-lg bg-[var(--console-field-bg)] px-3 py-2 text-[11px] text-cafe-muted">
           加载线程态势中...
         </p>
       )}
@@ -86,7 +83,7 @@ export function ThreadSituationPanel({
           return (
             <article
               key={item.id}
-              className="rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2.5 py-2"
+              className="rounded-xl bg-[var(--console-field-bg)] px-2.5 py-2"
               data-testid={`mc-thread-situation-item-${item.id}`}
             >
               <p className="text-xs font-semibold text-cafe">{item.title}</p>

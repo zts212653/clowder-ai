@@ -257,7 +257,7 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
             type="button"
             onClick={() => void handleImportBacklog()}
             disabled={isStale}
-            className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary hover:bg-[var(--console-pill-bg)] disabled:opacity-50 disabled:cursor-not-allowed"
+            className="console-button-secondary disabled:opacity-50 disabled:cursor-not-allowed"
           >
             导入 Backlog
           </button>
@@ -332,7 +332,7 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
 
             {subTab === 'features' &&
               (projectItems.length === 0 ? (
-                <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-8 text-center text-sm text-cafe-muted">
+                <div className="rounded-lg bg-[var(--console-card-bg)] shadow-[0_12px_30px_rgba(43,33,26,0.08)] p-8 text-center text-sm text-cafe-muted">
                   暂无功能 — 使用上方「导入 Backlog」按钮从项目导入
                 </div>
               ) : (
@@ -340,7 +340,7 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
                   {projectItems.map((item) => (
                     <div
                       key={item.id}
-                      className="flex items-center justify-between rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-4 py-3"
+                      className="flex items-center justify-between rounded-lg bg-[var(--console-card-bg)] shadow-[0_12px_30px_rgba(43,33,26,0.08)] px-4 py-3"
                     >
                       <div className="flex items-center gap-3">
                         <span className="rounded bg-[var(--console-pill-bg)] px-2 py-0.5 text-[10px] font-bold text-[var(--cafe-accent)]">

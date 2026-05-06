@@ -156,7 +156,7 @@ export function WeComBotSetupPanel({ configured, onConnected, onDisconnected }: 
           data-testid="wecom-bot-validate"
         >
           <WifiIcon />
-          Test &amp; Connect
+          测试连接
         </button>
       )}
     </div>

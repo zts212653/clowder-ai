@@ -56,7 +56,7 @@ export function IntentCardDetail({ card, onTriaged }: IntentCardDetailProps) {
       </div>
 
       {/* Core slots */}
-      <div className="space-y-2 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3">
+      <div className="space-y-2 rounded-lg bg-[var(--console-field-bg)] p-3">
         <SlotRow label="Actor" value={card.actor} />
         <SlotRow label="Context" value={card.contextTrigger} />
         <SlotRow label="Goal" value={card.goal} />
@@ -67,7 +67,7 @@ export function IntentCardDetail({ card, onTriaged }: IntentCardDetailProps) {
 
       {/* Original text */}
       {card.originalText && (
-        <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3">
+        <div className="rounded-lg bg-[var(--console-field-bg)] p-3">
           <div className="mb-1 text-[10px] font-semibold uppercase text-cafe-muted">甲方原文</div>
           <div className="text-cafe">{card.originalText}</div>
         </div>
@@ -88,7 +88,7 @@ export function IntentCardDetail({ card, onTriaged }: IntentCardDetailProps) {
       )}
 
       {/* Triage form */}
-      <div className="space-y-2 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3">
+      <div className="space-y-2 rounded-lg bg-[var(--console-field-bg)] p-3">
         <div className="text-[10px] font-semibold uppercase text-cafe-muted">Triage 评估</div>
         <ScoreSlider label="Clarity" value={clarity} onChange={setClarity} />
         <ScoreSlider label="Groundedness" value={groundedness} onChange={setGroundedness} />

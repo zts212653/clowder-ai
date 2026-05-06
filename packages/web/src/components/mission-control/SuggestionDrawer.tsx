@@ -114,7 +114,7 @@ export function SuggestionDrawer({
 
   if (!item) {
     return (
-      <aside className="rounded-2xl border border-[var(--console-border-soft)] bg-cafe-surface p-4">
+      <aside className="p-4">
         <h2 className="mb-2 text-sm font-semibold text-cafe">Suggestion Detail</h2>
         <p className="text-xs text-cafe-secondary">点击左侧卡片查看详情并执行建议领取/批准流程。</p>
       </aside>
@@ -122,11 +122,13 @@ export function SuggestionDrawer({
   }
 
   return (
-    <aside className="rounded-2xl border border-[var(--console-border-soft)] bg-cafe-surface p-4">
+    <aside className="p-4">
       <h2 className="text-sm font-semibold text-cafe">Suggestion Detail</h2>
       <p className="mt-1 text-xs text-cafe-secondary">状态：{statusLabel}</p>
-      <h3 className="mt-3 text-sm font-semibold text-cafe">{item.title}</h3>
-      <p className="mt-1 text-xs leading-relaxed text-cafe-secondary">{item.summary}</p>
+      <div className="mt-3 rounded-lg bg-[var(--console-field-bg)] p-3">
+        <h3 className="text-sm font-semibold text-cafe">{item.title}</h3>
+        <p className="mt-1 text-xs leading-relaxed text-cafe-secondary">{item.summary}</p>
+      </div>
 
       {item.status === 'open' && (
         <div className="mt-4 space-y-2">
@@ -147,7 +149,7 @@ export function SuggestionDrawer({
               setPlan('');
             }}
           />
-          <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-2 text-[11px] text-cafe-secondary">
+          <div className="rounded-lg bg-[var(--console-field-bg)] p-2 text-[11px] text-cafe-secondary">
             <p>
               Self-claim policy：<span className="font-semibold">{currentSelfClaimScope}</span>
             </p>
@@ -182,7 +184,7 @@ export function SuggestionDrawer({
                     requestedPhase: selectedPhase,
                   })
                 }
-                className="mt-2 w-full rounded-lg border border-cafe px-3 py-2 text-xs font-semibold text-cafe disabled:opacity-40"
+                className="console-button-secondary mt-2 w-full disabled:opacity-40"
                 data-testid="mc-self-claim-submit"
               >
                 直接自领并派发

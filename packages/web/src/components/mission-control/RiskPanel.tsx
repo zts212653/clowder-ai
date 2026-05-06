@@ -83,7 +83,7 @@ export function RiskPanel({ projectId, cards }: RiskPanelProps) {
   return (
     <div className="space-y-4">
       {/* Header + Run button */}
-      <div className="flex items-center justify-between rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-4 py-3">
+      <div className="flex items-center justify-between rounded-lg bg-[var(--console-field-bg)] px-4 py-3">
         <div>
           <div className="text-sm font-semibold text-cafe">風險預警</div>
           <div className="text-[10px] text-cafe-muted">对全部 Intent Cards 运行风险检测</div>
@@ -101,15 +101,15 @@ export function RiskPanel({ projectId, cards }: RiskPanelProps) {
       {/* Summary stats */}
       {summary && (
         <div className="grid grid-cols-3 gap-3">
-          <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3 text-center">
+          <div className="rounded-lg bg-[var(--console-field-bg)] p-3 text-center">
             <div className="text-lg font-bold text-cafe">{summary.totalCards}</div>
             <div className="text-[10px] font-medium text-cafe-muted">Total Cards</div>
           </div>
-          <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3 text-center">
+          <div className="rounded-lg bg-[var(--console-field-bg)] p-3 text-center">
             <div className="text-lg font-bold text-conn-red-text">{summary.cardsWithRisks}</div>
             <div className="text-[10px] font-medium text-cafe-muted">Cards w/ Risks</div>
           </div>
-          <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3 text-center">
+          <div className="rounded-lg bg-[var(--console-field-bg)] p-3 text-center">
             <div className="text-lg font-bold text-cafe">
               {Object.values(summary.signals).reduce((a, b) => a + b, 0)}
             </div>
@@ -122,10 +122,7 @@ export function RiskPanel({ projectId, cards }: RiskPanelProps) {
       {[...signalsByType.entries()].map(([signal, signalCards]) => {
         const severity = severityFor(signal);
         return (
-          <div
-            key={signal}
-            className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3"
-          >
+          <div key={signal} className="rounded-lg bg-[var(--console-field-bg)] p-3">
             <div className="mb-2 flex items-center gap-2">
               <span
                 className="rounded-full px-2 py-0.5 text-[10px] font-medium text-[var(--cafe-surface)]"

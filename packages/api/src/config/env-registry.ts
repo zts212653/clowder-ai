@@ -1227,6 +1227,16 @@ export const ENV_VARS: EnvDefinition[] = [
     hubVisible: false,
   },
 
+  // --- service management ---
+  {
+    name: 'CAT_CAFE_SERVICES_CONFIG',
+    defaultValue: '.cat-cafe/services.json',
+    description: '本地服务状态配置文件路径',
+    category: 'system',
+    sensitive: false,
+    hubVisible: false,
+  },
+
   // --- connector media ---
   {
     name: 'CONNECTOR_MEDIA_DIR',

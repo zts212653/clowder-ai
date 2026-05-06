@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -64,6 +64,21 @@ function appendLog(serviceId: string, chunk: string): void {
   }
 }
 
+/** Check if a PID's command line matches the service (prevents killing unrelated processes). */
+function isServiceProcess(pid: number, manifest: { scripts: { start?: string } }): boolean {
+  const startScript = manifest.scripts.start;
+  if (!startScript) return false;
+  try {
+    const cmd = execSync(`ps -o command= -p ${pid}`, { encoding: 'utf-8', timeout: 2000 }).trim();
+    // Match if the process command contains the service script name
+    const scriptBasename = startScript.replace(/.*\//, '');
+    return cmd.includes(scriptBasename) || cmd.includes(startScript);
+  } catch {
+    // Process may have already exited — treat as non-matching
+    return false;
+  }
+}
+
 function checkServiceOwner(request: Parameters<typeof resolveUserId>[0]): string | null {
   const userId = resolveUserId(request);
   if (!userId) return 'Authentication required';
@@ -78,7 +93,12 @@ export const servicesRoutes: FastifyPluginAsync = async (app) => {
     return { services: states };
   });
 
-  app.get('/api/services/endpoints', async () => {
+  app.get('/api/services/endpoints', async (request, reply) => {
+    const userId = resolveUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Authentication required' };
+    }
     const endpoints: Record<string, string | null> = {};
     for (const manifest of getKnownServices()) {
       endpoints[manifest.id] = resolveServiceEndpoint(manifest);
@@ -235,12 +255,13 @@ export const servicesRoutes: FastifyPluginAsync = async (app) => {
         child.on('close', () => res());
       });
       const myPid = process.pid;
-      const safePids = stdout
+      const candidatePids = stdout
         .trim()
         .split('\n')
         .filter(Boolean)
         .map((s) => Number(s))
         .filter((n) => Number.isFinite(n) && n > 0 && n !== myPid);
+      const safePids = candidatePids.filter((pid) => isServiceProcess(pid, manifest));
       for (const pid of safePids) {
         try {
           process.kill(pid, 'SIGTERM');

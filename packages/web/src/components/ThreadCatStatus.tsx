@@ -54,7 +54,7 @@ export function ThreadCatStatus({
         <span
           className={`inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold leading-none ${
             hasUserMention
-              ? 'bg-[var(--console-stop)] text-white'
+              ? 'bg-[var(--console-stop)] text-[var(--cafe-surface)]'
               : 'bg-[var(--cafe-accent)] text-[var(--cafe-surface)]'
           }`}
         >

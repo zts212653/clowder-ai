@@ -44,7 +44,7 @@ describe('CONNECTOR_SECRETS_ALLOWLIST', () => {
     assert.equal(isConnectorSecret('TELEGRAM_BOT_TOKEN_EXTRA'), false);
   });
 
-  it('allowlist has exactly 20 entries', () => {
-    assert.equal(CONNECTOR_SECRETS_ALLOWLIST.size, 20);
+  it('allowlist has exactly 26 entries', () => {
+    assert.equal(CONNECTOR_SECRETS_ALLOWLIST.size, 26);
   });
 });

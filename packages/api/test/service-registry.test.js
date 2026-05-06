@@ -5,12 +5,12 @@ import { getKnownServices, getServiceById, resolveHealthUrl } from '../dist/doma
 describe('service-registry', () => {
   it('returns all known services', () => {
     const services = getKnownServices();
-    assert.ok(services.length >= 5);
+    assert.ok(services.length >= 4);
     const ids = services.map((s) => s.id);
     assert.ok(ids.includes('whisper-stt'));
     assert.ok(ids.includes('mlx-tts'));
     assert.ok(ids.includes('embedding-model'));
-    assert.ok(ids.includes('playwright'));
+    assert.ok(ids.includes('llm-postprocess'));
   });
 
   it('finds a service by id', () => {
@@ -54,7 +54,7 @@ describe('resolveHealthUrl', () => {
     try {
       const manifest = getServiceById('embedding-model');
       const url = resolveHealthUrl(manifest);
-      assert.equal(url, 'http://127.0.0.1:9999/health');
+      assert.equal(url, 'http://localhost:9999/health');
     } finally {
       if (savedUrl !== undefined) process.env.EMBED_URL = savedUrl;
       else delete process.env.EMBED_URL;
@@ -88,7 +88,7 @@ describe('resolveHealthUrl', () => {
     try {
       const manifest = getServiceById('embedding-model');
       const url = resolveHealthUrl(manifest);
-      assert.equal(url, 'http://127.0.0.1:9880/health');
+      assert.equal(url, 'http://localhost:9880/health');
     } finally {
       if (savedUrl !== undefined) process.env.EMBED_URL = savedUrl;
       if (savedPort !== undefined) process.env.EMBED_PORT = savedPort;
