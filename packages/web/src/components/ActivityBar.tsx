@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useCallback } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useCafeTheme } from '@/hooks/useCafeTheme';
 import { usePinnedSections } from '@/hooks/usePinnedSections';
 import { HubIcon } from './hub-icons';
@@ -59,10 +59,27 @@ function SignalIcon({ className = 'w-5 h-5' }: { className?: string }) {
   );
 }
 
-function ThemeIcon({ className = 'w-5 h-5' }: { className?: string }) {
+function SunIcon({ className = 'w-5 h-5' }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
-      <title>主题</title>
+      <title>日间模式</title>
+      <circle cx="12" cy="12" r="5" />
+      <line x1="12" y1="1" x2="12" y2="3" />
+      <line x1="12" y1="21" x2="12" y2="23" />
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+      <line x1="1" y1="12" x2="3" y2="12" />
+      <line x1="21" y1="12" x2="23" y2="12" />
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+    </svg>
+  );
+}
+
+function MoonIcon({ className = 'w-5 h-5' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
+      <title>夜间模式</title>
       <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
@@ -158,8 +175,10 @@ function SettingsButton({ pathname, onNav }: { pathname: string; onNav: (path: s
 export function ActivityBar({ className }: ActivityBarProps) {
   const pathname = usePathname() ?? '/';
   const router = useRouter();
-  const { toggleTheme } = useCafeTheme();
+  const { toggleTheme, resolvedTheme } = useCafeTheme();
   const { pinned } = usePinnedSections();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   const handleNav = useCallback(
     (path: string) => {
@@ -217,9 +236,9 @@ export function ActivityBar({ className }: ActivityBarProps) {
           type="button"
           onClick={toggleTheme}
           className="flex h-10 w-10 items-center justify-center rounded-[9px] bg-[var(--console-rail-item)] hover:bg-[var(--console-hover-bg)] transition-all"
-          title="切换主题"
+          title={mounted && resolvedTheme === 'dark' ? '切换到日间模式' : '切换到夜间模式'}
         >
-          <ThemeIcon className="h-5 w-5" />
+          {mounted && resolvedTheme === 'dark' ? <MoonIcon className="h-5 w-5" /> : <SunIcon className="h-5 w-5" />}
         </button>
         <Suspense
           fallback={

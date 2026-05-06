@@ -1,6 +1,5 @@
 import { useChatStore } from '@/stores/chatStore';
 import { ExportButton } from './ExportButton';
-import { ThemeToggle } from './ThemeToggle';
 import { VoiceCompanionButton } from './VoiceCompanionButton';
 
 interface ChatContainerHeaderProps {
@@ -62,8 +61,6 @@ export function ChatContainerHeader({
             🔐 {authPendingCount}
           </span>
         )}
-        {/* F056 Phase D: Theme toggle */}
-        <ThemeToggle />
         <button
           onClick={onOpenMobileStatus}
           className="p-1 rounded-lg hover:bg-[var(--console-hover-bg)] transition-colors ml-1 lg:hidden"
