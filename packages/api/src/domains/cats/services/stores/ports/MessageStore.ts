@@ -65,6 +65,7 @@ export interface StoredMessage {
     targetCats?: string[];
     scheduler?: SchedulerMessageExtra['scheduler'];
     tracing?: { traceId: string; spanId: string; parentSpanId?: string };
+    systemKind?: 'a2a_routing';
   };
   /** CatIds mentioned in this message */
   mentions: readonly CatId[];

@@ -647,8 +647,12 @@ function addBackgroundSystemMessage(
   variant: 'info' | 'a2a_followup' = 'info',
   extra?: { systemKind?: 'a2a_routing' },
 ): void {
+  const id =
+    extra?.systemKind === 'a2a_routing' && msg.messageId
+      ? msg.messageId
+      : `bg-sys-${msg.timestamp}-${msg.catId}-${options.nextBgSeq()}`;
   options.store.addMessageToThread(msg.threadId, {
-    id: `bg-sys-${msg.timestamp}-${msg.catId}-${options.nextBgSeq()}`,
+    id,
     type: 'system',
     variant,
     catId: msg.catId,
@@ -2415,7 +2419,7 @@ export function useAgentMessages() {
         // (background path already uses nextBgSeq for the same reason).
         const serverTs = msg.timestamp ?? Date.now();
         addMessage({
-          id: `a2a-${serverTs}-${msg.catId}-${nextActiveA2AHandoffSeq()}`,
+          id: msg.messageId ?? `a2a-${serverTs}-${msg.catId}-${nextActiveA2AHandoffSeq()}`,
           type: 'system',
           variant: 'info',
           content: msg.content ?? '',

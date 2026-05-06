@@ -136,7 +136,17 @@ function mergeMessageExtra(
   const scheduler = preferred?.scheduler ?? fallback?.scheduler;
   const timeoutDiagnostics = preferred?.timeoutDiagnostics ?? fallback?.timeoutDiagnostics;
   const governanceBlocked = preferred?.governanceBlocked ?? fallback?.governanceBlocked;
-  if (!rich && !crossPost && !stream && !targetCats && !scheduler && !timeoutDiagnostics && !governanceBlocked) {
+  const systemKind = preferred?.systemKind ?? fallback?.systemKind;
+  if (
+    !rich &&
+    !crossPost &&
+    !stream &&
+    !targetCats &&
+    !scheduler &&
+    !timeoutDiagnostics &&
+    !governanceBlocked &&
+    !systemKind
+  ) {
     return undefined;
   }
   return {
@@ -147,6 +157,7 @@ function mergeMessageExtra(
     ...(scheduler ? { scheduler } : {}),
     ...(timeoutDiagnostics ? { timeoutDiagnostics } : {}),
     ...(governanceBlocked ? { governanceBlocked } : {}),
+    ...(systemKind ? { systemKind } : {}),
   };
 }
 
@@ -473,6 +484,7 @@ export function useChatHistory(threadId: string) {
               crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
               stream?: { invocationId?: string };
               scheduler?: SchedulerMessageExtra['scheduler'];
+              systemKind?: 'a2a_routing';
             };
             timestamp: number;
             summary?: { id: string; topic: string; conclusions: string[]; openQuestions: string[]; createdBy: string };
@@ -504,13 +516,14 @@ export function useChatHistory(threadId: string) {
               ...(m.metadata ? { metadata: m.metadata } : {}),
               ...(m.origin ? { origin: m.origin } : {}),
               ...(m.thinking ? { thinking: m.thinking } : {}),
-              ...(m.extra?.rich || m.extra?.crossPost || m.extra?.stream || m.extra?.scheduler
+              ...(m.extra?.rich || m.extra?.crossPost || m.extra?.stream || m.extra?.scheduler || m.extra?.systemKind
                 ? {
                     extra: {
                       ...(m.extra.rich ? { rich: m.extra.rich } : {}),
                       ...(m.extra.crossPost ? { crossPost: m.extra.crossPost } : {}),
                       ...(m.extra.stream ? { stream: m.extra.stream } : {}),
                       ...(m.extra.scheduler ? { scheduler: m.extra.scheduler } : {}),
+                      ...(m.extra.systemKind ? { systemKind: m.extra.systemKind } : {}),
                     },
                   }
                 : {}),

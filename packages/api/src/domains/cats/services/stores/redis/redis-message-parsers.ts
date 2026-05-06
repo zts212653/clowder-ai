@@ -56,6 +56,7 @@ export function safeParseExtra(raw: string | undefined):
       };
       targetCats?: string[];
       tracing?: { traceId: string; spanId: string; parentSpanId?: string };
+      systemKind?: 'a2a_routing';
     }
   | undefined {
   if (!raw) return undefined;
@@ -79,6 +80,7 @@ export function safeParseExtra(raw: string | undefined):
       };
       targetCats?: string[];
       tracing?: { traceId: string; spanId: string; parentSpanId?: string };
+      systemKind?: 'a2a_routing';
     } = {};
     let hasField = false;
 
@@ -123,6 +125,11 @@ export function safeParseExtra(raw: string | undefined):
     // #481: Preserve targetCats sub-field through Redis round-trip
     if (Array.isArray(parsed.targetCats)) {
       result.targetCats = parsed.targetCats;
+      hasField = true;
+    }
+
+    if (parsed.systemKind === 'a2a_routing') {
+      result.systemKind = 'a2a_routing';
       hasField = true;
     }
 

@@ -142,6 +142,30 @@ describe('GET /api/messages', () => {
     assert.equal(body.messages[0].source.meta.presentation, 'system_notice');
   });
 
+  it('maps a2a_routing system messages to type=system with extra.systemKind', async () => {
+    messageStore.append({
+      userId: 'system',
+      catId: null,
+      content: '布偶猫 → 缅因猫',
+      mentions: [],
+      timestamp: 3000,
+      threadId: 'thread-routing',
+      extra: { systemKind: 'a2a_routing' },
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-routing',
+    });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].type, 'system');
+    assert.equal(body.messages[0].catId, null);
+    assert.equal(body.messages[0].content, '布偶猫 → 缅因猫');
+    assert.equal(body.messages[0].extra.systemKind, 'a2a_routing');
+  });
+
   it('respects limit parameter', async () => {
     for (let i = 0; i < 10; i++) {
       messageStore.append({
