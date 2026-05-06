@@ -148,11 +148,14 @@ const HubPermissionsTab = forwardRef<HubPermissionsTabHandle, HubPermissionsTabP
               <span className="text-xs font-medium text-cafe-secondary">群白名单</span>
             </div>
             <button
+              type="button"
+              role="switch"
+              aria-checked={config.whitelistEnabled}
               onClick={() => setConfig((prev) => ({ ...prev, whitelistEnabled: !prev.whitelistEnabled }))}
-              className={`relative w-10 h-5 rounded-full transition-colors ${config.whitelistEnabled ? 'bg-[var(--color-cafe-accent)]' : 'bg-[var(--console-pill-bg)]'}`}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${config.whitelistEnabled ? 'bg-[var(--color-cafe-accent)]' : 'bg-[var(--console-pill-bg)]'}`}
             >
-              <div
-                className={`absolute top-0.5 w-4 h-4 rounded-full bg-cafe-surface transition-transform ${config.whitelistEnabled ? 'translate-x-5' : 'translate-x-0.5'}`}
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-cafe-surface shadow ring-0 transition-transform ${config.whitelistEnabled ? 'translate-x-5' : 'translate-x-0'}`}
               />
             </button>
           </div>
@@ -203,7 +206,7 @@ const HubPermissionsTab = forwardRef<HubPermissionsTabHandle, HubPermissionsTabP
                 <button
                   onClick={addGroup}
                   disabled={!newGroupId.trim()}
-                  className="px-3 py-1.5 text-xs bg-[var(--color-cafe-accent)] text-[var(--cafe-surface)] rounded-lg disabled:opacity-40"
+                  className="shrink-0 px-3 py-1.5 text-xs bg-[var(--color-cafe-accent)] text-[var(--cafe-surface)] rounded-lg disabled:opacity-40"
                 >
                   添加
                 </button>
@@ -263,7 +266,7 @@ const HubPermissionsTab = forwardRef<HubPermissionsTabHandle, HubPermissionsTabP
               <button
                 onClick={addAdmin}
                 disabled={!newAdminId.trim()}
-                className="px-3 py-1.5 text-xs bg-[var(--color-cafe-accent)] text-[var(--cafe-surface)] rounded-lg disabled:opacity-40"
+                className="shrink-0 px-3 py-1.5 text-xs bg-[var(--color-cafe-accent)] text-[var(--cafe-surface)] rounded-lg disabled:opacity-40"
               >
                 添加
               </button>
@@ -279,11 +282,14 @@ const HubPermissionsTab = forwardRef<HubPermissionsTabHandle, HubPermissionsTabP
               <span className="text-xs font-medium text-cafe-secondary">群聊命令仅管理员</span>
             </div>
             <button
+              type="button"
+              role="switch"
+              aria-checked={config.commandAdminOnly}
               onClick={() => setConfig((prev) => ({ ...prev, commandAdminOnly: !prev.commandAdminOnly }))}
-              className={`relative w-10 h-5 rounded-full transition-colors ${config.commandAdminOnly ? 'bg-[var(--color-cafe-accent)]' : 'bg-[var(--console-pill-bg)]'}`}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${config.commandAdminOnly ? 'bg-[var(--color-cafe-accent)]' : 'bg-[var(--console-pill-bg)]'}`}
             >
-              <div
-                className={`absolute top-0.5 w-4 h-4 rounded-full bg-cafe-surface transition-transform ${config.commandAdminOnly ? 'translate-x-5' : 'translate-x-0.5'}`}
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-cafe-surface shadow ring-0 transition-transform ${config.commandAdminOnly ? 'translate-x-5' : 'translate-x-0'}`}
               />
             </button>
           </div>
