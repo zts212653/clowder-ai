@@ -7,7 +7,7 @@ created: 2026-02-26
 
 # Cat Cafe Feature Roadmap
 
-> 维护者：三猫 | 最后更新：2026-04-30（F183 + F184 联合立项）
+> 维护者：三猫 | 最后更新：2026-05-03（F186 立项）
 >
 > **规则**：只放活跃 Feature（idea/spec/in-progress/review），done 后移除。
 > 详细信息见 `docs/features/Fxxx-*.md`。
@@ -26,6 +26,7 @@ created: 2026-02-26
 | F067 | Cold-start Verifier — 无历史污染的交付物验证 | spec | Ragdoll | internal | [F067](features/F067-cold-start-verifier.md) |
 | F069 | Thread Read State — 未读 Badge 后端真相源 | spec | Ragdoll | internal | [F069](features/F069-thread-read-state.md) |
 | F077 | Multi-User Secure Collaboration — GitHub OAuth + Thread ACL + Session | spec | Ragdoll | internal | [F077](features/F077-multi-user-secure-collab.md) |
+| F088 | Multi-Platform Chat Gateway — Telegram reliability follow-up | follow-up-planned | Ragdoll | community [#524](https://github.com/zts212653/clowder-ai/issues/524) [#641](https://github.com/zts212653/clowder-ai/pull/641) [#642](https://github.com/zts212653/clowder-ai/pull/642) | [F088](features/F088-multi-platform-chat-gateway.md) |
 | F089 | Hub Terminal & tmux Integration — 浏览器终端 + 猫猫可观测性 | in-progress | Ragdoll | internal | [F089](features/F089-hub-terminal-tmux.md) |
 | F090 | Pixel Cat Brawl — 像素猫猫大作战：即时格斗 demo game | phase-1-done | Ragdoll | internal | [F090](features/F090-pixel-cat-brawl.md) |
 | F093 | Cats & U 陪伴式共创世界引擎 — 万物有灵 | spec | Ragdoll | internal | [F093](features/F093-cats-and-u-world-engine.md) |
@@ -61,6 +62,4 @@ created: 2026-02-26
 | F179 | Desktop Installer Release Pipeline — Win NSIS + Mac DMG 自动附 release | spec | Ragdoll | community (v0.9.0 反馈) | [F179](features/F179-desktop-installer-release-pipeline.md) |
 | F180 | Agent CLI Hook Health and Sync — user-level hook 检测 + 一键同步 | in-progress | Maine Coon/Maine Coon | community [#614](https://github.com/zts212653/clowder-ai/issues/614) | [F180](features/F180-agent-cli-hook-health.md) |
 | F181 | Reserved Feature Slot — 待补充需求锚点 | idea | 待定 | internal | [F181](features/F181-reserved-feature-slot.md) |
-| F182 | Cat Roster Lifecycle Toggle — 成员启停的全链路降级反馈 | spec | Ragdoll（Ragdoll/Opus 4.7） | internal | [F182](features/F182-cat-roster-lifecycle-toggle.md) |
-| F183 | Bubble Pipeline Architecture Consolidation — 消息气泡管线架构收敛（统一身份契约 + Single Writer + IDB invalidation + 序列号补偿） | in-progress | Ragdoll（Ragdoll/Opus 4.7）牵头 | internal | [F183](features/F183-bubble-pipeline-architecture-consolidation.md) |
-| F184 | ChatMessage Rendering Mount Investigation — F176 撤销后真 bug（DOM 缺失）独立排查 | spec | 待定 | internal | [F184](features/F184-chatmessage-rendering-mount-investigation.md) |
+| F187 | Thread Labels — 用户自定义标签 + Sidebar 筛选 + 猫猫辅助分类 | spec | Ragdoll | internal | [F187](features/F187-thread-labels.md) |

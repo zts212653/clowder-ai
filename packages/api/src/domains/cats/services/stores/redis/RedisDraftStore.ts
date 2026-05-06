@@ -36,6 +36,7 @@ export class RedisDraftStore implements IDraftStore {
   async upsert(draft: DraftRecord): Promise<void> {
     const detailKey = DraftKeys.detail(draft.userId, draft.threadId, draft.invocationId);
     const indexKey = DraftKeys.index(draft.userId, draft.threadId);
+    const createdAtForMissing = await this.createdAtForMissing(detailKey, draft.createdAt ?? draft.updatedAt);
 
     const fields: Record<string, string> = {
       userId: draft.userId,
@@ -53,6 +54,7 @@ export class RedisDraftStore implements IDraftStore {
     }
 
     const pipeline = this.redis.multi();
+    pipeline.hsetnx(detailKey, 'createdAt', createdAtForMissing);
     pipeline.hset(detailKey, fields);
     pipeline.sadd(indexKey, draft.invocationId);
     if (this.ttlSeconds !== null) {
@@ -66,13 +68,21 @@ export class RedisDraftStore implements IDraftStore {
     if (this.ttlSeconds === null) return;
     const detailKey = DraftKeys.detail(userId, threadId, invocationId);
     const indexKey = DraftKeys.index(userId, threadId);
+    const now = Date.now();
+    const createdAtForMissing = await this.createdAtForMissing(detailKey, now);
 
     const pipeline = this.redis.multi();
+    pipeline.hsetnx(detailKey, 'createdAt', createdAtForMissing);
     // Update updatedAt so draft sort order stays fresh during tool-only phases
-    pipeline.hset(detailKey, 'updatedAt', String(Date.now()));
+    pipeline.hset(detailKey, 'updatedAt', String(now));
     pipeline.expire(detailKey, this.ttlSeconds);
     pipeline.expire(indexKey, this.ttlSeconds);
     await pipeline.exec();
+  }
+
+  private async createdAtForMissing(detailKey: string, fallback: number): Promise<string> {
+    const existingUpdatedAt = await this.redis.hget(detailKey, 'updatedAt');
+    return existingUpdatedAt ?? String(fallback);
   }
 
   async getByThread(userId: string, threadId: string): Promise<DraftRecord[]> {
@@ -155,6 +165,7 @@ export class RedisDraftStore implements IDraftStore {
       invocationId: d.invocationId ?? '',
       catId: (d.catId ?? 'opus') as CatId,
       content: d.content ?? '',
+      createdAt: parseInt(d.createdAt ?? d.updatedAt ?? '0', 10),
       updatedAt: parseInt(d.updatedAt ?? '0', 10),
       ...(toolEvents ? { toolEvents } : {}),
       ...(d.thinking ? { thinking: d.thinking } : {}),

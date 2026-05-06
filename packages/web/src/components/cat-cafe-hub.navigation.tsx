@@ -98,7 +98,9 @@ export function AccordionSection({
         type="button"
         onClick={onToggle}
         className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left transition-colors hover:bg-cafe-surface-elevated/50"
-        data-guide-id={group.id === 'settings' ? 'settings.group' : undefined}
+        data-guide-id={
+          group.id === 'settings' ? 'settings.group' : group.id === 'monitor' ? 'monitor.group' : undefined
+        }
       >
         <span className="flex-shrink-0" style={{ color: group.color }}>
           <HubIcon name={group.icon} className="h-5 w-5" />
@@ -128,7 +130,13 @@ export function AccordionSection({
                 className="flex w-full items-center gap-3 rounded-lg px-4 py-2.5 text-left text-sm transition-colors"
                 style={isActive ? { backgroundColor: `${group.color}10`, color: group.color } : {}}
                 data-guide-id={
-                  tab.id === 'cats' ? 'cats.overview' : tab.id === 'accounts' ? 'settings.accounts' : undefined
+                  tab.id === 'cats'
+                    ? 'cats.overview'
+                    : tab.id === 'accounts'
+                      ? 'settings.accounts'
+                      : tab.id === 'observability'
+                        ? 'monitor.observability'
+                        : undefined
                 }
               >
                 <span style={isActive ? { color: group.color } : { color: '#9ca3af' }}>

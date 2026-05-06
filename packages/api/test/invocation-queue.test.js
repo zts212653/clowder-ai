@@ -1176,6 +1176,80 @@ describe('InvocationQueue', () => {
     assert.deepStrictEqual(items, ['A', 'C', 'B'], 'move(B, down) should only swap B and C');
   });
 
+  // ── F185: hasQueuedNonAgentForThread (AC-6) ──
+
+  it('hasQueuedNonAgentForThread returns false when only agent entries are queued', () => {
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'handoff',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+    assert.equal(queue.hasQueuedNonAgentForThread('t1'), false, 'agent-only queue should not trigger fairness gate');
+  });
+
+  it('hasQueuedNonAgentForThread returns true when connector entry is queued', () => {
+    queue.enqueue(entry({ source: 'connector', targetCats: ['opus'] }));
+    assert.equal(queue.hasQueuedNonAgentForThread('t1'), true, 'connector entry must trigger fairness gate');
+  });
+
+  it('hasQueuedNonAgentForThread returns true when user entry is queued', () => {
+    queue.enqueue(entry({ source: 'user' }));
+    assert.equal(queue.hasQueuedNonAgentForThread('t1'), true, 'user entry must trigger fairness gate');
+  });
+
+  it('hasQueuedNonAgentForThread ignores processing entries', () => {
+    queue.enqueue(entry({ source: 'connector', targetCats: ['opus'] }));
+    queue.markProcessing('t1', 'u1');
+    assert.equal(queue.hasQueuedNonAgentForThread('t1'), false, 'processing entries are already being handled');
+  });
+
+  it('hasQueuedNonAgentForThread returns false for empty queue', () => {
+    assert.equal(queue.hasQueuedNonAgentForThread('t1'), false);
+  });
+
+  // ── F185: agent urgent prohibition (AC-8) ──
+
+  it('rejects urgent priority for agent entries (non-continuation)', () => {
+    const result = queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'A2A handoff',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+      priority: 'urgent',
+    });
+    assert.equal(result.entry.priority, 'normal', 'agent entry urgent must be downgraded to normal');
+  });
+
+  it('allows urgent priority for continuation entries (AC-12)', () => {
+    const result = queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'continuation',
+      source: 'agent',
+      sourceCategory: 'continuation',
+      targetCats: ['opus'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+      priority: 'urgent',
+    });
+    assert.equal(result.entry.priority, 'urgent', 'continuation entry must keep urgent priority');
+  });
+
+  it('allows urgent priority for connector entries', () => {
+    const result = queue.enqueue(entry({ source: 'connector', priority: 'urgent', sourceCategory: 'ci' }));
+    assert.equal(result.entry.priority, 'urgent', 'connector urgent must not be affected');
+  });
+
   // ── R2-P2: collectUserBatch returns entries in comparator order ──
 
   it('collectUserBatch returns entries sorted by comparator (R2-P2)', () => {

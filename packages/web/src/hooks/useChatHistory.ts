@@ -242,7 +242,17 @@ function mergeSameIdHydrationMessage(history: ChatMessageData, current: ChatMess
   };
 }
 
-function mergeReplaceHydrationMessages(
+// F183 Phase B1 AC-B2: 简化到 ≤ 2 种匹配策略。
+// 旧版有 4 条逻辑分支（id 匹配 → mergeSameId / streamKey 匹配 → 偏好选择 / draft 孤儿
+// 守卫 / 默认保留），并各自重复 historyIds Set + historyIndexByStreamKey Map 两份索引。
+// 简化后：
+//   1. **stable-identity 匹配（统一）**：构建单一索引 `historyIndexByStableId`，
+//      同时收 (id) 和 (streamKey) 键 → 单次 lookup 拿到 history 目标 index
+//   2. **未匹配**：默认 keep，但走 draft-orphan 副过滤器（不算独立匹配策略）
+// 行为不变：matched-by-id 走 mergeSameIdHydrationMessage；matched-by-streamKey
+// 走 shouldPreferCurrentMessage。统计字段语义不变。
+/** Exported for unit testing — see __tests__/mergeReplaceHydrationMessages-idb.test.ts */
+export function mergeReplaceHydrationMessages(
   historyMsgs: ChatMessageData[],
   currentMsgs: ChatMessageData[],
   currentCatInvocations: Record<string, CatInvocationInfo>,
@@ -254,61 +264,71 @@ function mergeReplaceHydrationMessages(
     };
   }
 
-  const historyIds = new Set(historyMsgs.map((msg) => msg.id));
-  const mergedMsgs = [...historyMsgs];
-  const historyIndexByStreamKey = new Map<string, number>();
-
+  // 单一索引: id ∪ (catId:invocationId) streamKey 都进同一个 Map。
+  // matchKind 区分 lookup 命中是 id 还是 streamKey（决定 merge action）。
+  // 当一个 invocation 在 history 里有多条 bubble（如 stream + 后续 callback），
+  // streamKey 命名空间内取 **last wins**（与 refactor 前 historyIndexByStreamKey
+  // 直接 Map.set 覆盖语义一致）—— 否则 reconciliation 会瞄到 stale earlier
+  // 条目，让 local placeholder 替换掉早期 stream bubble，留下两条 invocation
+  // 重复气泡（cloud Codex P1）。id 命名空间不被 streamKey 覆盖。
+  const historyIndexByStableId = new Map<string, { index: number; matchKind: 'id' | 'stream-key' }>();
   for (let i = 0; i < historyMsgs.length; i++) {
     const msg = historyMsgs[i]!;
+    historyIndexByStableId.set(msg.id, { index: i, matchKind: 'id' });
     const invocationId = msg.catId ? getHistoryInvocationId(msg) : undefined;
-    if (!msg.catId || !invocationId) continue;
-    historyIndexByStreamKey.set(`${msg.catId}:${invocationId}`, i);
+    if (msg.catId && invocationId) {
+      const streamKey = `${msg.catId}:${invocationId}`;
+      const existing = historyIndexByStableId.get(streamKey);
+      if (!existing || existing.matchKind === 'stream-key') {
+        historyIndexByStableId.set(streamKey, { index: i, matchKind: 'stream-key' });
+      }
+    }
   }
 
+  const mergedMsgs = [...historyMsgs];
   let preservedLocalCount = 0;
   let reconciledToHistoryCount = 0;
   let replacedHistoryCount = 0;
 
   for (const msg of currentMsgs) {
-    if (historyIds.has(msg.id)) {
-      const historyIndex = mergedMsgs.findIndex((candidate) => candidate.id === msg.id);
-      if (historyIndex !== -1) {
-        mergedMsgs[historyIndex] = mergeSameIdHydrationMessage(mergedMsgs[historyIndex]!, msg);
+    // F183 Phase D AC-D2 (砚砚 R1 P1 fix): IDB-origin messages NEVER participate
+    // in the merge — server history is authoritative. Skip BEFORE id/streamKey
+    // matching so cached IDB never enters mergeSameIdHydrationMessage (which
+    // could spread cachedFrom into a "richer-current preferred" outcome) nor
+    // the streamKey replacement branch (which would write the cached msg
+    // verbatim into mergedMsgs). For matched cases history stays in mergedMsgs
+    // as-is; for unmatched, the cached copy is dropped. F164 AC-A3 instant
+    // render still works: IDB hydrates first paint, API hydration replaces
+    // cleanly without cache leakage.
+    if (msg.cachedFrom === 'idb') {
+      continue;
+    }
+
+    // Strategy: stable-identity lookup. id 优先于 streamKey（id 命中走 same-id 合并）。
+    const idHit = historyIndexByStableId.get(msg.id);
+    const invocationId = msg.catId ? getLocalPlaceholderInvocationId(msg, currentCatInvocations) : undefined;
+    const streamKey = msg.catId && invocationId ? `${msg.catId}:${invocationId}` : undefined;
+    const streamHit = streamKey ? historyIndexByStableId.get(streamKey) : undefined;
+    const target = idHit?.matchKind === 'id' ? idHit : streamHit?.matchKind === 'stream-key' ? streamHit : undefined;
+
+    if (target) {
+      const historyMsg = mergedMsgs[target.index]!;
+      if (target.matchKind === 'id') {
+        mergedMsgs[target.index] = mergeSameIdHydrationMessage(historyMsg, msg);
+      } else if (shouldPreferCurrentMessage(msg, historyMsg)) {
+        mergedMsgs[target.index] = msg;
+        replacedHistoryCount++;
+      } else {
+        reconciledToHistoryCount++;
       }
       continue;
     }
 
-    const invocationId = msg.catId ? getLocalPlaceholderInvocationId(msg, currentCatInvocations) : undefined;
-    const streamKey = msg.catId && invocationId ? `${msg.catId}:${invocationId}` : undefined;
-
-    if (streamKey) {
-      const historyIndex = historyIndexByStreamKey.get(streamKey);
-      if (historyIndex !== undefined) {
-        const historyMsg = mergedMsgs[historyIndex]!;
-        if (shouldPreferCurrentMessage(msg, historyMsg)) {
-          mergedMsgs[historyIndex] = msg;
-          replacedHistoryCount++;
-        } else {
-          reconciledToHistoryCount++;
-        }
-        continue;
-      }
-    }
-
-    // F173 Phase C Task 9 — narrow ghost-tolerance guard (cloud Codex P1).
-    // Drop only the precise orphan-draft shape: id startsWith 'draft-' AND
-    // no live invocation in catInvocations claims its invocationId.
-    //
-    // Why narrow to draft-*:
-    //   - IDB-cached orphan drafts (hotfix3-filtered) always carry id
-    //     'draft-{invocationId}' (DraftStore write path).
-    //   - Just-completed live bubbles use 'msg-{inv}-{cat}' shape and may
-    //     have catInvocations cleared by the done handler before the server
-    //     persists them. An overly broad guard would drop those legitimate
-    //     bubbles on a fast thread switch — Codex P1 caught this.
-    //
-    // Result: orphan IDB drafts dropped; live just-completed bubbles preserved
-    // until server GET returns authoritative replacement.
+    // Side filter (not a matching strategy): F173 Phase C Task 9 narrow ghost-tolerance.
+    // Drop only the precise orphan-draft shape — IDB-cached orphans carrying id
+    // 'draft-{invocationId}' AND no live invocation claims that invocationId.
+    // Live just-completed bubbles use 'msg-{inv}-{cat}' shape and survive (cloud
+    // Codex P1 — overly broad guard would drop legitimate bubbles on fast thread switch).
     if (invocationId && msg.id.startsWith('draft-')) {
       const knownToLiveInvocation = Object.values(currentCatInvocations).some(
         (info) => info.invocationId === invocationId,
@@ -854,19 +874,90 @@ export function useChatHistory(threadId: string) {
   }, [threadId, cancelPendingRestore, clearMessages, fetchHistory, fetchQueue, fetchTaskProgress, fetchTasks]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Bug C safety net: when useAgentMessages detects done(isFinal) with no
-  // streaming bubble, it bumps streamCatchUpVersion with a target threadId.
-  // Only fetch if this hook's threadId matches the request (P1: thread-scoped).
-  const catchUpVersion = useChatStore((s) => s.streamCatchUpVersion);
-  const catchUpThreadId = useChatStore((s) => s.streamCatchUpThreadId);
+  // streaming bubble, or processThreadSeq detects gap/epoch-change, it bumps
+  // `streamCatchUpVersionByThread[threadId]`.
+  //
+  // F183 Phase C cloud P2 fix (2026-05-02): subscribe to per-thread version
+  // slot (not the previous single-slot global `streamCatchUpVersion +
+  // streamCatchUpThreadId`). Per-thread counter ensures bg gap on thread B
+  // can't overwrite active thread A's pending signal — both threads
+  // independently trigger their own fetchHistory.
+  const catchUpVersion = useChatStore((s) => s.streamCatchUpVersionByThread[threadId] ?? 0);
+  const consumedCatchUpVersion = useChatStore((s) => s.lastConsumedCatchUpVersionByThread[threadId] ?? 0);
   useEffect(() => {
     if (catchUpVersion === 0) return; // Skip initial render
-    if (catchUpThreadId !== threadId) return; // P1: only act for matching thread
-    // Small delay: backend may still be persisting the final message
-    const timer = setTimeout(() => {
-      void fetchHistory(undefined, { replace: true });
-    }, 600);
-    return () => clearTimeout(timer);
-  }, [catchUpVersion, catchUpThreadId, threadId, fetchHistory]);
+    // Cloud R3 P2 fix (2026-05-02): only fire if version has advanced beyond
+    // last consumed. Without this, thread-switch re-mounts re-fire fetchHistory
+    // on stale catchUpVersion (already-handled trigger) → unnecessary full-history
+    // reload + state churn on routine navigation.
+    if (catchUpVersion <= consumedCatchUpVersion) return;
+    // Cloud R3 P1 fix (2026-05-02): retry on skipped/failed fetch with exponential
+    // backoff. Without retry, fetchHistory's `loadingRef.current` early-out (when
+    // another fetch is in flight) returns undefined; my `result !== true` guard
+    // correctly skips ack, but no retry was scheduled — pending hangs forever
+    // if no future event triggers another version bump (e.g. dropped tail packet
+    // on quiet thread). 3 retries with 1s/2s/4s backoff cap.
+    //
+    // Cloud R4 P1 fix (2026-05-02): retry exhaustion does NOT mark consumed.
+    // Marking consumed on exhaustion permanently gates the effect on quiet
+    // threads (no future events to bump version), so pending gap never retries
+    // on remount/thread revisit — must manually F5. Instead: leave consumed
+    // unchanged on exhaustion. Next remount (thread switch back / page nav)
+    // re-runs effect → version > consumed (consumed didn't move) → fresh
+    // retry cycle. Consumed only advances on actual fetch success.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancelled = false;
+    let retries = 0;
+    const MAX_RETRIES = 3;
+
+    const tryFetch = async () => {
+      if (cancelled) return;
+      // F183 Phase C 砚砚 R6 P1 race fix: capture pending target at fetch start,
+      // NOT at ack time. If a newer gap arrives during fetch flight, we only
+      // advance lastSeq to capturedTarget and keep newer pending for next ack.
+      const targetAtStart = useChatStore.getState().pendingCatchUpTargetSeqByThread[threadId];
+      try {
+        const result = await fetchHistory(undefined, { replace: true });
+        if (cancelled) return;
+        if (result === true) {
+          // Success: ack catchup target + mark consumed (gates remount re-fire)
+          useChatStore.getState().setLastConsumedCatchUpVersion(threadId, catchUpVersion);
+          if (typeof targetAtStart === 'number' && targetAtStart > 0) {
+            useChatStore.getState().acknowledgeCatchUp(threadId, targetAtStart);
+          }
+          return;
+        }
+        // Skipped (loadingRef early-out / !res.ok / stale thread / abort) — retry
+        if (retries < MAX_RETRIES) {
+          retries++;
+          const backoff = 1000 * 2 ** (retries - 1); // 1s, 2s, 4s
+          timer = setTimeout(tryFetch, backoff);
+        }
+        // Cloud R4 P1 fix (2026-05-02): exhausted retries — DO NOT mark consumed.
+        // Marking consumed here permanently gates the effect on quiet threads
+        // (no future events to bump version), so the pending gap never retries
+        // on remount/thread revisit. Leave consumed unchanged — next remount
+        // (e.g. thread switch back, page navigation) re-runs the effect with
+        // fresh retry cycle. New gap event bumps version → still triggers normally.
+      } catch {
+        if (cancelled) return;
+        if (retries < MAX_RETRIES) {
+          retries++;
+          const backoff = 1000 * 2 ** (retries - 1);
+          timer = setTimeout(tryFetch, backoff);
+        }
+        // Cloud R4 P1: same — no setLastConsumedCatchUpVersion on exhaustion.
+      }
+    };
+
+    // Initial 600ms debounce: collapses bursts of catch-up requests (e.g. multiple
+    // gap events during a stream) into one fetchHistory call via timer cancel-restart.
+    timer = setTimeout(tryFetch, 600);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [catchUpVersion, consumedCatchUpVersion, threadId, fetchHistory]);
 
   // Snapshot scroll height before history load
   useEffect(() => {

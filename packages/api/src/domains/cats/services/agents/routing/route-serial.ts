@@ -421,6 +421,24 @@ export async function* routeSerial(
         }
       }
 
+      // F093: Resolve world context for thread (fail-open)
+      let worldContext: import('@cat-cafe/shared').WorldContextEnvelope | undefined;
+      if (deps.worldStore && deps.worldContextProvider) {
+        try {
+          const activeWorld = await deps.worldStore.getWorldForThread(threadId);
+          if (activeWorld) {
+            const scenes = await deps.worldStore.getScenesByWorld(activeWorld.worldId);
+            const activeScene = scenes.find((s) => s.status === 'active');
+            if (activeScene) {
+              const envelope = await deps.worldContextProvider.assemble(activeWorld.worldId, activeScene.sceneId);
+              if (envelope) worldContext = envelope;
+            }
+          }
+        } catch {
+          /* fail-open: world context lookup failure does not block invocation */
+        }
+      }
+
       const invocationMode = worklist.length > 1 ? 'serial' : 'independent';
       const a2aEnabled = worklistEntry.a2aCount < maxDepth;
       const invocationContext = buildInvocationContext({
@@ -443,6 +461,7 @@ export async function* routeSerial(
         ...(bootcampState ? { bootcampState, threadId, bootcampMemberCount } : {}),
         ...(alwaysOnDocs && alwaysOnInjectionMode === 'on' ? { alwaysOnDocs } : {}),
         ...guideContextForCat(guideCtx, catId, targetCatIds, threadId),
+        ...(worldContext ? { worldContext } : {}),
       });
       const continuityCapsule = buildCapsuleFromRouteState({
         threadId,

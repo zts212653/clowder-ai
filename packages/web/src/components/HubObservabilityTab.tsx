@@ -55,12 +55,13 @@ export function HubObservabilityTab({ initialSubTab = 'overview', subTabNonce }:
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2 border-b border-cafe-border pb-2">
+      <div className="flex items-center gap-2 border-b border-cafe-border pb-2" data-guide-id="observability.subtabs">
         {SUB_TABS.map((t) => (
           <button
             key={t}
             type="button"
             onClick={() => setSubTab(t)}
+            data-guide-id={`observability.${t}`}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
               subTab === t ? 'bg-blue-50 text-blue-700' : 'text-cafe-secondary hover:bg-cafe-surface-elevated'
             }`}
@@ -124,7 +125,7 @@ function OverviewPanel() {
   if (loading) return <p className="text-sm text-cafe-muted">...</p>;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-guide-id="observability.overview-panel">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <MetricCard label="Invocation (ok)" value={String(invOk)} />
         <MetricCard
@@ -196,7 +197,7 @@ function HealthPanel() {
   if (!health) return <p className="text-sm text-cafe-secondary">Unable to load health data.</p>;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" data-guide-id="observability.health-panel">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <MetricCard label="Status" value={health.status === 'healthy' ? '✓ Healthy' : '⚠ Degraded'} />
         <MetricCard label="Uptime" value={formatUptime(health.uptime)} />

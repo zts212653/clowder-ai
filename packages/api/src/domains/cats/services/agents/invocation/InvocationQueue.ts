@@ -185,7 +185,8 @@ export class InvocationQueue {
       autoExecute: input.autoExecute ?? false,
       callerCatId: input.callerCatId,
       senderMeta: input.senderMeta,
-      priority: input.priority ?? 'normal',
+      priority:
+        input.source === 'agent' && input.sourceCategory !== 'continuation' ? 'normal' : (input.priority ?? 'normal'),
       sourceCategory: input.sourceCategory,
       continuationKey: input.continuationKey,
       suggestedSkill: input.suggestedSkill,
@@ -698,6 +699,15 @@ export class InvocationQueue {
     for (const q of this.queues.values()) {
       if (!this.queueMatchesThread(q, threadId)) continue;
       if (q.some((e) => e.status === 'queued')) return true;
+    }
+    return false;
+  }
+
+  /** F185 AC-6: Whether any non-agent entry (user or connector) is queued for this thread. */
+  hasQueuedNonAgentForThread(threadId: string): boolean {
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
+      if (q.some((e) => e.status === 'queued' && e.source !== 'agent')) return true;
     }
     return false;
   }

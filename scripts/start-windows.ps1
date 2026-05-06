@@ -671,7 +671,8 @@ try {
 
     if ($startedRedis) {
         try {
-            Send-RedisShutdown -RedisUrl "redis://localhost:$RedisPort"
+            $managedShutdownUrl = if ($configuredRedisUrl) { $configuredRedisUrl } else { "redis://localhost:$RedisPort" }
+            Send-RedisShutdown -RedisUrl $managedShutdownUrl
             Write-Ok "Redis stopped"
         } catch {
             Write-Warn "Could not stop Redis gracefully"

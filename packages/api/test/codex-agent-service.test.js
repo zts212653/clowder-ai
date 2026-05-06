@@ -134,7 +134,9 @@ test('injects cat-cafe MCP config when workingDirectory contains mcp-server', as
   const tmpRoot = mkdtempSync(join(import.meta.dirname ?? '.', '.tmp-mcp-test-'));
   const mcpDistDir = join(tmpRoot, 'packages', 'mcp-server', 'dist');
   mkdirSync(mcpDistDir, { recursive: true });
-  writeFileSync(join(mcpDistDir, 'index.js'), '// stub');
+  for (const entrypoint of ['index.js', 'collab.js', 'memory.js', 'signals.js']) {
+    writeFileSync(join(mcpDistDir, entrypoint), '// stub');
+  }
 
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
@@ -172,6 +174,15 @@ test('injects cat-cafe MCP config when workingDirectory contains mcp-server', as
       'must inject CAT_CAFE_CAT_ID for game action auth',
     );
     assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_SIGNAL_USER="codex"'));
+
+    assert.ok(args.includes('mcp_servers.cat-cafe-collab.command="node"'));
+    const collabArgsConfig = args.find((arg) => arg.startsWith('mcp_servers.cat-cafe-collab.args=['));
+    assert.ok(collabArgsConfig, 'must inject cat-cafe-collab mcp args config');
+    assert.match(collabArgsConfig, /packages\/mcp-server\/dist\/collab\.js/);
+    assert.ok(args.includes('mcp_servers.cat-cafe-collab.enabled=true'));
+    assert.ok(args.includes('mcp_servers.cat-cafe-collab.env.CAT_CAFE_API_URL="http://127.0.0.1:3004"'));
+    assert.ok(args.includes('mcp_servers.cat-cafe-collab.env.CAT_CAFE_INVOCATION_ID="inv-test-1"'));
+    assert.ok(args.includes('mcp_servers.cat-cafe-collab.env.CAT_CAFE_CALLBACK_TOKEN="tok-test-1"'));
   } finally {
     rmSync(tmpRoot, { recursive: true, force: true });
   }

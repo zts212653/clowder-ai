@@ -2080,4 +2080,82 @@ describe('QueueProcessor', () => {
       assert.ok(!calledContent.includes('a'), 'duplicate entry content must not appear in batched execution');
     });
   });
+
+  // ── F185 AC-7: tryAutoExecute fairness gate ──
+
+  describe('tryAutoExecute fairness gate (F185 AC-7)', () => {
+    it('skips auto-execute when non-agent entries are queued for the thread', async () => {
+      // User entry queued (non-agent)
+      enqueueEntry(deps.queue, {
+        userId: 'u1',
+        source: 'user',
+        targetCats: ['opus'],
+      });
+      // Agent autoExecute entry queued
+      enqueueEntry(deps.queue, {
+        userId: 'system',
+        source: 'agent',
+        targetCats: ['codex'],
+        autoExecute: true,
+        callerCatId: 'opus',
+      });
+
+      await processor.tryAutoExecute('t1');
+      await new Promise((r) => setTimeout(r, 50));
+
+      assert.equal(
+        deps.invocationTracker.startAll.mock.calls.length,
+        0,
+        'should NOT auto-execute when user entry is pending',
+      );
+      // Agent entry stays queued
+      const agentEntries = deps.queue.list('t1', 'system');
+      assert.equal(agentEntries.length, 1, 'agent entry should remain queued');
+      assert.equal(agentEntries[0].status, 'queued');
+    });
+
+    it('AC-11: A2A chain + connector entry → connector not starved by autoExecute', async () => {
+      // Connector entry queued first
+      enqueueEntry(deps.queue, {
+        userId: 'u1',
+        source: 'connector',
+        targetCats: ['opus'],
+      });
+      // Agent A2A chain entry queued after
+      enqueueEntry(deps.queue, {
+        userId: 'system',
+        source: 'agent',
+        targetCats: ['codex'],
+        autoExecute: true,
+        callerCatId: 'opus',
+      });
+
+      await processor.tryAutoExecute('t1');
+      await new Promise((r) => setTimeout(r, 50));
+
+      assert.equal(
+        deps.invocationTracker.startAll.mock.calls.length,
+        0,
+        'agent autoExecute must NOT run while connector entry is pending',
+      );
+    });
+
+    it('allows auto-execute when only agent entries are queued', async () => {
+      enqueueEntry(deps.queue, {
+        userId: 'system',
+        source: 'agent',
+        targetCats: ['codex'],
+        autoExecute: true,
+        callerCatId: 'opus',
+      });
+
+      await processor.tryAutoExecute('t1');
+      await new Promise((r) => setTimeout(r, 50));
+
+      assert.ok(
+        deps.invocationTracker.startAll.mock.calls.length > 0,
+        'should auto-execute when only agent entries are queued',
+      );
+    });
+  });
 });

@@ -174,4 +174,114 @@ describe('F183 bubble replay harness', () => {
       }),
     ]);
   });
+
+  // F183 Phase E AC-E3 — Phase B+C harness-level smoke. The fixture's
+  // reducer adapter mirrors the in-place upgrade contract (stream → callback
+  // share `msg-{inv}-{cat}` id) but does NOT exercise production
+  // BubbleReducer (that's covered by `bubble-reducer.test.ts` directly).
+  // 砚砚 R1 P3: this is a harness smoke for the AC-E3 framework, not a
+  // production-coverage replacement. Keep narrow.
+  it('AC-E3 phase B+C harness smoke: stream → callback upgrade leaves no duplicate identity', () => {
+    // Reducer: stream_chunk creates/updates a single bubble keyed by
+    // (catId, invocationId, bubbleKind). callback_final upgrades the same
+    // bubble in place via stream-key match (no new bubble).
+    const result = replayBubbleEvents(
+      [
+        {
+          type: 'stream_chunk',
+          threadId: 'thread-A',
+          actorId: 'opus',
+          canonicalInvocationId: 'inv-X',
+          bubbleKind: 'assistant_text',
+          originPhase: 'stream',
+          sourcePath: 'active',
+          messageId: 'msg-inv-X-opus',
+          seq: 1,
+          payload: { content: 'streaming text' },
+        },
+        {
+          type: 'callback_final',
+          threadId: 'thread-A',
+          actorId: 'opus',
+          canonicalInvocationId: 'inv-X',
+          bubbleKind: 'assistant_text',
+          originPhase: 'callback/history',
+          sourcePath: 'callback',
+          messageId: 'msg-inv-X-opus', // same id → in-place upgrade
+          seq: 2,
+          payload: { content: 'final callback text' },
+        },
+      ],
+      {
+        reduceEvent: (state, event) => {
+          // stream_chunk creates the bubble; callback_final upgrades in place
+          const incoming = messageFromEvent(event);
+          const idx = state.messages.findIndex((m) => m.id === incoming.id);
+          const next = [...state.messages];
+          if (idx >= 0) {
+            next[idx] = { ...next[idx]!, ...incoming };
+          } else {
+            next.push(incoming);
+          }
+          return { messages: next, incomingMessage: incoming };
+        },
+      },
+    );
+
+    // Single bubble survives, callback content wins, no violations
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]!.content).toBe('final callback text');
+    expect(result.violations).toHaveLength(0);
+  });
+
+  // F183 Phase E AC-E3 — Phase D IDB cache hydration via REAL production
+  // helper `mergeReplaceHydrationMessages`. 砚砚 R1 P3 fix: the prior
+  // version hand-wrote `filter(cachedFrom !== 'idb')` in the fixture
+  // reducer, which proved nothing about production behavior. This version
+  // drives the actual mergeReplaceHydrationMessages export so any future
+  // regression in that helper would surface as a harness violation.
+  it('AC-E3 phase D scenario via real mergeReplaceHydrationMessages: cached IDB dropped, no violations', async () => {
+    const { mergeReplaceHydrationMessages } = await import('@/hooks/useChatHistory');
+    const idbMsg: ChatMessage = {
+      id: 'msg-cached-deleted',
+      type: 'assistant',
+      catId: 'opus',
+      content: 'stale cache',
+      timestamp: 100,
+      cachedFrom: 'idb',
+      extra: { stream: { invocationId: 'inv-old' } },
+    };
+    const result = replayBubbleEvents(
+      [
+        {
+          type: 'callback_final',
+          threadId: 'thread-D',
+          actorId: 'opus',
+          canonicalInvocationId: 'inv-fresh',
+          bubbleKind: 'assistant_text',
+          originPhase: 'callback/history',
+          sourcePath: 'callback',
+          messageId: 'msg-fresh',
+          seq: 1,
+          payload: { content: 'fresh from server' },
+        },
+      ],
+      {
+        initialMessagesByThread: { 'thread-D': [idbMsg] },
+        // Production-driven adapter: each event becomes a "history replace"
+        // where history = [incoming], current = state.messages. This mirrors
+        // useChatHistory.ts:545 production wire-up of the merge call.
+        reduceEvent: (state, event) => {
+          const incoming = messageFromEvent(event);
+          const merged = mergeReplaceHydrationMessages([incoming], state.messages, {});
+          return { messages: merged.messages, incomingMessage: incoming };
+        },
+      },
+    );
+
+    // Real mergeReplaceHydrationMessages dropped the cached IDB; fresh present.
+    expect(result.messages.find((m) => m.id === 'msg-cached-deleted')).toBeUndefined();
+    expect(result.messages.find((m) => m.id === 'msg-fresh')).toBeDefined();
+    expect(result.violations).toHaveLength(0);
+  });
 });

@@ -413,7 +413,7 @@ describe('POST /api/callbacks/start-vote', () => {
       payload: {
         question: 'Overflow test?',
         options: ['A', 'B'],
-        voters: ['codex', 'gemini', 'sonnet', 'gpt52', 'spark', 'dare', 'antigravity'],
+        voters: ['codex', 'gemini', 'sonnet', 'gpt52', 'spark', 'dare', 'antig-opus'],
       },
     });
 

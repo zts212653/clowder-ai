@@ -1375,6 +1375,13 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
+    name: 'WORLD_DB',
+    defaultValue: '{repoRoot}/world.sqlite',
+    description: 'F093 World Engine SQLite 数据库路径',
+    category: 'evidence',
+    sensitive: false,
+  },
+  {
     name: 'F102_API_BASE',
     defaultValue: '(未设置 → 摘要调度器不启用)',
     description: 'Phase G 摘要调度用的反代 API 地址（不是猫猫自己的 provider profile）',

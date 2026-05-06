@@ -168,4 +168,61 @@ describe('MarkerQueue', () => {
     assert.equal(lessons.length, 1);
     assert.equal(lessons[0].content, 'Lesson');
   });
+
+  // F186 Phase A: collection routing fields round-trip
+  it('submit + list preserves collection routing fields (F186 AC-A10)', async () => {
+    const marker = await queue.submit({
+      content: 'Knowledge from lexander world',
+      source: 'opus:t1',
+      status: 'captured',
+      targetKind: 'lesson',
+      sourceCollectionId: 'world:lexander',
+      sourceSensitivity: 'private',
+      targetCollectionId: 'global:methods',
+      promoteReviewStatus: 'validated',
+      secretScanFingerprint: 'sha256:abc123',
+    });
+
+    const all = await queue.list();
+    const found = all.find((m) => m.id === marker.id);
+    assert.equal(found.sourceCollectionId, 'world:lexander');
+    assert.equal(found.sourceSensitivity, 'private');
+    assert.equal(found.targetCollectionId, 'global:methods');
+    assert.equal(found.promoteReviewStatus, 'validated');
+    assert.equal(found.secretScanFingerprint, 'sha256:abc123');
+  });
+
+  it('transition with patch merges fields into marker (F186 AC-A10)', async () => {
+    const marker = await queue.submit({
+      content: 'A lesson from world:lexander',
+      source: 'opus:t1',
+      status: 'captured',
+      sourceCollectionId: 'world:lexander',
+    });
+
+    await queue.transition(marker.id, 'approved', {
+      targetCollectionId: 'global:methods',
+      promoteReviewStatus: 'validated',
+    });
+
+    const approved = await queue.list({ status: 'approved' });
+    assert.equal(approved.length, 1);
+    assert.equal(approved[0].targetCollectionId, 'global:methods');
+    assert.equal(approved[0].promoteReviewStatus, 'validated');
+    assert.equal(approved[0].sourceCollectionId, 'world:lexander');
+  });
+
+  it('collection routing fields are optional (backwards compat)', async () => {
+    const marker = await queue.submit({
+      content: 'Legacy marker without collection fields',
+      source: 'opus:t1',
+      status: 'captured',
+    });
+
+    const all = await queue.list();
+    const found = all.find((m) => m.id === marker.id);
+    assert.equal(found.sourceCollectionId, undefined);
+    assert.equal(found.targetCollectionId, undefined);
+    assert.equal(found.promoteReviewStatus, undefined);
+  });
 });

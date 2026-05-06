@@ -7,16 +7,19 @@
 
 import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
+import { COLLECTION_SENSITIVITY_ORDER } from '../domains/memory/collection-types.js';
 import type { IMarkerQueue, IMaterializationService } from '../domains/memory/interfaces.js';
+import type { LibraryCatalog } from '../domains/memory/LibraryCatalog.js';
 
 interface KnowledgeFeedDeps {
   markerQueue: IMarkerQueue;
   db: Database.Database;
   materializationService?: IMaterializationService;
+  catalog?: LibraryCatalog;
 }
 
 export async function knowledgeFeedRoutes(app: FastifyInstance, deps: KnowledgeFeedDeps) {
-  const { markerQueue, db, materializationService } = deps;
+  const { markerQueue, db, materializationService, catalog } = deps;
 
   // GET /api/knowledge/feed — List candidates grouped by status
   app.get('/api/knowledge/feed', async (_req, reply) => {
@@ -68,15 +71,64 @@ export async function knowledgeFeedRoutes(app: FastifyInstance, deps: KnowledgeF
     }
   });
 
-  // POST /api/knowledge/approve — Approve a candidate
-  app.post<{ Body: { markerId: string; targetPath?: string } }>('/api/knowledge/approve', async (req, reply) => {
+  // POST /api/knowledge/approve — Approve a candidate (F186: collection-aware routing)
+  app.post<{
+    Body: {
+      markerId: string;
+      targetPath?: string;
+      targetCollectionId?: string;
+      confirmVisibilityWidening?: boolean;
+    };
+  }>('/api/knowledge/approve', async (req, reply) => {
     try {
-      const { markerId } = req.body;
+      const { markerId, targetCollectionId, confirmVisibilityWidening } = req.body;
       if (!markerId) return reply.status(400).send({ error: 'markerId required' });
 
-      await markerQueue.transition(markerId, 'approved');
+      if (!targetCollectionId) {
+        const markers = await markerQueue.list();
+        const marker = markers.find((m) => m.id === markerId);
+        const srcId = marker?.sourceCollectionId;
+        const srcSens = marker?.sourceSensitivity ?? (srcId && catalog ? catalog.get(srcId)?.sensitivity : undefined);
+        if (srcSens === 'private' || srcSens === 'restricted') {
+          return reply.status(400).send({
+            error: 'targetCollectionId required for private/restricted source markers',
+          });
+        }
+      }
 
-      // Auto-materialize if service available
+      if (targetCollectionId) {
+        if (!catalog) {
+          return reply.status(400).send({ error: 'Collection catalog unavailable' });
+        }
+        const target = catalog.get(targetCollectionId);
+        if (!target) {
+          return reply.status(400).send({ error: `Unknown target collection: ${targetCollectionId}` });
+        }
+        const markers = await markerQueue.list();
+        const marker = markers.find((m) => m.id === markerId);
+        const sourceId = marker?.sourceCollectionId;
+        const source = sourceId ? catalog.get(sourceId) : undefined;
+        const sourceSensitivity = marker?.sourceSensitivity ?? source?.sensitivity;
+        if (sourceSensitivity && sourceId !== targetCollectionId) {
+          const sourceRank =
+            COLLECTION_SENSITIVITY_ORDER[sourceSensitivity as keyof typeof COLLECTION_SENSITIVITY_ORDER];
+          const targetRank = COLLECTION_SENSITIVITY_ORDER[target.sensitivity];
+          if (sourceRank == null) {
+            return reply.status(400).send({
+              error: `visibility-widening blocked: unrecognized source sensitivity "${sourceSensitivity}"`,
+            });
+          }
+          if (targetRank > sourceRank && confirmVisibilityWidening !== true) {
+            return reply.status(400).send({
+              error: 'visibility-widening requires confirmation',
+              detail: `Promoting from ${sourceSensitivity} (${sourceId ?? 'unknown source collection'}) to ${target.sensitivity} (${targetCollectionId}) widens visibility. Set confirmVisibilityWidening: true to proceed.`,
+            });
+          }
+        }
+      }
+
+      await markerQueue.transition(markerId, 'approved', targetCollectionId ? { targetCollectionId } : undefined);
+
       let materialized;
       if (materializationService) {
         try {
@@ -86,7 +138,7 @@ export async function knowledgeFeedRoutes(app: FastifyInstance, deps: KnowledgeF
         }
       }
 
-      return { status: 'approved', markerId, materialized };
+      return { status: 'approved', markerId, materialized, targetCollectionId };
     } catch (err) {
       reply.status(500).send({ error: 'Failed to approve candidate' });
     }

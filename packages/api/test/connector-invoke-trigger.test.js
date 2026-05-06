@@ -137,6 +137,7 @@ function mockInvocationRecordStore() {
 
 function mockInvocationTracker() {
   const starts = /** @type {Array<{threadId: string, catId: string}>} */ ([]);
+  const tryStartThreadCalls = /** @type {Array<{threadId: string, catId: string}>} */ ([]);
   const completes = /** @type {Array<{threadId: string, catId: string}>} */ ([]);
   const cancelCalls = /** @type {Array<{threadId: string, catId: string, userId: (string|undefined)}>} */ ([]);
   let aborted = false;
@@ -146,6 +147,7 @@ function mockInvocationTracker() {
 
   return {
     starts,
+    tryStartThreadCalls,
     completes,
     cancelCalls,
     setAborted(val) {
@@ -167,6 +169,11 @@ function mockInvocationTracker() {
         starts.push({ threadId, catId });
         const controller = { signal: { aborted } };
         return controller;
+      },
+      tryStartThread(threadId, catId, _userId, _catIds) {
+        tryStartThreadCalls.push({ threadId, catId });
+        if (activeSlots.has(threadId)) return null;
+        return { signal: { aborted } };
       },
       complete(threadId, catId, _controller) {
         completes.push({ threadId, catId });
@@ -303,7 +310,7 @@ describe('ConnectorInvokeTrigger', () => {
     trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
     await waitForTrigger();
 
-    assert.strictEqual(trackerMock.starts.length, 1);
+    assert.strictEqual(trackerMock.tryStartThreadCalls.length, 1);
     assert.strictEqual(trackerMock.completes.length, 1);
     assert.strictEqual(trackerMock.completes[0].threadId, 'thread-1');
   });
@@ -379,8 +386,12 @@ describe('ConnectorInvokeTrigger', () => {
     trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
     await waitForTrigger();
 
-    // Should NOT start tracker (create failed before start)
+    // start() not called (F185: tryStartThread used instead)
     assert.strictEqual(trackerMock.starts.length, 0);
+    // F185: tryStartThread WAS called (controller pre-acquired in trigger)
+    assert.strictEqual(trackerMock.tryStartThreadCalls.length, 1, 'controller was pre-acquired');
+    // R1-P1 FIX: controller must be released even when create() throws
+    assert.strictEqual(trackerMock.completes.length, 1, 'pre-acquired controller must be released on create failure');
     // Should NOT call routeExecution
     assert.strictEqual(routerMock.calls.length, 0);
     // No unhandledRejection = test process survives
@@ -402,7 +413,7 @@ describe('ConnectorInvokeTrigger', () => {
     await waitForTrigger();
 
     // Tracker must have been started AND completed (no leak)
-    assert.strictEqual(trackerMock.starts.length, 1, 'tracker should start');
+    assert.strictEqual(trackerMock.tryStartThreadCalls.length, 1, 'tracker should start via tryStartThread');
     assert.strictEqual(trackerMock.completes.length, 1, 'tracker must complete even on backfill error');
 
     // Should NOT call routeExecution (error happened before)
@@ -1042,6 +1053,7 @@ describe('ConnectorInvokeTrigger', () => {
       // so queued follow-ups stall forever. This test verifies the fix.
       const qpCalls = /** @type {Array<{threadId: string, catId: string, status: string}>} */ ([]);
       const mockQueueProcessor = /** @type {any} */ ({
+        isThreadBusy: () => false,
         isCatBusy: () => false,
         async onInvocationComplete(threadId, catId, status) {
           qpCalls.push({ threadId, catId, status });
@@ -1061,6 +1073,7 @@ describe('ConnectorInvokeTrigger', () => {
     it('P1 fix: direct execution calls queueProcessor.onInvocationComplete on failure', async () => {
       const qpCalls = /** @type {Array<{threadId: string, catId: string, status: string}>} */ ([]);
       const mockQueueProcessor = /** @type {any} */ ({
+        isThreadBusy: () => false,
         isCatBusy: () => false,
         async onInvocationComplete(threadId, catId, status) {
           qpCalls.push({ threadId, catId, status });
@@ -1187,6 +1200,128 @@ describe('ConnectorInvokeTrigger', () => {
         'receive-review',
         'suggestedSkill must be preserved in queue entry',
       );
+    });
+  });
+
+  // ── F185: thread-level busy gate (AC-1/AC-2) ──
+
+  describe('F185: thread-level busy gate', () => {
+    it('AC-1: enqueues when queueProcessor.isThreadBusy returns true', async () => {
+      const mockQueueProcessor = /** @type {any} */ ({
+        isThreadBusy: () => true,
+        isCatBusy: () => false,
+        async onInvocationComplete() {},
+      });
+      const trigger = createTrigger({ queueProcessor: mockQueueProcessor });
+      const outcome = trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Review msg', 'msg-1');
+      await waitForTrigger();
+
+      assert.strictEqual(outcome, 'enqueued', 'should enqueue when thread is busy');
+      assert.strictEqual(routerMock.calls.length, 0, 'should NOT dispatch');
+      assert.strictEqual(queue.list('thread-1', 'user-1').length, 1);
+    });
+
+    it('AC-2: enqueues when tryStartThread returns null (thread busy in tracker)', async () => {
+      const mockQueueProcessor = /** @type {any} */ ({
+        isThreadBusy: () => false,
+        isCatBusy: () => false,
+        async onInvocationComplete() {},
+      });
+      // Mock tryStartThread returning null (thread already has active invocation)
+      trackerMock.tracker.tryStartThread = (_threadId, _catId) => null;
+      const trigger = createTrigger({ queueProcessor: mockQueueProcessor });
+      const outcome = trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Review msg', 'msg-1');
+      await waitForTrigger();
+
+      assert.strictEqual(outcome, 'enqueued', 'should enqueue when tryStartThread fails');
+      assert.strictEqual(routerMock.calls.length, 0, 'should NOT dispatch');
+    });
+
+    it('AC-2: dispatches when tryStartThread returns controller', async () => {
+      const mockQueueProcessor = /** @type {any} */ ({
+        isThreadBusy: () => false,
+        isCatBusy: () => false,
+        async onInvocationComplete() {},
+      });
+      const acquiredController = new AbortController();
+      trackerMock.tracker.tryStartThread = (_threadId, _catId) => acquiredController;
+      const trigger = createTrigger({ queueProcessor: mockQueueProcessor });
+      const outcome = trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Review msg', 'msg-1');
+      await waitForTrigger();
+
+      assert.strictEqual(outcome, 'dispatched', 'should dispatch when tryStartThread succeeds');
+      assert.strictEqual(routerMock.calls.length, 1, 'should call routeExecution');
+    });
+
+    it('AC-10: connector + different cat busy in thread → enqueues (thread-level gate)', async () => {
+      // Scenario: opus is running, connector targets codex — should still queue (thread-level)
+      trackerMock.setActive('thread-1', 'user-1');
+      const trigger = createTrigger();
+      const outcome = trigger.trigger('thread-1', /** @type {any} */ ('codex'), 'user-1', 'CI notification', 'msg-ci');
+      await waitForTrigger();
+
+      assert.strictEqual(outcome, 'enqueued', 'connector must queue when ANY cat is busy in thread');
+      assert.strictEqual(routerMock.calls.length, 0, 'should NOT dispatch concurrently');
+    });
+
+    it('AC-3: reuses tryStartThread controller (no separate start() call)', async () => {
+      const mockQueueProcessor = /** @type {any} */ ({
+        isThreadBusy: () => false,
+        isCatBusy: () => false,
+        async onInvocationComplete() {},
+      });
+      const acquiredController = new AbortController();
+      trackerMock.tracker.tryStartThread = (_threadId, _catId) => acquiredController;
+      const trigger = createTrigger({ queueProcessor: mockQueueProcessor });
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
+      await waitForTrigger();
+
+      // start() should NOT have been called (tryStartThread already registered the slot)
+      assert.strictEqual(trackerMock.starts.length, 0, 'should NOT call start() when tryStartThread was used');
+      // complete() should still be called for cleanup
+      assert.strictEqual(trackerMock.completes.length, 1, 'should call complete()');
+    });
+
+    it('R2-P1-B: duplicate invocation does not notify queueProcessor with failed status', async () => {
+      const onCompleteCalls = /** @type {Array<{threadId: string, catId: string, status: string}>} */ ([]);
+      const mockQueueProcessor = /** @type {any} */ ({
+        isThreadBusy: () => false,
+        isCatBusy: () => false,
+        async onInvocationComplete(threadId, catId, status) {
+          onCompleteCalls.push({ threadId, catId, status });
+        },
+      });
+      recordMock.setDuplicate();
+      const trigger = createTrigger({ queueProcessor: mockQueueProcessor });
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-dup');
+      await waitForTrigger();
+
+      // Duplicate should NOT cause onInvocationComplete('failed')
+      const failedCalls = onCompleteCalls.filter((c) => c.status === 'failed');
+      assert.strictEqual(failedCalls.length, 0, 'duplicate must not trigger failed onInvocationComplete');
+    });
+
+    it('R2-P1-A: queue full emits system_info via broadcastAgentMessage', async () => {
+      const mockFullQueue = /** @type {any} */ ({
+        hasEntryWithMessageId: () => false,
+        enqueue: () => ({ outcome: 'full' }),
+        size: () => 5,
+        list: () => [],
+        hasQueuedUserMessagesForThread: () => false,
+        hasActiveOrQueuedAgentForCat: () => false,
+      });
+      trackerMock.setActive('thread-1', 'user-1');
+      const trigger = createTrigger({ invocationQueue: mockFullQueue });
+      const outcome = trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'overflow', 'mid-full');
+      await waitForTrigger();
+
+      assert.strictEqual(outcome, 'full');
+      const systemInfoMsgs = socketMock.broadcasts.filter(
+        (b) => b.msg.type === 'system_info' && b.threadId === 'thread-1',
+      );
+      assert.ok(systemInfoMsgs.length > 0, 'queue full must emit system_info to thread');
+      const parsed = JSON.parse(systemInfoMsgs[0].msg.content);
+      assert.strictEqual(parsed.reason, 'queue_full', 'system_info reason must be queue_full');
     });
   });
 });

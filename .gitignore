@@ -146,10 +146,13 @@ docs/discussions/**/sources/*.pdf
 # Playwright MCP cache
 .playwright-mcp/
 
-# SQLite runtime databases (Hindsight evidence store)
+# SQLite runtime databases (Hindsight evidence store + World Engine)
 evidence.sqlite
 evidence.sqlite-shm
 evidence.sqlite-wal
+world.sqlite
+world.sqlite-shm
+world.sqlite-wal
 
 # Temporary data files (browser automation artifacts)
 forzadata-*.txt

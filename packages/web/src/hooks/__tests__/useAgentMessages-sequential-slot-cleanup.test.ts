@@ -27,6 +27,10 @@ const mockSetCatInvocation = vi.fn();
 const mockSetMessageUsage = vi.fn();
 const mockRequestStreamCatchUp = vi.fn();
 const mockRemoveActiveInvocation = vi.fn();
+// F183 Phase B1.3 — done event now routes through reducer's replaceMessages
+// (single-writer wire-up). Mock as no-op so legacy slot-cleanup tests still
+// pass; the reducer's bubble-finalization is covered in bubble-reducer.test.ts.
+const mockReplaceMessages = vi.fn();
 
 const mockAddMessageToThread = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
@@ -66,6 +70,8 @@ const storeState: Record<string, unknown> = {
   setMessageUsage: mockSetMessageUsage,
   requestStreamCatchUp: mockRequestStreamCatchUp,
   removeActiveInvocation: mockRemoveActiveInvocation,
+  replaceMessages: mockReplaceMessages,
+  hasMore: true,
 
   addMessageToThread: mockAddMessageToThread,
   clearThreadActiveInvocation: mockClearThreadActiveInvocation,

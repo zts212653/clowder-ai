@@ -59,6 +59,7 @@ export function CodeViewer({
   scrollToLine,
   editable = false,
   onSave,
+  onDirtyChange,
   branch,
 }: {
   content: string;
@@ -67,6 +68,7 @@ export function CodeViewer({
   scrollToLine: number | null;
   editable?: boolean;
   onSave?: (newContent: string) => Promise<void>;
+  onDirtyChange?: (dirty: boolean) => void;
   branch?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -77,11 +79,14 @@ export function CodeViewer({
   const setPendingChatInsert = useChatStore((s) => s.setPendingChatInsert);
   const currentThreadId = useChatStore((s) => s.currentThreadId);
   const baseContentRef = useRef(content);
+  const onDirtyChangeRef = useRef(onDirtyChange);
+  onDirtyChangeRef.current = onDirtyChange;
 
   useEffect(() => {
     if (!containerRef.current) return;
     setHasSelection(false);
     setIsDirty(false);
+    onDirtyChangeRef.current?.(false);
     baseContentRef.current = content;
     viewRef.current?.destroy();
 
@@ -101,7 +106,9 @@ export function CodeViewer({
           }
           if (update.docChanged && editable) {
             const current = update.state.doc.toString();
-            setIsDirty(current !== baseContentRef.current);
+            const dirty = current !== baseContentRef.current;
+            setIsDirty(dirty);
+            onDirtyChangeRef.current?.(dirty);
           }
         }),
       ],

@@ -10,6 +10,7 @@ import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
+import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
 import {
   type MultiMentionCreateParams,
   MultiMentionOrchestrator,
@@ -429,17 +430,23 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
 
     const body = multiMentionSchema.parse(request.body);
 
-    // Validate all targets are registered cats
+    // F182 AC-C2: A' class — validate targets + callbackTo are available (contract 400 on disabled)
     const targetCatIds: CatId[] = [];
     for (const target of body.targets) {
-      if (!catRegistry.has(target)) {
+      const resolved = resolveCatTarget(target);
+      if ('error' in resolved) {
+        // cat_disabled: return full CatRoutingError (F182 AC-C2 contract, checked by C2-e)
+        // cat_not_found: backward-compat { error: 'Unknown cat: ...' } (pre-existing contract)
+        if (resolved.error.kind === 'cat_disabled') return reply.status(400).send(resolved.error);
         return reply.status(400).send({ error: `Unknown cat: ${target}` });
       }
-      targetCatIds.push(createCatId(target));
+      targetCatIds.push(createCatId(resolved.ok));
     }
 
     // Validate callbackTo
-    if (!catRegistry.has(body.callbackTo)) {
+    const callbackToResolved = resolveCatTarget(body.callbackTo);
+    if ('error' in callbackToResolved) {
+      if (callbackToResolved.error.kind === 'cat_disabled') return reply.status(400).send(callbackToResolved.error);
       return reply.status(400).send({ error: `Unknown callbackTo cat: ${body.callbackTo}` });
     }
 
@@ -457,7 +464,7 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
     const createParams = {
       threadId: record.threadId,
       initiator: callerCatId,
-      callbackTo: createCatId(body.callbackTo),
+      callbackTo: createCatId(callbackToResolved.ok),
       targets: targetCatIds,
       question: body.question,
       timeoutMinutes: body.timeoutMinutes ?? DEFAULT_TIMEOUT_MINUTES,

@@ -9,7 +9,7 @@ intake_source: clowder-ai#575
 
 # F175: 消息队列统一设计 — 优先级排序 + 用户可控编排
 
-> **Status**: spec | **Owner**: Ragdoll | **Priority**: P1
+> **Status**: phase-a-done | **Owner**: Ragdoll | **Priority**: P1
 >
 > **Inbound source**: [clowder-ai#575](https://github.com/zts212653/clowder-ai/pull/575)
 > **Original tag**: clowder-ai 仓内编号为 F169（unified-queue-design）
@@ -56,11 +56,10 @@ interface QueueEntry {
 peekOldestAcrossUsers(threadId):
   1. 显式 position（用户手动拖动）— 同 userId 内最高优先（跨用户不干扰）
   2. priority（urgent > normal）
-  3. sourceCategory 同优先级内 FIFO
-  4. createdAt 兜底
+  3. createdAt FIFO 兜底
 ```
 
-只有显式手动 position 的 entry 才覆盖 priority（仅同 userId 条目间比较；shared thread 中不同用户的拖动互不干扰）；未手动排序的 entry 仍按 `priority → createdAt` 默认出队。
+只有显式手动 position 的 entry 才覆盖 priority（仅同 userId 条目间比较；shared thread 中不同用户的拖动互不干扰）；未手动排序的 entry 仍按 `priority → createdAt` 默认出队。`sourceCategory` 是分组/diagnostics 字段，不参与排序。
 
 **4. 取消用户消息强制 merge + 出队时 user-message batching**
 
@@ -127,17 +126,17 @@ QueueProcessor 出队时：
 
 ## Acceptance Criteria
 
-### Phase A（后端统一）
-- [ ] AC-A1: `handleUrgentTrigger()` 和 urgent 分支已删除，active-slot 时所有 connector 消息走 `enqueueWhileActive()`（idle slot 保留 fast path）
-- [ ] AC-A2: QueueEntry 有 `priority` 字段，4 个 urgent 调用方正确透传
-- [ ] AC-A3: 出队逻辑 priority-first — urgent 消息在 normal 前面被处理
-- [ ] AC-A4: 用户手动 position 覆盖 priority 排序（仅显式设置时）
-- [ ] AC-A5: 用户消息不再强制 merge — 每条独立 QueueEntry
-- [ ] AC-A6: 出队时 user-message batching — 连续同 userId + 同 intent + 同 targetCats 的 user entries 汇聚为一次 invocation
-- [ ] AC-A7: connector/agent 消息不受 MAX_QUEUE_DEPTH 限制
-- [ ] AC-A8: reorder API 可用（`PATCH /queue/reorder`）
-- [ ] AC-A9: 回归：urgent connector 不打断 A2A 链（#564 原始场景修复）
-- [ ] AC-A10: 回归：跨优先级自动 dequeue — urgent 处理完后自动继续 normal
+### Phase A（后端统一）— ✅ 全部完成
+- [x] AC-A1: `handleUrgentTrigger()` 和 urgent 分支已删除，active-slot 时所有 connector 消息走 `enqueueWhileActive()`（idle slot 保留 fast path）
+- [x] AC-A2: QueueEntry 有 `priority` 字段，4 个 urgent 调用方正确透传
+- [x] AC-A3: 出队逻辑 priority-first — urgent 消息在 normal 前面被处理
+- [x] AC-A4: 用户手动 position 覆盖 priority 排序（仅显式设置时）
+- [x] AC-A5: 用户消息不再强制 merge — 每条独立 QueueEntry
+- [x] AC-A6: 出队时 user-message batching — 连续同 userId + 同 intent + 同 targetCats 的 user entries 汇聚为一次 invocation
+- [x] AC-A7: connector/agent 消息不受 MAX_QUEUE_DEPTH 限制
+- [x] AC-A8: reorder API 可用（`PATCH /queue/reorder`）
+- [x] AC-A9: 回归：urgent connector 不打断 A2A 链（#564 原始场景修复）
+- [x] AC-A10: 回归：跨优先级自动 dequeue — urgent 处理完后自动继续 normal
 
 ### Phase B（前端编排）
 - [ ] AC-B1: QueuePanel 支持拖动排序

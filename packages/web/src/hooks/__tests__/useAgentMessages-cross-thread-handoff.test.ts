@@ -104,6 +104,14 @@ const storeState = {
   removeActiveInvocation: mockRemoveActiveInvocation,
 
   addMessageToThread: mockAddMessageToThread,
+  // F183 B1.2.3: active stream new-bubble path → reducer → replaceMessages
+  replaceMessages: vi.fn((msgs: unknown[]) => {
+    storeState.messages = msgs as typeof storeState.messages;
+  }),
+  // F183 B1.7+: bg path reducer wire-up → replaceThreadMessages (thread-scoped)
+  replaceThreadMessages: vi.fn(),
+  incrementUnread: vi.fn(),
+  hasMore: true,
   clearThreadActiveInvocation: mockClearThreadActiveInvocation,
   resetThreadInvocationState: mockResetThreadInvocationState,
   setThreadMessageStreaming: mockSetThreadMessageStreaming,
@@ -199,10 +207,16 @@ describe('useAgentMessages — F173 Phase E AC-E3 cross-thread handoff (observab
         timestamp: 1000,
       });
     });
-    // Active path: addMessage called with deterministic id
+    // Active path: F183 B1.2.3 wire-up routes new stream bubble through reducer
+    // + replaceMessages (instead of addMessage). Find the bubble in either path.
+    const replaceMessagesMock = storeState.replaceMessages as ReturnType<typeof vi.fn>;
     const activeAddCalls = mockAddMessage.mock.calls.filter((c) => c[0]?.id === EXPECTED_BUBBLE_ID);
-    expect(activeAddCalls.length).toBeGreaterThan(0);
-    expect(activeAddCalls[0]?.[0]).toMatchObject({
+    const replacedBubbles = replaceMessagesMock.mock.calls
+      .flatMap((c) => c[0] as Array<{ id?: string; catId?: string; content?: string }>)
+      .filter((m) => m.id === EXPECTED_BUBBLE_ID);
+    const phase1Bubble = activeAddCalls[0]?.[0] ?? replacedBubbles[0];
+    expect(phase1Bubble, 'Phase 1 must produce bubble with deterministic id').toBeDefined();
+    expect(phase1Bubble).toMatchObject({
       id: EXPECTED_BUBBLE_ID,
       catId: 'opus',
       content: 'thinking...',
@@ -234,15 +248,17 @@ describe('useAgentMessages — F173 Phase E AC-E3 cross-thread handoff (observab
         timestamp: 2000,
       });
     });
-    // Bg path: addMessageToThread called with SAME deterministic id (deriveBubbleId is deterministic)
+    // F183 B1.8: bg path canonical wire-up — accept either reducer-routed
+    // replaceThreadMessages OR legacy addMessageToThread. Both must use the
+    // same deterministic bubble id (deriveBubbleId is canonical).
     const bgAddToThreadCalls = mockAddMessageToThread.mock.calls.filter(
       (c) => c[0] === 'thread-A' && c[1]?.id === EXPECTED_BUBBLE_ID,
     );
-    expect(bgAddToThreadCalls.length).toBeGreaterThan(0);
-    expect(bgAddToThreadCalls[0]?.[1]).toMatchObject({
-      id: EXPECTED_BUBBLE_ID,
-      catId: 'opus',
-    });
+    const bgReplaceCalls = (storeState.replaceThreadMessages as ReturnType<typeof vi.fn>).mock.calls
+      .filter((c) => c[0] === 'thread-A')
+      .flatMap((c) => (c[1] as Array<{ id?: string; catId?: string }>) ?? [])
+      .filter((m) => m.id === EXPECTED_BUBBLE_ID);
+    expect(bgAddToThreadCalls.length + bgReplaceCalls.length).toBeGreaterThan(0);
     // 云端 Codex P2 (PR #1423): negative assertion that bg-only path doesn't
     // also pollute flat (active) state. Without this, a regression introducing
     // dual dispatch (bg AND active writes for same event) would silently pass.
@@ -264,14 +280,15 @@ describe('useAgentMessages — F173 Phase E AC-E3 cross-thread handoff (observab
       });
     });
     // Active path again — uses same deterministic id (or appends to existing via patch)
-    // Either addMessage(msg-inv-1-opus) OR appendToMessage('msg-inv-1-opus', ...) is acceptable
+    // F183 B1.2.3: also accept replaceMessages-routed write
     const phase3AddIds = mockAddMessage.mock.calls.map((c) => c[0]?.id);
     const phase3AppendIds = mockAppendToMessage.mock.calls.map((c) => c[0]);
-    const allIds = [...phase3AddIds, ...phase3AppendIds];
+    const phase3ReplaceIds = (storeState.replaceMessages as ReturnType<typeof vi.fn>).mock.calls
+      .flatMap((c) => c[0] as Array<{ id?: string }>)
+      .map((m) => m.id);
+    const allIds = [...phase3AddIds, ...phase3AppendIds, ...phase3ReplaceIds];
     // 云端 Codex P1 (PR #1423): every() vacuously true on empty array — must
-    // also assert at least one active-path write happened. Otherwise switch-back
-    // routing being completely broken (no addMessage AND no appendToMessage)
-    // would still pass this assertion.
+    // also assert at least one active-path write happened.
     expect(allIds.length).toBeGreaterThan(0);
     expect(allIds.every((id) => !id || id === EXPECTED_BUBBLE_ID)).toBe(true);
   });
@@ -295,11 +312,16 @@ describe('useAgentMessages — F173 Phase E AC-E3 cross-thread handoff (observab
         timestamp: 1000,
       });
     });
-    expect(mockAddMessageToThread).toHaveBeenCalled();
-    const bgCalls = mockAddMessageToThread.mock.calls.filter(
+    // F183 B1.8: canonical bg → reducer → replaceThreadMessages 优先；mock on
+    // no-op fallback 才走 addMessageToThread。两路都接受 deterministic id 即可。
+    const bgAddCalls = mockAddMessageToThread.mock.calls.filter(
       (c) => c[0] === 'thread-B' && c[1]?.id === EXPECTED_BUBBLE_ID,
     );
-    expect(bgCalls.length).toBeGreaterThan(0);
+    const bgReplaceCalls = (storeState.replaceThreadMessages as ReturnType<typeof vi.fn>).mock.calls
+      .filter((c) => c[0] === 'thread-B')
+      .flatMap((c) => (c[1] as Array<{ id?: string }>) ?? [])
+      .filter((m) => m.id === EXPECTED_BUBBLE_ID);
+    expect(bgAddCalls.length + bgReplaceCalls.length).toBeGreaterThan(0);
     // Active flat state NOT touched
     expect(mockAddMessage).not.toHaveBeenCalled();
   });

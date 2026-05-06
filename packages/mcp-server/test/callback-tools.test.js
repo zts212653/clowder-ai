@@ -1172,4 +1172,70 @@ describe('MCP Callback Tools', () => {
     assert.equal(body.repoFullName, 'zts212653/cat-cafe');
     assert.equal(body.prNumber, 100);
   });
+
+  // ── F182 KD-6: formatCatRoutingErrorPrefix unit tests ──────────────────────
+
+  test('KD-6: formatCatRoutingErrorPrefix cat_disabled — fixed prefix + alternatives', async () => {
+    const { formatCatRoutingErrorPrefix } = await import('../dist/tools/callback-tools.js');
+
+    const result = formatCatRoutingErrorPrefix({
+      kind: 'cat_disabled',
+      catId: 'antigravity',
+      alternatives: [
+        { mention: '@opus', displayName: '布偶猫' },
+        { mention: '@antig-opus', displayName: '反重力布偶猫' },
+      ],
+    });
+
+    assert.ok(result.startsWith('Cat routing failed [kind=cat_disabled]'), `unexpected prefix: ${result}`);
+    assert.ok(result.includes('target=@antigravity'), `missing target: ${result}`);
+    assert.ok(result.includes('disabled.'), `missing disabled marker: ${result}`);
+    assert.ok(result.includes('Alternatives:'), `missing alternatives: ${result}`);
+    assert.ok(result.includes('@opus'), `missing @opus in alternatives: ${result}`);
+  });
+
+  test('KD-6: formatCatRoutingErrorPrefix cat_not_found — not found marker', async () => {
+    const { formatCatRoutingErrorPrefix } = await import('../dist/tools/callback-tools.js');
+
+    const result = formatCatRoutingErrorPrefix({
+      kind: 'cat_not_found',
+      mention: '@xyzunknown',
+      alternatives: [],
+    });
+
+    assert.ok(result.includes('[kind=cat_not_found]'), `missing kind: ${result}`);
+    assert.ok(result.includes('target=@xyzunknown'), `missing target: ${result}`);
+    assert.ok(result.includes('not found.'), `missing not found marker: ${result}`);
+  });
+
+  test('KD-6: callbackPost wraps 400 CatRoutingError with human prefix + JSON dual-track', async () => {
+    const { callbackPost } = await import('../dist/tools/callback-tools.js');
+
+    const routingError = {
+      kind: 'cat_disabled',
+      catId: 'antigravity',
+      displayName: '反重力猫',
+      alternatives: [{ mention: '@opus', displayName: '布偶猫' }],
+    };
+
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 400,
+      text: async () => JSON.stringify(routingError),
+    });
+
+    const result = await callbackPost('/api/callbacks/create-task', {
+      title: 'test',
+      ownerCatId: 'antigravity',
+    });
+
+    assert.equal(result.isError, true);
+    const text = result.content[0].text;
+    assert.ok(
+      text.startsWith('Cat routing failed [kind=cat_disabled]'),
+      `should start with prefix: ${text.slice(0, 80)}`,
+    );
+    assert.ok(text.includes('@antigravity'), `should include target: ${text.slice(0, 120)}`);
+    assert.ok(text.includes('"kind":"cat_disabled"'), `should include raw JSON: ${text.slice(0, 200)}`);
+  });
 });

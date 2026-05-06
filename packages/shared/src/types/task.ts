@@ -25,6 +25,7 @@ export interface CiAutomationState {
   readonly lastBucket?: string;
   readonly lastNotifiedAt?: number;
   readonly enabled?: boolean;
+  readonly skipNotified?: boolean;
 }
 
 /** Conflict detection automation state for pr_tracking tasks */

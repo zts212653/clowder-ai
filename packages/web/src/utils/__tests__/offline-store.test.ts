@@ -1,8 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- test stubs use partial objects */
-import { openDB } from 'idb';
+import { deleteDB, openDB } from 'idb';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import 'fake-indexeddb/auto';
 import {
+  _closeDBForTest,
   _getDBForTest,
   _resetDBForTest,
   clearAll,
@@ -12,17 +13,23 @@ import {
   saveThreads,
 } from '../offline-store';
 
+// Open the DB at whatever version the production code uses (no pinned version)
+// so the existing pollution helpers keep working after a schema bump.
+async function openCurrentVersionDB() {
+  return openDB('cat-cafe-offline');
+}
+
 // Write a polluted snapshot directly, bypassing saveThreadMessages' save-side filter.
 // Simulates a client that was running the pre-fix build and left isStreaming placeholders
 // in their IndexedDB.
 async function rawPutPollutedSnapshot(threadId: string, messages: any[], hasMore = false): Promise<void> {
-  const db = await openDB('cat-cafe-offline', 1);
+  const db = await openCurrentVersionDB();
   await db.put('thread-messages', { threadId, messages, hasMore, updatedAt: Date.now() });
   db.close();
 }
 
 async function rawGetSnapshot(threadId: string): Promise<any> {
-  const db = await openDB('cat-cafe-offline', 1);
+  const db = await openCurrentVersionDB();
   const record = await db.get('thread-messages', threadId);
   db.close();
   return record;
@@ -157,6 +164,94 @@ describe('offline-store', () => {
       await clearAll();
       expect(await loadThreads()).toBeNull();
       expect(await loadThreadMessages('t1')).toBeNull();
+    });
+  });
+
+  // F183 Phase D AC-D2 — cachedFrom='idb' marker is the signal mergeReplace
+  // uses to differentiate cache-derived messages from live state. Marker is
+  // applied at load (so callers don't have to remember) and stripped at save
+  // (so it doesn't survive in the persisted snapshot).
+  describe('AC-D2 cachedFrom marker', () => {
+    it('stamps cachedFrom="idb" on every loaded message', async () => {
+      const messages = [
+        { id: 'm1', content: [{ type: 'text', text: 'hello' }] },
+        { id: 'm2', content: [{ type: 'text', text: 'world' }] },
+      ] as any[];
+      await saveThreadMessages('thread_1', messages, false);
+      const result = await loadThreadMessages('thread_1');
+      expect(result!.messages.every((m: any) => m.cachedFrom === 'idb')).toBe(true);
+    });
+
+    it('strips cachedFrom from input before persisting (round-trip stays clean)', async () => {
+      const messages = [
+        { id: 'm1', cachedFrom: 'idb', content: [{ type: 'text', text: 'a' }] },
+        { id: 'm2', content: [{ type: 'text', text: 'b' }] },
+      ] as any[];
+      await saveThreadMessages('thread_1', messages, false);
+      // Read raw — confirms the persisted record has no cachedFrom field
+      const raw = await rawGetSnapshot('thread_1');
+      expect(raw.messages.every((m: any) => m.cachedFrom === undefined)).toBe(true);
+    });
+
+    it('also strips cachedFrom from polluted-snapshot self-heal write-back', async () => {
+      // Pre-existing client wrote a snapshot containing both cachedFrom and isStreaming
+      await rawPutPollutedSnapshot('t1', [
+        { id: 'm1', cachedFrom: 'idb' },
+        { id: 'm_stream', isStreaming: true },
+      ]);
+      await loadThreadMessages('t1');
+      const raw = await rawGetSnapshot('t1');
+      // Self-heal writeback must also strip cachedFrom
+      expect(raw.messages.every((m: any) => m.cachedFrom === undefined)).toBe(true);
+    });
+  });
+
+  // F183 Phase D AC-D1 — schema-version invalidation. When DB_VERSION bumps
+  // (because identity contract changed), the upgrade hook drops stale stores
+  // so cache can't pollute UI with messages stamped by the old contract.
+  describe('AC-D1 schema-version invalidation', () => {
+    it('drops stale stores when DB version bumps from a prior schema', async () => {
+      // Tear down any prior DB so we can re-create at v1 (legacy client state).
+      // Must close before delete or fake-indexeddb blocks indefinitely.
+      await _closeDBForTest();
+      await deleteDB('cat-cafe-offline');
+      // Simulate a legacy client: open at v1 with the old schema, populate
+      const legacyDb = await openDB('cat-cafe-offline', 1, {
+        upgrade(db) {
+          if (!db.objectStoreNames.contains('threads')) {
+            db.createObjectStore('threads', { keyPath: 'id' });
+          }
+          if (!db.objectStoreNames.contains('thread-messages')) {
+            db.createObjectStore('thread-messages', { keyPath: 'threadId' });
+          }
+        },
+      });
+      await legacyDb.put('threads', { id: 'thread-list', threads: [{ id: 'stale' }], updatedAt: Date.now() });
+      await legacyDb.put('thread-messages', {
+        threadId: 't-stale',
+        messages: [{ id: 'stale-msg' }],
+        hasMore: false,
+        updatedAt: Date.now(),
+      });
+      legacyDb.close();
+      // Now open via production code (DB_VERSION=2). Upgrade hook drops the
+      // pre-existing stores; reads see empty state.
+      _resetDBForTest();
+      const threadsAfterUpgrade = await loadThreads();
+      const messagesAfterUpgrade = await loadThreadMessages('t-stale');
+      expect(threadsAfterUpgrade).toBeNull();
+      expect(messagesAfterUpgrade).toBeNull();
+    });
+
+    it('is a no-op for fresh installs (oldVersion === 0)', async () => {
+      // Tear down so we open completely fresh
+      await _closeDBForTest();
+      await deleteDB('cat-cafe-offline');
+      // First call: should create stores cleanly without throwing
+      await saveThreads([{ id: 't-fresh' }] as any[]);
+      const threads = await loadThreads();
+      expect(threads).toHaveLength(1);
+      expect(threads![0].id).toBe('t-fresh');
     });
   });
 });

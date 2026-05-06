@@ -538,6 +538,7 @@ export class QueueProcessor {
    */
   async tryAutoExecute(threadId: string): Promise<void> {
     this.sweepZombieSlots(threadId);
+    if (this.hasDispatchableNonAgentQueued(threadId)) return;
     const entries = (this.deps.queue.listAutoExecute?.(threadId) ?? []).sort((a, b) => a.createdAt - b.createdAt);
     if (entries.length > 0) {
       const now = Date.now();
@@ -586,6 +587,18 @@ export class QueueProcessor {
 
   private hasDispatchableQueuedForThread(threadId: string): boolean {
     return this.deps.queue.hasDispatchableQueuedForThread(threadId);
+  }
+
+  private hasDispatchableNonAgentQueued(threadId: string): boolean {
+    if (!this.deps.queue.hasQueuedNonAgentForThread?.(threadId)) return false;
+    for (const userId of this.deps.queue.listUsersForThread(threadId)) {
+      for (const entry of this.deps.queue.list(threadId, userId)) {
+        if (entry.source === 'agent' || entry.status !== 'queued') continue;
+        const cat = entry.targetCats[0];
+        if (!cat || !this.pausedSlots.has(QueueProcessor.slotKey(threadId, cat))) return true;
+      }
+    }
+    return false;
   }
 
   private async tryExecuteNextAcrossUsers(

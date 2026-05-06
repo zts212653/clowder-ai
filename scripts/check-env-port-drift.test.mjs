@@ -461,16 +461,16 @@ describe(
     it('_sanitize-rules.pl transforms 3002→3004 (API)', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/_sanitize-rules.pl'), 'utf-8');
       assert.ok(
-        content.includes('s#localhost:3002#localhost:3004#g'),
-        'sanitize rules should transform localhost:3002 → localhost:3004',
+        content.includes('s#localhost:3004#localhost:3004#g'),
+        'sanitize rules should transform localhost:3004 → localhost:3004',
       );
     });
 
     it('_sanitize-rules.pl transforms 3001→3003 (Frontend)', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/_sanitize-rules.pl'), 'utf-8');
       assert.ok(
-        content.includes('s#localhost:3001#localhost:3003#g'),
-        'sanitize rules should transform localhost:3001 → localhost:3003',
+        content.includes('s#localhost:3003#localhost:3003#g'),
+        'sanitize rules should transform localhost:3003 → localhost:3003',
       );
     });
 
@@ -490,22 +490,30 @@ describe(
       );
     });
 
+    it('sync-to-opensource.sh runs sanitizer over ES module utility files', () => {
+      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
+      assert.ok(
+        content.includes('-name "*.mjs"'),
+        'sync sanitizer should include .mjs files such as scripts/lib/platform-status.mjs',
+      );
+    });
+
     it('sync-to-opensource.sh transforms start-dev.sh API fallback to 3004', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
-      const expected = "'s/API_PORT=$" + '{API_SERVER_PORT:-3002}/API_PORT=$' + "{API_SERVER_PORT:-3004}/g'";
+      const expected = "'s/API_PORT=$" + '{API_SERVER_PORT:-3004}/API_PORT=$' + "{API_SERVER_PORT:-3004}/g'";
       assert.ok(content.includes(expected), 'sync script should transform start-dev.sh API fallback 3002→3004');
     });
 
     it('sync-to-opensource.sh transforms start-dev.sh Frontend fallback to 3003', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
-      const expected = "'s/WEB_PORT=$" + '{FRONTEND_PORT:-3001}/WEB_PORT=$' + "{FRONTEND_PORT:-3003}/g'";
+      const expected = "'s/WEB_PORT=$" + '{FRONTEND_PORT:-3003}/WEB_PORT=$' + "{FRONTEND_PORT:-3003}/g'";
       assert.ok(content.includes(expected), 'sync script should transform start-dev.sh Frontend fallback 3001→3003');
     });
 
     it('sync-to-opensource.sh transforms setup.sh API port to 3004', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
       assert.ok(
-        content.includes("'s/API_SERVER_PORT=3002/API_SERVER_PORT=3004/g'"),
+        content.includes("'s/API_SERVER_PORT=3004/API_SERVER_PORT=3004/g'"),
         'sync script should transform setup.sh API_SERVER_PORT 3002→3004',
       );
     });
@@ -513,7 +521,7 @@ describe(
     it('sync-to-opensource.sh transforms setup.sh Frontend port to 3003', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
       assert.ok(
-        content.includes("'s/FRONTEND_PORT=3001/FRONTEND_PORT=3003/g'"),
+        content.includes("'s/FRONTEND_PORT=3003/FRONTEND_PORT=3003/g'"),
         'sync script should transform setup.sh FRONTEND_PORT 3001→3003',
       );
     });
@@ -521,15 +529,15 @@ describe(
     it('sync-to-opensource.sh transforms runtime-worktree.sh API port to 3004', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
       assert.ok(
-        content.includes("'s/API_SERVER_PORT:-3002/API_SERVER_PORT:-3004/g'"),
-        'sync script should transform runtime-worktree.sh API port 3002→3004',
+        content.includes("'s/API_SERVER_PORT:-3004/API_SERVER_PORT:-3004/g'"),
+        'sync script should transform runtime-worktree.sh API port 3004→3004',
       );
     });
 
     it('sync-to-opensource.sh transforms install.ps1 to public defaults', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
-      assert.ok(content.includes("'s/FRONTEND_PORT=3001/FRONTEND_PORT=3003/g'"));
-      assert.ok(content.includes("'s/API_SERVER_PORT=3002/API_SERVER_PORT=3004/g'"));
+      assert.ok(content.includes("'s/FRONTEND_PORT=3003/FRONTEND_PORT=3003/g'"));
+      assert.ok(content.includes("'s/API_SERVER_PORT=3004/API_SERVER_PORT=3004/g'"));
       assert.ok(content.includes('$frontendPort = "3003"'));
     });
 
@@ -646,16 +654,17 @@ excluded:
 
       const commands = readClaudeHookTemplateCommands(template);
       assert.deepEqual(commands, [
-        '"$HOME/.claude/hooks/session-start-recall.sh"',
-        '"$HOME/.claude/hooks/session-stop-check.sh"',
+        'bash "$HOME/.claude/hooks/session-start-recall.sh"',
+        'bash "$HOME/.claude/hooks/session-stop-check.sh"',
       ]);
     });
 
     it('F180 Claude settings hook template guard rejects maintainer absolute-path variants', () => {
       const absolutePathTemplates = [
         '{"hooks":{"SessionStart":[{"hooks":[{"command":"/home/alice/.claude/hooks/session-start-recall.sh"}]}]}}',
-        '{"hooks":{"SessionStart":[{"hooks":[{"command":"C:/Users/Alice/.claude/hooks/session-start-recall.sh"}]}]}}',
+        '{"hooks":{"SessionStart":[{"hooks":[{"command":"C:/home/user/session-start-recall.sh"}]}]}}',
         '{"hooks":{"SessionStart":[{"hooks":[{"command":"C:\\\\Users\\\\Alice\\\\.claude\\\\hooks\\\\session-start-recall.sh"}]}]}}',
+        '{"hooks":{"SessionStart":[{"hooks":[{"command":"bash \\"/home/alice/.claude/hooks/session-start-recall.sh\\""}]}]}}',
       ];
 
       for (const template of absolutePathTemplates) {
@@ -775,7 +784,7 @@ excluded:
       const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
       assert.ok(
         content.includes("process.env.API_SERVER_PORT ?? '3004'"),
-        'sync script should transform AgentRouter.ts API port 3002→3004',
+        'sync script should transform AgentRouter.ts API port 3004→3004',
       );
     });
 
@@ -1243,7 +1252,7 @@ describe(
       const content = readFileSync(resolve(ROOT, 'cat-cafe-skills/workspace-navigator/SKILL.md'), 'utf-8');
       assert.doesNotMatch(
         content,
-        /API_SERVER_PORT=3002|API_SERVER_PORT:-3002/,
+        /API_SERVER_PORT=3004|API_SERVER_PORT:-3004/,
         'workspace-navigator should not hardcode the home-only API default in public-facing usage guidance',
       );
       assert.match(

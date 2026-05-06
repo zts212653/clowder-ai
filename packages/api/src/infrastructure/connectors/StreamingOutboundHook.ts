@@ -152,7 +152,7 @@ export class StreamingOutboundHook {
           // F157: Edit to completion state instead of deleting (no recall notification)
           await adapter.finalizeStreamCard(session.externalChatId, session.platformMessageId, session.catDisplayName);
         } else if (adapter?.deleteMessage) {
-          await adapter.deleteMessage(session.platformMessageId);
+          await adapter.deleteMessage(session.platformMessageId, session.externalChatId);
         }
       } catch (err) {
         this.opts.log.warn({ err }, '[StreamingOutbound] cleanupPlaceholders failed');

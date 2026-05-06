@@ -1720,4 +1720,46 @@ describe('SystemPromptBuilder', () => {
         'Update GOVERNANCE_L0_DIGEST in SystemPromptBuilder.ts to match, then update PINNED_HASH here.',
     );
   });
+
+  // ── F182 Phase B: Roster invisibility guard ─────────────────────────────────────────────────
+  // AC-B1: disabled cat must NOT appear in buildTeammateRoster output (OQ-3 方案C)
+  // AC-B2: disabled cat catId/mention must NOT appear in buildStaticIdentity any section
+  // AC-B3: NOT changing buildTeammateRoster logic — only adding guard tests
+
+  test('F182 B1: disabled cat (antigravity) does not appear in teammate roster section', async () => {
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const prompt = buildStaticIdentity('opus');
+    // antigravity should not appear in the roster table (| ... | ... |)
+    // The roster table rows contain catId or mentionPatterns
+    // Whether or not roster section exists, antigravity must not appear
+    assert.ok(!prompt.includes('antigravity'), 'disabled cat "antigravity" must not appear in static identity prompt');
+  });
+
+  test('F182 B2: disabled cat mention patterns do not appear in any prompt section', async () => {
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    // Check for opus as subject (antigravity is not opus, so would appear as teammate if not filtered)
+    const prompt = buildStaticIdentity('opus');
+    // antigravity has mentionPatterns like @antigravity, @孟加拉猫
+    assert.ok(!prompt.includes('@antigravity'), 'disabled cat @antigravity mention must not appear');
+    // catId should not appear
+    assert.ok(!prompt.includes('antigravity'), 'disabled cat catId "antigravity" must not appear in any section');
+  });
+
+  test('F182 B1+B2: disabled cat does not appear in buildSystemPrompt output', async () => {
+    const build = await getBuilder();
+    const prompt = build({
+      catId: 'opus',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+    });
+    assert.ok(!prompt.includes('antigravity'), 'disabled cat must not appear in full system prompt');
+  });
+
+  test('F182 B3: available cats still appear in roster (regression guard)', async () => {
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    // codex is available — should appear in opus's roster
+    const prompt = buildStaticIdentity('opus');
+    assert.ok(prompt.includes('codex'), 'available cat @codex must appear in roster');
+  });
 });

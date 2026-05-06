@@ -10,7 +10,8 @@ import { F163ExperimentLogger } from '../domains/memory/f163-experiment-logger.j
 import { generateHealthReport } from '../domains/memory/f163-health-report.js';
 import { queryReviewQueue } from '../domains/memory/f163-review-queue.js';
 import { computeVariantId, freezeFlags } from '../domains/memory/f163-types.js';
-import type { EvidenceItem, SearchOptions } from '../domains/memory/interfaces.js';
+import type { EvidenceItem, IKnowledgeResolver, SearchOptions } from '../domains/memory/interfaces.js';
+import { QueryReplayCompare } from '../domains/memory/QueryReplayCompare.js';
 
 function isLocalhost(ip: string): boolean {
   return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
@@ -40,6 +41,7 @@ interface AuditRoutesOptions {
     };
     runExclusive<T>(fn: () => T | Promise<T>): Promise<T>;
   };
+  knowledgeResolver?: IKnowledgeResolver;
 }
 
 export const f163AuditRoutes: FastifyPluginAsync<AuditRoutesOptions> = async (app, opts) => {
@@ -145,5 +147,42 @@ export const f163AuditRoutes: FastifyPluginAsync<AuditRoutesOptions> = async (ap
     const report = generateHealthReport(db as Parameters<typeof generateHealthReport>[0]);
 
     return report;
+  });
+
+  // ── POST /api/f163/query-replay (AC-E2) ───────────────────────────
+
+  app.post('/api/f163/query-replay', async (request, reply) => {
+    if (!isLocalhost(request.ip)) {
+      reply.status(403);
+      return { error: 'only allowed from localhost' };
+    }
+
+    if (!opts.knowledgeResolver) {
+      reply.status(503);
+      return { error: 'KnowledgeResolver not available' };
+    }
+
+    const body = request.body as { captureId?: number };
+    if (!body?.captureId || typeof body.captureId !== 'number') {
+      reply.status(400);
+      return { error: 'captureId (number) is required' };
+    }
+
+    const db = opts.evidenceStore.getDb();
+    const compare = new QueryReplayCompare(db as ConstructorParameters<typeof QueryReplayCompare>[0]);
+    try {
+      const result = await compare.replay(body.captureId, opts.knowledgeResolver);
+      return result;
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (msg.includes('not found')) {
+        reply.status(404);
+      } else if (msg.includes('Unsupported capture format')) {
+        reply.status(422);
+      } else {
+        reply.status(500);
+      }
+      return { error: msg };
+    }
   });
 };

@@ -1,8 +1,10 @@
 import { create } from 'zustand';
 import { getBubbleInvocationId } from '@/debug/bubbleIdentity';
+import { isBubbleInvariantStrictModeOn, recordBubbleInvariantViolation } from '@/debug/bubbleInvariantDiagnostics';
 import { recordDebugEvent } from '@/debug/invocationEventDebug';
 import { getCachedCats } from '@/hooks/useCatData';
 import { saveThreadMessages as saveMessagesSnapshot, saveThreads as saveThreadsSnapshot } from '../utils/offline-store';
+import { findBubbleStoreInvariantViolations } from './bubble-invariants';
 import type {
   CatInvocationInfo,
   CatStatusType,
@@ -343,6 +345,29 @@ function collectBlobUrls(messages: ChatMessage[]): Set<string> {
   return blobUrls;
 }
 
+/**
+ * F183 Phase E AC-E2 (砚砚 R2 P1 fix) — strict-only invariant forward for
+ * caller-driven writers (replaceMessages, replaceThreadMessages,
+ * hydrateThread). When `BUBBLE_INVARIANT_STRICT=1` /
+ * `NEXT_PUBLIC_BUBBLE_INVARIANT_STRICT=1` /
+ * `localStorage[catcafe.bubbleInvariantStrict]==='1'` is on, runs the
+ * post-mutation duplicate-identity scan and forwards each violation to
+ * `recordBubbleInvariantViolation` (which throws under strict). Off mode is
+ * a 1-instruction early-out — no O(n) cost in production hot paths.
+ */
+function forwardStoreInvariantViolationsStrict(messages: ChatMessage[], threadId: string | null): void {
+  if (!isBubbleInvariantStrictModeOn()) return;
+  if (!threadId) return;
+  const violations = findBubbleStoreInvariantViolations(messages, {
+    threadId,
+    eventType: 'history_hydrate',
+    sourcePath: 'hydration',
+  });
+  for (const v of violations) {
+    recordBubbleInvariantViolation(v, 'warn');
+  }
+}
+
 function revokeRemovedBlobUrls(previousMessages: ChatMessage[], nextMessages: ChatMessage[]) {
   const retainedBlobUrls = collectBlobUrls(nextMessages);
   for (const msg of previousMessages) {
@@ -648,6 +673,16 @@ export interface ChatState {
    *  replaceMessages + saveMessagesSnapshot whenever a server GET response
    *  fully replaces the current thread timeline. AC-C10. */
   hydrateThread: (threadId: string, msgs: ChatMessage[], hasMore: boolean) => void;
+  /**
+   * F183 Phase B1.7 — thread-scoped reducer write entry point. Mirror of
+   * `replaceMessages` but for arbitrary thread (current OR background).
+   * Used by `handleBackgroundAgentMessage` to apply reducer's nextMessages
+   * to the target thread's state. Unlike `hydrateThread` (server-authoritative
+   * hydration with IDB persist), this is for per-event reducer mutations:
+   * no IDB write, no hasMore-required (defaults to existing thread.hasMore),
+   * mirrors flat when threadId === currentThreadId.
+   */
+  replaceThreadMessages: (threadId: string, msgs: ChatMessage[], hasMore?: boolean) => void;
   replaceMessageId: (fromId: string, toId: string) => void;
   patchMessage: (id: string, patch: ChatMessagePatch) => void;
   appendToLastMessage: (content: string) => void;
@@ -682,8 +717,114 @@ export interface ChatState {
   setMessageStreamInvocation: (messageId: string, invocationId: string) => void;
   clearMessages: () => void;
   /** Bug C: Monotonic counter + target threadId — increment to request a history catch-up fetch */
-  streamCatchUpVersion: number;
-  streamCatchUpThreadId: string | null;
+  /**
+   * F183 Phase C — per-thread catch-up version (cloud P2 fix 2026-05-02).
+   *
+   * Per-thread version counter; bumped by requestStreamCatchUp(threadId).
+   * useChatHistory subscribes to its own thread's version via
+   * `streamCatchUpVersionByThread[threadId]` — independent of other threads.
+   *
+   * Replaces the previous single-slot `(streamCatchUpVersion, streamCatchUpThreadId)`
+   * design where a later request from thread B would overwrite thread A's
+   * pending catch-up signal, silently losing the active gap recovery.
+   */
+  streamCatchUpVersionByThread: Record<string, number>;
+  /**
+   * F183 Phase C cloud R3 P2 + R4 P1 fix (2026-05-02) — per-thread consumed
+   * version marker. Bumped by useChatHistory **only on successful fetch**
+   * (not on retry exhaustion — cloud R4 P1). Effect gates on `current >
+   * consumed` to prevent thread-switch re-mounts from re-firing
+   * already-succeeded triggers, while leaving failed catch-ups eligible
+   * for retry on remount (consumed unchanged → version > consumed → effect
+   * re-runs with fresh retry cycle).
+   */
+  lastConsumedCatchUpVersionByThread: Record<string, number>;
+  /**
+   * F183 Phase C — per-thread pending catch-up target seq (砚砚 R5 P1 + R6 P1
+   * fix 2026-05-02). On gap, processThreadSeq records the triggering `incomingSeq`
+   * here and does NOT advance `lastSeqByThread` (cloud P1 watermark
+   * preservation). When useChatHistory's fetchHistory succeeds, it calls
+   * `acknowledgeCatchUp(threadId, capturedTargetSeq)` where capturedTargetSeq
+   * is the pending value snapshot at fetch START. The ack advances
+   * `lastSeqByThread[threadId]` to capturedTargetSeq and only clears pending
+   * when pending still equals capturedTargetSeq (no mid-flight refresh).
+   *
+   * If a newer gap arrived during fetch flight, pending was already refreshed
+   * to a higher value — keep it; next fetchHistory captures the new target
+   * and acks that. This avoids the "stale fetch advances lastSeq past actual
+   * snapshot coverage" race (砚砚 R6 P1).
+   *
+   * If fetch fails / is canceled, pending stays — next gap event refreshes
+   * it; subsequent live events keep firing 'gap' until catchup eventually
+   * succeeds. Without this ack mechanism, gap → fetch success would leave
+   * `lastSeq=5` forever while server emits 9/10/11... — perpetual gap state,
+   * violating Phase C goal of "no F5 needed".
+   */
+  pendingCatchUpTargetSeqByThread: Record<string, number>;
+  /**
+   * F183 Phase C — thread-scoped per-thread `lastSeq` ledger (KD-9).
+   * Maps threadId → highest seq seen so far. Used for gap detection in
+   * `useAgentMessages.handleAgentMessage`. seq=0 means "no seq tracking yet"
+   * (e.g. legacy producer or session start) — first event with seq>0 initializes.
+   */
+  lastSeqByThread: Record<string, number>;
+  /**
+   * F183 Phase C — per-thread server seq epoch (server boot UUID).
+   * Maps threadId → epoch last seen for that thread. When server restarts,
+   * its epoch changes and `seq` resets to 1; client compares incoming
+   * `seqEpoch` to `lastSeqEpochByThread[threadId]`. Mismatch → reset lastSeq
+   * + trigger catch-up (full fetch). Empty string = no epoch tracking yet.
+   */
+  lastSeqEpochByThread: Record<string, string>;
+  /** F183 Phase C — update lastSeq for a thread (single-writer, no monotonicity guard at store; caller responsibility). */
+  setLastSeq: (threadId: string, seq: number) => void;
+  /** F183 Phase C — update lastSeqEpoch for a thread (paired with setLastSeq on epoch change). */
+  setLastSeqEpoch: (threadId: string, epoch: string) => void;
+  /**
+   * F183 Phase C 砚砚 R5 P1 fix — record pending catch-up target seq for thread.
+   * Called by processThreadSeq's gap branch with `incomingSeq` (always >= prior
+   * pending value due to monotonicity invariant within an epoch). Cleared by
+   * `acknowledgeCatchUp(threadId, ackedTargetSeq)` only if pending still
+   * matches the ackedTargetSeq captured at fetch START (砚砚 R6 P1 race fix).
+   */
+  setPendingCatchUpTargetSeq: (threadId: string, seq: number) => void;
+  /**
+   * F183 Phase C cloud R3 P2 fix — mark catch-up version consumed for thread.
+   * Called by useChatHistory after fetch resolves (success or exhausted
+   * retries) to prevent thread-switch re-mounts from re-firing.
+   */
+  setLastConsumedCatchUpVersion: (threadId: string, version: number) => void;
+  /**
+   * F183 Phase C 砚砚 R5 P1 + R6 P1 fix — acknowledge successful catch-up.
+   *
+   * Advances `lastSeqByThread[threadId]` to the **caller-captured** target seq
+   * (the pending value at the moment fetchHistory was kicked off — NOT the
+   * current pending value at ack time). Clears pending only if pending still
+   * equals `ackedTargetSeq`; if a newer gap updated pending during fetch
+   * flight, keep the newer pending for the next fetch's ack to cover.
+   *
+   * 砚砚 R6 P1 race fix: without the captured-target binding, a stale fetch
+   * (started for pending=8, completed after pending was refreshed to 12)
+   * would prematurely advance lastSeq to 12 and clear the pending — but the
+   * snapshot returned by the stale fetch may not include events 9..12.
+   * Subsequent live events route as 'advance' and the missing range is lost.
+   *
+   * Defensive: never decrease lastSeq via ack (max with current value).
+   * If no pending, no-op (catch-up triggered by something other than gap
+   * detection, e.g. F069 onMessageRestored).
+   */
+  acknowledgeCatchUp: (threadId: string, ackedTargetSeq: number) => void;
+  /**
+   * Request full catch-up replay for a thread.
+   * Consumed by `useChatHistory` which fires HTTP `fetchHistory({replace: true})`
+   * after a small delay; reducer stable-key dedup reconciles duplicates.
+   *
+   * F183 Phase C: fired on gap (incomingSeq > lastSeq+1) or epoch change
+   * (server restart). Replaces the prior 5min DONE_TIMEOUT trigger. Unconditional
+   * full fetch — there is intentionally no `fromSeq` ranged-replay parameter:
+   * the consumer is HTTP fetch + reducer dedup (no ranged WebSocket replay
+   * handler), and exposing fromSeq would create a contract that nobody honors.
+   */
   requestStreamCatchUp: (threadId: string) => void;
   /** F101: Update current game state */
   setCurrentGame: (game: GameState | null) => void;
@@ -1257,11 +1398,44 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return { messages: [...newMsgs, ...state.messages], hasMore };
     }),
 
-  replaceMessages: (msgs, hasMore) =>
+  replaceMessages: (msgs, hasMore) => {
+    // F183 Phase E AC-E2 (砚砚 R2 P1 fix): caller-driven writer must forward
+    // post-mutation invariant violations to the diagnostic layer so strict
+    // mode (BUBBLE_INVARIANT_STRICT=1 / NEXT_PUBLIC_*=1 / localStorage) can
+    // throw on bypass-of-reducer mutations. No-op when strict is off — keeps
+    // production hot path free of the O(n) scan.
+    forwardStoreInvariantViolationsStrict(msgs, get().currentThreadId);
     set((state) => {
       revokeRemovedBlobUrls(state.messages, msgs);
       return { messages: msgs, hasMore };
-    }),
+    });
+  },
+
+  // F183 Phase B1.7 — see interface comment.
+  replaceThreadMessages: (threadId, msgs, hasMore) => {
+    // F183 Phase E AC-E2 (砚砚 R2 P1 fix): same strict-gate as replaceMessages
+    forwardStoreInvariantViolationsStrict(msgs, threadId);
+    return set((state) => {
+      if (threadId === state.currentThreadId) {
+        revokeRemovedBlobUrls(state.messages, msgs);
+        const nextHasMore = hasMore ?? state.hasMore;
+        return {
+          messages: msgs,
+          hasMore: nextHasMore,
+          ...mirrorActiveFlat(state, { messages: msgs, hasMore: nextHasMore }),
+        };
+      }
+      const baseThreadState = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
+      revokeRemovedBlobUrls(baseThreadState.messages, msgs);
+      const nextHasMore = hasMore ?? baseThreadState.hasMore;
+      return {
+        threadStates: {
+          ...state.threadStates,
+          [threadId]: { ...baseThreadState, messages: msgs, hasMore: nextHasMore },
+        },
+      };
+    });
+  },
 
   hydrateThread: (threadId, msgs, hasMore) => {
     // F173 Phase C Task 5+6+7 — atomic server-authoritative hydration that
@@ -1273,6 +1447,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // *the* thread-scoped writer for hydration:
     //   - current thread: write flat + mirror to threadStates (single set())
     //   - non-current thread: write only threadStates, never touch flat
+    //
+    // F183 Phase E AC-E2 (砚砚 R2 P1 fix): same strict-gate as the other
+    // caller-driven writers. Runs only when strict mode is on.
+    forwardStoreInvariantViolationsStrict(msgs, threadId);
     set((state) => {
       if (threadId === state.currentThreadId) {
         revokeRemovedBlobUrls(state.messages, msgs);
@@ -1615,12 +1793,90 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return { messages: [], hasMore: true };
     }),
 
-  streamCatchUpVersion: 0,
-  streamCatchUpThreadId: null,
+  /**
+   * F183 Phase C — per-thread catch-up version (cloud P2 fix 2026-05-02).
+   * Map<threadId, version>. requestStreamCatchUp(tid) bumps version[tid].
+   * useChatHistory subscribes to its specific thread's version slot.
+   */
+  streamCatchUpVersionByThread: {} as Record<string, number>,
+  /** F183 Phase C cloud R3 P2 fix — last consumed version per thread. */
+  lastConsumedCatchUpVersionByThread: {} as Record<string, number>,
+  /**
+   * F183 Phase C — pending catch-up target seq per thread (砚砚 R5 P1 fix).
+   * Cleared by acknowledgeCatchUp after fetchHistory success.
+   */
+  pendingCatchUpTargetSeqByThread: {} as Record<string, number>,
+  /**
+   * F183 Phase C — per-thread lastSeq ledger. Initialized empty.
+   * Updated on each incoming event with seq>0. F5/reload re-hydrates
+   * via thread state load.
+   */
+  lastSeqByThread: {},
+  /** F183 Phase C — per-thread server seq epoch (boot UUID); initialized empty. */
+  lastSeqEpochByThread: {},
+  setLastSeq: (threadId: string, seq: number) =>
+    set((state) => {
+      // F183 Phase C — allow non-monotonic writes only when seq=0 reset (test/hydration);
+      // monotonicity invariant is enforced by caller (handleAgentMessage), not store.
+      if (state.lastSeqByThread[threadId] === seq) return state;
+      return { lastSeqByThread: { ...state.lastSeqByThread, [threadId]: seq } };
+    }),
+  setLastSeqEpoch: (threadId: string, epoch: string) =>
+    set((state) => {
+      if (state.lastSeqEpochByThread[threadId] === epoch) return state;
+      return { lastSeqEpochByThread: { ...state.lastSeqEpochByThread, [threadId]: epoch } };
+    }),
+  setPendingCatchUpTargetSeq: (threadId: string, seq: number) =>
+    set((state) => {
+      if (state.pendingCatchUpTargetSeqByThread[threadId] === seq) return state;
+      return {
+        pendingCatchUpTargetSeqByThread: {
+          ...state.pendingCatchUpTargetSeqByThread,
+          [threadId]: seq,
+        },
+      };
+    }),
+  setLastConsumedCatchUpVersion: (threadId: string, version: number) =>
+    set((state) => {
+      if (state.lastConsumedCatchUpVersionByThread[threadId] === version) return state;
+      return {
+        lastConsumedCatchUpVersionByThread: {
+          ...state.lastConsumedCatchUpVersionByThread,
+          [threadId]: version,
+        },
+      };
+    }),
+  acknowledgeCatchUp: (threadId: string, ackedTargetSeq: number) =>
+    set((state) => {
+      if (typeof ackedTargetSeq !== 'number' || ackedTargetSeq <= 0) return state;
+      const pending = state.pendingCatchUpTargetSeqByThread[threadId];
+      const currentLastSeq = state.lastSeqByThread[threadId] ?? 0;
+      // Defensive: never decrease lastSeq via ack (out-of-order ack arrivals).
+      const nextLastSeq = Math.max(currentLastSeq, ackedTargetSeq);
+      const lastSeqPatch =
+        nextLastSeq !== currentLastSeq
+          ? { lastSeqByThread: { ...state.lastSeqByThread, [threadId]: nextLastSeq } }
+          : {};
+      // 砚砚 R6 P1 race fix: only clear pending if it matches ackedTargetSeq.
+      // If pending was refreshed during fetch flight (newer gap arrived),
+      // keep the newer pending — next fetchHistory will ack it.
+      if (typeof pending === 'number' && pending === ackedTargetSeq) {
+        const nextPending = { ...state.pendingCatchUpTargetSeqByThread };
+        delete nextPending[threadId];
+        return { ...lastSeqPatch, pendingCatchUpTargetSeqByThread: nextPending };
+      }
+      // pending !== ackedTarget (or no pending) — keep pending; only advance lastSeq if changed
+      return Object.keys(lastSeqPatch).length > 0 ? lastSeqPatch : state;
+    }),
   requestStreamCatchUp: (threadId: string) =>
     set((state) => ({
-      streamCatchUpVersion: state.streamCatchUpVersion + 1,
-      streamCatchUpThreadId: threadId,
+      // F183 Phase C cloud P2 fix: per-thread version (no global trample).
+      // Each thread independently tracks its catch-up trigger; bg gap on
+      // thread B no longer overwrites active thread A's pending signal.
+      streamCatchUpVersionByThread: {
+        ...state.streamCatchUpVersionByThread,
+        [threadId]: (state.streamCatchUpVersionByThread[threadId] ?? 0) + 1,
+      },
     })),
 
   setCurrentGame: (game) => set({ currentGame: game }),

@@ -66,7 +66,7 @@ END`,
 END`,
 ];
 
-export const CURRENT_SCHEMA_VERSION = 15;
+export const CURRENT_SCHEMA_VERSION = 18;
 
 // F163 Phase A: experiment infrastructure tables (cohorts, suggestions, logs)
 export const SCHEMA_V13_TABLES = `
@@ -450,6 +450,76 @@ export function applyMigrations(db: Database.Database): void {
       // Column may already exist from a partial migration
     }
     db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(15, new Date().toISOString());
+  }
+
+  // V16: F093 world scope — world_id / scene_id on evidence_docs for world-scoped recall
+  if (currentVersion < 16) {
+    try {
+      db.exec('ALTER TABLE evidence_docs ADD COLUMN world_id TEXT');
+    } catch {
+      // Column may already exist from a partial migration
+    }
+    try {
+      db.exec('ALTER TABLE evidence_docs ADD COLUMN scene_id TEXT');
+    } catch {
+      // Column may already exist from a partial migration
+    }
+    try {
+      db.exec('CREATE INDEX IF NOT EXISTS idx_evidence_docs_world ON evidence_docs(world_id)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_evidence_docs_world_scene ON evidence_docs(world_id, scene_id)');
+    } catch {
+      // Indexes may already exist
+    }
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(16, new Date().toISOString());
+  }
+
+  // V17: F186 Phase A — collection-aware columns + marker routing
+  if (currentVersion < 17) {
+    try {
+      db.exec('ALTER TABLE evidence_docs ADD COLUMN collection_id TEXT');
+    } catch {}
+    try {
+      db.exec('ALTER TABLE evidence_docs ADD COLUMN review_status TEXT');
+    } catch {}
+    try {
+      db.exec('CREATE INDEX IF NOT EXISTS idx_evidence_docs_collection ON evidence_docs(collection_id)');
+    } catch {}
+    try {
+      db.exec('ALTER TABLE markers ADD COLUMN source_collection_id TEXT');
+    } catch {}
+    try {
+      db.exec('ALTER TABLE markers ADD COLUMN source_sensitivity TEXT');
+    } catch {}
+    try {
+      db.exec('ALTER TABLE markers ADD COLUMN target_collection_id TEXT');
+    } catch {}
+    try {
+      db.exec('ALTER TABLE markers ADD COLUMN promote_review_status TEXT');
+    } catch {}
+    try {
+      db.exec('ALTER TABLE markers ADD COLUMN secret_scan_fingerprint TEXT');
+    } catch {}
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(17, new Date().toISOString());
+  }
+
+  // V18: F186 Phase F — extended edges with collection/sensitivity/provenance
+  if (currentVersion < 18) {
+    try {
+      db.exec('ALTER TABLE edges ADD COLUMN from_collection_id TEXT');
+    } catch {}
+    try {
+      db.exec('ALTER TABLE edges ADD COLUMN to_collection_id TEXT');
+    } catch {}
+    try {
+      db.exec('ALTER TABLE edges ADD COLUMN edge_sensitivity TEXT');
+    } catch {}
+    try {
+      db.exec('ALTER TABLE edges ADD COLUMN provenance TEXT');
+    } catch {}
+    try {
+      db.exec('ALTER TABLE edges ADD COLUMN created_at TEXT');
+    } catch {}
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(18, new Date().toISOString());
   }
 }
 

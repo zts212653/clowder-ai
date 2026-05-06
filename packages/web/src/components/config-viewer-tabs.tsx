@@ -77,7 +77,9 @@ export function CatOverviewTab({
   const draggingIdRef = useRef<string | null>(null);
   const saveSeqRef = useRef(0);
 
-  const displayCats = useMemo(() => (localOrder ? sortCatsByOrder(cats, localOrder) : cats), [cats, localOrder]);
+  const allDisplayCats = useMemo(() => (localOrder ? sortCatsByOrder(cats, localOrder) : cats), [cats, localOrder]);
+  const displayCats = useMemo(() => allDisplayCats.filter((c) => c.roster?.available !== false), [allDisplayCats]);
+  const disabledCats = useMemo(() => allDisplayCats.filter((c) => c.roster?.available === false), [allDisplayCats]);
 
   const handleDragStart = useCallback((cat: CatData, event: ReactDragEvent<HTMLElement>) => {
     draggingIdRef.current = cat.id;
@@ -103,7 +105,7 @@ export function CatOverviewTab({
       draggingIdRef.current = null;
       setDraggingId(null);
       if (!srcId || srcId === target.id) return;
-      const currentIds = displayCats.map((c) => c.id);
+      const currentIds = allDisplayCats.map((c) => c.id);
       const nextOrder = reorderIds(currentIds, srcId, target.id);
       if (nextOrder.length === 0) return;
       const previous = localOrder;
@@ -119,7 +121,7 @@ export function CatOverviewTab({
         }
       }
     },
-    [displayCats, localOrder],
+    [allDisplayCats, localOrder],
   );
 
   const fetchDefaultCat = useCallback(() => {
@@ -202,6 +204,22 @@ export function CatOverviewTab({
       </div>
       <p className="text-[13px] text-[#B59A88]">按住 ⠿ 拖动卡片可自由排序；点击卡片进入成员配置 →</p>
       {cats.length === 0 && <p className="text-sm text-cafe-muted">未找到成员配置数据</p>}
+      {disabledCats.length > 0 && (
+        <div className="space-y-3">
+          <p className="text-[12px] font-semibold text-slate-400 uppercase tracking-wide">已停用成员</p>
+          {disabledCats.map((catData) => (
+            <HubMemberOverviewCard
+              key={catData.id}
+              cat={catData}
+              configCat={config.cats[catData.id]}
+              onEdit={onEditMember}
+              onDelete={onDeleteMember}
+              onToggleAvailability={onToggleAvailability}
+              togglingAvailability={togglingCatId === catData.id}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -20,7 +20,8 @@ export function readDotEnvValues(dotEnvPath) {
   const values = {};
   for (const rawLine of readFileSync(dotEnvPath, 'utf8').split(/\r?\n/)) {
     const line = rawLine.trim();
-    if (!line || line.startsWith('#')) continue;
+    if (!line) continue;
+    if (line.startsWith('#')) continue;
     const separatorIndex = line.indexOf('=');
     if (separatorIndex <= 0) continue;
 
@@ -34,15 +35,21 @@ export function readDotEnvValues(dotEnvPath) {
   return values;
 }
 
-function getConfigValue(dotEnv, env, key) {
-  return dotEnv[key] || env[key];
+function resolvePortValue(dotEnv, env, key, defaultValue) {
+  const dotEnvValue = dotEnv[key];
+  if (dotEnvValue !== undefined && dotEnvValue !== '') return dotEnvValue;
+
+  const envValue = env[key];
+  if (envValue !== undefined && envValue !== '') return envValue;
+
+  return defaultValue;
 }
 
 export function resolveWindowsStatusPorts({ projectRoot = process.cwd(), env = process.env } = {}) {
   const dotEnv = readDotEnvValues(resolve(projectRoot, '.env'));
   return {
-    apiPort: getConfigValue(dotEnv, env, 'API_SERVER_PORT') ?? DEFAULT_API_PORT,
-    webPort: getConfigValue(dotEnv, env, 'FRONTEND_PORT') ?? DEFAULT_WEB_PORT,
+    apiPort: resolvePortValue(dotEnv, env, 'API_SERVER_PORT', DEFAULT_API_PORT),
+    webPort: resolvePortValue(dotEnv, env, 'FRONTEND_PORT', DEFAULT_WEB_PORT),
   };
 }
 

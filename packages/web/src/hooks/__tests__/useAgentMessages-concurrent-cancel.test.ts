@@ -64,6 +64,12 @@ const storeState: Record<string, unknown> = {
   setMessageUsage: mockSetMessageUsage,
   requestStreamCatchUp: mockRequestStreamCatchUp,
   removeActiveInvocation: mockRemoveActiveInvocation,
+  // F183 Phase B1.5 — active error wire-up routes through reducer's replaceMessages.
+  // mutation impl 让 storeState.messages 始终反映 reducer 写入，便于 end-state 断言。
+  replaceMessages: vi.fn((msgs: unknown[]) => {
+    storeState.messages = msgs as typeof storeState.messages;
+  }),
+  hasMore: true,
 
   addMessageToThread: mockAddMessageToThread,
   clearThreadActiveInvocation: mockClearThreadActiveInvocation,
@@ -256,13 +262,15 @@ describe('F108 P1: concurrent cancel isolation', () => {
       });
     });
 
-    expect(mockAddMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'system',
-        variant: 'error',
-        content: 'Error: The model produced an invalid tool call.',
-      }),
-    );
+    // F183 Phase B1.5: active error 通过 reducer 落到 storeState.messages（不再
+    // 直接调 mockAddMessage）。end-state 等价：error system bubble 必须存在。
+    const msgs = storeState.messages as Array<{ type: string; variant?: string; content: string }>;
+    const errorBubble = msgs.find((m) => m.type === 'system' && m.variant === 'error');
+    expect(errorBubble).toMatchObject({
+      type: 'system',
+      variant: 'error',
+      content: 'Error: The model produced an invalid tool call.',
+    });
     expect(mockSetCatStatus).not.toHaveBeenCalledWith('antig-opus', 'error');
     expect(mockSetStreaming).not.toHaveBeenCalledWith(expect.any(String), false);
     expect(mockRemoveActiveInvocation).not.toHaveBeenCalled();

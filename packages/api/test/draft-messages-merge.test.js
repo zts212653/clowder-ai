@@ -413,6 +413,42 @@ describe('GET /api/messages — draft merge (#80)', () => {
     );
   });
 
+  it('does not revive an older draft that was merely touched after a newer tracker slot started', async () => {
+    const ts = Date.now();
+    draftStore.upsert({
+      userId: 'user-1',
+      threadId: 'thread-1',
+      invocationId: 'inv-old-touched-draft',
+      catId: 'opus',
+      content: 'Old draft touched by stale tool heartbeat',
+      createdAt: ts - 5000,
+      updatedAt: ts + 1000,
+    });
+
+    const app = await buildAppWithInvocationRecordStore(
+      makeInvocationRecordStore({}),
+      makeInvocationTracker({
+        activeSlotsByThread: { 'thread-1': [{ catId: 'opus', startedAt: ts }] },
+        userIds: { 'thread-1:opus': 'user-1' },
+      }),
+    );
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-1',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const oldDraft = body.messages.find((m) => m.id === 'draft-inv-old-touched-draft');
+    assert.equal(oldDraft, undefined, 'Newer tracker slot must not revive a draft created before that slot');
+    assert.equal(
+      draftStore.getByThread('user-1', 'thread-1').length,
+      1,
+      'Filtered draft should remain for TTL cleanup',
+    );
+  });
+
   it('filters orphan draft without deleting it when invocation record is missing (F173 hotfix3)', async () => {
     const ts = Date.now();
     draftStore.upsert({

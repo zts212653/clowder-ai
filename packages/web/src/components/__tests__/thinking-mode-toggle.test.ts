@@ -259,9 +259,11 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
     expect(container.textContent).toContain(THINKING_TEXT);
   });
 
-  it('stream-origin messages render via CliOutputBlock (F097)', async () => {
+  it('stream-origin messages render via CliOutputBlock with text content default-expanded (stream-final-speech heuristic)', async () => {
     const { ChatMessage } = await import('@/components/ChatMessage');
 
+    // Stream + content + no callback companion → CLI Output is default-expanded so the
+    // 4.6/sonnet native final speech is immediately visible (no manual click required).
     const streamMsg = {
       id: 's1',
       type: 'assistant' as const,
@@ -282,18 +284,8 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
       );
     });
 
-    // F097: stream content now renders inside CliOutputBlock, not ThinkingContent
     expect(container.textContent).toContain('CLI Output');
-
-    // Click to expand → content visible in terminal substrate
-    const cliButton = Array.from(container.querySelectorAll('button')).find((b) =>
-      b.textContent?.includes('CLI Output'),
-    );
-    expect(cliButton).toBeTruthy();
-    act(() => {
-      cliButton?.click();
-    });
-
+    // No manual expand needed — the heuristic auto-expands stream-final-speech.
     expect(container.textContent).toContain('stream inner monologue content here');
   });
 

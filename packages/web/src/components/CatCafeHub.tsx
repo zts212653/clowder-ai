@@ -176,6 +176,31 @@ export function CatCafeHub() {
 
   const handleToggleAvailability = useCallback(
     async (cat: (typeof cats)[number]) => {
+      const isDisabling = cat.roster?.available !== false;
+
+      if (isDisabling) {
+        let impactNote = '';
+        try {
+          const ir = await apiFetch(`/api/cats/${cat.id}/disable-impact`);
+          if (ir.ok) {
+            const impact = (await ir.json()) as { tasks: unknown[]; scheduledTasks: unknown[] };
+            const parts: string[] = [];
+            if (impact.tasks.length > 0) parts.push(`${impact.tasks.length} 个进行中任务`);
+            if (impact.scheduledTasks.length > 0) parts.push(`${impact.scheduledTasks.length} 个活跃定时任务`);
+            if (parts.length > 0) impactNote = `\n\n涉及进行中引用：${parts.join('、')}（将变为待重指派）`;
+          }
+        } catch {
+          /* ignore — show dialog anyway */
+        }
+
+        const ok = await confirm({
+          title: `停用 ${cat.displayName}`,
+          message: `确认停用成员「${cat.displayName}」吗？停用后该成员不会再收到新的 @ 指令。${impactNote}`,
+          confirmLabel: '停用',
+        });
+        if (!ok) return;
+      }
+
       setTogglingCatId(cat.id);
       setFetchError(null);
       try {
@@ -196,7 +221,7 @@ export function CatCafeHub() {
         setTogglingCatId(null);
       }
     },
-    [fetchData, refresh],
+    [confirm, fetchData, refresh],
   );
 
   const handleDeleteMember = useCallback(

@@ -97,6 +97,7 @@ export interface FetchResult {
 export interface ScheduleTriggerPolicy {
   readonly priority?: 'urgent' | 'normal';
   readonly reason?: string;
+  readonly sourceCategory?: string;
   readonly suggestedSkill?: string;
 }
 

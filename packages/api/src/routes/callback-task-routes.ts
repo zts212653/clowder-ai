@@ -3,9 +3,10 @@
  */
 
 import type { CatId } from '@cat-cafe/shared';
-import { catRegistry } from '@cat-cafe/shared';
+import { catRegistry, createCatId } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
@@ -96,9 +97,15 @@ export function registerCallbackTaskRoutes(
 
     const { title, why, ownerCatId } = parsed.data;
 
-    if (ownerCatId && !catRegistry.has(ownerCatId)) {
-      reply.status(400);
-      return { error: `Unknown catId: ${ownerCatId}` };
+    // F182 AC-C2: B class — validate ownerCatId is available (contract 400 on disabled)
+    let resolvedOwnerCatId: CatId | null = null;
+    if (ownerCatId) {
+      const resolved = resolveCatTarget(ownerCatId);
+      if ('error' in resolved) {
+        reply.status(400);
+        return resolved.error;
+      }
+      resolvedOwnerCatId = createCatId(resolved.ok);
     }
 
     const task = await taskStore.create({
@@ -108,7 +115,7 @@ export function registerCallbackTaskRoutes(
       createdBy: actor.catId,
       kind: 'work',
       subjectKey: null,
-      ownerCatId: (ownerCatId ?? null) as CatId | null,
+      ownerCatId: resolvedOwnerCatId,
       userId: actor.userId,
     });
 

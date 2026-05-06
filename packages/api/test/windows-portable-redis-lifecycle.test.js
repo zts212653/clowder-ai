@@ -55,6 +55,10 @@ test('Windows startup resolves portable Redis from the shared helper before glob
   assert.match(startWindowsScript, /Resolve-PortableRedisLayout -ProjectRoot \$ProjectRoot/);
   assert.match(helpersScript, /function Resolve-GlobalRedisBinaries/);
   assert.match(helpersScript, /Get-Command redis-server -ErrorAction SilentlyContinue/);
+  assert.doesNotMatch(helpersScript, /if \(-not \$redisServer -or -not \$redisCli\) \{ return \$null \}/);
+  assert.match(helpersScript, /if \(-not \$redisServer\) \{ return \$null \}/);
+  assert.match(helpersScript, /CliPath = if \(\$redisCli\) \{ \$redisCli\.FullName \} else \{ \$null \}/);
+  assert.match(helpersScript, /CliPath = if \(\$redisCli\) \{ \$redisCli\.Source \} else \{ \$null \}/);
 });
 
 test('Windows startup quotes portable Redis file arguments before Start-Process', () => {

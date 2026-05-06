@@ -84,6 +84,7 @@ export class CiCdCheckPoller {
       const policy: ConnectorTriggerPolicy = {
         priority: isFail ? 'urgent' : 'normal',
         reason: isFail ? 'github_ci_failure' : 'github_ci_pass',
+        sourceCategory: 'ci',
       };
       invokeTrigger.trigger(
         routeResult.threadId,

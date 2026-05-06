@@ -3,7 +3,7 @@
  * 安全: 每个请求都需要 invocationId + callbackToken 验证。
  */
 
-import type { CatId, RichBlock } from '@cat-cafe/shared';
+import type { CatId, CatRoutingError, RichBlock } from '@cat-cafe/shared';
 import { catRegistry, createCatId, normalizeRichBlock } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
@@ -12,7 +12,8 @@ import type { InvocationRegistry } from '../domains/cats/services/agents/invocat
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import { MessageDeliveryService } from '../domains/cats/services/agents/invocation/MessageDeliveryService.js';
 import { getRichBlockBuffer } from '../domains/cats/services/agents/invocation/RichBlockBuffer.js';
-import { parseA2AMentions } from '../domains/cats/services/agents/routing/a2a-mentions.js';
+import { analyzeA2AMentions } from '../domains/cats/services/agents/routing/a2a-mentions.js';
+import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
 import { extractRichFromText } from '../domains/cats/services/agents/routing/rich-block-extract.js';
 import { buildVoteNotification } from '../domains/cats/services/agents/routing/vote-intercept.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
@@ -64,6 +65,23 @@ import { detectUserMention } from './user-mention.js';
 import { clearVoteTimer, closeVoteInternal, voteTimers } from './votes.js';
 
 const log = createModuleLogger('routes/callbacks');
+
+function buildPostMessageRoutingMessage(routedIds: string[], warnings: CatRoutingError[]): string {
+  const parts: string[] = [];
+  if (routedIds.length > 0) parts.push(`消息已路由给 ${routedIds.map((id) => `@${id}`).join('、')}。`);
+  for (const w of warnings) {
+    if (w.kind === 'cat_disabled') {
+      const alts = w.alternatives
+        .slice(0, 2)
+        .map((a) => a.mention)
+        .join('、');
+      parts.push(`@${w.catId} 已停用，已跳过${alts ? `（可用替代：${alts}）` : ''}。`);
+    } else {
+      parts.push(`${w.mention} 不存在，已跳过。`);
+    }
+  }
+  return parts.length > 0 ? parts.join(' ') : '消息已存储。';
+}
 
 export interface CallbackRoutesOptions {
   registry: InvocationRegistry;
@@ -377,11 +395,17 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       const { cleanText: storedContent, blocks: richBlocks } = extractRichFromText(content);
 
       const senderCatId = createCatId(principal.catId);
-      const contentTargets = parseA2AMentions(storedContent, senderCatId);
+      // F182 AC-C1: use analyzeA2AMentions (captures routing_warnings for disabled cats)
+      const contentAnalysis = analyzeA2AMentions(storedContent, senderCatId);
+      const contentTargets = contentAnalysis.mentions;
       const validExplicitTargets: CatId[] = [];
+      const routing_warnings: CatRoutingError[] = [...contentAnalysis.routing_warnings];
       for (const id of explicitTargetCats ?? []) {
-        if (catRegistry.has(id)) {
-          validExplicitTargets.push(createCatId(id));
+        const resolved = resolveCatTarget(id);
+        if ('ok' in resolved) {
+          validExplicitTargets.push(createCatId(resolved.ok));
+        } else {
+          routing_warnings.push(resolved.error);
         }
       }
       const mergedTargets = new Set<CatId>([...contentTargets, ...validExplicitTargets]);
@@ -516,12 +540,31 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           });
       }
 
+      // F182 AC-C1: soft degradation — routing_warnings + KD-7 message field
+      // If caller specified explicit targets and ALL were unavailable → signal routing failure
+      const allExplicitFailed =
+        (explicitTargetCats?.length ?? 0) > 0 && validExplicitTargets.length === 0 && contentTargets.length === 0;
+      if (allExplicitFailed) {
+        return {
+          isError: true,
+          routed: [],
+          routing_warnings,
+          message: buildPostMessageRoutingMessage([], routing_warnings),
+          threadId: effectiveThreadId,
+          messageId: storedMsg.id,
+          ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
+          ...(clientMessageId ? { clientMessageId } : {}),
+        };
+      }
+
       return {
         status: 'ok',
         threadId: effectiveThreadId,
         messageId: storedMsg.id,
         ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
         ...(clientMessageId ? { clientMessageId } : {}),
+        ...(routing_warnings.length > 0 ? { routing_warnings } : {}),
+        message: buildPostMessageRoutingMessage([...mentions], routing_warnings),
       };
     }
 
@@ -603,22 +646,24 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const isCrossThread = effectiveThreadId !== actor.threadId;
 
     // Parse line-start @mentions (A2A rule: only line-start, strip code blocks, single target)
-    // Uses parseA2AMentions instead of resolveTargetsAndIntent to avoid
-    // participants/default-opus fallback triggering on non-@ messages (P1-1)
-    // and inline @mentions triggering invocations (P1-2).
+    // Uses analyzeA2AMentions to capture routing_warnings for disabled cats (F182 KD-10).
     // F52: Cross-thread posts skip self-reference filter so @codex can trigger target thread's codex
     const senderCatId = createCatId(actor.catId);
-    const contentTargets = parseA2AMentions(storedContent, isCrossThread ? undefined : senderCatId);
+    const contentAnalysis = analyzeA2AMentions(storedContent, isCrossThread ? undefined : senderCatId);
+    const contentTargets = contentAnalysis.mentions;
     // F098-C1: Merge explicit targetCats with content-parsed mentions (deduped)
-    // Filter out invalid catIds (e.g. "default-user") — graceful degradation, not 400
+    // F182: use resolveCatTarget to distinguish disabled vs unknown — collect routing_warnings
     const validExplicitTargets: CatId[] = [];
+    const routing_warnings: CatRoutingError[] = [...contentAnalysis.routing_warnings];
     for (const id of explicitTargetCats ?? []) {
-      if (catRegistry.has(id)) {
-        validExplicitTargets.push(createCatId(id));
+      const resolved = resolveCatTarget(id);
+      if ('ok' in resolved) {
+        validExplicitTargets.push(createCatId(resolved.ok));
       } else {
+        routing_warnings.push(resolved.error);
         app.log.warn(
-          { droppedId: id, catId: actor.catId, invocationId },
-          '[callbacks/post-message] Dropped invalid catId from targetCats',
+          { droppedId: id, catId: actor.catId, invocationId, reason: resolved.error.kind },
+          '[callbacks/post-message] Dropped unavailable catId from targetCats',
         );
       }
     }
@@ -844,12 +889,31 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         });
     }
 
+    // F182 AC-C1: soft degradation — include routing_warnings + KD-7 message field
+    // If caller specified explicit targets and ALL were unavailable → signal routing failure
+    const allExplicitFailed =
+      (explicitTargetCats?.length ?? 0) > 0 && validExplicitTargets.length === 0 && contentTargets.length === 0;
+    if (allExplicitFailed) {
+      return {
+        isError: true,
+        routed: [],
+        routing_warnings,
+        message: buildPostMessageRoutingMessage([], routing_warnings),
+        threadId: effectiveThreadId,
+        messageId: storedMsg.id,
+        ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
+        ...(clientMessageId ? { clientMessageId } : {}),
+      };
+    }
+
     return {
       status: 'ok',
       threadId: effectiveThreadId,
       messageId: storedMsg.id,
       ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
       ...(clientMessageId ? { clientMessageId } : {}),
+      ...(routing_warnings.length > 0 ? { routing_warnings } : {}),
+      message: buildPostMessageRoutingMessage([...mentions], routing_warnings),
     };
   });
 
@@ -1499,7 +1563,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       );
     }
 
-    return { status: 'ok' };
+    // F182 AC-C1: A class — routing_warnings + KD-7 message (rich blocks have no routing targets)
+    return { status: 'ok', routing_warnings: [], message: '富文本块已创建。' };
   });
 
   // F079 Gap 4: Cat-initiated vote via MCP callback
@@ -1540,6 +1605,17 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return { error: '对话不存在', code: 'THREAD_NOT_FOUND' };
     }
 
+    // F182 AC-C2: B class — validate all voters are available, collect resolved canonical catIds
+    const resolvedVoters: CatId[] = [];
+    for (const voter of voters) {
+      const resolved = resolveCatTarget(voter);
+      if ('error' in resolved) {
+        reply.status(400);
+        return resolved.error;
+      }
+      resolvedVoters.push(createCatId(resolved.ok));
+    }
+
     // Check for existing active vote
     const existing = await threadStore.getVotingState(record.threadId);
     if (existing && existing.status === 'active') {
@@ -1558,7 +1634,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       deadline: Date.now() + timeoutSec * 1000,
       createdBy: record.userId,
       status: 'active',
-      voters,
+      voters: resolvedVoters,
       initiatedByCat: record.catId as string,
     };
 
@@ -1581,7 +1657,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     // Send notification message to each voter (so they see the vote request in chat)
     const notificationContent = buildVoteNotification(question, options);
-    const mentionCatIds = voters.map((v) => createCatId(v));
+    const mentionCatIds = resolvedVoters;
     let notificationMsg: Awaited<ReturnType<typeof messageStore.append>> | undefined;
     try {
       notificationMsg = await messageStore.append({

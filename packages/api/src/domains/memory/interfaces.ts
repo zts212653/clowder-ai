@@ -1,7 +1,10 @@
 // F102: Memory component interfaces — 6 pluggable adapters
 // See docs/features/F102-memory-adapter-refactor.md for architecture
 
+import type { CollectionSensitivity, ReviewStatus, SearchDimension } from './collection-types.js';
 import type { F163Activation, F163Authority } from './f163-types.js';
+
+export * from './collection-types.js';
 
 // ── Runtime guard symbols (TypeScript interfaces erase at runtime) ────
 
@@ -108,6 +111,12 @@ export interface EvidenceItem {
   invalidAt?: string;
   /** F163 Phase C: days between review cycles */
   reviewCycleDays?: number;
+  /** F093 Phase A (KD-16): world scope — derived canon evidence */
+  worldId?: string;
+  /** F093 Phase A (KD-16): scene scope — derived canon evidence */
+  sceneId?: string;
+  /** F186: collection-level review status */
+  reviewStatus?: ReviewStatus;
   /** AC-I9: passage-level detail when depth=raw */
   passages?: Array<{
     passageId: string;
@@ -124,10 +133,24 @@ export interface EvidenceItem {
   }>;
 }
 
+export type EdgeRelation =
+  | 'evolved_from'
+  | 'blocked_by'
+  | 'related'
+  | 'related_to'
+  | 'supersedes'
+  | 'invalidates'
+  | 'promoted_from';
+
 export interface Edge {
   fromAnchor: string;
   toAnchor: string;
-  relation: 'evolved_from' | 'blocked_by' | 'related' | 'supersedes' | 'invalidates';
+  relation: EdgeRelation;
+  fromCollectionId?: string;
+  toCollectionId?: string;
+  edgeSensitivity?: CollectionSensitivity;
+  provenance?: 'frontmatter' | 'wikilink' | 'promote' | 'manual';
+  createdAt?: string;
 }
 
 export interface Marker {
@@ -137,6 +160,11 @@ export interface Marker {
   status: MarkerStatus;
   targetKind?: EvidenceKind;
   createdAt: string;
+  sourceCollectionId?: string;
+  sourceSensitivity?: CollectionSensitivity;
+  targetCollectionId?: string;
+  promoteReviewStatus?: ReviewStatus;
+  secretScanFingerprint?: string;
 }
 
 export interface SearchOptions {
@@ -158,12 +186,18 @@ export interface SearchOptions {
   contextWindow?: number;
   /** F148 Phase B (AC-B1): filter evidence to a specific thread's digest */
   threadId?: string;
-  /** F102 Batch 3: knowledge dimension — project, global, or all (default) */
-  dimension?: 'project' | 'global' | 'all';
+  /** F102 Batch 3: knowledge dimension — project, global, or all (default); F186: library | collection */
+  dimension?: SearchDimension;
+  /** F186: filter to specific collection IDs when dimension=collection */
+  collections?: string[];
   /** F152 Phase A (AC-A6): filter by provenance tier */
   provenanceTier?: ProvenanceTier;
   /** F163 Phase B (AC-B3): include backstop docs in results (for drill-down) */
   includeBackstop?: boolean;
+  /** F093 Phase A (KD-16): filter to a specific world's derived knowledge */
+  worldId?: string;
+  /** F093 Phase A (KD-16): filter to a specific scene within a world */
+  sceneId?: string;
 }
 
 export interface MarkerFilter {
@@ -195,10 +229,21 @@ export interface MaterializeResult {
   reindexed: boolean;
 }
 
+export interface CollectionGroup {
+  collectionId: string;
+  sensitivity: CollectionSensitivity;
+  status: 'ok' | 'timeout' | 'skipped' | 'error';
+  whyIncluded?: string;
+  durationMs: number;
+  items: EvidenceItem[];
+}
+
 export interface KnowledgeResult {
   results: EvidenceItem[];
   sources: Array<'project' | 'global'>;
   query: string;
+  collectionGroups?: CollectionGroup[];
+  deprecationWarnings?: string[];
 }
 
 export interface ReflectionContext {
@@ -227,7 +272,7 @@ export interface IIndexBuilder {
 export interface IMarkerQueue {
   submit(marker: Omit<Marker, 'id' | 'createdAt'>): Promise<Marker>;
   list(filter?: MarkerFilter): Promise<Marker[]>;
-  transition(id: string, to: MarkerStatus): Promise<void>;
+  transition(id: string, to: MarkerStatus, patch?: Partial<Marker>): Promise<void>;
 }
 
 export interface IMaterializationService {

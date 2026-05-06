@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1200" viewBox="0 0 1800 1200">
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#8a6f45" flood-opacity="0.14"/>
+    </filter>
+    <filter id="soft">
+      <feTurbulence type="fractalNoise" baseFrequency="0.025" numOctaves="2" seed="12" result="noise"/>
+      <feColorMatrix in="noise" type="saturate" values="0"/>
+      <feBlend in="SourceGraphic" mode="multiply"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 z" fill="#344054"/>
+    </marker>
+    <marker id="arrowRed" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 z" fill="#dc2626"/>
+    </marker>
+    <style><![CDATA[
+      text { font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Arial Unicode MS", sans-serif; letter-spacing: 0; }
+      .title { font-weight: 800; fill: #263238; }
+      .subtitle { fill: #667085; }
+      .label { font-weight: 700; fill: #263238; }
+      .small { fill: #667085; }
+      .mono { font-family: "SFMono-Regular", "Menlo", "Consolas", monospace; }
+    ]]></style>
+  </defs>
+  <rect width="100%" height="100%" fill="#fffaf0"/>
+  <path d="M0,70 C420,10 760,95 1120,42 C1440,-4 1660,42 2100,16 L2100,0 L0,0 Z" fill="#f8efe0" opacity="0.8"/>
+  
+  
+  <text x="900" y="70" text-anchor="middle" opacity="1" class="title"><tspan x="900" dy="0" fill="#263238" font-weight="850" font-size="48">Cat Cafe 产品全景：不同引擎看同一件事</tspan></text>
+  <text x="900" y="112" text-anchor="middle" opacity="1" class=""><tspan x="900" dy="0" fill="#667085" font-weight="600" font-size="24">AI 团队不是岗位分工表；跨厂商多样性是结构性质量来源</tspan></text>
+
+  
+    <rect x="78" y="145" width="1644" height="285" rx="26" fill="#fff7ed" stroke="#f97316" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    <rect x="102" y="123" width="336" height="44" rx="22" fill="#f97316" opacity="0.96"/><text x="120" y="153" font-size="25" font-weight="800" fill="white">方向层 / CVO 共创</text>
+  
+  <rect x="155" y="260" width="420" height="90" rx="42" fill="#fed7aa" stroke="#344054" stroke-width="4"/>
+  <rect x="125" y="316" width="485" height="45" rx="22" fill="#fdba74" stroke="#344054" stroke-width="3"/>
+  
+  <g>
+    <circle cx="360" cy="230.64" r="24.599999999999998" fill="#f3d7bd" stroke="#344054" stroke-width="2.46"/>
+    <path d="M 319 291.32 Q 360 253.6 401 291.32 L 387.88 347.08 L 332.12 347.08 Z" fill="#334155" stroke="#344054" stroke-width="2.46"/>
+    <path d="M 394.44 271.64 C 428.88 255.24, 450.2 248.68, 476.44 241.3" fill="none" stroke="#344054" stroke-width="4.92" stroke-linecap="round"/>
+    <circle cx="483" cy="239.66" r="6.56" fill="#344054"/>
+    <text x="360" y="384.8" text-anchor="middle" font-size="21.32" font-weight="800" fill="#263238">铲屎官 / CVO</text>
+  </g>
+  
+    <rect x="720" y="205" width="700" height="170" rx="20" fill="#ffffff" stroke="#f97316" stroke-width="3" stroke-dasharray="" opacity="1" filter=""/>
+    
+  
+  <text x="830" y="265" text-anchor="start" opacity="1" class=""><tspan x="830" dy="0" fill="#f97316" font-weight="850" font-size="34">愿景</tspan><tspan x="830" dy="45.56" fill="#f97316" font-weight="850" font-size="34">SOP</tspan><tspan x="830" dy="45.56" fill="#f97316" font-weight="850" font-size="34">教训</tspan></text>
+  <text x="1015" y="252" text-anchor="start" opacity="1" class=""><tspan x="1015" dy="0" fill="#263238" font-weight="650" font-size="26">铲屎官定义方向与边界</tspan><tspan x="1015" dy="34.84" fill="#263238" font-weight="650" font-size="26">猫猫自治执行，必要时 push back</tspan></text>
+  <circle cx="1538" cy="270" r="62" fill="#fee2e2" stroke="#dc2626" stroke-width="6"/>
+  <circle cx="1538" cy="270" r="36" fill="#dc2626" opacity="0.9"/>
+  <text x="1538" y="365" text-anchor="middle" opacity="1" class=""><tspan x="1538" dy="0" fill="#dc2626" font-weight="800" font-size="24">Magic Words</tspan><tspan x="1538" dy="32.160000000000004" fill="#dc2626" font-weight="800" font-size="24">紧急拉闸</tspan></text>
+  <text x="900" y="465" text-anchor="middle" opacity="1" class=""><tspan x="900" dy="0" fill="#7c3aed" font-weight="800" font-size="30">↕ 深度贴贴：共创，不是逐步审批</tspan></text>
+
+  
+    <rect x="78" y="505" width="1644" height="335" rx="26" fill="#f5f3ff" stroke="#7c3aed" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    <rect x="102" y="483" width="280" height="44" rx="22" fill="#7c3aed" opacity="0.96"/><text x="120" y="513" font-size="25" font-weight="800" fill="white">执行层 / 三个引擎</text>
+  
+  
+    <rect x="155" y="575" width="395" height="200" rx="24" fill="#ffffff" stroke="#7c3aed" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    
+  
+  
+    <rect x="702" y="575" width="395" height="200" rx="24" fill="#ffffff" stroke="#7c3aed" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    
+  
+  
+    <rect x="1249" y="575" width="395" height="200" rx="24" fill="#ffffff" stroke="#7c3aed" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    
+  
+  
+  <g>
+    
+    <path d="M 306.4 582.6 L 335.2 548.4 L 349.6 586.2" fill="#f8fafc" stroke="#344054" stroke-width="2.7"/>
+    <path d="M 403.6 582.6 L 374.8 548.4 L 360.4 586.2" fill="#f8fafc" stroke="#344054" stroke-width="2.7"/>
+    <ellipse cx="355" cy="615" rx="57.6" ry="49.5" fill="#f8fafc" stroke="#344054" stroke-width="2.7"/>
+    <circle cx="335.2" cy="607.8" r="5.4" fill="#334155"/>
+    <circle cx="374.8" cy="607.8" r="5.4" fill="#334155"/>
+    <path d="M 347.8 624 Q 355 631.2 362.2 624" fill="none" stroke="#344054" stroke-width="2.7" stroke-linecap="round"/>
+    <path d="M 343.3 631.2 Q 355 640.2 366.7 631.2" fill="none" stroke="#344054" stroke-width="2.25" stroke-linecap="round"/>
+    <path d="M 311.8 622.2 L 278.5 615" stroke="#344054" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M 311.8 631.2 L 279.4 636.6" stroke="#344054" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M 398.2 622.2 L 431.5 615" stroke="#344054" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M 398.2 631.2 L 430.6 636.6" stroke="#344054" stroke-width="1.8" stroke-linecap="round"/>
+    <rect x="284.8" y="678" width="140.4" height="52.2" rx="19.8" fill="#7c3aed" opacity="0.96"/>
+    <text x="355" y="703.2" text-anchor="middle" font-size="21.6" font-weight="800" fill="white">宪宪</text>
+    <text x="355" y="726.6" text-anchor="middle" font-size="16.2" font-weight="600" fill="white" opacity="0.92">布偶/Claude</text>
+  </g>
+  
+  <g>
+    <path d="M 846 624 C 814.5 669, 865.8 700.5, 900 685.2 C 934.2 701.4, 985.5 669, 954 624" fill="#d6a45f" stroke="#344054" stroke-width="2.7"/>
+    <path d="M 851.4 582.6 L 880.2 548.4 L 894.6 586.2" fill="#fef3c7" stroke="#344054" stroke-width="2.7"/>
+    <path d="M 948.6 582.6 L 919.8 548.4 L 905.4 586.2" fill="#fef3c7" stroke="#344054" stroke-width="2.7"/>
+    <ellipse cx="900" cy="615" rx="57.6" ry="49.5" fill="#fef3c7" stroke="#344054" stroke-width="2.7"/>
+    <circle cx="880.2" cy="607.8" r="5.4" fill="#263238"/>
+    <circle cx="919.8" cy="607.8" r="5.4" fill="#263238"/>
+    <path d="M 892.8 624 Q 900 631.2 907.2 624" fill="none" stroke="#344054" stroke-width="2.7" stroke-linecap="round"/>
+    <path d="M 888.3 631.2 Q 900 640.2 911.7 631.2" fill="none" stroke="#344054" stroke-width="2.25" stroke-linecap="round"/>
+    <path d="M 856.8 622.2 L 823.5 615" stroke="#344054" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M 856.8 631.2 L 824.4 636.6" stroke="#344054" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M 943.2 622.2 L 976.5 615" stroke="#344054" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M 943.2 631.2 L 975.6 636.6" stroke="#344054" stroke-width="1.8" stroke-linecap="round"/>
+    <rect x="829.8" y="678" width="140.4" height="52.2" rx="19.8" fill="#2563eb" opacity="0.96"/>
+    <text x="900" y="703.2" text-anchor="middle" font-size="21.6" font-weight="800" fill="white">砚砚</text>
+    <text x="900" y="726.6" text-anchor="middle" font-size="16.2" font-weight="600" fill="white" opacity="0.92">缅因/GPT</text>
+  </g>
+  
+  <g>
+    
+    <path d="M 1396.4 582.6 L 1425.2 548.4 L 1439.6 586.2" fill="#e0f2fe" stroke="#344054" stroke-width="2.7"/>
+    <path d="M 1493.6 582.6 L 1464.8 548.4 L 1450.4 586.2" fill="#e0f2fe" stroke="#344054" stroke-width="2.7"/>
+    <ellipse cx="1445" cy="615" rx="57.6" ry="49.5" fill="#e0f2fe" stroke="#344054" stroke-width="2.7"/>
+    <circle cx="1425.2" cy="607.8" r="5.4" fill="#0f172a"/>
+    <circle cx="1464.8" cy="607.8" r="5.4" fill="#0f172a"/>
+    <path d="M 1437.8 624 Q 1445 631.2 1452.2 624" fill="none" stroke="#344054" stroke-width="2.7" stroke-linecap="round"/>
+    <path d="M 1433.3 631.2 Q 1445 640.2 1456.7 631.2" fill="none" stroke="#344054" stroke-width="2.25" stroke-linecap="round"/>
+    <path d="M 1401.8 622.2 L 1368.5 615" stroke="#344054" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M 1401.8 631.2 L 1369.4 636.6" stroke="#344054" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M 1488.2 622.2 L 1521.5 615" stroke="#344054" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M 1488.2 631.2 L 1520.6 636.6" stroke="#344054" stroke-width="1.8" stroke-linecap="round"/>
+    <rect x="1374.8" y="678" width="140.4" height="52.2" rx="19.8" fill="#0f766e" opacity="0.96"/>
+    <text x="1445" y="703.2" text-anchor="middle" font-size="21.6" font-weight="800" fill="white">烁烁</text>
+    <text x="1445" y="726.6" text-anchor="middle" font-size="16.2" font-weight="600" fill="white" opacity="0.92">暹罗/Gemini</text>
+  </g>
+  <text x="355" y="808" text-anchor="middle" opacity="1" class=""><tspan x="355" dy="0" fill="#667085" font-weight="800" font-size="25">IDE + 蓝图</tspan></text>
+  <text x="900" y="808" text-anchor="middle" opacity="1" class=""><tspan x="900" dy="0" fill="#667085" font-weight="800" font-size="25">放大镜 + checklist</tspan></text>
+  <text x="1445" y="808" text-anchor="middle" opacity="1" class=""><tspan x="1445" dy="0" fill="#667085" font-weight="800" font-size="25">画板 + 调色盘</tspan></text>
+  <line x1="540" y1="695" x2="705" y2="695" stroke="#7c3aed" stroke-width="6"  stroke-linecap="round" marker-end="url(#arrow)"/>
+  <line x1="1095" y1="695" x2="1250" y2="695" stroke="#7c3aed" stroke-width="6"  stroke-linecap="round" marker-end="url(#arrow)"/>
+  
+  <g>
+    <circle cx="626" cy="695" r="34" fill="#7c3aed" opacity="0.88" stroke="#344054" stroke-width="3"/>
+    <path d="M 602.2 684.8 C 620.9 664.4, 641.3 671.2, 651.84 691.6" fill="none" stroke="white" stroke-width="4.08" opacity="0.86"/>
+    <path d="M 598.8 703.5 C 622.6 691.6, 636.2 708.6, 654.9 698.4" fill="none" stroke="white" stroke-width="3.74" opacity="0.86"/>
+    <path d="M 620.9 666.1 C 614.1 693.3, 631.1 706.9, 620.9 724.24" fill="none" stroke="white" stroke-width="3.4000000000000004" opacity="0.86"/>
+  </g>
+  
+  <g>
+    <circle cx="1175" cy="695" r="34" fill="#7c3aed" opacity="0.88" stroke="#344054" stroke-width="3"/>
+    <path d="M 1151.2 684.8 C 1169.9 664.4, 1190.3 671.2, 1200.84 691.6" fill="none" stroke="white" stroke-width="4.08" opacity="0.86"/>
+    <path d="M 1147.8 703.5 C 1171.6 691.6, 1185.2 708.6, 1203.9 698.4" fill="none" stroke="white" stroke-width="3.74" opacity="0.86"/>
+    <path d="M 1169.9 666.1 C 1163.1 693.3, 1180.1 706.9, 1169.9 724.24" fill="none" stroke="white" stroke-width="3.4000000000000004" opacity="0.86"/>
+  </g>
+  <text x="900" y="560" text-anchor="middle" opacity="1" class=""><tspan x="900" dy="0" fill="#7c3aed" font-weight="800" font-size="24">毛线球 = 球权，任何猫都能接</tspan></text>
+  <text x="900" y="834" text-anchor="middle" opacity="1" class=""><tspan x="900" dy="0" fill="#7c3aed" font-weight="850" font-size="24">工位物品只暗示观察习惯，不是岗位边界</tspan></text>
+
+  
+    <rect x="78" y="895" width="1644" height="235" rx="26" fill="#ecfdf5" stroke="#16a34a" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    <rect x="102" y="873" width="168" height="44" rx="22" fill="#16a34a" opacity="0.96"/><text x="120" y="903" font-size="25" font-weight="800" fill="white">共享基础设施</text>
+  
+  
+  <g>
+    <rect x="205" y="1020" width="138" height="32.199999999999996" rx="6.8999999999999995" fill="#dcfce7" stroke="#16a34a" stroke-width="3.4499999999999997"/>
+    <rect x="225.7" y="983.2" width="144.89999999999998" height="32.199999999999996" rx="6.8999999999999995" fill="#dbeafe" stroke="#2563eb" stroke-width="3.4499999999999997"/>
+    <rect x="195.8" y="946.4" width="133.39999999999998" height="32.199999999999996" rx="6.8999999999999995" fill="#ffedd5" stroke="#f97316" stroke-width="3.4499999999999997"/>
+    <text x="287.8" y="1086.7" text-anchor="middle" font-size="25.299999999999997" font-weight="700" fill="#263238">docs / evidence</text>
+  </g>
+  
+    <rect x="520" y="955" width="340" height="120" rx="22" fill="#ffffff" stroke="#16a34a" stroke-width="3" stroke-dasharray="" opacity="1" filter=""/>
+    
+  
+  <text x="690" y="1008" text-anchor="middle" opacity="1" class=""><tspan x="690" dy="0" fill="#16a34a" font-weight="800" font-size="26">SOP 轨道</tspan><tspan x="690" dy="34.84" fill="#16a34a" font-weight="800" font-size="26">feat → review → merge</tspan></text>
+  
+    <rect x="930" y="955" width="340" height="120" rx="22" fill="#ffffff" stroke="#2563eb" stroke-width="3" stroke-dasharray="" opacity="1" filter=""/>
+    
+  
+  <text x="1100" y="1008" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#2563eb" font-weight="800" font-size="26">监控仪表盘</tspan><tspan x="1100" dy="34.84" fill="#2563eb" font-weight="800" font-size="26">谁在跑 / 谁在等</tspan></text>
+  
+    <rect x="1335" y="955" width="290" height="120" rx="22" fill="#ffffff" stroke="#f97316" stroke-width="3" stroke-dasharray="" opacity="1" filter=""/>
+    
+  
+  <text x="1480" y="1008" text-anchor="middle" opacity="1" class=""><tspan x="1480" dy="0" fill="#f97316" font-weight="800" font-size="26">外部触达</tspan><tspan x="1480" dy="34.84" fill="#f97316" font-weight="800" font-size="26">飞书 · 企微 · TG</tspan></text>
+  <text x="1688" y="1160" text-anchor="end" opacity="1" class=""><tspan x="1688" dy="0" fill="#667085" font-weight="700" font-size="20">valid_as_of: 2026-05-05 / CN first</tspan></text>
+  
+</svg>

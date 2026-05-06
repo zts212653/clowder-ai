@@ -8,19 +8,23 @@
 ### Claude Code
 ```bash
 cp .claude/hooks/user-level/session-*.sh ~/.claude/hooks/
-chmod +x ~/.claude/hooks/session-*.sh
+chmod +x ~/.claude/hooks/session-*.sh   # macOS/Linux; Windows Git Bash 可跳过
 ```
 然后在 `~/.claude/settings.json` 的 `hooks` 里加 SessionStart 和 Stop 条目。
 可参考同目录的 `claude-settings.template.json`；模板只使用 `$HOME`，不携带维护者机器上的绝对路径。
 建议优先用 Hub 的 Sync hooks 一键修复；手动复制 template 后，Hub 可能因路径规范化差异继续提示 stale，此时按提示再 sync 一次即可。
+
+> **Windows 用户**：需要安装 [Git for Windows](https://gitforwindows.org/)（提供 Git Bash）。
+> Hook 命令通过 `bash` 显式调用，确保跨平台执行。如果不装 Git Bash，
+> `.sh` 文件会被 VS Code 等编辑器打开而不是执行。
 
 ### Codex CLI
 创建 `~/.codex/hooks.json`，引用同一份脚本：
 ```json
 {
   "hooks": {
-    "SessionStart": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/session-start-recall.sh" }] }],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/session-stop-check.sh" }] }]
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "bash \"$HOME/.claude/hooks/session-start-recall.sh\"" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "bash \"$HOME/.claude/hooks/session-stop-check.sh\"" }] }]
   }
 }
 ```

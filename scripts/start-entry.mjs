@@ -81,7 +81,7 @@ if (mode === 'status') {
       CAT_CAFE_RESPECT_DOTENV_PORTS: '1',
     };
   } else {
-    console.error(`Unknown mode: ${mode}. Use: start, start:direct, dev:direct`);
+    console.error(`Unknown mode: ${mode}. Use: start, start:direct, dev:direct, status`);
     process.exit(1);
   }
   const child = spawn('bash', [cmd, ...args], { cwd: projectRoot, stdio: 'inherit', env });

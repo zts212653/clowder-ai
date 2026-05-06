@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2200" height="1500" viewBox="0 0 2200 1500">
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#8a6f45" flood-opacity="0.14"/>
+    </filter>
+    <filter id="soft">
+      <feTurbulence type="fractalNoise" baseFrequency="0.025" numOctaves="2" seed="12" result="noise"/>
+      <feColorMatrix in="noise" type="saturate" values="0"/>
+      <feBlend in="SourceGraphic" mode="multiply"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 z" fill="#344054"/>
+    </marker>
+    <marker id="arrowRed" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 z" fill="#dc2626"/>
+    </marker>
+    <style><![CDATA[
+      text { font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Arial Unicode MS", sans-serif; letter-spacing: 0; }
+      .title { font-weight: 800; fill: #263238; }
+      .subtitle { fill: #667085; }
+      .label { font-weight: 700; fill: #263238; }
+      .small { fill: #667085; }
+      .mono { font-family: "SFMono-Regular", "Menlo", "Consolas", monospace; }
+    ]]></style>
+  </defs>
+  <rect width="100%" height="100%" fill="#fffaf0"/>
+  <path d="M0,70 C420,10 760,95 1120,42 C1440,-4 1660,42 2100,16 L2100,0 L0,0 Z" fill="#f8efe0" opacity="0.8"/>
+  
+  
+  <text x="1100" y="70" text-anchor="middle" opacity="1" class="title"><tspan x="1100" dy="0" fill="#263238" font-weight="850" font-size="48">记忆 × Harness 双飞轮：知识活过上下文，规则会删除自己</tspan></text>
+  <text x="1100" y="112" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#667085" font-weight="600" font-size="24">给外部读者的人话版：左轮管理知识，右轮管理规则，中间闭环让两轮互相供数</tspan></text>
+
+  
+    
+    <rect x="70" y="170" width="760" height="1080" rx="34" fill="#16a34a12" stroke="#16a34a" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    <rect x="94" y="148" width="196" height="44" rx="22" fill="#16a34a" opacity="0.96"/><text x="112" y="178" font-size="25" font-weight="800" fill="white">左轮：知识飞轮</text>
+  
+    <text x="450" y="242" text-anchor="middle" opacity="1" class=""><tspan x="450" dy="0" fill="#16a34a" font-weight="900" font-size="31">让知识活过上下文重置</tspan></text>
+    
+    <rect x="104" y="274" width="692" height="62" rx="20" fill="white" stroke="#16a34a" stroke-width="3" stroke-dasharray="" opacity="1" filter=""/>
+    
+  
+    <text x="450" y="315" text-anchor="middle" opacity="1" class=""><tspan x="450" dy="0" fill="#263238" font-weight="780" font-size="21">问题：agent 每次开新上下文，过去决策和教训会丢</tspan></text>
+    
+    <rect x="114" y="360" width="672" height="88" rx="22" fill="white" stroke="#16a34a" stroke-width="3" filter="url(#shadow)"/>
+    <circle cx="158" cy="404" r="25" fill="#16a34a" opacity="0.95"/>
+    <text x="158" y="413" text-anchor="middle" font-size="24" font-weight="900" fill="white">1</text>
+    <text x="200" y="396" text-anchor="start" opacity="1" class=""><tspan x="200" dy="0" fill="#263238" font-weight="880" font-size="24">工作产出文档和讨论</tspan></text>
+    <text x="200" y="426" text-anchor="start" opacity="1" class=""><tspan x="200" dy="0" fill="#667085" font-weight="700" font-size="18">(docs / discussions)</tspan></text>
+  
+    <rect x="114" y="464" width="672" height="88" rx="22" fill="white" stroke="#16a34a" stroke-width="3" filter="url(#shadow)"/>
+    <circle cx="158" cy="508" r="25" fill="#16a34a" opacity="0.95"/>
+    <text x="158" y="517" text-anchor="middle" font-size="24" font-weight="900" fill="white">2</text>
+    <text x="200" y="500" text-anchor="start" opacity="1" class=""><tspan x="200" dy="0" fill="#263238" font-weight="880" font-size="24">系统自动扫描建索引</tspan></text>
+    <text x="200" y="530" text-anchor="start" opacity="1" class=""><tspan x="200" dy="0" fill="#667085" font-weight="700" font-size="18">(scan → evidence.sqlite)</tspan></text>
+  
+    <rect x="114" y="568" width="672" height="88" rx="22" fill="white" stroke="#16a34a" stroke-width="3" filter="url(#shadow)"/>
+    <circle cx="158" cy="612" r="25" fill="#16a34a" opacity="0.95"/>
+    <text x="158" y="621" text-anchor="middle" font-size="24" font-weight="900" fill="white">3</text>
+    <text x="200" y="604" text-anchor="start" opacity="1" class=""><tspan x="200" dy="0" fill="#263238" font-weight="880" font-size="24">Agent 开工前先搜</tspan></text>
+    <text x="200" y="634" text-anchor="start" opacity="1" class=""><tspan x="200" dy="0" fill="#667085" font-weight="700" font-size="18">(search_evidence)</tspan></text>
+  
+    <rect x="114" y="672" width="672" height="88" rx="22" fill="white" stroke="#16a34a" stroke-width="3" filter="url(#shadow)"/>
+    <circle cx="158" cy="716" r="25" fill="#16a34a" opacity="0.95"/>
+    <text x="158" y="725" text-anchor="middle" font-size="24" font-weight="900" fill="white">4</text>
+    <text x="200" y="708" text-anchor="start" opacity="1" class=""><tspan x="200" dy="0" fill="#263238" font-weight="880" font-size="24">搜到就用，用完反馈</tspan></text>
+    <text x="200" y="738" text-anchor="start" opacity="1" class=""><tspan x="200" dy="0" fill="#667085" font-weight="700" font-size="18">(recall → feedback)</tspan></text>
+  
+    <rect x="114" y="776" width="672" height="88" rx="22" fill="white" stroke="#16a34a" stroke-width="3" filter="url(#shadow)"/>
+    <circle cx="158" cy="820" r="25" fill="#16a34a" opacity="0.95"/>
+    <text x="158" y="829" text-anchor="middle" font-size="24" font-weight="900" fill="white">5</text>
+    <text x="200" y="812" text-anchor="start" opacity="1" class=""><tspan x="200" dy="0" fill="#263238" font-weight="880" font-size="24">人工审核，沉淀正式知识</tspan></text>
+    <text x="200" y="842" text-anchor="start" opacity="1" class=""><tspan x="200" dy="0" fill="#667085" font-weight="700" font-size="18">(review → materialize)</tspan></text>
+  
+    <rect x="114" y="880" width="672" height="88" rx="22" fill="white" stroke="#16a34a" stroke-width="3" filter="url(#shadow)"/>
+    <circle cx="158" cy="924" r="25" fill="#16a34a" opacity="0.95"/>
+    <text x="158" y="933" text-anchor="middle" font-size="24" font-weight="900" fill="white">6</text>
+    <text x="200" y="916" text-anchor="start" opacity="1" class=""><tspan x="200" dy="0" fill="#263238" font-weight="880" font-size="24">重新索引，检测过时/矛盾</tspan></text>
+    <text x="200" y="946" text-anchor="start" opacity="1" class=""><tspan x="200" dy="0" fill="#667085" font-weight="700" font-size="18">(reindex + stale / contradiction)</tspan></text>
+  
+    <line x1="450" y1="455" x2="450" y2="483" stroke="#16a34a" stroke-width="4"  stroke-linecap="round" marker-end="url(#arrow)"/><line x1="450" y1="559" x2="450" y2="587" stroke="#16a34a" stroke-width="4"  stroke-linecap="round" marker-end="url(#arrow)"/><line x1="450" y1="663" x2="450" y2="691" stroke="#16a34a" stroke-width="4"  stroke-linecap="round" marker-end="url(#arrow)"/><line x1="450" y1="767" x2="450" y2="795" stroke="#16a34a" stroke-width="4"  stroke-linecap="round" marker-end="url(#arrow)"/><line x1="450" y1="871" x2="450" y2="899" stroke="#16a34a" stroke-width="4"  stroke-linecap="round" marker-end="url(#arrow)"/>
+    
+    <rect x="104" y="1040" width="692" height="160" rx="24" fill="white" stroke="#16a34a" stroke-width="3" stroke-dasharray="" opacity="1" filter=""/>
+    
+  
+    <rect x="128" y="1022" width="150" height="44" rx="22" fill="#16a34a22" stroke="#16a34a" stroke-width="2"/>
+  <text x="203" y="1051.48" text-anchor="middle" font-size="22" font-weight="700" fill="#16a34a">飞轮效应</text>
+    <text x="134" y="1095" text-anchor="start" opacity="1" class=""><tspan x="134" dy="0" fill="#16a34a" font-weight="820" font-size="23">知识越多 → 搜索越准</tspan><tspan x="134" dy="28.75" fill="#16a34a" font-weight="820" font-size="23">搜索越准 → 决策越好</tspan><tspan x="134" dy="28.75" fill="#16a34a" font-weight="820" font-size="23">决策越好 → 产出更好的知识</tspan></text>
+  
+
+  
+    
+    <rect x="1370" y="170" width="760" height="1080" rx="34" fill="#f9731612" stroke="#f97316" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    <rect x="1394" y="148" width="364" height="44" rx="22" fill="#f97316" opacity="0.96"/><text x="1412" y="178" font-size="25" font-weight="800" fill="white">右轮：Harness 飞轮</text>
+  
+    <text x="1750" y="242" text-anchor="middle" opacity="1" class=""><tspan x="1750" dy="0" fill="#f97316" font-weight="900" font-size="31">让规则会删除自己</tspan></text>
+    
+    <rect x="1404" y="274" width="692" height="62" rx="20" fill="white" stroke="#f97316" stroke-width="3" stroke-dasharray="" opacity="1" filter=""/>
+    
+  
+    <text x="1750" y="315" text-anchor="middle" opacity="1" class=""><tspan x="1750" dy="0" fill="#263238" font-weight="780" font-size="21">问题：事故后只加规则不删规则，harness 会越来越重</tspan></text>
+    
+    <rect x="1414" y="360" width="672" height="88" rx="22" fill="white" stroke="#f97316" stroke-width="3" filter="url(#shadow)"/>
+    <circle cx="1458" cy="404" r="25" fill="#f97316" opacity="0.95"/>
+    <text x="1458" y="413" text-anchor="middle" font-size="24" font-weight="900" fill="white">1</text>
+    <text x="1500" y="396" text-anchor="start" opacity="1" class=""><tspan x="1500" dy="0" fill="#263238" font-weight="880" font-size="24">规则被触发</tspan></text>
+    <text x="1500" y="426" text-anchor="start" opacity="1" class=""><tspan x="1500" dy="0" fill="#667085" font-weight="700" font-size="18">(rule fire)</tspan></text>
+  
+    <rect x="1414" y="464" width="672" height="88" rx="22" fill="white" stroke="#f97316" stroke-width="3" filter="url(#shadow)"/>
+    <circle cx="1458" cy="508" r="25" fill="#f97316" opacity="0.95"/>
+    <text x="1458" y="517" text-anchor="middle" font-size="24" font-weight="900" fill="white">2</text>
+    <text x="1500" y="500" text-anchor="start" opacity="1" class=""><tspan x="1500" dy="0" fill="#263238" font-weight="880" font-size="24">记录触发信号</tspan></text>
+    <text x="1500" y="530" text-anchor="start" opacity="1" class=""><tspan x="1500" dy="0" fill="#667085" font-weight="700" font-size="18">(trace: 违规 / 绕行 / 拉闸)</tspan></text>
+  
+    <rect x="1414" y="568" width="672" height="88" rx="22" fill="white" stroke="#f97316" stroke-width="3" filter="url(#shadow)"/>
+    <circle cx="1458" cy="612" r="25" fill="#f97316" opacity="0.95"/>
+    <text x="1458" y="621" text-anchor="middle" font-size="24" font-weight="900" fill="white">3</text>
+    <text x="1500" y="604" text-anchor="start" opacity="1" class=""><tspan x="1500" dy="0" fill="#263238" font-weight="880" font-size="24">区分永久协议和临时脚手架</tspan></text>
+    <text x="1500" y="634" text-anchor="start" opacity="1" class=""><tspan x="1500" dy="0" fill="#667085" font-weight="700" font-size="18">(skeleton / explanation)</tspan></text>
+  
+    <rect x="1414" y="672" width="672" height="88" rx="22" fill="white" stroke="#f97316" stroke-width="3" filter="url(#shadow)"/>
+    <circle cx="1458" cy="716" r="25" fill="#f97316" opacity="0.95"/>
+    <text x="1458" y="725" text-anchor="middle" font-size="24" font-weight="900" fill="white">4</text>
+    <text x="1500" y="708" text-anchor="start" opacity="1" class=""><tspan x="1500" dy="0" fill="#263238" font-weight="880" font-size="24">临时规则写入删除条件</tspan></text>
+    <text x="1500" y="738" text-anchor="start" opacity="1" class=""><tspan x="1500" dy="0" fill="#667085" font-weight="700" font-size="18">(sunset condition)</tspan></text>
+  
+    <rect x="1414" y="776" width="672" height="88" rx="22" fill="white" stroke="#f97316" stroke-width="3" filter="url(#shadow)"/>
+    <circle cx="1458" cy="820" r="25" fill="#f97316" opacity="0.95"/>
+    <text x="1458" y="829" text-anchor="middle" font-size="24" font-weight="900" fill="white">5</text>
+    <text x="1500" y="812" text-anchor="start" opacity="1" class=""><tspan x="1500" dy="0" fill="#263238" font-weight="880" font-size="24">连续 N 次不触发，降级</tspan></text>
+    <text x="1500" y="842" text-anchor="start" opacity="1" class=""><tspan x="1500" dy="0" fill="#667085" font-weight="700" font-size="18">(default → dynamic)</tspan></text>
+  
+    <rect x="1414" y="880" width="672" height="88" rx="22" fill="white" stroke="#f97316" stroke-width="3" filter="url(#shadow)"/>
+    <circle cx="1458" cy="924" r="25" fill="#f97316" opacity="0.95"/>
+    <text x="1458" y="933" text-anchor="middle" font-size="24" font-weight="900" fill="white">6</text>
+    <text x="1500" y="916" text-anchor="start" opacity="1" class=""><tspan x="1500" dy="0" fill="#263238" font-weight="880" font-size="24">确认无用后删除并归档</tspan></text>
+    <text x="1500" y="946" text-anchor="start" opacity="1" class=""><tspan x="1500" dy="0" fill="#667085" font-weight="700" font-size="18">(sunset removal + lesson)</tspan></text>
+  
+    <line x1="1750" y1="455" x2="1750" y2="483" stroke="#f97316" stroke-width="4"  stroke-linecap="round" marker-end="url(#arrow)"/><line x1="1750" y1="559" x2="1750" y2="587" stroke="#f97316" stroke-width="4"  stroke-linecap="round" marker-end="url(#arrow)"/><line x1="1750" y1="663" x2="1750" y2="691" stroke="#f97316" stroke-width="4"  stroke-linecap="round" marker-end="url(#arrow)"/><line x1="1750" y1="767" x2="1750" y2="795" stroke="#f97316" stroke-width="4"  stroke-linecap="round" marker-end="url(#arrow)"/><line x1="1750" y1="871" x2="1750" y2="899" stroke="#f97316" stroke-width="4"  stroke-linecap="round" marker-end="url(#arrow)"/>
+    
+    <rect x="1404" y="1040" width="692" height="160" rx="24" fill="white" stroke="#f97316" stroke-width="3" stroke-dasharray="" opacity="1" filter=""/>
+    
+  
+    <rect x="1428" y="1022" width="150" height="44" rx="22" fill="#f9731622" stroke="#f97316" stroke-width="2"/>
+  <text x="1503" y="1051.48" text-anchor="middle" font-size="22" font-weight="700" fill="#f97316">飞轮效应</text>
+    <text x="1434" y="1095" text-anchor="start" opacity="1" class=""><tspan x="1434" dy="0" fill="#f97316" font-weight="820" font-size="23">删掉不需要的规则 → 系统更轻</tspan><tspan x="1434" dy="28.75" fill="#f97316" font-weight="820" font-size="23">系统更轻 → agent 更快更准</tspan><tspan x="1434" dy="28.75" fill="#f97316" font-weight="820" font-size="23">触发数据更干净 → 删除判断更准</tspan></text>
+  
+
+  
+    <rect x="880" y="430" width="440" height="560" rx="34" fill="#f8fafc" stroke="#2563eb" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    <rect x="904" y="408" width="140" height="44" rx="22" fill="#2563eb" opacity="0.96"/><text x="922" y="438" font-size="25" font-weight="800" fill="white">中间齿轮</text>
+  
+  <text x="1100" y="505" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#2563eb" font-weight="900" font-size="32">现实闭环</tspan><tspan x="1100" dy="36.8" fill="#2563eb" font-weight="900" font-size="32">连接两个飞轮的桥</tspan></text>
+  <text x="965" y="585" text-anchor="start" opacity="1" class=""><tspan x="965" dy="0" fill="#263238" font-weight="800" font-size="25">1. 看现实状态</tspan><tspan x="965" dy="31.25" fill="#263238" font-weight="800" font-size="25">2. 建计算模型</tspan><tspan x="965" dy="31.25" fill="#263238" font-weight="800" font-size="25">3. 执行动作</tspan><tspan x="965" dy="31.25" fill="#263238" font-weight="800" font-size="25">4. 改变现实</tspan><tspan x="965" dy="31.25" fill="#263238" font-weight="800" font-size="25">5. 验证结果</tspan><tspan x="965" dy="31.25" fill="#263238" font-weight="800" font-size="25">6. 做治理决策</tspan></text>
+  
+    <rect x="915" y="805" width="370" height="132" rx="22" fill="white" stroke="#2563eb" stroke-width="3" stroke-dasharray="" opacity="1" filter=""/>
+    
+  
+  <text x="1100" y="850" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#2563eb" font-weight="800" font-size="21">左轮提供：知识是否还被引用</tspan><tspan x="1100" dy="26.25" fill="#2563eb" font-weight="800" font-size="21">右轮提供：规则是否还在触发</tspan><tspan x="1100" dy="26.25" fill="#2563eb" font-weight="800" font-size="21">闭环让两轮同步转</tspan></text>
+  <path d="M 830 445 C 855 440, 875 480, 900 505" fill="none" stroke="#16a34a" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/>
+  <path d="M 1320 505 C 1345 480, 1350 440, 1370 445" fill="none" stroke="#f97316" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/>
+  <path d="M 900 950 C 860 985, 850 1025, 830 1040" fill="none" stroke="#16a34a" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/>
+  <path d="M 1370 1040 C 1350 1025, 1345 985, 1320 950" fill="none" stroke="#f97316" stroke-width="5"  stroke-linecap="round" marker-end="url(#arrow)"/>
+  
+  <g>
+    <circle cx="1100" cy="1018" r="40" fill="#0f766e" opacity="0.88" stroke="#344054" stroke-width="3"/>
+    <path d="M 1072 1006 C 1094 982, 1118 990, 1130.4 1014" fill="none" stroke="white" stroke-width="4.8" opacity="0.86"/>
+    <path d="M 1068 1028 C 1096 1014, 1112 1034, 1134 1022" fill="none" stroke="white" stroke-width="4.4" opacity="0.86"/>
+    <path d="M 1094 984 C 1086 1016, 1106 1032, 1094 1052.4" fill="none" stroke="white" stroke-width="4" opacity="0.86"/>
+  </g>
+  <text x="1100" y="1086" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#0f766e" font-weight="900" font-size="24">现实证据在中间回流</tspan></text>
+
+  
+    <rect x="180" y="1310" width="1840" height="92" rx="26" fill="#fffbeb" stroke="#d97706" stroke-width="3" stroke-dasharray="" opacity="1" filter=""/>
+    
+  
+  <text x="1100" y="1366" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#92400e" font-weight="820" font-size="25">常见六大件主要覆盖左轮的知识/产物熵控；Cat Cafe 额外把 harness 自身熵控画成右轮：规则要能产出删除自己的证据。</tspan></text>
+  
+</svg>

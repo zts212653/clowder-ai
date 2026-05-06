@@ -3,6 +3,35 @@
  * 导出所有类型定义
  */
 
+// F093 World Engine types (re-exported from schemas for convenience)
+export type {
+  CanonPromotionRecord,
+  CanonStatus,
+  CanonSummaryEntry,
+  CareLoopHint,
+  CharacterCoreIdentity,
+  CharacterGrowthState,
+  CharacterInnerDrive,
+  CharacterMaskOverlay,
+  CharacterRecord,
+  CharacterRelationshipTension,
+  CharacterVoiceAndImage,
+  JsonPatchOperation,
+  RelationshipBond,
+  SceneRecord,
+  SceneStatus,
+  WorldAction,
+  WorldActionEnvelope,
+  WorldActorKind,
+  WorldActorRef,
+  WorldContextEnvelope,
+  WorldEventEntry,
+  WorldEventType,
+  WorldMode,
+  WorldRecallResult,
+  WorldRecord,
+  WorldStatus,
+} from '../schemas/world.js';
 // A2A Protocol types (F050 Phase 3)
 export type {
   A2AAgentCard,
@@ -158,6 +187,8 @@ export type {
   Roster,
   RosterEntry,
 } from './cat-breed.js';
+// F182: Cat routing error types
+export type { CatAlternative, CatRoutingError } from './cat-routing.js';
 export type { BuiltinAccountClient } from './client-routing.js';
 export {
   builtinAccountFamilyForClient,

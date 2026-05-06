@@ -15,6 +15,15 @@ import { safeParseExtra } from '../dist/domains/cats/services/stores/redis/redis
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 const { InvocationRegistry } = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
 
+async function waitFor(predicate, timeoutMs = 1000, intervalMs = 10) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return true;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return predicate();
+}
+
 describe('A2A routing message persistence (#648)', () => {
   describe('safeParseExtra preserves systemKind through round-trip', () => {
     it('preserves systemKind: a2a_routing', () => {
@@ -104,10 +113,14 @@ describe('A2A routing message persistence (#648)', () => {
 
 function buildDeps(overrides = {}) {
   const invocationQueue = new InvocationQueue();
+  let nextStoredId = 0;
   return {
     registry: new InvocationRegistry(),
     messageStore: {
-      append: mock.fn(async (msg) => ({ id: `msg-${Date.now()}`, ...msg })),
+      append: mock.fn(async (msg) => ({
+        id: msg.extra?.systemKind === 'a2a_routing' ? 'msg-a2a-routing' : `msg-${++nextStoredId}`,
+        ...msg,
+      })),
       getByThread: mock.fn(async () => []),
       getByThreadBefore: mock.fn(async () => []),
     },
@@ -192,8 +205,10 @@ describe('Integration: a2a_handoff persistence through streaming route (#648)', 
 
     assert.equal(res.statusCode, 200);
 
-    // Wait for background coroutine to finish processing the generator
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    const processed = await waitFor(() =>
+      deps.socketManager.broadcastAgentMessage.mock.calls.some((c) => c.arguments[0]?.type === 'a2a_handoff'),
+    );
+    assert.equal(processed, true, 'background route should broadcast a2a_handoff');
 
     // 1. messageStore.append stores system message with extra.systemKind = 'a2a_routing'
     const appendCalls = deps.messageStore.append.mock.calls;
@@ -209,8 +224,7 @@ describe('Integration: a2a_handoff persistence through streaming route (#648)', 
     const broadcastCalls = deps.socketManager.broadcastAgentMessage.mock.calls;
     const a2aBroadcast = broadcastCalls.find((c) => c.arguments[0]?.type === 'a2a_handoff');
     assert.ok(a2aBroadcast, 'should broadcast a2a_handoff event');
-    assert.ok(a2aBroadcast.arguments[0].messageId, 'broadcast payload should carry stored messageId');
-    assert.equal(typeof a2aBroadcast.arguments[0].messageId, 'string');
+    assert.equal(a2aBroadcast.arguments[0].messageId, 'msg-a2a-routing');
     assert.equal(a2aBroadcast.arguments[0].invocationId, 'inv-a2a-test');
   });
 
@@ -228,7 +242,10 @@ describe('Integration: a2a_handoff persistence through streaming route (#648)', 
     });
 
     assert.equal(res.statusCode, 200);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    const processed = await waitFor(() =>
+      deps.socketManager.broadcastAgentMessage.mock.calls.some((c) => c.arguments[0]?.type === 'a2a_handoff'),
+    );
+    assert.equal(processed, true, 'background route should broadcast a2a_handoff');
 
     // No system message should be appended (only user message)
     const appendCalls = deps.messageStore.append.mock.calls;

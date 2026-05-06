@@ -41,6 +41,21 @@ interface AgentMessage {
   replyPreview?: { senderCatId: string | null; content: string; deleted?: true };
   /** F108: Invocation ID — distinguishes messages from concurrent invocations */
   invocationId?: string;
+  /**
+   * F183 Phase C — thread-scoped monotonic sequence number (KD-9).
+   * Set by `SocketManager.broadcastAgentMessage` from `ThreadSequencer.next()`
+   * before WebSocket emit. Forwarded to `useAgentMessages.handleAgentMessage`
+   * → `processThreadSeq` for gap detection. Optional for bw-compat with legacy
+   * direct emit paths that bypass SocketManager.
+   */
+  seq?: number;
+  /**
+   * F183 Phase C (砚砚 R1 P1 fix) — server seq epoch (sequencer instance UUID).
+   * Generated at API boot, stable for sequencer lifetime. Client compares to
+   * `lastSeqEpochByThread[threadId]`; mismatch = server restart → reset lastSeq
+   * + trigger catch-up.
+   */
+  seqEpoch?: string;
   timestamp: number;
 }
 
@@ -352,6 +367,17 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
   const threadIdRef = useRef(threadId);
   threadIdRef.current = threadId;
 
+  // F183 follow-up (R2/R4/R5 reconnect-window catch-up): distinguish initial
+  // connect vs reconnect. Phase C gap detection only fires on next live event;
+  // if the cat finished broadcasting during a disconnect window and no further
+  // event arrives, the gap stays undetected → user must F5/switch thread to
+  // see the missing bubble. On every RECONNECT (not initial), proactively
+  // bump per-thread catch-up version so useChatHistory's existing subscription
+  // re-fetches via the Phase C catchup machinery (debounce + retry + ack +
+  // Phase D merge filter). Initial connect skipped because useChatHistory
+  // mount already runs fetchHistory; double-firing would waste a roundtrip.
+  const hasConnectedOnceRef = useRef(false);
+
   // Use ref to avoid socket disconnect/reconnect on every callbacks change.
   // Without this, thread switches cause socketCallbacks to rebuild (useMemo dep on threadId),
   // which triggers useEffect cleanup → socket disconnect → reconnect. During this gap,
@@ -465,6 +491,38 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       // Socket disconnect can lose done(isFinal) events, leaving stale "replying" UI.
       // Delay slightly so any buffered events arrive first.
       reconcileInvocationStateOnReconnect(tid ?? null);
+
+      // F183 follow-up: catch-up trigger on RECONNECT (not initial connect).
+      // Covers the user-reported "F5 / 切 thread 才出来" symptom when server
+      // broadcast an agent_message during the disconnect window — Phase C gap
+      // detection alone misses it because no subsequent live event arrives to
+      // reveal lastSeq < server seq. Bumping per-thread catch-up version reuses
+      // useChatHistory's Phase C subscription (debounce + retry + ack +
+      // Phase D merge filter); see useChatHistory.ts:872 catchUpVersion.
+      if (hasConnectedOnceRef.current) {
+        const store = useChatStore.getState();
+        const bumped = new Set<string>();
+        // Active thread always covered.
+        if (tid) {
+          store.requestStreamCatchUp(tid);
+          bumped.add(tid);
+        }
+        // Cloud R1 P1: iterate joinedRoomsRef (the actual ground truth of
+        // joined socket.io rooms). `threadStates` was a too-narrow proxy —
+        // a room can be joined and receive broadcasts BEFORE any local
+        // thread state is written (e.g., subscription-only rooms, fresh
+        // bg threads with no messages yet). Strip "thread:" prefix to get
+        // the threadId.
+        for (const room of joinedRoomsRef.current) {
+          if (!room.startsWith('thread:')) continue;
+          const bgThreadId = room.slice('thread:'.length);
+          if (bumped.has(bgThreadId)) continue; // dedup with active thread
+          store.requestStreamCatchUp(bgThreadId);
+          bumped.add(bgThreadId);
+        }
+      } else {
+        hasConnectedOnceRef.current = true;
+      }
     });
 
     socket.on('agent_message', (msg: AgentMessage) => {

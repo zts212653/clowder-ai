@@ -96,7 +96,11 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
         }
 
         if (opts.invokeTrigger) {
-          const policy: ConnectorTriggerPolicy = { priority: 'urgent', reason: 'github_pr_conflict' };
+          const policy: ConnectorTriggerPolicy = {
+            priority: 'urgent',
+            reason: 'github_pr_conflict',
+            sourceCategory: 'conflict',
+          };
           opts.invokeTrigger.trigger(
             routeResult.threadId,
             routeResult.catId as CatId,

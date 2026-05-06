@@ -109,13 +109,11 @@ test('Windows Redis auth helpers decode percent-escaped ACL credentials before i
 test('Windows RESP helpers use UTF-8 byte counts for bulk string lengths', () => {
   assert.match(helpersScript, /function Format-RedisRespCommand/);
   assert.match(helpersScript, /\[System\.Text\.Encoding\]::UTF8\.GetByteCount\(\$arg\)/);
+  assert.match(helpersScript, /\$utf8NoBom = \[System\.Text\.UTF8Encoding\]::new\(\$false\)/);
+  assert.match(helpersScript, /\$commandBytes = \$utf8NoBom\.GetBytes\(\$Command\)/);
+  assert.match(helpersScript, /\$Stream\.Write\(\$commandBytes, 0, \$commandBytes\.Length\)/);
   assert.doesNotMatch(helpersScript, /\$\(\$arg\.Length\)/);
-});
-
-test('Windows RESP probes write raw bytes instead of StreamWriter to avoid BOM corruption', () => {
-  assert.doesNotMatch(helpersScript, /\[System\.IO\.StreamWriter\]::new\(\$stream/);
-  assert.match(helpersScript, /\$utf8NoBom\.GetBytes\(/);
-  assert.match(helpersScript, /\$stream\.Write\(\$.*Bytes, 0, \$.*Bytes\.Length\)/);
+  assert.doesNotMatch(helpersScript, /\[System\.IO\.StreamWriter\]::new\(\$stream, \[System\.Text\.Encoding\]::UTF8\)/);
 });
 
 test('Windows portable Redis defers REDIS_URL to runtime instead of hardcoding localhost:6379', () => {
@@ -167,7 +165,7 @@ test('Windows installer prefers plain portable Redis zips before service bundles
 
 test('Windows Redis URL handling validates connectivity with RESP and detects external backends for shutdown skip', () => {
   assert.match(startWindowsScript, /Test-RedisReachable -RedisUrl \$configuredRedisUrl/);
-  assert.match(helpersScript, /Format-RedisRespCommand -CommandArgs @\("PING"\)/);
+  assert.match(helpersScript, /Format-RedisRespCommand -Args @\("PING"\)/);
   assert.match(startWindowsScript, /Test-LocalRedisUrl -RedisUrl \$configuredRedisUrl -RedisPort \$RedisPort/);
   assert.match(stopWindowsScript, /Test-LocalRedisUrl -RedisUrl \$configuredRedisUrl -RedisPort \$RedisPort/);
   assert.match(
@@ -211,7 +209,7 @@ test('Windows Test-LocalRedisUrl treats IPv6 loopback [::1] as local', () => {
   assert.match(helpersScript, /\[System\.Net\.IPAddress\]::IsLoopback\(\$ipAddress\)/);
 });
 
-test('Windows startup passes localhost REDIS_URL auth into redis-server auto-start and authenticated ping', () => {
+test('Windows startup passes localhost REDIS_URL auth into redis-server auto-start, probe, and shutdown', () => {
   assert.match(helpersScript, /function Get-RedisServerAuthArgs/);
   assert.match(helpersScript, /\$utf8NoBom = New-Object System\.Text\.UTF8Encoding\(\$false\)/);
   assert.match(helpersScript, /\[System\.IO\.File\]::WriteAllLines\(\$AclFilePath, \$aclLines, \$utf8NoBom\)/);
@@ -225,5 +223,9 @@ test('Windows startup passes localhost REDIS_URL auth into redis-server auto-sta
   assert.match(startWindowsScript, /& \$launcherPath @launcherArgs 2>&1/);
 
   assert.match(startWindowsScript, /Test-RedisReachable -RedisUrl \$localUrl/);
-  assert.match(startWindowsScript, /Send-RedisShutdown -RedisUrl "redis:\/\/localhost:\$RedisPort"/);
+  assert.match(
+    startWindowsScript,
+    /\$managedShutdownUrl = if \(\$configuredRedisUrl\) \{ \$configuredRedisUrl \} else \{ "redis:\/\/localhost:\$RedisPort" \}/,
+  );
+  assert.match(startWindowsScript, /Send-RedisShutdown -RedisUrl \$managedShutdownUrl/);
 });

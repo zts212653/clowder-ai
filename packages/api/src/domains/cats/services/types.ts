@@ -157,6 +157,24 @@ export interface AgentMessage {
   tracing?: { traceId: string; spanId: string; parentSpanId?: string };
   /** F070: Structured error code for recoverable failures (e.g. GOVERNANCE_BOOTSTRAP_REQUIRED) */
   errorCode?: string;
+  /**
+   * F183 Phase C — thread-scoped monotonic sequence number (KD-9).
+   * Set by `SocketManager.broadcastAgentMessage` from `ThreadSequencer.next()`
+   * before WebSocket emit. Caller-supplied seq>0 is preserved as a transport
+   * hint (e.g. test fixtures); production callers leave undefined and let
+   * sequencer assign. Optional — direct emit paths that bypass SocketManager
+   * won't set it; client treats absence as no-op (graceful degradation for
+   * legacy producers).
+   */
+  seq?: number;
+  /**
+   * F183 Phase C (砚砚 R1 P1 fix) — server seq epoch (sequencer instance UUID).
+   * Generated at API boot, stable for sequencer lifetime. Client compares to
+   * `lastSeqEpochByThread[threadId]`; mismatch = server restart → reset lastSeq
+   * + trigger catch-up. Without epoch, restart silently breaks gap detection
+   * until server catches back up to client's high-water lastSeq.
+   */
+  seqEpoch?: string;
   /** When this message was created */
   timestamp: number;
 }

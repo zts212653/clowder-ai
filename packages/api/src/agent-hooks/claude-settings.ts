@@ -28,9 +28,15 @@ function stripWrappingShellQuotes(command: string): string {
   return (first === '"' && last === '"') || (first === "'" && last === "'") ? trimmed.slice(1, -1) : trimmed;
 }
 
+function extractScriptPath(command: string): string {
+  const trimmed = command.trim();
+  const match = trimmed.match(/^bash\s+(.+)$/);
+  return match ? match[1] : trimmed;
+}
+
 function normalizeHookCommand(command: unknown, targetRoot: string): string | null {
   if (typeof command !== 'string') return null;
-  const unquoted = stripWrappingShellQuotes(command);
+  const unquoted = stripWrappingShellQuotes(extractScriptPath(command));
   const expanded = unquoted.startsWith('$HOME/')
     ? join(targetRoot, unquoted.slice('$HOME/'.length))
     : unquoted.startsWith('${HOME}/')
@@ -45,6 +51,10 @@ function commandBasename(command: unknown, targetRoot: string): string | null {
   const normalized = normalizeHookCommand(command, targetRoot);
   if (normalized === null) return null;
   return normalized.slice(normalized.lastIndexOf('/') + 1);
+}
+
+function hasBashPrefix(command: unknown): boolean {
+  return typeof command === 'string' && /^bash\s/.test(command.trim());
 }
 
 function isManagedHookCommand(command: unknown, targetRoot: string): boolean {
@@ -100,6 +110,19 @@ function eventHasStaleManagedCommand(
   );
 }
 
+function managedCommandsAllHaveBashPrefix(settings: JsonObject, targetRoot: string): boolean {
+  for (const eventName of Object.keys(MANAGED_HOOKS) as Array<keyof typeof MANAGED_HOOKS>) {
+    for (const entry of eventEntries(settings, eventName)) {
+      for (const hook of entryHooks(entry)) {
+        if (hook.type === 'command' && isManagedHookCommand(hook.command, targetRoot) && !hasBashPrefix(hook.command)) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
 function readJsonObject(path: string): JsonObject {
   const parsed = JSON.parse(readFileSync(path, 'utf-8'));
   if (!isJsonObject(parsed)) {
@@ -128,7 +151,18 @@ export function claudeSettingsHealth(targetRoot: string): HealthResult {
     const hasStart = eventHasCommand(settings, 'SessionStart', startCommand, targetRoot);
     const hasStop = eventHasCommand(settings, 'Stop', stopCommand, targetRoot);
     if (hasStart && hasStop) {
-      return { name: 'claude-settings', drifted: false, status: 'configured', targetPath, reason: 'configured' };
+      const allBash = managedCommandsAllHaveBashPrefix(settings, targetRoot);
+      if (allBash) {
+        return { name: 'claude-settings', drifted: false, status: 'configured', targetPath, reason: 'configured' };
+      }
+      return {
+        name: 'claude-settings',
+        drifted: true,
+        status: 'stale',
+        targetPath,
+        reason: 'Claude settings hook commands missing bash prefix for cross-platform support',
+        diff: { kind: 'json', message: 'managed hook commands need bash prefix', fields: ['hooks'] },
+      };
     }
     if (
       eventHasStaleManagedCommand(settings, 'SessionStart', startCommand, targetRoot) ||
@@ -185,7 +219,8 @@ export async function syncClaudeSettings(targetRoot: string): Promise<void> {
 
   for (const eventName of Object.keys(MANAGED_HOOKS) as Array<keyof typeof MANAGED_HOOKS>) {
     const entries = withoutManagedHooks(eventEntries(settings, eventName), targetRoot);
-    entries.push({ hooks: [{ type: 'command', command: expectedClaudeCommand(targetRoot, eventName) }] });
+    const scriptPath = expectedClaudeCommand(targetRoot, eventName).replace(/\\/g, '/');
+    entries.push({ hooks: [{ type: 'command', command: `bash "${scriptPath}"` }] });
     hooksRoot[eventName] = entries;
   }
 

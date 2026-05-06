@@ -83,6 +83,14 @@ const storeState = {
   setMessageThinking: mockSetMessageThinking,
 
   addMessageToThread: mockAddMessageToThread,
+  // F183 B1.2.3: active stream new-bubble path → reducer → replaceMessages
+  replaceMessages: vi.fn((msgs: unknown[]) => {
+    storeState.messages = msgs as typeof storeState.messages;
+  }),
+  // F183 B1.7+: bg path reducer wire-up → replaceThreadMessages (thread-scoped)
+  replaceThreadMessages: vi.fn(),
+  incrementUnread: vi.fn(),
+  hasMore: true,
   setThreadLoading: mockSetThreadLoading,
   setThreadHasActiveInvocation: mockSetThreadHasActiveInvocation,
   setThreadCatInvocation: mockSetThreadCatInvocation,
@@ -180,18 +188,21 @@ describe('useAgentMessages — F173 Phase E single dispatch (KD-1 handler unific
         });
       });
 
-      // background path must write through thread-scoped writers, not flat active writers.
-      expect(mockAddMessageToThread).toHaveBeenCalledWith(
-        'thread-background',
-        expect.objectContaining({
-          id: 'msg-inv-bg-opus',
-          type: 'assistant',
-          catId: 'opus',
-          content: 'hello from bg thread',
-          origin: 'stream',
-          isStreaming: true,
-        }),
+      // F183 B1.8: background path must write through thread-scoped writers — canonical
+      // invocationId 走 reducer 的 replaceThreadMessages（首选）或 legacy addMessageToThread
+      // (reducer no-op fallback)。两路都应使用 deterministic id `msg-{inv}-{cat}-assistant_text`
+      // (B1.8 reducer makePlaceholder via ensureMessageId) 或 `msg-{inv}-{cat}` (legacy
+      // deriveBubbleId)。两者都必须不写 active flat 状态。
+      const bgAddCalls = mockAddMessageToThread.mock.calls.filter((c) => c[0] === 'thread-background');
+      const bgReplaceCalls = (storeState.replaceThreadMessages as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (c) => c[0] === 'thread-background',
       );
+      expect(bgAddCalls.length + bgReplaceCalls.length).toBeGreaterThan(0);
+      const allBgIds = [
+        ...bgAddCalls.map((c) => (c[1] as { id?: string })?.id),
+        ...bgReplaceCalls.flatMap((c) => (c[1] as Array<{ id?: string }>) ?? []).map((m) => m?.id),
+      ].filter((id): id is string => !!id);
+      expect(allBgIds.some((id) => id.startsWith('msg-inv-bg-opus'))).toBe(true);
       expect(mockAddThreadActiveInvocation).toHaveBeenCalledWith('thread-background', 'inv-bg', 'opus', 'execute');
       expect(mockUpdateThreadCatStatus).toHaveBeenCalledWith('thread-background', 'opus', 'streaming');
 

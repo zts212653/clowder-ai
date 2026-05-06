@@ -8,8 +8,11 @@ type TestMessage = {
   type: string;
   catId?: string;
   content: string;
+  origin?: 'stream' | 'callback';
   isStreaming?: boolean;
   timestamp: number;
+  toolEvents?: Array<{ id: string; type: string; label: string; timestamp: number }>;
+  extra?: { stream?: { invocationId: string } };
 };
 
 const mockAddMessage = vi.fn();
@@ -18,6 +21,9 @@ const mockAppendToolEvent = vi.fn();
 const mockSetStreaming = vi.fn();
 const mockSetLoading = vi.fn();
 const mockSetHasActiveInvocation = vi.fn();
+const mockRemoveActiveInvocation = vi.fn((invocationId: string) => {
+  delete storeState.activeInvocations[invocationId];
+});
 const mockSetIntentMode = vi.fn();
 const mockSetCatStatus = vi.fn();
 const mockClearCatStatuses = vi.fn();
@@ -31,15 +37,21 @@ const mockClearThreadActiveInvocation = vi.fn();
 const mockResetThreadInvocationState = vi.fn();
 const mockSetThreadMessageStreaming = vi.fn();
 const mockGetThreadState = vi.fn((): { messages: TestMessage[] } => ({ messages: [] }));
+// F183 B1.2.2: active text stream → reducer → replaceMessages
+const mockReplaceMessages = vi.fn((msgs: TestMessage[]) => {
+  storeState.messages = msgs;
+});
 
 const storeState = {
   messages: [] as TestMessage[],
+  activeInvocations: {} as Record<string, { catId: string }>,
   addMessage: mockAddMessage,
   appendToMessage: mockAppendToMessage,
   appendToolEvent: mockAppendToolEvent,
   setStreaming: mockSetStreaming,
   setLoading: mockSetLoading,
   setHasActiveInvocation: mockSetHasActiveInvocation,
+  removeActiveInvocation: mockRemoveActiveInvocation,
   clearAllActiveInvocations: mockClearAllActiveInvocations,
   setIntentMode: mockSetIntentMode,
   setCatStatus: mockSetCatStatus,
@@ -49,6 +61,7 @@ const storeState = {
   requestStreamCatchUp: mockRequestStreamCatchUp,
 
   addMessageToThread: mockAddMessageToThread,
+  replaceMessages: mockReplaceMessages,
   clearThreadActiveInvocation: mockClearThreadActiveInvocation,
   resetThreadInvocationState: mockResetThreadInvocationState,
   setThreadMessageStreaming: mockSetThreadMessageStreaming,
@@ -90,6 +103,7 @@ describe('useAgentMessages stream catch-up (Bug C safety net)', () => {
     root = createRoot(container);
     captured = undefined;
     storeState.messages = [];
+    storeState.activeInvocations = {};
     storeState.currentThreadId = 'thread-1';
     mockAddMessage.mockClear();
     mockAppendToMessage.mockClear();
@@ -97,6 +111,7 @@ describe('useAgentMessages stream catch-up (Bug C safety net)', () => {
     mockSetStreaming.mockClear();
     mockSetLoading.mockClear();
     mockSetHasActiveInvocation.mockClear();
+    mockRemoveActiveInvocation.mockClear();
     mockSetIntentMode.mockClear();
     mockSetCatStatus.mockClear();
     mockClearCatStatuses.mockClear();
@@ -177,6 +192,68 @@ describe('useAgentMessages stream catch-up (Bug C safety net)', () => {
         type: 'done',
         catId: 'opus',
         isFinal: true,
+      });
+    });
+
+    expect(mockRequestStreamCatchUp).not.toHaveBeenCalled();
+  });
+
+  it('requests catch-up when done(isFinal) only has an empty CLI/tool bubble', () => {
+    storeState.messages = [
+      {
+        id: 'assistant-tool-only',
+        type: 'assistant',
+        catId: 'opus',
+        content: '',
+        origin: 'stream',
+        isStreaming: true,
+        timestamp: Date.now(),
+        toolEvents: [{ id: 'tool-1', type: 'tool_use', label: 'opus -> Read', timestamp: Date.now() }],
+        extra: { stream: { invocationId: 'inv-tool-only' } },
+      },
+    ];
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'done',
+        catId: 'opus',
+        invocationId: 'inv-tool-only',
+        isFinal: true,
+      });
+    });
+
+    expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-1');
+  });
+
+  it('does NOT request catch-up when non-final done has an empty CLI/tool bubble', () => {
+    storeState.messages = [
+      {
+        id: 'assistant-tool-only',
+        type: 'assistant',
+        catId: 'opus',
+        content: '',
+        origin: 'stream',
+        isStreaming: true,
+        timestamp: Date.now(),
+        toolEvents: [{ id: 'tool-1', type: 'tool_use', label: 'opus -> Read', timestamp: Date.now() }],
+        extra: { stream: { invocationId: 'inv-tool-only' } },
+      },
+    ];
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'done',
+        catId: 'opus',
+        invocationId: 'inv-tool-only',
+        isFinal: false,
       });
     });
 

@@ -13,6 +13,8 @@ import type {
 } from '../../domains/cats/services/agents/invocation/InvocationTracker.js';
 import type { AgentMessage } from '../../domains/cats/services/types.js';
 import { createModuleLogger } from '../logger.js';
+import { BroadcastRateMonitor, type BroadcastRateMonitorOptions } from './BroadcastRateMonitor.js';
+import { ThreadSequencer } from './ThreadSequencer.js';
 
 const log = createModuleLogger('ws');
 
@@ -61,11 +63,57 @@ export class SocketManager {
     abortByThread(threadId: string): number;
     abortBySlot?(threadId: string, catId: string): number;
   } | null;
+  /**
+   * F183 Phase C — thread-scoped monotonic sequence number (KD-9).
+   * Each broadcastAgentMessage increments per-thread counter and injects seq
+   * into the emitted payload. Client uses seq for gap detection + catchup.
+   *
+   * In-memory only — single-instance deploy assumption (KD-9 拒绝 multi-instance
+   * 分布式 sequencer over-engineering). API restart resets seq; client sees
+   * `seq=1` after restart, treats it as seed (no false gap).
+   *
+   * Extracted to ThreadSequencer for unit testability without HttpServer.
+   */
+  private sequencer: ThreadSequencer = new ThreadSequencer();
+  /**
+   * F183 Phase C2/C3 — per-thread emit rate monitor (observability for
+   * backpressure root cause investigation). Logs structured warnings when
+   * a thread sustains > 200 events/sec for 1s. Replaces unfindable historical
+   * literal "in-process app-server event stream lagged; dropped N events"
+   * (字面源 grep 不到 — 见 BroadcastRateMonitor.ts 注释 + AC-C3 spec)。
+   * Public for test/admin introspection via getStats(threadId).
+   */
+  readonly rateMonitor: BroadcastRateMonitor;
 
-  constructor(httpServer: HttpServer, invocationTracker?: InvocationTracker) {
+  constructor(
+    httpServer: HttpServer,
+    invocationTracker?: InvocationTracker,
+    rateMonitorOptions?: BroadcastRateMonitorOptions,
+  ) {
     this.invocationTracker = invocationTracker ?? null;
     this.queueProcessor = null;
     this.multiMentionOrchestrator = null;
+    // F183 Phase C2/C3 — backpressure observability. onWarn forwards to module
+    // logger as structured `broadcast_rate_warn` event (replaces unfindable
+    // historical literal "in-process app-server event stream lagged ...").
+    this.rateMonitor = new BroadcastRateMonitor({
+      ...(rateMonitorOptions ?? {}),
+      onWarn:
+        rateMonitorOptions?.onWarn ??
+        ((event) => {
+          log.warn(
+            {
+              event: 'broadcast_rate_warn',
+              threadId: event.threadId,
+              windowCount: event.windowCount,
+              threshold: event.threshold,
+              windowMs: event.windowMs,
+              timestamp: event.timestamp,
+            },
+            'Broadcast rate exceeded threshold (per-thread sliding window)',
+          );
+        }),
+    });
     const corsOrigins = resolveFrontendCorsOrigins(process.env, console);
     this.io = new Server(httpServer, {
       cors: {
@@ -218,11 +266,36 @@ export class SocketManager {
    * Broadcast agent message to a thread room.
    * Always scoped to a room — defaults to 'thread:default' when threadId is omitted.
    * Never broadcasts globally to prevent cross-thread message leak.
+   *
+   * F183 Phase C — injects thread-scoped monotonic seq + sequencer epoch into the
+   * emitted payload for client gap detection (KD-9). Caller-supplied `seq>0` is
+   * preserved as a transport hint (e.g. test fixtures injecting deterministic
+   * seq); production callers should leave `seq` undefined and let sequencer
+   * assign. Epoch is always overwritten with current sequencer epoch (caller
+   * can't fake epoch — server-controlled identity).
+   *
+   * Cloud R3 P2 fix (2026-05-02): when override is used, bump sequencer to
+   * `max(current, override)` so subsequent auto-assigned seqs stay monotonic.
+   * Without this, `next()` would reuse lower numbers after override path,
+   * causing clients to treat fresh events as 'late'/'gap'.
    */
   broadcastAgentMessage(message: AgentMessage, threadId?: string): void {
     const tid = threadId ?? 'default';
     const room = `thread:${tid}`;
-    this.io.to(room).emit('agent_message', { ...message, threadId: tid });
+    const seqOverride = message.seq;
+    let seq: number;
+    if (typeof seqOverride === 'number' && seqOverride > 0) {
+      seq = seqOverride;
+      // Preserve monotonicity for subsequent auto-assigned seqs (cloud R3 P2)
+      this.sequencer.bumpTo(tid, seqOverride);
+    } else {
+      seq = this.sequencer.next(tid);
+    }
+    const seqEpoch = this.sequencer.epoch;
+    // F183 Phase C2/C3 — record per-thread emit rate; warn callback fires when
+    // sliding-window count exceeds threshold (debounced per thread).
+    this.rateMonitor.record(tid);
+    this.io.to(room).emit('agent_message', { ...message, threadId: tid, seq, seqEpoch });
   }
 
   broadcastToRoom(room: string, event: string, data: unknown): void {
