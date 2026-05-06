@@ -16,7 +16,7 @@
  */
 
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { VoiceConfig } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
@@ -50,11 +50,20 @@ function characterVoiceBaseDir(): string {
 
 function resolveRefAudioPath(refAudio: string, characterBaseDir: string): string {
   if (refAudio.startsWith('/uploads/')) {
-    const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
-    return join(uploadDir, refAudio.slice('/uploads/'.length));
+    const uploadDir = resolve(getDefaultUploadDir(process.env.UPLOAD_DIR));
+    const resolved = resolve(uploadDir, refAudio.slice('/uploads/'.length));
+    if (!resolved.startsWith(uploadDir)) return join(uploadDir, 'invalid-ref');
+    return resolved;
   }
-  if (isAbsolute(refAudio)) return refAudio;
-  return join(characterBaseDir, refAudio);
+  if (isAbsolute(refAudio)) {
+    const baseDir = resolve(characterBaseDir);
+    if (!resolve(refAudio).startsWith(baseDir)) return join(baseDir, 'invalid-ref');
+    return refAudio;
+  }
+  const baseDir = resolve(characterBaseDir);
+  const resolved = resolve(baseDir, refAudio);
+  if (!resolved.startsWith(baseDir)) return join(baseDir, 'invalid-ref');
+  return resolved;
 }
 
 /**

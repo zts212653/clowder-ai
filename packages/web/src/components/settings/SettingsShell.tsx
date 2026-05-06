@@ -14,9 +14,11 @@ function SettingsShellInner() {
 
   const handleSelect = useCallback(
     (sectionId: string) => {
-      router.replace(`/settings?s=${sectionId}`, { scroll: false });
+      const params = new URLSearchParams(searchParams.toString());
+      params.set('s', sectionId);
+      router.replace(`/settings?${params.toString()}`, { scroll: false });
     },
-    [router],
+    [router, searchParams],
   );
 
   if (standalone) {
