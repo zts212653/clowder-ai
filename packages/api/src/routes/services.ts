@@ -82,7 +82,8 @@ function isServiceProcess(pid: number, manifest: { scripts: { start?: string } }
 function checkServiceOwner(request: Parameters<typeof resolveUserId>[0]): string | null {
   const userId = resolveUserId(request);
   if (!userId) return 'Authentication required';
-  const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim() || 'default-user';
+  const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim();
+  if (!ownerId) return 'Service management requires DEFAULT_OWNER_USER_ID to be configured';
   if (userId !== ownerId) return 'Only the owner can manage services';
   return null;
 }

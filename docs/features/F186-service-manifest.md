@@ -1,12 +1,12 @@
 ---
-feature_ids: [F180]
+feature_ids: [F186]
 related_features: [F179]
 topics: [service-management, ml-services, autostart, infrastructure]
 doc_kind: feature-spec
 created: 2026-05-06
 ---
 
-# F180: Service Manifest — ML 服务统一管理
+# F186: Service Manifest — ML 服务统一管理
 
 > **Status**: doing | **Owner**: 布偶猫/宪宪
 > **Priority**: P2

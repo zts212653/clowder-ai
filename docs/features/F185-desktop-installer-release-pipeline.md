@@ -1,12 +1,12 @@
 ---
-feature_ids: [F179]
+feature_ids: [F185]
 related_features: [F124, F133, F140, F168]
 topics: [desktop, electron, installer, nsis, dmg, github-actions, release-pipeline, opensource-ops]
 doc_kind: spec
 created: 2026-04-28
 ---
 
-# F179: Desktop Installer Release Pipeline — 自动化产出 Win/Mac 安装包并附 release
+# F185: Desktop Installer Release Pipeline — 自动化产出 Win/Mac 安装包并附 release
 
 > **Status**: in-progress (Phase B: AC-B3 pending cross-cat verification) | **Owner**: Ragdoll（Opus-47/Ragdoll） | **Reviewer**: Maine Coon（GPT-5.5/Maine Coon） | **Priority**: P1
 >

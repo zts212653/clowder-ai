@@ -495,11 +495,12 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
       reply.status(401);
       return { error: 'Identity required' };
     }
-    const deleted = await backlogStore.delete(request.params.id);
-    if (!deleted) {
+    const existing = await backlogStore.get(request.params.id, userId);
+    if (!existing) {
       reply.status(404);
       return { error: 'Item not found' };
     }
+    await backlogStore.delete(request.params.id);
     return { ok: true };
   });
 

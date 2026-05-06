@@ -13,13 +13,11 @@ async function getServiceEndpoints(): Promise<Record<string, string | null>> {
     if (res.ok) {
       const data = (await res.json()) as { endpoints: Record<string, string | null> };
       _serviceEndpoints = data.endpoints;
-    } else {
-      _serviceEndpoints = {};
     }
   } catch {
-    _serviceEndpoints = {};
+    // Leave null so next call retries
   }
-  return _serviceEndpoints;
+  return _serviceEndpoints ?? {};
 }
 
 const WHISPER_FALLBACK = 'http://localhost:9876';
