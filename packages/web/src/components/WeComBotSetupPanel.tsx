@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { forwardRef, useImperativeHandle, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { CheckCircleIcon, SpinnerIcon } from './HubConfigIcons';
 
@@ -12,23 +12,29 @@ interface WeComBotSetupPanelProps {
   onDisconnected?: () => void;
 }
 
+export interface WeComBotSetupPanelHandle {
+  validate(): Promise<boolean>;
+  hasPendingCredentials(): boolean;
+}
+
 /**
  * F132 Phase E: WeCom Bot guided setup panel.
  * Validates credentials via real WebSocket connection, then auto-activates the adapter.
  * Follows the same pattern as FeishuQrPanel / WeixinQrPanel.
  */
-export function WeComBotSetupPanel({ configured, onConnected, onDisconnected }: WeComBotSetupPanelProps) {
+export const WeComBotSetupPanel = forwardRef<WeComBotSetupPanelHandle, WeComBotSetupPanelProps>(
+  function WeComBotSetupPanel({ configured, onConnected, onDisconnected }, ref) {
   const [state, setState] = useState<SetupState>(configured ? 'connected' : 'idle');
   const [botId, setBotId] = useState('');
   const [secret, setSecret] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
 
-  const handleValidate = async () => {
+  const handleValidate = async (): Promise<boolean> => {
     if (!botId.trim() || !secret.trim()) {
       setErrorMsg('Please enter both Bot ID and Bot Secret');
       setState('error');
-      return;
+      return false;
     }
 
     setState('testing');
@@ -49,15 +55,22 @@ export function WeComBotSetupPanel({ configured, onConnected, onDisconnected }: 
         setSecret('');
         setErrorMsg(null);
         onConnected?.();
-      } else {
-        setState('error');
-        setErrorMsg(data.error ?? 'Validation failed');
+        return true;
       }
+      setState('error');
+      setErrorMsg(data.error ?? 'Validation failed');
+      return false;
     } catch {
       setState('error');
       setErrorMsg('Network error');
+      return false;
     }
   };
+
+  useImperativeHandle(ref, () => ({
+    validate: handleValidate,
+    hasPendingCredentials: () => !!(botId.trim() && secret.trim()),
+  }));
 
   const handleDisconnect = async () => {
     setDisconnecting(true);
@@ -150,4 +163,4 @@ export function WeComBotSetupPanel({ configured, onConnected, onDisconnected }: 
       )}
     </div>
   );
-}
+});

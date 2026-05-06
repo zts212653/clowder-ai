@@ -7,6 +7,7 @@ import { FeishuQrPanel } from './FeishuQrPanel';
 import { DEFAULT_VISUAL, ExternalLinkIcon, LockIcon, PLATFORM_VISUALS, StepBadge, WifiIcon } from './HubConfigIcons';
 import type { HubPermissionsTabHandle } from './HubPermissionsTab';
 import { SettingsPageHeader } from './settings/SettingsPageHeader';
+import type { WeComBotSetupPanelHandle } from './WeComBotSetupPanel';
 import { WeComBotSetupPanel } from './WeComBotSetupPanel';
 import { WeixinQrPanel } from './WeixinQrPanel';
 
@@ -75,6 +76,7 @@ export function HubConnectorConfigTab() {
   const [testing, setTesting] = useState(false);
   const [saveResult, setSaveResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const permissionsRef = useRef<HubPermissionsTabHandle>(null);
+  const wecomRef = useRef<WeComBotSetupPanelHandle>(null);
 
   const fetchStatus = useCallback(async () => {
     setIsLoading(true);
@@ -114,6 +116,14 @@ export function HubConnectorConfigTab() {
   const handleSave = async (platform: PlatformStatus) => {
     setSaving(true);
     setSaveResult(null);
+
+    if (platform.id === 'wecom-bot' && wecomRef.current?.hasPendingCredentials()) {
+      const ok = await wecomRef.current.validate();
+      if (!ok) {
+        setSaving(false);
+        return;
+      }
+    }
 
     const secrets = platform.fields
       .filter((f) => fieldValues[f.envName] !== undefined)
@@ -253,6 +263,7 @@ export function HubConnectorConfigTab() {
                         {idx === guideSteps.length - 1 && (
                           <div className="ml-[26px]">
                             <WeComBotSetupPanel
+                              ref={wecomRef}
                               configured={platform.configured}
                               onConnected={() => void fetchStatus()}
                               onDisconnected={() => void fetchStatus()}
