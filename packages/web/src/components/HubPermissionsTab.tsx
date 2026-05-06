@@ -4,6 +4,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } fro
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { apiFetch } from '../utils/api-client';
 import { StepBadge } from './HubConfigIcons';
+import { SettingsResourceToggleSwitch } from './SettingsResourceCard';
 
 interface GroupEntry {
   externalChatId: string;
@@ -147,17 +148,10 @@ const HubPermissionsTab = forwardRef<HubPermissionsTabHandle, HubPermissionsTabP
               <StepBadge num={1} />
               <span className="text-xs font-medium text-cafe-secondary">群白名单</span>
             </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={config.whitelistEnabled}
+            <SettingsResourceToggleSwitch
+              enabled={config.whitelistEnabled}
               onClick={() => setConfig((prev) => ({ ...prev, whitelistEnabled: !prev.whitelistEnabled }))}
-              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${config.whitelistEnabled ? 'bg-[var(--color-cafe-accent)]' : 'bg-[var(--console-pill-bg)]'}`}
-            >
-              <span
-                className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-cafe-surface shadow ring-0 transition-transform ${config.whitelistEnabled ? 'translate-x-5' : 'translate-x-0'}`}
-              />
-            </button>
+            />
           </div>
           <p className="ml-[26px] text-xs text-cafe-secondary">开启后，仅白名单内的群可使用 bot</p>
           {config.whitelistEnabled && (
@@ -281,17 +275,10 @@ const HubPermissionsTab = forwardRef<HubPermissionsTabHandle, HubPermissionsTabP
               <StepBadge num={3} />
               <span className="text-xs font-medium text-cafe-secondary">群聊命令仅管理员</span>
             </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={config.commandAdminOnly}
+            <SettingsResourceToggleSwitch
+              enabled={config.commandAdminOnly}
               onClick={() => setConfig((prev) => ({ ...prev, commandAdminOnly: !prev.commandAdminOnly }))}
-              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${config.commandAdminOnly ? 'bg-[var(--color-cafe-accent)]' : 'bg-[var(--console-pill-bg)]'}`}
-            >
-              <span
-                className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-cafe-surface shadow ring-0 transition-transform ${config.commandAdminOnly ? 'translate-x-5' : 'translate-x-0'}`}
-              />
-            </button>
+            />
           </div>
           <p className="ml-[26px] text-xs text-cafe-secondary">
             开启后，非管理员在群聊发 /threads /new /use 会收到提示
