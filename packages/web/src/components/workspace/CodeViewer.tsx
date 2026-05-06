@@ -11,7 +11,11 @@ import { useChatStore } from '@/stores/chatStore';
 const cafeTheme = EditorView.theme(
   {
     '&': { backgroundColor: 'var(--terminal-bg)', color: 'var(--console-card-bg)' },
-    '.cm-gutters': { backgroundColor: 'var(--terminal-bg)', color: '#815B5B', borderRight: '1px solid var(--terminal-border)' },
+    '.cm-gutters': {
+      backgroundColor: 'var(--terminal-bg)',
+      color: '#815B5B',
+      borderRight: '1px solid var(--terminal-border)',
+    },
     '.cm-activeLineGutter': { backgroundColor: 'var(--terminal-border)' },
     '.cm-activeLine': { backgroundColor: 'rgba(155, 126, 189, 0.08)' },
     '.cm-cursor': { borderLeftColor: '#E29578' },

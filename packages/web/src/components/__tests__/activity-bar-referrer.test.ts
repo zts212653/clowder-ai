@@ -15,7 +15,14 @@ const mockPush = vi.fn();
 vi.mock('next/navigation', () => ({
   usePathname: () => '/thread/thread-abc',
   useSearchParams: () => new URLSearchParams(),
-  useRouter: () => ({ push: mockPush, replace: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
+  useRouter: () => ({
+    push: mockPush,
+    replace: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+    refresh: vi.fn(),
+    prefetch: vi.fn(),
+  }),
 }));
 
 vi.mock('@/components/ThreadSidebar/thread-navigation', () => ({

@@ -176,8 +176,15 @@ export function SignalArticleDetail({
   };
 
   const handleExpand = useCallback(async () => {
-    if (expandContent) { setExpandContent(false); setEnrichError(null); return; }
-    if (!article || enrichedContent || enriching) { setExpandContent(true); return; }
+    if (expandContent) {
+      setExpandContent(false);
+      setEnrichError(null);
+      return;
+    }
+    if (!article || enrichedContent || enriching) {
+      setExpandContent(true);
+      return;
+    }
     setEnriching(true);
     setEnrichError(null);
     try {
@@ -300,9 +307,7 @@ export function SignalArticleDetail({
         >
           <MarkdownContent content={enrichedContent || article.content || '（无正文）'} />
         </div>
-        {enrichError && (
-          <p className="mt-2 text-xs text-conn-amber-text">{enrichError}</p>
-        )}
+        {enrichError && <p className="mt-2 text-xs text-conn-amber-text">{enrichError}</p>}
       </section>
       <section className="mt-4">
         <h3 className="text-xs font-semibold text-cafe-secondary">标签</h3>

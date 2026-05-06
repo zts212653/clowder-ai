@@ -184,7 +184,15 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
         if (msg?.extra?.rich) {
           const blocks = msg.extra.rich.blocks.map((b) =>
             b.id === parsed.data.blockId
-              ? { id: b.id, v: 1 as const, kind: 'audio' as const, url: result.audioUrl, text: parsed.data.text, durationSec: result.durationSec, mimeType: 'audio/wav' }
+              ? {
+                  id: b.id,
+                  v: 1 as const,
+                  kind: 'audio' as const,
+                  url: result.audioUrl,
+                  text: parsed.data.text,
+                  durationSec: result.durationSec,
+                  mimeType: 'audio/wav',
+                }
               : b,
           );
           await messageStore.updateExtra(parsed.data.messageId, { rich: { v: 1, blocks } });

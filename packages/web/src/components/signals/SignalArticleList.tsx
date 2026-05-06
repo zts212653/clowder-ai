@@ -107,14 +107,20 @@ export function SignalArticleList({
                   <>
                     <button
                       type="button"
-                      onClick={(e) => { e.stopPropagation(); void onStatusChange(article.id, 'read'); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void onStatusChange(article.id, 'read');
+                      }}
                       className="rounded-md bg-[var(--console-card-bg)] px-2 py-1 text-[10px] font-semibold text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] transition hover:text-cafe"
                     >
                       已读
                     </button>
                     <button
                       type="button"
-                      onClick={(e) => { e.stopPropagation(); void onStatusChange(article.id, 'starred'); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void onStatusChange(article.id, 'starred');
+                      }}
                       className="rounded-md bg-conn-amber-bg px-2 py-1 text-[10px] font-semibold text-conn-amber-text transition hover:opacity-80"
                     >
                       收藏

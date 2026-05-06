@@ -574,7 +574,7 @@ export function HubCatEditor({
     }
   };
 
-  const overlayTitle = cat ? (cat.displayName || cat.name || cat.id) : '添加成员';
+  const overlayTitle = cat ? cat.displayName || cat.name || cat.id : '添加成员';
 
   const editorHeader = (
     <div className="flex shrink-0 items-start justify-between px-7 py-5">
@@ -595,7 +595,7 @@ export function HubCatEditor({
           id={variant === 'overlay' ? 'member-editor-title' : undefined}
           className="text-[13px] font-extrabold text-[var(--console-modal-title)]"
         >
-          {variant === 'overlay' ? overlayTitle : cat ? (cat.displayName || cat.name || cat.id) : '添加成员'}
+          {variant === 'overlay' ? overlayTitle : cat ? cat.displayName || cat.name || cat.id : '添加成员'}
         </p>
       </div>
       {variant === 'overlay' && (

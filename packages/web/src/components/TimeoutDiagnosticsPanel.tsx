@@ -97,7 +97,11 @@ export function TimeoutDiagnosticsPanel({ errorMessage, diagnostics, description
       {/* Error banner */}
       <div
         className="flex items-center gap-2.5 rounded-[10px]"
-        style={{ backgroundColor: 'var(--conn-red-bg)', border: '1px solid var(--console-diag-border)', padding: '10px 14px' }}
+        style={{
+          backgroundColor: 'var(--conn-red-bg)',
+          border: '1px solid var(--console-diag-border)',
+          padding: '10px 14px',
+        }}
       >
         <CircleXIcon className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--conn-amber-text)' }} />
         <div className="flex flex-col gap-0.5 min-w-0">
@@ -140,7 +144,10 @@ export function TimeoutDiagnosticsPanel({ errorMessage, diagnostics, description
                 <span className="text-[11px] font-medium" style={{ color: 'var(--cafe-text-muted)' }}>
                   {row.key}
                 </span>
-                <span className="text-[11px]" style={{ color: row.purple ? 'var(--console-diag-key)' : 'var(--console-diag-val)' }}>
+                <span
+                  className="text-[11px]"
+                  style={{ color: row.purple ? 'var(--console-diag-key)' : 'var(--console-diag-val)' }}
+                >
                   {row.value}
                 </span>
               </div>
