@@ -7,9 +7,10 @@
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FastifyPluginAsync } from 'fastify';
+import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
 function findProjectRoot(): string {
@@ -75,8 +76,8 @@ export const rulesRoutes: FastifyPluginAsync = async (app) => {
       }
       const root = findProjectRoot();
       const home = homedir();
-      const projectRoot =
-        request.query.projectPath && isAbsolute(request.query.projectPath) ? request.query.projectPath : root;
+      const validatedProject = request.query.projectPath ? await validateProjectPath(request.query.projectPath) : null;
+      const projectRoot = validatedProject ?? root;
       const candidateDirs = [
         join(root, 'cat-cafe-skills'),
         join(projectRoot, '.claude', 'skills'),

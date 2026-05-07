@@ -44,6 +44,6 @@ describe('BrakeModal theme compliance', () => {
 
   it('preserves border-based level indication', () => {
     const html = renderToStaticMarkup(React.createElement(BrakeModal));
-    expect(html).toContain('border-conn-amber-ring');
+    expect(html).toContain('border-cafe-accent');
   });
 });
