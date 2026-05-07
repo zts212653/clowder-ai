@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
-import { SettingsResourceToggleSwitch } from '../SettingsResourceCard';
+import { SettingsResourceToggleSwitch, settingsResourceCardClass } from '../SettingsResourceCard';
 
 interface RawStatusResponse {
   backend: string;
@@ -152,10 +152,7 @@ export function IndexStatus() {
   }
 
   return (
-    <div
-      data-testid="index-status"
-      className="console-list-card space-y-4 rounded-2xl p-5 shadow-[0_12px_30px_rgba(43,33,26,0.08)]"
-    >
+    <div data-testid="index-status" className={`${settingsResourceCardClass} space-y-4 p-5`}>
       {/* Health badge */}
       <div className="flex items-center gap-2">
         <span

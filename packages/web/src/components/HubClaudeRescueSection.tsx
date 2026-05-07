@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import type { ClaudeRescueRunResult, ClaudeRescueSessionItem } from './hub-claude-rescue.types';
+import { settingsResourceCardClass } from './SettingsResourceCard';
 
 function describeDetection(session: ClaudeRescueSessionItem): string {
   if (session.detectedBy === 'api_error_entry') return '已命中 Invalid signature API error';
@@ -109,7 +110,7 @@ export function HubClaudeRescueSection() {
   }, [addToast, rescuing, scanSessions, selectedTargets]);
 
   return (
-    <section className="console-list-card rounded-2xl p-3 space-y-3 shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
+    <section className={`${settingsResourceCardClass} p-3 space-y-3`}>
       <div className="space-y-1">
         <div className="flex items-center justify-between gap-3">
           <h4 className="text-xs font-semibold text-cafe">布偶猫救援中心</h4>

@@ -9,6 +9,7 @@ import { AuditExplorerPanel } from './audit/AuditExplorerPanel';
 import { CatTokenUsage } from './CatTokenUsage';
 import { PlanBoardPanel } from './PlanBoardPanel';
 import { SessionChainPanel } from './SessionChainPanel';
+import { settingsResourceCardClass } from './SettingsResourceCard';
 import {
   type CatStatus,
   collectSnapshotActiveCats,
@@ -284,9 +285,8 @@ function RevealWhispersButton({ threadId }: { threadId: string }) {
 }
 
 const LOGS_DIR = 'packages/api/data/logs/api';
-const INSPECTOR_CARD = 'console-list-card rounded-xl p-2.5 shadow-[0_12px_30px_rgba(43,33,26,0.08)]';
-const INSPECTOR_CARD_COLLAPSED =
-  'console-list-card rounded-xl h-9 px-2.5 flex items-center shadow-[0_12px_30px_rgba(43,33,26,0.08)]';
+const INSPECTOR_CARD = `${settingsResourceCardClass} p-2.5`;
+const INSPECTOR_CARD_COLLAPSED = `${settingsResourceCardClass} h-9 px-2.5 flex items-center`;
 
 function parseLogFilename(name: string): { date: string; seq: number } | null {
   const m = name.match(/^api\.(\d{4}-\d{2}-\d{2})\.(\d+)\.log$/);
@@ -393,7 +393,7 @@ export function RightStatusPanel({
       style={{
         width: width ?? 304,
         flexShrink: 0,
-        background: 'var(--console-inspector-gradient, var(--console-inspector-bg, #F4ECE4))',
+        background: 'var(--console-panel-bg)',
       }}
     >
       <div className="px-0.5 pb-1">

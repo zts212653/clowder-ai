@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useState } from 'react';
+import { settingsResourceCardClass } from '../SettingsResourceCard';
 import { AuditEventsTab } from './AuditEventsTab';
 import { SessionEventsViewer } from './SessionEventsViewer';
 import { SessionSearchTab } from './SessionSearchTab';
@@ -54,7 +55,7 @@ export function AuditExplorerPanel({
   }, [onCloseSession]);
 
   return (
-    <section className="console-list-card rounded-xl p-2.5 shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
+    <section className={`${settingsResourceCardClass} p-2.5`}>
       <button
         type="button"
         data-testid="audit-explorer-header"

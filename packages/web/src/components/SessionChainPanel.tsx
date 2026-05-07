@@ -8,6 +8,7 @@ import { apiFetch } from '@/utils/api-client';
 import { BindNewSessionSection } from './BindNewSessionSection';
 import { ContextHealthBar } from './ContextHealthBar';
 import { BindSessionInput, SessionIdTag } from './SessionChainInputs';
+import { settingsResourceCardClass } from './SettingsResourceCard';
 import { deriveSessionColors, type SessionColors } from './session-chain-colors';
 
 /** Minimal session record from API GET /api/threads/:id/sessions */
@@ -175,7 +176,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
   };
 
   return (
-    <section className="console-list-card rounded-xl p-2.5 shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
+    <section className={`${settingsResourceCardClass} p-2.5`}>
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-[11px] font-bold text-cafe-secondary">Session Chain</h3>
         <span className="text-[8px] font-bold text-cafe-muted">
