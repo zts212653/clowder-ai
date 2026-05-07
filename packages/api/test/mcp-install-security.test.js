@@ -53,6 +53,30 @@ async function buildApp(projectRoot) {
   return app;
 }
 
+function inlineProbeServerCode(workdir) {
+  return [
+    `process.chdir(${JSON.stringify(workdir)});`,
+    "process.stdin.setEncoding('utf8');",
+    "let buffer = '';",
+    "function send(message) { process.stdout.write(JSON.stringify(message) + '\\n'); }",
+    "process.stdin.on('data', (chunk) => {",
+    '  buffer += chunk;',
+    "  const lines = buffer.split('\\n');",
+    "  buffer = lines.pop() ?? '';",
+    '  for (const line of lines) {',
+    '    if (!line.trim()) continue;',
+    '    const msg = JSON.parse(line);',
+    "    if (msg.method === 'initialize') {",
+    "      send({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: msg.params?.protocolVersion ?? '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'install-probe-test-server', version: '1.0.0' } } });",
+    "    } else if (msg.method === 'tools/list') {",
+    "      send({ jsonrpc: '2.0', id: msg.id, result: { tools: [{ name: 'probe_echo', description: 'Probe test tool', inputSchema: { type: 'object', properties: {} } }] } });",
+    '      setTimeout(() => process.exit(0), 10);',
+    '    }',
+    '  }',
+    '});',
+  ].join(' ');
+}
+
 // ── Owner gate ──────────────────────────────────────────
 
 describe('MCP install — owner gate', () => {
@@ -352,6 +376,43 @@ describe('MCP install — transport-aware merge', () => {
     assert.ok(cap?.mcpServer);
     assert.equal(cap.mcpServer.command, 'new-cmd');
     assert.equal(cap.mcpServer.env?.SECRET_KEY, 'sk-keep-me', 'existing env must be preserved');
+  });
+
+  it('probes the saved merged MCP after partial update', async () => {
+    setEnv('DEFAULT_OWNER_USER_ID', undefined);
+    const probeCode = inlineProbeServerCode(process.cwd());
+    await writeCapabilitiesConfig(dir, {
+      version: 1,
+      capabilities: [
+        {
+          id: 'probe-merged-update',
+          type: 'mcp',
+          enabled: true,
+          source: 'external',
+          mcpServer: {
+            transport: 'stdio',
+            command: 'node',
+            args: ['--input-type=module', '--eval', probeCode],
+            workingDir: process.cwd(),
+          },
+        },
+      ],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/capabilities/mcp/install',
+      headers: { 'x-cat-cafe-user': 'test-user' },
+      payload: { id: 'probe-merged-update', command: 'node' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    const body = JSON.parse(res.payload);
+    assert.equal(body.probe?.connectionStatus, 'connected');
+    assert.ok(
+      body.probe.tools?.some((tool) => tool.name === 'probe_echo'),
+      'probe should use preserved args from the saved capability',
+    );
   });
 
   it('update merges headers instead of replacing them', async () => {

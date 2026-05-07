@@ -191,7 +191,7 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
       let probeResult: McpProbeResult | null = null;
       if (preview.willProbe) {
         try {
-          probeResult = await probeMcpCapability(entry, { projectRoot });
+          probeResult = await probeMcpCapability(savedCapability, { projectRoot });
         } catch {
           // probe failure is non-fatal
         }
