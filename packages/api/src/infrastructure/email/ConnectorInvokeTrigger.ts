@@ -602,16 +602,15 @@ export class ConnectorInvokeTrigger {
               log.warn({ err, threadId }, '[ConnectorInvokeTrigger] StreamingHook.cleanupPlaceholders failed');
             });
           } else if (deliveryFailed && this.opts.streamingHook?.cleanupPlaceholders) {
-            // Cloud-R4-P2: schedule late-success cleanup — if timed-out deliveries
-            // eventually succeed, clean up placeholder cards so the user doesn't see
-            // a stale "thinking…" card alongside the real response.
             const cleanupHook = this.opts.streamingHook;
             const scopedInvocationId = createResult.invocationId;
             Promise.allSettled(inflightDeliverPromises).then((results) => {
-              const allSucceeded = results.every((r) => r.status === 'fulfilled');
-              if (allSucceeded) {
+              if (results.every((r) => r.status === 'fulfilled')) {
                 cleanupHook.cleanupPlaceholders(threadId, scopedInvocationId).catch((err) => {
-                  log.warn({ err, threadId }, '[ConnectorInvokeTrigger] Late-success placeholder cleanup failed');
+                  log.warn(
+                    { err, threadId },
+                    '[ConnectorInvokeTrigger] Placeholder cleanup failed after late-success delivery',
+                  );
                 });
               }
             });

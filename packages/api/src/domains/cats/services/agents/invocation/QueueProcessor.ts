@@ -1299,7 +1299,7 @@ export class QueueProcessor {
         Promise.allSettled(inflightDeliverPromises).then((results) => {
           if (results.every((r) => r.status === 'fulfilled')) {
             cleanupFn(threadId, invocationId).catch((err) => {
-              log.warn({ err, threadId }, '[QueueProcessor] Late-success placeholder cleanup failed');
+              log.warn({ err, threadId }, '[QueueProcessor] Placeholder cleanup failed after late-success delivery');
             });
           }
         });

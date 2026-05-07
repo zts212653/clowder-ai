@@ -127,7 +127,7 @@ describe('TelegramAdapter', () => {
       assert.equal(sendCalls[0].text, 'Hello from cat!');
     });
 
-    it('truncates messages over 4096 chars', async () => {
+    it('splits messages over 4096 chars into multiple sends', async () => {
       const adapter = new TelegramAdapter('test-token', noopLog());
       const sendCalls = [];
       adapter._injectSendMessage(async (chatId, text, _opts) => {
@@ -136,9 +136,13 @@ describe('TelegramAdapter', () => {
 
       const longMsg = 'a'.repeat(5000);
       await adapter.sendReply('1001', longMsg);
-      assert.equal(sendCalls.length, 1);
-      assert.ok(sendCalls[0].text.length <= 4096);
-      assert.ok(sendCalls[0].text.endsWith('…'));
+      // K3: split instead of truncate — all content preserved
+      assert.ok(sendCalls.length >= 2);
+      const combined = sendCalls.map((c) => c.text).join('');
+      assert.equal(combined, longMsg);
+      for (const c of sendCalls) {
+        assert.ok(c.text.length <= 4096);
+      }
     });
   });
 
