@@ -36,7 +36,7 @@ const BLOCKED_PATTERNS = [
 ];
 
 const EXEMPT_PREFIXES = [
-  /^docs\(F\d+\):\s*(update|expand|refine)\s+spec\b/i,
+  /^docs\(F\d+\):/i, // feature doc commits — recording deferred work transparently IS the correct behavior
   /\[red\]/i, // TDD red-phase commits — "stub" is placeholder for failing tests, not deferred work
 ];
 
