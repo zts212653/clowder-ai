@@ -284,9 +284,9 @@ function RevealWhispersButton({ threadId }: { threadId: string }) {
 }
 
 const LOGS_DIR = 'packages/api/data/logs/api';
-const INSPECTOR_CARD = 'console-list-card rounded-xl p-2.5 shadow-[0_8px_20px_rgba(43,33,26,0.06)]';
+const INSPECTOR_CARD = 'console-list-card rounded-xl p-2.5 shadow-[0_12px_30px_rgba(43,33,26,0.08)]';
 const INSPECTOR_CARD_COLLAPSED =
-  'console-list-card rounded-xl h-9 px-2.5 flex items-center shadow-[0_8px_20px_rgba(43,33,26,0.06)]';
+  'console-list-card rounded-xl h-9 px-2.5 flex items-center shadow-[0_12px_30px_rgba(43,33,26,0.08)]';
 
 function parseLogFilename(name: string): { date: string; seq: number } | null {
   const m = name.match(/^api\.(\d{4}-\d{2}-\d{2})\.(\d+)\.log$/);

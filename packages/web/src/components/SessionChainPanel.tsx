@@ -175,7 +175,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
   };
 
   return (
-    <section className="console-list-card rounded-xl p-2.5 shadow-[0_8px_20px_rgba(43,33,26,0.06)]">
+    <section className="console-list-card rounded-xl p-2.5 shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-[11px] font-bold text-cafe-secondary">Session Chain</h3>
         <span className="text-[8px] font-bold text-cafe-muted">
