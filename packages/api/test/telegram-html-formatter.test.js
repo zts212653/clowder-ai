@@ -42,11 +42,13 @@ describe('formatTelegramHtml', () => {
     assert.ok(html.includes('&amp;'));
   });
 
-  it('respects Telegram 4096 char limit with truncation', () => {
+  it('preserves full content for long bodies (adapter handles splitting)', () => {
     const longBody = 'x'.repeat(5000);
     const blocks = [{ id: 'b1', kind: 'card', v: 1, title: 'Big', bodyMarkdown: longBody }];
     const html = formatTelegramHtml(blocks, '布偶猫');
-    assert.ok(html.length <= 4096);
+    // K3: formatter no longer truncates — adapter splitHtml handles chunking
+    assert.ok(html.includes('x'.repeat(100)));
+    assert.ok(html.length > 4096);
   });
 
   it('formats audio block with text', () => {
