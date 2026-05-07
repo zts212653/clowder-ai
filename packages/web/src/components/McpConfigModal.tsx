@@ -131,19 +131,19 @@ export function McpConfigModal({
       }}
       data-testid="mcp-config-modal"
     >
-      <div className="flex max-h-[85vh] w-full max-w-[640px] flex-col overflow-hidden rounded-[28px] bg-[var(--console-card-bg)] px-[30px] py-6 shadow-[0_24px_56px_rgba(43,33,26,0.14)]">
+      <div className="flex max-h-[85vh] w-full max-w-[640px] flex-col overflow-hidden rounded-[28px] bg-[var(--console-card-bg)] px-7 py-5 shadow-[0_24px_56px_rgba(43,33,26,0.14)]">
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1 space-y-2">
-            <h2 className="text-[28px] font-extrabold text-cafe">
+            <h2 className="text-[20px] font-extrabold text-cafe">
               {readOnly ? id : isEdit ? `更新 ${id}` : '连接至自定义 MCP'}
             </h2>
             {!readOnly && !isEdit && (
-              <p className="text-[14px] text-cafe-secondary">
+              <p className="text-[13px] text-cafe-secondary">
                 新增 STDIO MCP 使用同一浅色表单骨架；类型切换只改变字段集合。
               </p>
             )}
             {!readOnly && isHttpEdit && (
-              <p className="text-[14px] text-cafe-secondary">
+              <p className="text-[13px] text-cafe-secondary">
                 HTTP Stream 服务类型已固定；如需切换 MCP 服务器类型，请先卸载当前配置。
               </p>
             )}
