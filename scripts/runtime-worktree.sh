@@ -139,8 +139,12 @@ probe_port_with_nc() {
 
 probe_port_with_dev_tcp() {
   local port="$1"
-  # Bash-only: requires net redirections support (enabled in most mainstream builds).
-  (exec 3<>"/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1 || (exec 3<>"/dev/tcp/localhost/$port") >/dev/null 2>&1
+  local timeout_cmd=""
+  if command -v timeout >/dev/null 2>&1; then
+    timeout_cmd="timeout 1"
+  fi
+  ${timeout_cmd} bash -c 'exec 3<>/dev/tcp/127.0.0.1/$1' probe "$port" >/dev/null 2>&1 \
+    || ${timeout_cmd} bash -c 'exec 3<>/dev/tcp/localhost/$1' probe "$port" >/dev/null 2>&1
 }
 
 port_is_listening() {
@@ -459,6 +463,8 @@ start_runtime_worktree() {
   # Bash 3.2 + set -u: empty-array expansion can throw "unbound variable".
   exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 ./scripts/start-dev.sh --prod-web --profile=opensource ${START_ARGS[@]+"${START_ARGS[@]}"}
 }
+
+[[ "${1:-}" == "--source-only" ]] && { return 0 2>/dev/null; exit 0; }
 
 COMMAND="${1:-status}"
 shift || true

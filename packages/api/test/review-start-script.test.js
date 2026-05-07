@@ -27,6 +27,7 @@ function createSandbox() {
 
   const binDir = join(root, 'bin');
   mkdirSync(binDir, { recursive: true });
+  writeFileSync(join(binDir, 'bash'), '#!/bin/sh\nexec /bin/bash "$@"\n', { mode: 0o755 });
   writeFileSync(join(binDir, 'lsof'), '#!/bin/sh\nexit 127\n', { mode: 0o755 });
   writeFileSync(join(binDir, 'ss'), '#!/bin/sh\nexit 127\n', { mode: 0o755 });
   writeFileSync(
@@ -64,6 +65,32 @@ afterEach(async () => {
 });
 
 describe('review-start.sh', () => {
+  it('dev tcp probe falls back when timeout is unavailable', async () => {
+    const { root, binDir } = createSandbox();
+    const server = await listen(0);
+    const port = server.address().port;
+    const scriptPath = join(root, 'scripts', 'review-start.sh');
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e
+source "${scriptPath}" --source-only
+PATH="${binDir}"
+probe_port_with_dev_tcp "${port}"
+printf 'ok'`,
+      ],
+      {
+        cwd: root,
+        encoding: 'utf8',
+      },
+    );
+
+    assert.equal(result.status, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.equal(result.stdout.trim(), 'ok');
+  });
+
   it('falls back when lsof is unavailable and skips occupied review ports', async () => {
     const { root, binDir } = createSandbox();
     const occupiedServer = await listen(0);

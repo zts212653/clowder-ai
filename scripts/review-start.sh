@@ -55,7 +55,12 @@ probe_port_with_nc() {
 
 probe_port_with_dev_tcp() {
     local port="$1"
-    (exec 3<>"/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1 || (exec 3<>"/dev/tcp/localhost/$port") >/dev/null 2>&1
+    local timeout_cmd=""
+    if command -v timeout >/dev/null 2>&1; then
+        timeout_cmd="timeout 1"
+    fi
+    ${timeout_cmd} bash -c 'exec 3<>/dev/tcp/127.0.0.1/$1' probe "$port" >/dev/null 2>&1 \
+        || ${timeout_cmd} bash -c 'exec 3<>/dev/tcp/localhost/$1' probe "$port" >/dev/null 2>&1
 }
 
 port_is_listening() {
@@ -145,6 +150,8 @@ pick_port_pair() {
     done
     return 1
 }
+
+[[ "${1:-}" == "--source-only" ]] && { return 0 2>/dev/null; exit 0; }
 
 for arg in "$@"; do
     case "$arg" in

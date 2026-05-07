@@ -238,8 +238,8 @@ normalize_raw_dev_redis_defaults() {
 
     REDIS_PORT="6398"
     case "${REDIS_URL:-}" in
-        ""|"redis://localhost:6399"|"redis://127.0.0.1:6399")
-            REDIS_URL="redis://localhost:6398"
+        ""|"redis://127.0.0.1:6399"|"redis://localhost:6399")
+            REDIS_URL="redis://127.0.0.1:6398"
             ;;
     esac
 }
@@ -459,7 +459,15 @@ probe_port_with_nc() {
 probe_port_with_dev_tcp() {
     local port=$1
     # Bash-only: requires net redirections support (enabled in most mainstream builds).
-    (exec 3<>"/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1 || (exec 3<>"/dev/tcp/localhost/$port") >/dev/null 2>&1
+    # timeout prevents WSL hangs on closed ports (no built-in /dev/tcp timeout).
+    # Positional param avoids interpolating $port into bash -c command string.
+    # When timeout is unavailable (stock macOS, minimal images), fall back to bare /dev/tcp.
+    local timeout_cmd=""
+    if command -v timeout >/dev/null 2>&1; then
+        timeout_cmd="timeout 1"
+    fi
+    ${timeout_cmd} bash -c 'exec 3<>/dev/tcp/127.0.0.1/$1' probe "$port" >/dev/null 2>&1 \
+        || ${timeout_cmd} bash -c 'exec 3<>/dev/tcp/localhost/$1' probe "$port" >/dev/null 2>&1
 }
 
 port_listen_pids() {
