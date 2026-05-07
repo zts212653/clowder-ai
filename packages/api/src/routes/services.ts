@@ -255,7 +255,11 @@ export const servicesRoutes: FastifyPluginAsync = async (app) => {
     }
 
     try {
-      const child = spawn('lsof', ['-ti', `:${manifest.port}`], { stdio: ['pipe', 'pipe', 'pipe'] });
+      // -sTCP:LISTEN restricts to processes LISTENING on the port (not clients
+      // that happen to have a connection, like our API doing health checks).
+      const child = spawn('lsof', ['-ti', `TCP:${manifest.port}`, '-sTCP:LISTEN'], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
       let stdout = '';
       child.stdout?.on('data', (d: Buffer) => {
         stdout += d.toString();
@@ -271,15 +275,14 @@ export const servicesRoutes: FastifyPluginAsync = async (app) => {
         .filter(Boolean)
         .map((s) => Number(s))
         .filter((n) => Number.isFinite(n) && n > 0 && n !== myPid);
-      const safePids = candidatePids.filter((pid) => isServiceProcess(pid, manifest));
-      for (const pid of safePids) {
+      for (const pid of candidatePids) {
         try {
           process.kill(pid, 'SIGTERM');
         } catch {
           /* already gone */
         }
       }
-      return { ok: true, message: `${manifest.name} stopped (${safePids.length} process(es))` };
+      return { ok: true, message: `${manifest.name} stopped (${candidatePids.length} process(es))` };
     } catch {
       return { ok: false, error: 'Failed to stop service' };
     }
