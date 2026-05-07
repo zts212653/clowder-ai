@@ -43,10 +43,11 @@ ML sidecar 服务（ASR/TTS/Embedding/LLM后修）从 start-dev.sh 的硬编码�
 
 ### 待做
 
-- [ ] 健康轮询：定时探测已启用服务的 health endpoint，更新 ServiceState
-- [ ] 日志流：服务启动/运行日志通过 WebSocket 推送到前端
+- [ ] 健康轮询：���时探测已启用服务的 health endpoint，更新 ServiceState
+- [ ] 日志流：服务启动/运行日志通过 WebSocket 推送到前���
 - [ ] 依赖排序：服务间依赖声明 + 启动顺序保证
 - [ ] 模型下载进度：安装过程中模型下载进度反馈
+- [ ] 卸载弹窗：卸载时提供选项"同时删除模型缓存"（HuggingFace cache ~数十GB），默认仅删 venv
 
 ### Phase 4: 新功能接入规范（从 F179 迁入）
 
