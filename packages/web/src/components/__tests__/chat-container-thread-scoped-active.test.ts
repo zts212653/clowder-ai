@@ -116,7 +116,6 @@ vi.mock('../ChatInput', () => ({
 }));
 vi.mock('../ChatMessage', () => ({ ChatMessage: () => null }));
 vi.mock('../game/GameOverlayConnector', () => ({ GameOverlayConnector: () => null }));
-vi.mock('../HubListModal', () => ({ HubListModal: () => null }));
 vi.mock('../MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
 }));
