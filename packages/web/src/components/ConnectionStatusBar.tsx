@@ -44,7 +44,7 @@ function StatusPill({ label, level }: { label: string; level: ConnectionLevel })
     <div className={`rounded-xl border px-3 py-2 ${LEVEL_CLASS[level]}`}>
       <div className="flex items-center gap-2">
         <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: LEVEL_DOT_COLOR[level] }} />
-        <span className="text-[11px] font-medium tracking-wide">{label}</span>
+        <span className="text-xs font-medium tracking-wide">{label}</span>
       </div>
       <p className="mt-1 text-sm font-semibold">{LEVEL_LABEL[level]}</p>
     </div>

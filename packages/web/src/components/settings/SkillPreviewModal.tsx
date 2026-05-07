@@ -14,6 +14,7 @@ interface SkillPreviewModalProps {
 
 export function SkillPreviewModal({ skillId, skillName, description, triggers, onClose }: SkillPreviewModalProps) {
   const [content, setContent] = useState<string | null>(null);
+  const [skillPath, setSkillPath] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const reqRef = useRef(0);
@@ -30,9 +31,10 @@ export function SkillPreviewModal({ skillId, skillName, description, triggers, o
           setError(res.status === 404 ? 'SKILL.md 不存在' : '加载失败');
           return;
         }
-        const data = (await res.json()) as { content: string };
+        const data = (await res.json()) as { content: string; path?: string };
         if (id !== reqRef.current) return;
         setContent(data.content);
+        if (data.path) setSkillPath(data.path);
       } catch {
         if (id !== reqRef.current) return;
         setError('网络错误');
@@ -94,6 +96,11 @@ export function SkillPreviewModal({ skillId, skillName, description, triggers, o
         </div>
 
         {description && <p className="mt-3 text-[13px] leading-[1.4] text-cafe-secondary">{description}</p>}
+        {skillPath && (
+          <p className="mt-1.5 truncate text-[11px] font-mono text-cafe-muted" title={skillPath}>
+            {skillPath}
+          </p>
+        )}
 
         <div className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto">
           {triggerList.length > 0 && (

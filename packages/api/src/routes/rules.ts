@@ -6,6 +6,7 @@
 
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FastifyPluginAsync } from 'fastify';
@@ -71,14 +72,33 @@ export const rulesRoutes: FastifyPluginAsync = async (app) => {
       return { error: 'Invalid skill name' };
     }
     const root = findProjectRoot();
-    const skillPath = join(root, 'cat-cafe-skills', name, 'SKILL.md');
-    if (!existsSync(skillPath)) {
+    const home = homedir();
+    const candidateDirs = [
+      join(root, 'cat-cafe-skills'),
+      join(root, '.claude', 'skills'),
+      join(home, '.claude', 'skills'),
+      join(root, '.codex', 'skills'),
+      join(home, '.codex', 'skills'),
+      join(root, '.gemini', 'skills'),
+      join(home, '.gemini', 'skills'),
+      join(root, '.kimi', 'skills'),
+      join(home, '.kimi', 'skills'),
+    ];
+    let skillPath: string | null = null;
+    for (const dir of candidateDirs) {
+      const candidate = join(dir, name, 'SKILL.md');
+      if (existsSync(candidate)) {
+        skillPath = candidate;
+        break;
+      }
+    }
+    if (!skillPath) {
       reply.status(404);
       return { error: `Skill "${name}" not found` };
     }
     try {
       const content = await readFile(skillPath, 'utf-8');
-      return { name, content };
+      return { name, content, path: skillPath };
     } catch {
       reply.status(500);
       return { error: 'Failed to read skill content' };

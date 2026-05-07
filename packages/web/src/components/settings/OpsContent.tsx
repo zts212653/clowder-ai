@@ -6,6 +6,7 @@ import { HubClaudeRescueSection } from '../HubClaudeRescueSection';
 import { HubCommandsTab } from '../HubCommandsTab';
 import { HubGovernanceTab } from '../HubGovernanceTab';
 import { HubLeaderboardTab } from '../HubLeaderboardTab';
+import { HubObservabilityTab } from '../HubObservabilityTab';
 import { HubRoutingPolicyTab } from '../HubRoutingPolicyTab';
 import { HubToolUsageTab } from '../HubToolUsageTab';
 import { DEFAULT_OPS_SUBSECTION, OPS_SUBSECTIONS } from './ops-nav-config';
@@ -47,6 +48,8 @@ function OpsSubsectionContent({ subsection }: { subsection: string }) {
       );
     case 'leaderboard':
       return <HubLeaderboardTab />;
+    case 'observability':
+      return <HubObservabilityTab />;
     case 'health':
       return (
         <div className="space-y-6">

@@ -54,7 +54,7 @@ function CatStatusCard({
 
   return (
     <div
-      className="flex items-center gap-1.5 px-2.5 py-1 rounded-full"
+      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[var(--console-border-soft)]"
       style={{ backgroundColor: bgColor ?? 'var(--console-pill-bg)' }}
     >
       <StatusDot status={status} />
@@ -145,7 +145,7 @@ export function ParallelStatusBar({ onStop, threadId }: { onStop?: () => void; t
       </div>
       {agg && (
         <div
-          className="flex items-center gap-3 mt-1.5 text-[11px] text-cafe-secondary"
+          className="flex items-center gap-3 mt-1.5 text-xs text-cafe-secondary"
           data-testid="parallel-usage-summary"
         >
           {agg.inputTokens != null && (

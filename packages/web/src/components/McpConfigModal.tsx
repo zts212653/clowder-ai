@@ -131,7 +131,7 @@ export function McpConfigModal({
       }}
       data-testid="mcp-config-modal"
     >
-      <div className="flex max-h-[85vh] w-full max-w-[776px] flex-col overflow-hidden rounded-[28px] bg-[var(--console-card-bg)] px-[30px] py-6 shadow-[0_24px_56px_rgba(43,33,26,0.14)]">
+      <div className="flex max-h-[85vh] w-full max-w-[640px] flex-col overflow-hidden rounded-[28px] bg-[var(--console-card-bg)] px-[30px] py-6 shadow-[0_24px_56px_rgba(43,33,26,0.14)]">
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1 space-y-2">
             <h2 className="text-[28px] font-extrabold text-cafe">

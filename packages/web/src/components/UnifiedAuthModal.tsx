@@ -215,7 +215,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 px-4" onClick={handleClose}>
       <div
-        className="flex w-full max-w-[824px] flex-col overflow-hidden rounded-[28px] bg-[var(--console-card-bg)] px-7 py-6 shadow-[0_22px_48px_rgba(43,33,26,0.13)]"
+        className="flex w-full max-w-[640px] flex-col overflow-hidden rounded-[28px] bg-[var(--console-card-bg)] px-7 py-6 shadow-[0_22px_48px_rgba(43,33,26,0.13)]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
