@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -26,6 +27,21 @@ function runSourceOnlySnippet(scriptPath, snippet, envOverrides = {}) {
   return result.stdout.trim();
 }
 
+function createBashOnlyPath(root) {
+  const binDir = join(root, 'bin');
+  mkdirSync(binDir, { recursive: true });
+  writeFileSync(join(binDir, 'bash'), '#!/bin/sh\nexec /bin/bash "$@"\n', { mode: 0o755 });
+  return binDir;
+}
+
+function listenOnLoopback() {
+  const server = createServer();
+  return new Promise((resolvePromise, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => resolvePromise(server));
+  });
+}
+
 test('source-only exposes helper functions for testing seams', () => {
   const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
   const output = runSourceOnlySnippet(
@@ -46,6 +62,30 @@ printf 'ok'
   );
 
   assert.equal(output, 'ok');
+});
+
+test('probe_port_with_dev_tcp falls back when timeout is unavailable', async () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-no-timeout-'));
+  const server = await listenOnLoopback();
+
+  try {
+    const binDir = createBashOnlyPath(tempRoot);
+    const port = server.address().port;
+    const output = runSourceOnlySnippet(
+      scriptPath,
+      `
+PATH="${binDir}"
+probe_port_with_dev_tcp "${port}"
+printf 'ok'
+`,
+    );
+
+    assert.equal(output, 'ok');
+  } finally {
+    await new Promise((resolvePromise) => server.close(resolvePromise));
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
 });
 
 test('configure_mcp_server_path sets default path when env is unset', () => {
@@ -333,7 +373,7 @@ test('direct command mode can prefer current .env ports over ambient shell ports
   }
 });
 
-test('raw dev entry remaps setup-style Redis 6399 defaults to dev Redis 6398', () => {
+test('raw dev entry remaps setup-style Redis 6399 defaults to dev Redis 6398 (IPv4 normalization)', () => {
   const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
   const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-redis-dev-default-'));
   const tempScriptPath = join(tempRoot, 'scripts', 'start-dev.sh');
@@ -359,7 +399,7 @@ test('raw dev entry remaps setup-style Redis 6399 defaults to dev Redis 6398', (
     );
 
     assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
-    assert.equal(result.stdout.trim(), '6398|redis://localhost:6398');
+    assert.equal(result.stdout.trim(), '6398|redis://127.0.0.1:6398');
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }
