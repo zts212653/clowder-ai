@@ -54,7 +54,7 @@ export function AuditExplorerPanel({
   }, [onCloseSession]);
 
   return (
-    <section className="rounded-[10px] bg-[var(--console-card-bg)] p-[9px]">
+    <section className="console-list-card rounded-xl p-2.5 shadow-[0_8px_20px_rgba(43,33,26,0.06)]">
       <button
         type="button"
         data-testid="audit-explorer-header"
