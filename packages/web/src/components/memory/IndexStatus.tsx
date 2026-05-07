@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { SettingsResourceToggleSwitch } from '../SettingsResourceCard';
 
 interface RawStatusResponse {
   backend: string;
@@ -75,7 +76,7 @@ export function getConfigVars(vars: EnvVar[]): EnvVar[] {
 
 function StatusRow({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="flex items-center justify-between border-b border-[var(--console-border-soft)] py-2 last:border-b-0">
+    <div className="flex items-center justify-between py-2">
       <span className="text-xs text-cafe-secondary">{label}</span>
       <span className="text-sm font-medium text-cafe-black">{value}</span>
     </div>
@@ -165,7 +166,7 @@ export function IndexStatus() {
       </div>
 
       {/* Stats */}
-      <div className="rounded-lg border border-[var(--console-border-soft)] p-3">
+      <div className="rounded-lg bg-[var(--console-card-soft-bg)] p-3">
         <StatusRow label="Backend" value={status.backend} />
         <StatusRow label="Documents" value={status.docsCount} />
         <StatusRow label="Threads" value={status.threadsCount} />
@@ -180,32 +181,24 @@ export function IndexStatus() {
 
       {/* Feature flags */}
       {evidenceVars.length > 0 && (
-        <div className="rounded-lg border border-[var(--console-border-soft)] p-3">
+        <div className="rounded-lg bg-[var(--console-card-soft-bg)] p-3">
           <h3 className="mb-2 text-xs font-semibold text-cafe-black">功能开关</h3>
           {evidenceVars.map((v) => {
             const isOn = v.currentValue === 'on';
             const isBinary = v.currentValue === 'on' || v.currentValue === 'off' || v.currentValue == null;
             const isUpdating = updatingKey === v.name;
             return (
-              <div
-                key={v.name}
-                className="flex items-center justify-between border-b border-[var(--console-border-soft)] py-2 last:border-b-0"
-              >
+              <div key={v.name} className="flex items-center justify-between py-2">
                 <div className="flex-1 pr-3">
                   <div className="text-xs font-medium text-cafe-black">{v.name}</div>
                   <div className="text-[10px] text-cafe-secondary">{v.description}</div>
                 </div>
                 {isBinary ? (
-                  <button
-                    type="button"
-                    disabled={isUpdating}
+                  <SettingsResourceToggleSwitch
+                    enabled={isOn}
+                    busy={isUpdating}
                     onClick={() => toggleEnvVar(v.name, v.currentValue)}
-                    className={`relative h-5 w-9 rounded-full transition-colors ${isOn ? 'bg-conn-emerald-text' : 'bg-cafe-surface-sunken'} ${isUpdating ? 'opacity-50' : ''}`}
-                  >
-                    <span
-                      className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-cafe-surface shadow transition-transform ${isOn ? 'translate-x-4' : ''}`}
-                    />
-                  </button>
+                  />
                 ) : (
                   <span className="rounded bg-conn-amber-bg px-1.5 py-0.5 text-[10px] font-medium text-conn-amber-text">
                     {v.currentValue}
@@ -219,11 +212,11 @@ export function IndexStatus() {
 
       {/* Config reference — all non-toggle evidence env vars */}
       {configVars.length > 0 && (
-        <div className="rounded-lg border border-[var(--console-border-soft)] p-3">
+        <div className="rounded-lg bg-[var(--console-card-soft-bg)] p-3">
           <h3 className="mb-2 text-xs font-semibold text-cafe-black">配置参考</h3>
           <p className="mb-2 text-[10px] text-cafe-secondary">以下配置需在 .env 中设置，修改后重启生效。</p>
           {configVars.map((v) => (
-            <div key={v.name} className="border-b border-[var(--console-border-soft)] py-2 last:border-b-0">
+            <div key={v.name} className="py-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium font-mono text-cafe-black">{v.name}</span>
                 <span className="text-[10px] font-mono text-cafe-secondary truncate max-w-[50%] text-right">

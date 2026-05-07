@@ -109,7 +109,7 @@ export function HubClaudeRescueSection() {
   }, [addToast, rescuing, scanSessions, selectedTargets]);
 
   return (
-    <section className="console-list-card rounded-2xl border border-[var(--console-border-soft)] p-3 space-y-3 shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
+    <section className="console-list-card rounded-2xl p-3 space-y-3 shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
       <div className="space-y-1">
         <div className="flex items-center justify-between gap-3">
           <h4 className="text-xs font-semibold text-cafe">布偶猫救援中心</h4>
