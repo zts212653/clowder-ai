@@ -7,7 +7,7 @@
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FastifyPluginAsync } from 'fastify';
 import { resolveUserId } from '../utils/request-identity.js';
@@ -61,47 +61,52 @@ export const rulesRoutes: FastifyPluginAsync = async (app) => {
     return { sharedRules, providerGuides };
   });
 
-  app.get<{ Params: { name: string } }>('/api/rules/skill/:name', async (request, reply) => {
-    if (!resolveUserId(request)) {
-      reply.status(401);
-      return { error: 'Authentication required' };
-    }
-    const { name } = request.params;
-    if (!/^[a-z][a-z0-9-]*$/i.test(name)) {
-      reply.status(400);
-      return { error: 'Invalid skill name' };
-    }
-    const root = findProjectRoot();
-    const home = homedir();
-    const candidateDirs = [
-      join(root, 'cat-cafe-skills'),
-      join(root, '.claude', 'skills'),
-      join(home, '.claude', 'skills'),
-      join(root, '.codex', 'skills'),
-      join(home, '.codex', 'skills'),
-      join(root, '.gemini', 'skills'),
-      join(home, '.gemini', 'skills'),
-      join(root, '.kimi', 'skills'),
-      join(home, '.kimi', 'skills'),
-    ];
-    let skillPath: string | null = null;
-    for (const dir of candidateDirs) {
-      const candidate = join(dir, name, 'SKILL.md');
-      if (existsSync(candidate)) {
-        skillPath = candidate;
-        break;
+  app.get<{ Params: { name: string }; Querystring: { projectPath?: string } }>(
+    '/api/rules/skill/:name',
+    async (request, reply) => {
+      if (!resolveUserId(request)) {
+        reply.status(401);
+        return { error: 'Authentication required' };
       }
-    }
-    if (!skillPath) {
-      reply.status(404);
-      return { error: `Skill "${name}" not found` };
-    }
-    try {
-      const content = await readFile(skillPath, 'utf-8');
-      return { name, content, path: skillPath };
-    } catch {
-      reply.status(500);
-      return { error: 'Failed to read skill content' };
-    }
-  });
+      const { name } = request.params;
+      if (!/^[a-z][a-z0-9-]*$/i.test(name)) {
+        reply.status(400);
+        return { error: 'Invalid skill name' };
+      }
+      const root = findProjectRoot();
+      const home = homedir();
+      const projectRoot =
+        request.query.projectPath && isAbsolute(request.query.projectPath) ? request.query.projectPath : root;
+      const candidateDirs = [
+        join(root, 'cat-cafe-skills'),
+        join(projectRoot, '.claude', 'skills'),
+        join(home, '.claude', 'skills'),
+        join(projectRoot, '.codex', 'skills'),
+        join(home, '.codex', 'skills'),
+        join(projectRoot, '.gemini', 'skills'),
+        join(home, '.gemini', 'skills'),
+        join(projectRoot, '.kimi', 'skills'),
+        join(home, '.kimi', 'skills'),
+      ];
+      let skillPath: string | null = null;
+      for (const dir of candidateDirs) {
+        const candidate = join(dir, name, 'SKILL.md');
+        if (existsSync(candidate)) {
+          skillPath = candidate;
+          break;
+        }
+      }
+      if (!skillPath) {
+        reply.status(404);
+        return { error: `Skill "${name}" not found` };
+      }
+      try {
+        const content = await readFile(skillPath, 'utf-8');
+        return { name, content, path: skillPath };
+      } catch {
+        reply.status(500);
+        return { error: 'Failed to read skill content' };
+      }
+    },
+  );
 };

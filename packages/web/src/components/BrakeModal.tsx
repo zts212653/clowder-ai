@@ -26,8 +26,8 @@ const MESSAGES: Record<1 | 2 | 3, { catId: string; nickname: string; text: strin
 };
 
 const LEVEL_STYLE: Record<1 | 2 | 3, { border: string; bg: string; title: string }> = {
-  1: { border: 'border-conn-amber-ring', bg: 'bg-[var(--console-card-bg,#fffdfb)]', title: '休息时间到啦！' },
-  2: { border: 'border-conn-amber-ring', bg: 'bg-[var(--console-card-bg,#fffdfb)]', title: '猫猫们有点担心你了！' },
+  1: { border: 'border-cafe-accent', bg: 'bg-[var(--console-card-bg,#fffdfb)]', title: '休息时间到啦！' },
+  2: { border: 'border-cafe-accent', bg: 'bg-[var(--console-card-bg,#fffdfb)]', title: '猫猫们有点担心你了！' },
   3: { border: 'border-conn-red-ring', bg: 'bg-[var(--console-card-bg,#fffdfb)]', title: '三猫紧急拦截！' },
 };
 
@@ -164,7 +164,7 @@ export function BrakeModal() {
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="例：正在修复线上 P0 故障"
-              className="w-full border border-[var(--console-border-soft)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-conn-amber-ring"
+              className="w-full border border-[var(--console-border-soft)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cafe-accent"
               onCompositionStart={ime.onCompositionStart}
               onCompositionEnd={ime.onCompositionEnd}
               onKeyDown={(e) => {
@@ -189,7 +189,7 @@ export function BrakeModal() {
             type="button"
             onClick={() => checkin('wrap_up')}
             disabled={submitting}
-            className="w-full py-2.5 rounded-xl text-sm font-medium text-[var(--cafe-surface)] bg-conn-amber-bg hover:opacity-90 transition-colors disabled:opacity-50"
+            className="w-full py-2.5 rounded-xl text-sm font-medium text-cafe bg-[var(--console-hover-bg)] border border-[var(--console-border-soft)] hover:opacity-90 transition-colors disabled:opacity-50"
           >
             收尾（10 分钟）
           </button>

@@ -9,10 +9,18 @@ interface SkillPreviewModalProps {
   description?: string;
   triggers?: string[];
   category?: string;
+  projectPath?: string | null;
   onClose: () => void;
 }
 
-export function SkillPreviewModal({ skillId, skillName, description, triggers, onClose }: SkillPreviewModalProps) {
+export function SkillPreviewModal({
+  skillId,
+  skillName,
+  description,
+  triggers,
+  projectPath,
+  onClose,
+}: SkillPreviewModalProps) {
   const [content, setContent] = useState<string | null>(null);
   const [skillPath, setSkillPath] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -23,9 +31,12 @@ export function SkillPreviewModal({ skillId, skillName, description, triggers, o
     const id = ++reqRef.current;
     setLoading(true);
     setError(null);
+    setContent(null);
+    setSkillPath(null);
     (async () => {
       try {
-        const res = await apiFetch(`/api/rules/skill/${encodeURIComponent(skillId)}`);
+        const query = projectPath ? `?projectPath=${encodeURIComponent(projectPath)}` : '';
+        const res = await apiFetch(`/api/rules/skill/${encodeURIComponent(skillId)}${query}`);
         if (id !== reqRef.current) return;
         if (!res.ok) {
           setError(res.status === 404 ? 'SKILL.md 不存在' : '加载失败');
@@ -45,7 +56,7 @@ export function SkillPreviewModal({ skillId, skillName, description, triggers, o
     return () => {
       reqRef.current = id + 1;
     };
-  }, [skillId]);
+  }, [skillId, projectPath]);
 
   const handleBackdrop = useCallback(
     (e: React.MouseEvent) => {

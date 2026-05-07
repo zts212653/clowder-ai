@@ -135,6 +135,7 @@ export function SkillsContent() {
           description={previewItem.description}
           triggers={previewItem.triggers}
           category={previewItem.category}
+          projectPath={cap.projectPath}
           onClose={() => setPreviewItem(null)}
         />
       )}
