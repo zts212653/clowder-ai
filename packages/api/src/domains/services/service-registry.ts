@@ -163,11 +163,11 @@ export function resolveServiceEndpoint(idOrManifest: string | ServiceManifest): 
     const val = process.env[envVar];
     if (val?.startsWith('http')) return val;
     const parsed = val ? Number.parseInt(val, 10) : Number.NaN;
-    if (Number.isFinite(parsed) && parsed > 0) return `http://localhost:${parsed}`;
+    if (Number.isFinite(parsed) && parsed > 0) return `http://127.0.0.1:${parsed}`;
   }
 
   const port = resolveServicePort(manifest);
-  if (port) return `http://localhost:${port}`;
+  if (port) return `http://127.0.0.1:${port}`;
 
   return null;
 }

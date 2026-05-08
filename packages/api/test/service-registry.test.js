@@ -54,7 +54,7 @@ describe('resolveHealthUrl', () => {
     try {
       const manifest = getServiceById('embedding-model');
       const url = resolveHealthUrl(manifest);
-      assert.equal(url, 'http://localhost:9999/health');
+      assert.equal(url, 'http://127.0.0.1:9999/health');
     } finally {
       if (savedUrl !== undefined) process.env.EMBED_URL = savedUrl;
       else delete process.env.EMBED_URL;
@@ -88,7 +88,7 @@ describe('resolveHealthUrl', () => {
     try {
       const manifest = getServiceById('embedding-model');
       const url = resolveHealthUrl(manifest);
-      assert.equal(url, 'http://localhost:9880/health');
+      assert.equal(url, 'http://127.0.0.1:9880/health');
     } finally {
       if (savedUrl !== undefined) process.env.EMBED_URL = savedUrl;
       if (savedPort !== undefined) process.env.EMBED_PORT = savedPort;

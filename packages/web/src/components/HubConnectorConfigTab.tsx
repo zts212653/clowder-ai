@@ -129,7 +129,8 @@ export function HubConnectorConfigTab() {
       .filter((f) => fieldValues[f.envName] !== undefined)
       .map((f) => ({ name: f.envName, value: fieldValues[f.envName] || null }));
 
-    const permissions = permissionsRef.current?.getConfig();
+    const rawPerms = permissionsRef.current?.getConfig();
+    const hasPermissions = rawPerms && (rawPerms.adminOpenIds.length > 0 || rawPerms.allowedGroups.length > 0);
 
     try {
       const res = await apiFetch(`/api/connector/${platform.id}/config`, {
@@ -137,7 +138,7 @@ export function HubConnectorConfigTab() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...(secrets.length > 0 ? { secrets } : {}),
-          ...(permissions ? { permissions } : {}),
+          ...(hasPermissions ? { permissions: rawPerms } : {}),
         }),
       });
       if (!res.ok) {
