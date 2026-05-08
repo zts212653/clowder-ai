@@ -12,10 +12,18 @@
 
 import type { CatConfig, CatId } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
+import type { Span } from '@opentelemetry/api';
+import { context, trace } from '@opentelemetry/api';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
 import { getConfigSessionStrategy, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { getCatVoice } from '../../../../../config/cat-voices.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import {
+  AGENT_ID,
+  ROUTE_HAS_A2A_HANDOFF,
+  ROUTE_TOTAL_CATS_INVOKED,
+  ROUTE_TOTAL_TOKENS,
+} from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import {
   inlineActionChecked,
   inlineActionDetected,
@@ -89,6 +97,7 @@ import { shouldWarnVoidHold } from './void-hold-detect.js';
 import { buildVoteTally, checkVoteCompletion, extractVoteFromText, VOTE_RESULT_SOURCE } from './vote-intercept.js';
 
 const log = createModuleLogger('route-serial');
+const routeSerialTracer = trace.getTracer('cat-cafe-api', '0.1.0');
 
 function collectStructuredTargetCatsFromInput(input: unknown): string[] {
   if (!input || typeof input !== 'object') return [];
@@ -301,6 +310,12 @@ export async function* routeSerial(
     }
   }
   const bootcampMemberCount = getThreadBootcampMemberCount(routeThread);
+
+  // F153: Trace propagation — track per-invocation spans and route-level token totals
+  const catInvocationSpans = new Map<number, Span>();
+  const mentionParentSpan = new Map<number, Span>();
+  const pendingDispatchSpans: { span: Span; lastChildIndex: number }[] = [];
+  let routeTotalTokens = 0;
 
   // F155: Guide interceptor — resume existing guide state only
   const guideCtx = await prepareGuideContext({
@@ -677,6 +692,7 @@ export async function* routeSerial(
       );
       const leakedPayloadStripper = createLeakedToolCallStreamStripper();
       const invocationStartedAt = Date.now();
+      const invocationSpanRef: { current?: Span } = {};
       for await (const msg of invokeSingleCat(deps.invocationDeps, {
         catId,
         service: getService(deps.services, catId),
@@ -693,7 +709,10 @@ export async function* routeSerial(
         ...(worklistEntry.a2aTriggerMessageId.get(catId)
           ? { a2aTriggerMessageId: worklistEntry.a2aTriggerMessageId.get(catId) }
           : {}),
-        ...(options.routeSpan ? { routeSpan: options.routeSpan } : {}),
+        ...((mentionParentSpan.get(index) ?? options.routeSpan)
+          ? { routeSpan: mentionParentSpan.get(index) ?? options.routeSpan }
+          : {}),
+        invocationSpanRef,
         isLastCat: false,
       })) {
         // F39 bugfix: stop yielding after cancel (pipe buffer may still drain)
@@ -775,6 +794,10 @@ export async function* routeSerial(
               // F060: Collect inline rich_block for persistence (P1 fix)
               if (parsed.type === 'rich_block' && parsed.block && isValidRichBlock(parsed.block)) {
                 streamRichBlocks.push(parsed.block);
+              }
+              // F153: Accumulate invocation tokens for route aggregate
+              if (parsed.type === 'invocation_usage' && parsed.usage) {
+                routeTotalTokens += (parsed.usage.inputTokens ?? 0) + (parsed.usage.outputTokens ?? 0);
               }
             } catch {
               /* ignore parse errors */
@@ -1400,6 +1423,8 @@ export async function* routeSerial(
           }
         }
 
+        if (invocationSpanRef.current) catInvocationSpans.set(index, invocationSpanRef.current);
+
         // A2A: extend worklist if mention found + depth allows + queue fairness gate
         // F27: dedup only against pending (not-yet-executed) tail — cats that already ran
         // can be re-enqueued for another round (e.g. A→B→A review ping-pong).
@@ -1430,6 +1455,8 @@ export async function* routeSerial(
         }
 
         if (a2aMentions.length > 0 && worklistEntry.a2aCount < maxDepth && !signal?.aborted && !queuedMessagesPending) {
+          // F153: mention_dispatch span — tracks the causal link between mentioner and dispatched targets
+          let dispatchSpan: Span | undefined;
           const pendingTail = worklist.slice(index + 1);
           const pendingOriginalTargets = targetCats.slice(index + 1);
           for (const nextCat of a2aMentions) {
@@ -1479,12 +1506,41 @@ export async function* routeSerial(
               continue;
             }
 
+            // F153: lazily create mention_dispatch span on first actual push
+            if (!dispatchSpan) {
+              const mentionerSpan = catInvocationSpans.get(index);
+              if (mentionerSpan) {
+                const parentCtx = trace.setSpan(context.active(), mentionerSpan);
+                dispatchSpan = routeSerialTracer.startSpan(
+                  'cat_cafe.mention_dispatch',
+                  {
+                    attributes: { [AGENT_ID]: catId as string, 'dispatch.target_count': a2aMentions.length },
+                  },
+                  parentCtx,
+                );
+              }
+            }
+
             worklist.push(nextCat);
             worklistEntry.a2aCount++;
             pendingTail.push(nextCat); // Keep dedup view in sync
             worklistEntry.a2aFrom.set(nextCat, catId);
             // F121: response-text path — set trigger message for auto-replyTo
             if (storedMsgId) worklistEntry.a2aTriggerMessageId.set(nextCat, storedMsgId);
+            // F153: record mention parent span for dispatched target
+            if (dispatchSpan) mentionParentSpan.set(worklist.length - 1, dispatchSpan);
+          }
+          // F153: end or defer dispatch span based on child execution
+          if (dispatchSpan) {
+            let maxChildIdx = -1;
+            for (const [idx, s] of mentionParentSpan) {
+              if (s === dispatchSpan && idx > maxChildIdx) maxChildIdx = idx;
+            }
+            if (maxChildIdx > index) {
+              pendingDispatchSpans.push({ span: dispatchSpan, lastChildIndex: maxChildIdx });
+            } else {
+              dispatchSpan.end();
+            }
           }
         }
 
@@ -1838,6 +1894,17 @@ export async function* routeSerial(
       index++;
     }
   } finally {
+    // F153: Set route aggregate attributes on the parent route span
+    if (options.routeSpan) {
+      options.routeSpan.setAttribute(ROUTE_TOTAL_CATS_INVOKED, index);
+      options.routeSpan.setAttribute(ROUTE_TOTAL_TOKENS, routeTotalTokens);
+      options.routeSpan.setAttribute(ROUTE_HAS_A2A_HANDOFF, worklist.length > targetCats.length);
+    }
+    // F153: End all pending dispatch spans (unconditional — covers abort/throw)
+    for (const entry of pendingDispatchSpans) {
+      entry.span.end();
+    }
+
     if (options.invocationController && options.completeA2ASlots && activeTrackedA2ASlots.size > 0) {
       options.completeA2ASlots(threadId, [...activeTrackedA2ASlots], options.invocationController);
     }

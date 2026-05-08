@@ -8,6 +8,11 @@ import { catRegistry } from '@cat-cafe/shared';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
 import { getConfigSessionStrategy, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import {
+  ROUTE_HAS_A2A_HANDOFF,
+  ROUTE_TOTAL_CATS_INVOKED,
+  ROUTE_TOTAL_TOKENS,
+} from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import { estimateTokens } from '../../../../../utils/token-counter.js';
 import {
   ackGuideCompletion,
@@ -429,6 +434,8 @@ export async function* routeParallel(
   const catPayloadStrippers = new Map<string, ReturnType<typeof createLeakedToolCallStreamStripper>>();
   let completedCount = 0;
   let yieldedFinalDone = false;
+  // F153: Accumulate total tokens across all parallel streams for route aggregate
+  let routeTotalTokens = 0;
 
   // #80: Per-cat draft flush state
   const catFlushTime = new Map<string, number>();
@@ -532,6 +539,10 @@ export async function* routeParallel(
             const arr = catStreamRichBlocks.get(effectiveMsg.catId) ?? [];
             arr.push(parsed.block);
             catStreamRichBlocks.set(effectiveMsg.catId, arr);
+          }
+          // F153: Accumulate invocation tokens for route aggregate
+          if (parsed.type === 'invocation_usage' && parsed.usage) {
+            routeTotalTokens += (parsed.usage.inputTokens ?? 0) + (parsed.usage.outputTokens ?? 0);
           }
         } catch {
           /* ignore parse errors */
@@ -1086,6 +1097,14 @@ export async function* routeParallel(
       yield { ...msg, isFinal };
       if (isFinal) yieldedFinalDone = true;
     }
+  }
+
+  // F153: Set route aggregate attributes on the parent route span
+  if (options.routeSpan) {
+    options.routeSpan.setAttribute(ROUTE_TOTAL_CATS_INVOKED, completedCount);
+    options.routeSpan.setAttribute(ROUTE_TOTAL_TOKENS, routeTotalTokens);
+    // Parallel routes never produce A2A handoffs (MVP safety boundary)
+    options.routeSpan.setAttribute(ROUTE_HAS_A2A_HANDOFF, false);
   }
 
   // done-guarantee safety net: synthesize final done if loop exited without one

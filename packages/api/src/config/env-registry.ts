@@ -1505,6 +1505,20 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'telemetry',
     sensitive: false,
   },
+  {
+    name: 'PROMPT_CAPTURE',
+    defaultValue: 'off',
+    description: 'Prompt X-Ray 开关（on=启用 canonical prompt 捕获）',
+    category: 'telemetry',
+    sensitive: false,
+  },
+  {
+    name: 'PROMPT_CAPTURE_CATS',
+    defaultValue: '(未设置 → 全部猫)',
+    description: 'Prompt X-Ray 白名单：逗号分隔 catId（空=全部）',
+    category: 'telemetry',
+    sensitive: false,
+  },
   // --- antigravity (F061 Bridge) ---
   {
     name: 'ANTIGRAVITY_PORT',

@@ -21,9 +21,10 @@
 import type { CatId, CatRoutingError, MessageContent } from '@cat-cafe/shared';
 import { catRegistry, escapeRegExp } from '@cat-cafe/shared';
 import type { SessionStore } from '@cat-cafe/shared/utils';
-import { SpanStatusCode, trace } from '@opentelemetry/api';
+import { context as ctxApi, SpanStatusCode, trace } from '@opentelemetry/api';
 import { getDefaultCatId, isCatAvailable } from '../../../../../config/cat-config-loader.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import {
   ROUTING_INTENT,
   ROUTING_STRATEGY,
@@ -824,19 +825,35 @@ export class AgentRouter {
       persistenceContext?: PersistenceContext;
       /** F108: parentInvocationId for WorklistRegistry concurrent isolation */
       parentInvocationId?: string;
+      /** F153: caller trace context for cross-route A2A propagation */
+      callerTraceContext?: CallerTraceContext;
     },
   ): AsyncIterable<AgentMessage> {
     const cleanMessage = stripIntentTags(message);
     const strategy = intent.intent === 'ideate' && targetCats.length > 1 ? 'parallel' : 'serial';
 
-    const routeSpan = routeTracer.startSpan('cat_cafe.route', {
-      attributes: {
-        [ROUTING_TARGET_CATS]: (targetCats as string[]).join(','),
-        [ROUTING_INTENT]: intent.intent,
-        [ROUTING_STRATEGY]: strategy,
-        ...(options?.parentInvocationId ? { invocationId: options.parentInvocationId } : {}),
+    // F153: Reconstruct remote parent context for cross-route A2A trace propagation
+    const parentCtx = options?.callerTraceContext
+      ? trace.setSpanContext(ctxApi.active(), {
+          traceId: options.callerTraceContext.traceId,
+          spanId: options.callerTraceContext.spanId,
+          traceFlags: options.callerTraceContext.traceFlags,
+          isRemote: true,
+        })
+      : undefined;
+
+    const routeSpan = routeTracer.startSpan(
+      'cat_cafe.route',
+      {
+        attributes: {
+          [ROUTING_TARGET_CATS]: (targetCats as string[]).join(','),
+          [ROUTING_INTENT]: intent.intent,
+          [ROUTING_STRATEGY]: strategy,
+          ...(options?.parentInvocationId ? { invocationId: options.parentInvocationId } : {}),
+        },
       },
-    });
+      parentCtx,
+    );
 
     // Fetch thread for thinkingMode + update lastActive
     // Default to play mode when no threadStore is available: stream thinking stays isolated.

@@ -158,9 +158,9 @@ test('LocalTraceStore: combined filter (traceId + catId)', () => {
   assert.equal(results[0].attributes['agent.id'], 'ragdoll');
 });
 
-test('LocalTraceStore: default config uses 10k maxSpans and 2h maxAge', () => {
+test('LocalTraceStore: default config uses 10k maxSpans and 24h maxAge', () => {
   const store = new LocalTraceStore();
   const stats = store.stats();
   assert.equal(stats.maxSpans, 10000);
-  assert.equal(stats.maxAgeMs, 2 * 60 * 60 * 1000);
+  assert.equal(stats.maxAgeMs, 24 * 60 * 60 * 1000);
 });

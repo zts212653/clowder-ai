@@ -259,12 +259,29 @@ function TreeWaterfall({
 }
 
 function SpanDetail({ span }: { span: TraceSpan | undefined }) {
+  const [xrayOpen, setXrayOpen] = useState(false);
+
   if (!span) return null;
+
+  const invocationId = span.attributes.invocationId as string | undefined;
+  const hasInvocationId = Boolean(invocationId);
+
   return (
     <div className="rounded-lg bg-cafe-surface-elevated p-3 text-xs">
       <div className="space-y-1">
-        <div>
-          <span className="text-cafe-muted">spanId:</span> <span className="font-mono">{span.spanId}</span>
+        <div className="flex items-center justify-between">
+          <div>
+            <span className="text-cafe-muted">spanId:</span> <span className="font-mono">{span.spanId}</span>
+          </div>
+          {hasInvocationId && (
+            <button
+              type="button"
+              onClick={() => setXrayOpen(!xrayOpen)}
+              className="rounded-md bg-purple-50 px-2 py-0.5 text-[10px] font-medium text-purple-700 transition-colors hover:bg-purple-100"
+            >
+              {xrayOpen ? '✕ Close' : '🔬 X-Ray'}
+            </button>
+          )}
         </div>
         {span.parentSpanId && (
           <div>
@@ -298,6 +315,252 @@ function SpanDetail({ span }: { span: TraceSpan | undefined }) {
             ))}
           </div>
         )}
+      </div>
+      {xrayOpen && <PromptInspector invocationId={invocationId} catId={span.attributes['agent.id'] as string} />}
+    </div>
+  );
+}
+
+// ── F153: Prompt X-Ray Inspector ──────────────────────────────────
+
+interface PromptCaptureData {
+  captureId: string;
+  invocationId: string;
+  catId: string;
+  model: string;
+  capturedAt: number;
+  systemPrompt: string;
+  missionPrefix?: string;
+  userPrompt: string;
+  effectivePrompt: string;
+  injectionDecision: {
+    isResume: boolean;
+    canSkipOnResume: boolean;
+    forceReinjection: boolean;
+    injected: boolean;
+  };
+  promptBytes: number;
+  tokenEstimate: number;
+}
+
+type InspectorTab = 'system' | 'user' | 'effective' | 'meta';
+
+function PromptInspector({ invocationId, catId }: { invocationId?: string; catId?: string }) {
+  const [selected, setSelected] = useState<PromptCaptureData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<InspectorTab>('system');
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const params = new URLSearchParams();
+        if (invocationId) params.set('invocationId', invocationId);
+        const res = await apiFetch(`/api/debug/prompt-captures?${params}`);
+        if (!res.ok) {
+          setError(res.status === 404 ? 'No captures found' : `Error ${res.status}`);
+          return;
+        }
+        const index = (await res.json()) as Array<{ captureId: string; catId: string }>;
+        const matching = catId ? index.filter((e) => e.catId === catId) : index;
+        if (matching.length === 0) {
+          setError('No prompt captures for this span. Enable with PROMPT_CAPTURE=on');
+          return;
+        }
+        const detailRes = await apiFetch(`/api/debug/prompt-captures/${matching[0].captureId}`);
+        if (detailRes.ok) {
+          const data = (await detailRes.json()) as PromptCaptureData;
+          setSelected(data);
+        }
+      } catch {
+        setError('Failed to load prompt capture');
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, [invocationId, catId]);
+
+  if (loading) return <div className="mt-2 text-[10px] text-cafe-muted">Loading prompt capture...</div>;
+  if (error) return <div className="mt-2 text-[10px] text-cafe-secondary">{error}</div>;
+  if (!selected) return null;
+
+  const tabs: { key: InspectorTab; label: string; color: string }[] = [
+    { key: 'system', label: 'System', color: 'text-blue-600' },
+    { key: 'user', label: 'User', color: 'text-green-600' },
+    { key: 'effective', label: 'Full Prompt', color: 'text-purple-600' },
+    { key: 'meta', label: 'Meta', color: 'text-amber-600' },
+  ];
+
+  return (
+    <div className="mt-3 rounded-lg border border-purple-200 bg-white p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-[11px] font-medium text-purple-700">Prompt X-Ray</span>
+        <div className="flex items-center gap-2 text-[10px] text-cafe-muted">
+          <span>{selected.model}</span>
+          <span>·</span>
+          <span>{(selected.promptBytes / 1024).toFixed(1)} KB</span>
+          <span>·</span>
+          <span>~{selected.tokenEstimate} tokens</span>
+        </div>
+      </div>
+
+      <PromptTokenBar capture={selected} />
+
+      <div className="mt-2 flex gap-1 border-b border-cafe-border pb-1">
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => setTab(t.key)}
+            className={`rounded-t px-2 py-0.5 text-[10px] font-medium transition-colors ${
+              tab === t.key ? `${t.color} bg-cafe-surface-elevated` : 'text-cafe-muted hover:text-cafe-secondary'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-2 max-h-[300px] overflow-y-auto">
+        {tab === 'system' && (
+          <>
+            {!selected.injectionDecision.injected && (
+              <div className="mb-2 rounded bg-amber-50 px-2 py-1 text-[10px] text-amber-700">
+                Resume — system prompt was not injected this turn
+              </div>
+            )}
+            <PromptSection
+              content={selected.systemPrompt}
+              label={selected.injectionDecision.injected ? 'System Prompt' : 'System Prompt (not sent)'}
+            />
+          </>
+        )}
+        {tab === 'user' && (
+          <>
+            {selected.missionPrefix && (
+              <PromptSection content={selected.missionPrefix} label="Mission Prefix" className="mb-2" />
+            )}
+            <PromptSection content={selected.userPrompt} label="User Prompt" />
+          </>
+        )}
+        {tab === 'effective' && <PromptSection content={selected.effectivePrompt} label="Effective Prompt (Full)" />}
+        {tab === 'meta' && <PromptMeta capture={selected} />}
+      </div>
+    </div>
+  );
+}
+
+function PromptTokenBar({ capture }: { capture: PromptCaptureData }) {
+  const injected = capture.injectionDecision.injected;
+  const sysLen = injected ? capture.systemPrompt.length : 0;
+  const userLen = capture.userPrompt.length;
+  const missionLen = capture.missionPrefix?.length ?? 0;
+  const total = capture.effectivePrompt.length || 1;
+
+  const sysPct = (sysLen / total) * 100;
+  const missionPct = (missionLen / total) * 100;
+  const userPct = (userLen / total) * 100;
+
+  return (
+    <div>
+      <div className="flex h-2 overflow-hidden rounded-full bg-cafe-surface-elevated">
+        <div className="bg-blue-400" style={{ width: `${sysPct}%` }} title={`System: ${sysPct.toFixed(0)}%`} />
+        {missionPct > 0 && (
+          <div
+            className="bg-amber-400"
+            style={{ width: `${missionPct}%` }}
+            title={`Mission: ${missionPct.toFixed(0)}%`}
+          />
+        )}
+        <div className="bg-green-400" style={{ width: `${userPct}%` }} title={`User: ${userPct.toFixed(0)}%`} />
+      </div>
+      <div className="mt-0.5 flex gap-3 text-[9px] text-cafe-muted">
+        <span>
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-400" /> System {sysPct.toFixed(0)}%
+        </span>
+        {missionPct > 0 && (
+          <span>
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400" /> Mission {missionPct.toFixed(0)}%
+          </span>
+        )}
+        <span>
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-400" /> User {userPct.toFixed(0)}%
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function PromptSection({ content, label, className = '' }: { content: string; label: string; className?: string }) {
+  if (!content) return <div className="text-[10px] text-cafe-muted">Empty</div>;
+  return (
+    <div className={className}>
+      <div className="mb-1 text-[10px] font-medium text-cafe-muted">{label}</div>
+      <pre className="whitespace-pre-wrap break-words rounded bg-cafe-surface p-2 font-mono text-[10px] leading-relaxed text-cafe">
+        {content}
+      </pre>
+    </div>
+  );
+}
+
+function PromptMeta({ capture }: { capture: PromptCaptureData }) {
+  const { injectionDecision } = capture;
+  return (
+    <div className="space-y-2 text-[10px]">
+      <div>
+        <div className="font-medium text-cafe-muted">Capture Info</div>
+        <div className="ml-2 space-y-0.5">
+          <div>
+            <span className="text-cafe-muted">captureId:</span> <span className="font-mono">{capture.captureId}</span>
+          </div>
+          <div>
+            <span className="text-cafe-muted">invocationId:</span>{' '}
+            <span className="font-mono">{capture.invocationId}</span>
+          </div>
+          <div>
+            <span className="text-cafe-muted">catId:</span> {capture.catId}
+          </div>
+          <div>
+            <span className="text-cafe-muted">model:</span> {capture.model}
+          </div>
+          <div>
+            <span className="text-cafe-muted">captured:</span> {new Date(capture.capturedAt).toLocaleString()}
+          </div>
+        </div>
+      </div>
+      <div>
+        <div className="font-medium text-cafe-muted">Injection Decision</div>
+        <div className="ml-2 space-y-0.5">
+          <div>
+            <span className="text-cafe-muted">injected:</span>{' '}
+            <span className={injectionDecision.injected ? 'text-green-600' : 'text-red-600'}>
+              {String(injectionDecision.injected)}
+            </span>
+          </div>
+          <div>
+            <span className="text-cafe-muted">isResume:</span> {String(injectionDecision.isResume)}
+          </div>
+          <div>
+            <span className="text-cafe-muted">canSkipOnResume:</span> {String(injectionDecision.canSkipOnResume)}
+          </div>
+          <div>
+            <span className="text-cafe-muted">forceReinjection:</span> {String(injectionDecision.forceReinjection)}
+          </div>
+        </div>
+      </div>
+      <div>
+        <div className="font-medium text-cafe-muted">Size</div>
+        <div className="ml-2 space-y-0.5">
+          <div>
+            <span className="text-cafe-muted">bytes:</span> {capture.promptBytes.toLocaleString()}
+          </div>
+          <div>
+            <span className="text-cafe-muted">tokens (est):</span> ~{capture.tokenEstimate.toLocaleString()}
+          </div>
+        </div>
       </div>
     </div>
   );

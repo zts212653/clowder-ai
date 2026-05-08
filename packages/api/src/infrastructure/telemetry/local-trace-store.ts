@@ -54,7 +54,7 @@ export interface TraceQueryFilter {
 export interface LocalTraceStoreConfig {
   /** Max spans in buffer (default 10000). */
   maxSpans?: number;
-  /** Max age in ms before eviction (default 7200000 = 2h). */
+  /** Max age in ms before eviction (default 86400000 = 24h). */
   maxAgeMs?: number;
 }
 
@@ -66,8 +66,8 @@ export interface TraceStoreStats {
   newestStoredAt: number | null;
 }
 
-const DEFAULT_MAX_SPANS = 10_000;
-const DEFAULT_MAX_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
+export const LOCAL_TRACE_STORE_DEFAULT_MAX_SPANS = 10_000;
+export const LOCAL_TRACE_STORE_DEFAULT_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 export class LocalTraceStore {
   private readonly buffer: TraceSpanDTO[] = [];
@@ -75,8 +75,8 @@ export class LocalTraceStore {
   private readonly maxAgeMs: number;
 
   constructor(config?: LocalTraceStoreConfig) {
-    this.maxSpans = config?.maxSpans ?? DEFAULT_MAX_SPANS;
-    this.maxAgeMs = config?.maxAgeMs ?? DEFAULT_MAX_AGE_MS;
+    this.maxSpans = config?.maxSpans ?? LOCAL_TRACE_STORE_DEFAULT_MAX_SPANS;
+    this.maxAgeMs = config?.maxAgeMs ?? LOCAL_TRACE_STORE_DEFAULT_MAX_AGE_MS;
   }
 
   /** Add a span DTO. Evicts expired and overflow entries. */

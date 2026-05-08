@@ -21,6 +21,7 @@
 
 import type { CatId } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import type { AuthInvocationInput, IAuthInvocationBackend } from './IAuthInvocationBackend.js';
 import type { InvocationRecord, VerifyResult } from './InvocationRegistry.js';
 
@@ -162,6 +163,13 @@ function recordFromHash(fields: Record<string, string>, msgs: Set<string>): Invo
   };
   if (fields.parentInvocationId) record.parentInvocationId = fields.parentInvocationId;
   if (fields.a2aTriggerMessageId) record.a2aTriggerMessageId = fields.a2aTriggerMessageId;
+  if (fields.traceId && fields.spanId) {
+    record.traceContext = {
+      traceId: fields.traceId,
+      spanId: fields.spanId,
+      traceFlags: Number(fields.traceFlags ?? 0),
+    };
+  }
   return record;
 }
 
@@ -395,5 +403,10 @@ export class RedisAuthInvocationBackend implements IAuthInvocationBackend {
     // Returns 'OK' on first claim, null when key already exists (still cooling down).
     const result = await this.redis.set(KEY_REFRESH_COOLDOWN(invocationId), '1', 'PX', cooldownMs, 'NX');
     return result === 'OK';
+  }
+
+  async setTraceContext(invocationId: string, ctx: CallerTraceContext): Promise<void> {
+    const key = KEY_INV(invocationId);
+    await this.redis.hset(key, 'traceId', ctx.traceId, 'spanId', ctx.spanId, 'traceFlags', String(ctx.traceFlags));
   }
 }

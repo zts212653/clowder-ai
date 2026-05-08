@@ -12,17 +12,16 @@ import type { RedisClient } from '@cat-cafe/shared/utils';
 import { safeParseExtra } from '../../domains/cats/services/stores/redis/redis-message-parsers.js';
 import { MessageKeys } from '../../domains/cats/services/stores/redis-keys/message-keys.js';
 import { createModuleLogger } from '../logger.js';
-import type { LocalTraceStore, TraceSpanDTO } from './local-trace-store.js';
+import { LOCAL_TRACE_STORE_DEFAULT_MAX_AGE_MS, type LocalTraceStore, type TraceSpanDTO } from './local-trace-store.js';
 
 const log = createModuleLogger('telemetry:hydrate');
 
 const MAX_SCAN = 500;
-const DEFAULT_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 
 export async function hydrateTraceStoreFromRedis(
   traceStore: LocalTraceStore,
   redis: RedisClient,
-  maxAgeMs = DEFAULT_MAX_AGE_MS,
+  maxAgeMs = LOCAL_TRACE_STORE_DEFAULT_MAX_AGE_MS,
 ): Promise<void> {
   const cutoff = Date.now() - maxAgeMs;
 

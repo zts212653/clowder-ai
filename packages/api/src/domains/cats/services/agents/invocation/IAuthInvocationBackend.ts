@@ -10,6 +10,7 @@
  * `Promise.resolve` (negligible overhead).
  */
 
+import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import type { InvocationRecord, VerifyResult } from './InvocationRegistry.js';
 
 /** Subset of InvocationRecord fields the backend stores; expiresAt is computed by ttlMs. */
@@ -74,4 +75,7 @@ export interface IAuthInvocationBackend {
    * Implementation must be racy-safe (Redis SET NX EX, or per-key Map check).
    */
   tryClaimRefreshCooldown(invocationId: string, cooldownMs: number): Promise<boolean>;
+
+  /** F153: Persist caller trace context on an invocation for cross-route A2A propagation. */
+  setTraceContext(invocationId: string, ctx: CallerTraceContext): Promise<void>;
 }

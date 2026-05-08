@@ -259,5 +259,85 @@ for (const [name, factory] of backends) {
         assert.equal(earlyReclaim, true, 'tiny cap must evict aggressively');
       });
     }
+
+    test('F153: setTraceContext persists and is readable via getRecord', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        await backend.create(fixture('inv-tc', 'tok-tc'), 60_000);
+        await backend.setTraceContext('inv-tc', {
+          traceId: 'aaaa1111bbbb2222cccc3333dddd4444',
+          spanId: '1122334455667788',
+          traceFlags: 1,
+        });
+        const record = await backend.getRecord('inv-tc');
+        assert.ok(record, 'record must exist');
+        assert.deepEqual(record.traceContext, {
+          traceId: 'aaaa1111bbbb2222cccc3333dddd4444',
+          spanId: '1122334455667788',
+          traceFlags: 1,
+        });
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('F153: setTraceContext on unknown invocation is a no-op', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        await backend.setTraceContext('nonexistent', {
+          traceId: 'aaaa',
+          spanId: 'bbbb',
+          traceFlags: 0,
+        });
+        const record = await backend.getRecord('nonexistent');
+        assert.equal(record, null);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('F153: traceContext survives verify TTL slide', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        await backend.create(fixture('inv-slide', 'tok-slide'), 60_000);
+        await backend.setTraceContext('inv-slide', {
+          traceId: 'trace1234',
+          spanId: 'span5678',
+          traceFlags: 1,
+        });
+        const result = await backend.verify('inv-slide', 'tok-slide', 60_000);
+        assert.equal(result.ok, true);
+        assert.deepEqual(result.record.traceContext, {
+          traceId: 'trace1234',
+          spanId: 'span5678',
+          traceFlags: 1,
+        });
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('F153: peekRecord returns traceContext even after expiry', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        await backend.create(fixture('inv-peek', 'tok-peek'), 10);
+        await backend.setTraceContext('inv-peek', {
+          traceId: 'deadbeef',
+          spanId: 'cafebabe',
+          traceFlags: 0,
+        });
+        await new Promise((r) => setTimeout(r, 30));
+        const record = await backend.peekRecord('inv-peek');
+        if (record) {
+          assert.deepEqual(record.traceContext, {
+            traceId: 'deadbeef',
+            spanId: 'cafebabe',
+            traceFlags: 0,
+          });
+        }
+      } finally {
+        await cleanup();
+      }
+    });
   });
 }

@@ -13,6 +13,7 @@
  * - claimClientMessageId enforces MAX_CLIENT_MESSAGE_IDS bound per record
  */
 
+import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import type { AuthInvocationInput, IAuthInvocationBackend } from './IAuthInvocationBackend.js';
 import type { InvocationRecord, VerifyResult } from './InvocationRegistry.js';
 
@@ -190,6 +191,11 @@ export class MemoryAuthInvocationBackend implements IAuthInvocationBackend {
     if (this.latestByThreadCat.get(key) === invocationId) {
       this.latestByThreadCat.delete(key);
     }
+  }
+
+  async setTraceContext(invocationId: string, ctx: CallerTraceContext): Promise<void> {
+    const record = this.records.get(invocationId);
+    if (record) record.traceContext = ctx;
   }
 
   private cleanupExpired(): void {

@@ -13,6 +13,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { CatId } from '@cat-cafe/shared';
+import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import type { IAuthInvocationBackend } from './IAuthInvocationBackend.js';
 import { MemoryAuthInvocationBackend } from './MemoryAuthInvocationBackend.js';
 
@@ -27,6 +28,7 @@ export interface InvocationRecord {
   parentInvocationId?: string;
   /** F121: The A2A trigger message ID — the @mention message that caused this cat to be invoked */
   a2aTriggerMessageId?: string;
+  traceContext?: CallerTraceContext;
   /** In-invocation idempotency keys for callback post-message de-duplication. */
   clientMessageIds: Set<string>;
   createdAt: number;
@@ -163,6 +165,10 @@ export class InvocationRegistry {
    */
   async tryClaimRefreshCooldown(invocationId: string, cooldownMs: number): Promise<boolean> {
     return this.backend.tryClaimRefreshCooldown(invocationId, cooldownMs);
+  }
+
+  async setTraceContext(invocationId: string, ctx: CallerTraceContext): Promise<void> {
+    return this.backend.setTraceContext(invocationId, ctx);
   }
 
   /**

@@ -25,7 +25,9 @@ import { isSessionChainEnabled } from '../../../../../config/cat-config-loader.j
 import { getContextWindowFallback } from '../../../../../config/context-window-sizes.js';
 import { getSessionStrategy, shouldTakeAction } from '../../../../../config/session-strategy.js';
 import { assertSafeTestConfigRoot } from '../../../../../config/test-config-write-guard.js';
+import { capturePromptIfEnabled } from '../../../../../infrastructure/debug/prompt-capture-bridge.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import {
   AGENT_ID,
   GENAI_MODEL,
@@ -278,6 +280,8 @@ export interface InvocationParams {
   readonly a2aTriggerMessageId?: string;
   /** F153 Phase E: Parent route span — invocation span becomes its child */
   readonly routeSpan?: import('@opentelemetry/api').Span;
+  /** F153: mutable ref so caller can capture the invocation span for trace propagation */
+  readonly invocationSpanRef?: { current?: import('@opentelemetry/api').Span };
   /** #502 PR2: structured route control state to persist on threshold seal. */
   readonly continuityCapsule?: RouteStateContinuityCapsule;
 }
@@ -484,6 +488,21 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     { attributes: { [AGENT_ID]: catId, [OPERATION_NAME]: 'invoke', invocationId } },
     parentCtx,
   );
+
+  // F153: Expose invocation span to caller + persist trace context for A2A propagation
+  if (params.invocationSpanRef) params.invocationSpanRef.current = invocationSpan;
+  const sc = invocationSpan.spanContext();
+  try {
+    if (typeof deps.registry.setTraceContext === 'function') {
+      await deps.registry.setTraceContext(invocationId, {
+        traceId: sc.traceId,
+        spanId: sc.spanId,
+        traceFlags: sc.traceFlags,
+      });
+    }
+  } catch (err) {
+    log.warn({ catId, threadId, invocationId, err }, 'Trace context persistence failed, continuing invocation');
+  }
 
   try {
     // F152: Track active invocations — must be inside try so add/sub symmetry
@@ -1093,6 +1112,19 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       injectSystemPrompt && params.systemPrompt
         ? `${params.systemPrompt}\n\n---\n\n${promptWithMission}`
         : `${promptWithMission}`;
+
+    capturePromptIfEnabled({
+      catId: catId as string,
+      invocationId,
+      threadId,
+      userId,
+      model: resolvedAccount?.models?.[0] ?? 'unknown',
+      systemPrompt: params.systemPrompt ?? '',
+      missionPrefix: missionPrefix ?? undefined,
+      userPrompt: prompt,
+      effectivePrompt,
+      injectionDecision: { isResume, canSkipOnResume, forceReinjection, injected: injectSystemPrompt },
+    });
 
     // F089 Phase 2+3: Create tmux spawn override for agent-in-pane execution
     let spawnCliOverride: AgentServiceOptions['spawnCliOverride'];
