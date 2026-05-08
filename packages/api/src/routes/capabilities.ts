@@ -165,11 +165,16 @@ export function sanitizeArgsForDisplay(args: string[]): string[] {
     const eqIdx = arg.indexOf('=');
     if (eqIdx > 0) {
       const flagPart = arg.slice(0, eqIdx);
+      const valuePart = arg.slice(eqIdx + 1);
       if (isSecretFlag(flagPart) || isSecretFlag(`--${flagPart}`)) {
         result.push(`${arg.slice(0, eqIdx + 1)}••••••`);
         continue;
       }
       if (ENV_LIKE_SECRET.test(arg)) {
+        result.push(`${arg.slice(0, eqIdx + 1)}••••••`);
+        continue;
+      }
+      if (SECRET_VALUE_PATTERN.test(valuePart)) {
         result.push(`${arg.slice(0, eqIdx + 1)}••••••`);
         continue;
       }
@@ -207,6 +212,9 @@ export function sanitizeUrlForDisplay(url: string): string {
     }
     return result;
   } catch {
+    if (SECRET_VALUE_PATTERN.test(url) || /:\/\/[^@/]*@/.test(url)) {
+      return '••••••';
+    }
     return url;
   }
 }

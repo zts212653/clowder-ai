@@ -2,14 +2,13 @@
 
 // biome-ignore lint/correctness/noUnusedImports: React needed for JSX in vitest environment
 import React, { useEffect, useState } from 'react';
-import { useCatData } from '@/hooks/useCatData';
 import type { CatInvocationInfo, ContextHealthData } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
 import { BindNewSessionSection } from './BindNewSessionSection';
 import { ContextHealthBar } from './ContextHealthBar';
 import { BindSessionInput, SessionIdTag } from './SessionChainInputs';
 import { settingsResourceCardClass } from './SettingsResourceCard';
-import { deriveSessionColors, type SessionColors } from './session-chain-colors';
+import { deriveSessionColors } from './session-chain-colors';
 
 /** Minimal session record from API GET /api/threads/:id/sessions */
 interface SessionSummary {
@@ -87,7 +86,6 @@ function fmtTokens(n: number): string {
 }
 
 export function SessionChainPanel({ threadId, catInvocations, onViewSession }: SessionChainPanelProps) {
-  const { getCatById } = useCatData();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadedThreadId, setLoadedThreadId] = useState<string | null>(null);
@@ -95,10 +93,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
   const [unsealingSessionId, setUnsealingSessionId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const colorsForCat = (catId: string): SessionColors => {
-    const cat = getCatById(catId);
-    return deriveSessionColors(cat?.color?.primary, cat?.color?.secondary);
-  };
+  const sessionColors = deriveSessionColors();
 
   // Data is stale when it belongs to a different thread than the one we're viewing
   const isStale = loadedThreadId !== threadId;
@@ -217,7 +212,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
         const usage = inv?.usage ?? session.lastUsage;
         const cachePct = cachePercent(usage?.cacheReadTokens, usage?.inputTokens);
 
-        const colors = colorsForCat(session.catId);
+        const colors = sessionColors;
 
         return (
           <div key={session.id} className="mb-2">
@@ -228,8 +223,8 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
             <div
               data-testid="session-card-active"
               data-cat-id={session.catId}
-              className="console-list-card rounded-xl p-2.5"
-              style={{ boxShadow: `inset 3px 0 0 ${colors.border}, 0 4px 16px rgba(43,33,26,0.06)` }}
+              className="console-list-card session-corner-arcs rounded-xl p-2.5"
+              style={{ boxShadow: '0 4px 16px rgba(43,33,26,0.06)' }}
             >
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-1.5">
@@ -294,14 +289,14 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
           </div>
           <div className="space-y-1">
             {sealedSessions.map((session) => {
-              const sealedColors = colorsForCat(session.catId);
+              const sealedColors = sessionColors;
               return (
                 <div
                   key={session.id}
                   data-testid="session-card-sealed"
                   data-cat-id={session.catId}
-                  className="console-list-card flex items-center gap-2 rounded-xl px-2.5 py-1.5"
-                  style={{ boxShadow: `inset 2px 0 0 ${sealedColors.border}, 0 4px 16px rgba(43,33,26,0.06)` }}
+                  className="console-list-card session-corner-arcs flex items-center gap-2 rounded-xl px-2.5 py-1.5"
+                  style={{ boxShadow: '0 4px 16px rgba(43,33,26,0.06)' }}
                 >
                   <div
                     className={`flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center ${
