@@ -70,13 +70,13 @@ function CodeBlock({ children }: { children: ReactNode }) {
     <div className="relative group my-2">
       <button
         onClick={handleCopy}
-        className="absolute top-2 right-2 z-10 px-1.5 py-0.5 rounded text-[10px] bg-[var(--console-code-bg)] text-[var(--console-code-fg)] md:opacity-0 md:group-hover:opacity-100 hover:bg-[var(--console-hover-bg)] transition-opacity"
+        className="absolute top-2 right-2 z-10 px-1.5 py-0.5 rounded text-[10px] text-white/50 md:opacity-0 md:group-hover:opacity-100 hover:text-white/80 hover:bg-white/10 transition-all"
       >
         {copied ? '已复制' : '复制'}
       </button>
       <pre
         ref={preRef}
-        className="bg-[var(--console-code-bg)] text-[var(--console-code-fg)] rounded-lg p-3 overflow-x-auto text-xs leading-5 font-mono [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-inherit [&>code]:text-xs"
+        className="rounded-lg p-3 overflow-x-auto text-xs leading-5 font-mono"
       >
         {children}
       </pre>
@@ -256,7 +256,7 @@ const mdComponents: Components = {
   /* Code blocks with copy button */
   pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
   code: ({ className, children }) => (
-    <code className={`${className ?? ''} bg-[var(--console-pill-bg)]/50 rounded px-1 py-0.5 text-[0.85em] font-mono`}>
+    <code className={`${className ?? ''} rounded px-1 py-0.5 text-[0.85em] font-mono`}>
       {children}
     </code>
   ),

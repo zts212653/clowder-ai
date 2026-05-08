@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useBrakeStore } from '@/stores/brakeStore';
 import { HubIcon } from './hub-icons';
+import { SettingsResourceToggleSwitch } from './SettingsResourceCard';
 
 export function BrakeSettingsPanel() {
   const { settingsEnabled, settingsThreshold, settingsLoading, loadSettings, saveSettings } = useBrakeStore();
@@ -19,9 +20,7 @@ export function BrakeSettingsPanel() {
   const handleThresholdChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const value = Number(e.target.value);
-      // Optimistic UI update via store
       useBrakeStore.setState({ settingsThreshold: value });
-      // Debounce API save
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         saveSettings({ thresholdMinutes: value });
@@ -43,25 +42,11 @@ export function BrakeSettingsPanel() {
         <p className="text-sm text-cafe-secondary mt-1">三猫会在你连续工作一段时间后提醒你休息</p>
       </div>
 
-      <div className="console-list-card rounded-2xl p-4 space-y-4 shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
+      <div className="console-list-card rounded-2xl p-4 space-y-4 shadow-[var(--console-shadow-soft)]">
         {/* Toggle */}
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium text-cafe-secondary">启用健康守护</span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={settingsEnabled}
-            onClick={handleToggle}
-            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${
-              settingsEnabled ? 'bg-[var(--color-cafe-accent)]' : 'bg-[var(--console-pill-bg)]'
-            }`}
-          >
-            <span
-              className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-cafe-surface shadow ring-0 transition-transform duration-200 ${
-                settingsEnabled ? 'translate-x-5' : 'translate-x-0'
-              }`}
-            />
-          </button>
+          <SettingsResourceToggleSwitch enabled={settingsEnabled} onClick={handleToggle} />
         </div>
 
         {/* Threshold slider */}
@@ -77,7 +62,8 @@ export function BrakeSettingsPanel() {
             step={15}
             value={settingsThreshold}
             onChange={handleThresholdChange}
-            className="w-full accent-[var(--conn-blue-text)]"
+            className="console-range-slider w-full"
+            style={{ '--range-fill': `${((settingsThreshold - 30) / (240 - 30)) * 100}%` } as React.CSSProperties}
           />
           <div className="flex justify-between text-xs text-cafe-muted mt-0.5">
             <span>30 min</span>

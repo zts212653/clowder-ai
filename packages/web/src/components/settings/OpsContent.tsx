@@ -50,13 +50,10 @@ function OpsSubsectionContent({ subsection }: { subsection: string }) {
       return <HubLeaderboardTab />;
     case 'observability':
       return <HubObservabilityTab />;
+    case 'wellness':
+      return <BrakeSettingsPanel />;
     case 'health':
-      return (
-        <div className="space-y-6">
-          <HubGovernanceTab />
-          <BrakeSettingsPanel />
-        </div>
-      );
+      return <HubGovernanceTab />;
     case 'commands':
       return <HubCommandsTab />;
     case 'rescue':
