@@ -91,7 +91,7 @@ export function BootstrapPromptCard({
           <button
             type="button"
             onClick={onStartScan}
-            className="px-4 py-2 rounded-lg console-button-primary text-[var(--cafe-surface)] text-xs font-medium transition-colors inline-flex items-center gap-1.5"
+            className="px-4 py-2 rounded-lg console-button-primary text-xs font-medium transition-colors inline-flex items-center gap-1.5"
           >
             <PawIcon className="text-sm" />
             {isFailed ? '重试扫描' : isStale ? '更新索引' : '开始扫描'}
