@@ -76,7 +76,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
       </button>
       <pre
         ref={preRef}
-        className="bg-cafe-surface-sunken text-cafe-muted rounded-lg p-3 overflow-x-auto text-xs leading-5 font-mono [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-inherit [&>code]:text-xs"
+        className="bg-[#f3f3f3] text-[#4a4a4a] dark:bg-[#1e1e1e] dark:text-[#d4d4d4] rounded-lg p-3 overflow-x-auto text-xs leading-5 font-mono [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-inherit [&>code]:text-xs"
       >
         {children}
       </pre>
