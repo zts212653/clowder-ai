@@ -25,13 +25,13 @@ const MESSAGES: Record<1 | 2 | 3, { catId: string; nickname: string; text: strin
   ],
 };
 
-const LEVEL_STYLE: Record<1 | 2 | 3, { border: string; bg: string; title: string }> = {
-  1: { border: 'border-cafe-accent', bg: 'bg-[var(--console-card-bg,#fffdfb)]', title: '休息时间到啦！' },
-  2: { border: 'border-cafe-accent', bg: 'bg-[var(--console-card-bg,#fffdfb)]', title: '猫猫们有点担心你了！' },
-  3: { border: 'border-conn-red-ring', bg: 'bg-[var(--console-card-bg,#fffdfb)]', title: '三猫紧急拦截！' },
+const LEVEL_STYLE: Record<1 | 2 | 3, { bg: string; title: string }> = {
+  1: { bg: 'bg-[var(--console-card-bg,#fffdfb)]', title: '休息时间到啦！' },
+  2: { bg: 'bg-[var(--console-card-bg,#fffdfb)]', title: '猫猫们有点担心你了！' },
+  3: { bg: 'bg-[var(--console-card-bg,#fffdfb)]', title: '三猫紧急拦截！' },
 };
 
-const NIGHT_STYLE = { border: 'border-opus-primary/40', bg: 'bg-[var(--console-card-bg)]' };
+const NIGHT_STYLE = { bg: 'bg-[var(--console-card-bg)]' };
 
 /** Compact urgency badge for avatar corner (emoji-free) */
 const CAT_ALERT_BADGE: Record<1 | 2 | 3, string> = {
@@ -104,7 +104,6 @@ export function BrakeModal() {
 
   const style = LEVEL_STYLE[level];
   const messages = MESSAGES[level];
-  const borderClass = nightMode ? NIGHT_STYLE.border : style.border;
   const bgClass = nightMode ? NIGHT_STYLE.bg : style.bg;
   const alertBadge = CAT_ALERT_BADGE[level];
 
@@ -113,7 +112,7 @@ export function BrakeModal() {
       {/* biome-ignore lint/a11y/noStaticElementInteractions: modal content trap */}
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: Escape handled globally */}
       <div
-        className={`${bgClass} ${borderClass} border-2 rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4`}
+        className={`${bgClass} rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
