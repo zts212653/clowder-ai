@@ -224,7 +224,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
               data-testid="session-card-active"
               data-cat-id={session.catId}
               className="console-list-card session-corner-arcs rounded-xl p-2.5"
-              style={{ boxShadow: '0 4px 16px rgba(43,33,26,0.06)' }}
+              style={{ boxShadow: '0 2px 8px rgba(43,33,26,0.10), 0 0 2px rgba(43,33,26,0.06)' }}
             >
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-1.5">
@@ -296,7 +296,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                   data-testid="session-card-sealed"
                   data-cat-id={session.catId}
                   className="console-list-card session-corner-arcs flex items-center gap-2 rounded-xl px-2.5 py-1.5"
-                  style={{ boxShadow: '0 4px 16px rgba(43,33,26,0.06)' }}
+                  style={{ boxShadow: '0 2px 8px rgba(43,33,26,0.10), 0 0 2px rgba(43,33,26,0.06)' }}
                 >
                   <div
                     className={`flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center ${

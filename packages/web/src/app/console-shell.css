@@ -345,15 +345,15 @@
   border-radius: inherit;
   border: 2px solid var(--console-card-soft-bg);
   -webkit-mask-image:
-    radial-gradient(20px 20px at 0% 0%, black 80%, transparent 81%),
-    radial-gradient(20px 20px at 100% 0%, black 80%, transparent 81%),
-    radial-gradient(20px 20px at 0% 100%, black 80%, transparent 81%),
-    radial-gradient(20px 20px at 100% 100%, black 80%, transparent 81%);
+    radial-gradient(14px 14px at 0% 0%, black 80%, transparent 81%),
+    radial-gradient(14px 14px at 100% 0%, black 80%, transparent 81%),
+    radial-gradient(14px 14px at 0% 100%, black 80%, transparent 81%),
+    radial-gradient(14px 14px at 100% 100%, black 80%, transparent 81%);
   mask-image:
-    radial-gradient(20px 20px at 0% 0%, black 80%, transparent 81%),
-    radial-gradient(20px 20px at 100% 0%, black 80%, transparent 81%),
-    radial-gradient(20px 20px at 0% 100%, black 80%, transparent 81%),
-    radial-gradient(20px 20px at 100% 100%, black 80%, transparent 81%);
+    radial-gradient(14px 14px at 0% 0%, black 80%, transparent 81%),
+    radial-gradient(14px 14px at 100% 0%, black 80%, transparent 81%),
+    radial-gradient(14px 14px at 0% 100%, black 80%, transparent 81%),
+    radial-gradient(14px 14px at 100% 100%, black 80%, transparent 81%);
   pointer-events: none;
 }
 
