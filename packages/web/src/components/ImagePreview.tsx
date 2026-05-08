@@ -28,7 +28,7 @@ export function ImagePreview({ files, onRemove }: ImagePreviewProps) {
     <>
       <div className="flex gap-2 px-4 py-2 overflow-x-auto">
         {files.map((file, i) => (
-          <div key={`${file.name}-${i}`} className="relative flex-shrink-0 group">
+          <div key={`${file.name}-${i}`} className="relative flex-shrink-0">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={urls[i]}
@@ -37,12 +37,12 @@ export function ImagePreview({ files, onRemove }: ImagePreviewProps) {
               onClick={() => setLightboxIdx(i)}
             />
             <button
-              onClick={() => onRemove(i)}
-              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[var(--color-conn-red-text)] text-[var(--cafe-surface)] text-xs flex items-center justify-center"
+              onClick={(e) => { e.stopPropagation(); onRemove(i); }}
+              className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white text-[10px] leading-none flex items-center justify-center hover:bg-black/80"
               title={`移除 ${file.name}`}
               aria-label={`Remove ${file.name}`}
             >
-              x
+              ✕
             </button>
             <span className="block text-[9px] text-cafe-muted truncate w-16 mt-0.5 text-center">{file.name}</span>
           </div>
