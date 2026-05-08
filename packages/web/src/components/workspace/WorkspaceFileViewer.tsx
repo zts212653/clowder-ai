@@ -263,19 +263,19 @@ export function WorkspaceFileViewer({
       </div>
 
       {saveError && (
-        <div className="px-3 py-1.5 text-[10px] text-conn-red-text bg-conn-red-bg/20 border-b border-conn-red-ring/30">
+        <div className="px-3 py-1.5 text-caption text-conn-red-text bg-conn-red-bg/20 border-b border-conn-red-ring/30">
           {saveError}
         </div>
       )}
 
       {pendingExternalSha && (
-        <div className="px-3 py-1.5 text-[10px] text-amber-300 bg-amber-900/20 border-b border-amber-900/30 flex items-center justify-between">
+        <div className="px-3 py-1.5 text-caption text-[var(--terminal-text-warn)] bg-[var(--terminal-text-warn)]/10 border-b border-[var(--terminal-text-warn)]/15 flex items-center justify-between">
           <span>文件已被外部修改</span>
           <span className="flex gap-2">
-            <button type="button" onClick={onApplyExternalChange} className="underline hover:text-amber-200">
+            <button type="button" onClick={onApplyExternalChange} className="underline hover:opacity-80">
               重新加载
             </button>
-            <button type="button" onClick={onDismissExternalChange} className="underline hover:text-amber-200">
+            <button type="button" onClick={onDismissExternalChange} className="underline hover:opacity-80">
               忽略
             </button>
           </span>
@@ -306,7 +306,7 @@ export function WorkspaceFileViewer({
       />
 
       {file.truncated && (
-        <div className="px-3 py-1.5 text-[10px] text-conn-amber-text bg-[var(--terminal-bg)] border-t border-conn-amber-ring/30">
+        <div className="px-3 py-1.5 text-caption text-conn-amber-text bg-[var(--terminal-bg)] border-t border-conn-amber-ring/30">
           \u6587\u4EF6\u5DF2\u622A\u65AD (超过 1MB)
         </div>
       )}
@@ -336,7 +336,7 @@ function ToolbarBtn({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${active ? ac : 'text-cafe-secondary hover:text-cafe-muted hover:bg-cafe-surface/10'} ${disabled ? 'opacity-30 cursor-not-allowed' : ''}`}
+      className={`px-2 py-0.5 rounded text-caption font-medium transition-colors ${active ? ac : 'text-cafe-secondary hover:text-cafe-muted hover:bg-cafe-surface/10'} ${disabled ? 'opacity-30 cursor-not-allowed' : ''}`}
       title={title}
     >
       {children}

@@ -1,5 +1,4 @@
 export const CHAT_THREAD_ROUTE_EVENT = 'catcafe:thread-route-change';
-export const CLASSIC_WORLD_PREFIX = '/classic';
 
 export interface ThreadNavigationWindow {
   dispatchEvent: (event: Event) => boolean;
@@ -32,17 +31,6 @@ export function getThreadHref(threadId: string, prefix = ''): string {
   return `${normalizedPrefix}/thread/${encodeURIComponent(threadId)}`;
 }
 
-export function getClassicThreadHref(threadId: string): string {
-  return getThreadHref(threadId, CLASSIC_WORLD_PREFIX);
-}
-
-export function getWorldSwitchHref(pathname: string, referrerThreadId?: string): string {
-  const inClassicWorld = pathname.startsWith(CLASSIC_WORLD_PREFIX);
-  const threadId = getThreadIdFromPathname(pathname, inClassicWorld ? CLASSIC_WORLD_PREFIX : '');
-  const resolvedId = threadId !== 'default' ? threadId : (referrerThreadId ?? 'default');
-  return getThreadHref(resolvedId, inClassicWorld ? '' : CLASSIC_WORLD_PREFIX);
-}
-
 export function getThreadIdFromPathname(pathname: string, prefix = ''): string {
   const normalizedPrefix = normalizePrefix(prefix);
   if (!pathname || pathname === normalizedPrefix || pathname === `${normalizedPrefix}/`) return 'default';
@@ -63,11 +51,6 @@ export function pushThreadRouteWithHistory(
   windowObj.history.pushState({}, '', href);
   windowObj.dispatchEvent(new Event(CHAT_THREAD_ROUTE_EVENT));
   return href;
-}
-
-export function detectRoutePrefix(): string {
-  if (typeof window === 'undefined') return '';
-  return window.location.pathname.startsWith(CLASSIC_WORLD_PREFIX) ? CLASSIC_WORLD_PREFIX : '';
 }
 
 export function assignDocumentRoute(href: string, windowObj: DocumentNavigationWindow | undefined): string {

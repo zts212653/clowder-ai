@@ -9,7 +9,7 @@
   --console-border-strong: #d4c4b6;
   --console-shadow: 0 8px 32px rgba(43, 37, 32, 0.04);
   --console-shadow-soft: 0 8px 24px rgba(43, 37, 32, 0.03);
-  --console-field-bg: #f8f1ea;
+  --console-field-bg: #f0e6dc;
   --console-active-bg: #ead8cd;
   --console-hover-bg: #f0e6dc;
   --console-rail-bg: #eee6dc;
@@ -46,6 +46,16 @@
   --console-diag-val: #d89575;
   --console-status-connected: #16a34a;
   --console-status-idle: #9ca3af;
+
+  --semantic-success-bg: #f0fdf4;
+  --semantic-success-text: #15803d;
+  --semantic-warning-bg: #fff7ed;
+  --semantic-warning-text: #c2410c;
+  --semantic-error-bg: #fef2f2;
+  --semantic-error-text: #dc2626;
+  --semantic-info-bg: #f0f9ff;
+  --semantic-info-text: #0369a1;
+  --semantic-muted-text: #94a3b8;
   --terminal-bg: #1e1e24;
   --terminal-bg-deep: #16161c;
   --terminal-border: #2a2a32;
@@ -108,6 +118,16 @@
   --console-diag-val: #c48060;
   --console-status-connected: #22c55e;
   --console-status-idle: #6b7280;
+
+  --semantic-success-bg: color-mix(in srgb, #22c55e 16%, var(--console-card-bg) 84%);
+  --semantic-success-text: #4ade80;
+  --semantic-warning-bg: color-mix(in srgb, #f59e0b 14%, var(--console-card-bg) 86%);
+  --semantic-warning-text: #fbbf24;
+  --semantic-error-bg: color-mix(in srgb, #ef4444 14%, var(--console-card-bg) 86%);
+  --semantic-error-text: #f87171;
+  --semantic-info-bg: color-mix(in srgb, #0ea5e9 12%, var(--console-card-bg) 88%);
+  --semantic-info-text: #38bdf8;
+  --semantic-muted-text: #6b7280;
 }
 
 .console-shell {

@@ -14,16 +14,16 @@ export function kvToObj(pairs: KVPair[]): Record<string, string> {
 }
 
 export const formInputClass =
-  'h-11 w-full rounded-[12px] border border-transparent bg-[var(--console-field-bg)] px-[14px] text-[14px] text-cafe outline-none placeholder:text-cafe-muted transition focus:border-cafe-accent focus:ring-2 focus:ring-cafe-accent/30';
+  'h-9 w-full rounded-lg border border-transparent bg-[var(--console-field-bg)] px-3 text-compact text-cafe outline-none placeholder:text-cafe-muted transition focus:border-cafe-accent focus:ring-2 focus:ring-cafe-accent/30';
 
 export function FormSection({ children }: { children: React.ReactNode }) {
-  return <div className="space-y-2.5 rounded-[18px] p-[14px]">{children}</div>;
+  return <div className="space-y-2 rounded-xl p-3">{children}</div>;
 }
 
 export function FormItem({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-2">
-      <p className="text-[15px] font-extrabold text-cafe">{label}</p>
+      <p className="text-sm font-bold text-cafe">{label}</p>
       {children}
     </div>
   );
@@ -102,7 +102,7 @@ export function DynamicList({
       <button
         type="button"
         onClick={() => onChange([...values, ''])}
-        className="flex h-9 w-full items-center justify-center gap-2 rounded-[12px] bg-[var(--console-pill-bg)] text-[14px] font-bold text-cafe-secondary transition-colors hover:text-cafe"
+        className="flex h-8 w-full items-center justify-center gap-2 rounded-lg bg-[var(--console-pill-bg)] text-compact font-medium text-cafe-secondary transition-colors hover:text-cafe"
       >
         <PlusIcon className="h-4 w-4" />
         添加{addLabel}
@@ -159,7 +159,7 @@ export function DynamicKVList({
       <button
         type="button"
         onClick={() => onChange([...pairs, { key: '', value: '' }])}
-        className="flex h-9 w-full items-center justify-center gap-2 rounded-[12px] bg-[var(--console-panel-bg)] text-[14px] font-bold text-cafe-secondary transition-colors hover:text-cafe"
+        className="flex h-8 w-full items-center justify-center gap-2 rounded-lg bg-[var(--console-panel-bg)] text-compact font-medium text-cafe-secondary transition-colors hover:text-cafe"
       >
         <PlusIcon className="h-4 w-4" />
         添加{addLabel}

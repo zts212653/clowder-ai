@@ -210,17 +210,17 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
     : `添加账户认证 / ${isOAuth ? 'OAuth' : 'API Key'}`;
 
   const fieldInputClass =
-    'w-full rounded-[10px] border border-transparent bg-[var(--console-field-bg)] px-3 h-10 text-[13px] text-cafe outline-none placeholder:text-cafe-muted transition focus:border-cafe-accent focus:ring-2 focus:ring-cafe-accent/30';
+    'w-full rounded-lg border border-transparent bg-[var(--console-field-bg)] px-3 h-9 text-compact text-cafe outline-none placeholder:text-cafe-muted transition focus:border-cafe-accent focus:ring-2 focus:ring-cafe-accent/30';
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 px-4" onClick={handleClose}>
       <div
-        className="flex w-full max-w-[640px] flex-col overflow-hidden rounded-[28px] bg-[var(--console-card-bg)] px-7 py-6 shadow-[0_22px_48px_rgba(43,33,26,0.13)]"
+        className="flex w-full max-w-[580px] flex-col overflow-hidden rounded-2xl bg-[var(--console-card-bg)] px-6 py-4 shadow-[0_22px_48px_rgba(43,33,26,0.13)]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center gap-4">
-          <p className="text-[13px] font-extrabold text-[var(--console-modal-title)]">{titleLabel}</p>
+          <p className="text-compact font-bold text-[var(--console-modal-title)]">{titleLabel}</p>
           <div className="flex-1" />
           <button
             type="button"
@@ -234,12 +234,12 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
 
         {/* Auth type toggle */}
         <div
-          className={`mt-4 flex items-center gap-1 rounded-[14px] bg-[var(--console-field-bg)] p-1 ${isEdit ? 'opacity-50' : ''}`}
+          className={`mt-3 flex items-center gap-1 rounded-xl bg-[var(--console-field-bg)] p-1 ${isEdit ? 'opacity-50' : ''}`}
         >
           <button
             type="button"
             onClick={() => !isEdit && setAuthMode('oauth')}
-            className={`flex h-[38px] flex-1 items-center justify-center rounded-[10px] text-[13px] font-extrabold transition ${
+            className={`flex h-8 flex-1 items-center justify-center rounded-lg text-xs font-bold transition ${
               isOAuth ? 'bg-[var(--cafe-accent)] text-[var(--cafe-surface)]' : 'text-cafe-secondary hover:text-cafe'
             } ${isEdit ? 'cursor-not-allowed' : ''}`}
             disabled={isEdit}
@@ -249,7 +249,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
           <button
             type="button"
             onClick={() => !isEdit && setAuthMode('api_key')}
-            className={`flex h-[38px] flex-1 items-center justify-center rounded-[10px] text-[13px] font-extrabold transition ${
+            className={`flex h-8 flex-1 items-center justify-center rounded-lg text-xs font-bold transition ${
               !isOAuth ? 'bg-[var(--cafe-accent)] text-[var(--cafe-surface)]' : 'text-cafe-secondary hover:text-cafe'
             } ${isEdit ? 'cursor-not-allowed' : ''}`}
             disabled={isEdit}
@@ -258,10 +258,10 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
           </button>
         </div>
 
-        <div className="mt-4 space-y-[18px]" data-guide-id="accounts.create-details">
+        <div className="mt-3 space-y-3.5" data-guide-id="accounts.create-details">
           {/* 账号名称 */}
-          <div className="space-y-[7px]">
-            <label className="block text-[13px] font-extrabold text-cafe-secondary">账号名称</label>
+          <div className="space-y-1.5">
+            <label className="block text-xs font-bold text-cafe-secondary">账号名称</label>
             <input
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
@@ -272,8 +272,8 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
 
           {/* OAuth mode: Client dropdown */}
           {isOAuth && (
-            <div className="space-y-[7px]">
-              <label className="block text-[13px] font-extrabold text-cafe-secondary">Client</label>
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-cafe-secondary">Client</label>
               {initialClientId ? (
                 <p className={fieldInputClass}>{builtinClientLabel(initialClientId)}</p>
               ) : (
@@ -295,8 +295,8 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
           {/* API Key mode: Base URL + API Key */}
           {!isOAuth && (
             <>
-              <div className="space-y-[7px]">
-                <label className="block text-[13px] font-extrabold text-cafe-secondary">API 服务地址 (Base URL)</label>
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-cafe-secondary">API 服务地址 (Base URL)</label>
                 <input
                   value={baseUrl}
                   onChange={(e) => setBaseUrl(e.target.value)}
@@ -304,8 +304,8 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
                   className={fieldInputClass}
                 />
               </div>
-              <div className="space-y-[7px]">
-                <label className="block text-[13px] font-extrabold text-cafe-secondary">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-cafe-secondary">
                   API Key{isEdit && '（留空保持不变）'}
                 </label>
                 <input
@@ -324,8 +324,8 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
           )}
 
           {/* 可用模型 */}
-          <div className="space-y-[7px]">
-            <label className="block text-[13px] font-extrabold text-cafe-secondary">可用模型</label>
+          <div className="space-y-1.5">
+            <label className="block text-xs font-bold text-cafe-secondary">可用模型</label>
             <TagEditor
               tags={models}
               tone="purple"
@@ -337,7 +337,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
             />
             {(MODEL_SUGGESTIONS[initialClientId ?? clientId] ?? []).filter((m) => !models.includes(m)).length > 0 && (
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                <span className="text-[11px] text-cafe-secondary">推荐</span>
+                <span className="text-label text-cafe-secondary">推荐</span>
                 {(MODEL_SUGGESTIONS[initialClientId ?? clientId] ?? [])
                   .filter((m) => !models.includes(m))
                   .map((m) => (
@@ -345,7 +345,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
                       key={m}
                       type="button"
                       onClick={() => setModels([...models, m])}
-                      className="rounded-full bg-[var(--console-field-bg)] px-2.5 py-0.5 text-[11px] text-cafe-muted transition hover:text-cafe-accent"
+                      className="rounded-full bg-[var(--console-field-bg)] px-2.5 py-0.5 text-label text-cafe-muted transition hover:text-cafe-accent"
                     >
                       + {m}
                     </button>
@@ -355,18 +355,18 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
           </div>
 
           {/* F171: 高级配置 — collapsible env var injection */}
-          <div className="rounded-[14px] border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4">
+          <div className="rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3">
             <button
               type="button"
               onClick={() => setAdvancedOpen((v) => !v)}
-              className="flex items-center text-[14px] font-extrabold text-cafe-secondary"
+              className="flex items-center text-compact font-bold text-cafe-secondary"
             >
-              <span className="mr-1 text-[11px]">{advancedOpen ? '\u25BE' : '\u25B8'}</span>
+              <span className="mr-1 text-label">{advancedOpen ? '\u25BE' : '\u25B8'}</span>
               高级配置（可选）
             </button>
             {advancedOpen && (
               <div className="px-3 pb-3 pt-2">
-                <p className="mb-2 text-[12px] font-bold text-[var(--console-advanced-hint)]">
+                <p className="mb-2 text-xs font-bold text-[var(--console-advanced-hint)]">
                   自定义环境变量，启动 agent 时注入子进程（CAT_CAFE_ 前缀为保留变量）
                 </p>
                 <div className="space-y-1.5">
@@ -386,7 +386,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
                             : 'bg-[var(--console-field-bg)] text-cafe'
                         }`}
                       />
-                      <span className="text-[11px] font-bold text-cafe-muted">=</span>
+                      <span className="text-label font-bold text-cafe-muted">=</span>
                       <input
                         value={entry.value}
                         onChange={(e) => {
@@ -408,7 +408,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
                     </div>
                   ))}
                   {envEntries.some((e) => e.key.trim() && !isValidEnvKey(e.key.trim())) && (
-                    <p className="text-[10px] text-conn-red-text">
+                    <p className="text-caption text-conn-red-text">
                       {envEntries.some((e) => e.key.trim().startsWith('CAT_CAFE_')) ? 'CAT_CAFE_ 前缀为系统保留；' : ''}
                       变量名须以大写字母或下划线开头，仅含 A-Z、0-9、_
                     </p>
@@ -417,7 +417,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
                 <button
                   type="button"
                   onClick={() => setEnvEntries([...envEntries, { key: '', value: '' }])}
-                  className="mt-2.5 text-[13px] font-extrabold text-[var(--cafe-accent)] hover:opacity-80"
+                  className="mt-2 text-xs font-bold text-[var(--cafe-accent)] hover:opacity-80"
                 >
                   + 添加变量
                 </button>
@@ -435,7 +435,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
             data-guide-id="accounts.create-submit"
             onClick={handleSubmit}
             disabled={saving || !canSubmit}
-            className="h-8 rounded-[10px] bg-[var(--cafe-accent)] px-4 text-[13px] font-extrabold text-[var(--cafe-surface)] transition hover:bg-[var(--cafe-accent-hover)] disabled:opacity-50"
+            className="h-8 rounded-lg bg-[var(--cafe-accent)] px-4 text-xs font-bold text-[var(--cafe-surface)] transition hover:bg-[var(--cafe-accent-hover)] disabled:opacity-50"
           >
             {saving ? '保存中...' : '保存'}
           </button>

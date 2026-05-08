@@ -324,7 +324,7 @@ function CapabilityCard({
                     {item.tools.map((tool) => (
                       <li key={tool.name} className="console-card-soft rounded-[16px] px-3 py-3">
                         <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:gap-2">
-                          <code className="font-mono text-[11px] text-conn-indigo-text">{tool.name}</code>
+                          <code className="font-mono text-[11px] text-opus-primary">{tool.name}</code>
                           {tool.description && (
                             <span className="leading-6 break-words text-cafe-muted">{tool.description}</span>
                           )}
@@ -352,7 +352,7 @@ function CapabilityCard({
                     {item.triggers.map((t) => (
                       <span
                         key={t}
-                        className="console-pill inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium text-conn-indigo-text"
+                        className="console-pill inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium text-opus-primary"
                       >
                         &quot;{t}&quot;
                       </span>
@@ -475,7 +475,7 @@ function TypeBadge({ type }: { type: 'mcp' | 'skill' }) {
     <span
       className={`inline-flex items-center justify-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
         type === 'mcp'
-          ? 'border border-conn-indigo-ring bg-conn-indigo-bg text-conn-indigo-text'
+          ? 'border border-opus-light/50 bg-opus-bg text-opus-primary'
           : 'border border-conn-blue-ring bg-conn-blue-bg text-conn-blue-text'
       }`}
     >
@@ -674,8 +674,8 @@ export function FilterChips({
 
 export function SectionIconMcp() {
   return (
-    <div className="flex h-9 w-9 items-center justify-center rounded-[14px] border border-conn-indigo-ring bg-conn-indigo-bg shadow-sm">
-      <McpIcon className="h-4 w-4 text-conn-indigo-text" />
+    <div className="flex h-9 w-9 items-center justify-center rounded-[14px] border border-opus-light/50 bg-opus-bg shadow-sm">
+      <McpIcon className="h-4 w-4 text-opus-primary" />
     </div>
   );
 }

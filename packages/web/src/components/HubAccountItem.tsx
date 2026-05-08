@@ -44,7 +44,7 @@ export function HubAccountItem({ profile, busy, onDelete, onEdit }: HubAccountIt
 
   return (
     <div
-      className="flex h-24 cursor-pointer items-center gap-4 rounded-2xl bg-[var(--console-card-bg)] px-5 py-[18px] shadow-[0_12px_30px_rgba(43,33,26,0.08)] transition-shadow hover:shadow-[0_12px_30px_rgba(43,33,26,0.12)]"
+      className="flex cursor-pointer items-center gap-3 rounded-2xl bg-[var(--console-card-bg)] px-4 py-3 shadow-[0_12px_30px_rgba(43,33,26,0.08)] transition-shadow hover:shadow-[0_12px_30px_rgba(43,33,26,0.12)]"
       onClick={() => onEdit?.(profile.id)}
     >
       <svg className="h-[18px] w-[18px] shrink-0 cursor-grab text-cafe-muted" viewBox="0 0 24 24" fill="currentColor">
@@ -56,8 +56,8 @@ export function HubAccountItem({ profile, busy, onDelete, onEdit }: HubAccountIt
         <circle cx="15" cy="19" r="1.5" />
       </svg>
       <div className="min-w-0 flex-1">
-        <p className="text-[13px] font-bold text-cafe">{profile.displayName}</p>
-        <p className="mt-1 truncate text-[12px] text-cafe-secondary">{summaryText(profile)}</p>
+        <p className="text-sm font-bold text-cafe">{profile.displayName}</p>
+        <p className="mt-0.5 truncate text-xs text-cafe-secondary">{summaryText(profile)}</p>
       </div>
 
       <div className="flex shrink-0 items-center" onClick={(e) => e.stopPropagation()}>

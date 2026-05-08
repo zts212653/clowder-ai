@@ -47,14 +47,6 @@ describe('buildBackHref', () => {
   it('returns / when thread is "default"', () => {
     expect(buildBackHref('default')).toBe('/');
   });
-
-  it('preserves classic prefix when provided', () => {
-    expect(buildBackHref('thread_abc', '/classic')).toBe('/classic/thread/thread_abc');
-  });
-
-  it('returns /classic/ when thread is null with classic prefix', () => {
-    expect(buildBackHref(null, '/classic')).toBe('/classic');
-  });
 });
 
 describe('buildMemoryTabItems', () => {

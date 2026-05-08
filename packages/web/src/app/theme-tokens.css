@@ -131,6 +131,10 @@
   --border-radius-base: 16px;
   --spacing-unit: 8px;
 
+  --font-size-caption: 0.625rem;
+  --font-size-label: 0.6875rem;
+  --font-size-compact: 0.8125rem;
+
   --guide-overlay-bg: rgba(12, 16, 24, 0.62);
   --guide-cutout-ring: #d4853a;
   --guide-cutout-shadow: rgba(212, 133, 58, 0.35);

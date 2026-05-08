@@ -77,9 +77,9 @@ export function SkillsContent() {
                 >
                   <div className={settingsResourceAvatarClass}>{item.id.charAt(0).toUpperCase()}</div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-[15px] font-extrabold text-cafe">{item.id}</p>
+                    <p className="text-sm font-bold text-cafe">{item.id}</p>
                     <p className="mt-0.5 truncate text-xs text-cafe-secondary">{item.description || '—'}</p>
-                    {item.category && <p className="mt-0.5 text-[11px] text-cafe-muted">{item.category}</p>}
+                    {item.category && <p className="mt-0.5 text-label text-cafe-muted">{item.category}</p>}
                   </div>
                 </button>
                 <div className={settingsResourceActionGroupClass}>

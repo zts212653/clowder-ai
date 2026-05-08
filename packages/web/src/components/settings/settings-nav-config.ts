@@ -50,6 +50,13 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     description: '插件状态、外部集成以及安装结果。',
   },
   {
+    id: 'marketplace',
+    label: '能力市场',
+    icon: 'search',
+    color: 'var(--color-cafe-accent)',
+    description: '搜索和安装 MCP、Skill、插件等能力包。',
+  },
+  {
     id: 'voice',
     label: '语音管理',
     icon: 'mic',

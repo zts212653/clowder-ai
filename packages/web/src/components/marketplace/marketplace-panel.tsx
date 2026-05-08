@@ -1,12 +1,14 @@
 'use client';
 
 import type { MarketplaceArtifactKind } from '@cat-cafe/shared';
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMarketplaceStore } from '@/stores/marketplaceStore';
 import { HubIcon } from '../hub-icons';
 import { ArtifactCard } from './artifact-card';
 import { InstallPlanDetail } from './install-plan-detail';
 import { MarketplaceSearch } from './marketplace-search';
+
+const PAGE_SIZE = 12;
 
 function LoadingSkeleton() {
   return (
@@ -47,6 +49,37 @@ export function MarketplacePanel({
   const getInstallPlan = useMarketplaceStore((s) => s.getInstallPlan);
   const clearSelection = useMarketplaceStore((s) => s.clearSelection);
   const search = useMarketplaceStore((s) => s.search);
+  const browse = useMarketplaceStore((s) => s.browse);
+
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  // Reset visible count when results change
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [results]);
+
+  // Auto-browse on mount
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional mount-only
+  useEffect(() => {
+    if (!query && results.length === 0 && !loading) browse();
+  }, []);
+
+  // Infinite scroll via IntersectionObserver
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || visibleCount >= results.length) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setVisibleCount((n) => Math.min(n + PAGE_SIZE, results.length));
+        }
+      },
+      { rootMargin: '200px' },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [visibleCount, results.length]);
 
   const handleSelect = useCallback(
     (result: (typeof results)[number]) => {
@@ -76,6 +109,8 @@ export function MarketplacePanel({
     );
   }
 
+  const visibleResults = results.slice(0, visibleCount);
+
   return (
     <div className="space-y-4">
       <MarketplaceSearch />
@@ -85,28 +120,26 @@ export function MarketplacePanel({
       {error && (
         <div className="rounded-[20px] border border-conn-red-ring bg-conn-red-bg p-3 text-sm text-conn-red-text">
           <p>{error}</p>
-          <button onClick={handleRetry} className="mt-1 text-xs font-medium text-conn-red-text underline">
+          <button type="button" onClick={handleRetry} className="mt-1 text-xs font-medium text-conn-red-text underline">
             重试
           </button>
         </div>
       )}
 
-      {!loading && !error && query && results.length > 0 && (
-        <>
-          <p className="text-xs text-cafe-muted">找到 {results.length} 个结果</p>
-          <div className="space-y-2">
-            {results.map((r) => (
-              <ArtifactCard key={`${r.ecosystem}:${r.artifactId}`} result={r} onSelect={handleSelect} />
-            ))}
-          </div>
-        </>
+      {!loading && !error && results.length > 0 && (
+        <div className="space-y-2.5">
+          {visibleResults.map((r) => (
+            <ArtifactCard key={`${r.ecosystem}:${r.artifactId}`} result={r} onSelect={handleSelect} />
+          ))}
+          {visibleCount < results.length && <div ref={sentinelRef} className="h-1" />}
+        </div>
       )}
 
       {!loading && !error && query && results.length === 0 && (
         <div className="py-8 text-center text-sm text-cafe-muted">未找到匹配 &ldquo;{query}&rdquo; 的能力</div>
       )}
 
-      {!loading && !error && !query && (
+      {!loading && !error && !query && results.length === 0 && (
         <div className="flex flex-col items-center py-12 text-cafe-muted">
           <HubIcon name="search" className="mb-3 h-8 w-8 opacity-30" />
           <p className="text-sm">搜索关键词，发现能力</p>

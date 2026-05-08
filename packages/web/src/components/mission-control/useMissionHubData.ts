@@ -2,7 +2,7 @@
 
 import type { BacklogItem, CatId, ExternalProject, MissionHubSelfClaimScope, ThreadPhase } from '@cat-cafe/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { detectRoutePrefix, getThreadHref } from '@/components/ThreadSidebar/thread-navigation';
+import { getThreadHref } from '@/components/ThreadSidebar/thread-navigation';
 import { useChatStore } from '@/stores/chatStore';
 import { useExternalProjectStore } from '@/stores/externalProjectStore';
 import { useMissionControlStore } from '@/stores/missionControlStore';
@@ -311,7 +311,7 @@ export function useMissionHubData() {
     if (fromParam) return fromParam;
     return storeThreadId && storeThreadId !== 'default' ? storeThreadId : null;
   }, [fromParam, storeThreadId]);
-  const backHref = getThreadHref(referrerThread ?? 'default', detectRoutePrefix());
+  const backHref = getThreadHref(referrerThread ?? 'default');
 
   return {
     items,

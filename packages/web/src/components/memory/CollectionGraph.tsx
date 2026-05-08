@@ -235,7 +235,7 @@ export function CollectionGraph() {
       </form>
 
       {loading && <div className="text-sm text-cafe-secondary">Loading graph...</div>}
-      {error && <div className="text-sm text-red-500">Error: {error}</div>}
+      {error && <div className="text-sm text-[var(--semantic-error-text)]">Error: {error}</div>}
       {graph && graph.nodes.length === 0 && !loading && (
         <div className="text-sm text-cafe-secondary">No graph data for this anchor.</div>
       )}

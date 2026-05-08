@@ -131,19 +131,19 @@ export function McpConfigModal({
       }}
       data-testid="mcp-config-modal"
     >
-      <div className="flex max-h-[85vh] w-full max-w-[640px] flex-col overflow-hidden rounded-[28px] bg-[var(--console-card-bg)] px-7 py-5 shadow-[0_24px_56px_rgba(43,33,26,0.14)]">
+      <div className="flex max-h-[85vh] w-full max-w-[580px] flex-col overflow-hidden rounded-2xl bg-[var(--console-card-bg)] px-6 py-4 shadow-[0_24px_56px_rgba(43,33,26,0.14)]">
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1 space-y-2">
-            <h2 className="text-[20px] font-extrabold text-cafe">
+            <h2 className="text-lg font-bold text-cafe">
               {readOnly ? id : isEdit ? `更新 ${id}` : '连接至自定义 MCP'}
             </h2>
             {!readOnly && !isEdit && (
-              <p className="text-[13px] text-cafe-secondary">
+              <p className="text-xs text-cafe-secondary">
                 新增 STDIO MCP 使用同一浅色表单骨架；类型切换只改变字段集合。
               </p>
             )}
             {!readOnly && isHttpEdit && (
-              <p className="text-[13px] text-cafe-secondary">
+              <p className="text-xs text-cafe-secondary">
                 HTTP Stream 服务类型已固定；如需切换 MCP 服务器类型，请先卸载当前配置。
               </p>
             )}
@@ -178,17 +178,17 @@ export function McpConfigModal({
             </FormItem>
             {!isResolver && !isEdit && !readOnly && (
               <FormItem label="传输方式">
-                <div className="flex h-[46px] gap-1 rounded-[14px] bg-[var(--console-field-bg)] p-1">
+                <div className="flex h-10 gap-1 rounded-xl bg-[var(--console-field-bg)] p-1">
                   <button
                     type="button"
-                    className={`flex h-[38px] flex-1 items-center justify-center rounded-[10px] text-[13px] font-extrabold transition-colors ${transport === 'stdio' ? 'bg-[var(--cafe-accent)] text-[var(--cafe-surface)]' : 'text-cafe-secondary'}`}
+                    className={`flex h-8 flex-1 items-center justify-center rounded-lg text-xs font-bold transition-colors ${transport === 'stdio' ? 'bg-[var(--cafe-accent)] text-[var(--cafe-surface)]' : 'text-cafe-secondary'}`}
                     onClick={() => setTransport('stdio')}
                   >
                     STDIO
                   </button>
                   <button
                     type="button"
-                    className={`flex h-[38px] flex-1 items-center justify-center rounded-[10px] text-[13px] font-extrabold transition-colors ${transport === 'streamableHttp' ? 'bg-[var(--cafe-accent)] text-[var(--cafe-surface)]' : 'text-cafe-secondary'}`}
+                    className={`flex h-8 flex-1 items-center justify-center rounded-lg text-xs font-bold transition-colors ${transport === 'streamableHttp' ? 'bg-[var(--cafe-accent)] text-[var(--cafe-surface)]' : 'text-cafe-secondary'}`}
                     onClick={() => setTransport('streamableHttp')}
                   >
                     流式 HTTP
@@ -198,7 +198,7 @@ export function McpConfigModal({
             )}
             {(isEdit || readOnly) && (
               <FormItem label="传输方式">
-                <div className="flex h-[46px] items-center rounded-[14px] bg-[var(--console-field-bg)] px-[14px] text-[14px] font-extrabold text-cafe-secondary">
+                <div className="flex h-10 items-center rounded-xl bg-[var(--console-field-bg)] px-3 text-compact font-bold text-cafe-secondary">
                   {transport === 'streamableHttp' ? '流式 HTTP' : 'STDIO'}
                 </div>
               </FormItem>
@@ -260,7 +260,7 @@ export function McpConfigModal({
                       addLabel="参数"
                     />
                     {isEdit && args.every((a) => !a.trim()) && (
-                      <p className="mt-1 text-[11px] text-cafe-muted">提交时留空将保留服务器的现有参数不变</p>
+                      <p className="mt-1 text-label text-cafe-muted">提交时留空将保留服务器的现有参数不变</p>
                     )}
                   </>
                 )}
@@ -326,8 +326,8 @@ export function McpConfigModal({
                 <div className="max-h-[30vh] space-y-1 overflow-y-auto">
                   {tools.map((t) => (
                     <div key={t.name} className="rounded-[10px] bg-[var(--console-panel-bg)] px-3 py-2">
-                      <p className="text-[13px] font-bold text-cafe">{t.name}</p>
-                      {t.description && <p className="mt-0.5 text-[11px] text-cafe-muted">{t.description}</p>}
+                      <p className="text-compact font-bold text-cafe">{t.name}</p>
+                      {t.description && <p className="mt-0.5 text-label text-cafe-muted">{t.description}</p>}
                     </div>
                   ))}
                 </div>
@@ -346,7 +346,7 @@ export function McpConfigModal({
               type="button"
               onClick={handleSave}
               disabled={!id.trim() || saving}
-              className="h-[42px] rounded-[14px] bg-[var(--cafe-accent)] px-[18px] text-[15px] font-extrabold text-[var(--cafe-surface)] transition hover:bg-[var(--cafe-accent-hover)] disabled:opacity-50"
+              className="h-9 rounded-xl bg-[var(--cafe-accent)] px-4 text-sm font-bold text-[var(--cafe-surface)] transition hover:bg-[var(--cafe-accent-hover)] disabled:opacity-50"
             >
               {saving ? '保存中...' : '保存'}
             </button>
@@ -373,7 +373,7 @@ function HttpEndpointCard({
   return (
     <div className="space-y-3 rounded-[18px] p-4">
       <div className="space-y-2">
-        <p className="text-[15px] font-extrabold text-cafe">URL</p>
+        <p className="text-sm font-bold text-cafe">URL</p>
         <input
           type="text"
           value={url}
@@ -383,7 +383,7 @@ function HttpEndpointCard({
         />
       </div>
       <div className="space-y-2">
-        <p className="text-[15px] font-extrabold text-cafe">环境变量</p>
+        <p className="text-sm font-bold text-cafe">环境变量</p>
         <DynamicKVList pairs={envPairs} onChange={onEnvChange} addLabel="环境变量" />
       </div>
     </div>
@@ -393,7 +393,7 @@ function HttpEndpointCard({
 function HttpHeadersCard({ headers, onChange }: { headers: KVPair[]; onChange: (p: KVPair[]) => void }) {
   return (
     <div className="space-y-2.5 rounded-[18px] p-4">
-      <p className="text-[15px] font-extrabold text-cafe">标头</p>
+      <p className="text-sm font-bold text-cafe">标头</p>
       <DynamicKVList pairs={headers} onChange={onChange} addLabel="标头" />
     </div>
   );

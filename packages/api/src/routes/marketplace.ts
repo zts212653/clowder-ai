@@ -19,12 +19,8 @@ export const marketplaceRoutes: FastifyPluginAsync<MarketplaceRouteOptions> = as
       limit?: string;
     };
 
-    if (!q) {
-      return reply.status(400).send({ error: 'Missing required query parameter: q' });
-    }
-
     const results = await registry.search({
-      query: q,
+      query: q ?? '',
       ecosystems: ecosystems?.split(',') as MarketplaceEcosystem[] | undefined,
       trustLevels: trustLevels?.split(',') as TrustLevel[] | undefined,
       artifactKinds: artifactKinds?.split(',') as MarketplaceArtifactKind[] | undefined,

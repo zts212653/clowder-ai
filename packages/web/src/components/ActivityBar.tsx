@@ -7,7 +7,7 @@ import { usePinnedSections } from '@/hooks/usePinnedSections';
 import { HubIcon } from './hub-icons';
 import { MemoryIcon } from './icons/MemoryIcon';
 import { SETTINGS_SECTIONS } from './settings/settings-nav-config';
-import { CLASSIC_WORLD_PREFIX, getThreadIdFromPathname } from './ThreadSidebar/thread-navigation';
+import { getThreadIdFromPathname } from './ThreadSidebar/thread-navigation';
 
 const NAV_ITEMS = [
   { id: 'home', path: '/', label: '对话', match: (p: string) => p === '/' || p.startsWith('/thread/') },
@@ -182,14 +182,13 @@ export function ActivityBar({ className }: ActivityBarProps) {
 
   const handleNav = useCallback(
     (path: string) => {
-      const prefix = pathname.startsWith(CLASSIC_WORLD_PREFIX) ? CLASSIC_WORLD_PREFIX : '';
-      const threadId = getThreadIdFromPathname(pathname, prefix);
+      const threadId = getThreadIdFromPathname(pathname);
       let referrer = threadId !== 'default' ? threadId : null;
       if (!referrer && typeof window !== 'undefined') {
         referrer = new URLSearchParams(window.location.search).get('from');
       }
       if (referrer && path === '/') {
-        router.push(`${prefix}/thread/${encodeURIComponent(referrer)}`);
+        router.push(`/thread/${encodeURIComponent(referrer)}`);
       } else if (referrer) {
         const sep = path.includes('?') ? '&' : '?';
         router.push(`${path}${sep}from=${encodeURIComponent(referrer)}`);

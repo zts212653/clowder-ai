@@ -44,7 +44,7 @@ export function BootstrapPromptCard({
 
   return (
     <div data-testid="bootstrap-prompt-card" className="flex justify-center mb-3">
-      <div className="max-w-[85%] w-full rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-soft-bg)] p-5">
+      <div className="max-w-[85%] w-full rounded-xl bg-[var(--console-card-bg)] p-5 shadow-[0_4px_16px_rgba(43,33,26,0.06)]">
         <div className="flex items-center gap-4 mb-4">
           <div className="w-12 h-12 rounded-full bg-cafe-accent/10 flex items-center justify-center flex-shrink-0">
             <MemoryIcon className="w-6 h-6 text-cafe-accent" />
@@ -98,7 +98,7 @@ export function BootstrapPromptCard({
           </button>
         </div>
 
-        <p className="text-[10px] text-cafe-muted mt-3 ml-16">
+        <p className="text-caption text-cafe-muted mt-3 ml-16">
           {isFailed
             ? '扫描仅读取项目文件结构和文档，不会执行代码或修改任何文件。'
             : '选择「稍后再说」将在 7 天后再次提醒。你也可以在记忆中心手动触发扫描。'}

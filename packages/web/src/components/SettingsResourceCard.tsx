@@ -3,12 +3,12 @@ import type { ButtonHTMLAttributes, MouseEventHandler, ReactNode } from 'react';
 export const settingsResourceCardClass =
   'settings-resource-card rounded-2xl bg-[var(--console-card-bg)] shadow-[0_12px_30px_rgba(43,33,26,0.08)] transition-shadow hover:shadow-[0_12px_30px_rgba(43,33,26,0.12)]';
 
-export const settingsResourceRowClass = 'settings-resource-row flex h-24 items-center gap-4 px-5 py-[18px]';
+export const settingsResourceRowClass = 'settings-resource-row flex items-center gap-3 px-4 py-3';
 
 export const settingsResourceActionGroupClass = 'settings-resource-actions flex shrink-0 items-center gap-2.5';
 
 export const settingsResourceAvatarClass =
-  'settings-resource-avatar flex h-11 w-11 shrink-0 items-center justify-center rounded-[12px] bg-[var(--console-active-bg)] text-sm font-bold text-cafe-interactive';
+  'settings-resource-avatar flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[var(--console-active-bg)] text-xs font-bold text-cafe-interactive';
 
 function joinClasses(...classes: Array<string | false | null | undefined>): string {
   return classes.filter(Boolean).join(' ');

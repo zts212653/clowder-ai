@@ -118,7 +118,7 @@ export function PushServiceConfig({ onSaved }: { onSaved?: () => void }) {
             placeholder={configured[field.envName] ? '已设置（输入新值覆盖）' : field.placeholder}
             value={values[field.envName] ?? ''}
             onChange={(e) => setValues((prev) => ({ ...prev, [field.envName]: e.target.value }))}
-            className="console-form-input py-2 text-[13px]"
+            className="console-form-input py-2 text-compact"
             data-testid={`push-field-${field.envName}`}
           />
         </div>
@@ -139,7 +139,7 @@ export function PushServiceConfig({ onSaved }: { onSaved?: () => void }) {
           type="button"
           onClick={() => void handleGenerate()}
           disabled={generating}
-          className="console-button-secondary text-[13px] disabled:opacity-50"
+          className="console-button-secondary text-compact disabled:opacity-50"
         >
           {generating ? '生成中...' : '一键生成密钥'}
         </button>
@@ -147,7 +147,7 @@ export function PushServiceConfig({ onSaved }: { onSaved?: () => void }) {
           type="button"
           onClick={() => void handleSave()}
           disabled={saving}
-          className="console-button-primary text-[13px] disabled:opacity-50"
+          className="console-button-primary text-compact disabled:opacity-50"
         >
           {saving ? '保存中...' : '保存推送配置'}
         </button>

@@ -31,7 +31,7 @@ const LEVEL_STYLE: Record<1 | 2 | 3, { border: string; bg: string; title: string
   3: { border: 'border-conn-red-ring', bg: 'bg-[var(--console-card-bg,#fffdfb)]', title: '三猫紧急拦截！' },
 };
 
-const NIGHT_STYLE = { border: 'border-conn-purple-ring', bg: 'bg-[var(--console-card-bg)]' };
+const NIGHT_STYLE = { border: 'border-opus-primary/40', bg: 'bg-[var(--console-card-bg)]' };
 
 /** Compact urgency badge for avatar corner (emoji-free) */
 const CAT_ALERT_BADGE: Record<1 | 2 | 3, string> = {
@@ -118,7 +118,7 @@ export function BrakeModal() {
       >
         {/* Header */}
         <div className="text-center">
-          <h2 className={`text-lg font-bold ${nightMode ? 'text-conn-sky-text' : ''}`}>
+          <h2 className={`text-lg font-bold ${nightMode ? 'text-opus-light' : ''}`}>
             {nightMode ? '深夜了，猫猫们想你休息' : style.title}
           </h2>
           <p className="text-sm text-cafe-secondary mt-1">已专注工作 {activeMinutes} 分钟</p>

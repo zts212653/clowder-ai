@@ -2,7 +2,7 @@
 
 import type { BacklogItem, CatId } from '@cat-cafe/shared';
 import Link from 'next/link';
-import { detectRoutePrefix, getThreadHref } from '@/components/ThreadSidebar/thread-navigation';
+import { getThreadHref } from '@/components/ThreadSidebar/thread-navigation';
 import { extractFeatureId } from './FeatureBirdEyePanel';
 
 interface ThreadSituationSummary {
@@ -112,7 +112,7 @@ export function ThreadSituationPanel({
                     参与猫：{t.participants.length > 0 ? t.participants.join(', ') : '暂无'}
                   </p>
                   <Link
-                    href={getThreadHref(t.id, detectRoutePrefix())}
+                    href={getThreadHref(t.id)}
                     className="mt-1 inline-flex text-[11px] font-medium text-conn-sky-text underline-offset-2 hover:underline"
                     data-testid={`mc-thread-situation-link-${item.id}-${t.id}`}
                   >

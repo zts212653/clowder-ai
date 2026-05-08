@@ -2,7 +2,7 @@
 
 import type { BacklogItem, BacklogStatus, CatId } from '@cat-cafe/shared';
 import { useMemo, useState } from 'react';
-import { detectRoutePrefix, getThreadHref } from '@/components/ThreadSidebar/thread-navigation';
+import { getThreadHref } from '@/components/ThreadSidebar/thread-navigation';
 import { useFeatureDocDetail } from '../../hooks/useFeatureDocDetail';
 import { extractFeatureId } from './FeatureBirdEyePanel';
 import { FeatureProgressPanel } from './FeatureProgressPanel';
@@ -331,7 +331,7 @@ function FeatureRow({
                     return (
                       <a
                         key={thread.id}
-                        href={getThreadHref(thread.id, detectRoutePrefix())}
+                        href={getThreadHref(thread.id)}
                         className="flex items-center gap-1.5 rounded-lg bg-[var(--console-pill-bg)] px-2.5 py-1.5 text-xs text-cafe-secondary transition-colors hover:bg-[var(--console-pill-bg)]"
                       >
                         <svg
@@ -354,7 +354,7 @@ function FeatureRow({
                   titleMatchedThreads.map((t) => (
                     <a
                       key={t.id}
-                      href={getThreadHref(t.id, detectRoutePrefix())}
+                      href={getThreadHref(t.id)}
                       className="flex items-center gap-1.5 rounded-lg bg-[var(--console-pill-bg)] px-2.5 py-1.5 text-xs text-cafe-secondary transition-colors hover:bg-[var(--console-pill-bg)]"
                     >
                       <svg

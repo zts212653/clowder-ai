@@ -324,7 +324,7 @@ export function MarkdownContent({ content, className, disableCommandPrefix, base
 
   return (
     <div className={`markdown-content text-sm break-words ${className ?? ''}`}>
-      {cmdMatch && <span className="font-semibold text-conn-sky-text">{cmdMatch[1]}</span>}
+      {cmdMatch && <span className="font-semibold text-cocreator-primary">{cmdMatch[1]}</span>}
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>
         {md}
       </ReactMarkdown>

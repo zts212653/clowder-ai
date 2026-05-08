@@ -111,13 +111,13 @@ export function PluginsContent() {
                   <HubIcon name={plugin.icon} className="h-5 w-5 text-[var(--cafe-surface)]" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[15px] font-extrabold text-cafe">{plugin.name}</p>
+                  <p className="text-sm font-bold text-cafe">{plugin.name}</p>
                   <p className="mt-0.5 text-xs text-cafe-secondary">{plugin.description}</p>
-                  <p className="mt-0.5 text-[11px] text-cafe-muted">扩展服务 · 在「系统」标签管理</p>
+                  <p className="mt-0.5 text-label text-cafe-muted">扩展服务 · 在「系统」标签管理</p>
                 </div>
                 <div className={settingsResourceActionGroupClass}>
                   <span
-                    className={`flex-shrink-0 rounded-[13px] px-2.5 py-0.5 text-[11px] font-medium ${badge.bg} ${badge.text}`}
+                    className={`flex-shrink-0 rounded-[13px] px-2.5 py-0.5 text-label font-medium ${badge.bg} ${badge.text}`}
                   >
                     {plugin.statusLabel}
                   </span>
@@ -133,13 +133,13 @@ export function PluginsContent() {
                   <HubIcon name={plugin.icon} className="h-5 w-5 text-[var(--cafe-surface)]" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[15px] font-extrabold text-cafe">{plugin.name}</p>
+                  <p className="text-sm font-bold text-cafe">{plugin.name}</p>
                   <p className="mt-0.5 text-xs text-cafe-secondary">{plugin.description}</p>
-                  <p className="mt-0.5 text-[11px] text-cafe-muted">内置插件</p>
+                  <p className="mt-0.5 text-label text-cafe-muted">内置插件</p>
                 </div>
                 <div className={settingsResourceActionGroupClass}>
                   <span
-                    className={`flex-shrink-0 rounded-[13px] px-2.5 py-0.5 text-[11px] font-medium ${badge.bg} ${badge.text}`}
+                    className={`flex-shrink-0 rounded-[13px] px-2.5 py-0.5 text-label font-medium ${badge.bg} ${badge.text}`}
                   >
                     {plugin.statusLabel}
                   </span>

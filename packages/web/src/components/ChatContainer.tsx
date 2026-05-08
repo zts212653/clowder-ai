@@ -63,7 +63,7 @@ import { SplitPaneView } from './SplitPaneView';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { ThreadExecutionBar } from './ThreadExecutionBar';
 import { ThreadSidebar } from './ThreadSidebar';
-import { detectRoutePrefix, pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
+import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { VoteActiveBar } from './VoteActiveBar';
 import { type VoteConfig, VoteConfigModal } from './VoteConfigModal';
 import { WorkspacePanel } from './WorkspacePanel';
@@ -767,7 +767,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         <div className="md:hidden">
           <div className="fixed inset-0 bg-black/30 z-20" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
           <div className="fixed inset-y-0 left-0 z-30 flex-shrink-0" style={{ width: sidebarWidth }}>
-            <ThreadSidebar onClose={() => setSidebarOpen(false)} className="w-full" routePrefix={detectRoutePrefix()} />
+            <ThreadSidebar onClose={() => setSidebarOpen(false)} className="w-full" />
           </div>
         </div>
       )}

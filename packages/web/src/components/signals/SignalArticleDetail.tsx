@@ -6,7 +6,7 @@ import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { apiFetch } from '@/utils/api-client';
 import type { SignalArticleDetail } from '@/utils/signals-api';
 import { fetchStudyMeta, linkSignalThread, unlinkSignalThread } from '@/utils/signals-api';
-import { detectRoutePrefix, getThreadHref } from '../ThreadSidebar/thread-navigation';
+import { getThreadHref } from '../ThreadSidebar/thread-navigation';
 import { SignalTierBadge } from './SignalTierBadge';
 import { StudyFoldArea } from './StudyFoldArea';
 
@@ -162,7 +162,7 @@ export function SignalArticleDetail({
       if (!res.ok) return;
       const data = (await res.json()) as { threadId: string };
       const query = new URLSearchParams({ signal: article.id, source: article.source });
-      router.push(`${getThreadHref(data.threadId, detectRoutePrefix())}?${query.toString()}`);
+      router.push(`${getThreadHref(data.threadId)}?${query.toString()}`);
     } finally {
       setDiscussLoading(false);
     }

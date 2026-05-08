@@ -12,7 +12,7 @@ import { HubEnvFilesTab } from '../HubEnvFilesTab';
 import { PushSettingsPanel } from '../PushSettingsPanel';
 import { useConfirm } from '../useConfirm';
 import { VoiceSettingsPanel } from '../VoiceSettingsPanel';
-import { ConsoleSetupState, resolveConsoleSetupState } from './console-setup-state';
+import { MarketplaceContent } from './MarketplaceContent';
 import { McpManageContent } from './McpManageContent';
 import { OpsContent } from './OpsContent';
 import { PluginsContent } from './PluginsContent';
@@ -111,17 +111,17 @@ export function SettingsContent({ section }: SettingsContentProps) {
     [confirm, fetchData, refresh],
   );
 
-  const setupState = resolveConsoleSetupState(section, fetchError);
   const meta = SETTINGS_SECTIONS.find((s) => s.id === section) ?? SETTINGS_SECTIONS[0];
 
   if (section === 'im') return <HubConnectorConfigTab />;
   if (section === 'skills') return <SkillsContent />;
   if (section === 'mcp') return <McpManageContent />;
+  if (section === 'marketplace') return <MarketplaceContent />;
 
   const sectionContent = (() => {
     switch (section) {
       case 'members':
-        if (setupState) return <ConsoleSetupState {...setupState} />;
+        if (fetchError) return <p className="text-sm text-[var(--semantic-error-text)]">{fetchError}</p>;
         return config ? (
           <CatOverviewTab
             config={config}
@@ -159,7 +159,7 @@ export function SettingsContent({ section }: SettingsContentProps) {
           </div>
         );
       case 'system':
-        if (setupState) return <ConsoleSetupState {...setupState} />;
+        if (fetchError) return <p className="text-sm text-[var(--semantic-error-text)]">{fetchError}</p>;
         return <HubEnvFilesTab excludeCategories={['connector']} />;
       case 'rules':
         return <RulesPromptsContent />;

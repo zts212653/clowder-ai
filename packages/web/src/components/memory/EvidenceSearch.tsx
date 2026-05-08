@@ -226,7 +226,7 @@ export function EvidenceSearch({ initialQuery }: EvidenceSearchProps = {}) {
           <option value="project">维度: 项目</option>
           <option value="global">维度: 全局</option>
         </select>
-        {depth === 'raw' && <span className="text-[11px] text-conn-amber-text">消息级仅支持精确匹配</span>}
+        {depth === 'raw' && <span className="text-label text-conn-amber-text">消息级仅支持精确匹配</span>}
       </form>
 
       {/* Error */}
@@ -238,13 +238,13 @@ export function EvidenceSearch({ initialQuery }: EvidenceSearchProps = {}) {
           <div key={item.anchor} className="rounded-xl bg-[var(--console-card-bg)] p-3">
             <div className="flex items-center gap-2 min-w-0">
               <span
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${SOURCE_TYPE_COLORS[item.sourceType] ?? SOURCE_TYPE_COLORS.commit}`}
+                className={`rounded px-1.5 py-0.5 text-caption font-semibold ${SOURCE_TYPE_COLORS[item.sourceType] ?? SOURCE_TYPE_COLORS.commit}`}
               >
                 {SOURCE_TYPE_LABELS[item.sourceType] ?? item.sourceType}
               </span>
               {item.source && (
                 <span
-                  className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${item.source === 'project' ? 'bg-[var(--console-active-bg)] text-cafe' : 'bg-conn-emerald-bg text-conn-emerald-text'}`}
+                  className={`rounded px-1.5 py-0.5 text-caption font-semibold ${item.source === 'project' ? 'bg-opus-bg text-opus-dark border border-opus-light/30' : 'bg-[var(--semantic-info-bg)] text-[var(--semantic-info-text)] border border-[var(--semantic-info-text)]/20'}`}
                 >
                   {item.source === 'project' ? '项目' : '全局'}
                 </span>
@@ -269,7 +269,7 @@ export function EvidenceSearch({ initialQuery }: EvidenceSearchProps = {}) {
                     {p.speaker && <span className="font-medium text-cafe-black">{p.speaker}: </span>}
                     <span className="italic">{p.content}</span>
                     {p.createdAt && (
-                      <span className="ml-1 text-[10px] text-cafe-secondary/60">
+                      <span className="ml-1 text-caption text-cafe-secondary/60">
                         {new Date(p.createdAt).toLocaleString('zh-CN', {
                           month: 'short',
                           day: 'numeric',
@@ -281,7 +281,7 @@ export function EvidenceSearch({ initialQuery }: EvidenceSearchProps = {}) {
                     {p.context && p.context.length > 0 && (
                       <div className="ml-3 mt-0.5 space-y-0.5 border-l border-[var(--console-border-soft)] pl-2">
                         {p.context.map((ctx) => (
-                          <div key={ctx.passageId} className="text-[11px] text-cafe-secondary/70">
+                          <div key={ctx.passageId} className="text-label text-cafe-secondary/70">
                             {ctx.speaker && <span className="font-medium">{ctx.speaker}: </span>}
                             <span>{ctx.content}</span>
                           </div>

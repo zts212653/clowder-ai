@@ -60,7 +60,7 @@ export function AuditExplorerPanel({
         type="button"
         data-testid="audit-explorer-header"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center justify-between text-[11px] font-bold text-cafe-secondary hover:text-cafe"
+        className="flex w-full items-center justify-between text-[11px] font-bold text-cafe hover:text-cafe-secondary"
       >
         <span>审计 & Session</span>
         <svg
@@ -75,7 +75,7 @@ export function AuditExplorerPanel({
       </button>
 
       {expanded && (
-        <div className="mt-2">
+        <div className="p-2.5">
           {/* Tab bar */}
           <div className="mb-2 flex border-b border-[var(--console-border-soft)]">
             {(['events', 'session', 'search'] as const).map((t) => (

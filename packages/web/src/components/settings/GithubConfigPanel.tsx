@@ -101,7 +101,7 @@ export function GithubConfigPanel() {
                 }
                 value={values[field.envName] ?? ''}
                 onChange={(e) => setValues((prev) => ({ ...prev, [field.envName]: e.target.value }))}
-                className="console-form-input py-2.5 text-[13px]"
+                className="console-form-input py-2.5 text-compact"
                 data-testid={`field-${field.envName}`}
               />
             </div>
@@ -122,7 +122,7 @@ export function GithubConfigPanel() {
               type="button"
               onClick={() => void handleSave()}
               disabled={saving}
-              className="console-button-primary text-[13px] disabled:opacity-50"
+              className="console-button-primary text-compact disabled:opacity-50"
             >
               {saving ? '保存中...' : '保存 GitHub 配置'}
             </button>

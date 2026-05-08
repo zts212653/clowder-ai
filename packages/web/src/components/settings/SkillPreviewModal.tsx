@@ -106,7 +106,7 @@ export function SkillPreviewModal({
           </button>
         </div>
 
-        {description && <p className="mt-3 text-[13px] leading-[1.4] text-cafe-secondary">{description}</p>}
+        {description && <p className="mt-3 text-compact leading-[1.4] text-cafe-secondary">{description}</p>}
         {skillPath && (
           <p className="mt-1.5 truncate text-[11px] font-mono text-cafe-muted" title={skillPath}>
             {skillPath}

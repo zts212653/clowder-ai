@@ -4,6 +4,11 @@ module.exports = {
   content: ['./src/**/*.{js,ts,jsx,tsx,mdx}', '../shared/src/**/*.{js,ts}'],
   theme: {
     extend: {
+      fontSize: {
+        caption: 'var(--font-size-caption)',
+        label: 'var(--font-size-label)',
+        compact: 'var(--font-size-compact)',
+      },
       colors: {
         opus: {
           primary: 'var(--color-opus-primary)',

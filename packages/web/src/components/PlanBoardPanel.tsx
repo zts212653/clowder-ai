@@ -5,6 +5,7 @@ import { formatCatName, useCatData } from '@/hooks/useCatData';
 import { useSendMessage } from '@/hooks/useSendMessage';
 import type { CatInvocationInfo } from '@/stores/chatStore';
 import { buildContinueMessage } from '@/utils/taskProgressContinue';
+import { settingsResourceCardClass } from './SettingsResourceCard';
 import { useConfirm } from './useConfirm';
 
 export interface PlanBoardPanelProps {
@@ -89,7 +90,7 @@ function PlanCard({ catId, threadId, inv }: { catId: string; threadId: string; i
           <span className="text-[10px] text-cafe-muted">
             {completed}/{tasks.length}
           </span>
-          {statusLabel && <span className={`text-[9px] px-1 py-0.5 rounded ${statusTone}`}>{statusLabel}</span>}
+          {statusLabel && <span className={`text-[10px] px-1 py-0.5 rounded ${statusTone}`}>{statusLabel}</span>}
         </div>
         {status === 'interrupted' && (
           <button
@@ -163,11 +164,11 @@ export function PlanBoardPanel({ threadId, catInvocations }: PlanBoardPanelProps
   if (totalCats === 0) return null;
 
   return (
-    <section className="rounded-[10px] bg-[var(--console-card-bg)] p-2.5">
+    <section className={`${settingsResourceCardClass} p-2.5`}>
       <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-[11px] font-bold text-cafe-secondary">猫猫祟祟 ({totalCats})</h3>
+        <h3 className="text-[11px] font-bold text-cafe">猫猫祟祟</h3>
+        <span className="text-[10px] font-bold text-cafe-muted">{totalCats}</span>
       </div>
-
       {/* Running cats */}
       {runningCats.map(([catId, inv]) => (
         <PlanCard key={catId} catId={catId} threadId={threadId} inv={inv} />

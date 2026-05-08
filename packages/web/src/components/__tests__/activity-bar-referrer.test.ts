@@ -2,12 +2,11 @@ import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getThreadIdFromPathname, getWorldSwitchHref } = vi.hoisted(() => ({
+const { getThreadIdFromPathname } = vi.hoisted(() => ({
   getThreadIdFromPathname: vi.fn((pathname: string) => {
     const match = pathname.match(/^\/thread\/([^/?#]+)/);
     return match ? decodeURIComponent(match[1]) : 'default';
   }),
-  getWorldSwitchHref: vi.fn(() => '/classic'),
 }));
 
 const mockPush = vi.fn();
@@ -26,9 +25,7 @@ vi.mock('next/navigation', () => ({
 }));
 
 vi.mock('@/components/ThreadSidebar/thread-navigation', () => ({
-  CLASSIC_WORLD_PREFIX: '/classic',
   getThreadIdFromPathname,
-  getWorldSwitchHref,
 }));
 
 vi.mock('@/components/icons/MemoryIcon', () => ({

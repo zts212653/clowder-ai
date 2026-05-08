@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 import { ActivityBar } from './ActivityBar';
 import { ThreadSidebar } from './ThreadSidebar';
-import { detectRoutePrefix } from './ThreadSidebar/thread-navigation';
+
 
 const CHROMELESS_ROUTES = ['/story-export', '/pixel-brawl', '/showcase'];
 
@@ -32,7 +32,7 @@ export function AppShell({ children }: AppShellProps) {
       {!hideThreadSidebar && (
         <Suspense fallback={<div className="hidden md:block w-[260px] flex-shrink-0" aria-hidden="true" />}>
           <div className="hidden md:block w-[260px] flex-shrink-0">
-            <ThreadSidebar className="w-full h-full" routePrefix={detectRoutePrefix()} />
+            <ThreadSidebar className="w-full h-full" />
           </div>
         </Suspense>
       )}

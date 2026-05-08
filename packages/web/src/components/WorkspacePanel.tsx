@@ -391,7 +391,7 @@ export function WorkspacePanel() {
   return (
     <aside
       ref={panelRef}
-      className="hidden lg:flex flex-1 min-w-0 bg-[var(--console-shell-bg)] flex-col overflow-hidden animate-slide-in-right"
+      className="hidden lg:flex flex-1 min-w-0 border-l border-cafe bg-cafe-surface flex-col overflow-hidden animate-slide-in-right"
     >
       {/* ── Focus mode overlay ── */}
       {focusedPane === 'browser' && workspaceMode === 'dev' && viewMode === 'browser' ? (
@@ -456,7 +456,7 @@ export function WorkspacePanel() {
       ) : (
         <>
           {/* Header */}
-          <div className="px-3 py-2.5 border-b border-[var(--console-border-soft)] flex items-center justify-between bg-[var(--console-shell-bg)]">
+          <div className="px-3 py-2.5 border-b border-cafe flex items-center justify-between bg-cafe-surface">
             <div className="flex items-center gap-2 min-w-0">
               <MenuIcon />
               <span className="text-sm font-semibold text-cafe-black">Workspace</span>

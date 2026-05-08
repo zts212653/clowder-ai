@@ -27,7 +27,6 @@ import { useScrollAnchor } from './use-scroll-anchor';
 interface ThreadSidebarProps {
   onClose?: () => void;
   className?: string;
-  routePrefix?: string;
 }
 
 function notifyThreadCreateFailure(message: string) {
@@ -39,7 +38,7 @@ function notifyThreadCreateFailure(message: string) {
   });
 }
 
-export function ThreadSidebar({ onClose, className, routePrefix = '' }: ThreadSidebarProps) {
+export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   const {
     threads,
     currentThreadId,
@@ -170,9 +169,9 @@ export function ThreadSidebar({ onClose, className, routePrefix = '' }: ThreadSi
 
   const navigateToThread = useCallback(
     (threadId: string) => {
-      pushThreadRouteWithHistory(threadId, typeof window !== 'undefined' ? window : undefined, routePrefix);
+      pushThreadRouteWithHistory(threadId, typeof window !== 'undefined' ? window : undefined);
     },
-    [routePrefix],
+    [],
   );
 
   const createInProject = useCallback(

@@ -285,8 +285,7 @@ function RevealWhispersButton({ threadId }: { threadId: string }) {
 }
 
 const LOGS_DIR = 'packages/api/data/logs/api';
-const INSPECTOR_CARD = `${settingsResourceCardClass} p-2.5`;
-const INSPECTOR_CARD_COLLAPSED = `${settingsResourceCardClass} h-9 px-2.5 flex items-center`;
+const SIDEBAR_CARD = settingsResourceCardClass;
 
 function parseLogFilename(name: string): { date: string; seq: number } | null {
   const m = name.match(/^api\.(\d{4}-\d{2}-\d{2})\.(\d+)\.log$/);
@@ -338,11 +337,11 @@ function RuntimeLogsButton() {
   }, [setRevealPath, setOpenFile]);
 
   return (
-    <section className={`${INSPECTOR_CARD_COLLAPSED} justify-between`}>
+    <section className={`${SIDEBAR_CARD} flex items-center justify-between px-3 py-2`}>
       <h3 className="text-[11px] font-bold text-cafe-secondary">运行日志</h3>
       <button
         onClick={handleClick}
-        className="text-[9px] font-bold text-cafe-secondary transition-colors hover:text-cafe"
+        className="text-[11px] font-bold text-cafe-secondary transition-colors hover:text-cafe"
         title="在 Workspace 面板中打开运行日志目录"
       >
         查看日志
@@ -388,12 +387,12 @@ export function RightStatusPanel({
 
   return (
     <aside
-      className="hidden lg:flex flex-col gap-2 overflow-y-auto px-4 py-[18px]"
+      className="hidden lg:flex flex-col gap-3 overflow-y-auto px-4 py-[18px]"
       data-console-panel="status"
       style={{
         width: width ?? 304,
         flexShrink: 0,
-        background: 'var(--console-panel-bg)',
+        background: 'var(--console-shell-bg)',
       }}
     >
       <div className="px-0.5 pb-1">
@@ -401,17 +400,17 @@ export function RightStatusPanel({
         <span className="text-[10px] text-cafe-secondary">当前模式：{modeLabel(intentMode)}</span>
       </div>
 
-      <section className={`${INSPECTOR_CARD} flex flex-col gap-2`}>
-        <h3 className="text-[11px] font-bold text-cafe-secondary">猫猫状态</h3>
-        {activeCats.length > 0 ? (
-          <div className="space-y-2">
-            {activeCats.map((catId) => {
+      <section className={`${SIDEBAR_CARD} p-2.5`}>
+        <h3 className="text-[11px] font-bold text-cafe mb-2">猫猫状态</h3>
+        <div className="space-y-2">
+          {activeCats.length > 0 ? (
+            activeCats.map((catId) => {
               const cat = getCatById(catId);
               const dotColor = cat?.color.primary ?? 'var(--console-cat-fallback)';
               const status = catStatuses[catId] ?? 'pending';
               const inv = catInvocations[catId];
               return (
-                <div key={catId}>
+                <div key={catId} className="console-list-card rounded-xl p-2 shadow-[0_4px_16px_rgba(43,33,26,0.06)]">
                   <div className="flex items-center justify-between mb-1">
                     <div className="flex items-center gap-2">
                       <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: dotColor }} />
@@ -422,18 +421,18 @@ export function RightStatusPanel({
                   {inv && <CatInvocationCard catId={catId} inv={inv} onCopy={copyText} isActive />}
                 </div>
               );
-            })}
-          </div>
-        ) : (
-          <div className="text-[11px] text-cafe-secondary">空闲</div>
-        )}
+            })
+          ) : (
+            <div className="text-[11px] text-cafe-secondary">空闲</div>
+          )}
+        </div>
       </section>
 
       {historyCats.length > 0 && (
-        <section className={historyOpen ? INSPECTOR_CARD : INSPECTOR_CARD_COLLAPSED}>
+        <section className={`${SIDEBAR_CARD} p-2.5`}>
           <button
             onClick={() => setHistoryOpen((v) => !v)}
-            className="flex w-full items-center justify-between text-[11px] font-bold text-cafe-secondary hover:text-cafe"
+            className="flex w-full items-center justify-between text-[11px] font-bold text-cafe hover:text-cafe-secondary"
           >
             <span>历史参与 ({historyCats.length})</span>
             <svg
@@ -447,7 +446,7 @@ export function RightStatusPanel({
             </svg>
           </button>
           {historyOpen && (
-            <div className="mt-2 space-y-2">
+            <div className="p-2.5 space-y-2">
               {historyCats.map((catId) => {
                 const inv = catInvocations[catId];
                 if (!inv) {
@@ -469,9 +468,9 @@ export function RightStatusPanel({
         </section>
       )}
 
-      <section className={`${INSPECTOR_CARD} flex flex-col gap-1 p-[9px]`}>
-        <h3 className="text-[11px] font-bold text-cafe-secondary">消息统计</h3>
-        <div className="text-[9px] text-cafe-secondary space-y-0.5">
+      <section className={`${SIDEBAR_CARD} p-2.5`}>
+        <h3 className="text-[11px] font-bold text-cafe mb-2">消息统计</h3>
+        <div className="console-list-card rounded-xl p-2.5 shadow-[0_4px_16px_rgba(43,33,26,0.06)] text-[11px] text-cafe-secondary space-y-1">
           <div>
             总数 {messageSummary.total} 猫猫消息 {messageSummary.assistant}
           </div>
@@ -490,9 +489,9 @@ export function RightStatusPanel({
         onViewSession={(id, catId) => setViewSession({ id, catId })}
       />
 
-      <section className={`${INSPECTOR_CARD} flex flex-col gap-1 p-[9px]`}>
-        <h3 className="text-[11px] font-bold text-cafe-secondary">对话信息</h3>
-        <div className="text-[8px] text-cafe-secondary space-y-0.5">
+      <section className={`${SIDEBAR_CARD} p-2.5`}>
+        <h3 className="text-[11px] font-bold text-cafe mb-2">对话信息</h3>
+        <div className="console-list-card rounded-xl p-2.5 shadow-[0_4px_16px_rgba(43,33,26,0.06)] text-[11px] text-cafe-secondary space-y-1.5">
           <div>
             Thread:{' '}
             <button
