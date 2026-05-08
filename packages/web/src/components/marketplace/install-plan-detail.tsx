@@ -85,7 +85,10 @@ export function InstallPlanDetail({
     }
   }, [plan, projectPath, onInstalled]);
 
-  const trustColor = result.trustLevel === 'community' ? 'bg-[var(--semantic-warning-bg)] text-[var(--semantic-warning-text)]' : 'bg-[var(--semantic-success-bg)] text-[var(--semantic-success-text)]';
+  const trustColor =
+    result.trustLevel === 'community'
+      ? 'bg-[var(--semantic-warning-bg)] text-[var(--semantic-warning-text)]'
+      : 'bg-[var(--semantic-success-bg)] text-[var(--semantic-success-text)]';
 
   return (
     <div className="space-y-4">
@@ -129,7 +132,9 @@ export function InstallPlanDetail({
           {installing ? '安装中...' : copied ? '已复制!' : '安装'}
         </button>
         {installResult && (
-          <span className={`text-xs ${installResult.type === 'success' ? 'text-[var(--semantic-success-text)]' : 'text-[var(--semantic-error-text)]'}`}>
+          <span
+            className={`text-xs ${installResult.type === 'success' ? 'text-[var(--semantic-success-text)]' : 'text-[var(--semantic-error-text)]'}`}
+          >
             {installResult.message}
           </span>
         )}

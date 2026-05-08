@@ -156,7 +156,9 @@ export function CollectionCatalog() {
               <div className="text-xs text-cafe-secondary mt-1">
                 <span>Last indexed: {c.health.indexFreshness || 'never'}</span>
                 {c.health.pendingReviewCount > 0 && (
-                  <span className="ml-2 text-[var(--semantic-warning-text)]">{c.health.pendingReviewCount} pending review</span>
+                  <span className="ml-2 text-[var(--semantic-warning-text)]">
+                    {c.health.pendingReviewCount} pending review
+                  </span>
                 )}
               </div>
             )}

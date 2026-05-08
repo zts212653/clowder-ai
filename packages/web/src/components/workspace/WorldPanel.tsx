@@ -83,7 +83,9 @@ export function WorldPanel({ worldId, apiBase = '' }: WorldPanelProps) {
         </div>
       </div>
 
-      {error && <div className="px-3 py-2 text-[var(--semantic-error-text)] text-xs bg-[var(--semantic-error-bg)]">{error}</div>}
+      {error && (
+        <div className="px-3 py-2 text-[var(--semantic-error-text)] text-xs bg-[var(--semantic-error-bg)]">{error}</div>
+      )}
 
       <div className="flex-1 overflow-y-auto px-3 py-2">
         {mode === 'build' && <BuildView world={world} characters={characters} />}

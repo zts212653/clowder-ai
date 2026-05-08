@@ -5,7 +5,6 @@ import { Suspense, useEffect, useState } from 'react';
 import { ActivityBar } from './ActivityBar';
 import { ThreadSidebar } from './ThreadSidebar';
 
-
 const CHROMELESS_ROUTES = ['/story-export', '/pixel-brawl', '/showcase'];
 
 interface AppShellProps {

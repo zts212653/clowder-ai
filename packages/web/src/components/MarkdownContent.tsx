@@ -74,10 +74,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
       >
         {copied ? '已复制' : '复制'}
       </button>
-      <pre
-        ref={preRef}
-        className="rounded-lg p-3 overflow-x-auto text-xs leading-5 font-mono"
-      >
+      <pre ref={preRef} className="rounded-lg p-3 overflow-x-auto text-xs leading-5 font-mono">
         {children}
       </pre>
     </div>
@@ -256,9 +253,7 @@ const mdComponents: Components = {
   /* Code blocks with copy button */
   pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
   code: ({ className, children }) => (
-    <code className={`${className ?? ''} rounded px-1 py-0.5 text-[0.85em] font-mono`}>
-      {children}
-    </code>
+    <code className={`${className ?? ''} rounded px-1 py-0.5 text-[0.85em] font-mono`}>{children}</code>
   ),
 
   /* Tables (GFM) */

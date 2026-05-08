@@ -167,12 +167,9 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     })();
   }, []);
 
-  const navigateToThread = useCallback(
-    (threadId: string) => {
-      pushThreadRouteWithHistory(threadId, typeof window !== 'undefined' ? window : undefined);
-    },
-    [],
-  );
+  const navigateToThread = useCallback((threadId: string) => {
+    pushThreadRouteWithHistory(threadId, typeof window !== 'undefined' ? window : undefined);
+  }, []);
 
   const createInProject = useCallback(
     async (opts: NewThreadOptions) => {

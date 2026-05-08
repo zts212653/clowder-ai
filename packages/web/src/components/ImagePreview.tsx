@@ -37,7 +37,10 @@ export function ImagePreview({ files, onRemove }: ImagePreviewProps) {
               onClick={() => setLightboxIdx(i)}
             />
             <button
-              onClick={(e) => { e.stopPropagation(); onRemove(i); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemove(i);
+              }}
               className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white text-[10px] leading-none flex items-center justify-center hover:bg-black/80"
               title={`移除 ${file.name}`}
               aria-label={`Remove ${file.name}`}
