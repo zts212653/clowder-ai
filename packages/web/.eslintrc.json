@@ -27,6 +27,7 @@
         "src/components/ThinkingContent.tsx",
         "src/components/TimeoutDiagnosticsPanel.tsx",
         "src/components/cat-cafe-hub.navigation.tsx",
+        "src/components/HubTraceTree.tsx",
         "src/app/pixel-brawl/**"
       ],
       "rules": {
