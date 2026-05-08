@@ -303,7 +303,7 @@ export function DirectoryPickerModal({
 
         {/* ── Options bar: feat + pin + cats toggle (hidden when browser is open) ── */}
         <div
-          className={`px-7 py-2 border-t border-[var(--console-border-soft)] flex items-center gap-3 flex-wrap ${showBrowser ? 'hidden' : ''}`}
+          className={`px-7 py-2 border-t border-transparent flex items-center gap-3 flex-wrap ${showBrowser ? 'hidden' : ''}`}
         >
           {backlogItems.length > 0 && (
             <div className="flex-1 min-w-[140px]">
@@ -354,7 +354,7 @@ export function DirectoryPickerModal({
 
         {/* ── Cat selector (collapsed by default, hidden when browser is open) ── */}
         {catsExpanded && !showBrowser && (
-          <div className="px-7 py-2 border-t border-[var(--console-border-soft)] overflow-y-auto max-h-[40vh]">
+          <div className="px-7 py-2 border-t border-transparent overflow-y-auto max-h-[40vh]">
             <CatSelector selectedCats={selectedCats} onSelectionChange={setSelectedCats} />
             {/* F33: Session binding */}
             {selectedCats.length > 0 && (
@@ -410,7 +410,7 @@ export function DirectoryPickerModal({
 
         {/* ── F113: Inline directory browser (replaces osascript picker) ── */}
         {showBrowser && (
-          <div className="border-t border-[var(--console-border-soft)] flex-1 min-h-0 flex flex-col overflow-hidden">
+          <div className="border-t border-transparent flex-1 min-h-0 flex flex-col overflow-hidden">
             <DirectoryBrowser
               initialPath={cwdPath ?? undefined}
               activeProjectPath={cwdPath ?? undefined}
@@ -421,13 +421,15 @@ export function DirectoryPickerModal({
         )}
 
         {/* ── Bottom: browse button + path input + confirm ── */}
-        <div className="px-7 py-4 border-t border-[var(--console-border-soft)] space-y-2 flex-shrink-0">
+        <div className="px-7 py-4 space-y-2 flex-shrink-0">
           <div className="flex gap-2">
             <button
               type="button"
               onClick={() => setShowBrowser((v) => !v)}
-              className={`flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-medium transition-colors ${
-                showBrowser ? 'console-button-primary' : 'console-button-secondary'
+              className={`flex items-center justify-center gap-1.5 px-4 py-2 rounded-[10px] text-xs font-medium transition-colors ${
+                showBrowser
+                  ? 'console-button-primary'
+                  : 'bg-[var(--console-hover-bg)] text-cafe-secondary hover:bg-[var(--console-active-bg)]'
               }`}
             >
               <FolderOpenIcon />
