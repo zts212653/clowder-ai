@@ -70,7 +70,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
     <div className="relative group my-2">
       <button
         onClick={handleCopy}
-        className="absolute top-2 right-2 z-10 px-1.5 py-0.5 rounded text-[10px] text-white/50 md:opacity-0 md:group-hover:opacity-100 hover:text-white/80 hover:bg-white/10 transition-all"
+        className="absolute top-2 right-2 z-10 px-1.5 py-0.5 rounded text-[10px] bg-cafe-surface-sunken text-cafe-muted md:opacity-0 md:group-hover:opacity-100 hover:bg-[var(--console-hover-bg)] transition-opacity"
       >
         {copied ? '已复制' : '复制'}
       </button>
