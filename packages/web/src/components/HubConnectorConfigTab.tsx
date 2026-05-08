@@ -130,7 +130,12 @@ export function HubConnectorConfigTab() {
       .map((f) => ({ name: f.envName, value: fieldValues[f.envName] || null }));
 
     const rawPerms = permissionsRef.current?.getConfig();
-    const hasPermissions = rawPerms && (rawPerms.adminOpenIds.length > 0 || rawPerms.allowedGroups.length > 0);
+    const hasPermissions =
+      rawPerms &&
+      (rawPerms.whitelistEnabled ||
+        rawPerms.commandAdminOnly ||
+        rawPerms.adminOpenIds.length > 0 ||
+        rawPerms.allowedGroups.length > 0);
 
     try {
       const res = await apiFetch(`/api/connector/${platform.id}/config`, {
