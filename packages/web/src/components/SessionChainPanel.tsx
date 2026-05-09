@@ -2,13 +2,14 @@
 
 // biome-ignore lint/correctness/noUnusedImports: React needed for JSX in vitest environment
 import React, { useEffect, useState } from 'react';
+import { useCatData } from '@/hooks/useCatData';
 import type { CatInvocationInfo, ContextHealthData } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
 import { BindNewSessionSection } from './BindNewSessionSection';
 import { ContextHealthBar } from './ContextHealthBar';
 import { BindSessionInput, SessionIdTag } from './SessionChainInputs';
 import { settingsResourceCardClass } from './SettingsResourceCard';
-import { deriveSessionColors } from './session-chain-colors';
+import { deriveSessionColors, type SessionColors } from './session-chain-colors';
 
 /** Minimal session record from API GET /api/threads/:id/sessions */
 interface SessionSummary {
@@ -86,6 +87,7 @@ function fmtTokens(n: number): string {
 }
 
 export function SessionChainPanel({ threadId, catInvocations, onViewSession }: SessionChainPanelProps) {
+  const { getCatById } = useCatData();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadedThreadId, setLoadedThreadId] = useState<string | null>(null);
@@ -93,7 +95,10 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
   const [unsealingSessionId, setUnsealingSessionId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const sessionColors = deriveSessionColors();
+  const colorsForCat = (catId: string): SessionColors => {
+    const cat = getCatById(catId);
+    return deriveSessionColors(cat?.color?.primary, cat?.color?.secondary);
+  };
 
   // Data is stale when it belongs to a different thread than the one we're viewing
   const isStale = loadedThreadId !== threadId;
@@ -212,7 +217,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
         const usage = inv?.usage ?? session.lastUsage;
         const cachePct = cachePercent(usage?.cacheReadTokens, usage?.inputTokens);
 
-        const colors = sessionColors;
+        const colors = colorsForCat(session.catId);
 
         return (
           <div key={session.id} className="mb-2">
@@ -289,7 +294,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
           </div>
           <div className="space-y-1">
             {sealedSessions.map((session) => {
-              const sealedColors = sessionColors;
+              const sealedColors = colorsForCat(session.catId);
               return (
                 <div
                   key={session.id}
