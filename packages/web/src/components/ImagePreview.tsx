@@ -28,7 +28,7 @@ export function ImagePreview({ files, onRemove }: ImagePreviewProps) {
     <>
       <div className="flex gap-2 px-4 py-2 overflow-x-auto">
         {files.map((file, i) => (
-          <div key={`${file.name}-${i}`} className="relative flex-shrink-0">
+          <div key={`${file.name}-${i}`} className="relative flex-shrink-0 group">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={urls[i]}
@@ -41,7 +41,7 @@ export function ImagePreview({ files, onRemove }: ImagePreviewProps) {
                 e.stopPropagation();
                 onRemove(i);
               }}
-              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[var(--color-conn-red-text)] text-[var(--cafe-surface)] text-xs flex items-center justify-center"
+              className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 hover:bg-black/80 text-white text-[10px] flex items-center justify-center transition-colors"
               title={`移除 ${file.name}`}
               aria-label={`Remove ${file.name}`}
             >
