@@ -260,10 +260,10 @@ function Get-RedisAuthArgs {
 }
 
 function Format-RedisRespCommand {
-    param([string[]]$Args)
+    param([string[]]$CommandArgs)
 
-    $parts = "*$($Args.Count)`r`n"
-    foreach ($arg in $Args) {
+    $parts = "*$($CommandArgs.Count)`r`n"
+    foreach ($arg in $CommandArgs) {
         $byteLength = [System.Text.Encoding]::UTF8.GetByteCount($arg)
         $parts += "`$$byteLength`r`n$arg`r`n"
     }
@@ -293,11 +293,11 @@ function Get-RedisAuthRespCommand {
     $password = if ($parts.Count -ge 2) { [System.Uri]::UnescapeDataString($parts[1]) } else { "" }
 
     if ($parts.Count -ge 2 -and $username) {
-        return Format-RedisRespCommand -Args @("AUTH", $username, $password)
+        return Format-RedisRespCommand -CommandArgs @("AUTH", $username, $password)
     } elseif ($username) {
-        return Format-RedisRespCommand -Args @("AUTH", $username)
+        return Format-RedisRespCommand -CommandArgs @("AUTH", $username)
     }
-    return Format-RedisRespCommand -Args @("AUTH", $password)
+    return Format-RedisRespCommand -CommandArgs @("AUTH", $password)
 }
 
 # Pure-PowerShell Redis connectivity check via TCP + RESP PING/PONG.
@@ -344,7 +344,7 @@ function Test-RedisReachable {
         }
 
         # PING
-        Write-RedisRespCommand -Stream $stream -Command (Format-RedisRespCommand -Args @("PING"))
+        Write-RedisRespCommand -Stream $stream -Command (Format-RedisRespCommand -CommandArgs @("PING"))
         $pingLine = $reader.ReadLine()
         return $pingLine -eq '+PONG'
     } catch {
@@ -397,7 +397,7 @@ function Send-RedisShutdown {
         }
 
         # SHUTDOWN SAVE
-        Write-RedisRespCommand -Stream $stream -Command (Format-RedisRespCommand -Args @("SHUTDOWN", "SAVE"))
+        Write-RedisRespCommand -Stream $stream -Command (Format-RedisRespCommand -CommandArgs @("SHUTDOWN", "SAVE"))
         $reader.ReadLine() | Out-Null
         return $true
     } catch {

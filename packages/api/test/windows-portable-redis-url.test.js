@@ -165,7 +165,7 @@ test('Windows installer prefers plain portable Redis zips before service bundles
 
 test('Windows Redis URL handling validates connectivity with RESP and detects external backends for shutdown skip', () => {
   assert.match(startWindowsScript, /Test-RedisReachable -RedisUrl \$configuredRedisUrl/);
-  assert.match(helpersScript, /Format-RedisRespCommand -Args @\("PING"\)/);
+  assert.match(helpersScript, /Format-RedisRespCommand -CommandArgs @\("PING"\)/);
   assert.match(startWindowsScript, /Test-LocalRedisUrl -RedisUrl \$configuredRedisUrl -RedisPort \$RedisPort/);
   assert.match(stopWindowsScript, /Test-LocalRedisUrl -RedisUrl \$configuredRedisUrl -RedisPort \$RedisPort/);
   assert.match(
