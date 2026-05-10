@@ -280,7 +280,6 @@ vi.mock('../AuthorizationCard', () => ({ AuthorizationCard: () => null }));
 vi.mock('../WorkspacePanel', () => ({ WorkspacePanel: () => null }));
 vi.mock('../BootstrapOrchestrator', () => ({ BootstrapOrchestrator: () => null }));
 vi.mock('../BootcampListModal', () => ({ BootcampListModal: () => null }));
-vi.mock('@/components/HubListModal', () => ({ HubListModal: () => null }));
 vi.mock('@/components/ProjectSetupCard', () => ({ ProjectSetupCard: () => null }));
 vi.mock('@/components/game/GameOverlayConnector', () => ({ GameOverlayConnector: () => null }));
 vi.mock('@/components/icons/PawIcon', () => ({ PawIcon: () => null }));

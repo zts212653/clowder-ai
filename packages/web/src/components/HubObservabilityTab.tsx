@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { HubCallbackAuthPanel } from './HubCallbackAuthPanel';
 import { TraceBrowser } from './HubTraceTree';
+import { settingsResourceCardClass } from './SettingsResourceCard';
 
 interface HealthData {
   status: 'healthy' | 'degraded';
@@ -63,7 +64,9 @@ export function HubObservabilityTab({ initialSubTab = 'overview', subTabNonce }:
             onClick={() => setSubTab(t)}
             data-guide-id={`observability.${t}`}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-              subTab === t ? 'bg-blue-50 text-blue-700' : 'text-cafe-secondary hover:bg-cafe-surface-elevated'
+              subTab === t
+                ? 'bg-[var(--color-cafe-accent)]/10 text-[var(--color-cafe-accent)]'
+                : 'text-cafe-secondary hover:bg-cafe-surface-elevated'
             }`}
           >
             {SUB_TAB_LABELS[t]}
@@ -81,7 +84,7 @@ export function HubObservabilityTab({ initialSubTab = 'overview', subTabNonce }:
 
 function MetricCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="rounded-lg bg-cafe-surface-elevated px-4 py-3">
+    <div className={`${settingsResourceCardClass} px-4 py-3`}>
       <div className="text-xs text-cafe-muted">{label}</div>
       <div className="mt-1 text-xl font-semibold text-cafe">{value}</div>
       {sub && <div className="text-xs text-cafe-secondary">{sub}</div>}
@@ -165,7 +168,7 @@ function TrendChart({
   const points = values.map((v, i) => `${i * step},${height - (v / max) * height}`).join(' ');
 
   return (
-    <div className="rounded-lg bg-cafe-surface-elevated p-3">
+    <div className={`${settingsResourceCardClass} p-3`}>
       <div className="mb-2 text-xs text-cafe-muted">{label}</div>
       <svg viewBox={`0 0 ${width} ${height}`} className="h-20 w-full" preserveAspectRatio="none">
         <polyline points={points} fill="none" stroke="#5B9BD5" strokeWidth="2" />
@@ -209,14 +212,14 @@ function HealthPanel() {
       </div>
 
       {health.readiness && (
-        <div className="rounded-lg bg-cafe-surface-elevated p-3">
+        <div className={`${settingsResourceCardClass} p-3`}>
           <div className="mb-1 text-xs font-medium text-cafe-muted">Readiness Checks</div>
           {Object.entries(health.readiness.checks).map(([name, check]) => (
             <div key={name} className="flex items-center gap-2 text-xs">
-              <span className={check.ok ? 'text-green-600' : 'text-red-500'}>{check.ok ? '✓' : '✗'}</span>
+              <span className={check.ok ? 'text-conn-emerald-text' : 'text-conn-red-text'}>{check.ok ? '✓' : '✗'}</span>
               <span className="text-cafe">{name}</span>
               <span className="text-cafe-muted">{check.ms}ms</span>
-              {check.error && <span className="text-red-500">{check.error}</span>}
+              {check.error && <span className="text-conn-red-text">{check.error}</span>}
             </div>
           ))}
         </div>

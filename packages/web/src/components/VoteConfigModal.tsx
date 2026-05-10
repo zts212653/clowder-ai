@@ -67,17 +67,17 @@ export function VoteConfigModal({
     // biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop click-to-close
     <div
       role="presentation"
-      className="fixed inset-0 bg-black/30 flex items-center justify-center z-50"
+      className="fixed inset-0 bg-[var(--console-overlay-backdrop)] flex items-center justify-center z-50"
       onClick={(e) => {
         if (modalRef.current && !modalRef.current.contains(e.target as Node)) onCancel();
       }}
     >
       <div
         ref={modalRef}
-        className="bg-cafe-surface rounded-xl shadow-2xl w-full max-w-[480px] mx-4 max-h-[80vh] flex flex-col overflow-hidden"
+        className="bg-cafe-surface rounded-xl border border-[var(--cafe-border)] shadow-2xl w-full max-w-[480px] mx-4 max-h-[80vh] flex flex-col overflow-hidden"
       >
         {/* Header */}
-        <div className="px-5 py-4 border-b border-cafe-subtle flex items-center justify-between">
+        <div className="px-5 py-4 border-b border-[var(--console-border-soft)] flex items-center justify-between">
           <h2 className="text-base font-semibold text-cafe-black">发起投票</h2>
           <button
             type="button"
@@ -109,7 +109,7 @@ export function VoteConfigModal({
               onChange={(e) => setQuestion(e.target.value)}
               placeholder="例：谁最绿茶？"
               maxLength={500}
-              className="w-full text-sm px-3 py-2 rounded-lg border border-cafe bg-cafe-surface focus:outline-none focus:ring-1 focus:ring-cocreator-primary"
+              className="w-full text-sm px-3 py-2 rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface focus:outline-none focus:ring-1 focus:ring-cafe-accent"
             />
           </div>
 
@@ -125,7 +125,7 @@ export function VoteConfigModal({
                     onChange={(e) => updateOption(i, e.target.value)}
                     placeholder={`选项 ${i + 1}`}
                     maxLength={100}
-                    className="flex-1 text-sm px-3 py-2 rounded-lg border border-cafe bg-cafe-surface focus:outline-none focus:ring-1 focus:ring-cocreator-primary"
+                    className="flex-1 text-sm px-3 py-2 rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface focus:outline-none focus:ring-1 focus:ring-cafe-accent"
                     onCompositionStart={ime.onCompositionStart}
                     onCompositionEnd={ime.onCompositionEnd}
                     onKeyDown={(e) => {
@@ -140,7 +140,7 @@ export function VoteConfigModal({
                     <button
                       type="button"
                       onClick={() => removeOption(i)}
-                      className="text-cafe-muted hover:text-red-500 transition-colors px-1"
+                      className="text-cafe-muted hover:text-conn-red-text transition-colors px-1"
                       title={`删除选项 ${i + 1}`}
                       aria-label={`删除选项 ${i + 1}`}
                     >
@@ -160,7 +160,7 @@ export function VoteConfigModal({
               <button
                 type="button"
                 onClick={addOption}
-                className="mt-2 text-xs text-cocreator-primary hover:text-cocreator-dark transition-colors"
+                className="mt-2 text-xs text-cafe-accent hover:text-cafe-accent/80 transition-colors"
               >
                 + 添加选项
               </button>
@@ -180,7 +180,7 @@ export function VoteConfigModal({
                 type="checkbox"
                 checked={anonymous}
                 onChange={(e) => setAnonymous(e.target.checked)}
-                className="rounded border-cafe text-cocreator-primary focus:ring-cocreator-primary"
+                className="rounded border-[var(--console-border-soft)] text-cafe-accent focus:ring-cafe-accent"
               />
               匿名投票
             </label>
@@ -191,7 +191,7 @@ export function VoteConfigModal({
                 id="vote-timeout"
                 value={timeoutSec}
                 onChange={(e) => setTimeoutSec(Number(e.target.value))}
-                className="text-sm px-2 py-1 rounded border border-cafe bg-cafe-surface focus:outline-none focus:ring-1 focus:ring-cocreator-primary"
+                className="text-sm px-2 py-1 rounded border border-[var(--console-border-soft)] bg-cafe-surface focus:outline-none focus:ring-1 focus:ring-cafe-accent"
               >
                 <option value={60}>1 分钟</option>
                 <option value={120}>2 分钟</option>
@@ -203,7 +203,7 @@ export function VoteConfigModal({
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-4 border-t border-cafe-subtle flex justify-end gap-3">
+        <div className="px-5 py-4 border-t border-[var(--console-border-soft)] flex justify-end gap-3">
           <button
             type="button"
             onClick={onCancel}
@@ -215,7 +215,7 @@ export function VoteConfigModal({
             type="button"
             onClick={handleSubmit}
             disabled={!canSubmit}
-            className="px-4 py-2 text-sm font-semibold rounded-lg bg-cocreator-primary text-white hover:bg-cocreator-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-4 py-2 text-sm font-semibold rounded-lg bg-cafe-accent text-[var(--cafe-surface)] hover:bg-cafe-accent/80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             开始投票
           </button>

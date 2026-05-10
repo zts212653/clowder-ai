@@ -201,7 +201,7 @@ export function JsxPreview({ code, filePath, worktreeId }: JsxPreviewProps) {
 
   if (building) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-[#1E1E24] text-cafe-muted text-xs">
+      <div className="flex-1 flex items-center justify-center bg-[var(--terminal-bg)] text-cafe-muted text-xs">
         Bundling JSX/TSX...
       </div>
     );
@@ -209,8 +209,8 @@ export function JsxPreview({ code, filePath, worktreeId }: JsxPreviewProps) {
 
   if (error) {
     return (
-      <div className="flex-1 overflow-auto bg-[#1E1E24] p-4">
-        <div className="text-red-400 text-xs font-mono whitespace-pre-wrap">
+      <div className="flex-1 overflow-auto bg-[var(--terminal-bg)] p-4">
+        <div className="text-conn-red-text text-xs font-mono whitespace-pre-wrap">
           <div className="font-semibold mb-2">Bundle Error</div>
           {error}
         </div>
@@ -222,7 +222,7 @@ export function JsxPreview({ code, filePath, worktreeId }: JsxPreviewProps) {
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <div className="px-2 py-1 bg-blue-900/20 text-blue-400 text-[10px] border-b border-blue-900/30 flex-shrink-0">
+      <div className="px-2 py-1 bg-[var(--color-cafe-accent)]/20 text-[var(--color-cafe-accent)] text-[10px] border-b border-[var(--color-cafe-accent)]/30 flex-shrink-0">
         JSX Preview (esbuild-wasm) — local imports resolved, npm packages via esm.sh
       </div>
       <div className="flex-1 min-h-0 bg-cafe-surface">

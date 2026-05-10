@@ -18,7 +18,7 @@ export function GuideOverlayCompletion({
   return (
     <div className="fixed inset-0 z-[var(--guide-z-overlay)] flex items-center justify-center">
       <div
-        className="fixed inset-0 bg-black/20"
+        className="fixed inset-0 bg-[var(--console-overlay-light)]"
         onClick={completionPersisted || completionFailed ? onDismiss : undefined}
       />
       <div className="relative z-10 rounded-2xl border border-[var(--guide-hud-border)] bg-[var(--guide-hud-bg)] p-8 text-center shadow-2xl">
@@ -31,7 +31,7 @@ export function GuideOverlayCompletion({
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className="h-10 w-10 text-amber-500"
+              className="h-10 w-10 text-conn-amber-text"
             >
               <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01" />
             </svg>
@@ -57,7 +57,7 @@ export function GuideOverlayCompletion({
           type="button"
           onClick={onDismiss}
           disabled={!completionPersisted && !completionFailed}
-          className="rounded-xl bg-[var(--guide-success)] px-6 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+          className="rounded-xl bg-[var(--guide-success)] px-6 py-2 text-sm font-semibold text-[var(--cafe-surface)] transition hover:opacity-90 disabled:opacity-50"
         >
           {completionPersisted ? '太好了!' : completionFailed ? '知道了' : '保存中…'}
         </button>

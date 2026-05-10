@@ -72,15 +72,15 @@ export function GovernanceBlockedCard({ projectPath, reasonKind, invocationId }:
 
   return (
     <div data-testid="governance-blocked-card" className="flex justify-center mb-3">
-      <div className="max-w-[85%] w-full rounded-lg border border-amber-200 bg-amber-50 p-4">
+      <div className="max-w-[85%] w-full rounded-lg border border-conn-amber-ring bg-conn-amber-bg p-4">
         <div className="flex items-start gap-3">
-          <GovernanceShieldIcon className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+          <GovernanceShieldIcon className="w-5 h-5 text-conn-amber-text flex-shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-amber-800">
-              项目 <code className="px-1 py-0.5 bg-amber-100 rounded text-xs">{dirName}</code>{' '}
+            <p className="text-sm font-medium text-conn-amber-text">
+              项目 <code className="px-1 py-0.5 bg-conn-amber-bg rounded text-xs">{dirName}</code>{' '}
               {REASON_LABELS[reasonKind] ?? '治理状态异常'}
             </p>
-            <p className="text-xs text-amber-600 mt-1">
+            <p className="text-xs text-conn-amber-text mt-1">
               初始化将写入治理规则（CLAUDE.md 等）、Skills 链接和方法论模板到目标项目。已有文件不会被覆盖。
             </p>
 
@@ -89,23 +89,25 @@ export function GovernanceBlockedCard({ projectPath, reasonKind, invocationId }:
                 <button
                   type="button"
                   onClick={handleBootstrap}
-                  className="text-sm px-3 py-1.5 rounded-md bg-amber-500 text-white hover:bg-amber-600 transition-colors"
+                  className="text-sm px-3 py-1.5 rounded-md bg-conn-amber-text text-[var(--cafe-surface)] hover:opacity-90 transition-colors"
                 >
                   初始化治理并继续
                 </button>
               )}
-              {state === 'confirming' && <span className="text-sm text-amber-700">正在初始化治理...</span>}
-              {state === 'retrying' && <span className="text-sm text-amber-700">治理已就绪，正在重试...</span>}
+              {state === 'confirming' && <span className="text-sm text-conn-amber-text">正在初始化治理...</span>}
+              {state === 'retrying' && <span className="text-sm text-conn-amber-text">治理已就绪，正在重试...</span>}
               {state === 'done' && (
-                <span className="text-sm text-green-700">治理初始化完成{invocationId ? '，已自动重试' : ''}</span>
+                <span className="text-sm text-conn-emerald-text">
+                  治理初始化完成{invocationId ? '，已自动重试' : ''}
+                </span>
               )}
               {state === 'error' && (
                 <div className="space-y-2">
-                  <p className="text-sm text-red-600">{errorMsg}</p>
+                  <p className="text-sm text-conn-red-text">{errorMsg}</p>
                   <button
                     type="button"
                     onClick={handleBootstrap}
-                    className="text-sm px-3 py-1.5 rounded-md bg-amber-500 text-white hover:bg-amber-600 transition-colors"
+                    className="text-sm px-3 py-1.5 rounded-md bg-conn-amber-text text-[var(--cafe-surface)] hover:opacity-90 transition-colors"
                   >
                     重试
                   </button>

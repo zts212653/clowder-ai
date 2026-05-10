@@ -38,7 +38,7 @@ interface CommunityPanelFiltersProps {
 }
 
 const selectClass =
-  'text-[10px] bg-cafe-surface rounded px-1.5 py-0.5 border border-cocreator-light/30 text-cafe-secondary';
+  'text-[10px] bg-cafe-surface rounded px-1.5 py-0.5 border border-[var(--console-border-soft)] text-cafe-secondary';
 
 export function CommunityPanelFilters({
   repos,
@@ -56,12 +56,12 @@ export function CommunityPanelFilters({
 }: CommunityPanelFiltersProps) {
   return (
     <>
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-cocreator-light/40">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--console-border-soft)]">
         <select
           data-testid="repo-filter"
           value={repo}
           onChange={(e) => onRepoChange(e.target.value)}
-          className="flex-1 text-xs bg-cafe-surface rounded px-2 py-1 border border-cocreator-light/30 text-cafe-secondary"
+          className="flex-1 text-xs bg-cafe-surface rounded px-2 py-1 border border-[var(--console-border-soft)] text-cafe-secondary"
         >
           {repos.map((r) => (
             <option key={r} value={r}>
@@ -73,13 +73,13 @@ export function CommunityPanelFilters({
           type="button"
           onClick={onSync}
           disabled={loading}
-          className="flex items-center gap-1 text-[10px] text-cocreator-dark/60 hover:text-cocreator-dark transition-colors disabled:opacity-50"
+          className="flex items-center gap-1 text-[10px] text-cafe-muted hover:text-cafe-secondary transition-colors disabled:opacity-50"
           title="手动同步"
         >
           <span className={loading ? 'animate-spin' : ''}>{SYNC_ICON}</span>
         </button>
       </div>
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-cocreator-light/20">
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[var(--console-border-soft)]">
         <select
           data-testid="issue-state-filter"
           value={stateFilter}

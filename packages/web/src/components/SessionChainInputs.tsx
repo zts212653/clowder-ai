@@ -82,7 +82,7 @@ export function BindSessionInput({
         }}
         placeholder="CLI session ID"
         maxLength={500}
-        className="flex-1 text-[10px] font-mono px-1.5 py-0.5 rounded border border-cafe bg-cafe-surface-elevated focus:outline-none focus:ring-1 focus:ring-cocreator-primary"
+        className="flex-1 rounded border border-[var(--console-border-soft)] bg-cafe-surface-elevated px-1.5 py-0.5 font-mono text-[10px] focus:border-cafe-accent focus:outline-none focus:ring-1 focus:ring-cafe-accent/20"
         // biome-ignore lint/a11y/noAutofocus: intentional UX — focus input immediately on open
         autoFocus
       />
@@ -90,7 +90,7 @@ export function BindSessionInput({
         type="button"
         onClick={() => void handleBind()}
         disabled={status === 'saving' || !value.trim() || disabled}
-        className="text-[9px] px-1.5 py-0.5 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-40 transition-colors"
+        className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--console-pill-bg)] hover:bg-[var(--console-hover-bg)] disabled:opacity-40 transition-colors"
       >
         {status === 'saving' ? '...' : status === 'ok' ? 'ok' : status === 'error' ? 'err' : 'bind'}
       </button>

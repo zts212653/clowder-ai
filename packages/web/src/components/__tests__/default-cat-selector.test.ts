@@ -1,5 +1,5 @@
 /**
- * F154 Phase B — DefaultCatSelector: dropdown for choosing the global default cat.
+ * F154 Phase B / #543 — DefaultCatSelector: dropdown for choosing the global default cat.
  * AC-B2: Member overview has global default cat selector.
  * clowder-ai#543: Migrated from card grid to dropdown.
  */
@@ -146,7 +146,7 @@ describe('DefaultCatSelector (F154 Phase B, AC-B2)', () => {
     expect(container.textContent).toContain('新 thread');
   });
 
-  it('calls onSelect when changing dropdown value', () => {
+  it('calls onSelect when clicking a cat card', () => {
     const onSelect = vi.fn();
     act(() => {
       root.render(
@@ -165,7 +165,7 @@ describe('DefaultCatSelector (F154 Phase B, AC-B2)', () => {
     expect(onSelect).toHaveBeenCalledWith('codex');
   });
 
-  it('shows color dot for the current default cat', () => {
+  it('shows title and description in card layout', () => {
     act(() => {
       root.render(
         React.createElement(DefaultCatSelector, {
@@ -175,9 +175,8 @@ describe('DefaultCatSelector (F154 Phase B, AC-B2)', () => {
         }),
       );
     });
-    const dot = container.querySelector('[data-testid="selected-color-dot"]') as HTMLElement;
-    expect(dot).not.toBeNull();
-    expect(dot.style.backgroundColor).toBeTruthy();
+    expect(container.textContent).toContain('全局默认猫');
+    expect(container.textContent).toContain('新 thread');
   });
 
   it('shows error hint and retry button when fetchError is true (P1-2)', () => {

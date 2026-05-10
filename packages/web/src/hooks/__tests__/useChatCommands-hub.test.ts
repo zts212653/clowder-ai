@@ -1,16 +1,13 @@
 /**
- * F12: useChatCommands hub integration tests
+ * F12→F190: useChatCommands hub integration tests
  * Tests /help and /config via real processCommand invocation.
- *
- * Uses React.createElement + createRoot to render the hook (project convention),
- * avoiding @testing-library/react dependency.
+ * After F190, /help and /config navigate to /settings via window.location.assign.
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatStore } from '@/stores/chatStore';
 
-// Mock apiFetch — /config set needs it
 vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn().mockResolvedValue({
     ok: true,
@@ -18,10 +15,8 @@ vi.mock('@/utils/api-client', () => ({
   }),
 }));
 
-// Import after mocking
 const { useChatCommands } = await import('../useChatCommands');
 
-// Minimal hook renderer — captures processCommand from the hook
 let captured: { processCommand: (input: string) => Promise<boolean> } | null = null;
 
 function HookHost() {
@@ -32,12 +27,12 @@ function HookHost() {
 
 let root: Root;
 let container: HTMLDivElement;
+const mockAssign = vi.fn();
 
-describe('useChatCommands hub commands (F12)', () => {
+describe('useChatCommands hub commands (F190)', () => {
   beforeEach(() => {
     useChatStore.setState({
       messages: [],
-      hubState: null,
       currentThreadId: 'test-thread',
     });
     container = document.createElement('div');
@@ -45,6 +40,12 @@ describe('useChatCommands hub commands (F12)', () => {
     act(() => {
       root = createRoot(container);
       root.render(React.createElement(HookHost));
+    });
+    mockAssign.mockClear();
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, assign: mockAssign },
+      writable: true,
+      configurable: true,
     });
   });
 
@@ -54,10 +55,10 @@ describe('useChatCommands hub commands (F12)', () => {
     captured = null;
   });
 
-  it('/help opens Hub to commands tab via processCommand', async () => {
+  it('/help navigates to /settings?s=skills', async () => {
     const handled = await act(() => captured?.processCommand('/help'));
     expect(handled).toBe(true);
-    expect(useChatStore.getState().hubState).toMatchObject({ open: true, tab: 'commands' });
+    expect(mockAssign).toHaveBeenCalledWith('/settings?s=skills');
   });
 
   it('/help does NOT add any message to chat', async () => {
@@ -65,10 +66,10 @@ describe('useChatCommands hub commands (F12)', () => {
     expect(useChatStore.getState().messages).toHaveLength(0);
   });
 
-  it('/config (no args) opens Hub to system tab via processCommand', async () => {
+  it('/config (no args) navigates to /settings?s=system', async () => {
     const handled = await act(() => captured?.processCommand('/config'));
     expect(handled).toBe(true);
-    expect(useChatStore.getState().hubState).toMatchObject({ open: true, tab: 'system' });
+    expect(mockAssign).toHaveBeenCalledWith('/settings?s=system');
   });
 
   it('/config (no args) does NOT add any message to chat', async () => {
@@ -79,20 +80,7 @@ describe('useChatCommands hub commands (F12)', () => {
   it('/config set still adds messages (regression)', async () => {
     const handled = await act(() => captured?.processCommand('/config set cli.timeoutMs 120000'));
     expect(handled).toBe(true);
-    // Should have user echo + system response
     expect(useChatStore.getState().messages.length).toBeGreaterThanOrEqual(1);
-    // Hub should NOT open for /config set
-    expect(useChatStore.getState().hubState).toBeNull();
-  });
-
-  it('hubState defaults to null', () => {
-    expect(useChatStore.getState().hubState).toBeNull();
-  });
-
-  it('openHub/closeHub cycle works', () => {
-    useChatStore.getState().openHub('commands');
-    expect(useChatStore.getState().hubState).toMatchObject({ open: true, tab: 'commands' });
-    useChatStore.getState().closeHub();
-    expect(useChatStore.getState().hubState).toBeNull();
+    expect(mockAssign).not.toHaveBeenCalled();
   });
 });

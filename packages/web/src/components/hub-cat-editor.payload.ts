@@ -8,6 +8,24 @@ import {
   splitMentionPatterns,
   splitStrengthTags,
 } from './hub-cat-editor.model';
+
+function buildVoiceConfig(form: HubCatEditorFormState) {
+  const voice = form.voiceVoice.trim();
+  const langCode = form.voiceLangCode.trim();
+  if (!voice || !langCode) return undefined;
+  const speed = Number.parseFloat(form.voiceSpeed);
+  const temperature = Number.parseFloat(form.voiceTemperature);
+  return {
+    voice,
+    langCode,
+    ...(Number.isFinite(speed) && speed > 0 ? { speed } : {}),
+    ...(form.voiceRefAudio.trim() ? { refAudio: form.voiceRefAudio.trim() } : {}),
+    ...(form.voiceRefText.trim() ? { refText: form.voiceRefText.trim() } : {}),
+    ...(form.voiceInstruct.trim() ? { instruct: form.voiceInstruct.trim() } : {}),
+    ...(Number.isFinite(temperature) && temperature >= 0 ? { temperature } : {}),
+  };
+}
+
 import { defaultMcpSupportForClient } from './hub-cat-editor.protocols';
 
 function trimText(value: unknown): string {
@@ -81,6 +99,9 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
       : cat?.cli?.effort
         ? { cli: { effort: null as null } }
         : {};
+  const voiceConfig = buildVoiceConfig(form);
+  const voiceConfigPatch: Record<string, unknown> =
+    voiceConfig !== undefined ? { voiceConfig } : cat?.voiceConfig ? { voiceConfig: null } : {};
   const common = {
     displayName,
     variantLabel: trimText(form.variantLabel),
@@ -100,6 +121,7 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
     strengths: splitStrengthTags(form.strengths),
     sessionChain: form.sessionChain === 'true',
     ...contextBudgetPatch,
+    ...voiceConfigPatch,
   };
 
   if (form.clientId === 'antigravity') {

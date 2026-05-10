@@ -163,9 +163,9 @@ export function useChatCommands() {
           timestamp: Date.now(),
         });
       };
-      // /help — open Hub to commands tab (F12)
+      // /help — open settings to skills section
       if (trimmed === '/help') {
-        useChatStore.getState().openHub('commands');
+        window.location.assign('/settings?s=skills');
         return true;
       }
 
@@ -173,9 +173,9 @@ export function useChatCommands() {
       if (isCommandInvocation(trimmed, '/config')) {
         const configArgs = trimmed.slice('/config'.length).trim();
 
-        // /config (no args) — open Hub to system tab (F12)
+        // /config (no args) — open settings to system section
         if (!configArgs) {
-          useChatStore.getState().openHub('system');
+          window.location.assign('/settings?s=system');
           return true;
         }
 

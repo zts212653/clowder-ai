@@ -63,7 +63,7 @@ export function WorldPanel({ worldId, apiBase = '' }: WorldPanelProps) {
 
   return (
     <div className="flex flex-col h-full bg-cafe-surface/80 text-sm">
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-[#FFDDD2]">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--console-border-soft)]">
         <span className="font-semibold text-cafe-primary">{world?.name ?? worldId}</span>
         <span className="text-xs text-cafe-secondary">[{world?.status ?? '...'}]</span>
         <div className="ml-auto flex gap-1">
@@ -73,7 +73,7 @@ export function WorldPanel({ worldId, apiBase = '' }: WorldPanelProps) {
               onClick={() => setMode(m)}
               className={`px-2 py-0.5 rounded text-xs transition-colors ${
                 mode === m
-                  ? 'bg-cafe-primary text-white'
+                  ? 'bg-cafe-primary text-[var(--cafe-surface)]'
                   : 'bg-cafe-surface hover:bg-cafe-primary/10 text-cafe-secondary'
               }`}
             >
@@ -83,7 +83,9 @@ export function WorldPanel({ worldId, apiBase = '' }: WorldPanelProps) {
         </div>
       </div>
 
-      {error && <div className="px-3 py-2 text-red-600 text-xs bg-red-50/50">{error}</div>}
+      {error && (
+        <div className="px-3 py-2 text-[var(--semantic-error-text)] text-xs bg-[var(--semantic-error-bg)]">{error}</div>
+      )}
 
       <div className="flex-1 overflow-y-auto px-3 py-2">
         {mode === 'build' && <BuildView world={world} characters={characters} />}

@@ -99,19 +99,19 @@ export function statusLabel(status: CatStatus): string {
 export function statusTone(status: CatStatus): string {
   switch (status) {
     case 'spawning':
-      return 'text-blue-500';
+      return 'text-[var(--color-cafe-accent)]';
     case 'pending':
       return 'text-cafe-secondary';
     case 'streaming':
-      return 'text-green-600';
+      return 'text-conn-emerald-text';
     case 'done':
-      return 'text-emerald-700';
+      return 'text-conn-emerald-text';
     case 'error':
-      return 'text-red-600';
+      return 'text-conn-red-text';
     case 'alive_but_silent':
-      return 'text-amber-500';
+      return 'text-conn-amber-text';
     case 'suspected_stall':
-      return 'text-orange-600';
+      return 'text-conn-amber-text';
     default:
       return 'text-cafe-secondary';
   }

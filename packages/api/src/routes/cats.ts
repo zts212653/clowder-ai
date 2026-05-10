@@ -84,6 +84,17 @@ const baseCatSchema = z.object({
   caution: z.string().nullable().optional(),
   strengths: z.array(z.string().min(1)).optional(),
   sessionChain: z.boolean().optional(),
+  voiceConfig: z
+    .object({
+      voice: z.string().min(1),
+      langCode: z.string().min(1),
+      speed: z.number().positive().optional(),
+      refAudio: z.string().min(1).optional(),
+      refText: z.string().min(1).optional(),
+      instruct: z.string().min(1).optional(),
+      temperature: z.number().min(0).max(2).optional(),
+    })
+    .optional(),
 });
 
 /** Strip trailing slashes from model names — prevents "MiniMax-M2.7/" artifacts.
@@ -134,6 +145,18 @@ const updateCatSchema = z.object({
   commandArgs: z.array(z.string().min(1)).optional(),
   cliConfigArgs: z.array(z.string().min(1)).optional(),
   provider: z.string().min(1).nullable().optional(),
+  voiceConfig: z
+    .object({
+      voice: z.string().min(1),
+      langCode: z.string().min(1),
+      speed: z.number().positive().optional(),
+      refAudio: z.string().min(1).optional(),
+      refText: z.string().min(1).optional(),
+      instruct: z.string().min(1).optional(),
+      temperature: z.number().min(0).max(2).optional(),
+    })
+    .nullable()
+    .optional(),
 });
 
 type UpdateCatRequestBody = z.infer<typeof updateCatSchema>;
@@ -358,6 +381,7 @@ async function toCatResponse(
           evaluation: metadata.roster.evaluation,
         }
       : null,
+    voiceConfig: cat.voiceConfig ?? undefined,
     adapterMode: cat.clientId === 'google' ? (getAcpConfig(cat.id as string) ? 'acp' : 'cli') : undefined,
   };
 }
@@ -514,6 +538,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
             ...(body.commandArgs ? { defaultArgs: body.commandArgs } : {}),
           },
           commandArgs: body.commandArgs,
+          ...(body.voiceConfig ? { voiceConfig: body.voiceConfig } : {}),
         });
       } else {
         const resolvedCli = buildResolvedCliConfig(body.clientId, defaultCliForClient(body.clientId), body.cli);
@@ -545,6 +570,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           cli: resolvedCli,
           ...(body.cliConfigArgs ? { cliConfigArgs: body.cliConfigArgs } : {}),
           ...(body.provider ? { provider: body.provider } : {}),
+          ...(body.voiceConfig ? { voiceConfig: body.voiceConfig } : {}),
         });
       }
     } catch (err) {
@@ -707,6 +733,11 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           ? body.provider === null
             ? { provider: null }
             : { provider: body.provider }
+          : {}),
+        ...(body.voiceConfig !== undefined
+          ? body.voiceConfig === null
+            ? { voiceConfig: null }
+            : { voiceConfig: body.voiceConfig }
           : {}),
       });
       const resolved = await reconcileCatRegistry(projectRoot, managedIdsBefore);

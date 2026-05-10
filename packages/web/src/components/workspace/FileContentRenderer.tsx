@@ -53,14 +53,14 @@ export function FileContentRenderer({
   if (file.binary) {
     if (file.mime.startsWith('image/'))
       return (
-        <div className="flex-1 flex items-center justify-center bg-[#1E1E24] p-4 overflow-auto">
+        <div className="flex-1 flex items-center justify-center bg-[var(--terminal-bg)] p-4 overflow-auto">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={rawUrl(file.path)} alt={file.path} className="max-w-full max-h-full object-contain rounded" />
         </div>
       );
     if (file.mime.startsWith('audio/'))
       return (
-        <div className="flex-1 flex flex-col items-center justify-center bg-[#1E1E24] p-6 gap-3">
+        <div className="flex-1 flex flex-col items-center justify-center bg-[var(--terminal-bg)] p-6 gap-3">
           <HubIcon name="music" className="h-8 w-8 text-cafe-secondary" />
           <audio controls src={rawUrl(file.path)} className="w-full max-w-md">
             浏览器不支持音频播放
@@ -72,14 +72,14 @@ export function FileContentRenderer({
       );
     if (file.mime.startsWith('video/'))
       return (
-        <div className="flex-1 flex items-center justify-center bg-[#1E1E24] p-4 overflow-auto">
+        <div className="flex-1 flex items-center justify-center bg-[var(--terminal-bg)] p-4 overflow-auto">
           <video controls src={rawUrl(file.path)} className="max-w-full max-h-full rounded">
             浏览器不支持视频播放
           </video>
         </div>
       );
     return (
-      <div className="flex flex-col items-center justify-center py-8 bg-[#1E1E24] text-cafe-secondary text-xs">
+      <div className="flex flex-col items-center justify-center py-8 bg-[var(--terminal-bg)] text-cafe-secondary text-xs">
         <svg
           viewBox="0 0 24 24"
           fill="none"
@@ -98,7 +98,7 @@ export function FileContentRenderer({
         <button
           type="button"
           onClick={() => void revealInFinder(file.path)}
-          className="mt-2 px-3 py-1 rounded bg-cocreator-light/20 text-cocreator-dark/60 hover:bg-cocreator-light/40 transition-colors text-[10px]"
+          className="console-button-secondary mt-2 rounded px-3 py-1 text-[10px]"
         >
           在 Finder 中打开
         </button>
@@ -121,7 +121,7 @@ export function FileContentRenderer({
           <button
             type="button"
             onClick={onMdAddToChat}
-            className="absolute top-2 right-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cocreator-primary text-white text-[11px] font-medium shadow-lg hover:bg-cocreator-dark transition-colors z-10 animate-fade-in"
+            className="console-button-primary absolute top-2 right-3 z-10 flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-[var(--cafe-surface)] shadow-lg animate-fade-in"
             title="引用到聊天"
           >
             <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -137,7 +137,7 @@ export function FileContentRenderer({
   if (isHtml && htmlPreview && !editMode)
     return (
       <div className="flex-1 min-h-0 flex flex-col">
-        <div className="px-2 py-1 bg-amber-900/20 text-amber-400 text-[10px] border-b border-amber-900/30 flex-shrink-0">
+        <div className="px-2 py-1 bg-conn-amber-bg/20 text-conn-amber-text text-[10px] border-b border-conn-amber-ring/30 flex-shrink-0">
           预览模式 — 相对资源路径（图片/CSS/JS）可能无法加载
         </div>
         <div className="flex-1 min-h-0 bg-cafe-surface">

@@ -20,7 +20,7 @@ export function DirectionPill({ direction, getCatById }: DirectionPillProps) {
 
   // Breed color from first target cat (fallback to ragdoll purple)
   const firstCat = direction.type !== 'crossPost' ? getCatById(direction.targets[0]) : undefined;
-  const color = firstCat?.color.primary ?? '#9B7EBD';
+  const color = firstCat?.color.primary ?? 'var(--console-cat-fallback)';
 
   return (
     <span

@@ -222,12 +222,12 @@ export function CollectionGraph() {
           type="text"
           defaultValue=""
           placeholder="Enter anchor (e.g. project:cafe:doc/f186)"
-          className="flex-1 rounded border border-cafe bg-white px-3 py-1.5 text-sm text-cafe-primary"
+          className="flex-1 rounded border border-cafe bg-[var(--cafe-surface)] px-3 py-1.5 text-sm text-cafe-primary"
           data-testid="graph-anchor-input"
         />
         <button
           type="submit"
-          className="rounded bg-cafe-primary px-3 py-1.5 text-sm text-white"
+          className="rounded bg-cafe-primary px-3 py-1.5 text-sm text-[var(--cafe-surface)]"
           data-testid="graph-fetch-btn"
         >
           View Graph
@@ -235,13 +235,13 @@ export function CollectionGraph() {
       </form>
 
       {loading && <div className="text-sm text-cafe-secondary">Loading graph...</div>}
-      {error && <div className="text-sm text-red-500">Error: {error}</div>}
+      {error && <div className="text-sm text-[var(--semantic-error-text)]">Error: {error}</div>}
       {graph && graph.nodes.length === 0 && !loading && (
         <div className="text-sm text-cafe-secondary">No graph data for this anchor.</div>
       )}
 
       {graph && graph.nodes.length > 0 && (
-        <div className="relative rounded-lg border border-cafe bg-white p-2">
+        <div className="relative rounded-lg border border-cafe bg-[var(--cafe-surface)] p-2">
           <svg
             viewBox={`0 0 ${W} ${H}`}
             className="w-full"

@@ -73,6 +73,7 @@ export class WeComBotAdapter implements IStreamableOutboundAdapter {
 
   // Connection health state — exposed via getConnectionState() for status endpoint
   private connectionState: 'connected' | 'disconnected' | 'reconnecting' = 'disconnected';
+  private lastHeartbeatTs: number | null = null;
 
   // Delayed reconnect timer for disconnected_event recovery
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -127,6 +128,10 @@ export class WeComBotAdapter implements IStreamableOutboundAdapter {
 
   getConnectionState(): 'connected' | 'disconnected' | 'reconnecting' {
     return this.connectionState;
+  }
+
+  getLastHeartbeat(): number | null {
+    return this.lastHeartbeatTs;
   }
 
   /**
@@ -645,6 +650,7 @@ export class WeComBotAdapter implements IStreamableOutboundAdapter {
       // Lifecycle events — maintain connection health state
       client.on('authenticated', () => {
         this.connectionState = 'connected';
+        this.lastHeartbeatTs = Date.now();
         this.log.info('[WeComBotAdapter] WebSocket authenticated');
       });
       client.on('disconnected', (reason: string) => {

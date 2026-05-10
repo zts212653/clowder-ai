@@ -51,11 +51,11 @@ interface SkillsData {
 
 function MountBadge({ mounted }: { mounted: boolean }) {
   return mounted ? (
-    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100 text-green-600">
+    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-conn-emerald-bg text-conn-emerald-text">
       <HubIcon name="check" className="h-3 w-3" />
     </span>
   ) : (
-    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100 text-red-500">
+    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-conn-red-bg text-conn-red-text">
       <HubIcon name="x" className="h-3 w-3" />
     </span>
   );
@@ -75,7 +75,7 @@ function CategoryGroup({
   onInstallDone: () => void;
 }) {
   return (
-    <section className="rounded-lg border border-cafe bg-cafe-surface-elevated/70 p-3">
+    <section className="console-list-card rounded-2xl shadow-[0_12px_30px_rgba(43,33,26,0.08)] p-3">
       <h3 className="text-xs font-semibold text-cafe-secondary mb-2">{category}</h3>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
@@ -92,9 +92,9 @@ function CategoryGroup({
           </thead>
           <tbody>
             {skills.map((skill) => (
-              <tr key={skill.name} className="border-t border-cafe-subtle">
+              <tr key={skill.name} className="border-t border-[var(--console-border-soft)]">
                 <td className="py-1.5 pr-3">
-                  <code className="font-mono text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded text-[11px]">
+                  <code className="font-mono text-[var(--color-cafe-accent)] bg-[var(--color-cafe-accent)]/10 px-1.5 py-0.5 rounded text-[11px]">
                     {skill.name}
                   </code>
                 </td>
@@ -109,10 +109,10 @@ function CategoryGroup({
                           key={`${skill.name}:${dep.id}`}
                           className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                             dep.status === 'ready'
-                              ? 'bg-emerald-100 text-emerald-700'
+                              ? 'bg-conn-emerald-bg text-conn-emerald-text'
                               : dep.status === 'missing'
-                                ? 'bg-rose-100 text-rose-700'
-                                : 'bg-amber-100 text-amber-700'
+                                ? 'bg-conn-red-bg text-conn-red-text'
+                                : 'bg-conn-amber-bg text-conn-amber-text'
                           }`}
                         >
                           {dep.id}:{dep.status}
@@ -175,9 +175,9 @@ function StaleBanner({
   const hasRemoved = staleness.removedSkills.length > 0;
 
   return (
-    <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs">
+    <div className="rounded-lg border border-[var(--color-cafe-accent)]/30 bg-[var(--color-cafe-accent)]/5 p-3 text-xs">
       <div className="flex items-center justify-between">
-        <div className="text-blue-800">
+        <div className="text-[var(--color-cafe-accent)]">
           <span className="font-semibold">Skills 有更新</span>
           {hasNew && <span className="ml-2">+{staleness.newSkills.length} 新增</span>}
           {hasRemoved && <span className="ml-2">-{staleness.removedSkills.length} 移除</span>}
@@ -186,16 +186,16 @@ function StaleBanner({
           type="button"
           onClick={onSync}
           disabled={syncing}
-          className="rounded-md bg-blue-600 px-3 py-1 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-50"
+          className="rounded-md bg-[var(--color-cafe-accent)] px-3 py-1 text-[var(--cafe-surface)] text-xs font-medium hover:opacity-90 disabled:opacity-50"
         >
           {syncing ? '同步中...' : '立即同步'}
         </button>
       </div>
       {hasNew && (
-        <div className="mt-1.5 text-blue-600">
+        <div className="mt-1.5 text-[var(--color-cafe-accent)]">
           新增:{' '}
           {staleness.newSkills.map((n) => (
-            <code key={n} className="mx-0.5 bg-blue-100 px-1 rounded">
+            <code key={n} className="mx-0.5 bg-[var(--color-cafe-accent)]/10 px-1 rounded">
               {n}
             </code>
           ))}
@@ -215,10 +215,10 @@ function ConflictCard({
   resolving: boolean;
 }) {
   return (
-    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs">
+    <div className="rounded-lg border border-conn-amber-ring bg-conn-amber-bg p-3 text-xs">
       <div className="flex items-center justify-between">
-        <div className="text-amber-800">
-          <code className="font-mono font-semibold bg-amber-100 px-1 rounded">{conflict.skillName}</code>
+        <div className="text-conn-amber-text">
+          <code className="font-mono font-semibold bg-conn-amber-bg px-1 rounded">{conflict.skillName}</code>
           <span className="ml-1.5">在用户级和项目级来源不同</span>
         </div>
         <div className="flex gap-2">
@@ -226,7 +226,7 @@ function ConflictCard({
             type="button"
             onClick={() => onResolve('official')}
             disabled={resolving}
-            className="rounded-md bg-blue-600 px-2.5 py-1 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-50"
+            className="rounded-md bg-[var(--color-cafe-accent)] px-2.5 py-1 text-[var(--cafe-surface)] text-xs font-medium hover:opacity-90 disabled:opacity-50"
           >
             用官方版本
           </button>
@@ -313,7 +313,11 @@ export function HubSkillsTab() {
   }, [fetchSkills]);
 
   if (error) {
-    return <p className="text-sm text-red-500 bg-red-50 rounded-lg px-3 py-2">{error}</p>;
+    return (
+      <p className="text-sm text-conn-red-text bg-conn-red-bg border border-conn-red-ring rounded-[20px] px-3 py-2">
+        {error}
+      </p>
+    );
   }
   if (!data) {
     return <p className="text-sm text-cafe-muted">加载中...</p>;
@@ -359,13 +363,13 @@ export function HubSkillsTab() {
         />
       ))}
 
-      <div className="rounded-lg border border-cafe bg-cafe-surface-elevated/70 p-3">
+      <div className="console-list-card rounded-2xl shadow-[0_12px_30px_rgba(43,33,26,0.08)] p-3">
         <div className="flex items-center gap-4 text-xs">
           <span className="font-semibold text-cafe-secondary">{data.summary.total} skills</span>
-          <span className={data.summary.allMounted ? 'text-green-600' : 'text-amber-600'}>
+          <span className={data.summary.allMounted ? 'text-conn-emerald-text' : 'text-conn-amber-text'}>
             {data.summary.allMounted ? '全部正确挂载' : '部分挂载缺失'}
           </span>
-          <span className={data.summary.registrationConsistent ? 'text-green-600' : 'text-amber-600'}>
+          <span className={data.summary.registrationConsistent ? 'text-conn-emerald-text' : 'text-conn-amber-text'}>
             {data.summary.registrationConsistent ? '注册一致' : '注册不一致'}
           </span>
         </div>

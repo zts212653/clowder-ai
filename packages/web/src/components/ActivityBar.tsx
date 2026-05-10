@@ -187,8 +187,10 @@ export function ActivityBar({ className }: ActivityBarProps) {
       if (!referrer && typeof window !== 'undefined') {
         referrer = new URLSearchParams(window.location.search).get('from');
       }
-      if (referrer && path === '/') {
-        router.push(`/thread/${encodeURIComponent(referrer)}`);
+      if (path === '/') {
+        const fromParam =
+          typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('from') : null;
+        router.push(fromParam ? `/thread/${fromParam}` : '/');
       } else if (referrer) {
         const sep = path.includes('?') ? '&' : '?';
         router.push(`${path}${sep}from=${encodeURIComponent(referrer)}`);

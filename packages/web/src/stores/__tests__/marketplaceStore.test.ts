@@ -42,6 +42,7 @@ describe('marketplaceStore', () => {
       query: '',
       ecosystemFilter: [],
       trustFilter: [],
+      artifactKindsFilter: [],
     });
   });
 
@@ -171,6 +172,30 @@ describe('marketplaceStore', () => {
     await vi.waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(1));
 
     expect(mocks.apiFetch).toHaveBeenCalledWith(expect.stringContaining('trustLevels=official'));
+  });
+
+  it('search passes artifactKinds filter as CSV', async () => {
+    mocks.apiFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ results: [] }) });
+    const { useMarketplaceStore } = await import('../marketplaceStore');
+    useMarketplaceStore.setState({ artifactKindsFilter: ['mcp_server'] });
+
+    await useMarketplaceStore.getState().search('test');
+
+    expect(mocks.apiFetch).toHaveBeenCalledWith(expect.stringContaining('artifactKinds=mcp_server'));
+  });
+
+  it('setArtifactKindsFilter re-triggers search when query exists', async () => {
+    mocks.apiFetch.mockResolvedValue({ json: () => Promise.resolve({ results: [] }) });
+    const { useMarketplaceStore } = await import('../marketplaceStore');
+
+    await useMarketplaceStore.getState().search('memory');
+    mocks.apiFetch.mockClear();
+    mocks.apiFetch.mockResolvedValue({ json: () => Promise.resolve({ results: [] }) });
+
+    useMarketplaceStore.getState().setArtifactKindsFilter(['mcp_server']);
+    await vi.waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(1));
+
+    expect(mocks.apiFetch).toHaveBeenCalledWith(expect.stringContaining('artifactKinds=mcp_server'));
   });
 
   it('clearSelection resets selectedResult and installPlan', async () => {

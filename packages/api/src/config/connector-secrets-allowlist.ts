@@ -16,6 +16,9 @@ export const CONNECTOR_SECRETS_ALLOWLIST: ReadonlySet<string> = new Set([
   'DINGTALK_APP_KEY',
   'DINGTALK_APP_SECRET',
   'WEIXIN_BOT_TOKEN',
+  'WEIXIN_VOICE_ITEM_MODE',
+  'WEIXIN_ENABLE_UNSAFE_VOICE_MODES',
+  'WEIXIN_CAPTURE_INBOUND_VOICE_MEDIA',
   'WECOM_BOT_ID',
   'WECOM_BOT_SECRET',
   'WECOM_CORP_ID',
@@ -26,6 +29,12 @@ export const CONNECTOR_SECRETS_ALLOWLIST: ReadonlySet<string> = new Set([
   'XIAOYI_AK',
   'XIAOYI_SK',
   'XIAOYI_AGENT_ID',
+  'GITHUB_TOKEN',
+  'GITHUB_SETUP_NOISE_BOT_LOGINS',
+  'GITHUB_MCP_PAT',
+  'VAPID_PUBLIC_KEY',
+  'VAPID_PRIVATE_KEY',
+  'VAPID_SUBJECT',
 ]);
 
 export function isConnectorSecret(name: string): boolean {

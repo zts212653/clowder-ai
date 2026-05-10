@@ -43,7 +43,7 @@ triggers:
 
 | 改动范围 | 是否通知 |
 |---------|---------|
-| 共享文件（BACKLOG、feature doc、cat-config.json） | 必须 |
+| 共享文件（BACKLOG、feature doc、cat-template.json） | 必须 |
 | 被其他 feature 依赖的接口/类型 | 必须 |
 | `packages/shared/**` | 必须 |
 | 纯内部改动（只影响自己 feature 的文件） | 不需要 |

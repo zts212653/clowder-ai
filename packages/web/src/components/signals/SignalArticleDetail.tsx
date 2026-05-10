@@ -1,10 +1,12 @@
 import type { SignalArticleStatus, StudyMeta } from '@cat-cafe/shared';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { apiFetch } from '@/utils/api-client';
 import type { SignalArticleDetail } from '@/utils/signals-api';
 import { fetchStudyMeta, linkSignalThread, unlinkSignalThread } from '@/utils/signals-api';
+import { getThreadHref } from '../ThreadSidebar/thread-navigation';
 import { SignalTierBadge } from './SignalTierBadge';
 import { StudyFoldArea } from './StudyFoldArea';
 
@@ -47,11 +49,15 @@ export function SignalArticleDetail({
   onCreateCollection,
   onCollectionChanged,
 }: SignalArticleDetailProps) {
+  const router = useRouter();
   const [pendingTag, setPendingTag] = useState('');
   const [noteText, setNoteText] = useState('');
   const [noteOpen, setNoteOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [expandContent, setExpandContent] = useState(false);
+  const [enrichedContent, setEnrichedContent] = useState<string | null>(null);
+  const [enriching, setEnriching] = useState(false);
+  const [enrichError, setEnrichError] = useState<string | null>(null);
   const pendingTagInputRef = useRef<HTMLInputElement>(null);
   const normalizedPendingTag = pendingTag.trim();
   const ime = useIMEGuard();
@@ -63,6 +69,9 @@ export function SignalArticleDetail({
     setNoteText(article.note ?? '');
     setNoteOpen(!!article.note);
     setConfirmDelete(false);
+    setExpandContent(false);
+    setEnrichedContent(null);
+    setEnrichError(null);
   }
 
   const saveNote = useCallback(async () => {
@@ -153,11 +162,47 @@ export function SignalArticleDetail({
       if (!res.ok) return;
       const data = (await res.json()) as { threadId: string };
       const query = new URLSearchParams({ signal: article.id, source: article.source });
-      window.location.href = `/thread/${encodeURIComponent(data.threadId)}?${query.toString()}`;
+      router.push(`${getThreadHref(data.threadId)}?${query.toString()}`);
     } finally {
       setDiscussLoading(false);
     }
   }, [article, discussLoading]);
+
+  const REASON_LABEL: Record<string, string> = {
+    already_enriched: '已获取过全文',
+    no_better_content: '原始页面无可提取正文',
+    fetch_403: '原始页面拒绝访问 (403)',
+    fetch_404: '原始页面不存在 (404)',
+  };
+
+  const handleExpand = useCallback(async () => {
+    if (expandContent) {
+      setExpandContent(false);
+      setEnrichError(null);
+      return;
+    }
+    if (!article || enrichedContent || enriching) {
+      setExpandContent(true);
+      return;
+    }
+    setEnriching(true);
+    setEnrichError(null);
+    try {
+      const res = await apiFetch(`/api/signals/articles/${encodeURIComponent(article.id)}/enrich`, { method: 'POST' });
+      if (res.ok) {
+        const data = (await res.json()) as { article?: { content?: string }; enriched?: boolean; reason?: string };
+        if (data.article?.content && data.article.content.length > (article.content?.length ?? 0)) {
+          setEnrichedContent(data.article.content);
+        } else if (data.reason && data.reason !== 'already_enriched') {
+          setEnrichError(REASON_LABEL[data.reason] ?? `获取失败: ${data.reason}`);
+        }
+      }
+    } catch {
+      setEnrichError('网络请求失败');
+    }
+    setEnriching(false);
+    setExpandContent(true);
+  }, [article, expandContent, enrichedContent, enriching]);
 
   const addPendingTag = useCallback(async () => {
     if (!article) {
@@ -182,7 +227,7 @@ export function SignalArticleDetail({
 
   if (isLoading) {
     return (
-      <aside className="rounded-xl border border-cafe bg-cafe-surface p-6 text-sm text-cafe-secondary shadow-sm">
+      <aside className="rounded-xl bg-[var(--console-panel-bg)] p-6 text-sm text-cafe-secondary">
         正在加载文章详情...
       </aside>
     );
@@ -190,14 +235,14 @@ export function SignalArticleDetail({
 
   if (!article) {
     return (
-      <aside className="rounded-xl border border-dashed border-cafe bg-cafe-surface p-6 text-sm text-cafe-secondary">
+      <aside className="rounded-xl bg-[var(--console-panel-bg)] p-6 text-sm text-cafe-secondary">
         选择一篇文章查看详情。
       </aside>
     );
   }
 
   return (
-    <aside className="rounded-xl border border-cafe bg-cafe-surface p-5 shadow-sm">
+    <aside className="rounded-xl bg-[var(--console-panel-bg)] p-5">
       <div className="flex flex-wrap items-center gap-2">
         <SignalTierBadge tier={article.tier} />
         <span className="rounded bg-cafe-surface-elevated px-2 py-0.5 text-xs font-medium text-cafe-secondary">
@@ -213,7 +258,7 @@ export function SignalArticleDetail({
           href={article.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="rounded-md border border-cocreator-light px-3 py-1.5 text-xs text-cocreator-dark hover:bg-cocreator-bg"
+          className="console-button-ghost text-xs px-3 py-1.5"
         >
           打开原文 ↗
         </a>
@@ -221,14 +266,14 @@ export function SignalArticleDetail({
           type="button"
           onClick={() => void navigateToDiscuss()}
           disabled={discussLoading}
-          className="rounded-md border border-opus-light px-3 py-1.5 text-xs text-opus-dark hover:bg-opus-bg disabled:opacity-50"
+          className="rounded-md bg-opus-bg px-3 py-1.5 text-xs text-opus-dark transition-opacity hover:opacity-80 disabled:opacity-50"
         >
-          {discussLoading ? '正在创建讨论...' : '在对话中讨论'}
+          {discussLoading ? '正在跳转...' : studyMeta?.threads?.length ? '继续讨论' : '在对话中讨论'}
         </button>
       </div>
       {article.summary && (
-        <section className="mt-4 rounded-lg border border-cocreator-light bg-cocreator-bg p-3">
-          <h3 className="text-xs font-semibold text-cocreator-dark">AI 摘要</h3>
+        <section className="console-card mt-4 rounded-lg p-3">
+          <h3 className="text-xs font-semibold text-cafe-secondary">AI 摘要</h3>
           <p className="mt-1 whitespace-pre-wrap text-sm text-cafe-black">{article.summary}</p>
         </section>
       )}
@@ -250,17 +295,19 @@ export function SignalArticleDetail({
           <h3 className="text-xs font-semibold text-cafe-secondary">正文</h3>
           <button
             type="button"
-            onClick={() => setExpandContent((prev) => !prev)}
-            className="text-xs text-opus-dark hover:underline"
+            onClick={() => void handleExpand()}
+            disabled={enriching}
+            className="text-xs text-opus-dark hover:underline disabled:opacity-50"
           >
-            {expandContent ? '收起' : '展开阅读'}
+            {enriching ? '正在获取全文…' : expandContent ? '收起' : '展开阅读'}
           </button>
         </div>
         <div
-          className={`mt-1 overflow-y-auto rounded-lg border border-cafe bg-cafe-surface-elevated p-3 text-sm text-cafe-black ${expandContent ? '' : 'max-h-[300px]'}`}
+          className={`mt-1 rounded-lg bg-[var(--console-card-soft-bg)] p-3 text-sm text-cafe-black ${expandContent ? '' : 'max-h-[300px] overflow-y-auto'}`}
         >
-          <MarkdownContent content={article.content || '（无正文）'} />
+          <MarkdownContent content={enrichedContent || article.content || '（无正文）'} />
         </div>
+        {enrichError && <p className="mt-2 text-xs text-conn-amber-text">{enrichError}</p>}
       </section>
       <section className="mt-4">
         <h3 className="text-xs font-semibold text-cafe-secondary">标签</h3>
@@ -269,10 +316,7 @@ export function SignalArticleDetail({
             <span className="text-xs text-cafe-secondary">暂无标签</span>
           ) : (
             article.tags.map((tag) => (
-              <span
-                key={tag}
-                className="rounded-full border border-codex-light bg-codex-bg px-2 py-0.5 text-xs text-codex-dark"
-              >
+              <span key={tag} className="rounded-full bg-codex-bg px-2 py-0.5 text-xs text-codex-dark">
                 {tag}
               </span>
             ))
@@ -293,12 +337,12 @@ export function SignalArticleDetail({
               }
             }}
             placeholder="添加标签"
-            className="flex-1 rounded-md border border-cafe px-2 py-1.5 text-xs"
+            className="flex-1 rounded-md bg-[var(--console-field-bg)] px-2 py-1.5 text-xs text-cafe outline-none"
           />
           <button
             type="button"
             onClick={() => void addPendingTag()}
-            className="rounded-md border border-codex-light px-2.5 py-1.5 text-xs text-codex-dark hover:bg-codex-bg"
+            className="rounded-md bg-codex-bg px-2.5 py-1.5 text-xs text-codex-dark transition-opacity hover:opacity-80"
           >
             添加标签
           </button>
@@ -322,12 +366,12 @@ export function SignalArticleDetail({
                 onBlur={() => void saveNote()}
                 placeholder="写下你的笔记..."
                 rows={3}
-                className="w-full rounded-md border border-cafe px-3 py-2 text-sm"
+                className="w-full rounded-md bg-[var(--console-field-bg)] px-3 py-2 text-sm text-cafe outline-none"
               />
               <button
                 type="button"
                 onClick={() => void saveNote()}
-                className="mt-1 rounded-md border border-opus-light px-3 py-1 text-xs text-opus-dark hover:bg-opus-bg"
+                className="mt-1 rounded-md bg-opus-bg px-3 py-1 text-xs text-opus-dark transition-opacity hover:opacity-80"
               >
                 保存备注
               </button>
@@ -339,39 +383,39 @@ export function SignalArticleDetail({
         <button
           type="button"
           onClick={() => void onStatusChange(article.id, 'inbox')}
-          className="rounded-md border border-cocreator-light px-3 py-1.5 text-xs text-cocreator-dark hover:bg-cocreator-bg"
+          className="rounded-md bg-[var(--console-card-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] transition hover:text-cafe"
         >
           设为 Inbox
         </button>
         <button
           type="button"
           onClick={() => void onStatusChange(article.id, 'read')}
-          className="rounded-md border border-cafe px-3 py-1.5 text-xs text-cafe-secondary hover:bg-cafe-surface-elevated"
+          className="rounded-md bg-[var(--console-card-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] transition hover:text-cafe"
         >
           标记已读
         </button>
         <button
           type="button"
           onClick={() => void onStatusChange(article.id, 'starred')}
-          className="rounded-md border border-amber-200 px-3 py-1.5 text-xs text-amber-700 hover:bg-amber-50"
+          className="rounded-md bg-conn-amber-bg px-3 py-1.5 text-xs font-medium text-conn-amber-text transition hover:opacity-80"
         >
           收藏
         </button>
         {onDelete &&
           (confirmDelete ? (
             <div className="flex items-center gap-2">
-              <span className="text-xs text-red-600">确认删除？</span>
+              <span className="text-xs text-conn-red-text">确认删除？</span>
               <button
                 type="button"
                 onClick={() => void handleDelete()}
-                className="rounded-md border border-red-300 px-3 py-1.5 text-xs text-red-700 hover:bg-red-50"
+                className="rounded-md bg-conn-red-bg px-3 py-1.5 text-xs font-medium text-conn-red-text transition hover:opacity-80"
               >
                 删除
               </button>
               <button
                 type="button"
                 onClick={() => setConfirmDelete(false)}
-                className="rounded-md border border-cafe px-3 py-1.5 text-xs text-cafe-secondary hover:bg-cafe-surface-elevated"
+                className="rounded-md bg-[var(--console-card-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] transition hover:text-cafe"
               >
                 取消
               </button>
@@ -380,7 +424,7 @@ export function SignalArticleDetail({
             <button
               type="button"
               onClick={() => setConfirmDelete(true)}
-              className="rounded-md border border-red-200 px-3 py-1.5 text-xs text-red-500 hover:bg-red-50"
+              className="rounded-md bg-conn-red-bg px-3 py-1.5 text-xs font-medium text-conn-red-text transition hover:opacity-80"
             >
               删除
             </button>

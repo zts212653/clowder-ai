@@ -58,16 +58,14 @@ export function MarketplaceSearch() {
 
   const toggleEcosystem = useCallback(
     (eco: MarketplaceEcosystem) => {
-      const next = ecosystemFilter.includes(eco) ? ecosystemFilter.filter((e) => e !== eco) : [...ecosystemFilter, eco];
-      setEcosystemFilter(next);
+      setEcosystemFilter(ecosystemFilter.includes(eco) ? [] : [eco]);
     },
     [ecosystemFilter, setEcosystemFilter],
   );
 
   const toggleTrust = useCallback(
     (level: TrustLevel) => {
-      const next = trustFilter.includes(level) ? trustFilter.filter((l) => l !== level) : [...trustFilter, level];
-      setTrustFilter(next);
+      setTrustFilter(trustFilter.includes(level) ? [] : [level]);
     },
     [trustFilter, setTrustFilter],
   );
@@ -76,28 +74,27 @@ export function MarketplaceSearch() {
   const isTrustAll = trustFilter.length === 0;
 
   return (
-    <div className="space-y-3">
-      <div className="relative">
-        <span className="absolute inset-y-0 left-3 flex items-center text-cafe-muted">
-          <HubIcon name="search" className="h-4 w-4" />
-        </span>
+    <div className="space-y-2.5">
+      <div className="flex items-center gap-1.5 rounded-lg bg-[var(--console-card-bg)] px-2.5 h-8 shadow-[0_1px_3px_rgba(43,33,26,0.06)]">
+        <HubIcon name="search" className="h-4 w-4 shrink-0 text-cafe-muted" />
         <input
           type="text"
           value={inputValue}
           onChange={handleInput}
           onKeyDown={handleKeyDown}
           placeholder="搜索能力..."
-          className="w-full rounded-lg border border-cafe-border bg-white py-2 pl-9 pr-3 text-sm text-cafe placeholder:text-cafe-muted focus:border-purple-300 focus:outline-none focus:ring-1 focus:ring-purple-200"
+          className="min-w-0 flex-1 bg-transparent text-xs text-cafe outline-none placeholder:text-cafe-muted"
         />
       </div>
 
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
         <button
+          type="button"
           onClick={() => setEcosystemFilter([])}
-          className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+          className={`h-7 rounded-lg px-2.5 text-[11px] font-medium transition-colors ${
             isAll
-              ? 'border-transparent bg-cafe-text text-white'
-              : 'border-cafe-border bg-cafe-surface text-cafe-secondary hover:bg-cafe-surface-elevated'
+              ? 'bg-[var(--cafe-accent)] text-[var(--cafe-accent-foreground)]'
+              : 'bg-[var(--console-card-bg)] text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] hover:text-cafe'
           }`}
         >
           全部
@@ -106,28 +103,28 @@ export function MarketplaceSearch() {
           const active = ecosystemFilter.includes(eco);
           return (
             <button
+              type="button"
               key={eco}
               onClick={() => toggleEcosystem(eco)}
-              className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+              className={`h-7 rounded-lg px-2.5 text-[11px] font-medium transition-colors ${
                 active
-                  ? 'border-transparent bg-cafe-text text-white'
-                  : 'border-cafe-border bg-cafe-surface text-cafe-secondary hover:bg-cafe-surface-elevated'
+                  ? 'bg-[var(--cafe-accent)] text-[var(--cafe-accent-foreground)]'
+                  : 'bg-[var(--console-card-bg)] text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] hover:text-cafe'
               }`}
             >
               {ECOSYSTEM_LABELS[eco]}
             </button>
           );
         })}
-      </div>
-
-      <div className="flex flex-wrap gap-1.5">
-        <span className="self-center text-[10px] text-cafe-muted">信任:</span>
+        <span className="mx-1 h-4 w-px bg-[var(--console-border-soft)]" />
+        <span className="text-[10px] text-cafe-muted">信任:</span>
         <button
+          type="button"
           onClick={() => setTrustFilter([])}
-          className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+          className={`h-7 rounded-lg px-2.5 text-[11px] font-medium transition-colors ${
             isTrustAll
-              ? 'border-transparent bg-cafe-text text-white'
-              : 'border-cafe-border bg-cafe-surface text-cafe-secondary hover:bg-cafe-surface-elevated'
+              ? 'bg-[var(--cafe-accent)] text-[var(--cafe-accent-foreground)]'
+              : 'bg-[var(--console-card-bg)] text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] hover:text-cafe'
           }`}
         >
           全部
@@ -136,12 +133,13 @@ export function MarketplaceSearch() {
           const active = trustFilter.includes(level);
           return (
             <button
+              type="button"
               key={level}
               onClick={() => toggleTrust(level)}
-              className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+              className={`h-7 rounded-lg px-2.5 text-[11px] font-medium transition-colors ${
                 active
-                  ? 'border-transparent bg-cafe-text text-white'
-                  : 'border-cafe-border bg-cafe-surface text-cafe-secondary hover:bg-cafe-surface-elevated'
+                  ? 'bg-[var(--cafe-accent)] text-[var(--cafe-accent-foreground)]'
+                  : 'bg-[var(--console-card-bg)] text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] hover:text-cafe'
               }`}
             >
               {TRUST_LABELS[level]}

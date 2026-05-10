@@ -54,8 +54,10 @@ describe('CapabilitySection cat-cafe skill mounts', () => {
       );
     });
 
-    const expandButton = container.querySelector('button');
-    act(() => expandButton?.click());
+    // Expansion is triggered by clicking the card header div, not a button
+    const cardHeader = container.querySelector('[data-active="false"]');
+    const headerDiv = cardHeader?.querySelector('div');
+    act(() => headerDiv?.click());
 
     const text = container.textContent ?? '';
     expect(text).toContain('挂载状态:');

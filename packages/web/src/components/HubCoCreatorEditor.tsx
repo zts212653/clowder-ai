@@ -129,25 +129,27 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-[var(--console-overlay-medium)] px-4"
+      onClick={onClose}
+    >
       <div
-        className="flex max-h-[88vh] w-full max-w-3xl flex-col rounded-[28px] border border-[#EFDCCB] bg-[#FDF8F3] shadow-2xl"
+        className="flex max-h-[88vh] w-full max-w-[560px] flex-col overflow-hidden rounded-[28px] bg-[var(--console-card-bg)] shadow-[0_22px_48px_rgba(43,33,26,0.13)]"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex shrink-0 items-start justify-between border-b border-[#F0DDCD] px-6 py-5">
-          <div>
-            <p className="text-xs font-semibold text-[#D18A61]">成员协作 &gt; 总览 &gt; {current.name}</p>
-            <h3 className="mt-2 text-2xl font-bold text-[#2D2118]">编辑 {current.name}</h3>
-            <p className="mt-1 text-sm text-[#8A776B]">可维护头像、别名、被 @ 标签与卡片背景色。</p>
-          </div>
-          <button type="button" onClick={onClose} className="text-2xl leading-none text-[#B59A88]" aria-label="关闭">
+        <div className="flex shrink-0 items-start justify-between px-7 py-5">
+          <p className="text-[13px] font-extrabold text-[var(--console-modal-title)]">{current.name}</p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-[var(--console-modal-close-bg)] text-lg font-extrabold leading-none text-[var(--console-modal-close-fg)] transition hover:opacity-80"
+            aria-label="关闭"
+          >
             ×
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
-          <PersistenceBanner />
-
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-7 py-5">
           <SectionCard title="身份信息">
             <TextField
               label="名称"
@@ -159,13 +161,13 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
             />
 
             <div className="flex items-center gap-3">
-              <span className="w-[140px] shrink-0 text-[13px] font-medium text-[#5C4B42]">Avatar</span>
+              <span className="w-[150px] shrink-0 text-[12px] font-bold text-cafe-secondary">Avatar</span>
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-2 rounded-lg border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-1.5 text-sm text-[#5C4B42] transition hover:border-[#D49266]"
+                className="flex items-center gap-2 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-pill-bg)] px-3 py-1.5 text-sm text-cafe-secondary transition hover:border-[var(--cafe-accent)]"
               >
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#E8DCCF] bg-cafe-surface text-[10px] text-[#8A776B]">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--console-border-soft)] bg-cafe-surface text-[10px] text-cafe-muted">
                   {avatar ? (
                     // biome-ignore lint/performance/noImgElement: co-creator avatar may be runtime upload URL
                     // eslint-disable-next-line @next/next/no-img-element
@@ -180,7 +182,7 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
                 <button
                   type="button"
                   onClick={() => setAvatar('')}
-                  className="text-xs text-[#8A776B] hover:text-[#E29578]"
+                  className="text-xs text-cafe-muted hover:text-conn-amber-text"
                 >
                   清除
                 </button>
@@ -201,7 +203,7 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
             </div>
 
             <div className="flex items-center gap-3">
-              <span className="w-[140px] shrink-0 text-[13px] font-medium text-[#5C4B42]">Background Color</span>
+              <span className="w-[150px] shrink-0 text-[12px] font-bold text-cafe-secondary">Background Color</span>
               <div className="flex items-center gap-2">
                 <label title="Primary">
                   <input
@@ -227,7 +229,7 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
 
           <SectionCard title="别名与 @ 路由">
             <div className="flex items-start gap-3">
-              <span className="w-[140px] shrink-0 pt-1 text-[13px] font-medium text-[#5C4B42]">别名</span>
+              <span className="w-[150px] shrink-0 pt-1 text-[12px] font-bold text-cafe-secondary">别名</span>
               <div className="min-w-0 flex-1">
                 <TagEditor
                   tags={aliases}
@@ -241,7 +243,7 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
             </div>
 
             <div className="flex items-start gap-3">
-              <span className="w-[140px] shrink-0 pt-1 text-[13px] font-medium text-[#5C4B42]">@ 标签</span>
+              <span className="w-[150px] shrink-0 pt-1 text-[12px] font-bold text-cafe-secondary">@ 标签</span>
               <div className="min-w-0 flex-1">
                 <TagEditor
                   tags={mentionPatterns}
@@ -257,25 +259,18 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
             </div>
           </SectionCard>
 
-          {error ? <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-600">{error}</p> : null}
-        </div>
-
-        <div className="flex shrink-0 items-center justify-between border-t border-[#F0DDCD] bg-[#FFF3EA] px-6 py-4">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-xl bg-cafe-surface px-4 py-2 text-sm text-[#6A5A50] transition hover:bg-[#F7EEE6]"
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={saving}
-            className="rounded-xl bg-[#D49266] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#C88254] disabled:opacity-50"
-          >
-            {saving ? '保存中...' : '保存'}
-          </button>
+          <PersistenceBanner />
+          {error ? <p className="rounded-2xl bg-conn-red-bg px-4 py-3 text-sm text-conn-red-text">{error}</p> : null}
+          <div className="flex items-center justify-end pt-4">
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="h-8 rounded-[10px] bg-[var(--cafe-accent)] px-4 text-[13px] font-extrabold text-[var(--cafe-surface)] transition hover:bg-[var(--cafe-accent-hover)] disabled:opacity-50"
+            >
+              {saving ? '保存中…' : '保存'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

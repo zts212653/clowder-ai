@@ -36,7 +36,7 @@ export function MobileInputToolbar({
           onClose();
         }}
         disabled={disabled || sendDisabled || maxImages}
-        className={`${btnBase} text-cafe-secondary bg-cafe-surface border-cafe hover:border-cocreator-primary hover:text-cocreator-primary`}
+        className={`${btnBase} text-cafe-secondary bg-cafe-surface border-[var(--console-border-soft)] hover:border-cafe-accent hover:text-cafe-accent`}
       >
         <AttachIcon className="w-4 h-4" /> 附件
       </button>
@@ -48,8 +48,8 @@ export function MobileInputToolbar({
         disabled={disabled || sendDisabled}
         className={`${btnBase} ${
           whisperMode
-            ? 'text-amber-600 bg-amber-50 border-amber-300'
-            : 'text-cafe-secondary bg-cafe-surface border-cafe hover:border-amber-400 hover:text-amber-500'
+            ? 'text-conn-amber-text bg-conn-amber-bg border-conn-amber-ring'
+            : 'text-cafe-secondary bg-cafe-surface border-[var(--console-border-soft)] hover:border-conn-amber-ring hover:text-conn-amber-text'
         }`}
       >
         <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
@@ -67,7 +67,7 @@ export function MobileInputToolbar({
           onClose();
         }}
         disabled={disabled || sendDisabled}
-        className={`${btnBase} text-cafe-secondary bg-cafe-surface border-cafe hover:border-indigo-400 hover:text-indigo-500`}
+        className={`${btnBase} text-cafe-secondary bg-cafe-surface border-[var(--console-border-soft)] hover:border-cocreator-primary/40 hover:text-cocreator-primary`}
       >
         <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
           <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM14 11a1 1 0 011 1v1h1a1 1 0 110 2h-1v1a1 1 0 11-2 0v-1h-1a1 1 0 110-2h1v-1a1 1 0 011-1z" />

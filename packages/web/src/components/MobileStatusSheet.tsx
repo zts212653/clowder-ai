@@ -49,7 +49,7 @@ export function MobileStatusSheet({
     <>
       {/* Backdrop */}
       <div
-        className={`fixed inset-0 bg-black/30 z-40 transition-opacity lg:hidden ${
+        className={`fixed inset-0 bg-[var(--console-overlay-backdrop)] z-40 transition-opacity lg:hidden ${
           open ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
         onClick={onClose}
@@ -63,8 +63,8 @@ export function MobileStatusSheet({
         }`}
       >
         {/* Handle bar + header */}
-        <div className="sticky top-0 bg-cafe-surface rounded-t-2xl pt-3 pb-2 px-4 border-b border-cafe-subtle z-10">
-          <div className="w-10 h-1 bg-gray-300 rounded-full mx-auto mb-2" />
+        <div className="sticky top-0 bg-cafe-surface rounded-t-2xl pt-3 pb-2 px-4 border-b border-[var(--console-border-soft)] z-10">
+          <div className="w-10 h-1 bg-[var(--console-pill-bg)] rounded-full mx-auto mb-2" />
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-bold text-cafe-black">状态面板</h2>
             <button
@@ -88,7 +88,7 @@ export function MobileStatusSheet({
 
         <div className="p-4 space-y-3">
           {/* ── Cat status ── */}
-          <section className="rounded-lg border border-cafe bg-cafe-surface-elevated/70 p-3">
+          <section className="rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface-elevated/70 p-3">
             <h3 className="text-xs font-semibold text-cafe-secondary mb-2">
               {activeCats.length > 0 ? '当前调用' : '猫猫状态'}
             </h3>
@@ -96,7 +96,7 @@ export function MobileStatusSheet({
               <div className="space-y-2">
                 {activeCats.map((catId) => {
                   const cat = getCatById(catId);
-                  const dotColor = cat?.color.primary ?? '#9CA3AF';
+                  const dotColor = cat?.color.primary ?? 'var(--console-cat-fallback)';
                   const status = catStatuses[catId] ?? 'pending';
                   const inv = catInvocations[catId];
                   return (
@@ -128,7 +128,7 @@ export function MobileStatusSheet({
                     <div key={catId} className="flex items-center gap-2 text-xs text-cafe-secondary">
                       <span
                         className="inline-block h-2 w-2 rounded-full opacity-60"
-                        style={{ backgroundColor: cat?.color.primary ?? '#9CA3AF' }}
+                        style={{ backgroundColor: cat?.color.primary ?? 'var(--console-cat-fallback)' }}
                       />
                       {cat ? formatCatName(cat) : catId}
                     </div>
@@ -141,7 +141,7 @@ export function MobileStatusSheet({
           </section>
 
           {/* ── Message stats ── */}
-          <section className="rounded-lg border border-cafe bg-cafe-surface-elevated/70 p-3">
+          <section className="rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface-elevated/70 p-3">
             <h3 className="text-xs font-semibold text-cafe-secondary mb-2">消息统计</h3>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-cafe-secondary">
               <div>总数</div>
@@ -154,7 +154,7 @@ export function MobileStatusSheet({
           </section>
 
           {/* ── Thread info ── */}
-          <section className="rounded-lg border border-cafe bg-cafe-surface-elevated/70 p-3">
+          <section className="rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface-elevated/70 p-3">
             <h3 className="text-xs font-semibold text-cafe-secondary mb-2">对话信息</h3>
             <div className="text-xs text-cafe-secondary">
               Thread:{' '}

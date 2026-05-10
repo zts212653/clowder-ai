@@ -68,30 +68,32 @@ export function NeedAuditFrame({ projectId, frame, onSaved }: NeedAuditFrameProp
   ];
 
   return (
-    <div className="rounded-lg border border-[#E7DAC7] bg-[#FFFDF8] p-4">
-      <h3 className="mb-3 text-sm font-bold text-[#2B2118]">Stage 0: Frame — 六问定位</h3>
+    <div className="rounded-xl bg-[var(--console-card-bg)] p-4 shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
+      <h3 className="mb-3 text-sm font-bold text-cafe">Stage 0: Frame — 六问定位</h3>
       <div className="space-y-3">
         {fields.map((f) => (
           <label key={f.label} className="block">
-            <span className="text-xs font-medium text-[#6B5D4F]">{f.label}</span>
+            <span className="text-xs font-medium text-cafe-secondary">{f.label}</span>
             <input
               type="text"
               value={f.value}
               onChange={(e) => f.set(e.target.value)}
               placeholder={f.placeholder}
-              className="mt-1 w-full rounded-lg border border-[#D8C6AD] bg-cafe-surface px-3 py-1.5 text-xs text-[#2B2118] focus:border-[#8B6F47] focus:outline-none"
+              className="console-form-input mt-1 w-full text-xs"
             />
           </label>
         ))}
       </div>
       {error && (
-        <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-700">{error}</div>
+        <div className="mt-2 rounded-lg border border-conn-red-ring bg-conn-red-bg px-3 py-1.5 text-xs text-conn-red-text">
+          {error}
+        </div>
       )}
       <button
         type="button"
         onClick={() => void handleSave()}
         disabled={submitting}
-        className="mt-3 w-full rounded-lg bg-[#8B6F47] py-1.5 text-xs font-medium text-white hover:bg-[#7A6139] disabled:opacity-40"
+        className="console-button-primary mt-3 w-full disabled:opacity-40"
       >
         {submitting ? '保存中...' : frame ? '更新 Frame' : '保存 Frame'}
       </button>

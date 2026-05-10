@@ -12,6 +12,8 @@ interface EnvVar {
   sensitive: boolean;
   maskMode?: 'url';
   runtimeEditable?: boolean;
+  restartRequired?: boolean;
+  deprecated?: string;
   currentValue: string | null;
 }
 
@@ -80,20 +82,9 @@ function classifyPath(absPath: string, projectRoot: string, isDir: boolean): { k
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]">
-      <h3 className="text-[17px] font-bold text-[#2D2118]">{title}</h3>
+    <section className="rounded-[20px] bg-[var(--console-card-bg)] p-[18px] shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
+      <h3 className="text-[17px] font-bold text-cafe">{title}</h3>
       <div className="mt-3">{children}</div>
-    </section>
-  );
-}
-
-function PageIntro() {
-  return (
-    <section className="rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]">
-      <p className="text-[13px] font-semibold text-[#E29578]">系统配置 &gt; 环境 &amp; 文件</p>
-      <p className="mt-2 text-[14px] leading-6 text-[#8A776B]">
-        当前环境变量、配置文件、数据目录三段式不变。新增：变量值可直接编辑，保存后自动回填 .env。
-      </p>
     </section>
   );
 }
@@ -113,7 +104,7 @@ function HubFileLink({ relPath, label }: { relPath: string; label: string }) {
     <button
       type="button"
       onClick={handleClick}
-      className="text-blue-600 hover:text-blue-800 text-xs shrink-0 underline underline-offset-2 decoration-blue-300/60 hover:decoration-blue-600 transition-colors"
+      className="text-[var(--color-cafe-accent)] hover:opacity-90 text-xs shrink-0 underline underline-offset-2 decoration-[var(--color-cafe-accent)]/60 hover:decoration-[var(--color-cafe-accent)] transition-colors"
       title={`在 Hub 工作区中查看\n${relPath}`}
     >
       {label}
@@ -136,7 +127,7 @@ function HubDirLink({ relPath, label }: { relPath: string; label: string }) {
     <button
       type="button"
       onClick={handleClick}
-      className="text-blue-600 hover:text-blue-800 text-xs shrink-0 underline underline-offset-2 decoration-blue-300/60 hover:decoration-blue-600 transition-colors"
+      className="text-[var(--color-cafe-accent)] hover:opacity-90 text-xs shrink-0 underline underline-offset-2 decoration-[var(--color-cafe-accent)]/60 hover:decoration-[var(--color-cafe-accent)] transition-colors"
       title={`打开工作区面板，在文件树中找到:\n${relPath}`}
     >
       {label}
@@ -194,17 +185,8 @@ function buildConfigFiles(projectRoot: string) {
   ];
 }
 
-const RESTART_REQUIRED_ENV_VARS = new Set(['API_SERVER_PORT', 'PREVIEW_GATEWAY_PORT']);
-
-function buildVariableHint(variable: EnvVar): string | null {
-  const hints: string[] = [];
-  if (RESTART_REQUIRED_ENV_VARS.has(variable.name)) {
-    hints.push('写回 .env 后需重启相关服务生效。');
-  }
-  if (variable.maskMode === 'url') {
-    hints.push('当前值已做凭证脱敏；修改时请填写完整连接串。');
-  }
-  return hints.length > 0 ? hints.join(' ') : null;
+function needsRestart(variable: EnvVar): boolean {
+  return variable.restartRequired === true || variable.runtimeEditable === false;
 }
 
 function isEditableVariable(variable: EnvVar): boolean {
@@ -250,14 +232,11 @@ function ConfigFilesSection({ projectRoot }: { projectRoot: string }) {
         {files.map((f) => {
           const cls = classifyPath(f.path, projectRoot, f.isDir);
           return (
-            <div
-              key={f.name}
-              className="flex items-baseline gap-2 rounded-[12px] border border-[#F3E8DE] bg-cafe-surface px-3 py-2"
-            >
-              <code className="shrink-0 rounded bg-[#F7F3F0] px-1.5 py-0.5 font-mono text-xs text-[#6A5A50]">
+            <div key={f.name} className="flex items-baseline gap-2 px-1 py-2">
+              <code className="shrink-0 rounded bg-[var(--console-pill-bg)] px-1.5 py-0.5 font-mono text-xs text-cafe-secondary">
                 {f.name}
               </code>
-              <span className="text-xs text-[#8A776B]">{f.desc}</span>
+              <span className="text-xs text-cafe-muted">{f.desc}</span>
               <PathAction classification={cls} absPath={f.path} />
             </div>
           );
@@ -267,11 +246,35 @@ function ConfigFilesSection({ projectRoot }: { projectRoot: string }) {
   );
 }
 
+function EnvCategoryGroup({ label, count, children }: { label: string; count: number; children: React.ReactNode }) {
+  const [collapsed, setCollapsed] = useState(false);
+  return (
+    <div className="console-list-card rounded-2xl shadow-[0_4px_16px_rgba(43,33,26,0.05)] overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setCollapsed((c) => !c)}
+        className="flex w-full items-center gap-2.5 px-4 py-3 text-left transition-colors hover:bg-[var(--console-hover-bg)]"
+      >
+        <span
+          className="text-[11px] text-cafe-muted transition-transform"
+          style={{ transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}
+        >
+          ▾
+        </span>
+        <span className="text-[13px] font-semibold text-cafe">{label}</span>
+        <span className="console-pill rounded-full px-2 py-0.5 text-[10px] font-semibold text-cafe-muted">{count}</span>
+      </button>
+      {!collapsed && <div className="divide-y divide-[var(--console-border-soft)] px-4 pb-2">{children}</div>}
+    </div>
+  );
+}
+
 function EnvVarsSection({
   categories,
   variables,
   drafts,
   isDirty,
+  pendingRestartCount,
   saveState,
   onDraftChange,
   onSave,
@@ -280,6 +283,7 @@ function EnvVarsSection({
   variables: EnvVar[];
   drafts: Record<string, string>;
   isDirty: boolean;
+  pendingRestartCount: number;
   saveState: { saving: boolean; error: string | null; success: string | null };
   onDraftChange: (name: string, value: string) => void;
   onSave: () => void;
@@ -293,78 +297,79 @@ function EnvVarsSection({
     .filter((g) => g.vars.length > 0);
 
   return (
-    <Section title="环境变量">
-      <div className="mb-3 rounded-[12px] border border-[#D7E9D7] bg-[#F6FBF6] px-3 py-2 text-xs leading-5 text-[#5B7A5C]">
+    <Section title="运行时配置">
+      <div className="mb-3 rounded-[12px] border border-conn-emerald-ring bg-conn-emerald-bg px-3 py-2 text-xs leading-5 text-conn-emerald-text">
         变量值可直接编辑，保存后自动回填 `.env`。写回 .env 后需重启相关服务生效；URL
         型连接串当前值已脱敏，修改时请填写完整值。
       </div>
-      <div className="space-y-3">
+      <div className="space-y-2.5">
         {grouped.map((group) => (
-          <div key={group.key}>
-            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-[#77A777]">{group.label}</p>
-            <div className="space-y-1">
-              {group.vars.map((v) => (
-                <div
-                  key={v.name}
-                  className="grid gap-2 rounded-[12px] border border-[#F3E8DE] bg-cafe-surface px-3 py-2 text-xs md:grid-cols-[minmax(0,1fr)_220px]"
-                >
-                  <div className="min-w-0 space-y-1">
-                    <div className="flex items-baseline gap-1.5 min-w-0">
-                      <code className="shrink-0 font-mono text-[#6A5A50]">{v.name}</code>
-                      <span className="truncate text-[#B59A88]">{v.description}</span>
-                    </div>
-                    <div className="text-[11px] text-[#B59A88]">默认: {v.defaultValue}</div>
-                    {!isEditableVariable(v) && (
-                      <div className={`font-mono text-[11px] ${v.currentValue ? 'text-[#6A5A50]' : 'text-[#D4C5BA]'}`}>
-                        {v.currentValue ?? '未设置'}
-                      </div>
+          <EnvCategoryGroup key={group.key} label={group.label} count={group.vars.length}>
+            {group.vars.map((v) => (
+              <div key={v.name} className="flex items-center gap-3 px-1 py-2.5 text-xs">
+                <div className="min-w-0 flex-1 space-y-0.5">
+                  <div className="flex items-baseline gap-1.5">
+                    <code className="shrink-0 font-mono font-semibold text-cafe">{v.name}</code>
+                    <span
+                      className={`shrink-0 text-[10px] ${needsRestart(v) ? 'text-conn-amber-text' : 'text-conn-emerald-text'}`}
+                      title={needsRestart(v) ? '需重启生效' : '即时生效'}
+                    >
+                      {v.deprecated ? '⛔' : needsRestart(v) ? '🟡' : '🟢'}
+                    </span>
+                    {v.deprecated && (
+                      <span className="shrink-0 rounded bg-conn-red-bg px-1 py-0.5 text-[10px] font-semibold text-conn-red-text">
+                        {v.deprecated ? '已废弃' : ''}
+                      </span>
                     )}
                   </div>
+                  <p className="text-[11px] text-cafe-muted">{v.description}</p>
+                </div>
+                <div className="w-[220px] shrink-0">
                   {isEditableVariable(v) ? (
-                    <div className="space-y-1">
-                      <input
-                        aria-label={v.name}
-                        type={isSensitiveEditable(v) ? 'password' : 'text'}
-                        autoComplete={isSensitiveEditable(v) ? 'off' : undefined}
-                        value={drafts[v.name] ?? ''}
-                        onChange={(e) => onDraftChange(v.name, e.target.value)}
-                        placeholder={
-                          isSensitiveEditable(v)
-                            ? v.currentValue
-                              ? '已设置（留空不修改）'
-                              : '输入密钥'
-                            : isMaskedUrlVariable(v)
-                              ? '保持当前值（已脱敏）'
-                              : v.defaultValue
-                        }
-                        className="rounded-[10px] border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-2 font-mono text-xs text-[#6A5A50]"
-                      />
-                      {buildVariableHint(v) ? (
-                        <div className="text-[11px] leading-5 text-[#B59A88]">{buildVariableHint(v)}</div>
-                      ) : null}
-                    </div>
+                    <input
+                      aria-label={v.name}
+                      type={isSensitiveEditable(v) ? 'password' : 'text'}
+                      autoComplete={isSensitiveEditable(v) ? 'off' : undefined}
+                      value={drafts[v.name] ?? ''}
+                      onChange={(e) => onDraftChange(v.name, e.target.value)}
+                      placeholder={
+                        isSensitiveEditable(v)
+                          ? v.currentValue
+                            ? '已设置（留空不修改）'
+                            : '输入密钥'
+                          : isMaskedUrlVariable(v)
+                            ? '保持当前值（已脱敏）'
+                            : v.defaultValue
+                      }
+                      className="console-form-input py-1.5 font-mono text-xs"
+                    />
                   ) : (
-                    <div className="rounded-[10px] border border-dashed border-[#E8DCCF] bg-[#F7F3F0] px-3 py-2 text-[11px] text-[#8A776B]">
-                      只读变量（认证凭证 / 仅启动期生效）
+                    <div className="rounded-lg bg-[var(--console-field-bg)] px-3 py-1.5 font-mono text-xs text-cafe-muted">
+                      {v.currentValue ?? v.defaultValue}
                     </div>
                   )}
                 </div>
-              ))}
-            </div>
-          </div>
+              </div>
+            ))}
+          </EnvCategoryGroup>
         ))}
       </div>
+      {pendingRestartCount > 0 && (
+        <div className="mt-3 rounded-[12px] border border-conn-amber-ring bg-conn-amber-bg px-3 py-2 text-xs leading-5 text-conn-amber-text">
+          {pendingRestartCount} 项变更需要重启生效
+        </div>
+      )}
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <button
           type="button"
           onClick={onSave}
           disabled={!isDirty || saveState.saving}
-          className="rounded-full bg-[#D49266] px-4 py-2 text-xs font-semibold text-white hover:bg-[#c47f52] disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-full bg-[var(--cafe-accent)] px-4 py-2 text-xs font-semibold text-[var(--cafe-surface)] hover:bg-[var(--cafe-accent-hover,#c47f52)] disabled:cursor-not-allowed disabled:opacity-50"
         >
           {saveState.saving ? '保存中...' : '保存到 .env'}
         </button>
-        {saveState.error && <span className="text-xs text-red-600">{saveState.error}</span>}
-        {saveState.success && <span className="text-xs text-green-600">{saveState.success}</span>}
+        {saveState.error && <span className="text-xs text-conn-red-text">{saveState.error}</span>}
+        {saveState.success && <span className="text-xs text-conn-emerald-text">{saveState.success}</span>}
       </div>
     </Section>
   );
@@ -378,12 +383,9 @@ function DataDirsSection({ dataDirs, projectRoot }: { dataDirs: DataDirs; projec
         {dirs.map((d) => {
           const cls = classifyPath(d.path, projectRoot, d.isDir);
           return (
-            <div
-              key={d.name}
-              className="flex items-baseline gap-2 rounded-[12px] border border-[#F3E8DE] bg-cafe-surface px-3 py-2"
-            >
-              <span className="shrink-0 text-xs font-medium text-[#6A5A50]">{d.name}</span>
-              <span className="text-xs text-[#8A776B]">{d.desc}</span>
+            <div key={d.name} className="flex items-baseline gap-2 px-1 py-2">
+              <span className="shrink-0 text-xs font-medium text-cafe-secondary">{d.name}</span>
+              <span className="text-xs text-cafe-muted">{d.desc}</span>
               <PathAction classification={cls} absPath={d.path} />
             </div>
           );
@@ -393,7 +395,7 @@ function DataDirsSection({ dataDirs, projectRoot }: { dataDirs: DataDirs; projec
   );
 }
 
-export function HubEnvFilesTab() {
+export function HubEnvFilesTab({ excludeCategories }: { excludeCategories?: string[] } = {}) {
   const [data, setData] = useState<EnvSummaryData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -422,7 +424,7 @@ export function HubEnvFilesTab() {
       .catch(() => setError('环境信息加载失败'));
   }, []);
 
-  if (error) return <p className="text-sm text-red-500 bg-red-50 rounded-lg px-3 py-2">{error}</p>;
+  if (error) return <p className="text-sm text-conn-red-text bg-conn-red-bg rounded-lg px-3 py-2">{error}</p>;
   if (!data) return <p className="text-sm text-cafe-muted">加载中...</p>;
 
   const editableVariables = data.variables.filter(isEditableVariable);
@@ -438,6 +440,10 @@ export function HubEnvFilesTab() {
     .map(({ name, value }) => ({ name, value }));
 
   const isDirty = changedUpdates.length > 0;
+  const pendingRestartCount = changedUpdates.filter((u) => {
+    const v = data.variables.find((item) => item.name === u.name);
+    return v && needsRestart(v);
+  }).length;
 
   const handleDraftChange = (name: string, value: string) => {
     setDrafts((prev) => ({ ...prev, [name]: value }));
@@ -490,12 +496,18 @@ export function HubEnvFilesTab() {
 
   return (
     <div className="space-y-4">
-      <PageIntro />
       <EnvVarsSection
-        categories={data.categories}
-        variables={data.variables}
+        categories={
+          excludeCategories
+            ? Object.fromEntries(Object.entries(data.categories).filter(([k]) => !excludeCategories.includes(k)))
+            : data.categories
+        }
+        variables={
+          excludeCategories ? data.variables.filter((v) => !excludeCategories.includes(v.category)) : data.variables
+        }
         drafts={drafts}
         isDirty={isDirty}
+        pendingRestartCount={pendingRestartCount}
         saveState={saveState}
         onDraftChange={handleDraftChange}
         onSave={handleSave}

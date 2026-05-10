@@ -5,10 +5,9 @@ import { type Thread, useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { loadThreads as loadCachedThreads } from '@/utils/offline-store';
-import { BootcampIcon } from '../icons/BootcampIcon';
-import { HubIcon } from '../icons/HubIcon';
-import { MemoryIcon } from '../icons/MemoryIcon';
 
+import { BootcampListModal } from '../BootcampListModal';
+import { BootcampIcon } from '../icons/BootcampIcon';
 import { readProjectNames, writeProjectNames } from './active-workspace';
 import { DirectoryPickerModal, type NewThreadOptions } from './DirectoryPickerModal';
 import { SectionGroup } from './SectionGroup';
@@ -28,8 +27,6 @@ import { useScrollAnchor } from './use-scroll-anchor';
 interface ThreadSidebarProps {
   onClose?: () => void;
   className?: string;
-  onBootcampClick?: () => void;
-  onHubClick?: () => void;
 }
 
 function notifyThreadCreateFailure(message: string) {
@@ -41,7 +38,7 @@ function notifyThreadCreateFailure(message: string) {
   });
 }
 
-export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick }: ThreadSidebarProps) {
+export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   const {
     threads,
     currentThreadId,
@@ -55,6 +52,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
   } = useChatStore();
   const [isCreating, setIsCreating] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
+  const [showBootcampList, setShowBootcampList] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [bindWarning, setBindWarning] = useState<string | null>(null);
   // I-1: Thread to confirm deletion (null = no dialog)
@@ -185,9 +183,10 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
           body: JSON.stringify({
             ...(opts.projectPath ? { projectPath: opts.projectPath } : {}),
             ...(opts.preferredCats?.length ? { preferredCats: opts.preferredCats } : {}),
-            ...(opts.title ? { title: opts.title } : {}),
+            ...(opts.title || opts.bootcamp ? { title: opts.bootcamp ? '🎓 猫猫训练营' : opts.title } : {}),
             ...(opts.pinned ? { pinned: opts.pinned } : {}),
             ...(opts.backlogItemId ? { backlogItemId: opts.backlogItemId } : {}),
+            ...(opts.bootcamp ? { bootcampState: { v: 1, phase: 'phase-1-intro', startedAt: Date.now() } } : {}),
           }),
         });
         if (!res.ok) {
@@ -269,42 +268,6 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
     },
     [loadThreads, loadTrash],
   );
-
-  /** F087: Create a bootcamp onboarding thread */
-  const createBootcampThread = useCallback(async () => {
-    setIsCreating(true);
-    try {
-      const res = await apiFetch('/api/threads', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: '🎓 猫猫训练营',
-          bootcampState: {
-            v: 1,
-            phase: 'phase-1-intro',
-            startedAt: Date.now(),
-          },
-        }),
-      });
-      if (!res.ok) {
-        const errBody = await res.text().catch(() => '(no body)');
-        console.error('[createBootcampThread] POST /api/threads failed:', res.status, errBody);
-        notifyThreadCreateFailure('训练营线程没有创建成功，请稍后重试。');
-        return;
-      }
-      const thread: Thread = await res.json();
-      navigateToThread(thread.id);
-      if (typeof window !== 'undefined' && window.innerWidth < 768) {
-        onClose?.();
-      }
-      await loadThreads();
-    } catch (err) {
-      console.error('[createBootcampThread] exception:', err);
-      notifyThreadCreateFailure('训练营线程创建失败，请检查网络后重试。');
-    } finally {
-      setIsCreating(false);
-    }
-  }, [navigateToThread, loadThreads, onClose]);
 
   // I-1: Show confirmation dialog instead of deleting immediately
   const handleDeleteRequest = useCallback(
@@ -500,56 +463,33 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
     searchQuery: normalizedQuery,
     currentThreadId,
   });
+  const bootcampCount = useMemo(() => threads.filter((thread) => thread.bootcampState).length, [threads]);
 
   return (
     <>
-      <aside className={`${className ?? 'w-60'} border-r border-cocreator-light bg-cafe-surface flex flex-col h-full`}>
-        <div className="p-3 border-b border-cocreator-light flex items-center justify-between">
+      <aside
+        className={`${className ?? 'w-60'} flex flex-col h-full bg-[var(--console-panel-bg)]`}
+        style={{ boxShadow: '8px 0 24px rgba(43, 33, 26, 0.04)' }}
+      >
+        <div className="p-3 flex items-center justify-between gap-2">
           <span className="text-sm font-semibold text-cafe-black">对话</span>
           <div className="flex items-center gap-1.5">
             <button
               type="button"
-              onClick={onBootcampClick ?? createBootcampThread}
-              disabled={!onBootcampClick && isCreating}
-              className="text-xs px-2 py-1 rounded-lg border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 disabled:opacity-40 transition-colors"
-              title="猫猫训练营"
+              onClick={() => setShowBootcampList(true)}
+              className="relative flex h-8 w-8 items-center justify-center rounded-lg text-conn-amber-text transition-colors hover:bg-conn-amber-bg/60"
               data-testid="sidebar-bootcamp"
               data-guide-id="sidebar.bootcamp"
+              title={bootcampCount > 0 ? `我的训练营（${bootcampCount}）` : '开始训练营'}
+              aria-label={bootcampCount > 0 ? `我的训练营（${bootcampCount}）` : '开始训练营'}
             >
-              <BootcampIcon className="w-3.5 h-3.5 inline-block -mt-0.5" />
+              <BootcampIcon className="h-4 w-4" />
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                const fromParam = currentThreadId ? `?from=${encodeURIComponent(currentThreadId)}` : '';
-                window.location.assign(`/memory${fromParam}`);
-                if (typeof window !== 'undefined' && window.innerWidth < 768) {
-                  onClose?.();
-                }
-              }}
-              className="text-xs px-2 py-1 rounded-lg border border-purple-300 bg-purple-50 text-purple-700 hover:bg-purple-100 transition-colors"
-              title="Memory Hub"
-              data-testid="sidebar-memory"
-            >
-              <MemoryIcon className="w-3.5 h-3.5 inline-block -mt-0.5" />
-            </button>
-            {onHubClick && (
-              <button
-                type="button"
-                onClick={onHubClick}
-                className="text-xs px-2 py-1 rounded-lg border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
-                title="IM Hub"
-                data-testid="sidebar-hub"
-                data-guide-id="im-hub.trigger"
-              >
-                <HubIcon className="w-3.5 h-3.5 inline-block -mt-0.5" />
-              </button>
-            )}
             <button
               type="button"
               onClick={() => setShowPicker(true)}
               disabled={isCreating}
-              className="text-xs px-2 py-1 rounded-lg bg-cocreator-primary text-white hover:bg-cocreator-dark disabled:opacity-40 transition-colors"
+              className="console-button-primary text-xs px-2 py-1 disabled:opacity-40"
               data-guide-id="sidebar.new-thread"
             >
               {isCreating ? '...' : '+ 新对话'}
@@ -557,56 +497,23 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
           </div>
         </div>
 
-        <div className="px-3 py-2 border-b border-cocreator-light">
-          <button
-            type="button"
-            onClick={() => {
-              const fromParam = currentThreadId ? `?from=${encodeURIComponent(currentThreadId)}` : '';
-              window.location.assign(`/mission-hub${fromParam}`);
-              if (typeof window !== 'undefined' && window.innerWidth < 768) {
-                onClose?.();
-              }
-            }}
-            className="flex w-full items-center gap-2 rounded-lg border border-[#D8C6AD] bg-[#FCF7EE] px-2.5 py-1.5 text-left text-xs font-medium text-[#6C563F] transition-colors hover:bg-[#F7EEDB]"
-            data-testid="sidebar-mission-control"
-          >
-            <svg
-              className="h-4 w-4 shrink-0 text-[#9A866F]"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <rect x="3" y="3" width="7" height="7" />
-              <rect x="14" y="3" width="7" height="7" />
-              <rect x="14" y="14" width="7" height="7" />
-              <rect x="3" y="14" width="7" height="7" />
-            </svg>
-            Mission Hub
-          </button>
-        </div>
-
         {bindWarning && (
-          <div className="px-3 py-1.5 bg-yellow-50 border-b border-yellow-200 text-[10px] text-yellow-700">
-            {bindWarning}
-          </div>
+          <div className="px-3 py-1.5 bg-conn-amber-bg/60 text-[10px] text-conn-amber-text">{bindWarning}</div>
         )}
 
-        <div className="px-3 py-2 border-b border-cocreator-light">
+        <div className="px-3 py-2">
           <input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="搜索对话、项目或 ID..."
-            className="w-full rounded-lg border border-cocreator-light px-2.5 py-1.5 text-xs text-cafe-secondary placeholder:text-gray-400 focus:outline-none focus:border-cocreator-primary"
+            className="console-form-input w-full text-xs"
           />
           {unreadIds.size > 0 && (
             <button
               type="button"
               onClick={handleMarkAllRead}
               disabled={isMarkingAllRead}
-              className="mt-1.5 text-[10px] text-cafe-muted hover:text-cocreator-primary disabled:opacity-40 transition-colors"
+              className="mt-1.5 text-[10px] text-cafe-muted hover:text-cafe-accent disabled:opacity-40 transition-colors"
               data-testid="mark-all-read-btn"
             >
               {isMarkingAllRead ? '清理中...' : '全部已读'}
@@ -636,7 +543,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
               <button
                 type="button"
                 onClick={expandAll}
-                className="text-[10px] text-cafe-muted hover:text-cocreator-primary transition-colors"
+                className="text-[10px] text-cafe-muted hover:text-cafe-accent transition-colors"
                 data-testid="expand-all-btn"
               >
                 全部展开
@@ -645,7 +552,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
               <button
                 type="button"
                 onClick={collapseAll}
-                className="text-[10px] text-cafe-muted hover:text-cocreator-primary transition-colors"
+                className="text-[10px] text-cafe-muted hover:text-cafe-accent transition-colors"
                 data-testid="collapse-all-btn"
               >
                 全部折叠
@@ -801,20 +708,28 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
           )}
         </div>
 
-        {/* F095 Phase D: Trash bin section */}
-        <div className="border-t border-cocreator-light">
+        {/* F095 Phase D: Trash bin section — styled as Pencil Sidebar Utility Row */}
+        <div className="px-3 pb-3">
           <button
             type="button"
             onClick={handleToggleTrash}
-            className="flex w-full items-center gap-1.5 px-3 py-2 text-xs text-cafe-muted hover:text-cafe-secondary transition-colors"
+            className="flex w-full items-center gap-2 h-9 px-2.5 rounded-xl bg-[var(--console-code-bg)] text-xs text-cafe-secondary hover:opacity-80 transition-colors"
             data-testid="trash-bin-toggle"
           >
-            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-            </svg>
-            回收站{trashedThreads.length > 0 ? ` (${trashedThreads.length})` : ''}
             <svg
-              className={`h-3 w-3 ml-auto transition-transform ${showTrash ? 'rotate-180' : ''}`}
+              className="h-[15px] w-[15px] flex-shrink-0"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4" />
+            </svg>
+            <span className="flex-1 text-left">
+              回收站{trashedThreads.length > 0 ? ` (${trashedThreads.length})` : ''}
+            </span>
+            <svg
+              className={`h-3 w-3 flex-shrink-0 transition-transform ${showTrash ? 'rotate-180' : ''}`}
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -838,7 +753,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
                   <button
                     type="button"
                     onClick={() => handleRestore(t.id)}
-                    className="sm:opacity-0 sm:group-hover:opacity-100 text-[10px] text-cocreator-primary hover:text-cocreator-dark transition-all shrink-0"
+                    className="sm:opacity-0 sm:group-hover:opacity-100 text-[10px] text-cafe-accent hover:text-cafe-accent/80 transition-all shrink-0"
                     data-testid={`restore-btn-${t.id}`}
                   >
                     恢复
@@ -857,6 +772,11 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
           onCancel={() => setShowPicker(false)}
         />
       )}
+      <BootcampListModal
+        open={showBootcampList}
+        onClose={() => setShowBootcampList(false)}
+        currentThreadId={currentThreadId}
+      />
 
       {/* I-1: Delete confirmation dialog (F095-G: typed confirmation for system threads) */}
       {deleteTarget && (
@@ -889,12 +809,17 @@ function DeleteConfirmDialog({
   const [typedName, setTypedName] = useState('');
   const confirmed = !isSystem || typedName === title;
   const confirmInputRef = useRef<HTMLInputElement>(null);
+  const confirmBtnRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (isSystem) confirmInputRef.current?.focus();
+    else setTimeout(() => confirmBtnRef.current?.focus(), 50);
   }, [isSystem]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onCancel}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--console-overlay-medium)]"
+      onClick={onCancel}
+    >
       <div
         className="bg-cafe-surface rounded-xl shadow-2xl p-5 max-w-sm w-full mx-4"
         onClick={(e) => e.stopPropagation()}
@@ -903,14 +828,16 @@ function DeleteConfirmDialog({
         <p className="text-sm text-cafe-secondary mb-1">即将删除「{title}」</p>
         {isSystem ? (
           <>
-            <p className="text-xs text-red-500 mb-2">这是系统级对话（IM Hub 连接器）。删除可能影响平台消息路由。</p>
+            <p className="text-xs text-conn-red-text mb-2">
+              这是系统级对话（IM Hub 连接器）。删除可能影响平台消息路由。
+            </p>
             <p className="text-xs text-cafe-secondary mb-2">请输入对话名称以确认删除：</p>
             <input
               ref={confirmInputRef}
               value={typedName}
               onChange={(e) => setTypedName(e.target.value)}
               placeholder={title}
-              className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-cafe focus:outline-none focus:border-red-400 mb-4"
+              className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-[var(--console-border-soft)] focus:outline-none focus:border-conn-red-ring mb-4"
             />
           </>
         ) : (
@@ -921,17 +848,18 @@ function DeleteConfirmDialog({
         <div className="flex gap-2 justify-end">
           <button
             onClick={onCancel}
-            className="px-3 py-1.5 text-sm rounded-lg border border-cafe hover:bg-cafe-surface-elevated transition-colors"
+            className="px-3 py-1.5 text-sm rounded-lg border border-[var(--console-border-soft)] hover:bg-cafe-surface-elevated transition-colors"
           >
             取消
           </button>
           <button
+            ref={confirmBtnRef}
             onClick={onConfirm}
             disabled={!confirmed}
-            className={`px-3 py-1.5 text-sm rounded-lg text-white transition-colors ${
+            className={`px-3 py-1.5 text-sm rounded-lg text-[var(--cafe-surface)] transition-colors focus:outline-none focus:ring-2 ${
               isSystem
-                ? 'bg-red-500 hover:bg-red-600 disabled:bg-red-300 disabled:cursor-not-allowed'
-                : 'bg-orange-500 hover:bg-orange-600'
+                ? 'bg-conn-red-text hover:opacity-90 focus:ring-conn-red-ring disabled:opacity-40 disabled:cursor-not-allowed'
+                : 'bg-conn-amber-text hover:opacity-90 focus:ring-conn-amber-ring'
             }`}
           >
             {isSystem ? '确认删除' : '移入回收站'}

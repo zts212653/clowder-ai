@@ -168,4 +168,29 @@ describe('POST /api/config/secrets', () => {
     });
     assert.equal(process.env.DINGTALK_APP_SECRET, undefined);
   });
+
+  it('accepts GitHub plugin config keys (GITHUB_TOKEN, NOISE, MCP_PAT)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/config/secrets',
+      headers: { 'x-cat-cafe-user': 'test-user' },
+      payload: {
+        updates: [
+          { name: 'GITHUB_TOKEN', value: 'ghp_test123abc' },
+          { name: 'GITHUB_SETUP_NOISE_BOT_LOGINS', value: 'dependabot[bot]' },
+          { name: 'GITHUB_MCP_PAT', value: 'ghp_mcp_xyz' },
+        ],
+      },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.ok, true);
+    assert.equal(process.env.GITHUB_TOKEN, 'ghp_test123abc');
+    assert.equal(process.env.GITHUB_SETUP_NOISE_BOT_LOGINS, 'dependabot[bot]');
+    assert.equal(process.env.GITHUB_MCP_PAT, 'ghp_mcp_xyz');
+
+    delete process.env.GITHUB_TOKEN;
+    delete process.env.GITHUB_SETUP_NOISE_BOT_LOGINS;
+    delete process.env.GITHUB_MCP_PAT;
+  });
 });

@@ -22,12 +22,12 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `writing-plans` | 写实施计划 | — |
 | `worktree` | 开始写代码（创建隔离环境） | ① |
 | `tdd` | 写测试+实现（红绿重构） | ① |
+| `console-dev` | 前端交付范式（4-gate 门禁） | — |
 | `debugging` | 遇到 bug（系统化定位） | — |
 | `quality-gate` | 开发完了自检（愿景+spec+验证） | ② |
 | `request-review` | 发 review 请求给 reviewer | ③ |
 | `receive-review` | 处理 review 反馈（Red→Green） | ③ |
 | `merge-gate` | 门禁→PR→云端 review→merge→清理 | ④⑤⑥ |
-| `open-source-teardown` | 热门开源项目/竞品 agent/runtime 的源码拆解、算法剥皮、营销水分和 tradeoff 判断 | — |
 | `cross-cat-handoff` | 跨猫交接/传话（五件套） | — |
 | `deep-research` | 多源深度调研 | — |
 | `knowledge-engineering` | 外部项目文档重构/冷启动知识注入 | — |
@@ -64,6 +64,7 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `refs/ppt-density-playbook.md` | PPT 密度填充手法（9 种手段 + 量化门禁） |
 | `refs/ppt-visual-review.md` | PPT 视觉审查 Gate（D1 布局+D2 审美） |
 | `refs/ppt-style-tile.md` | PPT 风格定调（核心页 CSS 变量） |
+| `refs/f190-frontend-lessons.md` | F190 Console 重构案例集（console-dev 补充） |
 
 ## 关键规则
 

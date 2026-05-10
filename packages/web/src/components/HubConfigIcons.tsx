@@ -56,7 +56,7 @@ export const PLATFORM_VISUALS: Record<string, PlatformVisual> = {
 
 export const DEFAULT_VISUAL: PlatformVisual = {
   iconBg: '#F3F4F6',
-  iconColor: '#6B7280',
+  iconColor: 'var(--cafe-text-muted)',
   icon: (
     <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" stroke="currentColor" {...SVG_PROPS}>
       <path d="M12 12m-10 0a10 10 0 1 0 20 0a10 10 0 1 0-20 0" />
@@ -66,7 +66,7 @@ export const DEFAULT_VISUAL: PlatformVisual = {
 
 export function StepBadge({ num }: { num: number }) {
   return (
-    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-500 text-white text-[11px] font-bold flex-shrink-0">
+    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[var(--color-cafe-accent)] text-[var(--cafe-surface)] text-[11px] font-bold flex-shrink-0">
       {num}
     </span>
   );
@@ -111,7 +111,12 @@ export function WifiIcon() {
 
 export function TriangleAlertIcon() {
   return (
-    <svg className="w-4 h-4 text-amber-600 flex-shrink-0" viewBox="0 0 24 24" stroke="currentColor" {...SVG_PROPS}>
+    <svg
+      className="w-4 h-4 text-conn-amber-text flex-shrink-0"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      {...SVG_PROPS}
+    >
       <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
       <path d="M12 9v4" />
       <path d="M12 17h.01" />
@@ -123,7 +128,7 @@ export function TriangleAlertIcon() {
 export function StatusDotConnected() {
   return (
     <svg className="w-2.5 h-2.5 flex-shrink-0" viewBox="0 0 10 10">
-      <circle cx="5" cy="5" r="5" fill="#16A34A" />
+      <circle cx="5" cy="5" r="5" fill="var(--console-status-connected)" />
     </svg>
   );
 }
@@ -132,7 +137,7 @@ export function StatusDotConnected() {
 export function StatusDotIdle() {
   return (
     <svg className="w-2.5 h-2.5 flex-shrink-0" viewBox="0 0 10 10">
-      <circle cx="5" cy="5" r="4" fill="none" stroke="#9CA3AF" strokeWidth="2" />
+      <circle cx="5" cy="5" r="4" fill="none" stroke="var(--console-status-idle)" strokeWidth="2" />
     </svg>
   );
 }

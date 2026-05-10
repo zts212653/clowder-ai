@@ -51,9 +51,9 @@ packages/web/public/vendor/
 cat-config.json
 .cat-cafe/
 
-# Claude Code skills — cat-cafe symlinks are tracked; plugin-generated ones are not
-.claude/skills/pencil-renderer
-.claude/skills/pencil-to-code
+# Claude Code skills — fork-local symlinks to cat-cafe-skills/, not for upstream
+.claude/skills/
+packages/api/.claude/skills/
 
 # Claude local project memory / backup files
 .claude/projects/
@@ -145,6 +145,10 @@ docs/discussions/**/sources/*.pdf
 
 # Playwright MCP cache
 .playwright-mcp/
+
+# Playwright / test runner output
+test-results/
+test-cli-raw-archive/
 
 # SQLite runtime databases (Hindsight evidence store + World Engine)
 evidence.sqlite

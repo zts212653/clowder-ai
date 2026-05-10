@@ -541,6 +541,66 @@ describe('GET /api/connector/hub-threads', () => {
 const { WeComBotAdapter } = await import('../dist/infrastructure/connectors/adapters/WeComBotAdapter.js');
 
 describe('GET /api/connector/status — WeCom Bot live health', () => {
+  it('exposes GitHub plugin platform with active fields and category', async () => {
+    const app = Fastify();
+    try {
+      await app.register(connectorHubRoutes, {
+        threadStore: {
+          async list() {
+            return [];
+          },
+        },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/connector/status',
+        headers: AUTH_HEADERS,
+      });
+      const body = JSON.parse(res.body);
+      const github = body.platforms.find((p) => p.id === 'github');
+
+      assert.ok(github, 'github platform must exist in status');
+      assert.equal(github.category, 'plugin', 'github must have category=plugin');
+      assert.deepEqual(
+        github.fields.map((field) => field.envName),
+        ['GITHUB_TOKEN', 'GITHUB_SETUP_NOISE_BOT_LOGINS', 'GITHUB_MCP_PAT'],
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('IM platforms do not have category=plugin', async () => {
+    const app = Fastify();
+    try {
+      await app.register(connectorHubRoutes, {
+        threadStore: {
+          async list() {
+            return [];
+          },
+        },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/connector/status',
+        headers: AUTH_HEADERS,
+      });
+      const body = JSON.parse(res.body);
+      const imPlatforms = body.platforms.filter((p) => p.category !== 'plugin');
+
+      assert.ok(imPlatforms.length > 0, 'should have at least one IM platform');
+      for (const p of imPlatforms) {
+        assert.notEqual(p.id, 'github', 'github must not appear in IM-filtered list');
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
   it('P1: shows configured=false when adapter getter returns null (not false green from env)', async () => {
     const savedBotId = process.env.WECOM_BOT_ID;
     const savedSecret = process.env.WECOM_BOT_SECRET;
@@ -808,6 +868,81 @@ describe('POST /api/connector/wecom-bot/disconnect', () => {
     assert.ok(!envContent.includes('WECOM_BOT_SECRET'), 'WECOM_BOT_SECRET cleared from .env');
     assert.match(envContent, /KEEP=yes/, 'Other entries preserved');
 
+    await app.close();
+  });
+});
+
+describe('PUT /api/connector/:connectorId/config — owner guard', () => {
+  const OWNER_ID = 'owner-admin';
+
+  async function buildConfigApp(opts = {}) {
+    const tmpDir = mkdtempSync(join(os.tmpdir(), 'conn-cfg-'));
+    const envFilePath = join(tmpDir, '.env');
+    writeFileSync(envFilePath, 'EXISTING=keep\n');
+    const app = Fastify();
+    await app.register(connectorHubRoutes, {
+      threadStore: {
+        async list() {
+          return [];
+        },
+      },
+      envFilePath,
+      ...opts,
+    });
+    await app.ready();
+    return { app, envFilePath };
+  }
+
+  it('allows saves when DEFAULT_OWNER_USER_ID is not configured (permissive mode)', async () => {
+    delete process.env.DEFAULT_OWNER_USER_ID;
+    const { app, envFilePath } = await buildConfigApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/connector/telegram/config',
+      headers: { 'x-cat-cafe-user': 'anyone', 'content-type': 'application/json' },
+      payload: JSON.stringify({
+        secrets: [{ name: 'TELEGRAM_BOT_TOKEN', value: '123456:ABCdefghij_permissive_test' }],
+      }),
+    });
+    assert.equal(res.statusCode, 200);
+    const env = readFileSync(envFilePath, 'utf8');
+    assert.ok(env.includes('TELEGRAM_BOT_TOKEN'), '.env should be mutated in permissive mode');
+    await app.close();
+  });
+
+  it('returns 403 for non-owner user', async () => {
+    process.env.DEFAULT_OWNER_USER_ID = OWNER_ID;
+    const { app, envFilePath } = await buildConfigApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/connector/telegram/config',
+      headers: { 'x-cat-cafe-user': 'attacker', 'content-type': 'application/json' },
+      payload: JSON.stringify({ secrets: [{ name: 'TELEGRAM_BOT_TOKEN', value: '123456:ABC' }] }),
+    });
+    assert.equal(res.statusCode, 403);
+    const env = readFileSync(envFilePath, 'utf8');
+    assert.ok(!env.includes('TELEGRAM_BOT_TOKEN'), '.env must not be mutated');
+    delete process.env.DEFAULT_OWNER_USER_ID;
+    await app.close();
+  });
+
+  it('returns 200 for owner and writes secrets', async () => {
+    process.env.DEFAULT_OWNER_USER_ID = OWNER_ID;
+    const { app, envFilePath } = await buildConfigApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/connector/telegram/config',
+      headers: { 'x-cat-cafe-user': OWNER_ID, 'content-type': 'application/json' },
+      payload: JSON.stringify({ secrets: [{ name: 'TELEGRAM_BOT_TOKEN', value: '123456:ABCdefghij_test' }] }),
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.ok, true);
+    const env = readFileSync(envFilePath, 'utf8');
+    assert.match(env, /TELEGRAM_BOT_TOKEN=123456:ABCdefghij_test/);
+    assert.match(env, /EXISTING=keep/);
+    delete process.env.DEFAULT_OWNER_USER_ID;
+    delete process.env.TELEGRAM_BOT_TOKEN;
     await app.close();
   });
 });

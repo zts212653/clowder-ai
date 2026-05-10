@@ -23,7 +23,7 @@ export const auditRoutes: FastifyPluginAsync<AuditRoutesOptions> = async (app, o
 
   app.get<{ Params: { threadId: string } }>('/api/audit/thread/:threadId', async (request, reply) => {
     const { threadId } = request.params;
-    const userId = resolveUserId(request, { defaultUserId: 'default-user' });
+    const userId = resolveUserId(request);
 
     if (!userId) {
       reply.status(401);
@@ -36,7 +36,8 @@ export const auditRoutes: FastifyPluginAsync<AuditRoutesOptions> = async (app, o
       return { error: 'Thread not found' };
     }
 
-    if (thread.createdBy !== userId) {
+    const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim();
+    if (thread.createdBy !== userId && (!ownerId || userId !== ownerId)) {
       reply.status(403);
       return { error: 'Access denied' };
     }

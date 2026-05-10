@@ -43,6 +43,15 @@ export interface RuntimeCatInput {
   contextBudget?: ContextBudget;
   /** clowder-ai#340 P5: Model provider name (renamed from ocProviderName). */
   provider?: string;
+  voiceConfig?: {
+    voice: string;
+    langCode: string;
+    speed?: number;
+    refAudio?: string;
+    refText?: string;
+    instruct?: string;
+    temperature?: number;
+  };
 }
 
 export interface RuntimeCatUpdate {
@@ -70,6 +79,15 @@ export interface RuntimeCatUpdate {
   /** clowder-ai#340 P5: Model provider name (renamed from ocProviderName). */
   provider?: string | null;
   available?: boolean;
+  voiceConfig?: {
+    voice: string;
+    langCode: string;
+    speed?: number;
+    refAudio?: string;
+    refText?: string;
+    instruct?: string;
+    temperature?: number;
+  } | null;
 }
 
 export interface RuntimeCoCreatorUpdate {
@@ -230,6 +248,7 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
           ? { caution: input.caution && input.caution.trim().length > 0 ? input.caution.trim() : null }
           : {}),
         ...(input.strengths ? { strengths: input.strengths } : {}),
+        ...(input.voiceConfig ? { voiceConfig: input.voiceConfig } : {}),
       },
     ],
   } as unknown as CatBreed;
@@ -418,6 +437,13 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
       variant.provider = patch.provider;
     } else {
       delete variant.provider;
+    }
+  }
+  if (patch.voiceConfig !== undefined) {
+    if (patch.voiceConfig) {
+      variant.voiceConfig = patch.voiceConfig;
+    } else {
+      delete variant.voiceConfig;
     }
   }
   if (patch.available !== undefined && catalog.version === 2) {

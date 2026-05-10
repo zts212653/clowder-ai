@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useCafeTheme } from '@/hooks/useCafeTheme';
 
 /** Sun icon (shown in light mode → click to go dark) */
@@ -48,6 +49,9 @@ function MoonIcon() {
 
 export function ThemeToggle() {
   const { resolvedTheme, toggleTheme } = useCafeTheme();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   const isDark = resolvedTheme === 'dark';
 
   return (
@@ -57,7 +61,7 @@ export function ThemeToggle() {
       aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
       className="rounded-lg p-2 text-cafe-secondary hover:bg-cafe-surface-elevated transition-colors"
     >
-      {isDark ? <MoonIcon /> : <SunIcon />}
+      {!mounted ? <MoonIcon /> : isDark ? <MoonIcon /> : <SunIcon />}
     </button>
   );
 }

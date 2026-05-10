@@ -5,7 +5,7 @@ import type { RichChecklistBlock } from '@/stores/chat-types';
 export function ChecklistBlock({ block }: { block: RichChecklistBlock }) {
   const items = Array.isArray(block.items) ? block.items : [];
   return (
-    <div className="rounded-lg border border-cafe dark:border-gray-700 p-3">
+    <div className="rounded-lg border border-[var(--console-border-soft)] p-3">
       {block.title && <div className="font-medium text-sm mb-2">{block.title}</div>}
       <ul className="space-y-1">
         {items.map((item) => (

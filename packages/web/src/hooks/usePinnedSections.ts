@@ -10,8 +10,7 @@ function read(): string[] {
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    const parsed: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
+    return raw ? (JSON.parse(raw) as string[]) : [];
   } catch {
     return [];
   }

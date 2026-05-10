@@ -1,4 +1,4 @@
-import type { SignalArticle, SignalArticleStatus } from '@cat-cafe/shared';
+import type { SignalArticle } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -45,11 +45,8 @@ describe('SignalArticleList', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('does not render nested action buttons and keeps action click isolated', async () => {
+  it('renders article rows and triggers onSelect on click', async () => {
     const onSelect = vi.fn<(article: SignalArticle) => void>();
-    const onStatusChange = vi
-      .fn<(articleId: string, status: SignalArticleStatus) => Promise<void>>()
-      .mockResolvedValue(undefined);
 
     await act(async () => {
       root.render(
@@ -57,26 +54,38 @@ describe('SignalArticleList', () => {
           items: [createArticle()],
           selectedArticleId: null,
           onSelect,
-          onStatusChange,
         }),
       );
     });
 
-    const rowButtons = Array.from(container.querySelectorAll('button'));
-    expect(rowButtons.length).toBe(2);
-
-    const hasNestedButtons = rowButtons.some((button) => button.querySelector('button'));
-    expect(hasNestedButtons).toBe(false);
-
-    const readButton = rowButtons.find((button) => button.textContent?.includes('已读'));
-    expect(readButton).toBeTruthy();
-    if (!readButton) return;
+    const row = container.querySelector('[role="button"]');
+    expect(row).toBeTruthy();
+    if (!row) return;
 
     await act(async () => {
-      readButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      row.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    expect(onStatusChange).toHaveBeenCalledWith('article-1', 'read');
-    expect(onSelect).not.toHaveBeenCalled();
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 'article-1' }));
+  });
+
+  it('renders §3.12 empty state with icon when items is empty', async () => {
+    const onSelect = vi.fn();
+
+    await act(async () => {
+      root.render(
+        React.createElement(SignalArticleList, {
+          items: [],
+          selectedArticleId: null,
+          onSelect,
+        }),
+      );
+    });
+
+    const svg = container.querySelector('svg');
+    expect(svg).toBeTruthy();
+
+    const title = container.textContent;
+    expect(title).toContain('当前筛选条件下没有文章');
   });
 });

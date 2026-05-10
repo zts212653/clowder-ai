@@ -165,8 +165,8 @@ describe('ChatContainer mobile interactions', () => {
       toggleBtn.click();
     });
     expect(container.querySelector('[data-testid="sidebar"]')).toBeTruthy();
-    // Backdrop should also appear
-    expect(container.querySelector('[class*="bg-black"]')).toBeTruthy();
+    // Backdrop should also appear (inline style rgba backdrop)
+    expect(container.querySelector('.fixed.inset-0.z-20')).toBeTruthy();
   });
 
   it('closes sidebar when backdrop is clicked', () => {
@@ -179,8 +179,8 @@ describe('ChatContainer mobile interactions', () => {
       toggleBtn.click();
     });
     expect(container.querySelector('[data-testid="sidebar"]')).toBeTruthy();
-    // Click backdrop
-    const backdrop = container.querySelector('[class*="bg-black"]') as HTMLElement;
+    // Click backdrop (inline style rgba backdrop)
+    const backdrop = container.querySelector('.fixed.inset-0.z-20') as HTMLElement;
     act(() => {
       backdrop.click();
     });

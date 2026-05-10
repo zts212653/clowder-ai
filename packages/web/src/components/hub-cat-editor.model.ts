@@ -46,6 +46,13 @@ export interface HubCatEditorFormState {
   maxContextTokens: string;
   maxMessages: string;
   maxContentLengthPerMsg: string;
+  voiceVoice: string;
+  voiceLangCode: string;
+  voiceSpeed: string;
+  voiceRefAudio: string;
+  voiceRefText: string;
+  voiceInstruct: string;
+  voiceTemperature: string;
 }
 
 export interface HubCatEditorDraft {
@@ -355,6 +362,13 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     maxContextTokens: cat?.contextBudget ? String(cat.contextBudget.maxContextTokens) : '',
     maxMessages: cat?.contextBudget ? String(cat.contextBudget.maxMessages) : '',
     maxContentLengthPerMsg: cat?.contextBudget ? String(cat.contextBudget.maxContentLengthPerMsg) : '',
+    voiceVoice: cat?.voiceConfig?.voice ?? '',
+    voiceLangCode: cat?.voiceConfig?.langCode ?? '',
+    voiceSpeed: cat?.voiceConfig?.speed != null ? String(cat.voiceConfig.speed) : '',
+    voiceRefAudio: cat?.voiceConfig?.refAudio ?? '',
+    voiceRefText: cat?.voiceConfig?.refText ?? '',
+    voiceInstruct: cat?.voiceConfig?.instruct ?? '',
+    voiceTemperature: cat?.voiceConfig?.temperature != null ? String(cat.voiceConfig.temperature) : '',
   };
 }
 

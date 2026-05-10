@@ -67,7 +67,7 @@ describe('MessageNavigator', () => {
     const msgs = [makeMsg('m1', 'user'), makeMsg('m2', 'assistant', 'opus'), makeMsg('m3', 'assistant', 'codex')];
     const html = render(msgs);
 
-    expect(html).toContain('bg-cocreator-primary');
+    expect(html).toContain('bg-cafe-accent');
     expect(html).toContain('#9B7EBD');
     expect(html).toContain('#5B8C5A');
   });
@@ -154,7 +154,7 @@ describe('MessageNavigator', () => {
     const html = render(msgs);
 
     // Track rail (thin line) and viewport indicator should be present
-    expect(html).toContain('bg-gray-200');
-    expect(html).toContain('bg-gray-300/50');
+    expect(html).toContain('bg-[var(--console-pill-bg)]');
+    expect(html).toContain('bg-cafe-surface-sunken/50');
   });
 });

@@ -12,7 +12,12 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { resolveCatCatalogPath } from '../config/cat-catalog-store.js';
 import { loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
-import { deleteCatalogAccount, readCatalogAccounts, writeCatalogAccount } from '../config/catalog-accounts.js';
+import {
+  deleteCatalogAccount,
+  readCatalogAccounts,
+  resolveAccountsPath,
+  writeCatalogAccount,
+} from '../config/catalog-accounts.js';
 import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
 import { deleteCredential, hasCredential, writeCredential } from '../config/credentials.js';
 
@@ -245,8 +250,11 @@ export const accountsRoutes: FastifyPluginAsync = async (app) => {
     const providers = Object.entries(accounts).map(([id, account]) =>
       accountToView(id, account, hasCredential(id, projectRoot)),
     );
+    const accountsFile = resolveAccountsPath(projectRoot);
+    const configRoot = resolve(accountsFile, '..');
     return {
       projectPath: projectRoot,
+      configRoot,
       providers,
     };
   });

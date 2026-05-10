@@ -19,6 +19,9 @@ describe('CONNECTOR_SECRETS_ALLOWLIST', () => {
       'DINGTALK_APP_KEY',
       'DINGTALK_APP_SECRET',
       'WEIXIN_BOT_TOKEN',
+      'WEIXIN_VOICE_ITEM_MODE',
+      'WEIXIN_ENABLE_UNSAFE_VOICE_MODES',
+      'WEIXIN_CAPTURE_INBOUND_VOICE_MEDIA',
       'WECOM_BOT_ID',
       'WECOM_BOT_SECRET',
       'WECOM_CORP_ID',
@@ -44,7 +47,7 @@ describe('CONNECTOR_SECRETS_ALLOWLIST', () => {
     assert.equal(isConnectorSecret('TELEGRAM_BOT_TOKEN_EXTRA'), false);
   });
 
-  it('allowlist has exactly 20 entries', () => {
-    assert.equal(CONNECTOR_SECRETS_ALLOWLIST.size, 20);
+  it('allowlist has exactly 29 entries', () => {
+    assert.equal(CONNECTOR_SECRETS_ALLOWLIST.size, 29);
   });
 });

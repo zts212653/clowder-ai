@@ -28,10 +28,10 @@ interface DocumentGroup {
 }
 
 const SENSITIVITY_BADGE: Record<string, string> = {
-  public: 'bg-green-100 text-green-800',
-  internal: 'bg-blue-100 text-blue-800',
-  private: 'bg-amber-100 text-amber-800',
-  restricted: 'bg-red-100 text-red-800',
+  public: 'bg-[var(--semantic-success-bg)] text-[var(--semantic-success-text)]',
+  internal: 'bg-[var(--semantic-info-bg)] text-[var(--semantic-info-text)]',
+  private: 'bg-[var(--semantic-warning-bg)] text-[var(--semantic-warning-text)]',
+  restricted: 'bg-[var(--semantic-error-bg)] text-[var(--semantic-error-text)]',
 };
 
 function CollectionDetail({ collectionId }: { collectionId: string }) {
@@ -115,7 +115,7 @@ export function CollectionCatalog() {
         return (
           <div
             key={c.manifest.id}
-            className="rounded-lg border border-cafe bg-white p-4 transition-colors hover:border-cafe-primary/30"
+            className="rounded-lg border border-cafe bg-[var(--cafe-surface)] p-4 transition-colors hover:border-cafe-primary/30"
             data-testid={`collection-card-${c.manifest.id}`}
           >
             <button
@@ -156,7 +156,9 @@ export function CollectionCatalog() {
               <div className="text-xs text-cafe-secondary mt-1">
                 <span>Last indexed: {c.health.indexFreshness || 'never'}</span>
                 {c.health.pendingReviewCount > 0 && (
-                  <span className="ml-2 text-amber-600">{c.health.pendingReviewCount} pending review</span>
+                  <span className="ml-2 text-[var(--semantic-warning-text)]">
+                    {c.health.pendingReviewCount} pending review
+                  </span>
                 )}
               </div>
             )}

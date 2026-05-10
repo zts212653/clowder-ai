@@ -46,6 +46,27 @@
   --console-diag-val: #d89575;
   --console-status-connected: #16a34a;
   --console-status-idle: #9ca3af;
+  --console-overlay-backdrop: rgba(0, 0, 0, 0.3);
+  --console-overlay-medium: rgba(0, 0, 0, 0.4);
+  --console-overlay-control: rgba(0, 0, 0, 0.6);
+  --console-overlay-control-hover: rgba(0, 0, 0, 0.8);
+  --console-overlay-heavy: rgba(0, 0, 0, 0.7);
+  --console-overlay-heavy-hover: rgba(0, 0, 0, 0.9);
+  --console-overlay-light: rgba(0, 0, 0, 0.2);
+  --console-xray-bg: #faf5ff;
+  --console-xray-text: #7e22ce;
+  --console-xray-border: #e9d5ff;
+  --console-xray-btn-bg: #faf5ff;
+  --console-xray-btn-hover: #f3e8ff;
+  --console-chart-system: #60a5fa;
+  --console-chart-mission: #fbbf24;
+  --console-chart-user: #4ade80;
+  --pixel-brawl-bg: #000;
+  --pixel-brawl-title: #f1e28a;
+  --pixel-brawl-btn-bg: #1e2430;
+  --pixel-brawl-btn-cyan: #00f0ff;
+  --pixel-brawl-btn-green: #2fa56e;
+  --pixel-brawl-btn-border: #3a4658;
 
   --semantic-success-bg: #f0fdf4;
   --semantic-success-text: #15803d;
@@ -119,6 +140,21 @@
   --console-diag-val: #c48060;
   --console-status-connected: #22c55e;
   --console-status-idle: #6b7280;
+  --console-overlay-backdrop: rgba(0, 0, 0, 0.4);
+  --console-overlay-medium: rgba(0, 0, 0, 0.5);
+  --console-overlay-control: rgba(0, 0, 0, 0.6);
+  --console-overlay-control-hover: rgba(0, 0, 0, 0.8);
+  --console-overlay-heavy: rgba(0, 0, 0, 0.75);
+  --console-overlay-heavy-hover: rgba(0, 0, 0, 0.92);
+  --console-overlay-light: rgba(0, 0, 0, 0.25);
+  --console-xray-bg: color-mix(in srgb, #a855f7 12%, var(--console-card-bg) 88%);
+  --console-xray-text: #c084fc;
+  --console-xray-border: color-mix(in srgb, #a855f7 20%, var(--console-card-bg) 80%);
+  --console-xray-btn-bg: color-mix(in srgb, #a855f7 10%, var(--console-card-bg) 90%);
+  --console-xray-btn-hover: color-mix(in srgb, #a855f7 18%, var(--console-card-bg) 82%);
+  --console-chart-system: #3b82f6;
+  --console-chart-mission: #f59e0b;
+  --console-chart-user: #22c55e;
 
   --semantic-success-bg: color-mix(in srgb, #22c55e 16%, var(--console-card-bg) 84%);
   --semantic-success-text: #4ade80;
@@ -334,6 +370,29 @@
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--item-accent, var(--cafe-accent)) 30%, transparent);
 }
 
+.session-corner-arcs {
+  position: relative;
+}
+
+.session-corner-arcs::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 2px solid var(--console-card-soft-bg);
+  -webkit-mask-image:
+    radial-gradient(14px 14px at 0% 0%, black 80%, transparent 81%),
+    radial-gradient(14px 14px at 100% 0%, black 80%, transparent 81%),
+    radial-gradient(14px 14px at 0% 100%, black 80%, transparent 81%),
+    radial-gradient(14px 14px at 100% 100%, black 80%, transparent 81%);
+  mask-image:
+    radial-gradient(14px 14px at 0% 0%, black 80%, transparent 81%),
+    radial-gradient(14px 14px at 100% 0%, black 80%, transparent 81%),
+    radial-gradient(14px 14px at 0% 100%, black 80%, transparent 81%),
+    radial-gradient(14px 14px at 100% 100%, black 80%, transparent 81%);
+  pointer-events: none;
+}
+
 .console-inspector-section {
   background: color-mix(in srgb, var(--console-card-bg) 60%, transparent);
   border-bottom: 1px solid color-mix(in srgb, var(--console-border-soft) 50%, transparent);
@@ -343,4 +402,55 @@
 
 .console-inspector-section:last-child {
   border-bottom: none;
+}
+
+/* Range slider — filled progress track */
+.console-range-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(
+    to right,
+    var(--cafe-accent, #c65f3d) 0%,
+    var(--cafe-accent, #c65f3d) var(--range-fill, 0%),
+    var(--console-border-soft) var(--range-fill, 0%),
+    var(--console-border-soft) 100%
+  );
+  outline: none;
+}
+
+.console-range-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--cafe-accent, #c65f3d);
+  border: 2px solid var(--console-card-bg);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+}
+
+.console-range-slider::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--console-border-soft);
+  border: none;
+}
+
+.console-range-slider::-moz-range-progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--cafe-accent, #c65f3d);
+}
+
+.console-range-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--cafe-accent, #c65f3d);
+  border: 2px solid var(--console-card-bg);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
 }

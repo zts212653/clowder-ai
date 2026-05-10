@@ -2,10 +2,29 @@
 
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useVoiceSettingsStore } from '@/stores/voiceSettingsStore';
+import { apiFetch } from '@/utils/api-client';
 import { correctTranscription, mergeTermEntries, type TermEntry } from '@/utils/transcription-corrector';
 
-const WHISPER_URL = process.env.NEXT_PUBLIC_WHISPER_URL || 'http://localhost:9876';
-const LLM_POSTPROCESS_URL = process.env.NEXT_PUBLIC_LLM_POSTPROCESS_URL || 'http://localhost:9878';
+let _serviceEndpoints: Record<string, string | null> | null = null;
+let _endpointsFetchedAt = 0;
+const ENDPOINTS_TTL_MS = 30_000;
+async function getServiceEndpoints(): Promise<Record<string, string | null>> {
+  if (_serviceEndpoints && Date.now() - _endpointsFetchedAt < ENDPOINTS_TTL_MS) return _serviceEndpoints;
+  try {
+    const res = await apiFetch('/api/services/endpoints');
+    if (res.ok) {
+      const data = (await res.json()) as { endpoints: Record<string, string | null> };
+      _serviceEndpoints = data.endpoints;
+      _endpointsFetchedAt = Date.now();
+    }
+  } catch {
+    // Leave null so next call retries
+  }
+  return _serviceEndpoints ?? {};
+}
+
+const WHISPER_FALLBACK = 'http://localhost:9876';
+const LLM_POSTPROCESS_FALLBACK = 'http://localhost:9878';
 
 const DEFAULT_PROMPT =
   '这是 Clowder AI 猫猫协作项目的对话。宪宪是布偶猫（Claude Opus），砚砚是缅因猫（Codex）。' +
@@ -30,7 +49,9 @@ function buildFormData(blob: Blob, prompt: string, language: string): FormData {
 }
 
 async function transcribeBlob(blob: Blob, prompt: string, language: string): Promise<string> {
-  const res = await fetch(`${WHISPER_URL}/v1/audio/transcriptions`, {
+  const endpoints = await getServiceEndpoints();
+  const whisperUrl = endpoints['whisper-stt'] ?? WHISPER_FALLBACK;
+  const res = await fetch(`${whisperUrl}/v1/audio/transcriptions`, {
     method: 'POST',
     body: buildFormData(blob, prompt, language),
   });
@@ -47,18 +68,34 @@ async function transcribeBlob(blob: Blob, prompt: string, language: string): Pro
  */
 async function llmPostProcess(text: string): Promise<string> {
   if (!text.trim()) return text;
+  const endpoints = await getServiceEndpoints();
+  const llmUrl = endpoints['llm-postprocess'] ?? LLM_POSTPROCESS_FALLBACK;
+
   try {
-    const res = await fetch(`${LLM_POSTPROCESS_URL}/v1/text/refine`, {
+    const h = await fetch(`${llmUrl}/health`, { signal: AbortSignal.timeout(1000) });
+    if (!h.ok) return text;
+    const s = (await h.json()) as { status?: string };
+    if (s.status !== 'ok' && s.status !== 'running') return text;
+  } catch {
+    return text;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const res = await fetch(`${llmUrl}/v1/text/refine`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text }),
+      signal: controller.signal,
     });
-    if (!res.ok) return text; // Server error → fall back to raw
+    if (!res.ok) return text;
     const data: { text?: string } = await res.json();
     return data.text || text;
   } catch {
-    // Server not running or network error → silently skip
     return text;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

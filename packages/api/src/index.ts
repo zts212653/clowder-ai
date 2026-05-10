@@ -171,6 +171,8 @@ import {
   registerCallbackAuthDebugRoute,
   registerCallbackDocsRoutes,
   resolutionRoutes,
+  rulesRoutes,
+  servicesRoutes,
   sessionChainRoutes,
   sessionHooksRoutes,
   sessionStrategyConfigRoutes,
@@ -199,6 +201,7 @@ import {
 import { knowledgeFeedRoutes } from './routes/knowledge-feed.js';
 import { marketplaceRoutes } from './routes/marketplace.js';
 import { previewRoutes } from './routes/preview.js';
+import { refAudioUploadRoutes } from './routes/ref-audio-upload.js';
 import { terminalRoutes } from './routes/terminal.js';
 import { threadExportRoutes } from './routes/thread-export.js';
 import { ApiInstanceLease, type ApiInstanceLeaseInvalidation } from './services/ApiInstanceLease.js';
@@ -1735,7 +1738,10 @@ async function main(): Promise<void> {
     },
   });
   await app.register(avatarsRoutes);
+  await app.register(refAudioUploadRoutes);
   await app.register(skillsRoutes);
+  await app.register(servicesRoutes);
+  await app.register(rulesRoutes);
   await app.register(memoryRoutes, { memoryStore, threadStore });
 
   // Session chain (F24)
@@ -1907,10 +1913,9 @@ async function main(): Promise<void> {
 
   // F34: TTS Provider (mlx-audio → Python TTS server)
   const ttsRegistry = new TtsRegistry();
-  const ttsUrl = process.env.TTS_URL ?? 'http://localhost:9879';
-  ttsRegistry.register(new MlxAudioTtsProvider({ baseUrl: ttsUrl }));
+  ttsRegistry.register(new MlxAudioTtsProvider());
   const ttsCacheDir = process.env.TTS_CACHE_DIR ?? './data/tts-cache';
-  await app.register(ttsRoutes, { ttsRegistry, cacheDir: ttsCacheDir });
+  await app.register(ttsRoutes, { ttsRegistry, cacheDir: ttsCacheDir, messageStore });
   initVoiceBlockSynthesizer(ttsRegistry, ttsCacheDir);
   initStreamingTtsRegistry(ttsRegistry);
   startTtsCacheCleaner(ttsCacheDir);
@@ -1918,7 +1923,11 @@ async function main(): Promise<void> {
   // C1+C2: Web Push Notifications (optional — requires VAPID keys)
   const vapidPublicKey = process.env.VAPID_PUBLIC_KEY ?? '';
   const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY ?? '';
-  const vapidSubject = process.env.VAPID_SUBJECT ?? 'mailto:cat-cafe@localhost';
+  const vapidSubjectRaw = process.env.VAPID_SUBJECT ?? 'mailto:cat-cafe@localhost';
+  const vapidSubject =
+    vapidSubjectRaw.includes('@') && !vapidSubjectRaw.startsWith('mailto:') && !vapidSubjectRaw.startsWith('http')
+      ? `mailto:${vapidSubjectRaw}`
+      : vapidSubjectRaw;
   const pushSubscriptionStore = createPushSubscriptionStore(redis);
   const pushService =
     vapidPublicKey && vapidPrivateKey
@@ -2015,6 +2024,11 @@ async function main(): Promise<void> {
   }
   app.log.info(`[api] Server running on ${address}`);
   app.log.info(`[ws] WebSocket server ready`);
+
+  // Auto-start enabled services (fire-and-forget)
+  import('./domains/services/service-autostart.js')
+    .then((m) => m.autoStartEnabledServices(app.log))
+    .catch((err) => app.log.warn('[services] auto-start init failed: %s', err));
 
   // F156: Friendly hint for private network access
   if (HOST === '0.0.0.0' && process.env.CORS_ALLOW_PRIVATE_NETWORK !== 'true') {

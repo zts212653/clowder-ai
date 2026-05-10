@@ -38,7 +38,7 @@ export function TranslationMatrix({ cards, selectedCardId, onSelectCard, onCreat
     <div className="space-y-3">
       {/* Summary */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4 text-xs text-[#6B5D4F]">
+        <div className="flex items-center gap-4 text-xs text-cafe-secondary">
           <span>
             {triaged}/{cards.length} triaged
           </span>
@@ -48,7 +48,7 @@ export function TranslationMatrix({ cards, selectedCardId, onSelectCard, onCreat
         <button
           type="button"
           onClick={onCreateCard}
-          className="rounded-lg bg-[#8B6F47] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#7A6139]"
+          className="rounded-lg bg-[var(--cafe-accent)] px-3 py-1.5 text-xs font-medium text-[var(--cafe-surface)] hover:bg-[var(--cafe-accent-hover,#7A6139)]"
         >
           + 新建 Intent Card
         </button>
@@ -62,7 +62,9 @@ export function TranslationMatrix({ cards, selectedCardId, onSelectCard, onCreat
             type="button"
             onClick={() => setBucketFilter(f.value)}
             className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
-              bucketFilter === f.value ? 'bg-[#8B6F47] text-white' : 'bg-[#F4EFE7] text-[#6B5D4F] hover:bg-[#E7DAC7]'
+              bucketFilter === f.value
+                ? 'bg-[var(--cafe-accent)] text-[var(--cafe-surface)]'
+                : 'bg-[var(--console-pill-bg)] text-cafe-secondary hover:bg-[var(--console-pill-bg)]'
             }`}
           >
             {f.label}
@@ -72,13 +74,13 @@ export function TranslationMatrix({ cards, selectedCardId, onSelectCard, onCreat
 
       {/* Table */}
       {filtered.length === 0 ? (
-        <div className="rounded-lg border border-[#E7DAC7] bg-[#FFFDF8] p-8 text-center text-sm text-[#9A866F]">
+        <div className="rounded-lg bg-[var(--console-field-bg)] p-8 text-center text-sm text-cafe-muted">
           {cards.length === 0 ? '尚无 Intent Cards。点击上方按钮开始需求翻译。' : '当前筛选无结果。'}
         </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-[#E7DAC7]">
+        <div className="overflow-hidden rounded-lg shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
           <table className="w-full text-left text-xs">
-            <thead className="bg-[#F9F5EE] text-[10px] font-semibold uppercase text-[#9A866F]">
+            <thead className="bg-[var(--console-card-bg)] text-[10px] font-semibold uppercase text-cafe-muted">
               <tr>
                 <th className="px-3 py-2">甲方原文</th>
                 <th className="px-3 py-2">Intent Card</th>
@@ -86,17 +88,17 @@ export function TranslationMatrix({ cards, selectedCardId, onSelectCard, onCreat
                 <th className="px-3 py-2">Triage</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#F0E8DB]">
+            <tbody className="divide-y divide-[var(--console-border-soft)]">
               {filtered.map((card) => (
                 <tr
                   key={card.id}
                   onClick={() => onSelectCard(card.id)}
-                  className={`cursor-pointer transition-colors hover:bg-[#FBF7F0] ${
-                    selectedCardId === card.id ? 'bg-[#F7EEDB]' : 'bg-cafe-surface'
+                  className={`cursor-pointer transition-colors hover:bg-[var(--console-card-bg)] ${
+                    selectedCardId === card.id ? 'bg-[var(--console-pill-bg)]' : 'bg-cafe-surface'
                   }`}
                 >
-                  <td className="max-w-[200px] truncate px-3 py-2 text-[#2B2118]">{card.originalText || '—'}</td>
-                  <td className="max-w-[200px] truncate px-3 py-2 text-[#6B5D4F]">
+                  <td className="max-w-[200px] truncate px-3 py-2 text-cafe">{card.originalText || '—'}</td>
+                  <td className="max-w-[200px] truncate px-3 py-2 text-cafe-secondary">
                     {card.actor} → {card.goal}
                   </td>
                   <td className="px-3 py-2">
@@ -106,7 +108,7 @@ export function TranslationMatrix({ cards, selectedCardId, onSelectCard, onCreat
                     {card.triage ? (
                       <BucketBadge bucket={card.triage.bucket} />
                     ) : (
-                      <span className="text-[10px] text-[#B8A88F]">未评估</span>
+                      <span className="text-[10px] text-cafe-muted">未评估</span>
                     )}
                   </td>
                 </tr>

@@ -95,7 +95,7 @@ describe('QueuePanel agent entry rendering (F122B AC-B7)', () => {
     useChatStore.setState({ queue: [AGENT_ENTRY] });
     act(() => root.render(React.createElement(QueuePanel, { threadId: 'thread-1' })));
 
-    const agentRow = container.querySelector('.bg-\\[\\#F3EEFA\\]');
+    const agentRow = container.querySelector('.bg-conn-purple-bg');
     expect(agentRow).not.toBeNull();
   });
 
@@ -106,7 +106,7 @@ describe('QueuePanel agent entry rendering (F122B AC-B7)', () => {
     const text = container.textContent ?? '';
     expect(text).not.toContain('自动');
     expect(text).not.toContain('→');
-    const agentRow = container.querySelector('.bg-\\[\\#F3EEFA\\]');
+    const agentRow = container.querySelector('.bg-conn-purple-bg');
     expect(agentRow).toBeNull();
   });
 

@@ -35,7 +35,7 @@ export function ThreadExecutionBar() {
           color: cat.color.primary,
         });
       } else {
-        map.set(catId, { label: catId, color: '#9B7EBD' });
+        map.set(catId, { label: catId, color: 'var(--console-cat-fallback)' });
       }
     }
     return map;
@@ -64,10 +64,10 @@ export function ThreadExecutionBar() {
   if (activeCats.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-2 px-4 py-1.5 text-xs border-b border-[#9B7EBD]/10">
+    <div className="flex items-center gap-2 px-4 py-1.5 text-xs border-b border-[var(--color-opus-primary)]/10">
       <span className="text-cafe-muted font-medium shrink-0">执行中</span>
       {activeCats.map(({ catId, startedAt }) => {
-        const info = catDisplayMap.get(catId) ?? { label: catId, color: '#9B7EBD' };
+        const info = catDisplayMap.get(catId) ?? { label: catId, color: 'var(--console-cat-fallback)' };
         return (
           <CatStatusChip
             key={catId}
@@ -83,7 +83,7 @@ export function ThreadExecutionBar() {
         <button
           type="button"
           onClick={handleStopAll}
-          className="ml-auto text-xs text-cafe-muted hover:text-red-500 transition-colors shrink-0"
+          className="ml-auto text-xs text-cafe-muted hover:text-conn-red-text transition-colors shrink-0"
         >
           全部停止
         </button>
@@ -118,7 +118,7 @@ function CatStatusChip({
       <button
         type="button"
         onClick={() => onStop(catId)}
-        className="ml-0.5 text-cafe-muted hover:text-red-500 transition-colors"
+        className="ml-0.5 text-cafe-muted hover:text-conn-red-text transition-colors"
         aria-label={`Stop ${catId}`}
       >
         <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">

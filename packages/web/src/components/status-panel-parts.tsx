@@ -13,7 +13,7 @@ export function CatInvocationTime({ invocation }: { invocation: CatInvocationInf
   }
 
   if (invocation.startedAt && elapsed > 0) {
-    return <span className="text-green-600 ml-auto">{formatDuration(elapsed)}</span>;
+    return <span className="text-conn-emerald-text ml-auto">{formatDuration(elapsed)}</span>;
   }
 
   return null;

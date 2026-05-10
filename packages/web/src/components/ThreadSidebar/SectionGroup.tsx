@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 
-/** F070: governance status dot colors */
+/** F070: governance status dot colors — use solid tones for 2px dots */
 const GOV_STATUS_DOT: Record<string, { color: string; title: string }> = {
-  healthy: { color: 'bg-green-400', title: '治理正常' },
-  stale: { color: 'bg-yellow-400', title: '治理过期' },
-  missing: { color: 'bg-red-400', title: '治理缺失' },
-  'never-synced': { color: 'bg-gray-300', title: '未同步治理' },
+  healthy: { color: 'bg-conn-emerald-text', title: '治理正常' },
+  stale: { color: 'bg-conn-amber-text', title: '治理过期' },
+  missing: { color: 'bg-conn-red-text', title: '治理缺失' },
+  'never-synced': { color: 'bg-cafe-muted', title: '未同步治理' },
 };
 
 /** Section icon SVG paths (extracted to reduce JSX noise) */
@@ -22,11 +22,11 @@ const ICON_PATHS: Record<string, string> = {
 };
 
 const ICON_COLORS: Record<string, string> = {
-  pin: 'text-cocreator-primary',
-  star: 'text-yellow-500',
+  pin: 'text-cafe-accent',
+  star: 'text-conn-amber-text',
   clock: 'text-cafe-muted',
   archive: 'text-cafe-muted',
-  system: 'text-blue-500',
+  system: 'text-cafe-accent',
 };
 
 interface SectionGroupProps {
@@ -107,76 +107,97 @@ export function SectionGroup({
     setShowMenu(false);
   }, [label]);
 
-  const stopButton = useCallback((e: React.MouseEvent) => e.stopPropagation(), []);
-
   const iconPath = icon ? ICON_PATHS[icon] : undefined;
   const iconColor = icon ? ICON_COLORS[icon] : undefined;
   const govDot = governanceStatus ? GOV_STATUS_DOT[governanceStatus] : undefined;
 
   return (
     <div className="mt-1 relative group/section">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="w-full text-left px-3 py-1.5 flex items-center gap-1.5 hover:bg-cafe-surface-elevated transition-colors"
-        title={projectPath && projectPath !== 'default' ? projectPath : undefined}
-      >
-        {/* Chevron */}
-        <svg
-          aria-hidden="true"
-          className={`w-3 h-3 text-cafe-muted transition-transform flex-shrink-0 ${isCollapsed ? '' : 'rotate-90'}`}
-          viewBox="0 0 12 12"
-          fill="currentColor"
-        >
-          <path d="M4 2l4 4-4 4V2z" />
-        </svg>
-
-        {/* Section icon */}
-        {iconPath && (
-          <svg
-            aria-hidden="true"
-            className={`w-3 h-3 flex-shrink-0 ${iconColor}`}
-            viewBox="0 0 16 16"
-            fill="currentColor"
+      <div className="w-full flex items-center gap-1.5 px-3 py-1.5 hover:bg-cafe-surface-elevated transition-colors">
+        {/* Toggle button — keyboard-focusable, Enter/Space to toggle */}
+        {!isRenaming && (
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={!isCollapsed}
+            className="flex min-w-0 flex-1 items-center gap-1.5 text-left focus:outline-none"
+            title={projectPath && projectPath !== 'default' ? projectPath : undefined}
           >
-            <path d={iconPath} />
-          </svg>
+            <svg
+              aria-hidden="true"
+              className={`w-3 h-3 text-cafe-muted transition-transform flex-shrink-0 ${isCollapsed ? '' : 'rotate-90'}`}
+              viewBox="0 0 12 12"
+              fill="currentColor"
+            >
+              <path d="M4 2l4 4-4 4V2z" />
+            </svg>
+
+            {iconPath && (
+              <svg
+                aria-hidden="true"
+                className={`w-3 h-3 flex-shrink-0 ${iconColor}`}
+                viewBox="0 0 16 16"
+                fill="currentColor"
+              >
+                <path d={iconPath} />
+              </svg>
+            )}
+
+            <span className="text-xs font-medium text-cafe-secondary truncate">{label}</span>
+
+            {govDot && <span className={`w-2 h-2 rounded-full flex-shrink-0 ${govDot.color}`} title={govDot.title} />}
+
+            <span className="text-[10px] text-cafe-muted flex-shrink-0 ml-auto">{count}</span>
+          </button>
         )}
 
-        {/* Label (inline rename or static) */}
-        {isRenaming ? (
-          <input
-            ref={inputRef}
-            value={draftName}
-            onChange={(e) => setDraftName(e.target.value)}
-            onClick={stopButton}
-            onCompositionStart={ime.onCompositionStart}
-            onCompositionEnd={ime.onCompositionEnd}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !ime.isComposing()) {
-                e.preventDefault();
-                submitRename();
-              }
-              if (e.key === 'Escape') {
-                e.preventDefault();
-                setIsRenaming(false);
-              }
-            }}
-            onBlur={submitRename}
-            maxLength={100}
-            className="text-xs font-medium px-1 py-0 rounded border border-cocreator-light focus:outline-none focus:border-cocreator-primary flex-1 min-w-0"
-          />
-        ) : (
-          <span className="text-xs font-medium text-cafe-secondary truncate">{label}</span>
+        {/* Rename input — sibling of toggle button, never nested inside it */}
+        {isRenaming && (
+          <div className="flex min-w-0 flex-1 items-center gap-1.5">
+            <svg
+              aria-hidden="true"
+              className={`w-3 h-3 text-cafe-muted transition-transform flex-shrink-0 ${isCollapsed ? '' : 'rotate-90'}`}
+              viewBox="0 0 12 12"
+              fill="currentColor"
+            >
+              <path d="M4 2l4 4-4 4V2z" />
+            </svg>
+
+            {iconPath && (
+              <svg
+                aria-hidden="true"
+                className={`w-3 h-3 flex-shrink-0 ${iconColor}`}
+                viewBox="0 0 16 16"
+                fill="currentColor"
+              >
+                <path d={iconPath} />
+              </svg>
+            )}
+
+            <input
+              ref={inputRef}
+              value={draftName}
+              onChange={(e) => setDraftName(e.target.value)}
+              onCompositionStart={ime.onCompositionStart}
+              onCompositionEnd={ime.onCompositionEnd}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !ime.isComposing()) {
+                  e.preventDefault();
+                  submitRename();
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setIsRenaming(false);
+                }
+              }}
+              onBlur={submitRename}
+              maxLength={100}
+              className="console-form-input text-xs font-medium px-1 py-0 flex-1 min-w-0"
+            />
+          </div>
         )}
 
-        {/* Governance dot */}
-        {govDot && <span className={`w-2 h-2 rounded-full flex-shrink-0 ${govDot.color}`} title={govDot.title} />}
-
-        {/* Count */}
-        <span className="text-[10px] text-cafe-muted flex-shrink-0 ml-auto">{count}</span>
-
-        {/* F095 Phase F: Quick create button */}
+        {/* Action buttons — siblings of the toggle, not children */}
         {onQuickCreate && (
           <ActionButton
             onClick={(e) => {
@@ -191,7 +212,6 @@ export function SectionGroup({
           </ActionButton>
         )}
 
-        {/* Context menu trigger */}
         {hasContextMenu && (
           <ActionButton
             onClick={(e) => {
@@ -206,7 +226,6 @@ export function SectionGroup({
           </ActionButton>
         )}
 
-        {/* Project pin button */}
         {onToggleProjectPin && (
           <ActionButton
             onClick={(e) => {
@@ -215,18 +234,18 @@ export function SectionGroup({
             }}
             title={isProjectPinned ? '取消固定项目' : '固定项目到活跃区'}
             testId="project-pin-btn"
-            className={isProjectPinned ? 'text-cocreator-primary' : 'text-cafe-muted hover:text-cafe-muted'}
+            className={isProjectPinned ? 'text-cafe-accent' : 'text-cafe-muted hover:text-cafe-muted'}
           >
             <path d={ICON_PATHS.pin} />
           </ActionButton>
         )}
-      </button>
+      </div>
 
       {/* F095 Phase F: Context menu dropdown */}
       {showMenu && (
         <div
           ref={menuRef}
-          className="absolute right-2 top-8 z-50 bg-cafe-surface rounded-lg shadow-lg border border-cafe py-1 min-w-[140px]"
+          className="absolute right-2 top-8 z-50 bg-cafe-surface rounded-lg shadow-lg border border-[var(--console-border-soft)] py-1 min-w-[140px]"
         >
           {onOpenInFinder && (
             <MenuItem
@@ -302,7 +321,9 @@ function MenuItem({ onClick, danger, children }: { onClick: () => void; danger?:
       type="button"
       onClick={onClick}
       className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
-        danger ? 'text-red-500 hover:bg-red-50' : 'text-cafe-secondary hover:bg-cafe-surface-elevated'
+        danger
+          ? 'text-conn-red-text hover:bg-[var(--console-hover-bg)]'
+          : 'text-cafe-secondary hover:bg-[var(--console-hover-bg)]'
       }`}
     >
       {children}

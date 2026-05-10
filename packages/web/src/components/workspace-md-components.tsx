@@ -40,7 +40,7 @@ export function createWorkspaceLinkComponent(basePath: string, withMentions: Men
             e.preventDefault();
             setOpenFile(resolved);
           }}
-          className="text-cocreator-primary hover:text-cocreator-dark hover:underline break-all cursor-pointer"
+          className="text-cafe-accent hover:text-cafe-accent/80 hover:underline break-all cursor-pointer"
           title={`在工作区中打开 ${resolved}`}
         >
           {withMentions(children)}
@@ -53,7 +53,7 @@ export function createWorkspaceLinkComponent(basePath: string, withMentions: Men
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-cocreator-primary hover:text-cocreator-dark hover:underline break-all"
+        className="text-cafe-accent hover:text-cafe-accent/80 hover:underline break-all"
       >
         {withMentions(children)}
       </a>

@@ -47,7 +47,7 @@ function fmtDuration(ms: number): string {
 }
 
 const ROLE_STYLES: Record<string, string> = {
-  user: 'bg-blue-50 text-blue-800',
+  user: 'bg-[var(--color-cafe-accent)]/10 text-[var(--color-cafe-accent)]',
   system: 'bg-cafe-surface-elevated text-cafe-secondary',
 };
 
@@ -57,9 +57,9 @@ const ASSISTANT_STYLE_BY_CAT: Record<string, string> = {
   gemini: 'bg-gemini-light text-gemini-dark',
   kimi: 'bg-kimi-light text-kimi-dark',
   dare: 'bg-dare-light text-dare-dark',
-  gpt52: 'bg-[#C8E6C9] text-[#2E7D32]',
-  'opus-45': 'bg-[#E1D5F0] text-[#5E35B1]',
-  sonnet: 'bg-[#EDE7F6] text-[#6A1B9A]',
+  gpt52: 'bg-conn-emerald-bg text-conn-emerald-text',
+  'opus-45': 'bg-conn-purple-bg text-[var(--color-opus-primary)]',
+  sonnet: 'bg-conn-purple-bg text-[var(--color-opus-primary)]',
 };
 
 function assistantRoleStyle(catId?: string): string {
@@ -132,9 +132,9 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
   const assistantLabel = catId ? (getCatById(catId)?.displayName ?? catId) : 'assistant';
 
   return (
-    <div className="rounded-lg border border-cafe bg-cafe-surface">
+    <div className="rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-cafe-subtle">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--console-border-soft)]">
         <span className="text-xs font-semibold text-cafe-secondary">Session 事件</span>
         <button
           type="button"
@@ -147,14 +147,14 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
       </div>
 
       {/* View mode tabs */}
-      <div className="flex border-b border-cafe-subtle">
+      <div className="flex border-b border-[var(--console-border-soft)]">
         {(['chat', 'handoff', 'raw'] as const).map((m) => (
           <button
             type="button"
             key={m}
             onClick={() => setView(m)}
             className={`flex-1 py-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors
-              ${view === m ? 'text-blue-600 border-b-2 border-blue-600' : 'text-cafe-muted hover:text-cafe-secondary'}`}
+              ${view === m ? 'text-[var(--color-cafe-accent)] border-b-2 border-[var(--color-cafe-accent)]' : 'text-cafe-muted hover:text-cafe-secondary'}`}
           >
             {m === 'chat' ? 'Chat' : m === 'handoff' ? 'Handoff' : 'Raw'}
           </button>
@@ -167,7 +167,7 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
           <div className="text-[10px] text-cafe-muted text-center py-1 animate-pulse">Refreshing...</div>
         )}
         {loading && data.length === 0 && <div className="text-xs text-cafe-muted py-2">加载中...</div>}
-        {error && <div className="text-xs text-red-500 py-2">加载失败</div>}
+        {error && <div className="text-xs text-conn-red-text py-2">加载失败</div>}
 
         {!error && view === 'chat' && (
           <div className="space-y-1.5">
@@ -190,11 +190,14 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
         {!error && view === 'handoff' && (
           <div className="space-y-1.5">
             {(data as HandoffSummary[]).map((inv) => (
-              <div key={inv.invocationId} className="rounded border border-cafe-subtle px-2 py-1.5 text-[11px]">
+              <div
+                key={inv.invocationId}
+                className="rounded border border-[var(--console-border-soft)] px-2 py-1.5 text-[11px]"
+              >
                 <div className="flex items-center gap-1.5">
                   <span className="font-mono text-cafe-secondary">{inv.invocationId}</span>
                   <span className="text-cafe-muted">{fmtDuration(inv.durationMs)}</span>
-                  {inv.errors > 0 && <span className="text-red-500">{inv.errors} err</span>}
+                  {inv.errors > 0 && <span className="text-conn-red-text">{inv.errors} err</span>}
                 </div>
                 <div className="flex flex-wrap gap-1 mt-1">
                   {(inv.toolCalls ?? []).map((t) => (
@@ -227,16 +230,16 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
       </div>
 
       {/* Pagination */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-t border-cafe-subtle text-[10px] text-cafe-muted">
+      <div className="flex items-center justify-between px-3 py-1.5 border-t border-[var(--console-border-soft)] text-[10px] text-cafe-muted">
         <span>{total} 条事件</span>
         <div className="flex gap-2">
           {cursorHistory.length > 0 && (
-            <button type="button" onClick={goPrev} className="text-blue-500 hover:text-blue-700">
+            <button type="button" onClick={goPrev} className="text-[var(--color-cafe-accent)] hover:opacity-80">
               上一页
             </button>
           )}
           {nextCursor != null && (
-            <button type="button" onClick={goNext} className="text-blue-500 hover:text-blue-700">
+            <button type="button" onClick={goNext} className="text-[var(--color-cafe-accent)] hover:opacity-80">
               下一页
             </button>
           )}

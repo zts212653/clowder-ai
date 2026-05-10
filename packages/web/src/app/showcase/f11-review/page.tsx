@@ -371,9 +371,9 @@ Tests: 939 (880 backend + 59 frontend), 0 fail`,
 export default function F11ReviewShowcase() {
   const { getCatById } = useCatData();
   return (
-    <div className="min-h-screen bg-gradient-to-b from-orange-50 to-white">
+    <div className="min-h-screen bg-gradient-to-b from-conn-amber-bg to-cafe-surface">
       {/* Header */}
-      <div className="sticky top-0 z-10 bg-cafe-surface/80 backdrop-blur-sm border-b border-orange-100 px-6 py-4">
+      <div className="sticky top-0 z-10 bg-cafe-surface/80 backdrop-blur-sm border-b border-conn-amber-ring px-6 py-4">
         <div className="max-w-3xl mx-auto">
           <h1 className="text-2xl font-bold text-cafe">F11 Mode System Review 攻防录</h1>
           <p className="text-sm text-cafe-secondary mt-1">布偶猫 vs 缅因猫 — 6 轮 code review，研发自闭环</p>
@@ -381,22 +381,22 @@ export default function F11ReviewShowcase() {
       </div>
 
       {/* Stats Bar */}
-      <div className="bg-orange-50 border-b border-orange-100 px-6 py-3">
+      <div className="bg-conn-amber-bg border-b border-conn-amber-ring px-6 py-3">
         <div className="max-w-3xl mx-auto flex gap-6 text-sm">
           <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-full bg-red-400"></span>
+            <span className="w-3 h-3 rounded-full bg-conn-red-bg"></span>
             <span>P1: 8 个</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-full bg-yellow-400"></span>
+            <span className="w-3 h-3 rounded-full bg-conn-amber-bg"></span>
             <span>P2: 12 个</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-full bg-green-400"></span>
+            <span className="w-3 h-3 rounded-full bg-conn-emerald-bg"></span>
             <span>Tests: 904 → 939</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-full bg-blue-400"></span>
+            <span className="w-3 h-3 rounded-full bg-conn-sky-bg"></span>
             <span>6 轮才放行</span>
           </div>
         </div>

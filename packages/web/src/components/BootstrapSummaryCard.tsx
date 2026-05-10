@@ -11,9 +11,9 @@ const TIER_LABELS: Record<string, string> = {
 };
 
 const TIER_COLORS: Record<string, string> = {
-  authoritative: 'bg-cocreator-primary/10 text-cocreator-dark',
-  derived: 'bg-blue-100 text-blue-700',
-  soft_clue: 'bg-green-100 text-green-700',
+  authoritative: 'bg-[var(--console-active-bg)] text-cafe-accent',
+  derived: 'bg-[var(--color-cafe-accent)]/10 text-[var(--color-cafe-accent)]',
+  soft_clue: 'bg-conn-emerald-bg text-conn-emerald-text',
 };
 
 interface BootstrapSummaryCardProps {
@@ -88,29 +88,29 @@ export function BootstrapSummaryCard({
 
   return (
     <div data-testid="bootstrap-summary-card" className="flex justify-center mb-3">
-      <div className="max-w-[85%] w-full rounded-lg border border-green-200 bg-green-50/50 p-5">
+      <div className="max-w-[85%] w-full rounded-lg border border-conn-emerald-ring bg-conn-emerald-bg/50 p-5">
         <div className="flex items-center gap-4 mb-3">
-          <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-            <CheckCircleIcon className="w-6 h-6 text-green-600" />
+          <div className="w-12 h-12 rounded-full bg-conn-emerald-bg flex items-center justify-center flex-shrink-0">
+            <CheckCircleIcon className="w-6 h-6 text-conn-emerald-text" />
           </div>
           <div>
-            <p className="text-sm font-medium text-green-800">记忆索引构建完成</p>
-            <p className="text-xs text-green-600 mt-0.5">猫猫现在可以搜索这个项目的历史知识了</p>
+            <p className="text-sm font-medium text-conn-emerald-text">记忆索引构建完成</p>
+            <p className="text-xs text-conn-emerald-text mt-0.5">猫猫现在可以搜索这个项目的历史知识了</p>
           </div>
         </div>
 
-        <div className="ml-16 space-y-1.5 text-xs text-gray-600">
+        <div className="ml-16 space-y-1.5 text-xs text-cafe-secondary">
           <p className="inline-flex items-center gap-1.5">
-            <HubIcon name="folder" className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+            <HubIcon name="folder" className="w-3.5 h-3.5 text-cafe-muted flex-shrink-0" />
             项目 &nbsp;<strong>{summary.projectName}</strong>
           </p>
           <p className="inline-flex items-center gap-1.5">
-            <FileTextIcon className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+            <FileTextIcon className="w-3.5 h-3.5 text-cafe-muted flex-shrink-0" />
             已索引 {docsIndexed} 个文档
           </p>
           {durationSec !== null && (
             <p className="inline-flex items-center gap-1.5">
-              <HubIcon name="timer" className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+              <HubIcon name="timer" className="w-3.5 h-3.5 text-cafe-muted flex-shrink-0" />
               耗时 {durationSec} 秒
             </p>
           )}
@@ -118,12 +118,12 @@ export function BootstrapSummaryCard({
 
         {summary.kindCoverage && Object.keys(summary.kindCoverage).length > 0 ? (
           <div className="ml-16 mt-3">
-            <p className="text-[10px] text-gray-400 mb-1.5">知识覆盖</p>
+            <p className="text-[10px] text-cafe-muted mb-1.5">知识覆盖</p>
             <div className="flex flex-wrap gap-1.5">
               {Object.entries(summary.kindCoverage).map(([kind, count]) => (
                 <span
                   key={kind}
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${SOURCE_TYPE_COLORS[kind] ?? 'bg-gray-100 text-gray-600'}`}
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${SOURCE_TYPE_COLORS[kind] ?? 'bg-[var(--console-card-soft-bg)] text-cafe-secondary'}`}
                 >
                   {SOURCE_TYPE_LABELS[kind] ?? kind} · {count}
                 </span>
@@ -132,12 +132,12 @@ export function BootstrapSummaryCard({
           </div>
         ) : Object.keys(summary.tierCoverage).length > 0 ? (
           <div className="ml-16 mt-3">
-            <p className="text-[10px] text-gray-400 mb-1.5">覆盖分层</p>
+            <p className="text-[10px] text-cafe-muted mb-1.5">覆盖分层</p>
             <div className="flex flex-wrap gap-1.5">
               {Object.entries(summary.tierCoverage).map(([tier, count]) => (
                 <span
                   key={tier}
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${TIER_COLORS[tier] ?? 'bg-gray-100 text-gray-600'}`}
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${TIER_COLORS[tier] ?? 'bg-[var(--console-card-soft-bg)] text-cafe-secondary'}`}
                 >
                   {TIER_LABELS[tier] ?? tier} · {count}
                 </span>
@@ -151,7 +151,7 @@ export function BootstrapSummaryCard({
             <button
               type="button"
               onClick={onDismiss}
-              className="px-3 py-1.5 rounded-lg text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+              className="px-3 py-1.5 rounded-lg text-xs text-cafe-secondary hover:text-cafe hover:bg-[var(--console-card-soft-bg)] transition-colors"
             >
               关闭
             </button>
@@ -162,8 +162,8 @@ export function BootstrapSummaryCard({
             onClick={onSearchKnowledge}
             className={
               onSearchKnowledge
-                ? 'px-3 py-1.5 rounded-lg text-xs text-gray-600 hover:text-gray-800 hover:bg-gray-100 transition-colors inline-flex items-center gap-1'
-                : 'px-3 py-1.5 rounded-lg text-xs text-gray-400 cursor-not-allowed inline-flex items-center gap-1'
+                ? 'px-3 py-1.5 rounded-lg text-xs text-cafe-secondary hover:text-cafe hover:bg-[var(--console-card-soft-bg)] transition-colors inline-flex items-center gap-1'
+                : 'px-3 py-1.5 rounded-lg text-xs text-cafe-muted cursor-not-allowed inline-flex items-center gap-1'
             }
           >
             <SearchIcon className="w-3.5 h-3.5" />
@@ -175,8 +175,8 @@ export function BootstrapSummaryCard({
             onClick={onGoToMemoryHub}
             className={
               onGoToMemoryHub
-                ? 'px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-medium transition-colors inline-flex items-center gap-1'
-                : 'px-3 py-1.5 rounded-lg bg-green-600/50 text-white/70 text-xs font-medium cursor-not-allowed inline-flex items-center gap-1'
+                ? 'px-3 py-1.5 rounded-lg bg-[var(--color-conn-emerald-text)] hover:opacity-90 text-[var(--cafe-surface)] text-xs font-medium transition-colors inline-flex items-center gap-1'
+                : 'px-3 py-1.5 rounded-lg bg-[var(--color-conn-emerald-text)]/50 text-[var(--cafe-surface)]/70 text-xs font-medium cursor-not-allowed inline-flex items-center gap-1'
             }
           >
             <MemoryIcon className="w-3.5 h-3.5" />

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import { AvatarImageWithFallback } from './AvatarImageWithFallback';
 import type { ProfileItem } from './hub-accounts.types';
@@ -36,6 +36,7 @@ export function IdentitySection({
   avatarUploading,
   onChange,
   onAvatarUpload,
+  onRefAudioUpload,
 }: {
   cat?: CatData | null;
   form: HubCatEditorFormState;
@@ -43,6 +44,7 @@ export function IdentitySection({
   avatarUploading: boolean;
   onChange: (patch: FormPatch) => void;
   onAvatarUpload: (file: File) => Promise<void>;
+  onRefAudioUpload: (file: File) => Promise<void>;
 }) {
   const strengthTags = splitStrengthTags(form.strengths);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -96,18 +98,33 @@ export function IdentitySection({
         placeholder="角色定位，如 代码审查专家"
       />
 
-      <div className="flex items-center gap-3">
-        <span className="w-[140px] shrink-0 text-[13px] font-medium text-[#5C4B42]">Avatar</span>
+      <TextField
+        label="擅长领域"
+        ariaLabel="Team Strengths"
+        value={form.teamStrengths}
+        onChange={(value) => onChange({ teamStrengths: value })}
+        placeholder="如 架构设计、安全分析"
+      />
+      <TextField
+        label="性格特征"
+        ariaLabel="Personality"
+        value={form.personality}
+        onChange={(value) => onChange({ personality: value })}
+        placeholder="如 温柔但有主见"
+      />
+
+      <div className="flex items-center gap-[14px]">
+        <span className="w-[150px] shrink-0 text-[12px] font-bold text-cafe-secondary">Avatar</span>
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="flex items-center gap-2 rounded-lg border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-1.5 text-sm text-[#5C4B42] transition hover:border-[#D49266]"
+          className="flex h-9 items-center gap-2 rounded-[10px] bg-[var(--console-field-bg)] px-3 text-[13px] font-bold text-cafe-secondary transition hover:opacity-80"
         >
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#E8DCCF] bg-white text-[10px] text-[#8A776B]">
+          <div className="flex h-[30px] w-[30px] shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--console-card-bg)] text-[10px] text-cafe-secondary">
             {avatarSrc ? (
               <AvatarImageWithFallback src={avatarSrc} alt="Avatar preview" className="h-full w-full object-cover" />
             ) : (
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" role="img" aria-label="Default avatar">
+              <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" role="img" aria-label="Default avatar">
                 <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2Zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8Zm-2-9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm4 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" />
               </svg>
             )}
@@ -135,16 +152,16 @@ export function IdentitySection({
         />
       </div>
 
-      <div className="flex items-center gap-3">
-        <span className="w-[140px] shrink-0 text-[13px] font-medium text-[#5C4B42]">Background Color</span>
-        <div className="flex items-center gap-2">
+      <div className="flex items-center gap-[14px]">
+        <span className="w-[150px] shrink-0 text-[12px] font-bold text-cafe-secondary">Background Color</span>
+        <div className="flex items-center gap-2.5">
           <label title="Primary">
             <input
               type="color"
               aria-label="Background Color Primary"
               value={form.colorPrimary}
               onChange={(event) => onChange({ colorPrimary: event.target.value })}
-              className="h-8 w-8 cursor-pointer rounded border-0 bg-transparent p-0"
+              className="h-6 w-6 cursor-pointer rounded border-0 bg-transparent p-0"
             />
           </label>
           <label title="Secondary">
@@ -153,26 +170,11 @@ export function IdentitySection({
               aria-label="Background Color Secondary"
               value={form.colorSecondary}
               onChange={(event) => onChange({ colorSecondary: event.target.value })}
-              className="h-8 w-8 cursor-pointer rounded border-0 bg-transparent p-0"
+              className="h-6 w-6 cursor-pointer rounded border-0 bg-transparent p-0"
             />
           </label>
         </div>
       </div>
-
-      <TextField
-        label="擅长领域"
-        ariaLabel="Team Strengths"
-        value={form.teamStrengths}
-        onChange={(value) => onChange({ teamStrengths: value })}
-        placeholder="如 架构设计、安全分析"
-      />
-      <TextField
-        label="性格特征"
-        ariaLabel="Personality"
-        value={form.personality}
-        onChange={(value) => onChange({ personality: value })}
-        placeholder="如 温柔但有主见"
-      />
       <TextField
         label="注意事项"
         ariaLabel="Caution"
@@ -182,7 +184,7 @@ export function IdentitySection({
       />
 
       <div className="flex items-start gap-3">
-        <span className="w-[140px] shrink-0 pt-1 text-[13px] font-medium text-[#5C4B42]">Strengths</span>
+        <span className="w-[150px] shrink-0 pt-1 text-[12px] font-bold text-cafe-secondary">Strengths</span>
         <div className="min-w-0 flex-1">
           <TagEditor
             tags={strengthTags}
@@ -200,11 +202,132 @@ export function IdentitySection({
         />
       </div>
 
-      <div className="rounded-[10px] border border-dashed border-[#DCC9B8] bg-[#F7F3F0] px-3 py-2">
-        <p className="text-[13px] font-semibold text-[#8A776B]">▸ Voice Config (点击展开)</p>
-        <p className="mt-0.5 text-[11px] leading-4 text-[#B59A88]">需对接和启用语音功能后才支持配置</p>
-      </div>
+      <VoiceConfigSection form={form} onChange={onChange} onRefAudioUpload={onRefAudioUpload} />
     </SectionCard>
+  );
+}
+
+const VOICE_LANG_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: '', label: '未设置' },
+  { value: 'z', label: '中文 (z)' },
+  { value: 'zh', label: '中文 (zh)' },
+  { value: 'en-us', label: 'English (en-us)' },
+  { value: 'ja', label: '日本語 (ja)' },
+];
+
+function refAudioDisplayName(path: string): string {
+  if (!path) return '';
+  const segments = path.replace(/\\/g, '/').split('/');
+  return segments[segments.length - 1] ?? path;
+}
+
+function RefAudioField({ value, onUpload }: { value: string; onUpload: (file: File) => Promise<void> }) {
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const filename = refAudioDisplayName(value);
+
+  return (
+    <div className="flex flex-col gap-1.5 text-cafe sm:flex-row sm:items-center sm:gap-[14px]">
+      <span className="text-[12px] font-bold text-cafe-secondary sm:w-[150px] sm:shrink-0">Ref Audio</span>
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <span
+          className="flex-1 truncate rounded-[10px] bg-[var(--console-field-bg)] px-3 py-1.5 text-[13px] leading-5 text-cafe-black"
+          title={value}
+        >
+          {filename || <span className="text-cafe-muted">未设置</span>}
+        </span>
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          className="shrink-0 rounded-[10px] bg-[var(--console-field-bg)] px-3 py-1.5 text-[12px] font-bold text-cafe-secondary transition hover:opacity-80"
+        >
+          上传
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="audio/wav,audio/mpeg,audio/mp3,audio/webm,audio/ogg,.wav,.mp3,.webm,.ogg"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            void onUpload(file).finally(() => {
+              if (fileRef.current) fileRef.current.value = '';
+            });
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function VoiceConfigSection({
+  form,
+  onChange,
+  onRefAudioUpload,
+}: {
+  form: HubCatEditorFormState;
+  onChange: (patch: Partial<HubCatEditorFormState>) => void;
+  onRefAudioUpload: (file: File) => Promise<void>;
+}) {
+  const hasVoiceConfig = !!(form.voiceVoice || form.voiceLangCode);
+  const [expanded, setExpanded] = useState(hasVoiceConfig);
+  const summary = hasVoiceConfig ? `${form.voiceLangCode || '?'}` : '';
+
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="flex min-w-0 flex-1 items-center rounded-[10px] bg-[var(--console-field-bg)] px-3 h-[34px] w-full text-left"
+      >
+        <p className="text-[12px] font-bold text-[var(--console-voice-hint)]">
+          {expanded ? '▾' : '▸'} Voice Config{summary ? ` — ${summary}` : ''}
+        </p>
+      </button>
+      {expanded && (
+        <div className="space-y-2">
+          <SelectField
+            label="Lang Code"
+            value={form.voiceLangCode}
+            options={VOICE_LANG_OPTIONS}
+            onChange={(value) => {
+              const patch: Partial<HubCatEditorFormState> = { voiceLangCode: value };
+              if (value && !form.voiceVoice) patch.voiceVoice = 'zm_yunjian';
+              onChange(patch);
+            }}
+          />
+          <TextField
+            label="Speed"
+            ariaLabel="Voice Speed"
+            value={form.voiceSpeed}
+            onChange={(value) => onChange({ voiceSpeed: value })}
+            placeholder="1.0"
+          />
+          <RefAudioField value={form.voiceRefAudio} onUpload={onRefAudioUpload} />
+          <TextField
+            label="Ref Text"
+            ariaLabel="Reference Audio Text"
+            value={form.voiceRefText}
+            onChange={(value) => onChange({ voiceRefText: value })}
+            placeholder="参考音频对应的文本"
+          />
+          <TextField
+            label="Instruct"
+            ariaLabel="Voice Style Instruction"
+            value={form.voiceInstruct}
+            onChange={(value) => onChange({ voiceInstruct: value })}
+            placeholder="如：用一个调皮狡黠的少年语气说话"
+          />
+          <TextField
+            label="Temperature"
+            ariaLabel="Voice Temperature"
+            value={form.voiceTemperature}
+            onChange={(value) => onChange({ voiceTemperature: value })}
+            placeholder="0.3"
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -248,10 +371,10 @@ function ComboField({
 }) {
   const listId = `combo-${label.replace(/\s+/g, '-').toLowerCase()}`;
   return (
-    <label className="flex flex-col gap-1.5 text-[#5C4B42] sm:flex-row sm:items-center sm:gap-3">
-      <span className="text-[13px] font-semibold text-[#8A776B] sm:w-[140px] sm:shrink-0">
+    <label className="flex flex-col gap-1.5 text-cafe sm:flex-row sm:items-center sm:gap-[14px]">
+      <span className="text-[12px] font-bold text-cafe-secondary sm:w-[150px] sm:shrink-0">
         {label}
-        {required && <span className="ml-0.5 text-[#E29578]">*</span>}
+        {required && <span className="ml-0.5 text-conn-red-text">*</span>}
       </span>
       <div className="min-w-0 flex-1">
         <input
@@ -259,7 +382,7 @@ function ComboField({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           list={listId}
-          className="w-full rounded-[10px] border border-[#E8DCCF] bg-[#F7F3F0] px-3.5 py-2 text-[14px] leading-5 text-[#2D2118] placeholder:text-[#C4B5A8] outline-none transition focus:border-[#D49266] focus:ring-2 focus:ring-[#F5D2B8]"
+          className="w-full rounded-[10px] border border-transparent bg-[var(--console-field-bg)] px-3 py-1.5 text-[13px] leading-5 text-cafe-black placeholder:text-cafe-muted outline-none transition focus:border-cafe-accent focus:ring-2 focus:ring-cafe-accent/30"
           placeholder={placeholder}
         />
         <datalist id={listId}>
@@ -319,7 +442,7 @@ function buildCallHint(
   const fullUrl = `${effectiveBase}${info.pathSuffix}`;
   let warning = '';
   if (client === 'google') {
-    warning = '\n注意: Google 官方 endpoint 仍要求 builtin OAuth；第三方 gateway 会走这里展示的 baseUrl。';
+    warning = '\n注意: Google 官方 endpoint 要求 OAuth 认证；第三方 gateway 会走这里展示的 baseUrl。';
   }
   return { label: `${info.cli} CLI 实际调用: `, url: fullUrl, warning };
 }
@@ -386,15 +509,13 @@ export function AccountSection({
                 { value: '', label: loadingProfiles ? '加载中…' : '请选择认证方式' },
                 ...accountOptions
                   .filter((profile) => {
-                    // Gemini CLI doesn't support custom API endpoints — only show builtin
                     if (form.clientId === 'google' && profile.authType !== 'oauth') return false;
                     return true;
                   })
                   .map((profile) => ({
                     value: profile.id,
-                    label: profile.builtin
-                      ? `${profile.displayName}（内置）`
-                      : profile.authType === 'oauth'
+                    label:
+                      profile.authType === 'oauth'
                         ? `${profile.displayName}（OAuth）`
                         : `${profile.displayName}（API Key）`,
                   })),
@@ -427,7 +548,7 @@ export function AccountSection({
                   required
                   placeholder="如 anthropic、openai、openai-responses、openrouter、maas"
                 />
-                <p className="text-[11px] leading-4 text-[#8A776B]">
+                <p className="text-[11px] leading-4 text-cafe-secondary">
                   OpenCode 根据 Provider 名称决定实际的 API 协议类型（如 openai → Chat Completions, anthropic →
                   Messages, openai-responses → Responses）
                 </p>
@@ -437,17 +558,17 @@ export function AccountSection({
             form.defaultModel.trim() &&
             !form.defaultModel.includes('/') &&
             !form.provider.trim() ? (
-              <div className="rounded-[10px] border border-dashed border-[#DCC9B8] bg-[#F7F3F0] px-3 py-2">
-                <p className="text-[11px] leading-4 text-[#8A776B]">
+              <div className="rounded-[10px] bg-[var(--console-field-bg)] px-3 py-2">
+                <p className="text-[11px] leading-4 text-cafe-secondary">
                   建议使用 `providerId/modelId` 格式（例如 `openai/gpt-5.4`），部分 provider 需要前缀才能正确路由。
                 </p>
               </div>
             ) : null}
             {callHint ? (
-              <div className="rounded-[10px] border border-dashed border-[#DCC9B8] bg-[#F7F3F0] px-3 py-2">
-                <p className="whitespace-pre-wrap text-[11px] leading-4 text-[#8A776B]">
+              <div className="rounded-[10px] bg-[var(--console-field-bg)] px-3 py-2">
+                <p className="whitespace-pre-wrap text-[11px] leading-4 text-cafe-secondary">
                   {callHint.label}
-                  <span className="font-semibold text-[#5C4D43]">{callHint.url}</span>
+                  <span className="font-semibold text-cafe">{callHint.url}</span>
                   {callHint.warning}
                 </p>
               </div>

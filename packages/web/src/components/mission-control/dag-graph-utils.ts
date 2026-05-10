@@ -37,7 +37,7 @@ export const EDGE_STYLES = {
 } as const;
 
 export const STATUS_COLORS: Record<BacklogStatus, { border: string; bg: string; dot: string }> = {
-  open: { border: '#C4B5A0', bg: '#FFFDF8', dot: '#C4B5A0' },
+  open: { border: '#C4B5A0', bg: 'var(--console-card-bg)', dot: '#C4B5A0' },
   suggested: { border: '#E4A853', bg: '#FFFBF0', dot: '#E4A853' },
   approved: { border: '#E4A853', bg: '#FFFBF0', dot: '#E4A853' },
   dispatched: { border: '#5B9BD5', bg: '#F5F9FF', dot: '#5B9BD5' },

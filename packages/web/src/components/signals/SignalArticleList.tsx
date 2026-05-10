@@ -5,17 +5,10 @@ interface SignalArticleListProps {
   readonly items: readonly SignalArticle[];
   readonly selectedArticleId: string | null;
   readonly onSelect: (article: SignalArticle) => void;
-  readonly onStatusChange: (articleId: string, status: SignalArticleStatus) => Promise<void>;
+  readonly onStatusChange?: (articleId: string, status: SignalArticleStatus) => void;
   readonly selectedIds?: ReadonlySet<string>;
   readonly onToggleSelect?: (articleId: string) => void;
 }
-
-const statusClassMap: Record<SignalArticleStatus, string> = {
-  inbox: 'text-cocreator-dark bg-cocreator-bg',
-  read: 'text-cafe-secondary bg-cafe-surface-elevated',
-  archived: 'text-cafe-secondary bg-cafe-surface-elevated',
-  starred: 'text-amber-800 bg-amber-100',
-};
 
 function formatDate(input: string): string {
   const value = Date.parse(input);
@@ -40,8 +33,23 @@ export function SignalArticleList({
 }: SignalArticleListProps) {
   if (items.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-cafe bg-cafe-surface p-8 text-center text-sm text-cafe-secondary">
-        当前筛选条件下没有文章。
+      <div className="flex flex-col items-center justify-center rounded-2xl bg-[var(--console-card-bg)] px-8 py-16 text-center">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          className="mb-3 h-10 w-10 text-cafe-muted opacity-40"
+        >
+          <path
+            d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <line x1="4" y1="22" x2="4" y2="15" strokeLinecap="round" />
+        </svg>
+        <p className="text-[14px] font-semibold text-cafe">当前筛选条件下没有文章</p>
+        <p className="mt-1 text-xs text-cafe-muted">尝试调整筛选条件或等待新信号</p>
       </div>
     );
   }
@@ -50,6 +58,7 @@ export function SignalArticleList({
     <ul className="space-y-2">
       {items.map((article) => {
         const selected = selectedArticleId === article.id;
+        const initial = (article.source?.[0] ?? '?').toUpperCase();
         return (
           <li key={article.id}>
             <div
@@ -64,77 +73,60 @@ export function SignalArticleList({
                 }
               }}
               className={[
-                'w-full rounded-xl border bg-cafe-surface p-4 text-left shadow-sm transition-colors',
+                'flex items-center gap-3 rounded-[14px] px-3 py-2.5 cursor-pointer transition-all',
                 selected
-                  ? 'border-cocreator-primary ring-1 ring-cocreator-primary/40'
-                  : 'border-cafe hover:border-cocreator-light',
+                  ? 'bg-[var(--console-card-bg)] shadow-[0_8px_22px_rgba(43,33,26,0.04)]'
+                  : 'hover:bg-[var(--console-card-bg)]/60',
               ].join(' ')}
+              style={{ minHeight: 76 }}
             >
-              <div className="flex items-start gap-3">
-                {onToggleSelect && (
-                  <input
-                    type="checkbox"
-                    checked={selectedIds?.has(article.id) ?? false}
-                    onChange={(e) => {
-                      e.stopPropagation();
-                      onToggleSelect(article.id);
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                    className="mt-1.5 shrink-0"
-                  />
+              {onToggleSelect && (
+                <input
+                  type="checkbox"
+                  checked={selectedIds?.has(article.id) ?? false}
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    onToggleSelect(article.id);
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="shrink-0"
+                />
+              )}
+              <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-[9px] bg-[var(--console-card-bg)] text-xs font-semibold text-cafe-secondary">
+                {initial}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="line-clamp-2 text-[13px] font-semibold leading-[1.35] text-cafe">{article.title}</p>
+                <p className="mt-1 text-[11px] text-cafe-secondary">
+                  {article.source} · {formatDate(article.fetchedAt)}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <SignalTierBadge tier={article.tier} />
+                {onStatusChange && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void onStatusChange(article.id, 'read');
+                      }}
+                      className="rounded-md bg-[var(--console-card-bg)] px-2 py-1 text-[10px] font-semibold text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] transition hover:text-cafe"
+                    >
+                      已读
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void onStatusChange(article.id, 'starred');
+                      }}
+                      className="rounded-md bg-conn-amber-bg px-2 py-1 text-[10px] font-semibold text-conn-amber-text transition hover:opacity-80"
+                    >
+                      收藏
+                    </button>
+                  </>
                 )}
-                <div className="min-w-0 flex-1">
-                  <p className="line-clamp-2 min-h-[2.5rem] text-sm font-semibold leading-5 text-cafe-black">
-                    {article.title}
-                  </p>
-                  <div className="mt-1.5 flex items-center gap-2">
-                    <SignalTierBadge tier={article.tier} />
-                    <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${statusClassMap[article.status]}`}>
-                      {article.status}
-                    </span>
-                    <span className="text-xs text-cafe-muted">·</span>
-                    <span className="text-xs text-cafe-secondary">{article.source}</span>
-                    <span className="text-xs text-cafe-secondary">{formatDate(article.fetchedAt)}</span>
-                    {article.note && (
-                      <span
-                        title={article.note.length > 80 ? `${article.note.slice(0, 80)}...` : article.note}
-                        className="text-opus-dark cursor-help"
-                      >
-                        ✎
-                      </span>
-                    )}
-                    {(article.studyCount ?? 0) > 0 && (
-                      <span
-                        title={`学习 ${article.studyCount} 次`}
-                        className="rounded bg-opus-bg px-1 text-[10px] text-opus-dark"
-                      >
-                        学{article.studyCount}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="flex shrink-0 gap-1 pt-0.5">
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void onStatusChange(article.id, 'read');
-                    }}
-                    className="rounded-md border border-cafe px-2 py-1 text-xs text-cafe-secondary hover:border-codex-light hover:text-codex-dark"
-                  >
-                    已读
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void onStatusChange(article.id, 'starred');
-                    }}
-                    className="rounded-md border border-amber-200 px-2 py-1 text-xs text-amber-700 hover:bg-amber-50"
-                  >
-                    收藏
-                  </button>
-                </div>
               </div>
             </div>
           </li>

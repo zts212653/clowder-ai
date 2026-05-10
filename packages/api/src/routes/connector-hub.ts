@@ -1,5 +1,7 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { applyConnectorSecretUpdates } from '../config/connector-secret-updater.js';
+import { isConnectorSecret } from '../config/connector-secrets-allowlist.js';
+import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import { DEFAULT_THREAD_ID, type IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { WeComBotAdapter } from '../infrastructure/connectors/adapters/WeComBotAdapter.js';
 import type { WeixinAdapter } from '../infrastructure/connectors/adapters/WeixinAdapter.js';
@@ -63,6 +65,7 @@ interface PlatformDef {
   id: string;
   name: string;
   nameEn: string;
+  category?: 'im' | 'plugin';
   fields: ConnectorFieldDef[];
   docsUrl: string;
   /** Steps displayed in the guided wizard — may be mode-filtered */
@@ -90,6 +93,8 @@ export const CONNECTOR_PLATFORMS: PlatformDef[] = [
         sensitive: true,
         requiredWhen: { envName: 'FEISHU_CONNECTION_MODE', value: 'webhook' },
       },
+      { envName: 'FEISHU_BOT_OPEN_ID', label: 'Bot Open ID（高级）', sensitive: false, optional: true },
+      { envName: 'FEISHU_ADMIN_OPEN_IDS', label: '管理员 Open IDs（高级）', sensitive: false, optional: true },
     ],
     docsUrl:
       'https://open.feishu.cn/document/home/introduction-to-custom-app-development/self-built-application-development-process',
@@ -182,12 +187,46 @@ export const CONNECTOR_PLATFORMS: PlatformDef[] = [
     id: 'weixin',
     name: '微信',
     nameEn: 'WeChat Personal',
-    fields: [],
+    fields: [
+      { envName: 'WEIXIN_BOT_TOKEN', label: 'Gateway Token（高级）', sensitive: true, optional: true },
+      { envName: 'WEIXIN_VOICE_ITEM_MODE', label: '语音消息模式（高级）', sensitive: false, optional: true },
+      { envName: 'WEIXIN_ENABLE_UNSAFE_VOICE_MODES', label: '启用实验语音模式', sensitive: false, optional: true },
+      {
+        envName: 'WEIXIN_CAPTURE_INBOUND_VOICE_MEDIA',
+        label: '采集入站语音（调试）',
+        sensitive: false,
+        optional: true,
+      },
+    ],
     docsUrl: 'https://chatbot.weixin.qq.com/',
     steps: [
       { text: '点击「生成二维码」按钮' },
       { text: '使用微信扫描二维码并确认授权' },
       { text: '授权成功后自动连接，无需重启服务' },
+    ],
+  },
+  {
+    id: 'github',
+    name: 'GitHub',
+    nameEn: 'GitHub',
+    category: 'plugin',
+    fields: [
+      { envName: 'GITHUB_TOKEN', label: 'Personal Access Token', sensitive: true },
+      {
+        envName: 'GITHUB_SETUP_NOISE_BOT_LOGINS',
+        label: 'Noise 过滤 Bot 列表',
+        sensitive: false,
+        optional: true,
+        defaultValue: 'chatgpt-codex-connector[bot]',
+      },
+      { envName: 'GITHUB_MCP_PAT', label: 'MCP 专用 Token', sensitive: true, optional: true },
+    ],
+    docsUrl:
+      'https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens',
+    steps: [
+      { text: '创建 GitHub Personal Access Token（需 repo + notifications 权限）' },
+      { text: '填写 Token 后自动启用 PR Tracking、Review Router、CI/CD Monitor' },
+      { text: '可选：配置 Noise 过滤 Bot 列表以减少 setup-only 评论噪音' },
     ],
   },
 ];
@@ -214,7 +253,10 @@ export interface PlatformStatus {
   id: string;
   name: string;
   nameEn: string;
+  category?: 'im' | 'plugin';
   configured: boolean;
+  connectionState: 'connected' | 'disconnected' | 'reconnecting' | 'unknown';
+  lastHeartbeat: number | null;
   fields: PlatformFieldStatus[];
   docsUrl: string;
   steps: PlatformStepStatus[];
@@ -261,7 +303,10 @@ export function buildConnectorStatus(env: Record<string, string | undefined> = p
       id: platform.id,
       name: platform.name,
       nameEn: platform.nameEn,
+      ...(platform.category ? { category: platform.category } : {}),
       configured,
+      connectionState: configured ? ('unknown' as const) : ('disconnected' as const),
+      lastHeartbeat: null,
       fields,
       docsUrl: platform.docsUrl,
       steps: platform.steps,
@@ -304,17 +349,54 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
     const weixinStatus = status.find((p) => p.id === 'weixin');
     if (weixinStatus) {
       const adapter = opts.weixinAdapter;
-      weixinStatus.configured = adapter != null && adapter.hasBotToken() && adapter.isPolling();
+      const isLive = adapter != null && adapter.hasBotToken() && adapter.isPolling();
+      weixinStatus.configured = isLive;
+      weixinStatus.connectionState = isLive ? 'connected' : 'disconnected';
     }
     // F132 bugfix: WeCom Bot live health — override "configured" with actual connection state.
-    // When getter is wired (gateway started) but returns null (adapter stopped/not started),
-    // force configured=false to avoid false green light from env var check.
     const wecomBotStatus = status.find((p) => p.id === 'wecom-bot');
     if (wecomBotStatus && opts.getWeComBotAdapter) {
       const adapter = opts.getWeComBotAdapter();
-      wecomBotStatus.configured = adapter?.getConnectionState() === 'connected';
+      const state = adapter?.getConnectionState() ?? 'disconnected';
+      wecomBotStatus.configured = state === 'connected';
+      wecomBotStatus.connectionState = state;
+      wecomBotStatus.lastHeartbeat = adapter?.getLastHeartbeat() ?? null;
     }
     return { platforms: status };
+  });
+
+  app.post<{ Params: { platform: string } }>('/api/connector/:platform/test', async (request, reply) => {
+    const userId = requireTrustedHubIdentity(request, reply);
+    if (!userId) return { error: 'Identity required' };
+
+    const { platform } = request.params;
+    const def = CONNECTOR_PLATFORMS.find((p) => p.id === platform);
+    if (!def) {
+      reply.status(404);
+      return { ok: false, error: `Unknown platform: ${platform}` };
+    }
+
+    if (platform === 'weixin') {
+      const adapter = opts.weixinAdapter;
+      const ok = adapter != null && adapter.hasBotToken() && adapter.isPolling();
+      return { ok, message: ok ? '微信网关连接正常' : '微信网关未连接，请扫码登录' };
+    }
+    if (platform === 'wecom-bot') {
+      const adapter = opts.getWeComBotAdapter?.();
+      const state = adapter?.getConnectionState() ?? 'disconnected';
+      return {
+        ok: state === 'connected',
+        message: state === 'connected' ? '企微机器人 WebSocket 已连接' : `当前状态: ${state}`,
+      };
+    }
+
+    const status = buildConnectorStatus();
+    const platformStatus = status.find((p) => p.id === platform);
+    if (!platformStatus?.configured) {
+      return { ok: false, error: '平台尚未配置，请先填写凭证并保存' };
+    }
+
+    return { ok: true, message: `${def.name} 凭证已配置，连接器将在下次启动时自动连接` };
   });
 
   app.post('/api/connector/feishu/qrcode', async (request, reply) => {
@@ -576,35 +658,102 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
     return store.getConfig(connectorId);
   });
 
-  app.put('/api/connector/permissions/:connectorId', async (request, reply) => {
+  // ── Unified connector config save ──
+
+  const LOOPBACK_ADDRS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
+  const platformFieldIndex = new Map<string, Set<string>>();
+  for (const p of CONNECTOR_PLATFORMS) {
+    platformFieldIndex.set(p.id, new Set(p.fields.map((f) => f.envName)));
+  }
+
+  app.put<{ Params: { connectorId: string } }>('/api/connector/:connectorId/config', async (request, reply) => {
     const userId = requireTrustedHubIdentity(request, reply);
     if (!userId) return { error: 'Identity required' };
-    const { connectorId } = request.params as { connectorId: string };
-    const store = opts.permissionStore;
-    if (!store) {
-      reply.status(503);
-      return { error: 'Permission store not available' };
+    const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim();
+    if (ownerId && userId !== ownerId) {
+      reply.status(403);
+      return { error: 'Only the owner can modify connector configuration' };
     }
+    const { connectorId } = request.params;
     const body = request.body as {
-      whitelistEnabled?: boolean;
-      commandAdminOnly?: boolean;
-      adminOpenIds?: string[];
-      allowedGroups?: Array<{ externalChatId: string; label?: string }>;
-    };
-    if (body.whitelistEnabled !== undefined) {
-      await store.setWhitelistEnabled(connectorId, body.whitelistEnabled);
+      secrets?: Array<{ name: string; value: string | null }>;
+      permissions?: {
+        whitelistEnabled?: boolean;
+        commandAdminOnly?: boolean;
+        adminOpenIds?: string[];
+        allowedGroups?: Array<{ externalChatId: string; label?: string }>;
+      };
+    } | null;
+
+    if (!body || typeof body !== 'object') {
+      reply.status(400);
+      return { error: 'Request body required' };
     }
-    if (body.commandAdminOnly !== undefined) {
-      await store.setCommandAdminOnly(connectorId, body.commandAdminOnly);
+
+    const allowedFields = platformFieldIndex.get(connectorId);
+    if (!allowedFields) {
+      reply.status(400);
+      return { error: `Unknown connector: ${connectorId}` };
     }
-    if (body.adminOpenIds !== undefined) {
-      await store.setAdminOpenIds(connectorId, body.adminOpenIds);
+
+    if (body.permissions && !opts.permissionStore) {
+      reply.status(503);
+      return { error: 'Permission store is not available' };
     }
-    if (body.allowedGroups !== undefined) {
-      const current = await store.listAllowedGroups(connectorId);
-      for (const g of current) await store.denyGroup(connectorId, g.externalChatId);
-      for (const g of body.allowedGroups) await store.allowGroup(connectorId, g.externalChatId, g.label);
+
+    if (body.secrets && body.secrets.length > 0) {
+      if (!LOOPBACK_ADDRS.has(request.ip)) {
+        reply.status(403);
+        return { error: 'Secrets endpoint is loopback-only' };
+      }
+      for (const s of body.secrets) {
+        if (!isConnectorSecret(s.name)) {
+          reply.status(400);
+          return { error: `'${s.name}' is not in connector secrets allowlist` };
+        }
+        if (!allowedFields.has(s.name)) {
+          reply.status(400);
+          return { error: `'${s.name}' does not belong to connector '${connectorId}'` };
+        }
+        if (
+          s.name === 'TELEGRAM_BOT_TOKEN' &&
+          s.value != null &&
+          s.value !== '' &&
+          normalizeTelegramBotToken(s.value) == null
+        ) {
+          reply.status(400);
+          return { error: 'TELEGRAM_BOT_TOKEN format invalid' };
+        }
+      }
+      await applyConnectorSecretUpdates(body.secrets, { envFilePath: opts.envFilePath });
+
+      const auditLog = getEventAuditLog();
+      try {
+        await auditLog.append({
+          type: AuditEventTypes.CONFIG_UPDATED,
+          data: { target: 'secrets', keys: body.secrets.map((s) => s.name), operator: userId },
+        });
+      } catch (err) {
+        request.log.warn({ err }, 'connector config audit append failed');
+      }
     }
-    return store.getConfig(connectorId);
+
+    let permissions;
+    const store = opts.permissionStore;
+    if (body.permissions && store) {
+      const p = body.permissions;
+      if (p.whitelistEnabled !== undefined) await store.setWhitelistEnabled(connectorId, p.whitelistEnabled);
+      if (p.commandAdminOnly !== undefined) await store.setCommandAdminOnly(connectorId, p.commandAdminOnly);
+      if (p.adminOpenIds !== undefined) await store.setAdminOpenIds(connectorId, p.adminOpenIds);
+      if (p.allowedGroups !== undefined) {
+        const current = await store.listAllowedGroups(connectorId);
+        for (const g of current) await store.denyGroup(connectorId, g.externalChatId);
+        for (const g of p.allowedGroups) await store.allowGroup(connectorId, g.externalChatId, g.label);
+      }
+      permissions = await store.getConfig(connectorId);
+    }
+
+    return { ok: true, permissions };
   });
 };

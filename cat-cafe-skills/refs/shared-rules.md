@@ -71,7 +71,7 @@ AI agent 100x 执行速度下，**方向正确性**的价值远大于**启动便
 
 每个概念、每条规则、每个状态只在一个地方定义。其他地方引用，不重复。
 
-**推论**：shared-rules.md 是规则真相源；cat-config.json 是猫猫名册真相源；ROADMAP.md 是任务真相源。
+**推论**：shared-rules.md 是规则真相源；猫猫名册（cat-template.json + .cat-cafe/cat-catalog.json）是猫猫名册真相源；ROADMAP.md 是任务真相源。
 
 ### P5. 可验证才算完成
 

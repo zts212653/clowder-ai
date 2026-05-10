@@ -1307,73 +1307,12 @@ main() {
         echo -e "${YELLOW}  ⚠ Anthropic Proxy 已禁用 (ANTHROPIC_PROXY_ENABLED=0)${NC}"
     fi
 
-    # Sidecar 状态初始化
-    ASR_PORT=${WHISPER_PORT:-9876}
-    TTS_PORT_VAL=${TTS_PORT:-9879}
-    LLM_PP_PORT=${LLM_POSTPROCESS_PORT:-9878}
+    # ML 服务（ASR/TTS/LLM后修/Embedding）由 service-manifest 管理
+    # API 启动后通过 autoStartEnabledServices 自动拉起已启用的服务
     _STATE_ASR=disabled
     _STATE_TTS=disabled
     _STATE_LLM_PP=disabled
     _STATE_EMBED=disabled
-
-    # Qwen3-ASR Server (语音输入 — 替代 Whisper，同端口 drop-in)
-    if [ "${ASR_ENABLED:-0}" = "1" ]; then
-        if ! check_sidecar_dep "ASR" "python3"; then
-            _STATE_ASR=failed
-        elif [ -f "scripts/qwen3-asr-server.sh" ]; then
-            start_sidecar "Qwen3-ASR" "_STATE_ASR" "$ASR_PORT" "${ASR_TIMEOUT:-30}" \
-                "WHISPER_PORT=$ASR_PORT bash scripts/qwen3-asr-server.sh"
-        elif [ -f "scripts/whisper-server.sh" ]; then
-            start_sidecar "Whisper ASR" "_STATE_ASR" "$ASR_PORT" "${ASR_TIMEOUT:-30}" \
-                "WHISPER_PORT=$ASR_PORT bash scripts/whisper-server.sh"
-        else
-            echo -e "${RED}  ✗ ASR 已启用，但脚本未找到${NC}"
-            echo "    请运行: ./scripts/setup.sh"
-            _STATE_ASR=failed
-        fi
-    fi
-
-    # TTS Server (语音合成 — Qwen3-TTS / Kokoro / edge-tts)
-    if [ "${TTS_ENABLED:-0}" = "1" ]; then
-        if ! check_sidecar_dep "TTS" "python3"; then
-            _STATE_TTS=failed
-        elif [ -f "scripts/tts-server.sh" ]; then
-            start_sidecar "TTS" "_STATE_TTS" "$TTS_PORT_VAL" "${TTS_TIMEOUT:-30}" \
-                "TTS_PORT=$TTS_PORT_VAL bash scripts/tts-server.sh"
-        else
-            echo -e "${RED}  ✗ TTS 已启用，但脚本未找到${NC}"
-            echo "    请运行: ./scripts/setup.sh"
-            _STATE_TTS=failed
-        fi
-    fi
-
-    # LLM 后修 Server (语音转写纠正 — Qwen3-4B)
-    if [ "${LLM_POSTPROCESS_ENABLED:-0}" = "1" ]; then
-        if ! check_sidecar_dep "LLM 后修" "python3"; then
-            _STATE_LLM_PP=failed
-        elif [ -f "scripts/llm-postprocess-server.sh" ]; then
-            start_sidecar "LLM 后修" "_STATE_LLM_PP" "$LLM_PP_PORT" "${LLM_TIMEOUT:-60}" \
-                "LLM_POSTPROCESS_PORT=$LLM_PP_PORT bash scripts/llm-postprocess-server.sh"
-        else
-            echo -e "${RED}  ✗ LLM 后修已启用，但脚本未找到${NC}"
-            echo "    请运行: ./scripts/setup.sh"
-            _STATE_LLM_PP=failed
-        fi
-    fi
-
-    # Embedding Server (F102 记忆系统 — Qwen3-Embedding MLX GPU)
-    if [ "${EMBED_ENABLED:-0}" = "1" ]; then
-        if ! check_sidecar_dep "Embedding" "python3"; then
-            _STATE_EMBED=failed
-        elif [ -f "scripts/embed-server.sh" ]; then
-            start_sidecar "Embedding" "_STATE_EMBED" "${EMBED_PORT:-9880}" "${EMBED_TIMEOUT:-30}" \
-                "EMBED_PORT=${EMBED_PORT:-9880} bash scripts/embed-server.sh"
-        else
-            echo -e "${RED}  ✗ Embedding 已启用，但脚本未找到${NC}"
-            echo "    请运行: ./scripts/setup.sh"
-            _STATE_EMBED=failed
-        fi
-    fi
 
     API_LAUNCH_CMD="$(api_launch_command)"
     if [ "${CAT_CAFE_DIRECT_NO_WATCH:-0}" = "1" ]; then

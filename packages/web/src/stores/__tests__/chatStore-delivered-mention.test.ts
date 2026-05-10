@@ -74,6 +74,10 @@ describe('markMessagesDelivered mentionsUser notification', () => {
             },
           ],
           hasUserMention: false,
+          workspaceWorktreeId: null,
+          workspaceOpenTabs: [],
+          workspaceOpenFilePath: null,
+          workspaceOpenFileLine: null,
         },
       },
     });

@@ -110,15 +110,15 @@ describe('WorkflowSopPanel', () => {
     expect(pills).toBeTruthy();
     const implPill = container.querySelector('[data-testid="sop-stage-impl"]');
     expect(implPill).toBeTruthy();
-    expect(implPill?.className).toContain('bg-[#8B6F47]'); // current = active color
+    expect(implPill?.className).toContain('bg-[var(--cafe-accent)]'); // current = active color
 
     // Past stage should have muted color
     const kickoffPill = container.querySelector('[data-testid="sop-stage-kickoff"]');
-    expect(kickoffPill?.className).toContain('bg-[#D4C4A8]');
+    expect(kickoffPill?.className).toContain('bg-[var(--console-pill-bg)]');
 
     // Future stage should be lightest
     const reviewPill = container.querySelector('[data-testid="sop-stage-review"]');
-    expect(reviewPill?.className).toContain('bg-[#F0EBE3]');
+    expect(reviewPill?.className).toContain('bg-[var(--console-pill-bg)]');
 
     // Baton holder
     const baton = container.querySelector('[data-testid="sop-baton-holder"]');
@@ -169,10 +169,10 @@ describe('WorkflowSopPanel', () => {
     apiFetchMock.mockResolvedValue(mockResponse(200, sop));
     await renderPanel('b-1');
     const completionPill = container.querySelector('[data-testid="sop-stage-completion"]');
-    expect(completionPill?.className).toContain('bg-[#8B6F47]');
+    expect(completionPill?.className).toContain('bg-[var(--cafe-accent)]');
     // All prior stages should be past
     const mergePill = container.querySelector('[data-testid="sop-stage-merge"]');
-    expect(mergePill?.className).toContain('bg-[#D4C4A8]');
+    expect(mergePill?.className).toContain('bg-[var(--console-pill-bg)]');
   });
 
   it('hides next skill when null', async () => {

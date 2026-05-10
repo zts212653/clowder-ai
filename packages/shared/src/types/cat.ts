@@ -5,7 +5,7 @@
 
 import type { CliConfig, ContextBudget } from './cat-breed.js';
 import type { CatId, SessionId } from './ids.js';
-import { createCatId } from './ids.js';
+import type { VoiceConfig } from './tts.js';
 
 /**
  * CLI client identity used to invoke a cat (e.g. 'anthropic' → claude CLI, 'openai' → codex CLI).
@@ -86,6 +86,7 @@ export interface CatConfig {
   /** clowder-ai#340 P5: Model provider name for api_key routing (renamed from `ocProviderName`).
    *  e.g. "openrouter", "maas", "deepseek". Runtime assembles provider/model for the -m flag. */
   readonly provider?: string;
+  readonly voiceConfig?: VoiceConfig;
 }
 
 /**

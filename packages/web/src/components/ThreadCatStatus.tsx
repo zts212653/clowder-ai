@@ -32,9 +32,9 @@ export function ThreadCatStatus({
 
   const statusClasses: Record<string, string> = {
     idle: 'text-cafe-muted',
-    working: 'text-amber-500 animate-cat-bounce',
-    done: 'text-green-500',
-    error: 'text-red-500 animate-cat-shake',
+    working: 'text-conn-amber-text animate-cat-bounce',
+    done: 'text-conn-emerald-text',
+    error: 'text-conn-red-text animate-cat-shake',
   };
 
   return (
@@ -44,7 +44,7 @@ export function ThreadCatStatus({
           ᓚᘏᗢ
         </span>
       )}
-      {status === 'done' && <span className="text-green-500 text-[10px]">&#10003;</span>}
+      {status === 'done' && <span className="text-conn-emerald-text text-[10px]">&#10003;</span>}
       {hasUserMention && (
         <span title="猫猫 @ 了你">
           <PawIcon className="text-xs" />
@@ -52,8 +52,10 @@ export function ThreadCatStatus({
       )}
       {unreadCount > 0 && (
         <span
-          className={`inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-white text-[10px] font-bold leading-none ${
-            hasUserMention ? 'bg-red-500' : 'bg-amber-500'
+          className={`inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold leading-none ${
+            hasUserMention
+              ? 'bg-[var(--console-stop)] text-[var(--cafe-surface)]'
+              : 'bg-[var(--cafe-accent)] text-[var(--cafe-surface)]'
           }`}
         >
           {unreadCount > 99 ? '99+' : unreadCount}

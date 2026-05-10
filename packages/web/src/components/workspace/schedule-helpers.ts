@@ -70,11 +70,11 @@ export interface ScheduleTask {
 export type DisplayCategory = 'pr' | 'repo' | 'thread' | 'system' | 'external';
 
 export const CATEGORY_STYLES: Record<DisplayCategory, string> = {
-  pr: 'bg-blue-100 text-blue-700',
-  repo: 'bg-emerald-100 text-emerald-700',
-  thread: 'bg-violet-100 text-violet-700',
-  system: 'bg-amber-100 text-amber-700',
-  external: 'bg-purple-100 text-purple-700',
+  pr: 'bg-[var(--color-cafe-accent)]/10 text-[var(--color-cafe-accent)]',
+  repo: 'bg-conn-emerald-bg text-conn-emerald-text',
+  thread: 'bg-conn-purple-bg text-conn-purple-text',
+  system: 'bg-conn-amber-bg text-conn-amber-text',
+  external: 'bg-conn-purple-bg text-conn-purple-text',
 };
 
 export const CATEGORY_LABELS: Record<DisplayCategory, string> = {
@@ -126,8 +126,8 @@ export function outcomeIcon(outcome: string): string {
 }
 
 export function outcomeColor(outcome: string): string {
-  if (outcome === 'RUN_DELIVERED') return 'text-emerald-600';
-  if (outcome === 'RUN_FAILED') return 'text-red-500';
+  if (outcome === 'RUN_DELIVERED') return 'text-conn-emerald-text';
+  if (outcome === 'RUN_FAILED') return 'text-conn-red-text';
   return 'text-cafe-muted';
 }
 

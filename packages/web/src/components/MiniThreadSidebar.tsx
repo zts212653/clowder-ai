@@ -67,7 +67,7 @@ export function MiniThreadSidebar({ onAssignToPane }: MiniThreadSidebarProps) {
 
   return (
     <aside
-      className="relative flex-shrink-0 border-r border-cocreator-light bg-cafe-surface flex flex-col h-full"
+      className="relative flex h-full flex-shrink-0 flex-col border-r border-[var(--console-border-soft)] bg-[var(--console-panel-bg)]"
       style={{ width }}
     >
       <div className="flex-1 overflow-y-auto py-2 px-1 space-y-0.5">
@@ -80,7 +80,9 @@ export function MiniThreadSidebar({ onAssignToPane }: MiniThreadSidebarProps) {
           <MiniThreadRow key={t.id} thread={t} isInPane isCollapsed={isCollapsed} getThreadState={getThreadState} />
         ))}
 
-        {assigned.length > 0 && available.length > 0 && <div className="mx-1 border-t border-cafe my-1.5" />}
+        {assigned.length > 0 && available.length > 0 && (
+          <div className="mx-1 border-t border-[var(--console-border-soft)] my-1.5" />
+        )}
 
         {available.length > 0 && (
           <div className="px-1 mb-1">
@@ -100,7 +102,7 @@ export function MiniThreadSidebar({ onAssignToPane }: MiniThreadSidebarProps) {
 
       {/* Drag handle */}
       <div
-        className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-cocreator-primary/20 active:bg-cocreator-primary/30 transition-colors"
+        className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize transition-colors hover:bg-[var(--console-hover-bg)] active:bg-cafe-accent/20"
         onMouseDown={handleMouseDown}
       />
     </aside>
@@ -128,11 +130,11 @@ function MiniThreadRow({
   const status = getCatStatusType(ts.catStatuses);
   const dotColor =
     status === 'error'
-      ? 'bg-red-400'
+      ? 'bg-conn-red-bg'
       : status === 'working'
-        ? 'bg-amber-400 animate-pulse'
+        ? 'bg-conn-amber-bg animate-pulse'
         : status === 'done'
-          ? 'bg-green-400'
+          ? 'bg-conn-emerald-bg'
           : '';
 
   const firstCat = thread.participants[0];
@@ -142,7 +144,7 @@ function MiniThreadRow({
     <button
       onClick={onClick}
       className={`relative w-full flex items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors ${
-        isInPane ? 'bg-cocreator-light' : 'hover:bg-cafe-surface-elevated'
+        isInPane ? 'bg-[var(--console-active-bg)]' : 'hover:bg-[var(--console-hover-bg)]'
       } ${onClick ? 'cursor-pointer' : 'cursor-default'}`}
       title={title}
     >
@@ -157,7 +159,7 @@ function MiniThreadRow({
       {!isCollapsed && <span className="text-xs text-cafe-secondary truncate flex-1 min-w-0">{title}</span>}
       {ts.unreadCount > 0 && (
         <span
-          className={`text-[8px] ${ts.hasUserMention ? 'bg-red-500' : 'bg-amber-500'} text-white rounded-full min-w-[14px] px-0.5 text-center leading-3 flex-shrink-0`}
+          className={`text-[8px] ${ts.hasUserMention ? 'bg-conn-red-text' : 'bg-conn-amber-text'} text-[var(--cafe-surface)] rounded-full min-w-[14px] px-0.5 text-center leading-3 flex-shrink-0`}
         >
           {ts.unreadCount > 9 ? '9+' : ts.unreadCount}
         </span>

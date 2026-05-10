@@ -9,9 +9,9 @@ interface GovernanceHealthResponse {
 }
 
 const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }> = {
-  healthy: { bg: 'bg-green-50', text: 'text-green-700', label: '正常' },
-  stale: { bg: 'bg-yellow-50', text: 'text-yellow-700', label: '过期' },
-  missing: { bg: 'bg-red-50', text: 'text-red-700', label: '缺失' },
+  healthy: { bg: 'bg-conn-emerald-bg', text: 'text-conn-emerald-text', label: '正常' },
+  stale: { bg: 'bg-conn-amber-bg', text: 'text-conn-amber-text', label: '过期' },
+  missing: { bg: 'bg-conn-red-bg', text: 'text-conn-red-text', label: '缺失' },
   'never-synced': { bg: 'bg-cafe-surface-elevated', text: 'text-cafe-secondary', label: '未同步' },
 };
 
@@ -109,7 +109,7 @@ export function HubGovernanceTab() {
   }
 
   if (error) {
-    return <p className="text-sm text-red-500 bg-red-50 rounded-lg px-3 py-2">{error}</p>;
+    return <p className="text-sm text-conn-red-text bg-conn-red-bg rounded-lg px-3 py-2">{error}</p>;
   }
 
   if (projects.length === 0) {
@@ -125,12 +125,16 @@ export function HubGovernanceTab() {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-cafe-secondary">外部项目治理状态</h3>
-        <button type="button" onClick={fetchHealth} className="text-xs text-blue-500 hover:text-blue-700">
+        <button
+          type="button"
+          onClick={fetchHealth}
+          className="text-xs text-[var(--color-cafe-accent)] hover:opacity-90"
+        >
           刷新
         </button>
       </div>
 
-      <div className="border rounded-lg overflow-hidden">
+      <div className="console-list-card rounded-2xl overflow-hidden shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
         <table className="w-full text-sm">
           <thead className="bg-cafe-surface-elevated text-left">
             <tr>
@@ -141,7 +145,7 @@ export function HubGovernanceTab() {
               <th className="px-3 py-2 font-medium text-cafe-secondary">操作</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody className="divide-y divide-[var(--console-border-soft)]">
             {projects.map((p) => {
               const fallback = STATUS_STYLES['never-synced'];
               const style = STATUS_STYLES[p.status] ?? fallback;
@@ -167,7 +171,7 @@ export function HubGovernanceTab() {
                         type="button"
                         onClick={() => handleConfirm(p.projectPath)}
                         disabled={confirming === p.projectPath}
-                        className="text-xs px-2 py-1 rounded bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50"
+                        className="text-xs px-2 py-1 rounded bg-[var(--color-cafe-accent)] text-[var(--cafe-surface)] hover:opacity-90 disabled:opacity-50"
                       >
                         {confirming === p.projectPath ? '同步中...' : '立即同步'}
                       </button>

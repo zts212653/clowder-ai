@@ -5,7 +5,7 @@
 
 import assert from 'node:assert';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { clearVoiceCache, getCatVoice } from '../dist/config/cat-voices.js';
+import { clearVoiceCache, getCatVoice, isWithinBase } from '../dist/config/cat-voices.js';
 
 // F103: GENSHIN_VOICE_DIR backward compatibility
 describe('GENSHIN_VOICE_DIR backward compat (P1)', () => {
@@ -82,5 +82,32 @@ describe('refAudio absolute path detection (P2)', () => {
       const occurrences = voice.refAudio.split('character-models').length - 1;
       assert.ok(occurrences <= 1, `refAudio should not have double base dir: ${voice.refAudio}`);
     }
+  });
+});
+
+// F190: isWithinBase sibling-prefix traversal regression
+describe('isWithinBase traversal defense', () => {
+  it('rejects sibling directory with same prefix', () => {
+    assert.strictEqual(isWithinBase('/tmp/uploads', '/tmp/uploads_evil/secret.wav'), false);
+  });
+
+  it('rejects parent traversal', () => {
+    assert.strictEqual(isWithinBase('/tmp/uploads', '/tmp/etc/passwd'), false);
+  });
+
+  it('rejects dot-dot traversal', () => {
+    assert.strictEqual(isWithinBase('/tmp/uploads', '/tmp/uploads/../etc/passwd'), false);
+  });
+
+  it('allows valid subpath', () => {
+    assert.strictEqual(isWithinBase('/tmp/uploads', '/tmp/uploads/sub/file.wav'), true);
+  });
+
+  it('allows direct child', () => {
+    assert.strictEqual(isWithinBase('/tmp/uploads', '/tmp/uploads/file.wav'), true);
+  });
+
+  it('rejects base dir itself (not a file)', () => {
+    assert.strictEqual(isWithinBase('/tmp/uploads', '/tmp/uploads'), false);
   });
 });

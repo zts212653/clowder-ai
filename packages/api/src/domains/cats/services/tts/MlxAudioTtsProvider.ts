@@ -7,6 +7,7 @@
  */
 
 import type { ITtsProvider, TtsSynthesizeRequest, TtsSynthesizeResult } from '@cat-cafe/shared';
+import { resolveServiceEndpoint } from '../../../services/service-registry.js';
 
 export interface MlxAudioTtsProviderOptions {
   /** Base URL of the Python TTS server (default: http://localhost:9879) */
@@ -62,7 +63,7 @@ export class MlxAudioTtsProvider implements ITtsProvider {
   private readonly timeoutMs: number;
 
   constructor(options?: MlxAudioTtsProviderOptions) {
-    this.baseUrl = options?.baseUrl ?? process.env.TTS_URL ?? 'http://localhost:9879';
+    this.baseUrl = options?.baseUrl ?? resolveServiceEndpoint('mlx-tts') ?? 'http://localhost:9879';
     this.model = options?.model ?? 'mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16';
     this.timeoutMs = options?.timeoutMs ?? 30_000;
   }

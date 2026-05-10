@@ -32,25 +32,25 @@ describe('TriageBadge', () => {
       const badge = container.querySelector('[data-testid="bucket-badge"]');
       expect(badge).toBeTruthy();
       expect(badge?.textContent).toBe('Build Now');
-      expect(badge?.className).toContain('green');
+      expect(badge?.className).toContain('conn-emerald');
     });
 
-    it('renders clarify_first with yellow styling', () => {
+    it('renders clarify_first with amber styling', () => {
       act(() => {
         root.render(React.createElement(BucketBadge, { bucket: 'clarify_first' }));
       });
       const badge = container.querySelector('[data-testid="bucket-badge"]');
       expect(badge?.textContent).toBe('Clarify First');
-      expect(badge?.className).toContain('yellow');
+      expect(badge?.className).toContain('conn-amber');
     });
 
-    it('renders validate_first with orange styling', () => {
+    it('renders validate_first with amber styling', () => {
       act(() => {
         root.render(React.createElement(BucketBadge, { bucket: 'validate_first' }));
       });
       const badge = container.querySelector('[data-testid="bucket-badge"]');
       expect(badge?.textContent).toBe('Validate First');
-      expect(badge?.className).toContain('orange');
+      expect(badge?.className).toContain('conn-amber');
     });
 
     it('renders challenge with red styling', () => {
@@ -80,7 +80,7 @@ describe('TriageBadge', () => {
       const badge = container.querySelector('[data-testid="source-badge"]');
       expect(badge).toBeTruthy();
       expect(badge?.textContent).toContain('Q');
-      expect(badge?.className).toContain('blue');
+      expect(badge?.className).toContain('cafe-accent');
     });
 
     it('renders A tag with red styling', () => {

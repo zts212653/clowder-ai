@@ -1,8 +1,7 @@
 'use client';
 
 import type { ProfileItem } from './hub-accounts.types';
-import { builtinClientLabel } from './hub-accounts.view';
-import { TagEditor } from './hub-tag-editor';
+import { HubIcon } from './hub-icons';
 import { useConfirm } from './useConfirm';
 
 export interface ProfileEditPayload {
@@ -18,89 +17,59 @@ interface HubAccountItemProps {
   busy: boolean;
   onSave: (profileId: string, payload: ProfileEditPayload) => Promise<void>;
   onDelete: (profileId: string) => void;
-  onEdit?: (profile: ProfileItem) => void;
+  onEdit?: (profileId: string) => void;
 }
 
-function summaryText(profile: ProfileItem): string | null {
-  if (profile.authType === 'oauth') {
-    const label = profile.clientId ? builtinClientLabel(profile.clientId) : null;
-    return label ? `${label} · OAuth` : 'OAuth';
+function summaryText(profile: ProfileItem): string {
+  const parts: string[] = [];
+  if (profile.baseUrl) {
+    parts.push(profile.baseUrl.replace(/^https?:\/\//, ''));
   }
-  const host = profile.baseUrl?.replace(/^https?:\/\//, '').replace(/\/+$/, '') || null;
-  const keyStatus = profile.hasApiKey ? '已配置' : '未配置';
-  return host ? `${host} · ${keyStatus}` : keyStatus;
+  parts.push(profile.authType === 'oauth' ? 'OAuth' : 'API Key');
+  return parts.join(' · ');
 }
 
-export function HubAccountItem({ profile, busy, onSave, onDelete, onEdit }: HubAccountItemProps) {
+export function HubAccountItem({ profile, busy, onDelete, onEdit }: HubAccountItemProps) {
   const confirm = useConfirm();
+
+  const handleDelete = async () => {
+    const ok = await confirm({
+      title: '删除账号',
+      message: `确定要删除「${profile.displayName}」吗？此操作不可撤销。`,
+      confirmLabel: '删除',
+      variant: 'danger',
+    });
+    if (ok) onDelete(profile.id);
+  };
 
   return (
     <div
-      className={`rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px] transition ${onEdit ? 'cursor-pointer hover:border-[#D49266]/40' : ''}`}
-      onClick={() => onEdit?.(profile)}
+      className="flex cursor-pointer items-center gap-3 rounded-2xl bg-[var(--console-card-bg)] px-4 py-3 shadow-[0_12px_30px_rgba(43,33,26,0.08)] transition-shadow hover:shadow-[0_12px_30px_rgba(43,33,26,0.12)]"
+      onClick={() => onEdit?.(profile.id)}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 space-y-2">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-base font-bold text-[#2D2118]">{profile.displayName}</span>
-            <span
-              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                profile.authType === 'oauth' ? 'bg-[#FFF3E0] text-[#D49266]' : 'bg-[#F3E8FF] text-[#9D7BC7]'
-              }`}
-            >
-              {profile.authType === 'oauth' ? 'oauth' : 'api_key'}
-            </span>
-          </div>
-          {summaryText(profile) ? <p className="text-sm text-[#8A776B]">{summaryText(profile)}</p> : null}
-          <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
-            <p className="text-xs font-semibold text-[#8A776B]">可用模型</p>
-            <TagEditor
-              tags={profile.models ?? []}
-              tone={profile.authType === 'oauth' ? 'orange' : 'purple'}
-              addLabel="+ 添加"
-              placeholder="输入模型名"
-              emptyLabel="(暂无模型)"
-              minCount={1}
-              onChange={(nextModels) => {
-                if (busy) return;
-                void onSave(profile.id, {
-                  displayName: profile.displayName,
-                  ...(profile.authType === 'api_key' ? { baseUrl: profile.baseUrl ?? '' } : {}),
-                  models: nextModels,
-                });
-              }}
-            />
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-          <button
-            type="button"
-            className="rounded-full bg-red-50 p-2 text-red-600 transition hover:bg-red-100 disabled:opacity-50"
-            onClick={async () => {
-              if (
-                await confirm({
-                  title: '删除确认',
-                  message: `确认删除账号「${profile.displayName}」吗？该操作不可撤销。`,
-                  variant: 'danger',
-                  confirmLabel: '删除',
-                })
-              ) {
-                onDelete(profile.id);
-              }
-            }}
-            disabled={busy}
-            aria-label="删除账号"
-          >
-            <svg viewBox="0 0 16 16" className="h-4 w-4 fill-none stroke-current" aria-hidden="true">
-              <path
-                d="M3.5 4.5h9m-7.5 0V3.25h5V4.5m-5.5 0 .5 8h5l.5-8m-4 2v4m2-4v4"
-                strokeWidth="1.25"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-        </div>
+      <svg className="h-[18px] w-[18px] shrink-0 cursor-grab text-cafe-muted" viewBox="0 0 24 24" fill="currentColor">
+        <circle cx="9" cy="5" r="1.5" />
+        <circle cx="15" cy="5" r="1.5" />
+        <circle cx="9" cy="12" r="1.5" />
+        <circle cx="15" cy="12" r="1.5" />
+        <circle cx="9" cy="19" r="1.5" />
+        <circle cx="15" cy="19" r="1.5" />
+      </svg>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-bold text-cafe">{profile.displayName}</p>
+        <p className="mt-0.5 truncate text-xs text-cafe-secondary">{summaryText(profile)}</p>
+      </div>
+
+      <div className="flex shrink-0 items-center" onClick={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={handleDelete}
+          className={`flex h-[30px] w-[30px] items-center justify-center rounded-[9px] bg-[var(--console-card-soft-bg)] transition-opacity hover:opacity-80 ${busy ? 'opacity-50' : ''}`}
+          title="删除"
+        >
+          <HubIcon name="trash" className="h-4 w-4 text-[var(--cafe-accent)]" />
+        </button>
       </div>
     </div>
   );

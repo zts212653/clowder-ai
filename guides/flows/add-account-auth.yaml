@@ -10,12 +10,7 @@ description: 引导你完成 API Key 认证账号的创建和配置
 steps:
   - id: open-hub
     target: hub.trigger
-    tips: 点击这里打开 Hub 控制台
-    advance: click
-
-  - id: expand-settings
-    target: settings.group
-    tips: 展开系统配置分组
+    tips: 点击这里打开设置
     advance: click
 
   - id: go-to-accounts

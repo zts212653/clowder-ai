@@ -51,14 +51,14 @@ export const DEPTH_OPTIONS = [
 ] as const;
 
 export const SOURCE_TYPE_COLORS: Record<string, string> = {
-  decision: 'bg-amber-100 text-amber-800',
-  phase: 'bg-blue-100 text-blue-800',
-  feature: 'bg-purple-100 text-purple-800',
-  lesson: 'bg-green-100 text-green-800',
-  research: 'bg-cyan-100 text-cyan-800',
-  knowledge: 'bg-pink-100 text-pink-800',
-  discussion: 'bg-gray-100 text-gray-700',
-  commit: 'bg-gray-100 text-gray-600',
+  decision: 'bg-conn-amber-bg text-conn-amber-text',
+  phase: 'bg-[var(--color-cafe-accent)]/10 text-[var(--color-cafe-accent)]',
+  feature: 'bg-[var(--console-pill-bg)] text-cafe',
+  lesson: 'bg-conn-emerald-bg text-conn-emerald-text',
+  research: 'bg-conn-sky-bg text-conn-sky-text',
+  knowledge: 'bg-[var(--console-pill-bg)] text-cafe-secondary',
+  discussion: 'bg-[var(--console-card-soft-bg)] text-cafe',
+  commit: 'bg-[var(--console-card-soft-bg)] text-cafe-secondary',
 };
 
 export const SOURCE_TYPE_LABELS: Record<string, string> = {
@@ -162,109 +162,89 @@ export function EvidenceSearch({ initialQuery }: EvidenceSearchProps = {}) {
 
   return (
     <div data-testid="evidence-search" className="space-y-4">
-      {/* Search bar */}
-      <div className="flex gap-2">
+      {/* Search + filters — unified bar matching Signal Inbox layout */}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleSearch();
+        }}
+        className="flex flex-wrap items-center gap-2"
+      >
         <input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
           placeholder="搜索项目知识..."
-          className="flex-1 rounded-lg border border-cafe bg-white px-3 py-2 text-sm text-cafe-black placeholder:text-cafe-secondary focus:border-cocreator-primary focus:outline-none"
+          className="console-form-input max-w-[400px]"
           data-testid="evidence-search-input"
         />
-        <button
-          type="button"
-          onClick={handleSearch}
-          disabled={isSearching || !query.trim()}
-          className="rounded-lg bg-cocreator-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-cocreator-dark disabled:opacity-40"
-          data-testid="evidence-search-button"
+        <select
+          value={depth === 'raw' ? 'lexical' : mode}
+          onChange={(e) => setMode(e.target.value as EvidenceSearchParams['mode'])}
+          disabled={depth === 'raw'}
+          className="console-form-input"
         >
-          {isSearching ? '...' : '搜索'}
-        </button>
-      </div>
-
-      {/* Mode / Scope selectors */}
-      <div className="flex gap-3 text-xs">
-        <label className="flex items-center gap-1 text-cafe-secondary">
-          检索模式:
-          <select
-            value={depth === 'raw' ? 'lexical' : mode}
-            onChange={(e) => setMode(e.target.value as EvidenceSearchParams['mode'])}
-            disabled={depth === 'raw'}
-            className="rounded border border-cafe bg-white px-1.5 py-0.5 text-xs disabled:opacity-50"
-          >
-            <option value="hybrid">混合</option>
-            <option value="lexical">精确</option>
-            <option value="semantic">语义</option>
-          </select>
-          {depth === 'raw' && <span className="text-[10px] text-amber-600">消息级仅支持精确匹配</span>}
-        </label>
-        <label className="flex items-center gap-1 text-cafe-secondary">
-          范围:
-          <select
-            value={scope ?? 'all'}
-            onChange={(e) =>
-              setScope(e.target.value === 'all' ? undefined : (e.target.value as EvidenceSearchParams['scope']))
-            }
-            className="rounded border border-cafe bg-white px-1.5 py-0.5 text-xs"
-          >
-            <option value="all">全部</option>
-            <option value="docs">文档</option>
-            <option value="memory">记忆</option>
-            <option value="threads">对话</option>
-            <option value="sessions">会话</option>
-          </select>
-        </label>
-        <label className="flex items-center gap-1 text-cafe-secondary">
-          深度:
-          <select
-            value={depth ?? 'summary'}
-            onChange={(e) =>
-              setDepth(e.target.value === 'summary' ? undefined : (e.target.value as EvidenceSearchParams['depth']))
-            }
-            className="rounded border border-cafe bg-white px-1.5 py-0.5 text-xs"
-          >
-            {DEPTH_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-1 text-cafe-secondary">
-          维度:
-          <select
-            value={dimension ?? 'all'}
-            onChange={(e) =>
-              setDimension(e.target.value === 'all' ? undefined : (e.target.value as EvidenceSearchParams['dimension']))
-            }
-            className="rounded border border-cafe bg-white px-1.5 py-0.5 text-xs"
-            data-testid="evidence-dimension-select"
-          >
-            <option value="all">全部</option>
-            <option value="project">项目</option>
-            <option value="global">全局</option>
-          </select>
-        </label>
-      </div>
+          <option value="hybrid">模式: 混合</option>
+          <option value="lexical">模式: 精确</option>
+          <option value="semantic">模式: 语义</option>
+        </select>
+        <select
+          value={scope ?? 'all'}
+          onChange={(e) =>
+            setScope(e.target.value === 'all' ? undefined : (e.target.value as EvidenceSearchParams['scope']))
+          }
+          className="console-form-input"
+        >
+          <option value="all">范围: 全部</option>
+          <option value="docs">范围: 文档</option>
+          <option value="memory">范围: 记忆</option>
+          <option value="threads">范围: 对话</option>
+          <option value="sessions">范围: 会话</option>
+        </select>
+        <select
+          value={depth ?? 'summary'}
+          onChange={(e) =>
+            setDepth(e.target.value === 'summary' ? undefined : (e.target.value as EvidenceSearchParams['depth']))
+          }
+          className="console-form-input"
+        >
+          {DEPTH_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              深度: {opt.label}
+            </option>
+          ))}
+        </select>
+        <select
+          value={dimension ?? 'all'}
+          onChange={(e) =>
+            setDimension(e.target.value === 'all' ? undefined : (e.target.value as EvidenceSearchParams['dimension']))
+          }
+          className="console-form-input"
+          data-testid="evidence-dimension-select"
+        >
+          <option value="all">维度: 全部</option>
+          <option value="project">维度: 项目</option>
+          <option value="global">维度: 全局</option>
+        </select>
+        {depth === 'raw' && <span className="text-label text-conn-amber-text">消息级仅支持精确匹配</span>}
+      </form>
 
       {/* Error */}
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-conn-red-text">{error}</p>}
 
       {/* Results */}
       <div className="space-y-2">
         {results.map((item) => (
-          <div key={item.anchor} className="rounded-lg border border-cafe bg-white p-3">
+          <div key={item.anchor} className="rounded-xl bg-[var(--console-card-bg)] p-3">
             <div className="flex items-center gap-2 min-w-0">
               <span
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${SOURCE_TYPE_COLORS[item.sourceType] ?? SOURCE_TYPE_COLORS.commit}`}
+                className={`rounded px-1.5 py-0.5 text-caption font-semibold ${SOURCE_TYPE_COLORS[item.sourceType] ?? SOURCE_TYPE_COLORS.commit}`}
               >
                 {SOURCE_TYPE_LABELS[item.sourceType] ?? item.sourceType}
               </span>
               {item.source && (
                 <span
-                  className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${item.source === 'project' ? 'bg-indigo-100 text-indigo-800' : 'bg-teal-100 text-teal-800'}`}
+                  className={`rounded px-1.5 py-0.5 text-caption font-semibold ${item.source === 'project' ? 'bg-opus-bg text-opus-dark border border-opus-light/30' : 'bg-[var(--semantic-info-bg)] text-[var(--semantic-info-text)] border border-[var(--semantic-info-text)]/20'}`}
                 >
                   {item.source === 'project' ? '项目' : '全局'}
                 </span>
@@ -283,13 +263,13 @@ export function EvidenceSearch({ initialQuery }: EvidenceSearchProps = {}) {
               className="mt-1 text-xs text-cafe-secondary"
             />
             {item.passages && item.passages.length > 0 && (
-              <div className="mt-2 space-y-1 border-l-2 border-cocreator-light pl-2">
+              <div className="mt-2 space-y-1 border-l-2 border-[var(--console-border-soft)] pl-2">
                 {item.passages.map((p) => (
                   <div key={p.passageId} className="text-xs text-cafe-secondary">
                     {p.speaker && <span className="font-medium text-cafe-black">{p.speaker}: </span>}
                     <span className="italic">{p.content}</span>
                     {p.createdAt && (
-                      <span className="ml-1 text-[10px] text-cafe-secondary/60">
+                      <span className="ml-1 text-caption text-cafe-secondary/60">
                         {new Date(p.createdAt).toLocaleString('zh-CN', {
                           month: 'short',
                           day: 'numeric',
@@ -299,9 +279,9 @@ export function EvidenceSearch({ initialQuery }: EvidenceSearchProps = {}) {
                       </span>
                     )}
                     {p.context && p.context.length > 0 && (
-                      <div className="ml-3 mt-0.5 space-y-0.5 border-l border-cafe/30 pl-2">
+                      <div className="ml-3 mt-0.5 space-y-0.5 border-l border-[var(--console-border-soft)] pl-2">
                         {p.context.map((ctx) => (
-                          <div key={ctx.passageId} className="text-[11px] text-cafe-secondary/70">
+                          <div key={ctx.passageId} className="text-label text-cafe-secondary/70">
                             {ctx.speaker && <span className="font-medium">{ctx.speaker}: </span>}
                             <span>{ctx.content}</span>
                           </div>

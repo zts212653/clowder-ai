@@ -38,10 +38,6 @@ vi.mock('@/components/signals/SignalNav', () => ({
   SignalNav: () => React.createElement('div', { 'data-testid': 'signal-nav' }),
 }));
 
-vi.mock('@/components/signals/SignalStatsCards', () => ({
-  SignalStatsCards: () => React.createElement('div', { 'data-testid': 'stats-cards' }),
-}));
-
 function createArticle(overrides: Partial<SignalArticle> = {}): SignalArticle {
   return {
     id: 'signal_1',
@@ -120,31 +116,28 @@ describe('SignalInboxView', () => {
       await Promise.resolve();
     });
 
-    const queryInput = container.querySelector('input[placeholder="搜索标题、来源、标签..."]');
-    // Component uses tab buttons for status, so only 2 <select> elements: tier + source
+    const queryInput = container.querySelector('input[placeholder="搜索信号..."]');
     const selects = container.querySelectorAll('select');
-    let tierSelect = selects.item(0) as HTMLSelectElement | null;
+    let statusSelect = selects.item(0) as HTMLSelectElement | null;
     let sourceSelect = selects.item(1) as HTMLSelectElement | null;
     let form = container.querySelector('form');
 
     expect(queryInput).not.toBeNull();
     expect(form).not.toBeNull();
-    expect(tierSelect).not.toBeNull();
+    expect(statusSelect).not.toBeNull();
     expect(sourceSelect).not.toBeNull();
 
-    if (!queryInput || !form || !tierSelect || !sourceSelect) {
+    if (!queryInput || !form || !statusSelect || !sourceSelect) {
       return;
     }
 
     const sourceOption = sourceSelect.querySelector('option[value="anthropic-news"]');
     expect(sourceOption).not.toBeNull();
 
-    // Switch status to "已读" via tab button
-    const readTabButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '已读');
-    expect(readTabButton).toBeTruthy();
+    const statusEl = statusSelect;
     await act(async () => {
-      readTabButton!.click();
-      await Promise.resolve();
+      statusEl.value = 'read';
+      statusEl.dispatchEvent(new Event('change', { bubbles: true }));
       await Promise.resolve();
     });
 
@@ -155,25 +148,22 @@ describe('SignalInboxView', () => {
     });
 
     const refreshedSelects = container.querySelectorAll('select');
-    tierSelect = refreshedSelects.item(0) as HTMLSelectElement | null;
+    statusSelect = refreshedSelects.item(0) as HTMLSelectElement | null;
     sourceSelect = refreshedSelects.item(1) as HTMLSelectElement | null;
     form = container.querySelector('form');
-    expect(tierSelect).not.toBeNull();
+    expect(statusSelect).not.toBeNull();
     expect(sourceSelect).not.toBeNull();
     expect(form).not.toBeNull();
-    if (!tierSelect || !sourceSelect || !form) {
+    if (!statusSelect || !sourceSelect || !form) {
       return;
     }
 
     await act(async () => {
-      tierSelect.value = '1';
-      tierSelect.dispatchEvent(new Event('change', { bubbles: true }));
       sourceSelect.value = 'anthropic-news';
       sourceSelect.dispatchEvent(new Event('change', { bubbles: true }));
       await Promise.resolve();
     });
 
-    expect(tierSelect.value).toBe('1');
     expect(sourceSelect.value).toBe('anthropic-news');
 
     await act(async () => {
@@ -185,7 +175,7 @@ describe('SignalInboxView', () => {
       limit: 80,
       status: 'read',
       source: 'anthropic-news',
-      tier: 1,
+      tier: undefined,
     });
   });
 
@@ -212,7 +202,7 @@ describe('SignalInboxView', () => {
       items: [contentOnlyMatchedArticle],
     });
 
-    const queryInput = container.querySelector('input[placeholder="搜索标题、来源、标签..."]');
+    const queryInput = container.querySelector('input[placeholder="搜索信号..."]');
     let form = container.querySelector('form');
     expect(queryInput).not.toBeNull();
     expect(form).not.toBeNull();
@@ -259,9 +249,7 @@ describe('SignalInboxView', () => {
       await Promise.resolve();
     });
 
-    const queryInput = container.querySelector(
-      'input[placeholder="搜索标题、来源、标签..."]',
-    ) as HTMLInputElement | null;
+    const queryInput = container.querySelector('input[placeholder="搜索信号..."]') as HTMLInputElement | null;
     if (!queryInput) throw new Error('Missing query input');
 
     await act(async () => {

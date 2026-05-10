@@ -6,9 +6,11 @@ import { SessionBootstrap } from '@/components/SessionBootstrap';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import { ToastContainer } from '@/components/ToastContainer';
 import { ConfirmProvider } from '@/components/useConfirm';
+import '@xterm/xterm/css/xterm.css';
 import './theme-tokens.css';
 import './globals.css';
 import './console-shell.css';
+import './console-controls.css';
 
 export const viewport: Viewport = {
   width: 'device-width',

@@ -4,13 +4,12 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback } from 'react';
 import { SettingsContent } from './SettingsContent';
 import { SettingsNav } from './SettingsNav';
-import { DEFAULT_SECTION, SETTINGS_SECTIONS } from './settings-nav-config';
+import { DEFAULT_SECTION } from './settings-nav-config';
 
 function SettingsShellInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const raw = searchParams.get('s');
-  const activeSection = SETTINGS_SECTIONS.some((s) => s.id === raw) ? raw! : DEFAULT_SECTION;
+  const activeSection = searchParams.get('s') ?? DEFAULT_SECTION;
   const standalone = searchParams.get('standalone') === '1';
 
   const handleSelect = useCallback(

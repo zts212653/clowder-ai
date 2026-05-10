@@ -9,7 +9,7 @@ import { HubQuotaBoardTab } from './HubQuotaBoardTab';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-lg border border-cafe bg-cafe-surface-elevated/70 p-3">
+    <section className="console-list-card rounded-2xl p-4 shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
       <h3 className="text-xs font-semibold text-cafe-secondary mb-2">{title}</h3>
       {children}
     </section>
@@ -105,7 +105,11 @@ export function HubRoutingPolicyTab() {
           默认是猫猫自治路由；这里只放你明确要求的硬约束（比如预算/猫粮）。显式 @ 指名永远优先。
         </p>
 
-        {error && <p className="text-sm text-red-500 bg-red-50 rounded-lg px-3 py-2 mb-3">{error}</p>}
+        {error && (
+          <p className="text-sm text-conn-red-text bg-conn-red-bg border border-conn-red-ring rounded-[20px] px-3 py-2 mb-3">
+            {error}
+          </p>
+        )}
 
         <div className="space-y-3">
           <div className="flex items-start justify-between gap-3">
@@ -142,7 +146,7 @@ export function HubRoutingPolicyTab() {
             <button
               onClick={onSave}
               disabled={saving}
-              className="px-3 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-60"
+              className="px-3 py-2 text-sm rounded-lg bg-[var(--color-cafe-accent)] text-[var(--cafe-surface)] disabled:opacity-60"
             >
               {saving ? '保存中...' : '保存'}
             </button>

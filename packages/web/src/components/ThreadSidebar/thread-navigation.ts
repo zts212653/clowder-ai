@@ -16,18 +16,36 @@ export interface DocumentNavigationWindow {
   };
 }
 
-export function getThreadHref(threadId: string): string {
-  return threadId === 'default' ? '/' : `/thread/${threadId}`;
+function normalizePrefix(prefix = ''): string {
+  if (!prefix) return '';
+  return prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
 }
 
-export function getThreadIdFromPathname(pathname: string): string {
-  if (!pathname || pathname === '/') return 'default';
-  const match = pathname.match(/^\/thread\/([^/?#]+)/);
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function getThreadHref(threadId: string, prefix = ''): string {
+  const normalizedPrefix = normalizePrefix(prefix);
+  if (threadId === 'default') return normalizedPrefix || '/';
+  return `${normalizedPrefix}/thread/${encodeURIComponent(threadId)}`;
+}
+
+export function getThreadIdFromPathname(pathname: string, prefix = ''): string {
+  const normalizedPrefix = normalizePrefix(prefix);
+  if (!pathname || pathname === normalizedPrefix || pathname === `${normalizedPrefix}/`) return 'default';
+  const match = normalizedPrefix
+    ? pathname.match(new RegExp(`^${escapeRegExp(normalizedPrefix)}/thread/([^/?#]+)`))
+    : pathname.match(/^\/thread\/([^/?#]+)/);
   return match ? decodeURIComponent(match[1]) : 'default';
 }
 
-export function pushThreadRouteWithHistory(threadId: string, windowObj: ThreadNavigationWindow | undefined): string {
-  const href = getThreadHref(threadId);
+export function pushThreadRouteWithHistory(
+  threadId: string,
+  windowObj: ThreadNavigationWindow | undefined,
+  prefix = '',
+): string {
+  const href = getThreadHref(threadId, prefix);
   if (!windowObj) return href;
   if (windowObj.location.pathname === href) return href;
   windowObj.history.pushState({}, '', href);

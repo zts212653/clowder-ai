@@ -32,9 +32,9 @@ describe('ConsolePanel', () => {
 
   it('renders level-specific colors', () => {
     const html = renderToStaticMarkup(<ConsolePanel entries={entries} onClear={() => {}} />);
-    // Error entries should have red styling
-    expect(html).toContain('text-red');
-    // Warn entries should have amber/yellow styling
-    expect(html).toContain('text-amber');
+    // Error entries should have red styling (F170 semantic token)
+    expect(html).toContain('text-conn-red-text');
+    // Warn entries should have amber styling (F170 semantic token)
+    expect(html).toContain('text-conn-amber-text');
   });
 });
