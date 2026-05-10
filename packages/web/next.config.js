@@ -35,7 +35,12 @@ const nextConfig = {
     // F156 D-3: Strict CSP baseline.
     // Next.js hydration requires 'unsafe-inline' for scripts — nonce-based CSP
     // needs middleware (future work). Blocking 'unsafe-eval' prevents eval() injection.
-    const csp = ["frame-ancestors 'none'", "script-src 'self' 'unsafe-inline'", "object-src 'none'"].join('; ');
+    const isDev = process.env.NODE_ENV === 'development';
+    const csp = [
+      "frame-ancestors 'none'",
+      `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
+      "object-src 'none'",
+    ].join('; ');
     return [
       {
         source: '/:path*',

@@ -1,0 +1,164 @@
+.console-form-label {
+  color: var(--cafe-text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.console-form-input {
+  width: 100%;
+  border: none;
+  background: var(--console-field-bg);
+  color: var(--cafe-text);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+select.console-form-input {
+  width: auto;
+  min-width: 7rem;
+  max-width: 14rem;
+  padding-right: 2rem;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238A776B' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  cursor: pointer;
+}
+
+[data-theme="dark"] select.console-form-input {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23A0907F' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+}
+
+.console-form-input::placeholder {
+  color: var(--cafe-text-muted);
+}
+
+.console-form-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--cafe-accent) 24%, transparent);
+}
+
+.console-button-primary,
+.console-button-secondary,
+.console-button-ghost,
+.console-segmented-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border-radius: 0.5rem;
+  border: 1px solid transparent;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+.console-button-primary {
+  background: var(--cafe-accent);
+  color: var(--cafe-accent-foreground);
+}
+
+[data-theme="dark"] .console-button-primary {
+  background: color-mix(in srgb, var(--cafe-accent) 72%, var(--console-card-bg) 28%);
+}
+
+.console-button-primary:hover {
+  background: var(--cafe-accent-hover);
+}
+
+[data-theme="dark"] .console-button-primary:hover {
+  background: color-mix(in srgb, var(--cafe-accent) 85%, var(--console-card-bg) 15%);
+}
+
+.console-button-secondary {
+  border-color: var(--console-border-soft);
+  background: var(--console-card-bg);
+  color: var(--cafe-text);
+}
+
+.console-button-ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--cafe-text-secondary);
+}
+
+.console-button-ghost:hover {
+  background: color-mix(in srgb, var(--console-pill-bg) 80%, transparent);
+  color: var(--cafe-text);
+}
+
+.console-segmented {
+  display: inline-flex;
+  gap: 0.35rem;
+  border: none;
+  background: color-mix(in srgb, var(--console-card-soft-bg) 94%, transparent);
+  border-radius: 0.5rem;
+  padding: 0.25rem;
+}
+
+.console-segmented-button {
+  background: transparent;
+  color: var(--cafe-text-secondary);
+  padding: 0.6rem 0.9rem;
+}
+
+.console-segmented-button[data-active="true"] {
+  border-color: color-mix(in srgb, var(--cafe-accent) 24%, var(--console-border-soft) 76%);
+  background: color-mix(in srgb, var(--cafe-accent) 14%, var(--console-card-bg) 86%);
+  color: var(--cafe-text);
+  box-shadow: var(--console-shadow-soft);
+}
+
+.console-inline-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--cafe-crosspost);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.console-inline-link:hover {
+  color: color-mix(in srgb, var(--cafe-crosspost) 76%, var(--cafe-text) 24%);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.console-data-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.console-data-tile {
+  background: var(--console-card-bg);
+  border-radius: 0.625rem;
+  padding: 0.95rem 1rem;
+}
+
+.console-data-tile-label {
+  color: var(--cafe-text-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.console-data-tile-value {
+  margin-top: 0.45rem;
+  color: var(--cafe-text);
+  font-size: 0.93rem;
+  font-weight: 600;
+  line-height: 1.45;
+}

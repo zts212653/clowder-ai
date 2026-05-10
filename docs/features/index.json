@@ -1151,6 +1151,12 @@
       "name": "Thread Labels — 用户自定义标签 + Sidebar 筛选 + 猫猫辅助分类",
       "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F187-thread-labels.md"
+    },
+    {
+      "id": "F190",
+      "name": "Console Settings Shell — 全局导航 + 设置面板骨架",
+      "status": "Implemented (branch), pending merge | **Owner**: Ragdoll | **Priority**: P0",
+      "file": "F190-console-settings-shell.md"
     }
   ]
 }

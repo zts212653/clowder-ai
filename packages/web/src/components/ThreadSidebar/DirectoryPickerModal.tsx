@@ -222,7 +222,7 @@ export function DirectoryPickerModal({
             <button
               type="button"
               onClick={() => handleSelectPath(cwdPath)}
-              className={`w-full text-left px-3 py-2.5 text-sm text-cafe-secondary hover:bg-cocreator-bg rounded-lg transition-colors flex items-center gap-2 ${selectedPath === cwdPath ? 'ring-2 ring-cocreator-primary bg-cocreator-bg' : ''}`}
+              className={`w-full text-left px-3 py-2.5 text-sm text-cafe-secondary hover:bg-cafe-surface-elevated rounded-lg transition-colors flex items-center gap-2 ${selectedPath === cwdPath ? 'ring-2 ring-cocreator-primary bg-cocreator-bg' : ''}`}
               title={cwdPath}
             >
               <FolderIcon />
@@ -242,7 +242,7 @@ export function DirectoryPickerModal({
               <button
                 type="button"
                 onClick={() => handleSelectPath(selectedPath)}
-                className="w-full text-left px-3 py-2.5 text-sm text-cafe-secondary hover:bg-cocreator-bg rounded-lg transition-colors flex items-center gap-2 ring-2 ring-cocreator-primary bg-cocreator-bg"
+                className="w-full text-left px-3 py-2.5 text-sm text-cafe-secondary hover:bg-cafe-surface-elevated rounded-lg transition-colors flex items-center gap-2 ring-2 ring-cocreator-primary bg-cocreator-bg"
                 title={selectedPath}
               >
                 <FolderIcon />
@@ -259,7 +259,7 @@ export function DirectoryPickerModal({
               type="button"
               key={path}
               onClick={() => handleSelectPath(path)}
-              className={`w-full text-left px-3 py-2.5 text-sm text-cafe-secondary hover:bg-cocreator-bg rounded-lg transition-colors flex items-center gap-2 ${selectedPath === path ? 'ring-2 ring-cocreator-primary bg-cocreator-bg' : ''}`}
+              className={`w-full text-left px-3 py-2.5 text-sm text-cafe-secondary hover:bg-cafe-surface-elevated rounded-lg transition-colors flex items-center gap-2 ${selectedPath === path ? 'ring-2 ring-cocreator-primary bg-cocreator-bg' : ''}`}
               title={path}
             >
               <FolderIcon />
@@ -273,7 +273,7 @@ export function DirectoryPickerModal({
           <button
             type="button"
             onClick={() => handleSelectPath('lobby')}
-            className={`w-full text-left px-3 py-2.5 text-sm text-cafe-secondary hover:bg-cocreator-bg rounded-lg transition-colors flex items-center gap-2 ${selectedPath === 'lobby' ? 'ring-2 ring-cocreator-primary bg-cocreator-bg' : ''}`}
+            className={`w-full text-left px-3 py-2.5 text-sm text-cafe-secondary hover:bg-cafe-surface-elevated rounded-lg transition-colors flex items-center gap-2 ${selectedPath === 'lobby' ? 'ring-2 ring-cocreator-primary bg-cocreator-bg' : ''}`}
           >
             <span className="text-base">🏠</span>
             <span>大厅 (无项目)</span>

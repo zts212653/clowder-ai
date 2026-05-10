@@ -63,3 +63,4 @@ created: 2026-02-26
 | F180 | Agent CLI Hook Health and Sync — user-level hook 检测 + 一键同步 | in-progress | Maine Coon/Maine Coon | community [#614](https://github.com/zts212653/clowder-ai/issues/614) | [F180](features/F180-agent-cli-hook-health.md) |
 | F181 | Reserved Feature Slot — 待补充需求锚点 | idea | 待定 | internal | [F181](features/F181-reserved-feature-slot.md) |
 | F187 | Thread Labels — 用户自定义标签 + Sidebar 筛选 + 猫猫辅助分类 | spec | Ragdoll | internal | [F187](features/F187-thread-labels.md) |
+| F190 | Console Settings Shell — 全局导航 + 设置面板 + 设计体系迁移 | in-progress | Ragdoll | internal | [F190](features/F190-console-settings-shell.md) |

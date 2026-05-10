@@ -37,7 +37,7 @@ export const promptCaptureRoutes: FastifyPluginAsync = async (app) => {
       const userId = requireSession(request, reply);
       if (!userId) return;
       const store = getPromptCaptureStore();
-      const limit = Math.min(parseInt(request.query.limit ?? '20', 10) || 20, 100);
+      const limit = Math.max(1, Math.min(parseInt(request.query.limit ?? '20', 10) || 20, 100));
 
       if (request.query.invocationId) {
         return store.listByInvocation(request.query.invocationId, userId);
