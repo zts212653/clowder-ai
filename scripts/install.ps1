@@ -6,7 +6,7 @@
   Installs prerequisites and sets up the current checked-out cat-cafe repo.
   Clone or download the repo first, then run this helper from inside it.
   Steps: env detect -> preflight network check -> Node/pnpm install -> Redis -> .env generate
-         -> deps & build -> skills mount -> AI CLI tools -> auth config -> verify & optionally start
+         -> deps & build -> skills mount -> AI CLI tools -> verify & optionally start
 
 .EXAMPLE
   # From repo root:
@@ -245,7 +245,7 @@ function Resolve-ProjectRoot {
 }
 
 # -- Step 1: Environment detection ---------------------------
-Write-Step "Step 1/9 - Detect environment"
+Write-Step "Step 1/8 - Detect environment"
 
 if ($PSVersionTable.PSVersion.Major -lt 5) {
     Write-Err "PowerShell 5.0+ required (current: $($PSVersionTable.PSVersion))"
@@ -291,7 +291,7 @@ if (-not $SkipPreflight -and (Test-Path $preflightScript)) {
     }
 }
 
-Write-Step "Step 2/9 - Node.js and pnpm"
+Write-Step "Step 2/8 - Node.js and pnpm"
 
 $nodeOk = $false
 try {
@@ -389,7 +389,7 @@ if (-not $pnpmOk) {
     }
 }
 
-Write-Step "Step 3/9 - Redis"
+Write-Step "Step 3/8 - Redis"
 
 $redisPlan = Resolve-InstallerRedisPlan -ProjectRoot $ProjectRoot
 $hasRedis = Apply-InstallerRedisPlan -State $authState -ProjectRoot $ProjectRoot -Plan $redisPlan
@@ -398,7 +398,7 @@ if (-not $hasRedis) {
     exit 1
 }
 
-Write-Step "Step 4/9 - Generate .env"
+Write-Step "Step 4/8 - Generate .env"
 
 Set-Location $ProjectRoot
 Write-Ok "Using project root: $ProjectRoot"
@@ -436,7 +436,7 @@ if (Test-Path $envFile) {
     Write-Ok ".env loaded into session"
 }
 
-Write-Step "Step 5/9 - Install dependencies and build"
+Write-Step "Step 5/8 - Install dependencies and build"
 
 # pnpm 9 + npm-global pnpm.cmd + Node 24 on Windows hits
 # "Could not determine Node.js install directory" the moment `pnpm install`
@@ -506,10 +506,10 @@ if (-not $SkipBuild) {
     Write-Warn "Build skipped (-SkipBuild)"
 }
 
-Write-Step "Step 6/9 - Skills mount"
+Write-Step "Step 6/8 - Skills mount"
 Mount-InstallerSkills -ProjectRoot $ProjectRoot
 
-Write-Step "Step 7/9 - AI CLI tools"
+Write-Step "Step 7/8 - AI CLI tools"
 
 $cliTools = @(
     @{ Name = "Claude"; Label = "Claude"; Cmd = "claude"; Pkg = "@anthropic-ai/claude-code" },
@@ -565,17 +565,12 @@ if (-not $SkipCli) {
     $selectedCliCommands = @()
 }
 
-Write-Step "Step 8/9 - Auth config"
-Configure-InstallerAuth -ProjectRoot $ProjectRoot -State $authState -SelectedCliCommands $selectedCliCommands
-
-Apply-InstallerAuthEnv -State $authState -EnvFile $envFile
-
 $hasClaude = $null -ne (Resolve-ToolCommandWithRetry -Name "claude" -Attempts 6)
 $hasCodex = $null -ne (Resolve-ToolCommandWithRetry -Name "codex" -Attempts 6)
 $hasGemini = $null -ne (Resolve-ToolCommandWithRetry -Name "gemini" -Attempts 6)
 $hasKimi = $null -ne (Resolve-ToolCommandWithRetry -Name "kimi" -Attempts 6)
 
-Write-Step "Step 9/9 - Verify and launch"
+Write-Step "Step 8/8 - Verify and launch"
 
 $artifacts = @("packages/shared/dist", "packages/mcp-server/dist/index.js", "packages/api/dist/index.js", "packages/web/.next")
 $allGood = $true

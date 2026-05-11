@@ -69,7 +69,7 @@ test('install.ps1 defines Write-WindowsEpermHint to surface actionable fixes', (
 });
 
 test('Step 5 install flow branches on error class instead of blind retry', () => {
-  const step5Block = installScript.match(/Write-Step "Step 5\/9[\s\S]*?Write-Step "Step 6\/9/);
+  const step5Block = installScript.match(/Write-Step "Step 5\/8[\s\S]*?Write-Step "Step 6\/8/);
   assert.ok(step5Block, 'must find Step 5 install block');
   const block = step5Block[0];
   assert.match(
@@ -85,7 +85,7 @@ test('Step 5 install flow branches on error class instead of blind retry', () =>
 });
 
 test('Step 5 no longer prints misleading "Frozen lockfile failed, retrying" for non-lockfile errors', () => {
-  const step5Block = installScript.match(/Write-Step "Step 5\/9[\s\S]*?Write-Step "Step 6\/9/);
+  const step5Block = installScript.match(/Write-Step "Step 5\/8[\s\S]*?Write-Step "Step 6\/8/);
   assert.ok(step5Block, 'must find Step 5 install block');
   const block = step5Block[0];
   // The misleading retry message must now be gated behind a lockfile-mismatch check.
@@ -103,7 +103,7 @@ test('Step 5 no longer prints misleading "Frozen lockfile failed, retrying" for 
 });
 
 test('Step 5 surfaces Windows EPERM hint when EPERM detected, instead of silently failing', () => {
-  const step5Block = installScript.match(/Write-Step "Step 5\/9[\s\S]*?Write-Step "Step 6\/9/);
+  const step5Block = installScript.match(/Write-Step "Step 5\/8[\s\S]*?Write-Step "Step 6\/8/);
   assert.ok(step5Block, 'must find Step 5 install block');
   const block = step5Block[0];
   assert.match(
@@ -119,7 +119,7 @@ test('Step 5 plain-install retry passes --no-frozen-lockfile to override pnpm CI
   // ineffective in that environment unless we explicitly opt out: the retry
   // call must include --no-frozen-lockfile so it actually recovers from drift
   // (ERR_PNPM_LOCKFILE_CONFIG_MISMATCH / ERR_PNPM_FROZEN_LOCKFILE_WITH_OUTDATED_LOCKFILE).
-  const step5Block = installScript.match(/Write-Step "Step 5\/9[\s\S]*?Write-Step "Step 6\/9/);
+  const step5Block = installScript.match(/Write-Step "Step 5\/8[\s\S]*?Write-Step "Step 6\/8/);
   assert.ok(step5Block, 'must find Step 5 install block');
   const block = step5Block[0];
   // The retry call must appear AFTER the "Frozen lockfile failed, retrying"
@@ -139,7 +139,7 @@ test('Step 5 fails fast on non-lockfile errors instead of swapping to plain pnpm
   // The fix: when frozen-lockfile fails for a reason that is NOT a lockfile mismatch
   // (e.g. EPERM unlink), we must NOT fall back to plain `pnpm install` — that just
   // repeats the same failure and buries the real error under a misleading message.
-  const step5Block = installScript.match(/Write-Step "Step 5\/9[\s\S]*?Write-Step "Step 6\/9/);
+  const step5Block = installScript.match(/Write-Step "Step 5\/8[\s\S]*?Write-Step "Step 6\/8/);
   assert.ok(step5Block, 'must find Step 5 install block');
   const block = step5Block[0];
   // There must be a code path that exits 1 without invoking a second plain install
@@ -176,7 +176,7 @@ test('Step 5 pins --store-dir + --package-import-method copy on Windows by defau
   // very same command works once those two flags are passed. Step 5 must inject
   // them on every Invoke-PnpmInstallWithCapturedOutput call when running on
   // Windows; non-Windows platforms must NOT see the extra flags.
-  const step5Block = installScript.match(/Write-Step "Step 5\/9[\s\S]*?Write-Step "Step 6\/9/);
+  const step5Block = installScript.match(/Write-Step "Step 5\/8[\s\S]*?Write-Step "Step 6\/8/);
   assert.ok(step5Block, 'must find Step 5 install block');
   const block = step5Block[0];
   assert.match(block, /Windows_NT|IsWindows/, 'Step 5 must guard the extra args on a Windows-only condition');

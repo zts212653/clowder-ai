@@ -235,7 +235,7 @@ test('Windows installer generates .env before building so NEXT_PUBLIC_API_URL is
 
 test('Windows installer runs preflight before Node and pnpm bootstrap', () => {
   const preflightIndex = installScript.indexOf('$preflightScript = Join-Path $ProjectRoot "scripts\\preflight.ps1"');
-  const nodeStepIndex = installScript.indexOf('Write-Step "Step 2/9 - Node.js and pnpm"');
+  const nodeStepIndex = installScript.indexOf('Write-Step "Step 2/8 - Node.js and pnpm"');
   const wingetIndex = installScript.indexOf('winget install OpenJS.NodeJS.LTS');
   const npmIndex = installScript.indexOf('& $npmCommand install -g pnpm');
   const corepackIndex = installScript.indexOf('& $corepackCommand install -g pnpm@latest');
