@@ -93,6 +93,7 @@ function Invoke-PnpmInstallWithCapturedOutput {
     $capturedOutput = @()
     $hadPreviousSkip = Test-Path Env:PUPPETEER_SKIP_DOWNLOAD
     $previousSkipValue = if ($hadPreviousSkip) { $env:PUPPETEER_SKIP_DOWNLOAD } else { $null }
+    $previousErrorActionPreference = $ErrorActionPreference
 
     # Resolve pnpm BEFORE the captured pipeline. Wrapping pnpm in the
     # Invoke-Pnpm -> Invoke-ToolCommand function chain made the native exit
@@ -129,6 +130,10 @@ function Invoke-PnpmInstallWithCapturedOutput {
         # always observing the process-global value pnpm.exe actually updates.
         $global:LASTEXITCODE = -1
         try {
+            # Scope this down to the captured pnpm pipeline: under script-wide
+            # Stop, PowerShell 5.1 can promote benign Node 24 stderr (DEP0169)
+            # into a RemoteException before we can read pnpm's exit code.
+            $ErrorActionPreference = "SilentlyContinue"
             & $pnpmCommand @CommandArgs 2>&1 | Tee-Object -Variable capturedOutput
             return [pscustomobject]@{
                 Ok = $global:LASTEXITCODE -eq 0
@@ -159,6 +164,7 @@ function Invoke-PnpmInstallWithCapturedOutput {
             }
         }
     } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
         if ($hadPreviousSkip) {
             $env:PUPPETEER_SKIP_DOWNLOAD = $previousSkipValue
         } else {

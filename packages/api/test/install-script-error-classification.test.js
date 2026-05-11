@@ -7,6 +7,13 @@ import { assert } from './install-script-test-helpers.js';
 const testDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(testDir, '..', '..', '..');
 const installScript = readFileSync(resolve(repoRoot, 'scripts', 'install.ps1'), 'utf8');
+const invokePnpmInstallFunctionPattern = /function Invoke-PnpmInstallWithCapturedOutput[\s\S]*?\r?\n\}\r?\n/;
+
+function getInvokePnpmInstallFunctionBody() {
+  const fn = installScript.match(invokePnpmInstallFunctionPattern);
+  assert.ok(fn, 'must define Invoke-PnpmInstallWithCapturedOutput');
+  return fn[0];
+}
 
 test('install.ps1 defines Test-LockfileMismatchFailure helper', () => {
   assert.match(
@@ -150,9 +157,7 @@ test('Invoke-PnpmInstallWithCapturedOutput trusts $LASTEXITCODE over pipeline ex
   // Node 24 emits DEP0169 deprecation warnings to stderr. With $ErrorActionPreference=Stop,
   // the 2>&1 | Tee-Object pipeline can throw even when pnpm itself exited 0.
   // The catch path must check $LASTEXITCODE and treat exit 0 as success, not failure.
-  const fn = installScript.match(/function Invoke-PnpmInstallWithCapturedOutput[\s\S]*?\n\}\n/);
-  assert.ok(fn, 'must define Invoke-PnpmInstallWithCapturedOutput');
-  const body = fn[0];
+  const body = getInvokePnpmInstallFunctionBody();
   // The catch block must reference $LASTEXITCODE so it can distinguish a real
   // process failure from a benign pipeline throw on stderr.
   const catchBlock = body.match(/} catch \{[\s\S]*?\}/);
@@ -202,9 +207,7 @@ test('Invoke-PnpmInstallWithCapturedOutput calls resolved pnpm directly inside t
   // directly inside the captured pipeline (`& $pnpmCommand @CommandArgs 2>&1
   // | Tee-Object ...`) so the native command is the only producer of
   // $LASTEXITCODE in scope.
-  const fn = installScript.match(/function Invoke-PnpmInstallWithCapturedOutput[\s\S]*?\n\}\n/);
-  assert.ok(fn, 'must define Invoke-PnpmInstallWithCapturedOutput');
-  const body = fn[0];
+  const body = getInvokePnpmInstallFunctionBody();
   assert.match(body, /Resolve-PnpmCommand/, 'must resolve pnpm command upfront (not via Invoke-Pnpm wrapper)');
   // The captured pipeline must invoke the resolved pnpm command directly with
   // `& $pnpmCommand`, NOT through the Invoke-Pnpm wrapper, so PowerShell can
@@ -231,9 +234,7 @@ test('Invoke-PnpmInstallWithCapturedOutput reads $global:LASTEXITCODE explicitly
   //
   // Fix: read and write $LASTEXITCODE via the explicit `$global:` scope
   // qualifier so PowerShell cannot shadow it into the function scope.
-  const fn = installScript.match(/function Invoke-PnpmInstallWithCapturedOutput[\s\S]*?\n\}\n/);
-  assert.ok(fn, 'must define Invoke-PnpmInstallWithCapturedOutput');
-  const body = fn[0];
+  const body = getInvokePnpmInstallFunctionBody();
   // Sentinel assignment must use $global:LASTEXITCODE so it actually pins the
   // global automatic variable instead of creating a shadowed local.
   assert.match(
@@ -256,15 +257,32 @@ test('Invoke-PnpmInstallWithCapturedOutput reads $global:LASTEXITCODE explicitly
   );
 });
 
+test('Invoke-PnpmInstallWithCapturedOutput temporarily downgrades ErrorActionPreference during pnpm capture', () => {
+  const body = getInvokePnpmInstallFunctionBody();
+  const snapshotIdx = body.indexOf('$previousErrorActionPreference = $ErrorActionPreference');
+  const downgradeIdx = body.indexOf('$ErrorActionPreference = "SilentlyContinue"');
+  const invokeMatch = body.match(/&\s*\$pnpmCommand\s+@CommandArgs\s+2>&1\s*\|\s*Tee-Object/);
+  const invokeIdx = invokeMatch ? invokeMatch.index : -1;
+  const finallyIdx = body.indexOf('} finally {');
+  const restoreIdx = body.indexOf('$ErrorActionPreference = $previousErrorActionPreference');
+
+  assert.ok(snapshotIdx >= 0, 'must snapshot the incoming ErrorActionPreference');
+  assert.ok(downgradeIdx >= 0, 'must temporarily downgrade ErrorActionPreference around pnpm capture');
+  assert.ok(invokeIdx >= 0, 'must still invoke pnpm directly inside the captured pipeline');
+  assert.ok(finallyIdx >= 0, 'must have a finally block for restoring function-local state');
+  assert.ok(restoreIdx >= 0, 'must restore the previous ErrorActionPreference in finally');
+  assert.ok(snapshotIdx < downgradeIdx, 'snapshot must happen before the temporary downgrade');
+  assert.ok(downgradeIdx < invokeIdx, 'temporary downgrade must happen before the captured pnpm pipeline');
+  assert.ok(finallyIdx < restoreIdx, 'restore must happen inside the finally block');
+});
+
 test('Invoke-PnpmInstallWithCapturedOutput pins $LASTEXITCODE sentinel before pnpm call (codex P2)', () => {
   // $LASTEXITCODE is a process-global variable; PowerShell does NOT reset it on
   // `throw`. Without a sentinel a stale value (possibly 0) from earlier native
   // commands would let the catch path return Ok=$true — fail-open. Codex P2
   // fix: assign $LASTEXITCODE = -1 immediately before the pnpm invocation so
   // only a real pnpm.exe exit can overwrite it.
-  const fn = installScript.match(/function Invoke-PnpmInstallWithCapturedOutput[\s\S]*?\n\}\n/);
-  assert.ok(fn, 'must define Invoke-PnpmInstallWithCapturedOutput');
-  const body = fn[0];
+  const body = getInvokePnpmInstallFunctionBody();
   // The sentinel must appear, and it must appear BEFORE the direct pnpm call
   // so any pre-execution throw cannot leave a stale 0 in place. The direct
   // call form is `& $pnpmCommand @CommandArgs` (砚砚 exit-code plumbing fix).
