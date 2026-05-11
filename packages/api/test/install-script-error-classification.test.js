@@ -142,6 +142,35 @@ test('Invoke-PnpmInstallWithCapturedOutput trusts $LASTEXITCODE over pipeline ex
   );
 });
 
+test('Step 5 pins --store-dir + --package-import-method copy on Windows by default', () => {
+  // pnpm 9 + npm-global pnpm.cmd + Node 24 on Windows hits
+  // "Could not determine Node.js install directory" whenever pnpm install runs
+  // without an explicit store-dir. The Windows reporter confirmed that the
+  // very same command works once those two flags are passed. Step 5 must inject
+  // them on every Invoke-PnpmInstallWithCapturedOutput call when running on
+  // Windows; non-Windows platforms must NOT see the extra flags.
+  const step5Block = installScript.match(/Write-Step "Step 5\/9[\s\S]*?Write-Step "Step 6\/9/);
+  assert.ok(step5Block, 'must find Step 5 install block');
+  const block = step5Block[0];
+  assert.match(block, /Windows_NT|IsWindows/, 'Step 5 must guard the extra args on a Windows-only condition');
+  assert.match(block, /LOCALAPPDATA/, 'Step 5 must derive the store dir from %LOCALAPPDATA%');
+  assert.match(block, /--store-dir/, 'Step 5 must pass --store-dir on the default install invocation');
+  assert.match(
+    block,
+    /--package-import-method[\s\S]{0,50}copy/,
+    'Step 5 must pass --package-import-method copy to avoid hardlink failures',
+  );
+  // The injection must apply to the FIRST install attempt (not just a retry),
+  // otherwise the initial pnpm.exe call still hits "Could not determine Node.js
+  // install directory" on the same platforms.
+  const firstInvokeIdx = block.indexOf('Invoke-PnpmInstallWithCapturedOutput');
+  const storeDirIdx = block.indexOf('--store-dir');
+  assert.ok(
+    storeDirIdx >= 0 && firstInvokeIdx >= 0 && storeDirIdx < firstInvokeIdx,
+    '--store-dir must appear BEFORE the first Invoke-PnpmInstallWithCapturedOutput so the first attempt already has it',
+  );
+});
+
 test('Invoke-PnpmInstallWithCapturedOutput pins $LASTEXITCODE sentinel before pnpm call (codex P2)', () => {
   // $LASTEXITCODE is a process-global variable; PowerShell does NOT reset it on
   // `throw`. If Invoke-ToolCommand throws "command not found" before pnpm runs,

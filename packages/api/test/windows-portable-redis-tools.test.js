@@ -79,17 +79,24 @@ test('Windows installer revalidates Node major version after winget install', ()
 
 test('Windows installer retries plain pnpm install when frozen lockfile mode still fails after protected retries', () => {
   const helperIndex = installScript.indexOf('function Invoke-PnpmInstallWithCapturedOutput');
-  const frozenInstallIndex = installScript.indexOf(
-    '$frozenInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs @("install", "--frozen-lockfile")',
+  // Step 5 now also appends a Windows-only --store-dir / --package-import-method
+  // suffix to every Invoke-PnpmInstallWithCapturedOutput call, so the args are
+  // assembled inline as `@(...) + $pnpmInstallExtra`. Use a regex that tolerates
+  // either the bare array form or the concatenation form.
+  const frozenInstallMatch = installScript.match(
+    /\$frozenInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs \(?@\("install", "--frozen-lockfile"\)(?:\s*\+\s*\$pnpmInstallExtra)?\)?/,
   );
+  const frozenInstallIndex = frozenInstallMatch ? frozenInstallMatch.index : -1;
   const cancelExitIndex = installScript.indexOf(
     'Exit-InstallerIfCancelled -ErrorRecord $frozenInstallResult.ErrorRecord -Context "pnpm install"',
   );
   const retryWarnIndex = installScript.indexOf('Write-Warn "Frozen lockfile failed, retrying..."');
-  const retryInstallIndex = installScript.indexOf(
-    '$plainInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs @("install")',
-    retryWarnIndex,
-  );
+  const retryInstallMatch = installScript
+    .slice(retryWarnIndex)
+    .match(
+      /\$plainInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs \(?@\("install"\)(?:\s*\+\s*\$pnpmInstallExtra)?\)?/,
+    );
+  const retryInstallIndex = retryInstallMatch ? retryWarnIndex + retryInstallMatch.index : -1;
 
   assert.notEqual(helperIndex, -1, 'expected captured install helper');
   assert.notEqual(frozenInstallIndex, -1, 'expected frozen lockfile install attempt via helper');
@@ -114,17 +121,21 @@ test('Windows installer retries with PUPPETEER_SKIP_DOWNLOAD only for Puppeteer 
     installScript,
     /Write-Warn "Thread export \/ screenshot may be unavailable\. To install later: npx puppeteer browsers install chrome"/,
   );
+  // Step 5 now appends a Windows-only --store-dir suffix to every
+  // Invoke-PnpmInstallWithCapturedOutput call, so the args either appear as the
+  // bare array form (non-Windows path through the regex) or as
+  // `@(...) + $pnpmInstallExtra` (the Windows-default concatenation form).
   assert.match(
     installScript,
-    /\$frozenInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs @\("install", "--frozen-lockfile"\)/,
+    /\$frozenInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs \(?@\("install", "--frozen-lockfile"\)(?:\s*\+\s*\$pnpmInstallExtra)?\)?/,
   );
   assert.match(
     installScript,
-    /Invoke-PnpmInstallWithCapturedOutput -CommandArgs @\("install", "--frozen-lockfile"\) -SkipPuppeteerDownload/,
+    /Invoke-PnpmInstallWithCapturedOutput -CommandArgs \(?@\("install", "--frozen-lockfile"\)(?:\s*\+\s*\$pnpmInstallExtra)?\)? -SkipPuppeteerDownload/,
   );
   assert.match(
     installScript,
-    /Invoke-PnpmInstallWithCapturedOutput -CommandArgs @\("install"\) -SkipPuppeteerDownload/,
+    /Invoke-PnpmInstallWithCapturedOutput -CommandArgs \(?@\("install"\)(?:\s*\+\s*\$pnpmInstallExtra)?\)? -SkipPuppeteerDownload/,
   );
 });
 

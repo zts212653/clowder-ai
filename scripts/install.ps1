@@ -412,20 +412,31 @@ if (Test-Path $envFile) {
 
 Write-Step "Step 5/9 - Install dependencies and build"
 
+# pnpm 9 + npm-global pnpm.cmd + Node 24 on Windows hits
+# "Could not determine Node.js install directory" the moment `pnpm install`
+# tries to auto-detect a store location. The Windows reporter verified that
+# passing an explicit --store-dir + --package-import-method copy on the same
+# machine makes the install succeed. Build the default arg suffix once and
+# reuse it for every pnpm install invocation in this step.
+$pnpmInstallExtra = @()
+if ($env:OS -eq "Windows_NT" -and $env:LOCALAPPDATA) {
+    $pnpmInstallExtra = @("--store-dir", (Join-Path $env:LOCALAPPDATA "pnpm\store"), "--package-import-method", "copy")
+}
+
 Write-Host "  Running pnpm install..."
-$frozenInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs @("install", "--frozen-lockfile")
+$frozenInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs (@("install", "--frozen-lockfile") + $pnpmInstallExtra)
 if (-not $frozenInstallResult.Ok -and (Test-PuppeteerBrowserDownloadFailure -OutputText $frozenInstallResult.OutputText)) {
     Write-PuppeteerSkipWarning
-    $frozenInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs @("install", "--frozen-lockfile") -SkipPuppeteerDownload
+    $frozenInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs (@("install", "--frozen-lockfile") + $pnpmInstallExtra) -SkipPuppeteerDownload
 }
 if (-not $frozenInstallResult.Ok) {
     Exit-InstallerIfCancelled -ErrorRecord $frozenInstallResult.ErrorRecord -Context "pnpm install"
     if (Test-LockfileMismatchFailure -OutputText $frozenInstallResult.OutputText) {
         Write-Warn "Frozen lockfile failed, retrying..."
-        $plainInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs @("install")
+        $plainInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs (@("install") + $pnpmInstallExtra)
         if (-not $plainInstallResult.Ok -and (Test-PuppeteerBrowserDownloadFailure -OutputText $plainInstallResult.OutputText)) {
             Write-PuppeteerSkipWarning
-            $plainInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs @("install") -SkipPuppeteerDownload
+            $plainInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs (@("install") + $pnpmInstallExtra) -SkipPuppeteerDownload
         }
         if (-not $plainInstallResult.Ok) {
             Exit-InstallerIfCancelled -ErrorRecord $plainInstallResult.ErrorRecord -Context "pnpm install"
