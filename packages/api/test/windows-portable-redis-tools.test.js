@@ -192,6 +192,23 @@ test('Windows installer probes the npm shim path when pnpm is installed but not 
   assert.match(installScript, /Resolve-ToolCommand -Name "pnpm"/);
 });
 
+test('Windows pnpm resolver skips npm prefix probing before direct shim lookup', () => {
+  const appDataShimIndex = commandHelpersScript.indexOf('Join-Path $env:APPDATA "npm\\$Name.cmd"');
+  const pnpmGuardIndex = commandHelpersScript.indexOf('if ($Name -ne "pnpm") {');
+  const npmCommandIndex = commandHelpersScript.indexOf('$npmCommand = Get-Command npm -ErrorAction SilentlyContinue');
+  const npmPrefixIndex = commandHelpersScript.indexOf(
+    '$npmPrefix = @(& $npmPath prefix -g 2>$null) | Select-Object -Last 1',
+  );
+
+  assert.notEqual(appDataShimIndex, -1, 'expected APPDATA npm shim candidates');
+  assert.notEqual(pnpmGuardIndex, -1, 'expected pnpm-specific guard around npm prefix probing');
+  assert.notEqual(npmCommandIndex, -1, 'expected npm prefix fallback for non-pnpm tools');
+  assert.notEqual(npmPrefixIndex, -1, 'expected npm prefix fallback to remain available for non-pnpm tools');
+  assert.ok(appDataShimIndex < pnpmGuardIndex, 'expected direct APPDATA shim candidates before npm probing guard');
+  assert.ok(pnpmGuardIndex < npmCommandIndex, 'expected pnpm guard to wrap npm command lookup');
+  assert.ok(npmCommandIndex < npmPrefixIndex, 'expected npm prefix probe only inside guarded fallback');
+});
+
 test('Windows installer prints pnpm resolver diagnostics before giving up', () => {
   assert.match(commandHelpersScript, /function Get-ToolCommandCandidates/);
   assert.match(commandHelpersScript, /Write-Warn "\$Name resolver candidates:"/);

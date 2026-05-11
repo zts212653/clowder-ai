@@ -4,15 +4,17 @@ function Get-ToolCommandCandidates {
     if ($env:APPDATA) {
         $candidates += @((Join-Path $env:APPDATA "npm\$Name.cmd"), (Join-Path $env:APPDATA "npm\$Name.ps1"), (Join-Path $env:APPDATA "npm\$Name"))
     }
-    $npmCommand = Get-Command npm -ErrorAction SilentlyContinue
-    if ($npmCommand) {
-        $npmPath = if ($npmCommand.Path) { $npmCommand.Path } else { $npmCommand.Source }
-        try {
-            $npmPrefix = @(& $npmPath prefix -g 2>$null) | Select-Object -Last 1
-            if ($npmPrefix) {
-                $candidates += @((Join-Path $npmPrefix "$Name.cmd"), (Join-Path $npmPrefix "$Name.ps1"), (Join-Path $npmPrefix $Name))
-            }
-        } catch {}
+    if ($Name -ne "pnpm") {
+        $npmCommand = Get-Command npm -ErrorAction SilentlyContinue
+        if ($npmCommand) {
+            $npmPath = if ($npmCommand.Path) { $npmCommand.Path } else { $npmCommand.Source }
+            try {
+                $npmPrefix = @(& $npmPath prefix -g 2>$null) | Select-Object -Last 1
+                if ($npmPrefix) {
+                    $candidates += @((Join-Path $npmPrefix "$Name.cmd"), (Join-Path $npmPrefix "$Name.ps1"), (Join-Path $npmPrefix $Name))
+                }
+            } catch {}
+        }
     }
     $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
     if ($nodeCommand) {
