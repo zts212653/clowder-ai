@@ -7,6 +7,8 @@ function Get-NpmConfigPrefixCandidates {
     if ($env:NPM_CONFIG_USERCONFIG) { $npmConfigPaths += $env:NPM_CONFIG_USERCONFIG }
     if ($env:npm_config_userconfig) { $npmConfigPaths += $env:npm_config_userconfig }
     if ($env:USERPROFILE) { $npmConfigPaths += (Join-Path $env:USERPROFILE ".npmrc") }
+    if ($env:APPDATA) { $npmConfigPaths += (Join-Path $env:APPDATA "npm\etc\npmrc") }
+    if ($env:ProgramData) { $npmConfigPaths += (Join-Path $env:ProgramData "npm\npmrc") }
 
     foreach ($npmConfigPath in ($npmConfigPaths | Where-Object { $_ } | Select-Object -Unique)) {
         if (-not (Test-Path $npmConfigPath)) { continue }
@@ -32,17 +34,15 @@ function Get-ToolCommandCandidates {
     foreach ($npmPrefix in (Get-NpmConfigPrefixCandidates)) {
         $candidates += @((Join-Path $npmPrefix "$Name.cmd"), (Join-Path $npmPrefix "$Name.ps1"), (Join-Path $npmPrefix $Name))
     }
-    if ($Name -ne "pnpm") {
-        $npmCommand = Get-Command npm -ErrorAction SilentlyContinue
-        if ($npmCommand) {
-            $npmPath = if ($npmCommand.Path) { $npmCommand.Path } else { $npmCommand.Source }
-            try {
-                $npmPrefix = @(& $npmPath prefix -g 2>$null) | Select-Object -Last 1
-                if ($npmPrefix) {
-                    $candidates += @((Join-Path $npmPrefix "$Name.cmd"), (Join-Path $npmPrefix "$Name.ps1"), (Join-Path $npmPrefix $Name))
-                }
-            } catch {}
-        }
+    $npmCommand = Get-Command npm -ErrorAction SilentlyContinue
+    if ($npmCommand) {
+        $npmPath = if ($npmCommand.Path) { $npmCommand.Path } else { $npmCommand.Source }
+        try {
+            $npmPrefix = @(& $npmPath prefix -g 2>$null) | Select-Object -Last 1
+            if ($npmPrefix -and (Test-Path $npmPrefix -ErrorAction SilentlyContinue)) {
+                $candidates += @((Join-Path $npmPrefix "$Name.cmd"), (Join-Path $npmPrefix "$Name.ps1"), (Join-Path $npmPrefix $Name))
+            }
+        } catch {}
     }
     $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
     if ($nodeCommand) {

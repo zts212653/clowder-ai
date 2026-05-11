@@ -203,37 +203,38 @@ test('Windows installer probes the npm shim path when pnpm is installed but not 
   assert.match(installScript, /Resolve-ToolCommand -Name "pnpm"/);
 });
 
-test('Windows pnpm resolver skips npm prefix probing before direct shim lookup', () => {
+test('Windows pnpm resolver validates npm prefix output with Test-Path', () => {
   const appDataShimIndex = commandHelpersScript.indexOf('Join-Path $env:APPDATA "npm\\$Name.cmd"');
-  const pnpmGuardIndex = commandHelpersScript.indexOf('if ($Name -ne "pnpm") {');
   const npmCommandIndex = commandHelpersScript.indexOf('$npmCommand = Get-Command npm -ErrorAction SilentlyContinue');
   const npmPrefixIndex = commandHelpersScript.indexOf(
     '$npmPrefix = @(& $npmPath prefix -g 2>$null) | Select-Object -Last 1',
   );
+  const testPathIndex = commandHelpersScript.indexOf('Test-Path $npmPrefix -ErrorAction SilentlyContinue');
 
   assert.notEqual(appDataShimIndex, -1, 'expected APPDATA npm shim candidates');
-  assert.notEqual(pnpmGuardIndex, -1, 'expected pnpm-specific guard around npm prefix probing');
-  assert.notEqual(npmCommandIndex, -1, 'expected npm prefix fallback for non-pnpm tools');
-  assert.notEqual(npmPrefixIndex, -1, 'expected npm prefix fallback to remain available for non-pnpm tools');
-  assert.ok(appDataShimIndex < pnpmGuardIndex, 'expected direct APPDATA shim candidates before npm probing guard');
-  assert.ok(pnpmGuardIndex < npmCommandIndex, 'expected pnpm guard to wrap npm command lookup');
-  assert.ok(npmCommandIndex < npmPrefixIndex, 'expected npm prefix probe only inside guarded fallback');
+  assert.notEqual(npmCommandIndex, -1, 'expected npm prefix probe for all tools');
+  assert.notEqual(npmPrefixIndex, -1, 'expected npm prefix probe to remain available');
+  assert.notEqual(testPathIndex, -1, 'expected Test-Path validation on npm prefix output');
+  assert.ok(appDataShimIndex < npmCommandIndex, 'expected direct APPDATA shim candidates before npm probing');
+  assert.ok(npmCommandIndex < npmPrefixIndex, 'expected npm command lookup before prefix probe');
+  assert.ok(npmPrefixIndex < testPathIndex, 'expected Test-Path after npm prefix probe');
 });
 
-test('Windows pnpm resolver keeps npm config prefix candidates without executing npm prefix', () => {
+test('Windows pnpm resolver keeps npm config prefix candidates with machine-level coverage', () => {
   const configPrefixHelperIndex = commandHelpersScript.indexOf('function Get-NpmConfigPrefixCandidates');
   const configPrefixUseIndex = commandHelpersScript.indexOf('foreach ($npmPrefix in (Get-NpmConfigPrefixCandidates))');
-  const pnpmGuardIndex = commandHelpersScript.indexOf('if ($Name -ne "pnpm") {');
+  const npmPrefixProbeIndex = commandHelpersScript.indexOf('$npmCommand = Get-Command npm -ErrorAction SilentlyContinue');
 
   assert.notEqual(configPrefixHelperIndex, -1, 'expected non-executing npm config prefix helper');
   assert.match(commandHelpersScript, /\$env:NPM_CONFIG_PREFIX/);
   assert.match(commandHelpersScript, /\$env:npm_config_prefix/);
   assert.match(commandHelpersScript, /Join-Path \$env:USERPROFILE "\.npmrc"/);
+  assert.match(commandHelpersScript, /Join-Path \$env:APPDATA "npm\\etc\\npmrc"/);
+  assert.match(commandHelpersScript, /Join-Path \$env:ProgramData "npm\\npmrc"/);
   assert.notEqual(configPrefixUseIndex, -1, 'expected npm config prefix candidates in resolver');
-  assert.notEqual(pnpmGuardIndex, -1, 'expected dynamic npm prefix probe to stay guarded for pnpm');
   assert.ok(
-    configPrefixUseIndex < pnpmGuardIndex,
-    'expected npm config prefix candidates to remain available to pnpm before guarded dynamic probing',
+    configPrefixUseIndex < npmPrefixProbeIndex,
+    'expected static npm config prefix candidates before dynamic npm prefix probe',
   );
 });
 
