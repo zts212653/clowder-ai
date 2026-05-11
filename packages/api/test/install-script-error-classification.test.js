@@ -171,24 +171,53 @@ test('Step 5 pins --store-dir + --package-import-method copy on Windows by defau
   );
 });
 
-test('Invoke-PnpmInstallWithCapturedOutput pins $LASTEXITCODE sentinel before pnpm call (codex P2)', () => {
-  // $LASTEXITCODE is a process-global variable; PowerShell does NOT reset it on
-  // `throw`. If Invoke-ToolCommand throws "command not found" before pnpm runs,
-  // $LASTEXITCODE keeps whatever the previous native command left behind. Without
-  // a sentinel a stale 0 would let the catch path return Ok=$true — fail-open.
-  // Codex P2 fix: assign $LASTEXITCODE = -1 immediately before the Invoke-Pnpm
-  // call so only a real pnpm.exe exit can overwrite it.
+test('Invoke-PnpmInstallWithCapturedOutput calls resolved pnpm directly inside the captured pipeline (砚砚 exit-code plumbing)', () => {
+  // 砚砚's Windows / Node 24 repro showed that wrapping the pnpm call as
+  // `Invoke-Pnpm ... | Tee-Object` returned Ok=False and left $LASTEXITCODE = -1
+  // even when pnpm actually exited 0. Root cause: the nested function chain
+  // (Invoke-Pnpm -> Invoke-ToolCommand -> & $toolCommand) hides the native exit
+  // code from the captured pipeline. Fix: resolve pnpm up-front and invoke it
+  // directly inside the captured pipeline (`& $pnpmCommand @CommandArgs 2>&1
+  // | Tee-Object ...`) so the native command is the only producer of
+  // $LASTEXITCODE in scope.
   const fn = installScript.match(/function Invoke-PnpmInstallWithCapturedOutput[\s\S]*?\n\}\n/);
   assert.ok(fn, 'must define Invoke-PnpmInstallWithCapturedOutput');
   const body = fn[0];
-  // The sentinel must appear, and it must appear BEFORE the Invoke-Pnpm call so
-  // that an Invoke-ToolCommand pre-execution throw cannot leave a stale 0 in place.
+  assert.match(body, /Resolve-PnpmCommand/, 'must resolve pnpm command upfront (not via Invoke-Pnpm wrapper)');
+  // The captured pipeline must invoke the resolved pnpm command directly with
+  // `& $pnpmCommand`, NOT through the Invoke-Pnpm wrapper, so PowerShell can
+  // record the native exit code in $LASTEXITCODE reliably.
+  assert.match(
+    body,
+    /&\s*\$pnpmCommand\s+@CommandArgs\s+2>&1\s*\|\s*Tee-Object/,
+    'captured pipeline must call & $pnpmCommand @CommandArgs 2>&1 | Tee-Object directly',
+  );
+  assert.doesNotMatch(
+    body,
+    /Invoke-Pnpm\s+-CommandArgs\s+\$CommandArgs\s+2>&1\s*\|\s*Tee-Object/,
+    'must NOT pipe Invoke-Pnpm into Tee-Object (hides native exit code from caller scope)',
+  );
+});
+
+test('Invoke-PnpmInstallWithCapturedOutput pins $LASTEXITCODE sentinel before pnpm call (codex P2)', () => {
+  // $LASTEXITCODE is a process-global variable; PowerShell does NOT reset it on
+  // `throw`. Without a sentinel a stale value (possibly 0) from earlier native
+  // commands would let the catch path return Ok=$true — fail-open. Codex P2
+  // fix: assign $LASTEXITCODE = -1 immediately before the pnpm invocation so
+  // only a real pnpm.exe exit can overwrite it.
+  const fn = installScript.match(/function Invoke-PnpmInstallWithCapturedOutput[\s\S]*?\n\}\n/);
+  assert.ok(fn, 'must define Invoke-PnpmInstallWithCapturedOutput');
+  const body = fn[0];
+  // The sentinel must appear, and it must appear BEFORE the direct pnpm call
+  // so any pre-execution throw cannot leave a stale 0 in place. The direct
+  // call form is `& $pnpmCommand @CommandArgs` (砚砚 exit-code plumbing fix).
   const sentinelIdx = body.indexOf('$LASTEXITCODE = -1');
-  const invokeIdx = body.indexOf('Invoke-Pnpm -CommandArgs');
+  const invokeMatch = body.match(/&\s*\$pnpmCommand\s+@CommandArgs/);
+  const invokeIdx = invokeMatch ? invokeMatch.index : -1;
   assert.ok(sentinelIdx >= 0, 'must set $LASTEXITCODE = -1 sentinel before invoking pnpm');
-  assert.ok(invokeIdx >= 0, 'must invoke pnpm via Invoke-Pnpm');
+  assert.ok(invokeIdx >= 0, 'must invoke pnpm directly via & $pnpmCommand @CommandArgs');
   assert.ok(
     sentinelIdx < invokeIdx,
-    'sentinel assignment must appear BEFORE Invoke-Pnpm so a pre-execution throw cannot leave stale $LASTEXITCODE',
+    'sentinel assignment must appear BEFORE the pnpm invocation so a pre-execution throw cannot leave stale $LASTEXITCODE',
   );
 });

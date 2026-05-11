@@ -94,6 +94,21 @@ function Invoke-PnpmInstallWithCapturedOutput {
     $hadPreviousSkip = Test-Path Env:PUPPETEER_SKIP_DOWNLOAD
     $previousSkipValue = if ($hadPreviousSkip) { $env:PUPPETEER_SKIP_DOWNLOAD } else { $null }
 
+    # Resolve pnpm BEFORE the captured pipeline. Wrapping pnpm in the
+    # Invoke-Pnpm -> Invoke-ToolCommand function chain made the native exit
+    # code unreliable in PowerShell 5.1: pnpm could exit 0 yet the captured
+    # pipeline observed $LASTEXITCODE = -1 (sentinel never overwritten),
+    # which made Step 5 misclassify successful installs as failure on
+    # Windows / Node 24 (reproduced on pnpm 9.15.4).
+    $pnpmCommand = Resolve-PnpmCommand
+    if (-not $pnpmCommand) {
+        return [pscustomobject]@{
+            Ok = $false
+            ErrorRecord = $null
+            OutputText = "pnpm command not found"
+        }
+    }
+
     try {
         if ($SkipPuppeteerDownload) {
             $env:PUPPETEER_SKIP_DOWNLOAD = "1"
@@ -101,15 +116,13 @@ function Invoke-PnpmInstallWithCapturedOutput {
             Remove-Item Env:PUPPETEER_SKIP_DOWNLOAD -ErrorAction SilentlyContinue
         }
 
-        # Sentinel: $LASTEXITCODE is a process-global variable and PowerShell does
-        # NOT reset it on `throw`. If Invoke-ToolCommand throws "command not found"
-        # (or any other pre-execution error), $LASTEXITCODE keeps whatever value
-        # the previous native command left behind (possibly 0), which would let
-        # the catch path below fail-open. Pin it to -1 immediately before the
-        # Invoke-Pnpm call so only a real pnpm.exe exit can overwrite it.
+        # Sentinel: $LASTEXITCODE is process-global and PowerShell does not reset
+        # it on `throw`. Pin it to -1 so a stale value from earlier native
+        # commands cannot make the catch path fail-open. Only a real pnpm.exe
+        # exit code (0..255) can overwrite the sentinel.
         $LASTEXITCODE = -1
         try {
-            Invoke-Pnpm -CommandArgs $CommandArgs 2>&1 | Tee-Object -Variable capturedOutput
+            & $pnpmCommand @CommandArgs 2>&1 | Tee-Object -Variable capturedOutput
             return [pscustomobject]@{
                 Ok = $LASTEXITCODE -eq 0
                 ErrorRecord = $null
@@ -121,10 +134,9 @@ function Invoke-PnpmInstallWithCapturedOutput {
             #       pipeline threw (e.g. Node 24 DEP0169 deprecation on stderr
             #       under $ErrorActionPreference=Stop). $LASTEXITCODE is now 0
             #       and we should treat this as success.
-            #   (b) Invoke-ToolCommand threw before pnpm ran (e.g. "pnpm command
-            #       not found"). $LASTEXITCODE was never refreshed and remains
-            #       at the -1 sentinel set above, so the `-eq 0` check fails
-            #       closed.
+            #   (b) pnpm itself failed before producing an exit code, or the
+            #       captured pipeline aborted before pnpm started. $LASTEXITCODE
+            #       is still -1 and the `-eq 0` check fails closed.
             if ($LASTEXITCODE -eq 0) {
                 return [pscustomobject]@{
                     Ok = $true
