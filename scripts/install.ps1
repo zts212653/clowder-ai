@@ -445,10 +445,14 @@ if (-not $frozenInstallResult.Ok) {
     Exit-InstallerIfCancelled -ErrorRecord $frozenInstallResult.ErrorRecord -Context "pnpm install"
     if (Test-LockfileMismatchFailure -OutputText $frozenInstallResult.OutputText) {
         Write-Warn "Frozen lockfile failed, retrying..."
-        $plainInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs (@("install") + $pnpmInstallExtra)
+        # pnpm 8+ implicitly enables --frozen-lockfile when CI is set, so a
+        # bare `pnpm install` retry would re-fail with the same lockfile
+        # error in CI environments. Force --no-frozen-lockfile on the retry
+        # so the recovery actually overrides pnpm's CI default.
+        $plainInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs (@("install", "--no-frozen-lockfile") + $pnpmInstallExtra)
         if (-not $plainInstallResult.Ok -and (Test-PuppeteerBrowserDownloadFailure -OutputText $plainInstallResult.OutputText)) {
             Write-PuppeteerSkipWarning
-            $plainInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs (@("install") + $pnpmInstallExtra) -SkipPuppeteerDownload
+            $plainInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs (@("install", "--no-frozen-lockfile") + $pnpmInstallExtra) -SkipPuppeteerDownload
         }
         if (-not $plainInstallResult.Ok) {
             Exit-InstallerIfCancelled -ErrorRecord $plainInstallResult.ErrorRecord -Context "pnpm install"

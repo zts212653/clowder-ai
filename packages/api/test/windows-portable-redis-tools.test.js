@@ -94,7 +94,7 @@ test('Windows installer retries plain pnpm install when frozen lockfile mode sti
   const retryInstallMatch = installScript
     .slice(retryWarnIndex)
     .match(
-      /\$plainInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs \(?@\("install"\)(?:\s*\+\s*\$pnpmInstallExtra)?\)?/,
+      /\$plainInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs \(?@\("install"(?:,\s*"--no-frozen-lockfile")?\)(?:\s*\+\s*\$pnpmInstallExtra)?\)?/,
     );
   const retryInstallIndex = retryInstallMatch ? retryWarnIndex + retryInstallMatch.index : -1;
 
@@ -135,7 +135,7 @@ test('Windows installer retries with PUPPETEER_SKIP_DOWNLOAD only for Puppeteer 
   );
   assert.match(
     installScript,
-    /Invoke-PnpmInstallWithCapturedOutput -CommandArgs \(?@\("install"\)(?:\s*\+\s*\$pnpmInstallExtra)?\)? -SkipPuppeteerDownload/,
+    /Invoke-PnpmInstallWithCapturedOutput -CommandArgs \(?@\("install"(?:,\s*"--no-frozen-lockfile")?\)(?:\s*\+\s*\$pnpmInstallExtra)?\)? -SkipPuppeteerDownload/,
   );
 });
 

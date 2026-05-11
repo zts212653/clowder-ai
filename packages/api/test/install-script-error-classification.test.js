@@ -106,6 +106,28 @@ test('Step 5 surfaces Windows EPERM hint when EPERM detected, instead of silentl
   );
 });
 
+test('Step 5 plain-install retry passes --no-frozen-lockfile to override pnpm CI defaults (codex P1)', () => {
+  // pnpm 8+ enables --frozen-lockfile by default whenever the CI env var is set.
+  // Step 5's plain-install retry (taken after a lockfile-mismatch failure) is
+  // ineffective in that environment unless we explicitly opt out: the retry
+  // call must include --no-frozen-lockfile so it actually recovers from drift
+  // (ERR_PNPM_LOCKFILE_CONFIG_MISMATCH / ERR_PNPM_FROZEN_LOCKFILE_WITH_OUTDATED_LOCKFILE).
+  const step5Block = installScript.match(/Write-Step "Step 5\/9[\s\S]*?Write-Step "Step 6\/9/);
+  assert.ok(step5Block, 'must find Step 5 install block');
+  const block = step5Block[0];
+  // The retry call must appear AFTER the "Frozen lockfile failed, retrying"
+  // warning (i.e. inside the lockfile-mismatch branch) and must contain
+  // --no-frozen-lockfile.
+  const retryWarnIdx = block.indexOf('Write-Warn "Frozen lockfile failed, retrying..."');
+  assert.ok(retryWarnIdx >= 0, 'must have lockfile-mismatch retry warning');
+  const retrySlice = block.slice(retryWarnIdx);
+  assert.match(
+    retrySlice,
+    /\$plainInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs \(?@\([^)]*"--no-frozen-lockfile"[^)]*\)/,
+    'plain install retry must pass --no-frozen-lockfile so the retry overrides pnpm CI defaults',
+  );
+});
+
 test('Step 5 fails fast on non-lockfile errors instead of swapping to plain pnpm install', () => {
   // The fix: when frozen-lockfile fails for a reason that is NOT a lockfile mismatch
   // (e.g. EPERM unlink), we must NOT fall back to plain `pnpm install` — that just
