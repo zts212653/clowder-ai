@@ -21,6 +21,11 @@ test('Test-LockfileMismatchFailure recognises pnpm 9 lockfile error codes and ph
   assert.ok(fn, 'must define Test-LockfileMismatchFailure body');
   const body = fn[0];
   assert.match(body, /ERR_PNPM_OUTDATED_LOCKFILE/, 'must match pnpm outdated lockfile error code');
+  assert.match(
+    body,
+    /ERR_PNPM_FROZEN_LOCKFILE_WITH_OUTDATED_LOCKFILE/,
+    'must match pnpm 8 frozen lockfile drift error code',
+  );
   assert.match(body, /ERR_PNPM_LOCKFILE_CONFIG_MISMATCH/, 'must match pnpm lockfile config mismatch error code');
   assert.match(body, /frozen-lockfile/i, 'must reference frozen-lockfile error context');
   assert.match(body, /lockfile/i, 'must reference lockfile phrase');
