@@ -220,6 +220,23 @@ test('Windows pnpm resolver skips npm prefix probing before direct shim lookup',
   assert.ok(npmCommandIndex < npmPrefixIndex, 'expected npm prefix probe only inside guarded fallback');
 });
 
+test('Windows pnpm resolver keeps npm config prefix candidates without executing npm prefix', () => {
+  const configPrefixHelperIndex = commandHelpersScript.indexOf('function Get-NpmConfigPrefixCandidates');
+  const configPrefixUseIndex = commandHelpersScript.indexOf('foreach ($npmPrefix in (Get-NpmConfigPrefixCandidates))');
+  const pnpmGuardIndex = commandHelpersScript.indexOf('if ($Name -ne "pnpm") {');
+
+  assert.notEqual(configPrefixHelperIndex, -1, 'expected non-executing npm config prefix helper');
+  assert.match(commandHelpersScript, /\$env:NPM_CONFIG_PREFIX/);
+  assert.match(commandHelpersScript, /\$env:npm_config_prefix/);
+  assert.match(commandHelpersScript, /Join-Path \$env:USERPROFILE "\.npmrc"/);
+  assert.notEqual(configPrefixUseIndex, -1, 'expected npm config prefix candidates in resolver');
+  assert.notEqual(pnpmGuardIndex, -1, 'expected dynamic npm prefix probe to stay guarded for pnpm');
+  assert.ok(
+    configPrefixUseIndex < pnpmGuardIndex,
+    'expected npm config prefix candidates to remain available to pnpm before guarded dynamic probing',
+  );
+});
+
 test('Windows installer prints pnpm resolver diagnostics before giving up', () => {
   assert.match(commandHelpersScript, /function Get-ToolCommandCandidates/);
   assert.match(commandHelpersScript, /Write-Warn "\$Name resolver candidates:"/);

@@ -1,8 +1,36 @@
+function Get-NpmConfigPrefixCandidates {
+    $prefixes = @()
+    if ($env:NPM_CONFIG_PREFIX) { $prefixes += $env:NPM_CONFIG_PREFIX }
+    if ($env:npm_config_prefix) { $prefixes += $env:npm_config_prefix }
+
+    $npmConfigPaths = @()
+    if ($env:NPM_CONFIG_USERCONFIG) { $npmConfigPaths += $env:NPM_CONFIG_USERCONFIG }
+    if ($env:npm_config_userconfig) { $npmConfigPaths += $env:npm_config_userconfig }
+    if ($env:USERPROFILE) { $npmConfigPaths += (Join-Path $env:USERPROFILE ".npmrc") }
+
+    foreach ($npmConfigPath in ($npmConfigPaths | Where-Object { $_ } | Select-Object -Unique)) {
+        if (-not (Test-Path $npmConfigPath)) { continue }
+        foreach ($line in (Get-Content $npmConfigPath -ErrorAction SilentlyContinue)) {
+            $trimmed = $line.Trim()
+            if (-not $trimmed -or $trimmed.StartsWith("#") -or $trimmed.StartsWith(";")) { continue }
+            if ($trimmed -match '^prefix\s*=\s*(.+)$') {
+                $prefix = $Matches[1].Trim().Trim('"').Trim("'")
+                if ($prefix) { $prefixes += [Environment]::ExpandEnvironmentVariables($prefix) }
+            }
+        }
+    }
+
+    return @($prefixes | Where-Object { $_ } | Select-Object -Unique)
+}
+
 function Get-ToolCommandCandidates {
     param([string]$Name)
     $candidates = @()
     if ($env:APPDATA) {
         $candidates += @((Join-Path $env:APPDATA "npm\$Name.cmd"), (Join-Path $env:APPDATA "npm\$Name.ps1"), (Join-Path $env:APPDATA "npm\$Name"))
+    }
+    foreach ($npmPrefix in (Get-NpmConfigPrefixCandidates)) {
+        $candidates += @((Join-Path $npmPrefix "$Name.cmd"), (Join-Path $npmPrefix "$Name.ps1"), (Join-Path $npmPrefix $Name))
     }
     if ($Name -ne "pnpm") {
         $npmCommand = Get-Command npm -ErrorAction SilentlyContinue
