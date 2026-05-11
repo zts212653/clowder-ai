@@ -423,6 +423,14 @@ REDIS_PORT=6399
     Write-Ok "Minimal .env created"
 }
 
+# Flush installer state (Redis URL, MEMORY_STORE, etc. collected by
+# Apply-InstallerRedisPlan in Step 3) into .env BEFORE we load it. We no
+# longer write Claude/Codex/Gemini/Kimi auth from the installer, but the
+# Redis env state still flows through the same EnvSetMap/EnvDeleteMap and
+# this is the only call that persists it to disk (codex review P1 on
+# 3fa55b5c).
+Apply-InstallerAuthEnv -State $authState -EnvFile $envFile
+
 # Load .env into current session so NEXT_PUBLIC_* vars are available at build time
 if (Test-Path $envFile) {
     foreach ($line in (Get-Content $envFile)) {
