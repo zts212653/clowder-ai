@@ -1,3 +1,14 @@
+function Expand-NpmConfigPrefix {
+    param([string]$Prefix)
+    $expanded = [Environment]::ExpandEnvironmentVariables($Prefix)
+    return [regex]::Replace($expanded, '\$\{([^}]+)\}', {
+        param($match)
+        $value = [Environment]::GetEnvironmentVariable($match.Groups[1].Value)
+        if ($null -eq $value) { return $match.Value }
+        return $value
+    })
+}
+
 function Get-NpmConfigPrefixCandidates {
     $prefixes = @()
     if ($env:NPM_CONFIG_PREFIX) { $prefixes += $env:NPM_CONFIG_PREFIX }
@@ -37,7 +48,7 @@ function Get-NpmConfigPrefixCandidates {
             if (-not $trimmed -or $trimmed.StartsWith("#") -or $trimmed.StartsWith(";")) { continue }
             if ($trimmed -match '^prefix\s*=\s*(.+)$') {
                 $prefix = $Matches[1].Trim().Trim('"').Trim("'")
-                if ($prefix) { $prefixes += [Environment]::ExpandEnvironmentVariables($prefix) }
+                if ($prefix) { $prefixes += (Expand-NpmConfigPrefix -Prefix $prefix) }
             }
         }
     }

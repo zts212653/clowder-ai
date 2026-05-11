@@ -123,6 +123,25 @@ test('Windows portable Redis defers REDIS_URL to runtime instead of hardcoding l
   assert.doesNotMatch(installScript, /REDIS_URL=redis:\/\/localhost:6379/);
 });
 
+test('Windows installer persists Redis env changes after generating .env without restoring auth prompts', () => {
+  const generateEnvStepIndex = installScript.indexOf('Write-Step "Step 4/8 - Generate .env"');
+  const envApplyIndex = installScript.indexOf('Apply-InstallerAuthEnv -State $authState -EnvFile $envFile');
+  const envLoadIndex = installScript.indexOf('Write-Ok ".env loaded into session"');
+  const cliStepIndex = installScript.indexOf('Write-Step "Step 7/8 - AI CLI tools"');
+  const verifyStepIndex = installScript.indexOf('Write-Step "Step 8/8 - Verify and launch"');
+
+  assert.notEqual(generateEnvStepIndex, -1, 'install.ps1 must still generate .env before env flush');
+  assert.notEqual(envApplyIndex, -1, 'installer must flush Redis EnvSetMap/EnvDeleteMap to .env');
+  assert.notEqual(envLoadIndex, -1, 'installer must still load .env into the current session');
+  assert.notEqual(cliStepIndex, -1, 'installer must still run CLI installation step');
+  assert.notEqual(verifyStepIndex, -1, 'installer must still run verification step');
+  assert.ok(generateEnvStepIndex < envApplyIndex, 'env flush must happen after .env exists');
+  assert.ok(envApplyIndex < envLoadIndex, 'env flush must happen before .env is loaded into the process env');
+  assert.ok(cliStepIndex < verifyStepIndex, 'verification must remain after CLI installation');
+  assert.doesNotMatch(installScript, /Configure-InstallerAuth -ProjectRoot/, 'must not restore removed auth prompts');
+  assert.doesNotMatch(installScript, /Write-Step "Step \d+\/\d+ - Auth config"/, 'must not restore auth config step');
+});
+
 test('Windows installer keeps portable Redis inside the project .cat-cafe directory', () => {
   assert.match(helpersScript, /Join-Path \$ProjectRoot "\.cat-cafe\\redis\\windows"/);
   assert.match(helpersScript, /ArchiveDir = Join-Path \$[A-Za-z]+ "archives"/);

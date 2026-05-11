@@ -245,6 +245,20 @@ test('Windows pnpm resolver keeps npm config prefix candidates with machine-leve
   );
 });
 
+test('Windows pnpm resolver expands npmrc ${VAR} prefix syntax before probing shims', () => {
+  const expandHelperIndex = commandHelpersScript.indexOf('function Expand-NpmConfigPrefix');
+  const prefixParseIndex = commandHelpersScript.indexOf('$prefix = $Matches[1].Trim().Trim');
+  const expandUseIndex = commandHelpersScript.indexOf('Expand-NpmConfigPrefix -Prefix $prefix');
+
+  assert.notEqual(expandHelperIndex, -1, 'expected npm config prefix expansion helper');
+  assert.match(commandHelpersScript, /'\\\$\\\{\(\[\^\}\]\+\)\\\}'/, 'helper must match ${VAR} syntax');
+  assert.match(commandHelpersScript, /\[Environment\]::GetEnvironmentVariable\(\$match\.Groups\[1\]\.Value\)/);
+  assert.match(commandHelpersScript, /\[Environment\]::ExpandEnvironmentVariables\(\$Prefix\)/);
+  assert.notEqual(prefixParseIndex, -1, 'expected npmrc prefix parse');
+  assert.notEqual(expandUseIndex, -1, 'expected npmrc prefix parse to use expansion helper');
+  assert.ok(prefixParseIndex < expandUseIndex, 'expected prefix expansion after parsing npmrc prefix value');
+});
+
 test('Windows installer prints pnpm resolver diagnostics before giving up', () => {
   assert.match(commandHelpersScript, /function Get-ToolCommandCandidates/);
   assert.match(commandHelpersScript, /Write-Warn "\$Name resolver candidates:"/);
