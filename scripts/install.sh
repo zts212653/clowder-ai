@@ -644,8 +644,8 @@ if [[ "$SOURCE_ONLY" == true ]]; then
     return 0 2>/dev/null || exit 0
 fi
 
-# ── [1/9] Environment detection ────────────────────────────
-step "[1/9] Detecting environment / 环境检测..."
+# ── [1/8] Environment detection ────────────────────────────
+step "[1/8] Detecting environment / 环境检测..."
 # macOS: Homebrew refuses to run as root — fail early with a clear message
 # so users don't sudo the whole script after seeing Homebrew's sudo prompt.
 if [[ "$PLATFORM" == "Darwin" && $EUID -eq 0 ]]; then
@@ -758,8 +758,8 @@ if [[ "$SKIP_PREFLIGHT" != true && -f "$PROJECT_DIR/scripts/preflight.sh" ]]; th
     fi
 fi
 
-# ── [2/9] Install system dependencies ──────────────────────
-step "[2/9] Checking system dependencies / 检测系统依赖..."
+# ── [2/8] Install system dependencies ──────────────────────
+step "[2/8] Checking system dependencies / 检测系统依赖..."
 NEED_PKGS=()
 for cmd in git curl; do
     if command -v "$cmd" &>/dev/null; then ok "$cmd found"
@@ -823,8 +823,8 @@ else
     esac
 fi
 
-# ── [3/9] Install Node.js 20+ ────────────────────────────
-step "[3/9] Checking Node.js / 检测 Node.js..."
+# ── [3/8] Install Node.js 20+ ────────────────────────────
+step "[3/8] Checking Node.js / 检测 Node.js..."
 node_needs_install() {
     command -v node &>/dev/null || return 0
     local v; v=$(node -v | sed 's/v//' | cut -d. -f1)
@@ -902,8 +902,8 @@ else
     ok "Node.js $(node -v) already installed (>= 20)"
 fi
 
-# ── [4/9] Install pnpm + Redis ─────────────────────────────
-step "[4/9] Checking pnpm & Redis / 检测 pnpm 和 Redis..."
+# ── [4/8] Install pnpm + Redis ─────────────────────────────
+step "[4/8] Checking pnpm & Redis / 检测 pnpm 和 Redis..."
 if ! command -v pnpm &>/dev/null; then
     warn "pnpm not found — installing"
     if command -v corepack &>/dev/null; then
@@ -961,8 +961,8 @@ else
     install_redis_local
 fi
 
-# ── [5/9] Build checked-out project ────────────────────────
-step "[5/9] Preparing current repo / 准备当前仓库..."
+# ── [5/8] Build checked-out project ────────────────────────
+step "[5/8] Preparing current repo / 准备当前仓库..."
 cd "$PROJECT_DIR"
 ok "Using project: $PROJECT_DIR"
 pnpm_install_with_fallback || { fail "pnpm install failed in $PROJECT_DIR"; exit 1; }
@@ -984,8 +984,8 @@ if [[ -d "$SKILLS_SOURCE" ]]; then
 else fail "cat-cafe-skills/ not found"; exit 1; fi
 sync_agent_hooks_best_effort
 
-# ── [6/9] Install AI agent CLI tools ─────────────────────
-step "[6/9] Installing AI CLI tools / 安装 AI 命令行工具..."
+# ── [6/8] Install AI agent CLI tools ─────────────────────
+step "[6/8] Installing AI CLI tools / 安装 AI 命令行工具..."
 info "  Cat Cafe spawns CLI subprocesses — these are required"
 install_npm_cli() {
     local name="$1" cmd="$2" pkg="$3"
@@ -1077,86 +1077,8 @@ if [[ ${#MISSING_AGENTS[@]} -gt 0 ]]; then
     done
 fi
 
-# ── [7/9] Authentication setup / 认证配置 ─────────────────
-step "[7/9] Authentication setup / 认证配置..."
-configure_agent_auth() {
-    local name="$1" cmd="$2"
-    local allow_skip="${3:-false}"
-    command -v "$cmd" &>/dev/null || return 0
-
-    # Gemini CLI doesn't support custom API endpoints — always use OAuth
-    if [[ "$cmd" == "gemini" ]]; then
-        run_install_auth_config client-auth set \
-            --project-dir "$PROJECT_DIR" \
-            --client "$cmd" \
-            --mode oauth
-        ok "$name: OAuth mode (Gemini CLI only supports Google official API)"
-        return 0
-    fi
-
-    local auth_sel
-    local -a auth_options=(
-        "OAuth / Subscription (recommended / 推荐)"
-        "API Key"
-    )
-    [[ "$allow_skip" == true ]] && auth_options+=("Skip auth setup (default / configure later / 稍后配置)")
-    local skip_index=2
-    local default_auth_sel=0
-    [[ "$allow_skip" == true ]] && default_auth_sel="$skip_index"
-    TTY_SELECT_DEFAULT_INDEX="$default_auth_sel" tty_select auth_sel "  $name ($cmd) — auth mode:" "${auth_options[@]}"
-    if [[ "$allow_skip" == true && "$auth_sel" == "$skip_index" ]]; then
-        warn "$name: auth setup skipped"
-        return 0
-    fi
-    if [[ "$auth_sel" != "1" ]]; then
-        # Do not auto-delete installer API-key profiles here: accounts are global
-        # and we cannot prove other projects are not still bound to installer refs.
-        run_install_auth_config client-auth set \
-            --project-dir "$PROJECT_DIR" \
-            --client "$cmd" \
-            --mode oauth
-        ok "$name: OAuth mode (login on first use: run '$cmd')"
-        return 0
-    fi
-    local key="" base_url="" model=""
-    tty_read_secret "    API Key: " key
-    tty_read "    Base URL (Enter = default): " base_url
-    tty_read "    Model (Enter = default): " model
-
-    if [[ -n "$key" ]]; then
-        # All clients use the same install-auth-config.mjs to create provider profiles
-        local install_args=(
-            run_install_auth_config client-auth set
-            --project-dir "$PROJECT_DIR"
-            --client "$cmd"
-            --mode api_key
-            --base-url "${base_url:-}"
-        )
-        [[ -n "$model" ]] && install_args+=(--model "$model")
-        _INSTALLER_API_KEY="$key" "${install_args[@]}"
-        ok "$name: API key profile created in .cat-cafe/"
-    else
-        # No key provided — set OAuth mode via unified path
-        # Do not auto-delete installer API-key profiles here: accounts are global
-        # and we cannot prove other projects are not still bound to installer refs.
-        run_install_auth_config client-auth set \
-            --project-dir "$PROJECT_DIR" \
-            --client "$cmd" \
-            --mode oauth
-        warn "$name: no key provided, keeping OAuth"
-    fi
-}
-
-if [[ "$HAS_TTY" == true ]]; then
-    info "  Configure each agent / 逐个配置每只猫的认证方式："
-    configure_agent_auth "Claude (布偶猫)" "claude"; configure_agent_auth "Codex (缅因猫)" "codex"
-    configure_agent_auth "Gemini (暹罗猫)" "gemini"; configure_agent_auth "Kimi (月之暗面)" "kimi" true
-else
-    info "  Non-interactive — skipping auth. Run each CLI to log in: claude / codex / gemini / kimi"
-fi
-
-# ── [8/9] Generate .env with all collected config ─────────
-step "[8/9] Generating config / 生成配置..."
+# ── [7/8] Generate .env with all collected config ─────────
+step "[7/8] Generating config / 生成配置..."
 if [[ -f .env ]]; then
     warn ".env already exists — not overwriting. To regenerate: cp .env.example .env"
 elif [[ -f .env.example ]]; then
@@ -1172,8 +1094,8 @@ for i in ${ENV_KEYS[@]+"${!ENV_KEYS[@]}"}; do write_env_key "${ENV_KEYS[$i]}" "$
 maybe_write_docker_api_host
 chmod 600 .env 2>/dev/null || true
 
-# ── [9/9] Done ──────────────────────────────────────────────
-step "[9/9] Installation complete! / 安装完成！"
+# ── [8/8] Done ──────────────────────────────────────────────
+step "[8/8] Installation complete! / 安装完成！"
 echo -e "\n  ${GREEN}══ Cat Cafe is ready! 猫猫咖啡已就绪！══${NC}\n  Project: $PROJECT_DIR"
 START_CMD="cd $PROJECT_DIR && pnpm start"; [[ "$MEMORY_MODE" == true ]] && START_CMD+=" --memory"
 # The script runs as a subprocess — PATH changes don't propagate to the parent
