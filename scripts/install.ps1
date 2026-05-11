@@ -116,15 +116,22 @@ function Invoke-PnpmInstallWithCapturedOutput {
             Remove-Item Env:PUPPETEER_SKIP_DOWNLOAD -ErrorAction SilentlyContinue
         }
 
-        # Sentinel: $LASTEXITCODE is process-global and PowerShell does not reset
-        # it on `throw`. Pin it to -1 so a stale value from earlier native
-        # commands cannot make the catch path fail-open. Only a real pnpm.exe
-        # exit code (0..255) can overwrite the sentinel.
-        $LASTEXITCODE = -1
+        # Sentinel: $LASTEXITCODE is a process-global automatic variable, BUT
+        # PowerShell 5.1 will silently shadow it into the function scope the
+        # moment we assign without an explicit scope qualifier. After that
+        # shadowing, even a successful native command exit only updates
+        # $global:LASTEXITCODE; the function-local copy stays at -1 and the
+        # success check below sees the stale sentinel, misclassifying a
+        # successful pnpm install as failure (verified on the Windows
+        # reporter's PowerShell 5.1 / Node 24 / pnpm 9.15.4 box).
+        #
+        # Fix: assign and read via $global:LASTEXITCODE explicitly so we are
+        # always observing the process-global value pnpm.exe actually updates.
+        $global:LASTEXITCODE = -1
         try {
             & $pnpmCommand @CommandArgs 2>&1 | Tee-Object -Variable capturedOutput
             return [pscustomobject]@{
-                Ok = $LASTEXITCODE -eq 0
+                Ok = $global:LASTEXITCODE -eq 0
                 ErrorRecord = $null
                 OutputText = Get-CommandOutputText -OutputLines $capturedOutput
             }
@@ -132,12 +139,13 @@ function Invoke-PnpmInstallWithCapturedOutput {
             # Two distinct scenarios reach this catch:
             #   (a) pnpm actually ran, exited 0, and only the 2>&1 | Tee-Object
             #       pipeline threw (e.g. Node 24 DEP0169 deprecation on stderr
-            #       under $ErrorActionPreference=Stop). $LASTEXITCODE is now 0
-            #       and we should treat this as success.
+            #       under $ErrorActionPreference=Stop). $global:LASTEXITCODE is
+            #       now 0 and we should treat this as success.
             #   (b) pnpm itself failed before producing an exit code, or the
-            #       captured pipeline aborted before pnpm started. $LASTEXITCODE
-            #       is still -1 and the `-eq 0` check fails closed.
-            if ($LASTEXITCODE -eq 0) {
+            #       captured pipeline aborted before pnpm started.
+            #       $global:LASTEXITCODE is still -1 and the `-eq 0` check
+            #       fails closed.
+            if ($global:LASTEXITCODE -eq 0) {
                 return [pscustomobject]@{
                     Ok = $true
                     ErrorRecord = $null

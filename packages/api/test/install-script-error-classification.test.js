@@ -159,8 +159,8 @@ test('Invoke-PnpmInstallWithCapturedOutput trusts $LASTEXITCODE over pipeline ex
   assert.ok(catchBlock, 'must have catch block');
   assert.match(
     catchBlock[0],
-    /\$LASTEXITCODE\s*-eq\s*0/,
-    'catch block must check $LASTEXITCODE -eq 0 to avoid DEP0169 false failures',
+    /\$(?:global:)?LASTEXITCODE\s*-eq\s*0/,
+    'catch block must check $LASTEXITCODE (optionally with $global: scope) -eq 0 to avoid DEP0169 false failures',
   );
 });
 
@@ -218,6 +218,41 @@ test('Invoke-PnpmInstallWithCapturedOutput calls resolved pnpm directly inside t
     body,
     /Invoke-Pnpm\s+-CommandArgs\s+\$CommandArgs\s+2>&1\s*\|\s*Tee-Object/,
     'must NOT pipe Invoke-Pnpm into Tee-Object (hides native exit code from caller scope)',
+  );
+});
+
+test('Invoke-PnpmInstallWithCapturedOutput reads $global:LASTEXITCODE explicitly to bypass PowerShell function scope shadowing', () => {
+  // PowerShell 5.1 scoping quirk verified on the Windows reporter's box:
+  // assigning `$LASTEXITCODE = -1` inside a function creates a function-local
+  // copy that shadows the global automatic variable. When pnpm.exe runs and
+  // exits 0, PowerShell updates `$global:LASTEXITCODE = 0`, but the
+  // function-local `$LASTEXITCODE` stays at -1, so the success check still
+  // observes the sentinel value and misclassifies the successful install.
+  //
+  // Fix: read and write $LASTEXITCODE via the explicit `$global:` scope
+  // qualifier so PowerShell cannot shadow it into the function scope.
+  const fn = installScript.match(/function Invoke-PnpmInstallWithCapturedOutput[\s\S]*?\n\}\n/);
+  assert.ok(fn, 'must define Invoke-PnpmInstallWithCapturedOutput');
+  const body = fn[0];
+  // Sentinel assignment must use $global:LASTEXITCODE so it actually pins the
+  // global automatic variable instead of creating a shadowed local.
+  assert.match(
+    body,
+    /\$global:LASTEXITCODE\s*=\s*-1/,
+    'sentinel assignment must use $global:LASTEXITCODE = -1, not the function-local $LASTEXITCODE',
+  );
+  // Every read of the exit code must also use $global:LASTEXITCODE so we
+  // observe pnpm's real exit value rather than the shadowed sentinel.
+  const successCheck = body.match(/Ok\s*=\s*(\$[^\s]+)\s*-eq\s*0/);
+  assert.ok(successCheck, 'must have an Ok = $... -eq 0 check on the success path');
+  assert.equal(successCheck[1], '$global:LASTEXITCODE', 'success path must read $global:LASTEXITCODE explicitly');
+  // The catch path must also read $global:LASTEXITCODE for the same reason.
+  const catchBlock = body.match(/} catch \{[\s\S]*?\}\s*\}\s*finally/);
+  assert.ok(catchBlock, 'must have catch block');
+  assert.match(
+    catchBlock[0],
+    /\$global:LASTEXITCODE\s*-eq\s*0/,
+    'catch path must read $global:LASTEXITCODE explicitly to detect pnpm success-with-pipeline-throw',
   );
 });
 
