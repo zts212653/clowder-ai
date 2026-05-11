@@ -4,6 +4,8 @@ import path from 'node:path';
 import test from 'node:test';
 
 const packageJsonPath = path.resolve(import.meta.dirname, '../package.json');
+const desktopPackageJsonPath = path.resolve(import.meta.dirname, '../../../desktop/package.json');
+const desktopMainPath = path.resolve(import.meta.dirname, '../../../desktop/main.js');
 const desktopBuildScriptPath = path.resolve(import.meta.dirname, '../../../desktop/scripts/build-desktop.ps1');
 
 test('api build script avoids unix-only file copy commands', async () => {
@@ -14,6 +16,23 @@ test('api build script avoids unix-only file copy commands', async () => {
   assert.match(buildScript, /node \.\/scripts\/copy-marketplace-catalog-data\.mjs/);
   assert.doesNotMatch(buildScript, /\bmkdir -p\b/);
   assert.doesNotMatch(buildScript, /\bcp\s+src\/marketplace\/catalog-data/);
+});
+
+test('desktop package includes main process local require dependencies', async () => {
+  const desktopPackage = JSON.parse(await readFile(desktopPackageJsonPath, 'utf8'));
+  const mainSource = await readFile(desktopMainPath, 'utf8');
+  const packageFiles = new Set(desktopPackage.build?.files ?? []);
+  const missing = [];
+
+  for (const match of mainSource.matchAll(/require\(['"](\.\/[^'"]+)['"]\)/g)) {
+    const specifier = match[1];
+    let relativePath = specifier.slice('./'.length);
+    if (!path.extname(relativePath)) relativePath += '.js';
+    relativePath = relativePath.split(path.sep).join('/');
+    if (!packageFiles.has(relativePath)) missing.push(relativePath);
+  }
+
+  assert.deepEqual(missing, []);
 });
 
 test('windows desktop build script cleans up temporary Defender exclusions', async () => {

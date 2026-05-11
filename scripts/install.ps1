@@ -6,7 +6,7 @@
   Installs prerequisites and sets up the current checked-out cat-cafe repo.
   Clone or download the repo first, then run this helper from inside it.
   Steps: env detect -> preflight network check -> Node/pnpm install -> Redis -> .env generate
-         -> deps & build -> skills mount -> AI CLI tools -> auth config -> verify & optionally start
+         -> deps & build -> skills mount -> AI CLI tools -> verify & optionally start
 
 .EXAMPLE
   # From repo root:
@@ -47,6 +47,43 @@ function Write-PuppeteerSkipWarning {
     Write-Warn "Bundled Chrome download failed - skipped"
     Write-Warn "Thread export / screenshot may be unavailable. To install later: npx puppeteer browsers install chrome"
 }
+function Test-LockfileMismatchFailure {
+    param([string]$OutputText)
+    if (-not $OutputText) { return $false }
+    # Classify pnpm 9 lockfile drift (the only failure mode that justifies a plain
+    # `pnpm install` retry). Anything else (EPERM, network, native build) must
+    # surface its original stderr rather than be re-buried under a misleading
+    # "Frozen lockfile failed, retrying..." line.
+    return ($OutputText -match "ERR_PNPM_OUTDATED_LOCKFILE") -or
+           ($OutputText -match "ERR_PNPM_FROZEN_LOCKFILE_WITH_OUTDATED_LOCKFILE") -or
+           ($OutputText -match "ERR_PNPM_LOCKFILE_BREAKING_CHANGE") -or
+           ($OutputText -match "ERR_PNPM_LOCKFILE_CONFIG_MISMATCH") -or
+           ($OutputText -match "Cannot install with .frozen-lockfile") -or
+           ($OutputText -match "lockfile is not up to date") -or
+           ($OutputText -match "lockfile.*is incompatible") -or
+           ($OutputText -match "Cannot proceed with .* without the lockfile")
+}
+function Test-WindowsEpermFailure {
+    param([string]$OutputText)
+    if (-not $OutputText) { return $false }
+    return ($OutputText -match "EPERM[:\s]") -or
+           ($OutputText -match "EBUSY[:\s]") -or
+           ($OutputText -match "EACCES[:\s]") -or
+           ($OutputText -match "operation not permitted") -or
+           ($OutputText -match "resource busy or locked")
+}
+function Write-WindowsEpermHint {
+    Write-Err "This looks like a Windows file-system error (EPERM/EBUSY/EACCES),"
+    Write-Err "not a lockfile mismatch. Common causes and fixes:"
+    Write-Err "  1. Antivirus / Windows Defender locking files in the pnpm store"
+    Write-Err "     -> Add your project folder and %LOCALAPPDATA%\pnpm to Defender exclusions, then retry"
+    Write-Err "  2. A previous Node / pnpm / installer process still holding files open"
+    Write-Err "     -> Close other shells, reboot, then retry"
+    Write-Err "  3. Long path support disabled"
+    Write-Err "     -> Enable Win32 long paths (LongPathsEnabled=1 under HKLM\SYSTEM\CurrentControlSet\Control\FileSystem)"
+    Write-Err "  4. Project path requires elevation or sits on a sync'd drive (OneDrive/Dropbox)"
+    Write-Err "     -> Move the project under your local user profile, or run PowerShell as Administrator"
+}
 function Invoke-PnpmInstallWithCapturedOutput {
     param(
         [string[]]$CommandArgs,
@@ -56,6 +93,22 @@ function Invoke-PnpmInstallWithCapturedOutput {
     $capturedOutput = @()
     $hadPreviousSkip = Test-Path Env:PUPPETEER_SKIP_DOWNLOAD
     $previousSkipValue = if ($hadPreviousSkip) { $env:PUPPETEER_SKIP_DOWNLOAD } else { $null }
+    $previousErrorActionPreference = $ErrorActionPreference
+
+    # Resolve pnpm BEFORE the captured pipeline. Wrapping pnpm in the
+    # Invoke-Pnpm -> Invoke-ToolCommand function chain made the native exit
+    # code unreliable in PowerShell 5.1: pnpm could exit 0 yet the captured
+    # pipeline observed $LASTEXITCODE = -1 (sentinel never overwritten),
+    # which made Step 5 misclassify successful installs as failure on
+    # Windows / Node 24 (reproduced on pnpm 9.15.4).
+    $pnpmCommand = Resolve-PnpmCommand
+    if (-not $pnpmCommand) {
+        return [pscustomobject]@{
+            Ok = $false
+            ErrorRecord = $null
+            OutputText = "pnpm command not found"
+        }
+    }
 
     try {
         if ($SkipPuppeteerDownload) {
@@ -64,14 +117,46 @@ function Invoke-PnpmInstallWithCapturedOutput {
             Remove-Item Env:PUPPETEER_SKIP_DOWNLOAD -ErrorAction SilentlyContinue
         }
 
+        # Sentinel: $LASTEXITCODE is a process-global automatic variable, BUT
+        # PowerShell 5.1 will silently shadow it into the function scope the
+        # moment we assign without an explicit scope qualifier. After that
+        # shadowing, even a successful native command exit only updates
+        # $global:LASTEXITCODE; the function-local copy stays at -1 and the
+        # success check below sees the stale sentinel, misclassifying a
+        # successful pnpm install as failure (verified on the Windows
+        # reporter's PowerShell 5.1 / Node 24 / pnpm 9.15.4 box).
+        #
+        # Fix: assign and read via $global:LASTEXITCODE explicitly so we are
+        # always observing the process-global value pnpm.exe actually updates.
+        $global:LASTEXITCODE = -1
         try {
-            Invoke-Pnpm -CommandArgs $CommandArgs 2>&1 | Tee-Object -Variable capturedOutput
+            # Scope this down to the captured pnpm pipeline: under script-wide
+            # Stop, PowerShell 5.1 can promote benign Node 24 stderr (DEP0169)
+            # into a RemoteException before we can read pnpm's exit code.
+            $ErrorActionPreference = "SilentlyContinue"
+            & $pnpmCommand @CommandArgs 2>&1 | Tee-Object -Variable capturedOutput
             return [pscustomobject]@{
-                Ok = $LASTEXITCODE -eq 0
+                Ok = $global:LASTEXITCODE -eq 0
                 ErrorRecord = $null
                 OutputText = Get-CommandOutputText -OutputLines $capturedOutput
             }
         } catch {
+            # Two distinct scenarios reach this catch:
+            #   (a) pnpm actually ran, exited 0, and only the 2>&1 | Tee-Object
+            #       pipeline threw (e.g. Node 24 DEP0169 deprecation on stderr
+            #       under $ErrorActionPreference=Stop). $global:LASTEXITCODE is
+            #       now 0 and we should treat this as success.
+            #   (b) pnpm itself failed before producing an exit code, or the
+            #       captured pipeline aborted before pnpm started.
+            #       $global:LASTEXITCODE is still -1 and the `-eq 0` check
+            #       fails closed.
+            if ($global:LASTEXITCODE -eq 0) {
+                return [pscustomobject]@{
+                    Ok = $true
+                    ErrorRecord = $null
+                    OutputText = Get-CommandOutputText -OutputLines ($capturedOutput + @($_))
+                }
+            }
             return [pscustomobject]@{
                 Ok = $false
                 ErrorRecord = $_
@@ -79,6 +164,7 @@ function Invoke-PnpmInstallWithCapturedOutput {
             }
         }
     } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
         if ($hadPreviousSkip) {
             $env:PUPPETEER_SKIP_DOWNLOAD = $previousSkipValue
         } else {
@@ -159,7 +245,7 @@ function Resolve-ProjectRoot {
 }
 
 # -- Step 1: Environment detection ---------------------------
-Write-Step "Step 1/9 - Detect environment"
+Write-Step "Step 1/8 - Detect environment"
 
 if ($PSVersionTable.PSVersion.Major -lt 5) {
     Write-Err "PowerShell 5.0+ required (current: $($PSVersionTable.PSVersion))"
@@ -205,7 +291,7 @@ if (-not $SkipPreflight -and (Test-Path $preflightScript)) {
     }
 }
 
-Write-Step "Step 2/9 - Node.js and pnpm"
+Write-Step "Step 2/8 - Node.js and pnpm"
 
 $nodeOk = $false
 try {
@@ -303,7 +389,7 @@ if (-not $pnpmOk) {
     }
 }
 
-Write-Step "Step 3/9 - Redis"
+Write-Step "Step 3/8 - Redis"
 
 $redisPlan = Resolve-InstallerRedisPlan -ProjectRoot $ProjectRoot
 $hasRedis = Apply-InstallerRedisPlan -State $authState -ProjectRoot $ProjectRoot -Plan $redisPlan
@@ -312,7 +398,7 @@ if (-not $hasRedis) {
     exit 1
 }
 
-Write-Step "Step 4/9 - Generate .env"
+Write-Step "Step 4/8 - Generate .env"
 
 Set-Location $ProjectRoot
 Write-Ok "Using project root: $ProjectRoot"
@@ -337,6 +423,14 @@ REDIS_PORT=6399
     Write-Ok "Minimal .env created"
 }
 
+# Flush installer state (Redis URL, MEMORY_STORE, etc. collected by
+# Apply-InstallerRedisPlan in Step 3) into .env BEFORE we load it. We no
+# longer write Claude/Codex/Gemini/Kimi auth from the installer, but the
+# Redis env state still flows through the same EnvSetMap/EnvDeleteMap and
+# this is the only call that persists it to disk (codex review P1 on
+# 3fa55b5c).
+Apply-InstallerAuthEnv -State $authState -EnvFile $envFile
+
 # Load .env into current session so NEXT_PUBLIC_* vars are available at build time
 if (Test-Path $envFile) {
     foreach ($line in (Get-Content $envFile)) {
@@ -350,25 +444,52 @@ if (Test-Path $envFile) {
     Write-Ok ".env loaded into session"
 }
 
-Write-Step "Step 5/9 - Install dependencies and build"
+Write-Step "Step 5/8 - Install dependencies and build"
+
+# pnpm 9 + npm-global pnpm.cmd + Node 24 on Windows hits
+# "Could not determine Node.js install directory" the moment `pnpm install`
+# tries to auto-detect a store location. The Windows reporter verified that
+# passing an explicit --store-dir + --package-import-method copy on the same
+# machine makes the install succeed. Build the default arg suffix once and
+# reuse it for every pnpm install invocation in this step.
+$pnpmInstallExtra = @()
+if ($env:OS -eq "Windows_NT" -and $env:LOCALAPPDATA) {
+    $pnpmInstallExtra = @("--store-dir", (Join-Path $env:LOCALAPPDATA "pnpm\store"), "--package-import-method", "copy")
+}
 
 Write-Host "  Running pnpm install..."
-$frozenInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs @("install", "--frozen-lockfile")
+$frozenInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs (@("install", "--frozen-lockfile") + $pnpmInstallExtra)
 if (-not $frozenInstallResult.Ok -and (Test-PuppeteerBrowserDownloadFailure -OutputText $frozenInstallResult.OutputText)) {
     Write-PuppeteerSkipWarning
-    $frozenInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs @("install", "--frozen-lockfile") -SkipPuppeteerDownload
+    $frozenInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs (@("install", "--frozen-lockfile") + $pnpmInstallExtra) -SkipPuppeteerDownload
 }
 if (-not $frozenInstallResult.Ok) {
     Exit-InstallerIfCancelled -ErrorRecord $frozenInstallResult.ErrorRecord -Context "pnpm install"
-    Write-Warn "Frozen lockfile failed, retrying..."
-    $plainInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs @("install")
-    if (-not $plainInstallResult.Ok -and (Test-PuppeteerBrowserDownloadFailure -OutputText $plainInstallResult.OutputText)) {
-        Write-PuppeteerSkipWarning
-        $plainInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs @("install") -SkipPuppeteerDownload
-    }
-    if (-not $plainInstallResult.Ok) {
-        Exit-InstallerIfCancelled -ErrorRecord $plainInstallResult.ErrorRecord -Context "pnpm install"
-        Write-Err "pnpm install failed"
+    if (Test-LockfileMismatchFailure -OutputText $frozenInstallResult.OutputText) {
+        Write-Warn "Frozen lockfile failed, retrying..."
+        # pnpm 8+ implicitly enables --frozen-lockfile when CI is set, so a
+        # bare `pnpm install` retry would re-fail with the same lockfile
+        # error in CI environments. Force --no-frozen-lockfile on the retry
+        # so the recovery actually overrides pnpm's CI default.
+        $plainInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs (@("install", "--no-frozen-lockfile") + $pnpmInstallExtra)
+        if (-not $plainInstallResult.Ok -and (Test-PuppeteerBrowserDownloadFailure -OutputText $plainInstallResult.OutputText)) {
+            Write-PuppeteerSkipWarning
+            $plainInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs (@("install", "--no-frozen-lockfile") + $pnpmInstallExtra) -SkipPuppeteerDownload
+        }
+        if (-not $plainInstallResult.Ok) {
+            Exit-InstallerIfCancelled -ErrorRecord $plainInstallResult.ErrorRecord -Context "pnpm install"
+            Write-Err "pnpm install failed"
+            exit 1
+        }
+    } else {
+        # Non-lockfile failure (EPERM / EBUSY / network / native build). Falling back
+        # to plain `pnpm install` would just repeat the same error and bury the real
+        # cause under a misleading "Frozen lockfile failed" message.
+        if (Test-WindowsEpermFailure -OutputText $frozenInstallResult.OutputText) {
+            Write-WindowsEpermHint
+        }
+        Write-Err "pnpm install --frozen-lockfile failed"
+        Write-Err "The real error is above. This is NOT a lockfile drift issue."
         exit 1
     }
 }
@@ -393,10 +514,10 @@ if (-not $SkipBuild) {
     Write-Warn "Build skipped (-SkipBuild)"
 }
 
-Write-Step "Step 6/9 - Skills mount"
+Write-Step "Step 6/8 - Skills mount"
 Mount-InstallerSkills -ProjectRoot $ProjectRoot
 
-Write-Step "Step 7/9 - AI CLI tools"
+Write-Step "Step 7/8 - AI CLI tools"
 
 $cliTools = @(
     @{ Name = "Claude"; Label = "Claude"; Cmd = "claude"; Pkg = "@anthropic-ai/claude-code" },
@@ -452,17 +573,12 @@ if (-not $SkipCli) {
     $selectedCliCommands = @()
 }
 
-Write-Step "Step 8/9 - Auth config"
-Configure-InstallerAuth -ProjectRoot $ProjectRoot -State $authState -SelectedCliCommands $selectedCliCommands
-
-Apply-InstallerAuthEnv -State $authState -EnvFile $envFile
-
 $hasClaude = $null -ne (Resolve-ToolCommandWithRetry -Name "claude" -Attempts 6)
 $hasCodex = $null -ne (Resolve-ToolCommandWithRetry -Name "codex" -Attempts 6)
 $hasGemini = $null -ne (Resolve-ToolCommandWithRetry -Name "gemini" -Attempts 6)
 $hasKimi = $null -ne (Resolve-ToolCommandWithRetry -Name "kimi" -Attempts 6)
 
-Write-Step "Step 9/9 - Verify and launch"
+Write-Step "Step 8/8 - Verify and launch"
 
 $artifacts = @("packages/shared/dist", "packages/mcp-server/dist/index.js", "packages/api/dist/index.js", "packages/web/.next")
 $allGood = $true

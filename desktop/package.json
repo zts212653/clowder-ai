@@ -55,6 +55,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "project-root.js",
       "service-manager.js",
       "splash.html",
       "assets/**/*"

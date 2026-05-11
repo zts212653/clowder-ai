@@ -175,18 +175,14 @@ printf '%s' "$(resolve_installer_auth_config_root)"
   }
 });
 
-test('installer auth setup calls install-auth-config through runtime-aware wrapper', () => {
-  const installScriptText = readFileSync(installScript, 'utf8');
-  const configureAuthBody = installScriptText.match(/configure_agent_auth\(\) \{([\s\S]*?)^}\n/m)?.[1] ?? '';
-
-  assert.notEqual(configureAuthBody, '', 'expected configure_agent_auth body');
-  assert.match(configureAuthBody, /run_install_auth_config client-auth set/, 'auth writes should use wrapper');
-  assert.doesNotMatch(
-    configureAuthBody,
-    /node scripts\/install-auth-config\.mjs/,
-    'auth writes must not bypass runtime-aware config root resolution',
-  );
-});
+// `configure_agent_auth`-based tests removed: install.sh no longer prompts for
+// per-cat OAuth / API-key configuration during install (per CVO). Users now
+// authenticate each CLI themselves with the standard flow (e.g. `claude login`)
+// after install completes. The install-auth-config.mjs helper itself is kept
+// for project-local auth tooling outside the installer pipeline; tests below
+// (`runtime-aware auth wrapper also updates project-local state for direct
+// start modes`, `Claude empty API key removes stale installer-managed
+// profile`) continue to exercise that helper directly.
 
 test('runtime-aware auth wrapper also updates project-local state for direct start modes', () => {
   const parentRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-install-auth-direct-mode-'));
@@ -260,63 +256,10 @@ node scripts/install-auth-config.mjs claude-profile remove --project-dir "${envR
   }
 });
 
-test('OAuth selection does not force-remove global installer accounts before set', () => {
-  const installScriptText = readFileSync(installScript, 'utf8');
-  const configureAuthBody = installScriptText.match(/configure_agent_auth\(\) \{([\s\S]*?)^}\n/m)?.[1] ?? '';
-
-  assert.notEqual(configureAuthBody, '', 'expected configure_agent_auth body');
-  assert.match(configureAuthBody, /client-auth set \\/);
-  assert.match(configureAuthBody, /--mode oauth/);
-  assert.doesNotMatch(configureAuthBody, /client-auth remove/);
-  assert.doesNotMatch(configureAuthBody, /--force true/);
-});
-
-test('empty API key fallback to OAuth does not force-remove global installer accounts', () => {
-  const installScriptText = readFileSync(installScript, 'utf8');
-  const emptyKeyBranch =
-    installScriptText.match(
-      /# No key provided — set OAuth mode via unified path([\s\S]*?)warn "\$name: no key provided, keeping OAuth"/m,
-    )?.[1] ?? '';
-
-  assert.notEqual(emptyKeyBranch, '', 'expected empty API key OAuth fallback branch');
-  assert.match(emptyKeyBranch, /client-auth set \\/);
-  assert.match(emptyKeyBranch, /--mode oauth/);
-  assert.doesNotMatch(emptyKeyBranch, /client-auth remove/);
-  assert.doesNotMatch(emptyKeyBranch, /--force true/);
-});
-
-test('Kimi auth setup offers an explicit skip option instead of forcing OAuth', () => {
-  const installScriptText = readFileSync(installScript, 'utf8');
-  const configureAuthBody = installScriptText.match(/configure_agent_auth\(\) \{([\s\S]*?)^}\n/m)?.[1] ?? '';
-
-  assert.notEqual(configureAuthBody, '', 'expected configure_agent_auth body');
-  assert.match(configureAuthBody, /allow_skip/, 'configure_agent_auth should accept a skip flag');
-  assert.match(configureAuthBody, /Skip auth setup/, 'skip-enabled auth menus should include Skip');
-  assert.match(configureAuthBody, /auth setup skipped/, 'skip branch should return without writing OAuth');
-  assert.match(
-    installScriptText,
-    /configure_agent_auth "Kimi \(月之暗面\)" "kimi" true/,
-    'Kimi should opt into the skip-enabled auth menu',
-  );
-});
-
-test('Kimi auth setup defaults to skip so Enter does not choose OAuth when arrows fail', () => {
-  const installScriptText = readFileSync(installScript, 'utf8');
-  const configureAuthBody = installScriptText.match(/configure_agent_auth\(\) \{([\s\S]*?)^}\n/m)?.[1] ?? '';
-
-  assert.notEqual(configureAuthBody, '', 'expected configure_agent_auth body');
-  assert.match(configureAuthBody, /local skip_index=2/, 'skip option should remain the third menu entry');
-  assert.match(
-    configureAuthBody,
-    /\[\[ "\$allow_skip" == true \]\] && default_auth_sel="\$skip_index"/,
-    'skip-enabled auth menus should select Skip by default',
-  );
-  assert.match(
-    configureAuthBody,
-    /TTY_SELECT_DEFAULT_INDEX="\$default_auth_sel"\s+tty_select auth_sel/,
-    'auth selector should pass the computed default index into tty_select',
-  );
-});
+// 4 additional `configure_agent_auth` tests removed alongside the OAuth /
+// API-key prompt deletion (see note above). install-auth-config.mjs remains
+// available for the project-local auth flow exercised by the tests
+// surrounding this block.
 
 test('npm_global_install succeeds when a custom registry is configured', () => {
   const output = runSourceOnlySnippet(`
@@ -339,7 +282,7 @@ printf '|status:%s' "$?"
 test('install script runs preflight before installer-managed network fetches', () => {
   const content = readFileSync(installScript, 'utf8');
   const preflightIndex = content.indexOf('# Preflight network check — fail early before installer-managed downloads.');
-  const systemDepsIndex = content.indexOf('# ── [2/9] Install system dependencies');
+  const systemDepsIndex = content.indexOf('# ── [2/8] Install system dependencies');
   const nodeSourceIndex = content.indexOf('curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key');
   const corepackIndex = content.indexOf('corepack prepare pnpm@latest --activate');
 
