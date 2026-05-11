@@ -223,14 +223,21 @@ test('Windows pnpm resolver validates npm prefix output with Test-Path', () => {
 test('Windows pnpm resolver keeps npm config prefix candidates with machine-level coverage', () => {
   const configPrefixHelperIndex = commandHelpersScript.indexOf('function Get-NpmConfigPrefixCandidates');
   const configPrefixUseIndex = commandHelpersScript.indexOf('foreach ($npmPrefix in (Get-NpmConfigPrefixCandidates))');
-  const npmPrefixProbeIndex = commandHelpersScript.indexOf('$npmCommand = Get-Command npm -ErrorAction SilentlyContinue');
+  const npmPrefixProbeIndex = commandHelpersScript.indexOf(
+    '$npmCommand = Get-Command npm -ErrorAction SilentlyContinue',
+  );
 
   assert.notEqual(configPrefixHelperIndex, -1, 'expected non-executing npm config prefix helper');
   assert.match(commandHelpersScript, /\$env:NPM_CONFIG_PREFIX/);
   assert.match(commandHelpersScript, /\$env:npm_config_prefix/);
+  assert.match(commandHelpersScript, /\$env:NPM_CONFIG_GLOBALCONFIG/);
+  assert.match(commandHelpersScript, /\$env:npm_config_globalconfig/);
   assert.match(commandHelpersScript, /Join-Path \$env:USERPROFILE "\.npmrc"/);
   assert.match(commandHelpersScript, /Join-Path \$env:APPDATA "npm\\etc\\npmrc"/);
   assert.match(commandHelpersScript, /Join-Path \$env:ProgramData "npm\\npmrc"/);
+  assert.match(commandHelpersScript, /Join-Path \$env:ProgramFiles "nodejs\\etc\\npmrc"/);
+  assert.match(commandHelpersScript, /GetEnvironmentVariable\("ProgramFiles\(x86\)"\)/);
+  assert.match(commandHelpersScript, /Join-Path \$nodeDir "etc\\npmrc"/);
   assert.notEqual(configPrefixUseIndex, -1, 'expected npm config prefix candidates in resolver');
   assert.ok(
     configPrefixUseIndex < npmPrefixProbeIndex,

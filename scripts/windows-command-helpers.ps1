@@ -6,9 +6,29 @@ function Get-NpmConfigPrefixCandidates {
     $npmConfigPaths = @()
     if ($env:NPM_CONFIG_USERCONFIG) { $npmConfigPaths += $env:NPM_CONFIG_USERCONFIG }
     if ($env:npm_config_userconfig) { $npmConfigPaths += $env:npm_config_userconfig }
+    if ($env:NPM_CONFIG_GLOBALCONFIG) { $npmConfigPaths += $env:NPM_CONFIG_GLOBALCONFIG }
+    if ($env:npm_config_globalconfig) { $npmConfigPaths += $env:npm_config_globalconfig }
     if ($env:USERPROFILE) { $npmConfigPaths += (Join-Path $env:USERPROFILE ".npmrc") }
     if ($env:APPDATA) { $npmConfigPaths += (Join-Path $env:APPDATA "npm\etc\npmrc") }
     if ($env:ProgramData) { $npmConfigPaths += (Join-Path $env:ProgramData "npm\npmrc") }
+    if ($env:ProgramFiles) {
+        $npmConfigPaths += (Join-Path $env:ProgramFiles "nodejs\etc\npmrc")
+        $npmConfigPaths += (Join-Path $env:ProgramFiles "nodejs\node_modules\npm\npmrc")
+    }
+    $programFilesX86 = [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")
+    if ($programFilesX86) {
+        $npmConfigPaths += (Join-Path $programFilesX86 "nodejs\etc\npmrc")
+        $npmConfigPaths += (Join-Path $programFilesX86 "nodejs\node_modules\npm\npmrc")
+    }
+    $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+    if ($nodeCommand) {
+        $nodePath = if ($nodeCommand.Path) { $nodeCommand.Path } else { $nodeCommand.Source }
+        if ($nodePath) {
+            $nodeDir = Split-Path -Parent $nodePath
+            $npmConfigPaths += (Join-Path $nodeDir "etc\npmrc")
+            $npmConfigPaths += (Join-Path $nodeDir "node_modules\npm\npmrc")
+        }
+    }
 
     foreach ($npmConfigPath in ($npmConfigPaths | Where-Object { $_ } | Select-Object -Unique)) {
         if (-not (Test-Path $npmConfigPath)) { continue }
