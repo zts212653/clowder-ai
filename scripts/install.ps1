@@ -56,6 +56,7 @@ function Test-LockfileMismatchFailure {
     # "Frozen lockfile failed, retrying..." line.
     return ($OutputText -match "ERR_PNPM_OUTDATED_LOCKFILE") -or
            ($OutputText -match "ERR_PNPM_LOCKFILE_BREAKING_CHANGE") -or
+           ($OutputText -match "ERR_PNPM_LOCKFILE_CONFIG_MISMATCH") -or
            ($OutputText -match "Cannot install with .frozen-lockfile") -or
            ($OutputText -match "lockfile is not up to date") -or
            ($OutputText -match "lockfile.*is incompatible") -or
