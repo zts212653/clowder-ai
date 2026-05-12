@@ -32,7 +32,7 @@ function escapeAttr(text: string): string {
 
 function sanitizeUrl(url: string): string {
   const trimmed = url.trim();
-  if (/^(https?:\/\/|\/\/)/i.test(trimmed)) return escapeAttr(trimmed);
+  if (/^https?:\/\//i.test(trimmed)) return escapeAttr(trimmed);
   if (/^#/.test(trimmed)) return escapeAttr(trimmed);
   return '';
 }

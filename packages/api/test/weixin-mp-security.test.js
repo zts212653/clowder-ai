@@ -55,6 +55,22 @@ describe('validateExternalUrl', () => {
   it('rejects invalid URL', () => {
     assert.throws(() => validateExternalUrl('not-a-url'), /Invalid URL/);
   });
+
+  it('rejects IPv6-mapped IPv4 loopback', () => {
+    assert.throws(() => validateExternalUrl('http://[::ffff:127.0.0.1]/secret'), /private/);
+  });
+
+  it('rejects trailing-dot metadata hostname', () => {
+    assert.throws(() => validateExternalUrl('http://metadata.google.internal./'), /blocked/);
+  });
+
+  it('rejects trailing-dot localhost', () => {
+    assert.throws(() => validateExternalUrl('http://localhost./secret'), /blocked/);
+  });
+
+  it('rejects IPv6-mapped private IP', () => {
+    assert.throws(() => validateExternalUrl('http://[::ffff:169.254.169.254]/meta'), /private/);
+  });
 });
 
 describe('markdownToWxHtml sanitization', () => {
@@ -88,5 +104,15 @@ describe('markdownToWxHtml sanitization', () => {
   it('escapes HTML entities in attribute values', () => {
     const html = markdownToWxHtml('!["><script>](https://example.com/img.png)');
     assert.ok(!html.includes('"><script>'), 'attribute injection should be escaped');
+  });
+
+  it('blocks protocol-relative URLs in links', () => {
+    const html = markdownToWxHtml('[click](//evil.test/path)');
+    assert.ok(!html.includes('href="//evil.test'), 'protocol-relative URL should be stripped');
+  });
+
+  it('blocks protocol-relative URLs in images', () => {
+    const html = markdownToWxHtml('![img](//evil.test/img.png)');
+    assert.ok(!html.includes('src="//evil.test'), 'protocol-relative URL should be stripped');
   });
 });

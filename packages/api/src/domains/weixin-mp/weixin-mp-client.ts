@@ -1,5 +1,5 @@
 import type { WeixinMpTokenManager } from './weixin-mp-token.js';
-import { validateExternalUrl } from './url-safety.js';
+import { validateExternalUrl, safeFetchOptions } from './url-safety.js';
 
 const BASE = 'https://api.weixin.qq.com/cgi-bin';
 const TIMEOUT = 30_000;
@@ -85,7 +85,7 @@ export class WeixinMpClient {
   async uploadArticleImage(imageUrl: string): Promise<string> {
     validateExternalUrl(imageUrl);
     const token = await this.tokenMgr.getAccessToken();
-    const imgRes = await fetch(imageUrl, { signal: AbortSignal.timeout(TIMEOUT) });
+    const imgRes = await fetch(imageUrl, { ...safeFetchOptions(), signal: AbortSignal.timeout(TIMEOUT) });
     const contentType = imgRes.headers.get('content-type') ?? '';
     if (!contentType.startsWith('image/')) {
       throw new Error(`Expected image content-type, got: ${contentType}`);
@@ -113,7 +113,7 @@ export class WeixinMpClient {
   async addMaterial(imageUrl: string): Promise<{ mediaId: string; url: string }> {
     validateExternalUrl(imageUrl);
     const token = await this.tokenMgr.getAccessToken();
-    const imgRes = await fetch(imageUrl, { signal: AbortSignal.timeout(TIMEOUT) });
+    const imgRes = await fetch(imageUrl, { ...safeFetchOptions(), signal: AbortSignal.timeout(TIMEOUT) });
     const contentType = imgRes.headers.get('content-type') ?? '';
     if (!contentType.startsWith('image/')) {
       throw new Error(`Expected image content-type, got: ${contentType}`);
