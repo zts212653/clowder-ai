@@ -18,13 +18,36 @@ const S = {
 } as const;
 
 function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function escapeAttr(text: string): string {
+  return escapeHtml(text);
+}
+
+function sanitizeUrl(url: string): string {
+  const trimmed = url.trim();
+  if (/^(https?:\/\/|\/\/)/i.test(trimmed)) return escapeAttr(trimmed);
+  if (/^#/.test(trimmed)) return escapeAttr(trimmed);
+  return '';
 }
 
 function processInline(text: string): string {
-  return text
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, `<img src="$2" alt="$1" style="${S.img}" />`)
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, `<a href="$2" style="${S.a}">$1</a>`)
+  const escaped = escapeHtml(text);
+  return escaped
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt: string, url: string) => {
+      const safeUrl = sanitizeUrl(url);
+      return safeUrl ? `<img src="${safeUrl}" alt="${escapeAttr(alt)}" style="${S.img}" />` : escapeHtml(alt);
+    })
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label: string, url: string) => {
+      const safeUrl = sanitizeUrl(url);
+      return safeUrl ? `<a href="${safeUrl}" style="${S.a}">${label}</a>` : label;
+    })
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/`([^`]+)`/g, `<code style="${S.code}">$1</code>`);

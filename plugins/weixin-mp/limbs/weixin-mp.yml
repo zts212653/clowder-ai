@@ -6,14 +6,17 @@ displayName: 微信公众号
 platform: weixin
 
 capabilities:
-  - cap: content_publish
+  - cap: content_read
     commands:
       - weixin_mp.check_status
-      - weixin_mp.publish_article
-      - weixin_mp.upload_image
       - weixin_mp.list_drafts
       - weixin_mp.publish_status
     authLevel: free
+  - cap: content_publish
+    commands:
+      - weixin_mp.publish_article
+      - weixin_mp.upload_image
+    authLevel: gated
 
 commands:
   weixin_mp.check_status:

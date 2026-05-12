@@ -1,7 +1,9 @@
 import type { WeixinMpTokenManager } from './weixin-mp-token.js';
+import { validateExternalUrl } from './url-safety.js';
 
 const BASE = 'https://api.weixin.qq.com/cgi-bin';
 const TIMEOUT = 30_000;
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 interface WxApiResponse {
   readonly errcode?: number;
@@ -81,9 +83,17 @@ export class WeixinMpClient {
   constructor(private readonly tokenMgr: WeixinMpTokenManager) {}
 
   async uploadArticleImage(imageUrl: string): Promise<string> {
+    validateExternalUrl(imageUrl);
     const token = await this.tokenMgr.getAccessToken();
     const imgRes = await fetch(imageUrl, { signal: AbortSignal.timeout(TIMEOUT) });
+    const contentType = imgRes.headers.get('content-type') ?? '';
+    if (!contentType.startsWith('image/')) {
+      throw new Error(`Expected image content-type, got: ${contentType}`);
+    }
     const buf = Buffer.from(await imgRes.arrayBuffer());
+    if (buf.byteLength > MAX_IMAGE_BYTES) {
+      throw new Error(`Image exceeds ${MAX_IMAGE_BYTES} bytes limit`);
+    }
     const ext = imageUrl.match(/\.(jpe?g|png|gif|bmp)$/i)?.[1]?.toLowerCase() ?? 'png';
     const blob = new Blob([buf], { type: `image/${ext === 'jpg' ? 'jpeg' : ext}` });
 
@@ -101,9 +111,17 @@ export class WeixinMpClient {
   }
 
   async addMaterial(imageUrl: string): Promise<{ mediaId: string; url: string }> {
+    validateExternalUrl(imageUrl);
     const token = await this.tokenMgr.getAccessToken();
     const imgRes = await fetch(imageUrl, { signal: AbortSignal.timeout(TIMEOUT) });
+    const contentType = imgRes.headers.get('content-type') ?? '';
+    if (!contentType.startsWith('image/')) {
+      throw new Error(`Expected image content-type, got: ${contentType}`);
+    }
     const blob = await imgRes.blob();
+    if (blob.size > MAX_IMAGE_BYTES) {
+      throw new Error(`Image exceeds ${MAX_IMAGE_BYTES} bytes limit`);
+    }
 
     const form = new FormData();
     form.append('media', blob, 'cover.png');
