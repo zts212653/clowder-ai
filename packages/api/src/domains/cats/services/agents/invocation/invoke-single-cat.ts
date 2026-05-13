@@ -40,6 +40,7 @@ import {
   activeInvocations,
   catInvocationCount,
   catResponseDuration,
+  geminiContextFallback,
   invocationCompleted,
   invocationDuration,
   llmCallDuration,
@@ -1465,6 +1466,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                 windowTokens: windowSize,
                 fillRatio: Math.min(usedTokens / windowSize, 1.0),
                 source,
+                usedFrom: usedFrom ?? undefined,
                 measuredAt: Date.now(),
               };
               // Update SessionRecord (best-effort): persist health + usage snapshot
@@ -1517,7 +1519,45 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                   const isAnthropicApiKey = provider === 'anthropic' && profileMode === ANTHROPIC_PROFILE_MODE_API_KEY;
                   const skipAutoSealForApproxApiKey = isAnthropicApiKey && health.source === 'approx';
                   const skipAutoSealForApiKeyCompress = isAnthropicApiKey && strategy.strategy === 'compress';
-                  if (!skipAutoSealForApproxApiKey && !skipAutoSealForApiKeyCompress) {
+                  // Gemini CLI's stream stats are session-level cumulative, not per-turn.
+                  // When usedFrom !== 'last_turn' for a google provider, fillRatio is
+                  // computed from cumulative inputTokens/totalTokens which inflate
+                  // beyond windowSize and cap at 1.0 → spurious auto-seal.
+                  // GeminiAgentService injects per-turn lastTurnInputTokens from local
+                  // jsonl when possible; if it could not (assistantText empty / no
+                  // matching local message / jsonl unavailable), skip auto-seal here
+                  // and keep context_health as observability only.
+                  const skipAutoSealForGeminiCumulative = provider === 'google' && usedFrom !== 'last_turn';
+                  // Telemetry: when this guard kicks in, the cat is "blind-running"
+                  // past Gemini CLI's cumulative-only usage signal. Surface via
+                  // structured log + OTel counter so operators can see when
+                  // sessions are unguarded; do NOT emit a system_info event
+                  // because the frontend would render unknown system_info as a
+                  // visible system bubble.
+                  if (
+                    skipAutoSealForGeminiCumulative &&
+                    !skipAutoSealForApproxApiKey &&
+                    !skipAutoSealForApiKeyCompress
+                  ) {
+                    log.warn(
+                      {
+                        catId,
+                        threadId,
+                        invocationId,
+                        cumulativeUsedTokens: usedTokens,
+                        windowSize: windowSize ?? null,
+                        fillRatio: health.fillRatio,
+                        usedFrom,
+                      },
+                      'Gemini auto-seal skipped: no per-turn lastTurnInputTokens; running on cumulative usage only',
+                    );
+                    geminiContextFallback.add(1, { [AGENT_ID]: catId, [TRIGGER]: 'no_per_turn_signal' });
+                  }
+                  if (
+                    !skipAutoSealForApproxApiKey &&
+                    !skipAutoSealForApiKeyCompress &&
+                    !skipAutoSealForGeminiCumulative
+                  ) {
                     const activeRecord = await deps.sessionChainStore.getActive(catId, threadId);
                     const action = shouldTakeAction(
                       health.fillRatio,

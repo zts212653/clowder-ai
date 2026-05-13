@@ -383,6 +383,8 @@ export interface ContextHealthData {
   windowTokens: number;
   fillRatio: number;
   source: 'exact' | 'approx';
+  /** Backend usage field that fed usedTokens. Older records may omit it. */
+  usedFrom?: 'last_turn' | 'input' | 'total';
   measuredAt: number;
 }
 

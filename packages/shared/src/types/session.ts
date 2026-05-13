@@ -49,7 +49,10 @@ export interface SessionUsageSnapshot {
 }
 
 export interface ContextHealth {
-  /** Current used tokens (= inputTokens from last invocation) */
+  /**
+   * Tokens used for context health.
+   * Check usedFrom before interpreting this as true current context fill.
+   */
   usedTokens: number;
   /** Total context window capacity */
   windowTokens: number;
@@ -57,6 +60,13 @@ export interface ContextHealth {
   fillRatio: number;
   /** exact = CLI reported; approx = hardcoded fallback */
   source: 'exact' | 'approx';
+  /**
+   * Which usage field fed usedTokens.
+   * - last_turn: true per-turn context fill when the provider exposes it
+   * - input: inputTokens fallback; may be cumulative for some CLIs
+   * - total: totalTokens fallback; approximate only
+   */
+  usedFrom?: 'last_turn' | 'input' | 'total';
   measuredAt: number;
 }
 

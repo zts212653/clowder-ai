@@ -113,6 +113,23 @@ export const lineStartDetected = lazy(() =>
   }),
 );
 
+/**
+ * Counts how often a Gemini-family invocation falls back to the
+ * `skipAutoSealForGeminiCumulative` guard because no per-turn
+ * `lastTurnInputTokens` could be derived from the local Gemini session jsonl
+ * (e.g. assistantText empty / no matching local message / jsonl unavailable).
+ *
+ * When this counter rises, the cat is "blind-running" past the cumulative
+ * usage signal — auto-seal is suppressed but the underlying context could
+ * actually be approaching the window limit. Pair with a log warn to alert
+ * operators.
+ */
+export const geminiContextFallback = lazy(() =>
+  meter().createCounter('cat_cafe.gemini.context_fill_fallback', {
+    description: 'Gemini auto-seal skipped due to cumulative-only usage (no per-turn signal)',
+  }),
+);
+
 export const antigravityStreamErrorBuffered = lazy(() =>
   meter().createCounter('cat_cafe.antigravity.stream_error.buffered_total', {
     description: 'Buffered Antigravity stream_error after partial text while waiting for a recovery tail',

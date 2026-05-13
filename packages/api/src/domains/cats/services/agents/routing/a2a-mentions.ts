@@ -28,10 +28,39 @@ export const TOKEN_BOUNDARY_RE = /[\s,.:;!?()[\]{}<>，。！？、：；（）�
 /** @internal Exported for a2a-shadow-detection.ts. */
 export const HANDLE_CONTINUATION_RE = /[a-z0-9_.-]/;
 const LEADING_MARKDOWN_MENTION_PREFIX_RE = /^(?:(?:>\s*)|(?:[-*+]\s+)|(?:\d+[.)]\s+))+/;
+const LINE_START_MARKDOWN_PREFIX_PATTERN = String.raw`\s*(?:(?:>\s*)|(?:[-*+]\s+)|(?:\d+[.)]\s+))*`;
+const HANDLE_BOUNDARY_PATTERN = String.raw`(?=$|[\s,.:;!?()\[\]{}<>，。！？、：；（）【】《》「」『』〈〉]|[^a-z0-9_.-])`;
 
 interface MentionPatternEntry {
   readonly catId: CatId;
   readonly pattern: string;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildWhitespaceTolerantMentionPattern(pattern: string): RegExp {
+  const interleaved = Array.from(pattern)
+    .map((ch) => escapeRegExp(ch))
+    .join(String.raw`\s*`);
+  return new RegExp(`(^|\\n)(${LINE_START_MARKDOWN_PREFIX_PATTERN})${interleaved}${HANDLE_BOUNDARY_PATTERN}`, 'giu');
+}
+
+function repairLineStartMentionWhitespace(text: string, entries: readonly MentionPatternEntry[]): string {
+  let repaired = text;
+  for (const entry of entries) {
+    // Gemini CLI can split a logical assistant message across `message/assistant`
+    // events. GeminiAgentService inserts paragraph separators between those
+    // events, which can turn a legitimate final-slot handoff like `@小狸` into
+    // `@小\n\n狸`. Repair only pure whitespace inside known line-start handles;
+    // inline mentions and ordinary prose remain governed by the normal parser.
+    repaired = repaired.replace(
+      buildWhitespaceTolerantMentionPattern(entry.pattern),
+      (_match, lineStart: string, prefix: string) => `${lineStart}${prefix}${entry.pattern}`,
+    );
+  }
+  return repaired;
 }
 
 /** @deprecated Suppression system removed — line-start mentions always route. Kept for backward compat. */
@@ -99,12 +128,13 @@ export function analyzeA2AMentions(
     }
   }
   entries.sort((a, b) => b.pattern.length - a.pattern.length);
+  const normalizedText = repairLineStartMentionWhitespace(stripped, entries);
 
   // 3. Line-start matching with token boundary — always actionable (no keyword gate)
   const found: CatId[] = [];
   const seen = new Set<string>();
   const routing_warnings: CatRoutingError[] = [];
-  const lines = stripped.split(/\r?\n/);
+  const lines = normalizedText.split(/\r?\n/);
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
     const rawLine = lines[lineIndex]!;
     if (found.length >= MAX_A2A_MENTION_TARGETS) break; // 5. Safety limit

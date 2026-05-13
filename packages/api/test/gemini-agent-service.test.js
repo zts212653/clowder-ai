@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -853,6 +853,390 @@ test('skips Gemini local thinking hydration when the latest session content does
     const msgs = await promise;
     const thinkingMsg = msgs.find((m) => m.type === 'system_info' && m.content.includes('"type":"thinking"'));
     assert.equal(thinkingMsg, undefined);
+  } finally {
+    process.env.HOME = previousHome;
+  }
+});
+
+// ===========================================================================
+// lastTurnInputTokens from local Gemini session jsonl
+// ---------------------------------------------------------------------------
+// Bug: Gemini CLI's stream `result.stats` is session-level cumulative, not
+// per-turn. Cat Cafe currently uses the cumulative value as fillRatio numerator,
+// causing Gemini sessions to spuriously cap at 100% after a few turns.
+//
+// Fix direction: read per-turn `tokens.input` from local Gemini session jsonl
+// file, write to `metadata.usage.lastTurnInputTokens` so invoke-single-cat's
+// usedFrom priority picks the per-turn value over the cumulative inputTokens.
+//
+// These tests use the real Gemini CLI file format (.jsonl with header + $set +
+// gemini messages with tokens) which also exposes a latent bug in the
+// existing readGeminiThinkingFromLocalSession (filters .json, parses whole-file
+// JSON — neither works on real Gemini output).
+// ===========================================================================
+
+test('extracts lastTurnInputTokens from local Gemini session jsonl when assistant text matches', async () => {
+  // Includes a decoy .jsonl with same content but different sessionId and newer
+  // mtime, to lock in "must match by sessionId, not by file freshness".
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new GeminiAgentService({ spawnFn, adapter: 'gemini-cli' });
+
+  const fakeHome = mkdtempSync(join(tmpdir(), 'gemini-home-'));
+  const sessionDir = join(fakeHome, '.gemini', 'tmp', 'clowder-ai', 'chats');
+  mkdirSync(sessionDir, { recursive: true });
+  const previousHome = process.env.HOME;
+  process.env.HOME = fakeHome;
+
+  try {
+    // Matching session fixture — sessionId="test-session-uuid-001", "Hi there!" tokens.input=50
+    const matchPath = join(import.meta.dirname, 'fixtures', 'gemini-session-with-tokens.jsonl');
+    const matchContent = readFileSync(matchPath, 'utf8');
+    const matchFile = join(sessionDir, 'session-2026-05-09T01-00-test001.jsonl');
+    writeFileSync(matchFile, matchContent);
+
+    // Decoy session fixture — different sessionId, SAME content "Hi there!", tokens.input=900
+    // If implementation reads "the latest .jsonl file" instead of matching sessionId,
+    // it would pick up 900 here. Correct implementation must return 50.
+    const decoyPath = join(import.meta.dirname, 'fixtures', 'gemini-session-decoy.jsonl');
+    const decoyContent = readFileSync(decoyPath, 'utf8');
+    const decoyFile = join(sessionDir, 'session-2026-05-09T02-00-decoy.jsonl');
+    writeFileSync(decoyFile, decoyContent);
+
+    // Force decoy to have NEWER mtime so a "sort by mtime desc, take first match"
+    // implementation that ignores sessionId would pick decoy first.
+    const now = Date.now() / 1000;
+    utimesSync(matchFile, now - 60, now - 60);
+    utimesSync(decoyFile, now, now);
+
+    const promise = collect(service.invoke('test', { workingDirectory: '/home/user/clowder-ai' }));
+
+    emitGeminiEvents(proc, [
+      { type: 'init', session_id: 'test-session-uuid-001', model: 'gemini-test' },
+      // Assistant content matches msg-002 in matching fixture (tokens.input=50)
+      // AND d-msg-002 in decoy fixture (tokens.input=900)
+      { type: 'message', role: 'assistant', content: 'Hi there!', delta: true },
+      // Cumulative stats from CLI inflated to mimic the bug
+      { type: 'result', status: 'success', stats: { total_tokens: 9999, input_tokens: 8888 } },
+    ]);
+
+    const msgs = await promise;
+    const done = msgs.find((m) => m.type === 'done');
+    assert.ok(done?.metadata?.usage, 'done should have usage metadata');
+    // Cumulative stats from CLI preserved as-is for telemetry
+    assert.equal(done.metadata.usage.inputTokens, 8888);
+    assert.equal(done.metadata.usage.totalTokens, 9999);
+    // Per-turn lastTurnInputTokens MUST come from matching session (50), NOT decoy (900).
+    // Also: returns tokens.input (50), NOT tokens.total (60) — the metadata field is
+    // semantically input tokens only, not total. (Bug A regression: previously total.)
+    assert.equal(
+      done.metadata.usage.lastTurnInputTokens,
+      50,
+      'lastTurnInputTokens MUST match by sessionId AND return tokens.input (=50), NOT tokens.total (=60) and NOT decoy (=900)',
+    );
+  } finally {
+    process.env.HOME = previousHome;
+  }
+});
+
+test('prefers latest matching gemini message when same content appears multiple times in same session', async () => {
+  // Fixture line 6 and line 8 both have content "Here is more info about the topic"
+  // but tokens.input=100 (line 6) vs tokens.input=105 (line 8). Implementation must
+  // pick the latest matching message (105), not the first (100), to handle Gemini
+  // CLI's streamed duplicate-row updates.
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new GeminiAgentService({ spawnFn, adapter: 'gemini-cli' });
+
+  const fakeHome = mkdtempSync(join(tmpdir(), 'gemini-home-'));
+  const sessionDir = join(fakeHome, '.gemini', 'tmp', 'clowder-ai', 'chats');
+  mkdirSync(sessionDir, { recursive: true });
+  const previousHome = process.env.HOME;
+  process.env.HOME = fakeHome;
+
+  try {
+    const fixturePath = join(import.meta.dirname, 'fixtures', 'gemini-session-with-tokens.jsonl');
+    const jsonlContent = readFileSync(fixturePath, 'utf8');
+    writeFileSync(join(sessionDir, 'session-2026-05-09T01-00-test001.jsonl'), jsonlContent);
+
+    const promise = collect(service.invoke('test', { workingDirectory: '/home/user/clowder-ai' }));
+
+    emitGeminiEvents(proc, [
+      { type: 'init', session_id: 'test-session-uuid-001', model: 'gemini-test' },
+      // Content matches both msg-004 occurrences (line 6: input=100, line 8: input=105)
+      { type: 'message', role: 'assistant', content: 'Here is more info about the topic', delta: true },
+      { type: 'result', status: 'success', stats: { total_tokens: 200 } },
+    ]);
+
+    const msgs = await promise;
+    const done = msgs.find((m) => m.type === 'done');
+    assert.ok(done?.metadata?.usage, 'done should have usage metadata');
+    assert.equal(
+      done.metadata.usage.lastTurnInputTokens,
+      105,
+      'lastTurnInputTokens must equal the LATEST matching message tokens.input (105), not the first (100)',
+    );
+  } finally {
+    process.env.HOME = previousHome;
+  }
+});
+
+test('does not fall back to latest message when assistant text matches no jsonl message', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new GeminiAgentService({ spawnFn, adapter: 'gemini-cli' });
+
+  const fakeHome = mkdtempSync(join(tmpdir(), 'gemini-home-'));
+  const sessionDir = join(fakeHome, '.gemini', 'tmp', 'clowder-ai', 'chats');
+  mkdirSync(sessionDir, { recursive: true });
+  const previousHome = process.env.HOME;
+  process.env.HOME = fakeHome;
+
+  try {
+    const fixturePath = join(import.meta.dirname, 'fixtures', 'gemini-session-with-tokens.jsonl');
+    const jsonlContent = readFileSync(fixturePath, 'utf8');
+    writeFileSync(join(sessionDir, 'session-2026-05-09T01-00-test001.jsonl'), jsonlContent);
+
+    const promise = collect(service.invoke('test', { workingDirectory: '/home/user/clowder-ai' }));
+
+    emitGeminiEvents(proc, [
+      { type: 'init', session_id: 'test-session-uuid-001', model: 'gemini-test' },
+      // Content matches NO gemini message in fixture (don't degrade to latest!)
+      { type: 'message', role: 'assistant', content: 'completely unrelated reply text', delta: true },
+      { type: 'result', status: 'success', stats: { total_tokens: 9999, input_tokens: 8888 } },
+    ]);
+
+    const msgs = await promise;
+    const done = msgs.find((m) => m.type === 'done');
+    assert.ok(done?.metadata?.usage, 'done should have usage metadata');
+    assert.equal(done.metadata.usage.inputTokens, 8888); // cumulative preserved
+    assert.equal(
+      done.metadata.usage.lastTurnInputTokens,
+      undefined,
+      'lastTurnInputTokens MUST be undefined when no message matches; do NOT fall back to latest',
+    );
+  } finally {
+    process.env.HOME = previousHome;
+  }
+});
+
+test('injects lastTurnInputTokens for tool-only turn (no message/assistant event, fullAssistantText empty)', async () => {
+  // Repro of runtime bug observed 2026-05-11 endurance run: when Gemini CLI
+  // performs a turn that produces ONLY thinking + tool_use (no
+  // message/assistant event), GeminiAgentService leaves `fullAssistantText`
+  // empty. Previously the empty-assistantText guard in
+  // readLatestGeminiContextTokens returned undefined unconditionally — so
+  // tool-only turns silently degraded to cumulative inputTokens (UI's ↓
+  // widget == ContextHealthBar number).
+  // Fix: empty assistantText falls back to tail-most jsonl candidate, which
+  // IS this turn's latest message (sessionId-bound, CLI flushed before done).
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new GeminiAgentService({ spawnFn, adapter: 'gemini-cli' });
+
+  const fakeHome = mkdtempSync(join(tmpdir(), 'gemini-home-'));
+  const sessionDir = join(fakeHome, '.gemini', 'tmp', 'clowder-ai', 'chats');
+  mkdirSync(sessionDir, { recursive: true });
+  const previousHome = process.env.HOME;
+  process.env.HOME = fakeHome;
+
+  try {
+    const fixturePath = join(import.meta.dirname, 'fixtures', 'gemini-session-with-tokens.jsonl');
+    const jsonlContent = readFileSync(fixturePath, 'utf8');
+    writeFileSync(join(sessionDir, 'session-2026-05-09T01-00-test001.jsonl'), jsonlContent);
+
+    const promise = collect(service.invoke('test', { workingDirectory: '/home/user/clowder-ai' }));
+
+    // No message/assistant event at all — tool-only turn shape. fixture
+    // tail-most gemini-with-tokens is msg-004 (line 8) with tokens.input=105.
+    emitGeminiEvents(proc, [
+      { type: 'init', session_id: 'test-session-uuid-001', model: 'gemini-test' },
+      { type: 'tool_use', tool_name: 'read_file', tool_id: 't1', parameters: { path: '/tmp/x' } },
+      { type: 'tool_result', tool_id: 't1', status: 'success', output: 'file content' },
+      { type: 'result', status: 'success', stats: { total_tokens: 9999, input_tokens: 8888 } },
+    ]);
+
+    const msgs = await promise;
+    const done = msgs.find((m) => m.type === 'done');
+    assert.ok(done?.metadata?.usage, 'done should have usage metadata');
+    assert.equal(done.metadata.usage.inputTokens, 8888);
+    assert.equal(
+      done.metadata.usage.lastTurnInputTokens,
+      105,
+      'tool-only turn (empty assistantText) must still inject lastTurnInputTokens from tail-most jsonl candidate tokens.input',
+    );
+  } finally {
+    process.env.HOME = previousHome;
+  }
+});
+
+test('matches jsonl content even when Gemini CLI emits multiple text events (\\n\\n chunk boundary)', async () => {
+  // Repro of runtime bug observed 2026-05-11: Gemini CLI sometimes emits the
+  // same logical turn as multiple `type:"message", role:"assistant"` events,
+  // which GeminiAgentService concatenates with `\n\n` separators into
+  // `fullAssistantText`. Local jsonl, however, stores the CLI's final
+  // re-assembled content as a single string with NO `\n\n`. With the prior
+  // normalize (`\s+` → ' '), these would diverge for any inter-event boundary
+  // that fell mid-CJK / mid-digit / mid-path: "调\n\n用" → "调 用" != "调用".
+  // Fix: normalize strips all whitespace, not just folds it.
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new GeminiAgentService({ spawnFn, adapter: 'gemini-cli' });
+
+  const fakeHome = mkdtempSync(join(tmpdir(), 'gemini-home-'));
+  const sessionDir = join(fakeHome, '.gemini', 'tmp', 'clowder-ai', 'chats');
+  mkdirSync(sessionDir, { recursive: true });
+  const previousHome = process.env.HOME;
+  process.env.HOME = fakeHome;
+
+  try {
+    const fixturePath = join(import.meta.dirname, 'fixtures', 'gemini-session-chunk-boundary.jsonl');
+    const jsonlContent = readFileSync(fixturePath, 'utf8');
+    writeFileSync(join(sessionDir, 'session-2026-05-09T01-00-chunk001.jsonl'), jsonlContent);
+
+    const promise = collect(service.invoke('test', { workingDirectory: '/home/user/clowder-ai' }));
+
+    // Two assistant events; together they assemble into "调用工具完成了" in the
+    // jsonl, but GeminiAgentService stitches them as "调\n\n用工具完成了".
+    emitGeminiEvents(proc, [
+      { type: 'init', session_id: 'test-session-chunk-001', model: 'gemini-test' },
+      { type: 'message', role: 'assistant', content: '调', delta: true },
+      { type: 'message', role: 'assistant', content: '用工具完成了', delta: true },
+      { type: 'result', status: 'success', stats: { total_tokens: 9999, input_tokens: 8888 } },
+    ]);
+
+    const msgs = await promise;
+    const done = msgs.find((m) => m.type === 'done');
+    assert.ok(done?.metadata?.usage, 'done should have usage metadata');
+    assert.equal(done.metadata.usage.inputTokens, 8888);
+    assert.equal(
+      done.metadata.usage.lastTurnInputTokens,
+      50,
+      'lastTurnInputTokens must match the jsonl message even when fullAssistantText has \\n\\n boundaries inserted between events (tokens.input=50, not tokens.total=77)',
+    );
+  } finally {
+    process.env.HOME = previousHome;
+  }
+});
+
+test('matches jsonl final row when fullAssistantText is thinking-prefix + final (suffix match)', async () => {
+  // Repro of runtime bug observed 2026-05-11 (LD visual verification rounds 4 & 6):
+  // when the model thinks first then produces a final reply, Gemini CLI emits
+  // MULTIPLE `message/assistant` events (one per thinking step + one final).
+  // GeminiAgentService stitches them with `\n\n` into fullAssistantText, e.g.:
+  //   "**Counting lines in source files**...\n\n**Calculating Line Counts**...\n\n实际 final text"
+  // The jsonl, however, stores each step in its own row — the FINAL row's
+  // content equals only "实际 final text" (the tail). Strict equality would
+  // miss this; the suffix-match branch of matchesCurrentAssistantText must
+  // recover the match without falling back to cumulative tokens.
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new GeminiAgentService({ spawnFn, adapter: 'gemini-cli' });
+
+  const fakeHome = mkdtempSync(join(tmpdir(), 'gemini-home-'));
+  const sessionDir = join(fakeHome, '.gemini', 'tmp', 'clowder-ai', 'chats');
+  mkdirSync(sessionDir, { recursive: true });
+  const previousHome = process.env.HOME;
+  process.env.HOME = fakeHome;
+
+  try {
+    // Build a custom jsonl with thinking-prefix shape: 2 thinking rows + 1 final row.
+    // Only the final row carries tokens.input=42 (this is THIS turn's value).
+    const sessionId = 'test-session-thinking-001';
+    const jsonl = [
+      JSON.stringify({ sessionId, startedAt: '2026-05-11T16:00:00.000Z' }),
+      JSON.stringify({
+        id: 'th-001',
+        timestamp: '2026-05-11T16:00:01.000Z',
+        type: 'gemini',
+        content: '**Counting lines in source files**',
+        thoughts: [{ subject: 'thinking step 1' }],
+        tokens: { input: 10, output: 5, total: 15 },
+        model: 'gemini-test',
+      }),
+      JSON.stringify({
+        id: 'th-002',
+        timestamp: '2026-05-11T16:00:02.000Z',
+        type: 'gemini',
+        content: '**Calculating Line Counts**',
+        thoughts: [{ subject: 'thinking step 2' }],
+        tokens: { input: 20, output: 5, total: 25 },
+        model: 'gemini-test',
+      }),
+      JSON.stringify({
+        id: 'final-001',
+        timestamp: '2026-05-11T16:00:03.000Z',
+        type: 'gemini',
+        content: '实际 final text',
+        tokens: { input: 42, output: 10, total: 52 },
+        model: 'gemini-test',
+      }),
+      '',
+    ].join('\n');
+    writeFileSync(join(sessionDir, `session-2026-05-11T16-00-thinking001.jsonl`), jsonl);
+
+    const promise = collect(service.invoke('test', { workingDirectory: '/home/user/clowder-ai' }));
+
+    emitGeminiEvents(proc, [
+      { type: 'init', session_id: sessionId, model: 'gemini-test' },
+      // Three assistant events; cat cafe stitches them as
+      //   "**Counting lines in source files**\n\n**Calculating Line Counts**\n\n实际 final text"
+      // Only the LAST piece equals the jsonl final-row content.
+      { type: 'message', role: 'assistant', content: '**Counting lines in source files**', delta: true },
+      { type: 'message', role: 'assistant', content: '**Calculating Line Counts**', delta: true },
+      { type: 'message', role: 'assistant', content: '实际 final text', delta: true },
+      { type: 'result', status: 'success', stats: { total_tokens: 9999, input_tokens: 8888 } },
+    ]);
+
+    const msgs = await promise;
+    const done = msgs.find((m) => m.type === 'done');
+    assert.ok(done?.metadata?.usage, 'done should have usage metadata');
+    assert.equal(done.metadata.usage.inputTokens, 8888); // cumulative preserved
+    assert.equal(
+      done.metadata.usage.lastTurnInputTokens,
+      42,
+      'thinking-prefix shape (stitched assistantText, separate jsonl rows) MUST still resolve via suffix-match — final row tokens.input (=42), NOT cumulative (=8888), NOT thinking-row tokens (=10 / =20)',
+    );
+  } finally {
+    process.env.HOME = previousHome;
+  }
+});
+
+test('reads .jsonl files (Gemini CLI real format) and extracts thinking from matching message', async () => {
+  // Latent bug regression: existing readGeminiThinkingFromLocalSession previously
+  // filtered for .json only, but real Gemini CLI writes .jsonl. This test ensures
+  // thinking extraction now works end-to-end on the real format.
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new GeminiAgentService({ spawnFn, adapter: 'gemini-cli' });
+
+  const fakeHome = mkdtempSync(join(tmpdir(), 'gemini-home-'));
+  const sessionDir = join(fakeHome, '.gemini', 'tmp', 'clowder-ai', 'chats');
+  mkdirSync(sessionDir, { recursive: true });
+  const previousHome = process.env.HOME;
+  process.env.HOME = fakeHome;
+
+  try {
+    const fixturePath = join(import.meta.dirname, 'fixtures', 'gemini-session-with-tokens.jsonl');
+    const jsonlContent = readFileSync(fixturePath, 'utf8');
+    writeFileSync(join(sessionDir, 'session-2026-05-09T01-00-test001.jsonl'), jsonlContent);
+
+    const promise = collect(service.invoke('test', { workingDirectory: '/home/user/clowder-ai' }));
+
+    emitGeminiEvents(proc, [
+      { type: 'init', session_id: 'test-session-uuid-001', model: 'gemini-test' },
+      // Match msg-004 in fixture (which has thoughts)
+      { type: 'message', role: 'assistant', content: 'Here is more info about the topic', delta: true },
+      { type: 'result', status: 'success', stats: { total_tokens: 100 } },
+    ]);
+
+    const msgs = await promise;
+    const thinkingMsg = msgs.find((m) => m.type === 'system_info' && m.content?.includes?.('"type":"thinking"'));
+    assert.ok(thinkingMsg, 'should extract thinking from matching gemini message in .jsonl');
+    const parsed = JSON.parse(thinkingMsg.content);
+    assert.equal(parsed.type, 'thinking');
+    assert.match(parsed.text, /\*\*Analyzing\*\*/);
+    assert.match(parsed.text, /Considering the user request/);
   } finally {
     process.env.HOME = previousHome;
   }

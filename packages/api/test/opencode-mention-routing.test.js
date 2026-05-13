@@ -157,6 +157,18 @@ describe('parseA2AMentions — opencode A2A chain', () => {
     assert.deepEqual(result, ['opencode']);
   });
 
+  it('repairs whitespace split inside line-start CJK handles', () => {
+    const text = '交给金渐层\n@金\n\n渐\n\n层 帮忙看看这段代码';
+    const result = parseA2AMentions(text, 'opus');
+    assert.deepEqual(result, ['opencode']);
+  });
+
+  it('repairs whitespace split inside line-start ASCII handles', () => {
+    const text = '安全复核如下\n@co\n\ndex 请继续';
+    const result = parseA2AMentions(text, 'opus');
+    assert.deepEqual(result, ['codex']);
+  });
+
   it('detects multi-target: @opencode and @codex', () => {
     const text = '请两位协助\n@opencode 看架构\n@codex 看安全';
     const result = parseA2AMentions(text, 'opus');

@@ -31,6 +31,13 @@ function formatTokenCount(n: number): string {
   return String(n);
 }
 
+function describeContextHealthSource(health: ContextHealthData): string {
+  if (health.usedFrom === 'last_turn') return 'Current context fill';
+  if (health.usedFrom === 'input') return 'Input-token fallback for context health; may be cumulative';
+  if (health.usedFrom === 'total') return 'Total-token fallback estimate for context health';
+  return health.source === 'approx' ? 'Estimated context fill' : 'Current context fill';
+}
+
 /**
  * F24: Context health progress bar.
  * Thin bar showing context window fill ratio with color coding:
@@ -63,9 +70,9 @@ export function ContextHealthBar({
     barColor = CAT_BG_COLORS[catId] ?? CAT_BG_COLORS.opus;
   }
 
-  const approxPrefix = health.source === 'approx' ? '~' : '';
+  const approxPrefix = health.source === 'approx' || health.usedFrom === 'total' ? '~' : '';
   const percent = Math.round(health.fillRatio * 100);
-  const tooltip = `Context: ${approxPrefix}${percent}% (${formatTokenCount(health.usedTokens)} / ${formatTokenCount(health.windowTokens)} tokens)`;
+  const tooltip = `${describeContextHealthSource(health)}: ${approxPrefix}${percent}% (${formatTokenCount(health.usedTokens)} / ${formatTokenCount(health.windowTokens)} tokens)`;
 
   return (
     <div className="mt-1" title={tooltip} data-testid={`context-health-${catId}`}>
