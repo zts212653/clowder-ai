@@ -18,6 +18,26 @@ function stubStore(binding) {
   };
 }
 
+function stubMessageStore(messages = []) {
+  return {
+    getByThreadBefore: async (threadId, timestamp, limit) => {
+      return messages
+        .filter((m) => m.threadId === threadId && !m.deletedAt && m.timestamp < timestamp)
+        .slice(-(limit ?? 50));
+    },
+  };
+}
+
+function stubMessageStoreWithUserFilter(messages = []) {
+  return {
+    getByThreadBefore: async (threadId, timestamp, limit, userId) => {
+      let filtered = messages.filter((m) => m.threadId === threadId && !m.deletedAt && m.timestamp < timestamp);
+      if (userId) filtered = filtered.filter((m) => m.userId === userId || m.catId != null);
+      return filtered.slice(-(limit ?? 50));
+    },
+  };
+}
+
 function stubThreadStore(data) {
   const map = new Map();
   if (data && !Array.isArray(data)) map.set(data.id, data);
@@ -769,6 +789,7 @@ describe('ConnectorCommandLayer', () => {
         '/commands',
         '/cats',
         '/status',
+        '/history',
       ];
       for (const cmd of connectorCommands) {
         const result = await layer.handle('test', 'chat1', 'user1', cmd);
@@ -1629,5 +1650,425 @@ describe('F154 Phase B: /status preferred cat visibility (AC-B3)', () => {
     const result = await layer.handle('feishu', 'chat1', 'user1', '/status');
     assert.equal(result.kind, 'status');
     assert.ok(!result.response.includes('首选猫'), '/status should omit preferred cat line when undefined');
+  });
+});
+
+// ─── #687: /history tests ──────────────────────────────────────────────────
+describe('#687: /history command', () => {
+  let ConnectorCommandLayer;
+
+  before(async () => {
+    const mod = await import('../dist/infrastructure/connectors/ConnectorCommandLayer.js');
+    ConnectorCommandLayer = mod.ConnectorCommandLayer;
+  });
+
+  it('returns latest 1 round by default', async () => {
+    const messages = [
+      { id: '001', threadId: 't1', catId: null, content: '连接池设几个？', timestamp: 1000 },
+      { id: '002', threadId: 't1', catId: 'opus', content: '建议 3 个', timestamp: 2000 },
+    ];
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore({ connectorId: 'feishu', externalChatId: 'chat1', threadId: 't1', userId: 'u1' }),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      messageStore: stubMessageStore(messages),
+    });
+    const result = await layer.handle('feishu', 'chat1', 'u1', '/history');
+    assert.equal(result.kind, 'history');
+    assert.ok(result.response.includes('连接池设几个'));
+    assert.ok(result.response.includes('建议 3 个'));
+  });
+
+  it('/history 2 returns 2 rounds', async () => {
+    const messages = [
+      { id: '001', threadId: 't1', catId: null, content: 'Round 1 question', timestamp: 1000 },
+      { id: '002', threadId: 't1', catId: 'opus', content: 'Round 1 answer', timestamp: 2000 },
+      { id: '003', threadId: 't1', catId: null, content: 'Round 2 question', timestamp: 3000 },
+      { id: '004', threadId: 't1', catId: 'opus', content: 'Round 2 answer', timestamp: 4000 },
+    ];
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore({ connectorId: 'feishu', externalChatId: 'chat1', threadId: 't1', userId: 'u1' }),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      messageStore: stubMessageStore(messages),
+    });
+    const result = await layer.handle('feishu', 'chat1', 'u1', '/history 2');
+    assert.equal(result.kind, 'history');
+    assert.ok(result.response.includes('Round 1 question'));
+    assert.ok(result.response.includes('Round 2 answer'));
+  });
+
+  it('groups multi-cat replies into same round', async () => {
+    const messages = [
+      { id: '001', threadId: 't1', catId: null, content: '请 review', timestamp: 1000 },
+      { id: '002', threadId: 't1', catId: 'opus', content: '架构 LGTM', timestamp: 2000 },
+      { id: '003', threadId: 't1', catId: 'codex', content: '测试覆盖不够', timestamp: 3000 },
+    ];
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore({ connectorId: 'feishu', externalChatId: 'chat1', threadId: 't1', userId: 'u1' }),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      messageStore: stubMessageStore(messages),
+    });
+    const result = await layer.handle('feishu', 'chat1', 'u1', '/history');
+    assert.equal(result.kind, 'history');
+    assert.ok(result.response.includes('架构 LGTM'));
+    assert.ok(result.response.includes('测试覆盖不够'));
+  });
+
+  it('returns friendly message for empty thread', async () => {
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore({ connectorId: 'feishu', externalChatId: 'chat1', threadId: 't1', userId: 'u1' }),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      messageStore: stubMessageStore([]),
+    });
+    const result = await layer.handle('feishu', 'chat1', 'u1', '/history');
+    assert.equal(result.kind, 'history');
+    assert.ok(result.response.includes('没有消息'));
+  });
+
+  it('rejects N > 5', async () => {
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore({ connectorId: 'feishu', externalChatId: 'chat1', threadId: 't1', userId: 'u1' }),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      messageStore: stubMessageStore([]),
+    });
+    const result = await layer.handle('feishu', 'chat1', 'u1', '/history 9');
+    assert.equal(result.kind, 'history');
+    assert.ok(result.response.includes('1-5'));
+  });
+
+  it('rejects dirty input "2foo"', async () => {
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore({ connectorId: 'feishu', externalChatId: 'chat1', threadId: 't1', userId: 'u1' }),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      messageStore: stubMessageStore([]),
+    });
+    const result = await layer.handle('feishu', 'chat1', 'u1', '/history 2foo');
+    assert.equal(result.kind, 'history');
+    assert.ok(result.response.includes('1-5'));
+  });
+
+  it('returns error when no binding exists', async () => {
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(null),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      messageStore: stubMessageStore([]),
+    });
+    const result = await layer.handle('feishu', 'chat1', 'u1', '/history');
+    assert.equal(result.kind, 'history');
+    assert.ok(result.response.includes('没有绑定'));
+  });
+
+  it('truncates long messages and shows truncation footer (feishu 10000 budget)', async () => {
+    const longContent = 'A'.repeat(12000);
+    const messages = [
+      { id: '001', threadId: 't1', catId: null, content: '问题', timestamp: 1000 },
+      { id: '002', threadId: 't1', catId: 'opus', content: longContent, timestamp: 2000 },
+    ];
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore({ connectorId: 'feishu', externalChatId: 'chat1', threadId: 't1', userId: 'u1' }),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      messageStore: stubMessageStore(messages),
+    });
+    const result = await layer.handle('feishu', 'chat1', 'u1', '/history');
+    assert.ok(result.response.includes('…'), 'should show truncation marker');
+    assert.ok(result.response.includes('⚠️'), 'should show truncation footer');
+    assert.ok(result.response.length <= 10000, `feishu output must be <= 10000 chars, got ${result.response.length}`);
+  });
+
+  it('unknown connector defaults to 2000 budget', async () => {
+    const longContent = 'A'.repeat(3000);
+    const messages = [
+      { id: '001', threadId: 't1', catId: null, content: '问题', timestamp: 1000 },
+      { id: '002', threadId: 't1', catId: 'opus', content: longContent, timestamp: 2000 },
+    ];
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore({ connectorId: 'unknown-im', externalChatId: 'chat1', threadId: 't1', userId: 'u1' }),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      messageStore: stubMessageStore(messages),
+    });
+    const result = await layer.handle('unknown-im', 'chat1', 'u1', '/history');
+    assert.ok(result.response.length <= 2000, `unknown connector must be <= 2000 chars, got ${result.response.length}`);
+  });
+
+  it('dynamic budget: /history 1 shows more content per message than /history 5', async () => {
+    const content600 = 'X'.repeat(600);
+    const messages = [];
+    for (let r = 0; r < 5; r++) {
+      messages.push({ id: `u${r}`, threadId: 't1', catId: null, content: `Q${r}`, timestamp: r * 10000 });
+      messages.push({ id: `a${r}`, threadId: 't1', catId: 'opus', content: content600, timestamp: r * 10000 + 1 });
+    }
+    const makeDeps = () => ({
+      bindingStore: stubStore({ connectorId: 'weixin', externalChatId: 'chat1', threadId: 't1', userId: 'u1' }),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      messageStore: stubMessageStore(messages),
+    });
+    const layer = new ConnectorCommandLayer(makeDeps());
+    const r1 = await layer.handle('weixin', 'chat1', 'u1', '/history 1');
+    const r5 = await layer.handle('weixin', 'chat1', 'u1', '/history 5');
+    const content1 = r1.response.match(/X+/)?.[0]?.length ?? 0;
+    const content5Matches = r5.response.match(/X+/g) ?? [];
+    const maxContent5 = Math.max(...content5Matches.map((m) => m.length));
+    assert.ok(
+      content1 > maxContent5,
+      `/history 1 should show more content (${content1}) than /history 5 (${maxContent5})`,
+    );
+  });
+
+  it('fetches enough messages when a single round has >50 entries', async () => {
+    const messages = [];
+    messages.push({ id: 'u0', threadId: 't1', catId: null, userId: 'u1', content: '用户提问', timestamp: 1000 });
+    for (let i = 1; i <= 60; i++) {
+      messages.push({
+        id: `cat${i}`,
+        threadId: 't1',
+        catId: 'opus',
+        content: `reply ${i}`,
+        timestamp: 1000 + i,
+      });
+    }
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore({ connectorId: 'feishu', externalChatId: 'chat1', threadId: 't1', userId: 'u1' }),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      messageStore: stubMessageStore(messages),
+    });
+    const result = await layer.handle('feishu', 'chat1', 'u1', '/history');
+    assert.ok(result.response.includes('用户提问'), 'user message at start of 61-message round must be included');
+    assert.ok(result.response.includes('reply 60'), 'last cat reply must be included');
+  });
+
+  it('sets contextThreadId in result', async () => {
+    const messages = [{ id: '001', threadId: 't1', catId: null, content: 'hello', timestamp: 1000 }];
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore({ connectorId: 'feishu', externalChatId: 'chat1', threadId: 't1', userId: 'u1' }),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      messageStore: stubMessageStore(messages),
+    });
+    const result = await layer.handle('feishu', 'chat1', 'u1', '/history');
+    assert.equal(result.contextThreadId, 't1');
+  });
+
+  it('system messages (catId:null, userId:system) do not create round boundaries', async () => {
+    const messages = [
+      { id: '001', threadId: 't1', catId: null, userId: 'u1', content: '用户提问', timestamp: 1000 },
+      { id: '002', threadId: 't1', catId: 'opus', userId: 'opus', content: '猫回答', timestamp: 2000 },
+      { id: '003', threadId: 't1', catId: null, userId: 'system', content: '系统通知：配置已更新', timestamp: 3000 },
+      { id: '004', threadId: 't1', catId: null, userId: 'u1', content: '第二个问题', timestamp: 4000 },
+      { id: '005', threadId: 't1', catId: 'opus', userId: 'opus', content: '第二个回答', timestamp: 5000 },
+    ];
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore({ connectorId: 'feishu', externalChatId: 'chat1', threadId: 't1', userId: 'u1' }),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      messageStore: stubMessageStore(messages),
+    });
+    const result = await layer.handle('feishu', 'chat1', 'u1', '/history 2');
+    assert.equal(result.kind, 'history');
+    assert.ok(result.response.includes('用户提问'), 'should include first user question');
+    assert.ok(result.response.includes('第二个问题'), 'should include second user question');
+    assert.ok(
+      !result.response.includes('👤 你') || !result.response.match(/👤 你.*系统通知/),
+      'system message should not be labeled as user',
+    );
+  });
+
+  it('scheduler messages (catId:null, userId:scheduler) are labeled as system, not user', async () => {
+    const messages = [
+      { id: '001', threadId: 't1', catId: null, userId: 'u1', content: '用户提问', timestamp: 1000 },
+      { id: '002', threadId: 't1', catId: null, userId: 'scheduler', content: '定时任务完成', timestamp: 2000 },
+      { id: '003', threadId: 't1', catId: 'opus', userId: 'opus', content: '猫回答', timestamp: 3000 },
+    ];
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore({ connectorId: 'feishu', externalChatId: 'chat1', threadId: 't1', userId: 'u1' }),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      messageStore: stubMessageStore(messages),
+    });
+    const result = await layer.handle('feishu', 'chat1', 'u1', '/history');
+    assert.equal(result.kind, 'history');
+    assert.ok(result.response.includes('🔔'), 'scheduler message should have system indicator');
+    assert.ok(
+      !result.response.includes('👤 你') || result.response.indexOf('👤 你') < result.response.indexOf('🔔'),
+      'scheduler should not be labeled as user',
+    );
+  });
+
+  it('shows messages from all surfaces (mixed userId visibility)', async () => {
+    const messages = [
+      { id: '001', threadId: 't1', catId: null, userId: 'feishu_user1', content: '飞书发的问题', timestamp: 1000 },
+      { id: '002', threadId: 't1', catId: 'opus', userId: 'opus', content: '猫回答', timestamp: 2000 },
+      { id: '003', threadId: 't1', catId: null, userId: 'web_session_abc', content: 'Web 端追问', timestamp: 3000 },
+      { id: '004', threadId: 't1', catId: 'opus', userId: 'opus', content: '第二次回答', timestamp: 4000 },
+    ];
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore({
+        connectorId: 'feishu',
+        externalChatId: 'chat1',
+        threadId: 't1',
+        userId: 'feishu_user1',
+      }),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      messageStore: stubMessageStore(messages),
+    });
+    const result = await layer.handle('feishu', 'chat1', 'feishu_user1', '/history 2');
+    assert.ok(result.response.includes('飞书发的问题'), 'must show feishu-originated message');
+    assert.ok(result.response.includes('Web 端追问'), 'must show web-originated message');
+    assert.ok(result.response.includes('第二次回答'), 'must show cat reply after web message');
+  });
+
+  it('userId-filtered store would miss web messages, but handleHistory does not pass userId', async () => {
+    const messages = [
+      { id: '001', threadId: 't1', catId: null, userId: 'feishu_u1', content: '飞书消息', timestamp: 1000 },
+      { id: '002', threadId: 't1', catId: 'opus', userId: 'opus', content: '回答1', timestamp: 2000 },
+      { id: '003', threadId: 't1', catId: null, userId: 'web_u2', content: 'Web消息', timestamp: 3000 },
+      { id: '004', threadId: 't1', catId: 'opus', userId: 'opus', content: '回答2', timestamp: 4000 },
+    ];
+    const filteredStore = stubMessageStoreWithUserFilter(messages);
+    const filtered = await filteredStore.getByThreadBefore('t1', Infinity, 50, 'feishu_u1');
+    assert.ok(!filtered.some((m) => m.content === 'Web消息'), 'userId-filtered store should miss web messages');
+
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore({ connectorId: 'feishu', externalChatId: 'chat1', threadId: 't1', userId: 'feishu_u1' }),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      messageStore: stubMessageStore(messages),
+    });
+    const result = await layer.handle('feishu', 'chat1', 'feishu_u1', '/history 2');
+    assert.ok(result.response.includes('Web消息'), 'handleHistory must show ALL messages regardless of userId');
+  });
+
+  it('uses cat display names from catRoster', async () => {
+    const messages = [
+      { id: '001', threadId: 't1', catId: null, content: '问题', timestamp: 1000 },
+      { id: '002', threadId: 't1', catId: 'opus', content: '回答', timestamp: 2000 },
+      { id: '003', threadId: 't1', catId: 'codex', content: '审查', timestamp: 3000 },
+    ];
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore({ connectorId: 'feishu', externalChatId: 'chat1', threadId: 't1', userId: 'u1' }),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      messageStore: stubMessageStore(messages),
+      catRoster: { opus: { displayName: '布偶猫' }, codex: { displayName: '缅因猫' } },
+    });
+    const result = await layer.handle('feishu', 'chat1', 'u1', '/history');
+    assert.ok(result.response.includes('布偶猫'), 'should show display name for opus');
+    assert.ok(result.response.includes('缅因猫'), 'should show display name for codex');
+    assert.ok(!result.response.includes('🐱 opus'), 'should not show raw catId when display name available');
+  });
+
+  it('falls back to raw catId when catRoster not provided', async () => {
+    const messages = [
+      { id: '001', threadId: 't1', catId: null, content: '问题', timestamp: 1000 },
+      { id: '002', threadId: 't1', catId: 'opus', content: '回答', timestamp: 2000 },
+    ];
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore({ connectorId: 'feishu', externalChatId: 'chat1', threadId: 't1', userId: 'u1' }),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      messageStore: stubMessageStore(messages),
+    });
+    const result = await layer.handle('feishu', 'chat1', 'u1', '/history');
+    assert.ok(result.response.includes('🐱 opus'), 'should fall back to raw catId');
+  });
+
+  it('response never exceeds platform budget (weixin 2000)', async () => {
+    const messages = [];
+    for (let r = 0; r < 5; r++) {
+      messages.push({
+        id: `u${r}`,
+        threadId: 't1',
+        catId: null,
+        userId: 'u1',
+        content: 'Q'.repeat(400),
+        timestamp: r * 10000,
+      });
+      messages.push({
+        id: `a${r}`,
+        threadId: 't1',
+        catId: 'opus',
+        userId: 'opus',
+        content: 'A'.repeat(400),
+        timestamp: r * 10000 + 1,
+      });
+      messages.push({
+        id: `b${r}`,
+        threadId: 't1',
+        catId: 'codex',
+        userId: 'codex',
+        content: 'B'.repeat(400),
+        timestamp: r * 10000 + 2,
+      });
+    }
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore({ connectorId: 'weixin', externalChatId: 'chat1', threadId: 't1', userId: 'u1' }),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      messageStore: stubMessageStore(messages),
+      catRoster: { opus: { displayName: '布偶猫' }, codex: { displayName: '缅因猫' } },
+    });
+    const result = await layer.handle('weixin', 'chat1', 'u1', '/history 5');
+    assert.ok(result.response.length <= 2000, `weixin must be <= 2000 chars, got ${result.response.length}`);
+  });
+
+  it('feishu gets higher budget (10000) than weixin (2000)', async () => {
+    const messages = [];
+    for (let r = 0; r < 3; r++) {
+      messages.push({
+        id: `u${r}`,
+        threadId: 't1',
+        catId: null,
+        content: `Q${r}`,
+        timestamp: r * 10000,
+      });
+      messages.push({
+        id: `a${r}`,
+        threadId: 't1',
+        catId: 'opus',
+        content: 'X'.repeat(800),
+        timestamp: r * 10000 + 1,
+      });
+    }
+    const makeDeps = (cId) => ({
+      bindingStore: stubStore({ connectorId: cId, externalChatId: 'chat1', threadId: 't1', userId: 'u1' }),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      messageStore: stubMessageStore(messages),
+    });
+    const feishuLayer = new ConnectorCommandLayer(makeDeps('feishu'));
+    const weixinLayer = new ConnectorCommandLayer(makeDeps('weixin'));
+    const rf = await feishuLayer.handle('feishu', 'chat1', 'u1', '/history 3');
+    const rw = await weixinLayer.handle('weixin', 'chat1', 'u1', '/history 3');
+    const feishuX = (rf.response.match(/X+/g) ?? []).reduce((s, m) => s + m.length, 0);
+    const weixinX = (rw.response.match(/X+/g) ?? []).reduce((s, m) => s + m.length, 0);
+    assert.ok(feishuX > weixinX, `feishu should show more content (${feishuX}) than weixin (${weixinX})`);
+    assert.ok(rf.response.length <= 10000, `feishu must be <= 10000, got ${rf.response.length}`);
+    assert.ok(rw.response.length <= 2000, `weixin must be <= 2000, got ${rw.response.length}`);
+  });
+
+  it('no truncation footer when content fits within budget', async () => {
+    const messages = [
+      { id: '001', threadId: 't1', catId: null, content: '短问题', timestamp: 1000 },
+      { id: '002', threadId: 't1', catId: 'opus', content: '短回答', timestamp: 2000 },
+    ];
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore({ connectorId: 'feishu', externalChatId: 'chat1', threadId: 't1', userId: 'u1' }),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      messageStore: stubMessageStore(messages),
+    });
+    const result = await layer.handle('feishu', 'chat1', 'u1', '/history');
+    assert.ok(!result.response.includes('⚠️'), 'should not show truncation footer for short messages');
+    assert.ok(!result.response.includes('…'), 'should not show truncation marker');
   });
 });

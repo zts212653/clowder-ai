@@ -29,6 +29,7 @@ export interface CommandResult {
     | 'commands'
     | 'cats'
     | 'status'
+    | 'history'
     | 'focus'
     | 'ask'
     | 'not-command';
@@ -87,6 +88,16 @@ export interface ConnectorCommandLayerDeps {
   readonly catRoster?: Record<string, { displayName: string; available?: boolean }>;
   /** F142-B: unified command registry for /commands listing + skill detection + audit */
   readonly commandRegistry?: CommandRegistry;
+  /** #687: message store for /history round-based retrieval (AC-8: cursor-based) */
+  readonly messageStore?: {
+    getByThreadBefore(
+      threadId: string,
+      timestamp: number,
+      limit?: number,
+    ):
+      | Array<{ catId: string | null; userId?: string; content: string; timestamp: number; source?: string }>
+      | Promise<Array<{ catId: string | null; userId?: string; content: string; timestamp: number; source?: string }>>;
+  };
 }
 
 export class ConnectorCommandLayer {
@@ -142,6 +153,8 @@ export class ConnectorCommandLayer {
         return this.handleCats(connectorId, externalChatId);
       case '/status':
         return this.handleStatus(connectorId, externalChatId);
+      case '/history':
+        return this.handleHistory(connectorId, externalChatId, userId, cmdArgs);
       case '/unbind':
         return this.handleUnbind(connectorId, externalChatId);
       case '/allow-group':
@@ -362,6 +375,145 @@ export class ConnectorCommandLayer {
       response: removed
         ? `🚫 群 ${targetChatId.slice(-8)} 已从白名单移除`
         : `⚠️ 群 ${targetChatId.slice(-8)} 不在白名单中`,
+    };
+  }
+
+  // ── #687: /history — round-based thread history ────────────────────────
+
+  private async handleHistory(
+    connectorId: string,
+    externalChatId: string,
+    _userId: string,
+    args: string,
+  ): Promise<CommandResult> {
+    const binding = await this.deps.bindingStore.getByExternal(connectorId, externalChatId);
+    if (!binding) {
+      return { kind: 'history', response: '📍 当前没有绑定的 thread。用 /new 创建或发送消息自动创建。' };
+    }
+
+    const rawArg = args.trim();
+    if (rawArg && !/^[1-5]$/.test(rawArg)) {
+      return { kind: 'history', response: '❌ 用法: /history [1-5]（默认 1 轮）', contextThreadId: binding.threadId };
+    }
+    const roundCount = rawArg ? parseInt(rawArg, 10) : 1;
+
+    if (!this.deps.messageStore) {
+      return { kind: 'history', response: '❌ 消息存储不可用', contextThreadId: binding.threadId };
+    }
+
+    type Msg = Awaited<ReturnType<NonNullable<typeof this.deps.messageStore>['getByThreadBefore']>>[number];
+    const SYSTEM_UIDS = new Set(['system', 'scheduler']);
+    const isUserMsg = (m: Msg): boolean => m.catId === null && !SYSTEM_UIDS.has(m.userId ?? '');
+    const splitRounds = (msgs: Msg[]): Msg[][] => {
+      const result: Msg[][] = [];
+      let cur: Msg[] = [];
+      for (const m of msgs) {
+        if (isUserMsg(m) && cur.length > 0) {
+          result.push(cur);
+          cur = [];
+        }
+        cur.push(m);
+      }
+      if (cur.length > 0) result.push(cur);
+      return result;
+    };
+
+    // AC-8: cursor-based windowed fetch; floor 200 covers A2A-heavy rounds
+    const fetchLimit = Math.max(200, roundCount * 100);
+    const messages = await this.deps.messageStore.getByThreadBefore(binding.threadId, Date.now(), fetchLimit);
+    if (messages.length === 0) {
+      return { kind: 'history', response: '📜 本线程还没有消息。', contextThreadId: binding.threadId };
+    }
+    const rounds = splitRounds(messages);
+    const selected = rounds.slice(-roundCount);
+
+    const PLATFORM_BUDGET: Record<string, number> = {
+      feishu: 10000,
+      dingtalk: 6000,
+      telegram: 4000,
+      'wecom-bot': 2000,
+      'wecom-agent': 2000,
+      weixin: 2000,
+    };
+    const TOTAL_BUDGET = PLATFORM_BUDGET[connectorId] ?? 2000;
+    const roster = this.deps.catRoster;
+    const resolveSender = (msg: Msg): string => {
+      if (msg.catId) {
+        const display = roster?.[msg.catId]?.displayName;
+        return `🐱 ${display ?? msg.catId}`;
+      }
+      if (SYSTEM_UIDS.has(msg.userId ?? '')) return '🔔 系统';
+      return '👤 你';
+    };
+
+    const header = roundCount === 1 ? '📜 最近 1 轮对话：' : `📜 最近 ${selected.length} 轮对话：`;
+    const deepLink = buildThreadDeepLink(this.deps.frontendBaseUrl, binding.threadId);
+    const footerText = `\n\n⚠️ 内容已精简，完整对话请打开 thread\n🔗 ${deepLink}`;
+
+    // P1-1: pre-compute per-message metadata for overhead-aware budget
+    const allMsgs = selected.flat();
+    const meta = allMsgs.map((msg) => {
+      const time = new Date(msg.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+      return { msg, prefix: `**${resolveSender(msg)}** [${time}]: ` };
+    });
+
+    // Deduct header, line prefixes, separators, join newlines, truncation markers, footer reserve
+    const separatorCount = selected.length - 1;
+    const totalLineCount = meta.length + separatorCount;
+    const overhead =
+      header.length +
+      2 +
+      meta.reduce((s, m) => s + m.prefix.length, 0) +
+      separatorCount * 3 +
+      (totalLineCount > 1 ? totalLineCount - 1 : 0) +
+      meta.length +
+      footerText.length;
+    const contentBudget = Math.max(0, TOTAL_BUDGET - overhead);
+    // Progressive distribution: short messages keep full content, savings go to longer ones
+    const sortedLens = meta.map(({ msg }) => msg.content.length).sort((a, b) => a - b);
+    let budgetLeft = contentBudget;
+    let countLeft = sortedLens.length;
+    let perMsgBudget = Infinity;
+    for (const len of sortedLens) {
+      const share = Math.floor(budgetLeft / countLeft);
+      if (len <= share) {
+        budgetLeft -= len;
+        countLeft--;
+      } else {
+        perMsgBudget = Math.max(20, share);
+        break;
+      }
+    }
+
+    let anyTruncated = false;
+    const lines: string[] = [];
+    let metaIdx = 0;
+    for (const round of selected) {
+      for (let i = 0; i < round.length; i++) {
+        const { msg, prefix } = meta[metaIdx++]!;
+        let content = msg.content;
+        if (content.length > perMsgBudget) {
+          content = content.slice(0, perMsgBudget) + '…';
+          anyTruncated = true;
+        }
+        lines.push(`${prefix}${content}`);
+      }
+      lines.push('---');
+    }
+    if (lines[lines.length - 1] === '---') lines.pop();
+
+    const footer = anyTruncated ? footerText : '';
+    let response = `${header}\n\n${lines.join('\n')}${footer}`;
+
+    // Hard cap safety net
+    if (response.length > TOTAL_BUDGET) {
+      response = response.slice(0, TOTAL_BUDGET - footerText.length) + footerText;
+    }
+
+    return {
+      kind: 'history',
+      response,
+      contextThreadId: binding.threadId,
     };
   }
 

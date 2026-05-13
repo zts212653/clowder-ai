@@ -2464,6 +2464,26 @@ async function main(): Promise<void> {
         const resolved = msg instanceof Promise ? await msg : msg;
         return resolved ? { source: resolved.source } : null;
       },
+      async getByThread(threadId: string, limit?: number) {
+        const msgs = await messageStore.getByThread(threadId, limit);
+        return msgs.map((m) => ({
+          catId: m.catId,
+          userId: m.userId,
+          content: m.content,
+          timestamp: m.timestamp,
+          source: m.source as string | undefined,
+        }));
+      },
+      async getByThreadBefore(threadId: string, timestamp: number, limit?: number) {
+        const msgs = await messageStore.getByThreadBefore(threadId, timestamp, limit);
+        return msgs.map((m) => ({
+          catId: m.catId,
+          userId: m.userId,
+          content: m.content,
+          timestamp: m.timestamp,
+          source: m.source as string | undefined,
+        }));
+      },
     },
     threadStore,
     invokeTrigger,
