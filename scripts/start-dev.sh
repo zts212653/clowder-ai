@@ -453,7 +453,22 @@ probe_port_with_ss() {
 
 probe_port_with_nc() {
     local port=$1
-    nc -z 127.0.0.1 "$port" >/dev/null 2>&1 || nc -z localhost "$port" >/dev/null 2>&1
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 1 nc -z 127.0.0.1 "$port" >/dev/null 2>&1 || timeout 1 nc -z localhost "$port" >/dev/null 2>&1
+    else
+        nc -z 127.0.0.1 "$port" >/dev/null 2>&1 || nc -z localhost "$port" >/dev/null 2>&1
+    fi
+}
+
+# Safe redis-cli ping: use timeout when available, plain redis-cli otherwise.
+# macOS / minimal images may not have `timeout` (coreutils); without the guard,
+# `timeout` returns 127 and healthy Redis is incorrectly seen as down.
+redis_ping() {
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 2 redis-cli -p "$REDIS_PORT" ping &> /dev/null
+    else
+        redis-cli -p "$REDIS_PORT" ping &> /dev/null
+    fi
 }
 
 probe_port_with_dev_tcp() {
@@ -988,7 +1003,7 @@ archive_redis_snapshot() {
     local dir=""
     local dbfile=""
 
-    if redis-cli -p "$REDIS_PORT" ping &> /dev/null; then
+    if redis_ping; then
         redis-cli -p "$REDIS_PORT" bgsave &> /dev/null || true
         sleep 0.2
         dir=$(redis-cli -p "$REDIS_PORT" config get dir 2>/dev/null | sed -n '2p' || true)
@@ -1114,7 +1129,7 @@ setup_storage() {
     archive_redis_snapshot "pre-start"
 
     # 默认: 尝试 Redis 持久化 (专属端口，避免与系统 Redis 冲突)
-    if redis-cli -p "$REDIS_PORT" ping &> /dev/null; then
+    if redis_ping; then
         echo -e "${GREEN}  ✓ Redis 已运行 (端口 $REDIS_PORT)${NC}"
         export REDIS_URL="redis://localhost:$REDIS_PORT"
         print_redis_runtime_info
@@ -1138,7 +1153,7 @@ setup_storage() {
             --logfile "$REDIS_LOGFILE" \
             >/dev/null 2>&1 || true
         sleep 1
-        if redis-cli -p "$REDIS_PORT" ping &> /dev/null; then
+        if redis_ping; then
             echo -e "${GREEN}  ✓ Redis 已启动 (端口 $REDIS_PORT)${NC}"
             export REDIS_URL="redis://localhost:$REDIS_PORT"
             STARTED_REDIS=true
@@ -1172,7 +1187,7 @@ cleanup() {
     terminate_managed_pids
 
     # 关闭我们启动的专属 Redis (不影响其他 Redis 实例)
-    if [ "$USE_REDIS" = true ] && [ "$STARTED_REDIS" = true ] && redis-cli -p "$REDIS_PORT" ping &> /dev/null 2>&1; then
+    if [ "$USE_REDIS" = true ] && [ "$STARTED_REDIS" = true ] && redis_ping; then
         archive_redis_snapshot "pre-stop"
         redis-cli -p "$REDIS_PORT" shutdown save &> /dev/null || true
         echo "  Redis (端口 $REDIS_PORT) 已关闭"
@@ -1186,7 +1201,9 @@ cleanup() {
     echo "再见！🐾"
 }
 
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'trap - EXIT; cleanup; exit 130' INT
+trap 'trap - EXIT; cleanup; exit 143' TERM
 
 guard_main_branch_start() {
     if [ "${CAT_CAFE_ALLOW_MAIN_DEV:-0}" = "1" ]; then

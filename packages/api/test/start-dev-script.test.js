@@ -34,6 +34,14 @@ function createBashOnlyPath(root) {
   return binDir;
 }
 
+function createProbePath(root, tools) {
+  const binDir = createBashOnlyPath(root);
+  for (const [name, body] of Object.entries(tools)) {
+    writeFileSync(join(binDir, name), body, { mode: 0o755 });
+  }
+  return binDir;
+}
+
 function listenOnLoopback() {
   const server = createServer();
   return new Promise((resolvePromise, reject) => {
@@ -85,6 +93,156 @@ printf 'ok'
   } finally {
     await new Promise((resolvePromise) => server.close(resolvePromise));
     rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('probe_port_with_nc wraps nc with timeout when timeout is available', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-nc-timeout-'));
+  const timeoutLog = join(tempRoot, 'timeout.log');
+  const ncLog = join(tempRoot, 'nc.log');
+
+  try {
+    const binDir = createProbePath(tempRoot, {
+      timeout: `#!/bin/bash
+printf '%s\\n' "$*" >> "${timeoutLog}"
+shift
+exec "$@"
+`,
+      nc: `#!/bin/bash
+printf '%s\\n' "$*" >> "${ncLog}"
+exit 0
+`,
+    });
+
+    const output = runSourceOnlySnippet(
+      scriptPath,
+      `
+PATH="${binDir}"
+probe_port_with_nc 6543
+printf 'ok'
+`,
+    );
+
+    assert.equal(output, 'ok');
+    assert.equal(readFileSync(timeoutLog, 'utf8').trim(), '1 nc -z 127.0.0.1 6543');
+    assert.equal(readFileSync(ncLog, 'utf8').trim(), '-z 127.0.0.1 6543');
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('probe_port_with_nc falls back to bare nc when timeout is unavailable', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-nc-no-timeout-'));
+  const ncLog = join(tempRoot, 'nc.log');
+
+  try {
+    const binDir = createProbePath(tempRoot, {
+      nc: `#!/bin/bash
+printf '%s\\n' "$*" >> "${ncLog}"
+exit 0
+`,
+    });
+
+    const output = runSourceOnlySnippet(
+      scriptPath,
+      `
+PATH="${binDir}"
+probe_port_with_nc 6544
+printf 'ok'
+`,
+    );
+
+    assert.equal(output, 'ok');
+    assert.equal(readFileSync(ncLog, 'utf8').trim(), '-z 127.0.0.1 6544');
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('redis_ping wraps redis-cli ping with timeout when timeout is available', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-redis-timeout-'));
+  const timeoutLog = join(tempRoot, 'timeout.log');
+  const redisLog = join(tempRoot, 'redis.log');
+
+  try {
+    const binDir = createProbePath(tempRoot, {
+      timeout: `#!/bin/bash
+printf '%s\\n' "$*" >> "${timeoutLog}"
+shift
+exec "$@"
+`,
+      'redis-cli': `#!/bin/bash
+printf '%s\\n' "$*" >> "${redisLog}"
+exit 0
+`,
+    });
+
+    const output = runSourceOnlySnippet(
+      scriptPath,
+      `
+PATH="${binDir}"
+REDIS_PORT=6545
+redis_ping
+printf 'ok'
+`,
+    );
+
+    assert.equal(output, 'ok');
+    assert.equal(readFileSync(timeoutLog, 'utf8').trim(), '2 redis-cli -p 6545 ping');
+    assert.equal(readFileSync(redisLog, 'utf8').trim(), '-p 6545 ping');
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('redis_ping falls back to bare redis-cli when timeout is unavailable', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-redis-no-timeout-'));
+  const redisLog = join(tempRoot, 'redis.log');
+
+  try {
+    const binDir = createProbePath(tempRoot, {
+      'redis-cli': `#!/bin/bash
+printf '%s\\n' "$*" >> "${redisLog}"
+exit 0
+`,
+    });
+
+    const output = runSourceOnlySnippet(
+      scriptPath,
+      `
+PATH="${binDir}"
+REDIS_PORT=6546
+redis_ping
+printf 'ok'
+`,
+    );
+
+    assert.equal(output, 'ok');
+    assert.equal(readFileSync(redisLog, 'utf8').trim(), '-p 6546 ping');
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('signal traps clean up and exit with standard signal codes', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  for (const [signal, expectedStatus] of [
+    ['INT', 130],
+    ['TERM', 143],
+  ]) {
+    const result = spawnSync(
+      'bash',
+      ['-lc', `source "${scriptPath}" --source-only >/dev/null 2>&1\nkill -${signal} $$\nexit 99`],
+      { encoding: 'utf8', env: baseShellEnv() },
+    );
+
+    assert.equal(result.status, expectedStatus, `${signal} stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.match(result.stdout, /正在关闭服务/);
+    assert.match(result.stdout, /再见！/);
   }
 });
 

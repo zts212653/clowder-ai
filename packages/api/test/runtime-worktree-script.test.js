@@ -37,6 +37,14 @@ function createBashOnlyPath(projectDir) {
   return binDir;
 }
 
+function createProbePath(projectDir, tools) {
+  const binDir = createBashOnlyPath(projectDir);
+  for (const [name, body] of Object.entries(tools)) {
+    writeFileSync(join(binDir, name), body, { mode: 0o755 });
+  }
+  return binDir;
+}
+
 function listenOnLoopback() {
   const server = createServer();
   return new Promise((resolvePromise, reject) => {
@@ -180,6 +188,75 @@ printf 'ok'`,
 
     assert.equal(result.status, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
     assert.equal(result.stdout.trim(), 'ok');
+  });
+
+  it('nc probe wraps nc with timeout when timeout is available', () => {
+    const projectDir = createTempProject('runtime-nc-timeout');
+    const timeoutLog = join(projectDir, 'timeout.log');
+    const ncLog = join(projectDir, 'nc.log');
+    const binDir = createProbePath(projectDir, {
+      timeout: `#!/bin/bash
+printf '%s\\n' "$*" >> "${timeoutLog}"
+shift
+exec "$@"
+`,
+      nc: `#!/bin/bash
+printf '%s\\n' "$*" >> "${ncLog}"
+exit 0
+`,
+    });
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e
+source "${join(projectDir, 'scripts', 'runtime-worktree.sh')}" --source-only
+PATH="${binDir}"
+probe_port_with_nc 6547
+printf 'ok'`,
+      ],
+      {
+        cwd: projectDir,
+        encoding: 'utf8',
+      },
+    );
+
+    assert.equal(result.status, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.equal(result.stdout.trim(), 'ok');
+    assert.equal(readFileSync(timeoutLog, 'utf8').trim(), '1 nc -z 127.0.0.1 6547');
+    assert.equal(readFileSync(ncLog, 'utf8').trim(), '-z 127.0.0.1 6547');
+  });
+
+  it('nc probe falls back to bare nc when timeout is unavailable', () => {
+    const projectDir = createTempProject('runtime-nc-no-timeout');
+    const ncLog = join(projectDir, 'nc.log');
+    const binDir = createProbePath(projectDir, {
+      nc: `#!/bin/bash
+printf '%s\\n' "$*" >> "${ncLog}"
+exit 0
+`,
+    });
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e
+source "${join(projectDir, 'scripts', 'runtime-worktree.sh')}" --source-only
+PATH="${binDir}"
+probe_port_with_nc 6548
+printf 'ok'`,
+      ],
+      {
+        cwd: projectDir,
+        encoding: 'utf8',
+      },
+    );
+
+    assert.equal(result.status, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.equal(result.stdout.trim(), 'ok');
+    assert.equal(readFileSync(ncLog, 'utf8').trim(), '-z 127.0.0.1 6548');
   });
 
   it('starts in-place when project is not a git repository', () => {

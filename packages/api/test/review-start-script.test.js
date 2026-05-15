@@ -44,6 +44,10 @@ port="$2"
   return { root, binDir };
 }
 
+function writeTool(binDir, name, body) {
+  writeFileSync(join(binDir, name), body, { mode: 0o755 });
+}
+
 function listen(port) {
   return new Promise((resolvePromise, reject) => {
     const server = createServer();
@@ -89,6 +93,85 @@ printf 'ok'`,
 
     assert.equal(result.status, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
     assert.equal(result.stdout.trim(), 'ok');
+  });
+
+  it('nc probe wraps nc with timeout when timeout is available', () => {
+    const { root, binDir } = createSandbox();
+    const timeoutLog = join(root, 'timeout.log');
+    const ncLog = join(root, 'nc.log');
+    const scriptPath = join(root, 'scripts', 'review-start.sh');
+    writeTool(
+      binDir,
+      'timeout',
+      `#!/bin/bash
+printf '%s\\n' "$*" >> "${timeoutLog}"
+shift
+exec "$@"
+`,
+    );
+    writeTool(
+      binDir,
+      'nc',
+      `#!/bin/bash
+printf '%s\\n' "$*" >> "${ncLog}"
+exit 0
+`,
+    );
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e
+source "${scriptPath}" --source-only
+PATH="${binDir}"
+probe_port_with_nc 6549
+printf 'ok'`,
+      ],
+      {
+        cwd: root,
+        encoding: 'utf8',
+      },
+    );
+
+    assert.equal(result.status, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.equal(result.stdout.trim(), 'ok');
+    assert.equal(readFileSync(timeoutLog, 'utf8').trim(), '1 nc -z 127.0.0.1 6549');
+    assert.equal(readFileSync(ncLog, 'utf8').trim(), '-z 127.0.0.1 6549');
+  });
+
+  it('nc probe falls back to bare nc when timeout is unavailable', () => {
+    const { root, binDir } = createSandbox();
+    const ncLog = join(root, 'nc.log');
+    const scriptPath = join(root, 'scripts', 'review-start.sh');
+    writeTool(
+      binDir,
+      'nc',
+      `#!/bin/bash
+printf '%s\\n' "$*" >> "${ncLog}"
+exit 0
+`,
+    );
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e
+source "${scriptPath}" --source-only
+PATH="${binDir}"
+probe_port_with_nc 6550
+printf 'ok'`,
+      ],
+      {
+        cwd: root,
+        encoding: 'utf8',
+      },
+    );
+
+    assert.equal(result.status, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.equal(result.stdout.trim(), 'ok');
+    assert.equal(readFileSync(ncLog, 'utf8').trim(), '-z 127.0.0.1 6550');
   });
 
   it('falls back when lsof is unavailable and skips occupied review ports', async () => {
