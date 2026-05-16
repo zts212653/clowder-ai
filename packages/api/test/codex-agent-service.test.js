@@ -183,6 +183,15 @@ test('injects cat-cafe MCP config when workingDirectory contains mcp-server', as
     assert.ok(args.includes('mcp_servers.cat-cafe-collab.env.CAT_CAFE_API_URL="http://127.0.0.1:3004"'));
     assert.ok(args.includes('mcp_servers.cat-cafe-collab.env.CAT_CAFE_INVOCATION_ID="inv-test-1"'));
     assert.ok(args.includes('mcp_servers.cat-cafe-collab.env.CAT_CAFE_CALLBACK_TOKEN="tok-test-1"'));
+
+    // Codex ≥0.130: each Cat Cafe MCP server must have auto-approve to avoid
+    // "user cancelled MCP tool call" in non-interactive codex exec mode.
+    for (const serverName of ['cat-cafe', 'cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals']) {
+      assert.ok(
+        args.includes(`mcp_servers.${serverName}.default_tools_approval_mode="approve"`),
+        `${serverName} must have default_tools_approval_mode="approve"`,
+      );
+    }
   } finally {
     rmSync(tmpRoot, { recursive: true, force: true });
   }
