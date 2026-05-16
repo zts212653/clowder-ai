@@ -637,6 +637,7 @@ describe('IndexBuilder with embedding', () => {
     embedCallCount = 0;
     mockEmbedding = {
       isReady: () => true,
+      reprobeIfNeeded: async () => {},
       embed: async (texts) => {
         embedCallCount++;
         return texts.map(() => new Float32Array([0.5, 0.5, 0.5, 0.5]));

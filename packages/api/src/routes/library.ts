@@ -2,21 +2,26 @@ import { mkdirSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
 import { BindingDryRun } from '../domains/memory/BindingDryRun.js';
+import type { CollectionEmbedDeps } from '../domains/memory/CollectionIndexBuilder.js';
 import { CollectionIndexBuilder } from '../domains/memory/CollectionIndexBuilder.js';
 import { CollectionReadModel } from '../domains/memory/CollectionReadModel.js';
 import type { CollectionKind, CollectionManifest, CollectionSensitivity } from '../domains/memory/collection-types.js';
 import { validateManifestInput } from '../domains/memory/collection-types.js';
 import { resolveCollectionStorePath, saveExternalCollection } from '../domains/memory/external-collections.js';
 import { GraphResolver } from '../domains/memory/GraphResolver.js';
-import type { IEvidenceStore } from '../domains/memory/interfaces.js';
+import type { IEmbeddingService, IEvidenceStore } from '../domains/memory/interfaces.js';
 import type { LibraryCatalog } from '../domains/memory/LibraryCatalog.js';
 import { SqliteEvidenceStore } from '../domains/memory/SqliteEvidenceStore.js';
 import { resolveCollectionScanner } from '../domains/memory/scanner-resolver.js';
+import { ensureVectorTable } from '../domains/memory/schema.js';
+import { VectorStore } from '../domains/memory/VectorStore.js';
 
 export interface LibraryRoutesOptions {
   catalog: LibraryCatalog;
   stores: Map<string, IEvidenceStore>;
   dataDir?: string;
+  embeddingService?: IEmbeddingService;
+  embedMode?: 'shadow' | 'on';
 }
 
 type StoreWithDb = IEvidenceStore & { getDb?: () => import('better-sqlite3').Database };
@@ -164,8 +169,28 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
       return { error: 'Store not found' };
     }
     const scanner = resolveCollectionScanner(manifest);
-    const builder = new CollectionIndexBuilder(store as SqliteEvidenceStore, manifest, scanner);
-    const result = await builder.rebuild();
+    const body = request.body as { force?: boolean } | undefined;
+
+    let embedDeps: CollectionEmbedDeps | undefined;
+    const db = (store as StoreWithDb).getDb?.();
+    if (opts.embeddingService && db) {
+      try {
+        const sqliteVecMod = await import('sqlite-vec');
+        sqliteVecMod.load(db);
+        const dim = opts.embeddingService.getModelInfo().dim;
+        if (ensureVectorTable(db, dim)) {
+          const vectorStore = new VectorStore(db, dim);
+          embedDeps = { embedding: opts.embeddingService, vectorStore };
+          const mode = opts.embedMode ?? 'shadow';
+          (store as SqliteEvidenceStore).setEmbedDeps({ embedding: opts.embeddingService, vectorStore, mode });
+        }
+      } catch {
+        // fail-open: sqlite-vec not available → FTS-only
+      }
+    }
+
+    const builder = new CollectionIndexBuilder(store as SqliteEvidenceStore, manifest, scanner, embedDeps);
+    const result = await builder.rebuild({ force: body?.force ?? false });
     return result;
   });
 

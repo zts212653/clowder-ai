@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto';
 import type { CollectionManifest } from './collection-types.js';
-import type { EvidenceItem, RepoScanner, ScannedEvidence } from './interfaces.js';
+import { embedIndexedItems } from './embed-utils.js';
+import type { EvidenceItem, IEmbeddingService, RepoScanner, ScannedEvidence } from './interfaces.js';
 import type { SecretFinding } from './SecretScanner.js';
 import { SecretScanner } from './SecretScanner.js';
 import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
+import type { VectorStore } from './VectorStore.js';
 
 export interface CollectionRebuildResult {
   indexed: number;
@@ -12,11 +14,17 @@ export interface CollectionRebuildResult {
   secretFindings: SecretFinding[];
 }
 
+export interface CollectionEmbedDeps {
+  embedding: IEmbeddingService;
+  vectorStore: VectorStore;
+}
+
 export class CollectionIndexBuilder {
   constructor(
     private readonly store: SqliteEvidenceStore,
     private readonly manifest: CollectionManifest,
     private readonly scanner: RepoScanner,
+    private readonly embedDeps?: CollectionEmbedDeps,
   ) {}
 
   async rebuild(options?: { force?: boolean }): Promise<CollectionRebuildResult> {
@@ -32,7 +40,16 @@ export class CollectionIndexBuilder {
       return { indexed: 0, skipped: 0, blocked: true, secretFindings: findings };
     }
 
-    const { indexed, skipped } = await this.indexResults(results, force);
+    const { indexed, skipped, indexedItems } = await this.indexResults(results, force);
+
+    if (this.embedDeps && indexedItems.length > 0) {
+      try {
+        await embedIndexedItems(indexedItems, this.embedDeps.embedding, this.embedDeps.vectorStore);
+      } catch {
+        // fail-open: embedding errors don't block indexing
+      }
+    }
+
     return { indexed, skipped, blocked: false, secretFindings: [] };
   }
 
@@ -41,6 +58,7 @@ export class CollectionIndexBuilder {
     let indexed = 0;
     let skipped = 0;
     const currentAnchors = new Set<string>();
+    const indexedItems: EvidenceItem[] = [];
 
     for (const result of results) {
       const hash = createHash('sha256').update(result.rawContent).digest('hex');
@@ -62,11 +80,12 @@ export class CollectionIndexBuilder {
         authority: this.manifest.reviewPolicy.authorityCeiling,
       };
       await this.store.upsert([item]);
+      indexedItems.push(item);
       indexed++;
     }
 
     await this.cleanStale(currentAnchors);
-    return { indexed, skipped };
+    return { indexed, skipped, indexedItems };
   }
 
   private async purgeCollection(): Promise<void> {

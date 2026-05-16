@@ -1844,10 +1844,13 @@ async function main(): Promise<void> {
     if (!libraryStores.has('project:cat-cafe')) libraryStores.set('project:cat-cafe', memoryServices.store);
     if (memoryServices.globalStore && !libraryStores.has('global:methods'))
       libraryStores.set('global:methods', memoryServices.globalStore);
+    const embedMode = process.env.EMBED_MODE as 'shadow' | 'on' | undefined;
     await app.register(libraryRoutes, {
       catalog: memoryServices.catalog,
       stores: libraryStores,
       dataDir: memoryServices.dataDir,
+      embeddingService: memoryServices.embeddingService,
+      embedMode: embedMode && embedMode !== ('off' as string) ? embedMode : undefined,
     });
   }
 

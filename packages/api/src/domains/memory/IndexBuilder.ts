@@ -19,6 +19,7 @@ import type {
 // Re-export for backward compatibility — external code imports KIND_DIRS from IndexBuilder
 export { KIND_DIRS } from './CatCafeScanner.js';
 
+import { embedIndexedItems } from './embed-utils.js';
 import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
 import { SIGNAL_FLAGS } from './summary-config.js';
 import type { VectorStore } from './VectorStore.js';
@@ -399,8 +400,29 @@ export class IndexBuilder implements IIndexBuilder {
       }
     }
 
-    // Phase C: generate embeddings for indexed items
-    await this.embedIndexedItems(indexedItems);
+    // Phase C: generate embeddings for indexed items (shared utility with batch splitting)
+    if (this.embedDeps) {
+      const { embedding, vectorStore } = this.embedDeps;
+      const consistency = vectorStore.checkMetaConsistency(embedding.getModelInfo());
+      let toEmbed = indexedItems;
+      if (!consistency.consistent) {
+        vectorStore.clearAll();
+        const db = this.store.getDb();
+        const allDocs = db.prepare('SELECT anchor, title, summary FROM evidence_docs').all() as Array<{
+          anchor: string;
+          title: string;
+          summary: string | null;
+        }>;
+        toEmbed = allDocs.map(
+          (d) => ({ anchor: d.anchor, title: d.title, summary: d.summary ?? undefined }) as EvidenceItem,
+        );
+      }
+      try {
+        await embedIndexedItems(toEmbed, embedding, vectorStore);
+      } catch {
+        // fail-open: embedding errors don't block indexing
+      }
+    }
 
     // Persist current indexing version so next startup can detect changes
     await this.storeIndexingVersion();
@@ -503,44 +525,6 @@ export class IndexBuilder implements IIndexBuilder {
   }
 
   // ── Private ──────────────────────────────────────────────────────
-
-  /**
-   * Batch-embed indexed items when embedding service is ready.
-   * AC-C6: check meta consistency — if model changed, clearAll + re-embed all docs.
-   */
-  private async embedIndexedItems(items: EvidenceItem[]): Promise<void> {
-    if (!this.embedDeps?.embedding.isReady() || items.length === 0) return;
-
-    const { embedding, vectorStore } = this.embedDeps;
-
-    // Version anchor check: model/dim change → full re-embed
-    const consistency = vectorStore.checkMetaConsistency(embedding.getModelInfo());
-    let itemsToEmbed = items;
-    if (!consistency.consistent) {
-      vectorStore.clearAll();
-      // Re-embed ALL docs in store, not just newly indexed ones
-      const db = this.store.getDb();
-      const allDocs = db.prepare('SELECT anchor, title, summary FROM evidence_docs').all() as Array<{
-        anchor: string;
-        title: string;
-        summary: string | null;
-      }>;
-      itemsToEmbed = allDocs.map(
-        (d) => ({ anchor: d.anchor, title: d.title, summary: d.summary ?? undefined }) as EvidenceItem,
-      );
-    }
-
-    try {
-      const texts = itemsToEmbed.map((i) => `${i.title} ${i.summary ?? ''}`);
-      const vectors = await embedding.embed(texts);
-      for (let i = 0; i < itemsToEmbed.length; i++) {
-        vectorStore.upsert(itemsToEmbed[i].anchor, vectors[i]);
-      }
-      vectorStore.initMeta(embedding.getModelInfo());
-    } catch {
-      // fail-open: embedding errors don't block indexing
-    }
-  }
 
   /** F152: Bridge — delegate single-file parsing to scanner (for incrementalUpdate) */
   private parseSingleFile(filePath: string): EvidenceItem | null {
