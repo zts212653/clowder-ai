@@ -71,16 +71,13 @@ interface GeminiStoredSession {
 }
 
 function normalizeGeminiContent(value: string | undefined): string {
-  // Strip ALL whitespace (not just fold). Gemini CLI can emit one logical turn
-  // as multiple `message/assistant` events; GeminiAgentService stitches them
-  // with `\n\n` into `fullAssistantText`. The jsonl, by contrast, stores the
-  // CLI's final reassembled content with NO extra separator. If the inter-
-  // event boundary lands mid-CJK / mid-digit / mid-path, folding to a single
-  // space leaves the two strings unequal (e.g. "调 用" vs "调用"). Removing
-  // all whitespace is safe because the only consumer (latest-matching-message
-  // lookup within ONE sessionId-bound jsonl) walks candidates in reverse —
-  // collisions across turns are resolved to the latest, which IS the turn we
-  // just yielded.
+  // Strip ALL whitespace for matching. Gemini CLI stream-json emits each
+  // content chunk as a separate message/assistant event (delta:true). The
+  // accumulated fullAssistantText is a raw concat of these chunks, while
+  // the jsonl stores the CLI's final reassembled content. Stripping all
+  // whitespace ensures matching even when chunk boundaries land mid-CJK /
+  // mid-digit / mid-path. Safe because the only consumer is a latest-
+  // matching-message lookup within ONE sessionId-bound jsonl.
   return (value ?? '').replace(/\s+/g, '');
 }
 
@@ -92,9 +89,9 @@ function normalizeGeminiContent(value: string | undefined): string {
  * The suffix branch handles a real-world Gemini CLI shape (observed
  * 2026-05-11): when the model thinks before producing a final reply, the
  * CLI emits MULTIPLE `message/assistant` events — one per thinking step
- * plus one final text. GeminiAgentService stitches them with `\n\n` into
+ * plus one final text. GeminiAgentService raw-concats them into
  * `fullAssistantText`, so the assembled string looks like
- * `**Thinking step 1**\n\n**Thinking step 2**\n\nfinal text`. The jsonl,
+ * `**Thinking step 1**...**Thinking step 2**...final text`. The jsonl,
  * however, stores ONE row per logical step (each thinking step + the
  * final each in its own row), so the final row's content equals only
  * the "final text" tail. Strict equality would miss it; checking that
@@ -103,7 +100,7 @@ function normalizeGeminiContent(value: string | undefined): string {
  *
  * Why suffix (not arbitrary substring): Gemini CLI's per-step output is
  * the LAST piece appended for that step; for the final row we want it
- * to live at the END of the stitched assistant text. Forward/middle
+ * to live at the END of the accumulated assistant text. Forward/middle
  * substring would also match thinking-rows whose text appears as a
  * prefix or middle slice — those have STALE tokens.input (computed
  * before later steps' prompts were sent), so we must not pick them up.
@@ -309,7 +306,7 @@ function readGeminiThinkingFromLocalSession(
   // when assistantText is provided (uses `matchesCurrentAssistantText`, which
   // accepts strict equality OR suffix-match — see helper docstring for why
   // suffix-match is necessary when the model thinks first and final text is
-  // only the tail of the stitched fullAssistantText). Empty assistantText
+  // only the tail of the accumulated fullAssistantText). Empty assistantText
   // (tool-only paths) takes the tail-most message with thoughts.
   const matchesThoughts = (parsed: unknown): boolean => {
     if (parsed == null || typeof parsed !== 'object') return false;
@@ -360,7 +357,7 @@ function readGeminiThinkingFromLocalSession(
  *     `matchesCurrentAssistantText` (strict equality OR suffix-match — see
  *     helper docstring for why suffix-match is required to handle the
  *     thinking-prefix shape where multiple thinking messages plus a final
- *     are stitched into one fullAssistantText but stored as separate jsonl
+ *     are raw-concatenated into one fullAssistantText but stored as separate jsonl
  *     rows). Walks candidates in reverse, picks LATEST match.
  *   - assistantText empty (tool-only turn — model produced no user-visible
  *     text, only thinking + tool_use): fall back to the tail-most candidate.
@@ -657,16 +654,14 @@ export class GeminiAgentService implements AgentService {
             metadata.sessionId = result.sessionId;
           }
           if (result.type === 'text') {
-            // Separate consecutive assistant text turns with paragraph break.
-            // Each Gemini message/assistant is a complete turn (unlike Claude's
-            // incremental deltas), so direct concatenation loses inter-turn spacing.
-            if (sawAssistantText && result.content) {
-              fullAssistantText += `\n\n${result.content}`;
-              yield { ...result, content: `\n\n${result.content}`, metadata };
-            } else {
-              fullAssistantText += result.content ?? '';
-              yield { ...result, metadata };
-            }
+            // Gemini CLI stream-json emits each content chunk as a separate
+            // message/assistant event with delta:true (confirmed in upstream
+            // nonInteractiveCli.ts:369-378). These are streaming deltas
+            // identical to Claude's, not complete turns. Raw concat is the
+            // correct treatment; the model's own content includes newlines
+            // where paragraph breaks are intended.
+            fullAssistantText += result.content ?? '';
+            yield { ...result, metadata };
             sawAssistantText = true;
           } else {
             if (fromResultError && result.type === 'error') {

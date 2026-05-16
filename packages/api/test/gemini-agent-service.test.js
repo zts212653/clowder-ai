@@ -386,7 +386,7 @@ describe('GeminiAgentService (gemini-cli adapter)', () => {
     assert.equal(msgs[msgs.length - 1].type, 'done');
   });
 
-  test('separates multi-turn assistant text with paragraph breaks (turn newline fix)', async () => {
+  test('raw-concats consecutive assistant streaming deltas without synthetic separators', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new GeminiAgentService({ spawnFn, adapter: 'gemini-cli' });
@@ -407,13 +407,14 @@ describe('GeminiAgentService (gemini-cli adapter)', () => {
     const textMsgs = msgs.filter((m) => m.type === 'text');
 
     assert.equal(textMsgs.length, 3);
-    assert.equal(textMsgs[0].content, 'First turn', 'first turn has no prefix');
-    assert.equal(textMsgs[1].content, '\n\nSecond turn', 'second turn gets paragraph break');
-    assert.equal(textMsgs[2].content, '\n\nThird turn', 'third turn gets paragraph break');
+    // Gemini CLI stream-json events are streaming deltas (delta:true).
+    // Raw concat — no synthetic \n\n separator between consecutive events.
+    assert.equal(textMsgs[0].content, 'First turn');
+    assert.equal(textMsgs[1].content, 'Second turn', 'no synthetic \\n\\n prefix');
+    assert.equal(textMsgs[2].content, 'Third turn', 'no synthetic \\n\\n prefix');
 
-    // Verify concatenation produces proper markdown
     const combined = textMsgs.map((m) => m.content).join('');
-    assert.equal(combined, 'First turn\n\nSecond turn\n\nThird turn');
+    assert.equal(combined, 'First turnSecond turnThird turn');
   });
 });
 
@@ -1070,15 +1071,11 @@ test('injects lastTurnInputTokens for tool-only turn (no message/assistant event
   }
 });
 
-test('matches jsonl content even when Gemini CLI emits multiple text events (\\n\\n chunk boundary)', async () => {
-  // Repro of runtime bug observed 2026-05-11: Gemini CLI sometimes emits the
-  // same logical turn as multiple `type:"message", role:"assistant"` events,
-  // which GeminiAgentService concatenates with `\n\n` separators into
-  // `fullAssistantText`. Local jsonl, however, stores the CLI's final
-  // re-assembled content as a single string with NO `\n\n`. With the prior
-  // normalize (`\s+` → ' '), these would diverge for any inter-event boundary
-  // that fell mid-CJK / mid-digit / mid-path: "调\n\n用" → "调 用" != "调用".
-  // Fix: normalize strips all whitespace, not just folds it.
+test('matches jsonl content when Gemini CLI emits multiple streaming delta events', async () => {
+  // Gemini CLI stream-json emits each content chunk as a separate
+  // message/assistant event with delta:true. GeminiAgentService raw-concats
+  // them into fullAssistantText. Normalize strips all whitespace to match
+  // the jsonl's re-assembled content regardless of chunk boundary position.
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
   const service = new GeminiAgentService({ spawnFn, adapter: 'gemini-cli' });
@@ -1096,8 +1093,7 @@ test('matches jsonl content even when Gemini CLI emits multiple text events (\\n
 
     const promise = collect(service.invoke('test', { workingDirectory: '/home/user/clowder-ai' }));
 
-    // Two assistant events; together they assemble into "调用工具完成了" in the
-    // jsonl, but GeminiAgentService stitches them as "调\n\n用工具完成了".
+    // Two streaming delta events; raw concat → "调用工具完成了".
     emitGeminiEvents(proc, [
       { type: 'init', session_id: 'test-session-chunk-001', model: 'gemini-test' },
       { type: 'message', role: 'assistant', content: '调', delta: true },
@@ -1123,8 +1119,8 @@ test('matches jsonl final row when fullAssistantText is thinking-prefix + final 
   // Repro of runtime bug observed 2026-05-11 (LD visual verification rounds 4 & 6):
   // when the model thinks first then produces a final reply, Gemini CLI emits
   // MULTIPLE `message/assistant` events (one per thinking step + one final).
-  // GeminiAgentService stitches them with `\n\n` into fullAssistantText, e.g.:
-  //   "**Counting lines in source files**...\n\n**Calculating Line Counts**...\n\n实际 final text"
+  // GeminiAgentService raw-concats them into fullAssistantText, e.g.:
+  //   "**Counting lines in source files****Calculating Line Counts**实际 final text"
   // The jsonl, however, stores each step in its own row — the FINAL row's
   // content equals only "实际 final text" (the tail). Strict equality would
   // miss this; the suffix-match branch of matchesCurrentAssistantText must
@@ -1179,8 +1175,8 @@ test('matches jsonl final row when fullAssistantText is thinking-prefix + final 
 
     emitGeminiEvents(proc, [
       { type: 'init', session_id: sessionId, model: 'gemini-test' },
-      // Three assistant events; cat cafe stitches them as
-      //   "**Counting lines in source files**\n\n**Calculating Line Counts**\n\n实际 final text"
+      // Three streaming delta events; raw concat produces
+      //   "**Counting lines in source files****Calculating Line Counts**实际 final text"
       // Only the LAST piece equals the jsonl final-row content.
       { type: 'message', role: 'assistant', content: '**Counting lines in source files**', delta: true },
       { type: 'message', role: 'assistant', content: '**Calculating Line Counts**', delta: true },
@@ -1195,7 +1191,7 @@ test('matches jsonl final row when fullAssistantText is thinking-prefix + final 
     assert.equal(
       done.metadata.usage.lastTurnInputTokens,
       42,
-      'thinking-prefix shape (stitched assistantText, separate jsonl rows) MUST still resolve via suffix-match — final row tokens.input (=42), NOT cumulative (=8888), NOT thinking-row tokens (=10 / =20)',
+      'thinking-prefix shape (accumulated assistantText, separate jsonl rows) MUST still resolve via suffix-match — final row tokens.input (=42), NOT cumulative (=8888), NOT thinking-row tokens (=10 / =20)',
     );
   } finally {
     process.env.HOME = previousHome;
