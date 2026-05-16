@@ -6,7 +6,7 @@
 
 你的 AI agent 和一支真正团队之间，缺的就是这一层。
 
-[English](README.md) | **中文**
+[English](README.md) | **中文** | [日本語](README.ja-JP.md)
 
 </div>
 
