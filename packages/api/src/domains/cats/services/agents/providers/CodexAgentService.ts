@@ -191,6 +191,11 @@ function buildCatCafeMcpConfigArgs(workingDirectory?: string, callbackEnv?: Reco
       `mcp_servers.${serverName}.args=[${toTomlString(serverPath)}]`,
       '--config',
       `mcp_servers.${serverName}.enabled=true`,
+      // Codex ≥0.130: auto-approve MCP tool calls for trusted Cat Cafe servers.
+      // Without this, non-interactive `codex exec` has no UI to approve and
+      // write tools get auto-cancelled ("user cancelled MCP tool call").
+      '--config',
+      `mcp_servers.${serverName}.default_tools_approval_mode="approve"`,
     );
 
     for (const key of callbackKeys) {
