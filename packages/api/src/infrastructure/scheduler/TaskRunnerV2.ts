@@ -236,13 +236,24 @@ export class TaskRunnerV2 {
   private scheduleCronTick(task: AnyTaskSpec): void {
     if (task.trigger.type !== 'cron') return;
     const ms = getNextCronMs(task.trigger.expression, task.trigger.timezone);
+    // #605: chunk long delays to avoid Node setTimeout 32-bit overflow
+    if (ms > TaskRunnerV2.MAX_TIMER_DELAY) {
+      const timer = setTimeout(() => {
+        if (this.timers.has(task.id)) this.scheduleCronTick(task);
+      }, TaskRunnerV2.MAX_TIMER_DELAY);
+      if (typeof timer === 'object' && 'unref' in timer) timer.unref();
+      this.timers.set(task.id, timer);
+      this.logger.info(
+        `[scheduler] ${task.id}: cron delay ${ms}ms exceeds safe limit, chunking (next check in ${TaskRunnerV2.MAX_TIMER_DELAY}ms)`,
+      );
+      return;
+    }
     const timer = setTimeout(() => {
       this.executePipeline(task)
         .catch((err) => {
           this.logger.error(`[scheduler] ${task.id}: pipeline error`, err);
         })
         .finally(() => {
-          // Schedule next occurrence
           if (this.timers.has(task.id)) {
             this.scheduleCronTick(task);
           }
@@ -264,7 +275,9 @@ export class TaskRunnerV2 {
     const remaining = Math.max(0, task.trigger.fireAt - Date.now());
     // Node setTimeout overflows at 2^31-1 ms — chunk long delays into safe steps
     if (remaining > TaskRunnerV2.MAX_TIMER_DELAY) {
-      const timer = setTimeout(() => this.scheduleOnceTick(task), TaskRunnerV2.MAX_TIMER_DELAY);
+      const timer = setTimeout(() => {
+        if (this.timers.has(task.id)) this.scheduleOnceTick(task);
+      }, TaskRunnerV2.MAX_TIMER_DELAY);
       if (typeof timer === 'object' && 'unref' in timer) timer.unref();
       this.timers.set(task.id, timer);
       return;

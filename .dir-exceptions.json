@@ -18,7 +18,7 @@
       "path": "packages/api/src/domains/memory",
       "owner": "gpt52",
       "reason": "Memory 域已增长到 34 files；v0.8.0 发版先显式豁免，后续按 retrieval/indexing/distillation 子域拆分",
-      "expiresAt": "2026-05-17",
+      "expiresAt": "2026-06-17",
       "ticket": "F102"
     }
   ]

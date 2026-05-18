@@ -860,6 +860,115 @@ describe('TaskRunnerV2 — governance controls (AC-D1)', () => {
   });
 });
 
+// ─── #605: setTimeout 32-bit overflow regression ──────────
+
+describe('TaskRunnerV2 — cron setTimeout overflow (#605)', () => {
+  let db, ledger;
+  const noop = () => {};
+  const logMessages = [];
+  const capturingLogger = {
+    info: (msg) => logMessages.push(msg),
+    error: noop,
+  };
+
+  beforeEach(async () => {
+    db = new Database(':memory:');
+    const { applyMigrations } = await import('../../dist/domains/memory/schema.js');
+    const { RunLedger } = await import('../../dist/infrastructure/scheduler/RunLedger.js');
+    applyMigrations(db);
+    ledger = new RunLedger(db);
+    logMessages.length = 0;
+  });
+
+  it('far-future cron does NOT rapid-fire — delay is chunked (#605 regression)', async () => {
+    // Bug: Node clamps setTimeout(fn, n) where n > 2^31-1 to ~1ms, causing
+    // yearly crons to fire immediately in a tight loop. The fix chunks long
+    // delays into MAX_TIMER_DELAY steps that only reschedule, never execute.
+    //
+    // Pick a month ~6 months from now so next-fire is always >24.8 days,
+    // making this test deterministic year-round.
+    const safeMonth = ((new Date().getMonth() + 6) % 12) + 1;
+    const { TaskRunnerV2 } = await import('../../dist/infrastructure/scheduler/TaskRunnerV2.js');
+    const runner = new TaskRunnerV2({ logger: capturingLogger, ledger });
+    let executeCount = 0;
+
+    runner.register({
+      id: 'yearly-cron',
+      profile: 'awareness',
+      trigger: { type: 'cron', expression: `0 0 1 ${safeMonth} *` },
+      admission: {
+        gate: async () => ({ run: true, workItems: [{ signal: 'go', subjectKey: 'k' }] }),
+      },
+      run: {
+        overlap: 'skip',
+        timeoutMs: 5000,
+        execute: async () => {
+          executeCount++;
+        },
+      },
+      state: { runLedger: 'sqlite' },
+      outcome: { whenNoSignal: 'drop' },
+      enabled: () => true,
+    });
+    runner.start();
+
+    // Without the fix, Node would clamp the >24.8-day delay to ~1ms
+    // and executePipeline would fire repeatedly within milliseconds.
+    await new Promise((r) => setTimeout(r, 200));
+
+    assert.equal(executeCount, 0, 'yearly cron must NOT fire — delay should be chunked, not clamped to ~1ms');
+    assert.ok(
+      logMessages.some((m) => m.includes('chunking')),
+      'should log chunking message for oversized delay',
+    );
+    const rows = ledger.query('yearly-cron', 10);
+    assert.equal(rows.length, 0, 'no ledger entries — executePipeline should not have been called');
+    runner.stop();
+  });
+
+  it('cancelled cron task does not resurrect via chunk callback', async () => {
+    // When a long-delay cron enters the chunking path, stopping the runner
+    // must prevent the chunk callback from rescheduling the task.
+    const safeMonth = ((new Date().getMonth() + 6) % 12) + 1;
+    const { TaskRunnerV2 } = await import('../../dist/infrastructure/scheduler/TaskRunnerV2.js');
+    const runner = new TaskRunnerV2({ logger: capturingLogger, ledger });
+    let executeCount = 0;
+
+    runner.register({
+      id: 'cancel-yearly',
+      profile: 'awareness',
+      trigger: { type: 'cron', expression: `0 0 1 ${safeMonth} *` },
+      admission: {
+        gate: async () => ({ run: true, workItems: [{ signal: 'go', subjectKey: 'k' }] }),
+      },
+      run: {
+        overlap: 'skip',
+        timeoutMs: 5000,
+        execute: async () => {
+          executeCount++;
+        },
+      },
+      state: { runLedger: 'sqlite' },
+      outcome: { whenNoSignal: 'drop' },
+      enabled: () => true,
+    });
+    runner.start();
+
+    // Verify chunking was entered
+    assert.ok(
+      logMessages.some((m) => m.includes('cancel-yearly') && m.includes('chunking')),
+      'should enter chunking path',
+    );
+
+    // Stop the runner — clears all timers and timers map
+    runner.stop();
+
+    // After stop, timers.has(task.id) returns false, so even if a chunk
+    // callback somehow fired it would not reschedule or execute.
+    assert.equal(executeCount, 0, 'execute must not run after stop');
+  });
+});
+
 // ─── #415: once trigger ─────────────────────────────────────
 
 describe('TaskRunnerV2 — once trigger (#415)', () => {

@@ -4,6 +4,7 @@ import type { SocketCallbacks } from '@/hooks/useSocket';
 import { type Thread, useChatStore } from '@/stores/chatStore';
 import { useGameStore } from '@/stores/gameStore';
 import { type TaskItem, useTaskStore } from '@/stores/taskStore';
+import { apiFetch } from '@/utils/api-client';
 
 interface ExternalDeps {
   threadId: string;
@@ -97,7 +98,12 @@ export function useChatSocketCallbacks({
         requestStreamCatchUp(data.threadId);
       },
       onThreadBranched: () => {
-        /* branch navigation handled by the action initiator */
+        void apiFetch('/api/threads')
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data) => {
+            if (data?.threads) useChatStore.getState().setThreads(data.threads);
+          })
+          .catch(() => {});
       },
       onAuthorizationRequest: handleAuthRequest,
       onAuthorizationResponse: handleAuthResponse,
