@@ -144,21 +144,15 @@ function toTomlString(value: string): string {
  * based on the current thread working directory.
  */
 const CAT_CAFE_MCP_SERVER_ENTRIES = [
-  ['cat-cafe', 'index.js'],
   ['cat-cafe-collab', 'collab.js'],
   ['cat-cafe-memory', 'memory.js'],
   ['cat-cafe-signals', 'signals.js'],
+  ['cat-cafe-limb', 'limb.js'],
 ] as const;
 
 function buildCatCafeMcpConfigArgs(workingDirectory?: string, callbackEnv?: Record<string, string>): string[] {
-  const candidateRoots: string[] = [];
-  if (workingDirectory) candidateRoots.push(workingDirectory);
-  candidateRoots.push(process.cwd());
-
-  // file path: packages/api/src/domains/cats/services/agents/providers/CodexAgentService.ts
-  // repo root = dirname(fileURLToPath(import.meta.url)) up to .../cat-cafe
   const fileDir = dirname(fileURLToPath(import.meta.url));
-  candidateRoots.push(resolve(fileDir, '../../../../../../../..'));
+  const candidateRoots: string[] = [process.cwd(), resolve(fileDir, '../../../../../../../..')];
 
   let mcpDistDir: string | undefined;
   for (const root of candidateRoots) {

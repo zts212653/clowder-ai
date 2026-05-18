@@ -26,6 +26,7 @@ const BUILTIN_CAT_CAFE_SERVERS: ReadonlyMap<string, string> = new Map([
   ['cat-cafe-collab', 'collab.js'],
   ['cat-cafe-memory', 'memory.js'],
   ['cat-cafe-signals', 'signals.js'],
+  ['cat-cafe-limb', 'limb.js'],
 ]);
 
 /** Returns the dist entrypoint filename for a canonical builtin, or null. */
