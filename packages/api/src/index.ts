@@ -2215,7 +2215,9 @@ async function main(): Promise<void> {
     const { resolveStartupCliConfigContext } = await import('./config/capabilities/startup-cli-config.js');
     const monorepoRoot = findMonorepoRoot(process.cwd());
     const pluginsDir = join(monorepoRoot, 'plugins');
-    const { loadAllPluginConfigs, resolvePluginEnv } = await import('./domains/plugin/plugin-config-store.js');
+    const { loadAllPluginConfigs, resolvePluginEnv, getPluginConfigValue } = await import(
+      './domains/plugin/plugin-config-store.js'
+    );
     const pluginRegistry = new PluginRegistry(pluginsDir);
     pluginRegistry.scan();
     const scannedManifests = pluginRegistry.getAllManifests();
@@ -2240,7 +2242,7 @@ async function main(): Promise<void> {
 
     limbAdapterRegistry.set('weixin-mp', async (yamlPath) => {
       const decl = loadLimbDeclaration(yamlPath);
-      return new WeixinMpLimbNode({ capabilities: decl.capabilities, redis });
+      return new WeixinMpLimbNode({ capabilities: decl.capabilities, redis, resolveEnv: getPluginConfigValue });
     });
 
     const pluginActivator = new PluginResourceActivator({

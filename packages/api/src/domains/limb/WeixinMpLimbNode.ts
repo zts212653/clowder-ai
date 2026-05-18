@@ -4,9 +4,12 @@ import { markdownToWxHtml } from '../weixin-mp/markdown-to-wx-html.js';
 import { WeixinMpClient } from '../weixin-mp/weixin-mp-client.js';
 import { WeixinMpTokenManager } from '../weixin-mp/weixin-mp-token.js';
 
+export type EnvResolver = (name: string) => string | undefined;
+
 export interface WeixinMpLimbConfig {
   capabilities: LimbCapability[];
   redis?: RedisClient;
+  resolveEnv: EnvResolver;
 }
 
 export class WeixinMpLimbNode implements ILimbNode {
@@ -17,10 +20,12 @@ export class WeixinMpLimbNode implements ILimbNode {
 
   private readonly tokenMgr: WeixinMpTokenManager;
   private readonly client: WeixinMpClient;
+  private readonly resolveEnv: EnvResolver;
 
   constructor(config: WeixinMpLimbConfig) {
     this.capabilities = config.capabilities;
-    this.tokenMgr = new WeixinMpTokenManager(config.redis);
+    this.resolveEnv = config.resolveEnv;
+    this.tokenMgr = new WeixinMpTokenManager(config.redis, this.resolveEnv);
     this.client = new WeixinMpClient(this.tokenMgr);
   }
 
@@ -54,7 +59,7 @@ export class WeixinMpLimbNode implements ILimbNode {
   }
 
   async healthCheck(): Promise<LimbNodeStatus> {
-    const configured = !!(process.env['WEIXIN_MP_APP_ID'] && process.env['WEIXIN_MP_APP_SECRET']);
+    const configured = !!(this.resolveEnv('WEIXIN_MP_APP_ID') && this.resolveEnv('WEIXIN_MP_APP_SECRET'));
     if (!configured) return 'offline';
     try {
       await this.tokenMgr.getAccessToken();
@@ -65,7 +70,7 @@ export class WeixinMpLimbNode implements ILimbNode {
   }
 
   private async checkStatusCmd(): Promise<LimbInvokeResult> {
-    const configured = !!(process.env['WEIXIN_MP_APP_ID'] && process.env['WEIXIN_MP_APP_SECRET']);
+    const configured = !!(this.resolveEnv('WEIXIN_MP_APP_ID') && this.resolveEnv('WEIXIN_MP_APP_SECRET'));
     if (!configured) {
       return { success: true, data: { status: 'not_configured' } };
     }

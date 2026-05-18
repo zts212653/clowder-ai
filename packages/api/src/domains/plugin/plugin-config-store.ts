@@ -78,10 +78,8 @@ export function writePluginConfig(
 
     if (value == null || value === '') {
       existing[name] = null;
-      delete process.env[name];
     } else {
       existing[name] = value;
-      process.env[name] = value;
     }
   }
 
@@ -112,10 +110,7 @@ export function loadAllPluginConfigs(projectRoot: string, manifests: PluginManif
     for (const [name, value] of Object.entries(raw)) {
       if (!allowedEnvNames.has(name)) continue;
       filtered[name] = value;
-      if (typeof value === 'string') {
-        process.env[name] = value;
-        loaded++;
-      }
+      if (typeof value === 'string') loaded++;
     }
     configCache.set(manifest.id, filtered);
   }
@@ -139,4 +134,12 @@ export function resolvePluginEnv(manifests: PluginManifest[]): Record<string, st
     }
   }
   return result;
+}
+
+export function getPluginConfigValue(envName: string): string | undefined {
+  for (const cached of configCache.values()) {
+    const v = cached[envName];
+    if (typeof v === 'string') return v;
+  }
+  return undefined;
 }
