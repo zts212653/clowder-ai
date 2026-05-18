@@ -56,15 +56,16 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
         params.set('artifactKinds', artifactKindsFilter.join(','));
       }
       const res = await apiFetch(`/api/marketplace/search?${params}`);
+      if (!res.ok) throw new Error(`Search failed (${res.status})`);
       const data = (await res.json()) as { results: MarketplaceSearchResult[] };
-      set({ results: data.results, loading: false });
+      set({ results: data.results ?? [], loading: false });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Search failed', loading: false });
     }
   },
 
   browse: async () => {
-    set({ loading: true, error: null });
+    set({ loading: true, error: null, query: '' });
     try {
       const params = new URLSearchParams();
       const { ecosystemFilter, trustFilter, artifactKindsFilter } = get();
@@ -72,8 +73,9 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
       if (trustFilter.length > 0) params.set('trustLevels', trustFilter.join(','));
       if (artifactKindsFilter.length > 0) params.set('artifactKinds', artifactKindsFilter.join(','));
       const res = await apiFetch(`/api/marketplace/search?${params}`);
+      if (!res.ok) throw new Error(`Browse failed (${res.status})`);
       const data = (await res.json()) as { results: MarketplaceSearchResult[] };
-      set({ results: data.results, loading: false });
+      set({ results: data.results ?? [], loading: false });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Browse failed', loading: false });
     }
@@ -83,22 +85,25 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
     const prev = get().ecosystemFilter;
     if (ecosystems.length === prev.length && ecosystems.every((e, i) => e === prev[i])) return;
     set({ ecosystemFilter: ecosystems });
-    const { query, search } = get();
+    const { query, search, browse } = get();
     if (query) search(query);
+    else browse();
   },
   setTrustFilter: (levels) => {
     const prev = get().trustFilter;
     if (levels.length === prev.length && levels.every((l, i) => l === prev[i])) return;
     set({ trustFilter: levels });
-    const { query, search } = get();
+    const { query, search, browse } = get();
     if (query) search(query);
+    else browse();
   },
   setArtifactKindsFilter: (kinds) => {
     const prev = get().artifactKindsFilter;
     if (kinds.length === prev.length && kinds.every((k, i) => k === prev[i])) return;
     set({ artifactKindsFilter: kinds });
-    const { query, search } = get();
+    const { query, search, browse } = get();
     if (query) search(query);
+    else browse();
   },
   selectResult: (result) => set({ selectedResult: result }),
 

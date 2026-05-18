@@ -47,7 +47,7 @@ describe('marketplaceStore', () => {
   });
 
   it('search populates results from API', async () => {
-    mocks.apiFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ results: [MOCK_RESULT] }) });
+    mocks.apiFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ results: [MOCK_RESULT] }) });
     const { useMarketplaceStore } = await import('../marketplaceStore');
 
     await useMarketplaceStore.getState().search('memory');
@@ -58,7 +58,7 @@ describe('marketplaceStore', () => {
   });
 
   it('search passes ecosystem filter as CSV', async () => {
-    mocks.apiFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ results: [] }) });
+    mocks.apiFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ results: [] }) });
     const { useMarketplaceStore } = await import('../marketplaceStore');
     useMarketplaceStore.setState({ ecosystemFilter: ['claude', 'codex'] });
 
@@ -68,7 +68,7 @@ describe('marketplaceStore', () => {
   });
 
   it('search passes trust filter as CSV', async () => {
-    mocks.apiFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ results: [] }) });
+    mocks.apiFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ results: [] }) });
     const { useMarketplaceStore } = await import('../marketplaceStore');
     useMarketplaceStore.setState({ trustFilter: ['verified'] });
 
@@ -89,7 +89,7 @@ describe('marketplaceStore', () => {
     const promise = useMarketplaceStore.getState().search('memory');
     expect(useMarketplaceStore.getState().loading).toBe(true);
 
-    resolveApi!({ json: () => Promise.resolve({ results: [] }) });
+    resolveApi!({ ok: true, json: () => Promise.resolve({ results: [] }) });
     await promise;
     expect(useMarketplaceStore.getState().loading).toBe(false);
   });
@@ -105,7 +105,7 @@ describe('marketplaceStore', () => {
   });
 
   it('getInstallPlan fetches plan via POST', async () => {
-    mocks.apiFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ plan: MOCK_PLAN }) });
+    mocks.apiFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ plan: MOCK_PLAN }) });
     const { useMarketplaceStore } = await import('../marketplaceStore');
 
     await useMarketplaceStore.getState().getInstallPlan('claude', 'mcp-memory');
@@ -125,12 +125,12 @@ describe('marketplaceStore', () => {
   });
 
   it('setEcosystemFilter re-triggers search when query exists', async () => {
-    mocks.apiFetch.mockResolvedValue({ json: () => Promise.resolve({ results: [] }) });
+    mocks.apiFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ results: [] }) });
     const { useMarketplaceStore } = await import('../marketplaceStore');
 
     await useMarketplaceStore.getState().search('memory');
     mocks.apiFetch.mockClear();
-    mocks.apiFetch.mockResolvedValue({ json: () => Promise.resolve({ results: [MOCK_RESULT] }) });
+    mocks.apiFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ results: [MOCK_RESULT] }) });
 
     useMarketplaceStore.getState().setEcosystemFilter(['claude']);
     await vi.waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(1));
@@ -140,7 +140,7 @@ describe('marketplaceStore', () => {
   });
 
   it('setEcosystemFilter skips re-search when value unchanged', async () => {
-    mocks.apiFetch.mockResolvedValue({ json: () => Promise.resolve({ results: [] }) });
+    mocks.apiFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ results: [] }) });
     const { useMarketplaceStore } = await import('../marketplaceStore');
 
     useMarketplaceStore.setState({ ecosystemFilter: ['claude'] });
@@ -152,21 +152,23 @@ describe('marketplaceStore', () => {
     expect(mocks.apiFetch).not.toHaveBeenCalled();
   });
 
-  it('setEcosystemFilter does not search when no query', async () => {
+  it('setEcosystemFilter triggers browse when no query', async () => {
+    mocks.apiFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ results: [MOCK_RESULT] }) });
     const { useMarketplaceStore } = await import('../marketplaceStore');
 
     useMarketplaceStore.getState().setEcosystemFilter(['codex']);
+    await vi.waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(1));
 
-    expect(mocks.apiFetch).not.toHaveBeenCalled();
+    expect(mocks.apiFetch).toHaveBeenCalledWith(expect.stringContaining('ecosystems=codex'));
   });
 
   it('setTrustFilter re-triggers search when query exists', async () => {
-    mocks.apiFetch.mockResolvedValue({ json: () => Promise.resolve({ results: [] }) });
+    mocks.apiFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ results: [] }) });
     const { useMarketplaceStore } = await import('../marketplaceStore');
 
     await useMarketplaceStore.getState().search('test');
     mocks.apiFetch.mockClear();
-    mocks.apiFetch.mockResolvedValue({ json: () => Promise.resolve({ results: [] }) });
+    mocks.apiFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ results: [] }) });
 
     useMarketplaceStore.getState().setTrustFilter(['official']);
     await vi.waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(1));
@@ -175,7 +177,7 @@ describe('marketplaceStore', () => {
   });
 
   it('search passes artifactKinds filter as CSV', async () => {
-    mocks.apiFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ results: [] }) });
+    mocks.apiFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ results: [] }) });
     const { useMarketplaceStore } = await import('../marketplaceStore');
     useMarketplaceStore.setState({ artifactKindsFilter: ['mcp_server'] });
 
@@ -185,17 +187,59 @@ describe('marketplaceStore', () => {
   });
 
   it('setArtifactKindsFilter re-triggers search when query exists', async () => {
-    mocks.apiFetch.mockResolvedValue({ json: () => Promise.resolve({ results: [] }) });
+    mocks.apiFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ results: [] }) });
     const { useMarketplaceStore } = await import('../marketplaceStore');
 
     await useMarketplaceStore.getState().search('memory');
     mocks.apiFetch.mockClear();
-    mocks.apiFetch.mockResolvedValue({ json: () => Promise.resolve({ results: [] }) });
+    mocks.apiFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ results: [] }) });
 
     useMarketplaceStore.getState().setArtifactKindsFilter(['mcp_server']);
     await vi.waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(1));
 
     expect(mocks.apiFetch).toHaveBeenCalledWith(expect.stringContaining('artifactKinds=mcp_server'));
+  });
+
+  it('browse populates results without query param', async () => {
+    mocks.apiFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ results: [MOCK_RESULT] }) });
+    const { useMarketplaceStore } = await import('../marketplaceStore');
+
+    await useMarketplaceStore.getState().browse();
+
+    expect(useMarketplaceStore.getState().results).toHaveLength(1);
+    expect(useMarketplaceStore.getState().results[0].artifactId).toBe('mcp-memory');
+    expect(useMarketplaceStore.getState().loading).toBe(false);
+    expect(useMarketplaceStore.getState().error).toBeNull();
+  });
+
+  it('browse sets error when API returns non-ok response', async () => {
+    mocks.apiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: () => Promise.resolve({ error: 'Missing required query parameter: q' }),
+    });
+    const { useMarketplaceStore } = await import('../marketplaceStore');
+
+    await useMarketplaceStore.getState().browse();
+
+    expect(useMarketplaceStore.getState().error).toBeTruthy();
+    expect(useMarketplaceStore.getState().results).toEqual([]);
+    expect(useMarketplaceStore.getState().loading).toBe(false);
+  });
+
+  it('search sets error when API returns non-ok response', async () => {
+    mocks.apiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: () => Promise.resolve({ error: 'Internal server error' }),
+    });
+    const { useMarketplaceStore } = await import('../marketplaceStore');
+
+    await useMarketplaceStore.getState().search('test');
+
+    expect(useMarketplaceStore.getState().error).toBeTruthy();
+    expect(useMarketplaceStore.getState().results).toEqual([]);
+    expect(useMarketplaceStore.getState().loading).toBe(false);
   });
 
   it('clearSelection resets selectedResult and installPlan', async () => {

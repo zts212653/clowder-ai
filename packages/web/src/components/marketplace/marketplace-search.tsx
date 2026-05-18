@@ -23,6 +23,7 @@ export function MarketplaceSearch() {
   const [inputValue, setInputValue] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const search = useMarketplaceStore((s) => s.search);
+  const browse = useMarketplaceStore((s) => s.browse);
   const ecosystemFilter = useMarketplaceStore((s) => s.ecosystemFilter);
   const setEcosystemFilter = useMarketplaceStore((s) => s.setEcosystemFilter);
   const trustFilter = useMarketplaceStore((s) => s.trustFilter);
@@ -35,9 +36,11 @@ export function MarketplaceSearch() {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       if (v.trim()) {
         debounceRef.current = setTimeout(() => search(v.trim()), 300);
+      } else {
+        browse();
       }
     },
-    [search],
+    [search, browse],
   );
 
   const handleKeyDown = useCallback(

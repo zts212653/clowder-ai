@@ -91,7 +91,8 @@ export function MarketplacePanel({
 
   const handleRetry = useCallback(() => {
     if (query) search(query);
-  }, [query, search]);
+    else browse();
+  }, [browse, query, search]);
 
   useEffect(() => {
     return () => clearSelection();
