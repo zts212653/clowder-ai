@@ -108,7 +108,10 @@ export function PluginConfigPanel({ plugin, onUpdated }: Props) {
       if (data.ok) {
         setResult({ type: 'success', msg: `连接成功 · 状态: ${data.status}` });
       } else {
-        setResult({ type: 'error', msg: data.error ?? `连接失败 · 状态: ${data.status ?? 'unknown'}` });
+        const detail = data.error
+          ? `${data.error}${data.status ? ` (${data.status})` : ''}`
+          : `连接失败 · 状态: ${data.status ?? 'unknown'}`;
+        setResult({ type: 'error', msg: detail });
       }
     } catch {
       setResult({ type: 'error', msg: '网络错误' });

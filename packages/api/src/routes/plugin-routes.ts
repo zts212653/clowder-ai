@@ -315,11 +315,22 @@ export function registerPluginRoutes(app: FastifyInstance, opts: PluginRoutesOpt
       }
 
       try {
-        const status = await handle.healthCheck();
-        return { ok: status === 'online', status };
+        const result = await handle.invoke(manifest.healthCheck.limbCommand, {});
+        if (!result.success) {
+          return { ok: false, status: 'error', error: result.error ?? 'Health check invoke failed' };
+        }
+        const hcData = result.data as Record<string, unknown> | undefined;
+        const hcStatus = (hcData?.status as string) ?? 'unknown';
+        if (hcStatus === 'connected' || hcStatus === 'online') {
+          return { ok: true, status: hcStatus };
+        }
+        return {
+          ok: false,
+          status: hcStatus,
+          error: (hcData?.message as string) ?? undefined,
+        };
       } catch (err) {
-        const error = err instanceof Error ? err.message : String(err);
-        return { ok: false, status: 'error', error };
+        return { ok: false, status: 'error', error: err instanceof Error ? err.message : String(err) };
       }
     }
 
