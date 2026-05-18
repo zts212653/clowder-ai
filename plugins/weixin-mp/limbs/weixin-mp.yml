@@ -1,0 +1,79 @@
+# F171: 微信公众号 Limb 声明
+# 接口描述的唯一真相源 — adapter 从此文件加载 capabilities
+
+nodeId: weixin-mp
+displayName: 微信公众号
+platform: weixin
+
+capabilities:
+  - cap: content_publish
+    commands:
+      - weixin_mp.check_status
+      - weixin_mp.publish_article
+      - weixin_mp.upload_image
+      - weixin_mp.list_drafts
+      - weixin_mp.publish_status
+    authLevel: free
+
+commands:
+  weixin_mp.check_status:
+    description: 检查公众号连接状态（是否配置了 AppID/AppSecret，能否获取 access_token）
+    params: {}
+    returns: "{ status: 'connected' | 'not_configured' | 'error', message?: string }"
+
+  weixin_mp.publish_article:
+    description: 发布 Markdown 文章到公众号（默认保存到草稿箱，publish=true 直接发布）
+    params:
+      title:
+        type: string
+        required: true
+        desc: 文章标题（1-64 字）
+      markdown:
+        type: string
+        required: true
+        desc: 文章正文（Markdown 格式，自动转换为微信兼容 HTML）
+      author:
+        type: string
+        desc: 作者名（最长 16 字）
+      digest:
+        type: string
+        desc: 摘要（最长 120 字）
+      coverImageUrl:
+        type: string
+        desc: 封面图 URL（与 thumbMediaId 二选一，自动上传为永久素材）
+      thumbMediaId:
+        type: string
+        desc: 封面图素材 media_id（与 coverImageUrl 二选一）
+      publish:
+        type: boolean
+        desc: 是否直接发布（默认 false，仅保存到草稿箱）
+    returns: "{ draftMediaId: string, publishId?: string }"
+
+  weixin_mp.upload_image:
+    description: 上传图片到微信 CDN（返回可在文章正文中使用的链接）
+    params:
+      imageUrl:
+        type: string
+        required: true
+        desc: 图片 URL（支持 jpg/png/gif/bmp）
+    returns: "{ url: string }"
+
+  weixin_mp.list_drafts:
+    description: 列出草稿箱中的文章
+    params:
+      offset:
+        type: number
+        desc: 起始位置（默认 0）
+      count:
+        type: number
+        desc: 获取数量（默认 10，最大 20）
+    returns: "{ total_count: number, items: [{ title, media_id, update_time }] }"
+
+  weixin_mp.publish_status:
+    description: 查询文章发布状态
+    params:
+      publishId:
+        type: string
+        required: true
+        desc: 发布任务 ID（由 publish_article 返回）
+    returns: "{ publish_status: number, article_id?: string, article_url?: string }"

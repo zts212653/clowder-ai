@@ -1,0 +1,23 @@
+id: weixin-mp
+name: 微信公众号
+version: "1.0.0"
+description: 微信公众号文章发布 — 发文、上传图片、查看草稿
+
+config:
+  - envName: WEIXIN_MP_APP_ID
+    label: App ID
+    sensitive: false
+    required: true
+  - envName: WEIXIN_MP_APP_SECRET
+    label: App Secret
+    sensitive: true
+    required: true
+
+resources:
+  - type: limb
+    path: limbs/weixin-mp.yml
+  - type: skill
+    path: skills/weixin-mp
+
+healthCheck:
+  limbCommand: weixin_mp.check_status

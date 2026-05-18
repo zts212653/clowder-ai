@@ -2206,6 +2206,8 @@ async function main(): Promise<void> {
       './domains/plugin/PluginResourceActivator.js'
     );
     const { ScheduleFactoryRegistry } = await import('./domains/plugin/ScheduleFactoryRegistry.js');
+    const { WeixinMpLimbNode } = await import('./domains/limb/WeixinMpLimbNode.js');
+    const { loadLimbDeclaration } = await import('./domains/limb/limb-yaml-loader.js');
     const { registerPluginRoutes } = await import('./routes/plugin-routes.js');
     const { generateCliConfigs, readCapabilitiesConfig, writeCapabilitiesConfig, withCapabilityLock } = await import(
       './config/capabilities/capability-orchestrator.js'
@@ -2235,6 +2237,11 @@ async function main(): Promise<void> {
 
     // F202-2B: Mutable deps ref — starts with just log, populated with full GitHub deps later
     const scheduleFactoryDeps: Record<string, unknown> = { log: app.log };
+
+    limbAdapterRegistry.set('weixin-mp', async (yamlPath) => {
+      const decl = loadLimbDeclaration(yamlPath);
+      return new WeixinMpLimbNode({ capabilities: decl.capabilities, redis });
+    });
 
     const pluginActivator = new PluginResourceActivator({
       resolveProjectRoot: () => resolveActiveProjectRoot(),
