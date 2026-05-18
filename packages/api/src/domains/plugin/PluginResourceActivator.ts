@@ -17,7 +17,7 @@ import { classifyMountPath } from '../../skills/skill-sync-engine.js';
 import { buildSkillMountTargets, isManagedDirectoryLevelSkillsSymlink } from '../../utils/skill-mount.js';
 import type { LimbRegistry } from '../limb/LimbRegistry.js';
 import { normalizeCapId, resolvePluginResourcePath, resourceCapId, resourcePathBasename } from './PluginRegistry.js';
-import { resolvePluginEnv } from './plugin-config-store.js';
+import { readPluginConfig, resolvePluginEnv } from './plugin-config-store.js';
 import type { ScheduleFactoryDeps, ScheduleFactoryRegistry } from './ScheduleFactoryRegistry.js';
 
 export interface ActivationResult {
@@ -33,7 +33,11 @@ export interface ActivatePluginResult {
   resources: ActivationResult[];
 }
 
-export type LimbAdapterFactory = (pluginId: string, limbYamlPath: string) => Promise<ILimbNode>;
+export type LimbAdapterFactory = (
+  pluginId: string,
+  limbYamlPath: string,
+  pluginConfig: Record<string, string>,
+) => Promise<ILimbNode>;
 
 /** Minimal TaskRunner interface for schedule resource activation (F202 Phase 2) */
 export interface ScheduleTaskRunner {
@@ -106,7 +110,8 @@ export interface PluginLimbRehydrationDeps {
   capabilities: CapabilitiesConfig | null;
   pluginRegistry: Pick<import('./PluginRegistry.js').PluginRegistry, 'getManifest'>;
   pluginsDir: string;
-  limbAdapterRegistry: Map<string, (yamlPath: string) => Promise<ILimbNode>>;
+  projectRoot: string;
+  limbAdapterRegistry: Map<string, (yamlPath: string, pluginConfig: Record<string, string>) => Promise<ILimbNode>>;
   limbRegistry: Pick<LimbRegistry, 'register'>;
   log?: Pick<Console, 'info' | 'warn'>;
 }
@@ -131,7 +136,8 @@ export async function rehydrateEnabledPluginLimbs(deps: PluginLimbRehydrationDep
     try {
       const yamlPath = resolvePluginResourcePath(deps.pluginsDir, manifest.id, limbResource.path);
       await assertPluginResourceInsideRoot(deps.pluginsDir, manifest, yamlPath, 'Limb resource');
-      const node = withPersistedLimbNodeId(await factory(yamlPath), cap.limbNodeId);
+      const pluginConfig = readPluginConfig(deps.projectRoot, manifest.id);
+      const node = withPersistedLimbNodeId(await factory(yamlPath, pluginConfig), cap.limbNodeId);
       await deps.limbRegistry.register(node);
       deps.log?.info(`[api] F202: Rehydrated limb for plugin '${manifest.id}'`);
     } catch (err) {
@@ -364,7 +370,8 @@ export class PluginResourceActivator {
 
     const yamlPath = resolvePluginResourcePath(this.deps.pluginsDir, manifest.id, resource.path);
     await assertPluginResourceInsideRoot(this.deps.pluginsDir, manifest, yamlPath, 'Limb resource');
-    const node = await this.deps.limbAdapterFactory(manifest.id, yamlPath);
+    const pluginConfig = readPluginConfig(this.deps.resolveProjectRoot(), manifest.id);
+    const node = await this.deps.limbAdapterFactory(manifest.id, yamlPath, pluginConfig);
     const previous = await this.upsertCapabilityEntry(manifest, resource, true, node.nodeId);
     const capId = resourceCapId(manifest.id, resource);
     const previousEntry = previous?.capabilities.find(

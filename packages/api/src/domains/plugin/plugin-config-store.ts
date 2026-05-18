@@ -135,11 +135,3 @@ export function resolvePluginEnv(manifests: PluginManifest[]): Record<string, st
   }
   return result;
 }
-
-export function getPluginConfigValue(envName: string): string | undefined {
-  for (const cached of configCache.values()) {
-    const v = cached[envName];
-    if (typeof v === 'string') return v;
-  }
-  return undefined;
-}

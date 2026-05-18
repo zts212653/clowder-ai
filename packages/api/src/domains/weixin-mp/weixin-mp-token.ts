@@ -11,8 +11,6 @@ interface TokenResponse {
   readonly errmsg?: string;
 }
 
-type EnvResolver = (name: string) => string | undefined;
-
 export class WeixinMpTokenManager {
   private memToken: string | undefined;
   private memExpiresAt = 0;
@@ -20,11 +18,11 @@ export class WeixinMpTokenManager {
 
   constructor(
     private readonly redis: RedisClient | undefined,
-    private readonly resolveEnv: EnvResolver,
+    private readonly pluginConfig: Record<string, string>,
   ) {}
 
   async getAccessToken(): Promise<string> {
-    const appId = this.resolveEnv('WEIXIN_MP_APP_ID');
+    const appId = this.pluginConfig['WEIXIN_MP_APP_ID'];
     if (!appId) throw new Error('WEIXIN_MP_APP_ID must be configured');
 
     if (this.memAppId !== appId) {
@@ -43,8 +41,8 @@ export class WeixinMpTokenManager {
   }
 
   private async refresh(): Promise<string> {
-    const appId = this.resolveEnv('WEIXIN_MP_APP_ID');
-    const appSecret = this.resolveEnv('WEIXIN_MP_APP_SECRET');
+    const appId = this.pluginConfig['WEIXIN_MP_APP_ID'];
+    const appSecret = this.pluginConfig['WEIXIN_MP_APP_SECRET'];
     if (!appId || !appSecret) {
       throw new Error('WEIXIN_MP_APP_ID and WEIXIN_MP_APP_SECRET must be configured');
     }

@@ -4,12 +4,10 @@ import { markdownToWxHtml } from '../weixin-mp/markdown-to-wx-html.js';
 import { WeixinMpClient } from '../weixin-mp/weixin-mp-client.js';
 import { WeixinMpTokenManager } from '../weixin-mp/weixin-mp-token.js';
 
-export type EnvResolver = (name: string) => string | undefined;
-
 export interface WeixinMpLimbConfig {
   capabilities: LimbCapability[];
   redis?: RedisClient;
-  resolveEnv: EnvResolver;
+  pluginConfig: Record<string, string>;
 }
 
 export class WeixinMpLimbNode implements ILimbNode {
@@ -20,22 +18,18 @@ export class WeixinMpLimbNode implements ILimbNode {
 
   private readonly tokenMgr: WeixinMpTokenManager;
   private readonly client: WeixinMpClient;
-  private readonly resolveEnv: EnvResolver;
+  private readonly pluginConfig: Record<string, string>;
 
   constructor(config: WeixinMpLimbConfig) {
     this.capabilities = config.capabilities;
-    this.resolveEnv = config.resolveEnv;
-    this.tokenMgr = new WeixinMpTokenManager(config.redis, this.resolveEnv);
+    this.pluginConfig = config.pluginConfig;
+    this.tokenMgr = new WeixinMpTokenManager(config.redis, this.pluginConfig);
     this.client = new WeixinMpClient(this.tokenMgr);
   }
 
-  async register(): Promise<void> {
-    // Local node — registration handled by API startup
-  }
+  async register(): Promise<void> {}
 
-  async deregister(): Promise<void> {
-    // Local node — no cleanup needed
-  }
+  async deregister(): Promise<void> {}
 
   async invoke(command: string, params: Record<string, unknown>): Promise<LimbInvokeResult> {
     try {
@@ -59,7 +53,7 @@ export class WeixinMpLimbNode implements ILimbNode {
   }
 
   async healthCheck(): Promise<LimbNodeStatus> {
-    const configured = !!(this.resolveEnv('WEIXIN_MP_APP_ID') && this.resolveEnv('WEIXIN_MP_APP_SECRET'));
+    const configured = !!(this.pluginConfig['WEIXIN_MP_APP_ID'] && this.pluginConfig['WEIXIN_MP_APP_SECRET']);
     if (!configured) return 'offline';
     try {
       await this.tokenMgr.getAccessToken();
@@ -70,7 +64,7 @@ export class WeixinMpLimbNode implements ILimbNode {
   }
 
   private async checkStatusCmd(): Promise<LimbInvokeResult> {
-    const configured = !!(this.resolveEnv('WEIXIN_MP_APP_ID') && this.resolveEnv('WEIXIN_MP_APP_SECRET'));
+    const configured = !!(this.pluginConfig['WEIXIN_MP_APP_ID'] && this.pluginConfig['WEIXIN_MP_APP_SECRET']);
     if (!configured) {
       return { success: true, data: { status: 'not_configured' } };
     }
