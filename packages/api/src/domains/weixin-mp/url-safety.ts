@@ -10,11 +10,7 @@ const PRIVATE_IP_RANGES = [
   /^fe80:/i,
 ];
 
-const BLOCKED_HOSTNAMES = new Set([
-  'localhost',
-  'metadata.google.internal',
-  'metadata.internal',
-]);
+const BLOCKED_HOSTNAMES = new Set(['localhost', 'metadata.google.internal', 'metadata.internal']);
 
 function normalizeHostname(hostname: string): string {
   let h = hostname.toLowerCase();

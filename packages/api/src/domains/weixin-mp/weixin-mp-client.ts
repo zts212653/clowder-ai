@@ -1,5 +1,5 @@
+import { safeFetchOptions, validateExternalUrl } from './url-safety.js';
 import type { WeixinMpTokenManager } from './weixin-mp-token.js';
-import { validateExternalUrl, safeFetchOptions } from './url-safety.js';
 
 const BASE = 'https://api.weixin.qq.com/cgi-bin';
 const TIMEOUT = 30_000;

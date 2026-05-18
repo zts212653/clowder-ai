@@ -4,8 +4,8 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { validateExternalUrl } from '../dist/domains/weixin-mp/url-safety.js';
 import { markdownToWxHtml } from '../dist/domains/weixin-mp/markdown-to-wx-html.js';
+import { validateExternalUrl } from '../dist/domains/weixin-mp/url-safety.js';
 
 describe('validateExternalUrl', () => {
   it('allows https URLs', () => {
