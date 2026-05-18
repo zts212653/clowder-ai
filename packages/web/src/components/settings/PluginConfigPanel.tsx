@@ -38,10 +38,10 @@ export function PluginConfigPanel({ plugin, onUpdated }: Props) {
   const handleSave = async () => {
     const updates = plugin.config
       .filter((f) => fieldValues[f.envName] !== undefined)
-      .map((f) => ({
-        name: f.envName,
-        value: fieldValues[f.envName] === '' ? null : fieldValues[f.envName]!,
-      }));
+      .map((f) => {
+        const v = fieldValues[f.envName] as string;
+        return { name: f.envName, value: v === '' ? null : v };
+      });
     if (updates.length === 0) {
       setResult({ type: 'error', msg: '请填写至少一个配置项' });
       return;
@@ -124,8 +124,8 @@ export function PluginConfigPanel({ plugin, onUpdated }: Props) {
   return (
     <div className="space-y-3.5" style={{ paddingInline: '1rem', paddingBottom: '1rem' }}>
       {hasSteps &&
-        plugin.setupSteps!.map((step, idx) => (
-          <div key={idx} className="space-y-1.5">
+        plugin.setupSteps?.map((step, idx) => (
+          <div key={step} className="space-y-1.5">
             <div className="flex items-center gap-1.5">
               <StepBadge num={idx + 1} />
               <span
@@ -182,9 +182,9 @@ export function PluginConfigPanel({ plugin, onUpdated }: Props) {
 
       {plugin.resources.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
-          {plugin.resources.map((r, i) => (
+          {plugin.resources.map((r) => (
             <span
-              key={i}
+              key={r.type}
               className={`rounded-[13px] px-2.5 py-0.5 text-label font-medium ${
                 r.enabled ? 'bg-conn-emerald-bg text-conn-emerald-text' : 'bg-cafe-surface-sunken text-cafe-muted'
               }`}

@@ -2,6 +2,13 @@ id: weixin-mp
 name: 微信公众号
 version: "1.0.0"
 description: 微信公众号文章发布 — 发文、上传图片、查看草稿
+icon: megaphone
+iconBg: "#07c160"
+
+docsUrl: https://developers.weixin.qq.com/doc/service/guide/dev/api/
+setupSteps:
+  - 在微信公众平台注册/登录，获取 App ID 和 App Secret
+  - 目前支持已认证的服务号，订阅号不支持部分接口
 
 config:
   - envName: WEIXIN_MP_APP_ID
