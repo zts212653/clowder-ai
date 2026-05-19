@@ -71,7 +71,7 @@ export function RebuildButton({ onComplete }: { onComplete: () => void }) {
 
   if (job && (job.status === 'pending' || job.status === 'running')) {
     return (
-      <div data-testid="rebuild-progress" className="flex-1 rounded-lg border border-cafe bg-white px-3 py-1.5">
+      <div data-testid="rebuild-progress" className="flex-1 rounded-lg bg-[var(--console-card-bg)] px-3 py-1.5">
         <div className="flex items-center justify-between text-xs">
           <span className="text-cafe-secondary">{PHASE_LABELS[job.phase] ?? (job.phase || '准备中')}</span>
           <span className="font-medium text-cafe-black">{job.percent}%</span>

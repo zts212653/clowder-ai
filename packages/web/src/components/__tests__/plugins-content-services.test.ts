@@ -73,9 +73,9 @@ describe('PluginsContent service manifest view', () => {
     await renderPluginsContent();
 
     expect(mockFetch.mock.calls[0][0]).toBe('/api/services');
-    expect(container.textContent).toContain('Whisper STT');
+    expect(container.textContent).toContain('语音识别 (Whisper)');
     expect(container.textContent).toContain('运行中');
-    expect(container.textContent).toContain('MLX TTS');
+    expect(container.textContent).toContain('语音合成 (MLX)');
     expect(container.textContent).toContain('可安装');
     const buttons = Array.from(container.querySelectorAll('button'));
     const actionLabels = ['Install', 'Start', 'Stop', 'Uninstall'];
@@ -242,7 +242,7 @@ describe('PluginsContent service manifest view', () => {
 
     await renderPluginsContent();
 
-    expect(container.textContent).toContain('Whisper STT');
+    expect(container.textContent).toContain('语音识别 (Whisper)');
     expect(container.textContent).toContain('已安装');
     expect(container.textContent).toContain('HTTP 503');
   });

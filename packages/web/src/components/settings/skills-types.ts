@@ -16,6 +16,7 @@ export interface SkillEntry {
   name: string;
   category: string;
   trigger: string;
+  description?: string;
   mounts: SkillMount;
   requiresMcp: SkillMcpDependency[];
 }
@@ -57,6 +58,7 @@ export interface SettingsSkillItem {
   name: string;
   category: string;
   trigger: string;
+  description?: string;
   governance: {
     mounts: SkillMount;
     mountedCount: number;
@@ -90,6 +92,10 @@ export function normalizeSearch(value: string): string {
   return value.trim().toLowerCase();
 }
 
+export function matchesSkillSearch(skill: SettingsSkillItem, needle: string): boolean {
+  return `${skill.name} ${skill.category} ${skill.trigger} ${skill.description ?? ''}`.toLowerCase().includes(needle);
+}
+
 export function normalizeSkillsData(payload: SkillsApiData): SkillsData {
   return {
     ...payload,
@@ -117,6 +123,7 @@ export function composeSkillItems(governance: SkillsData, capabilityItems: Capab
       name: skill.name,
       category: skill.category,
       trigger: skill.trigger,
+      description: skill.description,
       governance: {
         mounts: skill.mounts,
         mountedCount: getMountedCount(skill.mounts),

@@ -63,7 +63,7 @@ export function SignalArticleList({
           />
           <line x1="4" y1="22" x2="4" y2="15" strokeLinecap="round" />
         </svg>
-        <p className="text-[14px] font-semibold text-cafe">当前筛选条件下没有文章</p>
+        <p className="text-sm font-semibold text-cafe">当前筛选条件下没有文章</p>
         <p className="mt-1 text-xs text-cafe-muted">尝试调整筛选条件或等待新信号</p>
       </div>
     );
@@ -111,8 +111,8 @@ export function SignalArticleList({
                 {initial}
               </div>
               <div className="min-w-0 flex-1">
-                <p className="line-clamp-2 text-[13px] font-semibold leading-[1.35] text-cafe">{article.title}</p>
-                <p className="mt-1 flex items-center gap-1.5 text-[11px] text-cafe-secondary">
+                <p className="line-clamp-2 text-sm font-semibold leading-[1.35] text-cafe">{article.title}</p>
+                <p className="mt-1 flex items-center gap-1.5 text-xs text-cafe-secondary">
                   <span>{article.source}</span>
                   <span>·</span>
                   <span>{formatDate(article.fetchedAt)}</span>

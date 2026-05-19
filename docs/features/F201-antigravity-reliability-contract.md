@@ -401,6 +401,9 @@ close_gate_report:
         - kind: alpha
           ref: "cascade-order P1 withdrawal"
           description: "HTML head order proves Next app CSS loads before static console CSS, so Tailwind does not override console controls"
+        - kind: alpha
+          ref: "Bengal Cat (antig-opus) real Antigravity smoke 2026-05-19"
+          description: "Controlled YOLO end-to-end: pwd+git-status 44ms PASS, node setTimeout 5s 5083ms PASS, /tmp write/read/delete 20ms PASS, MCP shell_exec 11ms PASS. Zero approval deadlock, native-executor bypasses UI gate."
 
   unmet: []
   deleted_or_scoped_out:

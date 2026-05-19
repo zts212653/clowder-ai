@@ -108,7 +108,7 @@ export function SkillRow({
               {skill.name}
             </SettingsText>
             <SettingsText as="p" tone="secondary" className="mt-0.5 truncate">
-              {skill.trigger || '—'}
+              {skill.description || skill.trigger || '—'}
             </SettingsText>
             <SettingsText as="p" tone="muted" className="mt-0.5">
               {skill.category || '未分类'}

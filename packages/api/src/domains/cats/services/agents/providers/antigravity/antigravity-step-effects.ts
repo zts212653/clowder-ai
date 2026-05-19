@@ -35,12 +35,16 @@ export interface AntigravityStepEffectSummary {
 }
 
 const READ_ONLY_MCP_TOOLS = new Set<string>([
+  'grep_search',
+  'list_dir',
+  'read_file',
   'search_evidence',
   'cat_cafe_search_evidence',
   'graph_resolve',
   'cat_cafe_graph_resolve',
   'list_recent',
   'cat_cafe_list_recent',
+  'view_file',
   'get_thread_context',
   'cat_cafe_get_thread_context',
   'list_threads',
@@ -251,6 +255,14 @@ export function classifyAntigravityStepEffect(step: TrajectoryStep): Antigravity
 
   const toolName = toolNameFromStep(step);
   if (toolName) {
+    if (isReadOnlyMcpTool(toolName)) {
+      return {
+        ...safeEffect('tool_read', 'reviewed read-only Antigravity tool'),
+        effectType: 'mcp',
+        toolName,
+        target: toolName,
+      };
+    }
     return {
       ...unsafeEffect(effectKindFromStatus(step), 'tool', 'shape fallback tool is unsafe by default'),
       toolName,

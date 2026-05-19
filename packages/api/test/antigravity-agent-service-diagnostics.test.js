@@ -14,7 +14,7 @@ describe('AntigravityAgentService (Bridge) — diagnostics', () => {
           {
             type: 'CORTEX_STEP_TYPE_TOOL_CALL',
             status: 'CORTEX_STEP_STATUS_DONE',
-            toolCall: { toolName: 'read_file', input: '{}' },
+            toolCall: { toolName: 'write_file', input: '{}' },
           },
         ],
         cursor: { baselineStepCount: 0, lastDeliveredStepCount: 3, terminalSeen: true, lastActivityAt: Date.now() },

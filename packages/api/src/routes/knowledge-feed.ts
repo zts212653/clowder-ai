@@ -7,15 +7,24 @@
 
 import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
+import { CollectionIndexBuilder } from '../domains/memory/CollectionIndexBuilder.js';
 import { COLLECTION_SENSITIVITY_ORDER } from '../domains/memory/collection-types.js';
-import type { IMarkerQueue, IMaterializationService } from '../domains/memory/interfaces.js';
+import type {
+  IEvidenceStore,
+  IMarkerQueue,
+  IMaterializationService,
+  MaterializeOptions,
+} from '../domains/memory/interfaces.js';
 import type { LibraryCatalog } from '../domains/memory/LibraryCatalog.js';
+import type { SqliteEvidenceStore } from '../domains/memory/SqliteEvidenceStore.js';
+import { resolveCollectionScanner } from '../domains/memory/scanner-resolver.js';
 
 interface KnowledgeFeedDeps {
   markerQueue: IMarkerQueue;
   db: Database.Database;
   materializationService?: IMaterializationService;
   catalog?: LibraryCatalog;
+  collectionStores?: Map<string, IEvidenceStore>;
 }
 
 export async function knowledgeFeedRoutes(app: FastifyInstance, deps: KnowledgeFeedDeps) {
@@ -104,6 +113,9 @@ export async function knowledgeFeedRoutes(app: FastifyInstance, deps: KnowledgeF
         if (!target) {
           return reply.status(400).send({ error: `Unknown target collection: ${targetCollectionId}` });
         }
+        if ((target.status ?? 'active') === 'archived') {
+          return reply.status(409).send({ error: `Target collection is archived: ${targetCollectionId}` });
+        }
         const markers = await markerQueue.list();
         const marker = markers.find((m) => m.id === markerId);
         const sourceId = marker?.sourceCollectionId;
@@ -125,6 +137,9 @@ export async function knowledgeFeedRoutes(app: FastifyInstance, deps: KnowledgeF
             });
           }
         }
+        if (!deps.collectionStores?.has(targetCollectionId)) {
+          return reply.status(400).send({ error: `Target collection store unavailable: ${targetCollectionId}` });
+        }
       }
 
       await markerQueue.transition(markerId, 'approved', targetCollectionId ? { targetCollectionId } : undefined);
@@ -132,7 +147,19 @@ export async function knowledgeFeedRoutes(app: FastifyInstance, deps: KnowledgeF
       let materialized;
       if (materializationService) {
         try {
-          materialized = await materializationService.materialize(markerId);
+          const opts: MaterializeOptions = {};
+          if (targetCollectionId && catalog) {
+            const manifest = catalog.get(targetCollectionId);
+            if (manifest) opts.targetRoot = manifest.root;
+            const targetStore = deps.collectionStores?.get(targetCollectionId);
+            if (targetStore && manifest) {
+              const scanner = resolveCollectionScanner(manifest);
+              opts.indexBuilder = new CollectionIndexBuilder(targetStore as SqliteEvidenceStore, manifest, scanner);
+            } else {
+              opts.indexBuilder = null;
+            }
+          }
+          materialized = await materializationService.materialize(markerId, opts);
         } catch {
           // Materialize failure is non-fatal — marker stays approved
         }

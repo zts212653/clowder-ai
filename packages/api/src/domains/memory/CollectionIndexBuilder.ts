@@ -69,6 +69,26 @@ export class CollectionIndexBuilder {
     return { indexed, skipped, blocked: false, secretFindings: [] };
   }
 
+  async incrementalUpdate(changedPaths: string[]): Promise<void> {
+    const now = new Date().toISOString();
+    for (const filePath of changedPaths) {
+      if (!('parseSingle' in this.scanner && typeof this.scanner.parseSingle === 'function')) continue;
+      const scanned = (this.scanner as { parseSingle(f: string, r: string): ScannedEvidence | null }).parseSingle(
+        filePath,
+        this.manifest.root,
+      );
+      if (!scanned) continue;
+      const hash = createHash('sha256').update(scanned.rawContent).digest('hex');
+      const item: EvidenceItem = {
+        ...scanned.item,
+        sourceHash: hash,
+        updatedAt: now,
+        authority: this.manifest.reviewPolicy.authorityCeiling,
+      };
+      await this.store.upsert([item]);
+    }
+  }
+
   private async indexResults(results: ScannedEvidence[], force: boolean) {
     const now = new Date().toISOString();
     let indexed = 0;

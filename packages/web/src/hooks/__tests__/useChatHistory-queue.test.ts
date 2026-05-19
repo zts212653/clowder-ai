@@ -260,6 +260,51 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
     expect(catIds).not.toContain('codex');
   });
 
+  it('F194: preserves full ideate targetCats when queue hydration reports only active subset', async () => {
+    useChatStore.setState({
+      hasActiveInvocation: true,
+      intentMode: 'ideate',
+      targetCats: ['opus', 'opus-47', 'codex'],
+      catStatuses: {
+        opus: 'streaming',
+        'opus-47': 'done',
+        codex: 'streaming',
+      },
+    });
+
+    apiFetchMock.mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('/queue')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              queue: [],
+              paused: false,
+              activeInvocations: [
+                { catId: 'opus', startedAt: Date.now() },
+                { catId: 'codex', startedAt: Date.now() },
+              ],
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ messages: [], hasMore: false, tasks: [] }), { status: 200 }),
+      );
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-q' }));
+    });
+
+    const state = useChatStore.getState();
+    expect(state.targetCats).toEqual(['opus', 'opus-47', 'codex']);
+    expect(Object.values(state.activeInvocations).map((slot) => slot.catId)).toEqual(['opus', 'codex']);
+    expect(state.catStatuses.opus).toBe('streaming');
+    expect(state.catStatuses['opus-47']).toBe('done');
+    expect(state.catStatuses.codex).toBe('streaming');
+  });
+
   it('F108B P1-2: clears activeInvocations record when server reports none', async () => {
     // Pre-populate with stale activeInvocations
     useChatStore.setState({

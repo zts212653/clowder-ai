@@ -94,7 +94,7 @@ describe('SignalSourcesView', () => {
 
   function findFetchButton(): HTMLButtonElement | undefined {
     return Array.from(container.querySelectorAll('button')).find(
-      (btn) => btn.textContent === 'Fetch' || btn.textContent === '抓取中...',
+      (btn) => btn.textContent === '抓取' || btn.textContent === '抓取中...',
     ) as HTMLButtonElement | undefined;
   }
 
@@ -109,7 +109,7 @@ describe('SignalSourcesView', () => {
 
     const fetchBtn = findFetchButton();
     expect(fetchBtn).toBeDefined();
-    expect(fetchBtn?.textContent).toBe('Fetch');
+    expect(fetchBtn?.textContent).toBe('抓取');
 
     await act(async () => {
       fetchBtn?.click();

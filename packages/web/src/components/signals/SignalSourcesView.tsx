@@ -56,7 +56,7 @@ export function SignalSourcesView({ initialReferrerThread = null }: { initialRef
       const { summary } = result;
       const hasErrors = summary.errors.length > 0;
       const msg = hasErrors
-        ? `Fetch 失败: ${summary.errors[0]?.message ?? 'unknown error'}`
+        ? `抓取失败: ${summary.errors[0]?.message ?? '未知错误'}`
         : `抓取 ${summary.fetchedArticles} 篇，新增 ${summary.newArticles} 篇，去重 ${summary.duplicateArticles} 篇`;
       setFetchResult({ sourceId, message: msg, ok: !hasErrors });
     } catch (fetchError) {
@@ -87,10 +87,10 @@ export function SignalSourcesView({ initialReferrerThread = null }: { initialRef
   return (
     <div className="min-h-screen bg-gradient-to-b from-codex-bg/30 via-[var(--console-shell-bg)] to-[var(--console-shell-bg)]">
       <main className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-5 sm:px-6">
-        <header className="rounded-2xl border border-codex-light bg-[var(--console-card-bg)] p-4 shadow-sm">
+        <header className="rounded-2xl bg-[var(--console-card-bg)] p-4 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h1 className="text-xl font-bold text-cafe-black">Signal Sources</h1>
+              <h1 className="text-xl font-bold text-cafe-black">信号源管理</h1>
               <p className="text-sm text-cafe-secondary">集中管理信号源开关，无需手改 yaml。</p>
             </div>
             <SignalNav active="sources" initialReferrerThread={initialReferrerThread} />
@@ -144,7 +144,7 @@ export function SignalSourcesView({ initialReferrerThread = null }: { initialRef
           {groupedSources.map((group) => (
             <div
               key={`${group.tier}-${group.category}`}
-              className="rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4 shadow-sm"
+              className="rounded-2xl bg-[var(--console-card-bg)] p-4 shadow-sm"
             >
               <div className="mb-3 flex items-center gap-2">
                 <SignalTierBadge tier={group.tier} />
@@ -153,7 +153,7 @@ export function SignalSourcesView({ initialReferrerThread = null }: { initialRef
               </div>
               <ul className="space-y-2">
                 {group.sources.map((source) => (
-                  <li key={source.id} className="rounded-xl border border-[var(--console-border-soft)] p-3">
+                  <li key={source.id} className="rounded-xl bg-[var(--console-field-bg)] p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-cafe-black">{source.name}</p>
@@ -186,7 +186,7 @@ export function SignalSourcesView({ initialReferrerThread = null }: { initialRef
                           onClick={() => void doFetch(source.id)}
                           className="rounded-full border border-opus-light px-3 py-1 text-xs font-semibold text-opus-dark transition-colors hover:bg-opus-bg disabled:opacity-50"
                         >
-                          {fetchingIds.has(source.id) ? '抓取中...' : 'Fetch'}
+                          {fetchingIds.has(source.id) ? '抓取中...' : '抓取'}
                         </button>
                         <button
                           type="button"
@@ -199,7 +199,7 @@ export function SignalSourcesView({ initialReferrerThread = null }: { initialRef
                               : 'border-[var(--console-border-soft)] bg-[var(--console-field-bg)] text-cafe-secondary',
                           ].join(' ')}
                         >
-                          {updatingId === source.id ? '更新中...' : source.enabled ? 'ON' : 'OFF'}
+                          {updatingId === source.id ? '更新中...' : source.enabled ? '开启' : '关闭'}
                         </button>
                       </div>
                     </div>

@@ -87,9 +87,9 @@ describe('ServiceStatusPanel', () => {
 
     expect(mockFetch.mock.calls[0][0]).toBe('/api/services');
     expect(container.textContent).toContain('语音服务');
-    expect(container.textContent).toContain('Whisper STT');
+    expect(container.textContent).toContain('语音识别 (Whisper)');
     expect(container.textContent).toContain('运行中');
-    expect(container.textContent).not.toContain('Embedding Model');
+    expect(container.textContent).not.toContain('嵌入模型');
     expect(container.textContent).not.toContain('启动');
     expect(container.textContent).not.toContain('停止');
     expect(container.textContent).not.toContain('安装');
@@ -102,11 +102,11 @@ describe('ServiceStatusPanel', () => {
     );
 
     expect(container.textContent).toContain('记忆服务');
-    expect(container.textContent).toContain('Embedding Model');
+    expect(container.textContent).toContain('嵌入模型');
     expect(container.textContent).toContain('异常');
     expect(container.textContent).toContain('http://127.0.0.1:9880');
     expect(container.textContent).toContain('HTTP 503');
-    expect(container.textContent).not.toContain('Whisper STT');
+    expect(container.textContent).not.toContain('语音识别 (Whisper)');
   });
 
   it('renders nothing while the service request is pending', () => {
@@ -123,7 +123,7 @@ describe('ServiceStatusPanel', () => {
     await render(React.createElement(SettingsContent, { section: 'voice' }));
 
     expect(container.textContent).toContain('语音服务');
-    expect(container.textContent).toContain('Whisper STT');
+    expect(container.textContent).toContain('语音识别 (Whisper)');
     expect(container.querySelector('[data-testid="voice-settings-panel"]')).toBeTruthy();
   });
 
@@ -166,7 +166,7 @@ describe('ServiceStatusPanel', () => {
 
     await render(React.createElement(ServiceStatusPanel, { filterFeatures: ['voice-output'], title: 'TTS' }));
 
-    const installBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Install');
+    const installBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '安装');
     expect(installBtn).toBeTruthy();
 
     await act(async () => {

@@ -147,7 +147,7 @@ export function GraphInspector({
   uniqueRelations,
 }: GraphInspectorProps) {
   return (
-    <div data-testid="graph-side-panel" className="min-w-0 space-y-4 rounded-md border border-[#e5dacd] bg-white p-4">
+    <div data-testid="graph-side-panel" className="min-w-0 space-y-4 rounded-md bg-[var(--console-card-bg)] p-4">
       <div data-testid="graph-node-detail" className="space-y-3">
         <div>
           <div className="text-[10px] font-bold uppercase tracking-wide text-cafe-secondary">Selected node</div>
@@ -177,11 +177,11 @@ export function GraphInspector({
 function SelectedNodeMeta({ node }: { node: GraphNode }) {
   return (
     <div className="grid grid-cols-2 gap-2 text-[10px] text-cafe-secondary">
-      <span>Kind</span>
+      <span>类型</span>
       <span className="font-semibold text-cafe-primary">{node.kind}</span>
-      <span>Collection</span>
+      <span>集合</span>
       <span className="font-semibold text-cafe-primary">{node.collectionId}</span>
-      <span>Sensitivity</span>
+      <span>敏感级别</span>
       <span className="font-semibold text-cafe-primary">{node.sensitivity}</span>
     </div>
   );
@@ -198,9 +198,9 @@ function SelectedRelations({
 }) {
   return (
     <div>
-      <div className="text-[10px] font-bold uppercase tracking-wide text-cafe-secondary">Relations</div>
+      <div className="text-[10px] font-bold uppercase tracking-wide text-cafe-secondary">关系</div>
       <div className="mt-2 space-y-1">
-        {edges.length === 0 && <div className="text-[10px] text-cafe-secondary">No visible relations.</div>}
+        {edges.length === 0 && <div className="text-[10px] text-cafe-secondary">暂无可见关系。</div>}
         {edges.slice(0, 8).map((edge) => (
           <RelationRow
             edge={edge}
@@ -241,10 +241,10 @@ function GraphSummary({ graph }: { graph: GraphResult }) {
   return (
     <div className="border-t border-[#eee3d6] pt-3 text-[10px] text-cafe-secondary" data-testid="graph-summary">
       <div className="flex flex-wrap gap-3">
-        <span>Nodes: {graph.nodes.length}</span>
-        <span>Edges: {graph.edges.length}</span>
-        <span>Depth: {graph.depth}</span>
-        {graph.center && <span>Center: {graph.center}</span>}
+        <span>节点: {graph.nodes.length}</span>
+        <span>关系边: {graph.edges.length}</span>
+        <span>深度: {graph.depth}</span>
+        {graph.center && <span>中心: {graph.center}</span>}
       </div>
     </div>
   );
@@ -253,7 +253,7 @@ function GraphSummary({ graph }: { graph: GraphResult }) {
 function GraphLegend({ uniqueKinds }: { uniqueKinds: string[] }) {
   return (
     <div className="border-t border-[#eee3d6] pt-3">
-      <div className="mb-2 text-[10px] font-bold uppercase tracking-wide text-cafe-secondary">Legend</div>
+      <div className="mb-2 text-[10px] font-bold uppercase tracking-wide text-cafe-secondary">图例</div>
       <div className="flex flex-wrap items-center gap-2" data-testid="graph-legend">
         {uniqueKinds.map((k) => (
           <span key={k} className="flex items-center gap-1 text-[10px] text-cafe-secondary">
@@ -277,7 +277,7 @@ function GraphEdgeFilter({
 }) {
   return (
     <div className="border-t border-[#eee3d6] pt-3 text-[10px] text-cafe-secondary" data-testid="graph-edge-filter">
-      <div className="mb-2 font-bold uppercase tracking-wide">Edge types</div>
+      <div className="mb-2 font-bold uppercase tracking-wide">关系类型</div>
       <div className="flex flex-wrap items-center gap-2">
         {uniqueRelations.map((rel) => (
           <label key={rel} className="flex items-center gap-0.5 cursor-pointer select-none">
@@ -299,7 +299,7 @@ export function GraphTooltip({ node }: { node: GraphNode }) {
   return (
     <div
       data-testid="graph-tooltip"
-      className="absolute inset-x-4 top-4 sm:left-auto sm:right-4 sm:max-w-xs rounded-lg bg-cafe-surface p-3 text-xs shadow-lg border border-cafe pointer-events-none"
+      className="absolute inset-x-4 top-4 sm:left-auto sm:right-4 sm:max-w-xs rounded-lg bg-cafe-surface p-3 text-xs shadow-lg pointer-events-none"
     >
       <div className="font-semibold text-cafe-primary">{node.title}</div>
       <div className="text-cafe-secondary">{node.kind}</div>

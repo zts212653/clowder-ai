@@ -119,7 +119,7 @@ describe('CollectionGraph query resolution', () => {
     expect(candidates?.textContent).toContain('discussion');
     expect(candidates?.textContent).toContain('project:cat-cafe');
     expect(candidates?.textContent).toContain('title');
-    expect(candidates?.textContent).toContain('4 relations');
+    expect(candidates?.textContent).toContain('4 条关系');
     expect(container.querySelector('[data-testid="graph-svg"]')).toBeNull();
   });
 

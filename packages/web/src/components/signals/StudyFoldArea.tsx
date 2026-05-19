@@ -127,7 +127,7 @@ export function StudyFoldArea({
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="flex w-full items-center justify-between rounded-t-lg border border-cafe bg-cafe-surface-elevated px-3 py-2 text-left text-xs font-semibold text-cafe-secondary"
+        className="flex w-full items-center justify-between rounded-t-lg bg-cafe-surface-elevated px-3 py-2 text-left text-xs font-semibold text-cafe-secondary"
       >
         <span>
           {open ? '▾' : '▸'} 学习区
@@ -138,7 +138,7 @@ export function StudyFoldArea({
         )}
       </button>
       {open && (
-        <div className="rounded-b-lg border border-t-0 border-cafe bg-cafe-surface-elevated p-3">
+        <div className="rounded-b-lg bg-cafe-surface-elevated p-3">
           <div className="flex flex-wrap gap-2">
             <button
               type="button"

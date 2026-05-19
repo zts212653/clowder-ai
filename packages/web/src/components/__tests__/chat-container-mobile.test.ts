@@ -2,6 +2,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatContainer } from '@/components/ChatContainer';
+import { useSidebarStore } from '@/stores/sidebarStore';
 
 const mockStoreState = () => ({
   messages: [],
@@ -144,6 +145,7 @@ describe('ChatContainer mobile interactions', () => {
   }
 
   beforeEach(() => {
+    useSidebarStore.setState({ isOpen: false });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -210,11 +212,14 @@ describe('ChatContainer mobile interactions', () => {
     expect(statusSheetAfter.getAttribute('data-open')).toBe('true');
   });
 
-  it('auto-opens sidebar on desktop viewport', () => {
+  it('auto-opens sidebar store on desktop but does not render mobile overlay', () => {
     mockMatchMedia(true);
     act(() => {
       root.render(React.createElement(ChatContainer, { threadId: 'test-thread' }));
     });
-    expect(container.querySelector('[data-testid="sidebar"]')).toBeTruthy();
+    // Desktop: sidebar store is open (AppShell renders the desktop sidebar)
+    expect(useSidebarStore.getState().isOpen).toBe(true);
+    // Mobile overlay must NOT mount — desktop sidebar lives in AppShell
+    expect(container.querySelector('[data-testid="sidebar"]')).toBeNull();
   });
 });

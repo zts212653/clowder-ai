@@ -34,6 +34,21 @@ export function __resetTaskCacheForTest() {
   taskCacheByThread.clear();
 }
 
+export function deriveQueueHydrationTargetCats({
+  intentMode,
+  previousTargetCats,
+  activeCatIds,
+}: {
+  intentMode: 'execute' | 'ideate' | null | undefined;
+  previousTargetCats: string[];
+  activeCatIds: string[];
+}): string[] {
+  if (intentMode === 'ideate' && previousTargetCats.length > 0 && activeCatIds.length > 0) {
+    return Array.from(new Set([...previousTargetCats, ...activeCatIds]));
+  }
+  return activeCatIds;
+}
+
 function isNearBottom(el: HTMLElement): boolean {
   return el.scrollHeight - el.clientHeight - el.scrollTop <= SCROLL_BOTTOM_THRESHOLD_PX;
 }
@@ -880,7 +895,22 @@ export function useChatHistory(threadId: string) {
       const activeStateSnapshot: Record<string, { catId: string; mode: string; startedAt?: number }> = {};
       if (data.activeInvocations && data.activeInvocations.length > 0) {
         const activeCatIds = data.activeInvocations.map((s) => s.catId);
-        replaceThreadTargetCats(fetchForThread, activeCatIds);
+        const livenessSnapshot =
+          fetchForThread === store.currentThreadId
+            ? { intentMode: store.intentMode, targetCats: store.targetCats, catStatuses: store.catStatuses }
+            : store.threadStates[fetchForThread];
+        const hydratedTargetCats = deriveQueueHydrationTargetCats({
+          intentMode: livenessSnapshot?.intentMode,
+          previousTargetCats: livenessSnapshot?.targetCats ?? [],
+          activeCatIds,
+        });
+        const previousStatuses = livenessSnapshot?.catStatuses ?? {};
+        replaceThreadTargetCats(fetchForThread, hydratedTargetCats);
+        for (const catId of hydratedTargetCats) {
+          if (!activeCatIds.includes(catId) && previousStatuses[catId]) {
+            updateThreadCatStatus(fetchForThread, catId, previousStatuses[catId]);
+          }
+        }
         for (const catId of activeCatIds) {
           updateThreadCatStatus(fetchForThread, catId, 'streaming');
         }

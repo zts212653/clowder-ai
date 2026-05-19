@@ -110,7 +110,7 @@ export function GithubConfigPanel() {
   return (
     <div
       className="space-y-3"
-      style={{ borderTop: '1px solid var(--cafe-border)', paddingInline: '1rem', paddingBlock: '0.75rem' }}
+      style={{ borderTop: '1px solid var(--console-border-soft)', paddingInline: '1rem', paddingBlock: '0.75rem' }}
     >
       <div className="space-y-1">
         <SettingsText as="p" variant="sm" tone="default" className="font-medium">
@@ -149,7 +149,7 @@ export function GithubConfigPanel() {
                 className="w-full"
                 style={{
                   borderRadius: '0.5rem',
-                  border: '1px solid var(--cafe-border)',
+                  border: '1px solid var(--console-border-soft)',
                   backgroundColor: 'var(--cafe-surface-elevated)',
                   paddingInline: '0.75rem',
                   paddingBlock: '0.5rem',

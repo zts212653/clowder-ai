@@ -19,10 +19,10 @@ const colorStyles: Record<StripTone, string> = {
 };
 
 const borderedColorStyles: Record<StripTone, string> = {
-  info: 'border border-blue-200 bg-conn-blue-bg text-conn-blue-text',
-  success: 'border border-emerald-200 bg-emerald-50 text-emerald-700',
+  info: 'border border-conn-blue-ring bg-conn-blue-bg text-conn-blue-text',
+  success: 'border border-conn-emerald-ring bg-conn-emerald-bg text-conn-emerald-text',
   warn: 'border border-conn-amber-ring bg-conn-amber-bg text-conn-amber-text',
-  error: 'border border-red-200 bg-conn-red-bg text-conn-red-text',
+  error: 'border border-conn-red-ring bg-conn-red-bg text-conn-red-text',
   muted: 'border border-[var(--console-border-soft)] text-cafe-muted',
 };
 

@@ -9,7 +9,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { L0PromptsSection, RuleFileCard } from '@/components/settings/RulesPromptsContent';
+import { L0PromptsSection, RuleFileCard, shouldShowL0Section } from '@/components/settings/RulesPromptsContent';
 
 beforeAll(() => {
   (globalThis as { React?: typeof React }).React = React;
@@ -93,5 +93,20 @@ describe('RuleFileCard error UX (F203 Phase F 砚砚 plan-review refinement)', (
     );
     expect(html).toContain('文件不存在');
     expect(html).not.toContain('编译失败');
+  });
+});
+
+describe('L0 gate — shouldShowL0Section predicate (#723 P1-7)', () => {
+  it('returns false when template.exists is false (open-source builds)', () => {
+    const l0 = { ...SAMPLE_L0, template: { ...SAMPLE_L0.template, exists: false } };
+    expect(shouldShowL0Section(l0)).toBe(false);
+  });
+
+  it('returns true when template.exists is true', () => {
+    expect(shouldShowL0Section(SAMPLE_L0)).toBe(true);
+  });
+
+  it('returns false when l0Prompts is undefined', () => {
+    expect(shouldShowL0Section(undefined)).toBe(false);
   });
 });

@@ -545,6 +545,8 @@ export class AntigravityAgentService implements AgentService {
         let attemptHasNativeDispatch = false;
         let attemptHasToolishStep = false;
         let attemptHasResolvedToolishStep = false;
+        let attemptHasReadOnlyMcpToolActivity = false;
+        let attemptHasUnsafeToolishStep = false;
         let modelCapacityRetryDelayMs: number | null = null;
         let retryErrorKind: UpstreamErrorKind | undefined;
         const handledToolCallIds = new Set<string>();
@@ -912,6 +914,19 @@ export class AntigravityAgentService implements AgentService {
               }
               const effectForStep = (step: (typeof batch.steps)[number]) => stepEffects.get(step);
               const batchEffectSummary = summarizeAntigravityEffects([...stepEffects.values()]);
+              const batchToolishEffects = [...stepEffects.values()].filter(
+                (effect) => effect.blocksBlindRetry || effect.kind === 'tool_read',
+              );
+              const isRetrySafeReadOnlyMcpEffect = (effect: (typeof batchToolishEffects)[number]) =>
+                effect.kind === 'tool_read' &&
+                effect.effectType === 'mcp' &&
+                !effect.sideEffectCapable &&
+                !effect.blocksBlindRetry;
+              const batchHasReadOnlyMcpToolActivity =
+                batchToolishEffects.length > 0 && batchToolishEffects.every(isRetrySafeReadOnlyMcpEffect);
+              const batchHasUnsafeToolishStep =
+                batchToolishEffects.length > 0 &&
+                batchToolishEffects.some((effect) => !isRetrySafeReadOnlyMcpEffect(effect));
               const isF201ToolishStep = (step: (typeof batch.steps)[number]) => {
                 const effect = effectForStep(step);
                 return effect?.blocksBlindRetry === true || effect?.kind === 'tool_read';
@@ -1013,6 +1028,12 @@ export class AntigravityAgentService implements AgentService {
                 return 'unknown';
               })() satisfies AntigravityDispatchRelevantStepKind;
               const transientJournalSummary = sideEffectJournal.summary();
+              const readOnlyToolActivityRetryEligible =
+                (attemptHasReadOnlyMcpToolActivity || batchHasReadOnlyMcpToolActivity) &&
+                !attemptHasUnsafeToolishStep &&
+                !batchHasUnsafeToolishStep &&
+                !attemptHasNativeDispatch &&
+                !transientJournalSummary.blocksBlindRetry;
               const transientRecoveryDecision = batchHasTransientError
                 ? decideAntigravityRecovery({
                     errorCode: batchHasModelCapacity ? 'model_capacity' : 'network_error',
@@ -1028,6 +1049,7 @@ export class AntigravityAgentService implements AgentService {
                       hasAttemptToolActivity: attemptHasToolActivity,
                       hasBatchToolActivity: batchHasToolActivity,
                       toolishRetryEligible,
+                      readOnlyToolActivityRetryEligible,
                       dispatchRelevantStepKind,
                       hasCooccurringUpstreamError: batchHasUpstreamError,
                     },
@@ -1474,6 +1496,12 @@ export class AntigravityAgentService implements AgentService {
               }
               if (batchHasResolvedToolishStep) {
                 attemptHasResolvedToolishStep = true;
+              }
+              if (batchHasReadOnlyMcpToolActivity) {
+                attemptHasReadOnlyMcpToolActivity = true;
+              }
+              if (batchHasUnsafeToolishStep) {
+                attemptHasUnsafeToolishStep = true;
               }
             }
             if (terminalAbort) {

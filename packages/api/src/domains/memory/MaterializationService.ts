@@ -9,6 +9,7 @@ import type {
   IIndexBuilder,
   IMarkerQueue,
   IMaterializationService,
+  MaterializeOptions,
   MaterializeResult,
 } from './interfaces.js';
 import { EVIDENCE_KINDS } from './interfaces.js';
@@ -38,7 +39,7 @@ export class MaterializationService implements IMaterializationService {
     return marker?.status === 'approved';
   }
 
-  async materialize(markerId: string): Promise<MaterializeResult> {
+  async materialize(markerId: string, options?: MaterializeOptions): Promise<MaterializeResult> {
     const markers = await this.markerQueue.list();
     const marker = markers.find((m) => m.id === markerId);
     if (!marker) throw new Error(`Marker not found: ${markerId}`);
@@ -53,7 +54,8 @@ export class MaterializationService implements IMaterializationService {
     }
     const anchor = `${kind}-${markerId}`;
     const subDir = KIND_TO_DIR[kind];
-    const dir = join(this.docsRoot, subDir);
+    const root = options?.targetRoot ?? this.docsRoot;
+    const dir = join(root, subDir);
     mkdirSync(dir, { recursive: true });
 
     // Conflict handling: append -N suffix if file already exists
@@ -89,11 +91,12 @@ export class MaterializationService implements IMaterializationService {
       // Not in a git repo or commit failed — continue gracefully
     }
 
-    // Trigger reindex if indexBuilder provided
+    // Trigger reindex: use override if provided, null = skip, undefined = default
     let reindexed = false;
-    if (this.indexBuilder) {
+    const effectiveBuilder = options?.indexBuilder === undefined ? this.indexBuilder : options.indexBuilder;
+    if (effectiveBuilder) {
       try {
-        await this.indexBuilder.incrementalUpdate([outputPath]);
+        await effectiveBuilder.incrementalUpdate([outputPath]);
         reindexed = true;
       } catch {
         // Reindex failed — continue gracefully

@@ -61,14 +61,14 @@ function GraphCanvas({
 }) {
   const renderedHeight = Math.round((viewHeight / H) * 560);
   return (
-    <div className="relative min-w-0 overflow-auto rounded-md border border-[#e5dacd] bg-white">
+    <div className="relative min-w-0 overflow-auto rounded-md bg-[var(--console-card-bg)]">
       <svg
         viewBox={`0 0 ${W} ${viewHeight}`}
         className="w-full"
         style={{ height: `${renderedHeight}px` }}
         preserveAspectRatio="xMidYMid meet"
         role="img"
-        aria-label="Knowledge graph"
+        aria-label="知识图谱"
         data-testid="graph-svg"
       >
         <defs>
@@ -273,16 +273,16 @@ export function CollectionGraph() {
     <div data-testid="collection-graph">
       <GraphSearchForm inputRef={inputRef} onSubmit={handleSubmit} />
 
-      {loading && <div className="text-sm text-cafe-secondary">Loading graph...</div>}
-      {error && <div className="text-sm text-conn-red-text">Error: {error}</div>}
+      {loading && <div className="text-sm text-cafe-secondary">加载图谱...</div>}
+      {error && <div className="text-sm text-conn-red-text">错误: {error}</div>}
       {candidates.length > 0 && !loading && <GraphCandidates candidates={candidates} onSelect={handleNodeClick} />}
       {noMatch && !loading && <GraphNoMatch examples={noMatch.examples} message={noMatch.message} />}
       {graph && graph.nodes.length === 0 && !loading && (
-        <div className="text-sm text-cafe-secondary">No graph data for this anchor.</div>
+        <div className="text-sm text-cafe-secondary">该锚点暂无图谱数据。</div>
       )}
 
       {graph && graph.nodes.length > 0 && (
-        <div className="relative rounded-lg border border-cafe bg-[#fbfaf7] p-3">
+        <div className="relative rounded-lg bg-[var(--console-card-bg)] p-3">
           {graphNote === 'no_edges' && <GraphNoEdgesNote />}
           <div data-testid="graph-stage" className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
             <GraphCanvas

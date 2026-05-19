@@ -35,12 +35,12 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        setError(data?.error ?? `Dry-run failed (${res.status})`);
+        setError(data?.error ?? `预扫描失败 (${res.status})`);
         return;
       }
       setDryRun(await res.json());
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(err instanceof Error ? err.message : '未知错误');
     } finally {
       setDryRunLoading(false);
     }
@@ -70,7 +70,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        setError(data?.error ?? `Failed (${res.status})`);
+        setError(data?.error ?? `创建失败 (${res.status})`);
         return;
       }
       const collectionId = `${kind}:${name}`;
@@ -81,7 +81,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
       }
       onCreated();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(err instanceof Error ? err.message : '未知错误');
     } finally {
       setSubmitting(false);
     }
@@ -93,11 +93,11 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
       data-testid="create-collection-dialog"
     >
       <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-lg p-6 w-full max-w-md space-y-4">
-        <h3 className="font-semibold text-sm text-cafe-primary">Create Collection</h3>
+        <h3 className="font-semibold text-sm text-cafe-primary">新建集合</h3>
         {error && <div className="text-xs text-red-600 bg-red-50 rounded p-2">{error}</div>}
         <div className="grid grid-cols-2 gap-3">
           <label className="text-xs text-cafe-secondary">
-            Kind
+            类型
             <select
               value={kind}
               onChange={(e) => setKind(e.target.value)}
@@ -111,7 +111,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
             </select>
           </label>
           <label className="text-xs text-cafe-secondary">
-            Name
+            名称
             <input
               value={name}
               onChange={(e) => setName(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
@@ -122,7 +122,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
           </label>
         </div>
         <label className="text-xs text-cafe-secondary block">
-          Display Name
+          显示名称
           <input
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
@@ -132,7 +132,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
           />
         </label>
         <label className="text-xs text-cafe-secondary block">
-          Root Path <span className="text-cafe-tertiary">(leave empty for managed vault)</span>
+          根路径 <span className="text-cafe-tertiary">（留空则使用托管存储）</span>
           <input
             value={root}
             onChange={(e) => {
@@ -144,7 +144,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
           />
         </label>
         <label className="text-xs text-cafe-secondary block">
-          Sensitivity
+          敏感级别
           <select
             value={sensitivity}
             onChange={(e) => setSensitivity(e.target.value)}
@@ -159,14 +159,12 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
         </label>
         {dryRun && (
           <div className="text-xs bg-blue-50 rounded p-3 space-y-1" data-testid="dry-run-preview">
-            <div className="font-medium text-blue-800">Scan Preview</div>
+            <div className="font-medium text-blue-800">扫描预览</div>
             <div className="text-blue-700">
-              {dryRun.totalFiles} files ({dryRun.markdownFiles} markdown)
+              {dryRun.totalFiles} 个文件（{dryRun.markdownFiles} 个 Markdown）
             </div>
             {dryRun.secretFindings > 0 && (
-              <div className="text-red-600 font-medium">
-                {dryRun.secretFindings} secret(s) detected — review before creating.
-              </div>
+              <div className="text-red-600 font-medium">检测到 {dryRun.secretFindings} 个敏感信息 — 创建前请核查。</div>
             )}
           </div>
         )}
@@ -176,7 +174,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
             onClick={onClose}
             className="px-3 py-1 text-xs text-cafe-secondary border border-cafe rounded hover:bg-gray-50"
           >
-            Cancel
+            取消
           </button>
           {canDryRun && !dryRun && (
             <button
@@ -186,7 +184,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
               className="px-3 py-1 text-xs text-blue-700 border border-blue-300 rounded hover:bg-blue-50 disabled:opacity-50"
               data-testid="dry-run-btn"
             >
-              {dryRunLoading ? 'Scanning...' : 'Preview Scan'}
+              {dryRunLoading ? '扫描中...' : '预览扫描'}
             </button>
           )}
           <button
@@ -194,7 +192,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
             disabled={submitting || !name || !displayName || (canDryRun && !confirmed)}
             className="px-3 py-1 text-xs text-white bg-cafe-primary rounded hover:bg-cafe-primary/90 disabled:opacity-50"
           >
-            {submitting ? 'Creating...' : confirmed ? 'Create' : 'Preview & Create'}
+            {submitting ? '创建中...' : confirmed ? '创建' : '预览并创建'}
           </button>
         </div>
       </form>

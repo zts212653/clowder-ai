@@ -71,14 +71,7 @@ describe('buildMemoryTabItems', () => {
 
   it('has correct labels', () => {
     const items = buildMemoryTabItems('');
-    expect(items.map((i) => i.label)).toEqual([
-      'Knowledge Feed',
-      'Search',
-      'Index Status',
-      'Health',
-      'Library',
-      'Graph',
-    ]);
+    expect(items.map((i) => i.label)).toEqual(['知识动态', '搜索', '索引状态', '健康度', '图书馆', '知识图谱']);
   });
 
   it('MemoryTab type covers all tabs', () => {
@@ -107,7 +100,7 @@ describe('MemoryNav component', () => {
     expect(container.querySelector('[data-testid="memory-back-to-chat"]')?.getAttribute('href')).toBe(
       '/thread/thread_b',
     );
-    expect(container.textContent).toContain('Graph');
+    expect(container.textContent).toContain('知识图谱');
 
     root.unmount();
     container.remove();

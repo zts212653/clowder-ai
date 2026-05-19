@@ -12,6 +12,7 @@ import { godAction, submitAction } from '@/hooks/useGameApi';
 import { reconnectGame } from '@/hooks/useGameReconnect';
 import { useGovernanceStatus } from '@/hooks/useGovernanceStatus';
 import { useIndexState } from '@/hooks/useIndexState';
+import { useIsDesktop } from '@/hooks/useIsDesktop';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { usePreviewAutoOpen } from '@/hooks/usePreviewAutoOpen';
 import { useSendMessage } from '@/hooks/useSendMessage';
@@ -25,6 +26,7 @@ import { useWorkspaceNavigate } from '@/hooks/useWorkspaceNavigate';
 import { type ChatMessage as ChatMessageData, type Thread, useChatStore } from '@/stores/chatStore';
 import { useGameStore } from '@/stores/gameStore';
 import { useGuideStore } from '@/stores/guideStore';
+import { useSidebarStore } from '@/stores/sidebarStore';
 import { useTaskStore } from '@/stores/taskStore';
 import { apiFetch } from '@/utils/api-client';
 import { computeScrollRecomputeSignal } from '@/utils/scrollRecomputeSignal';
@@ -44,7 +46,6 @@ import { syncLocalBootcampState } from './first-run-quest/syncLocalBootcampState
 import { useFirstProjectMistakeTipGate } from './first-run-quest/useFirstProjectMistakeTipGate';
 import { useFirstProjectPreviewAutoOpen } from './first-run-quest/useFirstProjectPreviewAutoOpen';
 import { GameOverlayConnector } from './game/GameOverlayConnector';
-import { HubListModal } from './HubListModal';
 import { BootcampIcon } from './icons/BootcampIcon';
 import { PawIcon } from './icons/PawIcon';
 import { MessageActions } from './MessageActions';
@@ -134,11 +135,10 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const workspaceWorktreeId = useChatStore((s) => s.workspaceWorktreeId);
   usePreviewAutoOpen(workspaceWorktreeId, threadId);
   useWorkspaceNavigate(workspaceWorktreeId, threadId);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { isOpen: sidebarOpen, open: openSidebar, close: closeSidebar, toggle: toggleSidebar } = useSidebarStore();
   const [statusPanelOpen, setStatusPanelOpen] = useState(true);
   const [mobileStatusOpen, setMobileStatusOpen] = useState(false);
   const [showBootcampList, setShowBootcampList] = useState(false);
-  const [showHubList, setShowHubList] = useState(false);
   const [showFirstRunQuestPrompt, setShowFirstRunQuestPrompt] = useState(false);
   const [showQuestWizard, setShowQuestWizard] = useState(false);
   // F106: fetch bootcamp count independently of sidebar lifecycle
@@ -173,12 +173,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     'cat-cafe:statusPanelWidth',
     STATUS_PANEL_DEFAULT,
   );
-  // F063 Gap 6: sidebar width in px, persisted
-  const SIDEBAR_DEFAULT = 240;
-  const [sidebarWidth, setSidebarWidth, resetSidebarWidth] = usePersistedState(
-    'cat-cafe:sidebarWidth',
-    SIDEBAR_DEFAULT,
-  );
   const containerRef = useRef<HTMLDivElement>(null);
   const handleHorizontalResize = useCallback(
     (delta: number) => {
@@ -189,12 +183,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       setChatBasis((prev) => Math.min(80, Math.max(20, prev + pct)));
     },
     [setChatBasis],
-  );
-  const handleSidebarResize = useCallback(
-    (delta: number) => {
-      setSidebarWidth((prev) => Math.min(480, Math.max(180, prev + delta)));
-    },
-    [setSidebarWidth],
   );
   // clowder-ai#28: drag-to-resize for right status panel (negative delta = panel wider)
   const handleStatusPanelResize = useCallback(
@@ -211,13 +199,14 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     }
   }, [rightPanelMode, statusPanelOpen]);
 
+  const isDesktop = useIsDesktop();
+
   // Desktop: open sidebar before first paint (useLayoutEffect avoids false→true flicker).
-  // SSR parity: both server and client start with false, layoutEffect flips before paint.
   useLayoutEffect(() => {
-    if (typeof window.matchMedia === 'function' && window.matchMedia('(min-width: 768px)').matches) {
-      setSidebarOpen(true);
+    if (isDesktop) {
+      openSidebar();
     }
-  }, []);
+  }, [isDesktop, openSidebar]);
 
   const { handleAgentMessage, handleStop: stopHandler, resetRefs, resetTimeout, clearDoneTimeout } = useAgentMessages();
   const { handleScroll, scrollContainerRef, messagesEndRef, isLoadingHistory, hasMore } = useChatHistory(threadId);
@@ -772,28 +761,16 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
 
   return (
     <div ref={containerRef} className="flex h-screen h-dvh">
-      {sidebarOpen && (
+      {/* Mobile-only sidebar overlay — desktop sidebar is in AppShell */}
+      {sidebarOpen && !isDesktop && (
         <>
-          {/* Backdrop — mobile only */}
           <div
-            className="fixed inset-0 bg-[var(--console-overlay-backdrop)] z-20 md:hidden"
-            onClick={() => setSidebarOpen(false)}
+            className="fixed inset-0 bg-[var(--console-overlay-backdrop)] z-20"
+            onClick={closeSidebar}
             aria-hidden="true"
           />
-          <div
-            className="fixed inset-y-0 left-0 z-30 md:static md:z-auto flex-shrink-0"
-            style={{ width: sidebarWidth }}
-          >
-            <ThreadSidebar onClose={() => setSidebarOpen(false)} className="w-full" />
-          </div>
-          <div className="hidden md:flex items-center">
-            <ResizeHandle
-              direction="horizontal"
-              label="左侧对话栏"
-              onResize={handleSidebarResize}
-              onCollapse={() => setSidebarOpen(false)}
-              onDoubleClick={resetSidebarWidth}
-            />
+          <div className="fixed inset-y-0 left-0 z-30 w-[240px]">
+            <ThreadSidebar onClose={closeSidebar} className="w-full" />
           </div>
         </>
       )}
@@ -808,7 +785,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       >
         <ChatContainerHeader
           sidebarOpen={sidebarOpen}
-          onToggleSidebar={() => setSidebarOpen((v) => !v)}
+          onToggleSidebar={toggleSidebar}
           threadId={threadId}
           authPendingCount={authPending.length}
           viewMode={viewMode}
@@ -1180,7 +1157,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         onCreated={handleQuestCreated}
       />
       <BootcampListModal open={showBootcampList} onClose={handleBootcampModalClose} currentThreadId={threadId} />
-      <HubListModal open={showHubList} onClose={() => setShowHubList(false)} currentThreadId={threadId} />
       {showVoteModal && <VoteConfigModal onSubmit={handleVoteSubmit} onCancel={() => setShowVoteModal(false)} />}
       {/* Bootcamp guide overlay: intro phase tips + lifecycle tips (phase-7.5 uses guide engine) */}
       {(() => {

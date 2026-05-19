@@ -58,11 +58,11 @@ function CollectionDetail({ collectionId }: { collectionId: string }) {
   }, [collectionId]);
 
   if (loading) {
-    return <div className="text-xs text-cafe-secondary py-2">Loading documents...</div>;
+    return <div className="text-xs text-cafe-secondary py-2">加载文档...</div>;
   }
 
   if (groups.length === 0) {
-    return <div className="text-xs text-cafe-secondary py-2">No documents indexed.</div>;
+    return <div className="text-xs text-cafe-secondary py-2">暂无已索引文档。</div>;
   }
 
   return (
@@ -85,7 +85,7 @@ function CollectionDetail({ collectionId }: { collectionId: string }) {
               </li>
             ))}
             {g.hasMore && (
-              <li className="text-[10px] text-cafe-tertiary italic">and {g.count - g.documents.length} more...</li>
+              <li className="text-[10px] text-cafe-tertiary italic">还有 {g.count - g.documents.length} 条...</li>
             )}
           </ul>
         </div>
@@ -157,22 +157,20 @@ export function CollectionCatalog() {
   );
 
   if (loading) {
-    return <div className="p-4 text-cafe-secondary text-sm">Loading collections...</div>;
+    return <div className="p-4 text-cafe-secondary text-sm">加载集合...</div>;
   }
 
   return (
     <div data-testid="collection-catalog">
       <div className="flex items-center justify-between mb-3">
-        <span className="text-xs text-cafe-secondary">
-          {collections.length} collection{collections.length !== 1 ? 's' : ''}
-        </span>
+        <span className="text-xs text-cafe-secondary">{collections.length} 个集合</span>
         <button
           type="button"
           onClick={() => setShowCreate(true)}
           className="px-3 py-1 text-xs text-white bg-cafe-primary rounded hover:bg-cafe-primary/90"
           data-testid="create-collection-btn"
         >
-          + New Collection
+          + 新建集合
         </button>
       </div>
       {showCreate && (
@@ -184,7 +182,7 @@ export function CollectionCatalog() {
           }}
         />
       )}
-      {collections.length === 0 && <div className="p-4 text-cafe-secondary text-sm">No collections registered.</div>}
+      {collections.length === 0 && <div className="p-4 text-cafe-secondary text-sm">暂无已注册集合。</div>}
       <div className="grid gap-3">
         {collections.map((c) => {
           const isExpanded = expandedId === c.manifest.id;
@@ -194,7 +192,7 @@ export function CollectionCatalog() {
           return (
             <div
               key={c.manifest.id}
-              className={`rounded-lg border border-cafe bg-white p-4 transition-colors hover:border-cafe-primary/30 ${isArchived ? 'opacity-60' : ''}`}
+              className={`rounded-lg bg-[var(--console-card-bg)] p-4 transition-colors ${isArchived ? 'opacity-60' : ''}`}
               data-testid={`collection-card-${c.manifest.id}`}
             >
               <button
@@ -222,10 +220,10 @@ export function CollectionCatalog() {
               </button>
               {c.overview && (
                 <div className="text-xs text-cafe-secondary">
-                  <span>{c.overview.docCount} docs</span>
+                  <span>{c.overview.docCount} 篇文档</span>
                   {c.overview.topKinds.length > 0 && (
                     <span className="ml-2">
-                      Top:{' '}
+                      热门:{' '}
                       {c.overview.topKinds
                         .slice(0, 3)
                         .map((k) => `${k.kind}(${k.count})`)
@@ -236,9 +234,9 @@ export function CollectionCatalog() {
               )}
               {c.health && (
                 <div className="text-xs text-cafe-secondary mt-1">
-                  <span>Last indexed: {c.health.indexFreshness || 'never'}</span>
+                  <span>最近索引: {c.health.indexFreshness || '从未'}</span>
                   {c.health.pendingReviewCount > 0 && (
-                    <span className="ml-2 text-conn-amber-text">{c.health.pendingReviewCount} pending review</span>
+                    <span className="ml-2 text-conn-amber-text">{c.health.pendingReviewCount} 条待审核</span>
                   )}
                 </div>
               )}
@@ -251,7 +249,7 @@ export function CollectionCatalog() {
                     className="px-2 py-0.5 text-[10px] border border-cafe rounded hover:bg-gray-50 text-cafe-secondary disabled:opacity-50"
                     data-testid={`unarchive-${c.manifest.id}`}
                   >
-                    {isBusy ? '...' : 'Unarchive'}
+                    {isBusy ? '...' : '取消归档'}
                   </button>
                 ) : (
                   <>
@@ -262,7 +260,7 @@ export function CollectionCatalog() {
                       className="px-2 py-0.5 text-[10px] border border-cafe rounded hover:bg-gray-50 text-cafe-secondary disabled:opacity-50"
                       data-testid={`rebuild-${c.manifest.id}`}
                     >
-                      {isBusy ? '...' : 'Rebuild Index'}
+                      {isBusy ? '...' : '重建索引'}
                     </button>
                     <button
                       type="button"
@@ -271,7 +269,7 @@ export function CollectionCatalog() {
                       className="px-2 py-0.5 text-[10px] border border-cafe rounded hover:bg-gray-50 text-cafe-secondary disabled:opacity-50"
                       data-testid={`archive-${c.manifest.id}`}
                     >
-                      {isBusy ? '...' : 'Archive'}
+                      {isBusy ? '...' : '归档'}
                     </button>
                   </>
                 )}

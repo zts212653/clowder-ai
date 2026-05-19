@@ -19,6 +19,7 @@ export interface AntigravityRecoveryDispatchState {
   hasAttemptToolActivity: boolean;
   hasBatchToolActivity: boolean;
   toolishRetryEligible: boolean;
+  readOnlyToolActivityRetryEligible?: boolean;
   dispatchRelevantStepKind: AntigravityDispatchRelevantStepKind;
   hasCooccurringUpstreamError?: boolean;
 }
@@ -125,14 +126,19 @@ function decideEmptyResponseRecovery(ctx: AntigravityRecoveryContext): Antigravi
 function terminalTransientReason(ctx: AntigravityRecoveryContext): string | null {
   if (!hasRetryBudget(ctx)) return 'retry_budget_exhausted';
   const { dispatchState } = ctx;
+  const readOnlyToolActivityRetryEligible = dispatchState.readOnlyToolActivityRetryEligible === true;
   if (dispatchState.hasCooccurringUpstreamError) return 'cooccurring_upstream_error';
-  if (dispatchState.hasResolvedToolishStep) return 'resolved_toolish_step_seen';
+  if (dispatchState.hasResolvedToolishStep && !readOnlyToolActivityRetryEligible) return 'resolved_toolish_step_seen';
   if (dispatchState.hasNativeDispatch) return 'native_dispatch_seen';
-  if (dispatchState.hasAttemptToolActivity) return 'tool_activity_seen';
-  if (dispatchState.hasBatchToolActivity) return 'tool_activity_seen';
-  if (dispatchState.hasDispatchRelevantStep && !dispatchState.toolishRetryEligible) {
+  if (dispatchState.hasAttemptToolActivity && !readOnlyToolActivityRetryEligible) return 'tool_activity_seen';
+  if (dispatchState.hasBatchToolActivity && !readOnlyToolActivityRetryEligible) return 'tool_activity_seen';
+  if (
+    dispatchState.hasDispatchRelevantStep &&
+    !dispatchState.toolishRetryEligible &&
+    !readOnlyToolActivityRetryEligible
+  ) {
     return dispatchState.dispatchRelevantStepKind === 'tool_read_mcp'
-      ? 'read_only_mcp_tool_transient_retry_intentionally_disabled'
+      ? 'read_only_mcp_tool_activity_not_retry_safe'
       : 'toolish_step_present';
   }
   return null;

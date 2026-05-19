@@ -84,17 +84,17 @@ describe('getActionItems', () => {
 
   it('suggests seeding when all docs are observed', () => {
     const items = getActionItems(baseReport);
-    expect(items.some((i) => i.includes('constitutional'))).toBe(true);
+    expect(items.some((i) => i.includes('宪法播种'))).toBe(true);
   });
 
   it('flags unresolved contradictions', () => {
     const items = getActionItems({ ...baseReport, contradictions: { total: 3, unresolved: 2 } });
-    expect(items.some((i) => i.includes('contradiction'))).toBe(true);
+    expect(items.some((i) => i.includes('未解决矛盾'))).toBe(true);
   });
 
   it('flags overdue reviews', () => {
     const items = getActionItems({ ...baseReport, staleReview: { warning: 1, overdue: 3 } });
-    expect(items.some((i) => i.includes('overdue'))).toBe(true);
+    expect(items.some((i) => i.includes('逾期'))).toBe(true);
   });
 
   it('returns empty when everything is healthy', () => {
@@ -103,7 +103,7 @@ describe('getActionItems', () => {
       byAuthority: { observed: 100, candidate: 50, validated: 30, constitutional: 20 },
     };
     const items = getActionItems(healthy);
-    expect(items.some((i) => i.includes('constitutional'))).toBe(false);
+    expect(items.some((i) => i.includes('宪法播种'))).toBe(false);
   });
 
   it('flags stale anchors', () => {
@@ -111,7 +111,7 @@ describe('getActionItems', () => {
       ...baseReport,
       staleAnchors: { count: 3, items: [] },
     });
-    expect(items.some((i) => i.includes('stale'))).toBe(true);
+    expect(items.some((i) => i.includes('过期锚点'))).toBe(true);
   });
 
   it('flags orphan edges', () => {
@@ -119,7 +119,7 @@ describe('getActionItems', () => {
       ...baseReport,
       orphanEdges: { count: 5 },
     });
-    expect(items.some((i) => i.includes('orphan'))).toBe(true);
+    expect(items.some((i) => i.includes('孤立边'))).toBe(true);
   });
 
   it('flags knowledge feed pending', () => {
@@ -127,6 +127,6 @@ describe('getActionItems', () => {
       ...baseReport,
       knowledgeFeed: { pendingCount: 7, needsReviewCount: 2 },
     });
-    expect(items.some((i) => i.includes('pending'))).toBe(true);
+    expect(items.some((i) => i.includes('待处理知识动态'))).toBe(true);
   });
 });
