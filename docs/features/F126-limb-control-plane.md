@@ -1,6 +1,6 @@
 ---
 feature_ids: [F126]
-related_features: [F041, F088, F102, F118, F124]
+related_features: [F041, F088, F102, F118, F124, F208]
 topics: [node, capability, presence, fleet, control-plane, distributed, limb]
 doc_kind: spec
 created: 2026-03-16

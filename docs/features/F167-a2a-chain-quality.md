@@ -1,6 +1,6 @@
 ---
 feature_ids: [F167]
-related_features: [F064, F027, F122, F055]
+related_features: [F064, F027, F122, F055, F208]
 topics: [a2a, collaboration, harness-engineering, agent-readiness]
 doc_kind: spec
 created: 2026-04-17
