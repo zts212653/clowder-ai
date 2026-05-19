@@ -33,11 +33,36 @@ renamed-from: deep-research-pipeline
 - 纯代码问题（用 Explore agent）
 - 项目文档里已有答案
 
+## 文件组织规范（铁律）
+
+**一个研究课题 = 一个子目录**。只要产出超过 1 个文件，就必须建子目录，禁止在 `project-research/` 平铺散落。
+
+```
+project-research/YYYY-MM-DD-{topic}/
+├── prompt.md                          # Step 1 研究提示词（同时保留到 docs/prompts/ 的副本）
+├── {provider}-response.md             # Step 2 云端 deep research 原文
+│   例：claude-response.md / gemini-response.md / gpt-response.md
+├── gpt-pro-review.md                  # Step 3 GPT Pro 审阅（可选）
+├── {cat}-synthesis.md                 # Step 4 猫猫独立综合分析
+│   例：opus-synthesis.md / codex-synthesis.md / opus47-synthesis.md
+├── {cat}-点评.md                      # 非代码猫的风格点评（如Siamese）
+└── synthesis.md                       # 最终合并综合（如果有）
+```
+
+**命名规则**：
+- `{topic}` 用英文 kebab-case（如 `finance-provider-stack`、`memory-architecture`）
+- `{provider}` = 云端模型标识：`claude` / `gemini` / `gpt` / `gpt-pro`
+- `{cat}` = 猫猫名：`opus` / `opus47` / `codex` / `gemini-cat`（避免和 provider 名冲突时加 `-cat`）
+- 如果只有 1 个文件（如单次 Mode B 咨询），可以不建子目录，直接放 `project-research/`
+
+**Mode B 咨询归属**：如果咨询是某个已有研究课题的一部分，文件放进该课题子目录（不另建目录）。
+
 ## 四步流程
 
 **Step 1 — 写 Prompt 并落盘**
 ```
-docs/prompts/YYYY-MM-DD-{topic}-research-prompt.md
+project-research/YYYY-MM-DD-{topic}/prompt.md
+（同时复制一份到 docs/prompts/YYYY-MM-DD-{topic}-research-prompt.md，向后兼容）
 ```
 模板见下方。写完再发，不要边写边发。
 
@@ -48,15 +73,16 @@ docs/prompts/YYYY-MM-DD-{topic}-research-prompt.md
   Gemini Deep Research
   ChatGPT Deep Research  ← 可能先问澄清问题，答完后把 Q&A 追加到另外两路的 prompt
 ```
-结果存：`project-research/YYYY-MM-DD-{topic}/`（chatgpt / claude-ai / gemini）
+结果存：`project-research/YYYY-MM-DD-{topic}/{provider}-response.md`
 
 **Step 3 — GPT-5.2 Pro 审阅**
 输入三份报告 → 找逻辑漏洞、弱证据、三方分歧
-存：`gpt-pro-review.md`（注意：Pro 是审阅者，不是调研者，不要让他搜索）
+存：`project-research/YYYY-MM-DD-{topic}/gpt-pro-review.md`（注意：Pro 是审阅者，不是调研者，不要让他搜索）
 
 **Step 4 — Coder 猫综合 + 决策**
 读全部四份文档 → 对照实际 codebase 验证 → 标注"直接可用/需验证/项目特殊约束"
-存：`synthesis.md` → 和铲屎官讨论 → 落到 ADR
+如果多只猫并行综合，每只猫存自己的：`{cat}-synthesis.md`
+最终合并版：`synthesis.md` → 和铲屎官讨论 → 落到 ADR
 
 ## Prompt 模板（Step 1）
 
@@ -275,10 +301,14 @@ project-research/YYYY-MM-DD-{topic}-{model}-consult.md
 
 ## 文件命名规范
 
+**独立咨询**（不属于某个研究课题）：
 ```
 project-research/YYYY-MM-DD-{topic}-{model}-consult.md
 ```
+例如：`2026-03-08-model-agent-platform-gpt-pro-consult.md`
 
-例如：
-- `2026-03-08-model-agent-platform-gpt-pro-consult.md`
-- `2026-03-05-mcp-security-claude-pro-consult.md`
+**属于已有课题的咨询**：放进课题子目录
+```
+project-research/YYYY-MM-DD-{topic}/{model}-consult.md
+```
+例如：*(internal reference removed)*
