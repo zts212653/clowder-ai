@@ -1259,6 +1259,12 @@
       "name": "AI Family Office — 个人投资学习基建",
       "status": "spec | **Owner**: Ragdoll | **Priority**: P2",
       "file": "F207-personal-finance-infra.md"
+    },
+    {
+      "id": "F208",
+      "name": "Harness Control Plane — 统一 harness unit 生命周期管理",
+      "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F208-harness-control-plane.md"
     }
   ]
 }
