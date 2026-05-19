@@ -5,6 +5,7 @@
 
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
+import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
 
 // Create a mock agent service that yields text + done
@@ -214,7 +215,7 @@ describe('bootcamp invocation context', () => {
           participants: [],
           lastActiveAt: Date.now(),
           createdAt: Date.now(),
-          projectPath: 'default',
+          projectPath: resolve(process.cwd(), '../..'),
           bootcampState: {
             v: 1,
             phase: 'phase-2-env-check',

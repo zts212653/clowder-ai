@@ -283,6 +283,7 @@ MCP 工具（异步汇报；token 有效期有限）：
 
 **记忆工具：**
 - cat_cafe_search_evidence: 首选入口；depth=raw 可看消息级细节
+- cat_cafe_library_*: collection管理(list/create/rebuild/archive)
 
 **drill-down：**
 - cat_cafe_list_session_chain: 列出 session 链

@@ -2,6 +2,7 @@ import {
   COLLECTION_SENSITIVITY_ORDER,
   type CollectionManifest,
   type CollectionSensitivity,
+  type CollectionStatus,
   validateCollectionId,
 } from './collection-types.js';
 
@@ -75,6 +76,38 @@ export class LibraryCatalog {
     return { direction, from, to: newSensitivity };
   }
 
+  private static readonly VALID_TRANSITIONS: Record<CollectionStatus, CollectionStatus[]> = {
+    registered: ['indexing', 'archived'],
+    indexing: ['active', 'blocked'],
+    active: ['stale', 'archived', 'indexing'],
+    stale: ['indexing', 'archived'],
+    blocked: ['registered', 'archived', 'indexing'],
+    archived: ['registered'],
+  };
+
+  setStatus(id: string, newStatus: CollectionStatus): void {
+    const manifest = this.collections.get(id);
+    if (!manifest) throw new Error(`Collection "${id}" not found`);
+    const currentStatus = manifest.status ?? 'active';
+    const allowed = LibraryCatalog.VALID_TRANSITIONS[currentStatus];
+    if (!allowed?.includes(newStatus)) throw new Error(`Invalid transition: ${currentStatus} → ${newStatus}`);
+    manifest.status = newStatus;
+    manifest.updatedAt = new Date().toISOString();
+  }
+
+  archive(id: string): CollectionManifest {
+    this.setStatus(id, 'archived');
+    return { ...this.collections.get(id)! };
+  }
+
+  unarchive(id: string): void {
+    this.setStatus(id, 'registered');
+  }
+
+  private isRoutable(m: CollectionManifest): boolean {
+    return m.status !== 'archived';
+  }
+
   getRoutable(
     dimension: 'library' | 'collection' | 'project' | 'global' | 'all',
     explicitCollections?: string[],
@@ -83,7 +116,7 @@ export class LibraryCatalog {
       if (!explicitCollections?.length) return [];
       const resolved = [...new Set(explicitCollections)]
         .map((id) => this.get(id))
-        .filter((m): m is CollectionManifest => m != null);
+        .filter((m): m is CollectionManifest => m != null && this.isRoutable(m));
       const seen = new Set<string>();
       return resolved.filter((m) => {
         if (seen.has(m.id)) return false;
@@ -91,15 +124,16 @@ export class LibraryCatalog {
         return true;
       });
     }
+    const active = this.list().filter((m) => this.isRoutable(m));
     if (dimension === 'library') {
-      return this.list().filter((m) => m.sensitivity === 'public' || m.sensitivity === 'internal');
+      return active.filter((m) => m.sensitivity === 'public' || m.sensitivity === 'internal');
     }
     if (dimension === 'project') {
-      return this.list().filter((m) => m.kind === 'project');
+      return active.filter((m) => m.kind === 'project');
     }
     if (dimension === 'global') {
-      return this.list().filter((m) => m.kind === 'global');
+      return active.filter((m) => m.kind === 'global');
     }
-    return this.list().filter((m) => m.kind === 'project' || m.kind === 'global');
+    return active.filter((m) => m.kind === 'project' || m.kind === 'global');
   }
 }

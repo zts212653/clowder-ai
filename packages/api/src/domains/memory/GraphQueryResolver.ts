@@ -64,8 +64,8 @@ export type GraphQueryResolution =
     };
 
 interface CatalogLike {
-  list(): Array<{ id: string; sensitivity: CollectionSensitivity; kind: string }>;
-  get(id: string): { id: string; sensitivity: CollectionSensitivity; kind: string } | undefined;
+  list(): Array<{ id: string; sensitivity: CollectionSensitivity; kind: string; status?: string }>;
+  get(id: string): { id: string; sensitivity: CollectionSensitivity; kind: string; status?: string } | undefined;
 }
 
 interface ResolveOptions {
@@ -93,11 +93,13 @@ function isRestrictedSensitivity(sensitivity: CollectionSensitivity): boolean {
 }
 
 function canShowCandidate(
-  manifest: { sensitivity: CollectionSensitivity } | undefined,
+  manifest: { sensitivity: CollectionSensitivity; status?: string } | undefined,
   collectionId: string,
   callerCollections: Set<string>,
 ): boolean {
-  if (!manifest || !isRestrictedSensitivity(manifest.sensitivity)) return true;
+  if (!manifest) return true;
+  if (manifest.status === 'archived') return false;
+  if (!isRestrictedSensitivity(manifest.sensitivity)) return true;
   return callerCollections.has(collectionId);
 }
 

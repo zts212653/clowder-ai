@@ -881,4 +881,48 @@ describe('GraphResolver', () => {
     assert.equal(typeof edge.weight, 'number');
     assert.ok(edge.weight > 1.1, `traversed feature_ref should exceed base 1.1, got ${edge.weight}`);
   });
+
+  it('excludes relation targets from archived collections (R2-P1)', async () => {
+    const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
+    const archivedStore = new SqliteEvidenceStore(':memory:');
+    await archivedStore.initialize();
+
+    await store.upsert([
+      { anchor: 'F200', kind: 'feature', status: 'active', title: 'F200 Active Feature', updatedAt: '2026-05-19' },
+    ]);
+    await archivedStore.upsert([
+      { anchor: 'F100', kind: 'feature', status: 'active', title: 'F100 Legacy Feature', updatedAt: '2026-05-19' },
+    ]);
+    await store.addEdge({
+      fromAnchor: 'F200',
+      toAnchor: 'F100',
+      relation: 'related_to',
+      fromCollectionId: 'project:cat-cafe',
+      toCollectionId: 'project:legacy',
+      edgeSensitivity: 'internal',
+      provenance: 'frontmatter',
+    });
+
+    const catalog = {
+      list: () => [
+        { id: 'project:cat-cafe', sensitivity: 'internal', kind: 'project', status: 'active' },
+        { id: 'project:legacy', sensitivity: 'internal', kind: 'project', status: 'archived' },
+      ],
+      get: (id) => catalog.list().find((m) => m.id === id),
+    };
+    const stores = new Map([
+      ['project:cat-cafe', store],
+      ['project:legacy', archivedStore],
+    ]);
+    const resolver = new GraphResolver(catalog, stores);
+
+    const result = await resolver.buildSubgraph('F200', {
+      depth: 1,
+      callerCollections: ['project:cat-cafe', 'project:legacy'],
+    });
+
+    assert.equal(result.nodes.length, 1, 'archived relation target must not appear as node');
+    assert.equal(result.edges.length, 0, 'edge to archived collection must not be emitted');
+    assert.equal(result.nodes[0].anchor, 'F200');
+  });
 });

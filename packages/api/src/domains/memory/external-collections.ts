@@ -32,6 +32,15 @@ export function saveExternalCollection(dataDir: string, manifest: CollectionMani
   writeFileSync(filePath, JSON.stringify(existing, null, 2));
 }
 
+export function updateExternalCollection(dataDir: string, id: string, updates: Partial<CollectionManifest>): void {
+  const filePath = join(dataDir, COLLECTIONS_FILE);
+  const existing = existsSync(filePath) ? (JSON.parse(readFileSync(filePath, 'utf-8')) as CollectionManifest[]) : [];
+  const idx = existing.findIndex((m) => m.id === id);
+  if (idx === -1) throw new Error(`Collection "${id}" not found in collections.json`);
+  existing[idx] = { ...existing[idx], ...updates, updatedAt: new Date().toISOString() };
+  writeFileSync(filePath, JSON.stringify(existing, null, 2));
+}
+
 export function resolveCollectionStorePath(dataDir: string, collectionId: string): string {
   const safeId = collectionId.replace(/:/g, '-');
   return join(dataDir, 'library', safeId, 'evidence.sqlite');

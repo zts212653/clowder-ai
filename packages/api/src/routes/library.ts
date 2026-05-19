@@ -1,5 +1,5 @@
-import { mkdirSync, statSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { mkdirSync, renameSync, statSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
 import { ToolEventLog } from '../domains/cats/services/tool-usage/ToolEventLog.js';
 import { BindingDryRun } from '../domains/memory/BindingDryRun.js';
@@ -7,8 +7,12 @@ import type { CollectionEmbedDeps } from '../domains/memory/CollectionIndexBuild
 import { CollectionIndexBuilder } from '../domains/memory/CollectionIndexBuilder.js';
 import { CollectionReadModel } from '../domains/memory/CollectionReadModel.js';
 import type { CollectionKind, CollectionManifest, CollectionSensitivity } from '../domains/memory/collection-types.js';
-import { validateManifestInput } from '../domains/memory/collection-types.js';
-import { resolveCollectionStorePath, saveExternalCollection } from '../domains/memory/external-collections.js';
+import { COLLECTION_SENSITIVITY_ORDER, validateManifestInput } from '../domains/memory/collection-types.js';
+import {
+  resolveCollectionStorePath,
+  saveExternalCollection,
+  updateExternalCollection,
+} from '../domains/memory/external-collections.js';
 import { GraphQueryResolver } from '../domains/memory/GraphQueryResolver.js';
 import { GraphResolver } from '../domains/memory/GraphResolver.js';
 import type { IEmbeddingService, IEvidenceStore } from '../domains/memory/interfaces.js';
@@ -25,6 +29,7 @@ export interface LibraryRoutesOptions {
   catalog: LibraryCatalog;
   stores: Map<string, IEvidenceStore>;
   dataDir?: string;
+  managedVaultBase?: string;
   embeddingService?: IEmbeddingService;
   embedMode?: 'shadow' | 'on';
   // F188 Phase F AC-F9: optional Redis client for tool-usage-metrics endpoint.
@@ -124,14 +129,31 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
       kind: string;
       name: string;
       displayName: string;
-      root: string;
+      root?: string;
       sensitivity?: string;
       scannerLevel?: number | 'auto';
       exclude?: string[];
     };
 
+    let resolvedRoot = body.root;
+    if (!resolvedRoot && opts.managedVaultBase) {
+      const safeId = body.id?.replace(/:/g, '-') ?? 'unknown';
+      if (/[/\\]|\.\./.test(safeId)) {
+        reply.status(400);
+        return { error: 'Invalid collection id: path traversal characters not allowed' };
+      }
+      const vaultDir = join(opts.managedVaultBase, 'library', 'sources', safeId);
+      mkdirSync(vaultDir, { recursive: true });
+      resolvedRoot = vaultDir;
+    }
+
+    if (!resolvedRoot) {
+      reply.status(400);
+      return { error: 'root is required (or configure managedVaultBase for managed vault mode)' };
+    }
+
     try {
-      validateManifestInput(body);
+      validateManifestInput({ ...body, root: resolvedRoot });
     } catch (e: unknown) {
       reply.status(400);
       return { error: (e as Error).message };
@@ -148,9 +170,10 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
       kind: body.kind as CollectionKind,
       name: body.name,
       displayName: body.displayName,
-      root: body.root,
+      root: resolvedRoot,
       sensitivity: (body.sensitivity ?? 'private') as CollectionSensitivity,
       scannerLevel: (body.scannerLevel ?? 'auto') as CollectionManifest['scannerLevel'],
+      status: 'registered',
       indexPolicy: { autoRebuild: false },
       reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: true },
       exclude: body.exclude,
@@ -230,8 +253,26 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
       }
     }
 
+    try {
+      opts.catalog.setStatus(manifest.id, 'indexing');
+    } catch {
+      // already indexing or invalid transition — proceed anyway
+    }
+
     const builder = new CollectionIndexBuilder(store as SqliteEvidenceStore, manifest, scanner, embedDeps);
     const result = await builder.rebuild({ force: body?.force ?? false });
+
+    const finalStatus = result.blocked ? 'blocked' : 'active';
+    try {
+      opts.catalog.setStatus(manifest.id, finalStatus);
+    } catch {
+      // transition guard may reject if state was mutated concurrently
+    }
+    try {
+      if (opts.dataDir) updateExternalCollection(opts.dataDir, manifest.id, { status: finalStatus });
+    } catch {
+      /* persist best-effort */
+    }
     return result;
   });
 
@@ -258,6 +299,156 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
       return { error: `Root path is not a valid directory: ${body.root}` };
     }
     return BindingDryRun.run(body.root, { exclude: body.exclude, authorityCeiling: body.authorityCeiling });
+  });
+
+  app.post<{ Params: { collectionId: string } }>('/api/library/:collectionId/archive', async (request, reply) => {
+    const ip = request.ip;
+    if (ip !== '127.0.0.1' && ip !== '::1' && ip !== '::ffff:127.0.0.1') {
+      reply.status(403);
+      return { error: 'Forbidden: localhost only' };
+    }
+    const { collectionId } = request.params;
+    const existing = opts.catalog.get(collectionId);
+    if (!existing) {
+      reply.status(404);
+      return { error: `Collection "${collectionId}" not found` };
+    }
+    const BUILT_IN_IDS = new Set(['project:cat-cafe', 'global:methods']);
+    if (BUILT_IN_IDS.has(collectionId)) {
+      reply.status(400);
+      return { error: `Cannot archive built-in collection "${collectionId}"` };
+    }
+    try {
+      const manifest = opts.catalog.archive(collectionId);
+      const store = opts.stores.get(collectionId);
+      if (store && 'close' in store && typeof store.close === 'function') {
+        (store as { close: () => void }).close();
+      }
+      opts.stores.delete(collectionId);
+      if (opts.dataDir) {
+        const safeId = collectionId.replace(/:/g, '-');
+        const activeDir = join(opts.dataDir, 'library', safeId);
+        const archiveDir = join(opts.dataDir, 'library', 'archives', safeId);
+        try {
+          mkdirSync(join(opts.dataDir, 'library', 'archives'), { recursive: true });
+          renameSync(activeDir, archiveDir);
+        } catch {
+          /* move best-effort — index stays accessible but store is removed from map */
+        }
+      }
+      try {
+        if (opts.dataDir) updateExternalCollection(opts.dataDir, collectionId, { status: 'archived' });
+      } catch {
+        /* persist best-effort */
+      }
+      return { manifest };
+    } catch (e: unknown) {
+      reply.status(400);
+      return { error: (e as Error).message };
+    }
+  });
+
+  app.post<{ Params: { collectionId: string } }>('/api/library/:collectionId/unarchive', async (request, reply) => {
+    const ip = request.ip;
+    if (ip !== '127.0.0.1' && ip !== '::1' && ip !== '::ffff:127.0.0.1') {
+      reply.status(403);
+      return { error: 'Forbidden: localhost only' };
+    }
+    const { collectionId } = request.params;
+    const existing = opts.catalog.get(collectionId);
+    if (!existing) {
+      reply.status(404);
+      return { error: `Collection "${collectionId}" not found` };
+    }
+    try {
+      opts.catalog.unarchive(collectionId);
+      if (opts.dataDir) {
+        const safeId = collectionId.replace(/:/g, '-');
+        const archiveDir = join(opts.dataDir, 'library', 'archives', safeId);
+        const activeDir = join(opts.dataDir, 'library', safeId);
+        try {
+          renameSync(archiveDir, activeDir);
+        } catch {
+          /* restore best-effort — will be recreated on rebuild */
+        }
+        const storePath = resolveCollectionStorePath(opts.dataDir, collectionId);
+        mkdirSync(dirname(storePath), { recursive: true });
+        const newStore = new SqliteEvidenceStore(storePath);
+        await newStore.initialize();
+        opts.stores.set(collectionId, newStore);
+      }
+      try {
+        if (opts.dataDir) updateExternalCollection(opts.dataDir, collectionId, { status: 'registered' });
+      } catch {
+        /* persist best-effort */
+      }
+      return { manifest: opts.catalog.get(collectionId) };
+    } catch (e: unknown) {
+      reply.status(400);
+      return { error: (e as Error).message };
+    }
+  });
+
+  app.put<{ Params: { collectionId: string } }>('/api/library/:collectionId/sensitivity', async (request, reply) => {
+    const ip = request.ip;
+    if (ip !== '127.0.0.1' && ip !== '::1' && ip !== '::ffff:127.0.0.1') {
+      reply.status(403);
+      return { error: 'Forbidden: localhost only' };
+    }
+    const { collectionId } = request.params;
+    const body = request.body as { sensitivity?: string; confirm?: boolean } | undefined;
+    const sensitivity = body?.sensitivity;
+    if (!sensitivity || !Object.hasOwn(COLLECTION_SENSITIVITY_ORDER, sensitivity)) {
+      reply.status(400);
+      return { error: `Invalid sensitivity: must be one of public, internal, private, restricted` };
+    }
+    const existing = opts.catalog.get(collectionId);
+    if (!existing) {
+      reply.status(404);
+      return { error: `Collection "${collectionId}" not found` };
+    }
+
+    const fromOrder = COLLECTION_SENSITIVITY_ORDER[existing.sensitivity];
+    const toOrder = COLLECTION_SENSITIVITY_ORDER[sensitivity as CollectionSensitivity];
+    const isWidening = toOrder > fromOrder;
+    const isNarrowing = toOrder < fromOrder;
+
+    if (isWidening && !body?.confirm) {
+      reply.status(409);
+      return {
+        direction: 'widening',
+        from: existing.sensitivity,
+        to: sensitivity,
+        requiresConfirmation: true,
+        message: `Widening from ${existing.sensitivity} to ${sensitivity} makes data visible to more contexts. Send confirm: true to proceed.`,
+      };
+    }
+
+    const change = opts.catalog.updateSensitivity(collectionId, sensitivity as CollectionSensitivity);
+    try {
+      if (opts.dataDir)
+        updateExternalCollection(opts.dataDir, collectionId, { sensitivity: sensitivity as CollectionSensitivity });
+    } catch {
+      /* persist best-effort */
+    }
+
+    let reindexTriggered = false;
+    if (isNarrowing) {
+      const store = opts.stores.get(collectionId);
+      if (store) {
+        try {
+          const manifest = opts.catalog.get(collectionId)!;
+          const scanner = resolveCollectionScanner(manifest);
+          const builder = new CollectionIndexBuilder(store as SqliteEvidenceStore, manifest, scanner);
+          await builder.rebuild({ force: true });
+          reindexTriggered = true;
+        } catch {
+          // best-effort reindex
+        }
+      }
+    }
+
+    return { ...change, ...(reindexTriggered ? { reindexTriggered } : {}) };
   });
 
   app.get('/api/library/graph', async (request, reply) => {

@@ -1,7 +1,6 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
@@ -14,7 +13,7 @@ test('accounts route accepts kimi api_key account creation', async () => {
   await app.register(accountsRoutes);
   await app.ready();
 
-  const projectDir = await mkdtemp(join(tmpdir(), 'accounts-kimi-'));
+  const projectDir = await mkdtemp(join(process.cwd(), '.tmp-accounts-kimi-'));
   const previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
   process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectDir;
 

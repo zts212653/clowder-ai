@@ -5,11 +5,11 @@ import { join } from 'node:path';
 import { beforeEach, describe, it } from 'node:test';
 
 describe('external-collections', () => {
-  let loadExternalCollections, saveExternalCollection;
+  let loadExternalCollections, saveExternalCollection, updateExternalCollection;
   let dataDir;
 
   beforeEach(async () => {
-    ({ loadExternalCollections, saveExternalCollection } = await import(
+    ({ loadExternalCollections, saveExternalCollection, updateExternalCollection } = await import(
       '../../dist/domains/memory/external-collections.js'
     ));
     dataDir = mkdtempSync(join(tmpdir(), 'ext-col-'));
@@ -180,5 +180,59 @@ describe('external-collections', () => {
     writeFileSync(join(dataDir, 'library', 'collections.json'), JSON.stringify([manifest]));
     const result = loadExternalCollections(dataDir);
     assert.equal(result.length, 0);
+  });
+
+  it('updateExternalCollection persists status change', () => {
+    mkdirSync(join(dataDir, 'library'), { recursive: true });
+    const contentDir = mkdtempSync(join(tmpdir(), 'col-upd-'));
+    const manifest = {
+      id: 'domain:test-update',
+      kind: 'domain',
+      name: 'test-update',
+      displayName: 'Test Update',
+      root: contentDir,
+      sensitivity: 'private',
+      scannerLevel: 'auto',
+      status: 'registered',
+      indexPolicy: { autoRebuild: false },
+      reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: true },
+      createdAt: '2026-05-19',
+      updatedAt: '2026-05-19',
+    };
+    writeFileSync(join(dataDir, 'library', 'collections.json'), JSON.stringify([manifest]));
+    updateExternalCollection(dataDir, 'domain:test-update', { status: 'active' });
+    const raw = JSON.parse(readFileSync(join(dataDir, 'library', 'collections.json'), 'utf-8'));
+    assert.equal(raw[0].status, 'active');
+    assert.notEqual(raw[0].updatedAt, '2026-05-19');
+  });
+
+  it('updateExternalCollection throws for unknown id', () => {
+    mkdirSync(join(dataDir, 'library'), { recursive: true });
+    writeFileSync(join(dataDir, 'library', 'collections.json'), JSON.stringify([]));
+    assert.throws(() => updateExternalCollection(dataDir, 'domain:nope', { status: 'active' }), /not found/);
+  });
+
+  it('updateExternalCollection preserves other manifests', () => {
+    mkdirSync(join(dataDir, 'library'), { recursive: true });
+    const dir1 = mkdtempSync(join(tmpdir(), 'col-p1-'));
+    const dir2 = mkdtempSync(join(tmpdir(), 'col-p2-'));
+    const base = {
+      kind: 'domain',
+      sensitivity: 'private',
+      scannerLevel: 'auto',
+      status: 'registered',
+      indexPolicy: { autoRebuild: false },
+      reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: true },
+      createdAt: '2026-05-19',
+      updatedAt: '2026-05-19',
+    };
+    const m1 = { ...base, id: 'domain:one', name: 'one', displayName: 'One', root: dir1 };
+    const m2 = { ...base, id: 'domain:two', name: 'two', displayName: 'Two', root: dir2 };
+    writeFileSync(join(dataDir, 'library', 'collections.json'), JSON.stringify([m1, m2]));
+    updateExternalCollection(dataDir, 'domain:two', { status: 'active' });
+    const raw = JSON.parse(readFileSync(join(dataDir, 'library', 'collections.json'), 'utf-8'));
+    assert.equal(raw.length, 2);
+    assert.equal(raw[0].status, 'registered');
+    assert.equal(raw[1].status, 'active');
   });
 });

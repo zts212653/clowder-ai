@@ -195,6 +195,7 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
   for (const manifest of externals) {
     try {
       catalog.register(manifest);
+      if (manifest.status === 'archived') continue;
       const storePath = resolveCollectionStorePath(dataDir, manifest.id);
       mkdirSync(dirname(storePath), { recursive: true });
       const extStore = new SqliteEvidenceStore(storePath);

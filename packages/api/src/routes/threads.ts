@@ -13,6 +13,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import type { TaskProgressStore } from '../domains/cats/services/agents/invocation/TaskProgressStore.js';
+import { resolveBootcampWorkspaceRoot } from '../domains/cats/services/bootcamp/workspace-root.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
@@ -122,6 +123,38 @@ const listThreadsSchema = z.object({
   deleted: z.union([z.boolean(), z.string().trim().min(1).max(8)]).optional(),
 });
 
+async function resolveCreateThreadProjectPath(
+  projectPath: string | undefined,
+  bootcampState: BootcampStateV1 | undefined,
+): Promise<{ ok: true; projectPath: string | undefined } | { ok: false; statusCode: number; error: string }> {
+  if (bootcampState && (!projectPath || projectPath === 'default')) {
+    const bootcampWorkspace = await resolveBootcampWorkspaceRoot();
+    if (!bootcampWorkspace.ok) {
+      return {
+        ok: false,
+        statusCode: 500,
+        error: bootcampWorkspace.error,
+      };
+    }
+
+    return { ok: true, projectPath: bootcampWorkspace.projectPath };
+  }
+
+  if (projectPath && projectPath !== 'default') {
+    const validated = await validateProjectPath(projectPath);
+    if (!validated) {
+      return {
+        ok: false,
+        statusCode: 400,
+        error: 'Invalid projectPath: must be an existing directory under allowed roots',
+      };
+    }
+    return { ok: true, projectPath: validated };
+  }
+
+  return { ok: true, projectPath };
+}
+
 function parseOptionalBooleanQuery(value: string | boolean | undefined): boolean | undefined {
   if (value === undefined) return undefined;
   if (typeof value === 'boolean') return value;
@@ -217,25 +250,28 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { error: 'Invalid request body', details: parseResult.error.issues };
     }
 
-    const { userId: legacyUserId, title, projectPath, preferredCats, pinned, backlogItemId } = parseResult.data;
+    const {
+      userId: legacyUserId,
+      title,
+      projectPath,
+      preferredCats,
+      pinned,
+      backlogItemId,
+      bootcampState,
+    } = parseResult.data;
     const userId = resolveUserId(request, { fallbackUserId: legacyUserId });
     if (!userId) {
       reply.status(401);
       return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
 
-    // Validate projectPath is a real directory under allowed roots
-    let thread;
-    if (projectPath && projectPath !== 'default') {
-      const validated = await validateProjectPath(projectPath);
-      if (!validated) {
-        reply.status(400);
-        return { error: 'Invalid projectPath: must be an existing directory under allowed roots' };
-      }
-      thread = await threadStore.create(userId, title, validated);
-    } else {
-      thread = await threadStore.create(userId, title, projectPath);
+    const resolvedProjectPath = await resolveCreateThreadProjectPath(projectPath, bootcampState as BootcampStateV1);
+    if (!resolvedProjectPath.ok) {
+      reply.status(resolvedProjectPath.statusCode);
+      return { error: resolvedProjectPath.error };
     }
+
+    let thread: Thread = await threadStore.create(userId, title, resolvedProjectPath.projectPath);
 
     // F32-b Phase 2: Set preferred cats if provided at creation time
     if (preferredCats && preferredCats.length > 0) {
@@ -265,7 +301,6 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     }
 
     // F087: Set bootcamp state if provided at creation time
-    const { bootcampState } = parseResult.data;
     if (bootcampState) {
       await threadStore.updateBootcampState(thread.id, bootcampState as BootcampStateV1);
       thread = (await threadStore.get(thread.id)) ?? thread;

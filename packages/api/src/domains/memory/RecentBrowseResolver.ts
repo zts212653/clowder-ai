@@ -51,7 +51,7 @@ const SCOPE_KIND_MAP: Record<string, readonly string[] | null> = {
 type StoreWithDb = IEvidenceStore & { getDb?: () => Database.Database };
 
 interface CatalogLike {
-  list(): Array<{ id: string; sensitivity: CollectionSensitivity; kind: string }>;
+  list(): Array<{ id: string; sensitivity: CollectionSensitivity; kind: string; status?: string }>;
 }
 
 export class RecentBrowseResolver {
@@ -89,6 +89,8 @@ export class RecentBrowseResolver {
     for (const [id, store] of this.stores) {
       const manifest = manifests.get(id);
       if (!manifest) continue;
+
+      if (manifest.status === 'archived') continue;
 
       // Privacy: private/restricted collections require explicit caller include
       if ((manifest.sensitivity === 'private' || manifest.sensitivity === 'restricted') && !callerSet?.has(id)) {
@@ -151,6 +153,7 @@ export class RecentBrowseResolver {
     for (const [id, store] of this.stores) {
       const manifest = manifests.get(id);
       if (!manifest) continue;
+      if (manifest.status === 'archived') continue;
       if ((manifest.sensitivity === 'private' || manifest.sensitivity === 'restricted') && !callerSet?.has(id)) {
         continue;
       }
