@@ -1090,8 +1090,10 @@ fi
 for key in ${ENV_DELETE_KEYS[@]+"${ENV_DELETE_KEYS[@]}"}; do delete_env_key "$key"; done
 for i in ${ENV_KEYS[@]+"${!ENV_KEYS[@]}"}; do write_env_key "${ENV_KEYS[$i]}" "${ENV_VALUES[$i]}"; done
 [[ ${#ENV_KEYS[@]} -gt 0 ]] && ok "Auth config written to .env"
-# #675: Generate TELEMETRY_HMAC_SALT if missing or blank
-if ! grep -q "^TELEMETRY_HMAC_SALT=.\+" .env 2>/dev/null; then
+# #675/#705: Generate TELEMETRY_HMAC_SALT if missing, quoted-empty, or whitespace-only
+_raw_salt="$(sed -n 's/^TELEMETRY_HMAC_SALT=//p' .env 2>/dev/null || true)"
+_trimmed_salt="$(printf '%s' "$_raw_salt" | tr -d "\"' \t\n\r")"
+if [[ -z "$_trimmed_salt" ]]; then
     _salt="$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | xxd -p -c 64 2>/dev/null || python3 -c 'import secrets;print(secrets.token_hex(32))' 2>/dev/null || echo '')"
     if [[ -n "$_salt" ]]; then
         write_env_key "TELEMETRY_HMAC_SALT" "$_salt"
@@ -1099,6 +1101,7 @@ if ! grep -q "^TELEMETRY_HMAC_SALT=.\+" .env 2>/dev/null; then
     fi
     unset _salt
 fi
+unset _raw_salt _trimmed_salt
 # Auto-detect Docker: only set host default on a freshly generated .env.
 maybe_write_docker_api_host
 chmod 600 .env 2>/dev/null || true

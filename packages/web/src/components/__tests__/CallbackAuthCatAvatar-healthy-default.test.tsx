@@ -39,6 +39,10 @@ vi.mock('@/stores/callbackAuthStore', () => ({
   useCallbackAuthAvailable: () => mockAvailable,
 }));
 
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: () => {} }),
+}));
+
 import { CallbackAuthCatAvatar } from '../CallbackAuthCatAvatar';
 
 Object.assign(globalThis as Record<string, unknown>, { React });

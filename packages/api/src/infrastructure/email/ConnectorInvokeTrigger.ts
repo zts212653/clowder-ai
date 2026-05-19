@@ -15,6 +15,7 @@ import { getDefaultCatId } from '../../config/cat-config-loader.js';
 import type { InvocationQueue } from '../../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationTracker } from '../../domains/cats/services/agents/invocation/InvocationTracker.js';
 import type { QueueProcessor } from '../../domains/cats/services/agents/invocation/QueueProcessor.js';
+import { stampVisibleTurn } from '../../domains/cats/services/agents/invocation/visible-turn.js';
 import type { AgentRouter } from '../../domains/cats/services/agents/routing/AgentRouter.js';
 import type { PersistenceContext } from '../../domains/cats/services/agents/routing/route-helpers.js';
 import type { IInvocationRecordStore } from '../../domains/cats/services/stores/ports/InvocationRecordStore.js';
@@ -50,6 +51,13 @@ export interface ConnectorTriggerPolicy {
   readonly sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a';
   /** F140 Phase C: hint which Skill to auto-load (not a hard constraint — cat can override) */
   readonly suggestedSkill?: string;
+  /**
+   * Optional queue coalescing key for connector bursts that supersede earlier queued work.
+   * Later hits reuse the first queued entry: messageIds are merged, but the original content/body stays in place.
+   * Once that entry is already processing, follow-up feedback gets a fresh queued wake-up.
+   * Queue metadata may still upgrade, e.g. normal COMMENTED feedback becoming urgent CHANGES_REQUESTED.
+   */
+  readonly coalesceKey?: string;
 }
 
 /**
@@ -114,6 +122,7 @@ export class ConnectorInvokeTrigger {
         priority,
         policy?.sourceCategory,
         policy?.suggestedSkill,
+        policy?.coalesceKey,
       );
     }
 
@@ -130,6 +139,7 @@ export class ConnectorInvokeTrigger {
         priority,
         policy?.sourceCategory,
         policy?.suggestedSkill,
+        policy?.coalesceKey,
       );
     }
 
@@ -161,6 +171,7 @@ export class ConnectorInvokeTrigger {
     priority: 'urgent' | 'normal' = 'normal',
     sourceCategory?: string,
     suggestedSkill?: string,
+    coalesceKey?: string,
   ): 'full' | 'enqueued' {
     const { invocationQueue, socketManager, log } = this.opts;
 
@@ -176,6 +187,12 @@ export class ConnectorInvokeTrigger {
       threadId,
       userId,
       content: message,
+      ...(coalesceKey
+        ? {
+            idempotencyKey: `connector:${sourceCategory ?? 'generic'}:${coalesceKey}`,
+            dedupeProcessing: false,
+          }
+        : {}),
       source: 'connector',
       targetCats: [catId],
       intent: 'execute',
@@ -345,7 +362,8 @@ export class ConnectorInvokeTrigger {
       for await (const msg of router.routeExecution(userId, message, threadId, messageId, targetCats, intent, {
         ...(contentBlocks ? { contentBlocks } : {}),
         ...(controller?.signal ? { signal: controller.signal } : {}),
-        queueHasQueuedMessages: (tid: string) => invocationQueue.hasQueuedUserMessagesForThread(tid),
+        queueHasQueuedMessages: (tid: string) => invocationQueue.hasQueuedNonAgentForThread(tid),
+        deferA2AEnqueue: (e) => invocationQueue.enqueue(e as any),
         hasQueuedOrActiveAgentForCat: (tid: string, catId: string) =>
           invocationQueue.hasActiveOrQueuedAgentForCat(tid, catId),
         cursorBoundaries,
@@ -439,7 +457,11 @@ export class ConnectorInvokeTrigger {
             });
           }
         }
-        socketManager.broadcastAgentMessage({ ...msg, invocationId: createResult.invocationId }, threadId);
+        // F194 Phase Z9 (砚砚 R1 P1-2): unified visible turn stamp via helper.
+        socketManager.broadcastAgentMessage(
+          { ...msg, ...stampVisibleTurn(createResult.invocationId, msg.invocationId) },
+          threadId,
+        );
       }
 
       // ⑤ Finalize: abort guard → persistence check → ack + succeeded

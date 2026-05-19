@@ -171,7 +171,6 @@ vi.mock('../components/MessageNavigator', () => ({ MessageNavigator: () => null 
 vi.mock('../components/MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
 }));
-vi.mock('../components/CatCafeHub', () => ({ CatCafeHub: () => null }));
 vi.mock('../components/SplitPaneView', () => ({ SplitPaneView: () => null }));
 vi.mock('../components/MobileStatusSheet', () => ({ MobileStatusSheet: () => null }));
 vi.mock('../components/QueuePanel', () => ({ QueuePanel: () => null }));

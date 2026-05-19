@@ -17,6 +17,16 @@ export function resolveCollectionScanner(manifest: CollectionManifest): RepoScan
 export function detectScannerLevel(root: string): 0 | 1 {
   if (existsSync(join(root, 'SUMMARY.md'))) return 1;
 
+  const docsDir = join(root, 'docs');
+  if (existsSync(docsDir)) {
+    try {
+      const mdCount = readdirSync(docsDir).filter((f) => f.endsWith('.md')).length;
+      if (mdCount >= 3) return 1;
+    } catch {
+      /* skip unreadable */
+    }
+  }
+
   let total = 0;
   let withFrontmatter = 0;
   try {

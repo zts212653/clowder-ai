@@ -1,142 +1,211 @@
 'use client';
 
-import { useState } from 'react';
-import type { CapabilityBoardItem } from '../capability-board-ui';
-import { HubIcon } from '../hub-icons';
-import {
-  SettingsResourceIconButton,
-  settingsResourceActionGroupClass,
-  settingsResourceAvatarClass,
-  settingsResourceCardClass,
-  settingsResourceRowClass,
-} from '../SettingsResourceCard';
-import { PerCatToggles, ProjectSelector, ToggleSwitch } from './capability-settings-ui';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { apiFetch } from '@/utils/api-client';
+import { ProjectSelector } from './capability-settings-ui';
+import { SettingsStatusStrip } from './primitives';
 import { SettingsPageHeader } from './SettingsPageHeader';
+import { SkillConflictBanner } from './SkillConflictBanner';
 import { SkillPreviewModal } from './SkillPreviewModal';
-import { useCapabilityState } from './useCapabilityState';
+import {
+  HealthStrip,
+  SkillRow,
+  SkillsEmptyState,
+  SkillsFilterToolbar,
+  SkillsSummaryFooter,
+} from './SkillsSubComponents';
+import type { SettingsSkillItem, SkillsApiData, SkillsData } from './skills-types';
+import { ALL_CATEGORIES, composeSkillItems, normalizeSearch, normalizeSkillsData } from './skills-types';
+import { useSkillControls } from './useSkillControls';
 
 export function SkillsContent() {
-  const cap = useCapabilityState('skill');
-  const [previewItem, setPreviewItem] = useState<CapabilityBoardItem | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [data, setData] = useState<SkillsData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [activeCategory, setActiveCategory] = useState(ALL_CATEGORIES);
+  const [query, setQuery] = useState('');
+  const [previewSkill, setPreviewSkill] = useState<SettingsSkillItem | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [resolving, setResolving] = useState<string | null>(null);
+  const [writeError, setWriteError] = useState<string | null>(null);
+  const [expandedCats, setExpandedCats] = useState<string | null>(null);
+
+  const controls = useSkillControls();
+  const skillsFetchGen = useRef(0);
+  const latestProjectRef = useRef(controls.projectPath);
+  latestProjectRef.current = controls.projectPath;
+
+  const fetchSkills = useCallback(async (forProject?: string) => {
+    const generation = ++skillsFetchGen.current;
+    const isCurrent = () => skillsFetchGen.current === generation;
+    setError(null);
+    try {
+      const q = forProject ? `?projectPath=${encodeURIComponent(forProject)}` : '';
+      const res = await apiFetch(`/api/skills${q}`);
+      if (!isCurrent()) return;
+      if (!res.ok) {
+        setError(`Skills 数据加载失败 (${res.status})`);
+        return;
+      }
+      const parsed = normalizeSkillsData((await res.json()) as SkillsApiData);
+      if (!isCurrent()) return;
+      setData(parsed);
+    } catch {
+      if (!isCurrent()) return;
+      setError('Skills 数据加载失败');
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchSkills();
+  }, [fetchSkills]);
+
+  const composedItems = useMemo(() => {
+    if (!data) return [];
+    return composeSkillItems(data, controls.items);
+  }, [data, controls.items]);
+
+  const categories = useMemo(() => {
+    if (!data) return [ALL_CATEGORIES];
+    const seen = new Set<string>();
+    for (const skill of data.skills) {
+      if (skill.category) seen.add(skill.category);
+    }
+    return [ALL_CATEGORIES, ...seen];
+  }, [data]);
+
+  const filteredSkills = useMemo(() => {
+    const needle = normalizeSearch(query);
+    return composedItems.filter((skill) => {
+      if (activeCategory !== ALL_CATEGORIES && skill.category !== activeCategory) return false;
+      if (!needle) return true;
+      return `${skill.name} ${skill.category} ${skill.trigger}`.toLowerCase().includes(needle);
+    });
+  }, [activeCategory, composedItems, query]);
+
+  async function handleSync() {
+    setSyncing(true);
+    setWriteError(null);
+    try {
+      const payload: Record<string, unknown> = {};
+      if (latestProjectRef.current) payload.projectPath = latestProjectRef.current;
+      const res = await apiFetch('/api/skills/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setWriteError(body.error ?? `Sync failed (${res.status})`);
+        return;
+      }
+      await Promise.all([fetchSkills(latestProjectRef.current ?? undefined), controls.refetch()]);
+    } catch {
+      setWriteError('Sync request failed');
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function handleResolveConflict(skillName: string, choice: 'official' | 'mine') {
+    setResolving(skillName);
+    setWriteError(null);
+    try {
+      const payload: Record<string, unknown> = { skillName, choice };
+      if (latestProjectRef.current) payload.projectPath = latestProjectRef.current;
+      const res = await apiFetch('/api/skills/resolve-conflict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setWriteError(body.error ?? `Resolve failed (${res.status})`);
+        return;
+      }
+      await Promise.all([fetchSkills(latestProjectRef.current ?? undefined), controls.refetch()]);
+    } catch {
+      setWriteError('Resolve request failed');
+    } finally {
+      setResolving(null);
+    }
+  }
+
+  const combinedError = error || controls.error;
 
   return (
     <div className="space-y-5">
-      <SettingsPageHeader title="Skill 管理" subtitle="点击卡片预览/编辑" />
+      <SettingsPageHeader title="Skill 管理" subtitle="Skill 注册治理、能力开关和 SKILL.md 预览。" />
 
       <ProjectSelector
-        resolvedPath={cap.resolvedProjectPath}
-        knownProjects={cap.knownProjects}
-        currentSelection={cap.projectPath}
-        onSwitch={cap.switchProject}
+        resolvedPath={controls.resolvedProjectPath}
+        knownProjects={controls.knownProjects}
+        currentSelection={controls.projectPath}
+        onSwitch={(path) => {
+          setData(null);
+          setActiveCategory(ALL_CATEGORIES);
+          setQuery('');
+          controls.switchProject(path);
+          void fetchSkills(path ?? undefined);
+        }}
       />
 
-      {cap.loading && (
-        <div className="space-y-3">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="animate-pulse rounded-xl bg-[var(--console-card-bg)] p-4">
-              <div className="h-4 w-1/3 rounded bg-[var(--console-border-soft)]" />
-              <div className="mt-2 h-3 w-2/3 rounded bg-[var(--console-border-soft)]" />
-            </div>
-          ))}
-        </div>
+      {combinedError && <SettingsStatusStrip tone="error">{combinedError}</SettingsStatusStrip>}
+      {writeError && <SettingsStatusStrip tone="error">{writeError}</SettingsStatusStrip>}
+
+      {data && (
+        <HealthStrip
+          summary={data.summary}
+          staleness={data.staleness}
+          conflictCount={data.conflicts.length}
+          syncing={syncing}
+          onSync={handleSync}
+        />
       )}
 
-      {!cap.loading && cap.items.length === 0 && (
-        <div className="flex flex-col items-center justify-center rounded-2xl bg-[var(--console-card-bg)] px-8 py-16 text-center">
-          <HubIcon name="zap" className="mb-3 h-10 w-10 text-cafe-muted opacity-40" />
-          <p className="text-[15px] font-semibold text-cafe">暂无已安装的 Skill</p>
-          <p className="mt-1 text-xs text-cafe-muted">Skill 在 cat-cafe-skills/ 目录下管理，或通过 CLI 安装</p>
-        </div>
+      {data && data.conflicts.length > 0 && (
+        <SkillConflictBanner conflicts={data.conflicts} resolving={resolving} onResolve={handleResolveConflict} />
       )}
 
-      <div className="space-y-3">
-        {cap.items.map((item) => {
-          const busy = cap.toggling === item.id;
-          const expanded = expandedId === item.id;
-          return (
-            <div key={item.id} className={settingsResourceCardClass}>
-              <div className={settingsResourceRowClass}>
-                <svg
-                  className="h-[18px] w-[18px] shrink-0 text-cafe-muted"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                  aria-hidden="true"
-                >
-                  <circle cx="9" cy="5" r="1.5" />
-                  <circle cx="15" cy="5" r="1.5" />
-                  <circle cx="9" cy="12" r="1.5" />
-                  <circle cx="15" cy="12" r="1.5" />
-                  <circle cx="9" cy="19" r="1.5" />
-                  <circle cx="15" cy="19" r="1.5" />
-                </svg>
-                <button
-                  type="button"
-                  onClick={() => setPreviewItem(item)}
-                  className="flex min-w-0 flex-1 items-center gap-4 text-left"
-                >
-                  <div className={settingsResourceAvatarClass}>{item.id.charAt(0).toUpperCase()}</div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-bold text-cafe">{item.id}</p>
-                    <p className="mt-0.5 truncate text-xs text-cafe-secondary">{item.description || '—'}</p>
-                    {item.category && <p className="mt-0.5 text-label text-cafe-muted">{item.category}</p>}
-                  </div>
-                </button>
-                <div className={settingsResourceActionGroupClass}>
-                  {cap.catFamilies.length > 0 && (
-                    <SettingsResourceIconButton
-                      onClick={() => setExpandedId(expanded ? null : item.id)}
-                      title="按猫开关"
-                      aria-label="按猫开关"
-                    >
-                      <HubIcon name="users" className="h-4 w-4" />
-                    </SettingsResourceIconButton>
-                  )}
-                  <ToggleSwitch
-                    enabled={item.enabled}
-                    busy={busy}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      cap.handleToggle(item, !item.enabled);
-                    }}
-                  />
-                  {item.source === 'external' && (
-                    <SettingsResourceIconButton
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        cap.handleDisableSkill(item);
-                      }}
-                      title="卸载 Skill"
-                      aria-label="卸载 Skill"
-                      tone="danger"
-                    >
-                      <HubIcon name="trash" className="h-4 w-4" />
-                    </SettingsResourceIconButton>
-                  )}
-                </div>
-              </div>
-              {expanded && (
-                <PerCatToggles
-                  item={item}
-                  catFamilies={cap.catFamilies}
-                  toggling={cap.toggling}
-                  onToggle={cap.handleToggle}
-                />
-              )}
-            </div>
-          );
-        })}
+      {data && (
+        <SkillsFilterToolbar
+          categories={categories}
+          activeCategory={activeCategory}
+          onCategoryChange={setActiveCategory}
+          query={query}
+          onQueryChange={setQuery}
+        />
+      )}
+
+      {!data && !error && <SettingsStatusStrip tone="muted">加载中...</SettingsStatusStrip>}
+
+      {data && filteredSkills.length === 0 && <SkillsEmptyState />}
+
+      <div className="space-y-3" data-testid="skills-list">
+        {filteredSkills.map((skill) => (
+          <SkillRow
+            key={skill.id}
+            skill={skill}
+            catFamilies={controls.catFamilies}
+            toggling={controls.toggling}
+            expandedCats={expandedCats}
+            onPreview={() => setPreviewSkill(skill)}
+            onToggle={controls.handleToggle}
+            onExpandCats={(id) => setExpandedCats(expandedCats === id ? null : id)}
+          />
+        ))}
       </div>
 
-      {previewItem && (
+      {data && <SkillsSummaryFooter summary={data.summary} />}
+
+      {previewSkill && (
         <SkillPreviewModal
-          skillId={previewItem.id}
-          skillName={previewItem.id}
-          description={previewItem.description}
-          triggers={previewItem.triggers}
-          category={previewItem.category}
-          projectPath={cap.projectPath}
-          onClose={() => setPreviewItem(null)}
+          skillId={previewSkill.name}
+          skillName={previewSkill.name}
+          description={previewSkill.trigger}
+          triggers={previewSkill.trigger ? [previewSkill.trigger] : []}
+          category={previewSkill.category}
+          projectPath={controls.projectPath}
+          onClose={() => setPreviewSkill(null)}
         />
       )}
     </div>

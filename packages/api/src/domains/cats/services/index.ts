@@ -25,7 +25,12 @@ export { assembleContext, formatMessage } from './context/ContextAssembler.js';
 export type { Intent, IntentResult } from './context/IntentParser.js';
 export { parseIntent, stripIntentTags } from './context/IntentParser.js';
 export type { InvocationContext } from './context/SystemPromptBuilder.js';
-export { buildInvocationContext, buildStaticIdentity, buildSystemPrompt } from './context/SystemPromptBuilder.js';
+export {
+  buildInvocationContext,
+  buildStaticIdentity,
+  buildStaticIdentityPackOnly,
+  buildSystemPrompt,
+} from './context/SystemPromptBuilder.js';
 // Game engine (F101)
 export { GameEngine } from './game/GameEngine.js';
 export type { GameOrchestratorDeps, StartGameInput } from './game/GameOrchestrator.js';

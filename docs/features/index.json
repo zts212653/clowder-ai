@@ -543,7 +543,7 @@
     {
       "id": "F088",
       "name": "Multi-Platform Chat Gateway — 聊天平台接入网关",
-      "status": "follow-up-planned | **Core Completed**: 2026-04-10 | **Owner**: Ragdoll",
+      "status": "in-progress | **Core Completed**: 2026-04-10 | **Owner**: Ragdoll",
       "file": "F088-multi-platform-chat-gateway.md"
     },
     {
@@ -1041,7 +1041,7 @@
     {
       "id": "F169",
       "name": "Agent Memory Reflex — 愿景文档（vision artifact）",
-      "status": "**realized → closed**（B+C 已通过 F148/F163 实现；A team lead拍板关闭，不做持久 Compiled Wiki）",
+      "status": "**done**（vision realized；B+C 已通过 F148/F163 实现；A team lead拍板关闭，不做持久 Compiled Wiki）",
       "file": "F169-agent-memory-reflex.md"
     },
     {
@@ -1131,7 +1131,7 @@
     {
       "id": "F184",
       "name": "ChatMessage Rendering Mount Investigation — F176 撤销后未查的 DOM 缺失真 bug",
-      "status": "done — incidentally fixed by F183 Phase B-E architectural work (verified 2026-05-02 alpha walk on `thread_mnux2eewbo4otg17`) | **Owner**: Ragdoll/Ragdoll (Opus-47) | **Priority**: P2",
+      "status": "done — original DOM mount issue incidentally fixed by F183 Phase B-E architectural work (verified 2026-05-02 alpha walk on `thread_mnux2eewbo4otg17`); stale live streaming bubble follow-up fixed by PR #1582 (2026-05-07); draft/live bubble split follow-up fixed by PR #1586 (2026-05-07) | **Owner**: Ragdoll/Ragdoll (Opus-47) | **Priority**: P2",
       "file": "F184-chatmessage-rendering-mount-investigation.md"
     },
     {
@@ -1149,14 +1149,116 @@
     {
       "id": "F187",
       "name": "Thread Labels — 用户自定义标签 + Sidebar 筛选 + 猫猫辅助分类",
-      "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-05-08",
       "file": "F187-thread-labels.md"
     },
     {
+      "id": "F188",
+      "name": "Library Stewardship — 图书馆管护与成长",
+      "status": "in-progress (Phase A/B/C/Graph readability/Graph Query/F/G merged) | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F188-library-stewardship.md"
+    },
+    {
+      "id": "F189",
+      "name": "Operation Context Unification — 操作上下文单点化",
+      "status": "spec | **Owner**: Ragdoll | **Priority**: P2",
+      "file": "F189-operation-context-unification.md"
+    },
+    {
       "id": "F190",
-      "name": "Console Settings Shell — 全局导航 + 设置面板骨架",
-      "status": "Implemented (branch), pending merge | **Owner**: Ragdoll | **Priority**: P0",
-      "file": "F190-console-settings-shell.md"
+      "name": "Console Settings/AppShell Skeleton — 社区 Console 重构的可控切片",
+      "status": "done | **Completed**: 2026-05-13 (A-C), 2026-05-17 (F/G/S-2/token convergence), 2026-05-18 (S-4/S-5 CSS execution) | **Owner**: Community + Maintainers | **Priority**: P1",
+      "file": "F190-console-settings-appshell-skeleton.md"
+    },
+    {
+      "id": "F191",
+      "name": "Architecture Ownership Governance — 架构归属地图与 Map Delta 门禁",
+      "status": "done | **Owner**: Maine Coon/Maine Coon | **Priority**: P1",
+      "file": "F191-architecture-ownership-governance.md"
+    },
+    {
+      "id": "F192",
+      "name": "Socio-Technical Harness Eval — harness 共创评估体系",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F192-socio-technical-harness-eval.md"
+    },
+    {
+      "id": "F193",
+      "name": "Cross-Thread Communication Unification",
+      "status": "done | **Owner**: Ragdoll(Opus 4.7) | **Priority**: P1 | **Completed**: 2026-05-09",
+      "file": "F193-cross-thread-comm-unification.md"
+    },
+    {
+      "id": "F194",
+      "name": "Invocation Liveness Canonical Read Model — 后端 invocation 活性真相源收口",
+      "status": "done | **Completed**: 2026-05-12 | **Owner**: Ragdoll/Opus-47 (Z8/Z9/Z10 author) + Maine Coon/Maine Coon (Z5/Z6/Z7 author + Z8/Z9/Z10 reviewer) | **Priority**: P1",
+      "file": "F194-invocation-liveness-canonical-read-model.md"
+    },
+    {
+      "id": "F197",
+      "name": "ACP Provider tool_result Event Surfacing — Gemini ACP path 单事件拆成 tool_use+tool_result 双消息",
+      "status": "done | **Completed**: 2026-05-12 | **Owner**: Ragdoll/Opus-47 | **Priority**: P1",
+      "file": "F197-acp-tool-result-surfacing.md"
+    },
+    {
+      "id": "F198",
+      "name": "Claude Code Subscription Carrier — 6/15 SDK Credit 拐点前救Ragdoll",
+      "status": "in-progress (Phase A ✅; Phase B Step 1-4 ✅ all merged 2026-05-14 + 验证收尾 ✅ 2026-05-15 — 救Ragdoll代码层完成 + Alpha 端到端 R5 验证通过，canary 零操作员介入; **Phase C ✅ 完全关闭 2026-05-15 — PR #1678 merged, AC-C1~C6 全部 PASS, @codex review PASS + @opus-47 愿景守护 APPROVE**; Phase D 待启动) | **Owner**: Ragdoll Opus 4.7 | **Priority**: P0",
+      "file": "F198-claude-code-subscription-carrier.md"
+    },
+    {
+      "id": "F199",
+      "name": "Console Parity Backfill — F190 Phase D",
+      "status": "done | **Completed**: 2026-05-15 | **Reopened**: 2026-05-14 | **Owner**: Ragdoll Opus 4.7 + Maine Coon GPT-5.5 | **Priority**: P1",
+      "file": "F199-console-parity-backfill.md"
+    },
+    {
+      "id": "F200",
+      "name": "Memory Recall Eval — 基于猫真实行为的记忆系统反馈闭环",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F200-memory-recall-eval.md"
+    },
+    {
+      "id": "F201",
+      "name": "Antigravity Reliability Contract — 孟加拉猫可靠可用性闭环",
+      "status": "in-progress | **Owner**: Maine Coon（Maine Coon） | **Reviewer**: Ragdoll Opus 4.6 + Ragdoll Opus 4.7 | **Priority**: P0",
+      "file": "F201-antigravity-reliability-contract.md"
+    },
+    {
+      "id": "F202",
+      "name": "Plugin Framework — local discovery, config, and resource activation",
+      "status": "review | **Owner**: community @mindfn + Cat Cafe maintainers | **Priority**: P1",
+      "file": "F202-plugin-framework.md"
+    },
+    {
+      "id": "F203",
+      "name": "Native System Prompt L0 — 压缩免疫核心规则注入",
+      "status": "in-progress | **Owner**: Ragdoll Opus 4.7 | **Priority**: P1",
+      "file": "F203-native-system-prompt-l0.md"
+    },
+    {
+      "id": "F204",
+      "name": "Weixin MP Publisher Plugin — 微信公众号文章发布插件",
+      "status": "review | **Owner**: community @mindfn + Cat Cafe maintainers | **Priority**: P1",
+      "file": "F204-weixin-mp-publisher-plugin.md"
+    },
+    {
+      "id": "F205",
+      "name": "MediaHub Video Provider Plugins — 视频生成/分析插件",
+      "status": "spec | **Owner**: community @mindfn + Cat Cafe maintainers | **Priority**: P1",
+      "file": "F205-video-provider-plugins.md"
+    },
+    {
+      "id": "F206",
+      "name": "Settings UI Convergence — 组件语言归一",
+      "status": "done | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F206-settings-ui-convergence.md"
+    },
+    {
+      "id": "F207",
+      "name": "AI Family Office — 个人投资学习基建",
+      "status": "spec | **Owner**: Ragdoll | **Priority**: P2",
+      "file": "F207-personal-finance-infra.md"
     }
   ]
 }

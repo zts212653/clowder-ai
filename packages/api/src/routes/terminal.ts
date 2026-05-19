@@ -3,6 +3,7 @@ import * as pty from 'node-pty';
 import { isOriginAllowed, resolveFrontendCorsOrigins } from '../config/frontend-origin.js';
 import type { PortDiscoveryService } from '../domains/preview/port-discovery.js';
 import type { AgentPaneRegistry } from '../domains/terminal/agent-pane-registry.js';
+import { readAgentSessions } from '../domains/terminal/agent-sessions-reader.js';
 import { TerminalSessionStore } from '../domains/terminal/session-store.js';
 import type { TmuxGateway } from '../domains/terminal/tmux-gateway.js';
 import { getWorktreeRoot } from '../domains/workspace/workspace-security.js';
@@ -301,5 +302,29 @@ export const terminalRoutes: FastifyPluginAsync<TerminalRouteOpts> = async (app,
     ptyProcess.onExit(() => {
       socket.close(1000, 'Agent pane exited');
     });
+  });
+
+  // F198 Phase C AC-C4: GET /api/agent-sessions — lists daemon job state snapshots
+  // P1-2: scope to Cat-Café registered sessions only (prevents leaking unrelated daemon jobs)
+  app.get('/api/agent-sessions', async () => {
+    const all = await readAgentSessions();
+    if (!agentPaneRegistry) return all;
+    const registered = agentPaneRegistry.getRegisteredDaemonShortIds();
+    return all.filter((s) => registered.has(s.daemonShortId));
+  });
+
+  // F198 Phase C AC-C1: GET /api/threads/:id/active-pane — resolves bg carrier session for a thread
+  app.get<{ Params: { id: string } }>('/api/threads/:id/active-pane', async (req, reply) => {
+    if (!agentPaneRegistry) return reply.status(501).send({ error: 'Agent pane tracking not enabled' });
+    const session = agentPaneRegistry.getBgCarrierByThread(req.params.id);
+    if (!session) return reply.status(404).send({ error: 'No active bg carrier session for thread' });
+    return {
+      invocationId: session.invocationId,
+      daemonShortId: session.daemonShortId,
+      catId: session.catId,
+      threadId: session.threadId,
+      status: session.status,
+      startedAt: session.startedAt,
+    };
   });
 };

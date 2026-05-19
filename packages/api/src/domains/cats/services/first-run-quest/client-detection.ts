@@ -1,12 +1,19 @@
 /**
  * F171: Detect which agent CLI clients are installed on the user's machine.
  * Only returns clients that are actually available for binding.
+ *
+ * LL-055 (src extension): never spawn agent runtimes for detection. Use
+ * existence probes (`which`/`where`) only. Reason: complex CLIs like
+ * `opencode` boot a full agent process for `opencode version`, ignore
+ * SIGTERM on `exec` timeout, and macOS lacks PR_SET_PDEATHSIG so the
+ * orphaned child burns CPU forever (PPID=1, ~67% CPU per leak observed
+ * 2026-05-08). PATH probes can't spawn anything we have to babysit.
  */
 
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export interface DetectedClient {
   /** Client ID — the CLI tool identity (claude, codex, gemini, opencode, dare, kimi) */
@@ -19,7 +26,12 @@ export interface DetectedClient {
   cli: string;
   /** Whether the CLI binary is found in PATH */
   installed: boolean;
-  /** CLI version string if installed */
+  /**
+   * Reserved field — historically held the CLI's `--version` output but that probe
+   * was removed (see LL-055 src extension). Always undefined now; kept for frontend
+   * type compat (ClientStep renders `{c.version && <span>v{version}</span>}` so
+   * undefined naturally hides the line).
+   */
   version?: string;
   /** Whether an API key env var is set for this provider */
   hasApiKey: boolean;
@@ -30,87 +42,86 @@ interface CliSpec {
   provider: DetectedClient['provider'];
   label: string;
   cli: string;
-  versionCmd: string;
   envKey: string;
 }
 
 const CLI_SPECS: CliSpec[] = [
-  {
-    client: 'claude',
-    provider: 'anthropic',
-    label: 'Claude',
-    cli: 'claude',
-    versionCmd: 'claude --version',
-    envKey: 'ANTHROPIC_API_KEY',
-  },
-  {
-    client: 'codex',
-    provider: 'openai',
-    label: 'Codex',
-    cli: 'codex',
-    versionCmd: 'codex --version',
-    envKey: 'OPENAI_API_KEY',
-  },
-  {
-    client: 'opencode',
-    provider: 'opencode',
-    label: 'OpenCode',
-    cli: 'opencode',
-    versionCmd: 'opencode version',
-    envKey: 'ANTHROPIC_API_KEY',
-  },
-  {
-    client: 'gemini',
-    provider: 'google',
-    label: 'Gemini',
-    cli: 'gemini',
-    versionCmd: 'gemini --version',
-    envKey: 'GOOGLE_API_KEY',
-  },
-  { client: 'dare', provider: 'dare', label: 'Dare', cli: 'dare', versionCmd: 'dare --version', envKey: '' },
-  {
-    client: 'kimi',
-    provider: 'kimi',
-    label: 'Kimi',
-    cli: 'kimi',
-    versionCmd: 'kimi --version',
-    envKey: 'MOONSHOT_API_KEY',
-  },
+  { client: 'claude', provider: 'anthropic', label: 'Claude', cli: 'claude', envKey: 'ANTHROPIC_API_KEY' },
+  { client: 'codex', provider: 'openai', label: 'Codex', cli: 'codex', envKey: 'OPENAI_API_KEY' },
+  { client: 'opencode', provider: 'opencode', label: 'OpenCode', cli: 'opencode', envKey: 'ANTHROPIC_API_KEY' },
+  { client: 'gemini', provider: 'google', label: 'Gemini', cli: 'gemini', envKey: 'GOOGLE_API_KEY' },
+  { client: 'dare', provider: 'dare', label: 'Dare', cli: 'dare', envKey: '' },
+  { client: 'kimi', provider: 'kimi', label: 'Kimi', cli: 'kimi', envKey: 'MOONSHOT_API_KEY' },
 ];
 
-async function checkCli(spec: CliSpec): Promise<DetectedClient> {
+/**
+ * Returns true iff the binary exists on PATH. Uses `command -v` via `execFile`
+ * (no shell, no agent spawn). Windows falls back to `where`. 1s timeout is
+ * orders of magnitude over what a PATH lookup needs but tolerates a slow disk.
+ *
+ * Exposed as a parameter so tests can substitute a deterministic stub —
+ * `detectAvailableClients({ existsOnPath })` in the test boundary.
+ */
+export type ExistsOnPath = (cli: string) => Promise<boolean>;
+
+const defaultExistsOnPath: ExistsOnPath = async (cli) => {
+  // `command -v` is POSIX, returns 0 + path on stdout if found, 1 otherwise.
+  // execFile (no shell) prevents argument injection; cli value comes from a
+  // closed enum so it's already trusted, but we keep the safe primitive.
+  const probeCmd = process.platform === 'win32' ? 'where' : 'command';
+  const probeArgs = process.platform === 'win32' ? [cli] : ['-v', cli];
   try {
-    const { stdout } = await execAsync(spec.versionCmd, { timeout: 5000 });
-    const version = stdout.trim().split('\n').at(0) ?? '';
-    return {
-      client: spec.client,
-      provider: spec.provider,
-      label: spec.label,
-      cli: spec.cli,
-      installed: true,
-      version: version || undefined,
-      hasApiKey: spec.envKey ? Boolean(process.env[spec.envKey]) : false,
-    };
+    if (process.platform === 'win32') {
+      await execFileAsync(probeCmd, probeArgs, { timeout: 1000 });
+    } else {
+      // `command -v` is a shell builtin on POSIX — execFile can't run it directly.
+      // Use `/bin/sh -c "command -v <cli>"` with cli passed as positional arg
+      // (sh sets $0/$1 from positional args, no interpolation).
+      await execFileAsync('/bin/sh', ['-c', 'command -v "$1"', '_probe', cli], { timeout: 1000 });
+    }
+    return true;
   } catch {
-    return {
-      client: spec.client,
-      provider: spec.provider,
-      label: spec.label,
-      cli: spec.cli,
-      installed: false,
-      hasApiKey: spec.envKey ? Boolean(process.env[spec.envKey]) : false,
-    };
+    return false;
   }
+};
+
+async function checkCli(spec: CliSpec, existsOnPath: ExistsOnPath): Promise<DetectedClient> {
+  // A throwing probe must NOT propagate — one bad CLI shouldn't tank the
+  // whole detection. Treat any error as "not installed" (same observable
+  // result as a probe that resolved false).
+  let installed = false;
+  try {
+    installed = await existsOnPath(spec.cli);
+  } catch {
+    installed = false;
+  }
+  return {
+    client: spec.client,
+    provider: spec.provider,
+    label: spec.label,
+    cli: spec.cli,
+    installed,
+    hasApiKey: spec.envKey ? Boolean(process.env[spec.envKey]) : false,
+  };
 }
 
-/** Detect all available CLI clients in parallel. */
-export async function detectAvailableClients(): Promise<DetectedClient[]> {
-  const results = await Promise.all(CLI_SPECS.map(checkCli));
+/**
+ * Detect all available CLI clients in parallel.
+ * Pass a stub `existsOnPath` from tests to avoid touching the real filesystem.
+ */
+export async function detectAvailableClients(deps?: { existsOnPath?: ExistsOnPath }): Promise<DetectedClient[]> {
+  const probe = deps?.existsOnPath ?? defaultExistsOnPath;
+  const results = await Promise.all(CLI_SPECS.map((spec) => checkCli(spec, probe)));
   return results;
 }
 
 /** Return only clients that are installed. */
-export async function getInstalledClients(): Promise<DetectedClient[]> {
-  const all = await detectAvailableClients();
+export async function getInstalledClients(deps?: { existsOnPath?: ExistsOnPath }): Promise<DetectedClient[]> {
+  const all = await detectAvailableClients(deps);
   return all.filter((c) => c.installed);
+}
+
+/** Exposed for tests — assert no spec carries a version-fetching command. */
+export function getCliSpecsForTest(): readonly CliSpec[] {
+  return CLI_SPECS;
 }

@@ -13,9 +13,6 @@ vi.mock('@/components/ThreadCatPill', () => ({
 vi.mock('@/components/ExportButton', () => ({
   ExportButton: () => null,
 }));
-vi.mock('@/components/ThemeToggle', () => ({
-  ThemeToggle: () => null,
-}));
 vi.mock('@/components/VoiceCompanionButton', () => ({
   VoiceCompanionButton: () => null,
 }));
@@ -54,10 +51,10 @@ describe('ChatContainerHeader safe-area', () => {
     const header = container.querySelector('header');
     expect(header).not.toBeNull();
     expect(header?.className).toContain('safe-area-top');
+    expect(header?.className).not.toContain('py-3');
 
     const innerRow = header?.querySelector('div');
     expect(innerRow).not.toBeNull();
-    expect(innerRow?.className).toContain('h-[54px]');
-    expect(container.querySelector('[data-testid="hub-button"]')).toBeNull();
+    expect(innerRow?.className).toContain('py-3');
   });
 });

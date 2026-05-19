@@ -2,13 +2,14 @@
 
 /**
  * Clowder AI MCP Server — Memory Surface
- * 只暴露记忆与回溯工具（evidence/reflect/session chain）。
+ * 只暴露记忆与回溯工具（evidence/graph/recent/session chain）。
  */
 
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { installShutdownHandlers, startRefreshLoop } from './refresh-loop.js';
 import { registerMemoryToolset } from './server-toolsets.js';
 import { initCatCafeDir } from './utils/path-validator.js';
 
@@ -21,7 +22,7 @@ function createBaseServer(name: string): McpServer {
 
 /**
  * Create a Memory MCP server instance with evidence search,
- * reflection, session chain, and memory retention tools registered.
+ * graph/recent navigation and session chain tools registered.
  */
 export function createMemoryServer(): McpServer {
   const server = createBaseServer('cat-cafe-memory-mcp');
@@ -36,6 +37,9 @@ async function main(): Promise<void> {
   console.error('[cat-cafe-memory] MCP Server starting...');
   await server.connect(transport);
   console.error('[cat-cafe-memory] MCP Server running on stdio');
+
+  const refreshLoop = startRefreshLoop();
+  installShutdownHandlers(refreshLoop);
 }
 
 const isEntryPoint = process.argv[1] && resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1]);

@@ -185,6 +185,9 @@ export function initTelemetry(config?: TelemetryConfig): TelemetryHandle {
 
   sdk.start();
 
+  // Pre-touch low-frequency counters so they appear in Prometheus at 0.
+  import('./instruments.js').then(({ warmupCounters }) => warmupCounters());
+
   // --- L1.5: MetricsSnapshotStore — periodic sampling for trend data ---
   const snapshotStore = new MetricsSnapshotStore();
   const SNAPSHOT_INTERVAL_MS = 30_000;

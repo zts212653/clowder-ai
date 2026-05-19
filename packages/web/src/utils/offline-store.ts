@@ -9,8 +9,16 @@ const DB_NAME = 'cat-cafe-offline';
  * object store on bump — snapshots are not the source of truth (KD-1, KD-3),
  * so dropping is safe; next hydration rebuilds from API. NEVER decrement.
  */
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const MAX_SNAPSHOT_MESSAGES = 50;
+
+/** F194 Phase Z10 AC-Z28: persist activeInvocations + hasActiveInvocation
+ *  per thread so F5 first paint shows last-known active state. fetchQueue
+ *  authoritative-refreshes after mount (overwrites with server truth). */
+export interface PersistedThreadActiveState {
+  hasActiveInvocation: boolean;
+  activeInvocations: Record<string, { catId: string; mode: string; startedAt?: number }>;
+}
 
 interface CatCafeOfflineDB extends DBSchema {
   threads: {
@@ -23,6 +31,15 @@ interface CatCafeOfflineDB extends DBSchema {
       threadId: string;
       messages: ChatMessage[];
       hasMore: boolean;
+      updatedAt: number;
+    };
+  };
+  'thread-active-state': {
+    key: string;
+    value: {
+      threadId: string;
+      hasActiveInvocation: boolean;
+      activeInvocations: PersistedThreadActiveState['activeInvocations'];
       updatedAt: number;
     };
   };
@@ -48,6 +65,10 @@ function getDB(): Promise<IDBPDatabase<CatCafeOfflineDB>> {
         }
         if (!db.objectStoreNames.contains('thread-messages')) {
           db.createObjectStore('thread-messages', { keyPath: 'threadId' });
+        }
+        // F194 Phase Z10 AC-Z28: persist activeInvocations across F5.
+        if (!db.objectStoreNames.contains('thread-active-state')) {
+          db.createObjectStore('thread-active-state', { keyPath: 'threadId' });
         }
       },
     });
@@ -132,14 +153,45 @@ export async function loadThreadMessages(
   };
 }
 
+/**
+ * F194 Phase Z10 AC-Z28 — save activeInvocations snapshot for F5 restore.
+ * Called write-through whenever the in-memory store's active state changes
+ * (typically from fetchQueue or socket activeInvocation events).
+ */
+export async function saveThreadActiveState(threadId: string, state: PersistedThreadActiveState): Promise<void> {
+  const db = await getDB();
+  await db.put('thread-active-state', {
+    threadId,
+    hasActiveInvocation: state.hasActiveInvocation,
+    activeInvocations: state.activeInvocations,
+    updatedAt: Date.now(),
+  });
+}
+
+/**
+ * F194 Phase Z10 AC-Z28 — load activeInvocations snapshot for F5 first paint.
+ * useChatHistory restores this BEFORE fetchQueue fires async, so UI shows
+ * last-known active state instead of fake "idle" gap (R14).
+ */
+export async function loadThreadActiveState(threadId: string): Promise<PersistedThreadActiveState | null> {
+  const db = await getDB();
+  const record = await db.get('thread-active-state', threadId);
+  if (!record) return null;
+  return {
+    hasActiveInvocation: record.hasActiveInvocation,
+    activeInvocations: record.activeInvocations,
+  };
+}
+
 /** @internal — only for tests to inject faults */
 export const _getDBForTest = getDB;
 
 export async function clearAll(): Promise<void> {
   const db = await getDB();
-  const tx = db.transaction(['threads', 'thread-messages'], 'readwrite');
+  const tx = db.transaction(['threads', 'thread-messages', 'thread-active-state'], 'readwrite');
   tx.objectStore('threads').clear();
   tx.objectStore('thread-messages').clear();
+  tx.objectStore('thread-active-state').clear();
   await tx.done;
 }
 

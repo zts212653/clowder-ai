@@ -163,16 +163,16 @@ export function SchedulePanel() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-[var(--console-card-bg)]">
+    <div className="flex flex-col h-full bg-cafe-surface">
       {/* Scope filter bar */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-[var(--console-border-soft)]">
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-cafe-subtle">
         <button
           type="button"
           onClick={() => setScope('all')}
           className={`px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all ${
             scope === 'all'
-              ? 'bg-[var(--console-pill-bg)] text-cafe-secondary border border-[var(--cafe-accent)]/40'
-              : 'text-cafe-muted hover:text-cafe-secondary'
+              ? 'bg-cafe-surface-elevated text-cafe border border-cafe-accent/40'
+              : 'text-cafe-muted hover:text-cafe'
           }`}
         >
           All
@@ -182,8 +182,8 @@ export function SchedulePanel() {
           onClick={() => setScope('current-thread')}
           className={`px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all ${
             scope === 'current-thread'
-              ? 'bg-[var(--console-pill-bg)] text-cafe-secondary border border-[var(--cafe-accent)]/40'
-              : 'text-cafe-muted hover:text-cafe-secondary'
+              ? 'bg-cafe-surface-elevated text-cafe border border-cafe-accent/40'
+              : 'text-cafe-muted hover:text-cafe'
           }`}
         >
           Current Thread
@@ -196,15 +196,15 @@ export function SchedulePanel() {
       {/* AC-D1: Global governance toggle */}
       {globalControl && (
         <div
-          className={`flex items-center gap-2 px-4 py-1.5 border-b border-[var(--console-border-soft)] ${
-            globalControl.enabled ? 'bg-[var(--console-card-bg)]' : 'bg-conn-red-bg'
+          className={`flex items-center gap-2 px-4 py-1.5 border-b border-cafe-subtle ${
+            globalControl.enabled ? 'bg-cafe-surface' : 'bg-conn-red-bg'
           }`}
         >
           <button
             type="button"
             onClick={handleGlobalToggle}
             className={`relative w-7 h-4 rounded-full transition-colors ${
-              globalControl.enabled ? 'bg-conn-emerald-bg' : 'bg-conn-red-bg'
+              globalControl.enabled ? 'bg-conn-emerald-text' : 'bg-conn-red-text'
             }`}
             title={globalControl.enabled ? 'Scheduler active — click to pause' : 'Scheduler paused — click to resume'}
           >
@@ -227,9 +227,9 @@ export function SchedulePanel() {
 
       {/* Current Thread context banner (V2 design) */}
       {scope === 'current-thread' && currentThreadId && (
-        <div className="flex items-center gap-1.5 px-4 py-1.5 bg-[var(--console-pill-bg)]/60 border-b border-[var(--console-border-soft)]">
+        <div className="flex items-center gap-1.5 px-4 py-1.5 bg-cafe-surface-elevated/60 border-b border-cafe-subtle">
           <span className="text-[10px] text-cafe-muted">Showing tasks for:</span>
-          <span className="text-[10px] font-medium text-cafe-secondary">{currentThreadId.slice(0, 12)}</span>
+          <span className="text-[10px] font-medium text-cafe">{currentThreadId.slice(0, 12)}</span>
         </div>
       )}
 
@@ -238,22 +238,22 @@ export function SchedulePanel() {
         {filteredTasks.length === 0 ? (
           <div className="flex items-center justify-center h-32 text-sm text-cafe-muted">No scheduled tasks</div>
         ) : (
-          <div className="divide-y divide-[var(--console-border-soft)]">
+          <div className="space-y-0.5">
             {filteredTasks.map((task) => {
               const category = task.display?.category ?? fallbackCategory(task.id);
               const label = task.display?.label ?? humanizeId(task.id);
               const preview = task.subjectPreview ?? task.display?.description ?? null;
               // Status dot: green=healthy, red=last run failed, gray=never run
               const statusDot = !task.lastRun
-                ? 'bg-cafe-surface-sunken'
+                ? 'bg-conn-gray-text'
                 : task.lastRun.outcome === 'RUN_FAILED'
-                  ? 'bg-conn-red-bg'
-                  : 'bg-conn-emerald-bg';
+                  ? 'bg-conn-red-text'
+                  : 'bg-conn-emerald-text';
               const isExpanded = expandedId === task.id;
               return (
                 <div key={task.id}>
                   <div
-                    className="px-4 py-3 hover:bg-[var(--console-pill-bg)]/50 transition-colors cursor-pointer"
+                    className="px-4 py-3 hover:bg-cafe-surface-elevated/50 transition-colors cursor-pointer"
                     onClick={() => handleToggleExpand(task.id)}
                     onKeyDown={(e) => e.key === 'Enter' && handleToggleExpand(task.id)}
                     role="button"
@@ -265,13 +265,13 @@ export function SchedulePanel() {
                         title={task.lastRun?.outcome ?? 'never run'}
                       />
                       <span
-                        className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${CATEGORY_STYLES[category]}`}
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${CATEGORY_STYLES[category]}`}
                       >
                         {CATEGORY_LABELS[category]}
                       </span>
-                      <span className="text-xs font-medium text-cafe-secondary truncate flex-1">{label}</span>
+                      <span className="text-xs font-medium text-cafe truncate flex-1">{label}</span>
                       {task.source === 'dynamic' && (
-                        <span className="px-1 py-0.5 rounded text-[8px] font-medium bg-conn-purple-bg text-conn-purple-text">
+                        <span className="px-1 py-0.5 rounded text-[10px] font-medium bg-conn-violet-bg text-conn-violet-text">
                           user
                         </span>
                       )}
@@ -294,7 +294,7 @@ export function SchedulePanel() {
                             </span>
                           )}
                           {preview && task.lastRun.outcome !== 'RUN_FAILED' && (
-                            <span className="text-[10px] text-cafe-muted truncate max-w-[140px]">{preview}</span>
+                            <span className="text-[10px] text-cafe-secondary truncate max-w-[140px]">{preview}</span>
                           )}
                         </>
                       ) : (
@@ -306,7 +306,7 @@ export function SchedulePanel() {
                         </span>
                       )}
                       {!(task.effectiveEnabled ?? task.enabled) && (
-                        <span className="ml-auto text-[9px] text-conn-red-text font-medium">PAUSED</span>
+                        <span className="ml-auto text-[10px] text-conn-red-text font-medium">PAUSED</span>
                       )}
                     </div>
                   </div>
@@ -321,7 +321,7 @@ export function SchedulePanel() {
                             e.stopPropagation();
                             handleToggleTask(task);
                           }}
-                          className="text-[10px] text-cafe-secondary hover:text-[var(--cafe-accent)] transition-colors"
+                          className="text-[10px] text-cafe hover:text-cafe-accent transition-colors"
                         >
                           {(task.effectiveEnabled ?? task.enabled) ? '\u23F8 Pause' : '\u25B6 Resume'}
                         </button>
@@ -366,7 +366,7 @@ export function SchedulePanel() {
       </div>
 
       {/* Footer: health summary (AC-F1) */}
-      <div className="px-4 py-1.5 border-t border-[var(--console-border-soft)] text-[10px] text-cafe-muted flex items-center">
+      <div className="px-4 py-1.5 border-t border-cafe-subtle text-[10px] text-cafe-muted flex items-center">
         <span>
           {tasks.length} tasks · {activeCount} active{pausedCount > 0 ? ` · ${pausedCount} paused` : ''}
         </span>
@@ -376,10 +376,10 @@ export function SchedulePanel() {
       </div>
 
       {/* Conversational CTA (AC-G5: replaces NL input — W1 vision) */}
-      <div className="px-4 py-2.5 bg-[var(--console-pill-bg)] border-t border-[var(--console-border-soft)]">
-        <p className="text-[11px] text-cafe-muted text-center">
+      <div className="px-4 py-2.5 bg-cafe-surface-elevated border-t border-cafe-subtle">
+        <p className="text-xs text-cafe-muted text-center">
           Want to add a scheduled task? Tell any cat in the chat — e.g.
-          <span className="text-cafe-secondary font-medium"> &quot;every morning at 9, check Anthropic news&quot;</span>
+          <span className="text-cafe font-medium"> &quot;every morning at 9, check Anthropic news&quot;</span>
         </p>
       </div>
     </div>

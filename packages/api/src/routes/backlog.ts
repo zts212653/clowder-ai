@@ -489,21 +489,6 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
     return { items };
   });
 
-  app.delete<{ Params: { id: string } }>('/api/backlog/items/:id', async (request, reply) => {
-    const userId = resolveUserId(request, {});
-    if (!userId) {
-      reply.status(401);
-      return { error: 'Identity required' };
-    }
-    const existing = await backlogStore.get(request.params.id, userId);
-    if (!existing) {
-      reply.status(404);
-      return { error: 'Item not found' };
-    }
-    await backlogStore.delete(request.params.id);
-    return { ok: true };
-  });
-
   app.get('/api/backlog/self-claim-policy', async (request, reply) => {
     const userId = resolveUserId(request, {});
     if (!userId) {

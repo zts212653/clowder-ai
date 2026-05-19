@@ -2,16 +2,19 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type Thread, useChatStore } from '@/stores/chatStore';
+import { useLabelStore } from '@/stores/label-store';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { loadThreads as loadCachedThreads } from '@/utils/offline-store';
-
 import { BootcampListModal } from '../BootcampListModal';
 import { BootcampIcon } from '../icons/BootcampIcon';
+
 import { readProjectNames, writeProjectNames } from './active-workspace';
 import { DirectoryPickerModal, type NewThreadOptions } from './DirectoryPickerModal';
+import { LabelFilterBar } from './LabelFilterBar';
 import { SectionGroup } from './SectionGroup';
 import { ThreadItem } from './ThreadItem';
+import { ThreadOrganizerModal } from './ThreadOrganizerModal';
 import { pushThreadRouteWithHistory } from './thread-navigation';
 import {
   getProjectPaths,
@@ -39,6 +42,7 @@ function notifyThreadCreateFailure(message: string) {
 }
 
 export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
+  const [showBootcampList, setShowBootcampList] = useState(false);
   const {
     threads,
     currentThreadId,
@@ -52,8 +56,8 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   } = useChatStore();
   const [isCreating, setIsCreating] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
-  const [showBootcampList, setShowBootcampList] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [labelFilter, setLabelFilter] = useState<string | null>(null);
   const [bindWarning, setBindWarning] = useState<string | null>(null);
   // I-1: Thread to confirm deletion (null = no dialog)
   const [deleteTarget, setDeleteTarget] = useState<Thread | null>(null);
@@ -136,8 +140,8 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
 
   useEffect(() => {
     void loadThreads();
-    // Fetch global bubble display defaults from Config Hub on mount
     void useChatStore.getState().fetchGlobalBubbleDefaults();
+    void useLabelStore.getState().fetchLabels();
   }, [loadThreads]);
 
   useEffect(() => {
@@ -183,10 +187,9 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           body: JSON.stringify({
             ...(opts.projectPath ? { projectPath: opts.projectPath } : {}),
             ...(opts.preferredCats?.length ? { preferredCats: opts.preferredCats } : {}),
-            ...(opts.title || opts.bootcamp ? { title: opts.bootcamp ? '🎓 猫猫训练营' : opts.title } : {}),
+            ...(opts.title ? { title: opts.title } : {}),
             ...(opts.pinned ? { pinned: opts.pinned } : {}),
             ...(opts.backlogItemId ? { backlogItemId: opts.backlogItemId } : {}),
-            ...(opts.bootcamp ? { bootcampState: { v: 1, phase: 'phase-1-intro', startedAt: Date.now() } } : {}),
           }),
         });
         if (!res.ok) {
@@ -339,6 +342,10 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     useChatStore.getState().updateThreadPreferredCats(threadId, cats);
   }, []);
 
+  const handleUpdateLabels = useCallback(async (threadId: string, labels: string[]) => {
+    await useChatStore.getState().updateThreadLabels(threadId, labels);
+  }, []);
+
   const handleSelect = useCallback(
     (threadId: string) => {
       // Always clear unread badge — user clicking the thread = "I've seen it"
@@ -418,6 +425,250 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     });
   }, [liveThreads, normalizedQuery]);
 
+  const { labels } = useLabelStore();
+
+  const labelFilteredThreads = useMemo(() => {
+    if (!labelFilter) return filteredThreads;
+    if (labelFilter === '__uncategorized__') {
+      return filteredThreads.filter((t) => !t.labels || t.labels.length === 0);
+    }
+    return filteredThreads.filter((t) => t.labels?.includes(labelFilter));
+  }, [filteredThreads, labelFilter]);
+
+  const uncategorizedCount = useMemo(
+    () => liveThreads.filter((t) => !t.labels || t.labels.length === 0).length,
+    [liveThreads],
+  );
+
+  const [showOrganizer, setShowOrganizer] = useState(false);
+  const [suggestLoading, setSuggestLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState<Map<string, string[]> | undefined>();
+  const pendingNewLabelsRef = useRef<{ name: string; color: string }[]>([]);
+  const pendingNameAssignmentsRef = useRef<Map<string, string[]>>(new Map());
+
+  const uncategorizedThreads = useMemo(
+    () => liveThreads.filter((t) => !t.labels || t.labels.length === 0),
+    [liveThreads],
+  );
+
+  const ORGANIZER_TITLE = 'Thread 整理助手';
+
+  const buildTriggerContent = useCallback(() => {
+    const uncatList = uncategorizedThreads
+      .slice(0, 50)
+      .map((t) => `- id: "${t.id}" title: "${t.title || t.id}"`)
+      .join('\n');
+
+    if (labels.length > 0) {
+      const labelInfo = labels.map((l) => `${l.name} (${l.id})`).join(', ');
+      return [
+        '帮我整理未分类的 thread。',
+        '',
+        `当前有 ${uncategorizedThreads.length} 个未分类 thread，可用标签：${labelInfo}`,
+        '',
+        '## 未分类 Thread',
+        uncatList,
+        '',
+        '请在回复末尾附上机器可读建议（用 HTML 注释包裹，modal 会自动解析）：',
+        '<!-- SUGGESTIONS_JSON:{"threadId1":["labelId1"],"threadId2":["labelId2","labelId3"]} -->',
+        'key = thread id，value = 建议的 label id 数组。只用上面列出的 id。',
+      ].join('\n');
+    }
+
+    return [
+      '帮我整理未分类的 thread。当前没有任何标签，请先建议一套标签体系再分类。',
+      '',
+      `当前有 ${uncategorizedThreads.length} 个未分类 thread（无标签）`,
+      '',
+      '## 未分类 Thread',
+      uncatList,
+      '',
+      '请在回复末尾附上机器可读建议（用 HTML 注释包裹，modal 会自动解析）：',
+      '<!-- SUGGESTIONS_JSON:{"newLabels":[{"name":"标签名","color":"#hex"}],"assignments":{"threadId1":["标签名"]}} -->',
+      'newLabels = 建议创建的标签（名称+十六进制颜色），assignments = 每个 thread 建议的标签名数组。',
+    ].join('\n');
+  }, [labels, uncategorizedThreads]);
+
+  const findOrCreateOrganizerThread = useCallback(async () => {
+    const store = useChatStore.getState();
+    const existing = store.threads.find((t) => t.title === ORGANIZER_TITLE);
+    if (existing) return existing;
+
+    const res = await apiFetch('/api/threads', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: ORGANIZER_TITLE }),
+    });
+    if (!res.ok) throw new Error(`${res.status}`);
+    const created = await res.json();
+    await loadThreads();
+    return created as Thread;
+  }, [loadThreads]);
+
+  const parseSuggestionsJson = useCallback(
+    async (jsonStr: string) => {
+      const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
+      const validThreadIds = new Set(uncategorizedThreads.map((t) => t.id));
+      if ('newLabels' in parsed) {
+        const { extractPendingLabelSuggestions } = await import('@/utils/batch-apply-labels');
+        const result = extractPendingLabelSuggestions(parsed, validThreadIds);
+        if (!result) return new Map<string, string[]>();
+        pendingNewLabelsRef.current = result.pendingLabels;
+        pendingNameAssignmentsRef.current = result.nameAssignments;
+        const map = new Map<string, string[]>();
+        for (const [tid, names] of result.nameAssignments) {
+          map.set(
+            tid,
+            names.map((n) => `pending:${n}`),
+          );
+        }
+        return map;
+      }
+      pendingNewLabelsRef.current = [];
+      pendingNameAssignmentsRef.current = new Map();
+      const { filterSuggestions } = await import('@/utils/batch-apply-labels');
+      const validLabelIds = new Set(labels.map((l) => l.id));
+      return filterSuggestions(parsed, validThreadIds, validLabelIds);
+    },
+    [uncategorizedThreads, labels],
+  );
+
+  const handleOrganizeWithCat = useCallback(async () => {
+    setShowOrganizer(true);
+    setSuggestLoading(true);
+    setSuggestions(undefined);
+    try {
+      const target = await findOrCreateOrganizerThread();
+      const threadId = target.id;
+      const sentAt = Date.now();
+
+      const triggerRes = await apiFetch('/api/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: buildTriggerContent(), threadId }),
+      });
+      if (!triggerRes.ok) {
+        useToastStore
+          .getState()
+          .addToast({ type: 'error', title: '发送失败', message: '触发消息发送失败，请重试', duration: 5000 });
+        return;
+      }
+
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const msgRes = await apiFetch(`/api/messages?threadId=${encodeURIComponent(threadId)}&limit=5`);
+        if (!msgRes.ok) continue;
+        const data = await msgRes.json();
+        const catMsgs = (data.messages ?? []).filter(
+          (m: { catId?: string; timestamp: number; isDraft?: boolean }) =>
+            m.catId && m.timestamp > sentAt && !m.isDraft,
+        );
+        if (catMsgs.length === 0) continue;
+        const withJson = catMsgs.find((m: { content: string }) => /<!-- SUGGESTIONS_JSON:/.test(m.content as string));
+        if (!withJson) continue;
+        const match = (withJson.content as string).match(/<!-- SUGGESTIONS_JSON:([\s\S]*?) -->/);
+        if (match?.[1]) {
+          try {
+            setSuggestions(await parseSuggestionsJson(match[1]));
+          } catch {
+            /* JSON malformed — modal stays usable without pre-fill */
+          }
+          break;
+        }
+      }
+    } catch {
+      useToastStore
+        .getState()
+        .addToast({ type: 'error', title: '分析失败', message: '猫猫无法分析，请重试', duration: 5000 });
+    } finally {
+      setSuggestLoading(false);
+    }
+  }, [findOrCreateOrganizerThread, buildTriggerContent, parseSuggestionsJson]);
+
+  const handleSuggestAll = useCallback(async () => {
+    setSuggestLoading(true);
+    setSuggestions(undefined);
+    try {
+      const target = await findOrCreateOrganizerThread();
+      const threadId = target.id;
+      const sentAt = Date.now();
+
+      const triggerRes = await apiFetch('/api/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: buildTriggerContent(), threadId }),
+      });
+      if (!triggerRes.ok) return;
+
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const msgRes = await apiFetch(`/api/messages?threadId=${encodeURIComponent(threadId)}&limit=5`);
+        if (!msgRes.ok) continue;
+        const data = await msgRes.json();
+        const catMsgs = (data.messages ?? []).filter(
+          (m: { catId?: string; timestamp: number; isDraft?: boolean }) =>
+            m.catId && m.timestamp > sentAt && !m.isDraft,
+        );
+        if (catMsgs.length === 0) continue;
+        const withJson = catMsgs.find((m: { content: string }) => /<!-- SUGGESTIONS_JSON:/.test(m.content as string));
+        if (!withJson) continue;
+        const match = (withJson.content as string).match(/<!-- SUGGESTIONS_JSON:([\s\S]*?) -->/);
+        if (match?.[1]) {
+          try {
+            setSuggestions(await parseSuggestionsJson(match[1]));
+          } catch {
+            /* JSON malformed — modal stays usable without pre-fill */
+          }
+          break;
+        }
+      }
+    } catch {
+      /* network error — loading will stop, modal stays usable */
+    } finally {
+      setSuggestLoading(false);
+    }
+  }, [findOrCreateOrganizerThread, buildTriggerContent, parseSuggestionsJson]);
+
+  const handleBatchApplyLabels = useCallback(async (assignments: Map<string, string[]>) => {
+    const { batchApplyLabels, createAndResolveLabels } = await import('@/utils/batch-apply-labels');
+    const updateLabels = useChatStore.getState().updateThreadLabels;
+
+    let resolvedAssignments = assignments;
+    if (pendingNewLabelsRef.current.length > 0) {
+      const { useLabelStore } = await import('@/stores/label-store');
+      const usedNames = new Set<string>();
+      const nameAssignments = new Map<string, string[]>();
+      for (const [tid, labelIds] of assignments) {
+        const names = labelIds.filter((id) => id.startsWith('pending:')).map((id) => id.slice(8));
+        if (names.length > 0) {
+          nameAssignments.set(tid, names);
+          for (const n of names) usedNames.add(n);
+        }
+      }
+      const usedPending = pendingNewLabelsRef.current.filter((spec) => usedNames.has(spec.name));
+      const resolved = await createAndResolveLabels(usedPending, nameAssignments, (name, color) =>
+        useLabelStore.getState().createLabel(name, color),
+      );
+      resolvedAssignments = new Map<string, string[]>();
+      for (const [tid, labelIds] of assignments) {
+        const realIds = labelIds.filter((id) => !id.startsWith('pending:'));
+        const newIds = resolved.get(tid) ?? [];
+        const merged = [...realIds, ...newIds];
+        if (merged.length > 0) resolvedAssignments.set(tid, merged);
+      }
+      setSuggestions(resolvedAssignments);
+      pendingNewLabelsRef.current = [];
+      pendingNameAssignmentsRef.current = new Map();
+    }
+
+    const { failedThreadIds } = await batchApplyLabels(resolvedAssignments, updateLabels);
+    if (failedThreadIds.length === 0) {
+      setSuggestions(undefined);
+      setShowOrganizer(false);
+    }
+    return { failedThreadIds };
+  }, []);
+
   const unreadIds = useMemo(() => {
     const ids = new Set<string>();
     for (const thread of threads) {
@@ -448,11 +699,11 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   // F095 Phase B: Active workspace grouping
   const { pinnedProjects, toggleProjectPin } = useProjectPins();
   const threadGroups = useMemo(
-    () => sortAndGroupThreadsWithWorkspace(filteredThreads, unreadIds, pinnedProjects),
-    [filteredThreads, unreadIds, pinnedProjects],
+    () => sortAndGroupThreadsWithWorkspace(labelFilteredThreads, unreadIds, pinnedProjects),
+    [labelFilteredThreads, unreadIds, pinnedProjects],
   );
   const existingProjects = useMemo(() => getProjectPaths(liveThreads), [liveThreads]);
-  const showDefaultThread = normalizedQuery.length === 0 || '大厅'.includes(normalizedQuery);
+  const showDefaultThread = (normalizedQuery.length === 0 || '大厅'.includes(normalizedQuery)) && !labelFilter;
 
   // F095 Phase E: Scroll anchor — keeps visible content in place when threads reorder
   const { onScroll: handleScrollAnchor } = useScrollAnchor(scrollContainerRef, threadGroups);
@@ -463,33 +714,31 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     searchQuery: normalizedQuery,
     currentThreadId,
   });
-  const bootcampCount = useMemo(() => threads.filter((thread) => thread.bootcampState).length, [threads]);
+  const sidebarWidthClass = className === undefined ? 'w-60' : className;
 
   return (
     <>
       <aside
-        className={`${className ?? 'w-60'} flex flex-col h-full bg-[var(--console-panel-bg)]`}
-        style={{ boxShadow: '8px 0 24px rgba(43, 33, 26, 0.04)' }}
+        className={`${sidebarWidthClass} border-r border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] flex flex-col h-full`}
       >
-        <div className="p-3 flex items-center justify-between gap-2">
+        <div className="px-3 pt-3 pb-2 flex items-center justify-between">
           <span className="text-sm font-semibold text-cafe-black">对话</span>
           <div className="flex items-center gap-1.5">
             <button
               type="button"
               onClick={() => setShowBootcampList(true)}
-              className="relative flex h-8 w-8 items-center justify-center rounded-lg text-conn-amber-text transition-colors hover:bg-conn-amber-bg/60"
+              className="p-1.5 rounded-lg text-conn-amber-text hover:bg-conn-amber-bg transition-colors"
+              title="猫猫训练营"
               data-testid="sidebar-bootcamp"
               data-guide-id="sidebar.bootcamp"
-              title={bootcampCount > 0 ? `我的训练营（${bootcampCount}）` : '开始训练营'}
-              aria-label={bootcampCount > 0 ? `我的训练营（${bootcampCount}）` : '开始训练营'}
             >
-              <BootcampIcon className="h-4 w-4" />
+              <BootcampIcon className="w-3.5 h-3.5" />
             </button>
             <button
               type="button"
               onClick={() => setShowPicker(true)}
               disabled={isCreating}
-              className="console-button-primary text-xs px-2 py-1 disabled:opacity-40"
+              className="console-button-primary text-xs disabled:opacity-40"
               data-guide-id="sidebar.new-thread"
             >
               {isCreating ? '...' : '+ 新对话'}
@@ -498,28 +747,41 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
         </div>
 
         {bindWarning && (
-          <div className="px-3 py-1.5 bg-conn-amber-bg/60 text-[10px] text-conn-amber-text">{bindWarning}</div>
+          <div className="px-3 py-1.5 bg-conn-amber-bg border-b border-conn-amber-ring text-[10px] text-conn-amber-text">
+            {bindWarning}
+          </div>
         )}
 
-        <div className="px-3 py-2">
-          <input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="搜索对话、项目或 ID..."
-            className="console-form-input w-full text-xs"
-          />
-          {unreadIds.size > 0 && (
-            <button
-              type="button"
-              onClick={handleMarkAllRead}
-              disabled={isMarkingAllRead}
-              className="mt-1.5 text-[10px] text-cafe-muted hover:text-cafe-accent disabled:opacity-40 transition-colors"
-              data-testid="mark-all-read-btn"
-            >
-              {isMarkingAllRead ? '清理中...' : '全部已读'}
-            </button>
-          )}
+        <div className="px-3 pb-2">
+          <div className="flex items-center gap-1.5">
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="搜索对话、项目或 ID..."
+              className="flex-1 min-w-0 rounded-lg bg-[var(--console-field-bg)] px-2.5 py-1.5 text-xs text-cafe-secondary placeholder:text-cafe-muted focus:outline-none focus:ring-1 focus:ring-[var(--console-input-stroke)]"
+            />
+            {unreadIds.size > 0 && (
+              <button
+                type="button"
+                onClick={handleMarkAllRead}
+                disabled={isMarkingAllRead}
+                className="shrink-0 rounded-md bg-[var(--console-field-bg)] px-2 py-0.5 text-[10px] text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-black disabled:opacity-40 transition-colors whitespace-nowrap"
+                data-testid="mark-all-read-btn"
+              >
+                {isMarkingAllRead ? '...' : '全部已读'}
+              </button>
+            )}
+          </div>
         </div>
+
+        <LabelFilterBar
+          labels={labels}
+          selectedFilter={labelFilter}
+          onSelect={setLabelFilter}
+          uncategorizedCount={uncategorizedCount}
+          onOrganize={handleOrganizeWithCat}
+          onManualOrganize={() => setShowOrganizer(true)}
+        />
 
         <div ref={scrollContainerRef} onScroll={handleScrollAnchor} className="flex-1 overflow-y-auto">
           {isLoadingThreads && threads.length === 0 && (
@@ -622,11 +884,13 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                             onTogglePin={handleTogglePin}
                             onToggleFavorite={handleToggleFavorite}
                             onUpdatePreferredCats={handleUpdatePreferredCats}
+                            onUpdateLabels={handleUpdateLabels}
                             isPinned={t.pinned}
                             isFavorited={t.favorited}
                             threadState={getThreadState(t.id)}
                             indented
                             preferredCats={t.preferredCats}
+                            threadLabels={t.labels}
                             isHubThread={!!t.connectorHubState}
                           />
                         ))}
@@ -691,11 +955,13 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                     onTogglePin={handleTogglePin}
                     onToggleFavorite={handleToggleFavorite}
                     onUpdatePreferredCats={handleUpdatePreferredCats}
+                    onUpdateLabels={handleUpdateLabels}
                     isPinned={t.pinned}
                     isFavorited={t.favorited}
                     threadState={getThreadState(t.id)}
                     indented={group.type === 'project'}
                     preferredCats={t.preferredCats}
+                    threadLabels={t.labels}
                     isHubThread={!!t.connectorHubState}
                   />
                 ))}
@@ -708,8 +974,8 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           )}
         </div>
 
-        {/* F095 Phase D: Trash bin section — styled as Pencil Sidebar Utility Row */}
-        <div className="px-3 pb-3">
+        {/* F095 Phase D: Trash bin section */}
+        <div className="mx-2 mt-1 mb-2">
           <button
             type="button"
             onClick={handleToggleTrash}
@@ -717,18 +983,20 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
             data-testid="trash-bin-toggle"
           >
             <svg
+              aria-hidden="true"
               className="h-[15px] w-[15px] flex-shrink-0"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
               strokeWidth="2"
             >
-              <path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4" />
+              <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
             </svg>
             <span className="flex-1 text-left">
               回收站{trashedThreads.length > 0 ? ` (${trashedThreads.length})` : ''}
             </span>
             <svg
+              aria-hidden="true"
               className={`h-3 w-3 flex-shrink-0 transition-transform ${showTrash ? 'rotate-180' : ''}`}
               viewBox="0 0 24 24"
               fill="none"
@@ -739,7 +1007,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
             </svg>
           </button>
           {showTrash && (
-            <div className="max-h-48 overflow-y-auto">
+            <div className="max-h-48 overflow-y-auto mt-1">
               {isLoadingTrash && <div className="px-3 py-2 text-[10px] text-cafe-muted">加载中...</div>}
               {!isLoadingTrash && trashedThreads.length === 0 && (
                 <div className="px-3 py-2 text-[10px] text-cafe-muted">回收站是空的</div>
@@ -747,13 +1015,13 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
               {trashedThreads.map((t) => (
                 <div
                   key={t.id}
-                  className="flex items-center gap-2 px-3 py-1.5 text-xs text-cafe-secondary hover:bg-cafe-surface-elevated group"
+                  className="flex items-center gap-2 px-3 py-1.5 text-xs text-cafe-secondary hover:bg-[var(--console-hover-bg)] rounded-lg group"
                 >
                   <span className="truncate flex-1">{t.title ?? '未命名对话'}</span>
                   <button
                     type="button"
                     onClick={() => handleRestore(t.id)}
-                    className="sm:opacity-0 sm:group-hover:opacity-100 text-[10px] text-cafe-accent hover:text-cafe-accent/80 transition-all shrink-0"
+                    className="sm:opacity-0 sm:group-hover:opacity-100 text-[10px] text-cafe-accent hover:text-cafe-interactive transition-all shrink-0"
                     data-testid={`restore-btn-${t.id}`}
                   >
                     恢复
@@ -772,11 +1040,6 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           onCancel={() => setShowPicker(false)}
         />
       )}
-      <BootcampListModal
-        open={showBootcampList}
-        onClose={() => setShowBootcampList(false)}
-        currentThreadId={currentThreadId}
-      />
 
       {/* I-1: Delete confirmation dialog (F095-G: typed confirmation for system threads) */}
       {deleteTarget && (
@@ -784,6 +1047,40 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           thread={deleteTarget}
           onCancel={() => setDeleteTarget(null)}
           onConfirm={handleDeleteConfirm}
+        />
+      )}
+
+      <BootcampListModal
+        open={showBootcampList}
+        onClose={() => setShowBootcampList(false)}
+        currentThreadId={currentThreadId}
+      />
+
+      {showOrganizer && (
+        <ThreadOrganizerModal
+          open={showOrganizer}
+          onClose={() => {
+            setShowOrganizer(false);
+            setSuggestions(undefined);
+            pendingNewLabelsRef.current = [];
+            pendingNameAssignmentsRef.current = new Map();
+          }}
+          threads={uncategorizedThreads}
+          labels={[
+            ...labels,
+            ...pendingNewLabelsRef.current.map((spec) => ({
+              id: `pending:${spec.name}`,
+              name: spec.name,
+              color: spec.color,
+              sortOrder: 0,
+              createdBy: 'auto',
+              createdAt: Date.now(),
+            })),
+          ]}
+          onApply={handleBatchApplyLabels}
+          onSuggestAll={handleSuggestAll}
+          initialSuggestions={suggestions}
+          loading={suggestLoading}
         />
       )}
     </>
@@ -809,10 +1106,8 @@ function DeleteConfirmDialog({
   const [typedName, setTypedName] = useState('');
   const confirmed = !isSystem || typedName === title;
   const confirmInputRef = useRef<HTMLInputElement>(null);
-  const confirmBtnRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (isSystem) confirmInputRef.current?.focus();
-    else setTimeout(() => confirmBtnRef.current?.focus(), 50);
   }, [isSystem]);
 
   return (
@@ -837,7 +1132,7 @@ function DeleteConfirmDialog({
               value={typedName}
               onChange={(e) => setTypedName(e.target.value)}
               placeholder={title}
-              className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-[var(--console-border-soft)] focus:outline-none focus:border-conn-red-ring mb-4"
+              className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-cafe focus:outline-none focus:border-conn-red-ring mb-4"
             />
           </>
         ) : (
@@ -848,18 +1143,17 @@ function DeleteConfirmDialog({
         <div className="flex gap-2 justify-end">
           <button
             onClick={onCancel}
-            className="px-3 py-1.5 text-sm rounded-lg border border-[var(--console-border-soft)] hover:bg-cafe-surface-elevated transition-colors"
+            className="px-3 py-1.5 text-sm rounded-lg border border-cafe hover:bg-cafe-surface-elevated transition-colors"
           >
             取消
           </button>
           <button
-            ref={confirmBtnRef}
             onClick={onConfirm}
             disabled={!confirmed}
-            className={`px-3 py-1.5 text-sm rounded-lg text-[var(--cafe-surface)] transition-colors focus:outline-none focus:ring-2 ${
+            className={`px-3 py-1.5 text-sm rounded-lg text-white transition-colors ${
               isSystem
-                ? 'bg-conn-red-text hover:opacity-90 focus:ring-conn-red-ring disabled:opacity-40 disabled:cursor-not-allowed'
-                : 'bg-conn-amber-text hover:opacity-90 focus:ring-conn-amber-ring'
+                ? 'bg-conn-red-text hover:bg-conn-red-hover disabled:bg-conn-red-ring disabled:cursor-not-allowed'
+                : 'bg-conn-amber-text hover:bg-conn-amber-hover'
             }`}
           >
             {isSystem ? '确认删除' : '移入回收站'}

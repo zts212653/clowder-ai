@@ -370,6 +370,48 @@ describe('cat-catalog-store', () => {
     assert.equal(created.variants[0]?.clientId, 'openai');
   });
 
+  it('persists voiceConfig when creating a runtime member', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    writeFileSync(templatePath, JSON.stringify(validConfig(), null, 2));
+    writeCatCatalog(projectRoot, validConfig());
+
+    await createRuntimeCat(projectRoot, {
+      catId: 'voice-cat',
+      breedId: 'voice-cat',
+      name: '声音猫',
+      displayName: '声音猫',
+      avatar: '/avatars/voice.png',
+      color: { primary: '#0f766e', secondary: '#ccfbf1' },
+      mentionPatterns: ['@voice-cat'],
+      roleDescription: '声音配置验证',
+      clientId: 'openai',
+      defaultModel: 'gpt-5.4',
+      mcpSupport: true,
+      cli: { command: 'codex', outputFormat: 'json' },
+      voiceConfig: {
+        voice: 'clone-voice',
+        langCode: 'zh',
+        refAudio: '/uploads/ref-audio-1234-abcd.wav',
+        refText: '参考文本',
+        instruct: 'calm',
+        speed: 1.1,
+      },
+    });
+
+    const catalog = readRuntimeCatCatalog(projectRoot);
+    const created = catalog.breeds.find((breed) => breed.catId === 'voice-cat');
+    assert.ok(created, 'voice-cat breed should be created');
+    assert.deepEqual(created.variants[0]?.voiceConfig, {
+      voice: 'clone-voice',
+      langCode: 'zh',
+      refAudio: '/uploads/ref-audio-1234-abcd.wav',
+      refText: '参考文本',
+      instruct: 'calm',
+      speed: 1.1,
+    });
+  });
+
   it('updates an existing runtime member in place', async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
     const templatePath = join(projectRoot, 'cat-template.json');
@@ -391,6 +433,39 @@ describe('cat-catalog-store', () => {
     assert.equal(updated.variants[0]?.defaultModel, 'claude-opus-4-1');
     assert.equal(updated.variants[0]?.personality, '更严格');
     assert.equal(catalog.coCreator?.mentionPatterns[0], '@co-worker');
+  });
+
+  it('persists and clears voiceConfig when updating a runtime member', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    writeFileSync(templatePath, JSON.stringify(validConfig(), null, 2));
+    writeCatCatalog(projectRoot, validConfig());
+
+    await updateRuntimeCat(projectRoot, 'opus', {
+      voiceConfig: {
+        voice: 'updated-clone',
+        langCode: 'zh',
+        refAudio: '/uploads/ref-audio-5678-efab.mp3',
+        refText: '更新后的参考文本',
+      },
+    });
+
+    let catalog = readRuntimeCatCatalog(projectRoot);
+    let updated = catalog.breeds.find((breed) => breed.catId === 'opus');
+    assert.ok(updated, 'opus breed should still exist');
+    assert.deepEqual(updated.variants[0]?.voiceConfig, {
+      voice: 'updated-clone',
+      langCode: 'zh',
+      refAudio: '/uploads/ref-audio-5678-efab.mp3',
+      refText: '更新后的参考文本',
+    });
+
+    await updateRuntimeCat(projectRoot, 'opus', { voiceConfig: null });
+
+    catalog = readRuntimeCatCatalog(projectRoot);
+    updated = catalog.breeds.find((breed) => breed.catId === 'opus');
+    assert.ok(updated, 'opus breed should still exist after clearing voiceConfig');
+    assert.equal(updated.variants[0]?.voiceConfig, undefined);
   });
 
   it('keeps sessionChain updates scoped to non-default variants', async () => {

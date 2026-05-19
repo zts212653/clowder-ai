@@ -49,13 +49,19 @@ function targetsFor(health: AgentHookStatusResponse | null): AgentHookTargetHeal
   return Array.isArray(health?.targets) ? health.targets : [];
 }
 
-function groupStatus(health: AgentHookStatusResponse | null, group: 'claude' | 'codex'): AgentHookHealthDisplayStatus {
+function groupStatus(
+  health: AgentHookStatusResponse | null,
+  group: 'claude' | 'codex' | 'gemini',
+): AgentHookHealthDisplayStatus {
   const allTargets = targetsFor(health);
   if (allTargets.length === 0) return 'unknown';
+  const peerNames = new Set(['codex-hooks', 'gemini-hooks']);
   const targets =
     group === 'codex'
       ? allTargets.filter((target) => target.name === 'codex-hooks')
-      : allTargets.filter((target) => target.name !== 'codex-hooks');
+      : group === 'gemini'
+        ? allTargets.filter((target) => target.name === 'gemini-hooks')
+        : allTargets.filter((target) => !peerNames.has(target.name));
   if (targets.length === 0) return 'unsupported';
   return aggregateStatus(targets);
 }
@@ -74,7 +80,7 @@ function toneFor(status: AgentHookHealthStatus | 'syncing' | 'synced' | 'error')
     return {
       icon: 'check',
       title: 'Agent 运行 Hook 已同步',
-      body: 'Claude/Codex 的开工与收尾 Hook 已就绪，猫猫可以按纪律开工。',
+      body: 'Claude/Codex/Gemini 的开工与收尾 Hook 已就绪，猫猫可以按纪律开工。',
       classes: 'border-conn-green-ring bg-conn-green-bg text-conn-green-text',
     };
   }
@@ -145,7 +151,7 @@ export function AgentHookHealthNotice({
               <button
                 type="button"
                 onClick={() => void onSync()}
-                className="min-w-[6.5rem] rounded-md bg-cocreator-primary px-3 py-1.5 text-xs font-medium text-cafe-white transition-colors hover:bg-cocreator-dark disabled:opacity-50"
+                className="min-w-[6.5rem] rounded-md bg-cafe-accent px-3 py-1.5 text-xs font-medium text-cafe-white transition-colors hover:bg-cafe-interactive disabled:opacity-50"
               >
                 一键同步
               </button>
@@ -153,17 +159,20 @@ export function AgentHookHealthNotice({
             {syncing && <span className="text-xs font-medium">同步中...</span>}
           </div>
 
-          <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
+          <div className="mt-2 flex flex-wrap gap-2 text-xs">
             <span className="rounded-full border border-cafe-subtle bg-cafe-surface-elevated px-2 py-0.5 text-cafe-secondary">
               Claude：{statusText(groupStatus(health, 'claude'))}
             </span>
             <span className="rounded-full border border-cafe-subtle bg-cafe-surface-elevated px-2 py-0.5 text-cafe-secondary">
               Codex：{statusText(groupStatus(health, 'codex'))}
             </span>
+            <span className="rounded-full border border-cafe-subtle bg-cafe-surface-elevated px-2 py-0.5 text-cafe-secondary">
+              Gemini：{statusText(groupStatus(health, 'gemini'))}
+            </span>
           </div>
 
           {problematicTargets.length > 0 && (
-            <details className="mt-2 text-[11px]">
+            <details className="mt-2 text-xs">
               <summary className="cursor-pointer font-medium">预览将修复的改动</summary>
               <ul className="mt-1 space-y-1">
                 {problematicTargets.map((target) => (

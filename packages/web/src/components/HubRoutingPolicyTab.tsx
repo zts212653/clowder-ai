@@ -9,7 +9,7 @@ import { HubQuotaBoardTab } from './HubQuotaBoardTab';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="console-list-card rounded-2xl p-4 shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
+    <section className="rounded-lg border border-cafe bg-cafe-surface-elevated/70 p-3">
       <h3 className="text-xs font-semibold text-cafe-secondary mb-2">{title}</h3>
       {children}
     </section>
@@ -101,21 +101,17 @@ export function HubRoutingPolicyTab() {
       <HubQuotaBoardTab />
 
       <Section title="路由策略（猫粮约束子模块）">
-        <p className="text-[11px] text-cafe-secondary mb-3">
+        <p className="text-xs text-cafe-secondary mb-3">
           默认是猫猫自治路由；这里只放你明确要求的硬约束（比如预算/猫粮）。显式 @ 指名永远优先。
         </p>
 
-        {error && (
-          <p className="text-sm text-conn-red-text bg-conn-red-bg border border-conn-red-ring rounded-[20px] px-3 py-2 mb-3">
-            {error}
-          </p>
-        )}
+        {error && <p className="text-sm text-conn-red-text bg-conn-red-bg rounded-lg px-3 py-2 mb-3">{error}</p>}
 
         <div className="space-y-3">
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-sm font-medium text-cafe">Review scope</div>
-              <div className="text-[11px] text-cafe-secondary">当消息明显是 review/合入/PR 场景时生效</div>
+              <div className="text-xs text-cafe-secondary">当消息明显是 review/合入/PR 场景时生效</div>
             </div>
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={reviewAvoidOpus} onChange={(e) => setReviewAvoidOpus(e.target.checked)} />
@@ -126,7 +122,7 @@ export function HubRoutingPolicyTab() {
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-sm font-medium text-cafe">Architecture scope</div>
-              <div className="text-[11px] text-cafe-secondary">当消息明显是 架构/设计/tradeoff 场景时生效</div>
+              <div className="text-xs text-cafe-secondary">当消息明显是 架构/设计/tradeoff 场景时生效</div>
             </div>
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -139,14 +135,14 @@ export function HubRoutingPolicyTab() {
           </div>
 
           <div className="flex items-center justify-between gap-3 pt-2">
-            <div className="text-[11px] text-cafe-secondary">
+            <div className="text-xs text-cafe-secondary">
               {currentPolicy ? '当前已启用策略' : '当前未启用策略'}
               {savedAt ? ` · 已保存 ${new Date(savedAt).toLocaleTimeString()}` : ''}
             </div>
             <button
               onClick={onSave}
               disabled={saving}
-              className="px-3 py-2 text-sm rounded-lg bg-[var(--color-cafe-accent)] text-[var(--cafe-surface)] disabled:opacity-60"
+              className="px-3 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-60"
             >
               {saving ? '保存中...' : '保存'}
             </button>

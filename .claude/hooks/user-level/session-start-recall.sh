@@ -34,6 +34,15 @@ ${UNPUSHED}
 "
 fi
 
+# 2b. 检查是否 behind origin（其他猫 push 了但本地没 pull）
+BEHIND=$(git rev-list --count HEAD..@{u} 2>/dev/null)
+if [ -n "$BEHIND" ] && [ "$BEHIND" -gt 0 ]; then
+  WARNINGS="${WARNINGS}
+⚠️ 本地落后 origin ${BEHIND} 个 commit
+→ 建议先 git pull 再开工
+"
+fi
+
 # 3. 检查是否在非 main 分支（主仓库不应该 checkout 到其他分支）
 BRANCH=$(git branch --show-current 2>/dev/null)
 TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null)
@@ -48,12 +57,44 @@ if [ "$BRANCH" != "main" ] && [ "$BRANCH" != "master" ]; then
   fi
 fi
 
+# 4. 检查 docs/ 下未跟踪的 .md 文件（猫猫生成了文档但忘记 commit）
+UNTRACKED_DOCS=$(git ls-files --others --exclude-standard -- 'docs/*.md' 'docs/**/*.md' 2>/dev/null | head -10)
+if [ -n "$UNTRACKED_DOCS" ]; then
+  WARNINGS="${WARNINGS}
+⚠️ docs/ 下有未跟踪的 .md 文件（某只猫生成了但忘记 commit push）：
+${UNTRACKED_DOCS}
+→ 向铲屎官汇报，商量处理方式（commit/移走/删除）
+"
+fi
+
+# 5. 检查根目录图片文件（用文件系统检查，不受 .gitignore 影响）
+ROOT_IMAGES=$(find . -maxdepth 1 -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.gif' -o -name '*.webp' \) 2>/dev/null | sed 's|^\./||' | head -10)
+if [ -n "$ROOT_IMAGES" ]; then
+  WARNINGS="${WARNINGS}
+⚠️ 根目录有图片文件（截图应放 assets/screenshots/，设计稿放 designs/）：
+${ROOT_IMAGES}
+→ 向铲屎官汇报，商量移走还是删除
+"
+fi
+
+# 6. 检查根目录其他杂物（未跟踪且未 ignore 的文件）
+ROOT_CLUTTER=$(git ls-files --others --exclude-standard -- ':!.*' ':!packages/' ':!docs/' ':!assets/' ':!scripts/' ':!cat-cafe-skills/' ':!designs/' ':!desktop/' 2>/dev/null \
+  | grep -vE '^(package\.json|pnpm-workspace\.yaml|pnpm-lock\.yaml|tsconfig|biome|README|LICENSE|CLAUDE|AGENTS|\.npmrc|\.nvmrc|\.node-version|\.editorconfig|\.prettierrc|Makefile|Dockerfile|Procfile|turbo\.json|\.tool-versions)' \
+  | head -10)
+if [ -n "$ROOT_CLUTTER" ]; then
+  WARNINGS="${WARNINGS}
+⚠️ 根目录有不该在这里的文件：
+${ROOT_CLUTTER}
+→ 向铲屎官汇报，商量处理方式
+"
+fi
+
 # 输出提醒（只在有警告时才输出）
 if [ -n "$WARNINGS" ]; then
   echo "🐾 开工自检：${WARNINGS}"
 fi
 
 # 通用提醒
-echo "📌 Recall：先用 mcp__cat_cafe_memory__.cat_cafe_search_evidence（备选 mcp__cat_cafe__.cat_cafe_search_evidence）搜当前任务上下文；若未暴露，先用 tool_search 精确搜 cat_cafe_search_evidence（CLAUDE.md 家规）"
+echo "📌 Recall 三入口（按场景选）：精确 anchor/看关系 → cat_cafe_graph_resolve | 零先验/扫最近 → cat_cafe_list_recent | 语义/模糊找 → cat_cafe_search_evidence（不确定→search_evidence mode=hybrid）。结果已融合消费加权排序（F200）。详见 CLAUDE.md 记忆系统段。若 MCP 未暴露，先 tool_search 精确搜工具名。"
 
 exit 0

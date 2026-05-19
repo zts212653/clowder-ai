@@ -96,20 +96,16 @@ export function TimeoutDiagnosticsPanel({ errorMessage, diagnostics, description
     <div data-testid="timeout-diagnostics" className="flex flex-col gap-2.5">
       {/* Error banner */}
       <div
-        className="flex items-center gap-2.5 rounded-[10px]"
-        style={{
-          backgroundColor: 'var(--conn-red-bg)',
-          border: '1px solid var(--console-diag-border)',
-          padding: '10px 14px',
-        }}
+        className="flex items-center gap-2.5 rounded-xl"
+        style={{ backgroundColor: '#FFF0ED', border: '1px solid #D0806833', padding: '10px 14px' }}
       >
-        <CircleXIcon className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--conn-amber-text)' }} />
+        <CircleXIcon className="w-4 h-4 flex-shrink-0" style={{ color: '#D08068' }} />
         <div className="flex flex-col gap-0.5 min-w-0">
-          <span className="text-[13px] font-semibold" style={{ color: 'var(--cafe-text-primary)' }}>
+          <span className="text-sm font-semibold" style={{ color: '#1A1918' }}>
             {errorMessage}
           </span>
           {description && (
-            <span className="text-xs" style={{ color: 'var(--cafe-text-secondary)', lineHeight: 1.4 }}>
+            <span className="text-xs" style={{ color: '#6D6C6A', lineHeight: 1.4 }}>
               {description}
             </span>
           )}
@@ -124,9 +120,9 @@ export function TimeoutDiagnosticsPanel({ errorMessage, diagnostics, description
       >
         <ChevronDownIcon
           className="w-3.5 h-3.5 transition-transform"
-          style={{ color: 'var(--cafe-text-muted)', transform: expanded ? 'rotate(180deg)' : undefined }}
+          style={{ color: '#9C9B99', transform: expanded ? 'rotate(180deg)' : undefined }}
         />
-        <span className="text-xs font-semibold" style={{ color: 'var(--cafe-text-muted)' }}>
+        <span className="text-xs font-semibold" style={{ color: '#9C9B99' }}>
           Diagnostics
         </span>
       </button>
@@ -136,18 +132,15 @@ export function TimeoutDiagnosticsPanel({ errorMessage, diagnostics, description
         <div
           data-testid="diagnostics-panel"
           className="rounded-lg"
-          style={{ backgroundColor: 'var(--cafe-text-primary)', padding: '12px 14px' }}
+          style={{ backgroundColor: '#1E1D1C', padding: '12px 14px' }}
         >
           <div className="flex flex-col gap-1">
             {rows.map((row) => (
               <div key={row.key} className="flex gap-2">
-                <span className="text-[11px] font-medium" style={{ color: 'var(--cafe-text-muted)' }}>
+                <span className="text-xs font-medium" style={{ color: '#9C9B99' }}>
                   {row.key}
                 </span>
-                <span
-                  className="text-[11px]"
-                  style={{ color: row.purple ? 'var(--console-diag-key)' : 'var(--console-diag-val)' }}
-                >
+                <span className="text-xs" style={{ color: row.purple ? '#C4A0E8' : '#D89575' }}>
                   {row.value}
                 </span>
               </div>

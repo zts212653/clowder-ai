@@ -31,7 +31,7 @@ export function SummaryCard({ topic, conclusions, openQuestions, createdBy, time
 
   return (
     <div className="flex justify-center mb-4">
-      <div className="bg-cafe-surface border-2 border-[var(--console-border-soft)] rounded-lg shadow-md px-5 pt-4 pb-5 max-w-md w-full rotate-[-0.5deg] hover:rotate-0 transition-transform">
+      <div className="bg-cafe-surface border-2 border-cafe rounded-lg shadow-md px-5 pt-4 pb-5 max-w-md w-full rotate-[-0.5deg] hover:rotate-0 transition-transform">
         {/* Topic header */}
         <div className="text-sm font-bold text-cafe-secondary mb-3 flex items-center gap-1.5">
           <HubIcon name="camera" className="h-3.5 w-3.5" />
@@ -52,7 +52,7 @@ export function SummaryCard({ topic, conclusions, openQuestions, createdBy, time
                     strokeWidth="2.5"
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    className="h-3 w-3 text-conn-emerald-text flex-shrink-0"
+                    className="h-3 w-3 text-green-500 flex-shrink-0"
                   >
                     <path d="M20 6L9 17l-5-5" />
                   </svg>
@@ -70,7 +70,7 @@ export function SummaryCard({ topic, conclusions, openQuestions, createdBy, time
             <ul className="space-y-1">
               {openQuestions.map((q, i) => (
                 <li key={i} className="text-xs text-cafe-secondary flex gap-1.5">
-                  <span className="text-conn-amber-text flex-shrink-0">?</span>
+                  <span className="text-amber-400 flex-shrink-0">?</span>
                   <span>{q}</span>
                 </li>
               ))}
@@ -79,7 +79,7 @@ export function SummaryCard({ topic, conclusions, openQuestions, createdBy, time
         )}
 
         {/* Footer: creator + time */}
-        <div className="flex items-center gap-2 pt-2 border-t border-[var(--console-border-soft)]">
+        <div className="flex items-center gap-2 pt-2 border-t border-cafe-subtle">
           {createdBy === 'system' ? (
             <HubIcon name="bot" className="h-3.5 w-3.5 text-cafe-secondary" />
           ) : catData ? (

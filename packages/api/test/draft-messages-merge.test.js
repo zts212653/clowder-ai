@@ -54,6 +54,15 @@ function makeInvocationRecordStore(records = {}) {
       throw new Error('not implemented');
     },
     getByIdempotencyKey: () => null,
+    // F194 Phase B contract: enumerate running records scoped to (threadId, userId).
+    // Required by getThreadLiveInvocations canonical liveness helper.
+    listRunningByThread: (threadId, userId) => {
+      const out = [];
+      for (const r of byId.values()) {
+        if (r?.status === 'running' && r.threadId === threadId && r.userId === userId) out.push(r);
+      }
+      return out;
+    },
   };
 }
 
@@ -797,10 +806,13 @@ describe('GET /api/messages — draft merge (#80)', () => {
 
     // Bug B: stream identity must be included for frontend reconciliation
     assert.equal(draft.origin, 'stream', 'Draft should have origin: stream');
+    // F194 Phase Z9 AC-Z25 (KD-28): draft now stamps both invocationId (parent
+    // chain) and turnInvocationId (per-visible-cat-turn). Draft has only one
+    // identity (its own invocationId) so both fields = invocationId.
     assert.deepEqual(
       draft.extra?.stream,
-      { invocationId: 'inv-contract' },
-      'Draft should have extra.stream.invocationId',
+      { invocationId: 'inv-contract', turnInvocationId: 'inv-contract' },
+      'Draft should have extra.stream.invocationId + turnInvocationId (Z9 unconditional stamp)',
     );
   });
 

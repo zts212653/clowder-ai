@@ -365,6 +365,24 @@ export {
   MARKETPLACE_ECOSYSTEMS,
   TRUST_LEVELS,
 } from './marketplace.js';
+// Meeting types (F195 Phase C — Meeting Copilot)
+export type {
+  MeetingParticipant,
+  MeetingSession,
+  MeetingStatus,
+  ParticipantRole,
+} from './meeting.js';
+export {
+  createMeetingSession,
+  transitionMeetingStatus,
+  validateParticipant,
+} from './meeting.js';
+// Meeting context block (F195 Phase C — untrusted transcript isolation)
+export type {
+  MeetingContextBlock,
+  MeetingContextProvenance,
+} from './meeting-context-block.js';
+export { createMeetingContextBlock } from './meeting-context-block.js';
 // Memory types (F3-lite 显式记忆)
 export type {
   MemoryEntry,

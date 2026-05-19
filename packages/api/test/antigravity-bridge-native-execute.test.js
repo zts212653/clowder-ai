@@ -249,7 +249,7 @@ describe('AntigravityBridge.nativeExecuteAndPush', () => {
     assert.equal(cancelCalls.length, 0, 'must not call CancelCascadeSteps without valid stepIndex');
   });
 
-  test('returns approval_pending when SafeToAutoRun is not true (respects Antigravity approval metadata)', async () => {
+  test('yolo-executes run_command when SafeToAutoRun is not true by default', async () => {
     const { bridge, rpcMock } = makeBridge();
     const variants = [
       { CommandLine: 'echo hi', Cwd: '/tmp', SafeToAutoRun: false },
@@ -267,15 +267,46 @@ describe('AntigravityBridge.nativeExecuteAndPush', () => {
         },
       };
       const handled = await bridge.nativeExecuteAndPush(step, { cascadeId: 'c1', cwd: '/tmp' });
-      assert.equal(
-        handled,
-        'approval_pending',
-        `must return approval_pending (not false) when SafeToAutoRun=${JSON.stringify(args.SafeToAutoRun)}`,
-      );
+      assert.equal(handled, true, `must yolo-execute when SafeToAutoRun=${JSON.stringify(args.SafeToAutoRun)}`);
     }
-    // No RPC calls at all — neither RunCommand nor CancelCascadeSteps
-    assert.equal(rpcMock.mock.callCount(), 0);
-    assert.equal(bridge.sendMessage.mock.callCount(), 0);
+    const methods = rpcMock.mock.calls.map((c) => {
+      const args = c.arguments;
+      return typeof args[0] === 'string' ? args[0] : args[1];
+    });
+    assert.equal(methods.filter((method) => method === 'RunCommand').length, variants.length);
+    assert.equal(bridge.sendMessage.mock.callCount(), variants.length);
+  });
+
+  test('returns approval_pending when yolo run_command is explicitly disabled', async () => {
+    const previous = process.env.ANTIGRAVITY_YOLO_RUN_COMMAND;
+    process.env.ANTIGRAVITY_YOLO_RUN_COMMAND = 'false';
+    try {
+      const { bridge, rpcMock } = makeBridge();
+      const step = {
+        type: 'CORTEX_STEP_TYPE_RUN_COMMAND',
+        status: 'CORTEX_STEP_STATUS_WAITING',
+        metadata: {
+          toolCall: {
+            id: 'toolu_gate',
+            name: 'run_command',
+            argumentsJson: JSON.stringify({ CommandLine: 'echo hi', Cwd: '/tmp', SafeToAutoRun: false }),
+          },
+          sourceTrajectoryStepInfo: { trajectoryId: 't1', stepIndex: 2, cascadeId: 'c1' },
+        },
+      };
+
+      const handled = await bridge.nativeExecuteAndPush(step, { cascadeId: 'c1', cwd: '/tmp' });
+
+      assert.equal(handled, 'approval_pending');
+      assert.equal(rpcMock.mock.callCount(), 0);
+      assert.equal(bridge.sendMessage.mock.callCount(), 0);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.ANTIGRAVITY_YOLO_RUN_COMMAND;
+      } else {
+        process.env.ANTIGRAVITY_YOLO_RUN_COMMAND = previous;
+      }
+    }
   });
 
   test('writes audit entry with result', async () => {

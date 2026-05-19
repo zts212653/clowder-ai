@@ -105,4 +105,28 @@ describe('getActionItems', () => {
     const items = getActionItems(healthy);
     expect(items.some((i) => i.includes('constitutional'))).toBe(false);
   });
+
+  it('flags stale anchors', () => {
+    const items = getActionItems({
+      ...baseReport,
+      staleAnchors: { count: 3, items: [] },
+    });
+    expect(items.some((i) => i.includes('stale'))).toBe(true);
+  });
+
+  it('flags orphan edges', () => {
+    const items = getActionItems({
+      ...baseReport,
+      orphanEdges: { count: 5 },
+    });
+    expect(items.some((i) => i.includes('orphan'))).toBe(true);
+  });
+
+  it('flags knowledge feed pending', () => {
+    const items = getActionItems({
+      ...baseReport,
+      knowledgeFeed: { pendingCount: 7, needsReviewCount: 2 },
+    });
+    expect(items.some((i) => i.includes('pending'))).toBe(true);
+  });
 });

@@ -4,7 +4,11 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { CONNECTOR_SECRETS_ALLOWLIST, isConnectorSecret } from '../dist/config/connector-secrets-allowlist.js';
+import {
+  CONNECTOR_GATEWAY_RELOAD_KEYS,
+  CONNECTOR_SECRETS_ALLOWLIST,
+  isConnectorSecret,
+} from '../dist/config/connector-secrets-allowlist.js';
 
 describe('CONNECTOR_SECRETS_ALLOWLIST', () => {
   it('accepts all connector env vars used by loadConnectorGatewayConfig', () => {
@@ -19,9 +23,6 @@ describe('CONNECTOR_SECRETS_ALLOWLIST', () => {
       'DINGTALK_APP_KEY',
       'DINGTALK_APP_SECRET',
       'WEIXIN_BOT_TOKEN',
-      'WEIXIN_VOICE_ITEM_MODE',
-      'WEIXIN_ENABLE_UNSAFE_VOICE_MODES',
-      'WEIXIN_CAPTURE_INBOUND_VOICE_MEDIA',
       'WECOM_BOT_ID',
       'WECOM_BOT_SECRET',
       'WECOM_CORP_ID',
@@ -47,7 +48,29 @@ describe('CONNECTOR_SECRETS_ALLOWLIST', () => {
     assert.equal(isConnectorSecret('TELEGRAM_BOT_TOKEN_EXTRA'), false);
   });
 
-  it('allowlist has exactly 29 entries', () => {
-    assert.equal(CONNECTOR_SECRETS_ALLOWLIST.size, 29);
+  it('accepts the VAPID env vars used by PushServiceConfig', () => {
+    assert.equal(isConnectorSecret('VAPID_PUBLIC_KEY'), true);
+    assert.equal(isConnectorSecret('VAPID_PRIVATE_KEY'), true);
+    assert.equal(isConnectorSecret('VAPID_SUBJECT'), true);
+  });
+
+  it('accepts the GitHub env vars used by GithubConfigPanel', () => {
+    assert.equal(isConnectorSecret('GITHUB_TOKEN'), true);
+    assert.equal(isConnectorSecret('GITHUB_SETUP_NOISE_BOT_LOGINS'), true);
+    assert.equal(isConnectorSecret('GITHUB_MCP_PAT'), true);
+  });
+
+  it('allowlist has exactly 26 entries: 20 connectors + 3 VAPID vars + 3 GitHub vars', () => {
+    assert.equal(CONNECTOR_SECRETS_ALLOWLIST.size, 26);
+  });
+
+  it('connector gateway reload keys stay connector-only', () => {
+    assert.equal(CONNECTOR_GATEWAY_RELOAD_KEYS.size, 20);
+    assert.equal(CONNECTOR_GATEWAY_RELOAD_KEYS.has('VAPID_PUBLIC_KEY'), false);
+    assert.equal(CONNECTOR_GATEWAY_RELOAD_KEYS.has('VAPID_PRIVATE_KEY'), false);
+    assert.equal(CONNECTOR_GATEWAY_RELOAD_KEYS.has('VAPID_SUBJECT'), false);
+    assert.equal(CONNECTOR_GATEWAY_RELOAD_KEYS.has('GITHUB_TOKEN'), false);
+    assert.equal(CONNECTOR_GATEWAY_RELOAD_KEYS.has('GITHUB_SETUP_NOISE_BOT_LOGINS'), false);
+    assert.equal(CONNECTOR_GATEWAY_RELOAD_KEYS.has('GITHUB_MCP_PAT'), false);
   });
 });

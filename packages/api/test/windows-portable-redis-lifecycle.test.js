@@ -160,11 +160,9 @@ test('Windows installer and startup reuse shared tool resolution instead of raw 
   assert.match(startWindowsScript, /\$pnpmCommand = Resolve-ToolCommand -Name "pnpm"/);
   assert.match(startWindowsScript, /& \$pnpmCommand run build/);
   assert.match(startWindowsScript, /param\(\$root, \$port, \$nextCli\)/);
-  assert.match(startWindowsScript, /& node \$nextCli dev \(Join-Path \$root "packages\/web"\) -p \$port/);
-  assert.match(
-    startWindowsScript,
-    /& node \$nextCli start \(Join-Path \$root "packages\/web"\) -p \$port -H 0\.0\.0\.0/,
-  );
+  assert.match(startWindowsScript, /Set-Location \(Join-Path \$root "packages\/web"\)/);
+  assert.match(startWindowsScript, /& node \$nextCli dev -p \$port/);
+  assert.match(startWindowsScript, /& node \$nextCli start -p \$port -H 0\.0\.0\.0/);
 });
 
 test('Windows CLI installs retry command discovery before warning and auth detection uses the same retry helper', () => {

@@ -157,16 +157,22 @@ describe('parseA2AMentions — opencode A2A chain', () => {
     assert.deepEqual(result, ['opencode']);
   });
 
-  it('repairs whitespace split inside line-start CJK handles', () => {
+  it('F690 intake: repairs whitespace split inside line-start CJK handles', () => {
     const text = '交给金渐层\n@金\n\n渐\n\n层 帮忙看看这段代码';
     const result = parseA2AMentions(text, 'opus');
     assert.deepEqual(result, ['opencode']);
   });
 
-  it('repairs whitespace split inside line-start ASCII handles', () => {
+  it('F690 intake: repairs whitespace split inside line-start ASCII handles', () => {
     const text = '安全复核如下\n@co\n\ndex 请继续';
     const result = parseA2AMentions(text, 'opus');
     assert.deepEqual(result, ['codex']);
+  });
+
+  it('F690 intake: does not repair inline split handles into routable mentions', () => {
+    const text = '句中提一下 @co\n\ndex 但这不是行首传球';
+    const result = parseA2AMentions(text, 'opus');
+    assert.deepEqual(result, []);
   });
 
   it('detects multi-target: @opencode and @codex', () => {

@@ -1,6 +1,6 @@
 ---
 feature_ids: [F043]
-related_features: [F041, F052]
+related_features: [F041, F052, F193]
 debt_ids: []
 topics: [mcp, architecture, agent-collaboration]
 doc_kind: feature-spec

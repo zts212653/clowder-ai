@@ -60,11 +60,12 @@ function NavItem({
         className={`absolute right-1 h-6 w-6 flex items-center justify-center rounded transition-opacity ${
           pinned
             ? 'opacity-80 text-cafe-secondary'
-            : 'opacity-0 pointer-events-none group-hover:opacity-60 group-hover:pointer-events-auto text-cafe-muted hover:text-cafe-secondary'
+            : 'opacity-50 group-hover:opacity-60 focus-visible:opacity-80 text-cafe-muted hover:text-cafe-secondary'
         }`}
         title={pinned ? '取消固定到侧栏' : '固定到侧栏'}
       >
         <svg
+          aria-hidden="true"
           viewBox="0 0 16 16"
           fill={pinned ? 'currentColor' : 'none'}
           stroke="currentColor"

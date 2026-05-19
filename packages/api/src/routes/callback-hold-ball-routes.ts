@@ -19,6 +19,7 @@ import { createModuleLogger } from '../infrastructure/logger.js';
 import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskStore.js';
 import type { TaskRunnerV2 } from '../infrastructure/scheduler/TaskRunnerV2.js';
 import type { TaskTemplate } from '../infrastructure/scheduler/templates/types.js';
+import { c1ZombieHoldCount } from '../infrastructure/telemetry/instruments.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
@@ -208,6 +209,7 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       try {
         taskRunner.unregister(prior.id);
         dynamicTaskStore.remove(prior.id);
+        c1ZombieHoldCount.add(1);
         log.info(
           { threadId, catId: catIdStr, priorTaskId: prior.id, newTaskId: taskId },
           'F167 Phase G: cancelled prior pending hold wake (single-slot replace)',

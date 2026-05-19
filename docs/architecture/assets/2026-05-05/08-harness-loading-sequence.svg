@@ -1,0 +1,256 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2600" height="3180" viewBox="0 0 2600 3180">
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#8a6f45" flood-opacity="0.14"/>
+    </filter>
+    <filter id="soft">
+      <feTurbulence type="fractalNoise" baseFrequency="0.025" numOctaves="2" seed="12" result="noise"/>
+      <feColorMatrix in="noise" type="saturate" values="0"/>
+      <feBlend in="SourceGraphic" mode="multiply"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 z" fill="#344054"/>
+    </marker>
+    <marker id="arrowRed" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 z" fill="#dc2626"/>
+    </marker>
+    <style><![CDATA[
+      text { font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Arial Unicode MS", sans-serif; letter-spacing: 0; }
+      .title { font-weight: 800; fill: #263238; }
+      .subtitle { fill: #667085; }
+      .label { font-weight: 700; fill: #263238; }
+      .small { fill: #667085; }
+      .mono { font-family: "SFMono-Regular", "Menlo", "Consolas", monospace; }
+    ]]></style>
+  </defs>
+  <rect width="100%" height="100%" fill="#fffaf0"/>
+  <path d="M0,70 C420,10 760,95 1120,42 C1440,-4 1660,42 2100,16 L2100,0 L0,0 Z" fill="#f8efe0" opacity="0.8"/>
+
+
+  <text x="1300" y="70" text-anchor="middle" opacity="1" class="title"><tspan x="1300" dy="0" fill="#263238" font-weight="850" font-size="48">图 8：Harness 加载时序图</tspan></text>
+  <text x="1300" y="112" text-anchor="middle" opacity="1" class=""><tspan x="1300" dy="0" fill="#667085" font-weight="600" font-size="24">一次 invocation 里，Environment Fit 如何被逐层装进上下文、运行时和回收链路</tspan></text>
+
+
+    <rect x="1985" y="150" width="500" height="245" rx="28" fill="#fffbeb" stroke="#d97706" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    <rect x="2009" y="128" width="224" height="44" rx="22" fill="#d97706" opacity="0.96"/><text x="2027" y="158" font-size="25" font-weight="800" fill="white">行业 vs 我们</text>
+
+  <text x="2035" y="225" text-anchor="start" opacity="1" class=""><tspan x="2035" dy="0" fill="#92400e" font-weight="850" font-size="24">行业常见：注入 1 次</tspan><tspan x="2035" dy="30.240000000000002" fill="#92400e" font-weight="850" font-size="24">我们：5 个注入时机</tspan><tspan x="2035" dy="30.240000000000002" fill="#92400e" font-weight="850" font-size="24">注入项：10 + 19 + 6 + hooks + 回收</tspan></text>
+
+
+    <rect x="70" y="170" width="1860" height="68" rx="24" fill="#dbeafe" stroke="#2563eb" stroke-width="3" stroke-dasharray="" opacity="1" filter=""/>
+
+
+  <text x="1000" y="214" text-anchor="middle" opacity="1" class=""><tspan x="1000" dy="0" fill="#2563eb" font-weight="900" font-size="27">Cat Cafe Orchestrator / route-serial.ts：先构建 prompt，再交给 provider CLI</tspan></text>
+
+  <line x1="130" y1="275" x2="130" y2="2915" stroke="#344054" stroke-width="6" stroke-linecap="round" opacity="0.46"/>
+
+    <circle cx="130" cy="325" r="30" fill="white" stroke="#2563eb" stroke-width="5"/>
+    <text x="130" y="336" text-anchor="middle" font-size="30" font-weight="900" fill="#2563eb">A</text>
+
+
+    <circle cx="130" cy="600" r="30" fill="white" stroke="#2563eb" stroke-width="5"/>
+    <text x="130" y="611" text-anchor="middle" font-size="30" font-weight="900" fill="#2563eb">B</text>
+
+
+    <circle cx="130" cy="965" r="30" fill="white" stroke="#7c3aed" stroke-width="5"/>
+    <text x="130" y="976" text-anchor="middle" font-size="30" font-weight="900" fill="#7c3aed">C</text>
+
+
+    <circle cx="130" cy="1315" r="30" fill="white" stroke="#7c3aed" stroke-width="5"/>
+    <text x="130" y="1326" text-anchor="middle" font-size="30" font-weight="900" fill="#7c3aed">D</text>
+
+
+    <circle cx="130" cy="1595" r="30" fill="white" stroke="#7c3aed" stroke-width="5"/>
+    <text x="130" y="1606" text-anchor="middle" font-size="30" font-weight="900" fill="#7c3aed">E</text>
+
+
+    <circle cx="130" cy="1945" r="30" fill="white" stroke="#f97316" stroke-width="5"/>
+    <text x="130" y="1956" text-anchor="middle" font-size="30" font-weight="900" fill="#f97316">F</text>
+
+
+    <circle cx="130" cy="2325" r="30" fill="white" stroke="#16a34a" stroke-width="5"/>
+    <text x="130" y="2336" text-anchor="middle" font-size="30" font-weight="900" fill="#16a34a">G</text>
+
+
+    <circle cx="130" cy="2735" r="30" fill="white" stroke="#0f766e" stroke-width="5"/>
+    <text x="130" y="2746" text-anchor="middle" font-size="30" font-weight="900" fill="#0f766e">H</text>
+
+
+
+
+    <rect x="235" y="265" width="1700" height="250" rx="30" fill="#2563eb12" stroke="#2563eb" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+
+
+    <circle cx="295" cy="323" r="34" fill="#2563eb" opacity="0.96"/>
+    <text x="295" y="335" text-anchor="middle" font-size="34" font-weight="900" fill="white">A</text>
+    <text x="347" y="313" text-anchor="start" opacity="1" class=""><tspan x="347" dy="0" fill="#2563eb" font-weight="900" font-size="30">路由入队</tspan></text>
+    <text x="347" y="353" text-anchor="start" opacity="1" class=""><tspan x="347" dy="0" fill="#263238" font-weight="780" font-size="22">Routing &amp; queueing</tspan></text>
+    <rect x="1680" y="289" width="220" height="44" rx="22" fill="#2563eb22" stroke="#2563eb" stroke-width="2"/>
+  <text x="1790" y="318.14" text-anchor="middle" font-size="21" font-weight="700" fill="#2563eb">入口准备</text>
+    <text x="287" y="405" text-anchor="start" opacity="1" class=""><tspan x="287" dy="0" fill="#263238" font-weight="730" font-size="22">@ 句柄解析 → 确定目标猫</tspan><tspan x="287" dy="26.84" fill="#263238" font-weight="730" font-size="22">InvocationQueue 入队；F175 相邻消息合批</tspan><tspan x="287" dy="26.84" fill="#263238" font-weight="730" font-size="22">QueueProcessor 取出；创建 InvocationRecord</tspan><tspan x="287" dy="26.84" fill="#263238" font-weight="730" font-size="22">queued: QueueProcessor.executeEntry；immediate: messages.ts</tspan></text>
+
+
+
+
+    <rect x="235" y="545" width="1700" height="250" rx="30" fill="#2563eb12" stroke="#2563eb" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+
+
+    <circle cx="295" cy="603" r="34" fill="#2563eb" opacity="0.96"/>
+    <text x="295" y="615" text-anchor="middle" font-size="34" font-weight="900" fill="white">B</text>
+    <text x="347" y="593" text-anchor="start" opacity="1" class=""><tspan x="347" dy="0" fill="#2563eb" font-weight="900" font-size="30">构建静态身份 candidate</tspan></text>
+    <text x="347" y="633" text-anchor="start" opacity="1" class=""><tspan x="347" dy="0" fill="#263238" font-weight="780" font-size="22">buildStaticIdentity() 只产出 Session-level candidate，实际注入在 Phase F 决策</tspan></text>
+    <rect x="1680" y="569" width="220" height="44" rx="22" fill="#2563eb22" stroke="#2563eb" stroke-width="2"/>
+  <text x="1790" y="598.14" text-anchor="middle" font-size="21" font-weight="700" fill="#2563eb">10 项静态</text>
+    <text x="287" y="685" text-anchor="start" opacity="1" class=""><tspan x="287" dy="0" fill="#263238" font-weight="730" font-size="22">10 项：猫身份 / 限制声明 / Pack Masks / A2A 格式 / 队友名册</tspan><tspan x="287" dy="26.84" fill="#263238" font-weight="730" font-size="22">工作流触发 / CVO 信息 / L0 治理摘要 / Pack 护栏 / MCP 工具说明</tspan><tspan x="287" dy="26.84" fill="#263238" font-weight="730" font-size="22">关键：不是 --append-system-prompt；后面按条件 string prepend</tspan></text>
+
+
+
+  <rect x="210" y="825" width="2240" height="76" rx="28" fill="#ede7ff" stroke="#7c3aed" stroke-width="4" stroke-dasharray="16 10"/>
+  <text x="1330" y="875" text-anchor="middle" opacity="1" class=""><tspan x="1330" dy="0" fill="#7c3aed" font-weight="900" font-size="25">Anti-compaction Boundary：上方是可复用静态身份；下方是每轮重新组装的动态上下文</tspan></text>
+
+
+
+    <rect x="235" y="930" width="1700" height="305" rx="30" fill="#7c3aed12" stroke="#7c3aed" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+
+
+    <circle cx="295" cy="988" r="34" fill="#7c3aed" opacity="0.96"/>
+    <text x="295" y="1000" text-anchor="middle" font-size="34" font-weight="900" fill="white">C</text>
+    <text x="347" y="978" text-anchor="start" opacity="1" class=""><tspan x="347" dy="0" fill="#7c3aed" font-weight="900" font-size="30">构建动态上下文</tspan></text>
+    <text x="347" y="1018" text-anchor="start" opacity="1" class=""><tspan x="347" dy="0" fill="#263238" font-weight="780" font-size="22">buildInvocationContext() · Per-invocation，每次重新组装</tspan></text>
+    <rect x="1680" y="954" width="220" height="44" rx="22" fill="#7c3aed22" stroke="#7c3aed" stroke-width="2"/>
+  <text x="1790" y="983.14" text-anchor="middle" font-size="21" font-weight="700" fill="#7c3aed">19 项动态</text>
+    <text x="287" y="1070" text-anchor="start" opacity="1" class=""><tspan x="287" dy="0" fill="#263238" font-weight="730" font-size="20">C.1 路由/球权 6：身份常量、A2A 直传、乒乓预警、参与猫、退出检查、路由反馈</tspan><tspan x="287" dy="24" fill="#263238" font-weight="730" font-size="20">C.2 模式/阶段 4：serial / parallel / independent、prompt 标签、SOP 阶段、训练营状态</tspan><tspan x="287" dy="24" fill="#263238" font-weight="730" font-size="20">C.3 提示/引导 4：skill 提示、活跃参与者、路由策略、引导候选</tspan><tspan x="287" dy="24" fill="#263238" font-weight="730" font-size="20">C.4 知识/内容 4：Voice Mode、世界上下文、宪法知识、信号文章</tspan><tspan x="287" dy="24" fill="#263238" font-weight="730" font-size="20">C.5 尾锚 1：传球三选一固定在 prompt 最末，工程化利用近因偏差</tspan></text>
+
+
+
+
+    <rect x="235" y="1265" width="1700" height="255" rx="30" fill="#7c3aed12" stroke="#7c3aed" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+
+
+    <circle cx="295" cy="1323" r="34" fill="#7c3aed" opacity="0.96"/>
+    <text x="295" y="1335" text-anchor="middle" font-size="34" font-weight="900" fill="white">D</text>
+    <text x="347" y="1313" text-anchor="start" opacity="1" class=""><tspan x="347" dy="0" fill="#7c3aed" font-weight="900" font-size="30">构建冷启动包</tspan></text>
+    <text x="347" y="1353" text-anchor="start" opacity="1" class=""><tspan x="347" dy="0" fill="#263238" font-weight="780" font-size="22">buildSessionBootstrap() · Session #2+ 专用，约 2000 token 预算</tspan></text>
+    <rect x="1680" y="1289" width="220" height="44" rx="22" fill="#7c3aed22" stroke="#7c3aed" stroke-width="2"/>
+  <text x="1790" y="1318.14" text-anchor="middle" font-size="21" font-weight="700" fill="#7c3aed">6 项冷启动</text>
+    <text x="287" y="1405" text-anchor="start" opacity="1" class=""><tspan x="287" dy="0" fill="#263238" font-weight="730" font-size="21">6 项：Session 身份、Thread 记忆、项目知识召回、上一轮摘要、任务快照、记忆工具指令</tspan><tspan x="287" dy="25.62" fill="#263238" font-weight="730" font-size="21">①⑥ always keep；丢弃顺序：recall → task → digest → threadMemory</tspan><tspan x="287" dy="25.62" fill="#263238" font-weight="730" font-size="21">作用：让新 session 30 秒内知道上次做到哪</tspan></text>
+
+
+
+
+    <rect x="235" y="1550" width="1700" height="230" rx="30" fill="#7c3aed12" stroke="#7c3aed" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+
+
+    <circle cx="295" cy="1608" r="34" fill="#7c3aed" opacity="0.96"/>
+    <text x="295" y="1620" text-anchor="middle" font-size="34" font-weight="900" fill="white">E</text>
+    <text x="347" y="1598" text-anchor="start" opacity="1" class=""><tspan x="347" dy="0" fill="#7c3aed" font-weight="900" font-size="30">组装上下文窗口</tspan></text>
+    <text x="347" y="1638" text-anchor="start" opacity="1" class=""><tspan x="347" dy="0" fill="#263238" font-weight="780" font-size="22">assembleIncrementalContext() / assembleContext()</tspan></text>
+    <rect x="1680" y="1574" width="220" height="44" rx="22" fill="#7c3aed22" stroke="#7c3aed" stroke-width="2"/>
+  <text x="1790" y="1603.14" text-anchor="middle" font-size="21" font-weight="700" fill="#7c3aed">最终 prompt</text>
+    <text x="287" y="1690" text-anchor="start" opacity="1" class=""><tspan x="287" dy="0" fill="#263238" font-weight="730" font-size="21">Smart Window：上下文压力 &gt; 80% 时注入 briefing</tspan><tspan x="287" dy="25.62" fill="#263238" font-weight="730" font-size="21">历史消息按 token 预算裁剪；当前用户消息必要时追加</tspan><tspan x="287" dy="25.62" fill="#263238" font-weight="730" font-size="21">最终拼接：dynamic context + mode prompt + bootstrap + MCP instructions + history + user message</tspan></text>
+
+
+
+
+    <rect x="70" y="1825" width="1860" height="68" rx="24" fill="#ffedd5" stroke="#f97316" stroke-width="3" stroke-dasharray="" opacity="1" filter=""/>
+
+
+  <text x="1000" y="1869" text-anchor="middle" opacity="1" class=""><tspan x="1000" dy="0" fill="#f97316" font-weight="900" font-size="26">Provider CLI Layer / invoke-single-cat.ts：解析 CLI session，决定是否把静态身份 prepend 到 prompt</tspan></text>
+
+
+
+    <rect x="235" y="1918" width="1700" height="260" rx="30" fill="#f9731612" stroke="#f97316" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+
+
+    <circle cx="295" cy="1976" r="34" fill="#f97316" opacity="0.96"/>
+    <text x="295" y="1988" text-anchor="middle" font-size="34" font-weight="900" fill="white">F</text>
+    <text x="347" y="1966" text-anchor="start" opacity="1" class=""><tspan x="347" dy="0" fill="#f97316" font-weight="900" font-size="30">解析会话 &amp; 条件注入</tspan></text>
+    <text x="347" y="2006" text-anchor="start" opacity="1" class=""><tspan x="347" dy="0" fill="#263238" font-weight="780" font-size="22">sessionManager / sessionChainStore / reconcileStuck / sessionMutex</tspan></text>
+    <rect x="1680" y="1942" width="220" height="44" rx="22" fill="#f9731622" stroke="#f97316" stroke-width="2"/>
+  <text x="1790" y="1971.14" text-anchor="middle" font-size="21" font-weight="700" fill="#f97316">条件 prepend</text>
+    <text x="287" y="2058" text-anchor="start" opacity="1" class=""><tspan x="287" dy="0" fill="#263238" font-weight="730" font-size="20">有活跃 session → --resume；无 session → 新建</tspan><tspan x="287" dy="23.599999999999998" fill="#263238" font-weight="730" font-size="20">读取 sealed chain；reconcileStuck 清理卡住的 sealing；F118 per-session mutex</tspan><tspan x="287" dy="23.599999999999998" fill="#263238" font-weight="730" font-size="20">Phase B candidate 注入决策：new / compressed(token 跌幅 &gt;60%) / registry changed → prepend</tspan><tspan x="287" dy="23.599999999999998" fill="#263238" font-weight="730" font-size="20">resume 且无变化 → 跳过；已在 session 上下文里</tspan></text>
+
+
+
+
+    <rect x="235" y="2210" width="1700" height="420" rx="30" fill="#16a34a12" stroke="#16a34a" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+
+
+    <circle cx="295" cy="2268" r="34" fill="#16a34a" opacity="0.96"/>
+    <text x="295" y="2280" text-anchor="middle" font-size="34" font-weight="900" fill="white">G</text>
+    <text x="347" y="2258" text-anchor="start" opacity="1" class=""><tspan x="347" dy="0" fill="#16a34a" font-weight="900" font-size="30">执行调用</tspan></text>
+    <text x="347" y="2298" text-anchor="start" opacity="1" class=""><tspan x="347" dy="0" fill="#263238" font-weight="780" font-size="22">CLI spawn + provider-scoped hooks + tool loop</tspan></text>
+    <rect x="1680" y="2234" width="220" height="44" rx="22" fill="#16a34a22" stroke="#16a34a" stroke-width="2"/>
+  <text x="1790" y="2263.14" text-anchor="middle" font-size="21" font-weight="700" fill="#16a34a">Runtime hooks</text>
+    <text x="287" y="2350" text-anchor="start" opacity="1" class=""><tspan x="287" dy="0" fill="#263238" font-weight="730" font-size="19">启动 claude / opencode / acp / gemini；流式输出 text / tool_use / done</tspan><tspan x="287" dy="22.229999999999997" fill="#263238" font-weight="730" font-size="19">SessionStart：f24-post-compact-bootstrap、preflight-shared-state</tspan><tspan x="287" dy="22.229999999999997" fill="#263238" font-weight="730" font-size="19">Claude PreToolUse：runtime-sanctuary-guard、pretool-brake-check、pretool-evidence-guard</tspan><tspan x="287" dy="22.229999999999997" fill="#263238" font-weight="730" font-size="19">Claude PostToolUse：evidence-marker、post-edit-check、shared-doc-push-guard、sop-bookmark、brake-timer</tspan><tspan x="287" dy="22.229999999999997" fill="#263238" font-weight="730" font-size="19">其他：PreCompact / UserPromptSubmit / Stop(f177-routing-guard)</tspan><tspan x="287" dy="22.229999999999997" fill="#263238" font-weight="730" font-size="19">注意：Codex F180 当前只有 SessionStart/Stop user hooks；Gemini/OpenCode 走 provider-native audit</tspan></text>
+
+
+
+
+    <rect x="235" y="2660" width="1700" height="300" rx="30" fill="#0f766e12" stroke="#0f766e" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+
+
+    <circle cx="295" cy="2718" r="34" fill="#0f766e" opacity="0.96"/>
+    <text x="295" y="2730" text-anchor="middle" font-size="34" font-weight="900" fill="white">H</text>
+    <text x="347" y="2708" text-anchor="start" opacity="1" class=""><tspan x="347" dy="0" fill="#0f766e" font-weight="900" font-size="30">回收下一棒</tspan></text>
+    <text x="347" y="2748" text-anchor="start" opacity="1" class=""><tspan x="347" dy="0" fill="#263238" font-weight="780" font-size="22">Post-execution：把最终输出转回共享状态和下一次 invocation</tspan></text>
+    <rect x="1680" y="2684" width="220" height="44" rx="22" fill="#0f766e22" stroke="#0f766e" stroke-width="2"/>
+  <text x="1790" y="2713.14" text-anchor="middle" font-size="21" font-weight="700" fill="#0f766e">回到图 3</text>
+    <text x="287" y="2800" text-anchor="start" opacity="1" class=""><tspan x="287" dy="0" fill="#263238" font-weight="730" font-size="22">A2A mention / targetCats 检测；Rich Block 提取；F172 图片扫描发布</tspan><tspan x="287" dy="26.84" fill="#263238" font-weight="730" font-size="22">Audit + telemetry；Continuation Capsule 封存；Ack Cursors CAS</tspan><tspan x="287" dy="26.84" fill="#263238" font-weight="730" font-size="22">有 targetCats → 回到 A；有 continuation capsule → 限流后入队；无 → 等用户或外部事件</tspan></text>
+
+      <rect x="269" y="2890" width="1632" height="46" rx="18" fill="white" stroke="#0f766e" stroke-width="2" opacity="0.86"/>
+      <text x="1085" y="2920" text-anchor="middle" opacity="1" class=""><tspan x="1085" dy="0" fill="#0f766e" font-weight="820" font-size="20">图 8 = 单 invocation 内部；图 3 = 多 invocation 之间的球权协议</tspan></text>
+
+
+
+
+    <rect x="2010" y="470" width="500" height="620" rx="30" fill="#f8fafc" stroke="#344054" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    <rect x="2034" y="448" width="196" height="44" rx="22" fill="#344054" opacity="0.96"/><text x="2052" y="478" font-size="25" font-weight="800" fill="white">5 个注入时机</text>
+
+
+    <rect x="2040" y="535" width="440" height="92" rx="24" fill="#2563eb16" stroke="#2563eb" stroke-width="3"/>
+    <text x="2064" y="571" text-anchor="start" opacity="1" class=""><tspan x="2064" dy="0" fill="#2563eb" font-weight="900" font-size="23">1. Session-level</tspan></text>
+    <text x="2064" y="603" text-anchor="start" opacity="1" class=""><tspan x="2064" dy="0" fill="#263238" font-weight="760" font-size="18">Phase B candidate → Phase F prepend</tspan></text>
+
+
+    <rect x="2040" y="640" width="440" height="92" rx="24" fill="#7c3aed16" stroke="#7c3aed" stroke-width="3"/>
+    <text x="2064" y="676" text-anchor="start" opacity="1" class=""><tspan x="2064" dy="0" fill="#7c3aed" font-weight="900" font-size="23">2. Per-invocation</tspan></text>
+    <text x="2064" y="708" text-anchor="start" opacity="1" class=""><tspan x="2064" dy="0" fill="#263238" font-weight="760" font-size="18">Phase C 每轮动态重组</tspan></text>
+
+
+    <rect x="2040" y="745" width="440" height="92" rx="24" fill="#7c3aed16" stroke="#7c3aed" stroke-width="3"/>
+    <text x="2064" y="781" text-anchor="start" opacity="1" class=""><tspan x="2064" dy="0" fill="#7c3aed" font-weight="900" font-size="23">3. Cold start</tspan></text>
+    <text x="2064" y="813" text-anchor="start" opacity="1" class=""><tspan x="2064" dy="0" fill="#263238" font-weight="760" font-size="18">Phase D 仅 Session #2+</tspan></text>
+
+
+    <rect x="2040" y="850" width="440" height="92" rx="24" fill="#16a34a16" stroke="#16a34a" stroke-width="3"/>
+    <text x="2064" y="886" text-anchor="start" opacity="1" class=""><tspan x="2064" dy="0" fill="#16a34a" font-weight="900" font-size="23">4. Runtime hooks</tspan></text>
+    <text x="2064" y="918" text-anchor="start" opacity="1" class=""><tspan x="2064" dy="0" fill="#263238" font-weight="760" font-size="18">Phase G tool call 前后</tspan></text>
+
+
+    <rect x="2040" y="955" width="440" height="92" rx="24" fill="#0f766e16" stroke="#0f766e" stroke-width="3"/>
+    <text x="2064" y="991" text-anchor="start" opacity="1" class=""><tspan x="2064" dy="0" fill="#0f766e" font-weight="900" font-size="23">5. Post-execution</tspan></text>
+    <text x="2064" y="1023" text-anchor="start" opacity="1" class=""><tspan x="2064" dy="0" fill="#263238" font-weight="760" font-size="18">Phase H 检测 / 发布 / 续接</tspan></text>
+
+
+
+    <rect x="2010" y="1150" width="500" height="355" rx="30" fill="#ede7ff" stroke="#7c3aed" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    <rect x="2034" y="1128" width="140" height="44" rx="22" fill="#7c3aed" opacity="0.96"/><text x="2052" y="1158" font-size="25" font-weight="800" fill="white">独家增量</text>
+
+  <text x="2052" y="1220" text-anchor="start" opacity="1" class=""><tspan x="2052" dy="0" fill="#263238" font-weight="800" font-size="22">不是“大 system prompt”</tspan><tspan x="2052" dy="26.84" fill="#263238" font-weight="800" font-size="22">而是多时机注入链：</tspan><tspan x="2052" dy="26.84" fill="#263238" font-weight="800" font-size="22"></tspan><tspan x="2052" dy="26.84" fill="#263238" font-weight="800" font-size="22">10 静态 + 19 动态 + 6 冷启动</tspan><tspan x="2052" dy="26.84" fill="#263238" font-weight="800" font-size="22">+ hooks + post-exec 回收</tspan><tspan x="2052" dy="26.84" fill="#263238" font-weight="800" font-size="22"></tspan><tspan x="2052" dy="26.84" fill="#263238" font-weight="800" font-size="22">每一层都有来源、生命周期、</tspan><tspan x="2052" dy="26.84" fill="#263238" font-weight="800" font-size="22">重注入条件和降级策略。</tspan></text>
+
+
+    <rect x="2010" y="2210" width="500" height="420" rx="30" fill="#fee2e2" stroke="#dc2626" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
+    <rect x="2034" y="2188" width="224" height="44" rx="22" fill="#dc2626" opacity="0.96"/><text x="2052" y="2218" font-size="25" font-weight="800" fill="white">Hook 触发条</text>
+
+  <text x="2260" y="2270" text-anchor="middle" opacity="1" class=""><tspan x="2260" dy="0" fill="#dc2626" font-weight="860" font-size="22">SessionStart</tspan><tspan x="2260" dy="24.64" fill="#dc2626" font-weight="860" font-size="22">  ↓</tspan><tspan x="2260" dy="24.64" fill="#dc2626" font-weight="860" font-size="22">模型思考</tspan><tspan x="2260" dy="24.64" fill="#dc2626" font-weight="860" font-size="22">  ↓</tspan><tspan x="2260" dy="24.64" fill="#dc2626" font-weight="860" font-size="22">PreToolUse ⚡</tspan><tspan x="2260" dy="24.64" fill="#dc2626" font-weight="860" font-size="22">  ↓</tspan><tspan x="2260" dy="24.64" fill="#dc2626" font-weight="860" font-size="22">Tool 执行</tspan><tspan x="2260" dy="24.64" fill="#dc2626" font-weight="860" font-size="22">  ↓</tspan><tspan x="2260" dy="24.64" fill="#dc2626" font-weight="860" font-size="22">PostToolUse ⚡</tspan><tspan x="2260" dy="24.64" fill="#dc2626" font-weight="860" font-size="22">  ↓</tspan><tspan x="2260" dy="24.64" fill="#dc2626" font-weight="860" font-size="22">继续思考 / final</tspan><tspan x="2260" dy="24.64" fill="#dc2626" font-weight="860" font-size="22"></tspan><tspan x="2260" dy="24.64" fill="#dc2626" font-weight="860" font-size="22">⚠ Pre/PostToolUse</tspan><tspan x="2260" dy="24.64" fill="#dc2626" font-weight="860" font-size="22">仅 Claude project hooks</tspan></text>
+
+
+    <rect x="205" y="3005" width="2210" height="88" rx="26" fill="#fffbeb" stroke="#d97706" stroke-width="3" stroke-dasharray="" opacity="1" filter=""/>
+
+
+  <text x="1310" y="3060" text-anchor="middle" opacity="1" class=""><tspan x="1310" dy="0" fill="#92400e" font-weight="900" font-size="27">一句话：Harness 的价值不是“写一段 prompt”，而是在正确时刻把正确状态、约束、记忆和刹车装到 agent 的认知路径上。</tspan></text>
+  <text x="2490" y="3140" text-anchor="end" opacity="1" class=""><tspan x="2490" dy="0" fill="#667085" font-weight="700" font-size="20">valid_as_of: 2026-05-07 · brief commit 878eaa3e8</tspan></text>
+
+</svg>

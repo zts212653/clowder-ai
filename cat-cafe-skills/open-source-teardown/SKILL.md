@@ -35,7 +35,7 @@ triggers:
 
 ## Required Output
 
-默认落盘：*(internal reference removed)*，包含 README、architecture-map、明星特性深挖、comparison、lessons/next steps。
+默认落盘：`feature-discussions/YYYY-MM-DD-{project}-deep-dive/`，包含 README、architecture-map、明星特性深挖、comparison、lessons/next steps。
 
 最小合格产物必须包含：
 

@@ -1,7 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { ISttProvider, SttTranscribeRequest, SttTranscribeResult } from '@cat-cafe/shared';
-import { resolveServiceEndpoint } from '../../../domains/services/service-registry.js';
 
 export interface WhisperSttProviderOptions {
   baseUrl?: string;
@@ -17,7 +16,7 @@ export class WhisperSttProvider implements ISttProvider {
   private readonly fetchFn: typeof fetch;
 
   constructor(opts?: WhisperSttProviderOptions) {
-    this.baseUrl = opts?.baseUrl ?? resolveServiceEndpoint('whisper-stt') ?? 'http://localhost:9876';
+    this.baseUrl = opts?.baseUrl ?? process.env.WHISPER_URL ?? 'http://localhost:9876';
     this.model = opts?.model ?? 'whisper-large-v3';
     this.fetchFn = opts?._fetchFn ?? fetch;
   }

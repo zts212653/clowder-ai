@@ -19,7 +19,10 @@ describe('MCP Callback Tools', () => {
   beforeEach(() => {
     // Save and set env vars
     originalEnv = { ...process.env };
-    process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:3004';
+    // shared-rules §19 (LL-054): closed loopback port — defense-in-depth.
+    // If a test forgets to override fetch, ECONNREFUSED keeps requests off
+    // the runtime callback endpoint.
+    process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:1';
     process.env.CAT_CAFE_INVOCATION_ID = 'test-invocation';
     process.env.CAT_CAFE_CALLBACK_TOKEN = 'test-token';
     process.env.CAT_CAFE_CALLBACK_RETRY_DELAYS_MS = '0,0,0';
@@ -29,6 +32,9 @@ describe('MCP Callback Tools', () => {
 
     // Save original fetch
     originalFetch = globalThis.fetch;
+    // shared-rules §19 default fetch stub — every test inherits a no-op,
+    // preventing accidental real HTTP if a test forgets to override.
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ status: 'ok' }) });
   });
 
   afterEach(() => {
@@ -76,7 +82,13 @@ describe('MCP Callback Tools', () => {
     assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
   });
 
-  test('handlePostMessage forwards optional threadId for cross-thread posting', async () => {
+  test('handlePostMessage forwards threadId for agent-key callers (F178)', async () => {
+    // F193 KD-1: principal detection follows buildAuthHeaders precedence —
+    // if env has BOTH invocation_id AND callback_token, request is
+    // invocation-token regardless of input.agentKeyCatId. To exercise the
+    // agent-key path, MUST unset invocation env vars (closing 砚砚 review P1).
+    delete process.env.CAT_CAFE_INVOCATION_ID;
+    delete process.env.CAT_CAFE_CALLBACK_TOKEN;
     const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
 
     let capturedOptions;
@@ -91,6 +103,7 @@ describe('MCP Callback Tools', () => {
     const result = await handlePostMessage({
       content: 'cross-thread ping',
       threadId: 'thread-123',
+      agentKeyCatId: 'antigravity', // F178 agent-key path
     });
 
     assert.equal(result.isError, undefined);
@@ -269,6 +282,8 @@ describe('MCP Callback Tools', () => {
     const result = await handleCrossPostMessage({
       threadId: 'thread-cross',
       content: 'hello from another thread',
+      // F193 AC-A4: cross_post requires routing creds at MCP layer
+      targetCats: ['codex'],
     });
 
     assert.equal(result.isError, undefined);

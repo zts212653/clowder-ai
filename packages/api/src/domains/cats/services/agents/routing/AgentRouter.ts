@@ -44,17 +44,41 @@ import type { ITaskStore } from '../../stores/ports/TaskStore.js';
 import type { IThreadStore, ThreadRoutingPolicyV1, ThreadRoutingScope } from '../../stores/ports/ThreadStore.js';
 import { DEFAULT_THREAD_ID } from '../../stores/ports/ThreadStore.js';
 import type { IWorkflowSopStore } from '../../stores/ports/WorkflowSopStore.js';
+import { SYSTEM_USER_IDS } from '../../stores/visibility.js';
 import type { AgentMessage, AgentService } from '../../types.js';
 import type { InvocationRegistry } from '../invocation/InvocationRegistry.js';
 import type { TaskProgressStore } from '../invocation/TaskProgressStore.js';
 import type { AgentRegistry } from '../registry/AgentRegistry.js';
-import type { PersistenceContext, RouteStrategyDeps } from '../routing/route-helpers.js';
+import type { PersistenceContext, RouteOptions, RouteStrategyDeps } from '../routing/route-helpers.js';
 import { routeParallel } from '../routing/route-parallel.js';
 import { routeSerial } from '../routing/route-serial.js';
 import { resolveCatTarget } from './cat-target-resolver.js';
 
 const log = createModuleLogger('agent-router');
 const routeTracer = trace.getTracer('cat-cafe-api', '0.1.0');
+
+/**
+ * F194 Phase Z5 AC-Z16: 无 @ fallback 回看最近 thread messages 找上一条 user message
+ * 的 mentions。
+ *
+ * Spec 窗口 = N=5 USER messages OR 时间窗口 1h（防远古 mentions 主导 fallback）。
+ *
+ * 实现 = 以 USER message 为停止条件分页扫 thread messages（不是固定 thread message
+ * 窗口）：cat-to-cat handoff / vision guard / cross-post 等 cat 消息不消耗 user count
+ * 也不能挤掉远一点的 user mention。
+ *
+ * 砚砚 review 历程：
+ *   R1 P1：原实现 `getByThread(threadId, 5)` 取最近 5 条 thread messages，user @ 后
+ *     只要 5 条 cat/vision-guard 就把 user mention 挤出窗口 → Bug D 复活。
+ *   R2 P1：R2 改成 `getByThread(threadId, 50)` + 反向数 N=5 user msgs + 1h cutoff，
+ *     但仍然是单页 thread window — 51+ 条 cat 消息夹中间就退化回原 bug。
+ *   R3 P1（当前）：改成分页 loop（getByThread 拉首页 → 不够再 getByThreadBefore
+ *     拿历史页），停在 N=5 USER msgs / 1h cutoff / 没有更多消息。
+ *     defensive 上限 = Z5_PAGE_SIZE * Z5_MAX_PAGES = 250 条 thread messages。
+ */
+const Z5_PAGE_SIZE = 50;
+const Z5_USER_MESSAGE_COUNT_LIMIT = 5;
+const Z5_TIME_WINDOW_MS = 60 * 60 * 1000; // 1h
 
 /** Parsed mention with position for ordering */
 interface ParsedMention {
@@ -177,6 +201,10 @@ export interface AgentRouterOptions {
   evidenceStore?: import('../../../../memory/interfaces.js').IEvidenceStore;
   /** F150: Tool usage counter */
   toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
+  /** F188 Phase F AC-F10: Tool event log (append-only sequence) */
+  toolEventLog?: import('../../tool-usage/ToolEventLog.js').ToolEventLog;
+  /** F188 Phase F AC-F10 (AS-4): Skill load event log */
+  skillLoadEventLog?: import('../../tool-usage/SkillLoadEventLog.js').SkillLoadEventLog;
   /** F155 B-4: Independent guide session store */
   guideSessionStore?: import('../../../../guides/GuideSessionRepository.js').IGuideSessionStore;
   /** F155 B-6: Dismiss tracker for guide offer suppression */
@@ -227,6 +255,10 @@ export class AgentRouter {
   private evidenceStore?: import('../../../../memory/interfaces.js').IEvidenceStore;
   /** F150 */
   private toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
+  /** F188 Phase F AC-F10 */
+  private toolEventLog?: import('../../tool-usage/ToolEventLog.js').ToolEventLog;
+  /** F188 Phase F AC-F10 AS-4 */
+  private skillLoadEventLog?: import('../../tool-usage/SkillLoadEventLog.js').SkillLoadEventLog;
   /** F155 B-4 */
   private guideSessionStore?: import('../../../../guides/GuideSessionRepository.js').IGuideSessionStore;
   /** F155 B-6 */
@@ -272,6 +304,8 @@ export class AgentRouter {
     this.packStore = options.packStore;
     this.evidenceStore = options.evidenceStore;
     this.toolUsageCounter = options.toolUsageCounter;
+    this.toolEventLog = options.toolEventLog;
+    this.skillLoadEventLog = options.skillLoadEventLog;
     this.guideSessionStore = options.guideSessionStore;
     this.dismissTracker = options.dismissTracker;
     this.worldContextProvider = options.worldContextProvider;
@@ -296,6 +330,103 @@ export class AgentRouter {
       filtered.push(catId);
     }
     return filtered;
+  }
+
+  /**
+   * F194 Phase Z5 AC-Z16: 无 @ fallback 优先用上一条 user message 的 mentions，
+   * 不让 thread 里其他猫的发言（如 vision guard cross-post）抢路由 fallback。
+   *
+   * 用户心智模型："no @ = 继续刚才 @ 的猫里的一只"，不是"thread 里最近发言的猫"，
+   * 也不是把上一轮 parallel mentions 全量延续成新一轮并发。
+   *
+   * user message 严格定义：`userId !== null && catId === null`。
+   *   - cat-to-cat handoff (A2A) 有 catId → NOT a user message
+   *   - vision guard cross-post 有 catId → NOT a user message
+   *   - 系统消息 (userId === null && catId === null) → NOT a user message
+   *
+   * 时间窗口：回看最近 N=5 条 user messages，防止远古 mentions 主导 fallback。
+   * 在 N 条窗口内找到的最近一条 user message 后，取第一个 routable mention
+   * 作为 deterministic single-cat fallback。
+   */
+  private async findRecentUserMentionFallback(threadId: string): Promise<CatId[] | null> {
+    if (!this.messageStore) return null;
+    // F194 Phase Z5 R2 (砚砚 R1 P1#1): MessageStore interface 允许 sync 数组 OR async Promise
+    // (memory mock 是同步，Redis 生产是 async)。必须 await 才能拿到 Redis 实际数据。
+    // F194 Phase Z5 R4 (砚砚 R3 P1): 改为分页扫 — 以 USER message 数 / 时间窗口为
+    // 停止条件，而不是固定 thread message 窗口。
+    //   首页 = getByThread(threadId, PAGE_SIZE) — 最近 PAGE_SIZE 条 (ascending by score)
+    //   历史页 = getByThreadBefore(threadId, oldest.score, PAGE_SIZE, oldest.id) — 再往前
+    //   每页内反向扫，遇 user msg 计 user count，遇有 mentions 直接 return。
+    // F194 Phase Z5 R10 (cloud Codex round-6 P2): 去掉固定 page cap，仅靠 spec stop conditions
+    //   (5 user msgs / 1h cutoff / no more history) 收敛。固定 page cap 在高流量 thread
+    //   (vision-guard / handoff > 250) 仍可能漏掉真正的 user @ → 退化回 participantsWithActivity。
+    //   1h cutoff 通过 effective score 时间维度天然 bound 扫描深度（cat msg score 最终 < cutoff
+    //   时整页都比 cutoff 老，user msg cutoff 触发 return null），不会无限循环。
+    // F194 Phase Z5 R9 (砚砚 R8 P1): cursor + cutoff 都用 effectiveOrderTime = deliveredAt ?? timestamp
+    //   (与 Redis thread zset score 同口径)。markDelivered 把 score 改成 deliveredAt 但
+    //   msg.timestamp 仍是 send-time，如果 cursor 用 timestamp 跳到老 send-time → 跨页跳过中间
+    //   deliveredAt 排序的页面 → 真正的 user mention 在那段被漏。
+    const effectiveOrderTime = (m: { timestamp?: unknown; deliveredAt?: unknown }): number => {
+      const delivered = typeof m?.deliveredAt === 'number' ? m.deliveredAt : 0;
+      const ts = typeof m?.timestamp === 'number' ? m.timestamp : 0;
+      return delivered > 0 ? delivered : ts;
+    };
+    const cutoffTimestamp = Date.now() - Z5_TIME_WINDOW_MS;
+    let userMessagesSeen = 0;
+    let cursorScore: number | undefined;
+    let cursorId: string | undefined;
+
+    for (let pageIdx = 0; ; pageIdx += 1) {
+      const pageResult =
+        pageIdx === 0
+          ? this.messageStore.getByThread(threadId, Z5_PAGE_SIZE)
+          : this.messageStore.getByThreadBefore(threadId, cursorScore ?? 0, Z5_PAGE_SIZE, cursorId);
+      const page = await Promise.resolve(pageResult);
+      if (!page || !Array.isArray(page) || page.length === 0) break;
+
+      for (let i = page.length - 1; i >= 0; i -= 1) {
+        const m = page[i] as {
+          userId?: unknown;
+          catId?: unknown;
+          mentions?: unknown;
+          timestamp?: unknown;
+          deliveredAt?: unknown;
+        };
+        // F194 Phase Z5 R5 + R6 (cloud Codex round-1+2 P1): system-authored notices 不算 user message。
+        // R5 只排除了 'system'；R6 改用 visibility.ts 的 SYSTEM_USER_IDS（含 scheduler + system + 未来扩展）
+        // — 与 message store 的 isSystemUserMessage 同口径，scheduler 触发的通知一并排除。
+        // 否则一串 system/scheduler notice 会塞满 USER count limit，把真正的 user @ 挤出窗口外。
+        const userIdStr = typeof m?.userId === 'string' ? m.userId : null;
+        const isUserMessage = userIdStr != null && !SYSTEM_USER_IDS.has(userIdStr) && m?.catId == null;
+        if (!isUserMessage) continue;
+        // F194 Phase Z5 R8 (cloud Codex round-4 P1) + R9 (砚砚 R8 P1): 1h cutoff 在 isUserMessage 之后
+        // 判断，且用 effectiveOrderTime（与 cursor 同口径）。Redis markDelivered 把 thread zset score
+        // 改成 deliveredAt，对一条 send-time 老但刚 re-delivered 的 user msg，cutoff 应按 deliveredAt
+        // 算（与 Redis 排序对齐）。非 user msg 已 continue 跳过，cutoff 不会误 trip return null。
+        const score = effectiveOrderTime(m);
+        if (score > 0 && score < cutoffTimestamp) return null;
+        userMessagesSeen += 1;
+        if (userMessagesSeen > Z5_USER_MESSAGE_COUNT_LIMIT) return null;
+        const mentions = Array.isArray(m.mentions) ? (m.mentions as string[]) : [];
+        if (mentions.length === 0) continue; // user msg without @ → skip, keep looking earlier
+        const routable = this.filterRoutableCats(mentions as CatId[]);
+        return routable.length > 0 ? [routable[0]] : null;
+      }
+
+      // 页内没找到，准备下一页 cursor = 当前页最旧消息（ascending → page[0]）。
+      // R9: cursor.score = effectiveOrderTime(page[0]) 与 Redis zset score 一致。
+      const oldest = page[0] as { id?: unknown; timestamp?: unknown; deliveredAt?: unknown };
+      if (typeof oldest?.id !== 'string') break;
+      const oldestScore = effectiveOrderTime(oldest);
+      if (oldestScore <= 0) break;
+      // F194 Phase Z5 R11 (砚砚 R10 P2): page-level cutoff — page[0] 是当前页最旧 effective score，
+      // 如果它已经早于 cutoff，下一页只会更老（pages 按 effective score asc），无须再翻。
+      // 防止高流量 thread (无 user msg in 1h) 把 unbounded loop 拖成全量历史扫描。
+      if (oldestScore < cutoffTimestamp) return null;
+      cursorScore = oldestScore;
+      cursorId = oldest.id;
+    }
+    return null;
   }
 
   /** Pick a deterministic fallback cat when policy filters out all candidates. */
@@ -579,6 +710,14 @@ export class AgentRouter {
         return this.applyThreadRoutingPolicy(thread, message, validPreferred);
       }
 
+      // F194 Phase Z5 AC-Z16: 优先用上一条 user message 的 mentions 作 fallback 候选集，
+      // 不让 thread 里其他猫的发言（vision guard / cross-post）抢路由。
+      // 铲屎官原话："明明 at 的最后一只猫是 47 or 55 但是召唤出来的却是 46"
+      const userMentionFallback = await this.findRecentUserMentionFallback(threadId);
+      if (userMentionFallback && userMentionFallback.length > 0) {
+        return this.applyThreadRoutingPolicy(thread, message, userMentionFallback);
+      }
+
       // F078: last-replier takes absolute priority over preferredCats.
       // User mental model: "no @ = continue with whoever I was talking to".
       // preferredCats only kicks in when there's no conversation history at all.
@@ -635,6 +774,14 @@ export class AgentRouter {
       const hasExplicitIdeate = /#ideate\b/i.test(message);
       if (hasExplicitIdeate && validPreferred.length > 1) {
         return this.applyThreadRoutingPolicy(thread, message, validPreferred);
+      }
+
+      // F194 Phase Z5 AC-Z16: 优先用上一条 user message 的 mentions 作 fallback 候选集，
+      // 不让 thread 里其他猫的发言（vision guard / cross-post）抢路由。
+      // 铲屎官原话："明明 at 的最后一只猫是 47 or 55 但是召唤出来的却是 46"
+      const userMentionFallback = await this.findRecentUserMentionFallback(threadId);
+      if (userMentionFallback && userMentionFallback.length > 0) {
+        return this.applyThreadRoutingPolicy(thread, message, userMentionFallback);
       }
 
       // F078 + #58: last-replier takes priority over preferred cats (user mental model)
@@ -697,6 +844,8 @@ export class AgentRouter {
       ...(this.packStore ? { packStore: this.packStore } : {}),
       ...(this.evidenceStore ? { evidenceStore: this.evidenceStore } : {}),
       ...(this.toolUsageCounter ? { toolUsageCounter: this.toolUsageCounter } : {}),
+      ...(this.toolEventLog ? { toolEventLog: this.toolEventLog } : {}),
+      ...(this.skillLoadEventLog ? { skillLoadEventLog: this.skillLoadEventLog } : {}),
       ...(this.worldContextProvider ? { worldContextProvider: this.worldContextProvider } : {}),
       ...(this.worldStore ? { worldStore: this.worldStore } : {}),
     };
@@ -816,6 +965,8 @@ export class AgentRouter {
       signal?: AbortSignal;
       queueHasQueuedMessages?: (threadId: string) => boolean;
       hasQueuedOrActiveAgentForCat?: (threadId: string, catId: string) => boolean;
+      /** F185 Phase B: deferred A2A enqueue when fairness gate blocks text-scan expansion */
+      deferA2AEnqueue?: RouteOptions['deferA2AEnqueue'];
       invocationController?: AbortController;
       trackA2ASlot?: (threadId: string, catId: CatId, userId: string, controller: AbortController) => void;
       completeA2ASlots?: (threadId: string, catIds: readonly CatId[], controller: AbortController) => void;
@@ -873,6 +1024,7 @@ export class AgentRouter {
       signal: options?.signal,
       queueHasQueuedMessages: options?.queueHasQueuedMessages,
       hasQueuedOrActiveAgentForCat: options?.hasQueuedOrActiveAgentForCat,
+      deferA2AEnqueue: options?.deferA2AEnqueue,
       invocationController: options?.invocationController,
       trackA2ASlot: options?.trackA2ASlot,
       completeA2ASlots: options?.completeA2ASlots,

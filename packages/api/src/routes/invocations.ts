@@ -15,6 +15,7 @@ const log = createModuleLogger('routes/invocations');
 
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
+import { stampVisibleTurn } from '../domains/cats/services/agents/invocation/visible-turn.js';
 import type { AgentRouter } from '../domains/cats/services/agents/routing/AgentRouter.js';
 import type { PersistenceContext } from '../domains/cats/services/agents/routing/route-helpers.js';
 import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
@@ -195,9 +196,10 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
             ...(opts.queueProcessor
               ? {
                   queueHasQueuedMessages: (tid: string) =>
-                    opts.queueProcessor?.hasQueuedUserMessagesForThread(tid) ?? false,
+                    opts.queueProcessor?.hasQueuedNonAgentForThread(tid) ?? false,
                   hasQueuedOrActiveAgentForCat: (tid: string, catId: string) =>
                     opts.queueProcessor?.hasActiveOrQueuedAgentForCat(tid, catId) ?? false,
+                  deferA2AEnqueue: (e: any) => opts.queueProcessor?.enqueueRaw(e),
                 }
               : {}),
             cursorBoundaries,
@@ -211,7 +213,14 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
           if ((msg.type === 'done' || msg.type === 'error') && msg.catId) {
             opts.invocationTracker.completeSlot(record.threadId, msg.catId, controller);
           }
-          opts.socketManager.broadcastAgentMessage({ ...msg, invocationId: id }, record.threadId);
+          // F194 Phase Z9 (砚砚 R1 P1-2): use stampVisibleTurn helper. After route-serial /
+          // route-parallel stamp ownInvocationId on yielded events (R1 P1-1), msg.invocationId
+          // is always defined for assistant turns; helper falls back to parent only as defense
+          // in depth for non-assistant or pre-system_info events.
+          opts.socketManager.broadcastAgentMessage(
+            { ...msg, ...stampVisibleTurn(id, msg.invocationId) },
+            record.threadId,
+          );
         }
 
         // P1-2: mark failed if any message persistence failed

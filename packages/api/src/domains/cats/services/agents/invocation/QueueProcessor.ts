@@ -22,6 +22,7 @@ import {
   isCollaborationContinuityCapsuleV1,
 } from './CollaborationContinuityCapsule.js';
 import type { InvocationQueue, QueueEntry } from './InvocationQueue.js';
+import { stampVisibleTurn } from './visible-turn.js';
 
 /** Minimal interfaces for deps — avoid importing full types for testability */
 
@@ -264,6 +265,16 @@ export class QueueProcessor {
   /** A2A fairness gate: only user-sourced entries should block text-scan A2A. */
   hasQueuedUserMessagesForThread(threadId: string): boolean {
     return this.deps.queue.hasQueuedUserMessagesForThread(threadId);
+  }
+
+  /** F185 Phase B: non-agent fairness gate for text-scan A2A — user + connector block, agent does not. */
+  hasQueuedNonAgentForThread(threadId: string): boolean {
+    return this.deps.queue.hasQueuedNonAgentForThread(threadId);
+  }
+
+  /** F185 Phase B: thin enqueue wrapper for deferred A2A entries from retry/invocations path. */
+  enqueueRaw(input: any) {
+    return this.deps.queue.enqueue(input);
   }
 
   /** A2A dedup: check if a specific cat already has a queued or processing entry for this thread. */
@@ -908,7 +919,8 @@ export class QueueProcessor {
         {
           ...(contentBlocks.length > 0 ? { contentBlocks } : {}),
           ...(controller.signal ? { signal: controller.signal } : {}),
-          queueHasQueuedMessages: (tid: string) => queue.hasQueuedUserMessagesForThread(tid),
+          queueHasQueuedMessages: (tid: string) => queue.hasQueuedNonAgentForThread(tid),
+          deferA2AEnqueue: (e: any) => queue.enqueue(e),
           hasQueuedOrActiveAgentForCat: (tid: string, catId: string) => queue.hasActiveOrQueuedAgentForCat(tid, catId),
           invocationController: controller,
           trackA2ASlot: (tid: string, catId: string, uid: string, ctrl: AbortController) => {
@@ -920,7 +932,7 @@ export class QueueProcessor {
           cursorBoundaries,
           persistenceContext,
           ...(invocationId ? { parentInvocationId: invocationId } : {}),
-          callerTraceContext: entry.callerTraceContext,
+          ...(entry.callerTraceContext ? { callerTraceContext: entry.callerTraceContext } : {}),
         },
       )) {
         if (controller.signal.aborted) {
@@ -1024,7 +1036,15 @@ export class QueueProcessor {
           break;
         }
 
-        socketManager.broadcastAgentMessage({ ...msg, ...(invocationId ? { invocationId } : {}) }, threadId);
+        // F194 Phase Z9 (砚砚 R1 P1-2): unified visible turn stamp via helper.
+        const msgInvocationId = (msg as { invocationId?: string }).invocationId;
+        socketManager.broadcastAgentMessage(
+          {
+            ...msg,
+            ...(invocationId ? stampVisibleTurn(invocationId, msgInvocationId) : {}),
+          },
+          threadId,
+        );
       }
 
       // 8. Check abort before marking succeeded (F122B B6 P1: abort→succeeded bug fix)

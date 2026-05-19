@@ -23,7 +23,7 @@ export function CopyIdButton({ messageId }: { messageId: string }) {
       type="button"
       onClick={handleClick}
       tabIndex={-1}
-      className="opacity-0 group-hover:opacity-100 transition-opacity text-[11px] text-cafe-muted hover:text-cafe-secondary cursor-pointer select-none"
+      className="opacity-0 group-hover:opacity-100 transition-opacity text-xs text-cafe-muted hover:text-cafe-secondary cursor-pointer select-none"
       title={messageId}
       aria-label={`复制消息 ID: ${messageId}`}
     >

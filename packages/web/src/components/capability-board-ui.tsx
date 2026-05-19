@@ -28,14 +28,13 @@ export interface CapabilityBoardItem {
   connectionStatus?: 'connected' | 'disconnected' | 'unknown';
   mcpServer?: {
     transport?: 'stdio' | 'streamableHttp';
+    resolver?: string;
     command?: string;
     args?: string[];
     url?: string;
     headers?: Record<string, string>;
     env?: Record<string, string>;
     envKeys?: string[];
-    headerKeys?: string[];
-    resolver?: string;
   };
   layer?: 'L1' | 'L2' | 'L3';
   ecosystem?: 'claude' | 'codex' | 'openclaw' | 'antigravity';
@@ -127,29 +126,39 @@ export function ExtensionIcon({ className }: { className?: string }) {
 // ────────── Section ──────────
 
 export function CapabilitySection({
+  icon,
+  title,
+  subtitle,
   items,
   catFamilies,
   toggling,
   onToggle,
   onDeleteMcp,
   deletingMcp,
-  onEditMcp,
 }: {
-  icon?: ReactNode;
-  title?: string;
-  subtitle?: string;
+  icon: ReactNode;
+  title: string;
+  subtitle: string;
   items: CapabilityBoardItem[];
   catFamilies: CatFamily[];
   toggling: string | null;
   onToggle: ToggleHandler;
   onDeleteMcp?: (id: string, hard: boolean) => void;
   deletingMcp?: string | null;
-  onEditMcp?: (id: string) => void;
 }) {
   if (items.length === 0) return null;
   return (
-    <section>
-      <div className="flex flex-col gap-3.5">
+    <div className="mb-6">
+      <div className="flex items-center gap-3 mb-3 pl-1">
+        {icon}
+        <div>
+          <h3 className="text-base font-bold text-cafe tracking-wide">{title}</h3>
+          <p className="text-xs font-medium text-cafe-muted mt-0.5">
+            {subtitle} · {items.length}
+          </p>
+        </div>
+      </div>
+      <div className="space-y-2.5">
         {items.map((item) => (
           <CapabilityCard
             key={`${item.type}:${item.id}`}
@@ -159,11 +168,10 @@ export function CapabilitySection({
             onToggle={onToggle}
             onDelete={onDeleteMcp && item.type === 'mcp' && item.source === 'external' ? onDeleteMcp : undefined}
             isDeleting={deletingMcp === item.id}
-            onEdit={onEditMcp && item.type === 'mcp' ? onEditMcp : undefined}
           />
         ))}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -176,7 +184,6 @@ function CapabilityCard({
   onToggle,
   onDelete,
   isDeleting,
-  onEdit,
 }: {
   item: CapabilityBoardItem;
   catFamilies: CatFamily[];
@@ -184,7 +191,6 @@ function CapabilityCard({
   onToggle: ToggleHandler;
   onDelete?: (id: string, hard: boolean) => void;
   isDeleting?: boolean;
-  onEdit?: (id: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const isToggling = toggling === `${item.type}:${item.id}`;
@@ -196,42 +202,61 @@ function CapabilityCard({
 
   return (
     <div
-      className={`rounded-2xl bg-[var(--console-card-bg)] shadow-[0_8px_24px_rgba(43,33,26,0.05)] transition ${expanded ? '' : 'cursor-pointer hover:shadow-[0_8px_24px_rgba(43,33,26,0.09)]'}`}
-      data-active={expanded ? 'true' : 'false'}
+      className={`rounded-xl border transition-all duration-300 overflow-hidden ${
+        expanded
+          ? 'border-conn-indigo-ring shadow-md ring-1 ring-conn-indigo-bg bg-cafe-surface/60 backdrop-blur-sm'
+          : 'border-cafe hover:border-conn-indigo-ring hover:shadow shadow-sm bg-cafe-surface/40'
+      }`}
     >
       {/* Header */}
-      <div
-        className={`flex items-center gap-4 px-5 ${expanded ? 'py-4' : 'h-24 py-[18px]'} transition-all duration-300`}
-        onClick={() => !expanded && hasDetails && setExpanded(true)}
-      >
-        <div className="flex-1 min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="truncate text-[13px] font-bold text-cafe">{item.id}</span>
-            <TypeBadge type={item.type} />
-            {item.ecosystem && <EcosystemBadge ecosystem={item.ecosystem} />}
-            {item.connectionStatus && <StatusDot status={item.connectionStatus} />}
-          </div>
-          {item.description && <p className="mt-1 truncate text-[12px] text-cafe-secondary">{item.description}</p>}
-        </div>
-
-        {/* Global toggle + edit + delete */}
-        <div className="flex shrink-0 items-center gap-1.5">
-          {onEdit && (
-            <button
-              type="button"
-              onClick={() => onEdit(item.id)}
-              title="设置"
-              className="console-button-ghost rounded-full p-2"
+      <div className={`flex items-center gap-3 px-4 transition-all duration-300 ${expanded ? 'py-3' : 'py-2.5'}`}>
+        <button
+          type="button"
+          onClick={() => hasDetails && setExpanded((v) => !v)}
+          className={`flex-1 min-w-0 flex items-center gap-3 text-left ${hasDetails ? 'cursor-pointer group' : 'cursor-default'}`}
+        >
+          {hasDetails && (
+            <div
+              className={`shrink-0 flex items-center justify-center w-6 h-6 rounded-full transition-colors ${
+                expanded
+                  ? 'bg-conn-indigo-bg text-conn-indigo-text'
+                  : 'bg-cafe-surface-elevated text-cafe-muted group-hover:bg-conn-indigo-bg group-hover:text-conn-indigo-text'
+              }`}
             >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+              <svg
+                className={`w-3.5 h-3.5 transition-transform duration-300 ${expanded ? 'rotate-90' : ''}`}
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
                 <path
                   fillRule="evenodd"
-                  d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z"
+                  d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
                   clipRule="evenodd"
                 />
               </svg>
-            </button>
+            </div>
           )}
+          {!hasDetails && <span className="w-6 shrink-0" />}
+
+          <div className="flex-1 min-w-0 py-0.5">
+            <div className="flex items-center gap-2">
+              <span
+                className={`text-sm font-semibold truncate transition-colors ${expanded ? 'text-cafe' : 'text-cafe'}`}
+              >
+                {item.id}
+              </span>
+              <TypeBadge type={item.type} />
+              {item.ecosystem && <EcosystemBadge ecosystem={item.ecosystem} />}
+              {item.connectionStatus && <StatusDot status={item.connectionStatus} />}
+            </div>
+            {item.description && (
+              <p className="text-xs text-cafe-secondary mt-1 truncate max-w-[90%] font-medium">{item.description}</p>
+            )}
+          </div>
+        </button>
+
+        {/* Global toggle + delete */}
+        <div className="shrink-0 pl-2 flex items-center gap-1.5">
           <ToggleSwitch
             enabled={item.enabled}
             disabled={isToggling}
@@ -243,7 +268,8 @@ function CapabilityCard({
               onClick={() => onDelete(item.id, false)}
               disabled={isDeleting}
               title="禁用此 MCP"
-              className="console-button-ghost rounded-full p-2 disabled:opacity-40"
+              className="p-1 rounded text-cafe-muted hover:text-conn-red-text hover:bg-conn-red-bg
+                         transition-colors disabled:opacity-40"
             >
               <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
                 <path
@@ -265,77 +291,33 @@ function CapabilityCard({
       >
         <div className="overflow-hidden">
           {expanded && (
-            <div className="console-code-pane space-y-4 px-5 py-4 text-xs text-cafe-secondary">
+            <div className="border-t border-conn-indigo-bg/50 px-5 py-3.5 bg-gradient-to-br from-conn-indigo-bg/50 to-cafe-surface/50 text-xs text-cafe-secondary space-y-3">
               {/* Full description */}
               {item.description && (
                 <div>
-                  <span className="console-data-tile-label">描述</span>
-                  <p className="mt-1 leading-6 break-words text-cafe-secondary">{item.description}</p>
-                </div>
-              )}
-
-              {/* MCP config summary */}
-              {item.type === 'mcp' && item.mcpServer && (
-                <div>
-                  <span className="console-data-tile-label">连接配置</span>
-                  <div className="mt-2 space-y-1 font-mono text-[11px]">
-                    <p>
-                      <span className="text-cafe-muted">传输: </span>
-                      <span className="text-cafe-secondary">{item.mcpServer.transport ?? 'stdio'}</span>
-                    </p>
-                    {item.mcpServer.transport === 'streamableHttp' && item.mcpServer.url && (
-                      <p>
-                        <span className="text-cafe-muted">URL: </span>
-                        <span className="text-cafe-secondary">{item.mcpServer.url}</span>
-                      </p>
-                    )}
-                    {item.mcpServer.transport !== 'streamableHttp' && (
-                      <>
-                        <p>
-                          <span className="text-cafe-muted">命令: </span>
-                          <span className="text-cafe-secondary">
-                            {item.mcpServer.command || '(resolver)'}
-                            {item.mcpServer.args?.length ? ` ${item.mcpServer.args.join(' ')}` : ''}
-                          </span>
-                        </p>
-                      </>
-                    )}
-                    {item.mcpServer.envKeys && item.mcpServer.envKeys.length > 0 && (
-                      <p>
-                        <span className="text-cafe-muted">环境变量: </span>
-                        <span className="text-cafe-secondary">{item.mcpServer.envKeys.join(', ')}</span>
-                      </p>
-                    )}
-                    {item.mcpServer.headerKeys && item.mcpServer.headerKeys.length > 0 && (
-                      <p>
-                        <span className="text-cafe-muted">标头: </span>
-                        <span className="text-cafe-secondary">{item.mcpServer.headerKeys.join(', ')}</span>
-                      </p>
-                    )}
-                  </div>
+                  <span className="font-medium text-cafe-secondary">描述:</span>
+                  <p className="mt-1 text-cafe-secondary leading-relaxed break-words">{item.description}</p>
                 </div>
               )}
 
               {/* MCP tools */}
               {item.type === 'mcp' && item.tools && item.tools.length > 0 && (
                 <div>
-                  <span className="console-data-tile-label">Tools ({item.tools.length})</span>
-                  <ul className="mt-2 space-y-2">
+                  <span className="font-medium text-cafe-secondary">Tools ({item.tools.length}):</span>
+                  <ul className="mt-1 space-y-0.5 ml-3">
                     {item.tools.map((tool) => (
-                      <li key={tool.name} className="console-card-soft rounded-[16px] px-3 py-3">
-                        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:gap-2">
-                          <code className="font-mono text-[11px] text-opus-primary">{tool.name}</code>
-                          {tool.description && (
-                            <span className="leading-6 break-words text-cafe-muted">{tool.description}</span>
-                          )}
-                        </div>
+                      <li key={tool.name} className="flex gap-2">
+                        <code className="text-conn-purple-text">{tool.name}</code>
+                        {tool.description && (
+                          <span className="text-cafe-muted leading-relaxed break-words">{tool.description}</span>
+                        )}
                       </li>
                     ))}
                   </ul>
                 </div>
               )}
               {item.type === 'mcp' && (!item.tools || item.tools.length === 0) && (
-                <p className="py-1 italic text-cafe-muted">
+                <p className="text-cafe-muted italic py-1">
                   {item.connectionStatus === 'disconnected'
                     ? '探活失败或服务不可达，请检查 MCP 配置'
                     : item.connectionStatus === 'connected'
@@ -347,12 +329,12 @@ function CapabilityCard({
               {/* Skill triggers */}
               {item.type === 'skill' && item.triggers && item.triggers.length > 0 && (
                 <div>
-                  <span className="console-data-tile-label mb-2 block">触发词</span>
-                  <div className="mt-1 flex flex-wrap gap-2">
+                  <span className="font-medium text-cafe-secondary mb-2 block">触发词:</span>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
                     {item.triggers.map((t) => (
                       <span
                         key={t}
-                        className="console-pill inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium text-opus-primary"
+                        className="px-2 py-1 bg-cafe-surface border border-conn-indigo-bg/50 text-conn-indigo-text rounded-md text-xs font-medium shadow-sm"
                       >
                         &quot;{t}&quot;
                       </span>
@@ -361,7 +343,7 @@ function CapabilityCard({
                 </div>
               )}
               {item.type === 'skill' && (!item.triggers || item.triggers.length === 0) && (
-                <p className="py-1 italic text-cafe-muted">无特定触发词，由上下文自动匹配</p>
+                <p className="text-cafe-muted italic py-1">无特定触发词，由上下文自动匹配</p>
               )}
 
               {/* Skill mount status */}
@@ -397,9 +379,9 @@ function CatFamilyToggles({
   const [openFamily, setOpenFamily] = useState<string | null>(null);
 
   return (
-    <div className="border-t border-[color:var(--console-border-soft)] pt-2">
-      <span className="text-[11px] font-medium uppercase tracking-wider text-cafe-muted">启用状态（按猫）</span>
-      <div className="mt-2 space-y-2">
+    <div className="pt-2 border-t border-conn-indigo-bg/30">
+      <span className="text-xs font-medium text-cafe-muted uppercase tracking-wider">启用状态（按猫）</span>
+      <div className="mt-1.5 space-y-1">
         {catFamilies.map((family) => {
           const isOpen = openFamily === family.id;
           const relevantCatIds = family.catIds.filter((c) => c in item.cats);
@@ -407,14 +389,14 @@ function CatFamilyToggles({
           if (item.type === 'skill' && relevantCatIds.length === 0) return null;
           const enabledCount = relevantCatIds.filter((c) => item.cats[c]).length;
           return (
-            <div key={family.id} className="console-card-soft rounded-[18px]">
+            <div key={family.id} className="rounded-lg border border-cafe-subtle bg-cafe-surface/50">
               <button
                 type="button"
                 onClick={() => setOpenFamily(isOpen ? null : family.id)}
-                className="flex w-full items-center justify-between px-3 py-2 text-left"
+                className="w-full flex items-center justify-between px-3 py-1.5 text-left"
               >
-                <span className="text-[12px] font-medium text-cafe">{family.name}</span>
-                <span className="text-[11px] text-cafe-muted">
+                <span className="text-xs font-medium text-cafe-secondary">{family.name}</span>
+                <span className="text-xs text-cafe-muted">
                   {enabledCount}/{relevantCatIds.length}
                   <svg
                     className={`inline-block w-3 h-3 ml-1 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
@@ -430,15 +412,15 @@ function CatFamilyToggles({
                 </span>
               </button>
               {isOpen && (
-                <div className="space-y-1 px-3 pb-3">
+                <div className="px-3 pb-2 space-y-1">
                   {family.catIds.map((catId) => {
                     // Sparse cats: if a skill is not relevant for a cat (provider mismatch),
                     // the backend omits the key entirely. Render a dash instead of a toggle.
                     if (!(catId in item.cats)) {
                       return (
                         <div key={catId} className="flex items-center justify-between py-0.5">
-                          <span className="font-mono text-[11px] text-cafe-secondary">{catId}</span>
-                          <span className="select-none text-[12px] text-cafe-muted" title="该 Skill 对此猫不适用">
+                          <span className="text-xs text-cafe-secondary font-mono">{catId}</span>
+                          <span className="text-xs text-cafe-muted select-none" title="该 Skill 对此猫不适用">
                             –
                           </span>
                         </div>
@@ -448,7 +430,7 @@ function CatFamilyToggles({
                     const isCatToggling = toggling === `${item.type}:${item.id}:${catId}`;
                     return (
                       <div key={catId} className="flex items-center justify-between py-0.5">
-                        <span className="font-mono text-[11px] text-cafe-secondary">{catId}</span>
+                        <span className="text-xs text-cafe-secondary font-mono">{catId}</span>
                         <ToggleSwitch
                           enabled={catEnabled}
                           disabled={isCatToggling}
@@ -473,10 +455,10 @@ function CatFamilyToggles({
 function TypeBadge({ type }: { type: 'mcp' | 'skill' }) {
   return (
     <span
-      className={`inline-flex items-center justify-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+      className={`inline-flex items-center justify-center text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
         type === 'mcp'
-          ? 'border border-opus-light/50 bg-opus-bg text-opus-primary'
-          : 'border border-conn-blue-ring bg-conn-blue-bg text-conn-blue-text'
+          ? 'bg-gradient-to-r from-purple-100 to-indigo-100 text-conn-purple-text border border-conn-purple-ring/50'
+          : 'bg-gradient-to-r from-blue-100 to-cyan-100 text-conn-blue-text border border-conn-blue-ring/50'
       }`}
     >
       {type === 'mcp' ? 'MCP' : 'Skill'}
@@ -485,13 +467,14 @@ function TypeBadge({ type }: { type: 'mcp' | 'skill' }) {
 }
 
 export function StatusDot({ status }: { status: 'connected' | 'disconnected' | 'unknown' }) {
-  const tone = status === 'connected' ? 'active' : status === 'disconnected' ? 'error' : 'info';
+  const color =
+    status === 'connected'
+      ? 'bg-conn-green-text'
+      : status === 'disconnected'
+        ? 'bg-conn-red-text'
+        : 'bg-conn-gray-text';
   const label = status === 'connected' ? '已连接' : status === 'disconnected' ? '掉线' : '未知';
-  return (
-    <span className="console-status-chip px-2 py-1 text-[10px]" data-status={tone} title={label}>
-      {label}
-    </span>
-  );
+  return <span className={`inline-block w-2 h-2 rounded-full ${color}`} title={label} />;
 }
 
 function ToggleSwitch({
@@ -514,17 +497,17 @@ function ToggleSwitch({
         onChange(!enabled);
       }}
       disabled={disabled}
-      className={`relative box-content shrink-0 rounded-full border-[3px] border-transparent transition-[background-color,opacity] duration-300 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-cafe-accent ${
-        disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:opacity-90'
-      } ${enabled ? 'bg-cafe-accent' : 'bg-cafe-surface-elevated'} ${isSm ? 'h-3.5 w-7' : 'h-5 w-10'}`}
+      className={`rounded-full relative transition-[background-color,opacity] duration-300 ease-in-out shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-conn-indigo-text box-content border-[3px] border-transparent ${
+        disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:opacity-90'
+      } ${enabled ? 'bg-conn-indigo-text' : 'bg-cafe-surface-elevated'} ${isSm ? 'w-7 h-3.5' : 'w-10 h-5'}`}
     >
       <span
-        className={`absolute top-0 flex items-center justify-center rounded-full border border-[var(--console-border-soft)] bg-cafe-surface shadow-sm transition-transform duration-300 ease-in-out ${isSm ? 'h-3.5 w-3.5' : 'h-5 w-5'} ${
+        className={`absolute top-0 rounded-full bg-cafe-surface shadow-sm ring-1 ring-black/5 transition-transform duration-300 ease-in-out flex items-center justify-center ${isSm ? 'w-3.5 h-3.5' : 'w-5 h-5'} ${
           enabled ? (isSm ? 'translate-x-[14px]' : 'translate-x-[20px]') : 'translate-x-0'
         }`}
       >
         {enabled && !isSm && (
-          <svg className="h-2.5 w-2.5 text-cafe-accent drop-shadow-sm" viewBox="0 0 12 12" fill="none">
+          <svg className="w-2.5 h-2.5 text-conn-indigo-text drop-shadow-sm" viewBox="0 0 12 12" fill="none">
             <path
               stroke="currentColor"
               strokeWidth="2"
@@ -549,17 +532,17 @@ function MountStatusBadges({ mounts }: { mounts: Record<string, boolean> }) {
   ];
   return (
     <div>
-      <span className="mb-1.5 block font-medium text-cafe-secondary">挂载状态:</span>
+      <span className="font-medium text-cafe-secondary mb-1.5 block">挂载状态:</span>
       <div className="flex flex-wrap gap-1.5">
         {providers.map(({ key, label }) => {
           const ok = mounts[key] ?? false;
           return (
             <span
               key={key}
-              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium border ${
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium border ${
                 ok
-                  ? 'border-conn-emerald-ring bg-conn-emerald-bg text-conn-emerald-text'
-                  : 'border-conn-red-ring bg-conn-red-bg text-conn-red-text'
+                  ? 'bg-conn-emerald-bg text-conn-emerald-text border-conn-emerald-ring/50'
+                  : 'bg-conn-red-bg text-conn-red-text border-conn-red-ring/50'
               }`}
             >
               {ok ? (
@@ -603,10 +586,10 @@ export function SkillHealthBanner({ health, items }: { health: SkillHealthSummar
 
   return (
     <div
-      className={`flex items-start gap-2.5 rounded-xl px-4 py-3 text-xs border ${
+      className={`flex items-start gap-2.5 rounded-lg px-3.5 py-2.5 text-xs border ${
         allGood
-          ? 'border-conn-emerald-ring bg-conn-emerald-bg text-conn-emerald-text'
-          : 'border-conn-amber-ring bg-conn-amber-bg text-conn-amber-text'
+          ? 'bg-conn-emerald-bg/60 border-conn-emerald-ring/40 text-conn-emerald-text'
+          : 'bg-conn-amber-bg/60 border-conn-amber-ring/40 text-conn-amber-text'
       }`}
     >
       <HubIcon name={allGood ? 'check' : 'alert-triangle'} className="h-4 w-4 mt-0.5 shrink-0" />
@@ -615,24 +598,25 @@ export function SkillHealthBanner({ health, items }: { health: SkillHealthSummar
           <span className={health.allMounted ? 'text-conn-emerald-text' : 'text-conn-amber-text'}>
             {health.allMounted ? '全部正确挂载' : '部分挂载异常'}
           </span>
-          <span className="text-cafe-muted/60">·</span>
+          <span className="text-cafe-muted">·</span>
           <span className={health.registrationConsistent ? 'text-conn-emerald-text' : 'text-conn-amber-text'}>
             {health.registrationConsistent ? '注册一致' : '注册不一致'}
           </span>
         </div>
         {mountFailures.length > 0 && (
-          <div className="space-y-0.5 text-conn-amber-text">
+          <div className="space-y-0.5 text-conn-amber-text/80">
             {mountFailures.map((f) => (
               <p key={f.id}>
-                <code className="rounded bg-conn-amber-bg px-1 text-[10px]">{f.id}</code> — {f.failed.join(', ')} 未挂载
+                <code className="text-[10px] bg-conn-amber-bg/50 px-1 rounded">{f.id}</code> — {f.failed.join(', ')}{' '}
+                未挂载
               </p>
             ))}
           </div>
         )}
         {health.unregistered.length > 0 && (
-          <p className="text-conn-amber-text">未注册: {health.unregistered.join(', ')}</p>
+          <p className="text-conn-amber-text/80">未注册: {health.unregistered.join(', ')}</p>
         )}
-        {health.phantom.length > 0 && <p className="text-conn-amber-text">幽灵项: {health.phantom.join(', ')}</p>}
+        {health.phantom.length > 0 && <p className="text-conn-amber-text/80">幽灵项: {health.phantom.join(', ')}</p>}
       </div>
     </div>
   );
@@ -657,10 +641,10 @@ export function FilterChips({
           key={opt.value}
           type="button"
           onClick={() => onChange(opt.value)}
-          className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+          className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
             value === opt.value
-              ? 'border border-conn-blue-ring bg-conn-blue-bg text-conn-blue-text'
-              : 'console-pill text-cafe-secondary hover:text-cafe'
+              ? 'bg-conn-blue-bg border-conn-blue-ring text-conn-blue-text'
+              : 'border-cafe text-cafe-secondary hover:border-cafe'
           }`}
         >
           {opt.label}
@@ -674,24 +658,24 @@ export function FilterChips({
 
 export function SectionIconMcp() {
   return (
-    <div className="flex h-9 w-9 items-center justify-center rounded-[14px] border border-opus-light/50 bg-opus-bg shadow-sm">
-      <McpIcon className="h-4 w-4 text-opus-primary" />
+    <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-50 to-indigo-100/50 border border-conn-indigo-bg/50 shadow-sm">
+      <McpIcon className="w-4 h-4 text-conn-indigo-text" />
     </div>
   );
 }
 
 export function SectionIconSkill() {
   return (
-    <div className="flex h-9 w-9 items-center justify-center rounded-[14px] border border-conn-amber-ring bg-conn-amber-bg shadow-sm">
-      <SkillIcon className="h-4 w-4 text-conn-amber-text" />
+    <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-amber-50 to-yellow-100/50 border border-amber-100/50 shadow-sm">
+      <SkillIcon className="w-4 h-4 text-conn-amber-text" />
     </div>
   );
 }
 
 export function SectionIconExtension() {
   return (
-    <div className="flex h-9 w-9 items-center justify-center rounded-[14px] border border-conn-emerald-ring bg-conn-emerald-bg shadow-sm">
-      <ExtensionIcon className="h-4 w-4 text-conn-emerald-text" />
+    <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-50 to-green-100/50 border border-emerald-100/50 shadow-sm">
+      <ExtensionIcon className="w-4 h-4 text-conn-emerald-text" />
     </div>
   );
 }

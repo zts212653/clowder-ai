@@ -24,8 +24,6 @@ triggers:
 > 1. 在 content 末尾另起一行写 `@句柄`（如 `@目标猫句柄`）
 > 2. 传 `targetCats` 参数（如 `targetCats: ["opus"]`）
 
-**Announce at start:** "I'm using the cross-thread-sync skill to coordinate with parallel sessions."
-
 ## Step 1: 发现（谁在平行工作？）
 
 ```
@@ -35,15 +33,16 @@ triggers:
 # 2. 确认哪些在活跃
 → cat_cafe_list_threads(activeSince=<2h_ago_ms>)
 
-# 3. 必要时补上下文
-→ cat_cafe_search_messages(query="F088 phase", limit=5)
+# 3. 必要时补上下文（D15: cat_cafe_search_messages 已删除，用以下两个替代）
+→ cat_cafe_search_evidence(query="F088 phase", scope="threads", depth="raw")  # 跨 thread 搜过程
+→ cat_cafe_get_thread_context(threadId="<target>", keyword="F088")  # 单 thread 取最近消息
 ```
 
 **判断是否需要同步**：
 
 | 改动范围 | 是否通知 |
 |---------|---------|
-| 共享文件（BACKLOG、feature doc、cat-template.json） | 必须 |
+| 共享文件（BACKLOG、feature doc、cat-config.json） | 必须 |
 | 被其他 feature 依赖的接口/类型 | 必须 |
 | `packages/shared/**` | 必须 |
 | 纯内部改动（只影响自己 feature 的文件） | 不需要 |

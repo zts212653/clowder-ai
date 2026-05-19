@@ -21,22 +21,22 @@ function ToastCard({ toast }: { toast: ToastItem }) {
 
   const borderColor =
     toast.type === 'error'
-      ? 'border-l-red-400'
+      ? 'border-l-conn-red-ring'
       : toast.type === 'success'
-        ? 'border-l-green-400'
-        : 'border-l-amber-400';
+        ? 'border-l-conn-green-ring'
+        : 'border-l-conn-amber-ring';
 
   const icon =
     toast.type === 'error'
       ? 'text-conn-red-text'
       : toast.type === 'success'
-        ? 'text-conn-emerald-text'
+        ? 'text-green-500'
         : 'text-conn-amber-text';
 
   return (
     <div
       className={`
-        bg-cafe-surface rounded-lg shadow-lg border border-[var(--console-border-soft)] border-l-4 ${borderColor}
+        bg-cafe-surface rounded-lg shadow-lg border border-cafe-subtle border-l-4 ${borderColor}
         px-4 py-3 max-w-xs pointer-events-auto
         ${toast.exiting ? 'animate-toast-out' : 'animate-toast-in'}
       `}

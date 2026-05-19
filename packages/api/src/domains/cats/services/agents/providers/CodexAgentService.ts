@@ -39,6 +39,7 @@ import {
   createCodexSessionContextSnapshotResolver,
 } from '../providers/codex-session-context-snapshot.js';
 import { extractImagePaths } from '../providers/image-paths.js';
+import { compileL0ViaSubprocess } from './l0-compiler.js';
 
 const log = createModuleLogger('codex-agent');
 
@@ -53,6 +54,8 @@ interface CodexAgentServiceOptions {
   model?: string;
   /** Inject a custom spawn function (for testing) */
   spawnFn?: SpawnFn;
+  /** Test seam — replaces the real L0 compiler subprocess (Task 3a). */
+  l0CompilerFn?: typeof compileL0ViaSubprocess;
   /** Inject audit log sink (for testing) */
   auditLog?: AuditLogSink;
   /** Inject raw archive sink (for testing) */
@@ -139,10 +142,49 @@ function toTomlString(value: string): string {
 }
 
 /**
+ * F203 Phase C — `--config` keys the system controls. User cliConfigArgs
+ * cannot override these. Currently `developer_instructions` carries the
+ * compiled L0 (identity / 家规 invariant). Adding here without updating
+ * the F203 spec is a P1 — silent system-config drop hides L0 from the cat.
+ * (砚砚 review 2026-05-16 BLOCKING finding.)
+ */
+const RESERVED_SYSTEM_CONFIG_KEYS: ReadonlySet<string> = new Set(['developer_instructions']);
+
+/**
+ * Strip `--config <key=value>` / `-c <key=value>` pairs from a pre-split
+ * cliConfigArgs array when `key` is reserved. The downstream `dedup()`
+ * would otherwise skip the system push for any key already in
+ * userConfigKeys — silently dropping the L0 the moment a user adds the
+ * same key. `-c` is the documented short alias of `--config` per
+ * `codex exec --help` so both forms must be intercepted (云端 Codex
+ * P1-cloud-2, 2026-05-16).
+ */
+function stripReservedSystemConfigs(args: string[], catId: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if ((a === '--config' || a === '-c') && i + 1 < args.length) {
+      const key = args[i + 1].split('=')[0];
+      if (key && RESERVED_SYSTEM_CONFIG_KEYS.has(key)) {
+        log.warn({ catId, key, form: a }, 'cliConfigArgs override of reserved system config key dropped');
+        i++; // also skip the value pair
+        continue;
+      }
+    }
+    out.push(a);
+  }
+  return out;
+}
+
+/**
  * F041/F043 root fix:
  * Ensure Codex subprocess always receives cat-cafe MCP server config
  * based on the current thread working directory.
  */
+// F193 Phase C: split-only. Legacy `cat-cafe` (all-in-one via
+// registerFullToolset) is no longer auto-provisioned because it exposes
+// limb tools that `cat-cafe-limb` now hosts directly — keeping both would
+// duplicate the limb tool surface in Codex sessions (cloud round 6 P1).
 const CAT_CAFE_MCP_SERVER_ENTRIES = [
   ['cat-cafe-collab', 'collab.js'],
   ['cat-cafe-memory', 'memory.js'],
@@ -150,9 +192,18 @@ const CAT_CAFE_MCP_SERVER_ENTRIES = [
   ['cat-cafe-limb', 'limb.js'],
 ] as const;
 
-function buildCatCafeMcpConfigArgs(workingDirectory?: string, callbackEnv?: Record<string, string>): string[] {
+function buildCatCafeMcpConfigArgs(_workingDirectory?: string, callbackEnv?: Record<string, string>): string[] {
   const fileDir = dirname(fileURLToPath(import.meta.url));
-  const candidateRoots: string[] = [process.cwd(), resolve(fileDir, '../../../../../../../..')];
+  // The thread workingDirectory is the user's project/workspace. Cat Cafe MCP
+  // binaries are runtime-owned, so resolving from workingDirectory can pick a
+  // fork checkout with incomplete node_modules and silently drop all MCP tools.
+  const candidateRoots = [
+    process.env.CAT_CAFE_RUNTIME_ROOT?.trim(),
+    process.cwd(),
+    // file path: packages/api/src/domains/cats/services/agents/providers/CodexAgentService.ts
+    // repo root = dirname(fileURLToPath(import.meta.url)) up to .../cat-cafe
+    resolve(fileDir, '../../../../../../../..'),
+  ].filter((root): root is string => !!root);
 
   let mcpDistDir: string | undefined;
   for (const root of candidateRoots) {
@@ -185,9 +236,6 @@ function buildCatCafeMcpConfigArgs(workingDirectory?: string, callbackEnv?: Reco
       `mcp_servers.${serverName}.args=[${toTomlString(serverPath)}]`,
       '--config',
       `mcp_servers.${serverName}.enabled=true`,
-      // Codex ≥0.130: auto-approve MCP tool calls for trusted Cat Cafe servers.
-      // Without this, non-interactive `codex exec` has no UI to approve and
-      // write tools get auto-cancelled ("user cancelled MCP tool call").
       '--config',
       `mcp_servers.${serverName}.default_tools_approval_mode="approve"`,
     );
@@ -239,15 +287,46 @@ export class CodexAgentService implements AgentService {
   private readonly rawArchive: RawArchiveSink;
   private readonly contextSnapshotResolver: CodexSessionContextSnapshotResolver;
   private readonly cliCommand: string;
+  /** F203 Phase C: compiles per-cat L0 → OpenAI developer role (-c). */
+  private readonly l0CompilerFn: typeof compileL0ViaSubprocess;
 
   constructor(options?: CodexAgentServiceOptions) {
     this.catId = options?.catId ?? createCatId('codex');
     this.spawnFn = options?.spawnFn;
+    this.l0CompilerFn = options?.l0CompilerFn ?? compileL0ViaSubprocess;
     this.model = options?.model ?? getCatModel(this.catId as string);
     this.auditLog = options?.auditLog ?? getEventAuditLog();
     this.rawArchive = options?.rawArchive ?? new CliRawArchive();
     this.contextSnapshotResolver = options?.contextSnapshotResolver ?? createCodexSessionContextSnapshotResolver();
     this.cliCommand = options?.cliCommand ?? 'codex';
+  }
+
+  /** F203 Phase C — this service injects L0 via `-c developer_instructions=` (Task 4). */
+  injectsL0Natively(): boolean {
+    return true;
+  }
+
+  /**
+   * F203 Phase C: compile per-cat L0 → `-c developer_instructions=` argv
+   * (S4-verified, 砚砚 62b9255e2 — enters the OpenAI `developer` role,
+   * additive, NOT replacing Codex's base instructions; per-invocation argv,
+   * NOT ~/.codex/config.toml which would race @codex/@gpt52/@spark).
+   * fail-closed: on compile failure return an error descriptor (caller yields
+   * error + done + return, mirroring the CLI-not-found path) — a missing L0
+   * = a cat with no identity/家规, strictly worse than a failed invocation.
+   */
+  private async compileDeveloperInstructionsArgs(
+    cliModel: string,
+  ): Promise<{ args: string[] } | { error: string; metadata: MessageMetadata }> {
+    try {
+      const compiledL0 = await this.l0CompilerFn({ catId: this.catId as string });
+      return { args: ['--config', `developer_instructions=${toTomlString(compiledL0)}`] };
+    } catch (err) {
+      return {
+        error: `L0 compile failed for ${this.catId as string}: ${(err as Error).message}`,
+        metadata: { provider: 'openai', model: cliModel },
+      };
+    }
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
@@ -275,13 +354,22 @@ export class CodexAgentService implements AgentService {
     const gitRepoArgs = buildGitRepoArgs(options?.workingDirectory);
     // User-defined CLI args from the member editor (#567) — passed as-is, no implicit wrapping.
     // Each entry is split by whitespace (e.g. "--config model_reasoning_effort=\"low\"").
-    const userConfigArgs = (options?.cliConfigArgs ?? []).flatMap((arg) => arg.trim().split(/\s+/));
-    // Collect user --config keys so system-injected duplicates can be skipped.
+    // F203 Phase C / 砚砚 P1: strip reserved system config keys (developer_instructions,
+    // carries L0) before dedup — otherwise dedup() would skip the system push and the
+    // L0 would be silently overridden by any cliConfigArgs entry with the same key.
+    const userConfigArgs = stripReservedSystemConfigs(
+      (options?.cliConfigArgs ?? []).flatMap((arg) => arg.trim().split(/\s+/)),
+      this.catId as string,
+    );
+    // Collect user --config / -c keys so system-injected duplicates can be
+    // skipped. `-c` is the documented short alias of `--config` per
+    // `codex exec --help`; both forms must be recognized here (云端 Codex
+    // P1-cloud-2, 2026-05-16).
     const userConfigKeys = new Set<string>();
     const userFlagSet = new Set<string>();
     for (let i = 0; i < userConfigArgs.length; i++) {
       const a = userConfigArgs[i];
-      if (a === '--config' && i + 1 < userConfigArgs.length) {
+      if ((a === '--config' || a === '-c') && i + 1 < userConfigArgs.length) {
         const key = userConfigArgs[i + 1].split('=')[0];
         if (key) userConfigKeys.add(key);
       } else if (a.startsWith('-')) {
@@ -329,6 +417,22 @@ export class CodexAgentService implements AgentService {
         ? ['--config', `model=${toTomlString(cliModel)}`]
         : ['--model', cliModel];
 
+    // F203 Phase C: compile per-cat L0 → OpenAI `developer` role args.
+    // fail-closed (generator contract, mirrors the CLI-not-found path below).
+    const l0Result = await this.compileDeveloperInstructionsArgs(cliModel);
+    if ('error' in l0Result) {
+      yield {
+        type: 'error' as const,
+        catId: this.catId,
+        error: l0Result.error,
+        metadata: l0Result.metadata,
+        timestamp: Date.now(),
+      };
+      yield { type: 'done' as const, catId: this.catId, metadata: l0Result.metadata, timestamp: Date.now() };
+      return;
+    }
+    const developerInstructionsArgs = l0Result.args;
+
     // resume 子命令不接受 --sandbox（sandbox 在创建时已锁定）
     // --add-dir .git: 允许写入 .git/ 目录（index.lock、objects、refs），解锁 git commit
     // 注意：旧 session resume 时沿用创建时的沙箱参数，不会带 --add-dir。
@@ -364,6 +468,7 @@ export class CodexAgentService implements AgentService {
           ...dedup(reasoningArgs),
           ...dedup(contextWindowArgs),
           ...dedup(approvalArgs),
+          ...dedup(developerInstructionsArgs),
           ...dedup(customProviderArgs),
           ...userConfigArgs,
           ...gitRepoArgs,
@@ -382,6 +487,7 @@ export class CodexAgentService implements AgentService {
           '--add-dir',
           '.git',
           ...dedup(approvalArgs),
+          ...dedup(developerInstructionsArgs),
           ...dedup(customProviderArgs),
           ...userConfigArgs,
           ...gitRepoArgs,

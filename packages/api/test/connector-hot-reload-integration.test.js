@@ -9,13 +9,16 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
-import { after, afterEach, before, describe, it } from 'node:test';
+import { after, afterEach, before, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 import { restartConnectorGateway } from '../dist/infrastructure/connectors/connector-gateway-lifecycle.js';
 import { createConnectorReloadSubscriber } from '../dist/infrastructure/connectors/connector-reload-subscriber.js';
 import { configSecretsRoutes } from '../dist/routes/config-secrets.js';
 
 const VALID_TELEGRAM_TOKEN = '123456:hot_reload_token';
+const OWNER_ID = 'owner-1';
+const SESSION_HEADERS = { 'x-test-session-user': OWNER_ID };
+const ORIGINAL_OWNER_ID = process.env.DEFAULT_OWNER_USER_ID;
 
 describe('F136 Phase 2 integration: secrets → event → reload', () => {
   let app;
@@ -26,6 +29,12 @@ describe('F136 Phase 2 integration: secrets → event → reload', () => {
 
   before(async () => {
     app = Fastify();
+    app.addHook('preHandler', async (request) => {
+      const sessionUser = request.headers['x-test-session-user'];
+      if (typeof sessionUser === 'string' && sessionUser.trim()) {
+        request.sessionUserId = sessionUser.trim();
+      }
+    });
     tmpDir = mkdtempSync(join(os.tmpdir(), 'hotreload-int-'));
     envFilePath = join(tmpDir, '.env');
     writeFileSync(envFilePath, '');
@@ -42,7 +51,13 @@ describe('F136 Phase 2 integration: secrets → event → reload', () => {
     });
   });
 
+  beforeEach(() => {
+    process.env.DEFAULT_OWNER_USER_ID = OWNER_ID;
+  });
+
   afterEach(() => {
+    if (ORIGINAL_OWNER_ID === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+    else process.env.DEFAULT_OWNER_USER_ID = ORIGINAL_OWNER_ID;
     restartCalls.length = 0;
     delete process.env.TELEGRAM_BOT_TOKEN;
     delete process.env.FEISHU_APP_ID;
@@ -57,7 +72,7 @@ describe('F136 Phase 2 integration: secrets → event → reload', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/config/secrets',
-      headers: { 'x-cat-cafe-user': 'integrator' },
+      headers: SESSION_HEADERS,
       payload: { updates: [{ name: 'TELEGRAM_BOT_TOKEN', value: VALID_TELEGRAM_TOKEN }] },
     });
     assert.equal(res.statusCode, 200);
@@ -71,7 +86,7 @@ describe('F136 Phase 2 integration: secrets → event → reload', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/config/secrets',
-      headers: { 'x-cat-cafe-user': 'integrator' },
+      headers: SESSION_HEADERS,
       payload: {
         updates: [
           { name: 'FEISHU_APP_ID', value: 'cli_int' },
@@ -109,7 +124,7 @@ describe('F136 Phase 2 integration: secrets → event → reload', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/config/secrets',
-      headers: { 'x-cat-cafe-user': 'integrator' },
+      headers: SESSION_HEADERS,
       payload: { updates: [{ name: 'DINGTALK_APP_KEY', value: 'healed-key' }] },
     });
     assert.equal(res.statusCode, 200);
@@ -130,7 +145,7 @@ describe('F136 Phase 2 integration: secrets → event → reload', () => {
     await app.inject({
       method: 'POST',
       url: '/api/config/secrets',
-      headers: { 'x-cat-cafe-user': 'integrator' },
+      headers: SESSION_HEADERS,
       payload: { updates: [{ name: 'TELEGRAM_BOT_TOKEN', value: VALID_TELEGRAM_TOKEN }] },
     });
     await new Promise((r) => setTimeout(r, 100));

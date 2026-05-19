@@ -271,6 +271,47 @@ describe('F167 L1: route-serial ping-pong circuit breaker', { concurrency: false
     }
   });
 
+  test('streak=4 in deferred path (F185-B AC-B3a) → block deferred enqueue + emit a2a_pingpong_terminated', async () => {
+    const original = catRegistry.getAllConfigs();
+    await loadRealRoster();
+    try {
+      const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+      const opusService = createCapturingService('opus', '看了\n@codex review 一下');
+      const codexService = createCapturingService('codex', '看了\n@opus 确认一下');
+      const deps = createMockDeps({ opus: opusService, codex: codexService });
+
+      let callCount = 0;
+      const deferredEntries = [];
+      const events = [];
+      for await (const msg of routeSerial(deps, ['opus'], 'ping-pong deferred test', 'user1', 'thread-pp-defer', {
+        thinkingMode: 'play',
+        queueHasQueuedMessages: () => {
+          callCount++;
+          return callCount >= 4;
+        },
+        deferA2AEnqueue: (entry) => deferredEntries.push(entry),
+      })) {
+        events.push(msg);
+      }
+
+      assert.strictEqual(opusService.calls.length, 2, 'opus should invoke 2 times (rounds 0, 2)');
+      assert.strictEqual(codexService.calls.length, 2, 'codex should invoke 2 times (rounds 1, 3)');
+
+      assert.strictEqual(deferredEntries.length, 0, 'deferred enqueue must NOT be called when streak blocks');
+
+      const terminated = events.find(
+        (e) =>
+          e.type === 'system_info' && typeof e.content === 'string' && e.content.includes('a2a_pingpong_terminated'),
+      );
+      assert.ok(terminated, 'deferred path must emit a2a_pingpong_terminated on streak=4');
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(original)) {
+        catRegistry.register(id, config);
+      }
+    }
+  });
+
   test('no ping-pong (single handoff) → no warning, no termination', async () => {
     const original = catRegistry.getAllConfigs();
     await loadRealRoster();

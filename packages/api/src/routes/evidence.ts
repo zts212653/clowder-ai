@@ -10,6 +10,7 @@ import {
   type SalienceTaskContext,
 } from '../domains/memory/f163-types.js';
 import type { IEvidenceStore, IIndexBuilder, IKnowledgeResolver } from '../domains/memory/interfaces.js';
+import type { RebuildJobTracker } from '../domains/memory/RebuildJobTracker.js';
 import { type BoostSource, type EvidenceResult, mapKindToSourceType } from './evidence-helpers.js';
 
 /** Accepted query parameters — Phase D: scope/mode/depth added */
@@ -25,6 +26,7 @@ const searchSchema = z.object({
   threadId: z.string().optional(),
   dimension: z.enum(['project', 'global', 'library', 'collection', 'all']).optional(),
   collections: z.string().optional(),
+  explain: z.enum(['true', '1']).optional(),
   activeFeatureIds: z.string().optional(),
   truthSourceRef: z.string().optional(),
   recentArtifactRefs: z.string().optional(),
@@ -66,6 +68,7 @@ export interface EvidenceRoutesOptions {
   evidenceStore: IEvidenceStore;
   indexBuilder?: IIndexBuilder;
   knowledgeResolver?: IKnowledgeResolver;
+  rebuildJobTracker?: RebuildJobTracker;
 }
 
 export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (app, opts) => {
@@ -88,6 +91,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       threadId,
       dimension,
       collections: rawCollections,
+      explain: rawExplain,
       activeFeatureIds: rawFeatureIds,
       truthSourceRef,
       recentArtifactRefs: rawArtifactRefs,
@@ -114,6 +118,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         ?.split(',')
         .map((s) => s.trim())
         .filter(Boolean);
+      const explain = rawExplain != null;
       const searchOpts = {
         limit: effectiveLimit,
         scope,
@@ -125,6 +130,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         threadId,
         dimension,
         collections: parsedCollections,
+        explain,
       };
       // F-4: Use KnowledgeResolver for federated project + global search
       const resolveResult = opts.knowledgeResolver ? await opts.knowledgeResolver.resolve(q, searchOpts) : null;
@@ -168,8 +174,11 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         sourceType: mapKindToSourceType(item.kind),
         boostSource: effectiveBoostSource,
         ...(item.authority ? { authority: item.authority } : {}),
+        ...(item.sourcePath ? { sourcePath: item.sourcePath } : {}),
         ...(singleSource ? { source: singleSource } : {}),
         ...(item.passages ? { passages: item.passages } : {}),
+        ...(item.matchReason ? { matchReason: item.matchReason } : {}),
+        ...(explain && item.rankingFactors ? { rankingFactors: item.rankingFactors } : {}),
       }));
       // F163 AC-A3: report always_on injection sources in response envelope
       let injectionSources: string[] | undefined;
@@ -360,5 +369,61 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       reply.status(500);
       return { error: 'reindex failed', message: String(err) };
     }
+  });
+
+  // F188 Phase A: Full rebuild endpoint (AC-A1)
+  app.post('/api/evidence/rebuild', async (request, reply) => {
+    const ip = request.ip;
+    if (ip !== '127.0.0.1' && ip !== '::1' && ip !== '::ffff:127.0.0.1') {
+      reply.status(403);
+      return { error: 'Forbidden: localhost only' };
+    }
+    if (!opts.indexBuilder || !opts.rebuildJobTracker) {
+      reply.status(503);
+      return { error: 'rebuild not available' };
+    }
+
+    let taskId: string;
+    try {
+      taskId = opts.rebuildJobTracker.create();
+    } catch (e) {
+      reply.status(409);
+      return { error: (e as Error).message };
+    }
+
+    const tracker = opts.rebuildJobTracker;
+    const builder = opts.indexBuilder;
+    setImmediate(() => {
+      builder
+        .rebuild({
+          force: true,
+          onProgress: (phase, percent) => tracker.updateProgress(taskId, phase, percent),
+        })
+        .then(
+          (result) => tracker.complete(taskId, result),
+          (err) => tracker.fail(taskId, String(err)),
+        );
+    });
+
+    return { taskId };
+  });
+
+  // F188 Phase A: Rebuild status endpoint (AC-A2)
+  app.get<{ Params: { taskId: string } }>('/api/evidence/rebuild/:taskId', async (request, reply) => {
+    const ip = request.ip;
+    if (ip !== '127.0.0.1' && ip !== '::1' && ip !== '::ffff:127.0.0.1') {
+      reply.status(403);
+      return { error: 'Forbidden: localhost only' };
+    }
+    if (!opts.rebuildJobTracker) {
+      reply.status(503);
+      return { error: 'rebuild not available' };
+    }
+    const job = opts.rebuildJobTracker.get(request.params.taskId);
+    if (!job) {
+      reply.status(404);
+      return { error: 'Task not found' };
+    }
+    return job;
   });
 };

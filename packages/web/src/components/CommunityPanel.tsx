@@ -67,17 +67,17 @@ const ISSUE_STATE_COLORS: Record<string, string> = {
   unreplied: 'text-cafe-accent',
   discussing: 'text-cafe-crosspost',
   'pending-decision': 'text-conn-amber-text',
-  accepted: 'text-conn-emerald-text',
+  accepted: 'text-conn-green-text',
   declined: 'text-cafe-muted',
-  closed: 'text-cafe-muted',
+  closed: 'text-gray-400',
 };
 
 const PR_GROUP_COLORS: Record<string, string> = {
   unreplied: 'text-cafe-accent',
-  replied: 'text-conn-emerald-text',
+  replied: 'text-conn-green-text',
   'has-new-activity': 'text-conn-amber-text',
-  merged: 'text-conn-emerald-text',
-  closed: 'text-cafe-muted',
+  merged: 'text-conn-green-text',
+  closed: 'text-gray-400',
 };
 
 const AUTO_REFRESH_MS = 5 * 60 * 1000;
@@ -149,13 +149,13 @@ function IssueRow({
             e.stopPropagation();
             onDispatch(item.id);
           }}
-          className="text-[9px] text-cafe-crosspost bg-cafe-crosspost/10 px-1.5 py-0.5 rounded hover:bg-cafe-crosspost/20 transition-colors"
+          className="text-xs text-cafe-crosspost bg-cafe-crosspost/10 px-1.5 py-0.5 rounded hover:bg-cafe-crosspost/20 transition-colors"
         >
           发送给系统猫
         </button>
       )}
       {item.replyState === 'unreplied' && item.state !== 'unreplied' && (
-        <span className="text-[9px] text-cafe-accent bg-cafe-accent/10 px-1 rounded">未回复</span>
+        <span className="text-xs text-cafe-accent bg-cafe-accent/10 px-1 rounded">未回复</span>
       )}
     </div>
   );
@@ -318,7 +318,7 @@ export function CommunityPanel({ threadId }: { threadId?: string }) {
       />
 
       {/* Stats */}
-      <div className="flex items-center gap-3 px-3 py-1.5 text-[10px] text-cafe-muted border-b border-[var(--console-border-soft)]">
+      <div className="flex items-center gap-3 px-3 py-1.5 text-[10px] text-cafe-muted border-b border-cafe-subtle/20">
         <span>Issues: {totalIssues}</span>
         <span>PRs: {totalPrs}</span>
         {loading && <span className="text-cafe-crosspost">同步中...</span>}
@@ -336,7 +336,7 @@ export function CommunityPanel({ threadId }: { threadId?: string }) {
         ) : (
           <>
             {/* Issues */}
-            <div className="border-b border-[var(--console-border-soft)]">
+            <div className="border-b border-cafe-subtle/20">
               <div className="px-3 py-1.5 text-[10px] font-bold text-cafe-muted uppercase tracking-wider">Issues</div>
               {ISSUE_SECTIONS.map((sec) => {
                 const items = issuesByState(sec.key);

@@ -2,7 +2,7 @@ import Link from 'next/link';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 
-export type SignalNavItem = 'signals' | 'sources';
+export type SignalNavItem = 'chat' | 'signals' | 'sources';
 
 interface SignalNavProps {
   readonly active: SignalNavItem;
@@ -36,16 +36,37 @@ function useReferrerThread(initialReferrerThread: string | null): string | null 
 export function SignalNav({ active, initialReferrerThread = null }: SignalNavProps) {
   const referrerThread = useReferrerThread(initialReferrerThread);
   const fromSuffix = referrerThread ? `?from=${encodeURIComponent(referrerThread)}` : '';
+
   const items: readonly ItemConfig[] = useMemo(
     () => [
-      { id: 'signals' as const, href: `/signals${fromSuffix}`, label: '收件箱' },
-      { id: 'sources' as const, href: `/signals/sources${fromSuffix}`, label: '信号源' },
+      { id: 'signals' as const, href: `/signals${fromSuffix}`, label: 'Signals' },
+      { id: 'sources' as const, href: `/signals/sources${fromSuffix}`, label: 'Sources' },
     ],
     [fromSuffix],
   );
 
+  const backHref = referrerThread && referrerThread !== 'default' ? `/thread/${referrerThread}` : '/';
+
   return (
     <nav aria-label="Signal navigation" className="flex items-center gap-2">
+      <a
+        href={backHref}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-[#D8C6AD] bg-[#FCF7EE] px-3 py-1.5 text-xs font-medium text-[#8B6F47] transition-colors hover:bg-[#F7EEDB]"
+        data-testid="signal-back-to-chat"
+      >
+        <svg
+          className="h-4 w-4"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <polyline points="15 18 9 12 15 6" />
+        </svg>
+        返回线程
+      </a>
       {items.map((item) => {
         const isActive = item.id === active;
         return (
@@ -54,10 +75,10 @@ export function SignalNav({ active, initialReferrerThread = null }: SignalNavPro
             href={item.href}
             aria-current={isActive ? 'page' : undefined}
             className={[
-              'rounded-md px-2 py-[3px] text-[11px] font-semibold transition-colors',
+              'inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
               isActive
-                ? 'bg-[var(--console-active-bg)] text-cafe-interactive'
-                : 'bg-[var(--console-pill-bg,var(--console-card-soft-bg))] text-cafe-secondary hover:text-cafe',
+                ? 'border-[var(--console-input-stroke)] bg-[var(--console-hover-bg)] text-cafe-black'
+                : 'border-[var(--console-border-soft)] bg-[var(--console-card-bg)] text-cafe-secondary hover:border-[var(--console-input-stroke)] hover:text-cafe-black',
             ].join(' ')}
           >
             {item.label}

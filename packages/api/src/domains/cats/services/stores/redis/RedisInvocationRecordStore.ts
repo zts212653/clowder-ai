@@ -50,16 +50,27 @@ return {'created', ARGV[1]}
  * Lua script for atomic status update with state machine guard.
  * Handles both CAS (expectedStatus provided) and non-CAS paths atomically.
  *
+ * F194 Phase B (R3 P1 fix): set membership maintenance is now INSIDE this script —
+ * post-Lua best-effort SADD/SREM had a race where a process crash between status
+ * update and Set update would leave a record `running` but missing from the index,
+ * silently re-introducing split-brain. Atomic Lua eliminates that window.
+ *
  * KEYS[1] = invocation record hash key
+ * KEYS[2] = running set key (invoc:running:{threadId}:{userId}) — derived from JS-side
+ *          snapshot of (threadId, userId); guarded inside Lua via ARGV[3]/ARGV[4]
  * ARGV[1] = expectedStatus ("" if non-CAS)
  * ARGV[2] = newStatus ("" if no status change)
- * ARGV[3..N] = field/value pairs to HSET (always includes updatedAt)
+ * ARGV[3] = expectedThreadId (matches snapshot used to derive KEYS[2])
+ * ARGV[4] = expectedUserId (matches snapshot used to derive KEYS[2])
+ * ARGV[5..N] = field/value pairs to HSET (always includes updatedAt)
  *
  * Returns:
  *   1  = success
  *   0  = CAS mismatch (expectedStatus didn't match current)
  *  -1  = illegal state transition
  *  -2  = record not found
+ *  -3  = (threadId, userId) drift — KEYS[2] is stale (e.g. reassignUserId race);
+ *        caller must retry with fresh snapshot
  */
 const ATOMIC_UPDATE_LUA = `
 local current = redis.call('HGET', KEYS[1], 'status')
@@ -73,6 +84,16 @@ local newStatus = ARGV[2]
 -- CAS check: if expectedStatus provided, current must match
 if expected ~= '' and current ~= expected then
   return 0
+end
+
+-- F194 Phase B (cloud R13 P1 #2): KEYS[2] is derived from JS-side snapshot of
+-- (threadId, userId). If reassignUserId() ran between snapshot and EVAL, the
+-- snapshot is stale and SADD/SREM would target the wrong running set. Guard
+-- by validating the hash's current (threadId, userId) match the snapshot.
+local currentThreadId = redis.call('HGET', KEYS[1], 'threadId')
+local currentUserId = redis.call('HGET', KEYS[1], 'userId')
+if currentThreadId ~= ARGV[3] or currentUserId ~= ARGV[4] then
+  return -3
 end
 
 -- State machine guard: validate transition when newStatus is provided.
@@ -94,18 +115,71 @@ end
 
 -- Apply field/value pairs
 local fields = {}
-for i = 3, #ARGV, 2 do
+for i = 5, #ARGV, 2 do
   fields[#fields + 1] = ARGV[i]
   fields[#fields + 1] = ARGV[i + 1]
 end
 if #fields > 0 then
   redis.call('HSET', KEYS[1], unpack(fields))
 end
+
+-- F194 Phase B: maintain running index inside the same atomic op
+if newStatus ~= '' and newStatus ~= current then
+  local invocId = redis.call('HGET', KEYS[1], 'id')
+  if newStatus == 'running' then
+    redis.call('SADD', KEYS[2], invocId)
+  elseif current == 'running' then
+    redis.call('SREM', KEYS[2], invocId)
+  end
+end
+
+return 1
+`;
+
+/**
+ * F194 Phase B (cloud R14 P1): atomic running-set migration during ownership reassignment.
+ *
+ * Folds HSET userId + SREM oldSet + SADD newSet into a single Lua eval. Status is read
+ * AFTER the HSET so concurrent terminal transitions are observed correctly — terminal
+ * records skip Set migration (they belong in no running set).
+ *
+ * KEYS[1] = invocation record hash key
+ * KEYS[2] = old running set key (running:{threadId}:{oldUserId})
+ * KEYS[3] = new running set key (running:{threadId}:{nextUserId})
+ * ARGV[1] = nextUserId
+ * ARGV[2] = nowMs (string)
+ * ARGV[3] = invocationId
+ *
+ * Returns:
+ *   1  = success (migration applied or skipped per current status)
+ *  -1  = record not found
+ */
+const REASSIGN_USERID_LUA = `
+local exists = redis.call('EXISTS', KEYS[1])
+if exists == 0 then
+  return -1
+end
+
+redis.call('HSET', KEYS[1], 'userId', ARGV[1], 'updatedAt', ARGV[2])
+
+local status = redis.call('HGET', KEYS[1], 'status')
+if status == 'running' then
+  redis.call('SREM', KEYS[2], ARGV[3])
+  redis.call('SADD', KEYS[3], ARGV[3])
+end
+
 return 1
 `;
 
 export class RedisInvocationRecordStore implements IInvocationRecordStore {
   private readonly redis: RedisClient;
+  // F194 Phase B (cloud R13 P1): per-process lazy backfill flag for the running index Set.
+  // Records that existed in `running` BEFORE this build deployed (or written via paths that
+  // bypass update()'s ATOMIC_UPDATE_LUA) won't be in `invoc:running:{tid}:{uid}`. On first
+  // listRunningByThread call, scan all invoc:* hashes once, populate the Set, then flip the
+  // flag. SADDs are idempotent so multi-process startup races at worst do duplicate work.
+  private runningIndexBackfilled = false;
+  private runningIndexBackfillPromise: Promise<void> | null = null;
 
   constructor(redis: RedisClient) {
     this.redis = redis;
@@ -161,35 +235,53 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
   async update(id: string, input: UpdateInvocationInput): Promise<InvocationRecord | null> {
     const key = InvocationKeys.detail(id);
 
-    // Build field/value pairs for HSET
+    // F194 Phase B (cloud R13 P1 #2): retry on (threadId, userId) drift caused by
+    // concurrent reassignUserId(). The Lua's KEYS[2] (running set key) is derived
+    // from a JS-side snapshot of the record's threadId/userId; if reassignUserId
+    // migrates the record between snapshot and EVAL, KEYS[2] points at the wrong
+    // set. The Lua guards via ARGV[3]/ARGV[4] and returns -3 on drift; we re-read
+    // and retry. Loop bounded to prevent persistent reassignment from looping.
+    const MAX_RETRIES = 3;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      const before = await this.get(id);
+      if (!before) return null;
+      const setKey = InvocationKeys.runningByThread(before.threadId, before.userId);
+
+      const pairs = await this.buildUpdatePairs(key, input);
+
+      const result = (await this.redis.eval(
+        ATOMIC_UPDATE_LUA,
+        2,
+        key,
+        setKey,
+        input.expectedStatus ?? '',
+        input.status ?? '',
+        before.threadId,
+        before.userId,
+        ...pairs,
+      )) as number;
+
+      if (result === -3) continue; // drift: re-snapshot + retry
+      // -2 = not found, 0 = CAS mismatch, -1 = illegal transition, 1 = success
+      if (result !== 1) return null;
+      return this.get(id);
+    }
+    return null; // exhausted retries — caller treats as transient failure
+  }
+
+  private async buildUpdatePairs(key: string, input: UpdateInvocationInput): Promise<string[]> {
     const pairs: string[] = [];
     pairs.push('updatedAt', String(Date.now()));
     if (input.status !== undefined) pairs.push('status', input.status);
     if (input.userMessageId !== undefined) pairs.push('userMessageId', input.userMessageId ?? '');
     if (input.error !== undefined) pairs.push('error', input.error);
-    if (input.usageByCat !== undefined) pairs.push('usageByCat', JSON.stringify(input.usageByCat));
-
-    // F128: stamp usageRecordedAt on first usageByCat write (HSETNX semantics)
     if (input.usageByCat !== undefined) {
+      pairs.push('usageByCat', JSON.stringify(input.usageByCat));
+      // F128: stamp usageRecordedAt on first usageByCat write (HSETNX semantics)
       const existing = await this.redis.hget(key, 'usageRecordedAt');
       if (!existing) pairs.push('usageRecordedAt', String(Date.now()));
     }
-
-    // All updates go through ATOMIC_UPDATE_LUA for consistent guard behavior.
-    // The Lua script handles CAS check + state machine validation atomically.
-    const result = (await this.redis.eval(
-      ATOMIC_UPDATE_LUA,
-      1,
-      key,
-      input.expectedStatus ?? '',
-      input.status ?? '',
-      ...pairs,
-    )) as number;
-
-    // -2 = not found, 0 = CAS mismatch, -1 = illegal transition
-    if (result !== 1) return null;
-
-    return this.get(id);
+    return pairs;
   }
 
   async getByIdempotencyKey(threadId: string, userId: string, key: string): Promise<InvocationRecord | null> {
@@ -231,6 +323,110 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
   }
 
   /**
+   * F194 Phase B (cloud R5 P1 fix): Enumerate running InvocationRecords scoped to (threadId, userId).
+   *
+   * Index-backed (砚砚 R6 P1 push back): reads `invoc:running:{threadId}:{userId}` Set instead of
+   * SCAN-ing all `invoc:*` hashes (hot read path; InvocationRecord is persistent so cardinality
+   * is unbounded over time). The Set is maintained by `update`/`reassignUserId` at status
+   * transitions; defensive HGETALL filter masks race-window stale members and best-effort SREM
+   * cleans them up in-line.
+   */
+  async listRunningByThread(threadId: string, userId: string): Promise<InvocationRecord[]> {
+    await this.ensureRunningIndexBackfilled();
+    const setKey = InvocationKeys.runningByThread(threadId, userId);
+    const ids = await this.redis.smembers(setKey);
+    if (ids.length === 0) return [];
+
+    const pipeline = this.redis.pipeline();
+    for (const id of ids) pipeline.hgetall(InvocationKeys.detail(id));
+    const results = await pipeline.exec();
+
+    const out: InvocationRecord[] = [];
+    const staleIds: string[] = [];
+    for (let i = 0; i < ids.length; i++) {
+      const [err, data] = results?.[i] ?? [null, null];
+      if (err || !data || typeof data !== 'object') continue;
+      const d = data as Record<string, string>;
+      if (!d.id || d.status !== 'running' || d.threadId !== threadId || d.userId !== userId) {
+        staleIds.push(ids[i]!);
+        continue;
+      }
+      out.push(this.hydrateRecord(d));
+    }
+    if (staleIds.length > 0) {
+      this.redis.srem(setKey, ...staleIds).catch(() => {}); // fire-and-forget cleanup
+    }
+    return out;
+  }
+
+  /**
+   * F194 Phase B (cloud R13 P1): one-time per-process backfill of the running index.
+   *
+   * `update()` maintains `invoc:running:{tid}:{uid}` Sets atomically inside ATOMIC_UPDATE_LUA,
+   * but records that existed in `running` BEFORE this build deployed are absent from those Sets.
+   * Without backfill, listRunningByThread (now SMEMBERS-only) returns [] for orphaned records,
+   * which makes /messages drop live drafts and /queue show no active slot.
+   *
+   * This method scans all invoc:* hashes once per process, SADDs each `running` record into
+   * its (threadId, userId) Set, then flips a flag so subsequent reads are pure SMEMBERS.
+   * SADDs are idempotent — concurrent multi-process startup at worst does duplicate work.
+   *
+   * On scan error: clears the in-flight promise so the next call retries; the original error
+   * propagates so the caller can decide whether to fail-open. Read-path correctness depends
+   * on backfill completing at least once per process.
+   */
+  private async ensureRunningIndexBackfilled(): Promise<void> {
+    if (this.runningIndexBackfilled) return;
+    if (!this.runningIndexBackfillPromise) {
+      this.runningIndexBackfillPromise = this.scanAndPopulateRunningIndex();
+    }
+    try {
+      await this.runningIndexBackfillPromise;
+      this.runningIndexBackfilled = true;
+    } finally {
+      this.runningIndexBackfillPromise = null;
+    }
+  }
+
+  private async scanAndPopulateRunningIndex(): Promise<void> {
+    // Cloud R16 P2: `invoc:running:{tid}:{uid}` set keys share the `invoc:*` prefix used
+    // by record hashes. SCAN MATCH returns BOTH; HGETALL on a set returns WRONGTYPE
+    // (caught by our defensive filter), but the round-trips still cost. Pre-filter the
+    // scan results to exclude running-set keys before pipelining HGETALL.
+    const matchPattern = `${this.keyPrefix}${InvocationKeys.detail('*')}`;
+    const runningSetPrefix = 'invoc:running:';
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', matchPattern, 'COUNT', 100);
+      cursor = nextCursor;
+      if (keys.length === 0) continue;
+
+      // Filter out running-index set keys (invoc:running:{tid}:{uid}) — they match the
+      // SCAN pattern but are sets, not record hashes. HGETALL on a set wastes a round-trip
+      // and returns WRONGTYPE.
+      const recordKeys = keys.filter((key) => !this.stripPrefix(key).startsWith(runningSetPrefix));
+      if (recordKeys.length === 0) continue;
+
+      const hgetalls = this.redis.pipeline();
+      for (const key of recordKeys) hgetalls.hgetall(this.stripPrefix(key));
+      const results = await hgetalls.exec();
+
+      const sadds = this.redis.pipeline();
+      let count = 0;
+      for (const entry of results ?? []) {
+        const [err, data] = entry ?? [null, null];
+        if (err || !data || typeof data !== 'object') continue;
+        const d = data as Record<string, string>;
+        if (d.id && d.status === 'running' && d.threadId && d.userId) {
+          sadds.sadd(InvocationKeys.runningByThread(d.threadId, d.userId), d.id);
+          count++;
+        }
+      }
+      if (count > 0) await sadds.exec();
+    } while (cursor !== '0');
+  }
+
+  /**
    * F128: Scan ALL invocation records.
    * Uses Redis SCAN (non-blocking cursor) + pipeline HGETALL for full hydration.
    */
@@ -264,12 +460,19 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     if (!record) return null;
     if (record.userId === nextUserId) return record;
 
-    const key = InvocationKeys.detail(id);
-    await this.redis.hset(key, {
-      userId: nextUserId,
-      updatedAt: String(Date.now()),
-    });
+    // F194 Phase B (cloud R14 P1): atomically migrate ownership.
+    // Old code did HSET userId → SREM oldSet → SADD newSet as 3 separate awaits;
+    // a crash between SREM and SADD could leave a running record in NEITHER set,
+    // invisible to listRunningByThread for either old or new owner.
+    // Fix: fold HSET + SREM + SADD into one Lua eval. Status is read INSIDE Lua
+    // (post-HSET) — if a concurrent update() drove status to terminal, the Lua
+    // skips Set migration (terminal records belong in no running set).
+    const recordKey = InvocationKeys.detail(id);
+    const oldSetKey = InvocationKeys.runningByThread(record.threadId, record.userId);
+    const newSetKey = InvocationKeys.runningByThread(record.threadId, nextUserId);
+    await this.redis.eval(REASSIGN_USERID_LUA, 3, recordKey, oldSetKey, newSetKey, nextUserId, String(Date.now()), id);
 
+    // Idempotency key migration: separate from Set migration (not on liveness hot path)
     const oldIdempKey = InvocationKeys.idempotency(record.threadId, record.userId, record.idempotencyKey);
     const newIdempKey = InvocationKeys.idempotency(record.threadId, nextUserId, record.idempotencyKey);
     const claimedId = await this.redis.get(oldIdempKey);

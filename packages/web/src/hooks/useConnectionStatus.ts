@@ -25,10 +25,38 @@ interface ConnectionProbeState {
 const POLL_INTERVAL_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 2_500;
 const FAILURE_THRESHOLD = 2;
+const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+export function isLoopbackApiUrl(apiUrl: string): boolean {
+  try {
+    const hostname = new URL(apiUrl).hostname.toLowerCase();
+    return LOOPBACK_HOSTNAMES.has(hostname);
+  } catch {
+    return false;
+  }
+}
+
+export function shouldForceBrowserOffline(browserOnline: boolean, apiUrl: string): boolean {
+  return !browserOnline && !isLoopbackApiUrl(apiUrl);
+}
+
+export function deriveSocketLevel(
+  browserOnline: boolean,
+  socketConnected: boolean | null | undefined,
+  apiUrl: string,
+): ConnectionLevel {
+  if (shouldForceBrowserOffline(browserOnline, apiUrl)) return 'offline';
+  if (socketConnected == null) return 'online';
+  return socketConnected ? 'online' : 'degraded';
+}
 
 function getInitialBrowserOnline(): boolean {
-  if (typeof window === 'undefined' || typeof window.navigator?.onLine !== 'boolean') return true;
-  return window.navigator.onLine;
+  if (typeof navigator === 'undefined') return true;
+  return navigator.onLine;
+}
+
+function getInitialConnectionLevel(): ConnectionLevel {
+  return shouldForceBrowserOffline(getInitialBrowserOnline(), API_URL) ? 'offline' : 'online';
 }
 
 async function probePublicEndpoint(path: string): Promise<ConnectionLevel> {
@@ -76,12 +104,13 @@ function mergeUpstreamSignal(ready: ConnectionLevel, cats: ConnectionLevel): Con
 export function useConnectionStatus(socketConnected?: boolean | null): ConnectionProbeState {
   const probesEnabled = process.env.NODE_ENV !== 'test';
   const [browserOnline, setBrowserOnline] = useState<boolean>(getInitialBrowserOnline);
-  const [api, setApi] = useState<ConnectionLevel>(browserOnline ? 'online' : 'offline');
-  const [upstream, setUpstream] = useState<ConnectionLevel>(browserOnline ? 'online' : 'offline');
+  const [api, setApi] = useState<ConnectionLevel>(getInitialConnectionLevel);
+  const [upstream, setUpstream] = useState<ConnectionLevel>(getInitialConnectionLevel);
   const [checkedAt, setCheckedAt] = useState<number | null>(null);
   const mountedRef = useRef(true);
   const apiFailureCountRef = useRef(0);
   const upstreamFailureCountRef = useRef(0);
+  const browserOfflineForcesDown = shouldForceBrowserOffline(browserOnline, API_URL);
 
   useEffect(() => {
     return () => {
@@ -109,7 +138,8 @@ export function useConnectionStatus(socketConnected?: boolean | null): Connectio
   );
 
   const runProbe = useCallback(async () => {
-    if (!browserOnline || !probesEnabled) return;
+    if (browserOfflineForcesDown) return;
+    if (!probesEnabled) return;
     const [apiLevel, readyLevel, catsLevel] = await Promise.all([
       probePublicEndpoint('/api/health'),
       probePublicEndpoint('/api/ready'),
@@ -120,10 +150,10 @@ export function useConnectionStatus(socketConnected?: boolean | null): Connectio
     applyWithFailureThreshold(apiLevel, apiFailureCountRef, setApi);
     applyWithFailureThreshold(mergeUpstreamSignal(readyLevel, catsLevel), upstreamFailureCountRef, setUpstream);
     setCheckedAt(Date.now());
-  }, [applyWithFailureThreshold, browserOnline, probesEnabled]);
+  }, [applyWithFailureThreshold, browserOfflineForcesDown, probesEnabled]);
 
   useEffect(() => {
-    if (!browserOnline) {
+    if (browserOfflineForcesDown) {
       apiFailureCountRef.current = 0;
       upstreamFailureCountRef.current = 0;
       setApi('offline');
@@ -146,7 +176,7 @@ export function useConnectionStatus(socketConnected?: boolean | null): Connectio
       void runProbe();
     }, POLL_INTERVAL_MS);
     return () => clearInterval(timer);
-  }, [browserOnline, runProbe, probesEnabled]);
+  }, [browserOfflineForcesDown, runProbe, probesEnabled]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -166,15 +196,9 @@ export function useConnectionStatus(socketConnected?: boolean | null): Connectio
     };
   }, []);
 
-  const socket: ConnectionLevel = !browserOnline
-    ? 'offline'
-    : socketConnected == null
-      ? 'online'
-      : socketConnected
-        ? 'online'
-        : 'degraded';
+  const socket = deriveSocketLevel(browserOnline, socketConnected, API_URL);
 
-  const isReadonly = !browserOnline || (api === 'offline' && socket === 'offline');
+  const isReadonly = browserOfflineForcesDown ? true : api === 'offline' && socket === 'offline';
 
   return {
     api,

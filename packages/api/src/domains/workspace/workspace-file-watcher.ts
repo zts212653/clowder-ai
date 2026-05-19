@@ -9,6 +9,7 @@ import { getWorktreeRoot, resolveWorkspacePath } from './workspace-security.js';
 const log = createModuleLogger('file-watcher');
 const DEBOUNCE_MS = 300;
 const POLL_FALLBACK_MS = 150;
+const WATCHDOG_POLL_MS = 1000;
 
 interface WatchEntry {
   stop: () => void;
@@ -25,18 +26,19 @@ function sha256(content: string): string {
 
 function startFileMonitor(parentDir: string, onFsEvent: () => void, onPoll: () => void): () => void {
   let poller: ReturnType<typeof setInterval> | null = null;
-  const startPolling = () => {
+  const startPolling = (intervalMs: number) => {
     if (poller) return;
-    poller = setInterval(onPoll, POLL_FALLBACK_MS);
+    poller = setInterval(onPoll, intervalMs);
     poller.unref?.();
   };
 
   try {
     const watcher = watch(parentDir, { persistent: false }, onFsEvent);
+    // fs.watch can silently miss atomic-save events under load; a low-frequency sha poll keeps the watcher live.
+    startPolling(WATCHDOG_POLL_MS);
     watcher.on('error', (err) => {
       log.warn({ parentDir, err }, 'fs.watch failed, falling back to polling');
       watcher.close();
-      startPolling();
     });
     return () => {
       watcher.close();
@@ -44,7 +46,7 @@ function startFileMonitor(parentDir: string, onFsEvent: () => void, onPoll: () =
     };
   } catch (err) {
     log.warn({ parentDir, err }, 'fs.watch unavailable, falling back to polling');
-    startPolling();
+    startPolling(POLL_FALLBACK_MS);
     return () => {
       if (poller) clearInterval(poller);
     };

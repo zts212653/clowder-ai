@@ -29,7 +29,7 @@ import type {
   SkillHealthSummary,
 } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { parse as parseYaml } from 'yaml';
 import { appendAuditEntry } from '../config/capabilities/capability-audit.js';
 import {
@@ -37,18 +37,19 @@ import {
   type DiscoveryPaths,
   deduplicateDiscoveredMcpServers,
   discoverExternalMcpServers,
-  ensureCatCafeMainServer,
   generateCliConfigs,
-  migrateLegacyCatCafeCapability,
-  migrateResolverBackedCapabilities,
+  healCatCafeMcpTopology,
   readCapabilitiesConfig,
-  readResolvedMcpState,
-  realignManagedCatCafeServerPaths,
   resolveServersForCat,
   toCapabilityEntry,
   withCapabilityLock,
   writeCapabilitiesConfig,
 } from '../config/capabilities/capability-orchestrator.js';
+import { sanitizeCapabilityForResponse } from '../config/capabilities/capability-redaction.js';
+import {
+  requireCapabilityWriteOwner,
+  resolveCapabilityWriteSessionUserId,
+} from '../config/capabilities/capability-write-guards.js';
 import { isManagedSkill, readSkillsState } from '../config/governance/skills-state.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
@@ -116,6 +117,36 @@ function getProjectRoot(): string {
   return PROJECT_ROOT;
 }
 
+function canReadSensitiveMcpConfig(request: FastifyRequest): boolean {
+  const sessionUserId = resolveCapabilityWriteSessionUserId(request);
+  return !!sessionUserId && !requireCapabilityWriteOwner(sessionUserId);
+}
+
+function buildBoardMcpServer(
+  cap: CapabilityEntry,
+  options?: { includeLaunchFields?: boolean },
+): CapabilityBoardItem['mcpServer'] | undefined {
+  const sanitized = sanitizeCapabilityForResponse(cap);
+  const server = sanitized?.mcpServer;
+  if (!server) return undefined;
+
+  const boardServer: CapabilityBoardItem['mcpServer'] = {
+    ...(server.transport && { transport: server.transport }),
+    ...(server.resolver && { resolver: server.resolver }),
+  };
+  if (options?.includeLaunchFields) {
+    if (server.command) boardServer.command = server.command;
+    if (Array.isArray(server.args)) boardServer.args = [...server.args];
+    if (server.url) boardServer.url = server.url;
+  }
+  if (server.env) boardServer.env = { ...server.env };
+  if (server.headers) boardServer.headers = { ...server.headers };
+
+  const envKeys = Object.keys(cap.mcpServer?.env ?? {});
+  if (envKeys.length > 0) boardServer.envKeys = envKeys;
+  return boardServer;
+}
+
 /**
  * Resolve Cat Cafe skills source from module location (stable), not selected project path.
  * This avoids false "未挂载" when projectPath points to another repo (e.g. cat-cafe-runtime).
@@ -131,117 +162,6 @@ function resolveCatCafeSkillsSourceDir(): string {
 }
 
 const CAT_CAFE_SKILLS_SRC = resolveCatCafeSkillsSourceDir();
-
-const SECRET_FLAG_EXACT = new Set([
-  '-s',
-  '--secret',
-  '--token',
-  '--key',
-  '--password',
-  '--api-key',
-  '--apikey',
-  '--auth',
-]);
-const SECRET_FLAG_CONTAINS = /secret|token|password|auth|credential|\bkey\b|\bheader\b/i;
-const SECRET_VALUE_PATTERN = /^(sk-|ghp_|gho_|ghu_|xoxb-|xoxp-)|Bearer\s|^Authorization:/i;
-const ENV_LIKE_SECRET = /^[A-Z][A-Z0-9_]*(SECRET|TOKEN|PASSWORD|KEY|AUTH|CREDENTIAL)[A-Z0-9_]*=.+/;
-const NESTED_SECRET_KEY = /secret|token|password|auth|credential|key/i;
-
-function isSecretFlag(flag: string): boolean {
-  const lower = flag.toLowerCase();
-  if (SECRET_FLAG_EXACT.has(lower)) return true;
-  if (lower.startsWith('--') && SECRET_FLAG_CONTAINS.test(lower)) return true;
-  return false;
-}
-
-export function sanitizeArgsForDisplay(args: string[]): string[] {
-  const result: string[] = [];
-  let redactNext = false;
-  for (const arg of args) {
-    if (redactNext) {
-      result.push('••••••');
-      redactNext = false;
-      continue;
-    }
-    const eqIdx = arg.indexOf('=');
-    if (eqIdx > 0) {
-      const flagPart = arg.slice(0, eqIdx);
-      const valuePart = arg.slice(eqIdx + 1);
-      if (isSecretFlag(flagPart) || isSecretFlag(`--${flagPart}`)) {
-        result.push(`${arg.slice(0, eqIdx + 1)}••••••`);
-        continue;
-      }
-      if (ENV_LIKE_SECRET.test(arg) || ENV_LIKE_SECRET.test(valuePart)) {
-        const nestedEq = valuePart.indexOf('=');
-        const redactFrom = nestedEq > 0 ? eqIdx + 1 + nestedEq + 1 : eqIdx + 1;
-        result.push(`${arg.slice(0, redactFrom)}••••••`);
-        continue;
-      }
-      if (SECRET_VALUE_PATTERN.test(valuePart)) {
-        result.push(`${arg.slice(0, eqIdx + 1)}••••••`);
-        continue;
-      }
-      const nestedEq = valuePart.indexOf('=');
-      if (nestedEq > 0) {
-        const nestedKey = valuePart.slice(0, nestedEq);
-        const nestedVal = valuePart.slice(nestedEq + 1);
-        if (NESTED_SECRET_KEY.test(nestedKey) || SECRET_VALUE_PATTERN.test(nestedVal)) {
-          result.push(`${arg.slice(0, eqIdx + 1 + nestedEq + 1)}••••••`);
-          continue;
-        }
-      }
-    }
-    if (eqIdx < 0 && isSecretFlag(arg)) {
-      result.push(arg);
-      redactNext = true;
-      continue;
-    }
-    if (SECRET_VALUE_PATTERN.test(arg)) {
-      result.push('••••••');
-      continue;
-    }
-    result.push(arg);
-  }
-  return result;
-}
-
-export function sanitizeUrlForDisplay(url: string): string {
-  try {
-    const parsed = new URL(url);
-    const hadUser = !!parsed.username;
-    const hadPass = !!parsed.password;
-    parsed.username = '';
-    parsed.password = '';
-    for (const [key, val] of [...parsed.searchParams.entries()]) {
-      if (/token|key|secret|auth|password|sig/i.test(key) || SECRET_VALUE_PATTERN.test(val)) {
-        parsed.searchParams.set(key, '••••••');
-      }
-    }
-    if (parsed.hash) {
-      parsed.hash = parsed.hash.replace(/(?<=[#&])([^=&#]+)=([^&#]*)/g, (_m, k, v) => {
-        if (/token|key|secret|auth|password|access_token|sig/i.test(k) || SECRET_VALUE_PATTERN.test(v)) {
-          return `${k}=••••••`;
-        }
-        return `${k}=${v}`;
-      });
-    }
-    let result = parsed.toString();
-    if (hadUser || hadPass) {
-      const cred = hadUser && hadPass ? '••••••:••••••@' : '••••••@';
-      result = result.replace('://', `://${cred}`);
-    }
-    return result;
-  } catch {
-    if (
-      SECRET_VALUE_PATTERN.test(url) ||
-      /:\/\/[^@/]*@/.test(url) ||
-      /[?&#](token|key|secret|auth|password|access_token|sig)=/i.test(url)
-    ) {
-      return '••••••';
-    }
-    return url;
-  }
-}
 
 /**
  * Discovery reads project-local CLI configs for providers that are project scoped.
@@ -524,6 +444,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     // Multi-project: accept ?projectPath=... to manage capabilities for any project
     const query = request.query as { projectPath?: string; probe?: string | boolean };
     const probeEnabled = query.probe === true || query.probe === 'true' || query.probe === '1';
+    const includeMcpLaunchFields = canReadSensitiveMcpConfig(request);
     let projectRoot = getProjectRoot();
     if (query.projectPath) {
       const validated = await validateProjectPath(query.projectPath);
@@ -546,15 +467,10 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         catCafeRepoRoot,
       });
     } else {
-      const migrated = migrateLegacyCatCafeCapability(config, { catCafeRepoRoot });
-      const resolverMigrated = migrateResolverBackedCapabilities(migrated.config);
-      const mainServerMigrated = ensureCatCafeMainServer(resolverMigrated.config, { catCafeRepoRoot });
-      const pathRealigned = realignManagedCatCafeServerPaths(mainServerMigrated.config, { catCafeRepoRoot });
-      if (migrated.migrated || resolverMigrated.migrated || mainServerMigrated.migrated || pathRealigned.migrated) {
-        config = pathRealigned.config;
+      const healed = healCatCafeMcpTopology(config, { catCafeRepoRoot });
+      config = healed.config;
+      if (healed.migrated) {
         await writeCapabilitiesConfig(projectRoot, config);
-      } else {
-        config = pathRealigned.config;
       }
     }
 
@@ -620,24 +536,16 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     }
 
     let configDirty = false;
-    const removedSet = new Set(config.removedExternalSkills ?? []);
     // Add newly discovered skills
     for (const skillName of allSkillNames) {
-      const isCatCafe =
-        isManagedSkill(skillsState, skillName) ||
-        (catCafeOwnSkills !== null && catCafeOwnSkills.includes(skillName)) ||
-        (!skillsState && projectSkillNames.has(skillName));
-      if (removedSet.has(skillName)) {
-        if (isCatCafe) {
-          removedSet.delete(skillName);
-          configDirty = true;
-        } else {
-          continue;
-        }
-      }
       const exists = config.capabilities.some((c) => c.type === 'skill' && c.id === skillName);
       if (!exists) {
         // ADR-025: merge skills-state.json with catCafeOwnSkills to handle stale state.
+        // A skill is cat-cafe if it's in the managed set OR found in cat-cafe-skills/.
+        const isCatCafe =
+          isManagedSkill(skillsState, skillName) ||
+          (catCafeOwnSkills !== null && catCafeOwnSkills.includes(skillName)) ||
+          (!skillsState && projectSkillNames.has(skillName));
         const source = isCatCafe ? ('cat-cafe' as const) : ('external' as const);
         config.capabilities.push({
           id: skillName,
@@ -673,9 +581,6 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         configDirty = true;
       }
     }
-    // Sync removedExternalSkills back (may have been cleaned above)
-    config.removedExternalSkills = removedSet.size > 0 ? [...removedSet] : undefined;
-
     // Prune stale skills no longer on filesystem.
     // Guard: only prune when ALL provider scans succeeded (no null returns).
     if (allScansOk) {
@@ -701,7 +606,15 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     const discoveredServers = deduplicateDiscoveredMcpServers([...projectLevelServers, ...userLevelServers]);
     // Skip legacy Cat Cafe names — a stale 'cat-cafe' entry in user config should
     // not be re-added alongside the split 'cat-cafe-*' built-in entries.
-    const CAT_CAFE_BUILTIN_NAMES = new Set(['cat-cafe', 'cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals']);
+    // F193 Phase C: include 'cat-cafe-limb' so discovery doesn't re-add it
+    // either (cloud round 5 P1).
+    const CAT_CAFE_BUILTIN_NAMES = new Set([
+      'cat-cafe',
+      'cat-cafe-collab',
+      'cat-cafe-memory',
+      'cat-cafe-signals',
+      'cat-cafe-limb',
+    ]);
     for (const server of discoveredServers) {
       if (CAT_CAFE_BUILTIN_NAMES.has(server.name)) continue;
       const exists = config.capabilities.some((c) => c.type === 'mcp' && c.id === server.name);
@@ -755,7 +668,6 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     // 5. Build board items from capabilities.json
     const catIds = catRegistry.getAllIds().map((id) => id as string);
     const items: CapabilityBoardItem[] = [];
-    const resolvedMcpState = await readResolvedMcpState(projectRoot);
 
     // MCP capabilities
     for (const cap of config.capabilities) {
@@ -772,26 +684,13 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         source: cap.source,
         enabled: cap.enabled,
         cats,
+        mcpServer: buildBoardMcpServer(cap, { includeLaunchFields: includeMcpLaunchFields }),
         layer: 'L1',
         ...(cap.ecosystem && { ecosystem: cap.ecosystem }),
         ...(cap.lockVersion && { lockVersion: cap.lockVersion }),
       };
       const mcpDesc = describeMcpCapability(cap);
       if (mcpDesc) mcpItem.description = mcpDesc;
-      if (cap.mcpServer) {
-        const { env, headers, ...safe } = cap.mcpServer;
-        const resolved = resolvedMcpState[cap.id];
-        mcpItem.mcpServer = {
-          ...safe,
-          args: sanitizeArgsForDisplay(safe.args ?? []),
-          ...(safe.url ? { url: sanitizeUrlForDisplay(safe.url) } : {}),
-          envKeys: env ? Object.keys(env) : [],
-          headerKeys: headers ? Object.keys(headers) : [],
-          ...(resolved?.status === 'resolved' && resolved.command
-            ? { resolvedCommand: resolved.command, resolvedArgs: sanitizeArgsForDisplay(resolved.args ?? []) }
-            : {}),
-        };
-      }
       items.push(mcpItem);
     }
 
@@ -928,10 +827,15 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
 
   // ── PATCH /api/capabilities ──
   app.patch('/api/capabilities', async (request, reply) => {
-    const userId = resolveUserId(request);
+    const userId = resolveCapabilityWriteSessionUserId(request);
     if (!userId) {
       reply.status(401);
-      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
+      return { error: 'Identity required (session cookie)' };
+    }
+    const ownerError = requireCapabilityWriteOwner(userId);
+    if (ownerError) {
+      reply.status(ownerError.status);
+      return { error: ownerError.error };
     }
 
     const body = request.body as CapabilityPatchRequest | undefined;
@@ -957,18 +861,29 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     }
 
     return withCapabilityLock(projectRoot, async () => {
-      const config = await readCapabilitiesConfig(projectRoot);
-      if (!config) {
+      const rawConfig = await readCapabilitiesConfig(projectRoot);
+      if (!rawConfig) {
         reply.status(404);
         return { error: 'capabilities.json not found. Run GET first to bootstrap.' };
       }
+
+      // F193 Phase C (cloud round 8 P2 #4): heal BEFORE locating + mutating
+      // the toggle target. Otherwise toggling legacy `cat-cafe` in a pre-
+      // Phase-C config would mutate an entry that the subsequent heal removes,
+      // and the audit/response would report a capability not present in the
+      // written finalConfig. Healing first ensures the toggle operates on
+      // the canonical post-Phase-C state.
+      const catCafeRepoRoot = await resolveMainRepoPath();
+      const config = healCatCafeMcpTopology(rawConfig, { catCafeRepoRoot }).config;
 
       const capIndex = config.capabilities.findIndex(
         (c) => c.id === body.capabilityId && c.type === body.capabilityType,
       );
       if (capIndex === -1) {
         reply.status(404);
-        return { error: `Capability "${body.capabilityId}" (type=${body.capabilityType}) not found` };
+        return {
+          error: `Capability "${body.capabilityId}" (type=${body.capabilityType}) not found in canonical config (may have been migrated by F193 Phase C — try the corresponding split server id)`,
+        };
       }
 
       const cap = config.capabilities[capIndex]!;
@@ -1002,7 +917,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         after: cap,
       });
 
-      return { ok: true, capability: cap };
+      return { ok: true, capability: sanitizeCapabilityForResponse(cap) };
     });
   });
 

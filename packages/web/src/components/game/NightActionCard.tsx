@@ -66,7 +66,7 @@ export function NightActionCard({
                 alt={seat.displayName}
                 className="w-7 h-7 rounded-full object-cover"
               />
-              <span className="text-[9px] text-ww-muted font-semibold truncate max-w-[52px]">
+              <span className="text-[10px] text-ww-muted font-semibold truncate max-w-[52px]">
                 {seat.seatId} {seat.displayName}
               </span>
             </button>

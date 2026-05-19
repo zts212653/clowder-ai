@@ -2,7 +2,6 @@
 
 import type { BacklogItem, CatId } from '@cat-cafe/shared';
 import Link from 'next/link';
-import { getThreadHref } from '@/components/ThreadSidebar/thread-navigation';
 import { extractFeatureId } from './FeatureBirdEyePanel';
 
 interface ThreadSituationSummary {
@@ -36,20 +35,20 @@ export function ThreadSituationPanel({
   threadsByFeatureId = {},
 }: ThreadSituationPanelProps) {
   return (
-    <section className="min-h-0 p-3" data-testid="mc-thread-situation">
+    <section className="min-h-0 rounded-2xl border border-[#E7DAC7] bg-[#FFFDF8] p-3" data-testid="mc-thread-situation">
       <div className="mb-2">
-        <h2 className="text-sm font-semibold text-cafe">线程态势</h2>
-        <p className="text-[11px] text-cafe-secondary">Dispatched 项的执行面状态一览</p>
+        <h2 className="text-sm font-semibold text-[#2C2118]">线程态势</h2>
+        <p className="text-xs text-[#7B6956]">Dispatched 项的执行面状态一览</p>
       </div>
 
       {dispatchedItems.length === 0 && (
-        <p className="rounded-lg bg-[var(--console-field-bg)] px-3 py-2 text-[11px] text-cafe-muted">
+        <p className="rounded-lg border border-dashed border-[#DDCCB5] px-2 py-2 text-xs text-[#8B7864]">
           暂无执行中的 backlog 项
         </p>
       )}
 
       {dispatchedItems.length > 0 && loading && (
-        <p className="rounded-lg bg-[var(--console-field-bg)] px-3 py-2 text-[11px] text-cafe-muted">
+        <p className="rounded-lg border border-dashed border-[#DDCCB5] px-2 py-2 text-xs text-[#8B7864]">
           加载线程态势中...
         </p>
       )}
@@ -65,11 +64,11 @@ export function ThreadSituationPanel({
             return (
               <article
                 key={item.id}
-                className="rounded-xl border border-dashed border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2.5 py-1.5"
+                className="rounded-xl border border-dashed border-[#DDCCB5] bg-[#FEFCF7] px-2.5 py-1.5"
                 data-testid={`mc-thread-situation-item-${item.id}`}
               >
-                <p className="text-[11px] text-cafe-muted">
-                  <span className="font-medium text-cafe">{item.title}</span>
+                <p className="text-xs text-[#8B7864]">
+                  <span className="font-medium text-[#4B3A2A]">{item.title}</span>
                   {' — '}暂无关联 thread
                 </p>
               </article>
@@ -83,18 +82,15 @@ export function ThreadSituationPanel({
           return (
             <article
               key={item.id}
-              className="rounded-xl bg-[var(--console-field-bg)] px-2.5 py-2"
+              className="rounded-xl border border-[#EADFCF] bg-[#FFF9F0] px-2.5 py-2"
               data-testid={`mc-thread-situation-item-${item.id}`}
             >
-              <p className="text-xs font-semibold text-cafe">{item.title}</p>
-              {matchType === 'title' && <p className="text-[10px] text-cafe-muted">通过标题匹配</p>}
+              <p className="text-xs font-semibold text-[#4B3A2A]">{item.title}</p>
+              {matchType === 'title' && <p className="text-[10px] text-[#9A866F]">通过标题匹配</p>}
               {displayThreads.map((t) => (
-                <div
-                  key={t.id}
-                  className="mt-1 border-t border-[var(--console-border-soft)] pt-1 first:mt-0 first:border-t-0 first:pt-0"
-                >
-                  <p className="text-[11px] text-cafe-secondary">Thread：{t.title || t.id}</p>
-                  <p className="text-[11px] text-cafe-secondary">
+                <div key={t.id} className="mt-1 border-t border-[#F0E8DA] pt-1 first:mt-0 first:border-t-0 first:pt-0">
+                  <p className="text-xs text-[#6E5A46]">Thread：{t.title || t.id}</p>
+                  <p className="text-xs text-[#6E5A46]">
                     最近活跃：
                     <span
                       title={new Date(t.lastActiveAt).toLocaleString('zh-CN', {
@@ -108,12 +104,12 @@ export function ThreadSituationPanel({
                       {formatLastActive(t.lastActiveAt)}
                     </span>
                   </p>
-                  <p className="text-[11px] text-cafe-secondary">
+                  <p className="text-xs text-[#6E5A46]">
                     参与猫：{t.participants.length > 0 ? t.participants.join(', ') : '暂无'}
                   </p>
                   <Link
-                    href={getThreadHref(t.id)}
-                    className="mt-1 inline-flex text-[11px] font-medium text-conn-sky-text underline-offset-2 hover:underline"
+                    href={`/thread/${t.id}`}
+                    className="mt-1 inline-flex text-xs font-medium text-[#245EA8] underline-offset-2 hover:underline"
                     data-testid={`mc-thread-situation-link-${item.id}-${t.id}`}
                   >
                     打开 thread

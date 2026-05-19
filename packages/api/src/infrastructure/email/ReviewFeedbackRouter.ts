@@ -18,6 +18,7 @@ export interface PrFeedbackComment {
   readonly author: string;
   readonly body: string;
   readonly createdAt: string;
+  readonly commitId?: string;
   readonly commentType: 'inline' | 'conversation';
   readonly filePath?: string;
   readonly line?: number;
@@ -29,6 +30,7 @@ export interface PrReviewDecision {
   readonly state: 'APPROVED' | 'CHANGES_REQUESTED' | 'DISMISSED' | 'COMMENTED';
   readonly body: string;
   readonly submittedAt: string;
+  readonly commitId?: string;
 }
 
 export interface ReviewFeedbackSignal {

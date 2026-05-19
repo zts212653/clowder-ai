@@ -134,6 +134,46 @@ describe('SystemPromptBuilder', () => {
     assert.ok(prompt.includes('cat_cafe_get_thread_context'));
   });
 
+  test('F193 AC-B1: MCP_TOOLS_SECTION lists cat_cafe_cross_post_message with routing hint', async () => {
+    const build = await getBuilder();
+    const prompt = build({
+      catId: 'opus',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: true,
+    });
+    assert.ok(
+      prompt.includes('cat_cafe_cross_post_message'),
+      'cross_post_message must appear in MCP_TOOLS_SECTION (F193 AC-B1)',
+    );
+    // Hint must mention targetCats OR line-start @ as routing creds (F193 AC-A4)
+    assert.ok(
+      prompt.match(/cross_post_message[^\n]*(?:targetCats|行首\s*@)/),
+      'cross_post_message description must mention routing creds (targetCats or line-start @)',
+    );
+    // F193 AC-B1: minimal cognitive path (gpt52 close gate P2 fix)
+    assert.ok(
+      prompt.match(/list_threads.*cross_post_message.*get_thread_context/),
+      'cross_post_message description must include minimal cognitive path: list_threads → cross_post_message → get_thread_context',
+    );
+  });
+
+  test('F193 AC-B1: post_message description signals KD-1 principal-conditioned threadId', async () => {
+    const build = await getBuilder();
+    const prompt = build({
+      catId: 'opus',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: true,
+    });
+    // post_message description must hint that threadId is agent-key-only
+    // (KD-1 边界 — invocation-token caller MUST omit threadId per F193)
+    assert.ok(
+      prompt.match(/post_message[^\n]*(?:agent-key|KD-1|本\s*thread)/),
+      'post_message description must hint at KD-1 boundary (agent-key threadId / 本 thread context)',
+    );
+  });
+
   test('omits MCP tools when mcpAvailable is false', async () => {
     const build = await getBuilder();
     const prompt = build({
@@ -183,7 +223,7 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: true,
       promptTags: ['critique'],
     });
-    assert.ok(prompt.length < 5700, `Full runtime prompt is ${prompt.length} chars, expected < 5700`);
+    assert.ok(prompt.length < 5800, `Full runtime prompt is ${prompt.length} chars, expected < 5800`);
   });
 
   test('returns empty string for unknown catId', async () => {
@@ -306,6 +346,96 @@ describe('SystemPromptBuilder', () => {
   test('buildStaticIdentity is deterministic', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     assert.equal(buildStaticIdentity('opus'), buildStaticIdentity('opus'));
+  });
+
+  // --- F203 Phase C Task 2: buildStaticIdentityPackOnly ---
+  // After L0 moves to native system role (--system-prompt-file / -c), the
+  // user-message systemPrompt must carry ONLY F129 pack blocks (per-invocation
+  // dynamic, external-project-specific) — never the non-pack identity/家规
+  // (now compression-immune in the native system prompt). This is the precise
+  // de-dup the CVO asked for ("接通之后再删重复").
+
+  const PACK_FIXTURE = {
+    packName: 'test-pack',
+    masksBlock: 'PACK_MASKS_MARKER_§',
+    workflowsBlock: 'PACK_WORKFLOWS_MARKER_§',
+    guardrailBlock: 'PACK_GUARDRAIL_MARKER_§',
+    defaultsBlock: 'PACK_DEFAULTS_MARKER_§',
+    worldDriverSummary: 'PACK_WORLD_MARKER_§',
+    warnings: [],
+  };
+
+  test('buildStaticIdentityPackOnly returns empty for unknown cat', async () => {
+    const { buildStaticIdentityPackOnly } = await import(
+      '../dist/domains/cats/services/context/SystemPromptBuilder.js'
+    );
+    assert.equal(buildStaticIdentityPackOnly('unknown-cat', { packBlocks: PACK_FIXTURE }), '');
+  });
+
+  test('buildStaticIdentityPackOnly returns empty when no pack blocks', async () => {
+    const { buildStaticIdentityPackOnly } = await import(
+      '../dist/domains/cats/services/context/SystemPromptBuilder.js'
+    );
+    assert.equal(buildStaticIdentityPackOnly('opus'), '');
+    assert.equal(buildStaticIdentityPackOnly('opus', { packBlocks: null }), '');
+  });
+
+  test('buildStaticIdentityPackOnly contains all pack blocks, NO non-pack content', async () => {
+    const { buildStaticIdentity, buildStaticIdentityPackOnly } = await import(
+      '../dist/domains/cats/services/context/SystemPromptBuilder.js'
+    );
+    const full = buildStaticIdentity('opus', { packBlocks: PACK_FIXTURE, mcpAvailable: true });
+    const packOnly = buildStaticIdentityPackOnly('opus', { packBlocks: PACK_FIXTURE, mcpAvailable: true });
+
+    // sanity: the full identity DOES carry non-pack + pack
+    assert.ok(full.includes('布偶猫') && full.includes('## 协作') && full.includes('PACK_MASKS_MARKER_§'));
+
+    // pack-only: all 5 pack blocks present
+    for (const b of [
+      'PACK_MASKS_MARKER_§',
+      'PACK_WORKFLOWS_MARKER_§',
+      'PACK_GUARDRAIL_MARKER_§',
+      'PACK_DEFAULTS_MARKER_§',
+      'PACK_WORLD_MARKER_§',
+    ]) {
+      assert.ok(packOnly.includes(b), `pack-only must include ${b}`);
+    }
+    // pack-only: ZERO non-pack anchors (identity / A2A / roster / governance / MCP)
+    assert.ok(!packOnly.includes('布偶猫'), 'pack-only must NOT include identity display name');
+    assert.ok(!packOnly.includes('## 协作'), 'pack-only must NOT include A2A collaboration section');
+    assert.ok(!packOnly.includes('用自己的身份签名'), 'pack-only must NOT include governance digest');
+    assert.ok(!packOnly.includes('cat_cafe_search_evidence'), 'pack-only must NOT include MCP section');
+    assert.ok(!packOnly.includes('缅因猫'), 'pack-only must NOT include teammate roster');
+  });
+
+  test('buildStaticIdentityPackOnly orders blocks masks→workflows→guardrail→defaults→world', async () => {
+    const { buildStaticIdentityPackOnly } = await import(
+      '../dist/domains/cats/services/context/SystemPromptBuilder.js'
+    );
+    const p = buildStaticIdentityPackOnly('opus', { packBlocks: PACK_FIXTURE });
+    const order = [
+      'PACK_MASKS_MARKER_§',
+      'PACK_WORKFLOWS_MARKER_§',
+      'PACK_GUARDRAIL_MARKER_§',
+      'PACK_DEFAULTS_MARKER_§',
+      'PACK_WORLD_MARKER_§',
+    ].map((m) => p.indexOf(m));
+    assert.deepEqual(
+      order,
+      [...order].sort((a, b) => a - b),
+      'pack blocks must appear in fixed order',
+    );
+  });
+
+  test('buildStaticIdentityPackOnly skips null blocks (partial pack)', async () => {
+    const { buildStaticIdentityPackOnly } = await import(
+      '../dist/domains/cats/services/context/SystemPromptBuilder.js'
+    );
+    const partial = { ...PACK_FIXTURE, masksBlock: null, defaultsBlock: null, worldDriverSummary: null };
+    const p = buildStaticIdentityPackOnly('opus', { packBlocks: partial });
+    assert.ok(p.includes('PACK_WORKFLOWS_MARKER_§') && p.includes('PACK_GUARDRAIL_MARKER_§'));
+    assert.ok(!p.includes('PACK_MASKS_MARKER_§') && !p.includes('PACK_WORLD_MARKER_§'));
+    assert.ok(!p.includes('布偶猫'), 'still no non-pack');
   });
 
   test('buildStaticIdentity disambiguates duplicate display names in runtime multi-variant config', async () => {
@@ -482,7 +612,7 @@ describe('SystemPromptBuilder', () => {
         mcpAvailable: true,
         promptTags: ['critique'],
       });
-      assert.ok(prompt.length < 5700, `Full runtime prompt is ${prompt.length} chars, expected < 5700`);
+      assert.ok(prompt.length < 5800, `Full runtime prompt is ${prompt.length} chars, expected < 5800`);
     } finally {
       catRegistry.reset();
       for (const [id, config] of Object.entries(originalConfigs)) {
@@ -504,6 +634,45 @@ describe('SystemPromptBuilder', () => {
     assert.ok(ctx.includes('你的队友'), 'Should list teammates');
     assert.ok(ctx.includes('缅因猫'), 'Should mention codex by display name');
     assert.ok(ctx.includes('1/2'), 'Should show chain position');
+  });
+
+  test('F193 AC-B2: buildInvocationContext renders crossThreadReplyHint when present', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const ctx = buildInvocationContext({
+      catId: 'opus',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: true,
+      crossThreadReplyHint: {
+        sourceThreadId: 'thread_source_full_id_12345',
+        senderCatId: 'codex',
+      },
+    });
+    // Full sourceThreadId (NOT truncated to 8 chars)
+    assert.ok(
+      ctx.includes('thread_source_full_id_12345'),
+      'reply hint must include FULL source thread id (not truncated)',
+    );
+    // Sender cat handle
+    assert.ok(ctx.includes('codex'), 'reply hint must include sender catId');
+    // Tool name guidance
+    assert.ok(ctx.includes('cross_post_message'), 'reply hint must direct user to cross_post_message tool');
+  });
+
+  test('F193 AC-B2 boundary: buildInvocationContext omits reply hint when not provided', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const ctx = buildInvocationContext({
+      catId: 'opus',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: true,
+    });
+    // No reply hint section when crossThreadReplyHint absent (e.g. agent-key path,
+    // same-thread post, no trigger message — see KD-1 boundary).
+    assert.ok(
+      !ctx.match(/cross_post_message\([^)]*threadId/),
+      'no reply hint section when crossThreadReplyHint absent',
+    );
   });
 
   test('buildInvocationContext omits teammate listing when empty', async () => {
@@ -747,6 +916,34 @@ describe('SystemPromptBuilder', () => {
     assert.match(ctx, /2\..*外部条件|hold_ball/, 'option 2 = external wait via hold_ball');
     // 3. only co-creator (three hard conditions)
     assert.match(ctx, /3\..*铲屎官|@co-creator|@co-creator/, 'option 3 = co-creator reserved for hard conditions');
+  });
+
+  test('F167-L AC-L2: trailing anchor option 2 distinguishes polling (2a) vs event-driven (2b) modes', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const ctx = buildInvocationContext({
+      catId: 'codex',
+      mode: 'independent',
+      teammates: ['opus'],
+      mcpAvailable: false,
+      a2aEnabled: true,
+    });
+    assert.match(ctx, /2a.*轮询|2a.*poll/i, 'option 2a = polling mode for no-callback scenarios');
+    assert.match(ctx, /2b.*事件驱动|2b.*event/i, 'option 2b = event-driven mode when callback covers');
+    assert.match(ctx, /KD-27/, 'must reference KD-27 decision');
+    // P1 regression guard: option 2 top-level must say "等外部条件" not "调用 hold_ball"
+    assert.match(
+      ctx,
+      /2\.\s*等外部条件/m,
+      'option 2 top-level starts with "等外部条件" (regression: old format had "调用 hold_ball")',
+    );
+    assert.match(ctx, /2a.*hold_ball|2a.*cat_cafe_hold_ball/i, 'only 2a mentions calling hold_ball');
+    assert.match(ctx, /2b.*不调用|2b.*不续约|2b.*禁止.*hold_ball/i, '2b explicitly forbids hold_ball');
+    // R3 regression: closing line must not equate "选项 2" with "(hold_ball)"
+    assert.doesNotMatch(
+      ctx,
+      /选项\s*2\s*（hold_ball）|选项\s*2\s*\(hold_ball\)/i,
+      'closing line must not equate option 2 with hold_ball',
+    );
   });
 
   test('F167-D2: trailing anchor names the three hard conditions for @co-creator', async () => {
@@ -1013,7 +1210,7 @@ describe('SystemPromptBuilder', () => {
         { catId: 'opus', lastMessageAt: Date.now() - 1000, messageCount: 3 },
       ],
     });
-    assert.ok(prompt.length < 5700, `Full runtime prompt is ${prompt.length} chars, expected < 5700`);
+    assert.ok(prompt.length < 5800, `Full runtime prompt is ${prompt.length} chars, expected < 5800`);
   });
 
   // --- F042: pinned identity constant + direct-message reply target ---
@@ -1425,7 +1622,7 @@ describe('SystemPromptBuilder', () => {
         featureId: 'F073',
       },
     });
-    assert.ok(prompt.length < 5700, `Prompt with SOP hint is ${prompt.length} chars, expected < 5700`);
+    assert.ok(prompt.length < 5900, `Prompt with SOP hint is ${prompt.length} chars, expected < 5900`);
   });
 
   // --- F092: Voice Mode prompt injection ---
@@ -1472,7 +1669,7 @@ describe('SystemPromptBuilder', () => {
       },
       voiceMode: true,
     });
-    assert.ok(prompt.length < 5700, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 5700`);
+    assert.ok(prompt.length < 5900, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 5900`);
   });
 
   test('buildInvocationContext injects bootcamp mode when bootcampState provided', async () => {

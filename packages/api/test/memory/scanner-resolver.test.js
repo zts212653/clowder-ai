@@ -2,7 +2,7 @@
 // AC-B3: scanner level configurable in manifest (auto/0/1/2/3)
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, it } from 'node:test';
@@ -95,6 +95,23 @@ describe('scanner-resolver', () => {
       writeFileSync(join(dir, `f${String(i).padStart(3, '0')}.md`), content);
     }
     assert.equal(detectScannerLevel(dir), 1, '10/20 = 0.5 should return Level 1, not 10/21');
+  });
+
+  it('detectScannerLevel returns 1 when docs/ has ≥3 markdown files', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'detect-docs-'));
+    mkdirSync(join(dir, 'docs'));
+    writeFileSync(join(dir, 'docs', 'a.md'), '# A');
+    writeFileSync(join(dir, 'docs', 'b.md'), '# B');
+    writeFileSync(join(dir, 'docs', 'c.md'), '# C');
+    assert.equal(detectScannerLevel(dir), 1);
+  });
+
+  it('detectScannerLevel returns 0 when docs/ has <3 markdown files', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'detect-docs-'));
+    mkdirSync(join(dir, 'docs'));
+    writeFileSync(join(dir, 'docs', 'a.md'), '# A');
+    writeFileSync(join(dir, 'docs', 'b.md'), '# B');
+    assert.equal(detectScannerLevel(dir), 0);
   });
 
   it('passes exclude patterns through to scanner', () => {

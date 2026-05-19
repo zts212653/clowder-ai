@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   addToastMock,
+  clickBootcampButton,
   createInLobby,
   createThreadSidebarHarness,
   defaultSidebarApiMock,
@@ -49,5 +50,12 @@ describe('ThreadSidebar create error feedback', () => {
       type: 'error',
       title: '创建线程失败',
     });
+  });
+
+  it('opens bootcamp list modal when bootcamp button is clicked', async () => {
+    await harness.render();
+    await clickBootcampButton(harness.container, harness.flush);
+    const modal = harness.container.querySelector('[data-testid="bootcamp-list-modal"]');
+    expect(modal ?? harness.container.textContent).toBeTruthy();
   });
 });

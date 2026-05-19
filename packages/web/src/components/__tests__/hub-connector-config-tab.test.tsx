@@ -16,6 +16,9 @@ vi.mock('../FeishuQrPanel', () => ({
       'Feishu QR Mock',
     ),
 }));
+vi.mock('../HubPermissionsTab', () => ({
+  default: () => React.createElement('div', { 'data-testid': 'permissions-mock' }, 'Permissions Mock'),
+}));
 
 import { apiFetch } from '@/utils/api-client';
 
@@ -39,6 +42,35 @@ async function flushEffects() {
   await act(async () => {
     await Promise.resolve();
   });
+}
+
+async function setInputValue(input: HTMLInputElement, value: string) {
+  const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+  await act(async () => {
+    nativeInputValueSetter?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+function feishuStatus(
+  fields?: Array<{ envName: string; label: string; sensitive: boolean; currentValue: string | null }>,
+) {
+  return {
+    platforms: [
+      {
+        id: 'feishu',
+        name: '飞书',
+        nameEn: 'Feishu / Lark',
+        configured: true,
+        docsUrl: 'https://open.feishu.cn',
+        steps: [{ text: 'step-1' }, { text: 'step-2' }],
+        fields: fields ?? [
+          { envName: 'FEISHU_APP_ID', label: 'App ID', sensitive: false, currentValue: 'cli_existing' },
+          { envName: 'FEISHU_APP_SECRET', label: 'App Secret', sensitive: true, currentValue: '••••••••' },
+        ],
+      },
+    ],
+  };
 }
 
 describe('F134 follow-up — HubConnectorConfigTab', () => {
@@ -185,5 +217,93 @@ describe('F134 follow-up — HubConnectorConfigTab', () => {
     await flushEffects();
 
     expect(container.querySelector('[data-guide-id="connector.weixin.qr-panel"]')).toBeTruthy();
+  });
+
+  it('saves only touched fields and does not submit masked secret placeholders', async () => {
+    mockApiFetch.mockResolvedValueOnce(jsonResponse(feishuStatus())).mockResolvedValueOnce(jsonResponse({ ok: true }));
+
+    await act(async () => {
+      root.render(React.createElement(HubConnectorConfigTab));
+    });
+    await flushEffects();
+
+    const expand = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('飞书'));
+    await act(async () => {
+      expand!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const appId = container.querySelector('[data-testid="field-FEISHU_APP_ID"]') as HTMLInputElement;
+    await setInputValue(appId, 'cli_new');
+
+    const save = container.querySelector('[data-testid="save-feishu"]') as HTMLButtonElement;
+    await act(async () => {
+      save.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(mockApiFetch).toHaveBeenCalledTimes(3);
+    const saveCall = mockApiFetch.mock.calls[1];
+    expect(saveCall[0]).toBe('/api/config/secrets');
+    expect(JSON.parse((saveCall[1] as RequestInit).body as string)).toEqual({
+      updates: [{ name: 'FEISHU_APP_ID', value: 'cli_new' }],
+    });
+  });
+
+  it('blocks user-entered redacted placeholders before calling the secrets API', async () => {
+    mockApiFetch.mockResolvedValueOnce(jsonResponse(feishuStatus()));
+
+    await act(async () => {
+      root.render(React.createElement(HubConnectorConfigTab));
+    });
+    await flushEffects();
+
+    const expand = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('飞书'));
+    await act(async () => {
+      expand!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const secret = container.querySelector('[data-testid="field-FEISHU_APP_SECRET"]') as HTMLInputElement;
+    await setInputValue(secret, '••••••');
+
+    const save = container.querySelector('[data-testid="save-feishu"]') as HTMLButtonElement;
+    await act(async () => {
+      save.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(mockApiFetch).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[data-testid="save-result"]')?.textContent).toContain('脱敏占位符');
+  });
+
+  it('renders connector write auth errors from the secrets API', async () => {
+    mockApiFetch
+      .mockResolvedValueOnce(jsonResponse(feishuStatus()))
+      .mockResolvedValueOnce(jsonResponse({ error: 'Connector credential writes require DEFAULT_OWNER_USER_ID' }, 403));
+
+    await act(async () => {
+      root.render(React.createElement(HubConnectorConfigTab));
+    });
+    await flushEffects();
+
+    const expand = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('飞书'));
+    await act(async () => {
+      expand!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const appId = container.querySelector('[data-testid="field-FEISHU_APP_ID"]') as HTMLInputElement;
+    await setInputValue(appId, 'cli_new');
+
+    const save = container.querySelector('[data-testid="save-feishu"]') as HTMLButtonElement;
+    await act(async () => {
+      save.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(container.querySelector('[data-testid="save-result"]')?.textContent).toContain(
+      'Connector credential writes require DEFAULT_OWNER_USER_ID',
+    );
   });
 });

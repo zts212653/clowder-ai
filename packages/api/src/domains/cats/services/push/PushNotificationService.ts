@@ -171,6 +171,10 @@ export function initPushNotificationService(opts: PushNotificationServiceOptions
   return pushServiceInstance;
 }
 
+export function resetPushNotificationService(): void {
+  pushServiceInstance = null;
+}
+
 export function getPushNotificationService(): PushNotificationService | null {
   return pushServiceInstance;
 }

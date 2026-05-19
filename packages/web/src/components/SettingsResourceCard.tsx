@@ -8,7 +8,7 @@ export const settingsResourceRowClass = 'settings-resource-row flex items-center
 export const settingsResourceActionGroupClass = 'settings-resource-actions flex shrink-0 items-center gap-2.5';
 
 export const settingsResourceAvatarClass =
-  'settings-resource-avatar flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[var(--console-active-bg)] text-xs font-bold text-cafe-interactive';
+  'settings-resource-avatar flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--console-active-bg)] text-xs font-bold text-cafe-interactive';
 
 function joinClasses(...classes: Array<string | false | null | undefined>): string {
   return classes.filter(Boolean).join(' ');
@@ -28,7 +28,7 @@ export function SettingsResourceIconButton({
       type="button"
       {...props}
       className={joinClasses(
-        'settings-resource-action flex h-[30px] w-[30px] items-center justify-center rounded-[9px] bg-[var(--console-hover-bg)] transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-50',
+        'settings-resource-action flex h-[30px] w-[30px] items-center justify-center rounded-lg bg-[var(--console-hover-bg)] transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-50',
         tone === 'danger' ? 'text-[var(--cafe-accent)]' : 'text-cafe-muted hover:text-cafe-secondary',
         className,
       )}

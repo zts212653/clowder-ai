@@ -9,6 +9,7 @@ created: 2026-03-26
 # F140: GitHub PR Signals — 冲突检测 + Review Feedback 全来源感知
 
 > **Status**: done | **Owner**: Ragdoll | **Priority**: P1 | **Phase A-D Completed**: 2026-03-27 | **Reopened**: 2026-04-24（Phase E — 通知合流：severity 抽取 + 下线 email 路径） | **Completed**: 2026-04-25
+> **Post-completion hardening**: 2026-05-07 — Review Feedback backlog guard（merged/closed 自收敛 + stale commit 过滤 + 同 PR/target-cat queue coalesce）
 
 ## 三层架构定位
 
@@ -151,6 +152,15 @@ team lead补充：
 - `github-feedback-filter.ts`：精简为只有 Rule A（self-authored skip），删除 `authoritativeReviewLogins` option
 - 从 `infrastructure/email/index.ts` 移除对应导出
 - `src/index.ts` 移除 watcher 启动逻辑和 Rule B 配置传递
+
+### Post-completion hardening（Review Feedback backlog guard）✅ completed 2026-05-07
+
+> **根因**：ReviewFeedbackTaskSpec 只依赖 pr_tracking task 的 `done` 状态，不独立查询 PR 生命周期；GitHub review 决策没有带 `commit_id` 进入本地模型，无法过滤旧 head review。长任务活跃时，ConnectorInvokeTrigger 只按单条 messageId 去重，同一 PR 的 review-feedback 会逐条进入自动处理队列。
+
+**修复**：
+- Review feedback gate 独立查询 PR metadata：`merged/closed` 直接把 pr_tracking task 标 `done`，不再 fetch/投递 feedback
+- `PrFeedbackComment` / `PrReviewDecision` 带 `commitId`，当 GitHub item 的 `commitId !== current headSha` 时视为 stale，推进 cursor 但不通知
+- Connector trigger 增加 policy `coalesceKey`，F140 review-feedback 以 `subjectKey + target cat` coalesce；同一 PR/同一 owner 在 active thread 下只保留一个 queued invocation，同时保留 urgent 升级和 in-flight follow-up 重新排队语义
 
 ## Acceptance Criteria
 

@@ -1,9 +1,8 @@
 'use client';
 
-import { usePathname } from 'next/navigation';
-import { Suspense, useEffect, useState } from 'react';
+import { usePathname, useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
 import { ActivityBar } from './ActivityBar';
-import { ThreadSidebar } from './ThreadSidebar';
 
 const CHROMELESS_ROUTES = ['/story-export', '/pixel-brawl', '/showcase'];
 
@@ -11,30 +10,27 @@ interface AppShellProps {
   children: React.ReactNode;
 }
 
-const SIDEBAR_HIDDEN_ROUTES = ['/settings', '/signals', '/memory', '/mission'];
-
 export function AppShell({ children }: AppShellProps) {
+  return (
+    <Suspense fallback={<>{children}</>}>
+      <AppShellContent>{children}</AppShellContent>
+    </Suspense>
+  );
+}
+
+function AppShellContent({ children }: AppShellProps) {
   const pathname = usePathname() ?? '/';
-  const [isExport, setIsExport] = useState(false);
-  useEffect(() => {
-    setIsExport(new URLSearchParams(window.location.search).get('export') === 'true');
-  }, [pathname]);
+  const searchParams = useSearchParams();
+  const isExport = searchParams.get('export') === 'true';
+
   if (isExport || CHROMELESS_ROUTES.some((r) => pathname.startsWith(r))) {
     return <>{children}</>;
   }
-  const hideThreadSidebar = SIDEBAR_HIDDEN_ROUTES.some((r) => pathname.startsWith(r));
   return (
     <div className="console-shell flex h-screen h-dvh overflow-hidden">
       <Suspense fallback={<div className="w-12 flex-shrink-0" aria-hidden="true" />}>
         <ActivityBar />
       </Suspense>
-      {!hideThreadSidebar && (
-        <Suspense fallback={<div className="hidden md:block w-[260px] flex-shrink-0" aria-hidden="true" />}>
-          <div className="hidden md:block w-[260px] flex-shrink-0">
-            <ThreadSidebar className="w-full h-full" />
-          </div>
-        </Suspense>
-      )}
       <div className="flex-1 min-w-0 overflow-y-auto">{children}</div>
     </div>
   );

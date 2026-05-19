@@ -151,15 +151,15 @@ export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
   }, [fetchProfiles, invalidateCacheForProfile, selectedProfileId, selectedModel]);
 
   if (loading) {
-    return <p className="py-8 text-center text-sm text-cafe-muted">加载认证配置...</p>;
+    return <p className="py-8 text-center text-sm text-gray-400">加载认证配置...</p>;
   }
 
   const canProceed = selectedProfileId && selectedModel && testResult?.ok;
 
   return (
     <div>
-      <h4 className="mb-1 text-sm font-semibold text-cafe-secondary">认证和模型配置</h4>
-      <p className="mb-3 text-xs text-cafe-muted">选择账号，配置模型，验证连通性</p>
+      <h4 className="mb-1 text-sm font-semibold text-gray-700">认证和模型配置</h4>
+      <p className="mb-3 text-xs text-gray-500">选择账号，配置模型，验证连通性</p>
 
       <div className="scrollbar-cafe mb-3 max-h-80 space-y-1.5 overflow-y-auto">
         {available.length === 0 && (
@@ -212,9 +212,7 @@ export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
         disabled={!canProceed}
         onClick={() => onComplete({ accountRef: selectedProfileId, model: selectedModel })}
         className={`w-full rounded-lg py-2.5 text-sm font-semibold transition ${
-          canProceed
-            ? 'bg-conn-amber-text text-[var(--cafe-surface)] hover:opacity-90'
-            : 'cursor-not-allowed bg-cafe-surface-elevated text-cafe-muted'
+          canProceed ? 'bg-amber-500 text-white hover:bg-amber-600' : 'cursor-not-allowed bg-gray-200 text-gray-400'
         }`}
       >
         {canProceed ? '创建猫猫' : '请先完成连接测试'}

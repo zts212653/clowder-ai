@@ -6,7 +6,7 @@
  * raw-concat them without injecting synthetic \n\n separators.
  *
  * Covers: display text integrity, @ handle routing, path/digit/English
- * chunk boundaries, short suffix false-positive safety.
+ * chunk boundaries.
  */
 
 import assert from 'node:assert/strict';

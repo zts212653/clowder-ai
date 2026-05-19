@@ -35,6 +35,7 @@ function createMockMessageStore() {
       rows.push(stored);
       return stored;
     },
+    getById: (id) => rows.find((m) => m.id === id) ?? null,
     getRecent: (limit = 50) => sorted().slice(-limit),
     getMentionsFor: () => [],
     getBefore: () => [],

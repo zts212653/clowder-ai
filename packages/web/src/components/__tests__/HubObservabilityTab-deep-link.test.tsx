@@ -1,8 +1,8 @@
 /**
  * F174 D2b-3 — cloud Codex P1 #1403 regression: HubObservabilityTab must
  * react to `initialSubTab` prop changes after mount, otherwise a second
- * `openHub('observability', 'callback-auth')` while the Hub is already
- * open on the Observability tab silently fails to switch subTab — the
+ * deep-link to observability/callback-auth while the tab is already
+ * open on the Observability subtab silently fails to switch subTab — the
  * 详情 button on D2b-1 would feel broken on the second click.
  */
 

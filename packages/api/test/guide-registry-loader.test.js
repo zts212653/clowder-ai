@@ -42,19 +42,19 @@ describe('F155 guide registry loader target validation', async () => {
     assert.equal(editStep.advance, 'confirm');
   });
 
-  test('loaded add-account-auth flow opens hub then targets the accounts tab', () => {
+  test('loaded add-account-auth flow expands settings before targeting the accounts tab', () => {
     const flow = loadGuideFlow('add-account-auth');
-    const openHubIndex = flow.steps.findIndex((step) => step.id === 'open-hub');
+    const expandSettingsIndex = flow.steps.findIndex((step) => step.id === 'expand-settings');
     const accountsIndex = flow.steps.findIndex((step) => step.id === 'go-to-accounts');
-    const openHubStep = flow.steps[openHubIndex];
+    const expandSettingsStep = flow.steps[expandSettingsIndex];
     const accountsStep = flow.steps[accountsIndex];
 
-    assert.ok(openHubIndex >= 0, 'open-hub step should exist');
-    assert.ok(accountsIndex > openHubIndex, 'go-to-accounts should happen after open-hub');
-    assert.ok(openHubStep, 'open-hub step should exist');
+    assert.ok(expandSettingsIndex >= 0, 'expand-settings step should exist');
+    assert.ok(accountsIndex > expandSettingsIndex, 'go-to-accounts should happen after expand-settings');
+    assert.ok(expandSettingsStep, 'expand-settings step should exist');
     assert.ok(accountsStep, 'go-to-accounts step should exist');
-    assert.equal(openHubStep.target, 'hub.trigger');
-    assert.equal(openHubStep.advance, 'click');
+    assert.equal(expandSettingsStep.target, 'settings.group');
+    assert.equal(expandSettingsStep.advance, 'click');
     assert.equal(accountsStep.target, 'settings.accounts');
   });
 

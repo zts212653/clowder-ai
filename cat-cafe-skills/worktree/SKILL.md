@@ -152,7 +152,7 @@ pnpm check:worktree-port-offset   # 验证全部 7 个大赛 OFFSET 派生 + 端
 
 多 worktree 并发默认**全禁用** sidecar（Preview Gateway / Anthropic Proxy / Whisper / TTS / LLM Postprocess / Embedding）。OFFSET 模式下 preflight 会**主动 export 0** 这些 sidecar 标志（不依赖用户 .env），即便用户配置了 `EMBED_MODE=on` 或 profile=dev 想拉起 proxy 也会被覆盖——无需用户手动禁用。启用 sidecar 但又不 offset 化 → 端口冲突。
 
-详细设计见 [*(internal reference removed)*](../../feature-specs/2026-04-30-worktree-port-offset.md)。
+详细设计见 *(internal reference removed)*。
 
 ## 合入后清理
 

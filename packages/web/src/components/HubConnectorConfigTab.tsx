@@ -1,65 +1,79 @@
 'use client';
 
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { useGuideStore } from '@/stores/guideStore';
 import { apiFetch } from '@/utils/api-client';
 import { FeishuQrPanel } from './FeishuQrPanel';
-import { DEFAULT_VISUAL, ExternalLinkIcon, LockIcon, PLATFORM_VISUALS, StepBadge, WifiIcon } from './HubConfigIcons';
-import type { HubPermissionsTabHandle } from './HubPermissionsTab';
-import { SettingsPageHeader } from './settings/SettingsPageHeader';
-import type { WeComBotSetupPanelHandle } from './WeComBotSetupPanel';
+import {
+  connStatePill,
+  DEFAULT_VISUAL,
+  ExternalLinkIcon,
+  formatHeartbeat,
+  LockIcon,
+  PERMISSION_CONNECTORS,
+  PLATFORM_VISUALS,
+  type PlatformStatus,
+  StepBadge,
+  WifiIcon,
+} from './HubConfigIcons';
 import { WeComBotSetupPanel } from './WeComBotSetupPanel';
 import { WeixinQrPanel } from './WeixinQrPanel';
 
 const HubPermissionsTab = lazy(() => import('./HubPermissionsTab'));
 
-const PERMISSION_CONNECTORS: Record<string, string> = {
-  feishu: '飞书',
-  'wecom-bot': '企业微信',
-  dingtalk: '钉钉',
-};
+const REDACTED_PLACEHOLDER = '••••••';
 
-interface PlatformFieldStatus {
-  envName: string;
-  label: string;
-  sensitive: boolean;
-  currentValue: string | null;
-}
-
-interface PlatformStepStatus {
-  text: string;
-  mode?: string;
-}
-
-interface PlatformStatus {
-  id: string;
-  name: string;
-  nameEn: string;
-  category?: 'im' | 'plugin';
-  configured: boolean;
-  connectionState?: 'connected' | 'disconnected' | 'reconnecting' | 'unknown';
-  lastHeartbeat?: number | null;
-  fields: PlatformFieldStatus[];
-  docsUrl: string;
-  steps: PlatformStepStatus[];
-}
-
-function connStatePill(p: PlatformStatus): { label: string; className: string } {
-  if (p.connectionState === 'connected')
-    return { label: '已连接', className: 'bg-conn-emerald-bg text-conn-emerald-text' };
-  if (p.connectionState === 'reconnecting')
-    return { label: '重连中', className: 'bg-conn-amber-bg text-conn-amber-text' };
-  if (p.connectionState === 'disconnected' && p.configured)
-    return { label: '已配置', className: 'bg-conn-amber-bg text-conn-amber-text' };
-  if (p.configured) return { label: '已配置', className: 'bg-conn-amber-bg text-conn-amber-text' };
-  return { label: '未配置', className: 'bg-cafe-surface-sunken text-cafe-muted' };
-}
-
-function formatHeartbeat(ts: number): string {
-  const ago = Math.floor((Date.now() - ts) / 1000);
-  if (ago < 60) return `${ago}s ago`;
-  if (ago < 3600) return `${Math.floor(ago / 60)}m ago`;
-  return `${Math.floor(ago / 3600)}h ago`;
+function ConnectorActionBar({
+  platformId,
+  saveResult,
+  saving,
+  onSave,
+  testing,
+  onTest,
+}: {
+  platformId: string;
+  saveResult: { type: 'success' | 'error'; message: string } | null;
+  saving: boolean;
+  onSave: () => void;
+  testing: boolean;
+  onTest: () => void;
+}) {
+  return (
+    <>
+      {saveResult && (
+        <div
+          className={`rounded-2xl px-3 py-2 text-xs ${
+            saveResult.type === 'success'
+              ? 'bg-conn-emerald-bg text-conn-emerald-text border border-conn-emerald-ring'
+              : 'bg-conn-red-bg text-conn-red-text border border-conn-red-ring'
+          }`}
+          data-testid="save-result"
+        >
+          {saveResult.message}
+        </div>
+      )}
+      <div className="flex items-center justify-end gap-2">
+        <button
+          type="button"
+          className="console-button-secondary text-sm disabled:opacity-50"
+          onClick={onTest}
+          disabled={testing}
+        >
+          <WifiIcon />
+          {testing ? '测试中...' : '测试连接'}
+        </button>
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={saving}
+          className="console-button-primary text-sm disabled:opacity-50"
+          data-testid={`save-${platformId}`}
+        >
+          {saving ? '保存中...' : '保存配置'}
+        </button>
+      </div>
+    </>
+  );
 }
 
 export function HubConnectorConfigTab() {
@@ -75,8 +89,6 @@ export function HubConnectorConfigTab() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [saveResult, setSaveResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-  const permissionsRef = useRef<HubPermissionsTabHandle>(null);
-  const wecomRef = useRef<WeComBotSetupPanelHandle>(null);
 
   const fetchStatus = useCallback(async () => {
     setIsLoading(true);
@@ -114,63 +126,57 @@ export function HubConnectorConfigTab() {
   };
 
   const handleSave = async (platform: PlatformStatus) => {
-    setSaving(true);
-    setSaveResult(null);
-
-    if (platform.id === 'wecom-bot' && wecomRef.current?.hasPendingCredentials()) {
-      const ok = await wecomRef.current.validate();
-      if (!ok) {
-        setSaving(false);
-        return;
-      }
-    }
-
-    const secrets = platform.fields
+    // F136 Phase 2: all connector fields go through /api/config/secrets (hot-reload enabled)
+    const updates = platform.fields
       .filter((f) => fieldValues[f.envName] !== undefined)
       .map((f) => ({ name: f.envName, value: fieldValues[f.envName] || null }));
 
-    const rawPerms = permissionsRef.current?.getConfig();
+    if (updates.length === 0) {
+      setSaveResult({ type: 'error', message: '请填写至少一个配置项' });
+      return;
+    }
 
+    if (updates.some((update) => update.value?.includes(REDACTED_PLACEHOLDER))) {
+      setSaveResult({ type: 'error', message: '不能保存脱敏占位符，请输入新的完整凭据' });
+      return;
+    }
+
+    setSaving(true);
+    setSaveResult(null);
     try {
-      const res = await apiFetch(`/api/connector/${platform.id}/config`, {
-        method: 'PUT',
+      const res = await apiFetch('/api/config/secrets', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...(secrets.length > 0 ? { secrets } : {}),
-          ...(rawPerms ? { permissions: rawPerms } : {}),
-        }),
+        body: JSON.stringify({ updates }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         setSaveResult({ type: 'error', message: data.error ?? '保存失败' });
-      } else {
-        const data = await res.json().catch(() => ({}));
-        if (secrets.length > 0) {
-          setFieldValues({});
-          await fetchStatus();
-        }
-        if (data.permissions && permissionsRef.current) {
-          permissionsRef.current.applyConfig(data.permissions);
-        }
-        setSaveResult({ type: 'success', message: '配置已保存，连接器正在自动重连...' });
+        return;
       }
+      setSaveResult({ type: 'success', message: '配置已保存，连接器正在自动重连...' });
+      setFieldValues({});
+      await fetchStatus();
     } catch {
-      setSaveResult({ type: 'error', message: '保存网络错误' });
+      setSaveResult({ type: 'error', message: '网络错误' });
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
-  const handleTestConnection = async (platformId: string) => {
+  const handleTest = async (platform: PlatformStatus) => {
     setTesting(true);
     setSaveResult(null);
     try {
-      const res = await apiFetch(`/api/connector/${platformId}/test`, { method: 'POST' });
-      const data = await res.json();
-      setSaveResult({
-        type: data.ok ? 'success' : 'error',
-        message: data.message ?? (data.ok ? '连接正常' : (data.error ?? '测试失败')),
+      const res = await apiFetch(`/api/connector/${encodeURIComponent(platform.id)}/test`, {
+        method: 'POST',
       });
-      await fetchStatus();
+      const data = (await res.json().catch(() => ({}))) as { valid?: boolean; error?: string };
+      if (data.valid) {
+        setSaveResult({ type: 'success', message: '连接正常' });
+      } else {
+        setSaveResult({ type: 'error', message: data.error || '连接失败' });
+      }
     } catch {
       setSaveResult({ type: 'error', message: '网络错误' });
     } finally {
@@ -188,8 +194,6 @@ export function HubConnectorConfigTab() {
 
   return (
     <div className="space-y-5">
-      <SettingsPageHeader title="IM 对接" subtitle="连接状态与回调配置" />
-
       {platforms.map((platform) => {
         const isExpanded = expandedId === platform.id;
         const v = PLATFORM_VISUALS[platform.id] ?? DEFAULT_VISUAL;
@@ -215,22 +219,22 @@ export function HubConnectorConfigTab() {
               className="flex w-full items-center gap-4 px-5 py-[18px] transition-colors"
             >
               <span
-                className="flex h-11 w-11 items-center justify-center rounded-[12px] shrink-0"
+                className="flex h-11 w-11 items-center justify-center rounded-xl shrink-0"
                 style={{ backgroundColor: v.iconBg, color: v.iconColor }}
               >
                 {v.icon}
               </span>
               <span className="flex-1 text-left min-w-0 space-y-1">
-                <span className="block text-[15px] font-extrabold text-cafe">
+                <span className="block text-base font-extrabold text-cafe">
                   {platform.name}
                   {platform.nameEn !== platform.name ? ` ${platform.nameEn}` : ''}
                 </span>
                 {platform.lastHeartbeat && (
-                  <span className="block text-[11px] text-cafe-muted">{formatHeartbeat(platform.lastHeartbeat)}</span>
+                  <span className="block text-xs text-cafe-muted">{formatHeartbeat(platform.lastHeartbeat)}</span>
                 )}
               </span>
               <span
-                className={`shrink-0 rounded-[13px] px-2.5 py-1 text-xs font-semibold ${connStatePill(platform).className}`}
+                className={`shrink-0 rounded-xl px-2.5 py-1 text-xs font-semibold ${connStatePill(platform).className}`}
               >
                 {connStatePill(platform).label}
               </span>
@@ -245,7 +249,7 @@ export function HubConnectorConfigTab() {
                       <div key={idx} className="space-y-1.5">
                         <div className="flex items-center gap-1.5">
                           <StepBadge num={idx + 1} />
-                          <span className="text-[13px] font-medium text-cafe">{step.text}</span>
+                          <span className="text-sm font-medium text-cafe">{step.text}</span>
                         </div>
                         {idx === 0 && (
                           <div className="ml-[26px]">
@@ -263,7 +267,6 @@ export function HubConnectorConfigTab() {
                         {idx === guideSteps.length - 1 && (
                           <div className="ml-[26px]">
                             <WeComBotSetupPanel
-                              ref={wecomRef}
                               configured={platform.configured}
                               onConnected={() => void fetchStatus()}
                               onDisconnected={() => void fetchStatus()}
@@ -277,40 +280,18 @@ export function HubConnectorConfigTab() {
 
                 {PERMISSION_CONNECTORS[platform.id] && (
                   <Suspense fallback={<p className="text-xs text-cafe-muted">加载中...</p>}>
-                    <HubPermissionsTab ref={permissionsRef} connectorId={platform.id} />
+                    <HubPermissionsTab connectorId={platform.id} connectorLabel={PERMISSION_CONNECTORS[platform.id]} />
                   </Suspense>
                 )}
 
-                {saveResult && (
-                  <div
-                    className={`rounded-[16px] px-3 py-2 text-xs ${
-                      saveResult.type === 'success'
-                        ? 'bg-conn-emerald-bg text-conn-emerald-text border border-conn-emerald-ring'
-                        : 'bg-conn-red-bg text-conn-red-text border border-conn-red-ring'
-                    }`}
-                  >
-                    {saveResult.message}
-                  </div>
-                )}
-                <div className="flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    className="console-button-secondary text-[13px]"
-                    disabled={testing}
-                    onClick={() => handleTestConnection(platform.id)}
-                  >
-                    <WifiIcon />
-                    {testing ? '测试中...' : '测试连接'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSave(platform)}
-                    disabled={saving}
-                    className="console-button-primary text-[13px] disabled:opacity-50"
-                  >
-                    {saving ? '保存中...' : '保存配置'}
-                  </button>
-                </div>
+                <ConnectorActionBar
+                  platformId={platform.id}
+                  saveResult={saveResult}
+                  saving={saving}
+                  onSave={() => handleSave(platform)}
+                  testing={testing}
+                  onTest={() => handleTest(platform)}
+                />
               </div>
             )}
 
@@ -320,7 +301,7 @@ export function HubConnectorConfigTab() {
                   <div key={idx} className="space-y-1.5">
                     <div className="flex items-center gap-1.5">
                       <StepBadge num={idx + 1} />
-                      <span className="text-[13px] font-medium text-cafe">{step.text}</span>
+                      <span className="text-sm font-medium text-cafe">{step.text}</span>
                     </div>
                     {idx === 0 && (
                       <div className="ml-[26px]">
@@ -357,7 +338,7 @@ export function HubConnectorConfigTab() {
                       <div key={idx} className="space-y-1.5">
                         <div className="flex items-center gap-1.5">
                           <StepBadge num={idx + 1} />
-                          <span className="text-[13px] font-medium text-cafe">{step.text}</span>
+                          <span className="text-sm font-medium text-cafe">{step.text}</span>
                         </div>
                         {idx === 0 && (
                           <div className="ml-[26px] space-y-2.5">
@@ -385,7 +366,7 @@ export function HubConnectorConfigTab() {
                     <div className="space-y-2">
                       <div className="flex items-center gap-1.5">
                         <StepBadge num={guideSteps.length + 1} />
-                        <span className="text-[13px] font-medium text-cafe">填写应用凭证</span>
+                        <span className="text-sm font-medium text-cafe">填写应用凭证</span>
                       </div>
                       <div className="ml-[26px] space-y-2.5">
                         {platform.fields.map((field) => (
@@ -408,7 +389,7 @@ export function HubConnectorConfigTab() {
                                 onChange={(e) =>
                                   setFieldValues((prev) => ({ ...prev, [field.envName]: e.target.value }))
                                 }
-                                className="console-form-input py-2.5 text-[13px]"
+                                className="console-form-input py-2.5 text-sm"
                                 data-testid={`field-${field.envName}`}
                               >
                                 <option value="webhook">Webhook（需公网 URL）</option>
@@ -429,7 +410,7 @@ export function HubConnectorConfigTab() {
                                 onChange={(e) =>
                                   setFieldValues((prev) => ({ ...prev, [field.envName]: e.target.value }))
                                 }
-                                className="console-form-input py-2.5 text-[13px]"
+                                className="console-form-input py-2.5 text-sm"
                                 data-testid={`field-${field.envName}`}
                               />
                             )}
@@ -442,49 +423,25 @@ export function HubConnectorConfigTab() {
 
                 {PERMISSION_CONNECTORS[platform.id] && (
                   <Suspense fallback={<p className="text-xs text-cafe-muted">加载中...</p>}>
-                    <HubPermissionsTab ref={permissionsRef} connectorId={platform.id} />
+                    <HubPermissionsTab connectorId={platform.id} connectorLabel={PERMISSION_CONNECTORS[platform.id]} />
                   </Suspense>
                 )}
 
-                {saveResult && (
-                  <div
-                    className={`rounded-[16px] px-3 py-2 text-xs ${
-                      saveResult.type === 'success'
-                        ? 'bg-conn-emerald-bg text-conn-emerald-text border border-conn-emerald-ring'
-                        : 'bg-conn-red-bg text-conn-red-text border border-conn-red-ring'
-                    }`}
-                    data-testid="save-result"
-                  >
-                    {saveResult.message}
-                  </div>
-                )}
-                <div className="flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    className="console-button-secondary text-[13px]"
-                    disabled={testing}
-                    onClick={() => handleTestConnection(platform.id)}
-                  >
-                    <WifiIcon />
-                    {testing ? '测试中...' : '测试连接'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSave(platform)}
-                    disabled={saving}
-                    className="console-button-primary text-[13px] disabled:opacity-50"
-                    data-testid={`save-${platform.id}`}
-                  >
-                    {saving ? '保存中...' : '保存配置'}
-                  </button>
-                </div>
+                <ConnectorActionBar
+                  platformId={platform.id}
+                  saveResult={saveResult}
+                  saving={saving}
+                  onSave={() => handleSave(platform)}
+                  testing={testing}
+                  onTest={() => handleTest(platform)}
+                />
               </div>
             )}
           </div>
         );
       })}
 
-      <p className="text-xs text-cafe-muted">配置保存后需重启连接器生效。</p>
+      <p className="text-xs text-cafe-muted">配置保存后自动生效，无需重启</p>
     </div>
   );
 }

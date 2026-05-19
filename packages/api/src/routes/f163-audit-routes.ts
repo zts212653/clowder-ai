@@ -10,7 +10,8 @@ import { F163ExperimentLogger } from '../domains/memory/f163-experiment-logger.j
 import { generateHealthReport } from '../domains/memory/f163-health-report.js';
 import { queryReviewQueue } from '../domains/memory/f163-review-queue.js';
 import { computeVariantId, freezeFlags } from '../domains/memory/f163-types.js';
-import type { EvidenceItem, IKnowledgeResolver, SearchOptions } from '../domains/memory/interfaces.js';
+import { computeLibraryHealth } from '../domains/memory/f188-library-health.js';
+import type { EvidenceItem, IKnowledgeResolver, IMarkerQueue, SearchOptions } from '../domains/memory/interfaces.js';
 import { QueryReplayCompare } from '../domains/memory/QueryReplayCompare.js';
 
 function isLocalhost(ip: string): boolean {
@@ -42,6 +43,9 @@ interface AuditRoutesOptions {
     runExclusive<T>(fn: () => T | Promise<T>): Promise<T>;
   };
   knowledgeResolver?: IKnowledgeResolver;
+  markerQueue?: IMarkerQueue;
+  repoRoot?: string;
+  docsRoot?: string;
 }
 
 export const f163AuditRoutes: FastifyPluginAsync<AuditRoutesOptions> = async (app, opts) => {
@@ -145,6 +149,16 @@ export const f163AuditRoutes: FastifyPluginAsync<AuditRoutesOptions> = async (ap
 
     const db = opts.evidenceStore.getDb();
     const report = generateHealthReport(db as Parameters<typeof generateHealthReport>[0]);
+
+    if (opts.markerQueue && (opts.repoRoot || opts.docsRoot)) {
+      const markers = await opts.markerQueue.list();
+      const libraryHealth = computeLibraryHealth(db as Parameters<typeof generateHealthReport>[0], {
+        repoRoot: opts.repoRoot,
+        docsRoot: opts.docsRoot,
+        markers,
+      });
+      return { ...report, ...libraryHealth };
+    }
 
     return report;
   });

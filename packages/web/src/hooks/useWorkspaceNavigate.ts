@@ -29,12 +29,16 @@ export function handleNavigateEvent(
     setWorkspaceMode?: (mode: 'dev' | 'recall') => void;
   },
   recentOpen?: { path: string; worktreeId?: string; ts: number } | null,
+  presentationLocked?: boolean,
 ): boolean {
-  // Phase H: Switch workspace to knowledge feed mode
+  // Phase H: Switch workspace to knowledge feed mode (allowed even when locked)
   if (data.action === 'knowledge-feed') {
     actions.setWorkspaceMode?.('recall');
     return true;
   }
+
+  // F063 Presentation Lock: suppress file-oriented auto-navigation (AC-PL5)
+  if (presentationLocked) return false;
 
   // File-oriented actions: auto-switch back to dev mode so the file is visible
   if (data.action === 'open') {
@@ -86,6 +90,7 @@ export function useWorkspaceNavigate(worktreeId: string | null, threadId: string
         if (!shouldAcceptNavigate(threadId, data.threadId)) return;
         if (data.eventId && data.eventId === lastEventIdRef.current) return;
         if (data.eventId) lastEventIdRef.current = data.eventId;
+        const locked = useChatStore.getState().presentationLock != null;
         const processed = handleNavigateEvent(
           data,
           worktreeId,
@@ -96,6 +101,7 @@ export function useWorkspaceNavigate(worktreeId: string | null, threadId: string
             setWorkspaceMode,
           },
           recentOpenRef.current,
+          locked,
         );
         if (processed && data.action === 'open') {
           recentOpenRef.current = { path: data.path, worktreeId: data.worktreeId, ts: Date.now() };

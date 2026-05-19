@@ -66,6 +66,26 @@ export interface CapabilityEntry {
   probeState?: ProbeState;
 }
 
+/** Sanitized MCP server details included in the capability board payload. */
+export interface CapabilityBoardMcpServer {
+  /** Transport type (default: stdio). */
+  transport?: McpTransport;
+  /** Optional local resolver hint for managed stdio servers. */
+  resolver?: string;
+  /** Command to spawn (stdio only). Included only for capability owner sessions. */
+  command?: string;
+  /** Command arguments (stdio only). Included only for capability owner sessions. */
+  args?: string[];
+  /** Remote MCP endpoint URL (streamableHttp only). Included only for capability owner sessions. */
+  url?: string;
+  /** Redacted HTTP headers for remote transport. */
+  headers?: Record<string, string>;
+  /** Redacted environment variables. */
+  env?: Record<string, string>;
+  /** Environment variable names for read-only display without exposing values. */
+  envKeys?: string[];
+}
+
 /** Root schema for .cat-cafe/capabilities.json */
 export interface CapabilitiesConfig {
   /** Schema version */
@@ -74,8 +94,6 @@ export interface CapabilitiesConfig {
   capabilities: CapabilityEntry[];
   /** F070: Governance pack metadata for this project */
   governancePack?: GovernancePackMeta;
-  /** F190: External skills explicitly uninstalled via Hub — survives filesystem re-scan */
-  removedExternalSkills?: string[];
 }
 
 /** Capabilities board response — what the GET API returns */
@@ -98,12 +116,8 @@ export interface CapabilityBoardItem {
   tools?: McpToolInfo[];
   /** MCP connection status (only when ?probe=true) */
   connectionStatus?: 'connected' | 'disconnected' | 'unknown';
-  /** MCP server config for edit backfill (only for type: 'mcp').
-   * env/headers values are stripped for security; envKeys/headerKeys carry key names only. */
-  mcpServer?: Omit<McpServerDescriptor, 'name' | 'enabled' | 'source'> & {
-    envKeys?: string[];
-    headerKeys?: string[];
-  };
+  /** Sanitized MCP server config for settings UI (MCP only). */
+  mcpServer?: CapabilityBoardMcpServer;
   /** F146-D: Capability layer (L1=MCP, L2=Skill, L3=Extension) */
   layer?: 'L1' | 'L2' | 'L3';
   /** F146-D: Source ecosystem (from marketplace install) */

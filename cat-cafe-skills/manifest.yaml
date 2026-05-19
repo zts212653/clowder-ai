@@ -128,27 +128,6 @@ skills:
     sop_step: null
     merged_from: null
 
-  # ── 前端交付范式 ──
-  console-dev:
-    description: >
-      Console 前端交付范式：4 道门禁驱动的前端开发流程。
-      Use when: 开发/修改前端页面、组件、样式；修复 UI 不一致；新增页面或重构布局。
-      Not for: 纯后端 API 开发、纯计算逻辑重构（不触及 UI state/form/auth/navigation）、独立 Design System token 定义。
-      Output: 通过 4-gate 验证的前端代码 + 视觉自检证据。
-    triggers:
-      - "写前端"
-      - "改页面"
-      - "UI 开发"
-      - "console-dev"
-      - "前端范式"
-    not_for:
-      - "纯后端 API"
-      - "纯计算逻辑（不触及 UI state/form/auth/navigation）"
-      - "设计 token 定义"
-    output: "4-gate verified frontend code + visual evidence"
-    next: ["quality-gate"]
-    sop_step: null
-
   # ── 计划编写 ──
   writing-plans:
     description: >
@@ -308,6 +287,55 @@ skills:
     sop_step: [4, 5, 6]
     merged_from: ["merge-approval-gate", "requesting-cloud-review", "finishing-a-development-branch"]
 
+  # ── Thread 整理 ──
+  organize-threads:
+    description: >
+      猫猫辅助整理未分类 thread，分析标题和元数据，建议合适的标签。
+      Use when: 用户说"帮我整理"、"分类 thread"、点击整理按钮。
+      Not for: 创建/删除/编辑标签本身。
+      Output: 按 thread 的标签建议列表。
+    triggers:
+      - "帮我整理"
+      - "整理 thread"
+      - "organize threads"
+      - "分类建议"
+    not_for:
+      - "创建标签"
+      - "删除标签"
+    output: "Thread label suggestion list"
+    next: []
+    sop_step: null
+
+  # ── 开源项目拆解 ──
+  open-source-teardown:
+    description: >
+      明星开源项目拆解：从宣传/PPT/README 进入源码，验证真实架构、明星特性、算法含量、营销水分、可学习点和不 follow 的 tradeoff。
+      Use when: 铲屎官要求拆解热门 GitHub 项目、竞品 agent/runtime、外部 skill/tool 框架，或问“它到底有什么真本事/我们能学什么”。
+      Not for: 普通资料搜索（用 deep-research）、社区 issue/PR 运营（用 opensource-ops）、只需要架构头脑风暴（用 collaborative-thinking）。
+      Output: feature-discussions/YYYY-MM-DD-{project}-deep-dive/ 下的代码证据报告 + 对比结论 + 候选 lesson/skill。
+      GOTCHA: 不许只看 README 下判断；每个明星特性必须追到代码路径、状态突变点、反馈闭环和算法输入输出。
+    triggers:
+      - "拆解明星开源项目"
+      - "拆解开源项目"
+      - "竞品拆解"
+      - "热门 GitHub 项目"
+      - "它有什么真本事"
+      - "我们能学什么"
+      - "marketing vs reality"
+      - "算法含量"
+      - "拆解 hermes"
+      - "看看 letta 怎么做的"
+      - "codex cli 源码"
+      - "agent runtime 拆解"
+    not_for:
+      - "普通资料搜索"
+      - "社区 issue/PR 运营"
+      - "只需要架构头脑风暴"
+    output: "Code-evidence teardown report + Cat Cafe comparison + candidate lessons"
+    next: ["collaborative-thinking", "writing-skills", "deep-research"]
+    sop_step: null
+    merged_from: null
+
   # ── 自我进化 ──
   self-evolution:
     description: >
@@ -338,6 +366,39 @@ skills:
       - "一次性 bug fix"
     output: "Scope Guard Log / Evolution Proposal / Episode Card → Method/Skill → Eval"
     next: []
+    sop_step: null
+    merged_from: null
+
+  # ── 绝境反转 ──
+  vision-rescue:
+    description: >
+      绝境反转方法论：当任务似乎没有希望、反复摆动、准备放弃愿景时的五步突破框架。
+      Use when: 任务看起来无解、多次尝试失败后想放弃、输出投降修辞（"现状最优"/"没救了"/"接受现实"）、连续 3+ 轮在希望与绝望间摆动。
+      Not for: 正常 debugging（用 debugging）、常规探索/调研（用 deep-research）、CVO 已签字降级的目标、trivial 任务。
+      Output: Desperation Packet（六问证据评估）+ 新方向行动计划 / CVO 升级请求。
+    triggers:
+      - "没希望"
+      - "没救了"
+      - "无解"
+      - "死胡同"
+      - "不可能"
+      - "接受现实"
+      - "放弃"
+      - "走投无路"
+      - "都试过了"
+      - "现状最优"
+      - "不值得继续"
+      - "保守路径"
+      - "实际价值变了"
+      - "收口"
+      - "vision rescue"
+    not_for:
+      - "未出现绝境信号的常规 debugging"
+      - "常规调研"
+      - "CVO 已签字降级"
+      - "trivial 任务"
+    output: "Desperation Packet / 新方向行动计划 / CVO 升级请求"
+    next: ["deep-research", "collaborative-thinking", "self-evolution"]
     sop_step: null
     merged_from: null
 
@@ -400,6 +461,63 @@ skills:
     sop_step: null
     merged_from: ["deep-research-pipeline"]
 
+  # ── 记忆系统三入口路由（F188 Phase F）──
+  memory-navigation:
+    description: >
+      记忆系统三入口路由（search_evidence / graph_resolve / list_recent）决策树 + 噪音控制 + 加载时机。F188 Phase F (AC-F6) 配套 skill。
+      Use when: 没先验、压缩后回顾、"我记得最近讨论过 X"、search_evidence 反复 low-hit。
+      Not for: 已有精确 anchor 直接 Read；代码符号查 Grep/LSP。
+      Output: 选定入口 + 噪音控制参数 + 进入对应 MCP 工具。
+    triggers:
+      - "没先验"
+      - "压缩后"
+      - "我记得讨论过"
+      - "最近讨论"
+      - "找不到 anchor"
+      - "cold start"
+      - "扫一眼最近"
+      - "memory navigation"
+    not_for:
+      - "已有精确 anchor"
+      - "代码符号查找"
+    output: "Entry choice + noise control params + downstream tool call"
+    next: ["feat-lifecycle", "debugging", "cross-cat-handoff"]
+    sop_step: null
+    merged_from: null
+
+  memory-search-best-practices:
+    description: >
+      记忆系统多刀检索 + recall coverage 策略（8 类题型 recipe）。F200 v1.2 SW-1 配套 skill。
+      Use when: "哪些地方提过 X" / source-map / absence check / delta / coverage 全集 / 冷启动 onboard / 召回任务搜了 1 刀觉得不够。
+      Not for: 只是选入口走第一刀（用 memory-navigation）/ 已知精确 anchor 直接 Read / 代码符号查 Grep/LSP / 新功能开发。
+      Output: multi-query union 召回 + coverage matrix + "何时停下来"判据。
+      GOTCHA: 和 memory-navigation 互补不重叠 — memory-navigation 决定第一刀工具，本 skill 决定要不要补刀+几路+何时停。Ragdoll家族必加载：治"我能猜出来 / 碎片够了"病。
+    triggers:
+      - "哪些 thread"
+      - "哪些 md"
+      - "哪些地方提过"
+      - "所有"
+      - "历史上"
+      - "沉淀过"
+      - "source map"
+      - "provenance"
+      - "有没有提过"
+      - "absence check"
+      - "delta"
+      - "上次和现在"
+      - "新猫冷启动"
+      - "coverage"
+      - "全集"
+    not_for:
+      - "选入口（用 memory-navigation）"
+      - "已知精确 anchor 直接 Read"
+      - "代码符号查找"
+      - "新功能开发"
+    output: "Multi-query union recall + coverage matrix + stop criteria"
+    next: ["feat-lifecycle", "debugging", "cross-cat-handoff", "collaborative-thinking"]
+    sop_step: null
+    merged_from: null
+
   # ── 知识工程（F152 Phase 0）──
   knowledge-engineering:
     description: >
@@ -420,36 +538,6 @@ skills:
       - "已有完善 docs/ 结构"
     output: "Documentation assessment + path selection + three-layer knowledge injection + skeleton templates"
     next: []
-    sop_step: null
-    merged_from: null
-
-  # ── 开源项目拆解 ──
-  open-source-teardown:
-    description: >
-      明星开源项目拆解：从宣传/PPT/README 进入源码，验证真实架构、明星特性、算法含量、营销水分、可学习点和不 follow 的 tradeoff。
-      Use when: 铲屎官要求拆解热门 GitHub 项目、竞品 agent/runtime、外部 skill/tool 框架，或问"它到底有什么真本事/我们能学什么"。
-      Not for: 普通资料搜索（用 deep-research）、社区 issue/PR 运营（用 opensource-ops）、只需要架构头脑风暴（用 collaborative-thinking）。
-      Output: feature-discussions/YYYY-MM-DD-{project}-deep-dive/ 下的代码证据报告 + 对比结论 + 候选 lesson/skill。
-      GOTCHA: 不许只看 README 下判断；每个明星特性必须追到代码路径、状态突变点、反馈闭环和算法输入输出。
-    triggers:
-      - "拆解明星开源项目"
-      - "拆解开源项目"
-      - "竞品拆解"
-      - "热门 GitHub 项目"
-      - "它有什么真本事"
-      - "我们能学什么"
-      - "marketing vs reality"
-      - "算法含量"
-      - "拆解 hermes"
-      - "看看 letta 怎么做的"
-      - "codex cli 源码"
-      - "agent runtime 拆解"
-    not_for:
-      - "普通资料搜索"
-      - "社区 issue/PR 运营"
-      - "只需要架构头脑风暴"
-    output: "Code-evidence teardown report + Cat Cafe comparison + candidate lessons"
-    next: ["collaborative-thinking", "writing-skills", "deep-research"]
     sop_step: null
     merged_from: null
 
@@ -703,6 +791,31 @@ skills:
     merged_from: null
     feature: "F120"
 
+  # ── Console 前端交付范式 ──
+  console-dev:
+    description: >
+      Console 前端交付范式：4 道门禁驱动的前端开发流程。
+      Use when: 新增前端能力、settings section 迁移、新增页面、重构布局、或 F190/Console 级前端流程需要 Product/Design/Implementation/Verification gate。
+      Not for: 小样式点改、纯后端 API、纯计算逻辑、独立 Design System token 定义。
+      Output: 通过 Product / Design-System / Implementation / Verification gate 的前端代码与证据。
+    triggers:
+      - "新增前端能力"
+      - "settings section 迁移"
+      - "console-dev"
+      - "前端范式"
+      - "重构布局"
+      - "新增页面"
+    not_for:
+      - "小样式点改"
+      - "纯后端 API"
+      - "纯计算逻辑"
+      - "独立 Design System token 定义"
+    output: "Frontend code + product/design/implementation/verification proof"
+    next: ["browser-preview", "quality-gate"]
+    sop_step: null
+    merged_from: null
+    feature: "F190"
+
   browser-automation:
     description: >
       浏览器工作流总路由：为外部网站浏览、登录态流程、浏览器自动化、证据采集选择合适后端。
@@ -921,10 +1034,8 @@ sop_navigation:
     hard_rules:
       - "worktree 开之前必须 main 双向同步 (ahead=0 behind=0)"
       - "Redis 只用 6398，禁碰 6399"
-      - "有视觉变化的前端改动必须先过 console-dev 的设计对齐步骤"
     pitfalls:
       - "跳过 Design Gate 直接写代码"
-      - "前端组件不查 Design System 直接写样式"
       - "压缩后忘了当前在做什么"
   quality_gate:
     suggested_skill: quality-gate

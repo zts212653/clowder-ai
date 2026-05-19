@@ -81,7 +81,7 @@ export function ExportButton({ threadId }: { threadId: string }) {
       </button>
 
       {menuOpen && (
-        <div className="absolute right-0 top-full mt-1 w-52 bg-cafe-white border border-[var(--console-border-soft)] rounded-lg shadow-lg z-50 py-1">
+        <div className="absolute right-0 top-full mt-1 w-52 bg-[var(--console-card-bg)] border border-[var(--console-border-soft)] rounded-lg shadow-lg z-50 py-1">
           {EXPORT_OPTIONS.map((opt) => (
             <button
               key={opt.format}

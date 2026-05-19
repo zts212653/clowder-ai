@@ -1,6 +1,6 @@
 ---
 feature_ids: [F052]
-related_features: [F043]
+related_features: [F043, F193]
 topics: [cross-thread, identity, a2a, context, ux]
 doc_kind: feature-spec
 created: 2026-03-02

@@ -20,6 +20,19 @@ const SKIP_DIRS = new Set([
   'vendor',
   '.claude',
   '.obsidian',
+  '.worktrees',
+  '.vscode',
+  '.idea',
+  'coverage',
+  '.cache',
+  '.turbo',
+  'tmp',
+  '.tmp',
+  '.output',
+  'venv',
+  '.venv',
+  'env',
+  '.env',
 ]);
 
 const MAX_DEPTH = 10;

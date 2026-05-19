@@ -90,4 +90,58 @@ describe('HubSkillsTab', () => {
     );
     expect(badges).toHaveLength(3);
   });
+
+  it('opens a read-only SKILL.md preview from the skill name', async () => {
+    mockApiFetch.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith('/api/rules/skill/')) {
+        return Promise.resolve(
+          jsonResponse({
+            content: '# cross-cat-handoff\n\nHandoff instructions',
+            path: '/repo/cat-cafe-skills/cross-cat-handoff/SKILL.md',
+          }),
+        );
+      }
+      return Promise.resolve(
+        jsonResponse({
+          skills: [
+            {
+              name: 'cross-cat-handoff',
+              category: '协作',
+              trigger: '@handoff',
+              mounts: { claude: true, codex: true, gemini: true, kimi: true },
+            },
+          ],
+          summary: {
+            total: 1,
+            allMounted: true,
+            registrationConsistent: true,
+          },
+          staleness: null,
+          conflicts: [],
+        }),
+      );
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubSkillsTab));
+    });
+    await flushEffects();
+
+    const previewButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === 'cross-cat-handoff',
+    );
+    expect(previewButton).toBeTruthy();
+
+    await act(async () => {
+      previewButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/rules/skill/cross-cat-handoff');
+    const dialog = container.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain('协作');
+    expect(container.textContent).toContain('Handoff instructions');
+    expect(container.textContent).toContain('/repo/cat-cafe-skills/cross-cat-handoff/SKILL.md');
+  });
 });

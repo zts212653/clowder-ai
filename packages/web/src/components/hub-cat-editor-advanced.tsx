@@ -60,7 +60,7 @@ export function AdvancedRuntimeSection({
       description="contextBudget + Session 策略 + Client 特有参数。标有 (Codex) 的参数仅在选择对应 Client 时显示。"
       tone="success"
     >
-      <p className="text-xs leading-5 text-[var(--console-runtime-hint)]">
+      <p className="text-xs leading-5 text-[#6C7A6D]">
         上下文预算会随成员配置一起持久化到运行时 catalog。4 项要么全部留空，要么全部填写。
       </p>
       <div className="space-y-2">
@@ -118,7 +118,7 @@ export function AdvancedRuntimeSection({
         ) : null}
         {form.clientId !== 'antigravity' && form.clientId !== 'catagent' ? (
           <div className="space-y-1">
-            <p className="text-sm font-medium text-cafe">额外 CLI 参数</p>
+            <p className="text-sm font-medium text-[#3D2E22]">额外 CLI 参数</p>
             <TagEditor
               tags={form.cliConfigArgs}
               onChange={(nextTags) => onChange({ cliConfigArgs: nextTags })}
@@ -127,23 +127,22 @@ export function AdvancedRuntimeSection({
               emptyLabel="无额外参数"
               tone="green"
             />
-            <p className="text-[11px] leading-4 text-cafe-muted">
-              每条直接追加到 CLI 命令，与系统参数重复时以用户参数为准。`CLI Effort` 请优先用上面的结构化字段。
+            <p className="text-xs leading-4 text-[#8A776B]">
+              每条直接追加到 CLI 命令，默认参数覆盖语义由各 CLI provider 处理，系统保留参数由运行时保护。`CLI Effort`
+              请优先用上面的结构化字段。
             </p>
           </div>
         ) : null}
       </div>
 
       {cat ? (
-        <div className="space-y-3 rounded-[14px] bg-[var(--console-runtime-group-bg)] p-[14px]">
-          {loadingStrategy ? <p className="text-sm text-cafe-secondary">Session 策略加载中...</p> : null}
+        <div className="space-y-3 rounded-2xl border border-[#DCE9E0] bg-cafe-surface/80 p-4">
+          {loadingStrategy ? <p className="text-sm text-[#7F7168]">Session 策略加载中...</p> : null}
           {strategyError ? (
-            <p className="rounded-[20px] border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-sm text-conn-red-text">
-              {strategyError}
-            </p>
+            <p className="rounded-xl bg-conn-red-bg px-3 py-2 text-sm text-conn-red-text">{strategyError}</p>
           ) : null}
           {strategyForm && !sessionChainEnabled ? (
-            <div className="rounded-[10px] bg-[var(--console-field-bg)] px-4 py-3 text-xs leading-5 text-[var(--cafe-accent)]">
+            <div className="rounded-2xl border border-[#F5D2B8] bg-[#FFF4EC] px-4 py-3 text-xs leading-5 text-[#C27D52]">
               <p className="font-semibold">Session Chain 未开启</p>
               <p>
                 当前成员不会记录或续接 Session Chain，下面的 Session 策略不会生效；先开启 Session Chain 后再配置策略。
@@ -152,7 +151,7 @@ export function AdvancedRuntimeSection({
           ) : null}
           {strategyForm && sessionChainEnabled ? (
             <div className="space-y-4">
-              <div className="rounded-[10px] bg-[var(--console-runtime-field-bg)] px-4 py-3 text-xs leading-5 text-[var(--console-runtime-hint)]">
+              <div className="rounded-2xl border border-[#CFE5D5] bg-[#F5FBF6] px-4 py-3 text-xs leading-5 text-[#6C7A6D]">
                 阈值基于 context 填充率 = 当前 tokens / Max Context Tokens。拖动滑条调节百分比。
               </div>
               <div className="space-y-2">
@@ -205,20 +204,18 @@ export function AdvancedRuntimeSection({
       ) : null}
 
       {showCodexSettings ? (
-        <div className="space-y-3 rounded-[14px] bg-[var(--console-runtime-group-bg)] p-[14px]">
-          {loadingCodexSettings ? <p className="text-sm text-cafe-secondary">Codex 运行参数加载中...</p> : null}
+        <div className="space-y-3 rounded-2xl border border-[#DCE9E0] bg-cafe-surface/80 p-4">
+          {loadingCodexSettings ? <p className="text-sm text-[#7F7168]">Codex 运行参数加载中...</p> : null}
           {codexSettingsError ? (
-            <p className="rounded-[20px] border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-sm text-conn-red-text">
-              {codexSettingsError}
-            </p>
+            <p className="rounded-xl bg-conn-red-bg px-3 py-2 text-sm text-conn-red-text">{codexSettingsError}</p>
           ) : null}
           {!loadingCodexSettings && !codexSettingsEditable ? (
-            <p className="rounded-[10px] bg-[var(--console-field-bg)] px-3 py-2 text-xs leading-5 text-[var(--cafe-accent)]">
+            <p className="rounded-xl border border-[#F5D2B8] bg-[#FFF4EC] px-3 py-2 text-xs leading-5 text-[#C27D52]">
               Codex 配置基线未加载成功，以下 3 项已禁用；请刷新后重试，避免保存时误以为已生效。
             </p>
           ) : null}
-          <p className="text-center text-xs font-semibold text-cafe-muted">── Codex 专属 (仅 Client=Codex 时显示) ──</p>
-          <p className="rounded-[10px] bg-[var(--console-runtime-field-bg)] px-3 py-2 text-xs leading-5 text-[var(--console-runtime-hint)]">
+          <p className="text-center text-xs font-semibold text-[#B59A88]">── Codex 专属 (仅 Client=Codex 时显示) ──</p>
+          <p className="rounded-xl border border-[#CFE5D5] bg-[#F5FBF6] px-3 py-2 text-xs leading-5 text-[#6C7A6D]">
             成员资料与 Codex 执行参数收敛到同一个入口保存。保存后会分别写入成员 overlay 与全局运行配置。
           </p>
           <div className="space-y-2">

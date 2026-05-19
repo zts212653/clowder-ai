@@ -113,6 +113,51 @@ doc_kind: note
     );
   });
 
+  it('indexes docs/harness-feedback/ with doc_kind harness-feedback as lesson kind', async () => {
+    mkdirSync(join(docsDir, 'harness-feedback'), { recursive: true });
+    writeFileSync(
+      join(docsDir, 'harness-feedback', 'sample-friction.md'),
+      `---
+doc_kind: harness-feedback
+feedback_type: cat-user
+feature_id: F167
+thread_ids:
+  - thread_abc123
+cats: [opus]
+primary_failure_class: harness_misfit
+status: candidate
+created: 2026-05-07
+---
+
+# Sample Friction
+
+Ball drop friction sample for scanner regression test.
+`,
+    );
+
+    const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    const store = new SqliteEvidenceStore(':memory:');
+    await store.initialize();
+    const builder = new IndexBuilder(store, docsDir);
+    await builder.rebuild();
+
+    const indexed = await store.getByAnchor('doc:harness-feedback/sample-friction');
+    assert.ok(indexed, 'harness-feedback doc should be indexed');
+    assert.equal(indexed.kind, 'lesson', 'harness-feedback should map to lesson EvidenceKind');
+
+    const results = await store.search('ball drop friction harness', {
+      mode: 'lexical',
+      scope: 'docs',
+      limit: 5,
+    });
+    assert.ok(
+      results.some((r) => r.anchor === 'doc:harness-feedback/sample-friction'),
+      'harness-feedback doc should be searchable',
+    );
+  });
+
   it('does not close a fenced block when the matching fence line has a suffix', async () => {
     writeFileSync(
       join(docsDir, 'stories', 'nested-fence.md'),

@@ -42,10 +42,16 @@ describe('A2A routing message persistence (#648)', () => {
       const raw = JSON.stringify({
         systemKind: 'a2a_routing',
         stream: { invocationId: 'inv-123' },
+        a2aRouting: { fromCatId: 'codex', targetCatId: 'opus-47', invocationId: 'inv-123' },
       });
       const parsed = safeParseExtra(raw);
       assert.equal(parsed?.systemKind, 'a2a_routing');
       assert.equal(parsed?.stream?.invocationId, 'inv-123');
+      assert.deepEqual(parsed?.a2aRouting, {
+        fromCatId: 'codex',
+        targetCatId: 'opus-47',
+        invocationId: 'inv-123',
+      });
     });
 
     it('survives JSON serialize → parse cycle (simulates Redis storage)', () => {
@@ -66,7 +72,10 @@ describe('A2A routing message persistence (#648)', () => {
         mentions: [],
         timestamp: Date.now(),
         threadId: 'thread-1',
-        extra: { systemKind: 'a2a_routing' },
+        extra: {
+          systemKind: 'a2a_routing',
+          a2aRouting: { fromCatId: 'codex', targetCatId: 'opus-47', invocationId: 'inv-123' },
+        },
       });
 
       assert.ok(result.id, 'stored message should have an id');
@@ -77,7 +86,10 @@ describe('A2A routing message persistence (#648)', () => {
       assert.equal(stored.userId, 'system');
       assert.equal(stored.catId, null);
       assert.equal(stored.content, '布偶猫 → 缅因猫');
-      assert.deepEqual(stored.extra, { systemKind: 'a2a_routing' });
+      assert.deepEqual(stored.extra, {
+        systemKind: 'a2a_routing',
+        a2aRouting: { fromCatId: 'codex', targetCatId: 'opus-47', invocationId: 'inv-123' },
+      });
     });
 
     it('stored messageId can be attached to broadcast payload', () => {
@@ -135,7 +147,13 @@ function buildDeps(overrides = {}) {
         intent: { intent: 'execute' },
       })),
       routeExecution: mock.fn(async function* () {
-        yield { type: 'a2a_handoff', catId: 'opus', content: '布偶猫 → 缅因猫', timestamp: Date.now() };
+        yield {
+          type: 'a2a_handoff',
+          catId: 'codex',
+          targetCatId: 'opus-47',
+          content: '缅因猫(codex) → 布偶猫(Opus 4.7)',
+          timestamp: Date.now(),
+        };
         yield { type: 'done', catId: 'opus', timestamp: Date.now() };
       }),
       ackCollectedCursors: mock.fn(async () => {}),
@@ -217,8 +235,13 @@ describe('Integration: a2a_handoff persistence through streaming route (#648)', 
     );
     assert.ok(a2aAppend, 'messageStore.append should be called with systemKind: a2a_routing');
     assert.equal(a2aAppend.arguments[0].catId, null);
-    assert.equal(a2aAppend.arguments[0].content, '布偶猫 → 缅因猫');
+    assert.equal(a2aAppend.arguments[0].content, '缅因猫(codex) → 布偶猫(Opus 4.7)');
     assert.equal(a2aAppend.arguments[0].threadId, 'thread-1');
+    assert.deepEqual(a2aAppend.arguments[0].extra.a2aRouting, {
+      fromCatId: 'codex',
+      targetCatId: 'opus-47',
+      invocationId: 'inv-a2a-test',
+    });
 
     // 2. broadcastAgentMessage receives the a2a_handoff event with stored messageId
     const broadcastCalls = deps.socketManager.broadcastAgentMessage.mock.calls;
@@ -226,6 +249,7 @@ describe('Integration: a2a_handoff persistence through streaming route (#648)', 
     assert.ok(a2aBroadcast, 'should broadcast a2a_handoff event');
     assert.equal(a2aBroadcast.arguments[0].messageId, 'msg-a2a-routing');
     assert.equal(a2aBroadcast.arguments[0].invocationId, 'inv-a2a-test');
+    assert.equal(a2aBroadcast.arguments[0].targetCatId, 'opus-47');
   });
 
   it('skips persistence when a2a_handoff has no content', async () => {

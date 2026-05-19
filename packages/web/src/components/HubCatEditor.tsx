@@ -6,7 +6,7 @@ import { apiFetch } from '@/utils/api-client';
 import type { ConfigData } from './config-viewer-types';
 import type { TemplateCard } from './first-run-quest/TemplateStep';
 import type { AccountsResponse, ProfileItem } from './hub-accounts.types';
-import { uploadAvatarAsset, uploadRefAudioAsset } from './hub-cat-editor.client';
+import { buildEditorLoadingNote, uploadAvatarAsset, uploadRefAudioAsset } from './hub-cat-editor.client';
 import {
   autoSlug,
   buildCatPayload,
@@ -41,20 +41,9 @@ interface HubCatEditorProps {
   open: boolean;
   onClose: () => void;
   onSaved: () => Promise<void> | void;
-  variant?: 'overlay' | 'inline';
-  hideDelete?: boolean;
 }
 
-export function HubCatEditor({
-  cat,
-  draft,
-  existingCats,
-  open,
-  onClose,
-  onSaved,
-  variant = 'overlay',
-  hideDelete = false,
-}: HubCatEditorProps) {
+export function HubCatEditor({ cat, draft, existingCats, open, onClose, onSaved }: HubCatEditorProps) {
   const confirm = useConfirm();
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
   const [loadingProfiles, setLoadingProfiles] = useState(false);
@@ -366,12 +355,10 @@ export function HubCatEditor({
 
   const handleRefAudioUpload = async (file: File) => {
     setError(null);
-    try {
-      const result = await uploadRefAudioAsset(file);
-      patchForm({ voiceRefAudio: result.url });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '参考音频上传失败');
-    }
+    await uploadRefAudioAsset(file).then(
+      (result) => patchForm({ voiceRefAudio: result.url }),
+      (err) => setError(err instanceof Error ? err.message : '参考音频上传失败'),
+    );
   };
 
   const handleSave = async () => {
@@ -574,157 +561,6 @@ export function HubCatEditor({
     }
   };
 
-  const overlayTitle = cat ? cat.displayName || cat.name || cat.id : '添加成员';
-
-  const editorHeader = (
-    <div className="flex shrink-0 items-start justify-between px-7 py-5">
-      <div className="flex items-center gap-2">
-        {variant === 'inline' && (
-          <button
-            type="button"
-            onClick={requestClose}
-            className="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--console-hover-bg)] text-cafe-muted transition hover:text-cafe"
-            aria-label="返回列表"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
-              <path d="M19 12H5M12 19l-7-7 7-7" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-        )}
-        <p
-          id={variant === 'overlay' ? 'member-editor-title' : undefined}
-          className="text-[13px] font-extrabold text-[var(--console-modal-title)]"
-        >
-          {variant === 'overlay' ? overlayTitle : cat ? cat.displayName || cat.name || cat.id : '添加成员'}
-        </p>
-      </div>
-      {variant === 'overlay' && (
-        <button
-          type="button"
-          onClick={requestClose}
-          className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-[var(--console-modal-close-bg)] text-lg font-extrabold leading-none text-[var(--console-modal-close-fg)] transition hover:opacity-80"
-          aria-label="关闭成员配置"
-        >
-          ×
-        </button>
-      )}
-    </div>
-  );
-
-  const editorBody = (
-    <div className={`min-h-0 flex-1 space-y-4 overflow-y-auto px-7 py-5 ${variant === 'inline' ? 'pb-8' : ''}`}>
-      {!cat && templates.length > 0 && (
-        <section
-          data-guide-id="add-member.template-picker"
-          className="space-y-3 rounded-[18px] bg-[var(--console-card-bg)] p-[18px] shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
-        >
-          <h4 className="text-base font-extrabold text-cafe">成员模板</h4>
-          <p className="text-xs font-semibold text-cafe-secondary">
-            从内置成员模板开始，选择后自动填充身份、模型与运行时默认值。
-          </p>
-          <div className="flex flex-wrap gap-2.5">
-            <button
-              type="button"
-              onClick={() => handleTemplateSelect(null)}
-              className={`h-8 rounded-2xl px-3.5 text-[13px] font-extrabold transition ${
-                selectedTemplateId === 'custom'
-                  ? 'bg-[var(--cafe-accent)] text-[var(--cafe-surface)]'
-                  : 'bg-[var(--console-field-bg)] text-[var(--console-template-text)]'
-              }`}
-            >
-              自定义
-            </button>
-            {templates.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => handleTemplateSelect(selectedTemplateId === t.id ? null : t)}
-                className={`h-8 rounded-2xl px-3.5 text-[13px] font-extrabold transition ${
-                  selectedTemplateId === t.id
-                    ? 'bg-[var(--cafe-accent)] text-[var(--cafe-surface)]'
-                    : 'bg-[var(--console-field-bg)] text-[var(--console-template-text)]'
-                }`}
-              >
-                {t.nickname ?? t.name}
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-      <IdentitySection
-        cat={cat}
-        form={form}
-        hasError={fieldErrors.identity}
-        avatarUploading={uploadingAvatar}
-        onChange={patchForm}
-        onAvatarUpload={handleAvatarUpload}
-        onRefAudioUpload={handleRefAudioUpload}
-      />
-      <AccountSection
-        form={form}
-        hasError={fieldErrors.account}
-        modelOptions={modelOptions}
-        availableProfiles={availableProfiles}
-        loadingProfiles={loadingProfiles}
-        onChange={patchForm}
-      />
-      <RoutingSection
-        form={form}
-        hasError={fieldErrors.routing}
-        reservedPatterns={reservedPatterns}
-        onChange={patchForm}
-      />
-      <AdvancedRuntimeSection
-        cat={cat}
-        form={form}
-        strategyForm={strategyForm}
-        loadingStrategy={loadingStrategy}
-        strategyError={strategyError}
-        codexSettings={codexSettings}
-        loadingCodexSettings={loadingCodexSettings}
-        codexSettingsError={codexSettingsError}
-        codexSettingsEditable={codexSettingsEditable}
-        showCodexSettings={showCodexSettings}
-        onChange={patchForm}
-        onStrategyChange={patchStrategy}
-        onCodexChange={patchCodex}
-      />
-      <PersistenceBanner />
-      {error ? <p className="rounded-2xl bg-conn-red-bg px-4 py-3 text-sm text-conn-red-text">{error}</p> : null}
-      <div className="flex items-center justify-between pt-4">
-        {cat && !hideDelete ? (
-          <button
-            type="button"
-            onClick={handleDelete}
-            aria-label="删除成员"
-            className="text-[13px] font-bold text-cafe-muted transition hover:text-conn-red-text"
-          >
-            删除成员
-          </button>
-        ) : (
-          <span />
-        )}
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving || saveBlockedByProfileBinding}
-          className="h-8 rounded-[10px] bg-[var(--cafe-accent)] px-4 text-[13px] font-extrabold text-[var(--cafe-surface)] transition hover:bg-[var(--cafe-accent-hover)] disabled:opacity-50"
-        >
-          {saving ? '保存中…' : '保存'}
-        </button>
-      </div>
-    </div>
-  );
-
-  if (variant === 'inline') {
-    return (
-      <div className="flex h-full flex-col" data-guide-id="member-editor.profile" data-bootcamp-step="cat-editor">
-        {editorHeader}
-        {editorBody}
-      </div>
-    );
-  }
-
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-[var(--console-overlay-medium)] px-4"
@@ -732,16 +568,140 @@ export function HubCatEditor({
       data-bootcamp-host="cat-editor-modal"
     >
       <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="member-editor-title"
-        className="member-editor-modal flex max-h-[88vh] w-full max-w-[720px] flex-col overflow-hidden rounded-[28px] bg-[var(--console-card-bg)] shadow-[0_22px_48px_rgba(43,33,26,0.13)]"
+        className="flex max-h-[88vh] w-full max-w-[560px] flex-col rounded-2xl border border-[#F0DDCD] bg-[#FFF8F2] shadow-2xl"
         data-guide-id="member-editor.profile"
         onClick={(event) => event.stopPropagation()}
         data-bootcamp-step="cat-editor"
       >
-        {editorHeader}
-        {editorBody}
+        <div className="flex shrink-0 items-start justify-between border-b border-[#F0DDCD] px-7 py-5">
+          <div>
+            <p className="text-sm font-semibold text-[#77A777]">
+              成员协作 &gt; 总览 &gt; {cat ? '编辑成员' : '添加成员'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={requestClose}
+              className="text-2xl leading-none text-[#B59A88]"
+              aria-label="关闭"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-7 py-5">
+          {!cat && templates.length > 0 && (
+            <section
+              data-guide-id="add-member.template-picker"
+              className="space-y-2 rounded-2xl border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]"
+            >
+              <h4 className="text-base font-bold text-[#2D2118]">模板快选（可选）</h4>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleTemplateSelect(null)}
+                  className={`rounded-full px-3 py-1.5 text-sm transition ${
+                    selectedTemplateId === 'custom'
+                      ? 'bg-[#D49266] text-white'
+                      : 'bg-[#F7EEE6] text-[#5C4B42] hover:bg-[#EDE0D5]'
+                  }`}
+                >
+                  自定义
+                </button>
+                {templates.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => handleTemplateSelect(selectedTemplateId === t.id ? null : t)}
+                    className={`rounded-full px-3 py-1.5 text-sm transition ${
+                      selectedTemplateId === t.id
+                        ? 'bg-[#D49266] text-white'
+                        : 'bg-[#F7EEE6] text-[#5C4B42] hover:bg-[#EDE0D5]'
+                    }`}
+                  >
+                    {t.nickname ?? t.name}
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+          <IdentitySection
+            cat={cat}
+            form={form}
+            hasError={fieldErrors.identity}
+            avatarUploading={uploadingAvatar}
+            onChange={patchForm}
+            onAvatarUpload={handleAvatarUpload}
+            onRefAudioUpload={handleRefAudioUpload}
+          />
+          <AccountSection
+            form={form}
+            hasError={fieldErrors.account}
+            modelOptions={modelOptions}
+            availableProfiles={availableProfiles}
+            loadingProfiles={loadingProfiles}
+            onChange={patchForm}
+          />
+          <RoutingSection
+            form={form}
+            hasError={fieldErrors.routing}
+            reservedPatterns={reservedPatterns}
+            onChange={patchForm}
+          />
+          <AdvancedRuntimeSection
+            cat={cat}
+            form={form}
+            strategyForm={strategyForm}
+            loadingStrategy={loadingStrategy}
+            strategyError={strategyError}
+            codexSettings={codexSettings}
+            loadingCodexSettings={loadingCodexSettings}
+            codexSettingsError={codexSettingsError}
+            codexSettingsEditable={codexSettingsEditable}
+            showCodexSettings={showCodexSettings}
+            onChange={patchForm}
+            onStrategyChange={patchStrategy}
+            onCodexChange={patchCodex}
+          />
+          <PersistenceBanner />
+          {error ? <p className="rounded-2xl bg-conn-red-bg px-4 py-3 text-sm text-conn-red-text">{error}</p> : null}
+        </div>
+
+        <div className="flex shrink-0 items-center justify-between border-t border-[#F0DDCD] bg-[#FFF3EA] px-7 py-4">
+          <div className="text-xs leading-5 text-[#8A776B]">
+            {buildEditorLoadingNote({ loadingProfiles, loadingStrategy, loadingCodexSettings })}
+          </div>
+          <div className="flex gap-2">
+            {cat ? (
+              <button
+                type="button"
+                aria-label="删除成员"
+                onClick={handleDelete}
+                disabled={saving}
+                className="rounded-full bg-conn-red-bg px-5 py-2.5 text-sm font-semibold text-conn-red-text transition hover:bg-conn-red-bg disabled:opacity-50"
+              >
+                删除成员
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={requestClose}
+              className="rounded-full bg-[#F7F3F0] px-5 py-2.5 text-sm font-semibold text-[#8A776B] transition hover:bg-[#F7EEE6]"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || saveBlockedByProfileBinding}
+              className="rounded-full bg-[#D49266] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#C88254] disabled:opacity-50"
+            >
+              {saving ? '保存中…' : cat ? '保存修改' : '保存'}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

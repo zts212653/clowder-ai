@@ -10,7 +10,17 @@ created: 2026-05-01
 
 > **Status**: done | **Owner**: Ragdoll/Ragdoll | **Priority**: P1
 >
-> **Decision**: [ADR-034](../../docs/decisions/034-dispatch-busy-gate-unification.md)
+> **Decision**: ADR-034
+
+## Vision Guard Record
+
+**Checker**: Siamese/Siamese🐾
+**Date**: 2026-05-18
+**Verdict**: **PASS**
+
+1. **符合架构愿景？** 是。F185 通过 Phase A (tryAutoExecute) 和 Phase B (routeSerial text-scan) 完整落地了 ADR-034 的统一判忙策略。Phase B 修复了 A2A text-scan 路径对 connector 消息的饿死问题，确保了 "non-agent 优先" 的 fairness invariant。
+2. **用户体验负面影响？** 无。改动提升了系统的响应性，外部信号（如 GitHub PR 状态、CI 结果）不再会被猫猫之间的 @mentions 链无限期阻塞。
+3. **完成度：** 100%。所有 ACs 已满足，测试全绿，代码已合入 main。
 
 ## Why
 
@@ -63,6 +73,98 @@ CI/review/conflict/scheduled 等 connector trigger policy 必须写入 `sourceCa
 - [x] AC-10: 回归测试：connector 到达 + thread 有猫在忙 → 排队不并发
 - [x] AC-11: 回归测试：A2A 链中插入 connector entry → connector 不被后续 agent autoExecute 饿死
 - [x] AC-12: 回归测试：continuation entry 仍为 urgent + system-pinned，不被 AC-8 校验拦截
+
+---
+
+## Phase B: routeSerial text-scan fairness gate 扩展至 non-agent
+
+> **Status**: ✅ merged (PR #1747) | **Reopened**: 2026-05-17
+> **起因**: team lead报告 A2A @ 链期间外部消息堆积（截图 2026-05-17）。三猫独立诊断（46/47/55）收敛：Phase A 的 fairness gate 覆盖了 `tryAutoExecute` 但**漏了 `routeSerial` text-scan 路径**。
+
+### Why
+
+Phase A（AC-7）给 `tryAutoExecute()` 加了 non-agent fairness gate——有 connector/user 排队时不启动新 agent。但 `routeSerial` 里的 A2A text-scan（猫输出含 `@猫B` 时决定是否扩展 worklist）走的是另一个 predicate：`hasQueuedUserMessagesForThread`，只看 `source === 'user'`，**不看 connector**。
+
+这意味着：猫A 在跑 → connector 消息来了（CI fail / review feedback）→ 入队 → 猫A 跑完输出 `@猫B` → text-scan 检查 `hasQueuedUserMessagesForThread` → false（connector 不算）→ worklist 扩展，猫B 继续跑 → connector 继续等。
+
+ADR-034 OQ-3 的设计结论是 "non-agent（user + connector）都应阻止 A2A 扩展"，但实现只在 `tryAutoExecute` 落地了，`routeSerial` text-scan 没跟上。`InvocationQueue.hasQueuedUserMessagesForThread` 的注释（L752-756）甚至显式写了 "connector must NOT block"，测试（`invocation-queue.test.js:924`）也断言了这个错误行为。
+
+### What
+
+两个改动点：
+
+**1. Fairness predicate 扩展**：将 `routeSerial` text-scan 的 fairness predicate 从 `hasQueuedUserMessagesForThread`（只看 user）改为 `hasQueuedNonAgentForThread`（看 user + connector），与 `tryAutoExecute` 的 fairness gate 对齐。
+
+**2. Deferred enqueue（preserve handoff）**：fairness gate 命中时，不是静默丢弃 A2A handoff，而是把 text-scan 命中的 A2A targets 入队，排在已有 non-agent entries 后面。connector 先出队执行，完成后 `onInvocationComplete` → `tryAutoExecute` 拉起 deferred A2A。
+
+**Deferred entry 必须携带的字段（行为契约）：**
+
+| 字段 | 值 | 理由 |
+|------|-----|------|
+| `source` | `'agent'` | 标识为 A2A 产生的条目 |
+| `sourceCategory` | `'a2a'` | 与 `callback-a2a-trigger` 路径一致，确保 QueuePanel 分组和 diagnostics 正确 |
+| `autoExecute` | `true` | non-agent 出队后 `tryAutoExecute` 自动拉起 |
+| `priority` | `'normal'` | agent 禁 urgent（Phase A AC-8） |
+| `targetCatId` | text-scan 解析出的目标猫 id | — |
+| `callerCatId` | 当前猫 `catId`（猫A） | 猫B invocation 需要知道谁传的球 |
+| `content` | 猫A 的 `storedContent`（当前轮完整输出） | 猫B 必须看到猫A的交接上下文才能继续工作 |
+| `triggerMessageId` | 猫A 持久化的 `storedMsgId` | downstream `currentUserMessageId` / replyTo / cross-thread hint 依赖此关联 |
+
+**入队前必须应用的 guards（与 inline 扩展路径对齐）：**
+
+- `maxDepth`：当前 `a2aCount` 已达上限的 target 不入队
+- `hasQueuedOrActiveAgentForCat`：目标猫已有 active/queued entry 时不重复入队（L1615 dedup）
+- F167 ping-pong streak：连续 A2A 往返超过阈值时不入队
+
+**行为对比：**
+
+| 场景 | Phase A（当前） | Phase B（修后） |
+|------|----------------|----------------|
+| user queued + text-scan 命中 `@猫B` | 不扩展 worklist，A2A 丢失 | 不扩展 worklist，A2A 入队，user 先执行 |
+| connector queued + text-scan 命中 `@猫B` | **扩展 worklist，connector 饿死** | 不扩展 worklist，A2A 入队，connector 先执行 |
+| 纯 agent queued + text-scan 命中 `@猫B` | 扩展 worklist | 扩展 worklist（不变） |
+
+注意：Phase A 对 user queued 场景也有同样的"A2A 丢失"问题（gate 命中时不入队）。Phase B 一并修复。
+
+**改动范围：**
+
+| 文件 | 行 | 改动 |
+|------|-----|------|
+| `route-serial.ts` | 1578-1607 | fairness gate 命中时，将 A2A targets 通过回调入队而非静默跳过 |
+| `routes/messages.ts` | 887 | `hasQueuedUserMessagesForThread` → `hasQueuedNonAgentForThread`；新增 enqueue 回调注入 |
+| `routes/invocations.ts` | 199 | 同上 |
+| `ConnectorInvokeTrigger.ts` | 365 | 同上 |
+| `QueueProcessor.ts` | 912 | 同上 |
+| `QueueProcessor.ts` | 265-268 | wrapper 方法重命名 + 改委托目标 |
+| `InvocationQueue.ts` | 752-757 | 更新注释，移除"connector must NOT block" |
+| `invocation-queue.test.js` | 924 | 断言改为 `true`（connector 应阻止 text-scan） |
+
+### Acceptance Criteria (Phase B)
+
+- [x] AC-B1: `routeSerial` text-scan fairness gate 使用 `hasQueuedNonAgentForThread`（检查 user + connector）
+- [x] AC-B2: 4 个注入 call site 全部从 `hasQueuedUserMessagesForThread` 切换到 `hasQueuedNonAgentForThread`
+- [x] AC-B3: fairness gate 命中时，text-scan 命中的 A2A targets 入队（deferred enqueue），不静默丢弃。entry 必须携带完整元数据（见 What §2 字段表）：`sourceCategory='a2a'`、`callerCatId`、`content=storedContent`、`messageId=storedMsgId`
+- [x] AC-B3a: 入队前应用全部 text-scan guards：`maxDepth`、`hasQueuedOrActiveAgentForCat` dedup、F167 ping-pong streak + abort guard + pendingTail dedup
+- [x] AC-B4: `QueueProcessor` wrapper 方法重命名，注释更新
+- [x] AC-B5: `InvocationQueue.hasQueuedUserMessagesForThread` 注释移除 "connector must NOT block" 误导文案
+- [x] AC-B6: 回归测试：connector queued + A2A text-scan → gate 阻止 worklist 扩展 + A2A target 入队，断言 entry 的 `content`/`messageId`/`callerCatId`/`sourceCategory` 全部正确
+- [x] AC-B7: 回归测试：deferred A2A entry 在 connector 出队完成后被 `tryAutoExecute` 拉起，猫B invocation 能读取猫A交接上下文
+- [x] AC-B8: 回归测试：纯 agent entries queued（无 user/connector）→ text-scan 正常扩展（不误阻）
+- [x] AC-B9: 回归测试：user queued + A2A text-scan → 同样 deferred enqueue（修复 Phase A 遗留）
+- [x] AC-B10: Phase A 已有测试全绿（AC-10/11/12 不回归）
+
+### Risk (Phase B)
+
+| 风险 | 缓解 |
+|------|------|
+| deferred entry 元数据不全导致猫B看不到交接上下文 | AC-B3 字段表 + AC-B6 测试断言 content/triggerMessageId/callerCatId/sourceCategory |
+| deferred enqueue 绕过 text-scan guards（maxDepth/dedup/ping-pong） | AC-B3a 要求入队前应用全部 guards，与 inline 扩展路径对齐 |
+| deferred enqueue 导致 A2A entry 与 `hasQueuedOrActiveAgentForCat` dedup 冲突 | 入队前复用 route-serial 现有 dedup 检查（L1615），已 active 的猫不重复入队 |
+| connector 频繁到达导致 A2A 反复 defer（活锁） | deferred entry 自身也是 agent entry，不阻止后续 non-agent 出队；且 `tryAutoExecute` fairness gate 保证 non-agent 优先，不会活锁 |
+| deferred enqueue 需要 `routeSerial` 调用方提供 enqueue 回调 | 4 个 call site 均有 `invocationQueue` / `queueProcessor` 引用，注入回调无额外依赖 |
+| `hasQueuedUserMessagesForThread` 被其他路径使用 | grep 确认只有 text-scan fairness gate 使用，无其他 caller |
+
+---
 
 ## Dependencies
 

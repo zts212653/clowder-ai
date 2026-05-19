@@ -1,0 +1,7 @@
+{
+  "spanCount": 4500,
+  "maxSpans": 10000,
+  "maxAgeMs": 86400000,
+  "oldestStoredAt": 1715213600000,
+  "newestStoredAt": 1715300005300
+}

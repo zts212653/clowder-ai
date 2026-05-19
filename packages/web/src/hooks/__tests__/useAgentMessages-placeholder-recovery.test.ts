@@ -40,7 +40,7 @@ const storeState = {
     content: string;
     isStreaming?: boolean;
     origin?: 'stream' | 'callback';
-    extra?: { stream?: { invocationId?: string } };
+    extra?: { stream?: { invocationId?: string; turnInvocationId?: string } };
     timestamp: number;
   }>,
   catInvocations: {} as Record<string, { invocationId?: string }>,
@@ -113,6 +113,7 @@ describe('useAgentMessages placeholder recovery', () => {
     storeState.activeInvocations = {};
     mockAddMessage.mockClear();
     mockAppendToMessage.mockClear();
+    mockAppendToolEvent.mockClear();
     mockAppendRichBlock.mockClear();
     mockPatchMessage.mockClear();
     mockSetMessageThinking.mockClear();
@@ -236,6 +237,56 @@ describe('useAgentMessages placeholder recovery', () => {
     )?.[0];
     expect(created).toBeTruthy();
     expect(created?.extra?.stream?.invocationId).toBeUndefined();
+  });
+
+  it('does not reuse an existing post_msg callback bubble as the active stream/tool container', () => {
+    storeState.messages = [
+      {
+        id: 'msg-callback-post',
+        type: 'assistant',
+        catId: 'opus',
+        content: 'post_msg speech should stay separate',
+        isStreaming: false,
+        origin: 'callback',
+        extra: { stream: { invocationId: 'inv-parent', turnInvocationId: 'turn-active' } },
+        timestamp: Date.now() - 1000,
+      },
+    ];
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'tool_use',
+        catId: 'opus',
+        invocationId: 'inv-parent',
+        turnInvocationId: 'turn-active',
+        toolName: 'command_execution',
+        toolInput: { command: 'git status' },
+      });
+    });
+
+    expect(mockAppendToolEvent).not.toHaveBeenCalledWith('msg-callback-post', expect.anything());
+    const streamBubble = mockAddMessage.mock.calls
+      .map(([m]) => m)
+      .find((m) => m.type === 'assistant' && m.origin === 'stream');
+    const callbackBubble = storeState.messages.find((m) => m.id === 'msg-callback-post');
+    expect(streamBubble).toMatchObject({
+      type: 'assistant',
+      catId: 'opus',
+      origin: 'stream',
+      isStreaming: true,
+      extra: { stream: { invocationId: 'inv-parent', turnInvocationId: 'turn-active' } },
+    });
+    expect(callbackBubble).toMatchObject({
+      type: 'assistant',
+      catId: 'opus',
+      origin: 'callback',
+      content: 'post_msg speech should stay separate',
+      isStreaming: false,
+    });
   });
 
   it('records bubble timeline with explicit invocationId when tool_use binds the bubble', () => {

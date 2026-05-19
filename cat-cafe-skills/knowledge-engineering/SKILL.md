@@ -92,7 +92,7 @@ triggers:
 3. 对每个确认的概念，引导用户填写：一句话定义 + 出现场景 + 关联概念 + 对应 API/操作
 4. 用户填写后，猫帮忙规范化格式（确保符合骨架模板）
 
-**交付物**：*(internal reference removed)*（使用骨架模板 1）
+**交付物**：`project-research/domain-glossary.md`（使用骨架模板 1）
 
 #### b) 业务规则表（Business Rules）
 
@@ -104,7 +104,7 @@ triggers:
 3. 引导用户用"实体 A + 实体 B + 关系 + 约束条件 + 原因"结构表达规则
 4. 特别关注：互斥规则、依赖关系、触发条件、权限边界
 
-**交付物**：*(internal reference removed)*（使用骨架模板 2）
+**交付物**：`project-research/business-rules.md`（使用骨架模板 2）
 
 #### c) 操作路径映射（Action Mapping）
 
@@ -116,7 +116,7 @@ triggers:
 3. 标注前置条件和预期结果
 4. 对高频操作优先完成映射
 
-**交付物**：*(internal reference removed)*（使用骨架模板 3）
+**交付物**：`project-research/action-mapping.md`（使用骨架模板 3）
 
 ### P1: 模式库（2-3 天）
 
@@ -130,7 +130,7 @@ triggers:
 3. 和用户确认：这个模式在什么场景下适用？什么场景下不适用？
 4. 每个模式写成独立文档
 
-**交付物**：*(internal reference removed)*（使用骨架模板 4）
+**交付物**：`project-research/pattern-{name}.md`（使用骨架模板 4）
 
 ### P2-P3: 检索管道（用户不需要手动做）
 
@@ -249,7 +249,7 @@ created: {YYYY-MM-DD}
 2. 按优先级分类：
    - **必须迁入仓库**：概念定义、业务规则、API 文档（猫需要直接检索的）
    - **保留链接即可**：流程图、会议纪要、临时讨论（引用但不索引）
-3. 迁移建议：导出为 .md → 加 frontmatter → 放入 *(internal reference removed)*
+3. 迁移建议：导出为 .md → 加 frontmatter → 放入 `project-research/`
 4. 在 `docs/README.md` 中建索引，列出外部文档位置
 
 ### 场景 D: 代码仓与文档仓分离
@@ -277,10 +277,10 @@ created: {YYYY-MM-DD}
 
 Guided path 完成时，项目应具备：
 
-- [ ] *(internal reference removed)* — 业务概念词典（覆盖项目核心概念；中型项目通常 10-15 个，小项目 3-5 个即可）
-- [ ] *(internal reference removed)* — 业务规则表（覆盖主要实体间的约束关系）
-- [ ] *(internal reference removed)* — 操作路径映射（覆盖用户高频操作路径）
-- [ ] *(internal reference removed)* — 可复用模式（从已有代码/脚本中提取，数量视项目规模而定）
+- [ ] `project-research/domain-glossary.md` — 业务概念词典（覆盖项目核心概念；中型项目通常 10-15 个，小项目 3-5 个即可）
+- [ ] `project-research/business-rules.md` — 业务规则表（覆盖主要实体间的约束关系）
+- [ ] `project-research/action-mapping.md` — 操作路径映射（覆盖用户高频操作路径）
+- [ ] `project-research/pattern-*.md` — 可复用模式（从已有代码/脚本中提取，数量视项目规模而定）
 - [ ] 所有文档有 YAML frontmatter，可被记忆引擎索引
 
 完成后猫可以：

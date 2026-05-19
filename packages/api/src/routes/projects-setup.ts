@@ -45,7 +45,12 @@ function classifyGitError(exitCode: number | null, stderr: string, killed: boole
       return { ok: false, errorKind: 'not_found', error: 'Repository not found' };
     }
   }
-  if (lc.includes('unable to access') || lc.includes('could not resolve')) {
+  if (
+    lc.includes('unable to access') ||
+    lc.includes('could not resolve') ||
+    lc.includes('failed to connect') ||
+    lc.includes('connection refused')
+  ) {
     return { ok: false, errorKind: 'network_error', error: 'Network error' };
   }
   return { ok: false, errorKind: 'unknown', error: stderr.slice(0, 500) || 'Clone failed' };

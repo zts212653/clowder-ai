@@ -68,7 +68,7 @@ export const GuideHUD = React.forwardRef<HTMLDivElement, GuideHUDProps>(function
         <button
           type="button"
           onClick={onExit}
-          className="rounded-lg px-3 py-1.5 text-xs text-[var(--guide-text-secondary)] transition hover:bg-cafe-surface-elevated"
+          className="rounded-lg px-3 py-1.5 text-xs text-[var(--guide-text-secondary)] transition hover:bg-black/5"
           aria-label="退出引导"
         >
           退出
@@ -77,7 +77,7 @@ export const GuideHUD = React.forwardRef<HTMLDivElement, GuideHUDProps>(function
           <button
             type="button"
             onClick={handleConfirm}
-            className="rounded-lg bg-[var(--guide-cutout-ring)] px-4 py-1.5 text-xs font-medium text-[var(--cafe-surface)] transition hover:opacity-90"
+            className="rounded-lg bg-[var(--guide-cutout-ring)] px-4 py-1.5 text-xs font-medium text-white transition hover:opacity-90"
             aria-label="已完成该步骤"
           >
             已完成该步骤
@@ -87,7 +87,7 @@ export const GuideHUD = React.forwardRef<HTMLDivElement, GuideHUDProps>(function
           <button
             type="button"
             onClick={onNext}
-            className="rounded-lg bg-[var(--guide-cutout-ring)] px-4 py-1.5 text-xs font-medium text-[var(--cafe-surface)] transition hover:opacity-90"
+            className="rounded-lg bg-[var(--guide-cutout-ring)] px-4 py-1.5 text-xs font-medium text-white transition hover:opacity-90"
             aria-label={stepIndex === totalSteps - 1 ? '完成引导' : '下一步'}
           >
             {stepIndex === totalSteps - 1 ? '知道了!' : '下一步'}

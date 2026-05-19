@@ -22,6 +22,17 @@ export interface UploadedFileInfo {
   fileSizeCiphertext: number;
 }
 
+interface CdnPlatformKey {
+  encryptQueryParam?: string;
+  fullUrl?: string;
+  aesKey?: string;
+}
+
+interface GetUploadUrlResponse {
+  upload_param?: string;
+  upload_full_url?: string;
+}
+
 // ── AES-128-ECB ──
 
 export function encryptAesEcb(plaintext: Buffer, key: Buffer): Buffer {
@@ -77,9 +88,30 @@ export function decodeAesKey(aesKey: string, log?: FastifyBaseLogger): Buffer {
 
 // ── CDN Download Pipeline ──
 
+function resolveWeChatCdnFullUrl(fullUrl: string, fieldName: 'full_url' | 'upload_full_url'): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(fullUrl);
+  } catch {
+    throw new Error(`[weixin-cdn] Invalid ${fieldName}: ${fullUrl.slice(0, 80)}`);
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  const isWeChatCdnHost = host === 'cdn.weixin.qq.com' ? true : host.endsWith('.cdn.weixin.qq.com');
+  if (parsed.protocol !== 'https:') {
+    throw new Error(`[weixin-cdn] Refusing ${fieldName} from non-WeChat CDN host: ${host}`);
+  }
+  if (!isWeChatCdnHost) {
+    throw new Error(`[weixin-cdn] Refusing ${fieldName} from non-WeChat CDN host: ${host}`);
+  }
+  return parsed.toString();
+}
+
 /**
  * Download encrypted media from WeChat CDN and decrypt.
- * `platformKey` is a JSON-encoded string: { encryptQueryParam, aesKey }.
+ * `platformKey` is a JSON-encoded string:
+ * - { encryptQueryParam, aesKey } for legacy CDN download API
+ * - { fullUrl, aesKey } for iLink full_url responses
  */
 export async function downloadMediaFromCdn(params: {
   platformKey: string;
@@ -89,12 +121,21 @@ export async function downloadMediaFromCdn(params: {
 }): Promise<Buffer> {
   const { platformKey, cdnBaseUrl, log, fetchFn = globalThis.fetch } = params;
 
-  const { encryptQueryParam, aesKey } = JSON.parse(platformKey) as {
-    encryptQueryParam: string;
-    aesKey: string;
-  };
+  const { encryptQueryParam, fullUrl, aesKey } = JSON.parse(platformKey) as CdnPlatformKey;
 
-  const cdnUrl = `${cdnBaseUrl}/download?encrypted_query_param=${encodeURIComponent(encryptQueryParam)}`;
+  if (!aesKey) {
+    throw new Error('[weixin-cdn] CDN platformKey missing aesKey');
+  }
+
+  const cdnUrl = fullUrl
+    ? resolveWeChatCdnFullUrl(fullUrl, 'full_url')
+    : encryptQueryParam
+      ? `${cdnBaseUrl}/download?encrypted_query_param=${encodeURIComponent(encryptQueryParam)}`
+      : '';
+  if (!cdnUrl) {
+    throw new Error('[weixin-cdn] CDN platformKey missing encryptQueryParam or fullUrl');
+  }
+
   log.info({ cdnUrl: cdnUrl.slice(0, 80) }, '[weixin-cdn] Downloading media from CDN');
 
   const res = await fetchFn(cdnUrl, {
@@ -150,13 +191,14 @@ export async function uploadMediaToCdn(params: {
     fetchFn,
   });
 
-  if (!uploadUrlResp.upload_param) {
-    throw new Error('[weixin-cdn] getUploadUrl returned no upload_param');
+  if (!uploadUrlResp.upload_param && !uploadUrlResp.upload_full_url) {
+    throw new Error('[weixin-cdn] getUploadUrl returned no upload_param/upload_full_url');
   }
 
   const downloadParam = await uploadBufferToCdn({
     buf: plaintext,
     uploadParam: uploadUrlResp.upload_param,
+    uploadFullUrl: uploadUrlResp.upload_full_url,
     filekey,
     cdnBaseUrl,
     aeskey,
@@ -195,7 +237,7 @@ async function callGetUploadUrl(params: {
   aeskey: string;
   botToken: string;
   fetchFn: typeof fetch;
-}): Promise<{ upload_param?: string }> {
+}): Promise<GetUploadUrlResponse> {
   const body = JSON.stringify({
     filekey: params.filekey,
     media_type: params.mediaType,
@@ -219,21 +261,29 @@ async function callGetUploadUrl(params: {
     const text = await res.text().catch(() => '');
     throw new Error(`getuploadurl HTTP ${res.status}: ${text}`);
   }
-  return (await res.json()) as { upload_param?: string };
+  return (await res.json()) as GetUploadUrlResponse;
 }
 
 async function uploadBufferToCdn(params: {
   buf: Buffer;
-  uploadParam: string;
+  uploadParam?: string;
+  uploadFullUrl?: string;
   filekey: string;
   cdnBaseUrl: string;
   aeskey: Buffer;
   log: FastifyBaseLogger;
   fetchFn: typeof fetch;
 }): Promise<string> {
-  const { buf, uploadParam, filekey, cdnBaseUrl, aeskey, log, fetchFn } = params;
+  const { buf, uploadParam, uploadFullUrl, filekey, cdnBaseUrl, aeskey, log, fetchFn } = params;
   const ciphertext = encryptAesEcb(buf, aeskey);
-  const cdnUrl = `${cdnBaseUrl}/upload?encrypted_query_param=${encodeURIComponent(uploadParam)}&filekey=${encodeURIComponent(filekey)}`;
+  const cdnUrl = uploadFullUrl
+    ? resolveWeChatCdnFullUrl(uploadFullUrl, 'upload_full_url')
+    : uploadParam
+      ? `${cdnBaseUrl}/upload?encrypted_query_param=${encodeURIComponent(uploadParam)}&filekey=${encodeURIComponent(filekey)}`
+      : '';
+  if (!cdnUrl) {
+    throw new Error('[weixin-cdn] Missing upload_param/upload_full_url for CDN upload');
+  }
 
   for (let attempt = 1; attempt <= UPLOAD_MAX_RETRIES; attempt++) {
     try {

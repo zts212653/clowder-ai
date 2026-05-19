@@ -1,6 +1,10 @@
-import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { applyConnectorSecretUpdates } from '../config/connector-secret-updater.js';
-import { isConnectorSecret } from '../config/connector-secrets-allowlist.js';
+import {
+  requireConnectorWriteOwner,
+  resolveConnectorSessionUserId,
+  validateConnectorSecretUpdates,
+} from '../config/connector-secret-write-guards.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import { DEFAULT_THREAD_ID, type IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { WeComBotAdapter } from '../infrastructure/connectors/adapters/WeComBotAdapter.js';
@@ -41,6 +45,62 @@ function requireTrustedHubIdentity(request: FastifyRequest, reply: FastifyReply)
   return userId;
 }
 
+function requireSessionHubIdentity(request: FastifyRequest, reply: FastifyReply): string | null {
+  const userId = resolveConnectorSessionUserId(request);
+  if (!userId) {
+    reply.status(401);
+    return null;
+  }
+  return userId;
+}
+
+type ConnectorWriteIdentityResult = { userId: string; error?: never } | { userId?: never; error: { error: string } };
+
+function requireConnectorWriteIdentity(request: FastifyRequest, reply: FastifyReply): ConnectorWriteIdentityResult {
+  const userId = requireSessionHubIdentity(request, reply);
+  if (!userId) return { error: { error: 'Identity required' } };
+  const ownerError = requireConnectorWriteOwner(userId);
+  if (ownerError) {
+    reply.status(ownerError.status);
+    return { error: { error: ownerError.error } };
+  }
+  return { userId };
+}
+
+interface ConnectorSecretRouteUpdate {
+  name: string;
+  value: string | null;
+}
+
+async function applyAuditedConnectorSecretUpdates(
+  app: FastifyInstance,
+  updates: ConnectorSecretRouteUpdate[],
+  opts: Pick<ConnectorHubRoutesOptions, 'envFilePath'>,
+  operator: string,
+  action: string,
+): Promise<{ status: number; error: string } | null> {
+  const validationError = validateConnectorSecretUpdates(updates);
+  if (validationError) return { status: 400, error: validationError };
+
+  await applyConnectorSecretUpdates(updates, { envFilePath: opts.envFilePath });
+
+  try {
+    await getEventAuditLog().append({
+      type: AuditEventTypes.CONFIG_UPDATED,
+      data: {
+        target: 'connector-secrets',
+        action,
+        keys: updates.map((update) => update.name),
+        operator,
+      },
+    });
+  } catch (err) {
+    app.log.warn({ err, action, keys: updates.map((update) => update.name) }, 'connector secret audit append failed');
+  }
+
+  return null;
+}
+
 // ── Connector platform config definitions ──
 
 interface ConnectorFieldDef {
@@ -53,6 +113,8 @@ interface ConnectorFieldDef {
   optional?: boolean;
   /** Default value used when the env var is not set — aligns status page with runtime normalization */
   defaultValue?: string;
+  /** Field writes persist immediately but runtime consumers only pick them up after an API restart. */
+  restartRequired?: boolean;
 }
 
 interface PlatformStepDef {
@@ -65,7 +127,6 @@ interface PlatformDef {
   id: string;
   name: string;
   nameEn: string;
-  category?: 'im' | 'plugin';
   fields: ConnectorFieldDef[];
   docsUrl: string;
   /** Steps displayed in the guided wizard — may be mode-filtered */
@@ -93,8 +154,6 @@ export const CONNECTOR_PLATFORMS: PlatformDef[] = [
         sensitive: true,
         requiredWhen: { envName: 'FEISHU_CONNECTION_MODE', value: 'webhook' },
       },
-      { envName: 'FEISHU_BOT_OPEN_ID', label: 'Bot Open ID（高级）', sensitive: false, optional: true },
-      { envName: 'FEISHU_ADMIN_OPEN_IDS', label: '管理员 Open IDs（高级）', sensitive: false, optional: true },
     ],
     docsUrl:
       'https://open.feishu.cn/document/home/introduction-to-custom-app-development/self-built-application-development-process',
@@ -187,17 +246,7 @@ export const CONNECTOR_PLATFORMS: PlatformDef[] = [
     id: 'weixin',
     name: '微信',
     nameEn: 'WeChat Personal',
-    fields: [
-      { envName: 'WEIXIN_BOT_TOKEN', label: 'Gateway Token（高级）', sensitive: true, optional: true },
-      { envName: 'WEIXIN_VOICE_ITEM_MODE', label: '语音消息模式（高级）', sensitive: false, optional: true },
-      { envName: 'WEIXIN_ENABLE_UNSAFE_VOICE_MODES', label: '启用实验语音模式', sensitive: false, optional: true },
-      {
-        envName: 'WEIXIN_CAPTURE_INBOUND_VOICE_MEDIA',
-        label: '采集入站语音（调试）',
-        sensitive: false,
-        optional: true,
-      },
-    ],
+    fields: [],
     docsUrl: 'https://chatbot.weixin.qq.com/',
     steps: [
       { text: '点击「生成二维码」按钮' },
@@ -209,7 +258,6 @@ export const CONNECTOR_PLATFORMS: PlatformDef[] = [
     id: 'github',
     name: 'GitHub',
     nameEn: 'GitHub',
-    category: 'plugin',
     fields: [
       { envName: 'GITHUB_TOKEN', label: 'Personal Access Token', sensitive: true },
       {
@@ -218,6 +266,7 @@ export const CONNECTOR_PLATFORMS: PlatformDef[] = [
         sensitive: false,
         optional: true,
         defaultValue: 'chatgpt-codex-connector[bot]',
+        restartRequired: true,
       },
       { envName: 'GITHUB_MCP_PAT', label: 'MCP 专用 Token', sensitive: true, optional: true },
     ],
@@ -240,6 +289,7 @@ export interface PlatformFieldStatus {
   envName: string;
   label: string;
   sensitive: boolean;
+  restartRequired?: boolean;
   /** null = not set, masked string = set (sensitive fields show last 4 chars) */
   currentValue: string | null;
 }
@@ -253,10 +303,7 @@ export interface PlatformStatus {
   id: string;
   name: string;
   nameEn: string;
-  category?: 'im' | 'plugin';
   configured: boolean;
-  connectionState: 'connected' | 'disconnected' | 'reconnecting' | 'unknown';
-  lastHeartbeat: number | null;
   fields: PlatformFieldStatus[];
   docsUrl: string;
   steps: PlatformStepStatus[];
@@ -288,6 +335,7 @@ export function buildConnectorStatus(env: Record<string, string | undefined> = p
         envName: f.envName,
         label: f.label,
         sensitive: f.sensitive,
+        restartRequired: f.restartRequired,
         currentValue: effectiveValue ? (f.sensitive ? maskSensitiveValue(effectiveValue) : effectiveValue) : null,
       };
     });
@@ -303,10 +351,7 @@ export function buildConnectorStatus(env: Record<string, string | undefined> = p
       id: platform.id,
       name: platform.name,
       nameEn: platform.nameEn,
-      ...(platform.category ? { category: platform.category } : {}),
       configured,
-      connectionState: configured ? ('unknown' as const) : ('disconnected' as const),
-      lastHeartbeat: null,
       fields,
       docsUrl: platform.docsUrl,
       steps: platform.steps,
@@ -319,9 +364,9 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
   const feishuQrBindClient = opts.feishuQrBindClient ?? new DefaultFeishuQrBindClient();
 
   app.get('/api/connector/hub-threads', async (request, reply) => {
-    const userId = requireTrustedHubIdentity(request, reply);
+    const userId = requireSessionHubIdentity(request, reply);
     if (!userId) {
-      return { error: 'Identity required (X-Cat-Cafe-User header)' };
+      return { error: 'Identity required (session cookie)' };
     }
     const allThreads = await threadStore.list(userId);
     const hubThreads = allThreads
@@ -340,68 +385,31 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
   });
 
   app.get('/api/connector/status', async (request, reply) => {
-    const userId = requireTrustedHubIdentity(request, reply);
+    const userId = requireSessionHubIdentity(request, reply);
     if (!userId) {
-      return { error: 'Identity required (X-Cat-Cafe-User header)' };
+      return { error: 'Identity required (session cookie)' };
     }
     const status = buildConnectorStatus();
     // F137: WeChat "configured" is based on adapter having a live bot_token, not env vars
     const weixinStatus = status.find((p) => p.id === 'weixin');
     if (weixinStatus) {
       const adapter = opts.weixinAdapter;
-      const isLive = adapter != null && adapter.hasBotToken() && adapter.isPolling();
-      weixinStatus.configured = isLive;
-      weixinStatus.connectionState = isLive ? 'connected' : 'disconnected';
+      weixinStatus.configured = adapter != null && adapter.hasBotToken() && adapter.isPolling();
     }
     // F132 bugfix: WeCom Bot live health — override "configured" with actual connection state.
+    // When getter is wired (gateway started) but returns null (adapter stopped/not started),
+    // force configured=false to avoid false green light from env var check.
     const wecomBotStatus = status.find((p) => p.id === 'wecom-bot');
     if (wecomBotStatus && opts.getWeComBotAdapter) {
       const adapter = opts.getWeComBotAdapter();
-      const state = adapter?.getConnectionState() ?? 'disconnected';
-      wecomBotStatus.configured = state === 'connected';
-      wecomBotStatus.connectionState = state;
-      wecomBotStatus.lastHeartbeat = adapter?.getLastHeartbeat() ?? null;
+      wecomBotStatus.configured = adapter?.getConnectionState() === 'connected';
     }
     return { platforms: status };
   });
 
-  app.post<{ Params: { platform: string } }>('/api/connector/:platform/test', async (request, reply) => {
-    const userId = requireTrustedHubIdentity(request, reply);
-    if (!userId) return { error: 'Identity required' };
-
-    const { platform } = request.params;
-    const def = CONNECTOR_PLATFORMS.find((p) => p.id === platform);
-    if (!def) {
-      reply.status(404);
-      return { ok: false, error: `Unknown platform: ${platform}` };
-    }
-
-    if (platform === 'weixin') {
-      const adapter = opts.weixinAdapter;
-      const ok = adapter != null && adapter.hasBotToken() && adapter.isPolling();
-      return { ok, message: ok ? '微信网关连接正常' : '微信网关未连接，请扫码登录' };
-    }
-    if (platform === 'wecom-bot') {
-      const adapter = opts.getWeComBotAdapter?.();
-      const state = adapter?.getConnectionState() ?? 'disconnected';
-      return {
-        ok: state === 'connected',
-        message: state === 'connected' ? '企微机器人 WebSocket 已连接' : `当前状态: ${state}`,
-      };
-    }
-
-    const status = buildConnectorStatus();
-    const platformStatus = status.find((p) => p.id === platform);
-    if (!platformStatus?.configured) {
-      return { ok: false, error: '平台尚未配置，请先填写凭证并保存' };
-    }
-
-    return { ok: true, message: `${def.name} 凭证已配置，连接器将在下次启动时自动连接` };
-  });
-
   app.post('/api/connector/feishu/qrcode', async (request, reply) => {
-    const userId = requireTrustedHubIdentity(request, reply);
-    if (!userId) return { error: 'Identity required' };
+    const auth = requireConnectorWriteIdentity(request, reply);
+    if (auth.error) return auth.error;
 
     try {
       const result = await feishuQrBindClient.create();
@@ -414,8 +422,9 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
   });
 
   app.get('/api/connector/feishu/qrcode-status', async (request, reply) => {
-    const userId = requireTrustedHubIdentity(request, reply);
-    if (!userId) return { error: 'Identity required' };
+    const auth = requireConnectorWriteIdentity(request, reply);
+    if (auth.error) return auth.error;
+    const { userId } = auth;
 
     const { qrPayload } = request.query as { qrPayload?: string };
     if (!qrPayload) {
@@ -438,7 +447,11 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
       if (currentMode === 'webhook' && (!verificationToken || verificationToken.trim() === '')) {
         updates.push({ name: 'FEISHU_CONNECTION_MODE', value: 'websocket' });
       }
-      await applyConnectorSecretUpdates(updates, { envFilePath: opts.envFilePath });
+      const writeError = await applyAuditedConnectorSecretUpdates(app, updates, opts, userId, 'feishu-qrcode-confirm');
+      if (writeError) {
+        reply.status(writeError.status);
+        return { error: writeError.error };
+      }
       return { status: 'confirmed' };
     } catch (err) {
       app.log.error({ err }, '[Feishu QR] Failed to poll QR status');
@@ -448,16 +461,24 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
   });
 
   app.post('/api/connector/feishu/disconnect', async (request, reply) => {
-    const userId = requireTrustedHubIdentity(request, reply);
-    if (!userId) return { error: 'Identity required' };
+    const auth = requireConnectorWriteIdentity(request, reply);
+    if (auth.error) return auth.error;
+    const { userId } = auth;
 
-    await applyConnectorSecretUpdates(
+    const writeError = await applyAuditedConnectorSecretUpdates(
+      app,
       [
         { name: 'FEISHU_APP_ID', value: null },
         { name: 'FEISHU_APP_SECRET', value: null },
       ],
-      { envFilePath: opts.envFilePath },
+      opts,
+      userId,
+      'feishu-disconnect',
     );
+    if (writeError) {
+      reply.status(writeError.status);
+      return { error: writeError.error };
+    }
     app.log.info({ userId }, '[Feishu] Disconnected by user');
     return { ok: true };
   });
@@ -465,8 +486,8 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
   // ── F137: WeChat QR code login routes ──
 
   app.post('/api/connector/weixin/qrcode', async (request, reply) => {
-    const userId = requireTrustedHubIdentity(request, reply);
-    if (!userId) return { error: 'Identity required' };
+    const auth = requireConnectorWriteIdentity(request, reply);
+    if (auth.error) return auth.error;
 
     try {
       const { WeixinAdapter: WA } = await import('../infrastructure/connectors/adapters/WeixinAdapter.js');
@@ -484,8 +505,9 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
   });
 
   app.get('/api/connector/weixin/qrcode-status', async (request, reply) => {
-    const userId = requireTrustedHubIdentity(request, reply);
-    if (!userId) return { error: 'Identity required' };
+    const auth = requireConnectorWriteIdentity(request, reply);
+    if (auth.error) return auth.error;
+    const { userId } = auth;
 
     const { qrPayload } = request.query as { qrPayload?: string };
     if (!qrPayload) {
@@ -504,10 +526,18 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
           reply.status(503);
           return { error: 'WeChat adapter not ready — please retry shortly' };
         }
+        const writeError = await applyAuditedConnectorSecretUpdates(
+          app,
+          [{ name: 'WEIXIN_BOT_TOKEN', value: status.botToken }],
+          opts,
+          userId,
+          'weixin-qrcode-confirm',
+        );
+        if (writeError) {
+          reply.status(writeError.status);
+          return { error: writeError.error };
+        }
         adapter.setBotToken(status.botToken);
-        await applyConnectorSecretUpdates([{ name: 'WEIXIN_BOT_TOKEN', value: status.botToken }], {
-          envFilePath: opts.envFilePath,
-        });
         opts.startWeixinPolling?.();
         app.log.info('[WeChat QR] Auto-activated — bot_token persisted to .env, polling started');
         return { status: 'confirmed' };
@@ -522,8 +552,8 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
   });
 
   app.post('/api/connector/weixin/activate', async (request, reply) => {
-    const userId = requireTrustedHubIdentity(request, reply);
-    if (!userId) return { error: 'Identity required' };
+    const auth = requireConnectorWriteIdentity(request, reply);
+    if (auth.error) return auth.error;
 
     const adapter = opts.weixinAdapter;
     if (!adapter) {
@@ -544,8 +574,9 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
 
   // F137 Phase D: Disconnect WeChat — stop polling + clear token + clear state
   app.post('/api/connector/weixin/disconnect', async (request, reply) => {
-    const userId = requireTrustedHubIdentity(request, reply);
-    if (!userId) return { error: 'Identity required' };
+    const auth = requireConnectorWriteIdentity(request, reply);
+    if (auth.error) return auth.error;
+    const { userId } = auth;
 
     const adapter = opts.weixinAdapter;
     if (!adapter) {
@@ -554,9 +585,17 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
     }
 
     await adapter.disconnect();
-    await applyConnectorSecretUpdates([{ name: 'WEIXIN_BOT_TOKEN', value: null }], {
-      envFilePath: opts.envFilePath,
-    });
+    const writeError = await applyAuditedConnectorSecretUpdates(
+      app,
+      [{ name: 'WEIXIN_BOT_TOKEN', value: null }],
+      opts,
+      userId,
+      'weixin-disconnect',
+    );
+    if (writeError) {
+      reply.status(writeError.status);
+      return { error: writeError.error };
+    }
     app.log.info({ userId }, '[WeChat] Disconnected by user — token cleared from .env');
 
     return { ok: true };
@@ -565,13 +604,22 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
   // ── F132 Phase E: WeCom Bot guided setup — validate + connect + disconnect ──
 
   app.post('/api/connector/wecom-bot/validate', async (request, reply) => {
-    const userId = requireTrustedHubIdentity(request, reply);
-    if (!userId) return { error: 'Identity required' };
+    const auth = requireConnectorWriteIdentity(request, reply);
+    if (auth.error) return auth.error;
+    const { userId } = auth;
 
     const { botId, secret } = (request.body ?? {}) as { botId?: string; secret?: string };
     if (!botId || !secret) {
       reply.status(400);
       return { error: 'botId and secret are required' };
+    }
+    const validationError = validateConnectorSecretUpdates([
+      { name: 'WECOM_BOT_ID', value: botId },
+      { name: 'WECOM_BOT_SECRET', value: secret },
+    ]);
+    if (validationError) {
+      reply.status(400);
+      return { error: validationError };
     }
 
     try {
@@ -590,25 +638,35 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
 
       // AC-E3: Save credentials and activate adapter without restart
       // P1 fix: save → start → if start fails, rollback credentials
-      await applyConnectorSecretUpdates(
+      const writeError = await applyAuditedConnectorSecretUpdates(
+        app,
         [
           { name: 'WECOM_BOT_ID', value: botId },
           { name: 'WECOM_BOT_SECRET', value: secret },
         ],
-        { envFilePath: opts.envFilePath },
+        opts,
+        userId,
+        'wecom-bot-validate',
       );
+      if (writeError) {
+        reply.status(writeError.status);
+        return { valid: false, error: writeError.error };
+      }
 
       if (opts.startWeComBotStream) {
         try {
           await opts.startWeComBotStream(botId, secret);
         } catch (startErr) {
           // Rollback: credentials saved but adapter failed to start
-          await applyConnectorSecretUpdates(
+          await applyAuditedConnectorSecretUpdates(
+            app,
             [
               { name: 'WECOM_BOT_ID', value: null },
               { name: 'WECOM_BOT_SECRET', value: null },
             ],
-            { envFilePath: opts.envFilePath },
+            opts,
+            userId,
+            'wecom-bot-rollback',
           );
           app.log.error({ err: startErr }, '[WeCom Bot] Adapter start failed — credentials rolled back');
           reply.status(502);
@@ -626,20 +684,28 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
   });
 
   app.post('/api/connector/wecom-bot/disconnect', async (request, reply) => {
-    const userId = requireTrustedHubIdentity(request, reply);
-    if (!userId) return { error: 'Identity required' };
+    const auth = requireConnectorWriteIdentity(request, reply);
+    if (auth.error) return auth.error;
+    const { userId } = auth;
 
     if (opts.stopWeComBot) {
       await opts.stopWeComBot();
     }
 
-    await applyConnectorSecretUpdates(
+    const writeError = await applyAuditedConnectorSecretUpdates(
+      app,
       [
         { name: 'WECOM_BOT_ID', value: null },
         { name: 'WECOM_BOT_SECRET', value: null },
       ],
-      { envFilePath: opts.envFilePath },
+      opts,
+      userId,
+      'wecom-bot-disconnect',
     );
+    if (writeError) {
+      reply.status(writeError.status);
+      return { error: writeError.error };
+    }
     app.log.info({ userId }, '[WeCom Bot] Disconnected by user — credentials cleared');
 
     return { ok: true };
@@ -658,102 +724,79 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
     return store.getConfig(connectorId);
   });
 
-  // ── Unified connector config save ──
-
-  const LOOPBACK_ADDRS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
-
-  const platformFieldIndex = new Map<string, Set<string>>();
-  for (const p of CONNECTOR_PLATFORMS) {
-    platformFieldIndex.set(p.id, new Set(p.fields.map((f) => f.envName)));
-  }
-
-  app.put<{ Params: { connectorId: string } }>('/api/connector/:connectorId/config', async (request, reply) => {
-    const userId = requireTrustedHubIdentity(request, reply);
-    if (!userId) return { error: 'Identity required' };
-    const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim();
-    if (ownerId && userId !== ownerId) {
-      reply.status(403);
-      return { error: 'Only the owner can modify connector configuration' };
-    }
-    const { connectorId } = request.params;
-    const body = request.body as {
-      secrets?: Array<{ name: string; value: string | null }>;
-      permissions?: {
-        whitelistEnabled?: boolean;
-        commandAdminOnly?: boolean;
-        adminOpenIds?: string[];
-        allowedGroups?: Array<{ externalChatId: string; label?: string }>;
-      };
-    } | null;
-
-    if (!body || typeof body !== 'object') {
-      reply.status(400);
-      return { error: 'Request body required' };
-    }
-
-    const allowedFields = platformFieldIndex.get(connectorId);
-    if (!allowedFields) {
-      reply.status(400);
-      return { error: `Unknown connector: ${connectorId}` };
-    }
-
-    if (body.permissions && !opts.permissionStore) {
-      reply.status(503);
-      return { error: 'Permission store is not available' };
-    }
-
-    if (body.secrets && body.secrets.length > 0) {
-      if (!LOOPBACK_ADDRS.has(request.ip)) {
-        reply.status(403);
-        return { error: 'Secrets endpoint is loopback-only' };
-      }
-      for (const s of body.secrets) {
-        if (!isConnectorSecret(s.name)) {
-          reply.status(400);
-          return { error: `'${s.name}' is not in connector secrets allowlist` };
-        }
-        if (!allowedFields.has(s.name)) {
-          reply.status(400);
-          return { error: `'${s.name}' does not belong to connector '${connectorId}'` };
-        }
-        if (
-          s.name === 'TELEGRAM_BOT_TOKEN' &&
-          s.value != null &&
-          s.value !== '' &&
-          normalizeTelegramBotToken(s.value) == null
-        ) {
-          reply.status(400);
-          return { error: 'TELEGRAM_BOT_TOKEN format invalid' };
-        }
-      }
-      await applyConnectorSecretUpdates(body.secrets, { envFilePath: opts.envFilePath });
-
-      const auditLog = getEventAuditLog();
-      try {
-        await auditLog.append({
-          type: AuditEventTypes.CONFIG_UPDATED,
-          data: { target: 'secrets', keys: body.secrets.map((s) => s.name), operator: userId },
-        });
-      } catch (err) {
-        request.log.warn({ err }, 'connector config audit append failed');
-      }
-    }
-
-    let permissions;
+  app.put('/api/connector/permissions/:connectorId', async (request, reply) => {
+    const auth = requireConnectorWriteIdentity(request, reply);
+    if (auth.error) return auth.error;
+    const { userId } = auth;
+    const { connectorId } = request.params as { connectorId: string };
     const store = opts.permissionStore;
-    if (body.permissions && store) {
-      const p = body.permissions;
-      if (p.whitelistEnabled !== undefined) await store.setWhitelistEnabled(connectorId, p.whitelistEnabled);
-      if (p.commandAdminOnly !== undefined) await store.setCommandAdminOnly(connectorId, p.commandAdminOnly);
-      if (p.adminOpenIds !== undefined) await store.setAdminOpenIds(connectorId, p.adminOpenIds);
-      if (p.allowedGroups !== undefined) {
-        const current = await store.listAllowedGroups(connectorId);
-        for (const g of current) await store.denyGroup(connectorId, g.externalChatId);
-        for (const g of p.allowedGroups) await store.allowGroup(connectorId, g.externalChatId, g.label);
+    if (!store) {
+      reply.status(503);
+      return { error: 'Permission store not available' };
+    }
+    const body = request.body as {
+      whitelistEnabled?: boolean;
+      commandAdminOnly?: boolean;
+      adminOpenIds?: string[];
+      allowedGroups?: Array<{ externalChatId: string; label?: string }>;
+    };
+    if (body.whitelistEnabled !== undefined) {
+      await store.setWhitelistEnabled(connectorId, body.whitelistEnabled);
+    }
+    if (body.commandAdminOnly !== undefined) {
+      await store.setCommandAdminOnly(connectorId, body.commandAdminOnly);
+    }
+    if (body.adminOpenIds !== undefined) {
+      await store.setAdminOpenIds(connectorId, body.adminOpenIds);
+    }
+    if (body.allowedGroups !== undefined) {
+      const current = await store.listAllowedGroups(connectorId);
+      for (const g of current) await store.denyGroup(connectorId, g.externalChatId);
+      for (const g of body.allowedGroups) await store.allowGroup(connectorId, g.externalChatId, g.label);
+    }
+    return store.getConfig(connectorId);
+  });
+
+  app.post('/api/connector/:id/test', async (request, reply) => {
+    const { error } = requireConnectorWriteIdentity(request, reply);
+    if (error) return error;
+
+    const { id } = request.params as { id: string };
+
+    if (id === 'wecom-bot') {
+      if (!opts.getWeComBotAdapter) {
+        return { valid: false, error: '企微机器人适配器未初始化' };
       }
-      permissions = await store.getConfig(connectorId);
+      const adapter = opts.getWeComBotAdapter();
+      if (!adapter) {
+        return { valid: false, error: '企微机器人未配置' };
+      }
+      const state = adapter.getConnectionState();
+      return { valid: state === 'connected', error: state !== 'connected' ? `当前状态: ${state}` : undefined };
     }
 
-    return { ok: true, permissions };
+    if (id === 'weixin') {
+      const adapter = opts.weixinAdapter;
+      if (!adapter) {
+        return { valid: false, error: '微信适配器未初始化' };
+      }
+      const isActive = adapter.hasBotToken() && adapter.isPolling();
+      return { valid: isActive, error: !isActive ? '微信未连接（需要扫码登录）' : undefined };
+    }
+
+    if (id === 'feishu') {
+      const status = buildConnectorStatus();
+      const feishu = status.find((p) => p.id === 'feishu');
+      return { valid: feishu?.configured === true, error: !feishu?.configured ? '飞书未配置或凭据无效' : undefined };
+    }
+
+    if (id === 'telegram') {
+      const status = buildConnectorStatus();
+      const tg = status.find((p) => p.id === 'telegram');
+      return { valid: tg?.configured === true, error: !tg?.configured ? 'Telegram Bot Token 未配置' : undefined };
+    }
+
+    reply.status(400);
+    return { valid: false, error: `未知平台: ${id}` };
   });
 };

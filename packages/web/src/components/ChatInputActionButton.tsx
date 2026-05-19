@@ -86,11 +86,11 @@ export function ChatInputActionButton({
       {voice.state === 'recording' && (
         <div className="absolute top-0 right-4 -mt-6 flex items-center gap-2">
           {voice.partialTranscript && (
-            <div className="px-2 py-0.5 bg-cafe-surface-sunken text-[var(--cafe-surface)] text-xs rounded-lg max-w-[240px] truncate opacity-80">
+            <div className="px-2 py-0.5 bg-gray-800 text-white text-xs rounded-lg max-w-[240px] truncate opacity-80">
               {voice.partialTranscript}
             </div>
           )}
-          <div className="px-2 py-0.5 bg-conn-red-bg text-conn-red-text text-xs rounded-full animate-pulse whitespace-nowrap">
+          <div className="px-2 py-0.5 bg-conn-red-text text-white text-xs rounded-full animate-pulse whitespace-nowrap">
             REC {Math.floor(voice.duration / 60)}:{String(voice.duration % 60).padStart(2, '0')}
           </div>
         </div>
@@ -105,7 +105,7 @@ export function ChatInputActionButton({
       {hasActiveInvocation && !disabled && onStop && (
         <button
           onClick={() => onStop()}
-          className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-[var(--console-stop)] text-[var(--cafe-surface)] hover:opacity-80 transition-colors"
+          className="p-2 rounded-lg bg-conn-red-text/80 text-white hover:bg-conn-red-hover transition-colors"
           title="停止生成"
           aria-label="Stop generation"
         >
@@ -115,15 +115,12 @@ export function ChatInputActionButton({
         </button>
       )}
 
-      {/* Primary action button priority chain — four design states:
-         State 1: idle-empty → mic
-         State 2: has-text → send (bg input-stroke)
-         State 3: agent-replying, no text → mic (stop is separate)
-         State 4: agent-replying + text → queue (bg voice-companion) + zap */}
+      {/* Primary action button priority chain */}
       {disabled && onStop && hasActiveInvocation ? (
+        /* Backward compat: when explicitly disabled during active invocation, Stop is the only primary action */
         <button
           onClick={() => onStop()}
-          className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-[var(--console-stop)] text-[var(--cafe-surface)] hover:opacity-80 transition-colors"
+          className="p-3 rounded-xl bg-conn-red-text text-white hover:bg-conn-red-hover transition-colors"
           title="停止生成"
           aria-label="Stop generation"
         >
@@ -134,7 +131,7 @@ export function ChatInputActionButton({
       ) : voice.state === 'recording' ? (
         <button
           onClick={voice.stopRecording}
-          className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-[var(--console-stop)] text-[var(--cafe-surface)] hover:opacity-80 transition-colors animate-pulse"
+          className="p-3 rounded-xl bg-conn-red-text text-white hover:bg-conn-red-hover transition-colors animate-pulse"
           title="停止录音"
           aria-label="Stop recording"
         >
@@ -143,18 +140,19 @@ export function ChatInputActionButton({
       ) : voice.state === 'transcribing' ? (
         <button
           disabled
-          className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-cafe-surface-sunken text-[var(--cafe-surface)] cursor-wait"
+          className="p-3 rounded-xl bg-gray-300 text-white cursor-wait"
           title="转写中"
           aria-label="Transcribing"
         >
           <LoadingIcon className="w-5 h-5" />
         </button>
       ) : isQueueMode && onQueueSend ? (
+        /* F39: Queue send — cat is running, user typed, queue the message */
         <div className="flex items-center gap-1">
           <button
             onClick={onQueueSend}
             disabled={isSendDisabled}
-            className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-[var(--console-voice-companion)] text-[var(--cafe-surface)] hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="p-3 rounded-xl bg-[#9B7EBD] text-white hover:bg-[#8A6DAC] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             aria-label="排队发送"
             title="排队发送 — 猫猫忙完后处理"
           >
@@ -164,7 +162,7 @@ export function ChatInputActionButton({
             <button
               onClick={onForceSend}
               disabled={isSendDisabled}
-              className="flex h-8 w-8 items-center justify-center rounded-[10px] text-cafe-muted hover:text-cafe-accent hover:bg-[var(--console-hover-bg)] disabled:opacity-40 transition-colors"
+              className="p-2 rounded-lg text-xs text-conn-red-text hover:bg-conn-red-bg disabled:opacity-40 transition-colors"
               aria-label="强制发送"
               title="强制发送 — 中断当前猫猫"
             >
@@ -182,7 +180,7 @@ export function ChatInputActionButton({
         <button
           onClick={onSend}
           disabled={isSendDisabled}
-          className="flex h-10 w-[42px] items-center justify-center rounded-[12px] bg-[var(--console-input-stroke)] text-[var(--cafe-surface)] hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="p-3 rounded-xl bg-cafe-accent text-white hover:bg-cafe-interactive disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           title="发送消息"
           aria-label="Send message"
         >
@@ -192,7 +190,7 @@ export function ChatInputActionButton({
         <button
           onClick={voice.startRecording}
           disabled={disabled}
-          className="flex h-10 w-10 items-center justify-center rounded-[12px] text-cafe-muted hover:text-cafe-accent hover:bg-[var(--console-hover-bg)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="p-3 rounded-xl text-cafe-muted hover:text-cafe-accent hover:bg-cafe-surface disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           aria-label="Start voice input (⌥V)"
           title="语音输入 (⌥V)"
         >

@@ -87,8 +87,8 @@ export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoo
   return (
     <div className="flex flex-col h-screen h-dvh">
       {/* Toolbar — matches single-mode header style */}
-      <header className="flex flex-shrink-0 items-center gap-2 border-b border-[var(--console-border-soft)] bg-[var(--console-panel-bg)] px-5 py-3">
-        <PawIcon className="h-6 w-6 text-cafe-accent" />
+      <header className="border-b border-cafe-subtle px-5 py-3 bg-cafe-surface flex items-center gap-2 flex-shrink-0">
+        <PawIcon className="text-2xl" />
         <div className="flex-1 min-w-0">
           <h1 className="text-lg font-bold text-cafe-black">Clowder AI</h1>
           <p className="text-xs text-cafe-secondary">分屏模式</p>
@@ -96,7 +96,7 @@ export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoo
         <span className="text-[10px] text-cafe-muted hidden sm:inline mr-1">⌘\ 切换</span>
         <button
           onClick={handleBackToSingle}
-          className="rounded-lg p-1 transition-colors hover:bg-[var(--console-hover-bg)]"
+          className="p-1 rounded-lg hover:bg-cafe-surface-sunken transition-colors"
           aria-label="切换单屏模式"
           title="返回单屏"
         >
@@ -132,7 +132,7 @@ export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoo
           </div>
 
           {/* Shared input bar */}
-          <div className="border-t border-[var(--console-border-soft)] bg-cafe-surface px-3 py-2">
+          <div className="border-t border-cafe-subtle bg-cafe-surface px-3 py-2">
             <div className="flex items-center gap-2 mb-1">
               <span className="text-[10px] text-cafe-muted">
                 {splitPaneTargetId

@@ -10,7 +10,7 @@ description: >
 # Video Forge — AI 视频生产线
 
 > 关联 Feature: [F138 Video Studio](../../docs/features/F138-video-studio.md)
-> 技术收敛纪要: [2026-04-05 三猫收敛](../../feature-discussions/2026-04-05-f138-video-pipeline-tech-convergence.md)
+> 技术收敛纪要: 2026-04-05 三猫收敛
 
 ## 核心原则
 

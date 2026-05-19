@@ -3,19 +3,19 @@
 import type { SourceTag, TriageBucket } from '@cat-cafe/shared';
 
 const BUCKET_STYLES: Record<TriageBucket, { bg: string; text: string; label: string }> = {
-  build_now: { bg: 'bg-conn-emerald-bg', text: 'text-conn-emerald-text', label: 'Build Now' },
-  clarify_first: { bg: 'bg-conn-amber-bg', text: 'text-conn-amber-text', label: 'Clarify First' },
-  validate_first: { bg: 'bg-conn-amber-bg', text: 'text-conn-amber-text', label: 'Validate First' },
-  challenge: { bg: 'bg-conn-red-bg', text: 'text-conn-red-text', label: 'Challenge' },
+  build_now: { bg: 'bg-conn-green-bg', text: 'text-green-800', label: 'Build Now' },
+  clarify_first: { bg: 'bg-yellow-100', text: 'text-yellow-800', label: 'Clarify First' },
+  validate_first: { bg: 'bg-orange-100', text: 'text-orange-800', label: 'Validate First' },
+  challenge: { bg: 'bg-conn-red-bg', text: 'text-red-800', label: 'Challenge' },
   later: { bg: 'bg-cafe-surface-elevated', text: 'text-cafe-secondary', label: 'Later' },
 };
 
 const SOURCE_STYLES: Record<SourceTag, { bg: string; text: string }> = {
-  Q: { bg: 'bg-[var(--color-cafe-accent)]/10', text: 'text-[var(--color-cafe-accent)]' },
-  O: { bg: 'bg-conn-emerald-bg', text: 'text-conn-emerald-text' },
-  D: { bg: 'bg-conn-purple-bg', text: 'text-conn-purple-text' },
-  R: { bg: 'bg-conn-emerald-bg', text: 'text-conn-emerald-text' },
-  A: { bg: 'bg-conn-red-bg', text: 'text-conn-red-text' },
+  Q: { bg: 'bg-blue-100', text: 'text-conn-blue-text' },
+  O: { bg: 'bg-conn-green-bg', text: 'text-green-800' },
+  D: { bg: 'bg-purple-100', text: 'text-purple-800' },
+  R: { bg: 'bg-teal-100', text: 'text-teal-800' },
+  A: { bg: 'bg-conn-red-bg', text: 'text-red-800' },
 };
 
 export function BucketBadge({ bucket }: { bucket: TriageBucket }) {

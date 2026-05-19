@@ -1,12 +1,11 @@
 import type { SignalArticleStatus, StudyMeta } from '@cat-cafe/shared';
-import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
+import { getThreadHref } from '@/components/ThreadSidebar/thread-navigation';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { apiFetch } from '@/utils/api-client';
 import type { SignalArticleDetail } from '@/utils/signals-api';
 import { fetchStudyMeta, linkSignalThread, unlinkSignalThread } from '@/utils/signals-api';
-import { getThreadHref } from '../ThreadSidebar/thread-navigation';
 import { SignalTierBadge } from './SignalTierBadge';
 import { StudyFoldArea } from './StudyFoldArea';
 
@@ -49,7 +48,6 @@ export function SignalArticleDetail({
   onCreateCollection,
   onCollectionChanged,
 }: SignalArticleDetailProps) {
-  const router = useRouter();
   const [pendingTag, setPendingTag] = useState('');
   const [noteText, setNoteText] = useState('');
   const [noteOpen, setNoteOpen] = useState(false);
@@ -69,9 +67,6 @@ export function SignalArticleDetail({
     setNoteText(article.note ?? '');
     setNoteOpen(!!article.note);
     setConfirmDelete(false);
-    setExpandContent(false);
-    setEnrichedContent(null);
-    setEnrichError(null);
   }
 
   const saveNote = useCallback(async () => {
@@ -162,47 +157,46 @@ export function SignalArticleDetail({
       if (!res.ok) return;
       const data = (await res.json()) as { threadId: string };
       const query = new URLSearchParams({ signal: article.id, source: article.source });
-      router.push(`${getThreadHref(data.threadId)}?${query.toString()}`);
+      window.location.href = `${getThreadHref(data.threadId)}?${query.toString()}`;
     } finally {
       setDiscussLoading(false);
     }
   }, [article, discussLoading]);
 
-  const REASON_LABEL: Record<string, string> = {
-    already_enriched: '已获取过全文',
-    no_better_content: '原始页面无可提取正文',
-    fetch_403: '原始页面拒绝访问 (403)',
-    fetch_404: '原始页面不存在 (404)',
-  };
-
-  const handleExpand = useCallback(async () => {
+  const handleEnrich = useCallback(async () => {
+    if (!article || enriching) return;
     if (expandContent) {
       setExpandContent(false);
-      setEnrichError(null);
       return;
     }
-    if (!article || enrichedContent || enriching) {
-      setExpandContent(true);
-      return;
-    }
+    // Always expand existing content immediately
+    setExpandContent(true);
+    if (enrichedContent) return;
+    // Try enrichment in background — failure doesn't block reading
     setEnriching(true);
     setEnrichError(null);
     try {
-      const res = await apiFetch(`/api/signals/articles/${encodeURIComponent(article.id)}/enrich`, { method: 'POST' });
-      if (res.ok) {
-        const data = (await res.json()) as { article?: { content?: string }; enriched?: boolean; reason?: string };
-        if (data.article?.content && data.article.content.length > (article.content?.length ?? 0)) {
-          setEnrichedContent(data.article.content);
-        } else if (data.reason && data.reason !== 'already_enriched') {
-          setEnrichError(REASON_LABEL[data.reason] ?? `获取失败: ${data.reason}`);
-        }
+      const res = await apiFetch(`/api/signals/articles/${encodeURIComponent(article.id)}/enrich`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        setEnrichError('全文抓取失败');
+        return;
       }
-    } catch {
-      setEnrichError('网络请求失败');
+      const data = (await res.json()) as { enriched: boolean; reason?: string; contentLength?: number };
+      if (data.enriched) {
+        const detail = await apiFetch(`/api/signals/articles/${encodeURIComponent(article.id)}`);
+        if (detail.ok) {
+          const body = (await detail.json()) as { article: { content?: string } };
+          setEnrichedContent(body.article.content || null);
+        }
+      } else if (data.reason === 'fetch_failed') {
+        setEnrichError('无法访问原始页面');
+      }
+    } finally {
+      setEnriching(false);
     }
-    setEnriching(false);
-    setExpandContent(true);
-  }, [article, expandContent, enrichedContent, enriching]);
+  }, [article, enriching, expandContent, enrichedContent]);
 
   const addPendingTag = useCallback(async () => {
     if (!article) {
@@ -227,7 +221,7 @@ export function SignalArticleDetail({
 
   if (isLoading) {
     return (
-      <aside className="rounded-xl bg-[var(--console-panel-bg)] p-6 text-sm text-cafe-secondary">
+      <aside className="rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-6 text-sm text-cafe-secondary shadow-sm">
         正在加载文章详情...
       </aside>
     );
@@ -235,17 +229,17 @@ export function SignalArticleDetail({
 
   if (!article) {
     return (
-      <aside className="rounded-xl bg-[var(--console-panel-bg)] p-6 text-sm text-cafe-secondary">
+      <aside className="rounded-xl border border-dashed border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-6 text-sm text-cafe-secondary">
         选择一篇文章查看详情。
       </aside>
     );
   }
 
   return (
-    <aside className="rounded-xl bg-[var(--console-panel-bg)] p-5">
+    <aside className="rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-5 shadow-sm">
       <div className="flex flex-wrap items-center gap-2">
         <SignalTierBadge tier={article.tier} />
-        <span className="rounded bg-cafe-surface-elevated px-2 py-0.5 text-xs font-medium text-cafe-secondary">
+        <span className="rounded bg-[var(--console-field-bg)] px-2 py-0.5 text-xs font-medium text-cafe-secondary">
           {article.status}
         </span>
       </div>
@@ -258,7 +252,7 @@ export function SignalArticleDetail({
           href={article.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="console-button-ghost text-xs px-3 py-1.5"
+          className="rounded-md border border-[var(--console-border-soft)] px-3 py-1.5 text-xs text-cafe-secondary hover:bg-[var(--console-hover-bg)]"
         >
           打开原文 ↗
         </a>
@@ -266,14 +260,14 @@ export function SignalArticleDetail({
           type="button"
           onClick={() => void navigateToDiscuss()}
           disabled={discussLoading}
-          className="rounded-md bg-opus-bg px-3 py-1.5 text-xs text-opus-dark transition-opacity hover:opacity-80 disabled:opacity-50"
+          className="rounded-md border border-opus-light px-3 py-1.5 text-xs text-opus-dark hover:bg-opus-bg disabled:opacity-50"
         >
-          {discussLoading ? '正在跳转...' : studyMeta?.threads?.length ? '继续讨论' : '在对话中讨论'}
+          {discussLoading ? '正在创建讨论...' : '在对话中讨论'}
         </button>
       </div>
       {article.summary && (
-        <section className="console-card mt-4 rounded-lg p-3">
-          <h3 className="text-xs font-semibold text-cafe-secondary">AI 摘要</h3>
+        <section className="mt-4 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-field-bg)] p-3">
+          <h3 className="text-xs font-semibold text-cafe-black">AI 摘要</h3>
           <p className="mt-1 whitespace-pre-wrap text-sm text-cafe-black">{article.summary}</p>
         </section>
       )}
@@ -293,21 +287,23 @@ export function SignalArticleDetail({
       <section className="mt-4">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-semibold text-cafe-secondary">正文</h3>
-          <button
-            type="button"
-            onClick={() => void handleExpand()}
-            disabled={enriching}
-            className="text-xs text-opus-dark hover:underline disabled:opacity-50"
-          >
-            {enriching ? '正在获取全文…' : expandContent ? '收起' : '展开阅读'}
-          </button>
+          <div className="flex items-center gap-2">
+            {enrichError && <span className="text-xs text-red-500">{enrichError}</span>}
+            <button
+              type="button"
+              onClick={handleEnrich}
+              disabled={enriching}
+              className="text-xs text-opus-dark hover:underline disabled:opacity-50"
+            >
+              {enriching ? '正在获取全文…' : expandContent ? '收起' : '展开阅读'}
+            </button>
+          </div>
         </div>
         <div
-          className={`mt-1 rounded-lg bg-[var(--console-card-soft-bg)] p-3 text-sm text-cafe-black ${expandContent ? '' : 'max-h-[300px] overflow-y-auto'}`}
+          className={`mt-1 overflow-y-auto rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-field-bg)] p-3 text-sm text-cafe-black ${expandContent ? '' : 'max-h-[300px]'}`}
         >
           <MarkdownContent content={enrichedContent || article.content || '（无正文）'} />
         </div>
-        {enrichError && <p className="mt-2 text-xs text-conn-amber-text">{enrichError}</p>}
       </section>
       <section className="mt-4">
         <h3 className="text-xs font-semibold text-cafe-secondary">标签</h3>
@@ -316,7 +312,10 @@ export function SignalArticleDetail({
             <span className="text-xs text-cafe-secondary">暂无标签</span>
           ) : (
             article.tags.map((tag) => (
-              <span key={tag} className="rounded-full bg-codex-bg px-2 py-0.5 text-xs text-codex-dark">
+              <span
+                key={tag}
+                className="rounded-full border border-codex-light bg-codex-bg px-2 py-0.5 text-xs text-codex-dark"
+              >
                 {tag}
               </span>
             ))
@@ -337,12 +336,12 @@ export function SignalArticleDetail({
               }
             }}
             placeholder="添加标签"
-            className="flex-1 rounded-md bg-[var(--console-field-bg)] px-2 py-1.5 text-xs text-cafe outline-none"
+            className="flex-1 rounded-md border border-[var(--console-border-soft)] px-2 py-1.5 text-xs"
           />
           <button
             type="button"
             onClick={() => void addPendingTag()}
-            className="rounded-md bg-codex-bg px-2.5 py-1.5 text-xs text-codex-dark transition-opacity hover:opacity-80"
+            className="rounded-md border border-codex-light px-2.5 py-1.5 text-xs text-codex-dark hover:bg-codex-bg"
           >
             添加标签
           </button>
@@ -366,12 +365,12 @@ export function SignalArticleDetail({
                 onBlur={() => void saveNote()}
                 placeholder="写下你的笔记..."
                 rows={3}
-                className="w-full rounded-md bg-[var(--console-field-bg)] px-3 py-2 text-sm text-cafe outline-none"
+                className="w-full rounded-md border border-[var(--console-border-soft)] px-3 py-2 text-sm"
               />
               <button
                 type="button"
                 onClick={() => void saveNote()}
-                className="mt-1 rounded-md bg-opus-bg px-3 py-1 text-xs text-opus-dark transition-opacity hover:opacity-80"
+                className="mt-1 rounded-md border border-opus-light px-3 py-1 text-xs text-opus-dark hover:bg-opus-bg"
               >
                 保存备注
               </button>
@@ -383,21 +382,21 @@ export function SignalArticleDetail({
         <button
           type="button"
           onClick={() => void onStatusChange(article.id, 'inbox')}
-          className="rounded-md bg-[var(--console-card-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] transition hover:text-cafe"
+          className="rounded-md border border-[var(--console-border-soft)] px-3 py-1.5 text-xs text-cafe-secondary hover:bg-[var(--console-hover-bg)]"
         >
           设为 Inbox
         </button>
         <button
           type="button"
           onClick={() => void onStatusChange(article.id, 'read')}
-          className="rounded-md bg-[var(--console-card-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] transition hover:text-cafe"
+          className="rounded-md border border-[var(--console-border-soft)] px-3 py-1.5 text-xs text-cafe-secondary hover:bg-[var(--console-hover-bg)]"
         >
           标记已读
         </button>
         <button
           type="button"
           onClick={() => void onStatusChange(article.id, 'starred')}
-          className="rounded-md bg-conn-amber-bg px-3 py-1.5 text-xs font-medium text-conn-amber-text transition hover:opacity-80"
+          className="rounded-md border border-conn-amber-ring px-3 py-1.5 text-xs text-conn-amber-text hover:bg-conn-amber-bg"
         >
           收藏
         </button>
@@ -408,14 +407,14 @@ export function SignalArticleDetail({
               <button
                 type="button"
                 onClick={() => void handleDelete()}
-                className="rounded-md bg-conn-red-bg px-3 py-1.5 text-xs font-medium text-conn-red-text transition hover:opacity-80"
+                className="rounded-md border border-red-300 px-3 py-1.5 text-xs text-red-700 hover:bg-conn-red-bg"
               >
                 删除
               </button>
               <button
                 type="button"
                 onClick={() => setConfirmDelete(false)}
-                className="rounded-md bg-[var(--console-card-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] transition hover:text-cafe"
+                className="rounded-md border border-[var(--console-border-soft)] px-3 py-1.5 text-xs text-cafe-secondary hover:bg-[var(--console-hover-bg)]"
               >
                 取消
               </button>
@@ -424,7 +423,7 @@ export function SignalArticleDetail({
             <button
               type="button"
               onClick={() => setConfirmDelete(true)}
-              className="rounded-md bg-conn-red-bg px-3 py-1.5 text-xs font-medium text-conn-red-text transition hover:opacity-80"
+              className="rounded-md border border-conn-red-ring px-3 py-1.5 text-xs text-conn-red-text hover:bg-conn-red-bg"
             >
               删除
             </button>

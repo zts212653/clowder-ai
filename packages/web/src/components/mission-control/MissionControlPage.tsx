@@ -2,7 +2,6 @@
 
 import type { BacklogItem, CatId, ExternalProject, MissionHubSelfClaimScope, ThreadPhase } from '@cat-cafe/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getThreadHref } from '@/components/ThreadSidebar/thread-navigation';
 import { useChatStore } from '@/stores/chatStore';
 import { useExternalProjectStore } from '@/stores/externalProjectStore';
 import { useMissionControlStore } from '@/stores/missionControlStore';
@@ -447,17 +446,15 @@ export function MissionControlPage({ initialReferrerThread = null }: { initialRe
     return storeThreadId && storeThreadId !== 'default' ? storeThreadId : null;
   }, [mcFromParam, storeThreadId]);
 
-  const backHref = getThreadHref(referrerThread ?? 'default');
-
   return (
-    <div className="flex h-screen bg-[var(--console-pill-bg)]">
+    <div className="flex h-screen bg-[#F4EFE7]">
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Header */}
-        <header className="flex items-center justify-between border-b border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-6 py-3">
+        <header className="flex items-center justify-between border-b border-[#E7DAC7] bg-[#FFFDF8] px-6 py-3">
           <div className="flex items-center gap-3">
             <a
-              href={backHref}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-1.5 text-xs font-medium text-[var(--cafe-accent)] transition-colors hover:bg-[var(--console-pill-bg)]"
+              href={referrerThread && referrerThread !== 'default' ? `/thread/${referrerThread}` : '/'}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#D8C6AD] bg-[#FCF7EE] px-3 py-1.5 text-xs font-medium text-[#8B6F47] transition-colors hover:bg-[#F7EEDB]"
               data-testid="mc-back-to-chat"
             >
               <svg
@@ -475,7 +472,7 @@ export function MissionControlPage({ initialReferrerThread = null }: { initialRe
             </a>
             <div className="flex items-center gap-2">
               <svg
-                className="h-5 w-5 text-cafe-muted"
+                className="h-5 w-5 text-[#9A866F]"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -488,7 +485,7 @@ export function MissionControlPage({ initialReferrerThread = null }: { initialRe
                 <rect x="14" y="14" width="7" height="7" />
                 <rect x="3" y="14" width="7" height="7" />
               </svg>
-              <h1 className="text-lg font-bold text-cafe">Mission Hub</h1>
+              <h1 className="text-lg font-bold text-[#2B2118]">Mission Hub</h1>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -496,7 +493,7 @@ export function MissionControlPage({ initialReferrerThread = null }: { initialRe
               type="button"
               onClick={() => void handleImportFromDocs()}
               disabled={submitting}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary transition-colors hover:bg-[var(--console-pill-bg)] disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#D8C6AD] bg-[#FCF7EE] px-3 py-1.5 text-xs font-medium text-[#7A6B5A] transition-colors hover:bg-[#F7EEDB] disabled:opacity-40"
               data-testid="mc-import-docs"
             >
               导入 Backlog
@@ -504,7 +501,7 @@ export function MissionControlPage({ initialReferrerThread = null }: { initialRe
             <button
               type="button"
               onClick={() => setShowImportModal(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary transition-colors hover:bg-[var(--console-pill-bg)]"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#D8C6AD] bg-[#FCF7EE] px-3 py-1.5 text-xs font-medium text-[#7A6B5A] transition-colors hover:bg-[#F7EEDB]"
               data-testid="mc-import-project"
             >
               + 导入项目
@@ -520,14 +517,14 @@ export function MissionControlPage({ initialReferrerThread = null }: { initialRe
         )}
 
         {/* Tabs */}
-        <div className="flex border-b border-[var(--console-border-soft)] bg-[var(--console-card-bg)]">
+        <div className="flex border-b border-[#E7DAC7] bg-[#FFFDF8]">
           <button
             type="button"
             onClick={() => setActiveTab('features')}
-            className={`px-5 py-2.5 text-[13px] font-semibold transition-colors ${
+            className={`px-5 py-2.5 text-sm font-semibold transition-colors ${
               activeTab === 'features'
-                ? 'border-b-2 border-[var(--cafe-accent)] text-[var(--cafe-accent)]'
-                : 'text-cafe-muted hover:text-cafe-secondary'
+                ? 'border-b-2 border-[#8B6F47] text-[#8B6F47]'
+                : 'text-[#9A866F] hover:text-[#6B5D4F]'
             }`}
             data-testid="mc-tab-features"
           >
@@ -536,10 +533,10 @@ export function MissionControlPage({ initialReferrerThread = null }: { initialRe
           <button
             type="button"
             onClick={() => setActiveTab('dependencies')}
-            className={`px-5 py-2.5 text-[13px] font-semibold transition-colors ${
+            className={`px-5 py-2.5 text-sm font-semibold transition-colors ${
               activeTab === 'dependencies'
-                ? 'border-b-2 border-[var(--cafe-accent)] text-[var(--cafe-accent)]'
-                : 'text-cafe-muted hover:text-cafe-secondary'
+                ? 'border-b-2 border-[#8B6F47] text-[#8B6F47]'
+                : 'text-[#9A866F] hover:text-[#6B5D4F]'
             }`}
             data-testid="mc-tab-dependencies"
           >
@@ -550,10 +547,10 @@ export function MissionControlPage({ initialReferrerThread = null }: { initialRe
               key={p.id}
               type="button"
               onClick={() => setActiveTab(p.id)}
-              className={`px-5 py-2.5 text-[13px] font-semibold transition-colors ${
+              className={`px-5 py-2.5 text-sm font-semibold transition-colors ${
                 activeTab === p.id
-                  ? 'border-b-2 border-[var(--cafe-accent)] text-[var(--cafe-accent)]'
-                  : 'text-cafe-muted hover:text-cafe-secondary'
+                  ? 'border-b-2 border-[#8B6F47] text-[#8B6F47]'
+                  : 'text-[#9A866F] hover:text-[#6B5D4F]'
               }`}
             >
               {p.name}
@@ -562,15 +559,15 @@ export function MissionControlPage({ initialReferrerThread = null }: { initialRe
         </div>
 
         {/* Status summary bar */}
-        <div className="flex items-center gap-5 border-b border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-6 py-2.5">
-          <StatusDot color="bg-conn-amber-text" label={`${pendingCount} 待审批`} textColor="text-conn-amber-text" />
-          <StatusDot color="bg-conn-blue-text" label={`${activeCount} 执行中`} textColor="text-conn-blue-text" />
-          <StatusDot color="bg-conn-emerald-text" label={`${doneCount} 已完成`} textColor="text-conn-emerald-text" />
+        <div className="flex items-center gap-5 border-b border-[#E7DAC7] bg-[#FFFDF8] px-6 py-2.5">
+          <StatusDot color="bg-[#E4A853]" label={`${pendingCount} 待审批`} textColor="text-[#9A7B3D]" />
+          <StatusDot color="bg-[#5B9BD5]" label={`${activeCount} 执行中`} textColor="text-[#4A7FB5]" />
+          <StatusDot color="bg-[#7CB87C]" label={`${doneCount} 已完成`} textColor="text-[#5A9A5A]" />
         </div>
 
         {error && (
           <div
-            className="mx-6 mt-3 rounded-[20px] border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-xs text-conn-red-text"
+            className="mx-6 mt-3 rounded-xl border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-xs text-red-700"
             data-testid="mc-error"
             role="alert"
           >
@@ -603,13 +600,13 @@ export function MissionControlPage({ initialReferrerThread = null }: { initialRe
 
               {/* Right panel: tabbed operations */}
               <div className="flex min-h-0 flex-col">
-                <div className="flex border-b border-[var(--console-border-soft)]">
+                <div className="flex border-b border-[#E7DAC7]">
                   <button
                     type="button"
                     className={`px-3 py-1.5 text-xs font-medium transition-colors ${
                       rightPanelTab === 'suggestion'
-                        ? 'border-b-2 border-[var(--cafe-accent)] text-cafe'
-                        : 'text-cafe-muted hover:text-cafe-secondary'
+                        ? 'border-b-2 border-[#8B6F47] text-[#4B3A2A]'
+                        : 'text-[#9A866F] hover:text-[#6E5A46]'
                     }`}
                     onClick={() => setRightPanelTab('suggestion')}
                     data-testid="mc-right-tab-suggestion"
@@ -620,8 +617,8 @@ export function MissionControlPage({ initialReferrerThread = null }: { initialRe
                     type="button"
                     className={`px-3 py-1.5 text-xs font-medium transition-colors ${
                       rightPanelTab === 'sop'
-                        ? 'border-b-2 border-[var(--cafe-accent)] text-cafe'
-                        : 'text-cafe-muted hover:text-cafe-secondary'
+                        ? 'border-b-2 border-[#8B6F47] text-[#4B3A2A]'
+                        : 'text-[#9A866F] hover:text-[#6E5A46]'
                     }`}
                     onClick={() => setRightPanelTab('sop')}
                     data-testid="mc-right-tab-sop"
@@ -632,8 +629,8 @@ export function MissionControlPage({ initialReferrerThread = null }: { initialRe
                     type="button"
                     className={`px-3 py-1.5 text-xs font-medium transition-colors ${
                       rightPanelTab === 'threads'
-                        ? 'border-b-2 border-[var(--cafe-accent)] text-cafe'
-                        : 'text-cafe-muted hover:text-cafe-secondary'
+                        ? 'border-b-2 border-[#8B6F47] text-[#4B3A2A]'
+                        : 'text-[#9A866F] hover:text-[#6E5A46]'
                     }`}
                     onClick={() => setRightPanelTab('threads')}
                     data-testid="mc-right-tab-threads"
@@ -679,7 +676,7 @@ export function MissionControlPage({ initialReferrerThread = null }: { initialRe
           )}
         </div>
 
-        {loading && items.length === 0 && <p className="px-6 py-2 text-xs text-cafe-muted">加载 backlog 中...</p>}
+        {loading && items.length === 0 && <p className="px-6 py-2 text-xs text-[#8A7864]">加载 backlog 中...</p>}
       </main>
     </div>
   );
@@ -689,7 +686,7 @@ function StatusDot({ color, label, textColor }: { color: string; label: string; 
   return (
     <span className="flex items-center gap-1.5">
       <span className={`h-2 w-2 rounded-full ${color}`} />
-      <span className={`text-[13px] font-semibold ${textColor}`}>{label}</span>
+      <span className={`text-sm font-semibold ${textColor}`}>{label}</span>
     </span>
   );
 }

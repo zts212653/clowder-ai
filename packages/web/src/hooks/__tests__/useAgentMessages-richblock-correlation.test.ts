@@ -687,4 +687,108 @@ describe('useAgentMessages rich_block correlation (Bug A)', () => {
 
     expect(mockAppendRichBlock).toHaveBeenCalledWith(explicitMsgId, testBlock);
   });
+
+  it('AC-Z17: invocationless rich_block after done attaches to just-finalized stream bubble, not a new small bubble', () => {
+    mockSetStreaming.mockImplementation((id: string, streaming: boolean) => {
+      storeState.messages = storeState.messages.map((m) => (m.id === id ? { ...m, isStreaming: streaming } : m));
+    });
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    storeState.messages.push({
+      id: 'msg-voice-stream',
+      type: 'assistant',
+      catId: 'opus',
+      content: '🎵 已发！',
+      isStreaming: true,
+      origin: 'stream',
+      extra: { stream: { invocationId: 'inv-voice' } },
+      timestamp: Date.now() - 1000,
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'done',
+        catId: 'opus',
+        invocationId: 'inv-voice',
+        isFinal: true,
+      });
+    });
+
+    expect(storeState.messages[0]?.isStreaming).toBe(false);
+    vi.clearAllMocks();
+
+    const voiceBlock = { id: 'voice-after-done', kind: 'audio', v: 1, url: '/api/audio/voice.wav' };
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'opus',
+        content: JSON.stringify({ type: 'rich_block', block: voiceBlock }),
+      });
+    });
+
+    // Z6: this is the old "F5 前多一个小气泡，F5 后消失" race. The late rich block
+    // should reuse the finalized stream bubble recorded by done, not create bg-rich/msg-*.
+    expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockAppendRichBlock).toHaveBeenCalledTimes(1);
+    expect(mockAppendRichBlock).toHaveBeenCalledWith('msg-voice-stream', voiceBlock);
+  });
+
+  it('does not attach explicit rich_block from a new invocation to the previous finalized bubble', () => {
+    mockSetStreaming.mockImplementation((id: string, streaming: boolean) => {
+      storeState.messages = storeState.messages.map((m) => (m.id === id ? { ...m, isStreaming: streaming } : m));
+    });
+    mockAddMessage.mockImplementation((message) => {
+      storeState.messages.push(message);
+    });
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    storeState.messages.push({
+      id: 'msg-old-voice-stream',
+      type: 'assistant',
+      catId: 'opus',
+      content: 'old voice done',
+      isStreaming: true,
+      origin: 'stream',
+      extra: { stream: { invocationId: 'inv-old-voice' } },
+      timestamp: Date.now() - 1000,
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'done',
+        catId: 'opus',
+        invocationId: 'inv-old-voice',
+        isFinal: true,
+      });
+    });
+
+    vi.clearAllMocks();
+
+    const newVoiceBlock = { id: 'voice-new-invocation', kind: 'audio', v: 1, url: '/api/audio/new.wav' };
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'opus',
+        invocationId: 'inv-new-voice',
+        content: JSON.stringify({ type: 'rich_block', block: newVoiceBlock }),
+      });
+    });
+
+    expect(mockAppendRichBlock).toHaveBeenCalledTimes(1);
+    expect(mockAppendRichBlock).toHaveBeenCalledWith('msg-inv-new-voice-opus', newVoiceBlock);
+    expect(mockAppendRichBlock).not.toHaveBeenCalledWith('msg-old-voice-stream', newVoiceBlock);
+    expect(mockAddMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'msg-inv-new-voice-opus',
+        catId: 'opus',
+        extra: { stream: { invocationId: 'inv-new-voice' } },
+      }),
+    );
+  });
 });

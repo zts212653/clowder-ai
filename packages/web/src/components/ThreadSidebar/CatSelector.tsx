@@ -55,7 +55,7 @@ export function CatSelector({ selectedCats, onSelectionChange }: CatSelectorProp
                     className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs transition-colors border ${
                       isSelected
                         ? 'font-medium border-current'
-                        : 'border-[var(--console-border-soft)] text-cafe-secondary hover:border-cafe'
+                        : 'border-cafe text-cafe-secondary hover:border-gray-400'
                     }`}
                     style={
                       isSelected

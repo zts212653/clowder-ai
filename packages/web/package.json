@@ -5,7 +5,7 @@
   "scripts": {
     "sync:vendor-assets": "node scripts/sync-vendor-assets.mjs",
     "predev": "pnpm run sync:vendor-assets",
-    "dev": "next dev",
+    "dev": "node scripts/sync-vendor-assets.mjs --watch -- next dev",
     "prebuild": "pnpm run sync:vendor-assets",
     "build": "next build",
     "prestart": "pnpm run sync:vendor-assets",
@@ -44,6 +44,7 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-markdown": "^10.1.0",
+    "react-rnd": "^10.5.3",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
     "socket.io-client": "^4.7.0",

@@ -86,7 +86,7 @@ export function VoteActiveBar({ threadId, onEnd }: { threadId: string; onEnd: ()
       <button
         type="button"
         onClick={handleEnd}
-        className="text-xs text-conn-amber-text hover:opacity-90 transition-colors flex-shrink-0"
+        className="text-xs text-conn-amber-text hover:text-conn-amber-text transition-colors flex-shrink-0"
       >
         结束投票
       </button>

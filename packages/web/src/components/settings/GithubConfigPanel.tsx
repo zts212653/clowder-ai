@@ -2,11 +2,15 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { SettingsPrimaryButton, SettingsStatusStrip, SettingsText } from './primitives';
+
+const REDACTED_PLACEHOLDER = '••••••';
 
 interface GitHubField {
   envName: string;
   label: string;
   sensitive: boolean;
+  restartRequired?: boolean;
   currentValue: string | null;
 }
 
@@ -19,11 +23,31 @@ interface ConnectorStatusResponse {
   platforms?: GitHubPlatformStatus[];
 }
 
+function friendlyError(message: string, fallback: string): string {
+  if (message.includes('DEFAULT_OWNER_USER_ID')) {
+    return 'DEFAULT_OWNER_USER_ID 未配置，后端拒绝写入 GitHub token。请先配置 owner 后再保存。';
+  }
+  if (message.includes('configured owner')) {
+    return '当前登录用户不是配置 owner，不能修改 GitHub token。';
+  }
+  return message.trim() || fallback;
+}
+
+async function readError(res: Response, fallback: string): Promise<string> {
+  try {
+    const payload = (await res.json()) as { error?: unknown };
+    if (typeof payload.error === 'string') return friendlyError(payload.error, fallback);
+  } catch {
+    // ignore non-json body
+  }
+  return fallback;
+}
+
 export function GithubConfigPanel() {
   const [fields, setFields] = useState<GitHubField[]>([]);
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
-  const [result, setResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [message, setMessage] = useState<{ tone: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   const fetchFields = useCallback(async () => {
     try {
@@ -31,10 +55,10 @@ export function GithubConfigPanel() {
       if (!res.ok) return;
       const data = (await res.json()) as ConnectorStatusResponse | GitHubPlatformStatus[];
       const platforms = Array.isArray(data) ? data : (data.platforms ?? []);
-      const gh = platforms.find((p) => p.id === 'github');
-      setFields(gh?.fields ?? []);
+      const github = platforms.find((platform) => platform.id === 'github');
+      setFields(github?.fields ?? []);
     } catch {
-      /* ignore */
+      // Config panel is additive; plugins page service cards remain usable if status fetch fails.
     }
   }, []);
 
@@ -42,93 +66,124 @@ export function GithubConfigPanel() {
     void fetchFields();
   }, [fetchFields]);
 
-  const handleSave = useCallback(async () => {
-    const updates = fields
-      .filter((f) => values[f.envName] !== undefined)
-      .map((f) => ({ name: f.envName, value: values[f.envName] || null }));
-    if (updates.length === 0) {
-      setResult({ type: 'error', message: '请填写至少一个配置项' });
-      return;
-    }
+  const updateField = (envName: string, value: string) => {
+    setValues((current) => ({ ...current, [envName]: value }));
+  };
 
+  const handleSave = async () => {
+    if (saving) return;
     setSaving(true);
-    setResult(null);
+    setMessage(null);
     try {
+      const updates = fields
+        .map((field) => ({ name: field.envName, value: values[field.envName]?.trim() ?? '' }))
+        .filter((update) => update.value.length > 0);
+      if (updates.length === 0) {
+        setMessage({ tone: 'info', text: '没有需要保存的 GitHub 配置。' });
+        return;
+      }
+      if (updates.some((update) => update.value.includes(REDACTED_PLACEHOLDER))) {
+        setMessage({ tone: 'error', text: '不能保存已脱敏占位符，请留空保持原值或输入新值。' });
+        return;
+      }
       const res = await apiFetch('/api/config/secrets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ updates }),
       });
       if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as Record<string, string>;
-        setResult({ type: 'error', message: data.error ?? '保存失败' });
+        setMessage({ tone: 'error', text: await readError(res, `保存失败（HTTP ${res.status}）`) });
         return;
       }
       setValues({});
-      setResult({ type: 'success', message: 'GitHub 配置已保存' });
+      setMessage({ tone: 'success', text: 'GitHub 配置已保存，secret 字段已清空。' });
       await fetchFields();
     } catch {
-      setResult({ type: 'error', message: '网络错误' });
+      setMessage({ tone: 'error', text: '保存失败，请检查 API 连接后重试。' });
     } finally {
       setSaving(false);
     }
-  }, [fields, values, fetchFields]);
+  };
+
+  const messageTone = message?.tone === 'success' ? 'success' : message?.tone === 'error' ? 'error' : 'info';
 
   return (
-    <div className="px-4 py-3">
-      <p className="mb-2 text-[12px] font-bold text-cafe-secondary">配置项</p>
+    <div
+      className="space-y-3"
+      style={{ borderTop: '1px solid var(--cafe-border)', paddingInline: '1rem', paddingBlock: '0.75rem' }}
+    >
+      <div className="space-y-1">
+        <SettingsText as="p" variant="sm" tone="default" className="font-medium">
+          GitHub Token
+        </SettingsText>
+        <SettingsText as="p" tone="secondary">
+          保存后写入运行时 .env；secret 字段留空会保留现有值。标记为重启的字段需重启 API 后生效。
+        </SettingsText>
+      </div>
+
       {fields.length === 0 ? (
-        <p className="text-[12px] text-cafe-muted">加载配置项...</p>
+        <SettingsText as="p" tone="muted">
+          加载配置项...
+        </SettingsText>
       ) : (
-        <div className="space-y-2">
+        <div className="grid gap-3 md:grid-cols-2">
           {fields.map((field) => (
-            <div key={field.envName}>
-              <label
-                htmlFor={`plugin-config-${field.envName}`}
-                className="mb-1 block text-xs font-medium text-cafe-secondary"
-              >
-                {field.label}
-              </label>
+            <label
+              key={field.envName}
+              className="space-y-1 font-medium"
+              style={{ fontSize: '0.75rem', color: 'var(--cafe-text-secondary)' }}
+            >
+              {field.label}
               <input
-                id={`plugin-config-${field.envName}`}
+                name={field.envName}
                 type={field.sensitive ? 'password' : 'text'}
+                value={values[field.envName] ?? ''}
+                onChange={(event) => updateField(field.envName, event.target.value)}
                 placeholder={
                   field.sensitive
                     ? field.currentValue
-                      ? '已设置（输入新值覆盖）'
+                      ? '已配置，留空保持不变'
                       : '未配置'
                     : (field.currentValue ?? '未配置')
                 }
-                value={values[field.envName] ?? ''}
-                onChange={(e) => setValues((prev) => ({ ...prev, [field.envName]: e.target.value }))}
-                className="console-form-input py-2.5 text-compact"
+                className="w-full"
+                style={{
+                  borderRadius: '0.5rem',
+                  border: '1px solid var(--cafe-border)',
+                  backgroundColor: 'var(--cafe-surface-elevated)',
+                  paddingInline: '0.75rem',
+                  paddingBlock: '0.5rem',
+                  fontSize: '0.875rem',
+                  color: 'var(--cafe-text)',
+                }}
                 data-testid={`field-${field.envName}`}
               />
-            </div>
+              {field.restartRequired && (
+                <SettingsText as="span" tone="muted" className="block">
+                  重启 API 后生效
+                </SettingsText>
+              )}
+            </label>
           ))}
-          {result && (
-            <div
-              className={`rounded-[16px] px-3 py-2 text-xs ${
-                result.type === 'success'
-                  ? 'border border-conn-emerald-ring bg-conn-emerald-bg text-conn-emerald-text'
-                  : 'border border-conn-red-ring bg-conn-red-bg text-conn-red-text'
-              }`}
-            >
-              {result.message}
-            </div>
-          )}
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={() => void handleSave()}
-              disabled={saving}
-              className="console-button-primary text-compact disabled:opacity-50"
-            >
-              {saving ? '保存中...' : '保存 GitHub 配置'}
-            </button>
-          </div>
         </div>
       )}
+
+      {message && (
+        <SettingsStatusStrip tone={messageTone} size="xs" bordered>
+          {message.text}
+        </SettingsStatusStrip>
+      )}
+
+      <div className="flex justify-end">
+        <SettingsPrimaryButton
+          onClick={() => {
+            void handleSave();
+          }}
+          disabled={saving || fields.length === 0}
+        >
+          {saving ? '保存中...' : '保存 GitHub 配置'}
+        </SettingsPrimaryButton>
+      </div>
     </div>
   );
 }

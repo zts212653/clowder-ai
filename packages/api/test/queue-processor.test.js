@@ -1688,7 +1688,9 @@ describe('QueueProcessor', () => {
       assert.ok(succeededUpdate, 'should succeed even without outboundHook');
     });
 
-    it('delivery failure: cleanupPlaceholders NOT called when delivery partially fails', async () => {
+    it('delivery failure: cleanupPlaceholders is NOT called after hard delivery failure (R5-P1)', async () => {
+      // R5-P1 design: when delivery fails, placeholder is preserved as fallback indicator
+      // for the next retry/invocation. Cleanup must NOT run on failure.
       // F151: mid-loop delivery retries failed turns in the final phase,
       // so use catId-based failure to ensure opus consistently fails.
       const outboundHook = {
@@ -1728,12 +1730,12 @@ describe('QueueProcessor', () => {
 
       assert.equal(outboundHook.deliver.mock.calls.length, 3, 'mid-loop (2) + final-phase retry (1)');
 
-      // One rejection → Promise.allSettled sees mixed results → cleanupPlaceholders skipped
-      await new Promise((r) => setTimeout(r, 50));
+      // Settle any pending allSettled callbacks
+      await new Promise((r) => setTimeout(r, 200));
       assert.equal(
         streamingHook.cleanupPlaceholders.mock.calls.length,
         0,
-        'cleanupPlaceholders should NOT be called when delivery partially fails',
+        'cleanupPlaceholders must NOT be called when delivery fails (R5-P1: preserve placeholder as fallback)',
       );
     });
 

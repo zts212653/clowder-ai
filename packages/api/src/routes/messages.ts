@@ -25,10 +25,18 @@ import {
   type CollaborationContinuityCapsuleV1,
   extractContinuityCapsuleFromAgentMessage,
 } from '../domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js';
+import {
+  ensureTerminalStatus,
+  RouteChainCompletionTracker,
+} from '../domains/cats/services/agents/invocation/ensureTerminalStatus.js';
+import { getThreadLiveInvocations } from '../domains/cats/services/agents/invocation/getThreadLiveInvocations.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
+import { reconcileZombies } from '../domains/cats/services/agents/invocation/reconcileZombies.js';
+import type { TaskProgressStore } from '../domains/cats/services/agents/invocation/TaskProgressStore.js';
+import { stampVisibleTurn } from '../domains/cats/services/agents/invocation/visible-turn.js';
 import type { PersistenceContext } from '../domains/cats/services/agents/routing/route-helpers.js';
 import { resetStreak } from '../domains/cats/services/agents/routing/WorklistRegistry.js';
 import {
@@ -98,6 +106,11 @@ const STREAM_START_TIMEOUT_MS = 5_000;
  * Dependencies injected via Fastify plugin options.
  * socketManager is injected to avoid circular import from index.ts.
  */
+/** F194 Phase Z3 (KD-23): process-singleton in-memory map tracking routeExecution chain
+ *  completion signals for parent recordStore invocations. Producer sets pending/succeeded/failed;
+ *  background async finally reads this to terminalize records that escaped explicit terminal write. */
+const routeChainTracker = new RouteChainCompletionTracker();
+
 export interface MessagesRoutesOptions {
   registry: InvocationRegistry;
   messageStore: IMessageStore;
@@ -109,6 +122,10 @@ export interface MessagesRoutesOptions {
   uploadDir?: string;
   invocationTracker?: InvocationTracker;
   invocationRecordStore?: IInvocationRecordStore;
+  /** F194 AC-B7: when helper detects zombies, reconcileZombies clears their TaskProgress
+   *  snapshot so the frontend doesn't show phantom progress. Optional — cleanup still marks
+   *  records `failed` even without this. */
+  taskProgressStore?: TaskProgressStore;
 
   summaryStore?: ISummaryStore;
   /** #80: Streaming draft store for F5 recovery */
@@ -148,7 +165,7 @@ function tryAutoCancelPendingHolds(threadId: string, deps: HoldBallCancelDeps | 
 
 async function persistA2ARoutingMessage(
   messageStore: IMessageStore,
-  msg: { content?: string; timestamp: number },
+  msg: { catId?: string; content?: string; invocationId?: string; targetCatId?: string; timestamp: number },
   threadId: string,
 ): Promise<string | undefined> {
   if (!msg.content) return undefined;
@@ -160,7 +177,14 @@ async function persistA2ARoutingMessage(
       mentions: [],
       timestamp: msg.timestamp,
       threadId,
-      extra: { systemKind: 'a2a_routing' },
+      extra: {
+        systemKind: 'a2a_routing',
+        a2aRouting: {
+          fromCatId: msg.catId,
+          targetCatId: msg.targetCatId,
+          invocationId: msg.invocationId,
+        },
+      },
     });
     return stored.id;
   } catch (err) {
@@ -786,6 +810,12 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         // F148 fix: Hoisted so abort/catch branches can ack completed cats' cursors
         const cursorBoundaries = new Map<string, string>();
 
+        // F194 Phase Z3 (AC-Z3): mark chain start for finally fallback. routeExecution may
+        // hang / silently exit / swallow exceptions and never reach explicit terminal write
+        // (root cause of bubble-still-split symptom). Without this signal, finally would
+        // fallback failed even on success. start→succeeded/failed → finally CAS terminal.
+        routeChainTracker.start(createResult.invocationId);
+
         try {
           await opts.invocationRecordStore?.update(createResult.invocationId, {
             status: 'running',
@@ -854,7 +884,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               ...(opts.invocationQueue
                 ? {
                     queueHasQueuedMessages: (tid: string) =>
-                      opts.invocationQueue?.hasQueuedUserMessagesForThread(tid) ?? false,
+                      opts.invocationQueue?.hasQueuedNonAgentForThread(tid) ?? false,
+                    deferA2AEnqueue: (e) => opts.invocationQueue?.enqueue(e as any),
                     hasQueuedOrActiveAgentForCat: (tid: string, catId: string) =>
                       opts.invocationQueue?.hasActiveOrQueuedAgentForCat(tid, catId) ?? false,
                   }
@@ -954,13 +985,17 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               }
             }
 
+            // F194 Phase Z9 (砚砚 R1 P1-2): unified visible turn stamp via helper.
+            // Route layer (R1 P1-1 fix) now stamps msg.invocationId = ownInvocationId
+            // for assistant yielded events, so helper receives a defined turn id
+            // (no parent fallback firing in practice).
             const broadcastPayload = {
               ...msg,
-              invocationId: createResult.invocationId,
+              ...stampVisibleTurn(createResult.invocationId, msg.invocationId),
             };
 
             if (msg.type === 'a2a_handoff') {
-              const storedId = await persistA2ARoutingMessage(opts.messageStore, msg, resolvedThreadId);
+              const storedId = await persistA2ARoutingMessage(opts.messageStore, broadcastPayload, resolvedThreadId);
               if (storedId) broadcastPayload.messageId = storedId;
             }
 
@@ -1049,6 +1084,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 : {}),
             });
             finalStatus = 'succeeded';
+            // F194 Phase Z3: chain succeeded — signal for finally fallback
+            routeChainTracker.succeed(createResult.invocationId);
 
             for (const continuationCapsule of continuationCapsules.values()) {
               opts.queueProcessor?.enqueueContinuation({
@@ -1134,6 +1171,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               status: 'failed',
               error: errorMsg,
             });
+            // F194 Phase Z3: chain failed — diagnostic signal for finally fallback
+            routeChainTracker.fail(createResult.invocationId);
             opts.socketManager.broadcastAgentMessage(
               {
                 type: 'error',
@@ -1161,6 +1200,29 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         } finally {
           clearInterval(heartbeatInterval);
           opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
+          // F194 Phase Z3 (AC-Z3): defensive terminal write. If routeExecution silently exited
+          // without writing terminal (the runtime split symptom root cause), CAS expectedStatus=
+          // running guarded write based on chainCompletion signal. Skips if status already terminal.
+          // Reads chainTracker → succeeded/failed/missing → CAS update or fallback. (砚砚 R1 P1-3)
+          if (opts.invocationRecordStore) {
+            try {
+              await ensureTerminalStatus(
+                createResult.invocationId,
+                {
+                  invocationRecordStore: opts.invocationRecordStore,
+                  chainCompletion: routeChainTracker,
+                  log,
+                },
+                { reqId: request.id },
+              );
+            } catch (err) {
+              log.warn(
+                { err, invocationId: createResult.invocationId, feature: 'F194' },
+                'F194 Z3 ensureTerminalStatus failed (background)',
+              );
+            }
+          }
+          routeChainTracker.release(createResult.invocationId);
           // F39: Notify queue processor for auto-dequeue chain
           opts.queueProcessor?.onInvocationComplete(resolvedThreadId, primaryCat, finalStatus).catch((err) => {
             log.error(
@@ -1324,7 +1386,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       m.extra?.stream ||
       m.extra?.targetCats ||
       m.extra?.scheduler ||
-      m.extra?.systemKind
+      m.extra?.systemKind ||
+      m.extra?.a2aRouting
         ? {
             extra: {
               ...(m.extra.rich ? { rich: m.extra.rich } : {}),
@@ -1333,6 +1396,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               ...(m.extra.targetCats ? { targetCats: m.extra.targetCats } : {}),
               ...(m.extra.scheduler ? { scheduler: m.extra.scheduler } : {}),
               ...(m.extra.systemKind ? { systemKind: m.extra.systemKind } : {}),
+              ...(m.extra.a2aRouting ? { a2aRouting: m.extra.a2aRouting } : {}),
             },
           }
         : {}),
@@ -1373,6 +1437,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     if (!before && opts.draftStore) {
       const draftStore = opts.draftStore;
       const drafts = await draftStore.getByThread(userId, resolvedThreadId);
+      let activeDrafts = drafts;
       // #80 fix-B diagnostic: trace draft merge for F5 recovery verification
       if (drafts.length > 0) {
         request.log.info(
@@ -1380,11 +1445,18 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           '#80 draft merge: found active drafts',
         );
         // P1-2 dedup: filter out drafts whose invocationId matches a formal message.
-        // Build invocationId set from current page first (fast path).
-        const formalInvocationIds = new Set(
-          page.map((m) => m.extra?.stream?.invocationId).filter((id): id is string => !!id),
-        );
-        let activeDrafts = drafts.filter((d) => !formalInvocationIds.has(d.invocationId));
+        // F194 Phase Z3 P1-3 (砚砚 R): formal set MUST collect both `invocationId` (parent SoT) and
+        // `turnInvocationId` (Z3 dual id, where draft.invocationId === turnInvocationId for new
+        // formal messages). Without this, append-success-but-draft-not-yet-deleted window double-shows
+        // formal + draft for the same turn.
+        const formalInvocationIds = new Set<string>();
+        for (const m of page) {
+          const parentInv = m.extra?.stream?.invocationId;
+          const turnInv = m.extra?.stream?.turnInvocationId;
+          if (parentInv) formalInvocationIds.add(parentInv);
+          if (turnInv) formalInvocationIds.add(turnInv);
+        }
+        activeDrafts = drafts.filter((d) => !formalInvocationIds.has(d.invocationId));
         // Cloud R4 P2: if drafts survive page-level dedup, widen the check to cover
         // formal messages pushed off the first page (race window: TTL > page depth).
         // Cloud R5 P2: wider window must always exceed page limit (limit max=200 → worst case 800).
@@ -1392,112 +1464,120 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           const widerLimit = Math.max(200, limit * 4);
           const wider = await opts.messageStore.getByThread(resolvedThreadId, widerLimit, userId);
           for (const m of wider) {
-            const invId = m.extra?.stream?.invocationId;
-            if (invId) formalInvocationIds.add(invId);
+            const parentInv = m.extra?.stream?.invocationId;
+            const turnInv = m.extra?.stream?.turnInvocationId;
+            if (parentInv) formalInvocationIds.add(parentInv);
+            if (turnInv) formalInvocationIds.add(turnInv);
           }
           activeDrafts = activeDrafts.filter((d) => !formalInvocationIds.has(d.invocationId));
         }
-        // F173 Phase A hotfix3 / stream-catchup repair:
-        // Draft persistence can outlive its invocation record when an invocation
-        // crashes or is replaced before a formal message is written. Filter those
-        // orphan drafts from the response, but do not delete from the GET path:
-        // a stale/missing InvocationRecord can be corrected by the active
-        // InvocationTracker, while real zombies still expire by DraftStore TTL or
-        // explicit completion/cancel cleanup.
-        if (activeDrafts.length > 0 && opts.invocationRecordStore) {
-          const invocationRecordStore = opts.invocationRecordStore;
-          const orphanDrafts: typeof activeDrafts = [];
-          const orphanDetails: Array<Record<string, unknown>> = [];
-          const checkedActiveDrafts: typeof activeDrafts = [];
-          for (const draft of activeDrafts) {
-            let record;
-            try {
-              record = await invocationRecordStore.get(draft.invocationId);
-            } catch (error) {
-              request.log.warn(
-                { err: error, threadId: resolvedThreadId, draftId: draft.invocationId },
-                '#80 draft merge: invocation liveness lookup failed',
-              );
-              checkedActiveDrafts.push(draft);
-              continue;
-            }
-            const recordActive =
-              record?.status === 'running' && record.threadId === resolvedThreadId && record.userId === userId;
-            let trackerActive = false;
-            let trackerSlotStartedAt: number | null = null;
-            let trackerUserId: string | null = null;
-            if (!recordActive && opts.invocationTracker) {
-              try {
-                const draftCreatedAt = draft.createdAt ?? draft.updatedAt;
-                const trackerSlot = opts.invocationTracker
-                  .getActiveSlots(resolvedThreadId)
-                  .find((slot) => slot.catId === draft.catId && slot.startedAt <= draftCreatedAt);
-                if (trackerSlot) {
-                  trackerSlotStartedAt = trackerSlot.startedAt;
-                  trackerUserId = opts.invocationTracker.getUserId(resolvedThreadId, draft.catId);
-                  trackerActive = trackerUserId === userId;
-                }
-              } catch (error) {
-                request.log.warn(
-                  { err: error, threadId: resolvedThreadId, draftId: draft.invocationId, catId: draft.catId },
-                  '#80 draft merge: tracker liveness lookup failed',
-                );
-                checkedActiveDrafts.push(draft);
-                continue;
-              }
-            }
-            if (recordActive || trackerActive) {
-              checkedActiveDrafts.push(draft);
-            } else {
-              orphanDrafts.push(draft);
-              orphanDetails.push({
-                draftId: draft.invocationId,
-                catId: draft.catId,
-                draftCreatedAt: draft.createdAt ?? draft.updatedAt,
-                draftUpdatedAt: draft.updatedAt,
-                recordStatus: record?.status ?? null,
-                recordThreadId: record?.threadId ?? null,
-                recordUserId: record?.userId ?? null,
-                trackerSlotStartedAt,
-                trackerUserId,
-              });
-            }
-          }
-          activeDrafts = checkedActiveDrafts;
+      }
 
-          if (orphanDrafts.length > 0) {
-            const logPayload = {
-              threadId: resolvedThreadId,
-              orphanCount: orphanDrafts.length,
-              draftIds: orphanDrafts.map((d) => d.invocationId),
-              orphanDetails,
-              cleanup: 'ttl_or_completion',
-            };
-            request.log.info(logPayload, '#80 draft merge: filtered orphan drafts');
+      // F194 Phase B step 2b: canonical getThreadLiveInvocations helper.
+      // Cloud R17 P1: helper MUST run even when activeDrafts is empty — zombies
+      // (record running + no fresh draft + age past grace) are exactly the empty-drafts
+      // case. Skipping the helper here means /messages never reconciles them; only /queue
+      // would, and a thread that's read but not queue-checked stays phantom forever.
+      //
+      // AC-B5 preservation (砚砚 R6 P1 fix): gate only requires `invocationRecordStore` —
+      // tracker is OPTIONAL. Embedded modes / legacy tests that wire recordStore but not
+      // tracker still get zombie detection + orphan filtering.
+      if (opts.invocationRecordStore) {
+        const recordStore = opts.invocationRecordStore;
+        const tracker = opts.invocationTracker;
+        const draftsForHelper = activeDrafts; // already deduped against formal messages (or empty)
+        try {
+          const liveness = await getThreadLiveInvocations(resolvedThreadId, userId, {
+            listRunningRecords: (tid, uid) => recordStore.listRunningByThread(tid, uid),
+            getActiveSlots: (tid) => tracker?.getActiveSlots(tid) ?? [],
+            getTrackerUserId: (tid, cid) => tracker?.getUserId(tid, cid) ?? null,
+            getDrafts: () => draftsForHelper,
+            // F194 Phase Z (KD-22): namespace bridge — child registry id → parent recordStore id.
+            // Wraps existing InvocationRegistry.getRecord (parentInvocationId field) + getLatestId.
+            // Helper uses these to detect parent+child execution chain liveness and cat-slot reuse
+            // zombies (砚砚 R1 P1-1: 结构化 dep, not boolean black-box).
+            getTurnInvocation: async (id) => {
+              const rec = await opts.registry.getRecord(id);
+              if (!rec) return null;
+              return {
+                parentInvocationId: rec.parentInvocationId,
+                threadId: rec.threadId,
+                userId: rec.userId,
+                catId: rec.catId,
+                createdAt: rec.createdAt,
+              };
+            },
+            getLatestTurnInvocationId: (tid, cat) => opts.registry.getLatestId(tid, cat),
+            // F194 AC-B12: route diagnostic events into request log. NB: do NOT spread
+            // `source: 'F194'` — that would clobber LivenessEvent.source (record+draft /
+            // record-only / tracker+draft / null), losing the diagnostic. Use `feature`.
+            onLog: (event) => request.log.info({ ...event, feature: 'F194' }, 'F194 liveness event'),
+          });
+          const liveInvocationIds = new Set(liveness.active.map((s) => s.invocationId));
+          const orphanDrafts = activeDrafts.filter((d) => !liveInvocationIds.has(d.invocationId));
+          activeDrafts = activeDrafts.filter((d) => liveInvocationIds.has(d.invocationId));
+          // F194 AC-B7~B10: fire-and-forget zombie cleanup so /messages read isn't blocked.
+          // Lifecycle converges to failed + TaskProgress cleared. Idempotent (state machine
+          // guard rejects double-write). reconcileZombies failure logs warn — never throws.
+          if (liveness.zombies.length > 0) {
+            void reconcileZombies(liveness.zombies, {
+              invocationRecordStore: recordStore,
+              taskProgressStore: opts.taskProgressStore,
+              log: request.log,
+            }).catch((err) => request.log.warn({ err, feature: 'F194' }, 'reconcileZombies failed'));
           }
-        }
-        // P2: stable sort by updatedAt for parallel multi-cat drafts
-        activeDrafts.sort((a, b) => a.updatedAt - b.updatedAt);
-        if (activeDrafts.length > 0) {
-          request.log.info(
-            { threadId: resolvedThreadId, mergedCount: activeDrafts.length, cats: activeDrafts.map((d) => d.catId) },
-            '#80 draft merge: merging drafts into response',
+          if (orphanDrafts.length > 0) {
+            request.log.info(
+              {
+                threadId: resolvedThreadId,
+                orphanCount: orphanDrafts.length,
+                draftIds: orphanDrafts.map((d) => d.invocationId),
+                cleanup: 'helper-canonical',
+              },
+              '#80 draft merge: filtered orphan drafts (F194 helper-canonical)',
+            );
+          }
+        } catch (err) {
+          // F194 AC-B13: fail-open + fallback metric — record/tracker error must not 500
+          // the read endpoint, but split-brain protection is bypassed during fallback.
+          request.log.warn(
+            {
+              err,
+              kind: 'liveness_fallback',
+              threadId: resolvedThreadId,
+              userId,
+              feature: 'F194',
+              endpoint: '/messages',
+              draftCount: activeDrafts.length,
+            },
+            '#80 draft merge: F194 helper threw, fall-open keep all drafts',
           );
         }
-        for (const d of activeDrafts) {
-          chatItems.push({
-            id: `draft-${d.invocationId}`,
-            type: 'assistant',
-            catId: d.catId as string | null,
-            content: d.content,
-            timestamp: d.updatedAt,
-            isDraft: true,
-            origin: 'stream',
-            extra: { stream: { invocationId: d.invocationId } },
-            ...(d.toolEvents ? { toolEvents: d.toolEvents } : {}),
-            ...(d.thinking ? { thinking: d.thinking } : {}),
-          });
-        }
+      }
+
+      // P2: stable sort by updatedAt for parallel multi-cat drafts
+      activeDrafts.sort((a, b) => a.updatedAt - b.updatedAt);
+      if (activeDrafts.length > 0) {
+        request.log.info(
+          { threadId: resolvedThreadId, mergedCount: activeDrafts.length, cats: activeDrafts.map((d) => d.catId) },
+          '#80 draft merge: merging drafts into response',
+        );
+      }
+      for (const d of activeDrafts) {
+        chatItems.push({
+          id: `draft-${d.invocationId}`,
+          type: 'assistant',
+          catId: d.catId as string | null,
+          content: d.content,
+          timestamp: d.updatedAt,
+          isDraft: true,
+          origin: 'stream',
+          // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId; draft has only
+          // one identity so both fields point to draft invocationId.
+          extra: { stream: { invocationId: d.invocationId, turnInvocationId: d.invocationId } },
+          ...(d.toolEvents ? { toolEvents: d.toolEvents } : {}),
+          ...(d.thinking ? { thinking: d.thinking } : {}),
+        });
       }
     }
 

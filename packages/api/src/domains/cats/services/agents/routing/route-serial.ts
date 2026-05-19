@@ -10,8 +10,7 @@
  * A2A only triggers here in routeSerial; routeParallel never chains (MVP safety boundary).
  */
 
-import type { CatConfig, CatId } from '@cat-cafe/shared';
-import { catRegistry } from '@cat-cafe/shared';
+import { type CatConfig, type CatId, catRegistry, createCatId } from '@cat-cafe/shared';
 import type { Span } from '@opentelemetry/api';
 import { context, trace } from '@opentelemetry/api';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
@@ -25,6 +24,9 @@ import {
   ROUTE_TOTAL_TOKENS,
 } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import {
+  c2VerdictHintEmitted,
+  c2VerdictWithoutPassCount,
+  c2VoidHoldHintEmitted,
   inlineActionChecked,
   inlineActionDetected,
   inlineActionFeedbackWriteFailed,
@@ -42,21 +44,27 @@ import {
   guideContextForCat,
   prepareGuideContext,
 } from '../../../../guides/GuideRoutingInterceptor.js';
+import { triggerRecallCorrelation } from '../../../../memory/recall-correlation-hook.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
 import {
   buildInvocationContext,
   buildStaticIdentity,
+  buildStaticIdentityPackOnly,
   type InvocationContext,
 } from '../../context/SystemPromptBuilder.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
 import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
 import {
+  hydrateCrossThreadReplyHint,
   hydrateReplyPreview,
   type StoredToolEvent,
   type StreamMetadataAugmentInput,
 } from '../../stores/ports/MessageStore.js';
 import type { Thread, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
+import { classifyTool } from '../../tool-usage/classify.js';
+import { deriveResultSummary } from '../../tool-usage/derive-result-summary.js';
+import { normalizeMcpToolName } from '../../tool-usage/normalize-mcp-tool-name.js';
 import { getStreamingTtsRegistry, StreamingTtsChunker } from '../../tts/StreamingTtsChunker.js';
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
 import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
@@ -73,6 +81,7 @@ import {
   updateStreakOnPush,
 } from '../routing/WorklistRegistry.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
+import { formatA2AHandoffContent } from './a2a-handoff-label.js';
 import { extractContextEvalSignals } from './context-eval.js';
 import { validateRoutingSyntax } from './final-routing-slot.js';
 import { buildBriefingMessage } from './format-briefing.js';
@@ -243,6 +252,7 @@ export async function* routeSerial(
     modeSystemPromptByCat,
     queueHasQueuedMessages,
     hasQueuedOrActiveAgentForCat,
+    deferA2AEnqueue,
   } = options;
   const previousResponses: { catId: CatId; content: string }[] = [];
   const thinkingMode = options.thinkingMode ?? 'play';
@@ -329,6 +339,8 @@ export async function* routeSerial(
     dismissTracker: deps.invocationDeps.dismissTracker,
   });
 
+  const completedCatInvocationIds: Array<[string, string]> = [];
+
   try {
     while (index < worklist.length) {
       if (signal?.aborted) break;
@@ -365,6 +377,24 @@ export async function* routeSerial(
       const streamReplyPreview = streamReplyTo
         ? await hydrateReplyPreview(deps.messageStore, streamReplyTo)
         : undefined;
+      // F193 AC-B2: structured cross-thread reply hint hydrated from trigger message.
+      // Closes Codex review P1 (砚砚 2026-05-08): worklist `a2aTriggerMessageId` map
+      // only has entries for downstream A2A targets — initial target via the modern
+      // InvocationQueue path doesn't register in the map. Queue path's trigger id
+      // arrives via `routeOptions.currentUserMessageId` (QueueProcessor → routeExecution).
+      // Fallback chain ensures queue path also gets the hint without changing
+      // streamReplyTo/auto-replyTo behavior (those have different semantics).
+      // Same-thread triggers / agent-key path naturally return null inside the helper.
+      const crossThreadReplyHintTriggerId = worklistEntry.a2aTriggerMessageId.get(catId) ?? currentUserMessageId;
+      const crossThreadReplyHintRaw = crossThreadReplyHintTriggerId
+        ? await hydrateCrossThreadReplyHint(deps.messageStore, crossThreadReplyHintTriggerId)
+        : null;
+      const crossThreadReplyHint = crossThreadReplyHintRaw
+        ? {
+            sourceThreadId: crossThreadReplyHintRaw.sourceThreadId,
+            senderCatId: createCatId(crossThreadReplyHintRaw.senderCatId),
+          }
+        : undefined;
       let mentionRoutingFeedback = null;
       if (deps.invocationDeps.threadStore) {
         try {
@@ -373,8 +403,15 @@ export async function* routeSerial(
           log.warn({ catId: catId as string, err: feedbackErr }, 'consumeMentionRoutingFeedback failed');
         }
       }
-      // MCP documentation: Claude's MCP_TOOLS_SECTION → staticIdentity (in -p content).
-      // Non-Claude HTTP callback instructions → per-message (session history may be lost on compress).
+      // mcpAvailable still gates the per-message HTTP callback fallback below
+      // (needsMcpInjection). F203 Phase C: the non-pack identity/家规/MCP docs
+      // travel via the compression-immune native system role
+      // (--system-prompt-file / -c) ONLY for providers that inject L0 natively
+      // (ClaudeBgCarrier + CodexAgent). Other providers (ClaudeAgentService
+      // legacy -p, Gemini, Antigravity, CatAgent, A2A, OpenCode, Dare, Kimi…)
+      // have no native L0 channel, so they MUST still receive the full static
+      // identity via the user-message systemPrompt prepend — otherwise they
+      // lose identity/家规 entirely (云端 Codex P1-cloud-1, 2026-05-16).
       const mcpAvailable = (catConfig?.mcpSupport ?? false) && !!mcpServerPath;
       // F129: Load active pack blocks (best-effort, failure does not block invocation)
       let packBlocks: import('@cat-cafe/shared').CompiledPackBlocks | null = null;
@@ -382,7 +419,11 @@ export async function* routeSerial(
         const { getActivePackBlocks } = await import('../../../../packs/getActivePackBlocks.js');
         packBlocks = await getActivePackBlocks(deps.packStore);
       }
-      const staticIdentity = buildStaticIdentity(catId, { mcpAvailable, packBlocks });
+      const service = getService(deps.services, catId);
+      const hasNativeL0 = service.injectsL0Natively?.() ?? false;
+      const staticIdentity = hasNativeL0
+        ? buildStaticIdentityPackOnly(catId, { packBlocks })
+        : buildStaticIdentity(catId, { mcpAvailable, packBlocks });
       // F041: inject HTTP callback only when MCP is NOT actually available (fallback)
       const mcpInstructions = needsMcpInjection(mcpAvailable, catConfig?.clientId)
         ? buildMcpCallbackInstructions({
@@ -467,6 +508,7 @@ export async function* routeSerial(
         a2aEnabled,
         ...(directMessageFrom ? { directMessageFrom } : {}),
         ...(pingPongWarning ? { pingPongWarning } : {}),
+        ...(crossThreadReplyHint ? { crossThreadReplyHint } : {}),
         ...(mentionRoutingFeedback ? { mentionRoutingFeedback } : {}),
         ...(activeParticipants.length > 0 ? { activeParticipants } : {}),
         ...(routingPolicy ? { routingPolicy } : {}),
@@ -691,11 +733,11 @@ export async function* routeSerial(
         'Invoking cat via invokeSingleCat',
       );
       const leakedPayloadStripper = createLeakedToolCallStreamStripper();
-      const invocationStartedAt = Date.now();
       const invocationSpanRef: { current?: Span } = {};
+      const invocationStartedAt = Date.now();
       for await (const msg of invokeSingleCat(deps.invocationDeps, {
         catId,
-        service: getService(deps.services, catId),
+        service,
         prompt,
         userId,
         threadId,
@@ -840,6 +882,22 @@ export async function* routeSerial(
               awaitingCallbackResult = false;
               if (callbackResult.messageId) callbackPostMessageId = callbackResult.messageId;
             }
+            // F188 Phase F AC-F10 (砚砚 六审 P1-B: also scope by catId for serial route consistency).
+            // 砚砚 cloud-3 P1: also pass toolUseId for exact match when available;
+            // otherwise FIFO toolName+catId match handles same-name parallel calls.
+            if (deps.toolEventLog && completedToolName) {
+              const normalizedName = normalizeMcpToolName(completedToolName);
+              const resultSummary = deriveResultSummary(normalizedName, effectiveMsg.content);
+              if (Object.keys(resultSummary).length > 0) {
+                const resultMsg = effectiveMsg as { catId?: string; toolUseId?: string };
+                const matcher: { toolUseId?: string; toolName?: string; catId?: string } = resultMsg.toolUseId
+                  ? { toolUseId: resultMsg.toolUseId }
+                  : resultMsg.catId
+                    ? { toolName: normalizedName, catId: resultMsg.catId }
+                    : { toolName: normalizedName };
+                deps.toolEventLog.updateSummary(threadId, matcher, resultSummary).catch(() => {});
+              }
+            }
           }
 
           // F150: Fire-and-forget tool usage counter
@@ -849,6 +907,59 @@ export async function* routeSerial(
               effectiveMsg.toolName ?? 'unknown',
               effectiveMsg.toolInput as Record<string, unknown> | undefined,
             );
+          }
+          // F188 Phase F AC-F10: append-only tool event log (砚砚 三审 P1 wiring)
+          if (effectiveMsg.type === 'tool_use' && deps.toolEventLog && effectiveMsg.catId) {
+            const msg = effectiveMsg as {
+              catId?: string;
+              toolName?: string;
+              toolInput?: Record<string, unknown>;
+              toolUseId?: string;
+              invocationId?: string;
+              sessionId?: string;
+              threadId?: string;
+              turnIndex?: number;
+            };
+            // 砚砚 四审 P1-1: normalizeMcpToolName handles mcp__/mcp:/cat_cafe_ child extraction
+            const rawToolName = msg.toolName ?? 'unknown';
+            const classification = classifyTool(rawToolName, msg.toolInput);
+            const normalizedToolName =
+              classification.category === 'skill' ? classification.toolName : normalizeMcpToolName(rawToolName);
+            // 砚砚 cloud-3 P1: propagate toolUseId into summary (as _toolUseId) so
+            // updateSummary can do exact match when provider emits it on tool_result.
+            const baseSummary = (msg.toolInput ?? {}) as Record<string, unknown>;
+            const summary: Record<string, unknown> = msg.toolUseId
+              ? { ...baseSummary, _toolUseId: msg.toolUseId }
+              : baseSummary;
+            deps.toolEventLog
+              .append({
+                invocationId: msg.invocationId ?? ownInvocationId ?? 'unknown',
+                sessionId: msg.sessionId ?? ownInvocationId ?? 'unknown',
+                threadId: msg.threadId ?? threadId ?? 'unknown',
+                catId: msg.catId ?? 'unknown',
+                toolName: normalizedToolName,
+                timestamp: Date.now(),
+                turnIndex: msg.turnIndex ?? 0,
+                status: 'success',
+                summary,
+              })
+              .catch(() => {});
+            // 砚砚 二审 P1-4: detect Skill tool_use → SkillLoadEventLog (AS-4 producer path)
+            if (rawToolName === 'Skill' && deps.skillLoadEventLog) {
+              const skillName =
+                msg.toolInput && typeof msg.toolInput['skill'] === 'string'
+                  ? (msg.toolInput['skill'] as string)
+                  : 'unknown';
+              deps.skillLoadEventLog
+                .append({
+                  invocationId: msg.invocationId ?? ownInvocationId ?? 'unknown',
+                  sessionId: msg.sessionId ?? ownInvocationId ?? 'unknown',
+                  skillId: skillName,
+                  loadTrigger: 'explicit_call',
+                  timestamp: Date.now(),
+                })
+                .catch(() => {});
+            }
           }
 
           // #80: Draft flush — fire-and-forget periodic persistence for F5 recovery
@@ -928,15 +1039,24 @@ export async function* routeSerial(
             if (effectiveMsg.type === 'text' && !effectiveMsg.content) {
               continue;
             }
+            // F194 Phase Z9 砚砚 R1 P1-1: stamp ownInvocationId on yielded stream events
+            // so downstream broadcaster (messages.ts) doesn't fall back to parent when
+            // assigning turnInvocationId. CLI text/done/tool events don't carry
+            // invocationId; only system_info=invocation_created does. Without explicit
+            // stamping, multi-turn same-cat under shared parent collapses to one bubble.
+            const ownStampedMsg =
+              ownInvocationId && !effectiveMsg.invocationId
+                ? { ...effectiveMsg, invocationId: ownInvocationId }
+                : effectiveMsg;
             // Tag CLI stdout text with origin: 'stream' (thinking/internal)
-            yield effectiveMsg.type === 'text'
+            yield ownStampedMsg.type === 'text'
               ? {
-                  ...effectiveMsg,
+                  ...ownStampedMsg,
                   origin: 'stream' as const,
                   ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
                   ...(streamReplyPreview ? { replyPreview: streamReplyPreview } : {}),
                 }
-              : effectiveMsg;
+              : ownStampedMsg;
           }
         }
       }
@@ -1175,6 +1295,8 @@ export async function* routeSerial(
               timestamp: Date.now(),
               source: hintSource,
             });
+            c2VerdictHintEmitted.add(1, { 'agent.id': catId as string });
+            c2VerdictWithoutPassCount.add(1, { 'agent.id': catId as string });
             if (deps.socketManager) {
               deps.socketManager.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
                 threadId,
@@ -1210,7 +1332,7 @@ export async function* routeSerial(
               icon: '🏓',
               meta: { presentation: 'system_notice', noticeTone: 'warning' },
             };
-            const stored = await deps.messageStore.append({
+            const voidStored = await deps.messageStore.append({
               userId: 'system',
               catId: null,
               threadId,
@@ -1221,15 +1343,16 @@ export async function* routeSerial(
               timestamp: Date.now(),
               source: hintSource,
             });
+            c2VoidHoldHintEmitted.add(1, { 'agent.id': catId as string });
             if (deps.socketManager) {
               deps.socketManager.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
                 threadId,
                 message: {
-                  id: stored.id,
+                  id: voidStored.id,
                   type: 'connector',
-                  content: stored.content,
+                  content: voidStored.content,
                   source: hintSource,
-                  timestamp: stored.timestamp,
+                  timestamp: voidStored.timestamp,
                 },
               });
             }
@@ -1348,7 +1471,21 @@ export async function* routeSerial(
               ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
               extra: {
                 ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
-                ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
+                // F194 Phase Z3: dual id — invocationId=parent (legacy SoT for liveness/queue/cancel),
+                // turnInvocationId=own (Z3 new SoT for frontend bubble identity stable key, prevents
+                // same-parent multi-turn-same-cat bubble merge).
+                // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId.
+                // First-in-chain (ownInvocationId === parent) still gets explicit
+                // turn stamp so frontend bubble identity never falls back to parent
+                // (which would let multi-turn same-cat under same parent collapse).
+                ...(persistedInvocationId
+                  ? {
+                      stream: {
+                        invocationId: persistedInvocationId,
+                        turnInvocationId: ownInvocationId ?? persistedInvocationId,
+                      },
+                    }
+                  : {}),
                 ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
               },
             });
@@ -1372,7 +1509,21 @@ export async function* routeSerial(
               };
               const extraParts = {
                 ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
-                ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
+                // F194 Phase Z3: dual id — invocationId=parent (legacy SoT for liveness/queue/cancel),
+                // turnInvocationId=own (Z3 new SoT for frontend bubble identity stable key, prevents
+                // same-parent multi-turn-same-cat bubble merge).
+                // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId.
+                // First-in-chain (ownInvocationId === parent) still gets explicit
+                // turn stamp so frontend bubble identity never falls back to parent
+                // (which would let multi-turn same-cat under same parent collapse).
+                ...(persistedInvocationId
+                  ? {
+                      stream: {
+                        invocationId: persistedInvocationId,
+                        turnInvocationId: ownInvocationId ?? persistedInvocationId,
+                      },
+                    }
+                  : {}),
                 ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
               };
               if (Object.keys(extraParts).length > 0) metadataPatch.extra = extraParts;
@@ -1437,12 +1588,12 @@ export async function* routeSerial(
           }
         }
 
-        // Diagnostic: log when A2A text-scan gate blocks (previously silent)
+        // Diagnostic: log when A2A text-scan gate blocks
         if (a2aMentions.length > 0) {
           if (queuedMessagesPending) {
             log.info(
               { threadId, catId, a2aMentions, a2aCount: worklistEntry.a2aCount },
-              'A2A text-scan blocked: user messages pending in queue (fairness gate)',
+              'A2A text-scan blocked: non-agent messages pending in queue (fairness gate)',
             );
           } else if (worklistEntry.a2aCount >= maxDepth) {
             log.info(
@@ -1542,6 +1693,62 @@ export async function* routeSerial(
               dispatchSpan.end();
             }
           }
+        } else if (a2aMentions.length > 0 && queuedMessagesPending && deferA2AEnqueue && !signal?.aborted) {
+          // F185 Phase B: deferred enqueue — preserve A2A handoff behind non-agent entries
+          const pendingTailDeferred = worklist.slice(index + 1);
+          for (const nextCat of a2aMentions) {
+            if (worklistEntry.a2aCount >= maxDepth) break;
+            if (pendingTailDeferred.includes(nextCat)) continue;
+            if (hasQueuedOrActiveAgentForCat && hasQueuedOrActiveAgentForCat(threadId, nextCat)) {
+              log.info(
+                { threadId, catId: nextCat, fromCat: catId },
+                'A2A text-scan dedup (deferred): cat actively processing, skipping',
+              );
+              continue;
+            }
+            // F167 L1 + F185-B AC-B3a: ping-pong streak check for deferred path
+            const hadSubstantiveToolCallDeferred = collectedToolNames.some((n) => isSubstantiveTool(n));
+            const streakDeferred = updateStreakOnPush(worklistEntry, catId, nextCat, {
+              hadSubstantiveToolCall: hadSubstantiveToolCallDeferred,
+              outputLength: storedContent.length,
+            });
+            if (streakDeferred.blockPingPong) {
+              log.info(
+                { threadId, catId: nextCat, fromCat: catId, count: streakDeferred.count },
+                'F167 L1: A2A ping-pong terminated in deferred path (streak >= 4)',
+              );
+              yield {
+                type: 'system_info' as AgentMessageType,
+                catId,
+                content: JSON.stringify({
+                  type: 'a2a_pingpong_terminated',
+                  fromCatId: catId,
+                  targetCatId: nextCat,
+                  pairCount: streakDeferred.count,
+                }),
+                timestamp: Date.now(),
+              } as AgentMessage;
+              continue;
+            }
+            deferA2AEnqueue({
+              threadId,
+              userId,
+              content: storedContent,
+              source: 'agent',
+              sourceCategory: 'a2a',
+              targetCats: [nextCat],
+              callerCatId: catId,
+              messageId: storedMsgId,
+              autoExecute: true,
+              priority: 'normal',
+              intent: 'execute',
+            });
+            worklistEntry.a2aCount++;
+            log.info(
+              { threadId, catId: nextCat, fromCat: catId },
+              'A2A text-scan deferred: enqueued behind non-agent entries (F185-B)',
+            );
+          }
         }
 
         // F27: Emit a2a_handoff for ALL new A2A targets (both response-text and callback-pushed).
@@ -1576,7 +1783,9 @@ export async function* routeSerial(
           yield {
             type: 'a2a_handoff' as AgentMessageType,
             catId,
-            content: `${catConfig?.displayName ?? catId} → ${nextConfig?.displayName ?? pendingCat}`,
+            content: formatA2AHandoffContent(catId, pendingCat, catConfig, nextConfig),
+            invocationId: ownInvocationId,
+            targetCatId: pendingCat,
             timestamp: Date.now(),
           } as AgentMessage;
         }
@@ -1639,8 +1848,15 @@ export async function* routeSerial(
               ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
               extra: {
                 ...(noTextBlocks.length > 0 ? { rich: { v: 1 as const, blocks: noTextBlocks } } : {}),
+                // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId
+                // (= ownInvocationId, else parent fallback).
                 ...((options.parentInvocationId ?? ownInvocationId)
-                  ? { stream: { invocationId: (options.parentInvocationId ?? ownInvocationId) as string } }
+                  ? {
+                      stream: {
+                        invocationId: (options.parentInvocationId ?? ownInvocationId) as string,
+                        turnInvocationId: (ownInvocationId ?? options.parentInvocationId) as string,
+                      },
+                    }
                   : {}),
                 ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
               },
@@ -1718,8 +1934,15 @@ export async function* routeSerial(
             ...((options.parentInvocationId ?? ownInvocationId) || doneMsg?.tracing
               ? {
                   extra: {
+                    // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId
+                    // for error+toolEvents records too.
                     ...((options.parentInvocationId ?? ownInvocationId)
-                      ? { stream: { invocationId: (options.parentInvocationId ?? ownInvocationId) as string } }
+                      ? {
+                          stream: {
+                            invocationId: (options.parentInvocationId ?? ownInvocationId) as string,
+                            turnInvocationId: (ownInvocationId ?? options.parentInvocationId) as string,
+                          },
+                        }
                       : {}),
                     ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
                   },
@@ -1802,7 +2025,9 @@ export async function* routeSerial(
         yield {
           type: 'a2a_handoff' as AgentMessageType,
           catId,
-          content: `${catConfig?.displayName ?? catId} → ${nextConfig?.displayName ?? pendingCat}`,
+          content: formatA2AHandoffContent(catId, pendingCat, catConfig, nextConfig),
+          invocationId: ownInvocationId,
+          targetCatId: pendingCat,
           timestamp: Date.now(),
         } as AgentMessage;
       }
@@ -1882,11 +2107,15 @@ export async function* routeSerial(
 
       // Yield buffered done with correct isFinal (evaluated AFTER worklist may have grown)
       // MUST always reach here regardless of append success (缅因猫 review P1-2)
+      // F194 Phase Z9 砚砚 R1 P1-1: stamp ownInvocationId on done if not already set.
       if (doneMsg) {
         const isFinal = index === worklist.length - 1;
-        yield { ...doneMsg, ...(mentionsUser ? { mentionsUser } : {}), isFinal };
+        const ownStampedDone =
+          ownInvocationId && !doneMsg.invocationId ? { ...doneMsg, invocationId: ownInvocationId } : doneMsg;
+        yield { ...ownStampedDone, ...(mentionsUser ? { mentionsUser } : {}), isFinal };
         activeTrackedA2ASlots.delete(catId);
         if (isFinal) yieldedFinalDone = true;
+        if (ownInvocationId) completedCatInvocationIds.push([catId, ownInvocationId]);
       }
 
       // F27: Advance executedIndex so pushToWorklist knows which cats are done
@@ -1907,6 +2136,22 @@ export async function* routeSerial(
 
     if (options.invocationController && options.completeA2ASlots && activeTrackedA2ASlots.size > 0) {
       options.completeA2ASlots(threadId, [...activeTrackedA2ASlots], options.invocationController);
+    }
+
+    // F200 AC-A1: fire-and-forget recall correlation after all cats complete
+    if (deps.toolEventLog && deps.evidenceStore && completedCatInvocationIds.length > 0) {
+      const evidenceDb = (deps.evidenceStore as { getDb?: () => import('better-sqlite3').Database }).getDb?.();
+      if (evidenceDb) {
+        deps.toolEventLog
+          .readByThread(threadId)
+          .then((events) => {
+            const raw = events as unknown as Parameters<typeof triggerRecallCorrelation>[1];
+            for (const [catId, invId] of completedCatInvocationIds) {
+              triggerRecallCorrelation(evidenceDb, raw, invId, catId).catch(() => {});
+            }
+          })
+          .catch(() => {});
+      }
     }
 
     // F27: Always unregister worklist, even on error/abort.

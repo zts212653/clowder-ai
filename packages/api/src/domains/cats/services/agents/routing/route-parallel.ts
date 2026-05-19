@@ -19,16 +19,21 @@ import {
   guideContextForCat,
   prepareGuideContext,
 } from '../../../../guides/GuideRoutingInterceptor.js';
+import { triggerRecallCorrelation } from '../../../../memory/recall-correlation-hook.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
 import {
   buildInvocationContext,
   buildStaticIdentity,
+  buildStaticIdentityPackOnly,
   type InvocationContext,
 } from '../../context/SystemPromptBuilder.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
 import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
 import type { StoredToolEvent } from '../../stores/ports/MessageStore.js';
 import type { Thread, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
+import { classifyTool } from '../../tool-usage/classify.js';
+import { deriveResultSummary } from '../../tool-usage/derive-result-summary.js';
+import { normalizeMcpToolName } from '../../tool-usage/normalize-mcp-tool-name.js';
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
 import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
 import { buildCapsuleFromRouteState } from '../invocation/CollaborationContinuityCapsule.js';
@@ -157,8 +162,14 @@ export async function* routeParallel(
     targetCats.map(async (catId) => {
       const catConfig: CatConfig | undefined = catRegistry.tryGet(catId as string)?.config;
       const teammates = targetCats.filter((id) => id !== catId);
-      // Build identity: static goes in -p content (+ systemPrompt as defense-in-depth), dynamic in -p only.
-      // Non-Claude HTTP callback instructions → per-message (session history may be lost on compress).
+      // F203 Phase C: non-pack identity/家规/MCP docs travel via the
+      // compression-immune native system role (--system-prompt-file / -c)
+      // ONLY for providers with native L0 injection (ClaudeBgCarrier +
+      // CodexAgent, Task 3/4). Non-native providers (ClaudeAgent legacy -p,
+      // Gemini, Antigravity, CatAgent, A2A, OpenCode, Dare, Kimi…) still
+      // need full identity via user-message systemPrompt prepend, else they
+      // lose identity/家规 entirely (云端 Codex P1-cloud-1, 2026-05-16).
+      // mcpAvailable still gates the per-message HTTP callback fallback.
       const mcpAvailable = (catConfig?.mcpSupport ?? false) && !!mcpServerPath;
       // F129: Load active pack blocks (best-effort)
       let packBlocks: import('@cat-cafe/shared').CompiledPackBlocks | null = null;
@@ -166,7 +177,11 @@ export async function* routeParallel(
         const { getActivePackBlocks } = await import('../../../../packs/getActivePackBlocks.js');
         packBlocks = await getActivePackBlocks(deps.packStore);
       }
-      const staticIdentity = buildStaticIdentity(catId, { mcpAvailable, packBlocks });
+      const service = getService(deps.services, catId);
+      const hasNativeL0 = service.injectsL0Natively?.() ?? false;
+      const staticIdentity = hasNativeL0
+        ? buildStaticIdentityPackOnly(catId, { packBlocks })
+        : buildStaticIdentity(catId, { mcpAvailable, packBlocks });
       // F041: inject HTTP callback only when MCP is NOT actually available (fallback)
       const mcpInstructions = needsMcpInjection(mcpAvailable, catConfig?.clientId)
         ? buildMcpCallbackInstructions({
@@ -398,7 +413,7 @@ export async function* routeParallel(
 
       return invokeSingleCat(deps.invocationDeps, {
         catId,
-        service: getService(deps.services, catId),
+        service,
         prompt,
         userId,
         threadId,
@@ -406,6 +421,10 @@ export async function* routeParallel(
         ...(targetUploadDir ? { uploadDir: targetUploadDir } : {}),
         ...(signal ? { signal } : {}),
         ...(staticIdentity ? { systemPrompt: staticIdentity } : {}),
+        // F194 Phase Z2 (砚砚 catch 2026-05-09)：parallel route 必须传 parentInvocationId，
+        // 与 route-serial.ts:725 对齐。否则 child registry record 缺 parentInvocationId →
+        // helper namespace bridge 失效 → ideate/parallel 场景气泡又裂。
+        ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
         ...(options.routeSpan ? { routeSpan: options.routeSpan } : {}),
         continuityCapsule,
         isLastCat: false,
@@ -431,6 +450,7 @@ export async function* routeParallel(
   const catHadProviderError = new Set<string>();
   // F22 R2 P1-1: Capture own invocationId per cat from stream
   const catInvocationId = new Map<string, string>();
+  const completedCatInvocationIds: Array<[string, string]> = [];
   const catPayloadStrippers = new Map<string, ReturnType<typeof createLeakedToolCallStreamStripper>>();
   let completedCount = 0;
   let yieldedFinalDone = false;
@@ -460,6 +480,16 @@ export async function* routeParallel(
     return stripper;
   }
 
+  // F200 HW-4 根因①: per-cat pending tool FIFO. Claude/Opus parallel
+  // tool_result often carries no result-side toolName/toolUseId/mcp label;
+  // without a fallback the result-side summary (incl. _f200Candidates) is
+  // never merged (audit Round 1: 59.2% candidates_json=[]). route-serial.ts
+  // has consumePendingToolResult; parallel had none. Keyed by catId because
+  // parallel runs multiple cats concurrently.
+  // 砚砚 HW-4 R1-2 review: entries carry toolUseId so an exact result can
+  // splice its own entry by id (not the first same-name), preventing
+  // same-name queue drift (search→graph→search).
+  const pendingToolResultsByCat = new Map<string, Array<{ toolName: string; toolUseId?: string }>>();
   const invocationStartedAt = Date.now();
   for await (const msg of mergeStreams(streams, (idx, err) => {
     log.error({ streamIndex: idx, err }, 'Parallel stream error');
@@ -580,8 +610,147 @@ export async function* routeParallel(
           effectiveMsg.toolInput as Record<string, unknown> | undefined,
         );
       }
+      // F188 Phase F AC-F10: append-only tool event log (砚砚 三审 P1 wiring)
+      if (effectiveMsg.type === 'tool_use' && deps.toolEventLog && effectiveMsg.catId) {
+        const msg = effectiveMsg as {
+          catId?: string;
+          toolName?: string;
+          toolInput?: Record<string, unknown>;
+          toolUseId?: string;
+          invocationId?: string;
+          sessionId?: string;
+          threadId?: string;
+          turnIndex?: number;
+        };
+        // 砚砚 四审 P1-1: normalizeMcpToolName handles mcp__/mcp:/cat_cafe_ child extraction
+        const rawToolName = msg.toolName ?? 'unknown';
+        const classification = classifyTool(rawToolName, msg.toolInput);
+        const normalizedToolName =
+          classification.category === 'skill' ? classification.toolName : normalizeMcpToolName(rawToolName);
+        // 砚砚 cloud P2: prefer per-cat invocation captured from system_info over literal 'unknown'.
+        // Mirrors serial route's `ownInvocationId` fallback chain (route-serial.ts:912).
+        // sessionId likewise falls back to per-cat invocation so parallel-cat skill-load
+        // counts don't collapse onto sessionId='unknown' across unrelated invocations.
+        const ownInv = msg.catId ? catInvocationId.get(msg.catId) : undefined;
+        // 砚砚 cloud-3 P1: propagate toolUseId into summary (as _toolUseId) so
+        // updateSummary can do exact match when provider emits it on tool_result.
+        // Falls back to FIFO toolName+catId match when toolUseId absent.
+        const baseSummary = (msg.toolInput ?? {}) as Record<string, unknown>;
+        const summary: Record<string, unknown> = msg.toolUseId
+          ? { ...baseSummary, _toolUseId: msg.toolUseId }
+          : baseSummary;
+        deps.toolEventLog
+          .append({
+            invocationId: msg.invocationId ?? ownInv ?? 'unknown',
+            sessionId: msg.sessionId ?? ownInv ?? 'unknown',
+            threadId: msg.threadId ?? threadId ?? 'unknown',
+            catId: msg.catId ?? 'unknown',
+            toolName: normalizedToolName,
+            timestamp: Date.now(),
+            turnIndex: msg.turnIndex ?? 0,
+            status: 'success',
+            summary,
+          })
+          .catch(() => {});
+        // F200 HW-4 根因①: enqueue into per-cat FIFO so a later nameless
+        // result-side tool_result can still be paired back to this tool.
+        {
+          const pk = msg.catId ?? 'unknown';
+          const pq = pendingToolResultsByCat.get(pk) ?? [];
+          pq.push({ toolName: normalizedToolName, toolUseId: msg.toolUseId });
+          pendingToolResultsByCat.set(pk, pq);
+        }
+        // 砚砚 二审 P1-4: Skill tool_use → SkillLoadEventLog (AS-4)
+        if (rawToolName === 'Skill' && deps.skillLoadEventLog) {
+          const skillName =
+            msg.toolInput && typeof msg.toolInput['skill'] === 'string'
+              ? (msg.toolInput['skill'] as string)
+              : 'unknown';
+          deps.skillLoadEventLog
+            .append({
+              invocationId: msg.invocationId ?? ownInv ?? 'unknown',
+              sessionId: msg.sessionId ?? ownInv ?? 'unknown',
+              skillId: skillName,
+              loadTrigger: 'explicit_call',
+              timestamp: Date.now(),
+            })
+            .catch(() => {});
+        }
+      }
       if (effectiveMsg.metadata && effectiveMsg.catId && !catMeta.has(effectiveMsg.catId)) {
         catMeta.set(effectiveMsg.catId, effectiveMsg.metadata);
+      }
+
+      // F188 Phase F AC-F10 (砚砚 七审 P1): merge result-side summary; parses real Codex
+      // tool_result format "mcp:server/tool (completed)" — mirrors serial route's
+      // inferToolResultName logic (route-serial.ts:177).
+      if (effectiveMsg.type === 'tool_result' && deps.toolEventLog) {
+        const msg = effectiveMsg as { toolName?: string; content?: unknown };
+        let toolNameCandidate = msg.toolName;
+        if (!toolNameCandidate) {
+          const text =
+            typeof msg.content === 'string'
+              ? msg.content
+              : Array.isArray(msg.content)
+                ? (msg.content as Array<{ text?: unknown }>)
+                    .map((c) => (typeof c?.text === 'string' ? c.text : ''))
+                    .join('\n')
+                : '';
+          const firstLine = text.trimStart().split('\n', 1)[0]?.trim();
+          if (firstLine) {
+            // Codex mcp_tool_call result: "mcp:server/tool (completed)" / "(failed)"
+            const mcpMatch = firstLine.match(/^(mcp:[^\s]+)\s+\(/);
+            if (mcpMatch?.[1]) toolNameCandidate = mcpMatch[1];
+            else if (firstLine.startsWith('command: ')) toolNameCandidate = 'command_execution';
+            else {
+              const labelMatch = /\[tool:([\w\-:/_.]+)\]/.exec(firstLine);
+              if (labelMatch?.[1]) toolNameCandidate = labelMatch[1];
+            }
+          }
+        }
+        // F200 HW-4 根因①: per-cat pending FIFO. Nameless result-side
+        // (Claude/Opus parallel) → FIFO fallback (mirrors route-serial.ts:197-227
+        // pure-FIFO branch). Resolved name → splice its FIFO entry so a later
+        // nameless result can't mis-pair (砚砚 R1 review: queue-drift guard).
+        {
+          const resultMsg2 = effectiveMsg as { catId?: string; toolUseId?: string };
+          const cq = resultMsg2.catId ? pendingToolResultsByCat.get(resultMsg2.catId) : undefined;
+          if (toolNameCandidate) {
+            if (cq) {
+              // 砚砚 HW-4 R1-2: exact result → splice its OWN entry by
+              // toolUseId when present (precise); else first same-name.
+              // Prevents same-name drift (search→graph→search).
+              let si = -1;
+              if (resultMsg2.toolUseId) {
+                si = cq.findIndex((e) => e.toolUseId === resultMsg2.toolUseId);
+              }
+              if (si < 0) {
+                const nn = normalizeMcpToolName(toolNameCandidate);
+                si = cq.findIndex((e) => e.toolName === nn);
+              }
+              if (si >= 0) cq.splice(si, 1);
+            }
+          } else if (cq && cq.length > 0) {
+            toolNameCandidate = cq.shift()!.toolName;
+          }
+        }
+        if (toolNameCandidate) {
+          const normalizedName = normalizeMcpToolName(toolNameCandidate);
+          const resultSummary = deriveResultSummary(normalizedName, msg.content);
+          if (Object.keys(resultSummary).length > 0) {
+            // 砚砚 六审 P1-B: scope updateSummary match to specific cat (parallel
+            // route runs multiple cats concurrently; same tool name can collide).
+            // 砚砚 cloud-3 P1: also pass toolUseId for exact match when available;
+            // otherwise FIFO toolName+catId match handles same-name parallel calls.
+            const resultMsg = effectiveMsg as { catId?: string; toolUseId?: string };
+            const matcher: { toolUseId?: string; toolName?: string; catId?: string } = resultMsg.toolUseId
+              ? { toolUseId: resultMsg.toolUseId }
+              : resultMsg.catId
+                ? { toolName: normalizedName, catId: resultMsg.catId }
+                : { toolName: normalizedName };
+            deps.toolEventLog.updateSummary(threadId, matcher, resultSummary).catch(() => {});
+          }
+        }
       }
 
       // #80: Draft flush — fire-and-forget periodic persistence per cat
@@ -654,7 +823,15 @@ export async function* routeParallel(
       }
 
       if (effectiveMsg.type === 'text' && !effectiveMsg.content) continue;
-      yield effectiveMsg;
+      // F194 Phase Z9 砚砚 R1 P1-1: stamp ownInvocationId on yielded events
+      // (same as route-serial.ts). CLI text/done/tool events don't carry
+      // invocationId; only system_info=invocation_created does. Without explicit
+      // stamping, downstream broadcaster falls back to parent → multi-turn
+      // same-cat under shared parent collapses to one bubble (R13 + R14).
+      const ownInvForYield = effectiveMsg.catId ? catInvocationId.get(effectiveMsg.catId) : undefined;
+      const stampedEffectiveMsg =
+        ownInvForYield && !effectiveMsg.invocationId ? { ...effectiveMsg, invocationId: ownInvForYield } : effectiveMsg;
+      yield stampedEffectiveMsg;
     }
 
     if (msg.type === 'done' && msg.catId) {
@@ -686,6 +863,7 @@ export async function* routeParallel(
       // F22: Consume MCP-buffered rich blocks BEFORE text/empty branch —
       // blocks must be persisted even when the cat emits no text (cloud Codex P1).
       const ownInvId = catInvocationId.get(msg.catId);
+      if (ownInvId) completedCatInvocationIds.push([msg.catId, ownInvId]);
       // Issue #83 P2 fix: Remove completed cat from keepalive set.
       // Without this, the shared keepalive timer would touch() a deleted draft,
       // recreating an orphan Redis hash key via HSET.
@@ -817,7 +995,16 @@ export async function* routeParallel(
             ...(catTools && catTools.length > 0 ? { toolEvents: catTools } : {}),
             extra: {
               ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
-              ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
+              // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId
+              // (= ownInvId else parent fallback).
+              ...(persistedInvocationId
+                ? {
+                    stream: {
+                      invocationId: persistedInvocationId,
+                      turnInvocationId: ownInvId ?? persistedInvocationId,
+                    },
+                  }
+                : {}),
               ...(msg.tracing ? { tracing: msg.tracing } : {}),
             },
           });
@@ -905,7 +1092,18 @@ export async function* routeParallel(
               ...(catTools && catTools.length > 0 ? { toolEvents: catTools } : {}),
               extra: {
                 ...(noTextBlocks.length > 0 ? { rich: { v: 1 as const, blocks: noTextBlocks } } : {}),
-                ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
+                // F194 Phase Z3 dual id (see route-serial.ts:1370 for contract)
+                // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId
+                // (= ownInvId else parent fallback) — prevents multi-turn same-cat
+                // bubble collapse under shared parent invocation.
+                ...(persistedInvocationId
+                  ? {
+                      stream: {
+                        invocationId: persistedInvocationId,
+                        turnInvocationId: ownInvId ?? persistedInvocationId,
+                      },
+                    }
+                  : {}),
                 ...(msg.tracing ? { tracing: msg.tracing } : {}),
               },
             });
@@ -985,7 +1183,15 @@ export async function* routeParallel(
               ...(persistedInvocationId || msg.tracing
                 ? {
                     extra: {
-                      ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
+                      // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId.
+                      ...(persistedInvocationId
+                        ? {
+                            stream: {
+                              invocationId: persistedInvocationId,
+                              turnInvocationId: ownInvId ?? persistedInvocationId,
+                            },
+                          }
+                        : {}),
                       ...(msg.tracing ? { tracing: msg.tracing } : {}),
                     },
                   }
@@ -1094,7 +1300,13 @@ export async function* routeParallel(
         }
       }
 
-      yield { ...msg, isFinal };
+      // F194 Phase Z9 砚砚 R2 P1: parallel done yield must use the `ownInvId`
+      // captured at L808 BEFORE `catInvocationId.delete(msg.catId)` at L812.
+      // Re-querying the map here returns undefined → done event yielded without
+      // invocationId → downstream broadcaster falls back to parent → bubble
+      // identity / liveness wrongly attached to parent (instead of own turn).
+      const stampedDone = ownInvId && !msg.invocationId ? { ...msg, invocationId: ownInvId } : msg;
+      yield { ...stampedDone, isFinal };
       if (isFinal) yieldedFinalDone = true;
     }
   }
@@ -1105,6 +1317,22 @@ export async function* routeParallel(
     options.routeSpan.setAttribute(ROUTE_TOTAL_TOKENS, routeTotalTokens);
     // Parallel routes never produce A2A handoffs (MVP safety boundary)
     options.routeSpan.setAttribute(ROUTE_HAS_A2A_HANDOFF, false);
+  }
+
+  // F200 AC-A1: fire-and-forget recall correlation after all cats complete
+  if (deps.toolEventLog && deps.evidenceStore && completedCatInvocationIds.length > 0) {
+    const evidenceDb = (deps.evidenceStore as { getDb?: () => import('better-sqlite3').Database }).getDb?.();
+    if (evidenceDb) {
+      deps.toolEventLog
+        .readByThread(threadId)
+        .then((events) => {
+          const raw = events as unknown as Parameters<typeof triggerRecallCorrelation>[1];
+          for (const [catId, invId] of completedCatInvocationIds) {
+            triggerRecallCorrelation(evidenceDb, raw, invId, catId).catch(() => {});
+          }
+        })
+        .catch(() => {});
+    }
   }
 
   // done-guarantee safety net: synthesize final done if loop exited without one

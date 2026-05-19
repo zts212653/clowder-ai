@@ -25,6 +25,7 @@ import {
   isCatAvailable,
   toAllCatConfigs,
 } from './config/cat-config-loader.js';
+import { configEventBus } from './config/config-event-bus.js';
 import { resolveFrontendBaseUrl, resolveFrontendCorsOrigins } from './config/frontend-origin.js';
 import { initRuntimeOverrides } from './config/session-strategy-overrides.js';
 import { assertStorageReady } from './config/storage-guard.js';
@@ -46,12 +47,12 @@ import {
   resolveAcpBootstrapCwd,
 } from './domains/cats/services/agents/providers/acp/acp-bootstrap-cwd.js';
 import { AntigravityAgentService } from './domains/cats/services/agents/providers/antigravity/AntigravityAgentService.js';
+import { RedisAntigravitySupervisorStore } from './domains/cats/services/agents/providers/antigravity/AntigravitySupervisorStore.js';
 import { AgentRegistry } from './domains/cats/services/agents/registry/AgentRegistry.js';
 import { AuthorizationManager } from './domains/cats/services/auth/AuthorizationManager.js';
 import {
   AgentRouter,
   AuditEventTypes,
-  ClaudeAgentService,
   CodexAgentService,
   createDraftStore,
   createInvocationRecordStore,
@@ -64,7 +65,11 @@ import {
   MemoryGovernanceStore,
   OpenCodeAgentService,
 } from './domains/cats/services/index.js';
-import { initPushNotificationService } from './domains/cats/services/push/PushNotificationService.js';
+import {
+  getPushNotificationService,
+  initPushNotificationService,
+  resetPushNotificationService,
+} from './domains/cats/services/push/PushNotificationService.js';
 import type { HandoffConfig } from './domains/cats/services/session/SessionSealer.js';
 import { SessionSealer } from './domains/cats/services/session/SessionSealer.js';
 import { TranscriptReader } from './domains/cats/services/session/TranscriptReader.js';
@@ -73,6 +78,7 @@ import { createAuthorizationAuditStore } from './domains/cats/services/stores/fa
 import { createAuthorizationRuleStore } from './domains/cats/services/stores/factories/AuthorizationRuleStoreFactory.js';
 import { createBacklogStore } from './domains/cats/services/stores/factories/BacklogStoreFactory.js';
 import { createCommunityIssueStore } from './domains/cats/services/stores/factories/CommunityIssueStoreFactory.js';
+import { createLabelStore } from './domains/cats/services/stores/factories/LabelStoreFactory.js';
 import { createMemoryStore } from './domains/cats/services/stores/factories/MemoryStoreFactory.js';
 import { createMessageStore } from './domains/cats/services/stores/factories/MessageStoreFactory.js';
 import { createPendingRequestStore } from './domains/cats/services/stores/factories/PendingRequestStoreFactory.js';
@@ -125,6 +131,7 @@ import { gameRoutes } from './routes/games.js';
 import {
   accountsRoutes,
   agentHooksRoutes,
+  audioProxyRoutes,
   auditRoutes,
   authorizationRoutes,
   backlogRoutes,
@@ -151,6 +158,7 @@ import {
   guideActionRoutes,
   intentCardRoutes,
   invocationsRoutes,
+  labelsRoutes,
   leaderboardEventsRoutes,
   leaderboardRoutes,
   libraryRoutes,
@@ -166,6 +174,8 @@ import {
   pushRoutes,
   queueRoutes,
   quotaRoutes,
+  recallMetricsRoutes,
+  refAudioUploadRoutes,
   reflectRoutes,
   refluxRoutes,
   registerCallbackAuthDebugRoute,
@@ -201,7 +211,6 @@ import {
 import { knowledgeFeedRoutes } from './routes/knowledge-feed.js';
 import { marketplaceRoutes } from './routes/marketplace.js';
 import { previewRoutes } from './routes/preview.js';
-import { refAudioUploadRoutes } from './routes/ref-audio-upload.js';
 import { terminalRoutes } from './routes/terminal.js';
 import { threadExportRoutes } from './routes/thread-export.js';
 import { ApiInstanceLease, type ApiInstanceLeaseInvalidation } from './services/ApiInstanceLease.js';
@@ -453,6 +462,7 @@ async function main(): Promise<void> {
   const { InMemoryGuideDismissTracker } = await import('./domains/guides/GuideDismissTracker.js');
   const dismissTracker = new InMemoryGuideDismissTracker();
   const taskStore = createTaskStore(redis);
+  const labelStore = createLabelStore(redis);
   const communityIssueStore = createCommunityIssueStore(redis);
   if (redis) {
     const { RedisPrTrackingStore } = await import('./infrastructure/email/RedisPrTrackingStore.js');
@@ -638,10 +648,20 @@ async function main(): Promise<void> {
   };
   const expeditionBootstrapService = new ExpeditionBootstrapService(indexStateManager, {
     rebuildIndex: async (projectPath: string) => {
-      const startMs = Date.now();
-      const { buildStructuralSummary } = await import('./domains/memory/ExpeditionBootstrapService.js');
-      const summary = buildStructuralSummary(projectPath);
-      return { docsIndexed: summary.docsList.length, durationMs: Date.now() - startMs };
+      if (isSameRepo(projectPath, repoRoot)) {
+        const startMs = Date.now();
+        const { buildStructuralSummary } = await import('./domains/memory/ExpeditionBootstrapService.js');
+        const summary = buildStructuralSummary(projectPath);
+        return { docsIndexed: summary.docsList.length, durationMs: Date.now() - startMs };
+      }
+      const { ensureProjectCollection } = await import('./domains/memory/bootstrap-collection-bridge.js');
+      return ensureProjectCollection(
+        projectPath,
+        memoryServices.catalog!,
+        memoryServices.collectionStores ?? new Map(),
+        memoryServices.dataDir!,
+        memoryServices.embeddingService,
+      );
     },
     getFingerprint,
     getTierCoverage: async (projectPath: string) => {
@@ -977,9 +997,16 @@ async function main(): Promise<void> {
       // getCatModel(catId) which respects env override (CAT_*_MODEL > config > fallback)
       let service: AgentService;
       switch (config.clientId) {
-        case 'anthropic':
-          service = new ClaudeAgentService({ catId });
+        case 'anthropic': {
+          // F198 Phase B Step 3 canary: env-gated carrier selection.
+          // CAT_CAFE_CLAUDE_CARRIER=bg_daemon → --bg carrier (subscription
+          // quota, R1 救宪宪). Unset/other → -p (current production default).
+          const { createClaudeAgentServiceForCanary } = await import(
+            './domains/cats/services/agents/providers/claude-carrier-factory.js'
+          );
+          service = createClaudeAgentServiceForCanary(catId);
           break;
+        }
         case 'openai':
           service = new CodexAgentService({ catId });
           break;
@@ -1038,6 +1065,11 @@ async function main(): Promise<void> {
         case 'antigravity':
           service = new AntigravityAgentService({
             catId,
+            supervisorStore: redisClient
+              ? new RedisAntigravitySupervisorStore(redisClient, {
+                  auditDir: join(process.cwd(), 'data', 'antigravity-audit'),
+                })
+              : undefined,
           });
           break;
         case 'opencode':
@@ -1102,7 +1134,9 @@ async function main(): Promise<void> {
       app.log.error(`[tmux] CAT_CAFE_TMUX_AGENT=1 but tmux not found: ${(err as Error).message}`);
     }
   }
-  const agentPaneRegistry = tmuxGateway ? new AgentPaneRegistry() : undefined;
+  // F198 Phase C P1-1: registry is unconditional — bg carrier sessions (claude --bg)
+  // must be trackable regardless of whether tmux agent panes are enabled.
+  const agentPaneRegistry = new AgentPaneRegistry();
 
   // F120: Preview Gateway (独立端口反向代理) + Port Discovery
   const PREVIEW_GATEWAY_ENABLED = process.env.PREVIEW_GATEWAY_ENABLED !== '0';
@@ -1144,6 +1178,14 @@ async function main(): Promise<void> {
         redis,
         toolUsageArchiver,
       )
+    : undefined;
+  // F188 Phase F AC-F10: append-only tool event log (sequence preserving)
+  const toolEventLog = redis
+    ? new (await import('./domains/cats/services/tool-usage/ToolEventLog.js')).ToolEventLog(redis)
+    : undefined;
+  // F188 Phase F AC-F10 (AS-4): skill load event log
+  const skillLoadEventLog = redis
+    ? new (await import('./domains/cats/services/tool-usage/SkillLoadEventLog.js')).SkillLoadEventLog(redis)
     : undefined;
 
   // F150: Daily archive sweep — persist expiring Redis counters to JSONL
@@ -1225,6 +1267,8 @@ async function main(): Promise<void> {
     packStore,
     evidenceStore: memoryServices.evidenceStore,
     ...(toolUsageCounter ? { toolUsageCounter } : {}),
+    ...(toolEventLog ? { toolEventLog } : {}),
+    ...(skillLoadEventLog ? { skillLoadEventLog } : {}),
     guideSessionStore,
     dismissTracker,
     worldContextProvider,
@@ -1303,6 +1347,7 @@ async function main(): Promise<void> {
     draftStore,
     invocationQueue,
     queueProcessor,
+    taskProgressStore, // F194 AC-B7: cleared on zombie reconcile
     ...(f101GameStore ? { gameStore: f101GameStore } : {}),
     ...(f101SharedDriver ? { autoPlayer: f101SharedDriver } : {}),
     holdBallCancelDeps: { dynamicTaskStore, taskRunner: taskRunnerV2 },
@@ -1315,6 +1360,10 @@ async function main(): Promise<void> {
     invocationTracker,
     socketManager,
     messageStore, // F117: for marking queued messages as canceled on withdraw/clear
+    invocationRecordStore, // F194 Phase B: canonical liveness read source
+    draftStore, // F194 Phase B: canonical liveness read source
+    taskProgressStore, // F194 AC-B7: cleared on zombie reconcile
+    invocationRegistry: registry, // F194 Phase Z (KD-22): namespace bridge for parent↔child invocation
   });
   await app.register(invocationsRoutes, {
     invocationRecordStore,
@@ -1365,6 +1414,8 @@ async function main(): Promise<void> {
   if (toolUsageCounter) {
     await app.register(toolUsageRoutes, { toolUsageCounter });
   }
+  // F200 Phase B: Recall metrics API
+  await app.register(recallMetricsRoutes, { evidenceDb: memoryServices.store.getDb() });
   // F153 Phase E: Hub embedded observability routes
   const { telemetryRoutes } = await import('./routes/telemetry.js');
   await app.register(telemetryRoutes, {
@@ -1486,6 +1537,7 @@ async function main(): Promise<void> {
     limbRegistry,
     limbPairingStore,
     guideSessionStore,
+    labelStore,
     holdBallDeps: {
       registry,
       taskRunner: taskRunnerV2,
@@ -1531,7 +1583,9 @@ async function main(): Promise<void> {
     backlogStore,
     ...(readStateStore ? { readStateStore } : {}),
     guideSessionStore,
+    labelStore,
   });
+  await app.register(labelsRoutes, { labelStore, threadStore });
   await app.register(threadBranchRoutes, {
     threadStore,
     messageStore,
@@ -1697,11 +1751,14 @@ async function main(): Promise<void> {
   await app.register(exportRoutes, { messageStore, threadStore });
   await app.register(configRoutes);
   await app.register(configSecretsRoutes);
+  await app.register(rulesRoutes);
+  await app.register(servicesRoutes);
   await app.register(featureDocDetailRoutes);
   await app.register(accountsRoutes);
   await app.register(claudeRescueRoutes);
   await app.register(auditRoutes, { threadStore });
   await app.register(capabilitiesRoutes);
+  await app.register(audioProxyRoutes);
 
   {
     const { createAdapterRegistry } = await import('./marketplace/index.js');
@@ -1738,10 +1795,7 @@ async function main(): Promise<void> {
     },
   });
   await app.register(avatarsRoutes);
-  await app.register(refAudioUploadRoutes);
   await app.register(skillsRoutes);
-  await app.register(servicesRoutes);
-  await app.register(rulesRoutes);
   await app.register(memoryRoutes, { memoryStore, threadStore });
 
   // Session chain (F24)
@@ -1778,11 +1832,16 @@ async function main(): Promise<void> {
   const { voteRoutes } = await import('./routes/votes.js');
   await app.register(voteRoutes, { threadStore, socketManager, messageStore });
 
-  // Evidence search (SQLite) + reindex endpoint (D-11) + F-4 federated search
+  // F188 Phase A: rebuild job tracker
+  const { RebuildJobTracker } = await import('./domains/memory/RebuildJobTracker.js');
+  const rebuildJobTracker = new RebuildJobTracker();
+
+  // Evidence search (SQLite) + reindex endpoint (D-11) + F-4 federated search + F188 rebuild
   await app.register(evidenceRoutes, {
     evidenceStore: memoryServices.evidenceStore,
     indexBuilder: memoryServices.indexBuilder,
     knowledgeResolver: memoryServices.knowledgeResolver,
+    rebuildJobTracker,
   });
 
   // F163: Knowledge promotion admin API (localhost-only)
@@ -1796,6 +1855,9 @@ async function main(): Promise<void> {
   await app.register(f163AuditRoutes, {
     evidenceStore: memoryServices.evidenceStore as unknown as Parameters<typeof f163AuditRoutes>[1]['evidenceStore'],
     knowledgeResolver: memoryServices.knowledgeResolver,
+    markerQueue: memoryServices.markerQueue,
+    repoRoot,
+    docsRoot: process.env.DOCS_ROOT ?? resolve(repoRoot, 'docs'),
   });
 
   // F152 Phase C: Distillation routes (global lesson reflow)
@@ -1851,6 +1913,8 @@ async function main(): Promise<void> {
       dataDir: memoryServices.dataDir,
       embeddingService: memoryServices.embeddingService,
       embedMode: embedMode && embedMode !== ('off' as string) ? embedMode : undefined,
+      // F188 Phase F AC-F9: pass redis for tool-usage-metrics endpoint (砚砚 review P1-2)
+      ...(redisClient ? { redis: redisClient } : {}),
     });
   }
 
@@ -1881,10 +1945,26 @@ async function main(): Promise<void> {
 
   // Commands route needs opus service for task extraction.
   // Lazy-init: empty catalog (first-run) has no opus entry yet — defer until first use.
-  let _opusService: ClaudeAgentService | undefined;
+  // 砚砚 Step-3 P2 (2026-05-14): route through canary factory so this path
+  // also honors CAT_CAFE_CLAUDE_CARRIER=bg_daemon when canary flips.
+  // 砚砚 Step-3 P1 re-review: invoke() must directly return AsyncIterable
+  // (not Promise<AsyncIterable>), otherwise `for await (... of svc.invoke())`
+  // crashes at runtime. Use sync generator wrapper that defers async setup
+  // to first yield.
+  let _opusService: AgentService | undefined;
   const opusService: AgentService = {
-    invoke(...args: Parameters<AgentService['invoke']>) {
-      return (_opusService ??= new ClaudeAgentService()).invoke(...args);
+    invoke(prompt, options) {
+      // Sync return of AsyncGenerator — IS AsyncIterable. Lazy init happens
+      // before first yield, then delegates.
+      return (async function* opusLazyInvoke() {
+        if (!_opusService) {
+          const { createClaudeAgentServiceForCanary } = await import(
+            './domains/cats/services/agents/providers/claude-carrier-factory.js'
+          );
+          _opusService = createClaudeAgentServiceForCanary('opus' as CatId);
+        }
+        yield* _opusService.invoke(prompt, options);
+      })();
     },
   };
   await app.register(commandsRoutes, {
@@ -1909,6 +1989,7 @@ async function main(): Promise<void> {
   // Serve uploaded files (images)
   const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
   await app.register(uploadsRoutes, { uploadDir });
+  await app.register(refAudioUploadRoutes);
 
   // F088: Serve downloaded connector media files
   const connectorMediaDir = process.env.CONNECTOR_MEDIA_DIR ?? './data/connector-media';
@@ -1916,37 +1997,56 @@ async function main(): Promise<void> {
 
   // F34: TTS Provider (mlx-audio → Python TTS server)
   const ttsRegistry = new TtsRegistry();
-  ttsRegistry.register(new MlxAudioTtsProvider());
+  const ttsUrl = process.env.TTS_URL ?? 'http://localhost:9879';
+  ttsRegistry.register(new MlxAudioTtsProvider({ baseUrl: ttsUrl }));
   const ttsCacheDir = process.env.TTS_CACHE_DIR ?? './data/tts-cache';
-  await app.register(ttsRoutes, { ttsRegistry, cacheDir: ttsCacheDir, messageStore });
+  await app.register(ttsRoutes, { ttsRegistry, cacheDir: ttsCacheDir });
   initVoiceBlockSynthesizer(ttsRegistry, ttsCacheDir);
   initStreamingTtsRegistry(ttsRegistry);
   startTtsCacheCleaner(ttsCacheDir);
 
   // C1+C2: Web Push Notifications (optional — requires VAPID keys)
-  const vapidPublicKey = process.env.VAPID_PUBLIC_KEY ?? '';
-  const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY ?? '';
-  const vapidSubjectRaw = process.env.VAPID_SUBJECT ?? 'mailto:cat-cafe@localhost';
-  const vapidSubject =
-    vapidSubjectRaw.includes('@') && !vapidSubjectRaw.startsWith('mailto:') && !vapidSubjectRaw.startsWith('http')
-      ? `mailto:${vapidSubjectRaw}`
-      : vapidSubjectRaw;
   const pushSubscriptionStore = createPushSubscriptionStore(redis);
-  const pushService =
-    vapidPublicKey && vapidPrivateKey
-      ? initPushNotificationService({
-          subscriptionStore: pushSubscriptionStore,
-          vapidPublicKey,
-          vapidPrivateKey,
-          vapidSubject,
-        })
-      : null;
+  const resolveVapidPublicKey = (): string => process.env.VAPID_PUBLIC_KEY ?? '';
+  const configurePushServiceFromEnv = () => {
+    const currentVapidPublicKey = process.env.VAPID_PUBLIC_KEY ?? '';
+    const currentVapidPrivateKey = process.env.VAPID_PRIVATE_KEY ?? '';
+    const currentVapidSubject = process.env.VAPID_SUBJECT ?? 'mailto:cat-cafe@localhost';
+    if (!currentVapidPublicKey || !currentVapidPrivateKey) {
+      resetPushNotificationService();
+      return null;
+    }
+    return initPushNotificationService({
+      subscriptionStore: pushSubscriptionStore,
+      vapidPublicKey: currentVapidPublicKey,
+      vapidPrivateKey: currentVapidPrivateKey,
+      vapidSubject: currentVapidSubject,
+    });
+  };
+  const pushService = configurePushServiceFromEnv();
   if (pushService) {
     app.log.info('[api] Web Push enabled (VAPID configured)');
   } else {
     app.log.info('[api] Web Push disabled (VAPID keys not set)');
   }
-  await app.register(pushRoutes, { pushSubscriptionStore, pushService, vapidPublicKey });
+  let pushConfigUnsub: (() => void) | null = configEventBus.onKeysChange(
+    ['VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY', 'VAPID_SUBJECT'],
+    () => {
+      const nextPushService = configurePushServiceFromEnv();
+      if (nextPushService) {
+        app.log.info('[api] Web Push hot-reloaded (VAPID configured)');
+      } else {
+        app.log.info('[api] Web Push hot-reloaded disabled (VAPID keys not set)');
+      }
+    },
+  );
+  await app.register(pushRoutes, {
+    pushSubscriptionStore,
+    pushService,
+    vapidPublicKey: resolveVapidPublicKey(),
+    getPushService: getPushNotificationService,
+    getVapidPublicKey: resolveVapidPublicKey,
+  });
 
   // F-BLOAT: Progressive disclosure docs endpoints (no auth, static content)
   await app.register(registerCallbackDocsRoutes);
@@ -2027,11 +2127,6 @@ async function main(): Promise<void> {
   }
   app.log.info(`[api] Server running on ${address}`);
   app.log.info(`[ws] WebSocket server ready`);
-
-  // Auto-start enabled services (fire-and-forget)
-  import('./domains/services/service-autostart.js')
-    .then((m) => m.autoStartEnabledServices(app.log))
-    .catch((err) => app.log.warn('[services] auto-start init failed: %s', err));
 
   // F156: Friendly hint for private network access
   if (HOST === '0.0.0.0' && process.env.CORS_ALLOW_PRIVATE_NETWORK !== 'true') {
@@ -2166,15 +2261,25 @@ async function main(): Promise<void> {
   // F140: Feedback filter (Rule A self-authored only post-E.2 cutover)
   const { createGitHubFeedbackFilter } = await import('./infrastructure/email/github-feedback-filter.js');
   const { createSetupNoiseFilter } = await import('./infrastructure/email/setup-noise-filter.js');
-  let selfGitHubLogin: string | undefined;
-  try {
+  let selfGitHubLogin: string | undefined = process.env.GITHUB_SELF_LOGIN?.trim() || undefined;
+  if (!selfGitHubLogin) {
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
-    const { stdout } = await promisify(execFile)('gh', ['api', '/user', '--jq', '.login'], { timeout: 10_000 });
-    selfGitHubLogin = stdout.trim() || undefined;
+    const execFileAsync = promisify(execFile);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const { stdout } = await execFileAsync('gh', ['api', '/user', '--jq', '.login'], { timeout: 10_000 });
+        selfGitHubLogin = stdout.trim() || undefined;
+        if (selfGitHubLogin) break;
+      } catch {
+        if (attempt === 0) await new Promise((r) => setTimeout(r, 3_000));
+      }
+    }
+  }
+  if (selfGitHubLogin) {
     app.log.info(`[api] F140: feedback filter self=${selfGitHubLogin}`);
-  } catch {
-    app.log.warn('[api] F140: could not resolve GitHub login — self-filter disabled');
+  } else {
+    app.log.error('[api] F140: self-filter DISABLED — set GITHUB_SELF_LOGIN env as fallback');
   }
   const feedbackFilter = createGitHubFeedbackFilter({ selfGitHubLogin });
 
@@ -2290,6 +2395,28 @@ async function main(): Promise<void> {
     taskRunnerV2.register(
       createReviewFeedbackTaskSpec({
         taskStore,
+        fetchPrMetadata: async (repo, pr) => {
+          const { execFile } = await import('node:child_process');
+          const { promisify } = await import('node:util');
+          const execFileAsync = promisify(execFile);
+          try {
+            const { stdout } = await execFileAsync(
+              'gh',
+              ['pr', 'view', String(pr), '-R', repo, '--json', 'headRefOid,state,mergedAt'],
+              { timeout: 15_000 },
+            );
+            const data = JSON.parse(stdout) as { headRefOid?: string; state?: string; mergedAt?: string | null };
+            const prState =
+              data.mergedAt || data.state === 'MERGED' ? 'merged' : data.state === 'CLOSED' ? 'closed' : 'open';
+            return { headSha: data.headRefOid ?? '', prState };
+          } catch (error) {
+            app.log.warn(
+              { repo, pr, err: error },
+              '[api] review-feedback metadata lookup failed; continuing without PR metadata',
+            );
+            return null;
+          }
+        },
         fetchComments: async (repo, pr) => {
           const [reviewComments, issueComments] = await Promise.all([
             fetchPaginated(`/repos/${repo}/pulls/${pr}/comments`),
@@ -2301,6 +2428,7 @@ async function main(): Promise<void> {
               body: string;
               created_at: string;
               user?: { login: string };
+              commit_id?: string;
               path?: string;
               line?: number;
               pull_request_review_id?: number;
@@ -2309,6 +2437,7 @@ async function main(): Promise<void> {
               author: c.user?.login ?? 'unknown',
               body: c.body,
               createdAt: c.created_at,
+              ...(c.commit_id ? { commitId: c.commit_id } : {}),
               commentType: c.pull_request_review_id ? ('inline' as const) : ('conversation' as const),
               ...(c.path ? { filePath: c.path } : {}),
               ...(c.line ? { line: c.line } : {}),
@@ -2318,12 +2447,20 @@ async function main(): Promise<void> {
         fetchReviews: async (repo, pr) => {
           const reviews = await fetchPaginated(`/repos/${repo}/pulls/${pr}/reviews`);
           return reviews.map(
-            (r: { id: number; user?: { login: string }; state: string; body: string; submitted_at: string }) => ({
+            (r: {
+              id: number;
+              user?: { login: string };
+              state: string;
+              body: string;
+              submitted_at: string;
+              commit_id?: string;
+            }) => ({
               id: r.id,
               author: r.user?.login ?? 'unknown',
               state: r.state as 'APPROVED' | 'CHANGES_REQUESTED' | 'DISMISSED' | 'COMMENTED',
               body: r.body,
               submittedAt: r.submitted_at,
+              ...(r.commit_id ? { commitId: r.commit_id } : {}),
             }),
           );
         },
@@ -2467,25 +2604,8 @@ async function main(): Promise<void> {
         const resolved = msg instanceof Promise ? await msg : msg;
         return resolved ? { source: resolved.source } : null;
       },
-      async getByThread(threadId: string, limit?: number) {
-        const msgs = await messageStore.getByThread(threadId, limit);
-        return msgs.map((m) => ({
-          catId: m.catId,
-          userId: m.userId,
-          content: m.content,
-          timestamp: m.timestamp,
-          source: m.source as string | undefined,
-        }));
-      },
       async getByThreadBefore(threadId: string, timestamp: number, limit?: number) {
-        const msgs = await messageStore.getByThreadBefore(threadId, timestamp, limit);
-        return msgs.map((m) => ({
-          catId: m.catId,
-          userId: m.userId,
-          content: m.content,
-          timestamp: m.timestamp,
-          source: m.source as string | undefined,
-        }));
+        return messageStore.getByThreadBefore(threadId, timestamp, limit);
       },
     },
     threadStore,
@@ -2611,6 +2731,8 @@ async function main(): Promise<void> {
       // Stop event bus subscribers
       catCatalogSubscriber.unsubscribe();
       accountBindingSubscriber.unsubscribe();
+      pushConfigUnsub?.();
+      pushConfigUnsub = null;
       connectorReloadUnsub?.();
       try {
         await connectorGatewayHandle?.stop();

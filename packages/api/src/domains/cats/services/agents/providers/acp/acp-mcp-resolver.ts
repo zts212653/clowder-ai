@@ -20,7 +20,16 @@ const log = createModuleLogger('acp-mcp-resolver');
 
 const MCP_SERVER_DIST = 'packages/mcp-server/dist';
 
-/** Canonical builtin cat-cafe MCP servers: name → dist filename. */
+/**
+ * Canonical builtin cat-cafe MCP servers: name → dist filename.
+ *
+ * F193 Phase C: `cat-cafe-limb` added as the 4th canonical split (cloud
+ * round 5 P1). Legacy `cat-cafe` is preserved here for ACP backward
+ * compatibility — F145 Phase E callers (per-project MCP whitelist) may
+ * still explicitly request it. The orchestrator removes legacy from the
+ * default capabilities.json instead, so Phase C migration runs at the
+ * canonical config layer.
+ */
 const BUILTIN_CAT_CAFE_SERVERS: ReadonlyMap<string, string> = new Map([
   ['cat-cafe', 'index.js'],
   ['cat-cafe-collab', 'collab.js'],
@@ -122,7 +131,7 @@ function readMcpJson(mcpJsonPath: string): Record<string, McpJsonEntry> {
  *   3. User project servers — from userProjectRoot/.mcp.json (lowest, additive)
  *
  * @param projectRoot — monorepo root
- * @param whitelist — server names from cat-catalog.json mcpWhitelist
+ * @param whitelist — server names from cat-config.json mcpWhitelist
  * @param userProjectRoot — user's project directory (reads .mcp.json, merges all servers)
  * @returns AcpMcpServer[] ready for newSession()
  * @throws when whitelist is non-empty but zero servers could be resolved

@@ -58,8 +58,8 @@ export const FIGHTER_NAMES: Record<FighterId, string> = {
 export const PALETTE = {
   ink: '#111318',
   slate: '#1E2430',
-  steel: 'var(--cafe-text-secondary)',
-  bone: 'var(--console-border-soft)',
+  steel: '#3A4658',
+  bone: '#E8DFC7',
   danger: '#D84E3B',
   flash: '#F1E28A',
   dj: '#8D6BFF',

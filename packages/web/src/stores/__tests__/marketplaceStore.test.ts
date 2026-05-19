@@ -77,6 +77,16 @@ describe('marketplaceStore', () => {
     expect(mocks.apiFetch).toHaveBeenCalledWith(expect.stringContaining('trustLevels=verified'));
   });
 
+  it('search passes artifactKinds filter as CSV', async () => {
+    mocks.apiFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ results: [] }) });
+    const { useMarketplaceStore } = await import('../marketplaceStore');
+    useMarketplaceStore.setState({ artifactKindsFilter: ['mcp_server'] });
+
+    await useMarketplaceStore.getState().search('test');
+
+    expect(mocks.apiFetch).toHaveBeenCalledWith(expect.stringContaining('artifactKinds=mcp_server'));
+  });
+
   it('search sets loading true then false', async () => {
     let resolveApi: (v: unknown) => void;
     mocks.apiFetch.mockReturnValueOnce(
@@ -101,6 +111,21 @@ describe('marketplaceStore', () => {
     await useMarketplaceStore.getState().search('memory');
 
     expect(useMarketplaceStore.getState().error).toBe('Network error');
+    expect(useMarketplaceStore.getState().loading).toBe(false);
+  });
+
+  it('search sets error when API returns non-ok response', async () => {
+    mocks.apiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: () => Promise.resolve({ error: 'Internal server error' }),
+    });
+    const { useMarketplaceStore } = await import('../marketplaceStore');
+
+    await useMarketplaceStore.getState().search('test');
+
+    expect(useMarketplaceStore.getState().error).toBeTruthy();
+    expect(useMarketplaceStore.getState().results).toEqual([]);
     expect(useMarketplaceStore.getState().loading).toBe(false);
   });
 
@@ -176,16 +201,6 @@ describe('marketplaceStore', () => {
     expect(mocks.apiFetch).toHaveBeenCalledWith(expect.stringContaining('trustLevels=official'));
   });
 
-  it('search passes artifactKinds filter as CSV', async () => {
-    mocks.apiFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ results: [] }) });
-    const { useMarketplaceStore } = await import('../marketplaceStore');
-    useMarketplaceStore.setState({ artifactKindsFilter: ['mcp_server'] });
-
-    await useMarketplaceStore.getState().search('test');
-
-    expect(mocks.apiFetch).toHaveBeenCalledWith(expect.stringContaining('artifactKinds=mcp_server'));
-  });
-
   it('setArtifactKindsFilter re-triggers search when query exists', async () => {
     mocks.apiFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ results: [] }) });
     const { useMarketplaceStore } = await import('../marketplaceStore');
@@ -221,21 +236,6 @@ describe('marketplaceStore', () => {
     const { useMarketplaceStore } = await import('../marketplaceStore');
 
     await useMarketplaceStore.getState().browse();
-
-    expect(useMarketplaceStore.getState().error).toBeTruthy();
-    expect(useMarketplaceStore.getState().results).toEqual([]);
-    expect(useMarketplaceStore.getState().loading).toBe(false);
-  });
-
-  it('search sets error when API returns non-ok response', async () => {
-    mocks.apiFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 500,
-      json: () => Promise.resolve({ error: 'Internal server error' }),
-    });
-    const { useMarketplaceStore } = await import('../marketplaceStore');
-
-    await useMarketplaceStore.getState().search('test');
 
     expect(useMarketplaceStore.getState().error).toBeTruthy();
     expect(useMarketplaceStore.getState().results).toEqual([]);

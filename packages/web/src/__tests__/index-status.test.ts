@@ -1,11 +1,10 @@
 /**
  * F102 Phase J: IndexStatus logic tests (AC-J4)
- *
- * Tests parsing of /api/evidence/status response.
+ * F188 Phase A: RebuildJob parsing tests (AC-A3)
  */
 
 import { describe, expect, it } from 'vitest';
-import { filterEvidenceVars, getConfigVars, parseIndexStatus } from '@/components/memory/IndexStatus';
+import { filterEvidenceVars, getConfigVars, parseIndexStatus, parseRebuildJob } from '@/components/memory/IndexStatus';
 
 describe('parseIndexStatus', () => {
   it('parses healthy response', () => {
@@ -131,5 +130,46 @@ describe('getConfigVars', () => {
 
   it('returns empty for no evidence vars', () => {
     expect(getConfigVars([mkVar('PORT', 'server', '3001')])).toEqual([]);
+  });
+});
+
+describe('parseRebuildJob (F188 AC-A3)', () => {
+  it('parses running job', () => {
+    const raw = { id: 'abc', status: 'running', phase: 'scanning', percent: 42, startedAt: 1000 };
+    const job = parseRebuildJob(raw);
+    expect(job.status).toBe('running');
+    expect(job.phase).toBe('scanning');
+    expect(job.percent).toBe(42);
+  });
+
+  it('parses done job with result', () => {
+    const raw = {
+      id: 'abc',
+      status: 'done',
+      phase: 'done',
+      percent: 100,
+      startedAt: 1000,
+      completedAt: 2000,
+      result: { docsIndexed: 50, docsSkipped: 10, durationMs: 3000 },
+    };
+    const job = parseRebuildJob(raw);
+    expect(job.status).toBe('done');
+    expect(job.result?.docsIndexed).toBe(50);
+    expect(job.result?.durationMs).toBe(3000);
+  });
+
+  it('parses error job', () => {
+    const raw = { id: 'abc', status: 'error', phase: '', percent: 30, startedAt: 1000, error: 'disk full' };
+    const job = parseRebuildJob(raw);
+    expect(job.status).toBe('error');
+    expect(job.error).toBe('disk full');
+  });
+
+  it('handles missing optional fields', () => {
+    const raw = { id: 'x', status: 'pending', phase: '', percent: 0, startedAt: 1000 };
+    const job = parseRebuildJob(raw);
+    expect(job.result).toBeUndefined();
+    expect(job.error).toBeUndefined();
+    expect(job.completedAt).toBeUndefined();
   });
 });

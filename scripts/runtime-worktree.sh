@@ -4,6 +4,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Quick-start build-freshness gate — rebuild when source moved, not just when
+# the artifact is missing (otherwise dist never refreshes across restarts).
+# Resolve via BASH_SOURCE, not $0/SCRIPT_DIR: under `source runtime-worktree.sh
+# --source-only` $0 is the parent shell, so SCRIPT_DIR mis-resolves to cwd.
+# BASH_SOURCE[0] always points at this file (source and exec alike).
+# shellcheck source=scripts/lib/quickstart-freshness.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/quickstart-freshness.sh"
 DEFAULT_RUNTIME_DIR="$(cd "$PROJECT_DIR/.." && pwd)/cat-cafe-runtime"
 
 RUNTIME_DIR="${CAT_CAFE_RUNTIME_DIR:-$DEFAULT_RUNTIME_DIR}"
@@ -248,19 +256,31 @@ ensure_runtime_dependencies() {
 ensure_quick_start_artifacts() {
   runtime_quick_mode || return 0
 
-  if [ ! -f "$RUNTIME_DIR/packages/shared/dist/index.js" ]; then
-    info "quick start missing shared dist; running pnpm -C \"$RUNTIME_DIR/packages/shared\" run build"
+  # Gate rebuilds on source freshness (git HEAD of the runtime worktree),
+  # not artifact existence — otherwise a synced source change never reaches
+  # the running process no matter how many times we restart.
+  local head_commit
+  head_commit="$(git -C "$RUNTIME_DIR" rev-parse HEAD 2>/dev/null || echo "")"
+
+  if needs_rebuild "$RUNTIME_DIR/packages/shared/dist/index.js" \
+      "$RUNTIME_DIR/packages/shared/dist/.build-commit" "$head_commit"; then
+    info "quick start: shared dist stale/missing; running pnpm -C \"$RUNTIME_DIR/packages/shared\" run build"
     pnpm -C "$RUNTIME_DIR/packages/shared" run build
+    record_build_stamp "$RUNTIME_DIR/packages/shared/dist/.build-commit" "$head_commit"
   fi
 
-  if [ ! -f "$RUNTIME_DIR/packages/mcp-server/dist/index.js" ]; then
-    info "quick start missing MCP server dist; running pnpm -C \"$RUNTIME_DIR/packages/mcp-server\" run build"
+  if needs_rebuild "$RUNTIME_DIR/packages/mcp-server/dist/index.js" \
+      "$RUNTIME_DIR/packages/mcp-server/dist/.build-commit" "$head_commit"; then
+    info "quick start: MCP server dist stale/missing; running pnpm -C \"$RUNTIME_DIR/packages/mcp-server\" run build"
     pnpm -C "$RUNTIME_DIR/packages/mcp-server" run build
+    record_build_stamp "$RUNTIME_DIR/packages/mcp-server/dist/.build-commit" "$head_commit"
   fi
 
-  if [ ! -f "$RUNTIME_DIR/packages/web/.next/BUILD_ID" ]; then
-    info "quick start missing web production build; running pnpm -C \"$RUNTIME_DIR/packages/web\" run build"
+  if needs_rebuild "$RUNTIME_DIR/packages/web/.next/BUILD_ID" \
+      "$RUNTIME_DIR/packages/web/.next/.build-commit" "$head_commit"; then
+    info "quick start: web production build stale/missing; running pnpm -C \"$RUNTIME_DIR/packages/web\" run build"
     pnpm -C "$RUNTIME_DIR/packages/web" run build
+    record_build_stamp "$RUNTIME_DIR/packages/web/.next/.build-commit" "$head_commit"
   fi
 }
 
@@ -417,7 +437,7 @@ status_runtime_worktree() {
 }
 
 start_runtime_worktree() {
-  info "preparing runtime worktree (checking ports, syncing origin/main…)"
+  info "preparing runtime worktree (checking ports, syncing origin/main...)"
 
   if ! is_git_repo; then
     RUNTIME_DIR="$PROJECT_DIR"

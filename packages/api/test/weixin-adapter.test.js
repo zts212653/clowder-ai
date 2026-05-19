@@ -18,6 +18,15 @@ function noopLog() {
   };
 }
 
+async function waitForCondition(predicate, timeoutMs = 500) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.ok(predicate(), 'condition timed out');
+}
+
 describe('WeixinAdapter', () => {
   describe('parseUpdates', () => {
     it('parses text messages from getupdates response', () => {
@@ -174,6 +183,40 @@ describe('WeixinAdapter', () => {
       const result = adapter.parseUpdates(raw);
       assert.equal(result.messages[0].text, '[图片]');
       assert.equal(result.messages[0].attachments, undefined, 'No CDN media → no attachment');
+    });
+
+    it('parses iLink full_url media attachments', () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      const raw = {
+        ret: 0,
+        msgs: [
+          {
+            message_id: 10021,
+            from_user_id: 'user1',
+            context_token: 'ctx-full-url',
+            item_list: [
+              {
+                type: 2,
+                image_item: {
+                  media: {
+                    full_url: 'https://novac2c.cdn.weixin.qq.com/c2c/image-full',
+                    aes_key: 'full-url-aes-key',
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      };
+
+      const result = adapter.parseUpdates(raw);
+      assert.equal(result.messages.length, 1);
+      assert.equal(result.messages[0].attachments?.[0]?.type, 'image');
+      const mediaUrl = result.messages[0].attachments?.[0]?.mediaUrl;
+      assert.ok(mediaUrl);
+      const mediaKey = JSON.parse(mediaUrl);
+      assert.equal(mediaKey.fullUrl, 'https://novac2c.cdn.weixin.qq.com/c2c/image-full');
+      assert.equal(mediaKey.aesKey, 'full-url-aes-key');
     });
 
     it('parses voice messages with transcribed text', () => {
@@ -758,6 +801,39 @@ describe('WeixinAdapter', () => {
 
       await assert.rejects(() => sendAndFlush(adapter, 'user-1', 'test'), /errcode -14/);
     });
+
+    it('retries transient iLink -2 rate-limit responses from sendmessage', async () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      adapter._injectContextToken('user-1', 'ctx-1');
+      let calls = 0;
+      adapter._injectFetch(async () => {
+        calls++;
+        if (calls === 1) {
+          return { ok: true, text: async () => JSON.stringify({ ret: -2, errmsg: 'frequency limit' }) };
+        }
+        return { ok: true, text: async () => JSON.stringify({ ret: 0 }) };
+      });
+
+      await sendAndFlush(adapter, 'user-1', 'test');
+
+      assert.equal(calls, 2, 'sendmessage must retry transient -2 responses');
+    });
+
+    it('treats iLink -2 unknown error as stale session and triggers reconnect', async () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      adapter._injectContextToken('user-1', 'ctx-1');
+      let sessionExpired = false;
+      adapter.setOnSessionExpired(() => {
+        sessionExpired = true;
+      });
+      adapter._injectFetch(async () => ({
+        ok: true,
+        text: async () => JSON.stringify({ ret: -2, errmsg: 'unknown error' }),
+      }));
+
+      await assert.rejects(() => sendAndFlush(adapter, 'user-1', 'test'), /stale session/i);
+      assert.equal(sessionExpired, true, 'stale-session -2 must trigger reconnect');
+    });
   });
 
   describe('chunkMessage', () => {
@@ -914,6 +990,209 @@ describe('WeixinAdapter', () => {
       adapter._injectContextToken('user-1', 'ctx-1');
       assert.equal(adapter.hasContextToken('user-1'), true);
     });
+
+    it('restores persisted cursor and context_token on startup', async () => {
+      const adapter = new WeixinAdapter('test-token', noopLog(), {
+        load: async () => ({
+          getUpdatesBuf: 'cursor-restored',
+          contextTokens: { 'user-1': 'ctx-restored' },
+        }),
+        save: async () => {},
+        clear: async () => {},
+      });
+
+      await adapter.restoreSessionState();
+
+      assert.equal(adapter._getCursor(), 'cursor-restored');
+      assert.equal(adapter.hasContextToken('user-1'), true);
+    });
+
+    it('persists cursor and context_token while polling', async () => {
+      /** @type {Array<{ getUpdatesBuf?: string, contextTokens?: Record<string, string> }>} */
+      const saves = [];
+      const adapter = new WeixinAdapter('test-token', noopLog(), {
+        load: async () => null,
+        save: async (state) => {
+          saves.push(state);
+        },
+        clear: async () => {},
+      });
+
+      adapter._injectFetch(async (url) => {
+        if (String(url).includes('/ilink/bot/getupdates')) {
+          return {
+            ok: true,
+            json: async () => ({
+              ret: 0,
+              get_updates_buf: 'cursor-persisted',
+              msgs: [
+                {
+                  message_id: 10001,
+                  from_user_id: 'user-1',
+                  context_token: 'ctx-persisted',
+                  create_time_ms: 1700000000000,
+                  item_list: [{ type: 1, text_item: { text: 'persist me' } }],
+                },
+              ],
+            }),
+          };
+        }
+        return { ok: false, status: 404, json: async () => ({}) };
+      });
+
+      let handled = 0;
+      adapter.startPolling(async () => {
+        handled++;
+        await adapter.stopPolling();
+      });
+
+      await waitForCondition(() => handled === 1 && saves.length > 0);
+      const lastSave = saves.at(-1);
+      assert.equal(lastSave?.getUpdatesBuf, 'cursor-persisted');
+      assert.equal(lastSave?.contextTokens?.['user-1'], 'ctx-persisted');
+    });
+
+    it('persists advanced cursor only after inbound handler settles', async () => {
+      /** @type {Array<{ getUpdatesBuf?: string, contextTokens?: Record<string, string> }>} */
+      const saves = [];
+      const adapter = new WeixinAdapter('test-token', noopLog(), {
+        load: async () => null,
+        save: async (state) => {
+          saves.push(state);
+        },
+        clear: async () => {},
+      });
+
+      adapter._injectFetch(async (url) => {
+        if (String(url).includes('/ilink/bot/getupdates')) {
+          return {
+            ok: true,
+            json: async () => ({
+              ret: 0,
+              get_updates_buf: 'cursor-after-handler',
+              msgs: [
+                {
+                  message_id: 10002,
+                  from_user_id: 'user-1',
+                  context_token: 'ctx-before-handler',
+                  create_time_ms: 1700000000000,
+                  item_list: [{ type: 1, text_item: { text: 'wait for handler' } }],
+                },
+              ],
+            }),
+          };
+        }
+        return { ok: false, status: 404, json: async () => ({}) };
+      });
+
+      let releaseHandler;
+      const handlerStarted = new Promise((resolve) => {
+        adapter.startPolling(async () => {
+          resolve();
+          await new Promise((release) => {
+            releaseHandler = release;
+          });
+          await adapter.stopPolling();
+        });
+      });
+
+      await handlerStarted;
+      await waitForCondition(() => saves.some((state) => state.contextTokens?.['user-1'] === 'ctx-before-handler'));
+      assert.equal(adapter._getCursor(), '', 'in-memory cursor must not advance before handler completes');
+      assert.equal(
+        saves.some((state) => state.getUpdatesBuf === 'cursor-after-handler'),
+        false,
+        'persisted cursor must not advance before handler completes',
+      );
+
+      releaseHandler();
+      await waitForCondition(() => saves.some((state) => state.getUpdatesBuf === 'cursor-after-handler'));
+      assert.equal(adapter._getCursor(), 'cursor-after-handler');
+    });
+  });
+
+  describe('content deduplication', () => {
+    it('drops same-content iLink replays with different message_id', async () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      adapter._injectFetch(async (url) => {
+        if (String(url).includes('/ilink/bot/getupdates')) {
+          return {
+            ok: true,
+            json: async () => ({
+              ret: 0,
+              get_updates_buf: 'cursor-dedup',
+              msgs: [
+                {
+                  message_id: 20001,
+                  from_user_id: 'user-1',
+                  context_token: 'ctx-1',
+                  create_time_ms: 1700000000000,
+                  item_list: [{ type: 1, text_item: { text: 'duplicate body' } }],
+                },
+                {
+                  message_id: 20002,
+                  from_user_id: 'user-1',
+                  context_token: 'ctx-1',
+                  create_time_ms: 1700000000000,
+                  item_list: [{ type: 1, text_item: { text: 'duplicate body' } }],
+                },
+              ],
+            }),
+          };
+        }
+        return { ok: false, status: 404, json: async () => ({}) };
+      });
+
+      let handled = 0;
+      adapter.startPolling(async () => {
+        handled++;
+        await adapter.stopPolling();
+      });
+
+      await waitForCondition(() => !adapter.isPolling());
+      assert.equal(handled, 1, 'only one duplicate-content replay should reach the router');
+    });
+
+    it('keeps repeated same-content messages when context_token changes', async () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      adapter._injectFetch(async (url) => {
+        if (String(url).includes('/ilink/bot/getupdates')) {
+          return {
+            ok: true,
+            json: async () => ({
+              ret: 0,
+              get_updates_buf: 'cursor-repeated',
+              msgs: [
+                {
+                  message_id: 20101,
+                  from_user_id: 'user-1',
+                  context_token: 'ctx-1',
+                  create_time_ms: 1700000000000,
+                  item_list: [{ type: 1, text_item: { text: 'same body' } }],
+                },
+                {
+                  message_id: 20102,
+                  from_user_id: 'user-1',
+                  context_token: 'ctx-2',
+                  create_time_ms: 1700000000000,
+                  item_list: [{ type: 1, text_item: { text: 'same body' } }],
+                },
+              ],
+            }),
+          };
+        }
+        return { ok: false, status: 404, json: async () => ({}) };
+      });
+
+      let handled = 0;
+      adapter.startPolling(async () => {
+        handled++;
+        if (handled === 2) await adapter.stopPolling();
+      });
+
+      await waitForCondition(() => !adapter.isPolling());
+      assert.equal(handled, 2, 'a new context_token is a distinct user message, not a replay');
+    });
   });
 
   describe('cursor management', () => {
@@ -967,6 +1246,39 @@ describe('WeixinAdapter', () => {
       assert.equal(adapter.hasBotToken(), false);
       adapter.setBotToken('new-token');
       assert.equal(adapter.hasBotToken(), true);
+    });
+
+    it('preserves live polling session state during token rotation', async () => {
+      let clearCalls = 0;
+      const adapter = new WeixinAdapter('old-token', noopLog(), {
+        load: async () => null,
+        save: async () => {},
+        clear: async () => {
+          clearCalls++;
+        },
+      });
+      adapter._setCursor('cursor-live');
+      adapter._injectContextToken('user-1', 'ctx-live');
+      adapter._injectFetch((_, init) => {
+        const signal = init?.signal;
+        return new Promise((_, reject) => {
+          signal?.addEventListener('abort', () => reject(new Error('poll aborted')), { once: true });
+        });
+      });
+
+      adapter.startPolling(async () => {});
+      assert.equal(adapter.isPolling(), true);
+
+      try {
+        adapter.setBotToken('new-token');
+
+        assert.equal(adapter.hasBotToken(), true);
+        assert.equal(adapter._getCursor(), 'cursor-live');
+        assert.equal(adapter.hasContextToken('user-1'), true);
+        assert.equal(clearCalls, 0);
+      } finally {
+        await adapter.stopPolling();
+      }
     });
   });
 
@@ -1427,8 +1739,8 @@ describe('WeixinAdapter', () => {
       }
     });
 
-    it('default mode: sends minimal voice_item (media only, no metadata)', async () => {
-      // Default (no env var) = minimal mode — safest fallback
+    it('default mode: sends audio as file_item attachment, not native voice_item', async () => {
+      // Default path must be reliable/playable attachment delivery. Native voice_item is opt-in only.
       delete process.env.WEIXIN_VOICE_ITEM_MODE;
       const adapter = new WeixinAdapter('test-token', noopLog());
       adapter._injectContextToken('user-1', 'ctx-1');
@@ -1436,10 +1748,14 @@ describe('WeixinAdapter', () => {
       await writeFile(wavPath, makeMalformedWav(24000, 2));
       /** @type {Record<string, unknown> | null} */
       let sentMsg = null;
+      /** @type {Record<string, unknown> | null} */
+      let uploadReq = null;
       try {
         adapter._injectFetch(async (url, opts) => {
-          if (url.includes('/ilink/bot/getuploadurl'))
+          if (url.includes('/ilink/bot/getuploadurl')) {
+            uploadReq = JSON.parse(opts.body);
             return { ok: true, json: async () => ({ upload_param: 'enc-upload-param' }) };
+          }
           if (url.includes('/c2c/upload?'))
             return { status: 200, headers: new Headers({ 'x-encrypted-param': 'enc-download-param' }) };
           if (url.includes('/ilink/bot/sendmessage')) {
@@ -1449,13 +1765,84 @@ describe('WeixinAdapter', () => {
           throw new Error(`unexpected url: ${url}`);
         });
         await adapter.sendMedia('user-1', { type: 'audio', absPath: wavPath, fileName: 'voice.wav' });
-        const voiceItem = /** @type {Record<string, unknown>} */ (sentMsg?.item_list[0].voice_item);
-        assert.ok(voiceItem?.media, 'media CDN reference must be present');
-        assert.equal(voiceItem.encode_type, undefined, 'minimal mode: no encode_type');
-        assert.equal(voiceItem.playtime, undefined, 'minimal mode: no playtime');
+        assert.equal(uploadReq?.media_type, 3, 'default audio must upload as FILE media');
+        assert.equal(sentMsg?.item_list[0].type, 4, 'default audio must send file_item');
+        assert.ok(sentMsg?.item_list[0].file_item?.media, 'file_item media CDN reference must be present');
+        assert.equal(sentMsg?.item_list[0].file_item?.file_name, 'voice.wav');
+        assert.equal(sentMsg?.item_list[0].voice_item, undefined, 'default audio must not send native voice_item');
       } finally {
         delete process.env.WEIXIN_VOICE_ITEM_MODE;
         await unlink(wavPath).catch(() => {});
+      }
+    });
+
+    it('invalid voice mode env values keep audio on file_item delivery', async () => {
+      for (const invalidMode of ['0', 'false', 'typo']) {
+        process.env.WEIXIN_VOICE_ITEM_MODE = invalidMode;
+        const adapter = new WeixinAdapter('test-token', noopLog());
+        adapter._injectContextToken('user-1', 'ctx-1');
+        const silkPath = join(tmpdir(), `cat-cafe-invalid-voice-mode-${invalidMode}-${Date.now()}.silk`);
+        await writeFile(silkPath, Buffer.from('#!SILK_V3\nfake'));
+        /** @type {Record<string, unknown> | null} */
+        let sentMsg = null;
+        /** @type {Record<string, unknown> | null} */
+        let uploadReq = null;
+        try {
+          adapter._injectFetch(async (url, opts) => {
+            if (url.includes('/ilink/bot/getuploadurl')) {
+              uploadReq = JSON.parse(opts.body);
+              return { ok: true, json: async () => ({ upload_param: 'enc-upload-param' }) };
+            }
+            if (url.includes('/c2c/upload?'))
+              return { status: 200, headers: new Headers({ 'x-encrypted-param': 'enc-download-param' }) };
+            if (url.includes('/ilink/bot/sendmessage')) {
+              sentMsg = JSON.parse(opts.body).msg;
+              return { ok: true, text: async () => JSON.stringify({ ret: 0 }) };
+            }
+            throw new Error(`unexpected url: ${url}`);
+          });
+
+          await adapter.sendMedia('user-1', { type: 'audio', absPath: silkPath, fileName: 'voice.silk' });
+
+          assert.equal(uploadReq?.media_type, 3, `${invalidMode}: invalid mode must upload as FILE media`);
+          assert.equal(sentMsg?.item_list[0].type, 4, `${invalidMode}: invalid mode must send file_item`);
+          assert.ok(sentMsg?.item_list[0].file_item?.media, `${invalidMode}: file_item media must be present`);
+          assert.equal(sentMsg?.item_list[0].voice_item, undefined, `${invalidMode}: must not send voice_item`);
+        } finally {
+          delete process.env.WEIXIN_VOICE_ITEM_MODE;
+          await unlink(silkPath).catch(() => {});
+        }
+      }
+    });
+
+    it('retries transient iLink -2 responses when sending media messages', async () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      adapter._injectContextToken('user-1', 'ctx-1');
+      const filePath = join(tmpdir(), `cat-cafe-media-retry-${Date.now()}.txt`);
+      await writeFile(filePath, Buffer.from('hello'));
+      let sendCalls = 0;
+
+      try {
+        adapter._injectFetch(async (url) => {
+          if (url.includes('/ilink/bot/getuploadurl'))
+            return { ok: true, json: async () => ({ upload_param: 'enc-upload-param' }) };
+          if (url.includes('/c2c/upload?'))
+            return { status: 200, headers: new Headers({ 'x-encrypted-param': 'enc-download-param' }) };
+          if (url.includes('/ilink/bot/sendmessage')) {
+            sendCalls++;
+            if (sendCalls === 1) {
+              return { ok: true, text: async () => JSON.stringify({ ret: -2, errmsg: 'frequency limit' }) };
+            }
+            return { ok: true, text: async () => JSON.stringify({ ret: 0 }) };
+          }
+          throw new Error(`unexpected url: ${url}`);
+        });
+
+        await adapter.sendMedia('user-1', { type: 'file', absPath: filePath, fileName: 'hello.txt' });
+
+        assert.equal(sendCalls, 2, 'media sendmessage must retry transient -2 responses');
+      } finally {
+        await unlink(filePath).catch(() => {});
       }
     });
 

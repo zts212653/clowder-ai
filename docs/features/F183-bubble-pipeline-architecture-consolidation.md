@@ -1,6 +1,6 @@
 ---
 feature_ids: [F183]
-related_features: [F081, F117, F123, F164, F176]
+related_features: [F081, F117, F123, F164, F173, F176, F184, F194]
 topics: [bubble, message-pipeline, identity-contract, websocket, idb-cache, reconcile, refactor, architecture, observability]
 doc_kind: spec
 created: 2026-04-30
@@ -11,6 +11,8 @@ created: 2026-04-30
 > **Status**: done | **Owner**: Ragdoll/Ragdoll (Opus-47) 牵头 | **Priority**: P1
 >
 > Phase A-E 全 phase 代码落地并通过 alpha 实测（2026-05-02）。**AC-Z1 5 类症状（裂/不见/F5 才好/F5 才出来/发完才出来）在 alpha 通道经验证已全部消除**。PR #1541 补齐了 reconnect-window catch-up 路径，alpha 实测 confirm 掉线期间 broadcast 可自愈。A→B→A UI bug 在 alpha 未复现。F183 愿景达成，架构进入 main 并作为消息管线真相源参考。
+>
+> **2026-05-07 Post-close follow-up**: team lead在 runtime 报告"活跃线程气泡仍会裂，但没那么严重"。Maine Coon现场只读诊断显示：`/api/messages` 仍返回 live `draft-{invocationId}`，但 `/api/threads/:threadId/queue` 对同一 thread 返回 `activeInvocations: []`。这是 DraftStore / InvocationRecordStore 与 InvocationTracker 的 liveness truth split，不是单纯渲染 CSS 问题。记录见下方 "Post-close Issue: Active Draft / Queue Liveness Split"。**已独立立项 [F194](F194-invocation-liveness-canonical-read-model.md)**（不 reopen F183，不挂 F173），由 opus-47 author / Maine Coon reviewer 收口后端 invocation 活性 canonical read model + zombie detection。
 >
 > Phase A 已 done（2026-04-30，team lead自治放行 ADR-033 v2）。Phase B0 已 merged（PR #1496，commit `a6be5970e`）。Phase B1.1 reducer core 已 merged（PR #1500，commit `2fbde77ec`）。Phase B1.2.1 adapter + reducer textMode='replace' 已 merged（PR #1506，commit `1e9cb84bd`）。Phase B1.2.2 active text wire-up pilot 已 merged（PR #1507，commit `3817e0974`，2 轮 review）。Phase B1.2.3 active stream new-bubble 已 merged（PR #1510，commit `058362c79`，1 轮 review）。Phase B1.2.4 callback wire-up + reducer callback-specific policy 已 merged（PR #1517，commit `1d6040b80`，4 轮 review 收敛 4 P1）。Phase B1.2.5 hydration `mergeReplaceHydrationMessages` 简化（AC-B2）已 merged（PR #1521，commit `a2cf6dc84`，1 轮云端 review 收敛 1 P1）。**active text 整体 wire-up 完成（stream + callback explicit-invocationId 路径）+ hydration replace 路径策略简化完毕**；后续处理 invocationless callback / tool events / done-error 等余下入口。
 
@@ -37,6 +39,44 @@ team lead 2026-04-30 原话：
 - **F183 修的是"架构层不再有四源竞争 / 写入口爆炸 / merge 启发式"**（结构视角）—— 把 TD111-TD114 收编 + IDB cache invalidation contract + websocket 序列号 + ack/gap 一起做
 
 副愿景：**Spec 内嵌的 Architecture Map 成为未来开发者改动消息管线时的强制参考真相源**，让"加一个新 provider/路径"不再触发新一轮气泡 bug。
+
+## Post-close Issue: Active Draft / Queue Liveness Split（2026-05-07）
+
+### 现场症状
+
+team lead报告：只要是当前活跃的 thread，气泡仍有概率分裂成两个气泡；F5 / 切 thread 后通常变轻或恢复。这次不是 PR #1586 没跑到 runtime：runtime preflight 显示 API 进程已在包含 PR #1586 修复后的 `89f088440` 上运行。
+
+Maine Coon只读诊断采样到同一类矛盾：
+
+- `thread_mou6i2v6jpgo7utj`: `/api/messages` 返回 `draft-4a31dc69-...`（opus）和 `draft-ffaa19de-...`（codex），但 `/api/threads/:threadId/queue` 返回 `activeInvocations: []`
+- `thread_mov3a7qva8mtsbs1`: `/api/messages` 返回当前 codex live draft `draft-3270e743-...`，但 queue endpoint 返回 `activeInvocations: []`
+- `thread_movcg5v7226tmg0q`: `/api/messages` 返回 `draft-bca7ca54-...`（opus-47），但 queue endpoint 返回 `activeInvocations: []`
+
+### 当前判断
+
+这是 liveness contract 分裂：
+
+- `/api/messages` 以 `DraftStore.getByThread()` 为入口，并通过 `InvocationRecordStore.status === "running"` 或 `InvocationTracker` 判断 draft 是否活着；通过后返回 `draft-{invocationId}`。
+- `/api/threads/:threadId/queue` 只暴露 `invocationTracker.getActiveSlots(threadId)` 作为 `activeInvocations`。
+- 当前现场出现 "messages 认为有 live draft / queue 认为没有 active slot"。前端 hydration 会看到 server draft；本地 websocket path 也可能已有 live bubble；但 queue reconcile 又拿不到同一 invocation 的 active binding，导致 local live bubble 与 server draft 不能稳定合并。
+
+PR #1586 已修复一个局部 identity gap：local invocationless live bubble 与 server `draft-{invocationId}` 在唯一 draft + 内容相近时可以 late-bind merge。但如果后端两个 liveness 读模型本身互相矛盾，前端仍会进入 "draft exists, active slot absent" 的 split-brain 状态。
+
+### 修复方向（待架构拍板）
+
+倾向方案：定义一个 canonical live-bubble read model，供 `/api/messages` 和 `/api/threads/:threadId/queue` 共同使用。不能让 DraftStore / InvocationRecordStore 和 InvocationTracker 各自独立回答"这只猫这一轮 invocation 是否还活着"。
+
+候选路径：
+
+1. **Preferred — queue endpoint 补齐 canonical active view**：`activeInvocations` 不只来自 `InvocationTracker`，还要纳入 `InvocationRecordStore running + DraftStore live draft` 的同一套判定；前端 reconcile 继续以 queue 为 active binding 真相源。
+2. **Alternative — messages draft merge 收窄到 queue 承认的 active slot**：如果 queue 不承认 active，就不返回 live draft。优点是简单；风险是 running record 仍活但 tracker 丢 slot 时，F5 恢复能力会退化。
+3. **Bigger unification — 挂到 F173**：把 frontend thread-runtime state 与 backend liveness view 一起收束，避免 `hasActiveInvocation` / `catInvocations` / `DraftStore` / `InvocationTracker` 多源漂移继续复发。
+
+### 验收建议
+
+- 增加 API regression：构造 "running invocation record + live draft + missing tracker slot" 场景，断言 `/api/messages` 与 `/queue.activeInvocations` 不再互相矛盾。
+- 增加 web hydration regression：本地已有 streaming bubble，server history 返回 `draft-{invocationId}`，queue 返回 canonical active binding；断言最终只保留一条 assistant bubble，且 `extra.stream.invocationId` 被补齐。
+- runtime diagnostic：当 messages 返回 live draft 但 queue active slots 为空时，记录结构化 `bubble_liveness_split` 事件，字段至少包含 `threadId` / `catId` / `invocationId` / `recordStatus` / `trackerSlotPresent`。
 
 ## What
 
@@ -176,6 +216,7 @@ team lead 2026-04-30 原话：
 | R6 | "写一个 ADR 或架构设计文档" | AC-A1, AC-A2, AC-A5 | doc review | [x] |
 | R7 | "未来修改代码就有架构图可以看和参考" | AC-Z3 | onboarding 检查 | [x] |
 | R8 | "组织大家讨论一下，不要当独裁猫猫" | AC-A1（多猫收敛） | discussion 落盘 | [x] |
+| **NEW-2026-05-07** | "现在活跃线程气泡还是裂的" | [F194](F194-invocation-liveness-canonical-read-model.md) AC-Z1 | F194 alpha 实测 | [→] 已转 F194 |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC

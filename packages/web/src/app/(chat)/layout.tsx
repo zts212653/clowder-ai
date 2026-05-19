@@ -11,12 +11,30 @@ function getThreadRouteSnapshot(): string {
   return getThreadIdFromPathname(window.location.pathname);
 }
 
-export default function ConsoleLayout({ children }: { children: React.ReactNode }) {
+export function resolveLayoutThreadId(
+  pathnameThreadId: string,
+  browserThreadId: string | null,
+  immediateBrowserThreadId: string | null = null,
+): string {
+  if (browserThreadId !== null) return browserThreadId;
+  if (immediateBrowserThreadId !== null) return immediateBrowserThreadId;
+  return pathnameThreadId;
+}
+
+/**
+ * Shared layout for "/" and "/thread/[threadId]".
+ *
+ * By placing ChatContainer here instead of in each page, it stays mounted
+ * across thread switches — no unmount/remount flicker, no scroll-position
+ * loss, and socket/state survives navigation.
+ */
+export default function ChatLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const pathnameThreadId = getThreadIdFromPathname(pathname ?? '');
+  // Parent layouts can briefly see the default route during hard refresh; the
+  // address bar is the authority before chat history effects are allowed to run.
   const immediateBrowserThreadId = typeof window !== 'undefined' ? getThreadRouteSnapshot() : null;
   const [browserThreadId, setBrowserThreadId] = useState<string | null>(null);
-
   useLayoutEffect(() => {
     const syncBrowserRoute = () => setBrowserThreadId(getThreadRouteSnapshot());
     syncBrowserRoute();
@@ -27,12 +45,7 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
       window.removeEventListener(CHAT_THREAD_ROUTE_EVENT, syncBrowserRoute);
     };
   }, []);
-
-  const threadId = (() => {
-    if (browserThreadId !== null) return browserThreadId;
-    if (immediateBrowserThreadId !== null) return immediateBrowserThreadId;
-    return pathnameThreadId;
-  })();
+  const threadId = resolveLayoutThreadId(pathnameThreadId, browserThreadId, immediateBrowserThreadId);
 
   return (
     <>

@@ -921,8 +921,47 @@ describe('InvocationQueue', () => {
     assert.equal(
       queue.hasQueuedUserMessagesForThread('t1'),
       false,
-      'connector-sourced entries should not block A2A text-scan',
+      'connector-sourced entries should not block A2A text-scan (user-only method)',
     );
+  });
+
+  // ── F185 Phase B: text-scan fairness gate must use hasQueuedNonAgentForThread ──
+
+  it('hasQueuedNonAgentForThread blocks text-scan when connector entry is queued (F185-B AC-B1)', () => {
+    queue.enqueue(entry({ source: 'connector', targetCats: ['opus'] }));
+    assert.equal(
+      queue.hasQueuedNonAgentForThread('t1'),
+      true,
+      'connector-sourced entries must block A2A text-scan fairness gate',
+    );
+  });
+
+  it('hasQueuedNonAgentForThread does not block when only agent entries are queued (F185-B AC-B8)', () => {
+    queue.enqueue(entry({ source: 'agent', targetCats: ['opus'], callerCatId: 'codex' }));
+    assert.equal(queue.hasQueuedNonAgentForThread('t1'), false, 'pure agent queue must not trigger fairness gate');
+  });
+
+  // ── F185 Phase B P1-1: deferred A2A messageId preservation ──
+
+  it('enqueue preserves messageId when provided (F185-B deferred handoff)', () => {
+    const result = queue.enqueue(
+      entry({
+        source: 'agent',
+        sourceCategory: 'a2a',
+        callerCatId: 'opus',
+        messageId: 'msg-trigger-123',
+      }),
+    );
+    assert.equal(
+      result.entry.messageId,
+      'msg-trigger-123',
+      'deferred A2A entry must carry triggerMessageId as messageId',
+    );
+  });
+
+  it('enqueue defaults messageId to null when not provided', () => {
+    const result = queue.enqueue(entry({ source: 'user' }));
+    assert.equal(result.entry.messageId, null, 'messageId must default to null for normal entries');
   });
 
   // ── F175: priority / sourceCategory / position fields ──

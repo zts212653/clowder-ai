@@ -4,7 +4,7 @@
  * a read-only SqliteEvidenceStore for federated search via KnowledgeResolver.
  */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { EvidenceItem, EvidenceKind, RebuildResult } from './interfaces.js';
 import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
@@ -59,11 +59,10 @@ export class GlobalIndexBuilder {
   private discoverSkills(): EvidenceItem[] {
     if (!existsSync(this.skillsRoot)) return [];
     const items: EvidenceItem[] = [];
-    const now = new Date().toISOString();
 
     for (const entry of readdirSync(this.skillsRoot, { withFileTypes: true })) {
       if (entry.name === 'refs') {
-        items.push(...this.indexDir(join(this.skillsRoot, 'refs'), 'decision', 'global:ref', now));
+        items.push(...this.indexDir(join(this.skillsRoot, 'refs'), 'decision', 'global:ref'));
         continue;
       }
       if (!entry.isDirectory()) continue;
@@ -79,7 +78,7 @@ export class GlobalIndexBuilder {
         status: 'active',
         title: fm?.name ?? entry.name,
         summary: fm?.description ?? content.slice(0, 300),
-        updatedAt: now,
+        updatedAt: statSync(skillPath).mtime.toISOString(),
       });
     }
     return items;
@@ -90,19 +89,18 @@ export class GlobalIndexBuilder {
   private discoverMemories(): EvidenceItem[] {
     if (!existsSync(this.memoryRoot)) return [];
     const items: EvidenceItem[] = [];
-    const now = new Date().toISOString();
 
     for (const projEntry of readdirSync(this.memoryRoot, { withFileTypes: true })) {
       if (!projEntry.isDirectory()) continue;
       const memDir = join(this.memoryRoot, projEntry.name, 'memory');
       if (!existsSync(memDir)) continue;
 
-      // Extract project slug from dir name (last segment after last dash)
       const slug = extractProjectSlug(projEntry.name);
 
       for (const file of readdirSync(memDir)) {
         if (!file.endsWith('.md') || file === 'MEMORY.md') continue;
-        const content = readFileSync(join(memDir, file), 'utf-8');
+        const filePath = join(memDir, file);
+        const content = readFileSync(filePath, 'utf-8');
         const fm = parseFrontmatter(content);
         const stem = file.replace(/\.md$/, '');
         const memType = fm?.type ?? 'reference';
@@ -114,7 +112,7 @@ export class GlobalIndexBuilder {
           status: 'active',
           title: fm?.name ?? extractTitle(content) ?? stem,
           summary: fm?.description ?? content.slice(0, 300),
-          updatedAt: now,
+          updatedAt: statSync(filePath).mtime.toISOString(),
         });
       }
     }
@@ -123,13 +121,14 @@ export class GlobalIndexBuilder {
 
   // ── Helpers ────────────────────────────────────────────────────────
 
-  private indexDir(dirPath: string, kind: EvidenceKind, anchorPrefix: string, now: string): EvidenceItem[] {
+  private indexDir(dirPath: string, kind: EvidenceKind, anchorPrefix: string): EvidenceItem[] {
     if (!existsSync(dirPath)) return [];
     const items: EvidenceItem[] = [];
 
     for (const file of readdirSync(dirPath)) {
       if (!file.endsWith('.md')) continue;
-      const content = readFileSync(join(dirPath, file), 'utf-8');
+      const filePath = join(dirPath, file);
+      const content = readFileSync(filePath, 'utf-8');
       const fm = parseFrontmatter(content);
       const stem = file.replace(/\.md$/, '');
 
@@ -139,7 +138,7 @@ export class GlobalIndexBuilder {
         status: 'active',
         title: fm?.name ?? extractTitle(content) ?? stem,
         summary: fm?.description ?? content.slice(0, 300),
-        updatedAt: now,
+        updatedAt: statSync(filePath).mtime.toISOString(),
       });
     }
     return items;

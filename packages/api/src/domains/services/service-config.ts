@@ -1,31 +1,41 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { ServiceConfig } from './service-manifest.js';
 
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../..');
-const CONFIG_PATH = process.env.CAT_CAFE_SERVICES_CONFIG
-  ? resolve(process.env.CAT_CAFE_SERVICES_CONFIG)
-  : resolve(REPO_ROOT, '.cat-cafe/services.json');
+function resolveConfigPath(): string {
+  return process.env.CAT_CAFE_SERVICES_CONFIG
+    ? resolve(process.env.CAT_CAFE_SERVICES_CONFIG)
+    : resolve(homedir(), '.cat-cafe/services.json');
+}
 
 type ServiceConfigMap = Record<string, ServiceConfig>;
 
+let cachePath: string | null = null;
 let cache: ServiceConfigMap | null = null;
 
 function load(): ServiceConfigMap {
-  if (cache) return cache;
-  if (!existsSync(CONFIG_PATH)) return {};
+  const configPath = resolveConfigPath();
+  if (cachePath === configPath && cache) return cache;
+  cachePath = configPath;
+  if (!existsSync(configPath)) {
+    cache = {};
+    return cache;
+  }
   try {
-    cache = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')) as ServiceConfigMap;
-    return cache!;
+    cache = JSON.parse(readFileSync(configPath, 'utf-8')) as ServiceConfigMap;
+    return cache;
   } catch {
-    return {};
+    cache = {};
+    return cache;
   }
 }
 
 function save(data: ServiceConfigMap): void {
-  mkdirSync(dirname(CONFIG_PATH), { recursive: true });
-  writeFileSync(CONFIG_PATH, `${JSON.stringify(data, null, 2)}\n`);
+  const configPath = resolveConfigPath();
+  mkdirSync(dirname(configPath), { recursive: true });
+  writeFileSync(configPath, `${JSON.stringify(data, null, 2)}\n`);
+  cachePath = configPath;
   cache = data;
 }
 
@@ -41,8 +51,4 @@ export function setServiceConfig(id: string, patch: Partial<ServiceConfig>): Ser
   all[id] = updated;
   save(all);
   return updated;
-}
-
-export function getAllServiceConfigs(): ServiceConfigMap {
-  return load();
 }

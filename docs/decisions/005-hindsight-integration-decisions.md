@@ -217,7 +217,7 @@ Ragdoll推荐 A，创建 `cat-cafe-evidence` bank。
 - 只导入**归档后**的稳定文档
 - `docs/decisions/` — 归档即导入
 - `docs/phases/` — Phase 完成后导入
-- *(internal reference removed)* — 有明确结论的纪要才导入
+- `feature-discussions/` — 有明确结论的纪要才导入
 - 正在进行的讨论（如当前 Phase 5）**不导入**
 
 ---
@@ -444,7 +444,7 @@ Ragdoll推荐 B（卡片）。
    - 默认 tagsMatch：`all_strict`（由 runtime config 管理）
 3. 可观测三件套落地
    - 脚本：`scripts/hindsight/p0-health-check.sh`
-   - 手册：*(internal reference removed)*
+   - 手册：`project-runbooks/hindsight-p0-health-check.md`
 
 ### 2026-02-13 验收快照
 

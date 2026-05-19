@@ -100,24 +100,22 @@ export function McpInstallForm({ projectPath, onInstalled, onClose, prefilledId 
 
   if (result) {
     return (
-      <div className="space-y-4">
-        <div className="console-card-soft rounded-xl px-4 py-4">
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="font-medium text-conn-green-text">MCP &ldquo;{id}&rdquo; 已安装</span>
-            <span
-              className="console-status-chip"
-              data-status={result.probe?.connectionStatus === 'connected' ? 'active' : 'warning'}
-            >
-              {result.probe?.connectionStatus ?? 'pending'}
-            </span>
-          </div>
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-conn-green-text font-medium">MCP &ldquo;{id}&rdquo; 已安装</span>
           {result.probe && (
-            <p className="mt-2 text-xs leading-6 text-cafe-secondary">
-              安装后已返回探测状态，可直接回到能力列表继续管理。
-            </p>
+            <span
+              className={`text-xs px-1.5 py-0.5 rounded ${
+                result.probe.connectionStatus === 'connected'
+                  ? 'bg-conn-green-bg text-conn-green-text'
+                  : 'bg-conn-amber-bg text-conn-amber-text'
+              }`}
+            >
+              {result.probe.connectionStatus}
+            </span>
           )}
         </div>
-        <button type="button" onClick={onClose} className="console-button-secondary">
+        <button type="button" onClick={onClose} className="text-xs text-cafe-accent hover:underline">
           关闭
         </button>
       </div>
@@ -125,167 +123,124 @@ export function McpInstallForm({ projectPath, onInstalled, onClose, prefilledId 
   }
 
   return (
-    <div className="space-y-4">
-      <div className="space-y-1.5">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cafe-muted">MCP Install</p>
-        <h3 className="text-lg font-semibold tracking-[-0.03em] text-cafe">添加 MCP</h3>
-        <p className="text-sm leading-6 text-cafe-secondary">
-          通过本地命令或远程 URL 注册新的 MCP 服务，先预览影响范围，再确认安装。
-        </p>
-      </div>
+    <div className="space-y-3">
+      <h3 className="text-sm font-semibold text-cafe-secondary">添加 MCP</h3>
 
-      {error && (
-        <div className="console-status-chip" data-status="error">
-          {error}
-        </div>
-      )}
+      {error && <p className="text-xs text-conn-red-text bg-conn-red-bg rounded px-2 py-1">{error}</p>}
 
-      <div className="console-section-shell rounded-xl p-4">
-        <div className="space-y-3">
-          <Field label="ID" required>
-            <input
-              type="text"
-              value={id}
-              onChange={(e) => setId(e.target.value)}
-              placeholder="e.g. agent-browser"
-              className="console-form-input"
-            />
-          </Field>
+      {/* ID */}
+      <Field label="ID" required>
+        <input
+          type="text"
+          value={id}
+          onChange={(e) => setId(e.target.value)}
+          placeholder="e.g. agent-browser"
+          className="form-input"
+        />
+      </Field>
 
-          <Field label="传输协议">
-            <div className="console-segmented">
-              <button
-                type="button"
-                data-active={transport === 'stdio' ? 'true' : 'false'}
-                className="console-segmented-button"
-                onClick={() => setTransport('stdio')}
-              >
-                stdio
-              </button>
-              <button
-                type="button"
-                data-active={transport === 'streamableHttp' ? 'true' : 'false'}
-                className="console-segmented-button"
-                onClick={() => setTransport('streamableHttp')}
-              >
-                streamableHttp
-              </button>
-            </div>
-          </Field>
-        </div>
-      </div>
+      {/* Transport */}
+      <Field label="传输协议">
+        <select value={transport} onChange={(e) => setTransport(e.target.value as Transport)} className="form-input">
+          <option value="stdio">stdio (本地命令)</option>
+          <option value="streamableHttp">streamableHttp (远程 URL)</option>
+        </select>
+      </Field>
 
+      {/* Stdio fields */}
       {transport === 'stdio' && (
-        <div className="console-section-shell rounded-xl p-4">
-          <div className="space-y-1.5">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-cafe-muted">Local Command</p>
-            <p className="text-sm text-cafe-secondary">为本地启动的 MCP Server 指定命令和参数。</p>
-          </div>
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <Field label="命令">
-              <input
-                type="text"
-                value={command}
-                onChange={(e) => setCommand(e.target.value)}
-                placeholder="e.g. npx"
-                className="console-form-input"
-              />
-            </Field>
-            <Field label="参数 (空格分隔)">
-              <input
-                type="text"
-                value={args}
-                onChange={(e) => setArgs(e.target.value)}
-                placeholder="e.g. agent-browser-mcp"
-                className="console-form-input"
-              />
-            </Field>
-          </div>
-        </div>
-      )}
-
-      {transport === 'streamableHttp' && (
-        <div className="console-section-shell rounded-xl p-4">
-          <div className="space-y-1.5">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-cafe-muted">Remote Endpoint</p>
-            <p className="text-sm text-cafe-secondary">把远程 MCP Server 挂进当前项目，适合已有托管服务的场景。</p>
-          </div>
-          <div className="mt-4">
-            <Field label="URL">
-              <input
-                type="text"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://mcp.example.com/api"
-                className="console-form-input"
-              />
-            </Field>
-          </div>
-        </div>
-      )}
-
-      <div className="console-section-shell rounded-xl p-4">
-        <div className="space-y-1.5">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-cafe-muted">Advanced</p>
-          <p className="text-sm text-cafe-secondary">高级配置只在需要定制 resolver 或临时注入环境变量时填写。</p>
-        </div>
-        <div className="mt-4 grid gap-3">
-          <Field label="Resolver (高级)">
+        <>
+          <Field label="命令">
             <input
               type="text"
-              value={resolver}
-              onChange={(e) => setResolver(e.target.value)}
-              placeholder="e.g. chrome-extension"
-              className="console-form-input"
+              value={command}
+              onChange={(e) => setCommand(e.target.value)}
+              placeholder="e.g. npx"
+              className="form-input"
             />
           </Field>
-          <Field label="环境变量 (KEY=VALUE 每行一个)">
-            <textarea
-              value={envPairs}
-              onChange={(e) => setEnvPairs(e.target.value)}
-              rows={4}
-              placeholder="API_KEY=xxx"
-              className="console-form-input resize-y"
+          <Field label="参数 (空格分隔)">
+            <input
+              type="text"
+              value={args}
+              onChange={(e) => setArgs(e.target.value)}
+              placeholder="e.g. agent-browser-mcp"
+              className="form-input"
             />
           </Field>
-        </div>
-      </div>
+        </>
+      )}
 
-      <div className="flex flex-wrap items-center gap-2 pt-1">
+      {/* StreamableHttp fields */}
+      {transport === 'streamableHttp' && (
+        <Field label="URL">
+          <input
+            type="text"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://mcp.example.com/api"
+            className="form-input"
+          />
+        </Field>
+      )}
+
+      {/* Advanced: resolver */}
+      <Field label="Resolver (高级)">
+        <input
+          type="text"
+          value={resolver}
+          onChange={(e) => setResolver(e.target.value)}
+          placeholder="e.g. chrome-extension"
+          className="form-input"
+        />
+      </Field>
+
+      {/* Env */}
+      <Field label="环境变量 (KEY=VALUE 每行一个)">
+        <textarea
+          value={envPairs}
+          onChange={(e) => setEnvPairs(e.target.value)}
+          rows={2}
+          placeholder="API_KEY=xxx"
+          className="form-input resize-y"
+        />
+      </Field>
+
+      {/* Actions */}
+      <div className="flex items-center gap-2 pt-1">
         <button
           type="button"
           onClick={handlePreview}
           disabled={!id.trim()}
-          className="console-button-secondary disabled:opacity-40"
+          className="px-3 py-1.5 text-xs rounded bg-cafe-surface border border-cafe text-cafe-secondary
+                     hover:bg-cafe-surface-hover disabled:opacity-40"
         >
           预览
         </button>
-        <button type="button" onClick={onClose} className="console-button-ghost">
+        <button
+          type="button"
+          onClick={onClose}
+          className="px-3 py-1.5 text-xs text-cafe-muted hover:text-cafe-secondary"
+        >
           取消
         </button>
       </div>
 
+      {/* Preview result */}
       {preview && (
-        <div className="console-card-soft rounded-xl p-4 space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-cafe-muted">Install Preview</p>
-              <h4 className="mt-1 text-sm font-semibold text-cafe">{preview.entry.id}</h4>
-            </div>
-            <span className="console-status-chip" data-status={preview.willProbe ? 'active' : 'info'}>
-              {preview.willProbe ? '会自动探测' : '仅写入配置'}
-            </span>
-          </div>
-          <div className="console-data-grid">
-            <DetailTile label="配置更新" value={preview.cliConfigsAffected.join(', ') || '无'} />
-            <DetailTile label="来源" value={preview.entry.source} />
-            <DetailTile label="Transport" value={String(preview.entry.type)} />
+        <div className="rounded-lg border border-cafe bg-cafe-surface/50 p-3 space-y-2">
+          <p className="text-xs font-medium text-cafe-secondary">安装预览</p>
+          <div className="text-xs text-cafe-muted space-y-1">
+            <p>
+              ID: <span className="text-cafe-secondary">{preview.entry.id}</span>
+            </p>
+            <p>将更新: {preview.cliConfigsAffected.join(', ')}</p>
+            {preview.willProbe && <p className="text-conn-blue-text">安装后将自动探测连接状态</p>}
           </div>
           {preview.risks.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-cafe-muted">Risks</p>
+            <div className="space-y-0.5">
               {preview.risks.map((r) => (
-                <p key={r} className="console-status-chip mr-2 inline-flex" data-status="warning">
+                <p key={r} className="text-xs text-conn-amber-text">
                   {r}
                 </p>
               ))}
@@ -295,7 +250,8 @@ export function McpInstallForm({ projectPath, onInstalled, onClose, prefilledId 
             type="button"
             onClick={handleInstall}
             disabled={installing}
-            className="console-button-primary disabled:opacity-50"
+            className="mt-1 px-3 py-1.5 text-xs rounded bg-cafe-accent text-white
+                       hover:bg-cafe-accent/90 disabled:opacity-50"
           >
             {installing ? '安装中...' : '确认安装'}
           </button>
@@ -308,20 +264,11 @@ export function McpInstallForm({ projectPath, onInstalled, onClose, prefilledId 
 function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
   return (
     <label className="block text-xs">
-      <span className="console-form-label mb-1.5 block">
+      <span className="text-cafe-muted mb-0.5 block">
         {label}
-        {required && <span className="ml-0.5 text-conn-red-text">*</span>}
+        {required && <span className="text-conn-red-text ml-0.5">*</span>}
       </span>
       {children}
     </label>
-  );
-}
-
-function DetailTile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="console-data-tile">
-      <p className="console-data-tile-label">{label}</p>
-      <p className="console-data-tile-value">{value}</p>
-    </div>
   );
 }

@@ -31,10 +31,11 @@ const VOICE_ENV_KEYS = {
 
 /**
  * Base directory for Genshin reference audio files.
- * Override with GENSHIN_VOICE_DIR env var.
+ * Priority: GENSHIN_VOICE_DIR > CHARACTER_VOICE_DIR/genshin > hardcoded default.
  */
 function genshinVoiceDir(): string {
-  return process.env.GENSHIN_VOICE_DIR ?? join(homedir(), 'projects/relay-station/GPT-SoVITS/character-models/genshin');
+  if (process.env.GENSHIN_VOICE_DIR) return process.env.GENSHIN_VOICE_DIR;
+  return join(characterVoiceBaseDir(), 'genshin');
 }
 
 /**
@@ -53,22 +54,28 @@ export function isWithinBase(base: string, target: string): boolean {
   return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
 }
 
-function resolveRefAudioPath(refAudio: string, characterBaseDir: string): string {
+function hasParentTraversalSegment(value: string): boolean {
+  return value.split(/[\\/]+/).some((segment) => segment === '..');
+}
+
+export function resolveRefAudioPath(refAudio: string, characterBaseDir: string): string {
   if (refAudio.startsWith('/uploads/')) {
     const uploadDir = resolve(getDefaultUploadDir(process.env.UPLOAD_DIR));
-    const resolved = resolve(uploadDir, refAudio.slice('/uploads/'.length));
-    if (!isWithinBase(uploadDir, resolved)) return join(uploadDir, 'invalid-ref');
-    return resolved;
+    const uploadKey = refAudio.slice('/uploads/'.length);
+    if (hasParentTraversalSegment(uploadKey)) return join(uploadDir, 'invalid-ref');
+    const resolved = resolve(uploadDir, uploadKey);
+    return isWithinBase(uploadDir, resolved) ? resolved : join(uploadDir, 'invalid-ref');
   }
+
   if (isAbsolute(refAudio)) {
     const baseDir = resolve(characterBaseDir);
-    if (!isWithinBase(baseDir, resolve(refAudio))) return join(baseDir, 'invalid-ref');
-    return refAudio;
+    const resolved = resolve(refAudio);
+    return isWithinBase(baseDir, resolved) ? resolved : join(baseDir, 'invalid-ref');
   }
+
   const baseDir = resolve(characterBaseDir);
   const resolved = resolve(baseDir, refAudio);
-  if (!isWithinBase(baseDir, resolved)) return join(baseDir, 'invalid-ref');
-  return resolved;
+  return isWithinBase(baseDir, resolved) ? resolved : join(baseDir, 'invalid-ref');
 }
 
 /**

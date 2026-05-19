@@ -266,7 +266,7 @@ W3C TraceContext 对齐的跨猫调用因果链：
 - [x] AC-C6: regressions 覆盖 strict/shadow 同猫跨行、same-line dual mention、code block / blockquote 排除
 
 ### Phase E（Hub 嵌入式可观测 + Snapshot Store）✅
-- [x] AC-E1: `LocalTraceStore` ring buffer 存储脱敏 TraceSpanDTO（10K cap，24h TTL — Phase G 统一）
+- [x] AC-E1: `LocalTraceStore` ring buffer 存储脱敏 TraceSpanDTO（10K cap，24h TTL）
 - [x] AC-E2: `LocalTraceExporter` 在 RedactingSpanProcessor 之后运行，只看脱敏属性
 - [x] AC-E3: `GET /api/telemetry/traces` 支持 traceId/invocationId(HMAC)/catId 过滤
 - [x] AC-E4: trace 查询端 HMAC 原始 ID 后匹配（pseudonymized store）
@@ -278,7 +278,7 @@ W3C TraceContext 对齐的跨猫调用因果链：
 - [x] AC-F1: 四类 span（route/invocation/cli_session/llm_call）统一携带 `invocationId` attribute（值 = outer InvocationRecord.id，键名不变）
 - [x] AC-F2: Message `extra.tracing` 写入 `{ traceId, spanId, parentSpanId }` 指针（route → user message，invocation/cli/llm → assistant message）
 - [x] AC-F3: `LocalTraceStore.hydrate()` 从消息数据合成 TraceSpanDTO 并回填 buffer，startTime 使用 `timestamp - duration` 反推（非直接用 message.timestamp）
-- [x] AC-F4: 冷启动时从最近 24h 消息自动 hydrate，Hub Traces tab 可见历史 span（Phase G 统一 TTL）
+- [x] AC-F4: 冷启动时从最近 24h 消息自动 hydrate，Hub Traces tab 可见历史 span
 - [x] AC-F5: hydrate 使用 `msg:timeline` sorted set 范围查询，不做全表扫描
 - [x] AC-F6: 每条消息 tracing 指针增量 ≤ 100 bytes，不存完整 span 快照
 - [x] AC-F7: `StoredMessage.extra` 类型扩展含 `tracing`，parser round-trip 保留，`updateExtra()` 使用 merge 语义
@@ -292,16 +292,16 @@ W3C TraceContext 对齐的跨猫调用因果链：
 - [x] AC-D5: Windows `start-windows.ps1` 通过 API Start-Job 注入同样的 `NODE_ENV` 语义
 - [x] AC-D6: `telemetry-debug.test.js` + `start-dev-profile-isolation.test.mjs` + `start-dev-script.test.js` 覆盖 guardrail 与启动链回归
 
-### Phase G（Prompt X-Ray + A2A Trace Propagation）
-- [x] AC-G1: `PromptCaptureStore` file-based ring buffer（500 cap, 6h TTL, gzip payloads, NDJSON index），同步/异步写入 + 按 invocationId/threadId/recent 查询
-- [x] AC-G2: prompt capture 默认关闭（`PROMPT_CAPTURE` env 开关），可选 `PROMPT_CAPTURE_CATS` 白名单
-- [x] AC-G3: `/api/debug/prompt-captures/*` 端点要求 session auth + userId resource-level auth（只返回当前用户 captures），query limit 上限 100
-- [x] AC-G4: `CallerTraceContext` 穿透 InvocationQueue → InvocationRegistry → AgentRouter → route-serial/route-parallel，callback A2A trigger 路径同步传播
-- [x] AC-G5: `mention_dispatch` span 作为 A2A handoff 的 parent，`dispatch.target_count` + `dispatch.source` attributes
-- [x] AC-G6: `setTraceContext` best-effort（try/catch + typeof check），不阻塞 invocation hot path
-- [x] AC-G7: route span 携带 aggregate attributes（`ROUTE_TOTAL_CATS_INVOKED`、`ROUTE_TOTAL_TOKENS`、`ROUTE_HAS_A2A_HANDOFF`）
-- [x] AC-G8: Hub `HubTraceTree` 新增 X-Ray Inspector，prompt 分解 tabs（system/user/effective/meta）
-- [x] AC-G9: `LocalTraceStore` 默认 TTL 统一为 24h，导出常量 `LOCAL_TRACE_STORE_DEFAULT_MAX_AGE_MS` 消除 hydrate-traces 不一致
+### Phase G（Prompt X-Ray + Cross-route A2A Trace Propagation）
+- [ ] AC-G1: `PromptCaptureStore` 文件级 ring buffer（500 条上限，6h TTL），NDJSON 索引 + gzip 载荷
+- [ ] AC-G2: `PROMPT_CAPTURE` env gate 默认关闭，`PROMPT_CAPTURE_CATS` 可选白名单过滤
+- [ ] AC-G3: `capturePromptIfEnabled` 在 `invoke-single-cat` fire-and-forget 调用，不阻塞 invocation hot path
+- [ ] AC-G4: `/api/debug/prompt-captures/*` 路由走 session auth + userId resource-level auth
+- [ ] AC-G5: `CallerTraceContext` 类型（W3C TraceContext 对齐：traceId/spanId/traceFlags）定义在 `genai-semconv.ts`
+- [ ] AC-G6: `wrapWithDispatchSpan` 创建 `mention_dispatch` child span 并返回 `CallerTraceContext`
+- [ ] AC-G7: `setTraceContext` on `IAuthInvocationBackend`（Memory + Redis 实现），best-effort try/catch
+- [ ] AC-G8: Route aggregate attributes（`ROUTE_TOTAL_CATS_INVOKED`/`ROUTE_TOTAL_TOKENS`/`ROUTE_HAS_A2A_HANDOFF`）设在 route span
+- [ ] AC-G9: `LocalTraceStore` 默认 TTL 从 2h 提升到 24h，导出 `LOCAL_TRACE_STORE_DEFAULT_MAX_AGE_MS` 常量
 
 ## Dependencies
 
@@ -346,8 +346,8 @@ W3C TraceContext 对齐的跨猫调用因果链：
 | KD-23 | startTime 用 `timestamp - durationMs` 反推 | assistant message timestamp 是终态落盘时间 ≈ span end；Maine Coon review 发现直接当 startTime 会偏移 | 2026-04-22 |
 | KD-24 | `extra.tracing` 需要 parser + merge 前置改造 | `updateExtra()` 是整块覆盖，parser 不保留未知字段；Maine Coon review 指出需先 widen type + merge 语义 | 2026-04-22 |
 | KD-25 | tool_use spans 暂不持久化 | KD-6 原决策为 event；Phase E 升级为 MCP 工具 span 但仍是零时长；等 Phase H 真实执行边界再持久化 | 2026-04-22 |
-| KD-26 | Prompt capture 用文件 ring buffer，不用 SQLite | 调试专用，零额外依赖，gzip 压缩 + TTL 自动清理 | 2026-05-08 |
-| KD-27 | Prompt capture 默认关闭，env 门控 | privacy by default，捕获含完整 prompt 明文，不能无授权开启 | 2026-05-08 |
-| KD-28 | `setTraceContext` best-effort（try/catch + typeof） | invocation hot path 稳定性优先，trace 丢失可接受，invocation 失败不可接受 | 2026-05-08 |
-| KD-29 | LocalTraceStore TTL 从 2h 提升到 24h | 24h 覆盖日常调试窗口，导出常量消除 hydrate 不一致 | 2026-05-08 |
-| KD-30 | `CallerTraceContext` 对齐 W3C TraceContext（traceId/spanId/traceFlags） | 跨进程 interop 标准对齐，未来可对接外部 tracing backend | 2026-05-08 |
+| KD-26 | 社区 F181 提案归入 F153 Phase G | Prompt X-Ray + A2A trace 属可观测性基础设施范畴，不单独立 feature | 2026-05-08 |
+| KD-27 | Prompt X-Ray 默认关闭，opt-in via `PROMPT_CAPTURE` env | 捕获内容含完整 prompt 明文，必须显式启用 | 2026-05-08 |
+| KD-28 | capturePromptIfEnabled fire-and-forget，不阻塞 invocation hot path | 调试工具不可影响正常调用延迟 | 2026-05-08 |
+| KD-29 | setTraceContext best-effort（try/catch + typeof check） | trace context 丢失 = 降级为独立 trace，不影响功能正确性 | 2026-05-08 |
+| KD-30 | LocalTraceStore TTL 2h → 24h | 2h 对日常调试过短，24h 覆盖典型工作日；导出常量统一引用 | 2026-05-08 |

@@ -26,6 +26,9 @@ export interface TokenUsage {
    *  Unlike inputTokens which is aggregated across all turns, this value
    *  represents the single most recent API call's input size. */
   lastTurnInputTokens?: number;
+  /** #679: true when inputTokens/totalTokens are cumulative across all turns
+   *  (e.g. Gemini CLI stats) — not usable for single-turn context fill ratio. */
+  isCumulativeUsage?: boolean;
   /** Codex session token_count: exact current context usage shown by CLI status. */
   contextUsedTokens?: number;
   /** Codex session token_count: reset timestamp (epoch ms) for display-only hint. */
@@ -36,7 +39,7 @@ export interface TokenUsage {
 export function mergeTokenUsage(existing: TokenUsage | undefined, incoming: TokenUsage): TokenUsage {
   if (!existing) return { ...incoming };
   const result = { ...existing };
-  const numericKeys: (keyof TokenUsage)[] = [
+  const numericKeys = [
     'inputTokens',
     'outputTokens',
     'totalTokens',
@@ -46,25 +49,23 @@ export function mergeTokenUsage(existing: TokenUsage | undefined, incoming: Toke
     'durationMs',
     'durationApiMs',
     'numTurns',
-  ];
+  ] as const;
   for (const key of numericKeys) {
     const val = incoming[key];
     if (val != null) {
-      result[key] = ((result[key] as number) ?? 0) + (val as number);
+      result[key] = ((result[key] ?? 0) as number) + val;
     }
   }
   // Non-aggregating contextual fields should keep the most recent snapshot.
-  const latestKeys: (keyof TokenUsage)[] = [
-    'contextWindowSize',
-    'lastTurnInputTokens',
-    'contextUsedTokens',
-    'contextResetsAtMs',
-  ];
+  const latestKeys = ['contextWindowSize', 'lastTurnInputTokens', 'contextUsedTokens', 'contextResetsAtMs'] as const;
   for (const key of latestKeys) {
     const val = incoming[key];
     if (val != null) {
       result[key] = val;
     }
+  }
+  if (incoming.isCumulativeUsage != null) {
+    result.isCumulativeUsage = incoming.isCumulativeUsage;
   }
   return result;
 }
@@ -81,6 +82,12 @@ export interface MessageMetadata {
   modelVerified?: boolean;
   /** F061: diagnostic context attached when empty_response is triggered */
   diagnostics?: Record<string, unknown>;
+  /** F061 Phase 3: structured upstream error classification for recovery decisions */
+  upstreamError?: {
+    kind: 'capacity' | 'network' | 'stream_interrupted' | 'invalid_tool_call' | 'unknown';
+    transient: boolean;
+    rawReason: string;
+  };
 }
 
 /**
@@ -106,7 +113,8 @@ export type AgentMessageType =
   | 'a2a_handoff'
   | 'system_info' // budget warnings, cancel feedback, extraction progress, thinking
   | 'provider_signal' // F149: upstream capacity/retry signals — skipped by invocation timeout & content flags
-  | 'liveness_signal'; // F149: stream idle watchdog — skipped by invocation timeout & content flags
+  | 'liveness_signal' // F149: stream idle watchdog — skipped by invocation timeout & content flags
+  | 'status'; // F198 Phase C: transient daemon progress detail — updates cat avatar tooltip, not a bubble
 
 /**
  * A message yielded from an agent during invocation
@@ -118,6 +126,8 @@ export interface AgentMessage {
   catId: CatId;
   /** Text content (for 'text' and 'tool_result' types) */
   content?: string;
+  /** Machine-readable A2A target cat for 'a2a_handoff' events. */
+  targetCatId?: CatId;
   /**
    * How the frontend should apply text content.
    * Default append preserves streaming semantics; replace is used when the
@@ -151,8 +161,14 @@ export interface AgentMessage {
   replyPreview?: ReplyPreview;
   /** F061: Whether this message mentions the co-creator (@user/@铲屎官/configured patterns) */
   mentionsUser?: boolean;
-  /** F108: Invocation ID — allows frontend to distinguish messages from concurrent invocations */
+  /** F108: Invocation ID — allows frontend to distinguish messages from concurrent invocations.
+   *  F194 Phase Z3 dual id: this is the chain/parent invocation id (legacy SoT for liveness/queue/cancel).
+   *  Per-cat-turn id is `turnInvocationId` below — frontend uses turn for bubble identity stable key. */
   invocationId?: string;
+  /** F194 Phase Z3 (砚砚 R P1-1): per-cat-turn invocation id, frontend uses for bubble identity
+   *  stable key (prevents same-parent multi-turn-same-cat bubble merge). Stamped into
+   *  `extra.stream.turnInvocationId` by useAgentMessages. */
+  turnInvocationId?: string;
   /** F153-F: OTel span context for trace persistence (written to message extra.tracing) */
   tracing?: { traceId: string; spanId: string; parentSpanId?: string };
   /** F070: Structured error code for recoverable failures (e.g. GOVERNANCE_BOOTSTRAP_REQUIRED) */
@@ -240,4 +256,17 @@ export interface AgentService {
    * @returns An async iterable of agent messages
    */
   invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage>;
+
+  /**
+   * F203 Phase C — whether this provider injects the L0 static identity into
+   * its native system role (e.g. Claude `--system-prompt-file`, Codex
+   * `-c developer_instructions`). When true, the routing layer passes a
+   * pack-only `systemPrompt` (non-pack identity travels the native channel,
+   * compression-immune); when false/undefined the routing layer keeps the
+   * full static identity in `params.systemPrompt` so cats with no native
+   * channel still receive identity/家规 via user-message prepend.
+   *
+   * Optional — defaults to false for back-compat with non-native services.
+   */
+  injectsL0Natively?(): boolean;
 }

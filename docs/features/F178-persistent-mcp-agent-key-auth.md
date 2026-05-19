@@ -1,6 +1,6 @@
 ---
 feature_ids: [F178]
-related_features: [F061, F174, F077, F086, F098]
+related_features: [F061, F174, F077, F086, F098, F193]
 topics: [auth, mcp, agent-key, persistent-credential, antigravity, infrastructure]
 doc_kind: spec
 created: 2026-04-26

@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-css-tags -- Global CSS that does not need Next processing (xterm vendor + app-level token/control styles) is served as static stylesheets to bypass Next dev's flight CSS loader. */
 import type { Metadata, Viewport } from 'next';
 import { AppShell } from '@/components/AppShell';
 import { BrakeModal } from '@/components/BrakeModal';
@@ -6,11 +7,7 @@ import { SessionBootstrap } from '@/components/SessionBootstrap';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import { ToastContainer } from '@/components/ToastContainer';
 import { ConfirmProvider } from '@/components/useConfirm';
-import '@xterm/xterm/css/xterm.css';
-import './theme-tokens.css';
 import './globals.css';
-import './console-shell.css';
-import './console-controls.css';
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -41,6 +38,14 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN" suppressHydrationWarning>
+      <head>
+        <link rel="stylesheet" href="/vendor/app/theme-tokens.css" />
+        <link rel="stylesheet" href="/vendor/app/console-shell.css" />
+        <link rel="stylesheet" href="/vendor/app/console-controls.css" />
+        <link rel="stylesheet" href="/vendor/app/connector-tokens.css" />
+        <link rel="stylesheet" href="/vendor/app/werewolf-theme.css" />
+        <link rel="stylesheet" href="/vendor/xterm/xterm.css" />
+      </head>
       <body className="min-h-screen">
         <SessionBootstrap />
         <ThemeProvider>

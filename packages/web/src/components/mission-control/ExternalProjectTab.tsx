@@ -234,17 +234,15 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Sub-header */}
-      <div className="flex items-center justify-between border-b border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-6 py-2">
+      <div className="flex items-center justify-between border-b border-[#E7DAC7] bg-[#FFFDF8] px-6 py-2">
         <div className="flex gap-1">
           {SUB_TABS.map((t) => (
             <button
               key={t.id}
               type="button"
               onClick={() => setSubTab(t.id)}
-              className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
-                subTab === t.id
-                  ? 'bg-[var(--cafe-accent)] text-[var(--cafe-surface)]'
-                  : 'bg-[var(--console-pill-bg)] text-cafe-secondary hover:bg-[var(--console-pill-bg)]'
+              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                subTab === t.id ? 'bg-[#8B6F47] text-white' : 'bg-[#F4EFE7] text-[#6B5D4F] hover:bg-[#E7DAC7]'
               }`}
             >
               {t.label}
@@ -252,12 +250,12 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
           ))}
         </div>
         <div className="flex items-center gap-2">
-          {importStatus && <span className="text-[10px] text-cafe-muted">{importStatus}</span>}
+          {importStatus && <span className="text-[10px] text-[#9A866F]">{importStatus}</span>}
           <button
             type="button"
             onClick={() => void handleImportBacklog()}
             disabled={isStale}
-            className="console-button-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+            className="rounded-lg border border-[#D8C6AD] bg-[#FCF7EE] px-3 py-1.5 text-xs font-medium text-[#7A6B5A] hover:bg-[#F7EEDB] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             导入 Backlog
           </button>
@@ -266,9 +264,7 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
 
       {/* Stale barrier: show refreshing indicator and block interactions until fresh data arrives */}
       {isStale && (
-        <div className="px-6 py-1 text-center text-[10px] text-cafe-muted animate-pulse">
-          Refreshing project data...
-        </div>
+        <div className="px-6 py-1 text-center text-[10px] text-[#9A866F] animate-pulse">Refreshing project data...</div>
       )}
 
       {/* Content — inert when stale blocks ALL interaction (mouse + keyboard + focus) to prevent cross-project writes */}
@@ -278,9 +274,9 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
           <div className="space-y-4">
             {/* Stage 0 Frame prompt */}
             {!auditFrame && subTab === 'audit' && (
-              <div className="rounded-lg border-2 border-dashed border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4 text-center">
-                <div className="text-sm font-medium text-cafe-secondary">Stage 0: Frame 尚未完成</div>
-                <div className="mt-1 text-xs text-cafe-muted">建议先完成六问定位，再开始需求翻译</div>
+              <div className="rounded-lg border-2 border-dashed border-[#D8C6AD] bg-[#FBF7F0] p-4 text-center">
+                <div className="text-sm font-medium text-[#6B5D4F]">Stage 0: Frame 尚未完成</div>
+                <div className="mt-1 text-xs text-[#9A866F]">建议先完成六问定位，再开始需求翻译</div>
               </div>
             )}
 
@@ -332,7 +328,7 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
 
             {subTab === 'features' &&
               (projectItems.length === 0 ? (
-                <div className="rounded-lg bg-[var(--console-card-bg)] shadow-[0_12px_30px_rgba(43,33,26,0.08)] p-8 text-center text-sm text-cafe-muted">
+                <div className="rounded-lg border border-[#E7DAC7] bg-[#FFFDF8] p-8 text-center text-sm text-[#9A866F]">
                   暂无功能 — 使用上方「导入 Backlog」按钮从项目导入
                 </div>
               ) : (
@@ -340,21 +336,21 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
                   {projectItems.map((item) => (
                     <div
                       key={item.id}
-                      className="flex items-center justify-between rounded-lg bg-[var(--console-card-bg)] shadow-[0_12px_30px_rgba(43,33,26,0.08)] px-4 py-3"
+                      className="flex items-center justify-between rounded-lg border border-[#E7DAC7] bg-[#FFFDF8] px-4 py-3"
                     >
                       <div className="flex items-center gap-3">
-                        <span className="rounded bg-[var(--console-pill-bg)] px-2 py-0.5 text-[10px] font-bold text-[var(--cafe-accent)]">
+                        <span className="rounded bg-[#F4EFE7] px-2 py-0.5 text-[10px] font-bold text-[#8B6F47]">
                           {item.tags[0] ?? '—'}
                         </span>
-                        <span className="text-sm font-medium text-cafe">{item.title}</span>
+                        <span className="text-sm font-medium text-[#4B3A2A]">{item.title}</span>
                       </div>
                       <span
                         className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
                           item.status === 'done'
-                            ? 'bg-conn-emerald-bg text-conn-emerald-text'
+                            ? 'bg-conn-green-bg text-green-800'
                             : item.status === 'dispatched'
-                              ? 'bg-[var(--color-cafe-accent)]/10 text-[var(--color-cafe-accent)]'
-                              : 'bg-[var(--console-pill-bg)] text-[var(--cafe-accent)]'
+                              ? 'bg-blue-100 text-conn-blue-text'
+                              : 'bg-[#F4EFE7] text-[#8B6F47]'
                         }`}
                       >
                         {item.status}

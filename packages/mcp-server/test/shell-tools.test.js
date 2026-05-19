@@ -34,7 +34,9 @@ test('whitelist passes common read-only commands', () => {
   assert.equal(isReadOnlyShellCommand('git status --short'), true);
   assert.equal(isReadOnlyShellCommand('git rev-parse HEAD'), true);
   assert.equal(isReadOnlyShellCommand('git diff'), true);
+  assert.equal(isReadOnlyShellCommand('git diff --stat HEAD~1'), true);
   assert.equal(isReadOnlyShellCommand('git show HEAD'), true);
+  assert.equal(isReadOnlyShellCommand('git show --stat HEAD~1'), true);
 });
 
 test('whitelist refuses write / mutating commands', () => {
@@ -309,6 +311,8 @@ test('P1 (cloud R7 missed in d007449e merge): refuses ~user expansion bypass', (
   assert.equal(isReadOnlyShellCommand('cat ~admin/secret'), false);
   assert.equal(isReadOnlyShellCommand('ls ~user1/'), false);
   assert.equal(isReadOnlyShellCommand('cat ~_systemUser/file'), false);
+  // Git revspec suffix (`HEAD~1`) is not shell tilde expansion and must stay allowed.
+  assert.equal(isReadOnlyShellCommand('git diff --stat HEAD~1'), true);
   // bare `~` and `~/...` are still allowed at gate (handled correctly by
   // unquoteAndExpandTilde + path guard downstream).
   assert.equal(isReadOnlyShellCommand('cat ~/file'), true);

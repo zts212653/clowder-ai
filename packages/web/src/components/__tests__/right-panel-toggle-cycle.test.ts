@@ -8,11 +8,11 @@ import { rightPanelToggleTransition } from '../ChatContainerHeader';
 
 describe('F099 RightPanelToggle three-state cycle', () => {
   let panelOpen: boolean;
-  let mode: 'status' | 'workspace';
+  let mode: 'status' | 'workspace' | 'transcript';
   const togglePanel = () => {
     panelOpen = !panelOpen;
   };
-  const setMode = (m: 'status' | 'workspace') => {
+  const setMode = (m: 'status' | 'workspace' | 'transcript') => {
     mode = m;
   };
 
@@ -49,6 +49,19 @@ describe('F099 RightPanelToggle three-state cycle', () => {
   it('workspace → closed: closes panel and resets to status mode', () => {
     panelOpen = true;
     mode = 'workspace';
+
+    rightPanelToggleTransition(panelOpen, mode, {
+      onToggleStatusPanel: togglePanel,
+      setRightPanelMode: setMode,
+    });
+
+    expect(panelOpen).toBe(false);
+    expect(mode).toBe('status');
+  });
+
+  it('transcript → closed: closes panel and resets to status mode', () => {
+    panelOpen = true;
+    mode = 'transcript';
 
     rightPanelToggleTransition(panelOpen, mode, {
       onToggleStatusPanel: togglePanel,

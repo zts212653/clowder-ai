@@ -10,13 +10,9 @@ import { useChatStore } from '@/stores/chatStore';
 
 const cafeTheme = EditorView.theme(
   {
-    '&': { backgroundColor: 'var(--terminal-bg)', color: 'var(--console-card-bg)' },
-    '.cm-gutters': {
-      backgroundColor: 'var(--terminal-bg)',
-      color: '#815B5B',
-      borderRight: '1px solid var(--terminal-border)',
-    },
-    '.cm-activeLineGutter': { backgroundColor: 'var(--terminal-border)' },
+    '&': { backgroundColor: '#1E1E24', color: '#FDF8F3' },
+    '.cm-gutters': { backgroundColor: '#1E1E24', color: '#815B5B', borderRight: '1px solid #2a2a32' },
+    '.cm-activeLineGutter': { backgroundColor: '#2a2a32' },
     '.cm-activeLine': { backgroundColor: 'rgba(155, 126, 189, 0.08)' },
     '.cm-cursor': { borderLeftColor: '#E29578' },
     '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': {
@@ -65,6 +61,9 @@ export function CodeViewer({
   onSave,
   onDirtyChange,
   branch,
+  restoreScrollTop,
+  restoreKey,
+  onScrollTopChange,
 }: {
   content: string;
   mime: string;
@@ -74,6 +73,9 @@ export function CodeViewer({
   onSave?: (newContent: string) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
   branch?: string;
+  restoreScrollTop?: number | null;
+  restoreKey?: string;
+  onScrollTopChange?: (scrollTop: number) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -85,6 +87,8 @@ export function CodeViewer({
   const baseContentRef = useRef(content);
   const onDirtyChangeRef = useRef(onDirtyChange);
   onDirtyChangeRef.current = onDirtyChange;
+  const onScrollTopChangeRef = useRef(onScrollTopChange);
+  onScrollTopChangeRef.current = onScrollTopChange;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -127,10 +131,40 @@ export function CodeViewer({
       view.dispatch({ effects: EditorView.scrollIntoView(lineInfo.from, { y: 'center' }) });
     }
 
+    const scroller = view.scrollDOM;
+    let rafId = 0;
+    const handleScroll = () => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        onScrollTopChangeRef.current?.(scroller.scrollTop);
+      });
+    };
+    scroller.addEventListener('scroll', handleScroll, { passive: true });
+
     return () => {
+      scroller.removeEventListener('scroll', handleScroll);
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+        onScrollTopChangeRef.current?.(scroller.scrollTop);
+      }
       view.destroy();
     };
   }, [content, mime, path, scrollToLine, editable]);
+
+  const restoreScrollTopRef = useRef(restoreScrollTop);
+  restoreScrollTopRef.current = restoreScrollTop;
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || !onScrollTopChangeRef.current) return;
+    const saved = restoreScrollTopRef.current;
+    if (saved != null) {
+      view.scrollDOM.scrollTop = saved;
+    } else {
+      onScrollTopChangeRef.current(view.scrollDOM.scrollTop);
+    }
+  }, [restoreKey, onScrollTopChange]);
 
   const handleSave = useCallback(async () => {
     const view = viewRef.current;
@@ -178,7 +212,7 @@ export function CodeViewer({
           type="button"
           onClick={handleSave}
           disabled={saving}
-          className="absolute bottom-3 right-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-conn-emerald-text text-[var(--cafe-surface)] text-[11px] font-medium shadow-lg hover:opacity-90 disabled:opacity-50 transition-colors z-10 animate-fade-in"
+          className="absolute bottom-3 right-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 text-white text-xs font-medium shadow-lg hover:bg-conn-green-text disabled:opacity-50 transition-colors z-10 animate-fade-in"
           title="保存 (Cmd+S)"
         >
           {saving ? '保存中...' : '保存'}
@@ -189,7 +223,7 @@ export function CodeViewer({
         <button
           type="button"
           onClick={handleAddToChat}
-          className="console-button-primary absolute top-2 right-3 z-10 flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-[var(--cafe-surface)] shadow-lg animate-fade-in"
+          className="absolute top-2 right-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cafe-accent text-white text-xs font-medium shadow-lg hover:bg-cafe-interactive transition-colors z-10 animate-fade-in"
           title="引用到聊天"
         >
           <AddToChatIcon />

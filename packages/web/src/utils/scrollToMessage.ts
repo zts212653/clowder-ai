@@ -9,8 +9,8 @@ export function scrollToMessage(messageId: string): void {
   el.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
   // Temporary blue ring highlight
-  el.classList.add('ring-2', 'ring-conn-blue-ring', 'transition-all');
+  el.classList.add('ring-2', 'ring-blue-400', 'transition-all');
   setTimeout(() => {
-    el.classList.remove('ring-2', 'ring-conn-blue-ring');
+    el.classList.remove('ring-2', 'ring-blue-400');
   }, 1500);
 }

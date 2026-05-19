@@ -1,6 +1,6 @@
 ---
 feature_ids: [F173]
-related_features: [F081, F123, F164, F047, F117]
+related_features: [F081, F123, F164, F047, F117, F194]
 topics: [frontend, thread-runtime, message-pipeline, liveness, cancel-button, queue-gating, state-machine, ghost-bubble, cli-resolve, hydration]
 doc_kind: spec
 created: 2026-04-22

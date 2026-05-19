@@ -30,7 +30,7 @@ export interface CallbackAuthAggregate {
   totalFailures24h: number;
   /**
    * F174 D2b-2 rev3: failures within last 24h that occurred AFTER
-   * lastViewedAt. Drives HubButton "unread badge" — clears to 0 when user
+   * lastViewedAt. Drives ActivityBar "unread badge" — clears to 0 when user
    * opens observability/callback-auth subtab via `markViewed()` action.
    */
   unviewedFailures24h: number;
@@ -259,7 +259,7 @@ export function useCallbackAuthAggregate(): CallbackAuthAggregate {
 
 /**
  * F174 D2b-2 rev3: action selector for "mark callback-auth as viewed" — used
- * by HubCallbackAuthPanel onMount to clear the HubButton unread badge when
+ * by HubCallbackAuthPanel onMount to clear the ActivityBar unread badge when
  * user opens the subtab. Stable reference (zustand action), safe to depend on
  * in useEffect.
  */

@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
+import { BrakeSettingsPanel } from '../BrakeSettingsPanel';
 import { CatOverviewTab, type ConfigData } from '../config-viewer-tabs';
 import { HubAccountsTab } from '../HubAccountsTab';
 import { HubCatEditor } from '../HubCatEditor';
 import { HubCoCreatorEditor } from '../HubCoCreatorEditor';
 import { HubConnectorConfigTab } from '../HubConnectorConfigTab';
 import { HubEnvFilesTab } from '../HubEnvFilesTab';
+import { HubGovernanceTab } from '../HubGovernanceTab';
 import { PushSettingsPanel } from '../PushSettingsPanel';
 import { useConfirm } from '../useConfirm';
 import { VoiceSettingsPanel } from '../VoiceSettingsPanel';
@@ -16,6 +18,7 @@ import { MarketplaceContent } from './MarketplaceContent';
 import { McpManageContent } from './McpManageContent';
 import { OpsContent } from './OpsContent';
 import { PluginsContent } from './PluginsContent';
+import { SettingsText } from './primitives';
 import { RulesPromptsContent } from './RulesPromptsContent';
 import { ServiceStatusPanel } from './ServiceStatusPanel';
 import { SettingsPageHeader } from './SettingsPageHeader';
@@ -42,14 +45,14 @@ export function SettingsContent({ section }: SettingsContentProps) {
     setFetchError(null);
     try {
       const res = await apiFetch('/api/config');
-      if (res.ok) {
-        const d = (await res.json()) as { config: ConfigData };
-        setConfig(d.config);
-      } else {
-        setFetchError('配置加载失败');
+      if (!res.ok) {
+        setFetchError(`配置加载失败 (${res.status})`);
+        return;
       }
+      const payload = (await res.json()) as { config: ConfigData };
+      setConfig(payload.config);
     } catch {
-      setFetchError('网络错误');
+      setFetchError('配置加载失败');
     }
   }, []);
 
@@ -111,17 +114,20 @@ export function SettingsContent({ section }: SettingsContentProps) {
     [confirm, fetchData, refresh],
   );
 
-  const meta = SETTINGS_SECTIONS.find((s) => s.id === section) ?? SETTINGS_SECTIONS[0];
-
-  if (section === 'im') return <HubConnectorConfigTab />;
-  if (section === 'skills') return <SkillsContent />;
-  if (section === 'mcp') return <McpManageContent />;
   if (section === 'marketplace') return <MarketplaceContent />;
+  if (section === 'skills') return <SkillsContent />;
 
-  const sectionContent = (() => {
-    switch (section) {
+  const meta = SETTINGS_SECTIONS.find((item) => item.id === section) ?? SETTINGS_SECTIONS[0];
+
+  const content = (() => {
+    switch (meta.id) {
       case 'members':
-        if (fetchError) return <p className="text-sm text-[var(--semantic-error-text)]">{fetchError}</p>;
+        if (fetchError)
+          return (
+            <SettingsText as="p" variant="sm" tone="red">
+              {fetchError}
+            </SettingsText>
+          );
         return config ? (
           <CatOverviewTab
             config={config}
@@ -142,12 +148,14 @@ export function SettingsContent({ section }: SettingsContentProps) {
             togglingCatId={togglingCatId}
           />
         ) : (
-          <p className="text-sm text-cafe-muted">加载中...</p>
+          <SettingsText as="p" variant="sm" tone="muted">
+            加载中...
+          </SettingsText>
         );
       case 'accounts':
         return <HubAccountsTab />;
-      case 'plugins':
-        return <PluginsContent />;
+      case 'im':
+        return <HubConnectorConfigTab />;
       case 'voice':
         return (
           <div className="space-y-6">
@@ -159,23 +167,32 @@ export function SettingsContent({ section }: SettingsContentProps) {
           </div>
         );
       case 'system':
-        if (fetchError) return <p className="text-sm text-[var(--semantic-error-text)]">{fetchError}</p>;
         return <HubEnvFilesTab excludeCategories={['connector']} />;
-      case 'rules':
-        return <RulesPromptsContent />;
       case 'notify':
         return <PushSettingsPanel />;
       case 'ops':
         return <OpsContent />;
+      case 'rules':
+        return (
+          <div className="space-y-5">
+            <RulesPromptsContent />
+            <HubGovernanceTab />
+            <BrakeSettingsPanel />
+          </div>
+        );
+      case 'mcp':
+        return <McpManageContent />;
+      case 'plugins':
+        return <PluginsContent />;
       default:
-        return <SettingsPlaceholder section={section} description="此分区即将上线" />;
+        return <SettingsPlaceholder section={meta.label} description="此分区即将上线" />;
     }
   })();
 
   return (
     <>
       <SettingsPageHeader title={meta.label} subtitle={meta.description} />
-      {sectionContent}
+      {content}
       {editorOpen && (
         <HubCatEditor
           open

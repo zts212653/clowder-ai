@@ -101,7 +101,7 @@ describe('POST /api/projects/setup', () => {
     assert.equal(body.errorKind, 'not_empty');
   });
 
-  it('mode=clone returns errorKind on invalid repo URL', async () => {
+  it('mode=clone returns network_error on unreachable HTTPS remote', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/projects/setup',
@@ -109,14 +109,12 @@ describe('POST /api/projects/setup', () => {
       payload: {
         projectPath: testRoot,
         mode: 'clone',
-        gitCloneUrl: 'https://github.com/nonexistent-org-xyz/nonexistent-repo-xyz.git',
+        gitCloneUrl: 'https://127.0.0.1:1/nonexistent.git',
       },
     });
-    // Should fail with a classified error
-    assert.ok(res.statusCode >= 400);
+    assert.equal(res.statusCode, 502);
     const body = JSON.parse(res.payload);
-    assert.ok(body.errorKind != null);
-    assert.ok(['not_found', 'auth_failed', 'network_error', 'timeout'].includes(body.errorKind));
+    assert.equal(body.errorKind, 'network_error');
   });
 
   it('rejects invalid mode', async () => {

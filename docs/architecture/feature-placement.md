@@ -1,54 +1,59 @@
 ---
 feature_ids: [F190]
-topics: [architecture, console, navigation, sop]
+topics: [architecture, console, navigation, settings]
 doc_kind: guide
-created: 2026-04-23
+created: 2026-05-12
 ---
 
 # Feature Placement Decision Tree
 
-New features go through this decision tree to determine where they live in the console.
+新增前端能力先决定入口层级，再决定组件和路由。
 
 ```
 New feature:
-  L1 Activity Bar   — user uses it daily (extreme caution: currently only 4 entries)
+  L1 Activity Bar    — daily core workflow, use sparingly
   L2 /settings       — management / configuration
-  L3 /settings tab   — read-only / analytics within a settings section
-  L4 Standalone route — unique interaction pattern that doesn't fit /settings
-
-Has external dependencies?  → Register ServiceManifest (see service-manifest-sop.md)
-Has config vars?            → Register in env-registry.ts with restartRequired + group
-Has MCP integration?        → Install via MCP management; env vars must be editable
-Has IM connector?           → Add config card to IM settings section
+  L3 /settings subtab — read-only dashboard or analytics inside a section
+  L4 standalone route — unique interaction that needs its own layout
 ```
 
 ## L1-L4 Criteria
 
 | Level | When to use | Approval |
 |-------|-------------|----------|
-| L1 | Core daily workflow (chat, signals, memory, settings) | CVO approval required |
-| L2 | Any management or config UI | Self-serve — pick the right section |
-| L3 | Dashboard, analytics, read-only views within a section | Self-serve |
-| L4 | Full-page experiences that need dedicated layout | Discuss with CVO |
+| L1 | Chat, memory, signals, settings 等每日核心入口 | CVO decision |
+| L2 | 管理、配置、连接器、凭据、偏好设置 | Maintainer decision |
+| L3 | 某个 settings section 内的只读视图、监控、排行、日志摘要 | Maintainer decision |
+| L4 | 工作流/游戏/设计器等需要独立布局的体验 | Discuss before build |
 
-## /settings Section Map
+## Current Settings Section Map
 
 | Section | Content | Keywords |
 |---------|---------|----------|
-| members | Cat roster, availability, co-creator | cat, roster, member |
-| accounts | API keys, credentials | key, credential, account |
-| im | IM connector configs per platform | feishu, dingtalk, telegram |
-| skills | Skill marketplace, installed skills | skill, capability |
-| mcp | MCP servers, STDIO/HTTP config | MCP, tool |
-| plugins | Third-party integrations | plugin, GitHub, email |
-| voice | TTS/STT settings, terminology | voice, whisper, TTS |
-| system | Runtime config, A2A, Codex, governance | env, config, bubble |
-| notify | Web push settings | push, notification |
-| ops | Usage stats, leaderboard, memory index, health, rescue | usage, monitoring |
+| members | 成员名册、默认协作对象与编排顺序 | cat, roster, member |
+| accounts | 模型账户、凭据和执行身份归属 | key, credential, account |
+| im | 飞书、钉钉、企微和外部消息入口 | feishu, wecom, connector |
+| skills | Skill 管理、安装计划、本地能力预览 | skill, capability |
+| mcp | MCP 服务、工具目录和自动化依赖 | MCP, tool |
+| plugins | 插件状态、外部集成、安装结果 | plugin, GitHub, email |
+| marketplace | 搜索和安装 MCP、Skill、插件等能力包 | marketplace, search |
+| voice | 语音输入输出、术语表和 TTS 服务状态 | voice, whisper, TTS |
+| system | 环境选项、默认行为和运行时总开关 | env, config, bubble |
+| rules | 家规、协作 SOP 和模型提示词入口 | rules, SOP, prompt |
+| notify | 推送订阅、提醒策略与设备联动 | push, notification |
+| ops | 服务健康、命令工具和运行态观测 | usage, monitoring |
 
 ## New Section Checklist
 
-1. Add entry to `SettingsNav` sections array with icon + label + keywords
-2. Add case to `SettingsContent` switch
-3. Create component under `components/settings/`
-4. If needed, add ops subsection in `ops-nav-config.ts`
+1. Add an entry to `settings-nav-config.ts`.
+2. Add keywords in `SettingsNav.tsx`.
+3. Add a `SettingsContent.tsx` switch case.
+4. Put the section component under `components/settings/`.
+5. If the view is an ops subtab, add it to `ops-nav-config.ts`.
+6. Add focused tests for routing, isolation from sibling sections, and existing write-path invariants.
+
+## Deferred High-Risk Areas
+
+External service lifecycle management, refAudio upload, and secret write-back are not placement-only decisions. They are F190 Phase C high-risk slices and need security review plus focused proof.
+
+Chat bubble rendering and read-model behavior are owned by F183/F184/F194. F190 placement work must not touch those surfaces.

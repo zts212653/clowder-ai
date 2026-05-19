@@ -86,6 +86,17 @@ export interface IInvocationRecordStore {
 
   /** F128: Scan all invocation records (optional — only Redis impl provides this) */
   scanAll?(): Promise<InvocationRecord[]>;
+
+  /**
+   * F194 Phase B: Enumerate currently running invocation records scoped to (threadId, userId).
+   *
+   * Required by `getThreadLiveInvocations` so canonical liveness read can detect zombie records
+   * even after their drafts have been TTL-reaped — the helper enumerates from records ∪ drafts.
+   * In-memory: filter the records map. Redis: SMEMBERS index Set + pipeline HGETALL on hit ids
+   * + defensive filter (Set is maintained inside ATOMIC_UPDATE_LUA on status transitions —
+   * crash-safe, no post-Lua best-effort window).
+   */
+  listRunningByThread(threadId: string, userId: string): InvocationRecord[] | Promise<InvocationRecord[]>;
 }
 
 /** Max records in memory store */
@@ -184,6 +195,14 @@ export class InvocationRecordStore implements IInvocationRecordStore {
     const entry = this.idempotencyIndex.get(composite);
     if (!entry || entry.expiresAt <= Date.now()) return null;
     return this.records.get(entry.invocationId) ?? null;
+  }
+
+  listRunningByThread(threadId: string, userId: string): InvocationRecord[] {
+    const out: InvocationRecord[] = [];
+    for (const r of this.records.values()) {
+      if (r.status === 'running' && r.threadId === threadId && r.userId === userId) out.push(r);
+    }
+    return out;
   }
 
   /** Current record count (for testing) */

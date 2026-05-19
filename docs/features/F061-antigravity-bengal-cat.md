@@ -433,7 +433,7 @@ await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'E
 
 | 状态 | 问题 | 当前判断 | 排期 |
 |------|------|----------|------|
-| [~] | `run_command` 多数命令被 Antigravity permission gate 拦截（`user denied permission`） | 2026-04-24 Bengal 实机复验（5 条命令样本）观察到 **allowlist-like behavior**——`ls` 放行，`pwd`/`git *` 拒绝；`SafeToAutoRun` flag 在本次样本中对 Antigravity UI 决策无影响。PR #1321 permission guard 前置生效（错误精度从 `context canceled` 提升为 `user denied permission`），PR #1330 journal 诊断可用。**现有已落地修复已把 Cat Café 侧诊断做到位**；若要继续突破，需要走 P3 探索或上游配合。用户可通过 Antigravity UI 手动 accept 或走 native executor 独立绕开 | **Next Reliability Queue P3**：approval bypass / stream writeback（Cat Café 侧可探索的手段）；若平台侧 whitelist 确认存在，再向 Antigravity 团队反馈 |
+| [x] | `run_command` 多数命令被 Antigravity permission gate 拦截（`user denied permission`） | 2026-05-16 复验确认没有可用 approval UI，不能要求team lead点击。Cat Café 侧改为默认 YOLO native execution：即使 `SafeToAutoRun=false/missing` 也执行 `RunCommand` 并回写 tool result；危险命令仍由本地 hard refusal 先拦，`ANTIGRAVITY_YOLO_RUN_COMMAND=false` 保留紧急回退。 | F061 Bug-F closed：approval bypass / stream writeback 已落地 |
 | [~] | retry 经常只 retry 1 次然后直接挂住 | 已确认“只 retry 1 次然后挂住”不是 retry 预算天然只有 1 次，而是旧实现会在 capacity retry 后落到 v2 尚未支持的 WAITING tool step（如 `grep_search`）并静默 stall。PR #1318 已把这条路径改成 fail-fast 显式报 `unsupported_waiting_tool`；PR #1320 补上 quota-style capacity classifier；PR #1330 进一步把 retry 收窄到“未 dispatch + 只读 + `SafeToAutoRun=true`”，并补齐 `failureLayer / dispatchState / executionJournal` 诊断，避免把 approval-gated / 已执行 / 已完成 tool step 误当成可安全重试。剩余还是 v2 executors / telemetry / 实机复验 | **G10 follow-up（P1）**：剩余继续跟 Phase 2c v2 / telemetry / 实机复验 |
 | [ ] | Antigravity 原生 MCP 只能读不能写 | PR #1307 边界是 `CAT_CAFE_READONLY=true`；`post_message` / `get_thread_context` 等写操作仍然走 per-invocation callback token。持久进程无法在会话外主动写回 thread | **Bug-H**：persistent MCP write-path auth（会话外鉴权模型，例如 agent-key；需产品决策"原生 MCP 是否应该有写权"） |
 | [~] | 上游 `⚠️ 模型服务端容量不足` UX polish | PR #1354 已修"provider_signal 被前端静默丢弃"的根因（frontend 现在能显示 `⚠️ 上游模型服务端容量不足，系统将在 20s 后自动重试（1/3）` 这类警告）。剩余 follow-up：retry in-flight 倒计时 badge + hard-limit 软降级模型切换建议，属于 UX redesign scope | **Bug-J follow-up**：倒计时 badge / 模型切换建议（UX，低优） |
@@ -450,8 +450,8 @@ await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'E
    - approval failures 已细分为 `approval_gate.denied|timeout`，且 `RUN_COMMAND:ERROR` 与缺 `toolCall.name` 形状都已覆盖
 3. **[x] P2 — safe retry for undispatched read-only commands**
    - PR #1330 已把 retry 严格收窄到“未 dispatch + 只读 + `SafeToAutoRun=true`”，并挡住 quoted `--output` / shell substitutions / var expansion / 历史 resolved tool step 等重放风险
-4. **[ ] P3 — evaluate IDE approval bypass / stream writeback**
-   - 只有在后续实机证据证明现有 approval correlation 仍不够时，才进入更重的 bypass / stream writeback 方案
+4. **[x] P3 — approval bypass / stream writeback**
+   - 2026-05-16 实机证据确认 Antigravity 没有可用 approval UI；Cat Café 侧默认 YOLO native `RunCommand` + `pushToolResult`，并保留 `ANTIGRAVITY_YOLO_RUN_COMMAND=false` 回退开关
 
 ---
 
@@ -476,9 +476,9 @@ await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'E
 - AC-2cD2 列的 `read_file / write_file / edit_file / grep_search / file_glob` 是 Claude Code 工具面 symmetry 的愿望清单——Antigravity LS 进程直接拥有 workspace 文件系统权限，文件类工具全部 LS 内部闭环，**不需要 Bridge executor**
 - 原"写文件不稳"截图里的真实问题只出在 `run_command` 单条链路（permission gate + context canceled），不是 file tool parity
 - AC-2cR4 + AC-2cI6 close as no-op
-- 只剩 `run_command` 的 approval / dispatch 链路在 Next Reliability Queue 继续跟
+- `run_command` 的 approval / dispatch 链路已由 2026-05-16 YOLO native execution 收口，后续只保留实机回归观察
 
-### Bug-F: retry 后 unsupported WAITING step 不再静默挂死；2026-04-24 Bengal 用 MCP `cat_cafe_shell_exec` 绕开 cascade UI permission gate ⚠️ PARTIAL → 有可用 workaround
+### Bug-F: retry 后 unsupported WAITING step 不再静默挂死；2026-05-16 YOLO native `run_command` 闭环 ✅ CLOSED
 
 **现象**（2026-04-20 team lead新报告）：孟加拉猫“经常只 retry 1 次然后又直接挂了”。
 
@@ -514,14 +514,13 @@ await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'E
 **三个钉实结论**：
 1. **PR #1321 permission guard 前置生效**——错误精度从 `context canceled` 提升为 `user denied permission`，诊断链更清晰，失败归因不再模糊
 2. **5 条命令样本上观察到 allowlist-like behavior**——`ls` 放行，`pwd` / `git *` 拒绝；`SafeToAutoRun` 是 Cat Café 侧标记，从本次样本看对 Antigravity UI permission 决策无影响（未做穷举验证）
-3. **现有已落地修复已把 Cat Café 侧诊断做到位**——若要继续突破，需要走 Next Reliability Queue P3（approval bypass / stream writeback）或向 Antigravity 团队反馈平台侧 whitelist 配置
+3. **当时的 Cat Café 侧诊断已做到位，但写通道仍未闭环**——这条历史判断已由 2026-05-16 YOLO native execution 取代；现在不再依赖 Antigravity UI approval
 
-**未来动作分叉**：
-- **Cat Café 侧可做**：Next Reliability Queue P3 的 approval bypass / stream writeback 探索（bridge 能不能绕开 Antigravity UI permission gate 直接 dispatch）
-- **需上游沟通**：向 Antigravity 团队反馈"`SafeToAutoRun=true` 的只读 git/shell 命令应该进白名单"
-- **降级方案**（已可用）：用户手动在 Antigravity UI accept permission，或者走 native executor 独立绕开 UI gate
-
-**排期**：G10 follow-up（P1，已建毛线球：`[P1] 调查 Antigravity 单次 retry 后仍挂起`）继续；本轮 quota-style classifier + continuity guard 已收；parity 2026-04-23 证伪为 no-op；run_command approval 2026-04-24 实机复验观察到 allowlist-like behavior（5 条样本，非穷举）。现有已落地修复已把 Cat Café 侧诊断做到位；若要继续突破，走 Next Reliability Queue P3（approval bypass / stream writeback）或向 Antigravity 团队反馈平台侧 whitelist 配置
+**2026-05-16 收口**：
+- Cat Café 不再依赖 Antigravity approval UI：`run_command` 默认 YOLO native execution + tool-result writeback（PR #1711）
+- 本地 hard refusal 仍先于执行：Redis 6399 / recursive root delete / fork bomb 不会被 YOLO 绕过；云端 Codex 追加的 `rm -rf -- /`、`/.`、`/tmp/..`、`/bin/rm`、`RM` 等绕过形态均已补 Red→Green 回归
+- 紧急回退：`ANTIGRAVITY_YOLO_RUN_COMMAND=false` 恢复旧 `approval_pending` 行为；`ANTIGRAVITY_NATIVE_EXECUTOR=0` 仍可关闭 native executor
+- 真实写路径验收目标：Bengal 能创建 worktree、写文件、删除 worktree，不再卡在 approval prompt
 
 ### Bug-H: Antigravity 原生 MCP 只能读不能写 ⚠️ OPEN（架构 debt）
 

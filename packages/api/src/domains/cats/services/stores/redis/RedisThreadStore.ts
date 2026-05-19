@@ -887,6 +887,9 @@ export class RedisThreadStore implements IThreadStore {
     if (thread.preferredWorkspaceMode) {
       result.preferredWorkspaceMode = thread.preferredWorkspaceMode;
     }
+    if (thread.labels && thread.labels.length > 0) {
+      result.labels = JSON.stringify(thread.labels);
+    }
     return result;
   }
 
@@ -991,7 +994,22 @@ export class RedisThreadStore implements IThreadStore {
     if (data.preferredWorkspaceMode && validModes.has(data.preferredWorkspaceMode)) {
       result.preferredWorkspaceMode = data.preferredWorkspaceMode as Thread['preferredWorkspaceMode'];
     }
+    if (data.labels) {
+      try {
+        const parsed = JSON.parse(data.labels);
+        if (Array.isArray(parsed)) {
+          result.labels = parsed as string[];
+        }
+      } catch {
+        /* ignore malformed JSON */
+      }
+    }
     return result;
+  }
+
+  async updateLabels(threadId: string, labelIds: string[]): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    await this.redis.hset(key, { labels: JSON.stringify(labelIds) });
   }
 
   private parsePhase(raw: string | undefined): ThreadPhase | undefined {

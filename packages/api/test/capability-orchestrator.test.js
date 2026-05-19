@@ -15,6 +15,7 @@ import {
   discoverExternalMcpServers,
   ensureCatCafeMainServer,
   generateCliConfigs,
+  healCatCafeMcpTopology,
   migrateLegacyCatCafeCapability,
   migrateResolverBackedCapabilities,
   orchestrate,
@@ -733,13 +734,13 @@ describe('bootstrapCapabilities', () => {
     });
 
     assert.equal(config.version, 1);
-    // cat-cafe main(1) + split(3) + filesystem
+    // F193 Phase C: split-only — 4 split servers (collab/memory/signals/limb) + filesystem
+    // (was: main + 3 split + filesystem = 5; now: 4 split + filesystem = 5 — count same!)
     assert.equal(config.capabilities.length, 5);
 
+    // F193 Phase C: NO all-in-one main server in fresh installs
     const catCafeMain = config.capabilities.find((c) => c.id === 'cat-cafe');
-    assert.ok(catCafeMain);
-    assert.equal(catCafeMain.source, 'cat-cafe');
-    assert.equal(catCafeMain.enabled, true);
+    assert.equal(catCafeMain, undefined, 'F193 Phase C: bootstrap must not include all-in-one cat-cafe');
 
     const catCafeCollab = config.capabilities.find((c) => c.id === 'cat-cafe-collab');
     assert.ok(catCafeCollab);
@@ -753,6 +754,12 @@ describe('bootstrapCapabilities', () => {
     const catCafeSignals = config.capabilities.find((c) => c.id === 'cat-cafe-signals');
     assert.ok(catCafeSignals);
     assert.equal(catCafeSignals.source, 'cat-cafe');
+
+    // F193 Phase C: cat-cafe-limb — new 4th split server
+    const catCafeLimb = config.capabilities.find((c) => c.id === 'cat-cafe-limb');
+    assert.ok(catCafeLimb, 'F193 Phase C: bootstrap must include cat-cafe-limb');
+    assert.equal(catCafeLimb.source, 'cat-cafe');
+    assert.equal(catCafeLimb.enabled, true);
 
     const fs = config.capabilities.find((c) => c.id === 'filesystem');
     assert.ok(fs);
@@ -791,7 +798,7 @@ describe('bootstrapCapabilities', () => {
     assert.deepEqual(pencil.mcpServer?.args, []);
   });
 
-  it('skips duplicate cat-cafe from external discovery', async () => {
+  it('skips legacy cat-cafe from external discovery (F193 Phase C: split-only)', async () => {
     const claudeFile = join(dir, '.mcp.json');
     await writeFile(
       claudeFile,
@@ -808,13 +815,14 @@ describe('bootstrapCapabilities', () => {
       geminiConfig: join(dir, 'x.json'),
     });
 
-    // Builtin cat-cafe main + splits; external duplicate skipped
+    // Phase C: legacy all-in-one cat-cafe must NOT be carried forward.
+    // Only the 4 split servers are bootstrapped.
     const catCafeEntries = config.capabilities.filter((c) => c.id === 'cat-cafe');
-    assert.equal(catCafeEntries.length, 1);
-    assert.equal(catCafeEntries[0].source, 'cat-cafe');
+    assert.equal(catCafeEntries.length, 0);
     assert.ok(config.capabilities.find((c) => c.id === 'cat-cafe-collab'));
     assert.ok(config.capabilities.find((c) => c.id === 'cat-cafe-memory'));
     assert.ok(config.capabilities.find((c) => c.id === 'cat-cafe-signals'));
+    assert.ok(config.capabilities.find((c) => c.id === 'cat-cafe-limb'));
   });
 
   it('uses catCafeRepoRoot for cat-cafe MCP descriptor when provided', async () => {
@@ -833,7 +841,8 @@ describe('bootstrapCapabilities', () => {
         { catCafeRepoRoot: '/host-repo' },
       );
 
-      const allIds = ['cat-cafe', 'cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals'];
+      // F193 Phase C: split-only — no legacy 'cat-cafe' all-in-one
+      const allIds = ['cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals', 'cat-cafe-limb'];
       for (const id of allIds) {
         const cap = config.capabilities.find((c) => c.id === id);
         assert.ok(cap, `${id} should exist after bootstrap`);
@@ -844,6 +853,12 @@ describe('bootstrapCapabilities', () => {
           `${id} MCP serverPath should be built from catCafeRepoRoot`,
         );
       }
+      // Legacy cat-cafe must NOT be present
+      assert.equal(
+        config.capabilities.filter((c) => c.id === 'cat-cafe').length,
+        0,
+        'legacy cat-cafe must not be bootstrapped',
+      );
     } finally {
       if (origRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
       else process.env.CAT_CAFE_RUNTIME_ROOT = origRuntimeRoot;
@@ -1016,10 +1031,58 @@ describe('migrateResolverBackedCapabilities', () => {
   });
 });
 
-// ────────── ensureCatCafeMainServer (F145 Phase C AC-C3) ──────────
+// ────────── ensureCatCafeMainServer (F193 Phase C — semantic flip from F145) ──────────
+// Old (F145): when splits present but main absent → add main (limb tools were piggybacked).
+// New (F193 Phase C): split-only — when splits present, REMOVE legacy main if any AND
+// ensure cat-cafe-limb is present (the new 4th split server).
 
-describe('ensureCatCafeMainServer', () => {
-  it('adds cat-cafe main server when splits exist but main is missing', () => {
+describe('ensureCatCafeMainServer (F193 Phase C semantics)', () => {
+  it('removes legacy all-in-one cat-cafe + adds cat-cafe-limb when 3-split install', () => {
+    const config = makeConfig([
+      {
+        id: 'cat-cafe',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['index.js'] },
+      },
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['collab.js'] },
+      },
+      {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['memory.js'] },
+      },
+      {
+        id: 'cat-cafe-signals',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['signals.js'] },
+      },
+    ]);
+
+    const result = ensureCatCafeMainServer(config, { projectRoot: '/repo' });
+    assert.equal(result.migrated, true);
+    // Phase C: legacy cat-cafe (all-in-one) gone
+    const main = result.config.capabilities.find((c) => c.id === 'cat-cafe');
+    assert.equal(main, undefined, 'F193 Phase C: legacy cat-cafe must be removed');
+    // Phase C: cat-cafe-limb added
+    const limb = result.config.capabilities.find((c) => c.id === 'cat-cafe-limb');
+    assert.ok(limb, 'F193 Phase C: cat-cafe-limb must be added');
+    assert.equal(limb.type, 'mcp');
+    assert.equal(limb.source, 'cat-cafe');
+    assert.ok(limb.mcpServer?.args[0].includes('limb.js'));
+  });
+
+  it('only adds cat-cafe-limb when no all-in-one is present (3-split install without main)', () => {
     const config = makeConfig([
       {
         id: 'cat-cafe-collab',
@@ -1046,21 +1109,32 @@ describe('ensureCatCafeMainServer', () => {
 
     const result = ensureCatCafeMainServer(config, { projectRoot: '/repo' });
     assert.equal(result.migrated, true);
-    const main = result.config.capabilities.find((c) => c.id === 'cat-cafe');
-    assert.ok(main);
-    assert.equal(main.type, 'mcp');
-    assert.equal(main.source, 'cat-cafe');
-    assert.ok(main.mcpServer?.args[0].includes('index.js'));
+    const limb = result.config.capabilities.find((c) => c.id === 'cat-cafe-limb');
+    assert.ok(limb, 'F193 Phase C: cat-cafe-limb must be added to 3-split install');
   });
 
-  it('inserts main server before first split server', () => {
+  it('only removes legacy main when full 4-split is canonical (collab+memory+signals+limb + cat-cafe)', () => {
     const config = makeConfig([
       {
-        id: 'filesystem',
+        id: 'cat-cafe',
         type: 'mcp',
         enabled: true,
-        source: 'external',
-        mcpServer: { command: 'npx', args: ['@mcp/fs'] },
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['index.js'] },
+      },
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['collab.js'] },
+      },
+      {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['memory.js'] },
       },
       {
         id: 'cat-cafe-signals',
@@ -1069,16 +1143,26 @@ describe('ensureCatCafeMainServer', () => {
         source: 'cat-cafe',
         mcpServer: { command: 'node', args: ['signals.js'] },
       },
+      {
+        id: 'cat-cafe-limb',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['limb.js'] },
+      },
     ]);
 
     const result = ensureCatCafeMainServer(config, { projectRoot: '/repo' });
     assert.equal(result.migrated, true);
-    assert.equal(result.config.capabilities[0].id, 'filesystem');
-    assert.equal(result.config.capabilities[1].id, 'cat-cafe');
-    assert.equal(result.config.capabilities[2].id, 'cat-cafe-signals');
+    assert.equal(
+      result.config.capabilities.find((c) => c.id === 'cat-cafe'),
+      undefined,
+    );
+    assert.ok(result.config.capabilities.find((c) => c.id === 'cat-cafe-limb'));
   });
 
-  it('no-op when main server already exists', () => {
+  // Cloud review P2 (PR #1605): partial split set must NOT trigger migration
+  it('no-op when partial split set (cat-cafe + only cat-cafe-collab) — preserves data-plane coverage', () => {
     const config = makeConfig([
       {
         id: 'cat-cafe',
@@ -1097,10 +1181,307 @@ describe('ensureCatCafeMainServer', () => {
     ]);
 
     const result = ensureCatCafeMainServer(config, { projectRoot: '/repo' });
-    assert.equal(result.migrated, false);
+    // Partial split state is non-canonical drift; do not silently strip
+    // cat-cafe (which is the only source of memory/signal tools here).
+    assert.equal(result.migrated, false, 'partial split must NOT trigger removal');
+    assert.ok(
+      result.config.capabilities.find((c) => c.id === 'cat-cafe'),
+      'cat-cafe must still be present',
+    );
+    assert.equal(
+      result.config.capabilities.find((c) => c.id === 'cat-cafe-limb'),
+      undefined,
+      'limb must NOT be added when split set incomplete',
+    );
   });
 
-  it('no-op when no split servers exist', () => {
+  // Cloud review P1 (PR #1605): limb must inherit settings from legacy cat-cafe
+  // (which previously hosted limb tools via registerFullToolset), NOT from
+  // arbitrary first split — otherwise migration silently re-enables limb when
+  // user had cat-cafe disabled.
+  it('cat-cafe-limb inherits enabled/overrides/env from legacy cat-cafe (not first split) when migrating', () => {
+    const config = makeConfig([
+      {
+        id: 'cat-cafe',
+        type: 'mcp',
+        enabled: false, // user disabled limb tools by disabling all-in-one
+        source: 'cat-cafe',
+        overrides: [{ catId: 'opus-47', enabled: true }],
+        mcpServer: {
+          command: 'node',
+          args: ['index.js'],
+          env: { CAT_CAFE_LIMB_TOKEN: 'legacy-token' },
+          workingDir: '/legacy-dir',
+        },
+      },
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        enabled: true, // splits enabled
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['collab.js'] },
+      },
+      {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['memory.js'] },
+      },
+      {
+        id: 'cat-cafe-signals',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['signals.js'] },
+      },
+    ]);
+
+    const result = ensureCatCafeMainServer(config, { projectRoot: '/repo' });
+    assert.equal(result.migrated, true);
+    const limb = result.config.capabilities.find((c) => c.id === 'cat-cafe-limb');
+    assert.ok(limb, 'limb must be added');
+    assert.equal(limb.enabled, false, 'limb must inherit DISABLED from legacy cat-cafe (P1: no silent re-enable)');
+    assert.deepEqual(
+      limb.overrides,
+      [{ catId: 'opus-47', enabled: true }],
+      'limb must inherit per-cat overrides from legacy cat-cafe',
+    );
+    assert.deepEqual(
+      limb.mcpServer?.env,
+      { CAT_CAFE_LIMB_TOKEN: 'legacy-token' },
+      'limb must inherit env from legacy cat-cafe',
+    );
+    assert.equal(limb.mcpServer?.workingDir, '/legacy-dir', 'limb must inherit workingDir from legacy cat-cafe');
+  });
+
+  it('no-op when 4-split is already canonical (no main, all 4 splits present)', () => {
+    // R5 P3: ensure fixture actually exercises canonical 4-split path,
+    // not the partial-split early return.
+    const config = makeConfig([
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['collab.js'] },
+      },
+      {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['memory.js'] },
+      },
+      {
+        id: 'cat-cafe-signals',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['signals.js'] },
+      },
+      {
+        id: 'cat-cafe-limb',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['limb.js'] },
+      },
+    ]);
+
+    const result = ensureCatCafeMainServer(config, { projectRoot: '/repo' });
+    assert.equal(result.migrated, false);
+    // Sanity check: no entries removed/added in canonical state
+    assert.equal(result.config.capabilities.length, 4);
+  });
+
+  // Cloud round 4 P1 (PR #1605): if external cat-cafe-limb blocks managed
+  // limb addition, do NOT remove legacy cat-cafe — that would leave user with
+  // no managed limb surface. Keep cat-cafe so limb tools stay accessible until
+  // user manually resolves the ID collision.
+  it('R4 P1: keeps legacy cat-cafe when external limb blocks managed limb add', () => {
+    const config = makeConfig([
+      {
+        id: 'cat-cafe',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['index.js'] },
+      },
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['collab.js'] },
+      },
+      {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['memory.js'] },
+      },
+      {
+        id: 'cat-cafe-signals',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['signals.js'] },
+      },
+      // External entry with cat-cafe-limb id (collision)
+      {
+        id: 'cat-cafe-limb',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: { command: 'npx', args: ['external-limb-impostor'] },
+      },
+    ]);
+
+    const result = ensureCatCafeMainServer(config, { projectRoot: '/repo' });
+    // Must keep cat-cafe (it's the only managed limb tool surface)
+    assert.ok(
+      result.config.capabilities.find((c) => c.id === 'cat-cafe' && c.source === 'cat-cafe'),
+      'managed cat-cafe must NOT be removed when managed limb cannot be added',
+    );
+    // External limb stays
+    assert.ok(result.config.capabilities.find((c) => c.id === 'cat-cafe-limb' && c.source === 'external'));
+    // No duplicate limb id
+    assert.equal(result.config.capabilities.filter((c) => c.id === 'cat-cafe-limb').length, 1);
+    assert.equal(result.migrated, false, 'no-op when migration would lose managed limb surface');
+  });
+
+  // Cloud round 4 P2 (PR #1605): migrateLegacyCatCafeCapability hasSplit
+  // guard must filter by source. External servers using split ids are
+  // ID-collisions, not "already migrated" — which is a different failure
+  // mode (handled by collision guard, see below).
+  it('R4 P2: migrateLegacyCatCafeCapability hasSplit guard ignores external cat-cafe-* ids', () => {
+    const config = makeConfig([
+      {
+        id: 'cat-cafe',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['index.js'] },
+      },
+      // External colliding ids — must NOT count as "already split"
+      {
+        id: 'cat-cafe-limb',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: { command: 'npx', args: ['external-limb'] },
+      },
+    ]);
+
+    // Pre-fix bug: hasSplit matches `cat-cafe-limb` external id and skips
+    // migration ("already split" false-positive). With source filter,
+    // hasSplit=false → migration proceeds to safety check.
+    //
+    // Migration cannot complete safely though, because adding managed
+    // `cat-cafe-limb` would create duplicate id with the external entry.
+    // Collision guard kicks in → bail out, preserving original config.
+    const result = migrateLegacyCatCafeCapability(config, { projectRoot: '/repo' });
+    assert.equal(result.migrated, false, 'collision-safe bail when external uses split id');
+    // Legacy cat-cafe preserved (limb tools still accessible via legacy)
+    assert.ok(result.config.capabilities.find((c) => c.id === 'cat-cafe' && c.source === 'cat-cafe'));
+    // External limb stays untouched
+    assert.ok(result.config.capabilities.find((c) => c.id === 'cat-cafe-limb' && c.source === 'external'));
+    // No duplicate
+    assert.equal(result.config.capabilities.filter((c) => c.id === 'cat-cafe-limb').length, 1);
+  });
+
+  // Cloud round 3 P2 (PR #1605): never create duplicate `cat-cafe-limb` ID,
+  // even if existing one is external. ID-collision in capabilities.json breaks
+  // downstream resolvers that key by id alone.
+  it('does not add cat-cafe-limb if any entry (managed or external) already uses that id', () => {
+    const config = makeConfig([
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['collab.js'] },
+      },
+      {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['memory.js'] },
+      },
+      {
+        id: 'cat-cafe-signals',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['signals.js'] },
+      },
+      // External entry already using cat-cafe-limb id (collision)
+      {
+        id: 'cat-cafe-limb',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: { command: 'npx', args: ['external-limb-tool'] },
+      },
+    ]);
+
+    const result = ensureCatCafeMainServer(config, { projectRoot: '/repo' });
+    // Must NOT create a duplicate cat-cafe-limb entry
+    const limbEntries = result.config.capabilities.filter((c) => c.id === 'cat-cafe-limb');
+    assert.equal(limbEntries.length, 1, 'must not duplicate cat-cafe-limb id');
+    assert.equal(limbEntries[0].source, 'external', 'existing external entry preserved as-is');
+    // Migration is no-op (no legacy cat-cafe to remove, limb already taken)
+    assert.equal(result.migrated, false, 'no-op when limb id already exists (any source)');
+  });
+
+  // Cloud round 2 P2 (PR #1605): only managed cat-cafe servers count as splits
+  it('no-op when split-named entries are external (source !== "cat-cafe")', () => {
+    const config = makeConfig([
+      {
+        id: 'cat-cafe',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['index.js'] },
+      },
+      // External servers that happen to reuse split IDs (ID collision)
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: { command: 'npx', args: ['external-collab'] },
+      },
+      {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: { command: 'npx', args: ['external-memory'] },
+      },
+      {
+        id: 'cat-cafe-signals',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: { command: 'npx', args: ['external-signals'] },
+      },
+    ]);
+
+    const result = ensureCatCafeMainServer(config, { projectRoot: '/repo' });
+    // External splits don't count — managed cat-cafe must NOT be removed
+    assert.equal(result.migrated, false, 'external split-named entries must not trigger migration');
+    assert.ok(result.config.capabilities.find((c) => c.id === 'cat-cafe' && c.source === 'cat-cafe'));
+    assert.equal(
+      result.config.capabilities.find((c) => c.id === 'cat-cafe-limb'),
+      undefined,
+    );
+  });
+
+  it('no-op when no split servers exist (legacy migration handles this)', () => {
     const config = makeConfig([
       {
         id: 'filesystem',
@@ -1115,31 +1496,8 @@ describe('ensureCatCafeMainServer', () => {
     assert.equal(result.migrated, false);
   });
 
-  it('falls back to process.cwd() for binary root when no opts (codex PR #1396 R3)', () => {
-    const origRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
-    delete process.env.CAT_CAFE_RUNTIME_ROOT;
-    try {
-      const config = makeConfig([
-        {
-          id: 'cat-cafe-collab',
-          type: 'mcp',
-          enabled: true,
-          source: 'cat-cafe',
-          mcpServer: { command: 'node', args: ['collab.js'] },
-        },
-      ]);
-
-      const result = ensureCatCafeMainServer(config);
-      assert.equal(result.migrated, true, 'ensure should add main server using cwd fallback');
-      const main = result.config.capabilities.find((c) => c.id === 'cat-cafe');
-      assert.ok(main?.mcpServer?.args[0].startsWith(process.cwd()));
-    } finally {
-      if (origRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
-      else process.env.CAT_CAFE_RUNTIME_ROOT = origRuntimeRoot;
-    }
-  });
-
-  it('inherits disabled + overrides + env from split servers (R1 regression)', () => {
+  // Fresh 3-split (no legacy cat-cafe) — limb falls back to inherit from first split
+  it('inherits disabled + overrides + env from first split when fresh 3-split (no legacy cat-cafe)', () => {
     const config = makeConfig([
       {
         id: 'cat-cafe-collab',
@@ -1161,23 +1519,41 @@ describe('ensureCatCafeMainServer', () => {
         source: 'cat-cafe',
         mcpServer: { command: 'node', args: ['memory.js'] },
       },
+      {
+        id: 'cat-cafe-signals',
+        type: 'mcp',
+        enabled: false,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['signals.js'] },
+      },
     ]);
 
     const result = ensureCatCafeMainServer(config, { projectRoot: '/repo' });
     assert.equal(result.migrated, true);
-    const main = result.config.capabilities.find((c) => c.id === 'cat-cafe');
-    assert.ok(main);
-    assert.equal(main.enabled, false, 'must inherit disabled state');
-    assert.deepEqual(main.overrides, [{ catId: 'codex', enabled: true }]);
-    assert.deepEqual(main.mcpServer?.env, { CAT_CAFE_FOO: 'bar' });
-    assert.equal(main.mcpServer?.workingDir, '/tmp/cat-cafe');
+    const limb = result.config.capabilities.find((c) => c.id === 'cat-cafe-limb');
+    assert.ok(limb);
+    assert.equal(
+      limb.enabled,
+      false,
+      'must inherit disabled state from first split (no legacy cat-cafe to inherit from)',
+    );
+    assert.deepEqual(limb.overrides, [{ catId: 'codex', enabled: true }]);
+    assert.deepEqual(limb.mcpServer?.env, { CAT_CAFE_FOO: 'bar' });
+    assert.equal(limb.mcpServer?.workingDir, '/tmp/cat-cafe');
   });
 
-  it('uses catCafeRepoRoot for main server path', () => {
+  it('uses catCafeRepoRoot for cat-cafe-limb path', () => {
     const origRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
     delete process.env.CAT_CAFE_RUNTIME_ROOT;
     try {
       const config = makeConfig([
+        {
+          id: 'cat-cafe-collab',
+          type: 'mcp',
+          enabled: true,
+          source: 'cat-cafe',
+          mcpServer: { command: 'node', args: ['collab.js'] },
+        },
         {
           id: 'cat-cafe-memory',
           type: 'mcp',
@@ -1185,15 +1561,23 @@ describe('ensureCatCafeMainServer', () => {
           source: 'cat-cafe',
           mcpServer: { command: 'node', args: ['memory.js'] },
         },
+        {
+          id: 'cat-cafe-signals',
+          type: 'mcp',
+          enabled: true,
+          source: 'cat-cafe',
+          mcpServer: { command: 'node', args: ['signals.js'] },
+        },
       ]);
 
       const result = ensureCatCafeMainServer(config, {
         catCafeRepoRoot: '/custom-root',
       });
       assert.equal(result.migrated, true);
-      const main = result.config.capabilities.find((c) => c.id === 'cat-cafe');
-      assert.ok(main);
-      assert.ok(main.mcpServer?.args[0].includes('/custom-root'));
+      const limb = result.config.capabilities.find((c) => c.id === 'cat-cafe-limb');
+      assert.ok(limb);
+      assert.ok(limb.mcpServer?.args[0].includes('/custom-root'));
+      assert.ok(limb.mcpServer?.args[0].includes('limb.js'));
     } finally {
       if (origRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
       else process.env.CAT_CAFE_RUNTIME_ROOT = origRuntimeRoot;
@@ -1792,6 +2176,101 @@ describe('generateCliConfigs', () => {
     } catch {
       // File may not exist if no google cats — that's fine
     }
+  });
+});
+
+// ────────── healCatCafeMcpTopology shared chain (cloud round 7 P1) ──────────
+
+describe('healCatCafeMcpTopology (F193 Phase C shared migration chain)', () => {
+  // codex round 7 P1 (PR #1605): write paths must run the same chain as GET
+  // so legacy-only configs auto-migrate before any mutation lands.
+  it('legacy-only cat-cafe → 4 splits + no main (full migration chain)', () => {
+    const config = makeConfig([
+      {
+        id: 'cat-cafe',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/legacy/index.js'] },
+      },
+    ]);
+
+    const result = healCatCafeMcpTopology(config, { catCafeRepoRoot: '/healed-root' });
+    assert.equal(result.migrated, true, 'heal must migrate legacy-only config');
+    // Legacy main gone
+    assert.equal(
+      result.config.capabilities.find((c) => c.id === 'cat-cafe' && c.source === 'cat-cafe'),
+      undefined,
+    );
+    // 4 managed splits present
+    const expectedSplits = ['cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals', 'cat-cafe-limb'];
+    for (const splitId of expectedSplits) {
+      const split = result.config.capabilities.find((c) => c.id === splitId && c.source === 'cat-cafe');
+      assert.ok(split, `${splitId} must be added`);
+      assert.ok(
+        split.mcpServer.args[0].startsWith('/healed-root/'),
+        `${splitId} path must use healed root, got ${split.mcpServer.args[0]}`,
+      );
+    }
+  });
+
+  it('canonical 4-split + no main is a no-op', () => {
+    const config = makeConfig([
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/root/packages/mcp-server/dist/collab.js'] },
+      },
+      {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/root/packages/mcp-server/dist/memory.js'] },
+      },
+      {
+        id: 'cat-cafe-signals',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/root/packages/mcp-server/dist/signals.js'] },
+      },
+      {
+        id: 'cat-cafe-limb',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/root/packages/mcp-server/dist/limb.js'] },
+      },
+    ]);
+
+    const result = healCatCafeMcpTopology(config, { catCafeRepoRoot: '/root' });
+    assert.equal(result.migrated, false, 'canonical 4-split must be no-op');
+    assert.equal(result.config.capabilities.length, 4);
+  });
+
+  it('migrated flag aggregates from all 4 chain steps', () => {
+    // Single managed split + legacy main → triggers migrateLegacy path:
+    // legacy seeded → 4 splits + cat-cafe removed via migrateLegacy.
+    const config = makeConfig([
+      {
+        id: 'cat-cafe',
+        type: 'mcp',
+        enabled: false, // disabled — legacySeed should propagate
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/legacy/index.js'] },
+      },
+    ]);
+
+    const result = healCatCafeMcpTopology(config, { catCafeRepoRoot: '/heal' });
+    assert.equal(result.migrated, true);
+    // P1 inheritance: limb (and other splits) should inherit disabled state
+    // from legacy main via legacySeed in migrateLegacyCatCafeCapability.
+    const limb = result.config.capabilities.find((c) => c.id === 'cat-cafe-limb');
+    assert.ok(limb);
+    assert.equal(limb.enabled, false, 'limb inherits disabled state from legacy seed');
   });
 });
 

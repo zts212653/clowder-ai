@@ -937,6 +937,267 @@ function globalArchitectureDiagram() {
   return svgShell(w, h, body);
 }
 
+function sequencePhase(x, y, w, h, phase, title, subtitle, bullets, color, opts = {}) {
+  const count = opts.count
+    ? pill(x + w - 255, y + 24, opts.count, `${color}22`, color, { w: 220, size: 21, textFill: color })
+    : '';
+  const note = opts.note
+    ? `
+      <rect x="${x + 34}" y="${y + h - 70}" width="${w - 68}" height="46" rx="18" fill="white" stroke="${color}" stroke-width="2" opacity="0.86"/>
+      ${lines([opts.note], x + w / 2, y + h - 40, { size: 20, weight: 820, fill: color, anchor: 'middle' })}
+    `
+    : '';
+  return `
+    ${box(x, y, w, h, { fill: `${color}12`, stroke: color, r: 30, shadow: true })}
+    <circle cx="${x + 60}" cy="${y + 58}" r="34" fill="${color}" opacity="0.96"/>
+    <text x="${x + 60}" y="${y + 70}" text-anchor="middle" font-size="34" font-weight="900" fill="white">${esc(phase)}</text>
+    ${lines([title], x + 112, y + 48, { size: 30, weight: 900, fill: color })}
+    ${lines([subtitle], x + 112, y + 88, { size: 22, weight: 780, fill: C.ink })}
+    ${count}
+    ${lines(bullets, x + 52, y + 140, { size: opts.size || 22, weight: 730, fill: C.ink, leading: opts.leading || 1.22 })}
+    ${note}
+  `;
+}
+
+function timelineDot(x, y, label, color) {
+  return `
+    <circle cx="${x}" cy="${y}" r="30" fill="white" stroke="${color}" stroke-width="5"/>
+    <text x="${x}" y="${y + 11}" text-anchor="middle" font-size="30" font-weight="900" fill="${color}">${esc(label)}</text>
+  `;
+}
+
+function timingBadge(x, y, title, detail, color) {
+  return `
+    <rect x="${x}" y="${y}" width="440" height="92" rx="24" fill="${color}16" stroke="${color}" stroke-width="3"/>
+    ${lines([title], x + 24, y + 36, { size: 23, weight: 900, fill: color })}
+    ${lines([detail], x + 24, y + 68, { size: 18, weight: 760, fill: C.ink })}
+  `;
+}
+
+function harnessLoadingSequenceDiagram() {
+  const w = 2600;
+  const h = 3180;
+  const axisX = 130;
+  const cardX = 235;
+  const cardW = 1700;
+  const sideX = 2010;
+  const body = `
+  ${sectionTitle('图 8：Harness 加载时序图', '一次 invocation 里，Environment Fit 如何被逐层装进上下文、运行时和回收链路', w)}
+
+  ${box(1985, 150, 500, 245, { fill: '#fffbeb', stroke: '#d97706', r: 28, label: '行业 vs 我们', labelColor: '#d97706' })}
+  ${lines(['行业常见：注入 1 次', '我们：5 个注入时机', '注入项：10 + 19 + 6 + hooks + 回收'], 2035, 225, { size: 24, weight: 850, fill: '#92400e', leading: 1.26 })}
+
+  ${box(70, 170, 1860, 68, { fill: C.blueSoft, stroke: C.blue, r: 24, shadow: false })}
+  ${lines(['Cat Cafe Orchestrator / route-serial.ts：先构建 prompt，再交给 provider CLI'], 1000, 214, { size: 27, weight: 900, fill: C.blue, anchor: 'middle' })}
+
+  <line x1="${axisX}" y1="275" x2="${axisX}" y2="2915" stroke="${C.line}" stroke-width="6" stroke-linecap="round" opacity="0.46"/>
+  ${timelineDot(axisX, 325, 'A', C.blue)}
+  ${timelineDot(axisX, 600, 'B', C.blue)}
+  ${timelineDot(axisX, 965, 'C', C.purple)}
+  ${timelineDot(axisX, 1315, 'D', C.purple)}
+  ${timelineDot(axisX, 1595, 'E', C.purple)}
+  ${timelineDot(axisX, 1945, 'F', C.orange)}
+  ${timelineDot(axisX, 2325, 'G', C.green)}
+  ${timelineDot(axisX, 2735, 'H', C.teal)}
+
+  ${sequencePhase(
+    cardX,
+    265,
+    cardW,
+    250,
+    'A',
+    '路由入队',
+    'Routing & queueing',
+    [
+      '@ 句柄解析 → 确定目标猫',
+      'InvocationQueue 入队；F175 相邻消息合批',
+      'QueueProcessor 取出；创建 InvocationRecord',
+      'queued: QueueProcessor.executeEntry；immediate: messages.ts',
+    ],
+    C.blue,
+    { count: '入口准备', size: 22 },
+  )}
+  ${sequencePhase(
+    cardX,
+    545,
+    cardW,
+    250,
+    'B',
+    '构建静态身份 candidate',
+    'buildStaticIdentity() 只产出 Session-level candidate，实际注入在 Phase F 决策',
+    [
+      '10 项：猫身份 / 限制声明 / Pack Masks / A2A 格式 / 队友名册',
+      '工作流触发 / CVO 信息 / L0 治理摘要 / Pack 护栏 / MCP 工具说明',
+      '关键：不是 --append-system-prompt；后面按条件 string prepend',
+    ],
+    C.blue,
+    { count: '10 项静态' },
+  )}
+
+  <rect x="210" y="825" width="2240" height="76" rx="28" fill="${C.purpleSoft}" stroke="${C.purple}" stroke-width="4" stroke-dasharray="16 10"/>
+  ${lines(['Anti-compaction Boundary：上方是可复用静态身份；下方是每轮重新组装的动态上下文'], 1330, 875, { size: 25, weight: 900, fill: C.purple, anchor: 'middle' })}
+
+  ${sequencePhase(
+    cardX,
+    930,
+    cardW,
+    305,
+    'C',
+    '构建动态上下文',
+    'buildInvocationContext() · Per-invocation，每次重新组装',
+    [
+      'C.1 路由/球权 6：身份常量、A2A 直传、乒乓预警、参与猫、退出检查、路由反馈',
+      'C.2 模式/阶段 4：serial / parallel / independent、prompt 标签、SOP 阶段、训练营状态',
+      'C.3 提示/引导 4：skill 提示、活跃参与者、路由策略、引导候选',
+      'C.4 知识/内容 4：Voice Mode、世界上下文、宪法知识、信号文章',
+      'C.5 尾锚 1：传球三选一固定在 prompt 最末，工程化利用近因偏差',
+    ],
+    C.purple,
+    { count: '19 项动态', size: 20, leading: 1.2 },
+  )}
+  ${sequencePhase(
+    cardX,
+    1265,
+    cardW,
+    255,
+    'D',
+    '构建冷启动包',
+    'buildSessionBootstrap() · Session #2+ 专用，约 2000 token 预算',
+    [
+      '6 项：Session 身份、Thread 记忆、项目知识召回、上一轮摘要、任务快照、记忆工具指令',
+      '①⑥ always keep；丢弃顺序：recall → task → digest → threadMemory',
+      '作用：让新 session 30 秒内知道上次做到哪',
+    ],
+    C.purple,
+    { count: '6 项冷启动', size: 21 },
+  )}
+  ${sequencePhase(
+    cardX,
+    1550,
+    cardW,
+    230,
+    'E',
+    '组装上下文窗口',
+    'assembleIncrementalContext() / assembleContext()',
+    [
+      'Smart Window：上下文压力 > 80% 时注入 briefing',
+      '历史消息按 token 预算裁剪；当前用户消息必要时追加',
+      '最终拼接：dynamic context + mode prompt + bootstrap + MCP instructions + history + user message',
+    ],
+    C.purple,
+    { count: '最终 prompt', size: 21 },
+  )}
+
+  ${box(70, 1825, 1860, 68, { fill: C.orangeSoft, stroke: C.orange, r: 24, shadow: false })}
+  ${lines(['Provider CLI Layer / invoke-single-cat.ts：解析 CLI session，决定是否把静态身份 prepend 到 prompt'], 1000, 1869, { size: 26, weight: 900, fill: C.orange, anchor: 'middle' })}
+
+  ${sequencePhase(
+    cardX,
+    1918,
+    cardW,
+    260,
+    'F',
+    '解析会话 & 条件注入',
+    'sessionManager / sessionChainStore / reconcileStuck / sessionMutex',
+    [
+      '有活跃 session → --resume；无 session → 新建',
+      '读取 sealed chain；reconcileStuck 清理卡住的 sealing；F118 per-session mutex',
+      'Phase B candidate 注入决策：new / compressed(token 跌幅 >60%) / registry changed → prepend',
+      'resume 且无变化 → 跳过；已在 session 上下文里',
+    ],
+    C.orange,
+    { count: '条件 prepend', size: 20, leading: 1.18 },
+  )}
+  ${sequencePhase(
+    cardX,
+    2210,
+    cardW,
+    420,
+    'G',
+    '执行调用',
+    'CLI spawn + provider-scoped hooks + tool loop',
+    [
+      '启动 claude / opencode / acp / gemini；流式输出 text / tool_use / done',
+      'SessionStart：f24-post-compact-bootstrap、preflight-shared-state',
+      'Claude PreToolUse：runtime-sanctuary-guard、pretool-brake-check、pretool-evidence-guard',
+      'Claude PostToolUse：evidence-marker、post-edit-check、shared-doc-push-guard、sop-bookmark、brake-timer',
+      '其他：PreCompact / UserPromptSubmit / Stop(f177-routing-guard)',
+      '注意：Codex F180 当前只有 SessionStart/Stop user hooks；Gemini/OpenCode 走 provider-native audit',
+    ],
+    C.green,
+    { count: 'Runtime hooks', size: 19, leading: 1.17 },
+  )}
+  ${sequencePhase(
+    cardX,
+    2660,
+    cardW,
+    300,
+    'H',
+    '回收下一棒',
+    'Post-execution：把最终输出转回共享状态和下一次 invocation',
+    [
+      'A2A mention / targetCats 检测；Rich Block 提取；F172 图片扫描发布',
+      'Audit + telemetry；Continuation Capsule 封存；Ack Cursors CAS',
+      '有 targetCats → 回到 A；有 continuation capsule → 限流后入队；无 → 等用户或外部事件',
+    ],
+    C.teal,
+    { count: '回到图 3', note: '图 8 = 单 invocation 内部；图 3 = 多 invocation 之间的球权协议' },
+  )}
+
+  ${box(sideX, 470, 500, 620, { fill: '#f8fafc', stroke: C.line, r: 30, label: '5 个注入时机', labelColor: C.line })}
+  ${timingBadge(sideX + 30, 535, '1. Session-level', 'Phase B candidate → Phase F prepend', C.blue)}
+  ${timingBadge(sideX + 30, 640, '2. Per-invocation', 'Phase C 每轮动态重组', C.purple)}
+  ${timingBadge(sideX + 30, 745, '3. Cold start', 'Phase D 仅 Session #2+', C.purple)}
+  ${timingBadge(sideX + 30, 850, '4. Runtime hooks', 'Phase G tool call 前后', C.green)}
+  ${timingBadge(sideX + 30, 955, '5. Post-execution', 'Phase H 检测 / 发布 / 续接', C.teal)}
+
+  ${box(sideX, 1150, 500, 355, { fill: C.purpleSoft, stroke: C.purple, r: 30, label: '独家增量', labelColor: C.purple })}
+  ${lines(
+    [
+      '不是“大 system prompt”',
+      '而是多时机注入链：',
+      '',
+      '10 静态 + 19 动态 + 6 冷启动',
+      '+ hooks + post-exec 回收',
+      '',
+      '每一层都有来源、生命周期、',
+      '重注入条件和降级策略。',
+    ],
+    sideX + 42,
+    1220,
+    { size: 22, weight: 800, fill: C.ink, leading: 1.22 },
+  )}
+
+  ${box(sideX, 2210, 500, 420, { fill: C.redSoft, stroke: C.red, r: 30, label: 'Hook 触发条', labelColor: C.red })}
+  ${lines(
+    [
+      'SessionStart',
+      '  ↓',
+      '模型思考',
+      '  ↓',
+      'PreToolUse ⚡',
+      '  ↓',
+      'Tool 执行',
+      '  ↓',
+      'PostToolUse ⚡',
+      '  ↓',
+      '继续思考 / final',
+      '',
+      '⚠ Pre/PostToolUse',
+      '仅 Claude project hooks',
+    ],
+    sideX + 250,
+    2270,
+    { size: 22, weight: 860, fill: C.red, anchor: 'middle', leading: 1.12 },
+  )}
+
+  ${box(205, 3005, 2210, 88, { fill: '#fffbeb', stroke: '#d97706', r: 26, shadow: false })}
+  ${lines(['一句话：Harness 的价值不是“写一段 prompt”，而是在正确时刻把正确状态、约束、记忆和刹车装到 agent 的认知路径上。'], 1310, 3060, { size: 27, weight: 900, fill: '#92400e', anchor: 'middle' })}
+  ${lines(['valid_as_of: 2026-05-07 · brief commit 878eaa3e8'], 2490, 3140, { size: 20, weight: 700, fill: C.muted, anchor: 'end' })}
+  `;
+  return svgShell(w, h, body);
+}
+
 const diagrams = [
   ['01-hero-overview', heroDiagram()],
   ['02-harness-engineering-map', harnessMapDiagram()],
@@ -946,6 +1207,7 @@ const diagrams = [
   ['05-runtime-stack', runtimeStackDiagram()],
   ['06-memory-pipeline-architecture', memoryPipelineDiagram()],
   ['07-cat-cafe-global-architecture', globalArchitectureDiagram()],
+  ['08-harness-loading-sequence', harnessLoadingSequenceDiagram()],
 ];
 
 await fs.mkdir(OUT_DIR, { recursive: true });
@@ -953,9 +1215,20 @@ await fs.mkdir(OUT_DIR, { recursive: true });
 for (const [name, svg] of diagrams) {
   const svgPath = path.join(OUT_DIR, `${name}.svg`);
   const pngPath = path.join(OUT_DIR, `${name}.png`);
-  const cleanSvg = svg.replace(/[ \t]+$/gm, '');
-  await fs.writeFile(svgPath, cleanSvg, 'utf8');
-  await sharp(Buffer.from(cleanSvg)).png({ compressionLevel: 9, quality: 94 }).toFile(pngPath);
+  let outputSvg = svg.replace(/[ \t]+$/gm, '');
+  if (name !== '08-harness-loading-sequence') {
+    try {
+      const existingSvg = await fs.readFile(svgPath, 'utf8');
+      const normalize = (value) => value.replace(/[ \t]+$/gm, '');
+      if (normalize(existingSvg) === normalize(svg)) {
+        outputSvg = existingSvg;
+      }
+    } catch {
+      // New diagram source.
+    }
+  }
+  await fs.writeFile(svgPath, outputSvg, 'utf8');
+  await sharp(Buffer.from(outputSvg)).png({ compressionLevel: 9, quality: 94 }).toFile(pngPath);
   const meta = await sharp(pngPath).metadata();
   console.log(`${name}.png ${meta.width}x${meta.height}`);
 }

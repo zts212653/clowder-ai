@@ -104,10 +104,14 @@ function mapTranscriptEventToMessage(
   };
 
   if (evtType !== 'user' && evt.invocationId) {
+    // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId for assistant
+    // raw records. History imports have only one identity (evt.invocationId), so
+    // both parent and turn point to it — but stamping turn explicitly keeps the
+    // frontend bubble identity contract (turn-priority) consistent.
     return {
       ...base,
       extra: {
-        stream: { invocationId: evt.invocationId },
+        stream: { invocationId: evt.invocationId, turnInvocationId: evt.invocationId },
       },
     };
   }

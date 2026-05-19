@@ -139,6 +139,7 @@ vi.mock('@/stores/gameStore', () => {
 });
 
 vi.mock('@/utils/api-client', () => ({
+  API_URL: 'http://localhost:3004',
   apiFetch: vi.fn(async () => ({ ok: true, json: async () => ({ threads: [] }) })),
 }));
 
@@ -242,11 +243,11 @@ vi.mock('../ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }))
 vi.mock('../SplitPaneView', () => ({
   SplitPaneView: () => React.createElement('div', { 'data-testid': 'split-view' }),
 }));
-vi.mock('../CatCafeHub', () => ({ CatCafeHub: () => null }));
 vi.mock('../AuthorizationCard', () => ({ AuthorizationCard: () => null }));
 vi.mock('../WorkspacePanel', () => ({ WorkspacePanel: () => null }));
 vi.mock('../BootstrapOrchestrator', () => ({ BootstrapOrchestrator: () => null }));
 vi.mock('../BootcampListModal', () => ({ BootcampListModal: () => null }));
+vi.mock('@/components/HubListModal', () => ({ HubListModal: () => null }));
 vi.mock('@/components/ProjectSetupCard', () => ({ ProjectSetupCard: () => null }));
 vi.mock('@/components/game/GameOverlayConnector', () => ({ GameOverlayConnector: () => null }));
 vi.mock('@/components/icons/PawIcon', () => ({ PawIcon: () => null }));
@@ -305,6 +306,7 @@ describe('ChatContainer bottom chrome observer', () => {
     expect(firstBottomChrome).toBeTruthy();
     expect(firstBottomChrome?.querySelector('[data-testid="chat-input"]')).toBeTruthy();
     expect(resizeObserverInstances).toHaveLength(1);
+    expect(resizeObserverInstances[0]?.observe.mock.calls[0]?.[0]).toBe(firstBottomChrome);
 
     storeState = { ...storeState, viewMode: 'split' };
     await act(async () => {
@@ -323,5 +325,6 @@ describe('ChatContainer bottom chrome observer', () => {
     expect(secondBottomChrome?.querySelector('[data-testid="chat-input"]')).toBeTruthy();
     expect(secondBottomChrome).not.toBe(firstBottomChrome);
     expect(resizeObserverInstances).toHaveLength(2);
+    expect(resizeObserverInstances[1]?.observe.mock.calls[0]?.[0]).toBe(secondBottomChrome);
   });
 });

@@ -36,9 +36,9 @@ export function QuestBanner({ phase, firstCatName, onAddSecondCat, onStartBootca
         <span className="text-xs font-semibold text-conn-amber-text">新手教程</span>
         <span className="text-xs text-conn-amber-text">{label}</span>
       </div>
-      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-conn-amber-bg">
+      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-amber-200">
         <div
-          className="h-full rounded-full bg-conn-amber-bg transition-all duration-500"
+          className="h-full rounded-full bg-amber-500 transition-all duration-500"
           style={{ width: `${progress}%` }}
         />
       </div>
@@ -55,7 +55,7 @@ export function QuestBanner({ phase, firstCatName, onAddSecondCat, onStartBootca
             <button
               type="button"
               onClick={onStartBootcamp}
-              className="rounded-lg bg-conn-amber-text px-3 py-1.5 text-sm font-medium text-[var(--cafe-surface)] transition hover:opacity-90"
+              className="rounded-lg bg-amber-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-amber-600"
             >
               开始新手训练营
             </button>
@@ -76,15 +76,15 @@ export function QuestBanner({ phase, firstCatName, onAddSecondCat, onStartBootca
       )}
 
       {isErrorPhase && (
-        <div className="mt-3 rounded-lg border border-conn-amber-ring bg-conn-amber-bg p-3">
-          <p className="text-sm text-conn-amber-text">
+        <div className="mt-3 rounded-lg border border-orange-200 bg-orange-50 p-3">
+          <p className="text-sm text-orange-700">
             {firstCatName ?? '猫猫'} 遇到了一些问题！在真实团队中，我们会让另一只猫猫来帮忙 review。
           </p>
           {onAddSecondCat && (
             <button
               type="button"
               onClick={onAddSecondCat}
-              className="mt-2 rounded-lg bg-conn-amber-text px-3 py-1.5 text-sm font-medium text-[var(--cafe-surface)] transition hover:opacity-90"
+              className="mt-2 rounded-lg bg-orange-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-orange-600"
             >
               再来一只猫猫！
             </button>
@@ -93,13 +93,13 @@ export function QuestBanner({ phase, firstCatName, onAddSecondCat, onStartBootca
       )}
 
       {isComplete && (
-        <div className="mt-3 rounded-lg border border-conn-emerald-ring bg-conn-emerald-bg p-3">
-          <p className="text-sm text-conn-emerald-text">恭喜！你已掌握了多猫协作的基本技能。</p>
+        <div className="mt-3 rounded-lg border border-conn-green-ring bg-conn-green-bg p-3">
+          <p className="text-sm text-conn-green-text">恭喜！你已掌握了多猫协作的基本技能。</p>
           {onComplete && (
             <button
               type="button"
               onClick={onComplete}
-              className="mt-2 rounded-lg bg-conn-emerald-text px-3 py-1.5 text-sm font-medium text-[var(--cafe-surface)] transition hover:bg-conn-emerald-text"
+              className="mt-2 rounded-lg bg-conn-green-text px-3 py-1.5 text-sm font-medium text-white transition hover:bg-conn-green-hover"
             >
               前往 Console 管理更多猫猫
             </button>

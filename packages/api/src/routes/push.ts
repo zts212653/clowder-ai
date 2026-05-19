@@ -1,66 +1,46 @@
-/**
- * Push Notification Routes — Web Push 订阅管理
- */
-
 import type { FastifyPluginAsync } from 'fastify';
 import webpush from 'web-push';
-import { z } from 'zod';
+import { requireConnectorWriteOwner, resolveConnectorSessionUserId } from '../config/connector-secret-write-guards.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { PushNotificationService } from '../domains/cats/services/push/PushNotificationService.js';
-import type {
-  IPushSubscriptionStore,
-  PushSubscriptionRecord,
-} from '../domains/cats/services/stores/ports/PushSubscriptionStore.js';
-import { resolveHeaderUserId } from '../utils/request-identity.js';
+import type { IPushSubscriptionStore } from '../domains/cats/services/stores/ports/PushSubscriptionStore.js';
+import { isLoopbackAddress } from '../utils/loopback-request.js';
+import {
+  describeEndpoint,
+  type PushDeliverySnapshot,
+  resolveUserId,
+  subscribeSchema,
+  summarizeTargets,
+  toDeliverySummary,
+  unsubscribeSchema,
+} from './push-route-helpers.js';
 
 export interface PushRoutesOptions {
   pushSubscriptionStore: IPushSubscriptionStore;
   pushService: PushNotificationService | null;
   vapidPublicKey: string;
+  getPushService?: () => PushNotificationService | null;
+  getVapidPublicKey?: () => string;
   auditLog?: {
     append(input: { type: string; threadId?: string; data: Record<string, unknown> }): Promise<unknown>;
   };
 }
 
-type PushDeliveryStatus = 'ok' | 'error' | 'not_attempted';
-
-interface PushDeliverySnapshot {
-  lastAttemptAt: number | null;
-  lastHttpStatus: number | null;
-  lastResult: PushDeliveryStatus;
-  lastError: string | null;
-}
-
-interface PushDeliverySummary {
-  attempted: number;
-  delivered: number;
-  failed: number;
-  removed: number;
-}
-
-function resolveUserId(request: import('fastify').FastifyRequest): string | null {
-  return resolveHeaderUserId(request);
-}
-
-const subscribeSchema = z.object({
-  subscription: z.object({
-    endpoint: z.string().url(),
-    keys: z.object({
-      p256dh: z.string().min(1),
-      auth: z.string().min(1),
-    }),
-  }),
-  userAgent: z.string().max(500).optional(),
-});
-
-const unsubscribeSchema = z.object({
-  endpoint: z.string().url(),
-});
-
 export const pushRoutes: FastifyPluginAsync<PushRoutesOptions> = async (app, opts) => {
   const { pushSubscriptionStore, pushService, vapidPublicKey } = opts;
   const auditLog = opts.auditLog ?? getEventAuditLog();
   const deliveryByUser = new Map<string, PushDeliverySnapshot>();
+
+  function getCurrentPushService(): PushNotificationService | null {
+    if (opts.getPushService) {
+      return opts.getPushService();
+    }
+    return pushService;
+  }
+
+  function getCurrentVapidPublicKey(): string {
+    return opts.getVapidPublicKey?.() ?? vapidPublicKey;
+  }
 
   function getDeliverySnapshot(userId: string): PushDeliverySnapshot {
     return (
@@ -77,41 +57,6 @@ export const pushRoutes: FastifyPluginAsync<PushRoutesOptions> = async (app, opt
     deliveryByUser.set(userId, update);
   }
 
-  function toDeliverySummary(delivery: Partial<PushDeliverySummary> | null | undefined): PushDeliverySummary {
-    return {
-      attempted: delivery?.attempted ?? 0,
-      delivered: delivery?.delivered ?? 0,
-      failed: delivery?.failed ?? 0,
-      removed: delivery?.removed ?? 0,
-    };
-  }
-
-  function describeEndpoint(endpoint: string): string {
-    try {
-      const url = new URL(endpoint);
-      return `${url.host}...${endpoint.slice(-12)}`;
-    } catch {
-      return `invalid...${endpoint.slice(-12)}`;
-    }
-  }
-
-  function summarizeUserAgent(userAgent?: string): string {
-    if (!userAgent) return 'unknown';
-    if (userAgent.includes('Edg/')) return 'edge';
-    if (userAgent.includes('Chrome/')) return 'chrome';
-    if (userAgent.includes('Firefox/')) return 'firefox';
-    if (userAgent.includes('Safari/')) return 'safari';
-    return 'other';
-  }
-
-  function summarizeTargets(subscriptions: PushSubscriptionRecord[]): Array<Record<string, unknown>> {
-    return subscriptions.map((sub) => ({
-      endpoint: describeEndpoint(sub.endpoint),
-      createdAt: sub.createdAt,
-      uaFamily: summarizeUserAgent(sub.userAgent),
-    }));
-  }
-
   async function appendPushAudit(
     request: { log: { warn: (obj: unknown, msg?: string) => void } },
     type: string,
@@ -124,29 +69,15 @@ export const pushRoutes: FastifyPluginAsync<PushRoutesOptions> = async (app, opt
     }
   }
 
-  // POST /api/push/generate-vapid — 一键生成 VAPID 密钥对 (owner-only)
-  app.post('/api/push/generate-vapid', async (request, reply) => {
-    const userId = resolveUserId(request);
-    if (!userId) {
-      reply.status(401);
-      return { error: 'Identity required (X-Cat-Cafe-User header)' };
-    }
-    const ownerId = process.env['DEFAULT_OWNER_USER_ID']?.trim();
-    if (ownerId && userId !== ownerId) {
-      reply.status(403);
-      return { error: 'Only the owner can generate VAPID keys' };
-    }
-    const keys = webpush.generateVAPIDKeys();
-    return { publicKey: keys.publicKey, privateKey: keys.privateKey };
-  });
-
   // GET /api/push/vapid-public-key — 前端获取 VAPID 公钥
   // enabled = pushService is fully configured (both VAPID keys present)
   app.get('/api/push/vapid-public-key', async () => {
-    if (!vapidPublicKey || !pushService) {
+    const currentVapidPublicKey = getCurrentVapidPublicKey();
+    const currentPushService = getCurrentPushService();
+    if (!currentVapidPublicKey || !currentPushService) {
       return { key: null, enabled: false };
     }
-    return { key: vapidPublicKey, enabled: true };
+    return { key: currentVapidPublicKey, enabled: true };
   });
 
   // GET /api/push/status — 前端通知能力矩阵 + 设备订阅状态 + 最近投递结果
@@ -158,12 +89,12 @@ export const pushRoutes: FastifyPluginAsync<PushRoutesOptions> = async (app, opt
     }
 
     const subscriptions = await pushSubscriptionStore.listByUser(userId);
-    const envHasVapid = Boolean(process.env.VAPID_PUBLIC_KEY) && Boolean(process.env.VAPID_PRIVATE_KEY);
+    const currentVapidPublicKey = getCurrentVapidPublicKey();
+    const currentPushService = getCurrentPushService();
     const capability = {
-      enabled: Boolean(vapidPublicKey) && Boolean(pushService),
-      vapidPublicKeyConfigured: Boolean(vapidPublicKey) || envHasVapid,
-      pushServiceConfigured: Boolean(pushService),
-      pendingRestart: envHasVapid && !pushService,
+      enabled: Boolean(currentVapidPublicKey) && Boolean(currentPushService),
+      vapidPublicKeyConfigured: Boolean(currentVapidPublicKey),
+      pushServiceConfigured: Boolean(currentPushService),
     };
     const delivery = getDeliverySnapshot(userId);
     const errorHints: string[] = [];
@@ -181,6 +112,34 @@ export const pushRoutes: FastifyPluginAsync<PushRoutesOptions> = async (app, opt
       delivery,
       errorHints,
     };
+  });
+
+  // POST /api/push/generate-vapid — owner-only one-shot keypair generation.
+  app.post('/api/push/generate-vapid', async (request, reply) => {
+    if (!isLoopbackAddress(request.ip)) {
+      reply.status(403);
+      return { error: 'VAPID key generation endpoint is loopback-only' };
+    }
+
+    const operator = resolveConnectorSessionUserId(request);
+    if (!operator) {
+      reply.status(401);
+      return { error: 'Identity required (session cookie)' };
+    }
+
+    const ownerError = requireConnectorWriteOwner(operator);
+    if (ownerError) {
+      reply.status(ownerError.status);
+      return { error: ownerError.error };
+    }
+
+    const keys = webpush.generateVAPIDKeys();
+    await appendPushAudit(request, AuditEventTypes.CONFIG_UPDATED, {
+      target: 'push-vapid-generate',
+      keys: ['VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY'],
+      operator,
+    });
+    return keys;
   });
 
   // POST /api/push/subscribe — 注册推送订阅
@@ -273,7 +232,8 @@ export const pushRoutes: FastifyPluginAsync<PushRoutesOptions> = async (app, opt
       ),
     });
 
-    if (!pushService) {
+    const currentPushService = getCurrentPushService();
+    if (!currentPushService) {
       reply.status(503);
       setDeliverySnapshot(userId, {
         lastAttemptAt: Date.now(),
@@ -316,7 +276,7 @@ export const pushRoutes: FastifyPluginAsync<PushRoutesOptions> = async (app, opt
       };
     }
 
-    const delivery = await pushService.notifyUser(userId, {
+    const delivery = await currentPushService.notifyUser(userId, {
       title: '🐱 猫猫测试推送',
       body: '如果你看到这条通知，说明推送配置成功了！',
       tag: 'push-test',

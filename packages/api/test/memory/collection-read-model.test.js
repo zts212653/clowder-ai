@@ -47,6 +47,15 @@ describe('CollectionReadModel', () => {
     assert.equal(typeof health.orphanedAnchorCount, 'number');
   });
 
+  it('orphanedAnchorCount reflects edges with missing endpoints (AC-C4)', async () => {
+    await store.addEdge({ fromAnchor: 'F001', toAnchor: 'F002', relation: 'related_to' });
+    await store.addEdge({ fromAnchor: 'F001', toAnchor: 'GHOST', relation: 'wikilink', provenance: 'content' });
+    await store.addEdge({ fromAnchor: 'MISSING', toAnchor: 'D001', relation: 'feature_ref', provenance: 'content' });
+
+    const health = CollectionReadModel.computeHealth('project:cat-cafe', db);
+    assert.equal(health.orphanedAnchorCount, 2, 'edges pointing to/from non-existent anchors');
+  });
+
   it('computeOverview with empty store', async () => {
     const emptyStore = new SqliteEvidenceStore(':memory:');
     await emptyStore.initialize();

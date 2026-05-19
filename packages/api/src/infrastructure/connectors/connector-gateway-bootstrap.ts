@@ -17,7 +17,6 @@ import type { RedisClient } from '@cat-cafe/shared/utils';
 import * as lark from '@larksuiteoapi/node-sdk';
 import type { FastifyBaseLogger } from 'fastify';
 import { isCatAvailable } from '../../config/cat-config-loader.js';
-import { resolveServiceEndpoint } from '../../domains/services/service-registry.js';
 import type { ConnectorWebhookHandler, WebhookHandleResult } from '../../routes/connector-webhooks.js';
 import { getDefaultUploadDir } from '../../utils/upload-paths.js';
 import { deliverConnectorMessage } from '../email/deliver-connector-message.js';
@@ -27,7 +26,7 @@ import { FeishuTokenManager } from './adapters/FeishuTokenManager.js';
 import { TelegramAdapter } from './adapters/TelegramAdapter.js';
 import { WeComAgentAdapter } from './adapters/WeComAgentAdapter.js';
 import { WeComBotAdapter } from './adapters/WeComBotAdapter.js';
-import { WeixinAdapter } from './adapters/WeixinAdapter.js';
+import { WeixinAdapter, type WeixinSessionStateStore } from './adapters/WeixinAdapter.js';
 import { ConnectorCommandLayer, type ConnectorCommandLayerDeps } from './ConnectorCommandLayer.js';
 import {
   type IConnectorPermissionStore,
@@ -92,19 +91,13 @@ export interface ConnectorGatewayDeps {
       timestamp: number;
     }): Promise<{ id: string }>;
     getById?(id: string): Promise<{ source?: ConnectorSource } | null>;
-    getByThread?(
-      threadId: string,
-      limit?: number,
-    ):
-      | Array<{ catId: string | null; userId?: string; content: string; timestamp: number; source?: string }>
-      | Promise<Array<{ catId: string | null; userId?: string; content: string; timestamp: number; source?: string }>>;
     getByThreadBefore?(
       threadId: string,
       timestamp: number,
       limit?: number,
     ):
-      | Array<{ catId: string | null; userId?: string; content: string; timestamp: number; source?: string }>
-      | Promise<Array<{ catId: string | null; userId?: string; content: string; timestamp: number; source?: string }>>;
+      | Array<{ catId: string | null; userId?: string; content: string; timestamp: number }>
+      | Promise<Array<{ catId: string | null; userId?: string; content: string; timestamp: number }>>;
   };
   readonly threadStore: {
     create(userId: string, title?: string): { id: string } | Promise<{ id: string }>;
@@ -208,6 +201,41 @@ export interface ConnectorGatewayHandle {
   stop(): Promise<void>;
 }
 
+const WEIXIN_SESSION_STATE_KEY = 'connectors:weixin:session-state';
+
+function createWeixinSessionStateStore(redis: RedisClient, log: FastifyBaseLogger): WeixinSessionStateStore {
+  return {
+    async load() {
+      const raw = await redis.get(WEIXIN_SESSION_STATE_KEY);
+      if (!raw) return null;
+      try {
+        const parsed = JSON.parse(raw) as { getUpdatesBuf?: unknown; contextTokens?: unknown };
+        const contextTokens =
+          parsed.contextTokens && typeof parsed.contextTokens === 'object'
+            ? Object.fromEntries(
+                Object.entries(parsed.contextTokens).filter(
+                  ([chatId, token]) => typeof chatId === 'string' && typeof token === 'string',
+                ),
+              )
+            : {};
+        return {
+          getUpdatesBuf: typeof parsed.getUpdatesBuf === 'string' ? parsed.getUpdatesBuf : '',
+          contextTokens,
+        };
+      } catch (err) {
+        log.warn({ err }, '[ConnectorGateway] Invalid persisted WeChat session state ignored');
+        return null;
+      }
+    },
+    async save(state) {
+      await redis.set(WEIXIN_SESSION_STATE_KEY, JSON.stringify(state));
+    },
+    async clear() {
+      await redis.del(WEIXIN_SESSION_STATE_KEY);
+    },
+  };
+}
+
 export function loadConnectorGatewayConfig(): ConnectorGatewayConfig {
   return {
     telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
@@ -228,7 +256,7 @@ export function loadConnectorGatewayConfig(): ConnectorGatewayConfig {
     wecomToken: process.env.WECOM_TOKEN,
     wecomEncodingAesKey: process.env.WECOM_ENCODING_AES_KEY,
     coCreatorUserId: process.env.DEFAULT_OWNER_USER_ID,
-    whisperUrl: resolveServiceEndpoint('whisper-stt') ?? process.env.WHISPER_URL,
+    whisperUrl: process.env.WHISPER_URL,
     connectorMediaDir: process.env.CONNECTOR_MEDIA_DIR,
     xiaoyiAk: process.env.XIAOYI_AK,
     xiaoyiSk: process.env.XIAOYI_SK,
@@ -328,7 +356,12 @@ export async function startConnectorGateway(
     catRoster,
     commandRegistry: deps.commandRegistry,
     ...(deps.messageStore.getByThreadBefore
-      ? { messageStore: deps.messageStore as ConnectorCommandLayerDeps['messageStore'] }
+      ? {
+          messageStore: {
+            getByThreadBefore: (threadId: string, timestamp: number, limit?: number) =>
+              deps.messageStore.getByThreadBefore!(threadId, timestamp, limit),
+          },
+        }
       : {}),
   });
 
@@ -852,7 +885,8 @@ export async function startConnectorGateway(
 
   // ── WeChat Personal (iLink Bot long polling) ──
   // Always create the adapter instance (for QR login routes); only start polling if we have a token.
-  const weixin = new WeixinAdapter(config.weixinBotToken ?? '', log);
+  const weixinSessionStateStore = deps.redis ? createWeixinSessionStateStore(deps.redis, log) : undefined;
+  const weixin = new WeixinAdapter(config.weixinBotToken ?? '', log, weixinSessionStateStore);
   adapters.set('weixin', weixin);
 
   const startWeixinPolling = () => {
@@ -867,6 +901,7 @@ export async function startConnectorGateway(
   };
 
   if (hasWeixin) {
+    await weixin.restoreSessionState();
     startWeixinPolling();
     log.info('[ConnectorGateway] WeChat adapter started (iLink Bot long polling)');
   } else {

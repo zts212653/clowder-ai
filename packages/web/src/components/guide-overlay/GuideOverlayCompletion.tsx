@@ -57,7 +57,7 @@ export function GuideOverlayCompletion({
           type="button"
           onClick={onDismiss}
           disabled={!completionPersisted && !completionFailed}
-          className="rounded-xl bg-[var(--guide-success)] px-6 py-2 text-sm font-semibold text-[var(--cafe-surface)] transition hover:opacity-90 disabled:opacity-50"
+          className="rounded-xl bg-[var(--guide-success)] px-6 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
         >
           {completionPersisted ? '太好了!' : completionFailed ? '知道了' : '保存中…'}
         </button>

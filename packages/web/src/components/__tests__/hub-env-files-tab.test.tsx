@@ -139,11 +139,11 @@ describe('HubEnvFilesTab', () => {
     await flushEffects();
 
     const sectionTitles = Array.from(container.querySelectorAll('h3')).map((node) => node.textContent?.trim());
-    expect(sectionTitles.slice(0, 3)).toEqual(['运行时配置', '配置文件', '数据目录']);
+    expect(sectionTitles.slice(0, 3)).toEqual(['环境变量', '配置文件', '数据目录']);
     expect(container.textContent).toContain('cat-template.json');
     expect(container.textContent).toContain('.cat-cafe/cat-catalog.json');
-    expect(container.textContent).toContain('变量值可直接编辑，保存后自动回填');
-    expect(container.textContent).toContain('写回 .env 后需重启相关服务生效');
+    expect(container.textContent).toContain('当前环境变量、配置文件、数据目录三段式不变');
+    expect(container.textContent).toContain('变量值可直接编辑，保存后自动回填 .env');
     expect(container.textContent).toContain('URL 型连接串当前值已脱敏');
     expect(container.querySelector('input[aria-label="API_SERVER_PORT"]')).toBeNull();
     expect(container.querySelector('input[aria-label="PREVIEW_GATEWAY_PORT"]')).toBeNull();

@@ -152,8 +152,8 @@ export function TerminalTab({ worktreeId }: TerminalTabProps) {
           gap: 8,
           padding: '4px 8px',
           fontSize: 12,
-          color: 'var(--terminal-text-muted)',
-          borderBottom: '1px solid var(--terminal-selected-bg)',
+          color: '#888',
+          borderBottom: '1px solid #2a2b3d',
         }}
       >
         <span
@@ -161,12 +161,7 @@ export function TerminalTab({ worktreeId }: TerminalTabProps) {
             width: 8,
             height: 8,
             borderRadius: '50%',
-            background:
-              status === 'connected'
-                ? 'var(--terminal-text-success)'
-                : status === 'connecting'
-                  ? 'var(--terminal-text-warn)'
-                  : 'var(--terminal-text-error)',
+            background: status === 'connected' ? '#9ece6a' : status === 'connecting' ? '#e0af68' : '#f7768e',
           }}
         />
         <span>
@@ -178,8 +173,8 @@ export function TerminalTab({ worktreeId }: TerminalTabProps) {
             type="button"
             style={{
               background: 'none',
-              border: '1px solid var(--terminal-button-border)',
-              color: 'var(--terminal-button-text)',
+              border: '1px solid #444',
+              color: '#aaa',
               padding: '2px 8px',
               borderRadius: 4,
               cursor: 'pointer',
@@ -195,8 +190,8 @@ export function TerminalTab({ worktreeId }: TerminalTabProps) {
             type="button"
             style={{
               background: 'none',
-              border: '1px solid var(--terminal-error-border)',
-              color: 'var(--terminal-text-error)',
+              border: '1px solid #6b3030',
+              color: '#f7768e',
               padding: '2px 8px',
               borderRadius: 4,
               cursor: 'pointer',

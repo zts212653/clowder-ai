@@ -25,22 +25,22 @@ export function LifecyclePhaseTip({ phase, config }: LifecyclePhaseTipProps) {
   if (dismissed) return null;
 
   const border = {
-    blue: 'border-conn-blue-ring',
-    purple: 'border-conn-purple-ring',
+    blue: 'border-blue-300',
+    purple: 'border-purple-300',
     amber: 'border-conn-amber-ring',
-    green: 'border-conn-emerald-ring',
+    green: 'border-green-300',
   }[config.variant];
   const background = {
     blue: 'bg-conn-blue-bg',
-    purple: 'bg-conn-purple-bg',
+    purple: 'bg-purple-50',
     amber: 'bg-conn-amber-bg',
-    green: 'bg-conn-emerald-bg',
+    green: 'bg-conn-green-bg',
   }[config.variant];
   const textColor = {
     blue: 'text-conn-blue-text',
-    purple: 'text-conn-purple-text',
+    purple: 'text-purple-800',
     amber: 'text-conn-amber-text',
-    green: 'text-conn-emerald-text',
+    green: 'text-green-800',
   }[config.variant];
 
   return (

@@ -44,6 +44,38 @@ ${STAGED}
 "
 fi
 
+# 4. 检查 docs/ 下未跟踪的 .md 文件
+UNTRACKED_DOCS=$(git ls-files --others --exclude-standard -- 'docs/*.md' 'docs/**/*.md' 2>/dev/null | head -10)
+if [ -n "$UNTRACKED_DOCS" ]; then
+  WARNINGS="${WARNINGS}
+⚠️ 收尾检查：docs/ 下有未跟踪的 .md 文件（你或其他猫生成了但忘记 commit push）：
+${UNTRACKED_DOCS}
+→ 别走！先向铲屎官汇报这些文件，商量处理方式
+"
+fi
+
+# 5. 检查根目录图片文件（用文件系统检查，不受 .gitignore 影响）
+ROOT_IMAGES=$(find . -maxdepth 1 -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.gif' -o -name '*.webp' \) 2>/dev/null | sed 's|^\./||' | head -10)
+if [ -n "$ROOT_IMAGES" ]; then
+  WARNINGS="${WARNINGS}
+⚠️ 收尾检查：根目录有图片文件（截图应放 assets/screenshots/）：
+${ROOT_IMAGES}
+→ 别走！先向铲屎官汇报，商量移走还是删除
+"
+fi
+
+# 6. 检查根目录其他杂物（未跟踪且未 ignore 的文件）
+ROOT_CLUTTER=$(git ls-files --others --exclude-standard -- ':!.*' ':!packages/' ':!docs/' ':!assets/' ':!scripts/' ':!cat-cafe-skills/' ':!designs/' ':!desktop/' 2>/dev/null \
+  | grep -vE '^(package\.json|pnpm-workspace\.yaml|pnpm-lock\.yaml|tsconfig|biome|README|LICENSE|CLAUDE|AGENTS|\.npmrc|\.nvmrc|\.node-version|\.editorconfig|\.prettierrc|Makefile|Dockerfile|Procfile|turbo\.json|\.tool-versions)' \
+  | head -10)
+if [ -n "$ROOT_CLUTTER" ]; then
+  WARNINGS="${WARNINGS}
+⚠️ 收尾检查：根目录有杂物文件：
+${ROOT_CLUTTER}
+→ 别走！先向铲屎官汇报这些文件
+"
+fi
+
 # 输出提醒（只在有警告时才输出）
 if [ -n "$WARNINGS" ]; then
   echo "🐾 收工自检：${WARNINGS}"

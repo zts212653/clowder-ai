@@ -4,6 +4,19 @@
  */
 
 export {
+  audioCaptureStartInputSchema,
+  audioCaptureStatusInputSchema,
+  audioCaptureStopInputSchema,
+  audioListSourcesInputSchema,
+  audioReadTranscriptInputSchema,
+  audioTools,
+  handleAudioCaptureStart,
+  handleAudioCaptureStatus,
+  handleAudioCaptureStop,
+  handleAudioListSources,
+  handleAudioReadTranscript,
+} from './audio-tools.js';
+export {
   callbackEvidenceSearchInputSchema,
   callbackMemoryTools,
   callbackReflectInputSchema,
@@ -62,6 +75,11 @@ export {
   submitGameActionInputSchema,
 } from './game-action-tools.js';
 export {
+  graphResolveInputSchema,
+  graphTools,
+  handleGraphResolve,
+} from './graph-tools.js';
+export {
   handleLimbInvoke,
   handleLimbListAvailable,
   limbInvokeInputSchema,
@@ -69,10 +87,11 @@ export {
   limbTools,
 } from './limb-tools.js';
 export {
-  handleReflect,
-  reflectInputSchema,
-  reflectTools,
-} from './reflect-tools.js';
+  handleListRecent,
+  listRecentInputSchema,
+  recentTools,
+} from './recent-tools.js';
+// F193 Phase D AC-D1: reflect-tools removed (deprecated)
 export {
   handleGetRichBlockRules,
   richBlockRulesInputSchema,

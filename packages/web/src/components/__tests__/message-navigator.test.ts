@@ -154,7 +154,7 @@ describe('MessageNavigator', () => {
     const html = render(msgs);
 
     // Track rail (thin line) and viewport indicator should be present
-    expect(html).toContain('bg-[var(--console-pill-bg)]');
-    expect(html).toContain('bg-cafe-surface-sunken/50');
+    expect(html).toContain('bg-gray-200');
+    expect(html).toContain('bg-gray-300/50');
   });
 });

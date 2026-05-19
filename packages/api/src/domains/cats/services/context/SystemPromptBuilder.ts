@@ -68,6 +68,26 @@ export interface InvocationContext {
     count: number;
   };
   /**
+   * F193 AC-B2: Cross-thread reply hint.
+   * When present (cross-post triggered invocation per F052), inject reply
+   * guidance so the receiving cat knows: (1) source thread id, (2) sender cat
+   * handle, (3) reply path (cross_post_message — local @ won't route back).
+   *
+   * Hydrated from trigger message id (worklist a2aTriggerMessageId / queue
+   * path backfill) → StoredMessage.extra.crossPost + StoredMessage.catId.
+   * MUST be structured (not parsed from prompt text) — ContextAssembler
+   * only renders slice(0,8) truncated thread + lacks senderCatId.
+   *
+   * KD-1 boundary: only set for invocation-token cross-thread RELAY path.
+   * Agent-key target-thread write does NOT inject this (no source thread).
+   */
+  crossThreadReplyHint?: {
+    /** Full source thread id (not truncated). */
+    sourceThreadId: string;
+    /** Sender cat handle (catId). */
+    senderCatId: CatId;
+  };
+  /**
    * F046 D3: One-shot feedback injected when previous @mention was not routed.
    * Consumed from threadStore before invocation and cleared after injection.
    */
@@ -263,7 +283,6 @@ MCP 工具（异步汇报；token 有效期有限）：
 
 **记忆工具：**
 - cat_cafe_search_evidence: 首选入口；depth=raw 可看消息级细节
-- cat_cafe_reflect: 反思性合成
 
 **drill-down：**
 - cat_cafe_list_session_chain: 列出 session 链
@@ -272,7 +291,8 @@ MCP 工具（异步汇报；token 有效期有限）：
 - cat_cafe_read_invocation_detail: 读单次 invocation 全事件
 
 **协作工具：**
-- cat_cafe_post_message: 异步消息
+- cat_cafe_post_message: 本 thread 异步（agent-key 才传 threadId）
+- cat_cafe_cross_post_message: 跨 thread（targetCats/行首@二选一）。最小路径：list_threads → cross_post_message(threadId, targetCats, content) → get_thread_context 验证
 - cat_cafe_register_pr_tracking: PR tracking
 - cat_cafe_get_pending_mentions: @提及
 - cat_cafe_get_thread_context: thread 上下文
@@ -580,6 +600,35 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
 }
 
 /**
+ * F203 Phase C (Task 2): the pack-only slice of the static identity.
+ *
+ * After L0 (non-pack identity / A2A / roster / workflow triggers / CVO ref /
+ * governance digest / MCP) moves to the compression-immune native system role
+ * (`--system-prompt-file` for Claude, `-c developer_instructions` for Codex —
+ * Task 3/4), the user-message `systemPrompt` must carry ONLY the F129 pack
+ * blocks: per-invocation dynamic + external-project-specific, so they must
+ * never be baked into the cached native prompt nor duplicated there.
+ *
+ * Returns '' for an unknown cat or when there are no pack blocks — the route
+ * layer's `...(x ? { systemPrompt: x } : {})` then omits the prepend entirely.
+ *
+ * Block order mirrors buildStaticIdentity's dual-track priority (ADR-021):
+ * masks → workflows → guardrails → defaults → worldDriver. buildStaticIdentity
+ * keeps its own interleaved push sites unchanged (guard tests must not
+ * regress); both paths consume the same `CompiledPackBlocks` contract.
+ */
+export function buildStaticIdentityPackOnly(catId: CatId, options?: StaticIdentityOptions): string {
+  const config = getConfig(catId as string);
+  if (!config) return '';
+  const pb = options?.packBlocks;
+  if (!pb) return '';
+  const blocks = [pb.masksBlock, pb.workflowsBlock, pb.guardrailBlock, pb.defaultsBlock, pb.worldDriverSummary].filter(
+    (b): b is string => typeof b === 'string' && b.trim().length > 0,
+  );
+  return blocks.join('\n\n');
+}
+
+/**
  * Build dynamic invocation context — changes per call.
  * Includes: teammates, mode, chain position, prompt tags.
  * (MCP tools and 铲屎官 reference moved to buildStaticIdentity for session-level injection.)
@@ -625,6 +674,20 @@ export function buildInvocationContext(context: InvocationContext): string {
         `⚠️ 同族分身提醒：对方是 ${fromVariant}（model=${fromModel}），你是 ${selfVariant}（model=${runtimeModel}）——两个独立分身，不是你的旧版或新版。`,
       );
     }
+  }
+
+  // F193 AC-B2: Cross-thread reply hint.
+  // Cross-post triggered invocation (F052 sourceThreadId injected by API).
+  // Without this hint, the receiving cat sees a truncated 8-char thread
+  // string (ContextAssembler) and has no sender catId — guesses wrong how
+  // to reply. Local @ won't route back across threads.
+  if (context.crossThreadReplyHint) {
+    const { sourceThreadId, senderCatId } = context.crossThreadReplyHint;
+    lines.push(
+      `📨 来自跨线程消息（source thread: ${sourceThreadId}，发件猫: @${senderCatId}）`,
+      `回复请用 cross_post_message(threadId="${sourceThreadId}", targetCats=["${senderCatId}"])`,
+      `本 thread 的 @${senderCatId} 不会路由回对方（对方 session 在另一个 thread）`,
+    );
   }
 
   // F167 L1: ping-pong streak warning — inject when this cat just received the ball
@@ -846,9 +909,9 @@ export function buildInvocationContext(context: InvocationContext): string {
       '',
       `下一棒传球决策树（本轮必选其一，缺 = 消息不完整）：先问"下一步谁能做"——`,
       `1. 另一只猫能做 → @句柄（review 完→@author / 修完→@reviewer / merge 完→@愿景守护猫）`,
-      `2. 等外部条件 → 实际调用 cat_cafe_hold_ball(...)。外部条件包括：**云端 codex / GitHub bot review / PR check / CI / 长 build / 外部 webhook**——这些不是本地猫，不在 roster，不可 @ 任何本地近似 proxy；CLI 要退出但还需继续也走这条（口头"我继续"不算）`,
+      `2. 等外部条件（按 2a/2b 判断行动）。外部条件包括：**云端 codex / GitHub bot review / PR check / CI / 长 build / 外部 webhook**——这些不是本地猫，不在 roster，不可 @ 任何本地近似 proxy；CLI 要退出但还需继续也走这条。2a 无回调覆盖（如等 EYES）→ **调用 cat_cafe_hold_ball(...)** + 轮询（口头"我继续"不算）；2b 已有结构化回调且 EYES>0 → 纯事件驱动，**不调用/不续约 hold_ball**（KD-27）`,
       `3. 只有铲屎官本人才能做 → ${cc}（硬条件：不可逆操作 / 愿景级决策 / 跨猫僵局）`,
-      `${cc} 不是默认出口——先问"哪只猫能接"。反问式 ping 非法（"要不要 X？"/"同意吗？"）：有立场就自决去做（错了能回滚），没立场根本不该 @。**外部 identity（云端 xxx / GitHub bot / CI）** 永远走选项 2（hold_ball），严禁投射成本地 @句柄。`,
+      `${cc} 不是默认出口——先问"哪只猫能接"。反问式 ping 非法（"要不要 X？"/"同意吗？"）：有立场就自决去做（错了能回滚），没立场根本不该 @。**外部 identity（云端 xxx / GitHub bot / CI）** 永远走选项 2（按 2a/2b 判断），严禁投射成本地 @句柄。`,
     );
   }
 

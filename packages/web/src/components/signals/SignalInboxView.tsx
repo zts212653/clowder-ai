@@ -1,6 +1,6 @@
 'use client';
 
-import type { SignalArticle, SignalArticleStatus } from '@cat-cafe/shared';
+import type { SignalArticle, SignalArticleStatus, SignalTier } from '@cat-cafe/shared';
 import { useSearchParams } from 'next/navigation';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
@@ -10,17 +10,23 @@ import {
   fetchCollections,
   fetchSignalArticle,
   fetchSignalSources,
+  fetchSignalStats,
   fetchSignalsInbox,
   type SignalArticleDetail,
+  type SignalArticleStats,
   type StudyCollection,
   searchSignals,
   updateCollection,
   updateSignalArticle,
 } from '@/utils/signals-api';
 import { filterSignalArticles, type SignalArticleFilters } from '@/utils/signals-view';
+import { BatchActionBar } from './BatchActionBar';
 import { SignalArticleDetail as SignalArticleDetailPanel } from './SignalArticleDetail';
 import { SignalArticleList } from './SignalArticleList';
+import { SignalFilterBar } from './SignalFilterBar';
 import { SignalNav } from './SignalNav';
+import { SignalStatsCards } from './SignalStatsCards';
+import { StudyTimeline } from './StudyTimeline';
 
 const initialFilters: SignalArticleFilters = {
   query: '',
@@ -33,21 +39,31 @@ function uniqueSources(items: readonly SignalArticle[]): readonly string[] {
   return Array.from(new Set(items.map((item) => item.source))).sort();
 }
 
+function toSignalTier(value: string | undefined): SignalTier | undefined {
+  if (!value || value === 'all') return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 4) return undefined;
+  return parsed as SignalTier;
+}
+
 export function SignalInboxView({ initialReferrerThread = null }: { initialReferrerThread?: string | null }) {
   const ime = useIMEGuard();
   const searchParams = useSearchParams();
   const deepLinkHandled = useRef(false);
   const [items, setItems] = useState<readonly SignalArticle[]>([]);
   const [showServerSearchResults, setShowServerSearchResults] = useState(false);
+  const [stats, setStats] = useState<SignalArticleStats | null>(null);
   const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
   const [selectedArticle, setSelectedArticle] = useState<SignalArticleDetail | null>(null);
   const [filters, setFilters] = useState<SignalArticleFilters>(initialFilters);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [batchSelected, setBatchSelected] = useState<Set<string>>(new Set());
   const [collections, setCollections] = useState<readonly StudyCollection[]>([]);
   const [allSourceNames, setAllSourceNames] = useState<readonly string[]>([]);
 
+  // Load collections and source config on mount
   useEffect(() => {
     fetchCollections()
       .then(setCollections)
@@ -78,6 +94,15 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
     [selectedArticle],
   );
 
+  const toggleBatchSelect = useCallback((articleId: string) => {
+    setBatchSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(articleId)) next.delete(articleId);
+      else next.add(articleId);
+      return next;
+    });
+  }, []);
+
   const refreshInbox = useCallback(
     async (statusOverride?: SignalArticleFilters['status']) => {
       setLoading(true);
@@ -86,9 +111,13 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
         const activeStatus = statusOverride ?? filters.status;
         const statusParam =
           activeStatus === 'all' ? ('all' as const) : activeStatus === 'inbox' ? undefined : activeStatus;
-        const inboxItems = await fetchSignalsInbox({ limit: 80, status: statusParam });
+        const [inboxItems, statsData] = await Promise.all([
+          fetchSignalsInbox({ limit: 80, status: statusParam }),
+          fetchSignalStats(),
+        ]);
         setItems(inboxItems);
         setShowServerSearchResults(false);
+        setStats(statsData);
       } catch (fetchError) {
         setError(fetchError instanceof Error ? fetchError.message : '加载失败');
       } finally {
@@ -103,11 +132,13 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only on mount
   }, [refreshInbox]);
 
+  // Deep-link: /signals?article=<id> → switch to 'all' tab and auto-select
   useEffect(() => {
     if (deepLinkHandled.current || loading) return;
     const articleId = searchParams.get('article');
     if (!articleId) return;
     deepLinkHandled.current = true;
+    // Switch to 'all' tab so the article is visible regardless of status
     setFilters((current) => ({ ...current, status: 'all' }));
     void refreshInbox('all').then(() => {
       setSelectedArticleId(articleId);
@@ -131,18 +162,6 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
     () => (showServerSearchResults ? items : filterSignalArticles(items, filters)),
     [showServerSearchResults, items, filters],
   );
-
-  useEffect(() => {
-    if (selectedArticleId || filteredItems.length === 0 || deepLinkHandled.current) return;
-    const first = filteredItems[0];
-    if (!first) return;
-    setSelectedArticleId(first.id);
-    setDetailLoading(true);
-    fetchSignalArticle(first.id)
-      .then(setSelectedArticle)
-      .catch(() => {})
-      .finally(() => setDetailLoading(false));
-  }, [filteredItems, selectedArticleId]);
   const sources = allSourceNames.length > 0 ? allSourceNames : uniqueSources(items);
 
   const handleSearchSubmit = useCallback(
@@ -156,6 +175,7 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
       }
       const formData = new FormData(event.currentTarget);
       const selectedSource = formData.get('source');
+      const selectedTier = formData.get('tier');
       const statusForSearch = filters.status === 'all' ? undefined : (filters.status as SignalArticleStatus);
 
       setLoading(true);
@@ -164,7 +184,7 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
           limit: 80,
           status: statusForSearch,
           source: typeof selectedSource === 'string' && selectedSource !== 'all' ? selectedSource : undefined,
-          tier: undefined,
+          tier: typeof selectedTier === 'string' ? toSignalTier(selectedTier) : undefined,
         });
         setItems(result.items);
         setShowServerSearchResults(true);
@@ -200,12 +220,17 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
         const updated = await updateSignalArticle(articleId, { status });
         setItems((current) => {
           const next = current.map((item) => (item.id === articleId ? updated : item));
+          // In non-'all' filter mode, remove articles that no longer match
           if (filters.status !== 'all' && updated.status !== filters.status) {
             return next.filter((item) => item.id !== articleId);
           }
           return next;
         });
         setSelectedArticle((current) => (current && current.id === articleId ? updated : current));
+        // Refresh stats to reflect the status change
+        fetchSignalStats()
+          .then(setStats)
+          .catch(() => {});
       } catch (updateError) {
         setError(updateError instanceof Error ? updateError.message : '更新文章失败');
       }
@@ -242,6 +267,10 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
       setItems((current) => current.filter((item) => item.id !== articleId));
       setSelectedArticle(null);
       setSelectedArticleId(null);
+      // Refresh stats to exclude the deleted article
+      fetchSignalStats()
+        .then(setStats)
+        .catch(() => {});
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : '删除失败');
     }
@@ -252,93 +281,64 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
       <div className="flex flex-1 flex-col overflow-hidden rounded-[18px] bg-[var(--console-shell-bg)] shadow-[var(--console-shadow-soft)] m-3 gap-5 px-9 py-8">
         <header className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-cafe">信号</h1>
-            <p className="mt-1 text-[13px] text-cafe-secondary">浏览、筛选和研读来自信源的文章</p>
+            <h1 className="text-2xl font-bold text-cafe-black">信号</h1>
+            <p className="mt-1 text-sm text-cafe-secondary">浏览、筛选和研读信号文章</p>
           </div>
+          <SignalNav active="signals" initialReferrerThread={initialReferrerThread} />
         </header>
 
-        <div className="flex h-[38px] items-center gap-2">
-          <SignalNav active="signals" initialReferrerThread={initialReferrerThread} />
-        </div>
+        <SignalStatsCards stats={stats} />
 
         {error && (
-          <div className="console-status-chip" data-status="error">
+          <div className="rounded-lg bg-conn-red-bg px-3 py-2 text-sm text-red-700 shadow-[0_1px_3px_rgba(43,33,26,0.06)]">
             请求失败: {error}
           </div>
         )}
 
         <div className="flex min-h-0 flex-1 gap-[18px]">
           <div className="flex w-[420px] shrink-0 flex-col gap-1 overflow-y-auto rounded-[18px] bg-[var(--console-panel-bg)] p-2">
-            <form onSubmit={handleSearchSubmit} className="flex flex-wrap items-center gap-1.5 px-1 pb-1">
-              <div className="flex flex-1 items-center gap-1.5 rounded-lg bg-[var(--console-card-bg)] px-2.5 h-8 shadow-[0_1px_3px_rgba(43,33,26,0.06)]">
-                <svg
-                  className="h-[13px] w-[13px] text-cafe-muted"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <circle cx="11" cy="11" r="8" />
-                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                </svg>
-                <input
-                  value={filters.query}
-                  onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))}
-                  onCompositionStart={ime.onCompositionStart}
-                  onCompositionEnd={ime.onCompositionEnd}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && ime.isComposing()) event.preventDefault();
-                  }}
-                  placeholder="搜索信号..."
-                  className="min-w-0 flex-1 bg-transparent text-xs text-cafe outline-none placeholder:text-cafe-muted"
-                />
-              </div>
-              <select
-                value={filters.status}
-                onChange={(event) => handleStatusTab(event.target.value as SignalArticleFilters['status'])}
-                className="h-8 appearance-none rounded-lg bg-[var(--console-card-bg)] px-2 text-[11px] text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] outline-none"
-                name="status"
-              >
-                <option value="inbox">Inbox</option>
-                <option value="starred">收藏</option>
-                <option value="read">已读</option>
-                <option value="archived">归档</option>
-                <option value="all">全部</option>
-              </select>
-              <select
-                value={filters.source}
-                onChange={(event) => setFilters((current) => ({ ...current, source: event.target.value }))}
-                name="source"
-                className="h-8 appearance-none rounded-lg bg-[var(--console-card-bg)] px-2 text-[11px] text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] outline-none"
-              >
-                <option value="all">全部来源</option>
-                {sources.map((source) => (
-                  <option key={source} value={source}>
-                    {source}
-                  </option>
-                ))}
-              </select>
-            </form>
-            <p className="px-2 pb-1 text-xs font-semibold text-cafe-muted">共 {filteredItems.length} 篇</p>
+            <SignalFilterBar
+              filters={filters}
+              onFilterChange={(patch) => setFilters((cur) => ({ ...cur, ...patch }))}
+              onStatusTab={handleStatusTab}
+              onSubmit={handleSearchSubmit}
+              sources={sources}
+              ime={ime}
+            />
+            <div className="flex items-center justify-between px-2 pb-1">
+              <p className="text-xs font-semibold text-cafe-muted">
+                {loading ? '加载中...' : `共 ${filteredItems.length} 篇`}
+              </p>
+              <BatchActionBar
+                selectedIds={batchSelected}
+                onClear={() => setBatchSelected(new Set())}
+                onComplete={() => void refreshInbox()}
+              />
+            </div>
             <SignalArticleList
               items={filteredItems}
               selectedArticleId={selectedArticleId}
               onSelect={handleSelectArticle}
               onStatusChange={handleStatusChange}
+              selectedIds={batchSelected}
+              onToggleSelect={toggleBatchSelect}
             />
           </div>
-          <div className="min-w-0 flex-1 overflow-y-auto rounded-[20px] bg-[var(--console-card-bg)] p-[22px] shadow-[0_10px_28px_rgba(43,33,26,0.04)]">
-            <SignalArticleDetailPanel
-              article={selectedArticle}
-              isLoading={detailLoading}
-              onStatusChange={handleStatusChange}
-              onTagsChange={handleTagsChange}
-              onNoteChange={handleNoteChange}
-              onDelete={handleDelete}
-              collections={collections}
-              onAddToCollection={handleAddToCollection}
-              onCreateCollection={handleCreateCollection}
-            />
+          <div className="flex min-w-0 flex-1 flex-col gap-[18px] overflow-y-auto">
+            <div className="rounded-2xl bg-[var(--console-card-bg)] p-[22px] shadow-[0_10px_28px_rgba(43,33,26,0.04)]">
+              <SignalArticleDetailPanel
+                article={selectedArticle}
+                isLoading={detailLoading}
+                onStatusChange={handleStatusChange}
+                onTagsChange={handleTagsChange}
+                onNoteChange={handleNoteChange}
+                onDelete={handleDelete}
+                collections={collections}
+                onAddToCollection={handleAddToCollection}
+                onCreateCollection={handleCreateCollection}
+              />
+            </div>
+            <StudyTimeline />
           </div>
         </div>
       </div>

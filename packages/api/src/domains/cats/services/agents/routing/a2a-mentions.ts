@@ -50,11 +50,6 @@ function buildWhitespaceTolerantMentionPattern(pattern: string): RegExp {
 function repairLineStartMentionWhitespace(text: string, entries: readonly MentionPatternEntry[]): string {
   let repaired = text;
   for (const entry of entries) {
-    // Gemini CLI can split a logical assistant message across `message/assistant`
-    // events. GeminiAgentService inserts paragraph separators between those
-    // events, which can turn a legitimate final-slot handoff like `@小狸` into
-    // `@小\n\n狸`. Repair only pure whitespace inside known line-start handles;
-    // inline mentions and ordinary prose remain governed by the normal parser.
     repaired = repaired.replace(
       buildWhitespaceTolerantMentionPattern(entry.pattern),
       (_match, lineStart: string, prefix: string) => `${lineStart}${prefix}${entry.pattern}`,

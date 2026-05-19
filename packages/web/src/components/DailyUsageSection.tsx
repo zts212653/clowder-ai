@@ -87,14 +87,14 @@ export function DailyUsageSection() {
   const grandTotal = report?.grandTotal;
 
   return (
-    <section className="console-list-card rounded-2xl shadow-[0_12px_30px_rgba(43,33,26,0.08)] p-4 space-y-3">
+    <section className="rounded-xl border border-cafe bg-cafe-surface p-4 space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-cafe">近 7 日猫粮消耗</h3>
         <button
           type="button"
           onClick={() => fetchUsage(true)}
           disabled={loading}
-          className="px-3 py-1 text-xs rounded-md bg-cafe-surface-sunken text-[var(--cafe-surface)] hover:bg-cafe-surface-sunken disabled:opacity-50"
+          className="px-3 py-1 text-xs rounded-md bg-gray-800 text-white hover:bg-gray-700 disabled:opacity-50"
         >
           {loading ? '加载中...' : '刷新'}
         </button>
@@ -109,7 +109,7 @@ export function DailyUsageSection() {
           (a, b) => b[1].inputTokens + b[1].outputTokens - (a[1].inputTokens + a[1].outputTokens),
         );
         return (
-          <div key={day.date} className="border-t border-[var(--console-border-soft)] pt-2 space-y-1">
+          <div key={day.date} className="border-t border-cafe-subtle pt-2 space-y-1">
             <div className="flex items-center justify-between text-xs">
               <span className="font-semibold text-cafe-secondary">{day.date}</span>
               <span className="text-cafe-muted">{day.total.invocations} 次调用</span>
@@ -122,7 +122,7 @@ export function DailyUsageSection() {
       })}
 
       {grandTotal && grandTotal.invocations > 0 && (
-        <div className="border-t-2 border-[var(--console-border-soft)] pt-2 flex items-center justify-between text-xs text-cafe-secondary">
+        <div className="border-t-2 border-cafe pt-2 flex items-center justify-between text-xs text-cafe-secondary">
           <span className="font-semibold text-cafe-secondary">7 日合计 {grandTotal.invocations} 次</span>
           <span className="flex gap-3">
             <span className="font-semibold text-cafe-secondary">

@@ -1,157 +1,242 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import type { PushStatusPayload } from '@/hooks/usePushNotify';
 import { apiFetch } from '@/utils/api-client';
+import {
+  SettingsCard,
+  SettingsPrimaryButton,
+  SettingsSecondaryButton,
+  SettingsStatusStrip,
+  SettingsText,
+} from './primitives';
 
-interface ConfigField {
-  envName: string;
-  label: string;
-  sensitive: boolean;
-  placeholder: string;
+const REDACTED_PLACEHOLDER = '••••••';
+
+type PushConfigField = 'VAPID_PUBLIC_KEY' | 'VAPID_PRIVATE_KEY' | 'VAPID_SUBJECT';
+
+interface PushConfigFormState {
+  VAPID_PUBLIC_KEY: string;
+  VAPID_PRIVATE_KEY: string;
+  VAPID_SUBJECT: string;
 }
 
-const PUSH_FIELDS: ConfigField[] = [
-  { envName: 'VAPID_PUBLIC_KEY', label: '推送公钥', sensitive: false, placeholder: '粘贴 VAPID Public Key' },
-  { envName: 'VAPID_PRIVATE_KEY', label: '推送私钥', sensitive: true, placeholder: '粘贴 VAPID Private Key' },
-  { envName: 'VAPID_SUBJECT', label: '联系信息', sensitive: false, placeholder: 'mailto:admin@example.com' },
-];
+const EMPTY_FORM: PushConfigFormState = {
+  VAPID_PUBLIC_KEY: '',
+  VAPID_PRIVATE_KEY: '',
+  VAPID_SUBJECT: '',
+};
 
-export function PushServiceConfig({ onSaved }: { onSaved?: () => void }) {
-  const [configured, setConfigured] = useState<Record<string, boolean>>({});
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [saving, setSaving] = useState(false);
-  const [generating, setGenerating] = useState(false);
-  const [result, setResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+function asStatusPayload(value: unknown): PushStatusPayload | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as { capability?: unknown; subscription?: unknown; delivery?: unknown; errorHints?: unknown };
+  if (!candidate.capability || typeof candidate.capability !== 'object') return null;
+  return value as PushStatusPayload;
+}
 
-  const fetchStatus = useCallback(async () => {
+function friendlyError(message: string, fallback: string): string {
+  if (message.includes('DEFAULT_OWNER_USER_ID')) {
+    return 'DEFAULT_OWNER_USER_ID 未配置，后端拒绝写入推送密钥。请先配置 owner 后再保存。';
+  }
+  if (message.includes('configured owner')) {
+    return '当前登录用户不是配置 owner，不能修改推送密钥。';
+  }
+  return message.trim() || fallback;
+}
+
+async function readError(res: Response, fallback: string): Promise<string> {
+  try {
+    const payload = (await res.json()) as { error?: unknown };
+    if (typeof payload.error === 'string') return friendlyError(payload.error, fallback);
+  } catch {
+    // ignore non-json body
+  }
+  return fallback;
+}
+
+export function PushServiceConfig() {
+  const [form, setForm] = useState<PushConfigFormState>(EMPTY_FORM);
+  const [status, setStatus] = useState<PushStatusPayload | null>(null);
+  const [busy, setBusy] = useState<'generate' | 'save' | null>(null);
+  const [message, setMessage] = useState<{ tone: 'success' | 'error' | 'info'; text: string } | null>(null);
+
+  const refreshStatus = useCallback(async () => {
     try {
       const res = await apiFetch('/api/push/status');
       if (!res.ok) return;
-      const data = await res.json();
-      const keysSaved = data.capability?.vapidPublicKeyConfigured || data.capability?.pendingRestart;
-      setConfigured({
-        VAPID_PUBLIC_KEY: keysSaved ?? false,
-        VAPID_PRIVATE_KEY: keysSaved ?? false,
-        VAPID_SUBJECT: keysSaved ?? false,
-      });
+      const payload = asStatusPayload(await res.json());
+      if (payload) setStatus(payload);
     } catch {
-      /* ignore */
+      // Push config is additive; the existing diagnostics panel still owns connection errors.
     }
   }, []);
 
   useEffect(() => {
-    void fetchStatus();
-  }, [fetchStatus]);
+    void refreshStatus();
+  }, [refreshStatus]);
 
-  const handleSave = useCallback(async () => {
-    const updates = PUSH_FIELDS.filter((f) => values[f.envName]?.trim()).map((f) => ({
-      name: f.envName,
-      value: values[f.envName].trim(),
-    }));
-    if (updates.length === 0) {
-      setResult({ type: 'error', message: '请填写至少一个配置项' });
-      return;
-    }
+  const updateField = (field: PushConfigField, value: string) => {
+    setForm((current) => ({ ...current, [field]: value }));
+  };
 
-    setSaving(true);
-    setResult(null);
+  const handleGenerate = async () => {
+    if (busy) return;
+    setBusy('generate');
+    setMessage(null);
     try {
+      const res = await apiFetch('/api/push/generate-vapid', { method: 'POST' });
+      if (!res.ok) {
+        setMessage({ tone: 'error', text: await readError(res, `生成失败（HTTP ${res.status}）`) });
+        return;
+      }
+      const payload = (await res.json()) as { publicKey?: unknown; privateKey?: unknown };
+      if (typeof payload.publicKey !== 'string' || typeof payload.privateKey !== 'string') {
+        setMessage({ tone: 'error', text: '生成接口返回格式不正确。' });
+        return;
+      }
+      const publicKey = payload.publicKey;
+      const privateKey = payload.privateKey;
+      setForm((current) => ({
+        ...current,
+        VAPID_PUBLIC_KEY: publicKey,
+        VAPID_PRIVATE_KEY: privateKey,
+      }));
+      setMessage({ tone: 'info', text: '已生成一组新密钥，请保存后生效。' });
+    } catch {
+      setMessage({ tone: 'error', text: '生成失败，请检查 API 连接后重试。' });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleSave = async () => {
+    if (busy) return;
+    setBusy('save');
+    setMessage(null);
+    try {
+      const updates = (Object.entries(form) as Array<[PushConfigField, string]>)
+        .map(([name, value]) => ({ name, value: value.trim() }))
+        .filter((update) => update.value.length > 0);
+      if (updates.length === 0) {
+        setMessage({ tone: 'info', text: '没有需要保存的推送配置。' });
+        return;
+      }
+      if (updates.some((update) => update.value.includes(REDACTED_PLACEHOLDER))) {
+        setMessage({ tone: 'error', text: '不能保存已脱敏占位符，请留空保持原值或输入新值。' });
+        return;
+      }
       const res = await apiFetch('/api/config/secrets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ updates }),
       });
       if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as Record<string, string>;
-        setResult({ type: 'error', message: data.error ?? '保存失败' });
+        setMessage({ tone: 'error', text: await readError(res, `保存失败（HTTP ${res.status}）`) });
         return;
       }
-      setConfigured((prev) => {
-        const next = { ...prev };
-        for (const u of updates) next[u.name] = true;
-        return next;
-      });
-      setResult({ type: 'success', message: '推送服务配置已保存，需重启后端生效' });
-      onSaved?.();
+      setForm((current) => ({ ...current, VAPID_PUBLIC_KEY: '', VAPID_PRIVATE_KEY: '' }));
+      setMessage({ tone: 'success', text: '推送配置已保存，密钥字段已清空。' });
+      await refreshStatus();
     } catch {
-      setResult({ type: 'error', message: '网络错误' });
+      setMessage({ tone: 'error', text: '保存失败，请检查 API 连接后重试。' });
     } finally {
-      setSaving(false);
+      setBusy(null);
     }
-  }, [values, fetchStatus, onSaved]);
+  };
 
-  const handleGenerate = useCallback(async () => {
-    setGenerating(true);
-    setResult(null);
-    try {
-      const res = await apiFetch('/api/push/generate-vapid', { method: 'POST' });
-      if (!res.ok) {
-        setResult({ type: 'error', message: '生成失败' });
-        return;
-      }
-      const keys = (await res.json()) as { publicKey: string; privateKey: string };
-      setValues((prev) => ({ ...prev, VAPID_PUBLIC_KEY: keys.publicKey, VAPID_PRIVATE_KEY: keys.privateKey }));
-      setResult({ type: 'success', message: '密钥已生成并回填，请确认后保存' });
-    } catch {
-      setResult({ type: 'error', message: '网络错误' });
-    } finally {
-      setGenerating(false);
-    }
-  }, []);
+  const messageTone = message?.tone === 'success' ? 'success' : message?.tone === 'error' ? 'error' : 'info';
+
+  const inputStyle = {
+    borderRadius: '0.5rem',
+    border: '1px solid var(--cafe-border)',
+    backgroundColor: 'var(--cafe-surface-elevated)',
+    paddingInline: '0.75rem',
+    paddingBlock: '0.5rem',
+    fontSize: '0.875rem',
+    color: 'var(--cafe-text)',
+  } as const;
+
+  const labelStyle = { fontSize: '0.75rem', color: 'var(--cafe-text-secondary)' } as const;
 
   return (
-    <div className="space-y-3">
-      {PUSH_FIELDS.map((field) => (
-        <div key={field.envName}>
-          <label
-            htmlFor={`push-${field.envName}`}
-            className="mb-1 flex items-center gap-2 text-xs font-medium text-cafe-secondary"
-          >
-            {field.label}
-            {configured[field.envName] && (
-              <span className="rounded-full bg-conn-emerald-bg px-1.5 text-[10px] text-conn-emerald-text">已配置</span>
-            )}
-          </label>
-          <input
-            id={`push-${field.envName}`}
-            type={field.sensitive ? 'password' : 'text'}
-            placeholder={configured[field.envName] ? '已设置（输入新值覆盖）' : field.placeholder}
-            value={values[field.envName] ?? ''}
-            onChange={(e) => setValues((prev) => ({ ...prev, [field.envName]: e.target.value }))}
-            className="console-form-input py-2 text-compact"
-            data-testid={`push-field-${field.envName}`}
-          />
+    <SettingsCard className="space-y-4">
+      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div className="space-y-1">
+          <SettingsText as="div" variant="sm" tone="default" className="font-medium">
+            VAPID 推送密钥
+          </SettingsText>
+          <SettingsText as="p" tone="secondary">
+            保存后写入运行时 .env；密钥字段留空会保留现有值。
+          </SettingsText>
         </div>
-      ))}
-      {result && (
-        <div
-          className={`rounded-lg px-3 py-2 text-xs ${
-            result.type === 'success'
-              ? 'border border-conn-emerald-ring bg-conn-emerald-bg text-conn-emerald-text'
-              : 'border border-conn-red-ring bg-conn-red-bg text-conn-red-text'
-          }`}
-        >
-          {result.message}
-        </div>
-      )}
-      <div className="flex items-center justify-end gap-2">
-        <button
-          type="button"
-          onClick={() => void handleGenerate()}
-          disabled={generating}
-          className="console-button-secondary text-compact disabled:opacity-50"
-        >
-          {generating ? '生成中...' : '一键生成密钥'}
-        </button>
-        <button
-          type="button"
-          onClick={() => void handleSave()}
-          disabled={saving}
-          className="console-button-primary text-compact disabled:opacity-50"
-        >
-          {saving ? '保存中...' : '保存推送配置'}
-        </button>
+        <SettingsText as="div" tone="secondary">
+          <div>公钥：{status?.capability.vapidPublicKeyConfigured ? '已配置' : '未配置'}</div>
+          <div>PushService：{status?.capability.pushServiceConfigured ? '可用' : '不可用'}</div>
+        </SettingsText>
       </div>
-    </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <label className="space-y-1 font-medium" style={labelStyle}>
+          推送公钥
+          <input
+            name="VAPID_PUBLIC_KEY"
+            value={form.VAPID_PUBLIC_KEY}
+            onChange={(event) => updateField('VAPID_PUBLIC_KEY', event.target.value)}
+            placeholder={status?.capability.vapidPublicKeyConfigured ? '已配置，留空保持不变' : 'VAPID public key'}
+            className="w-full"
+            style={inputStyle}
+          />
+        </label>
+        <label className="space-y-1 font-medium" style={labelStyle}>
+          推送私钥
+          <input
+            name="VAPID_PRIVATE_KEY"
+            type="password"
+            value={form.VAPID_PRIVATE_KEY}
+            onChange={(event) => updateField('VAPID_PRIVATE_KEY', event.target.value)}
+            placeholder={status?.capability.pushServiceConfigured ? '已配置，留空保持不变' : 'VAPID private key'}
+            className="w-full"
+            style={inputStyle}
+          />
+        </label>
+      </div>
+
+      <label className="block space-y-1 font-medium" style={labelStyle}>
+        联系信息
+        <input
+          name="VAPID_SUBJECT"
+          value={form.VAPID_SUBJECT}
+          onChange={(event) => updateField('VAPID_SUBJECT', event.target.value)}
+          placeholder="mailto:admin@example.com"
+          className="w-full"
+          style={inputStyle}
+        />
+      </label>
+
+      {message && (
+        <SettingsStatusStrip tone={messageTone} size="xs" bordered>
+          {message.text}
+        </SettingsStatusStrip>
+      )}
+
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <SettingsSecondaryButton
+          onClick={() => {
+            void handleGenerate();
+          }}
+          disabled={busy !== null}
+        >
+          {busy === 'generate' ? '生成中...' : '生成 VAPID 密钥'}
+        </SettingsSecondaryButton>
+        <SettingsPrimaryButton
+          onClick={() => {
+            void handleSave();
+          }}
+          disabled={busy !== null}
+        >
+          {busy === 'save' ? '保存中...' : '保存推送配置'}
+        </SettingsPrimaryButton>
+      </div>
+    </SettingsCard>
   );
 }

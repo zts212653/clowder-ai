@@ -62,13 +62,12 @@ const SHELL_GLOB_PATTERN = /[*?[\]]/;
 // usage but create real allowlist bypasses.
 const SHELL_BACKSLASH_PATTERN = /\\/;
 const SHELL_QUOTED_SPACE_PATTERN = /(["'])[^"'\n]*\s[^"'\n]*\1/;
-// `~user/...` (tilde with username) is expanded by /bin/sh to that user's
-// home directory, but unquoteAndExpandTilde only handles `~` and `~/...`.
+// `~user/...` (tilde with username) is expanded by /bin/sh only when `~`
+// starts a token. `HEAD~1` is Git rev syntax, not shell tilde expansion.
 // Without this gate, `cat ~root/.ssh/id_rsa` is path-validated as a literal
 // relative token under cwd (passes), then /bin/sh resolves it to an absolute
-// out-of-scope path at exec time. Refuse any `~` followed by a username
-// character. Cloud codex P1 on a335d159, missed in d007449e merge.
-const SHELL_TILDE_USER_PATTERN = /~[A-Za-z0-9_]/;
+// out-of-scope path at exec time.
+const SHELL_TILDE_USER_PATTERN = /(^|\s)~[A-Za-z0-9_]/;
 
 const READ_ONLY_PATTERNS: RegExp[] = [
   /^\s*pwd(?:\s|$)/i,

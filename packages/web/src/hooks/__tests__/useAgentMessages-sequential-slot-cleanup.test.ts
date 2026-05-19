@@ -242,6 +242,45 @@ describe('Sequential multi-cat: non-final done removes own slot', () => {
     expect(mockRemoveActiveInvocation).toHaveBeenCalledWith('hydrated-thread-1-codex');
   });
 
+  it('done(isFinal=false) with turn invocation removes parent-key slot for the finishing cat', () => {
+    // F194 follow-up: Z9 made messages carry dual identity:
+    // - activeInvocations stays keyed by parent liveness id from intent_mode
+    // - done/text/tool events can arrive with the per-cat turn id
+    // The finishing cat must still clear its parent-key slot, while preserving
+    // the other cats that have not finished yet.
+    storeState.activeInvocations = {
+      'parent-inv': { catId: 'opus', mode: 'execute', startedAt: Date.now() },
+      'parent-inv-opus-47': { catId: 'opus-47', mode: 'execute', startedAt: Date.now() },
+      'parent-inv-codex': { catId: 'codex', mode: 'execute', startedAt: Date.now() },
+    };
+    storeState.catInvocations = {
+      opus: {
+        invocationId: 'parent-inv',
+        turnInvocationId: 'turn-opus',
+      },
+    };
+
+    act(() => root.render(React.createElement(Harness)));
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'done',
+        catId: 'opus',
+        invocationId: 'turn-opus',
+        isFinal: false,
+      });
+    });
+
+    expect(mockRemoveActiveInvocation).toHaveBeenCalledWith('parent-inv');
+    expect(storeState.activeInvocations).toEqual({
+      'parent-inv-opus-47': { catId: 'opus-47', mode: 'execute', startedAt: expect.any(Number) },
+      'parent-inv-codex': { catId: 'codex', mode: 'execute', startedAt: expect.any(Number) },
+    });
+    expect(mockSetLoading).not.toHaveBeenCalledWith(false);
+    expect(mockSetIntentMode).not.toHaveBeenCalledWith(null);
+    expect(mockClearCatStatuses).not.toHaveBeenCalled();
+  });
+
   it('non-final done without invocationId must NOT reset hasActiveInvocation when other cats active', () => {
     // P1 from cloud review: codex has no slot but opus is still active.
     // The else-branch fallback must not call setHasActiveInvocation(false).

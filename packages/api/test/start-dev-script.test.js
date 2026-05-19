@@ -243,6 +243,7 @@ test('signal traps clean up and exit with standard signal codes', () => {
     assert.equal(result.status, expectedStatus, `${signal} stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
     assert.match(result.stdout, /正在关闭服务/);
     assert.match(result.stdout, /再见！/);
+    assert.equal((result.stdout.match(/再见！/g) ?? []).length, 1);
   }
 });
 
@@ -426,65 +427,80 @@ test('.env.local can activate respect-dotenv-ports mode (#603)', () => {
 });
 
 test('explicit port env vars override .env values for direct startup', () => {
-  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
-  const result = spawnSync(
-    'bash',
-    [
-      '-lc',
-      `set -e\nsource "${scriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s|%s|%s' "$FRONTEND_PORT" "$API_SERVER_PORT" "$REDIS_PORT"`,
-    ],
-    {
-      encoding: 'utf8',
-      env: baseShellEnv({
-        FRONTEND_PORT: '3023',
-        API_SERVER_PORT: '3024',
-        REDIS_PORT: '6409',
-      }),
-    },
-  );
+  const tmp = createTempProject();
+  try {
+    const scriptPath = join(tmp, 'scripts', 'start-dev.sh');
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e\nsource "${scriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s|%s|%s' "$FRONTEND_PORT" "$API_SERVER_PORT" "$REDIS_PORT"`,
+      ],
+      {
+        encoding: 'utf8',
+        env: baseShellEnv({
+          FRONTEND_PORT: '3023',
+          API_SERVER_PORT: '3024',
+          REDIS_PORT: '6409',
+        }),
+      },
+    );
 
-  assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
-  assert.equal(result.stdout.trim(), '3023|3024|6409');
+    assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.equal(result.stdout.trim(), '3023|3024|6409');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('explicit NEXT_PUBLIC_API_URL override survives project .env during direct startup', () => {
-  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
-  const result = spawnSync(
-    'bash',
-    [
-      '-lc',
-      `set -e\nsource "${scriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s' "$NEXT_PUBLIC_API_URL"`,
-    ],
-    {
-      encoding: 'utf8',
-      env: baseShellEnv({
-        NEXT_PUBLIC_API_URL: 'http://localhost:3035',
-      }),
-    },
-  );
+  const tmp = createTempProject();
+  try {
+    const scriptPath = join(tmp, 'scripts', 'start-dev.sh');
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e\nsource "${scriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s' "$NEXT_PUBLIC_API_URL"`,
+      ],
+      {
+        encoding: 'utf8',
+        env: baseShellEnv({
+          NEXT_PUBLIC_API_URL: 'http://localhost:3035',
+        }),
+      },
+    );
 
-  assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
-  assert.equal(result.stdout.trim(), 'http://localhost:3035');
+    assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.equal(result.stdout.trim(), 'http://localhost:3035');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('explicit PREVIEW_GATEWAY_PORT override survives project .env during direct startup', () => {
-  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
-  const result = spawnSync(
-    'bash',
-    [
-      '-lc',
-      `set -e\nsource "${scriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s' "$PREVIEW_GATEWAY_PORT"`,
-    ],
-    {
-      encoding: 'utf8',
-      env: baseShellEnv({
-        PREVIEW_GATEWAY_PORT: '5120',
-      }),
-    },
-  );
+  const tmp = createTempProject();
+  try {
+    const scriptPath = join(tmp, 'scripts', 'start-dev.sh');
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e\nsource "${scriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s' "$PREVIEW_GATEWAY_PORT"`,
+      ],
+      {
+        encoding: 'utf8',
+        env: baseShellEnv({
+          PREVIEW_GATEWAY_PORT: '5120',
+        }),
+      },
+    );
 
-  assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
-  assert.equal(result.stdout.trim(), '5120');
+    assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.equal(result.stdout.trim(), '5120');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('direct command mode can prefer current .env ports over ambient shell ports', () => {
@@ -598,10 +614,11 @@ test('respect-dotenv mode keeps explicit Redis 6399 defaults intact for wrappers
 });
 
 test('redis port override also recomputes isolated redis dirs', () => {
-  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const tmp = createTempProject();
   const tempHome = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-redis-override-'));
 
   try {
+    const scriptPath = join(tmp, 'scripts', 'start-dev.sh');
     const result = spawnSync(
       'bash',
       [
@@ -623,6 +640,7 @@ test('redis port override also recomputes isolated redis dirs', () => {
       ['dev-6409', `${tempHome}/.cat-cafe/redis-dev-6409`, `${tempHome}/.cat-cafe/redis-backups/dev-6409`].join('|'),
     );
   } finally {
+    rmSync(tmp, { recursive: true, force: true });
     rmSync(tempHome, { recursive: true, force: true });
   }
 });
@@ -1019,7 +1037,80 @@ printf '%s' "$(frontend_launch_command)"
 `,
   );
 
-  assert.equal(output, 'cd packages/web && PORT=3013 exec pnpm exec next start -p 3013 -H 0.0.0.0');
+  assert.equal(
+    output,
+    'cd packages/web && pnpm run sync:vendor-assets && PORT=3013 exec pnpm exec next start -p 3013 -H 0.0.0.0',
+  );
+});
+
+test('frontend_launch_command syncs vendor assets before Next dev when package lifecycle hooks are bypassed', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const output = runSourceOnlySnippet(
+    scriptPath,
+    `
+PROD_WEB=false
+WEB_PORT=3011
+printf '%s' "$(frontend_launch_command)"
+`,
+  );
+
+  assert.equal(
+    output,
+    'cd packages/web && NODE_ENV=development NEXT_IGNORE_INCORRECT_LOCKFILE=1 PORT=3011 exec pnpm exec node scripts/sync-vendor-assets.mjs --watch -- next dev -p 3011',
+  );
+});
+
+test('frontend_launch_command dev mode overrides inherited production NODE_ENV', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-frontend-node-env-'));
+  const fakeWebDir = join(tempRoot, 'packages', 'web');
+  const shimDir = join(tempRoot, 'bin');
+  const capturePath = join(tempRoot, 'captured.txt');
+
+  try {
+    mkdirSync(fakeWebDir, { recursive: true });
+    mkdirSync(shimDir, { recursive: true });
+    writeFileSync(
+      join(shimDir, 'pnpm'),
+      `#!/usr/bin/env bash\nprintf 'NODE_ENV=%s\\nARGS=%s\\n' "\${NODE_ENV:-<unset>}" "$*" > "${capturePath}"\n`,
+      'utf8',
+    );
+    chmodSync(join(shimDir, 'pnpm'), 0o755);
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e
+source "${scriptPath}" --source-only >/dev/null 2>&1
+trap - EXIT INT TERM
+PROD_WEB=false
+WEB_PORT=3011
+cmd=$(frontend_launch_command)
+cd "${tempRoot}"
+eval "$cmd"`,
+      ],
+      {
+        encoding: 'utf8',
+        env: baseShellEnv({ PATH: `${shimDir}:${process.env.PATH ?? ''}`, NODE_ENV: 'production' }),
+      },
+    );
+
+    assert.equal(
+      result.status,
+      0,
+      `bash failed to exec frontend_launch_command\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
+    const captured = readFileSync(capturePath, 'utf8');
+    assert.match(captured, /NODE_ENV=development/, 'frontend next dev inherited production NODE_ENV');
+    assert.match(
+      captured,
+      /ARGS=exec node scripts\/sync-vendor-assets\.mjs --watch -- next dev -p 3011/,
+      'pnpm args incorrect',
+    );
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
 });
 
 test('web_production_build_ready requires BUILD_ID instead of only .next directory', () => {

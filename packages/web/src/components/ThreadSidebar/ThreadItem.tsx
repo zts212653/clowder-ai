@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import type { ThreadState } from '@/stores/chat-types';
+import { useLabelStore } from '@/stores/label-store';
 import { API_URL } from '@/utils/api-client';
 // F174 D2b-2 (rev): per-cat callback-auth dot was rejected (铲屎官 alpha 反馈
 // "莫名其妙的颜色" — 16px participant avatars lacked any affordance). Status now
@@ -12,6 +13,7 @@ import { HubIcon } from '../icons/HubIcon';
 import { PawIcon } from '../icons/PawIcon';
 import { ThreadCatStatus } from '../ThreadCatStatus';
 import { ThreadCatSettings } from './ThreadCatSettings';
+import { ThreadLabelPicker } from './ThreadLabelPicker';
 import { formatRelativeTime } from './thread-utils';
 
 export interface ThreadItemProps {
@@ -26,11 +28,13 @@ export interface ThreadItemProps {
   onTogglePin?: (id: string, pinned: boolean) => void | Promise<void>;
   onToggleFavorite?: (id: string, favorited: boolean) => void | Promise<void>;
   onUpdatePreferredCats?: (id: string, cats: string[]) => void | Promise<void>;
+  onUpdateLabels?: (id: string, labels: string[]) => void | Promise<void>;
   isPinned?: boolean;
   isFavorited?: boolean;
   threadState?: ThreadState;
   indented?: boolean;
   preferredCats?: string[];
+  threadLabels?: string[];
   isHubThread?: boolean;
 }
 
@@ -46,11 +50,13 @@ export function ThreadItem({
   onTogglePin,
   onToggleFavorite,
   onUpdatePreferredCats,
+  onUpdateLabels,
   isPinned,
   isFavorited,
   threadState,
   indented,
   preferredCats,
+  threadLabels,
   isHubThread,
 }: ThreadItemProps) {
   const { getCatById } = useCatData();
@@ -108,7 +114,7 @@ export function ThreadItem({
   return (
     <div
       data-thread-id={id}
-      className={`group relative mx-2 rounded-[14px] ${indented ? 'pl-5 pr-3' : 'px-3'} py-2.5 transition-colors cursor-pointer ${
+      className={`group relative mx-2 rounded-xl ${indented ? 'pl-5 pr-3' : 'px-3'} py-2.5 transition-colors cursor-pointer ${
         isActive ? 'bg-[var(--console-active-bg)]' : 'hover:bg-[var(--console-hover-bg)]'
       }`}
       onClick={() => onSelect(id)}
@@ -140,7 +146,7 @@ export function ThreadItem({
             }}
             disabled={isSaving}
             maxLength={200}
-            className="console-form-input text-sm px-1.5 py-0.5 w-full mr-2 disabled:opacity-70"
+            className="text-sm px-1.5 py-0.5 rounded border border-cafe-subtle focus:outline-none focus:border-cafe-accent w-full mr-2 disabled:opacity-70"
           />
         ) : (
           <span
@@ -178,7 +184,7 @@ export function ThreadItem({
               className={`p-0.5 rounded transition-all ${
                 isFavorited
                   ? 'text-conn-amber-text'
-                  : 'opacity-0 group-hover:opacity-100 text-cafe-muted hover:text-conn-amber-text'
+                  : 'opacity-0 group-hover:opacity-100 text-cafe-muted hover:text-conn-amber-hover'
               }`}
               title={isFavorited ? '取消收藏' : '收藏'}
             >
@@ -188,6 +194,10 @@ export function ThreadItem({
           {/* Cat settings button */}
           {id !== 'default' && onUpdatePreferredCats && !isEditing && (
             <ThreadCatSettings threadId={id} currentCats={preferredCats ?? []} onSave={onUpdatePreferredCats} />
+          )}
+          {/* Label picker button */}
+          {id !== 'default' && onUpdateLabels && !isEditing && (
+            <ThreadLabelPicker threadId={id} currentLabels={threadLabels ?? []} onSave={onUpdateLabels} />
           )}
           {/* Rename button */}
           {canRename && !isEditing && (
@@ -199,7 +209,7 @@ export function ThreadItem({
                 e.stopPropagation();
                 setIsEditing(true);
               }}
-              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-[var(--console-hover-bg)] transition-all"
+              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-cafe-surface transition-all"
               title="重命名对话"
             >
               <svg className="w-3 h-3 text-cafe-muted hover:text-cafe-accent" viewBox="0 0 16 16" fill="currentColor">
@@ -215,11 +225,11 @@ export function ThreadItem({
                 e.stopPropagation();
                 window.open(`${API_URL}/api/export/thread/${id}?format=md`);
               }}
-              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-[var(--console-hover-bg)] transition-all"
+              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-conn-blue-bg transition-all"
               title="导出对话"
             >
               <svg
-                className="w-3 h-3 text-cafe-muted hover:text-[var(--color-cafe-accent)]"
+                className="w-3 h-3 text-cafe-muted hover:text-conn-blue-hover"
                 viewBox="0 0 16 16"
                 fill="currentColor"
               >
@@ -235,7 +245,7 @@ export function ThreadItem({
                 e.stopPropagation();
                 onDelete(id);
               }}
-              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-[var(--console-hover-bg)] transition-all"
+              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-conn-red-bg transition-all"
               title="删除对话"
             >
               <svg className="w-3 h-3 text-cafe-muted hover:text-conn-red-text" viewBox="0 0 16 16" fill="currentColor">
@@ -280,11 +290,12 @@ export function ThreadItem({
                 <span
                   key={catId}
                   className="inline-block w-1.5 h-1.5 rounded-full"
-                  style={{ backgroundColor: getCatById(catId)?.color.primary ?? 'var(--console-cat-fallback)' }}
+                  style={{ backgroundColor: getCatById(catId)?.color.primary ?? '#9CA3AF' }}
                 />
               ))}
             </div>
           )}
+          <LabelDots labels={threadLabels} />
           {threadState && (
             <ThreadCatStatus
               threadState={threadState}
@@ -323,5 +334,31 @@ function StarIcon({ filled }: { filled?: boolean }) {
     >
       <path d="M8 1.5l2.09 4.26 4.71.68-3.41 3.32.8 4.69L8 12.26l-4.19 2.19.8-4.69L1.2 6.44l4.71-.68L8 1.5z" />
     </svg>
+  );
+}
+
+function LabelDots({ labels }: { labels?: string[] }) {
+  const { labels: allLabels } = useLabelStore();
+  if (!labels || labels.length === 0) return null;
+  const resolved = labels
+    .map((id) => allLabels.find((l) => l.id === id))
+    .filter((l): l is NonNullable<typeof l> => l !== undefined);
+  if (resolved.length === 0) return null;
+  const shown = resolved.slice(0, 2);
+  const overflow = resolved.length - shown.length;
+  return (
+    <div className="flex items-center gap-0.5 ml-1" title={resolved.map((l) => l.name).join(', ')}>
+      {shown.map((l) => (
+        <span
+          key={l.id}
+          className="inline-flex items-center gap-0.5 rounded-full px-1 py-px text-[10px] leading-tight text-cafe-secondary"
+          style={{ backgroundColor: `${l.color}18` }}
+        >
+          <span className="inline-block w-1 h-1 rounded-full flex-shrink-0" style={{ backgroundColor: l.color }} />
+          <span className="max-w-[32px] truncate">{l.name}</span>
+        </span>
+      ))}
+      {overflow > 0 && <span className="text-[10px] text-cafe-muted">+{overflow}</span>}
+    </div>
   );
 }

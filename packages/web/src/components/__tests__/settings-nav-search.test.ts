@@ -41,13 +41,25 @@ describe('SettingsNav search filtering', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('renders all 11 sections when no search query', () => {
+  it('renders all settings sections when no search query', () => {
     act(() => {
       root.render(React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn() }));
     });
     const buttons = Array.from(container.querySelectorAll('[data-active]'));
-    expect(buttons).toHaveLength(11);
+    expect(buttons).toHaveLength(12);
     expect(container.textContent).toContain('规则与 SOP');
+  });
+
+  it('renders a primary icon for every settings section', () => {
+    act(() => {
+      root.render(React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn() }));
+    });
+
+    const buttons = Array.from(container.querySelectorAll('[data-active]'));
+    expect(buttons).toHaveLength(12);
+    for (const button of buttons) {
+      expect(button.querySelector('svg.h-4.w-4')).toBeTruthy();
+    }
   });
 
   it('filters sections by label match', () => {
@@ -103,5 +115,17 @@ describe('SettingsNav search filtering', () => {
     const active = navButtons.find((b) => b.textContent?.includes('语音管理'));
     expect(active).toBeTruthy();
     expect(active?.className).toContain('font-medium');
+  });
+
+  it('keeps unpinned section pin controls reachable without hover', () => {
+    act(() => {
+      root.render(React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn() }));
+    });
+
+    const pinButtons = Array.from(container.querySelectorAll('button[title="固定到侧栏"]'));
+    expect(pinButtons.length).toBeGreaterThan(0);
+    for (const button of pinButtons) {
+      expect(button.className).not.toContain('pointer-events-none');
+    }
   });
 });

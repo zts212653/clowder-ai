@@ -151,4 +151,33 @@ describe('ActivityBar referrer forwarding (P2 fix)', () => {
       configurable: true,
     });
   });
+
+  it('encodes existing ?from= when routing back to a thread from the home button', () => {
+    const originalSearch = window.location.search;
+    const threadId = 'thread/with space?x#frag';
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, search: `?from=${encodeURIComponent(threadId)}` },
+      writable: true,
+      configurable: true,
+    });
+
+    React.act(() => {
+      root.render(React.createElement(ActivityBar));
+    });
+
+    const homeBtn = container.querySelector('button[title="对话"]') as HTMLElement;
+    expect(homeBtn).toBeTruthy();
+
+    React.act(() => {
+      homeBtn.click();
+    });
+
+    expect(mockPush).toHaveBeenCalledWith(`/thread/${encodeURIComponent(threadId)}`);
+
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, search: originalSearch },
+      writable: true,
+      configurable: true,
+    });
+  });
 });

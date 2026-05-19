@@ -25,20 +25,20 @@ const BUCKET_LABELS: Record<TriageBucket, string> = {
   later: 'Later',
 };
 const BUCKET_COLORS: Record<TriageBucket, string> = {
-  build_now: 'bg-conn-emerald-text',
-  clarify_first: 'bg-conn-amber-text',
-  validate_first: 'bg-conn-amber-text',
-  challenge: 'bg-conn-red-text',
-  later: 'bg-cafe-surface-sunken',
+  build_now: 'bg-green-400',
+  clarify_first: 'bg-yellow-400',
+  validate_first: 'bg-orange-400',
+  challenge: 'bg-red-400',
+  later: 'bg-gray-300',
 };
 
 const SOURCE_TAGS: SourceTag[] = ['Q', 'O', 'D', 'R', 'A'];
 const SOURCE_COLORS: Record<SourceTag, string> = {
-  Q: 'bg-[var(--color-cafe-accent)]',
-  O: 'bg-conn-emerald-text',
-  D: 'bg-conn-purple-text',
-  R: 'bg-conn-emerald-text',
-  A: 'bg-conn-red-text',
+  Q: 'bg-blue-400',
+  O: 'bg-green-400',
+  D: 'bg-purple-400',
+  R: 'bg-teal-400',
+  A: 'bg-red-400',
 };
 
 export function GovernanceHealth({ cards, digests = [], resolutions = [], slices = [] }: GovernanceHealthProps) {
@@ -79,10 +79,10 @@ export function GovernanceHealth({ cards, digests = [], resolutions = [], slices
       </div>
 
       {/* Bucket distribution */}
-      <div className="rounded-lg bg-[var(--console-field-bg)] p-3">
-        <div className="mb-2 text-[10px] font-semibold uppercase text-cafe-muted">Triage Distribution</div>
+      <div className="rounded-lg border border-[#E7DAC7] bg-[#FFFDF8] p-3">
+        <div className="mb-2 text-[10px] font-semibold uppercase text-[#9A866F]">Triage Distribution</div>
         {total === 0 ? (
-          <div className="text-xs text-cafe-muted">尚无数据</div>
+          <div className="text-xs text-[#B8A88F]">尚无数据</div>
         ) : (
           <>
             <div className="mb-2 flex h-4 overflow-hidden rounded-full">
@@ -97,7 +97,7 @@ export function GovernanceHealth({ cards, digests = [], resolutions = [], slices
                   />
                 ))}
             </div>
-            <div className="flex flex-wrap gap-3 text-[10px] text-cafe-secondary">
+            <div className="flex flex-wrap gap-3 text-[10px] text-[#6B5D4F]">
               {bucketCounts
                 .filter((b) => b.count > 0)
                 .map((b) => (
@@ -112,29 +112,29 @@ export function GovernanceHealth({ cards, digests = [], resolutions = [], slices
       </div>
 
       {/* Source distribution */}
-      <div className="rounded-lg bg-[var(--console-field-bg)] p-3">
-        <div className="mb-2 text-[10px] font-semibold uppercase text-cafe-muted">Source Tag Distribution</div>
+      <div className="rounded-lg border border-[#E7DAC7] bg-[#FFFDF8] p-3">
+        <div className="mb-2 text-[10px] font-semibold uppercase text-[#9A866F]">Source Tag Distribution</div>
         <div className="flex gap-2">
           {sourceCounts
             .filter((s) => s.count > 0)
             .map((s) => (
-              <div key={s.tag} className="flex items-center gap-1 text-xs text-cafe-secondary">
+              <div key={s.tag} className="flex items-center gap-1 text-xs text-[#6B5D4F]">
                 <span className={`inline-block h-2 w-2 rounded-full ${SOURCE_COLORS[s.tag]}`} />
                 {s.tag}: {s.count}
               </div>
             ))}
-          {sourceCounts.every((s) => s.count === 0) && <div className="text-xs text-cafe-muted">尚无数据</div>}
+          {sourceCounts.every((s) => s.count === 0) && <div className="text-xs text-[#B8A88F]">尚无数据</div>}
         </div>
       </div>
 
       {/* Top risks */}
       {topRisks.length > 0 && (
-        <div className="rounded-lg bg-[var(--console-field-bg)] p-3">
-          <div className="mb-2 text-[10px] font-semibold uppercase text-cafe-muted">Top Risk Signals</div>
+        <div className="rounded-lg border border-[#E7DAC7] bg-[#FFFDF8] p-3">
+          <div className="mb-2 text-[10px] font-semibold uppercase text-[#9A866F]">Top Risk Signals</div>
           <div className="space-y-1">
             {topRisks.map(([signal, count]) => (
               <div key={signal} className="flex items-center justify-between text-xs">
-                <span className="text-cafe-secondary">{signal.replace(/_/g, ' ')}</span>
+                <span className="text-[#6B5D4F]">{signal.replace(/_/g, ' ')}</span>
                 <span className="font-medium text-conn-red-text">{count}</span>
               </div>
             ))}
@@ -144,8 +144,8 @@ export function GovernanceHealth({ cards, digests = [], resolutions = [], slices
 
       {/* Dispatch stats (F070 Phase 3c) */}
       {digests.length > 0 && (
-        <div className="rounded-lg bg-[var(--console-field-bg)] p-3">
-          <div className="mb-2 text-[10px] font-semibold uppercase text-cafe-muted">Dispatch Stats</div>
+        <div className="rounded-lg border border-[#E7DAC7] bg-[#FFFDF8] p-3">
+          <div className="mb-2 text-[10px] font-semibold uppercase text-[#9A866F]">Dispatch Stats</div>
           <div className="grid grid-cols-3 gap-3">
             <StatCard label="派遣次数" value={String(digests.length)} sub="total" />
             <StatCard
@@ -168,8 +168,8 @@ export function GovernanceHealth({ cards, digests = [], resolutions = [], slices
 
       {/* Resolution progress */}
       {resolutions.length > 0 && (
-        <div className="rounded-lg bg-[var(--console-field-bg)] p-3">
-          <div className="mb-2 text-[10px] font-semibold uppercase text-cafe-muted">Resolution Progress</div>
+        <div className="rounded-lg border border-[#E7DAC7] bg-[#FFFDF8] p-3">
+          <div className="mb-2 text-[10px] font-semibold uppercase text-[#9A866F]">Resolution Progress</div>
           <div className="grid grid-cols-3 gap-3">
             <StatCard label="Open" value={String(resolutions.filter((r) => r.status === 'open').length)} sub="待解决" />
             <StatCard
@@ -188,8 +188,8 @@ export function GovernanceHealth({ cards, digests = [], resolutions = [], slices
 
       {/* Slice progress */}
       {slices.length > 0 && (
-        <div className="rounded-lg bg-[var(--console-field-bg)] p-3">
-          <div className="mb-2 text-[10px] font-semibold uppercase text-cafe-muted">Slice Progress</div>
+        <div className="rounded-lg border border-[#E7DAC7] bg-[#FFFDF8] p-3">
+          <div className="mb-2 text-[10px] font-semibold uppercase text-[#9A866F]">Slice Progress</div>
           <div className="grid grid-cols-4 gap-3">
             <StatCard
               label="Planned"
@@ -220,10 +220,10 @@ export function GovernanceHealth({ cards, digests = [], resolutions = [], slices
 
 function StatCard({ label, value, sub }: { label: string; value: string; sub: string }) {
   return (
-    <div className="rounded-lg bg-[var(--console-field-bg)] p-3 text-center">
-      <div className="text-lg font-bold text-cafe">{value}</div>
-      <div className="text-[10px] font-medium text-cafe-muted">{label}</div>
-      <div className="text-[10px] text-cafe-muted">{sub}</div>
+    <div className="rounded-lg border border-[#E7DAC7] bg-[#FFFDF8] p-3 text-center">
+      <div className="text-lg font-bold text-[#2B2118]">{value}</div>
+      <div className="text-[10px] font-medium text-[#9A866F]">{label}</div>
+      <div className="text-[10px] text-[#B8A88F]">{sub}</div>
     </div>
   );
 }

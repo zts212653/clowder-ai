@@ -24,8 +24,15 @@ export interface ReviewFeedbackSignal {
   commitCursor: () => Promise<void>;
 }
 
+export interface ReviewFeedbackPrMetadata {
+  readonly headSha: string;
+  readonly prState: 'open' | 'merged' | 'closed';
+}
+
 export interface ReviewFeedbackTaskSpecOptions {
   readonly taskStore: ITaskStore;
+  /** Return null when PR metadata is temporarily unavailable; gate will continue without head/state filtering. */
+  readonly fetchPrMetadata?: (repoFullName: string, prNumber: number) => Promise<ReviewFeedbackPrMetadata | null>;
   readonly fetchComments: (repoFullName: string, prNumber: number) => Promise<PrFeedbackComment[]>;
   readonly fetchReviews: (repoFullName: string, prNumber: number) => Promise<PrReviewDecision[]>;
   readonly reviewFeedbackRouter: ReviewFeedbackRouter;
@@ -114,6 +121,13 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             const { repoFullName, prNumber } = parsed;
             const prKey = `${repoFullName}#${prNumber}`;
 
+            const prMetadata = opts.fetchPrMetadata ? await opts.fetchPrMetadata(repoFullName, prNumber) : null;
+            if (prMetadata?.prState === 'merged' || prMetadata?.prState === 'closed') {
+              await opts.taskStore.update(task.id, { status: 'done' });
+              opts.log.info(`[review-feedback] PR ${prKey} ${prMetadata.prState} — task marked done`);
+              continue;
+            }
+
             const [comments, reviews] = await Promise.all([
               opts.fetchComments(repoFullName, prNumber),
               opts.fetchReviews(repoFullName, prNumber),
@@ -125,16 +139,18 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
 
             const allNewComments = comments.filter((c) => c.id > commentCursor);
             const allNewReviews = reviews.filter((r) => r.id > reviewCursor);
+            const freshNewComments = allNewComments.filter((c) => !isStaleCommitFeedback(c, prMetadata?.headSha));
+            const freshNewReviews = allNewReviews.filter((r) => !isStaleCommitFeedback(r, prMetadata?.headSha));
 
             const commentFilter = opts.isEchoComment;
             const noiseFilter = opts.isNoiseComment;
             const reviewFilter = opts.isEchoReview;
-            const newComments = allNewComments.filter((c) => {
+            const newComments = freshNewComments.filter((c) => {
               if (commentFilter?.(c)) return false;
               if (noiseFilter?.(c)) return false;
               return true;
             });
-            const newDecisions = reviewFilter ? allNewReviews.filter((r) => !reviewFilter(r)) : allNewReviews;
+            const newDecisions = reviewFilter ? freshNewReviews.filter((r) => !reviewFilter(r)) : freshNewReviews;
 
             const maxCommentId =
               allNewComments.length > 0 ? Math.max(...allNewComments.map((c) => c.id)) : commentCursor;
@@ -177,7 +193,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
     run: {
       overlap: 'skip',
       timeoutMs: 30_000,
-      async execute(signal: ReviewFeedbackSignal, _subjectKey: string, _ctx: ExecuteContext) {
+      async execute(signal: ReviewFeedbackSignal, subjectKey: string, _ctx: ExecuteContext) {
         const { task } = signal;
         const routeResult = await opts.reviewFeedbackRouter.route(
           {
@@ -202,12 +218,14 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             const hasChangesRequested = signal.newDecisions.some((d) => d.state === 'CHANGES_REQUESTED');
             const hasApproved = !hasChangesRequested && signal.newDecisions.some((d) => d.state === 'APPROVED');
             const suggestedSkill = hasChangesRequested ? 'receive-review' : hasApproved ? 'merge-gate' : undefined;
+            const coalesceTargetCatId = routeResult.catId || task.ownerCatId || 'unassigned';
 
             const policy: ConnectorTriggerPolicy = {
               priority: hasChangesRequested ? 'urgent' : 'normal',
               reason: 'github_review_feedback',
               sourceCategory: 'review',
               suggestedSkill,
+              coalesceKey: `${subjectKey}:review-feedback:${coalesceTargetCatId}`,
             };
             opts.invokeTrigger.trigger(
               routeResult.threadId,
@@ -237,4 +255,8 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
       subjectKind: 'pr',
     },
   };
+}
+
+function isStaleCommitFeedback(item: { readonly commitId?: string }, currentHeadSha?: string): boolean {
+  return Boolean(currentHeadSha && item.commitId && item.commitId !== currentHeadSha);
 }

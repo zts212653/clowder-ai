@@ -31,6 +31,69 @@ describe('SignalNav back button', () => {
     container.remove();
   });
 
+  it('renders "返回线程" back button with Mission Hub style', () => {
+    React.act(() => {
+      root.render(React.createElement(SignalNav, { active: 'signals' }));
+    });
+
+    const backLink = container.querySelector('[data-testid="signal-back-to-chat"]') as HTMLAnchorElement;
+    expect(backLink).toBeTruthy();
+    expect(backLink.textContent).toContain('返回线程');
+  });
+
+  it('back button links to / when no referrer thread', () => {
+    mockStoreState.currentThreadId = 'default';
+
+    React.act(() => {
+      root.render(React.createElement(SignalNav, { active: 'signals' }));
+    });
+
+    const backLink = container.querySelector('[data-testid="signal-back-to-chat"]') as HTMLAnchorElement;
+    expect(backLink.getAttribute('href')).toBe('/');
+  });
+
+  it('back button links to referrer thread from ?from= param', () => {
+    // Simulate ?from=thread_abc in URL
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, search: '?from=thread_abc' },
+      writable: true,
+      configurable: true,
+    });
+
+    React.act(() => {
+      root.render(React.createElement(SignalNav, { active: 'signals' }));
+    });
+
+    const backLink = container.querySelector('[data-testid="signal-back-to-chat"]') as HTMLAnchorElement;
+    expect(backLink.getAttribute('href')).toBe('/thread/thread_abc');
+
+    // Restore
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, search: '' },
+      writable: true,
+      configurable: true,
+    });
+  });
+
+  it('back button falls back to store currentThreadId when no ?from= param', () => {
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, search: '' },
+      writable: true,
+      configurable: true,
+    });
+    mockStoreState.currentThreadId = 'thread_xyz';
+
+    React.act(() => {
+      root.render(React.createElement(SignalNav, { active: 'signals' }));
+    });
+
+    const backLink = container.querySelector('[data-testid="signal-back-to-chat"]') as HTMLAnchorElement;
+    expect(backLink.getAttribute('href')).toBe('/thread/thread_xyz');
+
+    // Reset
+    mockStoreState.currentThreadId = 'default';
+  });
+
   it('preserves ?from= across Signals and Sources nav links', () => {
     Object.defineProperty(window, 'location', {
       value: { ...window.location, search: '?from=thread_abc' },
@@ -43,8 +106,8 @@ describe('SignalNav back button', () => {
     });
 
     const links = Array.from(container.querySelectorAll('a'));
-    const signalsLink = links.find((a) => a.textContent === '收件箱');
-    const sourcesLink = links.find((a) => a.textContent === '信号源');
+    const signalsLink = links.find((a) => a.textContent === 'Signals');
+    const sourcesLink = links.find((a) => a.textContent === 'Sources');
 
     expect(signalsLink?.getAttribute('href')).toContain('?from=thread_abc');
     expect(sourcesLink?.getAttribute('href')).toContain('?from=thread_abc');

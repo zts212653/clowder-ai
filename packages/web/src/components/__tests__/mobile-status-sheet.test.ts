@@ -122,6 +122,32 @@ describe('MobileStatusSheet', () => {
     expect(container.textContent).toContain('缅因猫');
   });
 
+  it('AC-Z15 R7: ideate mode preserves targetCats UNION on mobile sheet (cloud Codex P2)', () => {
+    // Cloud Codex P2: MobileStatusSheet 没把 intentMode 传给 deriveActiveCats，
+    // ideate 多猫场景 cat 完成清 slot 后卡片消失，跨 panel coherence 规失。
+    const props = {
+      ...baseProps,
+      open: true,
+      intentMode: 'ideate' as IntentMode,
+      targetCats: ['opus', 'codex'],
+      catStatuses: { opus: 'streaming' as CatStatus, codex: 'done' as CatStatus },
+      activeInvocations: {
+        'inv-opus-1': { catId: 'opus', mode: 'ideate' },
+        // codex slot 已清，ideate UNION 应保留卡片
+      },
+      hasActiveInvocation: true,
+    };
+
+    act(() => {
+      root.render(React.createElement(MobileStatusSheet, props));
+    });
+
+    // GREEN after R7: ideate UNION → 两只猫都在
+    // RED before R7: slot-first → 只剩 opus
+    expect(container.textContent).toContain('布偶猫');
+    expect(container.textContent).toContain('缅因猫');
+  });
+
   it('prefers activeInvocations over stale targetCats when provided', () => {
     const props = {
       ...baseProps,

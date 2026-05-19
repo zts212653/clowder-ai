@@ -10,6 +10,9 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// Full package test runs can be CPU-bound; keep this condition-based wait generous
+// enough to avoid failing before the spawned API process reaches listen().
+const API_STARTUP_TIMEOUT_MS = 45000;
 
 // F171: bootstrapCatCatalog now creates empty catalogs. To start the API server in tests,
 // we must provide a pre-seeded cat-catalog.json with breeds so getCatModel('opus') succeeds.
@@ -146,7 +149,7 @@ test('API binds to 127.0.0.1 by default', async (t) => {
 
   try {
     const { match } = await waitForMatch(child, /Server (?:listening at|running on) http:\/\/([^:]+):(\d+)/, {
-      timeoutMs: 15000,
+      timeoutMs: API_STARTUP_TIMEOUT_MS,
     });
 
     const host = match[1];

@@ -68,7 +68,7 @@ export const CAT_STYLES: Record<
     displayName: '铲屎官',
     avatar: '/avatars/owner.jpg',
     primary: '#D97706',
-    secondary: 'var(--conn-amber-bg)',
+    secondary: '#FEF3C7',
     bubbleRadius: 'rounded-2xl rounded-br-sm',
   },
 };
