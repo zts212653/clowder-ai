@@ -188,7 +188,7 @@ harness / skill / MCP / shared-rules 类 feature 的 spec **必须含 `## Eval /
 **元审美自检**（Design Gate 必问，F163 教训 + F167 Round 4 canon 化）🔴
 
 这个方案是**坐标变换**（改变问题结构，让复杂度消失）还是**多项式堆项**（在现有结构上叠补丁/层数/脚手架）？
-后者 → 先读 [Meta-Aesthetics canon](../../docs/canon/meta-aesthetics.md)（数学美学 / 第一性原理 / 拒绝脚手架），尝试找到更简的分解方式。删掉它不影响安全/可验证性/权限边界，才是多余。
+后者 → 先读 Meta-Aesthetics canon（数学美学 / 第一性原理 / 拒绝脚手架），尝试找到更简的分解方式。删掉它不影响安全/可验证性/权限边界，才是多余。
 审计未通过 → 回到 Kickoff 或重新设计。
 
 ## Phase 碰头（大 Feature 专属，3+ Phase）🔴

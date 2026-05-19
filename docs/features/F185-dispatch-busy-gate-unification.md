@@ -10,7 +10,7 @@ created: 2026-05-01
 
 > **Status**: done | **Owner**: Ragdoll/Ragdoll | **Priority**: P1
 >
-> **Decision**: [ADR-034](../../docs/decisions/034-dispatch-busy-gate-unification.md)
+> **Decision**: ADR-034
 
 ## Vision Guard Record
 

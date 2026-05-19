@@ -35,7 +35,7 @@ team experience（2026-05-03）："你们得朝着图书馆发展……不只是
 
 #### 图 1：联邦全景图
 
-![F186 library overview](./F186-assets/library-overview.png)
+*(image: F186 library overview)*
 
 | 图元 | 含义 |
 |------|------|
@@ -48,7 +48,7 @@ team experience（2026-05-03）："你们得朝着图书馆发展……不只是
 
 #### 图 2：检索流程图
 
-![F186 search flow](./F186-assets/search-flow.png)
+*(image: F186 search flow)*
 
 | 阶段 | 说明 |
 |------|------|
@@ -61,7 +61,7 @@ team experience（2026-05-03）："你们得朝着图书馆发展……不只是
 
 #### 图 3：绑定安全管线
 
-![F186 security pipeline](./F186-assets/security-pipeline.png)
+*(image: F186 security pipeline)*
 
 | 站点 | 职责 | 关键约束 |
 |------|------|----------|

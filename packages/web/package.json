@@ -5,7 +5,7 @@
   "scripts": {
     "sync:vendor-assets": "node scripts/sync-vendor-assets.mjs",
     "predev": "pnpm run sync:vendor-assets",
-    "dev": "next dev",
+    "dev": "node scripts/sync-vendor-assets.mjs --watch -- next dev",
     "prebuild": "pnpm run sync:vendor-assets",
     "build": "next build",
     "prestart": "pnpm run sync:vendor-assets",

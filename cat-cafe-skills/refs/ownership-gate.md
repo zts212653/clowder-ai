@@ -1,6 +1,6 @@
 # 主人翁五问 Gate — Maintainer Ownership Gate
 
-> 返回 → [opensource-ops SKILL.md](../opensource-ops/SKILL.md)
+> 返回 → opensource-ops SKILL.md
 >
 > **铲屎官原话**："这是我们自己的家，我们需要有主人翁精神。多问自己：这东西和我们愿景冲突吗？和我们已经有的 feat 冲突吗？是我们需要的吗？技术栈优雅吗？引入的负债是什么呢？"
 

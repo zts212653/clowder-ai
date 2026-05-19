@@ -11,7 +11,7 @@ created: 2026-04-14
 
 > **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1
 > **Deadline**: 2026-04-17（WXG 面试 showcase）
-> **Architecture**: [ADR-029](../decisions/029-external-tool-integration-strategy.md)
+> **Architecture**: ADR-029
 
 ## Why
 

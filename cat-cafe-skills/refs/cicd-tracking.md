@@ -1,6 +1,6 @@
 # CI/CD Tracking 参考文档
 
-> 返回 → [opensource-ops SKILL.md](../opensource-ops/SKILL.md)
+> 返回 → opensource-ops SKILL.md
 >
 > Feature spec → [F133-cicd-tracking.md](../../docs/features/F133-cicd-tracking.md)
 

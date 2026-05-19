@@ -1056,7 +1056,7 @@ printf '%s' "$(frontend_launch_command)"
 
   assert.equal(
     output,
-    'cd packages/web && pnpm run sync:vendor-assets && NEXT_IGNORE_INCORRECT_LOCKFILE=1 PORT=3011 exec pnpm exec next dev -p 3011',
+    'cd packages/web && NEXT_IGNORE_INCORRECT_LOCKFILE=1 PORT=3011 exec pnpm exec node scripts/sync-vendor-assets.mjs --watch -- next dev -p 3011',
   );
 });
 

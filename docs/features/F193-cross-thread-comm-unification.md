@@ -24,7 +24,7 @@ team lead第二轮原话（接收侧补充）：
 
 1. **F043 / F052 / F178 三契约衰减**：`post_message` 重新出现 `threadId`（F178 引入合法用例），但没保留 F043 #316 防误投禁令；`cross_post_message` schema 缺 `targetCats`，skill 文档让猫填一个不存在的参数（[callback-tools.ts:355-366](../../packages/mcp-server/src/tools/callback-tools.ts) vs [SKILL.md:87](../../cat-cafe-skills/cross-thread-sync/SKILL.md)）
 2. **System prompt 缺工具**：[SystemPromptBuilder.ts:274-285](../../packages/api/src/domains/cats/services/context/SystemPromptBuilder.ts) MCP 工具列表没有 `cat_cafe_cross_post_message`——工具不在认知面 = 不存在
-3. **配置双重注册**：[.mcp.json](../../.mcp.json) + [.codex/config.toml](../../.codex/config.toml) 同时挂了 all-in-one (`cat-cafe`) 和 split 三 server，每个工具暴露至少两次
+3. **配置双重注册**：.mcp.json + .codex/config.toml 同时挂了 all-in-one (`cat-cafe`) 和 split 三 server，每个工具暴露至少两次
 4. **接收侧无 reply hint**：F052 后端注入了 `extra.crossPost.sourceThreadId`（[callbacks.ts:712](../../packages/api/src/routes/callbacks.ts)），但 invocation context / system prompt 没把这个数据 push 给收信猫——猫不知道消息来自哪个 thread、回复要 @ 哪只猫
 
 修复方向不是补认知脚手架，而是**砍冗余 + 让正确路径成为最低阻力路径**：恢复 F043 安全契约 + 把 `cross_post_message` 修成一等公民 + server 主动 push 接收侧数据 + split-only 配置。

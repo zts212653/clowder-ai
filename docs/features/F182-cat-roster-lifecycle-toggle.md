@@ -71,7 +71,7 @@ export interface CatAlternative {
 | `start_vote.voters` | 投票 voters 数组 | 同上 ⚠️ |
 | `register_scheduled_task.params.targetCatId` | 单字段 | 同上 ⚠️ |
 
-**关键**：disabled 在文本 @ parser 被过滤但**结构化目标字段直进 enqueueA2ATargets** = disable 不是闸，只是提示词/UI 层过滤。Maine Coon review 锚点：[callback-tools.ts:214](packages/mcp-server/src/tools/callback-tools.ts) + [callbacks.ts:613](packages/api/src/routes/callbacks.ts)。
+**关键**：disabled 在文本 @ parser 被过滤但**结构化目标字段直进 enqueueA2ATargets** = disable 不是闸，只是提示词/UI 层过滤。Maine Coon review 锚点：callback-tools.ts:214 + callbacks.ts:613。
 
 **4.6 实现纠正（必读）**：
 
@@ -134,8 +134,8 @@ LLM 读 `message` 就够了——结构化 warnings 是给 UI/telemetry 的。
 | `cat_cafe_register_scheduled_task` | `params.targetCatId` | 400 `cat_disabled` + alternatives |
 
 **剔除（之前清单错）**：
-- `cat_cafe_update_task` — 当前 schema 没 assignee 字段（[callback-tools.ts:471](packages/mcp-server/src/tools/callback-tools.ts)）
-- `cat_cafe_register_pr_tracking.catId` — deprecated 字段服务端已忽略（[callbacks.ts:1269](packages/api/src/routes/callbacks.ts)）。PR tracking 涉及的"调用猫自身被 disable 但旧 invocation 还活着"是另一个问题，留独立 issue
+- `cat_cafe_update_task` — 当前 schema 没 assignee 字段（callback-tools.ts:471）
+- `cat_cafe_register_pr_tracking.catId` — deprecated 字段服务端已忽略（callbacks.ts:1269）。PR tracking 涉及的"调用猫自身被 disable 但旧 invocation 还活着"是另一个问题，留独立 issue
 
 **P2（Maine Coon补充）— MCP wrapper 错误前缀**：MCP 协议把 400 包装成 `Callback failed (400): <body>` 文本，LLM 解析不稳定。要求 mcp-server 对 `CatRoutingError` 生成**固定人类可读前缀** + JSON 双轨：
 

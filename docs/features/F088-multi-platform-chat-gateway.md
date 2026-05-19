@@ -79,7 +79,7 @@ MVP 选型：**飞书**（国内企业）+ **Telegram**（海外开发者）。�
 
 **team lead已确认 Screen C 设计方向（2026-03-23）。**
 
-设计稿: [`designs/f088-im-hub-config-wizard-ux.pen`](../../designs/f088-im-hub-config-wizard-ux.pen)
+设计稿: `designs/f088-im-hub-config-wizard-ux.pen`
 
 **目标**: 在现有 `HubListModal` 中增加 Tab 导航，让team lead可以在 Web UI 中配置平台接入（飞书/Telegram/钉钉），无需手动编辑 `.env` 文件。
 

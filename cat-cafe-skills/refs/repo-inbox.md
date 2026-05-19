@@ -1,6 +1,6 @@
 # F141: Repo Inbox — 通知格式 + 首反 SOP
 
-> 返回 → [opensource-ops SKILL.md](../opensource-ops/SKILL.md)
+> 返回 → opensource-ops SKILL.md
 > Feature spec → [F141](../../docs/features/F141-github-repo-inbox.md)
 
 ## Repo Inbox 是什么
@@ -40,7 +40,7 @@ gh pr view {N} --repo {owner/repo}
 | 检查 | 不通过处置 |
 |------|---------|
 | 是 spam / bot 垃圾？ | 关闭，打 `invalid` |
-| Issue 信息不足？ | 打 `needs-info` + 追问模板（见 [issue-triage](./opensource-ops-issue-triage.md) Step 1.5） |
+| Issue 信息不足？ | 打 `needs-info` + 追问模板（见 issue-triage Step 1.5） |
 | PR 无关联 accepted issue？ | 回复请先开 issue，不进入代码 review |
 
 **PR 关键检查**：先找 linked issue。没有 accepted issue → 回到 issue-first 流程，不进入深度 code review。
