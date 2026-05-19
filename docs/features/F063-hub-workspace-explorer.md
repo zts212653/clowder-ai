@@ -213,7 +213,7 @@ PUT  /api/workspace/file    { worktreeId, path, content, baseSha256, editSession
 - [x] AC-19: 面板宽度（sidebar/chat-workspace/tree-viewer）刷新后保持，双击 resize handle 重置（Gap 6, PR #308）
 - [x] AC-20: 深层目录（depth≥4）展开时按需加载子节点（Gap 7, PR #311）
 - [x] AC-21: 切换线程后恢复该线程上次的文件树展开状态和打开的文件标签（Gap 7, PR #311）
-- [ ] AC-22: 演示锁定模式：team lead锁定当前 Workspace 文档后，切换 thread 仍保持右侧文档/行号/滚动位置；退出锁定后恢复各 thread 原本的 Workspace 状态
+- [x] AC-22: 演示锁定模式：team lead锁定当前 Workspace 文档后，切换 thread 仍保持右侧文档/行号/滚动位置；退出锁定后恢复各 thread 原本的 Workspace 状态（PR #1570）
 
 ## 需求点 Checklist
 
@@ -234,7 +234,7 @@ PUT  /api/workspace/file    { worktreeId, path, content, baseSha256, editSession
 | R13 | "你们发的文本里的那些地址我点击 右边这里能打开吗？" | AC-13 | manual: 点消息中路径 → workspace 面板自动打开文件 | [x] |
 | R14 | "要允许我能够调整两个的占比？或者说三个？聊天 然后文件系统 然后打开的文件" | AC-14 | manual: 拖拽分隔条调整三视图比例 | [x] |
 | R15 | "直接点击一个文件然后在 chat 里 mention，或者选中某些行某个文件点击 add to chat" | AC-15 | manual: 选中代码/文件 → 点击引用 → 插入到聊天输入框 | [x] |
-| R16 | "演示时切换 thread，右边 Workspace 仍固定在原本打开的文件/行号" | AC-22 | manual + store test: 锁定文档 → 切换 thread → 右侧不变；退出锁定 → 各 thread workspace 未被污染 | [ ] |
+| R16 | "演示时切换 thread，右边 Workspace 仍固定在原本打开的文件/行号" | AC-22 | manual + store test: 锁定文档 → 切换 thread → 右侧不变；退出锁定 → 各 thread workspace 未被污染 | [x] |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC
@@ -546,7 +546,7 @@ team lead看到实际 UI 后指出两个层级问题：
 
 ## Phase: Presentation Lock（演示锁定）
 
-> **Status**: planned | **Date**: 2026-05-06 | **Owner**: TBD
+> **Status**: done | **Date**: 2026-05-06 | **Owner**: Ragdoll | **PR**: #1570
 
 ### Why
 
@@ -574,12 +574,26 @@ team lead看到实际 UI 后指出两个层级问题：
 
 ### Acceptance Criteria
 
-- [ ] AC-PL1: 锁定当前文件后，切换 thread 右侧 Workspace 仍显示锁定文件。
-- [ ] AC-PL2: 锁定包含 worktree、file path、line/scroll、tabs，刷新前的 thread 切换不丢。
-- [ ] AC-PL3: 退出锁定后，当前 thread 恢复它自己的 Workspace 打开状态。
-- [ ] AC-PL4: 锁定期间切到其他 thread 不会把锁定文件写入该 thread 的 `ThreadState`。
-- [ ] AC-PL5: 锁定期间自动 workspace navigate 不抢占；用户可显式替换锁定对象。
-- [ ] AC-PL6: 与 Focus Mode 兼容：锁定文件专注后切 thread 不自动退出。
+- [x] AC-PL1: 锁定当前文件后，切换 thread 右侧 Workspace 仍显示锁定文件。
+- [x] AC-PL2: 锁定包含 worktree、file path、line/scroll、tabs，刷新前的 thread 切换不丢。
+- [x] AC-PL3: 退出锁定后，当前 thread 恢复它自己的 Workspace 打开状态。
+- [x] AC-PL4: 锁定期间切到其他 thread 不会把锁定文件写入该 thread 的 `ThreadState`。
+- [x] AC-PL5: 锁定期间自动 workspace navigate 不抢占；用户可显式替换锁定对象。
+- [x] AC-PL6: 与 Focus Mode 兼容：锁定文件专注后切 thread 不自动退出。
+
+### Review 记录
+
+- Maine Coon(codex) R5: 本地 review 放行（0 P1/P2）
+- 云端 Codex R1–R8: 迭代 8 轮（R6 P1 推动 store-level lock sync 架构改进）→ R9 放行 "Didn't find any major issues"
+- `pnpm gate` 通过，PR #1570 squash merged 2026-05-06
+- 愿景守护：Maine Coon(GPT-5.4) 放行，0 P1/P2
+
+### Residual Risk（愿景守护发现）
+
+| Risk | 描述 | 当前保障 | 回归触发条件 |
+|------|------|----------|-------------|
+| AC-PL6 测试层次 | Focus Mode 兼容只有 store-level 测试（mode 不随 thread 切换变化），组件级 auto-mode-switch 抑制靠 `WorkspacePanel.tsx:258` 的 `if (presentationLock) return` | store test + code guard | 若重构 mode-sync effect 移除 lock 检查 |
+| ~~AC-PL2 scroll~~ | ~~滚动位置靠 viewer 不 remount 自然保持，无显式 state 建模~~ | **已修复 PR #1578**: scrollTop 显式存入 PresentationLockSnapshot + CodeViewer/Markdown viewport bridge | — |
 
 ## Known Bugs (Follow-up)
 

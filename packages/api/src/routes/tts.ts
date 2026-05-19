@@ -34,11 +34,10 @@ const AUDIO_FILENAME_RE = /^[0-9a-f]{64}\.(wav|mp3)$/;
 export interface TtsRouteOptions extends FastifyPluginOptions {
   ttsRegistry: TtsRegistry;
   cacheDir: string;
-  messageStore?: import('../domains/cats/services/stores/ports/MessageStore.js').IMessageStore;
 }
 
 export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Promise<void> {
-  const { ttsRegistry, cacheDir, messageStore } = opts;
+  const { ttsRegistry, cacheDir } = opts;
 
   // Ensure cache directory exists
   await mkdir(cacheDir, { recursive: true });
@@ -148,8 +147,6 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
   const resynthesizeSchema = z.object({
     text: z.string().min(1).max(20000),
     catId: z.string().min(1),
-    messageId: z.string().min(1).optional(),
-    blockId: z.string().min(1).optional(),
   });
 
   /**
@@ -178,31 +175,6 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
 
     try {
       const result = await synthesizer.resynthesize(parsed.data.text, parsed.data.catId);
-
-      if (messageStore && parsed.data.messageId && parsed.data.blockId) {
-        const msg = await messageStore.getById(parsed.data.messageId);
-        if (msg && msg.userId !== userId) {
-          reply.status(403);
-          return { error: 'Not authorized to update this message' };
-        }
-        if (msg?.extra?.rich) {
-          const blocks = msg.extra.rich.blocks.map((b) =>
-            b.id === parsed.data.blockId
-              ? {
-                  id: b.id,
-                  v: 1 as const,
-                  kind: 'audio' as const,
-                  url: result.audioUrl,
-                  text: parsed.data.text,
-                  durationSec: result.durationSec,
-                  mimeType: 'audio/wav',
-                }
-              : b,
-          );
-          await messageStore.updateExtra(parsed.data.messageId, { rich: { v: 1, blocks } });
-        }
-      }
-
       return { audioUrl: result.audioUrl, durationSec: result.durationSec };
     } catch (err) {
       request.log.error({ err }, 'TTS resynthesize failed');

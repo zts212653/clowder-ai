@@ -468,16 +468,17 @@ describe('F183 Phase B1.2.2 — active text stream wire-up to reducer', () => {
       });
     });
 
+    // Z11 correction: stream work-log and callback speech are separate bubbles.
     expect(mockReplaceMessages).toHaveBeenCalled();
     const lastCall = mockReplaceMessages.mock.calls[mockReplaceMessages.mock.calls.length - 1];
     const nextMessages = lastCall[0] as ChatMessage[];
-    expect(nextMessages).toHaveLength(1);
-    expect(nextMessages[0]).toMatchObject({
-      id: 'msg-inv-cb-1-codex',
-      content: 'final answer',
-      isStreaming: false,
-      origin: 'callback',
-    });
+    expect(nextMessages).toHaveLength(2);
+    const stream = nextMessages.find((m) => m.origin === 'stream')!;
+    const callback = nextMessages.find((m) => m.origin === 'callback')!;
+    expect(stream.content).toContain('streaming...'); // stream raw preserved
+    expect(callback.id).toBe('msg-inv-cb-1-codex');
+    expect(callback.isStreaming).toBe(false);
+    expect(callback.content).toContain('final answer'); // callback content
     // legacy patchMessage(content/origin/isStreaming) MUST NOT be invoked
     const contentPatchCalls = mockPatchMessage.mock.calls.filter(
       (c) => c[1]?.content !== undefined || c[1]?.origin !== undefined || c[1]?.isStreaming !== undefined,

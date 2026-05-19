@@ -7,6 +7,7 @@
  */
 
 import { z } from 'zod';
+import { composeCoverageIntentNudge } from './evidence-coverage-nudge.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 
@@ -57,6 +58,10 @@ export const searchEvidenceInputSchema = {
     .describe(
       'Comma-separated collection IDs to search (e.g. "world:lexander,global:methods"). Only effective with dimension=collection',
     ),
+  explain: z
+    .boolean()
+    .optional()
+    .describe('When true, include rankingFactors (bm25Score, consumptionPrior, mmrPenalty) on each result'),
 };
 
 export async function handleSearchEvidence(input: {
@@ -71,6 +76,7 @@ export async function handleSearchEvidence(input: {
   threadId?: string | undefined;
   dimension?: string | undefined;
   collections?: string | undefined;
+  explain?: boolean | undefined;
 }): Promise<ToolResult> {
   const params = new URLSearchParams({ q: input.query });
   if (input.limit != null) params.set('limit', String(input.limit));
@@ -83,6 +89,7 @@ export async function handleSearchEvidence(input: {
   if (input.threadId) params.set('threadId', input.threadId);
   if (input.dimension) params.set('dimension', input.dimension);
   if (input.collections) params.set('collections', input.collections);
+  if (input.explain) params.set('explain', 'true');
 
   const url = `${API_URL}/api/evidence/search?${params.toString()}`;
   const queryLabel = JSON.stringify(input.query);
@@ -104,6 +111,9 @@ export async function handleSearchEvidence(input: {
         sourceType: string;
         authority?: string;
         boostSource?: string[];
+        matchReason?: string;
+        sourcePath?: string;
+        rankingFactors?: { bm25Score?: number; consumptionPrior?: number; mmrPenalty?: number };
         passages?: Array<{
           passageId: string;
           content: string;
@@ -144,7 +154,9 @@ export async function handleSearchEvidence(input: {
 
     if (data.results.length === 0) {
       const noResultMsg = `${EVIDENCE_RESULT_MARKER} No results found for: ${input.query}`;
-      const parts = [degradedBanner, noResultMsg, depthLine].filter(Boolean);
+      const nudge = composeMemoryNavigationNudge(data); // F188 AC-F3 + KD-7
+      const coverageNudge = composeCoverageIntentNudge(input.query);
+      const parts = [degradedBanner, noResultMsg, nudge, coverageNudge, depthLine].filter(Boolean);
       return successResult(parts.join('\n\n'));
     }
 
@@ -165,11 +177,24 @@ export async function handleSearchEvidence(input: {
       lines.push(`[${r.confidence}] ${r.title}`);
       lines.push(`  anchor: ${r.anchor}`);
       lines.push(`  type: ${r.sourceType}`);
+      // F200 HW-4 根因②b: stable machine line so deriveSearchEvidence can
+      // pair a path-based shell/Read consumption back to this candidate.
+      if (r.sourcePath) lines.push(`  sourcePath: ${r.sourcePath}`);
       if (r.authority) {
         lines.push(`  authority: ${r.authority}`);
       }
       if (r.boostSource && r.boostSource.length > 0 && !r.boostSource.every((s) => s === 'legacy')) {
         lines.push(`  boost: ${r.boostSource.join(', ')}`);
+      }
+      if (r.matchReason) {
+        lines.push(`  match: ${r.matchReason}`);
+      }
+      if (r.rankingFactors) {
+        const factors = Object.entries(r.rankingFactors)
+          .filter(([, v]) => v != null)
+          .map(([k, v]) => `${k}=${typeof v === 'number' ? v.toFixed(3) : v}`)
+          .join(', ');
+        if (factors) lines.push(`  ranking: ${factors}`);
       }
       const snippet = r.snippet.length > 200 ? `${r.snippet.slice(0, 200)}...` : r.snippet;
       lines.push(`  > ${snippet.replace(/\n/g, ' ')}`);
@@ -207,6 +232,19 @@ export async function handleSearchEvidence(input: {
       lines.push('');
     }
 
+    // F188 Phase F AC-F3 + KD-7: deterministic nudge on low-hit (no high/mid doc anchors)
+    const nudgeText = composeMemoryNavigationNudge(data);
+    if (nudgeText) {
+      lines.push(nudgeText);
+      lines.push('');
+    }
+
+    const coverageNudge = composeCoverageIntentNudge(input.query);
+    if (coverageNudge) {
+      lines.push(coverageNudge);
+      lines.push('');
+    }
+
     lines.push(depthLine);
 
     return successResult(lines.join('\n'));
@@ -214,6 +252,38 @@ export async function handleSearchEvidence(input: {
     const message = err instanceof Error ? err.message : String(err);
     return errorResult(`Evidence search request failed for ${queryLabel}: ${message}`);
   }
+}
+
+/**
+ * F188 Phase F AC-F3 (KD-7): deterministic nudge to alternate memory entries.
+ * Triggered on:
+ *   - no_match (results length 0)
+ *   - low_hit (no high/mid confidence doc anchors among results)
+ *
+ * Replaces PostToolUse hook (KD-7 v1 strategy). FM-5 measures effectiveness:
+ * if猫 ignores nudge AND falls back to Bash grep, nudge has failed.
+ */
+function composeMemoryNavigationNudge(data: {
+  results: Array<{ confidence: string; sourceType: string }>;
+}): string | null {
+  if (data.results.length === 0) {
+    return [
+      '🧭 Memory navigation — no match, try a different entry:',
+      '  • 精确 anchor (F186 / ADR-019 等) → cat_cafe_graph_resolve',
+      '  • 零先验 / 扫一眼最近活动 → cat_cafe_list_recent(scope="all", since="7d")',
+    ].join('\n');
+  }
+  const hasHighOrMidDocHit = data.results.some(
+    (r) => (r.confidence === 'high' || r.confidence === 'mid') && DOC_SOURCE_TYPES.has(r.sourceType),
+  );
+  if (!hasHighOrMidDocHit) {
+    return [
+      '🧭 Memory navigation — low confidence hits, consider an alternate entry:',
+      '  • 看 anchor 周边关系 → cat_cafe_graph_resolve',
+      '  • 时间窗口扫描 → cat_cafe_list_recent',
+    ].join('\n');
+  }
+  return null;
 }
 
 function formatDegradedBanner(
@@ -234,7 +304,7 @@ export const evidenceTools = [
     name: 'cat_cafe_search_evidence',
     description:
       'Search project knowledge base — features, decisions, plans, lessons, session history. ' +
-      'This is the PRIMARY entry point for all memory recall. Start here before drilling down. ' +
+      'Semantic/fuzzy find entry point for memory recall. For precise anchors (F186, ADR-019), prefer cat_cafe_graph_resolve; for zero-prior scanning, prefer cat_cafe_list_recent; when unsure, start here with mode=hybrid. ' +
       'Supports scope (docs/threads/all), mode (lexical/semantic/hybrid), and depth (summary/raw). ' +
       'SCOPE STRATEGY (decide first!): ' +
       'docs = 结论/真相源 (features, ADRs, plans, lessons). ' +
@@ -249,9 +319,17 @@ export const evidenceTools = [
       'Mix Chinese + English keywords for better recall (记忆 + memory). ' +
       'Split broad topics into 2-3 targeted queries from different angles (e.g. "how it was built" vs "how it is governed"). ' +
       'Watch for antonym gaps: searching 记忆 misses 失忆/压缩/丢失 — search the opposite angle separately if needed. ' +
+      'SEARCH TIPS — coverage/source-map tasks: this is not an exhaustive all-mentions entrypoint. If the user asks "哪些 / 所有 / 历史上 / 提过 / 沉淀", follow the memory-search-best-practices skill: expand terms yourself, search docs + threads separately, then drill into canonical docs/source threads and report coverage gaps. ' +
       'READING RESULTS: confidence = search match quality (rank-based), authority = document reliability (path-based) — two independent dimensions. ' +
+      'RANKING (F200 live): Results are consumption-weighted — docs that cats actually read/used after searching rank higher. Constitutional docs (ADR/lesson/canon) never get demoted. New docs have 14-day grace period. Near-duplicates are MMR-deduplicated for diversity. No action needed — ranking is automatic. ' +
       'DEPTH: Start with summary (default). Use depth=raw only after narrowing scope to drill into specific passages. ' +
-      'BOUNDARY: Use this tool to FIND information across the project. For READING raw messages in a specific thread, use get_thread_context instead.',
+      'BOUNDARY: Use this tool to FIND information across the project. For READING raw messages in a specific thread, use get_thread_context instead. ' +
+      'F188 PHASE F 7-TOOL FAMILY (cross-reference, choose by scenario): ' +
+      'precise anchor + relations → cat_cafe_graph_resolve; ' +
+      'zero-prior / scan recent → cat_cafe_list_recent; ' +
+      'this tool (search_evidence) = semantic/fuzzy find; ' +
+      'session drill-down → list_session_chain / read_session_digest / read_session_events / read_invocation_detail. ' +
+      'When this tool returns low_hit or no_match, payload appends a deterministic nudge pointing to graph_resolve/list_recent (KD-7).',
     inputSchema: searchEvidenceInputSchema,
     handler: handleSearchEvidence,
   },

@@ -6,7 +6,12 @@
  */
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { describe, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 describe('refresh loop algorithm (F174-C)', () => {
   // Note: MIN_DELAY_MS is now derived from server cooldown (5min) + 5% buffer
@@ -222,6 +227,22 @@ describe('refresh loop algorithm (F174-C)', () => {
       assert.ok(result.nextDelayMs > 0, 'must reschedule');
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe('split MCP server refresh lifecycle', () => {
+  test('all split callback entrypoints start the callback-token refresh loop', () => {
+    const entrypoints = ['collab.ts', 'memory.ts', 'signals.ts', 'limb.ts'];
+
+    for (const entrypoint of entrypoints) {
+      const source = readFileSync(join(__dirname, '..', 'src', entrypoint), 'utf-8');
+      assert.ok(source.includes("from './refresh-loop.js'"), `${entrypoint} must import the refresh lifecycle helpers`);
+      assert.ok(source.includes('startRefreshLoop()'), `${entrypoint} must start the refresh loop`);
+      assert.ok(
+        source.includes('installShutdownHandlers(refreshLoop)'),
+        `${entrypoint} must stop the loop on shutdown`,
+      );
     }
   });
 });

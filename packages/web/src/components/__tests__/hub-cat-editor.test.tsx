@@ -25,8 +25,19 @@ import {
   splitCommandArgs,
   validateModelFormatForClient,
 } from '@/components/hub-cat-editor.model';
+import { AdvancedRuntimeSection } from '@/components/hub-cat-editor-advanced';
 
 const mockApiFetch = vi.mocked(apiFetch);
+
+const emptyVoiceFields = {
+  voiceVoice: '',
+  voiceLangCode: '',
+  voiceSpeed: '',
+  voiceRefAudio: '',
+  voiceRefText: '',
+  voiceInstruct: '',
+  voiceTemperature: '',
+};
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -68,18 +79,6 @@ function queryField<T extends HTMLElement>(container: HTMLElement, selector: str
   return element as T;
 }
 
-function expectTextOrder(text: string, labels: string[]) {
-  let previous = -1;
-  let previousLabel = 'start';
-  for (const label of labels) {
-    const current = text.indexOf(label);
-    expect(current, `Missing label: ${label}`).toBeGreaterThanOrEqual(0);
-    expect(current, `${label} should appear after ${previousLabel}`).toBeGreaterThan(previous);
-    previous = current;
-    previousLabel = label;
-  }
-}
-
 describe('HubCatEditor', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -106,6 +105,70 @@ describe('HubCatEditor', () => {
     act(() => root.unmount());
     container.remove();
     vi.clearAllMocks();
+  });
+
+  async function renderAdvancedRuntimeSection(clientId: HubCatEditorFormState['clientId']) {
+    const form: HubCatEditorFormState = {
+      catId: `runtime-${clientId}`,
+      name: `runtime-${clientId}`,
+      displayName: `Runtime ${clientId}`,
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/default.png',
+      colorPrimary: '#16a34a',
+      colorSecondary: '#bbf7d0',
+      mentionPatterns: `@runtime-${clientId}`,
+      roleDescription: 'runtime config',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId,
+      accountRef: '',
+      defaultModel: 'test-model',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      provider: '',
+      sessionChain: 'true',
+      maxPromptTokens: '',
+      maxContextTokens: '',
+      maxMessages: '',
+      maxContentLengthPerMsg: '',
+      ...emptyVoiceFields,
+    };
+
+    await act(async () => {
+      root.render(
+        React.createElement(AdvancedRuntimeSection, {
+          cat: null,
+          form,
+          strategyForm: null,
+          loadingStrategy: false,
+          strategyError: null,
+          codexSettings: null,
+          loadingCodexSettings: false,
+          codexSettingsError: null,
+          codexSettingsEditable: false,
+          showCodexSettings: false,
+          onChange: vi.fn(),
+          onStrategyChange: vi.fn(),
+          onCodexChange: vi.fn(),
+        }),
+      );
+    });
+  }
+
+  it('shows extra CLI args editor for CLI clients and hides it for API-only clients', async () => {
+    for (const clientId of ['anthropic', 'openai', 'google', 'kimi', 'dare', 'opencode'] as const) {
+      await renderAdvancedRuntimeSection(clientId);
+      expect(container.textContent, clientId).toContain('额外 CLI 参数');
+    }
+
+    for (const clientId of ['antigravity', 'catagent'] as const) {
+      await renderAdvancedRuntimeSection(clientId);
+      expect(container.textContent, clientId).not.toContain('额外 CLI 参数');
+    }
   });
 
   it('buildCatPayload keeps name in PATCH payload when editing an existing cat', () => {
@@ -136,13 +199,7 @@ describe('HubCatEditor', () => {
       maxContextTokens: '',
       maxMessages: '',
       maxContentLengthPerMsg: '',
-      voiceVoice: '',
-      voiceLangCode: '',
-      voiceSpeed: '',
-      voiceRefAudio: '',
-      voiceRefText: '',
-      voiceInstruct: '',
-      voiceTemperature: '',
+      ...emptyVoiceFields,
     };
     const existingCat = {
       id: 'runtime-codex',
@@ -189,13 +246,7 @@ describe('HubCatEditor', () => {
       maxContextTokens: '',
       maxMessages: '',
       maxContentLengthPerMsg: '',
-      voiceVoice: '',
-      voiceLangCode: '',
-      voiceSpeed: '',
-      voiceRefAudio: '',
-      voiceRefText: '',
-      voiceInstruct: '',
-      voiceTemperature: '',
+      ...emptyVoiceFields,
     };
     const existingCat = {
       id: 'runtime-codex',
@@ -241,13 +292,7 @@ describe('HubCatEditor', () => {
       maxContextTokens: '',
       maxMessages: '',
       maxContentLengthPerMsg: '',
-      voiceVoice: '',
-      voiceLangCode: '',
-      voiceSpeed: '',
-      voiceRefAudio: '',
-      voiceRefText: '',
-      voiceInstruct: '',
-      voiceTemperature: '',
+      ...emptyVoiceFields,
     };
 
     const payload = buildCatPayload(form, null) as Record<string, unknown>;
@@ -287,13 +332,7 @@ describe('HubCatEditor', () => {
       maxContextTokens: '',
       maxMessages: '',
       maxContentLengthPerMsg: '',
-      voiceVoice: '',
-      voiceLangCode: '',
-      voiceSpeed: '',
-      voiceRefAudio: '',
-      voiceRefText: '',
-      voiceInstruct: '',
-      voiceTemperature: '',
+      ...emptyVoiceFields,
     } as HubCatEditorFormState & { cliEffort: string };
 
     const payload = buildCatPayload(form, null) as Record<string, unknown>;
@@ -461,6 +500,99 @@ describe('HubCatEditor', () => {
     expect(payload.accountRef).toBe('codex-sponsor');
     expect(payload.defaultModel).toBe('gpt-5.4-mini');
     expect(payload.mentionPatterns).toContain('@gpt-5.4-mini');
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it('uploads ref audio and saves the returned /uploads path in voiceConfig', async () => {
+    const onSaved = vi.fn(() => Promise.resolve());
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'codex-sponsor',
+            providers: [
+              {
+                id: 'codex-sponsor',
+                provider: 'codex-sponsor',
+                displayName: 'Codex Sponsor',
+                name: 'Codex Sponsor',
+                authType: 'api_key',
+                protocol: 'openai',
+                mode: 'api_key',
+                models: ['gpt-5.4-mini'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/uploads/ref-audio') {
+        expect(init?.method).toBe('POST');
+        expect(init?.body).toBeInstanceOf(FormData);
+        return Promise.resolve(jsonResponse({ url: '/uploads/ref-audio-test.wav' }));
+      }
+      if (path === '/api/cats') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'runtime-spark' } }, 201));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          draft: { clientId: 'openai', accountRef: 'codex-sponsor', defaultModel: 'gpt-5.4-mini' },
+          onClose: vi.fn(),
+          onSaved,
+        }),
+      );
+    });
+    await flushEffects();
+
+    await changeField(queryField(container, 'input[aria-label="Name"]'), '火花猫');
+    await changeField(queryField(container, 'input[aria-label="Description"]'), '快速执行');
+    await changeField(queryField(container, 'textarea[aria-label="Aliases"]'), '@runtime-spark');
+
+    const voiceToggle = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Voice Config'),
+    );
+    await act(async () => {
+      voiceToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    await changeField(queryField(container, 'select[aria-label="Voice Lang Code"]'), 'zh', 'change');
+    const audioInput = queryField<HTMLInputElement>(container, 'input[type="file"][accept*="audio"]');
+    const file = new File([new Uint8Array([0x52, 0x49, 0x46, 0x46])], 'voice.wav', { type: 'audio/wav' });
+    Object.defineProperty(audioInput, 'files', {
+      configurable: true,
+      value: [file],
+    });
+    await act(async () => {
+      audioInput.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const postCall = mockApiFetch.mock.calls.find(([path]) => path === '/api/cats');
+    expect(postCall).toBeTruthy();
+    const payload = JSON.parse(String(postCall?.[1]?.body));
+    expect(payload.voiceConfig).toMatchObject({
+      voice: 'zm_yunjian',
+      langCode: 'zh',
+      refAudio: '/uploads/ref-audio-test.wav',
+    });
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
@@ -1115,7 +1247,7 @@ describe('HubCatEditor', () => {
 
     const providerSelect = queryField<HTMLSelectElement>(container, 'select[aria-label="认证信息"]');
     const optionLabels = Array.from(providerSelect.options).map((option) => option.textContent ?? '');
-    expect(optionLabels).toContain('Gemini (OAuth)（OAuth）');
+    expect(optionLabels).toContain('Gemini (OAuth)（内置）');
     expect(optionLabels).not.toContain('Gemini Proxy（API Key）');
     expect(optionLabels).not.toContain('Google Official API（API Key）');
   });
@@ -1180,7 +1312,9 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存修改',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -1268,7 +1402,9 @@ describe('HubCatEditor', () => {
 
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label="认证信息"]').value).toBe('');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存修改',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -1353,7 +1489,9 @@ describe('HubCatEditor', () => {
 
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label="认证信息"]').value).toBe('');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存修改',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -1408,7 +1546,9 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存修改',
+    );
     expect(saveButton).toBeTruthy();
     expect((saveButton as HTMLButtonElement).disabled).toBe(false);
 
@@ -1523,7 +1663,9 @@ describe('HubCatEditor', () => {
 
     await changeField(queryField(container, 'select[aria-label="认证信息"]'), '', 'change');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存修改',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -1601,7 +1743,9 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'input[aria-label="Model"]'), 'gemini-bridge');
     await changeField(queryField(container, 'input[aria-label="CLI Command"]'), 'chat --mode agent');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存修改',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -1688,7 +1832,9 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'input[aria-label="Max Messages"]'), '');
     await changeField(queryField(container, 'input[aria-label="Max Content Length Per Msg"]'), '');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存修改',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -1845,7 +1991,9 @@ describe('HubCatEditor', () => {
 
     await changeField(queryField(container, 'input[aria-label="Name"]'), '临时名字');
 
-    const cancelButton = container.querySelector('button[aria-label="关闭成员配置"]');
+    const cancelButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '取消',
+    );
     await act(async () => {
       cancelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -1902,107 +2050,6 @@ describe('HubCatEditor', () => {
     await flushEffects();
 
     expect(container.querySelector('button[aria-label="删除成员"]')).not.toBeNull();
-  });
-
-  it('uses the designed member detail modal shell', async () => {
-    const existingCat: CatData = {
-      id: 'codex',
-      name: 'codex',
-      displayName: '缅因猫',
-      nickname: '砚砚',
-      clientId: 'openai',
-      defaultModel: 'gpt-5.4',
-      color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
-      mentionPatterns: ['@codex'],
-      avatar: '/avatars/codex.png',
-      roleDescription: 'review',
-      personality: 'rigorous',
-    };
-
-    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/accounts') {
-        return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', activeProfileId: null, providers: [] }));
-      }
-      if (path === '/api/config/session-strategy') {
-        return Promise.resolve(jsonResponse({ cats: [] }));
-      }
-      if (path === '/api/config' && !init?.method) {
-        return Promise.resolve(jsonResponse({ config: { cli: {}, codexExecution: {} } }));
-      }
-      if (path === '/api/cat-templates') {
-        return Promise.resolve(jsonResponse({ templates: [] }));
-      }
-      throw new Error(`Unexpected apiFetch path: ${path}`);
-    });
-
-    await act(async () => {
-      root.render(
-        React.createElement(HubCatEditor, { open: true, cat: existingCat, onClose: vi.fn(), onSaved: vi.fn() }),
-      );
-    });
-    await flushEffects();
-
-    const modal = queryField<HTMLElement>(container, '[role="dialog"][aria-labelledby="member-editor-title"]');
-    expect(modal.className).toContain('member-editor-modal');
-    expect(modal.className).toContain('max-w-[720px]');
-    expect(modal.className).toContain('rounded-[28px]');
-    expect(container.querySelector('#member-editor-title')?.textContent).toContain('成员配置 / 预览与编辑');
-    expect(container.querySelector('button[aria-label="关闭成员配置"]')?.className).toContain('h-8 w-8');
-    expect(Array.from(container.querySelectorAll('button')).some((button) => button.textContent === '取消')).toBe(
-      false,
-    );
-    expect(container.querySelector('h4')?.className).toContain('text-base');
-    expectTextOrder(container.textContent ?? '', [
-      '名称',
-      '昵称',
-      '显示后缀',
-      '角色描述',
-      '擅长领域',
-      '性格特征',
-      'Avatar',
-      'Background Color',
-      '注意事项',
-      'Strengths',
-      '▸ Voice Config',
-    ]);
-    expect(container.textContent).toContain('运行时持久化');
-  });
-
-  it('uses the designed add member template shell', async () => {
-    mockApiFetch.mockImplementation((path: string) => {
-      if (path === '/api/accounts') {
-        return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', activeProfileId: null, providers: [] }));
-      }
-      if (path === '/api/cat-templates') {
-        return Promise.resolve(
-          jsonResponse({
-            templates: [
-              {
-                id: 'codex',
-                name: '砚砚',
-                nickname: '砚砚',
-                avatar: '/avatars/codex.png',
-                color: { primary: '#5E8B60', secondary: '#DDEDDC' },
-                roleDescription: '代码审查专家',
-                personality: '严谨认真',
-                teamStrengths: 'Review、找 bug、coding 落地',
-              },
-            ],
-          }),
-        );
-      }
-      throw new Error(`Unexpected apiFetch path: ${path}`);
-    });
-
-    await act(async () => {
-      root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
-    });
-    await flushEffects();
-
-    expect(container.querySelector('#member-editor-title')?.textContent).toContain('添加成员');
-    expect(container.textContent).toContain('成员模板');
-    expect(container.textContent).toContain('从内置成员模板开始，选择后自动填充身份、模型与运行时默认值。');
-    expectTextOrder(container.textContent ?? '', ['成员模板', '自定义', '砚砚', '身份信息']);
   });
 
   it('loads runtime controls for an existing member and saves strategy separately', async () => {
@@ -2155,6 +2202,7 @@ describe('HubCatEditor', () => {
     expect(container.textContent).toContain('注意事项');
     expect(container.textContent).toContain('Strengths');
     expect(container.textContent).toContain('▸ Voice Config');
+    expect(container.textContent).toContain('展开后可配置 TTS clone 参考音频和文本。');
     expect(container.textContent).toContain('别名与 @ 路由');
     expect(container.textContent).toContain('认证与模型');
     expect(container.textContent).toContain('Session Chain');
@@ -2167,7 +2215,7 @@ describe('HubCatEditor', () => {
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Approval"]').disabled).toBe(false);
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Auth Mode"]').disabled).toBe(false);
     expect(container.textContent).toContain('运行时持久化');
-    expect(container.textContent).toContain('保存');
+    expect(container.textContent).toContain('保存修改');
     expect(container.textContent).toContain('删除成员');
     expect(container.textContent).not.toContain('账号与运行方式');
     expect(container.textContent).not.toContain('Primary');
@@ -2185,7 +2233,9 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'select[aria-label^="Codex Approval"]'), 'never', 'change');
     await changeField(queryField(container, 'select[aria-label^="Codex Auth Mode"]'), 'api_key', 'change');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存修改',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -2323,7 +2373,9 @@ describe('HubCatEditor', () => {
 
     await changeField(queryField(container, 'input[aria-label="Nickname"]'), '砚砚');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存修改',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -2406,7 +2458,9 @@ describe('HubCatEditor', () => {
     expect(container.querySelector('input[aria-label="Session Warn Threshold"]')).toBeNull();
     expect(container.querySelector('input[aria-label="Session Action Threshold"]')).toBeNull();
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存修改',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -2604,7 +2658,9 @@ describe('HubCatEditor', () => {
 
     await changeField(queryField(container, 'select[aria-label^="Codex Sandbox"]'), 'danger-full-access', 'change');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存修改',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -2685,7 +2741,9 @@ describe('HubCatEditor', () => {
 
     await changeField(queryField(container, 'input[aria-label="Nickname"]'), '新昵称');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存修改',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -2781,7 +2839,9 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'input[aria-label="Nickname"]'), '新昵称');
     await changeField(queryField(container, 'select[aria-label^="Codex Sandbox"]'), 'danger-full-access', 'change');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存修改',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -2914,7 +2974,9 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'select[aria-label^="Codex Sandbox"]'), 'danger-full-access', 'change');
     await changeField(queryField(container, 'select[aria-label^="Codex Approval"]'), 'never', 'change');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存修改',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -3050,7 +3112,9 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'select[aria-label="Session Strategy"]'), 'handoff', 'change');
     await changeField(queryField(container, 'input[aria-label="Session Warn Threshold"]'), '0.55');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存修改',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });

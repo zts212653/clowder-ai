@@ -69,6 +69,7 @@ describe('P1-2: resolveTargetsAndIntent persist writes participants', () => {
         rows.push(stored);
         return stored;
       },
+      getById: (id) => rows.find((m) => m.id === `msg-${id}` || m.id === id) ?? null,
       getRecent: () => [],
       getMentionsFor: () => [],
       getBefore: () => [],

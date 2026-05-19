@@ -12,6 +12,7 @@ import type { InvocationRegistry } from '../domains/cats/services/agents/invocat
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import { MessageDeliveryService } from '../domains/cats/services/agents/invocation/MessageDeliveryService.js';
 import { getRichBlockBuffer } from '../domains/cats/services/agents/invocation/RichBlockBuffer.js';
+import { stampVisibleTurn } from '../domains/cats/services/agents/invocation/visible-turn.js';
 import { analyzeA2AMentions } from '../domains/cats/services/agents/routing/a2a-mentions.js';
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
 import { extractRichFromText } from '../domains/cats/services/agents/routing/rich-block-extract.js';
@@ -65,6 +66,34 @@ import { detectUserMention } from './user-mention.js';
 import { clearVoteTimer, closeVoteInternal, voteTimers } from './votes.js';
 
 const log = createModuleLogger('routes/callbacks');
+
+/**
+ * F193 AC-A4 raw line-start @ detector.
+ * Mirrors authoritative server parser at a2a-mentions.ts:86-114
+ * (strip code fences, trimStart, strip markdown prefix, startsWith('@')).
+ *
+ * Used by AC-A4 fail-closed gate which MUST run BEFORE
+ * registry.claimClientMessageId (Codex review P1 round 2 close — otherwise
+ * malformed retries permanently consume idempotency keys).
+ *
+ * Local mirror (no cross-package dep) — server parser remains authoritative;
+ * this is just a raw caller-input signal: did the caller TRY to provide
+ * line-start @ routing? Disabled/unknown handles still fall through to the
+ * existing routing_warnings/allExplicitFailed path (Codex review P2 close).
+ */
+const LEADING_MARKDOWN_MENTION_PREFIX_RE_F193 = /^(?:(?:>\s*)|(?:[-*+]\s+)|(?:\d+[.)]\s+))+/;
+
+function hasPlausibleLineStartMention(content: string): boolean {
+  const stripped = content.replace(/```[\s\S]*?```/g, '');
+  for (const rawLine of stripped.split(/\r?\n/)) {
+    const leadingWs = rawLine.match(/^\s*/)?.[0].length ?? 0;
+    const normalized = rawLine.slice(leadingWs).replace(LEADING_MARKDOWN_MENTION_PREFIX_RE_F193, '');
+    if (normalized.startsWith('@') && normalized.length > 1) {
+      return true;
+    }
+  }
+  return false;
+}
 
 function buildPostMessageRoutingMessage(routedIds: string[], warnings: CatRoutingError[]): string {
   const parts: string[] = [];
@@ -145,6 +174,8 @@ export interface CallbackRoutesOptions {
   limbRegistry?: import('../domains/limb/LimbRegistry.js').LimbRegistry;
   /** F126 Phase C: Limb pairing store for remote device approval */
   limbPairingStore?: import('../domains/limb/LimbPairingStore.js').LimbPairingStore;
+  /** F187 Phase C: Label store for list-labels callback. */
+  labelStore?: import('../domains/cats/services/stores/ports/ThreadStore.js').ILabelStore;
   /** F088: Outbound delivery hook for connector-bound threads (late-bound after gateway bootstrap). */
   outboundHook?: {
     deliver(
@@ -178,6 +209,10 @@ const listThreadsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
   activeSince: z.coerce.number().int().min(0).optional(),
   keyword: z.string().trim().min(1).max(200).optional(),
+});
+
+const listLabelsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).optional(),
 });
 
 const featIndexQuerySchema = z.object({
@@ -615,6 +650,35 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       effectiveThreadId = scoped.threadId;
     }
 
+    // F193 AC-A4: cross-post fail-closed BEFORE idempotency claim.
+    // Closes Codex review P1 round 2 (2026-05-08): if AC-A4 reject runs AFTER
+    // claimClientMessageId, a malformed first attempt permanently consumes
+    // the idempotency key — corrected retry with the same key is then
+    // treated as `duplicate` and silently dropped. Validation errors must
+    // not be terminal for clients that correctly reuse the same key.
+    //
+    // Raw caller-input check (does NOT depend on contentAnalysis which runs
+    // later) — see hasPlausibleLineStartMention() docstring. Server-side
+    // analyzeA2AMentions remains the authoritative parser; disabled/unknown
+    // handles still fall through to the existing routing_warnings /
+    // allExplicitFailed path (Codex P2 round 1 close).
+    const isCrossThread = effectiveThreadId !== actor.threadId;
+    if (isCrossThread) {
+      const hasRawLineStartMention = hasPlausibleLineStartMention(content);
+      const hasRawTargetCats = (explicitTargetCats?.length ?? 0) > 0;
+      if (!hasRawLineStartMention && !hasRawTargetCats) {
+        reply.status(400);
+        return {
+          kind: 'cross_post_no_routing',
+          message: 'Cross-thread post requires routing credentials (F193 KD-1 / AC-A4).',
+          alternatives: [
+            'Pass targetCats: ["catHandle"] to route to specific cat(s) in the target thread',
+            'Add a line-start @catHandle in content (must be at start of line, not mid-sentence)',
+          ],
+        };
+      }
+    }
+
     // At-least-once de-duplication: retries with same clientMessageId are treated as duplicate.
     if (clientMessageId) {
       const isFirstSeen = await registry.claimClientMessageId(invocationId, clientMessageId);
@@ -642,8 +706,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
     }
 
-    // F52: Detect cross-thread post (used for both A2A exemption and crossPost metadata)
-    const isCrossThread = effectiveThreadId !== actor.threadId;
+    // F52: isCrossThread already computed above (before idempotency claim, F193 AC-A4 gate).
 
     // Parse line-start @mentions (A2A rule: only line-start, strip code blocks, single target)
     // Uses analyzeA2AMentions to capture routing_warnings for disabled cats (F182 KD-10).
@@ -668,6 +731,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
     }
     const mergedTargets = new Set<CatId>([...contentTargets, ...validExplicitTargets]);
+
     if (contentTargets.length === 1 && mergedTargets.size > 1) {
       const [primaryTarget] = contentTargets;
       if (!primaryTarget) {
@@ -761,9 +825,15 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // #573: persisted record's extra.stream.invocationId aligned to effectiveInvId
     // (parent/outer) so F5/hydration broadcasts match what live broadcasts use.
     // Merge with any existing extra (cross-post / explicit targets) without losing it.
+    // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId. When first-in-chain
+    // (invocationId === effectiveInvId), still stamp explicitly so frontend bubble
+    // identity never falls back to parent (which would collapse multi-turn same-cat).
     const persistedExtra = {
       ...(extra ?? {}),
-      stream: { invocationId: effectiveInvId },
+      stream: {
+        invocationId: effectiveInvId,
+        turnInvocationId: invocationId ?? effectiveInvId,
+      },
     };
     const storedMsg = await messageStore.append({
       userId: actor.userId,
@@ -827,9 +897,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           content: storedContent,
           origin: 'callback',
           messageId: storedMsg.id,
-          // #573: broadcast with effectiveInvId (parent/outer) so frontend's
-          // (catId, invocationId) dedup matches stream broadcasts.
-          invocationId: effectiveInvId,
+          // F194 Phase Z9 (砚砚 R1 P1-2): unified visible turn stamp via helper.
+          ...stampVisibleTurn(effectiveInvId, invocationId),
           // F52+F098-C1: Include crossPost + targetCats in real-time broadcast
           ...(isCrossThread || validExplicitTargets.length
             ? {
@@ -853,13 +922,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       // P2 cloud-review: include messageId for frontend correlation
       // #454/573: include effectiveInvId (parent/outer) so frontend can exact-match
       // callback to stream bubble.
+      // F194 Phase Z9 (砚砚 R1 P1-2): rich_block broadcast — unified stamp via helper.
       for (const block of richBlocks) {
         socketManager.broadcastAgentMessage(
           {
             type: 'system_info' as const,
             catId: actor.catId,
             content: JSON.stringify({ type: 'rich_block', block, messageId: storedMsg.id }),
-            invocationId: effectiveInvId,
+            ...stampVisibleTurn(effectiveInvId, invocationId),
             timestamp: Date.now(),
           },
           effectiveThreadId,
@@ -1278,9 +1348,38 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       pinned: thread.pinned ?? false,
       messageCount: null,
       participants: thread.participants,
+      labels: thread.labels ?? [],
     }));
 
     return { threads: summaries };
+  });
+
+  app.get('/api/callbacks/list-labels', async (request, reply) => {
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
+
+    const parsed = listLabelsQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request query', details: parsed.error.issues };
+    }
+
+    const { labelStore } = opts;
+    if (!labelStore) {
+      reply.status(503);
+      return { error: 'Label store not configured' };
+    }
+
+    const requestedLimit = parsed.data.limit ?? 50;
+    const labels = await labelStore.list(principal.userId);
+    const result = labels.slice(0, requestedLimit).map((l) => ({
+      id: l.id,
+      name: l.name,
+      color: l.color,
+      sortOrder: l.sortOrder,
+    }));
+
+    return { labels: result };
   });
 
   app.get('/api/callbacks/feat-index', async (request, reply) => {
@@ -1551,13 +1650,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // Only broadcast new blocks (dedup retries at server to prevent frontend duplicates)
     // #454/573: include effectiveInvId (parent/outer) so frontend can exact-match
     // callback to stream bubble.
+    // F194 Phase Z3 (砚砚 R2 P1-4): rich_block broadcast 带 turnInvocationId
     if (isNew) {
       socketManager.broadcastAgentMessage(
         {
           type: 'system_info' as const,
           catId: record.catId,
           content: JSON.stringify({ type: 'rich_block', block: resolvedBlock }),
-          invocationId: effectiveInvId,
+          ...stampVisibleTurn(effectiveInvId, invocationId),
           timestamp: Date.now(),
         },
         record.threadId,

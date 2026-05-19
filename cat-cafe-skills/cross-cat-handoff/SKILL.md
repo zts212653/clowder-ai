@@ -24,7 +24,7 @@ triggers:
 | 1 | **What** | 具体改动或决策 | "新增了 CAS Lua 脚本保护状态更新" |
 | 2 | **Why** | 为什么这样做 | "内存 store 返回活引用导致竞态" |
 | 3 | **Tradeoff** | 放弃了什么备选 | "考虑过乐观锁，但 Lua 更原子" |
-| 4 | **Open Questions** | 还不确定的点 | "keyPrefix 行为需要验证" |
+| 4 | **Open Questions** | 还不确定的点（分技术/价值两类） | "keyPrefix 行为需要验证"（技术）/ Decision Packet（价值） |
 | 5 | **Next Action** | 希望接手方做什么 | "请 review 这三个文件的改动" |
 
 ## 检查流程
@@ -101,8 +101,13 @@ Author 猫准备写: "@ Reviewer 我加了 CAS 保护，因为发现竞态问题
 - **Lua CAS**: 选择这个，原子性由 Redis 保证
 
 ### Open Questions
+
+**技术 OQ**（猫猫解决）：
 1. `keyPrefix` 在 `eval()` 中的行为是否和普通命令一致？
 2. 是否需要添加重试逻辑？
+
+**价值 OQ**（如需 CVO 拍板，附 Decision Packet——格式见 `refs/decision-matrix.md`）：
+- （本次无）
 
 ### Next Action
 请 review 这三个文件：
@@ -190,4 +195,4 @@ Author 猫准备写: "@ Reviewer 我加了 CAS 保护，因为发现竞态问题
 ## 参考
 
 - 五件套详见：`refs/shared-rules.md` §1
-- Review 信存放：*(internal reference removed)*
+- Review 信存放：`review-notes/`

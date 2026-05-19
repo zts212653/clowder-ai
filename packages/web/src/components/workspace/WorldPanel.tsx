@@ -73,7 +73,7 @@ export function WorldPanel({ worldId, apiBase = '' }: WorldPanelProps) {
               onClick={() => setMode(m)}
               className={`px-2 py-0.5 rounded text-xs transition-colors ${
                 mode === m
-                  ? 'bg-cafe-primary text-[var(--cafe-surface)]'
+                  ? 'bg-cafe-primary text-white'
                   : 'bg-cafe-surface hover:bg-cafe-primary/10 text-cafe-secondary'
               }`}
             >
@@ -83,9 +83,7 @@ export function WorldPanel({ worldId, apiBase = '' }: WorldPanelProps) {
         </div>
       </div>
 
-      {error && (
-        <div className="px-3 py-2 text-[var(--semantic-error-text)] text-xs bg-[var(--semantic-error-bg)]">{error}</div>
-      )}
+      {error && <div className="px-3 py-2 text-conn-red-text text-xs bg-conn-red-bg/50">{error}</div>}
 
       <div className="flex-1 overflow-y-auto px-3 py-2">
         {mode === 'build' && <BuildView world={world} characters={characters} />}

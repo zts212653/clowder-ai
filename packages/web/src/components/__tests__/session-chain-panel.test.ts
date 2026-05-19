@@ -243,7 +243,7 @@ describe('F24: SessionChainPanel', () => {
       '[data-testid="session-card-active"][data-cat-id="kimi"]',
     ) as HTMLElement | null;
     expect(card).not.toBeNull();
-    expect(card!.style.boxShadow).toMatch(/rgba?\(75,\s*85,\s*99/);
+    expect(card!.style.borderColor).toMatch(/rgba?\(75,\s*85,\s*99/);
   });
 
   it('renders catId in the active session badge (not breed displayName)', async () => {
@@ -604,7 +604,7 @@ describe('F24: SessionChainPanel', () => {
       '[data-testid="session-card-active"][data-cat-id="codex"]',
     ) as HTMLElement | null;
     expect(card).not.toBeNull();
-    expect(card!.style.boxShadow).toMatch(/rgba?\(91,\s*140,\s*90/);
+    expect(card!.style.borderColor).toMatch(/rgba?\(91,\s*140,\s*90/);
     const badge = container.querySelector(
       '[data-testid="session-badge-active"][data-cat-id="codex"]',
     ) as HTMLElement | null;
@@ -624,7 +624,7 @@ describe('F24: SessionChainPanel', () => {
       '[data-testid="session-card-active"][data-cat-id="gemini"]',
     ) as HTMLElement | null;
     expect(card).not.toBeNull();
-    expect(card!.style.boxShadow).toMatch(/rgba?\(74,\s*144,\s*226/);
+    expect(card!.style.borderColor).toMatch(/rgba?\(74,\s*144,\s*226/);
   });
 
   it('applies dare colors from cat.color', async () => {
@@ -638,7 +638,7 @@ describe('F24: SessionChainPanel', () => {
       '[data-testid="session-card-active"][data-cat-id="dare"]',
     ) as HTMLElement | null;
     expect(card).not.toBeNull();
-    expect(card!.style.boxShadow).toMatch(/rgba?\(255,\s*179,\s*0/);
+    expect(card!.style.borderColor).toMatch(/rgba?\(255,\s*179,\s*0/);
   });
 
   it('applies gpt52 (maine-coon variant) colors from cat.color', async () => {
@@ -652,7 +652,7 @@ describe('F24: SessionChainPanel', () => {
       '[data-testid="session-card-active"][data-cat-id="gpt52"]',
     ) as HTMLElement | null;
     expect(card).not.toBeNull();
-    expect(card!.style.boxShadow).toMatch(/rgba?\(102,\s*187,\s*106/);
+    expect(card!.style.borderColor).toMatch(/rgba?\(102,\s*187,\s*106/);
   });
 
   it('applies opus-45 and sonnet (ragdoll variant) distinct colors from cat.color', async () => {
@@ -671,8 +671,8 @@ describe('F24: SessionChainPanel', () => {
     ) as HTMLElement | null;
     expect(opus45).not.toBeNull();
     expect(sonnet).not.toBeNull();
-    expect(opus45!.style.boxShadow).toMatch(/rgba?\(126,\s*87,\s*194/);
-    expect(sonnet!.style.boxShadow).toMatch(/rgba?\(179,\s*157,\s*219/);
+    expect(opus45!.style.borderColor).toMatch(/rgba?\(126,\s*87,\s*194/);
+    expect(sonnet!.style.borderColor).toMatch(/rgba?\(179,\s*157,\s*219/);
   });
 
   it('falls back to neutral gray when cat is missing from cat-config (badge background)', async () => {
@@ -763,7 +763,7 @@ describe('F24: SessionChainPanel', () => {
         '[data-testid="session-card-active"][data-cat-id="opus-47"]',
       ) as HTMLElement | null;
       expect(card).not.toBeNull();
-      const triple = rgbTripleOf(card!.style.boxShadow);
+      const triple = rgbTripleOf(card!.style.borderColor);
       expect(triple).toEqual([123, 31, 162]);
     });
 
@@ -801,7 +801,7 @@ describe('F24: SessionChainPanel', () => {
         '[data-testid="session-card-sealed"][data-cat-id="opus-47"]',
       ) as HTMLElement | null;
       expect(card).not.toBeNull();
-      expect(rgbTripleOf(card!.style.boxShadow)).toEqual([123, 31, 162]);
+      expect(rgbTripleOf(card!.style.borderColor)).toEqual([123, 31, 162]);
     });
 
     it('falls back to neutral gray (#9CA3AF → 156,163,175) for unknown catId', async () => {
@@ -814,7 +814,7 @@ describe('F24: SessionChainPanel', () => {
         '[data-testid="session-card-active"][data-cat-id="unknown-cat"]',
       ) as HTMLElement | null;
       expect(card).not.toBeNull();
-      expect(rgbTripleOf(card!.style.boxShadow)).toEqual([156, 163, 175]);
+      expect(rgbTripleOf(card!.style.borderColor)).toEqual([156, 163, 175]);
     });
 
     it('does not emit any of the legacy hardcoded color tokens', async () => {
@@ -841,7 +841,7 @@ describe('F24: SessionChainPanel', () => {
       expect(html).not.toContain('border-[#B39DDB66]');
       // Legacy gray fallback class
       expect(html).not.toContain('border-cafe/40');
-      expect(html).not.toContain('bg-cafe-surface-elevated');
+      expect(html).not.toContain('bg-gray-200');
     });
   });
 

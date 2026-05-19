@@ -106,7 +106,6 @@ vi.mock('@/hooks/useSplitPaneKeys', () => ({ useSplitPaneKeys: vi.fn() }));
 vi.mock('../AuthorizationCard', () => ({ AuthorizationCard: () => null }));
 vi.mock('../BootcampListModal', () => ({ BootcampListModal: () => null }));
 vi.mock('../BootstrapOrchestrator', () => ({ BootstrapOrchestrator: () => null }));
-vi.mock('../CatCafeHub', () => ({ CatCafeHub: () => null }));
 vi.mock('../ChatContainerHeader', () => ({ ChatContainerHeader: () => null }));
 vi.mock('../ChatInput', () => ({
   ChatInput: (props: { hasActiveInvocation?: boolean; threadId: string }) => {
@@ -116,6 +115,7 @@ vi.mock('../ChatInput', () => ({
 }));
 vi.mock('../ChatMessage', () => ({ ChatMessage: () => null }));
 vi.mock('../game/GameOverlayConnector', () => ({ GameOverlayConnector: () => null }));
+vi.mock('../HubListModal', () => ({ HubListModal: () => null }));
 vi.mock('../MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
 }));

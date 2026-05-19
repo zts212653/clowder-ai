@@ -7,6 +7,7 @@
  */
 
 import type { DynamicTaskDef } from '../infrastructure/scheduler/DynamicTaskStore.js';
+import { c1HoldCancelCount } from '../infrastructure/telemetry/instruments.js';
 
 const HOLD_BALL_TASK_ID_PREFIX = 'hold-ball-';
 
@@ -58,5 +59,6 @@ export function cancelPendingHoldsForThread(threadId: string, deps: HoldBallCanc
     deps.taskRunner.unregister(task.id);
     deps.dynamicTaskStore.remove(task.id);
   }
+  if (pending.length > 0) c1HoldCancelCount.add(pending.length);
   return pending;
 }

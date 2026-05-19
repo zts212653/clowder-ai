@@ -1,0 +1,33 @@
+{
+  "snapshots": [
+    {
+      "timestamp": 1715300000000,
+      "metrics": {
+        "cat_cafe_a2a_inline_action_checked": 150,
+        "cat_cafe_a2a_inline_action_detected": 12,
+        "cat_cafe_a2a_inline_action_shadow_miss": 3,
+        "cat_cafe_a2a_inline_action_feedback_written": 8,
+        "cat_cafe_a2a_inline_action_hint_emitted": 5,
+        "cat_cafe_a2a_inline_action_routed_set_skip": 2,
+        "cat_cafe_a2a_line_start_detected": 95,
+        "cat_cafe_invocation_completed{status=\"ok\"}": 200,
+        "cat_cafe_invocation_completed{status=\"error\"}": 4
+      }
+    },
+    {
+      "timestamp": 1715300300000,
+      "metrics": {
+        "cat_cafe_a2a_inline_action_checked": 160,
+        "cat_cafe_a2a_inline_action_detected": 14,
+        "cat_cafe_a2a_inline_action_shadow_miss": 3,
+        "cat_cafe_a2a_inline_action_feedback_written": 9,
+        "cat_cafe_a2a_inline_action_hint_emitted": 5,
+        "cat_cafe_a2a_inline_action_routed_set_skip": 2,
+        "cat_cafe_a2a_line_start_detected": 100,
+        "cat_cafe_invocation_completed{status=\"ok\"}": 210,
+        "cat_cafe_invocation_completed{status=\"error\"}": 4
+      }
+    }
+  ],
+  "count": 2
+}

@@ -3,29 +3,9 @@
 import type { SignalSource } from '@cat-cafe/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchSignalSources, triggerSourceFetch, updateSignalSource } from '@/utils/signals-api';
+import { groupSignalSourcesByTierAndCategory } from '@/utils/signals-view';
 import { SignalNav } from './SignalNav';
-
-function SourceStatCard({ label, value, warning }: { label: string; value: number; warning?: boolean }) {
-  return (
-    <div
-      className="flex flex-1 flex-col gap-1 rounded-2xl bg-[var(--console-card-bg)] p-4 shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
-      style={{ height: 92 }}
-    >
-      <span className={`text-[22px] font-bold ${warning ? 'text-conn-amber-text' : 'text-cafe'}`}>{value}</span>
-      <span className="text-xs text-cafe-secondary">{label}</span>
-    </div>
-  );
-}
-
-function StatusPill({ enabled }: { enabled: boolean }) {
-  return (
-    <span
-      className={`rounded-md px-2 py-0.5 text-[11px] font-medium ${enabled ? 'bg-conn-emerald-bg text-conn-emerald-text' : 'bg-conn-amber-bg text-conn-amber-text'}`}
-    >
-      {enabled ? '正常' : '需检查'}
-    </span>
-  );
-}
+import { SignalTierBadge } from './SignalTierBadge';
 
 export function SignalSourcesView({ initialReferrerThread = null }: { initialReferrerThread?: string | null }) {
   const [sources, setSources] = useState<readonly SignalSource[]>([]);
@@ -52,11 +32,7 @@ export function SignalSourcesView({ initialReferrerThread = null }: { initialRef
     void reloadSources();
   }, [reloadSources]);
 
-  const stats = useMemo(() => {
-    const total = sources.length;
-    const abnormal = sources.filter((s) => !s.enabled).length;
-    return { total, abnormal };
-  }, [sources]);
+  const groupedSources = useMemo(() => groupSignalSourcesByTierAndCategory(sources), [sources]);
 
   const setEnabled = useCallback(async (sourceId: string, enabled: boolean) => {
     setError(null);
@@ -98,87 +74,142 @@ export function SignalSourcesView({ initialReferrerThread = null }: { initialRef
     }
   }, []);
 
+  const setAllEnabled = useCallback(
+    async (enabled: boolean) => {
+      const targets = sources.filter((source) => source.enabled !== enabled);
+      for (const source of targets) {
+        await setEnabled(source.id, enabled);
+      }
+    },
+    [setEnabled, sources],
+  );
+
   return (
-    <div className="flex h-full flex-col bg-[var(--console-panel-bg)]">
-      <div className="flex flex-1 flex-col overflow-hidden rounded-[18px] bg-[var(--console-shell-bg)] shadow-[var(--console-shadow-soft)] m-3 gap-5 px-9 py-8">
-        <header className="flex items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-cafe">信号源</h1>
-            <p className="mt-1 text-[13px] text-cafe-secondary">管理抓取来源、优先级和健康状态</p>
+    <div className="min-h-screen bg-gradient-to-b from-codex-bg/30 via-[var(--console-shell-bg)] to-[var(--console-shell-bg)]">
+      <main className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-5 sm:px-6">
+        <header className="rounded-2xl border border-codex-light bg-[var(--console-card-bg)] p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h1 className="text-xl font-bold text-cafe-black">Signal Sources</h1>
+              <p className="text-sm text-cafe-secondary">集中管理信号源开关，无需手改 yaml。</p>
+            </div>
+            <SignalNav active="sources" initialReferrerThread={initialReferrerThread} />
           </div>
         </header>
 
-        <div className="flex h-[38px] items-center gap-2">
-          <SignalNav active="sources" initialReferrerThread={initialReferrerThread} />
-        </div>
-
-        <div className="flex gap-3.5">
-          <SourceStatCard label="总信源" value={stats.total} />
-          <SourceStatCard label="今日新增" value={0} />
-          <SourceStatCard label="异常" value={stats.abnormal} warning={stats.abnormal > 0} />
-        </div>
+        <section className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void setAllEnabled(true)}
+            className="rounded-lg border border-codex-light px-3 py-2 text-sm text-codex-dark hover:bg-codex-bg"
+          >
+            全部开启
+          </button>
+          <button
+            type="button"
+            onClick={() => void setAllEnabled(false)}
+            className="rounded-lg border border-[var(--console-border-soft)] px-3 py-2 text-sm text-cafe-secondary hover:bg-[var(--console-hover-bg)]"
+          >
+            全部关闭
+          </button>
+          <button
+            type="button"
+            onClick={() => void reloadSources()}
+            className="rounded-lg border border-[var(--console-border-soft)] px-3 py-2 text-sm text-cafe-secondary hover:bg-[var(--console-hover-bg)]"
+          >
+            刷新
+          </button>
+        </section>
 
         {error && (
-          <div className="console-status-chip" data-status="error">
+          <div className="rounded-lg border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-sm text-red-700">
             请求失败: {error}
           </div>
         )}
         {fetchResult && (
           <div
-            className={`console-status-chip ${fetchResult.ok ? '' : ''}`}
-            data-status={fetchResult.ok ? 'success' : 'error'}
+            className={[
+              'rounded-lg border px-3 py-2 text-sm',
+              fetchResult.ok
+                ? 'border-conn-green-ring bg-conn-green-bg text-conn-green-text'
+                : 'border-conn-red-ring bg-conn-red-bg text-red-700',
+            ].join(' ')}
           >
             <span className="font-semibold">{fetchResult.sourceId}</span>: {fetchResult.message}
           </div>
         )}
+        {loading && <p className="text-sm text-cafe-secondary">加载中...</p>}
 
-        <div className="flex-1 overflow-y-auto rounded-[18px] bg-[var(--console-panel-bg)] p-2 space-y-2">
-          {loading && <p className="px-2 text-sm text-cafe-secondary">加载中...</p>}
-          {!loading && sources.length === 0 && <p className="px-2 text-sm text-cafe-secondary">暂无信源</p>}
-          {sources.map((source) => (
+        <section className="space-y-4">
+          {groupedSources.map((group) => (
             <div
-              key={source.id}
-              className="flex items-center gap-3 rounded-[14px] bg-[var(--console-card-bg)] px-3 py-3.5"
+              key={`${group.tier}-${group.category}`}
+              className="rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4 shadow-sm"
             >
-              <div className="flex h-[17px] w-[17px] shrink-0 items-center justify-center text-cafe-secondary">
-                <svg className="h-full w-full" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="2" />
-                  <path d="M16.24 7.76a6 6 0 010 8.49m-8.48-.01a6 6 0 010-8.49m11.31-2.82a10 10 0 010 14.14m-14.14 0a10 10 0 010-14.14" />
-                </svg>
+              <div className="mb-3 flex items-center gap-2">
+                <SignalTierBadge tier={group.tier} />
+                <h2 className="text-sm font-semibold text-cafe-black">{group.category}</h2>
+                <span className="text-xs text-cafe-secondary">({group.sources.length})</span>
               </div>
-              <span className="flex-1 truncate text-[13px] font-bold text-cafe">{source.name}</span>
-              <StatusPill enabled={source.enabled} />
-              <span
-                className="rounded-lg bg-[var(--console-field-bg)] px-2.5 py-1 text-xs text-cafe-secondary"
-                style={{ width: 96 }}
-              >
-                Tier {source.tier ?? 1}
-              </span>
-              <button
-                type="button"
-                disabled={fetchingIds.has(source.id)}
-                onClick={() => void doFetch(source.id)}
-                className="rounded-lg bg-[var(--console-field-bg)] px-2.5 py-1 text-xs font-semibold text-cafe-secondary transition-colors hover:text-cafe disabled:opacity-50"
-              >
-                {fetchingIds.has(source.id) ? '抓取中...' : 'Fetch'}
-              </button>
-              <button
-                type="button"
-                disabled={updatingId === source.id}
-                onClick={() => void setEnabled(source.id, !source.enabled)}
-                className={[
-                  'rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors',
-                  source.enabled
-                    ? 'bg-conn-emerald-bg text-conn-emerald-text'
-                    : 'bg-[var(--console-field-bg)] text-cafe-secondary',
-                ].join(' ')}
-              >
-                {updatingId === source.id ? '...' : source.enabled ? 'ON' : 'OFF'}
-              </button>
+              <ul className="space-y-2">
+                {group.sources.map((source) => (
+                  <li key={source.id} className="rounded-xl border border-[var(--console-border-soft)] p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-cafe-black">{source.name}</p>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                          <a
+                            href={source.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="break-all text-xs text-blue-600 hover:underline"
+                          >
+                            {source.url}
+                          </a>
+                          <a
+                            href={source.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="rounded-md border border-opus-light px-2 py-0.5 text-xs text-opus-dark hover:bg-opus-bg"
+                          >
+                            访问 ↗
+                          </a>
+                        </div>
+                        <p className="mt-1 text-xs text-cafe-secondary">
+                          {source.fetch.method} · {source.schedule.frequency}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={fetchingIds.has(source.id)}
+                          onClick={() => void doFetch(source.id)}
+                          className="rounded-full border border-opus-light px-3 py-1 text-xs font-semibold text-opus-dark transition-colors hover:bg-opus-bg disabled:opacity-50"
+                        >
+                          {fetchingIds.has(source.id) ? '抓取中...' : 'Fetch'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={updatingId === source.id}
+                          onClick={() => void setEnabled(source.id, !source.enabled)}
+                          className={[
+                            'rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
+                            source.enabled
+                              ? 'border-codex-light bg-codex-bg text-codex-dark'
+                              : 'border-[var(--console-border-soft)] bg-[var(--console-field-bg)] text-cafe-secondary',
+                          ].join(' ')}
+                        >
+                          {updatingId === source.id ? '更新中...' : source.enabled ? 'ON' : 'OFF'}
+                        </button>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
             </div>
           ))}
-        </div>
-      </div>
+        </section>
+      </main>
     </div>
   );
 }

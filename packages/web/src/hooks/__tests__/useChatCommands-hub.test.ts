@@ -1,12 +1,17 @@
 /**
- * F12→F190: useChatCommands hub integration tests
- * Tests /help and /config via real processCommand invocation.
- * After F190, /help and /config navigate to /settings via window.location.assign.
+ * useChatCommands — /help and /config command tests.
+ * /help now adds a system help message; /config (no args) navigates to /settings.
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatStore } from '@/stores/chatStore';
+
+const mockPush = vi.fn();
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: mockPush }),
+  useSearchParams: () => new URLSearchParams(),
+}));
 
 vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn().mockResolvedValue({
@@ -27,9 +32,8 @@ function HookHost() {
 
 let root: Root;
 let container: HTMLDivElement;
-const mockAssign = vi.fn();
 
-describe('useChatCommands hub commands (F190)', () => {
+describe('useChatCommands /help and /config', () => {
   beforeEach(() => {
     useChatStore.setState({
       messages: [],
@@ -41,12 +45,6 @@ describe('useChatCommands hub commands (F190)', () => {
       root = createRoot(container);
       root.render(React.createElement(HookHost));
     });
-    mockAssign.mockClear();
-    Object.defineProperty(window, 'location', {
-      value: { ...window.location, assign: mockAssign },
-      writable: true,
-      configurable: true,
-    });
   });
 
   afterEach(() => {
@@ -55,32 +53,25 @@ describe('useChatCommands hub commands (F190)', () => {
     captured = null;
   });
 
-  it('/help navigates to /settings?s=skills', async () => {
+  it('/help adds a system help message', async () => {
     const handled = await act(() => captured?.processCommand('/help'));
     expect(handled).toBe(true);
-    expect(mockAssign).toHaveBeenCalledWith('/settings?s=skills');
-  });
-
-  it('/help does NOT add any message to chat', async () => {
-    await act(() => captured?.processCommand('/help'));
-    expect(useChatStore.getState().messages).toHaveLength(0);
+    const msgs = useChatStore.getState().messages;
+    expect(msgs.length).toBeGreaterThanOrEqual(1);
+    const helpMsg = msgs.find((m) => m.type === 'system' && m.content.includes('可用命令'));
+    expect(helpMsg).toBeTruthy();
   });
 
   it('/config (no args) navigates to /settings?s=system', async () => {
+    mockPush.mockClear();
     const handled = await act(() => captured?.processCommand('/config'));
     expect(handled).toBe(true);
-    expect(mockAssign).toHaveBeenCalledWith('/settings?s=system');
-  });
-
-  it('/config (no args) does NOT add any message to chat', async () => {
-    await act(() => captured?.processCommand('/config'));
-    expect(useChatStore.getState().messages).toHaveLength(0);
+    expect(mockPush).toHaveBeenCalledWith('/settings?s=system');
   });
 
   it('/config set still adds messages (regression)', async () => {
     const handled = await act(() => captured?.processCommand('/config set cli.timeoutMs 120000'));
     expect(handled).toBe(true);
     expect(useChatStore.getState().messages.length).toBeGreaterThanOrEqual(1);
-    expect(mockAssign).not.toHaveBeenCalled();
   });
 });

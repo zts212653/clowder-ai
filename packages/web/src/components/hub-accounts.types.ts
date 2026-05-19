@@ -26,7 +26,6 @@ export interface ProfileItem {
 
 export interface AccountsResponse {
   projectPath: string;
-  configRoot?: string;
   providers: ProfileItem[];
 }
 

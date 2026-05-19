@@ -13,7 +13,7 @@ function Section({ eyebrow, title, children }: { eyebrow: string; title: string;
   return (
     <section className="console-list-card rounded-2xl p-5 shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
       <div className="space-y-1.5 mb-3">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cafe-muted">{eyebrow}</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cafe-muted">{eyebrow}</p>
         <h3 className="text-sm font-semibold text-cafe-secondary">{title}</h3>
       </div>
       {children}
@@ -71,6 +71,7 @@ function AddTermRow({ onAdd }: { onAdd: (from: string, to: string) => void }) {
         onKeyDown={handleKeyDown}
       />
       <button
+        type="button"
         onClick={handleAdd}
         disabled={!from.trim() || !to.trim()}
         className="text-xs px-2.5 py-1.5 rounded bg-cafe-accent text-[var(--cafe-surface)] hover:bg-cafe-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
@@ -140,6 +141,7 @@ function CustomTermRow({
           className="flex-1 border border-cafe-accent/40 rounded px-1.5 py-0.5 focus:outline-none focus:border-cafe-accent"
         />
         <button
+          type="button"
           onClick={saveEdit}
           disabled={!editFrom.trim() || !editTo.trim()}
           className="text-cafe-interactive hover:text-cafe-accent disabled:opacity-40"
@@ -147,7 +149,7 @@ function CustomTermRow({
         >
           &#10003;
         </button>
-        <button onClick={cancelEdit} className="text-cafe-muted hover:text-cafe-secondary" title="取消">
+        <button type="button" onClick={cancelEdit} className="text-cafe-muted hover:text-cafe-secondary" title="取消">
           &#10005;
         </button>
       </div>
@@ -156,11 +158,12 @@ function CustomTermRow({
 
   return (
     <div className="flex items-center gap-2 text-xs">
-      <code className="bg-cafe-accent/10 text-cafe-interactive px-1.5 py-0.5 rounded">{term.from}</code>
+      <code className="bg-cafe-accent/10 text-cafe-accent px-1.5 py-0.5 rounded">{term.from}</code>
       <span className="text-cafe-muted">&rarr;</span>
-      <code className="bg-cafe-surface-elevated text-cafe-secondary px-1.5 py-0.5 rounded">{term.to}</code>
+      <code className="bg-conn-green-bg text-conn-green-text px-1.5 py-0.5 rounded">{term.to}</code>
       <div className="ml-auto flex items-center gap-1">
         <button
+          type="button"
           onClick={startEdit}
           className="text-cafe-muted hover:text-cafe-interactive transition-colors"
           title="编辑"
@@ -168,8 +171,9 @@ function CustomTermRow({
           &#9998;
         </button>
         <button
+          type="button"
           onClick={() => onRemove(index)}
-          className="text-cafe-muted hover:text-cafe-secondary transition-colors"
+          className="text-cafe-muted hover:text-conn-red-text transition-colors"
           title="删除"
         >
           &times;
@@ -184,10 +188,10 @@ export function VoiceSettingsPanel() {
   const [showBuiltIn, setShowBuiltIn] = useState(false);
 
   return (
-    <div className="space-y-6">
+    <>
       {/* Custom terms */}
-      <Section eyebrow="术语纠正" title="自定义术语纠正">
-        <p className="text-[11px] text-cafe-secondary mb-2">添加你自己的纠正规则。自定义规则优先于内置词典。</p>
+      <Section eyebrow="Custom Terms" title="自定义术语纠正">
+        <p className="text-xs text-cafe-secondary mb-2">添加你自己的纠正规则。自定义规则优先于内置词典。</p>
         {settings.customTerms.length > 0 ? (
           <div className="space-y-1.5 mb-1">
             {settings.customTerms.map((term, i) => (
@@ -201,16 +205,17 @@ export function VoiceSettingsPanel() {
             ))}
           </div>
         ) : (
-          <p className="text-[11px] text-cafe-muted italic">暂无自定义规则</p>
+          <p className="text-xs text-cafe-muted italic">暂无自定义规则</p>
         )}
         <AddTermRow onAdd={addTerm} />
       </Section>
 
       {/* Built-in terms (collapsible) */}
-      <Section eyebrow="词典" title="内置词典">
+      <Section eyebrow="Dictionary" title="内置词典">
         <button
+          type="button"
           onClick={() => setShowBuiltIn(!showBuiltIn)}
-          className="text-[11px] text-cafe-interactive hover:text-cafe-accent transition-colors"
+          className="text-xs text-cafe-interactive hover:text-cafe-accent transition-colors"
         >
           {showBuiltIn ? '收起' : `查看全部 ${BUILT_IN_ENTRIES.length} 条内置规则`}
         </button>
@@ -228,13 +233,16 @@ export function VoiceSettingsPanel() {
       </Section>
 
       {/* Language selection */}
-      <Section eyebrow="语言" title="语言设置">
+      <Section eyebrow="Language" title="语言设置">
         <div className="flex items-center gap-3">
-          <label className="text-xs text-cafe-secondary">转写语言</label>
+          <label htmlFor="voice-language-select" className="text-xs text-cafe-secondary">
+            转写语言
+          </label>
           <select
+            id="voice-language-select"
             value={settings.language}
             onChange={(e) => setLanguage(e.target.value as typeof settings.language)}
-            className="console-form-input text-xs"
+            className="text-xs border border-[var(--console-border-soft)] rounded px-2 py-1.5 focus:outline-none focus:border-cafe-accent"
           >
             <option value="zh">中文</option>
             <option value="en">English</option>
@@ -244,8 +252,8 @@ export function VoiceSettingsPanel() {
       </Section>
 
       {/* Custom prompt (advanced) */}
-      <Section eyebrow="高级" title="Whisper 上下文提示">
-        <p className="text-[11px] text-cafe-secondary mb-2">
+      <Section eyebrow="Advanced" title="Whisper 上下文提示">
+        <p className="text-xs text-cafe-secondary mb-2">
           自定义发给 Whisper 的上下文提示词。模型会偏向识别提示中出现的术语。留空使用默认值。
         </p>
         <textarea
@@ -259,10 +267,14 @@ export function VoiceSettingsPanel() {
 
       {/* Reset */}
       <div className="flex justify-end">
-        <button onClick={resetAll} className="text-xs text-cafe-muted hover:text-cafe-secondary transition-colors">
+        <button
+          type="button"
+          onClick={resetAll}
+          className="text-xs text-cafe-muted hover:text-conn-red-text transition-colors"
+        >
           重置所有设置
         </button>
       </div>
-    </div>
+    </>
   );
 }

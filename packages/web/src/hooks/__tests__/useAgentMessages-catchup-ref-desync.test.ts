@@ -450,15 +450,15 @@ describe('useAgentMessages catch-up ref desync (#266 Round 2)', () => {
       });
     });
 
-    expect(storeState.messages).toEqual([
-      expect.objectContaining({
-        id: 'callback-race-final',
-        catId: 'opus',
-        origin: 'callback',
-        content: 'authoritative callback',
-        isStreaming: false,
-      }),
-    ]);
+    // Z11 correction: callback post_message speech must not swallow stream work-log content.
+    expect(storeState.messages).toHaveLength(2);
+    const streamBubble = storeState.messages.find((m) => m.origin === 'stream')!;
+    const finalBubble = storeState.messages.find((m) => m.origin === 'callback')!;
+    expect(streamBubble.content).toContain('stream head + late stream tail');
+    expect(finalBubble.id).toBe('callback-race-final');
+    expect(finalBubble.catId).toBe('opus');
+    expect(finalBubble.isStreaming).toBe(false);
+    expect(finalBubble.content).toContain('authoritative callback');
   });
 
   it('drains deferred callback on active text-final terminal event', () => {
@@ -510,15 +510,15 @@ describe('useAgentMessages catch-up ref desync (#266 Round 2)', () => {
       });
     });
 
-    expect(storeState.messages).toEqual([
-      expect.objectContaining({
-        id: 'callback-text-final',
-        catId: 'opus',
-        origin: 'callback',
-        content: 'authoritative callback after text final',
-        isStreaming: false,
-      }),
-    ]);
+    // Z11 correction: stream work-log and callback speech are separate bubbles.
+    expect(storeState.messages).toHaveLength(2);
+    const mergedStream = storeState.messages.find((m) => m.origin === 'stream')!;
+    const merged = storeState.messages.find((m) => m.origin === 'callback')!;
+    expect(merged.id).toBe('callback-text-final');
+    expect(merged.isStreaming).toBe(false);
+    expect(mergedStream.content).toContain('stream head');
+    expect(mergedStream.content).toContain('terminal stream tail');
+    expect(merged.content).toContain('authoritative callback after text final');
   });
 
   it('drains deferred callback on active text-final terminal event without extra content', () => {
@@ -561,15 +561,16 @@ describe('useAgentMessages catch-up ref desync (#266 Round 2)', () => {
       });
     });
 
-    expect(storeState.messages).toEqual([
-      expect.objectContaining({
-        id: 'callback-text-final-empty',
-        catId: 'opus',
-        origin: 'callback',
-        content: 'authoritative callback after empty text final',
-        isStreaming: false,
-      }),
-    ]);
+    // Z11 correction: empty terminal stream chunk should not add empty content segment.
+    expect(storeState.messages).toHaveLength(2);
+    const stream2 = storeState.messages.find((m) => m.origin === 'stream')!;
+    const merged2 = storeState.messages.find((m) => m.origin === 'callback')!;
+    expect(merged2.id).toBe('callback-text-final-empty');
+    expect(merged2.isStreaming).toBe(false);
+    expect(stream2.content).toContain('stream head');
+    expect(merged2.content).toContain('authoritative callback after empty text final');
+    // No double-blank pollution
+    expect(stream2.content).not.toMatch(/\n\n\n/);
   });
 
   it('drains deferred callback on timeout when terminal done is missing', () => {
@@ -615,15 +616,14 @@ describe('useAgentMessages catch-up ref desync (#266 Round 2)', () => {
         vi.advanceTimersByTime(5 * 60 * 1000);
       });
 
-      expect(storeState.messages).toEqual([
-        expect.objectContaining({
-          id: 'callback-timeout-final',
-          catId: 'opus',
-          origin: 'callback',
-          content: 'authoritative callback after missing done',
-          isStreaming: false,
-        }),
-      ]);
+      // Z11 correction: timeout drain preserves stream and callback as separate bubbles.
+      expect(storeState.messages).toHaveLength(2);
+      const stream3 = storeState.messages.find((m) => m.origin === 'stream')!;
+      const merged3 = storeState.messages.find((m) => m.origin === 'callback')!;
+      expect(merged3.id).toBe('callback-timeout-final');
+      expect(merged3.isStreaming).toBe(false);
+      expect(stream3.content).toContain('stale stream text');
+      expect(merged3.content).toContain('authoritative callback after missing done');
       expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-1');
     } finally {
       vi.useRealTimers();
@@ -673,15 +673,15 @@ describe('useAgentMessages catch-up ref desync (#266 Round 2)', () => {
         vi.advanceTimersByTime(5 * 60 * 1000);
       });
 
-      expect(threadMessages.get('thread-bg')).toEqual([
-        expect.objectContaining({
-          id: 'bg-callback-timeout-final',
-          catId: 'opus',
-          origin: 'callback',
-          content: 'authoritative background callback after missing terminal',
-          isStreaming: false,
-        }),
-      ]);
+      // Z11 correction: bg timeout drain preserves stream and callback as separate bubbles.
+      const bgMsgs = threadMessages.get('thread-bg') ?? [];
+      expect(bgMsgs).toHaveLength(2);
+      const stream4 = bgMsgs.find((m) => m.origin === 'stream')!;
+      const merged4 = bgMsgs.find((m) => m.origin === 'callback')!;
+      expect(merged4.id).toBe('bg-callback-timeout-final');
+      expect(merged4.isStreaming).toBe(false);
+      expect(stream4.content).toContain('background stream head');
+      expect(merged4.content).toContain('authoritative background callback after missing terminal');
       expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-bg');
     } finally {
       vi.useRealTimers();
@@ -952,14 +952,15 @@ describe('useAgentMessages catch-up ref desync (#266 Round 2)', () => {
       });
     });
 
-    expect(threadMessages.get('thread-bg')).toEqual([
-      expect.objectContaining({
-        id: 'bg-callback-reset',
-        origin: 'callback',
-        content: 'authoritative background callback',
-        isStreaming: false,
-      }),
-    ]);
+    // Z11 correction: bg drain preserves stream and callback as separate bubbles.
+    const bgResetMsgs = threadMessages.get('thread-bg') ?? [];
+    expect(bgResetMsgs).toHaveLength(2);
+    const stream6 = bgResetMsgs.find((m) => m.origin === 'stream')!;
+    const merged6 = bgResetMsgs.find((m) => m.origin === 'callback')!;
+    expect(merged6.id).toBe('bg-callback-reset');
+    expect(merged6.isStreaming).toBe(false);
+    expect(stream6.content).toContain('background stream head');
+    expect(merged6.content).toContain('authoritative background callback');
   });
 
   it('resetRefs keeps deferred callbacks when thread switch makes that thread current first', () => {
@@ -1010,13 +1011,13 @@ describe('useAgentMessages catch-up ref desync (#266 Round 2)', () => {
       });
     });
 
-    expect(storeState.messages).toEqual([
-      expect.objectContaining({
-        id: 'bg-callback-current-reset',
-        origin: 'callback',
-        content: 'authoritative callback after switch',
-        isStreaming: false,
-      }),
-    ]);
+    // Z11 correction: thread switch + drain preserves stream and callback as separate bubbles.
+    expect(storeState.messages).toHaveLength(2);
+    const stream5 = storeState.messages.find((m) => m.origin === 'stream')!;
+    const merged5 = storeState.messages.find((m) => m.origin === 'callback')!;
+    expect(merged5.id).toBe('bg-callback-current-reset');
+    expect(merged5.isStreaming).toBe(false);
+    expect(stream5.content).toContain('background stream before switch');
+    expect(merged5.content).toContain('authoritative callback after switch');
   });
 });

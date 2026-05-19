@@ -59,6 +59,19 @@ describe('MarketplacePanel', () => {
     container.remove();
   });
 
+  it('renders browse results when query is empty', async () => {
+    useMarketplaceStore.setState({ results: [MOCK_RESULT], error: null, query: '' });
+
+    await act(async () => {
+      root.render(React.createElement(MarketplacePanel));
+    });
+
+    const cards = container.querySelectorAll('[data-testid="artifact-card"]');
+    const countText = container.textContent;
+    expect(countText).toContain('共 1 个能力');
+    expect(cards.length > 0 || countText?.includes('MCP Memory')).toBe(true);
+  });
+
   it('retry in browse mode calls browse instead of no-oping', async () => {
     mocks.apiFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ results: [MOCK_RESULT] }) });
 

@@ -15,6 +15,7 @@
  */
 
 import type { CatId } from '@cat-cafe/shared';
+import { l1StreakBreakCount, l1StreakWarnCount } from '../../../../../infrastructure/telemetry/instruments.js';
 
 /** F122: Structured result from pushToWorklist — reason explains empty adds */
 export type PushReason = 'not_found' | 'depth_limit' | 'caller_mismatch' | 'all_duplicate' | 'pingpong_terminated';
@@ -275,6 +276,7 @@ export function pushToWorklist(
     if (wouldEnqueue) {
       const streak = updateStreakOnPush(entry, callerCatId, target, callerActivity);
       if (streak.blockPingPong) {
+        l1StreakBreakCount.add(1);
         return {
           added: [],
           reason: 'pingpong_terminated',
@@ -283,6 +285,7 @@ export function pushToWorklist(
         };
       }
       warnPingPong = streak.warnPingPong;
+      if (streak.warnPingPong) l1StreakWarnCount.add(1);
       pairCount = streak.count;
     }
     // else: dedup or depth would skip → do not touch streak state

@@ -80,7 +80,7 @@ describe('StudyFoldArea navigation', () => {
     const discussLink = container.querySelector('a[href*="signal="]') as HTMLAnchorElement;
     expect(discussLink).toBeTruthy();
     const href = discussLink.getAttribute('href')!;
-    expect(href).toContain('signal=article_2');
+    expect(href.startsWith('/')).toBe(true);
     expect(href).not.toContain('/thread/');
   });
 

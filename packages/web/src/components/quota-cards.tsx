@@ -128,15 +128,15 @@ export function toUtilization(item: CodexUsageItem): number {
 }
 
 export function riskDotClass(utilization: number): string {
-  if (utilization >= 80) return 'text-conn-red-text';
+  if (utilization >= 80) return 'text-rose-500';
   if (utilization >= 50) return 'text-conn-amber-text';
-  return 'text-conn-emerald-text';
+  return 'text-emerald-500';
 }
 
 function barColor(utilization: number): string {
-  if (utilization >= 80) return 'bg-conn-red-text';
-  if (utilization >= 50) return 'bg-conn-amber-text';
-  return 'bg-conn-emerald-text';
+  if (utilization >= 80) return 'bg-rose-500';
+  if (utilization >= 50) return 'bg-amber-400';
+  return 'bg-emerald-500';
 }
 
 function formatPercent(item: CodexUsageItem): string {
@@ -173,7 +173,7 @@ function ProgressBar({ percent, utilization }: { percent: number; utilization: n
   const clamped = Math.max(0, Math.min(100, percent));
   const color = barColor(utilization);
   return (
-    <div className="w-full h-1.5 bg-[var(--console-pill-bg)] rounded-full overflow-hidden">
+    <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
       <div className={`h-full rounded-full ${color}`} style={{ width: `${clamped}%` }} />
     </div>
   );
@@ -193,7 +193,7 @@ export function QuotaPoolRow({ item }: { item: CodexUsageItem }) {
           <span className="text-sm text-cafe-secondary truncate">{item.label}</span>
         </div>
         <span
-          className={`text-sm font-semibold whitespace-nowrap ${utilization >= 80 ? 'text-conn-red-text' : 'text-cafe'}`}
+          className={`text-sm font-semibold whitespace-nowrap ${utilization >= 80 ? 'text-rose-600' : 'text-cafe'}`}
         >
           {formatPercent(item)}
         </span>

@@ -87,6 +87,15 @@ Step 2.6: FALLBACK LAYER CHECK（F177 Phase D）🔴
   - 自检三问：①修坐标系还是补错误坐标系？②坐标变换能否消除？③每层为什么不能去掉？
   - 层数合理时在报告中说明理由；不合理时重构后再过 gate
 
+Step 2.7: ARCHITECTURE OWNERSHIP REPORT（F191，warning-only）🔴
+  - 执行：`pnpm check:architecture-ownership`
+  - 从 spec / plan 抄入：
+    `Architecture cell` / `Map delta` / `Why`
+  - 若缺失，报告 `⚠️ missing` 并列为 review focus；不在 quality-gate 做 semantic hard block
+  - 若 `Map delta: none` 但 diff 明显新增 `Store|Queue|Router|Adapter|Dispatcher|Binding` 等架构名词，报告 mismatch 给 reviewer
+  - 若 `Map delta: update required|new cell required`，报告对应 ownership cell / new cell 文件是否随 PR 更新
+  - 注意：quality-gate 只报告机械可见事实；架构语义正确性由 Design Gate + reviewer 判断
+
 Step 3: VERIFY — 逐项检查
   - 代码在哪？有测试覆盖？边界处理了？
   - 🔴 交付物必须核实 commit/PR 状态（git log --grep + gh pr list）
@@ -186,6 +195,12 @@ glob designs/**/*.pen 匹配结果: [列出匹配文件或"无匹配"]
 
 ### Artifact Hygiene（Step 7.5）
 仓库根目录媒体/设计工件（工作树 + 已提交差异）: 无 ✅
+
+### Architecture Ownership（Step 2.7）
+Architecture cell: dispatch
+Map delta: none
+Why: 只扩展现有 InvocationQueue 行为，不改变 dispatch cell 边界
+Diff mismatch scan: 无新增并行 Store/Queue/Router/Adapter ✅
 
 ### 验证命令输出（必须是这次真实运行）
 pnpm test → 34/34 pass ✅

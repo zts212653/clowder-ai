@@ -11,8 +11,8 @@ import {
   settingsResourceCardClass,
   settingsResourceRowClass,
 } from '../SettingsResourceCard';
-import { PerCatToggles, ToggleSwitch } from './capability-settings-ui';
-import { SettingsPageHeader } from './SettingsPageHeader';
+import { PerCatToggles, ProjectSelector, ToggleSwitch } from './capability-settings-ui';
+import { SettingsEmptyState, SettingsPrimaryButton, SettingsText } from './primitives';
 import { useCapabilityState } from './useCapabilityState';
 
 interface ModalState {
@@ -20,6 +20,29 @@ interface ModalState {
   editData?: McpConfigModalProps['editData'];
   readOnly?: boolean;
   tools?: { name: string; description?: string }[];
+}
+
+function buildEditData(item: CapabilityBoardItem): McpConfigModalProps['editData'] {
+  const server = item.mcpServer;
+  if (!server) return undefined;
+  return {
+    transport: server.transport,
+    command: server.command,
+    args: server.args,
+    url: server.url,
+    env: server.env,
+    headers: server.headers,
+    envKeys: server.envKeys ?? Object.keys(server.env ?? {}),
+    resolver: server.resolver,
+  };
+}
+
+function mcpSubInfo(item: CapabilityBoardItem): string | undefined {
+  const server = item.mcpServer;
+  if (!server) return undefined;
+  if (server.transport === 'streamableHttp') return server.url ? `http · ${server.url}` : 'http';
+  if (!server.command) return server.resolver ? `resolver · ${server.resolver}` : undefined;
+  return `stdio · ${server.command}${server.args?.length ? ` ${server.args.join(' ')}` : ''}`;
 }
 
 export function McpManageContent() {
@@ -33,18 +56,7 @@ export function McpManageContent() {
       editId: item.id,
       readOnly,
       tools: item.tools,
-      editData: item.mcpServer
-        ? {
-            transport: item.mcpServer.transport,
-            command: readOnly ? item.mcpServer.command : undefined,
-            args: readOnly ? item.mcpServer.args : undefined,
-            url: readOnly ? item.mcpServer.url : undefined,
-            env: item.mcpServer.env,
-            headers: item.mcpServer.headers,
-            envKeys: item.mcpServer.envKeys,
-            resolver: item.mcpServer.resolver,
-          }
-        : undefined,
+      editData: buildEditData(item),
     });
   }, []);
 
@@ -57,33 +69,58 @@ export function McpManageContent() {
 
   return (
     <div className="space-y-5">
-      <SettingsPageHeader title="MCP 管理" subtitle="点击卡片预览/编辑">
-        <button
-          type="button"
-          onClick={handleCreate}
-          className="flex shrink-0 items-center justify-center rounded-[10px] bg-[var(--cafe-accent,#C65F3D)] px-3.5 h-[34px] text-compact font-bold text-[var(--cafe-surface)] hover:opacity-90 transition-opacity"
-        >
-          新增 MCP
-        </button>
-      </SettingsPageHeader>
+      <div className="flex justify-end">
+        <SettingsPrimaryButton onClick={handleCreate}>新增 MCP</SettingsPrimaryButton>
+      </div>
+
+      <ProjectSelector
+        resolvedPath={cap.resolvedProjectPath}
+        knownProjects={cap.knownProjects}
+        currentSelection={cap.projectPath}
+        onSwitch={cap.switchProject}
+      />
+
+      {cap.error && (
+        <SettingsText as="p" variant="sm" tone="red">
+          {cap.error}
+        </SettingsText>
+      )}
 
       {cap.loading && (
         <div className="space-y-3">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="animate-pulse rounded-xl bg-[var(--console-card-bg)] p-4">
-              <div className="h-4 w-1/3 rounded bg-[var(--console-border-soft)]" />
-              <div className="mt-2 h-3 w-2/3 rounded bg-[var(--console-border-soft)]" />
+          {[1, 2, 3].map((index) => (
+            <div
+              key={index}
+              className="animate-pulse h-[68px]"
+              style={{
+                borderRadius: '0.75rem',
+                backgroundColor: 'var(--console-card-bg)',
+                padding: '1rem',
+              }}
+            >
+              <div
+                className="h-4 w-1/3"
+                style={{ borderRadius: '0.25rem', backgroundColor: 'var(--console-border-soft)' }}
+              />
+              <div
+                className="mt-2 h-3 w-2/3"
+                style={{ borderRadius: '0.25rem', backgroundColor: 'var(--console-border-soft)' }}
+              />
             </div>
           ))}
         </div>
       )}
 
       {!cap.loading && cap.items.length === 0 && (
-        <div className="flex flex-col items-center justify-center rounded-2xl bg-[var(--console-card-bg)] px-8 py-16 text-center">
-          <HubIcon name="box" className="mb-3 h-10 w-10 text-cafe-muted opacity-40" />
-          <p className="text-[15px] font-semibold text-cafe">暂无已安装的 MCP</p>
-          <p className="mt-1 text-xs text-cafe-muted">前往「能力市场」搜索安装，或点击上方按钮手动新增</p>
-        </div>
+        <SettingsEmptyState
+          icon={
+            <span className="mb-3" style={{ color: 'var(--cafe-text-muted)' }}>
+              <HubIcon name="box" className="h-10 w-10 opacity-40" />
+            </span>
+          }
+          title="暂无已安装的 MCP"
+          description="点击上方按钮手动新增 MCP 配置"
+        />
       )}
 
       <div className="space-y-2">
@@ -92,46 +129,41 @@ export function McpManageContent() {
           const busy = cap.toggling === item.id;
           const removing = cap.disabling === item.id;
           const expanded = expandedId === item.id;
-          const subInfo =
-            item.mcpServer?.transport === 'streamableHttp'
-              ? `http · ${item.mcpServer.url}`
-              : item.mcpServer?.command
-                ? `stdio · ${item.mcpServer.command}${item.mcpServer.args?.length ? ` ${item.mcpServer.args.join(' ')}` : ''}`
-                : undefined;
+          const subInfo = mcpSubInfo(item);
+
           return (
             <div key={item.id} className={settingsResourceCardClass}>
               <div className={settingsResourceRowClass}>
-                <svg
-                  className="h-[18px] w-[18px] shrink-0 text-cafe-muted"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                  aria-hidden="true"
-                >
-                  <circle cx="9" cy="5" r="1.5" />
-                  <circle cx="15" cy="5" r="1.5" />
-                  <circle cx="9" cy="12" r="1.5" />
-                  <circle cx="15" cy="12" r="1.5" />
-                  <circle cx="9" cy="19" r="1.5" />
-                  <circle cx="15" cy="19" r="1.5" />
-                </svg>
+                <span style={{ color: 'var(--cafe-text-muted)' }}>
+                  <HubIcon name="plug" className="h-[18px] w-[18px] shrink-0" />
+                </span>
                 <button
                   type="button"
                   onClick={() => handleCardClick(item)}
-                  className="flex min-w-0 flex-1 cursor-pointer items-center gap-4 text-left"
+                  className="flex min-w-0 flex-1 cursor-pointer items-center gap-4"
+                  style={{ textAlign: 'left' }}
                 >
                   <div className={settingsResourceAvatarClass}>{item.id.charAt(0).toUpperCase()}</div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-bold text-cafe">{item.id}</p>
-                    <p className="mt-0.5 truncate text-xs text-cafe-secondary">{item.description || '—'}</p>
-                    {subInfo && <p className="mt-0.5 truncate text-label font-mono text-cafe-muted">{subInfo}</p>}
+                    <SettingsText as="p" variant="sm" tone="default" className="font-bold">
+                      {item.id}
+                    </SettingsText>
+                    <SettingsText as="p" tone="secondary" className="mt-0.5 truncate">
+                      {item.description || '—'}
+                    </SettingsText>
+                    {subInfo && (
+                      <SettingsText as="p" tone="muted" className="mt-0.5 truncate font-mono">
+                        {subInfo}
+                      </SettingsText>
+                    )}
                   </div>
                 </button>
                 <div className={settingsResourceActionGroupClass}>
                   <ToggleSwitch
                     enabled={item.enabled}
                     busy={busy}
-                    onClick={(e) => {
-                      e.stopPropagation();
+                    onClick={(event) => {
+                      event.stopPropagation();
                       cap.handleToggle(item, !item.enabled);
                     }}
                   />
@@ -147,14 +179,14 @@ export function McpManageContent() {
                   {editable && (
                     <SettingsResourceIconButton
                       disabled={removing}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (window.confirm(`确认卸载 MCP "${item.id}"？卸载后需重新安装。`)) {
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (window.confirm(`确认禁用 MCP "${item.id}"？配置会保留，可稍后重新启用。`)) {
                           cap.handleRemoveMcp(item);
                         }
                       }}
-                      title="卸载此 MCP"
-                      aria-label="卸载此 MCP"
+                      title="禁用此 MCP"
+                      aria-label="禁用此 MCP"
                       tone="danger"
                     >
                       <HubIcon name="trash" className="h-4 w-4" />

@@ -15,6 +15,22 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 
+let catRegistryLock = Promise.resolve();
+
+async function withCatRegistryLock(fn) {
+  const previous = catRegistryLock;
+  let release;
+  catRegistryLock = new Promise((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
 function createCapturingService(catId, text) {
   const calls = [];
   return {
@@ -98,47 +114,51 @@ async function loadRealRoster() {
 }
 
 async function runRoute(text, threadId) {
-  const original = catRegistry.getAllConfigs();
-  await loadRealRoster();
-  const appended = [];
-  try {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const opusService = createCapturingService('opus', text);
-    const codexService = createCapturingService('codex', 'ack, no further action.');
-    const deps = createMockDeps({ opus: opusService, codex: codexService }, appended);
-    for await (const _ of routeSerial(deps, ['opus'], 'phase-h test', 'user1', threadId, {
-      thinkingMode: 'play',
-    })) {
+  return withCatRegistryLock(async () => {
+    const original = catRegistry.getAllConfigs();
+    await loadRealRoster();
+    const appended = [];
+    try {
+      const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+      const opusService = createCapturingService('opus', text);
+      const codexService = createCapturingService('codex', 'ack, no further action.');
+      const deps = createMockDeps({ opus: opusService, codex: codexService }, appended);
+      for await (const _ of routeSerial(deps, ['opus'], 'phase-h test', 'user1', threadId, {
+        thinkingMode: 'play',
+      })) {
+      }
+      return { appended, opusCalls: opusService.calls };
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(original)) {
+        catRegistry.register(id, config);
+      }
     }
-    return { appended, opusCalls: opusService.calls };
-  } finally {
-    catRegistry.reset();
-    for (const [id, config] of Object.entries(original)) {
-      catRegistry.register(id, config);
-    }
-  }
+  });
 }
 
 async function runRouteWithTool(text, threadId, toolName, toolInput) {
-  const original = catRegistry.getAllConfigs();
-  await loadRealRoster();
-  const appended = [];
-  try {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const opusService = createToolCallingService('opus', text, toolName, toolInput);
-    const codexService = createCapturingService('codex', 'ack, no further action.');
-    const deps = createMockDeps({ opus: opusService, codex: codexService }, appended);
-    for await (const _ of routeSerial(deps, ['opus'], 'phase-h test', 'user1', threadId, {
-      thinkingMode: 'play',
-    })) {
+  return withCatRegistryLock(async () => {
+    const original = catRegistry.getAllConfigs();
+    await loadRealRoster();
+    const appended = [];
+    try {
+      const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+      const opusService = createToolCallingService('opus', text, toolName, toolInput);
+      const codexService = createCapturingService('codex', 'ack, no further action.');
+      const deps = createMockDeps({ opus: opusService, codex: codexService }, appended);
+      for await (const _ of routeSerial(deps, ['opus'], 'phase-h test', 'user1', threadId, {
+        thinkingMode: 'play',
+      })) {
+      }
+      return { appended };
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(original)) {
+        catRegistry.register(id, config);
+      }
     }
-    return { appended };
-  } finally {
-    catRegistry.reset();
-    for (const [id, config] of Object.entries(original)) {
-      catRegistry.register(id, config);
-    }
-  }
+  });
 }
 
 describe('F167 Phase H AC-H3: route-serial routing-syntax-hint emission', () => {

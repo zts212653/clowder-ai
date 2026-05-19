@@ -71,7 +71,7 @@ export function CatTokenUsage({ catId, usage, contextHealth }: CatTokenUsageProp
   return (
     <div className="mt-1.5 space-y-1 animate-fade-in" data-testid={`token-usage-${catId}`}>
       {/* Token counts row */}
-      <div className="flex items-baseline gap-2 font-mono text-[11px]">
+      <div className="flex items-baseline gap-2 font-mono text-xs">
         {hasDetailed && (
           <>
             {usage.inputTokens != null && (

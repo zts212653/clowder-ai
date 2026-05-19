@@ -69,7 +69,7 @@ export function BindNewSessionSection({ threadId, activeCatIds, onBound, disable
   }
 
   return (
-    <div className="mt-2 p-2 rounded border border-dashed border-[var(--console-border-soft)] bg-cafe-surface">
+    <div className="mt-2 p-2 rounded border border-dashed border-cafe bg-cafe-surface">
       <div className="flex items-center justify-between mb-1.5">
         <span className="text-[10px] font-medium text-cafe-secondary">绑定外部 Session</span>
         <button
@@ -78,7 +78,7 @@ export function BindNewSessionSection({ threadId, activeCatIds, onBound, disable
             setExpanded(false);
             setStatus('idle');
           }}
-          className="text-[9px] text-cafe-muted hover:text-cafe-secondary"
+          className="text-[10px] text-cafe-muted hover:text-cafe-secondary"
         >
           ✕
         </button>
@@ -87,7 +87,7 @@ export function BindNewSessionSection({ threadId, activeCatIds, onBound, disable
         <select
           value={selectedCat}
           onChange={(e) => setSelectedCat(e.target.value)}
-          className="w-full text-[11px] px-2 py-1 rounded border border-[var(--console-border-soft)] bg-cafe-surface-elevated focus:outline-none focus:ring-1 focus:ring-cafe-accent"
+          className="w-full text-xs px-2 py-1 rounded border border-cafe bg-cafe-surface-elevated focus:outline-none focus:ring-1 focus:ring-cafe-accent"
         >
           <option value="">选择猫猫...</option>
           {availableCats.map((cat) => (
@@ -107,13 +107,13 @@ export function BindNewSessionSection({ threadId, activeCatIds, onBound, disable
           }}
           placeholder="CLI Session ID"
           maxLength={500}
-          className="w-full text-[11px] font-mono px-2 py-1 rounded border border-[var(--console-border-soft)] bg-cafe-surface-elevated focus:outline-none focus:ring-1 focus:ring-cafe-accent"
+          className="w-full text-xs font-mono px-2 py-1 rounded border border-cafe bg-cafe-surface-elevated focus:outline-none focus:ring-1 focus:ring-cafe-accent"
         />
         <button
           type="button"
           onClick={() => void handleBind()}
           disabled={status === 'saving' || !sessionId.trim() || !selectedCat || disabled}
-          className="w-full text-[10px] px-2 py-1 rounded bg-[var(--console-pill-bg)] hover:bg-[var(--console-hover-bg)] disabled:opacity-40 transition-colors"
+          className="w-full text-[10px] px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-40 transition-colors"
         >
           {status === 'saving'
             ? '绑定中...'

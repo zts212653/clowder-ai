@@ -42,13 +42,12 @@ describe('formatTelegramHtml', () => {
     assert.ok(html.includes('&amp;'));
   });
 
-  it('preserves full content for long bodies (adapter handles splitting)', () => {
+  it('returns full HTML without truncation (adapter splits long content)', () => {
     const longBody = 'x'.repeat(5000);
     const blocks = [{ id: 'b1', kind: 'card', v: 1, title: 'Big', bodyMarkdown: longBody }];
     const html = formatTelegramHtml(blocks, '布偶猫');
-    // K3: formatter no longer truncates — adapter splitHtml handles chunking
-    assert.ok(html.includes('x'.repeat(100)));
-    assert.ok(html.length > 4096);
+    assert.ok(html.length > 4096, 'formatter must not truncate — adapter handles splitting');
+    assert.ok(html.includes('x'.repeat(100)), 'full body content must be present');
   });
 
   it('formats audio block with text', () => {

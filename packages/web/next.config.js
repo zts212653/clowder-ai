@@ -24,6 +24,17 @@ function resolveApiBaseUrl() {
 }
 
 const apiBaseUrl = resolveApiBaseUrl();
+const allowUnsafeEvalInCsp = process.env.NODE_ENV === 'development';
+
+function buildContentSecurityPolicy() {
+  const scriptSrc = ["'self'", "'unsafe-inline'"];
+  if (allowUnsafeEvalInCsp) {
+    // Next.js dev React Refresh uses eval internally. Keep this dev-only so
+    // production continues to block eval injection.
+    scriptSrc.push("'unsafe-eval'");
+  }
+  return ["frame-ancestors 'none'", `script-src ${scriptSrc.join(' ')}`, "object-src 'none'"].join('; ');
+}
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -34,13 +45,8 @@ const nextConfig = {
   async headers() {
     // F156 D-3: Strict CSP baseline.
     // Next.js hydration requires 'unsafe-inline' for scripts — nonce-based CSP
-    // needs middleware (future work). Blocking 'unsafe-eval' prevents eval() injection.
-    const isDev = process.env.NODE_ENV === 'development';
-    const csp = [
-      "frame-ancestors 'none'",
-      `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
-      "object-src 'none'",
-    ].join('; ');
+    // needs middleware (future work). Production keeps blocking 'unsafe-eval'.
+    const csp = buildContentSecurityPolicy();
     return [
       {
         source: '/:path*',

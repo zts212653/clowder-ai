@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import {
   decodeAesKey,
   decryptAesEcb,
   downloadMediaFromCdn,
   encryptAesEcb,
+  uploadMediaToCdn,
 } from '../dist/infrastructure/connectors/adapters/weixin-cdn.js';
 
 describe('weixin-cdn AES-128-ECB', () => {
@@ -203,6 +207,108 @@ describe('downloadMediaFromCdn', () => {
         }),
       /CDN download HTTP 403/,
     );
+  });
+
+  it('downloads and decrypts media from iLink full_url when host is allowlisted', async () => {
+    const key = Buffer.alloc(16, 0xef);
+    const originalContent = Buffer.from('full url media');
+    const ciphertext = encryptAesEcb(originalContent, key);
+    const fullUrl = 'https://novac2c.cdn.weixin.qq.com/c2c/direct-media';
+    let requestedUrl = '';
+
+    const mockFetch = async (url) => {
+      requestedUrl = String(url);
+      return {
+        ok: true,
+        arrayBuffer: async () =>
+          ciphertext.buffer.slice(ciphertext.byteOffset, ciphertext.byteOffset + ciphertext.length),
+      };
+    };
+
+    const platformKey = JSON.stringify({
+      fullUrl,
+      aesKey: key.toString('hex'),
+    });
+
+    const result = await downloadMediaFromCdn({
+      platformKey,
+      cdnBaseUrl: 'https://cdn.example.com',
+      log: /** @type {any} */ (noopLog),
+      fetchFn: /** @type {any} */ (mockFetch),
+    });
+
+    assert.equal(requestedUrl, fullUrl);
+    assert.deepEqual(result, originalContent);
+  });
+
+  it('rejects full_url downloads from non-WeChat CDN hosts', async () => {
+    const platformKey = JSON.stringify({
+      fullUrl: 'https://evil.example/c2c/media',
+      aesKey: Buffer.alloc(16).toString('hex'),
+    });
+
+    await assert.rejects(
+      () =>
+        downloadMediaFromCdn({
+          platformKey,
+          cdnBaseUrl: 'https://cdn.example.com',
+          log: /** @type {any} */ (noopLog),
+          fetchFn: /** @type {any} */ (
+            async () => {
+              throw new Error('must not fetch disallowed host');
+            }
+          ),
+        }),
+      /full_url.*host/i,
+    );
+  });
+});
+
+describe('uploadMediaToCdn', () => {
+  const noop = () => {};
+  const noopLog = { info: noop, warn: noop, error: noop, debug: noop, trace: noop, fatal: noop, child: () => noopLog };
+
+  it('uploads through iLink upload_full_url when getuploadurl omits upload_param', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'cat-cafe-weixin-upload-'));
+    const filePath = join(dir, 'voice.silk');
+    await writeFile(filePath, Buffer.from('silk bytes'));
+
+    const uploadFullUrl = 'https://novac2c.cdn.weixin.qq.com/c2c/upload-full';
+    /** @type {string[]} */
+    const urls = [];
+
+    const mockFetch = async (url) => {
+      urls.push(String(url));
+      if (String(url).includes('/ilink/bot/getuploadurl')) {
+        return { ok: true, json: async () => ({ upload_full_url: uploadFullUrl }) };
+      }
+      if (String(url) === uploadFullUrl) {
+        return {
+          status: 200,
+          headers: new Headers({ 'x-encrypted-param': 'enc-download-param' }),
+        };
+      }
+      throw new Error(`unexpected url: ${url}`);
+    };
+
+    try {
+      const result = await uploadMediaToCdn({
+        filePath,
+        fileName: 'voice.silk',
+        mediaType: 2,
+        botToken: 'test-token',
+        cdnBaseUrl: 'https://cdn.example.com',
+        ilinkBaseUrl: 'https://ilink.example.com',
+        log: /** @type {any} */ (noopLog),
+        fetchFn: /** @type {any} */ (mockFetch),
+      });
+
+      assert.equal(urls[1], uploadFullUrl);
+      assert.equal(result.downloadEncryptedQueryParam, 'enc-download-param');
+      assert.ok(result.aeskey, 'upload result must include aeskey');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

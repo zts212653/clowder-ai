@@ -39,24 +39,27 @@ describe('agent hook sync targets', () => {
     await rm(targetRoot, { recursive: true, force: true });
   });
 
-  it('selects only user-level hook targets and renders Codex paths per target home', () => {
+  it('selects only user-level hook targets and renders Codex/Gemini paths per target home', () => {
     const targets = buildAgentHookTargets({ projectRoot, targetRoot });
     assert.deepEqual(
       targets.map((target) => target.name),
-      ['hooks/session-start', 'hooks/session-stop', 'codex-hooks'],
+      ['hooks/session-start', 'hooks/session-stop', 'codex-hooks', 'gemini-hooks'],
     );
+
+    const startScript = bashCmd(join(targetRoot, '.claude', 'hooks', 'session-start-recall.sh'));
+    const stopScript = bashCmd(join(targetRoot, '.claude', 'hooks', 'session-stop-check.sh'));
 
     const codexHooks = targets.find((target) => target.name === 'codex-hooks');
     assert.ok(codexHooks);
-    const rendered = JSON.parse(codexHooks.render());
-    assert.equal(
-      rendered.hooks.SessionStart[0].hooks[0].command,
-      bashCmd(join(targetRoot, '.claude', 'hooks', 'session-start-recall.sh')),
-    );
-    assert.equal(
-      rendered.hooks.Stop[0].hooks[0].command,
-      bashCmd(join(targetRoot, '.claude', 'hooks', 'session-stop-check.sh')),
-    );
+    const codexRendered = JSON.parse(codexHooks.render());
+    assert.equal(codexRendered.hooks.SessionStart[0].hooks[0].command, startScript);
+    assert.equal(codexRendered.hooks.Stop[0].hooks[0].command, stopScript);
+
+    const geminiHooks = targets.find((target) => target.name === 'gemini-hooks');
+    assert.ok(geminiHooks);
+    const geminiRendered = JSON.parse(geminiHooks.render());
+    assert.equal(geminiRendered.hooks.SessionStart[0].hooks[0].command, startScript);
+    assert.equal(geminiRendered.hooks.Stop[0].hooks[0].command, stopScript);
   });
 
   it('sync writes scripts, Codex hooks.json, and preserves unknown Claude settings hooks', async () => {

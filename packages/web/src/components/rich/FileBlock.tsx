@@ -34,11 +34,11 @@ export function FileBlock({ block }: { block: RichFileBlock }) {
     <a
       href={safeHref}
       download={safeHref ? block.fileName : undefined}
-      className="flex items-center gap-3 rounded-lg border border-[var(--console-border-soft)] px-4 py-3 hover:bg-cafe-surface-elevated dark:hover:bg-[var(--console-hover-bg)]/50 transition-colors"
+      className="flex items-center gap-3 rounded-lg border border-cafe px-4 py-3 hover:bg-cafe-surface-elevated  transition-colors"
     >
       <HubIcon name={iconName} className="h-6 w-6 flex-shrink-0 text-cafe-muted" />
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium text-cafe-black dark:text-cafe-muted truncate">{block.fileName}</div>
+        <div className="text-sm font-medium text-cafe-black  truncate">{block.fileName}</div>
         {block.fileSize != null && <div className="text-xs text-cafe-muted">{formatFileSize(block.fileSize)}</div>}
       </div>
     </a>

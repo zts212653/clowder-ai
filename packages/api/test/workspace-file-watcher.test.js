@@ -18,6 +18,55 @@ function wait(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function waitForSocketEvent(client, eventName, timeoutMs = 1500) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      client.off(eventName, onEvent);
+      reject(new Error(`Timed out waiting for ${eventName}`));
+    }, timeoutMs);
+    const onEvent = (data) => {
+      clearTimeout(timer);
+      resolve(data);
+    };
+    client.once(eventName, onEvent);
+  });
+}
+
+const FS_WATCH_EVENT_TIMEOUT_MS = 10000;
+
+async function connectClient(port) {
+  const client = ioClient(`http://localhost:${port}`, { transports: ['websocket'] });
+  await new Promise((resolve) => client.on('connect', resolve));
+  return client;
+}
+
+async function disconnectClient(client) {
+  if (!client) return;
+  if (!client.connected) {
+    client.close();
+    return;
+  }
+  await new Promise((resolve) => {
+    client.once('disconnect', resolve);
+    client.close();
+  });
+}
+
+async function closeIoServer(io) {
+  if (!io) return;
+  await new Promise((resolve) => io.close(resolve));
+}
+
+async function closeHttpServer(server) {
+  if (!server?.listening) return;
+  await new Promise((resolve, reject) => {
+    server.close((err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+}
+
 describe('workspace-file-watcher', () => {
   let httpServer;
   let io;
@@ -41,8 +90,8 @@ describe('workspace-file-watcher', () => {
   });
 
   after(async () => {
-    io.close();
-    httpServer.close();
+    await closeIoServer(io);
+    await closeHttpServer(httpServer);
     await rm(tmpDir, { recursive: true, force: true });
   });
 
@@ -51,35 +100,34 @@ describe('workspace-file-watcher', () => {
     await writeFile(filePath, 'version-1');
     const initialSha = sha256('version-1');
 
-    const client = ioClient(`http://localhost:${port}`, { transports: ['websocket'] });
-    const events = [];
+    const client = await connectClient(port);
 
-    await new Promise((resolve) => client.on('connect', resolve));
+    try {
+      const ready = waitForSocketEvent(client, 'workspace:file-changed', FS_WATCH_EVENT_TIMEOUT_MS);
+      client.emit('workspace:watch-file', { worktreeId: 'test-wt', path: 'target.md', sha256: null });
+      const readyEvent = await ready;
+      assert.equal(readyEvent.path, 'target.md');
+      assert.equal(readyEvent.sha256, initialSha);
 
-    client.on('workspace:file-changed', (data) => events.push(data));
-    client.emit('workspace:watch-file', { worktreeId: 'test-wt', path: 'target.md', sha256: initialSha });
+      // Atomic rename: write to tmp then rename over target
+      const firstChange = waitForSocketEvent(client, 'workspace:file-changed', FS_WATCH_EVENT_TIMEOUT_MS);
+      const tmpFile = join(tmpDir, 'target.md.tmp');
+      await writeFile(tmpFile, 'version-2');
+      const { rename } = await import('node:fs/promises');
+      await rename(tmpFile, filePath);
 
-    await wait(200);
+      const firstEvent = await firstChange;
+      assert.equal(firstEvent.path, 'target.md');
+      assert.equal(firstEvent.sha256, sha256('version-2'));
 
-    // Atomic rename: write to tmp then rename over target
-    const tmpFile = join(tmpDir, 'target.md.tmp');
-    await writeFile(tmpFile, 'version-2');
-    const { rename } = await import('node:fs/promises');
-    await rename(tmpFile, filePath);
-
-    await wait(600);
-    assert.ok(events.length >= 1, 'Should emit at least one file-changed event after atomic rename');
-    assert.equal(events[0].path, 'target.md');
-    assert.equal(events[0].sha256, sha256('version-2'));
-
-    // Subsequent write should still trigger (watcher survives rename)
-    events.length = 0;
-    await writeFile(filePath, 'version-3');
-    await wait(600);
-    assert.ok(events.length >= 1, 'Should emit after subsequent write post-rename');
-    assert.equal(events[events.length - 1].sha256, sha256('version-3'));
-
-    client.disconnect();
+      // Subsequent write should still trigger (watcher survives rename)
+      const secondChange = waitForSocketEvent(client, 'workspace:file-changed', FS_WATCH_EVENT_TIMEOUT_MS);
+      await writeFile(filePath, 'version-3');
+      const secondEvent = await secondChange;
+      assert.equal(secondEvent.sha256, sha256('version-3'));
+    } finally {
+      await disconnectClient(client);
+    }
   });
 
   it('emits immediately when client sha256 is null (subscription window gap)', async () => {
@@ -87,21 +135,20 @@ describe('workspace-file-watcher', () => {
     await writeFile(filePath, 'current-content');
     const currentSha = sha256('current-content');
 
-    const client = ioClient(`http://localhost:${port}`, { transports: ['websocket'] });
-    const events = [];
+    const client = await connectClient(port);
 
-    await new Promise((resolve) => client.on('connect', resolve));
-    client.on('workspace:file-changed', (data) => events.push(data));
+    try {
+      const changed = waitForSocketEvent(client, 'workspace:file-changed');
 
-    // Client sends null sha (simulates socket connecting before initial GET completes)
-    client.emit('workspace:watch-file', { worktreeId: 'test-wt', path: 'gap-test.txt', sha256: null });
+      // Client sends null sha (simulates socket connecting before initial GET completes)
+      client.emit('workspace:watch-file', { worktreeId: 'test-wt', path: 'gap-test.txt', sha256: null });
 
-    await wait(200);
-    assert.ok(events.length >= 1, 'Should emit immediately when client sha is null');
-    assert.equal(events[0].sha256, currentSha);
-    assert.equal(events[0].path, 'gap-test.txt');
-
-    client.disconnect();
+      const event = await changed;
+      assert.equal(event.sha256, currentSha);
+      assert.equal(event.path, 'gap-test.txt');
+    } finally {
+      await disconnectClient(client);
+    }
   });
 
   it('does NOT emit immediately when client sha matches current', async () => {
@@ -109,37 +156,45 @@ describe('workspace-file-watcher', () => {
     await writeFile(filePath, 'same-content');
     const currentSha = sha256('same-content');
 
-    const client = ioClient(`http://localhost:${port}`, { transports: ['websocket'] });
+    const client = await connectClient(port);
     const events = [];
 
-    await new Promise((resolve) => client.on('connect', resolve));
-    client.on('workspace:file-changed', (data) => events.push(data));
+    try {
+      client.on('workspace:file-changed', (data) => events.push(data));
 
-    client.emit('workspace:watch-file', { worktreeId: 'test-wt', path: 'match-test.txt', sha256: currentSha });
+      client.emit('workspace:watch-file', { worktreeId: 'test-wt', path: 'match-test.txt', sha256: currentSha });
 
-    await wait(200);
-    assert.equal(events.length, 0, 'Should NOT emit when sha matches');
-
-    client.disconnect();
+      await wait(200);
+      assert.equal(events.length, 0, 'Should NOT emit when sha matches');
+    } finally {
+      await disconnectClient(client);
+    }
   });
 
   it('cleans up watcher on disconnect', async () => {
     const filePath = join(tmpDir, 'cleanup-test.txt');
     await writeFile(filePath, 'initial');
 
-    const client = ioClient(`http://localhost:${port}`, { transports: ['websocket'] });
-    await new Promise((resolve) => client.on('connect', resolve));
+    const client = await connectClient(port);
 
-    client.emit('workspace:watch-file', { worktreeId: 'test-wt', path: 'cleanup-test.txt', sha256: sha256('initial') });
-    await wait(100);
+    try {
+      client.emit('workspace:watch-file', {
+        worktreeId: 'test-wt',
+        path: 'cleanup-test.txt',
+        sha256: sha256('initial'),
+      });
+      await wait(100);
 
-    client.disconnect();
-    await wait(100);
+      await disconnectClient(client);
+      await wait(100);
 
-    // Modify file after disconnect — should not throw or crash the server
-    await writeFile(filePath, 'modified-after-disconnect');
-    await wait(400);
-    // If we get here without crash, cleanup worked
-    assert.ok(true);
+      // Modify file after disconnect — should not throw or crash the server
+      await writeFile(filePath, 'modified-after-disconnect');
+      await wait(400);
+      // If we get here without crash, cleanup worked
+      assert.ok(true);
+    } finally {
+      await disconnectClient(client);
+    }
   });
 });

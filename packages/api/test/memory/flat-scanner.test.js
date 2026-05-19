@@ -143,6 +143,30 @@ describe('FlatScanner', () => {
     assert.equal(results.length, 0, '**/*.md should exclude root-level files too');
   });
 
+  it('P2-2: discovers markdown in src/ lib/ packages/ directories', () => {
+    mkdirSync(join(tmpDir, 'src', 'docs'), { recursive: true });
+    mkdirSync(join(tmpDir, 'lib'), { recursive: true });
+    mkdirSync(join(tmpDir, 'packages', 'plugin'), { recursive: true });
+    writeFileSync(join(tmpDir, 'src', 'docs', 'api.md'), '# API Docs');
+    writeFileSync(join(tmpDir, 'lib', 'README.md'), '# Lib README');
+    writeFileSync(join(tmpDir, 'packages', 'plugin', 'README.md'), '# Plugin');
+    const scanner = new FlatScanner('test:col');
+    const results = scanner.discover(tmpDir);
+    const paths = results.map((r) => r.item.sourcePath);
+    assert.ok(
+      paths.some((p) => p.includes('src')),
+      `should discover docs in src/: ${paths}`,
+    );
+    assert.ok(
+      paths.some((p) => p.includes('lib')),
+      `should discover docs in lib/: ${paths}`,
+    );
+    assert.ok(
+      paths.some((p) => p.includes('packages')),
+      `should discover docs in packages/: ${paths}`,
+    );
+  });
+
   it('exclude docs/**/*.md matches files directly in docs/ (P1-2)', () => {
     mkdirSync(join(tmpDir, 'docs'));
     writeFileSync(join(tmpDir, 'docs', 'a.md'), '# A');

@@ -129,6 +129,7 @@ describe('useChatHistory thread switch ordering', () => {
           intentMode: null,
           targetCats: [],
           catStatuses: {},
+          catStatusDetails: {},
           catInvocations: {},
           currentGame: null,
 
@@ -179,6 +180,7 @@ describe('useChatHistory thread switch ordering', () => {
           intentMode: null,
           targetCats: [],
           catStatuses: {},
+          catStatusDetails: {},
           catInvocations: {},
           currentGame: null,
 
@@ -241,6 +243,7 @@ describe('useChatHistory thread switch ordering', () => {
           intentMode: null,
           targetCats: [],
           catStatuses: {},
+          catStatusDetails: {},
           catInvocations: {},
           currentGame: null,
 
@@ -282,6 +285,7 @@ describe('useChatHistory thread switch ordering', () => {
           intentMode: 'execute',
           targetCats: ['opus'],
           catStatuses: { opus: 'streaming' },
+          catStatusDetails: {},
           catInvocations: {},
           currentGame: null,
 
@@ -361,6 +365,7 @@ describe('useChatHistory thread switch ordering', () => {
           intentMode: null,
           targetCats: [],
           catStatuses: {},
+          catStatusDetails: {},
           catInvocations: {},
           currentGame: null,
           unreadCount: 0,

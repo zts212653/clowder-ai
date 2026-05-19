@@ -6,7 +6,7 @@
  */
 
 import { type ConfigChangeEvent, configEventBus } from '../../config/config-event-bus.js';
-import { CONNECTOR_SECRETS_ALLOWLIST } from '../../config/connector-secrets-allowlist.js';
+import { CONNECTOR_GATEWAY_RELOAD_KEYS } from '../../config/connector-secrets-allowlist.js';
 
 export interface ConnectorReloadSubscriberOpts {
   onRestart: () => Promise<void>;
@@ -26,7 +26,7 @@ function isConnectorRelated(event: ConfigChangeEvent): boolean {
   if (event.scope === 'file') return true;
   // Empty changedKeys with file scope handled above; otherwise not relevant
   if (event.changedKeys.length === 0) return false;
-  return event.changedKeys.some((k) => CONNECTOR_SECRETS_ALLOWLIST.has(k));
+  return event.changedKeys.some((k) => CONNECTOR_GATEWAY_RELOAD_KEYS.has(k));
 }
 
 export function createConnectorReloadSubscriber(opts: ConnectorReloadSubscriberOpts): ConnectorReloadSubscriberHandle {

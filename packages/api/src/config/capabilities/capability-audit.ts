@@ -1,6 +1,7 @@
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CapabilityAuditEntry } from '@cat-cafe/shared';
+import { sanitizeCapabilityAuditEntry } from './capability-redaction.js';
 
 const AUDIT_DIR = '.cat-cafe';
 const AUDIT_FILE = 'audit.jsonl';
@@ -9,7 +10,7 @@ export async function appendAuditEntry(projectRoot: string, entry: CapabilityAud
   const dir = join(projectRoot, AUDIT_DIR);
   await mkdir(dir, { recursive: true });
   const filePath = join(dir, AUDIT_FILE);
-  await appendFile(filePath, `${JSON.stringify(entry)}\n`, 'utf-8');
+  await appendFile(filePath, `${JSON.stringify(sanitizeCapabilityAuditEntry(entry))}\n`, 'utf-8');
 }
 
 export async function readAuditLog(projectRoot: string, limit = 100): Promise<CapabilityAuditEntry[]> {
@@ -17,7 +18,7 @@ export async function readAuditLog(projectRoot: string, limit = 100): Promise<Ca
   try {
     const raw = await readFile(filePath, 'utf-8');
     const lines = raw.trim().split('\n').filter(Boolean);
-    return lines.slice(-limit).map((l) => JSON.parse(l) as CapabilityAuditEntry);
+    return lines.slice(-limit).map((l) => sanitizeCapabilityAuditEntry(JSON.parse(l) as CapabilityAuditEntry));
   } catch {
     return [];
   }

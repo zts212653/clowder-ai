@@ -4,7 +4,6 @@
 // The actual model runs in scripts/embed-api.py (independent Python process on GPU).
 // This service is just an HTTP client, like MlxAudioTtsProvider / WhisperSttProvider.
 
-import { resolveServiceEndpoint } from '../services/service-registry.js';
 import type { EmbedModelInfo, IEmbeddingService } from './interfaces.js';
 
 interface EmbeddingServiceConfig {
@@ -34,10 +33,15 @@ export class EmbeddingService implements IEmbeddingService {
   private modelId = '';
   private modelRev = 'http-client';
   private loader: (() => Promise<void>) | null = null; // test hook
+  private lastProbeAt = 0;
+  private static readonly REPROBE_COOLDOWN_MS = 30_000;
 
   constructor(config: EmbeddingServiceConfig) {
     this.config = config;
-    this.baseUrl = resolveServiceEndpoint('embedding-model') ?? process.env.EMBED_URL ?? 'http://127.0.0.1:9880';
+    // P1 fix (砚砚 review): derive from EMBED_PORT if EMBED_URL not set,
+    // so custom sidecar port is respected without needing both env vars
+    const port = process.env.EMBED_PORT ?? '9880';
+    this.baseUrl = process.env.EMBED_URL ?? `http://127.0.0.1:${port}`;
   }
 
   async load(): Promise<void> {
@@ -69,6 +73,9 @@ export class EmbeddingService implements IEmbeddingService {
 
   async reprobeIfNeeded(): Promise<void> {
     if (this.ready) return;
+    const now = Date.now();
+    if (now - this.lastProbeAt < EmbeddingService.REPROBE_COOLDOWN_MS) return;
+    this.lastProbeAt = now;
     await this.load();
   }
 

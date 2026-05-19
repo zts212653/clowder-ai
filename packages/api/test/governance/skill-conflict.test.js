@@ -171,4 +171,72 @@ describe('Skill Conflict Detection (ADR-025 Phase 2)', () => {
     const conflicts = await detectConflicts(projectRoot, homeDir, ['tdd']);
     assert.equal(conflicts.length, 0, 'Same target should not be flagged as conflict');
   });
+
+  test('does not flag identical Cat Cafe official mirrors as a user conflict', async () => {
+    const projectSkillsSource = join(tempDir, 'runtime', 'cat-cafe-skills');
+    const userSkillsSource = join(tempDir, 'main', 'cat-cafe-skills');
+    await mkdir(join(projectSkillsSource, 'tdd'), { recursive: true });
+    await writeFile(join(projectSkillsSource, 'tdd', 'SKILL.md'), '# TDD official');
+    await writeFile(join(projectSkillsSource, 'tdd', 'helper.md'), 'same helper');
+    await mkdir(join(userSkillsSource, 'tdd'), { recursive: true });
+    await writeFile(join(userSkillsSource, 'tdd', 'SKILL.md'), '# TDD official');
+    await writeFile(join(userSkillsSource, 'tdd', 'helper.md'), 'same helper');
+
+    const projectSkills = join(projectRoot, '.claude', 'skills');
+    await mkdir(projectSkills, { recursive: true });
+    await symlink(join(projectSkillsSource, 'tdd'), join(projectSkills, 'tdd'));
+
+    const userSkills = join(homeDir, '.claude', 'skills');
+    await mkdir(userSkills, { recursive: true });
+    await symlink(join(userSkillsSource, 'tdd'), join(userSkills, 'tdd'));
+
+    const conflicts = await detectConflicts(projectRoot, homeDir, ['tdd']);
+    assert.equal(conflicts.length, 0);
+  });
+
+  test('detects Cat Cafe official mirror conflict when content differs', async () => {
+    const projectSkillsSource = join(tempDir, 'runtime', 'cat-cafe-skills');
+    const userSkillsSource = join(tempDir, 'main', 'cat-cafe-skills');
+    await mkdir(join(projectSkillsSource, 'tdd'), { recursive: true });
+    await writeFile(join(projectSkillsSource, 'tdd', 'SKILL.md'), '# TDD runtime');
+    await mkdir(join(userSkillsSource, 'tdd'), { recursive: true });
+    await writeFile(join(userSkillsSource, 'tdd', 'SKILL.md'), '# TDD main');
+
+    const projectSkills = join(projectRoot, '.claude', 'skills');
+    await mkdir(projectSkills, { recursive: true });
+    await symlink(join(projectSkillsSource, 'tdd'), join(projectSkills, 'tdd'));
+
+    const userSkills = join(homeDir, '.claude', 'skills');
+    await mkdir(userSkills, { recursive: true });
+    await symlink(join(userSkillsSource, 'tdd'), join(userSkills, 'tdd'));
+
+    const conflicts = await detectConflicts(projectRoot, homeDir, ['tdd']);
+    assert.equal(conflicts.length, 1);
+    assert.equal(conflicts[0].skillName, 'tdd');
+  });
+
+  test('detects Cat Cafe official mirror conflict when same symlink text resolves to different content', async () => {
+    const projectSkillsSource = join(tempDir, 'runtime', 'cat-cafe-skills');
+    const userSkillsSource = join(tempDir, 'main', 'cat-cafe-skills');
+    await mkdir(join(projectSkillsSource, 'tdd'), { recursive: true });
+    await mkdir(join(userSkillsSource, 'tdd'), { recursive: true });
+    await writeFile(join(projectSkillsSource, 'tdd', 'SKILL.md'), '# TDD official');
+    await writeFile(join(userSkillsSource, 'tdd', 'SKILL.md'), '# TDD official');
+    await writeFile(join(projectSkillsSource, 'shared.md'), 'runtime helper');
+    await writeFile(join(userSkillsSource, 'shared.md'), 'main helper');
+    await symlink('../shared.md', join(projectSkillsSource, 'tdd', 'shared.md'));
+    await symlink('../shared.md', join(userSkillsSource, 'tdd', 'shared.md'));
+
+    const projectSkills = join(projectRoot, '.claude', 'skills');
+    await mkdir(projectSkills, { recursive: true });
+    await symlink(join(projectSkillsSource, 'tdd'), join(projectSkills, 'tdd'));
+
+    const userSkills = join(homeDir, '.claude', 'skills');
+    await mkdir(userSkills, { recursive: true });
+    await symlink(join(userSkillsSource, 'tdd'), join(userSkills, 'tdd'));
+
+    const conflicts = await detectConflicts(projectRoot, homeDir, ['tdd']);
+    assert.equal(conflicts.length, 1);
+    assert.equal(conflicts[0].skillName, 'tdd');
+  });
 });

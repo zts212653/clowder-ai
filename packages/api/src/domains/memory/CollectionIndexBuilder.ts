@@ -43,8 +43,24 @@ export class CollectionIndexBuilder {
     const { indexed, skipped, indexedItems } = await this.indexResults(results, force);
 
     if (this.embedDeps && indexedItems.length > 0) {
+      const { embedding, vectorStore } = this.embedDeps;
+      const store = this.store;
       try {
-        await embedIndexedItems(indexedItems, this.embedDeps.embedding, this.embedDeps.vectorStore);
+        await embedIndexedItems({
+          items: indexedItems,
+          embedding,
+          vectorStore,
+          allDocsProvider: () => {
+            const db = store.getDb();
+            const prefix = `${this.manifest.id}:`;
+            const allDocs = db
+              .prepare('SELECT anchor, title, summary FROM evidence_docs WHERE anchor LIKE ?')
+              .all(`${prefix}%`) as Array<{ anchor: string; title: string; summary: string | null }>;
+            return allDocs.map(
+              (d) => ({ anchor: d.anchor, title: d.title, summary: d.summary ?? undefined }) as EvidenceItem,
+            );
+          },
+        });
       } catch {
         // fail-open: embedding errors don't block indexing
       }

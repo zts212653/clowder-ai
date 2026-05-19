@@ -238,7 +238,7 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
   }, [activateView]);
 
   return (
-    <div className="flex flex-col h-full bg-[var(--console-card-bg)]">
+    <div className="flex flex-col h-full bg-[#FDF8F3]">
       {!previewOnly && (
         <BrowserToolbar
           urlInput={urlInput}
@@ -269,17 +269,17 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
 
       {!previewOnly && hmrStatus !== 'idle' && (
         <div
-          className={`flex items-center gap-1.5 px-3 py-1 text-[11px] border-b ${hmrStatus === 'connected' ? 'bg-conn-red-bg border-conn-red-ring' : 'bg-conn-red-bg border-conn-red-ring'} text-cafe-secondary/70`}
+          className={`flex items-center gap-1.5 px-3 py-1 text-xs border-b ${hmrStatus === 'connected' ? 'bg-[#FFF5F2] border-[var(--console-border-soft)]' : 'bg-[#FFF0ED] border-[var(--console-border-soft)]'} text-[#5a4a42]/70`}
         >
           <span
-            className={`w-1.5 h-1.5 rounded-full inline-block ${hmrStatus === 'connected' ? 'bg-conn-emerald-bg' : 'bg-conn-red-bg'}`}
+            className={`w-1.5 h-1.5 rounded-full inline-block ${hmrStatus === 'connected' ? 'bg-conn-green-text' : 'bg-red-400'}`}
           />
           {hmrStatus === 'connected' ? (
             <span>HMR connected · localhost:{targetPort}</span>
           ) : (
             <span>
               HMR disconnected.{' '}
-              <button type="button" className="underline hover:text-conn-amber-text" onClick={handleRefresh}>
+              <button type="button" className="underline hover:text-[#E29578]" onClick={handleRefresh}>
                 Retry
               </button>
             </span>
@@ -288,17 +288,15 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
       )}
 
       {error && (
-        <div className="px-3 py-1.5 text-xs text-conn-red-text bg-conn-red-bg/80 border-b border-conn-red-ring">
-          {error}
-        </div>
+        <div className="px-3 py-1.5 text-xs text-conn-red-text bg-conn-red-bg/80 border-b border-red-100">{error}</div>
       )}
       {warning && !error && (
-        <div className="px-3 py-1.5 text-xs text-conn-amber-text bg-conn-amber-bg/80 border-b border-conn-amber-ring">
+        <div className="px-3 py-1.5 text-xs text-conn-amber-text bg-conn-amber-bg/80 border-b border-amber-100">
           {warning}
         </div>
       )}
       {screenshotUrl && (
-        <div className="px-3 py-1.5 text-xs text-conn-emerald-text bg-conn-emerald-bg/80 border-b border-conn-emerald-ring">
+        <div className="px-3 py-1.5 text-xs text-conn-green-text bg-conn-green-bg/80 border-b border-green-100">
           Screenshot saved:{' '}
           <a href={screenshotUrl} target="_blank" rel="noreferrer" className="underline">
             {screenshotUrl}
@@ -309,8 +307,8 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
       {gatewayUrl ? (
         <div className="relative flex-1">
           {isLoading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-[var(--console-card-bg)]/80 z-10">
-              <div className="text-xs text-cafe-secondary/50">Loading preview...</div>
+            <div className="absolute inset-0 flex items-center justify-center bg-[#FDF8F3]/80 z-10">
+              <div className="text-xs text-[#5a4a42]/50">Loading preview...</div>
             </div>
           )}
           <iframe
@@ -328,7 +326,7 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
           />
         </div>
       ) : (
-        <div className="flex-1 flex items-center justify-center text-cafe-secondary/40 text-sm text-center">
+        <div className="flex-1 flex items-center justify-center text-[#5a4a42]/40 text-sm text-center">
           <div>
             <div className="text-3xl mb-3 opacity-30">🌐</div>
             <p>Enter a localhost URL to preview</p>
@@ -340,10 +338,10 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
       {!previewOnly && consoleOpen && <ConsolePanel entries={consoleEntries} onClear={clearConsole} />}
 
       {!previewOnly && (
-        <div className="flex items-center px-2 py-0.5 border-t border-conn-red-ring text-[10px] text-cafe-secondary/40 bg-cafe-surface/40">
+        <div className="flex items-center px-2 py-0.5 border-t border-[var(--console-border-soft)] text-[10px] text-[#5a4a42]/40 bg-cafe-surface/40">
           {targetPort && gatewayPort ? (
             <span className="flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-conn-emerald-bg inline-block" />
+              <span className="w-1.5 h-1.5 rounded-full bg-conn-green-text inline-block" />
               localhost:{targetPort} via gateway:{gatewayPort}
             </span>
           ) : (

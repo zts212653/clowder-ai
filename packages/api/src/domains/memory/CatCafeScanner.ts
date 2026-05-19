@@ -20,6 +20,7 @@ export const KIND_DIRS: Record<string, EvidenceKind> = {
   postmortems: 'lesson',
   guides: 'plan',
   stories: 'lesson',
+  'harness-feedback': 'lesson',
 };
 
 export class CatCafeScanner implements RepoScanner {
@@ -278,6 +279,7 @@ export function extractAnchor(fm: Record<string, unknown>): string | null {
 
 function inferKind(fm: Record<string, unknown>, filePath: string): EvidenceKind {
   const docKind = fm.doc_kind;
+  if (docKind === 'harness-feedback') return 'lesson';
   if (docKind === 'decision' || filePath.includes('/decisions/')) return 'decision';
   if (
     docKind === 'plan' ||

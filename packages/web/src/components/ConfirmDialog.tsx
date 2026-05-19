@@ -30,15 +30,13 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   const [inputValue, setInputValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
-  const confirmBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (open) {
       setInputValue('');
-      if (requireInput) setTimeout(() => inputRef.current?.focus(), 50);
-      else setTimeout(() => confirmBtnRef.current?.focus(), 50);
+      setTimeout(() => inputRef.current?.focus(), 50);
     }
-  }, [open, requireInput]);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -56,11 +54,11 @@ export function ConfirmDialog({
 
   return (
     <div
-      className="fixed inset-0 bg-[var(--console-overlay-backdrop)] flex items-center justify-center z-[100]"
+      className="fixed inset-0 bg-[var(--console-overlay-backdrop)] flex items-center justify-center z-50"
       onClick={onCancel}
     >
       <div
-        className="bg-cafe-surface rounded-xl border border-[var(--cafe-border)] shadow-xl p-6 max-w-sm w-full mx-4"
+        className="bg-cafe-surface rounded-xl shadow-xl p-6 max-w-sm w-full mx-4"
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-base font-semibold mb-2">{title}</h3>
@@ -72,7 +70,7 @@ export function ConfirmDialog({
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             placeholder={inputPlaceholder}
-            className="w-full border border-[var(--console-border-soft)] rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-conn-sky-ring"
+            className="w-full border border-cafe rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-300"
           />
         )}
         <div className="flex justify-end gap-2">
@@ -83,13 +81,10 @@ export function ConfirmDialog({
             {cancelLabel}
           </button>
           <button
-            ref={confirmBtnRef}
             onClick={onConfirm}
             disabled={!canConfirm}
-            className={`px-4 py-2 text-sm text-[var(--cafe-surface)] rounded-lg transition-colors focus:outline-none focus:ring-2 disabled:opacity-40 disabled:cursor-not-allowed ${
-              isDanger
-                ? 'bg-conn-red-text hover:opacity-90 focus:ring-conn-red-ring'
-                : 'bg-[var(--cafe-accent)] hover:opacity-90 focus:ring-[var(--cafe-accent)]/40'
+            className={`px-4 py-2 text-sm text-white rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+              isDanger ? 'bg-conn-red-text hover:bg-conn-red-hover' : 'bg-conn-blue-text hover:bg-conn-blue-hover'
             }`}
           >
             {confirmLabel}

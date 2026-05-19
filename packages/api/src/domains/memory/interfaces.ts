@@ -115,8 +115,16 @@ export interface EvidenceItem {
   worldId?: string;
   /** F093 Phase A (KD-16): scene scope — derived canon evidence */
   sceneId?: string;
+  /** F200 Phase C: first indexed timestamp (epoch ms) for 14d grace period */
+  firstIndexedAt?: number;
   /** F186: collection-level review status */
   reviewStatus?: ReviewStatus;
+  /** F200 v1.1 DF-3: explains why this result matched (anchor/title/summary/keyword/content) */
+  matchReason?: string;
+  /** F200 v1.1 DF-3: ranking factor breakdown when explain=true */
+  rankingFactors?: { bm25Score?: number; consumptionPrior?: number; mmrPenalty?: number };
+  /** F200 v1.1 DF-7: calibrated relevance confidence [0,1] */
+  confidence?: number;
   /** AC-I9: passage-level detail when depth=raw */
   passages?: Array<{
     passageId: string;
@@ -140,7 +148,10 @@ export type EdgeRelation =
   | 'related_to'
   | 'supersedes'
   | 'invalidates'
-  | 'promoted_from';
+  | 'promoted_from'
+  | 'wikilink'
+  | 'doc_link'
+  | 'feature_ref';
 
 export interface Edge {
   fromAnchor: string;
@@ -149,7 +160,7 @@ export interface Edge {
   fromCollectionId?: string;
   toCollectionId?: string;
   edgeSensitivity?: CollectionSensitivity;
-  provenance?: 'frontmatter' | 'wikilink' | 'promote' | 'manual';
+  provenance?: 'frontmatter' | 'wikilink' | 'promote' | 'manual' | 'content';
   createdAt?: string;
 }
 
@@ -198,6 +209,8 @@ export interface SearchOptions {
   worldId?: string;
   /** F093 Phase A (KD-16): filter to a specific scene within a world */
   sceneId?: string;
+  /** F200 v1.1 DF-3: include explainability fields in results */
+  explain?: boolean;
 }
 
 export interface MarkerFilter {
@@ -263,8 +276,10 @@ export interface IEvidenceStore {
   initialize(): Promise<void>;
 }
 
+export type RebuildProgressCallback = (phase: string, percent: number) => void;
+
 export interface IIndexBuilder {
-  rebuild(options?: { force?: boolean }): Promise<RebuildResult>;
+  rebuild(options?: { force?: boolean; onProgress?: RebuildProgressCallback }): Promise<RebuildResult>;
   incrementalUpdate(changedPaths: string[]): Promise<void>;
   checkConsistency(): Promise<ConsistencyReport>;
 }

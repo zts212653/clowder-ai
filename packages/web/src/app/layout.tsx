@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-css-tags -- Global token CSS (xterm vendor + app-level connector tokens) is served as static stylesheets to bypass Next dev's flight CSS loader. */
 import type { Metadata, Viewport } from 'next';
 import { AppShell } from '@/components/AppShell';
 import { BrakeModal } from '@/components/BrakeModal';
@@ -6,11 +7,11 @@ import { SessionBootstrap } from '@/components/SessionBootstrap';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import { ToastContainer } from '@/components/ToastContainer';
 import { ConfirmProvider } from '@/components/useConfirm';
-import '@xterm/xterm/css/xterm.css';
-import './theme-tokens.css';
 import './globals.css';
+import './theme-tokens.css';
 import './console-shell.css';
 import './console-controls.css';
+import './werewolf-theme.css';
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -41,6 +42,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN" suppressHydrationWarning>
+      <head>
+        <link rel="stylesheet" href="/vendor/app/connector-tokens.css" />
+        <link rel="stylesheet" href="/vendor/xterm/xterm.css" />
+      </head>
       <body className="min-h-screen">
         <SessionBootstrap />
         <ThemeProvider>

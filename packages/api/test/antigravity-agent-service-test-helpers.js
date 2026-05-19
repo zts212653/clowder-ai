@@ -23,6 +23,16 @@ export function createMockBridge({
     sendMessage: mock.fn(async () => 0),
     getTrajectorySteps: mock.fn(async () => steps),
     getTrajectory: mock.fn(async () => ({ status: 'CASCADE_RUN_STATUS_IDLE', numTotalSteps: steps.length })),
+    getCascadeHealth: mock.fn(async () => ({
+      cascadeId,
+      checkedAt: Date.now(),
+      level: 'ok',
+      stepCount: steps.length,
+      approximateTrajectoryBytes: 0,
+      thresholds: { warnBytes: 1_572_864, retireBytes: 2_097_152, warnSteps: 150, retireSteps: 200 },
+      reasons: [],
+      retryableForEmptyResponse: false,
+    })),
     pollForSteps: pollError
       ? mock.fn(async function* () {
           throw new Error(pollError);

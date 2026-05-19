@@ -105,12 +105,12 @@ export function WeixinQrPanel({ configured }: { configured: boolean }) {
   if (qrState === 'confirmed' || qrState === 'disconnecting') {
     return (
       <div className="space-y-2" data-testid="weixin-connected">
-        <div className="flex items-center justify-between bg-conn-emerald-bg border border-conn-emerald-ring rounded-lg px-3 py-2.5">
+        <div className="flex items-center justify-between bg-conn-green-bg border border-conn-green-ring rounded-lg px-3 py-2.5">
           <div className="flex items-center gap-2">
-            <span className="text-conn-emerald-text">
+            <span className="text-conn-green-text">
               <CheckCircleIcon />
             </span>
-            <span className="text-sm font-medium text-conn-emerald-text">WeChat connected</span>
+            <span className="text-sm font-medium text-conn-green-text">WeChat connected</span>
           </div>
           <button
             type="button"
@@ -150,8 +150,7 @@ export function WeixinQrPanel({ configured }: { configured: boolean }) {
           <button
             type="button"
             onClick={handleFetchQr}
-            className="flex items-center gap-1.5 px-4 py-2 text-[13px] font-semibold text-[var(--cafe-surface)] rounded-lg transition-colors"
-            // eslint-disable-next-line cafe/no-hardcoded-colors -- WeChat brand green
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white rounded-lg transition-colors"
             style={{ backgroundColor: '#07C160' }}
             data-testid="weixin-generate-qr"
           >
@@ -169,7 +168,7 @@ export function WeixinQrPanel({ configured }: { configured: boolean }) {
       )}
 
       {(qrState === 'waiting' || qrState === 'scanned') && qrUrl && (
-        <div className="flex flex-col items-center gap-3 bg-cafe-surface-elevated border border-[var(--console-border-soft)] rounded-xl p-4">
+        <div className="flex flex-col items-center gap-3 bg-cafe-surface-elevated border border-cafe rounded-xl p-4">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={qrUrl} alt="WeChat login QR code" className="w-48 h-48 rounded-lg" data-testid="weixin-qr-image" />
           {qrState === 'waiting' && (
@@ -179,7 +178,7 @@ export function WeixinQrPanel({ configured }: { configured: boolean }) {
             </div>
           )}
           {qrState === 'scanned' && (
-            <div className="flex items-center gap-2 text-conn-emerald-text text-xs font-medium">
+            <div className="flex items-center gap-2 text-conn-green-text text-xs font-medium">
               <SpinnerIcon />
               <span>Scanned! Confirm on your phone...</span>
             </div>

@@ -159,7 +159,7 @@ export function GodInspector({
                 {!seat.alive ? ' 💀' : ''}
               </span>
               <span
-                className={`text-[9px] font-mono font-medium ${
+                className={`text-[10px] font-mono font-medium ${
                   seat.status.includes('已行动')
                     ? 'text-ww-success'
                     : seat.status.includes('行动中')
@@ -189,7 +189,7 @@ export function GodInspector({
               <span className="text-[10px] font-mono font-bold" style={{ color: si.color }}>
                 {si.icon}
               </span>
-              <span className="text-[11px] font-medium" style={{ color: getRoleColor(step.roleName.toLowerCase()) }}>
+              <span className="text-xs font-medium" style={{ color: getRoleColor(step.roleName.toLowerCase()) }}>
                 {step.roleName}
               </span>
               <span className="text-[10px] font-mono text-ww-dim">{step.detail}</span>
@@ -214,7 +214,7 @@ export function GodInspector({
                 <span className="text-[10px] font-mono font-semibold text-ww-danger">{row.seatId}</span>
                 <span className="text-[10px] font-mono text-ww-dim">→</span>
                 <span className="text-[10px] font-mono font-semibold text-ww-main">{row.target}</span>
-                {row.source === 'fallback' && <span className="text-[9px] font-mono text-ww-danger">系统代行</span>}
+                {row.source === 'fallback' && <span className="text-[10px] font-mono text-ww-danger">系统代行</span>}
               </div>
             ))}
           </div>
@@ -257,7 +257,7 @@ export function GodInspector({
                 type="button"
                 data-testid="god-pause"
                 onClick={() => onGodAction?.('pause')}
-                className="flex-1 text-[11px] font-bold rounded-md px-3 py-2 bg-ww-info text-ww-base hover:brightness-90 transition-colors"
+                className="flex-1 text-xs font-bold rounded-md px-3 py-2 bg-ww-info text-ww-base hover:brightness-90 transition-colors"
               >
                 暂停
               </button>
@@ -267,7 +267,7 @@ export function GodInspector({
                 type="button"
                 data-testid="god-resume"
                 onClick={() => onGodAction?.('resume')}
-                className="flex-1 text-[11px] font-bold rounded-md px-3 py-2 bg-ww-success text-ww-base hover:brightness-90 transition-colors"
+                className="flex-1 text-xs font-bold rounded-md px-3 py-2 bg-ww-success text-ww-base hover:brightness-90 transition-colors"
               >
                 继续
               </button>
@@ -277,7 +277,7 @@ export function GodInspector({
                 type="button"
                 data-testid="god-skip"
                 onClick={() => onGodAction?.('skip_phase')}
-                className="flex-1 text-[11px] font-bold rounded-md px-3 py-2 bg-ww-card text-ww-muted hover:brightness-110 transition-colors"
+                className="flex-1 text-xs font-bold rounded-md px-3 py-2 bg-ww-card text-ww-muted hover:brightness-110 transition-colors"
               >
                 跳过阶段
               </button>
@@ -292,7 +292,7 @@ export function GodInspector({
                 setStopping(true);
                 onGodAction?.('stop');
               }}
-              className={`w-full text-[11px] font-bold rounded-md px-3 py-2 transition-colors ${stopping ? 'bg-ww-card text-ww-dim cursor-wait' : 'bg-ww-danger text-ww-base hover:brightness-90'}`}
+              className={`w-full text-xs font-bold rounded-md px-3 py-2 transition-colors ${stopping ? 'bg-ww-card text-ww-dim cursor-wait' : 'bg-ww-danger text-ww-base hover:brightness-90'}`}
             >
               {stopping ? '停止中...' : '强制停止游戏'}
             </button>

@@ -10,6 +10,8 @@ export default defineConfig({
     environment: 'jsdom',
     include: ['src/**/__tests__/**/*.test.ts', 'src/**/__tests__/**/*.test.tsx'],
     setupFiles: ['src/test-setup.ts'],
+    maxWorkers: process.env.CAT_CAFE_WEB_TEST_WORKERS ?? '25%',
+    testTimeout: 10_000,
   },
   resolve: {
     alias: {

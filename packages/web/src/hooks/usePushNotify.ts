@@ -58,7 +58,6 @@ export interface PushStatusPayload {
     enabled: boolean;
     vapidPublicKeyConfigured: boolean;
     pushServiceConfigured: boolean;
-    pendingRestart?: boolean;
   };
   subscription: {
     count: number;

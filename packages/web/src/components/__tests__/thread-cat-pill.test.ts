@@ -2,6 +2,8 @@
  * F154 Phase B — ThreadCatPill: shows preferred cat in header, opens CatSelector popover.
  */
 import React from 'react';
+import { flushSync } from 'react-dom';
+import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -125,5 +127,28 @@ describe('ThreadCatPill (F154 Phase B)', () => {
 
   it('shows chevron indicating expandable', () => {
     expect(renderPill('thread_pill_test').textContent).toContain('▾');
+  });
+
+  it('does not enter an effect loop when preferredCats is undefined', async () => {
+    mockStore.threads = [{ ...TEST_THREAD, preferredCats: undefined }];
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let root: Root | null = null;
+    try {
+      root = createRoot(container);
+      flushSync(() => {
+        root?.render(React.createElement(ThreadCatPill, { threadId: 'thread_pill_test' }));
+      });
+      await Promise.resolve();
+      expect(
+        errorSpy.mock.calls.some((call) => call.some((value) => String(value).includes('Maximum update depth'))),
+      ).toBe(false);
+    } finally {
+      if (root) {
+        flushSync(() => {
+          root?.unmount();
+        });
+      }
+      errorSpy.mockRestore();
+    }
   });
 });

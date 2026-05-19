@@ -34,7 +34,7 @@ export interface CallbackAuthSnapshot {
   lastViewedAt?: number;
   /**
    * F174 D2b-2 rev3: count of failures within last 24h that occurred AFTER
-   * lastViewedAt. Drives HubButton "unread badge" — clears to 0 when user
+   * lastViewedAt. Drives ActivityBar "unread badge" — clears to 0 when user
    * opens observability/callback-auth subtab.
    */
   unviewedFailures24h?: number;

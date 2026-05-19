@@ -1,5 +1,6 @@
 /**
- * AgentPaneRegistry — tracks which invocations are running in tmux panes.
+ * AgentPaneRegistry — tracks which invocations are running in tmux panes,
+ * and (F198 Phase C AC-C1) which bg carrier daemon sessions are running per thread.
  * In-memory store; used by terminal routes to let frontend discover agent panes.
  */
 
@@ -19,8 +20,21 @@ export interface AgentPaneInfo {
 
 const STALE_THRESHOLD_MS = 3_600_000; // 1 hour after finishing
 
+/** F198 Phase C: metadata for a bg carrier daemon session. */
+export interface BgCarrierSessionInfo {
+  invocationId: string;
+  catId: string;
+  daemonShortId: string;
+  threadId: string;
+  status: 'running' | 'done';
+  startedAt: number;
+  finishedAt?: number;
+}
+
 export class AgentPaneRegistry {
   private panes = new Map<string, AgentPaneInfo>();
+  /** F198 Phase C AC-C1: bg carrier sessions keyed by invocationId. */
+  private bgCarrierSessions = new Map<string, BgCarrierSessionInfo>();
 
   register(invocationId: string, worktreeId: string, paneId: string, userId: string): void {
     this.panes.set(invocationId, {
@@ -78,5 +92,49 @@ export class AgentPaneRegistry {
 
   remove(invocationId: string): void {
     this.panes.delete(invocationId);
+  }
+
+  // ── F198 Phase C AC-C1: bg carrier session tracking ──────────────────────
+
+  registerBgCarrier(opts: { invocationId: string; catId: string; daemonShortId: string; threadId: string }): void {
+    this.bgCarrierSessions.set(opts.invocationId, {
+      ...opts,
+      status: 'running',
+      startedAt: Date.now(),
+    });
+  }
+
+  getBgCarrierByInvocation(invocationId: string): BgCarrierSessionInfo | undefined {
+    return this.bgCarrierSessions.get(invocationId);
+  }
+
+  /** Returns the most-recently-started running bg carrier session for a thread. */
+  getBgCarrierByThread(threadId: string): BgCarrierSessionInfo | undefined {
+    let latest: BgCarrierSessionInfo | undefined;
+    for (const session of this.bgCarrierSessions.values()) {
+      if (session.threadId === threadId && session.status === 'running') {
+        if (!latest || session.startedAt > latest.startedAt) {
+          latest = session;
+        }
+      }
+    }
+    return latest;
+  }
+
+  markBgCarrierDone(invocationId: string): void {
+    const session = this.bgCarrierSessions.get(invocationId);
+    if (session) {
+      session.status = 'done';
+      session.finishedAt = Date.now();
+    }
+  }
+
+  /** P1-2: Set of all daemonShortIds known to Clowder AI (running + done). Used to scope /api/agent-sessions. */
+  getRegisteredDaemonShortIds(): Set<string> {
+    const ids = new Set<string>();
+    for (const session of this.bgCarrierSessions.values()) {
+      ids.add(session.daemonShortId);
+    }
+    return ids;
   }
 }

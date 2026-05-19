@@ -1,7 +1,7 @@
 // @ts-check
 
 import assert from 'node:assert/strict';
-import { beforeEach, describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 import { PushSubscriptionStore } from '../dist/domains/cats/services/stores/ports/PushSubscriptionStore.js';
 import { pushRoutes } from '../dist/routes/push.js';
@@ -28,6 +28,9 @@ function makePushService(overrides = {}) {
   };
 }
 
+const OWNER_ID = 'owner';
+const ORIGINAL_OWNER_ID = process.env.DEFAULT_OWNER_USER_ID;
+
 describe('push routes', () => {
   /** @type {import('fastify').FastifyInstance} */
   let app;
@@ -37,6 +40,7 @@ describe('push routes', () => {
   let auditEvents;
 
   beforeEach(async () => {
+    process.env.DEFAULT_OWNER_USER_ID = OWNER_ID;
     store = new PushSubscriptionStore();
     auditEvents = [];
     const auditLog = {
@@ -46,6 +50,12 @@ describe('push routes', () => {
       },
     };
     app = Fastify();
+    app.addHook('preHandler', async (request) => {
+      const sessionUser = request.headers['x-test-session-user'];
+      if (typeof sessionUser === 'string' && sessionUser.trim()) {
+        request.sessionUserId = sessionUser.trim();
+      }
+    });
     await app.register(pushRoutes, {
       pushSubscriptionStore: store,
       pushService: null,
@@ -53,6 +63,12 @@ describe('push routes', () => {
       auditLog,
     });
     await app.ready();
+  });
+
+  afterEach(async () => {
+    if (ORIGINAL_OWNER_ID === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+    else process.env.DEFAULT_OWNER_USER_ID = ORIGINAL_OWNER_ID;
+    await app?.close();
   });
 
   it('GET /api/push/vapid-public-key returns key when pushService is configured', async () => {
@@ -129,6 +145,164 @@ describe('push routes', () => {
     const body = JSON.parse(res.payload);
     assert.equal(body.key, null, 'should not expose key when push is not fully configured');
     assert.equal(body.enabled, false);
+  });
+
+  it('GET /api/push/status and public key use live push config getters', async () => {
+    /** @type {PushServiceMock | null} */
+    let currentPushService = null;
+    let currentVapidPublicKey = '';
+    const appWithLiveConfig = Fastify();
+    await appWithLiveConfig.register(pushRoutes, {
+      pushSubscriptionStore: store,
+      pushService: null,
+      vapidPublicKey: '',
+      getPushService: () => currentPushService,
+      getVapidPublicKey: () => currentVapidPublicKey,
+      auditLog: {
+        append: async (input) => {
+          auditEvents.push({ type: input.type, data: input.data });
+          return { id: 'audit-test-id' };
+        },
+      },
+    });
+    await appWithLiveConfig.ready();
+
+    const before = await appWithLiveConfig.inject({
+      method: 'GET',
+      url: '/api/push/status',
+      headers: { 'x-cat-cafe-user': 'owner' },
+    });
+    assert.equal(before.statusCode, 200);
+    assert.equal(JSON.parse(before.payload).capability.enabled, false);
+
+    currentPushService = makePushService();
+    currentVapidPublicKey = 'live-vapid-public-key';
+
+    const statusRes = await appWithLiveConfig.inject({
+      method: 'GET',
+      url: '/api/push/status',
+      headers: { 'x-cat-cafe-user': 'owner' },
+    });
+    assert.equal(statusRes.statusCode, 200);
+    const statusBody = JSON.parse(statusRes.payload);
+    assert.equal(statusBody.capability.enabled, true);
+    assert.equal(statusBody.capability.vapidPublicKeyConfigured, true);
+    assert.equal(statusBody.capability.pushServiceConfigured, true);
+
+    const keyRes = await appWithLiveConfig.inject({
+      method: 'GET',
+      url: '/api/push/vapid-public-key',
+    });
+    assert.equal(keyRes.statusCode, 200);
+    assert.deepEqual(JSON.parse(keyRes.payload), { key: 'live-vapid-public-key', enabled: true });
+    await appWithLiveConfig.close();
+  });
+
+  it('GET /api/push/status and POST /api/push/test preserve live getter null over startup service', async () => {
+    store.upsert({
+      endpoint: 'https://push.example.com/sub/live-disabled',
+      keys: { p256dh: 'key1', auth: 'auth1' },
+      userId: 'owner',
+      createdAt: Date.now(),
+    });
+
+    let notifyCalled = false;
+    const startupPushService = makePushService({
+      notifyUser: async () => {
+        notifyCalled = true;
+        return { attempted: 1, delivered: 1, failed: 0, removed: 0 };
+      },
+    });
+    const appWithLiveConfig = Fastify();
+    await appWithLiveConfig.register(pushRoutes, {
+      pushSubscriptionStore: store,
+      pushService: startupPushService,
+      vapidPublicKey: 'startup-vapid-public-key',
+      getPushService: () => null,
+      getVapidPublicKey: () => 'live-vapid-public-key',
+      auditLog: {
+        append: async (input) => {
+          auditEvents.push({ type: input.type, data: input.data });
+          return { id: 'audit-test-id' };
+        },
+      },
+    });
+    await appWithLiveConfig.ready();
+
+    const statusRes = await appWithLiveConfig.inject({
+      method: 'GET',
+      url: '/api/push/status',
+      headers: { 'x-cat-cafe-user': 'owner' },
+    });
+    assert.equal(statusRes.statusCode, 200);
+    const statusBody = JSON.parse(statusRes.payload);
+    assert.equal(statusBody.capability.enabled, false);
+    assert.equal(statusBody.capability.vapidPublicKeyConfigured, true);
+    assert.equal(statusBody.capability.pushServiceConfigured, false);
+    assert.equal(statusBody.errorHints.includes('push_not_configured'), true);
+
+    const testRes = await appWithLiveConfig.inject({
+      method: 'POST',
+      url: '/api/push/test',
+      headers: { 'x-cat-cafe-user': 'owner' },
+    });
+    assert.equal(testRes.statusCode, 503);
+    assert.equal(notifyCalled, false, 'startup push service must not be used after live config disables push');
+    await appWithLiveConfig.close();
+  });
+
+  it('POST /api/push/generate-vapid fails closed when DEFAULT_OWNER_USER_ID is missing', async () => {
+    delete process.env.DEFAULT_OWNER_USER_ID;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/push/generate-vapid',
+      headers: { 'x-test-session-user': OWNER_ID },
+    });
+    assert.equal(res.statusCode, 403);
+    assert.match(JSON.parse(res.payload).error, /DEFAULT_OWNER_USER_ID/);
+    assert.equal(auditEvents.length, 0);
+  });
+
+  it('POST /api/push/generate-vapid rejects trusted header identity without a real session', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/push/generate-vapid',
+      headers: { 'x-cat-cafe-user': OWNER_ID },
+    });
+    assert.equal(res.statusCode, 401);
+    assert.match(JSON.parse(res.payload).error, /Identity required/);
+  });
+
+  it('POST /api/push/generate-vapid rejects non-loopback clients before returning key material', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/push/generate-vapid',
+      headers: { 'x-test-session-user': OWNER_ID },
+      remoteAddress: '203.0.113.10',
+    });
+    assert.equal(res.statusCode, 403);
+    assert.match(JSON.parse(res.payload).error, /loopback-only/);
+    assert.equal(auditEvents.length, 0);
+  });
+
+  it('POST /api/push/generate-vapid returns keys to owner and audits metadata only', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/push/generate-vapid',
+      headers: { 'x-test-session-user': OWNER_ID },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.payload);
+    assert.equal(typeof body.publicKey, 'string');
+    assert.equal(typeof body.privateKey, 'string');
+    assert.ok(body.publicKey.length > 20);
+    assert.ok(body.privateKey.length > 20);
+
+    const auditJson = JSON.stringify(auditEvents);
+    assert.match(auditJson, /push-vapid-generate/);
+    assert.match(auditJson, /VAPID_PUBLIC_KEY/);
+    assert.doesNotMatch(auditJson, new RegExp(body.publicKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.doesNotMatch(auditJson, new RegExp(body.privateKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   });
 
   it('GET /api/push/status requires auth', async () => {

@@ -27,6 +27,7 @@ type FeedTab = 'review' | 'settled' | 'frequent' | 'upgrade';
  */
 export function KnowledgeFeed() {
   const [data, setData] = useState<FeedData | null>(null);
+  const [activeTab, setActiveTab] = useState<FeedTab>('review');
   const [loading, setLoading] = useState(true);
   // pendingCount reserved for badge display in mode switcher
   const [, setPendingCount] = useState(0);
@@ -103,40 +104,71 @@ export function KnowledgeFeed() {
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center text-cafe-muted text-xs">Loading knowledge feed...</div>
+      <div className="flex-1 flex items-center justify-center text-cafe-interactive/40 text-xs">
+        Loading knowledge feed...
+      </div>
     );
   }
 
-  const allItems = [...(data?.needsReview ?? []), ...(data?.settled ?? [])];
+  const tabs: Array<{ key: FeedTab; label: string; count?: number }> = [
+    { key: 'review', label: '待确认', count: data?.needsReview.length },
+    { key: 'settled', label: '已确认', count: data?.settled.length },
+    { key: 'frequent', label: '高频' },
+    { key: 'upgrade', label: '升级' },
+  ];
+
+  const currentItems =
+    activeTab === 'review' ? (data?.needsReview ?? []) : activeTab === 'settled' ? (data?.settled ?? []) : []; // 高频 + 升级 tabs: data source not yet implemented
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="flex-1 overflow-y-auto space-y-2">
-        {allItems.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              className="mb-3 h-10 w-10 text-cafe-muted opacity-40"
-            >
-              <path
-                d="M12 2a7 7 0 0 1 7 7c0 2.4-1.2 4.5-3 5.7V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.3C6.2 13.5 5 11.4 5 9a7 7 0 0 1 7-7Z"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <path d="M9 21h6M10 17v1M14 17v1" strokeLinecap="round" />
-            </svg>
-            <p className="text-[14px] font-semibold text-cafe">暂无涌现知识</p>
-            <p className="mt-1 text-xs text-cafe-muted">对话过程中产生的知识将自动出现在这里</p>
+      {/* Tabs */}
+      <div className="flex border-b border-cafe-subtle/40">
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => setActiveTab(tab.key)}
+            className={`flex items-center gap-1 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors ${
+              activeTab === tab.key
+                ? 'text-cafe-accent border-b-2 border-cafe-accent'
+                : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
+            }`}
+          >
+            {tab.label}
+            {tab.count != null && tab.count > 0 && (
+              <span
+                className={`text-[10px] rounded-full px-1.5 py-0.5 ${
+                  activeTab === tab.key
+                    ? 'bg-cafe-accent text-white'
+                    : 'bg-cafe-surface-sunken/60 text-cafe-interactive/50'
+                }`}
+              >
+                {tab.count}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Feed items */}
+      <div className="flex-1 overflow-y-auto px-2 py-2 space-y-2">
+        {currentItems.length === 0 ? (
+          <div className="text-center text-cafe-interactive/40 text-xs py-8">
+            {activeTab === 'review'
+              ? '没有待确认的知识'
+              : activeTab === 'frequent'
+                ? '高频命中统计即将上线'
+                : activeTab === 'upgrade'
+                  ? '值得升级的知识即将上线'
+                  : '暂无数据'}
           </div>
         ) : (
-          allItems.map((marker) => (
+          currentItems.map((marker) => (
             <KnowledgeCard
               key={marker.id}
               marker={marker}
-              tab={marker.status === 'settled' ? 'settled' : 'review'}
+              tab={activeTab}
               onApprove={handleApprove}
               onReject={handleReject}
               onUndo={handleUndo}
@@ -144,6 +176,15 @@ export function KnowledgeFeed() {
           ))
         )}
       </div>
+
+      {/* Stats bar */}
+      {data?.stats && (
+        <div className="flex items-center justify-center gap-3 px-3 py-1.5 border-t border-cafe-subtle/40 bg-cafe-surface/30">
+          <span className="text-[10px] font-semibold text-blue-600">{data.stats.decisions} decisions</span>
+          <span className="text-[10px] font-semibold text-conn-amber-text">{data.stats.lessons} lessons</span>
+          <span className="text-[10px] font-semibold text-conn-green-text">{data.stats.methods} methods</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -168,50 +209,61 @@ function KnowledgeCard({
   const title = marker.content.replace(/^\[(decision|lesson|method)\]\s*/i, '');
 
   const kindColors: Record<string, { bg: string; text: string }> = {
-    decision: { bg: 'bg-[var(--color-cafe-accent)]/10', text: 'text-[var(--color-cafe-accent)]' },
+    decision: { bg: 'bg-conn-blue-bg', text: 'text-blue-700' },
     lesson: { bg: 'bg-conn-amber-bg', text: 'text-conn-amber-text' },
-    method: { bg: 'bg-conn-emerald-bg', text: 'text-conn-emerald-text' },
+    method: { bg: 'bg-conn-green-bg', text: 'text-conn-green-text' },
   };
   const colors = kindColors[kind] ?? kindColors.lesson!;
 
-  const iconName = kind === 'decision' ? '✦' : kind === 'method' ? '⚙' : '📖';
-
   return (
-    <div className="flex items-center gap-3 rounded-[14px] bg-[var(--console-card-bg)] px-3 py-3.5 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
-      <span className="shrink-0 text-base text-cafe-secondary">{iconName}</span>
-      <div className="min-w-0 flex-1">
-        <p className="text-[13px] font-bold leading-[1.35] text-cafe">{title}</p>
-        <p className="mt-1 text-xs text-cafe-secondary">{marker.source}</p>
+    <div className="bg-cafe-surface rounded-lg border border-cafe-subtle/60 p-2.5 space-y-1.5">
+      {/* Top row: kind badge + status */}
+      <div className="flex items-center justify-between">
+        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${colors.bg} ${colors.text}`}>
+          {kind}
+        </span>
+        {tab === 'settled' && (
+          <span className="text-[10px] font-medium text-conn-green-text bg-conn-green-bg px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+            <span>&#10003;</span> 已确认
+          </span>
+        )}
       </div>
-      <span className={`shrink-0 rounded-md px-2 py-[3px] text-[11px] font-semibold ${colors.bg} ${colors.text}`}>
-        {kind}
-      </span>
+
+      {/* Title */}
+      <div className="text-xs font-semibold text-cafe-black leading-snug">{title}</div>
+
+      {/* Source */}
+      <div className="text-[10px] text-cafe-interactive/40">{marker.source}</div>
+
+      {/* Actions */}
       {tab === 'review' && (
-        <div className="flex shrink-0 gap-1">
+        <div className="flex items-center justify-end gap-1.5 pt-0.5">
           <button
             type="button"
             onClick={() => onApprove(marker.id)}
-            className="rounded-md bg-cafe-accent px-2 py-1 text-[10px] font-semibold text-[var(--cafe-surface)] hover:opacity-90"
+            className="text-[10px] font-semibold text-white bg-cafe-accent rounded px-2 py-1 hover:opacity-90 transition-opacity"
           >
-            ✓
+            Approve
           </button>
           <button
             type="button"
             onClick={() => onReject(marker.id)}
-            className="rounded-md px-1.5 py-1 text-[10px] text-cafe-muted hover:text-cafe-secondary"
+            className="text-[10px] font-medium text-cafe-interactive/50 hover:text-cafe-interactive/80 transition-colors px-1.5 py-1"
           >
-            ✕
+            Dismiss
           </button>
         </div>
       )}
       {tab === 'settled' && (
-        <button
-          type="button"
-          onClick={() => onUndo(marker.id)}
-          className="shrink-0 text-[10px] font-medium text-cafe-accent hover:underline"
-        >
-          撤回
-        </button>
+        <div className="flex items-center justify-end">
+          <button
+            type="button"
+            onClick={() => onUndo(marker.id)}
+            className="text-[10px] font-medium text-cafe-accent hover:underline"
+          >
+            撤回
+          </button>
+        </div>
       )}
     </div>
   );

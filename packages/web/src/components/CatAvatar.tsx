@@ -11,10 +11,10 @@ type CatStatus = 'spawning' | 'pending' | 'streaming' | 'done' | 'error' | 'aliv
 export type CallbackAuthStatus = 'healthy' | 'degraded' | 'broken' | 'unknown';
 
 const CALLBACK_AUTH_STATUS_COLOR: Record<CallbackAuthStatus, string> = {
-  healthy: 'var(--conn-emerald-text)',
-  degraded: 'var(--conn-amber-text)',
-  broken: 'var(--conn-red-text)',
-  unknown: 'var(--cafe-text-muted)',
+  healthy: '#22C55E',
+  degraded: '#F59E0B',
+  broken: '#EF4444',
+  unknown: '#A89386',
 };
 
 interface CatAvatarProps {
@@ -51,7 +51,7 @@ export function CatAvatar({
 
   const isStreaming = status === 'streaming';
   const isError = status === 'error';
-  const ringColor = cat?.color.primary ?? 'var(--console-cat-fallback)';
+  const ringColor = cat?.color.primary ?? '#9CA3AF'; // gray-400 fallback
   const glowShadow = isStreaming && cat ? `0 0 10px ${hexToRgba(ringColor, 0.5)}` : undefined;
 
   // F174 D2b-2: dot is ~28% of avatar size (min 8px), absolute positioned bottom-right.
@@ -68,7 +68,7 @@ export function CatAvatar({
         style={{
           width: size,
           height: size,
-          ['--tw-ring-color' as string]: isError ? 'var(--console-stop)' : ringColor,
+          ['--tw-ring-color' as string]: isError ? '#ef4444' : ringColor,
           boxShadow: glowShadow,
         }}
       >
@@ -113,7 +113,7 @@ export function CatAvatar({
                 width: dotSize,
                 height: dotSize,
                 backgroundColor: CALLBACK_AUTH_STATUS_COLOR[callbackAuthStatus],
-                border: `${dotBorder}px solid var(--cafe-surface)`,
+                border: `${dotBorder}px solid #FFFFFF`,
               }}
             />
           ) : (
@@ -128,7 +128,7 @@ export function CatAvatar({
                 width: dotSize,
                 height: dotSize,
                 backgroundColor: CALLBACK_AUTH_STATUS_COLOR[callbackAuthStatus],
-                border: `${dotBorder}px solid var(--cafe-surface)`,
+                border: `${dotBorder}px solid #FFFFFF`,
               }}
             />
           )}

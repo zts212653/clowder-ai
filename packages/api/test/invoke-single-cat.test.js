@@ -934,7 +934,6 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(payload.health.usedTokens, 50000);
     assert.equal(payload.health.windowTokens, 200000);
     assert.equal(payload.health.source, 'exact');
-    assert.equal(payload.health.usedFrom, 'input');
     assert.ok(payload.health.fillRatio > 0 && payload.health.fillRatio <= 1);
   });
 
@@ -1076,7 +1075,6 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(active.contextHealth.windowTokens, 200000);
     assert.equal(active.contextHealth.fillRatio, 0.7);
     assert.equal(active.contextHealth.source, 'exact');
-    assert.equal(active.contextHealth.usedFrom, 'input');
   });
 
   it('F24-fix: prefers lastTurnInputTokens over aggregated inputTokens for context health', async () => {
@@ -1242,7 +1240,6 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(payload.catId, 'codex');
     assert.equal(payload.health.usedTokens, 4200);
     assert.equal(payload.health.source, 'approx');
-    assert.equal(payload.health.usedFrom, 'total');
   });
 
   it('F24: marks source as approx when usedTokens falls back to totalTokens despite exact window', async () => {
@@ -5184,34 +5181,23 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     }
   });
 
-  // ===========================================================================
-  // Gemini cumulative-only auto-seal guard
-  // ---------------------------------------------------------------------------
-  // Bug: Gemini CLI's stream `result.stats` is session-level cumulative, not
-  // per-turn. Without the guard, fillRatio is computed from cumulative
-  // inputTokens which inflate beyond windowSize and cap at 1.0 → spurious
-  // auto-seal for google provider after a few turns.
-  //
-  // Fix: GeminiAgentService injects per-turn lastTurnInputTokens from local
-  // jsonl when possible; if it could not, invoke-single-cat skips auto-seal
-  // (telemetry preserved).
-  //
-  // Two behavior tests:
-  //   1. Google + cumulative-only → no seal (validates the guard kicks in)
-  //   2. Google + per-turn over threshold → still seals (validates guard not
-  //      written too wide; Gemini can still seal when context-fill is real)
-  // ===========================================================================
-
-  it('F-Gemini-cumulative: skips auto-seal for google provider when only cumulative usage available', async () => {
+  it('#679: skips auto-seal when usage is cumulative (Gemini CLI token stats)', async () => {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const sessionChainStore = new SessionChainStore();
 
-    sessionChainStore.create({
-      cliSessionId: 'cli-gemini-cumulative',
-      threadId: 'thread-gemini-cumulative',
+    const activeRecord = {
+      id: 'sess-gemini-cumul',
       catId: 'gemini',
-      userId: 'user1',
-    });
+      threadId: 'thread-gemini-cumul',
+      userId: 'user-gemini-cumul',
+      seq: 0,
+      status: 'active',
+      compressionCount: 0,
+      cliSessionId: 'cli-gemini-cumul',
+    };
+    // Override getActive to return our active record
+    sessionChainStore.getActive = async () => activeRecord;
+    sessionChainStore.update = async () => activeRecord;
 
     const sealRequests = [];
     const sessionSealer = {
@@ -5226,42 +5212,49 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     const service = {
       async *invoke() {
-        yield { type: 'session_init', catId: 'gemini', sessionId: 'cli-gemini-cumulative', timestamp: Date.now() };
+        yield { type: 'session_init', catId: 'gemini', sessionId: 'cli-gemini-cumul', timestamp: Date.now() };
         yield {
           type: 'done',
           catId: 'gemini',
           timestamp: Date.now(),
           metadata: {
             provider: 'google',
-            model: 'gemini-3.1-pro-preview',
+            model: 'gemini-2.5-pro',
             usage: {
-              // Cumulative session metrics (the bug scenario): 90% of 1M window
-              // far above google action threshold (0.65) — would normally seal.
-              inputTokens: 900_000,
-              outputTokens: 10,
-              contextWindowSize: 1_000_000,
-              // No lastTurnInputTokens: GeminiAgentService GREEN couldn't inject
-              // (e.g. assistantText empty / no matching local jsonl message).
+              // Gemini CLI stats are CUMULATIVE across all turns.
+              // After 10 turns, inputTokens = 800k (cumulative), but actual
+              // context fill is only ~80k. Without the guard, this 800k / 1M
+              // triggers auto-seal at 80% threshold.
+              inputTokens: 800000,
+              totalTokens: 850000,
+              outputTokens: 50000,
+              contextWindowSize: 1000000,
+              isCumulativeUsage: true,
             },
           },
         };
       },
     };
 
-    const deps = { ...makeDeps(), sessionChainStore, sessionSealer };
+    const deps = {
+      ...makeDeps(),
+      sessionChainStore,
+      sessionSealer,
+    };
+
     const msgs = await collect(
       invokeSingleCat(deps, {
         catId: 'gemini',
         service,
-        prompt: 'test cumulative-only no-seal',
-        userId: 'user1',
-        threadId: 'thread-gemini-cumulative',
+        prompt: 'test',
+        userId: 'user-gemini-cumul',
+        threadId: 'thread-gemini-cumul',
         isLastCat: true,
       }),
     );
 
-    // context_health MUST still emit for telemetry / observability
-    const healthInfo = msgs.find((m) => {
+    // Must NOT emit context_health at all — cumulative tokens produce fake fillRatio
+    const healthInfos = msgs.filter((m) => {
       if (m.type !== 'system_info') return false;
       try {
         return JSON.parse(m.content).type === 'context_health';
@@ -5269,20 +5262,9 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         return false;
       }
     });
-    assert.ok(healthInfo, 'should still emit context_health for observability');
-    const healthPayload = JSON.parse(healthInfo.content);
-    assert.equal(
-      healthPayload.health.fillRatio,
-      0.9,
-      'fillRatio computed from cumulative usage (telemetry visible) but auto-seal is gated below',
-    );
-    assert.equal(
-      healthPayload.health.usedFrom,
-      'input',
-      'context_health should expose that this Gemini health value came from cumulative inputTokens fallback',
-    );
+    assert.equal(healthInfos.length, 0, 'must not emit context_health for cumulative Gemini token stats');
 
-    // session_seal_requested MUST NOT emit; requestSeal MUST NOT be called
+    // Must NOT trigger auto-seal either
     const hasSealRequested = msgs.some((m) => {
       if (m.type !== 'system_info') return false;
       try {
@@ -5291,92 +5273,19 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         return false;
       }
     });
-    assert.equal(
-      hasSealRequested,
-      false,
-      'should NOT emit session_seal_requested when only cumulative usage available',
-    );
-    assert.equal(sealRequests.length, 0, 'should NOT call requestSeal on Gemini cumulative-only telemetry');
-  });
+    assert.equal(hasSealRequested, false, 'must not trigger auto-seal on cumulative Gemini token stats');
+    assert.equal(sealRequests.length, 0, 'must not request seal on cumulative Gemini token stats');
 
-  it('F-Gemini-per-turn: still seals for google provider when lastTurnInputTokens exceeds threshold', async () => {
-    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
-    const sessionChainStore = new SessionChainStore();
-
-    sessionChainStore.create({
-      cliSessionId: 'cli-gemini-perturn',
-      threadId: 'thread-gemini-perturn',
-      catId: 'gemini',
-      userId: 'user1',
-    });
-
-    const sealRequests = [];
-    const sessionSealer = {
-      requestSeal: async (input) => {
-        sealRequests.push(input);
-        return { accepted: true, status: 'sealing' };
-      },
-      finalize: async () => {},
-      reconcileStuck: async () => 0,
-      reconcileAllStuck: async () => 0,
-    };
-
-    const service = {
-      async *invoke() {
-        yield { type: 'session_init', catId: 'gemini', sessionId: 'cli-gemini-perturn', timestamp: Date.now() };
-        yield {
-          type: 'done',
-          catId: 'gemini',
-          timestamp: Date.now(),
-          metadata: {
-            provider: 'google',
-            model: 'gemini-3.1-pro-preview',
-            usage: {
-              // Per-turn lastTurnInputTokens — the real context fill (above
-              // google action threshold 0.65). Guard must NOT skip seal here,
-              // otherwise Gemini would never seal.
-              lastTurnInputTokens: 900_000,
-              // Cumulative inputTokens kept low to confirm the guard reads
-              // usedFrom (which prefers last_turn) rather than cumulative.
-              inputTokens: 8_888,
-              outputTokens: 10,
-              contextWindowSize: 1_000_000,
-            },
-          },
-        };
-      },
-    };
-
-    const deps = { ...makeDeps(), sessionChainStore, sessionSealer };
-    const msgs = await collect(
-      invokeSingleCat(deps, {
-        catId: 'gemini',
-        service,
-        prompt: 'test per-turn seals normally',
-        userId: 'user1',
-        threadId: 'thread-gemini-perturn',
-        isLastCat: true,
-      }),
-    );
-
-    const hasSealRequested = msgs.some((m) => {
+    // Raw invocation_usage should still be emitted (telemetry preserved)
+    const usageInfo = msgs.find((m) => {
       if (m.type !== 'system_info') return false;
       try {
-        return JSON.parse(m.content).type === 'session_seal_requested';
+        return JSON.parse(m.content).type === 'invocation_usage';
       } catch {
         return false;
       }
     });
-    assert.equal(
-      hasSealRequested,
-      true,
-      'should emit session_seal_requested when lastTurnInputTokens exceeds threshold (guard MUST NOT block per-turn seal)',
-    );
-    assert.equal(
-      sealRequests.length,
-      1,
-      'should call requestSeal exactly once when per-turn context fill exceeds google action threshold',
-    );
+    assert.ok(usageInfo, 'should still emit invocation_usage for telemetry');
   });
 });
 

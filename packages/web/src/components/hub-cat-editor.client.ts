@@ -26,7 +26,7 @@ export async function uploadAvatarAsset(file: File): Promise<string> {
   return payload.url;
 }
 
-const REF_AUDIO_MAX_BYTES = 10 * 1024 * 1024; // 10 MiB
+const REF_AUDIO_MAX_BYTES = 10 * 1024 * 1024;
 
 export async function uploadRefAudioAsset(file: File): Promise<{ url: string }> {
   if (file.size > REF_AUDIO_MAX_BYTES) {

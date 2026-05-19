@@ -94,7 +94,7 @@ describe('SessionEventsViewer', () => {
     expect(container.innerHTML).toContain('bg-kimi-light');
     expect(container.innerHTML).toContain('text-kimi-dark');
     expect(container.textContent).toContain('梵花猫');
-    expect(container.innerHTML).not.toContain('bg-conn-purple-bg');
+    expect(container.innerHTML).not.toContain('bg-purple-50');
     expect(container.innerHTML).not.toContain('text-purple-800');
   });
 
@@ -108,7 +108,7 @@ describe('SessionEventsViewer', () => {
 
     expect(container.innerHTML).toContain('bg-cafe-surface-elevated');
     expect(container.innerHTML).toContain('text-cafe-secondary');
-    expect(container.innerHTML).not.toContain('bg-conn-purple-bg');
+    expect(container.innerHTML).not.toContain('bg-purple-50');
   });
 
   it('switches to handoff view and renders invocation summaries', async () => {

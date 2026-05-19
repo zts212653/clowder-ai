@@ -21,6 +21,7 @@ function threadState(partial: Partial<ThreadState>): ThreadState {
     intentMode: null,
     targetCats: [],
     catStatuses: {},
+    catStatusDetails: {},
     catInvocations: {},
     currentGame: null,
     unreadCount: 0,

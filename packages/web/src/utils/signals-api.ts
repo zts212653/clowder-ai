@@ -309,3 +309,21 @@ export async function generatePodcast(
   await requireOk(response);
   return (await response.json()) as { artifact: import('@cat-cafe/shared').StudyArtifact };
 }
+
+// --- F091 Phase 4: Timeline API ---
+
+export interface TimelineEntry {
+  readonly articleId: string;
+  readonly articleTitle: string;
+  readonly source: string;
+  readonly lastStudiedAt: string;
+  readonly artifacts: readonly { id: string; kind: string; state: string; createdAt: string }[];
+  readonly threads: readonly { threadId: string; linkedAt: string }[];
+}
+
+export async function fetchStudyTimeline(days?: number): Promise<{ entries: readonly TimelineEntry[]; days: number }> {
+  const url = days ? `/api/signals/timeline?days=${days}` : '/api/signals/timeline';
+  const response = await apiFetch(url);
+  await requireOk(response);
+  return (await response.json()) as { entries: readonly TimelineEntry[]; days: number };
+}

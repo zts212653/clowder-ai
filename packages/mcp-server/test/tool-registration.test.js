@@ -30,10 +30,9 @@ const EXPECTED_TOOLS = [
   'cat_cafe_generate_document',
   'cat_cafe_get_rich_block_rules',
   'cat_cafe_register_pr_tracking',
-  // Guide tools
+  // Guide tools (cat_cafe_guide_resolve legacy alias removed in F193 Phase D AC-D2)
   'cat_cafe_update_guide_state',
   'cat_cafe_get_available_guides',
-  'cat_cafe_guide_resolve',
   'cat_cafe_start_guide',
   'cat_cafe_guide_control',
   // Workflow SOP tools (F073 P1)
@@ -50,9 +49,12 @@ const EXPECTED_TOOLS = [
   'cat_cafe_bootcamp_env_check',
   // Callback-scoped memory tools
   'cat_cafe_retain_memory_callback',
-  // Direct evidence/reflect tools
+  // Direct evidence tools (cat_cafe_reflect removed in F193 Phase D AC-D1)
   'cat_cafe_search_evidence',
-  'cat_cafe_reflect',
+  // F188 Phase F AC-F1: agent-facing graph navigation
+  'cat_cafe_graph_resolve',
+  // F188 Phase F AC-F2: time-based browse for cold-start
+  'cat_cafe_list_recent',
   // F152 Phase C: Distillation tools
   'cat_cafe_mark_generalizable',
   'cat_cafe_nominate_for_global',
@@ -88,8 +90,19 @@ const EXPECTED_TOOLS = [
   'cat_cafe_register_scheduled_task',
   'cat_cafe_remove_scheduled_task',
   'cat_cafe_hold_ball',
+  'cat_cafe_list_labels',
   // F061 Bug-F workaround: MCP shell exec for read-only commands
   'cat_cafe_shell_exec',
+  // F195 Phase B: Audio capture + transcription tools
+  'cat_cafe_audio_list_sources',
+  'cat_cafe_audio_capture_start',
+  'cat_cafe_audio_capture_stop',
+  'cat_cafe_audio_capture_status',
+  'cat_cafe_audio_read_transcript',
+  'cat_cafe_audio_enroll_speakers',
+  // F195 Phase C3: Advisory mode tools
+  'cat_cafe_audio_set_advisory_mode',
+  'cat_cafe_audio_set_talking_points',
 ];
 
 const EXPECTED_COLLAB_TOOLS = [
@@ -110,9 +123,9 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_request_permission',
   'cat_cafe_check_permission_status',
   'cat_cafe_register_pr_tracking',
+  // cat_cafe_guide_resolve legacy alias removed in F193 Phase D AC-D2
   'cat_cafe_update_guide_state',
   'cat_cafe_get_available_guides',
-  'cat_cafe_guide_resolve',
   'cat_cafe_start_guide',
   'cat_cafe_guide_control',
   'cat_cafe_update_workflow',
@@ -127,6 +140,7 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_register_scheduled_task',
   'cat_cafe_remove_scheduled_task',
   'cat_cafe_hold_ball',
+  'cat_cafe_list_labels',
   // F061 Bug-F workaround: MCP shell exec for read-only commands
   'cat_cafe_shell_exec',
 ];
@@ -137,7 +151,9 @@ const EXPECTED_MEMORY_TOOLS = [
   'cat_cafe_nominate_for_global',
   'cat_cafe_review_distillation',
   'cat_cafe_search_evidence',
-  'cat_cafe_reflect',
+  'cat_cafe_graph_resolve', // F188 Phase F AC-F1
+  'cat_cafe_list_recent', // F188 Phase F AC-F2
+  // cat_cafe_reflect removed in F193 Phase D AC-D1
   'cat_cafe_list_session_chain',
   'cat_cafe_read_session_events',
   'cat_cafe_read_session_digest',
@@ -159,6 +175,9 @@ const EXPECTED_SIGNAL_TOOLS = [
   'signal_link_thread',
 ];
 
+// F193 Phase C: limb tools (布偶猫专属能力 namespace) get their own server.
+const EXPECTED_LIMB_TOOLS = ['limb_list_available', 'limb_invoke', 'limb_pair_list', 'limb_pair_approve'];
+
 function assertUnique(values, label) {
   assert.equal(new Set(values).size, values.length, `${label} must not contain duplicate tool names`);
 }
@@ -169,6 +188,7 @@ describe('MCP Server Tool Registration', () => {
     assertUnique(EXPECTED_COLLAB_TOOLS, 'EXPECTED_COLLAB_TOOLS');
     assertUnique(EXPECTED_MEMORY_TOOLS, 'EXPECTED_MEMORY_TOOLS');
     assertUnique(EXPECTED_SIGNAL_TOOLS, 'EXPECTED_SIGNAL_TOOLS');
+    assertUnique(EXPECTED_LIMB_TOOLS, 'EXPECTED_LIMB_TOOLS');
   });
 
   test('all expected tools are registered via createServer()', async () => {
@@ -305,6 +325,14 @@ describe('MCP Server Tool Registration', () => {
 
     assert.deepEqual([...registered].sort(), [...EXPECTED_SIGNAL_TOOLS].sort());
   });
+
+  test('F193 AC-C1: createLimbServer registers only limb tool surface', async () => {
+    const { createLimbServer } = await import('../dist/limb.js');
+    const server = createLimbServer();
+    const registered = Object.keys(server._registeredTools);
+
+    assert.deepEqual([...registered].sort(), [...EXPECTED_LIMB_TOOLS].sort());
+  });
 });
 
 // --- F061 Phase 2: READONLY_ALLOWED_TOOLS whitelist ---
@@ -324,8 +352,8 @@ const KNOWN_WRITE_TOOLS = [
   'cat_cafe_start_vote',
   'cat_cafe_update_bootcamp_state',
   'cat_cafe_bootcamp_env_check', // writes bootcampState.envCheck via callbackPost
+  // cat_cafe_guide_resolve legacy alias removed in F193 Phase D AC-D2
   'cat_cafe_update_guide_state',
-  'cat_cafe_guide_resolve',
   'cat_cafe_start_guide',
   'cat_cafe_guide_control',
   'cat_cafe_retain_memory_callback',
@@ -351,7 +379,9 @@ const KNOWN_WRITE_TOOLS = [
 
 const EXPECTED_READONLY_TOOLS = [
   'cat_cafe_search_evidence',
-  'cat_cafe_reflect',
+  'cat_cafe_graph_resolve', // F188 Phase F AC-F1
+  'cat_cafe_list_recent', // F188 Phase F AC-F2
+  // cat_cafe_reflect removed in F193 Phase D AC-D1
   'cat_cafe_get_rich_block_rules',
   'cat_cafe_list_session_chain',
   'cat_cafe_read_session_events',

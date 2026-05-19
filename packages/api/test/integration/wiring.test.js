@@ -22,6 +22,7 @@ import { PassThrough } from 'node:stream';
 import { after, afterEach, before, beforeEach, describe, mock, test } from 'node:test';
 import Fastify from 'fastify';
 import { migrateRouterOpts } from '../helpers/agent-registry-helpers.js';
+import { fakeL0Compiler } from '../helpers/fake-l0-compiler.js';
 
 // --- Imports (from dist) ---
 
@@ -228,7 +229,7 @@ describe('AgentRouter + Services wiring', () => {
     const router = new AgentRouter(
       await migrateRouterOpts({
         claudeService: new ClaudeAgentService({ spawnFn: claudeSpawn }),
-        codexService: new CodexAgentService({ spawnFn: codexSpawn }),
+        codexService: new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn: codexSpawn }),
         geminiService: new GeminiAgentService({ spawnFn: geminiSpawn, adapter: 'gemini-cli' }),
         registry,
         messageStore,
@@ -253,7 +254,7 @@ describe('AgentRouter + Services wiring', () => {
     const router = new AgentRouter(
       await migrateRouterOpts({
         claudeService: new ClaudeAgentService({ spawnFn: claudeSpawn }),
-        codexService: new CodexAgentService({ spawnFn: codexSpawn }),
+        codexService: new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn: codexSpawn }),
         geminiService: new GeminiAgentService({ spawnFn: geminiSpawn, adapter: 'gemini-cli' }),
         registry,
         messageStore,
@@ -276,7 +277,7 @@ describe('AgentRouter + Services wiring', () => {
     const router = new AgentRouter(
       await migrateRouterOpts({
         claudeService: new ClaudeAgentService({ spawnFn: claudeSpawn }),
-        codexService: new CodexAgentService({ spawnFn: codexSpawn }),
+        codexService: new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn: codexSpawn }),
         geminiService: new GeminiAgentService({ spawnFn: geminiSpawn, adapter: 'gemini-cli' }),
         registry,
         messageStore,
@@ -301,7 +302,7 @@ describe('AgentRouter + Services wiring', () => {
     const router = new AgentRouter(
       await migrateRouterOpts({
         claudeService: new ClaudeAgentService({ spawnFn: claudeSpawn }),
-        codexService: new CodexAgentService({ spawnFn: codexSpawn }),
+        codexService: new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn: codexSpawn }),
         geminiService: new GeminiAgentService({ spawnFn: geminiSpawn, adapter: 'gemini-cli' }),
         registry,
         messageStore,
@@ -327,7 +328,7 @@ describe('AgentRouter + Services wiring', () => {
     const router = new AgentRouter(
       await migrateRouterOpts({
         claudeService: new ClaudeAgentService({ spawnFn: claudeSpawn }),
-        codexService: new CodexAgentService({ spawnFn: codexSpawn }),
+        codexService: new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn: codexSpawn }),
         geminiService: new GeminiAgentService({ spawnFn: geminiSpawn, adapter: 'gemini-cli' }),
         registry,
         messageStore,
@@ -354,7 +355,7 @@ describe('AgentRouter + Services wiring', () => {
     const router = new AgentRouter(
       await migrateRouterOpts({
         claudeService: new ClaudeAgentService({ spawnFn: claudeSpawn }),
-        codexService: new CodexAgentService({ spawnFn: codexSpawn }),
+        codexService: new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn: codexSpawn }),
         geminiService: new GeminiAgentService({ spawnFn: geminiSpawn, adapter: 'gemini-cli' }),
         registry,
         messageStore,
@@ -378,7 +379,7 @@ describe('AgentRouter + Services wiring', () => {
     const router = new AgentRouter(
       await migrateRouterOpts({
         claudeService: new ClaudeAgentService({ spawnFn: claudeSpawn }),
-        codexService: new CodexAgentService({ spawnFn: codexSpawn }),
+        codexService: new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn: codexSpawn }),
         geminiService: new GeminiAgentService({ spawnFn: geminiSpawn, adapter: 'gemini-cli' }),
         registry,
         messageStore,
@@ -407,7 +408,7 @@ describe('AgentRouter + Services wiring', () => {
     const router = new AgentRouter(
       await migrateRouterOpts({
         claudeService: new ClaudeAgentService({ spawnFn: claudeSpawn }),
-        codexService: new CodexAgentService({ spawnFn: codexSpawn }),
+        codexService: new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn: codexSpawn }),
         geminiService: new GeminiAgentService({ spawnFn: geminiSpawn, adapter: 'gemini-cli' }),
         registry,
         messageStore,
@@ -442,7 +443,7 @@ describe('AgentRouter + Services wiring', () => {
     const router = new AgentRouter(
       await migrateRouterOpts({
         claudeService: new ClaudeAgentService({ spawnFn: claudeSpawn }),
-        codexService: new CodexAgentService({ spawnFn: codexSpawn }),
+        codexService: new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn: codexSpawn }),
         geminiService: new GeminiAgentService({ spawnFn: geminiSpawn, adapter: 'gemini-cli' }),
         registry,
         messageStore,
@@ -467,7 +468,7 @@ describe('AgentRouter + Services wiring', () => {
     const router = new AgentRouter(
       await migrateRouterOpts({
         claudeService: new ClaudeAgentService({ spawnFn: claudeSpawn }),
-        codexService: new CodexAgentService({ spawnFn: codexSpawn }),
+        codexService: new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn: codexSpawn }),
         geminiService: new GeminiAgentService({ spawnFn: geminiSpawn, adapter: 'gemini-cli' }),
         registry,
         messageStore,
@@ -515,7 +516,7 @@ describe('MCP callback end-to-end flow', () => {
     const router = new AgentRouter(
       await migrateRouterOpts({
         claudeService: new ClaudeAgentService({ spawnFn: claudeSpawn }),
-        codexService: new CodexAgentService({ spawnFn: codexSpawn }),
+        codexService: new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn: codexSpawn }),
         geminiService: new GeminiAgentService({ spawnFn: geminiSpawn, adapter: 'gemini-cli' }),
         registry,
         messageStore,
@@ -564,7 +565,7 @@ describe('MCP callback end-to-end flow', () => {
     const router = new AgentRouter(
       await migrateRouterOpts({
         claudeService: new ClaudeAgentService({ spawnFn: claudeSpawn }),
-        codexService: new CodexAgentService({ spawnFn: codexSpawn }),
+        codexService: new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn: codexSpawn }),
         geminiService: new GeminiAgentService({ spawnFn: geminiSpawn, adapter: 'gemini-cli' }),
         registry,
         messageStore,

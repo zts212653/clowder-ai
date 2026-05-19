@@ -23,7 +23,12 @@ export interface BuildAgentHookTargetsOptions {
   targetRoot: string;
 }
 
-export const AGENT_HOOK_TARGET_NAMES = ['hooks/session-start', 'hooks/session-stop', 'codex-hooks'] as const;
+export const AGENT_HOOK_TARGET_NAMES = [
+  'hooks/session-start',
+  'hooks/session-stop',
+  'codex-hooks',
+  'gemini-hooks',
+] as const;
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map((item) => canonicalize(item));
@@ -127,6 +132,34 @@ export function renderCodexHooksJson(targetRoot: string): string {
   return JSON.stringify(config, null, 2) + '\n';
 }
 
+export function renderGeminiHooksJson(targetRoot: string): string {
+  const config = {
+    hooks: {
+      SessionStart: [
+        {
+          hooks: [
+            {
+              type: 'command',
+              command: bashCommand(join(targetRoot, '.claude', 'hooks', 'session-start-recall.sh')),
+            },
+          ],
+        },
+      ],
+      Stop: [
+        {
+          hooks: [
+            {
+              type: 'command',
+              command: bashCommand(join(targetRoot, '.claude', 'hooks', 'session-stop-check.sh')),
+            },
+          ],
+        },
+      ],
+    },
+  };
+  return JSON.stringify(config, null, 2) + '\n';
+}
+
 export function buildAgentHookTargets({ projectRoot, targetRoot }: BuildAgentHookTargetsOptions): SyncTarget[] {
   return [
     {
@@ -145,6 +178,12 @@ export function buildAgentHookTargets({ projectRoot, targetRoot }: BuildAgentHoo
       name: 'codex-hooks',
       render: () => renderCodexHooksJson(targetRoot),
       targetPath: join(targetRoot, '.codex', 'hooks.json'),
+      contentKind: 'json',
+    },
+    {
+      name: 'gemini-hooks',
+      render: () => renderGeminiHooksJson(targetRoot),
+      targetPath: join(targetRoot, '.gemini', 'hooks.json'),
       contentKind: 'json',
     },
   ];

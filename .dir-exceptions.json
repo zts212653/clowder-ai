@@ -15,11 +15,32 @@
       "ticket": "F23"
     },
     {
+      "path": "packages/api/src/domains/cats/services/agents/invocation",
+      "owner": "opus",
+      "reason": "Invocation 控制面当前 25 files；full sync 前先登记基线红灯，后续按 queue/registry/tracker/progress/reconciliation 子域拆分",
+      "expiresAt": "2026-06-01",
+      "ticket": "F23"
+    },
+    {
+      "path": "packages/api/src/domains/cats/services/agents/providers",
+      "owner": "opus",
+      "reason": "Agent providers 当前 30 files；full sync 前先登记基线红灯，后续按 carrier/event-transform/image-publication/provider-adapters 子域拆分",
+      "expiresAt": "2026-06-01",
+      "ticket": "F23"
+    },
+    {
       "path": "packages/api/src/domains/memory",
       "owner": "gpt52",
-      "reason": "Memory 域已增长到 34 files；v0.8.0 发版先显式豁免，后续按 retrieval/indexing/distillation 子域拆分",
-      "expiresAt": "2026-07-01",
+      "reason": "Memory 域现有 72 个非 index.ts 文件，职责已横跨 indexing/query/governance/library；先短续期，按真实边界拆子目录",
+      "expiresAt": "2026-06-15",
       "ticket": "F102"
+    },
+    {
+      "path": "packages/api/src/utils",
+      "owner": "codex",
+      "reason": "API utils 当前 25 files；full sync 前先登记基线红灯，后续按 cli/process/path/network/storage/security 子域拆分",
+      "expiresAt": "2026-06-01",
+      "ticket": "F23"
     }
   ]
 }

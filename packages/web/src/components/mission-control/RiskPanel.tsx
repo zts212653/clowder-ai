@@ -83,16 +83,16 @@ export function RiskPanel({ projectId, cards }: RiskPanelProps) {
   return (
     <div className="space-y-4">
       {/* Header + Run button */}
-      <div className="flex items-center justify-between rounded-lg bg-[var(--console-field-bg)] px-4 py-3">
+      <div className="flex items-center justify-between rounded-lg border border-[#E7DAC7] bg-[#FFFDF8] px-4 py-3">
         <div>
-          <div className="text-sm font-semibold text-cafe">風險預警</div>
-          <div className="text-[10px] text-cafe-muted">对全部 Intent Cards 运行风险检测</div>
+          <div className="text-sm font-semibold text-[#2B2118]">風險預警</div>
+          <div className="text-[10px] text-[#9A866F]">对全部 Intent Cards 运行风险检测</div>
         </div>
         <button
           type="button"
           onClick={() => void runDetection()}
           disabled={detecting || cards.length === 0}
-          className="rounded-lg bg-[var(--cafe-accent)] px-4 py-1.5 text-xs font-medium text-[var(--cafe-surface)] hover:bg-[var(--cafe-accent-hover,#7A6139)] disabled:opacity-40"
+          className="rounded-lg bg-[#8B6F47] px-4 py-1.5 text-xs font-medium text-white hover:bg-[#7A6139] disabled:opacity-40"
         >
           {detecting ? '检测中...' : 'Run Detection'}
         </button>
@@ -101,19 +101,19 @@ export function RiskPanel({ projectId, cards }: RiskPanelProps) {
       {/* Summary stats */}
       {summary && (
         <div className="grid grid-cols-3 gap-3">
-          <div className="rounded-lg bg-[var(--console-field-bg)] p-3 text-center">
-            <div className="text-lg font-bold text-cafe">{summary.totalCards}</div>
-            <div className="text-[10px] font-medium text-cafe-muted">Total Cards</div>
+          <div className="rounded-lg border border-[#E7DAC7] bg-[#FFFDF8] p-3 text-center">
+            <div className="text-lg font-bold text-[#2B2118]">{summary.totalCards}</div>
+            <div className="text-[10px] font-medium text-[#9A866F]">Total Cards</div>
           </div>
-          <div className="rounded-lg bg-[var(--console-field-bg)] p-3 text-center">
-            <div className="text-lg font-bold text-conn-red-text">{summary.cardsWithRisks}</div>
-            <div className="text-[10px] font-medium text-cafe-muted">Cards w/ Risks</div>
+          <div className="rounded-lg border border-[#E7DAC7] bg-[#FFFDF8] p-3 text-center">
+            <div className="text-lg font-bold text-[#C05A38]">{summary.cardsWithRisks}</div>
+            <div className="text-[10px] font-medium text-[#9A866F]">Cards w/ Risks</div>
           </div>
-          <div className="rounded-lg bg-[var(--console-field-bg)] p-3 text-center">
-            <div className="text-lg font-bold text-cafe">
+          <div className="rounded-lg border border-[#E7DAC7] bg-[#FFFDF8] p-3 text-center">
+            <div className="text-lg font-bold text-[#2B2118]">
               {Object.values(summary.signals).reduce((a, b) => a + b, 0)}
             </div>
-            <div className="text-[10px] font-medium text-cafe-muted">Total Signals</div>
+            <div className="text-[10px] font-medium text-[#9A866F]">Total Signals</div>
           </div>
         </div>
       )}
@@ -122,29 +122,24 @@ export function RiskPanel({ projectId, cards }: RiskPanelProps) {
       {[...signalsByType.entries()].map(([signal, signalCards]) => {
         const severity = severityFor(signal);
         return (
-          <div key={signal} className="rounded-lg bg-[var(--console-field-bg)] p-3">
+          <div key={signal} className="rounded-lg border border-[#E7DAC7] bg-[#FFFDF8] p-3">
             <div className="mb-2 flex items-center gap-2">
               <span
-                className="rounded-full px-2 py-0.5 text-[10px] font-medium text-[var(--cafe-surface)]"
+                className="rounded-full px-2 py-0.5 text-[10px] font-medium text-white"
                 style={{ backgroundColor: SEVERITY_COLORS[severity] }}
               >
                 {severity}
               </span>
-              <span className="text-xs font-semibold text-cafe">
+              <span className="text-xs font-semibold text-[#2B2118]">
                 {RISK_LABELS[signal as RiskSignal] ?? signal.replace(/_/g, ' ')}
               </span>
-              <span className="text-[10px] text-cafe-muted">({signalCards.length})</span>
+              <span className="text-[10px] text-[#9A866F]">({signalCards.length})</span>
             </div>
             <div className="space-y-1">
               {signalCards.map((card) => (
-                <div
-                  key={card.id}
-                  className="flex items-center gap-2 rounded bg-[var(--console-pill-bg)] px-2 py-1 text-xs"
-                >
-                  <span className="shrink-0 font-mono text-[10px] text-[var(--cafe-accent)]">
-                    {card.id.slice(0, 8)}
-                  </span>
-                  <span className="truncate text-cafe">{card.goal || '—'}</span>
+                <div key={card.id} className="flex items-center gap-2 rounded bg-[#F4EFE7] px-2 py-1 text-xs">
+                  <span className="shrink-0 font-mono text-[10px] text-[#8B6F47]">{card.id.slice(0, 8)}</span>
+                  <span className="truncate text-[#2B2118]">{card.goal || '—'}</span>
                 </div>
               ))}
             </div>
@@ -154,7 +149,7 @@ export function RiskPanel({ projectId, cards }: RiskPanelProps) {
 
       {/* Empty state */}
       {!summary && !detecting && (
-        <div className="rounded-lg border border-dashed border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-6 text-center text-xs text-cafe-muted">
+        <div className="rounded-lg border border-dashed border-[#D8C6AD] bg-[#FBF7F0] p-6 text-center text-xs text-[#9A866F]">
           点击 &ldquo;Run Detection&rdquo; 开始风险检测
         </div>
       )}

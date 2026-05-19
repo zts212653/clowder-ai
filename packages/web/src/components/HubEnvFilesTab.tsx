@@ -1,399 +1,20 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useChatStore } from '@/stores/chatStore';
+import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
-
-interface EnvVar {
-  name: string;
-  defaultValue: string;
-  description: string;
-  category: string;
-  sensitive: boolean;
-  maskMode?: 'url';
-  runtimeEditable?: boolean;
-  restartRequired?: boolean;
-  deprecated?: string;
-  currentValue: string | null;
-}
-
-interface DataDirs {
-  auditLogs: string;
-  runtimeLogs: string;
-  cliArchive: string;
-  redisDevSandbox: string;
-  uploads: string;
-}
-
-interface EnvPaths {
-  projectRoot: string;
-  homeDir: string;
-  dataDirs: DataDirs;
-}
-
-interface EnvSummaryData {
-  categories: Record<string, string>;
-  variables: EnvVar[];
-  paths: EnvPaths;
-}
-
-interface EnvSaveResponse {
-  ok: boolean;
-  envFilePath?: string;
-  summary?: EnvVar[];
-}
-
-// Must stay in sync with workspace-security.ts DENYLIST_PATTERNS
-const DENYLIST_PATTERNS = [/^\.env/, /\.pem$/, /\.key$/, /^id_rsa/];
-
-function isInsideProject(absPath: string, projectRoot: string): boolean {
-  return absPath.startsWith(projectRoot + '/') || absPath === projectRoot;
-}
-
-function isDenylisted(fileName: string): boolean {
-  return DENYLIST_PATTERNS.some((p) => p.test(fileName));
-}
-
-function toRelativePath(absPath: string, projectRoot: string): string {
-  if (absPath.startsWith(projectRoot + '/')) return absPath.slice(projectRoot.length + 1);
-  return absPath;
-}
-
-type PathKind = 'file' | 'dir-inside' | 'denied' | 'outside';
-
-/**
- * Classify a path for Hub navigation. Returns kind + relPath.
- * - file: openable via setWorkspaceOpenFile
- * - dir-inside: directory in worktree, opens workspace panel only
- * - denied: blocked by security denylist
- * - outside: not within worktree root
- */
-function classifyPath(absPath: string, projectRoot: string, isDir: boolean): { kind: PathKind; relPath: string } {
-  if (!isInsideProject(absPath, projectRoot)) {
-    return { kind: 'outside', relPath: absPath };
-  }
-  const relPath = toRelativePath(absPath, projectRoot);
-  const fileName = relPath.split('/').pop() ?? relPath;
-  if (!isDir && isDenylisted(fileName)) {
-    return { kind: 'denied', relPath };
-  }
-  return { kind: isDir ? 'dir-inside' : 'file', relPath };
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="rounded-[20px] bg-[var(--console-card-bg)] p-[18px] shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
-      <h3 className="text-[17px] font-bold text-cafe">{title}</h3>
-      <div className="mt-3">{children}</div>
-    </section>
-  );
-}
-
-function HubFileLink({ relPath, label }: { relPath: string; label: string }) {
-  const setOpenFile = useChatStore((s) => s.setWorkspaceOpenFile);
-
-  const handleClick = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      setOpenFile(relPath, null, null);
-    },
-    [setOpenFile, relPath],
-  );
-
-  return (
-    <button
-      type="button"
-      onClick={handleClick}
-      className="text-[var(--color-cafe-accent)] hover:opacity-90 text-xs shrink-0 underline underline-offset-2 decoration-[var(--color-cafe-accent)]/60 hover:decoration-[var(--color-cafe-accent)] transition-colors"
-      title={`在 Hub 工作区中查看\n${relPath}`}
-    >
-      {label}
-    </button>
-  );
-}
-
-function HubDirLink({ relPath, label }: { relPath: string; label: string }) {
-  const setRevealPath = useChatStore((s) => s.setWorkspaceRevealPath);
-
-  const handleClick = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      setRevealPath(relPath);
-    },
-    [setRevealPath, relPath],
-  );
-
-  return (
-    <button
-      type="button"
-      onClick={handleClick}
-      className="text-[var(--color-cafe-accent)] hover:opacity-90 text-xs shrink-0 underline underline-offset-2 decoration-[var(--color-cafe-accent)]/60 hover:decoration-[var(--color-cafe-accent)] transition-colors"
-      title={`打开工作区面板，在文件树中找到:\n${relPath}`}
-    >
-      {label}
-    </button>
-  );
-}
-
-function RestrictedPathLabel({ absPath, reason }: { absPath: string; reason: string }) {
-  return (
-    <span className="text-xs text-cafe-muted shrink-0 cursor-default" title={`${reason}\n${absPath}`}>
-      受保护
-    </span>
-  );
-}
-
-function PathAction({
-  classification,
-  absPath,
-}: {
-  classification: { kind: PathKind; relPath: string };
-  absPath: string;
-}) {
-  switch (classification.kind) {
-    case 'file':
-      return <HubFileLink relPath={classification.relPath} label="在 Hub 中查看" />;
-    case 'dir-inside':
-      return <HubDirLink relPath={classification.relPath} label="在 Hub 中查看" />;
-    case 'denied':
-      return <RestrictedPathLabel absPath={absPath} reason="受安全策略保护，无法在 Hub 中打开" />;
-    case 'outside':
-      return <RestrictedPathLabel absPath={absPath} reason="位于项目目录外部，无法在 Hub 中打开" />;
-  }
-}
-
-function buildConfigFiles(projectRoot: string) {
-  return [
-    {
-      name: 'cat-template.json',
-      path: `${projectRoot}/cat-template.json`,
-      desc: '猫猫模板（只读 seed）',
-      isDir: false,
-    },
-    {
-      name: '.cat-cafe/cat-catalog.json',
-      path: `${projectRoot}/.cat-cafe/cat-catalog.json`,
-      desc: '运行时成员真相源',
-      isDir: false,
-    },
-    { name: '.env', path: `${projectRoot}/.env`, desc: '可编辑环境变量真相源（不含认证凭证）', isDir: false },
-    { name: '.env.local', path: `${projectRoot}/.env.local`, desc: '本地环境变量覆盖', isDir: false },
-    { name: 'start-dev.sh', path: `${projectRoot}/scripts/start-dev.sh`, desc: '开发启动脚本', isDir: false },
-    { name: 'CLAUDE.md', path: `${projectRoot}/CLAUDE.md`, desc: '布偶猫项目指引', isDir: false },
-    { name: 'AGENTS.md', path: `${projectRoot}/AGENTS.md`, desc: '缅因猫项目指引', isDir: false },
-    { name: 'GEMINI.md', path: `${projectRoot}/GEMINI.md`, desc: '暹罗猫项目指引', isDir: false },
-  ];
-}
-
-function needsRestart(variable: EnvVar): boolean {
-  return variable.restartRequired === true || variable.runtimeEditable === false;
-}
-
-function isEditableVariable(variable: EnvVar): boolean {
-  // Must stay in sync with env-registry.ts isEditableEnvVar()
-  if (variable.runtimeEditable === true) return true;
-  if (variable.runtimeEditable === false) return false;
-  return !variable.sensitive;
-}
-
-/** Sensitive var explicitly opted into runtime editing (needs password input + masked display). */
-function isSensitiveEditable(variable: EnvVar): boolean {
-  return variable.sensitive && variable.runtimeEditable === true;
-}
-
-function isMaskedUrlVariable(variable: EnvVar): boolean {
-  return (
-    variable.maskMode === 'url' && typeof variable.currentValue === 'string' && variable.currentValue.includes('***')
-  );
-}
-
-function initialDraftValue(variable: EnvVar): string {
-  // Sensitive editable vars: always start empty (current value is masked as ***)
-  if (isSensitiveEditable(variable)) return '';
-  if (isMaskedUrlVariable(variable)) return '';
-  return variable.currentValue ?? '';
-}
-
-function buildDataDirs(dataDirs: DataDirs) {
-  return [
-    { name: '审计日志', path: dataDirs.auditLogs, desc: 'EventAuditLog 输出', isDir: true },
-    { name: '运行日志', path: dataDirs.runtimeLogs, desc: 'Pino 结构化 runtime log', isDir: true },
-    { name: 'CLI 归档', path: dataDirs.cliArchive, desc: 'CLI 原始输出归档', isDir: true },
-    { name: 'Redis 开发沙盒', path: dataDirs.redisDevSandbox, desc: '开发用 Redis 数据', isDir: true },
-    { name: '上传目录', path: dataDirs.uploads, desc: '文件上传存储', isDir: true },
-  ];
-}
-
-function ConfigFilesSection({ projectRoot }: { projectRoot: string }) {
-  const files = useMemo(() => buildConfigFiles(projectRoot), [projectRoot]);
-  return (
-    <Section title="配置文件">
-      <div className="space-y-2">
-        {files.map((f) => {
-          const cls = classifyPath(f.path, projectRoot, f.isDir);
-          return (
-            <div key={f.name} className="flex items-baseline gap-2 px-1 py-2">
-              <code className="shrink-0 rounded bg-[var(--console-pill-bg)] px-1.5 py-0.5 font-mono text-xs text-cafe-secondary">
-                {f.name}
-              </code>
-              <span className="text-xs text-cafe-muted">{f.desc}</span>
-              <PathAction classification={cls} absPath={f.path} />
-            </div>
-          );
-        })}
-      </div>
-    </Section>
-  );
-}
-
-function EnvCategoryGroup({ label, count, children }: { label: string; count: number; children: React.ReactNode }) {
-  const [collapsed, setCollapsed] = useState(false);
-  return (
-    <div className="console-list-card rounded-2xl shadow-[0_4px_16px_rgba(43,33,26,0.05)] overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setCollapsed((c) => !c)}
-        className="flex w-full items-center gap-2.5 px-4 py-3 text-left transition-colors hover:bg-[var(--console-hover-bg)]"
-      >
-        <span
-          className="text-[11px] text-cafe-muted transition-transform"
-          style={{ transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}
-        >
-          ▾
-        </span>
-        <span className="text-[13px] font-semibold text-cafe">{label}</span>
-        <span className="console-pill rounded-full px-2 py-0.5 text-[10px] font-semibold text-cafe-muted">{count}</span>
-      </button>
-      {!collapsed && <div className="divide-y divide-[var(--console-border-soft)] px-4 pb-2">{children}</div>}
-    </div>
-  );
-}
-
-function EnvVarsSection({
-  categories,
-  variables,
-  drafts,
-  isDirty,
-  pendingRestartCount,
-  saveState,
-  onDraftChange,
-  onSave,
-}: {
-  categories: Record<string, string>;
-  variables: EnvVar[];
-  drafts: Record<string, string>;
-  isDirty: boolean;
-  pendingRestartCount: number;
-  saveState: { saving: boolean; error: string | null; success: string | null };
-  onDraftChange: (name: string, value: string) => void;
-  onSave: () => void;
-}) {
-  const grouped = Object.entries(categories)
-    .map(([key, label]) => ({
-      key,
-      label,
-      vars: variables.filter((v) => v.category === key),
-    }))
-    .filter((g) => g.vars.length > 0);
-
-  return (
-    <Section title="运行时配置">
-      <div className="mb-3 rounded-[12px] border border-conn-emerald-ring bg-conn-emerald-bg px-3 py-2 text-xs leading-5 text-conn-emerald-text">
-        变量值可直接编辑，保存后自动回填 `.env`。写回 .env 后需重启相关服务生效；URL
-        型连接串当前值已脱敏，修改时请填写完整值。
-      </div>
-      <div className="space-y-2.5">
-        {grouped.map((group) => (
-          <EnvCategoryGroup key={group.key} label={group.label} count={group.vars.length}>
-            {group.vars.map((v) => (
-              <div key={v.name} className="flex items-center gap-3 px-1 py-2.5 text-xs">
-                <div className="min-w-0 flex-1 space-y-0.5">
-                  <div className="flex items-baseline gap-1.5">
-                    <code className="shrink-0 font-mono font-semibold text-cafe">{v.name}</code>
-                    <span
-                      className={`shrink-0 text-[10px] ${needsRestart(v) ? 'text-conn-amber-text' : 'text-conn-emerald-text'}`}
-                      title={needsRestart(v) ? '需重启生效' : '即时生效'}
-                    >
-                      {v.deprecated ? '⛔' : needsRestart(v) ? '🟡' : '🟢'}
-                    </span>
-                    {v.deprecated && (
-                      <span className="shrink-0 rounded bg-conn-red-bg px-1 py-0.5 text-[10px] font-semibold text-conn-red-text">
-                        {v.deprecated ? '已废弃' : ''}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-cafe-muted">{v.description}</p>
-                </div>
-                <div className="w-[220px] shrink-0">
-                  {isEditableVariable(v) ? (
-                    <input
-                      aria-label={v.name}
-                      type={isSensitiveEditable(v) ? 'password' : 'text'}
-                      autoComplete={isSensitiveEditable(v) ? 'off' : undefined}
-                      value={drafts[v.name] ?? ''}
-                      onChange={(e) => onDraftChange(v.name, e.target.value)}
-                      placeholder={
-                        isSensitiveEditable(v)
-                          ? v.currentValue
-                            ? '已设置（留空不修改）'
-                            : '输入密钥'
-                          : isMaskedUrlVariable(v)
-                            ? '保持当前值（已脱敏）'
-                            : v.defaultValue
-                      }
-                      className="console-form-input py-1.5 font-mono text-xs"
-                    />
-                  ) : (
-                    <div className="rounded-lg bg-[var(--console-field-bg)] px-3 py-1.5 font-mono text-xs text-cafe-muted">
-                      {v.currentValue ?? v.defaultValue}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </EnvCategoryGroup>
-        ))}
-      </div>
-      {pendingRestartCount > 0 && (
-        <div className="mt-3 rounded-[12px] border border-conn-amber-ring bg-conn-amber-bg px-3 py-2 text-xs leading-5 text-conn-amber-text">
-          {pendingRestartCount} 项变更需要重启生效
-        </div>
-      )}
-      <div className="mt-3 flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={!isDirty || saveState.saving}
-          className="rounded-full bg-[var(--cafe-accent)] px-4 py-2 text-xs font-semibold text-[var(--cafe-surface)] hover:bg-[var(--cafe-accent-hover,#c47f52)] disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {saveState.saving ? '保存中...' : '保存到 .env'}
-        </button>
-        {saveState.error && <span className="text-xs text-conn-red-text">{saveState.error}</span>}
-        {saveState.success && <span className="text-xs text-conn-emerald-text">{saveState.success}</span>}
-      </div>
-    </Section>
-  );
-}
-
-function DataDirsSection({ dataDirs, projectRoot }: { dataDirs: DataDirs; projectRoot: string }) {
-  const dirs = useMemo(() => buildDataDirs(dataDirs), [dataDirs]);
-  return (
-    <Section title="数据目录">
-      <div className="space-y-2">
-        {dirs.map((d) => {
-          const cls = classifyPath(d.path, projectRoot, d.isDir);
-          return (
-            <div key={d.name} className="flex items-baseline gap-2 px-1 py-2">
-              <span className="shrink-0 text-xs font-medium text-cafe-secondary">{d.name}</span>
-              <span className="text-xs text-cafe-muted">{d.desc}</span>
-              <PathAction classification={cls} absPath={d.path} />
-            </div>
-          );
-        })}
-      </div>
-    </Section>
-  );
-}
+import {
+  ConfigFilesSection,
+  DataDirsSection,
+  type EnvSaveResponse,
+  type EnvSummaryData,
+  EnvVarsSection,
+  initialDraftValue,
+  isEditableVariable,
+  isMaskedUrlVariable,
+  isSensitiveEditable,
+  PageIntro,
+} from './settings/EnvSubComponents';
+import { SettingsStatusStrip } from './settings/primitives';
 
 export function HubEnvFilesTab({ excludeCategories }: { excludeCategories?: string[] } = {}) {
   const [data, setData] = useState<EnvSummaryData | null>(null);
@@ -424,8 +45,8 @@ export function HubEnvFilesTab({ excludeCategories }: { excludeCategories?: stri
       .catch(() => setError('环境信息加载失败'));
   }, []);
 
-  if (error) return <p className="text-sm text-conn-red-text bg-conn-red-bg rounded-lg px-3 py-2">{error}</p>;
-  if (!data) return <p className="text-sm text-cafe-muted">加载中...</p>;
+  if (error) return <SettingsStatusStrip tone="error">{error}</SettingsStatusStrip>;
+  if (!data) return <SettingsStatusStrip tone="muted">加载中...</SettingsStatusStrip>;
 
   const editableVariables = data.variables.filter(isEditableVariable);
   const changedUpdates = editableVariables
@@ -440,10 +61,6 @@ export function HubEnvFilesTab({ excludeCategories }: { excludeCategories?: stri
     .map(({ name, value }) => ({ name, value }));
 
   const isDirty = changedUpdates.length > 0;
-  const pendingRestartCount = changedUpdates.filter((u) => {
-    const v = data.variables.find((item) => item.name === u.name);
-    return v && needsRestart(v);
-  }).length;
 
   const handleDraftChange = (name: string, value: string) => {
     setDrafts((prev) => ({ ...prev, [name]: value }));
@@ -474,7 +91,6 @@ export function HubEnvFilesTab({ excludeCategories }: { excludeCategories?: stri
         : data.variables.map((variable) => {
             const update = changedUpdates.find((item) => item.name === variable.name);
             if (!update) return variable;
-            // Never store plaintext for sensitive vars in client state
             if (isSensitiveEditable(variable)) {
               return { ...variable, currentValue: update.value ? '***' : null };
             }
@@ -496,6 +112,7 @@ export function HubEnvFilesTab({ excludeCategories }: { excludeCategories?: stri
 
   return (
     <div className="space-y-4">
+      <PageIntro />
       <EnvVarsSection
         categories={
           excludeCategories
@@ -507,7 +124,6 @@ export function HubEnvFilesTab({ excludeCategories }: { excludeCategories?: stri
         }
         drafts={drafts}
         isDirty={isDirty}
-        pendingRestartCount={pendingRestartCount}
         saveState={saveState}
         onDraftChange={handleDraftChange}
         onSave={handleSave}

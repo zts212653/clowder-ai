@@ -53,6 +53,14 @@ export interface EvidenceResult {
       createdAt?: string;
     }>;
   }>;
+  /** DF-3: explainability — which field matched (always present) */
+  matchReason?: string;
+  /** F200 HW-4 根因②b (砚砚 P1-2): source file path for path-based
+   * consumption match (shell-read / Read). Sourced from evidenceStore
+   * search item (interfaces.ts sourcePath); structured chain, not text-parse. */
+  sourcePath?: string;
+  /** DF-3: explainability — scoring breakdown (only with explain=true) */
+  rankingFactors?: { bm25Score?: number; consumptionPrior?: number; mmrPenalty?: number };
 }
 
 /** F163: Boost source attribution (search-path reranking, not injection) */

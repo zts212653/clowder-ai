@@ -150,7 +150,10 @@ describe('GET /api/messages', () => {
       mentions: [],
       timestamp: 3000,
       threadId: 'thread-routing',
-      extra: { systemKind: 'a2a_routing' },
+      extra: {
+        systemKind: 'a2a_routing',
+        a2aRouting: { fromCatId: 'codex', targetCatId: 'opus-47', invocationId: 'inv-routing' },
+      },
     });
 
     const res = await app.inject({
@@ -164,6 +167,11 @@ describe('GET /api/messages', () => {
     assert.equal(body.messages[0].catId, null);
     assert.equal(body.messages[0].content, '布偶猫 → 缅因猫');
     assert.equal(body.messages[0].extra.systemKind, 'a2a_routing');
+    assert.deepEqual(body.messages[0].extra.a2aRouting, {
+      fromCatId: 'codex',
+      targetCatId: 'opus-47',
+      invocationId: 'inv-routing',
+    });
   });
 
   it('respects limit parameter', async () => {

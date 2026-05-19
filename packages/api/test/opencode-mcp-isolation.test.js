@@ -164,7 +164,7 @@ describe('MCP Tool Namespace Isolation (AC-10)', () => {
       'cat_cafe_create_rich_block',
       'cat_cafe_request_permission',
       'cat_cafe_search_evidence',
-      'cat_cafe_reflect',
+      // cat_cafe_reflect removed in F193 Phase D AC-D1
       'cat_cafe_multi_mention',
       'cat_cafe_start_vote',
       'cat_cafe_update_workflow',

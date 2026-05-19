@@ -84,12 +84,12 @@ export function TraceBrowser() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="traceId or catId..."
-          className="flex-1 rounded-lg border border-cafe-border bg-cafe-surface px-3 py-1.5 text-sm text-cafe placeholder:text-cafe-muted focus:border-[var(--color-cafe-accent)] focus:outline-none"
+          className="flex-1 rounded-lg border border-cafe-border bg-cafe-surface px-3 py-1.5 text-sm text-cafe placeholder:text-cafe-muted focus:border-conn-blue-ring focus:outline-none"
         />
         <button
           type="button"
           onClick={fetchTraces}
-          className="rounded-lg bg-[var(--color-cafe-accent)]/10 px-3 py-1.5 text-xs font-medium text-[var(--color-cafe-accent)] hover:opacity-90"
+          className="rounded-lg bg-conn-blue-bg px-3 py-1.5 text-xs font-medium text-conn-blue-text hover:bg-conn-blue-bg"
         >
           Search
         </button>
@@ -173,7 +173,7 @@ function TreeWaterfall({
           <div
             key={node.span.spanId}
             onClick={() => onSelectSpan(selected ? null : node.span.spanId)}
-            className={`flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 transition-colors hover:bg-cafe-surface-elevated ${selected ? 'bg-[var(--color-cafe-accent)]/10' : ''}`}
+            className={`flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 transition-colors hover:bg-cafe-surface-elevated ${selected ? 'bg-conn-blue-bg/70' : ''}`}
           >
             <div
               className="flex items-center gap-1 truncate text-[10px]"
@@ -194,7 +194,7 @@ function TreeWaterfall({
             )}
             <div className="relative h-3 flex-1 rounded bg-cafe-surface-elevated">
               <div
-                className={`absolute h-full rounded ${statusOk ? 'bg-[var(--color-cafe-accent)]' : 'bg-[var(--color-conn-red-text)]'}`}
+                className={`absolute h-full rounded ${statusOk ? 'bg-conn-blue-text' : 'bg-conn-red-text'}`}
                 style={{ left: `${left}%`, width: `${width}%` }}
               />
             </div>
@@ -227,9 +227,9 @@ function SpanDetail({ span }: { span: TraceSpan | undefined }) {
             <button
               type="button"
               onClick={() => setXrayOpen(!xrayOpen)}
-              className="rounded-md bg-[var(--console-xray-btn-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--console-xray-text)] transition-colors hover:bg-[var(--console-xray-btn-hover)]"
+              className="rounded-md bg-conn-purple-bg px-2 py-0.5 text-[10px] font-medium text-conn-purple-text transition-colors hover:bg-conn-purple-hover hover:text-white"
             >
-              {xrayOpen ? '✕ Close' : '🔬 X-Ray'}
+              {xrayOpen ? 'Close' : 'X-Ray'}
             </button>
           )}
         </div>
@@ -271,7 +271,7 @@ function SpanDetail({ span }: { span: TraceSpan | undefined }) {
   );
 }
 
-// ── F153: Prompt X-Ray Inspector ──────────────────────────────────
+// -- F153: Prompt X-Ray Inspector --
 
 interface PromptCaptureData {
   captureId: string;
@@ -338,16 +338,16 @@ function PromptInspector({ invocationId, catId }: { invocationId?: string; catId
   if (!selected) return null;
 
   const tabs: { key: InspectorTab; label: string; color: string }[] = [
-    { key: 'system', label: 'System', color: 'text-blue-600' },
-    { key: 'user', label: 'User', color: 'text-green-600' },
-    { key: 'effective', label: 'Full Prompt', color: 'text-purple-600' },
-    { key: 'meta', label: 'Meta', color: 'text-amber-600' },
+    { key: 'system', label: 'System', color: 'text-conn-blue-text' },
+    { key: 'user', label: 'User', color: 'text-conn-green-text' },
+    { key: 'effective', label: 'Full Prompt', color: 'text-conn-purple-text' },
+    { key: 'meta', label: 'Meta', color: 'text-conn-amber-text' },
   ];
 
   return (
-    <div className="mt-3 rounded-lg border border-[var(--console-xray-border)] bg-[var(--console-xray-bg)] p-3">
+    <div className="mt-3 rounded-lg border border-conn-purple-ring bg-cafe-surface p-3">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-[11px] font-medium text-[var(--console-xray-text)]">Prompt X-Ray</span>
+        <span className="text-xs font-medium text-conn-purple-text">Prompt X-Ray</span>
         <div className="flex items-center gap-2 text-[10px] text-cafe-muted">
           <span>{selected.model}</span>
           <span>·</span>
@@ -378,7 +378,7 @@ function PromptInspector({ invocationId, catId }: { invocationId?: string; catId
         {tab === 'system' && (
           <>
             {!selected.injectionDecision.injected && (
-              <div className="mb-2 rounded bg-[var(--semantic-warning-bg)] px-2 py-1 text-[10px] text-[var(--semantic-warning-text)]">
+              <div className="mb-2 rounded bg-conn-amber-bg px-2 py-1 text-[10px] text-conn-amber-text">
                 Resume — system prompt was not injected this turn
               </div>
             )}
@@ -417,38 +417,28 @@ function PromptTokenBar({ capture }: { capture: PromptCaptureData }) {
   return (
     <div>
       <div className="flex h-2 overflow-hidden rounded-full bg-cafe-surface-elevated">
-        <div
-          className="bg-[var(--console-chart-system)]"
-          style={{ width: `${sysPct}%` }}
-          title={`System: ${sysPct.toFixed(0)}%`}
-        />
+        <div className="bg-conn-blue-text" style={{ width: `${sysPct}%` }} title={`System: ${sysPct.toFixed(0)}%`} />
         {missionPct > 0 && (
           <div
-            className="bg-[var(--console-chart-mission)]"
+            className="bg-conn-amber-text"
             style={{ width: `${missionPct}%` }}
             title={`Mission: ${missionPct.toFixed(0)}%`}
           />
         )}
-        <div
-          className="bg-[var(--console-chart-user)]"
-          style={{ width: `${userPct}%` }}
-          title={`User: ${userPct.toFixed(0)}%`}
-        />
+        <div className="bg-conn-green-text" style={{ width: `${userPct}%` }} title={`User: ${userPct.toFixed(0)}%`} />
       </div>
-      <div className="mt-0.5 flex gap-3 text-[9px] text-cafe-muted">
+      <div className="mt-0.5 flex gap-3 text-[10px] text-cafe-muted">
         <span>
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--console-chart-system)]" /> System{' '}
-          {sysPct.toFixed(0)}%
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-conn-blue-text" /> System {sysPct.toFixed(0)}%
         </span>
         {missionPct > 0 && (
           <span>
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--console-chart-mission)]" /> Mission{' '}
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-conn-amber-text" /> Mission{' '}
             {missionPct.toFixed(0)}%
           </span>
         )}
         <span>
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--console-chart-user)]" /> User{' '}
-          {userPct.toFixed(0)}%
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-conn-green-text" /> User {userPct.toFixed(0)}%
         </span>
       </div>
     </div>
@@ -497,11 +487,7 @@ function PromptMeta({ capture }: { capture: PromptCaptureData }) {
         <div className="ml-2 space-y-0.5">
           <div>
             <span className="text-cafe-muted">injected:</span>{' '}
-            <span
-              className={
-                injectionDecision.injected ? 'text-[var(--semantic-success-text)]' : 'text-[var(--semantic-error-text)]'
-              }
-            >
+            <span className={injectionDecision.injected ? 'text-conn-green-text' : 'text-conn-red-text'}>
               {String(injectionDecision.injected)}
             </span>
           </div>

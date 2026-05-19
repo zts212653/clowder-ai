@@ -9,7 +9,6 @@
  */
 
 import { useMemo } from 'react';
-import { getThreadHref } from '@/components/ThreadSidebar/thread-navigation';
 import type { ToolEvent } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 
@@ -38,7 +37,7 @@ export interface RecallEvent {
 export function anchorToHref(anchor: string | undefined): string | null {
   if (!anchor) return null;
   if (anchor.startsWith('thread-')) {
-    return getThreadHref(anchor.slice('thread-'.length));
+    return `/thread/${anchor.slice('thread-'.length)}`;
   }
   return `/memory/search?q=${encodeURIComponent(anchor)}`;
 }

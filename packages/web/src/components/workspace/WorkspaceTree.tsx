@@ -48,9 +48,9 @@ const CopyPathIcon = () => (
 );
 
 const hoverBtn =
-  'opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center rounded text-cafe-muted hover:text-cafe-accent hover:bg-[var(--console-hover-bg)] transition-all';
+  'opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center rounded text-cafe-interactive/40 hover:text-cafe-accent hover:bg-cafe-surface-sunken/60 transition-all';
 const hoverBtnDanger =
-  'opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center rounded text-cafe-muted hover:text-conn-red-text hover:bg-[var(--console-hover-bg)] transition-all';
+  'opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center rounded text-cafe-interactive/40 hover:text-conn-red-text hover:bg-conn-red-bg transition-all';
 
 export interface PendingAction {
   type: 'new-file' | 'new-dir' | 'rename';
@@ -141,7 +141,7 @@ function TreeItem({
   return (
     <div className={depth > 0 ? 'animate-fade-in' : ''}>
       <div
-        className={`group flex items-center relative ${dragOver ? 'bg-[var(--console-active-bg)] ring-1 ring-cafe-accent/40 rounded' : ''}`}
+        className={`group flex items-center relative ${dragOver ? 'bg-cafe-surface-sunken/40 ring-1 ring-cafe-accent/40 rounded' : ''}`}
         onDragOver={handleDragOver}
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
@@ -151,8 +151,8 @@ function TreeItem({
           onClick={() => (isDir ? toggleExpand(node.path) : onSelect(node.path))}
           className={`flex-1 text-left py-1 text-xs flex items-center gap-1.5 rounded-md transition-colors duration-100 truncate relative ${
             isSelected
-              ? 'bg-[var(--console-hover-bg)] text-cafe-secondary font-medium'
-              : 'hover:bg-[var(--console-hover-bg)] text-cafe-black/80'
+              ? 'bg-cafe-surface-sunken/60 text-cafe-interactive font-medium'
+              : 'hover:bg-cafe-surface text-cafe-black/80'
           }`}
           style={{ paddingLeft: `${depth * 16 + 8}px`, paddingRight: isDir ? '52px' : '40px' }}
           title={node.path}
@@ -160,11 +160,7 @@ function TreeItem({
           {depth > 0 && (
             <span className="absolute left-0 top-0 bottom-0 pointer-events-none" aria-hidden>
               {Array.from({ length: depth }, (_, i) => `${i * 16 + 14}px`).map((left) => (
-                <span
-                  key={left}
-                  className="absolute top-0 bottom-0 w-px bg-[var(--console-border-soft)]"
-                  style={{ left }}
-                />
+                <span key={left} className="absolute top-0 bottom-0 w-px bg-cafe-surface-sunken/50" style={{ left }} />
               ))}
             </span>
           )}
@@ -177,7 +173,7 @@ function TreeItem({
                 height="8"
                 viewBox="0 0 8 8"
                 fill="currentColor"
-                className="text-cafe-muted"
+                className="text-cafe-interactive/40"
                 aria-hidden="true"
               >
                 <path d="M2.5 1L6 4L2.5 7" strokeWidth="1" />
@@ -327,7 +323,7 @@ export function TreeSkeleton() {
             width: `${w}px`,
             marginLeft: `${(idx % 3) * 12}px`,
             background:
-              'linear-gradient(90deg, var(--console-hover-bg) 25%, var(--console-active-bg) 50%, var(--console-hover-bg) 75%)',
+              'linear-gradient(90deg, var(--console-hover-bg) 25%, rgba(255,221,210,0.3) 50%, var(--console-hover-bg) 75%)',
             backgroundSize: '200% 100%',
           }}
         />
@@ -418,8 +414,8 @@ export function WorkspaceTree({
     >
       {/* Root-level toolbar */}
       {callbacks && (
-        <div className="group flex items-center gap-0.5 px-3 py-1 border-b border-[var(--console-border-soft)]">
-          <span className="text-[10px] text-cafe-muted flex-1 uppercase tracking-wider">Files</span>
+        <div className="group flex items-center gap-0.5 px-3 py-1 border-b border-cafe-subtle/30">
+          <span className="text-[10px] text-cafe-interactive/40 flex-1 uppercase tracking-wider">Files</span>
           <button
             type="button"
             className={hoverBtn}
@@ -457,14 +453,14 @@ export function WorkspaceTree({
         <TreeSkeleton />
       ) : tree.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
-          <svg viewBox="0 0 24 24" fill="currentColor" className="h-7 w-7 mb-2 text-cafe-muted">
+          <svg viewBox="0 0 24 24" fill="currentColor" className="h-7 w-7 mb-2 text-cafe-interactive/30">
             <path d="M12 15C15 15 17.5 17 17.5 19.5C17.5 21 16 22.5 12 22.5C8 22.5 6.5 21 6.5 19.5C6.5 17 9 15 12 15Z" />
             <ellipse cx="6" cy="11.5" rx="2.5" ry="3" />
             <ellipse cx="12" cy="10" rx="3" ry="3.5" />
             <ellipse cx="18" cy="11.5" rx="2.5" ry="3" />
           </svg>
-          <p className="text-xs text-cafe-muted">还没有文件树</p>
-          <p className="text-[10px] text-cafe-muted mt-1">选择一个 worktree 开始浏览</p>
+          <p className="text-xs text-cafe-interactive/50">还没有文件树</p>
+          <p className="text-[10px] text-cafe-interactive/30 mt-1">选择一个 worktree 开始浏览</p>
         </div>
       ) : (
         tree.map((node) => (

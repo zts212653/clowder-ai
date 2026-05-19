@@ -250,4 +250,58 @@ describe('F183 Phase B1.2 — adaptIncomingToBubbleEvent', () => {
     // 关键：final text 不能走 done，否则 reducer 不写 content → 最后一段被 drop
     expect(event?.type).not.toBe('done');
   });
+
+  // F194 Phase Z3 R2 (砚砚 catch 2026-05-09 18:22): bubble identity SoT = turn id, not parent.
+  describe('F194 Phase Z3 R2: dual id (canonical=turn, chain=parent)', () => {
+    it('uses turnInvocationId as canonical when both present (parent moves to chainInvocationId)', () => {
+      const event = adaptIncomingToBubbleEvent(
+        baseMsg({
+          type: 'text',
+          content: 'hello',
+          origin: 'stream',
+          invocationId: 'parent-chain-1',
+          turnInvocationId: 'turn-opus-1',
+        }),
+        { sourcePath: 'active' },
+      );
+      expect(event?.canonicalInvocationId).toBe('turn-opus-1');
+      expect(event?.chainInvocationId).toBe('parent-chain-1');
+    });
+
+    it('falls back to invocationId (parent) for canonical when turnInvocationId absent — legacy compat', () => {
+      const event = adaptIncomingToBubbleEvent(
+        baseMsg({ type: 'text', content: 'hello', origin: 'stream', invocationId: 'legacy-only' }),
+        { sourcePath: 'active' },
+      );
+      expect(event?.canonicalInvocationId).toBe('legacy-only');
+      expect(event?.chainInvocationId).toBeUndefined();
+    });
+
+    it('same parent + same cat 多 turn → 不同 canonicalInvocationId (bubble 不合并前提)', () => {
+      const opus1 = adaptIncomingToBubbleEvent(
+        baseMsg({
+          type: 'text',
+          content: 'opus turn 1',
+          origin: 'stream',
+          catId: 'opus-47',
+          invocationId: 'parent-chain-1',
+          turnInvocationId: 'turn-opus-1',
+        }),
+        { sourcePath: 'active' },
+      );
+      const opus3 = adaptIncomingToBubbleEvent(
+        baseMsg({
+          type: 'text',
+          content: 'opus turn 3',
+          origin: 'stream',
+          catId: 'opus-47',
+          invocationId: 'parent-chain-1',
+          turnInvocationId: 'turn-opus-3',
+        }),
+        { sourcePath: 'active' },
+      );
+      expect(opus1?.canonicalInvocationId).not.toBe(opus3?.canonicalInvocationId);
+      expect(opus1?.chainInvocationId).toBe(opus3?.chainInvocationId);
+    });
+  });
 });

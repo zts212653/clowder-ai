@@ -109,7 +109,6 @@ describe('ThreadCatSettings', () => {
     // Click the settings button to open popover
     const settingsBtn = container.querySelector('button[title="设置默认猫猫"]');
     expect(settingsBtn).toBeTruthy();
-    expect(settingsBtn?.className).toContain('hover:text-cafe-accent');
     act(() => {
       (settingsBtn as HTMLElement).click();
     });
@@ -126,7 +125,6 @@ describe('ThreadCatSettings', () => {
     const saveBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '保存');
     expect(saveBtn).toBeTruthy();
     expect(saveBtn?.hasAttribute('disabled')).toBe(false);
-    expect(saveBtn?.className).toContain('console-button-primary');
 
     // Click save
     await act(async () => {

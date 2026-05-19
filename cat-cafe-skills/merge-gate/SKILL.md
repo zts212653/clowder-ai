@@ -80,7 +80,7 @@ ROOT_ARTIFACTS="$(git diff --name-only origin/main...HEAD | \
 if [ -n "$ROOT_ARTIFACTS" ]; then
   echo "❌ 根目录存在媒体/设计工件（已提交差异），停止 merge-gate"
   printf '%s\n' "$ROOT_ARTIFACTS"
-  echo "请先归档到 docs/evidence/、docs/features/assets/F{NNN}/ 或其他正式目录。"
+  echo "请先归档到 project-evidence/、docs/features/assets/F{NNN}/ 或其他正式目录。"
   exit 1
 fi
 ```
@@ -143,8 +143,10 @@ TRIGGER_COMMENT_ID=”$(gh api repos/{OWNER}/{REPO}/issues/{PR_NUMBER}/comments 
   --jq '[.[] | select(.body | test(“^@codex\\s+review”; “m”))] | last | .id')”
 EYES=”$(gh api repos/{OWNER}/{REPO}/issues/comments/${TRIGGER_COMMENT_ID}/reactions \
   --jq '[.[] | select(.content == “eyes”)] | length')”
-#   - EYES > 0 → 云端已接单 → 停止监控，PR tracking 会自动通知结果
-#   - EYES == 0 → 云端没接到 → 允许 re-trigger（进 6.2）
+#   - EYES > 0 → 云端已接单 → 停止监控，PR tracking 会自动通知结果。
+#     ⚠️ KD-27：此时必须释放 hold_ball，禁止续约轮询。PR tracking 回调是唯一通知渠道。
+#     如果你之前 hold_ball 轮询等接单，现在 EYES > 0 = 切换到事件驱动模式，不再 hold。
+#   - EYES == 0 → 云端没接到 → 允许 re-trigger（进 6.2），可以 hold_ball 轮询等 EYES
 #
 # 6.2 允许再次触发的条件（满足任一即可）：
 #     a. HEAD SHA 变化（有新 commit）
@@ -293,6 +295,29 @@ git worktree prune  # 清理 dangling worktree references
 `gh pr view` 的 `--json reviews` 只返回 review body（可能显示"no major issues"），
 但 inline code comment 里可能有 P1。
 
+#### 豁免条件 — 哪些 PR 跳过云端 review（CVO directive 2026-05-13）🔴
+
+云端 codex 没有 Cat Café MCP，看不到 thread / memory / 真相源，不了解家里 SOP 演化历史。对**纯家规/SOP/skill 类文字改动**做云端 review 会引入"被带歪"风险 > 价值。
+
+**默认豁免（本地 review pass 后直接 squash merge）**：
+- `cat-cafe-skills/**/SKILL.md` 改动（家规、SOP、流程文字 — 云端看不懂语境）
+- `cat-cafe-skills/refs/*.md` 改动（共享 lessons、reference partials）
+- `project-reflections/*.md` / `feature-discussions/*.md` 纯文字改动
+- 任何 docs-only PR 且本地 reviewer 是非 author 的Maine Coon族 reviewer（跨 family）
+
+**仍必须走云端 review（不能豁免）**：
+- 任何 `packages/**` 代码改动（业务逻辑 / API / 前端）
+- 任何 test 改动（含 fixture）
+- 涉及 secret / auth / SSRF / DoS 资源边界的改动
+- inbound community PR intake（即使是 docs-only — source intent 验证需要外部视角）
+
+**豁免时仍要做**：
+- 本地 reviewer 跨家族 review pass（必经）
+- `pnpm gate` light path（biome + check:features + git diff --check）
+- PR comment 标注 "Cloud review skipped per CVO directive: <reason>" 留决策依据
+
+事故来源：PR #1661 (SOP 改进 docs-only) 本地Maine Coon review pass 后无意识触发云端 review，CVO 立刻 push back "云端不懂家里情况，会被带歪"。
+
 #### 层级 A：通知已包含 severity（自动）
 
 ReviewRouter 现在会在投递通知时**主动拉取** review body + inline comments，
@@ -365,7 +390,7 @@ gh api --paginate repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/comments \
 | PR body 或 HTML 注释里写了 `@句柄`（例如签名） | **PR body 禁止任何 @句柄**，签名改为纯文本（如 `codex` / `gpt52`） |
 | 触发 comment 带了多行描述（SHA/规则/审查标准） | **只发 `@codex review` 一行**，详细内容让 Codex 误解为代码修改请求 |
 | 同一个 commit 连续发多条触发 comment | 先做 Step 5.1 去重检查；只有新 commit 才 re-trigger |
-| 触发后立刻轮询或手动重触发 | 5 分钟后查 👀（Step 6.1）；有 👀 = PR tracking 自动通知，不用管；无 👀 = 允许 re-trigger |
+| 触发后立刻轮询或手动重触发 | 5 分钟后查 👀（Step 6.1）；有 👀 = PR tracking 自动通知，**释放 hold_ball 不再轮询**（KD-27）；无 👀 = 允许 re-trigger |
 | 修了 P1 不 re-trigger review | 修完 push 后**必须重新触发**云端 review |
 | `pnpm gate` rebase / fixup 后沿用旧 review 直接 merge | 先对齐 `headRefOid`；**只要 HEAD 变了，就拿 reviewer 对新 SHA 的显式延续或重审** |
 | 本地 `git rebase -i` 手动 squash | 用 `gh pr merge --squash`（GitHub 处理） |
@@ -436,7 +461,7 @@ gh pr comment {PR_NUMBER} --body '@codex review'
 
 **铁律：降级后仍须校验"reviewer ≠ 作者"**——降级表是建议顺序，不能覆盖 self-review 禁令。
 
-操作：`gh pr comment {PR} --body "..."` 用标准触发模板 @ 降级 reviewer（句柄查猫猫名册）。
+操作：`gh pr comment {PR} --body "..."` 用标准触发模板 @ 降级 reviewer（句柄查 `cat-config.json`）。
 
 ## 和其他 skill 的区别
 

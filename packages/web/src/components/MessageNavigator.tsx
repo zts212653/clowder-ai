@@ -172,7 +172,7 @@ export function MessageNavigator({ messages, scrollContainerRef }: MessageNaviga
     <div className="absolute right-0.5 top-2 bottom-2 w-5 z-10">
       <div ref={trackRef} className="relative h-full cursor-pointer" onClick={handleTrackClick}>
         {/* Track rail */}
-        <div className="absolute left-1/2 top-0 bottom-0 w-px bg-[var(--console-pill-bg)] -translate-x-1/2" />
+        <div className="absolute left-1/2 top-0 bottom-0 w-px bg-gray-200 -translate-x-1/2" />
 
         {/* Viewport indicator (scrollbar thumb) — P2 fix: clamp to prevent overflow */}
         {(() => {
@@ -180,7 +180,7 @@ export function MessageNavigator({ messages, scrollContainerRef }: MessageNaviga
           const thumbTop = Math.min(viewport.top * 100, 100 - thumbH);
           return (
             <div
-              className="absolute left-1/2 -translate-x-1/2 w-2.5 rounded-full bg-cafe-surface-sunken/50 transition-all duration-100 pointer-events-none"
+              className="absolute left-1/2 -translate-x-1/2 w-2.5 rounded-full bg-gray-300/50 transition-all duration-100 pointer-events-none"
               style={{ top: `${thumbTop}%`, height: `${thumbH}%` }}
             />
           );
@@ -193,7 +193,7 @@ export function MessageNavigator({ messages, scrollContainerRef }: MessageNaviga
           const isAssistant = msg.type === 'assistant' || (msg.type === 'user' && !!msg.catId);
           const cat = isAssistant && msg.catId ? resolveCat(msg.catId) : undefined;
           const fallback = isAssistant && msg.catId ? resolveFallbackCatMeta(msg.catId) : undefined;
-          const className = isOwner ? 'bg-cafe-accent' : cat || fallback ? '' : 'bg-cafe-surface-sunken';
+          const className = isOwner ? 'bg-cafe-accent' : cat || fallback ? '' : 'bg-gray-400';
           const style = isOwner
             ? undefined
             : cat
@@ -246,7 +246,7 @@ function NavTooltip({
 
   return (
     <div
-      className="absolute right-full mr-2 -translate-y-1/2 bg-cafe-surface-sunken/90 text-[var(--cafe-surface)] text-xs rounded-lg px-2.5 py-1.5 max-w-[200px] pointer-events-none whitespace-nowrap z-50"
+      className="absolute right-full mr-2 -translate-y-1/2 bg-gray-900/90 text-white text-xs rounded-lg px-2.5 py-1.5 max-w-[200px] pointer-events-none whitespace-nowrap z-50"
       style={{ top: `${topPercent}%` }}
     >
       <div className="font-medium">

@@ -28,9 +28,9 @@ function timeAgo(ts: number): string {
 }
 
 const TYPE_COLORS: Record<string, string> = {
-  invocation_error: 'bg-conn-red-bg text-conn-red-text',
-  phase_completed: 'bg-conn-emerald-bg text-conn-emerald-text',
-  debate_winner: 'bg-[var(--color-cafe-accent)]/10 text-[var(--color-cafe-accent)]',
+  invocation_error: 'bg-conn-red-bg text-red-700',
+  phase_completed: 'bg-conn-green-bg text-conn-green-text',
+  debate_winner: 'bg-blue-100 text-blue-700',
 };
 
 export function AuditEventsTab({ threadId }: AuditEventsTabProps) {
@@ -83,10 +83,10 @@ export function AuditEventsTab({ threadId }: AuditEventsTabProps) {
             type="button"
             key={evt.id}
             data-testid="audit-event-row"
-            className="w-full text-left rounded bg-[var(--console-card-soft-bg)] px-2 py-1.5 cursor-pointer hover:bg-cafe-surface-elevated transition-colors"
+            className="w-full text-left rounded border border-cafe-subtle px-2 py-1.5 cursor-pointer hover:bg-cafe-surface-elevated transition-colors"
             onClick={() => setExpandedId(isExpanded ? null : evt.id)}
           >
-            <div className="flex items-center gap-1.5 text-[11px]">
+            <div className="flex items-center gap-1.5 text-xs">
               <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${colorClass}`}>{evt.type}</span>
               <span className="text-cafe-muted ml-auto">{timeAgo(evt.timestamp)}</span>
             </div>

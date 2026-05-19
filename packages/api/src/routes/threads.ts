@@ -23,6 +23,7 @@ import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore
 import type { IThreadReadStateStore } from '../domains/cats/services/stores/ports/ThreadReadStateStore.js';
 import type {
   BootcampStateV1,
+  ILabelStore,
   IThreadStore,
   Thread,
   ThreadRoutingPolicyV1,
@@ -56,6 +57,8 @@ export interface ThreadsRoutesOptions {
   backlogStore?: IBacklogStore;
   /** B-4: Cascade delete guide session when thread is deleted */
   guideSessionStore?: import('../domains/guides/GuideSessionRepository.js').IGuideSessionStore;
+  /** F187: Label store for validating label IDs on thread update */
+  labelStore?: ILabelStore;
 }
 
 /** F087: Bootcamp state Zod schema (F171 v2 flow) */
@@ -180,6 +183,8 @@ const updateThreadSchema = z
     bubbleCli: z.enum(['global', 'expanded', 'collapsed']).optional(),
     /** F168: Preferred workspace mode for auto-switch on thread open. null clears. */
     preferredWorkspaceMode: z.enum(['dev', 'recall', 'schedule', 'tasks', 'community']).nullable().optional(),
+    /** F187: Thread label IDs. */
+    labels: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
   })
   .strict()
   .refine(
@@ -194,7 +199,8 @@ const updateThreadSchema = z
       data.bootcampState !== undefined ||
       data.bubbleThinking !== undefined ||
       data.bubbleCli !== undefined ||
-      data.preferredWorkspaceMode !== undefined,
+      data.preferredWorkspaceMode !== undefined ||
+      data.labels !== undefined,
     {
       message: 'At least one field must be provided',
     },
@@ -436,6 +442,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       bubbleThinking,
       bubbleCli,
       preferredWorkspaceMode,
+      labels,
     } = parseResult.data;
     if (title !== undefined) await threadStore.updateTitle(id, title);
     if (pinned !== undefined) await threadStore.updatePin(id, pinned);
@@ -453,6 +460,19 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     if (bubbleCli !== undefined) await threadStore.updateBubbleDisplay(id, 'bubbleCli', bubbleCli);
     if (preferredWorkspaceMode !== undefined) {
       await threadStore.updatePreferredWorkspaceMode(id, preferredWorkspaceMode);
+    }
+    if (labels !== undefined) {
+      if (labels.length > 0 && opts.labelStore) {
+        const userId = resolveUserId(request) ?? 'default-user';
+        const userLabels = await opts.labelStore.list(userId);
+        const validIds = new Set(userLabels.map((l) => l.id));
+        const invalid = labels.filter((lid) => !validIds.has(lid));
+        if (invalid.length > 0) {
+          reply.status(400);
+          return { error: 'Invalid label IDs', invalidIds: invalid };
+        }
+      }
+      await threadStore.updateLabels(id, labels);
     }
 
     const updated = await threadStore.get(id);

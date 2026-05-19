@@ -120,7 +120,7 @@ DOM 路径：
 7. 轮询等待完成（检查 "Research complete" 文本出现，每 30s，最长 20min）
 8. 点击 Artifact 卡片打开报告
 9. 点击 "Copy options" → "Download as Markdown"
-10. 猫用 cp ~/Downloads/{file}.md → docs/research/YYYY-MM-DD-{topic}/claude/report.md
+10. 猫用 cp ~/Downloads/{file}.md → project-research/YYYY-MM-DD-{topic}/claude/report.md
 ```
 
 ## 已知限制

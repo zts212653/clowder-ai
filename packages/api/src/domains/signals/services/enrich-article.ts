@@ -1,67 +1,59 @@
 import type { SignalPaths } from '../config/signal-paths.js';
 import { extractArticleBody } from '../fetchers/webpage-fetcher.js';
-import type { SignalArticleDetail } from './article-document.js';
-import { readArticleDocument, toUpdatedFrontmatter, writeArticleDocument } from './article-document.js';
-import { readInboxRecords } from './inbox-records.js';
-
-interface FetchResult {
-  html: string | null;
-  status: number | null;
-  error?: string;
-}
-
-async function fetchHtml(url: string): Promise<FetchResult> {
-  try {
-    const res = await globalThis.fetch(url, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      },
-      signal: AbortSignal.timeout(20_000),
-    });
-    if (!res.ok) return { html: null, status: res.status };
-    return { html: await res.text(), status: res.status };
-  } catch (err) {
-    return { html: null, status: null, error: err instanceof Error ? err.message : 'fetch failed' };
-  }
-}
+import { readArticleDocument, writeArticleDocument } from './article-document.js';
+import { type InboxRecord, readInboxRecords } from './inbox-records.js';
 
 export interface EnrichResult {
-  article: SignalArticleDetail;
-  enriched: boolean;
-  reason?: string;
+  readonly enriched: boolean;
+  readonly reason?: 'already_enriched' | 'no_better_content' | 'fetch_failed' | 'not_found';
+  readonly contentLength?: number;
 }
 
-export async function enrichArticleContent(articleId: string, paths: SignalPaths): Promise<EnrichResult | null> {
+async function fetchHtml(url: string): Promise<string | null> {
+  try {
+    const response = await globalThis.fetch(url, {
+      headers: { 'User-Agent': 'CatCafe-Signal-Enrich/1.0' },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) return null;
+    return await response.text();
+  } catch {
+    return null;
+  }
+}
+
+export async function enrichArticleContent(articleId: string, paths: SignalPaths): Promise<EnrichResult> {
   const records = await readInboxRecords(paths, undefined);
-  const record = records.find((r) => r.id === articleId);
-  if (!record) return null;
+  const matched: InboxRecord | undefined = records.find((r) => r.id === articleId);
+  if (!matched) {
+    return { enriched: false, reason: 'not_found' };
+  }
 
-  const doc = await readArticleDocument(record);
-  const mkDetail = (content: string): SignalArticleDetail => ({ ...doc.article, content });
-
+  const doc = await readArticleDocument(matched);
   if (doc.frontmatter.enriched === true) {
-    return { article: mkDetail(doc.content), enriched: false, reason: 'already_enriched' };
+    return { enriched: false, reason: 'already_enriched', contentLength: doc.content.length };
   }
 
-  const result = await fetchHtml(doc.article.url);
-  if (!result.html) {
-    const reason = result.status ? `fetch_${result.status}` : `network_error: ${result.error ?? 'unknown'}`;
-    return { article: mkDetail(doc.content), enriched: false, reason };
+  const html = await fetchHtml(matched.url);
+  if (!html) {
+    return { enriched: false, reason: 'fetch_failed' };
   }
 
-  const extracted = extractArticleBody(result.html);
-  const currentBody = doc.content.replace(/^#\s+.*$/m, '').trim();
-
-  if (extracted && extracted.length > currentBody.length) {
-    const newContent = `# ${doc.article.title}\n\n${extracted}`;
-    const fm = { ...toUpdatedFrontmatter(doc.frontmatter, doc.article), enriched: true };
-    await writeArticleDocument({ filePath: doc.article.filePath, frontmatter: fm, content: newContent });
-    return { article: mkDetail(newContent), enriched: true };
+  const extracted = extractArticleBody(html);
+  if (!extracted || extracted.length <= doc.content.length) {
+    await writeArticleDocument({
+      filePath: matched.filePath,
+      frontmatter: { ...doc.frontmatter, enriched: true },
+      content: doc.content,
+    });
+    return { enriched: false, reason: 'no_better_content', contentLength: doc.content.length };
   }
 
-  const fm = { ...toUpdatedFrontmatter(doc.frontmatter, doc.article), enriched: true };
-  await writeArticleDocument({ filePath: doc.article.filePath, frontmatter: fm, content: doc.content });
-  return { article: mkDetail(doc.content), enriched: false, reason: 'no_better_content' };
+  await writeArticleDocument({
+    filePath: matched.filePath,
+    frontmatter: { ...doc.frontmatter, enriched: true },
+    content: extracted,
+  });
+
+  return { enriched: true, contentLength: extracted.length };
 }

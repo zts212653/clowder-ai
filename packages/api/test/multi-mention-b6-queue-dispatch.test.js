@@ -62,6 +62,7 @@ function createMockMessageStore() {
       messages.push(stored);
       return stored;
     },
+    getById: (id) => messages.find((m) => m.id === id) ?? null,
     getMessages: () => messages,
   };
 }

@@ -164,22 +164,6 @@ describe('DirectoryPickerModal', () => {
     expect(fns.onSelect).toHaveBeenCalledWith(expect.objectContaining({ projectPath: CWD_PATH }));
   });
 
-  it('uses console active styling for the selected quick pick instead of a heavy ring', async () => {
-    setupCwdSuccess();
-    render();
-    await flush();
-    const cwdBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('推荐'));
-    expect(cwdBtn).toBeTruthy();
-
-    act(() => {
-      cwdBtn?.click();
-    });
-
-    expect(cwdBtn?.className).toContain('bg-[var(--console-active-bg)]');
-    expect(cwdBtn?.className).not.toContain('ring-2');
-    expect(cwdBtn?.className).not.toContain('bg-cocreator-bg');
-  });
-
   it('calls onSelect with existing project path when selected and confirmed', async () => {
     const existingPath = '/home/user/other';
     setupCwdSuccess();
@@ -269,7 +253,6 @@ describe('DirectoryPickerModal', () => {
       b.textContent?.includes('浏览文件夹'),
     );
     expect(browseBtn).toBeTruthy();
-    expect(browseBtn?.className).toContain('console-button-secondary');
   });
 
   it('toggles inline DirectoryBrowser when browse button is clicked', async () => {

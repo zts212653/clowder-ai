@@ -2,16 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
-html {
-  background: var(--cafe-surface);
-}
+/* Design tokens live in theme-tokens.css (imported via layout.tsx) */
 
 body {
   font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  color: var(--cafe-text);
-  background: var(--cafe-surface);
+  color: var(--text-primary);
+  background: var(--bg-app);
 }
 
+/* === Mobile PWA: safe-area insets for notched devices === */
 @supports (padding-top: env(safe-area-inset-top)) {
   .safe-area-top {
     padding-top: env(safe-area-inset-top, 0px);
@@ -22,30 +21,6 @@ body {
   .safe-area-bottom {
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
-}
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes pulse-subtle {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.75;
-    box-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
-  }
-}
-
-.animate-pulse-subtle {
-  animation: pulse-subtle 2s ease-in-out infinite;
 }
 
 /* Quest input highlight: gentle amber glow on input area */
@@ -133,6 +108,7 @@ body {
     animation: none;
   }
 
+  /* Disable breathe ring and transitions on guide overlay elements */
   [style*="guide-breathe"] {
     animation: none !important;
   }
@@ -142,40 +118,35 @@ body {
   animation: guide-error-shake 0.3s ease-out;
 }
 
+/* Tier 3 System Notice — tone binding + entrance animation */
 [data-notice-tone="info"] {
   --notice-label: var(--notice-info-label);
   --notice-icon: var(--notice-info-icon);
   --notice-border: var(--notice-info-border);
   --notice-surface: var(--cafe-surface);
 }
-
 [data-notice-tone="warning"] {
   --notice-label: var(--notice-warning-label);
   --notice-icon: var(--notice-warning-icon);
   --notice-border: var(--notice-warning-border);
   --notice-surface: var(--cafe-surface);
 }
-
 [data-notice-tone="error"] {
   --notice-label: var(--notice-error-label);
   --notice-icon: var(--notice-error-icon);
   --notice-border: var(--notice-error-border);
   --notice-surface: var(--notice-error-surface);
 }
-
 .system-notice-bar__label {
   color: var(--notice-label);
 }
-
 .system-notice-bar__icon {
   color: var(--notice-icon);
 }
-
 .system-notice-bar {
   border: 1px solid var(--notice-border);
   background: color-mix(in srgb, var(--notice-surface) 90%, transparent);
 }
-
 @keyframes system-notice-enter {
   from {
     opacity: 0;
@@ -186,115 +157,27 @@ body {
     transform: translateY(0);
   }
 }
-
 @media (prefers-reduced-motion: no-preference) {
   .system-notice-bar {
     animation: system-notice-enter var(--notice-enter-duration) var(--notice-enter-easing);
   }
 }
 
-@keyframes shake {
-  0%,
-  100% {
-    transform: translateX(0);
-  }
-  20% {
-    transform: translateX(-4px);
-  }
-  40% {
-    transform: translateX(4px);
-  }
-  60% {
-    transform: translateX(-3px);
-  }
-  80% {
-    transform: translateX(2px);
-  }
-}
+/* Werewolf Cute Theme → werewolf-theme.css */
 
-[data-theme="werewolf-cute"] {
-  --ww-bg-base: #0b1020;
-  --ww-bg-card: #2a2340;
-  --ww-bg-surface: #1a1835;
-  --ww-bg-topbar: #0d1428;
-  --ww-text-main: #e2e8f0;
-  --ww-text-muted: #94a3b8;
-  --ww-text-dim: #64748b;
-  --ww-accent-danger: #d45a6a;
-  --ww-accent-cute: #f2b7a8;
-  --ww-accent-success: #8bd7c8;
-  --ww-accent-info: #e6c36a;
-  --ww-state-alive: var(--ww-accent-cute);
-  --ww-state-dead: #475569;
-  --ww-state-speaking: var(--ww-accent-info);
-  --ww-state-active: var(--ww-accent-cute);
-  --ww-role-wolf: var(--ww-accent-danger);
-  --ww-role-seer: var(--ww-accent-info);
-  --ww-role-witch: #c084fc;
-  --ww-role-guard: var(--ww-accent-success);
-  --ww-role-villager: var(--ww-text-muted);
-  --ww-faction-wolf: var(--ww-accent-danger);
-  --ww-faction-village: var(--ww-accent-success);
-  --ww-danger-soft: rgba(212, 90, 106, 0.1);
-  --ww-info-soft: rgba(230, 195, 106, 0.3);
-  --ww-subtle-soft: rgba(242, 183, 168, 0.08);
-  --ww-cute-soft: rgba(242, 183, 168, 0.1);
-  --ww-base-overlay: rgba(11, 16, 32, 0.9);
-  --ww-border-subtle: rgba(242, 183, 168, 0.15);
-  --ww-border-active: rgba(242, 183, 168, 0.4);
-  --ww-shadow-glow: rgba(212, 90, 106, 0.25);
-}
-
-[data-theme="werewolf-cute"][data-phase="day"] {
-  --ww-bg-base: #111828;
-  --ww-bg-card: #302a4a;
-  --ww-bg-surface: #201e40;
-  --ww-bg-topbar: #141a30;
-  --ww-text-main: #f1f5f9;
-  --ww-border-subtle: rgba(242, 183, 168, 0.2);
-}
-
-[data-theme="werewolf-cute"][data-phase="night"] {
-  --ww-bg-base: #080c18;
-  --ww-bg-card: #221d38;
-  --ww-bg-surface: #151230;
-  --ww-bg-topbar: #0a0e1e;
-  --ww-accent-cute: #e8a99a;
-  --ww-shadow-glow: rgba(212, 90, 106, 0.35);
-}
-
+/* F097: Dark-theme table overrides for CLI output + Thinking bubbles */
 .cli-output-md thead {
   background: rgba(255, 255, 255, 0.06);
 }
-
 .cli-output-md th {
   border-color: rgba(255, 255, 255, 0.12);
   color: #cbd5e1;
 }
-
 .cli-output-md td {
   border-color: rgba(255, 255, 255, 0.08);
   color: #94a3b8;
 }
-
 .cli-output-md code {
   background: rgba(255, 255, 255, 0.08);
   color: #e2e8f0;
-}
-
-/* Quest input highlight: gentle amber glow on input area */
-@keyframes quest-glow {
-  0%,
-  100% {
-    box-shadow: 0 0 4px rgba(245, 158, 11, 0.3);
-  }
-  50% {
-    box-shadow:
-      0 0 12px rgba(245, 158, 11, 0.5),
-      0 0 4px rgba(245, 158, 11, 0.2);
-  }
-}
-.quest-input-highlight {
-  animation: quest-glow 2.5s ease-in-out infinite;
-  border-color: rgb(245, 158, 11) !important;
 }

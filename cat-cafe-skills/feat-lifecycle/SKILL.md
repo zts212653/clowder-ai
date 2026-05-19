@@ -104,7 +104,7 @@ search_evidence("{topic}", scope="all")  # 找历史讨论 + thread
 - **开放讨论**：多猫协作。结构：背景 + 我的分析（仅供参考，**先自己想再看**）+ 开放问题（按角色分组）+ 我的倾向（透明推理链）。明确标"这是讨论不是任务"，保护观点独立性。
 
 **讨论结束必须做**：
-1. 落盘到 *(internal reference removed)*（含铲屎官原话、决策过程、优先级排序）
+1. 落盘到 `feature-discussions/YYYY-MM-DD-{topic}/README.md`（含铲屎官原话、决策过程、优先级排序）
 2. ROADMAP.md 该 Feature 行 ref 讨论文档链接
 3. Commit：`docs: {topic} discussion + backlog update [{猫猫签名}]`
 
@@ -125,10 +125,43 @@ search_evidence("{topic}", scope="all")  # 找历史讨论 + thread
 开 Design Gate 前，先做触发器 E "新领域侦查"：
 1. 读 `docs/features/README.md` 找相关 Feature
 2. 读相关 Feature spec 的 Key Decisions / Open Questions
-3. 搜 *(internal reference removed)* 看有没有前人讨论过类似问题
+3. 搜 `feature-discussions/` 看有没有前人讨论过类似问题
 4. 把发现记录到 Design Gate 讨论里（避免重复造轮子）
 
 详见 `shared-rules.md` §13 元思考触发器。先搜现状，再开讨论。
+
+**架构归属一问（F191）🔴**：
+
+每个非 trivial Feature 在 Design Gate 必须能用一句话回答：
+
+```markdown
+Architecture cell: {ownership cell id}
+Map delta: none | update required | new cell required
+Why: 一句话
+```
+
+- `Architecture cell` 来自 `docs/architecture/ownership/README.md`；普通增量默认引用已有 cell。
+- `Map delta: none` = 本次只扩展现有边界，不改 ownership map，也不重新画架构图。
+- `Map delta: update required` = 本次改变 owner / boundary / extension point / canonical anchor，先改对应 cell。
+- `Map delta: new cell required` = 找不到归属；这不是回去填表，而是 Phase 0 架构发现未完成。
+
+答不出来 → Design Gate 不放行。禁止用新 Feature 私造 `Store` / `Queue` / `Router` / `Adapter` 来绕开已有 cell。
+
+**Eval Contract 门禁（F192）🔴**：
+
+harness / skill / MCP / shared-rules 类 feature 的 spec **必须含 `## Eval / Tracking Contract` 节**，否则 Design Gate 不通过。
+
+**触发条件**（判断标准：改动会改变猫猫行为模式 → 填）：
+- 新增 skill / 新增 MCP tool / 新增 shared-rules section / 新增 SOP step
+- 现有规则/工具的显著行为变更
+
+**不触发**：typo / wording 微调 / 纯重构（行为不变）/ 文档补充
+
+**4 项必填**（模板见 *(internal reference removed)*）：
+1. Primary Users + Activation Signal
+2. Friction Metric
+3. Regression Fixture（最少 1 条，建议 2-5）
+4. Sunset Signal（**空填 = 不通过，不设 reviewer 签字降级**——KD-4）
 
 **在地设计检查 (Design in Context) 🔴**：
 凡是改动或往已有页面/组件添加新 UI 元素，必须逐项过 `cat-cafe-skills/refs/design-in-context-checklist.md`。禁止在真空中凭想象画已有页面的布局。
@@ -147,8 +180,10 @@ search_evidence("{topic}", scope="all")  # 找历史讨论 + thread
 1. 判断功能类型 → 选择确认路径
 2. 前端：画 wireframe（Pencil / 文字版 ASCII）→ 发铲屎官 → 等 OK
 3. 后端：`collaborative-thinking` → 拉相关猫讨论 API 契约/数据模型
-4. 架构：猫猫讨论 → 结论给铲屎官 → 铲屎官拍板
-5. 确认产出归档 *(internal reference removed)*
+4. 架构：猫猫讨论 → 结论给铲屎官 → **必须附 Decision Packet**（格式见 `refs/decision-matrix.md`）→ 铲屎官拍板
+5. 确认产出归档 `feature-discussions/{date}-{fid}-design/`
+
+**Design Gate OQ 升级规则**：先判断可逆性维度（见 `refs/decision-matrix.md`）——回滚成本低+不碰愿景/安全/外部契约/显著成本 → 猫猫自决，不升级 CVO。需要升级时，OQ 必须用 Decision Packet 格式，不能只列"模糊问题清单"。
 
 **元审美自检**（Design Gate 必问，F163 教训 + F167 Round 4 canon 化）🔴
 
@@ -202,13 +237,32 @@ AC 全打勾 ≠ 完成（F041 教训：12 项 AC ✅ 但 UI 不可用）。先�
 **愿景守护猫选择（不能 hardcode！）**：
 ```
 守护猫 ≠ 作者 且 ≠ reviewer
-选法：查猫猫名册（cat-template.json + cat-catalog.json）roster → 排除作者 catId + reviewer catId → 剩余猫中选一只
+选法：查 cat-config.json roster → 排除作者 catId + reviewer catId → 剩余猫中选一只
 ```
 | 作者 | Reviewer | 守护猫 |
 |------|----------|--------|
 | 猫 A | 猫 B | roster 中排除 A 和 B，优先跨 family |
 
 守护猫负责：愿景三问 + 不满足则踢回修改 + 满足则放行 close。
+
+**🔴 Step 0.3.5: User Visibility Disclosure（F190 Phase C post-close 教训 2026-05-13）— 守护猫审查前置输入**
+
+愿景三问之前，作者必须产出 **User Visibility Disclosure** 表，把"技术决策"翻译成"用户可见性"语言：
+
+| Surface | 用户能做什么（达成态） | 用户实际能做什么（本 feat close 时） | 缺失/退化 | 处置 |
+|---------|--------------------|--------------------------|----------|------|
+| 例: 通知页 | 配 VAPID 公私钥 + 一键生成 + 联系信箱 | 看诊断矩阵 + 修复建议（read-only） | 完全丢失写能力 | deferred to Phase D / CVO signoff: thread `...` |
+
+- ❌ "Service Manifest deferred" → ✅ "通知页用户看到诊断矩阵，无法在 UI 配置 VAPID"
+- ❌ "Phase C 4/4 ✅" → ✅ "通知页/插件页/MCP 写/Skill 管理 4 个 surface 有用户可感缺失，详见 disclosure 表"
+
+**Inbound intake 类 feature 必须额外含**：开源 vs 本地 visual side-by-side screenshots（每个 settings section / 主要 surface 各一对），不能只看"组件 wire 了没"。
+
+**Deliberate defer 必须 CVO signoff**——CVO 在 thread 里显式确认"接受这个 deferred surface 不在本 feat 内交付"才能 close；否则按"漏"处置，必须实做或开 follow-up F 号继续。
+
+守护猫先审 Disclosure 才能做愿景三问。看到 deferred 字样直接拷问："这个 deferred 用户能感知到吗？CVO signoff 在哪？"
+
+事故来源：F190 close 时 settings/ 缺 7 个开源 components，CVO 完全不知道"通知页变成诊断矩阵"——技术决策语言"deferred"没有映射到用户可见性。详见 *(internal reference removed)*。
 
 **🔴 守护猫提的 P1 = blocker，作者不能 self-resolve（2026-04-26 教训）**
 
@@ -239,12 +293,34 @@ AC 全打勾 ≠ 完成（F041 教训：12 项 AC ✅ 但 UI 不可用）。先�
 
 愿景对照 + 跨猫验证之后、AC 打勾之前，写一个反思胶囊：
 
-1. 从 *(internal reference removed)* 复制模板
+1. 从 `project-reflections/README.md` 复制模板
 2. 填 6 个固定章节（What Worked / What Failed / Trigger Missed / Doc Links / Rule Update Target）
-3. 保存到 *(internal reference removed)*
+3. 保存到 `project-reflections/YYYY-MM-DD-{topic}-capsule.md`
 4. Feature spec 只挂链接，不把正文塞回去
 
 **不能跳过**：每个 milestone/feature 完成都要写。没有就写"无"，不允许省略章节。
+
+**Step 0.6: Harness Eval Checkpoint（F192 Phase A）🔴**
+
+反思胶囊之后、Close Gate Report 之前，判断是否需要 harness-level 评估。**Checkpoint 必做**，但不一定每次都展开——大多数 feature 写 `harness_feedback: none` 即可。
+
+**触发条件**（任一满足 → 必须展开写 harness-feedback 文档）：
+
+| 触发 | 说明 |
+|------|------|
+| Harness / skill / MCP feature close | harness 自身变化必须评估 fit |
+| CVO 不满意 / "不是我要的" | 需要分清 vision gap / translation gap / harness misfit |
+| Trace anomaly（重复 tool call、handoff 断链、长时间无 tool call） | trace 只能给 what，猫解释 why |
+| 抽样（normal feature close） | 防止只看失败样本 |
+
+**未触发时**：在 CloseGateReport 中写 `harness_feedback: none | reason: {简短理由}`。
+
+**触发时**：
+
+1. 在 `docs/harness-feedback/YYYY-MM-DD-Fxxx-{topic}.md` 创建 harness-feedback 文档（schema 见 `docs/harness-feedback/README.md`）
+2. 使用 `evidence_refs` 指向 canonical trace/thread/session，**不复制 raw tool-call payload**
+3. 如需 evidence-directed cat interview，**必须在独立 session 或独立 turn 进行**，不接在工作上下文尾巴上
+4. 在 feature spec 和 CloseGateReport 中链接 harness-feedback 文档
 
 **Step 1: Close Gate Report（F177 Phase A）🔴**
 
@@ -282,8 +358,8 @@ AC-A5 ❌ unmet → delete(why: 经评估不属于 MVP scope)
 | 阶段 | 关键动作 | 文件 |
 |------|---------|------|
 | Kickoff | 分 ID → 聚合文件 → BACKLOG → 双向链接 | `docs/features/Fxxx.md` |
-| Discussion | 采访/开放 → 落盘 → BACKLOG ref | *(internal reference removed)* |
-| **Design Gate** | **分流 → 确认（UX→铲屎官/后端→猫猫/架构→两边）** | *(internal reference removed)* |
+| Discussion | 采访/开放 → 落盘 → BACKLOG ref | `feature-discussions/` |
+| **Design Gate** | **分流 → 确认（UX→铲屎官/后端→猫猫/架构→两边）** | `feature-discussions/{date}-{fid}-design/` |
 | Completion | 愿景对照 → 跨猫验证 → 更新状态 → 移出 BACKLOG | `docs/features/Fxxx.md` |
 
 ## Common Mistakes
@@ -295,7 +371,7 @@ AC-A5 ❌ unmet → delete(why: 经评估不属于 MVP scope)
 | 自己验完就收尾 | 跨猫交叉验证是强制的 |
 | 删了聚合文件 | 只从 BACKLOG 移除，聚合文件永久保留 |
 | 不记录演化关系 | Completion Step 3 必须思考 |
-| 讨论完不落盘 | 讨论结束写入 *(internal reference removed)* |
+| 讨论完不落盘 | 讨论结束写入 `feature-discussions/` |
 | 等铲屎官手动协调跨猫守护 | 自己 @ 其他猫发起守护（F073） |
 | 每步停下来问铲屎官"可以继续吗？" | 全链路自驱，只在阻塞/close 时通知铲屎官 |
 | 只看 spec checkbox 就声称完成/未完成 | 核实 git log + PR 状态 + 实际 commit（LL-029）|

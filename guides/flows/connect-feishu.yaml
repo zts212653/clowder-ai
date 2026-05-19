@@ -8,14 +8,14 @@ name: 对接飞书
 description: 引导你完成飞书渠道的接入与授权配置
 
 steps:
-  - id: open-hub
-    target: hub.trigger
-    tips: 点击这里打开设置
+  - id: open-im-hub
+    target: im-hub.trigger
+    tips: 点击这里打开 IM Hub
     advance: click
 
-  - id: go-to-im
-    target: settings.im
-    tips: 点击进入 IM 对接页面
+  - id: go-to-config
+    target: im-hub.config-tab
+    tips: 切换到平台配置页面
     advance: click
 
   - id: expand-feishu
@@ -25,5 +25,5 @@ steps:
 
   - id: finish-feishu-setup
     target: connector.feishu
-    tips: 按卡片里的步骤完成飞书授权或填写应用凭证；确认连接成功后点击"已完成该步骤"
+    tips: 按卡片里的步骤完成飞书授权或填写应用凭证；确认连接成功后点击“已完成该步骤”
     advance: confirm

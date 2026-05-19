@@ -55,7 +55,7 @@ export function MetadataBadge({ metadata }: MetadataBadgeProps) {
           {cachePct != null && cachePct > 0 && (
             <>
               <span className="text-cafe-muted"> · </span>
-              <span className="text-conn-emerald-text tabular-nums">cached {cachePct}%</span>
+              <span className="text-emerald-500/80 tabular-nums">cached {cachePct}%</span>
             </>
           )}
           {usage.costUsd != null && (

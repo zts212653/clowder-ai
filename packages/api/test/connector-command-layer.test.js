@@ -789,7 +789,6 @@ describe('ConnectorCommandLayer', () => {
         '/commands',
         '/cats',
         '/status',
-        '/history',
       ];
       for (const cmd of connectorCommands) {
         const result = await layer.handle('test', 'chat1', 'user1', cmd);

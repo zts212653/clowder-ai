@@ -7,17 +7,17 @@ export interface ConsoleEntry {
 }
 
 const LEVEL_STYLES: Record<ConsoleEntry['level'], string> = {
-  log: 'text-cafe-secondary dark:text-cafe-muted',
-  info: 'text-[var(--color-cafe-accent)]',
-  warn: 'text-conn-amber-text',
-  error: 'text-conn-red-text',
+  log: 'text-cafe-secondary',
+  info: 'text-blue-600 dark:text-blue-400',
+  warn: 'text-conn-amber-text dark:text-amber-400',
+  error: 'text-conn-red-text dark:text-conn-red-text',
 };
 
 const LEVEL_BG: Record<ConsoleEntry['level'], string> = {
   log: '',
   info: '',
-  warn: 'bg-conn-amber-bg/50',
-  error: 'bg-conn-red-bg/50',
+  warn: 'bg-conn-amber-bg/50 dark:bg-amber-900/10',
+  error: 'bg-conn-red-bg/50 dark:bg-red-900/10',
 };
 
 interface ConsolePanelProps {
@@ -27,13 +27,13 @@ interface ConsolePanelProps {
 
 export function ConsolePanel({ entries, onClear }: ConsolePanelProps) {
   return (
-    <div className="flex flex-col border-t border-conn-red-ring bg-cafe-surface/80 text-[11px] font-mono">
+    <div className="flex flex-col border-t border-[var(--console-border-soft)] bg-cafe-surface/80 text-xs font-mono">
       {/* Header bar */}
-      <div className="flex items-center justify-between px-2 py-1 border-b border-conn-red-ring bg-[var(--console-card-bg)]">
+      <div className="flex items-center justify-between px-2 py-1 border-b border-[var(--console-border-soft)] bg-[#FDF8F3]">
         <div className="flex items-center gap-1.5">
-          <span className="text-[10px] font-semibold text-cafe-secondary/70 uppercase tracking-wider">Console</span>
+          <span className="text-[10px] font-semibold text-[#5a4a42]/70 uppercase tracking-wider">Console</span>
           {entries.length > 0 && (
-            <span className="px-1.5 py-0.5 rounded-full bg-conn-amber-bg text-conn-amber-text text-[9px] font-bold">
+            <span className="px-1.5 py-0.5 rounded-full bg-[#E29578]/20 text-[#E29578] text-[10px] font-bold">
               {entries.length}
             </span>
           )}
@@ -42,7 +42,7 @@ export function ConsolePanel({ entries, onClear }: ConsolePanelProps) {
           <button
             type="button"
             onClick={onClear}
-            className="text-[10px] text-cafe-secondary/50 hover:text-cafe-secondary transition-colors"
+            className="text-[10px] text-[#5a4a42]/50 hover:text-[#5a4a42] transition-colors"
           >
             Clear
           </button>
@@ -52,15 +52,15 @@ export function ConsolePanel({ entries, onClear }: ConsolePanelProps) {
       {/* Entries */}
       <div className="overflow-y-auto max-h-[200px]">
         {entries.length === 0 ? (
-          <div className="px-3 py-4 text-center text-cafe-secondary/30 text-xs">No console output</div>
+          <div className="px-3 py-4 text-center text-[#5a4a42]/30 text-xs">No console output</div>
         ) : (
           entries.map((entry, i) => (
             <div
               key={`${entry.timestamp}-${i}`}
-              className={`flex items-start gap-2 px-2 py-0.5 border-b border-conn-red-ring/30 ${LEVEL_BG[entry.level]}`}
+              className={`flex items-start gap-2 px-2 py-0.5 border-b border-[var(--console-border-soft)]/30 ${LEVEL_BG[entry.level]}`}
             >
               <span className={`shrink-0 w-10 ${LEVEL_STYLES[entry.level]}`}>{entry.level}</span>
-              <span className="text-cafe-secondary/80 break-all">{entry.args.join(' ')}</span>
+              <span className="text-[#5a4a42]/80 break-all">{entry.args.join(' ')}</span>
             </div>
           ))
         )}

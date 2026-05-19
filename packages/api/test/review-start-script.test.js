@@ -198,7 +198,12 @@ printf 'ok'`,
     });
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.match(result.stdout, new RegExp(`START_DEV:${occupiedPort + 2}/${occupiedPort + 3}`));
+    const startMatch = result.stdout.match(/START_DEV:(\d+)\/(\d+)/);
+    assert.ok(startMatch, 'expected START_DEV:<web>/<api> in stdout');
+    const [, webPort, apiPort] = startMatch;
+    assert.notEqual(Number(webPort), occupiedPort, 'web port must not be the occupied port');
+    assert.notEqual(Number(apiPort), occupiedPort + 1, 'api port must not be the occupied+1 port');
+    assert.ok(Number(webPort) > occupiedPort, 'fallback web port must be above the occupied port');
   });
 
   it('rejects documented runtime reserved ports', () => {

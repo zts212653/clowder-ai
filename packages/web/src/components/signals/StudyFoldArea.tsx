@@ -1,8 +1,8 @@
 import type { StudyMeta } from '@cat-cafe/shared';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { getThreadHref } from '@/components/ThreadSidebar/thread-navigation';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { apiFetch } from '@/utils/api-client';
-import { getThreadHref } from '../ThreadSidebar/thread-navigation';
 import { PodcastPlayer } from './PodcastPlayer';
 
 interface StudyFoldAreaProps {
@@ -127,7 +127,7 @@ export function StudyFoldArea({
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="flex w-full items-center justify-between rounded-t-lg bg-[var(--console-card-soft-bg)] px-3 py-2 text-left text-xs font-semibold text-cafe-secondary"
+        className="flex w-full items-center justify-between rounded-t-lg border border-cafe bg-cafe-surface-elevated px-3 py-2 text-left text-xs font-semibold text-cafe-secondary"
       >
         <span>
           {open ? '▾' : '▸'} 学习区
@@ -138,12 +138,12 @@ export function StudyFoldArea({
         )}
       </button>
       {open && (
-        <div className="rounded-b-lg bg-[var(--console-card-soft-bg)] p-3">
+        <div className="rounded-b-lg border border-t-0 border-cafe bg-cafe-surface-elevated p-3">
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={onStartStudy}
-              className="rounded-md bg-opus-primary px-3 py-1.5 text-xs font-semibold text-[var(--cafe-surface)] hover:bg-opus-dark"
+              className="rounded-md bg-opus-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-opus-dark"
             >
               开始学习
             </button>
@@ -151,14 +151,14 @@ export function StudyFoldArea({
               type="button"
               onClick={onDiscuss}
               disabled={discussLoading}
-              className="rounded-md bg-[var(--console-field-bg)] px-3 py-1.5 text-xs text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)] disabled:opacity-50"
+              className="rounded-md border border-cafe px-3 py-1.5 text-xs text-cafe-secondary hover:bg-cafe-surface-elevated disabled:opacity-50"
             >
               {discussLoading ? '正在创建讨论...' : '在对话中讨论'}
             </button>
             {/* AC-6: 多猫研究派发 — signal param binds article context via activeSignals */}
             <a
               href={`${discussLink}&research=multi`}
-              className="rounded-md border border-conn-emerald-ring px-3 py-1.5 text-xs text-conn-emerald-text hover:bg-conn-emerald-bg"
+              className="rounded-md border border-emerald-300 px-3 py-1.5 text-xs text-emerald-700 hover:bg-emerald-50"
             >
               多猫研究
             </a>
@@ -172,7 +172,7 @@ export function StudyFoldArea({
                   <li key={t.threadId} className="flex items-center gap-1">
                     <a
                       href={getThreadHref(t.threadId)}
-                      className="flex flex-1 items-center justify-between rounded-md bg-[var(--console-field-bg)] px-3 py-1.5 text-xs text-opus-dark transition-colors hover:bg-opus-bg"
+                      className="flex flex-1 items-center justify-between rounded-md border border-cafe bg-cafe-surface px-3 py-1.5 text-xs text-opus-dark hover:bg-opus-bg"
                     >
                       <span className="truncate">{t.threadId}</span>
                       <span className="ml-2 shrink-0 text-cafe-muted">{formatDate(t.linkedAt)}</span>
@@ -209,12 +209,12 @@ export function StudyFoldArea({
                   }
                 }}
                 placeholder="输入 Thread ID 关联..."
-                className="flex-1 rounded-md bg-[var(--console-field-bg)] px-2 py-1 text-xs text-cafe outline-none"
+                className="flex-1 rounded-md border border-cafe px-2 py-1 text-xs"
               />
               <button
                 type="button"
                 onClick={() => void handleLinkThread()}
-                className="rounded-md bg-opus-bg px-2 py-1 text-xs text-opus-dark transition-opacity hover:opacity-80"
+                className="rounded-md border border-opus-light px-2 py-1 text-xs text-opus-dark hover:bg-opus-bg"
               >
                 关联
               </button>
@@ -230,7 +230,7 @@ export function StudyFoldArea({
                     <button
                       type="button"
                       onClick={() => void toggleNote(n.id)}
-                      className="flex w-full items-center justify-between rounded-md bg-[var(--console-field-bg)] px-3 py-1.5 text-xs text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)]"
+                      className="flex w-full items-center justify-between rounded-md border border-cafe bg-cafe-surface px-3 py-1.5 text-xs text-cafe-secondary hover:bg-cafe-surface-elevated"
                       data-testid={`note-toggle-${n.id}`}
                     >
                       <span className="flex items-center gap-1.5">
@@ -242,7 +242,7 @@ export function StudyFoldArea({
                       </span>
                     </button>
                     {expandedNote === n.id && (
-                      <div className="mt-1 rounded-md bg-[var(--console-card-soft-bg)] px-3 py-2 text-xs text-cafe-secondary">
+                      <div className="mt-1 rounded-md border border-cafe-subtle bg-cafe-surface-elevated px-3 py-2 text-xs text-cafe-secondary">
                         {loadingNote === n.id ? (
                           <span className="text-cafe-muted">加载中...</span>
                         ) : (
@@ -266,7 +266,7 @@ export function StudyFoldArea({
                 {reports.map((r) => (
                   <li
                     key={r.id}
-                    className="rounded-md bg-[var(--console-field-bg)] px-3 py-1.5 text-xs text-cafe-secondary"
+                    className="rounded-md border border-cafe bg-cafe-surface px-3 py-1.5 text-xs text-cafe-secondary"
                   >
                     <span className="font-medium">{r.id}</span>
                     <span className="ml-2 text-cafe-muted">
@@ -286,7 +286,10 @@ export function StudyFoldArea({
                 {studyMeta?.collections?.map((colId) => {
                   const col = collections.find((c) => c.id === colId);
                   return (
-                    <li key={colId} className="rounded-full bg-opus-bg px-2 py-0.5 text-xs text-opus-dark">
+                    <li
+                      key={colId}
+                      className="rounded-full border border-opus-light bg-opus-bg px-2 py-0.5 text-xs text-opus-dark"
+                    >
                       {col?.name ?? colId}
                     </li>
                   );
@@ -302,7 +305,7 @@ export function StudyFoldArea({
                   if (e.target.value) void onAddToCollection(e.target.value);
                   e.target.value = '';
                 }}
-                className="rounded-md bg-[var(--console-field-bg)] px-2 py-1 text-xs text-cafe"
+                className="rounded-md border border-cafe px-2 py-1 text-xs"
                 defaultValue=""
               >
                 <option value="" disabled>
@@ -335,7 +338,7 @@ export function StudyFoldArea({
                   }
                 }}
                 placeholder="新建学习集..."
-                className="flex-1 rounded-md bg-[var(--console-field-bg)] px-2 py-1 text-xs text-cafe outline-none"
+                className="flex-1 rounded-md border border-cafe px-2 py-1 text-xs"
               />
               <button
                 type="button"
@@ -345,7 +348,7 @@ export function StudyFoldArea({
                     setNewCollectionName('');
                   }
                 }}
-                className="rounded-md bg-opus-bg px-2 py-1 text-xs text-opus-dark transition-opacity hover:opacity-80"
+                className="rounded-md border border-opus-light px-2 py-1 text-xs text-opus-dark hover:bg-opus-bg"
               >
                 创建
               </button>

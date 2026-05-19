@@ -18,6 +18,7 @@ export function SkillPreviewModal({
   skillName,
   description,
   triggers,
+  category,
   projectPath,
   onClose,
 }: SkillPreviewModalProps) {
@@ -25,6 +26,7 @@ export function SkillPreviewModal({
   const [skillPath, setSkillPath] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showAllTriggers, setShowAllTriggers] = useState(false);
   const reqRef = useRef(0);
 
   useEffect(() => {
@@ -33,6 +35,7 @@ export function SkillPreviewModal({
     setError(null);
     setContent(null);
     setSkillPath(null);
+
     (async () => {
       try {
         const query = projectPath ? `?projectPath=${encodeURIComponent(projectPath)}` : '';
@@ -53,6 +56,7 @@ export function SkillPreviewModal({
         if (id === reqRef.current) setLoading(false);
       }
     })();
+
     return () => {
       reqRef.current = id + 1;
     };
@@ -74,9 +78,9 @@ export function SkillPreviewModal({
   }, [onClose]);
 
   const triggerList = triggers?.filter(Boolean) ?? [];
-  const [showAllTriggers, setShowAllTriggers] = useState(false);
   const visibleTriggers = showAllTriggers ? triggerList : triggerList.slice(0, 6);
   const hiddenTriggerCount = showAllTriggers ? 0 : Math.max(triggerList.length - 6, 0);
+
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-[var(--console-overlay-backdrop)] p-4 backdrop-blur-sm"
@@ -86,29 +90,36 @@ export function SkillPreviewModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="skill-preview-title"
-        className="skill-preview-modal relative flex max-h-[calc(100vh-32px)] w-full max-w-[620px] flex-col overflow-hidden rounded-[24px] bg-[var(--console-card-bg)] p-[26px] shadow-[0_20px_48px_rgba(43,33,26,0.14)]"
+        className="skill-preview-modal relative flex max-h-[calc(100vh-32px)] w-full max-w-[620px] flex-col overflow-hidden rounded-2xl bg-[var(--console-card-bg)] p-[26px] shadow-[0_20px_48px_rgba(43,33,26,0.14)]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center gap-[14px]">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[12px] bg-[var(--console-active-bg)] text-[18px] font-bold text-[var(--console-modal-title)]">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--console-active-bg)] text-lg font-bold text-[var(--console-modal-title)]">
             ✎
           </div>
-          <h2 id="skill-preview-title" className="min-w-0 flex-1 text-[20px] font-extrabold text-cafe">
+          <h2 id="skill-preview-title" className="min-w-0 flex-1 text-xl font-extrabold text-cafe">
             {skillName}
           </h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="关闭"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] text-[16px] text-cafe-muted transition hover:bg-[var(--console-modal-close-bg)] hover:text-[var(--console-modal-close-fg)]"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-base text-cafe-muted transition hover:bg-[var(--console-modal-close-bg)] hover:text-[var(--console-modal-close-fg)]"
           >
             ✕
           </button>
         </div>
 
         {description && <p className="mt-3 text-compact leading-[1.4] text-cafe-secondary">{description}</p>}
+        {category && (
+          <div className="mt-2 flex">
+            <span className="rounded-xl bg-[var(--console-panel-bg)] px-2.5 py-1 text-label font-bold text-cafe-muted">
+              {category}
+            </span>
+          </div>
+        )}
         {skillPath && (
-          <p className="mt-1.5 truncate text-[11px] font-mono text-cafe-muted" title={skillPath}>
+          <p className="mt-1.5 truncate text-xs font-mono text-cafe-muted" title={skillPath}>
             {skillPath}
           </p>
         )}
@@ -119,7 +130,7 @@ export function SkillPreviewModal({
               {visibleTriggers.map((trigger) => (
                 <span
                   key={trigger}
-                  className="rounded-[14px] bg-[var(--console-panel-bg)] px-2.5 py-1 text-[12px] font-bold text-[var(--console-modal-title)]"
+                  className="rounded-xl bg-[var(--console-panel-bg)] px-2.5 py-1 text-xs font-bold text-[var(--console-modal-title)]"
                 >
                   {trigger}
                 </span>
@@ -128,7 +139,7 @@ export function SkillPreviewModal({
                 <button
                   type="button"
                   onClick={() => setShowAllTriggers(true)}
-                  className="rounded-[14px] bg-[var(--console-panel-bg)] px-2.5 py-1 text-[12px] font-bold text-cafe-muted hover:text-cafe transition-colors"
+                  className="rounded-xl bg-[var(--console-panel-bg)] px-2.5 py-1 text-xs font-bold text-cafe-muted transition-colors hover:text-cafe"
                 >
                   +{hiddenTriggerCount}
                 </button>
@@ -137,8 +148,8 @@ export function SkillPreviewModal({
           )}
 
           {content && (
-            <div className="rounded-[16px] bg-[var(--console-panel-bg)] p-4">
-              <pre className="max-h-[40vh] overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-6 text-cafe-secondary">
+            <div className="rounded-2xl bg-[var(--console-panel-bg)] p-4">
+              <pre className="max-h-[40vh] overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-6 text-cafe-secondary">
                 {content}
               </pre>
             </div>

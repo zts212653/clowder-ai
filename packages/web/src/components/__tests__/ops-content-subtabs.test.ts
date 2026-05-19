@@ -16,6 +16,7 @@ vi.mock('@/stores/chatStore', () => {
 });
 
 import { OpsContent } from '../settings/OpsContent';
+import { OPS_SUBSECTIONS } from '../settings/ops-nav-config';
 
 describe('OpsContent sub-tabs', () => {
   let container: HTMLDivElement;
@@ -42,17 +43,14 @@ describe('OpsContent sub-tabs', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('renders all 5 subsection tabs', () => {
+  it('renders all subsection tabs from the ops nav config', () => {
     act(() => {
       root.render(React.createElement(OpsContent));
     });
-    const buttons = Array.from(container.querySelectorAll('button'));
+    const buttons = Array.from(container.querySelectorAll('button')).slice(0, OPS_SUBSECTIONS.length);
     const tabLabels = buttons.map((b) => b.textContent);
-    expect(tabLabels).toContain('使用统计');
-    expect(tabLabels).toContain('排行榜');
-    expect(tabLabels).toContain('治理与刹车');
-    expect(tabLabels).toContain('命令速查');
-    expect(tabLabels).toContain('紧急救援');
+    expect(tabLabels).toEqual(OPS_SUBSECTIONS.map((subsection) => subsection.label));
+    expect(tabLabels).toContain('监控面板');
   });
 
   it('defaults to 使用统计 tab (first tab is active)', () => {
@@ -71,13 +69,14 @@ describe('OpsContent sub-tabs', () => {
     const buttons = Array.from(container.querySelectorAll('button'));
     const rescueBtn = buttons.find((b) => b.textContent === '紧急救援');
     expect(rescueBtn).not.toBeNull();
+    if (!rescueBtn) throw new Error('Expected rescue tab to render');
 
     act(() => {
-      rescueBtn!.click();
+      rescueBtn.click();
     });
 
-    expect(rescueBtn!.className).toContain('bg-cafe-accent');
+    expect(rescueBtn.className).toContain('bg-cafe-accent');
     const usageBtn = buttons.find((b) => b.textContent === '使用统计');
-    expect(usageBtn!.className).not.toContain('bg-cafe-accent');
+    expect(usageBtn?.className).not.toContain('bg-cafe-accent');
   });
 });

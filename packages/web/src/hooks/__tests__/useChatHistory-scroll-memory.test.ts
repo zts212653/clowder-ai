@@ -36,6 +36,7 @@ function makeThreadState(messages: ChatMessage[]): ThreadState {
     intentMode: null,
     targetCats: [],
     catStatuses: {},
+    catStatusDetails: {},
     catInvocations: {},
     currentGame: null,
     unreadCount: 0,

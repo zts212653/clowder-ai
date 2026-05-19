@@ -34,7 +34,7 @@
 | 可挂为已有 Feature 子任务 | 方向相反（同一问题不同方案） |
 | 和已有 design memo/ADR 一致 | 抢已有 Feature 的定义权 |
 
-**证据来源**：搜 `docs/ROADMAP.md` + `docs/features/*.md` + `docs/decisions/` + *(internal reference removed)*。
+**证据来源**：搜 `docs/ROADMAP.md` + `docs/features/*.md` + `docs/decisions/` + `feature-discussions/`。
 
 **注意**：Q2 的搜索 = Scene A 的关联检测，不需要另开一套。
 

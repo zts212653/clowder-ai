@@ -239,14 +239,14 @@ test('spawnCli resets timeout on stderr activity (CLI alive signal)', async () =
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
 
-  const promise = collect(spawnCli({ command: 'test-cli', args: [], timeoutMs: 50 }, { spawnFn }));
+  const promise = collect(spawnCli({ command: 'test-cli', args: [], timeoutMs: 300 }, { spawnFn }));
 
   // Keep the process "alive" with stderr output so it doesn't timeout
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await new Promise((resolve) => setTimeout(resolve, 100));
   proc.stderr.write('thinking...\n');
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await new Promise((resolve) => setTimeout(resolve, 100));
   proc.stderr.write('still working...\n');
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await new Promise((resolve) => setTimeout(resolve, 100));
 
   proc.stdout.write('{"type":"ok"}\n');
   proc.stdout.end();
@@ -712,14 +712,14 @@ test('B4: yields alive_but_silent warning during CLI silence', async () => {
       {
         command: 'codex',
         args: [],
-        timeoutMs: 500,
-        livenessProbe: { sampleIntervalMs: 30, softWarningMs: 80, stallWarningMs: 300 },
+        timeoutMs: 2000,
+        livenessProbe: { sampleIntervalMs: 100, softWarningMs: 250, stallWarningMs: 1200 },
       },
       { spawnFn },
     ),
   );
 
-  await new Promise((r) => setTimeout(r, 600));
+  await new Promise((r) => setTimeout(r, 2500));
   proc.stdout.end();
 
   const results = await promise;
@@ -1129,58 +1129,58 @@ test('Group A: lingering process is killed after grace period expires', async ()
 
 // === Issue #774: stallAutoKill — fast-fail on idle-silent stall ===
 
-test('#774: stallAutoKill kills process on suspected_stall + idle-silent instead of waiting for full timeout', async () => {
-  // Use a genuinely idle process PID so probe sees flat CPU (idle-silent),
-  // even when the test runner itself is busy under concurrent test execution.
-  const { execFileSync } = await import('node:child_process');
-  const sleeper = (await import('node:child_process')).spawn('sleep', ['60']);
-  const sleeperPid = sleeper.pid;
+test('#774: stallAutoKill kills process on suspected_stall + idle-silent instead of waiting for full timeout', async (t) => {
+  const stallWarningMs = 200;
+  const stallWarning = {
+    __livenessWarning: true,
+    state: 'idle-silent',
+    silenceDurationMs: stallWarningMs,
+    level: 'suspected_stall',
+    cpuTimeMs: 0,
+    processAlive: true,
+  };
+  let drainCalls = 0;
 
-  try {
-    const proc = createMockProcess({ pid: sleeperPid });
-    const spawnFn = createMockSpawnFn(proc);
+  // Keep the test deterministic under full-suite CPU pressure: #774 is about
+  // spawnCli's reaction to a suspected_stall warning, not ps sampling latency.
+  t.mock.method(ProcessLivenessProbe.prototype, 'start', () => {});
+  t.mock.method(ProcessLivenessProbe.prototype, 'getState', () => 'idle-silent');
+  t.mock.method(ProcessLivenessProbe.prototype, 'drainWarnings', () => {
+    drainCalls += 1;
+    return drainCalls === 2 ? [stallWarning] : [];
+  });
 
-    // Simulate Codex pattern: one event then total silence
-    proc.stdout.write(JSON.stringify({ type: 'turn.started' }) + '\n');
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
 
-    const startMs = Date.now();
-    const promise = collect(
-      spawnCli(
-        {
-          command: 'codex',
-          args: [],
-          timeoutMs: 10_000, // 10s "full" timeout (would normally wait this long)
-          livenessProbe: {
-            sampleIntervalMs: 30,
-            softWarningMs: 80,
-            stallWarningMs: 200, // stall detected at 200ms
-            stallAutoKill: true, // #774: enable fast-fail
-          },
+  const resultsPromise = collect(
+    spawnCli(
+      {
+        command: 'codex',
+        args: [],
+        timeoutMs: 10_000, // Full timeout must not be the reported timeout when stallAutoKill fires.
+        livenessProbe: {
+          sampleIntervalMs: 30,
+          softWarningMs: 80,
+          stallWarningMs,
+          stallAutoKill: true, // #774: enable fast-fail
         },
-        { spawnFn },
-      ),
-    );
+      },
+      { spawnFn },
+    ),
+  );
 
-    // Wait for stall detection to fire + kill
-    await new Promise((r) => setTimeout(r, 600));
-    if (!proc.stdout.writableEnded) proc.stdout.end();
+  // Simulate Codex pattern: one event then total silence.
+  proc.stdout.write(JSON.stringify({ type: 'turn.started' }) + '\n');
 
-    const results = await promise;
-    const elapsedMs = Date.now() - startMs;
+  const results = await resultsPromise;
 
-    // Should finish much faster than the 10s timeout
-    assert.ok(elapsedMs < 3000, `Should stall-kill quickly (${elapsedMs}ms), not wait 10s`);
+  const timeout = results.find((r) => r?.__cliTimeout);
+  assert.ok(timeout, 'should yield __cliTimeout event');
+  assert.equal(timeout.stallKill, true, 'should have stallKill: true');
+  assert.equal(timeout.timeoutMs, stallWarningMs, 'reported timeout should use stallWarningMs, not full timeoutMs');
 
-    // Should have yielded __cliTimeout with stallKill flag
-    const timeout = results.find((r) => r?.__cliTimeout);
-    assert.ok(timeout, 'should yield __cliTimeout event');
-    assert.equal(timeout.stallKill, true, 'should have stallKill: true');
-
-    // Should have killed the process
-    assert.ok(proc.kill.mock.callCount() >= 1, 'should kill process on stall');
-  } finally {
-    sleeper.kill();
-  }
+  assert.ok(proc.kill.mock.callCount() >= 1, 'should kill process on stall');
 });
 
 test('#774: stallAutoKill=false (default) does NOT kill on stall — waits for full timeout', async () => {

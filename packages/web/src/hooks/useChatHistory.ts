@@ -4,6 +4,7 @@ import type { ReplyPreview, SchedulerMessageExtra } from '@cat-cafe/shared';
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { getBubbleInvocationId, shouldForceReplaceHydrationForCachedMessages } from '@/debug/bubbleIdentity';
 import { recordDebugEvent } from '@/debug/invocationEventDebug';
+import { projectCanonicalBubbles } from '@/stores/bubble-projection';
 import type { QueueEntry, TaskProgressItem } from '@/stores/chat-types';
 import { type CatInvocationInfo, type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
 import type { TaskItem } from '@/stores/taskStore';
@@ -11,7 +12,9 @@ import { useTaskStore } from '@/stores/taskStore';
 import { apiFetch } from '@/utils/api-client';
 import {
   loadThreadMessages as loadCachedMessages,
+  loadThreadActiveState,
   saveThreadMessages as saveMessagesSnapshot,
+  saveThreadActiveState,
 } from '@/utils/offline-store';
 
 type SavedScrollState = {
@@ -46,6 +49,7 @@ const HISTORY_PAGE_SIZE = 50;
 // In export mode (?export=true), load all messages in one request for screenshot capture.
 // Normal browsing still uses 50-per-page pagination.
 const EXPORT_LIMIT = 10000;
+const DRAFT_LIVE_MERGE_ACTIVITY_WINDOW_MS = 5 * 60 * 1000;
 function isAbortError(err: unknown): boolean {
   return typeof err === 'object' && err !== null && 'name' in err && (err as { name?: string }).name === 'AbortError';
 }
@@ -68,16 +72,22 @@ function getHistoryInvocationId(msg: ChatMessageData): string | undefined {
   return getBubbleInvocationId(msg);
 }
 
-function getLocalPlaceholderInvocationId(
+// Exported for unit testing (R20 cloud Codex P1: catInvocations fallback turn-priority).
+export function getLocalPlaceholderInvocationId(
   msg: ChatMessageData,
   currentCatInvocations: Record<string, CatInvocationInfo>,
 ): string | undefined {
-  if (msg.extra?.stream?.invocationId) return msg.extra.stream.invocationId;
-  // Fallback: draft messages have id = 'draft-{invocationId}' — extract even after
-  // isStreaming is cleared by the done handler (prevents duplicate bubbles).
-  if (msg.id.startsWith('draft-')) return msg.id.slice('draft-'.length);
+  // F194 Phase Z3 P1-2 (砚砚 R): MUST share `getBubbleInvocationId` priority order
+  // (turnInvocationId > invocationId > draft id slice). Otherwise current/local placeholder uses
+  // parent key while history bubble uses turn key → 刷新前后 merge 路径不一致。
+  const bubbleInvId = getBubbleInvocationId(msg);
+  if (bubbleInvId) return bubbleInvId;
   if (msg.type !== 'assistant' || msg.origin !== 'stream' || !msg.isStreaming || !msg.catId) return undefined;
-  return currentCatInvocations[msg.catId]?.invocationId;
+  // F194 Phase Z3 R20 (cloud Codex P1): catInvocations fallback also prefers turn id when present.
+  // Otherwise placeholder (no extra.stream yet) resolves to parent while history bubble resolves
+  // to turn → same-parent multi-turn loses stable-key merge → both bubbles persist post-hydrate.
+  const catInv = currentCatInvocations[msg.catId];
+  return catInv?.turnInvocationId ?? catInv?.invocationId;
 }
 
 function getMessageRichness(msg: ChatMessageData): [number, number, number, number] {
@@ -163,6 +173,46 @@ function mergeMessageExtra(
 
 function getMessageOrderTimestamp(msg: ChatMessageData): number {
   return msg.deliveredAt ?? msg.timestamp;
+}
+
+function getMessageActivityTimestamp(msg: ChatMessageData): number {
+  const toolTimestamps =
+    msg.toolEvents
+      ?.map((event) => event.timestamp)
+      .filter((timestamp): timestamp is number => typeof timestamp === 'number' && Number.isFinite(timestamp)) ?? [];
+  return Math.max(getMessageOrderTimestamp(msg), ...toolTimestamps);
+}
+
+function getComparableMessageText(msg: ChatMessageData): string {
+  return [msg.content, msg.thinking]
+    .filter((text): text is string => Boolean(text?.trim()))
+    .join('\n')
+    .trim();
+}
+
+function hasStreamActivity(msg: ChatMessageData): boolean {
+  if (getComparableMessageText(msg)) return true;
+  if (msg.toolEvents?.length) return true;
+  return Boolean(msg.extra?.rich?.blocks.length);
+}
+
+function hasContentProximity(current: ChatMessageData, draft: ChatMessageData): boolean {
+  const currentText = getComparableMessageText(current);
+  const draftText = getComparableMessageText(draft);
+  // Without text on both sides, same-cat + recency is not enough identity
+  // evidence: a stale tool-only bubble can otherwise capture a new draft.
+  if (!currentText) return false;
+  if (!draftText) return false;
+  if (currentText.includes(draftText)) return true;
+  return draftText.includes(currentText);
+}
+
+function canBindInvocationlessLiveToDraft(current: ChatMessageData, draft: ChatMessageData): boolean {
+  if (!hasStreamActivity(current)) return false;
+  const currentActivityAt = getMessageActivityTimestamp(current);
+  const draftActivityAt = getMessageActivityTimestamp(draft);
+  if (Math.abs(currentActivityAt - draftActivityAt) > DRAFT_LIVE_MERGE_ACTIVITY_WINDOW_MS) return false;
+  return hasContentProximity(current, draft);
 }
 
 function shouldPreferCurrentMessage(current: ChatMessageData, history: ChatMessageData): boolean {
@@ -272,6 +322,8 @@ export function mergeReplaceHydrationMessages(
   // 条目，让 local placeholder 替换掉早期 stream bubble，留下两条 invocation
   // 重复气泡（cloud Codex P1）。id 命名空间不被 streamKey 覆盖。
   const historyIndexByStableId = new Map<string, { index: number; matchKind: 'id' | 'stream-key' }>();
+  const uniqueDraftByCat = new Map<string, { index: number; invocationId: string; message: ChatMessageData }>();
+  const ambiguousDraftCats = new Set<string>();
   for (let i = 0; i < historyMsgs.length; i++) {
     const msg = historyMsgs[i]!;
     historyIndexByStableId.set(msg.id, { index: i, matchKind: 'id' });
@@ -281,6 +333,16 @@ export function mergeReplaceHydrationMessages(
       const existing = historyIndexByStableId.get(streamKey);
       if (!existing || existing.matchKind === 'stream-key') {
         historyIndexByStableId.set(streamKey, { index: i, matchKind: 'stream-key' });
+      }
+      if (msg.id.startsWith('draft-') && msg.origin === 'stream') {
+        if (uniqueDraftByCat.has(msg.catId)) {
+          uniqueDraftByCat.delete(msg.catId);
+          ambiguousDraftCats.add(msg.catId);
+          continue;
+        }
+        if (!ambiguousDraftCats.has(msg.catId)) {
+          uniqueDraftByCat.set(msg.catId, { index: i, invocationId, message: msg });
+        }
       }
     }
   }
@@ -309,14 +371,38 @@ export function mergeReplaceHydrationMessages(
     const invocationId = msg.catId ? getLocalPlaceholderInvocationId(msg, currentCatInvocations) : undefined;
     const streamKey = msg.catId && invocationId ? `${msg.catId}:${invocationId}` : undefined;
     const streamHit = streamKey ? historyIndexByStableId.get(streamKey) : undefined;
-    const target = idHit?.matchKind === 'id' ? idHit : streamHit?.matchKind === 'stream-key' ? streamHit : undefined;
+    let target = idHit?.matchKind === 'id' ? idHit : streamHit?.matchKind === 'stream-key' ? streamHit : undefined;
+    let msgForMerge = msg;
+
+    // Live race: active stream may start as invocationless, while `/api/messages`
+    // already returns the running server draft `draft-{invocationId}` for the same
+    // cat. If catInvocations missed the binding, streamKey matching cannot fire and
+    // the UI keeps two bubbles. When there is exactly one server draft for that cat,
+    // backfill the draft invocationId into the local live bubble and merge them.
+    if (
+      !target &&
+      msg.type === 'assistant' &&
+      msg.catId &&
+      msg.origin === 'stream' &&
+      msg.isStreaming &&
+      !msg.extra?.stream?.invocationId
+    ) {
+      const draftCandidate = uniqueDraftByCat.get(msg.catId);
+      if (draftCandidate && canBindInvocationlessLiveToDraft(msg, draftCandidate.message)) {
+        target = { index: draftCandidate.index, matchKind: 'stream-key' };
+        msgForMerge = {
+          ...msg,
+          extra: mergeMessageExtra({ stream: { invocationId: draftCandidate.invocationId } }, msg.extra),
+        };
+      }
+    }
 
     if (target) {
       const historyMsg = mergedMsgs[target.index]!;
       if (target.matchKind === 'id') {
-        mergedMsgs[target.index] = mergeSameIdHydrationMessage(historyMsg, msg);
+        mergedMsgs[target.index] = mergeSameIdHydrationMessage(historyMsg, msgForMerge);
       } else if (shouldPreferCurrentMessage(msg, historyMsg)) {
-        mergedMsgs[target.index] = msg;
+        mergedMsgs[target.index] = mergeSameIdHydrationMessage(historyMsg, msgForMerge);
         replacedHistoryCount++;
       } else {
         reconciledToHistoryCount++;
@@ -463,6 +549,34 @@ export function useChatHistory(threadId: string) {
     [cancelPendingRestore],
   );
 
+  // Fix: /queue returns before /messages. If /queue says idle it clears
+  // hasActiveInvocation. When /messages then returns draft messages (isDraft=true,
+  // meaning a cat is still streaming), we must restore the active invocation state
+  // so the cancel button stays visible.
+  const restoreActiveFromDrafts = useCallback(
+    (forThread: string, rawMessages: Array<{ isDraft?: boolean; catId?: string }>) => {
+      const draftCatIds = [...new Set(rawMessages.filter((m) => m.isDraft && m.catId).map((m) => m.catId!))];
+      if (draftCatIds.length === 0) return;
+
+      const store = useChatStore.getState();
+      const isCurrentThread = store.currentThreadId === forThread;
+      const threadState = store.threadStates[forThread];
+      const alreadyActive = isCurrentThread ? store.hasActiveInvocation : threadState?.hasActiveInvocation === true;
+      if (alreadyActive) return;
+
+      store.setThreadHasActiveInvocation(forThread, true);
+      for (const catId of draftCatIds) {
+        const syntheticId = `hydrated-${forThread}-${catId}`;
+        if (isCurrentThread) {
+          store.addActiveInvocation(syntheticId, catId, 'execute');
+        } else {
+          store.addThreadActiveInvocation(forThread, syntheticId, catId, 'execute');
+        }
+      }
+    },
+    [],
+  );
+
   // Fetch history page from API
   // When replace=true, clears existing messages before setting (used for force-refresh).
   const fetchHistory = useCallback(
@@ -598,10 +712,27 @@ export function useChatHistory(threadId: string) {
           // (instead of bare replaceMessages + saveMessagesSnapshot pair).
           // AC-C10: server GET 是 authoritative，IDB snapshot 必须被 GET
           // 响应覆盖而不是合并。
-          hydrateThread(fetchForThread, mergedMsgs, data.hasMore ?? false);
+          // F194 Phase Z8 AC-Z22 (KD-27 + 砚砚 R1 OQ-3): writer boundary projection
+          // — same canonical bubble rule as live reducer wrapper
+          // (applyBubbleEventWithRecovery)。raw records 进 store 前 collapse
+          // 到 1 bubble per (catId, invocationId)，确保 hydrate ≡ live。
+          const projectedMerged = projectCanonicalBubbles({ records: mergedMsgs }).messages;
+          hydrateThread(fetchForThread, projectedMerged, data.hasMore ?? false);
+          restoreActiveFromDrafts(fetchForThread, data.messages ?? []);
           return true;
         }
-        prependHistory(historyMsgs, data.hasMore ?? false);
+        // F194 Phase Z8 AC-Z22 + R2 P2 (砚砚): page-boundary projection — project
+        // (new historyMsgs ∪ existing store messages) so cross-page same-(catId, invocationId)
+        // raw records collapse into one canonical bubble. Plain prependHistory only dedupes
+        // by id, leaving canonical siblings split across page boundary.
+        const beforePrepend = useChatStore.getState().messages;
+        const unionProjected = projectCanonicalBubbles({
+          records: [...historyMsgs, ...beforePrepend],
+        }).messages;
+        // Replace store with projected union (cleaner than prepend + post-merge).
+        // hasMore propagates older-history pagination state.
+        replaceMessages(unionProjected, data.hasMore ?? false);
+        restoreActiveFromDrafts(fetchForThread, data.messages ?? []);
         // F164: Snapshot fetched messages to IndexedDB (fire-and-forget)
         const snapshotState = useChatStore.getState();
         if (snapshotState.currentThreadId === fetchForThread) {
@@ -620,7 +751,7 @@ export function useChatHistory(threadId: string) {
         }
       }
     },
-    [setLoadingHistory, prependHistory, replaceMessages, hydrateThread, threadId],
+    [setLoadingHistory, prependHistory, replaceMessages, hydrateThread, restoreActiveFromDrafts, threadId],
   );
 
   const fetchTasks = useCallback(async () => {
@@ -710,6 +841,14 @@ export function useChatHistory(threadId: string) {
     }
   }, [threadId, setCatInvocation, replaceThreadTargetCats]);
 
+  // F194 Phase Z10 (砚砚 R1 P1): track which AbortController has had a successful
+  // fetchQueue completion (active OR idle). IDB restore checks this set — if
+  // fetchQueue already wrote server truth, IDB restore must NOT overwrite
+  // (otherwise stale IDB "active" resurrects after server confirmed idle).
+  // WeakSet keys on controller so cleanup happens when controller is GC'd.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const queueFetchedControllers = useRef(new WeakSet<AbortController>()).current;
+
   // F39 Bug 1: Fetch queue state on mount/thread-switch to survive F5 refresh
   const fetchQueue = useCallback(async () => {
     const fetchForThread = threadId;
@@ -736,6 +875,9 @@ export function useChatHistory(threadId: string) {
       // Uses thread-scoped APIs so it works correctly for both active and background threads,
       // and always overwrites stale snapshots restored by setCurrentThread().
       const store = useChatStore.getState();
+      // F194 Phase Z10 AC-Z28: write-through to IDB so F5 first paint
+      // restores last-known active state (avoids R14 fake-idle gap).
+      const activeStateSnapshot: Record<string, { catId: string; mode: string; startedAt?: number }> = {};
       if (data.activeInvocations && data.activeInvocations.length > 0) {
         const activeCatIds = data.activeInvocations.map((s) => s.catId);
         replaceThreadTargetCats(fetchForThread, activeCatIds);
@@ -756,7 +898,13 @@ export function useChatHistory(threadId: string) {
           } else {
             store.addThreadActiveInvocation(fetchForThread, syntheticId, slot.catId, 'execute', slot.startedAt);
           }
+          activeStateSnapshot[syntheticId] = { catId: slot.catId, mode: 'execute', startedAt: slot.startedAt };
         }
+        // F194 Phase Z10 AC-Z28: persist for next F5.
+        void saveThreadActiveState(fetchForThread, {
+          hasActiveInvocation: true,
+          activeInvocations: activeStateSnapshot,
+        }).catch(() => {});
       } else {
         // Server says no active invocations — clear any stale processing state
         // that may have been restored from a threadStates snapshot.
@@ -764,7 +912,17 @@ export function useChatHistory(threadId: string) {
         // AND the activeInvocations slot map, preventing re-derivation bugs.
         store.clearThreadActiveInvocation(fetchForThread);
         replaceThreadTargetCats(fetchForThread, []);
+        // F194 Phase Z10 AC-Z28: persist idle snapshot so F5 doesn't show
+        // stale "active" — server truth wins.
+        void saveThreadActiveState(fetchForThread, {
+          hasActiveInvocation: false,
+          activeInvocations: {},
+        }).catch(() => {});
       }
+      // F194 Phase Z10 (砚砚 R1 P1): mark controller as fetched after server
+      // truth (active OR idle) has been applied. IDB restore skips overwriting
+      // if this controller is marked — prevents stale-active resurrection.
+      queueFetchedControllers.add(controller);
     } catch (err) {
       if (isAbortError(err)) return;
     }
@@ -822,6 +980,35 @@ export function useChatHistory(threadId: string) {
     // F164: Reset offline badge on every thread switch so stale state from
     // a previous thread's aborted fetch never leaks to the new thread.
     useChatStore.getState().setOfflineSnapshot(false);
+
+    // F194 Phase Z10 AC-Z28 (R14): restore IDB active state snapshot for F5
+    // first paint so UI doesn't show fake "idle" gap while fetchQueue is
+    // pending. fetchQueue (running in parallel via hydrateSecondaryPanels)
+    // overwrites with server truth ~100ms later. If fetchQueue completes
+    // before IDB load (unlikely — IDB faster than network), the IDB restore
+    // skips so it doesn't regress fresh server truth.
+    void (async () => {
+      try {
+        const snapshot = await loadThreadActiveState(threadId);
+        if (abortRef.current !== controller || threadIdRef.current !== threadId) return;
+        if (!snapshot) return;
+        // F194 Phase Z10 (砚砚 R1 P1): if fetchQueue already wrote server truth
+        // (active OR idle), IDB restore must NOT overwrite. The previous
+        // `currentState.hasActiveInvocation === true` check only handled the
+        // server-active case; server-idle case let stale IDB active resurrect.
+        if (queueFetchedControllers.has(controller)) return;
+        if (snapshot.hasActiveInvocation) {
+          const store = useChatStore.getState();
+          store.clearThreadActiveInvocation(threadId);
+          store.setThreadHasActiveInvocation(threadId, true);
+          for (const [invId, slot] of Object.entries(snapshot.activeInvocations)) {
+            store.addThreadActiveInvocation(threadId, invId, slot.catId, slot.mode, slot.startedAt);
+          }
+        }
+      } catch {
+        // best-effort restore; fetchQueue is the authoritative source.
+      }
+    })();
 
     const bootstrap = async () => {
       if (!hasCachedMessages) {

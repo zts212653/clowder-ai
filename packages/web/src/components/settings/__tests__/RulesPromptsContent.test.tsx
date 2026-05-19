@@ -1,0 +1,97 @@
+/**
+ * F203 Phase F — L0 system prompt visibility (read-only viewer).
+ *
+ * Tests the pure props-driven sub-components extracted from
+ * RulesPromptsContent. Async fetch + modal interactions covered by
+ * Playwright e2e in Task 4 (per plan).
+ */
+
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { L0PromptsSection, RuleFileCard } from '@/components/settings/RulesPromptsContent';
+
+beforeAll(() => {
+  (globalThis as { React?: typeof React }).React = React;
+});
+afterAll(() => {
+  delete (globalThis as { React?: typeof React }).React;
+});
+
+const SAMPLE_L0 = {
+  template: { path: 'assets/system-prompts/system-prompt-l0.md', content: '# L0 template body', exists: true },
+  compiledByCat: [
+    { catId: 'opus-47', displayName: '布偶猫 Opus 4.7', compiled: 'compiled-for-opus-47', error: null },
+    { catId: 'codex', displayName: '缅因猫 GPT-5.5(codex)', compiled: 'compiled-for-codex', error: null },
+    { catId: 'broken', displayName: 'Broken Cat', compiled: '', error: 'simulated compile failure' },
+  ],
+  customization: {
+    templatePath: 'assets/system-prompts/system-prompt-l0.md',
+    compileScript: 'scripts/compile-system-prompt-l0.mjs',
+    verifyCommand: 'pnpm gate + runtime restart (KD-5 git revert 回滚通道)',
+  },
+};
+
+describe('L0PromptsSection (F203 Phase F)', () => {
+  it('renders title, template card, and one card per compiled cat (AC-F2/F3)', () => {
+    const html = renderToStaticMarkup(<L0PromptsSection l0Prompts={SAMPLE_L0} onPreview={() => {}} />);
+    expect(html).toContain('L0 系统提示词');
+    expect(html).toContain('assets/system-prompts/system-prompt-l0.md');
+    expect(html).toContain('布偶猫 Opus 4.7');
+    expect(html).toContain('缅因猫 GPT-5.5(codex)');
+    expect(html).toContain('Broken Cat');
+  });
+
+  it('renders customization paths info row with template + compile script + verify command (AC-F4)', () => {
+    const html = renderToStaticMarkup(<L0PromptsSection l0Prompts={SAMPLE_L0} onPreview={() => {}} />);
+    expect(html).toContain('assets/system-prompts/system-prompt-l0.md');
+    expect(html).toContain('scripts/compile-system-prompt-l0.mjs');
+    expect(html).toContain('pnpm gate');
+    expect(html).toContain('runtime restart');
+  });
+});
+
+describe('RuleFileCard error UX (F203 Phase F 砚砚 plan-review refinement)', () => {
+  it('with errorMessage shows "编译失败" not "文件不存在"', () => {
+    const html = renderToStaticMarkup(
+      <RuleFileCard
+        file={{ path: 'compiled://broken', content: '', exists: false }}
+        label="Broken"
+        onClick={() => {}}
+        errorMessage="simulated compile failure"
+      />,
+    );
+    expect(html).toContain('编译失败');
+    expect(html).not.toContain('文件不存在');
+  });
+
+  it('with errorMessage = "" still shows "编译失败" (cloud R3: empty string IS a failure, not no-error)', () => {
+    // Cloud R3 P2: `new Error('').message === ''`; readL0Prompts forwards
+    // e.message directly. A truthy check (`if (errorMessage)`) treats `""` as
+    // "no error" and misclassifies as "文件不存在". Use explicit presence
+    // check (errorMessage !== undefined) so the prop semantic is "set means
+    // failure, regardless of text content".
+    const html = renderToStaticMarkup(
+      <RuleFileCard
+        file={{ path: 'compiled://broken', content: '', exists: false }}
+        label="Empty Err"
+        onClick={() => {}}
+        errorMessage=""
+      />,
+    );
+    expect(html).toContain('编译失败');
+    expect(html).not.toContain('文件不存在');
+  });
+
+  it('without errorMessage and !exists still shows "文件不存在" (existing behavior unchanged)', () => {
+    const html = renderToStaticMarkup(
+      <RuleFileCard
+        file={{ path: 'missing/file.md', content: '', exists: false }}
+        label="Missing"
+        onClick={() => {}}
+      />,
+    );
+    expect(html).toContain('文件不存在');
+    expect(html).not.toContain('编译失败');
+  });
+});

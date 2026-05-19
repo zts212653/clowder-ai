@@ -92,3 +92,4 @@ close_gate_report:
 3. 有无 follow-up tail 关键词命中
 4. cvo_signoff 的四件套是否完整且可追溯
 5. 不允许凭自由文本"我都做了" close
+6. **Contract 漂检查（KD-26 from F194 Phase Z5）**：本 PR 改了一个 contract（id 公式 / kind 语义 / fallback 策略 / etc.）后，是否同时审了**所有引用该 contract 的周边代码**没有出现"helper 用 X 公式但 reducer 用 X+kind 公式"这种漂？守护对照表不能只对照"上一次 catch 的症状"，要主动列出"contract A 改动 → contract B/C/D 是否仍兼容"的矩阵。F194 Phase Z3/Z4 守护表两次都全绿但 Bug A+B 没 catch，根因就是没做 contract 漂检查

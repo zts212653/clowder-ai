@@ -4,17 +4,18 @@ related_features: [F102, F148, F152, F163, F167]
 topics: [memory, externalized-working-memory, reflex-injection, salience-gating, vision]
 doc_kind: vision
 created: 2026-04-19
-revised: 2026-04-25
+revised: 2026-05-11
 ---
 
 # F169: Agent Memory Reflex — 愿景文档（vision artifact）
 
-> **Status**: **realized → closed**（B+C 已通过 F148/F163 实现；A team lead拍板关闭，不做持久 Compiled Wiki）
+> **Status**: **done**（vision realized；B+C 已通过 F148/F163 实现；A team lead拍板关闭，不做持久 Compiled Wiki）
+> **Completed**: 2026-05-11（truth-source close sync；Phase A 关闭决策为 2026-04-25）
 > **Reviewed**: 2026-04-19 by @opus-46 + @gpt52（Maine Coon）（综合 review 已落盘，见 Review Gate 节）
-> **愿景实现度更新**: 2026-04-25（closed）
+> **愿景实现度更新**: 2026-05-11（close gate + BACKLOG truth sync）
 > **Priority**: N/A（作为愿景保留，不走实现流程；实现归属分派到具体 feat Phase）
 >
-> **实现归属与状态**（截至 2026-04-25）：
+> **实现归属与状态**（截至 2026-05-11）：
 >
 > | 原 Phase | 原描述 | 实际归属 | 状态 | 证据 |
 > |----------|--------|---------|------|------|
@@ -22,7 +23,7 @@ revised: 2026-04-25
 > | Phase B | Reflex Injection | F148 Phase F-H | ✅ **精神达成** — F148 done 2026-04-25 | navigation header 注入 baton + tasks + truthSource + artifact，指向 raw anchor（KD-8 合规） |
 > | Phase C | Task-scoped Salience Gating | F163 Phase F | ✅ **完整对齐** VAC-C1~C5 | PR #1412 merged `b843744f`（2026-04-25），25 测试 + NDCG@10 gold set 验证 + Maine Coon愿景守护放行 |
 >
-> 本文档作为愿景研究产物保留：三层方向性主张 + 跨族视角论证 + ADHD 同构假设，已被两条主线（F148/F163）实现。Phase A team lead 2026-04-25 拍板关闭——不做持久文档，若痛点复现走 query-time Feature Lens。
+> 本文档作为愿景研究产物保留：三层方向性主张 + 跨族视角论证 + ADHD 同构假设，已被两条主线（F148/F163）实现。Phase A team lead 2026-04-25 拍板关闭——不做持久文档，若痛点复现走 query-time Feature Lens。2026-05-11 close sync 将 F169 从 BACKLOG 活跃列表移出。
 >
 > **Meta-Aesthetics 约束**：本文档按 [canon](../canon/meta-aesthetics.md) §5.4 写——方向性约束（终态设计 / 不加认知脚手架）作为 F148 Phase F / F163 Phase F 实现时的**设计哲学输入**，不是本文档的实现切片。
 
@@ -173,7 +174,7 @@ F169 不替代任何一层，是**把它们连起来运行**的 reflex runtime �
 
 - [~] **VAC-E2E**: Opus-47 或新分身进入新 feat thread，**不调用 search_evidence**，通过 F148 navigation header + F163 salience gating 在 5 秒内判断方向正确与否（**间接达成**——F148 close Maine Coon愿景守护 + F163 Phase F NDCG@10 gold set 各自覆盖了一部分；显式跨 feat e2e 测试未做，价值边际，按"愿景间接验证"通过）
 
-### Phase A（剥离，待team lead决策窗口至 2026-05-19）
+### Phase A（剥离后关闭）
 
 > Phase A Compiled Wiki Self-Authoring 已关闭（2026-04-25 team lead拍板）。B+C 充分覆盖愿景；若痛点复现，方向是 query-time Feature Lens（现场从 spec/thread/git/PR 投影，不存文件）。
 
@@ -191,7 +192,7 @@ F169 不替代任何一层，是**把它们连起来运行**的 reflex runtime �
 | Phase B spotlight 过度干预（噪音代替信号） | F148 Phase F-H：navigation header 的字段精简 + 愿景 AC「新猫 5 秒判断方向」 | ✅ F148 close 时Maine Coon愿景守护放行 |
 | Phase C salience 误压重要记忆 | F163 Phase F：`always_on` 免疫（VAC-C2）+ NDCG@10 gold set（VAC-C5）+ 任务作用域可逆（VAC-C4）+ shadow before/after 日志防 LL-051 空转 | ✅ PR #1412 合入，Maine Coon愿景守护放行 |
 | F148/F163 Phase F 改动并发冲突 | 由 46 在各自 Design Gate 上排序 | ✅ 两条主线均已合入，无冲突 |
-| Phase A Compiled Wiki 被遗忘 | 剥离挂 F102 增强待议列表；OQ-4 自动关闭窗口至 2026-05-19 | ✅ team lead 2026-04-25 拍板关闭 |
+| Phase A Compiled Wiki 被遗忘 | OQ-4 原本自动关闭窗口至 2026-05-19；team lead已在 2026-04-25 提前拍板关闭，2026-05-11 完成 truth sync | ✅ 闭环 |
 
 ## Key Decisions（愿景层 + 已通过 review）
 
@@ -211,4 +212,88 @@ F169 不替代任何一层，是**把它们连起来运行**的 reflex runtime �
   - P2 finding（Maine Coon）：Active Forgetting 名字过强——接受，全文改名 "task-scoped salience gating"
   - 结构建议（46+Maine Coon）：F169 不应是 implementation feature——接受，降级为 vision artifact + 实现归属分派
 - **Design Gate**（下游 feat）：F163 Phase F Design Gate 已完成（gpt52 给出 4 问硬约束：信号源/阈值策略/接入点/30 行约束边界），实现合入；F148 Phase F-H 通过愿景守护放行 close ✅
-- **愿景实现度** (2026-04-25)：B+C 已通过 F148/F163 实现；A 待team lead在 2026-05-19 前决策（OQ-4 自动关闭窗口）
+- **愿景实现度** (2026-05-11)：B+C 已通过 F148/F163 实现；A 已由team lead 2026-04-25 拍板关闭；2026-05-11 完成 BACKLOG / feature index / research README truth sync ✅
+
+## Completion Gate（2026-05-11）
+
+### 愿景守护证物对照表
+
+| team experience / 决策 | 当前实际状态（证据） | 匹配？ |
+|-------------------|----------------------|--------|
+| "记忆系统不是给team lead用的，是给你们用的" | F148 Phase F-H 已把 baton/tasks/truthSource/artifact 注入 navigation header；F163 Phase F 已把 task-scoped salience gating 接入 search evidence rerank。F169 runtime 愿景由 B+C 组合达成 | ✅ |
+| "别生成一份新文档存在那里...如果将来真需要这个功能，应该做成现场投影"（Maine Coon建议，经team lead 2026-04-25 接受） | Phase A 持久 Compiled Wiki 已关闭；Open Questions OQ-2/OQ-4 标记关闭；后续仅保留 query-time Feature Lens 作为痛点复现时的方向，不进入 BACKLOG | ✅ |
+| "那你好像要走一下feat close流程？...我们需要更新一下真相源了"（2026-05-11） | 本次 close sync 补 CloseGateReport、反思胶囊、BACKLOG 移除、features README 完成索引、研究专题 README 状态同步 | ✅ |
+
+### CloseGateReport
+
+```yaml
+close_gate_report:
+  feature_id: F169
+  spec_path: docs/features/F169-agent-memory-reflex.md
+  head_sha: "280b6ecea (substantive close sync commit; this report reference is filled by the next metadata commit)"
+  report_date: 2026-05-11
+  harness_feedback:
+    status: none
+    reason: "F169 是愿景文档 close sync，本次不引入 runtime 行为；runtime 行为已在 F148/F163 close gate 中验证"
+  ac_matrix:
+    - ac_id: VAC-B1..VAC-B5
+      status: met
+      evidence:
+        - kind: pr
+          ref: "PR #1286 / #1292 / #1297 / #1303 / #1312 / #1319"
+          description: "F148 Phase F-H + fixes merged: baton context, navigation data, artifact tracking, goal grounding, navigation-first briefing card, speaker attribution"
+        - kind: commit
+          ref: "7727d78cd"
+          description: "F148 close: Phase A-H complete, I/J de-scoped"
+        - kind: doc
+          ref: "docs/features/F148-hierarchical-context-transport.md"
+          description: "F148 timeline records 2026-04-25 feature close and navigation-axis completion"
+      resolution: null
+    - ac_id: VAC-C1..VAC-C5
+      status: met
+      evidence:
+        - kind: pr
+          ref: "PR #1412"
+          description: "F163 Phase F task-scoped salience gating merged"
+        - kind: commit
+          ref: "b843744f5"
+          description: "salience() + rerank, always_on immunity, reversible task-scoped behavior, NDCG@10 validation"
+        - kind: commit
+          ref: "3e7385719"
+          description: "F163 mark feature as done after Phase F"
+      resolution: null
+    - ac_id: Phase-A-Compiled-Wiki
+      status: cvo_signed_off
+      evidence:
+        - kind: message
+          ref: "0001778553412203-000128-72a248a5"
+          description: "CVO asks to run feat close flow and update F169 truth source as of 2026-05-11"
+        - kind: doc
+          ref: "docs/features/F169-agent-memory-reflex.md#open-questions"
+          description: "OQ-2/OQ-4 closed: no persistent Compiled Wiki; query-time Feature Lens only if pain recurs"
+      resolution:
+        kind: cvo_signoff
+        reason: "B+C fully cover the runtime memory reflex vision; persistent Compiled Wiki would create a second truth surface"
+        cvo_signoff:
+          proposal_message_id: "0001777183100065-000035-5052ba99"
+          cvo_message_id: "0001778553412203-000128-72a248a5"
+          cvo_quote: "那你好像要走一下feat close流程？...我们需要更新一下真相源了"
+          accepted_scope: ["Phase-A-Compiled-Wiki"]
+    - ac_id: BACKLOG-truth-sync
+      status: met
+      evidence:
+        - kind: doc
+          ref: "docs/ROADMAP.md"
+          description: "F169 removed from active feature list"
+        - kind: doc
+          ref: "docs/features/README.md"
+          description: "F169 added to completed feature index"
+        - kind: doc
+          description: "research topic index synced to done/closed status"
+      resolution: null
+```
+
+### Completion Notes
+
+- **Evolved from**: 2026-04-19 Karpathy LLM Wiki 研究专题 + meta-aesthetics canon 的 "Agent Quality = Model Capability × Environment Fit" 坐标系。
+- **No active follow-up**: query-time Feature Lens 只是痛点复现时的设计方向，不是当前 BACKLOG item。

@@ -7,12 +7,12 @@ import { HealthDashboard } from './HealthDashboard';
 
 function StatusBadge({ status, variant }: { status: string; variant: 'staged' | 'unstaged' | 'untracked' }) {
   const colors = {
-    staged: 'bg-conn-emerald-bg text-conn-emerald-text',
+    staged: 'bg-conn-green-bg text-conn-green-text',
     unstaged: 'bg-conn-amber-bg text-conn-amber-text',
     untracked: 'bg-cafe-surface-elevated text-cafe-secondary',
   };
   return (
-    <span className={`inline-block px-1 py-0.5 rounded text-[9px] font-mono font-bold ${colors[variant]}`}>
+    <span className={`inline-block px-1 py-0.5 rounded text-[10px] font-mono font-bold ${colors[variant]}`}>
       {status}
     </span>
   );
@@ -30,14 +30,14 @@ function StatusSection({
   if (items.length === 0) return null;
   return (
     <div className="mb-2">
-      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-cafe-muted">
+      <div className="text-[10px] font-semibold text-cafe-interactive/50 uppercase tracking-wider mb-1">
         {title} ({items.length})
       </div>
       <div className="space-y-0.5">
         {items.map((item) => (
           <div
             key={item.path}
-            className="flex items-center gap-1.5 rounded px-1 py-0.5 text-xs font-mono text-cafe-black/80 hover:bg-[var(--console-hover-bg)]"
+            className="flex items-center gap-1.5 text-xs font-mono text-cafe-black/80 py-0.5 px-1 rounded hover:bg-cafe-surface-sunken/30"
           >
             <StatusBadge status={item.status} variant={variant} />
             <span className="truncate">{item.path}</span>
@@ -54,16 +54,14 @@ function CommitRow({ commit, isExpanded, onToggle }: { commit: GitCommit; isExpa
     <button
       type="button"
       onClick={onToggle}
-      className={`w-full border-b border-[var(--console-border-soft)] px-2 py-1.5 text-left text-xs transition-colors hover:bg-[var(--console-hover-bg)] ${
-        isExpanded ? 'bg-[var(--console-active-bg)]' : ''
-      }`}
+      className={`w-full text-left px-2 py-1.5 text-xs hover:bg-cafe-surface-sunken/30 transition-colors border-b border-cafe-subtle/20 ${isExpanded ? 'bg-cafe-surface-sunken/20' : ''}`}
     >
       <div className="flex items-center gap-2">
-        <span className="shrink-0 font-mono text-[10px] text-cafe-secondary">{commit.short}</span>
+        <span className="font-mono text-cafe-accent/70 text-[10px] shrink-0">{commit.short}</span>
         <span className="truncate text-cafe-black/80 flex-1">{commit.subject}</span>
-        <span className="shrink-0 text-[10px] text-cafe-muted">{relDate}</span>
+        <span className="text-[10px] text-cafe-interactive/40 shrink-0">{relDate}</span>
       </div>
-      <div className="mt-0.5 text-[10px] text-cafe-muted">{commit.author}</div>
+      <div className="text-[10px] text-cafe-interactive/40 mt-0.5">{commit.author}</div>
     </button>
   );
 }
@@ -103,39 +101,37 @@ export function GitPanel() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Refresh button */}
-      <div className="flex items-center justify-between border-b border-[var(--console-border-soft)] px-3 py-1.5">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-cafe-muted">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-cafe-subtle/40">
+        <span className="text-[10px] font-semibold text-cafe-interactive/50 uppercase tracking-wider">
           {status?.branch ? `Branch: ${status.branch}` : 'Git'}
         </span>
         <button
           type="button"
           onClick={refresh}
           disabled={loading}
-          className="rounded-md px-2 py-1 text-[10px] text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe disabled:opacity-50"
+          className="text-[10px] text-cafe-accent hover:text-cafe-accent/80 disabled:opacity-50"
         >
           {loading ? '...' : 'Refresh'}
         </button>
       </div>
 
       {error && (
-        <div className="px-3 py-2 text-xs text-conn-red-text bg-conn-red-bg/80 border-b border-conn-red-ring">
-          {error}
-        </div>
+        <div className="px-3 py-2 text-xs text-conn-red-text bg-conn-red-bg/80 border-b border-red-100">{error}</div>
       )}
 
       <div className="flex-1 overflow-y-auto">
         {/* Git Status Section */}
         {status && totalChanges > 0 && (
-          <div className="border-b border-[var(--console-border-soft)]">
+          <div className="border-b border-cafe-subtle/40">
             <button
               type="button"
               onClick={() => setStatusCollapsed(!statusCollapsed)}
-              className="flex w-full items-center justify-between px-3 py-1.5 hover:bg-[var(--console-hover-bg)]"
+              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-cafe-surface-sunken/20"
             >
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-cafe-muted">
+              <span className="text-[10px] font-semibold text-cafe-interactive/60 uppercase tracking-wider">
                 Status ({totalChanges} changes)
               </span>
-              <span className="text-[10px] text-cafe-muted">{statusCollapsed ? '▸' : '▾'}</span>
+              <span className="text-[10px] text-cafe-interactive/40">{statusCollapsed ? '▸' : '▾'}</span>
             </button>
             {!statusCollapsed && (
               <div className="px-3 pb-2">
@@ -148,7 +144,7 @@ export function GitPanel() {
         )}
 
         {status && totalChanges === 0 && (
-          <div className="border-b border-[var(--console-border-soft)] px-3 py-2 text-xs text-conn-emerald-text">
+          <div className="px-3 py-2 text-xs text-conn-green-text border-b border-cafe-subtle/40">
             Working tree clean
           </div>
         )}
@@ -158,7 +154,7 @@ export function GitPanel() {
 
         {/* Git Log Section */}
         <div>
-          <div className="sticky top-0 border-b border-[var(--console-border-soft)] bg-cafe-white/95 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-cafe-muted backdrop-blur-sm">
+          <div className="px-3 py-1.5 text-[10px] font-semibold text-cafe-interactive/50 uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm border-b border-cafe-subtle/20">
             Commits ({commits.length})
           </div>
           {commits.map((commit) => (
@@ -169,15 +165,15 @@ export function GitPanel() {
                 onToggle={() => handleToggleCommit(commit.hash)}
               />
               {expandedHash === commit.hash && commitDetail && commitDetail.hash === commit.hash && (
-                <div className="border-b border-[var(--console-border-soft)] bg-[var(--console-card-soft-bg)] px-3 py-2">
+                <div className="bg-cafe-surface-sunken/10 px-3 py-2 border-b border-cafe-subtle/30">
                   {commitDetail.files.length === 0 ? (
-                    <div className="text-[10px] text-cafe-muted">No file changes</div>
+                    <div className="text-[10px] text-cafe-interactive/40">No file changes</div>
                   ) : (
                     <div className="space-y-0.5">
                       {commitDetail.files.map((f) => (
                         <div key={f.path} className="flex items-center justify-between text-[10px] font-mono">
                           <span className="text-cafe-black/70 truncate">{f.path}</span>
-                          <span className="ml-2 shrink-0 text-cafe-muted">{f.summary}</span>
+                          <span className="text-cafe-interactive/40 shrink-0 ml-2">{f.summary}</span>
                         </div>
                       ))}
                     </div>
@@ -187,7 +183,7 @@ export function GitPanel() {
             </div>
           ))}
           {commits.length === 0 && !loading && (
-            <div className="px-3 py-4 text-center text-xs text-cafe-muted">No commits found</div>
+            <div className="px-3 py-4 text-xs text-cafe-interactive/40 text-center">No commits found</div>
           )}
         </div>
       </div>

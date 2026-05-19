@@ -20,7 +20,7 @@
 
 ## Original Requirements（必填）
 
-- Discussion/Interview: *(internal reference removed)*
+- Discussion/Interview: `feature-discussions/{date}-{topic}/README.md`
 - **原始需求摘录（≤5 行，直接粘贴铲屎官原话）**：
   > {例："我要能看到三只猫分别挂了哪些 Skill，按猫分类，一目了然"}
 - 铲屎官核心痛点：{用铲屎官自己的话概括}
@@ -28,7 +28,7 @@
 
 ## Plan / ADR
 
-- Plan: *(internal reference removed)*
+- Plan: `feature-specs/YYYY-MM-DD-xxx.md`
 - ADR: `docs/decisions/NNN-xxx.md`（如有）
 - BACKLOG: F__ / #__
 

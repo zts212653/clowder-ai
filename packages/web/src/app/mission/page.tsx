@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
 
-export default function MissionPage() {
+export default function MissionRedirect() {
   redirect('/mission-hub');
 }

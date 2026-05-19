@@ -427,14 +427,18 @@ REDIS_PORT=6399
 # Apply-InstallerRedisPlan in Step 3) into .env BEFORE we load it. We no
 # longer write Claude/Codex/Gemini/Kimi auth from the installer, but the
 # Redis env state still flows through the same EnvSetMap/EnvDeleteMap and
-# this is the only call that persists it to disk (codex review P1 on
-# 3fa55b5c).
+# this is the only call that persists it to disk.
 Apply-InstallerAuthEnv -State $authState -EnvFile $envFile
 
-# #675: Generate TELEMETRY_HMAC_SALT if missing
+# #675/#705: Generate TELEMETRY_HMAC_SALT if missing, quoted-empty, or whitespace-only
 if (Test-Path $envFile) {
-    $hasSalt = Select-String -Path $envFile -Pattern "^TELEMETRY_HMAC_SALT=.+" -Quiet
-    if (-not $hasSalt) {
+    $needsSalt = $true
+    $saltLine = Select-String -Path $envFile -Pattern "^TELEMETRY_HMAC_SALT=" | Select-Object -First 1
+    if ($saltLine) {
+        $val = ($saltLine.Line -replace '^TELEMETRY_HMAC_SALT=', '').Trim().Trim('"', "'").Trim()
+        if ($val.Length -gt 0) { $needsSalt = $false }
+    }
+    if ($needsSalt) {
         $bytes = [byte[]]::new(32)
         [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
         $salt = -join ($bytes | ForEach-Object { "{0:x2}" -f $_ })

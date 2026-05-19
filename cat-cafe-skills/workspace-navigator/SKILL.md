@@ -54,10 +54,10 @@ Step 3: 调 API — 让 Hub 前端导航
 | "看审计日志" | 审计日志在 `packages/api/data/audit/` 下 | `glob("packages/api/data/audit/**")` |
 | "打开 F131 的文档" | Feature 文档在 `docs/features/` 下 | `glob("docs/features/F131*")` |
 | "看看 F131 的设计图" | Pencil 设计文件 | `glob("**/*F131*.pen")` 或 `glob("designs/*F131*")` |
-| "打开那个 discussion" | 讨论文档在 *(internal reference removed)* 下 | `glob("feature-discussions/*")` |
+| "打开那个 discussion" | 讨论文档在 `feature-discussions/` 下 | `glob("feature-discussions/*")` |
 | "看看 chatStore" | 源码文件名搜索 | `glob("**/*chatStore*")` |
 | "打开 BACKLOG" | 已知位置 | 直接用 `docs/ROADMAP.md` |
-| "看看 plans" | 计划目录 | 直接用 *(internal reference removed)* |
+| "看看 plans" | 计划目录 | 直接用 `feature-specs/` |
 | "打开那个 skill" | Skill 文档 | `glob("cat-cafe-skills/*/SKILL.md")` |
 | "看看 spec" + 上下文 | 从对话上下文推断是哪个 Feature | 推断 Feature ID → `glob("docs/features/Fxxx*")` |
 

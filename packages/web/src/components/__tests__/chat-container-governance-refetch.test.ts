@@ -169,6 +169,7 @@ vi.mock('@/stores/gameStore', () => {
 });
 
 vi.mock('@/utils/api-client', () => ({
+  API_URL: 'http://localhost:3004',
   apiFetch: vi.fn(async () => ({ ok: true, json: async () => ({ threads: [] }) })),
 }));
 
@@ -275,11 +276,11 @@ vi.mock('../ThreadExecutionBar', () => ({ ThreadExecutionBar: () => null }));
 vi.mock('../VoteActiveBar', () => ({ VoteActiveBar: () => null }));
 vi.mock('../ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }));
 vi.mock('../SplitPaneView', () => ({ SplitPaneView: () => null }));
-vi.mock('../CatCafeHub', () => ({ CatCafeHub: () => null }));
 vi.mock('../AuthorizationCard', () => ({ AuthorizationCard: () => null }));
 vi.mock('../WorkspacePanel', () => ({ WorkspacePanel: () => null }));
 vi.mock('../BootstrapOrchestrator', () => ({ BootstrapOrchestrator: () => null }));
 vi.mock('../BootcampListModal', () => ({ BootcampListModal: () => null }));
+vi.mock('@/components/HubListModal', () => ({ HubListModal: () => null }));
 vi.mock('@/components/ProjectSetupCard', () => ({ ProjectSetupCard: () => null }));
 vi.mock('@/components/game/GameOverlayConnector', () => ({ GameOverlayConnector: () => null }));
 vi.mock('@/components/icons/PawIcon', () => ({ PawIcon: () => null }));

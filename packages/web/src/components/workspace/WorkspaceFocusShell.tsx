@@ -32,7 +32,7 @@ export function WorkspaceFocusShell({ children, onExit }: WorkspaceFocusShellPro
       <button
         type="button"
         onClick={onExit}
-        className="absolute top-3 right-3 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-[var(--console-hover-bg)] text-cafe-secondary border border-[var(--console-border-soft)] backdrop-blur-sm shadow-sm hover:bg-[var(--console-active-bg)] transition-colors"
+        className="absolute top-3 right-3 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-cafe-surface-sunken/80 text-cafe-interactive/80 border border-cafe-interactive/10 backdrop-blur-sm shadow-sm hover:bg-cafe-surface-sunken transition-colors"
       >
         <svg
           width="8"

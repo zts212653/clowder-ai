@@ -34,6 +34,7 @@ describe('Callback Routes', () => {
   let taskStore;
   let backlogStore;
   let featIndexProvider;
+  let labelStore;
 
   beforeEach(async () => {
     const { InvocationRegistry } = await import(
@@ -49,6 +50,8 @@ describe('Callback Routes', () => {
     threadStore = new ThreadStore();
     taskStore = new TaskStore();
     backlogStore = new BacklogStore();
+    const { createLabelStore } = await import('../dist/domains/cats/services/stores/factories/LabelStoreFactory.js');
+    labelStore = createLabelStore();
     socketManager = createMockSocketManager();
     evidenceStore = {
       search: async () => [],
@@ -89,6 +92,9 @@ describe('Callback Routes', () => {
     }
     if (featIndexProvider) {
       options.featIndexProvider = featIndexProvider;
+    }
+    if (labelStore !== undefined) {
+      options.labelStore = labelStore;
     }
     await app.register(callbacksRoutes, options);
     return app;
@@ -275,6 +281,8 @@ describe('Callback Routes', () => {
       payload: {
         threadId: threadB.id,
         content: 'cross-thread hello',
+        // F193 AC-A4: cross-post requires routing credentials (targetCats or line-start @)
+        targetCats: ['codex'],
       },
     });
 
@@ -907,6 +915,7 @@ describe('Callback Routes', () => {
       pinned: false,
       messageCount: null,
       participants: ['opus', 'codex'],
+      labels: [],
     });
     assert.deepEqual(body.threads[1], {
       threadId: oldThread.id,
@@ -915,6 +924,7 @@ describe('Callback Routes', () => {
       pinned: false,
       messageCount: null,
       participants: ['opus'],
+      labels: [],
     });
   });
 
@@ -1067,6 +1077,88 @@ describe('Callback Routes', () => {
     });
 
     assert.equal(response.statusCode, 403);
+  });
+
+  test('GET list-threads includes labels array in summary', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const thread = await threadStore.create('user-1', 'Labeled thread');
+    await threadStore.updateLabels(thread.id, ['label-1', 'label-2']);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/list-threads',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.deepEqual(body.threads[0].labels, ['label-1', 'label-2']);
+  });
+
+  // ---- GET /api/callbacks/list-labels ----
+
+  test('GET list-labels returns user-scoped labels', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    await labelStore.create({
+      id: 'lb-1',
+      name: 'Feature',
+      color: '#FF0000',
+      sortOrder: 0,
+      createdBy: 'user-1',
+      createdAt: Date.now(),
+    });
+    await labelStore.create({
+      id: 'lb-2',
+      name: 'Bug',
+      color: '#00FF00',
+      sortOrder: 1,
+      createdBy: 'user-1',
+      createdAt: Date.now(),
+    });
+    await labelStore.create({
+      id: 'lb-3',
+      name: 'Other User',
+      color: '#0000FF',
+      sortOrder: 0,
+      createdBy: 'user-2',
+      createdAt: Date.now(),
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/list-labels',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.labels.length, 2);
+    assert.deepEqual(body.labels[0], { id: 'lb-1', name: 'Feature', color: '#FF0000', sortOrder: 0 });
+    assert.deepEqual(body.labels[1], { id: 'lb-2', name: 'Bug', color: '#00FF00', sortOrder: 1 });
+  });
+
+  test('GET list-labels returns 401 without credentials', async () => {
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/list-labels',
+    });
+    assert.equal(response.statusCode, 401);
+  });
+
+  test('GET list-labels returns 503 when labelStore is not configured', async () => {
+    labelStore = undefined;
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/list-labels',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(response.statusCode, 503);
+    const body = JSON.parse(response.body);
+    assert.match(body.error, /Label store not configured/);
   });
 
   // ---- GET /api/callbacks/feat-index ----
@@ -2457,6 +2549,8 @@ describe('Callback Routes', () => {
       payload: {
         content: 'Hello from source thread',
         threadId: targetThread.id,
+        // F193 AC-A4: cross-post requires routing credentials (targetCats or line-start @)
+        targetCats: ['opus'],
       },
     });
 

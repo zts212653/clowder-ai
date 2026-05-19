@@ -40,12 +40,12 @@ describe('scrollToMessage', () => {
     scrollToMessage('msg-456');
 
     expect(el.classList.contains('ring-2')).toBe(true);
-    expect(el.classList.contains('ring-conn-blue-ring')).toBe(true);
+    expect(el.classList.contains('ring-blue-400')).toBe(true);
 
     vi.advanceTimersByTime(1500);
 
     expect(el.classList.contains('ring-2')).toBe(false);
-    expect(el.classList.contains('ring-conn-blue-ring')).toBe(false);
+    expect(el.classList.contains('ring-blue-400')).toBe(false);
 
     vi.useRealTimers();
   });

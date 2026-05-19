@@ -19,7 +19,7 @@ vi.mock('@/utils/api-client', () => ({
   API_URL: 'http://localhost:3102',
 }));
 
-const mockStore: Record<string, unknown> = {
+export const mockStore: Record<string, unknown> = {
   threads: [],
   currentThreadId: 'default',
   setThreads: vi.fn(),
@@ -31,6 +31,7 @@ const mockStore: Record<string, unknown> = {
   updateThreadPin: vi.fn(),
   updateThreadFavorite: vi.fn(),
   updateThreadPreferredCats: vi.fn(),
+  updateThreadLabels: vi.fn().mockResolvedValue(undefined),
   threadStates: {},
   clearUnread: vi.fn(),
   clearAllUnread: vi.fn(),

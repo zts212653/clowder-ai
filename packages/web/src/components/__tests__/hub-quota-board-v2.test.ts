@@ -249,11 +249,11 @@ describe('HubQuotaBoardTab v2 — glanceable quota board', () => {
     expect(html).toContain('刷新全部');
   });
 
-  it('renders group headings on static render', () => {
+  it('renders F127 group headings on static render', () => {
     const html = renderToStaticMarkup(React.createElement(HubQuotaBoardTab));
     expect(html).toContain('OAuth 账号额度（按账号配置）');
     expect(html).toContain('API Key 额度（按账号配置）');
-    expect(html).toContain('更新说明');
+    expect(html).toContain('F127 变化说明');
   });
 
   it('does NOT contain old ops UI elements', () => {
@@ -468,8 +468,8 @@ describe('quota-cards — pool grouping and row rendering', () => {
         item: { label: 'test', usedPercent: 97, percentKind: 'remaining' },
       }),
     );
-    expect(healthyHtml).toContain('bg-conn-emerald-text');
-    expect(healthyHtml).not.toContain('bg-conn-red-text');
+    expect(healthyHtml).toContain('bg-emerald-500');
+    expect(healthyHtml).not.toContain('bg-rose-500');
 
     // 10% remaining = 90% used = danger → should be red
     const dangerHtml = renderToStaticMarkup(
@@ -477,8 +477,8 @@ describe('quota-cards — pool grouping and row rendering', () => {
         item: { label: 'test', usedPercent: 10, percentKind: 'remaining' },
       }),
     );
-    expect(dangerHtml).toContain('bg-conn-red-text');
-    expect(dangerHtml).not.toContain('bg-conn-emerald-text');
+    expect(dangerHtml).toContain('bg-rose-500');
+    expect(dangerHtml).not.toContain('bg-emerald-500');
   });
 
   it('renders resetsAt as formatted time when resetsText is absent', async () => {

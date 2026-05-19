@@ -113,20 +113,51 @@ export const lineStartDetected = lazy(() =>
   }),
 );
 
-/**
- * Counts how often a Gemini-family invocation falls back to the
- * `skipAutoSealForGeminiCumulative` guard because no per-turn
- * `lastTurnInputTokens` could be derived from the local Gemini session jsonl
- * (e.g. assistantText empty / no matching local message / jsonl unavailable).
- *
- * When this counter rises, the cat is "blind-running" past the cumulative
- * usage signal — auto-seal is suppressed but the underlying context could
- * actually be approaching the window limit. Pair with a log warn to alert
- * operators.
- */
 export const geminiContextFallback = lazy(() =>
   meter().createCounter('cat_cafe.gemini.context_fill_fallback', {
-    description: 'Gemini auto-seal skipped due to cumulative-only usage (no per-turn signal)',
+    description: 'Gemini cumulative-only context signal observed without per-turn token data',
+  }),
+);
+
+export const l1StreakWarnCount = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.l1.streak_warn_count', {
+    description: 'L1 ping-pong streak warning threshold reached',
+  }),
+);
+
+export const l1StreakBreakCount = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.l1.streak_break_count', {
+    description: 'L1 ping-pong circuit-break triggered',
+  }),
+);
+
+export const c1ZombieHoldCount = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.c1.zombie_hold_count', {
+    description: 'Hold registered but previous hold for same (thread, cat) was unreleased',
+  }),
+);
+
+export const c1HoldCancelCount = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.c1.hold_cancel_count', {
+    description: 'Pending hold cancelled by user message',
+  }),
+);
+
+export const c2VerdictHintEmitted = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.c2.verdict_hint_emitted', {
+    description: 'C2 exit-check verdict-no-pass hint emitted (split from mixed hint_emitted)',
+  }),
+);
+
+export const c2VoidHoldHintEmitted = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.c2.void_hold_hint_emitted', {
+    description: 'C2 exit-check void-hold hint emitted (split from mixed hint_emitted)',
+  }),
+);
+
+export const c2VerdictWithoutPassCount = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.c2.verdict_without_pass_count', {
+    description: 'C2 forced-pass trigger count (verdict issued without explicit pass)',
   }),
 );
 
@@ -241,4 +272,16 @@ export function registerLivenessProbe(invocationId: string, catId: string, getSt
 /** Unregister a liveness probe when invocation ends. */
 export function unregisterLivenessProbe(invocationId: string): void {
   activeProbes.delete(invocationId);
+}
+
+// Pre-touch counters that may never fire in normal operation so they
+// appear in Prometheus output (eval can distinguish 0 from absent).
+export function warmupCounters(): void {
+  l1StreakWarnCount.add(0);
+  l1StreakBreakCount.add(0);
+  c1ZombieHoldCount.add(0);
+  c1HoldCancelCount.add(0);
+  c2VerdictHintEmitted.add(0);
+  c2VoidHoldHintEmitted.add(0);
+  c2VerdictWithoutPassCount.add(0);
 }

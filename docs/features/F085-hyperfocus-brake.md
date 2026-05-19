@@ -6,7 +6,7 @@ doc_kind: spec
 created: 2026-03-08
 status: done
 completed: 2026-03-11
-reflection: docs/reflections/2026-03-09-f085-hyperfocus-brake-capsule.md
+reflection: project-reflections/2026-03-09-f085-hyperfocus-brake-capsule.md
 ---
 
 # F085 Hyperfocus Brake — 猫猫健康小刹车

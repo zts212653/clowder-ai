@@ -31,6 +31,8 @@ describe('AntigravityAgentService (Bridge) — diagnostics', () => {
       CORTEX_STEP_TYPE_CHECKPOINT: 2,
       CORTEX_STEP_TYPE_TOOL_CALL: 1,
     });
+    assert.equal(errMsg.metadata.diagnostics.sideEffectJournal.hasSideEffect, true);
+    assert.equal(errMsg.metadata.diagnostics.sideEffectSummary.hasUnsafeSideEffect, true);
     assert.equal(errMsg.metadata.diagnostics.hasText, false);
     assert.equal(errMsg.metadata.diagnostics.fatalSeen, false);
   });

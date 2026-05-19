@@ -23,7 +23,7 @@ export function MediaGalleryBlock({ block }: { block: RichMediaGalleryBlock }) {
 
   return (
     <>
-      <div className="rounded-lg border border-[var(--console-border-soft)] p-3">
+      <div className="rounded-lg border border-cafe p-3">
         {block.title && <div className="font-medium text-sm mb-2">{block.title}</div>}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {items.map((item, i) => {
@@ -34,7 +34,7 @@ export function MediaGalleryBlock({ block }: { block: RichMediaGalleryBlock }) {
                 <button
                   type="button"
                   onClick={() => setLightboxIndex(i)}
-                  className="block w-full rounded focus:outline-2 focus:outline-[var(--conn-blue-text)]"
+                  className="block w-full rounded focus:outline-2 focus:outline-blue-400"
                   aria-label={`Enlarge ${item.alt ?? 'image'}`}
                 >
                   {/* biome-ignore lint/performance/noImgElement: data URIs from MCP cannot use next/image */}
@@ -46,9 +46,7 @@ export function MediaGalleryBlock({ block }: { block: RichMediaGalleryBlock }) {
                   />
                 </button>
                 <CopyButton url={src} />
-                {item.caption && (
-                  <figcaption className="text-xs text-cafe-secondary dark:text-cafe-muted">{item.caption}</figcaption>
-                )}
+                {item.caption && <figcaption className="text-xs text-cafe-secondary">{item.caption}</figcaption>}
               </figure>
             );
           })}

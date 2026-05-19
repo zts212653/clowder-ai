@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { LibraryHealthSection } from './LibraryHealthSection';
 
 export interface HealthReportData {
   totalDocs: number;
@@ -13,6 +14,16 @@ export interface HealthReportData {
   backstopRatio: number;
   compressionRatio: number;
   generatedAt: string;
+  staleAnchors?: { count: number; items: Array<{ anchor: string; sourcePath: string }> };
+  orphanEdges?: { count: number };
+  searchQuality?: {
+    totalSearches: number;
+    zeroHitCount: number;
+    lowHitCount: number;
+    recentMisses: Array<{ query: string; resultCount: number; searchedAt: string }>;
+  };
+  replayDrift?: { available: boolean; sampleCount: number; avgSimilarity: number | null };
+  knowledgeFeed?: { pendingCount: number; needsReviewCount: number };
 }
 
 export function sortedEntries(data: Record<string, number>): Array<[string, number]> {
@@ -66,6 +77,15 @@ export function getActionItems(report: HealthReportData): string[] {
   if (report.unverified > 0) {
     items.push(`${report.unverified} document(s) lack verification`);
   }
+  if (report.staleAnchors && report.staleAnchors.count > 0) {
+    items.push(`${report.staleAnchors.count} stale anchor(s) — source files deleted`);
+  }
+  if (report.orphanEdges && report.orphanEdges.count > 0) {
+    items.push(`${report.orphanEdges.count} orphan edge(s) reference missing documents`);
+  }
+  if (report.knowledgeFeed && report.knowledgeFeed.pendingCount > 0) {
+    items.push(`${report.knowledgeFeed.pendingCount} pending knowledge feed item(s)`);
+  }
   return items;
 }
 
@@ -79,7 +99,7 @@ const AUTHORITY_COLORS: Record<string, string> = {
 
 function StatCard({ label, value, sub }: { label: string; value: string; sub: string }) {
   return (
-    <div className="flex-1 rounded-xl bg-[var(--console-card-bg)] p-4 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
+    <div className="flex-1 rounded-xl border border-cafe bg-white p-4">
       <div className="text-xs text-cafe-secondary">{label}</div>
       <div className="mt-1 text-2xl font-semibold text-cafe-black">{value}</div>
       <div className="mt-0.5 text-[10px] text-cafe-muted">{sub}</div>
@@ -93,7 +113,7 @@ function DonutRing({ byAuthority, total }: { byAuthority: Record<string, number>
   const hasMultiple = AUTHORITY_LEVELS.some((l) => l !== 'observed' && (byAuthority[l] ?? 0) > 0);
 
   return (
-    <div className="flex items-center gap-6 rounded-xl bg-[var(--console-card-bg)] p-5 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
+    <div className="flex items-center gap-6 rounded-xl border border-cafe bg-white p-5">
       <div className="relative flex h-[100px] w-[100px] items-center justify-center">
         <svg viewBox="0 0 100 100" className="h-full w-full -rotate-90">
           <circle cx="50" cy="50" r="40" fill="none" stroke="#F0EDE6" strokeWidth="16" />
@@ -118,7 +138,7 @@ function DonutRing({ byAuthority, total }: { byAuthority: Record<string, number>
             <circle cx="50" cy="50" r="40" fill="none" stroke="#E8C872" strokeWidth="16" />
           )}
         </svg>
-        <span className="absolute text-lg font-bold text-conn-amber-text">{pct}%</span>
+        <span className="absolute text-lg font-bold text-[#7A5C1F]">{pct}%</span>
       </div>
       <div className="flex flex-col gap-1.5">
         {AUTHORITY_LEVELS.map((level) => (
@@ -142,7 +162,7 @@ function KindBarChart({ byKind }: { byKind: Record<string, number> }) {
   const max = entries[0][1];
 
   return (
-    <div className="rounded-xl bg-[var(--console-card-bg)] p-5 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
+    <div className="rounded-xl border border-cafe bg-white p-5">
       <h3 className="mb-3 text-sm font-semibold text-cafe-black">Knowledge Distribution</h3>
       <div className="flex flex-col gap-2">
         {entries.map(([kind, count]) => (
@@ -150,7 +170,7 @@ function KindBarChart({ byKind }: { byKind: Record<string, number> }) {
             <span className="w-20 text-right text-xs text-cafe-secondary">{kind}</span>
             <div className="flex-1">
               <div
-                className="h-6 rounded-md bg-[var(--console-pill-bg)] transition-all"
+                className="h-6 rounded-md bg-[#D4C5A9] transition-all"
                 style={{ width: `${computeBarWidth(count, max)}%` }}
               />
             </div>
@@ -170,7 +190,7 @@ function ActionItems({ items }: { items: string[] }) {
       <ul className="space-y-1">
         {items.map((item) => (
           <li key={item} className="flex items-start gap-2 text-xs text-conn-amber-text">
-            <span className="mt-0.5 inline-block h-1.5 w-1.5 rounded-full bg-conn-amber-text" />
+            <span className="mt-0.5 inline-block h-1.5 w-1.5 rounded-full bg-amber-400" />
             {item}
           </li>
         ))}
@@ -201,9 +221,9 @@ export function HealthReport() {
 
   if (error) {
     return (
-      <div data-testid="health-report" className="rounded-[20px] border border-conn-red-ring bg-conn-red-bg p-4">
+      <div data-testid="health-report" className="rounded-lg border border-conn-red-ring bg-conn-red-bg p-4">
         <p className="text-sm text-conn-red-text">{error}</p>
-        <button type="button" onClick={fetchReport} className="mt-2 text-xs text-conn-red-text underline">
+        <button type="button" onClick={fetchReport} className="mt-2 text-xs text-red-700 underline">
           重试
         </button>
       </div>
@@ -246,12 +266,14 @@ export function HealthReport() {
 
       <ActionItems items={actions} />
 
+      <LibraryHealthSection report={report} />
+
       <div className="flex items-center justify-between">
         <span className="text-[10px] text-cafe-muted">Generated {new Date(report.generatedAt).toLocaleString()}</span>
         <button
           type="button"
           onClick={fetchReport}
-          className="rounded-lg bg-[var(--console-card-soft-bg)] px-3 py-1.5 text-xs text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)]"
+          className="rounded-lg border border-cafe bg-white px-3 py-1.5 text-xs text-cafe-secondary transition-colors hover:bg-cafe-surface"
         >
           刷新
         </button>

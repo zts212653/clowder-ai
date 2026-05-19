@@ -7,6 +7,7 @@ import { AuditLogger } from '../dist/domains/cats/services/agents/providers/anti
 import {
   isReadOnlyRunCommand,
   RunCommandExecutor,
+  runCommandTimeoutMs,
 } from '../dist/domains/cats/services/agents/providers/antigravity/executors/RunCommandExecutor.js';
 
 describe('RunCommandExecutor', () => {
@@ -50,6 +51,10 @@ describe('RunCommandExecutor', () => {
     // Fix: pass the full command line directly as `command`, no args.
     assert.equal(payload.command, 'echo hi');
     assert.equal(payload.args, undefined);
+    assert.equal(payload.timeoutMs, 600_000);
+    const [, , options] = rpc.mock.calls[0].arguments;
+    assert.ok(options.signal instanceof AbortSignal);
+    assert.equal(options.signal.aborted, false);
   });
 
   test('refuses Redis 6399 touches', async () => {
@@ -107,6 +112,45 @@ describe('RunCommandExecutor', () => {
     assert.equal(rpc.mock.callCount(), 0);
   });
 
+  test('refuses equivalent recursive root deletes', async () => {
+    const rpc = mock.fn();
+    const exec = new RunCommandExecutor({ rpc });
+    const variants = [
+      'rm -rf -- /',
+      'rm -rf /*',
+      'rm -fr /',
+      'rm -r -f /',
+      'sudo rm -Rf /',
+      'echo before && rm -rf /',
+      'rm -rf --no-preserve-root /.',
+      'rm -rf /./',
+      "rm -rf '/.'",
+      'rm -rf /./*',
+      'rm -rf /tmp/..',
+      '/bin/rm -rf /',
+      '/usr/bin/rm -rf /',
+      'RM -rf /',
+    ];
+
+    for (const commandLine of variants) {
+      const result = await exec.execute({ commandLine, cwd: '/tmp' }, ctx());
+      assert.equal(result.status, 'refused', `should refuse: ${commandLine}`);
+    }
+    assert.equal(rpc.mock.callCount(), 0);
+  });
+
+  test('does not refuse non-root recursive deletes', async () => {
+    const rpc = mock.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 }));
+    const exec = new RunCommandExecutor({ rpc });
+    const allowed = ['rm -rf /tmp/cat-cafe-smoke', 'rm -rf ./dist'];
+
+    for (const commandLine of allowed) {
+      const result = await exec.execute({ commandLine, cwd: '/tmp' }, ctx());
+      assert.equal(result.status, 'success', `should allow RPC execution: ${commandLine}`);
+    }
+    assert.equal(rpc.mock.callCount(), allowed.length);
+  });
+
   test('returns error status on rpc failure', async () => {
     const rpc = mock.fn(async () => {
       throw new Error('RPC boom');
@@ -115,6 +159,61 @@ describe('RunCommandExecutor', () => {
     const result = await exec.execute({ commandLine: 'echo hi', cwd: '/tmp' }, ctx());
     assert.equal(result.status, 'error');
     assert.match(result.error, /RPC boom/);
+  });
+
+  test('times out hung RunCommand RPC and audits the timeout', { timeout: 1000 }, async () => {
+    const previous = process.env.ANTIGRAVITY_RUN_COMMAND_TIMEOUT_MS;
+    process.env.ANTIGRAVITY_RUN_COMMAND_TIMEOUT_MS = '10';
+    try {
+      let abortSeen = false;
+      const rpc = mock.fn(
+        (_method, _payload, options) =>
+          new Promise((_resolve, reject) => {
+            assert.ok(options.signal instanceof AbortSignal);
+            options.signal.addEventListener(
+              'abort',
+              () => {
+                abortSeen = true;
+                reject(options.signal.reason);
+              },
+              { once: true },
+            );
+          }),
+      );
+      const exec = new RunCommandExecutor({ rpc });
+      const result = await exec.execute({ commandLine: 'sleep 999', cwd: '/tmp' }, ctx());
+
+      assert.equal(result.status, 'error');
+      assert.match(result.error, /timed out after 10ms/);
+      assert.ok(result.durationMs >= 10);
+      assert.equal(abortSeen, true);
+      assert.equal(rpc.mock.callCount(), 1);
+      const [, payload, options] = rpc.mock.calls[0].arguments;
+      assert.equal(payload.timeoutMs, 10);
+      assert.equal(options.signal.aborted, true);
+
+      const files = fs.readdirSync(logDir);
+      assert.equal(files.length, 1);
+      const entry = JSON.parse(fs.readFileSync(path.join(logDir, files[0]), 'utf8').trim());
+      assert.equal(entry.tool, 'run_command');
+      assert.equal(entry.result.status, 'error');
+      assert.match(entry.result.error, /timed out after 10ms/);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.ANTIGRAVITY_RUN_COMMAND_TIMEOUT_MS;
+      } else {
+        process.env.ANTIGRAVITY_RUN_COMMAND_TIMEOUT_MS = previous;
+      }
+    }
+  });
+
+  test('sanitizes invalid RunCommand timeout env values to the controlled default', () => {
+    assert.equal(runCommandTimeoutMs({ ANTIGRAVITY_RUN_COMMAND_TIMEOUT_MS: '5000' }), 5000);
+    assert.equal(runCommandTimeoutMs({ ANTIGRAVITY_RUN_COMMAND_TIMEOUT_MS: '0' }), 600_000);
+    assert.equal(runCommandTimeoutMs({ ANTIGRAVITY_RUN_COMMAND_TIMEOUT_MS: '0.5' }), 600_000);
+    assert.equal(runCommandTimeoutMs({ ANTIGRAVITY_RUN_COMMAND_TIMEOUT_MS: '3000000000' }), 600_000);
+    assert.equal(runCommandTimeoutMs({ ANTIGRAVITY_RUN_COMMAND_TIMEOUT_MS: 'Infinity' }), 600_000);
+    assert.equal(runCommandTimeoutMs({ ANTIGRAVITY_RUN_COMMAND_TIMEOUT_MS: 'not-a-number' }), 600_000);
   });
 
   test('audits every execution (success, refused, error)', async () => {

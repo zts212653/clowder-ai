@@ -582,9 +582,10 @@ try {
             param($root, $port, $nextCli)
             [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
             $OutputEncoding = [System.Text.Encoding]::UTF8
+            Set-Location (Join-Path $root "packages/web")
             $env:PORT = $port
             $env:NEXT_IGNORE_INCORRECT_LOCKFILE = "1"
-            & node $nextCli dev (Join-Path $root "packages/web") -p $port 2>&1
+            & node $nextCli dev -p $port 2>&1
         } -ArgumentList $ProjectRoot, $WebPort, $nextCli
     } else {
         # Production mode: next start (default - avoids #105 issues)
@@ -593,8 +594,9 @@ try {
             param($root, $port, $nextCli)
             [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
             $OutputEncoding = [System.Text.Encoding]::UTF8
+            Set-Location (Join-Path $root "packages/web")
             $env:PORT = $port
-            & node $nextCli start (Join-Path $root "packages/web") -p $port -H 0.0.0.0 2>&1
+            & node $nextCli start -p $port -H 0.0.0.0 2>&1
         } -ArgumentList $ProjectRoot, $WebPort, $nextCli
     }
     $jobs += $webJob

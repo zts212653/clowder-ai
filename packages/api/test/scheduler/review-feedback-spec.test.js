@@ -25,8 +25,15 @@ function mockTask(pr, overrides = {}) {
 
 function mockTaskStore(tasks) {
   const patchCalls = [];
+  const updateCalls = [];
   return {
     listByKind: async () => tasks,
+    update: async (taskId, input) => {
+      updateCalls.push({ taskId, input });
+      const task = tasks.find((t) => t.id === taskId);
+      if (!task) return null;
+      return { ...task, ...input, updatedAt: Date.now() };
+    },
     patchAutomationState: async (taskId, patch) => {
       patchCalls.push({ taskId, patch });
       const task = tasks.find((t) => t.id === taskId);
@@ -42,6 +49,7 @@ function mockTaskStore(tasks) {
       };
     },
     _patchCalls: patchCalls,
+    _updateCalls: updateCalls,
   };
 }
 
@@ -219,6 +227,45 @@ describe('ReviewFeedbackTaskSpec', () => {
     assert.equal(cursorCommitted, true);
     assert.equal(triggerCalls.length, 1);
     assert.equal(triggerCalls[0][6].priority, 'normal');
+  });
+
+  it('execute scopes review-feedback coalescing by target cat when PR ownership changes', async () => {
+    const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
+    const { router } = stubRouter();
+    const triggerCalls = [];
+    const spec = createReviewFeedbackTaskSpec({
+      taskStore: mockTaskStore([]),
+      fetchComments: async () => [],
+      fetchReviews: async () => [],
+      reviewFeedbackRouter: router,
+      invokeTrigger: {
+        trigger(...args) {
+          triggerCalls.push(args);
+        },
+      },
+      log: noopLog,
+    });
+
+    const baseSignal = {
+      repoFullName: 'owner/repo',
+      prNumber: 42,
+      newComments: [{ id: 1, author: 'alice', body: 'hi', createdAt: '2026-01-01', commentType: 'conversation' }],
+      newDecisions: [],
+      commitCursor: () => {},
+    };
+
+    await spec.run.execute({ ...baseSignal, task: mockTaskItem }, 'pr:owner/repo#42');
+    await spec.run.execute(
+      {
+        ...baseSignal,
+        task: mockTask({ repoFullName: 'owner/repo', prNumber: 42, catId: 'codex', threadId: 'th-1', userId: 'u-1' }),
+      },
+      'pr:owner/repo#42',
+    );
+
+    assert.equal(triggerCalls.length, 2);
+    assert.equal(triggerCalls[0][6].coalesceKey, 'pr:owner/repo#42:review-feedback:opus');
+    assert.equal(triggerCalls[1][6].coalesceKey, 'pr:owner/repo#42:review-feedback:codex');
   });
 
   it('execute uses urgent priority for CHANGES_REQUESTED', async () => {
@@ -760,6 +807,98 @@ describe('ReviewFeedbackTaskSpec', () => {
     const result = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
     assert.equal(result.run, false, 'done task must be excluded from gate');
     assert.equal(fetchCalled, false, 'should not even fetch comments for done tasks');
+  });
+
+  it('gate marks merged PR done via review-feedback metadata and does not fetch feedback (F140 backlog guard)', async () => {
+    const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
+    const { router } = stubRouter();
+    const store = mockTaskStore([mockTaskItem]);
+    let fetchCalled = false;
+    const spec = createReviewFeedbackTaskSpec({
+      taskStore: store,
+      fetchPrMetadata: async () => ({ prState: 'merged', headSha: 'merged-head' }),
+      fetchComments: async () => {
+        fetchCalled = true;
+        return [{ id: 1, author: 'alice', body: 'late review', createdAt: '2026-01-01', commentType: 'conversation' }];
+      },
+      fetchReviews: async () => {
+        fetchCalled = true;
+        return [{ id: 1, author: 'alice', state: 'COMMENTED', body: 'late review', submittedAt: '2026-01-01' }];
+      },
+      reviewFeedbackRouter: router,
+      log: noopLog,
+    });
+
+    const result = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
+
+    assert.equal(result.run, false);
+    assert.equal(fetchCalled, false, 'merged PRs must not fetch review feedback');
+    assert.equal(store._updateCalls.length, 1);
+    assert.equal(store._updateCalls[0].taskId, mockTaskItem.id);
+    assert.equal(store._updateCalls[0].input.status, 'done');
+  });
+
+  it('gate continues with fresh feedback when PR metadata lookup is unavailable', async () => {
+    const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
+    const { router } = stubRouter();
+    const spec = createReviewFeedbackTaskSpec({
+      taskStore: mockTaskStore([mockTaskItem]),
+      fetchPrMetadata: async () => null,
+      fetchComments: async () => [
+        { id: 10, author: 'alice', body: 'fresh review comment', createdAt: '2026-01-01', commentType: 'conversation' },
+      ],
+      fetchReviews: async () => [],
+      reviewFeedbackRouter: router,
+      log: noopLog,
+    });
+
+    const result = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
+
+    assert.equal(result.run, true, 'missing PR metadata should degrade to normal feedback processing');
+    assert.equal(result.workItems.length, 1);
+    assert.equal(result.workItems[0].signal.newComments.length, 1);
+    assert.equal(result.workItems[0].signal.newComments[0].id, 10);
+  });
+
+  it('gate advances cursor and skips stale commit feedback when PR head moved (F140 backlog guard)', async () => {
+    const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
+    const { router } = stubRouter();
+    const store = mockTaskStore([mockTaskItem]);
+    const spec = createReviewFeedbackTaskSpec({
+      taskStore: store,
+      fetchPrMetadata: async () => ({ prState: 'open', headSha: 'head-new' }),
+      fetchComments: async () => [
+        {
+          id: 10,
+          author: 'alice',
+          body: 'old inline finding',
+          createdAt: '2026-01-01',
+          commentType: 'inline',
+          filePath: 'src/a.ts',
+          line: 1,
+          commitId: 'head-old',
+        },
+      ],
+      fetchReviews: async () => [
+        {
+          id: 20,
+          author: 'chatgpt-codex-connector[bot]',
+          state: 'COMMENTED',
+          body: 'old commit review',
+          submittedAt: '2026-01-01',
+          commitId: 'head-old',
+        },
+      ],
+      reviewFeedbackRouter: router,
+      log: noopLog,
+    });
+
+    const result = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
+
+    assert.equal(result.run, false, 'stale-only feedback should not notify');
+    assert.equal(store._patchCalls.length, 1, 'stale-only feedback should still advance cursors');
+    assert.equal(store._patchCalls[0].patch.review.lastCommentCursor, 10);
+    assert.equal(store._patchCalls[0].patch.review.lastDecisionCursor, 20);
   });
 
   it('gate returns run:false when all items below persisted cursor (#406)', async () => {

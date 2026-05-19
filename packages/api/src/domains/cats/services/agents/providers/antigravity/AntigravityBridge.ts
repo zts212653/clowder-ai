@@ -3,15 +3,36 @@ import http from 'node:http';
 import https from 'node:https';
 import { dirname, join } from 'node:path';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
+import {
+  type AntigravityCascadeHealthSnapshot,
+  type AntigravityCascadeHealthThresholds,
+  assessAntigravityCascadeHealth,
+  cascadeHealthThresholdsFromEnv,
+} from './antigravity-cascade-health.js';
 import { discoverAntigravityLS } from './antigravity-ls-discovery.js';
 import { diffDeliveredSteps } from './antigravity-step-delta.js';
 import { RAW_RESPONSE_CAP, TRACE_ENABLED, TRACED_METHODS, traceLog } from './antigravity-trace.js';
 import type { AuditSink, ExecutorResult } from './executors/AntigravityToolExecutor.js';
 import type { ExecutorRegistry } from './executors/ExecutorRegistry.js';
 import { formatToolResult } from './executors/formatToolResult.js';
-import { getRunCommandRefusalReason } from './executors/RunCommandExecutor.js';
+import { getRunCommandRefusalReason, MAX_RUN_COMMAND_TIMEOUT_MS } from './executors/RunCommandExecutor.js';
 
 const log = createModuleLogger('antigravity-bridge');
+
+const DEFAULT_RPC_TIMEOUT_MS = 30_000;
+const RUN_COMMAND_RPC_TIMEOUT_BUFFER_MS = 5_000;
+
+export function antigravityRpcTimeoutMs(method: string, payload: unknown): number {
+  if (method !== 'RunCommand') return DEFAULT_RPC_TIMEOUT_MS;
+  if (payload == null) return DEFAULT_RPC_TIMEOUT_MS;
+  if (typeof payload !== 'object') return DEFAULT_RPC_TIMEOUT_MS;
+  const rawTimeoutMs = (payload as { timeoutMs?: unknown }).timeoutMs;
+  if (typeof rawTimeoutMs !== 'number') return DEFAULT_RPC_TIMEOUT_MS;
+  if (!Number.isSafeInteger(rawTimeoutMs)) return DEFAULT_RPC_TIMEOUT_MS;
+  if (rawTimeoutMs <= 0) return DEFAULT_RPC_TIMEOUT_MS;
+  if (rawTimeoutMs > MAX_RUN_COMMAND_TIMEOUT_MS) return DEFAULT_RPC_TIMEOUT_MS;
+  return Math.max(DEFAULT_RPC_TIMEOUT_MS, Math.floor(rawTimeoutMs) + RUN_COMMAND_RPC_TIMEOUT_BUFFER_MS);
+}
 
 const HARDCODED_MODEL_MAP: Record<string, string> = {
   'gemini-3.1-pro': 'MODEL_PLACEHOLDER_M37',
@@ -83,7 +104,21 @@ export interface CascadeTrajectory {
   status: string;
   numTotalSteps: number;
   awaitingUserInput?: boolean;
+  updatedAt?: number | string;
   trajectory?: { steps: TrajectoryStep[] };
+}
+
+export type BridgeLivenessEvidenceKind =
+  | 'trajectory_progress'
+  | 'trajectory_timestamp_progress'
+  | 'step_mutation'
+  | 'pending_approval'
+  | 'rpc_reconnected';
+
+export interface BridgeLivenessEvidence {
+  kind: BridgeLivenessEvidenceKind;
+  observedAt: number;
+  summary: string;
 }
 
 export interface DeliveryCursor {
@@ -92,6 +127,8 @@ export interface DeliveryCursor {
   terminalSeen: boolean;
   lastActivityAt: number;
   awaitingUserInput?: boolean;
+  lastTrajectoryAt?: number;
+  livenessEvidence?: BridgeLivenessEvidence;
 }
 
 export interface StepBatch {
@@ -103,7 +140,27 @@ export interface BridgeOptions {
   sessionStorePath?: string;
 }
 
+export interface AntigravityRpcOptions {
+  signal?: AbortSignal;
+}
+
 const DEFAULT_SESSION_STORE = join(process.cwd(), 'data', 'antigravity-sessions.json');
+
+function hasGeneratingPlannerResponse(steps: TrajectoryStep[]): boolean {
+  return steps.some(
+    (step) => step.type === 'CORTEX_STEP_TYPE_PLANNER_RESPONSE' && step.status === 'CORTEX_STEP_STATUS_GENERATING',
+  );
+}
+
+function trajectoryTimestampMs(trajectory: CascadeTrajectory): number | undefined {
+  const updatedAt = trajectory.updatedAt;
+  if (typeof updatedAt === 'number' && Number.isFinite(updatedAt)) return updatedAt;
+  if (typeof updatedAt === 'string') {
+    const parsed = Date.parse(updatedAt);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
 
 export class AntigravityBridge {
   private conn: BridgeConnection | null = null;
@@ -132,8 +189,12 @@ export class AntigravityBridge {
    * Public RPC entrypoint for executors that need to reach the Antigravity LS.
    * Resolves connection lazily. Keeps the private rpc() signature internal.
    */
-  async callRpc<T = Record<string, unknown>>(method: string, payload: unknown): Promise<T> {
-    return this.rpcSafe<T>(method, payload);
+  async callRpc<T = Record<string, unknown>>(
+    method: string,
+    payload: unknown,
+    options?: AntigravityRpcOptions,
+  ): Promise<T> {
+    return this.rpcSafe<T>(method, payload, options);
   }
 
   /**
@@ -166,12 +227,6 @@ export class AntigravityBridge {
       return false;
     }
 
-    // Respect Antigravity's approval metadata: only auto-execute steps the model
-    // explicitly marked as safe-to-auto-run. SafeToAutoRun=false / missing → fall
-    // back to normal approval flow (user or autoApprove via HandleCascadeUserInteraction).
-    // Return 'approval_pending' (truthy) so callers can distinguish from genuinely unsupported steps (false).
-    if (args.SafeToAutoRun !== true) return 'approval_pending';
-
     const commandLine = ((args.CommandLine as string | undefined) ?? (args.commandLine as string | undefined))?.trim();
     if (!commandLine) return false;
     const cwd = (args.Cwd as string | undefined) ?? (args.cwd as string | undefined) ?? opts.cwd;
@@ -203,6 +258,13 @@ export class AntigravityBridge {
       await this.pushToolResult(opts.cascadeId, stepIndex, result, input, opts.modelName);
       return true;
     }
+
+    // Antigravity has no usable approval surface in Cat Cafe's runtime path.
+    // Default to YOLO for run_command, matching Codex/Claude/OpenCode behavior,
+    // while retaining an env opt-out for emergency rollback. Local hard refusal
+    // rules above still run before any LS approval/execution.
+    const yoloRunCommand = process.env.ANTIGRAVITY_YOLO_RUN_COMMAND !== 'false';
+    if (args.SafeToAutoRun !== true && !yoloRunCommand) return 'approval_pending';
 
     // Stage 1: try to satisfy LS PermissionManager before invoking the native executor.
     // If the hint RPC itself fails, still continue to the writeback fallback path.
@@ -277,6 +339,19 @@ export class AntigravityBridge {
     return this.rpcSafe<CascadeTrajectory>('GetCascadeTrajectory', { cascadeId });
   }
 
+  async getCascadeHealth(
+    cascadeId: string,
+    thresholds: AntigravityCascadeHealthThresholds = cascadeHealthThresholdsFromEnv(),
+  ): Promise<AntigravityCascadeHealthSnapshot> {
+    const trajectory = await this.getTrajectory(cascadeId);
+    return assessAntigravityCascadeHealth({
+      cascadeId,
+      trajectory,
+      thresholds,
+      checkedAt: Date.now(),
+    });
+  }
+
   async *pollForSteps(
     cascadeId: string,
     stepsBefore = 0,
@@ -291,13 +366,16 @@ export class AntigravityBridge {
     const maxRpcRetries = 3;
     let deliveredFingerprints: string[] = [];
     let deliveredPlannerTexts: string[] = [];
+    let lastTrajectoryAt: number | undefined;
 
     while (true) {
       if (signal?.aborted) throw new Error('Aborted');
 
       let traj: CascadeTrajectory;
+      let recoveredAfterRpcError = false;
       try {
         traj = await this.getTrajectory(cascadeId);
+        recoveredAfterRpcError = rpcRetries > 0;
         rpcRetries = 0;
       } catch (err) {
         rpcRetries++;
@@ -310,6 +388,11 @@ export class AntigravityBridge {
       const currentSteps = traj.numTotalSteps ?? 0;
       const isTerminal = traj.status === 'CASCADE_RUN_STATUS_IDLE';
       const awaitingUserInput = traj.awaitingUserInput === true;
+      const trajectoryAt = trajectoryTimestampMs(traj);
+      const previousTrajectoryAt = lastTrajectoryAt;
+      if (trajectoryAt !== undefined) lastTrajectoryAt = trajectoryAt;
+      const trajectoryTimestampAdvanced =
+        trajectoryAt !== undefined && previousTrajectoryAt !== undefined && trajectoryAt > previousTrajectoryAt;
       const hasInlineSteps = Array.isArray(traj.trajectory?.steps);
       const shouldFetchForNewSteps = currentSteps > delivered;
       const shouldFetchForMutation = currentSteps > 0 && deliveredFingerprints.length > 0 && hasInlineSteps;
@@ -340,35 +423,55 @@ export class AntigravityBridge {
         nextPlannerTexts = diff.nextPlannerTexts;
         hadMutation = diff.hadMutation;
       }
+      const terminalReady = isTerminal && !hasGeneratingPlannerResponse(allSteps);
 
       if (currentSteps > delivered || hadMutation) {
         waitingApprovalSignaled = false;
         lastActivityAt = Date.now();
         const newSteps = allSteps.slice(delivered, currentSteps);
         const emittedSteps = replaySteps.concat(newSteps);
+        const livenessEvidence: BridgeLivenessEvidence =
+          currentSteps > delivered
+            ? {
+                kind: 'trajectory_progress',
+                observedAt: Date.now(),
+                summary: `trajectory step count advanced from ${delivered} to ${currentSteps}`,
+              }
+            : {
+                kind: 'step_mutation',
+                observedAt: Date.now(),
+                summary: `trajectory step content mutated at delivered count ${delivered}`,
+              };
         delivered = currentSteps;
         deliveredFingerprints = nextFingerprints;
         deliveredPlannerTexts = nextPlannerTexts;
         log.debug(
-          `cascade delivery: ${emittedSteps.length} emitted steps (new=${newSteps.length}, mutated=${replaySteps.length}, total=${currentSteps}, terminal=${isTerminal})`,
+          `cascade delivery: ${emittedSteps.length} emitted steps (new=${newSteps.length}, mutated=${replaySteps.length}, total=${currentSteps}, terminal=${terminalReady})`,
         );
         yield {
           steps: emittedSteps,
           cursor: {
             baselineStepCount: stepsBefore,
             lastDeliveredStepCount: delivered,
-            terminalSeen: isTerminal,
+            terminalSeen: terminalReady,
             lastActivityAt,
             awaitingUserInput,
+            ...(trajectoryAt === undefined ? {} : { lastTrajectoryAt: trajectoryAt }),
+            livenessEvidence,
           },
         };
-        if (isTerminal) return;
+        if (terminalReady) return;
       } else {
         const idleMs = Date.now() - lastActivityAt;
         if (awaitingUserInput) {
           if (!waitingApprovalSignaled) {
             waitingApprovalSignaled = true;
             log.info(`cascade ${cascadeId} awaiting user input; suppressing stall timeout`);
+            const livenessEvidence: BridgeLivenessEvidence = {
+              kind: 'pending_approval',
+              observedAt: Date.now(),
+              summary: 'trajectory is awaiting user approval',
+            };
             yield {
               steps: [],
               cursor: {
@@ -377,6 +480,8 @@ export class AntigravityBridge {
                 terminalSeen: false,
                 lastActivityAt,
                 awaitingUserInput: true,
+                ...(trajectoryAt === undefined ? {} : { lastTrajectoryAt: trajectoryAt }),
+                livenessEvidence,
               },
             };
           }
@@ -384,7 +489,7 @@ export class AntigravityBridge {
           continue;
         }
         waitingApprovalSignaled = false;
-        if (isTerminal && (delivered > stepsBefore || idleMs > idleTimeoutMs)) {
+        if (terminalReady && (delivered > stepsBefore || idleMs > idleTimeoutMs)) {
           yield {
             steps: [],
             cursor: {
@@ -401,6 +506,29 @@ export class AntigravityBridge {
           throw new Error(
             `Antigravity stall: no activity for ${idleMs}ms (steps=${currentSteps}, status=${traj.status})`,
           );
+        }
+        if (!isTerminal && trajectoryTimestampAdvanced) {
+          const livenessEvidence: BridgeLivenessEvidence = {
+            kind: recoveredAfterRpcError ? 'rpc_reconnected' : 'trajectory_timestamp_progress',
+            observedAt: Date.now(),
+            summary: recoveredAfterRpcError
+              ? `LS-RPC reconnected and trajectory timestamp advanced from ${previousTrajectoryAt} to ${trajectoryAt}`
+              : `trajectory timestamp advanced from ${previousTrajectoryAt} to ${trajectoryAt}`,
+          };
+          yield {
+            steps: [],
+            cursor: {
+              baselineStepCount: stepsBefore,
+              lastDeliveredStepCount: delivered,
+              terminalSeen: false,
+              lastActivityAt,
+              awaitingUserInput: false,
+              lastTrajectoryAt: trajectoryAt,
+              livenessEvidence,
+            },
+          };
+          await new Promise((r) => setTimeout(r, pollIntervalMs));
+          continue;
         }
       }
 
@@ -519,16 +647,20 @@ export class AntigravityBridge {
     return msg.includes('ECONNREFUSED') || msg.includes('ECONNRESET') || msg.includes('EHOSTUNREACH');
   }
 
-  private async rpcSafe<T = Record<string, unknown>>(method: string, payload: unknown): Promise<T> {
+  private async rpcSafe<T = Record<string, unknown>>(
+    method: string,
+    payload: unknown,
+    options?: AntigravityRpcOptions,
+  ): Promise<T> {
     let conn = await this.ensureConnected();
     try {
-      return await this.rpc<T>(conn, method, payload);
+      return await this.rpc<T>(conn, method, payload, options);
     } catch (err) {
       if (this.isConnectionError(err)) {
         log.warn(`connection lost on ${method}, rediscovering LS...`);
         this.invalidateConnection();
         conn = await this.ensureConnected();
-        return this.rpc<T>(conn, method, payload);
+        return this.rpc<T>(conn, method, payload, options);
       }
       throw err;
     }
@@ -569,13 +701,43 @@ export class AntigravityBridge {
     }
   }
 
-  private rpc<T = Record<string, unknown>>(conn: BridgeConnection, method: string, payload: unknown): Promise<T> {
+  private rpc<T = Record<string, unknown>>(
+    conn: BridgeConnection,
+    method: string,
+    payload: unknown,
+    options?: AntigravityRpcOptions,
+  ): Promise<T> {
     const mod = conn.useTls ? https : http;
     const protocol = conn.useTls ? 'https' : 'http';
     const url = `${protocol}://127.0.0.1:${conn.port}/exa.language_server_pb.LanguageServerService/${method}`;
     const body = JSON.stringify(payload);
+    const signal = options?.signal;
 
     return new Promise((resolve, reject) => {
+      const abortError = (): Error => {
+        const reason = signal?.reason;
+        return reason instanceof Error ? reason : new Error(`LS ${method}: aborted`);
+      };
+      if (signal?.aborted) {
+        reject(abortError());
+        return;
+      }
+
+      let settled = false;
+      let removeAbortListener = () => {};
+      const resolveOnce = (value: T) => {
+        if (settled) return;
+        settled = true;
+        removeAbortListener();
+        resolve(value);
+      };
+      const rejectOnce = (err: Error) => {
+        if (settled) return;
+        settled = true;
+        removeAbortListener();
+        reject(err);
+      };
+
       const req = mod.request(
         url,
         {
@@ -586,7 +748,7 @@ export class AntigravityBridge {
             'x-codeium-csrf-token': conn.csrfToken,
           },
           rejectUnauthorized: false,
-          timeout: 30_000,
+          timeout: antigravityRpcTimeoutMs(method, payload),
         },
         (res) => {
           let data = '';
@@ -602,21 +764,35 @@ export class AntigravityBridge {
                 );
               }
               try {
-                resolve(JSON.parse(data) as T);
+                resolveOnce(JSON.parse(data) as T);
               } catch {
-                resolve(data as unknown as T);
+                resolveOnce(data as unknown as T);
               }
             } else {
-              reject(new Error(`LS ${method}: ${res.statusCode} — ${data.substring(0, 200)}`));
+              rejectOnce(new Error(`LS ${method}: ${res.statusCode} — ${data.substring(0, 200)}`));
             }
           });
         },
       );
-      req.on('error', reject);
+      req.on('error', rejectOnce);
       req.on('timeout', () => {
-        req.destroy();
-        reject(new Error(`LS ${method}: timeout`));
+        const err = new Error(`LS ${method}: timeout`);
+        rejectOnce(err);
+        req.destroy(err);
       });
+      if (signal) {
+        const onAbort = () => {
+          const err = abortError();
+          rejectOnce(err);
+          req.destroy(err);
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        removeAbortListener = () => signal.removeEventListener('abort', onAbort);
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
+      }
       req.write(body);
       req.end();
     });

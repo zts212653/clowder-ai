@@ -89,14 +89,14 @@ export function ThreadCatSettings({ threadId, currentCats, onSave }: ThreadCatSe
       {isOpen && (
         <div
           style={getPopoverStyle()}
-          className="z-50 flex flex-col rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-panel-bg)] shadow-[var(--console-shadow-soft)]"
+          className="bg-cafe-surface rounded-lg shadow-lg border border-cafe z-50 flex flex-col"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="p-3 overflow-y-auto max-h-[50vh]">
             <CatSelector selectedCats={selectedCats} onSelectionChange={setSelectedCats} />
           </div>
           {saveError && <p className="text-[10px] text-conn-red-text px-3 mt-1">保存失败，请重试</p>}
-          <div className="flex items-center justify-between px-3 pb-3 pt-2 border-t border-[var(--console-border-soft)] flex-shrink-0">
+          <div className="flex items-center justify-between px-3 pb-3 pt-2 border-t border-cafe-subtle flex-shrink-0">
             {selectedCats.length > 0 && (
               <button
                 onClick={() => setSelectedCats([])}
@@ -118,7 +118,7 @@ export function ThreadCatSettings({ threadId, currentCats, onSave }: ThreadCatSe
               <button
                 onClick={() => void handleSave()}
                 disabled={!hasChanged || isSaving}
-                className="console-button-primary rounded px-2 py-0.5 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                className="text-xs px-2 py-0.5 rounded bg-cafe-accent text-white hover:bg-cafe-interactive disabled:opacity-40"
               >
                 {isSaving ? '...' : '保存'}
               </button>

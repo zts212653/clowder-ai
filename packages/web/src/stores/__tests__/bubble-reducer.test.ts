@@ -1812,6 +1812,135 @@ describe('F183 Phase B1 — BubbleReducer core', () => {
     });
   });
 
+  it('F194 Z7: done removes older local-only stream duplicate once canonical bubble exists', () => {
+    const canonical: ChatMessage = {
+      id: 'msg-inv-z7-opus',
+      type: 'assistant',
+      catId: 'opus',
+      content: 'visible stdout',
+      timestamp: 1000,
+      isStreaming: true,
+      origin: 'stream',
+      extra: { stream: { invocationId: 'inv-z7' } },
+      toolEvents: [{ id: 'te-z7', type: 'tool_use', label: 'opus -> rg', timestamp: 1001 }],
+    };
+    const localDuplicate: ChatMessage = {
+      id: 'local-thread-1-opus-1002-0',
+      type: 'assistant',
+      catId: 'opus',
+      content: 'visible stdout',
+      timestamp: 1002,
+      isStreaming: true,
+      origin: 'stream',
+      toolEvents: [{ id: 'te-z7-local', type: 'tool_use', label: 'opus -> rg', timestamp: 1002 }],
+    };
+
+    const output = applyBubbleEvent({
+      threadId: 'thread-1',
+      event: {
+        ...baseEvent(),
+        actorId: 'opus',
+        type: 'done',
+        bubbleKind: 'assistant_text',
+        canonicalInvocationId: 'inv-z7',
+        messageId: 'msg-inv-z7-opus',
+        timestamp: 1100,
+      },
+      currentMessages: [canonical, localDuplicate],
+    });
+
+    expect(output.recoveryAction).toBe('none');
+    expect(output.violations).toEqual([]);
+    expect(output.nextMessages).toHaveLength(1);
+    expect(output.nextMessages[0]).toMatchObject({
+      id: 'msg-inv-z7-opus',
+      content: 'visible stdout',
+      isStreaming: false,
+    });
+  });
+
+  it('F194 Z7: done does not remove a newer local-only stream placeholder for the next turn', () => {
+    const canonical: ChatMessage = {
+      id: 'msg-inv-z7-old-opus',
+      type: 'assistant',
+      catId: 'opus',
+      content: 'old stdout',
+      timestamp: 1000,
+      isStreaming: true,
+      origin: 'stream',
+      extra: { stream: { invocationId: 'inv-z7-old' } },
+    };
+    const nextTurnLocal: ChatMessage = {
+      id: 'local-thread-1-opus-1300-0',
+      type: 'assistant',
+      catId: 'opus',
+      content: 'new turn has started',
+      timestamp: 1300,
+      isStreaming: true,
+      origin: 'stream',
+    };
+
+    const output = applyBubbleEvent({
+      threadId: 'thread-1',
+      event: {
+        ...baseEvent(),
+        actorId: 'opus',
+        type: 'done',
+        bubbleKind: 'assistant_text',
+        canonicalInvocationId: 'inv-z7-old',
+        messageId: 'msg-inv-z7-old-opus',
+        timestamp: 1100,
+      },
+      currentMessages: [canonical, nextTurnLocal],
+    });
+
+    expect(output.recoveryAction).toBe('none');
+    expect(output.violations).toEqual([]);
+    expect(output.nextMessages).toHaveLength(2);
+    expect(output.nextMessages.find((m) => m.id === 'local-thread-1-opus-1300-0')).toBeDefined();
+  });
+
+  it('F194 Z7: done without timestamp does not remove local-only stream siblings', () => {
+    const canonical: ChatMessage = {
+      id: 'msg-inv-z7-no-ts-opus',
+      type: 'assistant',
+      catId: 'opus',
+      content: 'old stdout',
+      timestamp: 1000,
+      isStreaming: true,
+      origin: 'stream',
+      extra: { stream: { invocationId: 'inv-z7-no-ts' } },
+    };
+    const possibleNextTurnLocal: ChatMessage = {
+      id: 'local-thread-1-opus-1300-0',
+      type: 'assistant',
+      catId: 'opus',
+      content: 'new turn has started',
+      timestamp: 1300,
+      isStreaming: true,
+      origin: 'stream',
+    };
+
+    const output = applyBubbleEvent({
+      threadId: 'thread-1',
+      event: {
+        ...baseEvent(),
+        actorId: 'opus',
+        type: 'done',
+        bubbleKind: 'assistant_text',
+        canonicalInvocationId: 'inv-z7-no-ts',
+        messageId: 'msg-inv-z7-no-ts-opus',
+        timestamp: undefined,
+      },
+      currentMessages: [canonical, possibleNextTurnLocal],
+    });
+
+    expect(output.recoveryAction).toBe('none');
+    expect(output.violations).toEqual([]);
+    expect(output.nextMessages).toHaveLength(2);
+    expect(output.nextMessages.find((m) => m.id === 'local-thread-1-opus-1300-0')).toBeDefined();
+  });
+
   // F183 Phase B1.6 (cloud P1): reduceToolEvent must restrict target to
   // assistant_text bubbles. ADR-033 允许 thinking + assistant_text 在同
   // invocation 共存；如果 reducer 不区分 kind 直接拿第一个 streaming assistant
@@ -1958,6 +2087,68 @@ describe('F183 Phase B1 — BubbleReducer core', () => {
     });
   });
 
+  // F194 Phase Z3 R2 (砚砚 catch 2026-05-09 18:22): live reducer must keep dual id contract.
+  describe('F194 Phase Z3 R2: live reducer dual id (canonical=turn, chain=parent)', () => {
+    it('same parent + same cat 2 turns produce 2 bubbles + extra preserves parent+turn', () => {
+      const parentId = 'parent-chain-z3';
+      const out1 = applyBubbleEvent({
+        threadId: 'thread-1',
+        event: {
+          ...baseEvent(),
+          type: 'stream_chunk',
+          actorId: 'opus-47',
+          canonicalInvocationId: 'turn-opus-1',
+          chainInvocationId: parentId,
+          messageId: undefined, // let reducer derive `msg-{turn}-{actor}-{kind}`
+          payload: { content: 'opus turn 1' },
+          timestamp: 1000,
+        },
+        currentMessages: [],
+      });
+      const out3 = applyBubbleEvent({
+        threadId: 'thread-1',
+        event: {
+          ...baseEvent(),
+          type: 'stream_chunk',
+          actorId: 'opus-47',
+          canonicalInvocationId: 'turn-opus-3',
+          chainInvocationId: parentId,
+          messageId: undefined,
+          payload: { content: 'opus turn 3' },
+          timestamp: 1100,
+        },
+        currentMessages: out1.nextMessages,
+      });
+
+      expect(out3.nextMessages).toHaveLength(2);
+      const turn1 = out3.nextMessages.find((m) => m.extra?.stream?.turnInvocationId === 'turn-opus-1');
+      const turn3 = out3.nextMessages.find((m) => m.extra?.stream?.turnInvocationId === 'turn-opus-3');
+      expect(turn1).toBeDefined();
+      expect(turn3).toBeDefined();
+      expect(turn1?.extra?.stream?.invocationId).toBe(parentId);
+      expect(turn3?.extra?.stream?.invocationId).toBe(parentId);
+      expect(turn1?.id).not.toBe(turn3?.id);
+    });
+
+    it('legacy event without chainInvocationId stamps invocationId only (no turn key) — backward compat', () => {
+      const out = applyBubbleEvent({
+        threadId: 'thread-1',
+        event: {
+          ...baseEvent(),
+          type: 'stream_chunk',
+          actorId: 'opus-47',
+          canonicalInvocationId: 'legacy-only-id',
+          payload: { content: 'legacy hello' },
+          timestamp: 1000,
+        },
+        currentMessages: [],
+      });
+      const bubble = out.nextMessages[0];
+      expect(bubble.extra?.stream?.invocationId).toBe('legacy-only-id');
+      expect(bubble.extra?.stream?.turnInvocationId).toBeUndefined();
+    });
+  });
+
   it('B1.6: invocationless tool_event is reducer no-op (caller still drives via legacy)', () => {
     const toolEvent = { id: 'te-3', type: 'tool_use' as const, label: 'codex → noop', timestamp: 1100 };
     const output = applyBubbleEvent({
@@ -1975,5 +2166,198 @@ describe('F183 Phase B1 — BubbleReducer core', () => {
     });
     expect(output.nextMessages).toHaveLength(0);
     expect(output.recoveryAction).toBe('none');
+  });
+
+  // F194 Phase Z5 AC-Z14: live reconcile — empty assistant_text placeholder
+  // 应该被同 turn 不同 kind 的 event 吸收，避免 helper-created placeholder + reducer-created
+  // kind-specific bubble 共存。铲屎官 alpha catch 2026-05-10: 同 turn thinking + tool_use + text
+  // 链下 live UI 出现 2 个 bubble (assistant_text 容器 + tool_or_cli 容器)。
+  describe('F194 Phase Z5 AC-Z14: empty placeholder absorbed by other-kind events (live reconcile)', () => {
+    it('AC-Z14: tool_event absorbs empty assistant_text placeholder (no new bubble)', () => {
+      // 既有 helper-created assistant_text placeholder：content="", no toolEvents, no thinking
+      const placeholder = streamPlaceholder({
+        id: 'msg-T1-codex',
+        content: '',
+      });
+      const toolEvent = { id: 'te-z14', type: 'tool_use' as const, label: 'codex → bash', timestamp: 1100 };
+      const output = applyBubbleEvent({
+        threadId: 'thread-1',
+        event: {
+          ...baseEvent(),
+          type: 'tool_event',
+          bubbleKind: 'tool_or_cli',
+          messageId: undefined, // reducer self-derive — would be msg-T1-codex-tool_or_cli
+          timestamp: 1100,
+          payload: { toolEvent },
+        },
+        currentMessages: [placeholder],
+      });
+
+      // GREEN after Z5: tool_event 吸收 placeholder（用 placeholder 的 id），不新建第二个 bubble
+      // RED before Z5: tool_event 创建新 bubble at msg-T1-codex-tool_or_cli，placeholder 还在 → 2 bubbles
+      expect(output.nextMessages).toHaveLength(1);
+      expect(output.nextMessages[0].id).toBe('msg-T1-codex'); // 复用 placeholder id
+      expect(output.nextMessages[0].toolEvents).toHaveLength(1);
+    });
+
+    it('AC-Z14: stream_chunk on existing assistant_text bubble appends content (kind match path)', () => {
+      // placeholder 已有 content (kind 已确定为 assistant_text 真实 bubble)
+      const established = streamPlaceholder({
+        id: 'msg-T1-codex',
+        content: 'partial text',
+        extra: { stream: { invocationId: 'T1' } },
+      });
+      const output = applyBubbleEvent({
+        threadId: 'thread-1',
+        event: {
+          ...baseEvent(),
+          canonicalInvocationId: 'T1',
+          type: 'stream_chunk',
+          bubbleKind: 'assistant_text',
+          payload: { content: ' more' },
+          timestamp: 1200,
+        },
+        currentMessages: [established],
+      });
+
+      // 既有正常 stream_chunk 路径 — 同 kind 严格匹配，append content
+      expect(output.nextMessages).toHaveLength(1);
+      expect(output.nextMessages[0].content).toBe('partial text more');
+    });
+
+    it('AC-Z14 R2: reducer canonical path stream_started → tool_event → stream_chunk stays single bubble (砚砚 R1 P1#2)', () => {
+      // 砚砚 R1 P1#2 复现链路: reducer's ensureMessageId 在 caller 不传 messageId 时
+      // 自创建 canonical `msg-{turn}-{cat}-{kind}` id (kind suffix)。然后 tool_event
+      // 让 bubble kind 漂成 tool_or_cli，subsequent stream_chunk 找不到 assistant_text
+      // target → canonical-split 丢 content。修法：bubble-invariants UI-compat 白名单
+      // 加 `msg-{turn}-{cat}-assistant_text` id pattern，让 kind 不漂移。
+      // 链路: stream_started (no messageId) → tool_event (no messageId) → stream_chunk
+
+      // Step 1: stream_started — reducer 创建 canonical `msg-T1R-codex-assistant_text`
+      let messages: ChatMessage[] = [];
+      let output = applyBubbleEvent({
+        threadId: 'thread-1',
+        event: {
+          ...baseEvent(),
+          type: 'stream_started',
+          canonicalInvocationId: 'T1R',
+          messageId: undefined, // ← reducer self-derives
+          timestamp: 1000,
+        },
+        currentMessages: messages,
+      });
+      messages = output.nextMessages;
+      expect(messages).toHaveLength(1);
+      expect(messages[0].id).toBe('msg-T1R-codex-assistant_text'); // canonical kind-suffixed
+
+      // Step 2: tool_event — 应该 append 到 step 1 的 bubble (assistant_text container)
+      const toolEvent = { id: 'te-z14r2', type: 'tool_use' as const, label: 'codex → bash', timestamp: 1100 };
+      output = applyBubbleEvent({
+        threadId: 'thread-1',
+        event: {
+          ...baseEvent(),
+          type: 'tool_event',
+          canonicalInvocationId: 'T1R',
+          bubbleKind: 'tool_or_cli',
+          messageId: undefined,
+          timestamp: 1100,
+          payload: { toolEvent },
+        },
+        currentMessages: messages,
+      });
+      messages = output.nextMessages;
+      expect(messages).toHaveLength(1); // 仍然 1 个 bubble (吸收成功)
+      expect(messages[0].toolEvents).toHaveLength(1);
+
+      // Step 3: stream_chunk — 应该 append content 到同一 bubble，不触发 canonical-split
+      output = applyBubbleEvent({
+        threadId: 'thread-1',
+        event: {
+          ...baseEvent(),
+          type: 'stream_chunk',
+          canonicalInvocationId: 'T1R',
+          bubbleKind: 'assistant_text',
+          messageId: undefined,
+          timestamp: 1200,
+          payload: { content: 'final stdout text' },
+        },
+        currentMessages: messages,
+      });
+      messages = output.nextMessages;
+
+      // GREEN after R2 fix: bubble 仍是 1 个，content 写进去，无 violation
+      // RED before R2 fix: bubble kind 漂成 tool_or_cli → stream_chunk 找不到 assistant_text
+      //   target → canonical-split → content 丢失，violation 触发
+      expect(messages).toHaveLength(1);
+      expect(messages[0].id).toBe('msg-T1R-codex-assistant_text');
+      expect(messages[0].toolEvents).toHaveLength(1);
+      expect(messages[0].content).toBe('final stdout text');
+      expect(output.violations).toEqual([]);
+    });
+
+    it('AC-Z14 R5: error event (system_status) must NOT absorb empty assistant_text placeholder (cloud Codex P1)', () => {
+      // Cloud Codex P1: AC-Z14 placeholder 吸收 fallback 没 gate incoming kind，
+      // system_status 事件 (e.g. reduceErrorEvent error/timeout) 命中 placeholder candidate
+      // → 错误事件覆盖 assistant 容器 = 把 assistant 框变成 system error，丢失 ADR-033 kind 分离。
+      // 修法：placeholder 吸收只允许 incoming kind ∈ {assistant_text, thinking, tool_or_cli, rich_block}
+      const placeholder = streamPlaceholder({
+        id: 'msg-T1-codex',
+        content: '',
+        extra: { stream: { invocationId: 'T1' } },
+      });
+      const output = applyBubbleEvent({
+        threadId: 'thread-1',
+        event: {
+          ...baseEvent(),
+          type: 'error',
+          canonicalInvocationId: 'T1',
+          bubbleKind: 'system_status',
+          messageId: undefined,
+          timestamp: 1500,
+          payload: { content: 'Error: Provider returned 503' },
+        },
+        currentMessages: [placeholder],
+      });
+
+      // GREEN after R5: error event 走独立 system bubble（不吸收 placeholder）→ 2 bubbles
+      // RED before R5: error event 吸收 placeholder → 1 bubble，assistant 容器变 system error
+      expect(output.nextMessages).toHaveLength(2);
+      const placeholderStill = output.nextMessages.find((m) => m.id === 'msg-T1-codex');
+      const errorBubble = output.nextMessages.find((m) => m.type === 'system' && m.variant === 'error');
+      expect(placeholderStill, 'empty assistant placeholder should still exist (not absorbed)').toBeDefined();
+      expect(placeholderStill?.type).toBe('assistant'); // 仍是 assistant 容器，未被 system_status 覆盖
+      expect(errorBubble, 'error event should produce its own system_status bubble').toBeDefined();
+      expect(errorBubble?.content).toBe('Error: Provider returned 503');
+    });
+
+    it('AC-Z14: stream_chunk for assistant_text absorbs empty placeholder (Z14 relaxed kind match)', () => {
+      // 关键 Z14 场景：helper 创建 empty assistant_text placeholder 之后，
+      // text 事件应该 append 到该 placeholder，不创建新 bubble
+      // 即使 placeholder 已经吸收过 tool_event 后 kind 漂移成 tool_or_cli —
+      // empty-placeholder 吸收只发生在 placeholder STILL empty 时，所以这里测的是
+      // 简单 stream_chunk on empty placeholder 路径
+      const emptyPlaceholder = streamPlaceholder({
+        id: 'msg-T1-codex',
+        content: '',
+        extra: { stream: { invocationId: 'T1' } },
+      });
+      const output = applyBubbleEvent({
+        threadId: 'thread-1',
+        event: {
+          ...baseEvent(),
+          canonicalInvocationId: 'T1',
+          type: 'stream_chunk',
+          bubbleKind: 'assistant_text',
+          payload: { content: 'first text' },
+          timestamp: 1200,
+        },
+        currentMessages: [emptyPlaceholder],
+      });
+
+      // GREEN: text appends to placeholder (id 复用), 不新建 bubble
+      expect(output.nextMessages).toHaveLength(1);
+      expect(output.nextMessages[0].id).toBe('msg-T1-codex');
+      expect(output.nextMessages[0].content).toBe('first text');
+    });
   });
 });

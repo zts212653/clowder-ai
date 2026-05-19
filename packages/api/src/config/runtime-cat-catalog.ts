@@ -9,6 +9,7 @@ import type {
   ClientId,
   CoCreatorConfig,
   ContextBudget,
+  VoiceConfig,
 } from '@cat-cafe/shared';
 import { createCatId } from '@cat-cafe/shared';
 import { clearBudgetCache } from './cat-budgets.js';
@@ -41,17 +42,9 @@ export interface RuntimeCatInput {
   commandArgs?: string[];
   cliConfigArgs?: string[];
   contextBudget?: ContextBudget;
+  voiceConfig?: VoiceConfig;
   /** clowder-ai#340 P5: Model provider name (renamed from ocProviderName). */
   provider?: string;
-  voiceConfig?: {
-    voice: string;
-    langCode: string;
-    speed?: number;
-    refAudio?: string;
-    refText?: string;
-    instruct?: string;
-    temperature?: number;
-  };
 }
 
 export interface RuntimeCatUpdate {
@@ -76,18 +69,10 @@ export interface RuntimeCatUpdate {
   commandArgs?: string[];
   cliConfigArgs?: string[];
   contextBudget?: ContextBudget | null;
+  voiceConfig?: VoiceConfig | null;
   /** clowder-ai#340 P5: Model provider name (renamed from ocProviderName). */
   provider?: string | null;
   available?: boolean;
-  voiceConfig?: {
-    voice: string;
-    langCode: string;
-    speed?: number;
-    refAudio?: string;
-    refText?: string;
-    instruct?: string;
-    temperature?: number;
-  } | null;
 }
 
 export interface RuntimeCoCreatorUpdate {
@@ -240,6 +225,7 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
         ...(input.cliConfigArgs && input.cliConfigArgs.length > 0 ? { cliConfigArgs: input.cliConfigArgs } : {}),
         ...(input.provider ? { provider: input.provider } : {}),
         ...(input.contextBudget ? { contextBudget: input.contextBudget } : {}),
+        ...(input.voiceConfig !== undefined ? { voiceConfig: input.voiceConfig } : {}),
         ...(input.personality != null && input.personality.trim().length > 0 ? { personality: input.personality } : {}),
         ...(input.teamStrengths != null && input.teamStrengths.trim().length > 0
           ? { teamStrengths: input.teamStrengths.trim() }
@@ -248,7 +234,6 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
           ? { caution: input.caution && input.caution.trim().length > 0 ? input.caution.trim() : null }
           : {}),
         ...(input.strengths ? { strengths: input.strengths } : {}),
-        ...(input.voiceConfig ? { voiceConfig: input.voiceConfig } : {}),
       },
     ],
   } as unknown as CatBreed;
@@ -418,6 +403,13 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
       delete variant.contextBudget;
     }
   }
+  if (patch.voiceConfig !== undefined) {
+    if (patch.voiceConfig) {
+      variant.voiceConfig = patch.voiceConfig;
+    } else {
+      delete variant.voiceConfig;
+    }
+  }
   if (patch.commandArgs !== undefined) {
     if (patch.commandArgs.length > 0) {
       variant.commandArgs = patch.commandArgs;
@@ -437,13 +429,6 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
       variant.provider = patch.provider;
     } else {
       delete variant.provider;
-    }
-  }
-  if (patch.voiceConfig !== undefined) {
-    if (patch.voiceConfig) {
-      variant.voiceConfig = patch.voiceConfig;
-    } else {
-      delete variant.voiceConfig;
     }
   }
   if (patch.available !== undefined && catalog.version === 2) {

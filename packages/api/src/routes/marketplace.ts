@@ -10,7 +10,7 @@ export interface MarketplaceRouteOptions {
 export const marketplaceRoutes: FastifyPluginAsync<MarketplaceRouteOptions> = async (fastify, opts) => {
   const { registry } = opts;
 
-  fastify.get('/api/marketplace/search', async (request, reply) => {
+  fastify.get('/api/marketplace/search', async (request, _reply) => {
     const { q, ecosystems, trustLevels, artifactKinds, limit } = request.query as {
       q?: string;
       ecosystems?: string;

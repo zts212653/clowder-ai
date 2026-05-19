@@ -174,6 +174,25 @@ function hasStaleActiveThreadPresentation(state: ReturnType<typeof useChatStore.
   );
 }
 
+function finalizeStreamingBubblesAbsentFromServerSlots(threadId: string, activeCats: Set<string>): boolean {
+  const store = useChatStore.getState();
+  const isActiveThread = store.currentThreadId === threadId;
+  const messagesToCheck = isActiveThread ? store.messages : store.getThreadState(threadId).messages;
+  let finalizedAny = false;
+
+  for (const msg of messagesToCheck) {
+    if (msg.type !== 'assistant' || msg.isStreaming !== true) continue;
+    if (msg.catId && activeCats.has(msg.catId)) continue;
+    store.setThreadMessageStreaming(threadId, msg.id, false);
+    finalizedAny = true;
+  }
+
+  if (finalizedAny) {
+    store.requestStreamCatchUp(threadId);
+  }
+  return finalizedAny;
+}
+
 /**
  * Query /queue for one thread and reconcile local state against server truth.
  * Shared by reconnect reconciliation and the stale-watchdog probe.
@@ -212,6 +231,7 @@ export async function reconcileThreadWithServer(
         const syntheticId = `hydrated-${threadId}-${slot.catId}`;
         store.addThreadActiveInvocation(threadId, syntheticId, slot.catId, 'execute', slot.startedAt);
       }
+      finalizeStreamingBubblesAbsentFromServerSlots(threadId, new Set(serverActiveCats));
       console.log(`[ws] ${source} reconciliation: re-hydrated active slots from server`, {
         threadId,
         cats: serverActiveCats,

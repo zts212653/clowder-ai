@@ -14,7 +14,19 @@ export interface BubbleIdentityDescriptor {
   isUnstable: boolean;
 }
 
+/**
+ * F194 Phase Z3: dual id contract.
+ *   Bubble identity priority:
+ *     1. `extra.stream.turnInvocationId` (per-cat-turn invocation, Z3 new — bubble identity SoT)
+ *     2. `extra.stream.invocationId` (parent/chain invocation, legacy fallback for old messages)
+ *     3. draft message id slice
+ *
+ * Why: same parent A2A chain `opus → codex → opus` 共用 `extra.stream.invocationId=parentId`，
+ * 如果 bubble identity 用 parent id，第 1 个和第 3 个 opus turn 会被 reducer/merge 视为同一气泡 →
+ * cancel 按钮消失 + 第 3 个 opus 失踪（铲屎官 catch 2026-05-09 17:32, 砚砚 root cause analysis）。
+ */
 export function getBubbleInvocationId(msg: ChatMessage): string | undefined {
+  if (msg.extra?.stream?.turnInvocationId) return msg.extra.stream.turnInvocationId;
   if (msg.extra?.stream?.invocationId) return msg.extra.stream.invocationId;
   if (msg.id.startsWith('draft-')) return msg.id.slice('draft-'.length);
   return undefined;

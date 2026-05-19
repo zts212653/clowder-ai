@@ -88,15 +88,15 @@ export interface ConnectorCommandLayerDeps {
   readonly catRoster?: Record<string, { displayName: string; available?: boolean }>;
   /** F142-B: unified command registry for /commands listing + skill detection + audit */
   readonly commandRegistry?: CommandRegistry;
-  /** #687: message store for /history round-based retrieval (AC-8: cursor-based) */
+  /** #687: message store for /history round-based retrieval */
   readonly messageStore?: {
     getByThreadBefore(
       threadId: string,
       timestamp: number,
       limit?: number,
     ):
-      | Array<{ catId: string | null; userId?: string; content: string; timestamp: number; source?: string }>
-      | Promise<Array<{ catId: string | null; userId?: string; content: string; timestamp: number; source?: string }>>;
+      | Array<{ catId: string | null; userId?: string; content: string; timestamp: number }>
+      | Promise<Array<{ catId: string | null; userId?: string; content: string; timestamp: number }>>;
   };
 }
 
@@ -418,7 +418,6 @@ export class ConnectorCommandLayer {
       return result;
     };
 
-    // AC-8: cursor-based windowed fetch; floor 200 covers A2A-heavy rounds
     const fetchLimit = Math.max(200, roundCount * 100);
     const messages = await this.deps.messageStore.getByThreadBefore(binding.threadId, Date.now(), fetchLimit);
     if (messages.length === 0) {
@@ -450,14 +449,12 @@ export class ConnectorCommandLayer {
     const deepLink = buildThreadDeepLink(this.deps.frontendBaseUrl, binding.threadId);
     const footerText = `\n\n⚠️ 内容已精简，完整对话请打开 thread\n🔗 ${deepLink}`;
 
-    // P1-1: pre-compute per-message metadata for overhead-aware budget
     const allMsgs = selected.flat();
     const meta = allMsgs.map((msg) => {
       const time = new Date(msg.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
       return { msg, prefix: `**${resolveSender(msg)}** [${time}]: ` };
     });
 
-    // Deduct header, line prefixes, separators, join newlines, truncation markers, footer reserve
     const separatorCount = selected.length - 1;
     const totalLineCount = meta.length + separatorCount;
     const overhead =
@@ -469,7 +466,6 @@ export class ConnectorCommandLayer {
       meta.length +
       footerText.length;
     const contentBudget = Math.max(0, TOTAL_BUDGET - overhead);
-    // Progressive distribution: short messages keep full content, savings go to longer ones
     const sortedLens = meta.map(({ msg }) => msg.content.length).sort((a, b) => a - b);
     let budgetLeft = contentBudget;
     let countLeft = sortedLens.length;
@@ -505,7 +501,6 @@ export class ConnectorCommandLayer {
     const footer = anyTruncated ? footerText : '';
     let response = `${header}\n\n${lines.join('\n')}${footer}`;
 
-    // Hard cap safety net
     if (response.length > TOTAL_BUDGET) {
       response = response.slice(0, TOTAL_BUDGET - footerText.length) + footerText;
     }

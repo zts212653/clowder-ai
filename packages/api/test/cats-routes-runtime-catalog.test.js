@@ -403,4 +403,34 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     assert.equal(body.id, 'runtime-antigravity');
     assert.equal(body.displayName, '运行时桥接猫');
   });
+
+  it('GET /api/cats includes persisted voiceConfig from runtime catalog', async () => {
+    const catalog = makeCatalog('voice-cat', '语音猫');
+    catalog.breeds[0].variants[0].voiceConfig = {
+      voice: 'alloy',
+      langCode: 'zh-CN',
+      speed: 1.1,
+      refAudio: '/uploads/ref-audio-1234567890-deadbeef.wav',
+      refText: '参考音频文本',
+      instruct: '温和自然',
+      temperature: 0.4,
+    };
+    const projectRoot = createRuntimeCatalogProject(catalog);
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const res = await app.inject({ method: 'GET', url: '/api/cats' });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const voiceCat = body.cats.find((cat) => cat.id === 'voice-cat');
+    assert.ok(voiceCat, 'voice-cat should be listed');
+    assert.deepEqual(voiceCat.voiceConfig, catalog.breeds[0].variants[0].voiceConfig);
+
+    await app.close();
+  });
 });

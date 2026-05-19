@@ -98,11 +98,19 @@ export function adaptIncomingToBubbleEvent(
   // 累加 = 重复显示）。
   if (msg.textMode) payload.textMode = msg.textMode;
 
+  // F194 Phase Z3 (砚砚 R2 P1-1): bubble identity SoT = per-cat-turn id (msg.turnInvocationId);
+  // chain/parent id (msg.invocationId) lives alongside as `chainInvocationId` for liveness/queue/cancel.
+  // Same-parent multi-turn-same-cat → different canonicalInvocationId → bubble 不合并。
+  // Legacy/single-cat (turn absent): canonical falls back to parent (only id available).
+  const turnId = msg.turnInvocationId;
+  const chainId = msg.invocationId;
+  const canonicalInvocationId = turnId ?? chainId;
   return {
     type: eventType,
     threadId: msg.threadId,
     actorId: msg.catId,
-    canonicalInvocationId: msg.invocationId,
+    canonicalInvocationId,
+    ...(chainId && turnId && chainId !== turnId ? { chainInvocationId: chainId } : {}),
     bubbleKind: kind,
     originPhase: phase,
     sourcePath: options.sourcePath,

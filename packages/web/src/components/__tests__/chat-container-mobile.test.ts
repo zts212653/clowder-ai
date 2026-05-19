@@ -86,8 +86,16 @@ vi.mock('../ChatContainerHeader', () => ({
     React.createElement(
       'div',
       { 'data-testid': 'header' },
-      React.createElement('button', { 'data-testid': 'sidebar-toggle', onClick: props.onToggleSidebar }),
-      React.createElement('button', { 'data-testid': 'mobile-status-trigger', onClick: props.onOpenMobileStatus }),
+      React.createElement('button', {
+        type: 'button',
+        'data-testid': 'sidebar-toggle',
+        onClick: props.onToggleSidebar,
+      }),
+      React.createElement('button', {
+        type: 'button',
+        'data-testid': 'mobile-status-trigger',
+        onClick: props.onOpenMobileStatus,
+      }),
     ),
 }));
 vi.mock('../ThreadSidebar', () => ({
@@ -105,7 +113,6 @@ vi.mock('../MessageNavigator', () => ({ MessageNavigator: () => null }));
 vi.mock('../MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
 }));
-vi.mock('../CatCafeHub', () => ({ CatCafeHub: () => null }));
 vi.mock('../SplitPaneView', () => ({ SplitPaneView: () => null }));
 vi.mock('../AuthorizationCard', () => ({ AuthorizationCard: () => null }));
 
@@ -165,8 +172,8 @@ describe('ChatContainer mobile interactions', () => {
       toggleBtn.click();
     });
     expect(container.querySelector('[data-testid="sidebar"]')).toBeTruthy();
-    // Backdrop should also appear (inline style rgba backdrop)
-    expect(container.querySelector('.fixed.inset-0.z-20')).toBeTruthy();
+    // Backdrop should also appear
+    expect(container.querySelector('[class*="console-overlay-backdrop"]')).toBeTruthy();
   });
 
   it('closes sidebar when backdrop is clicked', () => {
@@ -179,8 +186,8 @@ describe('ChatContainer mobile interactions', () => {
       toggleBtn.click();
     });
     expect(container.querySelector('[data-testid="sidebar"]')).toBeTruthy();
-    // Click backdrop (inline style rgba backdrop)
-    const backdrop = container.querySelector('.fixed.inset-0.z-20') as HTMLElement;
+    // Click backdrop
+    const backdrop = container.querySelector('[class*="console-overlay-backdrop"]') as HTMLElement;
     act(() => {
       backdrop.click();
     });

@@ -9,6 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { mock, test } from 'node:test';
+import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
 
 const { CodexAgentService, isGitRepositoryPath } = await import(
   '../dist/domains/cats/services/agents/providers/CodexAgentService.js'
@@ -60,13 +61,37 @@ function createMockSpawnFn(proc) {
   return mock.fn(() => proc);
 }
 
-/** Write NDJSON events to mock process stdout, then end with exit 0 */
+/**
+ * Write NDJSON events to mock process stdout, then end with exit 0.
+ *
+ * F203 Phase C: stream end + 'exit' are deferred via setImmediate. invoke()
+ * now awaits L0 compile before spawnCli (fail-closed native system prompt),
+ * so a synchronous 'exit' here would fire before spawnCli attaches its
+ * process listeners and be lost (real codex never exits pre-listener — this
+ * only models the mock correctly). stdout writes stay sync (PassThrough
+ * buffers them; replayed once the consumer attaches).
+ */
 function emitCodexEvents(proc, events) {
   for (const event of events) {
     proc.stdout.write(`${JSON.stringify(event)}\n`);
   }
-  proc.stdout.end();
-  proc._emitter.emit('exit', 0, null);
+  setImmediate(() => {
+    proc.stdout.end();
+    proc._emitter.emit('exit', 0, null);
+  });
+}
+
+/**
+ * Defer stream end + (non-zero) 'exit' past spawnCli's listener attach.
+ * Same rationale as emitCodexEvents: invoke() awaits L0 compile before spawn
+ * (F203 Phase C), so a synchronous exit emitted right after invoke() would
+ * race ahead of the consumer and be lost.
+ */
+function finishExit(proc, code) {
+  setImmediate(() => {
+    if (!proc.stdout.destroyed) proc.stdout.end();
+    proc._emitter.emit('exit', code, null);
+  });
 }
 
 // --- Test cases ---
@@ -74,7 +99,7 @@ function emitCodexEvents(proc, events) {
 test('yields session_init, text, and done on basic success', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
   const promise = collect(service.invoke('Hello'));
 
@@ -102,7 +127,7 @@ test('yields session_init, text, and done on basic success', async () => {
 test('uses exec resume when sessionId is provided', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn, model: 'gpt-5.3-codex' });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
 
   const promise = collect(service.invoke('Continue', { sessionId: 'existing-thread-456' }));
   emitCodexEvents(proc, [
@@ -130,17 +155,17 @@ test('uses exec resume when sessionId is provided', async () => {
   assert.ok(!args.includes('approval_policy=\\"on-request\\"'), 'argv should not contain literal backslash escapes');
 });
 
-test('injects cat-cafe MCP config when workingDirectory contains mcp-server', async () => {
+test('injects cat-cafe MCP config from runtime root, not thread workingDirectory', async () => {
   const tmpRoot = mkdtempSync(join(import.meta.dirname ?? '.', '.tmp-mcp-test-'));
   const mcpDistDir = join(tmpRoot, 'packages', 'mcp-server', 'dist');
   mkdirSync(mcpDistDir, { recursive: true });
-  for (const entrypoint of ['index.js', 'collab.js', 'memory.js', 'signals.js']) {
+  for (const entrypoint of ['index.js', 'collab.js', 'memory.js', 'signals.js', 'limb.js']) {
     writeFileSync(join(mcpDistDir, entrypoint), '// stub');
   }
 
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn, model: 'gpt-5.3-codex' });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
 
   try {
     const promise = collect(
@@ -160,38 +185,65 @@ test('injects cat-cafe MCP config when workingDirectory contains mcp-server', as
     await promise;
 
     const args = spawnFn.mock.calls[0].arguments[1];
-    assert.ok(args.includes('mcp_servers.cat-cafe.command="node"'));
-    const mcpArgsConfig = args.find((arg) => arg.startsWith('mcp_servers.cat-cafe.args=['));
-    assert.ok(mcpArgsConfig, 'must inject cat-cafe mcp args config');
-    assert.match(mcpArgsConfig, /packages\/mcp-server\/dist\/index\.js/);
-    assert.ok(args.includes('mcp_servers.cat-cafe.enabled=true'));
-    assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_API_URL="http://127.0.0.1:3004"'));
-    assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_INVOCATION_ID="inv-test-1"'));
-    assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_CALLBACK_TOKEN="tok-test-1"'));
-    assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_USER_ID="user-test-1\\nline2"'));
-    assert.ok(
-      args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_CAT_ID="codex"'),
-      'must inject CAT_CAFE_CAT_ID for game action auth',
-    );
-    assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_SIGNAL_USER="codex"'));
 
-    assert.ok(args.includes('mcp_servers.cat-cafe-collab.command="node"'));
-    const collabArgsConfig = args.find((arg) => arg.startsWith('mcp_servers.cat-cafe-collab.args=['));
-    assert.ok(collabArgsConfig, 'must inject cat-cafe-collab mcp args config');
-    assert.match(collabArgsConfig, /packages\/mcp-server\/dist\/collab\.js/);
-    assert.ok(args.includes('mcp_servers.cat-cafe-collab.enabled=true'));
-    assert.ok(args.includes('mcp_servers.cat-cafe-collab.env.CAT_CAFE_API_URL="http://127.0.0.1:3004"'));
-    assert.ok(args.includes('mcp_servers.cat-cafe-collab.env.CAT_CAFE_INVOCATION_ID="inv-test-1"'));
-    assert.ok(args.includes('mcp_servers.cat-cafe-collab.env.CAT_CAFE_CALLBACK_TOKEN="tok-test-1"'));
-
-    // Codex ≥0.130: each Cat Cafe MCP server must have auto-approve to avoid
-    // "user cancelled MCP tool call" in non-interactive codex exec mode.
-    for (const serverName of ['cat-cafe', 'cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals']) {
+    // F193 Phase C (#1605): legacy `cat-cafe` MCP server is gone, replaced by
+    // split servers (cat-cafe-collab / -memory / -signals / -limb).
+    // Each split server must be injected with command + args path + enabled + full callback env.
+    const splitServers = [
+      ['cat-cafe-collab', 'collab.js'],
+      ['cat-cafe-memory', 'memory.js'],
+      ['cat-cafe-signals', 'signals.js'],
+      ['cat-cafe-limb', 'limb.js'],
+    ];
+    for (const [serverId, entrypoint] of splitServers) {
+      assert.ok(args.includes(`mcp_servers.${serverId}.command="node"`), `must inject ${serverId} command`);
+      const argsConfig = args.find((arg) => arg.startsWith(`mcp_servers.${serverId}.args=[`));
+      assert.ok(argsConfig, `must inject ${serverId} mcp args config`);
       assert.ok(
-        args.includes(`mcp_servers.${serverName}.default_tools_approval_mode="approve"`),
-        `${serverName} must have default_tools_approval_mode="approve"`,
+        argsConfig.includes(`packages/mcp-server/dist/${entrypoint}`),
+        `${serverId} args must point at ${entrypoint}`,
+      );
+      assert.ok(
+        !argsConfig.includes(tmpRoot),
+        `${serverId} args must not resolve MCP binary from thread workingDirectory`,
+      );
+      assert.ok(args.includes(`mcp_servers.${serverId}.enabled=true`), `must inject ${serverId} enabled=true`);
+      assert.ok(
+        args.includes(`mcp_servers.${serverId}.default_tools_approval_mode="approve"`),
+        `${serverId} must have default_tools_approval_mode="approve" for non-interactive codex exec`,
+      );
+      // full callback env coverage on every split server (regression guard for F168/F140 cross-thread auth)
+      assert.ok(
+        args.includes(`mcp_servers.${serverId}.env.CAT_CAFE_API_URL="http://127.0.0.1:3004"`),
+        `must inject CAT_CAFE_API_URL on ${serverId}`,
+      );
+      assert.ok(
+        args.includes(`mcp_servers.${serverId}.env.CAT_CAFE_INVOCATION_ID="inv-test-1"`),
+        `must inject CAT_CAFE_INVOCATION_ID on ${serverId}`,
+      );
+      assert.ok(
+        args.includes(`mcp_servers.${serverId}.env.CAT_CAFE_CALLBACK_TOKEN="tok-test-1"`),
+        `must inject CAT_CAFE_CALLBACK_TOKEN on ${serverId}`,
+      );
+      assert.ok(
+        args.includes(`mcp_servers.${serverId}.env.CAT_CAFE_USER_ID="user-test-1\\nline2"`),
+        `must inject CAT_CAFE_USER_ID on ${serverId}`,
+      );
+      assert.ok(
+        args.includes(`mcp_servers.${serverId}.env.CAT_CAFE_CAT_ID="codex"`),
+        `must inject CAT_CAFE_CAT_ID on ${serverId} for game action auth`,
+      );
+      assert.ok(
+        args.includes(`mcp_servers.${serverId}.env.CAT_CAFE_SIGNAL_USER="codex"`),
+        `must inject CAT_CAFE_SIGNAL_USER on ${serverId}`,
       );
     }
+
+    // legacy `cat-cafe` server must NOT be injected after the split
+    assert.ok(
+      !args.includes('mcp_servers.cat-cafe.command="node"'),
+      'legacy cat-cafe MCP server entry should not be injected after F193 Phase C split',
+    );
   } finally {
     rmSync(tmpRoot, { recursive: true, force: true });
   }
@@ -200,7 +252,7 @@ test('injects cat-cafe MCP config when workingDirectory contains mcp-server', as
 test('does not include resume when no sessionId', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn, model: 'gpt-5.3-codex' });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
 
   const promise = collect(service.invoke('hello'));
   emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't1' }]);
@@ -222,7 +274,12 @@ test('does not include resume when no sessionId', async () => {
 test('unknown Codex cat falls back to xhigh reasoning effort for new invocations', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn, catId: 'runtime-unknown-codex', model: 'gpt-5.4' });
+  const service = new CodexAgentService({
+    l0CompilerFn: fakeL0Compiler,
+    spawnFn,
+    catId: 'runtime-unknown-codex',
+    model: 'gpt-5.4',
+  });
 
   const promise = collect(service.invoke('hello'));
   emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-effort-fallback' }]);
@@ -239,7 +296,7 @@ test('unknown Codex cat falls back to xhigh reasoning effort for new invocations
 test('adds --skip-git-repo-check when workingDirectory is not a git repository', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn, model: 'gpt-5.3-codex' });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
   const nonGitDir = mkdtempSync(join('/tmp', 'codex-non-git-'));
 
   try {
@@ -257,7 +314,7 @@ test('adds --skip-git-repo-check when workingDirectory is not a git repository',
 test('does not add --skip-git-repo-check inside a git repository', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn, model: 'gpt-5.3-codex' });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
 
   const promise = collect(service.invoke('hello', { workingDirectory: process.cwd() }));
   emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-git-root' }]);
@@ -291,7 +348,7 @@ test('uses env-configured sandbox and approval policy for fresh exec', async () 
   try {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ spawnFn });
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('configurable'));
     emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-config' }]);
@@ -325,7 +382,7 @@ test('falls back to defaults for invalid sandbox/approval env values', async () 
   try {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ spawnFn });
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('fallback'));
     emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-fallback' }]);
@@ -351,7 +408,7 @@ test('falls back to defaults for invalid sandbox/approval env values', async () 
 test('new session includes --add-dir .git for git write access', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
   const promise = collect(service.invoke('hello'));
   emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't1' }]);
@@ -367,7 +424,7 @@ test('new session includes --add-dir .git for git write access', async () => {
 test('resume session does NOT include --add-dir (sandbox locked at creation)', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
   const promise = collect(service.invoke('Continue', { sessionId: 'old-session-123' }));
   emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'old-session-123' }]);
@@ -381,7 +438,7 @@ test('resume session does NOT include --add-dir (sandbox locked at creation)', a
 test('custom provider: model passed via --config as-is', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn, model: 'qwen-plus' });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'qwen-plus' });
 
   // Emit events after a tick to ensure generator has started consuming
   const promise = collect(
@@ -407,7 +464,11 @@ test('custom provider: multi-segment model slug preserved as-is', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
   // Model like "google/gemini-3-flash-preview" (OpenRouter format) — must NOT be stripped
-  const service = new CodexAgentService({ spawnFn, model: 'google/gemini-3-flash-preview' });
+  const service = new CodexAgentService({
+    l0CompilerFn: fakeL0Compiler,
+    spawnFn,
+    model: 'google/gemini-3-flash-preview',
+  });
 
   const promise = collect(
     service.invoke('test multi-segment', {
@@ -433,7 +494,7 @@ test('custom provider: multi-segment model slug preserved as-is', async () => {
 test('no custom provider: model is passed as-is', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn, model: 'gpt-5.3-codex' });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
 
   const promise = collect(service.invoke('test no custom'));
   emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-no-custom' }]);
@@ -449,7 +510,7 @@ test('no custom provider: model is passed as-is', async () => {
 test('handles multiple agent_message items', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
   const promise = collect(service.invoke('Multi'));
 
@@ -476,7 +537,7 @@ test('handles multiple agent_message items', async () => {
 test('separates multi-turn text with paragraph breaks (turn newline fix)', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
   const promise = collect(service.invoke('Multi-turn'));
 
@@ -527,7 +588,7 @@ test('separates multi-turn text with paragraph breaks (turn newline fix)', async
 test('maps command_execution and file_change items into tool events', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
   const promise = collect(service.invoke('With tools'));
 
@@ -569,13 +630,12 @@ test('yields error on CLI non-zero exit', async () => {
   const proc = createMockProcess();
   proc.kill = mock.fn(() => true);
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
   const promise = collect(service.invoke('crash'));
 
   proc.stderr.write('Error: authentication failed\n');
-  proc.stdout.end();
-  proc._emitter.emit('exit', 1, null);
+  finishExit(proc, 1);
 
   const msgs = await promise;
   const errMsg = msgs.find((m) => m.type === 'error');
@@ -590,7 +650,7 @@ test('includes reconnect diagnostics in CLI exit error when available', async ()
   const proc = createMockProcess();
   proc.kill = mock.fn(() => true);
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
   const promise = collect(service.invoke('reconnect failure'));
 
@@ -613,9 +673,8 @@ test('includes reconnect diagnostics in CLI exit error when available', async ()
       message: 'stream disconnected before completion',
     })}\n`,
   );
-  proc.stdout.end();
   // Exit code 2 = always a real failure (code 1 is suppressed only with substantive output)
-  proc._emitter.emit('exit', 2, null);
+  finishExit(proc, 2);
 
   const msgs = await promise;
   const sysInfos = msgs.filter((m) => m.type === 'system_info');
@@ -633,7 +692,7 @@ test('includes reconnect diagnostics in CLI exit error when available', async ()
 test('suppresses exit code 1 when Codex produced substantive output (item.completed)', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
   const promise = collect(service.invoke('review this'));
 
@@ -645,8 +704,7 @@ test('suppresses exit code 1 when Codex produced substantive output (item.comple
       item: { type: 'agent_message', text: 'Looks good!' },
     })}\n`,
   );
-  proc.stdout.end();
-  proc._emitter.emit('exit', 1, null); // Codex 0.98+ quirk
+  finishExit(proc, 1); // Codex 0.98+ quirk
 
   const msgs = await promise;
   const errors = msgs.filter((m) => m.type === 'error');
@@ -664,14 +722,13 @@ test('suppresses exit code 1 when Codex produced substantive output (item.comple
 test('does NOT suppress exit code 1 when only thread.started (no substantive output)', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
   const promise = collect(service.invoke('review this'));
 
   // Only thread.started — no item.completed → NOT substantive
   proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'tx' })}\n`);
-  proc.stdout.end();
-  proc._emitter.emit('exit', 1, null);
+  finishExit(proc, 1);
 
   const msgs = await promise;
   const errors = msgs.filter((m) => m.type === 'error');
@@ -683,7 +740,7 @@ test('yields error on spawn ENOENT', async () => {
   const proc = createMockProcess();
   proc.kill = mock.fn(() => true);
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
   const promise = collect(service.invoke('hi'));
 
@@ -704,7 +761,7 @@ test('yields error on spawn ENOENT', async () => {
 test('passes cwd from workingDirectory option', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
   const promise = collect(service.invoke('hi', { workingDirectory: '/my/project' }));
   emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't1' }]);
@@ -717,7 +774,7 @@ test('passes cwd from workingDirectory option', async () => {
 test('oauth mode (default) does not forward OPENAI_API_KEY to codex child env', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
   const originalApiKey = process.env.OPENAI_API_KEY;
   const originalAuthMode = process.env.CODEX_AUTH_MODE;
@@ -743,7 +800,7 @@ test('oauth mode (default) does not forward OPENAI_API_KEY to codex child env', 
 test('api_key mode via callbackEnv keeps OPENAI_API_KEY for codex child env', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
   const promise = collect(
     service.invoke('api-key test', {
@@ -763,7 +820,7 @@ test('api_key mode via callbackEnv keeps OPENAI_API_KEY for codex child env', as
 test('callbackEnv auth mode overrides process default when launching codex child env', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
   const originalAuthMode = process.env.CODEX_AUTH_MODE;
   try {
@@ -791,7 +848,7 @@ test('callbackEnv auth mode overrides process default when launching codex child
 test('callbackEnv model override takes precedence over constructor model', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn, model: 'gpt-5.4' });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.4' });
 
   const promise = collect(
     service.invoke('model override test', {
@@ -812,7 +869,7 @@ test('callbackEnv model override takes precedence over constructor model', async
 test('all messages have catId codex', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
   const promise = collect(service.invoke('check'));
 
@@ -833,7 +890,7 @@ test('all messages have catId codex', async () => {
 test('ignores turn.started and turn.completed control events', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
   const promise = collect(service.invoke('test'));
 
@@ -861,7 +918,7 @@ test('ignores turn.started and turn.completed control events', async () => {
 test('maps command execution lifecycle into tool_use and tool_result', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
   const promise = collect(service.invoke('run tool'));
 
@@ -911,7 +968,7 @@ test('writes CLI tool lifecycle audit events when auditContext is provided', asy
   const spawnFn = createMockSpawnFn(proc);
   const auditLog = { append: mock.fn(async () => ({ id: 'evt-1' })) };
   const rawArchive = { append: mock.fn(async () => {}) };
-  const service = new CodexAgentService({ spawnFn, auditLog, rawArchive });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, auditLog, rawArchive });
 
   const promise = collect(
     service.invoke('run tool', {
@@ -970,7 +1027,7 @@ test('archives raw stream events when auditContext is provided', async () => {
   const spawnFn = createMockSpawnFn(proc);
   const auditLog = { append: mock.fn(async () => ({ id: 'evt-1' })) };
   const rawArchive = { append: mock.fn(async () => {}) };
-  const service = new CodexAgentService({ spawnFn, auditLog, rawArchive });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, auditLog, rawArchive });
 
   const promise = collect(
     service.invoke('raw trace', {
@@ -1003,7 +1060,7 @@ test('does not write lifecycle audit or raw archive when auditContext is absent'
   const spawnFn = createMockSpawnFn(proc);
   const auditLog = { append: mock.fn(async () => ({ id: 'evt-1' })) };
   const rawArchive = { append: mock.fn(async () => {}) };
-  const service = new CodexAgentService({ spawnFn, auditLog, rawArchive });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, auditLog, rawArchive });
 
   const promise = collect(service.invoke('no audit context'));
 
@@ -1042,7 +1099,7 @@ test('redacts nested callback tokens before archiving raw events', async () => {
   const spawnFn = createMockSpawnFn(proc);
   const auditLog = { append: mock.fn(async () => ({ id: 'evt-1' })) };
   const rawArchive = { append: mock.fn(async () => {}) };
-  const service = new CodexAgentService({ spawnFn, auditLog, rawArchive });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, auditLog, rawArchive });
 
   const promise = collect(
     service.invoke('deep redact', {
@@ -1087,7 +1144,7 @@ test('redacts nested callback tokens before archiving raw events', async () => {
 test('systemPrompt is preserved and codex --image is used when contentBlocks contain images', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
   const promise = collect(
     service.invoke('describe this image', {
@@ -1115,7 +1172,7 @@ test('systemPrompt is preserved and codex --image is used when contentBlocks con
 test('fresh exec with --image inserts "--" before prompt to avoid varargs swallowing prompt', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
   const promise = collect(
     service.invoke('please describe this image path handling', {
@@ -1137,7 +1194,7 @@ test('fresh exec with --image inserts "--" before prompt to avoid varargs swallo
 test('resume exec with --image inserts "--" before prompt', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
   const promise = collect(
     service.invoke('resume image argument handling', {
@@ -1163,7 +1220,7 @@ test('resume exec with --image inserts "--" before prompt', async () => {
 test('F8: turn.completed usage is captured into done metadata', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
   const promise = collect(service.invoke('test'));
 
@@ -1197,7 +1254,7 @@ test('F24: enriches Codex context snapshot from resolver into done metadata', as
     contextWindowTokens: 258_400,
     contextResetsAtMs: Date.UTC(2026, 1, 18, 0, 0, 0),
   }));
-  const service = new CodexAgentService({ spawnFn, contextSnapshotResolver });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, contextSnapshotResolver });
 
   const promise = collect(service.invoke('test context telemetry'));
 
@@ -1246,7 +1303,7 @@ test('Issue #116: turn.completed unblocks done even when process exit is delayed
     _emitter: emitter,
   };
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
   const startMs = Date.now();
   const promise = collect(service.invoke('test'));
@@ -1295,7 +1352,7 @@ test('[F172] yields system_info rich_block for images found in codex generated_i
   try {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ spawnFn });
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('generate an image', { uploadDir }));
 

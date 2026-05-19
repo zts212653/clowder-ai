@@ -24,12 +24,13 @@ interface CallbackAuthCatAvatarProps {
 }
 
 export function CallbackAuthCatAvatar({ catId, size = 32, status }: CallbackAuthCatAvatarProps) {
-  const router = useRouter();
   const cba = useCallbackAuthByCat(catId);
   const aggregate = useCallbackAuthAggregate();
   const isAvailable = useCallbackAuthAvailable();
+  const router = useRouter();
+
   const handleOpenDetails = useCallback(() => {
-    router.push('/settings?s=ops');
+    router.push('/settings?s=ops&ops=observability&obs=callback-auth');
   }, [router]);
 
   // Cloud Codex #1403 (round 2 + 7): backend snapshot's recent24h.byCat ONLY
@@ -58,7 +59,7 @@ export function CallbackAuthCatAvatar({ catId, size = 32, status }: CallbackAuth
         <div>
           <div className="mb-0.5 text-[10px] uppercase tracking-wide text-cafe-muted">Reasons (24h, all cats)</div>
           {aggregate.topReasons.slice(0, 3).map((r) => (
-            <div key={r.name} className="flex items-center justify-between text-[11px]">
+            <div key={r.name} className="flex items-center justify-between text-xs">
               <span className="font-mono">{r.name}</span>
               <span className="text-cafe-secondary">{r.count}</span>
             </div>
@@ -69,7 +70,7 @@ export function CallbackAuthCatAvatar({ catId, size = 32, status }: CallbackAuth
         <div>
           <div className="mb-0.5 text-[10px] uppercase tracking-wide text-cafe-muted">Top Tools (24h, all cats)</div>
           {aggregate.topTools.slice(0, 3).map((t) => (
-            <div key={t.name} className="flex items-center justify-between text-[11px]">
+            <div key={t.name} className="flex items-center justify-between text-xs">
               <span className="font-mono">{t.name}</span>
               <span className="text-cafe-secondary">{t.count}</span>
             </div>

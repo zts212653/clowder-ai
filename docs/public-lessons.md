@@ -162,7 +162,7 @@ created: 2026-02-26
 
 - 关联：
   - `cat-cafe-skills/merge-approval-gate/SKILL.md`
-  - *(internal reference removed)*
+  - `review-notes/README.md`
 
 ### LL-006: 没有新鲜验证证据，不得宣称完成
 - 状态：validated
@@ -198,7 +198,7 @@ created: 2026-02-26
 
 - 关联：
   - `cat-cafe-skills/cross-cat-handoff/SKILL.md`
-  - *(internal reference removed)*
+  - `review-notes/README.md`
 
 ### LL-008: Worktree 生命周期必须成套执行（建-收敛-合入-清理）
 - 状态：validated
@@ -463,7 +463,7 @@ created: 2026-02-26
 - 防护：P0 验收前与后续回归中运行健康脚本；失败即阻断“可用”结论。
 - 来源锚点：
   - `scripts/hindsight/p0-health-check.sh`
-  - *(internal reference removed)*
+  - `project-runbooks/hindsight-p0-health-check.md`
   - *(internal reference removed)*
 - 原理：治理有效性不是“策略存在”，而是“策略被持续验证”。没有自动化检查的治理，等同于没有治理。
 
@@ -1103,6 +1103,129 @@ created: 2026-02-26
 - 原理：**长任务的关键不是“后台”两个字，而是谁拥有生命周期。** 需要持续交互时，生命周期应该绑在当前 `session_id`；需要任务脱离对话继续跑时，必须显式切换到真正 detached 的进程组，并用外部探针观测。shell 伪后台只是“看起来像分叉了”，不是可靠的 liveness ownership。
 
 - 关联：`assets/system-prompts/cats/codex.md` | *(internal reference removed)*
+
+---
+
+### LL-054: 猫的 callback env 泄漏到 unit test 子进程——用真身份发出 6 条 'hi'
+- 状态：validated
+- 更新时间：2026-05-07
+
+- 坑：F193 Phase A Task 3 写 `post-message-kd1-mcp-handler.test.js` 时漏 `beforeEach` mock fetch；跑 `pnpm --filter @cat-cafe/mcp-server test` 时，`node:test` 子进程继承了 Claude Code agent process 自带的 callback env (`CAT_CAFE_API_URL=http://127.0.0.1:3004` + `CAT_CAFE_INVOCATION_ID` + `CAT_CAFE_CALLBACK_TOKEN`)。测试里那行 `handlePostMessage({ content: 'hi' })` **用了猫自己当前 invocation 的真身份**，把 'hi' 发到当前对话 thread。跑 6 次 = 6 条假 hi 出现在铲屎官 thread 里，签名"Ragdoll (Opus 4.7)"，看起来像 cron job。
+- 根因：
+  1. **根因 A（猫疏忽）**：unit test 文件没写 `beforeEach` mock + env override；只 mock 在用到的 test case 里 → 漏 mock 的 case fall-through 到真 fetch
+  2. **根因 B（结构性）**：cat agent process 自身 env 就有 callback config（这是 MCP `post_message` 工具能跑的前提），跑 child process 时**默认全继承**——和 worktree 隔离无关，main / worktree / 任何 cwd 都一样会泄漏。原先以为问题是"worktree env 泄漏"是误诊
+  3. **根因 C（错认场景）**：mcp-server unit test 不该有任何"hit 真 callback URL"的可能——目前 `callback-tools.test.js` 已经在 `beforeEach` 设了 `CAT_CAFE_API_URL=http://127.0.0.1:3004` + 加 fetch mock，但只有那一个 file 这么做，没有共享 helper 强制其他测试 file 也走同样模式
+- 触发条件：在 cat agent invocation 进程里跑 `pnpm test` / `node --test`，且测试代码会调到 `handlePostMessage` / `handleCrossPostMessage` / 任何会 read `CAT_CAFE_API_URL` env 的 callback helper，且没在 `beforeEach` mock fetch + override env。**注意**：和 cwd（main / worktree）无关，纯继承父 process env。
+- 修复（已落地）：
+  1. `packages/mcp-server/test/post-message-kd1-mcp-handler.test.js` 加 `beforeEach`：`CAT_CAFE_API_URL=http://127.0.0.1:1`（关闭端口，ECONNREFUSED 即使 mock 漏）+ stub `globalThis.fetch`，`afterEach` 还原
+  2. 加 `assert.equal(fetchCalled, false)` 断言：把"KD-1 guard 必须 reject 在 fetch 之前"变成回归保护
+  3. Commit `8fea021f1`，已 push `feat/F193-cross-thread-comm`
+- 防护（待落地）：
+  1. **shared-rules §19**（本 LL 同时落）：cat agent 进程跑 unit test 前必须在 `beforeEach` override `CAT_CAFE_API_URL` 到 closed 端口 + mock `globalThis.fetch`
+  2. **测试 helper（建议 follow-up）**：`packages/mcp-server/test/helpers/callback-test-env.js` 导出 `setupClosedCallbackEnv()` / `restoreCallbackEnv()`，新写测试 import 一行就拿到 fail-closed 默认值。F193 Phase A 完成后开 follow-up TD
+  3. **CI lint（建议 follow-up）**：扫所有 `*.test.js`，凡 import 了 `handlePostMessage` / `handleCrossPostMessage` 但没 `beforeEach` 设 closed `CAT_CAFE_API_URL` → CI fail
+- 来源锚点：
+  - `docs/features/F193-cross-thread-comm-unification.md`（事故发生在该 feature Phase A 实施期间）
+  - `packages/mcp-server/test/post-message-kd1-mcp-handler.test.js`（修复点）
+  - commit `8fea021f1` (fix(F193): mock fetch + override env in AC-A2 test)
+  - 截图证据：`/path/to/project-runtime/packages/api/uploads/1778205224706-386492e0.png`
+- 原理：**子进程默认继承父 process env，是 OS 级行为不是 shell quirk**。任何用真 callback config 跑的进程（猫的 invocation 进程）下面派生的子进程（pnpm/node test runner）天然带这套 env。Unit test 必须**显式擦除**这些可能触发 side-effect 的 env，不能依赖"测试通常不发 HTTP"的乐观假设。fail-closed 优于 fail-fast——把 URL 指向 closed 端口，比单靠 fetch mock 多一层防御。
+
+- 关联：`cat-cafe-skills/refs/shared-rules.md §19` | F193
+
+### LL-055: spawn 出的"长尾 child runtime"必须能脱离 parent 自动死亡
+- 状态：draft
+- 更新时间：2026-05-09（src extension）
+
+- 坑：两次同模式踩坑，1 天内连续暴露——
+  1. **Test infra（首次）**：`process-liveness-probe.test.js` spawn `node -e while(true){}` 作为 busy CPU child；测试异常退出（runner timeout / 用户 Ctrl+C / `pnpm gate` 中断）时漏掉 child cleanup，每次泄漏一只 PPID=1 孤儿进程。累积 4 只时占满 ~270% CPU，导致 runtime `pnpm dev:direct` 在 20s 超时窗口内起不来 3002，看起来像"启动超时 + tsx Force killing"诡异连锁，根因实际在测试设计。
+  2. **Src（次日 2026-05-09 发现）**：`packages/api/src/.../first-run-quest/client-detection.ts` 用 `execAsync('opencode version', { timeout: 5000 })` 探测 OpenCode CLI 是否安装。`opencode version` 不是简单 CLI 查询——`opencode` 是 agent runtime，`version` 子命令会拉起完整 agent process。`exec` 的 `timeout` 默认发 SIGTERM；agent process 不响应就僵住，parent promise reject 后 child 成 PPID=1 + 67% CPU 烧 50 分钟孤儿。**这是 LL 的范围扩展——同模式不限于 test，src 里"靠 SIGTERM 链 kill 复杂 child runtime"是同样系统性漏洞。**
+- 根因：
+  1. **结构性**：测试设计依赖 parent SIGTERM handler 链式 kill child；macOS 没有 Linux `PR_SET_PDEATHSIG`，parent 异常死亡（SIGKILL / runner timeout / Ctrl+C）后 child 不会自动陪葬，被 launchd 收编成 PPID=1，继续 `while(true)` 烧 CPU 直到外部干预。
+  2. **可观测性**：孤儿没有指向源头的进程链（PPID=1），仅靠 `ps` 看不出"是谁 spawn 的"，只能 grep 字面量 `while(true){}` 反查代码。
+- 触发条件：test runner 强杀整个 worker（test timeout / OOM）、用户 Ctrl+C 中断 `pnpm test` / `pnpm gate`、multi-worktree fanout 并发跑同一测试（任一进程异常退出即泄漏）、CI 任务被 cancel——四种之一即可累积。
+- 修复（已落地）：
+  - **Test 修复（PR #1607, 2026-05-08）**：busy child 自带 5–10s 自杀 deadline——`while(Date.now() < end)` 替代 `while(true)`，最坏情况下泄漏一只也只活一个测试时长，不会跨 session 累积。`packages/api/test/process-liveness-probe.test.js` 第 145 行已改。
+  - **Src 修复（2026-05-09）**：`client-detection.ts` 把"靠 `<cli> version`/`<cli> --version` 探测"换成"`command -v <cli>` 存在性探测"——`execFile` 走 `/bin/sh -c 'command -v "$1"'` 路径（POSIX 内置，不 spawn agent runtime），timeout 1s。`versionCmd` 字段从 `CliSpec` 删除，`DetectedClient.version` 字段保留为可选但永不填值（前端 `ClientStep` 已 conditional render，自然降级到只显示"已安装"）。同时把 `existsOnPath` 抽成可注入接口便于测试。
+- 防护：
+  1. **Test**：任何 `*.test.{js,ts}` 里 spawn 的 busy / long-lived 子进程必须满足两条之一：(a) 自带时间 deadline，(b) 暴露 child PID 让外部测试 finally 块独立 SIGKILL，**不依赖 parent SIGTERM handler 链式 kill**。
+  2. **Src**（新增）：低成本 detection / health probe 路径**禁止 spawn 复杂 runtime**——能用 `command -v` / `which` / `where` 就不用 `<cli> --version`。即使是看起来"应该是简单 CLI"的目标（`opencode version`），也不能假设其 child 会响应 SIGTERM；agent runtime / headless browser 这类复杂 child 的生命周期不能让 parent 信号链承担。
+  3. **回归守护**：注入式 `existsOnPath` + unit test 断言所有 spec 没有 `versionCmd` / `versionArgs` 字段，CI 直接拦截重新引入。见 `packages/api/test/client-detection.test.js`（5 个 case，含 LL-055 src-extension regression guard）。
+  4. 卡启动 / CPU 异常排查 SOP（顺序按出现频率）：
+     - 先 `ps -eo pid,etime,pcpu,command | sort -k3 -nr | head` 看孤儿（频率最高）
+     - 再按命令字面量 grep 反查 spawn 源（`while(true)` 找 test，`<cli> version`/`<cli> --version` 找 src probe）
+     - 最后才查 agent-browser headless Chrome 僵尸（`feedback_agent_browser_zombie.md`）
+  5. CI lint（建议 follow-up）：扫 `**/*.{js,ts}` 中 `exec\\(.*<cli>\\s+(version|--version)` 模式（src + test 一起），匹配上直接 fail。
+- 来源锚点：
+  - `packages/api/test/process-liveness-probe.test.js#L140-L155`（test 修复 PR #1607）
+  - `packages/api/src/domains/cats/services/first-run-quest/client-detection.ts`（src 修复 2026-05-09）
+  - `packages/api/test/client-detection.test.js`（regression guards）
+  - 2026-05-08 runtime 启动超时事件（4 只 test 孤儿 6h–19h，270% CPU，3002 无法在 20s 内监听）
+  - 2026-05-09 hub UI / first-run-quest 触发的 opencode version 孤儿（PPID=1 + 67% CPU + 50 分钟）
+- 原理：**macOS 进程孤立化默认 detach 不死链**。Linux 可通过 `PR_SET_PDEATHSIG` 让 child 在 parent 死时收到信号自杀；macOS 无此机制，child 与 parent 的生命周期完全解耦。任何"靠 parent 信号链 kill child"的设计在 macOS 上都有泄漏窗口——必须让 child 自带退出条件（test 端：deadline；src 端：根本不 spawn 复杂 child，改用存在性探测），把退出的所有权从 parent 转回 child 或干脆不创造 child。
+
+- 关联：`feedback_agent_browser_zombie.md`（同族——agent-browser headless Chrome 子进程不清理，已三次导致铲屎官电脑卡顿，是同模式 src 案例）| F171（first-run-quest 是 src 漏洞首次暴露的 feature）
+
+---
+
+### LL-056: stale browser profile 不是 orphan——cleanup 要按资源所有权分组
+- 状态：draft
+- 更新时间：2026-05-17（pattern enumeration 扩展：rod / playwright / puppeteer）
+
+- 坑：F145 的 agent-browser Chrome startup cleanup 只扫描 `ppid=1` 的 orphan Chrome 进程。第 5 次复发时，现场是 61 个 `agent-browser-chrome-*` headless Chrome 进程抢 CPU，Chrome main process 自己还活着，helper 的 `ppid` 指向 Chrome main 而不是 launchd，所以原逻辑直接漏掉。结果 `pnpm start` 的 API server 在 20s 内监听不上 3002，看起来像 runtime 启动超时，根因实际是 stale browser profile 长时间占 CPU。
+- 根因：
+  1. **对象建模错了**：F145 把问题建模成“单个进程是否 orphan”，但真实资源所有权是“同一个 `--user-data-dir=...agent-browser-chrome-*` profile 下的一组 Chrome main/helper 是否还属于活跃任务”。当 parent 关系还存在时，`ppid=1` 不是充分条件。
+  2. **上游边界混淆**：我们本地 MCP 配置跑的是 `npx agent-browser-mcp`。npm 上 `agent-browser-mcp` 最新仍是 0.1.3，wrapper 只是按工具调用 spawn `agent-browser` CLI，没有 MCP server 退出时关闭浏览器 profile 的生命周期管理。底层 `agent-browser` CLI 有更新版本，但升级 CLI 不能补齐 wrapper crash / MCP parent 死亡后的资源回收。
+- 触发条件：agent-browser MCP server / IDE / 调用进程异常退出，Chrome main 没收到完整关闭信号；或者 MCP wrapper 没显式关闭 session，`agent-browser-chrome-*` temp profile 跨天保留并持续占 CPU。
+- 修复（已落地）：
+  1. `packages/api/src/utils/orphan-chrome-cleaner.ts` 的 parser 从 `ps -eo ppid=,pid=,args=` 升级为 `ps -eo ppid=,pid=,etime=,args=`，保留旧 `ppid=1` orphan 分支。
+  2. 新增按 `user-data-dir` 分组的 stale profile 判断：同组内只要存在 `ppid != 1 && etime >= 1h` 的 agent-browser Chrome 进程，就清理该 profile 下所有 Chrome main/helper PID。
+  3. 回归测试覆盖三类边界：stale non-orphan profile 会被清；5 分钟 active non-orphan profile 不被清；normal Chrome / prompt 里含关键词的 Node/Claude 进程不被误杀。
+- 防护：
+  1. 进程 cleanup 不要只看 parent 链；先问“资源所有权边界是什么”。对浏览器这类多进程 runtime，通常是 profile/socket/session dir，而不是单个 PID。
+  2. 外部 CLI upgrade 是必要排查项，但不能代替本地 guard。wrapper 没有生命周期管理时，A 类 startup guard 和 C 类上游修复必须并存。
+  3. 启发式阈值要有测试表达 tradeoff：本次 1h 阈值只在 cat-cafe startup 时运行，不是周期清理；误杀代价是重开 agent-browser session，低于 runtime 起不来的代价。
+  4. **Owner enumeration completeness（2026-05-17 增）**：坐标系对了之后，pattern 列表必须穷举所有 known headless owner，且每条 marker 必须**具体到 owner 自动生成的 profile prefix**——不能用宽泛字串。第 6 次复发是 xiaohongshu-mcp 用 go-rod，user-data-dir 落在 `rod/user-data/...`，初版只列了 `agent-browser-chrome` 一种 owner 导致漏清。当前白名单：`agent-browser-chrome` / `rod/user-data` / `playwright_chromiumdev_profile-` / `puppeteer_dev_chrome_profile-`。**反例**：初稿用 `'playwright'` 模糊匹配会把 `/tmp/my-playwright-debug-profile` 等用户手动 debug session 误判为孤儿，被 stale≥1h 路径 SIGKILL（Maine Coon review BLOCKING）。新增任何 headless 工具 → 验证 owner 源码确认 default temp profile prefix → 加 pattern + positive fixture + 至少一条 negative fixture 防止过宽。
+  5. **Cross-platform binary matching completeness（2026-05-17 增）**：owner pattern 通过 `--user-data-dir` 命中只是第一道门，进程必须先过 `isChromeBinary` 才会被 parser 接受。macOS 用 `.app` bundle，Linux 把 Chromium 装在 `chrome-linux/` 或 `chrome-linux64/` 子目录下，**且 Playwright/Puppeteer 还把 headless-only 构建拆到单独目录** `chrome-headless-shell-{version}/chrome-headless-shell-{platform}/chrome-headless-shell`（macOS + Linux 同形态）。**而且 macOS 的 helper（Renderer/GPU/Network/Plugin）的 binary 名带空格**（`Chromium Helper (Renderer)`），用 `\S*` 风格的正则会在 framework 段就截断匹配，所以 main + helper 不能用同一条 regex 覆盖。漏掉任一变体 → owner pattern 在该环境全失效。当前 binary matcher 必须覆盖：`/Applications/{Google Chrome,Chromium}.app/` macOS bundle / `/(usr|opt|snap)/.../chrome\|chromium` Linux 系统包 / `*/Chromium.app/Contents/MacOS/Chromium` cached macOS main binary（云端 codex P1）/ `*/chrome-linux(64)?/(chrome\|headless_shell)` cached Linux binary（云端 codex P1）/ `*/chrome-headless-shell` cached headless shell（Maine Coon P1）/ `/Chromium.app/Contents/Frameworks/` cached macOS helper（云端 codex P1 二审）。**通则**：新增 binary 路径时，必须同时确认 owner 是否还有 *headless variant* 装在不同 cache dir + 有 *helper sub-binary* 在 framework 路径下（带空格无法用同一条 \S*-style regex 一并覆盖）。**Binary path 含空格时（如 macOS helper）禁止用 args 全局 substring 检查**——必须先 `args.split(' -')[0]` 截出 binary path 部分再检查；否则 Node/claude 进程的 prompt text 含同样字串 + tracked user-data-dir 时会被误杀（R2 类回归，Maine Coon P1 二审 catch）。每条带空格的 binary matcher 必须配 negative fixture：node prompt 含该 path 字串 + 带 tracked owner user-data-dir，验证不命中。
+- 来源锚点：
+  - `docs/features/F145-mcp-portable-provisioning.md` Known Issues（PR #1407 只修了 orphan cleanup）
+  - `packages/api/src/utils/orphan-chrome-cleaner.ts`
+  - `packages/api/test/orphan-chrome-cleaner.test.js`
+  - 2026-05-10 agent-browser stale Chrome 第 5 次复发交接（61 个 headless Chrome，7 个 user-data-dir，最老 4 天）
+- 原理：**cleanup 的坐标系必须贴着资源所有权，而不是贴着症状最显眼的字段。** `ppid=1` 能识别 orphan，但不能识别 stale；`user-data-dir` 才是 agent-browser Chrome profile 的真实生命周期边界。对外部工具，不能把“上游版本更新”当作本地运行时的唯一防线，因为 wrapper 与 CLI 之间可能正好是泄漏发生的所有权断点。
+
+- 关联：F145 | LL-055 | `feedback_agent_browser_zombie.md`
+
+---
+
+### LL-057: root prompt 重复可能是兼容副本，不是天然垃圾
+- 状态：draft
+- 更新时间：2026-05-15
+
+- 坑：看到 `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` 和 `shared-rules.md`、skills、runtime context 重复后，容易直接得出"删掉重复内容"的结论。但这些重复有历史原因：早期猫经常不会主动读取被引用的 `shared-rules.md` / refs，root prompt 才被迫保留精华摘要。如果直接删除，direct CLI、post-compact、未加载 runtime context 的路径会失去安全骨架。
+- 根因：
+  1. **把重复等同于浪费**：prompt 重复里混有两类东西，一类是 stale copy，另一类是 compatibility shim。两者不能同刀处理。
+  2. **引用不是加载**：自然语言里写"参考 shared-rules.md"不等于 agent 已读原文；未验证读取路径前，把 root 摘要删掉会让规则只存在于文档而不进入执行上下文。
+  3. **新注入通道建成后旧通道未退役**：`SystemPromptBuilder`、session hook、skills、MCP schema 都逐步补齐了能力，但 root prompt 的旧摘要没有按能力成熟度回收。
+- 触发条件：做 prompt/context 瘦身、把规则从 root prompt 下沉到 skills/refs/hooks、把静态 roster 迁到 runtime dynamic context、或把 review 事故教训沉淀到规则体系时。
+- 修复（本次落地）：
+  1. 新增 *(internal reference removed)*，把 root prompt、runtime static/dynamic context、session bootstrap、hooks、skills、MCP schema 等注入面列成 ownership map。
+  2. 明确迁移原则：root prompt 只保留小安全骨架；volatile facts 进 runtime；阶段性解释进 skills；deterministic enforcement 进 hooks/tests/merge gates。
+  3. 明确退役条件：只有确认替代载体在该路径实际加载，才删除 root 摘要。
+- 防护：
+  1. Prompt 瘦身先量 baseline，再删高置信 stale copy。优先删 static teammate table、长 SOP 表、重复 key-doc table。
+  2. `shared-rules.md` 不作为第一批瘦身对象。它是长文真相源；问题是 root prompt 抄太多，不是 truth source 太长。
+  3. 新规则进入 root prompt 前先问：这是每 turn 都必须加载的安全骨架，还是 skill/hook/gate 能承担的阶段性规则？
+  4. 对"猫以前不读引用"这类行为风险，用短 always-visible trigger + deterministic check 兜底，不用整段解释常驻。
+- 来源锚点：
+  - *(internal reference removed)*
+  - *(internal reference removed)*
+  - `docs/decisions/030-system-prompt-engineering.md`
+  - `docs/architecture/2026-05-05-architecture-views.md`
+  - `cat-cafe-skills/refs/shared-rules.md`
+- 原理：**Prompt 去重的单位不是字符串，而是加载路径和失效模式。** 同一句规则如果只是 stale copy，就该删；如果是某条执行路径唯一会加载到的安全骨架，就必须先提供已验证替代载体再退役。
+
+- 关联：ADR-030 | F042 | F167
 
 ---
 

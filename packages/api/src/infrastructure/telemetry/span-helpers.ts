@@ -63,7 +63,7 @@ export function recordLlmCallSpan(
 
 const MEMORY_TOOL_PREFIXES = [
   'cat_cafe_search_evidence',
-  'cat_cafe_reflect',
+  // F193 Phase D AC-D1: cat_cafe_reflect removed from canonical taxonomy
   'cat_cafe_read_session',
   'cat_cafe_read_invocation',
   'cat_cafe_review_distillation',

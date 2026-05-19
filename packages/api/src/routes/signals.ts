@@ -132,23 +132,6 @@ export const signalsRoutes: FastifyPluginAsync = async (app) => {
     return { article };
   });
 
-  app.post('/api/signals/articles/:id/enrich', async (request, reply) => {
-    if (!requireIdentity(request, reply)) {
-      return { error: 'Identity required' };
-    }
-    const params = request.params as { id?: string };
-    if (!params.id?.trim()) {
-      reply.status(400);
-      return { error: 'Article id is required' };
-    }
-    const result = await enrichArticleContent(params.id, paths);
-    if (!result) {
-      reply.status(404);
-      return { error: 'Article not found' };
-    }
-    return { article: result.article, enriched: result.enriched, reason: result.reason };
-  });
-
   app.get('/api/signals/articles/by-url', async (request, reply) => {
     if (!requireIdentity(request, reply)) {
       return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
@@ -217,6 +200,26 @@ export const signalsRoutes: FastifyPluginAsync = async (app) => {
     }
 
     return { article };
+  });
+
+  app.post('/api/signals/articles/:id/enrich', async (request, reply) => {
+    if (!requireIdentity(request, reply)) {
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
+    }
+
+    const params = request.params as { id?: string };
+    if (!params.id || params.id.trim().length === 0) {
+      reply.status(400);
+      return { error: 'Article id is required' };
+    }
+
+    const result = await enrichArticleContent(params.id, paths);
+    if (result.reason === 'not_found') {
+      reply.status(404);
+      return { error: `Article not found: ${params.id}` };
+    }
+
+    return result;
   });
 
   app.get('/api/signals/sources', async (request, reply) => {

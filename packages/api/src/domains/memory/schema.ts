@@ -66,7 +66,7 @@ END`,
 END`,
 ];
 
-export const CURRENT_SCHEMA_VERSION = 18;
+export const CURRENT_SCHEMA_VERSION = 23;
 
 // F163 Phase A: experiment infrastructure tables (cohorts, suggestions, logs)
 export const SCHEMA_V13_TABLES = `
@@ -520,6 +520,138 @@ export function applyMigrations(db: Database.Database): void {
       db.exec('ALTER TABLE edges ADD COLUMN created_at TEXT');
     } catch {}
     db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(18, new Date().toISOString());
+  }
+
+  // V19: F200 Phase A — recall_events table + edge traversal columns
+  if (currentVersion < 19) {
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS recall_events (
+          recall_id TEXT PRIMARY KEY,
+          cat_id TEXT NOT NULL,
+          invocation_id TEXT NOT NULL,
+          tool_name TEXT NOT NULL,
+          query TEXT NOT NULL,
+          mode TEXT,
+          scope TEXT,
+          candidates_json TEXT NOT NULL,
+          consumed_json TEXT NOT NULL,
+          reformulated INTEGER NOT NULL DEFAULT 0,
+          fell_back_to_grep INTEGER NOT NULL DEFAULT 0,
+          abandoned INTEGER NOT NULL DEFAULT 0,
+          next_graph_resolve_after_read INTEGER NOT NULL DEFAULT 0,
+          token_cost INTEGER NOT NULL DEFAULT 0,
+          timestamp INTEGER NOT NULL
+        )
+      `);
+    } catch {}
+    try {
+      db.exec('CREATE INDEX IF NOT EXISTS idx_recall_events_cat ON recall_events(cat_id)');
+    } catch {}
+    try {
+      db.exec('CREATE INDEX IF NOT EXISTS idx_recall_events_ts ON recall_events(timestamp)');
+    } catch {}
+    try {
+      db.exec('CREATE INDEX IF NOT EXISTS idx_recall_events_inv ON recall_events(invocation_id)');
+    } catch {}
+    try {
+      db.exec('ALTER TABLE edges ADD COLUMN traversal_count INTEGER DEFAULT 0');
+    } catch {}
+    try {
+      db.exec('ALTER TABLE edges ADD COLUMN last_traversed_at TEXT');
+    } catch {}
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(19, new Date().toISOString());
+  }
+
+  // V20: F200 Phase B — anchor_recall_metrics table for popularity/dormancy
+  if (currentVersion < 20) {
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS anchor_recall_metrics (
+          anchor TEXT PRIMARY KEY,
+          consumed_count_30d INTEGER NOT NULL DEFAULT 0,
+          exposure_count_30d INTEGER NOT NULL DEFAULT 0,
+          last_consumed_at TEXT,
+          dormancy_days INTEGER,
+          updated_at TEXT NOT NULL
+        )
+      `);
+    } catch {}
+    try {
+      db.exec('CREATE INDEX IF NOT EXISTS idx_anchor_metrics_dormancy ON anchor_recall_metrics(dormancy_days)');
+    } catch {}
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(20, new Date().toISOString());
+  }
+
+  // V21: F200 Phase C — global CTR baseline + first_indexed_at + shadow ranking
+  if (currentVersion < 21) {
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS global_ctr_baseline (
+          doc_kind TEXT PRIMARY KEY,
+          mean_ctr REAL NOT NULL DEFAULT 0.2,
+          sample_count INTEGER NOT NULL DEFAULT 0,
+          updated_at INTEGER NOT NULL DEFAULT 0
+        )
+      `);
+    } catch {}
+    try {
+      db.exec('ALTER TABLE evidence_docs ADD COLUMN first_indexed_at INTEGER NOT NULL DEFAULT 0');
+    } catch {}
+    try {
+      db.exec('ALTER TABLE recall_events ADD COLUMN shadow_ranking_json TEXT');
+    } catch {}
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(21, new Date().toISOString());
+  }
+
+  // V22: F200 Phase D — task trajectories
+  if (currentVersion < 22) {
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS task_trajectories (
+          trajectory_id TEXT PRIMARY KEY,
+          invocation_id TEXT NOT NULL,
+          thread_id TEXT NOT NULL,
+          cat_id TEXT NOT NULL,
+          task_context TEXT,
+          search_event_ids_json TEXT NOT NULL DEFAULT '[]',
+          files_read_json TEXT NOT NULL DEFAULT '[]',
+          files_modified_json TEXT NOT NULL DEFAULT '[]',
+          output_verified INTEGER NOT NULL DEFAULT 0,
+          output_verified_signals_json TEXT NOT NULL DEFAULT '[]',
+          total_token_cost INTEGER NOT NULL DEFAULT 0,
+          duration INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `);
+    } catch {}
+    try {
+      db.exec('CREATE INDEX IF NOT EXISTS idx_trajectories_inv ON task_trajectories(invocation_id)');
+    } catch {}
+    try {
+      db.exec('CREATE INDEX IF NOT EXISTS idx_trajectories_thread ON task_trajectories(thread_id)');
+    } catch {}
+    try {
+      db.exec('CREATE INDEX IF NOT EXISTS idx_trajectories_cat ON task_trajectories(cat_id)');
+    } catch {}
+    try {
+      db.exec('CREATE INDEX IF NOT EXISTS idx_trajectories_verified ON task_trajectories(output_verified)');
+    } catch {}
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(22, new Date().toISOString());
+  }
+
+  // V23: F200 HW-4 根因③ — ambiguity-aware attribution (砚砚 audit Round 1
+  // Result 3): bundle id for same-invocation search groups + clean/ambiguous
+  // attribution clarity. Per-consumed provenance lives in consumed_json.
+  if (currentVersion < 23) {
+    try {
+      db.exec('ALTER TABLE recall_events ADD COLUMN result_set_id TEXT');
+    } catch {}
+    try {
+      db.exec('ALTER TABLE recall_events ADD COLUMN attribution_clarity TEXT');
+    } catch {}
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(23, new Date().toISOString());
   }
 }
 

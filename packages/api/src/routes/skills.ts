@@ -71,6 +71,28 @@ function resolveCatCafeSkillsSourceDir(): string {
 
 const CAT_CAFE_SKILLS_SRC = resolveCatCafeSkillsSourceDir();
 
+function resolveSessionUserId(request: import('fastify').FastifyRequest): string | null {
+  const userId = (request as import('fastify').FastifyRequest & { sessionUserId?: string }).sessionUserId;
+  return typeof userId === 'string' && userId.trim() ? userId.trim() : null;
+}
+
+function requireSkillsOwner(
+  request: import('fastify').FastifyRequest,
+  reply: import('fastify').FastifyReply,
+): string | null {
+  const userId = resolveSessionUserId(request);
+  if (!userId) {
+    reply.status(401);
+    return null;
+  }
+  const ownerId = process.env.DEFAULT_OWNER_USER_ID?.trim();
+  if (!ownerId || userId !== ownerId) {
+    reply.status(403);
+    return null;
+  }
+  return userId;
+}
+
 export const skillsRoutes: FastifyPluginAsync = async (app) => {
   app.get('/api/skills', async (request, reply) => {
     const userId = resolveUserId(request);
@@ -172,10 +194,11 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post('/api/skills/sync', async (request, reply) => {
-    const userId = resolveUserId(request);
+    const userId = requireSkillsOwner(request, reply);
     if (!userId) {
-      reply.status(401);
-      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
+      return reply.statusCode === 401
+        ? { error: 'Authentication required' }
+        : { error: 'Skills write operations require owner authorization' };
     }
     const body = (request.body ?? {}) as { projectPath?: string };
     const skillsSrc = CAT_CAFE_SKILLS_SRC;
@@ -195,10 +218,11 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post('/api/skills/resolve-conflict', async (request, reply) => {
-    const userId = resolveUserId(request);
+    const userId = requireSkillsOwner(request, reply);
     if (!userId) {
-      reply.status(401);
-      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
+      return reply.statusCode === 401
+        ? { error: 'Authentication required' }
+        : { error: 'Skills write operations require owner authorization' };
     }
     const body = (request.body ?? {}) as {
       skillName?: string;
@@ -228,6 +252,12 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
         return { error: 'Invalid project path' };
       }
       projectRoot = validated;
+    }
+
+    const state = await readSkillsState(projectRoot);
+    if (!state?.managedSkillNames?.includes(body.skillName)) {
+      reply.status(400);
+      return { error: `Skill '${body.skillName}' is not managed by Clowder AI sync` };
     }
 
     await resolveConflict(projectRoot, homedir(), body.skillName, body.choice);

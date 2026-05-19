@@ -60,7 +60,7 @@ describe('SystemNoticeBar', () => {
     expect(html).toContain('system-notice-bar--alert');
     expect(html).toContain('text-cafe-muted');
     expect(html).toContain('text-cafe-secondary');
-    expect(html).not.toContain('bg-conn-amber-bg');
+    expect(html).not.toContain('bg-amber-50');
     expect(html).not.toContain('text-amber-950');
     expect(html).not.toMatch(/text-\[#[0-9A-Fa-f]{3,6}\]/);
     expect(html).not.toMatch(/border-\[#[0-9A-Fa-f]{3,6}\]/);

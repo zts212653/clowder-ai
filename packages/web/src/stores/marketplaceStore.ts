@@ -115,6 +115,7 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ecosystem, artifactId }),
       });
+      if (!res.ok) throw new Error(`Install plan failed (${res.status})`);
       const data = (await res.json()) as { plan: InstallPlan };
       set({ installPlan: data.plan, loading: false });
     } catch (err) {

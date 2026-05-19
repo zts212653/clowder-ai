@@ -36,13 +36,45 @@ const log = createModuleLogger('claude-agent');
 
 const PERMISSION_MODE = 'bypassPermissions';
 
-const ANTHROPIC_PROFILE_MODE_KEY = 'CAT_CAFE_ANTHROPIC_PROFILE_MODE';
+// F198: exported so other Claude carriers (e.g. ClaudeBgCarrierService) can
+// reuse the single source of truth for profile mode routing.
+export const ANTHROPIC_PROFILE_MODE_KEY = 'CAT_CAFE_ANTHROPIC_PROFILE_MODE';
 const ANTHROPIC_PROFILE_API_KEY = 'CAT_CAFE_ANTHROPIC_API_KEY';
 const ANTHROPIC_PROFILE_BASE_URL = 'CAT_CAFE_ANTHROPIC_BASE_URL';
-const ANTHROPIC_MODEL_OVERRIDE_KEY = 'CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE';
+// F198: exported so ClaudeBgCarrierService and other carriers can reuse the
+// same model-override env key (single source of truth).
+export const ANTHROPIC_MODEL_OVERRIDE_KEY = 'CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE';
 
-function isKnownAnthropicModel(model: string): boolean {
+// F198: exported for reuse in resolveClaudeModelSelection consumers.
+export function isKnownAnthropicModel(model: string): boolean {
   return model.startsWith('claude-');
+}
+
+/**
+ * Resolve the effective Claude model + whether the `--model` flag should be
+ * OMITTED at spawn time.
+ *
+ * Selection rules (single source of truth for Claude carriers — F198 codex
+ * round-7 B-prime refactor):
+ * 1. effectiveModel = callbackEnv[MODEL_OVERRIDE_KEY] || fallbackModel
+ *    (per-invocation override beats constructor model)
+ * 2. useEnvModelOverride = api_key mode AND model is non-Anthropic
+ *    (e.g. glm-5 via api_key) — in this case the CLI's `--model` flag wins
+ *    over ANTHROPIC_MODEL env, so we must omit `--model` and let env drive.
+ *
+ * Carriers should pass `effectiveModel` via `--model` only when
+ * `useEnvModelOverride === false`. When `true`, env (ANTHROPIC_MODEL) is the
+ * source of truth and the flag must be omitted to avoid silently overriding
+ * the proxy-routed model.
+ */
+export function resolveClaudeModelSelection(
+  callbackEnv: Record<string, string> | undefined,
+  fallbackModel: string,
+): { effectiveModel: string; useEnvModelOverride: boolean } {
+  const effectiveModel = callbackEnv?.[ANTHROPIC_MODEL_OVERRIDE_KEY]?.trim() || fallbackModel;
+  const isApiKeyMode = callbackEnv?.[ANTHROPIC_PROFILE_MODE_KEY] === 'api_key';
+  const useEnvModelOverride = isApiKeyMode && !isKnownAnthropicModel(effectiveModel);
+  return { effectiveModel, useEnvModelOverride };
 }
 
 function isInvalidThinkingSignatureMessage(message: string | undefined): boolean {
@@ -64,7 +96,21 @@ const IS_WINDOWS = process.platform === 'win32';
 
 export { pickGitBashPathFromWhere } from './claude-agent-win.js';
 
-function buildClaudeEnvOverrides(callbackEnv?: Record<string, string>): Record<string, string | null> {
+/**
+ * Build env overrides for spawning the `claude` CLI.
+ *
+ * F198: exported as the single source of truth for Claude carrier env logic.
+ * ClaudeBgCarrierService reuses this instead of re-implementing 80% of the
+ * rules — eliminates the round-by-round 补锅 pattern where new carriers
+ * forget some production-tested invariant.
+ *
+ * Handles:
+ * - CLAUDECODE / CLAUDE_CODE_ENTRYPOINT strip (entrypoint=cli invariant)
+ * - Windows git bash path resolution
+ * - subscription mode → strip all ANTHROPIC_* (avoid silent api_key billing)
+ * - api_key mode → inject ANTHROPIC_API_KEY / BASE_URL / model override
+ */
+export function buildClaudeEnvOverrides(callbackEnv?: Record<string, string>): Record<string, string | null> {
   const env: Record<string, string | null> = { ...(callbackEnv ?? {}) };
 
   env.CLAUDECODE = null;
@@ -181,10 +227,10 @@ export class ClaudeAgentService implements AgentService {
     // Claude CLI print mode has no direct image attach flag; provide path hints and grant dir access.
     effectivePrompt = appendLocalImagePathHints(effectivePrompt, imagePaths);
 
-    // Profile-level model override (e.g. "opus[1m]") takes precedence over constructor model
-    const effectiveModel = options?.callbackEnv?.[ANTHROPIC_MODEL_OVERRIDE_KEY]?.trim() || this.model;
+    // F198 B-prime refactor: model selection delegates to shared helper so
+    // ClaudeBgCarrierService reuses the same rules (single source of truth).
+    const { effectiveModel, useEnvModelOverride } = resolveClaudeModelSelection(options?.callbackEnv, this.model);
     const isApiKeyMode = options?.callbackEnv?.[ANTHROPIC_PROFILE_MODE_KEY] === 'api_key';
-    const useEnvModelOverride = isApiKeyMode && !isKnownAnthropicModel(effectiveModel);
     const args: string[] = [
       '-p',
       effectivePrompt,

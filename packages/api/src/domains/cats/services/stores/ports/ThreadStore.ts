@@ -145,6 +145,8 @@ export interface Thread {
   connectorHubState?: ConnectorHubStateV1;
   /** F168: Auto-switch workspace panel when this thread is opened. */
   preferredWorkspaceMode?: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community';
+  /** F187: User-defined label IDs for thread categorization. */
+  labels?: string[];
 }
 
 /** F088 Phase G: Connector Hub thread state for IM command isolation. */
@@ -254,6 +256,29 @@ export interface VotingStateV1 {
   initiatedByCat?: string;
 }
 
+/** F187: A user-defined label for categorizing threads. */
+export interface ThreadLabel {
+  id: string;
+  name: string;
+  color: string;
+  sortOrder: number;
+  createdBy: string;
+  createdAt: number;
+}
+
+/** F187: Store for thread label CRUD operations. */
+export interface ILabelStore {
+  create(label: ThreadLabel): Promise<ThreadLabel>;
+  list(userId: string): Promise<ThreadLabel[]>;
+  get(id: string): Promise<ThreadLabel | null>;
+  update(
+    id: string,
+    userId: string,
+    fields: Partial<Pick<ThreadLabel, 'name' | 'color' | 'sortOrder'>>,
+  ): Promise<ThreadLabel | null>;
+  delete(id: string, userId: string): Promise<boolean>;
+}
+
 /**
  * Common interface for thread stores (in-memory and future Redis).
  */
@@ -318,6 +343,8 @@ export interface IThreadStore {
     threadId: string,
     mode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community' | null,
   ): void | Promise<void>;
+  /** F187: Update thread labels (replaces entire array). */
+  updateLabels(threadId: string, labelIds: string[]): void | Promise<void>;
   updateLastActive(threadId: string): void | Promise<void>;
   delete(threadId: string): boolean | Promise<boolean>;
   /** F095 Phase D: Soft-delete — mark thread as deleted without removing data. */
@@ -658,6 +685,11 @@ export class ThreadStore implements IThreadStore {
     } else {
       thread.preferredWorkspaceMode = mode;
     }
+  }
+
+  updateLabels(threadId: string, labelIds: string[]): void {
+    const thread = this.get(threadId);
+    if (thread) thread.labels = labelIds;
   }
 
   updateLastActive(threadId: string): void {

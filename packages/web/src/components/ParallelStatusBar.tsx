@@ -13,15 +13,15 @@ function StatusDot({ status }: { status: string }) {
     case 'pending':
       return <span className="inline-block w-2 h-2 rounded-full bg-cafe-surface-sunken animate-pulse" />;
     case 'streaming':
-      return <span className="inline-block w-2 h-2 rounded-full bg-conn-emerald-bg animate-pulse" />;
+      return <span className="inline-block w-2 h-2 rounded-full bg-conn-emerald-text animate-pulse" />;
     case 'done':
       return <span className="text-conn-emerald-text text-xs">&#10003;</span>;
     case 'error':
       return <span className="text-conn-red-text text-xs">&#10007;</span>;
     case 'alive_but_silent':
-      return <span className="inline-block w-2 h-2 rounded-full bg-conn-amber-bg animate-pulse" />;
+      return <span className="inline-block w-2 h-2 rounded-full bg-conn-amber-text animate-pulse" />;
     case 'suspected_stall':
-      return <span className="inline-block w-2 h-2 rounded-full bg-conn-amber-bg animate-pulse" />;
+      return <span className="inline-block w-2 h-2 rounded-full bg-conn-amber-text animate-pulse" />;
     default:
       return null;
   }
@@ -104,12 +104,16 @@ export function ParallelStatusBar({ onStop, threadId }: { onStop?: () => void; t
     catStatuses,
     catInvocations,
     activeInvocations,
+    intentMode,
     hasActive: hasActiveInvocation,
   } = useThreadLiveness(threadId);
   const activeCats = deriveActiveCats({
     targetCats,
     activeInvocations,
     hasActiveInvocation,
+    // F194 Phase Z5 AC-Z15: ideate mode 下保留 targetCats UNION，让本轮所有猫的卡片
+    // 全程显示，slot 移除（猫完成清 slot）不应让卡片消失
+    intentMode,
   });
 
   if (activeCats.length === 0) return null;

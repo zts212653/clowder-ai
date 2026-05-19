@@ -89,6 +89,34 @@ describe('MCP Evidence Tools', () => {
     assert.ok(!result.content[0].text.includes('Evidence store error'), 'must not misreport graceful degradation');
   });
 
+  test('HW-4 根因②b: renders sourcePath machine line for path-based consumption match', async () => {
+    const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
+
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        degraded: false,
+        results: [
+          {
+            title: 'F200 Memory Recall Eval',
+            anchor: 'F200',
+            snippet: 'eval substrate',
+            confidence: 'high',
+            sourceType: 'feature',
+            sourcePath: 'docs/features/F200-memory-recall-eval.md',
+          },
+        ],
+      }),
+    });
+
+    const result = await handleSearchEvidence({ query: 'F200' });
+    const text = result.content[0].text;
+    assert.ok(
+      text.includes('sourcePath: docs/features/F200-memory-recall-eval.md'),
+      'expected stable `sourcePath:` machine line in rendered output (deriveSearchEvidence parses it)',
+    );
+  });
+
   test('Hook F-1: appends Read reminder when high/mid doc anchors present', async () => {
     const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
 
@@ -232,5 +260,14 @@ describe('MCP Evidence Tools', () => {
       text.includes('Evidence search request failed for "quoted \\"topic\\"": connection refused'),
       'should include JSON-quoted query in request error output',
     );
+  });
+
+  test('search_evidence description warns coverage tasks are not single-query exhaustive', async () => {
+    const { evidenceTools } = await import('../dist/tools/evidence-tools.js');
+    const description = evidenceTools[0].description;
+
+    assert.ok(description.includes('coverage'), 'description should name coverage/source-map intent');
+    assert.ok(description.includes('memory-search-best-practices'), 'description should point to the search skill');
+    assert.ok(description.includes('docs + threads'), 'description should recommend multi-scope coverage searches');
   });
 });

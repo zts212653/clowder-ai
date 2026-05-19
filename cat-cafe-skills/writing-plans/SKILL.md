@@ -23,7 +23,7 @@ triggers:
 
 **开工前 Recall（F102 记忆系统）🔴**：写计划前先搜相关历史——`search_evidence("{feature}")` 找相关 spec/ADR/讨论，避免重复造轮子。
 
-**Save plans to:** *(internal reference removed)*
+**Save plans to:** `feature-specs/YYYY-MM-DD-<feature-name>.md`
 
 ## Straight-Line Check (A→B, No Detour)
 
@@ -58,12 +58,17 @@ triggers:
 **Feature:** F0xx — `docs/features/F0xx-xxx.md`
 **Goal:** [One sentence — must match feat doc 的 goal]
 **Acceptance Criteria:** [从 feat doc 逐条抄过来，plan 必须覆盖全部 AC]
+**Architecture cell:** [ownership cell id from docs/architecture/ownership/README.md]
+**Map delta:** none | update required | new cell required
+**Map delta why:** [一句话说明为什么不改 map / 改哪个 cell / 为什么需要新 cell]
 **Architecture:** [2-3 sentences about approach]
 **Tech Stack:** [Key technologies/libraries]
 **前端验证:** [涉及前端？标注 Yes — reviewer 必须用 Playwright/Chrome 实测]
 
 ---
 ```
+
+**F191 约束**：普通增量写 `Map delta: none`，不得重新画架构图。`update required` 或 `new cell required` 代表 Phase 0 还包含 ownership map 更新，必须在 implementation steps 里列出来。
 
 ## Task Structure
 
@@ -107,6 +112,14 @@ git add tests/path/test.py src/path/file.py
 git commit -m "feat: add specific feature"
 ```
 ```
+
+## Open Questions in Plans
+
+计划中的 Open Question 必须分类：
+- **技术 OQ**：实现过程中自行解决
+- **价值 OQ**：需要 CVO 判断 → 附 Decision Packet（格式见 `refs/decision-matrix.md`），包含 TL;DR + 回滚成本 + 真正需要判断的价值问题
+
+先判断可逆性：回滚成本低的不升级 CVO，猫猫自决。
 
 ## Remember
 - Exact file paths always

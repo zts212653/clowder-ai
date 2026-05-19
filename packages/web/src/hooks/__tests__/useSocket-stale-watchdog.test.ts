@@ -39,7 +39,7 @@ const mockRequestStreamCatchUp = vi.fn();
 const mockSetThreadLoading = vi.fn();
 const mockSetThreadMessageStreaming = vi.fn();
 const mockGetThreadState = vi.fn(() => ({
-  messages: [] as Array<{ id: string; type: string; isStreaming?: boolean }>,
+  messages: [] as Array<{ id: string; type: string; catId?: string; isStreaming?: boolean }>,
   isLoading: false,
   hasActiveInvocation: false,
   intentMode: null,
@@ -60,6 +60,7 @@ const mockStoreState = {
   messages: [] as Array<{
     id: string;
     type: string;
+    catId?: string;
     isStreaming?: boolean;
     deliveredAt?: number;
     timestamp?: number;
@@ -304,6 +305,66 @@ describe('useSocket stale-invocation watchdog', () => {
       'execute',
       slotStartedAt,
     );
+  });
+
+  it('direction 2: finalizes stale streaming bubbles for cats absent from server active slots', async () => {
+    const now = Date.now();
+    const slotStartedAt = now - 5_000;
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          activeInvocations: [{ catId: 'codex', startedAt: slotStartedAt }],
+        }),
+    });
+
+    mockStoreState.currentThreadId = 'thread-stale-while-codex';
+    mockStoreState.hasActiveInvocation = false;
+    mockStoreState.activeInvocations = {};
+    mockStoreState.intentMode = 'execute';
+    mockStoreState.targetCats = ['opus', 'codex'];
+    mockStoreState.catStatuses = { opus: 'streaming', codex: 'pending' };
+    mockStoreState.messages = [
+      {
+        id: 'opus-stale-stream',
+        type: 'assistant',
+        catId: 'opus',
+        isStreaming: true,
+        timestamp: now - 4 * 60_000,
+        deliveredAt: now - 4 * 60_000,
+      },
+      {
+        id: 'codex-active-stream',
+        type: 'assistant',
+        catId: 'codex',
+        isStreaming: true,
+        timestamp: now - 4 * 60_000,
+        deliveredAt: now - 4 * 60_000,
+      },
+    ];
+
+    act(() => {
+      root.render(
+        React.createElement(HookWrapper, {
+          callbacks: { onMessage: vi.fn() },
+          threadId: 'thread-stale-while-codex',
+        }),
+      );
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(31_000);
+    });
+
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/threads/thread-stale-while-codex/queue');
+    expect(mockStoreState.updateThreadCatStatus).toHaveBeenCalledWith('thread-stale-while-codex', 'codex', 'streaming');
+    expect(mockSetThreadMessageStreaming).toHaveBeenCalledWith('thread-stale-while-codex', 'opus-stale-stream', false);
+    expect(mockSetThreadMessageStreaming).not.toHaveBeenCalledWith(
+      'thread-stale-while-codex',
+      'codex-active-stream',
+      false,
+    );
+    expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-stale-while-codex');
   });
 
   it('direction 2: does NOT probe after normal completion (last msg is recent assistant reply)', async () => {

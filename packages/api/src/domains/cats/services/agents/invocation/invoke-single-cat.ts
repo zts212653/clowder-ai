@@ -27,7 +27,6 @@ import { getSessionStrategy, shouldTakeAction } from '../../../../../config/sess
 import { assertSafeTestConfigRoot } from '../../../../../config/test-config-write-guard.js';
 import { capturePromptIfEnabled } from '../../../../../infrastructure/debug/prompt-capture-bridge.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
-import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import {
   AGENT_ID,
   GENAI_MODEL,
@@ -71,9 +70,12 @@ import {
   summarizeOpenCodeRuntimeConfigForDebug,
   writeOpenCodeRuntimeConfig,
 } from '../providers/opencode-config-template.js';
+import { appendTranscriptPathHints } from '../providers/transcript-path-hints.js';
 
 const log = createModuleLogger('invoke');
 const tracer = trace.getTracer('cat-cafe-api', '0.1.0');
+const TRANSCRIPT_DIR =
+  process.env['TRANSCRIPT_DIR'] ?? resolve(findMonorepoRoot(), 'scripts', 'meeting-copilot', 'transcripts');
 let _openCodeKnownModels: Set<string> | null = null;
 
 export function getOpenCodeKnownModels(): Set<string> {
@@ -1109,10 +1111,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // F070-P2: missionPrefix (dispatch context) is prepended for external projects
     const promptWithMission = missionPrefix ? `${missionPrefix}\n\n${prompt}` : prompt;
 
-    const effectivePrompt =
+    let effectivePrompt =
       injectSystemPrompt && params.systemPrompt
         ? `${params.systemPrompt}\n\n---\n\n${promptWithMission}`
         : `${promptWithMission}`;
+
+    effectivePrompt = appendTranscriptPathHints(effectivePrompt, TRANSCRIPT_DIR, threadId);
 
     capturePromptIfEnabled({
       catId: catId as string,
@@ -1188,6 +1192,17 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           await sessionManager.store(userId, catId, threadId, msg.sessionId);
         } catch {
           // Redis write failure — session won't persist, but chain continues
+        }
+
+        // F198 Phase C P1-1: register bg carrier daemon session for Hub observability.
+        // Only fires when the provider is claude-bg; msg.sessionId is the daemon shortId.
+        if (deps.agentPaneRegistry && msg.metadata?.provider === 'claude-bg') {
+          deps.agentPaneRegistry.registerBgCarrier({
+            invocationId,
+            catId,
+            daemonShortId: msg.sessionId,
+            threadId,
+          });
         }
 
         // F24: Ensure SessionRecord exists for this session
@@ -1437,6 +1452,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
           // F24: Compute and emit context health (only when session chain is enabled)
           if (sessionChainActive) {
+            // #679: Gemini CLI token stats are cumulative across all turns — not usable
+            // for context fill. Skip entire context_health block (raw usage still in
+            // invocation_usage above). Guard auto-disables when lastTurnInputTokens exists.
+            const isCumulativeOnly =
+              msg.metadata.usage.isCumulativeUsage === true && msg.metadata.usage.lastTurnInputTokens == null;
             // Use lastTurnInputTokens (per-API-call) for accurate context fill,
             // then fallback to aggregated inputTokens, and finally totalTokens
             // for providers (Gemini CLI) that only expose a total count.
@@ -1449,7 +1469,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                   ? 'input'
                   : msg.metadata.usage.totalTokens != null
                     ? 'total'
-                    : null;
+                    : undefined;
             const usedTokens =
               usedFrom === 'last_turn'
                 ? msg.metadata.usage.lastTurnInputTokens!
@@ -1458,7 +1478,21 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                   : usedFrom === 'total'
                     ? msg.metadata.usage.totalTokens!
                     : 0;
-            if (windowSize && usedTokens > 0) {
+            if (windowSize && usedTokens > 0 && isCumulativeOnly) {
+              log.warn(
+                {
+                  catId,
+                  threadId,
+                  invocationId,
+                  cumulativeUsedTokens: usedTokens,
+                  windowSize,
+                  usedFrom,
+                },
+                'Gemini cumulative-only usage observed; skipping context_health and auto-seal',
+              );
+              geminiContextFallback.add(1, { [AGENT_ID]: catId, [TRIGGER]: 'no_per_turn_signal' });
+            }
+            if (windowSize && usedTokens > 0 && !isCumulativeOnly) {
               const source: ContextHealth['source'] =
                 msg.metadata.usage.contextWindowSize != null && usedFrom !== 'total' ? 'exact' : 'approx';
               const health: ContextHealth = {
@@ -1466,7 +1500,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                 windowTokens: windowSize,
                 fillRatio: Math.min(usedTokens / windowSize, 1.0),
                 source,
-                usedFrom: usedFrom ?? undefined,
+                usedFrom,
                 measuredAt: Date.now(),
               };
               // Update SessionRecord (best-effort): persist health + usage snapshot
@@ -1519,45 +1553,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                   const isAnthropicApiKey = provider === 'anthropic' && profileMode === ANTHROPIC_PROFILE_MODE_API_KEY;
                   const skipAutoSealForApproxApiKey = isAnthropicApiKey && health.source === 'approx';
                   const skipAutoSealForApiKeyCompress = isAnthropicApiKey && strategy.strategy === 'compress';
-                  // Gemini CLI's stream stats are session-level cumulative, not per-turn.
-                  // When usedFrom !== 'last_turn' for a google provider, fillRatio is
-                  // computed from cumulative inputTokens/totalTokens which inflate
-                  // beyond windowSize and cap at 1.0 → spurious auto-seal.
-                  // GeminiAgentService injects per-turn lastTurnInputTokens from local
-                  // jsonl when possible; if it could not (assistantText empty / no
-                  // matching local message / jsonl unavailable), skip auto-seal here
-                  // and keep context_health as observability only.
-                  const skipAutoSealForGeminiCumulative = provider === 'google' && usedFrom !== 'last_turn';
-                  // Telemetry: when this guard kicks in, the cat is "blind-running"
-                  // past Gemini CLI's cumulative-only usage signal. Surface via
-                  // structured log + OTel counter so operators can see when
-                  // sessions are unguarded; do NOT emit a system_info event
-                  // because the frontend would render unknown system_info as a
-                  // visible system bubble.
-                  if (
-                    skipAutoSealForGeminiCumulative &&
-                    !skipAutoSealForApproxApiKey &&
-                    !skipAutoSealForApiKeyCompress
-                  ) {
-                    log.warn(
-                      {
-                        catId,
-                        threadId,
-                        invocationId,
-                        cumulativeUsedTokens: usedTokens,
-                        windowSize: windowSize ?? null,
-                        fillRatio: health.fillRatio,
-                        usedFrom,
-                      },
-                      'Gemini auto-seal skipped: no per-turn lastTurnInputTokens; running on cumulative usage only',
-                    );
-                    geminiContextFallback.add(1, { [AGENT_ID]: catId, [TRIGGER]: 'no_per_turn_signal' });
-                  }
-                  if (
-                    !skipAutoSealForApproxApiKey &&
-                    !skipAutoSealForApiKeyCompress &&
-                    !skipAutoSealForGeminiCumulative
-                  ) {
+                  if (!skipAutoSealForApproxApiKey && !skipAutoSealForApiKeyCompress) {
                     const activeRecord = await deps.sessionChainStore.getActive(catId, threadId);
                     const action = shouldTakeAction(
                       health.fillRatio,
@@ -1824,7 +1820,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         if (iterResult.done) break;
         const msg = iterResult.value;
         // F149: provider_signal / liveness_signal must NOT reset timeout — prevents "续命"
-        if (msg.type !== 'provider_signal' && msg.type !== 'liveness_signal') resetInvocationTimeout();
+        // F198 Phase C P2-1: status (daemon detail progress) also must NOT reset timeout —
+        // a daemon sending frequent status updates must not evade the 30-min kill deadline.
+        if (msg.type !== 'provider_signal' && msg.type !== 'liveness_signal' && msg.type !== 'status')
+          resetInvocationTimeout();
         if (shouldTrackGeminiResumeFailures && options.sessionId && msg.type === 'error') {
           const failureKind = classifyResumeFailure(msg.error);
           if (failureKind) {
@@ -1941,7 +1940,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           msg.type !== 'done' &&
           msg.type !== 'session_init' &&
           msg.type !== 'provider_signal' &&
-          msg.type !== 'liveness_signal'
+          msg.type !== 'liveness_signal' &&
+          msg.type !== 'status'
         ) {
           attemptHasContentOutput = true;
           // Substantive = real model output, excludes system_info (e.g. timeout_diagnostics).
@@ -2183,6 +2183,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         deps.agentPaneRegistry.markDone(invocationId, 0);
       }
     }
+    // F198 Phase C P1-1: mark bg carrier done (always, on any terminal state)
+    deps.agentPaneRegistry?.markBgCarrierDone(invocationId);
 
     // F152: End invocation span + emit completion/error log through OTel
     // Three paths: (1) catch already handled, (2) yielded-error, (3) abort, (4) ok

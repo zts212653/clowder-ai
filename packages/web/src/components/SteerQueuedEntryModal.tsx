@@ -46,9 +46,7 @@ export function SteerQueuedEntryModal({
             data-testid="steer-mode-immediate"
             onClick={() => onModeChange('immediate')}
             className={`w-full text-left p-4 rounded-xl border transition-colors ${
-              mode === 'immediate'
-                ? 'border-[var(--color-opus-primary)] bg-[var(--color-opus-primary)]/5'
-                : 'border-[var(--console-border-soft)] hover:border-[var(--console-border-soft)] bg-cafe-surface'
+              mode === 'immediate' ? 'border-[#9B7EBD] bg-[#9B7EBD]/5' : 'border-cafe hover:border-cafe bg-cafe-surface'
             }`}
           >
             <div className="text-sm font-medium text-cafe">立即执行（必要时中断目标猫）</div>
@@ -62,9 +60,7 @@ export function SteerQueuedEntryModal({
             data-testid="steer-mode-promote"
             onClick={() => onModeChange('promote')}
             className={`w-full text-left p-4 rounded-xl border transition-colors ${
-              mode === 'promote'
-                ? 'border-[var(--color-opus-primary)] bg-[var(--color-opus-primary)]/5'
-                : 'border-[var(--console-border-soft)] hover:border-[var(--console-border-soft)] bg-cafe-surface'
+              mode === 'promote' ? 'border-[#9B7EBD] bg-[#9B7EBD]/5' : 'border-cafe hover:border-cafe bg-cafe-surface'
             }`}
           >
             <div className="text-sm font-medium text-cafe">提到队首（不取消）</div>
@@ -84,7 +80,7 @@ export function SteerQueuedEntryModal({
             type="button"
             data-testid="steer-confirm"
             onClick={onConfirm}
-            className="text-sm px-4 py-2 rounded-full bg-[var(--color-opus-primary)] text-[var(--cafe-surface)] hover:bg-[var(--color-opus-dark)] transition-colors"
+            className="text-sm px-4 py-2 rounded-full bg-[#9B7EBD] text-white hover:bg-[#8B6FAE] transition-colors"
           >
             确认
           </button>

@@ -139,6 +139,15 @@ describe('AntigravityAgentService (Bridge)', () => {
       /如果当前环境已挂载只读 Cat Cafe MCP/,
       'should describe native readonly MCP conditionally',
     );
+    assert.ok(
+      sentPrompt.includes('graph_resolve / list_recent'),
+      'should advertise current readonly memory entrypoints',
+    );
+    assert.ok(
+      !sentPrompt.includes('search_evidence / reflect / session-chain'),
+      'should not advertise removed reflect MCP',
+    );
+    assert.ok(sentPrompt.includes('limb_* 也同理'), 'should explain agentKeyCatId applies to limb server too');
     assert.doesNotMatch(sentPrompt, /当前没有原生 MCP 注入/, 'should not claim native MCP is absent');
     assert.ok(sentPrompt.includes('/api/callbacks/thread-context?invocationId=inv-123&callbackToken=tok-456'));
     assert.ok(sentPrompt.includes('/api/callbacks/post-message'));

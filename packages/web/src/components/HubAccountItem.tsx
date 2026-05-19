@@ -1,7 +1,10 @@
 'use client';
 
+import { useState } from 'react';
 import type { ProfileItem } from './hub-accounts.types';
-import { HubIcon } from './hub-icons';
+import { builtinClientLabel } from './hub-accounts.view';
+import { TagEditor } from './hub-tag-editor';
+import { SettingsBadge, SettingsDeleteButton, SettingsRow } from './settings/primitives';
 import { useConfirm } from './useConfirm';
 
 export interface ProfileEditPayload {
@@ -17,60 +20,77 @@ interface HubAccountItemProps {
   busy: boolean;
   onSave: (profileId: string, payload: ProfileEditPayload) => Promise<void>;
   onDelete: (profileId: string) => void;
-  onEdit?: (profileId: string) => void;
+  onEdit?: (profile: ProfileItem) => void;
 }
 
-function summaryText(profile: ProfileItem): string {
+function summaryMeta(profile: ProfileItem): string {
   const parts: string[] = [];
-  if (profile.baseUrl) {
-    parts.push(profile.baseUrl.replace(/^https?:\/\//, ''));
+  if (profile.authType === 'oauth') {
+    const label = profile.clientId ? builtinClientLabel(profile.clientId) : null;
+    if (label) parts.push(label);
+  } else {
+    const host = profile.baseUrl?.replace(/^https?:\/\//, '').replace(/\/+$/, '') || null;
+    if (host) parts.push(host);
+    parts.push(profile.hasApiKey ? '已配置' : '未配置');
   }
-  parts.push(profile.authType === 'oauth' ? 'OAuth' : 'API Key');
+  parts.push(`${profile.models?.length ?? 0} 模型`);
   return parts.join(' · ');
 }
 
-export function HubAccountItem({ profile, busy, onDelete, onEdit }: HubAccountItemProps) {
+export function HubAccountItem({ profile, busy, onSave, onDelete, onEdit }: HubAccountItemProps) {
   const confirm = useConfirm();
-
-  const handleDelete = async () => {
-    const ok = await confirm({
-      title: '删除账号',
-      message: `确定要删除「${profile.displayName}」吗？此操作不可撤销。`,
-      confirmLabel: '删除',
-      variant: 'danger',
-    });
-    if (ok) onDelete(profile.id);
-  };
+  const [expanded, setExpanded] = useState(false);
 
   return (
-    <div
-      className="flex cursor-pointer items-center gap-3 rounded-2xl bg-[var(--console-card-bg)] px-4 py-3 shadow-[0_12px_30px_rgba(43,33,26,0.08)] transition-shadow hover:shadow-[0_12px_30px_rgba(43,33,26,0.12)]"
-      onClick={() => onEdit?.(profile.id)}
-    >
-      <svg className="h-[18px] w-[18px] shrink-0 cursor-grab text-cafe-muted" viewBox="0 0 24 24" fill="currentColor">
-        <circle cx="9" cy="5" r="1.5" />
-        <circle cx="15" cy="5" r="1.5" />
-        <circle cx="9" cy="12" r="1.5" />
-        <circle cx="15" cy="12" r="1.5" />
-        <circle cx="9" cy="19" r="1.5" />
-        <circle cx="15" cy="19" r="1.5" />
-      </svg>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-bold text-cafe">{profile.displayName}</p>
-        <p className="mt-0.5 truncate text-xs text-cafe-secondary">{summaryText(profile)}</p>
-      </div>
-
-      <div className="flex shrink-0 items-center" onClick={(e) => e.stopPropagation()}>
-        <button
-          type="button"
+    <SettingsRow
+      title={profile.displayName}
+      meta={summaryMeta(profile)}
+      badges={
+        <SettingsBadge tone={profile.authType === 'oauth' ? 'amber' : 'purple'}>
+          {profile.authType === 'oauth' ? 'oauth' : 'api_key'}
+        </SettingsBadge>
+      }
+      actions={
+        <SettingsDeleteButton
           disabled={busy}
-          onClick={handleDelete}
-          className={`flex h-[30px] w-[30px] items-center justify-center rounded-[9px] bg-[var(--console-card-soft-bg)] transition-opacity hover:opacity-80 ${busy ? 'opacity-50' : ''}`}
-          title="删除"
-        >
-          <HubIcon name="trash" className="h-4 w-4 text-[var(--cafe-accent)]" />
-        </button>
+          aria-label="删除账号"
+          onClick={async () => {
+            if (
+              await confirm({
+                title: '删除确认',
+                message: `确认删除账号「${profile.displayName}」吗？该操作不可撤销。`,
+                variant: 'danger',
+                confirmLabel: '删除',
+              })
+            ) {
+              onDelete(profile.id);
+            }
+          }}
+        />
+      }
+      onClick={onEdit ? () => onEdit(profile) : undefined}
+      expanded={expanded}
+      onToggle={() => setExpanded((prev) => !prev)}
+    >
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: stopPropagation wrapper for inline editing */}
+      <div role="group" onClick={(e) => e.stopPropagation()}>
+        <TagEditor
+          tags={profile.models ?? []}
+          tone={profile.authType === 'oauth' ? 'orange' : 'purple'}
+          addLabel="+ 添加"
+          placeholder="输入模型名"
+          emptyLabel="(暂无模型)"
+          minCount={1}
+          onChange={(nextModels) => {
+            if (busy) return;
+            void onSave(profile.id, {
+              displayName: profile.displayName,
+              ...(profile.authType === 'api_key' ? { baseUrl: profile.baseUrl ?? '' } : {}),
+              models: nextModels,
+            });
+          }}
+        />
       </div>
-    </div>
+    </SettingsRow>
   );
 }

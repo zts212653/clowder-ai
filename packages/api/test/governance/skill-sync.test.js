@@ -50,7 +50,7 @@ describe('Skill Sync Service (ADR-025 Phase 2)', () => {
         assert.ok(s.isSymbolicLink(), `${provider}/skills/${skill} should be a symlink`);
 
         const target = await readlink(linkPath);
-        const expectedTarget = join(skillsSource, skill);
+        const expectedTarget = relative(join(projectRoot, provider, 'skills'), join(skillsSource, skill));
         assert.equal(target, expectedTarget, `${provider}/skills/${skill} should point to source`);
       }
     }
@@ -65,6 +65,7 @@ describe('Skill Sync Service (ADR-025 Phase 2)', () => {
     const state = await readSkillsState(projectRoot);
     assert.ok(state, 'skills-state.json should exist after sync');
     assert.deepStrictEqual(state.managedSkillNames.sort(), ['debugging', 'tdd', 'worktree']);
+    assert.equal(state.sourceRoot, relative(projectRoot, skillsSource));
     assert.ok(state.sourceManifestHash.startsWith('sha256:'));
     assert.ok(state.lastSyncedAt, 'should have a timestamp');
     assert.equal(result.newHash, state.sourceManifestHash);
@@ -104,7 +105,53 @@ describe('Skill Sync Service (ADR-025 Phase 2)', () => {
     await syncSkills(projectRoot, skillsSource);
 
     const target = await readlink(join(claudeSkills, 'tdd'));
-    assert.equal(target, join(skillsSource, 'tdd'), 'should fix the wrong symlink');
+    assert.equal(target, relative(claudeSkills, join(skillsSource, 'tdd')), 'should fix the wrong symlink');
+  });
+
+  test('does not write through directory-level provider skills symlinks', async () => {
+    const codexDir = join(projectRoot, '.codex');
+    const codexSkills = join(codexDir, 'skills');
+    await mkdir(codexDir, { recursive: true });
+    await symlink(skillsSource, codexSkills);
+
+    await syncSkills(projectRoot, skillsSource);
+
+    const sourceTdd = await lstat(join(skillsSource, 'tdd'));
+    assert.equal(sourceTdd.isDirectory(), true, 'source skill directory must not be replaced by a symlink');
+    assert.equal(await readlink(codexSkills), skillsSource, 'directory-level mount should be preserved');
+
+    const claudeSkill = join(projectRoot, '.claude', 'skills', 'tdd');
+    assert.equal((await lstat(claudeSkill)).isSymbolicLink(), true, 'non-mounted providers still get per-skill links');
+  });
+
+  test('rejects invalid directory-level provider skills symlinks', async () => {
+    const codexDir = join(projectRoot, '.codex');
+    const codexSkills = join(codexDir, 'skills');
+    const wrongSource = join(tempDir, 'wrong-skills');
+    await mkdir(codexDir, { recursive: true });
+    await mkdir(wrongSource, { recursive: true });
+    await symlink(wrongSource, codexSkills);
+
+    await assert.rejects(
+      () => syncSkills(projectRoot, skillsSource),
+      /Invalid directory-level skills mount/,
+      'wrong directory-level mount should fail loudly instead of marking sync successful',
+    );
+    assert.equal(await readSkillsState(projectRoot), null, 'failed sync should not update skills-state.json');
+  });
+
+  test('rejects dangling directory-level provider skills symlinks', async () => {
+    const codexDir = join(projectRoot, '.codex');
+    const codexSkills = join(codexDir, 'skills');
+    await mkdir(codexDir, { recursive: true });
+    await symlink(join(tempDir, 'missing-skills'), codexSkills);
+
+    await assert.rejects(
+      () => syncSkills(projectRoot, skillsSource),
+      /Invalid directory-level skills mount/,
+      'dangling directory-level mount should fail loudly instead of marking sync successful',
+    );
+    assert.equal(await readSkillsState(projectRoot), null, 'failed sync should not update skills-state.json');
   });
 
   test('is idempotent — second sync produces same result', async () => {

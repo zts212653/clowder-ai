@@ -41,7 +41,7 @@ export function QuickCreateForm({ disabled, onCreate }: QuickCreateFormProps) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="grid grid-cols-12 gap-2 rounded-2xl bg-[var(--console-card-bg)] p-3 shadow-[0_12px_30px_rgba(43,33,26,0.08)]"
+      className="grid grid-cols-12 gap-2 rounded-xl border border-[#E8DCCB] bg-cafe-surface p-3"
     >
       <label htmlFor="mc-create-title" className="col-span-3">
         <span className="sr-only">任务标题</span>
@@ -55,7 +55,7 @@ export function QuickCreateForm({ disabled, onCreate }: QuickCreateFormProps) {
             if (event.key === 'Enter' && ime.isComposing()) event.preventDefault();
           }}
           placeholder="任务标题"
-          className="console-form-input w-full text-xs"
+          className="w-full rounded-lg border border-[#E6D7C3] px-2 py-1.5 text-xs text-[#2C241B] outline-none focus:border-[#B8946A]"
           data-testid="mc-create-title"
         />
       </label>
@@ -71,7 +71,7 @@ export function QuickCreateForm({ disabled, onCreate }: QuickCreateFormProps) {
             if (event.key === 'Enter' && ime.isComposing()) event.preventDefault();
           }}
           placeholder="一句话描述任务价值"
-          className="console-form-input w-full text-xs"
+          className="w-full rounded-lg border border-[#E6D7C3] px-2 py-1.5 text-xs text-[#2C241B] outline-none focus:border-[#B8946A]"
           data-testid="mc-create-summary"
         />
       </label>
@@ -81,7 +81,7 @@ export function QuickCreateForm({ disabled, onCreate }: QuickCreateFormProps) {
           id="mc-create-priority"
           value={priority}
           onChange={(event) => setPriority(event.target.value as BacklogPriority)}
-          className="console-form-input w-full text-xs"
+          className="w-full rounded-lg border border-[#E6D7C3] bg-cafe-surface px-2 py-1.5 text-xs text-[#2C241B] outline-none focus:border-[#B8946A]"
           data-testid="mc-create-priority"
         >
           <option value="p0">P0</option>
@@ -102,14 +102,14 @@ export function QuickCreateForm({ disabled, onCreate }: QuickCreateFormProps) {
             if (event.key === 'Enter' && ime.isComposing()) event.preventDefault();
           }}
           placeholder="tags: redis,ui"
-          className="console-form-input w-full text-xs"
+          className="w-full rounded-lg border border-[#E6D7C3] px-2 py-1.5 text-xs text-[#2C241B] outline-none focus:border-[#B8946A]"
           data-testid="mc-create-tags"
         />
       </label>
       <button
         type="submit"
         disabled={disabled}
-        className="console-button-primary col-span-1 disabled:cursor-not-allowed disabled:opacity-40"
+        className="col-span-1 rounded-lg bg-[#1F1A16] px-2 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
         data-testid="mc-create-submit"
       >
         创建

@@ -40,17 +40,24 @@ export function collectSnapshotActiveCats(
  * 2) targetCats only while invocation is still active but slots not ready (degraded)
  * 3) snapshot-only when invocation has ended
  * Legacy compatibility: when slot data is not provided, keep previous targetCats behavior.
+ *
+ * F194 Phase Z5 AC-Z15: ideate mode 下保留 targetCats UNION（不只看 slots），
+ * 让 ParallelStatusBar 全程显示本轮所有 targetCats 卡片。slot 移除（猫完成清 slot）
+ * 不应让卡片消失——铲屎官 alpha catch 2026-05-10 04:51："并发 at 47 和 55
+ * 但是观点采样面板只显示 47"。
  */
 export function deriveActiveCats({
   targetCats,
   snapshotCats = [],
   activeInvocations,
   hasActiveInvocation,
+  intentMode,
 }: {
   targetCats: string[];
   snapshotCats?: string[];
   activeInvocations?: Record<string, ActiveInvocationSlot>;
   hasActiveInvocation?: boolean;
+  intentMode?: IntentMode;
 }): string[] {
   if (activeInvocations == null && hasActiveInvocation == null) {
     return Array.from(new Set([...targetCats, ...snapshotCats]));
@@ -63,6 +70,13 @@ export function deriveActiveCats({
         .filter((catId): catId is string => typeof catId === 'string' && catId.length > 0),
     ),
   );
+
+  // F194 Phase Z5 AC-Z15: ideate mode 下 fallback 到 targetCats UNION，slot 状态用作每只猫
+  // 卡片的状态展示（done/streaming/error）但不剔除卡片本身。仅在 hasActiveInvocation 为 true
+  // 时启用，避免 invocation 完全结束后还残留陈旧卡片。
+  if (intentMode === 'ideate' && hasActiveInvocation && targetCats.length > 0) {
+    return Array.from(new Set([...targetCats, ...slotCats, ...snapshotCats]));
+  }
 
   if (slotCats.length > 0) return Array.from(new Set([...slotCats, ...snapshotCats]));
   if (hasActiveInvocation) return Array.from(new Set([...targetCats, ...snapshotCats]));
@@ -99,19 +113,19 @@ export function statusLabel(status: CatStatus): string {
 export function statusTone(status: CatStatus): string {
   switch (status) {
     case 'spawning':
-      return 'text-[var(--color-cafe-accent)]';
+      return 'text-blue-500';
     case 'pending':
       return 'text-cafe-secondary';
     case 'streaming':
-      return 'text-conn-emerald-text';
+      return 'text-green-600';
     case 'done':
-      return 'text-conn-emerald-text';
+      return 'text-emerald-700';
     case 'error':
-      return 'text-conn-red-text';
+      return 'text-red-600';
     case 'alive_but_silent':
-      return 'text-conn-amber-text';
+      return 'text-amber-500';
     case 'suspected_stall':
-      return 'text-conn-amber-text';
+      return 'text-orange-600';
     default:
       return 'text-cafe-secondary';
   }

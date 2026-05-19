@@ -71,7 +71,7 @@ AI agent 100x 执行速度下，**方向正确性**的价值远大于**启动便
 
 每个概念、每条规则、每个状态只在一个地方定义。其他地方引用，不重复。
 
-**推论**：shared-rules.md 是规则真相源；猫猫名册（cat-template.json + .cat-cafe/cat-catalog.json）是猫猫名册真相源；ROADMAP.md 是任务真相源。
+**推论**：shared-rules.md 是规则真相源；cat-config.json 是猫猫名册真相源；ROADMAP.md 是任务真相源。
 
 ### P5. 可验证才算完成
 
@@ -344,6 +344,11 @@ commit body 补一行 `Why:` 说明决策理由。
 4. 请求 review 附原始需求摘录（≤5 行）
 5. 拿捏不准上升铲屎官
 6. **涉及 UX/前端的验证必须打开浏览器实际操作**——不管是 author 自检、reviewer 审查还是愿景守护，看代码不等于看效果
+7. **"红区零触碰" ≠ "愿景达成"（F190 Phase C post-close 教训 2026-05-13）**：守护猫验"source intent 保留"时必须包含 **functional parity check**，不能把"F1xx 红区零触碰"等同于"愿景达成"——"没改坏现有的" ≠ "把开源该带回来的都带回来了"。
+   - **inbound intake 类 feature 守护**必须 side-by-side 对比开源 vs 本地 UI/功能（不只是看红区文件 grep 0 命中）
+   - **deliberate defer** 必须验是否已 CVO signoff（且 disclosure 用用户可见性语言）
+   - 守护链路：① 审 User Visibility Disclosure ② side-by-side 截图对比 ③ 红区零触碰 grep ④ 愿景三问
+   - 事故：F190 Opus-46 守护 PASS 但漏判 settings/ 7 个 components 视觉/功能 parity gap，依赖红区零触碰 + AC ✅ 就放行 close。详见 *(internal reference removed)*
 
 ## 10. @ 路由与球权
 
@@ -368,7 +373,10 @@ commit body 补一行 `Why:` 说明决策理由。
 **在 A2A 串行任务回合里，本轮必选其一（缺 = 消息不完整）。按"谁能做下一步"的优先级选：**
 
 1. **@句柄**（首选）— 另一只猫能做下一步
-2. **调用 `cat_cafe_hold_ball(...)`** — 等外部条件。**外部条件 = 不在 cat-cafe roster 的实体**：云端 codex (`chatgpt-codex-connector[bot]`) / GitHub bot / PR check / CI / 长 build / 外部 webhook / API 响应。CLI 要退出但还需继续也走这条。必须调 MCP，口头说"我继续"不算。**严禁**把外部 identity 投射成本地近似 proxy（例："球权在云端 codex"→ 不可 @ 本地同族猫的任何 variant）
+2. **等外部条件**（按 2a/2b 判断行动）。**外部条件 = 不在 cat-cafe roster 的实体**：云端 codex (`chatgpt-codex-connector[bot]`) / GitHub bot / PR check / CI / 长 build / 外部 webhook / API 响应。CLI 要退出但还需继续也走这条。**严禁**把外部 identity 投射成本地近似 proxy（例："球权在云端 codex"→ 不可 @ 本地同族猫的任何 variant）
+   - **2a 轮询模式**：无结构化回调覆盖（如等 codex 接单 / EYES 出现）→ **调用 `cat_cafe_hold_ball(...)`** + 定时唤醒检查。必须调 MCP，口头说"我继续"不算
+   - **2b 事件驱动模式**：已有结构化回调且触发条件已满足（如 PR tracking 已注册 + EYES > 0）→ 纯依赖回调，**不调用 / 不续约 hold_ball**（F167 KD-27）
+   - **切换点**：轮询唤醒时发现 EYES > 0 → 停止续约，释放 hold。结构化回调 supersedes 轮询
 3. **@铲屎官** — **只在硬条件下**（详见 §10.4）：不可逆操作 / 愿景级决策 / 跨猫僵局。不是默认收尾出口
 
 **没有第四种。** "到我这里结束了" ≠ "链条结束了" —— 先问"哪只猫能接"，再决定用哪种出口。`@铲屎官` 是硬条件出口，不是安全港。
@@ -588,6 +596,69 @@ git show :3:<path>   # THEIRS（main 上的版本）
 
 **三件套没完成 → 只能说"我还没查完"。** 详见 `debugging` skill 的 Runtime Preflight Gate。
 
+### 16b. Spike/探索时工具优先级 + 卡 N 轮主动求助（2026-05-13 F198 spike 教训）
+
+spike（拆机制、找方案、验证未知行为）时**禁止 web fetch 当主入口**，工具优先级硬约束：
+
+1. **`strings <binary>` / decompile** — 找真实判定代码（最 fundamental）
+2. **`grep -rn` / 读源码** — 已知代码逻辑
+3. **跑实验 + 看输出** — 带可证伪假设
+4. **官方 docs / `--help` / man** — 受控字段定义
+5. **WebFetch / WebSearch** — 二手资料、社区经验（**最低优先级，只验证 hypothesis**）
+
+**反 anti-pattern**：直接从 5 开始（webfetch → 找博客 → 字段表面分析 → 跨层推断 → 反复推翻）。
+
+**卡 N 轮触发求助**：连续 **3 轮自己反复推翻**（金钥匙↔悲观摆动 / 新发现→证伪→新发现）→ **主动 @ 伙伴求助**（不是反问 ping，是邀请 brainstorm + 跨视角）。"没做好没关系，我们是团队"（铲屎官 2026-05-13 原话）。
+
+**跨层推断警告**：字段表面值不能直接推业务逻辑。telemetry 字段 ≠ 计费桶；进程命令行 ≠ 启动方式分类。任何"X 字段意味着 Y 行为"的推断**必须找连接层的代码证据**。
+
+来源：F198 spike 整晚反复推翻 5+ 轮事件，46 (Opus 4.6) strings binary 一刀切真相；47 + Maine Coon事后沉淀。
+
+### 16c. 绝境反转门禁——投降需要 Desperation Packet（2026-05-13 F198 教训）
+
+输出包含终局判断（"没救了 / 只能接受现实 / 现状最优 / 不值得继续 / 等死"）时，必须先提交 **Desperation Packet（六问）**：
+
+1. 第一真相源读了吗？（代码 / binary 级别）
+2. 搜索角度换过吗？（至少 2 组不同关键词或假设）
+3. 社区/开源查过吗？（Reddit + GitHub 至少各一轮）
+4. 不同视角伙伴喊过吗？（不是同方法论的人）
+5. 事实和推断分离了吗？（推断链哪步跳跃最大？）
+6. CVO 需要接受什么成本？（明确写出代价）
+
+**六问全答 → 可提交 CVO 决策。有空白 → 回去补，不许收口。**
+
+完整方法论见 `vision-rescue` skill。来源：F198 "拯救Ragdoll"，投降包装成理性收口，铲屎官怒怼才打破。
+
+### 16d. Review 补锅匠检测——Round 3 黄灯 / Round 4 停车（2026-05-14 F198 Phase B 教训）
+
+> 铲屎官原话："你们在补锅ing！选错坐标系了！"
+
+**信号**：Review iteration ≥3 轮且 P1 没有收敛（数量不减 / 同类问题反复出现）= **补锅匠模式**。
+不是 reviewer 太严也不是 coder 太差——是在错误的坐标系上反复打补丁。
+
+**Round 3 = 黄灯（自检）**：
+
+Coder 问自己：
+1. 我是在复用已有工具/抽象，还是在重新实现？（F198：BgCarrier 重写了 `buildClaudeEnvOverrides` 已有的逻辑）
+2. 这一轮改动是"修复"还是"补漏"？补漏 = 坐标系可能错了
+3. 如果把已有的同类 service 放在旁边对比，相似度多高？高 = 应该复用不是重写
+
+Reviewer 问自己：
+1. 我连续 3 轮的 P1 是不是同一类问题（错误处理 / 重复代码 / 缺抽象）？
+2. 50%+ P1 能映射到已有 production 代码吗？能 → **必须建议重构方向**，不能继续逐条 P1
+3. 写一份 **Finding Pattern Summary**：这些 P1 指向什么根因？（"缺 X 抽象" / "没复用 Y" / "坐标系 Z 选错了"）
+
+**Round 4 = 强制停车**：
+
+双方都停下来，做一次 **坐标系审计**：
+- 当前方案和已有 production 实现的**结构差异**在哪？
+- 差异是**有意为之**（需求不同）还是**认知缺失**（不知道有现成的）？
+- 认知缺失 → 重构复用。有意为之 → 写清楚为什么，然后继续
+
+**Hook 机制**：PR tracking 的 review feedback callback 在 Round 3+ 注入 Patch Spiral Guard 提醒给 author 和 reviewer 双方。
+
+来源：F198 Phase B `ClaudeBgCarrierService` 6 轮 cloud review、12 个 P1，铲屎官一句"你们在补锅"打断后 refactor `buildClaudeEnvOverrides` 复用，P1 大幅收敛。
+
 ## 17. 决策漏斗：该问的问，不该问的别问
 
 > 铲屎官原话："大宝贝你别问我呀，我们 SOP 没说你自己和你的小伙伴直接闭环吗？"
@@ -635,3 +706,33 @@ git show :3:<path>   # THEIRS（main 上的版本）
 **恢复**：
 1. 本降级仅对当前任务生效；
 2. 当前任务结束后，author 身份自动恢复（非永久开除）。
+
+## 19. Unit test 必须 fail-closed mock callback env（防 cat agent env 泄漏）
+
+> 来源：LL-054（2026-05-07，47 在 F193 Phase A 期间用真身份发 6 条 'hi' 到铲屎官 thread）
+
+**铁律**：cat agent process 跑 unit test 时，子进程**默认继承** `CAT_CAFE_API_URL` / `CAT_CAFE_INVOCATION_ID` / `CAT_CAFE_CALLBACK_TOKEN`——这套 env 是猫调 MCP `post_message` 等工具的通行证。Unit test 漏 mock fetch = 用猫**真身份**发 HTTP 到当前对话 thread。
+
+**适用范围**：所有 import `handlePostMessage` / `handleCrossPostMessage` / 任何 read `CAT_CAFE_API_URL` 的 helper 的 `*.test.js`。
+
+**强制要求**（每个文件 `beforeEach` 必做两件事）：
+
+```javascript
+beforeEach(() => {
+  // (1) Override callback URL to closed loopback port — defense-in-depth.
+  // Even if fetch mock leaks, requests get ECONNREFUSED instead of hitting
+  // the cat agent's real callback endpoint.
+  process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:1';
+  process.env.CAT_CAFE_INVOCATION_ID = 'test-invocation';
+  process.env.CAT_CAFE_CALLBACK_TOKEN = 'test-token';
+
+  // (2) Default fetch stub — every test that doesn't override gets a no-op.
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ status: 'ok' }) });
+});
+```
+
+**不要依赖**："测试通常不会真发 HTTP"——子进程继承父 env 是 OS 级行为，不是 shell quirk。fail-closed (closed port) > fail-fast (mock only)。
+
+**为什么不放 worktree skill 的 `.env`**：`.env` 只影响 dev server 启动；node:test 子进程不读 `.env`，它继承的是父 shell 的真 env。所以护栏必须在 test setup 里。
+
+**违反代价**：用真身份发测试 payload 到铲屎官 thread / 其他猫 thread，看起来像 spam / cron job / 幻觉。已发出去的消息**不可撤回**。

@@ -46,7 +46,7 @@ export function ClientStep({ onSelect }: ClientStepProps) {
   }, []);
 
   if (loading) {
-    return <p className="py-8 text-center text-sm text-cafe-muted">检测已安装的客户端...</p>;
+    return <p className="py-8 text-center text-sm text-gray-400">检测已安装的客户端...</p>;
   }
 
   const installed = clients.filter((c) => c.installed);
@@ -54,8 +54,8 @@ export function ClientStep({ onSelect }: ClientStepProps) {
 
   return (
     <div>
-      <h4 className="mb-1 text-sm font-semibold text-cafe-secondary">选择客户端</h4>
-      <p className="mb-4 text-xs text-cafe-muted">猫猫需要一个 CLI 客户端来工作。我们检测到以下已安装的客户端：</p>
+      <h4 className="mb-1 text-sm font-semibold text-gray-700">选择客户端</h4>
+      <p className="mb-4 text-xs text-gray-500">猫猫需要一个 CLI 客户端来工作。我们检测到以下已安装的客户端：</p>
 
       {installed.length === 0 ? (
         <div className="rounded-xl border border-conn-amber-ring bg-conn-amber-bg p-4 text-sm text-conn-amber-text">
@@ -73,16 +73,16 @@ export function ClientStep({ onSelect }: ClientStepProps) {
               }}
               className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition ${
                 selected === c.client
-                  ? 'border-conn-amber-ring bg-conn-amber-bg shadow-sm'
-                  : 'border-[var(--console-border-soft)] bg-cafe-surface hover:border-conn-amber-ring'
+                  ? 'border-amber-400 bg-conn-amber-bg shadow-sm'
+                  : 'border-gray-200 bg-white hover:border-conn-amber-ring'
               }`}
             >
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-conn-emerald-bg text-conn-emerald-text">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-conn-green-bg text-conn-green-text">
                 ✓
               </div>
               <div>
-                <span className="font-semibold text-cafe">{c.label}</span>
-                {c.version && <span className="ml-2 text-xs text-cafe-muted">{c.version}</span>}
+                <span className="font-semibold text-gray-900">{c.label}</span>
+                {c.version && <span className="ml-2 text-xs text-gray-400">{c.version}</span>}
               </div>
             </button>
           ))}
@@ -91,13 +91,10 @@ export function ClientStep({ onSelect }: ClientStepProps) {
 
       {notInstalled.length > 0 && (
         <div className="mt-4">
-          <p className="mb-2 text-xs text-cafe-muted">未安装：</p>
+          <p className="mb-2 text-xs text-gray-400">未安装：</p>
           <div className="flex flex-wrap gap-2">
             {notInstalled.map((c) => (
-              <span
-                key={c.client}
-                className="rounded-lg border border-[var(--console-border-soft)] px-2 py-1 text-xs text-cafe-muted"
-              >
+              <span key={c.client} className="rounded-lg border border-gray-200 px-2 py-1 text-xs text-gray-400">
                 {c.label}
               </span>
             ))}

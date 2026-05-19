@@ -280,8 +280,8 @@ export const getThreadContextInputSchema = {
     .min(1)
     .max(200)
     .optional()
-    .default(20)
-    .describe('Number of recent messages to retrieve (default: 20)'),
+    .default(100)
+    .describe('Number of recent messages to retrieve (default: 100, max: 200)'),
   threadId: z
     .string()
     .min(1)
@@ -313,6 +313,11 @@ export const listThreadsInputSchema = {
     .max(200)
     .optional()
     .describe('Optional: filter threads whose title or threadId contains this keyword (case-insensitive).'),
+  agentKeyCatId: agentKeyCatIdSchema,
+};
+
+export const listLabelsInputSchema = {
+  limit: z.number().int().min(1).max(50).optional().default(50).describe('Max labels to return (default: 50).'),
   agentKeyCatId: agentKeyCatIdSchema,
 };
 
@@ -355,6 +360,14 @@ export const updateTaskInputSchema = {
 export const crossPostMessageInputSchema = {
   threadId: z.string().min(1).describe('Target thread ID to post into'),
   content: z.string().min(1).describe('The message content to post'),
+  targetCats: z
+    .array(z.string().min(1))
+    .optional()
+    .describe(
+      'Cat handles to route the cross-thread notification to (triggers their session in the target thread). ' +
+        'Required if content has no line-start @mention — server fail-closes when both routing credentials are missing (F193 AC-A4). ' +
+        'F193 KD-1 boundary: this is the routing list, NOT relay metadata. Agent-key callers do not inherit F052 sourceThreadId semantics.',
+    ),
   replyTo: z.string().optional().describe('Optional message ID to reply to'),
   clientMessageId: z
     .string()
@@ -375,7 +388,37 @@ export const listTasksInputSchema = {
     .describe('Optional task kind filter (work = manual tasks, pr_tracking = PR automation)'),
 };
 
-export async function handlePostMessage(input: {
+/**
+ * F193 AC-A4: Plausible line-start @mention detector for MCP-layer
+ * fail-closed. Mirrors the authoritative server parser at
+ * a2a-mentions.ts:86-114 (strip code fences, trimStart, strip markdown
+ * prefix, then `startsWith('@')`). Local copy to avoid cross-package
+ * dep — server-side parser remains authoritative; this is just an
+ * early-reject to (a) save an HTTP roundtrip and (b) cover the
+ * agent-key API-layer gap (where isCrossThread never fires).
+ */
+const LEADING_MARKDOWN_MENTION_PREFIX_RE = /^(?:(?:>\s*)|(?:[-*+]\s+)|(?:\d+[.)]\s+))+/;
+
+function hasPlausibleLineStartMention(content: string): boolean {
+  // Strip fenced code blocks first — same as server parser.
+  const stripped = content.replace(/```[\s\S]*?```/g, '');
+  for (const rawLine of stripped.split(/\r?\n/)) {
+    const leadingWs = rawLine.match(/^\s*/)?.[0].length ?? 0;
+    const normalized = rawLine.slice(leadingWs).replace(LEADING_MARKDOWN_MENTION_PREFIX_RE, '');
+    if (normalized.startsWith('@') && normalized.length > 1) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * F193: Internal post-message dispatcher (no KD-1 guard).
+ * Used by both handlePostMessage (with KD-1 guard prepended) and
+ * handleCrossPostMessage (cross-thread relay path, bypasses guard
+ * because cross_post_message is the legitimate cross-thread tool).
+ */
+async function _executePostMessage(input: {
   content: string;
   threadId?: string | undefined;
   replyTo?: string | undefined;
@@ -452,6 +495,42 @@ export async function handlePostMessage(input: {
   return result;
 }
 
+/**
+ * F193 AC-A2 / KD-1 enforcement at MCP handler layer.
+ * Invocation-token caller MUST omit threadId — F043 #316 防误投 contract.
+ * Cross-thread delivery only via cat_cafe_cross_post_message.
+ * Agent-key caller (F178) is exempt: they REQUIRE threadId since persistent
+ * agents have no default thread context.
+ *
+ * Principal detection MUST follow buildAuthHeaders precedence (line 122):
+ * if BOTH CAT_CAFE_INVOCATION_ID and CAT_CAFE_CALLBACK_TOKEN env vars are
+ * present, the request will be sent with x-invocation-id headers — regardless
+ * of whether the caller passed input.agentKeyCatId. The input field is a
+ * sidecar selector for shared Antigravity MCP, NOT an auth principal.
+ *
+ * Closing砚砚 review P1: previous guard `!input.agentKeyCatId` could be
+ * trivially bypassed by an invocation-token caller passing any agentKeyCatId
+ * value. The fix gates on the actual auth headers that will be sent.
+ */
+export async function handlePostMessage(input: {
+  content: string;
+  threadId?: string | undefined;
+  replyTo?: string | undefined;
+  clientMessageId?: string | undefined;
+  targetCats?: string[] | undefined;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  const hasInvocationCreds = !!process.env['CAT_CAFE_INVOCATION_ID'] && !!process.env['CAT_CAFE_CALLBACK_TOKEN'];
+  if (input.threadId && hasInvocationCreds) {
+    return errorResult(
+      'post_message rejects threadId from invocation-token callers (F193 KD-1). ' +
+        'For cross-thread delivery, use cat_cafe_cross_post_message(threadId, targetCats, content). ' +
+        'For same-thread delivery, omit threadId entirely (defaults to invocation thread).',
+    );
+  }
+  return _executePostMessage(input);
+}
+
 export async function handleGetPendingMentions(input: { includeAcked?: boolean | undefined }): Promise<ToolResult> {
   return callbackGet('/api/callbacks/pending-mentions', {
     ...(input.includeAcked ? { includeAcked: '1' } : {}),
@@ -495,6 +574,19 @@ export async function handleListThreads(input: {
       ...(input.limit ? { limit: String(input.limit) } : {}),
       ...(input.activeSince !== undefined ? { activeSince: String(input.activeSince) } : {}),
       ...(input.keyword ? { keyword: input.keyword } : {}),
+    },
+    { agentKeyCatId: input.agentKeyCatId },
+  );
+}
+
+export async function handleListLabels(input: {
+  limit?: number | undefined;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  return callbackGet(
+    '/api/callbacks/list-labels',
+    {
+      ...(input.limit ? { limit: String(input.limit) } : {}),
     },
     { agentKeyCatId: input.agentKeyCatId },
   );
@@ -546,16 +638,48 @@ export async function handleCreateTask(input: {
 export async function handleCrossPostMessage(input: {
   threadId: string;
   content: string;
+  targetCats?: string[] | undefined;
   replyTo?: string | undefined;
   clientMessageId?: string | undefined;
   agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
-  return handlePostMessage({
+  // F193 AC-A4 closing砚砚 review P1: MCP layer fail-closed.
+  // The API route layer (callbacks.ts) only triggers AC-A4 reject when
+  // isCrossThread === true (effectiveThreadId !== actor.threadId), which is
+  // false for agent-key callers (target-thread write, no source thread).
+  // So MUST close routing-creds gate at MCP layer too — covers ALL callers
+  // (invocation-token + agent-key) before any HTTP dispatch.
+  const hasTargetCats = !!input.targetCats?.length;
+  // Line-start @ detection MUST mirror the authoritative server parser
+  // (a2a-mentions.ts:107-113): strip code fences, then for each line,
+  // trim leading whitespace + strip markdown prefix (`- ` / `> ` / `* ` /
+  // `1. ` etc.) and check if it starts with '@'. Closing 砚砚 review round 2
+  // P1: a naive /^@\w/m would (a) reject markdown-prefixed routing
+  // (`- @codex` / `> @codex`) — which the server parser and SystemPromptBuilder
+  // both treat as legitimate — and (b) reject non-ASCII handles like `@缅因猫`
+  // (\w only matches [a-zA-Z0-9_]). Server-side analyzeA2AMentions remains
+  // the authoritative parser — this is just an early reject for client
+  // ergonomics + closing the agent-key API-layer gap.
+  const hasLineStartMention = hasPlausibleLineStartMention(input.content);
+  if (!hasTargetCats && !hasLineStartMention) {
+    return errorResult(
+      'cross_post_message requires routing credentials (F193 AC-A4). ' +
+        'Pass targetCats: ["catHandle"] OR add a line-start @catHandle in content. ' +
+        'Without routing, the cross-thread message would land in the target thread but trigger no cat session.',
+    );
+  }
+  // cross_post_message is the legitimate cross-thread tool — bypass
+  // handlePostMessage's KD-1 guard (which is meant to redirect invocation-token
+  // callers AWAY from threadId on post_message). Reuse the same delivery
+  // primitive via _executePostMessage to share stale_ignored detection,
+  // outbox, and degradation hints.
+  return _executePostMessage({
     threadId: input.threadId,
     content: input.content,
     ...(input.replyTo ? { replyTo: input.replyTo } : {}),
     ...(input.clientMessageId ? { clientMessageId: input.clientMessageId } : {}),
     ...(input.agentKeyCatId ? { agentKeyCatId: input.agentKeyCatId } : {}),
+    ...(input.targetCats?.length ? { targetCats: input.targetCats } : {}),
   });
 }
 
@@ -1028,9 +1152,9 @@ export async function handleGetAvailableGuides(): Promise<ToolResult> {
   return callbackPost('/api/callbacks/get-available-guides', {});
 }
 
-export async function handleGuideResolve(input: { intent: string }): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/guide-resolve', { intent: input.intent });
-}
+// F193 Phase D AC-D2: handleGuideResolve removed — legacy alias replaced
+// by cat_cafe_get_available_guides, which lets the cat inspect catalog
+// metadata directly instead of guessing from a single intent string.
 
 export async function handleGuideControl(input: { action: string }): Promise<ToolResult> {
   return callbackPost('/api/callbacks/guide-control', { action: input.action });
@@ -1106,6 +1230,14 @@ export const callbackTools = [
       'Use activeSince (Unix ms) to filter to recently active threads. Use keyword to search by title.',
     inputSchema: listThreadsInputSchema,
     handler: handleListThreads,
+  },
+  {
+    name: 'cat_cafe_list_labels',
+    description:
+      'List user-defined thread labels (id, name, color). Use when you need to know which labels exist ' +
+      'before suggesting label assignments for threads. Returns all labels sorted by sortOrder.',
+    inputSchema: listLabelsInputSchema,
+    handler: handleListLabels,
   },
   {
     name: 'cat_cafe_feat_index',
@@ -1288,17 +1420,9 @@ export const callbackTools = [
     inputSchema: getAvailableGuidesInputSchema,
     handler: handleGetAvailableGuides,
   },
-  {
-    name: 'cat_cafe_guide_resolve',
-    description:
-      'Legacy alias for guide discovery by explicit intent. ' +
-      'Use only when an older prompt or caller still sends a concrete intent string and expects ranked guide matches. ' +
-      'For new code and new prompts, prefer cat_cafe_get_available_guides and let the cat choose based on catalog metadata.',
-    inputSchema: {
-      intent: z.string().min(1).describe('User intent text (e.g. "添加成员", "配置飞书")'),
-    },
-    handler: handleGuideResolve,
-  },
+  // F193 Phase D AC-D2: cat_cafe_guide_resolve legacy alias removed.
+  // Replaced by cat_cafe_get_available_guides — let the cat inspect catalog
+  // metadata directly rather than guess from a single intent string.
   {
     name: 'cat_cafe_start_guide',
     description:

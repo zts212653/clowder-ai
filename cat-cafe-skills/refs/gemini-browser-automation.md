@@ -81,7 +81,7 @@ document.execCommand('insertText', false, '你的提示词');
 9. [导出] 点击 "分享和导出" → "导出到 Google 文档"
 10. [等跳转] 等待新 tab 打开 Google Docs（~5-10秒）
 11. [下载] Google Docs: 文件 → 下载 → Markdown (.md)
-12. [归档] cp ~/Downloads/xxx.md → docs/research/
+12. [归档] cp ~/Downloads/xxx.md → project-research/
 ```
 
 **所有步骤均可自动化 ✅**

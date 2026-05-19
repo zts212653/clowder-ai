@@ -1,0 +1,60 @@
+/* === F101 AC-D5: Werewolf Cute Theme (狼人猫猫风) — extracted from globals.css (F190 Phase G) === */
+/* Token-only layer: components consume these vars, no hardcoded colors */
+
+[data-theme="werewolf-cute"] {
+  --ww-bg-base: #0b1020;
+  --ww-bg-card: #2a2340;
+  --ww-bg-surface: #1a1835;
+  --ww-bg-topbar: #0d1428;
+
+  --ww-text-main: #e2e8f0;
+  --ww-text-muted: #94a3b8;
+  --ww-text-dim: #64748b;
+
+  --ww-accent-danger: #d45a6a;
+  --ww-accent-cute: #f2b7a8;
+  --ww-accent-success: #8bd7c8;
+  --ww-accent-info: #e6c36a;
+
+  --ww-state-alive: var(--ww-accent-cute);
+  --ww-state-dead: #475569;
+  --ww-state-speaking: var(--ww-accent-info);
+  --ww-state-active: var(--ww-accent-cute);
+
+  --ww-role-wolf: var(--ww-accent-danger);
+  --ww-role-seer: var(--ww-accent-info);
+  --ww-role-witch: #c084fc;
+  --ww-role-guard: var(--ww-accent-success);
+  --ww-role-villager: var(--ww-text-muted);
+
+  --ww-faction-wolf: var(--ww-accent-danger);
+  --ww-faction-village: var(--ww-accent-success);
+
+  --ww-danger-soft: rgba(212, 90, 106, 0.1);
+  --ww-info-soft: rgba(230, 195, 106, 0.3);
+  --ww-subtle-soft: rgba(242, 183, 168, 0.08);
+  --ww-cute-soft: rgba(242, 183, 168, 0.1);
+  --ww-base-overlay: rgba(11, 16, 32, 0.9);
+
+  --ww-border-subtle: rgba(242, 183, 168, 0.15);
+  --ww-border-active: rgba(242, 183, 168, 0.4);
+  --ww-shadow-glow: rgba(212, 90, 106, 0.25);
+}
+
+[data-theme="werewolf-cute"][data-phase="day"] {
+  --ww-bg-base: #111828;
+  --ww-bg-card: #302a4a;
+  --ww-bg-surface: #201e40;
+  --ww-bg-topbar: #141a30;
+  --ww-text-main: #f1f5f9;
+  --ww-border-subtle: rgba(242, 183, 168, 0.2);
+}
+
+[data-theme="werewolf-cute"][data-phase="night"] {
+  --ww-bg-base: #080c18;
+  --ww-bg-card: #221d38;
+  --ww-bg-surface: #151230;
+  --ww-bg-topbar: #0a0e1e;
+  --ww-accent-cute: #e8a99a;
+  --ww-shadow-glow: rgba(212, 90, 106, 0.35);
+}

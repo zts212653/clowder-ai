@@ -8,24 +8,6 @@ import {
   splitMentionPatterns,
   splitStrengthTags,
 } from './hub-cat-editor.model';
-
-function buildVoiceConfig(form: HubCatEditorFormState) {
-  const voice = form.voiceVoice.trim();
-  const langCode = form.voiceLangCode.trim();
-  if (!voice || !langCode) return undefined;
-  const speed = Number.parseFloat(form.voiceSpeed);
-  const temperature = Number.parseFloat(form.voiceTemperature);
-  return {
-    voice,
-    langCode,
-    ...(Number.isFinite(speed) && speed > 0 ? { speed } : {}),
-    ...(form.voiceRefAudio.trim() ? { refAudio: form.voiceRefAudio.trim() } : {}),
-    ...(form.voiceRefText.trim() ? { refText: form.voiceRefText.trim() } : {}),
-    ...(form.voiceInstruct.trim() ? { instruct: form.voiceInstruct.trim() } : {}),
-    ...(Number.isFinite(temperature) && temperature >= 0 ? { temperature } : {}),
-  };
-}
-
 import { defaultMcpSupportForClient } from './hub-cat-editor.protocols';
 
 function trimText(value: unknown): string {
@@ -49,6 +31,24 @@ export const validateModelFormatForClient = hintModelFormatForClient;
 
 function resolveFormAccountRef(form: HubCatEditorFormState): string {
   return trimText(form.accountRef);
+}
+
+function buildVoiceConfig(form: HubCatEditorFormState) {
+  const voice = trimText(form.voiceVoice);
+  const langCode = trimText(form.voiceLangCode);
+  if (!voice) return undefined;
+  if (!langCode) return undefined;
+  const speed = Number.parseFloat(form.voiceSpeed);
+  const temperature = Number.parseFloat(form.voiceTemperature);
+  return {
+    voice,
+    langCode,
+    ...(Number.isFinite(speed) && speed > 0 ? { speed } : {}),
+    ...(trimText(form.voiceRefAudio) ? { refAudio: trimText(form.voiceRefAudio) } : {}),
+    ...(trimText(form.voiceRefText) ? { refText: trimText(form.voiceRefText) } : {}),
+    ...(trimText(form.voiceInstruct) ? { instruct: trimText(form.voiceInstruct) } : {}),
+    ...(Number.isFinite(temperature) && temperature >= 0 ? { temperature } : {}),
+  };
 }
 
 export function buildContextBudget(form: HubCatEditorFormState) {

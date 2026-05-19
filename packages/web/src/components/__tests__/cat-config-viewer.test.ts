@@ -1,7 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { CatOverviewTab, type ConfigData } from '@/components/config-viewer-tabs';
+import { CatOverviewTab, type ConfigData, SystemTab } from '@/components/config-viewer-tabs';
 import type { CatData } from '@/hooks/useCatData';
 
 const CONFIG: ConfigData & {
@@ -29,9 +29,7 @@ const CONFIG: ConfigData & {
   },
   a2a: { enabled: true, maxDepth: 2 },
   memory: { enabled: true, maxKeysPerThread: 50 },
-  codexExecution: { model: 'codex-mini-latest', authMode: 'oauth' as const, passModelArg: true },
   governance: { degradationEnabled: true, doneTimeoutMs: 300000, heartbeatIntervalMs: 30000 },
-  ui: { bubbleDefaults: { thinking: 'collapsed' as const, cliOutput: 'expanded' as const } },
 };
 
 const CATS: CatData[] = [
@@ -46,7 +44,7 @@ const CATS: CatData[] = [
     color: { primary: '#6366f1', secondary: '#818cf8' },
     mentionPatterns: ['@opus', '@布偶猫'],
     avatar: '',
-    roleDescription: '核心架构师',
+    roleDescription: '',
     personality: '',
     roster: {
       family: 'ragdoll',
@@ -67,7 +65,7 @@ const CATS: CatData[] = [
     color: { primary: '#22c55e', secondary: '#4ade80' },
     mentionPatterns: ['@codex', '@缅因猫'],
     avatar: '',
-    roleDescription: '代码审查与安全',
+    roleDescription: '',
     personality: '',
     roster: {
       family: 'maine-coon',
@@ -88,7 +86,7 @@ const CATS: CatData[] = [
     color: { primary: '#f59e0b', secondary: '#fcd34d' },
     mentionPatterns: ['@antigravity', '@孟加拉猫'],
     avatar: '',
-    roleDescription: '浏览器自动化',
+    roleDescription: '',
     personality: '',
     roster: {
       family: 'bengal',
@@ -101,7 +99,7 @@ const CATS: CatData[] = [
 ];
 
 describe('CatOverviewTab', () => {
-  it('renders member cards with name, role and model — no budget internals', () => {
+  it('renders the screen-2 overview as owner-first summary cards without budget internals', () => {
     const html = renderToStaticMarkup(
       React.createElement(CatOverviewTab, {
         config: CONFIG,
@@ -111,22 +109,47 @@ describe('CatOverviewTab', () => {
         onToggleAvailability: () => {},
       }),
     );
-    expect(html).toContain('布偶猫 宪宪');
-    expect(html).toContain('缅因猫 砚砚');
-    expect(html).toContain('孟加拉猫 阿吉');
-    expect(html).toContain('核心架构师');
-    expect(html).toContain('添加成员');
+    expect(html).toContain('Co-worker');
+    expect(html).toContain('Owner');
+    expect(html).toContain('#E29578');
+    expect(html).toContain('/avatars/owner-custom.png');
+    expect(html.indexOf('Co-worker')).toBeLessThan(html.indexOf('布偶猫 · 宪宪'));
+    expect(html).toContain('全部');
+    expect(html).toContain('CLI（OAuth）');
+    expect(html).toContain('CLI（配置）');
+    expect(html).toContain('已停用');
+    expect(html.indexOf('+ 添加成员')).toBeLessThan(html.indexOf('布偶猫 · 宪宪'));
+    expect(html).toContain('布偶猫 · 宪宪');
+    expect(html).toContain('缅因猫 · 砚砚');
+    expect(html).toContain('孟加拉猫 · 阿吉');
+    expect(html).toContain('CLI（OAuth）账号');
+    expect(html).toContain('CLI（配置） · sponsor1');
+    expect(html).toContain('已启用');
+    expect(html).toContain('停用成员');
+    expect(html).toContain('启用成员');
+    expect(html).toContain('@布偶猫');
+    expect(html).toContain('只能编辑，不能新增或删除');
+    expect(html).toContain('点击卡片进入成员配置');
     expect(html).toContain('gemini-bridge');
+    expect(html).toContain('添加成员');
+    expect(html).not.toContain('Owner 信息独立维护');
+    expect(html).not.toContain('Locked');
+    expect(html).not.toContain('border-dashed');
+    expect(html).not.toContain('md:grid-cols-2');
+    expect(html).not.toContain('Client');
+    expect(html).not.toContain('Account');
+    expect(html).not.toContain('Model');
     expect(html).not.toContain('Prompt 上限');
     expect(html).not.toContain('150k tokens');
     expect(html).not.toContain('原生 (--mcp-config)');
     expect(html).not.toContain('HTTP 回调注入');
     expect(html).not.toContain('>编辑<');
     expect(html).not.toContain('编辑成员');
+    expect(html).not.toContain('Lead');
     expect(html).not.toContain('npx antigravity --bridge');
   });
 
-  it('anchors the first-member guide target to the card section', () => {
+  it('anchors the first-member guide target to the edit-only control, not the whole card', () => {
     const html = renderToStaticMarkup(
       React.createElement(CatOverviewTab, {
         config: CONFIG,
@@ -138,27 +161,45 @@ describe('CatOverviewTab', () => {
     root.innerHTML = html;
 
     const guideTarget = root.querySelector('[data-guide-id="cats.first-member"]');
+
     expect(guideTarget).toBeTruthy();
-    expect(guideTarget?.tagName).toBe('SECTION');
-    expect(guideTarget?.textContent).toContain('布偶猫 宪宪');
+    expect(guideTarget?.getAttribute('role')).toBe('button');
+    expect(guideTarget?.textContent).toContain('布偶猫 · 宪宪');
+  });
+});
+
+describe('SystemTab', () => {
+  it('renders A2A config', () => {
+    const html = renderToStaticMarkup(React.createElement(SystemTab, { config: CONFIG }));
+    expect(html).toContain('A2A');
+    expect(html).toContain('2');
   });
 
-  it('uses the shared settings resource-card contract for member rows and actions', () => {
-    const html = renderToStaticMarkup(
-      React.createElement(CatOverviewTab, {
-        config: CONFIG,
-        cats: CATS,
-        onEditMember: () => {},
-        onDeleteMember: () => {},
-        onToggleAvailability: () => {},
-      }),
-    );
-    const root = document.createElement('div');
-    root.innerHTML = html;
+  it('renders memory config', () => {
+    const html = renderToStaticMarkup(React.createElement(SystemTab, { config: CONFIG }));
+    expect(html).toContain('记忆');
+    expect(html).toContain('50');
+  });
 
-    const firstCard = root.querySelector('[data-guide-id="cats.first-member"]');
-    expect(firstCard?.className).toContain('settings-resource-card');
-    expect(firstCard?.querySelector('button[aria-label="删除成员"]')?.className).toContain('settings-resource-action');
-    expect(firstCard?.querySelector('button[aria-pressed]')?.className).toContain('settings-resource-toggle');
+  it('renders governance config', () => {
+    const html = renderToStaticMarkup(React.createElement(SystemTab, { config: CONFIG }));
+    expect(html).toContain('治理');
+    expect(html).toContain('300s');
+    expect(html).toContain('30s');
+  });
+
+  it('renders codex execution config', () => {
+    const nextConfig = {
+      ...CONFIG,
+      codexExecution: {
+        model: 'gpt-5.3-codex',
+        authMode: 'oauth',
+        passModelArg: true,
+      },
+    } as unknown as ConfigData;
+
+    const html = renderToStaticMarkup(React.createElement(SystemTab, { config: nextConfig }));
+    expect(html).toContain('gpt-5.3-codex');
+    expect(html).toContain('oauth');
   });
 });

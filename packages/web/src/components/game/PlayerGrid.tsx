@@ -76,12 +76,12 @@ export function PlayerGrid({ seats, activeSeatId, gameStatus, onSeatClick }: Pla
               className="w-7 h-7 rounded-full object-cover border-2 border-ww-subtle"
             />
             <span
-              className={`text-[9px] font-semibold truncate max-w-[52px] ${isActive ? 'text-ww-base font-bold' : ''}`}
+              className={`text-[10px] font-semibold truncate max-w-[52px] ${isActive ? 'text-ww-base font-bold' : ''}`}
             >
               {seat.seatId} {seat.displayName}
             </span>
             <span
-              className={`text-[8px] font-mono ${isActive ? 'text-ww-base font-semibold' : 'text-ww-dim'} ${deriveActionStatusClass(seat.actionStatus)}`}
+              className={`text-[10px] font-mono ${isActive ? 'text-ww-base font-semibold' : 'text-ww-dim'} ${deriveActionStatusClass(seat.actionStatus)}`}
             >
               {isActive
                 ? '发言中'

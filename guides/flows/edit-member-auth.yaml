@@ -10,11 +10,11 @@ description: 引导你为成员配置认证信息和默认模型
 steps:
   - id: open-hub
     target: hub.trigger
-    tips: 点击这里打开设置
+    tips: 点击这里打开 Hub 控制台
     advance: click
 
   - id: go-to-cats
-    target: settings.members
+    target: cats.overview
     tips: 进入成员管理页面
     advance: click
 

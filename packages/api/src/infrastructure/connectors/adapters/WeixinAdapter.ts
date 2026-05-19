@@ -33,21 +33,30 @@ const QRCODE_POLL_INTERVAL_MS = 2_000;
 const QRCODE_STATUS_POLL_TIMEOUT_MS = 40_000;
 /** QR code timeout (5 minutes) */
 const QRCODE_TIMEOUT_MS = 5 * 60 * 1000;
+const ILINK_TRANSIENT_ERRCODE = -2;
+const SENDMESSAGE_MAX_ATTEMPTS = 2;
+const SENDMESSAGE_RETRY_DELAY_MS = 250;
+const CONTENT_DEDUP_TTL_MS = 5 * 60 * 1000;
+const CONTENT_DEDUP_MAX_ENTRIES = 10_000;
 
 /**
  * Voice item payload mode for WeChat voice delivery.
- * - `minimal` (default): send only `{ media }` — safest fallback ("1s fake" but visible).
+ * - `minimal`: send only `{ media }` — experimental native voice payload.
  * - `playtime`: send `{ media, playtime }` — shows correct duration but won't play.
  * - `playtime-sec`: send `{ media, playtime }` with playtime in SECONDS (not ms) — hypothesis test.
  * - `playtime-encode`: send `{ media, encode_type: 6, playtime }` — confirmed broken (encode_type is poison).
  * - `metadata`: send all SILK fields — confirmed broken (voice "completely gone").
  *
  * Runtime-configurable via WEIXIN_VOICE_ITEM_MODE so 铲屎官 can A/B test without code changes.
+ * Default audio delivery stays on file_item attachment because native voice_item is unreliable.
  */
-type WeixinVoiceItemMode = 'minimal' | 'playtime' | 'playtime-sec' | 'playtime-encode' | 'metadata';
+const VOICE_ITEM_MODES = ['minimal', 'playtime', 'playtime-sec', 'playtime-encode', 'metadata'] as const;
+type WeixinVoiceItemMode = (typeof VOICE_ITEM_MODES)[number];
+const VOICE_ITEM_MODE_VALUES = new Set<string>(VOICE_ITEM_MODES);
 const UNSAFE_VOICE_MODE_ENV = 'WEIXIN_ENABLE_UNSAFE_VOICE_MODES';
 const UNSAFE_VOICE_MODES = new Set<WeixinVoiceItemMode>(['playtime-encode', 'metadata']);
 const CAPTURE_INBOUND_VOICE_ENV = 'WEIXIN_CAPTURE_INBOUND_VOICE_MEDIA';
+const VOICE_ITEM_MODE_ENV = 'WEIXIN_VOICE_ITEM_MODE';
 
 function isUnsafeVoiceModeEnabled(): boolean {
   return process.env[UNSAFE_VOICE_MODE_ENV] === '1';
@@ -57,9 +66,18 @@ function isInboundVoiceCaptureEnabled(): boolean {
   return process.env[CAPTURE_INBOUND_VOICE_ENV] === '1';
 }
 
+function readWeixinVoiceItemMode(): WeixinVoiceItemMode | undefined {
+  const mode = process.env[VOICE_ITEM_MODE_ENV]?.trim().toLowerCase();
+  return mode && VOICE_ITEM_MODE_VALUES.has(mode) ? (mode as WeixinVoiceItemMode) : undefined;
+}
+
+function isNativeVoiceItemRequested(): boolean {
+  return readWeixinVoiceItemMode() !== undefined;
+}
+
 function getWeixinVoiceItemMode(log?: FastifyBaseLogger): WeixinVoiceItemMode {
-  const mode = process.env.WEIXIN_VOICE_ITEM_MODE?.trim().toLowerCase();
-  if (mode === 'playtime' || mode === 'playtime-sec' || mode === 'playtime-encode' || mode === 'metadata') {
+  const mode = readWeixinVoiceItemMode();
+  if (mode) {
     if (UNSAFE_VOICE_MODES.has(mode) && !isUnsafeVoiceModeEnabled()) {
       log?.warn(
         { requestedMode: mode, fallbackMode: 'playtime', unsafeModeEnv: UNSAFE_VOICE_MODE_ENV },
@@ -84,7 +102,19 @@ export interface WeixinInboundMessage {
   messageId: string;
   senderId: string;
   contextToken: string;
+  createdAtMs?: number;
   attachments?: WeixinAttachment[];
+}
+
+export interface WeixinSessionState {
+  getUpdatesBuf?: string;
+  contextTokens?: Record<string, string>;
+}
+
+export interface WeixinSessionStateStore {
+  load(): Promise<WeixinSessionState | null>;
+  save(state: WeixinSessionState): Promise<void>;
+  clear(): Promise<void>;
 }
 
 export interface WeixinAttachment {
@@ -112,21 +142,27 @@ interface ILinkMessageItem {
   type?: number; // 1=TEXT, 2=IMAGE, 3=VOICE, 4=FILE, 5=VIDEO
   text_item?: { text?: string };
   image_item?: {
-    media?: { encrypt_query_param?: string; aes_key?: string };
+    media?: ILinkMediaRef;
     url?: string;
     aeskey?: string;
   };
   voice_item?: {
-    media?: { encrypt_query_param?: string; aes_key?: string };
+    media?: ILinkMediaRef;
     text?: string;
   };
   file_item?: {
-    media?: { encrypt_query_param?: string; aes_key?: string };
+    media?: ILinkMediaRef;
     file_name?: string;
   };
   video_item?: {
-    media?: { encrypt_query_param?: string; aes_key?: string };
+    media?: ILinkMediaRef;
   };
+}
+
+interface ILinkMediaRef {
+  encrypt_query_param?: string;
+  full_url?: string;
+  aes_key?: string;
 }
 
 /**
@@ -223,13 +259,16 @@ export class WeixinAdapter implements IOutboundAdapter {
   >();
   private fetchFn: typeof fetch = globalThis.fetch;
   private sessionExpiredCallback: (() => void) | null = null;
+  private readonly sessionStateStore: WeixinSessionStateStore | undefined;
+  private readonly contentDedupFingerprints = new Map<string, number>();
   private readonly typingTickets = new Map<string, string>();
   private readonly typingTimers = new Map<string, ReturnType<typeof setInterval>>();
   private readonly typingEpoch = new Map<string, number>();
 
-  constructor(botToken: string, log: FastifyBaseLogger) {
+  constructor(botToken: string, log: FastifyBaseLogger, sessionStateStore?: WeixinSessionStateStore) {
     this.botToken = botToken;
     this.log = log;
+    this.sessionStateStore = sessionStateStore;
   }
 
   hasBotToken(): boolean {
@@ -237,7 +276,18 @@ export class WeixinAdapter implements IOutboundAdapter {
   }
 
   setBotToken(token: string): void {
+    const changed = this.botToken !== token;
     this.botToken = token;
+    if (changed) {
+      if (this.polling) {
+        this.log.info('[WeixinAdapter] Bot token changed while polling — preserving live session state');
+        return;
+      }
+      this.clearSessionState();
+      void this.clearPersistedSessionState(
+        '[WeixinAdapter] Failed to clear persisted session state after token change',
+      );
+    }
   }
 
   /**
@@ -247,8 +297,8 @@ export class WeixinAdapter implements IOutboundAdapter {
   async disconnect(): Promise<void> {
     await this.stopPolling();
     this.botToken = '';
-    this.contextTokens.clear();
-    this.getUpdatesBuf = '';
+    this.clearSessionState();
+    await this.clearPersistedSessionState('[WeixinAdapter] Failed to clear persisted session state on disconnect');
     // Reject all pending sendReply promises before clearing (P1: no dangling promises)
     const disconnectError = new Error('Disconnected by user');
     for (const [, bucket] of this.pendingReplies) {
@@ -264,6 +314,27 @@ export class WeixinAdapter implements IOutboundAdapter {
 
   setOnSessionExpired(cb: () => void): void {
     this.sessionExpiredCallback = cb;
+  }
+
+  async restoreSessionState(): Promise<void> {
+    if (!this.sessionStateStore) return;
+    const state = await this.sessionStateStore.load().catch((err) => {
+      this.log.warn({ err }, '[WeixinAdapter] Failed to restore session state');
+      return null;
+    });
+    if (!state) return;
+
+    this.getUpdatesBuf = typeof state.getUpdatesBuf === 'string' ? state.getUpdatesBuf : '';
+    this.contextTokens.clear();
+    if (state.contextTokens) {
+      for (const [chatId, token] of Object.entries(state.contextTokens)) {
+        if (typeof token === 'string' && token) this.contextTokens.set(chatId, token);
+      }
+    }
+    this.log.info(
+      { cursorRestored: Boolean(this.getUpdatesBuf), contextTokenCount: this.contextTokens.size },
+      '[WeixinAdapter] Session state restored',
+    );
   }
 
   // ── Auth headers ──
@@ -314,6 +385,17 @@ export class WeixinAdapter implements IOutboundAdapter {
    * Parse a single iLink WeixinMessage into our standard format.
    * Uses item_list[].type to determine message kind (TEXT=1, IMAGE=2, VOICE=3, FILE=4, VIDEO=5).
    */
+  private buildMediaKey(media: ILinkMediaRef | undefined): string {
+    if (!media?.aes_key) return '';
+    if (media.full_url) {
+      return JSON.stringify({ fullUrl: media.full_url, aesKey: media.aes_key });
+    }
+    if (media.encrypt_query_param) {
+      return JSON.stringify({ encryptQueryParam: media.encrypt_query_param, aesKey: media.aes_key });
+    }
+    return '';
+  }
+
   private parseMessage(msg: ILinkWeixinMessage): WeixinInboundMessage | null {
     const senderId = msg.from_user_id;
     const contextToken = msg.context_token;
@@ -341,37 +423,34 @@ export class WeixinAdapter implements IOutboundAdapter {
         messageId: msgId,
         senderId,
         contextToken,
+        createdAtMs: msg.create_time_ms,
       };
     }
 
     if (itemType === MessageItemType.IMAGE) {
       const media = firstItem.image_item?.media;
-      const mediaKey =
-        media?.encrypt_query_param && media?.aes_key
-          ? JSON.stringify({ encryptQueryParam: media.encrypt_query_param, aesKey: media.aes_key })
-          : '';
+      const mediaKey = this.buildMediaKey(media);
       return {
         chatId: senderId,
         text: '[图片]',
         messageId: msgId,
         senderId,
         contextToken,
+        createdAtMs: msg.create_time_ms,
         attachments: mediaKey ? [{ type: 'image' as const, mediaUrl: mediaKey }] : undefined,
       };
     }
 
     if (itemType === MessageItemType.VOICE) {
       const media = firstItem.voice_item?.media;
-      const mediaKey =
-        media?.encrypt_query_param && media?.aes_key
-          ? JSON.stringify({ encryptQueryParam: media.encrypt_query_param, aesKey: media.aes_key })
-          : '';
+      const mediaKey = this.buildMediaKey(media);
       return {
         chatId: senderId,
         text: firstItem.voice_item?.text || '[语音]',
         messageId: msgId,
         senderId,
         contextToken,
+        createdAtMs: msg.create_time_ms,
         attachments:
           isInboundVoiceCaptureEnabled() && mediaKey
             ? [{ type: 'file' as const, mediaUrl: mediaKey, fileName: `weixin-voice-${msgId}.silk` }]
@@ -381,16 +460,14 @@ export class WeixinAdapter implements IOutboundAdapter {
 
     if (itemType === MessageItemType.FILE) {
       const media = firstItem.file_item?.media;
-      const mediaKey =
-        media?.encrypt_query_param && media?.aes_key
-          ? JSON.stringify({ encryptQueryParam: media.encrypt_query_param, aesKey: media.aes_key })
-          : '';
+      const mediaKey = this.buildMediaKey(media);
       return {
         chatId: senderId,
         text: `[文件] ${firstItem.file_item?.file_name ?? ''}`.trim(),
         messageId: msgId,
         senderId,
         contextToken,
+        createdAtMs: msg.create_time_ms,
         attachments: mediaKey
           ? [{ type: 'file' as const, mediaUrl: mediaKey, fileName: firstItem.file_item?.file_name }]
           : undefined,
@@ -447,13 +524,21 @@ export class WeixinAdapter implements IOutboundAdapter {
             break;
           }
 
-          this.getUpdatesBuf = newCursor;
           this.consecutiveErrors = 0;
 
           for (const msg of messages) {
             const tokenHash = msg.contextToken.slice(-8);
             this.contextTokens.set(msg.chatId, msg.contextToken);
+            this.persistSessionState();
             this.log.info({ chatId: msg.chatId, tokenHash }, '[WeixinAdapter] Inbound token cached');
+
+            if (this.shouldDropDuplicateContent(msg)) {
+              this.log.info(
+                { chatId: msg.chatId, messageId: msg.messageId },
+                '[WeixinAdapter] Duplicate content skipped',
+              );
+              continue;
+            }
 
             // Start typing indicator (non-blocking, epoch-guarded against stale starts)
             const epoch = (this.typingEpoch.get(msg.chatId) ?? 0) + 1;
@@ -471,6 +556,11 @@ export class WeixinAdapter implements IOutboundAdapter {
             } catch (err) {
               this.log.error({ err, chatId: msg.chatId }, '[WeixinAdapter] Handler error');
             }
+          }
+
+          if (this.getUpdatesBuf !== newCursor) {
+            this.getUpdatesBuf = newCursor;
+            this.persistSessionState();
           }
         } catch (err) {
           if (!this.polling) break;
@@ -721,9 +811,10 @@ export class WeixinAdapter implements IOutboundAdapter {
       tempFilePath = downloaded;
     }
 
-    // WeChat voice messages require SILK codec; when conversion fails, degrade to file delivery.
+    // Native WeChat voice messages require SILK codec. Keep that path opt-in; default audio is a file attachment.
+    const nativeVoiceRequested = payload.type === 'audio' && isNativeVoiceItemRequested();
     let voiceMeta: { durationMs: number; sampleRate: number } | undefined;
-    if (payload.type === 'audio' && actualFilePath.endsWith('.wav')) {
+    if (nativeVoiceRequested && actualFilePath.endsWith('.wav')) {
       const converted = await this.convertWavToSilk(actualFilePath);
       if (converted) {
         // If we downloaded to temp, clean up the download temp
@@ -739,7 +830,7 @@ export class WeixinAdapter implements IOutboundAdapter {
 
     const { uploadMediaToCdn, UploadMediaType } = await import('./weixin-cdn.js');
     const cdnBaseUrl = 'https://novac2c.cdn.weixin.qq.com/c2c';
-    const audioAsVoice = payload.type === 'audio' && actualFilePath.endsWith('.silk');
+    const audioAsVoice = nativeVoiceRequested && actualFilePath.endsWith('.silk');
     const mediaTypeMap = {
       image: UploadMediaType.IMAGE,
       file: UploadMediaType.FILE,
@@ -800,7 +891,7 @@ export class WeixinAdapter implements IOutboundAdapter {
           {
             chatId: externalChatId,
             mode: voiceMode,
-            requestedMode: process.env.WEIXIN_VOICE_ITEM_MODE,
+            requestedMode: process.env[VOICE_ITEM_MODE_ENV],
             unsafeVoiceModesEnabled: isUnsafeVoiceModeEnabled(),
             durationMs: voiceMeta?.durationMs,
           },
@@ -828,31 +919,7 @@ export class WeixinAdapter implements IOutboundAdapter {
         base_info: { channel_version: '1.0.0' },
       };
 
-      const res = await this.fetchFn(`${ILINK_BASE_URL}/ilink/bot/sendmessage`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text().catch(() => '');
-        throw new Error(`sendMedia HTTP ${res.status}: ${errorText}`);
-      }
-
-      const rawText = await res.text().catch(() => '');
-      if (!rawText.trim()) {
-        throw new Error('sendMedia returned empty response body');
-      }
-      let data: ILinkSendResponse;
-      try {
-        data = JSON.parse(rawText) as ILinkSendResponse;
-      } catch {
-        throw new Error(`sendMedia returned non-JSON response: ${rawText}`);
-      }
-      const errorCode = data.errcode ?? data.ret;
-      if (errorCode && errorCode !== 0) {
-        throw new Error(`sendMedia errcode ${errorCode}: ${data.errmsg ?? 'unknown'}`);
-      }
+      await this.postSendMessageWithRetry('sendMedia', externalChatId, body);
 
       // BUG-5: token is reusable — do NOT consume/delete.
       this.log.info(
@@ -1042,6 +1109,53 @@ export class WeixinAdapter implements IOutboundAdapter {
 
     this.log.info({ chatId, textLen: text.length }, '[WeixinAdapter] sendMessageApi() calling iLink API');
 
+    await this.postSendMessageWithRetry('sendmessage', chatId, body);
+  }
+
+  private async postSendMessageWithRetry(
+    operation: 'sendmessage' | 'sendMedia',
+    chatId: string,
+    body: Record<string, unknown>,
+  ): Promise<void> {
+    for (let attempt = 1; attempt <= SENDMESSAGE_MAX_ATTEMPTS; attempt++) {
+      const { data, rawText } = await this.postSendMessageOnce(operation, chatId, body);
+      const errorCode = data.errcode !== undefined ? data.errcode : data.ret;
+
+      this.log.debug({ chatId, rawText }, `[WeixinAdapter] ${operation} raw response`);
+      this.log.info(
+        { chatId, attempt, errcode: errorCode, errmsg: data.errmsg },
+        `[WeixinAdapter] ${operation} response received`,
+      );
+
+      if (errorCode == null) return;
+      if (errorCode === 0) return;
+
+      const errmsg = data.errmsg === undefined ? 'unknown' : data.errmsg;
+      const classification = this.classifySendError(errorCode, errmsg);
+      if (classification === 'stale-session') {
+        this.log.error({ chatId, errcode: errorCode, errmsg }, `[WeixinAdapter] ${operation} stale session`);
+        this.sessionExpiredCallback?.();
+        throw new Error(`${operation} stale session errcode ${errorCode}: ${errmsg}`);
+      }
+
+      if (classification === 'retryable' && attempt < SENDMESSAGE_MAX_ATTEMPTS) {
+        this.log.warn(
+          { chatId, errcode: errorCode, errmsg, attempt },
+          `[WeixinAdapter] ${operation} transient iLink error — retrying`,
+        );
+        await this.sleep(SENDMESSAGE_RETRY_DELAY_MS);
+        continue;
+      }
+
+      throw new Error(`${operation} errcode ${errorCode}: ${errmsg}`);
+    }
+  }
+
+  private async postSendMessageOnce(
+    operation: 'sendmessage' | 'sendMedia',
+    chatId: string,
+    body: Record<string, unknown>,
+  ): Promise<{ data: ILinkSendResponse; rawText: string }> {
     const res = await this.fetchFn(`${ILINK_BASE_URL}/ilink/bot/sendmessage`, {
       method: 'POST',
       headers: this.getHeaders(),
@@ -1050,47 +1164,38 @@ export class WeixinAdapter implements IOutboundAdapter {
 
     if (!res.ok) {
       const errorText = await res.text().catch(() => '');
-      this.log.error({ chatId, status: res.status, errorText }, '[WeixinAdapter] sendMessageApi() HTTP error');
-      throw new Error(`sendmessage HTTP ${res.status}: ${errorText}`);
+      this.log.error({ chatId, status: res.status, errorText }, `[WeixinAdapter] ${operation} HTTP error`);
+      throw new Error(`${operation} HTTP ${res.status}: ${errorText}`);
     }
 
-    let rawText = '';
-    let data: ILinkSendResponse = {};
     if (typeof res.text === 'function') {
-      rawText = await res.text().catch(() => '');
+      const rawText = await res.text().catch(() => '');
       if (!rawText.trim()) {
-        this.log.error({ chatId }, '[WeixinAdapter] sendMessageApi() returned empty body');
-        throw new Error('sendmessage returned empty response body');
+        this.log.error({ chatId }, `[WeixinAdapter] ${operation} returned empty body`);
+        throw new Error(`${operation} returned empty response body`);
       }
       try {
-        data = JSON.parse(rawText) as ILinkSendResponse;
+        return { data: JSON.parse(rawText) as ILinkSendResponse, rawText };
       } catch (error) {
-        this.log.error(
-          { chatId, rawText, error: String(error) },
-          '[WeixinAdapter] sendMessageApi() returned non-JSON body',
-        );
-        throw new Error(`sendmessage returned non-JSON response: ${rawText}`);
+        this.log.error({ chatId, rawText, error: String(error) }, `[WeixinAdapter] ${operation} non-JSON body`);
+        throw new Error(`${operation} returned non-JSON response: ${rawText}`);
       }
-    } else if (typeof res.json === 'function') {
-      data = (await res.json()) as ILinkSendResponse;
-      rawText = JSON.stringify(data);
-    } else {
-      this.log.error({ chatId }, '[WeixinAdapter] sendMessageApi() response body reader missing');
-      throw new Error('sendmessage response body unreadable');
     }
 
-    const errorCode = data.errcode ?? data.ret;
-    this.log.debug({ chatId, rawText }, '[WeixinAdapter] sendMessageApi() raw response');
-    this.log.info(
-      { chatId, errcode: errorCode, errmsg: data.errmsg },
-      '[WeixinAdapter] sendMessageApi() response received',
-    );
-    if (errorCode && errorCode !== 0) {
-      if (errorCode === ERRCODE_SESSION_EXPIRED) {
-        this.log.error('[WeixinAdapter] Session expired during sendmessage (errcode -14)');
-      }
-      throw new Error(`sendmessage errcode ${errorCode}: ${data.errmsg ?? 'unknown'}`);
+    if (typeof res.json === 'function') {
+      const data = (await res.json()) as ILinkSendResponse;
+      return { data, rawText: JSON.stringify(data) };
     }
+
+    this.log.error({ chatId }, `[WeixinAdapter] ${operation} response body reader missing`);
+    throw new Error(`${operation} response body unreadable`);
+  }
+
+  private classifySendError(errorCode: number, errmsg: string): 'stale-session' | 'retryable' | 'fatal' {
+    if (errorCode === ERRCODE_SESSION_EXPIRED) return 'stale-session';
+    if (errorCode === ILINK_TRANSIENT_ERRCODE && /unknown error/i.test(errmsg)) return 'stale-session';
+    if (errorCode === ILINK_TRANSIENT_ERRCODE) return 'retryable';
+    return 'fatal';
   }
 
   // ── Helpers ──
@@ -1136,6 +1241,69 @@ export class WeixinAdapter implements IOutboundAdapter {
    */
   hasContextToken(chatId: string): boolean {
     return this.contextTokens.has(chatId);
+  }
+
+  private clearSessionState(): void {
+    this.contextTokens.clear();
+    this.getUpdatesBuf = '';
+    this.contentDedupFingerprints.clear();
+  }
+
+  private async clearPersistedSessionState(warnMessage: string): Promise<void> {
+    if (!this.sessionStateStore) return;
+    await this.sessionStateStore.clear().catch((err) => {
+      this.log.warn({ err }, warnMessage);
+    });
+  }
+
+  private persistSessionState(): void {
+    if (!this.sessionStateStore) return;
+    const contextTokens = Object.fromEntries(this.contextTokens.entries());
+    void this.sessionStateStore
+      .save({
+        getUpdatesBuf: this.getUpdatesBuf,
+        contextTokens,
+      })
+      .catch((err) => {
+        this.log.warn({ err }, '[WeixinAdapter] Failed to persist session state');
+      });
+  }
+
+  private shouldDropDuplicateContent(msg: WeixinInboundMessage): boolean {
+    if (msg.createdAtMs == null) return false;
+
+    const now = Date.now();
+    const attachments = msg.attachments
+      ?.map((a) => {
+        const fileName = a.fileName === undefined ? '' : a.fileName;
+        return `${a.type}:${a.mediaUrl}:${fileName}`;
+      })
+      .join('|');
+    const attachmentFingerprint = attachments === undefined ? '' : attachments;
+    const fingerprint = crypto
+      .createHash('sha256')
+      .update(`${msg.chatId}\0${msg.contextToken}\0${msg.createdAtMs}\0${msg.text}\0${attachmentFingerprint}`)
+      .digest('hex');
+    const expiresAt = this.contentDedupFingerprints.get(fingerprint);
+    if (expiresAt && expiresAt > now) return true;
+
+    if (this.contentDedupFingerprints.size >= CONTENT_DEDUP_MAX_ENTRIES) {
+      this.pruneContentDedupFingerprints(now);
+    }
+    this.contentDedupFingerprints.set(fingerprint, now + CONTENT_DEDUP_TTL_MS);
+    return false;
+  }
+
+  private pruneContentDedupFingerprints(now: number): void {
+    for (const [fingerprint, expiresAt] of this.contentDedupFingerprints) {
+      if (expiresAt <= now) {
+        this.contentDedupFingerprints.delete(fingerprint);
+      }
+      if (expiresAt > now && this.contentDedupFingerprints.size >= CONTENT_DEDUP_MAX_ENTRIES) {
+        this.contentDedupFingerprints.delete(fingerprint);
+      }
+      if (this.contentDedupFingerprints.size < CONTENT_DEDUP_MAX_ENTRIES) break;
+    }
   }
 
   private sleep(ms: number): Promise<void> {

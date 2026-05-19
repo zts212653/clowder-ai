@@ -1,0 +1,13 @@
+randomnoise0xDEADBEEF
+__webpack_require__.r(exports)
+You are Claude Code, Anthropic's official CLI for Claude.
+/Users/build/node_modules/.bin/whatever
+# Doing tasks
+Default to writing no comments. Only add one when the WHY is non-obvious.
+When operations are independent, prefer running multiple tools in a single response.
+Before running destructive operations, prefer a safer alternative when one exists.
+CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT
+var Q9=function(){return 42};exports.zZ=Q9
+You are a Claude agent, built on Anthropic's Claude Agent SDK.
+# Using your tools
+You are Claude Code, Anthropic's official CLI for Claude.",WL9="...",zC1=[N98,WL9];function _zH(H){return H.filter(x=>x.type!=="hook")}var ai_=R(()=>{FH()});junkjunkjunkjunkjunkjunkjunkjunkjunkjunkjunkjunkjunkjunkjunkjunk

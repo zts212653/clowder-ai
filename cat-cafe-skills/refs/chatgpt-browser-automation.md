@@ -196,7 +196,7 @@ a.click();
 const fileInput = document.querySelectorAll('input[type="file"]')[0];
 
 // 用 DataTransfer API 创建文件
-const content = fs.readFileSync('docs/research/xxx.md', 'utf-8'); // 在猫端读
+const content = fs.readFileSync('project-research/xxx.md', 'utf-8'); // 在猫端读
 const file = new File([content], 'research-context.md', { type: 'text/markdown' });
 const dataTransfer = new DataTransfer();
 dataTransfer.items.add(file);
@@ -253,7 +253,7 @@ fileInput.dispatchEvent(new Event('change', { bubbles: true }));
 5. 点击发送 / 按 Enter
 6. 轮询等待完成（检查停止按钮消失，每 5s，最长 5min）
 7. 点击复制按钮 → 读剪贴板 → window.__clipResult
-8. 将内容写入 docs/research/YYYY-MM-DD-{topic}/chatgpt/report.md
+8. 将内容写入 project-research/YYYY-MM-DD-{topic}/chatgpt/report.md
 ```
 
 ### 深度研究模式（全自动 ✅）
@@ -269,7 +269,7 @@ fileInput.dispatchEvent(new Event('change', { bubbles: true }));
 8. JS: fetch('/api/auth/session') → 拿 accessToken
 9. JS: fetch('/backend-api/conversation/{id}', {headers: {Authorization: 'Bearer '+token}})
 10. 解析 JSON: 找最大 tool 消息 → widget state → report_message.content.parts[0]
-11. Blob 下载 → 猫用 cp 移到 docs/research/YYYY-MM-DD-{topic}/chatgpt/report.md
+11. Blob 下载 → 猫用 cp 移到 project-research/YYYY-MM-DD-{topic}/chatgpt/report.md
 ```
 
 ## 图片生成（2026-03-10 实测验证 ✅）

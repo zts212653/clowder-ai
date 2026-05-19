@@ -22,10 +22,10 @@ const SECTION_STYLES: Record<SectionKey, { text: string; border: string; section
   blocked: {
     text: 'text-cafe-accent',
     border: 'border-l-cafe-accent',
-    sectionBg: 'bg-conn-red-bg dark:bg-conn-red-bg/20',
+    sectionBg: 'bg-conn-red-bg dark:bg-red-950/20',
   },
   todo: { text: 'text-cafe-muted', border: 'border-l-cafe-muted', sectionBg: '' },
-  done: { text: 'text-conn-emerald-text', border: 'border-l-[var(--color-conn-emerald-text)]', sectionBg: '' },
+  done: { text: 'text-conn-green-text', border: 'border-l-conn-green-text', sectionBg: '' },
 };
 
 function getDefaultCollapsed(): Record<SectionKey, boolean> {
@@ -78,7 +78,7 @@ function EmptyState({ onCreateFirst }: { onCreateFirst: () => void }) {
       <button
         type="button"
         onClick={onCreateFirst}
-        className="text-xs font-semibold bg-cafe-crosspost text-[var(--cafe-surface)] px-4 py-2 rounded-lg transition-colors hover:bg-cafe-crosspost/90"
+        className="text-xs font-semibold bg-cafe-crosspost text-white px-4 py-2 rounded-lg transition-colors hover:bg-cafe-crosspost/90"
       >
         创建第一颗毛线球
       </button>
@@ -130,21 +130,21 @@ export function TaskBoardPanel() {
   return (
     <div className="flex flex-col h-full bg-cafe-surface">
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-[var(--console-border-soft)]">
+      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-cafe">
         <span className="text-xs font-semibold text-cafe-secondary">
           毛线球 · {tasks.length === 0 ? '暂无任务' : '当前对话任务'}
         </span>
         <button
           type="button"
           onClick={() => setComposerOpen(true)}
-          className="ml-auto text-[10px] font-semibold bg-cafe-crosspost/80 text-[var(--cafe-surface)] px-2.5 py-1 rounded-full transition-colors hover:bg-cafe-crosspost"
+          className="ml-auto text-[10px] font-semibold bg-cafe-crosspost/80 text-white px-2.5 py-1 rounded-full transition-colors hover:bg-cafe-crosspost"
         >
           + 新任务
         </button>
       </div>
       {/* Stats bar */}
       {tasks.length > 0 && (
-        <div className="flex items-center gap-3 px-3 py-1.5 text-[10px] text-cafe-muted border-b border-[var(--console-border-soft)]">
+        <div className="flex items-center gap-3 px-3 py-1.5 text-[10px] text-cafe-muted border-b border-cafe">
           <span>{tasks.length} 总任务</span>
           {grouped.map(({ section, tasks: st }) =>
             st.length > 0 ? (

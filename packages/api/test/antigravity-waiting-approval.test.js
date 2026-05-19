@@ -328,6 +328,140 @@ describe('Antigravity waiting approval', () => {
     assert.equal(bridge.pollForSteps.mock.calls[1].arguments[1], 1, 'retry must resume from lastDeliveredStepCount=1');
   });
 
+  test('AC-G1: keeps waiting across repeated stalls when trajectory still shows liveness', async () => {
+    const resolveOutstandingSteps = mock.fn(async () => {});
+    let pollCount = 0;
+    let trajectoryCount = 0;
+    const bridge = {
+      ...createMockServiceBridge({ resolveOutstandingSteps }),
+      getTrajectory: mock.fn(async () => {
+        trajectoryCount += 1;
+        return {
+          status: 'CASCADE_RUN_STATUS_RUNNING',
+          numTotalSteps: trajectoryCount,
+          updatedAt: Date.now() + trajectoryCount,
+        };
+      }),
+      pollForSteps: mock.fn(async function* () {
+        pollCount += 1;
+        if (pollCount <= 2) {
+          throw new Error(
+            `Antigravity stall: no activity for 60213ms (steps=${pollCount}, status=CASCADE_RUN_STATUS_RUNNING)`,
+          );
+        }
+        yield {
+          steps: [
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'DONE',
+              plannerResponse: { response: 'still alive' },
+            },
+          ],
+          cursor: {
+            baselineStepCount: 0,
+            lastDeliveredStepCount: 1,
+            terminalSeen: true,
+            lastActivityAt: Date.now(),
+          },
+        };
+      }),
+    };
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'claude-opus-4-6', bridge });
+
+    const messages = await collect(service.invoke('long task'));
+
+    const texts = messages.filter((msg) => msg.type === 'text');
+    assert.equal(texts.length, 1);
+    assert.equal(texts[0].content, 'still alive');
+    assert.equal(resolveOutstandingSteps.mock.calls.length, 0, 'liveness stall must not burn approval probes');
+    assert.equal(bridge.pollForSteps.mock.calls.length, 3, 'must continue polling after repeated live stalls');
+  });
+
+  test('AC-G1: uses bounded multi-probe budget before treating repeated dead stalls as fatal', async () => {
+    const resolveOutstandingSteps = mock.fn(async () => {});
+    let pollCount = 0;
+    const bridge = {
+      ...createMockServiceBridge({ resolveOutstandingSteps }),
+      pollForSteps: mock.fn(async function* () {
+        pollCount += 1;
+        if (pollCount <= 2) {
+          throw new Error(`Antigravity stall: no activity for 60213ms (steps=0, status=CASCADE_RUN_STATUS_RUNNING)`);
+        }
+        yield {
+          steps: [
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'DONE',
+              plannerResponse: { response: 'unblocked after second probe' },
+            },
+          ],
+          cursor: {
+            baselineStepCount: 0,
+            lastDeliveredStepCount: 1,
+            terminalSeen: true,
+            lastActivityAt: Date.now(),
+          },
+        };
+      }),
+    };
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'claude-opus-4-6', bridge });
+
+    const messages = await collect(service.invoke('long task'));
+
+    const texts = messages.filter((msg) => msg.type === 'text');
+    assert.equal(texts.length, 1);
+    assert.equal(texts[0].content, 'unblocked after second probe');
+    assert.equal(resolveOutstandingSteps.mock.calls.length, 2, 'should have a bounded multi-probe budget');
+    assert.equal(bridge.pollForSteps.mock.calls.length, 3);
+  });
+
+  test('AC-G1: pending approval trajectory still consumes an approval probe', async () => {
+    const resolveOutstandingSteps = mock.fn(async () => {});
+    let pollCount = 0;
+    const bridge = {
+      ...createMockServiceBridge({ resolveOutstandingSteps }),
+      getTrajectory: mock.fn(async () => ({
+        status: 'CASCADE_RUN_STATUS_RUNNING',
+        numTotalSteps: 0,
+        awaitingUserInput: true,
+        updatedAt: Date.now(),
+      })),
+      pollForSteps: mock.fn(async function* () {
+        pollCount += 1;
+        if (pollCount === 1) {
+          throw new Error('Antigravity stall: no activity for 60213ms (steps=0, status=CASCADE_RUN_STATUS_RUNNING)');
+        }
+        yield {
+          steps: [
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'DONE',
+              plannerResponse: { response: 'approved after pending approval probe' },
+            },
+          ],
+          cursor: {
+            baselineStepCount: 0,
+            lastDeliveredStepCount: 1,
+            terminalSeen: true,
+            lastActivityAt: Date.now(),
+          },
+        };
+      }),
+    };
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'claude-opus-4-6', bridge });
+
+    const messages = await collect(service.invoke('long task'));
+
+    const texts = messages.filter((msg) => msg.type === 'text');
+    assert.equal(texts.length, 1);
+    assert.equal(texts[0].content, 'approved after pending approval probe');
+    assert.equal(
+      resolveOutstandingSteps.mock.calls.length,
+      1,
+      'pending approval must not be treated as passive liveness',
+    );
+  });
+
   test('service does not probe on stall when autoApprove=false', async () => {
     const resolveOutstandingSteps = mock.fn(async () => {});
     const bridge = {
@@ -407,7 +541,7 @@ describe('Antigravity waiting approval', () => {
     // Must keep the more specific upstream_error, not swallow it behind stream_error
     const hasUpstream = errors.some((e) => e.errorCode === 'upstream_error');
     assert.ok(hasUpstream, 'upstream_error must NOT be suppressed when stream_error also present');
-    assert.match(errors.find((e) => e.errorCode === 'upstream_error').error, /invalid tool call/i);
+    assert.equal(errors.find((e) => e.errorCode === 'upstream_error').error, '工具调用失败');
     // stream_error should be suppressed in favor of upstream_error
     const hasStream = errors.some((e) => e.errorCode === 'stream_error');
     assert.equal(hasStream, false, 'stream_error should be suppressed when upstream_error provides more detail');
@@ -451,7 +585,7 @@ describe('Antigravity waiting approval', () => {
     const errors = messages.filter((m) => m.type === 'error');
     assert.equal(errors.length, 1, 'should emit exactly one error');
     assert.equal(errors[0].errorCode, 'model_capacity', 'high traffic must be classified as model_capacity');
-    assert.match(errors[0].error, /high traffic/i);
+    assert.equal(errors[0].error, '上游模型服务繁忙');
   });
 
   test('G10: model_capacity with tool activity still classifies correctly', async () => {
@@ -533,6 +667,6 @@ describe('Antigravity waiting approval', () => {
     const errors = messages.filter((msg) => msg.type === 'error');
     // Must yield only ONE error to the user, not two identical red bars
     assert.equal(errors.length, 1, 'duplicate upstream_error must be deduplicated to single error');
-    assert.match(errors[0].error, /invalid tool call/i);
+    assert.equal(errors[0].error, '工具调用失败');
   });
 });

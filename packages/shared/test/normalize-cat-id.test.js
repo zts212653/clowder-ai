@@ -134,3 +134,30 @@ describe('normalizeCatId (F154 AC-A3, AC-A7)', () => {
     assert.equal(r.reason, 'not-found');
   });
 });
+
+describe('normalizeCatId partial registry hardening', () => {
+  before(() => {
+    catRegistry.reset();
+    catRegistry.register('opus', makeCatConfig('opus'));
+    catRegistry.register('codex', makeCatConfig('codex'));
+    catRegistry.register('legacy-partial', {
+      id: createCatId('legacy-partial'),
+      name: 'Legacy Partial Cat',
+      clientId: 'test-client',
+    });
+  });
+  after(() => catRegistry.reset());
+
+  it('unknown input ignores partial configs without mentionPatterns', () => {
+    const r = normalizeCatId('nonexistent');
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'not-found');
+  });
+
+  it('ambiguous input ignores partial configs without displayName', () => {
+    const r = normalizeCatId('猫');
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'ambiguous');
+    assert.deepEqual(r.candidates.sort(), ['codex', 'opus']);
+  });
+});

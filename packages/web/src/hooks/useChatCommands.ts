@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useCallback, useMemo } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { useChatStore } from '@/stores/chatStore';
@@ -124,6 +125,7 @@ function formatConfigForDisplay(config: ConfigSnapshot): string {
  * Returns true if the input was a command that was handled.
  */
 export function useChatCommands() {
+  const router = useRouter();
   const { addMessage } = useChatStore();
   const { cats } = useCatData();
 
@@ -163,19 +165,30 @@ export function useChatCommands() {
           timestamp: Date.now(),
         });
       };
-      // /help — open settings to skills section
+      // /help — show available commands as system message
       if (trimmed === '/help') {
-        window.location.assign('/settings?s=skills');
+        addMessage({
+          id: `help-${Date.now()}`,
+          type: 'system',
+          variant: 'info',
+          content: [
+            '**可用命令**',
+            '`/config set <key> <value>` — 热更新配置',
+            '`/config` — 打开设置页面',
+            '`/help` — 显示此帮助',
+          ].join('\n'),
+          timestamp: Date.now(),
+        });
         return true;
       }
 
-      // /config command — open hub or hot-update
+      // /config command — open settings or hot-update
       if (isCommandInvocation(trimmed, '/config')) {
         const configArgs = trimmed.slice('/config'.length).trim();
 
-        // /config (no args) — open settings to system section
+        // /config (no args) — navigate to Settings page
         if (!configArgs) {
-          window.location.assign('/settings?s=system');
+          router.push('/settings?s=system');
           return true;
         }
 

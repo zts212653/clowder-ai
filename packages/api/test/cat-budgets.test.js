@@ -120,6 +120,22 @@ describe('getCatContextBudget', () => {
       assert.ok(budget.maxContentLengthPerMsg > 0, `${cat} maxContentLengthPerMsg > 0`);
     }
   });
+
+  it('keeps Spark fallback budget when runtime config loading fails', () => {
+    const saved = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = '/tmp/nonexistent-cat-template-for-budget-test.json';
+    clearBudgetCache();
+    try {
+      const spark = getCatContextBudget('spark');
+      assert.strictEqual(spark.maxPromptTokens, 64000);
+      assert.strictEqual(spark.maxContextTokens, 40000);
+      assert.strictEqual(spark.maxMessages, 100);
+    } finally {
+      if (saved === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = saved;
+      clearBudgetCache();
+    }
+  });
 });
 
 describe('getAllCatBudgets', () => {

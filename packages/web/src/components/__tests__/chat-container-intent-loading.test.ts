@@ -26,8 +26,8 @@ function createMockStoreState() {
     isLoading: false,
     hasActiveInvocation: false,
     intentMode: null,
-    targetCats: [],
-    catStatuses: {},
+    targetCats: [] as string[],
+    catStatuses: {} as Record<string, string>,
     catInvocations: {},
     activeInvocations: {},
     addMessage: vi.fn(),
@@ -118,11 +118,11 @@ vi.mock('@/hooks/useSplitPaneKeys', () => ({ useSplitPaneKeys: vi.fn() }));
 vi.mock('../AuthorizationCard', () => ({ AuthorizationCard: () => null }));
 vi.mock('../BootcampListModal', () => ({ BootcampListModal: () => null }));
 vi.mock('../BootstrapOrchestrator', () => ({ BootstrapOrchestrator: () => null }));
-vi.mock('../CatCafeHub', () => ({ CatCafeHub: () => null }));
 vi.mock('../ChatContainerHeader', () => ({ ChatContainerHeader: () => null }));
 vi.mock('../ChatInput', () => ({ ChatInput: () => null }));
 vi.mock('../ChatMessage', () => ({ ChatMessage: () => null }));
 vi.mock('../game/GameOverlayConnector', () => ({ GameOverlayConnector: () => null }));
+vi.mock('../HubListModal', () => ({ HubListModal: () => null }));
 vi.mock('../MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
 }));
@@ -226,6 +226,20 @@ describe('ChatContainer intent_mode loading lock', () => {
     };
     storeState.intentMode = null;
     storeState.targetCats = [];
+
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
+    });
+
+    expect(mockThinkingIndicator).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders ThinkingIndicator during single-cat spawn_started before intent_mode registers a slot', () => {
+    storeState.hasActiveInvocation = true;
+    storeState.activeInvocations = {};
+    storeState.intentMode = null;
+    storeState.targetCats = ['codex'];
+    storeState.catStatuses = { codex: 'spawning' };
 
     act(() => {
       root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));

@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useCallback, useState } from 'react';
-import { settingsResourceCardClass } from '../SettingsResourceCard';
 import { AuditEventsTab } from './AuditEventsTab';
 import { SessionEventsViewer } from './SessionEventsViewer';
 import { SessionSearchTab } from './SessionSearchTab';
@@ -55,36 +54,28 @@ export function AuditExplorerPanel({
   }, [onCloseSession]);
 
   return (
-    <section className={`${settingsResourceCardClass} p-2.5`}>
+    <section className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3">
       <button
         type="button"
         data-testid="audit-explorer-header"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center justify-between text-[11px] font-bold text-cafe hover:text-cafe-secondary"
+        className="w-full flex items-center justify-between text-xs font-semibold text-cafe-secondary hover:text-cafe"
       >
         <span>审计 & Session</span>
-        <svg
-          className={`w-3 h-3 transition-transform ${expanded ? 'rotate-180' : ''}`}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M6 9l6 6 6-6" />
-        </svg>
+        <span className="text-[10px] text-cafe-muted">{expanded ? '▲' : '▼'}</span>
       </button>
 
       {expanded && (
-        <div className="p-2.5">
+        <div className="mt-2">
           {/* Tab bar */}
-          <div className="mb-2 flex border-b border-[var(--console-border-soft)]">
+          <div className="flex border-b border-[var(--console-border-soft)] mb-2">
             {(['events', 'session', 'search'] as const).map((t) => (
               <button
                 type="button"
                 key={t}
                 onClick={() => setTab(t)}
                 className={`flex-1 py-1 text-[10px] font-semibold transition-colors
-                  ${tab === t ? 'border-b-2 border-cafe-accent text-cafe-accent' : 'text-cafe-muted hover:text-cafe-secondary'}`}
+                  ${tab === t ? 'text-blue-600 border-b-2 border-blue-600' : 'text-cafe-muted hover:text-cafe-secondary'}`}
               >
                 {TAB_LABELS[t]}
               </button>

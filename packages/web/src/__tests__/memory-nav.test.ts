@@ -5,10 +5,13 @@
  * Same pattern as SignalNav but for /memory route.
  */
 
+import { act, createElement } from 'react';
+import { createRoot } from 'react-dom/client';
 import { describe, expect, it } from 'vitest';
 import {
   buildBackHref,
   buildMemoryTabItems,
+  MemoryNav,
   type MemoryTab,
   resolveReferrerThread,
 } from '@/components/memory/MemoryNav';
@@ -50,10 +53,10 @@ describe('buildBackHref', () => {
 });
 
 describe('buildMemoryTabItems', () => {
-  it('returns 3 tabs with correct ids', () => {
+  it('returns 6 tabs with correct ids', () => {
     const items = buildMemoryTabItems('');
-    expect(items).toHaveLength(3);
-    expect(items.map((i) => i.id)).toEqual(['feed', 'search', 'status']);
+    expect(items).toHaveLength(6);
+    expect(items.map((i) => i.id)).toEqual(['feed', 'search', 'status', 'health', 'catalog', 'graph']);
   });
 
   it('includes fromSuffix in hrefs', () => {
@@ -61,15 +64,52 @@ describe('buildMemoryTabItems', () => {
     expect(items[0].href).toBe('/memory?from=thread_abc');
     expect(items[1].href).toBe('/memory/search?from=thread_abc');
     expect(items[2].href).toBe('/memory/status?from=thread_abc');
+    expect(items[3].href).toBe('/memory/health?from=thread_abc');
+    expect(items[4].href).toBe('/memory/catalog?from=thread_abc');
+    expect(items[5].href).toBe('/memory/graph?from=thread_abc');
   });
 
   it('has correct labels', () => {
     const items = buildMemoryTabItems('');
-    expect(items.map((i) => i.label)).toEqual(['涌现 Feed', '知识检索', '索引状态']);
+    expect(items.map((i) => i.label)).toEqual([
+      'Knowledge Feed',
+      'Search',
+      'Index Status',
+      'Health',
+      'Library',
+      'Graph',
+    ]);
   });
 
   it('MemoryTab type covers all tabs', () => {
-    const tabs: MemoryTab[] = ['feed', 'search', 'status'];
-    expect(tabs).toHaveLength(3);
+    const tabs: MemoryTab[] = ['feed', 'search', 'status', 'health', 'catalog', 'graph'];
+    expect(tabs).toHaveLength(6);
+  });
+});
+
+describe('MemoryNav component', () => {
+  it('updates referrer links when the initial referrer changes', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(createElement(MemoryNav, { active: 'graph', initialReferrerThread: 'thread_a' }));
+    });
+    expect(container.querySelector('[data-testid="memory-back-to-chat"]')?.getAttribute('href')).toBe(
+      '/thread/thread_a',
+    );
+
+    await act(async () => {
+      root.render(createElement(MemoryNav, { active: 'graph', initialReferrerThread: 'thread_b' }));
+    });
+
+    expect(container.querySelector('[data-testid="memory-back-to-chat"]')?.getAttribute('href')).toBe(
+      '/thread/thread_b',
+    );
+    expect(container.textContent).toContain('Graph');
+
+    root.unmount();
+    container.remove();
   });
 });

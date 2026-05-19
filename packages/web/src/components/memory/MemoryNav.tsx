@@ -1,9 +1,8 @@
 import Link from 'next/link';
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
-import { getThreadHref } from '../ThreadSidebar/thread-navigation';
 
-export type MemoryTab = 'feed' | 'search' | 'status';
+export type MemoryTab = 'feed' | 'search' | 'status' | 'health' | 'catalog' | 'graph';
 
 interface MemoryNavProps {
   readonly active: MemoryTab;
@@ -29,8 +28,8 @@ export function resolveReferrerThread(urlSearch: string, storeThreadId: string |
 /**
  * Pure: build back href from referrer thread.
  */
-export function buildBackHref(referrerThread: string | null, prefix = ''): string {
-  return getThreadHref(referrerThread ?? 'default', prefix);
+export function buildBackHref(referrerThread: string | null): string {
+  return referrerThread && referrerThread !== 'default' ? `/thread/${referrerThread}` : '/';
 }
 
 /**
@@ -38,9 +37,12 @@ export function buildBackHref(referrerThread: string | null, prefix = ''): strin
  */
 export function buildMemoryTabItems(fromSuffix: string): readonly TabConfig[] {
   return [
-    { id: 'feed', href: `/memory${fromSuffix}`, label: '涌现 Feed' },
-    { id: 'search', href: `/memory/search${fromSuffix}`, label: '知识检索' },
-    { id: 'status', href: `/memory/status${fromSuffix}`, label: '索引状态' },
+    { id: 'feed', href: `/memory${fromSuffix}`, label: 'Knowledge Feed' },
+    { id: 'search', href: `/memory/search${fromSuffix}`, label: 'Search' },
+    { id: 'status', href: `/memory/status${fromSuffix}`, label: 'Index Status' },
+    { id: 'health', href: `/memory/health${fromSuffix}`, label: 'Health' },
+    { id: 'catalog', href: `/memory/catalog${fromSuffix}`, label: 'Library' },
+    { id: 'graph', href: `/memory/graph${fromSuffix}`, label: 'Graph' },
   ];
 }
 
@@ -49,7 +51,7 @@ function useReferrerThread(initialReferrerThread: string | null): string | null 
   const [fromParam, setFromParam] = useState<string | null>(initialReferrerThread);
   useEffect(() => {
     const nextFromParam = new URLSearchParams(window.location.search).get('from');
-    if (nextFromParam) setFromParam(nextFromParam);
+    setFromParam(nextFromParam ?? initialReferrerThread);
   }, [initialReferrerThread]);
   return useMemo(() => {
     if (fromParam) return fromParam;
@@ -62,9 +64,29 @@ export function MemoryNav({ active, initialReferrerThread = null }: MemoryNavPro
   const fromSuffix = referrerThread ? `?from=${encodeURIComponent(referrerThread)}` : '';
 
   const items = useMemo(() => buildMemoryTabItems(fromSuffix), [fromSuffix]);
+  const backHref = buildBackHref(referrerThread);
 
   return (
-    <nav aria-label="Memory navigation" className="flex items-center gap-2">
+    <nav aria-label="Memory navigation" className="flex flex-wrap items-center gap-2">
+      <a
+        href={backHref}
+        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-[#D8C6AD] bg-[#FCF7EE] px-3 py-1.5 text-xs font-medium text-[#8B6F47] transition-colors hover:bg-[#F7EEDB]"
+        data-testid="memory-back-to-chat"
+      >
+        <svg
+          aria-hidden="true"
+          className="h-4 w-4"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <polyline points="15 18 9 12 15 6" />
+        </svg>
+        返回对话
+      </a>
       {items.map((item) => {
         const isActive = item.id === active;
         return (
@@ -73,10 +95,10 @@ export function MemoryNav({ active, initialReferrerThread = null }: MemoryNavPro
             href={item.href}
             aria-current={isActive ? 'page' : undefined}
             className={[
-              'rounded-md px-2 py-[3px] text-[11px] font-semibold transition-colors',
+              'inline-flex items-center whitespace-nowrap rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
               isActive
-                ? 'bg-[var(--console-active-bg)] text-cafe-interactive'
-                : 'bg-[var(--console-pill-bg,var(--console-card-soft-bg))] text-cafe-secondary hover:text-cafe',
+                ? 'border-cafe-accent bg-cafe-surface-sunken text-cafe-interactive'
+                : 'border-cafe bg-cafe-surface text-cafe-secondary hover:border-cafe-subtle hover:text-cafe-interactive',
             ].join(' ')}
           >
             {item.label}

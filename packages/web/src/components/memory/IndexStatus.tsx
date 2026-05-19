@@ -1,9 +1,8 @@
 'use client';
 
-import type React from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
-import { SettingsResourceToggleSwitch, settingsResourceCardClass } from '../SettingsResourceCard';
+import { RebuildButton } from './RebuildButton';
 
 interface RawStatusResponse {
   backend: string;
@@ -46,6 +45,43 @@ export function parseIndexStatus(raw: RawStatusResponse): IndexStatusData {
   };
 }
 
+// ── F188 Phase A: Rebuild job types + parser ──
+
+interface RawRebuildJob {
+  id: string;
+  status: string;
+  phase: string;
+  percent: number;
+  error?: string;
+  result?: { docsIndexed: number; docsSkipped: number; durationMs: number };
+  startedAt: number;
+  completedAt?: number;
+}
+
+export interface RebuildJobData {
+  id: string;
+  status: 'pending' | 'running' | 'done' | 'error';
+  phase: string;
+  percent: number;
+  error?: string;
+  result?: { docsIndexed: number; docsSkipped: number; durationMs: number };
+  startedAt: number;
+  completedAt?: number;
+}
+
+export function parseRebuildJob(raw: RawRebuildJob): RebuildJobData {
+  return {
+    id: raw.id,
+    status: raw.status as RebuildJobData['status'],
+    phase: raw.phase,
+    percent: raw.percent,
+    error: raw.error,
+    result: raw.result,
+    startedAt: raw.startedAt,
+    completedAt: raw.completedAt,
+  };
+}
+
 // ── Env Config types + helpers ──
 
 interface EnvVar {
@@ -55,6 +91,7 @@ interface EnvVar {
   category: string;
   sensitive: boolean;
   currentValue: string | null;
+  allowedValues?: string[];
 }
 
 interface EnvSummaryResponse {
@@ -77,32 +114,9 @@ export function getConfigVars(vars: EnvVar[]): EnvVar[] {
 
 function StatusRow({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="flex items-center gap-3 px-1 py-2.5 text-xs">
-      <span className="flex-1 text-cafe-muted">{label}</span>
-      <span className="font-medium text-cafe">{String(value)}</span>
-    </div>
-  );
-}
-
-function CollapsibleGroup({ label, count, children }: { label: string; count: number; children: React.ReactNode }) {
-  const [collapsed, setCollapsed] = useState(false);
-  return (
-    <div className="console-list-card rounded-2xl shadow-[0_4px_16px_rgba(43,33,26,0.05)] overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setCollapsed((c) => !c)}
-        className="flex w-full items-center gap-2.5 px-4 py-3 text-left transition-colors hover:bg-[var(--console-hover-bg)]"
-      >
-        <span
-          className="text-[11px] text-cafe-muted transition-transform"
-          style={{ transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}
-        >
-          ▾
-        </span>
-        <span className="text-[13px] font-semibold text-cafe">{label}</span>
-        <span className="console-pill rounded-full px-2 py-0.5 text-[10px] font-semibold text-cafe-muted">{count}</span>
-      </button>
-      {!collapsed && <div className="divide-y divide-[var(--console-border-soft)] px-4 pb-2">{children}</div>}
+    <div className="flex items-center justify-between rounded-lg px-2 py-2">
+      <span className="text-xs text-cafe-secondary">{label}</span>
+      <span className="text-sm font-medium text-cafe-black">{value}</span>
     </div>
   );
 }
@@ -132,10 +146,16 @@ export function IndexStatus() {
     }
   }, []);
 
-  const toggleEnvVar = useCallback(
-    async (name: string, currentValue: string | null) => {
+  const cycleEnvVar = useCallback(
+    async (name: string, currentValue: string | null, allowedValues?: string[]) => {
       setUpdatingKey(name);
-      const newValue = currentValue === 'on' ? 'off' : 'on';
+      let newValue: string;
+      if (allowedValues && allowedValues.length > 1) {
+        const idx = allowedValues.indexOf(currentValue ?? allowedValues[0]!);
+        newValue = allowedValues[(idx + 1) % allowedValues.length]!;
+      } else {
+        newValue = currentValue === 'on' ? 'off' : 'on';
+      }
       try {
         await apiFetch('/api/config/env', {
           method: 'PATCH',
@@ -158,9 +178,9 @@ export function IndexStatus() {
 
   if (error) {
     return (
-      <div data-testid="index-status" className="rounded-[20px] border border-conn-red-ring bg-conn-red-bg p-4">
+      <div data-testid="index-status" className="rounded-lg border border-conn-red-ring bg-conn-red-bg p-4">
         <p className="text-sm text-conn-red-text">{error}</p>
-        <button type="button" onClick={fetchAll} className="mt-2 text-xs text-conn-red-text underline">
+        <button type="button" onClick={fetchAll} className="mt-2 text-xs text-red-700 underline">
           重试
         </button>
       </div>
@@ -175,81 +195,110 @@ export function IndexStatus() {
     );
   }
 
-  const statsCount = 5 + (status.embeddingModel ? 1 : 0) + 1;
-
   return (
-    <div data-testid="index-status" className={`${settingsResourceCardClass} p-[18px]`}>
-      <div className="flex items-center gap-2 mb-3">
+    <div data-testid="index-status" className="space-y-4">
+      {/* Health badge */}
+      <div className="flex items-center gap-2">
         <span
-          className={`inline-block h-2.5 w-2.5 rounded-full ${status.healthy ? 'bg-conn-emerald-text' : 'bg-conn-red-text'}`}
+          className={`inline-block h-2.5 w-2.5 rounded-full ${status.healthy ? 'bg-conn-green-text' : 'bg-conn-red-text'}`}
         />
-        <span className="text-[13px] font-semibold text-cafe">{status.healthy ? 'Healthy' : 'Unhealthy'}</span>
-        {status.reason && <span className="text-xs text-cafe-muted">({status.reason})</span>}
+        <span className="text-sm font-medium text-cafe-black">{status.healthy ? 'Healthy' : 'Unhealthy'}</span>
+        {status.reason && <span className="text-xs text-cafe-secondary">({status.reason})</span>}
       </div>
 
-      <div className="space-y-2.5">
-        <CollapsibleGroup label="索引统计" count={statsCount}>
-          <StatusRow label="Backend" value={status.backend} />
-          <StatusRow label="Documents" value={status.docsCount} />
-          <StatusRow label="Threads" value={status.threadsCount} />
-          <StatusRow label="Passages" value={status.passagesCount} />
-          <StatusRow label="Edges" value={status.edgesCount} />
-          {status.embeddingModel && <StatusRow label="Embedding" value={status.embeddingModel} />}
-          <StatusRow
-            label="Last rebuild"
-            value={status.lastRebuildAt ? new Date(status.lastRebuildAt).toLocaleString() : 'Never'}
-          />
-        </CollapsibleGroup>
+      {/* Stats */}
+      <div className="rounded-lg border border-cafe bg-white p-3">
+        <StatusRow label="Backend" value={status.backend} />
+        <StatusRow label="Documents" value={status.docsCount} />
+        <StatusRow label="Threads" value={status.threadsCount} />
+        <StatusRow label="Passages" value={status.passagesCount} />
+        <StatusRow label="Edges" value={status.edgesCount} />
+        {status.embeddingModel && <StatusRow label="Embedding" value={status.embeddingModel} />}
+        <StatusRow
+          label="Last rebuild"
+          value={status.lastRebuildAt ? new Date(status.lastRebuildAt).toLocaleString() : 'Never'}
+        />
+      </div>
 
-        {evidenceVars.length > 0 && (
-          <CollapsibleGroup label="功能开关" count={evidenceVars.length}>
-            {evidenceVars.map((v) => {
-              const isOn = v.currentValue === 'on';
-              const isBinary = v.currentValue === 'on' || v.currentValue === 'off' || v.currentValue == null;
-              const isUpdating = updatingKey === v.name;
-              return (
-                <div key={v.name} className="flex items-center gap-3 px-1 py-2.5 text-xs">
-                  <div className="min-w-0 flex-1 space-y-0.5">
-                    <code className="font-mono font-semibold text-cafe">{v.name}</code>
-                    <p className="text-[11px] text-cafe-muted">{v.description}</p>
-                  </div>
-                  {isBinary ? (
-                    <SettingsResourceToggleSwitch
-                      enabled={isOn}
-                      busy={isUpdating}
-                      onClick={() => toggleEnvVar(v.name, v.currentValue)}
+      {/* Feature flags */}
+      {evidenceVars.length > 0 && (
+        <div className="rounded-lg border border-cafe bg-white p-3">
+          <h3 className="mb-2 text-xs font-semibold text-cafe-black">功能开关</h3>
+          {evidenceVars.map((v) => {
+            const isOn = v.currentValue === 'on';
+            const hasMultiValues = v.allowedValues && v.allowedValues.length > 2;
+            const isUpdating = updatingKey === v.name;
+            const current = v.currentValue ?? v.defaultValue;
+            return (
+              <div key={v.name} className="flex items-center justify-between rounded-lg px-2 py-2">
+                <div className="flex-1 pr-3">
+                  <div className="text-xs font-medium text-cafe-black">{v.name}</div>
+                  <div className="text-[10px] text-cafe-secondary">{v.description}</div>
+                </div>
+                {hasMultiValues ? (
+                  <button
+                    type="button"
+                    disabled={isUpdating}
+                    onClick={() => cycleEnvVar(v.name, v.currentValue, v.allowedValues)}
+                    className={`rounded px-2 py-0.5 text-[10px] font-medium text-white transition-colors ${
+                      current === 'on' || current === 'apply'
+                        ? 'bg-emerald-600 hover:bg-emerald-700'
+                        : current === 'off'
+                          ? 'bg-zinc-400 hover:bg-zinc-500'
+                          : 'bg-amber-500 hover:bg-amber-600'
+                    } ${isUpdating ? 'opacity-50' : ''}`}
+                    title={`点击切换: ${v.allowedValues!.join(' → ')}`}
+                  >
+                    {current}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={isUpdating}
+                    onClick={() => cycleEnvVar(v.name, v.currentValue)}
+                    className={`relative h-5 w-9 rounded-full transition-colors ${isOn ? 'bg-conn-green-text' : 'bg-gray-300'} ${isUpdating ? 'opacity-50' : ''}`}
+                  >
+                    <span
+                      className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${isOn ? 'translate-x-4' : ''}`}
                     />
-                  ) : (
-                    <span className="rounded bg-conn-amber-bg px-1.5 py-0.5 text-[10px] font-medium text-conn-amber-text">
-                      {v.currentValue}
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </CollapsibleGroup>
-        )}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
-        {configVars.length > 0 && (
-          <CollapsibleGroup label="配置参考" count={configVars.length}>
-            {configVars.map((v) => (
-              <div key={v.name} className="flex items-center gap-3 px-1 py-2.5 text-xs">
-                <div className="min-w-0 flex-1 space-y-0.5">
-                  <code className="font-mono font-semibold text-cafe">{v.name}</code>
-                  <p className="text-[11px] text-cafe-muted">{v.description}</p>
-                </div>
-                <span className="shrink-0 font-mono text-cafe-muted truncate max-w-[50%] text-right">
+      {/* Config reference — all non-toggle evidence env vars */}
+      {configVars.length > 0 && (
+        <div className="rounded-lg border border-cafe bg-white p-3">
+          <h3 className="mb-2 text-xs font-semibold text-cafe-black">配置参考</h3>
+          <p className="mb-2 text-[10px] text-cafe-secondary">以下配置需在 .env 中设置，修改后重启生效。</p>
+          {configVars.map((v) => (
+            <div key={v.name} className="rounded-lg px-2 py-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium font-mono text-cafe-black">{v.name}</span>
+                <span className="text-[10px] font-mono text-cafe-secondary truncate max-w-[50%] text-right">
                   {v.sensitive ? '••••••' : v.currentValue || v.defaultValue}
                 </span>
               </div>
-            ))}
-          </CollapsibleGroup>
-        )}
-      </div>
+              <div className="text-[10px] text-cafe-secondary mt-0.5">{v.description}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
-      <button type="button" onClick={fetchAll} className="console-button-ghost text-xs px-3 py-1.5 mt-3">
-        刷新状态
-      </button>
+      {/* F188: Rebuild + Refresh buttons */}
+      <div className="flex gap-2">
+        <RebuildButton onComplete={fetchAll} />
+        <button
+          type="button"
+          onClick={fetchAll}
+          className="rounded-lg border border-cafe bg-white px-3 py-1.5 text-xs text-cafe-secondary transition-colors hover:bg-cafe-surface"
+        >
+          刷新状态
+        </button>
+      </div>
     </div>
   );
 }

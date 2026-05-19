@@ -1,6 +1,6 @@
 ---
 feature_ids: [F048]
-related_features: [F039]
+related_features: [F039, F194]
 topics: [restart, recovery, invocation, queue, redis]
 doc_kind: note
 created: 2026-02-28

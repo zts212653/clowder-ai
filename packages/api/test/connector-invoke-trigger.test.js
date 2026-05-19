@@ -705,7 +705,9 @@ describe('ConnectorInvokeTrigger', () => {
     assert.strictEqual(cleanupCalled, true, 'cleanup must run after late-success delivery');
   });
 
-  it('cloud-R4-P2: late-failure delivery does NOT trigger deferred cleanup', async () => {
+  it('cloud-R5-P1: late-failure delivery must NOT trigger cleanup (preserve placeholder as fallback)', async () => {
+    // R5-P1 design: on delivery failure, placeholder is preserved so next retry/invocation can
+    // consume it. Calling cleanupPlaceholders on failure would incorrectly finalize the card.
     /** @type {(err: Error) => void} */
     let rejectDeliver = () => {};
     const deliverPromise = new Promise((_, rej) => {
@@ -734,11 +736,15 @@ describe('ConnectorInvokeTrigger', () => {
     trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
 
     await new Promise((r) => setTimeout(r, 200));
-    assert.strictEqual(cleanupCalled, false, 'cleanup must NOT run after timeout');
+    assert.strictEqual(cleanupCalled, false, 'cleanup must NOT run before inflight promises settle');
 
     rejectDeliver(new Error('connector down'));
     await new Promise((r) => setTimeout(r, 100));
-    assert.strictEqual(cleanupCalled, false, 'cleanup must NOT run when delivery truly failed');
+    assert.strictEqual(
+      cleanupCalled,
+      false,
+      'cleanup must NOT run after hard delivery failure (R5-P1: preserve placeholder)',
+    );
   });
 
   it('cloud-P1-4: A→B→A ping-pong delivers 3 separate turns (not merged by catId)', async () => {
@@ -1029,6 +1035,91 @@ describe('ConnectorInvokeTrigger', () => {
       assert.strictEqual(entries.length, 2, 'Connector messages must not merge');
       assert.ok(entries[0].content.includes('First review'));
       assert.ok(entries[1].content.includes('Second review'));
+    });
+
+    it('coalesces queued connector messages with the same policy coalesceKey and preserves first content', async () => {
+      trackerMock.setActive('thread-1');
+      const trigger = createTrigger();
+      const policy = {
+        priority: 'normal',
+        reason: 'github_review_feedback',
+        sourceCategory: 'review',
+        coalesceKey: 'pr:owner/repo#42:review-feedback',
+      };
+
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'First review', 'msg-1', undefined, policy);
+      await waitForTrigger();
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Second review', 'msg-2', undefined, policy);
+      await waitForTrigger();
+
+      const entries = queue.list('thread-1', 'user-1');
+      assert.strictEqual(entries.length, 1, 'same PR review feedback should keep one queued invocation');
+      assert.strictEqual(entries[0].content, 'First review', 'coalescing keeps first queued content as canonical');
+      assert.strictEqual(entries[0].messageId, 'msg-1');
+      assert.deepStrictEqual(entries[0].mergedMessageIds, ['msg-2']);
+    });
+
+    it('upgrades coalesced review feedback when a later event is urgent', async () => {
+      trackerMock.setActive('thread-1');
+      const trigger = createTrigger();
+      const coalesceKey = 'pr:owner/repo#42:review-feedback';
+
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Commented review', 'msg-1', undefined, {
+        priority: 'normal',
+        reason: 'github_review_feedback',
+        sourceCategory: 'review',
+        coalesceKey,
+      });
+      await waitForTrigger();
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Changes requested', 'msg-2', undefined, {
+        priority: 'urgent',
+        reason: 'github_review_feedback',
+        sourceCategory: 'review',
+        suggestedSkill: 'receive-review',
+        coalesceKey,
+      });
+      await waitForTrigger();
+
+      const entries = queue.list('thread-1', 'user-1');
+      assert.strictEqual(entries.length, 1, 'same PR review feedback should keep one queued invocation');
+      assert.strictEqual(entries[0].content, 'Commented review', 'coalescing still keeps first content canonical');
+      assert.strictEqual(entries[0].priority, 'urgent', 'later CHANGES_REQUESTED should upgrade queue priority');
+      assert.strictEqual(entries[0].suggestedSkill, 'receive-review');
+      assert.strictEqual(entries[0].messageId, 'msg-1');
+      assert.deepStrictEqual(entries[0].mergedMessageIds, ['msg-2']);
+    });
+
+    it('queues follow-up review feedback when the previous coalesced wake-up is already processing', async () => {
+      trackerMock.setActive('thread-1');
+      const trigger = createTrigger();
+      const coalesceKey = 'pr:owner/repo#42:review-feedback';
+      const policy = {
+        priority: 'normal',
+        reason: 'github_review_feedback',
+        sourceCategory: 'review',
+        suggestedSkill: 'receive-review',
+        coalesceKey,
+      };
+
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'First review', 'msg-1', undefined, policy);
+      await waitForTrigger();
+      const first = queue.markProcessing('thread-1', 'user-1');
+      assert.ok(first, 'first coalesced wake-up should be processing');
+
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Second review', 'msg-2', undefined, policy);
+      await waitForTrigger();
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Third review', 'msg-3', undefined, policy);
+      await waitForTrigger();
+
+      const entries = queue.list('thread-1', 'user-1');
+      const processingEntries = entries.filter((entry) => entry.status === 'processing');
+      const queuedEntries = entries.filter((entry) => entry.status === 'queued');
+
+      assert.strictEqual(processingEntries.length, 1, 'the in-flight wake-up remains processing');
+      assert.strictEqual(queuedEntries.length, 1, 'follow-up feedback gets a fresh queued wake-up');
+      assert.strictEqual(queuedEntries[0].content, 'Second review');
+      assert.strictEqual(queuedEntries[0].messageId, 'msg-2');
+      assert.deepStrictEqual(queuedEntries[0].mergedMessageIds, ['msg-3']);
     });
 
     it('connector messages bypass MAX_QUEUE_DEPTH (F175)', async () => {

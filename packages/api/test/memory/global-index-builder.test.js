@@ -4,7 +4,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -241,5 +241,46 @@ describe('GlobalIndexBuilder', () => {
     assert.ok(items.length >= 1, 'search works after double rebuild');
 
     globalStore.close();
+  });
+
+  it('uses file mtime for updatedAt instead of rebuild timestamp (DF-1)', async () => {
+    const projDir = join(tmpDir, 'projects', '-Users-test-cat-cafe', 'memory');
+    mkdirSync(projDir, { recursive: true });
+
+    const oldFile = join(projDir, 'old_note.md');
+    const newFile = join(projDir, 'new_note.md');
+
+    writeFileSync(oldFile, '---\nname: old-note\ntype: feedback\n---\nOld note content');
+    writeFileSync(newFile, '---\nname: new-note\ntype: feedback\n---\nNew note content');
+
+    const oldDate = new Date('2026-01-15T10:00:00Z');
+    const newDate = new Date('2026-05-10T14:30:00Z');
+    utimesSync(oldFile, oldDate, oldDate);
+    utimesSync(newFile, newDate, newDate);
+
+    const globalStore = new SqliteEvidenceStore(':memory:');
+    await globalStore.initialize();
+
+    const builder = new GlobalIndexBuilder({
+      skillsRoot: '/nonexistent',
+      memoryRoot: join(tmpDir, 'projects'),
+      globalStore,
+    });
+
+    await builder.rebuild();
+
+    const oldItems = await globalStore.search('old note');
+    const newItems = await globalStore.search('new note');
+    assert.ok(oldItems.length >= 1, 'should find old note');
+    assert.ok(newItems.length >= 1, 'should find new note');
+
+    const oldUpdatedAt = oldItems[0].updatedAt;
+    const newUpdatedAt = newItems[0].updatedAt;
+
+    assert.notEqual(oldUpdatedAt, newUpdatedAt, 'files with different mtimes must have different updatedAt');
+    assert.ok(
+      new Date(oldUpdatedAt) < new Date(newUpdatedAt),
+      `old file (${oldUpdatedAt}) should have earlier updatedAt than new file (${newUpdatedAt})`,
+    );
   });
 });

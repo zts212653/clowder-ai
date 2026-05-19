@@ -89,7 +89,7 @@ export function GovernanceBlockedCard({ projectPath, reasonKind, invocationId }:
                 <button
                   type="button"
                   onClick={handleBootstrap}
-                  className="text-sm px-3 py-1.5 rounded-md bg-conn-amber-text text-[var(--cafe-surface)] hover:opacity-90 transition-colors"
+                  className="text-sm px-3 py-1.5 rounded-md bg-amber-500 text-white hover:bg-amber-600 transition-colors"
                 >
                   初始化治理并继续
                 </button>
@@ -97,9 +97,7 @@ export function GovernanceBlockedCard({ projectPath, reasonKind, invocationId }:
               {state === 'confirming' && <span className="text-sm text-conn-amber-text">正在初始化治理...</span>}
               {state === 'retrying' && <span className="text-sm text-conn-amber-text">治理已就绪，正在重试...</span>}
               {state === 'done' && (
-                <span className="text-sm text-conn-emerald-text">
-                  治理初始化完成{invocationId ? '，已自动重试' : ''}
-                </span>
+                <span className="text-sm text-conn-green-text">治理初始化完成{invocationId ? '，已自动重试' : ''}</span>
               )}
               {state === 'error' && (
                 <div className="space-y-2">
@@ -107,7 +105,7 @@ export function GovernanceBlockedCard({ projectPath, reasonKind, invocationId }:
                   <button
                     type="button"
                     onClick={handleBootstrap}
-                    className="text-sm px-3 py-1.5 rounded-md bg-conn-amber-text text-[var(--cafe-surface)] hover:opacity-90 transition-colors"
+                    className="text-sm px-3 py-1.5 rounded-md bg-amber-500 text-white hover:bg-amber-600 transition-colors"
                   >
                     重试
                   </button>

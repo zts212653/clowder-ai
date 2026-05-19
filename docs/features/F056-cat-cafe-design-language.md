@@ -220,8 +220,8 @@ Token contract 落地后，分桶跑 codemod：
 - [x] AC-B0-W3: 系统消息/前端零散 emoji → 文本标签 + SVG（Maine Coon负责）
 
 ### Phase B
-- [/] AC-B1: 聊天界面全面应用新设计语言 — 部分完成（console-shell.css token 驱动、ChatContainer/Header 使用 semantic token）
-- [/] AC-B2: 侧边栏应用新设计语言 — 部分完成（ActivityBar 使用 --console-rail-* token，ThreadSidebar 使用 semantic classes）
+- [ ] AC-B1: 聊天界面全面应用新设计语言
+- [ ] AC-B2: 侧边栏应用新设计语言
 - [ ] AC-B3: 无视觉回归（截图对比）
 
 ### Phase C
@@ -230,7 +230,7 @@ Token contract 落地后，分桶跑 codemod：
 
 ### Phase D
 - [x] AC-D1: ThemeProvider + useTheme + useCafeTheme hook 落地，组件不再直接吃 hex
-- [x] AC-D2: Dark mode 全站可切换 — token 层完成（console-shell.css + theme-tokens.css 全量 dark variants），主题切换按钮整合到 ActivityBar（响应 resolvedTheme），顶栏重复按钮已移除
+- [ ] AC-D2: Dark mode 全站可切换，light/dark 截图对比无视觉异常
 - [ ] AC-D3: next-intl 接入 + 术语词表独立文件，fork 改一张表即可换术语
 - [ ] AC-D4: tenant.config 可配品牌资产（logo/favicon/themeColor/配色 preset）
 

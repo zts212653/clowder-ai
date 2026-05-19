@@ -125,7 +125,7 @@ export function HubCallbackAuthPanel() {
   const markViewed = useCallbackAuthMarkViewed();
 
   // F174 D2b-2 rev3: opening this panel = "看过 callback auth" → POST mark-viewed
-  // → HubButton unread badge clears. Implements GitHub bell icon / iOS app badge
+  // → ActivityBar unread badge clears. Implements GitHub bell icon / iOS app badge
   // mental model. Effect runs once on mount (markViewed is a stable zustand
   // action). Errors silently swallowed inside markViewed (badge updates on
   // next successful poll regardless).

@@ -285,4 +285,91 @@ describe('InvocationRecordStore', () => {
     assert.ok(store.get(ids[3]));
     assert.ok(store.get(ids[4]));
   });
+
+  test('F194 Phase B — listRunningByThread returns only running + matching thread/user', async () => {
+    const { InvocationRecordStore } = await import(
+      '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+    );
+    const store = new InvocationRecordStore();
+
+    // Setup: 5 records across thread/user/status combinations
+    const r1 = store.create({
+      threadId: 'thread-A',
+      userId: 'user-1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'k1',
+    });
+    const r2 = store.create({
+      threadId: 'thread-A',
+      userId: 'user-1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'k2',
+    });
+    const r3 = store.create({
+      threadId: 'thread-A',
+      userId: 'user-2', // different user
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'k3',
+    });
+    const r4 = store.create({
+      threadId: 'thread-B', // different thread
+      userId: 'user-1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'k4',
+    });
+    store.create({
+      threadId: 'thread-A',
+      userId: 'user-1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'k5',
+    }); // r5 stays 'queued' — verifies non-running records are excluded
+
+    // Transition statuses
+    store.update(r1.invocationId, { status: 'running' }); // ✅ matches
+    store.update(r2.invocationId, { status: 'running' }); // ✅ matches
+    store.update(r2.invocationId, { status: 'succeeded' }); // ❌ no longer running
+    store.update(r3.invocationId, { status: 'running' }); // ❌ different user
+    store.update(r4.invocationId, { status: 'running' }); // ❌ different thread
+    // r5 stays 'queued' — ❌ not running
+
+    const running = store.listRunningByThread('thread-A', 'user-1');
+    const ids = running.map((r) => r.id).sort();
+    assert.deepEqual(ids, [r1.invocationId].sort(), 'only r1 (running + thread-A + user-1) returned');
+
+    // Sanity: empty thread returns empty
+    assert.deepEqual(store.listRunningByThread('thread-nonexistent', 'user-1'), []);
+    // Sanity: empty user returns empty
+    assert.deepEqual(store.listRunningByThread('thread-A', 'user-nonexistent'), []);
+  });
+
+  test('F194 Phase B — listRunningByThread reflects status transitions in real time', async () => {
+    const { InvocationRecordStore } = await import(
+      '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+    );
+    const store = new InvocationRecordStore();
+
+    const r = store.create({
+      threadId: 'thread-X',
+      userId: 'user-Y',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'transition-key',
+    });
+
+    // queued → not in list
+    assert.equal(store.listRunningByThread('thread-X', 'user-Y').length, 0);
+
+    // queued → running
+    store.update(r.invocationId, { status: 'running' });
+    assert.equal(store.listRunningByThread('thread-X', 'user-Y').length, 1);
+
+    // running → succeeded → no longer in list
+    store.update(r.invocationId, { status: 'succeeded' });
+    assert.equal(store.listRunningByThread('thread-X', 'user-Y').length, 0);
+  });
 });

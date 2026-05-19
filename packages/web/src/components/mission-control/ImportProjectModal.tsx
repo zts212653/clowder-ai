@@ -48,71 +48,75 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-2xl bg-[var(--console-card-bg)] p-6 shadow-[0_12px_30px_rgba(43,33,26,0.08)]"
+        className="w-full max-w-md rounded-xl border border-[#E7DAC7] bg-[#FFFDF8] p-6 shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="mb-4 text-base font-bold text-cafe">导入项目</h2>
+        <h2 className="mb-4 text-base font-bold text-[#2B2118]">导入项目</h2>
 
         <div className="space-y-3">
           <label className="block">
-            <span className="text-xs font-medium text-cafe-secondary">项目名称 *</span>
+            <span className="text-xs font-medium text-[#6B5D4F]">项目名称 *</span>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. studio-flow"
-              className="console-form-input mt-1 w-full text-sm"
+              className="mt-1 w-full rounded-lg border border-[#D8C6AD] bg-cafe-surface px-3 py-2 text-sm text-[#2B2118] focus:border-[#8B6F47] focus:outline-none"
             />
           </label>
 
           <label className="block">
-            <span className="text-xs font-medium text-cafe-secondary">项目路径 *</span>
+            <span className="text-xs font-medium text-[#6B5D4F]">项目路径 *</span>
             <input
               type="text"
               value={sourcePath}
               onChange={(e) => setSourcePath(e.target.value)}
               placeholder="/home/user/studio-flow"
-              className="console-form-input mt-1 w-full text-sm"
+              className="mt-1 w-full rounded-lg border border-[#D8C6AD] bg-cafe-surface px-3 py-2 text-sm text-[#2B2118] focus:border-[#8B6F47] focus:outline-none"
             />
           </label>
 
           <label className="block">
-            <span className="text-xs font-medium text-cafe-secondary">Backlog 路径</span>
+            <span className="text-xs font-medium text-[#6B5D4F]">Backlog 路径</span>
             <input
               type="text"
               value={backlogPath}
               onChange={(e) => setBacklogPath(e.target.value)}
-              className="console-form-input mt-1 w-full text-sm"
+              className="mt-1 w-full rounded-lg border border-[#D8C6AD] bg-cafe-surface px-3 py-2 text-sm text-[#2B2118] focus:border-[#8B6F47] focus:outline-none"
             />
           </label>
 
           <label className="block">
-            <span className="text-xs font-medium text-cafe-secondary">描述</span>
+            <span className="text-xs font-medium text-[#6B5D4F]">描述</span>
             <input
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="简要描述"
-              className="console-form-input mt-1 w-full text-sm"
+              className="mt-1 w-full rounded-lg border border-[#D8C6AD] bg-cafe-surface px-3 py-2 text-sm text-[#2B2118] focus:border-[#8B6F47] focus:outline-none"
             />
           </label>
         </div>
 
         {error && (
-          <div className="mt-3 rounded-lg border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-xs text-conn-red-text">
+          <div className="mt-3 rounded-lg border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-xs text-red-700">
             {error}
           </div>
         )}
 
         <div className="mt-4 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="console-button-secondary">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-[#D8C6AD] px-4 py-1.5 text-xs font-medium text-[#7A6B5A] hover:bg-[#F7EEDB]"
+          >
             取消
           </button>
           <button
             type="button"
             onClick={() => void handleSubmit()}
             disabled={submitting}
-            className="console-button-primary disabled:opacity-40"
+            className="rounded-lg bg-[#8B6F47] px-4 py-1.5 text-xs font-medium text-white hover:bg-[#7A6139] disabled:opacity-40"
           >
             {submitting ? '导入中...' : '导入'}
           </button>

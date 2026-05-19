@@ -45,7 +45,7 @@ describe('F146-D: CapabilityCard ecosystem badge', () => {
 
     const html = container.innerHTML;
     expect(html).toContain('Claude');
-    expect(html).toContain('bg-conn-purple-bg');
+    expect(html).toContain('bg-purple-50');
   });
 
   it('does not render ecosystem badge when item has no ecosystem', async () => {
@@ -72,6 +72,6 @@ describe('F146-D: CapabilityCard ecosystem badge', () => {
     });
 
     const html = container.innerHTML;
-    expect(html).not.toContain('bg-conn-purple-bg');
+    expect(html).not.toContain('bg-purple-50');
   });
 });

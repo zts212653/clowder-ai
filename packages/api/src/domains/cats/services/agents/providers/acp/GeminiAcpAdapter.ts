@@ -18,7 +18,7 @@ import { createPromptDigest } from '../../../context/prompt-digest.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../../types.js';
 import { type AcpCapacitySignal, AcpProtocolError, AcpTimeoutError } from './AcpClient.js';
 import type { AcpLease, AcpProcessPool, PoolKey } from './AcpProcessPool.js';
-import { transformAcpEvent } from './acp-event-transformer.js';
+import { createAcpSessionState, transformAcpEvent } from './acp-event-transformer.js';
 import { resolveUserProjectMcpServers } from './acp-mcp-resolver.js';
 import { callbackEnvDiagnostic, materializeSessionMcpServers } from './acp-session-env.js';
 import type { AcpMcpServer } from './types.js';
@@ -56,6 +56,9 @@ export class GeminiAcpAdapter implements AgentService {
     const threadId = options?.auditContext?.threadId;
     const invocationId = options?.auditContext?.invocationId;
     const ctx = { catId: this.catId, threadId, invocationId };
+    // F197 KD-5: per-invocation transformer state for toolCallId dedup + lifecycle tracking.
+    // Lifecycle = ACP session/invocation (this generator) — GC'd when invoke() returns.
+    const acpState = createAcpSessionState();
 
     // Window 1: pre-aborted signal short-circuits immediately
     if (options?.signal?.aborted) {
@@ -239,8 +242,15 @@ export class GeminiAcpAdapter implements AgentService {
           const firstEventLatencyMs = Date.now() - promptStreamStartedAt;
           log.info({ ...ctx, sessionId, firstEventLatencyMs }, 'ACP first event received');
         }
-        const msg = transformAcpEvent(event, this.catId, metadata);
-        if (msg) yield msg;
+        // F197: transformAcpEvent may return AgentMessage | AgentMessage[] | null
+        // (Gemini v0.36 single-event with status=completed splits into [tool_use, tool_result])
+        const result = transformAcpEvent(event, this.catId, metadata, acpState);
+        if (!result) continue;
+        if (Array.isArray(result)) {
+          for (const msg of result) yield msg;
+        } else {
+          yield result;
+        }
       }
       log.info({ ...ctx, sessionId, eventCount }, 'ACP promptStream completed');
       // Successful prompt — provider has recovered; clear stale capacity signal

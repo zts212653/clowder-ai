@@ -36,6 +36,9 @@ const DEFAULT_BUDGETS: Record<string, ContextBudget> = {
   ragdoll: { maxPromptTokens: 180000, maxContextTokens: 160000, maxMessages: 200, maxContentLengthPerMsg: 100000 },
   'maine-coon': { maxPromptTokens: 240000, maxContextTokens: 216000, maxMessages: 200, maxContentLengthPerMsg: 100000 },
   siamese: { maxPromptTokens: 350000, maxContextTokens: 300000, maxMessages: 300, maxContentLengthPerMsg: 100000 },
+  // Spark is a known built-in variant with a smaller context window than the
+  // maine-coon breed default; keep it stable even if runtime config loading fails.
+  spark: { maxPromptTokens: 64000, maxContextTokens: 40000, maxMessages: 100, maxContentLengthPerMsg: 100000 },
 };
 
 /** F32-a: Conservative fallback for unknown/dynamic cats — use smallest built-in budget */
@@ -91,8 +94,8 @@ export function getCatContextBudget(catName: string): ContextBudget {
   const breedId = resolveBreedId(catName);
   const baseBudget: ContextBudget =
     jsonBudgets[catName] ??
-    (breedId ? DEFAULT_BUDGETS[breedId] : undefined) ??
     DEFAULT_BUDGETS[catName] ??
+    (breedId ? DEFAULT_BUDGETS[breedId] : undefined) ??
     GLOBAL_FALLBACK_BUDGET; // F32-a: conservative fallback for dynamic cats
 
   // 2. Check for per-cat env var override

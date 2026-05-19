@@ -2,15 +2,18 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-const STORAGE_KEY = 'clowder-pinned-sections';
-const SYNC_EVENT = 'clowder-pinned-sync';
+const STORAGE_KEY = 'cat-cafe:pinned-settings-sections';
+const SYNC_EVENT = 'cat-cafe:pinned-settings-sync';
 const MAX_PINS = 8;
 
 function read(): string[] {
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as string[]) : [];
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === 'string');
   } catch {
     return [];
   }

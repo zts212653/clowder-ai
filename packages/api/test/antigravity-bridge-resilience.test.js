@@ -1,9 +1,32 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import http from 'node:http';
 import { describe, mock, test } from 'node:test';
-import { AntigravityBridge } from '../dist/domains/cats/services/agents/providers/antigravity/AntigravityBridge.js';
+import {
+  AntigravityBridge,
+  antigravityRpcTimeoutMs,
+} from '../dist/domains/cats/services/agents/providers/antigravity/AntigravityBridge.js';
 
 function createBridge() {
   return new AntigravityBridge({ port: 1234, csrfToken: 'test', useTls: false });
+}
+
+async function listenOnEphemeralPort(server) {
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
+  const address = server.address();
+  assert.equal(typeof address, 'object');
+  return address.port;
+}
+
+async function closeServer(server) {
+  server.closeAllConnections?.();
+  await new Promise((resolve) => server.close(resolve));
 }
 
 // ── G5: Dynamic model discovery ────────────────────────────────────
@@ -64,6 +87,109 @@ describe('G5: dynamic model map from GetUserStatus', () => {
 // ── G6: Connection self-healing ────────────────────────────────────
 
 describe('G6: connection invalidation and reconnect', () => {
+  test('RunCommand RPC request timeout follows controlled command timeout with buffer', () => {
+    assert.equal(antigravityRpcTimeoutMs('GetTrajectory', {}), 30_000);
+    assert.equal(
+      antigravityRpcTimeoutMs('RunCommand', { command: 'sleep 45', cwd: '/tmp', timeoutMs: 45_000 }),
+      50_000,
+    );
+    assert.equal(antigravityRpcTimeoutMs('RunCommand', { command: 'echo hi', cwd: '/tmp', timeoutMs: 10 }), 30_000);
+    assert.equal(antigravityRpcTimeoutMs('RunCommand', { command: 'echo hi', cwd: '/tmp', timeoutMs: 0.5 }), 30_000);
+    assert.equal(
+      antigravityRpcTimeoutMs('RunCommand', { command: 'echo hi', cwd: '/tmp', timeoutMs: 3_000_000_000 }),
+      30_000,
+    );
+    assert.equal(
+      antigravityRpcTimeoutMs('RunCommand', { command: 'echo hi', cwd: '/tmp', timeoutMs: Infinity }),
+      30_000,
+    );
+  });
+
+  test('callRpc abort signal closes an in-flight RunCommand HTTP request', async () => {
+    let runCommandStarted;
+    let runCommandClosed;
+    const started = new Promise((resolve) => {
+      runCommandStarted = resolve;
+    });
+    const closed = new Promise((resolve) => {
+      runCommandClosed = resolve;
+    });
+    const server = http.createServer((req, res) => {
+      if (req.url?.endsWith('/GetUserStatus')) {
+        req.resume();
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ cascadeModelConfigData: [] }));
+        return;
+      }
+      if (req.url?.endsWith('/RunCommand')) {
+        runCommandStarted();
+        req.on('close', runCommandClosed);
+        return;
+      }
+      res.writeHead(404);
+      res.end('{}');
+    });
+
+    try {
+      const port = await listenOnEphemeralPort(server);
+      const bridge = new AntigravityBridge({ port, csrfToken: 'test', useTls: false });
+      const controller = new AbortController();
+      const request = bridge.callRpc(
+        'RunCommand',
+        { command: 'sleep 999', cwd: '/tmp', timeoutMs: 10_000 },
+        { signal: controller.signal },
+      );
+
+      await started;
+      controller.abort(new Error('abort probe'));
+
+      await assert.rejects(request, /abort probe/);
+      await closed;
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  test('callRpc attaches request error listener before abort-race destroy', async () => {
+    const bridge = createBridge();
+    bridge.modelMapRefreshed = true;
+    let destroyedBeforeErrorListener = false;
+
+    class FakeRequest extends EventEmitter {
+      write() {}
+      end() {}
+      destroy() {
+        if (this.listenerCount('error') === 0) {
+          destroyedBeforeErrorListener = true;
+        }
+      }
+    }
+
+    const requestMock = mock.method(http, 'request', () => new FakeRequest());
+    const signal = {
+      aborted: false,
+      reason: new Error('abort race'),
+      addEventListener() {
+        this.aborted = true;
+      },
+      removeEventListener() {},
+    };
+
+    try {
+      await assert.rejects(
+        () => bridge.callRpc('RunCommand', { command: 'sleep 999', cwd: '/tmp', timeoutMs: 10_000 }, { signal }),
+        /abort race/,
+      );
+      assert.equal(
+        destroyedBeforeErrorListener,
+        false,
+        'request error listener must be attached before abort-race destroy',
+      );
+    } finally {
+      requestMock.mock.restore();
+    }
+  });
+
   test('invalidateConnection clears cached connection', async () => {
     const bridge = createBridge();
     const conn1 = await bridge.ensureConnected();
@@ -171,5 +297,73 @@ describe('G6: connection invalidation and reconnect', () => {
 
     assert.ok(batches.length >= 1, 'should recover and yield steps');
     assert.equal(batches[0].steps[0].plannerResponse.response, 'recovered');
+  });
+
+  test('pollForSteps surfaces terminal idle before timestamp heartbeat', async () => {
+    const bridge = createBridge();
+    let now = 0;
+    let callCount = 0;
+
+    mock.method(Date, 'now', () => now);
+    mock.method(bridge, 'getTrajectory', async () => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          status: 'CASCADE_RUN_STATUS_RUNNING',
+          numTotalSteps: 0,
+          updatedAt: 100,
+        };
+      }
+      now = 2;
+      return {
+        status: 'CASCADE_RUN_STATUS_IDLE',
+        numTotalSteps: 0,
+        updatedAt: 100 + callCount,
+      };
+    });
+
+    const iterator = bridge.pollForSteps('cascade-terminal-heartbeat', 0, 1, 0);
+    const first = await iterator.next();
+    await iterator.return?.();
+
+    assert.equal(first.done, false);
+    assert.equal(
+      first.value.cursor.terminalSeen,
+      true,
+      'terminal completion must not be masked by timestamp heartbeat',
+    );
+    assert.equal(first.value.steps.length, 0);
+    assert.ok(callCount >= 2);
+  });
+
+  test('pollForSteps bounds non-terminal timestamp heartbeat by idle timeout', async () => {
+    const bridge = createBridge();
+    let now = 0;
+    let callCount = 0;
+
+    mock.method(Date, 'now', () => now);
+    mock.method(bridge, 'getTrajectory', async () => {
+      callCount++;
+      now += 10;
+      return {
+        status: 'CASCADE_RUN_STATUS_RUNNING',
+        numTotalSteps: 0,
+        updatedAt: now,
+      };
+    });
+
+    const iterator = bridge.pollForSteps('cascade-running-heartbeat', 0, 25, 0);
+    const heartbeat = await iterator.next();
+
+    assert.equal(heartbeat.done, false);
+    assert.equal(heartbeat.value.cursor.livenessEvidence?.kind, 'trajectory_timestamp_progress');
+
+    await assert.rejects(
+      () => iterator.next(),
+      /Antigravity stall: no activity/,
+      'timestamp-only heartbeat must not keep non-terminal cascades alive forever',
+    );
+    await iterator.return?.();
+    assert.ok(callCount >= 3);
   });
 });

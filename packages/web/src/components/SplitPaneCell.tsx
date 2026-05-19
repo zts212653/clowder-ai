@@ -24,7 +24,7 @@ function MiniMessage({ msg }: { msg: ChatMessage }) {
       {!isUser && msg.catId && <CatAvatar catId={msg.catId} size={16} />}
       <p
         className={`text-xs leading-relaxed truncate max-w-[90%] px-2 py-1 rounded-lg ${
-          isUser ? 'bg-[var(--console-active-bg)] text-cafe-black' : 'bg-cafe-surface-elevated text-cafe-secondary'
+          isUser ? 'bg-cafe-surface text-cafe-black' : 'bg-cafe-surface-elevated text-cafe-secondary'
         } ${msg.isStreaming ? 'opacity-70' : ''}`}
       >
         {msg.content.slice(0, 120)}
@@ -52,26 +52,24 @@ export function SplitPaneCell({
       : catStatus === 'working'
         ? 'text-conn-amber-text'
         : catStatus === 'done'
-          ? 'text-conn-emerald-text'
+          ? 'text-green-500'
           : 'text-cafe-muted';
 
   return (
     <div
       className={`flex flex-col rounded-lg border-2 transition-colors cursor-pointer overflow-hidden ${
-        isSelected
-          ? 'border-cafe-accent shadow-[var(--console-shadow-soft)]'
-          : 'border-[var(--console-border-soft)] hover:border-[var(--console-border-soft)]'
+        isSelected ? 'border-cafe-accent shadow-sm' : 'border-cafe hover:border-cafe'
       }`}
       onClick={() => onSelect(threadId)}
       onDoubleClick={() => onDoubleClick(threadId)}
     >
       {/* Pane header */}
-      <div className="flex items-center gap-1.5 px-3 py-1.5 bg-cafe-surface-elevated border-b border-[var(--console-border-soft)] flex-shrink-0">
+      <div className="flex items-center gap-1.5 px-3 py-1.5 bg-cafe-surface-elevated border-b border-cafe-subtle flex-shrink-0">
         <span className={`text-xs ${statusColor}`}>{catStatus !== 'idle' ? 'ᓚᘏᗢ' : ''}</span>
         <span className="text-xs font-medium text-cafe-secondary truncate flex-1">{threadTitle}</span>
-        {threadState.isLoading && <span className="w-1.5 h-1.5 rounded-full bg-conn-amber-bg animate-pulse" />}
+        {threadState.isLoading && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />}
         {threadState.unreadCount > 0 && (
-          <span className="text-[9px] bg-conn-amber-text text-[var(--cafe-surface)] rounded-full px-1 min-w-[14px] text-center">
+          <span className="text-[10px] bg-amber-500 text-white rounded-full px-1 min-w-[14px] text-center">
             {threadState.unreadCount > 99 ? '99+' : threadState.unreadCount}
           </span>
         )}
@@ -94,8 +92,8 @@ export function SplitPaneCell({
 /** Empty pane placeholder */
 export function SplitPanePlaceholder({ index }: { index: number }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-[var(--console-border-soft)] transition-colors">
-      <span className="text-2xl text-cafe-muted mb-1">+</span>
+    <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-cafe transition-colors">
+      <span className="text-2xl text-gray-200 mb-1">+</span>
       <span className="text-xs text-cafe-muted">窗格 {index + 1}</span>
       <span className="text-[10px] text-cafe-muted mt-0.5">点击左侧 thread 分配到此处</span>
     </div>

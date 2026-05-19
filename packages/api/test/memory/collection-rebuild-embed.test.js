@@ -51,8 +51,9 @@ describe('CollectionIndexBuilder embedding integration (bug #6)', () => {
       getModelInfo: () => ({ modelId: 'test', modelRev: 'v1', dim: 2 }),
     };
     const mockVectorStore = {
-      upsert: (anchor, vec) => embedded.push(anchor),
+      upsert: (anchor) => embedded.push(anchor),
       checkMetaConsistency: () => ({ consistent: true, reason: 'ok' }),
+      clearAll: () => {},
       initMeta: () => {},
     };
 

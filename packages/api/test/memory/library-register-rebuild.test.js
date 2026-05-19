@@ -381,4 +381,34 @@ describe('library register + rebuild endpoints', () => {
     const res = await app.inject({ method: 'GET', url: '/api/library/domain:priv/documents' });
     assert.equal(res.statusCode, 200);
   });
+
+  it('POST /rebuild passes force flag to builder', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'force-'));
+    writeFileSync(join(dir, 'a.md'), '# Alpha\n\nAlpha content.');
+    await app.inject({
+      method: 'POST',
+      url: '/api/library/register',
+      payload: {
+        id: 'domain:force',
+        kind: 'domain',
+        name: 'force',
+        displayName: 'Force',
+        root: dir,
+        sensitivity: 'internal',
+        scannerLevel: 0,
+      },
+    });
+    const res1 = await app.inject({ method: 'POST', url: '/api/library/domain:force/rebuild' });
+    assert.equal(JSON.parse(res1.body).indexed, 1);
+
+    const res2 = await app.inject({ method: 'POST', url: '/api/library/domain:force/rebuild' });
+    assert.equal(JSON.parse(res2.body).skipped, 1, 'without force, unchanged file should be skipped');
+
+    const res3 = await app.inject({
+      method: 'POST',
+      url: '/api/library/domain:force/rebuild',
+      payload: { force: true },
+    });
+    assert.equal(JSON.parse(res3.body).indexed, 1, 'with force, file should be re-indexed');
+  });
 });

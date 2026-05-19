@@ -50,6 +50,20 @@ describe('createConnectorReloadSubscriber', () => {
     assert.equal(called, 0);
   });
 
+  it('does NOT restart connector gateway for VAPID push secrets', async () => {
+    let called = 0;
+    unsub = createConnectorReloadSubscriber({
+      onRestart: async () => {
+        called++;
+      },
+      debounceMs: 0,
+      log: silentLog,
+    });
+    configEventBus.emitChange(makeEvent(['VAPID_PUBLIC_KEY']));
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(called, 0);
+  });
+
   it('debounces: two rapid events produce one restart', async () => {
     let called = 0;
     unsub = createConnectorReloadSubscriber({

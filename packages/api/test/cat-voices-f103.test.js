@@ -5,7 +5,7 @@
 
 import assert from 'node:assert';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { clearVoiceCache, getCatVoice, isWithinBase } from '../dist/config/cat-voices.js';
+import { clearVoiceCache, getCatVoice } from '../dist/config/cat-voices.js';
 
 // F103: GENSHIN_VOICE_DIR backward compatibility
 describe('GENSHIN_VOICE_DIR backward compat (P1)', () => {
@@ -33,6 +33,45 @@ describe('GENSHIN_VOICE_DIR backward compat (P1)', () => {
         voice.refAudio.startsWith('/custom/character-models'),
         `refAudio should use CHARACTER_VOICE_DIR, got: ${voice.refAudio}`,
       );
+    }
+  });
+
+  it('CHARACTER_VOICE_DIR still wins when runtime config loading falls back', () => {
+    const savedTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = '/tmp/nonexistent-cat-template-for-voice-test.json';
+    process.env.CHARACTER_VOICE_DIR = '/custom/character-models';
+    clearVoiceCache();
+    try {
+      const voice = getCatVoice('opus');
+      if (voice.refAudio) {
+        assert.ok(
+          voice.refAudio.startsWith('/custom/character-models'),
+          `fallback refAudio should use CHARACTER_VOICE_DIR, got: ${voice.refAudio}`,
+        );
+      }
+    } finally {
+      if (savedTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = savedTemplatePath;
+      clearVoiceCache();
+    }
+  });
+
+  it('GENSHIN_VOICE_DIR remains the exact fallback genshin directory when runtime config loading falls back', () => {
+    const savedTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = '/tmp/nonexistent-cat-template-for-voice-test.json';
+    process.env.GENSHIN_VOICE_DIR = '/custom/not-literally-genshin';
+    clearVoiceCache();
+    try {
+      const voice = getCatVoice('ragdoll');
+      assert.ok(voice.refAudio, 'fallback breed default should include refAudio');
+      assert.ok(
+        voice.refAudio.startsWith('/custom/not-literally-genshin/'),
+        `fallback refAudio should use exact GENSHIN_VOICE_DIR, got: ${voice.refAudio}`,
+      );
+    } finally {
+      if (savedTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = savedTemplatePath;
+      clearVoiceCache();
     }
   });
 
@@ -82,32 +121,5 @@ describe('refAudio absolute path detection (P2)', () => {
       const occurrences = voice.refAudio.split('character-models').length - 1;
       assert.ok(occurrences <= 1, `refAudio should not have double base dir: ${voice.refAudio}`);
     }
-  });
-});
-
-// F190: isWithinBase sibling-prefix traversal regression
-describe('isWithinBase traversal defense', () => {
-  it('rejects sibling directory with same prefix', () => {
-    assert.strictEqual(isWithinBase('/tmp/uploads', '/tmp/uploads_evil/secret.wav'), false);
-  });
-
-  it('rejects parent traversal', () => {
-    assert.strictEqual(isWithinBase('/tmp/uploads', '/tmp/etc/passwd'), false);
-  });
-
-  it('rejects dot-dot traversal', () => {
-    assert.strictEqual(isWithinBase('/tmp/uploads', '/tmp/uploads/../etc/passwd'), false);
-  });
-
-  it('allows valid subpath', () => {
-    assert.strictEqual(isWithinBase('/tmp/uploads', '/tmp/uploads/sub/file.wav'), true);
-  });
-
-  it('allows direct child', () => {
-    assert.strictEqual(isWithinBase('/tmp/uploads', '/tmp/uploads/file.wav'), true);
-  });
-
-  it('rejects base dir itself (not a file)', () => {
-    assert.strictEqual(isWithinBase('/tmp/uploads', '/tmp/uploads'), false);
   });
 });

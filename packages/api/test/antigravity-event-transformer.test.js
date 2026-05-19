@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import {
   classifyStep,
+  classifyUpstreamError,
+  humanErrorMessage,
+  isCapacityError,
+  isNetworkError,
   transformTrajectorySteps,
 } from '../dist/domains/cats/services/agents/providers/antigravity/antigravity-event-transformer.js';
 
@@ -187,20 +191,19 @@ describe('G10: model_capacity error classification', () => {
     ];
     const msgs = transformTrajectorySteps(steps, catId, metadata);
 
-    // Must emit provider_signal BEFORE error
     const warnMsg = msgs.find((m) => m.type === 'provider_signal');
     assert.ok(warnMsg, 'should emit provider_signal warning for capacity error');
     const warnContent = JSON.parse(warnMsg.content);
     assert.equal(warnContent.type, 'warning');
-    assert.match(warnContent.message, /上游模型服务端繁忙/);
+    assert.match(warnContent.message, /上游模型服务繁忙/);
 
-    // Error must have model_capacity code and attribution text
     const errMsg = msgs.find((m) => m.type === 'error');
     assert.ok(errMsg, 'should emit error');
     assert.equal(errMsg.errorCode, 'model_capacity');
-    assert.match(errMsg.error, /非 Clowder AI/);
+    assert.equal(errMsg.error, '上游模型服务繁忙');
+    assert.equal(errMsg.metadata.upstreamError.kind, 'capacity');
+    assert.equal(errMsg.metadata.upstreamError.transient, true);
 
-    // Warning must come before error
     const warnIdx = msgs.indexOf(warnMsg);
     const errIdx = msgs.indexOf(errMsg);
     assert.ok(warnIdx < errIdx, 'provider_signal must precede error');
@@ -220,10 +223,10 @@ describe('G10: model_capacity error classification', () => {
     const errMsg = msgs.find((m) => m.type === 'error');
     assert.ok(errMsg);
     assert.equal(errMsg.errorCode, 'model_capacity');
-    assert.match(errMsg.error, /非 Clowder AI/);
+    assert.equal(errMsg.metadata.upstreamError.kind, 'capacity');
   });
 
-  test('ERROR_MESSAGE with quota-reset wording → provider_signal + model_capacity', () => {
+  test('ERROR_MESSAGE with quota-reset wording → provider_signal + model_capacity + raw in metadata', () => {
     const steps = [
       {
         type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
@@ -241,8 +244,8 @@ describe('G10: model_capacity error classification', () => {
     const errMsg = msgs.find((m) => m.type === 'error');
     assert.ok(errMsg);
     assert.equal(errMsg.errorCode, 'model_capacity');
-    assert.match(errMsg.error, /非 Clowder AI/);
-    assert.match(errMsg.error, /quota will reset after 0s/i);
+    assert.equal(errMsg.error, '上游模型服务繁忙');
+    assert.match(errMsg.metadata.upstreamError.rawReason, /quota will reset/i);
   });
 
   test('ERROR_MESSAGE with non-capacity error → errorCode upstream_error (unchanged)', () => {
@@ -256,10 +259,12 @@ describe('G10: model_capacity error classification', () => {
     const msgs = transformTrajectorySteps(steps, catId, metadata);
     const errMsg = msgs.find((m) => m.type === 'error');
     assert.ok(errMsg);
-    assert.equal(errMsg.errorCode, 'upstream_error', 'non-capacity errors stay upstream_error');
+    assert.equal(errMsg.errorCode, 'upstream_error');
+    assert.equal(errMsg.metadata.upstreamError.kind, 'invalid_tool_call');
+    assert.equal(errMsg.metadata.upstreamError.transient, false);
   });
 
-  test('ERROR_MESSAGE invalid tool call explains live MCP tool-list / agent-key cause', () => {
+  test('ERROR_MESSAGE invalid tool call uses Chinese user message, raw English in metadata only', () => {
     const steps = [
       {
         type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
@@ -271,10 +276,8 @@ describe('G10: model_capacity error classification', () => {
     const errMsg = msgs.find((m) => m.type === 'error');
     assert.ok(errMsg);
     assert.equal(errMsg.errorCode, 'upstream_error');
-    assert.match(errMsg.error, /invalid tool call/i);
-    assert.match(errMsg.error, /live MCP tool list/i);
-    assert.match(errMsg.error, /agent-key tools/i);
-    assert.match(errMsg.error, /cat_cafe_get_thread_context/);
+    assert.equal(errMsg.error, '工具调用失败');
+    assert.match(errMsg.metadata.upstreamError.rawReason, /invalid tool call/i);
   });
 });
 
@@ -348,9 +351,11 @@ describe('Transformer regression', () => {
       },
     ];
     const msgs = transformTrajectorySteps(steps, catId, metadata);
-    assert.equal(msgs.filter((m) => m.type === 'error').length, 1);
-    assert.ok(msgs[0].error.includes('terminated'));
-    assert.equal(msgs[0].errorCode, 'upstream_error', 'ERROR_MESSAGE must have errorCode for fatal detection');
+    const errMsgs = msgs.filter((m) => m.type === 'error');
+    assert.equal(errMsgs.length, 1);
+    assert.equal(errMsgs[0].error, '上游服务异常');
+    assert.equal(errMsgs[0].errorCode, 'upstream_error', 'ERROR_MESSAGE must have errorCode for fatal detection');
+    assert.match(errMsgs[0].metadata.upstreamError.rawReason, /terminated/);
   });
 
   test('emits stream_error when stopReason is CLIENT_STREAM_ERROR and no text', () => {
@@ -383,5 +388,88 @@ describe('Transformer regression', () => {
     const msgs = transformTrajectorySteps(steps, catId, metadata);
     const errors = msgs.filter((m) => m.type === 'error');
     assert.equal(errors.length, 2);
+  });
+});
+
+// ── F061 Phase 3: Error Taxonomy Regression ──────────────────────────
+
+describe('F061 Phase 3: error taxonomy', () => {
+  test('AC-2: STOP_REASON_CLIENT_STREAM_ERROR never appears in user message', () => {
+    const steps = [
+      {
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        status: 'DONE',
+        plannerResponse: { stopReason: 'STOP_REASON_CLIENT_STREAM_ERROR' },
+      },
+    ];
+    const msgs = transformTrajectorySteps(steps, catId, metadata);
+    for (const m of msgs) {
+      if (m.error) assert.doesNotMatch(m.error, /STOP_REASON/);
+      if (m.content && typeof m.content === 'string') assert.doesNotMatch(m.content, /STOP_REASON/);
+    }
+    const errMsg = msgs.find((m) => m.type === 'error');
+    assert.equal(errMsg.metadata.upstreamError.kind, 'stream_interrupted');
+    assert.equal(errMsg.metadata.upstreamError.transient, true);
+  });
+
+  test('AC-3: network error "please try again" is NOT classified as capacity', () => {
+    const raw =
+      'Encountered retryable error from model provider: There was a network issue connecting to the server, please try again.';
+    const info = classifyUpstreamError(raw);
+    assert.equal(info.kind, 'network', '"network issue...try again" must be network, not capacity');
+    assert.equal(info.transient, true);
+  });
+
+  test('AC-3: bare "try again" without transport keyword is NOT network (tightened regex)', () => {
+    assert.equal(isNetworkError('Something failed, please try again'), false);
+    assert.equal(isCapacityError('Something failed, please try again'), false);
+    const info = classifyUpstreamError('Something failed, please try again');
+    assert.equal(info.kind, 'unknown', 'bare "try again" without network/server context must not be transient');
+  });
+
+  test('AC-3: "high traffic...try again" still matches capacity (capacity takes priority)', () => {
+    const info = classifyUpstreamError('high traffic, please try again later');
+    assert.equal(info.kind, 'capacity');
+  });
+
+  test('network error emits errorCode network_error with provider_signal', () => {
+    const steps = [
+      {
+        type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+        status: 'DONE',
+        errorMessage: {
+          error: { userErrorMessage: 'There was a network issue connecting to the server, please try again.' },
+        },
+      },
+    ];
+    const msgs = transformTrajectorySteps(steps, catId, metadata);
+    const warnMsg = msgs.find((m) => m.type === 'provider_signal');
+    assert.ok(warnMsg, 'network errors are transient → should emit provider_signal');
+    const errMsg = msgs.find((m) => m.type === 'error');
+    assert.equal(errMsg.errorCode, 'network_error');
+    assert.equal(errMsg.error, '网络连接异常');
+    assert.equal(errMsg.metadata.upstreamError.kind, 'network');
+  });
+
+  test('stream_interrupted user message is Chinese, not raw stopReason', () => {
+    const errInfo = classifyUpstreamError('STOP_REASON_CLIENT_STREAM_ERROR', 'STOP_REASON_CLIENT_STREAM_ERROR');
+    assert.equal(humanErrorMessage(errInfo.kind), '连接中断');
+    assert.equal(
+      errInfo.rawReason,
+      'STOP_REASON_CLIENT_STREAM_ERROR',
+      'rawReason must preserve stopReason for diagnostics',
+    );
+  });
+
+  test('invalid_tool_call is not transient', () => {
+    const info = classifyUpstreamError('The model produced an invalid tool call.');
+    assert.equal(info.kind, 'invalid_tool_call');
+    assert.equal(info.transient, false);
+  });
+
+  test('unknown error is not transient', () => {
+    const info = classifyUpstreamError('Agent execution terminated');
+    assert.equal(info.kind, 'unknown');
+    assert.equal(info.transient, false);
   });
 });

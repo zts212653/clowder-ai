@@ -3,7 +3,7 @@
 
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { CatCafeScanner, extractAnchor, extractFrontmatter } from './CatCafeScanner.js';
 import { GenericRepoScanner } from './GenericRepoScanner.js';
 import type {
@@ -19,6 +19,7 @@ import type {
 // Re-export for backward compatibility — external code imports KIND_DIRS from IndexBuilder
 export { KIND_DIRS } from './CatCafeScanner.js';
 
+import { extractDocLinkEdges, extractFeatureRefEdges, extractWikiLinkEdges } from './edge-extractors.js';
 import { embedIndexedItems } from './embed-utils.js';
 import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
 import { SIGNAL_FLAGS } from './summary-config.js';
@@ -192,7 +193,11 @@ export class IndexBuilder implements IIndexBuilder {
     }
   }
 
-  async rebuild(options?: { force?: boolean }): Promise<RebuildResult> {
+  async rebuild(options?: {
+    force?: boolean;
+    onProgress?: (phase: string, percent: number) => void;
+  }): Promise<RebuildResult> {
+    const report = options?.onProgress ?? (() => {});
     const start = Date.now();
     let indexed = 0;
     let skipped = 0;
@@ -201,8 +206,10 @@ export class IndexBuilder implements IIndexBuilder {
     const versionChanged = this.hasIndexingVersionChanged();
     const effectiveForce = options?.force || versionChanged;
 
+    report('scanning', 0);
     // F152 Phase A: delegate to pluggable scanner (KD-5)
     const scannedItems = this.scanner.discover(this.scanRoot, this.buildScanOptions());
+    report('scanning', 15);
     const currentAnchors = new Set<string>();
     const indexedItems: EvidenceItem[] = [];
 
@@ -250,6 +257,8 @@ export class IndexBuilder implements IIndexBuilder {
       indexed++;
     }
 
+    report('indexing', 30);
+
     // Phase D: auto-extract edges from frontmatter cross-references (AC-D18, KD-29)
     // Phase F: clear both legacy 'related' and normalized 'related_to'; write 'related_to' with provenance
     await this.store.runExclusive(() => {
@@ -281,6 +290,49 @@ export class IndexBuilder implements IIndexBuilder {
       }
     }
 
+    // Phase C (F188): extract wikilink / doc_link / feature_ref edges from content
+    await this.store.runExclusive(() => {
+      this.store.getDb().prepare("DELETE FROM edges WHERE provenance = 'content'").run();
+    });
+
+    const toPosix = (p: string): string => p.replace(/\\/g, '/');
+    const sourcePathKey = (sourcePath: string): string =>
+      toPosix(isAbsolute(sourcePath) ? relative(this.scanRoot, sourcePath) : sourcePath);
+    const pathToAnchor = new Map<string, string>();
+    const setAlias = (key: string, anchor: string): void => {
+      if (!pathToAnchor.has(key)) pathToAnchor.set(key, anchor);
+    };
+    for (const scanned of scannedItems) {
+      const sp = scanned.item.sourcePath;
+      if (sp) {
+        const key = sourcePathKey(sp);
+        pathToAnchor.set(key, scanned.item.anchor);
+        if (key.startsWith('docs/')) {
+          setAlias(key.slice('docs/'.length), scanned.item.anchor);
+        } else {
+          setAlias(`docs/${key}`, scanned.item.anchor);
+        }
+      }
+    }
+
+    for (const scanned of scannedItems) {
+      if (!scanned.rawContent) continue;
+      const anchor = scanned.item.anchor;
+      if (!anchor) continue;
+
+      const body = scanned.rawContent.replace(/^---\n[\s\S]*?\n---\n?/, '');
+      const relSourcePath = scanned.item.sourcePath ? sourcePathKey(scanned.item.sourcePath) : undefined;
+      const allEdges = [
+        ...extractWikiLinkEdges(body, anchor),
+        ...extractFeatureRefEdges(body, anchor),
+        ...extractDocLinkEdges(body, anchor, pathToAnchor, relSourcePath),
+      ];
+      for (const edge of allEdges) {
+        await this.store.addEdge(edge);
+      }
+    }
+
+    report('indexing', 40);
     // Phase D-6: Index session digests (kind=session)
     if (this.transcriptDataDir) {
       const excludedThreadIds = this.excludeThreadIdsFn ? await this.excludeThreadIdsFn() : undefined;
@@ -368,6 +420,7 @@ export class IndexBuilder implements IIndexBuilder {
       }
     }
 
+    report('indexing', 55);
     // Phase E-3: Index thread message passages
     let threads: ThreadSnapshot[] = [];
     if (this.messageListFn && this.threadListFn && !threadListFailed) {
@@ -386,6 +439,7 @@ export class IndexBuilder implements IIndexBuilder {
       }
     }
 
+    report('cleanup', 70);
     // Remove stale anchors that no longer exist on disk
     // P1 fix: if threadListFn failed, preserve existing thread-* anchors (don't delete on transient error)
     const db = this.store.getDb();
@@ -400,25 +454,28 @@ export class IndexBuilder implements IIndexBuilder {
       }
     }
 
+    report('embedding', 80);
     // Phase C: generate embeddings for indexed items (shared utility with batch splitting)
     if (this.embedDeps) {
       const { embedding, vectorStore } = this.embedDeps;
-      const consistency = vectorStore.checkMetaConsistency(embedding.getModelInfo());
-      let toEmbed = indexedItems;
-      if (!consistency.consistent) {
-        vectorStore.clearAll();
-        const db = this.store.getDb();
-        const allDocs = db.prepare('SELECT anchor, title, summary FROM evidence_docs').all() as Array<{
-          anchor: string;
-          title: string;
-          summary: string | null;
-        }>;
-        toEmbed = allDocs.map(
-          (d) => ({ anchor: d.anchor, title: d.title, summary: d.summary ?? undefined }) as EvidenceItem,
-        );
-      }
+      const store = this.store;
       try {
-        await embedIndexedItems(toEmbed, embedding, vectorStore);
+        await embedIndexedItems({
+          items: indexedItems,
+          embedding,
+          vectorStore,
+          allDocsProvider: () => {
+            const db = store.getDb();
+            const allDocs = db.prepare('SELECT anchor, title, summary FROM evidence_docs').all() as Array<{
+              anchor: string;
+              title: string;
+              summary: string | null;
+            }>;
+            return allDocs.map(
+              (d) => ({ anchor: d.anchor, title: d.title, summary: d.summary ?? undefined }) as EvidenceItem,
+            );
+          },
+        });
       } catch {
         // fail-open: embedding errors don't block indexing
       }
@@ -426,6 +483,7 @@ export class IndexBuilder implements IIndexBuilder {
 
     // Persist current indexing version so next startup can detect changes
     await this.storeIndexingVersion();
+    report('done', 100);
 
     return { docsIndexed: indexed, docsSkipped: skipped, durationMs: Date.now() - start };
   }
@@ -759,6 +817,12 @@ export class IndexBuilder implements IIndexBuilder {
       }
 
       flushed++;
+    }
+
+    // #652: Also index passages for dirty threads so new messages are immediately searchable
+    const dirtySnapshots = dirtyIds.map((id) => threadMap.get(id)).filter(Boolean) as ThreadSnapshot[];
+    if (dirtySnapshots.length > 0) {
+      await this.indexPassages(dirtySnapshots);
     }
 
     return flushed;

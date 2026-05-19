@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 
-/** F070: governance status dot colors — use solid tones for 2px dots */
+/** F070: governance status dot colors */
 const GOV_STATUS_DOT: Record<string, { color: string; title: string }> = {
   healthy: { color: 'bg-conn-emerald-text', title: '治理正常' },
   stale: { color: 'bg-conn-amber-text', title: '治理过期' },
   missing: { color: 'bg-conn-red-text', title: '治理缺失' },
-  'never-synced': { color: 'bg-cafe-muted', title: '未同步治理' },
+  'never-synced': { color: 'bg-conn-slate-ring', title: '未同步治理' },
 };
 
 /** Section icon SVG paths (extracted to reduce JSX noise) */
@@ -26,7 +26,7 @@ const ICON_COLORS: Record<string, string> = {
   star: 'text-conn-amber-text',
   clock: 'text-cafe-muted',
   archive: 'text-cafe-muted',
-  system: 'text-cafe-accent',
+  system: 'text-conn-blue-text',
 };
 
 interface SectionGroupProps {
@@ -107,97 +107,76 @@ export function SectionGroup({
     setShowMenu(false);
   }, [label]);
 
+  const stopButton = useCallback((e: React.MouseEvent) => e.stopPropagation(), []);
+
   const iconPath = icon ? ICON_PATHS[icon] : undefined;
   const iconColor = icon ? ICON_COLORS[icon] : undefined;
   const govDot = governanceStatus ? GOV_STATUS_DOT[governanceStatus] : undefined;
 
   return (
     <div className="mt-1 relative group/section">
-      <div className="w-full flex items-center gap-1.5 px-3 py-1.5 hover:bg-cafe-surface-elevated transition-colors">
-        {/* Toggle button — keyboard-focusable, Enter/Space to toggle */}
-        {!isRenaming && (
-          <button
-            type="button"
-            onClick={onToggle}
-            aria-expanded={!isCollapsed}
-            className="flex min-w-0 flex-1 items-center gap-1.5 text-left focus:outline-none"
-            title={projectPath && projectPath !== 'default' ? projectPath : undefined}
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full text-left px-3 py-1.5 flex items-center gap-1.5 hover:bg-cafe-surface-elevated transition-colors"
+        title={projectPath && projectPath !== 'default' ? projectPath : undefined}
+      >
+        {/* Chevron */}
+        <svg
+          aria-hidden="true"
+          className={`w-3 h-3 text-cafe-muted transition-transform flex-shrink-0 ${isCollapsed ? '' : 'rotate-90'}`}
+          viewBox="0 0 12 12"
+          fill="currentColor"
+        >
+          <path d="M4 2l4 4-4 4V2z" />
+        </svg>
+
+        {/* Section icon */}
+        {iconPath && (
+          <svg
+            aria-hidden="true"
+            className={`w-3 h-3 flex-shrink-0 ${iconColor}`}
+            viewBox="0 0 16 16"
+            fill="currentColor"
           >
-            <svg
-              aria-hidden="true"
-              className={`w-3 h-3 text-cafe-muted transition-transform flex-shrink-0 ${isCollapsed ? '' : 'rotate-90'}`}
-              viewBox="0 0 12 12"
-              fill="currentColor"
-            >
-              <path d="M4 2l4 4-4 4V2z" />
-            </svg>
-
-            {iconPath && (
-              <svg
-                aria-hidden="true"
-                className={`w-3 h-3 flex-shrink-0 ${iconColor}`}
-                viewBox="0 0 16 16"
-                fill="currentColor"
-              >
-                <path d={iconPath} />
-              </svg>
-            )}
-
-            <span className="text-xs font-medium text-cafe-secondary truncate">{label}</span>
-
-            {govDot && <span className={`w-2 h-2 rounded-full flex-shrink-0 ${govDot.color}`} title={govDot.title} />}
-
-            <span className="text-[10px] text-cafe-muted flex-shrink-0 ml-auto">{count}</span>
-          </button>
+            <path d={iconPath} />
+          </svg>
         )}
 
-        {/* Rename input — sibling of toggle button, never nested inside it */}
-        {isRenaming && (
-          <div className="flex min-w-0 flex-1 items-center gap-1.5">
-            <svg
-              aria-hidden="true"
-              className={`w-3 h-3 text-cafe-muted transition-transform flex-shrink-0 ${isCollapsed ? '' : 'rotate-90'}`}
-              viewBox="0 0 12 12"
-              fill="currentColor"
-            >
-              <path d="M4 2l4 4-4 4V2z" />
-            </svg>
-
-            {iconPath && (
-              <svg
-                aria-hidden="true"
-                className={`w-3 h-3 flex-shrink-0 ${iconColor}`}
-                viewBox="0 0 16 16"
-                fill="currentColor"
-              >
-                <path d={iconPath} />
-              </svg>
-            )}
-
-            <input
-              ref={inputRef}
-              value={draftName}
-              onChange={(e) => setDraftName(e.target.value)}
-              onCompositionStart={ime.onCompositionStart}
-              onCompositionEnd={ime.onCompositionEnd}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !ime.isComposing()) {
-                  e.preventDefault();
-                  submitRename();
-                }
-                if (e.key === 'Escape') {
-                  e.preventDefault();
-                  setIsRenaming(false);
-                }
-              }}
-              onBlur={submitRename}
-              maxLength={100}
-              className="console-form-input text-xs font-medium px-1 py-0 flex-1 min-w-0"
-            />
-          </div>
+        {/* Label (inline rename or static) */}
+        {isRenaming ? (
+          <input
+            ref={inputRef}
+            value={draftName}
+            onChange={(e) => setDraftName(e.target.value)}
+            onClick={stopButton}
+            onCompositionStart={ime.onCompositionStart}
+            onCompositionEnd={ime.onCompositionEnd}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !ime.isComposing()) {
+                e.preventDefault();
+                submitRename();
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                setIsRenaming(false);
+              }
+            }}
+            onBlur={submitRename}
+            maxLength={100}
+            className="text-xs font-medium px-1 py-0 rounded border border-cafe-subtle focus:outline-none focus:border-cafe-accent flex-1 min-w-0"
+          />
+        ) : (
+          <span className="text-xs font-medium text-cafe-secondary truncate">{label}</span>
         )}
 
-        {/* Action buttons — siblings of the toggle, not children */}
+        {/* Governance dot */}
+        {govDot && <span className={`w-2 h-2 rounded-full flex-shrink-0 ${govDot.color}`} title={govDot.title} />}
+
+        {/* Count */}
+        <span className="text-[10px] text-cafe-muted flex-shrink-0 ml-auto">{count}</span>
+
+        {/* F095 Phase F: Quick create button */}
         {onQuickCreate && (
           <ActionButton
             onClick={(e) => {
@@ -212,6 +191,7 @@ export function SectionGroup({
           </ActionButton>
         )}
 
+        {/* Context menu trigger */}
         {hasContextMenu && (
           <ActionButton
             onClick={(e) => {
@@ -226,6 +206,7 @@ export function SectionGroup({
           </ActionButton>
         )}
 
+        {/* Project pin button */}
         {onToggleProjectPin && (
           <ActionButton
             onClick={(e) => {
@@ -239,13 +220,13 @@ export function SectionGroup({
             <path d={ICON_PATHS.pin} />
           </ActionButton>
         )}
-      </div>
+      </button>
 
       {/* F095 Phase F: Context menu dropdown */}
       {showMenu && (
         <div
           ref={menuRef}
-          className="absolute right-2 top-8 z-50 bg-cafe-surface rounded-lg shadow-lg border border-[var(--console-border-soft)] py-1 min-w-[140px]"
+          className="absolute right-2 top-8 z-50 bg-cafe-surface rounded-lg shadow-lg border border-cafe py-1 min-w-[140px]"
         >
           {onOpenInFinder && (
             <MenuItem
@@ -321,9 +302,7 @@ function MenuItem({ onClick, danger, children }: { onClick: () => void; danger?:
       type="button"
       onClick={onClick}
       className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
-        danger
-          ? 'text-conn-red-text hover:bg-[var(--console-hover-bg)]'
-          : 'text-cafe-secondary hover:bg-[var(--console-hover-bg)]'
+        danger ? 'text-conn-red-text hover:bg-conn-red-bg' : 'text-cafe-secondary hover:bg-cafe-surface-elevated'
       }`}
     >
       {children}

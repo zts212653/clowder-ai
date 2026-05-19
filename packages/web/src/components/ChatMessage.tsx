@@ -24,7 +24,7 @@ import { RichBlocks } from './rich/RichBlocks';
 import { SummaryCard } from './SummaryCard';
 import { SystemNoticeBar } from './SystemNoticeBar';
 import { ThinkingContent } from './ThinkingContent';
-import { getThreadHref, pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
+import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { TimeoutDiagnosticsPanel } from './TimeoutDiagnosticsPanel';
 import { TtsPlayButton } from './TtsPlayButton';
 
@@ -36,9 +36,9 @@ const BREED_STYLES: Record<string, { radius: string; font?: string }> = {
 };
 const DEFAULT_BREED_STYLE = { radius: 'rounded-2xl' };
 const SCHEDULER_ACCENT_BADGE_CLASS =
-  'inline-flex w-fit items-center gap-1.5 rounded-full border border-conn-amber-text/30 bg-conn-amber-bg px-2.5 py-1 text-[11px] font-semibold text-conn-amber-text shadow-sm';
+  'inline-flex w-fit items-center gap-1.5 rounded-full border border-conn-amber-ring bg-conn-amber-bg px-2.5 py-1 text-xs font-semibold text-conn-amber-text shadow-sm';
 const SCHEDULER_ACCENT_BUBBLE_CLASS =
-  'border-conn-amber-text/30 bg-conn-amber-bg/70 ring-1 ring-conn-amber-text/20 shadow-[0_10px_24px_rgba(217,119,6,0.16)] bg-gradient-to-b from-conn-amber-bg/60 to-transparent';
+  'border-conn-amber-ring bg-conn-amber-bg/70 ring-1 ring-amber-200 shadow-[0_10px_24px_rgba(217,119,6,0.16)] bg-gradient-to-b from-amber-50/60 to-transparent';
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -119,7 +119,15 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
   const direction = catData ? parseDirection(message, () => ({ toCat: getMentionToCat(), re: getMentionRe() })) : null;
 
   const isStreamOrigin = message.origin === 'stream';
-  const cliEvents = toCliEvents(message.toolEvents, isStreamOrigin ? message.content : undefined);
+  // F194 Phase Z11 follow-up: ordinary post_msg speech is projected as a
+  // separate callback bubble, but exact-key callback_final records can still
+  // merge into the stream bubble as terminal updates. Projection exposes the
+  // origin-split portions on extra.stream so CLI Output keeps the stream
+  // working log while the callback terminal text renders as the body.
+  const mergedCliStdout = message.extra?.stream?.cliStdout;
+  const mergedSpeechContent = message.extra?.stream?.speechContent;
+  const cliStdoutContent = mergedCliStdout ?? (isStreamOrigin ? message.content : undefined);
+  const cliEvents = toCliEvents(message.toolEvents, cliStdoutContent);
   const hasCliBlock = cliEvents.length > 0;
   const cliStatus = message.isStreaming
     ? ('streaming' as const)
@@ -183,18 +191,16 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
     const toneClass = isTool
       ? 'text-cafe-muted bg-cafe-surface-elevated/50 font-mono text-xs py-1'
       : isFollowup
-        ? 'text-conn-purple-text bg-conn-purple-bg border border-conn-purple-ring'
+        ? 'text-purple-700 bg-purple-50 border border-purple-200'
         : isError
           ? 'text-conn-red-text bg-conn-red-bg rounded-full'
-          : 'text-[var(--color-cafe-accent)] bg-[var(--color-cafe-accent)]/5';
+          : 'text-blue-700 bg-conn-blue-bg';
     return (
       <div data-message-id={message.id} className={`flex justify-center ${isTool ? 'mb-1' : 'mb-3'}`}>
         <div className={`text-sm px-4 py-2 rounded-lg whitespace-pre-wrap text-left max-w-[85%] ${toneClass}`}>
           {isFollowup && <span className="mr-1">🔗</span>}
           {message.content}
-          {isFollowup && (
-            <span className="block mt-1 text-xs text-conn-purple-text">输入 @猫名 跟进 来发起 follow-up</span>
-          )}
+          {isFollowup && <span className="block mt-1 text-xs text-purple-500">输入 @猫名 跟进 来发起 follow-up</span>}
         </div>
       </div>
     );
@@ -233,7 +239,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
           <div
             className={`rounded-2xl rounded-br-sm px-4 py-3 transition-transform hover:-translate-y-0.5 ${
               isWhisper && !isRevealed
-                ? 'bg-conn-amber-bg text-conn-amber-text border border-dashed border-conn-amber-text/30'
+                ? 'bg-conn-amber-bg text-conn-amber-text border border-dashed border-conn-amber-ring'
                 : ''
             }`}
             style={
@@ -252,12 +258,9 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
             )}
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => useChatStore.getState().openCoCreatorEditor()}
-          className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 ring-2 flex items-center justify-center text-[11px] font-bold text-[var(--cafe-surface)] cursor-pointer hover:opacity-80 transition-opacity"
+        <div
+          className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 ring-2 flex items-center justify-center text-xs font-bold text-white"
           style={{ backgroundColor: coCreatorPrimary, boxShadow: `0 0 0 2px ${coCreatorSecondary}` }}
-          title={coCreator.name}
         >
           {coCreator.avatar ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -274,7 +277,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
           ) : (
             'ME'
           )}
-        </button>
+        </div>
       </div>
     );
   }
@@ -296,16 +299,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
 
   return (
     <div data-message-id={message.id} className="group flex gap-2 mb-4 items-start">
-      {catData && (
-        <button
-          type="button"
-          onClick={() => useChatStore.getState().openMemberEditor(message.catId!)}
-          className="cursor-pointer flex-shrink-0"
-          title={`查看${formatCatName(catData)}详情`}
-        >
-          <CatAvatar catId={message.catId!} size={32} status={message.isStreaming ? 'streaming' : undefined} />
-        </button>
-      )}
+      {catData && <CatAvatar catId={message.catId!} size={32} status={message.isStreaming ? 'streaming' : undefined} />}
       <div className="max-w-[85%] md:max-w-[75%] min-w-0">
         {catStyle && (
           <div className="mb-1 flex flex-col gap-1 min-w-0">
@@ -360,13 +354,13 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
                 const senderLabel = catStyle?.label;
                 return (
                   <a
-                    href={getThreadHref(sourceId)}
+                    href={`/thread/${sourceId}`}
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
                       pushThreadRouteWithHistory(sourceId, typeof window !== 'undefined' ? window : undefined);
                     }}
-                    className="inline-flex items-center gap-1.5 border px-3 py-1 rounded-full bg-[var(--console-card-soft-bg)] border-[var(--console-border-soft)] text-cafe-secondary hover:bg-[var(--console-hover-bg)] transition-colors cursor-pointer w-fit max-w-full"
+                    className="inline-flex items-center gap-1.5 border px-3 py-1 rounded-full bg-[#FDF6ED] border-[#E8DCCF] text-[#8D6E63] hover:bg-[#F5EDE0] transition-colors cursor-pointer w-fit max-w-full"
                     title={sourceId}
                     aria-label={`跳转到来源 thread ${sourceId}`}
                   >
@@ -383,15 +377,25 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
           </div>
         )}
         <div
-          className={`px-4 py-3 transition-transform hover:-translate-y-0.5 overflow-hidden ${
-            catStyle ? `${catStyle.radius} ${catStyle.font ?? ''}` : 'bg-cafe-surface rounded-2xl'
+          className={`border px-4 py-3 transition-transform hover:-translate-y-0.5 overflow-hidden ${
+            catStyle ? `${catStyle.radius} ${catStyle.font ?? ''}` : 'bg-cafe-surface border-cafe rounded-2xl'
           } ${showSchedulerAccent ? SCHEDULER_ACCENT_BUBBLE_CLASS : ''}`}
-          style={catStyle ? { backgroundColor: catStyle.bgColor } : undefined}
+          style={
+            catStyle
+              ? {
+                  backgroundColor: catStyle.bgColor,
+                  ...(!showSchedulerAccent ? { borderColor: catStyle.borderColor } : {}),
+                }
+              : undefined
+          }
         >
           {hasCliBlock && isStreamOrigin ? null : !isStreamOrigin && hasBlocks ? (
             <ContentBlocks blocks={message.contentBlocks!} />
           ) : !isStreamOrigin && hasTextContent ? (
-            <CollapsibleMarkdown content={message.content} className={catStyle?.font} />
+            // F194 Phase Z11 follow-up: exact-key terminal callback merge keeps
+            // the stream working log in CLI Output via cliStdout; render only
+            // callback text here to avoid duplicating the stream text.
+            <CollapsibleMarkdown content={mergedSpeechContent ?? message.content} className={catStyle?.font} />
           ) : message.isStreaming ? (
             <span className="text-xs text-cafe-secondary">Thinking...</span>
           ) : null}
