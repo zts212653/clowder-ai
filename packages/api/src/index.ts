@@ -1911,6 +1911,7 @@ async function main(): Promise<void> {
       catalog: memoryServices.catalog,
       stores: libraryStores,
       dataDir: memoryServices.dataDir,
+      managedVaultBase: memoryServices.dataDir,
       embeddingService: memoryServices.embeddingService,
       embedMode: embedMode && embedMode !== ('off' as string) ? embedMode : undefined,
       // F188 Phase F AC-F9: pass redis for tool-usage-metrics endpoint (砚砚 review P1-2)

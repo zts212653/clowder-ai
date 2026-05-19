@@ -52,8 +52,8 @@ const MAX_EDGES_PER_NODE = 15;
 const MAX_TOTAL_NODES = 50;
 
 interface CatalogLike {
-  list(): Array<{ id: string; sensitivity: CollectionSensitivity; kind: string }>;
-  get(id: string): { id: string; sensitivity: CollectionSensitivity; kind: string } | undefined;
+  list(): Array<{ id: string; sensitivity: CollectionSensitivity; kind: string; status?: string }>;
+  get(id: string): { id: string; sensitivity: CollectionSensitivity; kind: string; status?: string } | undefined;
 }
 
 interface BuildSubgraphOptions {
@@ -72,6 +72,7 @@ interface BuildSubgraphOptions {
 function inferCollectionIdSync(anchor: string, catalog: CatalogLike): string | undefined {
   const manifests = catalog.list();
   for (const m of manifests) {
+    if (m.status === 'archived') continue;
     if (anchor.startsWith(`${m.id}:`)) return m.id;
   }
   return undefined;
@@ -192,6 +193,7 @@ export class GraphResolver {
           continue;
         }
         const manifest = this.catalog.get(collectionId);
+        if (manifest?.status === 'archived') continue;
         const sensitivity: CollectionSensitivity = manifest?.sensitivity ?? 'internal';
         const isRedacted =
           (sensitivity === 'private' || sensitivity === 'restricted') && !callerCollections.has(collectionId);
@@ -254,6 +256,7 @@ export class GraphResolver {
               rememberLookupAlias(relCanonicalAnchor, rel.anchor);
               const isCross = collectionId !== relCollectionId;
               const relManifest = relCollectionId ? this.catalog.get(relCollectionId) : undefined;
+              if (relManifest?.status === 'archived') continue;
               const relSensitivity: CollectionSensitivity = relManifest?.sensitivity ?? 'internal';
 
               const edgeSensitivity =

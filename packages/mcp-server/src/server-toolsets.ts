@@ -7,6 +7,7 @@ import {
   evidenceTools,
   gameActionTools,
   graphTools,
+  libraryLifecycleTools,
   limbTools,
   recentTools,
   richBlockRulesTools,
@@ -90,6 +91,7 @@ const memoryTools: readonly ToolDef[] = applyReadonlyFilter([
   ...distillationTools,
   ...evidenceTools,
   ...graphTools, // F188 Phase F AC-F1
+  ...libraryLifecycleTools, // F188 Phase I AC-I4
   ...recentTools, // F188 Phase F AC-F2
   // F193 Phase D AC-D1: reflectTools removed
   ...sessionChainTools,

@@ -406,6 +406,128 @@ describe('LibraryCatalog', () => {
     await app.close();
   });
 
+  it('setStatus transitions registered → indexing → active', () => {
+    catalog.register({
+      id: 'domain:lifecycle',
+      kind: 'domain',
+      name: 'lifecycle',
+      displayName: 'Lifecycle Test',
+      root: '/tmp',
+      sensitivity: 'internal',
+      scannerLevel: 0,
+      status: 'registered',
+      indexPolicy: { autoRebuild: false },
+      reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: false },
+      createdAt: '2026-05-19',
+      updatedAt: '2026-05-19',
+    });
+    catalog.setStatus('domain:lifecycle', 'indexing');
+    assert.equal(catalog.get('domain:lifecycle').status, 'indexing');
+    catalog.setStatus('domain:lifecycle', 'active');
+    assert.equal(catalog.get('domain:lifecycle').status, 'active');
+  });
+
+  it('setStatus rejects invalid transition', () => {
+    catalog.register({
+      id: 'domain:invalid-trans',
+      kind: 'domain',
+      name: 'invalid-trans',
+      displayName: 'Invalid Trans',
+      root: '/tmp',
+      sensitivity: 'internal',
+      scannerLevel: 0,
+      status: 'registered',
+      indexPolicy: { autoRebuild: false },
+      reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: false },
+      createdAt: '2026-05-19',
+      updatedAt: '2026-05-19',
+    });
+    assert.throws(() => catalog.setStatus('domain:invalid-trans', 'active'), /Invalid transition/);
+  });
+
+  it('archive marks collection archived, unarchive resets to registered', () => {
+    catalog.register({
+      id: 'domain:archivable',
+      kind: 'domain',
+      name: 'archivable',
+      displayName: 'Archivable',
+      root: '/tmp',
+      sensitivity: 'internal',
+      scannerLevel: 0,
+      status: 'active',
+      indexPolicy: { autoRebuild: false },
+      reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: false },
+      createdAt: '2026-05-19',
+      updatedAt: '2026-05-19',
+    });
+    const result = catalog.archive('domain:archivable');
+    assert.equal(result.status, 'archived');
+    assert.equal(catalog.get('domain:archivable').status, 'archived');
+
+    catalog.unarchive('domain:archivable');
+    assert.equal(catalog.get('domain:archivable').status, 'registered');
+  });
+
+  it('getRoutable excludes archived collections', () => {
+    catalog.register({
+      id: 'project:alive',
+      kind: 'project',
+      name: 'alive',
+      displayName: 'Alive',
+      root: '/tmp',
+      sensitivity: 'internal',
+      scannerLevel: 0,
+      status: 'active',
+      indexPolicy: { autoRebuild: true },
+      reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: false },
+      createdAt: '2026-05-19',
+      updatedAt: '2026-05-19',
+    });
+    catalog.register({
+      id: 'project:dead',
+      kind: 'project',
+      name: 'dead',
+      displayName: 'Dead',
+      root: '/tmp',
+      sensitivity: 'internal',
+      scannerLevel: 0,
+      status: 'active',
+      indexPolicy: { autoRebuild: true },
+      reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: false },
+      createdAt: '2026-05-19',
+      updatedAt: '2026-05-19',
+    });
+    catalog.archive('project:dead');
+    const routable = catalog.getRoutable('library');
+    assert.equal(routable.length, 1);
+    assert.equal(routable[0].id, 'project:alive');
+
+    const projectRoutable = catalog.getRoutable('project');
+    assert.equal(projectRoutable.length, 1);
+    assert.equal(projectRoutable[0].id, 'project:alive');
+
+    const allRoutable = catalog.getRoutable('all');
+    assert.equal(allRoutable.length, 1);
+  });
+
+  it('setStatus defaults missing status to active', () => {
+    catalog.register({
+      id: 'domain:no-status',
+      kind: 'domain',
+      name: 'no-status',
+      displayName: 'No Status',
+      root: '/tmp',
+      sensitivity: 'internal',
+      scannerLevel: 0,
+      indexPolicy: { autoRebuild: false },
+      reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: false },
+      createdAt: '2026-05-19',
+      updatedAt: '2026-05-19',
+    });
+    catalog.setStatus('domain:no-status', 'stale');
+    assert.equal(catalog.get('domain:no-status').status, 'stale');
+  });
+
   it('updateSensitivity tracks direction', () => {
     catalog.register({
       id: 'project:x',

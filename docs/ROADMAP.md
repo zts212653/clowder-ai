@@ -67,7 +67,6 @@ created: 2026-02-26
 | F192 | Socio-Technical Harness Eval — harness 共创评估体系 | spec | Ragdoll | internal | [F192](features/F192-socio-technical-harness-eval.md) |
 | F198 | Claude Code Subscription Carrier — 6/15 SDK Credit 拐点前救Ragdoll | spec | Ragdoll Opus 4.7 | internal | [F198](features/F198-claude-code-subscription-carrier.md) |
 | F200 | Memory Recall Eval — 基于猫真实行为的记忆系统反馈闭环 | in-progress | Ragdoll | internal | [F200](features/F200-memory-recall-eval.md) |
-| F201 | Antigravity Reliability Contract — 孟加拉猫可靠可用性闭环 | in-progress | Maine Coon/Maine Coon | internal | [F201](features/F201-antigravity-reliability-contract.md) |
 | F202 | Plugin Framework — local discovery, config, and resource activation | review | community @mindfn + maintainers | community [#686](https://github.com/zts212653/clowder-ai/pull/686) | [F202](features/F202-plugin-framework.md) |
 | F203 | Native System Prompt L0 — 压缩免疫核心规则注入 | in-progress | Ragdoll Opus 4.7 | internal | [F203](features/F203-native-system-prompt-l0.md) |
 | F204 | Weixin MP Publisher Plugin — 微信公众号文章发布插件 | review | community @mindfn + maintainers | community [#688](https://github.com/zts212653/clowder-ai/pull/688) | [F204](features/F204-weixin-mp-publisher-plugin.md) |

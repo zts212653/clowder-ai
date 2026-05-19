@@ -13,6 +13,9 @@ export const COLLECTION_SENSITIVITY_ORDER: Record<CollectionSensitivity, number>
   public: 3,
 };
 
+export const COLLECTION_STATUSES = ['registered', 'indexing', 'active', 'stale', 'blocked', 'archived'] as const;
+export type CollectionStatus = (typeof COLLECTION_STATUSES)[number];
+
 export const REVIEW_STATUSES = ['unreviewed', 'partial', 'reviewed', 'stale'] as const;
 export type ReviewStatus = (typeof REVIEW_STATUSES)[number];
 
@@ -32,6 +35,7 @@ export interface CollectionManifest {
     authorityCeiling: F163Authority;
     requireOwnerApproval: boolean;
   };
+  status?: CollectionStatus;
   exclude?: string[];
   createdAt: string;
   updatedAt: string;

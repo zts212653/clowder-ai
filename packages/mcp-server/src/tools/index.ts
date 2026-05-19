@@ -80,6 +80,19 @@ export {
   handleGraphResolve,
 } from './graph-tools.js';
 export {
+  handleLibraryArchive,
+  handleLibraryCreate,
+  handleLibraryDryRun,
+  handleLibraryList,
+  handleLibraryRebuild,
+  libraryArchiveInputSchema,
+  libraryCreateInputSchema,
+  libraryDryRunInputSchema,
+  libraryLifecycleTools,
+  libraryListInputSchema,
+  libraryRebuildInputSchema,
+} from './library-lifecycle-tools.js';
+export {
   handleLimbInvoke,
   handleLimbListAvailable,
   limbInvokeInputSchema,

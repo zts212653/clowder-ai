@@ -58,6 +58,7 @@ import { isUnderAllowedRoot } from '../../../../../utils/project-path.js';
 import { tcpProbe } from '../../../../../utils/tcp-probe.js';
 import type { AgentPaneRegistry } from '../../../../terminal/agent-pane-registry.js';
 import type { TmuxGateway } from '../../../../terminal/tmux-gateway.js';
+import { resolveBootcampWorkspaceRoot } from '../../bootcamp/workspace-root.js';
 import { createPromptDigest } from '../../context/prompt-digest.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
@@ -627,6 +628,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
     // Resolve workingDirectory from thread's projectPath
     let workingDirectory: string | undefined;
+    let bootcampWorkspaceError: Error | undefined;
     if (threadStore) {
       try {
         const thread = await preflightRace(Promise.resolve(threadStore.get(threadId)), 'threadStore.get', signal);
@@ -638,10 +640,20 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           if (!thread.projectPath.startsWith('games/') && isUnderAllowedRoot(thread.projectPath)) {
             workingDirectory = thread.projectPath;
           }
+        } else if (thread?.bootcampState) {
+          const bootcampWorkspace = await resolveBootcampWorkspaceRoot();
+          if (bootcampWorkspace.ok) {
+            workingDirectory = bootcampWorkspace.projectPath;
+          } else {
+            bootcampWorkspaceError = new Error(bootcampWorkspace.error);
+          }
         }
       } catch {
         // Thread store timeout or error — proceed without workingDirectory
       }
+    }
+    if (bootcampWorkspaceError) {
+      throw bootcampWorkspaceError;
     }
     const workingProjectRoot = workingDirectory ? findMonorepoRoot(workingDirectory) : undefined;
 

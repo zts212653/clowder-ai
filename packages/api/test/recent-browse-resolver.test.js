@@ -251,4 +251,30 @@ describe('RecentBrowseResolver (AC-F2)', () => {
     assert.equal(items.length, 1, 'only the store with getDb contributes');
     assert.equal(items[0].source, 'project:cafe');
   });
+
+  test('archived collection excluded from recent results (P1-3)', async () => {
+    const { RecentBrowseResolver } = await import('../dist/domains/memory/RecentBrowseResolver.js');
+
+    const activeStore = fakeStore([
+      { anchor: 'F100', title: 'Active Doc', kind: 'feature', updatedAt: '2026-05-10T10:00Z' },
+    ]);
+    const archivedStore = fakeStore([
+      { anchor: 'F200', title: 'Archived Doc', kind: 'feature', updatedAt: '2026-05-10T11:00Z' },
+    ]);
+
+    const resolver = new RecentBrowseResolver(
+      fakeCatalog([
+        { id: 'project:cafe', sensitivity: 'internal', kind: 'project' },
+        { id: 'domain:old', sensitivity: 'internal', kind: 'domain', status: 'archived' },
+      ]),
+      new Map([
+        ['project:cafe', activeStore],
+        ['domain:old', archivedStore],
+      ]),
+    );
+
+    const { items } = await resolver.list({ since: '7d', limit: 10 });
+    assert.equal(items.length, 1, 'archived collection should be excluded');
+    assert.equal(items[0].anchor, 'F100');
+  });
 });

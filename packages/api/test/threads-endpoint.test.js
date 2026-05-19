@@ -5,14 +5,23 @@
  */
 
 import assert from 'node:assert/strict';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 
 describe('Thread API', () => {
   let app;
   let threadStore;
+  let tmpRoots = [];
+  let originalWorkspaceRoot;
+  let originalRuntimeRoot;
 
   beforeEach(async () => {
+    originalWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    originalRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    tmpRoots = [];
+
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     const { threadsRoutes } = await import('../dist/routes/threads.js');
 
@@ -24,7 +33,18 @@ describe('Thread API', () => {
 
   afterEach(async () => {
     if (app) await app.close();
+    if (originalWorkspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+    else process.env.CAT_CAFE_WORKSPACE_ROOT = originalWorkspaceRoot;
+    if (originalRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+    else process.env.CAT_CAFE_RUNTIME_ROOT = originalRuntimeRoot;
+    await Promise.all(tmpRoots.map((dir) => rm(dir, { recursive: true, force: true })));
   });
+
+  async function createTempWorkspace() {
+    const dir = await mkdtemp(join(process.cwd(), '.tmp-bootcamp-workspace-'));
+    tmpRoots.push(dir);
+    return realpath(dir);
+  }
 
   it('POST /api/threads creates a thread', async () => {
     const res = await app.inject({
@@ -49,6 +69,45 @@ describe('Thread API', () => {
     assert.equal(res.statusCode, 201);
     const body = JSON.parse(res.body);
     assert.equal(body.projectPath, 'default');
+  });
+
+  it('POST /api/threads binds bootcamp threads without projectPath to CAT_CAFE_WORKSPACE_ROOT', async () => {
+    const workspaceRoot = await createTempWorkspace();
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads',
+      payload: {
+        userId: 'alice',
+        title: '猫猫训练营',
+        bootcampState: { v: 1, phase: 'phase-1-intro', startedAt: Date.now() },
+      },
+    });
+
+    assert.equal(res.statusCode, 201);
+    const body = JSON.parse(res.body);
+    assert.equal(body.projectPath, workspaceRoot);
+  });
+
+  it('POST /api/threads refuses bootcamp threads in runtime mode when workspace root is missing', async () => {
+    const runtimeRoot = await createTempWorkspace();
+    delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads',
+      payload: {
+        userId: 'alice',
+        title: '猫猫训练营',
+        bootcampState: { v: 1, phase: 'phase-1-intro', startedAt: Date.now() },
+      },
+    });
+
+    assert.equal(res.statusCode, 500);
+    const body = JSON.parse(res.body);
+    assert.match(body.error, /Bootcamp workspace root/);
   });
 
   it('POST /api/threads with pinned=true creates a pinned thread', async () => {
