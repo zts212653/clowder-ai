@@ -1,6 +1,6 @@
 ---
 feature_ids: [F153]
-related_features: [F130, F008, F150]
+related_features: [F130, F008, F150, F208]
 topics: [observability, telemetry, metrics, health-check, infrastructure]
 doc_kind: spec
 created: 2026-04-09

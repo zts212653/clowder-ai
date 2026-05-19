@@ -72,9 +72,9 @@ v0 scope：6-field registry + 3 pilots + YAML 文件。**不是平台，不建 r
 - [ ] AC-A5: Eval 观测模型文档化——thread-level 观测单位 + 三种用户补偿行为模式 + 时间窗口聚合策略
 
 ### Phase B（球权端到端验证）
-- [ ] AC-B1: Trace 接口——hold_ball 事件（hold/release/cancel/timeout/zombie）可通过 F153 telemetry 观测，定义 trace event schema
+- [ ] AC-B1: Trace 接口——hold_ball 事件（hold/release/cancel/timeout/zombie）可通过 F153 telemetry 观测，定义 trace event schema。需新增 event_type 过滤能力或 hold_ball 专属 trace span（当前 `/api/telemetry/traces` 仅支持 traceId/invocationId/catId/limit）
 - [ ] AC-B2: Eval 接口——基于 thread 段的球权效果评估，能检测至少一种用户补偿行为（如：不必要的 cancel = trust gap）
-- [ ] AC-B3: Feedback 接口——hold_ball 取消增加结构化 `reason` 字段（当前缺失，铲屎官明确指出）
+- [ ] AC-B3: Feedback 接口——hold_ball 取消增加结构化 `reason` 字段（当前缺失，铲屎官明确指出）+ 新增 `hold_cancel_with_reason_count` counter（与现有 `hold_cancel_count` 配对，用于 Friction Metric 计算）
 - [ ] AC-B4: Governance 接口——球权子规则的升级/降级/sunset 判据定义，含至少一个具体判据示例
 
 ### Phase C（Migration Playbook + 第二 Pilot）
@@ -145,7 +145,7 @@ v0 scope：6-field registry + 3 pilots + YAML 文件。**不是平台，不建 r
 > F208 本身是 harness 类 feature，按 F192 Phase B 门禁要求填写。
 
 **Primary Users**: 三猫（harness 的一线使用者和维护者）+ 铲屎官（governance 决策者）
-**Activation Signal**: Phase B 完成后，球权 pilot 的 trace event 在 F153 telemetry 中可观测（hold/release/cancel/timeout 至少各出现 1 次）；可验证方式：`GET /api/telemetry/traces?component=hold_ball` 返回非空
-**Friction Metric**: 球权 cancel 事件中缺少 reason 字段的比例（Phase B 前 = 100%，Phase B 后目标 < 20%）；可验证方式：`hold_cancel_count` vs `hold_cancel_with_reason_count` 的差值
+**Activation Signal**: Phase B 完成后，球权 pilot 的 trace event 在 F153 telemetry 中可观测（hold/release/cancel/timeout 至少各出现 1 次）；可验证方式：`GET /api/telemetry/metrics` 中 `hold_cancel_count` / `zombie_hold_count` 等 C1 counter 非零（现有 F192-D0 counter）。注：当前 `/api/telemetry/traces` 仅支持 `traceId/invocationId/catId/limit` 过滤，不支持按 component 过滤——Phase B AC-B1 需新增 event_type 过滤能力或定义 hold_ball 专属 trace span
+**Friction Metric**: 球权 cancel 事件中缺少 reason 字段的比例（Phase B 前 = 100%，Phase B 后目标 < 20%）；可验证方式：`hold_cancel_count`（已有，F192-D0）vs `hold_cancel_with_reason_count`（**Phase B AC-B3 新增 counter**，当前不存在）的差值
 **Regression Fixture**: (1) hold_ball 后 release 正常流——trace 链完整；(2) zombie hold 超时——timeout event 触发；(3) cancel 携带 reason——reason 字段非空。三个 fixture 作为 Phase B 验收的具体测试场景
-**Sunset Signal**: 连续 3 个月无猫查阅 registry 且无 governance 决策产生（可观测：registry.yaml 的 git log 无 commit + 无 governance 类 harness-feedback 文档产出）→ 候选 sunset
+**Sunset Signal**: 连续 3 个月无 registry/governance activity（可观测：registry.yaml 的 git log 无 commit + 无 governance 类 harness-feedback 文档产出 + 无 governance 相关 AC 变更）→ 候选 sunset
