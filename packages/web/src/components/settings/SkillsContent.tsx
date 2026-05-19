@@ -15,7 +15,13 @@ import {
   SkillsSummaryFooter,
 } from './SkillsSubComponents';
 import type { SettingsSkillItem, SkillsApiData, SkillsData } from './skills-types';
-import { ALL_CATEGORIES, composeSkillItems, normalizeSearch, normalizeSkillsData } from './skills-types';
+import {
+  ALL_CATEGORIES,
+  composeSkillItems,
+  matchesSkillSearch,
+  normalizeSearch,
+  normalizeSkillsData,
+} from './skills-types';
 import { useSkillControls } from './useSkillControls';
 
 export function SkillsContent() {
@@ -78,7 +84,7 @@ export function SkillsContent() {
     return composedItems.filter((skill) => {
       if (activeCategory !== ALL_CATEGORIES && skill.category !== activeCategory) return false;
       if (!needle) return true;
-      return `${skill.name} ${skill.category} ${skill.trigger}`.toLowerCase().includes(needle);
+      return matchesSkillSearch(skill, needle);
     });
   }, [activeCategory, composedItems, query]);
 
@@ -201,7 +207,7 @@ export function SkillsContent() {
         <SkillPreviewModal
           skillId={previewSkill.name}
           skillName={previewSkill.name}
-          description={previewSkill.trigger}
+          description={previewSkill.description || previewSkill.trigger}
           triggers={previewSkill.trigger ? [previewSkill.trigger] : []}
           category={previewSkill.category}
           projectPath={controls.projectPath}

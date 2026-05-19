@@ -329,6 +329,120 @@ describe('Knowledge Feed → Materialize integration', () => {
     await app3.close();
   });
 
+  it('approve rejects archived target collection (砚砚 R3 P1)', async () => {
+    const { knowledgeFeedRoutes } = await import('../dist/routes/knowledge-feed.js');
+    const { LibraryCatalog } = await import('../dist/domains/memory/LibraryCatalog.js');
+    const Database = (await import('better-sqlite3')).default;
+
+    const catalog = new LibraryCatalog();
+    catalog.register({
+      id: 'domain:old-project',
+      kind: 'domain',
+      name: 'old-project',
+      displayName: 'Old Project',
+      root: '/tmp/old-project',
+      sensitivity: 'internal',
+      scannerLevel: 0,
+      status: 'archived',
+      indexPolicy: { autoRebuild: true },
+      reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: false },
+      createdAt: '2026-01-01',
+      updatedAt: '2026-05-19',
+    });
+
+    const db = new Database(':memory:');
+    const appArchived = Fastify();
+    await knowledgeFeedRoutes(appArchived, { markerQueue: queue, db, catalog });
+    await appArchived.ready();
+
+    const marker = await queue.submit({
+      content: 'Knowledge going to archived collection',
+      source: 'opus:t1',
+      status: 'captured',
+      targetKind: 'lesson',
+    });
+
+    const res = await appArchived.inject({
+      method: 'POST',
+      url: '/api/knowledge/approve',
+      payload: { markerId: marker.id, targetCollectionId: 'domain:old-project' },
+    });
+
+    assert.equal(res.statusCode, 409, 'should reject archived target with 409');
+    const body = JSON.parse(res.body);
+    assert.ok(body.error.includes('archived'), 'error should mention archived');
+
+    // Marker must still be captured — no transition should have happened
+    const markers = await queue.list({ status: 'captured' });
+    const stillCaptured = markers.find((m) => m.id === marker.id);
+    assert.ok(stillCaptured, 'marker should remain in captured state');
+
+    await appArchived.close();
+  });
+
+  it('approve rejects when target collection store is unavailable (砚砚 R3 P1)', async () => {
+    const { knowledgeFeedRoutes } = await import('../dist/routes/knowledge-feed.js');
+    const { LibraryCatalog } = await import('../dist/domains/memory/LibraryCatalog.js');
+    const { MaterializationService } = await import('../dist/domains/memory/MaterializationService.js');
+    const Database = (await import('better-sqlite3')).default;
+
+    const catalog = new LibraryCatalog();
+    catalog.register({
+      id: 'domain:active-no-store',
+      kind: 'domain',
+      name: 'active-no-store',
+      displayName: 'Active But No Store',
+      root: '/tmp/active-no-store',
+      sensitivity: 'internal',
+      scannerLevel: 0,
+      indexPolicy: { autoRebuild: true },
+      reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: false },
+      createdAt: '2026-05-19',
+      updatedAt: '2026-05-19',
+    });
+
+    const db = new Database(':memory:');
+    const matService = new MaterializationService(queue, join(tmpDir, 'docs'));
+    const emptyStores = new Map();
+
+    const appNoStore = Fastify();
+    await knowledgeFeedRoutes(appNoStore, {
+      markerQueue: queue,
+      db,
+      catalog,
+      materializationService: matService,
+      collectionStores: emptyStores,
+    });
+    await appNoStore.ready();
+
+    const marker = await queue.submit({
+      content: 'Knowledge to a storeless collection',
+      source: 'opus:t1',
+      status: 'captured',
+      targetKind: 'lesson',
+    });
+
+    const res = await appNoStore.inject({
+      method: 'POST',
+      url: '/api/knowledge/approve',
+      payload: { markerId: marker.id, targetCollectionId: 'domain:active-no-store' },
+    });
+
+    assert.equal(res.statusCode, 400, 'should reject when collection store unavailable');
+    const body = JSON.parse(res.body);
+    assert.ok(
+      body.error.includes('store') || body.error.includes('unavailable'),
+      'error should mention store unavailability',
+    );
+
+    // Marker must still be captured
+    const markers = await queue.list({ status: 'captured' });
+    const stillCaptured = markers.find((m) => m.id === marker.id);
+    assert.ok(stillCaptured, 'marker should remain in captured state');
+
+    await appNoStore.close();
+  });
+
   it('approve requires targetCollectionId for private/restricted source markers (cloud R7 P1)', async () => {
     const { knowledgeFeedRoutes } = await import('../dist/routes/knowledge-feed.js');
     const { LibraryCatalog } = await import('../dist/domains/memory/LibraryCatalog.js');

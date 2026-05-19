@@ -9,7 +9,15 @@ interface Marker {
   source: string;
   status: string;
   targetKind?: string;
+  sourceCollectionId?: string;
+  sourceSensitivity?: string;
   createdAt: string;
+}
+
+interface CollectionOption {
+  id: string;
+  displayName: string;
+  sensitivity: string;
 }
 
 interface FeedData {
@@ -31,6 +39,8 @@ export function KnowledgeFeed() {
   const [loading, setLoading] = useState(true);
   // pendingCount reserved for badge display in mode switcher
   const [, setPendingCount] = useState(0);
+  const [collections, setCollections] = useState<CollectionOption[]>([]);
+  const [approveErrors, setApproveErrors] = useState<Record<string, string>>({});
 
   const fetchFeed = useCallback(async () => {
     try {
@@ -49,19 +59,71 @@ export function KnowledgeFeed() {
 
   useEffect(() => {
     fetchFeed();
-    // Refresh every 60s
     const interval = setInterval(fetchFeed, 60000);
     return () => clearInterval(interval);
   }, [fetchFeed]);
 
-  const handleApprove = useCallback(
-    async (markerId: string) => {
+  useEffect(() => {
+    (async () => {
       try {
-        await apiFetch('/api/knowledge/approve', {
+        const res = await apiFetch('/api/library/catalog');
+        if (res.ok) {
+          const json = await res.json();
+          const active = (json.collections ?? [])
+            .filter((c: { manifest: { status?: string } }) => (c.manifest.status ?? 'active') === 'active')
+            .map((c: { manifest: CollectionOption }) => ({
+              id: c.manifest.id,
+              displayName: c.manifest.displayName,
+              sensitivity: c.manifest.sensitivity,
+            }));
+          setCollections(active);
+        }
+      } catch {
+        // fail-open
+      }
+    })();
+  }, []);
+
+  const handleApprove = useCallback(
+    async (markerId: string, targetCollectionId?: string) => {
+      try {
+        setApproveErrors((prev) => {
+          const next = { ...prev };
+          delete next[markerId];
+          return next;
+        });
+
+        const payload: Record<string, unknown> = { markerId };
+        if (targetCollectionId) payload.targetCollectionId = targetCollectionId;
+
+        const res = await apiFetch('/api/knowledge/approve', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ markerId }),
+          body: JSON.stringify(payload),
         });
+
+        if (!res.ok) {
+          const err = await res.json();
+          if (res.status === 400 && typeof err.error === 'string' && err.error.includes('visibility-widening')) {
+            const confirmed = globalThis.confirm(err.detail ?? 'This action widens visibility. Proceed?');
+            if (!confirmed) return;
+
+            const retryRes = await apiFetch('/api/knowledge/approve', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ ...payload, confirmVisibilityWidening: true }),
+            });
+            if (!retryRes.ok) {
+              const retryErr = await retryRes.json();
+              setApproveErrors((prev) => ({ ...prev, [markerId]: retryErr.error ?? 'Approve failed' }));
+              return;
+            }
+          } else {
+            setApproveErrors((prev) => ({ ...prev, [markerId]: err.error ?? 'Approve failed' }));
+            return;
+          }
+        }
+
         fetchFeed();
       } catch {
         // fail-open
@@ -169,6 +231,8 @@ export function KnowledgeFeed() {
               key={marker.id}
               marker={marker}
               tab={activeTab}
+              collections={collections}
+              error={approveErrors[marker.id]}
               onApprove={handleApprove}
               onReject={handleReject}
               onUndo={handleUndo}
@@ -193,16 +257,22 @@ export function KnowledgeFeed() {
 function KnowledgeCard({
   marker,
   tab,
+  collections,
+  error,
   onApprove,
   onReject,
   onUndo,
 }: {
   marker: Marker;
   tab: FeedTab;
-  onApprove: (id: string) => void;
+  collections: CollectionOption[];
+  error?: string;
+  onApprove: (id: string, collectionId?: string) => void;
   onReject: (id: string) => void;
   onUndo: (id: string) => void;
 }) {
+  const [selectedCollection, setSelectedCollection] = useState('');
+  const isPrivateSource = marker.sourceSensitivity === 'private' || marker.sourceSensitivity === 'restricted';
   // Parse kind from content: "[decision] title: claim"
   const kindMatch = marker.content.match(/^\[(decision|lesson|method)\]\s*/i);
   const kind = kindMatch?.[1]?.toLowerCase() ?? 'lesson';
@@ -237,21 +307,40 @@ function KnowledgeCard({
 
       {/* Actions */}
       {tab === 'review' && (
-        <div className="flex items-center justify-end gap-1.5 pt-0.5">
-          <button
-            type="button"
-            onClick={() => onApprove(marker.id)}
-            className="text-[10px] font-semibold text-white bg-cafe-accent rounded px-2 py-1 hover:opacity-90 transition-opacity"
-          >
-            Approve
-          </button>
-          <button
-            type="button"
-            onClick={() => onReject(marker.id)}
-            className="text-[10px] font-medium text-cafe-interactive/50 hover:text-cafe-interactive/80 transition-colors px-1.5 py-1"
-          >
-            Dismiss
-          </button>
+        <div className="space-y-1.5 pt-0.5">
+          {collections.length > 0 && (
+            <select
+              value={selectedCollection}
+              onChange={(e) => setSelectedCollection(e.target.value)}
+              className="w-full text-[10px] bg-cafe-surface-sunken/40 border border-cafe-subtle/60 rounded px-1.5 py-1 text-cafe-interactive/70"
+            >
+              <option value="" disabled={isPrivateSource}>
+                自动选择
+              </option>
+              {collections.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.displayName} ({c.sensitivity})
+                </option>
+              ))}
+            </select>
+          )}
+          {error && <div className="text-[10px] text-conn-red-text bg-conn-red-bg/30 rounded px-1.5 py-1">{error}</div>}
+          <div className="flex items-center justify-end gap-1.5">
+            <button
+              type="button"
+              onClick={() => onApprove(marker.id, selectedCollection || undefined)}
+              className="text-[10px] font-semibold text-white bg-cafe-accent rounded px-2 py-1 hover:opacity-90 transition-opacity"
+            >
+              Approve
+            </button>
+            <button
+              type="button"
+              onClick={() => onReject(marker.id)}
+              className="text-[10px] font-medium text-cafe-interactive/50 hover:text-cafe-interactive/80 transition-colors px-1.5 py-1"
+            >
+              Dismiss
+            </button>
+          </div>
         </div>
       )}
       {tab === 'settled' && (

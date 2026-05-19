@@ -62,7 +62,7 @@ describe('adaptServiceState', () => {
     const home = makeHome({ id: 'mlx-tts', name: 'MLX TTS', category: 'voice', features: ['voice-output'] });
     const result = adaptServiceState(home);
     expect(result.id).toBe('mlx-tts');
-    expect(result.name).toBe('MLX TTS');
+    expect(result.name).toBe('语音合成 (MLX)');
     expect(result.category).toBe('voice');
     expect(result.features).toEqual(['voice-output']);
   });

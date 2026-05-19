@@ -69,7 +69,7 @@ export function McpIdentitySection({
           type="text"
           value={id}
           onChange={(event) => onIdChange(event.target.value)}
-          placeholder="MCP server name"
+          placeholder="MCP 服务名称"
           className={`${formInputClass} disabled:opacity-60`}
           disabled={isEdit || readOnly}
         />
@@ -132,7 +132,7 @@ export function McpResolverSection({ resolver }: { resolver?: string }) {
   if (!resolver) return null;
   return (
     <FormSection>
-      <FormItem label="Resolver">
+      <FormItem label="解析器">
         <div className="console-pill px-3 py-1.5 text-xs text-cafe-secondary">{resolver}</div>
       </FormItem>
     </FormSection>
@@ -177,7 +177,7 @@ function McpStdioFields({
           type="text"
           value={command}
           onChange={(event) => onCommandChange(event.target.value)}
-          placeholder={isEdit && !readOnly ? '留空保留现有命令' : 'e.g. npx'}
+          placeholder={isEdit && !readOnly ? '留空保留现有命令' : '例如 npx'}
           className={`${formInputClass} disabled:opacity-60`}
           disabled={readOnly}
         />

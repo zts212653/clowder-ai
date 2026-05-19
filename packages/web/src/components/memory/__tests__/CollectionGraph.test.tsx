@@ -190,8 +190,8 @@ describe('CollectionGraph force-directed', () => {
     const legend = container.querySelector('[data-testid="graph-legend"]');
     const filters = container.querySelector('[data-testid="graph-edge-filter"]');
 
-    expect(summary?.textContent).toContain('Nodes');
-    expect(summary?.textContent).toContain('Edges');
+    expect(summary?.textContent).toContain('节点');
+    expect(summary?.textContent).toContain('关系边');
     expect(legend?.closest('[data-testid="graph-side-panel"]')).toBe(sidePanel);
     expect(filters?.closest('[data-testid="graph-side-panel"]')).toBe(sidePanel);
   });

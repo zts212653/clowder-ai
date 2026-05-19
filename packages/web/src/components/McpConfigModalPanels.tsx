@@ -31,7 +31,7 @@ export function McpPreviewSection({ preview }: { preview: McpInstallPreview | nu
       <FormItem label="安装预览">
         <div className="space-y-2 rounded-xl bg-[var(--console-panel-bg)] px-3 py-2.5 text-xs text-cafe-secondary">
           <p>
-            ID: <span className="font-bold text-cafe">{preview.entry.id}</span>
+            标识：<span className="font-bold text-cafe">{preview.entry.id}</span>
           </p>
           <p>将更新: {preview.cliConfigsAffected.join(', ') || '无'}</p>
           {preview.willProbe && <p>安装后会探测连接状态</p>}

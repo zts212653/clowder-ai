@@ -99,20 +99,25 @@ describe('F201 Antigravity recovery policy', () => {
     assert.equal(decision.journalSummary.entries.length, 1);
   });
 
-  test('documents intentional read-only MCP transient retry narrowing', () => {
+  test('retries transient provider errors after read-only MCP tool activity', () => {
     const decision = decideAntigravityRecovery(
       baseContext({
         dispatchState: {
           ...baseContext().dispatchState,
           hasDispatchRelevantStep: true,
+          hasResolvedToolishStep: true,
+          hasAttemptToolActivity: true,
+          hasBatchToolActivity: true,
           dispatchRelevantStepKind: 'tool_read_mcp',
+          readOnlyToolActivityRetryEligible: true,
         },
       }),
     );
 
     assert.deepEqual(decision, {
-      action: 'surface_terminal_error',
-      reason: 'read_only_mcp_tool_transient_retry_intentionally_disabled',
+      action: 'retry_fresh_cascade',
+      reason: 'pre_side_effect_transient',
+      delayMs: 0,
     });
   });
 

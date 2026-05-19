@@ -290,8 +290,13 @@ export interface IMarkerQueue {
   transition(id: string, to: MarkerStatus, patch?: Partial<Marker>): Promise<void>;
 }
 
+export interface MaterializeOptions {
+  targetRoot?: string;
+  indexBuilder?: Pick<IIndexBuilder, 'incrementalUpdate'> | null;
+}
+
 export interface IMaterializationService {
-  materialize(markerId: string): Promise<MaterializeResult>;
+  materialize(markerId: string, options?: MaterializeOptions): Promise<MaterializeResult>;
   canMaterialize(markerId: string): Promise<boolean>;
 }
 

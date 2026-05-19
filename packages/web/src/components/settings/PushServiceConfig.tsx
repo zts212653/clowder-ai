@@ -146,15 +146,8 @@ export function PushServiceConfig() {
 
   const messageTone = message?.tone === 'success' ? 'success' : message?.tone === 'error' ? 'error' : 'info';
 
-  const inputStyle = {
-    borderRadius: '0.5rem',
-    border: '1px solid var(--cafe-border)',
-    backgroundColor: 'var(--cafe-surface-elevated)',
-    paddingInline: '0.75rem',
-    paddingBlock: '0.5rem',
-    fontSize: '0.875rem',
-    color: 'var(--cafe-text)',
-  } as const;
+  const inputClass =
+    'w-full rounded-lg border border-[var(--console-border-soft)] bg-[var(--cafe-surface-elevated)] px-3 py-2 text-sm text-cafe';
 
   const labelStyle = { fontSize: '0.75rem', color: 'var(--cafe-text-secondary)' } as const;
 
@@ -183,8 +176,7 @@ export function PushServiceConfig() {
             value={form.VAPID_PUBLIC_KEY}
             onChange={(event) => updateField('VAPID_PUBLIC_KEY', event.target.value)}
             placeholder={status?.capability.vapidPublicKeyConfigured ? '已配置，留空保持不变' : 'VAPID public key'}
-            className="w-full"
-            style={inputStyle}
+            className={inputClass}
           />
         </label>
         <label className="space-y-1 font-medium" style={labelStyle}>
@@ -195,8 +187,7 @@ export function PushServiceConfig() {
             value={form.VAPID_PRIVATE_KEY}
             onChange={(event) => updateField('VAPID_PRIVATE_KEY', event.target.value)}
             placeholder={status?.capability.pushServiceConfigured ? '已配置，留空保持不变' : 'VAPID private key'}
-            className="w-full"
-            style={inputStyle}
+            className={inputClass}
           />
         </label>
       </div>
@@ -208,8 +199,7 @@ export function PushServiceConfig() {
           value={form.VAPID_SUBJECT}
           onChange={(event) => updateField('VAPID_SUBJECT', event.target.value)}
           placeholder="mailto:admin@example.com"
-          className="w-full"
-          style={inputStyle}
+          className={inputClass}
         />
       </label>
 

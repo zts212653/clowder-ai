@@ -68,7 +68,7 @@ export function InstallPreviewModal({ serviceName, prerequisites, onConfirm, onC
             +
           </div>
           <h2 id="install-preview-title" className="min-w-0 flex-1 text-xl font-extrabold text-cafe">
-            Install {serviceName}
+            安装 {serviceName}
           </h2>
           <button
             type="button"
@@ -83,14 +83,14 @@ export function InstallPreviewModal({ serviceName, prerequisites, onConfirm, onC
         <div className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto">
           {prerequisites.runtime && (
             <div className="rounded-2xl bg-[var(--console-panel-bg)] px-4 py-3">
-              <p className="text-label font-semibold uppercase tracking-[0.22em] text-cafe-muted">Runtime</p>
+              <p className="text-label font-semibold uppercase tracking-[0.22em] text-cafe-muted">运行环境</p>
               <p className="mt-1 text-sm text-cafe-secondary">{prerequisites.runtime}</p>
             </div>
           )}
 
           {prerequisites.packages && prerequisites.packages.length > 0 && (
             <div className="rounded-2xl bg-[var(--console-panel-bg)] px-4 py-3">
-              <p className="text-label font-semibold uppercase tracking-[0.22em] text-cafe-muted">Packages</p>
+              <p className="text-label font-semibold uppercase tracking-[0.22em] text-cafe-muted">依赖包</p>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {prerequisites.packages.map((pkg) => (
                   <span
@@ -106,7 +106,7 @@ export function InstallPreviewModal({ serviceName, prerequisites, onConfirm, onC
 
           {models.length > 0 && (
             <div className="rounded-2xl bg-[var(--console-panel-bg)] px-4 py-3">
-              <p className="text-label font-semibold uppercase tracking-[0.22em] text-cafe-muted">Model</p>
+              <p className="text-label font-semibold uppercase tracking-[0.22em] text-cafe-muted">模型</p>
               <div className="mt-2 space-y-2">
                 {models.map((model) => (
                   <label
@@ -132,7 +132,7 @@ export function InstallPreviewModal({ serviceName, prerequisites, onConfirm, onC
                       <p className="mt-0.5 text-xs text-cafe-muted">
                         {model.size}
                         {model.description ? ` · ${model.description}` : ''}
-                        {model.isDefault ? ' · default' : ''}
+                        {model.isDefault ? ' · 默认' : ''}
                       </p>
                     </div>
                   </label>
@@ -150,7 +150,7 @@ export function InstallPreviewModal({ serviceName, prerequisites, onConfirm, onC
                     className="mt-0.5 shrink-0 accent-cafe-interactive"
                   />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-cafe">Custom model</p>
+                    <p className="text-sm font-medium text-cafe">自定义模型</p>
                     {useCustom && (
                       <input
                         value={customModel}
@@ -166,7 +166,7 @@ export function InstallPreviewModal({ serviceName, prerequisites, onConfirm, onC
           )}
 
           {prerequisites.estimatedMinutes != null && (
-            <p className="text-xs text-cafe-muted">Estimated time: ~{prerequisites.estimatedMinutes} min</p>
+            <p className="text-xs text-cafe-muted">预计耗时：~{prerequisites.estimatedMinutes} 分钟</p>
           )}
         </div>
 
@@ -176,7 +176,7 @@ export function InstallPreviewModal({ serviceName, prerequisites, onConfirm, onC
             onClick={onCancel}
             className="rounded-xl px-4 py-2 text-sm font-semibold text-cafe-muted transition-colors hover:bg-[var(--console-panel-bg)] hover:text-cafe"
           >
-            Cancel
+            取消
           </button>
           <button
             type="button"
@@ -184,7 +184,7 @@ export function InstallPreviewModal({ serviceName, prerequisites, onConfirm, onC
             disabled={useCustom && !customModel.trim()}
             className="rounded-xl bg-cafe-interactive px-4 py-2 text-sm font-semibold text-white transition-colors hover:opacity-90 disabled:opacity-50"
           >
-            Install
+            安装
           </button>
         </div>
       </div>

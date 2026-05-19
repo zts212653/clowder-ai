@@ -37,12 +37,12 @@ export function buildBackHref(referrerThread: string | null): string {
  */
 export function buildMemoryTabItems(fromSuffix: string): readonly TabConfig[] {
   return [
-    { id: 'feed', href: `/memory${fromSuffix}`, label: 'Knowledge Feed' },
-    { id: 'search', href: `/memory/search${fromSuffix}`, label: 'Search' },
-    { id: 'status', href: `/memory/status${fromSuffix}`, label: 'Index Status' },
-    { id: 'health', href: `/memory/health${fromSuffix}`, label: 'Health' },
-    { id: 'catalog', href: `/memory/catalog${fromSuffix}`, label: 'Library' },
-    { id: 'graph', href: `/memory/graph${fromSuffix}`, label: 'Graph' },
+    { id: 'feed', href: `/memory${fromSuffix}`, label: '知识动态' },
+    { id: 'search', href: `/memory/search${fromSuffix}`, label: '搜索' },
+    { id: 'status', href: `/memory/status${fromSuffix}`, label: '索引状态' },
+    { id: 'health', href: `/memory/health${fromSuffix}`, label: '健康度' },
+    { id: 'catalog', href: `/memory/catalog${fromSuffix}`, label: '图书馆' },
+    { id: 'graph', href: `/memory/graph${fromSuffix}`, label: '知识图谱' },
   ];
 }
 

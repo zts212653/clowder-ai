@@ -41,6 +41,7 @@ interface SkillEntry {
   name: string;
   category: string;
   trigger: string;
+  description?: string;
   mounts: SkillMount;
   requiresMcp?: SkillMcpDependency[];
 }
@@ -143,6 +144,7 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
           name,
           category: entry?.category ?? '未分类',
           trigger,
+          ...(meta?.description ? { description: meta.description } : {}),
           mounts: { claude, codex, gemini, kimi },
           ...(meta?.requiresMcp?.length
             ? {

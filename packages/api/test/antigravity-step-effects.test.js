@@ -111,6 +111,19 @@ describe('F201 classifyAntigravityStepEffect', () => {
     assert.equal(readOnly.blocksBlindRetry, false);
   });
 
+  test('reviewed Antigravity read tools are retry-safe tool_read steps', () => {
+    const effect = classifyAntigravityStepEffect({
+      type: 'CORTEX_STEP_TYPE_GREP_SEARCH',
+      status: 'CORTEX_STEP_STATUS_DONE',
+      toolCall: { toolName: 'grep_search', input: '{"query":"F201"}' },
+    });
+
+    assert.equal(effect.kind, 'tool_read');
+    assert.equal(effect.effectType, 'mcp');
+    assert.equal(effect.blocksBlindRetry, false);
+    assert.equal(effect.toolName, 'grep_search');
+  });
+
   test('CHECKPOINT / EPHEMERAL / USER_INPUT do not affect retry safety', () => {
     const summary = summarizeAntigravityStepEffects([
       { type: 'CORTEX_STEP_TYPE_CHECKPOINT', status: 'CORTEX_STEP_STATUS_DONE' },

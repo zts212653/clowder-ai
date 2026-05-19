@@ -57,6 +57,14 @@ const STATUS_LABELS: Record<ServiceUiStatus, string> = {
   starting: '启动中',
 };
 
+const DISPLAY_NAMES: Record<string, string> = {
+  'whisper-stt': '语音识别 (Whisper)',
+  'mlx-tts': '语音合成 (MLX)',
+  'llm-postprocess': 'LLM 后处理',
+  'embedding-model': '嵌入模型',
+  'audio-capture': '音频采集',
+};
+
 export function adaptServiceState(home: HomeServiceState): ServiceUiState {
   let status: ServiceUiStatus;
   let running: boolean;
@@ -78,7 +86,7 @@ export function adaptServiceState(home: HomeServiceState): ServiceUiState {
 
   return {
     id: home.id,
-    name: home.name,
+    name: DISPLAY_NAMES[home.id] ?? home.name,
     description: home.description,
     category: home.category,
     endpoint: home.endpoint,

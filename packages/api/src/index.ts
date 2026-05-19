@@ -1897,6 +1897,7 @@ async function main(): Promise<void> {
     db: memoryServices.store.getDb(),
     materializationService: memoryServices.materializationService,
     catalog: memoryServices.catalog,
+    collectionStores: memoryServices.collectionStores,
   });
 
   // F186: Library catalog API (Phase D: includes external collections + dataDir for register endpoint)

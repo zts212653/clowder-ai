@@ -19,12 +19,12 @@ const STATUS_DOT_COLOR: Record<string, string> = {
 
 type ActionBadgeTone = 'blue' | 'emerald' | 'amber';
 const ACTION_CONFIG: Record<string, { label: string; tone: ActionBadgeTone }> = {
-  install: { label: 'Install', tone: 'blue' },
-  start: { label: 'Start', tone: 'emerald' },
-  stop: { label: 'Stop', tone: 'amber' },
+  install: { label: '安装', tone: 'blue' },
+  start: { label: '启动', tone: 'emerald' },
+  stop: { label: '停止', tone: 'amber' },
 };
 
-const ROW_STYLE = { paddingInline: '1.25rem', paddingBlock: '1rem' } as const;
+const ROW_STYLE = { paddingInline: '1.25rem', paddingBlock: '0.75rem' } as const;
 const LOG_POLL_MS = 2000;
 
 interface ServiceStatusPanelProps {
@@ -212,7 +212,7 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
                       tone="danger"
                       disabled={isBusy}
                       onClick={() => void executeAction(service.id, 'uninstall')}
-                      title="Uninstall"
+                      title="卸载"
                     >
                       <HubIcon name="trash" className="h-3.5 w-3.5" />
                     </SettingsResourceIconButton>

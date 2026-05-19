@@ -34,7 +34,7 @@ function MetricRow({ label, metric, hint }: { label: string; metric: ToolUsageMe
   const display =
     metric.sufficient && metric.value !== null
       ? `${metric.value.toFixed(1)}${metric.unit}`
-      : `insufficient data (N=${metric.sampleN}, need ≥${metric.threshold})`;
+      : `数据不足 (N=${metric.sampleN}, 需 ≥${metric.threshold})`;
   const color = metric.sufficient ? 'text-cafe-black' : 'text-cafe-muted italic';
   return (
     <div className="flex items-baseline justify-between border-b border-cafe/30 py-2 last:border-0">
@@ -68,60 +68,56 @@ export function ToolUsageMetricsPanel({ fetcher }: { fetcher?: () => Promise<Too
 
   if (error) {
     return (
-      <div className="rounded-xl border border-cafe bg-white p-5" data-testid="tool-usage-metrics-error">
-        <h4 className="mb-2 text-sm font-semibold text-cafe-black">Tool Usage Metrics (F188 Phase F)</h4>
-        <div className="text-xs text-conn-red-text">Failed to load: {error}</div>
+      <div className="rounded-xl bg-[var(--console-card-bg)] p-5" data-testid="tool-usage-metrics-error">
+        <h4 className="mb-2 text-sm font-semibold text-cafe-black">工具使用指标</h4>
+        <div className="text-xs text-conn-red-text">加载失败: {error}</div>
       </div>
     );
   }
 
   if (!report) {
     return (
-      <div className="rounded-xl border border-cafe bg-white p-5" data-testid="tool-usage-metrics-loading">
-        <h4 className="mb-2 text-sm font-semibold text-cafe-black">Tool Usage Metrics (F188 Phase F)</h4>
-        <div className="text-xs text-cafe-muted">Loading…</div>
+      <div className="rounded-xl bg-[var(--console-card-bg)] p-5" data-testid="tool-usage-metrics-loading">
+        <h4 className="mb-2 text-sm font-semibold text-cafe-black">工具使用指标</h4>
+        <div className="text-xs text-cafe-muted">加载中…</div>
       </div>
     );
   }
 
   return (
-    <div className="rounded-xl border border-cafe bg-white p-5" data-testid="tool-usage-metrics-panel">
+    <div className="rounded-xl bg-[var(--console-card-bg)] p-5" data-testid="tool-usage-metrics-panel">
       <div className="mb-3 flex items-baseline justify-between">
-        <h4 className="text-sm font-semibold text-cafe-black">Tool Usage Metrics (F188 Phase F)</h4>
+        <h4 className="text-sm font-semibold text-cafe-black">工具使用指标</h4>
         <div className="text-[10px] text-cafe-muted">
-          {report.threadCount} thread(s) · {new Date(report.generatedAt).toLocaleString()}
+          {report.threadCount} 个线程 · {new Date(report.generatedAt).toLocaleString()}
         </div>
       </div>
       <div className="space-y-0">
-        <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-cafe-secondary">
-          Three-Entry Distribution
-        </div>
+        <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-cafe-secondary">三入口分布</div>
         <MetricRow label="search_evidence" metric={report.distribution.searchEvidence} />
         <MetricRow label="graph_resolve" metric={report.distribution.graphResolve} />
         <MetricRow label="list_recent" metric={report.distribution.listRecent} />
 
-        <div className="mt-3 mb-2 text-[10px] font-semibold uppercase tracking-wide text-cafe-secondary">
-          Friction Metrics
-        </div>
+        <div className="mt-3 mb-2 text-[10px] font-semibold uppercase tracking-wide text-cafe-secondary">摩擦指标</div>
         <MetricRow
-          label="grep after search rate"
+          label="搜索后 grep 比率"
           metric={report.grepAfterSearchRate}
-          hint="FM-1: search → Bash grep within 5 turns. Target: <30%"
+          hint="FM-1: 搜索后 5 轮内回退 grep。目标: <30%"
         />
         <MetricRow
-          label="candidate selection (non-first)"
+          label="候选项选择（非首选）"
           metric={report.candidateSelectionDistribution}
-          hint="FM-2: graph_resolve candidate ranking quality. Target: <50%"
+          hint="FM-2: graph_resolve 候选排序质量。目标: <50%"
         />
         <MetricRow
-          label="list_recent adoption rate"
+          label="list_recent 采用率"
           metric={report.listRecentAdoptionRate}
-          hint="FM-3: cold-start uses list_recent. Target: ≥5%"
+          hint="FM-3: 冷启动使用 list_recent。目标: ≥5%"
         />
         <MetricRow
-          label="nudge failure rate"
+          label="提示失败率"
           metric={report.nudgeFailureRate}
-          hint="FM-5: nudge sent but cat falls back to grep. Target: <40%"
+          hint="FM-5: 已发提示但猫回退到 grep。目标: <40%"
         />
       </div>
     </div>

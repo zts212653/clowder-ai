@@ -33,6 +33,10 @@ interface RulesData {
   l0Prompts?: L0PromptsBlock;
 }
 
+export function shouldShowL0Section(l0Prompts?: L0PromptsBlock): boolean {
+  return l0Prompts?.template.exists === true;
+}
+
 const PROVIDER_LABELS: Record<string, string> = {
   claude: '布偶猫 (Claude)',
   codex: '缅因猫 (Codex)',
@@ -118,8 +122,8 @@ export function RulesPromptsContent() {
         </div>
       </SettingsSection>
 
-      {data.l0Prompts && (
-        <L0PromptsSection l0Prompts={data.l0Prompts} onPreview={(file, label) => setPreviewFile({ file, label })} />
+      {shouldShowL0Section(data.l0Prompts) && (
+        <L0PromptsSection l0Prompts={data.l0Prompts!} onPreview={(file, label) => setPreviewFile({ file, label })} />
       )}
 
       {previewFile && (

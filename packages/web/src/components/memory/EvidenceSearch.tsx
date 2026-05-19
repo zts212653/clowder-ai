@@ -255,7 +255,7 @@ export function EvidenceSearch({ initialQuery }: EvidenceSearchProps = {}) {
       {/* Results */}
       <div className="space-y-2">
         {results.map((item) => (
-          <div key={item.anchor} className="rounded-lg border border-cafe bg-white p-3">
+          <div key={item.anchor} className="rounded-lg bg-[var(--console-card-bg)] p-3">
             <div className="flex items-center gap-2 min-w-0">
               <span
                 className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${SOURCE_TYPE_COLORS[item.sourceType] ?? SOURCE_TYPE_COLORS.commit}`}

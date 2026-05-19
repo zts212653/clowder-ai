@@ -110,7 +110,7 @@ export function HubRoutingPolicyTab() {
         <div className="space-y-3">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="text-sm font-medium text-cafe">Review scope</div>
+              <div className="text-sm font-medium text-cafe">审查范围</div>
               <div className="text-xs text-cafe-secondary">当消息明显是 review/合入/PR 场景时生效</div>
             </div>
             <label className="flex items-center gap-2 text-sm">
@@ -121,7 +121,7 @@ export function HubRoutingPolicyTab() {
 
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="text-sm font-medium text-cafe">Architecture scope</div>
+              <div className="text-sm font-medium text-cafe">架构范围</div>
               <div className="text-xs text-cafe-secondary">当消息明显是 架构/设计/tradeoff 场景时生效</div>
             </div>
             <label className="flex items-center gap-2 text-sm">

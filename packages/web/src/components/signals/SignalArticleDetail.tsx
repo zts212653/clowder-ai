@@ -221,7 +221,7 @@ export function SignalArticleDetail({
 
   if (isLoading) {
     return (
-      <aside className="rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-6 text-sm text-cafe-secondary shadow-sm">
+      <aside className="rounded-xl bg-[var(--console-card-bg)] p-6 text-sm text-cafe-secondary shadow-sm">
         正在加载文章详情...
       </aside>
     );
@@ -236,7 +236,7 @@ export function SignalArticleDetail({
   }
 
   return (
-    <aside className="rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-5 shadow-sm">
+    <aside className="rounded-xl bg-[var(--console-card-bg)] p-5 shadow-sm">
       <div className="flex flex-wrap items-center gap-2">
         <SignalTierBadge tier={article.tier} />
         <span className="rounded bg-[var(--console-field-bg)] px-2 py-0.5 text-xs font-medium text-cafe-secondary">
@@ -266,7 +266,7 @@ export function SignalArticleDetail({
         </button>
       </div>
       {article.summary && (
-        <section className="mt-4 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-field-bg)] p-3">
+        <section className="mt-4 rounded-lg bg-[var(--console-field-bg)] p-3">
           <h3 className="text-xs font-semibold text-cafe-black">AI 摘要</h3>
           <p className="mt-1 whitespace-pre-wrap text-sm text-cafe-black">{article.summary}</p>
         </section>
@@ -300,7 +300,7 @@ export function SignalArticleDetail({
           </div>
         </div>
         <div
-          className={`mt-1 overflow-y-auto rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-field-bg)] p-3 text-sm text-cafe-black ${expandContent ? '' : 'max-h-[300px]'}`}
+          className={`mt-1 overflow-y-auto rounded-lg bg-[var(--console-field-bg)] p-3 text-sm text-cafe-black ${expandContent ? '' : 'max-h-[300px]'}`}
         >
           <MarkdownContent content={enrichedContent || article.content || '（无正文）'} />
         </div>

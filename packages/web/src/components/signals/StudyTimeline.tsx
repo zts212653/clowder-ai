@@ -99,10 +99,7 @@ export function StudyTimeline({ days = 7 }: StudyTimelineProps) {
           <div className="mb-2 text-xs font-semibold text-cafe-secondary">{formatDate(group[0].lastStudiedAt)}</div>
           <div className="space-y-2 border-l-2 border-opus-light pl-3">
             {group.map((entry) => (
-              <div
-                key={entry.articleId}
-                className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-2.5"
-              >
+              <div key={entry.articleId} className="rounded-lg bg-[var(--console-card-bg)] p-2.5">
                 <div className="flex items-start justify-between gap-2">
                   <a
                     href={`/signals?article=${encodeURIComponent(entry.articleId)}`}

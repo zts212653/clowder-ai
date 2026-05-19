@@ -147,6 +147,39 @@ describe('CollectionIndexBuilder', () => {
     assert.ok(await store.getByAnchor('test:col:doc/doc'), 'own anchor should exist');
   });
 
+  it('incrementalUpdate indexes a single materialized file into collection store', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'col-incr-'));
+    const { mkdirSync } = await import('node:fs');
+    mkdirSync(join(dir, 'lessons'), { recursive: true });
+
+    const filePath = join(dir, 'lessons', 'lesson-marker-1.md');
+    writeFileSync(
+      filePath,
+      [
+        '---',
+        'anchor: lesson-marker-1',
+        'doc_kind: lesson',
+        'materialized_from: marker-1',
+        'created: 2026-05-19',
+        '---',
+        '',
+        'Redis 6399 is sacred — never touch it in dev.',
+        '',
+      ].join('\n'),
+    );
+
+    const manifest = makeManifest(dir);
+    const scanner = new FlatScanner('test:col');
+    const builder = new CollectionIndexBuilder(store, manifest, scanner);
+
+    await builder.incrementalUpdate([filePath]);
+
+    const anchor = 'test:col:doc/lessons/lesson-marker-1';
+    const item = await store.getByAnchor(anchor);
+    assert.ok(item, 'evidence row should exist after incrementalUpdate');
+    assert.equal(item.authority, 'validated');
+  });
+
   it('cleans frontmatter-anchored items when source file removed (P1-1)', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'col-fm-stale-'));
     const file = join(dir, 'adr.md');

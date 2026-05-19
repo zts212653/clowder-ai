@@ -142,7 +142,7 @@ export function IndexStatus() {
       setEnvVars(envData.variables ?? []);
       setError(null);
     } catch {
-      setError('Failed to fetch memory status');
+      setError('获取记忆状态失败');
     }
   }, []);
 
@@ -190,7 +190,7 @@ export function IndexStatus() {
   if (!status) {
     return (
       <div data-testid="index-status" className="p-4">
-        <p className="text-sm text-cafe-secondary">Loading...</p>
+        <p className="text-sm text-cafe-secondary">加载中...</p>
       </div>
     );
   }
@@ -202,27 +202,27 @@ export function IndexStatus() {
         <span
           className={`inline-block h-2.5 w-2.5 rounded-full ${status.healthy ? 'bg-conn-green-text' : 'bg-conn-red-text'}`}
         />
-        <span className="text-sm font-medium text-cafe-black">{status.healthy ? 'Healthy' : 'Unhealthy'}</span>
+        <span className="text-sm font-medium text-cafe-black">{status.healthy ? '健康' : '异常'}</span>
         {status.reason && <span className="text-xs text-cafe-secondary">({status.reason})</span>}
       </div>
 
       {/* Stats */}
-      <div className="rounded-lg border border-cafe bg-white p-3">
-        <StatusRow label="Backend" value={status.backend} />
-        <StatusRow label="Documents" value={status.docsCount} />
-        <StatusRow label="Threads" value={status.threadsCount} />
-        <StatusRow label="Passages" value={status.passagesCount} />
-        <StatusRow label="Edges" value={status.edgesCount} />
-        {status.embeddingModel && <StatusRow label="Embedding" value={status.embeddingModel} />}
+      <div className="rounded-lg bg-[var(--console-card-bg)] p-3">
+        <StatusRow label="后端" value={status.backend} />
+        <StatusRow label="文档" value={status.docsCount} />
+        <StatusRow label="线程" value={status.threadsCount} />
+        <StatusRow label="段落" value={status.passagesCount} />
+        <StatusRow label="关系边" value={status.edgesCount} />
+        {status.embeddingModel && <StatusRow label="嵌入模型" value={status.embeddingModel} />}
         <StatusRow
-          label="Last rebuild"
-          value={status.lastRebuildAt ? new Date(status.lastRebuildAt).toLocaleString() : 'Never'}
+          label="上次重建"
+          value={status.lastRebuildAt ? new Date(status.lastRebuildAt).toLocaleString() : '从未'}
         />
       </div>
 
       {/* Feature flags */}
       {evidenceVars.length > 0 && (
-        <div className="rounded-lg border border-cafe bg-white p-3">
+        <div className="rounded-lg bg-[var(--console-card-bg)] p-3">
           <h3 className="mb-2 text-xs font-semibold text-cafe-black">功能开关</h3>
           {evidenceVars.map((v) => {
             const isOn = v.currentValue === 'on';
@@ -271,7 +271,7 @@ export function IndexStatus() {
 
       {/* Config reference — all non-toggle evidence env vars */}
       {configVars.length > 0 && (
-        <div className="rounded-lg border border-cafe bg-white p-3">
+        <div className="rounded-lg bg-[var(--console-card-bg)] p-3">
           <h3 className="mb-2 text-xs font-semibold text-cafe-black">配置参考</h3>
           <p className="mb-2 text-[10px] text-cafe-secondary">以下配置需在 .env 中设置，修改后重启生效。</p>
           {configVars.map((v) => (

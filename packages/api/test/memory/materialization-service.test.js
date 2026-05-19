@@ -270,6 +270,180 @@ describe('MaterializationService', () => {
     assert.ok(!md.includes('source_collection'), 'should not have source_collection');
   });
 
+  it('materialize writes to targetRoot when provided (P1-1 fix)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const collectionRoot = join(tmpDir, 'collections', 'project-cat-cafe');
+    mkdirSync(collectionRoot, { recursive: true });
+
+    const marker = await queue.submit({
+      content: 'Knowledge going to a specific collection',
+      source: 'opus:t1',
+      status: 'captured',
+      targetKind: 'lesson',
+      targetCollectionId: 'project:cat-cafe',
+    });
+    await queue.transition(marker.id, 'approved');
+
+    const result = await service.materialize(marker.id, { targetRoot: collectionRoot });
+
+    // File should be in collectionRoot/lessons/, NOT docsRoot/lessons/
+    assert.ok(
+      result.outputPath.startsWith(collectionRoot),
+      `expected path under ${collectionRoot}, got ${result.outputPath}`,
+    );
+    assert.ok(existsSync(result.outputPath), 'file should exist in collection root');
+
+    // Default docsRoot should NOT have the file
+    const defaultPath = join(tmpDir, 'docs', 'lessons', `lesson-${marker.id}.md`);
+    assert.ok(!existsSync(defaultPath), 'file should NOT exist in default docsRoot');
+
+    // Content should still be correct
+    const md = readFileSync(result.outputPath, 'utf-8');
+    assert.ok(md.includes('target_collection: project:cat-cafe'));
+    assert.ok(md.includes('Knowledge going to a specific collection'));
+  });
+
+  it('materialize falls back to docsRoot when no targetRoot provided', async () => {
+    const marker = await queue.submit({
+      content: 'Default materialize path',
+      source: 'opus:t1',
+      status: 'captured',
+      targetKind: 'lesson',
+    });
+    await queue.transition(marker.id, 'approved');
+
+    const result = await service.materialize(marker.id);
+
+    // File should be in docsRoot/lessons/
+    assert.ok(result.outputPath.startsWith(join(tmpDir, 'docs')), `expected path under docs, got ${result.outputPath}`);
+    assert.ok(existsSync(result.outputPath));
+  });
+
+  it('materialize uses provided indexBuilder override instead of default (collection routing)', async () => {
+    const { MaterializationService } = await import('../../dist/domains/memory/MaterializationService.js');
+    let defaultIndexedPaths = [];
+    let overrideIndexedPaths = [];
+    const defaultBuilder = {
+      incrementalUpdate: async (paths) => {
+        defaultIndexedPaths = paths;
+      },
+    };
+    const overrideBuilder = {
+      incrementalUpdate: async (paths) => {
+        overrideIndexedPaths = paths;
+      },
+    };
+
+    const svc = new MaterializationService(queue, join(tmpDir, 'docs'), defaultBuilder);
+
+    const marker = await queue.submit({
+      content: 'Knowledge for target collection',
+      source: 'opus:t1',
+      status: 'captured',
+      targetKind: 'lesson',
+      targetCollectionId: 'domain:finance',
+    });
+    await queue.transition(marker.id, 'approved');
+
+    const result = await svc.materialize(marker.id, { indexBuilder: overrideBuilder });
+
+    assert.equal(result.reindexed, true);
+    assert.equal(overrideIndexedPaths.length, 1, 'override builder should be called');
+    assert.ok(overrideIndexedPaths[0].includes('lesson'));
+    assert.equal(defaultIndexedPaths.length, 0, 'default builder should NOT be called');
+  });
+
+  it('materialize skips reindex when indexBuilder is null', async () => {
+    const { MaterializationService } = await import('../../dist/domains/memory/MaterializationService.js');
+    let defaultCalled = false;
+    const defaultBuilder = {
+      incrementalUpdate: async () => {
+        defaultCalled = true;
+      },
+    };
+
+    const svc = new MaterializationService(queue, join(tmpDir, 'docs'), defaultBuilder);
+
+    const marker = await queue.submit({
+      content: 'No-reindex knowledge',
+      source: 'opus:t1',
+      status: 'captured',
+      targetKind: 'lesson',
+    });
+    await queue.transition(marker.id, 'approved');
+
+    const result = await svc.materialize(marker.id, { indexBuilder: null });
+
+    assert.equal(result.reindexed, false);
+    assert.equal(defaultCalled, false, 'default builder should NOT be called when null');
+    assert.ok(existsSync(result.outputPath), 'file should still be written');
+  });
+
+  it('materialize with collection indexBuilder indexes into collection store, not project store (P1-1 R2)', async () => {
+    const { MaterializationService } = await import('../../dist/domains/memory/MaterializationService.js');
+    const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
+    const { CollectionIndexBuilder } = await import('../../dist/domains/memory/CollectionIndexBuilder.js');
+    const { FlatScanner } = await import('../../dist/domains/memory/FlatScanner.js');
+
+    let projectIndexCalled = false;
+    const projectBuilder = {
+      incrementalUpdate: async () => {
+        projectIndexCalled = true;
+      },
+    };
+
+    const collectionRoot = join(tmpDir, 'collections', 'domain-finance');
+    mkdirSync(collectionRoot, { recursive: true });
+
+    const collDbPath = join(tmpDir, 'collection.sqlite');
+    const collStore = new SqliteEvidenceStore(collDbPath);
+    await collStore.initialize();
+
+    const manifest = {
+      id: 'domain:finance',
+      kind: 'domain',
+      name: 'finance',
+      displayName: 'Finance',
+      root: collectionRoot,
+      sensitivity: 'internal',
+      scannerLevel: 0,
+      indexPolicy: { autoRebuild: true },
+      reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: false },
+      createdAt: '2026-05-19',
+      updatedAt: '2026-05-19',
+    };
+    const scanner = new FlatScanner('domain:finance');
+    const collBuilder = new CollectionIndexBuilder(collStore, manifest, scanner);
+
+    const svc = new MaterializationService(queue, join(tmpDir, 'docs'), projectBuilder);
+
+    const marker = await queue.submit({
+      content: 'Financial reporting lesson',
+      source: 'opus:t1',
+      status: 'captured',
+      targetKind: 'lesson',
+      targetCollectionId: 'domain:finance',
+    });
+    await queue.transition(marker.id, 'approved');
+
+    const result = await svc.materialize(marker.id, {
+      targetRoot: collectionRoot,
+      indexBuilder: collBuilder,
+    });
+
+    // File is in collection root
+    assert.ok(result.outputPath.startsWith(collectionRoot));
+    assert.equal(result.reindexed, true);
+
+    // Collection store has the evidence row
+    const collAnchor = `domain:finance:doc/lessons/lesson-${marker.id}`;
+    const collItem = await collStore.getByAnchor(collAnchor);
+    assert.ok(collItem, 'evidence row should be in collection store');
+
+    // Project builder was NOT called
+    assert.equal(projectIndexCalled, false, 'project indexBuilder should not be called');
+  });
+
   it('e2e: submit → approve → materialize → .md exists + marker=materialized + reindexed', async () => {
     const { MaterializationService } = await import('../../dist/domains/memory/MaterializationService.js');
     let reindexedPaths = [];

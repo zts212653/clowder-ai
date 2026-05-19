@@ -39,8 +39,8 @@ export function SignalNav({ active, initialReferrerThread = null }: SignalNavPro
 
   const items: readonly ItemConfig[] = useMemo(
     () => [
-      { id: 'signals' as const, href: `/signals${fromSuffix}`, label: 'Signals' },
-      { id: 'sources' as const, href: `/signals/sources${fromSuffix}`, label: 'Sources' },
+      { id: 'signals' as const, href: `/signals${fromSuffix}`, label: '信号' },
+      { id: 'sources' as const, href: `/signals/sources${fromSuffix}`, label: '信号源' },
     ],
     [fromSuffix],
   );

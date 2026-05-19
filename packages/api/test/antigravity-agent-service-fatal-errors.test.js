@@ -846,9 +846,30 @@ describe('AntigravityAgentService (Bridge) — fatal errors', () => {
     );
   });
 
-  test('model_capacity intentionally does not retry read-only MCP_TOOL metadata-only batches', async () => {
+  test('model_capacity retries after read-only MCP_TOOL metadata-only batches', async () => {
     const bridge = createMockBridge();
-    bridge.pollForSteps = async function* () {
+    let sessionIndex = 0;
+    bridge.getOrCreateSession = async () => ['cascade-1', 'cascade-2'][sessionIndex++];
+    bridge.pollForSteps = async function* (cascadeId) {
+      if (cascadeId === 'cascade-2') {
+        yield {
+          steps: [
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'FINISHED',
+              plannerResponse: { response: 'Recovered after readonly memory lookup.' },
+            },
+          ],
+          cursor: {
+            baselineStepCount: 0,
+            lastDeliveredStepCount: 1,
+            terminalSeen: true,
+            lastActivityAt: Date.now(),
+          },
+        };
+        return;
+      }
+
       yield {
         steps: [
           {
@@ -890,15 +911,16 @@ describe('AntigravityAgentService (Bridge) — fatal errors', () => {
     });
     const messages = await collect(service.invoke('hello', { workingDirectory: '/tmp' }));
 
-    const capacity = messages.find((m) => m.type === 'error' && m.errorCode === 'model_capacity');
-    assert.ok(capacity, 'read-only MCP tool policy should surface the transient error for Phase C');
-    assert.equal(bridge.resetSession.mock.callCount(), 0, 'read-only MCP tool retry narrowing is intentional');
-    assert.deepEqual(capacity.metadata?.diagnostics?.recoveryDecision, {
-      action: 'surface_terminal_error',
-      reason: 'read_only_mcp_tool_transient_retry_intentionally_disabled',
-    });
-    assert.equal(capacity.metadata?.diagnostics?.sideEffectJournal?.hasSideEffect, false);
-    assert.equal(capacity.metadata?.diagnostics?.toolishToolName, 'cat_cafe_search_evidence');
+    const capacityErrors = messages.filter((m) => m.type === 'error' && m.errorCode === 'model_capacity');
+    assert.equal(capacityErrors.length, 0, 'read-only MCP tool capacity should stay hidden when retry succeeds');
+    assert.equal(
+      bridge.resetSession.mock.callCount(),
+      1,
+      'read-only MCP tool capacity should retry on a fresh cascade',
+    );
+    assert.equal(bridge.sendMessage.mock.callCount(), 2, 'retry should resend the prompt after readonly MCP capacity');
+    const texts = messages.filter((m) => m.type === 'text').map((m) => m.content);
+    assert.deepEqual(texts, ['Recovered after readonly memory lookup.']);
   });
 
   test('model_capacity retries when the blocked waiting run_command is read-only and undispatched', async () => {
