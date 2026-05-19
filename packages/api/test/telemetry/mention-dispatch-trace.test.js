@@ -329,7 +329,7 @@ test('F153 P1: tokenAttrs does NOT include THREAD_ID (cardinality + redactor byp
 // ── P1: HubTraceTree parallel rendering ──────────────────────────
 
 test('F153 P1: HubTraceTree buildForest supports multiple children per parent (fan-out)', () => {
-  const src = readFileSync(resolve(__dirname, '../../../web/src/components/HubTraceTree.tsx'), 'utf8');
+  const src = readFileSync(resolve(__dirname, '../../../web/src/components/trace-tree-utils.ts'), 'utf8');
   assert.ok(
     src.includes('childMap') && src.includes('children'),
     'buildForest should accumulate children per parent via childMap',
