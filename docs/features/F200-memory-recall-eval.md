@@ -1,6 +1,6 @@
 ---
 feature_ids: [F200]
-related_features: [F102, F153, F163, F188, F192]
+related_features: [F102, F153, F163, F188, F192, F208]
 topics: [memory, eval, observability, IR]
 doc_kind: spec
 created: 2026-05-14

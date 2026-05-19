@@ -10,6 +10,14 @@ created: 2026-05-20
 
 > **Status**: spec | **Owner**: Ragdoll | **Priority**: P1
 
+### Architecture Cell
+
+```
+Architecture cell: (new) harness-control-plane
+Map delta: new cell required
+Why: F208 跨 memory/dispatch/eval 三个已有 cell，是 harness unit 生命周期的统一控制面，不属于任何已有 cell
+```
+
 ## Why
 
 Cat Cafe 的 harness（prompt rules、skills、MCP tools、runtime guards）各自独立演化，缺少统一的生命周期管理框架。每个 harness unit 的 trace/eval/feedback/governance 分散在不同机制中，无法回答"这个规则还有效吗？该升级还是下线？"
@@ -88,7 +96,7 @@ v0 scope：6-field registry + 3 pilots + YAML 文件。**不是平台，不建 r
 | 风险 | 缓解 |
 |------|------|
 | 过度抽象——contract 太重，实际不写 | v0 = YAML 文件 + 3 pilots，不建平台；Phase C 回顾是否过重 |
-| 和 F192 scope 重叠 | F192 owns eval 方法论和模板；F208 owns 统一 registry + 四接口框架。Authority boundary 在 spec 中明确 |
+| 和 F192 scope 重叠 | **明确边界**：F192 owns eval pipeline（消费 telemetry → 聚合 → 归因 → 行动）+ F167 component registry（AC-D1 已完成的 hard/soft/eval 三栏格式）；F208 owns 统一 unit lifecycle metadata registry（runtime/eval/governance 三层 contract）。F208 registry **引用** F192 eval artifact 和 component registry 格式，不重建 eval pipeline。两个 registry 的关系：F192 的是"某个 feature 下的 harness 组件清单"，F208 的是"所有 harness unit 的生命周期元数据" |
 | Thread-level eval 实现复杂度高 | Phase B 先做"能检测一种补偿行为"，不追求全覆盖 |
 | 球权 trace 数据不足 | F192 Phase D 已补 hold_cancel_count 等 counter，先用现有数据 |
 
@@ -107,7 +115,7 @@ v0 scope：6-field registry + 3 pilots + YAML 文件。**不是平台，不建 r
 | KD-1 | 球权（hold_ball）作为第一个 pilot unit | 铲屎官明确指定；天然具备 trace signal（F153 counter）、eval 基础（F192 pilot）、feedback gap（cancel 无 reason）、governance 需求（子规则演化） | 2026-05-20 |
 | KD-2 | v0 = YAML registry + 文档，不是 runtime platform | 铲屎官强调"语义级别的架构"；先验证概念再决定是否需要 runtime 支撑 | 2026-05-20 |
 | KD-3 | Eval 观测单位 = thread 段 + 时间窗口，不是单次 tool call | 铲屎官原话："不能局限于某一个，应该是某一段时间内的"。单次 tool call 无法判断 harness 是否有效 | 2026-05-20 |
-| KD-4 | F208 与 F192 的 authority boundary：F192 owns eval 方法论，F208 owns 统一 registry + 四接口框架 | 防止 scope 重叠和 ownership 冲突 | 2026-05-20 |
+| KD-4 | F208 与 F192 的 authority boundary：F192 owns eval pipeline + F167 component registry（AC-D1 格式）；F208 owns 统一 unit lifecycle metadata registry + 四接口框架。F208 引用 F192 eval artifact，不重建 eval pipeline | 防止 scope 重叠——F192 回答"这个组件表现怎样"，F208 回答"这个 unit 该升级还是下线" | 2026-05-20 |
 
 ## Timeline
 
@@ -137,7 +145,7 @@ v0 scope：6-field registry + 3 pilots + YAML 文件。**不是平台，不建 r
 > F208 本身是 harness 类 feature，按 F192 Phase B 门禁要求填写。
 
 **Primary Users**: 三猫（harness 的一线使用者和维护者）+ 铲屎官（governance 决策者）
-**Activation Signal**: 猫猫在 feat close / harness 变更时查阅 registry 了解 unit 状态
-**Friction Metric**: registry 中的 unit 信息与实际运行状态不一致的比例
-**Regression Fixture**: 球权 pilot 的 4 接口全部可用 + cancel 有 reason 字段
-**Sunset Signal**: 连续 3 个月无猫查阅 registry 且无 governance 决策产生 → registry 已脱离工作流，候选 sunset
+**Activation Signal**: Phase B 完成后，球权 pilot 的 trace event 在 F153 telemetry 中可观测（hold/release/cancel/timeout 至少各出现 1 次）；可验证方式：`GET /api/telemetry/traces?component=hold_ball` 返回非空
+**Friction Metric**: 球权 cancel 事件中缺少 reason 字段的比例（Phase B 前 = 100%，Phase B 后目标 < 20%）；可验证方式：`hold_cancel_count` vs `hold_cancel_with_reason_count` 的差值
+**Regression Fixture**: (1) hold_ball 后 release 正常流——trace 链完整；(2) zombie hold 超时——timeout event 触发；(3) cancel 携带 reason——reason 字段非空。三个 fixture 作为 Phase B 验收的具体测试场景
+**Sunset Signal**: 连续 3 个月无猫查阅 registry 且无 governance 决策产生（可观测：registry.yaml 的 git log 无 commit + 无 governance 类 harness-feedback 文档产出）→ 候选 sunset
