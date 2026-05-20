@@ -151,10 +151,19 @@ function DaemonActiveIndicator({ threadId }: { threadId: string }) {
   );
 }
 
+/** Tail-preserving truncation for project chip — leading ellipsis keeps the
+ *  distinguishing suffix visible (worktree name, nested dir), which the
+ *  /Users/.../ prefix never carries. */
+export function tailTruncate(name: string, maxLen = 24): string {
+  if (name.length <= maxLen) return name;
+  return `…${name.slice(-(maxLen - 1))}`;
+}
+
 /** Thread indicator: shows which thread you're currently chatting in */
-function ThreadIndicator({ threadId }: { threadId: string }) {
+export function ThreadIndicator({ threadId }: { threadId: string }) {
   const threads = useChatStore((s) => s.threads);
   const currentThread = threads.find((t) => t.id === threadId);
+  const [copied, setCopied] = useState(false);
 
   if (threadId === 'default') {
     return <p className="text-xs text-cafe-secondary">大厅 · Your AI team collaboration space</p>;
@@ -162,21 +171,55 @@ function ThreadIndicator({ threadId }: { threadId: string }) {
 
   const title = currentThread?.title ?? '未命名对话';
   const rawPath = currentThread?.projectPath ?? '';
-  // 'default' is a sentinel for threads without a real projectPath — match exact value, not basename
   const rawBasename = rawPath === 'default' ? '' : (rawPath.split(/[/\\]/).pop() ?? '');
-  // Map known internal repo basenames to brand name; preserve real project paths for multi-workspace
   const INTERNAL_BASENAMES = ['cat-cafe', 'cat-cafe-runtime', 'clowder-ai'];
   const brandName = process.env.NEXT_PUBLIC_BRAND_NAME ?? '';
   const projectName = INTERNAL_BASENAMES.includes(rawBasename) && brandName ? brandName : rawBasename;
+  const displayName = tailTruncate(projectName);
+
+  const handleCopyPath = () => {
+    if (!rawPath || rawPath === 'default') return;
+    // Guard: Clipboard API can be undefined in insecure contexts (http://) or older webviews.
+    // writeText() can also throw synchronously, not just reject — wrap the whole call.
+    try {
+      const cb = typeof navigator !== 'undefined' && navigator.clipboard ? navigator.clipboard : null;
+      if (!cb || typeof cb.writeText !== 'function') return;
+      cb.writeText(rawPath).then(
+        () => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        },
+        () => {},
+      );
+    } catch {
+      /* clipboard unavailable — fail quietly */
+    }
+  };
 
   return (
-    <p
-      className="text-xs text-cafe-secondary truncate min-w-0"
-      title={`${title}${projectName ? ` · ${projectName}` : ''}`}
-    >
-      <span className="font-medium text-cafe-secondary">{title}</span>
-      {projectName && <span className="text-cafe-muted"> · {projectName}</span>}
-    </p>
+    <div className="flex min-w-0 items-baseline text-xs text-cafe-secondary">
+      <span className="truncate min-w-0 font-medium text-cafe-secondary" title={title}>
+        {title}
+      </span>
+      {projectName && (
+        <span
+          className="flex-shrink-0 max-w-[40%] sm:max-w-[200px] overflow-hidden whitespace-nowrap text-cafe-muted cursor-pointer hover:text-cafe-secondary transition-colors"
+          title={copied ? '已复制!' : rawPath}
+          onClick={handleCopyPath}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              handleCopyPath();
+            }
+          }}
+          role="button"
+          tabIndex={0}
+        >
+          {' '}
+          · {displayName}
+        </span>
+      )}
+    </div>
   );
 }
 
