@@ -21,6 +21,7 @@ interface CatAvatarProps {
   catId: string;
   size?: number;
   status?: CatStatus;
+  onClick?: () => void;
   /** F174 D2b-2: corner status dot for callback-auth health surface (明厨亮灶 实体层). */
   callbackAuthStatus?: CallbackAuthStatus;
   /** Optional aria-label / hover hint for the status dot (e.g. "broken · 12 fails"). */
@@ -43,6 +44,7 @@ export function CatAvatar({
   callbackAuthLabel,
   callbackAuthPopover,
   onCallbackAuthClick,
+  onClick,
 }: CatAvatarProps) {
   const [imgError, setImgError] = useState(false);
   const [popoverOpen, setPopoverOpen] = useState(false);
@@ -54,6 +56,8 @@ export function CatAvatar({
   const ringColor = cat?.color.primary ?? '#9CA3AF'; // gray-400 fallback
   const glowShadow = isStreaming && cat ? `0 0 10px ${hexToRgba(ringColor, 0.5)}` : undefined;
 
+  const Wrapper = onClick ? 'button' : 'div';
+
   // F174 D2b-2: dot is ~28% of avatar size (min 8px), absolute positioned bottom-right.
   // White ring lifts it off the avatar and survives most cat colors.
   const dotSize = Math.max(8, Math.round(size * 0.28));
@@ -61,10 +65,11 @@ export function CatAvatar({
 
   return (
     <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
-      <div
+      <Wrapper
+        {...(onClick ? { type: 'button' as const, onClick, 'aria-label': `${cat?.displayName ?? catId}` } : {})}
         className={`rounded-full ring-2 overflow-hidden bg-cafe-surface-elevated flex items-center justify-center transition-shadow duration-300 ${
           isStreaming ? 'animate-pulse' : ''
-        }`}
+        } ${onClick ? 'cursor-pointer hover:ring-[var(--console-accent)] transition-[box-shadow,--tw-ring-color]' : ''}`}
         style={{
           width: size,
           height: size,
@@ -85,7 +90,7 @@ export function CatAvatar({
             onError={() => setImgError(true)}
           />
         )}
-      </div>
+      </Wrapper>
       {callbackAuthStatus && (
         <span
           className="absolute"
