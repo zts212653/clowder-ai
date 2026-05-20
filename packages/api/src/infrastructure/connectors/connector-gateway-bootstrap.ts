@@ -33,7 +33,7 @@ import {
   MemoryConnectorPermissionStore,
   RedisConnectorPermissionStore,
 } from './ConnectorPermissionStore.js';
-import { ConnectorRouter } from './ConnectorRouter.js';
+import { ConnectorRouter, type RouteResult } from './ConnectorRouter.js';
 import { type IConnectorThreadBindingStore, MemoryConnectorThreadBindingStore } from './ConnectorThreadBindingStore.js';
 import { GitHubRepoWebhookHandler } from './github-repo-event/GitHubRepoWebhookHandler.js';
 import { ReconciliationDedup } from './github-repo-event/ReconciliationDedup.js';
@@ -183,6 +183,8 @@ export interface ConnectorGatewayDeps {
         close(opts?: unknown): void;
       })
     | undefined;
+  /** @internal Test-only: override Feishu token manager (e.g. stub for fail-closed tests) */
+  readonly _feishuTokenManagerOverride?: FeishuTokenManager | undefined;
 }
 
 export interface ConnectorGatewayHandle {
@@ -420,10 +422,12 @@ export async function startConnectorGateway(
     const feishu = new FeishuAdapter(config.feishuAppId!, config.feishuAppSecret!, log, {
       verificationToken: config.feishuVerificationToken,
     });
-    const feishuTokenManager = new FeishuTokenManager({
-      appId: config.feishuAppId!,
-      appSecret: config.feishuAppSecret!,
-    });
+    const feishuTokenManager =
+      deps._feishuTokenManagerOverride ??
+      new FeishuTokenManager({
+        appId: config.feishuAppId!,
+        appSecret: config.feishuAppSecret!,
+      });
     feishu._injectTokenManager(feishuTokenManager);
     adapters.set('feishu', feishu);
 
@@ -506,6 +510,36 @@ export async function startConnectorGateway(
       );
     }
 
+    async function routeFeishuCardAction(
+      cardAction: NonNullable<ReturnType<FeishuAdapter['parseCardAction']>>,
+    ): Promise<RouteResult | { kind: 'skipped'; reason: string }> {
+      const actionValue = cardAction.actionValue as { cmd?: string; args?: string };
+      const cmdFromBtn =
+        typeof actionValue.cmd === 'string' && actionValue.cmd.startsWith('/')
+          ? actionValue.args
+            ? `${actionValue.cmd} ${actionValue.args}`
+            : actionValue.cmd
+          : null;
+      const cmdFromSelect = !cmdFromBtn && cardAction.option?.startsWith('/') ? cardAction.option : null;
+      const cmdText = cmdFromBtn ?? cmdFromSelect;
+      const chatType = cardAction.chatType ?? (await feishu.resolveChatType(cardAction.chatId));
+      if (!chatType) {
+        log.warn({ chatId: cardAction.chatId }, '[Feishu] Card action rejected: chatType unknown (fail-closed)');
+        return { kind: 'skipped', reason: 'chat_type_unknown' };
+      }
+      const text = cmdText ?? JSON.stringify(cardAction.actionValue);
+      const sender = cmdText && cardAction.senderId ? { id: cardAction.senderId } : undefined;
+      return connectorRouter.route(
+        'feishu',
+        cardAction.chatId,
+        text,
+        `card-action-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        undefined,
+        sender,
+        chatType,
+      );
+    }
+
     if (feishuWsMode) {
       // ── Feishu WebSocket (long-connection) mode ──
       const eventDispatcher = new lark.EventDispatcher({}).register({
@@ -517,7 +551,6 @@ export async function startConnectorGateway(
             },
             '[Feishu] WS event received',
           );
-          // Wrap into the envelope format parseEvent expects: { header, event }
           const envelope = {
             header: { event_type: 'im.message.receive_v1' },
             event: data,
@@ -525,6 +558,16 @@ export async function startConnectorGateway(
           const parsed = feishu.parseEvent(envelope);
           if (!parsed) return;
           await routeFeishuParsedEvent(parsed);
+        },
+        'card.action.trigger': async (data: Record<string, unknown>) => {
+          log.info('[Feishu] WS card.action.trigger received');
+          const envelope = {
+            header: { event_type: 'card.action.trigger' },
+            event: data,
+          };
+          const cardAction = feishu.parseCardAction(envelope);
+          if (!cardAction) return;
+          await routeFeishuCardAction(cardAction);
         },
       });
 
@@ -580,13 +623,7 @@ export async function startConnectorGateway(
 
           const cardAction = feishu.parseCardAction(body);
           if (cardAction) {
-            const actionText = JSON.stringify(cardAction.actionValue);
-            const result = await connectorRouter.route(
-              'feishu',
-              cardAction.chatId,
-              actionText,
-              `card-action-${Date.now()}`,
-            );
+            const result = await routeFeishuCardAction(cardAction);
             return result.kind === 'skipped'
               ? { kind: 'skipped', reason: result.reason }
               : { kind: 'processed', messageId: result.kind === 'routed' ? result.messageId : 'card-action' };

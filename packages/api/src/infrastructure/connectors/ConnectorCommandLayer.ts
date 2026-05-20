@@ -41,6 +41,7 @@ export interface CommandResult {
   readonly forwardContent?: string;
   /** F154: one-shot target cat for /ask routing */
   readonly targetCatId?: string;
+  readonly cardActions?: readonly { readonly label: string; readonly value: Record<string, unknown> }[];
 }
 
 interface ThreadEntry {
@@ -220,9 +221,18 @@ export class ConnectorCommandLayer {
       const badge = featBadges.get(t.id);
       return badge ? `${i + 1}. ${title} [${badge}] [${t.id}]` : `${i + 1}. ${title} [${t.id}]`;
     });
+    const threadActions = threads.slice(0, 5).map((t, i) => {
+      const title = (t.title ?? '(无标题)').slice(0, 12);
+      const badge = featBadges.get(t.id);
+      return {
+        label: badge ? `${i + 1}. ${title} [${badge}]` : `${i + 1}. ${title}`,
+        value: { cmd: '/use', args: String(i + 1) },
+      };
+    });
     const result: CommandResult = {
       kind: 'threads',
       response: `📋 最近的 threads:\n\n${lines.join('\n')}\n\n用 /use F088 或 /use 关键词 或 /use 3 切换`,
+      cardActions: threadActions,
     };
     return binding ? { ...result, contextThreadId: binding.threadId } : result;
   }
@@ -392,6 +402,18 @@ export class ConnectorCommandLayer {
     }
 
     const rawArg = args.trim();
+    if (rawArg === 'pick') {
+      return {
+        kind: 'history',
+        response: '📜 查看几轮对话？',
+        cardActions: [
+          { label: '最近 1 轮', value: { cmd: '/history', args: '1' } },
+          { label: '最近 3 轮', value: { cmd: '/history', args: '3' } },
+          { label: '最近 5 轮', value: { cmd: '/history', args: '5' } },
+        ],
+        contextThreadId: binding.threadId,
+      };
+    }
     if (rawArg && !/^[1-5]$/.test(rawArg)) {
       return { kind: 'history', response: '❌ 用法: /history [1-5]（默认 1 轮）', contextThreadId: binding.threadId };
     }

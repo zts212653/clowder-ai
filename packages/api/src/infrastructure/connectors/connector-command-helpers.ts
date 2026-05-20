@@ -57,15 +57,40 @@ const FALLBACK_COMMANDS = [
   { cmd: '/use <F号|序号|关键词>', desc: '切换到指定 thread' },
   { cmd: '/thread <id> <消息>', desc: '切换并发送消息' },
   { cmd: '/unbind', desc: '解除当前绑定' },
+  { cmd: '/history [N]', desc: '查看最近 N 轮对话（默认 1）' },
 ];
 
+const COMMAND_BUTTON_LABELS: Record<string, string> = {
+  '/new': '➕ 新建',
+  '/threads': '📋 会话列表',
+  '/use': '🔀 切换',
+  '/thread': '💬 切换+发',
+  '/unbind': '🔓 解绑',
+  '/history': '📜 历史',
+  '/where': '📍 位置',
+  '/cats': '🐾 猫猫',
+  '/status': '📊 状态',
+  '/focus': '🎯 聚焦',
+  '/ask': '💬 问猫',
+  '/commands': '❓ 帮助',
+};
+
 export function buildCommandsList(registry?: CommandRegistry): CommandResult {
-  // F142-B: dynamic listing from registry when available
   const commands = registry
     ? registry.listBySurface('connector').map((c) => ({ cmd: c.usage || c.name, desc: c.description }))
     : FALLBACK_COMMANDS;
   const lines = commands.map((c) => `  ${c.cmd} — ${c.desc}`);
-  return { kind: 'commands', response: `📋 可用命令：\n\n${lines.join('\n')}` };
+  const commandActions = commands
+    .map((c) => {
+      const base = c.cmd.split(' ')[0]!;
+      const label = COMMAND_BUTTON_LABELS[base];
+      if (!label) return null;
+      const value: { cmd: string; args?: string } = { cmd: base };
+      if (base === '/history') value.args = 'pick';
+      return { label, value };
+    })
+    .filter((a): a is { label: string; value: { cmd: string; args?: string } } => a !== null);
+  return { kind: 'commands', response: `📋 可用命令：\n\n${lines.join('\n')}`, cardActions: commandActions };
 }
 
 export async function buildCatsInfo(threadId: string, deps: CommandInfoDeps): Promise<CommandResult> {

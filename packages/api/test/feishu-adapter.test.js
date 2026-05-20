@@ -787,9 +787,11 @@ describe('FeishuAdapter', () => {
 
     const card = JSON.parse(sendCalls[0].content);
     assert.equal(card.header.title.content, '🐱 布偶猫');
-    // Should only have the body markdown element, no subtitle/hr/footer
-    assert.equal(card.elements.length, 1, 'minimal card should have only body element');
+    // body + hr + select_static action (default quick actions always injected)
+    assert.equal(card.elements.length, 3, 'minimal card should have body + hr + action');
     assert.equal(card.elements[0].content, 'Hello from cat!');
+    assert.equal(card.elements[1].tag, 'hr');
+    assert.equal(card.elements[2].tag, 'action');
   });
 
   // P1-2: textContent must not be discarded when both text and blocks present
@@ -851,6 +853,36 @@ describe('FeishuAdapter', () => {
         },
       };
       assert.equal(adapter.parseCardAction(body), null);
+    });
+
+    it('extracts chatType from context.open_chat_type when present', () => {
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog());
+      const body = {
+        header: { event_type: 'card.action.trigger', event_id: 'evt-card-ct' },
+        event: {
+          operator: { open_id: 'ou_op_ct' },
+          action: { value: { cmd: '/new' }, tag: 'button' },
+          context: { open_chat_id: 'oc_group_chat', open_chat_type: 'group' },
+        },
+      };
+      const result = adapter.parseCardAction(body);
+      assert.ok(result);
+      assert.equal(result.chatType, 'group');
+    });
+
+    it('chatType is undefined when context lacks open_chat_type', () => {
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog());
+      const body = {
+        header: { event_type: 'card.action.trigger', event_id: 'evt-card-no-ct' },
+        event: {
+          operator: { open_id: 'ou_op_no_ct' },
+          action: { value: { cmd: '/threads' }, tag: 'button' },
+          context: { open_chat_id: 'oc_p2p_chat' },
+        },
+      };
+      const result = adapter.parseCardAction(body);
+      assert.ok(result);
+      assert.equal(result.chatType, undefined);
     });
   });
 

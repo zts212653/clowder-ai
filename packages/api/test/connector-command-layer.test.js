@@ -194,7 +194,8 @@ describe('ConnectorCommandLayer', () => {
     assert.equal(result.kind, 'threads');
     assert.ok(result.response.includes('飞书Bug'));
     assert.ok(result.response.includes('新功能讨论'));
-    assert.ok(result.response.includes('/use'));
+    assert.ok(result.cardActions?.length > 0);
+    assert.ok(result.response.includes('/use'), 'response should include /use instruction');
   });
 
   it('/threads shows full thread IDs (not truncated)', async () => {
@@ -834,6 +835,32 @@ describe('ConnectorCommandLayer', () => {
       assert.ok(result.response.includes('/cats'));
       assert.ok(result.response.includes('/where'));
       assert.ok(result.response.includes('/status'));
+    });
+
+    it('/commands cardActions includes /use and /thread labels', async () => {
+      const layer = new ConnectorCommandLayer({
+        bindingStore: stubStore(),
+        threadStore: stubThreadStore(),
+        frontendBaseUrl: 'https://cafe.example.com',
+      });
+      const result = await layer.handle('feishu', 'chat1', 'user1', '/commands');
+      assert.ok(result.cardActions, '/commands must return cardActions');
+      const cmds = result.cardActions.map((a) => a.value.cmd);
+      assert.ok(cmds.includes('/use'), 'cardActions must include /use');
+      assert.ok(cmds.includes('/thread'), 'cardActions must include /thread');
+      assert.ok(cmds.includes('/unbind'), 'cardActions must include /unbind');
+    });
+
+    it('/commands cardActions for /history includes args:pick', async () => {
+      const layer = new ConnectorCommandLayer({
+        bindingStore: stubStore(),
+        threadStore: stubThreadStore(),
+        frontendBaseUrl: 'https://cafe.example.com',
+      });
+      const result = await layer.handle('feishu', 'chat1', 'user1', '/commands');
+      const historyAction = result.cardActions?.find((a) => a.value.cmd === '/history');
+      assert.ok(historyAction, '/commands cardActions must include /history');
+      assert.equal(historyAction.value.args, 'pick', '/history from /commands must send args:pick');
     });
 
     it('/commands is case-insensitive', async () => {

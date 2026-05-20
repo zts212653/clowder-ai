@@ -20,7 +20,7 @@ import { catRegistry, getConnectorDefinition } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import { findMonorepoRoot } from '../../utils/monorepo-root.js';
 import type { ConnectorCommandLayer } from './ConnectorCommandLayer.js';
-import { ConnectorMessageFormatter } from './ConnectorMessageFormatter.js';
+import { type CardAction, ConnectorMessageFormatter, DEFAULT_QUICK_ACTIONS } from './ConnectorMessageFormatter.js';
 import type { IConnectorPermissionStore } from './ConnectorPermissionStore.js';
 import type { IConnectorThreadBindingStore } from './ConnectorThreadBindingStore.js';
 import type { InboundMessageDedup } from './InboundMessageDedup.js';
@@ -187,7 +187,7 @@ export class ConnectorRouter {
 
     // F157: Fire-and-forget emoji reaction as instant ack (< 500ms)
     const ackAdapter = this.opts.adapters?.get(connectorId);
-    if (ackAdapter?.addReaction && externalMessageId) {
+    if (ackAdapter?.addReaction && externalMessageId && !externalMessageId.startsWith('card-action-')) {
       ackAdapter.addReaction(externalMessageId, 'HEART').catch((err) => {
         log.warn({ err, connectorId, externalMessageId }, '[ConnectorRouter] addReaction failed (non-fatal)');
       });
@@ -254,7 +254,10 @@ export class ConnectorRouter {
         const adapter = this.opts.adapters?.get(connectorId);
         if (adapter) {
           if (adapter.sendFormattedReply) {
-            const envelope = this.formatter.formatCommand(cmdResult.response);
+            const envelope = this.formatter.formatCommand(
+              cmdResult.response,
+              cmdResult.cardActions ?? DEFAULT_QUICK_ACTIONS,
+            );
             await adapter.sendFormattedReply(externalChatId, envelope);
           } else {
             await adapter.sendReply(externalChatId, cmdResult.response);

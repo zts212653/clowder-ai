@@ -1,6 +1,7 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { FeishuTokenManager } from '../dist/infrastructure/connectors/adapters/FeishuTokenManager.js';
 import { TelegramAdapter } from '../dist/infrastructure/connectors/adapters/TelegramAdapter.js';
 import { startConnectorGateway } from '../dist/infrastructure/connectors/connector-gateway-bootstrap.js';
 
@@ -290,7 +291,7 @@ describe('ConnectorGateway Bootstrap', () => {
         event: {
           operator: { open_id: 'ou_operator' },
           action: { value: { action: 'approve', threadId: 'th_123' }, tag: 'button' },
-          context: { open_chat_id: 'oc_chat_card' },
+          context: { open_chat_id: 'oc_chat_card', open_chat_type: 'p2p' },
         },
       },
       {},
@@ -298,6 +299,55 @@ describe('ConnectorGateway Bootstrap', () => {
 
     assert.equal(result.kind, 'processed');
     assert.equal(triggerCalls.length, 1, 'card action should trigger cat invocation');
+    await handle.stop();
+  });
+
+  it('feishu webhook handler rejects card action when chatType unknown (fail-closed)', async () => {
+    const triggerCalls = [];
+    const deps = {
+      ...baseDeps,
+      invokeTrigger: {
+        trigger(...args) {
+          triggerCalls.push(args);
+        },
+      },
+    };
+
+    const stubTm = new FeishuTokenManager({
+      appId: 'stub',
+      appSecret: 'stub',
+      fetchFn: async () => new Response(null, { status: 401 }),
+    });
+
+    const config = {
+      feishuAppId: 'test-app-id',
+      feishuAppSecret: 'test-app-secret',
+      feishuVerificationToken: 'test-token',
+    };
+    const handle = await startConnectorGateway(config, {
+      ...deps,
+      _feishuTokenManagerOverride: stubTm,
+    });
+
+    const feishuHandler = handle.webhookHandlers.get('feishu');
+    const result = await feishuHandler.handleWebhook(
+      {
+        header: {
+          event_type: 'card.action.trigger',
+          event_id: 'evt-card-no-ct',
+          token: 'test-token',
+        },
+        event: {
+          operator: { open_id: 'ou_operator' },
+          action: { value: { cmd: '/threads' }, tag: 'button' },
+          context: { open_chat_id: 'oc_chat_unknown' },
+        },
+      },
+      {},
+    );
+
+    assert.equal(result.kind, 'skipped', 'card action without chatType must be rejected');
+    assert.equal(triggerCalls.length, 0, 'must not invoke cat when chatType unknown');
     await handle.stop();
   });
 

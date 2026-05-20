@@ -21,7 +21,7 @@ const execFileAsync = promisify(execFile);
 
 import * as lark from '@larksuiteoapi/node-sdk';
 import type { FastifyBaseLogger } from 'fastify';
-import type { MessageEnvelope } from '../ConnectorMessageFormatter.js';
+import { DEFAULT_QUICK_ACTIONS, type MessageEnvelope } from '../ConnectorMessageFormatter.js';
 import type { IStreamableOutboundAdapter } from '../OutboundDeliveryHook.js';
 import type { FeishuTokenManager } from './FeishuTokenManager.js';
 import { formatFeishuCard } from './feishu-card-formatter.js';
@@ -51,6 +51,8 @@ export interface FeishuCardAction {
   chatId: string;
   senderId: string;
   actionValue: Record<string, unknown>;
+  option?: string;
+  chatType?: 'p2p' | 'group';
 }
 
 export interface FeishuMediaPayload {
@@ -86,6 +88,7 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
   private static CACHE_TTL_MS = 30 * 60 * 1000;
   private senderNameCache = new Map<string, { name: string; expiresAt: number }>();
   private chatNameCache = new Map<string, { name: string; expiresAt: number }>();
+  private chatTypeCache = new Map<string, { chatType: 'p2p' | 'group'; expiresAt: number }>();
 
   constructor(appId: string, appSecret: string, log: FastifyBaseLogger, options?: FeishuAdapterOptions) {
     this.client = new lark.Client({
@@ -288,13 +291,19 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
 
     if (!operator || !action || !context) return null;
 
-    const actionValue = action.value as Record<string, unknown> | undefined;
-    if (!actionValue || typeof actionValue !== 'object') return null;
+    const actionValue = (action.value as Record<string, unknown> | undefined) ?? {};
+    const option = typeof action.option === 'string' ? action.option : undefined;
+    if (Object.keys(actionValue).length === 0 && !option) return null;
+
+    const rawChatType = context.open_chat_type as string | undefined;
+    const chatType = rawChatType === 'p2p' || rawChatType === 'group' ? rawChatType : undefined;
 
     return {
       chatId: context.open_chat_id as string,
       senderId: operator.open_id as string,
       actionValue,
+      option,
+      chatType,
     };
   }
 
@@ -604,6 +613,30 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
     }
   }
 
+  async resolveChatType(chatId: string): Promise<'p2p' | 'group' | undefined> {
+    const cached = this.chatTypeCache.get(chatId);
+    if (cached && cached.expiresAt > Date.now()) return cached.chatType;
+
+    try {
+      const token = await this.tokenManager?.getTenantAccessToken();
+      if (!token) return undefined;
+      const res = await (this.uploadFetchFn ?? globalThis.fetch)(
+        `https://open.feishu.cn/open-apis/im/v1/chats/${chatId}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (!res.ok) return undefined;
+      const data = (await res.json()) as { data?: { chat_mode?: string } };
+      const mode = data?.data?.chat_mode;
+      if (mode === 'p2p' || mode === 'group') {
+        this.chatTypeCache.set(chatId, { chatType: mode, expiresAt: Date.now() + FeishuAdapter.CACHE_TTL_MS });
+        return mode;
+      }
+      return undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   private prependAtMention(text: string, sender?: { id: string; name?: string }): string {
     if (!sender) return text;
     return `<at user_id="${sender.id}">${sender.name ?? '用户'}</at> ${text}`;
@@ -640,7 +673,7 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
     const sender = (metadata as { replyToSender?: { id: string; name?: string } } | undefined)?.replyToSender;
     const atPrefix = sender ? `<at id=${sender.id}>${sender.name ?? '用户'}</at> ` : '';
 
-    const elements: Array<{ tag: string; content?: string }> = [];
+    const elements: Array<Record<string, unknown>> = [];
     if (envelope.subtitle) {
       elements.push({ tag: 'markdown', content: `**${envelope.subtitle}**` });
     }
@@ -648,6 +681,25 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
     if (envelope.footer) {
       elements.push({ tag: 'hr' });
       elements.push({ tag: 'markdown', content: envelope.footer });
+    }
+    const actions = envelope.cardActions?.length ? envelope.cardActions : DEFAULT_QUICK_ACTIONS;
+    if (actions.length) {
+      elements.push({ tag: 'hr' });
+      const options = actions.map((a) => {
+        const v = a.value as { cmd?: string; args?: string };
+        const optVal = v.cmd ? (v.args ? `${v.cmd} ${v.args}` : v.cmd) : JSON.stringify(a.value);
+        return { text: { tag: 'plain_text', content: a.label }, value: optVal };
+      });
+      elements.push({
+        tag: 'action',
+        actions: [
+          {
+            tag: 'select_static',
+            placeholder: { tag: 'plain_text', content: '选择操作...' },
+            options,
+          },
+        ],
+      });
     }
     const card = {
       header: {
