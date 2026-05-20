@@ -46,6 +46,7 @@ import { syncLocalBootcampState } from './first-run-quest/syncLocalBootcampState
 import { useFirstProjectMistakeTipGate } from './first-run-quest/useFirstProjectMistakeTipGate';
 import { useFirstProjectPreviewAutoOpen } from './first-run-quest/useFirstProjectPreviewAutoOpen';
 import { GameOverlayConnector } from './game/GameOverlayConnector';
+import { HubCatEditor } from './HubCatEditor';
 import { BootcampIcon } from './icons/BootcampIcon';
 import { PawIcon } from './icons/PawIcon';
 import { MessageActions } from './MessageActions';
@@ -131,7 +132,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // AC-6: research=multi hint from Signal study "多猫研究" button
   const isResearchMode = searchParams?.get('research') === 'multi';
   const { clearTasks } = useTaskStore();
-  const { cats, getCatById, isLoading, hasFetched } = useCatData();
+  const { cats, getCatById, refresh: refreshCats, isLoading, hasFetched } = useCatData();
   const workspaceWorktreeId = useChatStore((s) => s.workspaceWorktreeId);
   usePreviewAutoOpen(workspaceWorktreeId, threadId);
   useWorkspaceNavigate(workspaceWorktreeId, threadId);
@@ -141,6 +142,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const [showBootcampList, setShowBootcampList] = useState(false);
   const [showFirstRunQuestPrompt, setShowFirstRunQuestPrompt] = useState(false);
   const [showQuestWizard, setShowQuestWizard] = useState(false);
+  const [editingCatId, setEditingCatId] = useState<string | null>(null);
+  const editingCat = editingCatId ? (getCatById(editingCatId) ?? null) : null;
   // F106: fetch bootcamp count independently of sidebar lifecycle
   // refreshKey increments only on modal close → avoids duplicate fetch on open
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -572,13 +575,14 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     onIndexEvent: handleIndexSocketEvent,
   });
 
+  const handleEditCat = useCallback((catId: string) => setEditingCatId(catId), []);
   const renderSingleMessage = useCallback(
     (msg: ChatMessageData) => (
       <MessageActions key={msg.id} message={msg} threadId={threadId}>
-        <ChatMessage message={msg} getCatById={getCatById} />
+        <ChatMessage message={msg} getCatById={getCatById} onEditCat={handleEditCat} />
       </MessageActions>
     ),
-    [threadId, getCatById],
+    [threadId, getCatById, handleEditCat],
   );
 
   const { cancelInvocation, syncRooms, socketConnected } = useSocket(socketCallbacks, threadId);
@@ -1158,6 +1162,18 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       />
       <BootcampListModal open={showBootcampList} onClose={handleBootcampModalClose} currentThreadId={threadId} />
       {showVoteModal && <VoteConfigModal onSubmit={handleVoteSubmit} onCancel={() => setShowVoteModal(false)} />}
+      {editingCat && (
+        <HubCatEditor
+          open
+          cat={editingCat}
+          draft={null}
+          onClose={() => setEditingCatId(null)}
+          onSaved={async () => {
+            await refreshCats();
+            setEditingCatId(null);
+          }}
+        />
+      )}
       {/* Bootcamp guide overlay: intro phase tips + lifecycle tips (phase-7.5 uses guide engine) */}
       {(() => {
         if (showFirstRunQuestPrompt || showQuestWizard) return null;
