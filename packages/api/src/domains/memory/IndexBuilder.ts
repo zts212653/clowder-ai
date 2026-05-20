@@ -102,10 +102,10 @@ function hasProjectManifest(dir: string): boolean {
 }
 
 /** AC-A3: auto-select scanner + resolve the correct scan root (P1-1 fix) */
-function detectScanner(docsRoot: string): { scanner: RepoScanner; scanRoot: string } {
+function detectScanner(docsRoot: string, exclude?: string[]): { scanner: RepoScanner; scanRoot: string } {
   // Cat-café repos have features/ or decisions/ inside docsRoot
   if (existsSync(join(docsRoot, 'features')) || existsSync(join(docsRoot, 'decisions'))) {
-    return { scanner: new CatCafeScanner(), scanRoot: docsRoot };
+    return { scanner: new CatCafeScanner(exclude), scanRoot: docsRoot };
   }
   // docsRoot itself might be a project root (has manifests directly)
   if (hasProjectManifest(docsRoot)) {
@@ -117,7 +117,7 @@ function detectScanner(docsRoot: string): { scanner: RepoScanner; scanRoot: stri
     return { scanner: new GenericRepoScanner(), scanRoot: parentDir };
   }
   // Default: CatCafeScanner (backward compatible)
-  return { scanner: new CatCafeScanner(), scanRoot: docsRoot };
+  return { scanner: new CatCafeScanner(exclude), scanRoot: docsRoot };
 }
 
 export class IndexBuilder implements IIndexBuilder {
@@ -141,12 +141,13 @@ export class IndexBuilder implements IIndexBuilder {
     private readonly messageListFn?: MessageListFn,
     private readonly excludeThreadIdsFn?: ExcludeThreadIdsFn,
     scanner?: RepoScanner,
+    exclude?: string[],
   ) {
     if (scanner) {
       this.scanner = scanner;
       this.scanRoot = docsRoot;
     } else {
-      const detected = detectScanner(docsRoot);
+      const detected = detectScanner(docsRoot, exclude);
       this.scanner = detected.scanner;
       this.scanRoot = detected.scanRoot;
     }
@@ -154,6 +155,12 @@ export class IndexBuilder implements IIndexBuilder {
 
   setEmbedDeps(deps: { embedding: IEmbeddingService; vectorStore: VectorStore }): void {
     this.embedDeps = deps;
+  }
+
+  addExcludePatterns(patterns: string[]): void {
+    if (this.scanner instanceof CatCafeScanner) {
+      this.scanner.addExcludePatterns(patterns);
+    }
   }
 
   /** P2-4 fix: auto-skip soft clues for large repos (AC-A5 performance guard) */

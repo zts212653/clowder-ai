@@ -82,7 +82,7 @@ export function CapabilityAuditLog({ projectPath }: { projectPath?: string }) {
                     minute: '2-digit',
                   })}
                 </span>
-                <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${label.color}`}>{label.text}</span>
+                <span className={`px-1.5 py-0.5 rounded text-micro font-medium ${label.color}`}>{label.text}</span>
                 <span className="text-slate-600 font-medium truncate">{e.capabilityId}</span>
                 <span className="text-slate-300 truncate">{e.userId}</span>
               </div>

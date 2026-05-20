@@ -127,14 +127,14 @@ export function SignalArticleList({
                   {(article.studyCount ?? 0) > 0 && (
                     <span
                       title={`学习 ${article.studyCount} 次`}
-                      className="rounded bg-opus-bg px-1 text-[10px] text-opus-dark"
+                      className="rounded bg-opus-bg px-1 text-micro text-opus-dark"
                     >
                       学{article.studyCount}
                     </span>
                   )}
                   <span
                     data-testid="signal-status-badge"
-                    className={`rounded px-1 text-[10px] font-medium ${statusClassMap[article.status]}`}
+                    className={`rounded px-1 text-micro font-medium ${statusClassMap[article.status]}`}
                   >
                     {statusLabelMap[article.status]}
                   </span>
@@ -148,7 +148,7 @@ export function SignalArticleList({
                     event.stopPropagation();
                     void onStatusChange(article.id, 'read');
                   }}
-                  className="rounded-md bg-[var(--console-card-bg)] px-2 py-1 text-[10px] font-semibold text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] transition hover:text-cafe"
+                  className="rounded-md bg-[var(--console-card-bg)] px-2 py-1 text-micro font-semibold text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] transition hover:text-cafe"
                 >
                   已读
                 </button>
@@ -158,7 +158,7 @@ export function SignalArticleList({
                     event.stopPropagation();
                     void onStatusChange(article.id, 'starred');
                   }}
-                  className="rounded-md bg-conn-amber-bg px-2 py-1 text-[10px] font-semibold text-conn-amber-text transition hover:opacity-80"
+                  className="rounded-md bg-conn-amber-bg px-2 py-1 text-micro font-semibold text-conn-amber-text transition hover:opacity-80"
                 >
                   收藏
                 </button>

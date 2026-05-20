@@ -87,11 +87,11 @@ export function AuditEventsTab({ threadId }: AuditEventsTabProps) {
             onClick={() => setExpandedId(isExpanded ? null : evt.id)}
           >
             <div className="flex items-center gap-1.5 text-xs">
-              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${colorClass}`}>{evt.type}</span>
+              <span className={`px-1.5 py-0.5 rounded text-micro font-medium ${colorClass}`}>{evt.type}</span>
               <span className="text-cafe-muted ml-auto">{timeAgo(evt.timestamp)}</span>
             </div>
             {isExpanded && (
-              <pre className="mt-1.5 text-[10px] text-cafe-secondary bg-cafe-surface-elevated rounded p-1.5 overflow-x-auto whitespace-pre-wrap">
+              <pre className="mt-1.5 text-micro text-cafe-secondary bg-cafe-surface-elevated rounded p-1.5 overflow-x-auto whitespace-pre-wrap">
                 {JSON.stringify(evt.data, null, 2)}
               </pre>
             )}

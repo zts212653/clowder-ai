@@ -782,6 +782,34 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     });
   }
 
+  removeBySourcePrefix(prefix: string): number {
+    this.ensureOpen();
+    const escaped = prefix.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+    const likePattern = escaped + '%';
+    const anchors = (
+      this.db?.prepare("SELECT anchor FROM evidence_docs WHERE source_path LIKE ? ESCAPE '\\'").all(likePattern) as
+        | Array<{ anchor: string }>
+        | undefined
+    )?.map((r) => r.anchor);
+    const result = this.db?.prepare("DELETE FROM evidence_docs WHERE source_path LIKE ? ESCAPE '\\'").run(likePattern);
+    if (anchors?.length) {
+      const CHUNK = 400;
+      for (let i = 0; i < anchors.length; i += CHUNK) {
+        const batch = anchors.slice(i, i + CHUNK);
+        const ph = batch.map(() => '?').join(',');
+        this.db
+          ?.prepare(`DELETE FROM edges WHERE from_anchor IN (${ph}) OR to_anchor IN (${ph})`)
+          .run(...batch, ...batch);
+        try {
+          this.db?.prepare(`DELETE FROM evidence_vectors WHERE anchor IN (${ph})`).run(...batch);
+        } catch {
+          // evidence_vectors (vec0) may not exist when embedding is disabled
+        }
+      }
+    }
+    return result?.changes ?? 0;
+  }
+
   async getByAnchor(anchor: string): Promise<EvidenceItem | null> {
     this.ensureOpen();
     const row = this.db?.prepare('SELECT * FROM evidence_docs WHERE anchor = ? COLLATE NOCASE').get(anchor) as

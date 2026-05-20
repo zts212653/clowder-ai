@@ -2,8 +2,9 @@
 name: image-generation
 description: >
   AI 图片生成：原生 tool call（Codex/Antigravity）或浏览器自动化（Gemini/ChatGPT）。
-  Use when: 需要 AI 生成概念图、UI 参考、像素画素材。
-  Not for: 已有图片的展示（用 media_gallery rich block）、SVG 图标制作（手写或用设计工具）。
+  Use when: 需要 AI 生成概念图、UI 参考、像素画素材、完整 PPT 页面、复杂架构图、信息图或视觉 mock。
+  Not for: 已有图片的展示（用 media_gallery rich block）、硬要求可编辑/native text 的 PPT/图表（用 PPT/HTML 管线）。
+  Output: 生成图片自动发布，或作为完整视觉 mock / 图像素材进入后续交付。
 ---
 
 # AI 图片生成 Skill
@@ -16,6 +17,37 @@ description: >
 - 需要为 feature 生成概念图、UI 参考图、像素画素材
 - 铲屎官要求生成特定风格的图片
 - 需要批量生成多个变体
+- 需要直接生成完整 PPT/slide 页面、复杂架构图、企业信息图、封面或高密视觉 mock
+- 用户明确说“不需要可编辑”“内部 mock”“直接生成完整页面”
+
+## Codex 原生能力校准：不要低估 imagegen
+
+Codex `image_gen` 不只是“概念图/素材生成器”。当前实测能力可以直接生成**完整高保真 raster 页面**，包括：
+
+- 企业 PPT / slide 页面：高密度模块、标题、图标、流程链路、判断框、页脚
+- 复杂架构图 / 信息图：多分区、多节点、多箭头、多层级视觉组织
+- 品牌风格 mock：如华为风格的红白黑企业战略页、发布会封面、白皮书页
+- UI / poster / cover：需要强视觉完成度、但不要求 native editability 的图像产物
+
+**默认判断**：当用户要的是“好看、完整、像最终稿”的视觉 mock，且不要求可编辑，先走整页 imagegen。不要先手写 SVG/HTML 去拼格子、排文字、合成素材。
+
+### Full-page raster first
+
+当用户说“不需要可编辑”“只要精美 mock”“直接生成完整 PPT 页面”时，按这个顺序：
+
+1. **整页直出**：用一个完整 prompt 描述页面比例、风格、版式、文案、信息密度、图标、图表、负面约束，直接生成完整页面。
+2. **视觉评估**：先看整体风格、信息密度、层级、可读性。若大方向对，用 prompt 迭代，而不是立刻拆成 SVG/合成管线。
+3. **参考图辅助**：如果有低保真草图或同风格样张，把它当 reference / layout guide，但仍让 imagegen 生成整页最终图。多页交付（如 10 页 PPT 套图）时，第一页定稿后作为后续每页的 reference image / style anchor，让整套保持同一视觉系统。
+4. **失败才降级**：连续 1-2 次整页直出都无法保住结构、文字或品牌风格时，再考虑 HTML/PPT/SVG/hybrid。
+
+### 什么时候才写 SVG / HTML / hybrid
+
+- 硬要求可编辑文字、native chart、PPT 元素可改
+- 硬要求像素级对齐、可复用组件、可导出真实代码
+- 需要用真实商标/logo/精确法律文本，且图片模型容易画错
+- imagegen 已经尝试过整页直出但无法达到验收线
+
+低保真蓝图是**辅助 imagegen 理解布局**，不是默认替代 imagegen 的最终渲染管线。不要为了“可控”牺牲用户真正要的视觉完成度。
 
 ## 路径选择（先问自己有没有原生能力）
 
@@ -167,6 +199,16 @@ codex exec "生成一张猫咖全景图，手绘水彩风格"
 |------|------|------|
 | Gemini | `Gemini_Generated_Image_{hash}.png` | `Gemini_Generated_Image_2kvjb12kvjb12kvj.png` |
 | ChatGPT | `ChatGPT Image {年}年{月}月{日}日 {HH_MM_SS}.png` | `ChatGPT Image 2026年3月10日 07_14_32.png` |
+
+## Common Mistakes
+
+| 错误 | 后果 | 修复 |
+|------|------|------|
+| 低估 Codex `image_gen`，把它当素材器 | 绕去写 SVG/HTML，页面僵硬、对齐差、审美差 | 视觉 mock 默认先整页 raster 直出 |
+| 用户说“直接生成完整 PPT 页面”，仍拆成图标资产 + 手工合成 | 信息堆叠、文字错位、整体不像最终稿 | 用完整页面 prompt 直接生成，再按视觉反馈迭代 |
+| 过度追求 native text / 可编辑性 | 违背“不需要可编辑”的目标，产物变丑 | 先确认交付目标：raster mock 走 imagegen，editable deck 走 PPT/HTML |
+| 为了避免文字风险生成无字图 | 用户期待的是完整页面，结果变成空背景/素材 | PPT mock 要含标题、标签、数据和结构；文字失败再降级 |
+| 用 SVG 画复杂企业页但没有设计系统和排版能力 | 格子、文字、图标互相打架 | 让 imagegen 承担视觉完成度；SVG 只做必要的精确结构或 reference |
 
 ## 注意事项
 

@@ -455,7 +455,7 @@ function CatFamilyToggles({
 function TypeBadge({ type }: { type: 'mcp' | 'skill' }) {
   return (
     <span
-      className={`inline-flex items-center justify-center text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+      className={`inline-flex items-center justify-center text-micro px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
         type === 'mcp'
           ? 'bg-gradient-to-r from-purple-100 to-indigo-100 text-conn-purple-text border border-conn-purple-ring/50'
           : 'bg-gradient-to-r from-blue-100 to-cyan-100 text-conn-blue-text border border-conn-blue-ring/50'
@@ -607,7 +607,7 @@ export function SkillHealthBanner({ health, items }: { health: SkillHealthSummar
           <div className="space-y-0.5 text-conn-amber-text/80">
             {mountFailures.map((f) => (
               <p key={f.id}>
-                <code className="text-[10px] bg-conn-amber-bg/50 px-1 rounded">{f.id}</code> — {f.failed.join(', ')}{' '}
+                <code className="text-micro bg-conn-amber-bg/50 px-1 rounded">{f.id}</code> — {f.failed.join(', ')}{' '}
                 未挂载
               </p>
             ))}

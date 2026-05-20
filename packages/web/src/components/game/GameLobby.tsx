@@ -112,7 +112,7 @@ export function GameLobby({ mode, cats, onConfirm, onCancel }: GameLobbyProps) {
                 }`}
               >
                 <div className="text-sm font-semibold">{preset.label}</div>
-                <div className="text-[10px] opacity-70 mt-0.5">{preset.desc}</div>
+                <div className="text-micro opacity-70 mt-0.5">{preset.desc}</div>
               </button>
             ))}
           </div>

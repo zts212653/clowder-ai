@@ -210,7 +210,7 @@ export function AudioBlock({ block, catId }: { block: RichAudioBlock; catId?: st
       </div>
 
       {audioDuration > 0 && (
-        <span className="text-[10px] text-cafe-muted flex-shrink-0 tabular-nums">{formatDuration(audioDuration)}</span>
+        <span className="text-micro text-cafe-muted flex-shrink-0 tabular-nums">{formatDuration(audioDuration)}</span>
       )}
 
       {blobSrc && <audio ref={audioRef} src={blobSrc} preload="none" />}

@@ -281,7 +281,7 @@ function TreeItem({
         <div className="relative">
           {node.children === undefined ? (
             <div
-              className="py-1 text-[10px] text-cafe-muted animate-pulse"
+              className="py-1 text-micro text-cafe-muted animate-pulse"
               style={{ paddingLeft: `${(depth + 1) * 16 + 8}px` }}
             >
               加载中...
@@ -415,7 +415,7 @@ export function WorkspaceTree({
       {/* Root-level toolbar */}
       {callbacks && (
         <div className="group flex items-center gap-0.5 px-3 py-1 border-b border-cafe-subtle/30">
-          <span className="text-[10px] text-cafe-interactive/40 flex-1 uppercase tracking-wider">Files</span>
+          <span className="text-micro text-cafe-interactive/40 flex-1 uppercase tracking-wider">Files</span>
           <button
             type="button"
             className={hoverBtn}
@@ -460,7 +460,7 @@ export function WorkspaceTree({
             <ellipse cx="18" cy="11.5" rx="2.5" ry="3" />
           </svg>
           <p className="text-xs text-cafe-interactive/50">还没有文件树</p>
-          <p className="text-[10px] text-cafe-interactive/30 mt-1">选择一个 worktree 开始浏览</p>
+          <p className="text-micro text-cafe-interactive/30 mt-1">选择一个 worktree 开始浏览</p>
         </div>
       ) : (
         tree.map((node) => (

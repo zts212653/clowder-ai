@@ -71,7 +71,7 @@ function CollectionDetail({ collectionId }: { collectionId: string }) {
         <div key={g.kind}>
           <div className="flex items-center gap-1.5 mb-1">
             <span className="text-xs font-medium text-cafe-primary capitalize">{g.kind}</span>
-            <span className="text-[10px] text-cafe-secondary">({g.count})</span>
+            <span className="text-micro text-cafe-secondary">({g.count})</span>
           </div>
           <ul className="space-y-0.5 pl-3">
             {g.documents.map((doc) => (
@@ -80,12 +80,12 @@ function CollectionDetail({ collectionId }: { collectionId: string }) {
                   {doc.title || doc.anchor}
                 </span>
                 {doc.updatedAt && (
-                  <span className="text-[10px] text-cafe-tertiary shrink-0">{doc.updatedAt.slice(0, 10)}</span>
+                  <span className="text-micro text-cafe-tertiary shrink-0">{doc.updatedAt.slice(0, 10)}</span>
                 )}
               </li>
             ))}
             {g.hasMore && (
-              <li className="text-[10px] text-cafe-tertiary italic">还有 {g.count - g.documents.length} 条...</li>
+              <li className="text-micro text-cafe-tertiary italic">还有 {g.count - g.documents.length} 条...</li>
             )}
           </ul>
         </div>
@@ -209,14 +209,14 @@ export function CollectionCatalog() {
                 )}
                 <span className="font-semibold text-sm text-cafe-primary">{c.manifest.displayName}</span>
                 <span
-                  className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${SENSITIVITY_BADGE[c.manifest.sensitivity] ?? ''}`}
+                  className={`rounded-full px-2 py-0.5 text-micro font-medium ${SENSITIVITY_BADGE[c.manifest.sensitivity] ?? ''}`}
                 >
                   {c.manifest.sensitivity}
                 </span>
-                <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${STATUS_BADGE[status] ?? ''}`}>
+                <span className={`rounded-full px-2 py-0.5 text-micro font-medium ${STATUS_BADGE[status] ?? ''}`}>
                   {status}
                 </span>
-                <span className="text-[10px] text-cafe-secondary">{c.manifest.kind}</span>
+                <span className="text-micro text-cafe-secondary">{c.manifest.kind}</span>
               </button>
               {c.overview && (
                 <div className="text-xs text-cafe-secondary">
@@ -246,7 +246,7 @@ export function CollectionCatalog() {
                     type="button"
                     onClick={() => handleUnarchive(c.manifest.id)}
                     disabled={isBusy}
-                    className="px-2 py-0.5 text-[10px] border border-cafe rounded hover:bg-gray-50 text-cafe-secondary disabled:opacity-50"
+                    className="px-2 py-0.5 text-micro border border-cafe rounded hover:bg-gray-50 text-cafe-secondary disabled:opacity-50"
                     data-testid={`unarchive-${c.manifest.id}`}
                   >
                     {isBusy ? '...' : '取消归档'}
@@ -257,7 +257,7 @@ export function CollectionCatalog() {
                       type="button"
                       onClick={() => handleRebuild(c.manifest.id)}
                       disabled={isBusy}
-                      className="px-2 py-0.5 text-[10px] border border-cafe rounded hover:bg-gray-50 text-cafe-secondary disabled:opacity-50"
+                      className="px-2 py-0.5 text-micro border border-cafe rounded hover:bg-gray-50 text-cafe-secondary disabled:opacity-50"
                       data-testid={`rebuild-${c.manifest.id}`}
                     >
                       {isBusy ? '...' : '重建索引'}
@@ -266,7 +266,7 @@ export function CollectionCatalog() {
                       type="button"
                       onClick={() => handleArchive(c.manifest.id)}
                       disabled={isBusy}
-                      className="px-2 py-0.5 text-[10px] border border-cafe rounded hover:bg-gray-50 text-cafe-secondary disabled:opacity-50"
+                      className="px-2 py-0.5 text-micro border border-cafe rounded hover:bg-gray-50 text-cafe-secondary disabled:opacity-50"
                       data-testid={`archive-${c.manifest.id}`}
                     >
                       {isBusy ? '...' : '归档'}

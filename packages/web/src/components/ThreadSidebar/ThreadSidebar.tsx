@@ -747,7 +747,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
         </div>
 
         {bindWarning && (
-          <div className="px-3 py-1.5 bg-conn-amber-bg border-b border-conn-amber-ring text-[10px] text-conn-amber-text">
+          <div className="px-3 py-1.5 bg-conn-amber-bg border-b border-conn-amber-ring text-micro text-conn-amber-text">
             {bindWarning}
           </div>
         )}
@@ -765,7 +765,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                 type="button"
                 onClick={handleMarkAllRead}
                 disabled={isMarkingAllRead}
-                className="shrink-0 rounded-md bg-[var(--console-field-bg)] px-2 py-0.5 text-[10px] text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-black disabled:opacity-40 transition-colors whitespace-nowrap"
+                className="shrink-0 rounded-md bg-[var(--console-field-bg)] px-2 py-0.5 text-micro text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-black disabled:opacity-40 transition-colors whitespace-nowrap"
                 data-testid="mark-all-read-btn"
               >
                 {isMarkingAllRead ? '...' : '全部已读'}
@@ -805,16 +805,16 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
               <button
                 type="button"
                 onClick={expandAll}
-                className="text-[10px] text-cafe-muted hover:text-cafe-accent transition-colors"
+                className="text-micro text-cafe-muted hover:text-cafe-accent transition-colors"
                 data-testid="expand-all-btn"
               >
                 全部展开
               </button>
-              <span className="text-[10px] text-cafe-muted mx-1">/</span>
+              <span className="text-micro text-cafe-muted mx-1">/</span>
               <button
                 type="button"
                 onClick={collapseAll}
-                className="text-[10px] text-cafe-muted hover:text-cafe-accent transition-colors"
+                className="text-micro text-cafe-muted hover:text-cafe-accent transition-colors"
                 data-testid="collapse-all-btn"
               >
                 全部折叠
@@ -1008,9 +1008,9 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           </button>
           {showTrash && (
             <div className="max-h-48 overflow-y-auto mt-1">
-              {isLoadingTrash && <div className="px-3 py-2 text-[10px] text-cafe-muted">加载中...</div>}
+              {isLoadingTrash && <div className="px-3 py-2 text-micro text-cafe-muted">加载中...</div>}
               {!isLoadingTrash && trashedThreads.length === 0 && (
-                <div className="px-3 py-2 text-[10px] text-cafe-muted">回收站是空的</div>
+                <div className="px-3 py-2 text-micro text-cafe-muted">回收站是空的</div>
               )}
               {trashedThreads.map((t) => (
                 <div
@@ -1021,7 +1021,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                   <button
                     type="button"
                     onClick={() => handleRestore(t.id)}
-                    className="sm:opacity-0 sm:group-hover:opacity-100 text-[10px] text-cafe-accent hover:text-cafe-interactive transition-all shrink-0"
+                    className="sm:opacity-0 sm:group-hover:opacity-100 text-micro text-cafe-accent hover:text-cafe-interactive transition-all shrink-0"
                     data-testid={`restore-btn-${t.id}`}
                   >
                     恢复

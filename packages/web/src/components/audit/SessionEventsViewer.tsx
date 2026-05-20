@@ -153,7 +153,7 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
             type="button"
             key={m}
             onClick={() => setView(m)}
-            className={`flex-1 py-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors
+            className={`flex-1 py-1.5 text-micro font-semibold uppercase tracking-wider transition-colors
               ${view === m ? 'text-blue-600 border-b-2 border-blue-600' : 'text-cafe-muted hover:text-cafe-secondary'}`}
           >
             {m === 'chat' ? 'Chat' : m === 'handoff' ? 'Handoff' : 'Raw'}
@@ -164,7 +164,7 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
       {/* Content — stale-while-revalidate: show old data with loading indicator */}
       <div className="max-h-72 overflow-y-auto p-2">
         {loading && data.length > 0 && (
-          <div className="text-[10px] text-cafe-muted text-center py-1 animate-pulse">Refreshing...</div>
+          <div className="text-micro text-cafe-muted text-center py-1 animate-pulse">Refreshing...</div>
         )}
         {loading && data.length === 0 && <div className="text-xs text-cafe-muted py-2">加载中...</div>}
         {error && <div className="text-xs text-conn-red-text py-2">加载失败</div>}
@@ -200,7 +200,7 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
                   {(inv.toolCalls ?? []).map((t) => (
                     <span
                       key={t}
-                      className="bg-cafe-surface-elevated text-cafe-secondary px-1 py-0.5 rounded text-[10px]"
+                      className="bg-cafe-surface-elevated text-cafe-secondary px-1 py-0.5 rounded text-micro"
                     >
                       {t}
                     </span>
@@ -217,7 +217,7 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
         {!error && view === 'raw' && (
           <div className="space-y-1">
             {(data as RawEvent[]).map((evt) => (
-              <div key={evt.eventNo} className="text-[10px] font-mono bg-cafe-surface-elevated rounded px-1.5 py-1">
+              <div key={evt.eventNo} className="text-micro font-mono bg-cafe-surface-elevated rounded px-1.5 py-1">
                 <span className="text-cafe-muted">#{evt.eventNo}</span>{' '}
                 <span className="text-cafe-secondary">{JSON.stringify(evt.event)}</span>
               </div>
@@ -227,7 +227,7 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
       </div>
 
       {/* Pagination */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-t border-cafe-subtle text-[10px] text-cafe-muted">
+      <div className="flex items-center justify-between px-3 py-1.5 border-t border-cafe-subtle text-micro text-cafe-muted">
         <span>{total} 条事件</span>
         <div className="flex gap-2">
           {cursorHistory.length > 0 && (

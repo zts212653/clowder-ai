@@ -174,7 +174,7 @@ export function SectionGroup({
         {govDot && <span className={`w-2 h-2 rounded-full flex-shrink-0 ${govDot.color}`} title={govDot.title} />}
 
         {/* Count */}
-        <span className="text-[10px] text-cafe-muted flex-shrink-0 ml-auto">{count}</span>
+        <span className="text-micro text-cafe-muted flex-shrink-0 ml-auto">{count}</span>
 
         {/* F095 Phase F: Quick create button */}
         {onQuickCreate && (

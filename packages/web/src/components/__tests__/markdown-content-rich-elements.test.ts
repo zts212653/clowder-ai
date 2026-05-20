@@ -71,6 +71,16 @@ describe('MarkdownContent task list rendering', () => {
   });
 });
 
+/* ── Mermaid diagrams ────────────────────────────────── */
+describe('MarkdownContent mermaid rendering', () => {
+  it('renders mermaid fenced code as a diagram container instead of a generic code block', () => {
+    const html = render('```mermaid\nflowchart TD\n  A[Draft] --> B[Workspace]\n```');
+
+    expect(html).toContain('data-testid="mermaid-diagram"');
+    expect(html).not.toContain('复制');
+  });
+});
+
 /* ── h4-h6 headings ──────────────────────────────────── */
 describe('MarkdownContent h4-h6 headings', () => {
   it('renders h4 with semibold styling', () => {

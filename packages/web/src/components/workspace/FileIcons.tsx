@@ -1,3 +1,4 @@
+// F206 exempt: file-type brand colors — fixed per language identity, not theme-dependent
 const FILE_ICONS: Record<string, { color: string; label: string }> = {
   ts: { color: '#3178C6', label: 'TS' },
   tsx: { color: '#3178C6', label: 'TX' },
@@ -21,14 +22,14 @@ export function FileIcon({ name }: { name: string }) {
   const icon = FILE_ICONS[ext];
   if (!icon) {
     return (
-      <span className="w-4 h-4 rounded text-[10px] font-bold flex items-center justify-center bg-gray-200 text-cafe-secondary flex-shrink-0">
+      <span className="w-4 h-4 rounded text-micro font-bold flex items-center justify-center bg-gray-200 text-cafe-secondary flex-shrink-0">
         F
       </span>
     );
   }
   return (
     <span
-      className="w-4 h-4 rounded text-[10px] font-bold flex items-center justify-center flex-shrink-0 text-white"
+      className="w-4 h-4 rounded text-micro font-bold flex items-center justify-center flex-shrink-0 text-white"
       style={{ backgroundColor: icon.color }}
     >
       {icon.label}

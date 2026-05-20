@@ -55,6 +55,7 @@ export function GraphNodeGlyph({ centerAnchor, node, onHover, onNodeClick, pos }
         filter="url(#node-shadow)"
       />
       <rect x={glyph.x} y={glyph.y} width={5} height={glyph.height} rx={2.5} fill={glyph.fill} opacity={0.95} />
+      {/* data-viz palette exempt: SVG text fills are graph-specific */}
       {node.redacted ? (
         <text x={glyph.x + 16} y={pos.y + 4} fontSize={13} fill="#374151" fontWeight="700">
           🔒 Redacted
@@ -110,6 +111,7 @@ function glyphViewModel(node: GraphNode, centerAnchor: string | undefined, pos: 
     anchorLabel,
     anchorSize: isCenter ? 13 : 11,
     anchorY: isCenter ? y + 21 : y + 19,
+    // data-viz palette exempt: node background/border colors are graph-specific
     background: isCenter ? '#eff6ff' : node.kind === 'unresolved' ? '#f3f4f6' : '#fffdf8',
     border: isCenter ? '#2563eb' : '#d6cabc',
     dimmed,
@@ -150,7 +152,7 @@ export function GraphInspector({
     <div data-testid="graph-side-panel" className="min-w-0 space-y-4 rounded-md bg-[var(--console-card-bg)] p-4">
       <div data-testid="graph-node-detail" className="space-y-3">
         <div>
-          <div className="text-[10px] font-bold uppercase tracking-wide text-cafe-secondary">Selected node</div>
+          <div className="text-micro font-bold uppercase tracking-wide text-cafe-secondary">Selected node</div>
           <div className="mt-1 text-sm font-black text-cafe-primary">
             {selectedNode ? selectedNode.anchor : 'No node'}
           </div>
@@ -176,7 +178,7 @@ export function GraphInspector({
 
 function SelectedNodeMeta({ node }: { node: GraphNode }) {
   return (
-    <div className="grid grid-cols-2 gap-2 text-[10px] text-cafe-secondary">
+    <div className="grid grid-cols-2 gap-2 text-micro text-cafe-secondary">
       <span>类型</span>
       <span className="font-semibold text-cafe-primary">{node.kind}</span>
       <span>集合</span>
@@ -198,9 +200,9 @@ function SelectedRelations({
 }) {
   return (
     <div>
-      <div className="text-[10px] font-bold uppercase tracking-wide text-cafe-secondary">关系</div>
+      <div className="text-micro font-bold uppercase tracking-wide text-cafe-secondary">关系</div>
       <div className="mt-2 space-y-1">
-        {edges.length === 0 && <div className="text-[10px] text-cafe-secondary">暂无可见关系。</div>}
+        {edges.length === 0 && <div className="text-micro text-cafe-secondary">暂无可见关系。</div>}
         {edges.slice(0, 8).map((edge) => (
           <RelationRow
             edge={edge}
@@ -227,7 +229,7 @@ function RelationRow({
   const otherAnchor = outbound ? edge.to : edge.from;
   const other = nodeByAnchor.get(otherAnchor);
   return (
-    <div className="text-[10px] text-cafe-secondary">
+    <div className="text-micro text-cafe-secondary">
       <span className="font-bold text-cafe-primary">
         {outbound ? '→' : '←'} {edge.relation.replace(/_/g, ' ')}
       </span>{' '}
@@ -239,7 +241,10 @@ function RelationRow({
 
 function GraphSummary({ graph }: { graph: GraphResult }) {
   return (
-    <div className="border-t border-[#eee3d6] pt-3 text-[10px] text-cafe-secondary" data-testid="graph-summary">
+    <div
+      className="border-t border-[var(--console-border-soft)] pt-3 text-micro text-cafe-secondary"
+      data-testid="graph-summary"
+    >
       <div className="flex flex-wrap gap-3">
         <span>节点: {graph.nodes.length}</span>
         <span>关系边: {graph.edges.length}</span>
@@ -252,11 +257,11 @@ function GraphSummary({ graph }: { graph: GraphResult }) {
 
 function GraphLegend({ uniqueKinds }: { uniqueKinds: string[] }) {
   return (
-    <div className="border-t border-[#eee3d6] pt-3">
-      <div className="mb-2 text-[10px] font-bold uppercase tracking-wide text-cafe-secondary">图例</div>
+    <div className="border-t border-[var(--console-border-soft)] pt-3">
+      <div className="mb-2 text-micro font-bold uppercase tracking-wide text-cafe-secondary">图例</div>
       <div className="flex flex-wrap items-center gap-2" data-testid="graph-legend">
         {uniqueKinds.map((k) => (
-          <span key={k} className="flex items-center gap-1 text-[10px] text-cafe-secondary">
+          <span key={k} className="flex items-center gap-1 text-micro text-cafe-secondary">
             <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: kindFill(k) }} />
             {k}
           </span>
@@ -276,7 +281,10 @@ function GraphEdgeFilter({
   uniqueRelations: string[];
 }) {
   return (
-    <div className="border-t border-[#eee3d6] pt-3 text-[10px] text-cafe-secondary" data-testid="graph-edge-filter">
+    <div
+      className="border-t border-[var(--console-border-soft)] pt-3 text-micro text-cafe-secondary"
+      data-testid="graph-edge-filter"
+    >
       <div className="mb-2 font-bold uppercase tracking-wide">关系类型</div>
       <div className="flex flex-wrap items-center gap-2">
         {uniqueRelations.map((rel) => (

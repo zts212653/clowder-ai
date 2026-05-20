@@ -83,7 +83,7 @@ function CategoryGroup({
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
-            <tr className="text-left text-[10px] text-cafe-muted uppercase tracking-wide">
+            <tr className="text-left text-micro text-cafe-muted uppercase tracking-wide">
               <th className="pb-1.5 pr-3 font-semibold">Skill</th>
               <th className="pb-1.5 pr-3 font-semibold">触发条件</th>
               <th className="pb-1.5 pr-3 font-semibold">MCP 依赖</th>
@@ -117,7 +117,7 @@ function CategoryGroup({
                       skill.requiresMcp?.map((dep) => (
                         <span
                           key={`${skill.name}:${dep.id}`}
-                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-micro font-semibold ${
                             dep.status === 'ready'
                               ? 'bg-conn-emerald-bg text-conn-emerald-text'
                               : dep.status === 'missing'

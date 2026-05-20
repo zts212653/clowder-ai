@@ -55,12 +55,12 @@ export function SuggestionOpenForm({
         });
       }}
     >
-      <label className="block text-xs font-medium text-[#5E4C3A]">
+      <label className="block text-xs font-medium text-cafe-secondary">
         建议领取猫猫
         <select
           value={catId}
           onChange={(event) => onCatIdChange(event.target.value)}
-          className="mt-1 w-full rounded-lg border border-[#E6D7C3] px-2 py-1.5 text-xs text-[#2C241B]"
+          className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] px-2 py-1.5 text-xs text-cafe"
           data-testid="mc-suggest-cat"
         >
           {catOptions.map((option) => (
@@ -70,28 +70,28 @@ export function SuggestionOpenForm({
           ))}
         </select>
       </label>
-      <label className="block text-xs font-medium text-[#5E4C3A]">
+      <label className="block text-xs font-medium text-cafe-secondary">
         Why
         <textarea
           value={why}
           onChange={(event) => onWhyChange(event.target.value)}
-          className="mt-1 h-16 w-full rounded-lg border border-[#E6D7C3] px-2 py-1.5 text-xs text-[#2C241B]"
+          className="mt-1 h-16 w-full rounded-lg border border-[var(--console-border-soft)] px-2 py-1.5 text-xs text-cafe"
           data-testid="mc-suggest-why"
         />
       </label>
-      <label className="block text-xs font-medium text-[#5E4C3A]">
+      <label className="block text-xs font-medium text-cafe-secondary">
         Plan
         <textarea
           value={plan}
           onChange={(event) => onPlanChange(event.target.value)}
-          className="mt-1 h-16 w-full rounded-lg border border-[#E6D7C3] px-2 py-1.5 text-xs text-[#2C241B]"
+          className="mt-1 h-16 w-full rounded-lg border border-[var(--console-border-soft)] px-2 py-1.5 text-xs text-cafe"
           data-testid="mc-suggest-plan"
         />
       </label>
       <button
         type="submit"
         disabled={submitting || catOptions.length === 0}
-        className="w-full rounded-lg bg-[#1F1A16] px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
+        className="w-full rounded-lg bg-[var(--cafe-text)] px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
         data-testid="mc-suggest-submit"
       >
         提交建议领取

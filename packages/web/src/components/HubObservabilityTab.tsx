@@ -168,6 +168,7 @@ function TrendChart({
     <div className="rounded-lg bg-cafe-surface-elevated p-3">
       <div className="mb-2 text-xs text-cafe-muted">{label}</div>
       <svg viewBox={`0 0 ${width} ${height}`} className="h-20 w-full" preserveAspectRatio="none">
+        {/* F206 exempt: data-viz chart stroke — fixed per visualization identity */}
         <polyline points={points} fill="none" stroke="#5B9BD5" strokeWidth="2" />
       </svg>
     </div>

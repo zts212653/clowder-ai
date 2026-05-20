@@ -34,7 +34,7 @@ export function SettingsBadge({
   children,
   className,
 }: SettingsBadgeProps) {
-  const sizeClass = size === 'xxs' ? 'px-1.5 py-0.5 text-[10px]' : 'px-2.5 py-0.5 text-xs';
+  const sizeClass = size === 'xxs' ? 'px-1.5 py-0.5 text-micro' : 'px-2.5 py-0.5 text-xs';
   const base = `rounded-full font-semibold ${sizeClass} ${toneStyles[tone]} ${className ?? ''}`;
 
   if (as === 'button') {

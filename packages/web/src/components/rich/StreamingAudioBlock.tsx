@@ -114,7 +114,7 @@ export function StreamingAudioBlock({ request, catId, autoPlay = true }: Props) 
         </div>
 
         {state.totalChunks > 0 && (
-          <span className="text-[10px] text-cafe-muted flex-shrink-0 tabular-nums">{formatChunkInfo()}</span>
+          <span className="text-micro text-cafe-muted flex-shrink-0 tabular-nums">{formatChunkInfo()}</span>
         )}
       </button>
 

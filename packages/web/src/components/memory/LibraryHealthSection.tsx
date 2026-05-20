@@ -5,7 +5,7 @@ function MetricCard({ label, value, sub }: { label: string; value: string; sub: 
     <div className="flex-1 rounded-xl bg-[var(--console-card-bg)] p-4">
       <div className="text-xs text-cafe-secondary">{label}</div>
       <div className="mt-1 text-2xl font-semibold text-cafe-black">{value}</div>
-      <div className="mt-0.5 text-[10px] text-cafe-muted">{sub}</div>
+      <div className="mt-0.5 text-micro text-cafe-muted">{sub}</div>
     </div>
   );
 }
@@ -44,7 +44,7 @@ export function LibraryHealthSection({ report }: { report: HealthReportData }) {
           </div>
           {report.searchQuality.recentMisses.length > 0 && (
             <div className="space-y-1">
-              <div className="text-[10px] font-medium text-cafe-muted">近期未命中</div>
+              <div className="text-micro font-medium text-cafe-muted">近期未命中</div>
               {report.searchQuality.recentMisses.slice(0, 5).map((m) => (
                 <div key={`${m.query}-${m.searchedAt}`} className="flex items-center gap-2 text-xs">
                   <span className="font-mono text-cafe-black">{m.query}</span>
@@ -79,7 +79,7 @@ export function LibraryHealthSection({ report }: { report: HealthReportData }) {
               </div>
             ))}
             {report.staleAnchors.items.length > 10 && (
-              <div className="text-[10px] text-conn-amber-text">+{report.staleAnchors.items.length - 10} 条更多</div>
+              <div className="text-micro text-conn-amber-text">+{report.staleAnchors.items.length - 10} 条更多</div>
             )}
           </div>
         </div>

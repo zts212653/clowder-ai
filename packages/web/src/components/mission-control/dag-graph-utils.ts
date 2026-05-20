@@ -31,17 +31,29 @@ export interface FeatureRecord {
 }
 
 export const EDGE_STYLES = {
-  evolved: { stroke: '#5B9BD5', strokeDasharray: undefined, label: '演化' },
-  blocked: { stroke: '#E05252', strokeDasharray: '6 3', label: '阻塞' },
-  related: { stroke: '#9A866F', strokeDasharray: '3 3', label: '关联' },
+  evolved: { stroke: 'var(--mc-edge-evolved)', strokeDasharray: undefined, label: '演化' },
+  blocked: { stroke: 'var(--mc-edge-blocked)', strokeDasharray: '6 3', label: '阻塞' },
+  related: { stroke: 'var(--mc-edge-related)', strokeDasharray: '3 3', label: '关联' },
 } as const;
 
 export const STATUS_COLORS: Record<BacklogStatus, { border: string; bg: string; dot: string }> = {
-  open: { border: '#C4B5A0', bg: '#FFFDF8', dot: '#C4B5A0' },
-  suggested: { border: '#E4A853', bg: '#FFFBF0', dot: '#E4A853' },
-  approved: { border: '#E4A853', bg: '#FFFBF0', dot: '#E4A853' },
-  dispatched: { border: '#5B9BD5', bg: '#F5F9FF', dot: '#5B9BD5' },
-  done: { border: '#7CB87C', bg: '#F5FFF5', dot: '#7CB87C' },
+  open: { border: 'var(--mc-status-open-dot)', bg: 'var(--console-card-bg)', dot: 'var(--mc-status-open-dot)' },
+  suggested: {
+    border: 'var(--mc-status-suggested-dot)',
+    bg: 'var(--mc-status-suggested-bg)',
+    dot: 'var(--mc-status-suggested-dot)',
+  },
+  approved: {
+    border: 'var(--mc-status-suggested-dot)',
+    bg: 'var(--mc-status-suggested-bg)',
+    dot: 'var(--mc-status-suggested-dot)',
+  },
+  dispatched: {
+    border: 'var(--mc-status-dispatched-dot)',
+    bg: 'var(--mc-status-dispatched-bg)',
+    dot: 'var(--mc-status-dispatched-dot)',
+  },
+  done: { border: 'var(--mc-status-done-dot)', bg: 'var(--mc-status-done-bg)', dot: 'var(--mc-status-done-dot)' },
 };
 
 export const NODE_WIDTH = 160;

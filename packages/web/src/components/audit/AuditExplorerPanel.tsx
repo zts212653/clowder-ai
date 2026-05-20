@@ -62,7 +62,7 @@ export function AuditExplorerPanel({
         className="w-full flex items-center justify-between text-xs font-semibold text-cafe-secondary hover:text-cafe"
       >
         <span>审计 & Session</span>
-        <span className="text-[10px] text-cafe-muted">{expanded ? '▲' : '▼'}</span>
+        <span className="text-micro text-cafe-muted">{expanded ? '▲' : '▼'}</span>
       </button>
 
       {expanded && (
@@ -74,7 +74,7 @@ export function AuditExplorerPanel({
                 type="button"
                 key={t}
                 onClick={() => setTab(t)}
-                className={`flex-1 py-1 text-[10px] font-semibold transition-colors
+                className={`flex-1 py-1 text-micro font-semibold transition-colors
                   ${tab === t ? 'text-blue-600 border-b-2 border-blue-600' : 'text-cafe-muted hover:text-cafe-secondary'}`}
               >
                 {TAB_LABELS[t]}

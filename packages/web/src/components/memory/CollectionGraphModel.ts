@@ -24,6 +24,7 @@ export interface GraphResult {
   depth: number;
 }
 
+// data-viz palette exempt: graph node kind colors
 export const KIND_FILL: Record<string, string> = {
   feature: '#2563eb',
   spec: '#0891b2',
@@ -38,6 +39,7 @@ export const KIND_FILL: Record<string, string> = {
   unresolved: '#d1d5db',
 };
 
+// data-viz palette exempt: graph edge relation colors
 export const RELATION_COLOR: Record<string, string> = {
   related_to: '#6b7280',
   related: '#6b7280',
@@ -51,11 +53,13 @@ export const RELATION_COLOR: Record<string, string> = {
   feature_ref: '#d97706',
 };
 
+// data-viz palette exempt: fallback color for unknown node kinds
 export function kindFill(kind: string): string {
   const color = KIND_FILL[kind];
   return typeof color === 'string' ? color : '#6b7280';
 }
 
+// data-viz palette exempt: fallback color for unknown edge relations
 export function relationColor(relation: string): string {
   const color = RELATION_COLOR[relation];
   return typeof color === 'string' ? color : '#9ca3af';

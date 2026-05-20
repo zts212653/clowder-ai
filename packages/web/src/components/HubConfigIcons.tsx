@@ -1,6 +1,7 @@
 import Image from 'next/image';
 import type { ReactNode } from 'react';
 
+// F206 exempt: connector/icon palette colors — fixed per platform identity, not theme-dependent
 // ── Per-platform visual config (matches .pen wireframe Screen C) ──
 
 export interface PlatformVisual {

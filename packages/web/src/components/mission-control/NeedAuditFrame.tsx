@@ -68,18 +68,18 @@ export function NeedAuditFrame({ projectId, frame, onSaved }: NeedAuditFrameProp
   ];
 
   return (
-    <div className="rounded-lg border border-[#E7DAC7] bg-[#FFFDF8] p-4">
-      <h3 className="mb-3 text-sm font-bold text-[#2B2118]">Stage 0: Frame — 六问定位</h3>
+    <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4">
+      <h3 className="mb-3 text-sm font-bold text-cafe">Stage 0: Frame — 六问定位</h3>
       <div className="space-y-3">
         {fields.map((f) => (
           <label key={f.label} className="block">
-            <span className="text-xs font-medium text-[#6B5D4F]">{f.label}</span>
+            <span className="text-xs font-medium text-cafe-secondary">{f.label}</span>
             <input
               type="text"
               value={f.value}
               onChange={(e) => f.set(e.target.value)}
               placeholder={f.placeholder}
-              className="mt-1 w-full rounded-lg border border-[#D8C6AD] bg-cafe-surface px-3 py-1.5 text-xs text-[#2B2118] focus:border-[#8B6F47] focus:outline-none"
+              className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface px-3 py-1.5 text-xs text-cafe focus:border-[var(--console-border-soft)] focus:outline-none"
             />
           </label>
         ))}
@@ -93,7 +93,7 @@ export function NeedAuditFrame({ projectId, frame, onSaved }: NeedAuditFrameProp
         type="button"
         onClick={() => void handleSave()}
         disabled={submitting}
-        className="mt-3 w-full rounded-lg bg-[#8B6F47] py-1.5 text-xs font-medium text-white hover:bg-[#7A6139] disabled:opacity-40"
+        className="mt-3 w-full rounded-lg bg-[var(--mc-accent)] py-1.5 text-xs font-medium text-white hover:bg-[var(--mc-accent-hover)] disabled:opacity-40"
       >
         {submitting ? '保存中...' : frame ? '更新 Frame' : '保存 Frame'}
       </button>

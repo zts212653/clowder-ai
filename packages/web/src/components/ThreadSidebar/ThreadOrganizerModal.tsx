@@ -160,7 +160,7 @@ export function ThreadOrganizerModal({
                           key={label.id}
                           type="button"
                           onClick={() => toggleLabel(thread.id, label.id)}
-                          className={`text-[10px] px-1.5 py-0.5 rounded-full border transition-colors flex items-center gap-1 ${
+                          className={`text-micro px-1.5 py-0.5 rounded-full border transition-colors flex items-center gap-1 ${
                             isSelected
                               ? 'border-cafe-muted bg-cafe-surface-elevated text-cafe-black'
                               : 'border-transparent text-cafe-muted hover:text-cafe-secondary'

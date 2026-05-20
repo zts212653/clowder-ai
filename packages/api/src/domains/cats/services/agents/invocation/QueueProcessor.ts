@@ -921,7 +921,8 @@ export class QueueProcessor {
           ...(controller.signal ? { signal: controller.signal } : {}),
           queueHasQueuedMessages: (tid: string) => queue.hasQueuedNonAgentForThread(tid),
           deferA2AEnqueue: (e: any) => queue.enqueue(e),
-          hasQueuedOrActiveAgentForCat: (tid: string, catId: string) => queue.hasActiveOrQueuedAgentForCat(tid, catId),
+          hasQueuedOrActiveAgentForCat: (tid: string, catId: string) =>
+            queue.hasActiveOrQueuedAgentForCat(tid, catId, { excludeEntryId: entry.id }),
           invocationController: controller,
           trackA2ASlot: (tid: string, catId: string, uid: string, ctrl: AbortController) => {
             invocationTracker.trackExternalSlot?.(tid, catId, ctrl, uid, [catId]);

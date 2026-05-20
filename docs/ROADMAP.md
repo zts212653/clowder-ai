@@ -62,7 +62,6 @@ created: 2026-02-26
 | F179 | Desktop Installer Release Pipeline — Win NSIS + Mac DMG 自动附 release | spec | Ragdoll | community (v0.9.0 反馈) | [F179](features/F179-desktop-installer-release-pipeline.md) |
 | F180 | Agent CLI Hook Health and Sync — user-level hook 检测 + 一键同步 | in-progress | Maine Coon/Maine Coon | community [#614](https://github.com/zts212653/clowder-ai/issues/614) | [F180](features/F180-agent-cli-hook-health.md) |
 | F181 | Reserved Feature Slot — 待补充需求锚点 | idea | 待定 | internal | [F181](features/F181-reserved-feature-slot.md) |
-| F188 | Library Stewardship — 图书馆管护与成长（rebuild + health + graph fidelity + materialize + pin） | spec | Ragdoll | internal | [F188](features/F188-library-stewardship.md) |
 | F189 | Operation Context Unification — 操作上下文单点化（HTTP/MCP/CLI/A2A 统一 builder） | spec | Ragdoll | internal | [F189](features/F189-operation-context-unification.md) |
 | F192 | Socio-Technical Harness Eval — harness 共创评估体系 | spec | Ragdoll | internal | [F192](features/F192-socio-technical-harness-eval.md) |
 | F198 | Claude Code Subscription Carrier — 6/15 SDK Credit 拐点前救Ragdoll | spec | Ragdoll Opus 4.7 | internal | [F198](features/F198-claude-code-subscription-carrier.md) |
@@ -71,4 +70,5 @@ created: 2026-02-26
 | F203 | Native System Prompt L0 — 压缩免疫核心规则注入 | in-progress | Ragdoll Opus 4.7 | internal | [F203](features/F203-native-system-prompt-l0.md) |
 | F204 | Weixin MP Publisher Plugin — 微信公众号文章发布插件 | review | community @mindfn + maintainers | community [#688](https://github.com/zts212653/clowder-ai/pull/688) | [F204](features/F204-weixin-mp-publisher-plugin.md) |
 | F205 | MediaHub Video Provider Plugins — 视频生成/分析插件 | spec | community @mindfn + maintainers | community [#689](https://github.com/zts212653/clowder-ai/pull/689) | [F205](features/F205-video-provider-plugins.md) |
+| F206 | Settings UI Convergence — 组件语言归一 | in-progress | Ragdoll | community [#723](https://github.com/zts212653/clowder-ai/issues/723) | [F206](features/F206-settings-ui-convergence.md) |
 | F207 | AI Family Office — 个人投资学习基建（画像/知识/数据/分析/决策五层） | spec | Ragdoll | internal | [F207](features/F207-personal-finance-infra.md) |

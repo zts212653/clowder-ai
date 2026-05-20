@@ -37,8 +37,7 @@ interface CommunityPanelFiltersProps {
   onSync: () => void;
 }
 
-const selectClass =
-  'text-[10px] bg-cafe-surface rounded px-1.5 py-0.5 border border-cafe-subtle/30 text-cafe-secondary';
+const selectClass = 'text-micro bg-cafe-surface rounded px-1.5 py-0.5 border border-cafe-subtle/30 text-cafe-secondary';
 
 export function CommunityPanelFilters({
   repos,
@@ -73,7 +72,7 @@ export function CommunityPanelFilters({
           type="button"
           onClick={onSync}
           disabled={loading}
-          className="flex items-center gap-1 text-[10px] text-cafe-interactive/60 hover:text-cafe-interactive transition-colors disabled:opacity-50"
+          className="flex items-center gap-1 text-micro text-cafe-interactive/60 hover:text-cafe-interactive transition-colors disabled:opacity-50"
           title="手动同步"
         >
           <span className={loading ? 'animate-spin' : ''}>{SYNC_ICON}</span>

@@ -139,7 +139,7 @@ team lead 2026-05-16 原话："我们的配置栏有个叫规则与SOP 我建议
 
 - [x] AC-B1: `assets/system-prompts/system-prompt-l0.md` 包含 14 项全部内容 ✅（branch `9105d184f`，测试 `14 L0 governance items coverage` 全覆盖）
 - [x] AC-B2: `scripts/compile-system-prompt-l0.mjs` 输出 per-cat 编译结果 ✅（6 catId 测试覆盖 + per-cat overlay 替换 + 36 测试全绿）
-- [x] AC-B3: 编译 token 总量 ≤ **5,000** ✅（**上限 4,500→5,000 调整**：S1 baseline 实测 static 2,684-3,060t，14 项完整内容 + 47 review 补 6 项 + 五条铁律 + 协作哲学 + 三硬条件物理下限 ~4,600t；per-family 治理协议已下沉 WORKFLOW overlay 去重；5,000 仍在 Claude 4.x prompt cache 单 breakpoint 内 + 占 200k context 2.5%）
+- [x] AC-B3: 编译 token 总量 ≤ **5,500** ✅（**两次上移**：4,500→5,000 见 KD-9；5,000→5,500 见 KD-14——codex user-layer strip 把 Codex CLI 专属「长任务纪律」迁入 maine-coon native overlay，maine-coon 实测 5,154-5,155t。5,500 仍在 Claude 4.x prompt cache 单 breakpoint 内 + 占 200k context 2.75%）
 - [x] AC-B4: per-breed cache key 稳定 ✅（same catId byte-identical 测试通过）
 
 ### Phase C（dual-path 落地）
@@ -213,6 +213,7 @@ team lead 2026-05-16 原话："我们的配置栏有个叫规则与SOP 我建议
 | KD-11 | 仓库门禁必须 `pnpm biome` / `pnpm check`，禁止 `npx biome` | Maine Coon Phase B review P1 教训：`npx biome` 解析到 0.3.3，项目实际 `pnpm biome` 2.4.1，`npx` 证据绕过项目门禁=假绿。沉淀到 [[feedback_verify_with_repo_toolchain]] | 2026-05-15 |
 | KD-12 | compile 脚本可测性重构：CLI 入口 + roster 过滤抽纯函数 | 云端 review P1（CLI entrypoint `file://${argv1}` POSIX-only，Windows broken）→ 抽 `isCliEntrypoint(metaUrl,argv1)` 用 fileURLToPath+resolve 跨平台；P2（roster 未过滤 available，disabled 猫进 L0 = dead-end @ 路由）→ 抽 `filterAvailableTeammates` + `isCatAvailable(id,config)` 过滤，对齐 SystemPromptBuilder:417。纯函数化使两者可单测（Red→Green，44 tests） | 2026-05-15 |
 | KD-13 | compile bootstrap 必须 no-arg `loadCatConfig()` + roster model 用 `getCatModel` | 云端 round-2 抓到 KD-12 P2 连环 bug：`loadCatConfig(PATH)` 显式 path 跳过 `.cat-cafe/cat-catalog.json` overlay（cat-config-loader.ts:307-327）→ isCatAvailable 基于 stale template → P2 dead-end 防护失效。根治：no-arg `loadCatConfig()`（catalog overlay = runtime 真相）+ `resolveModel`→`getCatModel`（env override > registry）。**根治原则：compile 编译器必须复用 SystemPromptBuilder 既定 runtime 入口（catalog-aware loadCatConfig + getCatModel），不自造静态读取路径** | 2026-05-15 |
+| KD-14 | codex user-layer strip：`~/.codex/AGENTS.md` 退役 + 「长任务纪律」迁入 native overlay + AC-B3 上限 5,000→5,500 | Maine Coon production 观察（cross-thread）：Codex invocation 的 developer 层已有 native L0，但 user 层仍被 Codex CLI 默认 prepend `~/.codex/AGENTS.md`（F050 sync-system-prompts.ts 渲染的 179 行静态身份/家规/队友/Magic Words）= 双重注入。根因：Phase C「精确剥离重复」只 strip 了 wrapper 的 user-message inline prepend，没收口 F050 home-file 路径。修复：`renderForCodex` 退役为空（`--apply` 清空文件，drift 守护）；Codex CLI 专属「长任务纪律」（exec_command session_id / 伪后台陷阱 / detached spawn 探针，L0 §6 maine-coon overlay 原本没有）迁入 native overlay。maine-coon 实测升至 5,154-5,155t，KD-9 的 5,000 buffer 耗尽 → AC-B3 上移到 5,500（物理下限随必要内容上移=真实测量，同 KD-9 逻辑，非脚手架；5,500 仍在 prompt cache 单 breakpoint 内 + 占 context 2.75%）。Gemini 路径（`renderForGemini`）暂留——Siamese未切 native L0 | 2026-05-20 |
 
 ## Spike Log
 

@@ -140,10 +140,10 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const [statusPanelOpen, setStatusPanelOpen] = useState(true);
   const [mobileStatusOpen, setMobileStatusOpen] = useState(false);
   const [showBootcampList, setShowBootcampList] = useState(false);
-  const [showFirstRunQuestPrompt, setShowFirstRunQuestPrompt] = useState(false);
-  const [showQuestWizard, setShowQuestWizard] = useState(false);
   const [editingCatId, setEditingCatId] = useState<string | null>(null);
   const editingCat = editingCatId ? (getCatById(editingCatId) ?? null) : null;
+  const [showFirstRunQuestPrompt, setShowFirstRunQuestPrompt] = useState(false);
+  const [showQuestWizard, setShowQuestWizard] = useState(false);
   // F106: fetch bootcamp count independently of sidebar lifecycle
   // refreshKey increments only on modal close → avoids duplicate fetch on open
   // eslint-disable-next-line @typescript-eslint/no-unused-vars

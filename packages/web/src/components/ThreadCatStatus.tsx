@@ -55,7 +55,7 @@ export function ThreadCatStatus({
           ᓚᘏᗢ
         </span>
       )}
-      {status === 'done' && <span className="text-green-500 text-[10px]">&#10003;</span>}
+      {status === 'done' && <span className="text-green-500 text-micro">&#10003;</span>}
       {hasUserMention && (
         <span title="猫猫 @ 了你">
           <PawIcon className="text-xs" />
@@ -63,7 +63,7 @@ export function ThreadCatStatus({
       )}
       {unreadCount > 0 && (
         <span
-          className={`inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-white text-[10px] font-bold leading-none ${
+          className={`inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-white text-micro font-bold leading-none ${
             hasUserMention ? 'bg-conn-red-text' : 'bg-amber-500'
           }`}
         >

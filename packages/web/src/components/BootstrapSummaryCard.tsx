@@ -118,12 +118,12 @@ export function BootstrapSummaryCard({
 
         {summary.kindCoverage && Object.keys(summary.kindCoverage).length > 0 ? (
           <div className="ml-16 mt-3">
-            <p className="text-[10px] text-gray-400 mb-1.5">知识覆盖</p>
+            <p className="text-micro text-gray-400 mb-1.5">知识覆盖</p>
             <div className="flex flex-wrap gap-1.5">
               {Object.entries(summary.kindCoverage).map(([kind, count]) => (
                 <span
                   key={kind}
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${SOURCE_TYPE_COLORS[kind] ?? 'bg-gray-100 text-gray-600'}`}
+                  className={`px-2 py-0.5 rounded-full text-micro font-medium ${SOURCE_TYPE_COLORS[kind] ?? 'bg-gray-100 text-gray-600'}`}
                 >
                   {SOURCE_TYPE_LABELS[kind] ?? kind} · {count}
                 </span>
@@ -132,12 +132,12 @@ export function BootstrapSummaryCard({
           </div>
         ) : Object.keys(summary.tierCoverage).length > 0 ? (
           <div className="ml-16 mt-3">
-            <p className="text-[10px] text-gray-400 mb-1.5">覆盖分层</p>
+            <p className="text-micro text-gray-400 mb-1.5">覆盖分层</p>
             <div className="flex flex-wrap gap-1.5">
               {Object.entries(summary.tierCoverage).map(([tier, count]) => (
                 <span
                   key={tier}
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${TIER_COLORS[tier] ?? 'bg-gray-100 text-gray-600'}`}
+                  className={`px-2 py-0.5 rounded-full text-micro font-medium ${TIER_COLORS[tier] ?? 'bg-gray-100 text-gray-600'}`}
                 >
                   {TIER_LABELS[tier] ?? tier} · {count}
                 </span>

@@ -24,7 +24,7 @@ export function DirectionPill({ direction, getCatById }: DirectionPillProps) {
 
   return (
     <span
-      className="text-[10px] font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap"
+      className="text-micro font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap"
       style={{ backgroundColor: `${color}20`, color }}
     >
       {text}

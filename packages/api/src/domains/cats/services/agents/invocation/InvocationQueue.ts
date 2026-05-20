@@ -521,11 +521,12 @@ export class InvocationQueue {
   static readonly STALE_QUEUED_THRESHOLD_MS = 60_000;
   static readonly STALE_PROCESSING_THRESHOLD_MS = 600_000; // 10 minutes
 
-  hasActiveOrQueuedAgentForCat(threadId: string, catId: string): boolean {
+  hasActiveOrQueuedAgentForCat(threadId: string, catId: string, opts?: { excludeEntryId?: string }): boolean {
     const now = Date.now();
     for (const q of this.queues.values()) {
       if (!this.queueMatchesThread(q, threadId)) continue;
       for (const e of q) {
+        if (opts?.excludeEntryId && e.id === opts.excludeEntryId) continue;
         if (e.source !== 'agent' || !e.targetCats.includes(catId)) continue;
 
         if (e.status === 'processing') {

@@ -80,10 +80,10 @@ function SearchResultItem({
       <div className="flex items-center gap-1.5">
         <FileIcon name={fileName} />
         <span className="text-xs font-medium text-cafe-black truncate">{fileName}</span>
-        {line > 0 && <span className="text-[10px] text-cafe-interactive/50 font-mono">:{line}</span>}
+        {line > 0 && <span className="text-micro text-cafe-interactive/50 font-mono">:{line}</span>}
       </div>
-      {dir && <div className="text-[10px] text-cafe-muted truncate ml-5">{dir}</div>}
-      {content && <div className="text-[10px] text-cafe-secondary truncate font-mono ml-5 mt-0.5">{highlighted}</div>}
+      {dir && <div className="text-micro text-cafe-muted truncate ml-5">{dir}</div>}
+      {content && <div className="text-micro text-cafe-secondary truncate font-mono ml-5 mt-0.5">{highlighted}</div>}
     </button>
   );
 }
@@ -604,7 +604,7 @@ export function WorkspacePanel() {
                 </svg>
               </button>
               {presentationLock && (
-                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-cafe-accent/15 text-cafe-accent">
+                <span className="text-micro font-medium px-1.5 py-0.5 rounded-full bg-cafe-accent/15 text-cafe-accent">
                   Locked
                 </span>
               )}
@@ -625,14 +625,14 @@ export function WorkspacePanel() {
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
                 <span className="text-xs font-medium text-cafe-black truncate">{currentWorktree.branch}</span>
-                <span className="text-[10px] font-mono text-cafe-interactive/50">{currentWorktree.head}</span>
+                <span className="text-micro font-mono text-cafe-interactive/50">{currentWorktree.head}</span>
               </div>
               {worktrees.length > 1 && (
                 <div className="flex items-center gap-1 mt-1.5">
                   <select
                     value={worktreeId ?? ''}
                     onChange={(e) => setWorktreeId(e.target.value || null)}
-                    className="flex-1 text-[10px] border border-cafe-subtle rounded-md px-2 py-1 bg-cafe-surface/80 text-cafe-black focus:outline-none focus:border-cafe-accent"
+                    className="flex-1 text-micro border border-cafe-subtle rounded-md px-2 py-1 bg-cafe-surface/80 text-cafe-black focus:outline-none focus:border-cafe-accent"
                   >
                     {worktrees.map((w) => (
                       <option key={w.id} value={w.id}>
@@ -676,7 +676,7 @@ export function WorkspacePanel() {
               <button
                 type="button"
                 onClick={() => setSearchMode((m) => (m === 'all' ? 'filename' : m === 'filename' ? 'content' : 'all'))}
-                className={`text-[10px] px-1.5 py-0.5 rounded-md font-medium transition-colors ${
+                className={`text-micro px-1.5 py-0.5 rounded-md font-medium transition-colors ${
                   searchMode === 'all'
                     ? 'bg-cafe-accent/15 text-cafe-accent'
                     : searchMode === 'filename'
@@ -701,7 +701,7 @@ export function WorkspacePanel() {
             <button
               type="button"
               onClick={() => setWorkspaceMode('dev')}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all ${
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-micro font-semibold transition-all ${
                 workspaceMode === 'dev'
                   ? 'bg-cafe-surface text-cafe-interactive border border-cafe-subtle/60'
                   : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
@@ -712,7 +712,7 @@ export function WorkspacePanel() {
             <button
               type="button"
               onClick={() => setWorkspaceMode('recall')}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all ${
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-micro font-semibold transition-all ${
                 workspaceMode === 'recall'
                   ? 'bg-cafe-accent/10 text-cafe-accent border border-cafe-accent/30'
                   : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
@@ -736,7 +736,7 @@ export function WorkspacePanel() {
             <button
               type="button"
               onClick={() => setWorkspaceMode('schedule')}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all ${
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-micro font-semibold transition-all ${
                 workspaceMode === 'schedule'
                   ? 'bg-cafe-surface text-cafe-interactive border border-cafe-subtle/60'
                   : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
@@ -750,7 +750,7 @@ export function WorkspacePanel() {
             <button
               type="button"
               onClick={() => setWorkspaceMode('tasks')}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all ${
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-micro font-semibold transition-all ${
                 workspaceMode === 'tasks'
                   ? 'bg-cafe-surface text-cafe-interactive border border-cafe-subtle/60'
                   : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
@@ -773,7 +773,7 @@ export function WorkspacePanel() {
             <button
               type="button"
               onClick={() => setWorkspaceMode('community')}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all ${
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-micro font-semibold transition-all ${
                 workspaceMode === 'community'
                   ? 'bg-cafe-surface text-cafe-interactive border border-cafe-subtle/60'
                   : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
@@ -824,7 +824,7 @@ export function WorkspacePanel() {
                       key={mode}
                       type="button"
                       onClick={() => setViewMode(mode)}
-                      className={`flex-1 py-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors ${
+                      className={`flex-1 py-1.5 text-micro font-semibold uppercase tracking-wider transition-colors ${
                         viewMode === mode
                           ? 'text-cafe-accent border-b-2 border-cafe-accent'
                           : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
@@ -845,21 +845,21 @@ export function WorkspacePanel() {
 
               {/* F120: Port Discovery Toast — matches design Scene 2 */}
               {portDiscoveryToast && (
-                <div className="mx-3 my-2 p-4 rounded-xl bg-cafe-surface shadow-md border border-[#E8E7E5]">
+                <div className="mx-3 my-2 p-4 rounded-xl bg-cafe-surface shadow-md border border-[var(--console-border-soft)]">
                   <div className="flex items-start justify-between mb-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-[#E29578] text-base">◉</span>
-                      <span className="text-sm font-semibold text-[#1A1918]">Dev Server Detected</span>
+                      <span className="text-cafe-accent text-base">◉</span>
+                      <span className="text-sm font-semibold text-cafe">Dev Server Detected</span>
                     </div>
                     <button
                       type="button"
-                      className="text-[#9C9B99] hover:text-[#5a4a42] text-xs"
+                      className="text-cafe-muted hover:text-cafe text-xs"
                       onClick={() => setPortDiscoveryToast(null)}
                     >
                       ✕
                     </button>
                   </div>
-                  <p className="text-xs text-[#6D6C6A] ml-6 mb-3">
+                  <p className="text-xs text-cafe-secondary ml-6 mb-3">
                     localhost:{portDiscoveryToast.port} is now listening
                     {portDiscoveryToast.framework && portDiscoveryToast.framework !== 'unknown'
                       ? ` (${portDiscoveryToast.framework})`
@@ -868,7 +868,7 @@ export function WorkspacePanel() {
                   <div className="flex items-center gap-2 ml-6">
                     <button
                       type="button"
-                      className="px-3 py-1.5 rounded-md bg-[#E29578] text-white text-xs font-medium hover:bg-[#d4856a] transition-colors"
+                      className="px-3 py-1.5 rounded-md bg-cafe-accent text-white text-xs font-medium hover:bg-cafe-accent-hover transition-colors"
                       onClick={() => {
                         setPreviewPort(portDiscoveryToast.port);
                         setViewMode('browser');
@@ -879,7 +879,7 @@ export function WorkspacePanel() {
                     </button>
                     <button
                       type="button"
-                      className="px-3 py-1.5 text-xs text-[#5a4a42]/70 hover:text-[#5a4a42]"
+                      className="px-3 py-1.5 text-xs text-cafe-secondary hover:text-cafe"
                       onClick={() => setPortDiscoveryToast(null)}
                     >
                       Dismiss
@@ -953,7 +953,7 @@ export function WorkspacePanel() {
                             <>
                               {isGrouped && fileHits.length > 0 && (
                                 <>
-                                  <div className="px-3 py-1.5 text-[10px] text-cafe-interactive/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
+                                  <div className="px-3 py-1.5 text-micro text-cafe-interactive/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
                                     文件名匹配 ({fileHits.length})
                                   </div>
                                   {fileHits.map((r, i) => (
@@ -970,7 +970,7 @@ export function WorkspacePanel() {
                               )}
                               {isGrouped && contentHits.length > 0 && (
                                 <>
-                                  <div className="px-3 py-1.5 text-[10px] text-cafe-interactive/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
+                                  <div className="px-3 py-1.5 text-micro text-cafe-interactive/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
                                     内容匹配 ({contentHits.length})
                                   </div>
                                   {contentHits.map((r, i) => (
@@ -987,7 +987,7 @@ export function WorkspacePanel() {
                               )}
                               {!isGrouped && (
                                 <>
-                                  <div className="px-3 py-1.5 text-[10px] text-cafe-interactive/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
+                                  <div className="px-3 py-1.5 text-micro text-cafe-interactive/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
                                     {searchResults.length} 个结果
                                   </div>
                                   {searchResults.map((r, i) => (

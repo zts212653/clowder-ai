@@ -172,7 +172,7 @@ function EventList({ events }: { events: WorldEvent[] }) {
           <div className="flex items-center gap-1">
             <span className="font-mono text-cafe-secondary">[{ev.type}]</span>
             <span className="text-cafe-secondary">{ev.actor.id}</span>
-            <span className="text-cafe-secondary/50 ml-auto text-[10px]">{ev.createdAt.slice(11, 19)}</span>
+            <span className="text-cafe-secondary/50 ml-auto text-micro">{ev.createdAt.slice(11, 19)}</span>
           </div>
           {'content' in ev.payload && ev.payload.content != null && (
             <p className="text-cafe-primary mt-0.5 leading-relaxed">{String(ev.payload.content).slice(0, 200)}</p>

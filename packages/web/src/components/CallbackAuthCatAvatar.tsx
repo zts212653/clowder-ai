@@ -57,7 +57,7 @@ export function CallbackAuthCatAvatar({ catId, size = 32, status }: CallbackAuth
       <div className="font-semibold">{label}</div>
       {aggregate.topReasons.length > 0 && (
         <div>
-          <div className="mb-0.5 text-[10px] uppercase tracking-wide text-cafe-muted">Reasons (24h, all cats)</div>
+          <div className="mb-0.5 text-micro uppercase tracking-wide text-cafe-muted">Reasons (24h, all cats)</div>
           {aggregate.topReasons.slice(0, 3).map((r) => (
             <div key={r.name} className="flex items-center justify-between text-xs">
               <span className="font-mono">{r.name}</span>
@@ -68,7 +68,7 @@ export function CallbackAuthCatAvatar({ catId, size = 32, status }: CallbackAuth
       )}
       {aggregate.topTools.length > 0 && (
         <div>
-          <div className="mb-0.5 text-[10px] uppercase tracking-wide text-cafe-muted">Top Tools (24h, all cats)</div>
+          <div className="mb-0.5 text-micro uppercase tracking-wide text-cafe-muted">Top Tools (24h, all cats)</div>
           {aggregate.topTools.slice(0, 3).map((t) => (
             <div key={t.name} className="flex items-center justify-between text-xs">
               <span className="font-mono">{t.name}</span>
@@ -77,7 +77,7 @@ export function CallbackAuthCatAvatar({ catId, size = 32, status }: CallbackAuth
           ))}
         </div>
       )}
-      <div className="pt-1 text-[10px] text-cafe-muted">点击跳 D2b-3 详情</div>
+      <div className="pt-1 text-micro text-cafe-muted">点击跳 D2b-3 详情</div>
     </div>
   );
 

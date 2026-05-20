@@ -12,7 +12,7 @@ function StatusBadge({ status, variant }: { status: string; variant: 'staged' | 
     untracked: 'bg-cafe-surface-elevated text-cafe-secondary',
   };
   return (
-    <span className={`inline-block px-1 py-0.5 rounded text-[10px] font-mono font-bold ${colors[variant]}`}>
+    <span className={`inline-block px-1 py-0.5 rounded text-micro font-mono font-bold ${colors[variant]}`}>
       {status}
     </span>
   );
@@ -30,7 +30,7 @@ function StatusSection({
   if (items.length === 0) return null;
   return (
     <div className="mb-2">
-      <div className="text-[10px] font-semibold text-cafe-interactive/50 uppercase tracking-wider mb-1">
+      <div className="text-micro font-semibold text-cafe-interactive/50 uppercase tracking-wider mb-1">
         {title} ({items.length})
       </div>
       <div className="space-y-0.5">
@@ -57,11 +57,11 @@ function CommitRow({ commit, isExpanded, onToggle }: { commit: GitCommit; isExpa
       className={`w-full text-left px-2 py-1.5 text-xs hover:bg-cafe-surface-sunken/30 transition-colors border-b border-cafe-subtle/20 ${isExpanded ? 'bg-cafe-surface-sunken/20' : ''}`}
     >
       <div className="flex items-center gap-2">
-        <span className="font-mono text-cafe-accent/70 text-[10px] shrink-0">{commit.short}</span>
+        <span className="font-mono text-cafe-accent/70 text-micro shrink-0">{commit.short}</span>
         <span className="truncate text-cafe-black/80 flex-1">{commit.subject}</span>
-        <span className="text-[10px] text-cafe-interactive/40 shrink-0">{relDate}</span>
+        <span className="text-micro text-cafe-interactive/40 shrink-0">{relDate}</span>
       </div>
-      <div className="text-[10px] text-cafe-interactive/40 mt-0.5">{commit.author}</div>
+      <div className="text-micro text-cafe-interactive/40 mt-0.5">{commit.author}</div>
     </button>
   );
 }
@@ -102,14 +102,14 @@ export function GitPanel() {
     <div className="flex flex-col h-full overflow-hidden">
       {/* Refresh button */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-cafe-subtle/40">
-        <span className="text-[10px] font-semibold text-cafe-interactive/50 uppercase tracking-wider">
+        <span className="text-micro font-semibold text-cafe-interactive/50 uppercase tracking-wider">
           {status?.branch ? `Branch: ${status.branch}` : 'Git'}
         </span>
         <button
           type="button"
           onClick={refresh}
           disabled={loading}
-          className="text-[10px] text-cafe-accent hover:text-cafe-accent/80 disabled:opacity-50"
+          className="text-micro text-cafe-accent hover:text-cafe-accent/80 disabled:opacity-50"
         >
           {loading ? '...' : 'Refresh'}
         </button>
@@ -128,10 +128,10 @@ export function GitPanel() {
               onClick={() => setStatusCollapsed(!statusCollapsed)}
               className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-cafe-surface-sunken/20"
             >
-              <span className="text-[10px] font-semibold text-cafe-interactive/60 uppercase tracking-wider">
+              <span className="text-micro font-semibold text-cafe-interactive/60 uppercase tracking-wider">
                 Status ({totalChanges} changes)
               </span>
-              <span className="text-[10px] text-cafe-interactive/40">{statusCollapsed ? '▸' : '▾'}</span>
+              <span className="text-micro text-cafe-interactive/40">{statusCollapsed ? '▸' : '▾'}</span>
             </button>
             {!statusCollapsed && (
               <div className="px-3 pb-2">
@@ -154,7 +154,7 @@ export function GitPanel() {
 
         {/* Git Log Section */}
         <div>
-          <div className="px-3 py-1.5 text-[10px] font-semibold text-cafe-interactive/50 uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm border-b border-cafe-subtle/20">
+          <div className="px-3 py-1.5 text-micro font-semibold text-cafe-interactive/50 uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm border-b border-cafe-subtle/20">
             Commits ({commits.length})
           </div>
           {commits.map((commit) => (
@@ -167,11 +167,11 @@ export function GitPanel() {
               {expandedHash === commit.hash && commitDetail && commitDetail.hash === commit.hash && (
                 <div className="bg-cafe-surface-sunken/10 px-3 py-2 border-b border-cafe-subtle/30">
                   {commitDetail.files.length === 0 ? (
-                    <div className="text-[10px] text-cafe-interactive/40">No file changes</div>
+                    <div className="text-micro text-cafe-interactive/40">No file changes</div>
                   ) : (
                     <div className="space-y-0.5">
                       {commitDetail.files.map((f) => (
-                        <div key={f.path} className="flex items-center justify-between text-[10px] font-mono">
+                        <div key={f.path} className="flex items-center justify-between text-micro font-mono">
                           <span className="text-cafe-black/70 truncate">{f.path}</span>
                           <span className="text-cafe-interactive/40 shrink-0 ml-2">{f.summary}</span>
                         </div>

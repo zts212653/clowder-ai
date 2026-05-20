@@ -165,11 +165,11 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
   return (
     <div className="flex flex-col h-full min-h-0 overflow-hidden">
       {/* ── Breadcrumb + New Folder ── */}
-      <div className="flex items-center gap-1 px-5 h-10 bg-cafe-white border-b border-[#f0e6de] flex-shrink-0 overflow-x-auto">
+      <div className="flex items-center gap-1 px-5 h-10 bg-cafe-white border-b border-[var(--console-border-soft)] flex-shrink-0 overflow-x-auto">
         {segments.map((seg, i) => (
           <span key={seg.path || `_${i}`} className="flex items-center gap-1 flex-shrink-0">
             {i > 0 && (
-              <svg aria-hidden="true" className="w-3 h-3 text-[#d4c0b3]" viewBox="0 0 20 20" fill="currentColor">
+              <svg aria-hidden="true" className="w-3 h-3 text-cafe-muted" viewBox="0 0 20 20" fill="currentColor">
                 <path
                   fillRule="evenodd"
                   d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"
@@ -258,7 +258,7 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
                 取消
               </button>
             </div>
-            {mkdirError && <p className="text-[10px] text-conn-red-text mt-1 ml-6">{mkdirError}</p>}
+            {mkdirError && <p className="text-micro text-conn-red-text mt-1 ml-6">{mkdirError}</p>}
           </div>
         )}
 
@@ -270,7 +270,7 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
 
         {info && (
           <div className="px-3 py-1.5 mb-1">
-            <p className="text-[10px] text-cafe-accent">{info}</p>
+            <p className="text-micro text-cafe-accent">{info}</p>
           </div>
         )}
 
@@ -299,12 +299,12 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
                 }`}
                 title={entry.path}
               >
-                <FolderIcon className={isActive ? 'text-cafe-accent' : 'text-[#c4a882]'} />
+                <FolderIcon className={isActive ? 'text-cafe-accent' : 'text-cafe-muted'} />
                 <span className="font-medium text-cafe-black truncate flex-1">{entry.name}</span>
-                {isActive && <span className="text-[10px] text-cafe-accent flex-shrink-0">当前项目</span>}
+                {isActive && <span className="text-micro text-cafe-accent flex-shrink-0">当前项目</span>}
                 <svg
                   aria-hidden="true"
-                  className="w-3.5 h-3.5 text-[#d4c0b3] flex-shrink-0"
+                  className="w-3.5 h-3.5 text-cafe-muted flex-shrink-0"
                   viewBox="0 0 20 20"
                   fill="currentColor"
                 >
@@ -320,7 +320,7 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
       </div>
 
       {/* ── Path input ── */}
-      <div className="px-5 py-3 border-t border-[#f0e6de] space-y-2 flex-shrink-0">
+      <div className="px-5 py-3 border-t border-[var(--console-border-soft)] space-y-2 flex-shrink-0">
         <div className="flex gap-2">
           <TerminalIcon />
           <input
@@ -333,13 +333,13 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
               if (e.key === 'Enter' && !ime.isComposing()) handlePathSubmit();
             }}
             placeholder="Enter path..."
-            className="flex-1 text-xs px-3 py-2 rounded-lg border border-[#e8d9cf] bg-cafe-white focus:outline-none focus:ring-1 focus:ring-cafe-accent"
+            className="flex-1 text-xs px-3 py-2 rounded-lg border border-[var(--console-border-soft)] bg-cafe-white focus:outline-none focus:ring-1 focus:ring-cafe-accent"
           />
           {pathInput.trim() && (
             <button
               type="button"
               onClick={handlePathSubmit}
-              className="px-2.5 py-2 rounded-lg border border-[#e8d9cf] bg-cafe-white text-cafe-secondary hover:bg-cafe-surface transition-colors"
+              className="px-2.5 py-2 rounded-lg border border-[var(--console-border-soft)] bg-cafe-white text-cafe-secondary hover:bg-cafe-surface transition-colors"
               aria-label="Go to path"
             >
               <svg aria-hidden="true" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
@@ -363,7 +363,7 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
           <button
             type="button"
             onClick={onCancel}
-            className="px-4 py-2 rounded-lg border border-[#e8d9cf] text-cafe-secondary text-xs font-medium transition-colors hover:bg-cafe-surface-elevated"
+            className="px-4 py-2 rounded-lg border border-[var(--console-border-soft)] text-cafe-secondary text-xs font-medium transition-colors hover:bg-cafe-surface-elevated"
           >
             取消
           </button>

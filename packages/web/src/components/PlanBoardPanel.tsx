@@ -86,14 +86,14 @@ function PlanCard({ catId, threadId, inv }: { catId: string; threadId: string; i
             style={{ backgroundColor: dotColor }}
           />
           <span className="text-xs font-medium text-cafe-secondary">{cat ? formatCatName(cat) : catId}</span>
-          <span className="text-[10px] text-cafe-muted">
+          <span className="text-micro text-cafe-muted">
             {completed}/{tasks.length}
           </span>
           {statusLabel && <span className={`text-xs px-1 py-0.5 rounded ${statusTone}`}>{statusLabel}</span>}
         </div>
         {status === 'interrupted' && (
           <button
-            className="text-[10px] px-2 py-0.5 rounded-full border border-[var(--console-border-soft)] hover:bg-[var(--console-hover-bg)] transition-colors"
+            className="text-micro px-2 py-0.5 rounded-full border border-[var(--console-border-soft)] hover:bg-[var(--console-hover-bg)] transition-colors"
             onClick={async () => {
               if (await confirm({ title: '继续任务', message: '确认继续上次任务？' })) {
                 void handleSend(buildContinueMessage(catId, tp), undefined, threadId);
@@ -183,7 +183,7 @@ export function PlanBoardPanel({ threadId, catInvocations }: PlanBoardPanelProps
         <div className="mt-2 border-t border-[var(--console-border-soft)] pt-2">
           <button
             onClick={() => setCompletedOpen((v) => !v)}
-            className="w-full flex items-center justify-between text-[10px] text-cafe-secondary hover:text-cafe-secondary"
+            className="w-full flex items-center justify-between text-micro text-cafe-secondary hover:text-cafe-secondary"
           >
             <span>已完成 ({completedCats.length})</span>
             <span>{completedOpen ? '▲' : '▼'}</span>

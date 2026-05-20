@@ -1,7 +1,6 @@
 // F152 Phase A: CatCafeScanner — extracted from IndexBuilder (KD-5)
 // Scans cat-cafe docs/ structure: KIND_DIRS + archive + top-level .md + fallback
 
-import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import type { EvidenceKind, RepoScanner, ScannedEvidence } from './interfaces.js';
@@ -24,6 +23,15 @@ export const KIND_DIRS: Record<string, EvidenceKind> = {
 };
 
 export class CatCafeScanner implements RepoScanner {
+  private exclude?: string[];
+  constructor(exclude?: string[]) {
+    this.exclude = exclude;
+  }
+
+  addExcludePatterns(patterns: string[]): void {
+    this.exclude = [...(this.exclude ?? []), ...patterns];
+  }
+
   discover(projectRoot: string): ScannedEvidence[] {
     const results: ScannedEvidence[] = [];
 
@@ -36,8 +44,9 @@ export class CatCafeScanner implements RepoScanner {
       });
     }
 
-    // Discover all .md files
+    // Discover all .md files, filtering out excluded child collection paths (AC-H1)
     for (const file of discoverFiles(projectRoot)) {
+      if (this.isExcluded(file.path, projectRoot)) continue;
       const evidence = this.parseFileToEvidence(file.path, projectRoot);
       if (evidence) results.push(evidence);
     }
@@ -45,8 +54,15 @@ export class CatCafeScanner implements RepoScanner {
     return results;
   }
 
+  private isExcluded(filePath: string, projectRoot: string): boolean {
+    if (!this.exclude?.length) return false;
+    const rel = relative(projectRoot, filePath);
+    return this.exclude.some((pattern) => matchGlob(pattern, rel));
+  }
+
   /** Parse a single file — used by IndexBuilder.incrementalUpdate() */
   parseSingle(filePath: string, projectRoot: string): ScannedEvidence | null {
+    if (this.isExcluded(filePath, projectRoot)) return null;
     return this.parseFileToEvidence(filePath, projectRoot);
   }
 
@@ -371,4 +387,16 @@ function mergeKeywords(primary: string[], secondary: string[]): string[] {
     merged.push(value);
   }
   return merged;
+}
+
+function matchGlob(pattern: string, path: string): boolean {
+  const regex = pattern
+    .replace(/\*\*\//g, '§GLOBSTAR_SLASH§')
+    .replace(/\*\*/g, '§GLOBSTAR§')
+    .replace(/\*/g, '§STAR§')
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/§GLOBSTAR_SLASH§/g, '(.+/)?')
+    .replace(/§GLOBSTAR§/g, '.*')
+    .replace(/§STAR§/g, '[^/]*');
+  return new RegExp(`^${regex}$`).test(path);
 }

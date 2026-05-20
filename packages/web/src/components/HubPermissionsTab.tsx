@@ -26,7 +26,7 @@ const EMPTY_CONFIG: PermissionConfig = {
   allowedGroups: [],
 };
 
-const CARD_SHADOW = 'shadow-[0_12px_30px_rgba(43,33,26,0.08)]';
+const CARD_SHADOW = 'shadow-[var(--hub-shadow)]';
 
 function SaveFeedback({ result, saving }: { result: 'ok' | 'error' | null; saving: boolean }) {
   if (saving) return <div className="text-xs text-cafe-muted">保存中...</div>;
@@ -260,7 +260,7 @@ export default function HubPermissionsTab({ connectorId, connectorLabel }: HubPe
                   </svg>
                   <span className="flex-1 truncate text-cafe-secondary">{id}</span>
                   {i === 0 && (
-                    <span className="px-1.5 py-0.5 bg-conn-amber-bg text-conn-amber-text rounded text-[10px] font-semibold">
+                    <span className="px-1.5 py-0.5 bg-conn-amber-bg text-conn-amber-text rounded text-micro font-semibold">
                       Owner
                     </span>
                   )}

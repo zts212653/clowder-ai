@@ -9,7 +9,7 @@ interface SettingsSectionProps {
 
 export function SettingsSection({ title, description, badge, children }: SettingsSectionProps) {
   return (
-    <section className="rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-[18px]">
+    <section className="rounded-2xl bg-[var(--console-card-bg)] p-[18px]">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-lg font-bold text-cafe">{title}</h3>

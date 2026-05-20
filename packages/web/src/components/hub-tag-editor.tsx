@@ -12,9 +12,11 @@ function mergeTags(tags: string[], nextTag: string): string[] {
 }
 
 function pillClass(tone: 'purple' | 'green' | 'orange') {
-  if (tone === 'green') return 'border-[#CFE5D5] bg-[#E8F5E9] text-[#4F7B50]';
-  if (tone === 'orange') return 'border-[#E8C9AF] bg-[#F7EEE6] text-[#C8946B]';
-  return 'border-[#D9C5EF] bg-[#F3EDFA] text-[#8B68B7]';
+  if (tone === 'green')
+    return 'border-[var(--hub-tag-green-border)] bg-[var(--hub-tag-green-bg)] text-[var(--hub-tag-green-text)]';
+  if (tone === 'orange')
+    return 'border-[var(--hub-tag-orange-border)] bg-[var(--hub-surface-hover)] text-[var(--hub-accent-warm)]';
+  return 'border-[var(--hub-tag-purple-border)] bg-[var(--hub-tag-purple-bg)] text-[var(--hub-tag-purple-text)]';
 }
 
 export function TagPillList({
@@ -33,7 +35,7 @@ export function TagPillList({
   const locked = useMemo(() => new Set(lockedTags), [lockedTags]);
 
   if (tags.length === 0) {
-    return <span className="text-sm italic text-[#8A776B]">{emptyLabel}</span>;
+    return <span className="text-sm italic text-[var(--hub-text-muted)]">{emptyLabel}</span>;
   }
 
   return (
@@ -49,7 +51,7 @@ export function TagPillList({
               type="button"
               aria-label={`移除 ${tag}`}
               onClick={() => onRemove(tag)}
-              className="rounded-full px-1 text-[10px] leading-none opacity-70 transition hover:opacity-100"
+              className="rounded-full px-1 text-micro leading-none opacity-70 transition hover:opacity-100"
             >
               ×
             </button>
@@ -150,12 +152,12 @@ export function TagEditor({
               }
             }}
             placeholder={placeholder}
-            className="min-w-[220px] flex-1 rounded-xl border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-2 text-sm text-[#2D2118] outline-none transition focus:border-[#D49266] focus:ring-2 focus:ring-[#F5D2B8]"
+            className="min-w-[220px] flex-1 rounded-xl border border-[var(--hub-border-field)] bg-[var(--hub-surface-field)] px-3 py-2 text-sm text-[var(--hub-heading)] outline-none transition focus:border-[var(--hub-accent)] focus:ring-2 focus:ring-[var(--hub-input-focus-ring)]"
           />
           <button
             type="button"
             onClick={commit}
-            className="rounded-full border border-[#D49266] bg-[#FFF1E3] px-3 py-1.5 text-xs font-medium text-[#9A5A2C]"
+            className="rounded-full border border-[var(--hub-accent)] bg-[var(--hub-surface-accent)] px-3 py-1.5 text-xs font-medium text-[var(--hub-tag-action-text)]"
           >
             添加
           </button>

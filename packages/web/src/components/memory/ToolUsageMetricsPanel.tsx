@@ -40,7 +40,7 @@ function MetricRow({ label, metric, hint }: { label: string; metric: ToolUsageMe
     <div className="flex items-baseline justify-between border-b border-cafe/30 py-2 last:border-0">
       <div>
         <div className="text-xs font-medium text-cafe-black">{label}</div>
-        {hint ? <div className="text-[10px] text-cafe-muted">{hint}</div> : null}
+        {hint ? <div className="text-micro text-cafe-muted">{hint}</div> : null}
       </div>
       <div className={`text-sm font-mono ${color}`} data-testid={`metric-${label.replace(/\s+/g, '-').toLowerCase()}`}>
         {display}
@@ -88,17 +88,17 @@ export function ToolUsageMetricsPanel({ fetcher }: { fetcher?: () => Promise<Too
     <div className="rounded-xl bg-[var(--console-card-bg)] p-5" data-testid="tool-usage-metrics-panel">
       <div className="mb-3 flex items-baseline justify-between">
         <h4 className="text-sm font-semibold text-cafe-black">工具使用指标</h4>
-        <div className="text-[10px] text-cafe-muted">
+        <div className="text-micro text-cafe-muted">
           {report.threadCount} 个线程 · {new Date(report.generatedAt).toLocaleString()}
         </div>
       </div>
       <div className="space-y-0">
-        <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-cafe-secondary">三入口分布</div>
+        <div className="mb-2 text-micro font-semibold uppercase tracking-wide text-cafe-secondary">三入口分布</div>
         <MetricRow label="search_evidence" metric={report.distribution.searchEvidence} />
         <MetricRow label="graph_resolve" metric={report.distribution.graphResolve} />
         <MetricRow label="list_recent" metric={report.distribution.listRecent} />
 
-        <div className="mt-3 mb-2 text-[10px] font-semibold uppercase tracking-wide text-cafe-secondary">摩擦指标</div>
+        <div className="mt-3 mb-2 text-micro font-semibold uppercase tracking-wide text-cafe-secondary">摩擦指标</div>
         <MetricRow
           label="搜索后 grep 比率"
           metric={report.grepAfterSearchRate}

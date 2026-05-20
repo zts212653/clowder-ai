@@ -10,11 +10,15 @@ import { useChatStore } from '@/stores/chatStore';
 
 const cafeTheme = EditorView.theme(
   {
-    '&': { backgroundColor: '#1E1E24', color: '#FDF8F3' },
-    '.cm-gutters': { backgroundColor: '#1E1E24', color: '#815B5B', borderRight: '1px solid #2a2a32' },
-    '.cm-activeLineGutter': { backgroundColor: '#2a2a32' },
+    '&': { backgroundColor: 'var(--ws-editor-bg)', color: 'var(--ws-editor-fg)' },
+    '.cm-gutters': {
+      backgroundColor: 'var(--ws-editor-bg)',
+      color: 'var(--ws-editor-gutter)',
+      borderRight: '1px solid var(--ws-editor-surface)',
+    },
+    '.cm-activeLineGutter': { backgroundColor: 'var(--ws-editor-surface)' },
     '.cm-activeLine': { backgroundColor: 'rgba(155, 126, 189, 0.08)' },
-    '.cm-cursor': { borderLeftColor: '#E29578' },
+    '.cm-cursor': { borderLeftColor: 'var(--ws-accent)' },
     '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': {
       backgroundColor: 'rgba(155, 126, 189, 0.25) !important',
     },

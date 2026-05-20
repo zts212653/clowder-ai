@@ -109,6 +109,53 @@ describe('MCP List Recent Tool (AC-F2)', () => {
     assert.ok(description.includes('scope/kinds'), 'description should warn about scope/kinds intersection');
   });
 
+  test('renders collection distribution footer when groups present (AC-H4)', async () => {
+    const { handleListRecent } = await import('../dist/tools/recent-tools.js');
+
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        items: [
+          { anchor: 'F001', title: 'Doc1', kind: 'feature', updatedAt: '2026-05-19T12:00:00Z', source: 'project:cafe' },
+          {
+            anchor: 'F002',
+            title: 'Doc2',
+            kind: 'research',
+            updatedAt: '2026-05-18T12:00:00Z',
+            source: 'domain:finance',
+          },
+        ],
+        groups: [
+          { key: 'project:cafe', type: 'collection', label: 'Clowder AI Project', count: 6, available: 10 },
+          { key: 'domain:finance', type: 'collection', label: 'Finance', count: 2, available: 5 },
+        ],
+      }),
+    });
+
+    const result = await handleListRecent({ since: '7d' });
+    const text = result.content[0].text;
+    assert.ok(text.includes('Collections:'), 'footer must contain Collections: header');
+    assert.ok(text.includes('Clowder AI Project(6/10)'), 'footer must show collection with count/available');
+    assert.ok(text.includes('Finance(2/5)'), 'footer must show second collection');
+  });
+
+  test('omits collection footer for single collection', async () => {
+    const { handleListRecent } = await import('../dist/tools/recent-tools.js');
+
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        items: [
+          { anchor: 'F001', title: 'Doc1', kind: 'feature', updatedAt: '2026-05-19T12:00:00Z', source: 'project:cafe' },
+        ],
+      }),
+    });
+
+    const result = await handleListRecent({ since: '7d' });
+    const text = result.content[0].text;
+    assert.ok(!text.includes('Collections:'), 'no footer for single collection');
+  });
+
   test('handles fetch error gracefully', async () => {
     const { handleListRecent } = await import('../dist/tools/recent-tools.js');
     globalThis.fetch = async () => {

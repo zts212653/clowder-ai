@@ -46,7 +46,7 @@ export function HubCommandsTab() {
             <div key={s.keys} className="flex items-baseline gap-3 text-xs">
               <kbd className="font-mono text-cafe-secondary bg-gray-200 px-1.5 py-0.5 rounded shrink-0">{s.keys}</kbd>
               <span className="text-cafe-secondary">{s.description}</span>
-              {s.context !== '全局' && <span className="text-[10px] text-cafe-muted ml-auto">({s.context})</span>}
+              {s.context !== '全局' && <span className="text-micro text-cafe-muted ml-auto">({s.context})</span>}
             </div>
           ))}
         </div>

@@ -35,7 +35,7 @@ export function BootstrapProgressPill({ progress, expanded: defaultExpanded }: B
               return (
                 <div key={label} className="flex items-center gap-2 text-xs">
                   <span
-                    className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] ${
+                    className={`w-4 h-4 rounded-full flex items-center justify-center text-micro ${
                       isDone
                         ? 'bg-cafe-accent text-white'
                         : isActive
@@ -65,7 +65,7 @@ export function BootstrapProgressPill({ progress, expanded: defaultExpanded }: B
                   style={{ width: `${Math.min(100, (progress.docsProcessed / progress.docsTotal) * 100)}%` }}
                 />
               </div>
-              <p className="text-[10px] text-gray-400 mt-1">
+              <p className="text-micro text-gray-400 mt-1">
                 {progress.docsProcessed} / {progress.docsTotal} 文档
               </p>
             </div>

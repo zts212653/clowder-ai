@@ -93,6 +93,7 @@ function OwnerBadge() {
   );
 }
 
+// F206 exempt: coCreator config default colors — data-driven, not UI theme
 function OwnerAvatar({ coCreator }: { coCreator: CoCreatorConfig }) {
   const primary = coCreator.color?.primary ?? '#D4A76A';
   const avatarSrc = safeAvatarSrc(coCreator.avatar);

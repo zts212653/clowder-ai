@@ -809,3 +809,62 @@ test('invoke() legacy fallback: no linkScanPath but state.output.result present 
   // Legacy path: no transcript → no usage in metadata
   assert.equal(done.metadata.usage, undefined);
 });
+
+test('F198 Phase D carrier parity (2026-05-19 hotfix): --bg spawn args include `--permission-mode bypassPermissions`', async () => {
+  // Regression guard for the F198 Phase D carrier-parity bug realized when
+  // 铲屎官 flipped CAT_CAFE_CLAUDE_CARRIER=bg_daemon in runtime and布偶猫
+  // sessions stalled on first Bash call: ClaudeAgentService ('-p' carrier)
+  // passes `--permission-mode bypassPermissions` so tool calls don't prompt
+  // per-call, but ClaudeBgCarrierService ('--bg' carrier) was missing this
+  // flag → daemon-spawned claude reverted to default permission mode →
+  // every tool call prompted inside the detached daemon TTY (invisible from
+  // the web UI). This test pins the parity so any future args refactor
+  // doesn't silently drop the flag again.
+  const tmpJobsDir = mkdtempSync(join(tmpdir(), 'cat-cafe-stream-test-'));
+  const shortId = 'cafe0001';
+  const jobDir = join(tmpJobsDir, shortId);
+  mkdirSync(jobDir, { recursive: true });
+  writeFileSync(
+    join(jobDir, 'state.json'),
+    JSON.stringify({ state: 'done', daemonShort: shortId, output: { result: 'ok' } }),
+  );
+
+  const spawnedArgs = [];
+  const fakeSpawn = (_cmd, args, _opts) => {
+    spawnedArgs.push([...args]);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.unref = () => {};
+    setImmediate(() => {
+      child.stdout.emit('data', Buffer.from(`backgrounded · ${shortId}\n`));
+      child.emit('close', 0);
+    });
+    return child;
+  };
+  const service = new ClaudeBgCarrierService({
+    l0CompilerFn: fakeL0Compiler,
+    spawnFn: fakeSpawn,
+    model: 'claude-opus-4-7',
+    jobsDir: tmpJobsDir,
+    pollMs: 50,
+  });
+
+  for await (const _msg of service.invoke('hi')) {
+    // drain
+  }
+
+  const bgInvocation = spawnedArgs.find((args) => args[0] === '--bg');
+  assert.ok(bgInvocation, 'expected at least one `claude --bg` spawn');
+  const permIdx = bgInvocation.indexOf('--permission-mode');
+  assert.notEqual(
+    permIdx,
+    -1,
+    'ClaudeBgCarrierService must pass `--permission-mode` flag (parity with ClaudeAgentService PERMISSION_MODE)',
+  );
+  assert.equal(
+    bgInvocation[permIdx + 1],
+    'bypassPermissions',
+    'bg carrier permission-mode value must be `bypassPermissions` (matches ClaudeAgentService constant)',
+  );
+});

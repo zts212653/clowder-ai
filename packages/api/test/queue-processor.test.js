@@ -255,6 +255,37 @@ describe('QueueProcessor', () => {
     assert.ok(canceledUpdate, 'aborted queued invocation should be recorded as canceled');
   });
 
+  it('excludes the current processing agent entry from A2A cross-path dedup', async () => {
+    let dedupResult;
+    deps.router.routeExecution = mock.fn(
+      async function* (_userId, _content, threadId, _messageId, _targetCats, _intent, options) {
+        dedupResult = options.hasQueuedOrActiveAgentForCat(threadId, 'codex');
+        yield { type: 'done', catId: 'opus', isFinal: true, timestamp: Date.now() };
+      },
+    );
+
+    deps.queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'agent-sourced review request',
+      source: 'agent',
+      targetCats: ['opus-47', 'codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+
+    const result = await processor.processNext('t1', 'u1');
+    assert.equal(result.started, true);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    assert.equal(
+      dedupResult,
+      false,
+      'current processing entry targetCats must not make same-route A2A back to codex look already active',
+    );
+  });
+
   it('failed → pauses queue, emits queue_paused', async () => {
     enqueueEntry(deps.queue);
 

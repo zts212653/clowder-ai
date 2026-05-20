@@ -15,7 +15,7 @@ const STATUS_STYLES: Record<DispatchExecutionDigest['status'], { bg: string; tex
 export function DispatchProgress({ digests }: DispatchProgressProps) {
   if (digests.length === 0) {
     return (
-      <div className="rounded-lg border border-[#E7DAC7] bg-[#FFFDF8] p-8 text-center text-sm text-[#9A866F]">
+      <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-8 text-center text-sm text-cafe-secondary">
         暂无派遣记录
       </div>
     );
@@ -29,16 +29,19 @@ export function DispatchProgress({ digests }: DispatchProgressProps) {
         const totalCriteria = digest.doneWhenResults.length;
 
         return (
-          <div key={digest.id} className="rounded-lg border border-[#E7DAC7] bg-[#FFFDF8] p-4">
+          <div
+            key={digest.id}
+            className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4"
+          >
             {/* Header: status + cat + time */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${style.bg} ${style.text}`}>
+                <span className={`rounded-full px-2 py-0.5 text-micro font-medium ${style.bg} ${style.text}`}>
                   {style.label}
                 </span>
-                <span className="text-xs font-medium text-[#6B5D4F]">@{digest.catId}</span>
+                <span className="text-xs font-medium text-cafe-secondary">@{digest.catId}</span>
               </div>
-              <span className="text-[10px] text-[#9A866F]">
+              <span className="text-micro text-cafe-secondary">
                 {new Date(digest.completedAt).toLocaleString('zh-CN', {
                   month: '2-digit',
                   day: '2-digit',
@@ -49,17 +52,17 @@ export function DispatchProgress({ digests }: DispatchProgressProps) {
             </div>
 
             {/* Mission summary */}
-            <p className="mt-2 text-sm text-[#4B3A2A]">{digest.summary}</p>
+            <p className="mt-2 text-sm text-cafe">{digest.summary}</p>
 
             {/* Mission context */}
-            <div className="mt-2 text-xs text-[#9A866F]">
+            <div className="mt-2 text-xs text-cafe-secondary">
               <span className="font-medium">任务:</span> {digest.missionPack.mission}
             </div>
 
             {/* doneWhen checklist */}
             {totalCriteria > 0 && (
               <div className="mt-2 space-y-1">
-                <div className="text-[10px] font-medium text-[#8B6F47]">
+                <div className="text-micro font-medium text-cafe-secondary">
                   完成标准 ({metCount}/{totalCriteria})
                 </div>
                 {digest.doneWhenResults.map((r) => (
@@ -75,9 +78,9 @@ export function DispatchProgress({ digests }: DispatchProgressProps) {
                     >
                       <path d={r.met ? 'M20 6L9 17l-5-5' : 'M18 6L6 18M6 6l12 12'} />
                     </svg>
-                    <span className="text-[#6B5D4F]">
+                    <span className="text-cafe-secondary">
                       {r.criterion}
-                      {r.evidence && <span className="ml-1 text-[#9A866F]">— {r.evidence}</span>}
+                      {r.evidence && <span className="ml-1 text-cafe-secondary">— {r.evidence}</span>}
                     </span>
                   </div>
                 ))}
@@ -87,10 +90,15 @@ export function DispatchProgress({ digests }: DispatchProgressProps) {
             {/* Files changed */}
             {digest.filesChanged.length > 0 && (
               <div className="mt-2">
-                <span className="text-[10px] font-medium text-[#8B6F47]">变更文件 ({digest.filesChanged.length})</span>
+                <span className="text-micro font-medium text-cafe-secondary">
+                  变更文件 ({digest.filesChanged.length})
+                </span>
                 <div className="mt-0.5 flex flex-wrap gap-1">
                   {digest.filesChanged.map((f) => (
-                    <span key={f} className="rounded bg-[#F4EFE7] px-1.5 py-0.5 text-[10px] font-mono text-[#6B5D4F]">
+                    <span
+                      key={f}
+                      className="rounded bg-[var(--console-hover-bg)] px-1.5 py-0.5 text-micro font-mono text-cafe-secondary"
+                    >
                       {f}
                     </span>
                   ))}
@@ -100,7 +108,7 @@ export function DispatchProgress({ digests }: DispatchProgressProps) {
 
             {/* Next steps */}
             {digest.nextSteps.length > 0 && (
-              <div className="mt-2 text-xs text-[#9A866F]">
+              <div className="mt-2 text-xs text-cafe-secondary">
                 <span className="font-medium">下一步:</span> {digest.nextSteps.join('; ')}
               </div>
             )}

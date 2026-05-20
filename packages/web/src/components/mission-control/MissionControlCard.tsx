@@ -23,28 +23,31 @@ export function MissionControlCard({ item, selected, onSelect }: MissionControlC
       className={[
         'w-full rounded-xl border p-3 text-left transition-all',
         selected
-          ? 'border-[#5F4B37] bg-[#FFF7EA] shadow-sm'
-          : 'border-[#EADFCF] bg-[#FFFDF8] hover:border-[#CAB396] hover:bg-[#FFF8EE]',
+          ? 'border-[var(--console-button-emphasis)] bg-[var(--console-card-bg)] shadow-sm'
+          : 'border-[var(--console-border-soft)] bg-[var(--console-card-bg)] hover:border-[var(--console-border-strong)] hover:bg-[var(--console-hover-bg)]',
       ].join(' ')}
     >
       <div className="mb-2 flex items-center gap-2">
-        <span className="text-xs font-semibold text-[#5C4B39]">{item.title}</span>
-        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${PRIORITY_CLASS[item.priority]}`}>
+        <span className="text-xs font-semibold text-cafe">{item.title}</span>
+        <span className={`rounded-full px-2 py-0.5 text-micro font-semibold ${PRIORITY_CLASS[item.priority]}`}>
           {item.priority.toUpperCase()}
         </span>
       </div>
-      <p className="line-clamp-2 text-xs leading-relaxed text-[#715F4C]">{item.summary}</p>
+      <p className="line-clamp-2 text-xs leading-relaxed text-cafe-secondary">{item.summary}</p>
       {item.tags.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1">
           {item.tags.map((tag) => (
-            <span key={tag} className="rounded bg-[#EFE7DC] px-1.5 py-0.5 text-[10px] text-[#6B5946]">
+            <span
+              key={tag}
+              className="rounded bg-[var(--console-panel-bg)] px-1.5 py-0.5 text-micro text-cafe-secondary"
+            >
               #{tag}
             </span>
           ))}
         </div>
       )}
       {item.suggestion && (
-        <p className="mt-2 text-[10px] text-[#8A765F]">
+        <p className="mt-2 text-micro text-cafe-muted">
           建议领取：@{item.suggestion.catId} · {item.suggestion.requestedPhase}
         </p>
       )}
@@ -53,7 +56,7 @@ export function MissionControlCard({ item, selected, onSelect }: MissionControlC
           {item.dependencies.evolvedFrom?.map((id) => (
             <span
               key={`ef-${id}`}
-              className="inline-block rounded-md border border-conn-blue-ring bg-conn-blue-bg px-1.5 py-0.5 text-[10px] font-medium text-blue-700"
+              className="inline-block rounded-md border border-conn-blue-ring bg-conn-blue-bg px-1.5 py-0.5 text-micro font-medium text-blue-700"
             >
               ← {id.toUpperCase()}
             </span>
@@ -61,7 +64,7 @@ export function MissionControlCard({ item, selected, onSelect }: MissionControlC
           {item.dependencies.blockedBy?.map((id) => (
             <span
               key={`bb-${id}`}
-              className="inline-block rounded-md border border-conn-red-ring bg-conn-red-bg px-1.5 py-0.5 text-[10px] font-medium text-red-700"
+              className="inline-block rounded-md border border-conn-red-ring bg-conn-red-bg px-1.5 py-0.5 text-micro font-medium text-red-700"
             >
               ⊘ {id.toUpperCase()}
             </span>
@@ -69,7 +72,7 @@ export function MissionControlCard({ item, selected, onSelect }: MissionControlC
           {item.dependencies.related?.map((id) => (
             <span
               key={`rel-${id}`}
-              className="inline-block rounded-md border border-cafe bg-cafe-surface-elevated px-1.5 py-0.5 text-[10px] font-medium text-cafe-secondary"
+              className="inline-block rounded-md border border-cafe bg-cafe-surface-elevated px-1.5 py-0.5 text-micro font-medium text-cafe-secondary"
             >
               ↔ {id.toUpperCase()}
             </span>

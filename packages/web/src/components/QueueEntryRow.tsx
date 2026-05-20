@@ -95,7 +95,7 @@ function QueueEntryRow({
           </span>
           {categoryLabel && (
             <span
-              className={`text-[10px] px-1 py-px rounded font-medium ${
+              className={`text-micro px-1 py-px rounded font-medium ${
                 isUrgent ? 'bg-conn-red-bg text-conn-red-text' : 'bg-[#9B7EBD]/15 text-[#9B7EBD]'
               }`}
             >
@@ -103,7 +103,7 @@ function QueueEntryRow({
             </span>
           )}
           {isAgent && entry.autoExecute && (
-            <span className="text-[10px] px-1 py-px rounded bg-[#9B7EBD]/15 text-[#9B7EBD] font-medium">自动</span>
+            <span className="text-micro px-1 py-px rounded bg-[#9B7EBD]/15 text-[#9B7EBD] font-medium">自动</span>
           )}
           {imageCount > 0 && (
             <span className="flex items-center gap-0.5 text-xs text-cafe-muted ml-1">

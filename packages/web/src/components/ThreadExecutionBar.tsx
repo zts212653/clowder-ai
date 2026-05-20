@@ -35,7 +35,7 @@ export function ThreadExecutionBar() {
           color: cat.color.primary,
         });
       } else {
-        map.set(catId, { label: catId, color: '#9B7EBD' });
+        map.set(catId, { label: catId, color: 'var(--cafe-accent)' });
       }
     }
     return map;
@@ -64,10 +64,10 @@ export function ThreadExecutionBar() {
   if (activeCats.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-2 px-4 py-1.5 text-xs border-b border-[#9B7EBD]/10">
+    <div className="flex items-center gap-2 px-4 py-1.5 text-xs border-b border-[var(--console-border-soft)]">
       <span className="text-cafe-muted font-medium shrink-0">执行中</span>
       {activeCats.map(({ catId, startedAt }) => {
-        const info = catDisplayMap.get(catId) ?? { label: catId, color: '#9B7EBD' };
+        const info = catDisplayMap.get(catId) ?? { label: catId, color: 'var(--cafe-accent)' };
         return (
           <CatStatusChip
             key={catId}

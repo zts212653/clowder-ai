@@ -372,7 +372,7 @@ export function ChatMessage({ message, getCatById, onEditCat }: ChatMessageProps
                     title={sourceId}
                     aria-label={`跳转到来源 thread ${sourceId}`}
                   >
-                    <span className="text-[10px] font-semibold" aria-hidden>
+                    <span className="text-micro font-semibold" aria-hidden>
                       📮
                     </span>
                     <span className="min-w-0 truncate">

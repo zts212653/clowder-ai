@@ -7,7 +7,8 @@
 
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { HealthReportData } from '@/components/memory/HealthReport';
 import {
   buildBackHref,
   buildMemoryTabItems,
@@ -15,6 +16,25 @@ import {
   type MemoryTab,
   resolveReferrerThread,
 } from '@/components/memory/MemoryNav';
+
+vi.mock('@/utils/api-client', () => ({
+  apiFetch: vi.fn(async () => ({ ok: false })),
+}));
+
+function mockHealthReport(overrides: Partial<HealthReportData> = {}): HealthReportData {
+  return {
+    totalDocs: 100,
+    byKind: {},
+    byAuthority: {},
+    contradictions: { total: 0, unresolved: 0 },
+    staleReview: { warning: 0, overdue: 0 },
+    unverified: 0,
+    backstopRatio: 0,
+    compressionRatio: 0,
+    generatedAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
 
 describe('resolveReferrerThread', () => {
   it('returns fromParam when present in URL search', () => {
@@ -78,9 +98,31 @@ describe('buildMemoryTabItems', () => {
     const tabs: MemoryTab[] = ['feed', 'search', 'status', 'health', 'catalog', 'graph'];
     expect(tabs).toHaveLength(6);
   });
+
+  it('attaches badge count for specified tabs', () => {
+    const items = buildMemoryTabItems('', { health: 3 });
+    const healthTab = items.find((i) => i.id === 'health');
+    expect(healthTab?.badge).toBe(3);
+  });
+
+  it('omits badge when count is 0', () => {
+    const items = buildMemoryTabItems('', { health: 0 });
+    const healthTab = items.find((i) => i.id === 'health');
+    expect(healthTab?.badge).toBeUndefined();
+  });
+
+  it('leaves tabs without badge entry unchanged', () => {
+    const items = buildMemoryTabItems('', { health: 5 });
+    const feedTab = items.find((i) => i.id === 'feed');
+    expect(feedTab?.badge).toBeUndefined();
+  });
 });
 
 describe('MemoryNav component', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('updates referrer links when the initial referrer changes', async () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
@@ -101,6 +143,50 @@ describe('MemoryNav component', () => {
       '/thread/thread_b',
     );
     expect(container.textContent).toContain('知识图谱');
+
+    root.unmount();
+    container.remove();
+  });
+
+  it('renders health badge when report has action items (P1 cloud R5)', async () => {
+    const { apiFetch } = await import('@/utils/api-client');
+    vi.mocked(apiFetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockHealthReport({ staleAnchors: { count: 3, items: [] }, orphanEdges: { count: 2 } }),
+    } as Response);
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(createElement(MemoryNav, { active: 'feed' }));
+    });
+
+    const badge = container.querySelector('[data-testid="health-badge"]');
+    expect(badge).not.toBeNull();
+    expect(badge?.textContent).toBe('3');
+
+    root.unmount();
+    container.remove();
+  });
+
+  it('does not render badge when no health issues', async () => {
+    const { apiFetch } = await import('@/utils/api-client');
+    vi.mocked(apiFetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockHealthReport({ byAuthority: { constitutional: 1 } }),
+    } as Response);
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(createElement(MemoryNav, { active: 'feed' }));
+    });
+
+    expect(container.querySelector('[data-testid="health-badge"]')).toBeNull();
 
     root.unmount();
     container.remove();

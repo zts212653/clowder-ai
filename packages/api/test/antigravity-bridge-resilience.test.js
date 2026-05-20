@@ -258,6 +258,30 @@ describe('G6: connection invalidation and reconnect', () => {
     assert.ok(rpcCallCount >= 2, 'should have retried the RPC');
   });
 
+  test('startCascade uses the explicit cascade-client trajectory source', async () => {
+    const bridge = createBridge();
+    const startCascadePayloads = [];
+
+    mock.method(bridge, 'rpc', async (_conn, method, payload) => {
+      if (method === 'GetUserStatus') return { cascadeModelConfigData: [] };
+      if (method === 'StartCascade') {
+        startCascadePayloads.push(payload);
+        if (payload?.source === 0) {
+          throw new Error(
+            'LS StartCascade: 400 — {"code":"invalid_argument","message":"CortexTrajectorySource is unspecified"}',
+          );
+        }
+        return { cascadeId: 'explicit-source-cascade' };
+      }
+      return {};
+    });
+
+    const cascadeId = await bridge.startCascade();
+
+    assert.equal(cascadeId, 'explicit-source-cascade');
+    assert.deepEqual(startCascadePayloads, [{ source: 1 }]);
+  });
+
   test('rpcSafe does NOT retry on non-connection errors', async () => {
     const bridge = createBridge();
     mock.method(bridge, 'rpc', async (_conn, method) => {

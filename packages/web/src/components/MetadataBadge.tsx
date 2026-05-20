@@ -25,7 +25,7 @@ export function MetadataBadge({ metadata }: MetadataBadgeProps) {
   return (
     <button
       onClick={() => setExpanded((v) => !v)}
-      className="mt-1 text-[10px] text-cafe-muted hover:text-cafe-secondary transition-colors cursor-pointer select-none flex items-center gap-0 flex-wrap"
+      className="mt-1 text-micro text-cafe-muted hover:text-cafe-secondary transition-colors cursor-pointer select-none flex items-center gap-0 flex-wrap"
     >
       <span>
         {metadata.model || 'unknown'} · {metadata.provider || 'unknown'}

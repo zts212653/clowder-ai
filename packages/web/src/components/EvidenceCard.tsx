@@ -95,12 +95,12 @@ export function EvidenceCard({ result }: { result: EvidenceResult }) {
           </div>
           <div className="flex flex-col items-end gap-1 flex-shrink-0">
             <span
-              className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider ${conf.bg} ${conf.text}`}
+              className={`text-micro font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider ${conf.bg} ${conf.text}`}
             >
               {conf.label}
             </span>
             {status?.badge && (
-              <span className={`text-[10px] font-black px-1 py-0.25 rounded border ${status.badge}`}>
+              <span className={`text-micro font-black px-1 py-0.25 rounded border ${status.badge}`}>
                 {status.label}
               </span>
             )}
@@ -115,18 +115,18 @@ export function EvidenceCard({ result }: { result: EvidenceResult }) {
         />
 
         <div className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-700">
-          <span className="text-[10px] text-slate-400 font-bold">{source.label}</span>
+          <span className="text-micro text-slate-400 font-bold">{source.label}</span>
           {result.authority && (
             <>
-              <span className="text-[10px] text-cafe-muted">·</span>
-              <span className="text-[10px] text-slate-500 font-mono">{result.authority}</span>
+              <span className="text-micro text-cafe-muted">·</span>
+              <span className="text-micro text-slate-500 font-mono">{result.authority}</span>
             </>
           )}
-          <span className="text-[10px] text-cafe-muted">·</span>
+          <span className="text-micro text-cafe-muted">·</span>
           <ExpandableText
             text={result.anchor}
             clampClass="truncate"
-            className="text-[10px] text-cafe-muted font-mono opacity-70 italic"
+            className="text-micro text-cafe-muted font-mono opacity-70 italic"
           />
         </div>
       </div>

@@ -198,7 +198,7 @@ export function EvidenceSearch({ initialQuery }: EvidenceSearchProps = {}) {
             <option value="lexical">精确</option>
             <option value="semantic">语义</option>
           </select>
-          {depth === 'raw' && <span className="text-[10px] text-conn-amber-text">消息级仅支持精确匹配</span>}
+          {depth === 'raw' && <span className="text-micro text-conn-amber-text">消息级仅支持精确匹配</span>}
         </label>
         <label className="flex items-center gap-1 text-cafe-secondary">
           范围:
@@ -258,13 +258,13 @@ export function EvidenceSearch({ initialQuery }: EvidenceSearchProps = {}) {
           <div key={item.anchor} className="rounded-lg bg-[var(--console-card-bg)] p-3">
             <div className="flex items-center gap-2 min-w-0">
               <span
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${SOURCE_TYPE_COLORS[item.sourceType] ?? SOURCE_TYPE_COLORS.commit}`}
+                className={`rounded px-1.5 py-0.5 text-micro font-semibold ${SOURCE_TYPE_COLORS[item.sourceType] ?? SOURCE_TYPE_COLORS.commit}`}
               >
                 {SOURCE_TYPE_LABELS[item.sourceType] ?? item.sourceType}
               </span>
               {item.source && (
                 <span
-                  className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${item.source === 'project' ? 'bg-conn-indigo-bg text-conn-indigo-text' : 'bg-conn-cyan-bg text-conn-cyan-text'}`}
+                  className={`rounded px-1.5 py-0.5 text-micro font-semibold ${item.source === 'project' ? 'bg-conn-indigo-bg text-conn-indigo-text' : 'bg-conn-cyan-bg text-conn-cyan-text'}`}
                 >
                   {item.source === 'project' ? '项目' : '全局'}
                 </span>
@@ -289,7 +289,7 @@ export function EvidenceSearch({ initialQuery }: EvidenceSearchProps = {}) {
                     {p.speaker && <span className="font-medium text-cafe-black">{p.speaker}: </span>}
                     <span className="italic">{p.content}</span>
                     {p.createdAt && (
-                      <span className="ml-1 text-[10px] text-cafe-secondary/60">
+                      <span className="ml-1 text-micro text-cafe-secondary/60">
                         {new Date(p.createdAt).toLocaleString('zh-CN', {
                           month: 'short',
                           day: 'numeric',

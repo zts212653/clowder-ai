@@ -191,7 +191,7 @@ export function KnowledgeFeed() {
             key={tab.key}
             type="button"
             onClick={() => setActiveTab(tab.key)}
-            className={`flex items-center gap-1 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors ${
+            className={`flex items-center gap-1 px-2 py-1.5 text-micro font-semibold uppercase tracking-wider transition-colors ${
               activeTab === tab.key
                 ? 'text-cafe-accent border-b-2 border-cafe-accent'
                 : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
@@ -200,7 +200,7 @@ export function KnowledgeFeed() {
             {tab.label}
             {tab.count != null && tab.count > 0 && (
               <span
-                className={`text-[10px] rounded-full px-1.5 py-0.5 ${
+                className={`text-micro rounded-full px-1.5 py-0.5 ${
                   activeTab === tab.key
                     ? 'bg-cafe-accent text-white'
                     : 'bg-cafe-surface-sunken/60 text-cafe-interactive/50'
@@ -244,9 +244,9 @@ export function KnowledgeFeed() {
       {/* Stats bar */}
       {data?.stats && (
         <div className="flex items-center justify-center gap-3 px-3 py-1.5 border-t border-cafe-subtle/40 bg-cafe-surface/30">
-          <span className="text-[10px] font-semibold text-blue-600">{data.stats.decisions} decisions</span>
-          <span className="text-[10px] font-semibold text-conn-amber-text">{data.stats.lessons} lessons</span>
-          <span className="text-[10px] font-semibold text-conn-green-text">{data.stats.methods} methods</span>
+          <span className="text-micro font-semibold text-blue-600">{data.stats.decisions} decisions</span>
+          <span className="text-micro font-semibold text-conn-amber-text">{data.stats.lessons} lessons</span>
+          <span className="text-micro font-semibold text-conn-green-text">{data.stats.methods} methods</span>
         </div>
       )}
     </div>
@@ -289,11 +289,11 @@ function KnowledgeCard({
     <div className="bg-cafe-surface rounded-lg border border-cafe-subtle/60 p-2.5 space-y-1.5">
       {/* Top row: kind badge + status */}
       <div className="flex items-center justify-between">
-        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${colors.bg} ${colors.text}`}>
+        <span className={`text-micro font-semibold px-1.5 py-0.5 rounded-full ${colors.bg} ${colors.text}`}>
           {kind}
         </span>
         {tab === 'settled' && (
-          <span className="text-[10px] font-medium text-conn-green-text bg-conn-green-bg px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+          <span className="text-micro font-medium text-conn-green-text bg-conn-green-bg px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
             <span>&#10003;</span> 已确认
           </span>
         )}
@@ -303,7 +303,7 @@ function KnowledgeCard({
       <div className="text-xs font-semibold text-cafe-black leading-snug">{title}</div>
 
       {/* Source */}
-      <div className="text-[10px] text-cafe-interactive/40">{marker.source}</div>
+      <div className="text-micro text-cafe-interactive/40">{marker.source}</div>
 
       {/* Actions */}
       {tab === 'review' && (
@@ -312,7 +312,7 @@ function KnowledgeCard({
             <select
               value={selectedCollection}
               onChange={(e) => setSelectedCollection(e.target.value)}
-              className="w-full text-[10px] bg-cafe-surface-sunken/40 border border-cafe-subtle/60 rounded px-1.5 py-1 text-cafe-interactive/70"
+              className="w-full text-micro bg-cafe-surface-sunken/40 border border-cafe-subtle/60 rounded px-1.5 py-1 text-cafe-interactive/70"
             >
               <option value="" disabled={isPrivateSource}>
                 自动选择
@@ -324,19 +324,19 @@ function KnowledgeCard({
               ))}
             </select>
           )}
-          {error && <div className="text-[10px] text-conn-red-text bg-conn-red-bg/30 rounded px-1.5 py-1">{error}</div>}
+          {error && <div className="text-micro text-conn-red-text bg-conn-red-bg/30 rounded px-1.5 py-1">{error}</div>}
           <div className="flex items-center justify-end gap-1.5">
             <button
               type="button"
               onClick={() => onApprove(marker.id, selectedCollection || undefined)}
-              className="text-[10px] font-semibold text-white bg-cafe-accent rounded px-2 py-1 hover:opacity-90 transition-opacity"
+              className="text-micro font-semibold text-white bg-cafe-accent rounded px-2 py-1 hover:opacity-90 transition-opacity"
             >
               Approve
             </button>
             <button
               type="button"
               onClick={() => onReject(marker.id)}
-              className="text-[10px] font-medium text-cafe-interactive/50 hover:text-cafe-interactive/80 transition-colors px-1.5 py-1"
+              className="text-micro font-medium text-cafe-interactive/50 hover:text-cafe-interactive/80 transition-colors px-1.5 py-1"
             >
               Dismiss
             </button>
@@ -348,7 +348,7 @@ function KnowledgeCard({
           <button
             type="button"
             onClick={() => onUndo(marker.id)}
-            className="text-[10px] font-medium text-cafe-accent hover:underline"
+            className="text-micro font-medium text-cafe-accent hover:underline"
           >
             撤回
           </button>

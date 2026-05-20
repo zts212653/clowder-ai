@@ -60,9 +60,9 @@ function SectionHeader({
     >
       <span className={`text-sm ${style.text}`}>{section.icon}</span>
       <span className={`text-xs font-semibold ${style.text}`}>{section.label}</span>
-      <span className="text-[10px] text-cafe-muted bg-cafe-surface-elevated rounded-full px-1.5 py-0.5">{count}</span>
-      {collapsed && count > 0 && <span className="text-[10px] text-cafe-muted">{count} 项已折叠</span>}
-      <span className="ml-auto text-[10px] text-cafe-muted">{collapsed ? '▸' : '▾'}</span>
+      <span className="text-micro text-cafe-muted bg-cafe-surface-elevated rounded-full px-1.5 py-0.5">{count}</span>
+      {collapsed && count > 0 && <span className="text-micro text-cafe-muted">{count} 项已折叠</span>}
+      <span className="ml-auto text-micro text-cafe-muted">{collapsed ? '▸' : '▾'}</span>
     </button>
   );
 }
@@ -83,8 +83,8 @@ function EmptyState({ onCreateFirst }: { onCreateFirst: () => void }) {
         创建第一颗毛线球
       </button>
       <div className="mt-6 text-left w-full">
-        <p className="text-[10px] font-semibold text-cafe-muted mb-1.5">何时该用毛线球？</p>
-        <ul className="text-[10px] text-cafe-muted space-y-1 list-disc pl-4">
+        <p className="text-micro font-semibold text-cafe-muted mb-1.5">何时该用毛线球？</p>
+        <ul className="text-micro text-cafe-muted space-y-1 list-disc pl-4">
           <li>跨对话的持续任务（调研、重构、功能开发）</li>
           <li>需要阻塞跟踪的外部依赖</li>
           <li>想让猫猫记住的长期目标</li>
@@ -137,14 +137,14 @@ export function TaskBoardPanel() {
         <button
           type="button"
           onClick={() => setComposerOpen(true)}
-          className="ml-auto text-[10px] font-semibold bg-cafe-crosspost/80 text-white px-2.5 py-1 rounded-full transition-colors hover:bg-cafe-crosspost"
+          className="ml-auto text-micro font-semibold bg-cafe-crosspost/80 text-white px-2.5 py-1 rounded-full transition-colors hover:bg-cafe-crosspost"
         >
           + 新任务
         </button>
       </div>
       {/* Stats bar */}
       {tasks.length > 0 && (
-        <div className="flex items-center gap-3 px-3 py-1.5 text-[10px] text-cafe-muted border-b border-cafe">
+        <div className="flex items-center gap-3 px-3 py-1.5 text-micro text-cafe-muted border-b border-cafe">
           <span>{tasks.length} 总任务</span>
           {grouped.map(({ section, tasks: st }) =>
             st.length > 0 ? (

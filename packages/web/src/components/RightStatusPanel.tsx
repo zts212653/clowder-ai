@@ -65,7 +65,7 @@ function CatInvocationCard({
         <span className="font-medium text-cafe-secondary">{cat ? formatCatName(cat) : catId}</span>
         {inv.sessionSeq !== undefined && (
           <span
-            className={`text-[10px] px-1 py-0.5 rounded ${
+            className={`text-micro px-1 py-0.5 rounded ${
               inv.sessionSealed
                 ? 'bg-conn-amber-bg text-conn-amber-text'
                 : 'bg-[var(--console-field-bg)] text-cafe-secondary'
@@ -436,7 +436,7 @@ export function RightStatusPanel({
             className="w-full flex items-center justify-between text-xs font-semibold text-cafe-secondary hover:text-cafe-secondary"
           >
             <span>历史参与 ({historyCats.length})</span>
-            <span className="text-[10px]">{historyOpen ? '▲' : '▼'}</span>
+            <span className="text-micro">{historyOpen ? '▲' : '▼'}</span>
           </button>
           {historyOpen && (
             <div className="mt-2 space-y-2">

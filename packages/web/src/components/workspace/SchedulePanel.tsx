@@ -169,7 +169,7 @@ export function SchedulePanel() {
         <button
           type="button"
           onClick={() => setScope('all')}
-          className={`px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all ${
+          className={`px-2.5 py-1 rounded-full text-micro font-semibold transition-all ${
             scope === 'all'
               ? 'bg-cafe-surface-elevated text-cafe border border-cafe-accent/40'
               : 'text-cafe-muted hover:text-cafe'
@@ -180,7 +180,7 @@ export function SchedulePanel() {
         <button
           type="button"
           onClick={() => setScope('current-thread')}
-          className={`px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all ${
+          className={`px-2.5 py-1 rounded-full text-micro font-semibold transition-all ${
             scope === 'current-thread'
               ? 'bg-cafe-surface-elevated text-cafe border border-cafe-accent/40'
               : 'text-cafe-muted hover:text-cafe'
@@ -188,7 +188,7 @@ export function SchedulePanel() {
         >
           Current Thread
         </button>
-        <span className="ml-auto text-[10px] text-cafe-muted">
+        <span className="ml-auto text-micro text-cafe-muted">
           {tasks.length} tasks · {activeCount} active{pausedCount > 0 ? ` · ${pausedCount} paused` : ''}
         </span>
       </div>
@@ -215,12 +215,12 @@ export function SchedulePanel() {
             />
           </button>
           <span
-            className={`text-[10px] font-medium ${globalControl.enabled ? 'text-conn-emerald-text' : 'text-conn-red-text'}`}
+            className={`text-micro font-medium ${globalControl.enabled ? 'text-conn-emerald-text' : 'text-conn-red-text'}`}
           >
             {globalControl.enabled ? 'Scheduler active' : 'Scheduler paused'}
           </span>
           {!globalControl.enabled && globalControl.reason && (
-            <span className="text-[10px] text-conn-red-text truncate max-w-[160px]">{globalControl.reason}</span>
+            <span className="text-micro text-conn-red-text truncate max-w-[160px]">{globalControl.reason}</span>
           )}
         </div>
       )}
@@ -228,8 +228,8 @@ export function SchedulePanel() {
       {/* Current Thread context banner (V2 design) */}
       {scope === 'current-thread' && currentThreadId && (
         <div className="flex items-center gap-1.5 px-4 py-1.5 bg-cafe-surface-elevated/60 border-b border-cafe-subtle">
-          <span className="text-[10px] text-cafe-muted">Showing tasks for:</span>
-          <span className="text-[10px] font-medium text-cafe">{currentThreadId.slice(0, 12)}</span>
+          <span className="text-micro text-cafe-muted">Showing tasks for:</span>
+          <span className="text-micro font-medium text-cafe">{currentThreadId.slice(0, 12)}</span>
         </div>
       )}
 
@@ -265,18 +265,18 @@ export function SchedulePanel() {
                         title={task.lastRun?.outcome ?? 'never run'}
                       />
                       <span
-                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${CATEGORY_STYLES[category]}`}
+                        className={`px-1.5 py-0.5 rounded text-micro font-bold uppercase ${CATEGORY_STYLES[category]}`}
                       >
                         {CATEGORY_LABELS[category]}
                       </span>
                       <span className="text-xs font-medium text-cafe truncate flex-1">{label}</span>
                       {task.source === 'dynamic' && (
-                        <span className="px-1 py-0.5 rounded text-[10px] font-medium bg-conn-violet-bg text-conn-violet-text">
+                        <span className="px-1 py-0.5 rounded text-micro font-medium bg-conn-violet-bg text-conn-violet-text">
                           user
                         </span>
                       )}
-                      <span className="text-[10px] text-cafe-muted font-mono">{formatTrigger(task.trigger)}</span>
-                      <span className="text-[10px] text-cafe-muted">{isExpanded ? '\u25B4' : '\u25BE'}</span>
+                      <span className="text-micro text-cafe-muted font-mono">{formatTrigger(task.trigger)}</span>
+                      <span className="text-micro text-cafe-muted">{isExpanded ? '\u25B4' : '\u25BE'}</span>
                     </div>
                     <div className="flex items-center gap-2 mt-1 ml-[52px]">
                       {task.lastRun ? (
@@ -284,29 +284,29 @@ export function SchedulePanel() {
                           <span className={`text-xs font-medium ${outcomeColor(task.lastRun.outcome)}`}>
                             {outcomeIcon(task.lastRun.outcome)} {outcomeLabel(task.lastRun.outcome)}
                           </span>
-                          <span className="text-[10px] text-cafe-muted">{timeAgo(task.lastRun.started_at)}</span>
+                          <span className="text-micro text-cafe-muted">{timeAgo(task.lastRun.started_at)}</span>
                           {task.lastRun.outcome === 'RUN_FAILED' && task.lastRun.error_summary && (
                             <span
-                              className="text-[10px] text-conn-red-text truncate max-w-[160px]"
+                              className="text-micro text-conn-red-text truncate max-w-[160px]"
                               title={task.lastRun.error_summary}
                             >
                               {task.lastRun.error_summary}
                             </span>
                           )}
                           {preview && task.lastRun.outcome !== 'RUN_FAILED' && (
-                            <span className="text-[10px] text-cafe-secondary truncate max-w-[140px]">{preview}</span>
+                            <span className="text-micro text-cafe-secondary truncate max-w-[140px]">{preview}</span>
                           )}
                         </>
                       ) : (
-                        <span className="text-[10px] text-cafe-muted italic">never run</span>
+                        <span className="text-micro text-cafe-muted italic">never run</span>
                       )}
                       {task.runStats.delivered > 0 && (
-                        <span className="ml-auto text-[10px] text-conn-emerald-text">
+                        <span className="ml-auto text-micro text-conn-emerald-text">
                           {task.runStats.delivered} delivered
                         </span>
                       )}
                       {!(task.effectiveEnabled ?? task.enabled) && (
-                        <span className="ml-auto text-[10px] text-conn-red-text font-medium">PAUSED</span>
+                        <span className="ml-auto text-micro text-conn-red-text font-medium">PAUSED</span>
                       )}
                     </div>
                   </div>
@@ -321,7 +321,7 @@ export function SchedulePanel() {
                             e.stopPropagation();
                             handleToggleTask(task);
                           }}
-                          className="text-[10px] text-cafe hover:text-cafe-accent transition-colors"
+                          className="text-micro text-cafe hover:text-cafe-accent transition-colors"
                         >
                           {(task.effectiveEnabled ?? task.enabled) ? '\u23F8 Pause' : '\u25B6 Resume'}
                         </button>
@@ -332,20 +332,20 @@ export function SchedulePanel() {
                               e.stopPropagation();
                               handleDeleteDynamic(task.dynamicTaskId!);
                             }}
-                            className="text-[10px] text-cafe-muted hover:text-conn-red-text transition-colors"
+                            className="text-micro text-cafe-muted hover:text-conn-red-text transition-colors"
                           >
                             Delete
                           </button>
                         )}
                       </div>
                       {/* Run history */}
-                      <div className="text-[10px] text-cafe-muted font-medium">Recent runs:</div>
+                      <div className="text-micro text-cafe-muted font-medium">Recent runs:</div>
                       {runHistory.length === 0 ? (
-                        <div className="text-[10px] text-cafe-muted italic">No run history</div>
+                        <div className="text-micro text-cafe-muted italic">No run history</div>
                       ) : (
                         <div className="space-y-1">
                           {runHistory.map((r, i) => (
-                            <div key={i} className="flex items-center gap-2 text-[10px]">
+                            <div key={i} className="flex items-center gap-2 text-micro">
                               <span className={outcomeColor(r.outcome)}>{outcomeIcon(r.outcome)}</span>
                               <span className="text-cafe-muted">{timeAgo(r.started_at)}</span>
                               <span className="text-cafe-muted">{r.duration_ms}ms</span>
@@ -366,7 +366,7 @@ export function SchedulePanel() {
       </div>
 
       {/* Footer: health summary (AC-F1) */}
-      <div className="px-4 py-1.5 border-t border-cafe-subtle text-[10px] text-cafe-muted flex items-center">
+      <div className="px-4 py-1.5 border-t border-cafe-subtle text-micro text-cafe-muted flex items-center">
         <span>
           {tasks.length} tasks · {activeCount} active{pausedCount > 0 ? ` · ${pausedCount} paused` : ''}
         </span>

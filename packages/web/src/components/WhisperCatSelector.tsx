@@ -42,7 +42,7 @@ export function WhisperCatSelector({ cats, selected, activeCatIds, onToggle }: W
         ))}
       </div>
       {canScrollDown && (
-        <div className="px-4 py-1 text-[10px] text-cafe-muted text-center border-t border-cafe-subtle bg-gradient-to-t from-white shrink-0">
+        <div className="px-4 py-1 text-micro text-cafe-muted text-center border-t border-cafe-subtle bg-gradient-to-t from-white shrink-0">
           ↓ 还有更多猫猫
         </div>
       )}
@@ -142,7 +142,7 @@ function CatRow({
         <div className="text-xs text-cafe-muted truncate">{cat.roleDescription}</div>
       </div>
       {isActive && (
-        <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-cafe-muted shrink-0">执行中</span>
+        <span className="text-micro px-1.5 py-0.5 rounded bg-gray-100 text-cafe-muted shrink-0">执行中</span>
       )}
     </button>
   );

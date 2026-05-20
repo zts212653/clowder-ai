@@ -143,7 +143,7 @@ export function ChatInputMenus({
             ))}
           </div>
           {canScrollDown && (
-            <div className="px-4 py-1 text-[10px] text-cafe-muted text-center border-t border-cafe-subtle bg-gradient-to-t from-white shrink-0">
+            <div className="px-4 py-1 text-micro text-cafe-muted text-center border-t border-cafe-subtle bg-gradient-to-t from-white shrink-0">
               ↓ 还有更多猫猫
             </div>
           )}

@@ -61,7 +61,7 @@ export function BindNewSessionSection({ threadId, activeCatIds, onBound, disable
         type="button"
         onClick={() => setExpanded(true)}
         disabled={disabled}
-        className="text-[10px] text-cafe-muted hover:text-cafe-secondary transition-colors mt-1 disabled:opacity-40 disabled:cursor-not-allowed"
+        className="text-micro text-cafe-muted hover:text-cafe-secondary transition-colors mt-1 disabled:opacity-40 disabled:cursor-not-allowed"
       >
         + 绑定外部 Session
       </button>
@@ -71,14 +71,14 @@ export function BindNewSessionSection({ threadId, activeCatIds, onBound, disable
   return (
     <div className="mt-2 p-2 rounded border border-dashed border-cafe bg-cafe-surface">
       <div className="flex items-center justify-between mb-1.5">
-        <span className="text-[10px] font-medium text-cafe-secondary">绑定外部 Session</span>
+        <span className="text-micro font-medium text-cafe-secondary">绑定外部 Session</span>
         <button
           type="button"
           onClick={() => {
             setExpanded(false);
             setStatus('idle');
           }}
-          className="text-[10px] text-cafe-muted hover:text-cafe-secondary"
+          className="text-micro text-cafe-muted hover:text-cafe-secondary"
         >
           ✕
         </button>
@@ -113,7 +113,7 @@ export function BindNewSessionSection({ threadId, activeCatIds, onBound, disable
           type="button"
           onClick={() => void handleBind()}
           disabled={status === 'saving' || !sessionId.trim() || !selectedCat || disabled}
-          className="w-full text-[10px] px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-40 transition-colors"
+          className="w-full text-micro px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-40 transition-colors"
         >
           {status === 'saving'
             ? '绑定中...'

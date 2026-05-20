@@ -45,6 +45,18 @@ const READ_ONLY_MCP_TOOLS = new Set<string>([
   'list_recent',
   'cat_cafe_list_recent',
   'view_file',
+  'cat_cafe_get_rich_block_rules',
+  'cat_cafe_list_session_chain',
+  'cat_cafe_read_session_events',
+  'cat_cafe_read_session_digest',
+  'cat_cafe_read_invocation_detail',
+  // Safety depends on mcp-server/src/tools/shell-tools.ts enforcing a strict
+  // read-only command whitelist; antigravity-step-effects.test.js guards both sides.
+  'cat_cafe_shell_exec',
+  'signal_list_inbox',
+  'signal_get_article',
+  'signal_search',
+  'signal_list_studies',
   'get_thread_context',
   'cat_cafe_get_thread_context',
   'list_threads',
@@ -132,6 +144,8 @@ function effectKindFromStatus(step: TrajectoryStep): AntigravityEffectKind {
 }
 
 function toolNameFromStep(step: TrajectoryStep): string | undefined {
+  const fromNestedMcpTool = normalizeName(step.mcpTool?.toolCall?.name);
+  if (fromNestedMcpTool) return fromNestedMcpTool;
   const fromToolCall = normalizeName(step.toolCall?.toolName);
   if (fromToolCall) return fromToolCall;
   const fromToolResult = normalizeName(step.toolResult?.toolName);
@@ -205,6 +219,7 @@ export function classifyAntigravityStepEffect(step: TrajectoryStep): Antigravity
 
   if (
     step.type === 'CORTEX_STEP_TYPE_CHECKPOINT' ||
+    step.type === 'CORTEX_STEP_TYPE_CONVERSATION_HISTORY' ||
     step.type === 'CORTEX_STEP_TYPE_EPHEMERAL_MESSAGE' ||
     step.type === 'CORTEX_STEP_TYPE_USER_INPUT'
   ) {

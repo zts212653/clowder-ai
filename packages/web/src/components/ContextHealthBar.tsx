@@ -87,7 +87,7 @@ export function ContextHealthBar({
             }}
           />
         </div>
-        <span className="text-[10px] text-cafe-muted tabular-nums w-8 text-right">
+        <span className="text-micro text-cafe-muted tabular-nums w-8 text-right">
           {approxPrefix}
           {percent}%
         </span>

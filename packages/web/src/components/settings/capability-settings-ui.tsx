@@ -81,14 +81,14 @@ export function PerCatToggles({
 
   return (
     <div className="border-t border-[var(--console-border-soft)] px-4 pb-3 pt-2">
-      <span className="text-[10px] font-medium uppercase tracking-wider text-cafe-muted">按猫开关</span>
+      <span className="text-micro font-medium uppercase tracking-wider text-cafe-muted">按猫开关</span>
       <div className="mt-1.5 space-y-1">
         {catFamilies.map((family) => {
           const relevantCats = family.catIds.filter((catId) => catId in item.cats);
           if (relevantCats.length === 0) return null;
           return (
             <div key={family.id} className="space-y-1">
-              {relevantCats.length > 1 && <span className="text-[10px] text-cafe-muted">{family.name}</span>}
+              {relevantCats.length > 1 && <span className="text-micro text-cafe-muted">{family.name}</span>}
               {relevantCats.map((catId) => {
                 const enabled = item.cats[catId] ?? false;
                 const busy = toggling === `${item.id}:${catId}`;

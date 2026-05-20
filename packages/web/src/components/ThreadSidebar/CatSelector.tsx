@@ -41,7 +41,7 @@ export function CatSelector({ selectedCats, onSelectionChange }: CatSelectorProp
         const breedName = cats[0].breedDisplayName ?? cats[0].displayName;
         return (
           <div key={breedId}>
-            <div className="text-[10px] text-cafe-muted mb-1">
+            <div className="text-micro text-cafe-muted mb-1">
               {breedName}家族 · {clientIdLabel(cats[0].clientId)}
             </div>
             <div className="flex flex-wrap gap-1.5">

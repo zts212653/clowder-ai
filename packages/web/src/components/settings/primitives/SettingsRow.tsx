@@ -3,9 +3,9 @@ import type { DragEvent, KeyboardEvent, ReactNode } from 'react';
 type RowTone = 'default' | 'active' | 'inactive';
 
 const rowToneClasses: Record<RowTone, string> = {
-  default: 'border-[var(--console-border-soft)] bg-[var(--console-card-bg)]',
-  active: 'border-conn-purple-ring bg-[var(--console-card-bg)]',
-  inactive: 'border-conn-slate-ring bg-conn-slate-bubble-bg',
+  default: 'bg-[var(--console-card-bg)]',
+  active: 'bg-conn-purple-bg',
+  inactive: 'bg-conn-slate-bubble-bg',
 };
 
 interface SettingsRowProps {
@@ -59,7 +59,7 @@ export function SettingsRow({
 
   return (
     <div
-      className={`rounded-xl border ${rowToneClasses[tone]} px-4 py-3 transition ${onClick ? 'cursor-pointer hover:shadow-md' : ''} ${isDragging ? 'opacity-40' : ''} ${className ?? ''}`}
+      className={`rounded-xl ${rowToneClasses[tone]} px-4 py-3 transition ${onClick ? 'cursor-pointer hover:shadow-md' : ''} ${isDragging ? 'opacity-40' : ''} ${className ?? ''}`}
       onClick={onClick}
       onKeyDown={onKeyDown}
       draggable={draggable || undefined}

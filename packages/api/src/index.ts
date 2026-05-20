@@ -1917,6 +1917,9 @@ async function main(): Promise<void> {
       embedMode: embedMode && embedMode !== ('off' as string) ? embedMode : undefined,
       // F188 Phase F AC-F9: pass redis for tool-usage-metrics endpoint (砚砚 review P1-2)
       ...(redisClient ? { redis: redisClient } : {}),
+      // AC-H1 P1 R3: runtime exclude updates for parent IndexBuilder
+      indexBuilder: memoryServices.indexBuilder as import('./domains/memory/IndexBuilder.js').IndexBuilder | undefined,
+      parentRoot: process.env.DOCS_ROOT ?? resolve(repoRoot, 'docs'),
     });
   }
 
