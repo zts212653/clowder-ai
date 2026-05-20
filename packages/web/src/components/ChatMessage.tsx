@@ -1,6 +1,5 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { type CatData, formatCatName } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { useTts } from '@/hooks/useTts';
@@ -67,10 +66,10 @@ function isConnectorSystemNotice(message: ChatMessageType): boolean {
 interface ChatMessageProps {
   message: ChatMessageType;
   getCatById: (id: string) => CatData | undefined;
+  onEditCat?: (catId: string) => void;
 }
 
-export function ChatMessage({ message, getCatById }: ChatMessageProps) {
-  const router = useRouter();
+export function ChatMessage({ message, getCatById, onEditCat }: ChatMessageProps) {
   const coCreator = useCoCreatorConfig();
   const { state: ttsState, synthesize: ttsSynthesize, activeMessageId } = useTts();
   const currentThreadId = useChatStore((s) => s.currentThreadId);
@@ -306,7 +305,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
           catId={message.catId!}
           size={32}
           status={message.isStreaming ? 'streaming' : undefined}
-          onClick={() => router.push(`/settings?s=members&cat=${message.catId}`)}
+          onClick={onEditCat && message.catId ? () => onEditCat(message.catId!) : undefined}
         />
       )}
       <div className="max-w-[85%] md:max-w-[75%] min-w-0">
