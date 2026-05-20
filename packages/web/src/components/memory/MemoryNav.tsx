@@ -1,6 +1,8 @@
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
+import { apiFetch } from '@/utils/api-client';
+import { getActionItems, type HealthReportData } from './HealthReport';
 
 export type MemoryTab = 'feed' | 'search' | 'status' | 'health' | 'catalog' | 'graph';
 
@@ -13,6 +15,7 @@ interface TabConfig {
   readonly id: MemoryTab;
   readonly href: string;
   readonly label: string;
+  readonly badge?: number;
 }
 
 /**
@@ -33,10 +36,13 @@ export function buildBackHref(referrerThread: string | null): string {
 }
 
 /**
- * Pure: build tab items with optional fromSuffix.
+ * Pure: build tab items with optional fromSuffix and badge counts.
  */
-export function buildMemoryTabItems(fromSuffix: string): readonly TabConfig[] {
-  return [
+export function buildMemoryTabItems(
+  fromSuffix: string,
+  badges?: Partial<Record<MemoryTab, number>>,
+): readonly TabConfig[] {
+  const base: TabConfig[] = [
     { id: 'feed', href: `/memory${fromSuffix}`, label: '知识动态' },
     { id: 'search', href: `/memory/search${fromSuffix}`, label: '搜索' },
     { id: 'status', href: `/memory/status${fromSuffix}`, label: '索引状态' },
@@ -44,6 +50,11 @@ export function buildMemoryTabItems(fromSuffix: string): readonly TabConfig[] {
     { id: 'catalog', href: `/memory/catalog${fromSuffix}`, label: '图书馆' },
     { id: 'graph', href: `/memory/graph${fromSuffix}`, label: '知识图谱' },
   ];
+  if (!badges) return base;
+  return base.map((tab) => {
+    const count = badges[tab.id];
+    return count ? { ...tab, badge: count } : tab;
+  });
 }
 
 function useReferrerThread(initialReferrerThread: string | null): string | null {
@@ -59,18 +70,38 @@ function useReferrerThread(initialReferrerThread: string | null): string | null 
   }, [fromParam, storeThreadId]);
 }
 
+function useHealthBadgeCount(): number {
+  const [count, setCount] = useState(0);
+  const fetchCount = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/f163/health-report');
+      if (!res.ok) return;
+      const data = (await res.json()) as HealthReportData;
+      setCount(getActionItems(data).length);
+    } catch {
+      /* badge silently degrades to 0 */
+    }
+  }, []);
+  useEffect(() => {
+    fetchCount();
+  }, [fetchCount]);
+  return count;
+}
+
 export function MemoryNav({ active, initialReferrerThread = null }: MemoryNavProps) {
   const referrerThread = useReferrerThread(initialReferrerThread);
   const fromSuffix = referrerThread ? `?from=${encodeURIComponent(referrerThread)}` : '';
+  const healthIssueCount = useHealthBadgeCount();
 
-  const items = useMemo(() => buildMemoryTabItems(fromSuffix), [fromSuffix]);
+  const badges = useMemo(() => (healthIssueCount > 0 ? { health: healthIssueCount } : undefined), [healthIssueCount]);
+  const items = useMemo(() => buildMemoryTabItems(fromSuffix, badges), [fromSuffix, badges]);
   const backHref = buildBackHref(referrerThread);
 
   return (
     <nav aria-label="Memory navigation" className="flex flex-wrap items-center gap-2">
       <a
         href={backHref}
-        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-[#D8C6AD] bg-[#FCF7EE] px-3 py-1.5 text-xs font-medium text-[#8B6F47] transition-colors hover:bg-[#F7EEDB]"
+        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-[var(--console-border-strong)] bg-[var(--console-card-bg)] px-3 py-1.5 text-xs font-medium text-[var(--console-button-emphasis)] transition-colors hover:bg-[var(--console-hover-bg)]"
         data-testid="memory-back-to-chat"
       >
         <svg
@@ -102,6 +133,14 @@ export function MemoryNav({ active, initialReferrerThread = null }: MemoryNavPro
             ].join(' ')}
           >
             {item.label}
+            {item.badge != null && item.badge > 0 && (
+              <span
+                data-testid="health-badge"
+                className="ml-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-micro font-bold leading-none text-white"
+              >
+                {item.badge > 99 ? '99+' : item.badge}
+              </span>
+            )}
           </Link>
         );
       })}

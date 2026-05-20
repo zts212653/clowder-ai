@@ -6,9 +6,9 @@ import { TagEditor } from './hub-tag-editor';
 
 export function AccountsSummaryCard() {
   return (
-    <div className="rounded-2xl border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]">
-      <p className="text-sm font-semibold text-[#E29578]">系统配置 &gt; 账号配置</p>
-      <p className="mt-2 text-sm leading-6 text-[#8A776B]">
+    <div className="rounded-2xl bg-[var(--console-card-bg)] p-[18px]">
+      <p className="text-sm font-semibold text-cafe-accent">系统配置 &gt; 账号配置</p>
+      <p className="mt-2 text-sm leading-6 text-cafe-muted">
         每个账号可添加或删除模型。账号配置全局共享，所有项目通用。
       </p>
     </div>
@@ -47,7 +47,7 @@ export function CreateApiKeyAccountSection({
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="rounded-2xl border border-[#E8C9AF] bg-[#F7EEE6] p-[18px]">
+    <div className="rounded-2xl bg-[var(--console-card-soft-bg)] p-[18px]">
       <button
         type="button"
         onClick={() =>
@@ -61,8 +61,8 @@ export function CreateApiKeyAccountSection({
         className="flex w-full items-center justify-between text-left"
         data-guide-id="accounts.create-form"
       >
-        <h4 className="text-base font-bold text-[#D49266]">+ 新建 API Key 账号</h4>
-        <span className="text-sm text-[#C8946B]">{expanded ? '▾ 收起' : '▸ 展开'}</span>
+        <h4 className="text-base font-bold text-cafe-accent">+ 新建 API Key 账号</h4>
+        <span className="text-sm text-cafe-accent/70">{expanded ? '▾ 收起' : '▸ 展开'}</span>
       </button>
       {expanded && (
         <div className="mt-4 space-y-3" data-guide-id="accounts.create-details">
@@ -70,13 +70,13 @@ export function CreateApiKeyAccountSection({
             value={displayName}
             onChange={(e) => onDisplayNameChange(e.target.value)}
             placeholder="账号显示名，如 my-glm"
-            className="w-full rounded border border-[#E8DCCF] bg-cafe-surface px-3 py-2 text-sm placeholder:text-[#C4B5A8]"
+            className="w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-3 py-2 text-sm placeholder:text-cafe-muted"
           />
           <input
             value={baseUrl}
             onChange={(e) => onBaseUrlChange(e.target.value)}
             placeholder="API 服务地址，如 https://api.example.com/v1"
-            className="w-full rounded border border-[#E8DCCF] bg-cafe-surface px-3 py-2 text-sm placeholder:text-[#C4B5A8]"
+            className="w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-3 py-2 text-sm placeholder:text-cafe-muted"
           />
           <input
             type="password"
@@ -84,11 +84,11 @@ export function CreateApiKeyAccountSection({
             value={apiKey}
             onChange={(e) => onApiKeyChange(e.target.value)}
             placeholder="sk-xxxxxxxxxxxxxxxx"
-            className="w-full rounded border border-[#E8DCCF] bg-cafe-surface px-3 py-2 text-sm placeholder:text-[#C4B5A8]"
+            className="w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-3 py-2 text-sm placeholder:text-cafe-muted"
             data-guide-id="accounts.api-key"
           />
           <div className="space-y-2">
-            <p className="text-xs font-semibold text-[#8A776B]">可用模型 *</p>
+            <p className="text-xs font-semibold text-cafe-muted">可用模型 *</p>
             <TagEditor
               tags={models}
               tone="purple"
@@ -103,7 +103,7 @@ export function CreateApiKeyAccountSection({
             type="button"
             onClick={onCreate}
             disabled={busy || !canCreate}
-            className="rounded bg-[#D49266] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#c47f52] disabled:opacity-50"
+            className="rounded bg-cafe-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-cafe-accent-hover disabled:opacity-50"
             data-guide-id="accounts.create-submit"
           >
             {busy ? '创建中...' : '创建'}

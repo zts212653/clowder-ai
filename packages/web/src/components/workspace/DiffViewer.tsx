@@ -235,7 +235,7 @@ export function DiffViewer({ diff, filePath, compact }: DiffViewerProps) {
           <button
             type="button"
             onClick={() => setMode('unified')}
-            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
+            className={`px-2 py-0.5 rounded text-micro font-medium transition-colors ${
               mode === 'unified'
                 ? 'bg-cafe-accent/80 text-white'
                 : 'text-cafe-secondary hover:text-cafe-muted hover:bg-cafe-surface/10'
@@ -246,7 +246,7 @@ export function DiffViewer({ diff, filePath, compact }: DiffViewerProps) {
           <button
             type="button"
             onClick={() => setMode('split')}
-            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
+            className={`px-2 py-0.5 rounded text-micro font-medium transition-colors ${
               mode === 'split'
                 ? 'bg-cafe-accent/80 text-white'
                 : 'text-cafe-secondary hover:text-cafe-muted hover:bg-cafe-surface/10'
@@ -254,7 +254,7 @@ export function DiffViewer({ diff, filePath, compact }: DiffViewerProps) {
           >
             Side-by-side
           </button>
-          <span className="ml-auto text-[10px] text-cafe-secondary">
+          <span className="ml-auto text-micro text-cafe-secondary">
             {filtered.length} file{filtered.length !== 1 ? 's' : ''} changed
           </span>
         </div>
@@ -262,11 +262,11 @@ export function DiffViewer({ diff, filePath, compact }: DiffViewerProps) {
       {filtered.map((file) => (
         <div key={file.path} className="rounded border border-[var(--console-border-soft)] overflow-hidden">
           {!compact && (
-            <div className="bg-[#1E1E24] px-3 py-1.5 text-xs font-mono text-cafe-muted border-b border-[var(--console-border-soft)] truncate">
+            <div className="bg-[var(--ws-editor-bg)] px-3 py-1.5 text-xs font-mono text-cafe-muted border-b border-[var(--console-border-soft)] truncate">
               {file.path}
             </div>
           )}
-          <div className="overflow-x-auto bg-[#16161c]">
+          <div className="overflow-x-auto bg-[var(--ws-editor-deep)]">
             {mode === 'unified' ? <UnifiedView hunks={file.hunks} /> : <SideBySideView hunks={file.hunks} />}
           </div>
         </div>

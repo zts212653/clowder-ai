@@ -124,7 +124,7 @@ export function MarketplaceSearch() {
       </div>
 
       <div className="flex flex-wrap gap-1.5">
-        <span className="self-center text-[10px] text-cafe-muted">信任:</span>
+        <span className="self-center text-micro text-cafe-muted">信任:</span>
         <button
           onClick={() => setTrustFilter([])}
           className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${

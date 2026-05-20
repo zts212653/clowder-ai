@@ -50,7 +50,7 @@ export function LabelFilterBar({
         <button
           type="button"
           onClick={() => handleClick('__uncategorized__')}
-          className={`text-[10px] px-1.5 py-0.5 rounded-full border transition-colors ${
+          className={`text-micro px-1.5 py-0.5 rounded-full border transition-colors ${
             selectedFilter === '__uncategorized__'
               ? 'border-[var(--console-border-soft)] bg-[var(--console-field-bg)] text-cafe-black'
               : 'border-transparent text-cafe-muted hover:bg-[var(--console-hover-bg)] hover:text-cafe-secondary'
@@ -110,7 +110,7 @@ export function LabelFilterBar({
           key={label.id}
           type="button"
           onClick={() => handleClick(label.id)}
-          className={`text-[10px] px-1.5 py-0.5 rounded-full border transition-colors flex items-center gap-1 ${
+          className={`text-micro px-1.5 py-0.5 rounded-full border transition-colors flex items-center gap-1 ${
             selectedFilter === label.id
               ? 'border-[var(--console-border-soft)] bg-[var(--console-field-bg)] text-cafe-black'
               : 'border-transparent text-cafe-muted hover:bg-[var(--console-hover-bg)] hover:text-cafe-secondary'
@@ -126,7 +126,7 @@ export function LabelFilterBar({
           <button
             type="button"
             onClick={() => setShowOverflow(!showOverflow)}
-            className="rounded-full px-1 py-0.5 text-[10px] text-cafe-muted hover:bg-[var(--console-hover-bg)] hover:text-cafe-secondary"
+            className="rounded-full px-1 py-0.5 text-micro text-cafe-muted hover:bg-[var(--console-hover-bg)] hover:text-cafe-secondary"
           >
             ...
           </button>
@@ -140,7 +140,7 @@ export function LabelFilterBar({
                     handleClick(label.id);
                     setShowOverflow(false);
                   }}
-                  className={`w-full text-left text-[10px] px-2 py-1 flex items-center gap-1.5 hover:bg-[var(--console-hover-bg)] ${
+                  className={`w-full text-left text-micro px-2 py-1 flex items-center gap-1.5 hover:bg-[var(--console-hover-bg)] ${
                     selectedFilter === label.id ? 'text-cafe-black font-medium' : 'text-cafe-muted'
                   }`}
                 >

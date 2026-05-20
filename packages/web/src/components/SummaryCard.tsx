@@ -87,7 +87,7 @@ export function SummaryCard({ topic, conclusions, openQuestions, createdBy, time
           ) : (
             <HubIcon name="user" className="h-3.5 w-3.5 text-cafe-secondary" />
           )}
-          <span className="text-[10px] text-cafe-muted">
+          <span className="text-micro text-cafe-muted">
             {creatorLabel} · {formatTime(timestamp)}
           </span>
         </div>

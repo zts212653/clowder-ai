@@ -209,7 +209,7 @@ function SettingsButton({ pathname, onNav }: { pathname: string; onNav: (path: s
       {showBadge && (
         <span
           data-testid="settings-callback-auth-badge"
-          className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold flex items-center justify-center"
+          className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full text-micro font-bold flex items-center justify-center"
           style={{
             backgroundColor: badgeColor,
             color: '#FFFFFF',

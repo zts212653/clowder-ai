@@ -233,14 +233,14 @@ export function IndexStatus() {
               <div key={v.name} className="flex items-center justify-between rounded-lg px-2 py-2">
                 <div className="flex-1 pr-3">
                   <div className="text-xs font-medium text-cafe-black">{v.name}</div>
-                  <div className="text-[10px] text-cafe-secondary">{v.description}</div>
+                  <div className="text-micro text-cafe-secondary">{v.description}</div>
                 </div>
                 {hasMultiValues ? (
                   <button
                     type="button"
                     disabled={isUpdating}
                     onClick={() => cycleEnvVar(v.name, v.currentValue, v.allowedValues)}
-                    className={`rounded px-2 py-0.5 text-[10px] font-medium text-white transition-colors ${
+                    className={`rounded px-2 py-0.5 text-micro font-medium text-white transition-colors ${
                       current === 'on' || current === 'apply'
                         ? 'bg-emerald-600 hover:bg-emerald-700'
                         : current === 'off'
@@ -273,16 +273,16 @@ export function IndexStatus() {
       {configVars.length > 0 && (
         <div className="rounded-lg bg-[var(--console-card-bg)] p-3">
           <h3 className="mb-2 text-xs font-semibold text-cafe-black">配置参考</h3>
-          <p className="mb-2 text-[10px] text-cafe-secondary">以下配置需在 .env 中设置，修改后重启生效。</p>
+          <p className="mb-2 text-micro text-cafe-secondary">以下配置需在 .env 中设置，修改后重启生效。</p>
           {configVars.map((v) => (
             <div key={v.name} className="rounded-lg px-2 py-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium font-mono text-cafe-black">{v.name}</span>
-                <span className="text-[10px] font-mono text-cafe-secondary truncate max-w-[50%] text-right">
+                <span className="text-micro font-mono text-cafe-secondary truncate max-w-[50%] text-right">
                   {v.sensitive ? '••••••' : v.currentValue || v.defaultValue}
                 </span>
               </div>
-              <div className="text-[10px] text-cafe-secondary mt-0.5">{v.description}</div>
+              <div className="text-micro text-cafe-secondary mt-0.5">{v.description}</div>
             </div>
           ))}
         </div>

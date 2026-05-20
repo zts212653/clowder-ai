@@ -98,7 +98,7 @@ export function BootstrapPromptCard({
           </button>
         </div>
 
-        <p className="text-[10px] text-gray-400 mt-3 ml-16">
+        <p className="text-micro text-gray-400 mt-3 ml-16">
           {isFailed
             ? '扫描仅读取项目文件结构和文档，不会执行代码或修改任何文件。'
             : '选择「稍后再说」将在 7 天后再次提醒。你也可以在记忆中心手动触发扫描。'}

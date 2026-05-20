@@ -29,9 +29,9 @@ const CAT_LABELS: Record<string, string> = {
 
 /* Cozy Swiss palette — warm tones aligned with Clowder AI design language */
 const CATEGORY_STYLE: Record<string, { color: string; bg: string; label: string; iconName: string }> = {
-  native: { color: '#7C6CA8', bg: '#F3F0FA', label: '原生工具', iconName: 'wrench' },
-  mcp: { color: '#D4915A', bg: '#FDF3EB', label: 'MCP 桥接', iconName: 'store' },
-  skill: { color: '#6BA589', bg: '#EDF7F2', label: '技能调用', iconName: 'sparkles' },
+  native: { color: 'var(--hub-cat-native)', bg: 'var(--hub-cat-native-bg)', label: '原生工具', iconName: 'wrench' },
+  mcp: { color: 'var(--hub-cat-mcp)', bg: 'var(--hub-cat-mcp-bg)', label: 'MCP 桥接', iconName: 'store' },
+  skill: { color: 'var(--hub-cat-skill)', bg: 'var(--hub-cat-skill-bg)', label: '技能调用', iconName: 'sparkles' },
 };
 
 const CATEGORIES = ['native', 'mcp', 'skill'] as const;
@@ -82,16 +82,16 @@ export function HubToolUsageTab() {
   return (
     <div className="space-y-4">
       {/* Header — cafe menu style */}
-      <div className="flex items-center justify-between rounded-xl bg-[#FDF8F3] px-4 py-3">
+      <div className="flex items-center justify-between rounded-xl bg-[var(--hub-surface)] px-4 py-3">
         <div>
-          <h3 className="text-sm font-semibold text-[#5C4A3A]">工具使用日志</h3>
-          <p className="text-xs text-[#A08A76]">猫猫们的每日工具箱使用记录</p>
+          <h3 className="text-sm font-semibold text-[var(--hub-text)]">工具使用日志</h3>
+          <p className="text-xs text-[var(--hub-text-soft)]">猫猫们的每日工具箱使用记录</p>
         </div>
         <div className="flex items-center gap-2">
           <select
             value={catFilter}
             onChange={(e) => setCatFilter(e.target.value)}
-            className="rounded-lg border border-[#E8DDD2] bg-white px-2 py-1 text-xs text-[#5C4A3A]"
+            className="rounded-lg border border-[var(--hub-border)] bg-[var(--hub-surface-clean)] px-2 py-1 text-xs text-[var(--hub-text)]"
           >
             <option value="">全部猫猫</option>
             {Object.entries(CAT_LABELS).map(([id, label]) => (
@@ -103,7 +103,7 @@ export function HubToolUsageTab() {
           <select
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
-            className="rounded-lg border border-[#E8DDD2] bg-white px-2 py-1 text-xs text-[#5C4A3A]"
+            className="rounded-lg border border-[var(--hub-border)] bg-[var(--hub-surface-clean)] px-2 py-1 text-xs text-[var(--hub-text)]"
           >
             <option value="">全部类型</option>
             {CATEGORIES.map((cat) => (
@@ -115,7 +115,7 @@ export function HubToolUsageTab() {
           <select
             value={days}
             onChange={(e) => setDays(Number(e.target.value))}
-            className="rounded-lg border border-[#E8DDD2] bg-white px-2 py-1 text-xs text-[#5C4A3A]"
+            className="rounded-lg border border-[var(--hub-border)] bg-[var(--hub-surface-clean)] px-2 py-1 text-xs text-[var(--hub-text)]"
           >
             <option value={7}>近 7 天</option>
             <option value={14}>近 14 天</option>
@@ -127,7 +127,7 @@ export function HubToolUsageTab() {
             type="button"
             onClick={() => fetchData(true)}
             disabled={loading}
-            className="rounded-lg bg-[#5C4A3A] px-3 py-1 text-xs text-white hover:bg-[#7A6555] disabled:opacity-50"
+            className="rounded-lg bg-[var(--hub-text)] px-3 py-1 text-xs text-white hover:bg-[var(--hub-btn-hover)] disabled:opacity-50"
           >
             {loading ? '冲泡中...' : '刷新'}
           </button>
@@ -137,10 +137,10 @@ export function HubToolUsageTab() {
       {error && <div className="rounded-lg bg-conn-red-bg px-3 py-2 text-xs text-conn-red-text">{error}</div>}
 
       {!error && total === 0 && !loading && (
-        <div className="rounded-xl border border-dashed border-[#E8DDD2] bg-[#FDF8F3] py-10 text-center">
-          <HubIcon name="store" className="h-7 w-7 text-[#A08A76]" />
-          <p className="mt-2 text-xs text-[#A08A76]">还没有工具使用记录</p>
-          <p className="text-xs text-[#C4B5A4]">猫猫们开始工作后，数据会自动出现在这里</p>
+        <div className="rounded-xl border border-dashed border-[var(--hub-border)] bg-[var(--hub-surface)] py-10 text-center">
+          <HubIcon name="store" className="h-7 w-7 text-[var(--hub-text-soft)]" />
+          <p className="mt-2 text-xs text-[var(--hub-text-soft)]">还没有工具使用记录</p>
+          <p className="text-xs text-[var(--hub-text-ghost)]">猫猫们开始工作后，数据会自动出现在这里</p>
         </div>
       )}
 
@@ -160,9 +160,9 @@ export function HubToolUsageTab() {
 function SummaryCards({ total, byCategory }: { total: number; byCategory: Record<string, number> }) {
   return (
     <div className="grid grid-cols-4 gap-3">
-      <div className="rounded-xl border border-[#E8DDD2] bg-[#FDF8F3] p-3 text-center">
-        <div className="text-2xl font-bold text-[#5C4A3A]">{total.toLocaleString()}</div>
-        <div className="text-xs text-[#A08A76]">总调用</div>
+      <div className="rounded-xl border border-[var(--hub-border)] bg-[var(--hub-surface)] p-3 text-center">
+        <div className="text-2xl font-bold text-[var(--hub-text)]">{total.toLocaleString()}</div>
+        <div className="text-xs text-[var(--hub-text-soft)]">总调用</div>
       </div>
       {CATEGORIES.map((cat) => {
         const style = CATEGORY_STYLE[cat];
@@ -196,10 +196,10 @@ function DailyTrend({ daily }: { daily: ToolUsageReport['daily'] }) {
   const sorted = [...daily].reverse();
 
   return (
-    <section className="space-y-3 rounded-xl border border-[#E8DDD2] bg-[#FDF8F3] p-4">
+    <section className="space-y-3 rounded-xl border border-[var(--hub-border)] bg-[var(--hub-surface)] p-4">
       <div className="flex items-center justify-between">
-        <h4 className="text-xs font-semibold text-[#5C4A3A]">每日使用趋势</h4>
-        <div className="flex gap-4 text-[10px]">
+        <h4 className="text-xs font-semibold text-[var(--hub-text)]">每日使用趋势</h4>
+        <div className="flex gap-4 text-micro">
           {CATEGORIES.map((cat) => {
             const s = CATEGORY_STYLE[cat];
             return (
@@ -217,7 +217,9 @@ function DailyTrend({ daily }: { daily: ToolUsageReport['daily'] }) {
           const pct = (dayTotal / maxDay) * 100;
           return (
             <div key={day.date} className="flex items-center gap-3 text-xs">
-              <span className="w-12 shrink-0 text-right tabular-nums text-xs text-[#A08A76]">{day.date.slice(5)}</span>
+              <span className="w-12 shrink-0 text-right tabular-nums text-xs text-[var(--hub-text-soft)]">
+                {day.date.slice(5)}
+              </span>
               <div className="flex h-6 flex-1 items-center">
                 <div className="flex h-full overflow-hidden rounded-md" style={{ width: `${Math.max(pct, 3)}%` }}>
                   {CATEGORIES.map((cat) => {
@@ -237,9 +239,9 @@ function DailyTrend({ daily }: { daily: ToolUsageReport['daily'] }) {
                   })}
                 </div>
               </div>
-              <span className="w-20 shrink-0 tabular-nums text-xs text-[#5C4A3A]">
+              <span className="w-20 shrink-0 tabular-nums text-xs text-[var(--hub-text)]">
                 <span className="font-medium">{dayTotal}</span>
-                <span className="ml-1 text-[10px] text-[#A08A76]">
+                <span className="ml-1 text-micro text-[var(--hub-text-soft)]">
                   ({day.native}/{day.mcp}/{day.skill})
                 </span>
               </span>
@@ -265,7 +267,10 @@ function TopToolsTable({ tools }: { tools: ToolUsageReport['topTools'] }) {
       {grouped.map(({ cat, style, items }) => {
         const maxCount = items[0]?.count ?? 1;
         return (
-          <section key={cat} className="space-y-2 rounded-xl border border-[#E8DDD2] bg-white p-3">
+          <section
+            key={cat}
+            className="space-y-2 rounded-xl border border-[var(--hub-border)] bg-[var(--hub-surface-clean)] p-3"
+          >
             <h4 className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: style.color }}>
               <HubIcon name={style.iconName} className="h-3.5 w-3.5" />
               {style.label}
@@ -273,8 +278,8 @@ function TopToolsTable({ tools }: { tools: ToolUsageReport['topTools'] }) {
             <div className="space-y-1">
               {items.map((tool, i) => (
                 <div key={`${cat}:${tool.name}`} className="flex items-center gap-1.5 text-xs">
-                  <span className="w-4 text-right text-[10px] text-[#A08A76]">{i + 1}</span>
-                  <span className="min-w-0 flex-1 truncate text-[#5C4A3A]" title={tool.name}>
+                  <span className="w-4 text-right text-micro text-[var(--hub-text-soft)]">{i + 1}</span>
+                  <span className="min-w-0 flex-1 truncate text-[var(--hub-text)]" title={tool.name}>
                     {tool.name}
                   </span>
                   <div className="flex w-16 items-center">
@@ -289,7 +294,7 @@ function TopToolsTable({ tools }: { tools: ToolUsageReport['topTools'] }) {
                       />
                     </div>
                   </div>
-                  <span className="w-10 text-right tabular-nums text-xs text-[#5C4A3A]">{tool.count}</span>
+                  <span className="w-10 text-right tabular-nums text-xs text-[var(--hub-text)]">{tool.count}</span>
                 </div>
               ))}
             </div>
@@ -308,15 +313,15 @@ function ByCatSection({ byCat }: { byCat: Record<string, Record<string, number>>
   if (entries.length === 0) return null;
 
   return (
-    <section className="space-y-3 rounded-xl border border-[#E8DDD2] bg-white p-4">
-      <h4 className="text-xs font-semibold text-[#5C4A3A]">猫猫工具使用分布</h4>
+    <section className="space-y-3 rounded-xl border border-[var(--hub-border)] bg-[var(--hub-surface-clean)] p-4">
+      <h4 className="text-xs font-semibold text-[var(--hub-text)]">猫猫工具使用分布</h4>
       <div className="space-y-2">
         {entries.map(([catId, cats]) => {
           const catTotal = Object.values(cats).reduce((s, v) => s + v, 0);
           return (
             <div key={catId} className="flex items-center gap-3 text-xs">
-              <span className="w-28 truncate font-medium text-[#5C4A3A]">{catLabel(catId)}</span>
-              <div className="flex h-5 flex-1 overflow-hidden rounded-full bg-[#F5F0EB]">
+              <span className="w-28 truncate font-medium text-[var(--hub-text)]">{catLabel(catId)}</span>
+              <div className="flex h-5 flex-1 overflow-hidden rounded-full bg-[var(--hub-surface-warm)]">
                 {CATEGORIES.map((category) => {
                   const val = cats[category] ?? 0;
                   if (val === 0) return null;
@@ -334,7 +339,7 @@ function ByCatSection({ byCat }: { byCat: Record<string, Record<string, number>>
                   );
                 })}
               </div>
-              <span className="w-10 text-right tabular-nums text-[#A08A76]">{catTotal}</span>
+              <span className="w-10 text-right tabular-nums text-[var(--hub-text-soft)]">{catTotal}</span>
             </div>
           );
         })}

@@ -100,7 +100,7 @@ export function BindSessionInput({
           setOpen(false);
           setStatus('idle');
         }}
-        className="text-[10px] text-cafe-muted hover:text-cafe-secondary"
+        className="text-micro text-cafe-muted hover:text-cafe-secondary"
       >
         ✕
       </button>

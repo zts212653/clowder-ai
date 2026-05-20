@@ -37,7 +37,7 @@ export function BrowserToolbar({
       <button
         type="button"
         onClick={onBack}
-        className="p-1 rounded hover:bg-[#FFF5F2] text-[#5a4a42]/60 text-sm"
+        className="p-1 rounded hover:bg-[var(--ws-surface-hover)] text-[var(--ws-text)]/60 text-sm"
         title="Back"
       >
         ‹
@@ -45,7 +45,7 @@ export function BrowserToolbar({
       <button
         type="button"
         onClick={onForward}
-        className="p-1 rounded hover:bg-[#FFF5F2] text-[#5a4a42]/60 text-sm"
+        className="p-1 rounded hover:bg-[var(--ws-surface-hover)] text-[var(--ws-text)]/60 text-sm"
         title="Forward"
       >
         ›
@@ -53,7 +53,7 @@ export function BrowserToolbar({
       <button
         type="button"
         onClick={onRefresh}
-        className="p-1 rounded hover:bg-[#FFF5F2] text-[#5a4a42]/60 text-sm"
+        className="p-1 rounded hover:bg-[var(--ws-surface-hover)] text-[var(--ws-text)]/60 text-sm"
         title="Refresh"
       >
         ↻
@@ -70,14 +70,14 @@ export function BrowserToolbar({
             if (e.key === 'Enter' && !ime.isComposing()) onNavigate();
           }}
           placeholder="localhost:3000"
-          className="w-full px-2 py-1 text-xs rounded border border-[var(--console-border-soft)] bg-cafe-surface focus:outline-none focus:border-[#E29578] placeholder:text-[#5a4a42]/30"
+          className="w-full px-2 py-1 text-xs rounded border border-[var(--console-border-soft)] bg-cafe-surface focus:outline-none focus:border-[var(--ws-accent)] placeholder:text-[var(--ws-text)]/30"
         />
       </div>
 
       <button
         type="button"
         onClick={onNavigate}
-        className="px-2.5 py-1 text-xs rounded bg-[#E29578] text-white hover:bg-[#d4856a] transition-colors"
+        className="px-2.5 py-1 text-xs rounded bg-[var(--ws-accent)] text-white hover:bg-[var(--ws-accent-hover)] transition-colors"
       >
         Go
       </button>
@@ -86,7 +86,7 @@ export function BrowserToolbar({
         type="button"
         onClick={onScreenshot}
         disabled={isCapturing || !hasTarget}
-        className="p-1 rounded hover:bg-[#FFF5F2] text-[#5a4a42]/60 text-sm disabled:opacity-30"
+        className="p-1 rounded hover:bg-[var(--ws-surface-hover)] text-[var(--ws-text)]/60 text-sm disabled:opacity-30"
         title="Capture Screenshot"
       >
         {isCapturing ? '...' : '📷'}
@@ -96,7 +96,9 @@ export function BrowserToolbar({
         type="button"
         onClick={onConsoleToggle}
         className={`p-1 rounded text-sm transition-colors ${
-          consoleOpen ? 'bg-[#E29578]/20 text-[#E29578]' : 'hover:bg-[#FFF5F2] text-[#5a4a42]/60'
+          consoleOpen
+            ? 'bg-[var(--ws-accent)]/20 text-[var(--ws-accent)]'
+            : 'hover:bg-[var(--ws-surface-hover)] text-[var(--ws-text)]/60'
         }`}
         title="Toggle Console"
       >

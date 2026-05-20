@@ -784,6 +784,57 @@ describe('InvocationQueue', () => {
     );
   });
 
+  it('hasActiveOrQueuedAgentForCat can exclude the current processing entry', () => {
+    const current = queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'current multi-target handoff',
+      source: 'agent',
+      targetCats: ['opus-47', 'codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+    queue.markProcessing('t1', 'system');
+
+    assert.equal(queue.hasActiveOrQueuedAgentForCat('t1', 'codex'), true);
+    assert.equal(
+      queue.hasActiveOrQueuedAgentForCat('t1', 'codex', { excludeEntryId: current.entry.id }),
+      false,
+      'current route entry must not block a later same-route A2A handoff back to an already-run target',
+    );
+  });
+
+  it('hasActiveOrQueuedAgentForCat still blocks other pending entries when excluding current entry', () => {
+    const current = queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'current route',
+      source: 'agent',
+      targetCats: ['opus-47', 'codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+    queue.markProcessing('t1', 'system');
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'already queued callback handoff',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+
+    assert.equal(
+      queue.hasActiveOrQueuedAgentForCat('t1', 'codex', { excludeEntryId: current.entry.id }),
+      true,
+      'a separate queued agent entry must still block duplicate text-scan A2A',
+    );
+  });
+
   it('hasActiveOrQueuedAgentForCat returns false after entry completes', () => {
     queue.enqueue({
       threadId: 't1',

@@ -15,7 +15,10 @@ function CatTag({ catId }: { catId: string }) {
   const label = family && detail && family !== detail ? `${family} · ${detail}` : (family ?? detail ?? catId);
 
   return (
-    <span className="text-xs font-medium" style={{ color: '#8E8E93', fontFamily: 'Plus Jakarta Sans, sans-serif' }}>
+    <span
+      className="text-xs font-medium"
+      style={{ color: 'var(--hub-lb-text-muted)', fontFamily: 'Plus Jakarta Sans, sans-serif' }}
+    >
       {label}
     </span>
   );
@@ -23,17 +26,20 @@ function CatTag({ catId }: { catId: string }) {
 
 export function CatHeroCard({ cat, unit }: { cat: RankedCat; unit: string }) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-xl p-5" style={{ background: '#F4EFE7' }}>
+    <div className="flex flex-col items-center gap-3 rounded-xl p-5" style={{ background: 'var(--hub-lb-card-bg)' }}>
       <span className="text-3xl">{MEDAL[cat.rank - 1] ?? `#${cat.rank}`}</span>
       <CatAvatar catId={cat.catId} size={72} />
-      <span className="text-lg font-medium" style={{ fontFamily: 'Fraunces, serif', color: '#2D2D2D' }}>
+      <span className="text-lg font-medium" style={{ fontFamily: 'Fraunces, serif', color: 'var(--hub-lb-text)' }}>
         {cat.displayName}
       </span>
       <CatTag catId={cat.catId} />
-      <span className="text-4xl font-medium tracking-tight" style={{ fontFamily: 'Fraunces, serif', color: '#8B6F47' }}>
+      <span
+        className="text-4xl font-medium tracking-tight"
+        style={{ fontFamily: 'Fraunces, serif', color: 'var(--hub-lb-accent)' }}
+      >
         {cat.count}
       </span>
-      <span className="text-xs font-medium" style={{ color: '#8E8E93' }}>
+      <span className="text-xs font-medium" style={{ color: 'var(--hub-lb-text-muted)' }}>
         {unit}
       </span>
     </div>
@@ -42,17 +48,27 @@ export function CatHeroCard({ cat, unit }: { cat: RankedCat; unit: string }) {
 
 export function WorkMetric({ cat, label }: { cat: RankedCat | undefined; label: string }) {
   return (
-    <div className="flex flex-col gap-1.5 rounded-xl p-5" style={{ background: '#F4EFE7' }}>
-      <span className="text-4xl font-medium tracking-tight" style={{ fontFamily: 'Fraunces, serif', color: '#2D2D2D' }}>
+    <div className="flex flex-col gap-1.5 rounded-xl p-5" style={{ background: 'var(--hub-lb-card-bg)' }}>
+      <span
+        className="text-4xl font-medium tracking-tight"
+        style={{ fontFamily: 'Fraunces, serif', color: 'var(--hub-lb-text)' }}
+      >
         {cat?.count ?? 0}
       </span>
-      <span className="text-xs font-medium" style={{ color: '#8E8E93', fontFamily: 'Plus Jakarta Sans, sans-serif' }}>
+      <span
+        className="text-xs font-medium"
+        style={{ color: 'var(--hub-lb-text-muted)', fontFamily: 'Plus Jakarta Sans, sans-serif' }}
+      >
         {label}
       </span>
       {cat && (
         <span
           className="inline-flex self-start rounded-md px-2.5 py-1 text-xs font-semibold"
-          style={{ background: 'rgba(139,111,71,0.08)', color: '#8B6F47', fontFamily: 'Plus Jakarta Sans, sans-serif' }}
+          style={{
+            background: 'var(--hub-lb-badge-bg)',
+            color: 'var(--hub-lb-accent)',
+            fontFamily: 'Plus Jakarta Sans, sans-serif',
+          }}
         >
           🏅 {cat.displayName}
         </span>
@@ -64,7 +80,7 @@ export function WorkMetric({ cat, label }: { cat: RankedCat | undefined; label: 
 export function MiniRanked({ items, unit }: { items: RankedCat[]; unit: string }) {
   if (items.length === 0)
     return (
-      <p className="text-sm" style={{ color: '#8E8E93' }}>
+      <p className="text-sm" style={{ color: 'var(--hub-lb-text-muted)' }}>
         暂无数据
       </p>
     );
@@ -74,10 +90,10 @@ export function MiniRanked({ items, unit }: { items: RankedCat[]; unit: string }
         <li key={cat.catId} className="flex items-center gap-2">
           <span className="text-sm">{MEDAL[cat.rank - 1] ?? `#${cat.rank}`}</span>
           <CatAvatar catId={cat.catId} size={24} />
-          <span className="text-sm font-semibold" style={{ color: '#2D2D2D' }}>
+          <span className="text-sm font-semibold" style={{ color: 'var(--hub-lb-text)' }}>
             {cat.displayName}
           </span>
-          <span className="text-xs ml-auto" style={{ color: '#8E8E93' }}>
+          <span className="text-xs ml-auto" style={{ color: 'var(--hub-lb-text-muted)' }}>
             {cat.count} {unit}
           </span>
         </li>
@@ -89,7 +105,7 @@ export function MiniRanked({ items, unit }: { items: RankedCat[]; unit: string }
 export function StreakRanked({ items }: { items: StreakCat[] }) {
   if (items.length === 0)
     return (
-      <p className="text-sm" style={{ color: '#8E8E93' }}>
+      <p className="text-sm" style={{ color: 'var(--hub-lb-text-muted)' }}>
         暂无数据
       </p>
     );
@@ -98,10 +114,10 @@ export function StreakRanked({ items }: { items: StreakCat[] }) {
       {items.slice(0, 5).map((cat) => (
         <li key={cat.catId} className="flex items-center gap-2">
           <span className="text-sm">{MEDAL[cat.rank - 1] ?? `#${cat.rank}`}</span>
-          <span className="text-sm font-semibold" style={{ color: '#2D2D2D' }}>
+          <span className="text-sm font-semibold" style={{ color: 'var(--hub-lb-text)' }}>
             {cat.displayName}
           </span>
-          <span className="text-xs ml-auto" style={{ color: '#8E8E93' }}>
+          <span className="text-xs ml-auto" style={{ color: 'var(--hub-lb-text-muted)' }}>
             连续 {cat.currentStreak} 天 (最长 {cat.maxStreak})
           </span>
         </li>
@@ -112,8 +128,8 @@ export function StreakRanked({ items }: { items: StreakCat[] }) {
 
 export function SectionCard({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="rounded-2xl p-6 flex flex-col gap-4" style={{ background: '#FFFDF8' }}>
-      <h3 className="text-xl font-medium" style={{ fontFamily: 'Fraunces, serif', color: '#2D2D2D' }}>
+    <div className="rounded-2xl p-6 flex flex-col gap-4" style={{ background: 'var(--hub-lb-section-bg)' }}>
+      <h3 className="text-xl font-medium" style={{ fontFamily: 'Fraunces, serif', color: 'var(--hub-lb-text)' }}>
         {title}
       </h3>
       {children}

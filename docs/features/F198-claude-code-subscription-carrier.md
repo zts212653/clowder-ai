@@ -301,6 +301,17 @@ in_context_observability:
 - [x] AC-C6: 跨猫愿景守护（Maine Coon + Siamese/Siamese）认证"oversight 信息密度 ≥ -p 模式"（@codex ✅ REVIEW PASS + @opus-47 ✅ 愿景守护 APPROVE — runtime 数据流全链路 trace 验证，信息密度严格超过 -p）
 
 ### Phase D（兜底 + 切流量）
+
+> **实证缺口（2026-05-19 F203 alpha canary flip 撞出 3 个 production-gap，promote 为 Phase D P1）**：
+>
+> | # | 现象 | spec 之前状态 | 处理 |
+> |---|------|--------------|------|
+> | 1 | BgCarrier 缺 `--permission-mode bypassPermissions` → 每个 tool call 在 detached daemon TTY 弹 prompt → web UI 看不见，session 整个卡死 | 之前 OQ 没明列，alpha smoke 漏覆盖 | ✅ **Fixed PR #1785 (`6e1adbbbe` 2026-05-20)** — bg carrier --permission-mode bypassPermissions parity with -p |
+> | 2 | `state.json` 永久卡 `working`（MCP 工具调用后 daemon 不更新 state）→ UI 永远"正在回复"卡死；`JobState` 缺 `failed/blocked/stopped` 枚举 | **OQ-12** `--bg cancel/interrupt 语义` 已标 ⬜ Phase B spike，**没真关** | ✅ **Fixed PR #1798 (`281349e15` 2026-05-20)** — transcript `turn_duration` backup 终止信号 + 补全 state 枚举 |
+> | 3 | cancel 后新消息**新建 session 不 resume**（carrier 从未实现 `--resume`，存 daemon shortId 非 conversation UUID） | **OQ-7** `Interactive session resume 语义` 已标 ⬜ Phase B spike，**没真关** | ⬜ **Deferred** — separate PR，详见 bug-report §4.2 |
+>
+> 实证教训：Phase B/C "alpha-validated ✅ canary 零操作员介入" = alpha **单 happy-path 跑通**，**production 真用浮的 gap 全被 alpha smoke 漏过**。"切流量"前必须先 hardening 这些 gap，否则 6/15 cutover 真翻 = 全员协作链路断。来源：F203-47（跨 thread）→ F198-47（本 spec owner，同一 model 不同 invocation）2026-05-19 投诉。
+
 - [ ] AC-D1: 三档 fallback 实现 + 自动触发逻辑（quota 超限 / carrier 挂掉）
 - [ ] AC-D2: 预算治理面板 + 告警阈值生效
 - [ ] AC-D3: 灰度切流量 10% → 50% → 100%，每档观察期内无 P0/P1 regression

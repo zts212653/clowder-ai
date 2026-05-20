@@ -2,7 +2,7 @@
 
 import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { EmbeddingService } from './EmbeddingService.js';
 import { loadExternalCollections, resolveCollectionStorePath } from './external-collections.js';
 import { GlobalIndexBuilder } from './GlobalIndexBuilder.js';
@@ -76,6 +76,19 @@ export interface MemoryConfig {
   memoryRoot?: string;
 }
 
+export function computeChildExcludes(parentRoot: string, children: Array<{ root: string }>): string[] {
+  const absParent = resolve(parentRoot);
+  const excludes: string[] = [];
+  for (const child of children) {
+    const absChild = resolve(child.root);
+    if (absChild.startsWith(absParent + '/') && absChild !== absParent) {
+      const rel = relative(absParent, absChild);
+      excludes.push(`${rel}/**`);
+    }
+  }
+  return excludes;
+}
+
 export async function createMemoryServices(config: MemoryConfig): Promise<MemoryServices> {
   const sqlitePath = config.sqlitePath ?? 'evidence.sqlite';
   const docsRoot = config.docsRoot ?? 'docs';
@@ -113,6 +126,13 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
   }
 
   const embedDeps = embeddingService && vectorStore ? { embedding: embeddingService, vectorStore } : undefined;
+
+  // Pre-load external manifests to compute child excludes (AC-H1)
+  // Must happen before IndexBuilder so CatCafeScanner gets the exclude patterns
+  const dataDir = join(homedir(), '.cat-cafe');
+  const externals = loadExternalCollections(dataDir);
+  const childExcludes = computeChildExcludes(docsRoot, externals);
+
   const indexBuilder = new IndexBuilder(
     store,
     docsRoot,
@@ -121,6 +141,8 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
     config.threadListFn,
     config.messageListFn,
     config.excludeThreadIdsFn,
+    undefined,
+    childExcludes.length > 0 ? childExcludes : undefined,
   );
 
   // Wire rerank deps into store for search-time
@@ -166,6 +188,7 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
     root: docsRoot,
     sensitivity: 'internal',
     scannerLevel: 0,
+    exclude: childExcludes.length > 0 ? childExcludes : undefined,
     indexPolicy: { autoRebuild: true },
     reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: false },
     createdAt: now,
@@ -189,9 +212,6 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
     });
     stores.set('global:methods', globalStore);
   }
-
-  const dataDir = join(homedir(), '.cat-cafe');
-  const externals = loadExternalCollections(dataDir);
   for (const manifest of externals) {
     try {
       catalog.register(manifest);

@@ -160,7 +160,7 @@ export function InstallPlanDetail({
           <HubIcon name={action.icon} className="h-4 w-4" />
           {copied ? '已复制!' : action.label}
         </button>
-        <p className="mt-1.5 text-center text-[10px] text-cafe-muted">{action.hint}</p>
+        <p className="mt-1.5 text-center text-micro text-cafe-muted">{action.hint}</p>
       </div>
     </div>
   );

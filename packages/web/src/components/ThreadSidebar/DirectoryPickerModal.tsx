@@ -216,7 +216,7 @@ export function DirectoryPickerModal({
 
         {/* ── Project list (PRIMARY ACTION — takes most space, hidden when browser is open) ── */}
         <div className={`overflow-y-auto px-5 py-3 space-y-1 ${showBrowser ? 'hidden' : 'flex-1 min-h-[180px]'}`}>
-          <div className="text-[10px] text-cafe-muted font-medium mb-1">选择项目</div>
+          <div className="text-micro text-cafe-muted font-medium mb-1">选择项目</div>
 
           {cwdPath && !existingProjects.includes(cwdPath) && (
             <button
@@ -228,9 +228,9 @@ export function DirectoryPickerModal({
               <FolderIcon />
               <div className="min-w-0 flex-1">
                 <span className="font-medium block truncate">{projectDisplayName(cwdPath)}</span>
-                <span className="text-[10px] text-cafe-muted block truncate">{cwdPath}</span>
+                <span className="text-micro text-cafe-muted block truncate">{cwdPath}</span>
               </div>
-              <span className="text-[10px] text-cafe-accent flex-shrink-0">推荐</span>
+              <span className="text-micro text-cafe-accent flex-shrink-0">推荐</span>
             </button>
           )}
 
@@ -248,9 +248,9 @@ export function DirectoryPickerModal({
                 <FolderIcon />
                 <div className="min-w-0 flex-1">
                   <span className="font-medium block truncate">{projectDisplayName(selectedPath)}</span>
-                  <span className="text-[10px] text-cafe-muted block truncate">{selectedPath}</span>
+                  <span className="text-micro text-cafe-muted block truncate">{selectedPath}</span>
                 </div>
-                <span className="text-[10px] text-cafe-accent flex-shrink-0">已选</span>
+                <span className="text-micro text-cafe-accent flex-shrink-0">已选</span>
               </button>
             )}
 
@@ -265,7 +265,7 @@ export function DirectoryPickerModal({
               <FolderIcon />
               <div className="min-w-0 flex-1">
                 <span className="font-medium block truncate">{projectDisplayName(path)}</span>
-                <span className="text-[10px] text-cafe-muted block truncate">{path}</span>
+                <span className="text-micro text-cafe-muted block truncate">{path}</span>
               </div>
             </button>
           ))}
@@ -359,9 +359,7 @@ export function DirectoryPickerModal({
                 </button>
                 {bindExpanded && (
                   <div className="mt-1.5 space-y-2">
-                    <p className="text-[10px] text-cafe-muted">
-                      粘贴 Claude Code / Codex 的 Session ID，创建后自动绑定
-                    </p>
+                    <p className="text-micro text-cafe-muted">粘贴 Claude Code / Codex 的 Session ID，创建后自动绑定</p>
                     {selectedCats.map((catId) => {
                       const cat = getCatById(catId);
                       const label = cat ? formatCatName(cat) : catId;
@@ -443,7 +441,7 @@ export function DirectoryPickerModal({
               </button>
             )}
           </div>
-          {pathError && <p className="text-[10px] text-conn-red-text">{pathError}</p>}
+          {pathError && <p className="text-micro text-conn-red-text">{pathError}</p>}
           {/* F068-R7: Selected path hint + confirm button */}
           <div className="flex items-center gap-2 pt-1">
             {selectedPath && (

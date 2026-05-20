@@ -18,12 +18,19 @@ import { join } from 'node:path';
 const HOME = homedir();
 const JOBS_DIR = join(HOME, '.claude/jobs');
 
-/** State machine values emitted by Anthropic Agent View daemon. */
-export type JobState = 'queued' | 'working' | 'done' | 'error' | 'idle';
+/** State machine values emitted by Anthropic Agent View daemon.
+ *  F198 Phase D Bug #2 fix: `failed` / `blocked` / `stopped` were observed
+ *  in real `~/.claude/jobs/<id>/state.json` files (evidence: b67f7411=failed,
+ *  25d080fe=blocked) but were missing from this union — the carrier's
+ *  terminal check silently ignored them and hung to the 30-min timeout. */
+export type JobState = 'queued' | 'working' | 'done' | 'error' | 'idle' | 'failed' | 'blocked' | 'stopped';
 
 export interface JobStateSnapshot {
   state: JobState;
   detail?: string;
+  /** F198 Phase D Bug #2: populated when state==='blocked' — what the
+   *  daemon is waiting on (e.g. "confirm whether to trigger the demo"). */
+  needs?: string;
   tempo?: string;
   inFlight?: { tasks: number; queued: number; kinds: string[] };
   output?: { result?: string };

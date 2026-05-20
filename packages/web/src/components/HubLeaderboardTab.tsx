@@ -50,11 +50,14 @@ export function HubLeaderboardTab() {
   return (
     <div
       className="flex flex-col gap-6 p-6 rounded-xl overflow-y-auto"
-      style={{ background: '#F4EFE7', fontFamily: plusJakartaSans.style.fontFamily }}
+      style={{ background: 'var(--hub-lb-card-bg)', fontFamily: plusJakartaSans.style.fontFamily }}
     >
       {/* Header + Range Filter */}
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-medium" style={{ fontFamily: fraunces.style.fontFamily, color: '#2D2D2D' }}>
+        <h2
+          className="text-xl font-medium"
+          style={{ fontFamily: fraunces.style.fontFamily, color: 'var(--hub-lb-text)' }}
+        >
           Cat Leaderboard
         </h2>
         <div className="flex gap-3">
@@ -66,8 +69,8 @@ export function HubLeaderboardTab() {
               className="rounded-lg px-4 py-2.5 text-sm font-medium transition-colors"
               style={
                 range === opt.value
-                  ? { background: '#8B6F47', color: '#FFFFFF' }
-                  : { background: 'transparent', color: '#8E8E93' }
+                  ? { background: 'var(--hub-lb-accent)', color: 'var(--hub-surface-clean)' }
+                  : { background: 'transparent', color: 'var(--hub-lb-text-muted)' }
               }
             >
               {opt.label}
@@ -77,12 +80,15 @@ export function HubLeaderboardTab() {
       </div>
 
       {error && (
-        <p className="text-sm rounded-lg px-3 py-2" style={{ color: '#D4845E', background: 'rgba(212,132,94,0.1)' }}>
+        <p
+          className="text-sm rounded-lg px-3 py-2"
+          style={{ color: 'var(--hub-lb-accent-warm)', background: 'var(--hub-lb-error-bg)' }}
+        >
           {error}
         </p>
       )}
       {loading && !data && (
-        <p className="text-sm" style={{ color: '#8E8E93' }}>
+        <p className="text-sm" style={{ color: 'var(--hub-lb-text-muted)' }}>
           加载中...
         </p>
       )}
@@ -91,7 +97,7 @@ export function HubLeaderboardTab() {
         <>
           {/* Hero — Most Beloved */}
           <SectionCard title="本周之星">
-            <p className="text-sm" style={{ color: '#8E8E93' }}>
+            <p className="text-sm" style={{ color: 'var(--hub-lb-text-muted)' }}>
               Who is the most beloved feline?
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
@@ -135,7 +141,7 @@ export function HubLeaderboardTab() {
               {data.cvoLevel ? (
                 <CvoLevelCard level={data.cvoLevel} />
               ) : (
-                <p className="text-sm" style={{ color: '#8E8E93' }}>
+                <p className="text-sm" style={{ color: 'var(--hub-lb-text-muted)' }}>
                   暂无等级数据
                 </p>
               )}
@@ -144,7 +150,7 @@ export function HubLeaderboardTab() {
               {data.games ? (
                 <GameArena stats={data.games} />
               ) : (
-                <p className="text-sm" style={{ color: '#8E8E93' }}>
+                <p className="text-sm" style={{ color: 'var(--hub-lb-text-muted)' }}>
                   暂无游戏数据
                 </p>
               )}

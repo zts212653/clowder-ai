@@ -44,7 +44,7 @@ export function ImagePreview({ files, onRemove }: ImagePreviewProps) {
             >
               x
             </button>
-            <span className="block text-[10px] text-cafe-muted truncate w-16 mt-0.5 text-center">{file.name}</span>
+            <span className="block text-micro text-cafe-muted truncate w-16 mt-0.5 text-center">{file.name}</span>
           </div>
         ))}
       </div>

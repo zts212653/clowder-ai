@@ -69,7 +69,7 @@ export function SplitPaneCell({
         <span className="text-xs font-medium text-cafe-secondary truncate flex-1">{threadTitle}</span>
         {threadState.isLoading && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />}
         {threadState.unreadCount > 0 && (
-          <span className="text-[10px] bg-amber-500 text-white rounded-full px-1 min-w-[14px] text-center">
+          <span className="text-micro bg-amber-500 text-white rounded-full px-1 min-w-[14px] text-center">
             {threadState.unreadCount > 99 ? '99+' : threadState.unreadCount}
           </span>
         )}
@@ -95,7 +95,7 @@ export function SplitPanePlaceholder({ index }: { index: number }) {
     <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-cafe transition-colors">
       <span className="text-2xl text-gray-200 mb-1">+</span>
       <span className="text-xs text-cafe-muted">窗格 {index + 1}</span>
-      <span className="text-[10px] text-cafe-muted mt-0.5">点击左侧 thread 分配到此处</span>
+      <span className="text-micro text-cafe-muted mt-0.5">点击左侧 thread 分配到此处</span>
     </div>
   );
 }

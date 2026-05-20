@@ -130,7 +130,7 @@ export function BrakeModal() {
             <div key={msg.catId} className="flex items-start gap-3">
               <div className="relative shrink-0">
                 <CatAvatar catId={msg.catId} size={48} />
-                <span className="absolute -bottom-1 -right-1 text-[10px] px-1 py-0.5 rounded bg-cafe-surface/90 border border-cafe">
+                <span className="absolute -bottom-1 -right-1 text-micro px-1 py-0.5 rounded bg-cafe-surface/90 border border-cafe">
                   {alertBadge}
                 </span>
               </div>

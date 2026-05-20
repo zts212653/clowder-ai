@@ -83,7 +83,7 @@ export function SessionSearchTab({ threadId, onViewSession }: SessionSearchTabPr
         </button>
       </form>
 
-      <div className="flex items-center gap-1 text-[10px] text-cafe-muted">
+      <div className="flex items-center gap-1 text-micro text-cafe-muted">
         <span>范围:</span>
         {(['both', 'transcripts', 'digests'] as const).map((s) => (
           <button
@@ -115,7 +115,7 @@ export function SessionSearchTab({ threadId, onViewSession }: SessionSearchTabPr
                   className="rounded border border-cafe-subtle px-2 py-1.5 hover:bg-cafe-surface-elevated transition-colors"
                 >
                   <div className="flex items-center gap-1.5 text-xs">
-                    <span className={`px-1 py-0.5 rounded text-[10px] font-medium ${badge.bg} ${badge.text}`}>
+                    <span className={`px-1 py-0.5 rounded text-micro font-medium ${badge.bg} ${badge.text}`}>
                       {hit.kind}
                     </span>
                     <button
@@ -129,7 +129,7 @@ export function SessionSearchTab({ threadId, onViewSession }: SessionSearchTabPr
                   </div>
                   <p className="text-xs text-cafe-secondary mt-0.5">{hit.snippet}</p>
                   {hit.pointer.eventNo != null && (
-                    <span className="text-[10px] text-cafe-muted">event #{hit.pointer.eventNo}</span>
+                    <span className="text-micro text-cafe-muted">event #{hit.pointer.eventNo}</span>
                   )}
                 </div>
               );

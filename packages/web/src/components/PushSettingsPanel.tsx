@@ -100,7 +100,7 @@ function BrowserPushCard({
         <div className="px-5 py-3 border-t border-[var(--console-border-soft)]">
           <p className="mb-3 text-xs text-cafe-muted leading-relaxed">
             浏览器推送需要配置服务端密钥对来标识推送身份。终端运行{' '}
-            <code className="text-[10px] bg-[var(--console-field-bg)] px-1 py-0.5 rounded">
+            <code className="text-micro bg-[var(--console-field-bg)] px-1 py-0.5 rounded">
               npx web-push generate-vapid-keys
             </code>{' '}
             生成后填入下方。

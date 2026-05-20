@@ -71,7 +71,7 @@ export function GameResultScreen({ stats, onClose }: GameResultScreenProps) {
       <div data-testid="player-stats" className="w-full max-w-lg">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-[10px] text-ww-dim font-mono tracking-wider border-b border-ww-subtle">
+            <tr className="text-micro text-ww-dim font-mono tracking-wider border-b border-ww-subtle">
               <th className="text-left py-2 px-1">座位</th>
               <th className="text-left py-2 px-1">玩家</th>
               <th className="text-left py-2 px-1">角色</th>

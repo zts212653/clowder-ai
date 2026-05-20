@@ -897,7 +897,7 @@
     {
       "id": "F147",
       "name": "i18n — Hub 界面中英文切换",
-      "status": "idea | **Owner**: 待定 | **Priority**: 待定",
+      "status": "idea | **Owner**: 待定 | **Priority**: P2（team lead 2026-05-19 提出需求）",
       "file": "F147-i18n-hub-locale-switch.md"
     },
     {
@@ -1155,7 +1155,7 @@
     {
       "id": "F188",
       "name": "Library Stewardship — 图书馆管护与成长",
-      "status": "in-progress (Phase A/B/C/Graph readability/Graph Query/F/G/I/D merged; Phase E superseded by F200; Phase H remaining) | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "done | **Completed**: 2026-05-20 | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F188-library-stewardship.md"
     },
     {
@@ -1251,7 +1251,7 @@
     {
       "id": "F206",
       "name": "Settings UI Convergence — 组件语言归一",
-      "status": "done | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F206-settings-ui-convergence.md"
     },
     {

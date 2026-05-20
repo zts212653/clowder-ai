@@ -152,7 +152,7 @@ export function ProjectSetupCard({
           <div>
             <p className="text-sm font-medium text-cafe-black">发现了一片新大陆！</p>
             <p className="text-xs text-gray-500 mt-0.5">
-              项目 <code className="px-1 py-0.5 bg-cafe-surface rounded text-[10px]">{dirName}</code>{' '}
+              项目 <code className="px-1 py-0.5 bg-cafe-surface rounded text-micro">{dirName}</code>{' '}
               {isEmptyDir ? '是空目录，' : ''}需要初始化后猫猫才能工作。
             </p>
           </div>
@@ -192,7 +192,7 @@ export function ProjectSetupCard({
                   <HubIcon name="folder" className="h-5 w-5 text-cafe-accent" />
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-cafe-black">克隆 Git 仓库</span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-cafe-accent/10 text-cafe-accent font-medium">
+                    <span className="text-micro px-1.5 py-0.5 rounded-full bg-cafe-accent/10 text-cafe-accent font-medium">
                       推荐
                     </span>
                   </div>
@@ -270,7 +270,7 @@ export function ProjectSetupCard({
             </div>
 
             {/* Explanation */}
-            <p className="text-[10px] text-gray-400 px-1 mt-1">
+            <p className="text-micro text-gray-400 px-1 mt-1">
               初始化将写入协作规则（CLAUDE.md 等）、Skills 链接和方法论模板。已有文件不会被覆盖。
             </p>
           </div>

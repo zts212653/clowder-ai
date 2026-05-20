@@ -107,15 +107,15 @@ export function StudyTimeline({ days = 7 }: StudyTimelineProps) {
                   >
                     {entry.articleTitle}
                   </a>
-                  <span className="shrink-0 text-[10px] text-cafe-muted">{formatTime(entry.lastStudiedAt)}</span>
+                  <span className="shrink-0 text-micro text-cafe-muted">{formatTime(entry.lastStudiedAt)}</span>
                 </div>
-                <span className="text-[10px] text-cafe-muted">{entry.source}</span>
+                <span className="text-micro text-cafe-muted">{entry.source}</span>
                 {entry.artifacts.length > 0 && (
                   <div className="mt-1 flex flex-wrap gap-1">
                     {entry.artifacts.map((a) => (
                       <span
                         key={a.id}
-                        className="rounded-full bg-[var(--console-field-bg)] px-1.5 py-0.5 text-[10px] text-cafe-secondary"
+                        className="rounded-full bg-[var(--console-field-bg)] px-1.5 py-0.5 text-micro text-cafe-secondary"
                       >
                         <HubIcon name={ARTIFACT_ICON_NAMES[a.kind] ?? 'file-text'} className="inline h-3 w-3" />{' '}
                         {a.kind} · {a.state}
@@ -129,7 +129,7 @@ export function StudyTimeline({ days = 7 }: StudyTimelineProps) {
                       <a
                         key={t.threadId}
                         href={`/thread/${encodeURIComponent(t.threadId)}`}
-                        className="rounded-full bg-opus-bg px-1.5 py-0.5 text-[10px] text-opus-dark hover:underline"
+                        className="rounded-full bg-opus-bg px-1.5 py-0.5 text-micro text-opus-dark hover:underline"
                       >
                         <HubIcon name="message-circle" className="inline h-3 w-3" /> {t.threadId.slice(0, 12)}...
                       </a>

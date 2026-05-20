@@ -105,7 +105,7 @@ export function HubAgentSessionsTab() {
                   <button
                     type="button"
                     onClick={() => setAttachOverlay(attachOverlay === s.daemonShortId ? null : s.daemonShortId)}
-                    className="text-[10px] px-1.5 py-0.5 rounded border border-cafe-border text-cafe-muted hover:text-cafe-text hover:border-cafe-text transition-colors"
+                    className="text-micro px-1.5 py-0.5 rounded border border-cafe-border text-cafe-muted hover:text-cafe-text hover:border-cafe-text transition-colors"
                   >
                     接管
                   </button>
@@ -113,7 +113,7 @@ export function HubAgentSessionsTab() {
               </div>
               {s.detail && <div className="text-xs text-cafe-muted truncate">{s.detail}</div>}
               {s.cwd && <div className="text-xs text-cafe-muted truncate font-mono">{s.cwd}</div>}
-              <div className="flex gap-4 text-[10px] text-cafe-muted">
+              <div className="flex gap-4 text-micro text-cafe-muted">
                 {s.createdAt && <span>创建 {formatTs(s.createdAt)}</span>}
                 {s.updatedAt && <span>更新 {formatTs(s.updatedAt)}</span>}
               </div>
@@ -126,7 +126,7 @@ export function HubAgentSessionsTab() {
                   <button
                     type="button"
                     onClick={() => void handleCopy(s.daemonShortId)}
-                    className="text-[10px] px-1.5 py-0.5 rounded bg-cafe-surface text-cafe-muted hover:text-cafe-text transition-colors flex-shrink-0"
+                    className="text-micro px-1.5 py-0.5 rounded bg-cafe-surface text-cafe-muted hover:text-cafe-text transition-colors flex-shrink-0"
                   >
                     {copied ? '已复制 ✓' : '复制'}
                   </button>

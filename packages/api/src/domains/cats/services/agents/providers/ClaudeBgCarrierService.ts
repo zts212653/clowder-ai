@@ -70,6 +70,11 @@ export interface ClaudeBgCarrierServiceOptions {
   jobsDir?: string;
   /** Test seam — invoke() poll interval (ms). Default 500. */
   pollMs?: number;
+  /** Test seam — invoke() terminal-wait timeout (ms). Default 30 min.
+   *  F198 Phase D Bug #2 fix: exposed so terminal-detection tests can
+   *  assert fast-fail instead of hanging the full 30-minute production
+   *  ceiling. Production callers leave undefined. */
+  timeoutMs?: number;
   /** Absolute path to MCP server entry (dist/index.js) for --mcp-config.
    *  Resolved from env CAT_CAFE_MCP_SERVER_PATH or repo layout heuristics
    *  via `resolveDefaultClaudeMcpServerPath` when undefined.
@@ -105,6 +110,7 @@ export class ClaudeBgCarrierService implements AgentService {
   private readonly spawnFn: typeof spawn;
   private readonly jobsDir?: string;
   private readonly pollMs: number;
+  private readonly timeoutMs: number;
   private readonly mcpServerPath: string | undefined;
   /** Windows: cached MCP config file path (created once per instance,
    *  reused across invocations to avoid temp file spam). */
@@ -119,6 +125,7 @@ export class ClaudeBgCarrierService implements AgentService {
     this.l0CompilerFn = options?.l0CompilerFn ?? compileL0ViaSubprocess;
     this.jobsDir = options?.jobsDir;
     this.pollMs = options?.pollMs ?? 500;
+    this.timeoutMs = options?.timeoutMs ?? 30 * 60_000;
     // 砚砚 Step-3 P1: resolve MCP server path same way as ClaudeAgentService
     // (single source of truth via `resolveDefaultClaudeMcpServerPath`).
     const configuredPath = options?.mcpServerPath ?? process.env.CAT_CAFE_MCP_SERVER_PATH;
@@ -224,6 +231,17 @@ export class ClaudeBgCarrierService implements AgentService {
       const args = useEnvModelOverride ? ['--bg', prompt] : ['--bg', prompt, '--model', effectiveModel];
       // F203 Phase C: native system role from compiled L0 file (above).
       args.push('--system-prompt-file', l0Path);
+
+      // F198 Phase D carrier parity (2026-05-19 hotfix): ClaudeAgentService
+      // ('-p' carrier) passes `--permission-mode bypassPermissions` so cats can
+      // invoke tools (Bash / Edit / etc.) without per-call approval prompts.
+      // ClaudeBgCarrierService ('--bg' carrier) was missing this flag → the
+      // daemon-spawned claude process reverted to default permission mode →
+      // every tool call prompted inside the detached daemon TTY (invisible
+      // from web UI) → invocations hung. Realized when 铲屎官 flipped
+      // CAT_CAFE_CLAUDE_CARRIER=bg_daemon in runtime and布偶猫 cats stalled
+      // on first Bash call. Parity-keep with ClaudeAgentService PERMISSION_MODE.
+      args.push('--permission-mode', 'bypassPermissions');
 
       // 砚砚 Step-3 P1 (2026-05-14): inject --mcp-config when callbackEnv
       // present + mcpServerPath resolved. Mirrors ClaudeAgentService so
@@ -362,7 +380,7 @@ export class ClaudeBgCarrierService implements AgentService {
     // codex review (PR #1666 round 5) P1.2: on abort / timeout, issue a
     // best-effort `claude stop <shortId>` so the detached --bg session
     // stops consuming quota instead of leaking until natural completion.
-    const timeoutMs = 30 * 60_000;
+    const timeoutMs = this.timeoutMs;
     const deadline = Date.now() + timeoutMs;
 
     let tailer: TranscriptTailer | undefined;
@@ -374,6 +392,7 @@ export class ClaudeBgCarrierService implements AgentService {
     // terminal (long jobs would build unbounded memory pressure).
     const usageAcc = createUsageAccumulator();
     let transcriptEntryCount = 0;
+    let transcriptTerminal = false;
     // codex slice-2 P1 round-4 (2026-05-14): track the LAST assistant
     // entry's joined text content. Predicate at terminal:
     //   trim(lastAssistantText) === trim(state.output.result) → suppress
@@ -460,7 +479,13 @@ export class ClaudeBgCarrierService implements AgentService {
         try {
           newEntries = await tailer.readNew();
         } catch (err) {
-          if (state?.state === 'done' || state?.state === 'error') {
+          if (
+            state?.state === 'done' ||
+            state?.state === 'error' ||
+            state?.state === 'failed' ||
+            state?.state === 'blocked' ||
+            state?.state === 'stopped'
+          ) {
             // Terminal state — degrade gracefully, fallback path will emit
             // output.result if present. No leak (job already finished).
             tailer = undefined;
@@ -476,10 +501,27 @@ export class ClaudeBgCarrierService implements AgentService {
           accumulateUsageFromEntries(usageAcc, newEntries);
           transcriptEntryCount += newEntries.length;
           yield* yieldFromTranscript(newEntries);
+          if (!transcriptTerminal) {
+            for (const raw of newEntries) {
+              if (typeof raw === 'object' && raw !== null) {
+                const e = raw as Record<string, unknown>;
+                if (e.type === 'system' && e.subtype === 'turn_duration') {
+                  transcriptTerminal = true;
+                  break;
+                }
+              }
+            }
+          }
         }
       }
 
-      if (state?.state === 'done' || state?.state === 'error') {
+      const stateTerminal =
+        state?.state === 'done' ||
+        state?.state === 'error' ||
+        state?.state === 'failed' ||
+        state?.state === 'blocked' ||
+        state?.state === 'stopped';
+      if (stateTerminal || transcriptTerminal) {
         // Final drain: transcript may have grown between last poll and terminal.
         // codex slice-2 P1 (regression B): use includeTrailingPartial to also
         // emit the final line when daemon committed state=done before
@@ -508,8 +550,8 @@ export class ClaudeBgCarrierService implements AgentService {
         // equality on the LAST assistant entry's joined text — substring /
         // endsWith would falsely match when result is a prefix/suffix of
         // earlier text (round-3 SPIKE_OK trap).
-        const resultText = state.output?.result;
-        if (state.state === 'done' && typeof resultText === 'string' && resultText.trim().length > 0) {
+        const resultText = state?.output?.result;
+        if (state?.state === 'done' && typeof resultText === 'string' && resultText.trim().length > 0) {
           const transcriptCoversResult = lastAssistantText.trim() === resultText.trim();
           if (!transcriptCoversResult) {
             yield {
@@ -523,12 +565,21 @@ export class ClaudeBgCarrierService implements AgentService {
         }
 
         // codex review (PR #1666) P1.1: error path emits error + done (NOT throw).
-        if (state.state === 'error') {
+        if (state && (state.state === 'error' || state.state === 'failed')) {
           yield {
             type: 'error',
             catId: this.catId,
             sessionId: shortId,
-            error: state.detail ?? 'claude --bg job ended in error state',
+            error: state.detail ?? `claude --bg job ended in ${state.state} state`,
+            timestamp: Date.now(),
+          };
+        }
+        if (state?.state === 'blocked') {
+          yield {
+            type: 'error',
+            catId: this.catId,
+            sessionId: shortId,
+            error: state.needs ?? state.detail ?? 'claude --bg job blocked',
             timestamp: Date.now(),
           };
         }
@@ -554,7 +605,8 @@ export class ClaudeBgCarrierService implements AgentService {
             model: effectiveModel,
             ...(usage ? { usage } : {}),
             diagnostics: {
-              ...(state.state === 'error' ? { terminalState: 'error' } : {}),
+              ...(state?.state && state.state !== 'done' ? { terminalState: state.state } : {}),
+              ...(transcriptTerminal && state?.state === 'working' ? { terminalState: 'transcript-complete' } : {}),
               durationMs,
               // Report transcript entry count when we actually counted any
               // (not gated on tailer being currently defined — see round-16).

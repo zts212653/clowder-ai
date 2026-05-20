@@ -23,7 +23,7 @@ export function BucketBadge({ bucket }: { bucket: TriageBucket }) {
   return (
     <span
       data-testid="bucket-badge"
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${style.bg} ${style.text}`}
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-micro font-medium ${style.bg} ${style.text}`}
     >
       {style.label}
     </span>
@@ -35,7 +35,7 @@ export function SourceBadge({ tag }: { tag: SourceTag }) {
   return (
     <span
       data-testid="source-badge"
-      className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-bold ${style.bg} ${style.text}`}
+      className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-micro font-bold ${style.bg} ${style.text}`}
     >
       {tag}
     </span>

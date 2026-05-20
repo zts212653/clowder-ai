@@ -73,7 +73,7 @@ export function MiniThreadSidebar({ onAssignToPane }: MiniThreadSidebarProps) {
       <div className="flex-1 overflow-y-auto py-2 px-1 space-y-0.5">
         {assigned.length > 0 && (
           <div className="px-1 mb-1">
-            <span className="text-[10px] text-cafe-muted uppercase tracking-wider">{isCollapsed ? '' : '窗格中'}</span>
+            <span className="text-micro text-cafe-muted uppercase tracking-wider">{isCollapsed ? '' : '窗格中'}</span>
           </div>
         )}
         {assigned.map((t) => (
@@ -84,7 +84,7 @@ export function MiniThreadSidebar({ onAssignToPane }: MiniThreadSidebarProps) {
 
         {available.length > 0 && (
           <div className="px-1 mb-1">
-            <span className="text-[10px] text-cafe-muted uppercase tracking-wider">{isCollapsed ? '' : '可添加'}</span>
+            <span className="text-micro text-cafe-muted uppercase tracking-wider">{isCollapsed ? '' : '可添加'}</span>
           </div>
         )}
         {available.map((t) => (
@@ -157,7 +157,7 @@ function MiniThreadRow({
       {!isCollapsed && <span className="text-xs text-cafe-secondary truncate flex-1 min-w-0">{title}</span>}
       {ts.unreadCount > 0 && (
         <span
-          className={`text-[10px] ${ts.hasUserMention ? 'bg-conn-red-text' : 'bg-amber-500'} text-white rounded-full min-w-[14px] px-0.5 text-center leading-3 flex-shrink-0`}
+          className={`text-micro ${ts.hasUserMention ? 'bg-conn-red-text' : 'bg-amber-500'} text-white rounded-full min-w-[14px] px-0.5 text-center leading-3 flex-shrink-0`}
         >
           {ts.unreadCount > 9 ? '9+' : ts.unreadCount}
         </span>

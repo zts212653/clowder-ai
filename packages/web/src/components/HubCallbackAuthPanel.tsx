@@ -81,8 +81,8 @@ function CatRoster({ byCat, max = 6 }: { byCat: Record<string, number>; max?: nu
           {/* CallbackAuthCatAvatar reads status + popover from the global store
               so this in-panel roster matches what ThreadItem participants show. */}
           <CallbackAuthCatAvatar catId={catId} size={48} />
-          <div className="truncate text-[10px] text-cafe">{catId}</div>
-          <div className="text-[10px] text-cafe-muted">{count} fail</div>
+          <div className="truncate text-micro text-cafe">{catId}</div>
+          <div className="text-micro text-cafe-muted">{count} fail</div>
         </div>
       ))}
     </div>

@@ -85,7 +85,7 @@ export function SignalSourcesView({ initialReferrerThread = null }: { initialRef
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-codex-bg/30 via-[var(--console-shell-bg)] to-[var(--console-shell-bg)]">
+    <div className="min-h-screen bg-[var(--console-shell-bg)]">
       <main className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-5 sm:px-6">
         <header className="rounded-2xl bg-[var(--console-card-bg)] p-4 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -122,7 +122,7 @@ export function SignalSourcesView({ initialReferrerThread = null }: { initialRef
         </section>
 
         {error && (
-          <div className="rounded-lg border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-sm text-red-700">
+          <div className="rounded-lg border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-sm text-[var(--semantic-error-text)]">
             请求失败: {error}
           </div>
         )}
@@ -132,7 +132,7 @@ export function SignalSourcesView({ initialReferrerThread = null }: { initialRef
               'rounded-lg border px-3 py-2 text-sm',
               fetchResult.ok
                 ? 'border-conn-green-ring bg-conn-green-bg text-conn-green-text'
-                : 'border-conn-red-ring bg-conn-red-bg text-red-700',
+                : 'border-conn-red-ring bg-conn-red-bg text-[var(--semantic-error-text)]',
             ].join(' ')}
           >
             <span className="font-semibold">{fetchResult.sourceId}</span>: {fetchResult.message}
@@ -162,7 +162,7 @@ export function SignalSourcesView({ initialReferrerThread = null }: { initialRef
                             href={source.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="break-all text-xs text-blue-600 hover:underline"
+                            className="break-all text-xs text-cafe-interactive hover:underline"
                           >
                             {source.url}
                           </a>

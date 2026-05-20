@@ -13,8 +13,10 @@
  *   (API = Frontend + 1 in both environments)
  */
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 
 const ROOT = resolve(process.cwd());
@@ -142,6 +144,53 @@ function parseYamlTopLevelList(content, sectionName) {
 
 function readYamlTopLevelList(relPath, sectionName) {
   return parseYamlTopLevelList(readFileSync(resolve(ROOT, relPath), 'utf-8'), sectionName);
+}
+
+function parseYamlTransformTargets(content) {
+  const lines = content.split('\n');
+  const targets = [];
+  let inSection = false;
+
+  for (const line of lines) {
+    const topLevelKey = readYamlTopLevelKey(line);
+    if (topLevelKey === 'transforms') {
+      inSection = true;
+      continue;
+    }
+    if (topLevelKey && inSection) {
+      break;
+    }
+
+    if (!inSection) continue;
+
+    const target = line.match(/^ {2}- target:\s*(.+)$/)?.[1];
+    if (target) {
+      targets.push(normalizeYamlListItem(target));
+    }
+  }
+
+  return targets;
+}
+
+function readYamlTransformTargets(relPath) {
+  return parseYamlTransformTargets(readFileSync(resolve(ROOT, relPath), 'utf-8'));
+}
+
+function sanitizeFixture(relPath, content) {
+  const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-sanitize-'));
+  const fixturePath = resolve(tempRoot, relPath);
+  mkdirSync(dirname(fixturePath), { recursive: true });
+  writeFileSync(fixturePath, content);
+
+  try {
+    execFileSync('perl', ['-pi', resolve(ROOT, 'scripts/_sanitize-rules.pl'), fixturePath], {
+      cwd: ROOT,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return readFileSync(fixturePath, 'utf-8');
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
 }
 
 function assertPortableClaudeHookTemplate(template) {
@@ -656,6 +705,55 @@ excluded:
       }
     });
 
+    it('sync-manifest exports F203 native L0 runtime closure', () => {
+      const managedFiles = readYamlTopLevelList('sync-manifest.yaml', 'managed_files');
+      const managedScripts = readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts');
+
+      assert.ok(
+        managedFiles.includes('assets/system-prompts/system-prompt-l0.md'),
+        'sync-manifest should export the F203 L0 template required by native prompt compilation',
+      );
+      assert.ok(
+        managedScripts.includes('scripts/compile-system-prompt-l0.mjs'),
+        'sync-manifest should export the F203 L0 compiler required by carrier invocation',
+      );
+    });
+
+    it('sync-manifest marks the F203 native L0 template as a sanitized transform', () => {
+      const transformTargets = readYamlTransformTargets('sync-manifest.yaml');
+
+      assert.ok(
+        transformTargets.includes('assets/system-prompts/system-prompt-l0.md'),
+        'system-prompt-l0.md carries governance rules and must be explicitly tracked as a sanitize transform',
+      );
+    });
+
+    it('public F203 native L0 template sanitization removes home-only runtime rules', () => {
+      const sourceL0 = readFileSync(resolve(ROOT, 'assets/system-prompts/system-prompt-l0.md'), 'utf-8');
+      const sanitized = sanitizeFixture('assets/system-prompts/system-prompt-l0.md', sourceL0);
+
+      assert.doesNotMatch(sanitized, /Redis production Redis \(sacred\)/);
+      assert.doesNotMatch(sanitized, /Redis production Redis (sacred)/);
+      assert.doesNotMatch(sanitized, /\b6398\b|\b6399\b/);
+      assert.match(sanitized, /\*\*Runtime data safety\*\*/);
+      assert.doesNotMatch(sanitized, /Cat Café 的护城河是情感壁垒不是技术壁垒/);
+    });
+
+    it('sync-to-opensource.sh hard-fails if public L0 still contains internal patterns', () => {
+      const content = readSyncScript();
+
+      assert.match(
+        content,
+        /l0_internal_found=\$\(printf '%s\\n' "\$found" \| grep -F 'assets\/system-prompts\/system-prompt-l0\.md'/,
+        'internal-pattern scan should isolate system-prompt-l0.md findings',
+      );
+      assert.match(
+        content,
+        /l0_internal_found[\s\S]*?SCAN_FAILED=true/,
+        'system-prompt-l0.md internal-pattern findings should fail the sync gate, not warn only',
+      );
+    });
+
     it('sync-manifest exports a portable F180 Claude settings hook template', () => {
       const managedFiles = readYamlTopLevelList('sync-manifest.yaml', 'managed_files');
       const templatePath = '.claude/hooks/user-level/claude-settings.template.json';
@@ -1080,6 +1178,16 @@ describe(
         gate,
         /PROJECT_ALLOWED_ROOTS_APPEND=true[\s\\]+PROJECT_ALLOWED_ROOTS="\$gate_target_real"[\s\\]+API_SERVER_PORT=\$accept_api_port MEMORY_STORE=1 NODE_ENV=test/,
         'API startup acceptance should reuse the same temp-target allow-root so projectPath-based dispatch stays representative',
+      );
+    });
+
+    it('target public gate smokes F203 native L0 compiler closure', () => {
+      const gate = readFunctionBody(readSyncScript(), 'run_target_public_gate');
+
+      assert.match(
+        gate,
+        /node scripts\/compile-system-prompt-l0\.mjs --cat codex >\/dev\/null/,
+        'target public gate should compile codex L0 so missing F203 script/template fails before real sync',
       );
     });
 

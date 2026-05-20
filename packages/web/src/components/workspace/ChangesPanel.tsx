@@ -74,20 +74,20 @@ export function ChangesPanel({ worktreeId, basisPct }: ChangesPanelProps) {
         style={{ maxHeight: `${basisPct}%` }}
       >
         <div className="px-3 py-1.5 flex items-center justify-between sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
-          <span className="text-[10px] text-cafe-interactive/50 font-semibold uppercase tracking-wider">
+          <span className="text-micro text-cafe-interactive/50 font-semibold uppercase tracking-wider">
             {data ? `${data.changedFiles.length} changed` : 'Changes'}
           </span>
           <button
             type="button"
             onClick={fetchDiff}
             disabled={loading}
-            className="text-[10px] text-cafe-interactive/40 hover:text-cafe-interactive transition-colors disabled:opacity-50"
+            className="text-micro text-cafe-interactive/40 hover:text-cafe-interactive transition-colors disabled:opacity-50"
             title="Refresh"
           >
             {loading ? '...' : '↻'}
           </button>
         </div>
-        {error && <div className="px-3 py-1.5 text-[10px] text-conn-red-text">{error}</div>}
+        {error && <div className="px-3 py-1.5 text-micro text-conn-red-text">{error}</div>}
         {data?.changedFiles.map((f) => {
           const info = getStatusInfo(f.status);
           return (
@@ -99,10 +99,10 @@ export function ChangesPanel({ worktreeId, basisPct }: ChangesPanelProps) {
                 selectedFile === f.path ? 'bg-cafe-surface/80' : ''
               }`}
             >
-              <span className={`text-[10px] font-mono font-bold w-3 ${info.color}`}>{info.label}</span>
+              <span className={`text-micro font-mono font-bold w-3 ${info.color}`}>{info.label}</span>
               <FileIcon name={f.path} />
               <span className="text-xs text-cafe-black truncate">{f.path.split('/').pop()}</span>
-              <span className="text-[10px] text-cafe-muted truncate ml-auto">
+              <span className="text-micro text-cafe-muted truncate ml-auto">
                 {f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : ''}
               </span>
             </button>
@@ -114,7 +114,7 @@ export function ChangesPanel({ worktreeId, basisPct }: ChangesPanelProps) {
       </div>
 
       {/* Diff viewer */}
-      <div className="flex-1 min-h-0 overflow-auto bg-[#16161c]">
+      <div className="flex-1 min-h-0 overflow-auto bg-[var(--ws-editor-deep)]">
         {data?.diff ? (
           <DiffViewer diff={data.diff} filePath={selectedFile ?? undefined} />
         ) : (

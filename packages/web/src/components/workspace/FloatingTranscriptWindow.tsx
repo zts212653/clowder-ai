@@ -171,7 +171,7 @@ export function FloatingTranscriptWindow({
             {recording ? (sourceLabel ?? 'Recording') : 'Transcript'}
           </span>
           {recording && (
-            <span className="font-mono text-[10px] text-cafe-text-secondary">{formatDuration(elapsed)}</span>
+            <span className="font-mono text-micro text-cafe-text-secondary">{formatDuration(elapsed)}</span>
           )}
           <button
             type="button"
@@ -306,7 +306,7 @@ export function FloatingTranscriptWindow({
             <button
               type="button"
               onClick={onAdvisoryDnd}
-              className="shrink-0 text-[10px] text-amber-400/60 hover:text-amber-300"
+              className="shrink-0 text-micro text-amber-400/60 hover:text-amber-300"
               title="Don't disturb for 15 min"
             >
               DND
@@ -417,7 +417,7 @@ export function FloatingTranscriptWindow({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center gap-3 border-t border-cafe-border px-3 py-1.5 text-[10px] text-cafe-text-muted">
+        <div className="flex items-center gap-3 border-t border-cafe-border px-3 py-1.5 text-micro text-cafe-text-muted">
           <span>{lines.length} chunks</span>
           <span>avg {avgLatency}s</span>
           <span className={connected ? 'text-green-500' : 'text-conn-red-text'}>

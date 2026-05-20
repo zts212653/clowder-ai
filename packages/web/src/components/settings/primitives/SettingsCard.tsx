@@ -22,8 +22,8 @@ interface SettingsCardProps {
 }
 
 const variantStyles: Record<CardVariant, string> = {
-  default: 'border-[var(--console-border-soft)] bg-[var(--console-card-bg)]',
-  highlight: 'border-cafe-accent/30 bg-cafe-accent/5',
+  default: 'bg-[var(--console-card-bg)]',
+  highlight: 'bg-cafe-accent/5',
 };
 
 export function SettingsCard({
@@ -44,7 +44,7 @@ export function SettingsCard({
 }: SettingsCardProps) {
   return (
     <Tag
-      className={`rounded-xl border p-4 transition ${variantStyles[variant]} ${onClick ? 'cursor-pointer hover:shadow-md' : ''} ${isDragging ? 'opacity-40' : ''} ${className ?? ''}`}
+      className={`rounded-xl p-4 transition ${variantStyles[variant]} ${onClick ? 'cursor-pointer hover:shadow-md' : ''} ${isDragging ? 'opacity-40' : ''} ${className ?? ''}`}
       onClick={onClick}
       onKeyDown={onKeyDown}
       draggable={draggable || undefined}

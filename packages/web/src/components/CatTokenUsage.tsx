@@ -99,13 +99,13 @@ export function CatTokenUsage({ catId, usage, contextHealth }: CatTokenUsageProp
       {/* Cache bar */}
       {cachePct > 0 && (
         <div>
-          <div className="text-[10px] text-cafe-muted mb-0.5">缓存命中</div>
+          <div className="text-micro text-cafe-muted mb-0.5">缓存命中</div>
           <TokenCacheBar percent={cachePct} catId={catId} />
         </div>
       )}
 
       {/* Cost + duration row */}
-      <div className="flex items-center gap-2 text-[10px]">
+      <div className="flex items-center gap-2 text-micro">
         {usage.costUsd != null && (
           <span className="text-conn-amber-text font-medium tabular-nums animate-cost-glow">
             {formatCost(usage.costUsd)}
@@ -120,7 +120,7 @@ export function CatTokenUsage({ catId, usage, contextHealth }: CatTokenUsageProp
       </div>
 
       {contextSummary && (
-        <div className="text-[10px] text-cafe-secondary font-mono">
+        <div className="text-micro text-cafe-secondary font-mono">
           {contextSummary}
           {contextResetLabel && <span className="text-cafe-muted ml-1">{contextResetLabel}</span>}
         </div>
@@ -129,7 +129,7 @@ export function CatTokenUsage({ catId, usage, contextHealth }: CatTokenUsageProp
       {/* F24: Context health bar */}
       {contextHealth && (
         <div>
-          <div className="text-[10px] text-cafe-muted mb-0.5">上下文占用</div>
+          <div className="text-micro text-cafe-muted mb-0.5">上下文占用</div>
           <ContextHealthBar catId={catId} health={contextHealth} />
         </div>
       )}

@@ -12,7 +12,7 @@ interface BrowserTabBarProps {
 
 export function BrowserTabBar({ tabs, activeTabId, onSelect, onClose, onAdd }: BrowserTabBarProps) {
   return (
-    <div className="flex items-center bg-[#F5F0EB] border-b border-[var(--console-border-soft)] overflow-x-auto">
+    <div className="flex items-center bg-[var(--ws-surface-warm)] border-b border-[var(--console-border-soft)] overflow-x-auto">
       {tabs.map((tab) => {
         const isActive = tab.id === activeTabId;
         return (
@@ -22,8 +22,8 @@ export function BrowserTabBar({ tabs, activeTabId, onSelect, onClose, onAdd }: B
             onClick={() => onSelect(tab.id)}
             className={`group flex items-center gap-1 px-3 py-1.5 text-xs border-r border-[var(--console-border-soft)]/50 shrink-0 max-w-[180px] transition-colors ${
               isActive
-                ? 'bg-[#FDF8F3] text-[#5a4a42] font-medium'
-                : 'text-[#5a4a42]/60 hover:text-[#5a4a42] hover:bg-[#FDF8F3]/50'
+                ? 'bg-[var(--ws-surface)] text-[var(--ws-text)] font-medium'
+                : 'text-[var(--ws-text)]/60 hover:text-[var(--ws-text)] hover:bg-[var(--ws-surface)]/50'
             }`}
           >
             <span className="truncate">{tab.title}</span>
@@ -32,7 +32,7 @@ export function BrowserTabBar({ tabs, activeTabId, onSelect, onClose, onAdd }: B
                 e.stopPropagation();
                 onClose(tab.id);
               }}
-              className="ml-1 opacity-0 group-hover:opacity-100 text-[#5a4a42]/40 hover:text-[#5a4a42]"
+              className="ml-1 opacity-0 group-hover:opacity-100 text-[var(--ws-text)]/40 hover:text-[var(--ws-text)]"
               role="button"
               tabIndex={-1}
               onKeyDown={() => {}}
@@ -45,7 +45,7 @@ export function BrowserTabBar({ tabs, activeTabId, onSelect, onClose, onAdd }: B
       <button
         type="button"
         onClick={onAdd}
-        className="px-2 py-1.5 text-xs text-[#5a4a42]/40 hover:text-[#5a4a42] hover:bg-[#FDF8F3]/50 transition-colors shrink-0"
+        className="px-2 py-1.5 text-xs text-[var(--ws-text)]/40 hover:text-[var(--ws-text)] hover:bg-[var(--ws-surface)]/50 transition-colors shrink-0"
         title="New tab"
       >
         +

@@ -43,8 +43,17 @@ interface RecentItem {
   verified?: boolean;
 }
 
+interface SelectionGroup {
+  key: string;
+  type: 'collection';
+  label: string;
+  count: number;
+  available: number;
+}
+
 interface RecentResponse {
   items: RecentItem[];
+  groups?: SelectionGroup[];
   nudge?: string;
 }
 
@@ -101,6 +110,11 @@ function formatRecent(data: RecentResponse, since: string): string {
       }
       lines.push(line);
     }
+  }
+  if (data.groups && data.groups.length > 1) {
+    lines.push('');
+    const distribution = data.groups.map((g) => `${g.label}(${g.count}/${g.available})`).join(' | ');
+    lines.push(`Collections: ${distribution}`);
   }
   lines.push('');
   lines.push(crossReferenceFooter());

@@ -109,7 +109,7 @@ export function CallbackAuthFailureBlock({ block }: { block: RichCardBlock }) {
         <span className="flex-1" />
         {meta.fallbackOk && (
           <span
-            className="rounded px-2 py-0.5 text-[10px] font-bold"
+            className="rounded px-2 py-0.5 text-micro font-bold"
             style={{ backgroundColor: '#FED7AA', color: '#9A3412' }}
           >
             FALLBACK OK

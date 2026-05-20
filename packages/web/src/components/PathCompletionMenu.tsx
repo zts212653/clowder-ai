@@ -42,7 +42,7 @@ export function PathCompletionMenu({ entries, selectedIdx, onSelectIdx, onSelect
           </button>
         ))}
       </div>
-      <div className="px-3 py-1 text-[10px] text-cafe-muted border-t border-cafe-subtle shrink-0">
+      <div className="px-3 py-1 text-micro text-cafe-muted border-t border-cafe-subtle shrink-0">
         Tab/Enter 选择 · Esc 关闭
       </div>
     </div>

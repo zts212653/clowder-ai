@@ -25,7 +25,7 @@ export function ArtifactCard({
 
       <p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-cafe-secondary">{result.componentSummary}</p>
 
-      <div className="mt-2 flex items-center justify-between text-[10px] text-cafe-muted">
+      <div className="mt-2 flex items-center justify-between text-micro text-cafe-muted">
         <span>{result.sourceLocator}</span>
         {result.publisherIdentity && <span>{result.publisherIdentity}</span>}
       </div>

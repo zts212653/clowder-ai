@@ -12,15 +12,19 @@ import {
 import { discoverAntigravityLS } from './antigravity-ls-discovery.js';
 import { diffDeliveredSteps } from './antigravity-step-delta.js';
 import { RAW_RESPONSE_CAP, TRACE_ENABLED, TRACED_METHODS, traceLog } from './antigravity-trace.js';
-import type { AuditSink, ExecutorResult } from './executors/AntigravityToolExecutor.js';
+import type { AntigravityToolExecutor, AuditSink, ExecutorResult } from './executors/AntigravityToolExecutor.js';
 import type { ExecutorRegistry } from './executors/ExecutorRegistry.js';
 import { formatToolResult } from './executors/formatToolResult.js';
+import type { McpToolInput } from './executors/McpToolExecutor.js';
 import { getRunCommandRefusalReason, MAX_RUN_COMMAND_TIMEOUT_MS } from './executors/RunCommandExecutor.js';
 
 const log = createModuleLogger('antigravity-bridge');
 
 const DEFAULT_RPC_TIMEOUT_MS = 30_000;
 const RUN_COMMAND_RPC_TIMEOUT_BUFFER_MS = 5_000;
+// Antigravity 2.x rejects the proto default 0 (UNSPECIFIED) for StartCascade.
+// The IDE client defaults regular conversations to CASCADE_CLIENT.
+const CORTEX_TRAJECTORY_SOURCE_CASCADE_CLIENT = 1;
 
 export function antigravityRpcTimeoutMs(method: string, payload: unknown): number {
   if (method !== 'RunCommand') return DEFAULT_RPC_TIMEOUT_MS;
@@ -64,6 +68,13 @@ export interface TrajectoryStep {
   userInput?: { items?: Array<{ text?: string }> };
   toolCall?: { toolName?: string; input?: string };
   toolResult?: { toolName?: string; success?: boolean; output?: string; error?: string };
+  mcpTool?: {
+    serverName?: string;
+    toolCall?: {
+      name?: string;
+      argumentsJson?: string;
+    };
+  };
   metadata?: {
     toolCall?: { id?: string; name?: string; argumentsJson?: string };
     sourceTrajectoryStepInfo?: {
@@ -162,6 +173,67 @@ function trajectoryTimestampMs(trajectory: CascadeTrajectory): number | undefine
   return undefined;
 }
 
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function stringField(record: Record<string, unknown>, key: string): string | undefined {
+  return nonEmptyString(record[key]);
+}
+
+function parseJsonObject(raw: string | undefined): Record<string, unknown> | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function parseMcpArgumentsCandidate(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value === 'string') {
+    const raw = nonEmptyString(value);
+    if (!raw) return undefined;
+    return parseJsonObject(raw) ?? undefined;
+  }
+  return objectRecord(value) ?? undefined;
+}
+
+function mcpToolInputFromStep(step: TrajectoryStep, args: Record<string, unknown>): McpToolInput | null {
+  const serverName =
+    nonEmptyString(step.mcpTool?.serverName) ??
+    stringField(args, 'ServerName') ??
+    stringField(args, 'serverName') ??
+    stringField(args, 'server_name');
+  const toolName =
+    nonEmptyString(step.mcpTool?.toolCall?.name) ??
+    stringField(args, 'ToolName') ??
+    stringField(args, 'toolName') ??
+    stringField(args, 'tool_name');
+  if (!serverName || !toolName) return null;
+
+  const toolArguments =
+    parseMcpArgumentsCandidate(step.mcpTool?.toolCall?.argumentsJson) ??
+    parseMcpArgumentsCandidate(args.Arguments) ??
+    parseMcpArgumentsCandidate(args.arguments) ??
+    parseMcpArgumentsCandidate(args.argumentsJson) ??
+    parseMcpArgumentsCandidate(args.input) ??
+    {};
+
+  return {
+    serverName,
+    toolName,
+    arguments: toolArguments,
+  };
+}
+
 export class AntigravityBridge {
   private conn: BridgeConnection | null = null;
   private sessionMap = new Map<string, string>();
@@ -218,19 +290,7 @@ export class AntigravityBridge {
     if (!executor) return 'no_executor' as const;
 
     const argsJson = step.metadata?.toolCall?.argumentsJson;
-    if (!argsJson) return false;
-    let args: Record<string, unknown>;
-    try {
-      args = JSON.parse(argsJson) as Record<string, unknown>;
-    } catch (err) {
-      log.warn(`nativeExecuteAndPush: failed to parse argumentsJson: ${err}`);
-      return false;
-    }
-
-    const commandLine = ((args.CommandLine as string | undefined) ?? (args.commandLine as string | undefined))?.trim();
-    if (!commandLine) return false;
-    const cwd = (args.Cwd as string | undefined) ?? (args.cwd as string | undefined) ?? opts.cwd;
-    const input = { commandLine, cwd };
+    const args = parseJsonObject(argsJson);
 
     const trajectoryId = step.metadata?.sourceTrajectoryStepInfo?.trajectoryId ?? '';
     const stepIndex = step.metadata?.sourceTrajectoryStepInfo?.stepIndex;
@@ -240,6 +300,56 @@ export class AntigravityBridge {
       );
       return false;
     }
+
+    if (executor.toolName === 'call_mcp_tool') {
+      return await this.nativeExecuteMcpToolAndPush(step, args ?? {}, executor, opts, trajectoryId, stepIndex);
+    }
+
+    if (!argsJson || !args) return false;
+    return await this.nativeExecuteRunCommandAndPush(args, executor, opts, trajectoryId, stepIndex);
+  }
+
+  private async nativeExecuteMcpToolAndPush(
+    step: TrajectoryStep,
+    args: Record<string, unknown>,
+    executor: AntigravityToolExecutor,
+    opts: { cascadeId: string; cwd: string; modelName?: string },
+    trajectoryId: string,
+    stepIndex: number,
+  ): Promise<true | 'no_executor' | false> {
+    if (!this.executorAudit) return false;
+    const input = mcpToolInputFromStep(step, args);
+    if (!input) return 'no_executor';
+    const result = await executor.execute(input, {
+      cascadeId: opts.cascadeId,
+      trajectoryId,
+      stepIndex,
+      cwd: opts.cwd,
+      audit: this.executorAudit,
+    });
+
+    await this.pushToolResult(
+      opts.cascadeId,
+      stepIndex,
+      result,
+      { commandLine: `${input.serverName}/${input.toolName}`, cwd: opts.cwd },
+      opts.modelName,
+    );
+    return true;
+  }
+
+  private async nativeExecuteRunCommandAndPush(
+    args: Record<string, unknown>,
+    executor: AntigravityToolExecutor,
+    opts: { cascadeId: string; cwd: string; modelName?: string },
+    trajectoryId: string,
+    stepIndex: number,
+  ): Promise<true | 'approval_pending' | false> {
+    if (!this.executorAudit) return false;
+    const commandLine = ((args.CommandLine as string | undefined) ?? (args.commandLine as string | undefined))?.trim();
+    if (!commandLine) return false;
+    const cwd = (args.Cwd as string | undefined) ?? (args.cwd as string | undefined) ?? opts.cwd;
+    const input = { commandLine, cwd };
 
     // Run local refusal rules before signaling LS-side approval. Otherwise an
     // unsafe command could be permission-approved upstream before our native
@@ -308,7 +418,9 @@ export class AntigravityBridge {
     return this.conn;
   }
   async startCascade(): Promise<string> {
-    const resp = await this.rpcSafe<{ cascadeId?: string }>('StartCascade', { source: 0 });
+    const resp = await this.rpcSafe<{ cascadeId?: string }>('StartCascade', {
+      source: CORTEX_TRAJECTORY_SOURCE_CASCADE_CLIENT,
+    });
     if (!resp.cascadeId) throw new Error('StartCascade: no cascadeId returned');
     log.debug(`cascade created: ${resp.cascadeId}`);
     return resp.cascadeId;

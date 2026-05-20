@@ -123,6 +123,7 @@ module.exports = {
           /* F174 D2b-2: cat callback-auth status dot palette (烁烁 visual review). */
           'status-healthy': '#22C55E',
           'status-degraded': '#F59E0B',
+          'status-active': '#3B82F6',
           'status-broken': '#EF4444',
           'status-unknown': '#A89386',
         },
@@ -175,6 +176,9 @@ module.exports = {
         ww: {
           glow: 'var(--ww-shadow-glow)',
         },
+      },
+      fontSize: {
+        micro: ['10px', { lineHeight: '14px' }],
       },
       keyframes: {
         'fade-in': {

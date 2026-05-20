@@ -34,7 +34,7 @@ export function ReplyPill({ replyPreview, replyToId, getCatById }: ReplyPillProp
     <button
       type="button"
       onClick={handleClick}
-      className="text-[10px] font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap max-w-[200px] truncate cursor-pointer hover:opacity-80 transition-opacity"
+      className="text-micro font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap max-w-[200px] truncate cursor-pointer hover:opacity-80 transition-opacity"
       style={{ backgroundColor: `${color}20`, color }}
       title={deleted ? '消息已删除' : `${senderLabel}: ${content}`}
     >

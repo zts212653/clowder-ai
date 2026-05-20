@@ -25,19 +25,19 @@ function RefAudioField({ value, onUpload }: { value: string; onUpload: (file: Fi
   const filename = refAudioDisplayName(value);
 
   return (
-    <div className="flex flex-col gap-1.5 text-[#5C4B42] sm:flex-row sm:items-center sm:gap-3">
-      <span className="text-sm font-medium text-[#5C4B42] sm:w-[140px] sm:shrink-0">Ref Audio</span>
+    <div className="flex flex-col gap-1.5 text-cafe-secondary sm:flex-row sm:items-center sm:gap-3">
+      <span className="text-sm font-medium text-cafe-secondary sm:w-[140px] sm:shrink-0">Ref Audio</span>
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <span
-          className="min-w-0 flex-1 truncate rounded-xl border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-2 text-sm leading-5 text-[#2D2118]"
+          className="min-w-0 flex-1 truncate rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2 text-sm leading-5 text-cafe"
           title={value}
         >
-          {filename ? filename : <span className="text-[#8A776B]">未设置</span>}
+          {filename ? filename : <span className="text-cafe-muted">未设置</span>}
         </span>
         <button
           type="button"
           onClick={() => fileRef.current?.click()}
-          className="shrink-0 rounded-xl border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-2 text-sm font-semibold text-[#5C4B42] transition hover:border-[#D49266]"
+          className="shrink-0 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2 text-sm font-semibold text-cafe-secondary transition hover:border-cafe-accent"
         >
           上传
         </button>
@@ -81,15 +81,15 @@ export function VoiceConfigSection({
   const summary = hasVoiceConfig ? `${form.voiceLangCode ? form.voiceLangCode : '?'}` : '';
 
   return (
-    <div className="space-y-2 rounded-xl border border-dashed border-[#DCC9B8] bg-[#F7F3F0] px-3 py-2">
+    <div className="space-y-2 rounded-xl border border-dashed border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2">
       <button
         type="button"
         onClick={() => setExpanded(!expanded)}
-        className="w-full text-left text-sm font-semibold text-[#8A776B]"
+        className="w-full text-left text-sm font-semibold text-cafe-muted"
       >
         {expanded ? '▾' : '▸'} Voice Config{summary ? ` — ${summary}` : ''}
       </button>
-      {!expanded && <p className="mt-0.5 text-xs leading-4 text-[#B59A88]">展开后可配置 TTS clone 参考音频和文本。</p>}
+      {!expanded && <p className="mt-0.5 text-xs leading-4 text-cafe-muted">展开后可配置 TTS clone 参考音频和文本。</p>}
       {expanded && (
         <div className="space-y-2">
           <SelectField

@@ -164,14 +164,14 @@ export function ThreadLabelPicker({ threadId, currentLabels, onSave }: ThreadLab
                 <div className="flex justify-end gap-1">
                   <button
                     onClick={() => setShowCreate(false)}
-                    className="text-[10px] px-1.5 py-0.5 text-cafe-muted hover:text-cafe-secondary"
+                    className="text-micro px-1.5 py-0.5 text-cafe-muted hover:text-cafe-secondary"
                   >
                     取消
                   </button>
                   <button
                     onClick={() => void handleCreate()}
                     disabled={!newName.trim()}
-                    className="text-[10px] px-1.5 py-0.5 rounded bg-cafe-accent text-white disabled:opacity-40"
+                    className="text-micro px-1.5 py-0.5 rounded bg-cafe-accent text-white disabled:opacity-40"
                   >
                     创建
                   </button>
@@ -180,16 +180,16 @@ export function ThreadLabelPicker({ threadId, currentLabels, onSave }: ThreadLab
             ) : (
               <button
                 onClick={() => setShowCreate(true)}
-                className="mt-2 text-[10px] text-cafe-accent hover:underline w-full text-left"
+                className="mt-2 text-micro text-cafe-accent hover:underline w-full text-left"
               >
                 + 新建标签
               </button>
             )}
           </div>
-          {saveError && <p className="text-[10px] text-conn-red-text px-3 mt-1">保存失败，请重试</p>}
+          {saveError && <p className="text-micro text-conn-red-text px-3 mt-1">保存失败，请重试</p>}
           <div className="flex items-center justify-between px-3 pb-3 pt-2 border-t border-cafe-subtle flex-shrink-0">
             {selected.length > 0 && (
-              <button onClick={() => setSelected([])} className="text-[10px] text-cafe-muted hover:text-conn-red-text">
+              <button onClick={() => setSelected([])} className="text-micro text-cafe-muted hover:text-conn-red-text">
                 清除
               </button>
             )}

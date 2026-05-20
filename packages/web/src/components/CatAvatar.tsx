@@ -40,11 +40,11 @@ export function CatAvatar({
   catId,
   size = 32,
   status,
+  onClick,
   callbackAuthStatus,
   callbackAuthLabel,
   callbackAuthPopover,
   onCallbackAuthClick,
-  onClick,
 }: CatAvatarProps) {
   const [imgError, setImgError] = useState(false);
   const [popoverOpen, setPopoverOpen] = useState(false);
@@ -56,12 +56,12 @@ export function CatAvatar({
   const ringColor = cat?.color.primary ?? '#9CA3AF'; // gray-400 fallback
   const glowShadow = isStreaming && cat ? `0 0 10px ${hexToRgba(ringColor, 0.5)}` : undefined;
 
-  const Wrapper = onClick ? 'button' : 'div';
-
   // F174 D2b-2: dot is ~28% of avatar size (min 8px), absolute positioned bottom-right.
   // White ring lifts it off the avatar and survives most cat colors.
   const dotSize = Math.max(8, Math.round(size * 0.28));
   const dotBorder = Math.max(1, Math.round(dotSize * 0.18));
+
+  const Wrapper = onClick ? 'button' : 'div';
 
   return (
     <div className="relative flex-shrink-0" style={{ width: size, height: size }}>

@@ -1,5 +1,5 @@
 import { mkdirSync, renameSync, statSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
 import { ToolEventLog } from '../domains/cats/services/tool-usage/ToolEventLog.js';
 import { BindingDryRun } from '../domains/memory/BindingDryRun.js';
@@ -36,6 +36,9 @@ export interface LibraryRoutesOptions {
   // Typed as `unknown` to accept any RedisClient implementation (ioredis, etc.);
   // ToolEventLog will narrow internally via its own constructor signature.
   redis?: unknown;
+  // AC-H1 P1 R3: parent IndexBuilder for runtime exclude updates
+  indexBuilder?: import('../domains/memory/IndexBuilder.js').IndexBuilder;
+  parentRoot?: string;
 }
 
 type StoreWithDb = IEvidenceStore & { getDb?: () => import('better-sqlite3').Database };
@@ -192,6 +195,34 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
     const store = new SqliteEvidenceStore(storePath);
     await store.initialize();
     opts.stores.set(manifest.id, store);
+
+    // AC-H1 P1 R3+R4: update parent excludes + purge leaked rows if child overlaps parent root
+    if (opts.indexBuilder && opts.parentRoot && resolvedRoot) {
+      const absParent = resolve(opts.parentRoot);
+      const absChild = resolve(resolvedRoot);
+      if (absChild.startsWith(absParent + '/') && absChild !== absParent) {
+        const rel = relative(absParent, absChild);
+        const pattern = `${rel}/**`;
+        opts.indexBuilder.addExcludePatterns([pattern]);
+
+        // R4: immediately purge existing parent rows matching child prefix
+        const parentStore = opts.stores.get('project:cat-cafe');
+        if (parentStore && 'removeBySourcePrefix' in parentStore) {
+          (parentStore as SqliteEvidenceStore).removeBySourcePrefix(`${rel}/`);
+        }
+
+        // R4: update parent catalog manifest so library rebuild path also respects new excludes
+        const parentManifest = opts.catalog.get('project:cat-cafe');
+        if (parentManifest) {
+          const existing = parentManifest.exclude ?? [];
+          if (!existing.includes(pattern)) {
+            parentManifest.exclude = [...existing, pattern];
+            parentManifest.updatedAt = new Date().toISOString();
+          }
+        }
+      }
+    }
+
     return { manifest };
   });
 
@@ -600,8 +631,10 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
     const callerCollections: string[] | undefined = undefined;
     const resolver = new RecentBrowseResolver(opts.catalog, opts.stores);
     const result = await resolver.list({ scope, since, limit, kinds, callerCollections, verified });
-    if (result.nudge) return { items: result.items, nudge: result.nudge };
-    return { items: result.items };
+    const response: Record<string, unknown> = { items: result.items };
+    if (result.groups) response.groups = result.groups;
+    if (result.nudge) response.nudge = result.nudge;
+    return response;
   });
 };
 

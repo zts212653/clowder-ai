@@ -7,7 +7,7 @@ const variantMap: Record<TextVariant, string> = {
   base: 'text-base',
   sm: 'text-sm',
   xs: 'text-xs',
-  micro: 'text-[10px]',
+  micro: 'text-micro',
 };
 
 const toneMap: Record<TextTone, string> = {

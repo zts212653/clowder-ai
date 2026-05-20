@@ -38,6 +38,7 @@
     "dompurify": "^3.3.3",
     "esbuild-wasm": "^0.27.3",
     "idb": "^8.0.3",
+    "mermaid": "^11.15.0",
     "next": "^14.1.0",
     "next-themes": "^0.4.6",
     "phaser": "^3.90.0",

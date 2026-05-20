@@ -93,7 +93,7 @@ export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoo
           <h1 className="text-lg font-bold text-cafe-black">Clowder AI</h1>
           <p className="text-xs text-cafe-secondary">分屏模式</p>
         </div>
-        <span className="text-[10px] text-cafe-muted hidden sm:inline mr-1">⌘\ 切换</span>
+        <span className="text-micro text-cafe-muted hidden sm:inline mr-1">⌘\ 切换</span>
         <button
           onClick={handleBackToSingle}
           className="p-1 rounded-lg hover:bg-cafe-surface-sunken transition-colors"
@@ -134,7 +134,7 @@ export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoo
           {/* Shared input bar */}
           <div className="border-t border-cafe-subtle bg-cafe-surface px-3 py-2">
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-[10px] text-cafe-muted">
+              <span className="text-micro text-cafe-muted">
                 {splitPaneTargetId
                   ? `发往: ${threadMap.get(splitPaneTargetId)?.title ?? splitPaneTargetId}`
                   : '请选择一个窗格'}

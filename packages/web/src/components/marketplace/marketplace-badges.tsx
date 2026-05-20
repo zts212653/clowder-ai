@@ -31,7 +31,7 @@ const TRUST_STYLES: Record<TrustLevel, { bg: string; text: string; label: string
 export function TrustBadge({ level }: { level: TrustLevel }) {
   const s = TRUST_STYLES[level];
   return (
-    <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${s.bg} ${s.text}`}>
+    <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-micro font-medium ${s.bg} ${s.text}`}>
       <HubIcon name={s.iconName} className="h-3 w-3" />
       {s.label}
     </span>
@@ -48,7 +48,7 @@ const MODE_STYLES: Record<InstallMode, { bg: string; text: string; label: string
 export function InstallModeBadge({ mode }: { mode: InstallMode }) {
   const s = MODE_STYLES[mode];
   return (
-    <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${s.bg} ${s.text}`}>
+    <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-micro font-medium ${s.bg} ${s.text}`}>
       <HubIcon name={s.iconName} className="h-3 w-3" />
       {s.label}
     </span>

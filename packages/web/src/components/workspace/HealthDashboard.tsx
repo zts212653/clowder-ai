@@ -12,7 +12,7 @@ function Badge({ label, variant }: { label: string; variant: 'danger' | 'warning
     muted: 'bg-cafe-surface-elevated text-cafe-secondary',
   };
   return (
-    <span className={`inline-block px-1 py-0.5 rounded text-[10px] font-mono font-bold ${colors[variant]}`}>
+    <span className={`inline-block px-1 py-0.5 rounded text-micro font-mono font-bold ${colors[variant]}`}>
       {label}
     </span>
   );
@@ -24,8 +24,8 @@ function StaleBranchRow({ branch }: { branch: StaleBranch }) {
     <div className="flex items-center gap-1.5 text-xs font-mono py-0.5 px-1 rounded hover:bg-cafe-surface-sunken/30">
       <Badge label="stale" variant="warning" />
       <span className="truncate text-cafe-black/80 flex-1">{branch.name}</span>
-      <span className="text-[10px] text-cafe-interactive/40 shrink-0">{branch.author}</span>
-      <span className="text-[10px] text-cafe-interactive/30 shrink-0">{relDate}</span>
+      <span className="text-micro text-cafe-interactive/40 shrink-0">{branch.author}</span>
+      <span className="text-micro text-cafe-interactive/30 shrink-0">{relDate}</span>
     </div>
   );
 }
@@ -36,15 +36,15 @@ function WorktreeRow({ wt }: { wt: WorktreeHealth }) {
     <div className="flex items-center gap-1.5 text-xs font-mono py-0.5 px-1 rounded hover:bg-cafe-surface-sunken/30">
       <Badge label={wt.isOrphan ? 'orphan' : 'active'} variant={wt.isOrphan ? 'danger' : 'success'} />
       <span className="truncate text-cafe-black/80 flex-1">{dirName}</span>
-      <span className="text-[10px] text-cafe-interactive/40 shrink-0">{wt.branch}</span>
-      <span className="text-[10px] text-cafe-interactive/30 shrink-0">{wt.head}</span>
+      <span className="text-micro text-cafe-interactive/40 shrink-0">{wt.branch}</span>
+      <span className="text-micro text-cafe-interactive/30 shrink-0">{wt.head}</span>
     </div>
   );
 }
 
 function DriftSection({ drift }: { drift: RuntimeDrift }) {
   if (!drift.available) {
-    return <div className="text-[10px] text-cafe-interactive/40 px-1">Runtime drift unavailable</div>;
+    return <div className="text-micro text-cafe-interactive/40 px-1">Runtime drift unavailable</div>;
   }
   const inSync = drift.aheadOfMain === 0 && drift.behindMain === 0;
   return (
@@ -65,7 +65,7 @@ function DriftSection({ drift }: { drift: RuntimeDrift }) {
               {drift.behindCommits.length > 0 && (
                 <div className="ml-6 space-y-0.5">
                   {drift.behindCommits.map((c) => (
-                    <div key={c.short} className="flex items-center gap-1.5 text-[10px] font-mono text-cafe-black/60">
+                    <div key={c.short} className="flex items-center gap-1.5 text-micro font-mono text-cafe-black/60">
                       <span className="text-cafe-accent/50">{c.short}</span>
                       <span className="truncate">{c.subject}</span>
                     </div>
@@ -115,15 +115,15 @@ export function HealthDashboard() {
         onClick={() => setCollapsed(!collapsed)}
         className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-cafe-surface-sunken/20"
       >
-        <span className="text-[10px] font-semibold text-cafe-interactive/60 uppercase tracking-wider">
+        <span className="text-micro font-semibold text-cafe-interactive/60 uppercase tracking-wider">
           Health {totalIssues > 0 ? `(${totalIssues} issues)` : ''}
         </span>
-        <span className="text-[10px] text-cafe-interactive/40">{collapsed ? '\u25b8' : '\u25be'}</span>
+        <span className="text-micro text-cafe-interactive/40">{collapsed ? '\u25b8' : '\u25be'}</span>
       </button>
 
       {!collapsed && (
         <div className="px-3 pb-2 space-y-2">
-          {loading && <div className="text-[10px] text-cafe-interactive/40">Loading...</div>}
+          {loading && <div className="text-micro text-cafe-interactive/40">Loading...</div>}
           {error && <div className="text-xs text-conn-red-text">{error}</div>}
 
           {health && totalIssues === 0 && !health.runtimeDrift && (
@@ -132,7 +132,7 @@ export function HealthDashboard() {
 
           {staleCount > 0 && (
             <div>
-              <div className="text-[10px] font-semibold text-cafe-interactive/50 uppercase tracking-wider mb-1">
+              <div className="text-micro font-semibold text-cafe-interactive/50 uppercase tracking-wider mb-1">
                 Stale Branches ({staleCount})
               </div>
               <div className="space-y-0.5">
@@ -145,7 +145,7 @@ export function HealthDashboard() {
 
           {health && health.worktrees.length > 0 && (
             <div>
-              <div className="text-[10px] font-semibold text-cafe-interactive/50 uppercase tracking-wider mb-1">
+              <div className="text-micro font-semibold text-cafe-interactive/50 uppercase tracking-wider mb-1">
                 Worktrees ({health.worktrees.length})
               </div>
               <div className="space-y-0.5">

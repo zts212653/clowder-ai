@@ -59,6 +59,7 @@ import { classifyAntigravityStepEffect, summarizeAntigravityEffects } from './an
 import { summarizeStepShape, TRACE_ENABLED, traceLog } from './antigravity-trace.js';
 import { AuditLogger } from './executors/AuditLogger.js';
 import { ExecutorRegistry } from './executors/ExecutorRegistry.js';
+import { CallMcpToolExecutor } from './executors/McpToolExecutor.js';
 import { isReadOnlyRunCommand, RunCommandExecutor } from './executors/RunCommandExecutor.js';
 
 const log = createModuleLogger('antigravity-service');
@@ -314,6 +315,7 @@ export class AntigravityAgentService implements AgentService {
           rpc: (method, payload, options) => this.bridge.callRpc(method, payload, options),
         }),
       );
+      registry.register(new CallMcpToolExecutor());
       const audit = new AuditLogger(join(process.cwd(), 'data', 'antigravity-audit'));
       this.bridge.attachExecutors(registry, audit);
     }

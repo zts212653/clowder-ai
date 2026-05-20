@@ -346,7 +346,7 @@ export function TranscriptPanel() {
       )}
 
       {/* Footer stats */}
-      <div className="flex items-center gap-3 border-t border-cafe-border px-3 py-1.5 text-[10px] text-cafe-text-muted">
+      <div className="flex items-center gap-3 border-t border-cafe-border px-3 py-1.5 text-micro text-cafe-text-muted">
         <span>{lines.length} chunks</span>
         <span>avg {avgLatency}s</span>
         <span>16kHz mono</span>

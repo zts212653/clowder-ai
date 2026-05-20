@@ -89,7 +89,7 @@ export function MobileStatusSheet({
 
         <div className="p-4 space-y-3">
           {/* ── Cat status ── */}
-          <section className="rounded-lg border border-cafe bg-cafe-surface-elevated/70 p-3">
+          <section className="rounded-lg bg-cafe-surface-elevated/70 p-3">
             <h3 className="text-xs font-semibold text-cafe-secondary mb-2">
               {activeCats.length > 0 ? '当前调用' : '猫猫状态'}
             </h3>
@@ -142,7 +142,7 @@ export function MobileStatusSheet({
           </section>
 
           {/* ── Message stats ── */}
-          <section className="rounded-lg border border-cafe bg-cafe-surface-elevated/70 p-3">
+          <section className="rounded-lg bg-cafe-surface-elevated/70 p-3">
             <h3 className="text-xs font-semibold text-cafe-secondary mb-2">消息统计</h3>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-cafe-secondary">
               <div>总数</div>
@@ -155,7 +155,7 @@ export function MobileStatusSheet({
           </section>
 
           {/* ── Thread info ── */}
-          <section className="rounded-lg border border-cafe bg-cafe-surface-elevated/70 p-3">
+          <section className="rounded-lg bg-cafe-surface-elevated/70 p-3">
             <h3 className="text-xs font-semibold text-cafe-secondary mb-2">对话信息</h3>
             <div className="text-xs text-cafe-secondary">
               Thread:{' '}

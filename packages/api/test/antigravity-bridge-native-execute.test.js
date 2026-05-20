@@ -214,6 +214,260 @@ describe('AntigravityBridge.nativeExecuteAndPush', () => {
     assert.equal(rpcMock.mock.callCount(), 0);
   });
 
+  test('executes Antigravity 2.x call_mcp_tool wrapper using the nested MCP tool payload', async () => {
+    const storePath = tempStorePath();
+    cleanupPaths.push(storePath);
+    const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-audit-'));
+    cleanupDirs.push(logDir);
+    const bridge = new AntigravityBridge(
+      { port: 1234, csrfToken: 't', useTls: false },
+      { sessionStorePath: storePath },
+    );
+    mock.method(bridge, 'ensureConnected', async () => ({ port: 1234, csrfToken: 't', useTls: false }));
+    const rpcMock = mock.fn(async () => ({}));
+    Object.getPrototypeOf(bridge).rpc = rpcMock;
+    mock.method(bridge, 'sendMessage', async () => 1);
+
+    const executeMock = mock.fn(async () => ({
+      status: 'success',
+      output: { content: [{ type: 'text', text: 'ok' }] },
+      stdout: 'ok',
+      durationMs: 1,
+    }));
+    const registry = new ExecutorRegistry();
+    registry.register({
+      toolName: 'call_mcp_tool',
+      canHandle: (step) => step.metadata?.toolCall?.name === 'call_mcp_tool',
+      execute: executeMock,
+    });
+    bridge.attachExecutors(registry, new AuditLogger(logDir));
+
+    const step = {
+      type: 'CORTEX_STEP_TYPE_MCP_TOOL',
+      status: 'CORTEX_STEP_STATUS_WAITING',
+      metadata: {
+        toolCall: {
+          id: 'toolu_mcp',
+          name: 'call_mcp_tool',
+          argumentsJson: JSON.stringify({
+            ServerName: 'cat-cafe-memory',
+            ToolName: 'cat_cafe_list_session_chain',
+            Arguments: JSON.stringify({ threadId: 'thread-1', catId: 'antig-opus', limit: 5 }),
+          }),
+        },
+        sourceTrajectoryStepInfo: { trajectoryId: 'traj-1', stepIndex: 3, cascadeId: 'c1' },
+      },
+      mcpTool: {
+        serverName: 'cat-cafe-memory',
+        toolCall: {
+          name: 'cat_cafe_list_session_chain',
+          argumentsJson: JSON.stringify({ threadId: 'thread-1', catId: 'antig-opus', limit: 5 }),
+        },
+      },
+    };
+
+    const handled = await bridge.nativeExecuteAndPush(step, {
+      cascadeId: 'c1',
+      cwd: '/tmp',
+      modelName: 'claude-opus-4-6',
+    });
+
+    assert.equal(handled, true);
+    assert.equal(executeMock.mock.callCount(), 1);
+    assert.deepEqual(executeMock.mock.calls[0].arguments[0], {
+      serverName: 'cat-cafe-memory',
+      toolName: 'cat_cafe_list_session_chain',
+      arguments: { threadId: 'thread-1', catId: 'antig-opus', limit: 5 },
+    });
+    const methods = rpcMock.mock.calls.map((c) => {
+      const args = c.arguments;
+      return typeof args[0] === 'string' ? args[0] : args[1];
+    });
+    assert.equal(
+      methods.includes('HandleCascadeUserInteraction'),
+      false,
+      'MCP wrapper should not approve LS permission',
+    );
+    assert.ok(methods.includes('CancelCascadeSteps'), 'MCP result writeback must cancel the waiting step');
+    assert.equal(bridge.sendMessage.mock.callCount(), 1);
+    const textArg = bridge.sendMessage.mock.calls[0].arguments[1];
+    assert.match(textArg, /\[native-executor result for: cat-cafe-memory\/cat_cafe_list_session_chain\]/);
+    assert.match(textArg, /ok/);
+  });
+
+  test('falls back to wrapper MCP payload when nested MCP fields are empty strings', async () => {
+    const storePath = tempStorePath();
+    cleanupPaths.push(storePath);
+    const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-audit-'));
+    cleanupDirs.push(logDir);
+    const bridge = new AntigravityBridge(
+      { port: 1234, csrfToken: 't', useTls: false },
+      { sessionStorePath: storePath },
+    );
+    mock.method(bridge, 'ensureConnected', async () => ({ port: 1234, csrfToken: 't', useTls: false }));
+    const rpcMock = mock.fn(async () => ({}));
+    Object.getPrototypeOf(bridge).rpc = rpcMock;
+    mock.method(bridge, 'sendMessage', async () => 1);
+
+    const executeMock = mock.fn(async () => ({
+      status: 'success',
+      output: { content: [{ type: 'text', text: 'ok' }] },
+      stdout: 'ok',
+      durationMs: 1,
+    }));
+    const registry = new ExecutorRegistry();
+    registry.register({
+      toolName: 'call_mcp_tool',
+      canHandle: (step) => step.metadata?.toolCall?.name === 'call_mcp_tool',
+      execute: executeMock,
+    });
+    bridge.attachExecutors(registry, new AuditLogger(logDir));
+
+    const step = {
+      type: 'CORTEX_STEP_TYPE_MCP_TOOL',
+      status: 'CORTEX_STEP_STATUS_WAITING',
+      metadata: {
+        toolCall: {
+          id: 'toolu_mcp',
+          name: 'call_mcp_tool',
+          argumentsJson: JSON.stringify({
+            ServerName: 'cat-cafe-memory',
+            ToolName: 'cat_cafe_list_session_chain',
+            Arguments: JSON.stringify({ threadId: 'thread-1', catId: 'antig-opus', limit: 5 }),
+          }),
+        },
+        sourceTrajectoryStepInfo: { trajectoryId: 'traj-1', stepIndex: 3, cascadeId: 'c1' },
+      },
+      mcpTool: {
+        serverName: '',
+        toolCall: {
+          name: '',
+          argumentsJson: '',
+        },
+      },
+    };
+
+    const handled = await bridge.nativeExecuteAndPush(step, {
+      cascadeId: 'c1',
+      cwd: '/tmp',
+      modelName: 'claude-opus-4-6',
+    });
+
+    assert.equal(handled, true);
+    assert.equal(executeMock.mock.callCount(), 1);
+    assert.deepEqual(executeMock.mock.calls[0].arguments[0], {
+      serverName: 'cat-cafe-memory',
+      toolName: 'cat_cafe_list_session_chain',
+      arguments: { threadId: 'thread-1', catId: 'antig-opus', limit: 5 },
+    });
+  });
+
+  test('falls back to wrapper MCP arguments when nested arguments JSON is malformed', async () => {
+    const storePath = tempStorePath();
+    cleanupPaths.push(storePath);
+    const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-audit-'));
+    cleanupDirs.push(logDir);
+    const bridge = new AntigravityBridge(
+      { port: 1234, csrfToken: 't', useTls: false },
+      { sessionStorePath: storePath },
+    );
+    mock.method(bridge, 'ensureConnected', async () => ({ port: 1234, csrfToken: 't', useTls: false }));
+    const rpcMock = mock.fn(async () => ({}));
+    Object.getPrototypeOf(bridge).rpc = rpcMock;
+    mock.method(bridge, 'sendMessage', async () => 1);
+
+    const executeMock = mock.fn(async () => ({
+      status: 'success',
+      output: { content: [{ type: 'text', text: 'ok' }] },
+      stdout: 'ok',
+      durationMs: 1,
+    }));
+    const registry = new ExecutorRegistry();
+    registry.register({
+      toolName: 'call_mcp_tool',
+      canHandle: (step) => step.metadata?.toolCall?.name === 'call_mcp_tool',
+      execute: executeMock,
+    });
+    bridge.attachExecutors(registry, new AuditLogger(logDir));
+
+    const step = {
+      type: 'CORTEX_STEP_TYPE_MCP_TOOL',
+      status: 'CORTEX_STEP_STATUS_WAITING',
+      metadata: {
+        toolCall: {
+          id: 'toolu_mcp',
+          name: 'call_mcp_tool',
+          argumentsJson: JSON.stringify({
+            ServerName: 'cat-cafe-memory',
+            ToolName: 'cat_cafe_list_session_chain',
+            Arguments: JSON.stringify({ threadId: 'thread-wrapper', catId: 'antig-opus', limit: 3 }),
+          }),
+        },
+        sourceTrajectoryStepInfo: { trajectoryId: 'traj-1', stepIndex: 3, cascadeId: 'c1' },
+      },
+      mcpTool: {
+        serverName: 'cat-cafe-memory',
+        toolCall: {
+          name: 'cat_cafe_list_session_chain',
+          argumentsJson: '{not-json',
+        },
+      },
+    };
+
+    const handled = await bridge.nativeExecuteAndPush(step, {
+      cascadeId: 'c1',
+      cwd: '/tmp',
+      modelName: 'claude-opus-4-6',
+    });
+
+    assert.equal(handled, true);
+    assert.equal(executeMock.mock.callCount(), 1);
+    assert.deepEqual(executeMock.mock.calls[0].arguments[0], {
+      serverName: 'cat-cafe-memory',
+      toolName: 'cat_cafe_list_session_chain',
+      arguments: { threadId: 'thread-wrapper', catId: 'antig-opus', limit: 3 },
+    });
+  });
+
+  test('returns no_executor when call_mcp_tool payload cannot be decoded', async () => {
+    const storePath = tempStorePath();
+    cleanupPaths.push(storePath);
+    const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-audit-'));
+    cleanupDirs.push(logDir);
+    const bridge = new AntigravityBridge(
+      { port: 1234, csrfToken: 't', useTls: false },
+      { sessionStorePath: storePath },
+    );
+    mock.method(bridge, 'ensureConnected', async () => ({ port: 1234, csrfToken: 't', useTls: false }));
+    const rpcMock = mock.fn(async () => ({}));
+    Object.getPrototypeOf(bridge).rpc = rpcMock;
+    mock.method(bridge, 'sendMessage', async () => 1);
+    const executeMock = mock.fn(async () => ({ status: 'success', stdout: 'should-not-run' }));
+    const registry = new ExecutorRegistry();
+    registry.register({
+      toolName: 'call_mcp_tool',
+      canHandle: (step) => step.metadata?.toolCall?.name === 'call_mcp_tool',
+      execute: executeMock,
+    });
+    bridge.attachExecutors(registry, new AuditLogger(logDir));
+
+    const handled = await bridge.nativeExecuteAndPush(
+      {
+        type: 'CORTEX_STEP_TYPE_MCP_TOOL',
+        status: 'CORTEX_STEP_STATUS_WAITING',
+        metadata: {
+          toolCall: { id: 'toolu_mcp', name: 'call_mcp_tool', argumentsJson: '{}' },
+          sourceTrajectoryStepInfo: { trajectoryId: 'traj-1', stepIndex: 3, cascadeId: 'c1' },
+        },
+      },
+      { cascadeId: 'c1', cwd: '/tmp' },
+    );
+
+    assert.equal(handled, 'no_executor');
+    assert.equal(executeMock.mock.callCount(), 0);
+    assert.equal(bridge.sendMessage.mock.callCount(), 0);
+  });
+
   test('skips when executor not attached', async () => {
     const storePath = tempStorePath();
     cleanupPaths.push(storePath);

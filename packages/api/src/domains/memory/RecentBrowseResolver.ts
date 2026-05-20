@@ -26,8 +26,17 @@ export interface RecentItem {
   verified?: boolean;
 }
 
+export interface SelectionGroup {
+  key: string;
+  type: 'collection';
+  label: string;
+  count: number;
+  available: number;
+}
+
 export interface ListRecentResult {
   items: RecentItem[];
+  groups?: SelectionGroup[];
   nudge?: string;
 }
 
@@ -140,10 +149,9 @@ export class RecentBrowseResolver {
       }
     }
 
-    const items = results
-      .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0))
-      .slice(0, opts.limit);
-    return { items };
+    const items = applyGuaranteedMinimum(results, opts.limit);
+    const groups = computeSelectionGroups(items, results, manifests);
+    return { items, groups: groups.length > 1 ? groups : undefined };
   }
 
   private listTrajectories(cutoff: string, opts: ListRecentOptions): ListRecentResult {
@@ -199,6 +207,79 @@ export class RecentBrowseResolver {
     items.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
     return { items: items.slice(0, opts.limit) };
   }
+}
+
+const byUpdatedAtDesc = (a: RecentItem, b: RecentItem) =>
+  a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0;
+
+function applyGuaranteedMinimum(results: RecentItem[], limit: number): RecentItem[] {
+  const byCollection = new Map<string, RecentItem[]>();
+  for (const r of results) {
+    const list = byCollection.get(r.source) ?? [];
+    list.push(r);
+    byCollection.set(r.source, list);
+  }
+
+  for (const list of byCollection.values()) {
+    list.sort(byUpdatedAtDesc);
+  }
+
+  const eligible = byCollection.size;
+  if (eligible === 0) return [];
+
+  if (eligible > limit) {
+    const sorted = [...byCollection.entries()].sort((a, b) => byUpdatedAtDesc(a[1][0], b[1][0])).slice(0, limit);
+    return sorted.map(([, items]) => items[0]).sort(byUpdatedAtDesc);
+  }
+
+  const selected = new Set<string>();
+  const guaranteed: RecentItem[] = [];
+  for (const [collId, items] of byCollection) {
+    guaranteed.push(items[0]);
+    selected.add(`${collId}\0${items[0].anchor}`);
+  }
+
+  const remaining = limit - guaranteed.length;
+  if (remaining > 0) {
+    const rest = results
+      .filter((r) => !selected.has(`${r.source}\0${r.anchor}`))
+      .sort(byUpdatedAtDesc)
+      .slice(0, remaining);
+    guaranteed.push(...rest);
+  }
+
+  return guaranteed.sort(byUpdatedAtDesc);
+}
+
+function computeSelectionGroups(
+  selected: RecentItem[],
+  pool: RecentItem[],
+  manifests: Map<string, { id: string; displayName?: string; name?: string }>,
+): SelectionGroup[] {
+  const countMap = new Map<string, number>();
+  for (const item of selected) {
+    countMap.set(item.source, (countMap.get(item.source) ?? 0) + 1);
+  }
+
+  const availableMap = new Map<string, number>();
+  for (const item of pool) {
+    availableMap.set(item.source, (availableMap.get(item.source) ?? 0) + 1);
+  }
+
+  const groups: SelectionGroup[] = [];
+  for (const [key, count] of countMap) {
+    const manifest = manifests.get(key);
+    groups.push({
+      key,
+      type: 'collection',
+      label: manifest?.displayName ?? manifest?.name ?? key,
+      count,
+      available: availableMap.get(key) ?? count,
+    });
+  }
+
+  groups.sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+  return groups;
 }
 
 function findScopeForKinds(kinds: readonly string[]): string {

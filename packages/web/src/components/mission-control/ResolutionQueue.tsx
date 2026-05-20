@@ -80,11 +80,11 @@ export function ResolutionQueue({ projectId, resolutions, cards, onUpdate }: Res
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div className="text-sm font-semibold text-[#2B2118]">澄清队列</div>
+        <div className="text-sm font-semibold text-cafe">澄清队列</div>
         <button
           type="button"
           onClick={() => setShowForm(!showForm)}
-          className="rounded-lg bg-[#8B6F47] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#7A6139]"
+          className="rounded-lg bg-[var(--mc-accent)] px-3 py-1.5 text-xs font-medium text-white hover:bg-[var(--mc-accent-hover)]"
         >
           {showForm ? '取消' : 'Add Question'}
         </button>
@@ -92,11 +92,11 @@ export function ResolutionQueue({ projectId, resolutions, cards, onUpdate }: Res
 
       {/* Add Question form */}
       {showForm && (
-        <div className="space-y-2 rounded-lg border border-[#E7DAC7] bg-[#FFFDF8] p-4">
+        <div className="space-y-2 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4">
           <select
             value={cardId}
             onChange={(e) => setCardId(e.target.value)}
-            className="w-full rounded border border-[#E7DAC7] bg-cafe-surface px-2 py-1.5 text-xs text-[#2B2118]"
+            className="w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1.5 text-xs text-cafe"
           >
             <option value="">选择 Card...</option>
             {cards.map((c) => (
@@ -108,7 +108,7 @@ export function ResolutionQueue({ projectId, resolutions, cards, onUpdate }: Res
           <select
             value={path}
             onChange={(e) => setPath(e.target.value as NonNullPath)}
-            className="w-full rounded border border-[#E7DAC7] bg-cafe-surface px-2 py-1.5 text-xs text-[#2B2118]"
+            className="w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1.5 text-xs text-cafe"
           >
             {PATH_OPTIONS.map((p) => (
               <option key={p} value={p}>
@@ -121,20 +121,20 @@ export function ResolutionQueue({ projectId, resolutions, cards, onUpdate }: Res
             onChange={(e) => setQuestion(e.target.value)}
             placeholder="问题..."
             rows={2}
-            className="w-full rounded border border-[#E7DAC7] bg-cafe-surface px-2 py-1.5 text-xs text-[#2B2118]"
+            className="w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1.5 text-xs text-cafe"
           />
           <textarea
             value={recommendation}
             onChange={(e) => setRecommendation(e.target.value)}
             placeholder="建议..."
             rows={2}
-            className="w-full rounded border border-[#E7DAC7] bg-cafe-surface px-2 py-1.5 text-xs text-[#2B2118]"
+            className="w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1.5 text-xs text-cafe"
           />
           <button
             type="button"
             onClick={() => void handleCreate()}
             disabled={submitting || !cardId || !question.trim()}
-            className="w-full rounded-lg bg-[#8B6F47] py-1.5 text-xs font-medium text-white hover:bg-[#7A6139] disabled:opacity-40"
+            className="w-full rounded-lg bg-[var(--mc-accent)] py-1.5 text-xs font-medium text-white hover:bg-[var(--mc-accent-hover)] disabled:opacity-40"
           >
             {submitting ? '提交中...' : '提交'}
           </button>
@@ -143,7 +143,7 @@ export function ResolutionQueue({ projectId, resolutions, cards, onUpdate }: Res
 
       {/* Resolution list */}
       {resolutions.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-[#D8C6AD] bg-[#FBF7F0] p-6 text-center text-xs text-[#9A866F]">
+        <div className="rounded-lg border border-dashed border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-6 text-center text-xs text-cafe-secondary">
           暂无澄清问题
         </div>
       ) : (
@@ -151,40 +151,43 @@ export function ResolutionQueue({ projectId, resolutions, cards, onUpdate }: Res
           {resolutions.map((item) => {
             const style = STATUS_STYLES[item.status] ?? STATUS_STYLES.open;
             return (
-              <div key={item.id} className="rounded-lg border border-[#E7DAC7] bg-[#FFFDF8] p-3 text-xs">
+              <div
+                key={item.id}
+                className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3 text-xs"
+              >
                 <div className="mb-1 flex items-center gap-2">
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${style.bg} ${style.text}`}>
+                  <span className={`rounded-full px-2 py-0.5 text-micro font-medium ${style.bg} ${style.text}`}>
                     {item.status}
                   </span>
-                  <span className="rounded bg-[#F4EFE7] px-1.5 py-0.5 text-[10px] font-medium text-[#8B6F47]">
+                  <span className="rounded bg-[var(--console-hover-bg)] px-1.5 py-0.5 text-micro font-medium text-cafe-secondary">
                     {item.path}
                   </span>
-                  <span className="text-[10px] text-[#B8A88F]">{item.cardId.slice(0, 8)}</span>
+                  <span className="text-micro text-cafe-muted">{item.cardId.slice(0, 8)}</span>
                 </div>
-                <div className="mb-1 font-medium text-[#2B2118]">{item.question}</div>
+                <div className="mb-1 font-medium text-cafe">{item.question}</div>
                 {item.recommendation && (
-                  <div className="mb-1 text-[10px] text-[#9A866F]">建议: {item.recommendation}</div>
+                  <div className="mb-1 text-micro text-cafe-secondary">建议: {item.recommendation}</div>
                 )}
-                {item.answer && <div className="rounded bg-conn-green-bg px-2 py-1 text-[#2B2118]">{item.answer}</div>}
+                {item.answer && <div className="rounded bg-conn-green-bg px-2 py-1 text-cafe">{item.answer}</div>}
                 {item.status === 'open' && (
                   <div className="mt-2 flex gap-2">
                     <input
                       value={answerText[item.id] ?? ''}
                       onChange={(e) => setAnswerText((prev) => ({ ...prev, [item.id]: e.target.value }))}
                       placeholder="回答..."
-                      className="flex-1 rounded border border-[#E7DAC7] bg-cafe-surface px-2 py-1 text-xs"
+                      className="flex-1 rounded border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1 text-xs"
                     />
                     <button
                       type="button"
                       onClick={() => void handleAnswer(item.id)}
-                      className="rounded bg-green-600 px-2 py-1 text-[10px] font-medium text-white hover:bg-green-700"
+                      className="rounded bg-green-600 px-2 py-1 text-micro font-medium text-white hover:bg-green-700"
                     >
                       Answer
                     </button>
                     <button
                       type="button"
                       onClick={() => void handleEscalate(item.id)}
-                      className="rounded bg-red-600 px-2 py-1 text-[10px] font-medium text-white hover:bg-red-700"
+                      className="rounded bg-red-600 px-2 py-1 text-micro font-medium text-white hover:bg-red-700"
                     >
                       Escalate
                     </button>

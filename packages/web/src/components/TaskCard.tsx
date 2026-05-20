@@ -86,7 +86,7 @@ export function TaskCard({
         <button
           type="button"
           onClick={() => onStatusChange(task.id, STATUS_CYCLE[status])}
-          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${style.pillBg} transition-colors hover:opacity-80`}
+          className={`text-micro font-semibold px-2 py-0.5 rounded-full ${style.pillBg} transition-colors hover:opacity-80`}
         >
           {STATUS_LABELS[status]}
         </button>
@@ -96,7 +96,7 @@ export function TaskCard({
       {expanded && (
         <div className="mt-2 pt-2 border-t border-cafe">
           {task.why && <p className="text-xs text-cafe-muted leading-relaxed">{task.why}</p>}
-          <p className="text-[10px] text-cafe-muted mt-1">
+          <p className="text-micro text-cafe-muted mt-1">
             {formatRelativeTime(task.createdAt)} · {task.createdBy === 'user' ? '铲屎官' : task.createdBy}
           </p>
         </div>

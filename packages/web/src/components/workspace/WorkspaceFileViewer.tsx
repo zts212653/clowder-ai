@@ -138,16 +138,16 @@ export function WorkspaceFileViewer({
     <div className="flex-1 flex flex-col min-h-0 animate-fade-in">
       {/* Tab bar */}
       {openTabs.length > 0 && (
-        <div className="flex bg-[#1E1E24] border-b border-[#2a2a32] overflow-x-auto scrollbar-none">
+        <div className="flex bg-[var(--ws-editor-bg)] border-b border-[var(--ws-editor-surface)] overflow-x-auto scrollbar-none">
           {openTabs.map((tab) => (
             <button
               key={tab}
               type="button"
               onClick={() => setOpenFile(tab)}
-              className={`group flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono border-r border-[#2a2a32] flex-shrink-0 transition-colors ${
+              className={`group flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono border-r border-[var(--ws-editor-surface)] flex-shrink-0 transition-colors ${
                 tab === openFilePath
-                  ? 'bg-[#2a2a32] text-gray-200'
-                  : 'text-cafe-secondary hover:text-cafe-muted hover:bg-[#252530]'
+                  ? 'bg-[var(--ws-editor-surface)] text-gray-200'
+                  : 'text-cafe-secondary hover:text-cafe-muted hover:bg-[var(--ws-editor-hover)]'
               }`}
               title={tab}
             >
@@ -177,10 +177,10 @@ export function WorkspaceFileViewer({
       )}
 
       {/* Toolbar */}
-      <div className="px-3 py-1 bg-[#1E1E24] flex items-center justify-between">
+      <div className="px-3 py-1 bg-[var(--ws-editor-bg)] flex items-center justify-between">
         <div className="flex items-center gap-2 min-w-0">
           {file.size > 0 && (
-            <span className="text-[10px] text-cafe-secondary font-mono flex-shrink-0">
+            <span className="text-micro text-cafe-secondary font-mono flex-shrink-0">
               {file.size < 1024 ? `${file.size}B` : `${Math.round(file.size / 1024)}KB`}
             </span>
           )}
@@ -269,13 +269,13 @@ export function WorkspaceFileViewer({
       </div>
 
       {saveError && (
-        <div className="px-3 py-1.5 text-[10px] text-conn-red-text bg-red-900/20 border-b border-red-900/30">
+        <div className="px-3 py-1.5 text-micro text-conn-red-text bg-red-900/20 border-b border-red-900/30">
           {saveError}
         </div>
       )}
 
       {pendingExternalSha && (
-        <div className="px-3 py-1.5 text-[10px] text-amber-300 bg-amber-900/20 border-b border-amber-900/30 flex items-center justify-between">
+        <div className="px-3 py-1.5 text-micro text-amber-300 bg-amber-900/20 border-b border-amber-900/30 flex items-center justify-between">
           <span>文件已被外部修改</span>
           <span className="flex gap-2">
             <button type="button" onClick={onApplyExternalChange} className="underline hover:text-amber-200">
@@ -315,7 +315,7 @@ export function WorkspaceFileViewer({
       />
 
       {file.truncated && (
-        <div className="px-3 py-1.5 text-[10px] text-amber-400 bg-[#1E1E24] border-t border-amber-900/30">
+        <div className="px-3 py-1.5 text-micro text-amber-400 bg-[var(--ws-editor-bg)] border-t border-amber-900/30">
           \u6587\u4EF6\u5DF2\u622A\u65AD (超过 1MB)
         </div>
       )}
@@ -345,7 +345,7 @@ function ToolbarBtn({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${active ? ac : 'text-cafe-secondary hover:text-cafe-muted hover:bg-cafe-surface/10'} ${disabled ? 'opacity-30 cursor-not-allowed' : ''}`}
+      className={`px-2 py-0.5 rounded text-micro font-medium transition-colors ${active ? ac : 'text-cafe-secondary hover:text-cafe-muted hover:bg-cafe-surface/10'} ${disabled ? 'opacity-30 cursor-not-allowed' : ''}`}
       title={title}
     >
       {children}

@@ -3,6 +3,7 @@ import { describe, test } from 'node:test';
 import { classifyStep } from '../dist/domains/cats/services/agents/providers/antigravity/antigravity-event-transformer.js';
 import {
   classifyAntigravityStepEffect,
+  isReadOnlyMcpTool,
   summarizeAntigravityStepEffects,
 } from '../dist/domains/cats/services/agents/providers/antigravity/antigravity-step-effects.js';
 
@@ -111,6 +112,65 @@ describe('F201 classifyAntigravityStepEffect', () => {
     assert.equal(readOnly.blocksBlindRetry, false);
   });
 
+  test('Antigravity 2.x call_mcp_tool wrapper is classified by its nested MCP tool name', () => {
+    const effect = classifyAntigravityStepEffect({
+      type: 'CORTEX_STEP_TYPE_MCP_TOOL',
+      status: 'CORTEX_STEP_STATUS_WAITING',
+      metadata: {
+        toolCall: {
+          name: 'call_mcp_tool',
+          argumentsJson: JSON.stringify({
+            ServerName: 'cat-cafe-memory',
+            ToolName: 'cat_cafe_list_session_chain',
+            Arguments: JSON.stringify({ threadId: 'thread-1', catId: 'antig-opus' }),
+          }),
+        },
+      },
+      mcpTool: {
+        serverName: 'cat-cafe-memory',
+        toolCall: {
+          name: 'cat_cafe_list_session_chain',
+          argumentsJson: JSON.stringify({ threadId: 'thread-1', catId: 'antig-opus' }),
+        },
+      },
+    });
+
+    assert.equal(effect.kind, 'tool_read');
+    assert.equal(effect.effectType, 'mcp');
+    assert.equal(effect.toolName, 'cat_cafe_list_session_chain');
+    assert.equal(effect.blocksBlindRetry, false);
+  });
+
+  test('persistent read-only MCP allowlist is present in the readonly server toolset', async () => {
+    const { READONLY_ALLOWED_TOOLS } = await import('../../mcp-server/dist/server-toolsets.js');
+    const persistentReadonlyTools = [
+      'cat_cafe_get_rich_block_rules',
+      'cat_cafe_list_session_chain',
+      'cat_cafe_read_session_events',
+      'cat_cafe_read_session_digest',
+      'cat_cafe_read_invocation_detail',
+      'cat_cafe_shell_exec',
+      'signal_list_inbox',
+      'signal_get_article',
+      'signal_search',
+      'signal_list_studies',
+    ];
+
+    for (const toolName of persistentReadonlyTools) {
+      assert.equal(isReadOnlyMcpTool(toolName), true, `${toolName} must be retry-safe in Antigravity`);
+      assert.equal(READONLY_ALLOWED_TOOLS.has(toolName), true, `${toolName} must be available in readonly MCP mode`);
+    }
+  });
+
+  test('cat_cafe_shell_exec remains coupled to the readonly shell command policy', async () => {
+    const { isReadOnlyShellCommand } = await import('../../mcp-server/dist/tools/shell-tools.js');
+
+    assert.equal(isReadOnlyMcpTool('cat_cafe_shell_exec'), true);
+    assert.equal(isReadOnlyShellCommand('git status --short'), true);
+    assert.equal(isReadOnlyShellCommand('mkdir should-not-run'), false);
+    assert.equal(isReadOnlyShellCommand('git diff --output=/tmp/patch.diff'), false);
+  });
+
   test('reviewed Antigravity read tools are retry-safe tool_read steps', () => {
     const effect = classifyAntigravityStepEffect({
       type: 'CORTEX_STEP_TYPE_GREP_SEARCH',
@@ -134,6 +194,42 @@ describe('F201 classifyAntigravityStepEffect', () => {
     assert.equal(summary.hasUnsafeSideEffect, false);
     assert.equal(summary.hasCompletedSideEffect, false);
     assert.equal(summary.blocksBlindRetry, false);
+  });
+
+  test('CONVERSATION_HISTORY does not affect retry safety', () => {
+    const step = {
+      type: 'CORTEX_STEP_TYPE_CONVERSATION_HISTORY',
+      status: 'CORTEX_STEP_STATUS_DONE',
+    };
+
+    const effect = classifyAntigravityStepEffect(step);
+    assert.equal(effect.kind, 'none');
+    assert.equal(effect.sideEffectCapable, false);
+    assert.equal(effect.blocksBlindRetry, false);
+
+    const summary = summarizeAntigravityStepEffects([step]);
+    assert.equal(summary.hasUnsafeSideEffect, false);
+    assert.equal(summary.hasCompletedSideEffect, false);
+    assert.equal(summary.blocksBlindRetry, false);
+    assert.equal(summary.effects.length, 0);
+
+    const mixedSummary = summarizeAntigravityStepEffects([
+      step,
+      {
+        type: 'CORTEX_STEP_TYPE_MCP_TOOL',
+        status: 'CORTEX_STEP_STATUS_DONE',
+        mcpTool: {
+          serverName: 'cat-cafe-memory',
+          toolCall: {
+            name: 'cat_cafe_list_session_chain',
+            argumentsJson: JSON.stringify({ threadId: 'thread-1', catId: 'antig-opus' }),
+          },
+        },
+      },
+    ]);
+    assert.equal(mixedSummary.hasUnsafeSideEffect, false);
+    assert.equal(mixedSummary.blocksBlindRetry, false);
+    assert.equal(mixedSummary.effects.length, 0);
   });
 
   test('sed -n with in-place edit flag is not read-only', () => {

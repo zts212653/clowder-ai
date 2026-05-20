@@ -21,12 +21,12 @@ export function EvidencePanel({ data }: { data: EvidenceData }) {
         <div className="flex items-center justify-between mb-3 px-0.5">
           <div className="flex items-center gap-2">
             <span className="text-xs font-black text-slate-200 tracking-wide uppercase">Hindsight 检索结果</span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-600 text-slate-300 font-bold">
+            <span className="text-micro px-1.5 py-0.5 rounded-full bg-slate-600 text-slate-300 font-bold">
               {data.results.length}
             </span>
           </div>
           {data.degraded && (
-            <div className="flex items-center gap-1 text-[10px] font-bold text-amber-400 animate-pulse">
+            <div className="flex items-center gap-1 text-micro font-bold text-amber-400 animate-pulse">
               <svg
                 viewBox="0 0 24 24"
                 fill="none"
@@ -45,7 +45,7 @@ export function EvidencePanel({ data }: { data: EvidenceData }) {
 
         {/* Degraded info if present */}
         {data.degraded && (
-          <div className="text-[10px] text-amber-300 bg-amber-950/30 border border-amber-800/40 rounded-lg px-3 py-2 mb-3 leading-relaxed italic">
+          <div className="text-micro text-amber-300 bg-amber-950/30 border border-amber-800/40 rounded-lg px-3 py-2 mb-3 leading-relaxed italic">
             {'\u201c'}哎呀，有些记忆暂时找不到了，正在为您从本地文档中努力搜寻...{'\u201d'}
           </div>
         )}

@@ -966,6 +966,37 @@ skills:
     merged_from: null
     feature: "F144"
 
+  # ── 金融数据 ──
+  ttfund-skills:
+    description: >
+      天天基金官方 Skills 网关调用封装。
+      Use when: 查询天天基金/天天财富基金数据、基金搜索、基金净值、基金持仓、基金经理、指数、黄金、债市、活期宝或官方 ttfund skills。
+      Not for: 交易执行、券商/银行账户操作、FRED/Tushare/yfinance/AKShare 结构化数据源、投资建议。
+      Output: 通过官方网关返回的结构化 JSON 事实数据，带 source/asOf 后再进入 F207 数据层。
+      GOTCHA: 必须有本机 TTFUND_APIKEY，且 key 只放环境变量或 gitignored .env，绝不写入 git 或回复全文。
+    triggers:
+      - "天天基金 skills"
+      - "ttfund"
+      - "TTFUND_APIKEY"
+      - "天天基金净值"
+      - "天天基金搜索"
+      - "天天基金经理"
+      - "天天基金持仓"
+      - "天天黄金"
+      - "天天债市"
+    not_for:
+      - "交易执行"
+      - "券商账户操作"
+      - "FRED"
+      - "Tushare"
+      - "yfinance"
+      - "AKShare"
+      - "投资建议"
+    output: "Official ttfund gateway JSON facts"
+    next: []
+    sop_step: null
+    feature: "F207"
+
 # ─── 降级为 refs/（不再是独立 skill） ─────────────────
 refs:
   mcp-callbacks:

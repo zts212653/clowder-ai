@@ -257,7 +257,7 @@ function ToolRow({
       {/* Detail — hidden by default, shown on click */}
       {hasResult && !rowExpanded && <ChevronIcon expanded={false} />}
       {rowExpanded && hasResult && event.detail && (
-        <div className="w-full mt-1 pl-7 whitespace-pre-wrap text-[10px]" style={{ color: '#64748B' }}>
+        <div className="w-full mt-1 pl-7 whitespace-pre-wrap text-micro" style={{ color: '#64748B' }}>
           {event.detail}
         </div>
       )}

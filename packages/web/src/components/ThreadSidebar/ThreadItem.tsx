@@ -267,7 +267,7 @@ export function ThreadItem({
           ) : id !== 'default' ? (
             <>
               <PawIcon className="text-xs" />
-              <span className="text-[10px] text-cafe-muted">还没有猫猫加入</span>
+              <span className="text-micro text-cafe-muted">还没有猫猫加入</span>
             </>
           ) : null}
           {preferredCats && preferredCats.length > 0 && (
@@ -305,8 +305,8 @@ export function ThreadItem({
           )}
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          {hasDraft && <span className="text-[10px] font-medium text-conn-red-text">[草稿]</span>}
-          <span className="text-[10px] text-cafe-muted">{formatRelativeTime(lastActiveAt, true)}</span>
+          {hasDraft && <span className="text-micro font-medium text-conn-red-text">[草稿]</span>}
+          <span className="text-micro text-cafe-muted">{formatRelativeTime(lastActiveAt, true)}</span>
         </div>
       </div>
     </div>
@@ -351,14 +351,14 @@ function LabelDots({ labels }: { labels?: string[] }) {
       {shown.map((l) => (
         <span
           key={l.id}
-          className="inline-flex items-center gap-0.5 rounded-full px-1 py-px text-[10px] leading-tight text-cafe-secondary"
+          className="inline-flex items-center gap-0.5 rounded-full px-1 py-px text-micro leading-tight text-cafe-secondary"
           style={{ backgroundColor: `${l.color}18` }}
         >
           <span className="inline-block w-1 h-1 rounded-full flex-shrink-0" style={{ backgroundColor: l.color }} />
           <span className="max-w-[32px] truncate">{l.name}</span>
         </span>
       ))}
-      {overflow > 0 && <span className="text-[10px] text-cafe-muted">+{overflow}</span>}
+      {overflow > 0 && <span className="text-micro text-cafe-muted">+{overflow}</span>}
     </div>
   );
 }

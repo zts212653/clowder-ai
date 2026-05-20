@@ -64,7 +64,7 @@ function StoryBubble({ msg }: { msg: StoryMessage }) {
                 className="flex items-center gap-1.5 text-xs text-cafe-secondary hover:text-cafe-secondary transition-colors mb-1"
               >
                 <span
-                  className="text-[10px]"
+                  className="text-micro"
                   style={{
                     transform: thinkingExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
                     display: 'inline-block',
@@ -112,7 +112,7 @@ function BadgeTag({ badge }: { badge: NonNullable<StoryMessage['badge']> }) {
     amber: 'bg-amber-100 text-conn-amber-text',
     blue: 'bg-conn-blue-bg text-conn-blue-text',
   };
-  return <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${colorMap[badge.color]}`}>{badge.text}</span>;
+  return <span className={`text-micro px-1.5 py-0.5 rounded font-medium ${colorMap[badge.color]}`}>{badge.text}</span>;
 }
 
 function StoryCardView({ card, index }: { card: StoryCardType; index: number }) {
