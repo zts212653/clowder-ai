@@ -1,4 +1,5 @@
 'use client';
+import { ServiceStatusPanel } from '../settings/ServiceStatusPanel';
 import { KnowledgeFeed } from '../workspace/KnowledgeFeed';
 import { CollectionCatalog } from './CollectionCatalog';
 import { CollectionGraph } from './CollectionGraph';
@@ -34,7 +35,8 @@ export function MemoryHub({ activeTab = 'feed', initialQuery, initialReferrerThr
           </div>
         )}
         {activeTab === 'status' && (
-          <div data-testid="memory-tab-status">
+          <div className="space-y-4" data-testid="memory-tab-status">
+            <ServiceStatusPanel filterFeatures={['memory-semantic-search']} title="语义搜索服务" />
             <IndexStatus />
           </div>
         )}

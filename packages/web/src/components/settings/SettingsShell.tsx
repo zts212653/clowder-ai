@@ -10,6 +10,7 @@ function SettingsShellInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const activeSection = searchParams.get('s') ?? DEFAULT_SECTION;
+  const initialEditCatId = searchParams.get('cat') ?? undefined;
   const standalone = searchParams.get('standalone') === '1';
 
   const handleSelect = useCallback(
@@ -26,7 +27,7 @@ function SettingsShellInner() {
       <div className="flex h-full flex-col bg-[var(--console-panel-bg)]">
         <div className="m-3 flex flex-1 flex-col overflow-y-auto rounded-[18px] bg-[var(--console-shell-bg)] px-5 py-6 shadow-[var(--console-shadow-soft)] md:px-9 md:py-8">
           <div className="space-y-5">
-            <SettingsContent section={activeSection} />
+            <SettingsContent section={activeSection} initialEditCatId={initialEditCatId} />
           </div>
         </div>
       </div>
@@ -49,7 +50,7 @@ function SettingsShellInner() {
 
       <div className="min-w-0 flex-1 overflow-y-auto">
         <div className="space-y-5 px-5 py-5 md:px-8 md:py-7">
-          <SettingsContent section={activeSection} />
+          <SettingsContent section={activeSection} initialEditCatId={initialEditCatId} />
         </div>
       </div>
     </div>

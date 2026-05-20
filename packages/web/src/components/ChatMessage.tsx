@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { type CatData, formatCatName } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { useTts } from '@/hooks/useTts';
@@ -69,6 +70,7 @@ interface ChatMessageProps {
 }
 
 export function ChatMessage({ message, getCatById }: ChatMessageProps) {
+  const router = useRouter();
   const coCreator = useCoCreatorConfig();
   const { state: ttsState, synthesize: ttsSynthesize, activeMessageId } = useTts();
   const currentThreadId = useChatStore((s) => s.currentThreadId);
@@ -299,7 +301,14 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
 
   return (
     <div data-message-id={message.id} className="group flex gap-2 mb-4 items-start">
-      {catData && <CatAvatar catId={message.catId!} size={32} status={message.isStreaming ? 'streaming' : undefined} />}
+      {catData && (
+        <CatAvatar
+          catId={message.catId!}
+          size={32}
+          status={message.isStreaming ? 'streaming' : undefined}
+          onClick={() => router.push(`/settings?s=members&cat=${message.catId}`)}
+        />
+      )}
       <div className="max-w-[85%] md:max-w-[75%] min-w-0">
         {catStyle && (
           <div className="mb-1 flex flex-col gap-1 min-w-0">

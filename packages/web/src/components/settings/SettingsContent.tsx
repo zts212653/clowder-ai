@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
 import { BrakeSettingsPanel } from '../BrakeSettingsPanel';
@@ -28,9 +28,10 @@ import { SETTINGS_SECTIONS } from './settings-nav-config';
 
 interface SettingsContentProps {
   section: string;
+  initialEditCatId?: string;
 }
 
-export function SettingsContent({ section }: SettingsContentProps) {
+export function SettingsContent({ section, initialEditCatId }: SettingsContentProps) {
   const { cats, refresh } = useCatData();
   const [config, setConfig] = useState<ConfigData | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -59,6 +60,24 @@ export function SettingsContent({ section }: SettingsContentProps) {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  const consumedDeepLinkRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      initialEditCatId &&
+      section === 'members' &&
+      cats.length > 0 &&
+      consumedDeepLinkRef.current !== initialEditCatId
+    ) {
+      const cat = cats.find((c) => c.id === initialEditCatId);
+      if (cat) {
+        consumedDeepLinkRef.current = initialEditCatId;
+        setCreateDraft(null);
+        setEditingCat(cat);
+        setEditorOpen(true);
+      }
+    }
+  }, [initialEditCatId, section, cats]);
 
   const handleEditorSaved = useCallback(async () => {
     await Promise.all([fetchData(), refresh()]);
