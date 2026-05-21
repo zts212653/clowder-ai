@@ -3628,6 +3628,266 @@ describe('AntigravityAgentService (Bridge) — fatal errors', () => {
     assert.equal(record.journalSummarySnapshot.entries[0].status, 'pending');
   });
 
+  test('suppresses Antigravity assistant-prefill tail error after terminal text', async () => {
+    const supervisorStore = new InMemoryAntigravitySupervisorStore();
+    const bridge = createMockBridge({ cascadeId: 'cascade-f201-terminal-prefill-tail' });
+    bridge.nativeExecuteAndPush = mock.fn(async (step) => step.type === 'CORTEX_STEP_TYPE_RUN_COMMAND');
+    bridge.pollForSteps = async function* () {
+      yield {
+        steps: [
+          {
+            type: 'CORTEX_STEP_TYPE_RUN_COMMAND',
+            status: 'CORTEX_STEP_STATUS_WAITING',
+            metadata: {
+              toolCall: {
+                id: 'toolu_terminal_prefill_tail',
+                name: 'run_command',
+                argumentsJson: JSON.stringify({
+                  CommandLine: 'which rg && echo "---" && rg --version',
+                  Cwd: '/tmp',
+                  SafeToAutoRun: true,
+                }),
+              },
+              sourceTrajectoryStepInfo: {
+                cascadeId: 'cascade-f201-terminal-prefill-tail',
+                trajectoryId: 'traj-f201-terminal-prefill-tail',
+                stepIndex: 1,
+              },
+            },
+          },
+        ],
+        cursor: { baselineStepCount: 0, lastDeliveredStepCount: 1, terminalSeen: false, lastActivityAt: Date.now() },
+      };
+      yield {
+        steps: [
+          {
+            type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+            status: 'CORTEX_STEP_STATUS_DONE',
+            plannerResponse: {
+              modifiedResponse: 'grep_search smoke passed; rg resolved from the bundled binary.',
+              stopReason: 'STOP_REASON_STOP_PATTERN',
+            },
+          },
+        ],
+        cursor: { baselineStepCount: 1, lastDeliveredStepCount: 2, terminalSeen: true, lastActivityAt: Date.now() },
+      };
+      yield {
+        steps: [
+          {
+            type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+            status: 'CORTEX_STEP_STATUS_DONE',
+            plannerResponse: { stopReason: 'STOP_REASON_CLIENT_STREAM_ERROR' },
+          },
+          {
+            type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+            status: 'CORTEX_STEP_STATUS_DONE',
+            errorMessage: {
+              error: {
+                modelErrorMessage:
+                  'INVALID_ARGUMENT (code 400): invalid_request_error: This model does not support assistant message prefill. The conversation must end with a user message.',
+              },
+            },
+          },
+        ],
+        cursor: { baselineStepCount: 2, lastDeliveredStepCount: 4, terminalSeen: true, lastActivityAt: Date.now() },
+      };
+    };
+
+    const service = new AntigravityAgentService({
+      catId: 'antigravity',
+      model: 'claude-opus-4-6',
+      bridge,
+      supervisorStore,
+      streamErrorGraceWindowMs: 0,
+      modelCapacityRetryDelaysMs: [0],
+    });
+    const messages = await collect(
+      service.invoke('hello', {
+        auditContext: {
+          threadId: 'thread-f201-terminal-prefill-tail',
+          invocationId: 'inv-f201-terminal-prefill-tail',
+          userId: 'u1',
+          catId: 'antigravity',
+        },
+      }),
+    );
+
+    assert.equal(
+      bridge.nativeExecuteAndPush.mock.calls.filter(
+        (call) => call.arguments[0]?.metadata?.toolCall?.id === 'toolu_terminal_prefill_tail',
+      ).length,
+      1,
+      'native executor still dispatches the read-only run_command once',
+    );
+    assert.deepEqual(
+      messages.filter((msg) => msg.type === 'text').map((msg) => msg.content),
+      ['grep_search smoke passed; rg resolved from the bundled binary.'],
+    );
+    assert.equal(
+      messages.some((msg) => msg.type === 'error' && msg.errorCode === 'upstream_error'),
+      false,
+      'tail assistant-prefill upstream_error should not override an already delivered terminal answer',
+    );
+    assert.equal(
+      messages.some((msg) => msg.type === 'system_info' && msg.content?.includes('"antigravity_recovery"')),
+      false,
+      'tail assistant-prefill error should not produce a resumable recovery card',
+    );
+
+    const record = await supervisorStore.get('inv-f201-terminal-prefill-tail', 'cascade-f201-terminal-prefill-tail');
+    assert.equal(record?.status, 'done');
+    assert.equal(record?.receiptState, 'clean');
+  });
+
+  test('does not suppress assistant-prefill upstream_error after non-terminal text', async () => {
+    const bridge = createMockBridge({ cascadeId: 'cascade-f201-nonterminal-prefill-tail' });
+    bridge.pollForSteps = async function* () {
+      yield {
+        steps: [
+          {
+            type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+            status: 'CORTEX_STEP_STATUS_DONE',
+            plannerResponse: {
+              response: 'I found the first result; continuing with the next check.',
+              stopReason: 'STOP_REASON_STOP_PATTERN',
+            },
+          },
+        ],
+        cursor: { baselineStepCount: 0, lastDeliveredStepCount: 1, terminalSeen: false, lastActivityAt: Date.now() },
+      };
+      yield {
+        steps: [
+          {
+            type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+            status: 'CORTEX_STEP_STATUS_DONE',
+            errorMessage: {
+              error: {
+                modelErrorMessage:
+                  'INVALID_ARGUMENT (code 400): invalid_request_error: This model does not support assistant message prefill. The conversation must end with a user message.',
+              },
+            },
+          },
+        ],
+        cursor: { baselineStepCount: 1, lastDeliveredStepCount: 2, terminalSeen: true, lastActivityAt: Date.now() },
+      };
+    };
+
+    const service = new AntigravityAgentService({
+      catId: 'antigravity',
+      model: 'claude-opus-4-6',
+      bridge,
+      streamErrorGraceWindowMs: 0,
+      modelCapacityRetryDelaysMs: [],
+    });
+    const messages = await collect(service.invoke('hello'));
+
+    assert.deepEqual(
+      messages.filter((msg) => msg.type === 'text').map((msg) => msg.content),
+      ['I found the first result; continuing with the next check.'],
+    );
+    assert.equal(
+      messages.filter((msg) => msg.type === 'error' && msg.errorCode === 'upstream_error').length,
+      1,
+      'assistant-prefill upstream_error after non-terminal text must still surface',
+    );
+  });
+
+  test('does not suppress assistant-prefill upstream_error coalesced with terminalSeen text', async () => {
+    const bridge = createMockBridge({ cascadeId: 'cascade-f201-coalesced-prefill-tail' });
+    bridge.pollForSteps = async function* () {
+      yield {
+        steps: [
+          {
+            type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+            status: 'CORTEX_STEP_STATUS_DONE',
+            plannerResponse: {
+              response: 'I found one result; checking the final status next.',
+              stopReason: 'STOP_REASON_STOP_PATTERN',
+            },
+          },
+          {
+            type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+            status: 'CORTEX_STEP_STATUS_DONE',
+            errorMessage: {
+              error: {
+                modelErrorMessage:
+                  'INVALID_ARGUMENT (code 400): invalid_request_error: This model does not support assistant message prefill. The conversation must end with a user message.',
+              },
+            },
+          },
+        ],
+        cursor: { baselineStepCount: 0, lastDeliveredStepCount: 2, terminalSeen: true, lastActivityAt: Date.now() },
+      };
+    };
+
+    const service = new AntigravityAgentService({
+      catId: 'antigravity',
+      model: 'claude-opus-4-6',
+      bridge,
+      streamErrorGraceWindowMs: 0,
+      modelCapacityRetryDelaysMs: [],
+    });
+    const messages = await collect(service.invoke('hello'));
+
+    assert.deepEqual(
+      messages.filter((msg) => msg.type === 'text').map((msg) => msg.content),
+      ['I found one result; checking the final status next.'],
+    );
+    assert.equal(
+      messages.filter((msg) => msg.type === 'error' && msg.errorCode === 'upstream_error').length,
+      1,
+      'same-batch assistant-prefill upstream_error must not be hidden by batch-level terminalSeen',
+    );
+  });
+
+  test('does not suppress generic stream_error after terminal text', async () => {
+    const bridge = createMockBridge({ cascadeId: 'cascade-f201-terminal-stream-error' });
+    bridge.pollForSteps = async function* () {
+      yield {
+        steps: [
+          {
+            type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+            status: 'CORTEX_STEP_STATUS_DONE',
+            plannerResponse: {
+              response: 'I have an intermediate result, then I will continue.',
+              stopReason: 'STOP_REASON_STOP_PATTERN',
+            },
+          },
+        ],
+        cursor: { baselineStepCount: 0, lastDeliveredStepCount: 1, terminalSeen: false, lastActivityAt: Date.now() },
+      };
+      yield {
+        steps: [
+          {
+            type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+            status: 'CORTEX_STEP_STATUS_DONE',
+            plannerResponse: { stopReason: 'STOP_REASON_CLIENT_STREAM_ERROR' },
+          },
+        ],
+        cursor: { baselineStepCount: 1, lastDeliveredStepCount: 2, terminalSeen: true, lastActivityAt: Date.now() },
+      };
+    };
+
+    const service = new AntigravityAgentService({
+      catId: 'antigravity',
+      model: 'claude-opus-4-6',
+      bridge,
+      streamErrorGraceWindowMs: 0,
+      modelCapacityRetryDelaysMs: [],
+    });
+    const messages = await collect(service.invoke('hello'));
+
+    assert.deepEqual(
+      messages.filter((msg) => msg.type === 'text').map((msg) => msg.content),
+      ['I have an intermediate result, then I will continue.'],
+    );
+    assert.equal(
+      messages.filter((msg) => msg.type === 'error' && msg.errorCode === 'stream_error').length,
+      1,
+      'generic stream_error after prior terminal text must still surface',
+    );
+  });
+
   test('AC-G7: YOLO-dispatched approval-gated run_command remains side-effect journal covered', async () => {
     const supervisorStore = new InMemoryAntigravitySupervisorStore();
     const bridge = createMockBridge({ cascadeId: 'cascade-f201-yolo-journal' });

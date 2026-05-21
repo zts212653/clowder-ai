@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +17,7 @@ function readComponent(relativePath: string): string {
 describe('console shell content surfaces', () => {
   it.each([
     ['MemoryHub', 'memory/MemoryHub.tsx', 'memory-content-surface'],
+    ['MissionControlPage', 'mission-control/MissionControlPage.tsx', 'mission-content-surface'],
     ['SignalInboxView', 'signals/SignalInboxView.tsx', 'signal-inbox-content-surface'],
     ['SignalSourcesView', 'signals/SignalSourcesView.tsx', 'signal-sources-content-surface'],
   ])('%s uses a visible rounded content carrier', (_name, path, testId) => {
