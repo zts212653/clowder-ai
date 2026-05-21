@@ -277,16 +277,16 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
   }, []);
 
   return (
-    <div className="flex h-full flex-col bg-[var(--console-panel-bg)]">
-      <div className="flex flex-1 flex-col overflow-hidden rounded-[18px] bg-[var(--console-shell-bg)] shadow-[var(--console-shadow-soft)] m-3 gap-5 px-9 py-8">
-        <header className="flex items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-cafe-black">信号</h1>
-            <p className="mt-1 text-sm text-cafe-secondary">浏览、筛选和研读信号文章</p>
-          </div>
-          <SignalNav active="signals" initialReferrerThread={initialReferrerThread} />
-        </header>
+    <div className="flex h-full flex-col bg-[var(--console-shell-bg)]">
+      <header className="flex items-center justify-between gap-4 border-b border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-6 py-3">
+        <div>
+          <h1 className="text-lg font-bold text-cafe">信号</h1>
+          <p className="mt-0.5 text-xs text-cafe-secondary">浏览、筛选和研读信号文章</p>
+        </div>
+        <SignalNav active="signals" initialReferrerThread={initialReferrerThread} />
+      </header>
 
+      <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-6">
         <SignalStatsCards stats={stats} />
 
         {error && (
@@ -295,8 +295,8 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
           </div>
         )}
 
-        <div className="flex min-h-0 flex-1 gap-[18px]">
-          <div className="flex w-[420px] shrink-0 flex-col gap-1 overflow-y-auto rounded-[18px] bg-[var(--console-panel-bg)] p-2">
+        <div className="flex min-h-0 flex-1 gap-4">
+          <div className="flex w-[420px] shrink-0 flex-col gap-1 overflow-y-auto border-r border-[var(--console-border-soft)] pr-4">
             <SignalFilterBar
               filters={filters}
               onFilterChange={(patch) => setFilters((cur) => ({ ...cur, ...patch }))}
@@ -324,24 +324,22 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
               onToggleSelect={toggleBatchSelect}
             />
           </div>
-          <div className="flex min-w-0 flex-1 flex-col gap-[18px] overflow-y-auto">
-            <div className="rounded-2xl bg-[var(--console-card-bg)] p-[22px] shadow-[0_10px_28px_rgba(43,33,26,0.04)]">
-              <SignalArticleDetailPanel
-                article={selectedArticle}
-                isLoading={detailLoading}
-                onStatusChange={handleStatusChange}
-                onTagsChange={handleTagsChange}
-                onNoteChange={handleNoteChange}
-                onDelete={handleDelete}
-                collections={collections}
-                onAddToCollection={handleAddToCollection}
-                onCreateCollection={handleCreateCollection}
-              />
-            </div>
+          <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto">
+            <SignalArticleDetailPanel
+              article={selectedArticle}
+              isLoading={detailLoading}
+              onStatusChange={handleStatusChange}
+              onTagsChange={handleTagsChange}
+              onNoteChange={handleNoteChange}
+              onDelete={handleDelete}
+              collections={collections}
+              onAddToCollection={handleAddToCollection}
+              onCreateCollection={handleCreateCollection}
+            />
             <StudyTimeline />
           </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

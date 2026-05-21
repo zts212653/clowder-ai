@@ -85,12 +85,14 @@ export {
   handleLibraryDryRun,
   handleLibraryList,
   handleLibraryRebuild,
+  handleLibraryVerify,
   libraryArchiveInputSchema,
   libraryCreateInputSchema,
   libraryDryRunInputSchema,
   libraryLifecycleTools,
   libraryListInputSchema,
   libraryRebuildInputSchema,
+  libraryVerifyInputSchema,
 } from './library-lifecycle-tools.js';
 export {
   handleLimbInvoke,

@@ -68,7 +68,9 @@ export function generateHealthReport(db: Database.Database, opts?: { now?: strin
   const unverified = (
     db
       .prepare(
-        "SELECT COUNT(*) as c FROM evidence_docs WHERE verified_at IS NULL AND COALESCE(authority, 'observed') != 'observed'",
+        `SELECT COUNT(*) as c FROM evidence_docs
+       WHERE review_status IN ('needs_review', 'escalated')
+          OR (review_status IS NULL AND verified_at IS NULL AND authority != 'observed')`,
       )
       .get() as { c: number }
   ).c;

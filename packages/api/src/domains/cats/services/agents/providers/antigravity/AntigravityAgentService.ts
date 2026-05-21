@@ -59,6 +59,7 @@ import { classifyAntigravityStepEffect, summarizeAntigravityEffects } from './an
 import { summarizeStepShape, TRACE_ENABLED, traceLog } from './antigravity-trace.js';
 import { AuditLogger } from './executors/AuditLogger.js';
 import { ExecutorRegistry } from './executors/ExecutorRegistry.js';
+import { ANTIGRAVITY_IDE_READ_TOOL_NAMES, AntigravityIdeReadToolExecutor } from './executors/IdeReadToolExecutor.js';
 import { CallMcpToolExecutor } from './executors/McpToolExecutor.js';
 import { isReadOnlyRunCommand, RunCommandExecutor } from './executors/RunCommandExecutor.js';
 
@@ -316,6 +317,9 @@ export class AntigravityAgentService implements AgentService {
         }),
       );
       registry.register(new CallMcpToolExecutor());
+      for (const toolName of ANTIGRAVITY_IDE_READ_TOOL_NAMES) {
+        registry.register(new AntigravityIdeReadToolExecutor(toolName));
+      }
       const audit = new AuditLogger(join(process.cwd(), 'data', 'antigravity-audit'));
       this.bridge.attachExecutors(registry, audit);
     }

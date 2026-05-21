@@ -10,33 +10,87 @@ import { generateHealthReport } from '../../dist/domains/memory/f163-health-repo
 import { applyMigrations } from '../../dist/domains/memory/schema.js';
 
 describe('F163 P2-2: health report unverified metric', () => {
-  it('reports unverified count for non-observed docs without verified_at', () => {
+  it('counts needs_review + escalated as unverified (Phase J governance)', () => {
     const db = new Database(':memory:');
     applyMigrations(db);
 
     db.prepare(
-      `INSERT INTO evidence_docs (anchor, kind, status, title, updated_at, authority, verified_at)
-       VALUES ('LL-1', 'lesson', 'active', 'verified doc', '2026-01-01', 'validated', '2026-01-01')`,
+      `INSERT INTO evidence_docs (anchor, kind, status, title, updated_at, authority, review_status)
+       VALUES ('R1', 'feature', 'active', 'needs review', '2026-01-01', 'validated', 'needs_review')`,
     ).run();
 
     db.prepare(
-      `INSERT INTO evidence_docs (anchor, kind, status, title, updated_at, authority, verified_at)
-       VALUES ('LL-2', 'lesson', 'active', 'unverified candidate', '2026-01-02', 'candidate', NULL)`,
+      `INSERT INTO evidence_docs (anchor, kind, status, title, updated_at, authority, review_status)
+       VALUES ('R2', 'decision', 'active', 'escalated', '2026-01-02', 'constitutional', 'escalated')`,
     ).run();
 
     db.prepare(
-      `INSERT INTO evidence_docs (anchor, kind, status, title, updated_at, authority, verified_at)
-       VALUES ('LL-3', 'decision', 'active', 'unverified validated', '2026-01-03', 'validated', NULL)`,
+      `INSERT INTO evidence_docs (anchor, kind, status, title, updated_at, authority, review_status)
+       VALUES ('R3', 'feature', 'active', 'trusted legacy', '2026-01-03', 'validated', 'trusted_legacy')`,
+    ).run();
+
+    db.prepare(
+      `INSERT INTO evidence_docs (anchor, kind, status, title, updated_at, authority, review_status)
+       VALUES ('R4', 'feature', 'active', 'reviewed', '2026-01-04', 'validated', 'reviewed')`,
     ).run();
 
     db.prepare(
       `INSERT INTO evidence_docs (anchor, kind, status, title, updated_at, authority)
-       VALUES ('LL-4', 'lesson', 'active', 'observed doc', '2026-01-04', 'observed')`,
+       VALUES ('R5', 'lesson', 'active', 'observed', '2026-01-05', 'observed')`,
+    ).run();
+
+    db.prepare(
+      `INSERT INTO evidence_docs (anchor, kind, status, title, updated_at, authority)
+       VALUES ('R6', 'feature', 'active', 'null status', '2026-01-06', 'candidate')`,
     ).run();
 
     const report = generateHealthReport(db, { now: '2026-04-16' });
 
     assert.ok('unverified' in report, 'report must include unverified metric');
-    assert.equal(report.unverified, 2, 'LL-2 (candidate) + LL-3 (validated) should be unverified');
+    assert.equal(
+      report.unverified,
+      3,
+      'needs_review (R1) + escalated (R2) + candidate NULL (R6); observed (R5) excluded from fallback',
+    );
+  });
+
+  it('pre-migration fallback: NULL review_status + NULL verified_at counts as unverified', () => {
+    const db = new Database(':memory:');
+    applyMigrations(db);
+
+    db.prepare(
+      `INSERT INTO evidence_docs (anchor, kind, status, title, updated_at, authority)
+       VALUES ('PRE1', 'feature', 'active', 'unmigrated doc', '2026-01-01', 'candidate')`,
+    ).run();
+
+    db.prepare(
+      `INSERT INTO evidence_docs (anchor, kind, status, title, updated_at, authority, verified_at)
+       VALUES ('PRE2', 'feature', 'active', 'verified but unmigrated', '2026-01-02', 'validated', '2026-01-10')`,
+    ).run();
+
+    const report = generateHealthReport(db, { now: '2026-04-16' });
+    assert.equal(
+      report.unverified,
+      1,
+      'only PRE1 (NULL review_status + NULL verified_at) counts; PRE2 has verified_at',
+    );
+  });
+
+  it('observed authority excluded from pre-migration fallback', () => {
+    const db = new Database(':memory:');
+    applyMigrations(db);
+
+    db.prepare(
+      `INSERT INTO evidence_docs (anchor, kind, status, title, updated_at, authority)
+       VALUES ('OBS1', 'feature', 'active', 'observed doc', '2026-01-01', 'observed')`,
+    ).run();
+
+    db.prepare(
+      `INSERT INTO evidence_docs (anchor, kind, status, title, updated_at, authority)
+       VALUES ('CAN1', 'feature', 'active', 'candidate doc', '2026-01-02', 'candidate')`,
+    ).run();
+
+    const report = generateHealthReport(db, { now: '2026-04-16' });
+    assert.equal(report.unverified, 1, 'only CAN1 counts; OBS1 (observed) excluded from fallback');
   });
 });

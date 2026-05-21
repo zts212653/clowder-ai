@@ -190,6 +190,14 @@ Phase O post-merge audit（Maine Coon）识别 5 个 Settings/Voice 文件仍有
 4. **SkillConflictBanner 修复**：`bg-white` → `bg-[var(--console-card-bg)]`（adaptive dark mode）
 5. **Uppercase eyebrow 保留**：`uppercase tracking-[0.22em]` 是跨文件一致的 typography pattern（VoiceSettingsPanel/ServiceStatusPanel/InstallPreviewModal），本 Phase 不改——改需 design decision
 
+### Post-close shell container parity ✅
+
+team lead 2026-05-21 截图反馈：Settings 与 Chat/Thread 切换时 rail/content 边界感不一致；Signal 与 Memory/Mission 的页面承载形态不一致。
+
+1. **SettingsShell rail separator**：Settings 左侧 rail 增加 `border-r border-[var(--console-border-soft)]`，对齐 ThreadSidebar 的 rail/content 分隔模式
+2. **Signal full-height shell**：SignalInboxView / SignalSourcesView 移除旧 `max-w` 圆角外壳，改为 full-height console shell + header/content 分层
+3. **SignalNav tab token parity**：Signal tabs 对齐 MemoryNav/MissionControl 的 `border-strong + card-bg + button-emphasis` active hierarchy
+
 ### Post-close Guardrail: 线条分隔 vs 背景分层
 
 team lead 2026-05-20 追加口径：Thread 栏、对话栏、底部/右侧状态栏这类主框架区域，可以保留“统一底色 + 极淡线条分隔”的模式，不必强制改成背景色分层。目标接近网易云/微信的克制分隔：线条存在但不抢眼。
@@ -317,6 +325,12 @@ team lead 2026-05-20 追加口径：Thread 栏、对话栏、底部/右侧状态
 - [x] AC-P4: SkillConflictBanner — bg-white migrated to --console-card-bg (adaptive)
 - [x] AC-P5: `pnpm gate` 全绿
 
+### Post-close shell container parity
+- [x] AC-S1: SettingsShell rail/content separator matches ThreadSidebar (`border-r` + `--console-border-soft`)
+- [x] AC-S2: SignalInboxView / SignalSourcesView use full-height console shell instead of rounded standalone carrier
+- [x] AC-S3: SignalNav active tab tokens match MemoryNav/MissionControl hierarchy
+- [x] AC-S4: `pnpm gate` 全绿
+
 ## Dependencies
 
 - **Evolved from**: F190（Console Settings 骨架 intake）、F199（Settings parity audit）
@@ -339,6 +353,7 @@ team lead 2026-05-20 追加口径：Thread 栏、对话栏、底部/右侧状态
 | KD-3 | 先归一再 outbound sync | 同步出去的代码是社区二次参考点，混乱版污染下游 | 2026-05-18 |
 | KD-4 | 框架边界可用极淡统一线条，内容卡片避免四周包边 | team lead 2026-05-20 明确：Thread 栏/对话栏/状态栏可统一底色 + 淡线分隔；状态栏等内容块仍应”能不要框线就不要框线”，避免改着改着忘回卡片包边 | 2026-05-20 |
 | KD-5 | 红区文件纯 CSS token 迁移豁免 + reopen anchor CVO 追认 | Phase L/N 触碰 ChatContainer.tsx/ChatMessage.tsx（F183/F184/F194 红区），diff 实证纯 className 视觉 token 迁移（零行为风险）。CVO 2026-05-21 追认豁免。同时追认 F206 reopen 承载 Phase D-P（原 close `8891cd400` → reopen `675a7c104`，anchor 归属 CVO 事后 signoff） | 2026-05-21 |
+| KD-6 | Console shell 容器层级优先统一页面承载形态 | Settings/Thread 这类 rail/content 页面用淡边界分隔；Memory/Mission/Signal 这类 console page 用 full-height shell + header/content 分层，避免一边无缝、一边圆角外壳的跨页面冲突 | 2026-05-21 |
 
 ## Review Gate
 
@@ -358,3 +373,4 @@ team lead 2026-05-20 追加口径：Thread 栏、对话栏、底部/右侧状态
 - Phase N: codex 本地 review → 云端 skip（CVO KD-1 速度优先，纯 console token alignment）
 - Phase O: codex 本地 review → 云端 skip（CVO KD-1 速度优先，纯 CSS token migration for inner controls）
 - Phase P: codex 本地 review → 云端 skip（CVO KD-1 速度优先，纯 CSS token migration for settings/voice residuals）
+- Post-close shell container parity: opus 本地 review → 云端 skip（CVO KD-1 速度优先，纯 CSS shell hierarchy correction）
