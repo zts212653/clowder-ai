@@ -131,17 +131,15 @@ describe('MemoryNav component', () => {
     await act(async () => {
       root.render(createElement(MemoryNav, { active: 'graph', initialReferrerThread: 'thread_a' }));
     });
-    expect(container.querySelector('[data-testid="memory-back-to-chat"]')?.getAttribute('href')).toBe(
-      '/thread/thread_a',
-    );
+    const graphLinkA = Array.from(container.querySelectorAll('a')).find((a) => a.textContent === '知识图谱');
+    expect(graphLinkA?.getAttribute('href')).toContain('?from=thread_a');
 
     await act(async () => {
       root.render(createElement(MemoryNav, { active: 'graph', initialReferrerThread: 'thread_b' }));
     });
 
-    expect(container.querySelector('[data-testid="memory-back-to-chat"]')?.getAttribute('href')).toBe(
-      '/thread/thread_b',
-    );
+    const graphLinkB = Array.from(container.querySelectorAll('a')).find((a) => a.textContent === '知识图谱');
+    expect(graphLinkB?.getAttribute('href')).toContain('?from=thread_b');
     expect(container.textContent).toContain('知识图谱');
 
     root.unmount();

@@ -22,12 +22,11 @@ const CONTENT_SURFACE_CLASS =
 export function MemoryHub({ activeTab = 'feed', initialQuery, initialReferrerThread = null }: MemoryHubProps) {
   return (
     <div className="flex h-full flex-col bg-[var(--console-shell-bg)]" data-testid="memory-hub">
-      <header className="flex items-start gap-3 border-b border-[var(--console-border-soft)] px-4 py-3">
-        <MemoryNav active={activeTab} initialReferrerThread={initialReferrerThread} />
-      </header>
-
       <main className="flex-1 overflow-y-auto p-5">
         <div className={CONTENT_SURFACE_CLASS} data-testid="memory-content-surface">
+          <div className="mb-4">
+            <MemoryNav active={activeTab} initialReferrerThread={initialReferrerThread} />
+          </div>
           {activeTab === 'feed' && (
             <div data-testid="memory-tab-feed">
               <KnowledgeFeed />
