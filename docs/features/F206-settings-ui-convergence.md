@@ -199,6 +199,7 @@ team lead 2026-05-21 截图反馈：Settings 与 Chat/Thread 切换时 rail/cont
 3. **SignalNav tab token parity**：Signal tabs 对齐 MemoryNav/MissionControl 的 `border-strong + card-bg + button-emphasis` active hierarchy
 4. **Memory/Signal visible content carriers**：MemoryHub / SignalInboxView / SignalSourcesView 的主内容区补齐 `rounded-2xl + --console-card-bg + --console-border-soft + soft shadow + 18px padding`，对齐 SettingsSection / Mission panels 的圆角承载层；用 regression test 固定三页必须有可见 carrier
 5. **Single-card content hierarchy**：Memory/Signal 的 title/nav/content 合并进同一张圆角承载卡，删除 MemoryNav/SignalNav 中冗余的“返回对话/返回线程”按钮；线程返回由 ActivityBar chat icon 统一承担
+6. **MissionHub single-card parity**：Mission Hub 的标题、tabs、状态条、内容合并进 `mission-content-surface` 圆角承载卡，删除冗余“返回线程”按钮；`/mission-hub` 入口不再传 `?from=`，线程返回统一走 ActivityBar chat icon
 
 ### Post-close Guardrail: 线条分隔 vs 背景分层
 
@@ -363,6 +364,7 @@ team lead 2026-05-20 追加口径：Thread 栏、对话栏、底部/右侧状态
 | KD-6 | Console shell 容器层级拆成 outer shell + content carrier | Settings/Thread 这类 rail/content 页面用淡边界分隔；Memory/Mission/Signal 这类 console page 外层用 full-height shell，页面级标题/nav/content 归入 content carrier，承载层跟随多数页面的圆角 surface 模式 | 2026-05-21 |
 | KD-7 | 多数页面的圆角承载层优先于无缝少数派 | CVO 2026-05-21 二次验收指出“规则与 SOP 等多数页面是圆角承载层”，Memory/Signal 的无缝主内容是异端；PR #1826 给 Memory/Signal 主内容补 visible carrier，避免 card-bg 与 shell-bg 过近导致“看起来没圆角/没空白” | 2026-05-21 |
 | KD-8 | Memory/Signal 页面承载层必须是一张卡，不拆 title/nav 与 content | CVO 2026-05-21 三次验收指出“原本是一整张，你们分开成两个了”；PR #1827 将 Memory/Signal 的标题、tabs、内容合进同一张 content carrier，并删除重复返回按钮，ActivityBar chat icon 作为统一返回入口 | 2026-05-21 |
+| KD-9 | Mission Hub 也必须跟随同一张圆角承载卡模式 | CVO 2026-05-21 四次验收指出“就差 mission hub 了”，Mission 仍有返回线程按钮且不是圆框；PR #1829 将 Mission 标题/tabs/status/content 合进同一张 `mission-content-surface` carrier，并移除 `?from=`/返回线程路径 | 2026-05-21 |
 
 ## Review Gate
 
@@ -385,3 +387,4 @@ team lead 2026-05-20 追加口径：Thread 栏、对话栏、底部/右侧状态
 - Post-close shell container parity: opus 本地 review → 云端 skip（CVO KD-1 速度优先，纯 CSS shell hierarchy correction）
 - Post-close rounded content carrier follow-up: opus 本地 review → 云端 review clean（纯 CSS carrier visibility fix + regression test）
 - Post-close unified content card follow-up: codex 本地 review + `pnpm gate` → 云端 skip（CVO explicit directive，纯 layout hierarchy fix + test update）
+- Post-close Mission content card follow-up: opus 本地 review + `pnpm gate` → 云端 skip（CVO explicit directive，纯 layout hierarchy fix + test update）
