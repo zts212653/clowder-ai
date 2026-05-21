@@ -85,18 +85,16 @@ export function SignalSourcesView({ initialReferrerThread = null }: { initialRef
   );
 
   return (
-    <div className="min-h-screen bg-[var(--console-shell-bg)]">
-      <main className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-5 sm:px-6">
-        <header className="rounded-2xl bg-[var(--console-card-bg)] p-4 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h1 className="text-xl font-bold text-cafe-black">信号源管理</h1>
-              <p className="text-sm text-cafe-secondary">集中管理信号源开关，无需手改 yaml。</p>
-            </div>
-            <SignalNav active="sources" initialReferrerThread={initialReferrerThread} />
-          </div>
-        </header>
+    <div className="flex h-full flex-col bg-[var(--console-shell-bg)]">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-6 py-3">
+        <div>
+          <h1 className="text-lg font-bold text-cafe">信号源管理</h1>
+          <p className="mt-0.5 text-xs text-cafe-secondary">集中管理信号源开关，无需手改 yaml。</p>
+        </div>
+        <SignalNav active="sources" initialReferrerThread={initialReferrerThread} />
+      </header>
 
+      <main className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
         <section className="flex flex-wrap gap-2">
           <button
             type="button"

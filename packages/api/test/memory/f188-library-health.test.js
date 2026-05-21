@@ -204,4 +204,80 @@ describe('F188 Phase B: computeLibraryHealth', () => {
       assert.equal(result.knowledgeFeed.needsReviewCount, 0);
     });
   });
+
+  describe('verificationDebt (AC-J8)', () => {
+    it('counts needs_review and escalated docs', () => {
+      const db = createTestDb();
+      const ins = db.prepare(
+        `INSERT INTO evidence_docs (anchor, kind, status, title, updated_at, review_status)
+         VALUES (?, 'feature', 'active', ?, '2026-01-01', ?)`,
+      );
+      ins.run('nr1', 'nr1', 'needs_review');
+      ins.run('nr2', 'nr2', 'needs_review');
+      ins.run('esc', 'esc', 'escalated');
+      ins.run('tl', 'tl', 'trusted_legacy');
+      ins.run('rev', 'rev', 'reviewed');
+
+      const result = computeLibraryHealth(db, { docsRoot: tmpDocsRoot(), markers: [] });
+      assert.equal(result.verificationDebt.needsReviewCount, 2);
+      assert.equal(result.verificationDebt.escalatedCount, 1);
+      assert.equal(result.verificationDebt.trustedLegacyCount, 1);
+    });
+
+    it('returns zeros when no docs have review_status', () => {
+      const db = createTestDb();
+      const result = computeLibraryHealth(db, { docsRoot: tmpDocsRoot(), markers: [] });
+      assert.equal(result.verificationDebt.needsReviewCount, 0);
+      assert.equal(result.verificationDebt.escalatedCount, 0);
+      assert.equal(result.verificationDebt.trustedLegacyCount, 0);
+    });
+  });
+});
+
+describe('review_status column (AC-J6 prerequisite)', () => {
+  it('evidence_docs has review_status column', () => {
+    const db = new Database(':memory:');
+    applyMigrations(db);
+    const info = db.prepare("PRAGMA table_info('evidence_docs')").all();
+    const col = info.find((c) => c.name === 'review_status');
+    assert.ok(col, 'review_status column should exist');
+    assert.equal(col.type, 'TEXT');
+  });
+
+  it('review_status defaults to NULL for new rows', () => {
+    const db = new Database(':memory:');
+    applyMigrations(db);
+    db.prepare(
+      `INSERT INTO evidence_docs (anchor, kind, status, title, updated_at)
+       VALUES ('test', 'feature', 'active', 'Test', '2026-01-01')`,
+    ).run();
+    const row = db.prepare('SELECT review_status FROM evidence_docs WHERE anchor = ?').get('test');
+    assert.equal(row.review_status, null);
+  });
+
+  it('review_status accepts valid enum values', () => {
+    const db = new Database(':memory:');
+    applyMigrations(db);
+    db.prepare(
+      `INSERT INTO evidence_docs (anchor, kind, status, title, updated_at, review_status)
+       VALUES ('t1', 'feature', 'active', 'T1', '2026-01-01', 'trusted_legacy')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO evidence_docs (anchor, kind, status, title, updated_at, review_status)
+       VALUES ('t2', 'feature', 'active', 'T2', '2026-01-01', 'needs_review')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO evidence_docs (anchor, kind, status, title, updated_at, review_status)
+       VALUES ('t3', 'feature', 'active', 'T3', '2026-01-01', 'reviewed')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO evidence_docs (anchor, kind, status, title, updated_at, review_status)
+       VALUES ('t4', 'feature', 'active', 'T4', '2026-01-01', 'escalated')`,
+    ).run();
+    const rows = db.prepare('SELECT anchor, review_status FROM evidence_docs ORDER BY anchor').all();
+    assert.equal(rows[0].review_status, 'trusted_legacy');
+    assert.equal(rows[1].review_status, 'needs_review');
+    assert.equal(rows[2].review_status, 'reviewed');
+    assert.equal(rows[3].review_status, 'escalated');
+  });
 });

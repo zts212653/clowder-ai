@@ -71,9 +71,9 @@ describe('edge-extractors', () => {
       assert.equal(edges.length, 1);
     });
 
-    it('handles 2-4 digit F-numbers', () => {
-      const edges = extractFeatureRefEdges('F42 F186 F1234', 'F188');
-      assert.equal(edges.length, 3);
+    it('handles 2-3 digit F-numbers', () => {
+      const edges = extractFeatureRefEdges('F42 F186', 'F188');
+      assert.equal(edges.length, 2);
     });
 
     it('does not match inside wikilinks', () => {
@@ -106,6 +106,37 @@ describe('edge-extractors', () => {
         edges.find((e) => e.toAnchor === 'F102'),
         'F102 in body should be extracted',
       );
+    });
+  });
+
+  describe('extractFeatureRefEdges canonical resolver (AC-J5)', () => {
+    it('zero-pads short F numbers: F20 → F020', () => {
+      const edges = extractFeatureRefEdges('文档引用 F20 和 F186', 'other');
+      assert.equal(edges.length, 2);
+      assert.equal(edges[0].toAnchor, 'F020');
+      assert.equal(edges[1].toAnchor, 'F186');
+    });
+
+    it('F020 already canonical is no-op', () => {
+      const edges = extractFeatureRefEdges('已经是 F020 的引用', 'other');
+      assert.equal(edges.length, 1);
+      assert.equal(edges[0].toAnchor, 'F020');
+    });
+
+    it('filters year-like F2025 (num > 999)', () => {
+      const edges = extractFeatureRefEdges('年份 F2025 不是 feature', 'other');
+      assert.equal(edges.length, 0);
+    });
+
+    it('rejects F32-b (hyphen suffix via lookahead)', () => {
+      const edges = extractFeatureRefEdges('F32-b 不是合法 anchor', 'other');
+      assert.equal(edges.length, 0);
+    });
+
+    it('creates edge for unknown F998 (unresolved is ok at extraction)', () => {
+      const edges = extractFeatureRefEdges('不存在的 F998', 'other');
+      assert.equal(edges.length, 1);
+      assert.equal(edges[0].toAnchor, 'F998');
     });
   });
 

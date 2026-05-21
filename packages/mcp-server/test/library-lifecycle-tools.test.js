@@ -268,7 +268,7 @@ describe('MCP Library Lifecycle Tools (AC-I4)', () => {
 
   test('tool exports have correct names and count', async () => {
     const { libraryLifecycleTools } = await import('../dist/tools/library-lifecycle-tools.js');
-    assert.equal(libraryLifecycleTools.length, 5);
+    assert.equal(libraryLifecycleTools.length, 6);
     const names = libraryLifecycleTools.map((t) => t.name).sort();
     assert.deepEqual(names, [
       'cat_cafe_library_archive',
@@ -276,6 +276,7 @@ describe('MCP Library Lifecycle Tools (AC-I4)', () => {
       'cat_cafe_library_dry_run',
       'cat_cafe_library_list',
       'cat_cafe_library_rebuild',
+      'cat_cafe_library_verify',
     ]);
   });
 

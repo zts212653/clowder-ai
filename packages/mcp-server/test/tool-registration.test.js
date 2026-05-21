@@ -61,6 +61,7 @@ const EXPECTED_TOOLS = [
   'cat_cafe_library_create',
   'cat_cafe_library_rebuild',
   'cat_cafe_library_archive',
+  'cat_cafe_library_verify',
   // F152 Phase C: Distillation tools
   'cat_cafe_mark_generalizable',
   'cat_cafe_nominate_for_global',
@@ -163,6 +164,7 @@ const EXPECTED_MEMORY_TOOLS = [
   'cat_cafe_library_create', // F188 Phase I AC-I4
   'cat_cafe_library_rebuild', // F188 Phase I AC-I4
   'cat_cafe_library_archive', // F188 Phase I AC-I4
+  'cat_cafe_library_verify', // F188 Phase J AC-J7
   'cat_cafe_list_recent', // F188 Phase F AC-F2
   // cat_cafe_reflect removed in F193 Phase D AC-D1
   'cat_cafe_list_session_chain',

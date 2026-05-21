@@ -3,6 +3,8 @@
  * Extracted from f163-admin.ts to stay under 350-line limit.
  */
 
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { ContradictionDetector } from '../domains/memory/f163-contradiction-detector.js';
@@ -11,6 +13,8 @@ import { generateHealthReport } from '../domains/memory/f163-health-report.js';
 import { queryReviewQueue } from '../domains/memory/f163-review-queue.js';
 import { computeVariantId, freezeFlags } from '../domains/memory/f163-types.js';
 import { computeLibraryHealth } from '../domains/memory/f188-library-health.js';
+import { applyOrphanRepair, dryRunOrphanRepair } from '../domains/memory/f188-orphan-edge-repair.js';
+import { executeVerificationAction } from '../domains/memory/f188-verification-workflow.js';
 import type { EvidenceItem, IKnowledgeResolver, IMarkerQueue, SearchOptions } from '../domains/memory/interfaces.js';
 import { QueryReplayCompare } from '../domains/memory/QueryReplayCompare.js';
 
@@ -46,6 +50,29 @@ interface AuditRoutesOptions {
   markerQueue?: IMarkerQueue;
   repoRoot?: string;
   docsRoot?: string;
+}
+
+export function gatherDiskAnchors(docsRoot?: string): Set<string> | undefined {
+  if (!docsRoot) return undefined;
+  const anchors = new Set<string>();
+  try {
+    const featDir = join(docsRoot, 'features');
+    for (const file of readdirSync(featDir)) {
+      const m = file.match(/^(F\d{3})\b/);
+      if (m) anchors.add(m[1]!);
+    }
+  } catch {
+    // features dir may not exist
+  }
+  try {
+    const backlog = readFileSync(join(docsRoot, 'BACKLOG.md'), 'utf-8');
+    for (const m of backlog.matchAll(/\|\s*(F\d{3})\s*\|/g)) {
+      anchors.add(m[1]!);
+    }
+  } catch {
+    // BACKLOG.md may not exist
+  }
+  return anchors.size > 0 ? anchors : undefined;
 }
 
 export const f163AuditRoutes: FastifyPluginAsync<AuditRoutesOptions> = async (app, opts) => {
@@ -161,6 +188,77 @@ export const f163AuditRoutes: FastifyPluginAsync<AuditRoutesOptions> = async (ap
     }
 
     return report;
+  });
+
+  // ── GET /api/f163/orphan-edges/dry-run (AC-J3) ─────────────────────
+
+  app.get('/api/f163/orphan-edges/dry-run', async (request, reply) => {
+    if (!isLocalhost(request.ip)) {
+      reply.status(403);
+      return { error: 'only allowed from localhost' };
+    }
+
+    const db = opts.evidenceStore.getDb();
+    const diskAnchors = gatherDiskAnchors(opts.docsRoot);
+    const report = dryRunOrphanRepair(db as Parameters<typeof dryRunOrphanRepair>[0], { diskAnchors });
+    return report;
+  });
+
+  // ── POST /api/f163/orphan-edges/apply (AC-J4) ────────────────────
+
+  app.post('/api/f163/orphan-edges/apply', async (request, reply) => {
+    if (!isLocalhost(request.ip)) {
+      reply.status(403);
+      return { error: 'only allowed from localhost' };
+    }
+
+    const body = request.body as { confirm?: boolean } | undefined;
+    if (!body?.confirm) {
+      reply.status(400);
+      return { error: 'Request body must include { "confirm": true } to apply destructive repairs' };
+    }
+
+    const diskAnchors = gatherDiskAnchors(opts.docsRoot);
+    const { report, result } = await opts.evidenceStore.runExclusive(() => {
+      const db = opts.evidenceStore.getDb();
+      const rpt = dryRunOrphanRepair(db as Parameters<typeof dryRunOrphanRepair>[0], { diskAnchors });
+      const res = applyOrphanRepair(db as Parameters<typeof applyOrphanRepair>[0], rpt);
+      return { report: rpt, result: res };
+    });
+    return { ...result, report };
+  });
+
+  // ── POST /api/f163/verification/action (AC-J7) ────────────────────
+
+  const verificationActionSchema = z.object({
+    anchor: z.string().min(1),
+    action: z.enum(['confirm', 'mark_stale', 'escalate', 'dismiss_review']),
+    actor: z.string().min(1),
+  });
+
+  app.post('/api/f163/verification/action', async (request, reply) => {
+    if (!isLocalhost(request.ip)) {
+      reply.status(403);
+      return { error: 'only allowed from localhost' };
+    }
+
+    const parsed = verificationActionSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.issues };
+    }
+
+    const result = await opts.evidenceStore.runExclusive(() => {
+      const db = opts.evidenceStore.getDb();
+      return executeVerificationAction(db as Parameters<typeof executeVerificationAction>[0], parsed.data);
+    });
+
+    if (!result.ok) {
+      reply.status(422);
+      return { error: result.error };
+    }
+
+    return result;
   });
 
   // ── POST /api/f163/query-replay (AC-E2) ───────────────────────────

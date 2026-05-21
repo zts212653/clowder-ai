@@ -249,6 +249,47 @@ export async function handleLibraryArchive(input: { collectionId: string }): Pro
   }
 }
 
+// --- library_verify ---
+
+export const libraryVerifyInputSchema = {
+  anchor: z.string().min(1).describe('The document anchor to act on (e.g. F188, LL-029).'),
+  action: z
+    .enum(['confirm', 'mark_stale', 'escalate', 'dismiss_review'])
+    .describe(
+      'confirm: mark as reviewed (needs_review→reviewed). mark_stale: reset to needs_review. escalate: flag for human attention. dismiss_review: clear review_status.',
+    ),
+  actor: z.string().min(1).describe('Who is performing this action (cat ID or human identifier).'),
+};
+
+export async function handleLibraryVerify(input: {
+  anchor: string;
+  action: string;
+  actor: string;
+}): Promise<ToolResult> {
+  try {
+    const response = await fetch(`${API_URL}/api/f163/verification/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const data = (await response.json()) as {
+      ok?: boolean;
+      error?: string;
+      previousStatus?: string;
+      newStatus?: string;
+    };
+    if (!response.ok) {
+      return errorResult(`library_verify failed (${response.status}): ${data.error ?? 'unknown'}`);
+    }
+    return successResult(
+      `✅ Verification action applied: ${input.anchor} — ${input.action}\n` +
+        `  Previous: ${data.previousStatus ?? 'null'} → New: ${data.newStatus ?? 'null'}`,
+    );
+  } catch (err) {
+    return errorResult(`library_verify error: ${(err as Error).message}`);
+  }
+}
+
 // --- exports ---
 
 export const libraryLifecycleTools = [
@@ -305,5 +346,15 @@ export const libraryLifecycleTools = [
     ].join('\n'),
     inputSchema: libraryArchiveInputSchema,
     handler: handleLibraryArchive,
+  },
+  {
+    name: 'cat_cafe_library_verify',
+    description: [
+      'Execute a verification action on a document: confirm, mark_stale, escalate, or dismiss_review.',
+      'Use when: reviewing documents flagged by the verification migration or health report.',
+      'Preconditions enforced: e.g. confirm only works on needs_review docs.',
+    ].join('\n'),
+    inputSchema: libraryVerifyInputSchema,
+    handler: handleLibraryVerify,
   },
 ] as const;

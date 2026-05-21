@@ -158,7 +158,7 @@ describe('AntigravityAgentService (Bridge) — fatal errors', () => {
   test('capacity retry fails fast on unsupported waiting tool step instead of hanging for stall timeout', async () => {
     const bridge = createMockBridge();
     bridge.nativeExecuteAndPush = async (step) => {
-      if (step.metadata?.toolCall?.name === 'grep_search') return 'no_executor';
+      if (step.metadata?.toolCall?.name === 'write_file') return 'no_executor';
       return false;
     };
     let sessionIndex = 0;
@@ -191,13 +191,13 @@ describe('AntigravityAgentService (Bridge) — fatal errors', () => {
       yield {
         steps: [
           {
-            type: 'CORTEX_STEP_TYPE_GREP_SEARCH',
+            type: 'CORTEX_STEP_TYPE_WRITE_FILE',
             status: 'CORTEX_STEP_STATUS_WAITING',
             metadata: {
               toolCall: {
                 id: 'tool-1',
-                name: 'grep_search',
-                argumentsJson: JSON.stringify({ Pattern: 'foo', Path: 'src' }),
+                name: 'write_file',
+                argumentsJson: JSON.stringify({ Path: 'src/index.ts', Content: 'unsafe' }),
               },
             },
           },
@@ -225,7 +225,7 @@ describe('AntigravityAgentService (Bridge) — fatal errors', () => {
     assert.equal(retryWarnings.length, 1, 'should still emit the first retry warning');
     const unsupported = messages.find((m) => m.type === 'error' && m.errorCode === 'unsupported_waiting_tool');
     assert.ok(unsupported, 'unsupported waiting tool should surface as explicit fatal error');
-    assert.match(unsupported.error, /grep_search/i);
+    assert.match(unsupported.error, /write_file/i);
     assert.equal(
       messages.some((m) => m.type === 'error' && /^Antigravity stall:/i.test(m.error ?? '')),
       false,

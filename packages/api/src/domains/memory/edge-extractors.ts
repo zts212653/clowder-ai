@@ -27,8 +27,10 @@ export function extractFeatureRefEdges(content: string, selfAnchor: string): Ext
   masked = masked.replace(/\[[^\]]*\]\([^)]*\)/g, (m) => ' '.repeat(m.length));
   const edges: ExtractedEdge[] = [];
   const seen = new Set<string>();
-  for (const match of masked.matchAll(/\bF(\d{2,4})\b/g)) {
-    const fRef = match[0];
+  for (const match of masked.matchAll(/\bF(\d{2,4})(?![-a-zA-Z])\b/g)) {
+    const num = parseInt(match[1]!, 10);
+    if (num > 999) continue;
+    const fRef = `F${String(num).padStart(3, '0')}`;
     if (fRef === selfAnchor || seen.has(fRef)) continue;
     seen.add(fRef);
     edges.push({ fromAnchor: selfAnchor, toAnchor: fRef, relation: 'feature_ref', provenance: 'content' });

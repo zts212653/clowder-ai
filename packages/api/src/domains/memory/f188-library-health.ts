@@ -6,6 +6,7 @@ import type { Marker } from './interfaces.js';
 export interface LibraryHealthMetrics {
   staleAnchors: { count: number; items: Array<{ anchor: string; sourcePath: string }> };
   orphanEdges: { count: number };
+  verificationDebt: { needsReviewCount: number; escalatedCount: number; trustedLegacyCount: number };
   searchQuality: {
     totalSearches: number;
     zeroHitCount: number;
@@ -25,6 +26,7 @@ export function computeLibraryHealth(
   return {
     staleAnchors: computeStaleAnchors(db, opts.repoRoot, opts.docsRoot),
     orphanEdges: computeOrphanEdges(db),
+    verificationDebt: computeVerificationDebt(db),
     searchQuality: computeSearchQuality(db),
     replayDrift: computeReplayDrift(db),
     knowledgeFeed: computeKnowledgeFeed(opts.markers),
@@ -61,6 +63,27 @@ function computeOrphanEdges(db: Database.Database) {
     return { count: r?.c ?? 0 };
   } catch {
     return { count: 0 };
+  }
+}
+
+function computeVerificationDebt(db: Database.Database) {
+  try {
+    const counts = db
+      .prepare(
+        `SELECT
+           SUM(CASE WHEN review_status = 'needs_review' THEN 1 ELSE 0 END) AS needs_review,
+           SUM(CASE WHEN review_status = 'escalated' THEN 1 ELSE 0 END) AS escalated,
+           SUM(CASE WHEN review_status = 'trusted_legacy' THEN 1 ELSE 0 END) AS trusted_legacy
+         FROM evidence_docs`,
+      )
+      .get() as { needs_review: number; escalated: number; trusted_legacy: number } | undefined;
+    return {
+      needsReviewCount: counts?.needs_review ?? 0,
+      escalatedCount: counts?.escalated ?? 0,
+      trustedLegacyCount: counts?.trusted_legacy ?? 0,
+    };
+  } catch {
+    return { needsReviewCount: 0, escalatedCount: 0, trustedLegacyCount: 0 };
   }
 }
 
