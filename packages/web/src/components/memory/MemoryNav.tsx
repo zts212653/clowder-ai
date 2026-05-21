@@ -95,29 +95,9 @@ export function MemoryNav({ active, initialReferrerThread = null }: MemoryNavPro
 
   const badges = useMemo(() => (healthIssueCount > 0 ? { health: healthIssueCount } : undefined), [healthIssueCount]);
   const items = useMemo(() => buildMemoryTabItems(fromSuffix, badges), [fromSuffix, badges]);
-  const backHref = buildBackHref(referrerThread);
 
   return (
     <nav aria-label="Memory navigation" className="flex flex-wrap items-center gap-2">
-      <a
-        href={backHref}
-        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-[var(--console-border-strong)] bg-[var(--console-card-bg)] px-3 py-1.5 text-xs font-medium text-[var(--console-button-emphasis)] transition-colors hover:bg-[var(--console-hover-bg)]"
-        data-testid="memory-back-to-chat"
-      >
-        <svg
-          aria-hidden="true"
-          className="h-4 w-4"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <polyline points="15 18 9 12 15 6" />
-        </svg>
-        返回对话
-      </a>
       {items.map((item) => {
         const isActive = item.id === active;
         return (

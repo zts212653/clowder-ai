@@ -195,9 +195,10 @@ Phase O post-merge audit（Maine Coon）识别 5 个 Settings/Voice 文件仍有
 team lead 2026-05-21 截图反馈：Settings 与 Chat/Thread 切换时 rail/content 边界感不一致；Signal 与 Memory/Mission 的页面承载形态不一致。后续二次反馈确认方向应以多数页面的“圆角承载层”对齐，而不是把 Signal 拉到无缝 shell 少数派。
 
 1. **SettingsShell rail separator**：Settings 左侧 rail 增加 `border-r border-[var(--console-border-soft)]`，对齐 ThreadSidebar 的 rail/content 分隔模式
-2. **Signal outer shell normalization**：SignalInboxView / SignalSourcesView 移除旧 `max-w` 圆角外壳，外层改为 full-height console shell + header/content 分层
+2. **Signal outer shell normalization**：SignalInboxView / SignalSourcesView 移除旧 `max-w` 圆角外壳，外层改为 full-height console shell；标题/nav/content 均由内容承载卡管理
 3. **SignalNav tab token parity**：Signal tabs 对齐 MemoryNav/MissionControl 的 `border-strong + card-bg + button-emphasis` active hierarchy
 4. **Memory/Signal visible content carriers**：MemoryHub / SignalInboxView / SignalSourcesView 的主内容区补齐 `rounded-2xl + --console-card-bg + --console-border-soft + soft shadow + 18px padding`，对齐 SettingsSection / Mission panels 的圆角承载层；用 regression test 固定三页必须有可见 carrier
+5. **Single-card content hierarchy**：Memory/Signal 的 title/nav/content 合并进同一张圆角承载卡，删除 MemoryNav/SignalNav 中冗余的“返回对话/返回线程”按钮；线程返回由 ActivityBar chat icon 统一承担
 
 ### Post-close Guardrail: 线条分隔 vs 背景分层
 
@@ -334,6 +335,8 @@ team lead 2026-05-20 追加口径：Thread 栏、对话栏、底部/右侧状态
 - [x] AC-S4: `pnpm gate` 全绿
 - [x] AC-S5: MemoryHub / SignalInboxView / SignalSourcesView main content areas use visible rounded carriers (`rounded-2xl`, `--console-border-soft`, soft shadow, 18px padding)
 - [x] AC-S6: Regression test pins the rounded content surface pattern for all three pages
+- [x] AC-S7: MemoryHub / SignalInboxView / SignalSourcesView keep title/nav/content inside one unified content carrier, matching SettingsSection/Rules SOP card hierarchy
+- [x] AC-S8: Redundant in-page back buttons removed from MemoryNav/SignalNav; ActivityBar chat icon remains the canonical return-to-thread affordance
 
 ## Dependencies
 
@@ -357,8 +360,9 @@ team lead 2026-05-20 追加口径：Thread 栏、对话栏、底部/右侧状态
 | KD-3 | 先归一再 outbound sync | 同步出去的代码是社区二次参考点，混乱版污染下游 | 2026-05-18 |
 | KD-4 | 框架边界可用极淡统一线条，内容卡片避免四周包边 | team lead 2026-05-20 明确：Thread 栏/对话栏/状态栏可统一底色 + 淡线分隔；状态栏等内容块仍应”能不要框线就不要框线”，避免改着改着忘回卡片包边 | 2026-05-20 |
 | KD-5 | 红区文件纯 CSS token 迁移豁免 + reopen anchor CVO 追认 | Phase L/N 触碰 ChatContainer.tsx/ChatMessage.tsx（F183/F184/F194 红区），diff 实证纯 className 视觉 token 迁移（零行为风险）。CVO 2026-05-21 追认豁免。同时追认 F206 reopen 承载 Phase D-P（原 close `8891cd400` → reopen `675a7c104`，anchor 归属 CVO 事后 signoff） | 2026-05-21 |
-| KD-6 | Console shell 容器层级拆成 outer shell + content carrier | Settings/Thread 这类 rail/content 页面用淡边界分隔；Memory/Mission/Signal 这类 console page 外层用 full-height shell + header/content 分层，内层主内容承载层跟随多数页面的圆角 surface 模式 | 2026-05-21 |
+| KD-6 | Console shell 容器层级拆成 outer shell + content carrier | Settings/Thread 这类 rail/content 页面用淡边界分隔；Memory/Mission/Signal 这类 console page 外层用 full-height shell，页面级标题/nav/content 归入 content carrier，承载层跟随多数页面的圆角 surface 模式 | 2026-05-21 |
 | KD-7 | 多数页面的圆角承载层优先于无缝少数派 | CVO 2026-05-21 二次验收指出“规则与 SOP 等多数页面是圆角承载层”，Memory/Signal 的无缝主内容是异端；PR #1826 给 Memory/Signal 主内容补 visible carrier，避免 card-bg 与 shell-bg 过近导致“看起来没圆角/没空白” | 2026-05-21 |
+| KD-8 | Memory/Signal 页面承载层必须是一张卡，不拆 title/nav 与 content | CVO 2026-05-21 三次验收指出“原本是一整张，你们分开成两个了”；PR #1827 将 Memory/Signal 的标题、tabs、内容合进同一张 content carrier，并删除重复返回按钮，ActivityBar chat icon 作为统一返回入口 | 2026-05-21 |
 
 ## Review Gate
 
@@ -380,3 +384,4 @@ team lead 2026-05-20 追加口径：Thread 栏、对话栏、底部/右侧状态
 - Phase P: codex 本地 review → 云端 skip（CVO KD-1 速度优先，纯 CSS token migration for settings/voice residuals）
 - Post-close shell container parity: opus 本地 review → 云端 skip（CVO KD-1 速度优先，纯 CSS shell hierarchy correction）
 - Post-close rounded content carrier follow-up: opus 本地 review → 云端 review clean（纯 CSS carrier visibility fix + regression test）
+- Post-close unified content card follow-up: codex 本地 review + `pnpm gate` → 云端 skip（CVO explicit directive，纯 layout hierarchy fix + test update）
