@@ -20,6 +20,7 @@ const SEARCH_RESULT_SENTINEL = MAX_SEARCH_RESULTS + 1;
 const RG_TIMEOUT_MS = 10_000;
 const STDERR_CAPTURE_BYTES = 32_768;
 const RG_DENYLIST_GLOBS = ['!.env*', '!*.pem', '!*.key', '!id_rsa*', '!.git', '!secrets'];
+let ripgrepBinaryPromise: Promise<string> | undefined;
 
 function durationSince(startedAt: number): number {
   return Math.max(0, Date.now() - startedAt);
@@ -119,9 +120,26 @@ function filterAndTruncateRipgrepJson(stdout: string): string {
 
 export const filterAndTruncateRipgrepJsonForTest = filterAndTruncateRipgrepJson;
 
+async function resolveRipgrepBinary(): Promise<string> {
+  const configured = process.env.CAT_CAFE_RIPGREP_PATH?.trim();
+  if (configured) return configured;
+
+  try {
+    const { rgPath } = await import('@vscode/ripgrep');
+    if (typeof rgPath === 'string' && rgPath.length > 0) return rgPath;
+  } catch {
+    // Fall through to PATH lookup for development shells and system installs.
+  }
+
+  return 'rg';
+}
+
 async function executeRipgrepJson(args: string[], cwd: string): Promise<string> {
+  ripgrepBinaryPromise ??= resolveRipgrepBinary();
+  const ripgrepBinary = await ripgrepBinaryPromise;
+
   return new Promise((resolve, reject) => {
-    const child = spawn('rg', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(ripgrepBinary, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
     const lines: string[] = [];
     let stdoutRemainder = '';
     let stderr = '';

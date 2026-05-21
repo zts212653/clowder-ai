@@ -192,11 +192,12 @@ Phase O post-merge audit（Maine Coon）识别 5 个 Settings/Voice 文件仍有
 
 ### Post-close shell container parity ✅
 
-team lead 2026-05-21 截图反馈：Settings 与 Chat/Thread 切换时 rail/content 边界感不一致；Signal 与 Memory/Mission 的页面承载形态不一致。
+team lead 2026-05-21 截图反馈：Settings 与 Chat/Thread 切换时 rail/content 边界感不一致；Signal 与 Memory/Mission 的页面承载形态不一致。后续二次反馈确认方向应以多数页面的“圆角承载层”对齐，而不是把 Signal 拉到无缝 shell 少数派。
 
 1. **SettingsShell rail separator**：Settings 左侧 rail 增加 `border-r border-[var(--console-border-soft)]`，对齐 ThreadSidebar 的 rail/content 分隔模式
-2. **Signal full-height shell**：SignalInboxView / SignalSourcesView 移除旧 `max-w` 圆角外壳，改为 full-height console shell + header/content 分层
+2. **Signal outer shell normalization**：SignalInboxView / SignalSourcesView 移除旧 `max-w` 圆角外壳，外层改为 full-height console shell + header/content 分层
 3. **SignalNav tab token parity**：Signal tabs 对齐 MemoryNav/MissionControl 的 `border-strong + card-bg + button-emphasis` active hierarchy
+4. **Memory/Signal visible content carriers**：MemoryHub / SignalInboxView / SignalSourcesView 的主内容区补齐 `rounded-2xl + --console-card-bg + --console-border-soft + soft shadow + 18px padding`，对齐 SettingsSection / Mission panels 的圆角承载层；用 regression test 固定三页必须有可见 carrier
 
 ### Post-close Guardrail: 线条分隔 vs 背景分层
 
@@ -209,6 +210,7 @@ team lead 2026-05-20 追加口径：Thread 栏、对话栏、底部/右侧状态
 3. 线条是“结构边界”，不是“卡片轮廓”。除了对话主区域的必要框架线，状态栏、统计块、消息统计、Session Chain、Memory/Signals/Settings 内部模块等能不用卡片外框就不用外框，优先用背景、间距、分组标题、轻量 divider。
 4. Review 时不要一刀切套 CDS §1.1：先判断区域角色。框架边界可用线；内容卡片/统计卡/列表项不应回到四周包边。
 5. 视觉验收要看“线条强度”：如果截图里边框先于内容被看见，视为过强，需要降到更淡 token 或改为背景/间距分隔。
+6. 页面级承载层（SettingsSection / Mission panels / Memory/Signal content surface）可以用圆角卡片；“避免四周包边”约束的是承载层内部的二级内容块，不是页面主容器。
 
 ## Acceptance Criteria
 
@@ -327,9 +329,11 @@ team lead 2026-05-20 追加口径：Thread 栏、对话栏、底部/右侧状态
 
 ### Post-close shell container parity
 - [x] AC-S1: SettingsShell rail/content separator matches ThreadSidebar (`border-r` + `--console-border-soft`)
-- [x] AC-S2: SignalInboxView / SignalSourcesView use full-height console shell instead of rounded standalone carrier
+- [x] AC-S2: SignalInboxView / SignalSourcesView use full-height console outer shell instead of legacy max-width standalone shell
 - [x] AC-S3: SignalNav active tab tokens match MemoryNav/MissionControl hierarchy
 - [x] AC-S4: `pnpm gate` 全绿
+- [x] AC-S5: MemoryHub / SignalInboxView / SignalSourcesView main content areas use visible rounded carriers (`rounded-2xl`, `--console-border-soft`, soft shadow, 18px padding)
+- [x] AC-S6: Regression test pins the rounded content surface pattern for all three pages
 
 ## Dependencies
 
@@ -353,7 +357,8 @@ team lead 2026-05-20 追加口径：Thread 栏、对话栏、底部/右侧状态
 | KD-3 | 先归一再 outbound sync | 同步出去的代码是社区二次参考点，混乱版污染下游 | 2026-05-18 |
 | KD-4 | 框架边界可用极淡统一线条，内容卡片避免四周包边 | team lead 2026-05-20 明确：Thread 栏/对话栏/状态栏可统一底色 + 淡线分隔；状态栏等内容块仍应”能不要框线就不要框线”，避免改着改着忘回卡片包边 | 2026-05-20 |
 | KD-5 | 红区文件纯 CSS token 迁移豁免 + reopen anchor CVO 追认 | Phase L/N 触碰 ChatContainer.tsx/ChatMessage.tsx（F183/F184/F194 红区），diff 实证纯 className 视觉 token 迁移（零行为风险）。CVO 2026-05-21 追认豁免。同时追认 F206 reopen 承载 Phase D-P（原 close `8891cd400` → reopen `675a7c104`，anchor 归属 CVO 事后 signoff） | 2026-05-21 |
-| KD-6 | Console shell 容器层级优先统一页面承载形态 | Settings/Thread 这类 rail/content 页面用淡边界分隔；Memory/Mission/Signal 这类 console page 用 full-height shell + header/content 分层，避免一边无缝、一边圆角外壳的跨页面冲突 | 2026-05-21 |
+| KD-6 | Console shell 容器层级拆成 outer shell + content carrier | Settings/Thread 这类 rail/content 页面用淡边界分隔；Memory/Mission/Signal 这类 console page 外层用 full-height shell + header/content 分层，内层主内容承载层跟随多数页面的圆角 surface 模式 | 2026-05-21 |
+| KD-7 | 多数页面的圆角承载层优先于无缝少数派 | CVO 2026-05-21 二次验收指出“规则与 SOP 等多数页面是圆角承载层”，Memory/Signal 的无缝主内容是异端；PR #1826 给 Memory/Signal 主内容补 visible carrier，避免 card-bg 与 shell-bg 过近导致“看起来没圆角/没空白” | 2026-05-21 |
 
 ## Review Gate
 
@@ -374,3 +379,4 @@ team lead 2026-05-20 追加口径：Thread 栏、对话栏、底部/右侧状态
 - Phase O: codex 本地 review → 云端 skip（CVO KD-1 速度优先，纯 CSS token migration for inner controls）
 - Phase P: codex 本地 review → 云端 skip（CVO KD-1 速度优先，纯 CSS token migration for settings/voice residuals）
 - Post-close shell container parity: opus 本地 review → 云端 skip（CVO KD-1 速度优先，纯 CSS shell hierarchy correction）
+- Post-close rounded content carrier follow-up: opus 本地 review → 云端 review clean（纯 CSS carrier visibility fix + regression test）
