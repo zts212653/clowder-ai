@@ -7,6 +7,9 @@ import { groupSignalSourcesByTierAndCategory } from '@/utils/signals-view';
 import { SignalNav } from './SignalNav';
 import { SignalTierBadge } from './SignalTierBadge';
 
+const CONTENT_SURFACE_CLASS =
+  'rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-[18px] shadow-[0_12px_30px_rgba(43,33,26,0.06)]';
+
 export function SignalSourcesView({ initialReferrerThread = null }: { initialReferrerThread?: string | null }) {
   const [sources, setSources] = useState<readonly SignalSource[]>([]);
   const [loading, setLoading] = useState(true);
@@ -94,119 +97,121 @@ export function SignalSourcesView({ initialReferrerThread = null }: { initialRef
         <SignalNav active="sources" initialReferrerThread={initialReferrerThread} />
       </header>
 
-      <main className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
-        <section className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => void setAllEnabled(true)}
-            className="rounded-lg border border-codex-light px-3 py-2 text-sm text-codex-dark hover:bg-codex-bg"
-          >
-            全部开启
-          </button>
-          <button
-            type="button"
-            onClick={() => void setAllEnabled(false)}
-            className="rounded-lg border border-[var(--console-border-soft)] px-3 py-2 text-sm text-cafe-secondary hover:bg-[var(--console-hover-bg)]"
-          >
-            全部关闭
-          </button>
-          <button
-            type="button"
-            onClick={() => void reloadSources()}
-            className="rounded-lg border border-[var(--console-border-soft)] px-3 py-2 text-sm text-cafe-secondary hover:bg-[var(--console-hover-bg)]"
-          >
-            刷新
-          </button>
-        </section>
-
-        {error && (
-          <div className="rounded-lg border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-sm text-[var(--semantic-error-text)]">
-            请求失败: {error}
-          </div>
-        )}
-        {fetchResult && (
-          <div
-            className={[
-              'rounded-lg border px-3 py-2 text-sm',
-              fetchResult.ok
-                ? 'border-conn-green-ring bg-conn-green-bg text-conn-green-text'
-                : 'border-conn-red-ring bg-conn-red-bg text-[var(--semantic-error-text)]',
-            ].join(' ')}
-          >
-            <span className="font-semibold">{fetchResult.sourceId}</span>: {fetchResult.message}
-          </div>
-        )}
-        {loading && <p className="text-sm text-cafe-secondary">加载中...</p>}
-
-        <section className="space-y-4">
-          {groupedSources.map((group) => (
-            <div
-              key={`${group.tier}-${group.category}`}
-              className="rounded-2xl bg-[var(--console-card-bg)] p-4 shadow-sm"
+      <main className="flex-1 overflow-y-auto p-5">
+        <div className={`${CONTENT_SURFACE_CLASS} space-y-4`} data-testid="signal-sources-content-surface">
+          <section className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void setAllEnabled(true)}
+              className="rounded-lg border border-codex-light px-3 py-2 text-sm text-codex-dark hover:bg-codex-bg"
             >
-              <div className="mb-3 flex items-center gap-2">
-                <SignalTierBadge tier={group.tier} />
-                <h2 className="text-sm font-semibold text-cafe-black">{group.category}</h2>
-                <span className="text-xs text-cafe-secondary">({group.sources.length})</span>
-              </div>
-              <ul className="space-y-2">
-                {group.sources.map((source) => (
-                  <li key={source.id} className="rounded-xl bg-[var(--console-field-bg)] p-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-cafe-black">{source.name}</p>
-                        <div className="mt-0.5 flex flex-wrap items-center gap-2">
-                          <a
-                            href={source.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="break-all text-xs text-cafe-interactive hover:underline"
-                          >
-                            {source.url}
-                          </a>
-                          <a
-                            href={source.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="rounded-md border border-opus-light px-2 py-0.5 text-xs text-opus-dark hover:bg-opus-bg"
-                          >
-                            访问 ↗
-                          </a>
-                        </div>
-                        <p className="mt-1 text-xs text-cafe-secondary">
-                          {source.fetch.method} · {source.schedule.frequency}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          disabled={fetchingIds.has(source.id)}
-                          onClick={() => void doFetch(source.id)}
-                          className="rounded-full border border-opus-light px-3 py-1 text-xs font-semibold text-opus-dark transition-colors hover:bg-opus-bg disabled:opacity-50"
-                        >
-                          {fetchingIds.has(source.id) ? '抓取中...' : '抓取'}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={updatingId === source.id}
-                          onClick={() => void setEnabled(source.id, !source.enabled)}
-                          className={[
-                            'rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
-                            source.enabled
-                              ? 'border-codex-light bg-codex-bg text-codex-dark'
-                              : 'border-[var(--console-border-soft)] bg-[var(--console-field-bg)] text-cafe-secondary',
-                          ].join(' ')}
-                        >
-                          {updatingId === source.id ? '更新中...' : source.enabled ? '开启' : '关闭'}
-                        </button>
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+              全部开启
+            </button>
+            <button
+              type="button"
+              onClick={() => void setAllEnabled(false)}
+              className="rounded-lg border border-[var(--console-border-soft)] px-3 py-2 text-sm text-cafe-secondary hover:bg-[var(--console-hover-bg)]"
+            >
+              全部关闭
+            </button>
+            <button
+              type="button"
+              onClick={() => void reloadSources()}
+              className="rounded-lg border border-[var(--console-border-soft)] px-3 py-2 text-sm text-cafe-secondary hover:bg-[var(--console-hover-bg)]"
+            >
+              刷新
+            </button>
+          </section>
+
+          {error && (
+            <div className="rounded-lg border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-sm text-[var(--semantic-error-text)]">
+              请求失败: {error}
             </div>
-          ))}
-        </section>
+          )}
+          {fetchResult && (
+            <div
+              className={[
+                'rounded-lg border px-3 py-2 text-sm',
+                fetchResult.ok
+                  ? 'border-conn-green-ring bg-conn-green-bg text-conn-green-text'
+                  : 'border-conn-red-ring bg-conn-red-bg text-[var(--semantic-error-text)]',
+              ].join(' ')}
+            >
+              <span className="font-semibold">{fetchResult.sourceId}</span>: {fetchResult.message}
+            </div>
+          )}
+          {loading && <p className="text-sm text-cafe-secondary">加载中...</p>}
+
+          <section className="space-y-4">
+            {groupedSources.map((group) => (
+              <div
+                key={`${group.tier}-${group.category}`}
+                className="rounded-2xl bg-[var(--console-card-bg)] p-4 shadow-sm"
+              >
+                <div className="mb-3 flex items-center gap-2">
+                  <SignalTierBadge tier={group.tier} />
+                  <h2 className="text-sm font-semibold text-cafe-black">{group.category}</h2>
+                  <span className="text-xs text-cafe-secondary">({group.sources.length})</span>
+                </div>
+                <ul className="space-y-2">
+                  {group.sources.map((source) => (
+                    <li key={source.id} className="rounded-xl bg-[var(--console-field-bg)] p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-cafe-black">{source.name}</p>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                            <a
+                              href={source.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="break-all text-xs text-cafe-interactive hover:underline"
+                            >
+                              {source.url}
+                            </a>
+                            <a
+                              href={source.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="rounded-md border border-opus-light px-2 py-0.5 text-xs text-opus-dark hover:bg-opus-bg"
+                            >
+                              访问 ↗
+                            </a>
+                          </div>
+                          <p className="mt-1 text-xs text-cafe-secondary">
+                            {source.fetch.method} · {source.schedule.frequency}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={fetchingIds.has(source.id)}
+                            onClick={() => void doFetch(source.id)}
+                            className="rounded-full border border-opus-light px-3 py-1 text-xs font-semibold text-opus-dark transition-colors hover:bg-opus-bg disabled:opacity-50"
+                          >
+                            {fetchingIds.has(source.id) ? '抓取中...' : '抓取'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={updatingId === source.id}
+                            onClick={() => void setEnabled(source.id, !source.enabled)}
+                            className={[
+                              'rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
+                              source.enabled
+                                ? 'border-codex-light bg-codex-bg text-codex-dark'
+                                : 'border-[var(--console-border-soft)] bg-[var(--console-field-bg)] text-cafe-secondary',
+                            ].join(' ')}
+                          >
+                            {updatingId === source.id ? '更新中...' : source.enabled ? '开启' : '关闭'}
+                          </button>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </section>
+        </div>
       </main>
     </div>
   );

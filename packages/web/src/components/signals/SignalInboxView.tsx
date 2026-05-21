@@ -35,6 +35,9 @@ const initialFilters: SignalArticleFilters = {
   tier: 'all',
 };
 
+const CONTENT_SURFACE_CLASS =
+  'rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-[18px] shadow-[0_12px_30px_rgba(43,33,26,0.06)]';
+
 function uniqueSources(items: readonly SignalArticle[]): readonly string[] {
   return Array.from(new Set(items.map((item) => item.source))).sort();
 }
@@ -286,57 +289,62 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
         <SignalNav active="signals" initialReferrerThread={initialReferrerThread} />
       </header>
 
-      <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-6">
-        <SignalStatsCards stats={stats} />
+      <main className="flex min-h-0 flex-1 p-5">
+        <div
+          className={`flex min-h-0 flex-1 flex-col gap-4 overflow-hidden ${CONTENT_SURFACE_CLASS}`}
+          data-testid="signal-inbox-content-surface"
+        >
+          <SignalStatsCards stats={stats} />
 
-        {error && (
-          <div className="rounded-lg bg-conn-red-bg px-3 py-2 text-sm text-red-700 shadow-[0_1px_3px_rgba(43,33,26,0.06)]">
-            请求失败: {error}
-          </div>
-        )}
+          {error && (
+            <div className="rounded-lg bg-conn-red-bg px-3 py-2 text-sm text-red-700 shadow-[0_1px_3px_rgba(43,33,26,0.06)]">
+              请求失败: {error}
+            </div>
+          )}
 
-        <div className="flex min-h-0 flex-1 gap-4">
-          <div className="flex w-[420px] shrink-0 flex-col gap-1 overflow-y-auto border-r border-[var(--console-border-soft)] pr-4">
-            <SignalFilterBar
-              filters={filters}
-              onFilterChange={(patch) => setFilters((cur) => ({ ...cur, ...patch }))}
-              onStatusTab={handleStatusTab}
-              onSubmit={handleSearchSubmit}
-              sources={sources}
-              ime={ime}
-            />
-            <div className="flex items-center justify-between px-2 pb-1">
-              <p className="text-xs font-semibold text-cafe-muted">
-                {loading ? '加载中...' : `共 ${filteredItems.length} 篇`}
-              </p>
-              <BatchActionBar
+          <div className="flex min-h-0 flex-1 gap-4">
+            <div className="flex w-[420px] shrink-0 flex-col gap-1 overflow-y-auto border-r border-[var(--console-border-soft)] pr-4">
+              <SignalFilterBar
+                filters={filters}
+                onFilterChange={(patch) => setFilters((cur) => ({ ...cur, ...patch }))}
+                onStatusTab={handleStatusTab}
+                onSubmit={handleSearchSubmit}
+                sources={sources}
+                ime={ime}
+              />
+              <div className="flex items-center justify-between px-2 pb-1">
+                <p className="text-xs font-semibold text-cafe-muted">
+                  {loading ? '加载中...' : `共 ${filteredItems.length} 篇`}
+                </p>
+                <BatchActionBar
+                  selectedIds={batchSelected}
+                  onClear={() => setBatchSelected(new Set())}
+                  onComplete={() => void refreshInbox()}
+                />
+              </div>
+              <SignalArticleList
+                items={filteredItems}
+                selectedArticleId={selectedArticleId}
+                onSelect={handleSelectArticle}
+                onStatusChange={handleStatusChange}
                 selectedIds={batchSelected}
-                onClear={() => setBatchSelected(new Set())}
-                onComplete={() => void refreshInbox()}
+                onToggleSelect={toggleBatchSelect}
               />
             </div>
-            <SignalArticleList
-              items={filteredItems}
-              selectedArticleId={selectedArticleId}
-              onSelect={handleSelectArticle}
-              onStatusChange={handleStatusChange}
-              selectedIds={batchSelected}
-              onToggleSelect={toggleBatchSelect}
-            />
-          </div>
-          <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto">
-            <SignalArticleDetailPanel
-              article={selectedArticle}
-              isLoading={detailLoading}
-              onStatusChange={handleStatusChange}
-              onTagsChange={handleTagsChange}
-              onNoteChange={handleNoteChange}
-              onDelete={handleDelete}
-              collections={collections}
-              onAddToCollection={handleAddToCollection}
-              onCreateCollection={handleCreateCollection}
-            />
-            <StudyTimeline />
+            <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto">
+              <SignalArticleDetailPanel
+                article={selectedArticle}
+                isLoading={detailLoading}
+                onStatusChange={handleStatusChange}
+                onTagsChange={handleTagsChange}
+                onNoteChange={handleNoteChange}
+                onDelete={handleDelete}
+                collections={collections}
+                onAddToCollection={handleAddToCollection}
+                onCreateCollection={handleCreateCollection}
+              />
+              <StudyTimeline />
+            </div>
           </div>
         </div>
       </main>

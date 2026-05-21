@@ -1625,6 +1625,14 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
+    name: 'CAT_CAFE_RIPGREP_PATH',
+    defaultValue: '(未设置 → 使用内置 @vscode/ripgrep，失败时回落 PATH rg)',
+    description: 'Antigravity grep_search native executor 的 ripgrep 二进制路径覆盖（异常部署/调试用）',
+    category: 'antigravity',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'CAT_CAFE_READONLY',
     defaultValue: '(未设置 → 全量注册)',
     description: 'MCP Server 只读模式：跳过 post_message 等写操作工具注册（Antigravity 持久 MCP 用）',

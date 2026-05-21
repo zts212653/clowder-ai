@@ -64,6 +64,30 @@ describe('AntigravityIdeReadToolExecutor', () => {
     assert.equal(entries[0].result.status, 'success');
   });
 
+  test('grep_search works when rg is not discoverable on PATH', async () => {
+    const root = makeWorkspace();
+    const emptyPath = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-ide-read-tools-empty-path-'));
+    cleanupDirs.push(emptyPath);
+    const originalPath = process.env.PATH;
+    process.env.PATH = emptyPath;
+
+    try {
+      const executor = new AntigravityIdeReadToolExecutor('grep_search');
+      const { ctx } = makeContext(root);
+
+      const result = await executor.execute({ Pattern: 'needle', Path: 'src' }, ctx);
+
+      assert.equal(result.status, 'success');
+      assert.match(result.stdout, /src\/index\.ts:1:const needle = true;/);
+    } finally {
+      if (originalPath === undefined) {
+        delete process.env.PATH;
+      } else {
+        process.env.PATH = originalPath;
+      }
+    }
+  });
+
   test('grep_search honors canonical SearchPath instead of defaulting to workspace root', async () => {
     const root = makeWorkspace();
     fs.mkdirSync(path.join(root, 'docs'), { recursive: true });
