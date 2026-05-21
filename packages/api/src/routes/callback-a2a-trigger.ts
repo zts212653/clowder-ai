@@ -210,7 +210,12 @@ export async function enqueueA2ATargets(
     );
     // Trigger auto-execute for entries whose target slot is free
     await deps.queueProcessor?.tryAutoExecute?.(threadId);
-    log.info({ threadId, triggerMessageId, enqueued, targetCats }, '[F122B] A2A callback: enqueued to InvocationQueue');
+    log.info(
+      { threadId, triggerMessageId, enqueued, targetCats },
+      enqueued.length > 0
+        ? '[F122B] A2A callback: enqueued to InvocationQueue'
+        : '[F122B] A2A callback: no new InvocationQueue entries enqueued',
+    );
     return { enqueued, fallback: false };
   }
 

@@ -28,7 +28,7 @@ function FeatureNode({ data }: NodeProps<Node<FeatureNodeData>>) {
 
   return (
     <div
-      className={`rounded-xl border-2 bg-cafe-surface px-3 py-2 shadow-sm transition-shadow hover:shadow-md ${isDone ? 'opacity-50' : ''}`}
+      className={`rounded-xl border-2 bg-[var(--console-card-bg)] px-3 py-2 shadow-sm transition-shadow hover:shadow-md ${isDone ? 'opacity-50' : ''}`}
       style={{
         borderColor: colors.border,
         backgroundColor: colors.bg,

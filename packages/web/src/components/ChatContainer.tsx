@@ -757,7 +757,10 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   if (isExport) {
     const exportReady = !isLoadingHistory && messages.length > 0 && !isLoading;
     return (
-      <div className="min-h-screen bg-cafe-surface" {...(exportReady ? { 'data-export-ready': 'true' } : {})}>
+      <div
+        className="min-h-screen bg-[var(--console-shell-bg)]"
+        {...(exportReady ? { 'data-export-ready': 'true' } : {})}
+      >
         <div className="max-w-4xl mx-auto p-4">{messages.map(renderSingleMessage)}</div>
       </div>
     );

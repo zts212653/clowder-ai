@@ -282,7 +282,7 @@ export function HealthReport() {
         <button
           type="button"
           onClick={fetchReport}
-          className="rounded-lg border border-cafe bg-white px-3 py-1.5 text-xs text-cafe-secondary transition-colors hover:bg-cafe-surface"
+          className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-1.5 text-xs text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)]"
         >
           刷新
         </button>

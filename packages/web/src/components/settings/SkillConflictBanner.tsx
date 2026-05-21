@@ -41,7 +41,7 @@ export function SkillConflictBanner({ conflicts, resolving, onResolve }: SkillCo
               type="button"
               disabled={resolving === c.skillName}
               onClick={() => void onResolve(c.skillName, 'mine')}
-              className="rounded-lg bg-white px-2.5 py-1 text-micro font-bold text-conn-amber-text hover:bg-conn-amber-bg disabled:opacity-50"
+              className="rounded-lg bg-[var(--console-card-bg)] px-2.5 py-1 text-micro font-bold text-conn-amber-text hover:bg-conn-amber-bg disabled:opacity-50"
             >
               我的
             </button>

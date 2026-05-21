@@ -36,6 +36,11 @@ import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js'
 
 const log = createModuleLogger('routes/threads');
 
+interface ThreadIndexBuilder {
+  markThreadDirty(threadId: string): void;
+  flushDirtyThreads?(): number | Promise<number>;
+}
+
 export interface ThreadsRoutesOptions {
   threadStore: IThreadStore;
   /** Optional: cascade delete messages when thread is deleted */
@@ -60,6 +65,8 @@ export interface ThreadsRoutesOptions {
   guideSessionStore?: import('../domains/guides/GuideSessionRepository.js').IGuideSessionStore;
   /** F187: Label store for validating label IDs on thread update */
   labelStore?: ILabelStore;
+  /** F102: keep thread evidence search in sync after title-only updates */
+  indexBuilder?: ThreadIndexBuilder;
 }
 
 /** F087: Bootcamp state Zod schema (F171 v2 flow) */
@@ -479,7 +486,15 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       preferredWorkspaceMode,
       labels,
     } = parseResult.data;
-    if (title !== undefined) await threadStore.updateTitle(id, title);
+    if (title !== undefined) {
+      await threadStore.updateTitle(id, title);
+      try {
+        opts.indexBuilder?.markThreadDirty(id);
+        await opts.indexBuilder?.flushDirtyThreads?.();
+      } catch (err) {
+        log.warn({ err, threadId: id }, 'failed to refresh thread evidence index after title update');
+      }
+    }
     if (pinned !== undefined) await threadStore.updatePin(id, pinned);
     if (favorited !== undefined) await threadStore.updateFavorite(id, favorited);
     if (thinkingMode !== undefined) await threadStore.updateThinkingMode(id, thinkingMode);

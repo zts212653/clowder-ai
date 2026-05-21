@@ -53,7 +53,7 @@ function AddTermRow({ onAdd }: { onAdd: (from: string, to: string) => void }) {
         value={from}
         onChange={(e) => setFrom(e.target.value)}
         placeholder="误识别词"
-        className="flex-1 text-xs border border-[var(--console-border-soft)] rounded px-2 py-1.5 focus:outline-none focus:border-cafe-accent"
+        className="flex-1 text-xs border border-[var(--console-border-soft)] rounded px-2 py-1.5 focus:outline-none focus:border-[var(--console-border-strong)]"
         onCompositionStart={ime.onCompositionStart}
         onCompositionEnd={ime.onCompositionEnd}
         onKeyDown={handleFromKeyDown}
@@ -65,7 +65,7 @@ function AddTermRow({ onAdd }: { onAdd: (from: string, to: string) => void }) {
         value={to}
         onChange={(e) => setTo(e.target.value)}
         placeholder="正确词"
-        className="flex-1 text-xs border border-[var(--console-border-soft)] rounded px-2 py-1.5 focus:outline-none focus:border-cafe-accent"
+        className="flex-1 text-xs border border-[var(--console-border-soft)] rounded px-2 py-1.5 focus:outline-none focus:border-[var(--console-border-strong)]"
         onCompositionStart={ime.onCompositionStart}
         onCompositionEnd={ime.onCompositionEnd}
         onKeyDown={handleKeyDown}
@@ -128,7 +128,7 @@ function CustomTermRow({
           onCompositionStart={ime.onCompositionStart}
           onCompositionEnd={ime.onCompositionEnd}
           onKeyDown={handleEditKeyDown}
-          className="flex-1 border border-cafe-accent/40 rounded px-1.5 py-0.5 focus:outline-none focus:border-cafe-accent"
+          className="flex-1 border border-[var(--console-border-soft)] rounded px-1.5 py-0.5 focus:outline-none focus:border-[var(--console-border-strong)]"
         />
         <span className="text-cafe-muted">&rarr;</span>
         <input
@@ -138,7 +138,7 @@ function CustomTermRow({
           onCompositionStart={ime.onCompositionStart}
           onCompositionEnd={ime.onCompositionEnd}
           onKeyDown={handleEditKeyDown}
-          className="flex-1 border border-cafe-accent/40 rounded px-1.5 py-0.5 focus:outline-none focus:border-cafe-accent"
+          className="flex-1 border border-[var(--console-border-soft)] rounded px-1.5 py-0.5 focus:outline-none focus:border-[var(--console-border-strong)]"
         />
         <button
           type="button"
@@ -223,9 +223,9 @@ export function VoiceSettingsPanel() {
           <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
             {BUILT_IN_ENTRIES.map(([from, to]) => (
               <div key={from} className="flex items-center gap-2 text-xs text-cafe-secondary">
-                <code className="bg-cafe-surface-elevated px-1.5 py-0.5 rounded">{from}</code>
+                <code className="bg-[var(--console-panel-bg)] px-1.5 py-0.5 rounded">{from}</code>
                 <span>&rarr;</span>
-                <code className="bg-cafe-surface-elevated px-1.5 py-0.5 rounded">{to}</code>
+                <code className="bg-[var(--console-panel-bg)] px-1.5 py-0.5 rounded">{to}</code>
               </div>
             ))}
           </div>
@@ -242,7 +242,7 @@ export function VoiceSettingsPanel() {
             id="voice-language-select"
             value={settings.language}
             onChange={(e) => setLanguage(e.target.value as typeof settings.language)}
-            className="text-xs border border-[var(--console-border-soft)] rounded px-2 py-1.5 focus:outline-none focus:border-cafe-accent"
+            className="text-xs border border-[var(--console-border-soft)] rounded px-2 py-1.5 focus:outline-none focus:border-[var(--console-border-strong)]"
           >
             <option value="zh">中文</option>
             <option value="en">English</option>
@@ -261,7 +261,7 @@ export function VoiceSettingsPanel() {
           onChange={(e) => setCustomPrompt(e.target.value || null)}
           placeholder="使用默认提示词"
           rows={3}
-          className="w-full text-xs border border-[var(--console-border-soft)] rounded px-2 py-1.5 focus:outline-none focus:border-cafe-accent resize-vertical font-mono"
+          className="w-full text-xs border border-[var(--console-border-soft)] rounded px-2 py-1.5 focus:outline-none focus:border-[var(--console-border-strong)] resize-vertical font-mono"
         />
       </Section>
 

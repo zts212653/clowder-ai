@@ -92,7 +92,10 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
       className="fixed inset-0 bg-black/30 flex items-center justify-center z-50"
       data-testid="create-collection-dialog"
     >
-      <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-lg p-6 w-full max-w-md space-y-4">
+      <form
+        onSubmit={handleSubmit}
+        className="bg-[var(--console-card-bg)] rounded-xl shadow-lg p-6 w-full max-w-md space-y-4"
+      >
         <h3 className="font-semibold text-sm text-cafe-primary">新建集合</h3>
         {error && <div className="text-xs text-red-600 bg-red-50 rounded p-2">{error}</div>}
         <div className="grid grid-cols-2 gap-3">
@@ -101,7 +104,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
             <select
               value={kind}
               onChange={(e) => setKind(e.target.value)}
-              className="mt-1 block w-full rounded border border-cafe px-2 py-1 text-xs"
+              className="mt-1 block w-full rounded border border-[var(--console-border-soft)] px-2 py-1 text-xs"
             >
               {COLLECTION_KINDS.map((k) => (
                 <option key={k} value={k}>
@@ -116,7 +119,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
               value={name}
               onChange={(e) => setName(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
               placeholder="finance"
-              className="mt-1 block w-full rounded border border-cafe px-2 py-1 text-xs"
+              className="mt-1 block w-full rounded border border-[var(--console-border-soft)] px-2 py-1 text-xs"
               required
             />
           </label>
@@ -127,7 +130,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             placeholder="Personal Finance"
-            className="mt-1 block w-full rounded border border-cafe px-2 py-1 text-xs"
+            className="mt-1 block w-full rounded border border-[var(--console-border-soft)] px-2 py-1 text-xs"
             required
           />
         </label>
@@ -140,7 +143,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
               setDryRun(null);
             }}
             placeholder="/home/user/finance"
-            className="mt-1 block w-full rounded border border-cafe px-2 py-1 text-xs"
+            className="mt-1 block w-full rounded border border-[var(--console-border-soft)] px-2 py-1 text-xs"
           />
         </label>
         <label className="text-xs text-cafe-secondary block">
@@ -148,7 +151,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
           <select
             value={sensitivity}
             onChange={(e) => setSensitivity(e.target.value)}
-            className="mt-1 block w-full rounded border border-cafe px-2 py-1 text-xs"
+            className="mt-1 block w-full rounded border border-[var(--console-border-soft)] px-2 py-1 text-xs"
           >
             {SENSITIVITIES.map((s) => (
               <option key={s} value={s}>
@@ -172,7 +175,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-1 text-xs text-cafe-secondary border border-cafe rounded hover:bg-gray-50"
+            className="px-3 py-1 text-xs text-cafe-secondary border border-[var(--console-border-soft)] rounded hover:bg-[var(--console-hover-bg)]"
           >
             取消
           </button>

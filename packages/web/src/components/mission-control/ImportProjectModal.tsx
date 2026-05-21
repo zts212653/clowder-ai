@@ -61,7 +61,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. studio-flow"
-              className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface px-3 py-2 text-sm text-cafe focus:border-[var(--console-border-soft)] focus:outline-none"
+              className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2 text-sm text-cafe focus:border-[var(--console-border-soft)] focus:outline-none"
             />
           </label>
 
@@ -72,7 +72,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
               value={sourcePath}
               onChange={(e) => setSourcePath(e.target.value)}
               placeholder="/home/user/studio-flow"
-              className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface px-3 py-2 text-sm text-cafe focus:border-[var(--console-border-soft)] focus:outline-none"
+              className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2 text-sm text-cafe focus:border-[var(--console-border-soft)] focus:outline-none"
             />
           </label>
 
@@ -82,7 +82,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
               type="text"
               value={backlogPath}
               onChange={(e) => setBacklogPath(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface px-3 py-2 text-sm text-cafe focus:border-[var(--console-border-soft)] focus:outline-none"
+              className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2 text-sm text-cafe focus:border-[var(--console-border-soft)] focus:outline-none"
             />
           </label>
 
@@ -93,7 +93,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="简要描述"
-              className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface px-3 py-2 text-sm text-cafe focus:border-[var(--console-border-soft)] focus:outline-none"
+              className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2 text-sm text-cafe focus:border-[var(--console-border-soft)] focus:outline-none"
             />
           </label>
         </div>

@@ -28,6 +28,9 @@ describe('callback delivery decision helper', () => {
     });
 
     assert.equal(result.shouldBroadcastNow, false);
+    assert.deepEqual(result.enqueued, ['opus']);
+    assert.equal(result.enqueueAttempted, true);
+    assert.equal(result.enqueueFailed, false);
     assert.equal(log.warn.mock.calls.length, 0);
     assert.equal(log.error.mock.calls.length, 0);
   });
@@ -48,6 +51,9 @@ describe('callback delivery decision helper', () => {
     });
 
     assert.equal(result.shouldBroadcastNow, true);
+    assert.deepEqual(result.enqueued, []);
+    assert.equal(result.enqueueAttempted, true);
+    assert.equal(result.enqueueFailed, false);
     assert.equal(markDelivered.mock.calls.length, 1);
     assert.equal(log.error.mock.calls.length, 0);
   });
@@ -70,6 +76,9 @@ describe('callback delivery decision helper', () => {
     });
 
     assert.equal(result.shouldBroadcastNow, true);
+    assert.deepEqual(result.enqueued, []);
+    assert.equal(result.enqueueAttempted, true);
+    assert.equal(result.enqueueFailed, true);
     assert.equal(markDelivered.mock.calls.length, 1);
     assert.equal(log.error.mock.calls.length, 1);
   });
@@ -89,6 +98,9 @@ describe('callback delivery decision helper', () => {
     });
 
     assert.equal(result.shouldBroadcastNow, true);
+    assert.deepEqual(result.enqueued, ['opus']);
+    assert.equal(result.enqueueAttempted, true);
+    assert.equal(result.enqueueFailed, false);
     assert.equal(enqueueA2A.mock.calls.length, 1);
   });
 });

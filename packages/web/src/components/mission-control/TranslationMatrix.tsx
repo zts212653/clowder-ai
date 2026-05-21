@@ -94,7 +94,7 @@ export function TranslationMatrix({ cards, selectedCardId, onSelectCard, onCreat
                   key={card.id}
                   onClick={() => onSelectCard(card.id)}
                   className={`cursor-pointer transition-colors hover:bg-[var(--console-card-bg)] ${
-                    selectedCardId === card.id ? 'bg-[var(--console-hover-bg)]' : 'bg-cafe-surface'
+                    selectedCardId === card.id ? 'bg-[var(--console-hover-bg)]' : 'bg-[var(--console-card-bg)]'
                   }`}
                 >
                   <td className="max-w-[200px] truncate px-3 py-2 text-cafe">{card.originalText || '—'}</td>

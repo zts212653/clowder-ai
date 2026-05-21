@@ -868,6 +868,32 @@ describe('IndexBuilder thread summary (E1/E2)', () => {
     assert.ok(item.summary.includes('Redis keyPrefix'));
   });
 
+  it('E1: rebuild updates a thread title even when summary is unchanged', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    let title = 'Old thread title';
+    const mockThreads = [
+      {
+        id: 'thread_rename',
+        title,
+        participants: ['opus'],
+        threadMemory: { summary: 'Stable discussion summary.' },
+        lastActiveAt: 1710000000000,
+      },
+    ];
+
+    const builder = new IndexBuilder(store, docsDir, undefined, undefined, () => mockThreads);
+    await builder.rebuild();
+    assert.equal((await store.getByAnchor('thread-thread_rename')).title, 'Old thread title');
+
+    title = 'New thread title';
+    mockThreads[0].title = title;
+    const result = await builder.rebuild();
+
+    assert.equal(result.docsIndexed, 1, 'title-only changes must re-index the thread evidence row');
+    assert.equal((await store.getByAnchor('thread-thread_rename')).title, 'New thread title');
+  });
+
   it('E1: threadListFn error does not delete existing thread anchors', async () => {
     const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
 
@@ -922,6 +948,33 @@ describe('IndexBuilder thread summary (E1/E2)', () => {
 
     const after = await store.getByAnchor('thread-thread_dirty');
     assert.ok(after.summary.includes('v2'), 'summary should be updated to v2');
+  });
+
+  it('E2: flushDirtyThreads updates a thread title even when summary is unchanged', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    let title = 'Original searchable title';
+    const mockThreads = [
+      {
+        id: 'thread_dirty_title',
+        title,
+        participants: ['codex'],
+        threadMemory: { summary: 'Stable thread summary.' },
+        lastActiveAt: 1710000000000,
+      },
+    ];
+    const builder = new IndexBuilder(store, docsDir, undefined, undefined, () => mockThreads);
+
+    await builder.rebuild();
+    assert.equal((await store.getByAnchor('thread-thread_dirty_title')).title, 'Original searchable title');
+
+    title = 'Renamed searchable title';
+    mockThreads[0].title = title;
+    builder.markThreadDirty('thread_dirty_title');
+    const flushed = await builder.flushDirtyThreads();
+
+    assert.equal(flushed, 1, 'title-only dirty threads must be flushed');
+    assert.equal((await store.getByAnchor('thread-thread_dirty_title')).title, 'Renamed searchable title');
   });
 });
 

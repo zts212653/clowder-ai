@@ -9,7 +9,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { before, beforeEach, describe, test } from 'node:test';
+import { beforeEach, describe, test } from 'node:test';
 import './helpers/setup-cat-registry.js';
 import Fastify from 'fastify';
 
@@ -196,6 +196,56 @@ describe('post_message A2A mention invocation', () => {
     // InvocationRecord should be created
     assert.equal(invocationRecordStore.getRecords().length, 1);
     assert.deepEqual(invocationRecordStore.getRecords()[0].targetCats, ['codex']);
+  });
+
+  test('post-message does not claim routed when InvocationQueue skips a duplicate queued target', async () => {
+    const tryAutoExecuteCalls = [];
+    const queueProcessor = {
+      async onInvocationComplete() {},
+      async tryAutoExecute(threadId) {
+        tryAutoExecuteCalls.push(threadId);
+      },
+      registerEntryCompleteHook() {},
+      unregisterEntryCompleteHook() {},
+    };
+    const invocationQueue = {
+      countAgentEntriesForThread() {
+        return 1;
+      },
+      hasQueuedAgentForCat(threadId, catId) {
+        assert.equal(threadId, 't1');
+        assert.equal(catId, 'codex');
+        return true;
+      },
+      enqueue() {
+        throw new Error('duplicate target must not be enqueued again');
+      },
+      backfillMessageId() {
+        throw new Error('skipped duplicate must not backfill a new queue entry');
+      },
+      list() {
+        return [];
+      },
+    };
+    const app = await createApp({ invocationQueue, queueProcessor });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 't1');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        content: '修复完成了\n@缅因猫\n请帮忙 review',
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.deepEqual(body.routed, [], 'Response must expose that no new A2A route was enqueued');
+    assert.doesNotMatch(body.message, /消息已路由给 @codex/, 'Duplicate skip must not be reported as routed');
+    assert.match(body.message, /未新增唤醒|已有待处理队列/);
+    assert.deepEqual(tryAutoExecuteCalls, ['t1'], 'Existing queued entry should still be nudged for auto-execute');
+    assert.equal(invocationRecordStore.getRecords().length, 0, 'InvocationQueue path must not create legacy records');
   });
 
   // Content-before-mention regression: 上面写内容，最后一行 @ (缅因猫习惯)

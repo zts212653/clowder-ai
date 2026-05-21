@@ -128,8 +128,8 @@ export function MemoryNav({ active, initialReferrerThread = null }: MemoryNavPro
             className={[
               'inline-flex items-center whitespace-nowrap rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
               isActive
-                ? 'border-cafe-accent bg-cafe-surface-sunken text-cafe-interactive'
-                : 'border-cafe bg-cafe-surface text-cafe-secondary hover:border-cafe-subtle hover:text-cafe-interactive',
+                ? 'border-[var(--console-border-strong)] bg-[var(--console-card-bg)] text-[var(--console-button-emphasis)]'
+                : 'border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] text-cafe-secondary hover:border-[var(--console-border-strong)] hover:text-cafe',
             ].join(' ')}
           >
             {item.label}

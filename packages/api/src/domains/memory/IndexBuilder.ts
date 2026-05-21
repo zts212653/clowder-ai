@@ -64,6 +64,10 @@ export interface ThreadSnapshot {
   featureIds?: string[];
 }
 
+function computeThreadSourceHash(title: string, summary: string, keywords: string[]): string {
+  return createHash('sha256').update(JSON.stringify({ title, summary, keywords })).digest('hex').slice(0, 16);
+}
+
 /** Callback that returns all threads for indexing. */
 export type ThreadListFn = () => ThreadSnapshot[] | Promise<ThreadSnapshot[]>;
 
@@ -400,7 +404,7 @@ export class IndexBuilder implements IIndexBuilder {
           summary = title;
         }
 
-        const sourceHash = createHash('sha256').update(summary).digest('hex').slice(0, 16);
+        const sourceHash = computeThreadSourceHash(title, summary, keywords);
 
         currentAnchors.add(anchor);
         if (!options?.force) {
@@ -794,7 +798,7 @@ export class IndexBuilder implements IIndexBuilder {
         summary = title;
       }
 
-      const sourceHash = createHash('sha256').update(summary).digest('hex').slice(0, 16);
+      const sourceHash = computeThreadSourceHash(title, summary, keywords);
 
       const existing = await this.store.getByAnchor(anchor);
       if (existing?.sourceHash === sourceHash) continue; // unchanged

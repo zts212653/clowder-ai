@@ -150,7 +150,7 @@ function FeatureCard({
 
   return (
     <article
-      className="rounded-xl border border-cafe-subtle bg-[var(--console-card-bg)] px-3 py-2"
+      className="rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2"
       data-testid={`mc-bird-eye-feature-${tag}`}
     >
       <div className="flex items-center justify-between">

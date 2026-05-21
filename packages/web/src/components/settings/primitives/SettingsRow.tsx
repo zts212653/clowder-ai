@@ -4,7 +4,7 @@ type RowTone = 'default' | 'active' | 'inactive';
 
 const rowToneClasses: Record<RowTone, string> = {
   default: 'bg-[var(--console-card-bg)]',
-  active: 'bg-conn-purple-bg',
+  active: 'bg-[var(--console-card-bg)]',
   inactive: 'bg-conn-slate-bubble-bg',
 };
 

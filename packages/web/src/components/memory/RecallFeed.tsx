@@ -16,23 +16,26 @@ function RecallCard({ event }: { event: RecallEvent }) {
           {event.query}
         </span>
         {event.resultCount != null && (
-          <span className="rounded bg-cafe-surface-sunken px-1.5 py-0.5 text-micro font-semibold text-cafe-interactive">
+          <span className="rounded bg-[var(--console-panel-bg)] px-1.5 py-0.5 text-micro font-semibold text-cafe-interactive">
             {event.resultCount} 条命中
           </span>
         )}
       </button>
       {expanded && (
-        <div className="mt-2 space-y-1 border-t border-cafe/50 pt-2 text-xs text-cafe-secondary">
+        <div className="mt-2 space-y-1 border-t border-[var(--console-border-soft)]/50 pt-2 text-xs text-cafe-secondary">
           {event.mode && <div>模式: {event.mode}</div>}
           {event.scope && <div>范围: {event.scope}</div>}
           <div>时间: {new Date(event.timestamp).toLocaleTimeString()}</div>
           {event.results && event.results.length > 0 && (
             <div className="mt-1.5 space-y-1.5">
               {event.results.map((r, i) => (
-                <div key={`${event.id}-r${i}`} className="rounded border border-cafe/40 bg-cafe-surface p-1.5">
+                <div
+                  key={`${event.id}-r${i}`}
+                  className="rounded border border-[var(--console-border-soft)]/40 bg-[var(--console-card-bg)] p-1.5"
+                >
                   <div className="flex items-center gap-1.5 min-w-0">
                     {r.sourceType && (
-                      <span className="rounded bg-cafe-surface-sunken/60 px-1 py-0.5 text-micro font-semibold text-cafe-interactive">
+                      <span className="rounded bg-[var(--console-panel-bg)]/60 px-1 py-0.5 text-micro font-semibold text-cafe-interactive">
                         {r.sourceType}
                       </span>
                     )}

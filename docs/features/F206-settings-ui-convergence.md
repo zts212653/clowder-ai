@@ -8,7 +8,7 @@ created: 2026-05-18
 
 # F206: Settings UI Convergence — 组件语言归一
 
-> **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1
+> **Status**: done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-05-21
 
 ## Why
 
@@ -173,6 +173,23 @@ Phase K post-merge audit（Maine Coon）确认 `text-[10px]` 精确 510 处 acro
 3. **行为差异**：`text-[10px]` = `font-size: 10px`；`text-micro` = `font-size: 10px; line-height: 14px`。line-height 增加是 design system 意图（统一 micro text 行高），不是回归
 4. **验证**：替换后 zero `text-[10px]` remaining（rg verified），`pnpm test` + `pnpm check` + `pnpm build` 全绿
 
+### Phase M: settings tone unify (purple cards + sidebar bg) ✅
+
+team lead 2026-05-21 指出两个视觉问题：成员管理里所有已启用猫猫卡片显示紫色背景（connector purple token 错误用作 generic active 状态）+ 设置栏与对话栏侧栏底色不统一。
+
+1. **SettingsRow active tone 修复**：`bg-conn-purple-bg` (#f3e8ff) → `bg-[var(--console-card-bg)]` (#fffdfb)，enabled/disabled 区分靠 badge + inactive 灰色背景
+2. **SettingsShell sidebar 对齐**：`--console-panel-bg` (#f6efe7) → `--console-shell-bg` (#fcfaf7)，和 ThreadSidebar 一致
+
+### Phase P: Settings residual primitive sweep ✅
+
+Phase O post-merge audit（Maine Coon）识别 5 个 Settings/Voice 文件仍有 legacy cafe-* token + custom eyebrow pattern。
+
+1. **VoiceSettingsPanel 迁移**：4x `focus:border-cafe-accent` → `focus:border-[var(--console-border-strong)]`、2x `border-cafe-accent/40` → `border-[var(--console-border-soft)]`、2x `bg-cafe-surface-elevated` code pills → `bg-[var(--console-panel-bg)]`
+2. **InstallPreviewModal 迁移**：1x `border-cafe` input → `border-[var(--console-border-soft)]`
+3. **SettingsInlineItem primitive 修复**：`bg-cafe-surface` → `bg-[var(--console-card-bg)]`（primitive 自身残留，优先级最高）
+4. **SkillConflictBanner 修复**：`bg-white` → `bg-[var(--console-card-bg)]`（adaptive dark mode）
+5. **Uppercase eyebrow 保留**：`uppercase tracking-[0.22em]` 是跨文件一致的 typography pattern（VoiceSettingsPanel/ServiceStatusPanel/InstallPreviewModal），本 Phase 不改——改需 design decision
+
 ### Post-close Guardrail: 线条分隔 vs 背景分层
 
 team lead 2026-05-20 追加口径：Thread 栏、对话栏、底部/右侧状态栏这类主框架区域，可以保留“统一底色 + 极淡线条分隔”的模式，不必强制改成背景色分层。目标接近网易云/微信的克制分隔：线条存在但不抢眼。
@@ -274,6 +291,32 @@ team lead 2026-05-20 追加口径：Thread 栏、对话栏、底部/右侧状态
 - [x] AC-L2: Zero `text-[10px]` remaining in `packages/web/src/` (rg verified)
 - [x] AC-L3: `pnpm test` + `pnpm check` + `pnpm build` 全绿
 
+### Phase M（settings tone unify — purple cards + sidebar bg）
+- [x] AC-M1: SettingsRow active tone no longer uses connector purple — uses console-card-bg
+- [x] AC-M2: Settings sidebar background aligned to --console-shell-bg (same as ThreadSidebar)
+- [x] AC-M3: `pnpm gate` 全绿
+
+### Phase N（console page shell convergence）
+- [x] AC-N1: MemoryHub shell bg + header border migrated to console tokens (--console-shell-bg, --console-border-soft)
+- [x] AC-N2: MemoryNav tab pills migrated from cafe-accent/surface-sunken to console-border-strong/card-bg/button-emphasis
+- [x] AC-N3: MissionControlPage root bg aligned from --console-panel-bg to --console-shell-bg
+- [x] AC-N4: ChatContainer export mode bg migrated from bg-cafe-surface to --console-shell-bg
+- [x] AC-N5: `pnpm gate` 全绿
+
+### Phase O（Memory/Mission inner control primitive sweep）
+- [x] AC-O1: 10 Memory files migrated — form inputs, search bars, filter dropdowns, chip badges, passage borders all use console-* tokens
+- [x] AC-O2: 15 Mission-control files migrated — form inputs (bg-cafe-surface → --console-card-bg), focus borders (border-cafe-accent → --console-border-strong), badge/card bg (bg-cafe-surface-elevated → --console-card-bg), section borders (border-cafe-subtle → --console-border-soft)
+- [x] AC-O3: CTA buttons exempt — bg-cafe-accent/bg-cafe-primary semantic action tokens preserved (WCAG AA contrast, --console-button-emphasis dark mode 3.31:1 with text-white fails threshold)
+- [x] AC-O4: Chip/badge hierarchy preserved — child elements use --console-panel-bg (not --console-card-bg same as parent) to maintain visual distinction
+- [x] AC-O5: `pnpm gate` 全绿
+
+### Phase P（Settings residual primitive sweep）
+- [x] AC-P1: VoiceSettingsPanel — 4x focus border + 2x edit border + 2x code pill bg migrated to console tokens
+- [x] AC-P2: InstallPreviewModal — border-cafe input migrated to --console-border-soft
+- [x] AC-P3: SettingsInlineItem — bg-cafe-surface migrated to --console-card-bg (primitive self-heal)
+- [x] AC-P4: SkillConflictBanner — bg-white migrated to --console-card-bg (adaptive)
+- [x] AC-P5: `pnpm gate` 全绿
+
 ## Dependencies
 
 - **Evolved from**: F190（Console Settings 骨架 intake）、F199（Settings parity audit）
@@ -294,7 +337,8 @@ team lead 2026-05-20 追加口径：Thread 栏、对话栏、底部/右侧状态
 | KD-1 | 不走云端 review，opus coding + codex review + opus-47 愿景守护 | CVO directive：快速路，减少社区分叉。Guardian 47 是同 family (ragdoll) 不同个体（fallback path per 五条铁律 #2），CVO 指定。理想 cross-family 选项是 @gemini，本次因速度优先 + 47 未参与 review 而采用 fallback。 | 2026-05-18 |
 | KD-2 | 归一 ≠ 砍功能学开源 | 开源一致是功能简单，我们要功能保留+抽象到 primitives | 2026-05-18 |
 | KD-3 | 先归一再 outbound sync | 同步出去的代码是社区二次参考点，混乱版污染下游 | 2026-05-18 |
-| KD-4 | 框架边界可用极淡统一线条，内容卡片避免四周包边 | team lead 2026-05-20 明确：Thread 栏/对话栏/状态栏可统一底色 + 淡线分隔；状态栏等内容块仍应“能不要框线就不要框线”，避免改着改着忘回卡片包边 | 2026-05-20 |
+| KD-4 | 框架边界可用极淡统一线条，内容卡片避免四周包边 | team lead 2026-05-20 明确：Thread 栏/对话栏/状态栏可统一底色 + 淡线分隔；状态栏等内容块仍应”能不要框线就不要框线”，避免改着改着忘回卡片包边 | 2026-05-20 |
+| KD-5 | 红区文件纯 CSS token 迁移豁免 + reopen anchor CVO 追认 | Phase L/N 触碰 ChatContainer.tsx/ChatMessage.tsx（F183/F184/F194 红区），diff 实证纯 className 视觉 token 迁移（零行为风险）。CVO 2026-05-21 追认豁免。同时追认 F206 reopen 承载 Phase D-P（原 close `8891cd400` → reopen `675a7c104`，anchor 归属 CVO 事后 signoff） | 2026-05-21 |
 
 ## Review Gate
 
@@ -310,3 +354,7 @@ team lead 2026-05-20 追加口径：Thread 栏、对话栏、底部/右侧状态
 - Phase J: codex 本地 review → 云端 skip（CVO KD-1 速度优先，纯 CSS token migration）
 - Phase K: codex 本地 review → 云端 skip（CVO KD-1 速度优先，纯 CSS token migration + exempt annotations）
 - Phase L: codex 本地 review → 云端 skip（CVO KD-1 速度优先，纯 className bulk migration）
+- Phase M: codex 本地 review → 云端 skip（CVO KD-1 速度优先，纯 CSS token swap）
+- Phase N: codex 本地 review → 云端 skip（CVO KD-1 速度优先，纯 console token alignment）
+- Phase O: codex 本地 review → 云端 skip（CVO KD-1 速度优先，纯 CSS token migration for inner controls）
+- Phase P: codex 本地 review → 云端 skip（CVO KD-1 速度优先，纯 CSS token migration for settings/voice residuals）

@@ -1584,6 +1584,9 @@ async function main(): Promise<void> {
     ...(readStateStore ? { readStateStore } : {}),
     guideSessionStore,
     labelStore,
+    indexBuilder: memoryServices.indexBuilder as
+      | { markThreadDirty(threadId: string): void; flushDirtyThreads?(): number | Promise<number> }
+      | undefined,
   });
   await app.register(labelsRoutes, { labelStore, threadStore });
   await app.register(threadBranchRoutes, {

@@ -76,7 +76,7 @@ export function RebuildButton({ onComplete }: { onComplete: () => void }) {
           <span className="text-cafe-secondary">{PHASE_LABELS[job.phase] ?? (job.phase || '准备中')}</span>
           <span className="font-medium text-cafe-black">{job.percent}%</span>
         </div>
-        <div className="mt-1 h-1.5 rounded-full bg-cafe-surface">
+        <div className="mt-1 h-1.5 rounded-full bg-[var(--console-card-bg)]">
           <div
             className="h-full rounded-full bg-[var(--memory-progress-fill)] transition-all"
             style={{ width: `${job.percent}%` }}
@@ -96,7 +96,7 @@ export function RebuildButton({ onComplete }: { onComplete: () => void }) {
           type="button"
           disabled={starting}
           onClick={handleStart}
-          className={`rounded-lg border border-cafe bg-white px-3 py-1.5 text-xs text-cafe-secondary transition-colors hover:bg-cafe-surface ${starting ? 'opacity-50' : ''}`}
+          className={`rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-1.5 text-xs text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)] ${starting ? 'opacity-50' : ''}`}
         >
           重建索引
         </button>
@@ -112,7 +112,7 @@ export function RebuildButton({ onComplete }: { onComplete: () => void }) {
           type="button"
           disabled={starting}
           onClick={handleStart}
-          className={`rounded-lg border border-cafe bg-white px-3 py-1.5 text-xs text-conn-red-text transition-colors hover:bg-conn-red-bg ${starting ? 'opacity-50' : ''}`}
+          className={`rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-1.5 text-xs text-conn-red-text transition-colors hover:bg-conn-red-bg ${starting ? 'opacity-50' : ''}`}
         >
           重试
         </button>
@@ -126,7 +126,7 @@ export function RebuildButton({ onComplete }: { onComplete: () => void }) {
       disabled={starting}
       onClick={handleStart}
       data-testid="rebuild-button"
-      className={`rounded-lg border border-cafe bg-white px-3 py-1.5 text-xs text-cafe-secondary transition-colors hover:bg-cafe-surface ${starting ? 'opacity-50' : ''}`}
+      className={`rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-1.5 text-xs text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)] ${starting ? 'opacity-50' : ''}`}
     >
       重建索引
     </button>

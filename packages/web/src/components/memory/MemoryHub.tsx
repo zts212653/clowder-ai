@@ -18,8 +18,8 @@ interface MemoryHubProps {
 
 export function MemoryHub({ activeTab = 'feed', initialQuery, initialReferrerThread = null }: MemoryHubProps) {
   return (
-    <div className="flex h-full flex-col bg-cafe-surface" data-testid="memory-hub">
-      <header className="flex items-start gap-3 border-b border-cafe px-4 py-3">
+    <div className="flex h-full flex-col bg-[var(--console-shell-bg)]" data-testid="memory-hub">
+      <header className="flex items-start gap-3 border-b border-[var(--console-border-soft)] px-4 py-3">
         <MemoryNav active={activeTab} initialReferrerThread={initialReferrerThread} />
       </header>
 
