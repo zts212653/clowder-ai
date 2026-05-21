@@ -1155,7 +1155,7 @@
     {
       "id": "F188",
       "name": "Library Stewardship — 图书馆管护与成长",
-      "status": "done | **Completed**: 2026-05-20 | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "reopened | **Completed (A-I)**: 2026-05-20 | **Reopened**: 2026-05-20 (Phase J) | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F188-library-stewardship.md"
     },
     {
@@ -1251,7 +1251,7 @@
     {
       "id": "F206",
       "name": "Settings UI Convergence — 组件语言归一",
-      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-05-21",
       "file": "F206-settings-ui-convergence.md"
     },
     {
@@ -1259,6 +1259,12 @@
       "name": "AI Family Office — 个人投资学习基建",
       "status": "spec | **Owner**: Ragdoll | **Priority**: P2",
       "file": "F207-personal-finance-infra.md"
+    },
+    {
+      "id": "F208",
+      "name": "Capability Profile Routing — 能力画像档案 + 认知路由",
+      "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F208-capability-profile-routing.md"
     }
   ]
 }

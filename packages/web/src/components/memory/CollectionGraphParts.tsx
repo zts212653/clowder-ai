@@ -307,7 +307,7 @@ export function GraphTooltip({ node }: { node: GraphNode }) {
   return (
     <div
       data-testid="graph-tooltip"
-      className="absolute inset-x-4 top-4 sm:left-auto sm:right-4 sm:max-w-xs rounded-lg bg-cafe-surface p-3 text-xs shadow-lg pointer-events-none"
+      className="absolute inset-x-4 top-4 sm:left-auto sm:right-4 sm:max-w-xs rounded-lg bg-[var(--console-card-bg)] p-3 text-xs shadow-lg pointer-events-none"
     >
       <div className="font-semibold text-cafe-primary">{node.title}</div>
       <div className="text-cafe-secondary">{node.kind}</div>

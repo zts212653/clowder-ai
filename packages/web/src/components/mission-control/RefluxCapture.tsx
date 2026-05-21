@@ -79,7 +79,7 @@ export function RefluxCapture({ projectId, patterns, onUpdate }: RefluxCapturePr
           <select
             value={category}
             onChange={(e) => setCategory(e.target.value as RefluxCategory)}
-            className="w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1.5 text-xs text-cafe"
+            className="w-full rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2 py-1.5 text-xs text-cafe"
           >
             {CATEGORY_OPTIONS.map((c) => (
               <option key={c} value={c}>
@@ -91,21 +91,21 @@ export function RefluxCapture({ projectId, patterns, onUpdate }: RefluxCapturePr
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="标题"
-            className="w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1.5 text-xs text-cafe"
+            className="w-full rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2 py-1.5 text-xs text-cafe"
           />
           <textarea
             value={insight}
             onChange={(e) => setInsight(e.target.value)}
             placeholder="Insight..."
             rows={3}
-            className="w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1.5 text-xs text-cafe"
+            className="w-full rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2 py-1.5 text-xs text-cafe"
           />
           <textarea
             value={evidence}
             onChange={(e) => setEvidence(e.target.value)}
             placeholder="Evidence..."
             rows={2}
-            className="w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1.5 text-xs text-cafe"
+            className="w-full rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2 py-1.5 text-xs text-cafe"
           />
           <button
             type="button"

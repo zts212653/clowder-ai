@@ -95,9 +95,16 @@ function hasPlausibleLineStartMention(content: string): boolean {
   return false;
 }
 
-function buildPostMessageRoutingMessage(routedIds: string[], warnings: CatRoutingError[]): string {
+function buildPostMessageRoutingMessage(
+  routedIds: string[],
+  warnings: CatRoutingError[],
+  notEnqueuedIds: string[] = [],
+): string {
   const parts: string[] = [];
   if (routedIds.length > 0) parts.push(`消息已路由给 ${routedIds.map((id) => `@${id}`).join('、')}。`);
+  if (notEnqueuedIds.length > 0) {
+    parts.push(`${notEnqueuedIds.map((id) => `@${id}`).join('、')} 未新增唤醒（可能已有待处理队列或当前不可调度）。`);
+  }
   for (const w of warnings) {
     if (w.kind === 'cat_disabled') {
       const alts = w.alternatives
@@ -110,6 +117,17 @@ function buildPostMessageRoutingMessage(routedIds: string[], warnings: CatRoutin
     }
   }
   return parts.length > 0 ? parts.join(' ') : '消息已存储。';
+}
+
+function buildRoutingOutcome(requestedIds: string[], enqueuedIds: readonly string[], enqueueAttempted: boolean) {
+  if (!enqueueAttempted) {
+    return { routed: [], notEnqueued: requestedIds };
+  }
+  const enqueuedSet = new Set(enqueuedIds);
+  return {
+    routed: [...enqueuedIds],
+    notEnqueued: requestedIds.filter((id) => !enqueuedSet.has(id)),
+  };
 }
 
 export interface CallbackRoutesOptions {
@@ -592,14 +610,20 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         };
       }
 
+      const routingOutcome = buildRoutingOutcome(
+        [...mentions],
+        deliveryDecision.enqueued,
+        deliveryDecision.enqueueAttempted,
+      );
       return {
         status: 'ok',
         threadId: effectiveThreadId,
         messageId: storedMsg.id,
+        routed: routingOutcome.routed,
         ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
         ...(clientMessageId ? { clientMessageId } : {}),
         ...(routing_warnings.length > 0 ? { routing_warnings } : {}),
-        message: buildPostMessageRoutingMessage([...mentions], routing_warnings),
+        message: buildPostMessageRoutingMessage(routingOutcome.routed, routing_warnings, routingOutcome.notEnqueued),
       };
     }
 
@@ -977,14 +1001,20 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       };
     }
 
+    const routingOutcome = buildRoutingOutcome(
+      [...mentions],
+      deliveryDecision.enqueued,
+      deliveryDecision.enqueueAttempted,
+    );
     return {
       status: 'ok',
       threadId: effectiveThreadId,
       messageId: storedMsg.id,
+      routed: routingOutcome.routed,
       ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
       ...(clientMessageId ? { clientMessageId } : {}),
       ...(routing_warnings.length > 0 ? { routing_warnings } : {}),
-      message: buildPostMessageRoutingMessage([...mentions], routing_warnings),
+      message: buildPostMessageRoutingMessage(routingOutcome.routed, routing_warnings, routingOutcome.notEnqueued),
     };
   });
 

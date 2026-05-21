@@ -156,7 +156,7 @@ export function InstallPreviewModal({ serviceName, prerequisites, onConfirm, onC
                         value={customModel}
                         onChange={(e) => setCustomModel(e.target.value)}
                         placeholder="org/model-name"
-                        className="mt-1.5 w-full rounded-lg border border-cafe bg-[var(--console-card-bg)] px-2.5 py-1.5 text-xs text-cafe-secondary outline-none placeholder:text-cafe-muted"
+                        className="mt-1.5 w-full rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2.5 py-1.5 text-xs text-cafe-secondary outline-none placeholder:text-cafe-muted"
                       />
                     )}
                   </div>

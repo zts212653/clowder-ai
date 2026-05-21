@@ -79,7 +79,7 @@ export function NeedAuditFrame({ projectId, frame, onSaved }: NeedAuditFrameProp
               value={f.value}
               onChange={(e) => f.set(e.target.value)}
               placeholder={f.placeholder}
-              className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface px-3 py-1.5 text-xs text-cafe focus:border-[var(--console-border-soft)] focus:outline-none"
+              className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-1.5 text-xs text-cafe focus:border-[var(--console-border-soft)] focus:outline-none"
             />
           </label>
         ))}

@@ -27,7 +27,7 @@ export function GraphSearchForm({
         type="text"
         defaultValue=""
         placeholder="搜索知识或输入锚点（如 F186、harness）"
-        className="min-w-0 flex-1 rounded border border-cafe bg-white px-3 py-1.5 text-sm text-cafe-primary"
+        className="min-w-0 flex-1 rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-1.5 text-sm text-cafe-primary"
         data-testid="graph-anchor-input"
       />
       <button
@@ -54,7 +54,7 @@ export function GraphCandidates({
       <div className="space-y-2">
         {candidates.map((candidate) => (
           <button
-            className="w-full rounded-md border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3 text-left transition-colors hover:border-cafe-accent hover:bg-[var(--console-hover-bg)]"
+            className="w-full rounded-md border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3 text-left transition-colors hover:border-[var(--console-border-strong)] hover:bg-[var(--console-hover-bg)]"
             data-testid={`graph-candidate-${candidate.anchor}`}
             key={`${candidate.collectionId}:${candidate.anchor}`}
             onClick={() => onSelect(candidate.anchor, candidate.collectionId)}
@@ -62,7 +62,7 @@ export function GraphCandidates({
           >
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-black text-cafe-primary">{candidate.anchor}</span>
-              <span className="rounded bg-cafe-surface px-1.5 py-0.5 text-micro font-bold text-cafe-secondary">
+              <span className="rounded bg-[var(--console-panel-bg)] px-1.5 py-0.5 text-micro font-bold text-cafe-secondary">
                 {candidate.kind}
               </span>
               <span className="text-micro font-semibold text-cafe-secondary">{candidate.edgeCount ?? 0} 条关系</span>
@@ -91,7 +91,7 @@ export function GraphNoMatch({ examples, message }: { examples: string[]; messag
       <div className="mt-2 text-xs">试试精确锚点、标题关键词、来源路径或概念短语。</div>
       <div className="mt-3 flex flex-wrap gap-2">
         {examples.map((example) => (
-          <span className="rounded bg-cafe-surface px-2 py-1 text-xs font-semibold" key={example}>
+          <span className="rounded bg-[var(--console-panel-bg)] px-2 py-1 text-xs font-semibold" key={example}>
             {example}
           </span>
         ))}

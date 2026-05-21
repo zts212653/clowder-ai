@@ -216,6 +216,32 @@ describe('F192 Attribution', () => {
       assert.ok(['pipeline', 'human-required'].includes(gapFinding.attribution.pipelineOrHuman));
     }
   });
+
+  it('C2 Day-9 fixture generates findings via attribution pipeline (regression)', () => {
+    const report = generateAttributionReport({
+      featureId: 'F167',
+      snapshot: {
+        components: [
+          makeComponent({
+            componentId: 'C2',
+            frictionCounts: {
+              'c2.verdict_without_pass_count': 13,
+              'c2.void_hold_hint_emitted': 4,
+            },
+            activationCounts: {
+              'c2.verdict_hint_emitted': 13,
+            },
+            confidence: 'medium',
+          }),
+        ],
+      },
+    });
+    assert.equal(report.noFindingRecord, undefined, 'must NOT produce noFindingRecord');
+    assert.ok(report.findings.length >= 2, 'must produce findings for both friction signals');
+    const types = report.findings.map((f) => f.frictionSignal.type);
+    assert.ok(types.includes('c2.verdict_without_pass_count'), 'must detect verdict_without_pass');
+    assert.ok(types.includes('c2.void_hold_hint_emitted'), 'must detect void_hold_hint');
+  });
 });
 
 describe('AC-D9 Action Rate', () => {

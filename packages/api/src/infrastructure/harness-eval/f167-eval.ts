@@ -204,10 +204,11 @@ function buildC2(metrics: Record<string, number>): ComponentHealth {
   const activationCounts: Record<string, number | null> = {
     'hint_emitted (mixed routing+verdict)': hintCount,
   };
+  const frictionCounts: Record<string, number | null> = {};
   if (hasSplitCounters) {
     activationCounts['c2.verdict_hint_emitted'] = verdictHint ?? 0;
-    activationCounts['c2.void_hold_hint_emitted'] = voidHoldHint ?? 0;
-    activationCounts['c2.verdict_without_pass_count'] = verdictWithoutPass ?? 0;
+    frictionCounts['c2.verdict_without_pass_count'] = verdictWithoutPass ?? 0;
+    frictionCounts['c2.void_hold_hint_emitted'] = voidHoldHint ?? 0;
   }
 
   const gaps: TelemetryGap[] = [];
@@ -228,7 +229,7 @@ function buildC2(metrics: Record<string, number>): ComponentHealth {
     componentId: 'C2',
     componentName: 'exit-check (forced-pass guard)',
     activationCounts,
-    frictionCounts: {},
+    frictionCounts,
     falsePositiveCandidates: [],
     bypassCandidates: [],
     confidence: hasData ? (hasSplitCounters ? 'medium' : 'low') : 'no-data',

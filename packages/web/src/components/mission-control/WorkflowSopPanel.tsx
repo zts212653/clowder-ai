@@ -179,7 +179,7 @@ export function WorkflowSopPanel({ backlogItemId }: WorkflowSopPanelProps) {
       </div>
 
       {/* Baton holder + next skill */}
-      <div className="mb-3 rounded-xl border border-cafe-subtle bg-[var(--console-card-bg)] px-2.5 py-2">
+      <div className="mb-3 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2.5 py-2">
         <p className="text-xs text-cafe-secondary">
           接力棒：
           <span className="font-semibold text-cafe" data-testid="sop-baton-holder">
@@ -195,7 +195,7 @@ export function WorkflowSopPanel({ backlogItemId }: WorkflowSopPanelProps) {
 
       {/* Resume capsule */}
       <div
-        className="mb-3 rounded-xl border border-cafe-subtle bg-[var(--console-card-bg)] px-2.5 py-2"
+        className="mb-3 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2.5 py-2"
         data-testid="sop-resume-capsule"
       >
         <p className="mb-1 text-micro font-semibold uppercase tracking-wide text-cafe-secondary">Resume Capsule</p>

@@ -246,7 +246,7 @@ export function CollectionCatalog() {
                     type="button"
                     onClick={() => handleUnarchive(c.manifest.id)}
                     disabled={isBusy}
-                    className="px-2 py-0.5 text-micro border border-cafe rounded hover:bg-gray-50 text-cafe-secondary disabled:opacity-50"
+                    className="px-2 py-0.5 text-micro border border-[var(--console-border-soft)] rounded hover:bg-[var(--console-hover-bg)] text-cafe-secondary disabled:opacity-50"
                     data-testid={`unarchive-${c.manifest.id}`}
                   >
                     {isBusy ? '...' : '取消归档'}
@@ -257,7 +257,7 @@ export function CollectionCatalog() {
                       type="button"
                       onClick={() => handleRebuild(c.manifest.id)}
                       disabled={isBusy}
-                      className="px-2 py-0.5 text-micro border border-cafe rounded hover:bg-gray-50 text-cafe-secondary disabled:opacity-50"
+                      className="px-2 py-0.5 text-micro border border-[var(--console-border-soft)] rounded hover:bg-[var(--console-hover-bg)] text-cafe-secondary disabled:opacity-50"
                       data-testid={`rebuild-${c.manifest.id}`}
                     >
                       {isBusy ? '...' : '重建索引'}
@@ -266,7 +266,7 @@ export function CollectionCatalog() {
                       type="button"
                       onClick={() => handleArchive(c.manifest.id)}
                       disabled={isBusy}
-                      className="px-2 py-0.5 text-micro border border-cafe rounded hover:bg-gray-50 text-cafe-secondary disabled:opacity-50"
+                      className="px-2 py-0.5 text-micro border border-[var(--console-border-soft)] rounded hover:bg-[var(--console-hover-bg)] text-cafe-secondary disabled:opacity-50"
                       data-testid={`archive-${c.manifest.id}`}
                     >
                       {isBusy ? '...' : '归档'}

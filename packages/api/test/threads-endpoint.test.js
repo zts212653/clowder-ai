@@ -490,6 +490,35 @@ describe('Thread API', () => {
     assert.equal(body.title, 'New Title');
   });
 
+  it('PATCH /api/threads/:id marks renamed threads dirty for evidence search', async () => {
+    const { threadsRoutes } = await import('../dist/routes/threads.js');
+    const calls = [];
+    const indexBuilder = {
+      markThreadDirty(threadId) {
+        calls.push(['mark', threadId]);
+      },
+      async flushDirtyThreads() {
+        calls.push(['flush']);
+        return 1;
+      },
+    };
+    const isolated = Fastify();
+    await isolated.register(threadsRoutes, { threadStore, indexBuilder });
+    await isolated.ready();
+
+    const thread = threadStore.create('alice', 'Old Indexed Title');
+    const res = await isolated.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      payload: { title: 'New Indexed Title' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(calls, [['mark', thread.id], ['flush']]);
+
+    await isolated.close();
+  });
+
   it('PATCH /api/threads/:id persists bubble display overrides via detail and list reads', async () => {
     const thread = threadStore.create('default-user', 'Bubble Override Test');
 

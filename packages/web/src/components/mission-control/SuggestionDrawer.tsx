@@ -113,7 +113,7 @@ export function SuggestionDrawer({
 
   if (!item) {
     return (
-      <aside className="rounded-2xl border border-[var(--console-border-soft)] bg-cafe-surface p-4">
+      <aside className="rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4">
         <h2 className="mb-2 text-sm font-semibold text-cafe">Suggestion Detail</h2>
         <p className="text-xs text-cafe-secondary">点击左侧卡片查看详情并执行建议领取/批准流程。</p>
       </aside>
@@ -121,7 +121,7 @@ export function SuggestionDrawer({
   }
 
   return (
-    <aside className="rounded-2xl border border-[var(--console-border-soft)] bg-cafe-surface p-4">
+    <aside className="rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4">
       <h2 className="text-sm font-semibold text-cafe">Suggestion Detail</h2>
       <p className="mt-1 text-xs text-cafe-secondary">状态：{statusLabel}</p>
       <h3 className="mt-3 text-sm font-semibold text-cafe">{item.title}</h3>

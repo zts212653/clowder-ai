@@ -447,7 +447,7 @@ export function MissionControlPage({ initialReferrerThread = null }: { initialRe
   }, [mcFromParam, storeThreadId]);
 
   return (
-    <div className="flex h-screen bg-[var(--console-panel-bg)]">
+    <div className="flex h-screen bg-[var(--console-shell-bg)]">
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Header */}
         <header className="flex items-center justify-between border-b border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-6 py-3">

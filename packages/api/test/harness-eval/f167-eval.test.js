@@ -272,7 +272,7 @@ describe('F167 Runtime Eval Snapshot', () => {
     assert.equal(c1.telemetryGaps.length, 0);
   });
 
-  it('extracts C2 split hint counters and upgrades confidence (AC-D0)', () => {
+  it('extracts C2 split hint counters and classifies friction correctly (AC-D0)', () => {
     const snapshot = generateF167Snapshot({
       ...emptyInput,
       metrics: {
@@ -289,10 +289,35 @@ describe('F167 Runtime Eval Snapshot', () => {
       },
     });
     const c2 = snapshot.components.find((c) => c.componentId === 'C2');
+    // verdict_hint_emitted is activation (guard fired)
     assert.equal(c2.activationCounts['c2.verdict_hint_emitted'], 4);
-    assert.equal(c2.activationCounts['c2.void_hold_hint_emitted'], 1);
-    assert.equal(c2.activationCounts['c2.verdict_without_pass_count'], 3);
+    // verdict_without_pass and void_hold are friction (violations)
+    assert.equal(c2.frictionCounts['c2.verdict_without_pass_count'], 3);
+    assert.equal(c2.frictionCounts['c2.void_hold_hint_emitted'], 1);
     assert.notEqual(c2.confidence, 'no-data');
     assert.ok(c2.telemetryGaps.length === 0 || !c2.telemetryGaps.some((g) => g.reason === 'no_counter'));
+  });
+
+  it('C2 friction signals populate frictionCounts (Day-9 regression)', () => {
+    const snapshot = generateF167Snapshot({
+      ...emptyInput,
+      metrics: {
+        cat_cafe_a2a_c2_verdict_hint_emitted: 13,
+        cat_cafe_a2a_c2_void_hold_hint_emitted: 4,
+        cat_cafe_a2a_c2_verdict_without_pass_count: 13,
+      },
+      traceStats: {
+        spanCount: 100,
+        maxSpans: 10000,
+        maxAgeMs: 86400000,
+        oldestStoredAt: Date.now() - 3600000,
+        newestStoredAt: Date.now(),
+      },
+    });
+    const c2 = snapshot.components.find((c) => c.componentId === 'C2');
+    // Must have non-empty frictionCounts so attribution can generate findings
+    assert.ok(Object.keys(c2.frictionCounts).length > 0, 'C2 must have friction counts');
+    assert.ok(c2.frictionCounts['c2.verdict_without_pass_count'] >= 3, 'verdict_without_pass must be friction');
+    assert.ok(c2.frictionCounts['c2.void_hold_hint_emitted'] >= 3, 'void_hold must be friction');
   });
 });

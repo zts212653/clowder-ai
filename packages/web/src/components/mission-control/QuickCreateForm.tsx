@@ -41,7 +41,7 @@ export function QuickCreateForm({ disabled, onCreate }: QuickCreateFormProps) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="grid grid-cols-12 gap-2 rounded-xl border border-[var(--console-border-soft)] bg-cafe-surface p-3"
+      className="grid grid-cols-12 gap-2 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3"
     >
       <label htmlFor="mc-create-title" className="col-span-3">
         <span className="sr-only">任务标题</span>
@@ -55,7 +55,7 @@ export function QuickCreateForm({ disabled, onCreate }: QuickCreateFormProps) {
             if (event.key === 'Enter' && ime.isComposing()) event.preventDefault();
           }}
           placeholder="任务标题"
-          className="w-full rounded-lg border border-[var(--console-border-soft)] px-2 py-1.5 text-xs text-cafe outline-none focus:border-cafe-accent"
+          className="w-full rounded-lg border border-[var(--console-border-soft)] px-2 py-1.5 text-xs text-cafe outline-none focus:border-[var(--console-border-strong)]"
           data-testid="mc-create-title"
         />
       </label>
@@ -71,7 +71,7 @@ export function QuickCreateForm({ disabled, onCreate }: QuickCreateFormProps) {
             if (event.key === 'Enter' && ime.isComposing()) event.preventDefault();
           }}
           placeholder="一句话描述任务价值"
-          className="w-full rounded-lg border border-[var(--console-border-soft)] px-2 py-1.5 text-xs text-cafe outline-none focus:border-cafe-accent"
+          className="w-full rounded-lg border border-[var(--console-border-soft)] px-2 py-1.5 text-xs text-cafe outline-none focus:border-[var(--console-border-strong)]"
           data-testid="mc-create-summary"
         />
       </label>
@@ -81,7 +81,7 @@ export function QuickCreateForm({ disabled, onCreate }: QuickCreateFormProps) {
           id="mc-create-priority"
           value={priority}
           onChange={(event) => setPriority(event.target.value as BacklogPriority)}
-          className="w-full rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1.5 text-xs text-cafe outline-none focus:border-cafe-accent"
+          className="w-full rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2 py-1.5 text-xs text-cafe outline-none focus:border-[var(--console-border-strong)]"
           data-testid="mc-create-priority"
         >
           <option value="p0">P0</option>
@@ -102,7 +102,7 @@ export function QuickCreateForm({ disabled, onCreate }: QuickCreateFormProps) {
             if (event.key === 'Enter' && ime.isComposing()) event.preventDefault();
           }}
           placeholder="tags: redis,ui"
-          className="w-full rounded-lg border border-[var(--console-border-soft)] px-2 py-1.5 text-xs text-cafe outline-none focus:border-cafe-accent"
+          className="w-full rounded-lg border border-[var(--console-border-soft)] px-2 py-1.5 text-xs text-cafe outline-none focus:border-[var(--console-border-strong)]"
           data-testid="mc-create-tags"
         />
       </label>
