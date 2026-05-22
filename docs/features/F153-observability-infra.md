@@ -321,7 +321,7 @@ UI 必须显示 `—` 而非 `0`，否则会让"重启前的数据"看起来像"
 
 > **Status**: spec | **Owner**: Ragdoll
 > **Promoted from**: Phase H Backlog item "MCP call spans + tool execution duration spans"
-> **Discussion**: 2026-05-22，Design Gate（Ragdoll + 砚砚/codex GPT-5.5 + gpt52/GPT-5.4）— sonnet 未在 dispatch list
+> **Discussion**: 2026-05-22，Design Gate（Ragdoll + 砚砚/codex GPT-5.5 + gpt52/GPT-5.4 + 布偶猫/Sonnet 4.6）— Sonnet 提了 "Hybrid A+C" 替代方案（transformer 内 UUID 状态机 + 栈 fallback），与 codex/gpt52 的"明确降级"立场冲突，最终采纳两 codex/gpt52 路线（KD-41 明确降级），Sonnet 提案 rejected
 
 #### 问题
 
@@ -340,7 +340,7 @@ UI 必须显示 `—` 而非 `0`，否则会让"重启前的数据"看起来像"
 | AgentMessage 缺结构化 result status | `tool_result` 无 `is_error/success/exitCode` 字段，只能从 `content` 字符串猜 | span status 真实性无保证 |
 | Provider native ID 丢失 | `CatAgentService.ts:154` 有 `tool_use_id`、`dare-event-transform.ts:66` 有 `tool_call_id`，但 transformation 丢失 | 必须修复 transformer 保真 |
 | 单工具串行假设不成立 | Claude/CatAgent 一个 assistant content 可多个 tool_use block | `Map<toolName>` / 栈模型在同名/乱序时错配 |
-| `span-helpers.ts` 本地 `isMcpTool` 只认 `mcp__` 前缀 | 错过 Codex `mcp:` 分类 | Codex MCP tool 误判 basic |
+| `span-helpers.ts` 本地 `isMcpTool` 缺失 Codex `mcp:` 前缀识别 | 现认 `cat_cafe_` / `mcp__` / `signal_`，但漏 `mcp:`；而 `tool-usage/classify.ts` 已正确处理该格式 | Codex MCP tool 误判 basic |
 
 #### 设计原则（多猫共识 → KD-36..41）
 
@@ -524,5 +524,5 @@ UI 必须显示 `—` 而非 `0`，否则会让"重启前的数据"看起来像"
 | KD-37 | Phase J: per-invocation `ToolSpanTracker`，`Map<toolUseId, Span>` key = invocation+cat scope | 砚砚 finding：provider raw id 可能跨 invocation 碰撞；scoped key 避免 cross-invocation 串扰 + 内存泄漏 | 2026-05-22 |
 | KD-38 | Phase J: `AgentMessage` 扩展 `toolUseId` + `toolResultStatus`，不靠 content 字符串猜 status | gpt52 + 砚砚 共同发现：当前 `tool_result` 无结构化 status，duration 真实化但 status 仍 unreliable 等于半修 | 2026-05-22 |
 | KD-39 | Phase J 同 phase 内做 AC-F8 unblock（持久化 + hydrate），不拆出去 | 两猫共识：防止 Phase F 时"live 真 / restored 假"的 status 漂移重现；Phase J 不标 ✅ 直到两 slice 闭环 | 2026-05-22 |
-| KD-40 | Phase J: 移除 `span-helpers.ts` 本地 `isMcpTool`，统一走 `tool-usage/classify.ts` | 砚砚独有 finding：本地 `isMcpTool` 只认 `mcp__` 前缀，错过 Codex `mcp:` 分类，导致 Codex MCP tool 误判 basic | 2026-05-22 |
+| KD-40 | Phase J: 移除 `span-helpers.ts` 本地 `isMcpTool`，统一走 `tool-usage/classify.ts` | 砚砚独有 finding：本地 `isMcpTool` 当前识别 `cat_cafe_` / `mcp__` / `signal_`，**漏 Codex `mcp:` 前缀**，导致 Codex MCP tool 误判 basic；`tool-usage/classify.ts` 已正确处理 `mcp:` 格式 | 2026-05-22 |
 | KD-41 | Phase J: provider 支持矩阵必须文档化，不允许"至少 X 其他 fallback"模糊口径 | gpt52 finding：模糊 AC 容易把 Phase J 做成局部真实；每个 provider 必须明确列 start/end/id/status 四件套支持，不支持的明确降级（不开 span 或标 fallback） | 2026-05-22 |
