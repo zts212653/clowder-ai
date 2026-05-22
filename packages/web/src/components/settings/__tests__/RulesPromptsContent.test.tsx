@@ -9,7 +9,13 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { L0PromptsSection, RuleFileCard, shouldShowL0Section } from '@/components/settings/RulesPromptsContent';
+import {
+  ConsumptionLegend,
+  type L0PromptsBlock,
+  L0PromptsSection,
+  RuleFileCard,
+  shouldShowL0Section,
+} from '@/components/settings/RulesPromptsContent';
 
 beforeAll(() => {
   (globalThis as { React?: typeof React }).React = React;
@@ -18,12 +24,55 @@ afterAll(() => {
   delete (globalThis as { React?: typeof React }).React;
 });
 
-const SAMPLE_L0 = {
-  template: { path: 'assets/system-prompts/system-prompt-l0.md', content: '# L0 template body', exists: true },
+const SAMPLE_L0: L0PromptsBlock = {
+  template: {
+    path: 'assets/system-prompts/system-prompt-l0.md',
+    content: '# L0 template body',
+    exists: true,
+    consumption: {
+      kind: 'actual-prompt',
+      label: '实际进 prompt',
+      detail: 'Template is compiled per cat and injected into the native system role.',
+      consumers: ['compile-system-prompt-l0.mjs'],
+    },
+  },
   compiledByCat: [
-    { catId: 'opus-47', displayName: '布偶猫 Opus 4.7', compiled: 'compiled-for-opus-47', error: null },
-    { catId: 'codex', displayName: '缅因猫 GPT-5.5(codex)', compiled: 'compiled-for-codex', error: null },
-    { catId: 'broken', displayName: 'Broken Cat', compiled: '', error: 'simulated compile failure' },
+    {
+      catId: 'opus-47',
+      displayName: '布偶猫 Opus 4.7',
+      compiled: 'compiled-for-opus-47',
+      error: null,
+      consumption: {
+        kind: 'actual-prompt',
+        label: '实际进 prompt',
+        detail: 'Per-cat compiled L0 actually passed to the model.',
+        consumers: ['ClaudeBgCarrierService'],
+      },
+    },
+    {
+      catId: 'codex',
+      displayName: '缅因猫 GPT-5.5(codex)',
+      compiled: 'compiled-for-codex',
+      error: null,
+      consumption: {
+        kind: 'actual-prompt',
+        label: '实际进 prompt',
+        detail: 'Per-cat compiled L0 actually passed to the model.',
+        consumers: ['CodexAgentService'],
+      },
+    },
+    {
+      catId: 'broken',
+      displayName: 'Broken Cat',
+      compiled: '',
+      error: 'simulated compile failure',
+      consumption: {
+        kind: 'actual-prompt',
+        label: '实际进 prompt',
+        detail: 'Per-cat compiled L0 actually passed to the model.',
+        consumers: ['compile-system-prompt-l0.mjs'],
+      },
+    },
   ],
   customization: {
     templatePath: 'assets/system-prompts/system-prompt-l0.md',
@@ -51,11 +100,54 @@ describe('L0PromptsSection (F203 Phase F)', () => {
   });
 });
 
+describe('Prompt consumption chain UX (#749)', () => {
+  it('renders the four consumption classes in the legend', () => {
+    const html = renderToStaticMarkup(<ConsumptionLegend />);
+    expect(html).toContain('实际进 prompt');
+    expect(html).toContain('harness 注入');
+    expect(html).toContain('只是参考');
+    expect(html).toContain('skill 按需加载');
+  });
+
+  it('RuleFileCard renders consumption badge and detail', () => {
+    const html = renderToStaticMarkup(
+      <RuleFileCard
+        file={{
+          path: 'cat-cafe-skills/refs/shared-rules.md',
+          content: '# shared rules',
+          exists: true,
+          consumption: {
+            kind: 'actual-prompt',
+            label: '实际进 prompt',
+            detail: 'shared-rules.md → governance L0 → native/fallback prompt paths.',
+            consumers: ['compile-system-prompt-l0.mjs', 'SystemPromptBuilder'],
+          },
+        }}
+        onClick={() => {}}
+      />,
+    );
+    expect(html).toContain('实际进 prompt');
+    expect(html).toContain('shared-rules.md → governance L0');
+    expect(html).toContain('compile-system-prompt-l0.mjs');
+    expect(html).toContain('SystemPromptBuilder');
+  });
+});
+
 describe('RuleFileCard error UX (F203 Phase F 砚砚 plan-review refinement)', () => {
   it('with errorMessage shows "编译失败" not "文件不存在"', () => {
     const html = renderToStaticMarkup(
       <RuleFileCard
-        file={{ path: 'compiled://broken', content: '', exists: false }}
+        file={{
+          path: 'compiled://broken',
+          content: '',
+          exists: false,
+          consumption: {
+            kind: 'actual-prompt',
+            label: '实际进 prompt',
+            detail: 'Per-cat compiled L0 actually passed to the model.',
+            consumers: ['compile-system-prompt-l0.mjs'],
+          },
+        }}
         label="Broken"
         onClick={() => {}}
         errorMessage="simulated compile failure"
@@ -73,7 +165,17 @@ describe('RuleFileCard error UX (F203 Phase F 砚砚 plan-review refinement)', (
     // failure, regardless of text content".
     const html = renderToStaticMarkup(
       <RuleFileCard
-        file={{ path: 'compiled://broken', content: '', exists: false }}
+        file={{
+          path: 'compiled://broken',
+          content: '',
+          exists: false,
+          consumption: {
+            kind: 'actual-prompt',
+            label: '实际进 prompt',
+            detail: 'Per-cat compiled L0 actually passed to the model.',
+            consumers: ['compile-system-prompt-l0.mjs'],
+          },
+        }}
         label="Empty Err"
         onClick={() => {}}
         errorMessage=""
@@ -86,7 +188,17 @@ describe('RuleFileCard error UX (F203 Phase F 砚砚 plan-review refinement)', (
   it('without errorMessage and !exists still shows "文件不存在" (existing behavior unchanged)', () => {
     const html = renderToStaticMarkup(
       <RuleFileCard
-        file={{ path: 'missing/file.md', content: '', exists: false }}
+        file={{
+          path: 'missing/file.md',
+          content: '',
+          exists: false,
+          consumption: {
+            kind: 'reference',
+            label: '只是参考',
+            detail: 'Reference workflow document; not injected into every prompt.',
+            consumers: [],
+          },
+        }}
         label="Missing"
         onClick={() => {}}
       />,

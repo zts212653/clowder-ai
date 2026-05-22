@@ -5,6 +5,7 @@
  * Template variables (injected per invocation, not statically baked):
  *   {{IDENTITY_BLOCK}}      — catId / displayName / nickname / role / personality / restrictions
  *   {{TEAMMATE_ROSTER}}     — table of other available cats with @mention · model · strengths · caution
+ *   {{GOVERNANCE_L0}}       — compact governance block compiled from shared-rules.md
  *   {{WORKFLOW_TRIGGERS}}   — per-breed workflow triggers (ragdoll / maine-coon / siamese)
  *
  * Output: string ready for `claude --system-prompt <out>` or
@@ -43,6 +44,7 @@ let _bootstrapped = false;
 let _loadedConfig = null;
 let _isCatAvailable = null;
 let _getCatModel = null;
+let _loadCompiledGovernanceL0 = null;
 // Phase C Task 1 (A8 gap): CVO ref handles 必须来自 co-creator config
 // 渲染（buildStaticIdentity L568-571 同源），非 L0 硬编码 @co-creator——
 // 否则删 user message 后 co-creator 多 handle / 自定义 name 丢失。
@@ -53,9 +55,13 @@ async function bootstrapCatRegistry() {
     '../packages/api/dist/config/cat-config-loader.js'
   );
   const { getCatModel } = await import('../packages/api/dist/config/cat-models.js');
+  const { loadCompiledGovernanceL0 } = await import(
+    '../packages/api/dist/domains/cats/services/context/governance-l0.js'
+  );
   _loadedConfig = loadCatConfig(); // no-arg: template + catalog overlay (runtime truth)
   _isCatAvailable = isCatAvailable;
   _getCatModel = getCatModel;
+  _loadCompiledGovernanceL0 = loadCompiledGovernanceL0;
   _coCreatorConfig = getCoCreatorConfig(_loadedConfig);
   const allConfigs = toAllCatConfigs(_loadedConfig);
   for (const [id, config] of Object.entries(allConfigs)) {
@@ -268,9 +274,11 @@ export async function compileL0(options) {
   }
   const config = { ...entry.config, catId };
   const template = readFileSync(TEMPLATE_PATH, 'utf8');
+  const governanceL0 = await _loadCompiledGovernanceL0(REPO_ROOT);
   return template
     .replace('{{IDENTITY_BLOCK}}', buildIdentityBlock(config, runtimeModel))
     .replace('{{TEAMMATE_ROSTER}}', buildTeammateRoster(catId))
+    .replace('{{GOVERNANCE_L0}}', governanceL0.content)
     .replace('{{WORKFLOW_TRIGGERS}}', buildWorkflowTriggers(config.breedId, catId, config.displayName))
     .replace('{{CVO_REF}}', renderCvoRef());
 }

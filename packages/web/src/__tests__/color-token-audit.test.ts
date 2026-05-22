@@ -13,7 +13,7 @@ const REDUNDANT_PATTERNS = [
 describe('color token audit', () => {
   it('no redundant dark: overrides on semantic token classes', () => {
     const output = execSync(
-      `grep -rn "dark:" --include="*.tsx" --include="*.ts" "${WEB_SRC}" | grep -v node_modules | grep -v ".test."`,
+      `grep -rn "dark:" --include="*.tsx" --include="*.ts" "${WEB_SRC}" | grep -v node_modules | grep -v "\\.test\\."`,
       { encoding: 'utf-8', maxBuffer: 1024 * 1024 },
     ).trim();
 
@@ -31,7 +31,7 @@ describe('color token audit', () => {
 
   it('remaining dark: usages are within expected count', () => {
     const output = execSync(
-      `grep -rn "dark:" --include="*.tsx" --include="*.ts" "${WEB_SRC}" | grep -v node_modules | grep -v ".test." | wc -l`,
+      `grep -rn "dark:" --include="*.tsx" --include="*.ts" "${WEB_SRC}" | grep -v node_modules | grep -v "\\.test\\." | wc -l`,
       { encoding: 'utf-8' },
     ).trim();
 

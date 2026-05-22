@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -13,6 +13,11 @@ async function withTempWorkspace(setupFn, testFn) {
   const refsDir = join(tmp, 'cat-cafe-skills', 'refs');
   await mkdir(refsDir, { recursive: true });
   await writeFile(join(tmp, 'pnpm-workspace.yaml'), '');
+  const sharedRules = await readFile(
+    new URL('../../../cat-cafe-skills/refs/shared-rules.md', import.meta.url),
+    'utf-8',
+  );
+  await writeFile(join(refsDir, 'shared-rules.md'), sharedRules);
   if (setupFn) await setupFn(refsDir);
 
   const savedCwd = process.cwd();

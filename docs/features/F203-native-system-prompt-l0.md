@@ -124,6 +124,30 @@ team lead 2026-05-16 原话："我们的配置栏有个叫规则与SOP 我建议
 
 依赖：Phase C 合入 main（L0 注入通道稳定后才有意义可见化）✅ 已合入。建议作为独立 PR / 独立 thread 跟进。
 
+### Phase G: Governance L0 单源编译 + 消费链可见化（#747 / #749）
+
+team lead 2026-05-21 指令：先做 #747，再做 #749；#748 先讨论、暂不动。
+
+**#747 问题**：`shared-rules.md` / `system-prompt-l0.md` §3 / `SystemPromptBuilder` fallback digest 曾是多份物理表示；`.local-override` 只挂在 fallback 路径。结果是同一套家规可能漂移，native L0 和 fallback 看到的治理内容不一定同源。
+
+落地：
+- 新增 governance L0 编译器：`cat-cafe-skills/refs/shared-rules.md` → deterministic compiled governance block。
+- `assets/system-prompts/system-prompt-l0.md` §3 改为 `{{GOVERNANCE_L0}}`，native L0 每次编译时替换。
+- `SystemPromptBuilder` fallback 不再维护硬编码 `GOVERNANCE_L0_DIGEST`，改读同一编译产物。
+- `shared-rules.local.md` / `shared-rules.local-override.md` 挂到编译层：native + fallback 同时生效；override 保留旧语义（replace final governance block）。
+
+**#749 问题**：Rules & SOP 面板只展示文件，没告诉人“这个文件到底有没有进 prompt”。Phase F 解决了 L0 可见，但没有解释消费链。
+
+落地：
+- `/api/rules` 返回 `consumption` 元数据：`actual-prompt` / `reference` / `skill-on-demand`。
+- 「规则与 SOP」面板显示四类标签：
+  - **实际进 prompt**：`shared-rules.md` → governance L0 compiler → native/fallback；L0 template / per-cat compiled L0。
+  - **harness 注入**：root `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` 这类 provider project-doc 会被对应 CLI/harness 注入上下文，但不是 Cat Café native L0 真相源。
+  - **只是参考**：`docs/SOP.md` 等人工流程文档，不直接进入 native L0。
+  - **skill 按需加载**：`SKILL.md` 仅在 skill 被选择/调用时读取。
+
+**#748**（SOP vocabulary / `sop_navigation` 分散）暂缓：等 #747/#749 合入后再讨论，不在本切片偷做。
+
 ## Acceptance Criteria
 
 ### Phase A（Baseline + 扩展 spike）
@@ -177,6 +201,14 @@ team lead 2026-05-16 原话："我们的配置栏有个叫规则与SOP 我建议
 - [x] AC-F4: 修改路径明示 ✅ — `l0Prompts.customization` API 字段（templatePath + compileScript + verifyCommand `pnpm gate + restart`）+ 前端 info row 渲染
 - [⊘] AC-F5（可选）：可编辑（dirty/save/reload + 影响范围警告 + 写回）—— **Design Gate 决定 DEFER（不做）**：team lead诉求是可见性非编辑器，web-editable 治理 prompt = P0 风险面，KD-5 file+git+gate+restart 已是回滚通道。additive，日后需要可低成本重启
 
+### Phase G（Governance L0 单源编译 + 消费链）
+
+- [x] AC-G1: `shared-rules.md` 编译生成 governance L0 ✅（`governance-l0.ts` deterministic compiler；缺 anchor fail-closed；测试覆盖 Rule 0 / P1-P5 / W1-W8 / Magic Words / A2A / family overlays）
+- [x] AC-G2: native L0 与 fallback 共用同一编译产物 ✅（`system-prompt-l0.md` §3 `{{GOVERNANCE_L0}}` + `SystemPromptBuilder` 同读 `loadCompiledGovernanceL0*`）
+- [x] AC-G3: `.local.md` / `.local-override.md` 挂到编译层 ✅（native + fallback 同时生效；override replace 语义保留）
+- [x] AC-G4: Rules & SOP 面板展示消费链 ✅（`/api/rules` 增 `consumption`；前端 legend + card badge 显示“实际进 prompt / harness 注入 / 只是参考 / skill 按需加载”）
+- [⊘] AC-G5: #748 SOP vocabulary / `sop_navigation` 收敛 ⏸（team lead明确先思考；等 #747/#749 完成后再讨论）
+
 ## Dependencies
 
 - **Evolved from**: ADR-030（注入链地图 + 14 项 L0 清单 + spike-first 迁移路径）
@@ -214,6 +246,9 @@ team lead 2026-05-16 原话："我们的配置栏有个叫规则与SOP 我建议
 | KD-12 | compile 脚本可测性重构：CLI 入口 + roster 过滤抽纯函数 | 云端 review P1（CLI entrypoint `file://${argv1}` POSIX-only，Windows broken）→ 抽 `isCliEntrypoint(metaUrl,argv1)` 用 fileURLToPath+resolve 跨平台；P2（roster 未过滤 available，disabled 猫进 L0 = dead-end @ 路由）→ 抽 `filterAvailableTeammates` + `isCatAvailable(id,config)` 过滤，对齐 SystemPromptBuilder:417。纯函数化使两者可单测（Red→Green，44 tests） | 2026-05-15 |
 | KD-13 | compile bootstrap 必须 no-arg `loadCatConfig()` + roster model 用 `getCatModel` | 云端 round-2 抓到 KD-12 P2 连环 bug：`loadCatConfig(PATH)` 显式 path 跳过 `.cat-cafe/cat-catalog.json` overlay（cat-config-loader.ts:307-327）→ isCatAvailable 基于 stale template → P2 dead-end 防护失效。根治：no-arg `loadCatConfig()`（catalog overlay = runtime 真相）+ `resolveModel`→`getCatModel`（env override > registry）。**根治原则：compile 编译器必须复用 SystemPromptBuilder 既定 runtime 入口（catalog-aware loadCatConfig + getCatModel），不自造静态读取路径** | 2026-05-15 |
 | KD-14 | codex user-layer strip：`~/.codex/AGENTS.md` 退役 + 「长任务纪律」迁入 native overlay + AC-B3 上限 5,000→5,500 | Maine Coon production 观察（cross-thread）：Codex invocation 的 developer 层已有 native L0，但 user 层仍被 Codex CLI 默认 prepend `~/.codex/AGENTS.md`（F050 sync-system-prompts.ts 渲染的 179 行静态身份/家规/队友/Magic Words）= 双重注入。根因：Phase C「精确剥离重复」只 strip 了 wrapper 的 user-message inline prepend，没收口 F050 home-file 路径。修复：`renderForCodex` 退役为空（`--apply` 清空文件，drift 守护）；Codex CLI 专属「长任务纪律」（exec_command session_id / 伪后台陷阱 / detached spawn 探针，L0 §6 maine-coon overlay 原本没有）迁入 native overlay。maine-coon 实测升至 5,154-5,155t，KD-9 的 5,000 buffer 耗尽 → AC-B3 上移到 5,500（物理下限随必要内容上移=真实测量，同 KD-9 逻辑，非脚手架；5,500 仍在 prompt cache 单 breakpoint 内 + 占 context 2.75%）。Gemini 路径（`renderForGemini`）暂留——Siamese未切 native L0 | 2026-05-20 |
+| KD-15 | `shared-rules.md` 是 governance L0 唯一真相源；native + fallback 必须共用编译产物 | #747：手写 `system-prompt-l0.md` §3 + `SystemPromptBuilder` fallback digest + `shared-rules.md` 三份物理表示会漂移，且 `.local-override` 只影响 fallback。修复：`governance-l0.ts` deterministic compiler 读取 `shared-rules.md`，native L0 通过 `{{GOVERNANCE_L0}}` 注入，fallback 同读 `loadCompiledGovernanceL0*`；`.local.md` append / `.local-override.md` replace 在编译层统一处理。 | 2026-05-21 |
+| KD-16 | Rules & SOP 面板必须展示 prompt 消费链，而不只是文件列表 | #749：team lead需要知道“实际进 prompt / 只是参考 / skill 按需加载”。`/api/rules` 增 `consumption` 元数据，前端用四类标签显式展示 shared-rules→governance L0→native/fallback、root provider project-doc 的 harness 注入、SOP 参考文档、SKILL.md 按需加载。#748 词汇收敛 deferred，不抢跑。 | 2026-05-21 |
+| KD-17 | Governance L0 compiler anchors must be sanitizer-invariant | Outbound sync public gate exposed a cross-repo drift: `_sanitize-rules.pl` rewrites family names in `cat-cafe-skills/refs/shared-rules.md`（`Maine Coon`→`Maine Coon`、`Siamese`→`Siamese`），but `packages/api/.../governance-l0.ts` was not sanitized and asserted exact localized headings. Result: exported public API startup failed before touching clowder-ai. Fix: assert stable protocol core anchors（`fallback 层数检测协议` / `创意-实现解耦协议`）and derive output labels from the actual heading, so internal output keeps localized labels and public output follows sanitized `Maine Coon` / `Siamese`. Do not sanitize `packages/` code to avoid rewriting runtime identifiers. | 2026-05-21 |
 
 ## Spike Log
 

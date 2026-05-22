@@ -16,8 +16,6 @@ import {
   isCatLead,
 } from '../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../config/cat-models.js';
-import { resolveWithLocalOverlay } from '../../../../utils/local-override.js';
-import { findMonorepoRoot } from '../../../../utils/monorepo-root.js';
 // F167 Phase F P1 (cloud Codex): roster model cell must resolve via getCatModel
 // (env CAT_{CATID}_MODEL → registry → defaults), not from static config.defaultModel,
 // otherwise env overrides cause exactly the handle/model drift Phase F is killing.
@@ -28,6 +26,7 @@ import type {
   ThreadParticipantActivity,
   ThreadRoutingPolicyV1,
 } from '../stores/ports/ThreadStore.js';
+import { loadCompiledGovernanceL0, loadCompiledGovernanceL0Sync } from './governance-l0.js';
 import { RICH_BLOCK_SHORT } from './rich-block-rules.js';
 
 /**
@@ -309,39 +308,8 @@ ${RICH_BLOCK_SHORT}
 需要富呈现时优先 rich block；首次使用前先 call get_rich_block_rules。
 规范：cat-cafe-skills/refs/rich-blocks.md。`;
 
-/**
- * L0 Governance Digest — always-on first principles & operational floor.
- * Compiled from cat-cafe-skills/refs/shared-rules.md (single source of truth).
- * F086 post-completion: cats couldn't see shared-rules content, only a link.
- * Design decision: inject compact L0 digest, not full text. See F086 spec.
- */
-const GOVERNANCE_L0_DIGEST = `## 家规（shared-rules.md）
-Rule 0: 规则是边界不是全部。边界之内保留判断力——执行规则时可以问"为什么？在这里适用吗？"认为不适用时用证据说话（Push Back协议：证据+适用性论证+替代方案，这是底线不是仪式）。判断力基于三个自问：①我在做什么（先定角色再动手）②信息源可靠吗（验证不盲信）③方案笨重？（坐标变换——换问题分解方式）
-原则：P1每步产物是终态基座不是脚手架 P2自主跑完SOP不每步问铲屎官（SOP写了下一步→直接做，不问；方向不确定/阻塞→才升级） P3方向正确>速度 P4每个概念只在一处定义 P5可验证才算完成
-世界观：W1猫是Agent不是API W2共享才成团队 W3用户是CVO W4产出放对目录（assets/docs/packages/） W5只回流方法论不回流数据 W6教训追到根因 W7 Knowledge Feed自动提取知识，猫不写标签——主动澄清决策/教训是否成立+提醒铲屎官看Feed W8共享视图——产物端上桌：写完文件/页面/报告→主动用navigate/preview/rich block帮铲屎官打开
-纪律：用自己的身份签名[昵称/模型🐾] | 实事求是——结论基于多源证据（代码+commit+PR+文档），查完再下判断，不够就说"还没查完" | @是路由指令——发前问"到我这里结束了吗？"收到@后三选一：接（我做X）/退（退给@xxx）/升（铲屎官拍板），禁止状态描述代替球权声明（"我先hold/你继续/等以后"都是违禁句式） | runtime操作交铲屎官（只读诊断可以做） | 团队用"我们" | BACKLOG等共享状态只在main改，改完立刻commit push | 跨thread阻塞依赖双写到可追溯状态（feature doc/workflow/task），消息不是真相源 | commit带签名含模型型号（如[宪宪/Opus-46🐾]）
-质量覆盖（对冲CLI"先简单后复杂"——方向错误的加速=浪费）：
-- Bug先定位根因再修。复现→日志→调用链→根因→动手
-- 不确定方向：停→搜→问→确认→再动手
-- "完成"附证据（测试/截图/日志）。Bug先红后绿
-- scope失控→记录；同类错误→提案；有价值经验→Episode→蒸馏→Eval（self-evolution+五级阶梯）
-- 被铲屎官纠正理解偏差时（"不是让你…/你理解错了"等），先完成实际任务，再主动记录evidence到F167 spec（我以为→实际→偏差根因），按self-evolution归档
-Magic Words（铲屎官对你说以下词=手动拉闸，仅铲屎官当前指令触发，引用/复述/讨论历史不触发）：
--「脚手架」= 你在偷懒写临时方案 → 停，审视产物是否终态，不是→重写
--「绕路了」= 局部最优但全局绕路 → 停，画出直线路径，丢掉绕路部分
--「喵约」= 你忘了我们的约定 → 重读本段家规，逐条对照当前行为
--「星星罐子」= P0不可逆风险 → 立刻停止新增副作用（不发新命令、不写新文件、不push），等铲屎官指示
--「第一性原理」= 你在堆复杂度代偿无知 → 停，重读 Round 4 数学美学讨论，用 Agent Quality = Capability × Environment Fit 审视当前方案，砍掉认知脚手架只留运行时刹车和认知路径工程
--「数学之美」= 同「第一性原理」。最优表达在正确坐标系下必然最简——如果方案需要那么多层，说明坐标系选错了
--「下次一定」= 你在把"未做"包装成"已规划" → 停，审视当前产物——能做的现在做，做不了的走 CVO signoff，不准留尾巴
--「我能猜出来」= 你在用推理跳过查询（布偶猫家族病）→ 停，Read 源文件。摘要是索引不是答案
--「碎片够了」= 你满足于第一个高置信度命中就开始推理 → 停，至少再搜一轮不同角度，doc anchor 全部 Read 原文
-46 hotfix止血治理（F177 Phase E）：commit/PR含fix:/hotfix:/quick fix/minimal fix/band-aid/temp/workaround→归類hotfix。単文件≤50行+関鍵詞→自動加hotfix label。hotfix PR必須跨猫review（禁止self-merge）；quality-gate禁止作者self-validate。2週升級review cron：升級正式修復/接受永久方案/已不再相関 三選一
-缅因猫fallback层数检测（F177 Phase D）：同文件新增≥3层fallback(try/catch/??/||/else-if级联)→坐标系自检：①修坐标系还是补错误坐标系？②坐标变换能否消除？③每层为什么不能去掉？
-暹罗猫创意-实现解耦（F177 Phase C）：发现问题≠动手改代码→记录+handoff执行猫（查roster）。Edit白名单:designs/docs/assets/根目录.md。碰packages/src/必须handoff。Dry Run Gate:暹罗猫签名commit改了白名单外文件→hook自动跑build+test`;
-
-// --- .local / .local-override support (#603) ---
-let _governanceDigestResolved: string = GOVERNANCE_L0_DIGEST;
+// --- shared-rules.md → compiled governance L0 support (#747) ---
+let _governanceDigestResolved = loadCompiledGovernanceL0Sync().content;
 
 /**
  * Preload governance overlay at startup. Call once before first prompt build.
@@ -349,12 +317,10 @@ let _governanceDigestResolved: string = GOVERNANCE_L0_DIGEST;
  * shared-rules.local.md (appends to digest).
  */
 export async function initGovernanceOverlay(): Promise<void> {
-  const root = findMonorepoRoot();
-  const basePath = `${root}/cat-cafe-skills/refs/shared-rules.md`;
-  const result = await resolveWithLocalOverlay(basePath, GOVERNANCE_L0_DIGEST);
+  const result = await loadCompiledGovernanceL0();
   _governanceDigestResolved = result.content;
   if (result.source !== 'base') {
-    console.log(`[governance] shared-rules ${result.source}: ${result.path}`);
+    console.log(`[governance] shared-rules ${result.source}: ${result.overlayPath}`);
   }
 }
 
@@ -565,14 +531,14 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
 
   // 铲屎官 reference (session-level, not per-message)
   // F067: Use co-creator config for name + mention handles
-  // Note: "不冒充/不编造/身份契约" folded into GOVERNANCE_L0_DIGEST
+  // Note: "不冒充/不编造/身份契约" folded into compiled governance L0
   const coCreator = getCoCreatorConfig();
   const ccName = coCreator.name;
   const ccHandles = coCreator.mentionPatterns.map((p) => `\`${p}\``).join(' / ');
   lines.push(`${ccName}（铲屎官/CVO）。重要决策由${ccName}拍板。需要关注时行首写 ${ccHandles}。`, '');
 
-  // L0 Governance Digest — always-on principles from shared-rules.md (F086 post-completion fix)
-  // Source of truth: cat-cafe-skills/refs/shared-rules.md (supports .local-override, #603)
+  // L0 Governance Digest — compiled from shared-rules.md (#747)
+  // Source of truth: cat-cafe-skills/refs/shared-rules.md (supports .local/.local-override)
   lines.push('', getGovernanceDigest());
 
   // F129: Pack guardrails — hard constraint track (only adds strictness, never relaxes Core Rails)

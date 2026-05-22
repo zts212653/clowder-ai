@@ -323,7 +323,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(identity.includes('## 协作'), 'Should contain collaboration guide');
     // Phase 0 正面化: 不冒充 → 用自己的身份签名 (L0 GOVERNANCE_L0_DIGEST)
     assert.ok(identity.includes('用自己的身份签名'), 'Should contain identity-signature rule (anti-impersonation)');
-    assert.ok(identity.includes('团队用"我们"'), 'Should contain identity contract (folded into L0)');
+    assert.ok(identity.includes('不是外包工具'), 'Should contain identity contract from shared-rules (folded into L0)');
   });
 
   test('buildStaticIdentity returns empty for unknown cat', async () => {

@@ -25,20 +25,61 @@ function findProjectRoot(): string {
   return process.cwd();
 }
 
-interface RuleFileResponse {
+export type PromptConsumptionKind = 'actual-prompt' | 'harness-injected' | 'reference' | 'skill-on-demand';
+
+export interface PromptConsumptionInfo {
+  kind: PromptConsumptionKind;
+  label: string;
+  detail: string;
+  consumers: string[];
+}
+
+export interface RuleFileResponse {
   path: string;
   content: string;
   exists: boolean;
+  consumption: PromptConsumptionInfo;
 }
 
-async function readRuleFile(root: string, relativePath: string): Promise<RuleFileResponse> {
+const CONSUMPTION = {
+  actualPrompt: (detail: string, consumers: string[]): PromptConsumptionInfo => ({
+    kind: 'actual-prompt',
+    label: '实际进 prompt',
+    detail,
+    consumers,
+  }),
+  reference: (detail: string, consumers: string[] = []): PromptConsumptionInfo => ({
+    kind: 'reference',
+    label: '只是参考',
+    detail,
+    consumers,
+  }),
+  harnessInjected: (detail: string, consumers: string[] = []): PromptConsumptionInfo => ({
+    kind: 'harness-injected',
+    label: 'harness 注入',
+    detail,
+    consumers,
+  }),
+  skillOnDemand: (detail: string, consumers: string[] = []): PromptConsumptionInfo => ({
+    kind: 'skill-on-demand',
+    label: 'skill 按需加载',
+    detail,
+    consumers,
+  }),
+} as const;
+
+async function readRuleFile(
+  root: string,
+  relativePath: string,
+  consumption: PromptConsumptionInfo,
+): Promise<RuleFileResponse> {
   const fullPath = join(root, relativePath);
-  if (!existsSync(fullPath)) return { path: relativePath, content: '', exists: false };
+  if (!existsSync(fullPath)) return { path: relativePath, content: '', exists: false, consumption };
   try {
     const content = await readFile(fullPath, 'utf-8');
-    return { path: relativePath, content, exists: true };
+    return { path: relativePath, content, exists: true, consumption };
   } catch {
-    return { path: relativePath, content: '', exists: false };
+    return { path: relativePath, content: '', exists: false, consumption };
   }
 }
 
@@ -54,6 +95,7 @@ export interface L0CompiledForCat {
   displayName: string;
   compiled: string;
   error: string | null;
+  consumption: PromptConsumptionInfo;
 }
 
 export interface L0PromptsBlock {
@@ -72,14 +114,33 @@ const L0_COMPILE_SCRIPT_RELPATH = 'scripts/compile-system-prompt-l0.mjs';
 const L0_VERIFY_COMMAND = 'pnpm gate + runtime restart (KD-5 git revert 回滚通道)';
 
 export async function readL0Prompts(root: string, opts: ReadL0PromptsOptions): Promise<L0PromptsBlock> {
-  const template = await readRuleFile(root, L0_TEMPLATE_RELPATH);
+  const template = await readRuleFile(
+    root,
+    L0_TEMPLATE_RELPATH,
+    CONSUMPTION.actualPrompt('Template is compiled per cat and injected into the native system role.', [
+      'compile-system-prompt-l0.mjs',
+      'ClaudeBgCarrierService',
+      'CodexAgentService',
+    ]),
+  );
+  const compiledConsumption = CONSUMPTION.actualPrompt('Per-cat compiled L0 actually passed to the model.', [
+    'compile-system-prompt-l0.mjs',
+    'ClaudeBgCarrierService',
+    'CodexAgentService',
+  ]);
   const compiledByCat: L0CompiledForCat[] = await Promise.all(
     opts.availableCats.map(async ({ catId, displayName }) => {
       try {
         const compiled = await opts.compileL0({ catId, cwd: root });
-        return { catId, displayName, compiled, error: null };
+        return { catId, displayName, compiled, error: null, consumption: compiledConsumption };
       } catch (e) {
-        return { catId, displayName, compiled: '', error: e instanceof Error ? e.message : String(e) };
+        return {
+          catId,
+          displayName,
+          compiled: '',
+          error: e instanceof Error ? e.message : String(e),
+          consumption: compiledConsumption,
+        };
       }
     }),
   );
@@ -116,12 +177,62 @@ export function loadAvailableCatsForL0(
     .map(([catId, c]) => ({ catId, displayName: c.displayName ?? catId }));
 }
 
-const SHARED_RULE_FILES = ['cat-cafe-skills/refs/shared-rules.md', 'docs/SOP.md'];
+export interface RulesPayload {
+  sharedRules: RuleFileResponse[];
+  providerGuides: Array<RuleFileResponse & { provider: string }>;
+  l0Prompts: L0PromptsBlock;
+}
 
-const PROVIDER_GUIDE_FILES: Record<string, string> = {
-  claude: 'CLAUDE.md',
-  codex: 'AGENTS.md',
-  gemini: 'GEMINI.md',
+export async function readRulesPayload(root: string, opts: ReadL0PromptsOptions): Promise<RulesPayload> {
+  const [sharedRules, providerGuides, l0Prompts] = await Promise.all([
+    Promise.all(SHARED_RULE_FILES.map((f) => readRuleFile(root, f.path, f.consumption))),
+    Promise.all(
+      Object.entries(PROVIDER_GUIDE_FILES).map(async ([provider, file]) => ({
+        provider,
+        ...(await readRuleFile(root, file.path, file.consumption)),
+      })),
+    ),
+    readL0Prompts(root, opts),
+  ]);
+  return { sharedRules, providerGuides, l0Prompts };
+}
+
+const SHARED_RULE_FILES: Array<{ path: string; consumption: PromptConsumptionInfo }> = [
+  {
+    path: 'cat-cafe-skills/refs/shared-rules.md',
+    consumption: CONSUMPTION.actualPrompt('shared-rules.md → governance L0 compiler → native/fallback prompt paths.', [
+      'compile-system-prompt-l0.mjs',
+      'SystemPromptBuilder',
+    ]),
+  },
+  {
+    path: 'docs/SOP.md',
+    consumption: CONSUMPTION.reference('Reference workflow document; not injected into every prompt.'),
+  },
+];
+
+const PROVIDER_GUIDE_FILES: Record<string, { path: string; consumption: PromptConsumptionInfo }> = {
+  claude: {
+    path: 'CLAUDE.md',
+    consumption: CONSUMPTION.harnessInjected(
+      'Claude Code reads project CLAUDE.md into model context; not the native L0 source.',
+      ['Claude Code project-doc loader'],
+    ),
+  },
+  codex: {
+    path: 'AGENTS.md',
+    consumption: CONSUMPTION.harnessInjected(
+      'Codex CLI reads project AGENTS.md into model context; native L0 comes from developer_instructions.',
+      ['Codex CLI project-doc loader'],
+    ),
+  },
+  gemini: {
+    path: 'GEMINI.md',
+    consumption: CONSUMPTION.harnessInjected(
+      'Gemini project guide is provider-level prompt context; Gemini native L0 migration is not part of F203 #747/#749.',
+      ['Gemini CLI project-doc loader'],
+    ),
+  },
 };
 
 export function isLegacySkillProjectPath(absPath: string, roots: string[] = getDefaultRootsForPlatform()): boolean {
@@ -161,17 +272,7 @@ export const rulesRoutes: FastifyPluginAsync = async (app) => {
     }
     const root = findProjectRoot();
     const availableCats = loadAvailableCatsForL0();
-    const [sharedRules, providerGuides, l0Prompts] = await Promise.all([
-      Promise.all(SHARED_RULE_FILES.map((f) => readRuleFile(root, f))),
-      Promise.all(
-        Object.entries(PROVIDER_GUIDE_FILES).map(async ([provider, file]) => ({
-          provider,
-          ...(await readRuleFile(root, file)),
-        })),
-      ),
-      readL0Prompts(root, { availableCats, compileL0: compileL0ViaSubprocess }),
-    ]);
-    return { sharedRules, providerGuides, l0Prompts };
+    return readRulesPayload(root, { availableCats, compileL0: compileL0ViaSubprocess });
   });
 
   app.get<{ Params: { name: string }; Querystring: { projectPath?: string } }>(
@@ -194,7 +295,12 @@ export const rulesRoutes: FastifyPluginAsync = async (app) => {
       }
       try {
         const content = await readFile(skillPath, 'utf-8');
-        return { name, content, path: skillPath };
+        return {
+          name,
+          content,
+          path: skillPath,
+          consumption: CONSUMPTION.skillOnDemand('SKILL.md is loaded only when that skill is selected or invoked.'),
+        };
       } catch {
         reply.status(500);
         return { error: 'Failed to read skill content' };

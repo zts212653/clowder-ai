@@ -4,7 +4,9 @@ import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-const { isLegacySkillProjectPath, readL0Prompts, loadAvailableCatsForL0 } = await import('../dist/routes/rules.js');
+const { isLegacySkillProjectPath, readL0Prompts, loadAvailableCatsForL0, readRulesPayload } = await import(
+  '../dist/routes/rules.js'
+);
 
 function findProjectRoot() {
   let dir = dirname(fileURLToPath(import.meta.url));
@@ -144,5 +146,38 @@ describe('readL0Prompts helper (F203 Phase F)', () => {
     assert.equal(result.compiledByCat[0].error, null);
     assert.equal(result.compiledByCat[1].compiled, '');
     assert.match(result.compiledByCat[1].error, /simulated compile failure/);
+  });
+});
+
+describe('rules consumption metadata (#749)', () => {
+  const root = findProjectRoot();
+
+  it('labels actual prompt vs reference documents in /api/rules payload', async () => {
+    const result = await readRulesPayload(root, {
+      availableCats: [{ catId: 'codex', displayName: '缅因猫 GPT-5.5(codex)' }],
+      compileL0: async () => 'COMPILED-L0-FOR-codex',
+    });
+
+    const sharedRules = result.sharedRules.find((f) => f.path === 'cat-cafe-skills/refs/shared-rules.md');
+    assert.equal(sharedRules?.consumption.kind, 'actual-prompt');
+    assert.match(sharedRules?.consumption.detail ?? '', /shared-rules\.md.*governance L0.*native\/fallback/);
+    assert.ok(sharedRules?.consumption.consumers.includes('compile-system-prompt-l0.mjs'));
+    assert.ok(sharedRules?.consumption.consumers.includes('SystemPromptBuilder'));
+
+    const sop = result.sharedRules.find((f) => f.path === 'docs/SOP.md');
+    assert.equal(sop?.consumption.kind, 'reference');
+    assert.match(sop?.consumption.detail ?? '', /not injected/i);
+
+    const l0Template = result.l0Prompts.template;
+    assert.equal(l0Template.consumption.kind, 'actual-prompt');
+    assert.match(l0Template.consumption.detail, /native system role/);
+
+    const compiledCodex = result.l0Prompts.compiledByCat[0];
+    assert.equal(compiledCodex.consumption.kind, 'actual-prompt');
+    assert.equal(compiledCodex.compiled, 'COMPILED-L0-FOR-codex');
+
+    const codexGuide = result.providerGuides.find((g) => g.provider === 'codex');
+    assert.equal(codexGuide?.consumption.kind, 'harness-injected');
+    assert.match(codexGuide?.consumption.detail ?? '', /Codex CLI/i);
   });
 });
