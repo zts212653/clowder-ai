@@ -16,6 +16,10 @@ function bashCmd(scriptPath) {
   return `bash "${scriptPath}"`;
 }
 
+function codexStopCmd(scriptPath) {
+  return `${bashCmd(scriptPath)} --codex-json`;
+}
+
 async function createProjectRoot() {
   const projectRoot = await mkdtemp(join(tmpdir(), 'agent-hooks-project-'));
   const hookDir = join(projectRoot, '.claude', 'hooks', 'user-level');
@@ -53,7 +57,10 @@ describe('agent hook sync targets', () => {
     assert.ok(codexHooks);
     const codexRendered = JSON.parse(codexHooks.render());
     assert.equal(codexRendered.hooks.SessionStart[0].hooks[0].command, startScript);
-    assert.equal(codexRendered.hooks.Stop[0].hooks[0].command, stopScript);
+    assert.equal(
+      codexRendered.hooks.Stop[0].hooks[0].command,
+      codexStopCmd(join(targetRoot, '.claude', 'hooks', 'session-stop-check.sh')),
+    );
 
     const geminiHooks = targets.find((target) => target.name === 'gemini-hooks');
     assert.ok(geminiHooks);
@@ -116,7 +123,7 @@ describe('agent hook sync targets', () => {
 
     const codex = JSON.parse(await readFile(join(targetRoot, '.codex', 'hooks.json'), 'utf8'));
     assert.equal(codex.hooks.SessionStart[0].hooks[0].command, bashCmd(startScript));
-    assert.equal(codex.hooks.Stop[0].hooks[0].command, bashCmd(stopScript));
+    assert.equal(codex.hooks.Stop[0].hooks[0].command, codexStopCmd(stopScript));
 
     for (const target of buildAgentHookTargets({ projectRoot, targetRoot })) {
       assert.equal(
@@ -375,6 +382,10 @@ describe('agent hook routes', () => {
       hooksJson.hooks.SessionStart[0].hooks[0].command,
       bashCmd(join(targetRoot, '.claude', 'hooks', 'session-start-recall.sh')),
     );
+    assert.equal(
+      hooksJson.hooks.Stop[0].hooks[0].command,
+      codexStopCmd(join(targetRoot, '.claude', 'hooks', 'session-stop-check.sh')),
+    );
   });
 
   it('rejects no-origin header-only sync requests before writing hook files', async () => {
@@ -511,6 +522,10 @@ describe('agent hook routes', () => {
     assert.equal(
       hooksJson.hooks.SessionStart[0].hooks[0].command,
       bashCmd(join(targetRoot, '.claude', 'hooks', 'session-start-recall.sh')),
+    );
+    assert.equal(
+      hooksJson.hooks.Stop[0].hooks[0].command,
+      codexStopCmd(join(targetRoot, '.claude', 'hooks', 'session-stop-check.sh')),
     );
   });
 

@@ -42,6 +42,10 @@ function loadManifest() {
   return { skills };
 }
 
+function hasYamlFrontmatter(content) {
+  return content.startsWith('---\n') || content.startsWith('---\r\n');
+}
+
 function loadRosterHandles() {
   if (!existsSync(catConfigPath)) {
     throw new Error(`cat-config.json not found: ${catConfigPath}`);
@@ -122,6 +126,11 @@ function lintManifestStructure(skillsMap) {
     const skillDocPath = join(skillsRoot, skillName, 'SKILL.md');
     if (!existsSync(skillDocPath)) {
       errors.push(`[manifest] skills.${skillName} has no matching SKILL.md at ${relative(repoRoot, skillDocPath)}`);
+    } else {
+      const skillDoc = readFileSync(skillDocPath, 'utf-8');
+      if (!hasYamlFrontmatter(skillDoc)) {
+        errors.push(`[skill-frontmatter] ${relative(repoRoot, skillDocPath)} missing YAML frontmatter`);
+      }
     }
   }
 

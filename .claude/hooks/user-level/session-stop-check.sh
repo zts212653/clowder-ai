@@ -3,6 +3,13 @@
 # 用户级 hook：所有项目都生效，出征也带着走
 # 归属：F050 系统提示词同步 + 猫猫行为规范
 
+CODEX_JSON=0
+for arg in "$@"; do
+  if [ "$arg" = "--codex-json" ]; then
+    CODEX_JSON=1
+  fi
+done
+
 # 读取 stdin（hook 协议要求）
 INPUT=$(cat)
 CWD=$(echo "$INPUT" | grep -oE '"cwd"\s*:\s*"[^"]*"' | head -1 | sed 's/.*: *"//;s/"$//')
@@ -78,7 +85,12 @@ fi
 
 # 输出提醒（只在有警告时才输出）
 if [ -n "$WARNINGS" ]; then
-  echo "🐾 收工自检：${WARNINGS}"
+  MESSAGE="🐾 收工自检：${WARNINGS}"
+  if [ "$CODEX_JSON" = "1" ]; then
+    printf '%s' "$MESSAGE" | node -e 'let input = ""; process.stdin.setEncoding("utf8"); process.stdin.on("data", (chunk) => { input += chunk; }); process.stdin.on("end", () => { process.stdout.write(`${JSON.stringify({ systemMessage: input })}\n`); });'
+  else
+    echo "$MESSAGE"
+  fi
 fi
 
 exit 0

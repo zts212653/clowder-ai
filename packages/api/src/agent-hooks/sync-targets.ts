@@ -104,6 +104,10 @@ function bashCommand(scriptPath: string): string {
   return `bash "${scriptPath.replace(/\\/g, '/')}"`;
 }
 
+function codexStopCommand(scriptPath: string): string {
+  return `${bashCommand(scriptPath)} --codex-json`;
+}
+
 export function renderCodexHooksJson(targetRoot: string): string {
   const config = {
     hooks: {
@@ -122,7 +126,7 @@ export function renderCodexHooksJson(targetRoot: string): string {
           hooks: [
             {
               type: 'command',
-              command: bashCommand(join(targetRoot, '.claude', 'hooks', 'session-stop-check.sh')),
+              command: codexStopCommand(join(targetRoot, '.claude', 'hooks', 'session-stop-check.sh')),
             },
           ],
         },

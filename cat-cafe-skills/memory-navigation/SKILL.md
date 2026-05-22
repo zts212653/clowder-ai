@@ -1,3 +1,25 @@
+---
+name: memory-navigation
+description: >
+  记忆系统三入口路由（search_evidence / graph_resolve / list_recent）决策树 + 噪音控制 + 加载时机。F188 Phase F (AC-F6) 配套 skill。
+  Use when: 没先验、压缩后回顾、"我记得最近讨论过 X"、search_evidence 反复 low-hit。
+  Not for: 已有精确 anchor 直接 Read；代码符号查 Grep/LSP。
+  Output: 选定入口 + 噪音控制参数 + 进入对应 MCP 工具。
+triggers:
+  - "没先验"
+  - "压缩后"
+  - "我记得讨论过"
+  - "最近讨论"
+  - "找不到 anchor"
+  - "cold start"
+  - "扫一眼最近"
+  - "memory navigation"
+not_for:
+  - "已有精确 anchor"
+  - "代码符号查找"
+output: "Entry choice + noise control params + downstream tool call"
+---
+
 # memory-navigation
 
 > 记忆系统三入口路由决策 + 噪音控制 + 加载时机。F188 Phase F (AC-F6) 配套 skill。
