@@ -119,6 +119,33 @@ const toolCallCounts = new WeakMap<Span, number>();
 /** @deprecated Use recordToolUseSpan instead. Kept for backward compat during migration. */
 export const recordToolUseEvent = recordToolUseSpan;
 
+// --- F153 Phase I: cat_cafe.agent_loop marker ---
+
+const agentLoopCounts = new WeakMap<Span, number>();
+
+/**
+ * Record one completed agent loop (think → act → observe) on the invocation span.
+ *
+ * Provider stream parsers should call this at every LLM call boundary they can
+ * identify from their stream protocol. The cumulative count is stored as the
+ * `agent_loop.count` attribute on invocationSpan (same WeakMap + setAttribute
+ * pattern as `tool.basic_call_count`), so Step Summary can derive
+ * `agent_loop_count` per-route = sum across child invocation spans.
+ *
+ * Provider-agnostic: does NOT depend on `msg.metadata.usage.durationApiMs` or
+ * the `done` event (both are per-invocation, not per-loop — see F153 KD-33).
+ *
+ * Providers that cannot identify LLM call boundaries from their stream simply
+ * never call this helper; the invocation span has no `agent_loop.count`
+ * attribute, and Step Summary displays `—` (per AC-I2, AC-I7 — non-degradation
+ * to invocation count).
+ */
+export function recordAgentLoop(invocationSpan: Span): void {
+  const prev = (agentLoopCounts.get(invocationSpan) ?? 0) + 1;
+  agentLoopCounts.set(invocationSpan, prev);
+  invocationSpan.setAttribute('agent_loop.count', prev);
+}
+
 /**
  * Stamp routing decision attributes onto the invocation span.
  * Not a separate span — routing is instantaneous and should live

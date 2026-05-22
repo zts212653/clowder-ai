@@ -86,10 +86,18 @@ export async function enqueueA2ATargets(
   const fromCatId = callerCatId ?? opts.triggerMessage.catId ?? getDefaultCatId();
   const targetCats = opts.targetCats;
 
-  // F153: wrap caller trace context with mention_dispatch span for callback A2A causality
-  const dispatchTraceContext = opts.callerTraceContext
-    ? wrapWithDispatchSpan(opts.callerTraceContext, targetCats.length)
-    : undefined;
+  // F153 Phase I (Maine Coon P1): Lazy-create mention_dispatch span + a2a.dispatch.count counter
+  // ONLY when a target is about to actually dispatch (passes all guards and reaches a real enqueue
+  // or fallback invocation). Pre-creating would mint span/counter even when ALL cats are blocked
+  // by depth limit / dedup / ping-pong streak / empty-conflict fallback — polluting Step Summary
+  // a2a_dispatch_count with phantom dispatches.
+  let dispatchTraceContext: CallerTraceContext | undefined;
+  const ensureDispatchTraceContext = (): CallerTraceContext | undefined => {
+    if (dispatchTraceContext === undefined && opts.callerTraceContext) {
+      dispatchTraceContext = wrapWithDispatchSpan(opts.callerTraceContext, targetCats.length, fromCatId);
+    }
+    return dispatchTraceContext;
+  };
 
   // F122B: If InvocationQueue is available, enqueue as agent entry (unified dispatch).
   // This replaces both the worklist path and the fallback standalone invocation.
@@ -168,7 +176,7 @@ export async function enqueueA2ATargets(
         intent: 'execute',
         autoExecute: true,
         callerCatId: callerCatId ?? undefined,
-        callerTraceContext: dispatchTraceContext,
+        callerTraceContext: ensureDispatchTraceContext(),
       });
       queueDiagnostics.push({
         catId,
@@ -230,6 +238,12 @@ export async function enqueueA2ATargets(
     });
     const enqueued = pushResult.added;
     if (enqueued.length > 0) {
+      // F153 Phase I (Maine Coon round-2 P2): legacy worklist callback dispatch must also
+      // mint the mention_dispatch span + a2a.dispatch.count counter. Use the lazy helper for
+      // its side-effects; the returned trace context is unused here because route-serial
+      // (which consumes the worklist) doesn't accept a callerTraceContext at worklist-push
+      // time. Empty added / blocked branches still skip this (lazy = idempotent on first call).
+      ensureDispatchTraceContext();
       if (deliveryCursorStore) {
         // F27 + #77: Best-effort auto-ack to prevent surprise backlog when cats later
         // call pending-mentions. This intentionally advances the mention-ack cursor
@@ -335,7 +349,11 @@ export async function enqueueA2ATargets(
       );
     }
     // Proceed with non-conflicting targets only
-    await triggerA2AInvocation(deps, { ...opts, targetCats: nonConflicting, callerTraceContext: dispatchTraceContext });
+    await triggerA2AInvocation(deps, {
+      ...opts,
+      targetCats: nonConflicting,
+      callerTraceContext: ensureDispatchTraceContext(),
+    });
     return { enqueued: nonConflicting, fallback: true };
   }
 
@@ -351,7 +369,7 @@ export async function enqueueA2ATargets(
   // F167 PR1 history note: originally this path filtered role-gated targets before
   // fallback; Phase E retires L3, so targetCats == opts.targetCats now. Kept the
   // explicit spread for intent clarity and future filter hooks.
-  await triggerA2AInvocation(deps, { ...opts, targetCats, callerTraceContext: dispatchTraceContext });
+  await triggerA2AInvocation(deps, { ...opts, targetCats, callerTraceContext: ensureDispatchTraceContext() });
   return { enqueued: targetCats, fallback: true };
 }
 

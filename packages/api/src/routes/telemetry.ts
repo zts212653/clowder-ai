@@ -13,6 +13,7 @@ import { hmacId } from '../infrastructure/telemetry/hmac.js';
 import type { LocalTraceStore } from '../infrastructure/telemetry/local-trace-store.js';
 import type { MetricsSnapshotStore } from '../infrastructure/telemetry/metrics-snapshot-store.js';
 import { parsePrometheusText } from '../infrastructure/telemetry/metrics-snapshot-store.js';
+import { computeStepSummary } from '../infrastructure/telemetry/step-summary.js';
 
 export interface ReadinessResult {
   status: 'ready' | 'degraded';
@@ -95,6 +96,38 @@ export const telemetryRoutes: FastifyPluginAsync<TelemetryRoutesOptions> = async
 
     return opts.traceStore.stats();
   });
+
+  /**
+   * GET /api/telemetry/step-summary — per-route Step Summary (F153 Phase I).
+   *
+   * Query params:
+   *   traceId      — OTel trace ID (required)
+   *   routeSpanId  — scope to this route span's subtree (optional; auto-detects root route when omitted)
+   *
+   * Returns descriptive step metrics scoped to one route (per AC-I1/I6, KD-32
+   * descriptive only — no efficiency or quality scoring). Null sub-counts
+   * indicate restored spans or no provider marker (AC-I4 — UI must render
+   * '—' for null, never '0').
+   */
+  app.get<{ Querystring: { traceId?: string; routeSpanId?: string } }>(
+    '/api/telemetry/step-summary',
+    async (request, reply) => {
+      if (!requireSession(request, reply)) return;
+      if (!opts.traceStore) {
+        return reply.status(503).send({ error: 'Trace store not available (OTel may be disabled)' });
+      }
+      const traceId = request.query.traceId;
+      if (!traceId) {
+        return reply.status(400).send({ error: 'traceId is required' });
+      }
+      const spans = opts.traceStore.query({ traceId, limit: opts.traceStore.stats().maxSpans });
+      const summary = computeStepSummary(spans, traceId, request.query.routeSpanId);
+      if (!summary) {
+        return reply.status(404).send({ error: 'No spans found for traceId' });
+      }
+      return summary;
+    },
+  );
 
   /**
    * GET /api/telemetry/metrics — read Prometheus metrics from in-process registry.

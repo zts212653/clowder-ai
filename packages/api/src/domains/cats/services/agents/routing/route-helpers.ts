@@ -113,6 +113,10 @@ export interface RouteOptions {
         autoExecute: true;
         priority: 'normal';
         intent: 'execute';
+        /** F153 Phase I: trace context of the mention_dispatch span, so the dispatched
+         *  route picked up by QueueProcessor reuses it as the parent — preserving cross-route
+         *  causality through the fairness-gate deferred path. */
+        callerTraceContext?: import('../../../../../infrastructure/telemetry/genai-semconv.js').CallerTraceContext;
       }) => void)
     | undefined;
   /** ADR-008 S3: When provided, cursor boundaries are collected here instead of acking immediately.

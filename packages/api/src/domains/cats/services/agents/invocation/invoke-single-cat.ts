@@ -49,7 +49,11 @@ import {
 } from '../../../../../infrastructure/telemetry/instruments.js';
 import { normalizeModel } from '../../../../../infrastructure/telemetry/model-normalizer.js';
 import { emitOtelLog } from '../../../../../infrastructure/telemetry/otel-logger.js';
-import { recordLlmCallSpan, recordToolUseSpan } from '../../../../../infrastructure/telemetry/span-helpers.js';
+import {
+  recordAgentLoop,
+  recordLlmCallSpan,
+  recordToolUseSpan,
+} from '../../../../../infrastructure/telemetry/span-helpers.js';
 import { resolveActiveProjectRoot } from '../../../../../utils/active-project-root.js';
 import { resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { DEFAULT_CLI_TIMEOUT_MS, resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
@@ -1678,6 +1682,14 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
         outputs.push({ ...msg, isFinal: isLastCat });
       } else {
+        // F153 Phase I: agent_loop is telemetry-only — record marker, never push to outputs
+        // (no user-visible signal, no transcript write, no downstream forwarding).
+        // processMessage is an arrow function (not a loop), so `return outputs` (empty here)
+        // is the correct way to skip the remaining branches and transcript writer below.
+        if (msg.type === 'agent_loop') {
+          if (invocationSpan) recordAgentLoop(invocationSpan);
+          return outputs;
+        }
         outputs.push(attachInvocationIdToTaskProgress(msg));
 
         // F153 Phase E: Record tool_use as child span (zero-duration; shows in trace tree with tool name + category)

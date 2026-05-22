@@ -534,3 +534,136 @@ test('F153 behavioral: wrapWithDispatchSpan creates mention_dispatch as child of
   assert.equal(dispatch.attributes['dispatch.source'], 'callback', 'Should mark source as callback');
   assert.equal(dispatch.parentSpanContext.spanId, callerSc.spanId, 'dispatch is child of caller');
 });
+
+// ── F185 deferred A2A path: mention_dispatch span + counter + ctx ──
+
+test('F153 Phase I (F185 deferred): route-serial creates mention_dispatch span in deferred path', () => {
+  const src = readFileSync(
+    resolve(__dirname, '../../src/domains/cats/services/agents/routing/route-serial.ts'),
+    'utf8',
+  );
+  // The deferred branch is the `else if (... && deferA2AEnqueue && !signal?.aborted)` block.
+  const deferredIdx = src.indexOf('deferA2AEnqueue && !signal?.aborted');
+  assert.ok(deferredIdx > 0, 'Should find the deferred branch guard');
+  // After the deferred guard, the same block should create a mention_dispatch span tagged as deferred.
+  const dispatchSpanIdx = src.indexOf("'cat_cafe.mention_dispatch'", deferredIdx);
+  const deferredSourceIdx = src.indexOf("'dispatch.source': 'text-scan-deferred'", deferredIdx);
+  assert.ok(dispatchSpanIdx > deferredIdx, 'Deferred branch should create cat_cafe.mention_dispatch span');
+  assert.ok(
+    deferredSourceIdx > deferredIdx,
+    "Deferred dispatch span should set dispatch.source='text-scan-deferred' (distinct from callback/inline)",
+  );
+});
+
+test('F153 Phase I (F185 deferred): deferred path increments a2aDispatchCount', () => {
+  const src = readFileSync(
+    resolve(__dirname, '../../src/domains/cats/services/agents/routing/route-serial.ts'),
+    'utf8',
+  );
+  const deferredIdx = src.indexOf('deferA2AEnqueue && !signal?.aborted');
+  const counterIdx = src.indexOf('a2aDispatchCount.add', deferredIdx);
+  assert.ok(
+    counterIdx > deferredIdx,
+    'Deferred branch should call a2aDispatchCount.add — otherwise Step Summary aggregate under-reports',
+  );
+});
+
+test('F153 Phase I (F185 deferred): deferA2AEnqueue entry carries callerTraceContext', () => {
+  const src = readFileSync(
+    resolve(__dirname, '../../src/domains/cats/services/agents/routing/route-serial.ts'),
+    'utf8',
+  );
+  const deferredIdx = src.indexOf('deferA2AEnqueue && !signal?.aborted');
+  // After the deferred guard, the enqueue invocation should include callerTraceContext
+  // so QueueProcessor reuses it as the parent for the dispatched route.
+  const enqueueCallIdx = src.indexOf('deferA2AEnqueue({', deferredIdx);
+  const ctxFieldIdx = src.indexOf('callerTraceContext: deferredDispatchCtx', deferredIdx);
+  assert.ok(enqueueCallIdx > deferredIdx, 'Deferred branch should call deferA2AEnqueue({...})');
+  assert.ok(
+    ctxFieldIdx > enqueueCallIdx,
+    'deferA2AEnqueue entry must include callerTraceContext: deferredDispatchCtx — otherwise cross-route causality is severed at the fairness gate',
+  );
+});
+
+test('F153 Phase I (F185 deferred): deferA2AEnqueue entry contract declares callerTraceContext', () => {
+  const src = readFileSync(
+    resolve(__dirname, '../../src/domains/cats/services/agents/routing/route-helpers.ts'),
+    'utf8',
+  );
+  // The entry type for deferA2AEnqueue must declare callerTraceContext so callers (route-serial,
+  // and downstream consumers including QueueProcessor) see a stable contract.
+  assert.ok(
+    src.includes('callerTraceContext?: import(') && src.includes('CallerTraceContext'),
+    'RouteOptions.deferA2AEnqueue entry type should declare optional callerTraceContext field',
+  );
+});
+
+test('F153 Phase I behavioral (F185 deferred): captured ctx parents the dispatched route', async () => {
+  otelExporter.reset();
+
+  // Simulate route-serial deferred path:
+  // route1 → invocation(A) → mention_dispatch (ended immediately, source=text-scan-deferred)
+  //                                           ↘ queue handoff (captured ctx)
+  // Later: QueueProcessor → route2 (child of mention_dispatch via remote ctx)
+  const route1 = otelTracer.startSpan('cat_cafe.route');
+  const route1Ctx = traceApi.setSpan(ctxApi.active(), route1);
+
+  const invA = otelTracer.startSpan('cat_cafe.invocation', { attributes: { 'agent.id': 'opus' } }, route1Ctx);
+
+  // Lazy create dispatch span as child of mentioner invocation, then immediately end.
+  const invACtx = traceApi.setSpan(ctxApi.active(), invA);
+  const dispatchSpan = otelTracer.startSpan(
+    'cat_cafe.mention_dispatch',
+    {
+      attributes: {
+        'agent.id': 'opus',
+        'dispatch.target_count': 1,
+        'dispatch.source': 'text-scan-deferred',
+      },
+    },
+    invACtx,
+  );
+  const dispatchSc = dispatchSpan.spanContext();
+  dispatchSpan.end();
+  invA.end();
+  route1.end();
+
+  // Captured CallerTraceContext propagated through queue entry.
+  const callerCtx = { traceId: dispatchSc.traceId, spanId: dispatchSc.spanId, traceFlags: dispatchSc.traceFlags };
+
+  // Downstream QueueProcessor reconstructs remote parent (mirrors AgentRouter.routeExecution).
+  const { context: ctxApiLocal, trace: traceApiLocal } = await import('@opentelemetry/api');
+  const remoteParentCtx = traceApiLocal.setSpanContext(ctxApiLocal.active(), {
+    traceId: callerCtx.traceId,
+    spanId: callerCtx.spanId,
+    traceFlags: callerCtx.traceFlags,
+    isRemote: true,
+  });
+  const route2 = otelTracer.startSpan('cat_cafe.route', {}, remoteParentCtx);
+  const route2Ctx = traceApiLocal.setSpan(ctxApiLocal.active(), route2);
+  const invB = otelTracer.startSpan('cat_cafe.invocation', { attributes: { 'agent.id': 'sonnet' } }, route2Ctx);
+  invB.end();
+  route2.end();
+
+  const spans = otelExporter.getFinishedSpans();
+  const dispatch = spans.find(
+    (s) => s.name === 'cat_cafe.mention_dispatch' && s.attributes['dispatch.source'] === 'text-scan-deferred',
+  );
+  const route2Span = spans.find((s) => s.name === 'cat_cafe.route' && s.parentSpanContext);
+  const invBSpan = spans.find((s) => s.attributes['agent.id'] === 'sonnet');
+
+  assert.ok(dispatch, 'deferred dispatch span should be present');
+  assert.ok(route2Span && invBSpan, 'queued route2 and invocation B should be present');
+
+  // Same trace across the fairness-gate hop.
+  const traceId = dispatch.spanContext().traceId;
+  assert.equal(route2Span.spanContext().traceId, traceId, 'queued route stays in caller trace');
+  assert.equal(invBSpan.spanContext().traceId, traceId, 'dispatched invocation stays in caller trace');
+
+  // route2 is parented at the dispatch span (not the mentioner directly).
+  assert.equal(
+    route2Span.parentSpanContext.spanId,
+    dispatch.spanContext().spanId,
+    'queued route is child of mention_dispatch (preserves causality through fairness gate)',
+  );
+});

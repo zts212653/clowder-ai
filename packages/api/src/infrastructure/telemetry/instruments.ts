@@ -211,6 +211,21 @@ export const catResponseDuration = lazy(() =>
   }),
 );
 
+// --- F153 Phase I: Step Summary counters ---
+
+/**
+ * Counter: A2A mention_dispatch span occurrences.
+ * Increments at every `cat_cafe.mention_dispatch` span creation (in-process or callback path).
+ * Attributes (allowlist-filtered): only `agent.id` (mentioner cat) — never invocationId/threadId
+ * (metric-allowlist forbids high-cardinality). Omit `agent.id` when source cat is unknown
+ * (e.g. callback path without sourceCatId).
+ */
+export const a2aDispatchCount = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.dispatch.count', {
+    description: 'A2A mention_dispatch span occurrences (F153 Phase I)',
+  }),
+);
+
 // --- F174 Phase D1: callback auth observability ---
 
 /**

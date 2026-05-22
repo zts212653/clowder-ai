@@ -140,6 +140,7 @@ function TraceCard({ trace, expanded, onToggle }: { trace: TraceGroup; expanded:
       {expanded && (
         <div className="border-t border-cafe-border px-3 pb-3 pt-2 space-y-2">
           <div className="text-micro text-cafe-muted font-mono">traceId: {trace.traceId}</div>
+          <StepSummaryPanel traceId={trace.traceId} />
           <TreeWaterfall trace={trace} selectedSpan={selectedSpan} onSelectSpan={setSelectedSpan} />
           {selectedSpan && <SpanDetail span={trace.spans.find((s) => s.spanId === selectedSpan)} />}
         </div>
@@ -513,6 +514,94 @@ function PromptMeta({ capture }: { capture: PromptCaptureData }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── F153 Phase I: Step Summary panel ──────────────────────────────
+
+interface StepSummaryData {
+  traceId: string;
+  routeSpanId?: string;
+  agent_loop_count: number | null;
+  tool_call_count: number | null;
+  a2a_dispatch_count: number | null;
+  duration_ms: number;
+  token_total: number;
+  error_count: number;
+  is_restored: boolean;
+  width_avg_tools_per_loop: number | null;
+  agent_loop_partial: boolean;
+}
+
+function StepSummaryPanel({ traceId, routeSpanId }: { traceId: string; routeSpanId?: string }) {
+  const [data, setData] = useState<StepSummaryData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    const qs = new URLSearchParams({ traceId });
+    if (routeSpanId) qs.set('routeSpanId', routeSpanId);
+    apiFetch(`/api/telemetry/step-summary?${qs.toString()}`)
+      .then(async (res) => {
+        if (cancelled) return;
+        if (res.ok) {
+          const json = (await res.json()) as StepSummaryData;
+          setData(json);
+        }
+      })
+      .catch(() => {
+        /* ignore */
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [traceId, routeSpanId]);
+
+  if (loading) {
+    return <div className="text-[10px] text-cafe-muted">Loading Step Summary…</div>;
+  }
+  if (!data) return null;
+
+  // '—' for null (AC-I4 / AC-I7 non-degradation — never render 0 for unknown).
+  const fmt = (n: number | null): string => (n === null ? '—' : n.toString());
+
+  return (
+    <div className="rounded-lg border border-cafe-border bg-cafe-surface-elevated p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-medium text-cafe">Step Summary</span>
+        {data.is_restored && (
+          <span className="rounded bg-cafe-surface px-1.5 py-0.5 text-[10px] text-cafe-muted">Restored (history)</span>
+        )}
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <StepCell
+          label="Agent loops"
+          value={data.agent_loop_partial ? `${fmt(data.agent_loop_count)}+` : fmt(data.agent_loop_count)}
+          primary
+        />
+        <StepCell label="Tool calls" value={fmt(data.tool_call_count)} />
+        <StepCell label="A2A dispatch" value={fmt(data.a2a_dispatch_count)} />
+        <StepCell label="Duration" value={`${data.duration_ms.toFixed(0)} ms`} />
+        <StepCell label="Tokens" value={data.token_total.toLocaleString()} />
+        <StepCell label="Errors" value={data.error_count.toString()} />
+      </div>
+      <div className="mt-2 border-t border-cafe-border pt-2 text-[10px] text-cafe-muted">
+        Length × Width = {fmt(data.agent_loop_count)} loop ×{' '}
+        {data.width_avg_tools_per_loop != null ? `${data.width_avg_tools_per_loop.toFixed(1)} tools/loop` : '—'}
+      </div>
+    </div>
+  );
+}
+
+function StepCell({ label, value, primary }: { label: string; value: string; primary?: boolean }) {
+  return (
+    <div>
+      <div className="text-[10px] text-cafe-muted">{label}</div>
+      <div className={`font-mono text-xs ${primary ? 'font-semibold text-cafe' : 'text-cafe'}`}>{value}</div>
     </div>
   );
 }
