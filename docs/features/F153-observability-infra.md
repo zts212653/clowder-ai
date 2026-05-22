@@ -95,11 +95,15 @@ Phase E 只回答"发生了什么"（traces、metrics、健康状态），不做
 > - P2: `/api/telemetry/health` 聚合 `/ready` 探针 + error rate → unified health verdict
 > - P2: `task.*` instruments 重命名为 `invocation.completed` / `thread.duration`（匹配实际语义）
 
-### Phase F: Trace 持久化 — 指针关联方案（设计中）
+### Phase F: Trace 持久化 — 指针关联方案 ✅
 
-> **Status**: spec | **Owner**: Ragdoll
+> **Status**: merged | **Owner**: Ragdoll
+> **Provenance**: zts212653/clowder-ai#592
+> **Implementation PR**: zts212653/clowder-ai#579 (merged 2026-04-28, commit `8cc6f9a1`)
 > **Trigger**: 重启后 trace 数据全丢（LocalTraceStore 纯内存）
 > **Discussion**: 2026-04-22，三猫讨论（Ragdoll + Sonnet + GPT-5.4）
+>
+> **Scope note**: AC-F1..F7 全部 ✅。AC-F8（tool_use spans 持久化）声明 deferred — 当前 MCP tool span 是零时长点标记，待 Phase H 真实执行边界落地后再升级持久化策略。Phase F header 状态过期至 2026-05-22 由 Phase I 完结后同步修正（本次 doc-sync）。
 
 #### 问题
 
@@ -352,7 +356,7 @@ UI 必须显示 `—` 而非 `0`，否则会让"重启前的数据"看起来像"
 - [x] AC-E6: `HubTraceTree` 按 `parentSpanId` 构建 forest，树形瀑布图展示父子层次
 - [x] AC-E7: `MetricsSnapshotStore` 30s 采样，`/metrics/history` 返回趋势数据
 
-### Phase F（Trace 持久化 — 指针关联方案）
+### Phase F（Trace 持久化 — 指针关联方案）✅
 - [x] AC-F1: 四类 span（route/invocation/cli_session/llm_call）统一携带 `invocationId` attribute（值 = outer InvocationRecord.id，键名不变）
 - [x] AC-F2: Message `extra.tracing` 写入 `{ traceId, spanId, parentSpanId }` 指针（route → user message，invocation/cli/llm → assistant message）
 - [x] AC-F3: `LocalTraceStore.hydrate()` 从消息数据合成 TraceSpanDTO 并回填 buffer，startTime 使用 `timestamp - duration` 反推（非直接用 message.timestamp）
