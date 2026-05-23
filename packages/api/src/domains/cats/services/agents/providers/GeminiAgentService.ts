@@ -4,7 +4,8 @@
  *
  * 双 Adapter 架构:
  *   gemini-cli (默认):  spawn 'gemini' CLI + NDJSON → 全自动 headless
- *   antigravity (opt-in): spawn Antigravity IDE → MCP 回传 → 半自动
+ *   antigravity-cli: spawn 'agy' CLI + plain stdout → 全自动 headless prototype
+ *   antigravity (legacy opt-in): spawn Antigravity IDE → MCP 回传 → 半自动
  *
  * gemini CLI NDJSON 事件格式 (v0.27.2):
  *   init              → session_init (含 session_id)
@@ -29,20 +30,23 @@ import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/
 import {
   buildChildEnv,
   isCliError,
+  isCliPlainTextResult,
   isCliTimeout,
   isLivenessWarning,
   spawnCli,
 } from '../../../../../utils/cli-spawn.js';
+import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import { readJsonlTail } from '../../../../../utils/jsonl-tail-reader.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata, TokenUsage } from '../../types.js';
 import { appendLocalImagePathHints, collectImageAccessDirectories } from '../providers/image-cli-bridge.js';
 import { extractImagePaths } from '../providers/image-paths.js';
+import { classifyAntigravityCliPlainText } from './antigravity-cli-event-parser.js';
 import { isKnownPostResponseCandidatesCrash, isResultErrorEvent, transformGeminiEvent } from './gemini-event-parser.js';
 
 const log = createModuleLogger('gemini-agent');
 
-type GeminiAdapter = 'gemini-cli' | 'antigravity';
+type GeminiAdapter = 'gemini-cli' | 'antigravity-cli' | 'antigravity';
 
 interface GeminiStoredThought {
   readonly subject?: string;
@@ -296,6 +300,12 @@ function readLatestGeminiContextTokens(
     .reverse()
     .find((message) => matchesCurrentAssistantText(message.content, normalizedAssistantText))?.tokens?.input;
 }
+
+function formatAgyPrintTimeout(timeoutMs: number): string | null {
+  if (timeoutMs <= 0) return null;
+  return `${Math.max(1, Math.ceil(timeoutMs / 1000))}s`;
+}
+
 /**
  * Options for constructing GeminiAgentService (dependency injection)
  * F32-b: catId and model are constructor parameters
@@ -334,6 +344,8 @@ export class GeminiAgentService implements AgentService {
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
     if (this.adapter === 'antigravity') {
       yield* this.invokeAntigravity(prompt, options);
+    } else if (this.adapter === 'antigravity-cli') {
+      yield* this.invokeAntigravityCLI(prompt, options);
     } else {
       yield* this.invokeGeminiCLI(prompt, options);
     }
@@ -563,6 +575,276 @@ export class GeminiAgentService implements AgentService {
         timestamp: Date.now(),
       };
       // Guarantee done after error so invoke-single-cat can set isFinal correctly
+      yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+    }
+  }
+
+  private async *invokeAntigravityCLI(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
+    const requestedModelOverride = options?.callbackEnv?.CAT_CAFE_GEMINI_MODEL_OVERRIDE;
+    const metadata: MessageMetadata = {
+      provider: 'google',
+      model: 'account-selected (antigravity-cli)',
+      modelVerified: false,
+      diagnostics: {
+        antigravityCli: {
+          modelSelection: 'account-side selected model',
+          configuredCatModel: this.model,
+          ...(requestedModelOverride ? { unsupportedModelOverride: requestedModelOverride } : {}),
+        },
+      },
+    };
+
+    let effectivePrompt = options?.systemPrompt ? `${options.systemPrompt}\n\n${prompt}` : prompt;
+    const imagePaths = extractImagePaths(options?.contentBlocks, options?.uploadDir);
+    const imageAccessDirs = collectImageAccessDirectories(imagePaths);
+    effectivePrompt = appendLocalImagePathHints(effectivePrompt, imagePaths);
+
+    const workingDirectory = options?.workingDirectory ?? process.cwd();
+    const timeoutMs = resolveCliTimeoutMs(undefined);
+    const printTimeout = formatAgyPrintTimeout(timeoutMs);
+    const args: string[] = ['--add-dir', workingDirectory, '--dangerously-skip-permissions'];
+    for (const dir of imageAccessDirs) {
+      args.push('--add-dir', dir);
+    }
+    if (printTimeout) {
+      args.push('--print-timeout', printTimeout);
+    }
+    const sessionId = options?.sessionId ?? `agy-${randomUUID()}`;
+    metadata.sessionId = sessionId;
+    yield {
+      type: 'session_init',
+      catId: this.catId,
+      sessionId,
+      metadata,
+      timestamp: Date.now(),
+    };
+    if (requestedModelOverride) {
+      yield {
+        type: 'system_info',
+        catId: this.catId,
+        content: JSON.stringify({
+          type: 'antigravity_cli_model_override_unsupported',
+          requestedModel: requestedModelOverride,
+          reason:
+            'AGY CLI 1.0.1 uses the account-side selected model; no verified --model/env per-call override exists.',
+        }),
+        metadata,
+        timestamp: Date.now(),
+      };
+    }
+    args.push('--conversation', sessionId);
+    args.push('--print', effectivePrompt);
+
+    const userParts: string[] = [];
+    for (const arg of options?.cliConfigArgs ?? []) {
+      userParts.push(...arg.trim().split(/\s+/));
+    }
+    if (userParts.length > 0) {
+      const accumulativeFlags = new Set(['--add-dir']);
+      const userFlags = new Set(userParts.filter((p) => p.startsWith('-')));
+      const deduped: string[] = [];
+      for (let i = 0; i < args.length; i++) {
+        if (args[i].startsWith('-') && userFlags.has(args[i]) && !accumulativeFlags.has(args[i])) {
+          if (i + 1 < args.length && !args[i + 1].startsWith('-')) i++;
+          continue;
+        }
+        deduped.push(args[i]);
+      }
+      args.length = 0;
+      args.push(...deduped, ...userParts);
+    }
+
+    try {
+      const agyCommand = resolveCliCommand('agy');
+      if (!agyCommand) {
+        yield {
+          type: 'error' as const,
+          catId: this.catId,
+          error: formatCliNotFoundError('agy'),
+          metadata,
+          timestamp: Date.now(),
+        };
+        yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };
+        return;
+      }
+
+      const childEnv =
+        options?.callbackEnv || options?.accountEnv
+          ? { ...(options?.callbackEnv ?? {}), ...(options?.accountEnv ?? {}) }
+          : undefined;
+      let stdout = '';
+      let stderr = '';
+      let timeoutEvent:
+        | {
+            __cliTimeout: true;
+            timeoutMs: number;
+            message: string;
+            command: string;
+            silenceDurationMs?: number;
+            processAlive?: boolean;
+            lastEventType?: string;
+            firstEventAt?: number;
+            lastEventAt?: number;
+            cliSessionId?: string;
+            invocationId?: string;
+            rawArchivePath?: string;
+          }
+        | undefined;
+      let cliErrorEvent:
+        | {
+            __cliError: true;
+            exitCode: number | null;
+            signal: string | null;
+            message: string;
+            command: string;
+            reasonCode?: string;
+          }
+        | undefined;
+      let cancelled = false;
+      let exitCode: number | null = null;
+      let exitSignal: NodeJS.Signals | null = null;
+
+      const abortHandler = (): void => {
+        cancelled = true;
+      };
+      if (options?.signal) {
+        if (options.signal.aborted) {
+          abortHandler();
+        } else {
+          options.signal.addEventListener('abort', abortHandler, { once: true });
+        }
+      }
+
+      const cliOpts = {
+        command: agyCommand,
+        args,
+        outputMode: 'plainText' as const,
+        cwd: workingDirectory,
+        timeoutMs,
+        ...(childEnv ? { env: childEnv } : {}),
+        ...(options?.signal ? { signal: options.signal } : {}),
+        ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
+        ...(options?.cliSessionId ? { cliSessionId: options.cliSessionId } : {}),
+        ...(options?.livenessProbe ? { livenessProbe: options.livenessProbe } : {}),
+        ...(options?.parentSpan ? { parentSpan: options.parentSpan } : {}),
+      };
+      const events = options?.spawnCliOverride
+        ? options.spawnCliOverride(cliOpts)
+        : spawnCli(cliOpts, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);
+
+      try {
+        for await (const event of events) {
+          if (isCliPlainTextResult(event)) {
+            stdout = event.stdout;
+            stderr = event.stderr;
+            exitCode = event.exitCode;
+            exitSignal = event.signal;
+            continue;
+          }
+          if (isCliTimeout(event)) {
+            timeoutEvent = event;
+            continue;
+          }
+          if (isCliError(event)) {
+            cliErrorEvent = event;
+            continue;
+          }
+          if (isLivenessWarning(event)) {
+            yield {
+              type: 'system_info' as const,
+              catId: this.catId,
+              content: JSON.stringify({ type: 'liveness_warning', ...event }),
+              timestamp: Date.now(),
+            };
+          }
+        }
+      } finally {
+        if (options?.signal) {
+          options.signal.removeEventListener('abort', abortHandler);
+        }
+      }
+
+      const parsedPlainText = classifyAntigravityCliPlainText({
+        stdout,
+        stderr,
+        resumed: Boolean(options?.sessionId),
+      });
+
+      if (timeoutEvent) {
+        yield {
+          type: 'system_info' as const,
+          catId: this.catId,
+          content: JSON.stringify({
+            type: 'timeout_diagnostics',
+            silenceDurationMs: timeoutEvent.silenceDurationMs,
+            processAlive: timeoutEvent.processAlive,
+            lastEventType: timeoutEvent.lastEventType,
+            firstEventAt: timeoutEvent.firstEventAt,
+            lastEventAt: timeoutEvent.lastEventAt,
+            invocationId: timeoutEvent.invocationId ?? options?.invocationId,
+            cliSessionId: timeoutEvent.cliSessionId ?? options?.cliSessionId,
+            rawArchivePath: timeoutEvent.rawArchivePath,
+          }),
+          timestamp: Date.now(),
+        };
+        yield {
+          type: 'error',
+          catId: this.catId,
+          error: `Antigravity CLI 响应超时 (${Math.round(timeoutEvent.timeoutMs / 1000)}s)`,
+          metadata,
+          timestamp: Date.now(),
+        };
+      } else if (cancelled) {
+        // User-initiated cancellation should clear frontend loading without
+        // presenting a provider failure, even if AGY already wrote error text.
+      } else if (parsedPlainText.kind === 'error') {
+        yield {
+          type: 'error',
+          catId: this.catId,
+          error: parsedPlainText.error,
+          metadata,
+          timestamp: Date.now(),
+        };
+      } else if (cliErrorEvent) {
+        yield {
+          type: 'error',
+          catId: this.catId,
+          error: formatCliExitError('Antigravity CLI', cliErrorEvent),
+          metadata,
+          timestamp: Date.now(),
+        };
+      } else if (exitCode !== 0 || exitSignal !== null) {
+        yield {
+          type: 'error',
+          catId: this.catId,
+          error: formatCliExitError('Antigravity CLI', {
+            exitCode,
+            signal: exitSignal,
+            message: `CLI 异常退出 (code: ${exitCode ?? 'null'}, signal: ${exitSignal ?? 'none'})`,
+          }),
+          metadata,
+          timestamp: Date.now(),
+        };
+      } else if (parsedPlainText.kind === 'text') {
+        yield {
+          type: 'text',
+          catId: this.catId,
+          content: parsedPlainText.content,
+          ...(parsedPlainText.textMode ? { textMode: parsedPlainText.textMode } : {}),
+          metadata,
+          timestamp: Date.now(),
+        };
+      }
+
+      yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+    } catch (err) {
+      yield {
+        type: 'error',
+        catId: this.catId,
+        error: err instanceof Error ? err.message : String(err),
+        metadata,
+        timestamp: Date.now(),
+      };
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
     }
   }

@@ -19,6 +19,7 @@ static_scan_hints: [catId, AgentRegistry, cat-config, roster, ConnectorThreadBin
 cited_by:
   - {feature: F191, date: 2026-05-07, delta: new cell}
   - {feature: F193, date: 2026-05-08, delta: Phase B — typed crossThreadReplyHint field on InvocationContext + render block in buildInvocationContext (receiver-side reply hint hydrated from trigger message id)}
+  - {feature: F209, date: 2026-05-22, delta: "boundary note — F209 entity_id is a retrievable entity doorway, not roster truth"}
 ---
 
 # Identity / Session
@@ -30,6 +31,8 @@ This is a top-level routing cell with three subcells. It exists to prevent ident
 - `identity-agent`: F032 owns dynamic CatId, roster, AgentRegistry, roles, and reviewer matching.
 - `identity-connector`: F088 owns connector principal link and external chat/thread binding.
 - `identity-bubble`: F183 / ADR-033 own frontend bubble identity within a thread.
+
+F209's entity registry is adjacent but not canonical for agent identity. Its `entity_id` / aliases are retrievable memory anchors with provenance; they may point to cats, humans, features, or external concepts, but they do not decide roster membership, current model, role, reviewer eligibility, or who a cat is.
 
 ## Use This When
 
@@ -43,15 +46,17 @@ This is a top-level routing cell with three subcells. It exists to prevent ident
 - For connector binding, use `ConnectorThreadBindingStore` and connector binding keys instead of ad hoc thread maps.
 - For bubble identity, follow ADR-033 and route through `bubble-pipeline` contracts and tests.
 - When a feature touches more than one subcell, declare each one in the feature's Architecture cell note and explain the boundary.
+- If a feature consumes F209 `entity_id`, keep the direction one-way: identity/session truth may be referenced as provenance for entity aliases, but entity aliases must not rewrite roster or connector bindings.
 
 ## Do NOT Unify With
 
 - `identity-agent` is not `identity-connector`. A roster cat ID does not prove an external user owns a connector binding.
 - `identity-connector` is not `identity-bubble`. External chat/thread binding does not decide frontend bubble grouping.
 - `identity-bubble` is not `identity-agent`. Bubble identity uses `(catId, canonicalInvocationId, bubbleKind)` inside a thread; it is not the source of roster truth.
+- F209 `entity_id` is not `identity-agent`. Entity aliases such as `landy` / `CVO` / `铲屎官` or `gemini` / `Siamese` are retrieval anchors, not roster truth.
 - `ConnectorThreadBindingStore` is an intentional shared touchpoint with `transport`: transport uses it for routing, while `identity-connector` uses it as the binding contract. Shared file ownership does not merge the cells.
 - Do not add a generic `IdentityStore` to cover all three. Shared vocabulary is not shared ownership.
 
 ## Static Scan Hints
 
-Watch for new or renamed `catId`, `CatId`, `AgentRegistry`, `cat-config`, `roster`, `ReviewerMatcher`, `ConnectorThreadBindingStore`, `Binding`, `bubbleIdentity`, `canonicalInvocationId`, and `session` code.
+Watch for new or renamed `catId`, `CatId`, `AgentRegistry`, `cat-config`, `roster`, `ReviewerMatcher`, `ConnectorThreadBindingStore`, `Binding`, `bubbleIdentity`, `canonicalInvocationId`, `session`, and agent-facing `entity_id` code.

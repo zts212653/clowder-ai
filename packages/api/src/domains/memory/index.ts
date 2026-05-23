@@ -61,6 +61,7 @@ export {
 export { KnowledgeResolver } from './KnowledgeResolver.js';
 export { MarkerQueue } from './MarkerQueue.js';
 export { MaterializationService } from './MaterializationService.js';
+export { PassageVectorStore, parsePassageVectorKey, passageVectorKey } from './PassageVectorStore.js';
 export { ReflectionService } from './ReflectionService.js';
 export { SemanticReranker } from './SemanticReranker.js';
 // Implementations
@@ -68,5 +69,5 @@ export type { PassageResult } from './SqliteEvidenceStore.js';
 export { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
 export { StructuredScanner } from './StructuredScanner.js';
 export { detectScannerLevel, resolveCollectionScanner } from './scanner-resolver.js';
-export { ensureVectorTable } from './schema.js';
+export { ensurePassageVectorTable, ensureVectorTable } from './schema.js';
 export { VectorStore } from './VectorStore.js';

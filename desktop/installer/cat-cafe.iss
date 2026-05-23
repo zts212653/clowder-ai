@@ -55,7 +55,7 @@ Name: "minimal"; Description: "Minimal (no extra CLI tools)"; Flags: iscustom
 Name: "core";         Description: "Cat Cafe Core (required)";      Types: full minimal; Flags: fixed
 Name: "cli_claude";   Description: "Claude CLI (Anthropic)";          Types: full
 Name: "cli_codex";    Description: "Codex CLI (OpenAI)";              Types: full
-Name: "cli_gemini";   Description: "Gemini CLI (Google)";             Types: full
+Name: "cli_antigravity"; Description: "Antigravity CLI (Google agy)";  Types: full
 Name: "cli_kimi";     Description: "Kimi CLI (Moonshot)";             Types: full
 
 [Files]
@@ -143,7 +143,7 @@ Filename: "powershell.exe"; \
 
 ; Generate desktop-config.json with selected components
 Filename: "powershell.exe"; \
-  Parameters: "-ExecutionPolicy Bypass -Command ""& '{app}\scripts\generate-desktop-config.ps1' -AppDir '{app}' -Claude {code:BoolComponent|cli_claude} -Codex {code:BoolComponent|cli_codex} -Gemini {code:BoolComponent|cli_gemini} -Kimi {code:BoolComponent|cli_kimi}"""; \
+  Parameters: "-ExecutionPolicy Bypass -Command ""& '{app}\scripts\generate-desktop-config.ps1' -AppDir '{app}' -Claude {code:BoolComponent|cli_claude} -Codex {code:BoolComponent|cli_codex} -Antigravity {code:BoolComponent|cli_antigravity} -Kimi {code:BoolComponent|cli_kimi}"""; \
   StatusMsg: "Generating desktop configuration..."; \
   Flags: runhidden waituntilterminated
 
@@ -167,7 +167,7 @@ begin
   Result := '';
   if WizardIsComponentSelected('cli_claude') then Result := Result + ' -Claude';
   if WizardIsComponentSelected('cli_codex')  then Result := Result + ' -Codex';
-  if WizardIsComponentSelected('cli_gemini') then Result := Result + ' -Gemini';
+  if WizardIsComponentSelected('cli_antigravity') then Result := Result + ' -Antigravity';
   if WizardIsComponentSelected('cli_kimi')   then Result := Result + ' -Kimi';
 end;
 

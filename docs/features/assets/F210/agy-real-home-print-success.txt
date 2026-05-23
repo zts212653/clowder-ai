@@ -1,0 +1,34 @@
+Command:
+/tmp/cat-cafe-f210-agy-recon/bin/agy \
+  --log-file /tmp/cat-cafe-f210-agy-headless-spike-real-home.log \
+  --print-timeout 20s \
+  --print "Reply exactly: CAT_CAFE_AGY_HEADLESS_OK"
+
+Captured: 2026-05-22
+Exit: 0
+
+stdout:
+CAT_CAFE_AGY_HEADLESS_OK
+
+stderr:
+(empty)
+
+Selected log lines:
+I... Print mode: starting (promptLength=39, model="", conversationID="")
+I... Print mode: not authenticated, trying silent auth
+I... ChainedAuth: authenticated via keyring (effective: keyring)
+I... OAuth: authenticated successfully as [REDACTED_EMAIL]
+I... Propagating selected model override to backend: label="Gemini 3.5 Flash (High)"
+I... Print mode: silent auth succeeded
+I... Starting new conversation (agent=false)
+I... Created conversation [REDACTED_CONVERSATION_ID]
+I... Print mode: conversation=[REDACTED_CONVERSATION_ID], sending message
+
+Post-run file checks:
+- ~/.gemini/antigravity-cli/settings.json still did not exist after the run.
+- ~/.gemini/antigravity-cli/cache/last_conversations.json recorded the new conversation.
+- ~/.gemini/config/projects/[REDACTED_PROJECT_ID].json was created and symlinked from .antigravitycli/.
+
+Notes:
+- Successful print-mode stdout is plain final text, not JSON or NDJSON.
+- The default model source was not a local settings.json key; the CLI fetched an account-side selected model override after silent keyring auth.

@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { KnowledgeResolver } from '../../dist/domains/memory/KnowledgeResolver.js';
 
 /** Minimal stub that records calls and returns canned items */
-function makeStore(tag, items = []) {
+function makeStore(tag, items = [], overrides = {}) {
   const calls = [];
   return {
     calls,
@@ -20,6 +20,7 @@ function makeStore(tag, items = []) {
       }));
     },
     health: async () => true,
+    ...overrides,
   };
 }
 
@@ -64,6 +65,33 @@ describe('KnowledgeResolver dimension routing', () => {
     // All three items should be present (fusion, no dedup since anchors differ)
     assert.equal(result.results.length, 3);
     assert.deepEqual(result.sources, ['project', 'global']);
+  });
+
+  it('dimension=all combines degradation metadata from project and global stores', async () => {
+    const proj = makeStore('proj', ['Alpha'], {
+      searchWithMeta: async (query, opts) => ({
+        items: await makeStore('proj', ['Alpha']).search(query, opts),
+        meta: { degraded: false },
+      }),
+    });
+    const glob = makeStore('glob', ['Beta'], {
+      searchWithMeta: async (query, opts) => ({
+        items: await makeStore('glob', ['Beta']).search(query, opts),
+        meta: {
+          degraded: true,
+          degradeReason: 'passage_embedding_unavailable',
+          effectiveMode: 'lexical',
+        },
+      }),
+    });
+    const resolver = new KnowledgeResolver({ projectStore: proj, globalStore: glob });
+
+    const result = await resolver.resolve('test', { dimension: 'all', depth: 'raw', mode: 'semantic' });
+
+    assert.equal(result.results.length, 2);
+    assert.equal(result.meta?.degraded, true);
+    assert.equal(result.meta?.degradeReason, 'passage_embedding_unavailable');
+    assert.equal(result.meta?.effectiveMode, 'lexical');
   });
 
   it('undefined dimension behaves like all (backward compat)', async () => {

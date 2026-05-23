@@ -287,6 +287,25 @@ export const getThreadContextInputSchema = {
     .min(1)
     .optional()
     .describe('Optional: read messages from a different thread. Omit to read the current thread.'),
+  messageId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional: open a bounded context window around a specific message in the selected thread.'),
+  before: z
+    .number()
+    .int()
+    .min(0)
+    .max(50)
+    .optional()
+    .describe('When messageId is set, number of messages before the target to include (default: 3).'),
+  after: z
+    .number()
+    .int()
+    .min(0)
+    .max(50)
+    .optional()
+    .describe('When messageId is set, number of messages after the target to include (default: 3).'),
   catId: z.string().min(1).optional().describe("Optional: filter by speaker catId, or pass 'user' for human messages."),
   keyword: z
     .string()
@@ -546,6 +565,9 @@ export async function handleAckMentions(input: { upToMessageId: string }): Promi
 export async function handleGetThreadContext(input: {
   limit?: number | undefined;
   threadId?: string | undefined;
+  messageId?: string | undefined;
+  before?: number | undefined;
+  after?: number | undefined;
   catId?: string | undefined;
   keyword?: string | undefined;
   agentKeyCatId?: string | undefined;
@@ -555,6 +577,9 @@ export async function handleGetThreadContext(input: {
     {
       ...(input.limit ? { limit: String(input.limit) } : {}),
       ...(input.threadId ? { threadId: input.threadId } : {}),
+      ...(input.messageId ? { messageId: input.messageId } : {}),
+      ...(input.before !== undefined ? { before: String(input.before) } : {}),
+      ...(input.after !== undefined ? { after: String(input.after) } : {}),
       ...(input.catId ? { catId: input.catId } : {}),
       ...(input.keyword ? { keyword: input.keyword } : {}),
     },

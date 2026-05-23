@@ -117,6 +117,89 @@ describe('MCP Evidence Tools', () => {
     );
   });
 
+  test('renders entity match explanations returned by search_evidence API', async () => {
+    const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
+
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        degraded: false,
+        results: [
+          {
+            title: 'Vision discussion',
+            anchor: 'thread:vision',
+            snippet: 'CVO asked about entity anchors',
+            confidence: 'high',
+            sourceType: 'discussion',
+            matchReason: 'entity:person:landy',
+            entityMatches: [
+              {
+                entityId: 'person:landy',
+                type: 'person',
+                canonicalName: 'You',
+                matchedAlias: 'CVO',
+                surface: '铲屎官',
+                source: 'passage',
+                docAnchor: 'thread:vision',
+                passageId: 'p1',
+                provenance: [{ source: 'F209 Phase B MCP contract test' }],
+                why: 'query CVO matched entity person:landy via alias 铲屎官',
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    const result = await handleSearchEvidence({ query: 'CVO', mode: 'hybrid' });
+    const text = result.content[0].text;
+
+    assert.ok(text.includes('match: entity:person:landy'), 'should keep coarse entity match reason');
+    assert.ok(text.includes('entity: person:landy'), 'should render entity id');
+    assert.ok(text.includes('matchedAlias=CVO'), 'should render the query alias');
+    assert.ok(text.includes('surface=铲屎官'), 'should render the matched surface');
+    assert.ok(
+      text.includes('why: query CVO matched entity person:landy via alias 铲屎官'),
+      'should render entity match why explanation',
+    );
+    assert.ok(text.includes('provenance: F209 Phase B MCP contract test'), 'should render entity match provenance');
+  });
+
+  test('renders typed drillDown hints returned by search_evidence API', async () => {
+    const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
+
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        degraded: false,
+        results: [
+          {
+            title: 'Vision discussion',
+            anchor: 'thread:vision',
+            snippet: 'CVO asked about drill-down readers',
+            confidence: 'high',
+            sourceType: 'discussion',
+            drillDown: {
+              tool: 'cat_cafe_get_thread_context',
+              params: { threadId: 'thread_vision', messageId: 'msg-42', before: '3', after: '3' },
+              hint: 'get_thread_context(threadId="thread_vision", messageId="msg-42", before=3, after=3)',
+            },
+          },
+        ],
+      }),
+    });
+
+    const result = await handleSearchEvidence({ query: 'drill-down', mode: 'hybrid' });
+    const text = result.content[0].text;
+
+    assert.ok(text.includes('drillDown: cat_cafe_get_thread_context'), 'should render drillDown tool');
+    assert.ok(text.includes('threadId=thread_vision'), 'should render threadId param');
+    assert.ok(text.includes('messageId=msg-42'), 'should render messageId param');
+    assert.ok(text.includes('before=3'), 'should render before window');
+    assert.ok(text.includes('after=3'), 'should render after window');
+    assert.ok(text.includes('hint: get_thread_context'), 'should render drillDown hint');
+  });
+
   test('Hook F-1: appends Read reminder when high/mid doc anchors present', async () => {
     const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
 

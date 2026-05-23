@@ -66,7 +66,7 @@ END`,
 END`,
 ];
 
-export const CURRENT_SCHEMA_VERSION = 23;
+export const CURRENT_SCHEMA_VERSION = 24;
 
 // F163 Phase A: experiment infrastructure tables (cohorts, suggestions, logs)
 export const SCHEMA_V13_TABLES = `
@@ -653,6 +653,61 @@ export function applyMigrations(db: Database.Database): void {
     } catch {}
     db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(23, new Date().toISOString());
   }
+
+  // V24: F209 Phase B — entity registry, aliases, and mention index.
+  if (currentVersion < 24) {
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS entity_registry (
+          entity_id TEXT PRIMARY KEY,
+          entity_type TEXT NOT NULL,
+          canonical_name TEXT NOT NULL,
+          provenance_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      `);
+    } catch {}
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS entity_aliases (
+          entity_id TEXT NOT NULL,
+          alias TEXT NOT NULL,
+          alias_norm TEXT NOT NULL,
+          provenance_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (entity_id, alias_norm),
+          FOREIGN KEY (entity_id) REFERENCES entity_registry(entity_id) ON DELETE CASCADE
+        )
+      `);
+    } catch {}
+    try {
+      db.exec('CREATE INDEX IF NOT EXISTS idx_entity_aliases_norm ON entity_aliases(alias_norm)');
+    } catch {}
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS entity_mentions (
+          entity_id TEXT NOT NULL,
+          doc_anchor TEXT NOT NULL,
+          passage_id TEXT NOT NULL DEFAULT '',
+          surface TEXT NOT NULL,
+          surface_norm TEXT NOT NULL,
+          source TEXT NOT NULL,
+          provenance_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          PRIMARY KEY (entity_id, doc_anchor, passage_id, surface_norm),
+          FOREIGN KEY (entity_id) REFERENCES entity_registry(entity_id) ON DELETE CASCADE,
+          FOREIGN KEY (doc_anchor) REFERENCES evidence_docs(anchor) ON DELETE CASCADE
+        )
+      `);
+    } catch {}
+    try {
+      db.exec('CREATE INDEX IF NOT EXISTS idx_entity_mentions_entity ON entity_mentions(entity_id)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_entity_mentions_doc ON entity_mentions(doc_anchor)');
+    } catch {}
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(24, new Date().toISOString());
+  }
 }
 
 /**
@@ -666,6 +721,25 @@ export function ensureVectorTable(db: Database.Database, dim: number): boolean {
     db.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS evidence_vectors USING vec0(
         anchor TEXT PRIMARY KEY,
+        embedding float[${dim}]
+      )
+    `);
+    return true;
+  } catch {
+    return false; // sqlite-vec not loaded — fail-open
+  }
+}
+
+/**
+ * Ensure passage-level vec0 table exists for raw semantic / hybrid recall.
+ * Kept separate from evidence_vectors because hydration target is
+ * evidence_passages, not evidence_docs.
+ */
+export function ensurePassageVectorTable(db: Database.Database, dim: number): boolean {
+  try {
+    db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS passage_vectors USING vec0(
+        passage_key TEXT PRIMARY KEY,
         embedding float[${dim}]
       )
     `);

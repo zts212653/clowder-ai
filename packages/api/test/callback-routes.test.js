@@ -546,6 +546,60 @@ describe('Callback Routes', () => {
     assert.equal(body.messages.length, 3);
   });
 
+  test('GET thread-context can open a bounded message window by messageId', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    const messages = [];
+    for (let i = 0; i < 5; i++) {
+      messages.push(
+        messageStore.append({
+          userId: 'user-1',
+          catId: i % 2 === 0 ? null : 'opus',
+          content: `Window message ${i}`,
+          mentions: [],
+          timestamp: i + 1,
+        }),
+      );
+    }
+
+    const target = messages[2];
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/thread-context?messageId=${target.id}&before=1&after=2`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.deepEqual(
+      body.messages.map((m) => m.content),
+      ['Window message 1', 'Window message 2', 'Window message 3', 'Window message 4'],
+    );
+  });
+
+  test('GET thread-context rejects messageId from another thread', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    const other = messageStore.append({
+      userId: 'user-1',
+      threadId: 'other-thread',
+      catId: null,
+      content: 'Other thread target',
+      mentions: [],
+      timestamp: 1,
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/thread-context?messageId=${other.id}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 404);
+  });
+
   test('GET thread-context supports catId filter (cat + user)', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');

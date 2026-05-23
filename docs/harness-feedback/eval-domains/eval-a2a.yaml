@@ -1,0 +1,26 @@
+---
+domainId: eval:a2a
+displayName: A2A Harness Eval
+systemThreadId: thread_eval_a2a
+evalCat:
+  catId: codex
+  handle: "@codex"
+  model: gpt-5.5
+frequency: daily
+sourceAdapter: f167-runtime-eval
+threadPolicy:
+  role: working-home
+  stateSot: registry
+  allowedContent:
+    - longitudinal-analysis
+    - verdict-discussion
+    - handoff-drafts
+legacyScheduledTaskIds:
+  - harness-fit-digest
+handoffTargetResolver:
+  featureId: F167
+  ownerCatId: opus47
+  threadLookup: feature-thread
+sla:
+  acknowledgeHours: 24
+  reevalWithinHours: 72

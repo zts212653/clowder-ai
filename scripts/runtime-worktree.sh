@@ -12,6 +12,8 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # BASH_SOURCE[0] always points at this file (source and exec alike).
 # shellcheck source=scripts/lib/quickstart-freshness.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/quickstart-freshness.sh"
+# shellcheck source=scripts/lib/node-runtime-guard.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/node-runtime-guard.sh"
 DEFAULT_RUNTIME_DIR="$(cd "$PROJECT_DIR/.." && pwd)/cat-cafe-runtime"
 
 RUNTIME_DIR="${CAT_CAFE_RUNTIME_DIR:-$DEFAULT_RUNTIME_DIR}"
@@ -491,6 +493,8 @@ start_runtime_worktree() {
 }
 
 [[ "${1:-}" == "--source-only" ]] && { return 0 2>/dev/null; exit 0; }
+
+ensure_supported_node_runtime "$SCRIPT_DIR/runtime-worktree.sh" "$@"
 
 COMMAND="${1:-status}"
 shift || true

@@ -12,7 +12,9 @@ const SYNC_SCRIPT = resolve(ROOT, 'scripts/sync-to-opensource.sh');
 function createSandbox(envFile = '') {
   const dir = mkdtempSync(join(tmpdir(), 'cc-start-dev-profile-'));
   mkdirSync(join(dir, 'scripts'), { recursive: true });
+  mkdirSync(join(dir, 'scripts/lib'), { recursive: true });
   cpSync(resolve(ROOT, 'scripts/start-dev.sh'), join(dir, 'scripts', 'start-dev.sh'));
+  cpSync(resolve(ROOT, 'scripts/lib/node-runtime-guard.sh'), join(dir, 'scripts/lib', 'node-runtime-guard.sh'));
 
   const downloadOverrides = resolve(ROOT, 'scripts/download-source-overrides.sh');
   if (existsSync(downloadOverrides)) {
@@ -412,6 +414,26 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
     assert.ok(apiJobBlock, 'start-windows.ps1 must have an API Start-Job block');
     assert.match(ps1, /NODE_ENV\s*=\s*\$apiNodeEnv/, 'Windows runtime env overrides must include NODE_ENV');
     assert.match(apiJobBlock, /runtimeEnvOverrides/, 'API job must consume runtimeEnvOverrides');
+  });
+});
+
+describe('embedding sidecar startup guards', () => {
+  it('does not silently fall back to sentence-transformers on Apple Silicon', () => {
+    const apiScript = readFileSync(resolve(ROOT, 'scripts/embed-api.py'), 'utf8');
+
+    assert.match(apiScript, /EMBED_ALLOW_ST_FALLBACK/);
+    assert.match(apiScript, /platform\.system\(\)\s*==\s*["']Darwin["']/);
+    assert.match(apiScript, /platform\.machine\(\)\s*==\s*["']arm64["']/);
+    assert.match(apiScript, /SentenceTransformer fallback disabled/);
+  });
+
+  it('pins the MLX embedding tokenizer stack away from transformers v5 drift', () => {
+    const embedScript = readFileSync(resolve(ROOT, 'scripts/embed-server.sh'), 'utf8');
+
+    assert.match(embedScript, /transformers<5/);
+    assert.match(embedScript, /huggingface-hub<1\.0/);
+    assert.match(embedScript, /mlx_embeddings\.utils/);
+    assert.match(embedScript, /batch_encode_plus/);
   });
 });
 

@@ -4,13 +4,26 @@
  */
 
 import assert from 'node:assert/strict';
+import { spawn as nodeSpawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { mock, test } from 'node:test';
 import { clearTimeout as clearKeepAliveTimeout, setTimeout as setKeepAliveTimeout } from 'node:timers';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const { spawnCli, isCliError, isCliTimeout, isLivenessWarning, KILL_GRACE_MS, SEMANTIC_COMPLETION_GRACE_MS } =
-  await import('../dist/utils/cli-spawn.js');
+const {
+  spawnCli,
+  isCliError,
+  isCliTimeout,
+  isLivenessWarning,
+  KILL_GRACE_MS,
+  SEMANTIC_COMPLETION_GRACE_MS,
+  resolveCliSupervisorNodeArgs,
+} = await import('../dist/utils/cli-spawn.js');
 const { DEFAULT_CLI_TIMEOUT_MS } = await import('../dist/utils/cli-timeout.js');
 const { isParseError } = await import('../dist/utils/ndjson-parser.js');
 const { ProcessLivenessProbe } = await import('../dist/utils/ProcessLivenessProbe.js');
@@ -31,15 +44,24 @@ async function collect(iterable) {
 
 /**
  * Create a mock child process for testing.
- * @param {{ exitOnKill?: boolean, exitCode?: number }} opts
+ * @param {{ exitOnKill?: boolean, exitCode?: number, autoCloseOnExit?: boolean }} opts
  *   exitOnKill: if true (default), killing closes stdout and emits exit.
  *   exitCode: the code to emit on exit (default null for signal kills).
+ *   autoCloseOnExit: if true (default), emitting exit schedules close like Node child_process.
  */
 function createMockProcess(opts = {}) {
-  const { exitOnKill = true, exitCode = null, pid = 12345 } = opts;
+  const { exitOnKill = true, exitCode = null, pid = 12345, autoCloseOnExit = true } = opts;
   const stdout = new PassThrough();
   const stderr = new PassThrough();
   const emitter = new EventEmitter();
+  const originalEmit = emitter.emit.bind(emitter);
+  emitter.emit = (event, ...args) => {
+    const emitted = originalEmit(event, ...args);
+    if (event === 'exit' && autoCloseOnExit) {
+      process.nextTick(() => originalEmit('close', ...args));
+    }
+    return emitted;
+  };
   const proc = {
     stdout,
     stderr,
@@ -97,6 +119,152 @@ test('spawnCli yields parsed JSON events from stdout', async () => {
   assert.deepEqual(spawnFn.mock.calls[0].arguments[1], ['--json']);
 });
 
+test(
+  'spawnCli default spawn supervisors Unix CLI children with parent pid',
+  { skip: process.platform === 'win32' && 'Unix supervisor is not used on Windows' },
+  async () => {
+    const results = await collect(
+      spawnCli({
+        command: process.execPath,
+        args: [
+          '-e',
+          'console.log(JSON.stringify({ type: "env", parentPid: process.env.CAT_CAFE_SUPERVISOR_PARENT_PID ?? null }))',
+        ],
+        timeoutMs: 5_000,
+      }),
+    );
+
+    const event = results.find((item) => item?.type === 'env');
+    assert.equal(event?.parentPid, String(process.pid));
+  },
+);
+
+test('resolveCliSupervisorNodeArgs falls back to source ts file under tsx runtime', async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), 'cat-cafe-cli-supervisor-source-'));
+  try {
+    const utilsDir = join(tempDir, 'src', 'utils');
+    await mkdir(utilsDir, { recursive: true });
+    const cliSpawnPath = join(utilsDir, 'cli-spawn.ts');
+    const supervisorPath = join(utilsDir, 'cli-supervisor.ts');
+    await writeFile(cliSpawnPath, '');
+    await writeFile(supervisorPath, '');
+
+    const args = resolveCliSupervisorNodeArgs(pathToFileURL(cliSpawnPath).href, ['--import', 'tsx']);
+
+    assert.deepEqual(args, ['--import', 'tsx', supervisorPath]);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('resolveCliSupervisorNodeArgs prefers built js file when present', async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), 'cat-cafe-cli-supervisor-dist-'));
+  try {
+    const utilsDir = join(tempDir, 'dist', 'utils');
+    await mkdir(utilsDir, { recursive: true });
+    const cliSpawnPath = join(utilsDir, 'cli-spawn.js');
+    const supervisorPath = join(utilsDir, 'cli-supervisor.js');
+    await writeFile(cliSpawnPath, '');
+    await writeFile(supervisorPath, '');
+
+    const args = resolveCliSupervisorNodeArgs(pathToFileURL(cliSpawnPath).href, ['--import', 'tsx']);
+
+    assert.deepEqual(args, [supervisorPath]);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test(
+  'cli supervisor terminates supervised child when original parent is gone',
+  { skip: process.platform === 'win32' && 'Unix process-group supervisor is not used on Windows' },
+  async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'cat-cafe-cli-supervisor-'));
+    const markerPath = join(tempDir, 'terminated.txt');
+    const supervisorPath = fileURLToPath(new URL('../dist/utils/cli-supervisor.js', import.meta.url));
+    const childScript = [
+      'const fs = require("node:fs");',
+      `process.on("SIGTERM", () => { fs.writeFileSync(${JSON.stringify(markerPath)}, "SIGTERM"); process.exit(0); });`,
+      'setInterval(() => {}, 60_000);',
+    ].join('\n');
+
+    let supervisor;
+    try {
+      supervisor = nodeSpawn(process.execPath, [supervisorPath, '--', process.execPath, '-e', childScript], {
+        env: {
+          ...process.env,
+          CAT_CAFE_SUPERVISOR_PARENT_PID: '999999',
+          CAT_CAFE_SUPERVISOR_POLL_MS: '500',
+          CAT_CAFE_SUPERVISOR_KILL_GRACE_MS: '300',
+        },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+      let stderr = '';
+      supervisor.stderr.on('data', (chunk) => {
+        stderr += chunk.toString();
+      });
+
+      const exit = await new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          supervisor.kill('SIGKILL');
+          resolve({ timedOut: true, stderr });
+        }, 3_000);
+        supervisor.once('exit', (code, signal) => {
+          clearTimeout(timer);
+          resolve({ code, signal, stderr });
+        });
+      });
+
+      assert.notEqual(exit.timedOut, true, `supervisor did not exit: ${exit.stderr}`);
+      assert.equal(existsSync(markerPath), true, `child did not receive SIGTERM; stderr=${exit.stderr}`);
+      assert.equal(await readFile(markerPath, 'utf8'), 'SIGTERM');
+    } finally {
+      supervisor?.kill('SIGKILL');
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'cli supervisor escalates stubborn supervised child before parent kill grace elapses',
+  { skip: process.platform === 'win32' && 'Unix process-group supervisor is not used on Windows' },
+  async () => {
+    const supervisorPath = fileURLToPath(new URL('../dist/utils/cli-supervisor.js', import.meta.url));
+    const childScript = ['process.on("SIGTERM", () => {});', 'setInterval(() => {}, 60_000);'].join('\n');
+    const supervisor = nodeSpawn(process.execPath, [supervisorPath, '--', process.execPath, '-e', childScript], {
+      env: {
+        ...process.env,
+        CAT_CAFE_SUPERVISOR_PARENT_PID: '999999',
+        CAT_CAFE_SUPERVISOR_POLL_MS: '100',
+        CAT_CAFE_SUPERVISOR_KILL_GRACE_MS: '150',
+      },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let stderr = '';
+    supervisor.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    try {
+      const exit = await new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          supervisor.kill('SIGKILL');
+          resolve({ timedOut: true, stderr });
+        }, 2_000);
+        supervisor.once('exit', (code, signal) => {
+          clearTimeout(timer);
+          resolve({ code, signal, stderr });
+        });
+      });
+
+      assert.notEqual(exit.timedOut, true, `supervisor did not escalate: ${exit.stderr}`);
+      assert.equal(exit.code, 137, `SIGKILL child should surface as 137; stderr=${exit.stderr}`);
+    } finally {
+      supervisor.kill('SIGKILL');
+    }
+  },
+);
+
 test('spawnCli does not yield stderr data', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
@@ -133,6 +301,144 @@ test('spawnCli skips parse errors in stdout', async () => {
   assert.equal(isParseError(results[1]), true);
   assert.equal(results[1].line, 'not-json-line');
   assert.deepEqual(results[2], { also: 'valid' });
+});
+
+test('spawnCli plainText mode buffers raw stdout without NDJSON parsing', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+
+  const promise = collect(spawnCli({ command: 'test-cli', args: ['--print'], outputMode: 'plainText' }, { spawnFn }));
+
+  proc.stdout.write('plain ');
+  proc.stdout.write('response\n');
+  proc.stderr.write('debug log\n');
+  proc.stdout.end();
+  proc._emitter.emit('exit', 0, null);
+
+  const results = await promise;
+  assert.equal(results.length, 1);
+  assert.deepEqual(results[0], {
+    __cliPlainText: true,
+    stdout: 'plain response\n',
+    stderr: 'debug log\n',
+    exitCode: 0,
+    signal: null,
+    command: 'test-cli',
+  });
+});
+
+test('spawnCli plainText mode waits for close before emitting trailing stderr', async () => {
+  const proc = createMockProcess({ autoCloseOnExit: false });
+  const spawnFn = createMockSpawnFn(proc);
+
+  const promise = collect(
+    spawnCli({ command: 'agy', args: ['--print', 'hello'], outputMode: 'plainText' }, { spawnFn }),
+  );
+
+  proc.stdout.write('plain response\n');
+  proc.stdout.end();
+  proc._emitter.emit('exit', 0, null);
+  setImmediate(() => {
+    proc.stderr.write('Error: neither PlanModel nor RequestedModel specified\n');
+    proc.stderr.end();
+    proc._emitter.emit('close', 0, null);
+  });
+
+  const results = await promise;
+  assert.equal(results.length, 1);
+  assert.deepEqual(results[0], {
+    __cliPlainText: true,
+    stdout: 'plain response\n',
+    stderr: 'Error: neither PlanModel nor RequestedModel specified\n',
+    exitCode: 0,
+    signal: null,
+    command: 'agy',
+  });
+});
+
+test('spawnCli plainText mode waits for delayed close without fixed fallback', async () => {
+  const proc = createMockProcess({ autoCloseOnExit: false });
+  const spawnFn = createMockSpawnFn(proc);
+
+  const promise = collect(
+    spawnCli({ command: 'agy', args: ['--print', 'hello'], outputMode: 'plainText' }, { spawnFn }),
+  );
+
+  proc.stdout.write('plain response\n');
+  proc.stdout.end();
+  proc._emitter.emit('exit', 0, null);
+  setTimeout(() => {
+    proc.stderr.write('Error: delayed diagnostic after exit\n');
+    proc.stderr.end();
+    proc._emitter.emit('close', 0, null);
+  }, 80);
+
+  const results = await promise;
+  assert.equal(results.length, 1);
+  assert.deepEqual(results[0], {
+    __cliPlainText: true,
+    stdout: 'plain response\n',
+    stderr: 'Error: delayed diagnostic after exit\n',
+    exitCode: 0,
+    signal: null,
+    command: 'agy',
+  });
+});
+
+test('spawnCli plainText mode drains liveness warnings before stdout closes', async (t) => {
+  const stallWarningMs = 120;
+  const stallWarning = {
+    __livenessWarning: true,
+    state: 'idle-silent',
+    silenceDurationMs: stallWarningMs,
+    level: 'suspected_stall',
+    cpuTimeMs: 0,
+    processAlive: true,
+  };
+  let drainCalls = 0;
+
+  t.mock.method(ProcessLivenessProbe.prototype, 'start', () => {});
+  t.mock.method(ProcessLivenessProbe.prototype, 'getState', () => 'idle-silent');
+  t.mock.method(ProcessLivenessProbe.prototype, 'drainWarnings', () => {
+    drainCalls += 1;
+    return drainCalls === 2 ? [stallWarning] : [];
+  });
+
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const startedAt = Date.now();
+
+  const promise = collect(
+    spawnCli(
+      {
+        command: 'agy',
+        args: ['--print', 'hello'],
+        outputMode: 'plainText',
+        timeoutMs: 800,
+        livenessProbe: {
+          sampleIntervalMs: 30,
+          softWarningMs: 60,
+          stallWarningMs,
+          stallAutoKill: true,
+        },
+      },
+      { spawnFn },
+    ),
+  );
+
+  proc.stdout.write('partial plain text');
+
+  const results = await promise;
+  const elapsedMs = Date.now() - startedAt;
+  const timeout = results.find(isCliTimeout);
+  const warnings = results.filter(isLivenessWarning);
+
+  assert.ok(timeout, 'should yield __cliTimeout event');
+  assert.equal(timeout.stallKill, true, 'plainText stall warning should trigger stall auto-kill');
+  assert.equal(timeout.timeoutMs, stallWarningMs, 'reported timeout should use stallWarningMs');
+  assert.equal(warnings.length, 1, 'plainText path should surface liveness warning before stdout closes');
+  assert.ok(elapsedMs < 500, `plainText stallAutoKill should fire before full timeout, took ${elapsedMs}ms`);
+  assert.ok(proc.kill.mock.callCount() >= 1, 'should kill process on plainText stall');
 });
 
 test('parse-error noise does not reset timeout forever', async () => {

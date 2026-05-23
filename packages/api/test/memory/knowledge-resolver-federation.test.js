@@ -15,6 +15,13 @@ function mockStore(items) {
   };
 }
 
+function mockStoreWithMeta(items, meta) {
+  return {
+    ...mockStore(items),
+    searchWithMeta: async () => ({ items, meta }),
+  };
+}
+
 function item(anchor, title) {
   return { anchor, kind: 'feature', status: 'active', title, updatedAt: '2026-05-03' };
 }
@@ -114,6 +121,36 @@ describe('KnowledgeResolver N-collection federation', () => {
       assert.ok(group.sensitivity);
       assert.ok(['ok', 'timeout', 'skipped', 'error'].includes(group.status));
     }
+  });
+
+  it('dimension=library combines degradation metadata from collection stores', async () => {
+    const catalog = new LibraryCatalog();
+    catalog.register(manifest('project:a', 'project', 'internal'));
+    catalog.register(manifest('global:g', 'global', 'public'));
+
+    const stores = new Map();
+    stores.set('project:a', mockStoreWithMeta([item('p1', 'P')], { degraded: false }));
+    stores.set(
+      'global:g',
+      mockStoreWithMeta([item('g1', 'G')], {
+        degraded: true,
+        degradeReason: 'passage_vector_search_error',
+        effectiveMode: 'lexical',
+      }),
+    );
+
+    const resolver = new KnowledgeResolver({
+      projectStore: mockStore([]),
+      catalog,
+      stores,
+    });
+
+    const result = await resolver.resolve('test', { dimension: 'library', depth: 'raw', mode: 'hybrid' });
+
+    assert.equal(result.results.length, 2);
+    assert.equal(result.meta?.degraded, true);
+    assert.equal(result.meta?.degradeReason, 'passage_vector_search_error');
+    assert.equal(result.meta?.effectiveMode, 'lexical');
   });
 
   it('RRF fuses results across N collections', async () => {

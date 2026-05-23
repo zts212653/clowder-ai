@@ -428,7 +428,7 @@ install_sidecar_venvs() {
     fi
     "$embed_venv/bin/pip" install --quiet -U pip
     if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
-        "$embed_venv/bin/pip" install --quiet mlx mlx-embeddings fastapi uvicorn numpy
+        "$embed_venv/bin/pip" install --quiet mlx mlx-embeddings fastapi uvicorn numpy 'transformers<5' 'huggingface-hub<1.0'
     else
         "$embed_venv/bin/pip" install --quiet sentence-transformers torch fastapi uvicorn numpy
     fi

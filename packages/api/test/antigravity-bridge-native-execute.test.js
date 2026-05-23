@@ -127,7 +127,7 @@ describe('AntigravityBridge.nativeExecuteAndPush', () => {
     assert.deepEqual(payload, {
       cascadeId: 'c1',
       interaction: {
-        permission: { allowed: true },
+        permission: { allow: true },
         trajectoryId: 'traj-1',
         stepIndex: 23,
       },
@@ -212,6 +212,109 @@ describe('AntigravityBridge.nativeExecuteAndPush', () => {
     const handled = await bridge.nativeExecuteAndPush(step, { cascadeId: 'c1', cwd: '/tmp' });
     assert.equal(handled, 'no_executor', 'step with no matching executor must return no_executor (not false)');
     assert.equal(rpcMock.mock.callCount(), 0);
+  });
+
+  test('routes LS-owned file write tools to approval_pending instead of native writeback', async () => {
+    const lsOwnedTools = ['write_to_file', 'write_file', 'replace_file_content', 'multi_replace_file_content'];
+    for (const toolName of lsOwnedTools) {
+      const { bridge, rpcMock } = makeBridge();
+      const step = {
+        type: 'CORTEX_STEP_TYPE_CODE_ACTION',
+        status: 'CORTEX_STEP_STATUS_WAITING',
+        metadata: {
+          toolCall: {
+            id: `toolu_${toolName}`,
+            name: toolName,
+            argumentsJson: JSON.stringify({ Path: 'src/index.ts', Content: 'unsafe' }),
+          },
+          sourceTrajectoryStepInfo: { trajectoryId: 'traj-1', stepIndex: 9, cascadeId: 'c1' },
+        },
+      };
+
+      const handled = await bridge.nativeExecuteAndPush(step, {
+        cascadeId: 'c1',
+        cwd: '/tmp',
+        modelName: 'claude-opus-4-6',
+      });
+
+      assert.equal(handled, 'approval_pending', `${toolName} must be approved by Antigravity LS, not executed here`);
+      assert.equal(rpcMock.mock.callCount(), 0, `${toolName} must not call RunCommand or pushToolResult RPCs`);
+      assert.equal(bridge.sendMessage.mock.callCount(), 0, `${toolName} must not synthetic-writeback a file result`);
+    }
+  });
+
+  test('approves CODE_ACTION write permissions through Antigravity user interaction RPC', async () => {
+    const { bridge, rpcMock } = makeBridge();
+    const step = {
+      type: 'CORTEX_STEP_TYPE_CODE_ACTION',
+      status: 'CORTEX_STEP_STATUS_WAITING',
+      metadata: {
+        toolCall: {
+          id: 'toolu_write_to_file',
+          name: 'write_to_file',
+          argumentsJson: JSON.stringify({ Path: 'src/index.ts', Content: 'safe probe' }),
+        },
+        sourceTrajectoryStepInfo: { trajectoryId: 'traj-1', stepIndex: 9, cascadeId: 'c1' },
+      },
+      requestedInteraction: {
+        permission: {
+          resource: {
+            action: 'write_file',
+            target: '/tmp/src/index.ts',
+          },
+        },
+      },
+    };
+
+    await bridge.approvePendingInteraction('c1', step);
+
+    const methods = rpcMock.mock.calls.map((c) => {
+      const args = c.arguments;
+      return typeof args[0] === 'string' ? args[0] : args[1];
+    });
+    assert.deepEqual(methods, ['HandleCascadeUserInteraction']);
+
+    const payload = rpcMock.mock.calls[0].arguments[2];
+    assert.deepEqual(payload, {
+      cascadeId: 'c1',
+      interaction: {
+        permission: { allow: true },
+        trajectoryId: 'traj-1',
+        stepIndex: 9,
+      },
+    });
+    assert.equal(bridge.sendMessage.mock.callCount(), 0, 'code action approval must not synthetic-writeback');
+  });
+
+  test('acknowledges non-permission CODE_ACTION steps without requiring trajectoryId', async () => {
+    const { bridge, rpcMock } = makeBridge();
+    const step = {
+      type: 'CORTEX_STEP_TYPE_CODE_ACTION',
+      status: 'CORTEX_STEP_STATUS_WAITING',
+      metadata: {
+        toolCall: {
+          id: 'toolu_code_action_ack',
+          name: 'show_diff',
+          argumentsJson: JSON.stringify({ Path: 'src/index.ts' }),
+        },
+        sourceTrajectoryStepInfo: { stepIndex: 4, cascadeId: 'c1' },
+      },
+    };
+
+    await bridge.approvePendingInteraction('c1', step);
+
+    const methods = rpcMock.mock.calls.map((c) => {
+      const args = c.arguments;
+      return typeof args[0] === 'string' ? args[0] : args[1];
+    });
+    assert.deepEqual(methods, ['AcknowledgeCodeActionStep']);
+
+    const payload = rpcMock.mock.calls[0].arguments[2];
+    assert.deepEqual(payload, {
+      cascadeId: 'c1',
+      accept: true,
+      stepIndices: [4],
+    });
   });
 
   test('executes Antigravity 2.x call_mcp_tool wrapper using the nested MCP tool payload', async () => {
@@ -438,20 +541,20 @@ describe('AntigravityBridge.nativeExecuteAndPush', () => {
     }));
     const registry = new ExecutorRegistry();
     registry.register({
-      toolName: 'write_file',
-      canHandle: (step) => step.metadata?.toolCall?.name === 'write_file',
+      toolName: 'delete_file',
+      canHandle: (step) => step.metadata?.toolCall?.name === 'delete_file',
       execute: executeMock,
     });
     bridge.attachExecutors(registry, new AuditLogger(logDir));
 
     const step = {
-      type: 'CORTEX_STEP_TYPE_WRITE_FILE',
+      type: 'CORTEX_STEP_TYPE_DELETE_FILE',
       status: 'CORTEX_STEP_STATUS_WAITING',
       metadata: {
         toolCall: {
-          id: 'toolu_write',
-          name: 'write_file',
-          argumentsJson: JSON.stringify({ Path: 'src/index.ts', Content: 'unsafe' }),
+          id: 'toolu_delete',
+          name: 'delete_file',
+          argumentsJson: JSON.stringify({ Path: 'src/index.ts' }),
         },
         sourceTrajectoryStepInfo: { trajectoryId: 'traj-1', stepIndex: 8, cascadeId: 'c1' },
       },

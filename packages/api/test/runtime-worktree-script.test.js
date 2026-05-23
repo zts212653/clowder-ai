@@ -14,8 +14,11 @@ const runtimeScriptSource = join(__dirname, '..', '..', '..', 'scripts', 'runtim
 // whole closure or `set -e` dies sourcing a missing file (same root cause as
 // the sync-manifest closure: copying the script means copying its deps too).
 const quickstartLibSource = join(__dirname, '..', '..', '..', 'scripts', 'lib', 'quickstart-freshness.sh');
+const nodeRuntimeGuardSource = join(__dirname, '..', '..', '..', 'scripts', 'lib', 'node-runtime-guard.sh');
 const tempDirs = [];
 const tempProcs = [];
+
+process.env.CAT_CAFE_SKIP_NODE_RUNTIME_GUARD = '1';
 
 function createTempProject(name) {
   const projectDir = mkdtempSync(join(tmpdir(), `${name}-`));
@@ -33,6 +36,13 @@ function createTempProject(name) {
     join(projectDir, 'scripts', 'lib', 'quickstart-freshness.sh'),
     readFileSync(quickstartLibSource, 'utf8'),
     { mode: 0o644 },
+  );
+  writeFileSync(
+    join(projectDir, 'scripts', 'lib', 'node-runtime-guard.sh'),
+    readFileSync(nodeRuntimeGuardSource, 'utf8'),
+    {
+      mode: 0o644,
+    },
   );
   writeFileSync(join(projectDir, 'scripts', 'start-dev.sh'), '#!/bin/sh\nprintf "STARTED:%s\\n" "$PWD"\n', {
     mode: 0o755,

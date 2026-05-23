@@ -966,6 +966,33 @@ skills:
     merged_from: null
     feature: "F144"
 
+  # ── 技术文章对外写作 ──
+  tech-writing:
+    description: >
+      技术文章对外写作：从内部实践到读者能代入的叙事。
+      Use when: 写技术博客、公众号文章、社区分享、对外 longform、技术文章 review、写推广语。
+      Not for: 内部文档/spec（直接写）、PPT（用 ppt-forge）、纯调研报告（用 deep-research）。
+      Output: 读者能代入的技术文章 + AI味自检通过 + 推广语。
+    triggers:
+      - "写文章"
+      - "技术分享"
+      - "博客"
+      - "longform"
+      - "公众号"
+      - "对外发布"
+      - "社区分享"
+      - "推广语"
+      - "tech writing"
+    not_for:
+      - "内部文档"
+      - "spec"
+      - "PPT"
+      - "调研报告"
+    output: "Reader-friendly technical article + AI-flavor check passed + promo copy"
+    next: []
+    sop_step: null
+    merged_from: null
+
   # ── 金融数据 ──
   ttfund-skills:
     description: >

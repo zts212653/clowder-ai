@@ -160,19 +160,24 @@ describe('GET /api/evidence/search', () => {
     assert.deepEqual(body.results, []);
   });
 
-  // ── AC-K1: depth=raw + non-lexical mode returns degradation signal ──
-  it('returns degraded=true with effectiveMode for depth=raw + mode=hybrid', async () => {
+  // ── F209 Phase A: raw non-lexical modes degrade only when passage vectors are unavailable ──
+  it('returns degraded=false for depth=raw + mode=hybrid when store reports raw hybrid execution', async () => {
     await setup({
-      search: async () => [
-        {
-          anchor: 'thread-1',
-          kind: 'thread',
-          status: 'active',
-          title: 'Thread 1',
-          summary: 'A thread',
-          updatedAt: '2026-01-01T00:00:00Z',
+      searchWithMeta: async () => ({
+        items: [
+          {
+            anchor: 'thread-1',
+            kind: 'thread',
+            status: 'active',
+            title: 'Thread 1',
+            summary: 'A thread',
+            updatedAt: '2026-01-01T00:00:00Z',
+          },
+        ],
+        meta: {
+          degraded: false,
         },
-      ],
+      }),
     });
 
     const res = await app.inject({
@@ -182,10 +187,81 @@ describe('GET /api/evidence/search', () => {
 
     assert.equal(res.statusCode, 200);
     const body = res.json();
+    assert.equal(body.degraded, false);
+    assert.equal(body.degradeReason, undefined);
+    assert.equal(body.effectiveMode, undefined);
+    assert.equal(body.results.length, 1);
+  });
+
+  it('returns passage_embedding_unavailable when raw semantic falls back to lexical', async () => {
+    await setup({
+      searchWithMeta: async () => ({
+        items: [],
+        meta: {
+          degraded: true,
+          degradeReason: 'passage_embedding_unavailable',
+          effectiveMode: 'lexical',
+        },
+      }),
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=test&depth=raw&mode=semantic',
+    });
+
+    const body = res.json();
+    assert.equal(body.degraded, true);
+    assert.equal(body.degradeReason, 'passage_embedding_unavailable');
+    assert.equal(body.effectiveMode, 'lexical');
+  });
+
+  it('returns passage_vector_search_error when raw hybrid vector search fails open', async () => {
+    await setup({
+      searchWithMeta: async () => ({
+        items: [],
+        meta: {
+          degraded: true,
+          degradeReason: 'passage_vector_search_error',
+          effectiveMode: 'lexical',
+        },
+      }),
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=test&depth=raw&mode=hybrid',
+    });
+
+    const body = res.json();
+    assert.equal(body.degraded, true);
+    assert.equal(body.degradeReason, 'passage_vector_search_error');
+    assert.equal(body.effectiveMode, 'lexical');
+  });
+
+  it('returns raw_lexical_only when legacy stores lack searchWithMeta for raw semantic', async () => {
+    await setup({
+      search: async () => [
+        {
+          anchor: 'thread-legacy',
+          kind: 'thread',
+          status: 'active',
+          title: 'Legacy thread hit',
+          summary: 'Legacy store lexical-only result',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+      ],
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=test&depth=raw&mode=semantic',
+    });
+
+    const body = res.json();
     assert.equal(body.degraded, true);
     assert.equal(body.degradeReason, 'raw_lexical_only');
     assert.equal(body.effectiveMode, 'lexical');
-    // Results must still be returned (not swallowed)
     assert.equal(body.results.length, 1);
   });
 

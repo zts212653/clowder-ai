@@ -117,6 +117,8 @@ export function TraceBrowser() {
 
 function TraceCard({ trace, expanded, onToggle }: { trace: TraceGroup; expanded: boolean; onToggle: () => void }) {
   const [selectedSpan, setSelectedSpan] = useState<string | null>(null);
+  const selectedSpanData = selectedSpan ? trace.spans.find((s) => s.spanId === selectedSpan) : undefined;
+  const selectedRouteSpanId = selectedSpanData?.name === 'cat_cafe.route' ? selectedSpanData.spanId : undefined;
 
   return (
     <div className="rounded-lg border border-cafe-border bg-cafe-surface">
@@ -140,9 +142,9 @@ function TraceCard({ trace, expanded, onToggle }: { trace: TraceGroup; expanded:
       {expanded && (
         <div className="border-t border-cafe-border px-3 pb-3 pt-2 space-y-2">
           <div className="text-micro text-cafe-muted font-mono">traceId: {trace.traceId}</div>
-          <StepSummaryPanel traceId={trace.traceId} />
+          <StepSummaryPanel traceId={trace.traceId} routeSpanId={selectedRouteSpanId} />
           <TreeWaterfall trace={trace} selectedSpan={selectedSpan} onSelectSpan={setSelectedSpan} />
-          {selectedSpan && <SpanDetail span={trace.spans.find((s) => s.spanId === selectedSpan)} />}
+          {selectedSpan && <SpanDetail span={selectedSpanData} />}
         </div>
       )}
     </div>
@@ -540,15 +542,19 @@ function StepSummaryPanel({ traceId, routeSpanId }: { traceId: string; routeSpan
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+    setData(null);
     const qs = new URLSearchParams({ traceId });
     if (routeSpanId) qs.set('routeSpanId', routeSpanId);
     apiFetch(`/api/telemetry/step-summary?${qs.toString()}`)
       .then(async (res) => {
         if (cancelled) return;
-        if (res.ok) {
-          const json = (await res.json()) as StepSummaryData;
-          setData(json);
+        if (!res.ok) {
+          setData(null);
+          return;
         }
+        const json = (await res.json()) as StepSummaryData;
+        setData(json);
       })
       .catch(() => {
         /* ignore */

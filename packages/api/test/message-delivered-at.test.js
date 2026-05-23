@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+const { MessageStore, generateSortableId } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
 describe('MessageStore.markDelivered', () => {
   test('sets deliveredAt on a queued message', () => {
@@ -67,5 +67,43 @@ describe('MessageStore.markDelivered', () => {
 
     // Immediate messages should NOT have deliveredAt
     assert.equal(msg.deliveredAt, undefined);
+  });
+});
+
+describe('MessageStore.getByThreadAfter', () => {
+  test('falls back to lexicographic ID filtering when cursor message is missing', () => {
+    const store = new MessageStore();
+    store.append({
+      threadId: 'thread-a',
+      userId: 'u1',
+      catId: null,
+      content: 'before cursor',
+      mentions: [],
+      timestamp: 1000,
+    });
+    const afterCursor = store.append({
+      threadId: 'thread-a',
+      userId: 'u1',
+      catId: null,
+      content: 'after missing cursor',
+      mentions: [],
+      timestamp: 2000,
+    });
+    store.append({
+      threadId: 'thread-b',
+      userId: 'u1',
+      catId: null,
+      content: 'other thread',
+      mentions: [],
+      timestamp: 3000,
+    });
+
+    const missingCursor = generateSortableId(1500);
+    const results = store.getByThreadAfter('thread-a', missingCursor, 5, 'u1');
+
+    assert.deepEqual(
+      results.map((m) => m.id),
+      [afterCursor.id],
+    );
   });
 });

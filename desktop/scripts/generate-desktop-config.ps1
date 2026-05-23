@@ -7,7 +7,7 @@ param(
     [Parameter(Mandatory)] [string]$AppDir,
     [switch]$Claude,
     [switch]$Codex,
-    [switch]$Gemini,
+    [switch]$Antigravity,
     [switch]$Kimi
 )
 
@@ -17,7 +17,7 @@ $config = @{
     components = @{
         claude = $Claude.IsPresent
         codex  = $Codex.IsPresent
-        gemini = $Gemini.IsPresent
+        antigravity = $Antigravity.IsPresent
         kimi   = $Kimi.IsPresent
     }
 }

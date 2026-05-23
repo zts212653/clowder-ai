@@ -1,0 +1,25 @@
+Command:
+/tmp/cat-cafe-f210-agy-recon/bin/agy \
+  --log-file /tmp/cat-cafe-f210-agy-headless-spike-timeout.log \
+  --print-timeout 1s \
+  --print "Wait silently for five seconds, then reply TIMEOUT_SHOULD_NOT_RETURN."
+
+Captured: 2026-05-22
+Exit: 0
+
+stdout:
+Error: timed out waiting for response
+
+stderr:
+(empty)
+
+Selected log lines:
+I... Print mode: starting (promptLength=69, model="", conversationID="")
+I... ChainedAuth: authenticated via keyring (effective: keyring)
+I... Propagating selected model override to backend: label="Gemini 3.5 Flash (High)"
+I... Print mode: conversation=[REDACTED_CONVERSATION_ID], sending message
+E... Print mode: timed out after 5 polls (printed=2)
+
+Notes:
+- `--print-timeout 1s` produced a timeout message on stdout, not stderr.
+- The process exit code was 0 despite the timeout message, so adapter code cannot treat exit code alone as success.

@@ -89,6 +89,11 @@ describe('MCP Callback Tools', () => {
     // agent-key path, MUST unset invocation env vars (closing 砚砚 review P1).
     delete process.env.CAT_CAFE_INVOCATION_ID;
     delete process.env.CAT_CAFE_CALLBACK_TOKEN;
+    delete process.env.CAT_CAFE_AGENT_KEY_SECRET;
+    delete process.env.CAT_CAFE_AGENT_KEY_FILE;
+    const agentKeyFile = join(outboxDir, 'antigravity-agent-key.secret');
+    writeFileSync(agentKeyFile, 'test-agent-key\n', { mode: 0o600 });
+    process.env.CAT_CAFE_AGENT_KEY_FILES = JSON.stringify({ antigravity: agentKeyFile });
     const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
 
     let capturedOptions;
@@ -238,6 +243,33 @@ describe('MCP Callback Tools', () => {
     assert.ok(capturedUrl.includes('threadId=thread-42'));
     assert.ok(capturedUrl.includes('catId=user'));
     assert.ok(capturedUrl.includes('keyword=redis+lock'));
+  });
+
+  test('handleGetThreadContext forwards message window parameters', async () => {
+    const { handleGetThreadContext } = await import('../dist/tools/callback-tools.js');
+
+    let capturedUrl;
+    globalThis.fetch = async (url) => {
+      capturedUrl = url;
+      return {
+        ok: true,
+        json: async () => ({ messages: [] }),
+      };
+    };
+
+    const result = await handleGetThreadContext({
+      threadId: 'thread-42',
+      messageId: 'msg-42',
+      before: 2,
+      after: 4,
+    });
+
+    assert.equal(result.isError, undefined);
+    assert.ok(capturedUrl.includes('/api/callbacks/thread-context'));
+    assert.ok(capturedUrl.includes('threadId=thread-42'));
+    assert.ok(capturedUrl.includes('messageId=msg-42'));
+    assert.ok(capturedUrl.includes('before=2'));
+    assert.ok(capturedUrl.includes('after=4'));
   });
 
   test('handleListThreads forwards limit/activeSince filters', async () => {

@@ -2,27 +2,39 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { formatCatName, useCatData } from '@/hooks/useCatData';
+import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
+import type { CatInvocationInfo } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { deriveActiveCats } from './status-helpers';
+
+type ActiveInvocationSlots = Record<string, { catId: string; mode: string; startedAt?: number }>;
+
+interface ThreadExecutionBarProps {
+  threadId?: string;
+}
 
 /** F122B AC-B8+B9: Per-cat execution status bar with stop controls.
  *  B8/B9 polish: cat names use formatCatName() — "品种（variant）" format, colors from cat-config. */
-export function ThreadExecutionBar() {
-  const activeInvocations = useChatStore((s) => s.activeInvocations);
+export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
   const currentThreadId = useChatStore((s) => s.currentThreadId);
+  const effectiveThreadId = threadId ?? currentThreadId;
+  const {
+    activeInvocations,
+    catInvocations,
+    hasActive: hasActiveInvocation,
+    intentMode,
+    targetCats,
+  } = useThreadLiveness(effectiveThreadId);
   const { getCatById } = useCatData();
   const [, setTick] = useState(0);
 
-  // Extract unique active cats from invocations
-  const activeCats = Object.values(activeInvocations ?? {}).reduce(
-    (acc, inv) => {
-      if (!acc.some((c) => c.catId === inv.catId)) {
-        acc.push({ catId: inv.catId, startedAt: inv.startedAt ?? Date.now() });
-      }
-      return acc;
-    },
-    [] as Array<{ catId: string; startedAt: number }>,
-  );
+  const activeCats = deriveActiveCats({
+    targetCats,
+    activeInvocations,
+    hasActiveInvocation,
+    intentMode,
+  }).map((catId) => ({ catId, startedAt: getStartedAt(catId, activeInvocations, catInvocations) }));
 
   // Build display info from cat-config (dynamic, not hardcoded)
   const catDisplayMap = useMemo(() => {
@@ -50,16 +62,16 @@ export function ThreadExecutionBar() {
 
   const handleStopCat = useCallback(
     async (catId: string) => {
-      if (!currentThreadId) return;
-      await apiFetch(`/api/threads/${currentThreadId}/cancel/${catId}`, { method: 'POST' });
+      if (!effectiveThreadId) return;
+      await apiFetch(`/api/threads/${effectiveThreadId}/cancel/${catId}`, { method: 'POST' });
     },
-    [currentThreadId],
+    [effectiveThreadId],
   );
 
   const handleStopAll = useCallback(async () => {
-    if (!currentThreadId) return;
+    if (!effectiveThreadId) return;
     await Promise.all(activeCats.map(({ catId }) => handleStopCat(catId)));
-  }, [currentThreadId, activeCats, handleStopCat]);
+  }, [effectiveThreadId, activeCats, handleStopCat]);
 
   if (activeCats.length === 0) return null;
 
@@ -90,6 +102,20 @@ export function ThreadExecutionBar() {
       )}
     </div>
   );
+}
+
+function getStartedAt(
+  catId: string,
+  activeInvocations: ActiveInvocationSlots,
+  catInvocations: Record<string, CatInvocationInfo>,
+) {
+  const slot = Object.values(activeInvocations).find((inv) => inv.catId === catId);
+  if (typeof slot?.startedAt === 'number') return slot.startedAt;
+
+  const invocationStartedAt = catInvocations[catId]?.startedAt;
+  if (typeof invocationStartedAt === 'number') return invocationStartedAt;
+
+  return Date.now();
 }
 
 function CatStatusChip({

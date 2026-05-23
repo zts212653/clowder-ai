@@ -5,6 +5,7 @@ import {
   callbackTools,
   distillationTools,
   evidenceTools,
+  fileSliceTools,
   gameActionTools,
   graphTools,
   libraryLifecycleTools,
@@ -40,6 +41,7 @@ export const READONLY_ALLOWED_TOOLS = new Set([
   'cat_cafe_graph_resolve', // F188 Phase F AC-F1
   'cat_cafe_list_recent', // F188 Phase F AC-F2
   'cat_cafe_get_rich_block_rules',
+  'cat_cafe_read_file_slice',
   // Session chain (read-only API calls, no callback creds needed)
   'cat_cafe_list_session_chain',
   'cat_cafe_read_session_events',
@@ -90,6 +92,7 @@ const memoryTools: readonly ToolDef[] = applyReadonlyFilter([
   ...callbackMemoryTools,
   ...distillationTools,
   ...evidenceTools,
+  ...fileSliceTools,
   ...graphTools, // F188 Phase F AC-F1
   ...libraryLifecycleTools, // F188 Phase I AC-I4
   ...recentTools, // F188 Phase F AC-F2

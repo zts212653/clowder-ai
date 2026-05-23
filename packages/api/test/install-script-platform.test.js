@@ -207,17 +207,32 @@ test('linux: Claude installed via npm, not curl claude.ai', () => {
   );
 });
 
-test('Gemini always installed via npm (no brew formula)', () => {
-  assert.match(installScriptText, /gemini\).*install_npm_cli.*Gemini/s, 'Gemini must always use npm install');
+test('Antigravity CLI installs through native bootstrapper, not Gemini npm package', () => {
+  assert.match(installScriptText, /install_antigravity_cli\(\)/, 'must define AGY native install helper');
+  assert.match(
+    installScriptText,
+    /https:\/\/antigravity\.google\/cli\/install\.sh/,
+    'must use official AGY bootstrapper',
+  );
+  assert.match(installScriptText, /agy\)\s+install_antigravity_cli/s, 'missing AGY should route to native helper');
+  assert.doesNotMatch(
+    installScriptText,
+    /gemini\).*install_npm_cli.*Gemini/s,
+    'must not install Gemini CLI as AGY replacement',
+  );
 });
 
 test('darwin redis install does not ping-gate after install', () => {
   // install_redis_local must NOT check redis-cli ping — install success
   // is determined by the package manager exit code, not by whether the
   // service is already responding.
+  const start = installScriptText.indexOf('install_redis_local()');
+  const end = installScriptText.indexOf('start_redis_if_stopped()', start);
+  assert.ok(start >= 0 && end > start, 'install_redis_local body should be locatable');
+  const redisInstallBody = installScriptText.slice(start, end);
   assert.doesNotMatch(
-    installScriptText,
-    /install_redis_local[\s\S]*?redis-cli ping[\s\S]*?return 1/s,
+    redisInstallBody,
+    /redis-cli ping[\s\S]*?return 1/s,
     'install_redis_local must not fail on redis-cli ping',
   );
 });

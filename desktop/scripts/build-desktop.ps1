@@ -253,6 +253,18 @@ if (-not (Test-Path $cliToolsDir)) {
     New-Item -ItemType Directory -Path $cliToolsDir -Force | Out-Null
 }
 
+$agyInstructionsPath = Join-Path $cliToolsDir "agy-install-instructions.txt"
+@"
+Antigravity CLI (agy) is a native binary, not an npm package.
+Install it with the official bootstrapper:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri https://antigravity.google/cli/install.cmd -OutFile `$env:TEMP\antigravity-cli-install.cmd; & `$env:TEMP\antigravity-cli-install.cmd"
+
+Offline Cat Cafe packages intentionally do not vendor agy until Google
+publishes a redistributable native binary contract.
+"@ | Set-Content -Path $agyInstructionsPath -Encoding ascii
+Write-Ok "agy-install-instructions.txt written"
+
 # Use bundled npm (guaranteed present after Step 3) to pack CLI tarballs.
 $npmCmd = Join-Path $bundledNode "npm.cmd"
 if (-not (Test-Path $npmCmd)) {
@@ -262,8 +274,7 @@ if (-not (Test-Path $npmCmd)) {
 
 $cliPackages = @(
     @{ Name = "claude"; Pkg = "@anthropic-ai/claude-code" },
-    @{ Name = "codex";  Pkg = "@openai/codex" },
-    @{ Name = "gemini"; Pkg = "@google/gemini-cli" }
+    @{ Name = "codex";  Pkg = "@openai/codex" }
 )
 
 $cliAllPacked = $true

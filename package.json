@@ -5,6 +5,7 @@
   "description": "三只 AI 猫猫的协作空间",
   "scripts": {
     "init": "./scripts/init-cafe.sh",
+    "preinstall": "node scripts/check-node-runtime.mjs",
     "gate": "bash ./scripts/pre-merge-check.sh",
     "guards:install": "bash ./scripts/install-git-guards.sh",
     "start": "node ./scripts/start-entry.mjs start",

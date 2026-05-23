@@ -5,9 +5,11 @@ import type {
   CollectionGroup,
   CollectionManifest,
   EvidenceItem,
+  EvidenceSearchExecution,
   IEvidenceStore,
   IKnowledgeResolver,
   KnowledgeResult,
+  SearchExecutionMeta,
   SearchOptions,
 } from './interfaces.js';
 import type { LibraryCatalog } from './LibraryCatalog.js';
@@ -61,19 +63,27 @@ export class KnowledgeResolver implements IKnowledgeResolver {
     const manifests = this.catalog!.getRoutable(dimension, options?.collections);
     const groups: CollectionGroup[] = [];
 
+    const metas: SearchExecutionMeta[] = [];
     const settled = await Promise.allSettled(
       manifests.map(async (m) => {
         const store = this.stores.get(m.id);
         if (!store) return { manifest: m, items: [] as EvidenceItem[], noStore: true };
         const start = Date.now();
-        const items = await store.search(query, { ...options, limit });
-        return { manifest: m, items, durationMs: Date.now() - start, noStore: false };
+        const execution = await searchStoreWithMeta(store, query, { ...options, limit });
+        return {
+          manifest: m,
+          items: execution.items,
+          meta: execution.meta,
+          durationMs: Date.now() - start,
+          noStore: false,
+        };
       }),
     );
 
     for (const entry of settled) {
       if (entry.status === 'fulfilled') {
-        const { manifest: m, items, durationMs, noStore } = entry.value;
+        const { manifest: m, items, meta, durationMs, noStore } = entry.value;
+        if (meta) metas.push(meta);
         groups.push({
           collectionId: m.id,
           sensitivity: m.sensitivity,
@@ -83,6 +93,7 @@ export class KnowledgeResolver implements IKnowledgeResolver {
         });
       } else {
         const m = manifests[settled.indexOf(entry)] as CollectionManifest;
+        metas.push({ degraded: true, degradeReason: 'evidence_store_error' });
         groups.push({
           collectionId: m.id,
           sensitivity: m.sensitivity,
@@ -102,7 +113,13 @@ export class KnowledgeResolver implements IKnowledgeResolver {
         sources.push('global');
     }
 
-    return { results: fused, sources, query, collectionGroups: redactGroupsForPersistence(groups) };
+    return {
+      results: fused,
+      sources,
+      query,
+      meta: combineSearchMeta(metas),
+      collectionGroups: redactGroupsForPersistence(groups),
+    };
   }
 
   private async resolveLegacy(
@@ -112,37 +129,107 @@ export class KnowledgeResolver implements IKnowledgeResolver {
     dimension: string,
   ): Promise<KnowledgeResult> {
     if (dimension === 'project') {
-      const results = await this.projectStore.search(query, { ...options, limit });
-      return { results: results.slice(0, limit), sources: ['project'], query };
+      const execution = await searchStoreWithMeta(this.projectStore, query, { ...options, limit });
+      return { results: execution.items.slice(0, limit), sources: ['project'], query, meta: execution.meta };
     }
 
     if (dimension === 'global') {
       if (!this.globalStore) return { results: [], sources: [], query };
-      const results = await this.globalStore.search(query, { ...options, limit }).catch(() => []);
+      const execution = await searchStoreWithMeta(this.globalStore, query, { ...options, limit }).catch(
+        () =>
+          ({
+            items: [],
+            meta: { degraded: true, degradeReason: 'evidence_store_error' },
+          }) satisfies EvidenceSearchExecution,
+      );
+      const results = execution.items;
       return {
         results: results.slice(0, limit),
         sources: results.length > 0 ? ['global'] : [],
         query,
+        meta: execution.meta,
       };
     }
 
     const sources: KnowledgeResult['sources'] = [];
-    const projectPromise = this.projectStore.search(query, { ...options, limit });
+    const projectPromise = searchStoreWithMeta(this.projectStore, query, { ...options, limit });
     const globalPromise = this.globalStore
-      ? this.globalStore.search(query, { ...options, limit }).catch(() => null)
+      ? searchStoreWithMeta(this.globalStore, query, { ...options, limit }).catch(
+          () =>
+            ({
+              items: [],
+              meta: { degraded: true, degradeReason: 'evidence_store_error' },
+            }) satisfies EvidenceSearchExecution,
+        )
       : Promise.resolve(null);
 
-    const [projectResults, globalResults] = await Promise.all([projectPromise, globalPromise]);
+    const [projectExecution, globalExecution] = await Promise.all([projectPromise, globalPromise]);
+    const projectResults = projectExecution.items;
     sources.push('project');
 
-    if (!globalResults || globalResults.length === 0) {
-      return { results: projectResults.slice(0, limit), sources, query };
+    if (!globalExecution || globalExecution.items.length === 0) {
+      return {
+        results: projectResults.slice(0, limit),
+        sources,
+        query,
+        meta: combineSearchMeta([projectExecution.meta, globalExecution?.meta]),
+      };
     }
 
     sources.push('global');
+    const globalResults = globalExecution.items;
     const fused = rrfFusion(projectResults, globalResults, limit);
-    return { results: fused, sources, query };
+    return { results: fused, sources, query, meta: combineSearchMeta([projectExecution.meta, globalExecution.meta]) };
   }
+}
+
+async function searchStoreWithMeta(
+  store: IEvidenceStore,
+  query: string,
+  options?: SearchOptions,
+): Promise<EvidenceSearchExecution> {
+  if (store.searchWithMeta) return store.searchWithMeta(query, options);
+  return { items: await store.search(query, options), meta: legacyStoreMeta(options) };
+}
+
+function legacyStoreMeta(options?: SearchOptions): SearchExecutionMeta {
+  if (isRawNonLexical(options)) {
+    return { degraded: true, degradeReason: 'raw_lexical_only', effectiveMode: 'lexical' };
+  }
+  return { degraded: false };
+}
+
+function combineSearchMeta(metas: Array<SearchExecutionMeta | undefined>): SearchExecutionMeta {
+  const degradedMetas = metas.filter((meta): meta is SearchExecutionMeta => Boolean(meta?.degraded));
+  if (degradedMetas.length === 0) return { degraded: false };
+
+  const selected = degradedMetas.reduce((best, current) =>
+    degradeReasonPriority(current.degradeReason) > degradeReasonPriority(best.degradeReason) ? current : best,
+  );
+  return {
+    degraded: true,
+    ...(selected.degradeReason ? { degradeReason: selected.degradeReason } : {}),
+    ...(selected.effectiveMode ? { effectiveMode: selected.effectiveMode } : {}),
+  };
+}
+
+function degradeReasonPriority(reason: SearchExecutionMeta['degradeReason']): number {
+  switch (reason) {
+    case 'evidence_store_error':
+      return 4;
+    case 'passage_vector_search_error':
+      return 3;
+    case 'passage_embedding_unavailable':
+      return 2;
+    case 'raw_lexical_only':
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+function isRawNonLexical(options?: SearchOptions): boolean {
+  return options?.depth === 'raw' && (options.mode ?? 'lexical') !== 'lexical';
 }
 
 // ── Reciprocal Rank Fusion ──────────────────────────────────────────

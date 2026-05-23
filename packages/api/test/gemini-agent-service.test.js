@@ -15,6 +15,7 @@ import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
 const { GeminiAgentService } = await import('../dist/domains/cats/services/agents/providers/GeminiAgentService.js');
 
 ensureFakeCliOnPath('gemini');
+ensureFakeCliOnPath('agy');
 
 /** Helper: collect all items from async iterable */
 async function collect(iterable) {
@@ -41,6 +42,7 @@ function createMockProcess() {
       process.nextTick(() => {
         if (!stdout.destroyed) stdout.end();
         emitter.emit('exit', null, 'SIGTERM');
+        emitter.emit('close', null, 'SIGTERM');
       });
       return true;
     }),
@@ -65,6 +67,7 @@ function createMockSpawnFn(proc) {
 function emitProcessExit(proc, code, signal = null) {
   process.nextTick(() => {
     proc._emitter.emit('exit', code, signal);
+    proc._emitter.emit('close', code, signal);
   });
 }
 
@@ -77,6 +80,27 @@ function emitGeminiEvents(proc, events) {
     emitProcessExit(proc, 0, null);
   });
   proc.stdout.end();
+}
+
+function emitPlainText(proc, text, code = 0) {
+  proc.stdout.write(text);
+  proc.stdout.once('finish', () => {
+    emitProcessExit(proc, code, null);
+  });
+  proc.stdout.end();
+}
+
+function emitExitThenLatePlainTextBeforeClose(proc, text, code = 0) {
+  process.nextTick(() => {
+    proc._emitter.emit('exit', code, null);
+  });
+  setImmediate(() => {
+    proc.stdout.write(text);
+    proc.stdout.once('finish', () => {
+      proc._emitter.emit('close', code, null);
+    });
+    proc.stdout.end();
+  });
 }
 
 function writeGeminiJsonlSession(home, projectDir, sessionId, messages) {
@@ -422,6 +446,320 @@ describe('GeminiAgentService (gemini-cli adapter)', () => {
 
     const combined = textMsgs.map((m) => m.content).join('');
     assert.equal(combined, 'First turnSecond turnThird turn');
+  });
+});
+
+// ===== antigravity-cli adapter tests =====
+
+describe('GeminiAgentService (antigravity-cli adapter)', () => {
+  test('spawns agy print mode with repo access and maps plain stdout to text', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({
+      spawnFn,
+      adapter: 'antigravity-cli',
+      model: 'gemini-3.5-flash',
+    });
+    const workDir = mkdtempSync(join(tmpdir(), 'agy-workdir-'));
+
+    const promise = collect(
+      service.invoke('Say hi', {
+        workingDirectory: workDir,
+        systemPrompt: 'System identity',
+      }),
+    );
+    emitPlainText(proc, 'AGY_OK\n');
+
+    const msgs = await promise;
+    const text = msgs.find((m) => m.type === 'text');
+    const done = msgs.find((m) => m.type === 'done');
+    assert.equal(text?.content, 'AGY_OK');
+    assert.equal(done?.metadata?.provider, 'google');
+    assert.match(done?.metadata?.model ?? '', /antigravity-cli/);
+
+    const call = spawnFn.mock.calls[0];
+    assert.ok(call.arguments[0] === 'agy' || call.arguments[0].endsWith('/agy'));
+    const args = call.arguments[1];
+    assert.ok(args.includes('--print'));
+    assert.ok(args.includes('--print-timeout'));
+    assert.ok(args.includes('--dangerously-skip-permissions'));
+    assert.ok(args.includes('--add-dir'));
+    assert.equal(args[args.indexOf('--add-dir') + 1], workDir);
+    assert.equal(args[args.indexOf('--print') + 1], 'System identity\n\nSay hi');
+    assert.equal(args.includes('--model'), false, 'agy 1.0.1 has no verified --model flag');
+  });
+
+  test('creates a resumable agy conversation id on first turn', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli' });
+
+    const promise = collect(service.invoke('new agy thread'));
+    emitPlainText(proc, 'AGY_SESSION_OK\n');
+
+    const msgs = await promise;
+    assert.equal(msgs[0].type, 'session_init');
+    assert.match(msgs[0].sessionId, /^agy-/);
+    assert.equal(msgs[1].type, 'text');
+    assert.equal(msgs[1].content, 'AGY_SESSION_OK');
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(args.includes('--conversation'));
+    assert.equal(args[args.indexOf('--conversation') + 1], msgs[0].sessionId);
+  });
+
+  test('marks resumed agy stdout as replace because print mode can replay prior text', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli' });
+
+    const promise = collect(service.invoke('resume agy thread', { sessionId: 'agy-existing-session' }));
+    emitPlainText(proc, 'OLD_ASSISTANT_TEXT\nNEW_ASSISTANT_TEXT\n');
+
+    const msgs = await promise;
+    const text = msgs.find((m) => m.type === 'text');
+    assert.equal(text?.content, 'OLD_ASSISTANT_TEXT\nNEW_ASSISTANT_TEXT');
+    assert.equal(text?.textMode, 'replace');
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.equal(args[args.indexOf('--conversation') + 1], 'agy-existing-session');
+  });
+
+  test('reports per-call model override as unsupported without passing --model to agy', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli' });
+
+    const promise = collect(
+      service.invoke('model override check', {
+        callbackEnv: { CAT_CAFE_GEMINI_MODEL_OVERRIDE: 'gemini-override-should-not-be-used' },
+      }),
+    );
+    emitPlainText(proc, 'AGY_MODEL_BOUNDARY_OK\n');
+
+    const msgs = await promise;
+    const info = msgs.find((m) => {
+      if (m.type !== 'system_info' || typeof m.content !== 'string') return false;
+      return JSON.parse(m.content).type === 'antigravity_cli_model_override_unsupported';
+    });
+    assert.ok(info, 'unsupported model override should be explicit system_info');
+    const payload = JSON.parse(info.content);
+    assert.equal(payload.requestedModel, 'gemini-override-should-not-be-used');
+    assert.match(payload.reason, /account-side selected model/);
+
+    const done = msgs.find((m) => m.type === 'done');
+    assert.equal(done?.metadata?.modelVerified, false);
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.equal(args.includes('--model'), false);
+  });
+
+  test('passes image inputs as local path hints and add-dir access, not native image flags', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli' });
+    const workDir = mkdtempSync(join(tmpdir(), 'agy-image-workdir-'));
+    const uploadDir = join(workDir, 'uploads');
+    mkdirSync(uploadDir, { recursive: true });
+
+    const promise = collect(
+      service.invoke('describe this image', {
+        workingDirectory: workDir,
+        uploadDir,
+        contentBlocks: [{ type: 'image', url: '/uploads/example.png' }],
+      }),
+    );
+    emitPlainText(proc, 'AGY_IMAGE_HINT_OK\n');
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const addDirs = args.flatMap((arg, index) => (arg === '--add-dir' ? [args[index + 1]] : []));
+    assert.ok(addDirs.includes(workDir), 'repo workdir should remain accessible');
+    assert.ok(addDirs.includes(uploadDir), 'image upload dir should be accessible');
+    assert.equal(args.includes('--image'), false);
+    assert.equal(args.includes('-i'), false);
+    assert.match(args[args.indexOf('--print') + 1], /\[Local image path: .*example\.png\]/);
+  });
+
+  test('uses spawnCliOverride for agy plain stdout execution', async () => {
+    const spawnFn = mock.fn(() => {
+      throw new Error('direct spawn should not be used when spawnCliOverride is present');
+    });
+    let capturedOpts;
+    const spawnCliOverride = async function* (opts) {
+      capturedOpts = opts;
+      yield {
+        __cliPlainText: true,
+        stdout: 'AGY_OVERRIDE_OK\n',
+        stderr: '',
+        exitCode: 0,
+        signal: null,
+        command: opts.command,
+      };
+    };
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli' });
+
+    const msgs = await collect(
+      service.invoke('override agy', {
+        workingDirectory: '/tmp/agy-override',
+        spawnCliOverride,
+        invocationId: 'inv-agy-override',
+        cliSessionId: 'cli-agy-override',
+      }),
+    );
+
+    const text = msgs.find((m) => m.type === 'text');
+    assert.equal(text?.content, 'AGY_OVERRIDE_OK');
+    assert.equal(spawnFn.mock.callCount(), 0);
+    assert.equal(capturedOpts?.outputMode, 'plainText');
+    assert.ok(capturedOpts?.command === 'agy' || capturedOpts?.command.endsWith('/agy'));
+    assert.equal(capturedOpts?.cwd, '/tmp/agy-override');
+    assert.equal(capturedOpts?.invocationId, 'inv-agy-override');
+    assert.equal(capturedOpts?.cliSessionId, 'cli-agy-override');
+  });
+
+  test('waits for process close before classifying final agy stdout', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli' });
+
+    const promise = collect(service.invoke('stdout after exit'));
+    emitExitThenLatePlainTextBeforeClose(proc, 'AGY_LATE_OK\n');
+
+    const msgs = await promise;
+    const text = msgs.find((m) => m.type === 'text');
+    assert.equal(text?.content, 'AGY_LATE_OK');
+    assert.equal(msgs[msgs.length - 1].type, 'done');
+  });
+
+  test('classifies agy stdout timeout as an error even when process exits 0', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli' });
+
+    const promise = collect(service.invoke('slow prompt'));
+    emitPlainText(proc, 'Error: timed out waiting for response\n', 0);
+
+    const msgs = await promise;
+    assert.equal(
+      msgs.some((m) => m.type === 'text'),
+      false,
+    );
+    const err = msgs.find((m) => m.type === 'error');
+    assert.ok(err, 'timeout stdout must produce an error');
+    assert.match(err.error, /超时|timeout/i);
+    assert.equal(msgs[msgs.length - 1].type, 'done');
+  });
+
+  test('does not classify normal agy text mentioning timeout phrase as provider timeout', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli' });
+
+    const promise = collect(service.invoke('explain timeout wording'));
+    emitPlainText(proc, 'The CLI phrase `timed out waiting for response` is only an example.\n', 0);
+
+    const msgs = await promise;
+    assert.equal(
+      msgs.some((m) => m.type === 'error'),
+      false,
+    );
+    const text = msgs.find((m) => m.type === 'text');
+    assert.match(text?.content ?? '', /timed out waiting for response/);
+    assert.equal(msgs[msgs.length - 1].type, 'done');
+  });
+
+  test('does not classify normal agy text starting with Error as provider error', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli' });
+
+    const promise = collect(service.invoke('quote an error-prefixed answer'));
+    emitPlainText(proc, 'Error: this is quoted model output, not a CLI failure.\n', 0);
+
+    const msgs = await promise;
+    assert.equal(
+      msgs.some((m) => m.type === 'error'),
+      false,
+    );
+    const text = msgs.find((m) => m.type === 'text');
+    assert.equal(text?.content, 'Error: this is quoted model output, not a CLI failure.');
+    assert.equal(msgs[msgs.length - 1].type, 'done');
+  });
+
+  test('classifies missing selected model as actionable onboarding error', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli' });
+
+    const promise = collect(service.invoke('hello'));
+    emitPlainText(proc, 'Error: neither PlanModel nor RequestedModel specified. You must specify a valid model.\n', 0);
+
+    const msgs = await promise;
+    assert.equal(
+      msgs.some((m) => m.type === 'text'),
+      false,
+    );
+    const err = msgs.find((m) => m.type === 'error');
+    assert.ok(err, 'missing model stdout must produce an error');
+    assert.match(err.error, /\/model/);
+    assert.match(err.error, /Antigravity CLI|AGY/);
+    assert.equal(msgs[msgs.length - 1].type, 'done');
+  });
+
+  test('does not classify normal agy text mentioning model onboarding as missing model', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli' });
+
+    const promise = collect(service.invoke('explain model onboarding'));
+    emitPlainText(proc, 'The setup guide may say: Please use the /model command before continuing.\n', 0);
+
+    const msgs = await promise;
+    assert.equal(
+      msgs.some((m) => m.type === 'error'),
+      false,
+    );
+    const text = msgs.find((m) => m.type === 'text');
+    assert.match(text?.content ?? '', /Please use the \/model command/);
+    assert.equal(msgs[msgs.length - 1].type, 'done');
+  });
+
+  test('does not surface user cancellation as provider error', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli' });
+    const controller = new AbortController();
+
+    const promise = collect(service.invoke('cancel me', { signal: controller.signal }));
+    await new Promise((resolve) => setImmediate(resolve));
+    controller.abort();
+
+    const msgs = await promise;
+    assert.equal(
+      msgs.some((m) => m.type === 'error'),
+      false,
+    );
+    assert.equal(msgs[msgs.length - 1].type, 'done');
+  });
+
+  test('user cancellation wins over agy stdout timeout text', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli' });
+    const controller = new AbortController();
+
+    const promise = collect(service.invoke('cancel after stdout', { signal: controller.signal }));
+    await new Promise((resolve) => setImmediate(resolve));
+    proc.stdout.write('Error: timed out waiting for response\n');
+    controller.abort();
+
+    const msgs = await promise;
+    assert.equal(
+      msgs.some((m) => m.type === 'error'),
+      false,
+    );
+    assert.equal(msgs[msgs.length - 1].type, 'done');
   });
 });
 

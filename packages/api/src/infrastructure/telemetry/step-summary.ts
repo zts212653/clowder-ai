@@ -50,9 +50,12 @@ function collectSubtree(spans: TraceSpanDTO[], rootSpanId: string): TraceSpanDTO
   const byParent = new Map<string, TraceSpanDTO[]>();
   for (const s of spans) {
     if (s.parentSpanId) {
-      const arr = byParent.get(s.parentSpanId) ?? [];
-      arr.push(s);
-      byParent.set(s.parentSpanId, arr);
+      const siblings = byParent.get(s.parentSpanId);
+      if (siblings) {
+        siblings.push(s);
+      } else {
+        byParent.set(s.parentSpanId, [s]);
+      }
     }
   }
   const root = spans.find((s) => s.spanId === rootSpanId);
@@ -60,7 +63,9 @@ function collectSubtree(spans: TraceSpanDTO[], rootSpanId: string): TraceSpanDTO
   const result: TraceSpanDTO[] = [root];
   const queue = [rootSpanId];
   for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
-    for (const child of byParent.get(id) ?? []) {
+    const children = byParent.get(id);
+    if (!children) continue;
+    for (const child of children) {
       result.push(child);
       queue.push(child.spanId);
     }
@@ -142,7 +147,9 @@ export function computeStepSummary(spans: TraceSpanDTO[], traceId: string, route
   const errorCount = scopedSpans.filter((s) => s.status.code === SPAN_STATUS_ERROR).length;
 
   const width: number | null =
-    agentLoopCount != null && agentLoopCount > 0 && toolCallCount != null ? toolCallCount / agentLoopCount : null;
+    !agentLoopPartial && agentLoopCount != null && agentLoopCount > 0 && toolCallCount != null
+      ? toolCallCount / agentLoopCount
+      : null;
 
   return {
     traceId,

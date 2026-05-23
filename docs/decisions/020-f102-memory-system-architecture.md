@@ -73,7 +73,7 @@ Thread                     所有猫共享的"聊天室"
 每种模式有独立的召回路径（KD-44）：
 - semantic 不依赖 BM25 召回（纯 NN）
 - hybrid 的 BM25 候选池 = max(limit×4, 20) cap 100
-- depth=raw 强制 lexical-only（passage 级暂无向量）
+- depth=raw 对 thread passages 支持 lexical / semantic / hybrid；passage embedding 不可用时 fail-open 到 lexical 并显式标 `degraded/effectiveMode`
 - fail-open：embedding 不可用时退化为 lexical
 
 ### 3. 存储架构 — evidence.sqlite

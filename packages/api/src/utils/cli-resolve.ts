@@ -110,12 +110,18 @@ export function resolveCliCommand(command: string): string | null {
     const winDirs: string[] = [];
     if (appData) winDirs.push(resolve(appData, 'npm'));
     if (localAppData) winDirs.push(resolve(localAppData, 'npm'));
+    if (command === 'agy' && localAppData) winDirs.push(resolve(localAppData, 'agy', 'bin'));
     for (const dir of winDirs) {
       // Prefer .cmd shim (more reliable for resolveWindowsShimSpawn)
       const cmdCandidate = resolve(dir, `${command}.cmd`);
       if (existsSync(cmdCandidate)) {
         resolvedCache.set(command, cmdCandidate);
         return cmdCandidate;
+      }
+      const exeCandidate = resolve(dir, `${command}.exe`);
+      if (existsSync(exeCandidate)) {
+        resolvedCache.set(command, exeCandidate);
+        return exeCandidate;
       }
     }
   } else {
@@ -155,11 +161,15 @@ export function resolveCliCommandOrBare(command: string): string {
 /**
  * Format a user-friendly install hint for a missing CLI.
  */
-export function formatCliNotFoundError(command: string): string {
+export function formatCliNotFoundError(command: string, platform: NodeJS.Platform = process.platform): string {
   const installHints: Record<string, string> = {
     claude: 'npm install -g @anthropic-ai/claude-code',
     codex: 'npm install -g @openai/codex',
     gemini: 'npm install -g @google/gemini-cli',
+    agy:
+      platform === 'win32'
+        ? 'curl.exe -fsSL https://antigravity.google/cli/install.cmd -o install.cmd && install.cmd && del install.cmd'
+        : 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
     kimi: 'uv tool install --python 3.13 kimi-cli',
     opencode: 'npm install -g opencode',
   };

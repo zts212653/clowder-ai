@@ -719,6 +719,25 @@ excluded:
       );
     });
 
+    it('sync-manifest exports public harness eval fixtures used by test:public', () => {
+      const managedFiles = readYamlTopLevelList('sync-manifest.yaml', 'managed_files');
+      const fixturePaths = [
+        'docs/harness-feedback/eval-domains/eval-a2a.yaml',
+        'docs/harness-feedback/verdicts/fixtures/2026-05-21-eval-a2a-contract-demo.md',
+        'docs/features/assets/F210/agy-conversation-resume.txt',
+        'docs/features/assets/F210/agy-print-timeout.txt',
+        'docs/features/assets/F210/agy-real-home-no-default-model.txt',
+        'docs/features/assets/F210/agy-real-home-print-success.txt',
+      ];
+
+      for (const fixturePath of fixturePaths) {
+        assert.ok(
+          managedFiles.includes(fixturePath),
+          `sync-manifest should export ${fixturePath} because packages/api test:public loads it`,
+        );
+      }
+    });
+
     it('sync-manifest marks the F203 native L0 template as a sanitized transform', () => {
       const transformTargets = readYamlTransformTargets('sync-manifest.yaml');
 
@@ -807,6 +826,23 @@ excluded:
           `${name} should warn and continue when hook sync fails`,
         );
       }
+    });
+
+    it('F210 source installer provisions Antigravity CLI through native bootstrapper', () => {
+      const install = readFileSync(resolve(ROOT, 'scripts/install.sh'), 'utf-8');
+      const installPs = readFileSync(resolve(ROOT, 'scripts/install.ps1'), 'utf-8');
+
+      assert.match(install, /install_antigravity_cli\(\)/);
+      assert.match(install, /https:\/\/antigravity\.google\/cli\/install\.sh/);
+      assert.match(install, /MISSING_AGENTS\+=\("agy"\)/);
+      assert.match(install, /agy\)\s+install_antigravity_cli/s);
+      assert.doesNotMatch(install, /install_npm_cli "Gemini CLI" "gemini" "@google\/gemini-cli"/);
+
+      assert.match(installPs, /Name = "Antigravity"; Label = "Antigravity CLI"; Cmd = "agy"/);
+      assert.match(installPs, /InstallKind = "antigravity-native"/);
+      assert.match(installPs, /https:\/\/antigravity\.google\/cli\/install\.cmd/);
+      assert.match(installPs, /Resolve-ToolCommandWithRetry -Name "agy" -Attempts 6/);
+      assert.doesNotMatch(installPs, /Name = "Gemini"; Label = "Gemini"; Cmd = "gemini"; Pkg = "@google\/gemini-cli"/);
     });
 
     it('sync-system-prompts agent hook mode also configures Claude settings', () => {

@@ -1315,16 +1315,16 @@ describe('F154: /focus command (AC-A1, AC-A3, AC-A6, AC-A7)', () => {
     const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
     const allConfigs = toAllCatConfigs(loadCatConfig());
     catRegistry.reset();
-    catRegistry.register('opus', { ...allConfigs.opus });
+    catRegistry.register('opus', { ...allConfigs.opus, displayName: 'focus-ambig opus' });
     catRegistry.register('opus-45', {
       ...allConfigs.opus,
       id: createCatId('opus-45'),
       name: '布偶猫 Opus 4.5',
-      displayName: '布偶猫 Opus 4.5',
+      displayName: 'focus-ambig opus-45',
       nickname: undefined,
       mentionPatterns: ['@opus-45'],
     });
-    catRegistry.register('codex', { ...allConfigs.codex });
+    catRegistry.register('codex', { ...allConfigs.codex, displayName: 'focus-ambig codex' });
 
     const mod = await import('../dist/infrastructure/connectors/ConnectorCommandLayer.js');
     ConnectorCommandLayer = mod.ConnectorCommandLayer;
@@ -1400,7 +1400,7 @@ describe('F154: /focus command (AC-A1, AC-A3, AC-A6, AC-A7)', () => {
 
   it('/focus ambiguous — returns candidates (AC-A7)', async () => {
     const layer = makeLayer();
-    const result = await layer.handle(CID, EXT, UID, '/focus 猫');
+    const result = await layer.handle(CID, EXT, UID, '/focus focus-ambig');
     assert.equal(result.kind, 'focus');
     assert.ok(result.response.includes('opus'), `should list opus candidate, got: ${result.response}`);
     assert.ok(result.response.includes('codex'), `should list codex candidate, got: ${result.response}`);

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -120,13 +121,24 @@ describe('readL0Prompts helper (F203 Phase F)', () => {
     // template defaults. The no-arg loadCatConfig() runtime path merges
     // template (base) + catalog (overlay), so even with no catalog the
     // template defaults populate the cat list (KD-13 / SystemPromptBuilder).
-    const cats = loadAvailableCatsForL0();
-    assert.ok(Array.isArray(cats), 'returns an array');
-    assert.ok(cats.length > 0, `must return ≥1 cat from template defaults; got ${cats.length}`);
-    assert.ok(
-      cats.every((c) => typeof c.catId === 'string' && typeof c.displayName === 'string'),
-      'each entry has catId + displayName',
-    );
+    const isolatedRoot = join(tmpdir(), `cat-cafe-rules-l0-${process.pid}-${Date.now()}`);
+    const previousTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    mkdirSync(isolatedRoot, { recursive: true });
+    cpSync(join(root, 'cat-template.json'), join(isolatedRoot, 'cat-template.json'));
+    process.env.CAT_TEMPLATE_PATH = join(isolatedRoot, 'cat-template.json');
+    try {
+      const cats = loadAvailableCatsForL0();
+      assert.ok(Array.isArray(cats), 'returns an array');
+      assert.ok(cats.length > 0, `must return ≥1 cat from template defaults; got ${cats.length}`);
+      assert.ok(
+        cats.every((c) => typeof c.catId === 'string' && typeof c.displayName === 'string'),
+        'each entry has catId + displayName',
+      );
+    } finally {
+      if (previousTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = previousTemplatePath;
+      rmSync(isolatedRoot, { recursive: true, force: true });
+    }
   });
 
   it('per-cat compile failure captured in error field, does not throw (砚砚 plan-review)', async () => {

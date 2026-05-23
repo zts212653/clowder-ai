@@ -197,8 +197,8 @@ for arch in "${ARCHS[@]}"; do
   build_redis "$arch"
 done
 
-# ─── Step 5: Pack CLI tarballs (cross-platform, reuse bundled npm) ─────
-bold "Step 5/6 — Pack CLI tool tarballs"
+# ─── Step 5: Pack CLI tarballs + AGY native install guidance ───────────
+bold "Step 5/6 — Pack CLI tool tarballs + AGY native install guidance"
 mkdir -p "$CLI_TOOLS_DIR"
 # Prefer a bundled npm we just downloaded (version-pinned to build Node).
 NPM_CMD=""
@@ -212,8 +212,19 @@ if [[ -z "$NPM_CMD" ]]; then
 fi
 [[ -n "$NPM_CMD" ]] || die "no npm available for 'npm pack'"
 
-cli_names=("claude" "codex" "gemini")
-cli_pkgs=("@anthropic-ai/claude-code" "@openai/codex" "@google/gemini-cli")
+cat > "${CLI_TOOLS_DIR}/agy-install-instructions.txt" <<'EOF'
+Antigravity CLI (agy) is a native binary, not an npm package.
+Install it with the official bootstrapper:
+
+  curl -fsSL https://antigravity.google/cli/install.sh | bash
+
+Offline Cat Cafe packages intentionally do not vendor agy until Google
+publishes a redistributable native binary contract.
+EOF
+ok "agy-install-instructions.txt written"
+
+cli_names=("claude" "codex")
+cli_pkgs=("@anthropic-ai/claude-code" "@openai/codex")
 all_packed=1
 for i in "${!cli_names[@]}"; do
   name="${cli_names[$i]}"

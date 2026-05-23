@@ -22,9 +22,10 @@ import { KnowledgeResolver } from './KnowledgeResolver.js';
 import { LibraryCatalog } from './LibraryCatalog.js';
 import { MarkerQueue } from './MarkerQueue.js';
 import { MaterializationService } from './MaterializationService.js';
+import { PassageVectorStore } from './PassageVectorStore.js';
 import { ReflectionService } from './ReflectionService.js';
 import { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
-import { ensureVectorTable } from './schema.js';
+import { ensurePassageVectorTable, ensureVectorTable } from './schema.js';
 import { VectorStore } from './VectorStore.js';
 
 export interface MemoryServices {
@@ -38,6 +39,7 @@ export interface MemoryServices {
   materializationService?: IMaterializationService;
   embeddingService?: IEmbeddingService;
   vectorStore?: VectorStore;
+  passageVectorStore?: PassageVectorStore;
   /** F-4: Global knowledge index builder (Skills + MEMORY.md) */
   globalIndexBuilder?: GlobalIndexBuilder;
   /** F152 Phase C: Global knowledge store for distillation */
@@ -74,6 +76,8 @@ export interface MemoryConfig {
   skillsRoot?: string;
   /** F-4: Claude projects memory root (default: ~/.claude/projects/) */
   memoryRoot?: string;
+  /** F186: External collection data directory (default: ~/.cat-cafe) */
+  dataDir?: string;
 }
 
 export function computeChildExcludes(parentRoot: string, children: Array<{ root: string }>): string[] {
@@ -100,6 +104,7 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
 
   let embeddingService: IEmbeddingService | undefined;
   let vectorStore: VectorStore | undefined;
+  let passageVectorStore: PassageVectorStore | undefined;
 
   if (embedConfig.embedMode !== 'off') {
     embeddingService = new EmbeddingService(embedConfig);
@@ -120,16 +125,21 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
       if (ok) {
         vectorStore = new VectorStore(store.getDb(), embedConfig.embedDim);
       }
+      const passageOk = ensurePassageVectorTable(store.getDb(), embedConfig.embedDim);
+      if (passageOk) {
+        passageVectorStore = new PassageVectorStore(store.getDb(), embedConfig.embedDim);
+      }
     } catch {
       // fail-open: sqlite-vec not available
     }
   }
 
-  const embedDeps = embeddingService && vectorStore ? { embedding: embeddingService, vectorStore } : undefined;
+  const embedDeps =
+    embeddingService && vectorStore ? { embedding: embeddingService, vectorStore, passageVectorStore } : undefined;
 
   // Pre-load external manifests to compute child excludes (AC-H1)
   // Must happen before IndexBuilder so CatCafeScanner gets the exclude patterns
-  const dataDir = join(homedir(), '.cat-cafe');
+  const dataDir = config.dataDir ?? join(homedir(), '.cat-cafe');
   const externals = loadExternalCollections(dataDir);
   const childExcludes = computeChildExcludes(docsRoot, externals);
 
@@ -218,7 +228,10 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
       if (manifest.status === 'archived') continue;
       const storePath = resolveCollectionStorePath(dataDir, manifest.id);
       mkdirSync(dirname(storePath), { recursive: true });
-      const extStore = new SqliteEvidenceStore(storePath);
+      const extStore = new SqliteEvidenceStore(storePath, undefined, {
+        sourceRoot: manifest.root,
+        sourceRef: manifest.id,
+      });
       await extStore.initialize();
       stores.set(manifest.id, extStore);
     } catch {
@@ -238,6 +251,7 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
     materializationService,
     embeddingService,
     vectorStore,
+    passageVectorStore,
     globalIndexBuilder,
     globalStore,
     catalog,

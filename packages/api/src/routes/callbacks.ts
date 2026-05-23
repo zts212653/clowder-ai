@@ -21,10 +21,14 @@ import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
-import { hydrateReplyPreview, type IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import {
+  hydrateReplyPreview,
+  type IMessageStore,
+  isDelivered,
+} from '../domains/cats/services/stores/ports/MessageStore.js';
 import { type ITaskStore, isSubjectOwnershipConflictError } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore, VotingStateV1 } from '../domains/cats/services/stores/ports/ThreadStore.js';
-import { canViewMessage } from '../domains/cats/services/stores/visibility.js';
+import { canViewMessage, isSystemUserMessage } from '../domains/cats/services/stores/visibility.js';
 import { getVoiceBlockSynthesizer } from '../domains/cats/services/tts/VoiceBlockSynthesizer.js';
 import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domains/memory/interfaces.js';
 import { buildThreadDeepLink } from '../infrastructure/connectors/connector-command-helpers.js';
@@ -219,6 +223,9 @@ const postMessageSchema = z.object({
 const threadContextQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
   threadId: z.string().min(1).optional(), // F-Swarm-6: optional cross-thread read
+  messageId: z.string().min(1).optional(),
+  before: z.coerce.number().int().min(0).max(50).optional(),
+  after: z.coerce.number().int().min(0).max(50).optional(),
   catId: z.string().min(1).optional(),
   keyword: z.string().min(1).optional(),
 });
@@ -1146,7 +1153,15 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return { error: 'Invalid query parameters' };
     }
 
-    const { limit, threadId: overrideThreadId, catId: filterCatId, keyword } = parsed.data;
+    const {
+      limit,
+      threadId: overrideThreadId,
+      messageId,
+      before: beforeWindow,
+      after: afterWindow,
+      catId: filterCatId,
+      keyword,
+    } = parsed.data;
 
     if (filterCatId && filterCatId !== 'user' && !catRegistry.has(filterCatId)) {
       reply.status(400);
@@ -1200,8 +1215,45 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
       return true;
     };
+    const canIncludeContextItem = (item: Awaited<ReturnType<typeof messageStore.getByThread>>[number]): boolean => {
+      if (item.deletedAt) return false;
+      if (!isDelivered(item)) return false;
+      if (item.userId !== principalUserId && !isSystemUserMessage(item)) return false;
+      if (!canViewMessage(item, viewer)) return false;
+      if (needsPlayFilter) {
+        const isOtherCat = item.catId && item.catId !== principalCatId;
+        if (isOtherCat && item.origin === 'stream') return false;
+      }
+      return matchesExtraFilters(item);
+    };
 
-    if (!needsPlayFilter) {
+    if (messageId) {
+      const target = await messageStore.getById(messageId);
+      if (!target || target.threadId !== effectiveThreadId || !canIncludeContextItem(target)) {
+        reply.status(404);
+        return { error: 'Message not found in thread context' };
+      }
+
+      const beforeCount = beforeWindow ?? 3;
+      const afterCount = afterWindow ?? 3;
+      const beforeMessages =
+        beforeCount > 0
+          ? await messageStore.getByThreadBefore(
+              effectiveThreadId,
+              target.timestamp,
+              beforeCount,
+              target.id,
+              principalUserId,
+            )
+          : [];
+      const afterMessages =
+        afterCount > 0
+          ? await messageStore.getByThreadAfter(effectiveThreadId, target.id, afterCount, principalUserId)
+          : [];
+      filtered = [...beforeMessages, target, ...afterMessages]
+        .filter(canIncludeContextItem)
+        .sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
+    } else if (!needsPlayFilter) {
       // Normal mode: paginate backwards collecting visible messages until we
       // have enough or data is exhausted. This ensures whisper filtering
       // doesn't silently shrink the result set.
