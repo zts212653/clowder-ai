@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { beforeEach, describe, it } from 'node:test';
 import Database from 'better-sqlite3';
 import { SqliteEvidenceStore } from '../../dist/domains/memory/SqliteEvidenceStore.js';
@@ -410,6 +413,141 @@ describe('G-4: drillDown hints', () => {
       assert.ok(sessionResult.drillDown, 'session result should have drillDown');
       assert.equal(sessionResult.drillDown.tool, 'cat_cafe_read_session_digest');
       assert.equal(sessionResult.drillDown.params.sessionId, 'xyz789');
+    }
+  });
+
+  it('sourcePath results get file slice drillDown hint', async () => {
+    const store = new SqliteEvidenceStore(':memory:', undefined, { sourceRoot: process.cwd() });
+    await store.initialize();
+
+    await store.upsert([
+      {
+        anchor: 'doc-f209',
+        kind: 'feature',
+        status: 'active',
+        title: 'F209 Evidence Recall',
+        summary: 'typed drill-down readers',
+        sourcePath: 'docs/features/F209-evidence-recall-optimization.md',
+        updatedAt: new Date().toISOString(),
+      },
+    ]);
+
+    const results = await store.search('typed drill-down', { limit: 5 });
+    const docResult = results.find((r) => r.anchor === 'doc-f209');
+
+    assert.ok(docResult?.drillDown, 'sourcePath result should have drillDown');
+    assert.equal(docResult.drillDown.tool, 'cat_cafe_read_file_slice');
+    assert.equal(docResult.drillDown.params.path, 'docs/features/F209-evidence-recall-optimization.md');
+    assert.equal(docResult.drillDown.params.startLine, '1');
+    assert.equal(docResult.drillDown.params.endLine, '120');
+  });
+
+  it('docs-root sourcePath results get repo-readable file slice drillDown path', async () => {
+    const docsRoot = join(process.cwd(), 'docs');
+    const store = new SqliteEvidenceStore(':memory:', undefined, { sourceRoot: docsRoot });
+    await store.initialize();
+
+    await store.upsert([
+      {
+        anchor: 'doc-f209-docs-root',
+        kind: 'feature',
+        status: 'active',
+        title: 'F209 Evidence Recall Docs Root',
+        summary: 'typed drill-down readers from docs root',
+        sourcePath: 'features/F209-evidence-recall-optimization.md',
+        updatedAt: new Date().toISOString(),
+      },
+    ]);
+
+    const results = await store.search('docs root', { limit: 5 });
+    const docResult = results.find((r) => r.anchor === 'doc-f209-docs-root');
+
+    assert.ok(docResult?.drillDown, 'docs-root sourcePath result should have drillDown');
+    assert.equal(docResult.drillDown.tool, 'cat_cafe_read_file_slice');
+    assert.equal(docResult.drillDown.params.path, 'docs/features/F209-evidence-recall-optimization.md');
+  });
+
+  it('sourcePath file slice drillDown is omitted when a relative path has no source root', async () => {
+    const store = new SqliteEvidenceStore(':memory:');
+    await store.initialize();
+
+    await store.upsert([
+      {
+        anchor: 'doc-f209-no-root',
+        kind: 'feature',
+        status: 'active',
+        title: 'F209 Evidence Recall No Root',
+        summary: 'typed drill-down readers without source root',
+        sourcePath: 'docs/features/F209-evidence-recall-optimization.md',
+        updatedAt: new Date().toISOString(),
+      },
+    ]);
+
+    const results = await store.search('without source root', { limit: 5 });
+    const docResult = results.find((r) => r.anchor === 'doc-f209-no-root');
+
+    assert.ok(docResult, 'sourcePath result should still be searchable');
+    assert.equal(docResult.drillDown, undefined);
+  });
+
+  it('sourcePath file slice drillDown uses virtual collection paths without leaking the store source root', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'f209-source-root-'));
+    try {
+      const store = new SqliteEvidenceStore(':memory:', undefined, {
+        sourceRoot: root,
+        sourceRef: 'world:test',
+      });
+      await store.initialize();
+
+      await store.upsert([
+        {
+          anchor: 'world:test/doc/source',
+          kind: 'feature',
+          status: 'active',
+          title: 'External Collection Source',
+          summary: 'collection-backed typed reader source root',
+          sourcePath: 'docs/source.md',
+          updatedAt: new Date().toISOString(),
+        },
+      ]);
+
+      const results = await store.search('collection-backed typed reader', { limit: 5 });
+      const docResult = results.find((r) => r.anchor === 'world:test/doc/source');
+
+      assert.ok(docResult?.drillDown, 'sourcePath result should have drillDown');
+      assert.equal(docResult.drillDown.tool, 'cat_cafe_read_file_slice');
+      assert.equal(docResult.drillDown.params.path, 'cat-cafe://collection/world%3Atest/docs/source.md');
+      assert.ok(!docResult.drillDown.params.path.includes(root), 'drillDown path must not leak host source root');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('sourcePath file slice drillDown is omitted when a relative path escapes the source root', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'f209-source-root-'));
+    try {
+      const store = new SqliteEvidenceStore(':memory:', undefined, { sourceRoot: root });
+      await store.initialize();
+
+      await store.upsert([
+        {
+          anchor: 'world:test/doc/escape',
+          kind: 'feature',
+          status: 'active',
+          title: 'Escaping Collection Source',
+          summary: 'collection-backed typed reader source root escape',
+          sourcePath: '../outside.md',
+          updatedAt: new Date().toISOString(),
+        },
+      ]);
+
+      const results = await store.search('source root escape', { limit: 5 });
+      const docResult = results.find((r) => r.anchor === 'world:test/doc/escape');
+
+      assert.ok(docResult, 'sourcePath result should still be searchable');
+      assert.equal(docResult.drillDown, undefined);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 

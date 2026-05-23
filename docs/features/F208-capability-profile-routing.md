@@ -1,6 +1,6 @@
 ---
 feature_ids: [F208]
-related_features: [F154, F078, F200, F192, F203]
+related_features: [F154, F078, F200, F192, F203, F209]
 topics: [routing, capability-profile, dynamic-routing, eval, open-source]
 doc_kind: spec
 created: 2026-05-20
@@ -29,6 +29,18 @@ review 收敛。
 **CVO directive（2026-05-20）：不做 MVP 版本，做最终版本。** 本 spec 写完整终态
 （Phase A-E），分阶段实施，但每个 Phase 都是朝终态走的真实切片——close 条件是
 Phase A-E 全达成 + 完整愿景，禁止"Phase A 能用就 close"（见 KD-7）。
+
+## Architecture Cell
+
+```markdown
+Architecture cell: identity-session（候选主 cell）
+Map delta: update required — 待 Design Gate 确认是否需 new cell
+Why: F208 把 agent identity 从静态 roster 一行话（cat-config.json）扩展为「能力画像
+档案 + 认知路由」子系统。画像档案是 identity-session cell 的能力维度深化；但「认知
+路由」（猫读画像自主判断传球）可能溢出为新的协作子系统。entity_id 身份真相源在
+F209 memory cell（见 related F209，AC-B6：cat-dossier 消费 F209 entity_id）。
+Design Gate 拍定主 cell 与 map delta。
+```
 
 ## 核心原则：不做算法路由
 
@@ -124,6 +136,7 @@ fork 后按领域累积）/ evolving（eval 回流持续刷新）。
 - **Related**: F200（Memory Recall Eval — Phase D 自动累积的数据源；in-progress，v1 不阻塞于其完成）
 - **Related**: F192（Socio-Technical Harness Eval — Phase E eval 框架；in-progress，v1 不阻塞）
 - **Related**: F203（Native System Prompt L0 — 若日后速查卡进 L0 的注入通道；v1 不进 L0）
+- **Related**: F209（Evidence Recall Optimization — F209 owns 实体身份层（`entity_id`/alias/provenance 真相源）；F208 cat-dossier 是能力画像层，**消费 F209 `entity_id` 作猫/人标识键，不另造 ID namespace**，见 F209 AC-B6 / KD-7）
 
 ## Risk
 

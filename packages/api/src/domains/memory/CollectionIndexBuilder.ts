@@ -25,7 +25,9 @@ export class CollectionIndexBuilder {
     private readonly manifest: CollectionManifest,
     private readonly scanner: RepoScanner,
     private readonly embedDeps?: CollectionEmbedDeps,
-  ) {}
+  ) {
+    this.store.setSourceRoot(this.manifest.root, this.manifest.id);
+  }
 
   async rebuild(options?: { force?: boolean }): Promise<CollectionRebuildResult> {
     const force = options?.force ?? false;

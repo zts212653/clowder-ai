@@ -42,6 +42,14 @@ function createMockProcess(opts = {}) {
   const stdout = new PassThrough();
   const stderr = new PassThrough();
   const emitter = new EventEmitter();
+  const originalEmit = emitter.emit.bind(emitter);
+  emitter.emit = (event, ...args) => {
+    const emitted = originalEmit(event, ...args);
+    if (event === 'exit') {
+      process.nextTick(() => originalEmit('close', ...args));
+    }
+    return emitted;
+  };
   const proc = {
     stdout,
     stderr,

@@ -51,7 +51,7 @@ export async function ensureProjectCollection(
 
     const storePath = resolveCollectionStorePath(dataDir, collectionId);
     mkdirSync(dirname(storePath), { recursive: true });
-    store = new SqliteEvidenceStore(storePath);
+    store = new SqliteEvidenceStore(storePath, undefined, { sourceRoot: manifest.root, sourceRef: manifest.id });
     await store.initialize();
 
     catalog.register(manifest);
@@ -61,10 +61,11 @@ export async function ensureProjectCollection(
 
   if (!store) {
     const storePath = resolveCollectionStorePath(dataDir, collectionId);
-    store = new SqliteEvidenceStore(storePath);
+    store = new SqliteEvidenceStore(storePath, undefined, { sourceRoot: manifest.root, sourceRef: manifest.id });
     await store.initialize();
     stores.set(collectionId, store);
   }
+  store.setSourceRoot(manifest.root, manifest.id);
 
   let embedDeps: CollectionEmbedDeps | undefined;
   if (embeddingService) {

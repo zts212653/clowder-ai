@@ -97,8 +97,8 @@ describe('F200 Phase D — task_trajectories schema V22', () => {
     assert.equal(row.duration, 45000);
   });
 
-  it('reaches schema version 23', () => {
+  it('reaches schema version 24', () => {
     const row = db.prepare('SELECT MAX(version) as v FROM schema_version').get();
-    assert.equal(row.v, 23);
+    assert.equal(row.v, 24);
   });
 });

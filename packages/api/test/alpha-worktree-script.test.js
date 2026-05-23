@@ -9,13 +9,17 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const alphaScriptSource = join(__dirname, '..', '..', '..', 'scripts', 'alpha-worktree.sh');
+const nodeRuntimeGuardSource = join(__dirname, '..', '..', '..', 'scripts', 'lib', 'node-runtime-guard.sh');
 const tempDirs = [];
+
+process.env.CAT_CAFE_SKIP_NODE_RUNTIME_GUARD = '1';
 
 function createTempProject(name) {
   const projectDir = mkdtempSync(join(tmpdir(), `${name}-`));
   tempDirs.push(projectDir);
 
   mkdirSync(join(projectDir, 'scripts'), { recursive: true });
+  mkdirSync(join(projectDir, 'scripts', 'lib'), { recursive: true });
   mkdirSync(join(projectDir, 'packages', 'web'), { recursive: true });
   mkdirSync(join(projectDir, 'packages', 'api'), { recursive: true });
   mkdirSync(join(projectDir, 'packages', 'mcp-server'), { recursive: true });
@@ -24,6 +28,13 @@ function createTempProject(name) {
   writeFileSync(join(projectDir, 'scripts', 'alpha-worktree.sh'), readFileSync(alphaScriptSource, 'utf8'), {
     mode: 0o755,
   });
+  writeFileSync(
+    join(projectDir, 'scripts', 'lib', 'node-runtime-guard.sh'),
+    readFileSync(nodeRuntimeGuardSource, 'utf8'),
+    {
+      mode: 0o644,
+    },
+  );
   writeFileSync(join(projectDir, 'scripts', 'start-dev.sh'), '#!/bin/sh\nprintf "ALPHA-STARTED:%s\\n" "$PWD"\n', {
     mode: 0o755,
   });

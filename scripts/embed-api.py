@@ -28,9 +28,11 @@ Dim recommendations (CMTEB bilingual quality):
   1024 — maximum quality, 33% more storage than 768
 
 Env vars:
-  EMBED_PORT    — server port (default: 9877)
-  EMBED_MODEL   — MLX model ID (default: mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ)
-  EMBED_DIM     — output dimension after MRL truncation (default: 768)
+  EMBED_PORT              — server port (default: 9877)
+  EMBED_MODEL             — MLX model ID (default: mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ)
+  EMBED_DIM               — output dimension after MRL truncation (default: 768)
+  EMBED_ALLOW_ST_FALLBACK — opt in to sentence-transformers fallback on Apple Silicon
+  EMBED_ST_DEVICE         — explicit fallback device (cpu/cuda/mps)
 """
 
 from __future__ import annotations
@@ -39,6 +41,7 @@ import argparse
 import asyncio
 import logging
 import os
+import platform
 import signal
 import sys
 import time
@@ -85,9 +88,28 @@ _embed_lock = asyncio.Lock()
 MAX_BATCH_SIZE = 64
 MAX_TEXT_LENGTH = 8192
 
-# Fallback: if mlx-embeddings not available, use sentence-transformers + MPS
+# Fallback: sentence-transformers remains available off Apple Silicon. On
+# Apple Silicon it is opt-in because the MPS path can exhaust unified memory.
 _use_fallback = False
 _st_model = None
+_fallback_device: str = ""
+
+
+def _env_truthy(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_apple_silicon() -> bool:
+    return platform.system() == "Darwin" and platform.machine() == "arm64"
+
+
+def _allow_sentence_transformers_fallback() -> bool:
+    if "EMBED_ALLOW_ST_FALLBACK" in os.environ:
+        return _env_truthy("EMBED_ALLOW_ST_FALLBACK")
+    return not _is_apple_silicon()
 
 
 # ─── Request/Response models ──────────────────────────────────────
@@ -150,7 +172,7 @@ async def health():
         "status": "ok" if model_loaded else "loading",
         "model": model_name or "none",
         "backend": _backend,
-        "device": "mlx" if not _use_fallback else "mps",
+        "device": "mlx" if not _use_fallback else (_fallback_device or "unknown"),
         "dim": embed_dim,
     }
 
@@ -238,7 +260,8 @@ def main():
     log.info("=== Cat Cafe Embedding Server ===")
     log.info("Model: %s | Dim: %d | Port: %d", model_name, embed_dim, args.port)
 
-    # Try MLX-native first, fallback to sentence-transformers + MPS
+    # Try MLX-native first. On Apple Silicon, do not silently fall back to
+    # sentence-transformers: its MPS path can exhaust unified memory.
     start = time.time()
     def _try_mlx() -> bool:
         """Try MLX-native load + test embedding. Returns True on success."""
@@ -258,14 +281,14 @@ def main():
             log.warning("mlx-embeddings not installed")
             return False
         except Exception as e:
-            log.warning("MLX load/inference failed (%s), falling back to sentence-transformers", e)
+            log.warning("MLX load/inference failed (%s)", e)
             mlx_model = None
             mlx_tokenizer = None
             return False
 
     def _try_sentence_transformers() -> bool:
         """Fallback: sentence-transformers + MPS/CUDA/CPU."""
-        global _use_fallback, _st_model, _backend, model_loaded, model_name
+        global _use_fallback, _st_model, _backend, _fallback_device, model_loaded, model_name
         _use_fallback = True
         _backend = "sentence-transformers"
         try:
@@ -278,14 +301,18 @@ def main():
             fallback_model = model_name.replace("mlx-community/", "").replace("-4bit-DWQ", "").replace("-4bit", "")
             if "Qwen3-Embedding" in fallback_model:
                 fallback_model = "Qwen/" + fallback_model
-            if torch.cuda.is_available():
+            explicit_device = os.environ.get("EMBED_ST_DEVICE", "").strip()
+            if explicit_device:
+                device = explicit_device
+            elif torch.cuda.is_available():
                 device = "cuda"
-            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            elif not _is_apple_silicon() and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
                 device = "mps"
             else:
                 device = "cpu"
             log.info("Loading model via sentence-transformers (device: %s)...", device)
             _st_model = SentenceTransformer(fallback_model, device=device)
+            _fallback_device = device
             model_name = fallback_model  # update displayed model name
             model_loaded = True
             log.info("Fallback model loaded in %.1fs! (device: %s)", time.time() - start, device)
@@ -295,6 +322,12 @@ def main():
             return False
 
     if not _try_mlx():
+        if not _allow_sentence_transformers_fallback():
+            log.error(
+                "SentenceTransformer fallback disabled on Apple Silicon; "
+                "fix MLX dependencies or set EMBED_ALLOW_ST_FALLBACK=1 to opt in"
+            )
+            sys.exit(1)
         if not _try_sentence_transformers():
             log.error("All backends failed, exiting")
             sys.exit(1)

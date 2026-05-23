@@ -1,6 +1,8 @@
 import { access, readdir, readFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 
+import type { EntityMatch, EvidenceDrillDown } from '../domains/memory/interfaces.js';
+
 export interface EvidenceFreshness {
   status: 'fresh' | 'stale' | 'unknown';
   checkedAt: string;
@@ -42,19 +44,29 @@ export interface EvidenceResult {
   boostSource: BoostSource[];
   /** AC-I9: passage-level detail when depth=raw */
   passages?: Array<{
+    docAnchor?: string;
     passageId: string;
     content: string;
     speaker?: string;
     createdAt?: string;
+    threadId?: string;
+    messageId?: string;
     context?: Array<{
+      docAnchor?: string;
       passageId: string;
       content: string;
       speaker?: string;
       createdAt?: string;
+      threadId?: string;
+      messageId?: string;
     }>;
   }>;
   /** DF-3: explainability — which field matched (always present) */
   matchReason?: string;
+  /** F209 Phase B: entity alias / mention explanation for retrieval-anchor hits */
+  entityMatches?: EntityMatch[];
+  /** F209 Phase C: typed bounded reader hint for opening the exact source window */
+  drillDown?: EvidenceDrillDown;
   /** F200 HW-4 根因②b (砚砚 P1-2): source file path for path-based
    * consumption match (shell-read / Read). Sourced from evidenceStore
    * search item (interfaces.ts sourcePath); structured chain, not text-parse. */
@@ -123,6 +135,15 @@ export function mapKindToSourceType(kind: string): EvidenceSourceType {
     default:
       return 'commit';
   }
+}
+
+export function sanitizeEvidenceDrillDown(drillDown?: EvidenceDrillDown): EvidenceDrillDown | undefined {
+  if (!drillDown) return undefined;
+  if (drillDown.tool === 'cat_cafe_read_file_slice') {
+    const filePath = drillDown.params.path;
+    if (!filePath || isAbsolute(filePath)) return undefined;
+  }
+  return drillDown;
 }
 
 /** Map a file path to a source type */

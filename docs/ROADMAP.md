@@ -7,7 +7,7 @@ created: 2026-02-26
 
 # Cat Cafe Feature Roadmap
 
-> 维护者：三猫 | 最后更新：2026-05-20（F188 Phase J reopen）
+> 维护者：三猫 | 最后更新：2026-05-22（F210 Phase A recon）
 >
 > **规则**：只放活跃 Feature（idea/spec/in-progress/review），done 后移除。
 > 详细信息见 `docs/features/Fxxx-*.md`。
@@ -40,7 +40,7 @@ created: 2026-02-26
 | F119 | 谁是卧底 — 坏猫战术推理游戏 #2 | spec | Ragdoll | internal | [F119](features/F119-who-is-spy-game.md) |
 | F124 | Apple Ecosystem × Cat Café 语音交互系统 — iOS/watchOS/AirPods | spec | Ragdoll | internal | [F124](features/F124-apple-ecosystem-voice-interaction.md) |
 | F126 | 四肢控制面 — Cat Café Limb Control Plane | in-progress | Ragdoll | internal | [F126](features/F126-limb-control-plane.md) |
-| F128 | Cat-Initiated Thread Creation — 猫程序化创建 Thread | spec | 待定 | community [#82](https://github.com/zts212653/clowder-ai/issues/82) | [F128](features/F128-cat-create-thread.md) |
+| F128 | Cat-Proposed Thread Creation — 猫猫提议创建 Thread | spec | 待定 | community [#82](https://github.com/zts212653/clowder-ai/issues/82) | [F128](features/F128-cat-create-thread.md) |
 | F129 | Pack System — Multi-Agent 共创世界的 Mod 生态 | in-progress | Ragdoll | internal | [F129](features/F129-pack-system-multi-agent-mod.md) |
 | F135 | 狸花猫开箱即用 — DARE Out-of-the-Box | spec | bouillipx | community [#195](https://github.com/zts212653/clowder-ai/issues/195) | [F135](features/F135-dare-ootb.md) |
 | F138 | Cat Café Video Studio — AI 视频制作管线 | spec | 金渐层 | internal | [F138](features/F138-video-studio.md) |
@@ -64,7 +64,7 @@ created: 2026-02-26
 | F181 | Reserved Feature Slot — 待补充需求锚点 | idea | 待定 | internal | [F181](features/F181-reserved-feature-slot.md) |
 | F188 | Library Stewardship — Health Debt Governance (Phase J) | reopened | Ragdoll | internal | [F188](features/F188-library-stewardship.md) |
 | F189 | Operation Context Unification — 操作上下文单点化（HTTP/MCP/CLI/A2A 统一 builder） | spec | Ragdoll | internal | [F189](features/F189-operation-context-unification.md) |
-| F192 | Socio-Technical Harness Eval — harness 共创评估体系 | spec | Ragdoll | internal | [F192](features/F192-socio-technical-harness-eval.md) |
+| F192 | Socio-Technical Harness Eval — Harness Eval Control Plane / Eval Hub | in-progress | Ragdoll | internal | [F192](features/F192-socio-technical-harness-eval.md) |
 | F198 | Claude Code Subscription Carrier — 6/15 SDK Credit 拐点前救Ragdoll | spec | Ragdoll Opus 4.7 | internal | [F198](features/F198-claude-code-subscription-carrier.md) |
 | F200 | Memory Recall Eval — 基于猫真实行为的记忆系统反馈闭环 | in-progress | Ragdoll | internal | [F200](features/F200-memory-recall-eval.md) |
 | F202 | Plugin Framework — local discovery, config, and resource activation | review | community @mindfn + maintainers | community [#686](https://github.com/zts212653/clowder-ai/pull/686) | [F202](features/F202-plugin-framework.md) |
@@ -73,3 +73,5 @@ created: 2026-02-26
 | F205 | MediaHub Video Provider Plugins — 视频生成/分析插件 | spec | community @mindfn + maintainers | community [#689](https://github.com/zts212653/clowder-ai/pull/689) | [F205](features/F205-video-provider-plugins.md) |
 | F207 | AI Family Office — 个人投资学习基建（画像/知识/数据/分析/决策五层） | spec | Ragdoll | internal | [F207](features/F207-personal-finance-infra.md) |
 | F208 | Capability Profile Routing — 能力画像档案 + 认知路由 | spec | Ragdoll | internal | [F208](features/F208-capability-profile-routing.md) |
+| F209 | Evidence Recall Optimization — 消息级语义、实体门牌号与活查询藤 | spec | Maine Coon/Maine Coon | internal | [F209](features/F209-evidence-recall-optimization.md) |
+| F210 | Gemini CLI to Antigravity CLI Migration | in-progress | Maine Coon/Maine Coon | internal | [F210](features/F210-antigravity-cli-migration.md) |

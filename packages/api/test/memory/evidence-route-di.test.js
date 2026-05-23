@@ -4,6 +4,8 @@
  */
 
 import assert from 'node:assert/strict';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 
@@ -87,6 +89,139 @@ describe('evidence route DI (IEvidenceStore path)', () => {
     assert.ok('sourceType' in r, 'DI evidence result must have sourceType');
   });
 
+  it('preserves entity match explanations in search results', async () => {
+    const mockStore = createMockEvidenceStore({
+      search: async () => [
+        {
+          anchor: 'thread:vision',
+          kind: 'thread',
+          status: 'active',
+          title: 'Vision discussion',
+          summary: 'CVO asked about entity anchors',
+          updatedAt: new Date().toISOString(),
+          matchReason: 'entity:person:landy',
+          entityMatches: [
+            {
+              entityId: 'person:landy',
+              type: 'person',
+              canonicalName: 'You',
+              matchedAlias: 'CVO',
+              surface: '铲屎官',
+              source: 'passage',
+              docAnchor: 'thread:vision',
+              passageId: 'p1',
+              provenance: [{ source: 'F209 Phase B route contract test' }],
+              why: 'query CVO matched entity person:landy via alias 铲屎官',
+            },
+          ],
+        },
+      ],
+    });
+    const { evidenceRoutes } = await import('../../dist/routes/evidence.js');
+    app = Fastify();
+    await app.register(evidenceRoutes, {
+      hindsightClient: MOCK_HINDSIGHT,
+      sharedBank: 'cat-cafe-shared',
+      evidenceStore: mockStore,
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=CVO',
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    const match = body.results[0]?.entityMatches?.[0];
+    assert.equal(match?.entityId, 'person:landy');
+    assert.equal(match?.matchedAlias, 'CVO');
+    assert.equal(match?.surface, '铲屎官');
+    assert.equal(match?.provenance?.[0]?.source, 'F209 Phase B route contract test');
+    assert.match(match?.why ?? '', /CVO.*person:landy.*铲屎官/);
+  });
+
+  it('preserves typed drillDown hints in search results', async () => {
+    const mockStore = createMockEvidenceStore({
+      search: async () => [
+        {
+          anchor: 'thread:vision',
+          kind: 'thread',
+          status: 'active',
+          title: 'Vision discussion',
+          summary: 'CVO asked about drill-down readers',
+          updatedAt: new Date().toISOString(),
+          drillDown: {
+            tool: 'cat_cafe_get_thread_context',
+            params: { threadId: 'thread_vision', messageId: 'msg-42', before: '3', after: '3' },
+            hint: 'get_thread_context(threadId="thread_vision", messageId="msg-42", before=3, after=3)',
+          },
+        },
+      ],
+    });
+    const { evidenceRoutes } = await import('../../dist/routes/evidence.js');
+    app = Fastify();
+    await app.register(evidenceRoutes, {
+      hindsightClient: MOCK_HINDSIGHT,
+      sharedBank: 'cat-cafe-shared',
+      evidenceStore: mockStore,
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=drill',
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    const drillDown = body.results[0]?.drillDown;
+    assert.equal(drillDown?.tool, 'cat_cafe_get_thread_context');
+    assert.equal(drillDown?.params?.threadId, 'thread_vision');
+    assert.equal(drillDown?.params?.messageId, 'msg-42');
+    assert.equal(drillDown?.params?.before, '3');
+    assert.equal(drillDown?.params?.after, '3');
+    assert.match(drillDown?.hint ?? '', /get_thread_context/);
+  });
+
+  it('omits unsafe absolute file-slice drillDown paths from search results', async () => {
+    const absolutePath = join(tmpdir(), 'f209-secret-root', 'docs/source.md');
+    const mockStore = createMockEvidenceStore({
+      search: async () => [
+        {
+          anchor: 'doc:absolute',
+          kind: 'feature',
+          status: 'active',
+          title: 'Absolute path result',
+          summary: 'absolute file-slice path should not leave the API boundary',
+          updatedAt: new Date().toISOString(),
+          drillDown: {
+            tool: 'cat_cafe_read_file_slice',
+            params: { path: absolutePath, startLine: '1', endLine: '120' },
+            hint: `read_file_slice(path="${absolutePath}", startLine=1, endLine=120)`,
+          },
+        },
+      ],
+    });
+    const { evidenceRoutes } = await import('../../dist/routes/evidence.js');
+    app = Fastify();
+    await app.register(evidenceRoutes, {
+      hindsightClient: MOCK_HINDSIGHT,
+      sharedBank: 'cat-cafe-shared',
+      evidenceStore: mockStore,
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=absolute',
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.results[0]?.drillDown, undefined);
+  });
+
   it('returns 400 for missing q even with IEvidenceStore', async () => {
     const mockStore = createMockEvidenceStore();
     const { evidenceRoutes } = await import('../../dist/routes/evidence.js');
@@ -130,6 +265,67 @@ describe('evidence route DI (IEvidenceStore path)', () => {
     const body = res.json();
     assert.equal(body.degraded, true);
     assert.equal(body.results.length, 0);
+  });
+
+  it('uses IEvidenceStore.searchWithMeta metadata when available', async () => {
+    const mockStore = createMockEvidenceStore({
+      searchWithMeta: async () => ({
+        items: [],
+        meta: {
+          degraded: true,
+          degradeReason: 'passage_embedding_unavailable',
+          effectiveMode: 'lexical',
+        },
+      }),
+    });
+    const { evidenceRoutes } = await import('../../dist/routes/evidence.js');
+    app = Fastify();
+    await app.register(evidenceRoutes, {
+      hindsightClient: MOCK_HINDSIGHT,
+      sharedBank: 'cat-cafe-shared',
+      evidenceStore: mockStore,
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=test&depth=raw&mode=semantic',
+    });
+
+    const body = res.json();
+    assert.equal(body.degraded, true);
+    assert.equal(body.degradeReason, 'passage_embedding_unavailable');
+    assert.equal(body.effectiveMode, 'lexical');
+  });
+
+  it('surfaces raw non-lexical degradation when KnowledgeResolver omits metadata', async () => {
+    const mockStore = createMockEvidenceStore();
+    const mockResolver = {
+      resolve: async () => ({
+        results: [],
+        sources: ['project'],
+        query: 'test',
+      }),
+    };
+    const { evidenceRoutes } = await import('../../dist/routes/evidence.js');
+    app = Fastify();
+    await app.register(evidenceRoutes, {
+      hindsightClient: MOCK_HINDSIGHT,
+      sharedBank: 'cat-cafe-shared',
+      evidenceStore: mockStore,
+      knowledgeResolver: mockResolver,
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=test&depth=raw&mode=semantic&dimension=library',
+    });
+
+    const body = res.json();
+    assert.equal(body.degraded, true);
+    assert.equal(body.degradeReason, 'raw_lexical_only');
+    assert.equal(body.effectiveMode, 'lexical');
   });
 });
 

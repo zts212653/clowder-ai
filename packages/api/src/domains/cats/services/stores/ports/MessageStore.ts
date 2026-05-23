@@ -505,14 +505,29 @@ export class MessageStore {
     const bounded = Number.isFinite(limit as number) && (limit as number) > 0;
     const max = bounded ? (limit as number) : Number.MAX_SAFE_INTEGER;
     const matches: StoredMessage[] = [];
+    let cursorSeen = !afterId;
 
     for (let i = 0; i < this.messages.length && matches.length < max; i++) {
       const msg = this.messages[i]!;
       if (msg.threadId !== threadId) continue;
+      if (!cursorSeen) {
+        if (msg.id === afterId) cursorSeen = true;
+        continue;
+      }
       if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
-      if (afterId && msg.id <= afterId) continue;
       if (!isDelivered(msg)) continue;
       matches.push(msg);
+    }
+
+    if (!cursorSeen && afterId) {
+      for (let i = 0; i < this.messages.length && matches.length < max; i++) {
+        const msg = this.messages[i]!;
+        if (msg.threadId !== threadId) continue;
+        if (msg.id <= afterId) continue;
+        if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
+        if (!isDelivered(msg)) continue;
+        matches.push(msg);
+      }
     }
 
     return matches;

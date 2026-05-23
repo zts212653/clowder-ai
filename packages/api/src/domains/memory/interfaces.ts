@@ -69,6 +69,12 @@ export const IRepoScannerSymbol = Symbol.for('IRepoScanner');
 
 // ── Data types ───────────────────────────────────────────────────────
 
+export interface EvidenceDrillDown {
+  tool: string;
+  params: Record<string, string>;
+  hint: string;
+}
+
 export interface EvidenceItem {
   anchor: string;
   kind: EvidenceKind;
@@ -84,11 +90,7 @@ export interface EvidenceItem {
   /** F129: Pack scope — when set, this evidence belongs to a specific pack */
   packId?: string;
   /** G-4: drill-down hint — tells the cat what tool to use to see full details */
-  drillDown?: {
-    tool: string;
-    params: Record<string, string>;
-    hint: string;
-  };
+  drillDown?: EvidenceDrillDown;
   /** F163 Phase A: knowledge authority level */
   authority?: F163Authority;
   /** F163 Phase A: knowledge activation mode */
@@ -125,20 +127,68 @@ export interface EvidenceItem {
   rankingFactors?: { bm25Score?: number; consumptionPrior?: number; mmrPenalty?: number };
   /** F200 v1.1 DF-7: calibrated relevance confidence [0,1] */
   confidence?: number;
+  /** F209 Phase B: entity alias / mention explanations for retrieval-anchor hits */
+  entityMatches?: EntityMatch[];
   /** AC-I9: passage-level detail when depth=raw */
   passages?: Array<{
+    docAnchor?: string;
     passageId: string;
     content: string;
     speaker?: string;
     createdAt?: string;
+    threadId?: string;
+    messageId?: string;
     /** AC-I8: surrounding passages when contextWindow is set */
     context?: Array<{
+      docAnchor?: string;
       passageId: string;
       content: string;
       speaker?: string;
       createdAt?: string;
+      threadId?: string;
+      messageId?: string;
     }>;
   }>;
+}
+
+export type EntityType = 'person' | 'cat' | 'feature' | 'concept' | 'external';
+
+export interface EntityProvenance {
+  source: string;
+  anchor?: string;
+  note?: string;
+  date?: string;
+}
+
+export interface EntityRecord {
+  entityId: string;
+  type: EntityType;
+  canonicalName: string;
+  aliases: string[];
+  provenance: EntityProvenance[];
+  createdAt?: string;
+  updatedAt: string;
+}
+
+export interface QueryEntityMatch {
+  entityId: string;
+  type: EntityType;
+  canonicalName: string;
+  matchedAlias: string;
+  provenance: EntityProvenance[];
+}
+
+export interface EntityMatch {
+  entityId: string;
+  type: EntityType;
+  canonicalName: string;
+  matchedAlias: string;
+  surface: string;
+  source: 'doc' | 'passage';
+  docAnchor: string;
+  passageId?: string;
+  provenance: EntityProvenance[];
+  why: string;
 }
 
 export type EdgeRelation =
@@ -213,6 +263,23 @@ export interface SearchOptions {
   explain?: boolean;
 }
 
+export type SearchDegradeReason =
+  | 'passage_embedding_unavailable'
+  | 'passage_vector_search_error'
+  | 'evidence_store_error'
+  | 'raw_lexical_only';
+
+export interface SearchExecutionMeta {
+  degraded: boolean;
+  degradeReason?: SearchDegradeReason;
+  effectiveMode?: 'lexical' | 'semantic' | 'hybrid';
+}
+
+export interface EvidenceSearchExecution {
+  items: EvidenceItem[];
+  meta: SearchExecutionMeta;
+}
+
 export interface MarkerFilter {
   status?: MarkerStatus;
   targetKind?: EvidenceKind;
@@ -255,6 +322,7 @@ export interface KnowledgeResult {
   results: EvidenceItem[];
   sources: Array<'project' | 'global'>;
   query: string;
+  meta?: SearchExecutionMeta;
   collectionGroups?: CollectionGroup[];
   deprecationWarnings?: string[];
 }
@@ -269,7 +337,12 @@ export interface ReflectionContext {
 
 export interface IEvidenceStore {
   search(query: string, options?: SearchOptions): Promise<EvidenceItem[]>;
+  searchWithMeta?(query: string, options?: SearchOptions): Promise<EvidenceSearchExecution>;
   upsert(items: EvidenceItem[]): Promise<void>;
+  upsertEntities?(entities: EntityRecord[]): Promise<void>;
+  getEntity?(entityId: string): Promise<EntityRecord | null>;
+  resolveEntityAliases?(query: string): Promise<QueryEntityMatch[]>;
+  refreshEntityMentions?(docAnchors?: string[]): Promise<void>;
   deleteByAnchor(anchor: string): Promise<void>;
   getByAnchor(anchor: string): Promise<EvidenceItem | null>;
   health(): Promise<boolean>;

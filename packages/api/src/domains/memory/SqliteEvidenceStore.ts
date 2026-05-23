@@ -1,17 +1,24 @@
 // F102: SQLite implementation of IEvidenceStore
 
+import { basename, isAbsolute, relative, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { computeConsumptionPrior } from './consumption-prior.js';
+import { type EntityMentionPassageHit, EntityRegistryStore } from './EntityRegistry.js';
 import { EvidenceWriteQueue } from './evidence-write-queue.js';
 import { ContradictionDetector } from './f163-contradiction-detector.js';
 import { type F163Authority, freezeFlags, pathToAuthority } from './f163-types.js';
 import { freezeF200Flags } from './f200-types.js';
 import type {
   Edge,
+  EntityMatch,
+  EntityRecord,
   EvidenceItem,
   EvidenceKind,
+  EvidenceSearchExecution,
   IEmbeddingService,
   IEvidenceStore,
+  QueryEntityMatch,
+  SearchExecutionMeta,
   SearchOptions,
 } from './interfaces.js';
 import {
@@ -20,6 +27,7 @@ import {
   splitLexicalBackfillWords,
 } from './lexical-backfill.js';
 import { applyMMR } from './mmr.js';
+import { type PassageVectorStore, parsePassageVectorKey, passageVectorKey } from './PassageVectorStore.js';
 import { computeRecencyDecay } from './recency-decay.js';
 import { applyMigrations } from './schema.js';
 import type { VectorStore } from './VectorStore.js';
@@ -48,24 +56,49 @@ export interface PassageResult {
 export interface EmbedDeps {
   embedding: IEmbeddingService;
   vectorStore: VectorStore;
+  passageVectorStore?: PassageVectorStore;
   mode: 'off' | 'shadow' | 'on';
+}
+
+export interface SqliteEvidenceStoreOptions {
+  sourceRoot?: string;
+  sourceRef?: string;
+}
+
+interface SearchFilterContext {
+  effectiveKind?: EvidenceKind;
+  excludeSessionAndThread: boolean;
+  excludePackKnowledge: boolean;
+  threadAnchor?: string;
+  suppressBackstop: boolean;
 }
 
 export class SqliteEvidenceStore implements IEvidenceStore {
   private db: Database.Database | null = null;
   private readonly dbPath: string;
   private embedDeps?: EmbedDeps;
+  private sourceRoot?: string;
+  private sourceRef?: string;
+  private entityRegistry?: EntityRegistryStore;
   /** F163: single-writer queue serializes all evidence.sqlite mutations */
   private readonly writeQueue = new EvidenceWriteQueue();
 
-  constructor(dbPath: string, embedDeps?: EmbedDeps) {
+  constructor(dbPath: string, embedDeps?: EmbedDeps, options?: SqliteEvidenceStoreOptions) {
     this.dbPath = dbPath;
     this.embedDeps = embedDeps;
+    this.sourceRoot = options?.sourceRoot ? resolve(options.sourceRoot) : undefined;
+    this.sourceRef = options?.sourceRoot ? options.sourceRef : undefined;
   }
 
   /** @internal Allow late-binding of embed deps (factory sets after construction) */
   setEmbedDeps(deps: EmbedDeps): void {
     this.embedDeps = deps;
+  }
+
+  /** @internal Bind relative sourcePath values to the scanner/collection root that produced them. */
+  setSourceRoot(sourceRoot?: string, sourceRef?: string): void {
+    this.sourceRoot = sourceRoot ? resolve(sourceRoot) : undefined;
+    this.sourceRef = sourceRoot ? sourceRef : undefined;
   }
 
   async initialize(): Promise<void> {
@@ -75,16 +108,47 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     this.db.pragma('busy_timeout = 5000');
 
     applyMigrations(this.db);
+    this.entityRegistry = new EntityRegistryStore(this.db);
+  }
+
+  async upsertEntities(entities: EntityRecord[]): Promise<void> {
+    return this.writeQueue.enqueue(() => {
+      this.ensureOpen();
+      this.entityRegistry?.upsert(entities);
+      this.entityRegistry?.refreshMentions();
+    });
+  }
+
+  async getEntity(entityId: string): Promise<EntityRecord | null> {
+    this.ensureOpen();
+    return this.entityRegistry?.get(entityId) ?? null;
+  }
+
+  async resolveEntityAliases(query: string): Promise<QueryEntityMatch[]> {
+    this.ensureOpen();
+    return this.entityRegistry?.resolveQuery(query) ?? [];
+  }
+
+  async refreshEntityMentions(docAnchors?: string[]): Promise<void> {
+    return this.writeQueue.enqueue(() => {
+      this.ensureOpen();
+      this.entityRegistry?.refreshMentions(docAnchors);
+    });
   }
 
   async search(query: string, options?: SearchOptions): Promise<EvidenceItem[]> {
+    return (await this.searchWithMeta(query, options)).items;
+  }
+
+  async searchWithMeta(query: string, options?: SearchOptions): Promise<EvidenceSearchExecution> {
     this.ensureOpen();
     const limit = options?.limit ?? 10;
     // P2 fix (砚砚): hybrid needs a wider BM25 candidate pool for meaningful RRF
     const bm25Pool = options?.mode === 'hybrid' ? Math.min(Math.max(limit * 4, 20), 100) : limit;
     const trimmed = query.trim();
-    if (!trimmed) return [];
+    if (!trimmed) return { items: [], meta: { degraded: false } };
     const lexicalBackfillWords = splitLexicalBackfillWords(trimmed);
+    const queryEntityMatches = this.entityRegistry?.resolveQuery(trimmed) ?? [];
 
     // Phase D: resolve scope → kind filter
     // scope='threads' → kind='thread' (P1 fix: was incorrectly mapped to 'session')
@@ -324,70 +388,33 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       }
     }
 
-    // Phase E + AC-I9: passage search when depth=raw and scope includes threads
-    if (options?.depth === 'raw' && (!options?.scope || options.scope === 'all' || options.scope === 'threads')) {
-      const cw = options?.contextWindow;
-      const passages = this.searchPassages(
-        trimmed,
-        limit,
-        { dateFrom: options?.dateFrom, dateTo: options?.dateTo },
-        cw && cw > 0 ? { contextWindow: cw } : undefined,
-      );
-      // Group passages by docAnchor for structured return
-      // P1-2 fix: when threadId filter is active, skip passages from other threads
-      const passagesByAnchor = new Map<string, typeof passages>();
-      for (const p of passages) {
-        if (threadAnchor && p.docAnchor !== threadAnchor) continue;
-        const arr = passagesByAnchor.get(p.docAnchor) ?? [];
-        arr.push(p);
-        passagesByAnchor.set(p.docAnchor, arr);
-      }
-      for (const [anchor, pList] of passagesByAnchor) {
-        // Find existing result or synthesize from parent doc
-        let item = results.find((r) => r.anchor === anchor);
-        if (!item) {
-          const parentDoc = this.db?.prepare('SELECT * FROM evidence_docs WHERE anchor = ?').get(anchor) as
-            | RowShape
-            | undefined;
-          if (parentDoc) {
-            item = rowToItem(parentDoc);
-            item.summary = `[passage match] ${pList[0].speaker ? `${pList[0].speaker}: ` : ''}${pList[0].content.slice(0, 200)}`;
-            results.push(item);
-            seenAnchors.add(anchor);
-          }
-        }
-        if (item) {
-          item.passages = pList.map((p) => ({
-            passageId: p.passageId,
-            content: p.content,
-            speaker: p.speaker,
-            createdAt: p.createdAt,
-            ...(p.context
-              ? {
-                  context: p.context.map((c) => ({
-                    passageId: c.passageId,
-                    content: c.content,
-                    speaker: c.speaker,
-                    createdAt: c.createdAt,
-                  })),
-                }
-              : {}),
-          }));
-        }
+    const entityMentionDocs = this.hydrateEntityMentionDocs(queryEntityMatches, options, bm25Pool, {
+      effectiveKind,
+      excludeSessionAndThread,
+      excludePackKnowledge,
+      threadAnchor,
+      suppressBackstop,
+    });
+    for (const item of entityMentionDocs.items) {
+      if (!seenAnchors.has(item.anchor)) {
+        results.push(item);
+        seenAnchors.add(item.anchor);
       }
     }
 
-    // P1 fix (砚砚 review): depth=raw must stay lexical-only — no passage vectors yet.
-    // Short-circuit BEFORE mode split to prevent semantic/hybrid from eating raw results.
     if (options?.depth === 'raw') {
-      // Passage ranking fix: results with passage matches must rank before
-      // doc-only hits so low-limit queries surface message-level content.
-      results.sort((a, b) => {
-        const aHas = a.passages?.length ? 1 : 0;
-        const bHas = b.passages?.length ? 1 : 0;
-        return bHas - aHas; // passage-bearing first, stable within each group
-      });
-      return this.enrichWithDrillDown(results.slice(0, limit), undefined, options, trimmed);
+      const rawResult = await this.rawPassageSearch(
+        query,
+        results,
+        limit,
+        options,
+        queryEntityMatches,
+        entityMentionDocs.matchesByAnchor,
+      );
+      return {
+        items: this.enrichWithDrillDown(rawResult.items, undefined, options, trimmed),
+        meta: rawResult.meta,
+      };
     }
 
     // ── F163: Post-retrieval authority boost (fail-open: Task 11) ──
@@ -408,43 +435,556 @@ export class SqliteEvidenceStore implements IEvidenceStore {
 
     // G-4: all paths go through enrichWithDrillDown before returning
     if (searchMode === 'lexical') {
-      return this.enrichWithDrillDown(lexicalResults, undefined, options, trimmed);
+      return {
+        items: this.enrichWithDrillDown(
+          this.attachEntityMatches(lexicalResults, entityMentionDocs.matchesByAnchor),
+          undefined,
+          options,
+          trimmed,
+        ),
+        meta: { degraded: false },
+      };
     }
 
     if (searchMode === 'semantic') {
       if (!embeddingAvailable) {
-        return this.enrichWithDrillDown(lexicalResults, undefined, options, trimmed);
+        return {
+          items: this.enrichWithDrillDown(
+            this.attachEntityMatches(lexicalResults, entityMentionDocs.matchesByAnchor),
+            undefined,
+            options,
+            trimmed,
+          ),
+          meta: { degraded: false },
+        };
       }
       try {
-        return this.enrichWithDrillDown(
-          await this.semanticNNSearch(query, limit, options, suppressBackstop),
-          undefined,
-          options,
-          trimmed,
-        );
+        const semanticItems = await this.semanticNNSearch(query, limit, options, suppressBackstop);
+        return {
+          items: this.enrichWithDrillDown(
+            this.attachEntityMatches(
+              this.mergeEntityResults(entityMentionDocs.items, semanticItems, limit),
+              entityMentionDocs.matchesByAnchor,
+            ),
+            undefined,
+            options,
+            trimmed,
+          ),
+          meta: { degraded: false },
+        };
       } catch {
-        return this.enrichWithDrillDown(lexicalResults, undefined, options, trimmed);
+        return {
+          items: this.enrichWithDrillDown(
+            this.attachEntityMatches(lexicalResults, entityMentionDocs.matchesByAnchor),
+            undefined,
+            options,
+            trimmed,
+          ),
+          meta: { degraded: false },
+        };
       }
     }
 
     if (searchMode === 'hybrid') {
       if (!embeddingAvailable) {
-        return this.enrichWithDrillDown(lexicalResults, undefined, options, trimmed);
+        return {
+          items: this.enrichWithDrillDown(
+            this.attachEntityMatches(lexicalResults, entityMentionDocs.matchesByAnchor),
+            undefined,
+            options,
+            trimmed,
+          ),
+          meta: { degraded: false },
+        };
       }
       try {
         const f200Pool = freezeF200Flags().consumptionRerank !== 'off' ? limit * 3 : limit;
-        return this.enrichWithDrillDown(
-          await this.hybridRRFSearch(query, lexicalCandidates, f200Pool, options, suppressBackstop),
-          limit,
-          options,
-          trimmed,
-        );
+        const hybridItems = await this.hybridRRFSearch(query, lexicalCandidates, f200Pool, options, suppressBackstop);
+        return {
+          items: this.enrichWithDrillDown(
+            this.attachEntityMatches(
+              this.mergeEntityResults(entityMentionDocs.items, hybridItems, f200Pool),
+              entityMentionDocs.matchesByAnchor,
+            ),
+            limit,
+            options,
+            trimmed,
+          ),
+          meta: { degraded: false },
+        };
       } catch {
-        return this.enrichWithDrillDown(lexicalResults, undefined, options, trimmed);
+        return {
+          items: this.enrichWithDrillDown(
+            this.attachEntityMatches(lexicalResults, entityMentionDocs.matchesByAnchor),
+            undefined,
+            options,
+            trimmed,
+          ),
+          meta: { degraded: false },
+        };
       }
     }
 
-    return this.enrichWithDrillDown(lexicalResults, undefined, options, trimmed);
+    return {
+      items: this.enrichWithDrillDown(
+        this.attachEntityMatches(lexicalResults, entityMentionDocs.matchesByAnchor),
+        undefined,
+        options,
+        trimmed,
+      ),
+      meta: { degraded: false },
+    };
+  }
+
+  private async rawPassageSearch(
+    query: string,
+    baseResults: EvidenceItem[],
+    limit: number,
+    options: SearchOptions,
+    queryEntityMatches: QueryEntityMatch[],
+    entityMatchesByAnchor: Map<string, EntityMatch[]>,
+  ): Promise<EvidenceSearchExecution> {
+    if (options.scope && options.scope !== 'all' && options.scope !== 'threads') {
+      return {
+        items: this.attachEntityMatches(this.rankRawResults(baseResults, limit), entityMatchesByAnchor),
+        meta: { degraded: false },
+      };
+    }
+
+    const mode = options.mode ?? 'lexical';
+    const pool = Math.min(Math.max(limit * 4, 20), 100);
+    const timeFilter = { dateFrom: options.dateFrom, dateTo: options.dateTo };
+    const lexical = (): PassageResult[] => this.searchPassages(query, pool, timeFilter);
+
+    let passages: PassageResult[];
+    let meta: SearchExecutionMeta = { degraded: false };
+    if (mode === 'semantic') {
+      if (!this.isPassageEmbeddingAvailable()) {
+        passages = lexical();
+        meta = {
+          degraded: true,
+          degradeReason: 'passage_embedding_unavailable',
+          effectiveMode: 'lexical',
+        };
+      } else {
+        try {
+          passages = await this.semanticPassageNNSearch(query, pool, options);
+        } catch {
+          passages = lexical();
+          meta = {
+            degraded: true,
+            degradeReason: 'passage_vector_search_error',
+            effectiveMode: 'lexical',
+          };
+        }
+      }
+    } else if (mode === 'hybrid') {
+      if (!this.isPassageEmbeddingAvailable()) {
+        passages = lexical();
+        meta = {
+          degraded: true,
+          degradeReason: 'passage_embedding_unavailable',
+          effectiveMode: 'lexical',
+        };
+      } else {
+        try {
+          passages = await this.hybridPassageRRFSearch(query, lexical(), pool, options);
+        } catch {
+          passages = lexical();
+          meta = {
+            degraded: true,
+            degradeReason: 'passage_vector_search_error',
+            effectiveMode: 'lexical',
+          };
+        }
+      }
+    } else {
+      passages = lexical();
+    }
+
+    const entityPassageHits = this.entityRegistry?.findMentionPassages(queryEntityMatches, pool, {
+      threadId: options.threadId,
+      dateFrom: options.dateFrom,
+      dateTo: options.dateTo,
+    });
+    const entityPassages = entityPassageHits?.passages.map((p) => this.entityHitToPassageResult(p)) ?? [];
+    const mergedEntityMatches = mergeEntityMatchMaps(entityMatchesByAnchor, entityPassageHits?.matchesByAnchor);
+    const mergedPassages = mergePassageResults(entityPassages, passages);
+    return {
+      items: this.attachEntityMatches(
+        this.hydratePassageResults(baseResults, mergedPassages, limit, options),
+        mergedEntityMatches,
+      ),
+      meta,
+    };
+  }
+
+  private hydrateEntityMentionDocs(
+    queryEntityMatches: QueryEntityMatch[],
+    options: SearchOptions | undefined,
+    limit: number,
+    filters: SearchFilterContext,
+  ): { items: EvidenceItem[]; matchesByAnchor: Map<string, EntityMatch[]> } {
+    const mentionHits = this.entityRegistry?.findMentionAnchors(queryEntityMatches, limit, {
+      kind: filters.effectiveKind,
+      excludeSessionAndThread: filters.excludeSessionAndThread,
+      excludePackKnowledge: filters.excludePackKnowledge,
+      status: options?.status,
+      keywords: options?.keywords,
+      anchor: filters.threadAnchor,
+      dateFrom: options?.dateFrom,
+      dateTo: options?.dateTo,
+      worldId: options?.worldId,
+      sceneId: options?.sceneId,
+      provenanceTier: options?.provenanceTier,
+      suppressBackstop: filters.suppressBackstop,
+    });
+    if (!mentionHits || mentionHits.anchors.length === 0 || !this.db) {
+      return { items: [], matchesByAnchor: new Map() };
+    }
+
+    const placeholders = mentionHits.anchors.map(() => '?').join(',');
+    let sql = `SELECT * FROM evidence_docs WHERE anchor IN (${placeholders})`;
+    const params: unknown[] = [...mentionHits.anchors];
+
+    if (filters.effectiveKind) {
+      sql += ' AND kind = ?';
+      params.push(filters.effectiveKind);
+    }
+    if (filters.excludeSessionAndThread) {
+      sql += " AND kind != 'session' AND kind != 'thread'";
+    }
+    if (filters.excludePackKnowledge) {
+      sql += " AND kind != 'pack-knowledge'";
+    }
+    if (options?.status) {
+      sql += ' AND status = ?';
+      params.push(options.status);
+    }
+    if (options?.keywords?.length) {
+      sql += ` AND (${options.keywords.map(() => 'keywords LIKE ?').join(' OR ')})`;
+      params.push(...options.keywords.map((kw) => `%"${kw}"%`));
+    }
+    if (filters.threadAnchor) {
+      sql += ' AND anchor = ?';
+      params.push(filters.threadAnchor);
+    }
+    if (options?.dateFrom) {
+      sql += ' AND updated_at >= ?';
+      params.push(options.dateFrom);
+    }
+    if (options?.dateTo) {
+      sql += ' AND updated_at <= ?';
+      params.push(options.dateTo.length === 10 ? `${options.dateTo}T23:59:59` : options.dateTo);
+    }
+    if (options?.worldId) {
+      sql += ' AND world_id = ?';
+      params.push(options.worldId);
+    }
+    if (options?.sceneId) {
+      sql += ' AND scene_id = ?';
+      params.push(options.sceneId);
+    }
+    if (options?.provenanceTier) {
+      sql += ' AND provenance_tier = ?';
+      params.push(options.provenanceTier);
+    }
+    if (filters.suppressBackstop) {
+      sql += " AND activation != 'backstop'";
+    }
+
+    const rows = this.db.prepare(sql).all(...params) as RowShape[];
+    const rowMap = new Map(rows.map((row) => [row.anchor, row]));
+    const items = mentionHits.anchors
+      .map((anchor) => rowMap.get(anchor))
+      .filter((row): row is RowShape => Boolean(row))
+      .map((row) => rowToItem(row));
+    return { items, matchesByAnchor: mentionHits.matchesByAnchor };
+  }
+
+  private attachEntityMatches(items: EvidenceItem[], matchesByAnchor: Map<string, EntityMatch[]>): EvidenceItem[] {
+    if (matchesByAnchor.size === 0) return items;
+    for (const item of items) {
+      const matches = dedupeEntityMatches(matchesByAnchor.get(item.anchor) ?? []);
+      if (matches.length > 0) item.entityMatches = matches;
+    }
+    return items;
+  }
+
+  private mergeEntityResults(entityItems: EvidenceItem[], items: EvidenceItem[], limit: number): EvidenceItem[] {
+    if (entityItems.length === 0) return items.slice(0, limit);
+    const out: EvidenceItem[] = [];
+    const seen = new Set<string>();
+    const entityCap = items.length > 0 ? Math.max(1, Math.ceil(limit / 2)) : limit;
+    for (const item of entityItems.slice(0, entityCap)) {
+      if (seen.has(item.anchor)) continue;
+      seen.add(item.anchor);
+      out.push(item);
+      if (out.length >= limit) break;
+    }
+    for (const item of items) {
+      if (seen.has(item.anchor)) continue;
+      seen.add(item.anchor);
+      out.push(item);
+      if (out.length >= limit) break;
+    }
+    return out.slice(0, limit);
+  }
+
+  private entityHitToPassageResult(hit: EntityMentionPassageHit): PassageResult {
+    return {
+      docAnchor: hit.docAnchor,
+      passageId: hit.passageId,
+      content: hit.content,
+      speaker: hit.speaker,
+      position: hit.position,
+      createdAt: hit.createdAt,
+    };
+  }
+
+  private isPassageEmbeddingAvailable(): boolean {
+    return Boolean(
+      this.embedDeps?.embedding.isReady() && this.embedDeps.mode === 'on' && this.embedDeps.passageVectorStore,
+    );
+  }
+
+  private async semanticPassageNNSearch(
+    query: string,
+    limit: number,
+    options?: SearchOptions,
+  ): Promise<PassageResult[]> {
+    const queryVec = await this.embedDeps!.embedding.embed([query]);
+    const nnResults = this.embedDeps!.passageVectorStore!.search(queryVec[0], limit);
+    return this.hydratePassageVectorHits(nnResults, options);
+  }
+
+  private async hybridPassageRRFSearch(
+    query: string,
+    lexicalPassages: PassageResult[],
+    limit: number,
+    options?: SearchOptions,
+  ): Promise<PassageResult[]> {
+    const semanticPassages = await this.semanticPassageNNSearch(query, limit, options);
+    const rrfK = 60;
+    const nnWeight = hasCJKCharacters(query) ? CJK_NN_WEIGHT : 1.0;
+    const scores = new Map<string, number>();
+    const passageMap = new Map<string, PassageResult>();
+
+    for (let i = 0; i < lexicalPassages.length; i++) {
+      const passage = lexicalPassages[i];
+      const key = passageVectorKey(passage.docAnchor, passage.passageId);
+      scores.set(key, (scores.get(key) ?? 0) + 1 / (rrfK + i));
+      passageMap.set(key, passage);
+    }
+
+    for (let i = 0; i < semanticPassages.length; i++) {
+      const passage = semanticPassages[i];
+      const key = passageVectorKey(passage.docAnchor, passage.passageId);
+      scores.set(key, (scores.get(key) ?? 0) + nnWeight / (rrfK + i));
+      passageMap.set(key, passage);
+    }
+
+    return [...scores.keys()]
+      .sort((a, b) => (scores.get(b) ?? 0) - (scores.get(a) ?? 0))
+      .map((key) => passageMap.get(key))
+      .filter((p): p is PassageResult => Boolean(p))
+      .slice(0, limit);
+  }
+
+  private hydratePassageVectorHits(
+    hits: Array<{ passageKey: string; distance: number }>,
+    options?: SearchOptions,
+  ): PassageResult[] {
+    if (!this.db || hits.length === 0) return [];
+
+    const parsed = hits
+      .map((hit) => {
+        try {
+          return { ...parsePassageVectorKey(hit.passageKey), passageKey: hit.passageKey, distance: hit.distance };
+        } catch {
+          return null;
+        }
+      })
+      .filter((hit): hit is { docAnchor: string; passageId: string; passageKey: string; distance: number } =>
+        Boolean(hit),
+      );
+    if (parsed.length === 0) return [];
+
+    const clauses = parsed.map(() => '(doc_anchor = ? AND passage_id = ?)').join(' OR ');
+    const params: unknown[] = parsed.flatMap((p) => [p.docAnchor, p.passageId]);
+    let sql = `SELECT doc_anchor, passage_id, content, speaker, position, created_at FROM evidence_passages WHERE (${clauses})`;
+
+    if (options?.threadId) {
+      sql += ' AND doc_anchor = ?';
+      params.push(`thread-${options.threadId}`);
+    }
+    if (options?.dateFrom) {
+      sql += ' AND created_at >= ?';
+      params.push(options.dateFrom);
+    }
+    if (options?.dateTo) {
+      sql += ' AND created_at <= ?';
+      params.push(options.dateTo.length === 10 ? `${options.dateTo}T23:59:59` : options.dateTo);
+    }
+
+    const rows = this.db.prepare(sql).all(...params) as Array<{
+      doc_anchor: string;
+      passage_id: string;
+      content: string;
+      speaker: string | null;
+      position: number | null;
+      created_at: string | null;
+    }>;
+    const rowMap = new Map(rows.map((r) => [passageVectorKey(r.doc_anchor, r.passage_id), r]));
+
+    const passages: PassageResult[] = [];
+    for (let index = 0; index < parsed.length; index++) {
+      const hit = parsed[index];
+      const row = rowMap.get(hit.passageKey);
+      if (!row) continue;
+      passages.push({
+        docAnchor: row.doc_anchor,
+        passageId: row.passage_id,
+        content: row.content,
+        speaker: row.speaker ?? undefined,
+        position: row.position ?? undefined,
+        rank: hit.distance ?? index,
+        createdAt: row.created_at ?? undefined,
+      });
+    }
+    return passages;
+  }
+
+  private hydratePassageResults(
+    baseResults: EvidenceItem[],
+    passages: PassageResult[],
+    limit: number,
+    options?: SearchOptions,
+  ): EvidenceItem[] {
+    const results = [...baseResults];
+    const threadAnchor = options?.threadId ? `thread-${options.threadId}` : undefined;
+    const passageOrder = new Map<string, number>();
+    const passagesByAnchor = new Map<string, PassageResult[]>();
+    const withContext = this.attachPassageContext(passages, options?.contextWindow);
+
+    for (let index = 0; index < withContext.length; index++) {
+      const passage = withContext[index];
+      if (threadAnchor && passage.docAnchor !== threadAnchor) continue;
+      const arr = passagesByAnchor.get(passage.docAnchor) ?? [];
+      arr.push(passage);
+      passagesByAnchor.set(passage.docAnchor, arr);
+      if (!passageOrder.has(passage.docAnchor)) passageOrder.set(passage.docAnchor, index);
+    }
+
+    for (const [anchor, pList] of passagesByAnchor) {
+      let item = results.find((r) => r.anchor === anchor);
+      if (!item) {
+        const parentDoc = this.db?.prepare('SELECT * FROM evidence_docs WHERE anchor = ?').get(anchor) as
+          | RowShape
+          | undefined;
+        if (parentDoc) {
+          item = rowToItem(parentDoc);
+          item.summary = `[passage match] ${pList[0].speaker ? `${pList[0].speaker}: ` : ''}${pList[0].content.slice(0, 200)}`;
+          results.push(item);
+        }
+      }
+      if (item) item.passages = pList.map((p) => this.toEvidencePassage(p));
+    }
+
+    return this.rankRawResults(results, limit, passageOrder);
+  }
+
+  private attachPassageContext(passages: PassageResult[], contextWindow?: number): PassageResult[] {
+    if (!contextWindow || contextWindow <= 0 || !this.db) return passages;
+    const ctxStmt = this.db.prepare(
+      `SELECT doc_anchor, passage_id, content, speaker, position, created_at
+       FROM evidence_passages
+       WHERE doc_anchor = ? AND position BETWEEN ? AND ? AND passage_id != ?
+       ORDER BY position`,
+    );
+
+    return passages.map((passage) => {
+      if (passage.position == null) return passage;
+      const ctxRows = ctxStmt.all(
+        passage.docAnchor,
+        passage.position - contextWindow,
+        passage.position + contextWindow,
+        passage.passageId,
+      ) as Array<{
+        doc_anchor: string;
+        passage_id: string;
+        content: string;
+        speaker: string | null;
+        position: number | null;
+        created_at: string | null;
+      }>;
+      return {
+        ...passage,
+        context: ctxRows.map((c) => ({
+          docAnchor: c.doc_anchor,
+          passageId: c.passage_id,
+          content: c.content,
+          speaker: c.speaker ?? undefined,
+          position: c.position ?? undefined,
+          createdAt: c.created_at ?? undefined,
+        })),
+      };
+    });
+  }
+
+  private toEvidencePassage(passage: PassageResult): NonNullable<EvidenceItem['passages']>[number] {
+    const threadId = passage.docAnchor.startsWith('thread-') ? passage.docAnchor.slice('thread-'.length) : undefined;
+    const messageId = passage.passageId.startsWith('msg-') ? passage.passageId.slice('msg-'.length) : undefined;
+    return {
+      docAnchor: passage.docAnchor,
+      passageId: passage.passageId,
+      content: passage.content,
+      speaker: passage.speaker,
+      createdAt: passage.createdAt,
+      threadId,
+      messageId,
+      ...(passage.context
+        ? {
+            context: passage.context.map((c) => {
+              const ctxThreadId = c.docAnchor.startsWith('thread-') ? c.docAnchor.slice('thread-'.length) : undefined;
+              const ctxMessageId = c.passageId.startsWith('msg-') ? c.passageId.slice('msg-'.length) : undefined;
+              return {
+                docAnchor: c.docAnchor,
+                passageId: c.passageId,
+                content: c.content,
+                speaker: c.speaker,
+                createdAt: c.createdAt,
+                threadId: ctxThreadId,
+                messageId: ctxMessageId,
+              };
+            }),
+          }
+        : {}),
+    };
+  }
+
+  private rankRawResults(
+    results: EvidenceItem[],
+    limit: number,
+    passageOrder: Map<string, number> = new Map(),
+  ): EvidenceItem[] {
+    const originalOrder = new Map(results.map((item, index) => [item.anchor, index]));
+    results.sort((a, b) => {
+      const aHas = a.passages?.length ? 1 : 0;
+      const bHas = b.passages?.length ? 1 : 0;
+      if (aHas !== bHas) return bHas - aHas;
+      if (aHas && bHas) {
+        return (
+          (passageOrder.get(a.anchor) ?? Number.MAX_SAFE_INTEGER) -
+          (passageOrder.get(b.anchor) ?? Number.MAX_SAFE_INTEGER)
+        );
+      }
+      return (
+        (originalOrder.get(a.anchor) ?? Number.MAX_SAFE_INTEGER) -
+        (originalOrder.get(b.anchor) ?? Number.MAX_SAFE_INTEGER)
+      );
+    });
+    return results.slice(0, limit);
   }
 
   /**
@@ -465,7 +1005,19 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     if (targetLimit && results.length > targetLimit) results.length = targetLimit;
     annotateMatchReasons(results, query, options?.explain);
     for (const item of results) {
-      if (item.kind === 'thread' && item.anchor.startsWith('thread-')) {
+      const primaryPassage = item.passages?.find((p) => p.threadId && p.messageId);
+      if (primaryPassage?.threadId && primaryPassage.messageId) {
+        item.drillDown = {
+          tool: 'cat_cafe_get_thread_context',
+          params: {
+            threadId: primaryPassage.threadId,
+            messageId: primaryPassage.messageId,
+            before: '3',
+            after: '3',
+          },
+          hint: `打开原文窗口：get_thread_context(threadId="${primaryPassage.threadId}", messageId="${primaryPassage.messageId}", before=3, after=3)`,
+        };
+      } else if (item.kind === 'thread' && item.anchor.startsWith('thread-')) {
         const threadId = item.anchor.replace('thread-', '');
         item.drillDown = {
           tool: 'cat_cafe_get_thread_context',
@@ -479,9 +1031,34 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           params: { sessionId },
           hint: `查看 session 摘要：read_session_digest(sessionId="${sessionId}")`,
         };
+      } else if (item.sourcePath) {
+        const filePath = this.resolveSourcePathForDrillDown(item.sourcePath);
+        if (filePath) {
+          item.drillDown = {
+            tool: 'cat_cafe_read_file_slice',
+            params: { path: filePath, startLine: '1', endLine: '120' },
+            hint: `打开文件切片：read_file_slice(path="${filePath}", startLine=1, endLine=120)`,
+          };
+        }
       }
     }
     return results;
+  }
+
+  private resolveSourcePathForDrillDown(sourcePath: string): string | null {
+    if (!this.sourceRoot) return null;
+    const resolved = isAbsolute(sourcePath) ? resolve(sourcePath) : resolve(this.sourceRoot, sourcePath);
+    const rel = relative(this.sourceRoot, resolved);
+    if (!rel || rel.startsWith('..') || isAbsolute(rel)) return null;
+    const publicRel = rel
+      .split(/[\\/]+/)
+      .filter(Boolean)
+      .join('/');
+    if (!this.sourceRef) {
+      return basename(this.sourceRoot) === 'docs' && !publicRel.startsWith('docs/') ? `docs/${publicRel}` : publicRel;
+    }
+    const encodedPath = publicRel.split('/').map(encodeURIComponent).join('/');
+    return `cat-cafe://collection/${encodeURIComponent(this.sourceRef)}/${encodedPath}`;
   }
 
   /**
@@ -763,6 +1340,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       });
 
       tx(items);
+      this.entityRegistry?.refreshMentions(items.map((item) => item.anchor));
     });
   }
 
@@ -1143,6 +1721,46 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   }
 }
 
+function mergeEntityMatchMaps(
+  left: Map<string, EntityMatch[]>,
+  right?: Map<string, EntityMatch[]>,
+): Map<string, EntityMatch[]> {
+  if (!right || right.size === 0) return left;
+  const merged = new Map<string, EntityMatch[]>();
+  for (const [anchor, matches] of left) merged.set(anchor, [...matches]);
+  for (const [anchor, matches] of right) {
+    const arr = merged.get(anchor) ?? [];
+    arr.push(...matches);
+    merged.set(anchor, arr);
+  }
+  return merged;
+}
+
+function mergePassageResults(entityPassages: PassageResult[], passages: PassageResult[]): PassageResult[] {
+  if (entityPassages.length === 0) return passages;
+  const out: PassageResult[] = [];
+  const seen = new Set<string>();
+  for (const passage of [...entityPassages, ...passages]) {
+    const key = passageVectorKey(passage.docAnchor, passage.passageId);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(passage);
+  }
+  return out;
+}
+
+function dedupeEntityMatches(matches: EntityMatch[]): EntityMatch[] {
+  const seen = new Set<string>();
+  const out: EntityMatch[] = [];
+  for (const match of matches) {
+    const key = `${match.entityId}\u0000${match.docAnchor}\u0000${match.passageId ?? ''}\u0000${match.surface}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(match);
+  }
+  return out;
+}
+
 // ── Row mapping ──────────────────────────────────────────────────────
 
 interface RowShape {
@@ -1391,7 +2009,9 @@ function annotateMatchReasons(results: EvidenceItem[], query: string, explain?: 
   if (!query) return;
   const q = query.toLowerCase();
   for (const item of results) {
-    if (item.anchor.toLowerCase().includes(q)) {
+    if (item.entityMatches?.length) {
+      item.matchReason = `entity:${item.entityMatches[0].entityId}`;
+    } else if (item.anchor.toLowerCase().includes(q)) {
       item.matchReason = 'anchor';
     } else if (item.title.toLowerCase().includes(q)) {
       item.matchReason = 'title';

@@ -8,8 +8,8 @@
 
 import { execFile, execFileSync } from 'node:child_process';
 import type { ReadStream } from 'node:fs';
-import { closeSync, constants, createReadStream, openSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { closeSync, constants, createReadStream, openSync, statSync } from 'node:fs';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Interface as ReadlineInterface } from 'node:readline';
@@ -49,10 +49,19 @@ function shellEscape(s: string): string {
   return `'${s.replace(/'/g, "'\"'\"'")}'`;
 }
 
-/** Build: set -o pipefail; command args 2>&1 | tee $FIFO; echo "EXIT:$?" > $EXIT_FILE */
-function buildPaneCommand(opts: TmuxSpawnOptions, fifoPath: string, exitFilePath: string): string {
+/** Build: set -o pipefail; command args | tee $FIFO; echo "EXIT:$?" > $EXIT_FILE */
+function buildPaneCommand(
+  opts: TmuxSpawnOptions,
+  fifoPath: string,
+  exitFilePath: string,
+  stderrFilePath: string,
+): string {
   const parts = [shellEscape(opts.command), ...opts.args.map(shellEscape)];
   // pipefail ensures $? reflects the CLI exit code, not tee's
+  if (opts.outputMode === 'plainText') {
+    const stderrFile = shellEscape(stderrFilePath);
+    return `set -o pipefail; ${parts.join(' ')} 2> ${stderrFile} | tee ${shellEscape(fifoPath)}; echo "EXIT:$?" > ${shellEscape(exitFilePath)}; cat ${stderrFile} >&2`;
+  }
   return `set -o pipefail; ${parts.join(' ')} 2>&1 | tee ${shellEscape(fifoPath)}; echo "EXIT:$?" > ${shellEscape(exitFilePath)}`;
 }
 
@@ -81,11 +90,14 @@ export async function* spawnCliInTmux(
 ): AsyncGenerator<unknown, TmuxSpawnResult, undefined> {
   const { tmuxGateway } = deps;
   const idleTimeoutMs = resolveCliTimeoutMs(options.timeoutMs);
-  const firstEventTimeoutMs = options.firstEventTimeoutMs ?? DEFAULT_FIRST_EVENT_TIMEOUT_MS;
+  const firstEventTimeoutMs =
+    options.firstEventTimeoutMs ??
+    (options.outputMode === 'plainText' ? idleTimeoutMs : DEFAULT_FIRST_EVENT_TIMEOUT_MS);
 
   const tmpDir = await mkdtemp(join(tmpdir(), `catcafe-agent-${options.invocationId}-`));
   const fifoPath = join(tmpDir, 'output.fifo');
   const exitFilePath = join(tmpDir, 'exit-code');
+  const stderrFilePath = join(tmpDir, 'stderr.log');
   await execAsync('mkfifo', [fifoPath]);
 
   const paneId = await tmuxGateway.createAgentPane(options.worktreeId, {
@@ -102,7 +114,11 @@ export async function* spawnCliInTmux(
     await new Promise((r) => setTimeout(r, 100));
   }
 
-  await tmuxGateway.execInPane(options.worktreeId, paneId, buildPaneCommand(options, fifoPath, exitFilePath));
+  await tmuxGateway.execInPane(
+    options.worktreeId,
+    paneId,
+    buildPaneCommand(options, fifoPath, exitFilePath, stderrFilePath),
+  );
   // Set read-only AFTER command starts (select-pane -d blocks send-keys if set before)
   await tmuxGateway.setPaneReadOnly(options.worktreeId, paneId, true);
   yield { __tmuxPaneCreated: true, paneId, worktreeId: options.worktreeId } as unknown;
@@ -112,6 +128,9 @@ export async function* spawnCliInTmux(
   let gotFirstEvent = false;
   let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
   let firstEventTimer: ReturnType<typeof setTimeout> | null = null;
+  let stderrPollTimer: ReturnType<typeof setInterval> | null = null;
+  let observedStderrSize = 0;
+  let observedStderrMtimeMs = 0;
   // CRITICAL: Hold references so killAgent can close readline to unblock `for await`.
   let fifoStream: ReadStream | null = null;
   let rl: ReadlineInterface | null = null;
@@ -198,6 +217,39 @@ export async function* spawnCliInTmux(
     }
   };
 
+  const recordPlainTextActivity = (): void => {
+    if (!gotFirstEvent) {
+      gotFirstEvent = true;
+      if (firstEventTimer) {
+        clearTimeout(firstEventTimer);
+        firstEventTimer = null;
+      }
+    }
+    resetIdleTimeout();
+  };
+
+  const pollStderrActivity = (): void => {
+    if (options.outputMode !== 'plainText' || killed) return;
+    try {
+      const stat = statSync(stderrFilePath);
+      const changed = stat.size > observedStderrSize || stat.mtimeMs > observedStderrMtimeMs;
+      observedStderrSize = Math.max(observedStderrSize, stat.size);
+      observedStderrMtimeMs = Math.max(observedStderrMtimeMs, stat.mtimeMs);
+      if (changed && stat.size > 0) recordPlainTextActivity();
+    } catch {
+      /* stderr file may not exist before the CLI writes its first stderr byte */
+    }
+  };
+
+  const startPlainTextStderrWatcher = (): void => {
+    if (options.outputMode !== 'plainText' || idleTimeoutMs === 0) return;
+    const pollMs = Math.max(50, Math.min(250, Math.floor(idleTimeoutMs / 4)));
+    stderrPollTimer = setInterval(pollStderrActivity, pollMs);
+    if (stderrPollTimer && typeof stderrPollTimer === 'object' && 'unref' in stderrPollTimer) {
+      stderrPollTimer.unref();
+    }
+  };
+
   /** Start the first-event timeout (pane spawned but no valid NDJSON yet). */
   const startFirstEventTimeout = (): void => {
     if (firstEventTimeoutMs === 0) return;
@@ -217,6 +269,7 @@ export async function* spawnCliInTmux(
   };
 
   startFirstEventTimeout();
+  startPlainTextStderrWatcher();
 
   const abortHandler = (): void => {
     killPromise ??= killAgent();
@@ -234,40 +287,65 @@ export async function* spawnCliInTmux(
 
     // createReadStream queues open() asynchronously — it doesn't block here.
     // The actual open() blocks at the kernel level until tee connects as writer.
-    // rl.close() in killAgent unblocks `for await` even if open() is still pending.
+    // killAgent closes the active reader/stream to unblock `for await`.
     fifoStream = createReadStream(fifoPath, { encoding: 'utf-8' });
-    rl = createInterface({ input: fifoStream, crlfDelay: Infinity });
+    const plainTextChunks: string[] = [];
     try {
-      for await (const line of rl) {
-        const trimmed = line.trim();
-        if (trimmed.length === 0) continue;
-        let event: unknown;
-        try {
-          event = JSON.parse(trimmed);
-        } catch {
-          log.error({ line: trimmed }, 'JSON parse error');
-          continue;
+      if (options.outputMode === 'plainText') {
+        for await (const chunk of fifoStream) {
+          const text = chunk.toString();
+          plainTextChunks.push(text);
+          if (text.length > 0) recordPlainTextActivity();
         }
-        // Mark first event and switch from first-event timeout to idle timeout.
-        if (!gotFirstEvent) {
-          gotFirstEvent = true;
-          if (firstEventTimer) {
-            clearTimeout(firstEventTimer);
-            firstEventTimer = null;
+      } else {
+        rl = createInterface({ input: fifoStream, crlfDelay: Infinity });
+        for await (const line of rl) {
+          const trimmed = line.trim();
+          if (trimmed.length === 0) continue;
+          let event: unknown;
+          try {
+            event = JSON.parse(trimmed);
+          } catch {
+            log.error({ line: trimmed }, 'JSON parse error');
+            continue;
           }
+          // Mark first event and switch from first-event timeout to idle timeout.
+          if (!gotFirstEvent) {
+            gotFirstEvent = true;
+            if (firstEventTimer) {
+              clearTimeout(firstEventTimer);
+              firstEventTimer = null;
+            }
+          }
+          // Reset idle timeout only on valid NDJSON events.
+          // Invalid output should not mask a hung CLI.
+          resetIdleTimeout();
+          yield event;
         }
-        // Reset idle timeout only on valid NDJSON events.
-        // Invalid output should not mask a hung CLI.
-        resetIdleTimeout();
-        yield event;
       }
     } catch (streamErr) {
-      // When killAgent() destroys the FIFO stream, readline throws
+      // When killAgent() destroys the FIFO stream, the active reader throws
       // ERR_STREAM_PREMATURE_CLOSE or ERR_USE_AFTER_CLOSE. This is expected.
       if (!killed) throw streamErr;
     }
 
     const exitCode = await readExitCode(exitFilePath);
+    if (options.outputMode === 'plainText') {
+      let stderr = '';
+      try {
+        stderr = await readFile(stderrFilePath, 'utf-8');
+      } catch {
+        /* stderr file may be absent if pane startup failed before redirection */
+      }
+      yield {
+        __cliPlainText: true,
+        stdout: plainTextChunks.join(''),
+        stderr,
+        exitCode,
+        signal: null,
+        command: options.command,
+      };
+    }
     if (!killed && exitCode !== null && exitCode !== 0) {
       yield {
         __cliError: true,
@@ -291,6 +369,7 @@ export async function* spawnCliInTmux(
   } finally {
     if (timeoutTimer) clearTimeout(timeoutTimer);
     if (firstEventTimer) clearTimeout(firstEventTimer);
+    if (stderrPollTimer) clearInterval(stderrPollTimer);
     if (options.signal) options.signal.removeEventListener('abort', abortHandler);
     if (killPromise) {
       try {

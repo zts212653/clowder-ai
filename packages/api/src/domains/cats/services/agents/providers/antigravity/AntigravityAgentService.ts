@@ -23,7 +23,12 @@ import { normalizeModel } from '../../../../../../infrastructure/telemetry/model
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../../types.js';
 import { appendLocalImagePathHints } from '../image-cli-bridge.js';
 import { extractImagePaths } from '../image-paths.js';
-import { AntigravityBridge, type BridgeConnection, type TrajectoryStep } from './AntigravityBridge.js';
+import {
+  AntigravityBridge,
+  type BridgeConnection,
+  type CascadeTrajectory,
+  type TrajectoryStep,
+} from './AntigravityBridge.js';
 import { AntigravitySideEffectJournal } from './AntigravitySideEffectJournal.js';
 import {
   type AntigravityLivenessEvidence,
@@ -85,6 +90,7 @@ type StallLivenessEvidence =
     };
 type AntigravityJournalSummary = ReturnType<AntigravitySideEffectJournal['summary']>;
 type AntigravityJournalEntry = AntigravityJournalSummary['entries'][number];
+type StallTrajectorySnapshot = Partial<CascadeTrajectory> & { steps?: readonly TrajectoryStep[] };
 
 function sanitizeRetryDelays(delays?: readonly number[]): number[] {
   return (delays ?? DEFAULT_MODEL_CAPACITY_RETRY_DELAYS_MS).filter(
@@ -235,6 +241,36 @@ function detectStallLivenessFromTrajectory(
     return { kind: 'trajectory_timestamp_progress', observedSteps, lastDelivered, trajectoryAt, previousTrajectoryAt };
   }
   return null;
+}
+
+function getWaitingCodeActionStepFromTrajectory(trajectory: StallTrajectorySnapshot): TrajectoryStep | undefined {
+  let steps: readonly TrajectoryStep[] = [];
+  if (trajectory.trajectory?.steps) {
+    steps = trajectory.trajectory.steps;
+  } else if (trajectory.steps) {
+    steps = trajectory.steps;
+  }
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    const step = steps[index];
+    if (step.type === 'CORTEX_STEP_TYPE_CODE_ACTION' && step.status === 'CORTEX_STEP_STATUS_WAITING') {
+      return step;
+    }
+  }
+  return undefined;
+}
+
+function getTrajectoryStepToolName(step: TrajectoryStep | undefined): string | undefined {
+  if (step?.metadata?.toolCall?.name) return step.metadata.toolCall.name;
+  if (step?.toolCall?.toolName) return step.toolCall.toolName;
+  return step?.toolResult?.toolName;
+}
+
+function getTrajectoryStepIndex(step: TrajectoryStep | undefined): number | undefined {
+  return step?.metadata?.sourceTrajectoryStepInfo?.stepIndex;
+}
+
+function getTrajectoryObservedStepCount(trajectory: { numTotalSteps?: number }, fallback: number): number {
+  return Number.isFinite(trajectory.numTotalSteps) ? Number(trajectory.numTotalSteps) : fallback;
 }
 
 async function sleepWithAbort(delayMs: number, signal?: AbortSignal): Promise<void> {
@@ -560,7 +596,8 @@ export class AntigravityAgentService implements AgentService {
         let hasTerminalText = false;
         let fatalSeen = false;
         let terminalAbort = false;
-        let autoApproveAttempted = false;
+        let cursorAutoApproveAttempted = false;
+        const autoApprovedPendingStepKeys = new Set<string>();
         const stallProbeBudget: StallProbeBudget = { attempts: 0, maxAttempts: STALL_PROBE_MAX_ATTEMPTS };
         let lastDelivered = stepsBefore;
         let attemptHasToolActivity = false;
@@ -871,8 +908,8 @@ export class AntigravityAgentService implements AgentService {
                       summary: 'trajectory is awaiting user approval',
                     };
               await persistCursorLiveness(approvalLivenessEvidence);
-              if (self.autoApprove && !autoApproveAttempted) {
-                autoApproveAttempted = true;
+              if (self.autoApprove && !cursorAutoApproveAttempted) {
+                cursorAutoApproveAttempted = true;
                 try {
                   await self.bridge.resolveOutstandingSteps(cascadeId);
                   log.info(`auto-approved pending interaction for cascade ${cascadeId}`);
@@ -896,7 +933,7 @@ export class AntigravityAgentService implements AgentService {
               const nextLastDelivered = batch.cursor.lastDeliveredStepCount;
               const deliveryAdvanced = nextLastDelivered > previousLastDelivered;
               if (deliveryAdvanced) {
-                autoApproveAttempted = false;
+                cursorAutoApproveAttempted = false;
                 stallProbeBudget.attempts = 0;
               }
               lastDelivered = nextLastDelivered;
@@ -1474,13 +1511,18 @@ export class AntigravityAgentService implements AgentService {
                     attemptHasNativeDispatch = true;
                   }
                   if (handled === 'approval_pending') {
-                    if (self.autoApprove && !autoApproveAttempted) {
-                      autoApproveAttempted = true;
+                    const approvalKey =
+                      toolCallId !== undefined && toolCallId !== ''
+                        ? `${cascadeId}:tool:${toolCallId}`
+                        : `${cascadeId}:step:${step.type}:${stepIndexFor(step)}`;
+                    if (self.autoApprove && !autoApprovedPendingStepKeys.has(approvalKey)) {
+                      autoApprovedPendingStepKeys.add(approvalKey);
                       try {
-                        await self.bridge.resolveOutstandingSteps(cascadeId);
+                        await self.bridge.approvePendingInteraction(cascadeId, step);
                         log.info(`auto-approved pending native tool interaction for cascade ${cascadeId}`);
                         continue;
                       } catch (err) {
+                        autoApprovedPendingStepKeys.delete(approvalKey);
                         log.warn(`auto-approve pending native tool interaction failed: ${err}`);
                       }
                     }
@@ -1591,10 +1633,47 @@ export class AntigravityAgentService implements AgentService {
               break;
             }
             if (isStall) {
+              let codeActionWaitExhausted = false;
               try {
                 const existingSupervisor = await this.supervisorStore.get(originalInvocationId, cascadeId);
+                const trajectory = await this.bridge.getTrajectory(cascadeId);
+                const waitingCodeActionStep = getWaitingCodeActionStepFromTrajectory(trajectory);
+                if (waitingCodeActionStep) {
+                  const observedSteps = getTrajectoryObservedStepCount(trajectory, lastDelivered);
+                  const stepIndex = getTrajectoryStepIndex(waitingCodeActionStep);
+                  let toolName = getTrajectoryStepToolName(waitingCodeActionStep);
+                  if (!toolName) toolName = waitingCodeActionStep.type;
+                  if (stallProbeBudget.attempts >= stallProbeBudget.maxAttempts) {
+                    codeActionWaitExhausted = true;
+                    log.warn(
+                      { cascadeId, toolName, stepIndex, observedSteps, lastDelivered, stallProbeBudget },
+                      'CODE_ACTION wait exhausted stall budget; surfacing stall without generic resolve',
+                    );
+                  } else {
+                    stallProbeBudget.attempts += 1;
+                    log.info(
+                      { cascadeId, toolName, stepIndex, observedSteps, lastDelivered, stallProbeBudget },
+                      'stall ignored because CODE_ACTION is still waiting for Antigravity LS apply',
+                    );
+                    await persistSupervisor({
+                      status: 'running',
+                      recoveryStrategy: 'wait',
+                      lastObservedStepCount: observedSteps,
+                      lastDeliveredStepIndex: lastDelivered,
+                      lastTrajectoryAt: Date.now(),
+                      lastLivenessEvidence: {
+                        kind: 'pending_approval',
+                        observedAt: Date.now(),
+                        summary: `${toolName} CODE_ACTION is still waiting for Antigravity LS apply; generic resolve is unsafe`,
+                      },
+                      auditType: 'supervisor_liveness',
+                    });
+                    retry = true;
+                    continue;
+                  }
+                }
                 const liveness = detectStallLivenessFromTrajectory(
-                  await this.bridge.getTrajectory(cascadeId),
+                  trajectory,
                   lastDelivered,
                   existingSupervisor?.lastTrajectoryAt,
                 );
@@ -1633,6 +1712,9 @@ export class AntigravityAgentService implements AgentService {
                 }
               } catch (livenessErr) {
                 log.warn(`stall liveness probe failed: ${livenessErr}`);
+              }
+              if (codeActionWaitExhausted) {
+                throw err;
               }
             }
             if (isStall && this.autoApprove && stallProbeBudget.attempts < stallProbeBudget.maxAttempts) {

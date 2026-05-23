@@ -16,6 +16,8 @@ export interface CliSpawnOptions {
   command: string;
   /** Arguments to pass to the CLI */
   args: readonly string[];
+  /** stdout parser mode. Defaults to NDJSON for existing CLI providers. */
+  outputMode?: 'ndjson' | 'plainText';
   /** Working directory for the process */
   cwd?: string;
   /** Timeout in milliseconds before auto-kill (default: 300_000 = 5 min) */

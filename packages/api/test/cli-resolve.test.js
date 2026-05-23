@@ -16,6 +16,19 @@ test('formatCliNotFoundError returns install hint for known CLI', () => {
   assert.match(msg, /npm install -g @openai\/codex/);
 });
 
+test('formatCliNotFoundError returns native installer hint for agy', () => {
+  const msg = formatCliNotFoundError('agy');
+  assert.match(msg, /agy CLI 未找到/);
+  assert.match(msg, /https:\/\/antigravity\.google\/cli\/install\.sh/);
+});
+
+test('formatCliNotFoundError returns Windows installer hint for agy on win32', () => {
+  const msg = formatCliNotFoundError('agy', 'win32');
+  assert.match(msg, /agy CLI 未找到/);
+  assert.match(msg, /install\.cmd/);
+  assert.doesNotMatch(msg, /install\.sh/);
+});
+
 test('formatCliNotFoundError returns generic hint for unknown CLI', () => {
   const msg = formatCliNotFoundError('unknown-tool');
   assert.match(msg, /unknown-tool CLI 未找到/);
@@ -89,6 +102,36 @@ test(
       const result = resolveCliCommand(cmdName);
       assert.equal(result, fakeCmd, 'should find .cmd in LOCALAPPDATA/npm');
     } finally {
+      if (originalAppData === undefined) delete process.env.APPDATA;
+      else process.env.APPDATA = originalAppData;
+      if (originalLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+      else process.env.LOCALAPPDATA = originalLocalAppData;
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'resolveCliCommand finds agy in LOCALAPPDATA/agy/bin on Windows',
+  { skip: process.platform !== 'win32' && 'Windows-only (AGY native binary fallback)' },
+  () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'cli-resolve-agy-localappdata-'));
+    const agyDir = join(tempRoot, 'local', 'agy', 'bin');
+    mkdirSync(agyDir, { recursive: true });
+
+    const fakeAgy = join(agyDir, 'agy.exe');
+    writeFileSync(fakeAgy, 'MZ', 'utf8');
+
+    const originalAppData = process.env.APPDATA;
+    const originalLocalAppData = process.env.LOCALAPPDATA;
+    try {
+      process.env.APPDATA = join(tempRoot, 'roaming');
+      process.env.LOCALAPPDATA = join(tempRoot, 'local');
+      invalidateCliCommand('agy');
+      const result = resolveCliCommand('agy');
+      assert.equal(result, fakeAgy, 'should find official Windows AGY native binary path');
+    } finally {
+      invalidateCliCommand('agy');
       if (originalAppData === undefined) delete process.env.APPDATA;
       else process.env.APPDATA = originalAppData;
       if (originalLocalAppData === undefined) delete process.env.LOCALAPPDATA;

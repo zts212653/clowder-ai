@@ -4,6 +4,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=scripts/lib/node-runtime-guard.sh
+source "$SCRIPT_DIR/lib/node-runtime-guard.sh"
 DEFAULT_ALPHA_DIR="$(cd "$PROJECT_DIR/.." && pwd)/cat-cafe-alpha"
 DEFAULT_LEGACY_ALPHA_DIR="$(cd "$PROJECT_DIR/.." && pwd)/cat-cafe-main-test"
 DEFAULT_ALPHA_BRANCH="alpha/main-sync"
@@ -419,6 +421,7 @@ start_alpha_worktree() {
 if [[ "${1:-}" == "--source-only" ]]; then
   SOURCE_ONLY=true
 else
+  ensure_supported_node_runtime "$SCRIPT_DIR/alpha-worktree.sh" "$@"
   COMMAND="${1:-status}"
   shift || true
 fi

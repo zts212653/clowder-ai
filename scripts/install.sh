@@ -1042,11 +1042,34 @@ install_codex_cli() {
         install_npm_cli "Codex CLI" "codex" "@openai/codex"
     fi
 }
+antigravity_cli_available() {
+    command -v agy &>/dev/null || [[ -x "$HOME/.local/bin/agy" ]]
+}
+install_antigravity_cli() {
+    info "  Installing Antigravity CLI..."
+    local installer_url="https://antigravity.google/cli/install.sh"
+    if ! command -v curl &>/dev/null; then
+        warn "curl not found — install Antigravity CLI manually: curl -fsSL $installer_url | bash"
+        return 1
+    fi
+    if curl -fsSL "$installer_url" | bash; then
+        [[ -d "$HOME/.local/bin" ]] && export PATH="$HOME/.local/bin:$PATH"
+        hash -r 2>/dev/null || true
+        if antigravity_cli_available; then
+            ok "Antigravity CLI installed"
+        else
+            warn "Antigravity CLI installer completed but agy is not visible yet. Add ~/.local/bin to PATH or open a new shell."
+        fi
+    else
+        warn "Antigravity CLI install failed — run manually: curl -fsSL $installer_url | bash"
+        return 1
+    fi
+}
 # Detect missing CLIs
 MISSING_AGENTS=()
 command -v claude &>/dev/null && ok "Claude Code already installed" || MISSING_AGENTS+=("claude")
 command -v codex &>/dev/null && ok "Codex CLI already installed"  || MISSING_AGENTS+=("codex")
-command -v gemini &>/dev/null && ok "Gemini CLI already installed" || MISSING_AGENTS+=("gemini")
+antigravity_cli_available && ok "Antigravity CLI already installed" || MISSING_AGENTS+=("agy")
 command -v kimi &>/dev/null && ok "Kimi CLI already installed"   || MISSING_AGENTS+=("kimi")
 
 if [[ ${#MISSING_AGENTS[@]} -gt 0 ]]; then
@@ -1071,7 +1094,7 @@ if [[ ${#MISSING_AGENTS[@]} -gt 0 ]]; then
         case "$agent" in
             claude) install_claude_cli ;;
             codex)  install_codex_cli ;;
-            gemini) install_npm_cli "Gemini CLI" "gemini" "@google/gemini-cli" ;;
+            agy)    install_antigravity_cli ;;
             kimi)   install_kimi_cli ;;
         esac
     done

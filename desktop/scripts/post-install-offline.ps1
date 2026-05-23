@@ -11,7 +11,7 @@ param(
     [Parameter(Mandatory)] [string]$AppDir,
     [switch]$Claude,
     [switch]$Codex,
-    [switch]$Gemini,
+    [switch]$Antigravity,
     [switch]$Kimi,
     [switch]$AgentHooksOnly
 )
@@ -23,9 +23,11 @@ function Write-Ok    { param([string]$msg) Write-Host "  [OK] $msg" -ForegroundC
 function Write-Warn  { param([string]$msg) Write-Host "  [!!] $msg" -ForegroundColor Yellow }
 function Write-Err   { param([string]$msg) Write-Host "  [ERR] $msg" -ForegroundColor Red }
 
-function Test-NetworkAvailable {
+function Test-UrlAvailable {
+    param([string]$Url)
     try {
-        $req = [System.Net.WebRequest]::Create("https://registry.npmjs.org")
+        $req = [System.Net.WebRequest]::Create($Url)
+        $req.Method = "HEAD"
         $req.Timeout = 3000
         $resp = $req.GetResponse()
         $resp.Close()
@@ -33,6 +35,14 @@ function Test-NetworkAvailable {
     } catch {
         return $false
     }
+}
+
+function Test-NetworkAvailable {
+    return Test-UrlAvailable -Url "https://registry.npmjs.org"
+}
+
+function Test-AntigravityCliBootstrapperAvailable {
+    return Test-UrlAvailable -Url "https://antigravity.google/cli/install.cmd"
 }
 
 function Resolve-Command { param([string]$Name)
@@ -43,9 +53,10 @@ function Resolve-Command { param([string]$Name)
         (Join-Path $env:APPDATA "npm\$Name.cmd"),
         (Join-Path $env:APPDATA "npm\$Name.exe"),
         (Join-Path $env:LOCALAPPDATA "npm\$Name.cmd"),
+        $(if ($Name -eq "agy" -and $env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "agy\bin\agy.exe" }),
         (Join-Path $env:ProgramFiles "nodejs\$Name.cmd"),
         (Join-Path ${env:ProgramFiles(x86)} "nodejs\$Name.cmd")
-    )
+    ) | Where-Object { $_ }
     foreach ($c in $candidates) {
         if (Test-Path $c) { return $c }
     }
@@ -88,6 +99,20 @@ function Install-CliToolFromNetwork {
             & $npmCmd install -g $PkgName 2>$null
             return ($LASTEXITCODE -eq 0)
         } catch { return $false }
+    }
+}
+
+function Install-AntigravityCliFromNetwork {
+    $installerUrl = "https://antigravity.google/cli/install.cmd"
+    $installerPath = Join-Path ([System.IO.Path]::GetTempPath()) "antigravity-cli-install.cmd"
+    try {
+        Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing -TimeoutSec 120
+        & $installerPath
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    } finally {
+        Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -215,7 +240,7 @@ Write-Step "Step 3/4 - AI CLI tools"
 $cliTools = @(
     @{ Name = "claude"; Label = "Claude"; Pkg = "@anthropic-ai/claude-code"; Selected = $Claude.IsPresent },
     @{ Name = "codex"; Label = "Codex"; Pkg = "@openai/codex"; Selected = $Codex.IsPresent },
-    @{ Name = "gemini"; Label = "Gemini"; Pkg = "@google/gemini-cli"; Selected = $Gemini.IsPresent },
+    @{ Name = "agy"; Label = "Antigravity CLI"; Kind = "antigravity-native"; Selected = $Antigravity.IsPresent },
     @{ Name = "kimi"; Label = "Kimi"; Pkg = "kimi-cli"; Kind = "python"; Selected = $Kimi.IsPresent }
 )
 
@@ -229,7 +254,7 @@ if (-not $selectedTools) {
     if ($hasNetwork) {
         Write-Ok "Network available"
     } else {
-        Write-Warn "Network unavailable -- CLI tools can only be installed from bundle"
+        Write-Warn "Network unavailable -- npm CLI tools can only be installed from bundle; Antigravity CLI requires its official bootstrapper"
     }
 }
 
@@ -245,14 +270,24 @@ foreach ($tool in $selectedTools) {
     $installed = $false
     $source = $null
 
-    # Try bundled tarball first
-    if (Test-Path $BundleDir) {
+    if ($tool.Kind -eq "antigravity-native") {
+        # AGY is a native binary bootstrapper, not an npm tarball. Offline
+        # packages intentionally ship instructions instead of pretending to
+        # vendor @google/gemini-cli as a replacement.
+        if (Test-AntigravityCliBootstrapperAvailable) {
+            $installed = Install-AntigravityCliFromNetwork
+            if ($installed) { $source = "official-bootstrapper" }
+        } else {
+            Write-Warn "Antigravity CLI requires the official network bootstrapper -- see bundled\\cli-tools\\agy-install-instructions.txt"
+        }
+    } elseif (Test-Path $BundleDir) {
+        # Try bundled tarball first
         $installed = Install-CliToolFromBundle -Name $tool.Name -PkgName $tool.Pkg -BundleDir $BundleDir
         if ($installed) { $source = "bundle" }
     }
 
     # Fall back to network
-    if (-not $installed -and $hasNetwork) {
+    if (-not $installed -and $hasNetwork -and $tool.Kind -ne "antigravity-native") {
         $installed = Install-CliToolFromNetwork -PkgName $tool.Pkg -InstallKind $tool.Kind
         if ($installed) { $source = "network" }
     }

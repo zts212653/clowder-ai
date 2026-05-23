@@ -1,0 +1,31 @@
+Command:
+BROWSER=echo \
+/tmp/cat-cafe-f210-agy-recon/bin/agy \
+  --log-file /tmp/cat-cafe-f210-agy-recon/raw/real-home-print.log \
+  --print-timeout 15s \
+  --print "Reply with AGY_RECON_OK only."
+
+Captured: 2026-05-22
+Exit: 0
+
+stdout:
+(empty)
+
+stderr:
+(empty)
+
+Selected log lines:
+I... Print mode: starting (promptLength=29, model="", conversationID="")
+I... Print mode: not authenticated, trying silent auth
+I... ChainedAuth: authenticated via keyring (effective: keyring)
+I... OAuth: authenticated successfully as [REDACTED_EMAIL]
+I... Print mode: silent auth succeeded
+I... Starting new conversation (agent=false)
+I... Print mode: conversation=[REDACTED_CONVERSATION_ID], sending message
+E... failed to construct executor: neither PlanModel nor RequestedModel specified. You must specify a valid model.
+E... neither PlanModel nor RequestedModel specified. You must specify a valid model.
+
+Notes:
+- Real HOME has Antigravity Desktop state under ~/.gemini/antigravity.
+- AGY CLI did not reuse a ready default model from that Desktop state.
+- It did reuse macOS keyring auth for the logged-in consumer account.

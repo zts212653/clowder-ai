@@ -100,10 +100,11 @@ Phase E 只回答"发生了什么"（traces、metrics、健康状态），不做
 > **Status**: merged | **Owner**: Ragdoll
 > **Provenance**: zts212653/clowder-ai#592
 > **Implementation PR**: zts212653/clowder-ai#579 (merged 2026-04-28, commit `8cc6f9a1`)
+> **Cat-cafe intake**: zts212653/cat-cafe#1449 (commit `254c6e2fa`)
 > **Trigger**: 重启后 trace 数据全丢（LocalTraceStore 纯内存）
 > **Discussion**: 2026-04-22，三猫讨论（Ragdoll + Sonnet + GPT-5.4）
 >
-> **Scope note**: AC-F1..F7 全部 ✅。AC-F8（tool_use spans 持久化）声明 deferred — 当前 MCP tool span 是零时长点标记，待 Phase J 真实执行边界落地后再升级持久化策略（Phase J Slice J-B AC-J7/J8 直接覆盖 AC-F8 unblock）。Phase F header 状态过期至 2026-05-22 由 Phase I 完结后同步修正（doc-sync）。
+> **Scope note**: AC-F1..F7 全部 ✅。AC-F8（tool_use spans 持久化）声明 deferred — 当前 MCP tool span 是零时长点标记，待 Phase J 真实执行边界落地后再升级持久化策略（Phase J Slice J-B AC-J7/J8 直接覆盖 AC-F8 unblock）。Phase F header 状态过期至 2026-05-22 由本次 doc-sync 修正（clowder-ai#753 / cat-cafe#1839）。
 
 #### 问题
 
@@ -246,7 +247,7 @@ W3C TraceContext 对齐的跨猫调用因果链：
 > **Spec PR**: clowder-labs/clowder-ai#2 (merged 2026-05-19)
 > **Implementation PR**: clowder-labs/clowder-ai#3 (merged 2026-05-19, commit `f4594cb9`)
 > **Governance split PR**: clowder-labs/clowder-ai#4 (dir-exceptions extension, merged 2026-05-19, commit `d3e60d01`)
-> **Discussion**: 2026-05-19，三方对齐（铲屎官 + Maine Coon/砚砚 + Ragdoll/宪宪）
+> **Discussion**: 2026-05-19，三方对齐（team lead + Maine Coon/Maine Coon + Ragdoll/Ragdoll）
 >
 > **Provider coverage**: Claude CLI provider 已通过 `claude-ndjson-parser.ts` 在 `message_stop` 处 emit `cat_cafe.agent_loop` marker。其余 provider（Codex / Gemini / Kimi / Antigravity / OpenCode / DARE / A2A）尚未实现 marker emit，Step Summary 会显式显示 `agent_loop_count: —`（per AC-I2/I7 non-degradation rule）。后续 phase 补齐各 provider 的 stream parser hook。
 
@@ -321,7 +322,7 @@ UI 必须显示 `—` 而非 `0`，否则会让"重启前的数据"看起来像"
 
 > **Status**: spec | **Owner**: Ragdoll
 > **Promoted from**: Phase H Backlog item "MCP call spans + tool execution duration spans"
-> **Discussion**: 2026-05-22，Design Gate（Ragdoll + 砚砚/codex GPT-5.5 + gpt52/GPT-5.4 + 布偶猫/Sonnet 4.6）— Sonnet 提了 "Hybrid A+C" 替代方案（transformer 内 UUID 状态机 + 栈 fallback），与 codex/gpt52 的"明确降级"立场冲突，最终采纳两 codex/gpt52 路线（KD-41 明确降级），Sonnet 提案 rejected
+> **Discussion**: 2026-05-22，Design Gate（Ragdoll + Maine Coon/codex GPT-5.5 + gpt52/GPT-5.4 + Ragdoll/Sonnet 4.6）— Sonnet 提了 "Hybrid A+C" 替代方案（transformer 内 UUID 状态机 + 栈 fallback），与 codex/gpt52 的"明确降级"立场冲突，最终采纳 codex/gpt52 的明确降级路线（KD-41），Sonnet 提案 rejected
 
 #### 问题
 
@@ -460,13 +461,6 @@ UI 必须显示 `—` 而非 `0`，否则会让"重启前的数据"看起来像"
 - [ ] AC-J8: hydrate 从 `toolEvents[]` 恢复 `cat_cafe.tool_use ...` real-duration child span（不退化成 `invocation.restored`）
 - [ ] AC-J9: provider 支持矩阵附录 — F153 spec 加表格列每个 provider 的 (start, end, id, status) 四件套支持情况
 
-**Timeline:**
-| Date | Event |
-|------|-------|
-| 2026-05-19 | Phase I spec merged (PR #2, commit `b36540cf`) |
-| 2026-05-19 | Phase I implementation merged (PR #3, commit `f4594cb9`) |
-| 2026-05-19 | Governance split: dir-exception extension (PR #4, commit `d3e60d01`) |
-
 ## Dependencies
 
 - **Related**: F130（API 日志治理 — 同属可观测性，F130 管 logging，F153 管 metrics/tracing）
@@ -515,14 +509,14 @@ UI 必须显示 `—` 而非 `0`，否则会让"重启前的数据"看起来像"
 | KD-28 | capturePromptIfEnabled fire-and-forget，不阻塞 invocation hot path | 调试工具不可影响正常调用延迟 | 2026-05-08 |
 | KD-29 | setTraceContext best-effort（try/catch + typeof check） | trace context 丢失 = 降级为独立 trace，不影响功能正确性 | 2026-05-08 |
 | KD-30 | LocalTraceStore TTL 2h → 24h | 2h 对日常调试过短，24h 覆盖典型工作日；导出常量统一引用 | 2026-05-08 |
-| KD-31 | Phase I: 步 = 一次 agent loop（边界锚 = `cat_cafe.agent_loop` stream marker，per-provider stream parser 识别 LLM call 边界并 emit） | 现有 stream 信号都是 invocation 粒度——`done` event 在 CLI 跑完后 yield 一次（ClaudeAgentService.ts:476、CodexAgentService.ts:709），`cat_cafe.llm_call` span 也走 done 路径（usage 在 invocation 累计 emit，invoke-single-cat.ts:1308/1387）。真正 loop 边界必须在 stream parser 里识别；无法识别的 provider 显示 `—`，不退化 | 2026-05-19 |
+| KD-31 | Phase I: 步 = 一次 agent loop（边界锚 = `cat_cafe.agent_loop` stream marker，per-provider stream parser 识别 LLM call 边界并 emit） | 现有 stream 信号都是 invocation 粒度：`done` event 在 CLI 跑完后 yield 一次，`cat_cafe.llm_call` span 也走 done 路径。真正 loop 边界必须在 stream parser 里识别；无法识别的 provider 显示 `—`，不退化 | 2026-05-19 |
 | KD-32 | Phase I 仍是 descriptive plane，不计算 efficiency/quality score | 继承 KD-16；步长长可能是认真验证也可能是绕路，单凭计数无法判断质量；eval 信号留给未来 feature | 2026-05-19 |
-| KD-33 | Phase I 引入 `cat_cafe.agent_loop` stream marker，由各 provider stream parser 在 LLM call 边界 emit；无法识别的 provider 首版显示 `—`（不退化成 invocation count） | Maine Coon review 二轮：上轮把 anchor 改为 done event 仍是 invocation 粒度（done 在 CLI 跑完才 yield 一次），不是 loop；`llm_call` span 也走 done 路径。真正 loop 边界必须在 stream parser 层识别，新 marker 是唯一 provider-agnostic 出口 | 2026-05-19 |
-| KD-34 | Phase I metric counter `cat_cafe.a2a.dispatch.count` 仅带 `AGENT_ID`，不带 `invocationId/threadId`，不复用 `CALLBACK_TOOL/REASON` | metric-allowlist.ts 禁止高基数；CALLBACK_TOOL/REASON 是 callback auth failure 语义，与 dispatch 无关；如需 dispatch 专属 labels 须先扩 allowlist | 2026-05-19 |
-| KD-35 | Phase I `tool_call_count` 走双轨（child `cat_cafe.tool_use *` span + invocation `tool.basic_call_count` attr）；`token_total` 走 `cat_cafe.route` span `ROUTE_TOTAL_TOKENS` attr | Maine Coon review (Findings 3+4)：span-helpers.ts:81-96 把 basic tools 设计成 attribute 计数（避免 trace tree flooding），MCP/business 走 child span；token metrics 没 route 维度（allowlist 禁），route span 已 finally 块设置 `ROUTE_TOTAL_TOKENS`（route-serial.ts:1900）| 2026-05-19 |
+| KD-33 | Phase I 引入 `cat_cafe.agent_loop` stream marker，由各 provider stream parser 在 LLM call 边界 emit；无法识别的 provider 首版显示 `—`（不退化成 invocation count） | Maine Coon review 二轮：done event / `llm_call` span 都是 invocation 粒度，不是 loop；新 marker 是唯一 provider-agnostic 出口 | 2026-05-19 |
+| KD-34 | Phase I metric counter `cat_cafe.a2a.dispatch.count` 仅带 `AGENT_ID`，不带 `invocationId/threadId`，不复用 `CALLBACK_TOOL/REASON` | metric allowlist 禁止高基数；CALLBACK_TOOL/REASON 是 callback auth failure 语义，与 dispatch 无关；如需 dispatch 专属 labels 须先扩 allowlist | 2026-05-19 |
+| KD-35 | Phase I `tool_call_count` 走双轨（child `cat_cafe.tool_use *` span + invocation `tool.basic_call_count` attr）；`token_total` 走 `cat_cafe.route` span `ROUTE_TOTAL_TOKENS` attr | basic tools 设计成 attribute 计数，MCP/business 走 child span；token metrics 没 route 维度，route span 已 finally 块设置 `ROUTE_TOTAL_TOKENS` | 2026-05-19 |
 | KD-36 | Phase J: tool span correlation 必须基于 native ID（方案 A），拒绝 `Map<toolName>` / 栈模型弱关联 | 两猫共识：Claude/CatAgent 一个 assistant content 可多个 tool_use block；同名工具/result 乱序会让弱关联错配；DARE/Codex/CatAgent 源协议本来就有 call id | 2026-05-22 |
-| KD-37 | Phase J: per-invocation `ToolSpanTracker`，`Map<toolUseId, Span>` key = invocation+cat scope | 砚砚 finding：provider raw id 可能跨 invocation 碰撞；scoped key 避免 cross-invocation 串扰 + 内存泄漏 | 2026-05-22 |
-| KD-38 | Phase J: `AgentMessage` 扩展 `toolUseId` + `toolResultStatus`，不靠 content 字符串猜 status | gpt52 + 砚砚 共同发现：当前 `tool_result` 无结构化 status，duration 真实化但 status 仍 unreliable 等于半修 | 2026-05-22 |
+| KD-37 | Phase J: per-invocation `ToolSpanTracker`，`Map<toolUseId, Span>` key = invocation+cat scope | Maine Coon finding：provider raw id 可能跨 invocation 碰撞；scoped key 避免 cross-invocation 串扰 + 内存泄漏 | 2026-05-22 |
+| KD-38 | Phase J: `AgentMessage` 扩展 `toolUseId` + `toolResultStatus`，不靠 content 字符串猜 status | gpt52 + Maine Coon 共同发现：当前 `tool_result` 无结构化 status，duration 真实化但 status 仍 unreliable 等于半修 | 2026-05-22 |
 | KD-39 | Phase J 同 phase 内做 AC-F8 unblock（持久化 + hydrate），不拆出去 | 两猫共识：防止 Phase F 时"live 真 / restored 假"的 status 漂移重现；Phase J 不标 ✅ 直到两 slice 闭环 | 2026-05-22 |
-| KD-40 | Phase J: 移除 `span-helpers.ts` 本地 `isMcpTool`，统一走 `tool-usage/classify.ts` | 砚砚独有 finding：本地 `isMcpTool` 当前识别 `cat_cafe_` / `mcp__` / `signal_`，**漏 Codex `mcp:` 前缀**，导致 Codex MCP tool 误判 basic；`tool-usage/classify.ts` 已正确处理 `mcp:` 格式 | 2026-05-22 |
+| KD-40 | Phase J: 移除 `span-helpers.ts` 本地 `isMcpTool`，统一走 `tool-usage/classify.ts` | Maine Coon独有 finding：本地 `isMcpTool` 当前识别 `cat_cafe_` / `mcp__` / `signal_`，**漏 Codex `mcp:` 前缀**，导致 Codex MCP tool 误判 basic；`tool-usage/classify.ts` 已正确处理 `mcp:` 格式 | 2026-05-22 |
 | KD-41 | Phase J: provider 支持矩阵必须文档化，不允许"至少 X 其他 fallback"模糊口径 | gpt52 finding：模糊 AC 容易把 Phase J 做成局部真实；每个 provider 必须明确列 start/end/id/status 四件套支持，不支持的明确降级（不开 span 或标 fallback） | 2026-05-22 |

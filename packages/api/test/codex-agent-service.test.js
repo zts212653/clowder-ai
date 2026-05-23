@@ -31,6 +31,14 @@ function createMockProcess() {
   const stdout = new PassThrough();
   const stderr = new PassThrough();
   const emitter = new EventEmitter();
+  const originalEmit = emitter.emit.bind(emitter);
+  emitter.emit = (event, ...args) => {
+    const emitted = originalEmit(event, ...args);
+    if (event === 'exit') {
+      process.nextTick(() => originalEmit('close', ...args));
+    }
+    return emitted;
+  };
   const proc = {
     stdout,
     stderr,
@@ -1323,8 +1331,12 @@ test('Issue #116: turn.completed unblocks done even when process exit is delayed
   );
   proc.stdout.end();
 
-  // Process exits naturally during grace period (simulating delayed but normal exit)
-  setTimeout(() => emitter.emit('exit', 0, null), 300);
+  // Process exits naturally during grace period (simulating delayed but normal exit).
+  // Real child_process emits close once stdio is drained.
+  setTimeout(() => {
+    emitter.emit('exit', 0, null);
+    emitter.emit('close', 0, null);
+  }, 300);
 
   const msgs = await promise;
   const elapsedMs = Date.now() - startMs;

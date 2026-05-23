@@ -124,8 +124,11 @@ test('F153 Phase I (round-2 P2): legacy worklist callback success also mints dis
   // The lazy helper must be invoked in the worklist success branch (enqueued.length > 0)
   // — otherwise callbacks routed via the legacy F027 worklist path will silently skip the
   // mention_dispatch span and a2a.dispatch.count counter even when dispatch did happen.
-  const worklistBlock = src.split('if (hasWorklist(threadId))')[1] ?? '';
-  const successBranch = worklistBlock.split('if (enqueued.length > 0)')[1] ?? '';
+  const worklistParts = src.split('if (hasWorklist(threadId))');
+  assert.ok(worklistParts[1], 'callback-a2a-trigger should contain the legacy worklist branch');
+  const successParts = worklistParts[1].split('if (enqueued.length > 0)');
+  assert.ok(successParts[1], 'legacy worklist branch should contain the success branch');
+  const successBranch = successParts[1];
   assert.ok(
     successBranch.includes('ensureDispatchTraceContext()'),
     'worklist success branch must call ensureDispatchTraceContext() (lazy side-effects: span + counter)',
@@ -429,20 +432,26 @@ test('Mixed-provider: partial agent_loop.count coverage sets agent_loop_partial=
       name: 'cat_cafe.invocation',
       spanId: 'claude-inv',
       parentSpanId: 'r',
-      attributes: { 'agent_loop.count': 5 },
+      attributes: { 'agent_loop.count': 5, 'tool.basic_call_count': 2 },
     }),
     // Gemini invocation — no agent_loop.count (provider does not emit marker)
     span({
       name: 'cat_cafe.invocation',
       spanId: 'gemini-inv',
       parentSpanId: 'r',
-      attributes: {},
+      attributes: { 'tool.basic_call_count': 3 },
     }),
   ];
 
   const summary = computeStepSummary(spans, 'trace-mixed');
   assert.equal(summary.agent_loop_count, 5, 'Sum of available counts (lower bound)');
+  assert.equal(summary.tool_call_count, 5, 'Tool counts can still be exact when loop coverage is partial');
   assert.equal(summary.agent_loop_partial, true, 'Should flag partial coverage');
+  assert.equal(
+    summary.width_avg_tools_per_loop,
+    null,
+    'Width must not render as precise when agent_loop_count is only a lower bound',
+  );
 });
 
 test('Full coverage: agent_loop_partial is false when all invocations have the attribute', async () => {
@@ -478,6 +487,17 @@ test('F153 Phase I: HubTraceTree renders StepSummaryPanel with route scope', () 
   assert.ok(src.includes('/api/telemetry/step-summary'), 'Should fetch step-summary endpoint');
   assert.ok(src.includes("n === null ? '—'"), "Null sub-counts must render '—' (non-degradation, AC-I4)");
   assert.ok(src.includes('Restored (history)'), 'Should badge restored traces');
-  assert.ok(src.includes('routeSpanId'), 'Should pass routeSpanId to scope summary to route subtree');
+  assert.ok(src.includes('selectedRouteSpanId'), 'Should derive selected route span id from the trace tree selection');
+  assert.ok(
+    src.includes('routeSpanId={selectedRouteSpanId}'),
+    'Should pass the selected route span id into StepSummaryPanel, not only define the prop',
+  );
+  assert.ok(
+    src.includes("selectedSpanData?.name === 'cat_cafe.route'"),
+    'Only selected cat_cafe.route spans should scope the Step Summary panel',
+  );
+  assert.ok(src.includes('setLoading(true);'), 'Route/trace changes should reset loading before refetching');
+  assert.ok(src.includes('setData(null);'), 'Route/trace changes should clear stale summary data before refetching');
+  assert.ok(src.includes('if (!res.ok)'), 'Non-OK step-summary responses must not keep stale metrics rendered');
   assert.ok(src.includes('agent_loop_partial'), 'Should handle partial coverage indicator');
 });

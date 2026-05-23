@@ -60,6 +60,7 @@ declare -F background_eval_with_null_stdin >/dev/null
 declare -F wait_for_port_or_exit >/dev/null
 declare -F api_launch_command >/dev/null
 declare -F frontend_launch_command >/dev/null
+declare -F ensure_api_native_addons >/dev/null
 declare -F web_production_build_ready >/dev/null
 declare -F default_redis_storage_key >/dev/null
 declare -F default_redis_data_dir >/dev/null
@@ -89,7 +90,7 @@ printf 'ok'
 `,
     );
 
-    assert.equal(output, 'ok');
+    assert.match(output, /ok$/);
   } finally {
     await new Promise((resolvePromise) => server.close(resolvePromise));
     rmSync(tempRoot, { recursive: true, force: true });
@@ -124,7 +125,7 @@ printf 'ok'
 `,
     );
 
-    assert.equal(output, 'ok');
+    assert.match(output, /ok$/);
     assert.equal(readFileSync(timeoutLog, 'utf8').trim(), '1 nc -z 127.0.0.1 6543');
     assert.equal(readFileSync(ncLog, 'utf8').trim(), '-z 127.0.0.1 6543');
   } finally {
@@ -311,15 +312,84 @@ printf '%s' "$CAT_CAFE_MCP_SERVER_PATH"
   assert.equal(output, explicitPath);
 });
 
+test('ensure_api_native_addons rebuilds better-sqlite3 after Node ABI drift', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-native-rebuild-'));
+  const binDir = join(tempRoot, 'bin');
+  const apiDir = join(tempRoot, 'packages', 'api');
+  const nodeProbeCount = join(tempRoot, 'node-probe-count');
+  const pnpmLog = join(tempRoot, 'pnpm.log');
+
+  try {
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(apiDir, { recursive: true });
+    writeFileSync(join(apiDir, 'package.json'), '{"name":"@cat-cafe/api"}\n');
+    writeFileSync(
+      join(binDir, 'node'),
+      `#!/bin/bash
+if [ "\${1:-}" = "-e" ]; then
+  case "\${2:-}" in
+    *"new Database(':memory:')"*) ;;
+    *) exit 2 ;;
+  esac
+  count=0
+  [ -f "${nodeProbeCount}" ] && count="$(cat "${nodeProbeCount}")"
+  count=$((count + 1))
+  printf '%s\\n' "$count" > "${nodeProbeCount}"
+  [ "$count" -ge 2 ]
+  exit $?
+fi
+exit 0
+`,
+      { mode: 0o755 },
+    );
+    writeFileSync(
+      join(binDir, 'pnpm'),
+      `#!/bin/bash
+printf '%s\\n' "$*" >> "${pnpmLog}"
+exit 0
+`,
+      { mode: 0o755 },
+    );
+
+    const output = runSourceOnlySnippet(
+      scriptPath,
+      `
+PROJECT_DIR="${tempRoot}"
+PATH="${binDir}:$PATH"
+ensure_api_native_addons
+printf 'ok'
+`,
+    );
+
+    assert.match(output, /ok$/);
+    assert.match(readFileSync(pnpmLog, 'utf8'), /rebuild better-sqlite3/);
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 function createTempProject() {
   const tmp = mkdtempSync(join(tmpdir(), 'env-local-'));
   const scriptsDir = join(tmp, 'scripts');
   mkdirSync(scriptsDir);
+  mkdirSync(join(scriptsDir, 'lib'), { recursive: true });
   const realScriptsDir = resolve(process.cwd(), '../../scripts');
   cpSync(join(realScriptsDir, 'start-dev.sh'), join(scriptsDir, 'start-dev.sh'));
   cpSync(join(realScriptsDir, 'download-source-overrides.sh'), join(scriptsDir, 'download-source-overrides.sh'));
+  cpSync(join(realScriptsDir, 'lib', 'node-runtime-guard.sh'), join(scriptsDir, 'lib', 'node-runtime-guard.sh'));
   chmodSync(join(scriptsDir, 'start-dev.sh'), 0o755);
   return tmp;
+}
+
+function copyStartDevClosure(tempRoot, scriptPath, tempScriptPath, tempOverridesPath) {
+  mkdirSync(join(tempRoot, 'scripts', 'lib'), { recursive: true });
+  cpSync(scriptPath, tempScriptPath);
+  cpSync(resolve(process.cwd(), '../../scripts/download-source-overrides.sh'), tempOverridesPath);
+  cpSync(
+    resolve(process.cwd(), '../../scripts/lib/node-runtime-guard.sh'),
+    join(tempRoot, 'scripts', 'lib', 'node-runtime-guard.sh'),
+  );
 }
 
 test('.env.local overrides same-name keys from .env (#603)', () => {
@@ -513,9 +583,7 @@ test('direct command mode can prefer current .env ports over ambient shell ports
   });
 
   try {
-    mkdirSync(join(tempRoot, 'scripts'), { recursive: true });
-    cpSync(scriptPath, tempScriptPath);
-    cpSync(resolve(process.cwd(), '../../scripts/download-source-overrides.sh'), tempOverridesPath);
+    copyStartDevClosure(tempRoot, scriptPath, tempScriptPath, tempOverridesPath);
     writeFileSync(
       join(tempRoot, '.env'),
       'FRONTEND_PORT=3003\nAPI_SERVER_PORT=3004\nNEXT_PUBLIC_API_URL=http://localhost:3004\n',
@@ -554,9 +622,7 @@ test('raw dev entry remaps setup-style Redis 6399 defaults to dev Redis 6398 (IP
   const tempOverridesPath = join(tempRoot, 'scripts', 'download-source-overrides.sh');
 
   try {
-    mkdirSync(join(tempRoot, 'scripts'), { recursive: true });
-    cpSync(scriptPath, tempScriptPath);
-    cpSync(resolve(process.cwd(), '../../scripts/download-source-overrides.sh'), tempOverridesPath);
+    copyStartDevClosure(tempRoot, scriptPath, tempScriptPath, tempOverridesPath);
     writeFileSync(join(tempRoot, '.env'), 'REDIS_PORT=6399\nREDIS_URL=redis://localhost:6399\n', 'utf8');
 
     const result = spawnSync(
@@ -586,9 +652,7 @@ test('respect-dotenv mode keeps explicit Redis 6399 defaults intact for wrappers
   const tempOverridesPath = join(tempRoot, 'scripts', 'download-source-overrides.sh');
 
   try {
-    mkdirSync(join(tempRoot, 'scripts'), { recursive: true });
-    cpSync(scriptPath, tempScriptPath);
-    cpSync(resolve(process.cwd(), '../../scripts/download-source-overrides.sh'), tempOverridesPath);
+    copyStartDevClosure(tempRoot, scriptPath, tempScriptPath, tempOverridesPath);
     writeFileSync(join(tempRoot, '.env'), 'REDIS_PORT=6399\nREDIS_URL=redis://localhost:6399\n', 'utf8');
 
     const result = spawnSync(

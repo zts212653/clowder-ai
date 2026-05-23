@@ -310,7 +310,7 @@ test('Windows installer uses interactive selectors instead of typed or letter-ba
   assert.match(uiHelpersScript, /Space to toggle, Enter to confirm/);
   assert.match(installScript, /Name = "Claude"; Label = "Claude"; Cmd = "claude"/);
   assert.match(installScript, /Name = "Codex"; Label = "Codex"; Cmd = "codex"/);
-  assert.match(installScript, /Name = "Gemini"; Label = "Gemini"; Cmd = "gemini"/);
+  assert.match(installScript, /Name = "Antigravity"; Label = "Antigravity CLI"; Cmd = "agy"/);
   assert.match(installScript, /Name = "Kimi"; Label = "Kimi"; Cmd = "kimi"/);
   assert.match(installScript, /Select-InstallerMultiChoice -Title "Missing agent CLIs"/);
   assert.doesNotMatch(uiHelpersScript, /Label = "&All"/);

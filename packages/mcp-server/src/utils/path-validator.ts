@@ -63,12 +63,6 @@ export function isPathAllowed(targetPath: string, config?: PathConfig): boolean 
 
   const resolvedAllowedDirs = allowedDirs.map(resolveAbsolutePath);
 
-  // Quick reject using pure path prefix check
-  const prefixAllowed = resolvedAllowedDirs.some((allowedDir) => isWithinPath(resolvedPath, allowedDir));
-  if (!prefixAllowed) {
-    return false;
-  }
-
   const realAllowedDirs = resolvedAllowedDirs.map((allowedDir) => tryRealpathSync(allowedDir) ?? allowedDir);
 
   // If target exists, validate its realpath; otherwise validate the realpath of the deepest

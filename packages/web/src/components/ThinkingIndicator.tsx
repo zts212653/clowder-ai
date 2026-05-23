@@ -1,6 +1,7 @@
 'use client';
 
 import { useCatData } from '@/hooks/useCatData';
+import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
 import type { CatStatusType, LivenessWarningSnapshot } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 
@@ -71,6 +72,7 @@ function SquareIcon({ className }: { className?: string }) {
 
 interface ThinkingIndicatorProps {
   onCancel?: (threadId: string, catId?: string) => void;
+  threadId?: string;
 }
 
 /**
@@ -78,12 +80,10 @@ interface ThinkingIndicatorProps {
  * Shows a simple banner when only one cat is being invoked (execute mode).
  * F118 Phase C: Extended with liveness warning states.
  */
-export function ThinkingIndicator({ onCancel }: ThinkingIndicatorProps = {}) {
-  const targetCats = useChatStore((s) => s.targetCats);
-  const catStatuses = useChatStore((s) => s.catStatuses);
-  const catInvocations = useChatStore((s) => s.catInvocations);
-  const activeInvocations = useChatStore((s) => s.activeInvocations);
+export function ThinkingIndicator({ onCancel, threadId }: ThinkingIndicatorProps) {
   const currentThreadId = useChatStore((s) => s.currentThreadId);
+  const effectiveThreadId = threadId ?? currentThreadId;
+  const { targetCats, catStatuses, catInvocations, activeInvocations } = useThreadLiveness(effectiveThreadId);
   const { getCatById } = useCatData();
 
   // Derive display+cancel target from the same truth source (activeInvocations)
@@ -159,11 +159,11 @@ export function ThinkingIndicator({ onCancel }: ThinkingIndicatorProps = {}) {
               </span>
             </div>
           </div>
-          {onCancel && currentThreadId && (
+          {onCancel && effectiveThreadId && (
             <button
               type="button"
               data-testid="cancel-btn"
-              onClick={() => onCancel(currentThreadId, catId)}
+              onClick={() => onCancel(effectiveThreadId, catId)}
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white flex-shrink-0 transition-opacity hover:opacity-90"
               style={{ backgroundColor: '#D08068' }}
             >

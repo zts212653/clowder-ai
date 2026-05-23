@@ -804,7 +804,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         />
 
         {intentMode === 'ideate' && <ParallelStatusBar onStop={handleStop} threadId={threadId} />}
-        {showThinkingIndicator && <ThinkingIndicator onCancel={cancelInvocation} />}
+        {showThinkingIndicator && <ThinkingIndicator onCancel={cancelInvocation} threadId={threadId} />}
 
         <div className="flex-1 relative overflow-hidden">
           <main
@@ -943,7 +943,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             </div>
           )}
 
-          <ThreadExecutionBar />
+          <ThreadExecutionBar threadId={threadId} />
           <QueuePanel threadId={threadId} />
           <VoteActiveBar threadId={threadId} onEnd={() => {}} />
 

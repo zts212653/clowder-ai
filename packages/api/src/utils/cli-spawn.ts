@@ -4,7 +4,9 @@
  */
 
 import { spawn as nodeSpawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { dirname, isAbsolute } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Span } from '@opentelemetry/api';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import { createModuleLogger } from '../infrastructure/logger.js';
@@ -33,6 +35,15 @@ function classifyKnownCliStderr(stderr: string): CliErrorReasonCode | undefined 
   return undefined;
 }
 
+function isStallAutoKillWarning(options: CliSpawnOptions, warning: unknown): boolean {
+  return (
+    options.livenessProbe?.stallAutoKill === true &&
+    isLivenessWarning(warning) &&
+    warning.level === 'suspected_stall' &&
+    warning.state === 'idle-silent'
+  );
+}
+
 /** Grace period between SIGTERM and SIGKILL */
 export const KILL_GRACE_MS = 3_000;
 
@@ -47,11 +58,30 @@ export interface CliSpawnerDeps {
   spawnFn?: SpawnFn;
 }
 
+export function resolveCliSupervisorNodeArgs(moduleUrl = import.meta.url, execArgv = process.execArgv): string[] {
+  const jsPath = fileURLToPath(new URL('./cli-supervisor.js', moduleUrl));
+  if (existsSync(jsPath)) return [jsPath];
+
+  const tsPath = fileURLToPath(new URL('./cli-supervisor.ts', moduleUrl));
+  if (existsSync(tsPath)) return [...execArgv, tsPath];
+
+  return [jsPath];
+}
+
 /** Env vars to strip from child processes to prevent E2BIG (overly large values). */
 const ENV_VARS_TO_STRIP: ReadonlySet<string> = new Set([
   'LS_COLORS', // typically 1-2 KB of color mappings
   'LSCOLORS', // BSD/macOS equivalent
 ]);
+
+export interface CliPlainTextResult {
+  __cliPlainText: true;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  command: string;
+}
 
 export function buildChildEnv(overrides?: Record<string, string | null>): NodeJS.ProcessEnv {
   // Clone process.env but strip known bloated vars to avoid E2BIG (ARG_MAX exceeded).
@@ -133,17 +163,34 @@ export async function* spawnCli(
 
   // Track child exit state (P1: prevents PID reuse kills)
   let childExited = false;
+  let childClosed = false;
   let exitCode: number | null = null;
   let exitSignal: NodeJS.Signals | null = null;
-
-  const exitPromise = new Promise<void>((resolve) => {
-    child.once('exit', (code, signal) => {
-      childExited = true;
-      exitCode = code;
-      exitSignal = signal;
-      log.debug({ pid: child.pid, command: options.command, exitCode: code, signal }, 'CLI process exited');
+  let closeWaitResolved = false;
+  let resolveCloseWait!: () => void;
+  const closePromise = new Promise<void>((resolve) => {
+    resolveCloseWait = () => {
+      if (closeWaitResolved) return;
+      closeWaitResolved = true;
       resolve();
-    });
+    };
+  });
+
+  child.once('exit', (code, signal) => {
+    childExited = true;
+    exitCode = code;
+    exitSignal = signal;
+    log.debug({ pid: child.pid, command: options.command, exitCode: code, signal }, 'CLI process exited');
+  });
+  child.once('close', (code: unknown, signal: unknown) => {
+    childClosed = true;
+    if (!childExited) {
+      childExited = true;
+      exitCode = typeof code === 'number' ? code : null;
+      exitSignal = typeof signal === 'string' ? (signal as NodeJS.Signals) : null;
+    }
+    log.debug({ pid: child.pid, command: options.command, exitCode, signal: exitSignal }, 'CLI process stdio closed');
+    resolveCloseWait();
   });
 
   // Handle spawn errors (P2: ENOENT for command-not-found)
@@ -260,100 +307,160 @@ export async function* spawnCli(
       throw spawnError;
     }
 
-    const ndjson = parseNDJSON(child.stdout)[Symbol.asyncIterator]();
-    let pendingNext = ndjson.next();
+    let plainTextResult: { stdout: string } | undefined;
 
-    // #774 R2: Deferred stall-kill — only execute when probe timer wins the race,
-    // meaning no NDJSON event arrived. If NDJSON wins, the pending kill is cancelled
-    // because CLI has recovered. This prevents the stale-warning race condition where
-    // a recovery event is pending in the stream but hasn't been consumed yet.
-    let pendingStallKill = false;
+    if (options.outputMode === 'plainText') {
+      const stdoutChunks: string[] = [];
+      const plaintext = (child.stdout as AsyncIterable<Buffer | string>)[Symbol.asyncIterator]();
+      let pendingNext = plaintext.next();
 
-    for (;;) {
-      if (spawnError) throw spawnError;
+      // Keep plainText providers protected by the same liveness fast-fail path
+      // as NDJSON providers while still buffering raw stdout until completion.
+      let pendingStallKill = false;
 
-      // F118: Drain probe warnings and check for dead process
-      if (probe) {
-        for (const warning of probe.drainWarnings()) {
-          yield warning;
-          // #774: Mark for deferred kill — don't kill here (recovery NDJSON may be pending)
-          if (
-            options.livenessProbe?.stallAutoKill &&
-            warning.level === 'suspected_stall' &&
-            warning.state === 'idle-silent'
-          ) {
-            pendingStallKill = true;
+      for (;;) {
+        if (spawnError) throw spawnError;
+
+        if (probe) {
+          for (const warning of probe.drainWarnings()) {
+            yield warning;
+            if (isStallAutoKillWarning(options, warning)) {
+              pendingStallKill = true;
+            }
+          }
+          if (probe.getState() === 'dead') {
+            killChild();
+            break;
           }
         }
-        if (probe.getState() === 'dead') {
-          killChild();
-          break;
+
+        let raceTimer: ReturnType<typeof setTimeout> | undefined;
+        const raceResult = probe
+          ? await Promise.race([
+              pendingNext.then((r) => {
+                if (raceTimer !== undefined) clearTimeout(raceTimer);
+                return { source: 'stdout' as const, result: r };
+              }),
+              new Promise<{ source: 'probe' }>((r) => {
+                raceTimer = setTimeout(() => r({ source: 'probe' }), probe.config.sampleIntervalMs);
+              }),
+            ])
+          : { source: 'stdout' as const, result: await pendingNext };
+
+        if (raceResult.source === 'probe') {
+          if (pendingStallKill) {
+            stallKilled = true;
+            timedOut = true;
+            processAliveAtTimeout = !childExited;
+            killChild();
+            break;
+          }
+          continue;
         }
+
+        pendingStallKill = false;
+
+        const { done, value } = raceResult.result;
+        if (done) break;
+
+        stdoutChunks.push(value.toString());
+        resetTimeout();
+        if (probe) probe.notifyActivity();
+        const now = Date.now();
+        if (firstEventAt === null) firstEventAt = now;
+        lastEventAt = now;
+        lastEventType = 'stdout';
+        pendingNext = plaintext.next();
       }
+      plainTextResult = { stdout: stdoutChunks.join('') };
+    } else {
+      const ndjson = parseNDJSON(child.stdout)[Symbol.asyncIterator]();
+      let pendingNext = ndjson.next();
 
-      // Race NDJSON event vs probe poll interval
-      let raceTimer: ReturnType<typeof setTimeout> | undefined;
-      const raceResult = probe
-        ? await Promise.race([
-            pendingNext.then((r) => {
-              if (raceTimer !== undefined) clearTimeout(raceTimer);
-              return { source: 'ndjson' as const, result: r };
-            }),
-            new Promise<{ source: 'probe' }>((r) => {
-              raceTimer = setTimeout(() => r({ source: 'probe' }), probe.config.sampleIntervalMs);
-            }),
-          ])
-        : { source: 'ndjson' as const, result: await pendingNext };
+      // #774 R2: Deferred stall-kill — only execute when probe timer wins the race,
+      // meaning no NDJSON event arrived. If NDJSON wins, the pending kill is cancelled
+      // because CLI has recovered. This prevents the stale-warning race condition where
+      // a recovery event is pending in the stream but hasn't been consumed yet.
+      let pendingStallKill = false;
 
-      if (raceResult.source === 'probe') {
-        // No NDJSON arrived — if stall-kill is pending, execute it now
-        if (pendingStallKill) {
-          stallKilled = true;
-          timedOut = true;
-          processAliveAtTimeout = !childExited;
-          killChild();
-          break;
+      for (;;) {
+        if (spawnError) throw spawnError;
+
+        // F118: Drain probe warnings and check for dead process
+        if (probe) {
+          for (const warning of probe.drainWarnings()) {
+            yield warning;
+            // #774: Mark for deferred kill — don't kill here (recovery NDJSON may be pending)
+            if (isStallAutoKillWarning(options, warning)) {
+              pendingStallKill = true;
+            }
+          }
+          if (probe.getState() === 'dead') {
+            killChild();
+            break;
+          }
         }
-        continue;
-      }
 
-      // NDJSON event arrived — CLI is alive, cancel any pending stall-kill
-      pendingStallKill = false;
+        // Race NDJSON event vs probe poll interval
+        let raceTimer: ReturnType<typeof setTimeout> | undefined;
+        const raceResult = probe
+          ? await Promise.race([
+              pendingNext.then((r) => {
+                if (raceTimer !== undefined) clearTimeout(raceTimer);
+                return { source: 'ndjson' as const, result: r };
+              }),
+              new Promise<{ source: 'probe' }>((r) => {
+                raceTimer = setTimeout(() => r({ source: 'probe' }), probe.config.sampleIntervalMs);
+              }),
+            ])
+          : { source: 'ndjson' as const, result: await pendingNext };
 
-      const { done, value } = raceResult.result;
-      if (done) break;
+        if (raceResult.source === 'probe') {
+          // No NDJSON arrived — if stall-kill is pending, execute it now
+          if (pendingStallKill) {
+            stallKilled = true;
+            timedOut = true;
+            processAliveAtTimeout = !childExited;
+            killChild();
+            break;
+          }
+          continue;
+        }
 
-      if (isParseError(value)) {
-        const parseErr = value as { line: string };
-        log.warn({ command: options.command, line: parseErr.line }, 'CLI non-JSON output');
+        // NDJSON event arrived — CLI is alive, cancel any pending stall-kill
+        pendingStallKill = false;
+
+        const { done, value } = raceResult.result;
+        if (done) break;
+
+        if (isParseError(value)) {
+          const parseErr = value as { line: string };
+          log.warn({ command: options.command, line: parseErr.line }, 'CLI non-JSON output');
+          yield value;
+          pendingNext = ndjson.next();
+          continue;
+        }
+        // Reset timeout only after a valid NDJSON event.
+        // Invalid chatter should not keep a stuck invocation alive forever.
+        resetTimeout();
+        if (probe) probe.notifyActivity();
+        // F118: Record event timestamps for diagnostic enrichment
+        const now = Date.now();
+        if (firstEventAt === null) firstEventAt = now;
+        lastEventAt = now;
+        if (typeof value === 'object' && value !== null && 'type' in value) {
+          lastEventType = String((value as Record<string, unknown>).type);
+        }
         yield value;
         pendingNext = ndjson.next();
-        continue;
       }
-      // Reset timeout only after a valid NDJSON event.
-      // Invalid chatter should not keep a stuck invocation alive forever.
-      resetTimeout();
-      if (probe) probe.notifyActivity();
-      // F118: Record event timestamps for diagnostic enrichment
-      const now = Date.now();
-      if (firstEventAt === null) firstEventAt = now;
-      lastEventAt = now;
-      if (typeof value === 'object' && value !== null && 'type' in value) {
-        lastEventType = String((value as Record<string, unknown>).type);
-      }
-      yield value;
-      pendingNext = ndjson.next();
     }
 
     if (probe) {
       await probe.flushPendingWarnings();
       for (const warning of probe.drainWarnings()) {
         yield warning;
-        if (
-          options.livenessProbe?.stallAutoKill &&
-          warning.level === 'suspected_stall' &&
-          warning.state === 'idle-silent'
-        ) {
+        if (isStallAutoKillWarning(options, warning)) {
           stallKilled = true;
           timedOut = true;
           processAliveAtTimeout = !childExited;
@@ -371,12 +478,12 @@ export async function* spawnCli(
     const semanticDone = options.semanticCompletionSignal?.aborted === true;
 
     if (!semanticDone) {
-      // Wait for child to fully exit after stdout closes
-      await exitPromise;
-    } else if (!childExited) {
+      // Wait for stdio close after stdout iteration so trailing stderr cannot be truncated.
+      await closePromise;
+    } else if (!childClosed) {
       // Grace period: give the process time to exit naturally before force-killing.
       // If it exits within grace, great; if not, killChild() in finally will clean up.
-      await Promise.race([exitPromise, new Promise<void>((r) => setTimeout(r, SEMANTIC_COMPLETION_GRACE_MS).unref())]);
+      await Promise.race([closePromise, new Promise<void>((r) => setTimeout(r, SEMANTIC_COMPLETION_GRACE_MS).unref())]);
     }
 
     if (exitCode === 0 && exitSignal === null && stderrBuffer.trim()) {
@@ -388,6 +495,17 @@ export async function* spawnCli(
         },
         'CLI stderr on successful exit',
       );
+    }
+
+    if (plainTextResult) {
+      yield {
+        __cliPlainText: true,
+        stdout: plainTextResult.stdout,
+        stderr: stderrBuffer,
+        exitCode,
+        signal: exitSignal,
+        command: options.command,
+      } satisfies CliPlainTextResult;
     }
 
     // Yield error on abnormal exit (only if WE didn't kill it AND no semantic completion)
@@ -496,6 +614,15 @@ export function isCliError(value: unknown): value is {
   );
 }
 
+export function isCliPlainTextResult(value: unknown): value is CliPlainTextResult {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    '__cliPlainText' in value &&
+    (value as Record<string, unknown>).__cliPlainText === true
+  );
+}
+
 /**
  * Type guard for CLI timeout objects (process killed due to timeout)
  * Note: `message` is sanitized for user display; raw stderr is logged to console only.
@@ -595,9 +722,15 @@ function defaultSpawn(
     env.PATH = env.PATH ? `${binDir}:${env.PATH}` : binDir;
   }
 
-  return nodeSpawn(command, [...args], {
+  const supervisorArgs = resolveCliSupervisorNodeArgs();
+
+  return nodeSpawn(process.execPath, [...supervisorArgs, '--', command, ...args], {
     cwd: options.cwd,
-    env,
+    env: {
+      ...env,
+      CAT_CAFE_SUPERVISOR_PARENT_PID: String(process.pid),
+      CAT_CAFE_SUPERVISOR_KILL_GRACE_MS: String(Math.max(250, KILL_GRACE_MS - 500)),
+    },
     stdio: options.stdio,
   });
 }

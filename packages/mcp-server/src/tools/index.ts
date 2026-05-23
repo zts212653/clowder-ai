@@ -70,6 +70,11 @@ export {
   searchEvidenceInputSchema,
 } from './evidence-tools.js';
 export {
+  fileSliceTools,
+  handleReadFileSlice,
+  readFileSliceInputSchema,
+} from './file-tools.js';
+export {
   gameActionTools,
   handleSubmitGameAction,
   submitGameActionInputSchema,

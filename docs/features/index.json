@@ -627,7 +627,7 @@
     {
       "id": "F102",
       "name": "记忆组件 Adapter 化重构 — IEvidenceStore + 本地索引",
-      "status": "done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-04-04 (Phase A~J) | **Reopened**: 2026-04-13 (Phase K) | **Re-closed**: 2026-04-14 (Phase K done, AC-K3/K4 deferred)",
+      "status": "done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-04-04 (Phase A~J) | **Reopened**: 2026-04-13 (Phase K) | **Re-closed**: 2026-04-14 (Phase K done; AC-K3 later completed by F209 Phase A; AC-K4 remains future work)",
       "file": "F102-memory-adapter-refactor.md"
     },
     {
@@ -782,7 +782,7 @@
     },
     {
       "id": "F128",
-      "name": "Cat-Initiated Thread Creation — 猫程序化创建 Thread",
+      "name": "Cat-Proposed Thread Creation — 猫猫提议创建 Thread",
       "status": "spec | **Source**: clowder-ai #82 (bouillipx) / PR #85 | **Priority**: P2",
       "file": "F128-cat-create-thread.md"
     },
@@ -1265,6 +1265,18 @@
       "name": "Capability Profile Routing — 能力画像档案 + 认知路由",
       "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F208-capability-profile-routing.md"
+    },
+    {
+      "id": "F209",
+      "name": "Evidence Recall Optimization — 消息级语义、实体门牌号与活查询藤",
+      "status": "in-progress (Phase A ✅ merged PR #1842; Phase B ✅ merged PR #1846 + AC-B3 contract fix PR #1851; Phase C ✅ merged PR #1853 + file-slice dogfood hotfix PR #1854; AC-B6 waits F208 consumer integration) | **Owner**: Maine Coon/Maine Coon | **Priority**: P1",
+      "file": "F209-evidence-recall-optimization.md"
+    },
+    {
+      "id": "F210",
+      "name": "Gemini CLI to Antigravity CLI Migration",
+      "status": "in-progress | **Owner**: Maine Coon（Maine Coon） | **Priority**: P1",
+      "file": "F210-antigravity-cli-migration.md"
     }
   ]
 }
