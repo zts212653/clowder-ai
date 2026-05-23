@@ -44,7 +44,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     id: 'plugins',
-    label: '插件/集成',
+    label: '插件集成',
     icon: 'puzzle',
     color: 'var(--cafe-accent)',
     description: '插件状态、外部集成以及安装结果。',

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useMemo, useRef, useState } from 'react';
+import typographyTokens from '@/styles/typography-tokens.json';
 import { edgePath, type GraphNode, type GraphResult, relationColor } from './CollectionGraphModel';
 import { GraphInspector, GraphNodeGlyph, GraphTooltip } from './CollectionGraphParts';
 import {
@@ -134,7 +135,7 @@ function SparseEdgeLabel({
       x={labelX}
       y={labelY - 6}
       textAnchor="middle"
-      fontSize={10}
+      fontSize={typographyTokens.fontSizePx.micro}
       fill={color}
       fontWeight="700"
       data-testid={`graph-edge-label-${edge.from}-${edge.to}-${edge.relation}`}

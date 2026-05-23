@@ -1,6 +1,7 @@
 import type { BacklogItem, BacklogStatus } from '@cat-cafe/shared';
 import dagre from '@dagrejs/dagre';
 import { type Edge, MarkerType, type Node } from '@xyflow/react';
+import typographyTokens from '@/styles/typography-tokens.json';
 import { extractFeatureId } from './FeatureBirdEyePanel';
 
 export type DagScope = 'connected' | 'active' | 'all';
@@ -111,7 +112,7 @@ function makeEdge(src: string, tgt: string, type: keyof typeof EDGE_STYLES, widt
     markerEnd: arrow,
     ...(type === 'related' && { markerStart: arrow }),
     label: s.label,
-    labelStyle: { fontSize: 10, fill: s.stroke },
+    labelStyle: { fontSize: typographyTokens.fontSizePx.micro, fill: s.stroke },
     interactionWidth: 20,
   };
 }

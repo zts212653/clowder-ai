@@ -12,7 +12,6 @@ import { HubObservabilityTab } from '../HubObservabilityTab';
 import { HubRoutingPolicyTab } from '../HubRoutingPolicyTab';
 import { HubToolUsageTab } from '../HubToolUsageTab';
 import { DEFAULT_OPS_SUBSECTION, OPS_SUBSECTIONS } from './ops-nav-config';
-import { SettingsFilterTabs } from './primitives';
 
 const OPS_TABS = OPS_SUBSECTIONS.map((s) => ({ key: s.id, label: s.label }));
 
@@ -39,9 +38,25 @@ export function OpsContent() {
 
   return (
     <div>
-      <div className="mb-5">
-        <SettingsFilterTabs tabs={OPS_TABS} activeKey={activeTab} onTabChange={setActiveTab} />
-      </div>
+      <nav className="flex console-divider-b mb-5">
+        {OPS_TABS.map((tab) => {
+          const isActive = tab.key === activeTab;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveTab(tab.key)}
+              className={`inline-flex items-center px-5 py-2.5 text-sm font-semibold transition-colors ${
+                isActive
+                  ? 'border-b-2 border-[var(--console-button-emphasis)] text-[var(--console-button-emphasis)]'
+                  : 'text-cafe-muted hover:text-cafe-secondary'
+              }`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </nav>
       <OpsSubsectionContent subsection={activeTab} obsSubTab={obsParam} nonce={nonce} />
     </div>
   );

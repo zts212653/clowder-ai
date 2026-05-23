@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import { getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
-import { setServiceConfig } from '../domains/services/service-config.js';
+import { getServiceConfig, setServiceConfig } from '../domains/services/service-config.js';
 import {
   findPidsByPort,
   readProcessCommand,
@@ -11,7 +11,7 @@ import {
   type ServiceLifecycleAction,
   type ServiceLifecycleRunner,
 } from '../domains/services/service-lifecycle.js';
-import { getServiceManifest } from '../domains/services/service-manifest.js';
+import { getServiceManifest, MODEL_ENV_VARS, type ServiceConfig } from '../domains/services/service-manifest.js';
 import {
   registerServiceLifecycleAuditRoutes,
   SERVICE_LIFECYCLE_AUDIT_TYPE,
@@ -36,12 +36,10 @@ export interface ServiceLifecycleRouteOptions {
   findPidsByPort?: (port: number) => Promise<number[]>;
   readProcessCommand?: (pid: number) => Promise<string | null>;
   killPid?: (pid: number, signal: NodeJS.Signals) => void;
-  serviceConfig?: {
-    set(
-      id: string,
-      patch: { enabled?: boolean; selectedModel?: string; port?: number },
-    ): { enabled: boolean; selectedModel?: string; port?: number };
-  };
+  serviceConfig?: Partial<{
+    get(id: string): ServiceConfig | undefined;
+    set(id: string, patch: Partial<ServiceConfig>): ServiceConfig;
+  }>;
   auditLog?: ServiceLifecycleAuditLog;
 }
 
@@ -59,7 +57,10 @@ export async function registerServiceLifecycleRoutes(
   const lookupProcessCommand = options.lifecycle?.readProcessCommand ?? readProcessCommand;
   const terminatePid =
     options.lifecycle?.killPid ?? ((pid: number, signal: NodeJS.Signals) => process.kill(pid, signal));
-  const serviceConfigStore = options.lifecycle?.serviceConfig ?? { set: setServiceConfig };
+  const serviceConfigStore = {
+    get: options.lifecycle?.serviceConfig?.get ?? getServiceConfig,
+    set: options.lifecycle?.serviceConfig?.set ?? setServiceConfig,
+  };
   const auditLog = options.lifecycle?.auditLog ?? getEventAuditLog();
   const { withLock } = createServiceLifecycleLock();
   const partitionServicePids = createServicePortPartitioner({
@@ -162,7 +163,16 @@ export async function registerServiceLifecycleRoutes(
           operator,
           env: envResult.env,
         });
-        if (!result.ok) reply.status(lifecycleFailureStatus(result.error));
+        if (!result.ok) {
+          reply.status(lifecycleFailureStatus(result.error));
+        } else {
+          const model = request.body?.model;
+          const selectedModel = typeof model === 'string' && model.length > 0 ? model : undefined;
+          serviceConfigStore.set(service.id, {
+            installed: true,
+            ...(selectedModel ? { selectedModel } : {}),
+          });
+        }
         return result;
       });
     },
@@ -187,7 +197,11 @@ export async function registerServiceLifecycleRoutes(
         operator,
         env: { ...(options.env ?? process.env) },
       });
-      if (!result.ok) reply.status(lifecycleFailureStatus(result.error));
+      if (!result.ok) {
+        reply.status(lifecycleFailureStatus(result.error));
+      } else {
+        serviceConfigStore.set(service.id, { installed: false, enabled: false });
+      }
       return result;
     });
   });
@@ -223,6 +237,7 @@ export async function registerServiceLifecycleRoutes(
       return { error: `Service port ${service.port} is already owned by another process` };
     }
     if (portProbe.owned.length > 0) {
+      serviceConfigStore.set(service.id, { installed: true, enabled: true });
       await audit({
         serviceId: service.id,
         action: 'start',
@@ -242,12 +257,18 @@ export async function registerServiceLifecycleRoutes(
           reply.status(400);
           return { error: `Start script not found: ${scriptPath}` };
         }
+        const startEnv: NodeJS.ProcessEnv = { ...(options.env ?? process.env) };
+        const savedConfig = serviceConfigStore.get(service.id);
+        const modelEnvKey = MODEL_ENV_VARS[service.id];
+        if (modelEnvKey && savedConfig?.selectedModel) {
+          startEnv[modelEnvKey] = savedConfig.selectedModel;
+        }
         await audit({ serviceId: service.id, action: 'start', operator, status: 'started' });
         const result = await runWithTimeout(runner, {
           serviceId: service.id,
           action: 'start',
           scriptPath,
-          env: { ...(options.env ?? process.env) },
+          env: startEnv,
           detached: true,
           timeoutMs: lifecycleTimeoutMs,
         });
@@ -275,6 +296,7 @@ export async function registerServiceLifecycleRoutes(
             output: result.output?.slice(-2000),
           };
         }
+        serviceConfigStore.set(service.id, { installed: true, enabled: true });
         await audit({ serviceId: service.id, action: 'start', operator, status: 'completed', code: result.code });
         const success = { ok: true, message: `${service.name} start initiated`, pid: result.pid };
         return holdStartupGrace(success, options.lifecycle?.startupGraceMs);
@@ -337,6 +359,7 @@ export async function registerServiceLifecycleRoutes(
           failed,
         };
       }
+      serviceConfigStore.set(service.id, { enabled: false });
       await audit({ serviceId: service.id, action: 'stop', operator, status: 'completed' });
       return { ok: true, message: `${service.name} stopped (${stopped.length} process(es))`, stopped };
     });

@@ -65,6 +65,17 @@ export const PALETTE = {
   dj: '#8D6BFF',
 } as const;
 
+export const PIXEL_FONT_SIZES = {
+  fighterLabel: '6px',
+  fighterName: '7px',
+  subtitle: '8px',
+  micro: '10px',
+  timer: '12px',
+  button: '14px',
+  center: '20px',
+  title: '24px',
+} as const;
+
 export const GROUND_Y = 300;
 export const ATTACK_COOLDOWN_MS = 650; // R4 tuning: longer window between swings
 export const ATTACK_RANGE = 55; // was 60 — slightly tighter

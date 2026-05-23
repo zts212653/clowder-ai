@@ -160,7 +160,7 @@ function PinnedSections({ pinned, onNav }: { pinned: readonly string[]; onNav: (
             className={`flex h-10 w-10 items-center justify-center rounded-lg transition-all ${
               active
                 ? 'bg-[var(--console-rail-active)] shadow-[0_5px_14px_rgba(43,37,32,0.07)]'
-                : 'bg-[var(--console-rail-item)] hover:bg-[var(--console-hover-bg)]'
+                : 'hover:bg-[var(--console-rail-item)] hover:shadow-[0_5px_14px_rgba(43,37,32,0.07)]'
             }`}
             title={sec.label}
             aria-current={active ? 'page' : undefined}
@@ -197,7 +197,7 @@ function SettingsButton({ pathname, onNav }: { pathname: string; onNav: (path: s
       className={`relative flex h-10 w-10 items-center justify-center rounded-lg transition-all ${
         isSettings
           ? 'bg-[var(--console-rail-active)] shadow-[0_5px_14px_rgba(43,37,32,0.07)]'
-          : 'bg-[var(--console-rail-item)] hover:bg-[var(--console-hover-bg)]'
+          : 'hover:bg-[var(--console-rail-item)] hover:shadow-[0_5px_14px_rgba(43,37,32,0.07)]'
       }`}
       title={showBadge ? `设置 · MCP Callback Auth 24h ${unviewed} 次未查看失败` : '设置'}
       aria-current={isSettings ? 'page' : undefined}
@@ -257,7 +257,7 @@ export function ActivityBar({ className }: ActivityBarProps) {
             className={`flex h-10 w-10 items-center justify-center rounded-lg transition-all ${
               active
                 ? 'bg-[var(--console-rail-active)] shadow-[0_5px_14px_rgba(43,37,32,0.07)]'
-                : 'bg-[var(--console-rail-item)] hover:bg-[var(--console-hover-bg)]'
+                : 'hover:bg-[var(--console-rail-item)] hover:shadow-[0_5px_14px_rgba(43,37,32,0.07)]'
             }`}
             title={item.label}
             aria-current={active ? 'page' : undefined}
@@ -276,7 +276,7 @@ export function ActivityBar({ className }: ActivityBarProps) {
         <button
           type="button"
           onClick={toggleTheme}
-          className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--console-rail-item)] hover:bg-[var(--console-hover-bg)] transition-all"
+          className="flex h-10 w-10 items-center justify-center rounded-lg hover:bg-[var(--console-rail-item)] hover:shadow-[0_5px_14px_rgba(43,37,32,0.07)] transition-all"
           title={mounted && resolvedTheme === 'dark' ? '切换到日间模式' : '切换到夜间模式'}
         >
           {mounted && resolvedTheme === 'dark' ? <MoonIcon className="h-5 w-5" /> : <SunIcon className="h-5 w-5" />}
@@ -285,7 +285,7 @@ export function ActivityBar({ className }: ActivityBarProps) {
           fallback={
             <button
               type="button"
-              className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--console-rail-item)] transition-all"
+              className="flex h-10 w-10 items-center justify-center rounded-lg transition-all"
               title="设置"
               data-guide-id="hub.trigger"
             >

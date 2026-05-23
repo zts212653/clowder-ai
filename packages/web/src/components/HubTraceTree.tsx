@@ -84,12 +84,13 @@ export function TraceBrowser() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="traceId or catId..."
-          className="flex-1 rounded-lg border border-cafe-border bg-cafe-surface px-3 py-1.5 text-sm text-cafe placeholder:text-cafe-muted focus:border-conn-blue-ring focus:outline-none"
+          className="flex-1 rounded-lg bg-[var(--console-field-bg)] px-3 py-1.5 text-xs text-cafe placeholder:text-cafe-muted outline-none transition focus:ring-1 focus:ring-[var(--console-input-stroke)]"
         />
         <button
           type="button"
           onClick={fetchTraces}
-          className="rounded-lg bg-conn-blue-bg px-3 py-1.5 text-xs font-medium text-conn-blue-text hover:bg-conn-blue-bg"
+          disabled={!search.trim()}
+          className="rounded-lg bg-cafe-accent px-3 py-1.5 text-xs font-semibold text-[var(--cafe-surface)] transition-colors hover:bg-cafe-accent-hover disabled:opacity-50"
         >
           Search
         </button>
@@ -230,7 +231,7 @@ function SpanDetail({ span }: { span: TraceSpan | undefined }) {
             <button
               type="button"
               onClick={() => setXrayOpen(!xrayOpen)}
-              className="rounded-md bg-conn-purple-bg px-2 py-0.5 text-micro font-medium text-conn-purple-text transition-colors hover:bg-conn-purple-hover hover:text-white"
+              className="rounded-md bg-conn-purple-bg px-2 py-0.5 text-micro font-medium text-conn-purple-text transition-colors hover:bg-conn-purple-hover hover:text-[var(--cafe-surface)]"
             >
               {xrayOpen ? 'Close' : 'X-Ray'}
             </button>
@@ -568,7 +569,7 @@ function StepSummaryPanel({ traceId, routeSpanId }: { traceId: string; routeSpan
   }, [traceId, routeSpanId]);
 
   if (loading) {
-    return <div className="text-[10px] text-cafe-muted">Loading Step Summary…</div>;
+    return <div className="text-micro text-cafe-muted">Loading Step Summary…</div>;
   }
   if (!data) return null;
 
@@ -580,7 +581,7 @@ function StepSummaryPanel({ traceId, routeSpanId }: { traceId: string; routeSpan
       <div className="mb-2 flex items-center justify-between">
         <span className="text-xs font-medium text-cafe">Step Summary</span>
         {data.is_restored && (
-          <span className="rounded bg-cafe-surface px-1.5 py-0.5 text-[10px] text-cafe-muted">Restored (history)</span>
+          <span className="rounded bg-cafe-surface px-1.5 py-0.5 text-micro text-cafe-muted">Restored (history)</span>
         )}
       </div>
       <div className="grid grid-cols-3 gap-2">
@@ -595,7 +596,7 @@ function StepSummaryPanel({ traceId, routeSpanId }: { traceId: string; routeSpan
         <StepCell label="Tokens" value={data.token_total.toLocaleString()} />
         <StepCell label="Errors" value={data.error_count.toString()} />
       </div>
-      <div className="mt-2 border-t border-cafe-border pt-2 text-[10px] text-cafe-muted">
+      <div className="mt-2 border-t border-cafe-border pt-2 text-micro text-cafe-muted">
         Length × Width = {fmt(data.agent_loop_count)} loop ×{' '}
         {data.width_avg_tools_per_loop != null ? `${data.width_avg_tools_per_loop.toFixed(1)} tools/loop` : '—'}
       </div>
@@ -606,7 +607,7 @@ function StepSummaryPanel({ traceId, routeSpanId }: { traceId: string; routeSpan
 function StepCell({ label, value, primary }: { label: string; value: string; primary?: boolean }) {
   return (
     <div>
-      <div className="text-[10px] text-cafe-muted">{label}</div>
+      <div className="text-micro text-cafe-muted">{label}</div>
       <div className={`font-mono text-xs ${primary ? 'font-semibold text-cafe' : 'text-cafe'}`}>{value}</div>
     </div>
   );

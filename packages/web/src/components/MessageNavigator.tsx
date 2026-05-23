@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { type CatData, formatCatName, useCatData } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import type { ChatMessage as ChatMessageData } from '@/stores/chatStore';
@@ -99,7 +99,6 @@ export function MessageNavigator({ messages, scrollContainerRef }: MessageNaviga
   const { getCatById } = useCatData();
   const coCreator = useCoCreatorConfig();
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
-  const [viewport, setViewport] = useState({ top: 0, height: 1 });
   const trackRef = useRef<HTMLDivElement>(null);
 
   const resolveCat = useCallback((catId: string) => resolveCatById(getCatById, catId), [getCatById]);
@@ -124,30 +123,6 @@ export function MessageNavigator({ messages, scrollContainerRef }: MessageNaviga
     });
   }, [navItems]);
 
-  // Sync viewport indicator with scroll position
-  const updateViewport = useCallback(() => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    const { scrollTop, scrollHeight, clientHeight } = el;
-    if (scrollHeight <= clientHeight) {
-      setViewport({ top: 0, height: 1 });
-      return;
-    }
-    setViewport({
-      top: scrollTop / scrollHeight,
-      height: clientHeight / scrollHeight,
-    });
-  }, [scrollContainerRef]);
-
-  // Re-bind on navItems change so ref.current is re-read if container remounts (P3 fix)
-  useEffect(() => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    updateViewport();
-    el.addEventListener('scroll', updateViewport, { passive: true });
-    return () => el.removeEventListener('scroll', updateViewport);
-  }, [scrollContainerRef, updateViewport]);
-
   // Click on track background → scroll proportionally
   const handleTrackClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -171,20 +146,8 @@ export function MessageNavigator({ messages, scrollContainerRef }: MessageNaviga
   return (
     <div className="absolute right-0.5 top-2 bottom-2 w-5 z-10">
       <div ref={trackRef} className="relative h-full cursor-pointer" onClick={handleTrackClick}>
-        {/* Track rail */}
-        <div className="absolute left-1/2 top-0 bottom-0 w-px bg-gray-200 -translate-x-1/2" />
-
-        {/* Viewport indicator (scrollbar thumb) — P2 fix: clamp to prevent overflow */}
-        {(() => {
-          const thumbH = Math.max(viewport.height * 100, 5);
-          const thumbTop = Math.min(viewport.top * 100, 100 - thumbH);
-          return (
-            <div
-              className="absolute left-1/2 -translate-x-1/2 w-2.5 rounded-full bg-gray-300/50 transition-all duration-100 pointer-events-none"
-              style={{ top: `${thumbTop}%`, height: `${thumbH}%` }}
-            />
-          );
-        })()}
+        {/* Track rail — thin connecting line between dots */}
+        <div className="absolute left-1/2 top-0 bottom-0 w-px bg-[var(--console-border-soft)] -translate-x-1/2" />
 
         {/* Sampled dots */}
         {sampledItems.map(({ msg, sourceIdx }, idx) => {

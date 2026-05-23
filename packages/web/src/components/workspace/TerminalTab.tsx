@@ -3,6 +3,7 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import typographyTokens from '@/styles/typography-tokens.json';
 import { API_URL, apiFetch } from '@/utils/api-client';
 
 import { AgentPaneList } from './AgentPaneList';
@@ -46,7 +47,7 @@ export function TerminalTab({ worktreeId }: TerminalTabProps) {
       // Init xterm.js
       const term = new Terminal({
         cursorBlink: true,
-        fontSize: 13,
+        fontSize: typographyTokens.fontSizePx.compact,
         fontFamily: 'JetBrains Mono, Menlo, Monaco, monospace',
         /* xterm.js canvas renderer exempt: requires resolved color values, cannot use CSS vars */
         theme: {
@@ -152,7 +153,7 @@ export function TerminalTab({ worktreeId }: TerminalTabProps) {
           alignItems: 'center',
           gap: 8,
           padding: '4px 8px',
-          fontSize: 12,
+          fontSize: typographyTokens.fontSizePx.xs,
           color: 'var(--terminal-text-muted)',
           borderBottom: '1px solid var(--terminal-chrome)',
         }}
@@ -184,7 +185,7 @@ export function TerminalTab({ worktreeId }: TerminalTabProps) {
               padding: '2px 8px',
               borderRadius: 4,
               cursor: 'pointer',
-              fontSize: 11,
+              fontSize: typographyTokens.fontSizePx.label,
             }}
           >
             Reconnect
@@ -201,7 +202,7 @@ export function TerminalTab({ worktreeId }: TerminalTabProps) {
               padding: '2px 8px',
               borderRadius: 4,
               cursor: 'pointer',
-              fontSize: 11,
+              fontSize: typographyTokens.fontSizePx.label,
               marginLeft: 'auto',
             }}
           >

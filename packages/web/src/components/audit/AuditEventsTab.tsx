@@ -83,7 +83,7 @@ export function AuditEventsTab({ threadId }: AuditEventsTabProps) {
             type="button"
             key={evt.id}
             data-testid="audit-event-row"
-            className="w-full text-left rounded border border-cafe-subtle px-2 py-1.5 cursor-pointer hover:bg-cafe-surface-elevated transition-colors"
+            className="w-full text-left rounded-lg bg-[var(--console-shell-bg)] px-2 py-1.5 cursor-pointer hover:bg-cafe-surface-elevated transition-colors"
             onClick={() => setExpandedId(isExpanded ? null : evt.id)}
           >
             <div className="flex items-center gap-1.5 text-xs">

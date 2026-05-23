@@ -1,6 +1,6 @@
 .console-form-label {
   color: var(--cafe-text-secondary);
-  font-size: 0.72rem;
+  font-size: var(--console-font-label);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -13,7 +13,7 @@
   color: var(--cafe-text);
   border-radius: 0.5rem;
   padding: 0.5rem 0.75rem;
-  font-size: 0.82rem;
+  font-size: var(--console-font-compact);
   line-height: 1.4;
 }
 
@@ -53,7 +53,7 @@ select.console-form-input {
   border-radius: 0.5rem;
   border: 1px solid transparent;
   padding: 0.45rem 0.85rem;
-  font-size: 0.78rem;
+  font-size: var(--console-font-compact);
   font-weight: 600;
   line-height: 1;
   transition:
@@ -125,7 +125,7 @@ select.console-form-input {
   align-items: center;
   gap: 0.45rem;
   color: var(--cafe-crosspost);
-  font-size: 0.82rem;
+  font-size: var(--console-font-compact);
   font-weight: 600;
 }
 
@@ -149,7 +149,7 @@ select.console-form-input {
 
 .console-data-tile-label {
   color: var(--cafe-text-muted);
-  font-size: 0.68rem;
+  font-size: var(--console-font-label);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -158,7 +158,7 @@ select.console-form-input {
 .console-data-tile-value {
   margin-top: 0.45rem;
   color: var(--cafe-text);
-  font-size: 0.93rem;
+  font-size: var(--console-font-sm);
   font-weight: 600;
   line-height: 1.45;
 }

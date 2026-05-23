@@ -39,9 +39,9 @@ function save(data: ServiceConfigMap): void {
   cache = data;
 }
 
-export function getServiceConfig(id: string): ServiceConfig {
+export function getServiceConfig(id: string): ServiceConfig | undefined {
   const all = load();
-  return all[id] ?? { enabled: false };
+  return all[id];
 }
 
 export function setServiceConfig(id: string, patch: Partial<ServiceConfig>): ServiceConfig {

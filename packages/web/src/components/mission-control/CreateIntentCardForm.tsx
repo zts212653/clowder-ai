@@ -81,7 +81,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
   };
 
   return (
-    <div className="space-y-3 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4">
+    <div className="space-y-3 rounded-xl bg-[var(--console-card-bg)] p-4 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
       <h3 className="text-sm font-bold text-cafe">新建 Intent Card</h3>
 
       {/* Original text */}
@@ -92,7 +92,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
           onChange={(e) => setOriginalText(e.target.value)}
           rows={3}
           placeholder="粘贴 PRD 原文片段..."
-          className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2 text-xs text-cafe focus:border-[var(--console-border-soft)] focus:outline-none"
+          className="mt-1 w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2 text-xs text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
         />
       </label>
 
@@ -113,7 +113,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
               value={f.value}
               onChange={(e) => f.set(e.target.value)}
               placeholder={f.ph}
-              className="mt-0.5 w-full rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2 py-1 text-xs focus:border-[var(--console-border-soft)] focus:outline-none"
+              className="mt-0.5 w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-cafe-accent"
             />
           </label>
         ))}
@@ -126,7 +126,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
           <select
             value={sourceTag}
             onChange={(e) => setSourceTag(e.target.value as SourceTag)}
-            className="mt-0.5 w-full rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2 py-1 text-xs"
+            className="mt-0.5 w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-2 py-1 text-xs"
           >
             <option value="Q">Q — 客户口述</option>
             <option value="O">O — 现场观察</option>
@@ -140,7 +140,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
           <select
             value={confidence}
             onChange={(e) => setConfidence(Number(e.target.value))}
-            className="mt-0.5 w-full rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2 py-1 text-xs"
+            className="mt-0.5 w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-2 py-1 text-xs"
           >
             <option value={1}>1 — 低</option>
             <option value={2}>2 — 中</option>
@@ -158,7 +158,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
             value={sourceDetail}
             onChange={(e) => setSourceDetail(e.target.value)}
             placeholder="PRD section 3.2"
-            className="mt-0.5 w-full rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2 py-1 text-xs focus:border-[var(--console-border-soft)] focus:outline-none"
+            className="mt-0.5 w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-cafe-accent"
           />
         </label>
         <label className="block">
@@ -168,7 +168,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
             value={decisionOwner}
             onChange={(e) => setDecisionOwner(e.target.value)}
             placeholder="Product Owner"
-            className="mt-0.5 w-full rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2 py-1 text-xs focus:border-[var(--console-border-soft)] focus:outline-none"
+            className="mt-0.5 w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-cafe-accent"
           />
         </label>
       </div>
@@ -204,7 +204,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-lg border border-[var(--console-border-soft)] px-4 py-1.5 text-xs font-medium text-cafe-secondary hover:bg-[var(--console-hover-bg)]"
+          className="rounded-lg bg-[var(--console-shell-bg)] px-4 py-1.5 text-xs font-medium text-cafe-secondary hover:bg-[var(--console-hover-bg)]"
         >
           取消
         </button>

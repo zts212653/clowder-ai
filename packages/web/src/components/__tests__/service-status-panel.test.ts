@@ -27,7 +27,9 @@ const servicesPayload = {
       status: 'healthy',
       httpStatus: 200,
       error: null,
-      availableActions: [],
+      installed: true,
+      enabled: true,
+      installable: true,
     },
     {
       id: 'embedding-model',
@@ -40,7 +42,9 @@ const servicesPayload = {
       status: 'unhealthy',
       httpStatus: 503,
       error: 'HTTP 503',
-      availableActions: [],
+      installed: true,
+      enabled: true,
+      installable: true,
     },
   ],
 };
@@ -109,6 +113,41 @@ describe('ServiceStatusPanel', () => {
     expect(container.textContent).not.toContain('语音识别 (Whisper)');
   });
 
+  it('shows toggle ON and no trash for enabled+unhealthy service', async () => {
+    const unhealthyEnabledPayload = {
+      services: [
+        {
+          id: 'embedding-model',
+          name: 'Embedding Model',
+          description: 'Semantic memory embedding endpoint',
+          category: 'memory',
+          features: ['memory-semantic-search'],
+          endpoint: 'http://127.0.0.1:9880',
+          configured: true,
+          status: 'unhealthy',
+          httpStatus: 503,
+          error: 'HTTP 503',
+          installed: true,
+          enabled: true,
+          installable: true,
+        },
+      ],
+    };
+    mockFetch.mockResolvedValue({ ok: true, json: async () => unhealthyEnabledPayload });
+
+    await render(
+      React.createElement(ServiceStatusPanel, { filterFeatures: ['memory-semantic-search'], title: '记忆服务' }),
+    );
+
+    const toggle = container.querySelector('.settings-resource-toggle') as HTMLButtonElement;
+    expect(toggle).toBeTruthy();
+    expect(toggle.title).toBe('停止服务');
+    expect(toggle.className).toContain('cafe-accent');
+
+    const trashBtn = Array.from(container.querySelectorAll('button')).find((b) => b.title === '卸载');
+    expect(trashBtn).toBeFalsy();
+  });
+
   it('renders nothing while the service request is pending', () => {
     mockFetch.mockReturnValue(new Promise(() => undefined));
 
@@ -127,6 +166,86 @@ describe('ServiceStatusPanel', () => {
     expect(container.querySelector('[data-testid="voice-settings-panel"]')).toBeTruthy();
   });
 
+  it('shows error and does not call /toggle when /stop fails', async () => {
+    const enabledPayload = {
+      services: [
+        {
+          id: 'whisper-stt',
+          name: 'Whisper STT',
+          description: 'Local speech-to-text endpoint',
+          category: 'voice',
+          features: ['voice-input'],
+          endpoint: 'http://localhost:9876',
+          configured: true,
+          status: 'healthy',
+          httpStatus: 200,
+          error: null,
+          installed: true,
+          enabled: true,
+          installable: true,
+        },
+      ],
+    };
+    const callLog: string[] = [];
+    mockFetch.mockImplementation(async (path: string) => {
+      callLog.push(path);
+      if (path === '/api/services') {
+        return { ok: true, json: async () => enabledPayload };
+      }
+      if (path.includes('/stop')) {
+        return { ok: true, json: async () => ({ ok: false, error: 'Stop failed: process busy' }) };
+      }
+      return { ok: true, json: async () => ({ ok: true }) };
+    });
+
+    await render(React.createElement(ServiceStatusPanel, { filterFeatures: ['voice-input'], title: '语音服务' }));
+
+    const toggle = container.querySelector('.settings-resource-toggle') as HTMLButtonElement;
+    expect(toggle).toBeTruthy();
+
+    await act(async () => {
+      toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(callLog.some((p) => p.includes('/stop'))).toBe(true);
+    expect(callLog.some((p) => p.includes('/toggle'))).toBe(false);
+    expect(container.textContent).toContain('Stop failed: process busy');
+  });
+
+  it('does not render lifecycle controls for scriptless (installable=false) services', async () => {
+    const scriptlessPayload = {
+      services: [
+        {
+          id: 'audio-capture',
+          name: 'Audio Capture',
+          description: 'System audio capture',
+          category: 'audio',
+          features: ['voice-input'],
+          endpoint: null,
+          configured: true,
+          status: 'healthy',
+          httpStatus: 200,
+          error: null,
+          installed: true,
+          enabled: true,
+          installable: false,
+        },
+      ],
+    };
+    mockFetch.mockResolvedValue({ ok: true, json: async () => scriptlessPayload });
+
+    await render(React.createElement(ServiceStatusPanel, { filterFeatures: ['voice-input'], title: '音频' }));
+
+    expect(container.textContent).toContain('音频采集');
+    const toggle = container.querySelector('.settings-resource-toggle');
+    expect(toggle).toBeFalsy();
+    const trashBtn = Array.from(container.querySelectorAll('button')).find((b) => b.title === '卸载');
+    expect(trashBtn).toBeFalsy();
+  });
+
   it('reads lines field from /logs DTO during install polling', async () => {
     const installablePayload = {
       services: [
@@ -140,7 +259,9 @@ describe('ServiceStatusPanel', () => {
           configured: false,
           status: 'not_configured',
           error: null,
-          availableActions: ['install'],
+          installed: false,
+          enabled: false,
+          installable: true,
         },
       ],
     };

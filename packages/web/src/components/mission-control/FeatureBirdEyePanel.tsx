@@ -91,7 +91,7 @@ export function FeatureBirdEyePanel({ items, threadsByBacklogId, threadCountByFe
 
   return (
     <section
-      className="rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3"
+      className="rounded-2xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
       data-testid="mc-feature-bird-eye"
     >
       <h2 className="mb-2 text-sm font-semibold text-cafe">Feature 鸟瞰</h2>
@@ -150,7 +150,7 @@ function FeatureCard({
 
   return (
     <article
-      className="rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2"
+      className="rounded-xl bg-[var(--console-card-bg)] px-3 py-2 shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
       data-testid={`mc-bird-eye-feature-${tag}`}
     >
       <div className="flex items-center justify-between">

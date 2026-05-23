@@ -144,14 +144,10 @@ function UnifiedView({ hunks }: { hunks: DiffHunk[] }) {
         {hunks.map((hunk, hi) =>
           hunk.lines.map((line, li) => (
             <tr key={`${hi}-${li}`} className={lineStyles[line.type]}>
-              <td
-                className={`w-10 text-right px-1.5 select-none border-r border-[var(--console-border-soft)] ${gutterStyles[line.type]}`}
-              >
+              <td className={`w-10 text-right px-1.5 select-none console-divider-r ${gutterStyles[line.type]}`}>
                 {line.oldLine ?? ''}
               </td>
-              <td
-                className={`w-10 text-right px-1.5 select-none border-r border-[var(--console-border-soft)] ${gutterStyles[line.type]}`}
-              >
+              <td className={`w-10 text-right px-1.5 select-none console-divider-r ${gutterStyles[line.type]}`}>
                 {line.newLine ?? ''}
               </td>
               <td className="px-2 whitespace-pre overflow-x-auto">
@@ -176,7 +172,7 @@ function SideBySideView({ hunks }: { hunks: DiffHunk[] }) {
           <tr key={i}>
             {/* Left (old) */}
             <td
-              className={`w-8 text-right px-1 select-none border-r border-[var(--console-border-soft)] ${pair.left ? gutterStyles[pair.left.type] : 'bg-gray-900/50'}`}
+              className={`w-8 text-right px-1 select-none console-divider-r ${pair.left ? gutterStyles[pair.left.type] : 'bg-gray-900/50'}`}
             >
               {pair.left?.oldLine ?? ''}
             </td>
@@ -187,7 +183,7 @@ function SideBySideView({ hunks }: { hunks: DiffHunk[] }) {
             </td>
             {/* Right (new) */}
             <td
-              className={`w-8 text-right px-1 select-none border-l border-r border-[var(--console-border-soft)] ${pair.right ? gutterStyles[pair.right.type] : 'bg-gray-900/50'}`}
+              className={`w-8 text-right px-1 select-none console-divider-l console-divider-r ${pair.right ? gutterStyles[pair.right.type] : 'bg-gray-900/50'}`}
             >
               {pair.right?.newLine ?? ''}
             </td>
@@ -262,7 +258,7 @@ export function DiffViewer({ diff, filePath, compact }: DiffViewerProps) {
       {filtered.map((file) => (
         <div key={file.path} className="rounded border border-[var(--console-border-soft)] overflow-hidden">
           {!compact && (
-            <div className="bg-[var(--ws-editor-bg)] px-3 py-1.5 text-xs font-mono text-cafe-muted border-b border-[var(--console-border-soft)] truncate">
+            <div className="bg-[var(--ws-editor-bg)] px-3 py-1.5 text-xs font-mono text-cafe-muted console-divider-b truncate">
               {file.path}
             </div>
           )}

@@ -92,11 +92,11 @@ export function ResolutionQueue({ projectId, resolutions, cards, onUpdate }: Res
 
       {/* Add Question form */}
       {showForm && (
-        <div className="space-y-2 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4">
+        <div className="space-y-2 rounded-xl bg-[var(--console-card-bg)] p-4 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
           <select
             value={cardId}
             onChange={(e) => setCardId(e.target.value)}
-            className="w-full rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2 py-1.5 text-xs text-cafe"
+            className="w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-2 py-1.5 text-xs text-cafe"
           >
             <option value="">选择 Card...</option>
             {cards.map((c) => (
@@ -108,7 +108,7 @@ export function ResolutionQueue({ projectId, resolutions, cards, onUpdate }: Res
           <select
             value={path}
             onChange={(e) => setPath(e.target.value as NonNullPath)}
-            className="w-full rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2 py-1.5 text-xs text-cafe"
+            className="w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-2 py-1.5 text-xs text-cafe"
           >
             {PATH_OPTIONS.map((p) => (
               <option key={p} value={p}>
@@ -121,14 +121,14 @@ export function ResolutionQueue({ projectId, resolutions, cards, onUpdate }: Res
             onChange={(e) => setQuestion(e.target.value)}
             placeholder="问题..."
             rows={2}
-            className="w-full rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2 py-1.5 text-xs text-cafe"
+            className="w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-2 py-1.5 text-xs text-cafe"
           />
           <textarea
             value={recommendation}
             onChange={(e) => setRecommendation(e.target.value)}
             placeholder="建议..."
             rows={2}
-            className="w-full rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2 py-1.5 text-xs text-cafe"
+            className="w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-2 py-1.5 text-xs text-cafe"
           />
           <button
             type="button"
@@ -143,7 +143,7 @@ export function ResolutionQueue({ projectId, resolutions, cards, onUpdate }: Res
 
       {/* Resolution list */}
       {resolutions.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-6 text-center text-xs text-cafe-secondary">
+        <div className="rounded-lg bg-[var(--console-shell-bg)] p-6 text-center text-xs text-cafe-secondary">
           暂无澄清问题
         </div>
       ) : (
@@ -153,7 +153,7 @@ export function ResolutionQueue({ projectId, resolutions, cards, onUpdate }: Res
             return (
               <div
                 key={item.id}
-                className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3 text-xs"
+                className="rounded-xl bg-[var(--console-card-bg)] p-3 text-xs shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
               >
                 <div className="mb-1 flex items-center gap-2">
                   <span className={`rounded-full px-2 py-0.5 text-micro font-medium ${style.bg} ${style.text}`}>
@@ -175,7 +175,7 @@ export function ResolutionQueue({ projectId, resolutions, cards, onUpdate }: Res
                       value={answerText[item.id] ?? ''}
                       onChange={(e) => setAnswerText((prev) => ({ ...prev, [item.id]: e.target.value }))}
                       placeholder="回答..."
-                      className="flex-1 rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2 py-1 text-xs"
+                      className="flex-1 rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-2 py-1 text-xs"
                     />
                     <button
                       type="button"

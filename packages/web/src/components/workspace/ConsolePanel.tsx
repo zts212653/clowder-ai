@@ -27,9 +27,9 @@ interface ConsolePanelProps {
 
 export function ConsolePanel({ entries, onClear }: ConsolePanelProps) {
   return (
-    <div className="flex flex-col border-t border-[var(--console-border-soft)] bg-cafe-surface/80 text-xs font-mono">
+    <div className="flex flex-col console-divider-t bg-cafe-surface/80 text-xs font-mono">
       {/* Header bar */}
-      <div className="flex items-center justify-between px-2 py-1 border-b border-[var(--console-border-soft)] bg-[var(--ws-surface)]">
+      <div className="flex items-center justify-between px-2 py-1 console-divider-b bg-[var(--ws-surface)]">
         <div className="flex items-center gap-1.5">
           <span className="text-micro font-semibold text-[var(--ws-text)]/70 uppercase tracking-wider">Console</span>
           {entries.length > 0 && (
@@ -57,7 +57,7 @@ export function ConsolePanel({ entries, onClear }: ConsolePanelProps) {
           entries.map((entry, i) => (
             <div
               key={`${entry.timestamp}-${i}`}
-              className={`flex items-start gap-2 px-2 py-0.5 border-b border-[var(--console-border-soft)]/30 ${LEVEL_BG[entry.level]}`}
+              className={`flex items-start gap-2 px-2 py-0.5 console-divider-b ${LEVEL_BG[entry.level]}`}
             >
               <span className={`shrink-0 w-10 ${LEVEL_STYLES[entry.level]}`}>{entry.level}</span>
               <span className="text-[var(--ws-text)]/80 break-all">{entry.args.join(' ')}</span>

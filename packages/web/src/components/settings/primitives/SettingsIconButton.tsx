@@ -9,7 +9,7 @@ export function SettingsIconButton({
     <button
       type="button"
       {...props}
-      className={`flex h-[26px] w-[26px] items-center justify-center rounded-lg bg-[var(--console-hover-bg)] text-cafe-muted transition-colors hover:text-cafe-secondary${className ? ` ${className}` : ''}`}
+      className={`flex h-[26px] w-[26px] items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent${className ? ` ${className}` : ''}`}
     >
       {children}
     </button>

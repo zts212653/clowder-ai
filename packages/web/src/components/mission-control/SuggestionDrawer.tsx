@@ -113,7 +113,7 @@ export function SuggestionDrawer({
 
   if (!item) {
     return (
-      <aside className="rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4">
+      <aside className="rounded-2xl bg-[var(--console-card-bg)] p-4 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
         <h2 className="mb-2 text-sm font-semibold text-cafe">Suggestion Detail</h2>
         <p className="text-xs text-cafe-secondary">点击左侧卡片查看详情并执行建议领取/批准流程。</p>
       </aside>
@@ -121,7 +121,7 @@ export function SuggestionDrawer({
   }
 
   return (
-    <aside className="rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4">
+    <aside className="rounded-2xl bg-[var(--console-card-bg)] p-4 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
       <h2 className="text-sm font-semibold text-cafe">Suggestion Detail</h2>
       <p className="mt-1 text-xs text-cafe-secondary">状态：{statusLabel}</p>
       <h3 className="mt-3 text-sm font-semibold text-cafe">{item.title}</h3>
@@ -146,7 +146,7 @@ export function SuggestionDrawer({
               setPlan('');
             }}
           />
-          <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-2 text-xs text-cafe-secondary">
+          <div className="rounded-lg bg-[var(--console-shell-bg)] p-2 text-xs text-cafe-secondary">
             <p>
               Self-claim policy：<span className="font-semibold">{currentSelfClaimScope}</span>
             </p>
@@ -179,7 +179,7 @@ export function SuggestionDrawer({
                     requestedPhase: selectedPhase,
                   })
                 }
-                className="mt-2 w-full rounded-lg border border-[var(--cafe-text)] px-3 py-2 text-xs font-semibold text-cafe disabled:opacity-40"
+                className="mt-2 w-full rounded-lg bg-[var(--console-shell-bg)] px-3 py-2 text-xs font-semibold text-cafe hover:bg-[var(--console-hover-bg)] disabled:opacity-40"
                 data-testid="mc-self-claim-submit"
               >
                 直接自领并派发
@@ -209,7 +209,7 @@ export function SuggestionDrawer({
           <p>已派发到 Thread：{item.dispatchedThreadId}</p>
           <p>Phase：{item.dispatchedThreadPhase}</p>
           {item.lease && (
-            <div className="mt-2 rounded border border-[var(--mc-status-dispatched-bg)] bg-[var(--mc-status-dispatched-bg)] px-2 py-1.5 text-xs text-[var(--mc-status-dispatched-text)]">
+            <div className="mt-2 rounded-lg bg-[var(--mc-status-dispatched-bg)] px-2 py-1.5 text-xs text-[var(--mc-status-dispatched-text)]">
               <p>Lease：{item.lease.state}</p>
               <p>Owner：{item.lease.ownerCatId}</p>
               <p>ExpiresAt：{new Date(item.lease.expiresAt).toLocaleString()}</p>
@@ -242,7 +242,7 @@ export function SuggestionDrawer({
                   type="button"
                   disabled={submitting || !leaseOwnerCatId}
                   onClick={() => void onReleaseLease({ itemId: item.id, catId: leaseOwnerCatId })}
-                  className="rounded border border-[var(--console-border-soft)] px-2 py-1 text-xs font-semibold text-cafe-secondary disabled:opacity-40"
+                  className="rounded bg-[var(--console-shell-bg)] px-2 py-1 text-xs font-semibold text-cafe-secondary disabled:opacity-40"
                   data-testid="mc-lease-release"
                 >
                   释放 Lease

@@ -57,6 +57,7 @@ function AppShellContent({ children }: AppShellProps) {
             onResize={handleResize}
             onCollapse={close}
             onDoubleClick={resetWidth}
+            showLine={false}
           />
         </div>
       )}

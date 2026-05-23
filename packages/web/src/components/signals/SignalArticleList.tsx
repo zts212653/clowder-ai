@@ -90,8 +90,8 @@ export function SignalArticleList({
               className={[
                 'flex items-center gap-3 rounded-[14px] px-3 py-2.5 cursor-pointer transition-all',
                 selected
-                  ? 'bg-[var(--console-card-bg)] shadow-[0_8px_22px_rgba(43,33,26,0.04)]'
-                  : 'hover:bg-[var(--console-card-bg)]/60',
+                  ? 'bg-[var(--console-active-bg)] shadow-[0_8px_22px_rgba(43,33,26,0.10)]'
+                  : 'hover:bg-[var(--console-hover-bg)]',
               ].join(' ')}
               style={{ minHeight: 76 }}
             >

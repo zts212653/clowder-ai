@@ -75,11 +75,11 @@ export function RefluxCapture({ projectId, patterns, onUpdate }: RefluxCapturePr
 
       {/* Capture form */}
       {showForm && (
-        <div className="space-y-2 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4">
+        <div className="space-y-2 rounded-xl bg-[var(--console-card-bg)] p-4 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
           <select
             value={category}
             onChange={(e) => setCategory(e.target.value as RefluxCategory)}
-            className="w-full rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2 py-1.5 text-xs text-cafe"
+            className="w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-2 py-1.5 text-xs text-cafe"
           >
             {CATEGORY_OPTIONS.map((c) => (
               <option key={c} value={c}>
@@ -91,21 +91,21 @@ export function RefluxCapture({ projectId, patterns, onUpdate }: RefluxCapturePr
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="标题"
-            className="w-full rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2 py-1.5 text-xs text-cafe"
+            className="w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-2 py-1.5 text-xs text-cafe"
           />
           <textarea
             value={insight}
             onChange={(e) => setInsight(e.target.value)}
             placeholder="Insight..."
             rows={3}
-            className="w-full rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2 py-1.5 text-xs text-cafe"
+            className="w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-2 py-1.5 text-xs text-cafe"
           />
           <textarea
             value={evidence}
             onChange={(e) => setEvidence(e.target.value)}
             placeholder="Evidence..."
             rows={2}
-            className="w-full rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2 py-1.5 text-xs text-cafe"
+            className="w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-2 py-1.5 text-xs text-cafe"
           />
           <button
             type="button"
@@ -120,7 +120,7 @@ export function RefluxCapture({ projectId, patterns, onUpdate }: RefluxCapturePr
 
       {/* Pattern list */}
       {patterns.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-6 text-center text-xs text-cafe-secondary">
+        <div className="rounded-lg bg-[var(--console-shell-bg)] p-6 text-center text-xs text-cafe-secondary">
           暂无经验记录
         </div>
       ) : (
@@ -130,7 +130,7 @@ export function RefluxCapture({ projectId, patterns, onUpdate }: RefluxCapturePr
             return (
               <div
                 key={p.id}
-                className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3 text-xs"
+                className="rounded-xl bg-[var(--console-card-bg)] p-3 text-xs shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
               >
                 <div className="mb-1 flex items-center justify-between">
                   <div className="flex items-center gap-2">

@@ -64,7 +64,7 @@ export function ConnectionStatusBar({
 
   return (
     <section
-      className="mx-auto mb-3 w-full max-w-3xl rounded-2xl border border-[var(--console-border-soft)] bg-cafe-surface p-3 shadow-sm backdrop-blur"
+      className="mx-auto mb-3 w-full max-w-3xl rounded-2xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)] backdrop-blur"
       data-testid="connection-status-bar"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">

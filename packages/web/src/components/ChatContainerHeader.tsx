@@ -1,12 +1,11 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { useVoiceServicesAvailable } from '@/hooks/useVoiceServicesAvailable';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { ChatVoiceFeatureControls } from './ChatVoiceFeatureControls';
 import { ExportButton } from './ExportButton';
 import { CatCafeLogo } from './icons/CatCafeLogo';
 import { ThreadCatPill } from './ThreadCatPill';
-import { VoiceCompanionButton } from './VoiceCompanionButton';
 
 interface ChatContainerHeaderProps {
   sidebarOpen: boolean;
@@ -37,8 +36,6 @@ export function ChatContainerHeader({
   onToggleStatusPanel,
   defaultCatId,
 }: ChatContainerHeaderProps) {
-  const voiceAvailable = useVoiceServicesAvailable();
-
   return (
     <header className="safe-area-top">
       <div className="px-5 py-3 flex items-center gap-2">
@@ -70,12 +67,7 @@ export function ChatContainerHeader({
           </div>
         </div>
         <ExportButton threadId={threadId} />
-        {voiceAvailable && (
-          <>
-            <VoiceCompanionButton threadId={threadId} defaultCatId={defaultCatId} />
-            <LiveAudioToggle />
-          </>
-        )}
+        <ChatVoiceFeatureControls threadId={threadId} defaultCatId={defaultCatId} />
         {authPendingCount > 0 && (
           <span
             className="inline-flex items-center justify-center h-5 min-w-[20px] px-1 rounded-full bg-conn-amber-bg text-conn-amber-text text-micro font-bold animate-pulse-subtle"
@@ -119,7 +111,7 @@ function DaemonActiveIndicator({ threadId }: { threadId: string }) {
         const res = await apiFetch(`/api/threads/${threadId}/active-pane`);
         if (cancelled) return;
         if (res.ok) {
-          const body = (await res.json()) as { daemonShortId?: string };
+          const body = (await res.json()) as { active?: boolean; daemonShortId?: string };
           setDaemonShortId(body.daemonShortId ?? null);
         } else {
           setDaemonShortId(null);
@@ -247,35 +239,6 @@ export function rightPanelToggleTransition(
   }
 }
 
-/** F099: Unified right panel toggle — cycles closed → status → workspace → closed */
-function LiveAudioToggle() {
-  const rightPanelMode = useChatStore((s) => s.rightPanelMode);
-  const setRightPanelMode = useChatStore((s) => s.setRightPanelMode);
-  const isActive = rightPanelMode === 'transcript';
-
-  return (
-    <button
-      type="button"
-      onClick={() => setRightPanelMode(isActive ? 'status' : 'transcript')}
-      className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors hidden lg:flex ${
-        isActive
-          ? 'bg-conn-emerald-bg text-conn-emerald-text'
-          : 'bg-[var(--console-pill-bg)] text-cafe-secondary hover:opacity-80'
-      }`}
-      title={isActive ? 'Close transcript' : 'Live audio transcript'}
-      aria-label={isActive ? 'Close transcript' : 'Live audio transcript'}
-    >
-      <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-        <path
-          fillRule="evenodd"
-          d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z"
-          clipRule="evenodd"
-        />
-      </svg>
-    </button>
-  );
-}
-
 function RightPanelToggle({
   onToggleStatusPanel,
   statusPanelOpen,
@@ -299,12 +262,12 @@ function RightPanelToggle({
   return (
     <button
       onClick={handleClick}
-      className={`p-1 rounded-lg text-cafe-secondary hover:bg-[var(--console-hover-bg)] transition-colors ml-1 hidden lg:block ${
+      className={`p-1 rounded-lg transition-colors ml-1 hidden lg:block ${
         statusPanelOpen
           ? isWorkspace
             ? 'bg-[var(--cafe-accent)]/5 text-[var(--cafe-accent)]'
-            : 'bg-[var(--console-hover-bg)]'
-          : ''
+            : 'text-cafe-accent'
+          : 'text-cafe-secondary hover:text-cafe-accent'
       }`}
       aria-label={label}
       title={label}

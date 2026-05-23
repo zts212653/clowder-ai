@@ -15,7 +15,7 @@ const STATUS_STYLES: Record<DispatchExecutionDigest['status'], { bg: string; tex
 export function DispatchProgress({ digests }: DispatchProgressProps) {
   if (digests.length === 0) {
     return (
-      <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-8 text-center text-sm text-cafe-secondary">
+      <div className="rounded-xl bg-[var(--console-shell-bg)] p-8 text-center text-sm text-cafe-secondary">
         暂无派遣记录
       </div>
     );
@@ -31,7 +31,7 @@ export function DispatchProgress({ digests }: DispatchProgressProps) {
         return (
           <div
             key={digest.id}
-            className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4"
+            className="rounded-xl bg-[var(--console-card-bg)] p-4 shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
           >
             {/* Header: status + cat + time */}
             <div className="flex items-center justify-between">

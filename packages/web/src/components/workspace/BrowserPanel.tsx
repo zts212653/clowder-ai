@@ -338,7 +338,7 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
       {!previewOnly && consoleOpen && <ConsolePanel entries={consoleEntries} onClear={clearConsole} />}
 
       {!previewOnly && (
-        <div className="flex items-center px-2 py-0.5 border-t border-[var(--console-border-soft)] text-micro text-[var(--ws-text)]/40 bg-cafe-surface/40">
+        <div className="flex items-center px-2 py-0.5 console-divider-t text-micro text-[var(--ws-text)]/40 bg-cafe-surface/40">
           {targetPort && gatewayPort ? (
             <span className="flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-conn-green-text inline-block" />

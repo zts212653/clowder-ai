@@ -67,7 +67,7 @@ export function InstallPreviewModal({ serviceName, prerequisites, onConfirm, onC
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--console-active-bg)] text-lg font-bold text-[var(--console-modal-title)]">
             +
           </div>
-          <h2 id="install-preview-title" className="min-w-0 flex-1 text-xl font-extrabold text-cafe">
+          <h2 id="install-preview-title" className="min-w-0 flex-1 text-xl font-bold text-cafe">
             安装 {serviceName}
           </h2>
           <button

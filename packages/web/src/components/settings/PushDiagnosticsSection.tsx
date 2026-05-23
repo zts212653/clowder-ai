@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { PushServiceConfig } from './PushServiceConfig';
 
-const CARD_SHADOW = 'shadow-[0_12px_30px_rgba(43,33,26,0.08)]';
+const CARD_SHADOW = 'shadow-[0_8px_22px_rgba(43,33,26,0.04)]';
 
 function describePermission(permission: NotificationPermission | 'unsupported'): string {
   if (permission === 'granted') return '已授权';
@@ -59,7 +59,7 @@ export function PushDiagnosticsSection({ permission, status, pushConfigured }: P
       </button>
 
       {showDiagnostics && (
-        <div className={`mt-3 console-list-card rounded-2xl p-4 ${CARD_SHADOW} space-y-4`}>
+        <div className={`mt-3 console-list-card rounded-xl p-4 ${CARD_SHADOW} space-y-4`}>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
             <div className="rounded-lg bg-[var(--console-field-bg)] px-3 py-2">
               <div className="text-cafe-muted">权限</div>

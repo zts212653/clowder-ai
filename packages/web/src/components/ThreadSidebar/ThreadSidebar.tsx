@@ -718,9 +718,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
 
   return (
     <>
-      <aside
-        className={`${sidebarWidthClass} border-r border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] flex flex-col h-full`}
-      >
+      <aside className={`${sidebarWidthClass} bg-[var(--console-panel-bg)] flex flex-col h-full`}>
         <div className="px-3 pt-3 pb-2 flex items-center justify-between">
           <span className="text-sm font-semibold text-cafe-black">对话</span>
           <div className="flex items-center gap-1.5">
@@ -758,14 +756,14 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="搜索对话、项目或 ID..."
-              className="flex-1 min-w-0 rounded-lg bg-[var(--console-field-bg)] px-2.5 py-1.5 text-xs text-cafe-secondary placeholder:text-cafe-muted focus:outline-none focus:ring-1 focus:ring-[var(--console-input-stroke)]"
+              className="flex-1 min-w-0 rounded-lg bg-[var(--console-card-soft-bg)] px-2.5 py-1.5 text-xs text-cafe-secondary placeholder:text-cafe-muted focus:outline-none focus:ring-1 focus:ring-[var(--console-input-stroke)]"
             />
             {unreadIds.size > 0 && (
               <button
                 type="button"
                 onClick={handleMarkAllRead}
                 disabled={isMarkingAllRead}
-                className="shrink-0 rounded-md bg-[var(--console-field-bg)] px-2 py-0.5 text-micro text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-black disabled:opacity-40 transition-colors whitespace-nowrap"
+                className="shrink-0 rounded-md bg-transparent px-2 py-0.5 text-micro text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-black disabled:opacity-40 transition-colors whitespace-nowrap"
                 data-testid="mark-all-read-btn"
               >
                 {isMarkingAllRead ? '...' : '全部已读'}
@@ -979,7 +977,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           <button
             type="button"
             onClick={handleToggleTrash}
-            className="flex w-full items-center gap-2 h-9 px-2.5 rounded-xl bg-[var(--console-code-bg)] text-xs text-cafe-secondary hover:opacity-80 transition-colors"
+            className="flex w-full items-center gap-2 h-9 px-2.5 rounded-xl bg-[var(--console-card-soft-bg)] text-xs text-cafe-secondary hover:text-cafe-accent transition-colors"
             data-testid="trash-bin-toggle"
           >
             <svg

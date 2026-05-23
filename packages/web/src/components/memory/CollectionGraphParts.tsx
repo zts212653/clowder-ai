@@ -1,5 +1,6 @@
 'use client';
 
+import typographyTokens from '@/styles/typography-tokens.json';
 import {
   compactAnchorLabel,
   type GraphEdge,
@@ -15,7 +16,8 @@ const DIMMED_SENSITIVITIES = new Set(['private', 'restricted']);
 
 function labelWidth(anchor: string, title: string, isCenter: boolean): number {
   const anchorWidth = [...anchor].length * 8;
-  const titleWidth = [...title].length * (isCenter ? 14 : 11);
+  const titleWidth =
+    [...title].length * (isCenter ? typographyTokens.fontSizePx.sm : typographyTokens.fontSizePx.label);
   const raw = Math.max(anchorWidth, titleWidth) + 34;
   return Math.max(isCenter ? 210 : 132, Math.min(isCenter ? 340 : 210, raw));
 }
@@ -57,7 +59,13 @@ export function GraphNodeGlyph({ centerAnchor, node, onHover, onNodeClick, pos }
       <rect x={glyph.x} y={glyph.y} width={5} height={glyph.height} rx={2.5} fill={glyph.fill} opacity={0.95} />
       {/* data-viz palette exempt: SVG text fills are graph-specific */}
       {node.redacted ? (
-        <text x={glyph.x + 16} y={pos.y + 4} fontSize={13} fill="#374151" fontWeight="700">
+        <text
+          x={glyph.x + 16}
+          y={pos.y + 4}
+          fontSize={typographyTokens.fontSizePx.compact}
+          fill="#374151"
+          fontWeight="700"
+        >
           🔒 Redacted
         </text>
       ) : (
@@ -109,7 +117,7 @@ function glyphViewModel(node: GraphNode, centerAnchor: string | undefined, pos: 
   const dimmed = node.redacted ? true : DIMMED_SENSITIVITIES.has(node.sensitivity);
   return {
     anchorLabel,
-    anchorSize: isCenter ? 13 : 11,
+    anchorSize: isCenter ? typographyTokens.fontSizePx.compact : typographyTokens.fontSizePx.label,
     anchorY: isCenter ? y + 21 : y + 19,
     // data-viz palette exempt: node background/border colors are graph-specific
     background: isCenter ? '#eff6ff' : node.kind === 'unresolved' ? '#f3f4f6' : '#fffdf8',
@@ -119,7 +127,7 @@ function glyphViewModel(node: GraphNode, centerAnchor: string | undefined, pos: 
     height,
     strokeWidth: isCenter ? 2.5 : 1.5,
     title,
-    titleSize: isCenter ? 12 : 10,
+    titleSize: isCenter ? typographyTokens.fontSizePx.xs : typographyTokens.fontSizePx.micro,
     titleY: isCenter ? y + 40 : y + 35,
     width,
     x: pos.x - width / 2,
@@ -241,10 +249,7 @@ function RelationRow({
 
 function GraphSummary({ graph }: { graph: GraphResult }) {
   return (
-    <div
-      className="border-t border-[var(--console-border-soft)] pt-3 text-micro text-cafe-secondary"
-      data-testid="graph-summary"
-    >
+    <div className="console-divider-t pt-3 text-micro text-cafe-secondary" data-testid="graph-summary">
       <div className="flex flex-wrap gap-3">
         <span>节点: {graph.nodes.length}</span>
         <span>关系边: {graph.edges.length}</span>
@@ -257,7 +262,7 @@ function GraphSummary({ graph }: { graph: GraphResult }) {
 
 function GraphLegend({ uniqueKinds }: { uniqueKinds: string[] }) {
   return (
-    <div className="border-t border-[var(--console-border-soft)] pt-3">
+    <div className="console-divider-t pt-3">
       <div className="mb-2 text-micro font-bold uppercase tracking-wide text-cafe-secondary">图例</div>
       <div className="flex flex-wrap items-center gap-2" data-testid="graph-legend">
         {uniqueKinds.map((k) => (
@@ -281,10 +286,7 @@ function GraphEdgeFilter({
   uniqueRelations: string[];
 }) {
   return (
-    <div
-      className="border-t border-[var(--console-border-soft)] pt-3 text-micro text-cafe-secondary"
-      data-testid="graph-edge-filter"
-    >
+    <div className="console-divider-t pt-3 text-micro text-cafe-secondary" data-testid="graph-edge-filter">
       <div className="mb-2 font-bold uppercase tracking-wide">关系类型</div>
       <div className="flex flex-wrap items-center gap-2">
         {uniqueRelations.map((rel) => (

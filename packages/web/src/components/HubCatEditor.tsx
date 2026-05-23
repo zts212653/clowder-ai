@@ -6,7 +6,7 @@ import { apiFetch } from '@/utils/api-client';
 import type { ConfigData } from './config-viewer-types';
 import type { TemplateCard } from './first-run-quest/TemplateStep';
 import type { AccountsResponse, ProfileItem } from './hub-accounts.types';
-import { buildEditorLoadingNote, uploadAvatarAsset, uploadRefAudioAsset } from './hub-cat-editor.client';
+import { uploadAvatarAsset, uploadRefAudioAsset } from './hub-cat-editor.client';
 import {
   autoSlug,
   buildCatPayload,
@@ -534,33 +534,6 @@ export function HubCatEditor({ cat, draft, existingCats, open, onClose, onSaved 
     }
   };
 
-  const handleDelete = async () => {
-    if (!cat || saving) return;
-    const ok = await confirm({
-      title: '删除确认',
-      message: `确认删除成员「${cat.displayName || cat.name || cat.id}」吗？该操作不可撤销。`,
-      variant: 'danger',
-      confirmLabel: '删除',
-    });
-    if (!ok) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const res = await apiFetch(`/api/cats/${cat.id}`, { method: 'DELETE' });
-      if (!res.ok) {
-        const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-        setError((payload.error as string) ?? `删除失败 (${res.status})`);
-        return;
-      }
-      await onSaved();
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '删除失败');
-    } finally {
-      setSaving(false);
-    }
-  };
-
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-[var(--console-overlay-medium)] px-4"
@@ -568,44 +541,46 @@ export function HubCatEditor({ cat, draft, existingCats, open, onClose, onSaved 
       data-bootcamp-host="cat-editor-modal"
     >
       <div
-        className="flex max-h-[88vh] w-full max-w-[560px] flex-col rounded-2xl border border-[var(--hub-border-warm)] bg-[var(--hub-surface)] shadow-2xl"
+        className="member-editor-modal flex max-h-[88vh] w-full max-w-[720px] flex-col overflow-hidden rounded-[28px] bg-[var(--console-card-bg)] shadow-[0_22px_48px_rgba(43,33,26,0.13)]"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="member-editor-title"
         data-guide-id="member-editor.profile"
         onClick={(event) => event.stopPropagation()}
         data-bootcamp-step="cat-editor"
       >
-        <div className="flex shrink-0 items-start justify-between border-b border-[var(--hub-border-warm)] px-7 py-5">
-          <div>
-            <p className="text-sm font-semibold text-[var(--field-success-focus)]">
-              成员协作 &gt; 总览 &gt; {cat ? '编辑成员' : '添加成员'}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={requestClose}
-              className="text-2xl leading-none text-[var(--hub-text-faint)]"
-              aria-label="关闭"
-            >
-              ×
-            </button>
-          </div>
+        <div className="flex shrink-0 items-start justify-between px-7 py-5">
+          <p id="member-editor-title" className="text-compact font-extrabold text-[var(--console-modal-title)]">
+            {cat ? cat.displayName || cat.name || cat.id : '添加成员'}
+          </p>
+          <button
+            type="button"
+            onClick={requestClose}
+            className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-[var(--console-modal-close-bg)] text-lg font-extrabold leading-none text-[var(--console-modal-close-fg)] transition hover:opacity-80"
+            aria-label="关闭"
+          >
+            ×
+          </button>
         </div>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-7 py-5">
           {!cat && templates.length > 0 && (
             <section
               data-guide-id="add-member.template-picker"
-              className="space-y-2 rounded-2xl border border-[var(--hub-border-soft)] bg-[var(--hub-surface-clean)] p-[18px]"
+              className="space-y-3 rounded-[18px] bg-[var(--console-card-bg)] p-[18px] shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
             >
-              <h4 className="text-base font-bold text-[var(--hub-heading)]">模板快选（可选）</h4>
-              <div className="flex flex-wrap gap-2">
+              <h4 className="text-base font-extrabold text-cafe">成员模板</h4>
+              <p className="text-xs font-semibold text-cafe-secondary">
+                从内置成员模板开始，选择后自动填充身份、模型与运行时默认值。
+              </p>
+              <div className="flex flex-wrap gap-2.5">
                 <button
                   type="button"
                   onClick={() => handleTemplateSelect(null)}
-                  className={`rounded-full px-3 py-1.5 text-sm transition ${
+                  className={`h-8 rounded-2xl px-3.5 text-compact font-extrabold transition ${
                     selectedTemplateId === 'custom'
-                      ? 'bg-[var(--hub-accent)] text-white'
-                      : 'bg-[var(--hub-surface-hover)] text-[var(--hub-text)] hover:bg-[var(--hub-border)]'
+                      ? 'bg-[var(--cafe-accent)] text-[var(--cafe-surface)]'
+                      : 'bg-[var(--console-field-bg)] text-[var(--console-template-text)]'
                   }`}
                 >
                   自定义
@@ -615,10 +590,10 @@ export function HubCatEditor({ cat, draft, existingCats, open, onClose, onSaved 
                     key={t.id}
                     type="button"
                     onClick={() => handleTemplateSelect(selectedTemplateId === t.id ? null : t)}
-                    className={`rounded-full px-3 py-1.5 text-sm transition ${
+                    className={`h-8 rounded-2xl px-3.5 text-compact font-extrabold transition ${
                       selectedTemplateId === t.id
-                        ? 'bg-[var(--hub-accent)] text-white'
-                        : 'bg-[var(--hub-surface-hover)] text-[var(--hub-text)] hover:bg-[var(--hub-border)]'
+                        ? 'bg-[var(--cafe-accent)] text-[var(--cafe-surface)]'
+                        : 'bg-[var(--console-field-bg)] text-[var(--console-template-text)]'
                     }`}
                   >
                     {t.nickname ?? t.name}
@@ -669,38 +644,15 @@ export function HubCatEditor({ cat, draft, existingCats, open, onClose, onSaved 
           {error ? <p className="rounded-2xl bg-conn-red-bg px-4 py-3 text-sm text-conn-red-text">{error}</p> : null}
         </div>
 
-        <div className="flex shrink-0 items-center justify-between border-t border-[var(--hub-border-warm)] bg-[var(--hub-surface-footer)] px-7 py-4">
-          <div className="text-xs leading-5 text-[var(--hub-text-muted)]">
-            {buildEditorLoadingNote({ loadingProfiles, loadingStrategy, loadingCodexSettings })}
-          </div>
-          <div className="flex gap-2">
-            {cat ? (
-              <button
-                type="button"
-                aria-label="删除成员"
-                onClick={handleDelete}
-                disabled={saving}
-                className="rounded-full bg-conn-red-bg px-5 py-2.5 text-sm font-semibold text-conn-red-text transition hover:bg-conn-red-bg disabled:opacity-50"
-              >
-                删除成员
-              </button>
-            ) : null}
-            <button
-              type="button"
-              onClick={requestClose}
-              className="rounded-full bg-[var(--hub-surface-field)] px-5 py-2.5 text-sm font-semibold text-[var(--hub-text-muted)] transition hover:bg-[var(--hub-surface-hover)]"
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={saving || saveBlockedByProfileBinding}
-              className="rounded-full bg-[var(--hub-accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--hub-accent-hover)] disabled:opacity-50"
-            >
-              {saving ? '保存中…' : cat ? '保存修改' : '保存'}
-            </button>
-          </div>
+        <div className="flex items-center justify-end px-7 pb-5 pt-4">
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving || saveBlockedByProfileBinding}
+            className="h-8 rounded-[10px] bg-[var(--cafe-accent)] px-4 text-compact font-extrabold text-[var(--cafe-surface)] transition hover:bg-[var(--cafe-accent-hover)] disabled:opacity-50"
+          >
+            {saving ? '保存中…' : '保存'}
+          </button>
         </div>
       </div>
     </div>

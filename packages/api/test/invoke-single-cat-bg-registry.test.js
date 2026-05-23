@@ -187,7 +187,7 @@ describe('F198-C P1-1: registerBgCarrier called on claude-bg session_init', () =
     );
   });
 
-  it('active-pane returns 404 when no bg carrier registered (baseline)', async () => {
+  it('active-pane empty state has no bg carrier registered (baseline)', async () => {
     // Confirms getBgCarrierByThread returns undefined for unregistered thread
     // (AgentPaneRegistry unit test already covers this; included here for integration visibility)
     const { AgentPaneRegistry } = await import('../dist/domains/terminal/agent-pane-registry.js');

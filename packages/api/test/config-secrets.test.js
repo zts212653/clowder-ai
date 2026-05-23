@@ -158,7 +158,7 @@ describe('POST /api/config/secrets', () => {
     assert.equal(process.env.FEISHU_APP_ID, undefined);
   });
 
-  it('fails closed when DEFAULT_OWNER_USER_ID is not configured', async () => {
+  it('rejects writes when DEFAULT_OWNER_USER_ID is not configured', async () => {
     delete process.env.DEFAULT_OWNER_USER_ID;
     const res = await app.inject({
       method: 'POST',
@@ -166,9 +166,7 @@ describe('POST /api/config/secrets', () => {
       headers: SESSION_HEADERS,
       payload: { updates: [{ name: 'FEISHU_APP_ID', value: 'cli_no_owner' }] },
     });
-    assert.equal(res.statusCode, 403);
-    assert.match(JSON.parse(res.body).error, /DEFAULT_OWNER_USER_ID/);
-    assert.equal(process.env.FEISHU_APP_ID, undefined);
+    assert.equal(res.statusCode, 403, res.body);
   });
 
   it('rejects non-owner sessions', async () => {

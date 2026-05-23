@@ -2,7 +2,7 @@
 
 import localFont from 'next/font/local';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { FighterId } from '@/games/pixel-brawl/types';
+import { type FighterId, PIXEL_FONT_SIZES } from '@/games/pixel-brawl/types';
 
 type GameMode = 'pvai' | 'aivai';
 
@@ -92,7 +92,7 @@ export default function PixelBrawlPage() {
         >
           <h1
             style={{
-              fontSize: '24px',
+              fontSize: PIXEL_FONT_SIZES.title,
               color: '#F1E28A',
               margin: 0,
               letterSpacing: '2px',
@@ -101,7 +101,7 @@ export default function PixelBrawlPage() {
           >
             PIXEL BRAWL
           </h1>
-          <p style={{ fontSize: '12px', color: '#3A4658', margin: 0 }}>Clowder AI Fighting Demo</p>
+          <p style={{ fontSize: PIXEL_FONT_SIZES.timer, color: '#3A4658', margin: 0 }}>Clowder AI Fighting Demo</p>
           <div style={{ display: 'flex', gap: '16px', marginTop: '16px' }}>
             <button
               type="button"
@@ -112,7 +112,7 @@ export default function PixelBrawlPage() {
                 color: '#00F0FF',
                 border: '2px solid #3A4658',
                 fontFamily: silkscreen.style.fontFamily,
-                fontSize: '14px',
+                fontSize: PIXEL_FONT_SIZES.button,
                 cursor: 'pointer',
               }}
             >
@@ -127,14 +127,14 @@ export default function PixelBrawlPage() {
                 color: '#2FA56E',
                 border: '2px solid #3A4658',
                 fontFamily: silkscreen.style.fontFamily,
-                fontSize: '14px',
+                fontSize: PIXEL_FONT_SIZES.button,
                 cursor: 'pointer',
               }}
             >
               Player vs AI
             </button>
           </div>
-          <p style={{ fontSize: '10px', color: '#3A4658', margin: 0 }}>
+          <p style={{ fontSize: PIXEL_FONT_SIZES.micro, color: '#3A4658', margin: 0 }}>
             Player: A/D move | J attack | K skill | R restart
           </p>
         </div>

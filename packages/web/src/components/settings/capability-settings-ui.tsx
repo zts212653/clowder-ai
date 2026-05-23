@@ -80,7 +80,7 @@ export function PerCatToggles({
   if (catEntries.length === 0) return null;
 
   return (
-    <div className="border-t border-[var(--console-border-soft)] px-4 pb-3 pt-2">
+    <div className="px-4 pb-3 pt-2">
       <span className="text-micro font-medium uppercase tracking-wider text-cafe-muted">按猫开关</span>
       <div className="mt-1.5 space-y-1">
         {catFamilies.map((family) => {

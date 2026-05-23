@@ -1,6 +1,6 @@
 import * as Phaser from 'phaser';
 import type { Fighter, FighterId } from '../types';
-import { FIGHTER_STATS, PALETTE, SKILLS, TEAM_COLORS } from '../types';
+import { FIGHTER_STATS, PALETTE, PIXEL_FONT_SIZES, SKILLS, TEAM_COLORS } from '../types';
 
 const HP_BAR_W = 120;
 const HP_BAR_H = 10;
@@ -41,7 +41,7 @@ export class BattleHud {
       const nameText = this.scene.add
         .text(cx, 4, f.name, {
           fontFamily: FONT_HUD,
-          fontSize: '7px',
+          fontSize: PIXEL_FONT_SIZES.fighterName,
           color: TEAM_COLORS[f.id],
         })
         .setOrigin(0.5, 0);
@@ -65,7 +65,7 @@ export class BattleHud {
       const label = this.scene.add
         .text(f.x, 340, f.name, {
           fontFamily: FONT_HUD,
-          fontSize: '6px',
+          fontSize: PIXEL_FONT_SIZES.fighterLabel,
           color: TEAM_COLORS[f.id],
         })
         .setOrigin(0.5, 0);
@@ -77,7 +77,7 @@ export class BattleHud {
     this.timerText = this.scene.add
       .text(320, 6, '99', {
         fontFamily: FONT_DISPLAY,
-        fontSize: '12px',
+        fontSize: PIXEL_FONT_SIZES.timer,
         color: PALETTE.flash,
       })
       .setOrigin(0.5, 0)
@@ -87,7 +87,7 @@ export class BattleHud {
     this.centerText = this.scene.add
       .text(320, 150, '', {
         fontFamily: FONT_DISPLAY,
-        fontSize: '20px',
+        fontSize: PIXEL_FONT_SIZES.center,
         color: PALETTE.flash,
       })
       .setOrigin(0.5)
@@ -97,7 +97,7 @@ export class BattleHud {
     this.subtitleText = this.scene.add
       .text(320, 190, '', {
         fontFamily: FONT_HUD,
-        fontSize: '8px',
+        fontSize: PIXEL_FONT_SIZES.subtitle,
         color: PALETTE.steel,
       })
       .setOrigin(0.5)

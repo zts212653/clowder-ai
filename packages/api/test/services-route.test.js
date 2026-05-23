@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { setServiceConfig } from '../dist/domains/services/service-config.js';
 import { servicesRoutes } from '../dist/routes/services.js';
+
+const testConfigDir = mkdtempSync(join(tmpdir(), 'services-test-'));
+process.env.CAT_CAFE_SERVICES_CONFIG = join(testConfigDir, 'services.json');
 
 const SESSION_HEADERS = { 'x-test-session-user': 'you' };
 const TRUSTED_ORIGIN_HEADERS = { origin: 'http://localhost:3003', host: 'localhost:3003' };
@@ -62,6 +69,7 @@ describe('services routes', () => {
   });
 
   it('returns a read-only service manifest without lifecycle script handles', async () => {
+    setServiceConfig('whisper-stt', { installed: true, enabled: true });
     const app = await buildApp({
       env: { WHISPER_URL: 'http://127.0.0.1:19999/healthy' },
     });
@@ -79,7 +87,10 @@ describe('services routes', () => {
       assert.equal(whisper.endpoint, 'http://127.0.0.1:19999/healthy');
       assert.equal(whisper.configured, true);
       assert.equal(whisper.status, 'healthy');
-      assert.deepEqual(whisper.availableActions, ['stop', 'uninstall']);
+      assert.equal(whisper.installable, true);
+      assert.equal(typeof whisper.installed, 'boolean');
+      assert.equal(typeof whisper.enabled, 'boolean');
+      assert.equal('availableActions' in whisper, false);
       assert.equal('scripts' in whisper, false);
       assert.equal('installScript' in whisper, false);
       assert.equal('startScript' in whisper, false);
@@ -200,6 +211,9 @@ describe('services routes', () => {
   });
 
   it('probes service-specific health URLs instead of base endpoints', async () => {
+    for (const id of ['whisper-stt', 'mlx-tts', 'embedding-model', 'llm-postprocess', 'audio-capture']) {
+      setServiceConfig(id, { installed: true, enabled: true });
+    }
     const probedUrls = new Map();
     const app = await buildApp({
       env: {
@@ -235,6 +249,7 @@ describe('services routes', () => {
   });
 
   it('does not append duplicate health paths when endpoint already points at health', async () => {
+    setServiceConfig('whisper-stt', { installed: true, enabled: true });
     let probedUrl = null;
     const app = await buildApp({
       env: { WHISPER_URL: 'http://127.0.0.1:19999/health' },
@@ -258,6 +273,7 @@ describe('services routes', () => {
   });
 
   it('returns positive health for a known configured service', async () => {
+    setServiceConfig('whisper-stt', { installed: true, enabled: true });
     const app = await buildApp({
       env: { WHISPER_URL: 'http://127.0.0.1:19999/healthy' },
     });
@@ -281,7 +297,8 @@ describe('services routes', () => {
     }
   });
 
-  it('includes install in available actions for unhealthy services with scripts', async () => {
+  it('reports not_configured for services that are not installed and enabled', async () => {
+    setServiceConfig('whisper-stt', { installed: false, enabled: false });
     const app = await buildApp({
       env: { WHISPER_URL: 'http://127.0.0.1:19999/down' },
     });
@@ -293,8 +310,191 @@ describe('services routes', () => {
       });
       assert.equal(res.statusCode, 200, res.payload);
       const whisper = JSON.parse(res.payload).services.find((s) => s.id === 'whisper-stt');
-      assert.equal(whisper.status, 'unhealthy');
-      assert.deepEqual(whisper.availableActions, ['install', 'start', 'uninstall']);
+      assert.equal(whisper.status, 'not_configured');
+      assert.equal(whisper.installable, true);
+      assert.equal(typeof whisper.installed, 'boolean');
+      assert.equal(typeof whisper.enabled, 'boolean');
+      assert.equal('availableActions' in whisper, false);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('does not probe health when service is not installed', async () => {
+    setServiceConfig('whisper-stt', { installed: false, enabled: false });
+    let probed = false;
+    const app = await buildApp({
+      env: { WHISPER_URL: 'http://127.0.0.1:19999/healthy' },
+      fetchHealth: async () => {
+        probed = true;
+        return { ok: true, status: 200, error: null };
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/services/whisper-stt/health',
+        headers: SESSION_HEADERS,
+      });
+      assert.equal(res.statusCode, 200, res.payload);
+      assert.equal(JSON.parse(res.payload).status, 'not_configured');
+      assert.equal(probed, false, 'should not probe health for non-installed service');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('does not probe health when service is installed but disabled', async () => {
+    setServiceConfig('whisper-stt', { installed: true, enabled: false });
+    let probed = false;
+    const app = await buildApp({
+      env: { WHISPER_URL: 'http://127.0.0.1:19999/healthy' },
+      fetchHealth: async () => {
+        probed = true;
+        return { ok: true, status: 200, error: null };
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/services/whisper-stt/health',
+        headers: SESSION_HEADERS,
+      });
+      assert.equal(res.statusCode, 200, res.payload);
+      assert.equal(JSON.parse(res.payload).status, 'not_configured');
+      assert.equal(probed, false, 'should not probe health for disabled service');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('probes health for legacy config with only enabled (no installed field)', async () => {
+    setServiceConfig('whisper-stt', { enabled: true });
+    let probed = false;
+    const app = await buildApp({
+      env: { WHISPER_URL: 'http://127.0.0.1:19999/healthy' },
+      fetchHealth: async () => {
+        probed = true;
+        return { ok: true, status: 200, error: null };
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/services/whisper-stt/health',
+        headers: SESSION_HEADERS,
+      });
+      assert.equal(res.statusCode, 200, res.payload);
+      assert.equal(JSON.parse(res.payload).status, 'healthy');
+      assert.equal(probed, true, 'should probe health for legacy enabled-only config');
+
+      const listRes = await app.inject({
+        method: 'GET',
+        url: '/api/services',
+        headers: SESSION_HEADERS,
+      });
+      const whisper = JSON.parse(listRes.payload).services.find((s) => s.id === 'whisper-stt');
+      assert.equal(whisper.installed, true, 'installed derived from enabled for installable services');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('legacy config { enabled:false } treated as installed (config record exists)', async () => {
+    setServiceConfig('whisper-stt', { enabled: false });
+    const app = await buildApp({
+      env: { WHISPER_URL: 'http://127.0.0.1:19999/healthy' },
+      fetchHealth: async () => ({ ok: true, status: 200, error: null }),
+    });
+    try {
+      const listRes = await app.inject({
+        method: 'GET',
+        url: '/api/services',
+        headers: SESSION_HEADERS,
+      });
+      const whisper = JSON.parse(listRes.payload).services.find((s) => s.id === 'whisper-stt');
+      assert.equal(whisper.installed, true, 'legacy disabled config should still be installed');
+      assert.equal(whisper.enabled, false, 'enabled should be false');
+      assert.equal(whisper.status, 'not_configured', 'installed but disabled = not probed');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('fresh service (no config record) treated as not installed', async () => {
+    const freshConfigDir = mkdtempSync(join(tmpdir(), 'services-fresh-'));
+    const prevConfig = process.env.CAT_CAFE_SERVICES_CONFIG;
+    process.env.CAT_CAFE_SERVICES_CONFIG = join(freshConfigDir, 'services.json');
+    const app = await buildApp({
+      env: { WHISPER_URL: 'http://127.0.0.1:19999/healthy' },
+      fetchHealth: async () => ({ ok: true, status: 200, error: null }),
+    });
+    try {
+      const listRes = await app.inject({
+        method: 'GET',
+        url: '/api/services',
+        headers: SESSION_HEADERS,
+      });
+      const whisper = JSON.parse(listRes.payload).services.find((s) => s.id === 'whisper-stt');
+      assert.equal(whisper.installed, false, 'no config record = not installed');
+      assert.equal(whisper.status, 'not_configured', 'not installed = not probed');
+    } finally {
+      process.env.CAT_CAFE_SERVICES_CONFIG = prevConfig;
+      await app.close();
+    }
+  });
+
+  it('scriptless service (audio-capture) treated as installed when enabled', async () => {
+    setServiceConfig('audio-capture', { enabled: true });
+    let probed = false;
+    const app = await buildApp({
+      env: { AUDIO_SERVICE_URL: 'http://127.0.0.1:19995/healthy' },
+      fetchHealth: async () => {
+        probed = true;
+        return { ok: true, status: 200, error: null };
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/services/audio-capture/health',
+        headers: SESSION_HEADERS,
+      });
+      assert.equal(res.statusCode, 200, res.payload);
+      assert.equal(JSON.parse(res.payload).status, 'healthy');
+      assert.equal(probed, true, 'should probe health for scriptless enabled service');
+
+      const listRes = await app.inject({
+        method: 'GET',
+        url: '/api/services',
+        headers: SESSION_HEADERS,
+      });
+      const audioCap = JSON.parse(listRes.payload).services.find((s) => s.id === 'audio-capture');
+      assert.equal(audioCap.installed, true, 'scriptless services treated as installed');
+      assert.equal(audioCap.installable, false, 'audio-capture has no install scripts');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('scriptless service probed when endpoint configured even if enabled=false', async () => {
+    setServiceConfig('audio-capture', { enabled: false });
+    let probed = false;
+    const app = await buildApp({
+      env: { AUDIO_SERVICE_URL: 'http://127.0.0.1:19995/healthy' },
+      fetchHealth: async () => {
+        probed = true;
+        return { ok: true, status: 200, error: null };
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/services/audio-capture/health',
+        headers: SESSION_HEADERS,
+      });
+      assert.equal(res.statusCode, 200, res.payload);
+      assert.equal(probed, true, 'scriptless service should be probed regardless of enabled flag');
     } finally {
       await app.close();
     }

@@ -280,7 +280,9 @@ describe('F134 follow-up — HubConnectorConfigTab', () => {
   it('renders connector write auth errors from the secrets API', async () => {
     mockApiFetch
       .mockResolvedValueOnce(jsonResponse(feishuStatus()))
-      .mockResolvedValueOnce(jsonResponse({ error: 'Connector credential writes require DEFAULT_OWNER_USER_ID' }, 403));
+      .mockResolvedValueOnce(
+        jsonResponse({ error: 'Connector credential writes can only be modified by the configured owner' }, 403),
+      );
 
     await act(async () => {
       root.render(React.createElement(HubConnectorConfigTab));
@@ -302,8 +304,6 @@ describe('F134 follow-up — HubConnectorConfigTab', () => {
     });
     await flushEffects();
 
-    expect(container.querySelector('[data-testid="save-result"]')?.textContent).toContain(
-      'Connector credential writes require DEFAULT_OWNER_USER_ID',
-    );
+    expect(container.querySelector('[data-testid="save-result"]')?.textContent).toContain('configured owner');
   });
 });

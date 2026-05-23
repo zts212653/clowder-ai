@@ -96,7 +96,7 @@ export function RebuildButton({ onComplete }: { onComplete: () => void }) {
           type="button"
           disabled={starting}
           onClick={handleStart}
-          className={`rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-1.5 text-xs text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)] ${starting ? 'opacity-50' : ''}`}
+          className={`rounded-lg bg-[var(--console-card-bg)] px-3 py-1.5 text-xs text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] transition-colors hover:bg-[var(--console-hover-bg)] ${starting ? 'opacity-50' : ''}`}
         >
           重建索引
         </button>
@@ -126,7 +126,7 @@ export function RebuildButton({ onComplete }: { onComplete: () => void }) {
       disabled={starting}
       onClick={handleStart}
       data-testid="rebuild-button"
-      className={`rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-1.5 text-xs text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)] ${starting ? 'opacity-50' : ''}`}
+      className={`rounded-lg bg-[var(--console-card-bg)] px-3 py-1.5 text-xs text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] transition-colors hover:bg-[var(--console-hover-bg)] ${starting ? 'opacity-50' : ''}`}
     >
       重建索引
     </button>

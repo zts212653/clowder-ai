@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useState } from 'react';
+import { settingsResourceCardClass } from '../SettingsResourceCard';
 import { AuditEventsTab } from './AuditEventsTab';
 import { SessionEventsViewer } from './SessionEventsViewer';
 import { SessionSearchTab } from './SessionSearchTab';
@@ -54,7 +55,7 @@ export function AuditExplorerPanel({
   }, [onCloseSession]);
 
   return (
-    <section className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3">
+    <section className={`${settingsResourceCardClass} p-2.5`}>
       <button
         type="button"
         data-testid="audit-explorer-header"
@@ -68,7 +69,7 @@ export function AuditExplorerPanel({
       {expanded && (
         <div className="mt-2">
           {/* Tab bar */}
-          <div className="flex border-b border-[var(--console-border-soft)] mb-2">
+          <div className="flex console-divider-b mb-2">
             {(['events', 'session', 'search'] as const).map((t) => (
               <button
                 type="button"

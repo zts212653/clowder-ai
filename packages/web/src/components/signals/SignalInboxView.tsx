@@ -36,7 +36,7 @@ const initialFilters: SignalArticleFilters = {
 };
 
 const CONTENT_SURFACE_CLASS =
-  'rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-[18px] shadow-[0_12px_30px_rgba(43,33,26,0.06)]';
+  'rounded-[18px] bg-[var(--console-shell-bg)] shadow-[var(--console-shadow-soft)] m-3 px-9 py-8';
 
 function uniqueSources(items: readonly SignalArticle[]): readonly string[] {
   return Array.from(new Set(items.map((item) => item.source))).sort();
@@ -280,19 +280,17 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
   }, []);
 
   return (
-    <div className="flex h-full flex-col bg-[var(--console-shell-bg)]">
-      <main className="flex min-h-0 flex-1 p-5">
+    <div className="flex h-full flex-col bg-[var(--console-panel-bg)]">
+      <main className="flex min-h-0 flex-1">
         <div
           className={`flex min-h-0 flex-1 flex-col gap-4 overflow-hidden ${CONTENT_SURFACE_CLASS}`}
           data-testid="signal-inbox-content-surface"
         >
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <h1 className="text-lg font-bold text-cafe">信号</h1>
-              <p className="mt-0.5 text-xs text-cafe-secondary">浏览、筛选和研读信号文章</p>
-            </div>
-            <SignalNav active="signals" initialReferrerThread={initialReferrerThread} />
+          <div>
+            <h1 className="text-xl font-bold text-cafe">信号</h1>
+            <p className="mt-0.5 text-xs text-cafe-secondary">浏览、筛选和研读信号文章</p>
           </div>
+          <SignalNav active="signals" initialReferrerThread={initialReferrerThread} />
           <SignalStatsCards stats={stats} />
 
           {error && (
@@ -302,7 +300,7 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
           )}
 
           <div className="flex min-h-0 flex-1 gap-4">
-            <div className="flex w-[420px] shrink-0 flex-col gap-1 overflow-y-auto border-r border-[var(--console-border-soft)] pr-4">
+            <div className="flex w-[420px] shrink-0 flex-col gap-1 overflow-y-auto pr-4">
               <SignalFilterBar
                 filters={filters}
                 onFilterChange={(patch) => setFilters((cur) => ({ ...cur, ...patch }))}

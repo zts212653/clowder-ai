@@ -12,8 +12,12 @@ export interface EnrichResult {
 async function fetchHtml(url: string): Promise<string | null> {
   try {
     const response = await globalThis.fetch(url, {
-      headers: { 'User-Agent': 'CatCafe-Signal-Enrich/1.0' },
-      signal: AbortSignal.timeout(15_000),
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+      signal: AbortSignal.timeout(20_000),
     });
     if (!response.ok) return null;
     return await response.text();

@@ -362,6 +362,6 @@ describe('RightStatusPanel', () => {
       messageSummary: { total: 0, assistant: 0, system: 0, evidence: 0, followup: 0 },
     });
 
-    expect(html).toContain('width:288px');
+    expect(html).toContain('width:304px');
   });
 });

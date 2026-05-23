@@ -76,7 +76,7 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
   if (activeCats.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-2 px-4 py-1.5 text-xs border-b border-[var(--console-border-soft)]">
+    <div className="flex items-center gap-2 px-4 py-1.5 text-xs console-divider-b">
       <span className="text-cafe-muted font-medium shrink-0">执行中</span>
       {activeCats.map(({ catId, startedAt }) => {
         const info = catDisplayMap.get(catId) ?? { label: catId, color: 'var(--cafe-accent)' };

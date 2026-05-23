@@ -82,7 +82,7 @@ export function BindSessionInput({
         }}
         placeholder="CLI session ID"
         maxLength={500}
-        className="flex-1 text-xs font-mono px-1.5 py-0.5 rounded border border-cafe bg-cafe-surface-elevated focus:outline-none focus:ring-1 focus:ring-cafe-accent"
+        className="flex-1 text-xs font-mono px-1.5 py-0.5 rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] focus:outline-none focus:ring-1 focus:ring-cafe-accent"
         // biome-ignore lint/a11y/noAutofocus: intentional UX — focus input immediately on open
         autoFocus
       />

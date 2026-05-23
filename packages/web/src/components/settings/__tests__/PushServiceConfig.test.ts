@@ -126,11 +126,11 @@ describe('PushServiceConfig', () => {
     expect(body.updates).toEqual([{ name: 'VAPID_SUBJECT', value: 'mailto:owner@example.com' }]);
   });
 
-  it('shows owner fail-closed errors from the save endpoint', async () => {
+  it('shows configured-owner errors from the save endpoint', async () => {
     mocks.apiFetch.mockImplementation((path: string) => {
       if (path === '/api/config/secrets') {
         return Promise.resolve(
-          jsonResponse({ error: 'Connector credential writes require DEFAULT_OWNER_USER_ID to be configured' }, 403),
+          jsonResponse({ error: 'Connector credential writes can only be modified by the configured owner' }, 403),
         );
       }
       if (path === '/api/push/status') {
@@ -151,6 +151,7 @@ describe('PushServiceConfig', () => {
       findButton(container, '保存推送配置').click();
     });
 
-    expect(container.textContent).toContain('DEFAULT_OWNER_USER_ID 未配置');
+    expect(container.textContent).toContain('配置 owner');
+    expect(container.textContent).not.toContain('DEFAULT_OWNER_USER_ID');
   });
 });

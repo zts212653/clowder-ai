@@ -38,7 +38,7 @@ interface ThreadListResponse {
 type SelfClaimPolicyBlocker = 'once' | 'thread' | null;
 
 const CONTENT_SURFACE_CLASS =
-  'rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-[18px] shadow-[0_12px_30px_rgba(43,33,26,0.06)]';
+  'rounded-[18px] bg-[var(--console-shell-bg)] shadow-[var(--console-shadow-soft)] m-3 px-9 py-8';
 
 function detectSelfClaimPolicyBlocker(rawError: string): SelfClaimPolicyBlocker {
   if (rawError.includes('Self-claim once policy already consumed')) return 'once';
@@ -436,33 +436,17 @@ export function MissionControlPage() {
   }, [activeProject, setActiveProjectId]);
 
   return (
-    <div className="flex h-screen bg-[var(--console-shell-bg)]">
-      <main className="min-w-0 flex-1 overflow-y-auto p-5">
+    <div className="flex h-screen bg-[var(--console-panel-bg)]">
+      <main className="min-w-0 flex-1 overflow-y-auto">
         <div className={`${CONTENT_SURFACE_CLASS} flex min-h-full flex-col`} data-testid="mission-content-surface">
           <header className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <svg
-                className="h-5 w-5 text-cafe-muted"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <rect x="3" y="3" width="7" height="7" />
-                <rect x="14" y="3" width="7" height="7" />
-                <rect x="14" y="14" width="7" height="7" />
-                <rect x="3" y="14" width="7" height="7" />
-              </svg>
-              <h1 className="text-lg font-bold text-cafe">Mission Hub</h1>
-            </div>
+            <h1 className="text-xl font-bold text-cafe">Mission Hub</h1>
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => void handleImportFromDocs()}
                 disabled={submitting}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--console-border-strong)] bg-[var(--console-card-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)] disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--console-card-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] transition-colors hover:bg-[var(--console-hover-bg)] disabled:opacity-40"
                 data-testid="mc-import-docs"
               >
                 导入 Backlog
@@ -470,7 +454,7 @@ export function MissionControlPage() {
               <button
                 type="button"
                 onClick={() => setShowImportModal(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--console-border-strong)] bg-[var(--console-card-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)]"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--console-card-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] transition-colors hover:bg-[var(--console-hover-bg)]"
                 data-testid="mc-import-project"
               >
                 + 导入项目
@@ -485,14 +469,14 @@ export function MissionControlPage() {
             />
           )}
 
-          <div className="mt-4 flex border-b border-[var(--console-border-soft)]">
+          <div className="mt-4 flex console-divider-b">
             <button
               type="button"
               onClick={() => setActiveTab('features')}
               className={`px-5 py-2.5 text-sm font-semibold transition-colors ${
                 activeTab === 'features'
-                  ? 'border-b-2 border-[var(--console-button-emphasis)] text-[var(--console-button-emphasis)]'
-                  : 'text-cafe-muted hover:text-cafe-secondary'
+                  ? 'rounded-lg bg-[var(--console-active-bg)] text-cafe'
+                  : 'text-cafe-muted hover:text-cafe-secondary hover:bg-[var(--console-hover-bg)]'
               }`}
               data-testid="mc-tab-features"
             >
@@ -503,8 +487,8 @@ export function MissionControlPage() {
               onClick={() => setActiveTab('dependencies')}
               className={`px-5 py-2.5 text-sm font-semibold transition-colors ${
                 activeTab === 'dependencies'
-                  ? 'border-b-2 border-[var(--console-button-emphasis)] text-[var(--console-button-emphasis)]'
-                  : 'text-cafe-muted hover:text-cafe-secondary'
+                  ? 'rounded-lg bg-[var(--console-active-bg)] text-cafe'
+                  : 'text-cafe-muted hover:text-cafe-secondary hover:bg-[var(--console-hover-bg)]'
               }`}
               data-testid="mc-tab-dependencies"
             >
@@ -517,8 +501,8 @@ export function MissionControlPage() {
                 onClick={() => setActiveTab(p.id)}
                 className={`px-5 py-2.5 text-sm font-semibold transition-colors ${
                   activeTab === p.id
-                    ? 'border-b-2 border-[var(--console-button-emphasis)] text-[var(--console-button-emphasis)]'
-                    : 'text-cafe-muted hover:text-cafe-secondary'
+                    ? 'rounded-lg bg-[var(--console-active-bg)] text-cafe'
+                    : 'text-cafe-muted hover:bg-[var(--console-hover-bg)]'
                 }`}
               >
                 {p.name}
@@ -526,7 +510,7 @@ export function MissionControlPage() {
             ))}
           </div>
 
-          <div className="flex flex-wrap items-center gap-5 border-b border-[var(--console-border-soft)] py-2.5">
+          <div className="flex flex-wrap items-center gap-5 console-divider-b py-2.5">
             <StatusDot
               color="bg-cafe-status-degraded"
               label={`${pendingCount} 待审批`}
@@ -572,13 +556,13 @@ export function MissionControlPage() {
                 </div>
 
                 <div className="flex min-h-0 flex-col">
-                  <div className="flex border-b border-[var(--console-border-soft)]">
+                  <div className="flex console-divider-b">
                     <button
                       type="button"
                       className={`px-3 py-1.5 text-xs font-medium transition-colors ${
                         rightPanelTab === 'suggestion'
-                          ? 'border-b-2 border-[var(--console-button-emphasis)] text-cafe'
-                          : 'text-cafe-muted hover:text-cafe-secondary'
+                          ? 'rounded-lg bg-[var(--console-active-bg)] text-cafe'
+                          : 'text-cafe-muted hover:bg-[var(--console-hover-bg)]'
                       }`}
                       onClick={() => setRightPanelTab('suggestion')}
                       data-testid="mc-right-tab-suggestion"
@@ -589,8 +573,8 @@ export function MissionControlPage() {
                       type="button"
                       className={`px-3 py-1.5 text-xs font-medium transition-colors ${
                         rightPanelTab === 'sop'
-                          ? 'border-b-2 border-[var(--console-button-emphasis)] text-cafe'
-                          : 'text-cafe-muted hover:text-cafe-secondary'
+                          ? 'rounded-lg bg-[var(--console-active-bg)] text-cafe'
+                          : 'text-cafe-muted hover:bg-[var(--console-hover-bg)]'
                       }`}
                       onClick={() => setRightPanelTab('sop')}
                       data-testid="mc-right-tab-sop"
@@ -601,8 +585,8 @@ export function MissionControlPage() {
                       type="button"
                       className={`px-3 py-1.5 text-xs font-medium transition-colors ${
                         rightPanelTab === 'threads'
-                          ? 'border-b-2 border-[var(--console-button-emphasis)] text-cafe'
-                          : 'text-cafe-muted hover:text-cafe-secondary'
+                          ? 'rounded-lg bg-[var(--console-active-bg)] text-cafe'
+                          : 'text-cafe-muted hover:bg-[var(--console-hover-bg)]'
                       }`}
                       onClick={() => setRightPanelTab('threads')}
                       data-testid="mc-right-tab-threads"
@@ -657,7 +641,7 @@ function StatusDot({ color, label, textColor }: { color: string; label: string; 
   return (
     <span className="flex items-center gap-1.5">
       <span className={`h-2 w-2 rounded-full ${color}`} />
-      <span className={`text-sm font-semibold ${textColor}`}>{label}</span>
+      <span className={`text-xs font-medium ${textColor}`}>{label}</span>
     </span>
   );
 }

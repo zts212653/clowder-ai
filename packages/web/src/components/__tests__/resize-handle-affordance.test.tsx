@@ -46,9 +46,7 @@ describe('ResizeHandle affordance', () => {
 
     const handle = container.querySelector('[role="separator"]') as HTMLElement;
     expect(handle).toBeTruthy();
-    expect(handle.getAttribute('aria-label')).toContain('左侧对话栏');
-    expect(handle.textContent).toContain('点击折叠');
-    expect(handle.textContent).toContain('拖动调整');
+    expect(handle.getAttribute('aria-label')).toContain('左侧对话栏分隔条');
 
     act(() => {
       handle.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 100 }));

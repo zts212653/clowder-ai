@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { PushStatusPayload } from '@/hooks/usePushNotify';
 import { apiFetch } from '@/utils/api-client';
+import { formInputClass } from '../mcp-form-helpers';
 import {
   SettingsCard,
   SettingsPrimaryButton,
@@ -35,11 +36,8 @@ function asStatusPayload(value: unknown): PushStatusPayload | null {
 }
 
 function friendlyError(message: string, fallback: string): string {
-  if (message.includes('DEFAULT_OWNER_USER_ID')) {
-    return 'DEFAULT_OWNER_USER_ID 未配置，后端拒绝写入推送密钥。请先配置 owner 后再保存。';
-  }
   if (message.includes('configured owner')) {
-    return '当前登录用户不是配置 owner，不能修改推送密钥。';
+    return '当前会话用户不是配置 owner，不能修改推送密钥。';
   }
   return message.trim() || fallback;
 }
@@ -54,7 +52,7 @@ async function readError(res: Response, fallback: string): Promise<string> {
   return fallback;
 }
 
-export function PushServiceConfig() {
+export function PushServiceConfig({ embedded = false }: { embedded?: boolean } = {}) {
   const [form, setForm] = useState<PushConfigFormState>(EMPTY_FORM);
   const [status, setStatus] = useState<PushStatusPayload | null>(null);
   const [busy, setBusy] = useState<'generate' | 'save' | null>(null);
@@ -146,62 +144,46 @@ export function PushServiceConfig() {
 
   const messageTone = message?.tone === 'success' ? 'success' : message?.tone === 'error' ? 'error' : 'info';
 
-  const inputClass =
-    'w-full rounded-lg border border-[var(--console-border-soft)] bg-[var(--cafe-surface-elevated)] px-3 py-2 text-sm text-cafe';
+  const content = (
+    <>
+      <SettingsText as="p" tone="secondary">
+        <span className="font-medium text-cafe-black">VAPID 推送密钥</span> — 保存后写入运行时
+        .env；密钥字段留空会保留现有值。
+      </SettingsText>
 
-  const labelStyle = { fontSize: '0.75rem', color: 'var(--cafe-text-secondary)' } as const;
-
-  return (
-    <SettingsCard className="space-y-4">
-      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-        <div className="space-y-1">
-          <SettingsText as="div" variant="sm" tone="default" className="font-medium">
-            VAPID 推送密钥
-          </SettingsText>
-          <SettingsText as="p" tone="secondary">
-            保存后写入运行时 .env；密钥字段留空会保留现有值。
-          </SettingsText>
-        </div>
-        <SettingsText as="div" tone="secondary">
-          <div>公钥：{status?.capability.vapidPublicKeyConfigured ? '已配置' : '未配置'}</div>
-          <div>PushService：{status?.capability.pushServiceConfigured ? '可用' : '不可用'}</div>
-        </SettingsText>
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-2">
-        <label className="space-y-1 font-medium" style={labelStyle}>
-          推送公钥
+      <div className="grid gap-2">
+        <label className="flex items-center gap-3">
+          <span className="w-20 shrink-0 text-xs font-medium text-cafe-secondary">推送公钥</span>
           <input
             name="VAPID_PUBLIC_KEY"
             value={form.VAPID_PUBLIC_KEY}
             onChange={(event) => updateField('VAPID_PUBLIC_KEY', event.target.value)}
             placeholder={status?.capability.vapidPublicKeyConfigured ? '已配置，留空保持不变' : 'VAPID public key'}
-            className={inputClass}
+            className={`flex-1 ${formInputClass}`}
           />
         </label>
-        <label className="space-y-1 font-medium" style={labelStyle}>
-          推送私钥
+        <label className="flex items-center gap-3">
+          <span className="w-20 shrink-0 text-xs font-medium text-cafe-secondary">推送私钥</span>
           <input
             name="VAPID_PRIVATE_KEY"
             type="password"
             value={form.VAPID_PRIVATE_KEY}
             onChange={(event) => updateField('VAPID_PRIVATE_KEY', event.target.value)}
             placeholder={status?.capability.pushServiceConfigured ? '已配置，留空保持不变' : 'VAPID private key'}
-            className={inputClass}
+            className={`flex-1 ${formInputClass}`}
+          />
+        </label>
+        <label className="flex items-center gap-3">
+          <span className="w-20 shrink-0 text-xs font-medium text-cafe-secondary">联系信息</span>
+          <input
+            name="VAPID_SUBJECT"
+            value={form.VAPID_SUBJECT}
+            onChange={(event) => updateField('VAPID_SUBJECT', event.target.value)}
+            placeholder="mailto:admin@example.com"
+            className={`flex-1 ${formInputClass}`}
           />
         </label>
       </div>
-
-      <label className="block space-y-1 font-medium" style={labelStyle}>
-        联系信息
-        <input
-          name="VAPID_SUBJECT"
-          value={form.VAPID_SUBJECT}
-          onChange={(event) => updateField('VAPID_SUBJECT', event.target.value)}
-          placeholder="mailto:admin@example.com"
-          className={inputClass}
-        />
-      </label>
 
       {message && (
         <SettingsStatusStrip tone={messageTone} size="xs" bordered>
@@ -209,7 +191,7 @@ export function PushServiceConfig() {
         </SettingsStatusStrip>
       )}
 
-      <div className="flex flex-col gap-2 sm:flex-row">
+      <div className="flex justify-end gap-2">
         <SettingsSecondaryButton
           onClick={() => {
             void handleGenerate();
@@ -227,6 +209,12 @@ export function PushServiceConfig() {
           {busy === 'save' ? '保存中...' : '保存推送配置'}
         </SettingsPrimaryButton>
       </div>
-    </SettingsCard>
+    </>
   );
+
+  if (embedded) {
+    return <div className="space-y-4">{content}</div>;
+  }
+
+  return <SettingsCard className="space-y-4">{content}</SettingsCard>;
 }

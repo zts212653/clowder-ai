@@ -4,7 +4,7 @@ function MetricCard({ label, value, sub }: { label: string; value: string; sub: 
   return (
     <div className="flex-1 rounded-xl bg-[var(--console-card-bg)] p-4">
       <div className="text-xs text-cafe-secondary">{label}</div>
-      <div className="mt-1 text-2xl font-semibold text-cafe-black">{value}</div>
+      <div className="mt-1 text-base font-bold text-cafe-black">{value}</div>
       <div className="mt-0.5 text-micro text-cafe-muted">{sub}</div>
     </div>
   );

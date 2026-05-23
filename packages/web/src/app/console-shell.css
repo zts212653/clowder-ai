@@ -9,13 +9,13 @@
   --console-border-strong: #d4c4b6;
   --console-shadow: 0 8px 32px rgba(43, 37, 32, 0.04);
   --console-shadow-soft: 0 8px 24px rgba(43, 37, 32, 0.03);
-  --console-field-bg: #f0e6dc;
+  --console-field-bg: #f8f4f0;
   --console-active-bg: #ead8cd;
-  --console-hover-bg: #f0e6dc;
+  --console-hover-bg: #f3ebe3;
   --console-rail-bg: #eee6dc;
   --console-rail-item: #e8ddd2;
   --console-rail-active: #fffdfb;
-  --console-input-stroke: #e49a7d;
+  --console-input-stroke: var(--cafe-accent);
   --console-stop: #f26767;
   --console-runtime-bg: #eef8f0;
   --console-runtime-field-bg: #e4f3e6;
@@ -53,6 +53,7 @@
   --console-overlay-heavy: rgba(0, 0, 0, 0.7);
   --console-overlay-heavy-hover: rgba(0, 0, 0, 0.9);
   --console-overlay-light: rgba(0, 0, 0, 0.2);
+  /* --console-font-* vars are generated from typography-tokens.json via tailwind plugin */
   --console-xray-bg: #faf5ff;
   --console-xray-text: #7e22ce;
   --console-xray-border: #e9d5ff;
@@ -200,6 +201,26 @@
   --hub-alert-warning-text: #c27d52;
   --hub-shadow: 0 12px 30px rgba(43, 33, 26, 0.08);
   --hub-shadow-hover: 0 12px 30px rgba(43, 33, 26, 0.12);
+}
+
+[data-chat-container] {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--cafe-text-muted) 72%, transparent) transparent;
+}
+[data-chat-container]::-webkit-scrollbar {
+  width: 10px;
+}
+[data-chat-container]::-webkit-scrollbar-track {
+  background: transparent;
+}
+[data-chat-container]::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--cafe-text-muted) 72%, transparent);
+  background-clip: content-box;
+  border: 3px solid transparent;
+  border-radius: 999px;
+}
+[data-chat-container]::-webkit-scrollbar-thumb:hover {
+  background-color: var(--cafe-text-muted);
 }
 
 [data-theme="dark"] {
@@ -483,7 +504,7 @@
   border-radius: 999px;
   padding: 0.35rem 0.7rem;
   color: var(--cafe-text-secondary);
-  font-size: 0.7rem;
+  font-size: var(--console-font-label);
   font-weight: 600;
   line-height: 1;
 }
@@ -602,6 +623,20 @@
     radial-gradient(14px 14px at 0% 100%, black 80%, transparent 81%),
     radial-gradient(14px 14px at 100% 100%, black 80%, transparent 81%);
   pointer-events: none;
+}
+
+/* ── Divider primitives — single source of truth for section separators ── */
+.console-divider-t {
+  border-top: 1px solid var(--console-border-soft);
+}
+.console-divider-b {
+  border-bottom: 1px solid var(--console-border-soft);
+}
+.console-divider-l {
+  border-left: 1px solid var(--console-border-soft);
+}
+.console-divider-r {
+  border-right: 1px solid var(--console-border-soft);
 }
 
 .console-inspector-section {

@@ -12,7 +12,7 @@ interface SettingsCollapsibleCardProps {
 
 export function SettingsCollapsibleCard({ title, count, collapsed, onToggle, children }: SettingsCollapsibleCardProps) {
   return (
-    <div className="console-list-card overflow-hidden rounded-2xl shadow-[0_4px_16px_rgba(43,33,26,0.05)]">
+    <div className="console-list-card overflow-hidden rounded-xl shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
       <button
         type="button"
         onClick={onToggle}
@@ -47,7 +47,7 @@ interface SettingsCardSubSectionProps {
 
 export function SettingsCardSubSection({ label, children }: SettingsCardSubSectionProps) {
   return (
-    <div className="border-t border-[var(--console-border-soft)] px-4 pb-3 pt-2">
+    <div className="px-4 pb-3 pt-2">
       {label && (
         <SettingsText variant="micro" tone="muted" className="font-medium uppercase tracking-wider">
           {label}

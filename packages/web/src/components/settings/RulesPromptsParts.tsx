@@ -244,16 +244,7 @@ export function L0PromptsSection({
             />
           );
         })}
-        <div
-          className="leading-5"
-          style={{
-            borderRadius: '0.75rem',
-            backgroundColor: 'var(--console-panel-bg)',
-            padding: '0.75rem',
-            fontSize: '0.75rem',
-            color: 'var(--cafe-text-muted)',
-          }}
-        >
+        <div className="rounded-xl bg-[var(--console-panel-bg)] p-3 text-xs leading-5 text-cafe-muted">
           <SettingsText as="p" tone="secondary" className="font-medium">
             如何修改 L0（read-only viewer，编辑入口在文件系统）
           </SettingsText>

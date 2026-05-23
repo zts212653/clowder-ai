@@ -125,7 +125,11 @@ export function HubGovernanceTab() {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-cafe-secondary">外部项目治理状态</h3>
-        <button type="button" onClick={fetchHealth} className="text-xs text-conn-blue-text hover:text-blue-700">
+        <button
+          type="button"
+          onClick={fetchHealth}
+          className="rounded-lg bg-cafe-accent px-3 py-1.5 text-xs font-semibold text-[var(--cafe-surface)] transition-colors hover:bg-cafe-accent-hover"
+        >
           刷新
         </button>
       </div>
@@ -141,7 +145,7 @@ export function HubGovernanceTab() {
               <th className="px-3 py-2 font-medium text-cafe-secondary">操作</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody className="divide-y divide-cafe-border">
             {projects.map((p) => {
               const fallback = STATUS_STYLES['never-synced'];
               const style = STATUS_STYLES[p.status] ?? fallback;
@@ -167,7 +171,7 @@ export function HubGovernanceTab() {
                         type="button"
                         onClick={() => handleConfirm(p.projectPath)}
                         disabled={confirming === p.projectPath}
-                        className="text-xs px-2 py-1 rounded bg-conn-blue-text text-white hover:bg-conn-blue-hover disabled:opacity-50"
+                        className="text-xs px-2 py-1 rounded-lg bg-cafe-accent text-[var(--cafe-surface)] hover:bg-cafe-accent-hover disabled:opacity-50"
                       >
                         {confirming === p.projectPath ? '同步中...' : '立即同步'}
                       </button>

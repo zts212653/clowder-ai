@@ -10,6 +10,7 @@ import {
   GROUND_Y,
   HURT_DURATION_MS,
   PALETTE,
+  PIXEL_FONT_SIZES,
   TEAM_COLORS,
 } from '../types';
 import { BattleHud } from './BattleHud';
@@ -88,7 +89,7 @@ export class BattleScene extends Phaser.Scene {
     this.add
       .text(320, 120, 'ROUND 1', {
         fontFamily: FONT_DISPLAY,
-        fontSize: '10px',
+        fontSize: PIXEL_FONT_SIZES.micro,
         color: PALETTE.bone,
       })
       .setOrigin(0.5);
@@ -98,7 +99,7 @@ export class BattleScene extends Phaser.Scene {
       const hint = this.add
         .text(320, 350, 'A/D Move  |  J Attack  |  K Skill', {
           fontFamily: FONT_HUD,
-          fontSize: '7px',
+          fontSize: PIXEL_FONT_SIZES.fighterName,
           color: PALETTE.steel,
         })
         .setOrigin(0.5);
@@ -109,7 +110,7 @@ export class BattleScene extends Phaser.Scene {
       this.add
         .text(320, 350, 'AI vs AI  —  watching', {
           fontFamily: FONT_HUD,
-          fontSize: '7px',
+          fontSize: PIXEL_FONT_SIZES.fighterName,
           color: PALETTE.steel,
         })
         .setOrigin(0.5);

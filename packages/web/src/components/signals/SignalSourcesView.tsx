@@ -8,7 +8,7 @@ import { SignalNav } from './SignalNav';
 import { SignalTierBadge } from './SignalTierBadge';
 
 const CONTENT_SURFACE_CLASS =
-  'rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-[18px] shadow-[0_12px_30px_rgba(43,33,26,0.06)]';
+  'rounded-[18px] bg-[var(--console-shell-bg)] shadow-[var(--console-shadow-soft)] m-3 px-9 py-8';
 
 export function SignalSourcesView({ initialReferrerThread = null }: { initialReferrerThread?: string | null }) {
   const [sources, setSources] = useState<readonly SignalSource[]>([]);
@@ -88,16 +88,14 @@ export function SignalSourcesView({ initialReferrerThread = null }: { initialRef
   );
 
   return (
-    <div className="flex h-full flex-col bg-[var(--console-shell-bg)]">
-      <main className="flex-1 overflow-y-auto p-5">
+    <div className="flex h-full flex-col bg-[var(--console-panel-bg)]">
+      <main className="flex-1 overflow-y-auto">
         <div className={`${CONTENT_SURFACE_CLASS} space-y-4`} data-testid="signal-sources-content-surface">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h1 className="text-lg font-bold text-cafe">信号源管理</h1>
-              <p className="mt-0.5 text-xs text-cafe-secondary">集中管理信号源开关，无需手改 yaml。</p>
-            </div>
-            <SignalNav active="sources" initialReferrerThread={initialReferrerThread} />
+          <div>
+            <h1 className="text-xl font-bold text-cafe">信号源</h1>
+            <p className="mt-0.5 text-xs text-cafe-secondary">集中管理信号源开关，无需手改 yaml。</p>
           </div>
+          <SignalNav active="sources" initialReferrerThread={initialReferrerThread} />
           <section className="flex flex-wrap gap-2">
             <button
               type="button"

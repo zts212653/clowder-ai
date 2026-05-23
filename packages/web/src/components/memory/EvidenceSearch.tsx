@@ -46,8 +46,8 @@ interface SearchResponse {
 }
 
 export const DEPTH_OPTIONS = [
-  { value: 'summary', label: '摘要' },
-  { value: 'raw', label: '原文' },
+  { value: 'summary', label: '仅摘要' },
+  { value: 'raw', label: '全文' },
 ] as const;
 
 export const SOURCE_TYPE_COLORS: Record<string, string> = {
@@ -170,14 +170,14 @@ export function EvidenceSearch({ initialQuery }: EvidenceSearchProps = {}) {
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
           placeholder="搜索项目知识..."
-          className="flex-1 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2 text-sm text-cafe-black placeholder:text-cafe-secondary focus:border-[var(--console-border-strong)] focus:outline-none"
+          className="flex-1 min-w-0 h-8 rounded-lg bg-[var(--console-field-bg)] px-3 text-xs text-cafe-secondary placeholder:text-cafe-muted outline-none transition focus:ring-1 focus:ring-[var(--console-input-stroke)]"
           data-testid="evidence-search-input"
         />
         <button
           type="button"
           onClick={handleSearch}
           disabled={isSearching || !query.trim()}
-          className="rounded-lg bg-cafe-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-cafe-interactive disabled:opacity-40"
+          className="h-8 shrink-0 rounded-lg bg-cafe-accent px-4 text-compact font-semibold text-[var(--cafe-surface)] transition-colors hover:bg-cafe-accent-hover disabled:opacity-50"
           data-testid="evidence-search-button"
         >
           {isSearching ? '...' : '搜索'}
@@ -185,68 +185,56 @@ export function EvidenceSearch({ initialQuery }: EvidenceSearchProps = {}) {
       </div>
 
       {/* Mode / Scope selectors */}
-      <div className="flex gap-3 text-xs">
-        <label className="flex items-center gap-1 text-cafe-secondary">
-          检索模式:
-          <select
-            value={depth === 'raw' ? 'lexical' : mode}
-            onChange={(e) => setMode(e.target.value as EvidenceSearchParams['mode'])}
-            disabled={depth === 'raw'}
-            className="rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-1.5 py-0.5 text-xs disabled:opacity-50"
-          >
-            <option value="hybrid">混合</option>
-            <option value="lexical">精确</option>
-            <option value="semantic">语义</option>
-          </select>
-          {depth === 'raw' && <span className="text-micro text-conn-amber-text">消息级仅支持精确匹配</span>}
-        </label>
-        <label className="flex items-center gap-1 text-cafe-secondary">
-          范围:
-          <select
-            value={scope ?? 'all'}
-            onChange={(e) =>
-              setScope(e.target.value === 'all' ? undefined : (e.target.value as EvidenceSearchParams['scope']))
-            }
-            className="rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-1.5 py-0.5 text-xs"
-          >
-            <option value="all">全部</option>
-            <option value="docs">文档</option>
-            <option value="memory">记忆</option>
-            <option value="threads">对话</option>
-            <option value="sessions">会话</option>
-          </select>
-        </label>
-        <label className="flex items-center gap-1 text-cafe-secondary">
-          深度:
-          <select
-            value={depth ?? 'summary'}
-            onChange={(e) =>
-              setDepth(e.target.value === 'summary' ? undefined : (e.target.value as EvidenceSearchParams['depth']))
-            }
-            className="rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-1.5 py-0.5 text-xs"
-          >
-            {DEPTH_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-1 text-cafe-secondary">
-          维度:
-          <select
-            value={dimension ?? 'all'}
-            onChange={(e) =>
-              setDimension(e.target.value === 'all' ? undefined : (e.target.value as EvidenceSearchParams['dimension']))
-            }
-            className="rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-1.5 py-0.5 text-xs"
-            data-testid="evidence-dimension-select"
-          >
-            <option value="all">全部</option>
-            <option value="project">项目</option>
-            <option value="global">全局</option>
-          </select>
-        </label>
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <select
+          value={depth === 'raw' ? 'lexical' : mode}
+          onChange={(e) => setMode(e.target.value as EvidenceSearchParams['mode'])}
+          disabled={depth === 'raw'}
+          className="h-7 rounded-lg bg-[var(--console-field-bg)] pl-2 pr-6 text-xs text-cafe-secondary outline-none transition focus:ring-1 focus:ring-[var(--console-input-stroke)] disabled:opacity-50"
+        >
+          <option value="hybrid">混合检索</option>
+          <option value="lexical">精确检索</option>
+          <option value="semantic">语义检索</option>
+        </select>
+        {depth === 'raw' && <span className="text-micro text-conn-amber-text">消息级仅支持精确匹配</span>}
+        <select
+          value={scope ?? 'all'}
+          onChange={(e) =>
+            setScope(e.target.value === 'all' ? undefined : (e.target.value as EvidenceSearchParams['scope']))
+          }
+          className="h-7 rounded-lg bg-[var(--console-field-bg)] pl-2 pr-6 text-xs text-cafe-secondary outline-none transition focus:ring-1 focus:ring-[var(--console-input-stroke)]"
+        >
+          <option value="all">全部范围</option>
+          <option value="docs">文档</option>
+          <option value="memory">记忆</option>
+          <option value="threads">对话</option>
+          <option value="sessions">会话</option>
+        </select>
+        <select
+          value={depth ?? 'summary'}
+          onChange={(e) =>
+            setDepth(e.target.value === 'summary' ? undefined : (e.target.value as EvidenceSearchParams['depth']))
+          }
+          className="h-7 rounded-lg bg-[var(--console-field-bg)] pl-2 pr-6 text-xs text-cafe-secondary outline-none transition focus:ring-1 focus:ring-[var(--console-input-stroke)]"
+        >
+          {DEPTH_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        <select
+          value={dimension ?? 'all'}
+          onChange={(e) =>
+            setDimension(e.target.value === 'all' ? undefined : (e.target.value as EvidenceSearchParams['dimension']))
+          }
+          className="h-7 rounded-lg bg-[var(--console-field-bg)] pl-2 pr-6 text-xs text-cafe-secondary outline-none transition focus:ring-1 focus:ring-[var(--console-input-stroke)]"
+          data-testid="evidence-dimension-select"
+        >
+          <option value="all">全部维度</option>
+          <option value="project">项目维度</option>
+          <option value="global">全局维度</option>
+        </select>
       </div>
 
       {/* Error */}

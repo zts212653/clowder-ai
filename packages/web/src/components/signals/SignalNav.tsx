@@ -46,7 +46,7 @@ export function SignalNav({ active, initialReferrerThread = null }: SignalNavPro
   );
 
   return (
-    <nav aria-label="Signal navigation" className="flex items-center gap-2">
+    <nav aria-label="Signal navigation" className="flex console-divider-b">
       {items.map((item) => {
         const isActive = item.id === active;
         return (
@@ -54,12 +54,11 @@ export function SignalNav({ active, initialReferrerThread = null }: SignalNavPro
             key={item.id}
             href={item.href}
             aria-current={isActive ? 'page' : undefined}
-            className={[
-              'inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
+            className={`inline-flex items-center px-5 py-2.5 text-sm font-semibold transition-colors ${
               isActive
-                ? 'border-[var(--console-border-strong)] bg-[var(--console-card-bg)] text-[var(--console-button-emphasis)]'
-                : 'border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] text-cafe-secondary hover:border-[var(--console-border-strong)] hover:text-cafe-black',
-            ].join(' ')}
+                ? 'border-b-2 border-[var(--console-button-emphasis)] text-[var(--console-button-emphasis)]'
+                : 'text-cafe-muted hover:text-cafe-secondary'
+            }`}
           >
             {item.label}
           </Link>

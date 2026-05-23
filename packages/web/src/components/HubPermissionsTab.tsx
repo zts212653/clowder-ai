@@ -26,7 +26,7 @@ const EMPTY_CONFIG: PermissionConfig = {
   allowedGroups: [],
 };
 
-const CARD_SHADOW = 'shadow-[var(--hub-shadow)]';
+const CARD_SHADOW = 'shadow-[0_8px_22px_rgba(43,33,26,0.04)]';
 
 function SaveFeedback({ result, saving }: { result: 'ok' | 'error' | null; saving: boolean }) {
   if (saving) return <div className="text-xs text-cafe-muted">保存中...</div>;
@@ -40,7 +40,7 @@ interface HubPermissionsTabProps {
   connectorLabel: string;
 }
 
-export default function HubPermissionsTab({ connectorId, connectorLabel }: HubPermissionsTabProps) {
+export default function HubPermissionsTab({ connectorId }: HubPermissionsTabProps) {
   const [config, setConfig] = useState<PermissionConfig>(EMPTY_CONFIG);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -124,15 +124,9 @@ export default function HubPermissionsTab({ connectorId, connectorLabel }: HubPe
 
   return (
     <div className="space-y-4">
-      <div className="text-xs text-cafe-muted flex items-center gap-1">
-        <span className="text-cafe-interactive cursor-pointer">{connectorLabel}</span>
-        <span>›</span>
-        <span>群聊权限</span>
-      </div>
-
-      <div className={`console-list-card rounded-2xl overflow-hidden ${CARD_SHADOW}`}>
+      <div className={`console-list-card rounded-xl overflow-hidden ${CARD_SHADOW}`}>
         {/* Header */}
-        <div className="bg-conn-emerald-bg px-5 py-4 flex items-center gap-3">
+        <div className="bg-conn-emerald-bg px-4 py-3 flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-conn-emerald-text/20 flex items-center justify-center text-conn-emerald-text">
             <svg
               className="w-5 h-5"

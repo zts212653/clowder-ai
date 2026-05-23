@@ -16,15 +16,21 @@ interface MemoryHubProps {
   readonly initialReferrerThread?: string | null;
 }
 
-const CONTENT_SURFACE_CLASS =
-  'rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-[18px] shadow-[0_12px_30px_rgba(43,33,26,0.06)]';
-
 export function MemoryHub({ activeTab = 'feed', initialQuery, initialReferrerThread = null }: MemoryHubProps) {
   return (
-    <div className="flex h-full flex-col bg-[var(--console-shell-bg)]" data-testid="memory-hub">
-      <main className="flex-1 overflow-y-auto p-5">
-        <div className={CONTENT_SURFACE_CLASS} data-testid="memory-content-surface">
-          <div className="mb-4">
+    <div className="flex h-full flex-col bg-[var(--console-panel-bg)]" data-testid="memory-hub">
+      <main className="flex-1 overflow-y-auto">
+        <div
+          className="m-3 flex flex-col gap-[18px] rounded-[18px] bg-[var(--console-shell-bg)] px-9 py-8 shadow-[var(--console-shadow-soft)]"
+          data-testid="memory-content-surface"
+        >
+          <header className="flex items-center gap-4">
+            <div>
+              <h1 className="text-xl font-bold text-cafe">记忆</h1>
+              <p className="mt-1 text-compact text-cafe-secondary">查看知识涌现、检索证据和索引健康状态</p>
+            </div>
+          </header>
+          <div>
             <MemoryNav active={activeTab} initialReferrerThread={initialReferrerThread} />
           </div>
           {activeTab === 'feed' && (

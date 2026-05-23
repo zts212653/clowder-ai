@@ -3,9 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { HubIcon } from '../hub-icons';
-import { SettingsResourceIconButton, settingsResourceCardClass } from '../SettingsResourceCard';
+import {
+  SettingsResourceIconButton,
+  SettingsResourceToggleSwitch,
+  settingsResourceCardClass,
+} from '../SettingsResourceCard';
 import { InstallPreviewModal } from './InstallPreviewModal';
-import { SettingsBadge, SettingsText } from './primitives';
+import { SettingsText } from './primitives';
 import { adaptServiceState, type HomeServiceState, type ServiceUiState } from './service-ui-adapter';
 
 const STATUS_DOT_COLOR: Record<string, string> = {
@@ -15,13 +19,6 @@ const STATUS_DOT_COLOR: Record<string, string> = {
   error: 'var(--conn-red-text)',
   installing: 'var(--conn-amber-text)',
   starting: 'var(--conn-amber-text)',
-};
-
-type ActionBadgeTone = 'blue' | 'emerald' | 'amber';
-const ACTION_CONFIG: Record<string, { label: string; tone: ActionBadgeTone }> = {
-  install: { label: '安装', tone: 'blue' },
-  start: { label: '启动', tone: 'emerald' },
-  stop: { label: '停止', tone: 'amber' },
 };
 
 const ROW_STYLE = { paddingInline: '1.25rem', paddingBlock: '0.75rem' } as const;
@@ -131,6 +128,10 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
     }
   }
 
+  function handleToggle(service: ServiceUiState) {
+    void executeAction(service.id, service.enabled ? 'stop' : 'start');
+  }
+
   function handleAction(service: ServiceUiState, action: string) {
     if (action === 'install' && service.prerequisites?.models?.length) {
       setInstallTarget(service);
@@ -187,38 +188,38 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
                 )}
               </div>
 
-              {service.availableActions.length > 0 && (
-                <div className="flex shrink-0 items-center gap-2">
-                  {service.availableActions
-                    .filter((a) => a !== 'uninstall')
-                    .map((action) => {
-                      const acfg = ACTION_CONFIG[action];
-                      if (!acfg) return null;
-                      return (
-                        <SettingsBadge
-                          key={action}
-                          tone={acfg.tone}
-                          as="button"
-                          disabled={isBusy}
-                          onClick={() => handleAction(service, action)}
-                          className="font-bold"
-                        >
-                          {isBusy ? '...' : acfg.label}
-                        </SettingsBadge>
-                      );
-                    })}
-                  {service.availableActions.includes('uninstall') && (
-                    <SettingsResourceIconButton
-                      tone="danger"
-                      disabled={isBusy}
-                      onClick={() => void executeAction(service.id, 'uninstall')}
-                      title="卸载"
-                    >
-                      <HubIcon name="trash" className="h-3.5 w-3.5" />
-                    </SettingsResourceIconButton>
-                  )}
-                </div>
-              )}
+              <div className="flex shrink-0 items-center gap-2">
+                {!service.installed && service.installable && (
+                  <button
+                    type="button"
+                    disabled={isBusy}
+                    onClick={() => handleAction(service, 'install')}
+                    className="rounded-lg bg-cafe-accent px-3 py-1.5 text-xs font-semibold text-[var(--cafe-surface)] transition-colors hover:bg-cafe-accent-hover disabled:opacity-50"
+                  >
+                    {isBusy ? '...' : '安装'}
+                  </button>
+                )}
+                {service.installed && service.installable && (
+                  <>
+                    <SettingsResourceToggleSwitch
+                      enabled={service.enabled}
+                      busy={isBusy}
+                      onClick={() => handleToggle(service)}
+                      title={service.enabled ? '停止服务' : '启动服务'}
+                    />
+                    {!service.enabled && (
+                      <SettingsResourceIconButton
+                        tone="danger"
+                        disabled={isBusy}
+                        onClick={() => void executeAction(service.id, 'uninstall')}
+                        title="卸载"
+                      >
+                        <HubIcon name="trash" className="h-3.5 w-3.5" />
+                      </SettingsResourceIconButton>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           </div>
         );

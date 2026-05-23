@@ -44,7 +44,7 @@ export function SettingsCard({
 }: SettingsCardProps) {
   return (
     <Tag
-      className={`rounded-xl p-4 transition ${variantStyles[variant]} ${onClick ? 'cursor-pointer hover:shadow-md' : ''} ${isDragging ? 'opacity-40' : ''} ${className ?? ''}`}
+      className={`rounded-xl p-4 shadow-[0_8px_22px_rgba(43,33,26,0.04)] transition ${variantStyles[variant]} ${onClick ? 'cursor-pointer hover:shadow-md' : ''} ${isDragging ? 'opacity-40' : ''} ${className ?? ''}`}
       onClick={onClick}
       onKeyDown={onKeyDown}
       draggable={draggable || undefined}

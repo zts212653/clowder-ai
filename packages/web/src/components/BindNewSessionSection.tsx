@@ -69,7 +69,7 @@ export function BindNewSessionSection({ threadId, activeCatIds, onBound, disable
   }
 
   return (
-    <div className="mt-2 p-2 rounded border border-dashed border-cafe bg-cafe-surface">
+    <div className="mt-2 p-2 rounded-lg bg-[var(--console-shell-bg)]">
       <div className="flex items-center justify-between mb-1.5">
         <span className="text-micro font-medium text-cafe-secondary">绑定外部 Session</span>
         <button
@@ -87,7 +87,7 @@ export function BindNewSessionSection({ threadId, activeCatIds, onBound, disable
         <select
           value={selectedCat}
           onChange={(e) => setSelectedCat(e.target.value)}
-          className="w-full text-xs px-2 py-1 rounded border border-cafe bg-cafe-surface-elevated focus:outline-none focus:ring-1 focus:ring-cafe-accent"
+          className="w-full text-xs px-2 py-1 rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] focus:outline-none focus:ring-1 focus:ring-cafe-accent"
         >
           <option value="">选择猫猫...</option>
           {availableCats.map((cat) => (
@@ -107,7 +107,7 @@ export function BindNewSessionSection({ threadId, activeCatIds, onBound, disable
           }}
           placeholder="CLI Session ID"
           maxLength={500}
-          className="w-full text-xs font-mono px-2 py-1 rounded border border-cafe bg-cafe-surface-elevated focus:outline-none focus:ring-1 focus:ring-cafe-accent"
+          className="w-full text-xs font-mono px-2 py-1 rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] focus:outline-none focus:ring-1 focus:ring-cafe-accent"
         />
         <button
           type="button"

@@ -505,7 +505,7 @@ export function WorkspacePanel() {
   return (
     <aside
       ref={panelRef}
-      className="hidden lg:flex flex-1 min-w-0 border-l border-cafe-subtle bg-cafe-white/95 flex-col overflow-hidden animate-slide-in-right"
+      className="hidden lg:flex flex-1 min-w-0 bg-[var(--console-panel-bg)] flex-col overflow-hidden animate-slide-in-right"
     >
       {/* ── Focus mode overlay ── */}
       {focusedPane === 'browser' && workspaceMode === 'dev' && viewMode === 'browser' ? (

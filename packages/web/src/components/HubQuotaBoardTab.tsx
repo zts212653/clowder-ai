@@ -198,20 +198,18 @@ export function HubQuotaBoardTab() {
   ];
 
   return (
-    <section className="space-y-3 rounded-2xl border border-[var(--hub-border-soft)] bg-[var(--hub-surface-clean)] p-[18px]">
+    <section className="console-list-card space-y-3 rounded-xl p-[18px] shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-lg font-bold text-[var(--hub-heading)]">配额看板</h3>
+        <h3 className="text-lg font-bold text-cafe">配额看板</h3>
         <div className="flex items-center gap-3">
           {quota?.fetchedAt ? (
-            <span className="text-xs text-[var(--hub-text-faint)]">
-              {new Date(quota.fetchedAt).toLocaleTimeString()}
-            </span>
+            <span className="text-xs text-cafe-muted">{new Date(quota.fetchedAt).toLocaleTimeString()}</span>
           ) : null}
           <button
             type="button"
             onClick={onRefresh}
             disabled={refreshing}
-            className="rounded-full bg-[var(--hub-btn-dark)] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[var(--hub-btn-dark-hover)] disabled:opacity-50"
+            className="rounded-full bg-cafe-accent px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-cafe-interactive disabled:opacity-50"
           >
             {refreshing ? '刷新中...' : '刷新全部'}
           </button>
@@ -219,7 +217,7 @@ export function HubQuotaBoardTab() {
       </div>
 
       {errors.length > 0 && (
-        <div className="rounded-2xl border border-[var(--hub-quota-error-border)] bg-[var(--hub-quota-error-bg)] px-3 py-2 text-xs text-[var(--hub-quota-error-text)]">
+        <div className="rounded-[16px] border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-xs text-conn-red-text">
           {errors.map((e) => (
             <div key={e}>{e}</div>
           ))}
@@ -230,9 +228,9 @@ export function HubQuotaBoardTab() {
         <PoolGroupSection key={group.id} group={group} />
       ))}
 
-      <section className="rounded-2xl border border-[var(--hub-border-accent)] bg-[var(--hub-surface-accent)] px-4 py-3">
-        <p className="text-sm font-bold text-[var(--hub-accent-warm)]">F127 变化说明</p>
-        <p className="mt-1 text-sm leading-6 text-[var(--hub-text-muted)]">
+      <section className="rounded-xl bg-[var(--console-field-bg)] px-4 py-3">
+        <p className="text-compact font-bold text-[var(--cafe-accent)]">F127 变化说明</p>
+        <p className="mt-1 text-compact leading-6 text-cafe-muted">
           1. 从猫粮看板改名为配额看板
           <br />
           2. 按账号配置维度（非 Provider）分组
@@ -249,11 +247,11 @@ export function HubQuotaBoardTab() {
 function PoolGroupSection({ group }: { group: AccountQuotaPoolGroup }) {
   return (
     <section
-      className={`rounded-2xl border px-4 py-4 ${group.tone === 'success' ? 'border-[var(--field-success-border)] bg-[var(--field-success-card-bg)]' : 'border-[var(--hub-border-soft)] bg-[var(--hub-surface-clean)]'}`}
+      className={`rounded-xl px-4 py-4 ${group.tone === 'success' ? 'bg-conn-emerald-bg' : 'bg-[var(--console-field-bg)]'}`}
     >
-      <h4 className="text-lg font-bold text-[var(--hub-heading)]">{group.title}</h4>
+      <h4 className="text-lg font-bold text-cafe">{group.title}</h4>
       <p
-        className={`mt-1 text-sm leading-6 ${group.tone === 'success' ? 'text-[var(--field-success-hint)]' : 'text-[var(--hub-text-muted)]'}`}
+        className={`mt-1 text-compact leading-6 ${group.tone === 'success' ? 'text-conn-emerald-text' : 'text-cafe-muted'}`}
       >
         {group.description}
       </p>
@@ -269,9 +267,7 @@ function PoolGroupSection({ group }: { group: AccountQuotaPoolGroup }) {
             />
           ))
         ) : (
-          <div className="rounded-xl bg-cafe-surface/80 px-4 py-3 text-xs text-[var(--hub-text-muted)]">
-            暂无 API Key 账号
-          </div>
+          <div className="rounded-[14px] bg-cafe-surface/80 px-4 py-3 text-xs text-cafe-muted">暂无 API Key 账号</div>
         )}
       </div>
     </section>
@@ -294,16 +290,16 @@ function PoolSection({
   const dotClass = worstUtil >= 0 ? riskDotClass(worstUtil) : 'text-cafe-muted';
 
   return (
-    <div className="rounded-2xl border border-[var(--hub-border-soft)] bg-[var(--hub-surface-clean)] px-4 py-3">
+    <div className="console-list-card rounded-xl px-4 py-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
       <div className="mb-1 flex flex-wrap items-center gap-2">
         <span className={`text-xs ${dotClass}`} aria-hidden="true">
           {'\u25CF'}
         </span>
-        <span className="text-xs font-semibold tracking-wide text-[var(--hub-text-secondary)]">{title}</span>
+        <span className="text-xs font-semibold tracking-wide text-cafe-secondary">{title}</span>
         {memberTags.map((tag) => (
           <span
             key={tag}
-            className="rounded-full bg-[var(--hub-quota-tag-bg)] px-2 py-0.5 text-xs font-medium text-[var(--hub-quota-tag-text)]"
+            className="rounded-full bg-conn-purple-bg px-2 py-0.5 text-label font-medium text-[var(--color-opus-primary)]"
           >
             {tag}
           </span>
@@ -311,7 +307,7 @@ function PoolSection({
       </div>
       {items.length > 0
         ? items.map((item) => <QuotaPoolRow key={item.label} item={item} />)
-        : emptyText && <div className="ml-5 text-xs text-[var(--hub-text-faint)]">{emptyText}</div>}
+        : emptyText && <div className="ml-5 text-xs text-cafe-muted">{emptyText}</div>}
     </div>
   );
 }

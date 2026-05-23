@@ -149,12 +149,16 @@ describe('MessageNavigator', () => {
     expect(buttons.length).toBe(18);
   });
 
-  it('renders viewport indicator track', () => {
+  it('renders 1px connecting rail, no viewport thumb', () => {
     const msgs = [makeMsg('m1', 'user'), makeMsg('m2', 'assistant', 'opus'), makeMsg('m3', 'assistant', 'codex')];
     const html = render(msgs);
 
-    // Track rail (thin line) and viewport indicator should be present
-    expect(html).toContain('bg-gray-200');
-    expect(html).toContain('bg-gray-300/50');
+    expect(html).toContain('--console-border-soft');
+    expect(html).toContain('w-px');
+    expect(html).not.toContain('w-1.5');
+    expect(html).not.toContain('opacity-40');
+    expect(html).not.toContain('bg-gray-200');
+    expect(html).not.toContain('bg-gray-300/50');
+    expect(html).toContain('rounded-full');
   });
 });

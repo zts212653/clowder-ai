@@ -9,7 +9,7 @@ import { HubQuotaBoardTab } from './HubQuotaBoardTab';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-lg border border-cafe bg-cafe-surface-elevated/70 p-3">
+    <section className="console-list-card rounded-xl p-4 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
       <h3 className="text-xs font-semibold text-cafe-secondary mb-2">{title}</h3>
       {children}
     </section>
@@ -142,7 +142,7 @@ export function HubRoutingPolicyTab() {
             <button
               onClick={onSave}
               disabled={saving}
-              className="px-3 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-60"
+              className="px-3 py-2 text-sm rounded-lg bg-cafe-accent text-white hover:bg-cafe-interactive disabled:opacity-60"
             >
               {saving ? '保存中...' : '保存'}
             </button>

@@ -167,7 +167,7 @@ export function CollectionCatalog() {
         <button
           type="button"
           onClick={() => setShowCreate(true)}
-          className="px-3 py-1 text-xs text-white bg-cafe-primary rounded hover:bg-cafe-primary/90"
+          className="px-3 py-1 text-xs text-white bg-cafe-accent rounded-lg hover:bg-cafe-interactive"
           data-testid="create-collection-btn"
         >
           + 新建集合
@@ -246,7 +246,7 @@ export function CollectionCatalog() {
                     type="button"
                     onClick={() => handleUnarchive(c.manifest.id)}
                     disabled={isBusy}
-                    className="px-2 py-0.5 text-micro border border-[var(--console-border-soft)] rounded hover:bg-[var(--console-hover-bg)] text-cafe-secondary disabled:opacity-50"
+                    className="px-2.5 py-1 text-xs rounded-lg bg-[var(--console-card-bg)] text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] hover:bg-[var(--console-hover-bg)] disabled:opacity-50"
                     data-testid={`unarchive-${c.manifest.id}`}
                   >
                     {isBusy ? '...' : '取消归档'}
@@ -257,7 +257,7 @@ export function CollectionCatalog() {
                       type="button"
                       onClick={() => handleRebuild(c.manifest.id)}
                       disabled={isBusy}
-                      className="px-2 py-0.5 text-micro border border-[var(--console-border-soft)] rounded hover:bg-[var(--console-hover-bg)] text-cafe-secondary disabled:opacity-50"
+                      className="px-2.5 py-1 text-xs rounded-lg bg-[var(--console-card-bg)] text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] hover:bg-[var(--console-hover-bg)] disabled:opacity-50"
                       data-testid={`rebuild-${c.manifest.id}`}
                     >
                       {isBusy ? '...' : '重建索引'}
@@ -266,7 +266,7 @@ export function CollectionCatalog() {
                       type="button"
                       onClick={() => handleArchive(c.manifest.id)}
                       disabled={isBusy}
-                      className="px-2 py-0.5 text-micro border border-[var(--console-border-soft)] rounded hover:bg-[var(--console-hover-bg)] text-cafe-secondary disabled:opacity-50"
+                      className="px-2.5 py-1 text-xs rounded-lg bg-[var(--console-card-bg)] text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] hover:bg-[var(--console-hover-bg)] disabled:opacity-50"
                       data-testid={`archive-${c.manifest.id}`}
                     >
                       {isBusy ? '...' : '归档'}

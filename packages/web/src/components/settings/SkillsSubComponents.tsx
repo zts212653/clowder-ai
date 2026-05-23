@@ -142,7 +142,7 @@ export function SkillRow({
                   }}
                   title="按猫开关"
                 >
-                  <HubIcon name={isExpanded ? 'chevron-up' : 'chevron-down'} className="h-3.5 w-3.5" />
+                  <HubIcon name="users" className="h-3.5 w-3.5" />
                 </SettingsIconButton>
               )}
             </>

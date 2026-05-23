@@ -280,6 +280,8 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
       reply.status(400);
       return { error: 'Identity required (X-Cat-Cafe-User header)' };
     }
+    const sessionUserId = (request as FastifyRequest & { sessionUserId?: string }).sessionUserId;
+    const sessionOperator = typeof sessionUserId === 'string' && sessionUserId.trim() ? sessionUserId.trim() : null;
 
     const updates = new Map<string, string | null>();
     for (const update of parsed.data.updates) {
@@ -290,15 +292,19 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
       updates.set(update.name, update.value);
     }
 
-    // Owner gate: sensitive-editable vars require EXPLICIT owner config (F136 trust anchor)
+    // Sensitive env writes require session-auth (not forgeable header identity)
     const touchesSensitive = hasSensitiveEditableVars(updates.keys());
     if (touchesSensitive) {
+      if (!sessionOperator) {
+        reply.status(401);
+        return { error: 'Sensitive env writes require session authentication' };
+      }
       const ownerId = process.env.DEFAULT_OWNER_USER_ID?.trim();
       if (!ownerId) {
         reply.status(403);
         return { error: 'Sensitive env write requires DEFAULT_OWNER_USER_ID to be configured' };
       }
-      if (operator !== ownerId) {
+      if (sessionOperator !== ownerId) {
         reply.status(403);
         return { error: 'Sensitive env vars can only be modified by the owner' };
       }
@@ -333,22 +339,22 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
       });
     }
 
+    const auditOperator = touchesSensitive ? sessionOperator! : (sessionOperator ?? operator);
     try {
       await auditLog.append({
         type: AuditEventTypes.CONFIG_UPDATED,
         data: {
           target: '.env',
           keys: [...updates.keys()],
-          operator,
+          operator: auditOperator,
         },
       });
-      // Separate audit trail for sensitive env writes (sensitive keys only, no values)
       if (touchesSensitive) {
         await auditLog.append({
           type: AuditEventTypes.ENV_SENSITIVE_WRITE,
           data: {
             keys: filterSensitiveEditableKeys(updates.keys()),
-            operator,
+            operator: auditOperator,
           },
         });
       }

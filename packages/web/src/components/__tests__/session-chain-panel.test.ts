@@ -232,18 +232,18 @@ describe('F24: SessionChainPanel', () => {
     expect(container.textContent).toContain('sealing');
   });
 
-  it('renders kimi colors from cat.color (border inline style)', async () => {
+  it('renders kimi colors from cat.color (badge inline style)', async () => {
     // kimi primary #4B5563 → 75,85,99
     mockSessionsResponse([
       { id: 'kimi_s1', catId: 'kimi', seq: 0, status: 'active', messageCount: 2, createdAt: Date.now() },
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    const card = container.querySelector(
-      '[data-testid="session-card-active"][data-cat-id="kimi"]',
+    const badge = container.querySelector(
+      '[data-testid="session-badge-active"][data-cat-id="kimi"]',
     ) as HTMLElement | null;
-    expect(card).not.toBeNull();
-    expect(card!.style.borderColor).toMatch(/rgba?\(75,\s*85,\s*99/);
+    expect(badge).not.toBeNull();
+    expect(badge!.style.color).toMatch(/rgba?\(75,\s*85,\s*99/);
   });
 
   it('renders catId in the active session badge (not breed displayName)', async () => {
@@ -593,18 +593,13 @@ describe('F24: SessionChainPanel', () => {
     expect(container.textContent).not.toContain('Session #6');
   });
 
-  it('applies codex green colors from cat.color (border + badge inline style)', async () => {
+  it('applies codex green colors from cat.color (badge inline style)', async () => {
     // codex primary #5B8C5A → 91,140,90; secondary #D4E6D3 → 212,230,211
     mockSessionsResponse([
       { id: 's1', catId: 'codex', seq: 0, status: 'active', messageCount: 3, createdAt: Date.now() },
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    const card = container.querySelector(
-      '[data-testid="session-card-active"][data-cat-id="codex"]',
-    ) as HTMLElement | null;
-    expect(card).not.toBeNull();
-    expect(card!.style.borderColor).toMatch(/rgba?\(91,\s*140,\s*90/);
     const badge = container.querySelector(
       '[data-testid="session-badge-active"][data-cat-id="codex"]',
     ) as HTMLElement | null;
@@ -620,11 +615,11 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    const card = container.querySelector(
-      '[data-testid="session-card-active"][data-cat-id="gemini"]',
+    const badge = container.querySelector(
+      '[data-testid="session-badge-active"][data-cat-id="gemini"]',
     ) as HTMLElement | null;
-    expect(card).not.toBeNull();
-    expect(card!.style.borderColor).toMatch(/rgba?\(74,\s*144,\s*226/);
+    expect(badge).not.toBeNull();
+    expect(badge!.style.color).toMatch(/rgba?\(74,\s*144,\s*226/);
   });
 
   it('applies dare colors from cat.color', async () => {
@@ -634,11 +629,11 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    const card = container.querySelector(
-      '[data-testid="session-card-active"][data-cat-id="dare"]',
+    const badge = container.querySelector(
+      '[data-testid="session-badge-active"][data-cat-id="dare"]',
     ) as HTMLElement | null;
-    expect(card).not.toBeNull();
-    expect(card!.style.borderColor).toMatch(/rgba?\(255,\s*179,\s*0/);
+    expect(badge).not.toBeNull();
+    expect(badge!.style.color).toMatch(/rgba?\(255,\s*179,\s*0/);
   });
 
   it('applies gpt52 (maine-coon variant) colors from cat.color', async () => {
@@ -648,11 +643,11 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    const card = container.querySelector(
-      '[data-testid="session-card-active"][data-cat-id="gpt52"]',
+    const badge = container.querySelector(
+      '[data-testid="session-badge-active"][data-cat-id="gpt52"]',
     ) as HTMLElement | null;
-    expect(card).not.toBeNull();
-    expect(card!.style.borderColor).toMatch(/rgba?\(102,\s*187,\s*106/);
+    expect(badge).not.toBeNull();
+    expect(badge!.style.color).toMatch(/rgba?\(102,\s*187,\s*106/);
   });
 
   it('applies opus-45 and sonnet (ragdoll variant) distinct colors from cat.color', async () => {
@@ -671,8 +666,14 @@ describe('F24: SessionChainPanel', () => {
     ) as HTMLElement | null;
     expect(opus45).not.toBeNull();
     expect(sonnet).not.toBeNull();
-    expect(opus45!.style.borderColor).toMatch(/rgba?\(126,\s*87,\s*194/);
-    expect(sonnet!.style.borderColor).toMatch(/rgba?\(179,\s*157,\s*219/);
+    const opus45Badge = container.querySelector(
+      '[data-testid="session-badge-active"][data-cat-id="opus-45"]',
+    ) as HTMLElement | null;
+    const sonnetBadge = container.querySelector(
+      '[data-testid="session-badge-active"][data-cat-id="sonnet"]',
+    ) as HTMLElement | null;
+    expect(opus45Badge!.style.color).toMatch(/rgba?\(126,\s*87,\s*194/);
+    expect(sonnetBadge!.style.color).toMatch(/rgba?\(179,\s*157,\s*219/);
   });
 
   it('falls back to neutral gray when cat is missing from cat-config (badge background)', async () => {
@@ -759,11 +760,11 @@ describe('F24: SessionChainPanel', () => {
       ]);
       renderPanel('thread-1');
       await flushFetch();
-      const card = container.querySelector(
-        '[data-testid="session-card-active"][data-cat-id="opus-47"]',
+      const badge = container.querySelector(
+        '[data-testid="session-badge-active"][data-cat-id="opus-47"]',
       ) as HTMLElement | null;
-      expect(card).not.toBeNull();
-      const triple = rgbTripleOf(card!.style.borderColor);
+      expect(badge).not.toBeNull();
+      const triple = rgbTripleOf(badge!.style.color);
       expect(triple).toEqual([123, 31, 162]);
     });
 
@@ -801,7 +802,11 @@ describe('F24: SessionChainPanel', () => {
         '[data-testid="session-card-sealed"][data-cat-id="opus-47"]',
       ) as HTMLElement | null;
       expect(card).not.toBeNull();
-      expect(rgbTripleOf(card!.style.borderColor)).toEqual([123, 31, 162]);
+      const sealBadge = container.querySelector(
+        '[data-testid="session-badge-sealed"][data-cat-id="opus-47"]',
+      ) as HTMLElement | null;
+      expect(sealBadge).not.toBeNull();
+      expect(rgbTripleOf(sealBadge!.style.color)).toEqual([123, 31, 162]);
     });
 
     it('falls back to neutral gray (#9CA3AF → 156,163,175) for unknown catId', async () => {
@@ -810,11 +815,11 @@ describe('F24: SessionChainPanel', () => {
       ]);
       renderPanel('thread-1');
       await flushFetch();
-      const card = container.querySelector(
-        '[data-testid="session-card-active"][data-cat-id="unknown-cat"]',
+      const badge = container.querySelector(
+        '[data-testid="session-badge-active"][data-cat-id="unknown-cat"]',
       ) as HTMLElement | null;
-      expect(card).not.toBeNull();
-      expect(rgbTripleOf(card!.style.borderColor)).toEqual([156, 163, 175]);
+      expect(badge).not.toBeNull();
+      expect(rgbTripleOf(badge!.style.color)).toEqual([156, 163, 175]);
     });
 
     it('does not emit any of the legacy hardcoded color tokens', async () => {

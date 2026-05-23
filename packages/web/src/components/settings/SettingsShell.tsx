@@ -35,9 +35,9 @@ function SettingsShellInner() {
   }
 
   return (
-    <div className="console-shell flex h-full min-h-0 flex-col overflow-hidden bg-[var(--console-shell-bg)] md:flex-row">
+    <div className="console-shell flex h-full min-h-0 flex-col overflow-hidden bg-[var(--console-panel-bg)] md:flex-row">
       <aside
-        className="flex max-h-[42vh] w-full flex-shrink-0 flex-col overflow-hidden border-b border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] md:max-h-none md:w-[220px] md:border-b-0 md:border-r"
+        className="flex max-h-[42vh] w-full flex-shrink-0 flex-col overflow-hidden bg-[var(--console-panel-bg)] md:max-h-none md:w-[220px]"
         data-console-panel="settings-nav"
       >
         <div className="px-4 pt-4 pb-2">

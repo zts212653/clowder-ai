@@ -1,6 +1,8 @@
 'use client';
 
 import type React from 'react';
+import { useState } from 'react';
+import { formInputClass } from '../mcp-form-helpers';
 
 export interface GraphQueryCandidate {
   anchor: string;
@@ -20,19 +22,22 @@ export function GraphSearchForm({
   inputRef: React.RefObject<HTMLInputElement>;
   onSubmit: (e: React.FormEvent) => void;
 }) {
+  const [query, setQuery] = useState('');
   return (
     <form onSubmit={onSubmit} className="mb-4 flex flex-col gap-2 sm:flex-row">
       <input
         ref={inputRef}
         type="text"
         defaultValue=""
+        onChange={(e) => setQuery(e.target.value)}
         placeholder="搜索知识或输入锚点（如 F186、harness）"
-        className="min-w-0 flex-1 rounded border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-1.5 text-sm text-cafe-primary"
+        className={`min-w-0 flex-1 ${formInputClass}`}
         data-testid="graph-anchor-input"
       />
       <button
         type="submit"
-        className="rounded bg-cafe-accent px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-cafe-interactive sm:w-auto"
+        disabled={!query.trim()}
+        className="h-9 shrink-0 rounded-lg bg-cafe-accent px-3 text-compact font-semibold text-white transition-colors hover:bg-cafe-interactive disabled:opacity-50 sm:w-auto"
         data-testid="graph-fetch-btn"
       >
         查看图谱

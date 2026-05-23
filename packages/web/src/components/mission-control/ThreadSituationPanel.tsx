@@ -36,7 +36,7 @@ export function ThreadSituationPanel({
 }: ThreadSituationPanelProps) {
   return (
     <section
-      className="min-h-0 rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3"
+      className="min-h-0 rounded-2xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
       data-testid="mc-thread-situation"
     >
       <div className="mb-2">
@@ -45,15 +45,13 @@ export function ThreadSituationPanel({
       </div>
 
       {dispatchedItems.length === 0 && (
-        <p className="rounded-lg border border-dashed border-[var(--console-border-soft)] px-2 py-2 text-xs text-cafe-muted">
+        <p className="rounded-lg bg-[var(--console-shell-bg)] px-2 py-2 text-xs text-cafe-muted">
           暂无执行中的 backlog 项
         </p>
       )}
 
       {dispatchedItems.length > 0 && loading && (
-        <p className="rounded-lg border border-dashed border-[var(--console-border-soft)] px-2 py-2 text-xs text-cafe-muted">
-          加载线程态势中...
-        </p>
+        <p className="rounded-lg bg-[var(--console-shell-bg)] px-2 py-2 text-xs text-cafe-muted">加载线程态势中...</p>
       )}
 
       <div className="space-y-2">
@@ -67,7 +65,7 @@ export function ThreadSituationPanel({
             return (
               <article
                 key={item.id}
-                className="rounded-xl border border-dashed border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2.5 py-1.5"
+                className="rounded-xl bg-[var(--console-shell-bg)] px-2.5 py-1.5"
                 data-testid={`mc-thread-situation-item-${item.id}`}
               >
                 <p className="text-xs text-cafe-muted">
@@ -85,16 +83,13 @@ export function ThreadSituationPanel({
           return (
             <article
               key={item.id}
-              className="rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2.5 py-2"
+              className="rounded-xl bg-[var(--console-card-bg)] px-2.5 py-2 shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
               data-testid={`mc-thread-situation-item-${item.id}`}
             >
               <p className="text-xs font-semibold text-cafe">{item.title}</p>
               {matchType === 'title' && <p className="text-micro text-cafe-muted">通过标题匹配</p>}
               {displayThreads.map((t) => (
-                <div
-                  key={t.id}
-                  className="mt-1 border-t border-[var(--console-border-soft)] pt-1 first:mt-0 first:border-t-0 first:pt-0"
-                >
+                <div key={t.id} className="mt-1 console-divider-t pt-1 first:mt-0 first:border-t-0 first:pt-0">
                   <p className="text-xs text-cafe-secondary">Thread：{t.title || t.id}</p>
                   <p className="text-xs text-cafe-secondary">
                     最近活跃：

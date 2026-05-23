@@ -81,13 +81,13 @@ export function HubAgentSessionsTab() {
         <button
           onClick={() => void refresh()}
           disabled={loading}
-          className="text-xs px-2 py-1 rounded bg-cafe-surface hover:bg-cafe-surface-hover text-cafe-text disabled:opacity-50"
+          className="rounded-lg bg-cafe-accent px-3 py-1.5 text-xs font-semibold text-[var(--cafe-surface)] transition-colors hover:bg-cafe-accent-hover disabled:opacity-50"
         >
           {loading ? '加载中…' : '刷新'}
         </button>
       </div>
 
-      {error && <div className="text-xs text-conn-red-text bg-red-950/30 rounded p-2">{error}</div>}
+      {error && <div className="text-xs text-conn-red-text bg-conn-red-bg rounded p-2">{error}</div>}
 
       {!loading && sessions.length === 0 && !error && (
         <div className="text-xs text-cafe-muted text-center py-8">没有找到后台会话 (当前 ~/.claude/jobs/ 为空)</div>
@@ -96,7 +96,10 @@ export function HubAgentSessionsTab() {
       {sessions.length > 0 && (
         <div className="space-y-2">
           {sessions.map((s) => (
-            <div key={s.daemonShortId} className="rounded border border-cafe-border bg-cafe-surface p-3 space-y-1">
+            <div
+              key={s.daemonShortId}
+              className="rounded-xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)] space-y-1"
+            >
               <div className="flex items-center justify-between gap-2">
                 <span className="font-mono text-xs text-cafe-text">{s.daemonShortId}</span>
                 <div className="flex items-center gap-2">
@@ -105,7 +108,7 @@ export function HubAgentSessionsTab() {
                   <button
                     type="button"
                     onClick={() => setAttachOverlay(attachOverlay === s.daemonShortId ? null : s.daemonShortId)}
-                    className="text-micro px-1.5 py-0.5 rounded border border-cafe-border text-cafe-muted hover:text-cafe-text hover:border-cafe-text transition-colors"
+                    className="text-micro px-1.5 py-0.5 rounded-lg bg-[var(--console-card-bg)] text-cafe-muted shadow-[0_1px_3px_rgba(43,33,26,0.06)] hover:text-cafe hover:bg-[var(--console-hover-bg)] transition-colors"
                   >
                     接管
                   </button>
@@ -126,7 +129,7 @@ export function HubAgentSessionsTab() {
                   <button
                     type="button"
                     onClick={() => void handleCopy(s.daemonShortId)}
-                    className="text-micro px-1.5 py-0.5 rounded bg-cafe-surface text-cafe-muted hover:text-cafe-text transition-colors flex-shrink-0"
+                    className="text-micro px-1.5 py-0.5 rounded-lg bg-[var(--console-card-bg)] text-cafe-muted shadow-[0_1px_3px_rgba(43,33,26,0.06)] hover:text-cafe hover:bg-[var(--console-hover-bg)] transition-colors flex-shrink-0"
                   >
                     {copied ? '已复制 ✓' : '复制'}
                   </button>

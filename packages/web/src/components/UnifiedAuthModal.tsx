@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import type { BuiltinAccountClient, ProfileAuthType } from './hub-accounts.types';
 import { builtinClientLabel } from './hub-accounts.view';
+import { HubIcon } from './hub-icons';
 import { TagEditor } from './hub-tag-editor';
+import { formInputClass } from './mcp-form-helpers';
 
 const CLIENT_OPTIONS: BuiltinAccountClient[] = ['anthropic', 'openai', 'google', 'kimi', 'dare', 'opencode'];
 
@@ -265,7 +267,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               placeholder="例如: my-claude-account"
-              className="w-full rounded-lg border border-[var(--console-border-soft)] bg-white px-3 py-2 text-sm placeholder:text-[var(--cafe-text-muted)]"
+              className={formInputClass}
             />
           </div>
 
@@ -274,14 +276,12 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
             <div>
               <label className="mb-1 block text-xs font-medium text-cafe-secondary">Client</label>
               {initialClientId ? (
-                <p className="w-full rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2 text-sm text-cafe">
-                  {builtinClientLabel(initialClientId)}
-                </p>
+                <p className={formInputClass}>{builtinClientLabel(initialClientId)}</p>
               ) : (
                 <select
                   value={clientId}
                   onChange={(e) => setClientId(e.target.value as BuiltinAccountClient)}
-                  className="w-full rounded-lg border border-[var(--console-border-soft)] bg-white px-3 py-2 text-sm text-cafe"
+                  className={formInputClass}
                 >
                   {CLIENT_OPTIONS.map((c) => (
                     <option key={c} value={c}>
@@ -302,7 +302,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
                   value={baseUrl}
                   onChange={(e) => setBaseUrl(e.target.value)}
                   placeholder="https://api.openai.com/v1"
-                  className="w-full rounded-lg border border-[var(--console-border-soft)] bg-white px-3 py-2 text-sm placeholder:text-[var(--cafe-text-muted)]"
+                  className={formInputClass}
                 />
               </div>
               <div>
@@ -318,7 +318,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
                     setError(null);
                   }}
                   placeholder={isEdit ? '••••••••••••' : 'sk-...'}
-                  className="w-full rounded-lg border border-[var(--console-border-soft)] bg-white px-3 py-2 text-sm placeholder:text-[var(--cafe-text-muted)]"
+                  className={formInputClass}
                 />
               </div>
             </>
@@ -368,7 +368,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
               高级配置 (可选)
             </button>
             {advancedOpen && (
-              <div className="border-t border-[var(--console-border-soft)] px-3 pb-3 pt-2">
+              <div className="console-divider-t px-3 pb-3 pt-2">
                 <p className="mb-2 text-micro text-cafe-muted">
                   自定义环境变量，启动 agent 时注入子进程 (CAT_CAFE_ 前缀为保留变量)
                 </p>
@@ -383,10 +383,10 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
                           setEnvEntries(next);
                         }}
                         placeholder="KEY"
-                        className={`w-[38%] rounded border px-2 py-1 font-mono text-xs placeholder:text-[var(--cafe-text-muted)] ${
+                        className={`w-[38%] font-mono ${
                           entry.key.trim() && !isValidEnvKey(entry.key.trim())
-                            ? 'border-red-300 bg-conn-red-bg text-conn-red-text'
-                            : 'border-[var(--console-border-soft)] bg-white text-cafe'
+                            ? `${formInputClass} !border-red-300 !bg-conn-red-bg !text-conn-red-text`
+                            : formInputClass
                         }`}
                       />
                       <span className="text-micro text-cafe-muted">=</span>
@@ -398,7 +398,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
                           setEnvEntries(next);
                         }}
                         placeholder="value"
-                        className="flex-1 rounded border border-[var(--console-border-soft)] bg-white px-2 py-1 font-mono text-xs text-cafe placeholder:text-[var(--cafe-text-muted)]"
+                        className={`flex-1 font-mono ${formInputClass}`}
                       />
                       <button
                         type="button"
@@ -406,7 +406,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
                         className="text-xs text-cafe-muted hover:text-conn-red-text"
                         title="删除"
                       >
-                        &times;
+                        <HubIcon name="trash" className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   ))}

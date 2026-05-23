@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import typographyTokens from '@/styles/typography-tokens.json';
 import { API_URL } from '@/utils/api-client';
 
 // Dynamic import to avoid polluting test environment (esbuild-wasm checks TextEncoder at import time)
@@ -147,6 +148,8 @@ export function JsxPreview({ code, filePath, worktreeId }: JsxPreviewProps) {
       });
 
       const js = result.outputFiles?.[0]?.text ?? '';
+      const previewCompactPx = `${typographyTokens.fontSizePx.compact}px`;
+      const previewXsPx = `${typographyTokens.fontSizePx.xs}px`;
 
       const previewHtml = `<!DOCTYPE html>
 <html>
@@ -154,6 +157,7 @@ export function JsxPreview({ code, filePath, worktreeId }: JsxPreviewProps) {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
+    :root { --preview-font-compact: ${previewCompactPx}; --preview-font-xs: ${previewXsPx}; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 16px; }
   </style>
@@ -175,14 +179,12 @@ export function JsxPreview({ code, filePath, worktreeId }: JsxPreviewProps) {
         const root = createRoot(document.getElementById('root'));
         root.render(createElement(Component));
       } else {
-        /* sandboxed iframe HTML exempt: cannot reference parent CSS vars */
         document.getElementById('root').innerHTML =
-          '<p style="color:#888;font-size:13px">No default export or App component found to render.</p>';
+          '<p style="color:#888;font-size:var(--preview-font-compact)">No default export or App component found to render.</p>';
       }
     } catch (err) {
-      /* sandboxed iframe HTML exempt: cannot reference parent CSS vars */
       document.getElementById('root').innerHTML =
-        '<pre style="color:#e53;font-size:12px;white-space:pre-wrap">' +
+        '<pre style="color:#e53;font-size:var(--preview-font-xs);white-space:pre-wrap">' +
         err.message + '\\n' + (err.stack || '') + '</pre>';
     }
   </script>

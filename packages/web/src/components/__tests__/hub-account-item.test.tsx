@@ -59,15 +59,7 @@ describe('HubAccountItem', () => {
     const onEdit = vi.fn();
 
     await act(async () => {
-      root.render(
-        <HubAccountItem
-          profile={profile}
-          busy={false}
-          onSave={vi.fn(async () => {})}
-          onDelete={() => {}}
-          onEdit={onEdit}
-        />,
-      );
+      root.render(<HubAccountItem profile={profile} busy={false} onDelete={() => {}} onEdit={onEdit} />);
     });
 
     expect(container.textContent).not.toContain('编辑');
@@ -81,45 +73,41 @@ describe('HubAccountItem', () => {
     expect(onEdit).toHaveBeenCalledWith(profile);
   });
 
-  it('keeps the + 添加 model entry visible for built-in cards without binding-scope controls', async () => {
+  it('clicking an OAuth card triggers onEdit', async () => {
     const profile = profileItem({
       id: 'codex-oauth',
       provider: 'codex-oauth',
       displayName: 'Codex (OAuth)',
       name: 'Codex (OAuth)',
       authType: 'oauth',
-
       mode: 'subscription',
       models: ['gpt-5.4'],
       hasApiKey: false,
       createdAt: '2026-03-18T00:00:00.000Z',
       updatedAt: '2026-03-18T00:00:00.000Z',
     });
+    const onEdit = vi.fn();
 
     await act(async () => {
-      root.render(<HubAccountItem profile={profile} busy={false} onSave={vi.fn(async () => {})} onDelete={() => {}} />);
+      root.render(<HubAccountItem profile={profile} busy={false} onDelete={() => {}} onEdit={onEdit} />);
     });
 
-    const expandBtn = container.querySelector<HTMLButtonElement>('button[aria-label="展开"]');
-    expect(expandBtn).toBeTruthy();
+    expect(container.querySelector('button[aria-label="展开"]')).toBeFalsy();
+
+    const card = container.querySelector('[class*="rounded-"]') as HTMLElement;
     await act(async () => {
-      expandBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      card.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-
-    expect(container.textContent).toContain('+ 添加');
-    expect(container.textContent).not.toContain('编辑');
-    expect(container.textContent).not.toContain('绑定范围');
-    expect(container.textContent).not.toContain('设为 Codex 默认');
+    expect(onEdit).toHaveBeenCalledWith(profile);
   });
 
-  it('hides unsupported 测试 actions for non-api-key profiles', async () => {
+  it('renders without onEdit (no click handler, no crash)', async () => {
     const profile = profileItem({
       id: 'opencode-client-auth',
       provider: 'opencode-client-auth',
       displayName: 'OpenCode (client-auth)',
       name: 'OpenCode (client-auth)',
       authType: 'oauth',
-
       mode: 'subscription',
       models: ['claude-sonnet-4'],
       hasApiKey: false,
@@ -129,18 +117,11 @@ describe('HubAccountItem', () => {
     });
 
     await act(async () => {
-      root.render(<HubAccountItem profile={profile} busy={false} onSave={vi.fn(async () => {})} onDelete={() => {}} />);
+      root.render(<HubAccountItem profile={profile} busy={false} onDelete={() => {}} />);
     });
 
-    const expandBtn = container.querySelector<HTMLButtonElement>('button[aria-label="展开"]');
-    expect(expandBtn).toBeTruthy();
-    await act(async () => {
-      expandBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    expect(container.textContent).not.toContain('测试');
-    expect(container.textContent).toContain('+ 添加');
     expect(container.textContent).toContain('OpenCode (client-auth)');
+    expect(container.querySelector('button[aria-label="展开"]')).toBeFalsy();
   });
 
   it('requires delete confirmation and respects denial', async () => {
@@ -161,7 +142,7 @@ describe('HubAccountItem', () => {
     mockConfirm.mockResolvedValue(false);
 
     await act(async () => {
-      root.render(<HubAccountItem profile={profile} busy={false} onSave={vi.fn(async () => {})} onDelete={onDelete} />);
+      root.render(<HubAccountItem profile={profile} busy={false} onDelete={onDelete} />);
     });
 
     await act(async () => {

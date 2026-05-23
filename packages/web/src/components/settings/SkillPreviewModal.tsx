@@ -97,7 +97,7 @@ export function SkillPreviewModal({
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--console-active-bg)] text-lg font-bold text-[var(--console-modal-title)]">
             ✎
           </div>
-          <h2 id="skill-preview-title" className="min-w-0 flex-1 text-xl font-extrabold text-cafe">
+          <h2 id="skill-preview-title" className="min-w-0 flex-1 text-xl font-bold text-cafe">
             {skillName}
           </h2>
           <button

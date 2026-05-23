@@ -68,7 +68,7 @@ export function NeedAuditFrame({ projectId, frame, onSaved }: NeedAuditFrameProp
   ];
 
   return (
-    <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4">
+    <div className="rounded-xl bg-[var(--console-card-bg)] p-4 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
       <h3 className="mb-3 text-sm font-bold text-cafe">Stage 0: Frame — 六问定位</h3>
       <div className="space-y-3">
         {fields.map((f) => (
@@ -79,7 +79,7 @@ export function NeedAuditFrame({ projectId, frame, onSaved }: NeedAuditFrameProp
               value={f.value}
               onChange={(e) => f.set(e.target.value)}
               placeholder={f.placeholder}
-              className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-1.5 text-xs text-cafe focus:border-[var(--console-border-soft)] focus:outline-none"
+              className="mt-1 w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-1.5 text-xs text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
             />
           </label>
         ))}

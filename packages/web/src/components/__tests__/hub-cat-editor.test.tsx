@@ -1312,9 +1312,7 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
-    );
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -1402,9 +1400,7 @@ describe('HubCatEditor', () => {
 
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label="认证信息"]').value).toBe('');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
-    );
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -1489,9 +1485,7 @@ describe('HubCatEditor', () => {
 
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label="认证信息"]').value).toBe('');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
-    );
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -1546,9 +1540,7 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
-    );
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
     expect(saveButton).toBeTruthy();
     expect((saveButton as HTMLButtonElement).disabled).toBe(false);
 
@@ -1663,9 +1655,7 @@ describe('HubCatEditor', () => {
 
     await changeField(queryField(container, 'select[aria-label="认证信息"]'), '', 'change');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
-    );
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -1743,9 +1733,7 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'input[aria-label="Model"]'), 'gemini-bridge');
     await changeField(queryField(container, 'input[aria-label="CLI Command"]'), 'chat --mode agent');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
-    );
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -1832,9 +1820,7 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'input[aria-label="Max Messages"]'), '');
     await changeField(queryField(container, 'input[aria-label="Max Content Length Per Msg"]'), '');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
-    );
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -1909,7 +1895,7 @@ describe('HubCatEditor', () => {
     expect(mockApiFetch).not.toHaveBeenCalledWith('/api/cats', expect.objectContaining({ method: 'POST' }));
   });
 
-  it('deletes an existing member only after confirmation', async () => {
+  it('does not show delete action inside editor (delete lives on member list)', async () => {
     const existingCat: CatData = {
       id: 'runtime-antigravity',
       name: '运行时桥接猫',
@@ -1923,16 +1909,12 @@ describe('HubCatEditor', () => {
       roleDescription: '桥接通道',
       personality: '稳定',
     };
-    const onSaved = vi.fn(() => Promise.resolve());
     mockApiFetch.mockImplementation((path: string) => {
       if (path === '/api/accounts') {
         return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', activeProfileId: null, providers: [] }));
       }
       if (path === '/api/config/session-strategy') {
         return Promise.resolve(jsonResponse({ cats: [] }));
-      }
-      if (path === '/api/cats/runtime-antigravity') {
-        return Promise.resolve(jsonResponse({ deleted: true }));
       }
       if (path === '/api/cat-templates') {
         return Promise.resolve(jsonResponse({ templates: [] }));
@@ -1941,36 +1923,14 @@ describe('HubCatEditor', () => {
     });
 
     await act(async () => {
-      root.render(React.createElement(HubCatEditor, { open: true, cat: existingCat, onClose: vi.fn(), onSaved }));
+      root.render(
+        React.createElement(HubCatEditor, { open: true, cat: existingCat, onClose: vi.fn(), onSaved: vi.fn() }),
+      );
     });
     await flushEffects();
 
-    const deleteButton = queryField<HTMLButtonElement>(container, 'button[aria-label="删除成员"]');
-    mockConfirm.mockResolvedValueOnce(false);
-
-    await act(async () => {
-      deleteButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    await flushEffects();
-
-    expect(mockConfirm).toHaveBeenCalledTimes(1);
-    expect(mockApiFetch).not.toHaveBeenCalledWith(
-      '/api/cats/runtime-antigravity',
-      expect.objectContaining({ method: 'DELETE' }),
-    );
-    expect(onSaved).toHaveBeenCalledTimes(0);
-
-    mockConfirm.mockResolvedValueOnce(true);
-    await act(async () => {
-      deleteButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    await flushEffects();
-
-    expect(mockApiFetch).toHaveBeenCalledWith(
-      '/api/cats/runtime-antigravity',
-      expect.objectContaining({ method: 'DELETE' }),
-    );
-    expect(onSaved).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('button[aria-label="删除成员"]')).toBeNull();
+    expect(container.textContent).not.toContain('删除成员');
   });
 
   it('prompts before closing when there are unsaved edits', async () => {
@@ -1991,11 +1951,9 @@ describe('HubCatEditor', () => {
 
     await changeField(queryField(container, 'input[aria-label="Name"]'), '临时名字');
 
-    const cancelButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '取消',
-    );
+    const closeButton = container.querySelector('button[aria-label="关闭"]') as HTMLElement;
     await act(async () => {
-      cancelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      closeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await flushEffects();
 
@@ -2004,7 +1962,7 @@ describe('HubCatEditor', () => {
 
     mockConfirm.mockResolvedValue(true);
     await act(async () => {
-      cancelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      closeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await flushEffects();
 
@@ -2012,7 +1970,7 @@ describe('HubCatEditor', () => {
     mockConfirm.mockResolvedValue(true);
   });
 
-  it('shows delete action for all members', async () => {
+  it('does not show delete action inside editor for any member type', async () => {
     const existingCat: CatData = {
       id: 'codex',
       name: '缅因猫',
@@ -2049,7 +2007,7 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(container.querySelector('button[aria-label="删除成员"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="删除成员"]')).toBeNull();
   });
 
   it('loads runtime controls for an existing member and saves strategy separately', async () => {
@@ -2215,8 +2173,8 @@ describe('HubCatEditor', () => {
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Approval"]').disabled).toBe(false);
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Auth Mode"]').disabled).toBe(false);
     expect(container.textContent).toContain('运行时持久化');
-    expect(container.textContent).toContain('保存修改');
-    expect(container.textContent).toContain('删除成员');
+    expect(container.textContent).toContain('保存');
+    expect(container.textContent).not.toContain('删除成员');
     expect(container.textContent).not.toContain('账号与运行方式');
     expect(container.textContent).not.toContain('Primary');
     expect(container.textContent).not.toContain('Secondary');
@@ -2233,9 +2191,7 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'select[aria-label^="Codex Approval"]'), 'never', 'change');
     await changeField(queryField(container, 'select[aria-label^="Codex Auth Mode"]'), 'api_key', 'change');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
-    );
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -2373,9 +2329,7 @@ describe('HubCatEditor', () => {
 
     await changeField(queryField(container, 'input[aria-label="Nickname"]'), '砚砚');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
-    );
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -2458,9 +2412,7 @@ describe('HubCatEditor', () => {
     expect(container.querySelector('input[aria-label="Session Warn Threshold"]')).toBeNull();
     expect(container.querySelector('input[aria-label="Session Action Threshold"]')).toBeNull();
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
-    );
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -2658,9 +2610,7 @@ describe('HubCatEditor', () => {
 
     await changeField(queryField(container, 'select[aria-label^="Codex Sandbox"]'), 'danger-full-access', 'change');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
-    );
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -2741,9 +2691,7 @@ describe('HubCatEditor', () => {
 
     await changeField(queryField(container, 'input[aria-label="Nickname"]'), '新昵称');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
-    );
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -2839,9 +2787,7 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'input[aria-label="Nickname"]'), '新昵称');
     await changeField(queryField(container, 'select[aria-label^="Codex Sandbox"]'), 'danger-full-access', 'change');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
-    );
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -2974,9 +2920,7 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'select[aria-label^="Codex Sandbox"]'), 'danger-full-access', 'change');
     await changeField(queryField(container, 'select[aria-label^="Codex Approval"]'), 'never', 'change');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
-    );
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -3112,9 +3056,7 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'select[aria-label="Session Strategy"]'), 'handoff', 'change');
     await changeField(queryField(container, 'input[aria-label="Session Warn Threshold"]'), '0.55');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
-    );
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });

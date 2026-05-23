@@ -113,7 +113,7 @@ export function DependencyGraphTab({ items }: DependencyGraphTabProps) {
   return (
     <div data-testid="mc-dep-graph">
       {/* Toolbar: scope filter + stats */}
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-[var(--console-card-bg)] shadow-[0_8px_22px_rgba(43,33,26,0.04)] px-3 py-2">
         <div className="flex items-center gap-2">
           {(Object.keys(SCOPE_LABELS) as DagScope[]).map((s) => (
             <button
@@ -122,8 +122,8 @@ export function DependencyGraphTab({ items }: DependencyGraphTabProps) {
               onClick={() => setScope(s)}
               className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
                 scope === s
-                  ? 'bg-[var(--mc-accent)] text-white'
-                  : 'bg-[var(--console-hover-bg)] text-cafe-secondary hover:bg-[var(--console-border-soft)]'
+                  ? 'bg-[var(--console-active-bg)] font-semibold text-cafe'
+                  : 'bg-[var(--console-hover-bg)] text-cafe-secondary hover:bg-[var(--console-active-bg)]'
               }`}
               data-testid={`mc-dep-scope-${s}`}
             >
@@ -137,7 +137,7 @@ export function DependencyGraphTab({ items }: DependencyGraphTabProps) {
       </div>
 
       {/* Legend */}
-      <div className="mb-3 flex flex-wrap items-center gap-4 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2">
+      <div className="mb-3 flex flex-wrap items-center gap-4 rounded-xl bg-[var(--console-card-bg)] shadow-[0_8px_22px_rgba(43,33,26,0.04)] px-3 py-2">
         <LegendDot color="var(--mc-status-suggested-dot)" label="待审批" />
         <LegendDot color="var(--mc-status-dispatched-dot)" label="执行中" />
         <LegendDot color="var(--mc-status-done-dot)" label="已完成" />
@@ -153,11 +153,11 @@ export function DependencyGraphTab({ items }: DependencyGraphTabProps) {
 
       {/* DAG graph or empty state */}
       {filtered.length === 0 ? (
-        <div className="flex items-center justify-center rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] py-16 text-sm text-cafe-secondary">
+        <div className="flex items-center justify-center rounded-xl bg-[var(--console-card-bg)] shadow-[0_8px_22px_rgba(43,33,26,0.04)] py-16 text-sm text-cafe-secondary">
           当前筛选无有依赖关系的 Feature — 尝试切换到「全部」或刷新依赖数据
         </div>
       ) : (
-        <div className="h-[500px] w-full rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)]">
+        <div className="h-[500px] w-full rounded-xl bg-[var(--console-card-bg)] shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -188,7 +188,7 @@ function NodeDetailPanel({ data, onClose }: { data: FeatureNodeData; onClose: ()
   const colors = STATUS_COLORS[data.status];
   return (
     <div
-      className="mt-3 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4"
+      className="mt-3 rounded-xl bg-[var(--console-card-bg)] shadow-[0_8px_22px_rgba(43,33,26,0.04)] p-4"
       data-testid="mc-dep-node-detail"
     >
       <div className="flex items-center justify-between">

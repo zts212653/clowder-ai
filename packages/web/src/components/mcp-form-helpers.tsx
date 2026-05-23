@@ -1,4 +1,5 @@
 import type React from 'react';
+import { HubIcon } from './hub-icons';
 
 export interface KVPair {
   key: string;
@@ -22,7 +23,7 @@ export function kvToObj(
 }
 
 export const formInputClass =
-  'h-9 w-full rounded-lg border border-transparent bg-[var(--console-field-bg)] px-3 text-compact text-cafe outline-none placeholder:text-cafe-muted transition focus:border-cafe-accent focus:ring-2 focus:ring-cafe-accent/30';
+  'h-9 w-full rounded-lg border border-transparent bg-[var(--console-field-bg)] px-3 text-compact text-cafe outline-none placeholder:text-cafe-muted transition focus:ring-1 focus:ring-[var(--console-input-stroke)]';
 
 export function FormSection({ children }: { children: React.ReactNode }) {
   return <div className="space-y-2 rounded-xl p-3">{children}</div>;
@@ -38,21 +39,7 @@ export function FormItem({ label, children }: { label: string; children: React.R
 }
 
 function TrashIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <polyline points="3 6 5 6 21 6" />
-      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-    </svg>
-  );
+  return <HubIcon name="trash" className={className ?? 'h-[18px] w-[18px]'} />;
 }
 
 function PlusIcon({ className }: { className?: string }) {

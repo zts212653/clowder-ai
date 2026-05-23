@@ -12,11 +12,9 @@ function mergeTags(tags: string[], nextTag: string): string[] {
 }
 
 function pillClass(tone: 'purple' | 'green' | 'orange') {
-  if (tone === 'green')
-    return 'border-[var(--hub-tag-green-border)] bg-[var(--hub-tag-green-bg)] text-[var(--hub-tag-green-text)]';
-  if (tone === 'orange')
-    return 'border-[var(--hub-tag-orange-border)] bg-[var(--hub-surface-hover)] text-[var(--hub-accent-warm)]';
-  return 'border-[var(--hub-tag-purple-border)] bg-[var(--hub-tag-purple-bg)] text-[var(--hub-tag-purple-text)]';
+  if (tone === 'green') return 'bg-[var(--console-runtime-field-bg)] text-[var(--console-runtime-label)]';
+  if (tone === 'orange') return 'bg-[var(--console-pill-bg)] text-[var(--cafe-accent)]';
+  return 'bg-conn-purple-bg text-[var(--color-opus-primary)]';
 }
 
 export function TagPillList({
@@ -35,7 +33,7 @@ export function TagPillList({
   const locked = useMemo(() => new Set(lockedTags), [lockedTags]);
 
   if (tags.length === 0) {
-    return <span className="text-sm italic text-[var(--hub-text-muted)]">{emptyLabel}</span>;
+    return <span className="text-sm italic text-cafe-muted">{emptyLabel}</span>;
   }
 
   return (
@@ -43,7 +41,7 @@ export function TagPillList({
       {tags.map((tag) => (
         <span
           key={tag}
-          className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium ${pillClass(tone)}`}
+          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${pillClass(tone)}`}
         >
           <span>{tag}</span>
           {onRemove && !locked.has(tag) ? (
@@ -128,7 +126,7 @@ export function TagEditor({
         <button
           type="button"
           onClick={() => setAdding((value) => !value)}
-          className={`rounded-full border px-3 py-1 text-xs font-medium ${pillClass(tone)}`}
+          className={`rounded-full px-3 py-1 text-xs font-medium ${pillClass(tone)}`}
         >
           {addLabel}
         </button>
@@ -152,12 +150,12 @@ export function TagEditor({
               }
             }}
             placeholder={placeholder}
-            className="min-w-[220px] flex-1 rounded-xl border border-[var(--hub-border-field)] bg-[var(--hub-surface-field)] px-3 py-2 text-sm text-[var(--hub-heading)] outline-none transition focus:border-[var(--hub-accent)] focus:ring-2 focus:ring-[var(--hub-input-focus-ring)]"
+            className="min-w-[220px] flex-1 rounded-xl border border-transparent bg-[var(--console-pill-bg)] px-3 py-2 text-sm text-cafe outline-none transition focus:border-[var(--cafe-accent)] focus:ring-2 focus:ring-conn-amber-ring"
           />
           <button
             type="button"
             onClick={commit}
-            className="rounded-full border border-[var(--hub-accent)] bg-[var(--hub-surface-accent)] px-3 py-1.5 text-xs font-medium text-[var(--hub-tag-action-text)]"
+            className="rounded-full bg-[var(--console-field-bg)] px-3 py-1.5 text-xs font-medium text-[var(--cafe-accent)]"
           >
             添加
           </button>

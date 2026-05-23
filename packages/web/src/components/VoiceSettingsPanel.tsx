@@ -11,7 +11,7 @@ const BUILT_IN_ENTRIES = Object.entries(builtInTerms as Record<string, string>).
 
 function Section({ eyebrow, title, children }: { eyebrow: string; title: string; children: React.ReactNode }) {
   return (
-    <section className="console-list-card rounded-2xl p-5 shadow-[0_12px_30px_rgba(43,33,26,0.08)]">
+    <section className="console-list-card rounded-xl p-5 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
       <div className="space-y-1.5 mb-3">
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cafe-muted">{eyebrow}</p>
         <h3 className="text-sm font-semibold text-cafe-secondary">{title}</h3>
@@ -53,7 +53,7 @@ function AddTermRow({ onAdd }: { onAdd: (from: string, to: string) => void }) {
         value={from}
         onChange={(e) => setFrom(e.target.value)}
         placeholder="误识别词"
-        className="flex-1 text-xs border border-[var(--console-border-soft)] rounded px-2 py-1.5 focus:outline-none focus:border-[var(--console-border-strong)]"
+        className="flex-1 text-xs border border-[var(--console-border-soft)] rounded px-2 py-1.5 bg-transparent outline-none transition focus:bg-[var(--console-card-bg)] focus:ring-1 focus:ring-[var(--console-input-stroke)]"
         onCompositionStart={ime.onCompositionStart}
         onCompositionEnd={ime.onCompositionEnd}
         onKeyDown={handleFromKeyDown}
@@ -65,7 +65,7 @@ function AddTermRow({ onAdd }: { onAdd: (from: string, to: string) => void }) {
         value={to}
         onChange={(e) => setTo(e.target.value)}
         placeholder="正确词"
-        className="flex-1 text-xs border border-[var(--console-border-soft)] rounded px-2 py-1.5 focus:outline-none focus:border-[var(--console-border-strong)]"
+        className="flex-1 text-xs border border-[var(--console-border-soft)] rounded px-2 py-1.5 bg-transparent outline-none transition focus:bg-[var(--console-card-bg)] focus:ring-1 focus:ring-[var(--console-input-stroke)]"
         onCompositionStart={ime.onCompositionStart}
         onCompositionEnd={ime.onCompositionEnd}
         onKeyDown={handleKeyDown}
@@ -128,7 +128,7 @@ function CustomTermRow({
           onCompositionStart={ime.onCompositionStart}
           onCompositionEnd={ime.onCompositionEnd}
           onKeyDown={handleEditKeyDown}
-          className="flex-1 border border-[var(--console-border-soft)] rounded px-1.5 py-0.5 focus:outline-none focus:border-[var(--console-border-strong)]"
+          className="flex-1 border border-[var(--console-border-soft)] rounded px-1.5 py-0.5 bg-transparent outline-none transition focus:bg-[var(--console-card-bg)] focus:ring-1 focus:ring-[var(--console-input-stroke)]"
         />
         <span className="text-cafe-muted">&rarr;</span>
         <input
@@ -138,7 +138,7 @@ function CustomTermRow({
           onCompositionStart={ime.onCompositionStart}
           onCompositionEnd={ime.onCompositionEnd}
           onKeyDown={handleEditKeyDown}
-          className="flex-1 border border-[var(--console-border-soft)] rounded px-1.5 py-0.5 focus:outline-none focus:border-[var(--console-border-strong)]"
+          className="flex-1 border border-[var(--console-border-soft)] rounded px-1.5 py-0.5 bg-transparent outline-none transition focus:bg-[var(--console-card-bg)] focus:ring-1 focus:ring-[var(--console-input-stroke)]"
         />
         <button
           type="button"
@@ -242,7 +242,7 @@ export function VoiceSettingsPanel() {
             id="voice-language-select"
             value={settings.language}
             onChange={(e) => setLanguage(e.target.value as typeof settings.language)}
-            className="text-xs border border-[var(--console-border-soft)] rounded px-2 py-1.5 focus:outline-none focus:border-[var(--console-border-strong)]"
+            className="rounded-lg bg-[var(--console-field-bg)] pl-2 pr-6 py-1.5 text-xs text-cafe-secondary outline-none transition focus:ring-1 focus:ring-[var(--console-input-stroke)]"
           >
             <option value="zh">中文</option>
             <option value="en">English</option>
@@ -261,7 +261,7 @@ export function VoiceSettingsPanel() {
           onChange={(e) => setCustomPrompt(e.target.value || null)}
           placeholder="使用默认提示词"
           rows={3}
-          className="w-full text-xs border border-[var(--console-border-soft)] rounded px-2 py-1.5 focus:outline-none focus:border-[var(--console-border-strong)] resize-vertical font-mono"
+          className="w-full text-xs border border-[var(--console-border-soft)] rounded px-2 py-1.5 bg-transparent outline-none transition focus:bg-[var(--console-card-bg)] focus:ring-1 focus:ring-[var(--console-input-stroke)] resize-vertical font-mono"
         />
       </Section>
 

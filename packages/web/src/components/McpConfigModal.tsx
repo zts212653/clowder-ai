@@ -86,11 +86,6 @@ async function readApiError(res: Response, fallback: string): Promise<string> {
   return data.error ?? `${fallback} (${res.status})`;
 }
 
-function ownerHint(error: string): string {
-  if (!error.includes('DEFAULT_OWNER_USER_ID')) return error;
-  return `DEFAULT_OWNER_USER_ID 未配置：capability 写操作已按 D-3a fail-closed 拒绝。请在 dev 环境配置 DEFAULT_OWNER_USER_ID=default-user 后重试。`;
-}
-
 function modalSubtitle(readOnly: boolean, isEdit: boolean): string {
   if (readOnly) return '托管 MCP 为只读预览，敏感值仅显示键名。';
   if (isEdit) return '留空或保留遮罩值会沿用现有配置，不会把遮罩写回后端。';
@@ -163,7 +158,7 @@ export function McpConfigModal({
         body: JSON.stringify(buildPayload()),
       });
       if (!res.ok) {
-        setError(ownerHint(await readApiError(res as Response, '预览失败')));
+        setError(await readApiError(res as Response, '预览失败'));
         return;
       }
       setPreview((await res.json()) as McpInstallPreview);
@@ -185,7 +180,7 @@ export function McpConfigModal({
         body: JSON.stringify(buildPayload()),
       });
       if (!res.ok) {
-        setError(ownerHint(await readApiError(res as Response, isEdit ? '保存失败' : '安装失败')));
+        setError(await readApiError(res as Response, isEdit ? '保存失败' : '安装失败'));
         return;
       }
       onSaved();

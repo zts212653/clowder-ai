@@ -37,7 +37,7 @@ function MetricRow({ label, metric, hint }: { label: string; metric: ToolUsageMe
       : `数据不足 (N=${metric.sampleN}, 需 ≥${metric.threshold})`;
   const color = metric.sufficient ? 'text-cafe-black' : 'text-cafe-muted italic';
   return (
-    <div className="flex items-baseline justify-between border-b border-[var(--console-border-soft)]/30 py-2 last:border-0">
+    <div className="flex items-baseline justify-between console-divider-b py-2 last:border-0">
       <div>
         <div className="text-xs font-medium text-cafe-black">{label}</div>
         {hint ? <div className="text-micro text-cafe-muted">{hint}</div> : null}

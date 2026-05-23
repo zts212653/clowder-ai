@@ -12,7 +12,7 @@ interface BrowserTabBarProps {
 
 export function BrowserTabBar({ tabs, activeTabId, onSelect, onClose, onAdd }: BrowserTabBarProps) {
   return (
-    <div className="flex items-center bg-[var(--ws-surface-warm)] border-b border-[var(--console-border-soft)] overflow-x-auto">
+    <div className="flex items-center bg-[var(--ws-surface-warm)] console-divider-b overflow-x-auto">
       {tabs.map((tab) => {
         const isActive = tab.id === activeTabId;
         return (

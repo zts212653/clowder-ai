@@ -74,11 +74,11 @@ export function TranslationMatrix({ cards, selectedCardId, onSelectCard, onCreat
 
       {/* Table */}
       {filtered.length === 0 ? (
-        <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-8 text-center text-sm text-cafe-secondary">
+        <div className="rounded-lg bg-[var(--console-shell-bg)] p-8 text-center text-sm text-cafe-secondary">
           {cards.length === 0 ? '尚无 Intent Cards。点击上方按钮开始需求翻译。' : '当前筛选无结果。'}
         </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-[var(--console-border-soft)]">
+        <div className="overflow-hidden rounded-lg shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
           <table className="w-full text-left text-xs">
             <thead className="bg-[var(--console-hover-bg)] text-micro font-semibold uppercase text-cafe-secondary">
               <tr>

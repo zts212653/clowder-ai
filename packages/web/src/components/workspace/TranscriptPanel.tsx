@@ -223,7 +223,7 @@ export function TranscriptPanel() {
   const sourceLabel = status.app_name ? `${status.app_name}` : status.source === 'mic' ? 'Microphone' : '—';
 
   return (
-    <div className="flex h-full flex-col border-l border-cafe-border bg-cafe-surface-primary">
+    <div className="flex h-full flex-col bg-cafe-surface-primary">
       {/* Header */}
       <div className="flex items-center gap-2 border-b border-cafe-border px-3 py-2">
         <span

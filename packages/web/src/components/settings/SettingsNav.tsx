@@ -1,6 +1,5 @@
 'use client';
 
-import type { CSSProperties } from 'react';
 import { usePinnedSections } from '@/hooks/usePinnedSections';
 import { HubIcon } from '../hub-icons';
 import { SETTINGS_SECTIONS, type SettingsSection } from './settings-nav-config';
@@ -31,20 +30,9 @@ function NavItem({
         onClick={onSelect}
         data-guide-id={`settings.${section.id}`}
         data-active={active ? 'true' : 'false'}
-        className={`flex w-full items-center gap-2 rounded-lg px-2.5 h-9 text-left transition-colors ${active ? 'bg-[var(--console-active-bg)] font-medium' : 'hover:bg-[var(--console-hover-bg)]'}`}
-        style={
-          active
-            ? ({
-                ['--console-active-bg' as string]: `color-mix(in srgb, ${section.color} 10%, var(--console-card-bg) 90%)`,
-                color: section.color,
-              } as CSSProperties)
-            : undefined
-        }
+        className={`flex w-full items-center gap-2 rounded-lg px-2.5 h-9 text-left transition-colors ${active ? 'bg-[var(--console-active-bg)] font-medium text-cafe-black' : 'hover:bg-[var(--console-hover-bg)]'}`}
       >
-        <span
-          className="flex-shrink-0"
-          style={active ? { color: section.color } : { color: 'var(--cafe-text-secondary)' }}
-        >
+        <span className="flex-shrink-0" style={{ color: active ? 'var(--cafe-accent)' : 'var(--cafe-text-secondary)' }}>
           <HubIcon name={section.icon} className="h-4 w-4" />
         </span>
         <span className={`text-compact truncate ${active ? 'font-medium' : 'text-cafe-secondary'}`}>
@@ -60,7 +48,7 @@ function NavItem({
         className={`absolute right-1 h-6 w-6 flex items-center justify-center rounded transition-opacity ${
           pinned
             ? 'opacity-80 text-cafe-secondary'
-            : 'opacity-50 group-hover:opacity-60 focus-visible:opacity-80 text-cafe-muted hover:text-cafe-secondary'
+            : 'opacity-0 group-hover:opacity-60 focus-visible:opacity-80 text-cafe-muted hover:text-cafe-secondary'
         }`}
         title={pinned ? '取消固定到侧栏' : '固定到侧栏'}
       >

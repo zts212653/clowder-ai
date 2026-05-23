@@ -28,7 +28,7 @@ export function requireLifecycleOwner(request: FastifyRequest, reply: FastifyRep
 export function lifecycleOwnerError(reply: FastifyReply): { error: string } {
   if (reply.statusCode === 401) return { error: 'Authentication required' };
   return {
-    error: 'Service lifecycle writes require DEFAULT_OWNER_USER_ID to be configured and match the session owner',
+    error: 'Service lifecycle writes can only be performed by the configured owner',
   };
 }
 

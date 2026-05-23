@@ -180,7 +180,7 @@ export function IndexStatus() {
     return (
       <div data-testid="index-status" className="rounded-lg border border-conn-red-ring bg-conn-red-bg p-4">
         <p className="text-sm text-conn-red-text">{error}</p>
-        <button type="button" onClick={fetchAll} className="mt-2 text-xs text-red-700 underline">
+        <button type="button" onClick={fetchAll} className="mt-2 text-xs text-conn-red-text underline">
           重试
         </button>
       </div>
@@ -240,12 +240,12 @@ export function IndexStatus() {
                     type="button"
                     disabled={isUpdating}
                     onClick={() => cycleEnvVar(v.name, v.currentValue, v.allowedValues)}
-                    className={`rounded px-2 py-0.5 text-micro font-medium text-white transition-colors ${
+                    className={`rounded px-2 py-0.5 text-micro font-medium transition-colors ${
                       current === 'on' || current === 'apply'
-                        ? 'bg-emerald-600 hover:bg-emerald-700'
+                        ? 'bg-cafe-accent text-[var(--cafe-surface)] hover:bg-cafe-accent-hover'
                         : current === 'off'
-                          ? 'bg-zinc-400 hover:bg-zinc-500'
-                          : 'bg-amber-500 hover:bg-amber-600'
+                          ? 'bg-[var(--console-field-bg)] text-cafe-secondary hover:bg-[var(--console-hover-bg)]'
+                          : 'bg-conn-amber-bg text-conn-amber-text hover:opacity-80'
                     } ${isUpdating ? 'opacity-50' : ''}`}
                     title={`点击切换: ${v.allowedValues!.join(' → ')}`}
                   >
@@ -256,10 +256,10 @@ export function IndexStatus() {
                     type="button"
                     disabled={isUpdating}
                     onClick={() => cycleEnvVar(v.name, v.currentValue)}
-                    className={`relative h-5 w-9 rounded-full transition-colors ${isOn ? 'bg-conn-green-text' : 'bg-gray-300'} ${isUpdating ? 'opacity-50' : ''}`}
+                    className={`relative h-5 w-9 rounded-full transition-colors ${isOn ? 'bg-cafe-accent' : 'bg-[var(--console-field-bg)]'} ${isUpdating ? 'opacity-50' : ''}`}
                   >
                     <span
-                      className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${isOn ? 'translate-x-4' : ''}`}
+                      className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-[var(--cafe-surface)] shadow transition-transform ${isOn ? 'translate-x-4' : ''}`}
                     />
                   </button>
                 )}
@@ -294,7 +294,7 @@ export function IndexStatus() {
         <button
           type="button"
           onClick={fetchAll}
-          className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-1.5 text-xs text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)]"
+          className="rounded-lg bg-cafe-accent px-3 py-1.5 text-xs font-semibold text-[var(--cafe-surface)] transition-colors hover:bg-cafe-accent-hover"
         >
           刷新状态
         </button>

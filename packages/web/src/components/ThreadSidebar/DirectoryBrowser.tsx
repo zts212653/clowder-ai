@@ -165,7 +165,7 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
   return (
     <div className="flex flex-col h-full min-h-0 overflow-hidden">
       {/* ── Breadcrumb + New Folder ── */}
-      <div className="flex items-center gap-1 px-5 h-10 bg-cafe-white border-b border-[var(--console-border-soft)] flex-shrink-0 overflow-x-auto">
+      <div className="flex items-center gap-1 px-5 h-10 bg-cafe-white console-divider-b flex-shrink-0 overflow-x-auto">
         {segments.map((seg, i) => (
           <span key={seg.path || `_${i}`} className="flex items-center gap-1 flex-shrink-0">
             {i > 0 && (
@@ -320,7 +320,7 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
       </div>
 
       {/* ── Path input ── */}
-      <div className="px-5 py-3 border-t border-[var(--console-border-soft)] space-y-2 flex-shrink-0">
+      <div className="px-5 py-3 console-divider-t space-y-2 flex-shrink-0">
         <div className="flex gap-2">
           <TerminalIcon />
           <input

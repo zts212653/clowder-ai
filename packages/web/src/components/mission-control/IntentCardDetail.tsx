@@ -56,7 +56,7 @@ export function IntentCardDetail({ card, onTriaged }: IntentCardDetailProps) {
       </div>
 
       {/* Core slots */}
-      <div className="space-y-2 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3">
+      <div className="space-y-2 rounded-xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
         <SlotRow label="Actor" value={card.actor} />
         <SlotRow label="Context" value={card.contextTrigger} />
         <SlotRow label="Goal" value={card.goal} />
@@ -67,7 +67,7 @@ export function IntentCardDetail({ card, onTriaged }: IntentCardDetailProps) {
 
       {/* Original text */}
       {card.originalText && (
-        <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-hover-bg)] p-3">
+        <div className="rounded-xl bg-[var(--console-hover-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
           <div className="mb-1 text-micro font-semibold uppercase text-cafe-secondary">甲方原文</div>
           <div className="text-cafe">{card.originalText}</div>
         </div>
@@ -88,7 +88,7 @@ export function IntentCardDetail({ card, onTriaged }: IntentCardDetailProps) {
       )}
 
       {/* Triage form */}
-      <div className="space-y-2 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3">
+      <div className="space-y-2 rounded-xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
         <div className="text-micro font-semibold uppercase text-cafe-secondary">Triage 评估</div>
         <ScoreSlider label="Clarity" value={clarity} onChange={setClarity} />
         <ScoreSlider label="Groundedness" value={groundedness} onChange={setGroundedness} />

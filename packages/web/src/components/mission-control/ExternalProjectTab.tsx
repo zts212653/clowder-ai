@@ -234,7 +234,7 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Sub-header */}
-      <div className="flex items-center justify-between border-b border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-6 py-2">
+      <div className="flex items-center justify-between console-divider-b bg-[var(--console-card-bg)] px-6 py-2">
         <div className="flex gap-1">
           {SUB_TABS.map((t) => (
             <button
@@ -257,7 +257,7 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
             type="button"
             onClick={() => void handleImportBacklog()}
             disabled={isStale}
-            className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary hover:bg-[var(--console-hover-bg)] disabled:opacity-50 disabled:cursor-not-allowed"
+            className="rounded-lg bg-[var(--console-shell-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary hover:bg-[var(--console-hover-bg)] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             导入 Backlog
           </button>
@@ -278,7 +278,7 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
           <div className="space-y-4">
             {/* Stage 0 Frame prompt */}
             {!auditFrame && subTab === 'audit' && (
-              <div className="rounded-lg border-2 border-dashed border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4 text-center">
+              <div className="rounded-lg bg-[var(--console-shell-bg)] p-4 text-center">
                 <div className="text-sm font-medium text-cafe-secondary">Stage 0: Frame 尚未完成</div>
                 <div className="mt-1 text-xs text-cafe-secondary">建议先完成六问定位，再开始需求翻译</div>
               </div>
@@ -332,7 +332,7 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
 
             {subTab === 'features' &&
               (projectItems.length === 0 ? (
-                <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-8 text-center text-sm text-cafe-secondary">
+                <div className="rounded-lg bg-[var(--console-shell-bg)] p-8 text-center text-sm text-cafe-secondary">
                   暂无功能 — 使用上方「导入 Backlog」按钮从项目导入
                 </div>
               ) : (
@@ -340,7 +340,7 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
                   {projectItems.map((item) => (
                     <div
                       key={item.id}
-                      className="flex items-center justify-between rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-4 py-3"
+                      className="flex items-center justify-between rounded-xl bg-[var(--console-card-bg)] px-4 py-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
                     >
                       <div className="flex items-center gap-3">
                         <span className="rounded bg-[var(--console-hover-bg)] px-2 py-0.5 text-micro font-bold text-cafe-secondary">

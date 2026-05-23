@@ -317,8 +317,9 @@ export const terminalRoutes: FastifyPluginAsync<TerminalRouteOpts> = async (app,
   app.get<{ Params: { id: string } }>('/api/threads/:id/active-pane', async (req, reply) => {
     if (!agentPaneRegistry) return reply.status(501).send({ error: 'Agent pane tracking not enabled' });
     const session = agentPaneRegistry.getBgCarrierByThread(req.params.id);
-    if (!session) return reply.status(404).send({ error: 'No active bg carrier session for thread' });
+    if (!session) return { active: false };
     return {
+      active: true,
       invocationId: session.invocationId,
       daemonShortId: session.daemonShortId,
       catId: session.catId,

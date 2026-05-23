@@ -33,7 +33,7 @@ export function BrowserToolbar({
 }: BrowserToolbarProps) {
   const ime = useIMEGuard();
   return (
-    <div className="flex items-center gap-1 px-2 py-1.5 border-b border-[var(--console-border-soft)] bg-cafe-surface/60">
+    <div className="flex items-center gap-1 px-2 py-1.5 console-divider-b bg-cafe-surface/60">
       <button
         type="button"
         onClick={onBack}

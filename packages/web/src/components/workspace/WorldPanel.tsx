@@ -63,7 +63,7 @@ export function WorldPanel({ worldId, apiBase = '' }: WorldPanelProps) {
 
   return (
     <div className="flex flex-col h-full bg-cafe-surface/80 text-sm">
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--console-border-soft)]">
+      <div className="flex items-center gap-2 px-3 py-2 console-divider-b">
         <span className="font-semibold text-cafe-primary">{world?.name ?? worldId}</span>
         <span className="text-xs text-cafe-secondary">[{world?.status ?? '...'}]</span>
         <div className="ml-auto flex gap-1">

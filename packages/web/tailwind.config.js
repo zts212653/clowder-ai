@@ -1,4 +1,6 @@
 /** @type {import('tailwindcss').Config} */
+const typographyTokens = require('./src/styles/typography-tokens.json');
+
 module.exports = {
   darkMode: ['selector', '[data-theme="dark"]'],
   content: ['./src/**/*.{js,ts,jsx,tsx,mdx}', '../shared/src/**/*.{js,ts}'],
@@ -177,9 +179,7 @@ module.exports = {
           glow: 'var(--ww-shadow-glow)',
         },
       },
-      fontSize: {
-        micro: ['10px', { lineHeight: '14px' }],
-      },
+      fontSize: typographyTokens.fontSize,
       keyframes: {
         'fade-in': {
           '0%': { opacity: '0', transform: 'translateY(4px)' },
@@ -254,5 +254,13 @@ module.exports = {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    ({ addBase }) => {
+      const vars = {};
+      for (const [name, px] of Object.entries(typographyTokens.fontSizePx)) {
+        vars[`--console-font-${name}`] = `${px}px`;
+      }
+      addBase({ ':root': vars });
+    },
+  ],
 };

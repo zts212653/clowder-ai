@@ -1,0 +1,18 @@
+{
+  "fontSize": {
+    "micro": ["10px", { "lineHeight": "14px" }],
+    "label": ["11px", { "lineHeight": "16px" }],
+    "compact": ["13px", { "lineHeight": "20px" }]
+  },
+  "fontSizePx": {
+    "micro": 10,
+    "label": 11,
+    "xs": 12,
+    "compact": 13,
+    "sm": 14,
+    "base": 16,
+    "lg": 18,
+    "xl": 20,
+    "leaderboardMedal": 28
+  }
+}

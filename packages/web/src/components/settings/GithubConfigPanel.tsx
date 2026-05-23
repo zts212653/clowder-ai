@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { formInputClass } from '../mcp-form-helpers';
 import { SettingsPrimaryButton, SettingsStatusStrip, SettingsText } from './primitives';
 
 const REDACTED_PLACEHOLDER = '••••••';
@@ -24,11 +25,8 @@ interface ConnectorStatusResponse {
 }
 
 function friendlyError(message: string, fallback: string): string {
-  if (message.includes('DEFAULT_OWNER_USER_ID')) {
-    return 'DEFAULT_OWNER_USER_ID 未配置，后端拒绝写入 GitHub token。请先配置 owner 后再保存。';
-  }
   if (message.includes('configured owner')) {
-    return '当前登录用户不是配置 owner，不能修改 GitHub token。';
+    return '当前会话用户不是配置 owner，不能修改 GitHub token。';
   }
   return message.trim() || fallback;
 }
@@ -108,10 +106,7 @@ export function GithubConfigPanel() {
   const messageTone = message?.tone === 'success' ? 'success' : message?.tone === 'error' ? 'error' : 'info';
 
   return (
-    <div
-      className="space-y-3"
-      style={{ borderTop: '1px solid var(--console-border-soft)', paddingInline: '1rem', paddingBlock: '0.75rem' }}
-    >
+    <div className="space-y-3 px-4 py-3">
       <div className="space-y-1">
         <SettingsText as="p" variant="sm" tone="default" className="font-medium">
           GitHub Token
@@ -126,13 +121,9 @@ export function GithubConfigPanel() {
           加载配置项...
         </SettingsText>
       ) : (
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid gap-3">
           {fields.map((field) => (
-            <label
-              key={field.envName}
-              className="space-y-1 font-medium"
-              style={{ fontSize: '0.75rem', color: 'var(--cafe-text-secondary)' }}
-            >
+            <label key={field.envName} className="space-y-1 text-xs font-medium text-cafe-secondary">
               {field.label}
               <input
                 name={field.envName}
@@ -146,16 +137,7 @@ export function GithubConfigPanel() {
                       : '未配置'
                     : (field.currentValue ?? '未配置')
                 }
-                className="w-full"
-                style={{
-                  borderRadius: '0.5rem',
-                  border: '1px solid var(--console-border-soft)',
-                  backgroundColor: 'var(--cafe-surface-elevated)',
-                  paddingInline: '0.75rem',
-                  paddingBlock: '0.5rem',
-                  fontSize: '0.875rem',
-                  color: 'var(--cafe-text)',
-                }}
+                className={formInputClass}
                 data-testid={`field-${field.envName}`}
               />
               {field.restartRequired && (

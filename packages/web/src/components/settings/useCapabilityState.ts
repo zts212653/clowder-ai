@@ -118,6 +118,7 @@ export function useCapabilityState(filterType: 'mcp' = 'mcp') {
       try {
         const query = new URLSearchParams();
         if (projectPath) query.set('projectPath', projectPath);
+        if (item.source === 'external') query.set('hard', 'true');
         const queryString = query.toString();
         const res = await apiFetch(`/api/capabilities/mcp/${encodeURIComponent(item.id)}?${queryString}`, {
           method: 'DELETE',

@@ -92,13 +92,6 @@ function needsRestart(variable: EnvVar): boolean {
   return variable.runtimeEditable === false || RESTART_REQUIRED_ENV_VARS.has(variable.name);
 }
 
-function buildVariableHint(variable: EnvVar): string | null {
-  const hints: string[] = [];
-  if (needsRestart(variable)) hints.push('写回 .env 后需重启相关服务生效。');
-  if (variable.maskMode === 'url') hints.push('当前值已做凭证脱敏；修改时请填写完整连接串。');
-  return hints.length > 0 ? hints.join(' ') : null;
-}
-
 export function isEditableVariable(variable: EnvVar): boolean {
   if (variable.runtimeEditable === true) return true;
   if (variable.runtimeEditable === false) return false;
@@ -303,6 +296,7 @@ export function EnvVarsSection({
                     </SettingsText>
                     <SettingsText tone="muted" className="truncate">
                       {v.description}
+                      {v.defaultValue && <span className="ml-1 opacity-60">（默认: {v.defaultValue}）</span>}
                     </SettingsText>
                     {v.deprecated && (
                       <SettingsBadge tone="red" size="xxs">
@@ -310,9 +304,6 @@ export function EnvVarsSection({
                       </SettingsBadge>
                     )}
                   </div>
-                  <SettingsText as="div" tone="muted">
-                    默认: {v.defaultValue}
-                  </SettingsText>
                   {!isEditableVariable(v) && (
                     <SettingsText as="div" tone={v.currentValue ? 'secondary' : 'muted'} className="font-mono">
                       {v.currentValue ?? '未设置'}
@@ -337,11 +328,6 @@ export function EnvVarsSection({
                             : v.defaultValue
                       }
                     />
-                    {buildVariableHint(v) ? (
-                      <SettingsText as="div" tone="muted" className="leading-5">
-                        {buildVariableHint(v)}
-                      </SettingsText>
-                    ) : null}
                   </div>
                 ) : (
                   <SettingsReadOnlyField>只读变量（认证凭证 / 仅启动期生效）</SettingsReadOnlyField>

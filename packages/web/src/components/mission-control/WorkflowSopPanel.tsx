@@ -117,7 +117,7 @@ export function WorkflowSopPanel({ backlogItemId }: WorkflowSopPanelProps) {
   if (!backlogItemId) {
     return (
       <section
-        className="rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3"
+        className="rounded-2xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
         data-testid="mc-workflow-sop"
       >
         <p className="text-xs text-cafe-secondary">选择一个 backlog 项查看 SOP 状态</p>
@@ -128,7 +128,7 @@ export function WorkflowSopPanel({ backlogItemId }: WorkflowSopPanelProps) {
   if (loading) {
     return (
       <section
-        className="rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3"
+        className="rounded-2xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
         data-testid="mc-workflow-sop"
       >
         <p className="text-xs text-cafe-secondary">加载 SOP 告示牌中...</p>
@@ -139,7 +139,7 @@ export function WorkflowSopPanel({ backlogItemId }: WorkflowSopPanelProps) {
   if (fetchError) {
     return (
       <section
-        className="rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3"
+        className="rounded-2xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
         data-testid="mc-workflow-sop"
       >
         <p className="text-xs text-conn-red-text">{fetchError}</p>
@@ -150,10 +150,10 @@ export function WorkflowSopPanel({ backlogItemId }: WorkflowSopPanelProps) {
   if (!sop) {
     return (
       <section
-        className="rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3"
+        className="rounded-2xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
         data-testid="mc-workflow-sop"
       >
-        <p className="rounded-lg border border-dashed border-[var(--console-border-soft)] px-2 py-2 text-xs text-cafe-secondary">
+        <p className="rounded-lg bg-[var(--console-shell-bg)] px-2 py-2 text-xs text-cafe-secondary">
           暂无 SOP 告示牌数据
         </p>
       </section>
@@ -164,7 +164,7 @@ export function WorkflowSopPanel({ backlogItemId }: WorkflowSopPanelProps) {
 
   return (
     <section
-      className="rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3"
+      className="rounded-2xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
       data-testid="mc-workflow-sop"
     >
       {/* Header */}
@@ -179,7 +179,7 @@ export function WorkflowSopPanel({ backlogItemId }: WorkflowSopPanelProps) {
       </div>
 
       {/* Baton holder + next skill */}
-      <div className="mb-3 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2.5 py-2">
+      <div className="mb-3 rounded-xl bg-[var(--console-card-bg)] px-2.5 py-2 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
         <p className="text-xs text-cafe-secondary">
           接力棒：
           <span className="font-semibold text-cafe" data-testid="sop-baton-holder">
@@ -195,7 +195,7 @@ export function WorkflowSopPanel({ backlogItemId }: WorkflowSopPanelProps) {
 
       {/* Resume capsule */}
       <div
-        className="mb-3 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2.5 py-2"
+        className="mb-3 rounded-xl bg-[var(--console-card-bg)] px-2.5 py-2 shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
         data-testid="sop-resume-capsule"
       >
         <p className="mb-1 text-micro font-semibold uppercase tracking-wide text-cafe-secondary">Resume Capsule</p>
@@ -233,7 +233,7 @@ export function WorkflowSopPanel({ backlogItemId }: WorkflowSopPanelProps) {
       </div>
 
       {/* Footer */}
-      <div className="border-t border-[var(--console-border-soft)] pt-1.5">
+      <div className="console-divider-t pt-1.5">
         <p className="text-micro text-cafe-muted">
           更新于{' '}
           {new Date(sop.updatedAt).toLocaleString('zh-CN', {

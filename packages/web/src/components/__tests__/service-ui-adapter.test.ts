@@ -16,40 +16,72 @@ function makeHome(overrides: Partial<HomeServiceState> = {}): HomeServiceState {
     configured: true,
     status: 'healthy',
     features: ['voice-input'],
-    availableActions: [],
+    installed: true,
+    enabled: true,
+    installable: true,
     ...overrides,
   };
 }
 
 describe('adaptServiceState', () => {
-  it('maps healthy to running', () => {
+  it('maps healthy to running (installed=true, enabled=true)', () => {
     const result = adaptServiceState(makeHome({ status: 'healthy' }));
     expect(result.status).toBe('running');
     expect(result.statusLabel).toBe('运行中');
     expect(result.running).toBe(true);
-    expect(result.installedKnown).toBe(true);
+    expect(result.installed).toBe(true);
+    expect(result.enabled).toBe(true);
   });
 
-  it('maps unhealthy + configured to error', () => {
-    const result = adaptServiceState(makeHome({ status: 'unhealthy', configured: true, error: 'HTTP 503' }));
+  it('maps installed + enabled + unhealthy to error', () => {
+    const result = adaptServiceState(
+      makeHome({ status: 'unhealthy', installed: true, enabled: true, error: 'HTTP 503' }),
+    );
     expect(result.status).toBe('error');
     expect(result.statusLabel).toBe('异常');
     expect(result.running).toBe(false);
-    expect(result.installedKnown).toBe(true);
+    expect(result.installed).toBe(true);
     expect(result.error).toBe('HTTP 503');
   });
 
-  it('maps not_configured to not_configured', () => {
-    const result = adaptServiceState(makeHome({ status: 'not_configured', configured: false, endpoint: null }));
+  it('maps installed + disabled to stopped', () => {
+    const result = adaptServiceState(makeHome({ status: 'unhealthy', installed: true, enabled: false }));
+    expect(result.status).toBe('stopped');
+    expect(result.statusLabel).toBe('未启动');
+    expect(result.running).toBe(false);
+    expect(result.installed).toBe(true);
+    expect(result.enabled).toBe(false);
+  });
+
+  it('suppresses error when installed but disabled', () => {
+    const result = adaptServiceState(
+      makeHome({ status: 'unhealthy', installed: true, enabled: false, error: 'fetch failed' }),
+    );
+    expect(result.error).toBeUndefined();
+  });
+
+  it('maps not installed to not_configured', () => {
+    const result = adaptServiceState(
+      makeHome({ status: 'not_configured', configured: false, endpoint: null, installed: false, enabled: false }),
+    );
     expect(result.status).toBe('not_configured');
     expect(result.statusLabel).toBe('未配置');
     expect(result.running).toBe(false);
-    expect(result.installedKnown).toBe(false);
+    expect(result.installed).toBe(false);
   });
 
-  it('passes through availableActions unchanged', () => {
-    const result = adaptServiceState(makeHome({ availableActions: ['start', 'uninstall'] }));
-    expect(result.availableActions).toEqual(['start', 'uninstall']);
+  it('suppresses error when not installed', () => {
+    const result = adaptServiceState(
+      makeHome({
+        status: 'not_configured',
+        configured: false,
+        endpoint: null,
+        installed: false,
+        enabled: false,
+        error: 'fetch failed',
+      }),
+    );
+    expect(result.error).toBeUndefined();
   });
 
   it('passes through prerequisites', () => {
@@ -66,6 +98,56 @@ describe('adaptServiceState', () => {
     expect(result.category).toBe('voice');
     expect(result.features).toEqual(['voice-output']);
   });
+
+  it('passes through installable flag', () => {
+    const result = adaptServiceState(makeHome({ installable: false }));
+    expect(result.installable).toBe(false);
+  });
+
+  it('healthy does not override installed/enabled from API', () => {
+    const result = adaptServiceState(makeHome({ status: 'healthy', installed: false, enabled: false }));
+    expect(result.running).toBe(true);
+    expect(result.installed).toBe(false);
+    expect(result.enabled).toBe(false);
+    expect(result.status).toBe('not_configured');
+  });
+
+  it('scriptless healthy maps to running regardless of enabled', () => {
+    const result = adaptServiceState(
+      makeHome({ id: 'audio-capture', status: 'healthy', installable: false, enabled: false }),
+    );
+    expect(result.status).toBe('running');
+    expect(result.running).toBe(true);
+  });
+
+  it('scriptless unhealthy+configured maps to error with message', () => {
+    const result = adaptServiceState(
+      makeHome({
+        id: 'audio-capture',
+        status: 'unhealthy',
+        installable: false,
+        enabled: false,
+        configured: true,
+        error: 'ECONNREFUSED',
+      }),
+    );
+    expect(result.status).toBe('error');
+    expect(result.error).toBe('ECONNREFUSED');
+  });
+
+  it('scriptless unconfigured maps to not_configured', () => {
+    const result = adaptServiceState(
+      makeHome({
+        id: 'audio-capture',
+        status: 'not_configured',
+        installable: false,
+        enabled: false,
+        configured: false,
+        endpoint: null,
+      }),
+    );
+    expect(result.status).toBe('not_configured');
+  });
 });
 
 describe('adaptServiceToPlugin', () => {
@@ -79,9 +161,10 @@ describe('adaptServiceToPlugin', () => {
       features: ['voice-input'],
       status: 'running',
       statusLabel: '运行中',
-      installedKnown: true,
+      installed: true,
+      enabled: true,
+      installable: true,
       running: true,
-      availableActions: [],
       ...overrides,
     };
   }
@@ -94,13 +177,13 @@ describe('adaptServiceToPlugin', () => {
   });
 
   it('maps installed-but-stopped service to configured plugin', () => {
-    const result = adaptServiceToPlugin(makeUi({ running: false, installedKnown: true }));
+    const result = adaptServiceToPlugin(makeUi({ running: false, installed: true }));
     expect(result.status).toBe('configured');
     expect(result.statusLabel).toBe('已安装');
   });
 
-  it('maps unconfigured service to available plugin', () => {
-    const result = adaptServiceToPlugin(makeUi({ running: false, installedKnown: false }));
+  it('maps not-installed service to available plugin', () => {
+    const result = adaptServiceToPlugin(makeUi({ running: false, installed: false }));
     expect(result.status).toBe('available');
     expect(result.statusLabel).toBe('可安装');
   });
@@ -111,10 +194,16 @@ describe('adaptServiceToPlugin', () => {
   });
 });
 
-describe('adapter does not expose enabled', () => {
-  it('ServiceUiState has no enabled field from home data', () => {
+describe('explicit state fields', () => {
+  it('no availableActions in adapter types', () => {
     const result = adaptServiceState(makeHome());
-    expect('enabled' in result).toBe(false);
+    expect('availableActions' in result).toBe(false);
+  });
+
+  it('exposes installed and enabled fields', () => {
+    const result = adaptServiceState(makeHome({ installed: true, enabled: false }));
+    expect('installed' in result).toBe(true);
+    expect('enabled' in result).toBe(true);
   });
 });
 
@@ -125,14 +214,18 @@ describe('end-to-end: home service → plugin status', () => {
     expect(plugin.statusLabel).toBe('运行中');
   });
 
-  it('unhealthy configured home service becomes configured plugin', () => {
-    const plugin = adaptServiceToPlugin(adaptServiceState(makeHome({ status: 'unhealthy', configured: true })));
+  it('installed disabled home service becomes configured plugin', () => {
+    const plugin = adaptServiceToPlugin(
+      adaptServiceState(makeHome({ status: 'unhealthy', installed: true, enabled: false })),
+    );
     expect(plugin.status).toBe('configured');
     expect(plugin.statusLabel).toBe('已安装');
   });
 
-  it('not_configured home service becomes available plugin', () => {
-    const plugin = adaptServiceToPlugin(adaptServiceState(makeHome({ status: 'not_configured', configured: false })));
+  it('not installed home service becomes available plugin', () => {
+    const plugin = adaptServiceToPlugin(
+      adaptServiceState(makeHome({ status: 'not_configured', configured: false, installed: false, enabled: false })),
+    );
     expect(plugin.status).toBe('available');
     expect(plugin.statusLabel).toBe('可安装');
   });

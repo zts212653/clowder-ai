@@ -193,7 +193,7 @@ export function HubConnectorConfigTab() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-3">
       {platforms.map((platform) => {
         const isExpanded = expandedId === platform.id;
         const v = PLATFORM_VISUALS[platform.id] ?? DEFAULT_VISUAL;
@@ -208,7 +208,7 @@ export function HubConnectorConfigTab() {
         return (
           <div
             key={platform.id}
-            className="console-list-card rounded-2xl overflow-hidden shadow-[var(--hub-shadow)] hover:shadow-[var(--hub-shadow-hover)]"
+            className="console-list-card rounded-xl overflow-hidden shadow-[0_8px_22px_rgba(43,33,26,0.04)] hover:shadow-md"
             data-testid={`platform-card-${platform.id}`}
             data-guide-id={`connector.${platform.id}`}
             data-active={isExpanded ? 'true' : 'false'}
@@ -216,16 +216,16 @@ export function HubConnectorConfigTab() {
             <button
               type="button"
               onClick={() => handleExpand(platform.id)}
-              className="flex w-full items-center gap-4 px-5 py-[18px] transition-colors"
+              className="flex w-full items-center gap-3 px-4 py-3 transition-colors"
             >
               <span
-                className="flex h-11 w-11 items-center justify-center rounded-xl shrink-0"
+                className="flex h-9 w-9 items-center justify-center rounded-xl shrink-0"
                 style={{ backgroundColor: v.iconBg, color: v.iconColor }}
               >
                 {v.icon}
               </span>
               <span className="flex-1 text-left min-w-0 space-y-1">
-                <span className="block text-base font-extrabold text-cafe">
+                <span className="block text-sm font-semibold text-cafe">
                   {platform.name}
                   {platform.nameEn !== platform.name ? ` ${platform.nameEn}` : ''}
                 </span>
@@ -243,7 +243,7 @@ export function HubConnectorConfigTab() {
             {/* F132 Phase E: WeCom Bot guided setup — dedicated panel with validate+connect */}
             {isExpanded && platform.id === 'wecom-bot' && (
               <div className="px-4 py-4 space-y-4">
-                <div className="console-list-card rounded-2xl overflow-hidden shadow-[var(--hub-shadow)]">
+                <div className="console-list-card rounded-xl overflow-hidden shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
                   <div className="console-code-pane space-y-3.5 px-4 py-4">
                     {guideSteps.map((step, idx) => (
                       <div key={idx} className="space-y-1.5">
@@ -317,7 +317,7 @@ export function HubConnectorConfigTab() {
 
             {isExpanded && platform.id !== 'weixin' && platform.id !== 'wecom-bot' && (
               <div className="px-4 py-4 space-y-4">
-                <div className="console-list-card rounded-2xl overflow-hidden shadow-[var(--hub-shadow)]">
+                <div className="console-list-card rounded-xl overflow-hidden shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
                   <div className="bg-conn-sky-bg px-4 py-3 flex items-center gap-3">
                     <div className="w-9 h-9 rounded-lg bg-conn-sky-ring flex items-center justify-center text-conn-sky-text">
                       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

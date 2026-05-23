@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
+import { getServiceConfig } from '../domains/services/service-config.js';
 import {
   type FetchServiceHealth,
   getServiceManifest,
@@ -30,11 +31,14 @@ function requireIdentity(request: FastifyRequest, reply: FastifyReply): boolean 
 }
 
 export const servicesRoutes: FastifyPluginAsync<ServicesRouteOptions> = async (app, options) => {
+  const getConfig = options.lifecycle?.serviceConfig?.get ?? getServiceConfig;
+
   app.get('/api/services', async (request, reply) => {
     if (!requireIdentity(request, reply)) return { error: 'Authentication required' };
     const services = await resolveServiceStates({
       env: options.env,
       fetchHealth: options.fetchHealth,
+      getConfig,
     });
     return { services };
   });
@@ -57,6 +61,7 @@ export const servicesRoutes: FastifyPluginAsync<ServicesRouteOptions> = async (a
     const state = await resolveServiceState(service, {
       env: options.env,
       fetchHealth: options.fetchHealth,
+      config: getConfig(request.params.id),
     });
     return {
       id: state.id,

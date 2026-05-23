@@ -4,7 +4,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { PushServiceConfig } from '@/components/settings/PushServiceConfig';
 import { usePushNotify } from '@/hooks/usePushNotify';
 import { useToastStore } from '@/stores/toastStore';
-import { SettingsResourceToggleSwitch } from './SettingsResourceCard';
+import {
+  SettingsResourceToggleSwitch,
+  settingsResourceCardClass,
+  settingsResourceRowClass,
+} from './SettingsResourceCard';
 import { PushDiagnosticsSection } from './settings/PushDiagnosticsSection';
 
 const STORAGE_KEY = 'cat-cafe-notify-prefs';
@@ -37,8 +41,6 @@ const REPAIR_HINTS: Record<string, string> = {
   push_last_delivery_failed: '最近一次系统通知投递失败，请查看网络/代理后重试。',
 };
 
-const CARD_SHADOW = 'shadow-[0_12px_30px_rgba(43,33,26,0.08)]';
-
 function BrowserPushCard({
   isSubscribed,
   isLoading,
@@ -55,9 +57,9 @@ function BrowserPushCard({
   onSendTest: () => void;
 }) {
   return (
-    <div className={`console-list-card rounded-2xl overflow-hidden ${CARD_SHADOW}`}>
-      <div className="flex items-center gap-4 px-5 py-[18px]">
-        <span className="flex h-11 w-11 items-center justify-center rounded-xl shrink-0 bg-[var(--cafe-accent,#C65F3D)]">
+    <div className={`${settingsResourceCardClass} overflow-hidden`}>
+      <div className={settingsResourceRowClass}>
+        <span className="flex h-11 w-11 items-center justify-center rounded-xl shrink-0 bg-[var(--cafe-accent,#c96442)]">
           <svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.5" className="h-5 w-5" aria-hidden="true">
             <path
               d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"
@@ -84,7 +86,7 @@ function BrowserPushCard({
       </div>
 
       {isSubscribed && (
-        <div className="flex items-center gap-2 px-5 py-3 border-t border-[var(--console-border-soft)]">
+        <div className="flex items-center gap-2 px-5 py-3">
           <button
             type="button"
             onClick={onSendTest}
@@ -97,7 +99,7 @@ function BrowserPushCard({
       )}
 
       {!pushConfigured && (
-        <div className="px-5 py-3 border-t border-[var(--console-border-soft)]">
+        <div className="px-4 pb-4 pt-3">
           <p className="mb-3 text-xs text-cafe-muted leading-relaxed">
             浏览器推送需要配置服务端密钥对来标识推送身份。终端运行{' '}
             <code className="text-micro bg-[var(--console-field-bg)] px-1 py-0.5 rounded">
@@ -105,7 +107,7 @@ function BrowserPushCard({
             </code>{' '}
             生成后填入下方。
           </p>
-          <PushServiceConfig />
+          <PushServiceConfig embedded />
         </div>
       )}
     </div>
@@ -210,8 +212,8 @@ export function PushSettingsPanel() {
           }}
         />
 
-        <div className={`console-list-card rounded-2xl overflow-hidden ${CARD_SHADOW}`}>
-          <div className="flex items-center gap-4 px-5 py-[18px]">
+        <div className={`${settingsResourceCardClass} overflow-hidden`}>
+          <div className={settingsResourceRowClass}>
             <span className="flex h-11 w-11 items-center justify-center rounded-xl shrink-0 bg-conn-emerald-text">
               <svg
                 viewBox="0 0 24 24"
@@ -243,9 +245,7 @@ export function PushSettingsPanel() {
           {prefsSaved && <span className="text-xs text-conn-emerald-text">已保存</span>}
         </div>
         <p className="text-xs text-cafe-muted">选择哪些事件触发通知</p>
-        <div
-          className={`console-list-card rounded-2xl overflow-hidden ${CARD_SHADOW} divide-y divide-[var(--console-border-soft)]`}
-        >
+        <div className={`${settingsResourceCardClass} overflow-hidden divide-y divide-[var(--console-border-soft)]`}>
           {NOTIFY_TYPES.map((type) => (
             <label
               key={type.id}
@@ -287,7 +287,7 @@ export function PushSettingsPanel() {
       )}
 
       {lastTestSummary && (
-        <div className={`console-list-card rounded-2xl p-4 ${CARD_SHADOW} text-xs space-y-1`}>
+        <div className={`${settingsResourceCardClass} p-4 text-xs space-y-1`}>
           <div className="text-sm font-medium text-cafe">最近测试</div>
           {lastTestMessage && <p className="text-cafe-secondary">{lastTestMessage}</p>}
           <p className="text-cafe-secondary">

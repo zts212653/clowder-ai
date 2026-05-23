@@ -265,9 +265,9 @@ function CapabilityCard({
           {onDelete && (
             <button
               type="button"
-              onClick={() => onDelete(item.id, false)}
+              onClick={() => onDelete(item.id, true)}
               disabled={isDeleting}
-              title="禁用此 MCP"
+              title="卸载此 MCP"
               className="p-1 rounded text-cafe-muted hover:text-conn-red-text hover:bg-conn-red-bg
                          transition-colors disabled:opacity-40"
             >

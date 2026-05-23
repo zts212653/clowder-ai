@@ -140,7 +140,7 @@ export function SkillsContent() {
 
   return (
     <div className="space-y-5">
-      <SettingsPageHeader title="Skill 管理" subtitle="Skill 注册治理、能力开关和 SKILL.md 预览。" />
+      <SettingsPageHeader title="Skill 管理" subtitle="点击卡片预览/编辑" />
 
       <ProjectSelector
         resolvedPath={controls.resolvedProjectPath}

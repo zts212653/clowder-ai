@@ -180,7 +180,7 @@ export function PlanBoardPanel({ threadId, catInvocations }: PlanBoardPanelProps
 
       {/* Completed cats — folded */}
       {completedCats.length > 0 && (
-        <div className="mt-2 border-t border-[var(--console-border-soft)] pt-2">
+        <div className="mt-2 console-divider-t pt-2">
           <button
             onClick={() => setCompletedOpen((v) => !v)}
             className="w-full flex items-center justify-between text-micro text-cafe-secondary hover:text-cafe-secondary"

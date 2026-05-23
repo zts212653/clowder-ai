@@ -6,7 +6,7 @@ import { HubIcon } from '../hub-icons';
 import { EcosystemBadge, InstallModeBadge, TrustBadge } from './marketplace-badges';
 
 const MODE_ACTION: Record<string, { label: string; icon: string; hint: string }> = {
-  direct_mcp: { label: '安装到当前猫猫', icon: 'download', hint: '将自动写入 MCP 配置并重启' },
+  direct_mcp: { label: '暂不支持自动安装', icon: 'settings', hint: '请手动添加 MCP 配置' },
   delegated_cli: { label: '复制 CLI 命令', icon: 'copy', hint: '粘贴到终端执行安装' },
   manual_file: { label: '复制配置文件', icon: 'copy', hint: '粘贴到对应的配置文件中' },
   manual_ui: { label: '打开设置', icon: 'external-link', hint: '在对应平台设置界面中配置' },
@@ -14,7 +14,7 @@ const MODE_ACTION: Record<string, { label: string; icon: string; hint: string }>
 
 function ConfigRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-baseline gap-3 border-b border-cafe-border/50 py-1.5 last:border-0">
+    <div className="flex items-baseline gap-3 border-b border-[var(--console-border-soft)]/50 py-1.5 last:border-0">
       <span className="w-20 shrink-0 text-xs text-cafe-muted">{label}</span>
       <span className="text-xs font-mono text-cafe">{value}</span>
     </div>
@@ -80,8 +80,8 @@ export function InstallPlanDetail({
       </div>
 
       <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-50">
-          <HubIcon name="settings" className="h-5 w-5 text-purple-500" />
+        <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-[var(--console-active-bg)]">
+          <HubIcon name="settings" className="h-6 w-6 text-cafe-accent" />
         </div>
         <div className="flex-1">
           <h3 className="text-sm font-semibold text-cafe">{result.displayName}</h3>
@@ -96,7 +96,7 @@ export function InstallPlanDetail({
 
       <p className="text-xs leading-relaxed text-cafe-secondary">{result.componentSummary}</p>
 
-      <div className="rounded-lg border border-cafe-border bg-white p-3">
+      <div className="rounded-xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
         <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-cafe">
           <HubIcon name="settings" className="h-3.5 w-3.5" /> 安装配置
         </p>
@@ -118,7 +118,7 @@ export function InstallPlanDetail({
       </div>
 
       {plan.mcpEntry?.env && Object.keys(plan.mcpEntry.env).length > 0 && (
-        <div className="rounded-lg border border-cafe-border bg-white p-3">
+        <div className="rounded-xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
           <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-cafe">
             <HubIcon name="key" className="h-3.5 w-3.5" /> 环境变量 (可选)
           </p>
@@ -129,7 +129,7 @@ export function InstallPlanDetail({
       )}
 
       {plan.manualSteps && plan.manualSteps.length > 0 && (
-        <div className="rounded-lg border border-cafe-border bg-white p-3">
+        <div className="rounded-xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
           <p className="mb-2 text-xs font-medium text-cafe">手动步骤</p>
           <ol className="list-inside list-decimal space-y-1 text-xs text-cafe-secondary">
             {plan.manualSteps.map((step, i) => (
@@ -155,7 +155,11 @@ export function InstallPlanDetail({
         <button
           onClick={handleAction}
           disabled={!canAct}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+          className={`inline-flex items-center justify-center gap-2 rounded-lg px-5 py-2 text-xs font-medium transition-colors ${
+            canAct
+              ? 'bg-cafe-accent text-white hover:bg-cafe-interactive'
+              : 'bg-[var(--console-card-bg)] text-cafe-muted shadow-[0_1px_3px_rgba(43,33,26,0.06)] cursor-not-allowed'
+          }`}
         >
           <HubIcon name={action.icon} className="h-4 w-4" />
           {copied ? '已复制!' : action.label}

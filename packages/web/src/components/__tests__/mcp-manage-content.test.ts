@@ -189,13 +189,13 @@ describe('McpManageContent', () => {
     expect(JSON.stringify(body)).not.toContain('••••••');
   });
 
-  it('shows owner fail-closed errors from MCP preview', async () => {
+  it('shows configured-owner errors from MCP preview', async () => {
     mockFetch.mockImplementation(async (url: string) => {
       if (url === '/api/capabilities/mcp/preview') {
         return {
           ok: false,
           status: 403,
-          json: async () => ({ error: 'Capability writes require DEFAULT_OWNER_USER_ID to be configured' }),
+          json: async () => ({ error: 'Capability writes can only be modified by the configured owner' }),
         };
       }
       return ITEMS_RESPONSE;
@@ -215,15 +215,16 @@ describe('McpManageContent', () => {
       buttonByText('预览').click();
     });
 
-    expect(container.textContent).toContain('DEFAULT_OWNER_USER_ID');
+    expect(container.textContent).toContain('configured owner');
+    expect(container.textContent).not.toContain('DEFAULT_OWNER_USER_ID');
   });
 
-  it('keeps existing external MCP soft-delete behavior', async () => {
+  it('hard-deletes external MCP on uninstall', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     await renderContent();
 
-    const trashButtons = Array.from(container.querySelectorAll('button[title="禁用此 MCP"]'));
+    const trashButtons = Array.from(container.querySelectorAll('button[title="卸载此 MCP"]'));
     expect(trashButtons.length).toBe(1);
 
     mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({}) }).mockResolvedValueOnce(ITEMS_RESPONSE);
@@ -237,7 +238,7 @@ describe('McpManageContent', () => {
     );
     expect(deleteCalls).toHaveLength(1);
     expect(deleteCalls[0][0]).toContain('/api/capabilities/mcp/custom-mcp?');
-    expect(deleteCalls[0][0]).not.toContain('hard=true');
+    expect(deleteCalls[0][0]).toContain('hard=true');
 
     confirmSpy.mockRestore();
   });

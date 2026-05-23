@@ -96,15 +96,15 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
         onSubmit={handleSubmit}
         className="bg-[var(--console-card-bg)] rounded-xl shadow-lg p-6 w-full max-w-md space-y-4"
       >
-        <h3 className="font-semibold text-sm text-cafe-primary">新建集合</h3>
-        {error && <div className="text-xs text-red-600 bg-red-50 rounded p-2">{error}</div>}
+        <h3 className="font-semibold text-sm text-cafe">新建集合</h3>
+        {error && <div className="text-xs text-conn-red-text bg-conn-red-bg rounded-lg p-2">{error}</div>}
         <div className="grid grid-cols-2 gap-3">
           <label className="text-xs text-cafe-secondary">
             类型
             <select
               value={kind}
               onChange={(e) => setKind(e.target.value)}
-              className="mt-1 block w-full rounded border border-[var(--console-border-soft)] px-2 py-1 text-xs"
+              className="mt-1 block w-full rounded-lg bg-[var(--console-field-bg)] pl-2 pr-6 py-1.5 text-xs text-cafe-secondary outline-none transition focus:ring-1 focus:ring-[var(--console-input-stroke)]"
             >
               {COLLECTION_KINDS.map((k) => (
                 <option key={k} value={k}>
@@ -119,7 +119,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
               value={name}
               onChange={(e) => setName(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
               placeholder="finance"
-              className="mt-1 block w-full rounded border border-[var(--console-border-soft)] px-2 py-1 text-xs"
+              className="mt-1 block w-full appearance-none rounded-lg bg-[var(--console-field-bg)] px-2 py-1.5 text-xs text-cafe-secondary outline-none transition focus:ring-1 focus:ring-[var(--console-input-stroke)]"
               required
             />
           </label>
@@ -130,7 +130,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             placeholder="Personal Finance"
-            className="mt-1 block w-full rounded border border-[var(--console-border-soft)] px-2 py-1 text-xs"
+            className="mt-1 block w-full appearance-none rounded-lg bg-[var(--console-field-bg)] px-2 py-1.5 text-xs text-cafe-secondary outline-none transition focus:ring-1 focus:ring-[var(--console-input-stroke)]"
             required
           />
         </label>
@@ -143,7 +143,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
               setDryRun(null);
             }}
             placeholder="/home/user/finance"
-            className="mt-1 block w-full rounded border border-[var(--console-border-soft)] px-2 py-1 text-xs"
+            className="mt-1 block w-full appearance-none rounded-lg bg-[var(--console-field-bg)] px-2 py-1.5 text-xs text-cafe-secondary outline-none transition focus:ring-1 focus:ring-[var(--console-input-stroke)]"
           />
         </label>
         <label className="text-xs text-cafe-secondary block">
@@ -151,7 +151,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
           <select
             value={sensitivity}
             onChange={(e) => setSensitivity(e.target.value)}
-            className="mt-1 block w-full rounded border border-[var(--console-border-soft)] px-2 py-1 text-xs"
+            className="mt-1 block w-full rounded-lg bg-[var(--console-field-bg)] pl-2 pr-6 py-1.5 text-xs text-cafe-secondary outline-none transition focus:ring-1 focus:ring-[var(--console-input-stroke)]"
           >
             {SENSITIVITIES.map((s) => (
               <option key={s} value={s}>
@@ -161,13 +161,15 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
           </select>
         </label>
         {dryRun && (
-          <div className="text-xs bg-blue-50 rounded p-3 space-y-1" data-testid="dry-run-preview">
-            <div className="font-medium text-blue-800">扫描预览</div>
-            <div className="text-blue-700">
+          <div className="text-xs rounded-lg bg-[var(--console-field-bg)] p-3 space-y-1" data-testid="dry-run-preview">
+            <div className="font-medium text-cafe">扫描预览</div>
+            <div className="text-cafe-secondary">
               {dryRun.totalFiles} 个文件（{dryRun.markdownFiles} 个 Markdown）
             </div>
             {dryRun.secretFindings > 0 && (
-              <div className="text-red-600 font-medium">检测到 {dryRun.secretFindings} 个敏感信息 — 创建前请核查。</div>
+              <div className="text-conn-red-text font-medium">
+                检测到 {dryRun.secretFindings} 个敏感信息 — 创建前请核查。
+              </div>
             )}
           </div>
         )}
@@ -175,7 +177,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-1 text-xs text-cafe-secondary border border-[var(--console-border-soft)] rounded hover:bg-[var(--console-hover-bg)]"
+            className="px-3 py-1.5 text-xs text-cafe-secondary rounded-lg bg-[var(--console-card-bg)] shadow-[0_1px_3px_rgba(43,33,26,0.06)] hover:bg-[var(--console-hover-bg)]"
           >
             取消
           </button>
@@ -184,7 +186,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
               type="button"
               onClick={handleDryRun}
               disabled={dryRunLoading || !name || !displayName}
-              className="px-3 py-1 text-xs text-blue-700 border border-blue-300 rounded hover:bg-blue-50 disabled:opacity-50"
+              className="px-3 py-1.5 text-xs text-cafe-secondary rounded-lg bg-[var(--console-card-bg)] shadow-[0_1px_3px_rgba(43,33,26,0.06)] hover:bg-[var(--console-hover-bg)] disabled:opacity-50"
               data-testid="dry-run-btn"
             >
               {dryRunLoading ? '扫描中...' : '预览扫描'}
@@ -193,7 +195,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
           <button
             type="submit"
             disabled={submitting || !name || !displayName || (canDryRun && !confirmed)}
-            className="px-3 py-1 text-xs text-white bg-cafe-primary rounded hover:bg-cafe-primary/90 disabled:opacity-50"
+            className="px-3 py-1.5 text-xs text-white bg-cafe-accent rounded-lg hover:bg-cafe-interactive disabled:opacity-50"
           >
             {submitting ? '创建中...' : confirmed ? '创建' : '预览并创建'}
           </button>

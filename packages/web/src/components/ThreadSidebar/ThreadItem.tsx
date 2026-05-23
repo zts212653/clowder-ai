@@ -157,47 +157,9 @@ export function ThreadItem({
           </span>
         )}
         <div className="flex items-center gap-0.5 flex-shrink-0 mt-0.5">
-          {/* Pin button */}
-          {canPin && !isEditing && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                void onTogglePin(id, !isPinned);
-              }}
-              className={`p-0.5 rounded transition-all ${
-                isPinned
-                  ? 'text-cafe-accent'
-                  : 'opacity-0 group-hover:opacity-100 text-cafe-muted hover:text-cafe-accent'
-              }`}
-              title={isPinned ? '取消置顶' : '置顶'}
-            >
-              <PinIcon />
-            </button>
-          )}
-          {/* Favorite button */}
-          {canFavorite && !isEditing && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                void onToggleFavorite(id, !isFavorited);
-              }}
-              className={`p-0.5 rounded transition-all ${
-                isFavorited
-                  ? 'text-conn-amber-text'
-                  : 'opacity-0 group-hover:opacity-100 text-cafe-muted hover:text-conn-amber-hover'
-              }`}
-              title={isFavorited ? '取消收藏' : '收藏'}
-            >
-              <StarIcon filled={isFavorited} />
-            </button>
-          )}
           {/* Cat settings button */}
           {id !== 'default' && onUpdatePreferredCats && !isEditing && (
             <ThreadCatSettings threadId={id} currentCats={preferredCats ?? []} onSave={onUpdatePreferredCats} />
-          )}
-          {/* Label picker button */}
-          {id !== 'default' && onUpdateLabels && !isEditing && (
-            <ThreadLabelPicker threadId={id} currentLabels={threadLabels ?? []} onSave={onUpdateLabels} />
           )}
           {/* Rename button */}
           {canRename && !isEditing && (
@@ -255,6 +217,44 @@ export function ThreadItem({
                   clipRule="evenodd"
                 />
               </svg>
+            </button>
+          )}
+          {/* Label picker — stateful, stays visible when labels assigned */}
+          {id !== 'default' && onUpdateLabels && !isEditing && (
+            <ThreadLabelPicker threadId={id} currentLabels={threadLabels ?? []} onSave={onUpdateLabels} />
+          )}
+          {/* Favorite button — stateful, stays visible when active */}
+          {canFavorite && !isEditing && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                void onToggleFavorite(id, !isFavorited);
+              }}
+              className={`p-0.5 rounded transition-all ${
+                isFavorited
+                  ? 'text-conn-amber-text'
+                  : 'opacity-0 group-hover:opacity-100 text-cafe-muted hover:text-conn-amber-hover'
+              }`}
+              title={isFavorited ? '取消收藏' : '收藏'}
+            >
+              <StarIcon filled={isFavorited} />
+            </button>
+          )}
+          {/* Pin button — stateful, rightmost (highest frequency) */}
+          {canPin && !isEditing && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                void onTogglePin(id, !isPinned);
+              }}
+              className={`p-0.5 rounded transition-all ${
+                isPinned
+                  ? 'text-cafe-accent'
+                  : 'opacity-0 group-hover:opacity-100 text-cafe-muted hover:text-cafe-accent'
+              }`}
+              title={isPinned ? '取消置顶' : '置顶'}
+            >
+              <PinIcon />
             </button>
           )}
         </div>

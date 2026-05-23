@@ -79,7 +79,7 @@ export function GovernanceHealth({ cards, digests = [], resolutions = [], slices
       </div>
 
       {/* Bucket distribution */}
-      <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3">
+      <div className="rounded-xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
         <div className="mb-2 text-micro font-semibold uppercase text-cafe-secondary">Triage Distribution</div>
         {total === 0 ? (
           <div className="text-xs text-cafe-muted">尚无数据</div>
@@ -112,7 +112,7 @@ export function GovernanceHealth({ cards, digests = [], resolutions = [], slices
       </div>
 
       {/* Source distribution */}
-      <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3">
+      <div className="rounded-xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
         <div className="mb-2 text-micro font-semibold uppercase text-cafe-secondary">Source Tag Distribution</div>
         <div className="flex gap-2">
           {sourceCounts
@@ -129,7 +129,7 @@ export function GovernanceHealth({ cards, digests = [], resolutions = [], slices
 
       {/* Top risks */}
       {topRisks.length > 0 && (
-        <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3">
+        <div className="rounded-xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
           <div className="mb-2 text-micro font-semibold uppercase text-cafe-secondary">Top Risk Signals</div>
           <div className="space-y-1">
             {topRisks.map(([signal, count]) => (
@@ -144,7 +144,7 @@ export function GovernanceHealth({ cards, digests = [], resolutions = [], slices
 
       {/* Dispatch stats (F070 Phase 3c) */}
       {digests.length > 0 && (
-        <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3">
+        <div className="rounded-xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
           <div className="mb-2 text-micro font-semibold uppercase text-cafe-secondary">Dispatch Stats</div>
           <div className="grid grid-cols-3 gap-3">
             <StatCard label="派遣次数" value={String(digests.length)} sub="total" />
@@ -168,7 +168,7 @@ export function GovernanceHealth({ cards, digests = [], resolutions = [], slices
 
       {/* Resolution progress */}
       {resolutions.length > 0 && (
-        <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3">
+        <div className="rounded-xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
           <div className="mb-2 text-micro font-semibold uppercase text-cafe-secondary">Resolution Progress</div>
           <div className="grid grid-cols-3 gap-3">
             <StatCard label="Open" value={String(resolutions.filter((r) => r.status === 'open').length)} sub="待解决" />
@@ -188,7 +188,7 @@ export function GovernanceHealth({ cards, digests = [], resolutions = [], slices
 
       {/* Slice progress */}
       {slices.length > 0 && (
-        <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3">
+        <div className="rounded-xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
           <div className="mb-2 text-micro font-semibold uppercase text-cafe-secondary">Slice Progress</div>
           <div className="grid grid-cols-4 gap-3">
             <StatCard
@@ -220,7 +220,7 @@ export function GovernanceHealth({ cards, digests = [], resolutions = [], slices
 
 function StatCard({ label, value, sub }: { label: string; value: string; sub: string }) {
   return (
-    <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3 text-center">
+    <div className="rounded-xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)] text-center">
       <div className="text-lg font-bold text-cafe">{value}</div>
       <div className="text-micro font-medium text-cafe-secondary">{label}</div>
       <div className="text-micro text-cafe-muted">{sub}</div>

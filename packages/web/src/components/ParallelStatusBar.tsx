@@ -121,7 +121,7 @@ export function ParallelStatusBar({ onStop, threadId }: { onStop?: () => void; t
   const agg = aggregateUsage(catInvocations, activeCats);
 
   return (
-    <div className="px-5 py-2.5 bg-gradient-to-r from-opus-bg via-codex-bg to-gemini-bg border-b border-[var(--console-border-soft)]">
+    <div className="px-5 py-2.5 bg-gradient-to-r from-opus-bg via-codex-bg to-gemini-bg console-divider-b">
       <div className="flex items-center gap-4">
         <span className="text-sm font-medium text-cafe-secondary">独立观点采样中</span>
         {activeCats.map((catId) => (

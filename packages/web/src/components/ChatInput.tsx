@@ -551,7 +551,7 @@ export function ChatInput({
   }, [activeMenu, closeMenus]);
 
   return (
-    <div className="border-t border-cafe-subtle bg-[var(--console-shell-bg)] relative safe-area-bottom">
+    <div className="relative bg-[var(--console-shell-bg)] safe-area-bottom">
       {/* F39: Queue status bar — visible when cat is running */}
       {hasActiveInvocation && (
         <div className="px-4 pt-2 flex items-center gap-2">
@@ -731,8 +731,8 @@ export function ChatInput({
             }
             className={`w-full resize-none rounded-xl border p-3 text-sm focus:outline-none focus:ring-2 placeholder:text-gray-400 ${
               whisperMode
-                ? 'border-conn-amber-ring bg-conn-amber-bg/50 focus:ring-conn-amber-ring'
-                : 'border-cafe-subtle bg-cafe-surface focus:ring-cafe-accent'
+                ? 'border-conn-amber-text/30 bg-conn-amber-bg/50 focus:ring-conn-amber-text'
+                : 'border-[var(--console-border-soft)] bg-transparent focus:bg-[var(--console-card-bg)] focus:ring-[var(--console-input-stroke)]'
             }`}
             rows={1}
             disabled={disabled}

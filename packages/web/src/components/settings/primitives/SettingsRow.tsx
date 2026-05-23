@@ -59,7 +59,7 @@ export function SettingsRow({
 
   return (
     <div
-      className={`rounded-xl ${rowToneClasses[tone]} px-4 py-3 transition ${onClick ? 'cursor-pointer hover:shadow-md' : ''} ${isDragging ? 'opacity-40' : ''} ${className ?? ''}`}
+      className={`rounded-xl ${rowToneClasses[tone]} px-4 py-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)] transition ${onClick ? 'cursor-pointer hover:shadow-md' : ''} ${isDragging ? 'opacity-40' : ''} ${className ?? ''}`}
       onClick={onClick}
       onKeyDown={onKeyDown}
       draggable={draggable || undefined}
@@ -76,7 +76,7 @@ export function SettingsRow({
         {icon && <div className="shrink-0">{icon}</div>}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="truncate text-sm font-semibold text-cafe">{title}</span>
+            <span className="truncate text-compact font-bold text-cafe">{title}</span>
             {badges}
           </div>
           {meta && <div className="mt-0.5 truncate text-xs text-cafe-secondary">{meta}</div>}
@@ -89,7 +89,7 @@ export function SettingsRow({
               e.stopPropagation();
               onToggle();
             }}
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-cafe-muted transition-colors hover:text-cafe-secondary"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-cafe-accent transition-colors hover:text-cafe"
             aria-expanded={isExpanded}
             aria-label={isExpanded ? '收起' : '展开'}
           >
@@ -105,9 +105,7 @@ export function SettingsRow({
           </button>
         )}
       </div>
-      {children && isExpanded && (
-        <div className="mt-3 border-t border-[var(--console-border-soft)] pt-3">{children}</div>
-      )}
+      {children && isExpanded && <div className="mt-3 pt-3">{children}</div>}
     </div>
   );
 }

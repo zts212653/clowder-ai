@@ -23,10 +23,19 @@ function restoreEnv() {
   }
 }
 
+function addSessionHook(app) {
+  app.addHook('preHandler', async (request) => {
+    const sessionUser = request.headers['x-test-session-user'];
+    if (typeof sessionUser === 'string' && sessionUser.trim()) {
+      request.sessionUserId = sessionUser.trim();
+    }
+  });
+}
+
 describe('PATCH /api/config/env — sensitive env owner gate', () => {
   afterEach(() => restoreEnv());
 
-  it('rejects sensitive env writes from non-owner operators', async () => {
+  it('rejects sensitive env writes from non-owner session operators', async () => {
     const { configRoutes } = await import('../dist/routes/config.js');
     const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
     const envFilePath = resolve(tempRoot, '.env');
@@ -34,6 +43,7 @@ describe('PATCH /api/config/env — sensitive env owner gate', () => {
     setEnv('DEFAULT_OWNER_USER_ID', 'you');
 
     const app = Fastify({ logger: false });
+    addSessionHook(app);
     try {
       await configRoutes(app, {
         projectRoot: tempRoot,
@@ -45,13 +55,77 @@ describe('PATCH /api/config/env — sensitive env owner gate', () => {
       const res = await app.inject({
         method: 'PATCH',
         url: '/api/config/env',
-        headers: { 'x-cat-cafe-user': 'codex' },
+        headers: { 'x-test-session-user': 'codex' },
         payload: { updates: [{ name: 'F102_API_KEY', value: 'sk-new' }] },
       });
 
       assert.equal(res.statusCode, 403);
       assert.match(JSON.parse(res.payload).error, /only be modified by the owner/);
       assert.equal(readFileSync(envFilePath, 'utf8'), 'F102_API_KEY=sk-old\n');
+    } finally {
+      await app.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects sensitive env writes with header-only (non-session) identity', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
+    const envFilePath = resolve(tempRoot, '.env');
+    writeFileSync(envFilePath, 'F102_API_KEY=sk-old\n', 'utf8');
+    delete process.env.DEFAULT_OWNER_USER_ID;
+
+    const app = Fastify({ logger: false });
+    addSessionHook(app);
+    try {
+      await configRoutes(app, {
+        projectRoot: tempRoot,
+        envFilePath,
+        auditLog: { append: async () => {} },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/config/env',
+        headers: { 'x-cat-cafe-user': 'forged' },
+        payload: { updates: [{ name: 'F102_API_KEY', value: 'sk-new' }] },
+      });
+
+      assert.equal(res.statusCode, 401);
+      assert.match(JSON.parse(res.payload).error, /session authentication/);
+      assert.equal(readFileSync(envFilePath, 'utf8'), 'F102_API_KEY=sk-old\n');
+    } finally {
+      await app.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects sensitive env writes when DEFAULT_OWNER_USER_ID is not configured', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
+    const envFilePath = resolve(tempRoot, '.env');
+    writeFileSync(envFilePath, 'F102_API_KEY=sk-old\n', 'utf8');
+    delete process.env.DEFAULT_OWNER_USER_ID;
+
+    const app = Fastify({ logger: false });
+    addSessionHook(app);
+    try {
+      await configRoutes(app, {
+        projectRoot: tempRoot,
+        envFilePath,
+        auditLog: { append: async () => {} },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/config/env',
+        headers: { 'x-test-session-user': 'any-user' },
+        payload: { updates: [{ name: 'F102_API_KEY', value: 'sk-new' }] },
+      });
+
+      assert.equal(res.statusCode, 403, res.payload);
     } finally {
       await app.close();
       rmSync(tempRoot, { recursive: true, force: true });
@@ -67,6 +141,7 @@ describe('PATCH /api/config/env — sensitive env owner gate', () => {
     const auditEvents = [];
 
     const app = Fastify({ logger: false });
+    addSessionHook(app);
     try {
       await configRoutes(app, {
         projectRoot: tempRoot,
@@ -78,7 +153,7 @@ describe('PATCH /api/config/env — sensitive env owner gate', () => {
       const res = await app.inject({
         method: 'PATCH',
         url: '/api/config/env',
-        headers: { 'x-cat-cafe-user': 'you' },
+        headers: { 'x-test-session-user': 'you' },
         payload: { updates: [{ name: 'F102_API_KEY', value: 'sk-new-key-123' }] },
       });
 
@@ -103,6 +178,42 @@ describe('PATCH /api/config/env — sensitive env owner gate', () => {
       assert.equal(auditEvents[1].type, 'env_sensitive_write');
       assert.deepEqual(auditEvents[1].data.keys, ['F102_API_KEY']);
       assert.equal(auditEvents[1].data.operator, 'you');
+    } finally {
+      await app.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('sensitive write audit uses session identity, not forgeable header', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
+    const envFilePath = resolve(tempRoot, '.env');
+    writeFileSync(envFilePath, 'F102_API_KEY=sk-old\n', 'utf8');
+    setEnv('DEFAULT_OWNER_USER_ID', 'you');
+    const auditEvents = [];
+
+    const app = Fastify({ logger: false });
+    addSessionHook(app);
+    try {
+      await configRoutes(app, {
+        projectRoot: tempRoot,
+        envFilePath,
+        auditLog: { append: async (event) => auditEvents.push(event) },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/config/env',
+        headers: { 'x-test-session-user': 'you', 'x-cat-cafe-user': 'attacker' },
+        payload: { updates: [{ name: 'F102_API_KEY', value: 'sk-new' }] },
+      });
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(auditEvents.length, 2);
+      assert.equal(auditEvents[0].data.operator, 'you', 'CONFIG_UPDATED must use session identity');
+      assert.equal(auditEvents[1].data.operator, 'you', 'ENV_SENSITIVE_WRITE must use session identity');
+      assert.notEqual(auditEvents[0].data.operator, 'attacker', 'forged header must not appear in audit');
     } finally {
       await app.close();
       rmSync(tempRoot, { recursive: true, force: true });
@@ -148,6 +259,7 @@ describe('PATCH /api/config/env — sensitive env owner gate', () => {
     const auditEvents = [];
 
     const app = Fastify({ logger: false });
+    addSessionHook(app);
     try {
       await configRoutes(app, {
         projectRoot: tempRoot,
@@ -159,7 +271,7 @@ describe('PATCH /api/config/env — sensitive env owner gate', () => {
       const res = await app.inject({
         method: 'PATCH',
         url: '/api/config/env',
-        headers: { 'x-cat-cafe-user': 'you' },
+        headers: { 'x-test-session-user': 'you' },
         payload: {
           updates: [
             { name: 'FRONTEND_URL', value: 'http://new' },

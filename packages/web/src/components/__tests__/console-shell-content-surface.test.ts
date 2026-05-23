@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 const testDir = dirname(fileURLToPath(import.meta.url));
 const componentsRoot = resolve(testDir, '..');
 
-const surfaceRequirements = ['rounded-2xl', 'border-[var(--console-border-soft)]', 'shadow-[0_12px_30px'];
+const surfaceRequirements = ['rounded-[18px]', 'shadow-[var(--console-shadow-soft)]'];
 
 function readComponent(relativePath: string): string {
   return readFileSync(resolve(componentsRoot, relativePath), 'utf8');

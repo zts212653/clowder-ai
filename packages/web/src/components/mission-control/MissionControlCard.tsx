@@ -21,10 +21,10 @@ export function MissionControlCard({ item, selected, onSelect }: MissionControlC
       type="button"
       onClick={() => onSelect(item.id)}
       className={[
-        'w-full rounded-xl border p-3 text-left transition-all',
+        'w-full rounded-xl p-3 text-left transition-all',
         selected
-          ? 'border-[var(--console-button-emphasis)] bg-[var(--console-card-bg)] shadow-sm'
-          : 'border-[var(--console-border-soft)] bg-[var(--console-card-bg)] hover:border-[var(--console-border-strong)] hover:bg-[var(--console-hover-bg)]',
+          ? 'bg-[var(--console-card-bg)] shadow-[0_8px_22px_rgba(43,33,26,0.04)] ring-1 ring-[var(--console-button-emphasis)]'
+          : 'bg-[var(--console-card-bg)] shadow-[0_8px_22px_rgba(43,33,26,0.04)] hover:bg-[var(--console-hover-bg)]',
       ].join(' ')}
     >
       <div className="mb-2 flex items-center gap-2">
@@ -72,7 +72,7 @@ export function MissionControlCard({ item, selected, onSelect }: MissionControlC
           {item.dependencies.related?.map((id) => (
             <span
               key={`rel-${id}`}
-              className="inline-block rounded-md border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-1.5 py-0.5 text-micro font-medium text-cafe-secondary"
+              className="inline-block rounded-md bg-[var(--console-hover-bg)] px-1.5 py-0.5 text-micro font-medium text-cafe-secondary"
             >
               ↔ {id.toUpperCase()}
             </span>

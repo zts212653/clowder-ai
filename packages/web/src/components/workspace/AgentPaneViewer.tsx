@@ -3,6 +3,7 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import { useEffect, useRef, useState } from 'react';
+import typographyTokens from '@/styles/typography-tokens.json';
 import { API_URL } from '@/utils/api-client';
 
 interface AgentPaneViewerProps {
@@ -20,7 +21,7 @@ export function AgentPaneViewer({ worktreeId, paneId, onBack }: AgentPaneViewerP
 
     const term = new Terminal({
       cursorBlink: false,
-      fontSize: 13,
+      fontSize: typographyTokens.fontSizePx.compact,
       fontFamily: 'JetBrains Mono, Menlo, Monaco, monospace',
       disableStdin: true,
       /* xterm.js canvas renderer exempt: requires resolved color values, cannot use CSS vars */
@@ -76,7 +77,7 @@ export function AgentPaneViewer({ worktreeId, paneId, onBack }: AgentPaneViewerP
           alignItems: 'center',
           gap: 8,
           padding: '4px 8px',
-          fontSize: 12,
+          fontSize: typographyTokens.fontSizePx.xs,
           color: 'var(--terminal-text-muted)',
           borderBottom: '1px solid var(--terminal-chrome)',
         }}
@@ -91,7 +92,7 @@ export function AgentPaneViewer({ worktreeId, paneId, onBack }: AgentPaneViewerP
             padding: '2px 8px',
             borderRadius: 4,
             cursor: 'pointer',
-            fontSize: 11,
+            fontSize: typographyTokens.fontSizePx.label,
           }}
         >
           Back to shell
@@ -112,7 +113,15 @@ export function AgentPaneViewer({ worktreeId, paneId, onBack }: AgentPaneViewerP
         <span>
           {status === 'watching' ? `Watching ${paneId}` : status === 'connecting' ? 'Connecting\u2026' : 'Disconnected'}
         </span>
-        <span style={{ fontSize: 10, color: 'var(--terminal-text-faint)', marginLeft: 'auto' }}>read-only</span>
+        <span
+          style={{
+            fontSize: typographyTokens.fontSizePx.micro,
+            color: 'var(--terminal-text-faint)',
+            marginLeft: 'auto',
+          }}
+        >
+          read-only
+        </span>
       </div>
       <div ref={containerRef} style={{ flex: 1, overflow: 'hidden' }} />
     </div>

@@ -191,10 +191,10 @@ export function KnowledgeFeed() {
             key={tab.key}
             type="button"
             onClick={() => setActiveTab(tab.key)}
-            className={`flex items-center gap-1 px-2 py-1.5 text-micro font-semibold uppercase tracking-wider transition-colors ${
+            className={`flex items-center gap-1 px-2 py-1.5 text-xs font-medium transition-colors ${
               activeTab === tab.key
-                ? 'text-cafe-accent border-b-2 border-cafe-accent'
-                : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
+                ? 'border-b-2 border-[var(--console-button-emphasis)] text-[var(--console-button-emphasis)]'
+                : 'text-cafe-muted hover:text-cafe-secondary'
             }`}
           >
             {tab.label}
@@ -202,7 +202,7 @@ export function KnowledgeFeed() {
               <span
                 className={`text-micro rounded-full px-1.5 py-0.5 ${
                   activeTab === tab.key
-                    ? 'bg-cafe-accent text-white'
+                    ? 'bg-[var(--console-active-bg)] text-[var(--console-button-emphasis)]'
                     : 'bg-cafe-surface-sunken/60 text-cafe-interactive/50'
                 }`}
               >

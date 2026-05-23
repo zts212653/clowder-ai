@@ -1,5 +1,4 @@
 type HomeServiceStatus = 'healthy' | 'unhealthy' | 'not_configured';
-type HomeServiceAction = 'install' | 'start' | 'stop' | 'uninstall';
 
 interface ModelOption {
   name: string;
@@ -25,7 +24,9 @@ export interface HomeServiceState {
   configured: boolean;
   status: HomeServiceStatus;
   features: string[];
-  availableActions: HomeServiceAction[];
+  installed: boolean;
+  enabled: boolean;
+  installable: boolean;
   prerequisites?: ServicePrerequisites;
   error?: string | null;
 }
@@ -41,9 +42,10 @@ export interface ServiceUiState {
   features: string[];
   status: ServiceUiStatus;
   statusLabel: string;
-  installedKnown: boolean;
+  installed: boolean;
+  enabled: boolean;
+  installable: boolean;
   running: boolean;
-  availableActions: HomeServiceAction[];
   prerequisites?: ServicePrerequisites;
   error?: string | null;
 }
@@ -66,22 +68,21 @@ const DISPLAY_NAMES: Record<string, string> = {
 };
 
 export function adaptServiceState(home: HomeServiceState): ServiceUiState {
-  let status: ServiceUiStatus;
-  let running: boolean;
-  let installedKnown: boolean;
+  const installed = home.installed;
+  const enabled = home.enabled;
+  const running = home.status === 'healthy';
 
-  if (home.status === 'healthy') {
-    status = 'running';
-    running = true;
-    installedKnown = true;
-  } else if (home.status === 'unhealthy' && home.configured) {
-    status = 'error';
-    running = false;
-    installedKnown = true;
-  } else {
+  let status: ServiceUiStatus;
+  if (!installed) {
     status = 'not_configured';
-    running = false;
-    installedKnown = false;
+  } else if (!home.installable) {
+    status = running ? 'running' : home.configured ? 'error' : 'not_configured';
+  } else if (enabled && running) {
+    status = 'running';
+  } else if (enabled) {
+    status = 'error';
+  } else {
+    status = 'stopped';
   }
 
   return {
@@ -93,11 +94,12 @@ export function adaptServiceState(home: HomeServiceState): ServiceUiState {
     features: home.features,
     status,
     statusLabel: STATUS_LABELS[status],
-    installedKnown,
+    installed,
+    enabled,
+    installable: home.installable,
     running,
-    availableActions: home.availableActions,
     prerequisites: home.prerequisites,
-    error: home.error,
+    error: (installed && enabled) || !home.installable ? home.error : undefined,
   };
 }
 
@@ -118,7 +120,7 @@ export function adaptServiceToPlugin(ui: ServiceUiState): PluginUiItem {
   let pluginStatus: PluginUiStatus;
   if (ui.running) {
     pluginStatus = 'active';
-  } else if (ui.installedKnown) {
+  } else if (ui.installed) {
     pluginStatus = 'configured';
   } else {
     pluginStatus = 'available';

@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
-import { HubAccountItem, type ProfileEditPayload } from './HubAccountItem';
+import { HubAccountItem } from './HubAccountItem';
 import type { AccountsResponse, ProfileItem } from './hub-accounts.types';
 import { normalizeBuiltinClientIds, resolveAccountActionId } from './hub-accounts.view';
-import { SettingsPrimaryButton, SettingsStatusStrip, SettingsText } from './settings/primitives';
+import { SettingsPrimaryButton, SettingsStatusStrip } from './settings/primitives';
 import { type UnifiedAuthEditData, UnifiedAuthModal } from './UnifiedAuthModal';
 
 export function HubAccountsTab() {
@@ -91,26 +91,6 @@ export function HubAccountsTab() {
     [callApi, fetchAccounts],
   );
 
-  const saveAccount = useCallback(
-    async (accountId: string, payload: ProfileEditPayload) => {
-      setBusyId(accountId);
-      setError(null);
-      try {
-        await callApi(`/api/accounts/${accountId}`, {
-          method: 'PATCH',
-          body: JSON.stringify(payload),
-        });
-        await fetchAccounts();
-        window.dispatchEvent(new CustomEvent('accounts-changed'));
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setBusyId(null);
-      }
-    },
-    [callApi, fetchAccounts],
-  );
-
   const displayAccounts = useMemo(() => normalizeBuiltinClientIds(data?.providers ?? []), [data?.providers]);
   const builtinAccounts = useMemo(() => displayAccounts.filter((a) => a.builtin), [displayAccounts]);
   const customAccounts = useMemo(() => displayAccounts.filter((a) => !a.builtin), [displayAccounts]);
@@ -123,10 +103,7 @@ export function HubAccountsTab() {
     <div className="space-y-4">
       {error && <SettingsStatusStrip tone="error">{error}</SettingsStatusStrip>}
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <SettingsText tone="secondary" variant="xs">
-          存储路径: {data.projectPath}/.cat-cafe
-        </SettingsText>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
         <SettingsPrimaryButton
           data-guide-id="accounts.create-form"
           onClick={() => {
@@ -144,16 +121,14 @@ export function HubAccountsTab() {
             key={account.id}
             profile={account}
             busy={busyId === resolveAccountActionId(account)}
-            onSave={(_id, payload) => saveAccount(resolveAccountActionId(account), payload)}
             onDelete={() => deleteAccount(resolveAccountActionId(account))}
             onEdit={handleEdit}
           />
         ))}
       </div>
 
-      <SettingsStatusStrip tone="muted">点击卡片进入编辑 →</SettingsStatusStrip>
       <SettingsStatusStrip tone="muted">
-        secrets 存储在 {data.projectPath}/.cat-cafe/credentials.json，Git 忽略。
+        secrets 存储在 {data.projectPath}/.cat-cafe/credentials.json，已被 Git 忽略。
       </SettingsStatusStrip>
 
       <UnifiedAuthModal

@@ -48,7 +48,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-6 shadow-lg"
+        className="w-full max-w-md rounded-xl bg-[var(--console-card-bg)] p-6 shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="mb-4 text-base font-bold text-cafe">导入项目</h2>
@@ -61,7 +61,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. studio-flow"
-              className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2 text-sm text-cafe focus:border-[var(--console-border-soft)] focus:outline-none"
+              className="mt-1 w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2 text-sm text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
             />
           </label>
 
@@ -72,7 +72,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
               value={sourcePath}
               onChange={(e) => setSourcePath(e.target.value)}
               placeholder="/home/user/studio-flow"
-              className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2 text-sm text-cafe focus:border-[var(--console-border-soft)] focus:outline-none"
+              className="mt-1 w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2 text-sm text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
             />
           </label>
 
@@ -82,7 +82,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
               type="text"
               value={backlogPath}
               onChange={(e) => setBacklogPath(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2 text-sm text-cafe focus:border-[var(--console-border-soft)] focus:outline-none"
+              className="mt-1 w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2 text-sm text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
             />
           </label>
 
@@ -93,7 +93,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="简要描述"
-              className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2 text-sm text-cafe focus:border-[var(--console-border-soft)] focus:outline-none"
+              className="mt-1 w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2 text-sm text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
             />
           </label>
         </div>
@@ -108,7 +108,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-[var(--console-border-soft)] px-4 py-1.5 text-xs font-medium text-cafe-secondary hover:bg-[var(--console-hover-bg)]"
+            className="rounded-lg bg-[var(--console-shell-bg)] px-4 py-1.5 text-xs font-medium text-cafe-secondary hover:bg-[var(--console-hover-bg)]"
           >
             取消
           </button>

@@ -83,7 +83,7 @@ export function RiskPanel({ projectId, cards }: RiskPanelProps) {
   return (
     <div className="space-y-4">
       {/* Header + Run button */}
-      <div className="flex items-center justify-between rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-4 py-3">
+      <div className="flex items-center justify-between rounded-xl bg-[var(--console-card-bg)] px-4 py-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
         <div>
           <div className="text-sm font-semibold text-cafe">風險預警</div>
           <div className="text-micro text-cafe-secondary">对全部 Intent Cards 运行风险检测</div>
@@ -101,15 +101,15 @@ export function RiskPanel({ projectId, cards }: RiskPanelProps) {
       {/* Summary stats */}
       {summary && (
         <div className="grid grid-cols-3 gap-3">
-          <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3 text-center">
+          <div className="rounded-xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)] text-center">
             <div className="text-lg font-bold text-cafe">{summary.totalCards}</div>
             <div className="text-micro font-medium text-cafe-secondary">Total Cards</div>
           </div>
-          <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3 text-center">
+          <div className="rounded-xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)] text-center">
             <div className="text-lg font-bold text-[var(--mc-risk-critical)]">{summary.cardsWithRisks}</div>
             <div className="text-micro font-medium text-cafe-secondary">Cards w/ Risks</div>
           </div>
-          <div className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3 text-center">
+          <div className="rounded-xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)] text-center">
             <div className="text-lg font-bold text-cafe">
               {Object.values(summary.signals).reduce((a, b) => a + b, 0)}
             </div>
@@ -124,7 +124,7 @@ export function RiskPanel({ projectId, cards }: RiskPanelProps) {
         return (
           <div
             key={signal}
-            className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3"
+            className="rounded-xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
           >
             <div className="mb-2 flex items-center gap-2">
               <span
@@ -155,7 +155,7 @@ export function RiskPanel({ projectId, cards }: RiskPanelProps) {
 
       {/* Empty state */}
       {!summary && !detecting && (
-        <div className="rounded-lg border border-dashed border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-6 text-center text-xs text-cafe-secondary">
+        <div className="rounded-lg bg-[var(--console-shell-bg)] p-6 text-center text-xs text-cafe-secondary">
           点击 &ldquo;Run Detection&rdquo; 开始风险检测
         </div>
       )}

@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import type { CliEvent, CliStatus } from '@/stores/chat-types';
+import typographyTokens from '@/styles/typography-tokens.json';
 
 /* ── Helpers ── */
 
@@ -426,7 +427,10 @@ export function CliOutputBlock({
           <ChevronIcon expanded={expanded} />
         </span>
         <span className="font-medium min-w-0 truncate text-left">{summary}</span>
-        <span className="ml-auto flex items-center gap-1 flex-shrink-0" style={{ color: '#64748B', fontSize: 10 }}>
+        <span
+          className="ml-auto flex items-center gap-1 flex-shrink-0"
+          style={{ color: '#64748B', fontSize: typographyTokens.fontSizePx.micro }}
+        >
           {thinkingMode === 'debug' ? (
             <>
               <PawPrint />
@@ -463,7 +467,7 @@ export function CliOutputBlock({
                     style={{
                       padding: '8px 12px 4px 12px',
                       fontFamily: 'JetBrains Mono, monospace',
-                      fontSize: 10,
+                      fontSize: typographyTokens.fontSizePx.micro,
                       color: '#475569',
                     }}
                   >

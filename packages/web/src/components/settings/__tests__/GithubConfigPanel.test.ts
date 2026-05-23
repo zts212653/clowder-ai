@@ -104,12 +104,12 @@ describe('GithubConfigPanel', () => {
     expect(body.updates).toEqual([{ name: 'GITHUB_TOKEN', value: 'ghp_new_token' }]);
   });
 
-  it('shows owner fail-closed errors from the save endpoint', async () => {
+  it('shows configured-owner errors from the save endpoint', async () => {
     mocks.apiFetch.mockImplementation((path: string) => {
       if (path === '/api/connector/status') return Promise.resolve(connectorStatusResponse());
       if (path === '/api/config/secrets') {
         return Promise.resolve(
-          jsonResponse({ error: 'Connector credential writes require DEFAULT_OWNER_USER_ID to be configured' }, 403),
+          jsonResponse({ error: 'Connector credential writes can only be modified by the configured owner' }, 403),
         );
       }
       return Promise.resolve(jsonResponse({ ok: true }));
@@ -127,7 +127,8 @@ describe('GithubConfigPanel', () => {
       findButton(container, '保存 GitHub 配置').click();
     });
 
-    expect(container.textContent).toContain('DEFAULT_OWNER_USER_ID 未配置');
+    expect(container.textContent).toContain('配置 owner');
+    expect(container.textContent).not.toContain('DEFAULT_OWNER_USER_ID');
   });
 
   it('marks GitHub setup noise bot logins as restart-required', async () => {

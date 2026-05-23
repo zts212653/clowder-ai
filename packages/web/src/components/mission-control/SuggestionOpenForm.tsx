@@ -60,7 +60,7 @@ export function SuggestionOpenForm({
         <select
           value={catId}
           onChange={(event) => onCatIdChange(event.target.value)}
-          className="mt-1 w-full rounded-lg border border-[var(--console-border-soft)] px-2 py-1.5 text-xs text-cafe"
+          className="mt-1 w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-2 py-1.5 text-xs text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
           data-testid="mc-suggest-cat"
         >
           {catOptions.map((option) => (
@@ -75,7 +75,7 @@ export function SuggestionOpenForm({
         <textarea
           value={why}
           onChange={(event) => onWhyChange(event.target.value)}
-          className="mt-1 h-16 w-full rounded-lg border border-[var(--console-border-soft)] px-2 py-1.5 text-xs text-cafe"
+          className="mt-1 h-16 w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-2 py-1.5 text-xs text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
           data-testid="mc-suggest-why"
         />
       </label>
@@ -84,7 +84,7 @@ export function SuggestionOpenForm({
         <textarea
           value={plan}
           onChange={(event) => onPlanChange(event.target.value)}
-          className="mt-1 h-16 w-full rounded-lg border border-[var(--console-border-soft)] px-2 py-1.5 text-xs text-cafe"
+          className="mt-1 h-16 w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-2 py-1.5 text-xs text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
           data-testid="mc-suggest-plan"
         />
       </label>
