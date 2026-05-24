@@ -23,6 +23,11 @@ triggers:
 先调用 `limb_list_available()` 确认 `weixin-mp` 节点在线。
 如果节点不在线或不存在，提示用户在 **设置 → 插件集成** 中启用并配置微信公众号插件。
 
+## 接口发现
+
+`limb_list_available()` 返回当前在线节点的 capability、command 和 authLevel；这是可调用命令白名单。
+详细参数以本 skill 的“核心能力”说明为准。当前列表中没有的命令不要猜测调用；如果缺少预期命令，提示用户重新启用或同步微信公众号插件。
+
 ## 何时使用
 
 - 需要将 Markdown 内容发布到微信公众号
