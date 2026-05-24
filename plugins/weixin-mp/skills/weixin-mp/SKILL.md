@@ -18,6 +18,11 @@ triggers:
 
 通过 Limb 体系 (`limb_invoke`) 操作微信公众号。
 
+## 使用前检查
+
+先调用 `limb_list_available()` 确认 `weixin-mp` 节点在线。
+如果节点不在线或不存在，提示用户在 **设置 → 插件集成** 中启用并配置微信公众号插件。
+
 ## 何时使用
 
 - 需要将 Markdown 内容发布到微信公众号
