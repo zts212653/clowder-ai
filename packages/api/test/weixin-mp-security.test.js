@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { markdownToWxHtml } from '../dist/domains/weixin-mp/markdown-to-wx-html.js';
-import { validateExternalUrl } from '../dist/domains/weixin-mp/url-safety.js';
+import { validateExternalUrl, validateExternalUrlResolved } from '../dist/domains/weixin-mp/url-safety.js';
 
 describe('validateExternalUrl', () => {
   it('allows https URLs', () => {
@@ -70,6 +70,37 @@ describe('validateExternalUrl', () => {
 
   it('rejects IPv6-mapped private IP', () => {
     assert.throws(() => validateExternalUrl('http://[::ffff:169.254.169.254]/meta'), /private/);
+  });
+
+  it('allows hostnames that resolve to public addresses', async () => {
+    await assert.doesNotReject(() =>
+      validateExternalUrlResolved('https://cdn.example.test/image.png', async () => [{ address: '93.184.216.34' }]),
+    );
+  });
+
+  it('rejects hostnames that resolve to private IPv4 addresses', async () => {
+    await assert.rejects(
+      () => validateExternalUrlResolved('https://cdn.example.test/image.png', async () => [{ address: '10.0.0.5' }]),
+      /private/,
+    );
+  });
+
+  it('rejects hostnames that resolve to metadata addresses', async () => {
+    await assert.rejects(
+      () =>
+        validateExternalUrlResolved('https://cdn.example.test/image.png', async () => [
+          { address: '93.184.216.34' },
+          { address: '169.254.169.254' },
+        ]),
+      /private/,
+    );
+  });
+
+  it('rejects hostnames that resolve to private IPv6 addresses', async () => {
+    await assert.rejects(
+      () => validateExternalUrlResolved('https://cdn.example.test/image.png', async () => [{ address: 'fd00::1' }]),
+      /private/,
+    );
   });
 });
 
