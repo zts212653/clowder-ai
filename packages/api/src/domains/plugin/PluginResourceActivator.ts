@@ -110,10 +110,20 @@ export interface PluginLimbRehydrationDeps {
   capabilities: CapabilitiesConfig | null;
   pluginRegistry: Pick<import('./PluginRegistry.js').PluginRegistry, 'getManifest'>;
   pluginsDir: string;
-  projectRoot: string;
   limbAdapterRegistry: Map<string, (yamlPath: string, pluginConfig: Record<string, string>) => Promise<ILimbNode>>;
   limbRegistry: Pick<LimbRegistry, 'register'>;
   log?: Pick<Console, 'info' | 'warn'>;
+}
+
+function resolveRuntimePluginConfig(manifest: PluginManifest): Record<string, string> {
+  if (manifest.config.length === 0) return {};
+  const resolved = resolvePluginEnv([manifest]);
+  const env: Record<string, string> = {};
+  for (const field of manifest.config) {
+    const val = resolved[field.envName];
+    if (val) env[field.envName] = val;
+  }
+  return env;
 }
 
 export async function rehydrateEnabledPluginLimbs(deps: PluginLimbRehydrationDeps): Promise<void> {
@@ -136,7 +146,7 @@ export async function rehydrateEnabledPluginLimbs(deps: PluginLimbRehydrationDep
     try {
       const yamlPath = resolvePluginResourcePath(deps.pluginsDir, manifest.id, limbResource.path);
       await assertPluginResourceInsideRoot(deps.pluginsDir, manifest, yamlPath, 'Limb resource');
-      const pluginConfig = readPluginConfig(deps.projectRoot, manifest.id);
+      const pluginConfig = resolveRuntimePluginConfig(manifest);
       const node = withPersistedLimbNodeId(await factory(yamlPath, pluginConfig), cap.limbNodeId);
       await deps.limbRegistry.register(node);
       deps.log?.info(`[api] F202: Rehydrated limb for plugin '${manifest.id}'`);
@@ -370,7 +380,7 @@ export class PluginResourceActivator {
 
     const yamlPath = resolvePluginResourcePath(this.deps.pluginsDir, manifest.id, resource.path);
     await assertPluginResourceInsideRoot(this.deps.pluginsDir, manifest, yamlPath, 'Limb resource');
-    const pluginConfig = readPluginConfig(this.deps.resolveProjectRoot(), manifest.id);
+    const pluginConfig = resolveRuntimePluginConfig(manifest);
     const node = await this.deps.limbAdapterFactory(manifest.id, yamlPath, pluginConfig);
     const previous = await this.upsertCapabilityEntry(manifest, resource, true, node.nodeId);
     const capId = resourceCapId(manifest.id, resource);
@@ -675,11 +685,12 @@ export class PluginResourceActivator {
       const next = structuredClone(config);
 
       const mcpEnv = this.buildMcpEnv(manifest);
+      const pluginConfig = resolveRuntimePluginConfig(manifest);
       let changed = false;
       for (const cap of next.capabilities) {
-        if (cap.pluginId !== manifest.id || cap.type !== 'mcp' || !cap.mcpServer) continue;
-        cap.mcpServer.env = mcpEnv.env;
-        changed = true;
+        if (cap.pluginId !== manifest.id) continue;
+        if (this.syncMcpCapabilityEnv(cap, mcpEnv)) changed = true;
+        if (await this.refreshLimbCapability(manifest, cap, pluginConfig)) changed = true;
       }
       if (changed) await this.writeCapabilitiesWithRollback(previous, next);
     });
@@ -707,14 +718,53 @@ export class PluginResourceActivator {
     };
   }
 
-  private buildMcpEnv(manifest: PluginManifest): { env?: Record<string, string> } {
-    if (manifest.config.length === 0) return {};
-    const resolved = resolvePluginEnv([manifest]);
-    const env: Record<string, string> = {};
-    for (const field of manifest.config) {
-      const val = resolved[field.envName];
-      if (val) env[field.envName] = val;
+  private syncMcpCapabilityEnv(cap: CapabilityEntry, mcpEnv: { env?: Record<string, string> }): boolean {
+    if (cap.type !== 'mcp' || !cap.mcpServer) return false;
+    cap.mcpServer.env = mcpEnv.env;
+    return true;
+  }
+
+  private async refreshLimbCapability(
+    manifest: PluginManifest,
+    cap: CapabilityEntry,
+    pluginConfig: Record<string, string>,
+  ): Promise<boolean> {
+    if (cap.type !== 'limb' || !cap.enabled) return false;
+
+    const resource = manifest.resources.find((r) => resourceCapId(manifest.id, r) === cap.id);
+    if (!resource?.path) return false;
+    if (!this.deps.limbAdapterFactory) {
+      throw new Error('No limb adapter factory configured');
     }
+
+    const yamlPath = resolvePluginResourcePath(this.deps.pluginsDir, manifest.id, resource.path);
+    const refreshedNode = await this.deps.limbAdapterFactory(manifest.id, yamlPath, pluginConfig);
+    await this.replaceRegisteredLimbNode(cap.limbNodeId, refreshedNode);
+
+    if (cap.limbNodeId === refreshedNode.nodeId) return false;
+    cap.limbNodeId = refreshedNode.nodeId;
+    return true;
+  }
+
+  private async replaceRegisteredLimbNode(oldNodeId: string | undefined, refreshedNode: ILimbNode): Promise<void> {
+    const oldNode = oldNodeId ? this.deps.limbRegistry.getNodeHandle(oldNodeId) : undefined;
+    if (oldNodeId) this.deps.limbRegistry.deregister(oldNodeId);
+    try {
+      await this.deps.limbRegistry.register(refreshedNode);
+    } catch (err) {
+      if (oldNode) {
+        try {
+          await this.deps.limbRegistry.register(oldNode);
+        } catch {
+          /* best-effort rollback */
+        }
+      }
+      throw err;
+    }
+  }
+
+  private buildMcpEnv(manifest: PluginManifest): { env?: Record<string, string> } {
+    const env = resolveRuntimePluginConfig(manifest);
     return Object.keys(env).length > 0 ? { env } : {};
   }
 

@@ -9,12 +9,14 @@ import os from 'node:os';
 import { join } from 'node:path';
 import { describe, it, mock } from 'node:test';
 import Fastify from 'fastify';
+import { LimbRegistry } from '../dist/domains/limb/LimbRegistry.js';
 import { PluginRegistry, resourceCapId } from '../dist/domains/plugin/PluginRegistry.js';
 import {
   PluginResourceActivator,
   rehydrateEnabledPluginLimbs,
   withPersistedLimbNodeId,
 } from '../dist/domains/plugin/PluginResourceActivator.js';
+import { writePluginConfig } from '../dist/domains/plugin/plugin-config-store.js';
 import { BUILTIN_PLUGIN_IDS, parsePluginManifest, validateEnvSafety } from '../dist/domains/plugin/plugin-manifest.js';
 import { registerPluginRoutes } from '../dist/routes/plugin-routes.js';
 
@@ -576,6 +578,102 @@ describe('parsePluginManifest security', () => {
       ].join('\n'),
     );
     assert.throws(() => parsePluginManifest(yamlPath), /Invalid envName/);
+  });
+});
+
+describe('PluginResourceActivator config handling', () => {
+  function createActivator(projectRoot, factory) {
+    let capabilities = { version: 1, capabilities: [] };
+    const limbRegistry = new LimbRegistry();
+    const activator = new PluginResourceActivator({
+      resolveProjectRoot: () => projectRoot,
+      pluginsDir: join(projectRoot, 'plugins'),
+      limbRegistry,
+      readCapabilities: async () => capabilities,
+      writeCapabilities: async (next) => {
+        capabilities = next;
+      },
+      withCapabilityLock: async (fn) => fn(),
+      limbAdapterFactory: factory,
+    });
+    return { activator, getCapabilities: () => capabilities, limbRegistry };
+  }
+
+  it('uses env fallback for plugin MCP and limb activation', async () => {
+    const projectRoot = mkdtempSync(join(os.tmpdir(), 'plugin-config-test-'));
+    const manifest = {
+      id: 'test-plugin-env-fallback',
+      name: 'Test',
+      version: '1.0.0',
+      builtin: false,
+      config: [{ envName: 'TEST_PLUGIN_ENV_FALLBACK_TOKEN', label: 'Token', sensitive: true, required: true }],
+      resources: [
+        { type: 'mcp', name: 'server', command: 'node', args: ['server.js'] },
+        { type: 'limb', path: 'limb.yml' },
+      ],
+    };
+
+    const seenTokens = [];
+    const { activator, getCapabilities, limbRegistry } = createActivator(
+      projectRoot,
+      async (_pluginId, _yamlPath, pluginConfig) => {
+        seenTokens.push(pluginConfig.TEST_PLUGIN_ENV_FALLBACK_TOKEN);
+        return {
+          nodeId: 'test-node',
+          displayName: pluginConfig.TEST_PLUGIN_ENV_FALLBACK_TOKEN,
+          platform: 'test',
+          capabilities: [{ cap: 'test', commands: ['test.run'], authLevel: 'free' }],
+          invoke: async () => ({ success: true }),
+        };
+      },
+    );
+
+    process.env.TEST_PLUGIN_ENV_FALLBACK_TOKEN = 'from-env';
+    try {
+      await activator.enablePlugin(manifest);
+    } finally {
+      delete process.env.TEST_PLUGIN_ENV_FALLBACK_TOKEN;
+    }
+
+    const mcpEntry = getCapabilities().capabilities.find(
+      (c) => c.id === resourceCapId(manifest.id, manifest.resources[0]),
+    );
+    assert.equal(mcpEntry?.mcpServer?.env?.TEST_PLUGIN_ENV_FALLBACK_TOKEN, 'from-env');
+    assert.deepEqual(seenTokens, ['from-env']);
+    assert.equal(limbRegistry.getNode('test-node')?.displayName, 'from-env');
+  });
+
+  it('refreshes enabled limb nodes after plugin config changes', async () => {
+    const projectRoot = mkdtempSync(join(os.tmpdir(), 'plugin-config-test-'));
+    const manifest = {
+      id: 'test-plugin-sync',
+      name: 'Test',
+      version: '1.0.0',
+      builtin: false,
+      config: [{ envName: 'TEST_PLUGIN_SYNC_TOKEN', label: 'Token', sensitive: true, required: true }],
+      resources: [{ type: 'limb', path: 'limb.yml' }],
+    };
+
+    const { activator, limbRegistry } = createActivator(projectRoot, async (_pluginId, _yamlPath, pluginConfig) => ({
+      nodeId: 'sync-node',
+      displayName: pluginConfig.TEST_PLUGIN_SYNC_TOKEN,
+      platform: 'test',
+      capabilities: [{ cap: 'test', commands: ['test.run'], authLevel: 'free' }],
+      invoke: async () => ({ success: true }),
+    }));
+
+    process.env.TEST_PLUGIN_SYNC_TOKEN = 'old-token';
+    try {
+      await activator.enablePlugin(manifest);
+    } finally {
+      delete process.env.TEST_PLUGIN_SYNC_TOKEN;
+    }
+    assert.equal(limbRegistry.getNode('sync-node')?.displayName, 'old-token');
+
+    writePluginConfig(projectRoot, manifest.id, [{ name: 'TEST_PLUGIN_SYNC_TOKEN', value: 'fresh-token' }]);
+    await activator.syncPluginEnv(manifest);
+
+    assert.equal(limbRegistry.getNode('sync-node')?.displayName, 'fresh-token');
   });
 });
 

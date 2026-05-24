@@ -114,6 +114,8 @@ export function PluginsContent() {
       {plugins.map((plugin) => {
         const statusCfg = STATUS_CONFIG[plugin.status];
         const isExpanded = expandedId === plugin.id;
+        const isRuntimeEnabled = plugin.status === 'enabled' || plugin.status === 'partial';
+        const showResourceToggle = plugin.resources.length > 0 && (plugin.configured || isRuntimeEnabled);
 
         return (
           <article key={plugin.id} className={settingsResourceCardClass}>
@@ -147,9 +149,9 @@ export function PluginsContent() {
                 <SettingsBadge tone={statusCfg.tone} className="shrink-0 font-medium">
                   {statusCfg.label}
                 </SettingsBadge>
-                {plugin.resources.length > 0 && plugin.configured && (
+                {showResourceToggle && (
                   <SettingsResourceToggleSwitch
-                    enabled={plugin.status === 'enabled' || plugin.status === 'partial'}
+                    enabled={isRuntimeEnabled}
                     busy={togglingId === plugin.id}
                     onClick={(e) => {
                       e.stopPropagation();

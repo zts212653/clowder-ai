@@ -22,7 +22,7 @@ export class WeixinMpTokenManager {
   ) {}
 
   async getAccessToken(): Promise<string> {
-    const appId = this.pluginConfig['WEIXIN_MP_APP_ID'];
+    const appId = this.pluginConfig.WEIXIN_MP_APP_ID;
     if (!appId) throw new Error('WEIXIN_MP_APP_ID must be configured');
 
     if (this.memAppId !== appId) {
@@ -31,8 +31,12 @@ export class WeixinMpTokenManager {
     }
 
     if (this.redis) {
-      const cached = await this.redis.get(`${REDIS_KEY_PREFIX}${appId}`);
-      if (cached) return cached;
+      try {
+        const cached = await this.redis.get(`${REDIS_KEY_PREFIX}${appId}`);
+        if (cached) return cached;
+      } catch {
+        /* Redis is an optional cache; fall back to in-memory/fresh token. */
+      }
     }
     if (this.memToken && Date.now() < this.memExpiresAt) {
       return this.memToken;
@@ -41,8 +45,8 @@ export class WeixinMpTokenManager {
   }
 
   private async refresh(): Promise<string> {
-    const appId = this.pluginConfig['WEIXIN_MP_APP_ID'];
-    const appSecret = this.pluginConfig['WEIXIN_MP_APP_SECRET'];
+    const appId = this.pluginConfig.WEIXIN_MP_APP_ID;
+    const appSecret = this.pluginConfig.WEIXIN_MP_APP_SECRET;
     if (!appId || !appSecret) {
       throw new Error('WEIXIN_MP_APP_ID and WEIXIN_MP_APP_SECRET must be configured');
     }
@@ -57,7 +61,11 @@ export class WeixinMpTokenManager {
 
     const ttlSec = (data.expires_in ?? 7200) - REFRESH_MARGIN_SEC;
     if (this.redis) {
-      await this.redis.setex(`${REDIS_KEY_PREFIX}${appId}`, ttlSec, data.access_token);
+      try {
+        await this.redis.setex(`${REDIS_KEY_PREFIX}${appId}`, ttlSec, data.access_token);
+      } catch {
+        /* Redis is an optional cache; keep the process-local token. */
+      }
     }
     this.memToken = data.access_token;
     this.memExpiresAt = Date.now() + ttlSec * 1000;

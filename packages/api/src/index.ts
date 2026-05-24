@@ -2285,7 +2285,6 @@ async function main(): Promise<void> {
       capabilities: startupCaps,
       pluginRegistry,
       pluginsDir,
-      projectRoot: resolveActiveProjectRoot(),
       limbAdapterRegistry,
       limbRegistry,
       log: app.log,
