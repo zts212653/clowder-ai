@@ -1,4 +1,4 @@
-import { safeFetchOptions, validateExternalUrlResolved } from './url-safety.js';
+import { fetchExternalUrlPinned } from './url-safety.js';
 import type { WeixinMpTokenManager } from './weixin-mp-token.js';
 
 const BASE = 'https://api.weixin.qq.com/cgi-bin';
@@ -83,19 +83,14 @@ export class WeixinMpClient {
   constructor(private readonly tokenMgr: WeixinMpTokenManager) {}
 
   async uploadArticleImage(imageUrl: string): Promise<string> {
-    await validateExternalUrlResolved(imageUrl);
     const token = await this.tokenMgr.getAccessToken();
-    const imgRes = await fetch(imageUrl, { ...safeFetchOptions(), signal: AbortSignal.timeout(TIMEOUT) });
-    const contentType = imgRes.headers.get('content-type') ?? '';
+    const imgRes = await fetchExternalUrlPinned(imageUrl, { timeoutMs: TIMEOUT, maxBytes: MAX_IMAGE_BYTES });
+    const contentType = imgRes.contentType;
     if (!contentType.startsWith('image/')) {
       throw new Error(`Expected image content-type, got: ${contentType}`);
     }
-    const buf = Buffer.from(await imgRes.arrayBuffer());
-    if (buf.byteLength > MAX_IMAGE_BYTES) {
-      throw new Error(`Image exceeds ${MAX_IMAGE_BYTES} bytes limit`);
-    }
     const ext = imageUrl.match(/\.(jpe?g|png|gif|bmp)$/i)?.[1]?.toLowerCase() ?? 'png';
-    const blob = new Blob([buf], { type: `image/${ext === 'jpg' ? 'jpeg' : ext}` });
+    const blob = new Blob([imgRes.body], { type: `image/${ext === 'jpg' ? 'jpeg' : ext}` });
 
     const form = new FormData();
     form.append('media', blob, `image.${ext}`);
@@ -111,17 +106,13 @@ export class WeixinMpClient {
   }
 
   async addMaterial(imageUrl: string): Promise<{ mediaId: string; url: string }> {
-    await validateExternalUrlResolved(imageUrl);
     const token = await this.tokenMgr.getAccessToken();
-    const imgRes = await fetch(imageUrl, { ...safeFetchOptions(), signal: AbortSignal.timeout(TIMEOUT) });
-    const contentType = imgRes.headers.get('content-type') ?? '';
+    const imgRes = await fetchExternalUrlPinned(imageUrl, { timeoutMs: TIMEOUT, maxBytes: MAX_IMAGE_BYTES });
+    const contentType = imgRes.contentType;
     if (!contentType.startsWith('image/')) {
       throw new Error(`Expected image content-type, got: ${contentType}`);
     }
-    const blob = await imgRes.blob();
-    if (blob.size > MAX_IMAGE_BYTES) {
-      throw new Error(`Image exceeds ${MAX_IMAGE_BYTES} bytes limit`);
-    }
+    const blob = new Blob([imgRes.body], { type: contentType });
 
     const form = new FormData();
     form.append('media', blob, 'cover.png');

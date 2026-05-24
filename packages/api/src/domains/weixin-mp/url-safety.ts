@@ -1,4 +1,7 @@
 import { lookup } from 'node:dns/promises';
+import type { IncomingMessage, RequestOptions } from 'node:http';
+import http from 'node:http';
+import https from 'node:https';
 import { isIP } from 'node:net';
 
 const PRIVATE_IP_RANGES = [
@@ -16,6 +19,25 @@ const PRIVATE_IP_RANGES = [
 const BLOCKED_HOSTNAMES = new Set(['localhost', 'metadata.google.internal', 'metadata.internal']);
 
 export type DnsLookup = (hostname: string) => Promise<readonly { readonly address: string }[]>;
+
+export interface ResolvedExternalUrl {
+  readonly url: URL;
+  readonly address: string;
+  readonly hostname: string;
+}
+
+export interface PinnedFetchOptions {
+  readonly timeoutMs: number;
+  readonly maxBytes: number;
+  readonly dnsLookup?: DnsLookup;
+}
+
+export interface PinnedFetchResult {
+  readonly contentType: string;
+  readonly body: Buffer;
+}
+
+export type PinnedRequestOptions = RequestOptions & { servername?: string };
 
 function normalizeHostname(hostname: string): string {
   let h = hostname.toLowerCase();
@@ -67,10 +89,13 @@ export function validateExternalUrl(url: string): URL {
   return parsed;
 }
 
-export async function validateExternalUrlResolved(url: string, dnsLookup: DnsLookup = defaultDnsLookup): Promise<void> {
+export async function resolveExternalUrl(
+  url: string,
+  dnsLookup: DnsLookup = defaultDnsLookup,
+): Promise<ResolvedExternalUrl> {
   const parsed = validateExternalUrl(url);
   const hostname = normalizeHostname(parsed.hostname);
-  if (isIP(hostname)) return;
+  if (isIP(hostname)) return { url: parsed, address: hostname, hostname };
 
   let records: readonly { readonly address: string }[];
   try {
@@ -86,8 +111,82 @@ export async function validateExternalUrlResolved(url: string, dnsLookup: DnsLoo
   for (const record of records) {
     assertExternalHostnameAllowed(record.address);
   }
+
+  const firstRecord = records[0];
+  if (!firstRecord) {
+    throw new Error(`URL hostname could not be resolved: ${hostname}`);
+  }
+  return { url: parsed, address: firstRecord.address, hostname };
 }
 
-export function safeFetchOptions(): { redirect: 'error' } {
-  return { redirect: 'error' };
+export async function validateExternalUrlResolved(url: string, dnsLookup: DnsLookup = defaultDnsLookup): Promise<void> {
+  await resolveExternalUrl(url, dnsLookup);
+}
+
+export function createPinnedRequestOptions(resolved: ResolvedExternalUrl): PinnedRequestOptions {
+  const options: PinnedRequestOptions = {
+    protocol: resolved.url.protocol,
+    hostname: resolved.address,
+    path: `${resolved.url.pathname}${resolved.url.search}`,
+    method: 'GET',
+    headers: { Host: resolved.url.host },
+  };
+
+  if (resolved.url.port) options.port = Number(resolved.url.port);
+  if (resolved.url.protocol === 'https:') options.servername = resolved.hostname;
+  return options;
+}
+
+function collectPinnedResponse(res: IncomingMessage, maxBytes: number): Promise<PinnedFetchResult> {
+  return new Promise((resolve, reject) => {
+    const statusCode = res.statusCode ?? 0;
+    if (statusCode >= 300 && statusCode < 400) {
+      res.resume();
+      reject(new Error('External image redirects are not allowed'));
+      return;
+    }
+    if (statusCode < 200 || statusCode >= 300) {
+      res.resume();
+      reject(new Error(`External image fetch failed with HTTP ${statusCode}`));
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    let total = 0;
+    res.on('data', (chunk: Buffer) => {
+      total += chunk.byteLength;
+      if (total > maxBytes) {
+        reject(new Error(`Image exceeds ${maxBytes} bytes limit`));
+        res.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    res.on('end', () => {
+      resolve({
+        contentType: Array.isArray(res.headers['content-type'])
+          ? (res.headers['content-type'][0] ?? '')
+          : (res.headers['content-type'] ?? ''),
+        body: Buffer.concat(chunks),
+      });
+    });
+    res.on('error', reject);
+  });
+}
+
+export async function fetchExternalUrlPinned(url: string, options: PinnedFetchOptions): Promise<PinnedFetchResult> {
+  const resolved = await resolveExternalUrl(url, options.dnsLookup ?? defaultDnsLookup);
+  const requestOptions = createPinnedRequestOptions(resolved);
+  const client = resolved.url.protocol === 'https:' ? https : http;
+
+  return new Promise((resolve, reject) => {
+    const req = client.request(requestOptions, (res) => {
+      collectPinnedResponse(res, options.maxBytes).then(resolve, reject);
+    });
+    req.setTimeout(options.timeoutMs, () => {
+      req.destroy(new Error(`External image fetch timed out after ${options.timeoutMs}ms`));
+    });
+    req.on('error', reject);
+    req.end();
+  });
 }

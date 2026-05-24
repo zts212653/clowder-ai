@@ -5,7 +5,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { markdownToWxHtml } from '../dist/domains/weixin-mp/markdown-to-wx-html.js';
-import { validateExternalUrl, validateExternalUrlResolved } from '../dist/domains/weixin-mp/url-safety.js';
+import {
+  createPinnedRequestOptions,
+  resolveExternalUrl,
+  validateExternalUrl,
+  validateExternalUrlResolved,
+} from '../dist/domains/weixin-mp/url-safety.js';
 
 describe('validateExternalUrl', () => {
   it('allows https URLs', () => {
@@ -101,6 +106,19 @@ describe('validateExternalUrl', () => {
       () => validateExternalUrlResolved('https://cdn.example.test/image.png', async () => [{ address: 'fd00::1' }]),
       /private/,
     );
+  });
+
+  it('pins fetch request options to the validated DNS address', async () => {
+    const resolved = await resolveExternalUrl('https://cdn.example.test:8443/image.png?size=large', async () => [
+      { address: '93.184.216.34' },
+    ]);
+
+    const options = createPinnedRequestOptions(resolved);
+
+    assert.equal(options.hostname, '93.184.216.34');
+    assert.equal(options.servername, 'cdn.example.test');
+    assert.equal(options.path, '/image.png?size=large');
+    assert.deepEqual(options.headers, { Host: 'cdn.example.test:8443' });
   });
 });
 
