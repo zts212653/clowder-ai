@@ -12,11 +12,22 @@ code_anchors:
   - packages/api/src/infrastructure/harness-eval/legacy-task-cleanup.ts
   - packages/api/src/infrastructure/harness-eval/reeval-closure.ts
   - packages/api/src/infrastructure/harness-eval/eval-a2a-adapter.ts
+  - packages/api/src/infrastructure/harness-eval/eval-hub-read-model.ts
+  - packages/api/src/routes/eval-hub.ts
+  - packages/web/src/components/HubEvalTab.tsx
+  - sop-definitions/development.yaml
+  - sop-definitions/stubs/video-cocreation.yaml
+  - sop-definitions/stubs/tech-article.yaml
+  - sop-definitions/stubs/family-office.yaml
+  - scripts/sop-definitions.mjs
+  - scripts/lib/sop-definition-codegen.mjs
+  - packages/shared/src/types/sop-definition.generated.ts
 doc_anchors:
   - docs/features/F192-socio-technical-harness-eval.md
   - docs/harness-feedback/
   - feature-discussions/2026-05-21-f192-phase-e-eval-hub-kickoff/README.md
-static_scan_hints: [harness-eval, VerdictHandoffPacket, eval-domain, reeval, harness-fit-digest, Eval Hub]
+  - sop-definitions/README.md
+static_scan_hints: [harness-eval, VerdictHandoffPacket, eval-domain, reeval, harness-fit-digest, Eval Hub, SopDefinition, sop-definitions, predicate]
 cited_by:
   - F192 Phase E-pilot
 ---
@@ -30,6 +41,7 @@ F192 owns the socio-technical harness evaluation contract: harnesses declare exp
 ## Use This When
 
 - Adding or changing an Eval Contract for a harness, skill, MCP tool, SOP, or shared rule.
+- Adding or changing a SOP stage definition or predicate-backed hard rule.
 - Adding an eval domain registry entry such as `eval:a2a` or `eval:memory`.
 - Producing or validating Verdict Handoff Packets.
 - Migrating legacy scheduled tasks into unified eval runtime.
@@ -50,4 +62,4 @@ F192 owns the socio-technical harness evaluation contract: harnesses declare exp
 
 ## Static Scan Hints
 
-Watch for new `eval:*` domains, `VerdictHandoffPacket`, `harness-fit-digest`, `delete_sunset`, `reeval`, `legacy scheduled task`, and `harness-feedback` artifacts.
+Watch for new `eval:*` domains, `VerdictHandoffPacket`, `harness-fit-digest`, `delete_sunset`, `reeval`, `legacy scheduled task`, `harness-feedback`, `SopDefinition`, `sop-definitions`, and `predicate` artifacts.

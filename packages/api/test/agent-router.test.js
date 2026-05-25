@@ -1472,7 +1472,10 @@ describe('AgentRouter', () => {
 
   test('passes workingDirectory when thread has non-default projectPath', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
-    const projectPath = resolve(process.cwd(), '..', '..');
+    const { findMonorepoRoot } = await import('../dist/utils/monorepo-root.js');
+    // Keep this path inside the host repo: this test covers workingDirectory
+    // propagation, not the external-project governance gate.
+    const projectPath = findMonorepoRoot();
     const previousAllowedRoots = process.env.PROJECT_ALLOWED_ROOTS;
     const previousAllowedRootsAppend = process.env.PROJECT_ALLOWED_ROOTS_APPEND;
 
@@ -1595,10 +1598,10 @@ describe('AgentRouter', () => {
   });
 
   test('F203 Phase C: provider WITHOUT native L0 still gets full static identity in user-message prompt', async () => {
-    // 云端 Codex P1-cloud-1: only ClaudeBgCarrier + CodexAgent inject L0
-    // natively (--system-prompt-file / -c developer_instructions). All other
-    // providers (ClaudeAgentService legacy -p, GeminiAgentService, Antigravity,
-    // CatAgentService, A2A, OpenCode, Dare, Kimi…) still rely on the
+    // 云端 Codex P1-cloud-1: only providers that explicitly expose
+    // injectsL0Natively() inject L0 natively (--system-prompt-file / -c
+    // developer_instructions). Providers without that marker (GeminiAgentService,
+    // Antigravity, CatAgentService, A2A, OpenCode, Dare, Kimi…) still rely on the
     // user-message `params.systemPrompt` prepend for identity/家规. The route
     // layer must consult `service.injectsL0Natively?.()` and keep FULL static
     // identity for non-native services — pack-only-everywhere would orphan
@@ -1607,7 +1610,7 @@ describe('AgentRouter', () => {
 
     let opusReceivedPrompt = '';
     const mockClaudeService = {
-      // Intentionally NO injectsL0Natively — represents legacy ClaudeAgentService.
+      // Intentionally NO injectsL0Natively — represents a non-native provider.
       invoke: mock.fn(async function* (prompt) {
         opusReceivedPrompt = prompt;
         yield { type: 'text', catId: 'opus', content: 'hi', timestamp: Date.now() };
@@ -1643,9 +1646,10 @@ describe('AgentRouter', () => {
   });
 
   test('F203 Phase C: provider WITH injectsL0Natively=true gets pack-only (non-pack via native channel)', async () => {
-    // The intended behavior for ClaudeBgCarrier + CodexAgent: static identity
-    // travels via --system-prompt-file / -c developer_instructions, not via
-    // user message. Route layer detects via service.injectsL0Natively?.().
+    // The intended behavior for ClaudeAgentService, ClaudeBgCarrierService,
+    // and CodexAgent: static identity travels via --system-prompt-file / -c
+    // developer_instructions, not via user message. Route layer detects via
+    // service.injectsL0Natively?.().
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
 
     let opusReceivedPrompt = '';

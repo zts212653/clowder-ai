@@ -183,6 +183,67 @@ describe('Callback routes: agent-key auth path', () => {
     assert.equal(JSON.parse(r2.body).status, 'duplicate');
   });
 
+  test('post-message with agent-key suppresses exact duplicate callback posts in the retry window', async () => {
+    const app = await createApp();
+    const { secret } = await issueKey();
+
+    const payload = { content: 'same smoke report', threadId: ownedThreadId };
+    const r1 = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-agent-key-secret': secret },
+      payload,
+    });
+    assert.equal(r1.statusCode, 200);
+    const firstBody = JSON.parse(r1.body);
+    assert.equal(firstBody.status, 'ok');
+
+    const r2 = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-agent-key-secret': secret },
+      payload,
+    });
+    assert.equal(r2.statusCode, 200);
+    const secondBody = JSON.parse(r2.body);
+    assert.equal(secondBody.status, 'duplicate');
+    assert.equal(secondBody.messageId, firstBody.messageId);
+
+    const messages = await messageStore.getByThread(ownedThreadId);
+    assert.equal(messages.length, 1);
+    assert.equal(socketManager.getMessages().filter((m) => m.type === 'text').length, 1);
+  });
+
+  test('post-message with agent-key suppresses exact duplicate callback posts when first copy is queued', async () => {
+    const app = await createApp();
+    const { secret } = await issueKey();
+
+    const queued = messageStore.append({
+      userId: TEST_USER,
+      catId: TEST_CAT,
+      content: 'same queued smoke report',
+      mentions: [],
+      origin: 'callback',
+      timestamp: Date.now(),
+      threadId: ownedThreadId,
+      deliveryStatus: 'queued',
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-agent-key-secret': secret },
+      payload: { content: 'same queued smoke report', threadId: ownedThreadId },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.status, 'duplicate');
+    assert.equal(body.messageId, queued.id);
+
+    assert.equal(messageStore.size, 1);
+    assert.equal(socketManager.getMessages().filter((m) => m.type === 'text').length, 0);
+  });
+
   test('post-message with agent-key parses @mentions from content', async () => {
     const app = await createApp();
     const { secret } = await issueKey();

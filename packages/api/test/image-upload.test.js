@@ -171,7 +171,7 @@ describe('Claude CLI image fallback', () => {
     };
 
     const { ClaudeAgentService } = await import('../dist/domains/cats/services/agents/providers/ClaudeAgentService.js');
-    const service = new ClaudeAgentService({ spawnFn: mockSpawnFn });
+    const service = new ClaudeAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn: mockSpawnFn });
 
     for await (const _ of service.invoke('test', {
       contentBlocks: [

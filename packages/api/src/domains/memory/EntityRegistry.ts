@@ -75,7 +75,7 @@ export function aliasMatchesText(text: string, alias: string): boolean {
 export class EntityRegistryStore {
   constructor(private readonly db: Database.Database) {}
 
-  upsert(entities: EntityRecord[]): void {
+  upsert(entities: EntityRecord[]): boolean {
     const entityStmt = this.db.prepare(`
       INSERT INTO entity_registry
       (entity_id, entity_type, canonical_name, provenance_json, created_at, updated_at)
@@ -86,7 +86,10 @@ export class EntityRegistryStore {
         provenance_json = excluded.provenance_json,
         updated_at = excluded.updated_at
     `);
-    const existingCreatedAtStmt = this.db.prepare('SELECT created_at FROM entity_registry WHERE entity_id = ?');
+    const existingEntityStmt = this.db.prepare('SELECT * FROM entity_registry WHERE entity_id = ?');
+    const existingAliasesStmt = this.db.prepare(
+      'SELECT alias, alias_norm FROM entity_aliases WHERE entity_id = ? ORDER BY alias_norm, alias',
+    );
     const deleteAliasesStmt = this.db.prepare('DELETE FROM entity_aliases WHERE entity_id = ?');
     const aliasStmt = this.db.prepare(`
       INSERT OR REPLACE INTO entity_aliases
@@ -95,13 +98,22 @@ export class EntityRegistryStore {
     `);
 
     const tx = this.db.transaction((records: EntityRecord[]) => {
+      let changed = false;
       for (const entity of records) {
-        const existing = existingCreatedAtStmt.get(entity.entityId) as { created_at: string } | undefined;
+        const existing = existingEntityStmt.get(entity.entityId) as EntityRow | undefined;
+        const aliases = uniqueAliases(entity.aliases);
         const createdAt = existing?.created_at ?? entity.createdAt ?? entity.updatedAt;
         const provenanceJson = JSON.stringify(entity.provenance);
+        const existingAliases = existingAliasesStmt.all(entity.entityId) as Array<{
+          alias: string;
+          alias_norm: string;
+        }>;
+        if (entitySeedUnchanged(existing, existingAliases, entity, aliases, provenanceJson)) continue;
+
+        changed = true;
         entityStmt.run(entity.entityId, entity.type, entity.canonicalName, provenanceJson, createdAt, entity.updatedAt);
         deleteAliasesStmt.run(entity.entityId);
-        for (const alias of uniqueAliases(entity.aliases)) {
+        for (const alias of aliases) {
           aliasStmt.run(
             entity.entityId,
             alias,
@@ -112,8 +124,9 @@ export class EntityRegistryStore {
           );
         }
       }
+      return changed;
     });
-    tx(entities);
+    return tx(entities) as boolean;
   }
 
   get(entityId: string): EntityRecord | null {
@@ -588,4 +601,21 @@ function uniqueAliases(aliases: string[]): string[] {
     out.push(alias);
   }
   return out;
+}
+
+function entitySeedUnchanged(
+  existing: EntityRow | undefined,
+  existingAliases: Array<{ alias: string; alias_norm: string }>,
+  entity: EntityRecord,
+  aliases: string[],
+  provenanceJson: string,
+): boolean {
+  if (!existing) return false;
+  if (existing.entity_type !== entity.type) return false;
+  if (existing.canonical_name !== entity.canonicalName) return false;
+  if (existing.provenance_json !== provenanceJson) return false;
+  const currentAliases = existingAliases.map((row) => `${row.alias_norm}\u0000${row.alias}`).sort();
+  const nextAliases = aliases.map((alias) => `${normalizeEntityAlias(alias)}\u0000${alias}`).sort();
+  if (currentAliases.length !== nextAliases.length) return false;
+  return currentAliases.every((alias, index) => alias === nextAliases[index]);
 }

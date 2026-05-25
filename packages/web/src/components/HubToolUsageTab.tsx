@@ -28,6 +28,7 @@ const CAT_LABELS: Record<string, string> = {
   opencode: '金渐层',
 };
 
+/* Cozy Swiss palette — warm tones aligned with Clowder AI design language */
 const DATAVIZ_TOKENS = {
   '--dataviz-native': '#7C6CA8',
   '--dataviz-native-bg': '#F3F0FA',
@@ -36,7 +37,6 @@ const DATAVIZ_TOKENS = {
   '--dataviz-skill': '#6BA589',
   '--dataviz-skill-bg': '#EDF7F2',
 } as React.CSSProperties;
-
 const CATEGORY_STYLE: Record<string, { color: string; bg: string; label: string; iconName: string }> = {
   native: { color: 'var(--dataviz-native)', bg: 'var(--dataviz-native-bg)', label: '原生工具', iconName: 'wrench' },
   mcp: { color: 'var(--dataviz-mcp)', bg: 'var(--dataviz-mcp-bg)', label: 'MCP 桥接', iconName: 'store' },

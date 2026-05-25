@@ -127,13 +127,38 @@ function createTrackingSpawnFn(eventsFn) {
   const calls = [];
   const spawnFn = mock.fn((_cmd, _args, options) => {
     const proc = createMockProcess();
-    calls.push({ args: _args, options, proc });
+    calls.push({ cmd: _cmd, args: _args, options, proc });
     // Schedule events on next tick so caller can start reading
     process.nextTick(() => emitEvents(proc, eventsFn(calls.length)));
     return proc;
   });
   spawnFn._calls = calls;
   return spawnFn;
+}
+
+function createTrackingPlainTextSpawnFn(outputFn) {
+  const calls = [];
+  const spawnFn = mock.fn((_cmd, _args, options) => {
+    const proc = createMockProcess();
+    calls.push({ cmd: _cmd, args: _args, options, proc });
+    process.nextTick(() => {
+      const output = outputFn(calls.length);
+      if (output.stderr) proc.stderr.write(output.stderr);
+      if (output.stdout) proc.stdout.write(output.stdout);
+      proc.stdout.end();
+      proc.stderr.end();
+      const exitCode = output.exitCode === undefined ? 0 : output.exitCode;
+      proc._emitter.emit('exit', exitCode, null);
+    });
+    return proc;
+  });
+  spawnFn._calls = calls;
+  return spawnFn;
+}
+
+function commandName(command) {
+  const parts = command.split(/[\\/]/);
+  return parts[parts.length - 1].replace(/\.cmd$/i, '');
 }
 
 /** Mock SocketManager */
@@ -162,11 +187,13 @@ function installFakeCliPath() {
     writeExecutable('claude.cmd', content);
     writeExecutable('codex.cmd', content);
     writeExecutable('gemini.cmd', content);
+    writeExecutable('agy.cmd', content);
   } else {
     const content = '#!/bin/sh\nexit 0\n';
     writeExecutable('claude', content);
     writeExecutable('codex', content);
     writeExecutable('gemini', content);
+    writeExecutable('agy', content);
   }
 
   return dir;
@@ -174,11 +201,13 @@ function installFakeCliPath() {
 
 let originalGlobalConfigRoot;
 let originalHome;
+let originalGeminiAdapter;
 let testGlobalConfigRoot;
 
 before(() => {
   originalGlobalConfigRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
   originalHome = process.env.HOME;
+  originalGeminiAdapter = process.env.GEMINI_ADAPTER;
 });
 
 beforeEach(async () => {
@@ -200,6 +229,8 @@ afterEach(() => {
   else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = originalGlobalConfigRoot;
   if (originalHome === undefined) delete process.env.HOME;
   else process.env.HOME = originalHome;
+  if (originalGeminiAdapter === undefined) delete process.env.GEMINI_ADAPTER;
+  else process.env.GEMINI_ADAPTER = originalGeminiAdapter;
 });
 
 // ===================================================================
@@ -295,9 +326,47 @@ describe('AgentRouter + Services wiring', () => {
     await collect(router.route('user-1', '@gemini hello'));
 
     assert.equal(geminiSpawn._calls.length, 1);
+    const call = geminiSpawn._calls[0];
+    assert.equal(commandName(call.cmd), 'gemini');
+    assert.ok(call.args.includes('-o'), 'gemini-cli fallback should request stream-json output');
+    assert.ok(call.args.includes('stream-json'), 'gemini-cli fallback should remain NDJSON-based');
+    assert.equal(call.args.includes('--print'), false, 'gemini-cli fallback must not use agy --print mode');
     const spawnOpts = geminiSpawn._calls[0].options;
     assert.ok(spawnOpts.env.CAT_CAFE_INVOCATION_ID);
     assert.ok(spawnOpts.env.CAT_CAFE_CALLBACK_TOKEN);
+  });
+
+  test('routes Gemini through antigravity-cli plain-text adapter by default', async () => {
+    delete process.env.GEMINI_ADAPTER;
+    const claudeSpawn = createTrackingSpawnFn(() => claudeEvents('s-1', 'hi'));
+    const codexSpawn = createTrackingSpawnFn(() => codexEvents('t-1', 'hi'));
+    const agySpawn = createTrackingPlainTextSpawnFn(() => ({
+      stdout: 'CAT_CAFE_AGY_ROUTE_OK\n',
+    }));
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: new ClaudeAgentService({ spawnFn: claudeSpawn }),
+        codexService: new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn: codexSpawn }),
+        geminiService: new GeminiAgentService({ spawnFn: agySpawn }),
+        registry,
+        messageStore,
+      }),
+    );
+
+    const msgs = await collect(router.route('user-1', '@gemini hello'));
+
+    assert.equal(agySpawn._calls.length, 1);
+    const call = agySpawn._calls[0];
+    assert.equal(commandName(call.cmd), 'agy');
+    assert.ok(call.args.includes('--print'), 'default antigravity-cli route should use agy --print');
+    assert.ok(call.args.includes('--add-dir'), 'default antigravity-cli route should bind the working directory');
+    assert.equal(call.args.includes('--model'), false, 'antigravity-cli must not pass unverified --model flag');
+    assert.ok(
+      msgs.some((m) => m.type === 'text' && m.content === 'CAT_CAFE_AGY_ROUTE_OK'),
+      'route should surface plain-text AGY stdout',
+    );
+    assert.equal(msgs.at(-1)?.type, 'done');
   });
 
   // --- InvocationRegistry 接线验证 ---

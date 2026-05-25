@@ -82,9 +82,10 @@ function seedVectors(vectorStore) {
 }
 
 // Mock embedding service that returns controlled vectors
-function createMockEmbedding(queryResponse) {
+function createMockEmbedding(queryResponse, options = {}) {
   return {
     isReady: () => true,
+    reprobeIfNeeded: options.reprobeIfNeeded ?? (async () => {}),
     embed: async (texts) => [queryResponse],
     getModelInfo: () => ({ modelId: 'test', modelRev: 'test', dim: 3 }),
     load: async () => {},
@@ -116,6 +117,25 @@ describe('Search Mode Split (KD-44)', () => {
     const results = await store.search('Redis keyPrefix', { mode: 'lexical', limit: 5 });
     assert.ok(results.length > 0, 'should find redis doc via BM25');
     assert.equal(results[0].anchor, 'doc-redis-pitfall');
+  });
+
+  it('lexical mode: does not reprobe embedding readiness', async () => {
+    const lexicalStore = new SqliteEvidenceStore(':memory:');
+    await lexicalStore.initialize();
+    await seedDocs(lexicalStore);
+    let reprobeCalls = 0;
+    const mockEmbed = createMockEmbedding(new Float32Array([0.85, 0.15, 0.0]), {
+      reprobeIfNeeded: async () => {
+        reprobeCalls++;
+      },
+    });
+    lexicalStore.setEmbedDeps({ embedding: mockEmbed, vectorStore: { search: () => [] }, mode: 'on' });
+
+    const results = await lexicalStore.search('Redis keyPrefix', { mode: 'lexical', limit: 5 });
+
+    assert.ok(results.length > 0, 'lexical search should still return BM25 hits');
+    assert.equal(results[0].anchor, 'doc-redis-pitfall');
+    assert.equal(reprobeCalls, 0, 'pure lexical search must not depend on embedding readiness probes');
   });
 
   it('lexical mode: does NOT find semantically-similar docs without keyword match', async () => {

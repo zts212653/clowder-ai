@@ -202,6 +202,38 @@ describe('raw passage semantic and hybrid retrieval', () => {
     );
   });
 
+  it('raw semantic mode re-probes embedding readiness before degrading', async () => {
+    let ready = false;
+    let reprobeCalls = 0;
+    store.setEmbedDeps({
+      embedding: {
+        isReady: () => ready,
+        reprobeIfNeeded: async () => {
+          reprobeCalls++;
+          ready = true;
+        },
+        embed: async () => [new Float32Array([1, 0, 0])],
+        getModelInfo: () => ({ modelId: 'test-raw-passage', modelRev: 'v1', dim: 3 }),
+      },
+      vectorStore,
+      passageVectorStore,
+      mode: 'on',
+    });
+
+    const result = await store.searchWithMeta('care logistics', {
+      depth: 'raw',
+      mode: 'semantic',
+      scope: 'threads',
+      limit: 1,
+    });
+
+    assert.equal(reprobeCalls, 1);
+    assert.equal(result.meta.degraded, false);
+    assert.equal(result.items.length, 1);
+    assert.equal(result.items[0].anchor, 'thread-thread_semantic');
+    assert.equal(result.items[0].passages?.[0]?.passageId, 'msg-semantic');
+  });
+
   it('searchWithMeta reports passage vector search errors for raw hybrid fallback', async () => {
     store.setEmbedDeps({
       embedding: createEmbedding(new Float32Array([1, 0, 0])),

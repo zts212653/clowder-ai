@@ -979,23 +979,64 @@ describe('GeminiAgentService (antigravity adapter)', () => {
 // ===== facade / adapter selection tests =====
 
 describe('GeminiAgentService (adapter selection)', () => {
-  test('defaults to gemini-cli adapter', async () => {
+  test('defaults to antigravity-cli adapter', async () => {
+    const previousAdapter = process.env.GEMINI_ADAPTER;
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    // No adapter option → should default to gemini-cli
-    const service = new GeminiAgentService({ spawnFn });
 
-    const promise = collect(service.invoke('test'));
-    emitGeminiEvents(proc, [{ type: 'init', session_id: 's1', model: 'auto' }]);
-    await promise;
+    try {
+      delete process.env.GEMINI_ADAPTER;
+      // No adapter option and no env override -> default to antigravity-cli.
+      const service = new GeminiAgentService({ spawnFn });
 
-    // Verify gemini CLI was spawned (not antigravity)
-    assert.equal(spawnFn.mock.callCount(), 1);
-    const spawnedCommand = spawnFn.mock.calls[0].arguments[0];
-    assert.ok(
-      spawnedCommand === 'gemini' || spawnedCommand.endsWith('/gemini'),
-      `Expected gemini command, got: ${spawnedCommand}`,
-    );
+      const promise = collect(service.invoke('test'));
+      emitPlainText(proc, 'DEFAULT_AGY_OK\n');
+      const msgs = await promise;
+
+      assert.ok(msgs.some((m) => m.type === 'text' && m.content === 'DEFAULT_AGY_OK'));
+
+      // Verify agy CLI was spawned (not legacy gemini).
+      assert.equal(spawnFn.mock.callCount(), 1);
+      const call = spawnFn.mock.calls[0];
+      const spawnedCommand = call.arguments[0];
+      assert.ok(
+        spawnedCommand === 'agy' || spawnedCommand.endsWith('/agy'),
+        `Expected agy command, got: ${spawnedCommand}`,
+      );
+      assert.ok(call.arguments[1].includes('--print'));
+      assert.equal(call.arguments[1].includes('--model'), false, 'default antigravity-cli must not pass --model');
+    } finally {
+      if (previousAdapter === undefined) delete process.env.GEMINI_ADAPTER;
+      else process.env.GEMINI_ADAPTER = previousAdapter;
+    }
+  });
+
+  test('selects gemini-cli via GEMINI_ADAPTER env override', async () => {
+    const previousAdapter = process.env.GEMINI_ADAPTER;
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+
+    try {
+      process.env.GEMINI_ADAPTER = 'gemini-cli';
+      const service = new GeminiAgentService({ spawnFn });
+
+      const promise = collect(service.invoke('test'));
+      emitGeminiEvents(proc, [{ type: 'init', session_id: 's1', model: 'auto' }]);
+      await promise;
+
+      assert.equal(spawnFn.mock.callCount(), 1);
+      const call = spawnFn.mock.calls[0];
+      const spawnedCommand = call.arguments[0];
+      assert.ok(
+        spawnedCommand === 'gemini' || spawnedCommand.endsWith('/gemini'),
+        `Expected gemini command, got: ${spawnedCommand}`,
+      );
+      assert.ok(call.arguments[1].includes('stream-json'), 'gemini-cli fallback should keep NDJSON output');
+      assert.equal(call.arguments[1].includes('--print'), false);
+    } finally {
+      if (previousAdapter === undefined) delete process.env.GEMINI_ADAPTER;
+      else process.env.GEMINI_ADAPTER = previousAdapter;
+    }
   });
 
   test('selects antigravity via constructor option', async () => {

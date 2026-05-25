@@ -6,7 +6,13 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import type { CallbackAuthFailureReason } from '@cat-cafe/shared';
-import { CALLBACK_AUTH_FAILURE_REASONS, isCallbackAuthFailureReason, normalizeRichBlock } from '@cat-cafe/shared';
+import {
+  CALLBACK_AUTH_FAILURE_REASONS,
+  DEVELOPMENT_SOP_STAGE_IDS,
+  isCallbackAuthFailureReason,
+  normalizeRichBlock,
+  SOP_DEFINITION_IDS,
+} from '@cat-cafe/shared';
 import { z } from 'zod';
 import { sendCallbackRequest } from './callback-outbox.js';
 import { extractReasonTag } from './callback-retry.js';
@@ -885,10 +891,11 @@ export async function handleRegisterPrTracking(input: {
 export const updateWorkflowInputSchema = {
   backlogItemId: z.string().min(1).describe('The backlog item ID to update workflow SOP for'),
   featureId: z.string().min(1).describe('Feature ID (e.g. "F073")'),
-  stage: z
-    .enum(['kickoff', 'impl', 'quality_gate', 'review', 'merge', 'completion'])
+  sopDefinitionId: z
+    .enum(SOP_DEFINITION_IDS)
     .optional()
-    .describe('Current SOP stage'),
+    .describe('SOP definition id. Defaults to "development" for existing workflows.'),
+  stage: z.enum(DEVELOPMENT_SOP_STAGE_IDS).optional().describe('Current SOP stage'),
   batonHolder: z
     .string()
     .min(1)
@@ -926,6 +933,7 @@ export const updateWorkflowInputSchema = {
 export async function handleUpdateWorkflow(input: {
   backlogItemId: string;
   featureId: string;
+  sopDefinitionId?: string | undefined;
   stage?: string | undefined;
   batonHolder?: string | undefined;
   nextSkill?: string | null | undefined;
@@ -944,6 +952,7 @@ export async function handleUpdateWorkflow(input: {
     backlogItemId: input.backlogItemId,
     featureId: input.featureId,
   };
+  if (input.sopDefinitionId !== undefined) body['sopDefinitionId'] = input.sopDefinitionId;
   if (input.stage !== undefined) body['stage'] = input.stage;
   if (input.batonHolder !== undefined) body['batonHolder'] = input.batonHolder;
   if (input.nextSkill !== undefined) body['nextSkill'] = input.nextSkill;

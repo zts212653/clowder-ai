@@ -138,6 +138,84 @@ describe('F183 Phase B1 — BubbleReducer core', () => {
     });
   });
 
+  it('does not let a legacy parent-key callback replace an earlier assistant turn across a user turn', () => {
+    const previousReply = streamPlaceholder({
+      id: 'reply-1',
+      content: 'first answer',
+      timestamp: 1000,
+      isStreaming: false,
+      origin: 'callback',
+      extra: { stream: { invocationId: 'legacy-parent' } },
+    });
+    const userTurn: ChatMessage = {
+      id: 'user-2',
+      type: 'user',
+      content: 'second prompt',
+      timestamp: 2000,
+    };
+
+    const output = applyBubbleEvent({
+      threadId: 'thread-1',
+      event: {
+        ...baseEvent(),
+        type: 'callback_final',
+        originPhase: 'callback/history',
+        sourcePath: 'callback',
+        canonicalInvocationId: 'legacy-parent',
+        messageId: 'reply-2',
+        timestamp: 3000,
+        payload: { content: 'second answer' },
+      },
+      currentMessages: [previousReply, userTurn],
+    });
+
+    expect(output.nextMessages.map((m) => m.id)).toEqual(['reply-1', 'user-2', 'reply-2']);
+    expect(output.nextMessages.find((m) => m.id === 'reply-1')?.content).toBe('first answer');
+    expect(output.nextMessages.find((m) => m.id === 'reply-2')).toMatchObject({
+      content: 'second answer',
+      origin: 'callback',
+      isStreaming: false,
+    });
+  });
+
+  it('does not append a legacy parent-key stream chunk to an earlier assistant turn across a user turn', () => {
+    const previousReply = streamPlaceholder({
+      id: 'reply-1',
+      content: 'first answer',
+      timestamp: 1000,
+      isStreaming: false,
+      origin: 'callback',
+      extra: { stream: { invocationId: 'legacy-parent' } },
+    });
+    const userTurn: ChatMessage = {
+      id: 'user-2',
+      type: 'user',
+      content: 'second prompt',
+      timestamp: 2000,
+    };
+
+    const output = applyBubbleEvent({
+      threadId: 'thread-1',
+      event: {
+        ...baseEvent(),
+        type: 'stream_chunk',
+        canonicalInvocationId: 'legacy-parent',
+        messageId: 'reply-2-stream',
+        timestamp: 3000,
+        payload: { content: 'second answer streaming' },
+      },
+      currentMessages: [previousReply, userTurn],
+    });
+
+    expect(output.nextMessages.map((m) => m.id)).toEqual(['reply-1', 'user-2', 'reply-2-stream']);
+    expect(output.nextMessages.find((m) => m.id === 'reply-1')?.content).toBe('first answer');
+    expect(output.nextMessages.find((m) => m.id === 'reply-2-stream')).toMatchObject({
+      content: 'second answer streaming',
+      origin: 'stream',
+      isStreaming: true,
+    });
+  });
+
   it('B1.2.4: callback does NOT hijack contentful invocationless live stream', () => {
     // contentful invocationless live stream — 不能被不同 invocation 的 callback 收编
     const liveStream: ChatMessage = {

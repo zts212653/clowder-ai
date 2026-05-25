@@ -5,6 +5,7 @@ import * as sqliteVec from 'sqlite-vec';
 function createEmbedding(vector) {
   return {
     isReady: () => true,
+    reprobeIfNeeded: async () => {},
     embed: async () => [vector],
     getModelInfo: () => ({ modelId: 'test-entity-alias', modelRev: 'v1', dim: 3 }),
   };

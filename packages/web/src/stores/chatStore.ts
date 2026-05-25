@@ -21,6 +21,7 @@ import type {
   ToolEvent,
 } from './chat-types';
 import { DEFAULT_THREAD_STATE } from './chat-types';
+import { crossesUserTurnBoundary } from './turn-boundary';
 
 // Re-export types so existing consumers keep working with `import { ... } from '@/stores/chatStore'`
 export type {
@@ -490,7 +491,10 @@ function findAssistantDuplicate(messages: ChatMessage[], incoming: ChatMessage):
       const existing = messages[i]!;
       if (existing.type !== 'assistant' || existing.catId !== incoming.catId) continue;
       const existingInvId = getBubbleInvocationId(existing);
-      if (existingInvId === incomingInvId) return i;
+      if (existingInvId === incomingInvId) {
+        if (existing.id !== incoming.id && crossesUserTurnBoundary(messages, existing, incoming)) continue;
+        return i;
+      }
     }
   }
 

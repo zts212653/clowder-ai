@@ -51,16 +51,18 @@
 
 ## 支持的 Agent
 
-Clowder 不绑定模型。当前支持的 Agent CLI：
+Clowder 不绑定模型。当前支持的 Agent CLI / adapter：
 
 | Agent CLI | 模型家族 | 输出格式 | MCP | 状态 |
 |-----------|---------|---------|-----|------|
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Claude (Opus / Sonnet / Haiku) | stream-json | 是 | 已发布 |
 | [Codex CLI](https://github.com/openai/codex) | GPT / Codex | json | 是 | 已发布 |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | Gemini | stream-json | 是 | 已发布 |
-| [Antigravity](https://github.com/nolanzandi/antigravity-cli) | 多模型 | cdp-bridge | 否 | 已发布 |
+| [Antigravity CLI](https://antigravity.google/cli) | Gemini / Google 账号侧选型 | plain text (`agy --print`) | CLI 管理 | 非 ACP Gemini 路线默认 |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | Gemini | stream-json / ACP | 是 | 配了 ACP 时仍默认；其它路径显式 fallback |
+| [Antigravity Desktop](https://antigravity.google/) | 多模型 | cdp-bridge | 回调桥 | legacy opt-in |
 | [opencode](https://github.com/sst/opencode) | 多模型 | ndjson | 是 | 已发布 |
 
+> Google consumer Gemini CLI / Gemini Code Assist individual 请求在 2026-06-18 停止服务，所以非 ACP Gemini 路线默认走 Antigravity CLI。已经配置 ACP 的 catalog 仍走 `gemini --acp`，直到 `agy` 暴露受支持的 ACP 模式；只有明确的 enterprise/API-key fallback 才显式设置 `GEMINI_ADAPTER=gemini-cli`。
 > Clowder 不替代你的 Agent CLI — 它是 CLI *之上*的那一层，让 agent 们作为团队协作。
 
 ## 快速开始

@@ -4,6 +4,7 @@ import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { HubCallbackAuthPanel } from './HubCallbackAuthPanel';
+import { HubEvalTab } from './HubEvalTab';
 import { TraceBrowser } from './HubTraceTree';
 
 interface HealthData {
@@ -22,16 +23,17 @@ interface MetricsSnapshot {
   metrics: Record<string, number>;
 }
 
-type SubTab = 'overview' | 'traces' | 'health' | 'callback-auth';
+type SubTab = 'overview' | 'traces' | 'health' | 'callback-auth' | 'eval';
 
 const SUB_TAB_LABELS: Record<SubTab, string> = {
   overview: '总览',
   traces: 'Traces',
   health: '健康',
   'callback-auth': 'Callback Auth',
+  eval: 'Eval',
 };
 
-const SUB_TABS: SubTab[] = ['overview', 'traces', 'health', 'callback-auth'];
+const SUB_TABS: SubTab[] = ['overview', 'traces', 'health', 'callback-auth', 'eval'];
 
 export interface HubObservabilityTabProps {
   /** F174 D2b-3: open directly into a specific subtab (e.g. when D2b-1 详情 button navigates here). */
@@ -78,6 +80,7 @@ export function HubObservabilityTab({ initialSubTab = 'overview', subTabNonce }:
       {subTab === 'traces' && <TraceBrowser />}
       {subTab === 'health' && <HealthPanel />}
       {subTab === 'callback-auth' && <HubCallbackAuthPanel />}
+      {subTab === 'eval' && <HubEvalTab />}
     </div>
   );
 }

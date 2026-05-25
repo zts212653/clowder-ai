@@ -114,8 +114,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   async upsertEntities(entities: EntityRecord[]): Promise<void> {
     return this.writeQueue.enqueue(() => {
       this.ensureOpen();
-      this.entityRegistry?.upsert(entities);
-      this.entityRegistry?.refreshMentions();
+      const changed = this.entityRegistry?.upsert(entities) ?? false;
+      if (changed) this.entityRegistry?.refreshMentions();
     });
   }
 
@@ -431,7 +431,6 @@ export class SqliteEvidenceStore implements IEvidenceStore {
 
     // ── Mode-based retrieval (KD-44: three independent paths) ──────
     const searchMode = options?.mode ?? 'lexical';
-    const embeddingAvailable = this.embedDeps?.embedding.isReady() && this.embedDeps.mode === 'on';
 
     // G-4: all paths go through enrichWithDrillDown before returning
     if (searchMode === 'lexical') {
@@ -447,6 +446,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     }
 
     if (searchMode === 'semantic') {
+      const embeddingAvailable = await this.isEmbeddingAvailable();
       if (!embeddingAvailable) {
         return {
           items: this.enrichWithDrillDown(
@@ -486,6 +486,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     }
 
     if (searchMode === 'hybrid') {
+      const embeddingAvailable = await this.isEmbeddingAvailable();
       if (!embeddingAvailable) {
         return {
           items: this.enrichWithDrillDown(
@@ -559,7 +560,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     let passages: PassageResult[];
     let meta: SearchExecutionMeta = { degraded: false };
     if (mode === 'semantic') {
-      if (!this.isPassageEmbeddingAvailable()) {
+      if (!(await this.isPassageEmbeddingAvailable())) {
         passages = lexical();
         meta = {
           degraded: true,
@@ -579,7 +580,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         }
       }
     } else if (mode === 'hybrid') {
-      if (!this.isPassageEmbeddingAvailable()) {
+      if (!(await this.isPassageEmbeddingAvailable())) {
         passages = lexical();
         meta = {
           degraded: true,
@@ -742,10 +743,26 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     };
   }
 
-  private isPassageEmbeddingAvailable(): boolean {
-    return Boolean(
-      this.embedDeps?.embedding.isReady() && this.embedDeps.mode === 'on' && this.embedDeps.passageVectorStore,
-    );
+  private async isEmbeddingAvailable(): Promise<boolean> {
+    const deps = this.embedDeps;
+    if (!deps || deps.mode !== 'on') return false;
+    try {
+      await deps.embedding.reprobeIfNeeded();
+    } catch {
+      return false;
+    }
+    return deps.embedding.isReady();
+  }
+
+  private async isPassageEmbeddingAvailable(): Promise<boolean> {
+    const deps = this.embedDeps;
+    if (!deps?.passageVectorStore || deps.mode !== 'on') return false;
+    try {
+      await deps.embedding.reprobeIfNeeded();
+    } catch {
+      return false;
+    }
+    return deps.embedding.isReady();
   }
 
   private async semanticPassageNNSearch(

@@ -56,6 +56,32 @@ describe('MCP Evidence Tools', () => {
     assert.equal(parsed.searchParams.get('q'), 'hindsight');
     assert.equal(parsed.searchParams.get('scope'), 'docs');
     assert.equal(parsed.searchParams.get('mode'), 'hybrid');
+    assert.equal(parsed.searchParams.get('dimension'), 'project');
+  });
+
+  test('handleSearchEvidence preserves explicit dimension overrides', async () => {
+    const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
+
+    /** @type {string | URL | undefined} */
+    let capturedUrl;
+    globalThis.fetch = async (url) => {
+      capturedUrl = url;
+      return {
+        ok: true,
+        json: async () => ({ results: [], degraded: false }),
+      };
+    };
+
+    const result = await handleSearchEvidence({
+      query: 'cross-collection',
+      dimension: 'all',
+    });
+
+    assert.equal(result.isError, undefined);
+    assert.ok(capturedUrl, 'expected fetch to be called');
+
+    const parsed = new URL(String(capturedUrl));
+    assert.equal(parsed.searchParams.get('dimension'), 'all');
   });
 
   test('handleSearchEvidence renders raw_lexical_only as graceful degradation, not store error', async () => {

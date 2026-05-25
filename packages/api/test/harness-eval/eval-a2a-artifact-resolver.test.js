@@ -437,6 +437,51 @@ describe('eval:a2a evidence bundle resolver', () => {
     assert.throws(() => resolveA2aEvidenceBundle({ bundleDir, verdictId }), /no-finding record is required/);
   });
 
+  it('resolves bundle with F200 featureId for memory domain', () => {
+    const memVerdictId = '2026-05-24-eval-memory-live-verdict';
+    const bundleDir = createBundle({
+      snapshot: {
+        verdictId: memVerdictId,
+        evalSnapshotId: 'eval-F200-2026-05-24',
+        featureId: 'F200',
+      },
+      attribution: {
+        verdictId: memVerdictId,
+        featureId: 'F200',
+        evalSnapshotId: 'eval-F200-2026-05-24',
+        findings: [
+          {
+            id: 'MEM-2026-05-24-001',
+            relatedFeature: 'F200',
+            frictionSignal: {
+              type: 'orphan_edge_spike',
+              severity: 'medium',
+              confidence: 0.8,
+              detectedAt: '2026-05-24T12:00:00.000Z',
+            },
+            attribution: {
+              primaryLayer: 'graph_integrity',
+              evidence: [
+                {
+                  type: 'counter',
+                  anchor: 'C2/c2.verdict_without_pass_count',
+                  excerpt: 'reusing C2 for memory domain test',
+                },
+              ],
+            },
+            proposedAction: [{ action: 'repair-orphans', target: 'F188', rationale: 'orphan count exceeds threshold' }],
+            status: 'open',
+          },
+        ],
+      },
+      provenance: { verdictId: memVerdictId },
+    });
+
+    const resolved = resolveA2aEvidenceBundle({ bundleDir, verdictId: memVerdictId });
+    assert.equal(resolved.snapshot.featureId, 'F200');
+    assert.equal(resolved.attributionReport.featureId, 'F200');
+  });
+
   it('accepts the exact no-finding attribution ref when the bundle records no finding', () => {
     const bundleDir = createBundle({
       attribution: {

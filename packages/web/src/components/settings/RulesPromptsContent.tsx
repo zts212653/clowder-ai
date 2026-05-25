@@ -146,11 +146,25 @@ function RulePreviewModal({ label, file, onClose }: { label: string; file: RuleF
         }}
       >
         <div className="flex shrink-0 items-center gap-[14px]">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--console-active-bg)] text-lg font-bold text-[var(--console-modal-title)]">
+          <div
+            className="flex h-11 w-11 shrink-0 items-center justify-center font-bold"
+            style={{
+              borderRadius: '0.75rem',
+              backgroundColor: 'var(--console-active-bg)',
+              fontSize: 'var(--console-font-lg)',
+              color: 'var(--console-modal-title)',
+            }}
+          >
             📜
           </div>
           <div className="min-w-0 flex-1">
-            <SettingsText as="h2" variant="base" tone="default" className="text-xl font-bold">
+            <SettingsText
+              as="h2"
+              variant="base"
+              tone="default"
+              className="font-bold"
+              style={{ fontSize: 'var(--console-font-xl)' }}
+            >
               {label}
             </SettingsText>
             <SettingsText as="p" tone="muted">
@@ -161,7 +175,12 @@ function RulePreviewModal({ label, file, onClose }: { label: string; file: RuleF
             type="button"
             onClick={onClose}
             aria-label="关闭"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-base text-cafe-muted transition"
+            className="flex h-8 w-8 shrink-0 items-center justify-center transition"
+            style={{
+              borderRadius: '0.75rem',
+              fontSize: 'var(--console-font-base)',
+              color: 'var(--cafe-text-muted)',
+            }}
           >
             ✕
           </button>
@@ -171,7 +190,10 @@ function RulePreviewModal({ label, file, onClose }: { label: string; file: RuleF
           className="mt-4 min-h-0 flex-1 overflow-y-auto"
           style={{ borderRadius: '1rem', backgroundColor: 'var(--console-panel-bg)', padding: '1rem' }}
         >
-          <pre className="max-h-[50vh] overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-6 text-cafe-secondary">
+          <pre
+            className="max-h-[50vh] overflow-auto whitespace-pre-wrap break-words font-mono leading-6"
+            style={{ fontSize: 'var(--console-font-xs)', color: 'var(--cafe-text-secondary)' }}
+          >
             {file.content}
           </pre>
         </div>

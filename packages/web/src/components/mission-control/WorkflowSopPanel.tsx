@@ -1,6 +1,13 @@
 'use client';
 
-import type { CheckStatus, SopStage, WorkflowSop } from '@cat-cafe/shared';
+import {
+  type CheckStatus,
+  DEVELOPMENT_SOP_DEFINITION,
+  DEVELOPMENT_SOP_STAGE_IDS,
+  resolveWorkflowSopSkill,
+  type SopStage,
+  type WorkflowSop,
+} from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 
@@ -8,16 +15,11 @@ interface WorkflowSopPanelProps {
   backlogItemId: string | null;
 }
 
-const STAGE_LABELS: Record<SopStage, string> = {
-  kickoff: '立项',
-  impl: '实现',
-  quality_gate: '自检',
-  review: 'Review',
-  merge: '合入',
-  completion: '完成',
-};
+const STAGE_LABELS = Object.fromEntries(
+  DEVELOPMENT_SOP_DEFINITION.stages.map((stage) => [stage.id, stage.label]),
+) as Record<SopStage, string>;
 
-const STAGE_ORDER: SopStage[] = ['kickoff', 'impl', 'quality_gate', 'review', 'merge', 'completion'];
+const STAGE_ORDER = [...DEVELOPMENT_SOP_STAGE_IDS] as SopStage[];
 
 const CHECK_LABELS: Record<keyof WorkflowSop['checks'], string> = {
   remoteMainSynced: 'Main 同步',
@@ -71,6 +73,14 @@ function StagePills({ current }: { current: SopStage }) {
       })}
     </div>
   );
+}
+
+function tryResolveWorkflowSopSkill(sop: WorkflowSop) {
+  try {
+    return resolveWorkflowSopSkill(sop);
+  } catch {
+    return null;
+  }
 }
 
 export function WorkflowSopPanel({ backlogItemId }: WorkflowSopPanelProps) {
@@ -161,6 +171,24 @@ export function WorkflowSopPanel({ backlogItemId }: WorkflowSopPanelProps) {
   }
 
   const checkEntries = Object.entries(sop.checks) as [keyof WorkflowSop['checks'], CheckStatus][];
+  const resolvedSkill = tryResolveWorkflowSopSkill(sop);
+
+  if (!resolvedSkill) {
+    return (
+      <section
+        className="rounded-2xl bg-[var(--console-card-bg)] p-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
+        data-testid="mc-workflow-sop"
+      >
+        <div className="mb-2">
+          <h2 className="text-sm font-semibold text-cafe">SOP 告示牌</h2>
+          <p className="text-micro text-cafe-secondary">{sop.featureId}</p>
+        </div>
+        <p className="rounded-lg bg-[var(--console-shell-bg)] px-2 py-2 text-xs text-cafe-secondary">
+          SOP 告示牌数据需要更新
+        </p>
+      </section>
+    );
+  }
 
   return (
     <section
@@ -186,11 +214,10 @@ export function WorkflowSopPanel({ backlogItemId }: WorkflowSopPanelProps) {
             {sop.batonHolder}
           </span>
         </p>
-        {sop.nextSkill && (
-          <p className="text-xs text-cafe-secondary">
-            下一步 Skill：<span className="font-medium text-cafe-secondary">{sop.nextSkill}</span>
-          </p>
-        )}
+        <p className="text-xs text-cafe-secondary" data-testid="sop-next-skill">
+          {resolvedSkill.source === 'override' ? '手动 override：' : '定义建议：'}
+          <span className="font-medium text-cafe-secondary">{resolvedSkill.skill}</span>
+        </p>
       </div>
 
       {/* Resume capsule */}

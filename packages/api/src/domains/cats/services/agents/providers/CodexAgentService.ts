@@ -191,8 +191,42 @@ const CAT_CAFE_MCP_SERVER_ENTRIES = [
   ['cat-cafe-signals', 'signals.js'],
   ['cat-cafe-limb', 'limb.js'],
 ] as const;
+const CAT_CAFE_LEGACY_STATIC_SERVER_NAME = 'cat-cafe';
+const CAT_CAFE_MCP_CALLBACK_ENV_KEYS = [
+  'CAT_CAFE_API_URL',
+  'CAT_CAFE_INVOCATION_ID',
+  'CAT_CAFE_CALLBACK_TOKEN',
+  'CAT_CAFE_USER_ID',
+  'CAT_CAFE_CAT_ID',
+  'CAT_CAFE_SIGNAL_USER',
+] as const;
 
-function buildCatCafeMcpConfigArgs(_workingDirectory?: string, callbackEnv?: Record<string, string>): string[] {
+function resolveAllowedWorkspaceDirsForMcp(workingDirectory?: string): string {
+  const explicitAllowed = process.env.ALLOWED_WORKSPACE_DIRS?.trim();
+  if (explicitAllowed) return explicitAllowed;
+  const threadWorkspace = workingDirectory?.trim();
+  if (threadWorkspace) return resolve(threadWorkspace);
+  const explicitWorkspace = process.env.CAT_CAFE_WORKSPACE_ROOT?.trim();
+  if (explicitWorkspace) return explicitWorkspace;
+  return process.cwd();
+}
+
+function pushCatCafeMcpEnvConfig(
+  args: string[],
+  serverName: string,
+  allowedWorkspaceDirs: string,
+  callbackEnv?: Record<string, string>,
+): void {
+  args.push('--config', `mcp_servers.${serverName}.env.ALLOWED_WORKSPACE_DIRS=${toTomlString(allowedWorkspaceDirs)}`);
+
+  for (const key of CAT_CAFE_MCP_CALLBACK_ENV_KEYS) {
+    const value = callbackEnv?.[key];
+    if (!value) continue;
+    args.push('--config', `mcp_servers.${serverName}.env.${key}=${toTomlString(value)}`);
+  }
+}
+
+function buildCatCafeMcpConfigArgs(workingDirectory?: string, callbackEnv?: Record<string, string>): string[] {
   const fileDir = dirname(fileURLToPath(import.meta.url));
   // The thread workingDirectory is the user's project/workspace. Cat Cafe MCP
   // binaries are runtime-owned, so resolving from workingDirectory can pick a
@@ -216,15 +250,12 @@ function buildCatCafeMcpConfigArgs(_workingDirectory?: string, callbackEnv?: Rec
   if (!mcpDistDir) return [];
 
   const args: string[] = [];
+  const allowedWorkspaceDirs = resolveAllowedWorkspaceDirsForMcp(workingDirectory);
 
-  const callbackKeys = [
-    'CAT_CAFE_API_URL',
-    'CAT_CAFE_INVOCATION_ID',
-    'CAT_CAFE_CALLBACK_TOKEN',
-    'CAT_CAFE_USER_ID',
-    'CAT_CAFE_CAT_ID',
-    'CAT_CAFE_SIGNAL_USER',
-  ] as const;
+  // Codex may still load a user/project-managed legacy `cat-cafe` server from
+  // static config. Overlay env only; split servers remain the only auto-provisioned ones.
+  pushCatCafeMcpEnvConfig(args, CAT_CAFE_LEGACY_STATIC_SERVER_NAME, allowedWorkspaceDirs, callbackEnv);
+
   for (const [serverName, entrypoint] of CAT_CAFE_MCP_SERVER_ENTRIES) {
     const serverPath = resolve(mcpDistDir, entrypoint);
     if (!existsSync(serverPath)) continue;
@@ -240,11 +271,7 @@ function buildCatCafeMcpConfigArgs(_workingDirectory?: string, callbackEnv?: Rec
       `mcp_servers.${serverName}.default_tools_approval_mode="approve"`,
     );
 
-    for (const key of callbackKeys) {
-      const value = callbackEnv?.[key];
-      if (!value) continue;
-      args.push('--config', `mcp_servers.${serverName}.env.${key}=${toTomlString(value)}`);
-    }
+    pushCatCafeMcpEnvConfig(args, serverName, allowedWorkspaceDirs, callbackEnv);
   }
 
   return args;

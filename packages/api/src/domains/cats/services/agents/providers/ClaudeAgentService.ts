@@ -15,9 +15,9 @@
  *   result/success → 跳过 (done 在循环后 yield)
  */
 
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
@@ -31,10 +31,17 @@ import { appendLocalImagePathHints, collectImageAccessDirectories } from '../pro
 import { extractImagePaths } from '../providers/image-paths.js';
 import { findGitBashPath } from './claude-agent-win.js';
 import { extractClaudeUsage, isResultErrorEvent, transformClaudeEvent } from './claude-ndjson-parser.js';
+import { compileL0ViaSubprocess } from './l0-compiler.js';
 
 const log = createModuleLogger('claude-agent');
 
 const PERMISSION_MODE = 'bypassPermissions';
+const RESERVED_SYSTEM_PROMPT_FLAGS = new Set([
+  '--system-prompt-file',
+  '--system-prompt',
+  '--append-system-prompt',
+  '--append-system-prompt-file',
+]);
 
 // F198: exported so other Claude carriers (e.g. ClaudeBgCarrierService) can
 // reuse the single source of truth for profile mode routing.
@@ -95,6 +102,32 @@ function formatThinkingSignatureRescueError(sessionId: string | undefined): stri
 const IS_WINDOWS = process.platform === 'win32';
 
 export { pickGitBashPathFromWhere } from './claude-agent-win.js';
+
+function stripReservedSystemPromptArgs(args: string[], catId: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    const eqIdx = arg.indexOf('=');
+    const flag = eqIdx >= 0 ? arg.slice(0, eqIdx) : arg;
+    if (RESERVED_SYSTEM_PROMPT_FLAGS.has(flag)) {
+      log.warn({ catId, flag }, 'cliConfigArgs override of reserved Claude system prompt flag dropped');
+      if (eqIdx < 0 && i + 1 < args.length && !args[i + 1].startsWith('-')) i++;
+      continue;
+    }
+    out.push(arg);
+  }
+  return out;
+}
+
+function removeL0TempDir(l0Path: string | undefined): void {
+  if (!l0Path) return;
+  const l0Dir = dirname(l0Path);
+  try {
+    rmSync(l0Dir, { recursive: true, force: true });
+  } catch (err) {
+    log.warn({ err, l0Dir }, 'Failed to remove Claude L0 temp directory');
+  }
+}
 
 /**
  * Build env overrides for spawning the `claude` CLI.
@@ -173,6 +206,8 @@ interface ClaudeAgentServiceOptions {
   model?: string;
   /** Absolute path to MCP server entry (dist/index.js) for --mcp-config */
   mcpServerPath?: string;
+  /** Test seam — replaces the real L0 compiler subprocess. */
+  l0CompilerFn?: typeof compileL0ViaSubprocess;
 }
 
 /**
@@ -204,12 +239,15 @@ export class ClaudeAgentService implements AgentService {
   private readonly spawnFn: SpawnFn | undefined;
   private readonly model: string;
   private readonly mcpServerPath: string | undefined;
+  /** F203: compiles per-cat L0 → file for --system-prompt-file. */
+  private readonly l0CompilerFn: typeof compileL0ViaSubprocess;
   /** Windows: cached MCP config file path (created once per instance, reused across invocations) */
   private mcpConfigFilePath: string | undefined;
 
   constructor(options?: ClaudeAgentServiceOptions) {
     this.catId = options?.catId ?? createCatId('opus');
     this.spawnFn = options?.spawnFn;
+    this.l0CompilerFn = options?.l0CompilerFn ?? compileL0ViaSubprocess;
     // F32-b: model from options > env (getCatModel) > default
     this.model = options?.model ?? getCatModel(this.catId as string);
     const configuredPath = options?.mcpServerPath ?? process.env.CAT_CAFE_MCP_SERVER_PATH;
@@ -218,6 +256,22 @@ export class ClaudeAgentService implements AgentService {
     } else {
       this.mcpServerPath = resolveDefaultClaudeMcpServerPath();
     }
+  }
+
+  injectsL0Natively(): boolean {
+    return true;
+  }
+
+  private async compileL0ToTempFile(): Promise<string> {
+    const l0Dir = mkdtempSync(join(tmpdir(), 'cat-cafe-l0-'));
+    const l0Path = join(l0Dir, 'system-prompt-l0.md');
+    try {
+      await this.l0CompilerFn({ catId: this.catId as string, outPath: l0Path });
+    } catch (err) {
+      removeL0TempDir(l0Path);
+      throw new Error(`L0 compile failed for ${this.catId as string}: ${(err as Error).message}`);
+    }
+    return l0Path;
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
@@ -258,11 +312,6 @@ export class ClaudeAgentService implements AgentService {
       args.splice(6, 0, '--model', effectiveModel);
     }
 
-    // Inject static identity via --append-system-prompt (separate from -p content)
-    if (options?.systemPrompt) {
-      args.push('--append-system-prompt', options.systemPrompt);
-    }
-
     if (options?.sessionId) {
       args.push('--resume', options.sessionId);
     }
@@ -301,27 +350,6 @@ export class ClaudeAgentService implements AgentService {
       }
     }
 
-    // User-defined CLI args from the member editor (#567).
-    // User flags win when they overlap with system-injected flags.
-    const userParts: string[] = [];
-    for (const arg of options?.cliConfigArgs ?? []) {
-      userParts.push(...arg.trim().split(/\s+/));
-    }
-    if (userParts.length > 0) {
-      const accumulativeFlags = new Set(['--add-dir']);
-      const userFlags = new Set(userParts.filter((p) => p.startsWith('-')));
-      const deduped: string[] = [];
-      for (let i = 0; i < args.length; i++) {
-        if (args[i].startsWith('-') && userFlags.has(args[i]) && !accumulativeFlags.has(args[i])) {
-          if (i + 1 < args.length && !args[i + 1].startsWith('-')) i++;
-          continue;
-        }
-        deduped.push(args[i]);
-      }
-      args.length = 0;
-      args.push(...deduped, ...userParts);
-    }
-
     const metadata: MessageMetadata = { provider: 'anthropic', model: effectiveModel };
     const streamState = {
       partialTextMessageIds: new Set<string>(),
@@ -330,7 +358,38 @@ export class ClaudeAgentService implements AgentService {
       thinkingBuffer: '' as string,
     };
 
+    let l0Path: string | undefined;
     try {
+      l0Path = await this.compileL0ToTempFile();
+      args.push('--system-prompt-file', l0Path);
+      // Route layer passes pack-only systemPrompt for native-L0 providers.
+      // Keep it as an append layer, but never use it as the carrier's L0 source.
+      if (options?.systemPrompt) args.push('--append-system-prompt', options.systemPrompt);
+
+      // User-defined CLI args from the member editor (#567).
+      // User flags win when they overlap with ordinary system-injected flags,
+      // but native L0 flags are reserved: user overrides would silently remove
+      // the compression-immune identity/governance layer.
+      const cliConfigArgs = options?.cliConfigArgs;
+      const userParts = stripReservedSystemPromptArgs(
+        cliConfigArgs ? cliConfigArgs.flatMap((arg) => arg.trim().split(/\s+/)) : [],
+        this.catId as string,
+      );
+      if (userParts.length > 0) {
+        const accumulativeFlags = new Set(['--add-dir']);
+        const userFlags = new Set(userParts.filter((p) => p.startsWith('-')));
+        const deduped: string[] = [];
+        for (let i = 0; i < args.length; i++) {
+          if (args[i].startsWith('-') && userFlags.has(args[i]) && !accumulativeFlags.has(args[i])) {
+            if (i + 1 < args.length && !args[i + 1].startsWith('-')) i++;
+            continue;
+          }
+          deduped.push(args[i]);
+        }
+        args.length = 0;
+        args.push(...deduped, ...userParts);
+      }
+
       const claudeCommand = resolveCliCommand('claude');
       log.info({ catId: this.catId, resolved: claudeCommand ?? null }, 'Resolving claude CLI command');
       if (!claudeCommand) {
@@ -530,6 +589,8 @@ export class ClaudeAgentService implements AgentService {
       };
       // Guarantee done after error so invoke-single-cat can set isFinal correctly
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+    } finally {
+      removeL0TempDir(l0Path);
     }
   }
 }

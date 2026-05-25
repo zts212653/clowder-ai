@@ -17,7 +17,7 @@ export interface AntigravityCliPlainTextInput {
 }
 
 export function classifyAntigravityCliPlainText(input: AntigravityCliPlainTextInput): AntigravityCliPlainTextResult {
-  const trimmedStdout = input.stdout.trim();
+  const trimmedStdout = stripFreshConversationWarning(input.stdout).trim();
   const diagnosticText = `${trimmedStdout}\n${(input.stderr ?? '').trim()}`;
 
   if (isAgyPrintTimeoutOutput(trimmedStdout)) {
@@ -47,6 +47,10 @@ export function classifyAntigravityCliPlainText(input: AntigravityCliPlainTextIn
 
 function isAgyPrintTimeoutOutput(stdout: string): boolean {
   return /^Error:\s*timed out waiting for response\.?$/i.test(stdout.trim());
+}
+
+function stripFreshConversationWarning(stdout: string): string {
+  return stdout.replace(/^Warning:\s*conversation\s+"agy-[^"\r\n]+"\s+not found\.\r?\n/i, '');
 }
 
 function isAgyMissingModelDiagnostic(text: string): boolean {

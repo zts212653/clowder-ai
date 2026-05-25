@@ -1,6 +1,6 @@
 ---
 feature_ids: [F201]
-related_features: [F061, F172, F174, F178, F183, F193, F194, F197]
+related_features: [F061, F172, F174, F178, F183, F193, F194, F197, F211]
 topics: [antigravity, reliability, side-effect-journal, availability, recovery, smoke-test, rich-block]
 doc_kind: spec
 created: 2026-05-15
@@ -100,6 +100,7 @@ F201 关闭时，Antigravity 必须满足以下契约：
 - 不新增 F174/F178 审计写口；side-effect journal 只服务 Antigravity recovery。
 - 不把 F172 image-only regression 作为 F201 close gate；如需跑 image 回归，挂到 F172 verify/alpha smoke。
 - 不把所有上游平台不稳定都包装成“Cat Café 已保证 100% 成功”。F201 保证的是可诊断、可恢复、可验收。
+- **Post-close split-out（2026-05-24）**：Antigravity cascade / IDE-direct session transparency 不属于 F201 reliability close gate。F201 保持 `done`；两套 session 系统、JSON shadow state、IDE-direct 反向注册、long-lived session kind 等后续工作拆到 [F211 Cross-Runtime Session Transparency](F211-cross-runtime-session-transparency.md)。F209 只作为 downstream retrieval consumer，不承载该 scope。
 
 ## Acceptance Criteria
 

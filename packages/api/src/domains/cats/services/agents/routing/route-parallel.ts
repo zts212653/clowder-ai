@@ -4,7 +4,7 @@
  */
 
 import type { CatConfig, CatId } from '@cat-cafe/shared';
-import { catRegistry } from '@cat-cafe/shared';
+import { catRegistry, resolveWorkflowSopSkill } from '@cat-cafe/shared';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
 import { getConfigSessionStrategy, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
@@ -105,7 +105,9 @@ export async function* routeParallel(
   // F042: Fetch thread routingPolicy once (shared across all cats).
   let routingPolicy: ThreadRoutingPolicyV1 | undefined;
   // F073 P4: SOP stage hint from workflow-sop (告示牌 — info only, cats decide actions)
-  let sopStageHint: { stage: string; suggestedSkill: string | null; featureId: string } | undefined;
+  let sopStageHint:
+    | { stage: string; suggestedSkill: string; suggestedSkillSource: string; featureId: string }
+    | undefined;
   // F092: Voice companion mode
   let voiceMode: boolean | undefined;
   // F087: Bootcamp state for CVO onboarding
@@ -124,9 +126,11 @@ export async function* routeParallel(
         try {
           const sop = await deps.invocationDeps.workflowSopStore.get(routeThread.backlogItemId);
           if (sop) {
+            const skill = resolveWorkflowSopSkill(sop);
             sopStageHint = {
               stage: sop.stage,
-              suggestedSkill: sop.nextSkill,
+              suggestedSkill: skill.skill,
+              suggestedSkillSource: skill.source,
               featureId: sop.featureId,
             };
           }
@@ -164,10 +168,10 @@ export async function* routeParallel(
       const teammates = targetCats.filter((id) => id !== catId);
       // F203 Phase C: non-pack identity/家规/MCP docs travel via the
       // compression-immune native system role (--system-prompt-file / -c)
-      // ONLY for providers with native L0 injection (ClaudeBgCarrier +
-      // CodexAgent, Task 3/4). Non-native providers (ClaudeAgent legacy -p,
-      // Gemini, Antigravity, CatAgent, A2A, OpenCode, Dare, Kimi…) still
-      // need full identity via user-message systemPrompt prepend, else they
+      // ONLY for providers with native L0 injection (ClaudeAgentService -p,
+      // ClaudeBgCarrierService, CodexAgent). Non-native providers (Gemini,
+      // Antigravity, CatAgent, A2A, OpenCode, Dare, Kimi…) still need full
+      // identity via user-message systemPrompt prepend, else they
       // lose identity/家规 entirely (云端 Codex P1-cloud-1, 2026-05-16).
       // mcpAvailable still gates the per-message HTTP callback fallback.
       const mcpAvailable = (catConfig?.mcpSupport ?? false) && !!mcpServerPath;

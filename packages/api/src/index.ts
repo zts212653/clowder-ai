@@ -12,8 +12,7 @@ import cors from '@fastify/cors';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyReply } from 'fastify';
 import { resolveAnthropicRuntimeProfile, resolveForClient } from './config/account-resolver.js';
-import { generateCliConfigs, readCapabilitiesConfig } from './config/capabilities/capability-orchestrator.js';
-import { resolveStartupCliConfigContext } from './config/capabilities/startup-cli-config.js';
+import { regenerateStartupCliConfigs } from './config/capabilities/startup-cli-config.js';
 import { resolveBoundAccountRefForCat } from './config/cat-account-binding.js';
 import { getCatContextBudget } from './config/cat-budgets.js';
 import {
@@ -70,6 +69,7 @@ import {
   initPushNotificationService,
   resetPushNotificationService,
 } from './domains/cats/services/push/PushNotificationService.js';
+import { createRuntimeSessionStore } from './domains/cats/services/runtime-session/RuntimeSessionStoreFactory.js';
 import type { HandoffConfig } from './domains/cats/services/session/SessionSealer.js';
 import { SessionSealer } from './domains/cats/services/session/SessionSealer.js';
 import { TranscriptReader } from './domains/cats/services/session/TranscriptReader.js';
@@ -514,6 +514,7 @@ async function main(): Promise<void> {
   }
 
   const sessionChainStore = createSessionChainStore(redis);
+  const runtimeSessionStore = createRuntimeSessionStore(redis);
   // F24: Transcript Writer/Reader for session chain
   // E7 fix: resolve relative to monorepo root, not CWD (same fix as docsRoot in PR #524)
   const transcriptDataDir = process.env.TRANSCRIPT_DATA_DIR ?? `${findMonorepoRoot(process.cwd())}/data/transcripts`;
@@ -1065,6 +1066,7 @@ async function main(): Promise<void> {
         case 'antigravity':
           service = new AntigravityAgentService({
             catId,
+            runtimeSessionStore,
             supervisorStore: redisClient
               ? new RedisAntigravitySupervisorStore(redisClient, {
                   auditDir: join(process.cwd(), 'data', 'antigravity-audit'),
@@ -1423,6 +1425,12 @@ async function main(): Promise<void> {
     getMetricsText: telemetryHandle.getMetricsText ?? undefined,
     metricsSnapshotStore: telemetryHandle.metricsSnapshotStore ?? undefined,
     checkReadiness,
+  });
+  // F192 Phase E-hub: harness eval verdict lifecycle surface.
+  const { evalHubRoutes } = await import('./routes/eval-hub.js');
+  await app.register(evalHubRoutes, {
+    harnessFeedbackRoot: resolve(repoRoot, 'docs', 'harness-feedback'),
+    threadStore,
   });
 
   // F153: Prompt X-Ray debug routes
@@ -2214,10 +2222,8 @@ async function main(): Promise<void> {
   // Best-effort: regenerate CLI configs at startup so runtime-derived env
   // (Gemini placeholders, Antigravity sidecar key files) reaches CLI config.
   try {
-    const { projectRoot, paths } = resolveStartupCliConfigContext(process.cwd());
-    const capConfig = await readCapabilitiesConfig(projectRoot);
-    if (capConfig) {
-      await generateCliConfigs(capConfig, paths);
+    const result = await regenerateStartupCliConfigs(process.cwd());
+    if (result.generated) {
       app.log.info('[api] CLI configs regenerated at startup');
     }
   } catch (err) {

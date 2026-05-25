@@ -5,19 +5,19 @@ doc_kind: note
 created: 2026-02-26
 ---
 
-# CLI 集成架构：Claude Code / Codex / Gemini CLI
+# CLI 集成架构：Claude Code / Codex / Google CLI
 
-> Cat Cafe 项目如何对接三个不同厂商的 AI CLI 工具
-> 作者：Ragdoll | 最后更新：2026-02-07
+> Cat Cafe 项目如何对接三个不同厂商的 AI CLI / adapter 工具
+> 作者：Ragdoll | 最后更新：2026-05-23
 
 ## 概述
 
 Cat Cafe 需要调用三个不同厂商的 AI Agent：
 - **Ragdoll** → Claude Code CLI (`claude`)
 - **Maine Coon** → OpenAI Codex CLI (`codex`)
-- **Siamese** → Google Gemini CLI (`gemini`)
+- **Siamese** → Google Antigravity CLI (`agy`，默认) / Gemini CLI (`gemini`，显式 fallback)
 
-这三个 CLI 有不同的调用方式、输出格式和 Session 管理机制。本文档记录我们的集成方案和踩过的坑。
+这些 CLI 有不同的调用方式、输出格式和 Session 管理机制。Claude / Codex / `gemini-cli` 走 NDJSON 流；`antigravity-cli` 走 `agy --print` plain text，并在 `GeminiAgentService` 内独立分类。本文档记录我们的集成方案和踩过的坑。
 
 ---
 
@@ -42,10 +42,12 @@ Cat Cafe 需要调用三个不同厂商的 AI Agent：
                     │  (通用子进程管理器)     │
                     └───────────┬───────────┘
                                 │
-                    ┌───────────▼───────────┐
-                    │   parseNDJSON()       │
-                    │  (NDJSON 流解析器)     │
-                    └───────────────────────┘
+              ┌─────────────────┴─────────────────┐
+              ▼                                   ▼
+    ┌───────────────────────┐         ┌────────────────────────────┐
+    │   parseNDJSON()       │         │ antigravity-cli parser     │
+    │  (Claude/Codex/gemini)│         │ (`agy --print` plain text) │
+    └───────────────────────┘         └────────────────────────────┘
 ```
 
 **核心设计决策：CLI 子进程而非 SDK**
@@ -63,7 +65,7 @@ Cat Cafe 需要调用三个不同厂商的 AI Agent：
 
 ### 1. NDJSON 流解析器 (`ndjson-parser.ts`)
 
-三个 CLI 都支持 NDJSON（Newline-Delimited JSON）流式输出，每行一个 JSON 对象。
+Claude、Codex 和 legacy `gemini-cli` 支持 NDJSON（Newline-Delimited JSON）流式输出，每行一个 JSON 对象。默认的 `antigravity-cli` 不走这里：`agy --print` 只在 stdout 输出 plain text，使用 `antigravity-cli-event-parser.ts` 分类 timeout、missing-model、fresh-conversation warning 和最终文本。
 
 ```typescript
 // 核心实现
@@ -253,14 +255,33 @@ function transformCodexEvent(event, catId): AgentMessage | null {
 
 ---
 
-### Gemini CLI (`gemini`)
+### Google adapters (`agy` / `gemini` / Antigravity Desktop)
 
-**双 Adapter 架构：**
+**三 Adapter 架构：**
 
 | Adapter | 命令 | 场景 |
 |---------|------|------|
-| `gemini-cli` (默认) | `gemini -p "..." -o stream-json -y` | 全自动 headless |
+| `antigravity-cli` (默认，非 ACP) | `agy --print "..."` | Google consumer 非 ACP headless carrier |
+| `gemini-cli` (fallback / ACP) | `gemini -p "..." -o stream-json -y` / `gemini --acp` | enterprise / API-key fallback；catalog 配置 ACP 时的主路径 |
 | `antigravity` | `open -a Antigravity` | IDE 模式，MCP 回传 |
+
+**F210 default switch（2026-05-23）**：Google consumer Gemini CLI / Gemini Code Assist individual requests 在 2026-06-18 停止服务，所以 `GeminiAgentService` 的非 ACP 默认 headless carrier 切到 `antigravity-cli`。但 runtime catalog 若有 `acp` section，`index.ts` 仍优先实例化 `GeminiAcpAdapter` / `gemini --acp`；`agy 1.0.1` 当前没有受支持的 ACP server mode，不能直接替换 ACP path。Enterprise/API-key 仍作为 `GEMINI_ADAPTER=gemini-cli` fallback 保留，legacy `GEMINI_ADAPTER=antigravity` 仍是 Desktop/MCP callback。
+
+**antigravity-cli 调用方式：**
+```bash
+agy \
+  --conversation agy-<uuid> \
+  --add-dir "$WORKDIR" \
+  --dangerously-skip-permissions \
+  --print-timeout 120 \
+  --print "prompt"
+```
+
+**antigravity-cli 关键边界：**
+- `agy` 1.0.1 没有可验证的 `--model` flag；模型来自账号侧 `/model` 默认选择，所以 `modelVerified=false`。
+- resume stdout 可能回放旧回复 + 新回复，因此 resumed text 事件使用 `textMode: "replace"`。
+- timeout / missing selected model 可能以 exit code 0 + stdout error 文本出现，必须由 plain-text parser 分类。
+- fresh conversation 的 `Warning: conversation "agy-..." not found.` 是可清理噪音，只能锚定 Cat Cafe 生成的 `agy-*` session id。
 
 **gemini-cli 调用方式：**
 ```bash
@@ -291,7 +312,7 @@ gemini -p "prompt" -o stream-json -y [-i image.png]
 **特殊处理：**
 - **Session 恢复（F053，2026-03-03）**：在当前环境（Gemini CLI 0.31.0）支持 `gemini --resume <sessionId>`（UUID），provider 已启用 resume；prompt prepend 继续用于跨猫历史补全
 - **图片支持**：通过 `-i` flag 传递
-- **Antigravity fallback**：IDE 模式不输出 NDJSON，需要通过 MCP 回传
+- **Antigravity Desktop fallback**：IDE 模式不输出 NDJSON，需要通过 MCP 回传
 
 **事件转换：**
 ```typescript

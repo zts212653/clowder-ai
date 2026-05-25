@@ -107,7 +107,7 @@ describe('IndexBuilder passage embeddings', () => {
   });
 
   it('embeds late-arriving dirty-thread passages without full rebuild', async () => {
-    let messages = [
+    const messages = [
       {
         id: 'msg_dirty_001',
         content: 'Initial passage before dirty flush.',

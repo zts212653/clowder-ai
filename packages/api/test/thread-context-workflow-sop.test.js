@@ -44,6 +44,7 @@ describe('GET thread-context with workflowSop', () => {
         const sop = {
           featureId,
           backlogItemId,
+          sopDefinitionId: 'development',
           stage: 'impl',
           batonHolder: updatedBy,
           nextSkill: 'tdd',
@@ -114,9 +115,12 @@ describe('GET thread-context with workflowSop', () => {
     const body = JSON.parse(response.body);
     assert.ok(body.workflowSop, 'workflowSop should be present');
     assert.equal(body.workflowSop.featureId, 'F073');
+    assert.equal(body.workflowSop.sopDefinitionId, 'development');
     assert.equal(body.workflowSop.stage, 'impl');
     assert.equal(body.workflowSop.batonHolder, 'opus');
     assert.equal(body.workflowSop.nextSkill, 'tdd');
+    assert.equal(body.workflowSop.suggestedSkill, 'tdd');
+    assert.equal(body.workflowSop.suggestedSkillSource, 'override');
     assert.deepEqual(body.workflowSop.resumeCapsule, {
       goal: 'Build F073',
       done: ['types'],
@@ -126,6 +130,53 @@ describe('GET thread-context with workflowSop', () => {
     // version and updatedAt should NOT be in the response
     assert.equal(body.workflowSop.version, undefined);
     assert.equal(body.workflowSop.updatedAt, undefined);
+  });
+
+  test('returns thread context without workflowSop when stored SOP stage is invalid even with nextSkill override', async () => {
+    const app = await createApp();
+
+    const thread = threadStore.create('user-1', 'F073 test', 'default');
+    threadStore.linkBacklogItem(thread.id, 'item-invalid-sop');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
+
+    workflowSopStore._store.set('item-invalid-sop', {
+      featureId: 'F073',
+      backlogItemId: 'item-invalid-sop',
+      sopDefinitionId: 'development',
+      stage: 'retired_stage',
+      batonHolder: 'opus',
+      nextSkill: 'tdd',
+      resumeCapsule: { goal: 'Build F073', done: ['types'], currentFocus: 'Redis store' },
+      checks: {
+        remoteMainSynced: 'attested',
+        qualityGatePassed: 'unknown',
+        reviewApproved: 'unknown',
+        visionGuardDone: 'unknown',
+      },
+      version: 1,
+      updatedAt: Date.now(),
+      updatedBy: 'opus',
+    });
+
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      threadId: thread.id,
+      content: 'Hello',
+      mentions: [],
+      timestamp: Date.now(),
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.workflowSop, undefined, 'invalid stored SOP data should not break thread-context');
+    assert.equal(body.messages[0].content, 'Hello');
   });
 
   test('does not return workflowSop when thread has no backlogItemId', async () => {

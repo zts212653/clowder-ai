@@ -37,8 +37,10 @@ Architecture cell: identity-session（候选主 cell）
 Map delta: update required — 待 Design Gate 确认是否需 new cell
 Why: F208 把 agent identity 从静态 roster 一行话（cat-config.json）扩展为「能力画像
 档案 + 认知路由」子系统。画像档案是 identity-session cell 的能力维度深化；但「认知
-路由」（猫读画像自主判断传球）可能溢出为新的协作子系统。entity_id 身份真相源在
-F209 memory cell（见 related F209，AC-B6：cat-dossier 消费 F209 entity_id）。
+路由」（猫读画像自主判断传球）可能溢出为新的协作子系统。**F209 owns entity registry /
+retrieval anchor truth source；F032 / identity-session owns roster truth**。F208
+cat-dossier 消费 F209 `entity_id` 作猫/人标识键（不另造 namespace），详见 AC-A5
+（dual of F209 AC-B6, transferred 2026-05-23）。
 Design Gate 拍定主 cell 与 map delta。
 ```
 
@@ -110,6 +112,7 @@ fork 后按领域累积）/ evolving（eval 回流持续刷新）。
 - [ ] AC-A2: 四猫（46/47/Maine Coon/Siamese）画像全部回填，每条总结带 provenance（来源+证据+日期）
 - [ ] AC-A3: L0 指针进 root md / session hook，猫每次在场能看到"该读画像"提示
 - [ ] AC-A4: 画像条目带时间戳，schema 支持演化（同一能力可有多条不同日期的总结）
+- [ ] AC-A5: `cat-dossier` **消费 F209 `entity_id`** 作猫/人标识键，不创建平行 cat ID / person ID namespace。**Dual of F209 AC-B6**（F209 spec 2026-05-23 transferred this AC to F208；详见 F209 KD-7 / KD-12）。F032 / identity-session 仍是 roster truth，F209 `entity_id` 仅作 retrieval anchor 镜像；F208 dossier 是 capability 画像层，引用 entity_id 不反写。
 
 ### Phase B（传球加载 + 非阻塞提醒）
 - [ ] AC-B1: 猫传球时可按需加载目标猫 L1 画像（像 skill，不常驻）

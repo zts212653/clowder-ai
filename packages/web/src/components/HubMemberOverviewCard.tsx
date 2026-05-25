@@ -9,6 +9,7 @@ import {
   SettingsFilterTabs,
   SettingsPrimaryButton,
   SettingsRow,
+  SettingsStatusStrip,
   SettingsText,
 } from './settings/primitives';
 
@@ -154,8 +155,10 @@ export function HubOverviewToolbar({
 }) {
   return (
     <div className="flex items-center justify-between gap-3">
-      {onFilterChange && (
+      {onFilterChange ? (
         <SettingsFilterTabs tabs={MEMBER_FILTER_TABS} activeKey={activeFilter ?? '全部'} onTabChange={onFilterChange} />
+      ) : (
+        <SettingsStatusStrip tone="muted">全部 · 已启用 · 已停用 · CLI（OAuth） · CLI（配置）</SettingsStatusStrip>
       )}
       {onAddMember && (
         <SettingsPrimaryButton

@@ -92,18 +92,65 @@ describe('Eval Domain Registry v0', () => {
     );
   });
 
-  it('rejects unknown domain ids in E-pilot', () => {
-    assert.throws(() => parseEvalDomainRegistryEntry({ ...validEntry, domainId: 'eval:memory' }), /eval:a2a/);
+  it('validates the eval:memory registry entry', () => {
+    const memoryEntry = {
+      domainId: 'eval:memory',
+      displayName: 'Memory Recall & Library Health Eval',
+      systemThreadId: 'thread_eval_memory',
+      evalCat: { catId: 'opus47', handle: '@opus47', model: 'claude-opus-4-7' },
+      frequency: 'daily',
+      sourceAdapter: 'f200-f188-memory-eval',
+      threadPolicy: {
+        role: 'working-home',
+        stateSot: 'registry',
+        allowedContent: ['longitudinal-analysis', 'verdict-discussion', 'handoff-drafts'],
+      },
+      legacyScheduledTaskIds: ['memory-recall-digest'],
+      handoffTargetResolver: { featureId: 'F200', ownerCatId: 'opus47', threadLookup: 'feature-thread' },
+      sla: { acknowledgeHours: 48, reevalWithinHours: 168 },
+    };
+    const entry = parseEvalDomainRegistryEntry(memoryEntry);
+    assert.equal(entry.domainId, 'eval:memory');
+    assert.equal(entry.sourceAdapter, 'f200-f188-memory-eval');
+    assert.equal(entry.handoffTargetResolver.featureId, 'F200');
   });
 
-  it('rejects non-F167 handoff targets in E-pilot', () => {
-    assert.throws(
-      () =>
-        parseEvalDomainRegistryEntry({
-          ...validEntry,
-          handoffTargetResolver: { ...validEntry.handoffTargetResolver, featureId: 'F192' },
-        }),
-      /F167/,
+  it('accepts F188 as handoff target feature', () => {
+    const entry = parseEvalDomainRegistryEntry({
+      ...validEntry,
+      handoffTargetResolver: { ...validEntry.handoffTargetResolver, featureId: 'F188' },
+    });
+    assert.equal(entry.handoffTargetResolver.featureId, 'F188');
+  });
+
+  it('loads the docs-backed eval:memory registry fixture', async () => {
+    const raw = await readFile(
+      new URL('../../../../docs/harness-feedback/eval-domains/eval-memory.yaml', import.meta.url),
+      'utf8',
+    );
+    const parsed = parse(raw);
+    const entry = parseEvalDomainRegistryFile(parsed);
+
+    assert.equal(entry.domainId, 'eval:memory');
+    assert.equal(entry.sourceAdapter, 'f200-f188-memory-eval');
+    assert.equal(entry.handoffTargetResolver.featureId, 'F200');
+    assert.equal(entry.sla.acknowledgeHours, 48);
+  });
+
+  it('rejects unknown domain ids', () => {
+    assert.throws(() => parseEvalDomainRegistryEntry({ ...validEntry, domainId: 'eval:unknown' }));
+  });
+
+  it('rejects unknown source adapter', () => {
+    assert.throws(() => parseEvalDomainRegistryEntry({ ...validEntry, sourceAdapter: 'unknown-adapter' }));
+  });
+
+  it('rejects malformed feature id in handoff target', () => {
+    assert.throws(() =>
+      parseEvalDomainRegistryEntry({
+        ...validEntry,
+        handoffTargetResolver: { ...validEntry.handoffTargetResolver, featureId: 'not-a-feature' },
+      }),
     );
   });
 });

@@ -231,6 +231,9 @@ export class ClaudeBgCarrierService implements AgentService {
       const args = useEnvModelOverride ? ['--bg', prompt] : ['--bg', prompt, '--model', effectiveModel];
       // F203 Phase C: native system role from compiled L0 file (above).
       args.push('--system-prompt-file', l0Path);
+      if (options?.systemPrompt) {
+        args.push('--append-system-prompt', options.systemPrompt);
+      }
 
       // F198 Phase D carrier parity (2026-05-19 hotfix): ClaudeAgentService
       // ('-p' carrier) passes `--permission-mode bypassPermissions` so cats can

@@ -237,8 +237,8 @@ export async function* spawnCli(
     timeoutTimer = setTimeout(() => {
       // F118: If busy-silent (CPU growing), extend timeout unless hard cap exceeded
       if (probe?.shouldExtendTimeout()) {
-        const elapsed = Date.now() - startedAt;
-        if (!probe.isHardCapExceeded(elapsed, timeoutMs)) {
+        const innerElapsed = Date.now() - startedAt;
+        if (!probe.isHardCapExceeded(innerElapsed, timeoutMs)) {
           resetTimeout(); // extend once more
           return;
         }
@@ -251,12 +251,13 @@ export async function* spawnCli(
   };
   if (timeoutMs > 0) resetTimeout(); // Start initial timeout only if enabled
 
-  // Attach stderr handler now that resetTimeout is defined
-  // Reset timeout on stderr activity — CLI is alive (working on tools, thinking, etc.)
+  // Attach stderr handler — collect output but do NOT extend timeout or probe.
+  // stderr is transport/reconnect noise, not user-visible output. Extending
+  // timeout on stderr was the root cause of the 30-min stall bug: chatter kept
+  // resetting the timer so the callback never fired and the probe never reached
+  // suspected_stall. Silence tracking (probe) is also not reset here.
   child.stderr?.on('data', (chunk: Buffer) => {
     stderrBuffer += chunk.toString();
-    resetTimeout();
-    probe?.notifyActivity(); // F118: stderr = CLI alive, sync to probe
   });
 
   // AbortSignal

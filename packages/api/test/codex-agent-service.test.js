@@ -102,6 +102,64 @@ function finishExit(proc, code) {
   });
 }
 
+const CAT_CAFE_SPLIT_SERVER_IDS = ['cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals', 'cat-cafe-limb'];
+const CAT_CAFE_WORKSPACE_ENV_SERVER_IDS = ['cat-cafe', ...CAT_CAFE_SPLIT_SERVER_IDS];
+
+async function withWorkspaceEnv(env, fn) {
+  const previousAllowedWorkspaceDirs = process.env.ALLOWED_WORKSPACE_DIRS;
+  const previousCatCafeWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+
+  try {
+    if (env.ALLOWED_WORKSPACE_DIRS === undefined) {
+      delete process.env.ALLOWED_WORKSPACE_DIRS;
+    } else {
+      process.env.ALLOWED_WORKSPACE_DIRS = env.ALLOWED_WORKSPACE_DIRS;
+    }
+    if (env.CAT_CAFE_WORKSPACE_ROOT === undefined) {
+      delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+    } else {
+      process.env.CAT_CAFE_WORKSPACE_ROOT = env.CAT_CAFE_WORKSPACE_ROOT;
+    }
+    await fn();
+  } finally {
+    if (previousAllowedWorkspaceDirs === undefined) {
+      delete process.env.ALLOWED_WORKSPACE_DIRS;
+    } else {
+      process.env.ALLOWED_WORKSPACE_DIRS = previousAllowedWorkspaceDirs;
+    }
+    if (previousCatCafeWorkspaceRoot === undefined) {
+      delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+    } else {
+      process.env.CAT_CAFE_WORKSPACE_ROOT = previousCatCafeWorkspaceRoot;
+    }
+  }
+}
+
+async function collectCodexSpawnArgs(workingDirectory) {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+  const promise = collect(service.invoke('hello from workspace env test', { workingDirectory }));
+  emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-mcp-workspace-env' }]);
+  await promise;
+
+  return spawnFn.mock.calls[0].arguments[1];
+}
+
+function assertWorkspaceScopedServersUseAllowedWorkspaceDirs(args, expected, reason) {
+  for (const serverId of CAT_CAFE_WORKSPACE_ENV_SERVER_IDS) {
+    assert.ok(
+      args.includes(`mcp_servers.${serverId}.env.ALLOWED_WORKSPACE_DIRS="${expected}"`),
+      `${serverId} must use ${reason}`,
+    );
+  }
+}
+
+function makeTempDir(prefix) {
+  return mkdtempSync(join(import.meta.dirname ?? '.', prefix));
+}
+
 // --- Test cases ---
 
 test('yields session_init, text, and done on basic success', async () => {
@@ -164,7 +222,9 @@ test('uses exec resume when sessionId is provided', async () => {
 });
 
 test('injects cat-cafe MCP config from runtime root, not thread workingDirectory', async () => {
-  const tmpRoot = mkdtempSync(join(import.meta.dirname ?? '.', '.tmp-mcp-test-'));
+  const tmpRoot = makeTempDir('.tmp-mcp-test-');
+  const previousAllowedWorkspaceDirs = process.env.ALLOWED_WORKSPACE_DIRS;
+  const previousCatCafeWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
   const mcpDistDir = join(tmpRoot, 'packages', 'mcp-server', 'dist');
   mkdirSync(mcpDistDir, { recursive: true });
   for (const entrypoint of ['index.js', 'collab.js', 'memory.js', 'signals.js', 'limb.js']) {
@@ -176,6 +236,8 @@ test('injects cat-cafe MCP config from runtime root, not thread workingDirectory
   const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
 
   try {
+    delete process.env.ALLOWED_WORKSPACE_DIRS;
+    delete process.env.CAT_CAFE_WORKSPACE_ROOT;
     const promise = collect(
       service.invoke('hello from outside cwd', {
         workingDirectory: tmpRoot,
@@ -220,6 +282,10 @@ test('injects cat-cafe MCP config from runtime root, not thread workingDirectory
         args.includes(`mcp_servers.${serverId}.default_tools_approval_mode="approve"`),
         `${serverId} must have default_tools_approval_mode="approve" for non-interactive codex exec`,
       );
+      assert.ok(
+        args.includes(`mcp_servers.${serverId}.env.ALLOWED_WORKSPACE_DIRS="${tmpRoot}"`),
+        `${serverId} must receive the thread workspace as ALLOWED_WORKSPACE_DIRS`,
+      );
       // full callback env coverage on every split server (regression guard for F168/F140 cross-thread auth)
       assert.ok(
         args.includes(`mcp_servers.${serverId}.env.CAT_CAFE_API_URL="http://127.0.0.1:3004"`),
@@ -247,14 +313,72 @@ test('injects cat-cafe MCP config from runtime root, not thread workingDirectory
       );
     }
 
-    // legacy `cat-cafe` server must NOT be injected after the split
+    // legacy `cat-cafe` server must NOT be auto-provisioned after the split.
     assert.ok(
       !args.includes('mcp_servers.cat-cafe.command="node"'),
       'legacy cat-cafe MCP server entry should not be injected after F193 Phase C split',
     );
+    assert.ok(
+      !args.some((arg) => arg.startsWith('mcp_servers.cat-cafe.args=')),
+      'legacy cat-cafe MCP args should not be injected after F193 Phase C split',
+    );
+    assert.ok(
+      args.includes(`mcp_servers.cat-cafe.env.ALLOWED_WORKSPACE_DIRS="${tmpRoot}"`),
+      'legacy cat-cafe static config must receive the same workspace env overlay',
+    );
+  } finally {
+    if (previousAllowedWorkspaceDirs === undefined) {
+      delete process.env.ALLOWED_WORKSPACE_DIRS;
+    } else {
+      process.env.ALLOWED_WORKSPACE_DIRS = previousAllowedWorkspaceDirs;
+    }
+    if (previousCatCafeWorkspaceRoot === undefined) {
+      delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+    } else {
+      process.env.CAT_CAFE_WORKSPACE_ROOT = previousCatCafeWorkspaceRoot;
+    }
+    rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test('Codex MCP config prefers explicit ALLOWED_WORKSPACE_DIRS over thread workingDirectory', async () => {
+  const tmpRoot = makeTempDir('.tmp-mcp-explicit-env-');
+
+  try {
+    await withWorkspaceEnv(
+      { ALLOWED_WORKSPACE_DIRS: '/explicit/workspace', CAT_CAFE_WORKSPACE_ROOT: '/stale/workspace-root' },
+      async () => {
+        const args = await collectCodexSpawnArgs(tmpRoot);
+        assertWorkspaceScopedServersUseAllowedWorkspaceDirs(
+          args,
+          '/explicit/workspace',
+          'explicit ALLOWED_WORKSPACE_DIRS',
+        );
+      },
+    );
   } finally {
     rmSync(tmpRoot, { recursive: true, force: true });
   }
+});
+
+test('Codex MCP config prefers thread workingDirectory over CAT_CAFE_WORKSPACE_ROOT', async () => {
+  const tmpRoot = makeTempDir('.tmp-mcp-workspace-root-');
+
+  try {
+    await withWorkspaceEnv({ CAT_CAFE_WORKSPACE_ROOT: '/stale/startup-workspace' }, async () => {
+      const args = await collectCodexSpawnArgs(tmpRoot);
+      assertWorkspaceScopedServersUseAllowedWorkspaceDirs(args, tmpRoot, 'thread workingDirectory');
+    });
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test('Codex MCP config uses CAT_CAFE_WORKSPACE_ROOT when thread workingDirectory is absent', async () => {
+  await withWorkspaceEnv({ CAT_CAFE_WORKSPACE_ROOT: '/workspace/root' }, async () => {
+    const args = await collectCodexSpawnArgs();
+    assertWorkspaceScopedServersUseAllowedWorkspaceDirs(args, '/workspace/root', 'CAT_CAFE_WORKSPACE_ROOT fallback');
+  });
 });
 
 test('does not include resume when no sessionId', async () => {
@@ -1351,12 +1475,12 @@ test('Issue #116: turn.completed unblocks done even when process exit is delayed
 
 test('[F172] yields system_info rich_block for images found in codex generated_images dir', async () => {
   const sessionId = 'thread-f172-img';
-  const tmpHome = mkdtempSync(join(import.meta.dirname ?? '.', '.tmp-f172-'));
+  const tmpHome = makeTempDir('.tmp-f172-');
   const imgDir = join(tmpHome, '.codex', 'generated_images', sessionId);
   mkdirSync(imgDir, { recursive: true });
   writeFileSync(join(imgDir, 'ig_test.png'), Buffer.from('fake-png'));
 
-  const uploadDir = mkdtempSync(join(import.meta.dirname ?? '.', '.tmp-f172-uploads-'));
+  const uploadDir = makeTempDir('.tmp-f172-uploads-');
 
   const prevHome = process.env.HOME;
   process.env.HOME = tmpHome;

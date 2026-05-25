@@ -268,6 +268,159 @@ describe('Callback Routes', () => {
     assert.equal(socketManager.getMessages().length, 1);
   });
 
+  test('POST post-message suppresses exact duplicate callback posts in the retry window', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    const payload = { content: 'same callback report' };
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload,
+    });
+    assert.equal(first.statusCode, 200);
+    const firstBody = JSON.parse(first.body);
+    assert.equal(firstBody.status, 'ok');
+
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload,
+    });
+    assert.equal(second.statusCode, 200);
+    const secondBody = JSON.parse(second.body);
+    assert.equal(secondBody.status, 'duplicate');
+    assert.equal(secondBody.messageId, firstBody.messageId);
+
+    const recent = messageStore.getRecent(10);
+    assert.equal(recent.length, 1);
+    assert.equal(socketManager.getMessages().length, 1);
+  });
+
+  test('POST post-message suppresses exact duplicate callback posts when first copy is queued', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    const queued = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'same queued callback report',
+      mentions: [],
+      origin: 'callback',
+      timestamp: Date.now(),
+      threadId: 'default',
+      extra: {
+        stream: {
+          invocationId,
+          turnInvocationId: invocationId,
+        },
+      },
+      deliveryStatus: 'queued',
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { content: 'same queued callback report' },
+    });
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.status, 'duplicate');
+    assert.equal(body.messageId, queued.id);
+
+    assert.equal(messageStore.size, 1);
+    assert.equal(socketManager.getMessages().length, 0);
+  });
+
+  test('POST post-message duplicate scan skips stale candidates without stopping early', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const now = Date.now();
+
+    const freshDuplicate = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'same callback report behind stale tail',
+      mentions: [],
+      origin: 'callback',
+      timestamp: now,
+      deliveredAt: now,
+      threadId: 'default',
+      extra: {
+        stream: {
+          invocationId,
+          turnInvocationId: invocationId,
+        },
+      },
+    });
+    messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'old unrelated callback tail',
+      mentions: [],
+      origin: 'callback',
+      timestamp: now - 10_000,
+      deliveredAt: now - 10_000,
+      threadId: 'default',
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { content: 'same callback report behind stale tail' },
+    });
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.status, 'duplicate');
+    assert.equal(body.messageId, freshDuplicate.id);
+
+    assert.equal(messageStore.size, 2);
+    assert.equal(socketManager.getMessages().length, 0);
+  });
+
+  test('POST post-message suppresses exact duplicate callback posts when transient extra differs', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    const first = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'same callback payload after rich block consumption',
+      mentions: [],
+      origin: 'callback',
+      timestamp: Date.now(),
+      threadId: 'default',
+      extra: {
+        rich: {
+          v: 1,
+          blocks: [{ kind: 'card', v: 1, id: 'rb-1', data: { title: 'smoke report' } }],
+        },
+        stream: {
+          invocationId,
+          turnInvocationId: invocationId,
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { content: 'same callback payload after rich block consumption' },
+    });
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.status, 'duplicate');
+    assert.equal(body.messageId, first.id);
+
+    assert.equal(messageStore.size, 1);
+    assert.equal(socketManager.getMessages().length, 0);
+  });
+
   test('POST post-message supports cross-thread send with threadId', async () => {
     const app = await createApp();
     const threadA = await threadStore.create('user-1', 'thread-a');

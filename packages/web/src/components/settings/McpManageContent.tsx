@@ -22,6 +22,10 @@ interface ModalState {
   tools?: { name: string; description?: string }[];
 }
 
+const MCP_SKELETON_CARD_CLASS =
+  'animate-pulse h-[68px] rounded-xl bg-[var(--console-card-bg)] p-4 shadow-[0_8px_22px_rgba(43,33,26,0.04)]';
+const MCP_SKELETON_BAR_CLASS = 'rounded bg-[var(--console-border-soft)]';
+
 function buildEditData(item: CapabilityBoardItem): McpConfigModalProps['editData'] {
   const server = item.mcpServer;
   if (!server) return undefined;
@@ -89,12 +93,9 @@ export function McpManageContent() {
       {cap.loading && (
         <div className="space-y-3">
           {[1, 2, 3].map((index) => (
-            <div
-              key={index}
-              className="animate-pulse h-[68px] rounded-xl bg-[var(--console-card-bg)] p-4 shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
-            >
-              <div className="h-4 w-1/3 rounded bg-[var(--console-border-soft)]" />
-              <div className="mt-2 h-3 w-2/3 rounded bg-[var(--console-border-soft)]" />
+            <div key={index} className={MCP_SKELETON_CARD_CLASS}>
+              <div className={`${MCP_SKELETON_BAR_CLASS} h-4 w-1/3`} />
+              <div className={`${MCP_SKELETON_BAR_CLASS} mt-2 h-3 w-2/3`} />
             </div>
           ))}
         </div>

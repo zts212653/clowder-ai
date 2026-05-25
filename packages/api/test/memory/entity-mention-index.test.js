@@ -102,4 +102,46 @@ describe('F209 entity mention indexing', () => {
     const rows = db.prepare('SELECT * FROM entity_mentions WHERE doc_anchor = ?').all('deleted-thread-anchor');
     assert.equal(rows.length, 0);
   });
+
+  it('does not rebuild all entity mentions when unchanged seeds are upserted', async () => {
+    const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
+
+    const store = new SqliteEvidenceStore(':memory:');
+    await store.initialize();
+    await store.upsert([
+      {
+        anchor: 'thread-entity-seed-noop',
+        kind: 'thread',
+        status: 'active',
+        title: 'Entity seed no-op thread',
+        summary: '铲屎官 asked whether restart should reindex every entity mention.',
+        updatedAt: '2026-05-23T00:00:00.000Z',
+      },
+    ]);
+
+    const seed = {
+      entityId: 'person:landy',
+      type: 'person',
+      canonicalName: 'You',
+      aliases: ['you', '铲屎官', 'CVO'],
+      provenance: [{ source: 'F209 Phase B.1 test seed' }],
+      updatedAt: '2026-05-23T00:00:00Z',
+    };
+    await store.upsertEntities([seed]);
+
+    const db = store.getDb();
+    db.exec(`
+      CREATE TEMP TABLE mention_delete_log(entity_id TEXT NOT NULL);
+      CREATE TEMP TRIGGER log_entity_mention_delete
+      AFTER DELETE ON entity_mentions
+      BEGIN
+        INSERT INTO mention_delete_log(entity_id) VALUES (OLD.entity_id);
+      END;
+    `);
+
+    await store.upsertEntities([seed]);
+
+    const deleteCount = db.prepare('SELECT COUNT(*) AS count FROM mention_delete_log').get().count;
+    assert.equal(deleteCount, 0, 'unchanged seeds must not trigger a full entity_mentions rebuild');
+  });
 });

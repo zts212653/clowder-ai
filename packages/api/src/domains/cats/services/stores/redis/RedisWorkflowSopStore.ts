@@ -1,4 +1,4 @@
-import type { UpdateWorkflowSopInput, WorkflowSop } from '@cat-cafe/shared';
+import { normalizeSopDefinitionId, type UpdateWorkflowSopInput, type WorkflowSop } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { IWorkflowSopStore } from '../ports/WorkflowSopStore.js';
 import { VersionConflictError } from '../ports/WorkflowSopStore.js';
@@ -18,6 +18,13 @@ const DEFAULT_RESUME_CAPSULE = {
   done: [] as string[],
   currentFocus: '',
 };
+
+function normalizeWorkflowSop(raw: WorkflowSop): WorkflowSop {
+  return {
+    ...raw,
+    sopDefinitionId: normalizeSopDefinitionId(raw.sopDefinitionId),
+  };
+}
 
 /**
  * Lua script for atomic CAS upsert.
@@ -70,7 +77,7 @@ export class RedisWorkflowSopStore implements IWorkflowSopStore {
     const raw = await this.redis.get(key);
     if (!raw) return null;
     try {
-      return JSON.parse(raw) as WorkflowSop;
+      return normalizeWorkflowSop(JSON.parse(raw) as WorkflowSop);
     } catch {
       return null;
     }
@@ -91,6 +98,7 @@ export class RedisWorkflowSopStore implements IWorkflowSopStore {
     const sop: WorkflowSop = existing
       ? {
           ...existing,
+          sopDefinitionId: input.sopDefinitionId ?? existing.sopDefinitionId,
           stage: input.stage ?? existing.stage,
           batonHolder: input.batonHolder ?? existing.batonHolder,
           nextSkill: input.nextSkill !== undefined ? input.nextSkill : existing.nextSkill,
@@ -105,6 +113,7 @@ export class RedisWorkflowSopStore implements IWorkflowSopStore {
       : {
           featureId,
           backlogItemId,
+          sopDefinitionId: input.sopDefinitionId ?? 'development',
           stage: input.stage ?? 'kickoff',
           batonHolder: input.batonHolder ?? updatedBy,
           nextSkill: input.nextSkill !== undefined ? input.nextSkill : null,
@@ -132,7 +141,7 @@ export class RedisWorkflowSopStore implements IWorkflowSopStore {
 
     if (result !== 'OK') {
       // Lua returned existing JSON = version mismatch
-      const current = JSON.parse(result) as WorkflowSop;
+      const current = normalizeWorkflowSop(JSON.parse(result) as WorkflowSop);
       throw new VersionConflictError(current);
     }
 

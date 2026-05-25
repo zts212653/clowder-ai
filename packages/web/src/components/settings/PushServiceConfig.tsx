@@ -147,13 +147,17 @@ export function PushServiceConfig({ embedded = false }: { embedded?: boolean } =
   const content = (
     <>
       <SettingsText as="p" tone="secondary">
-        <span className="font-medium text-cafe-black">VAPID 推送密钥</span> — 保存后写入运行时
-        .env；密钥字段留空会保留现有值。
+        <SettingsText as="span" tone="default" className="font-medium">
+          VAPID 推送密钥
+        </SettingsText>{' '}
+        — 保存后写入运行时 .env；密钥字段留空会保留现有值。
       </SettingsText>
 
       <div className="grid gap-2">
         <label className="flex items-center gap-3">
-          <span className="w-20 shrink-0 text-xs font-medium text-cafe-secondary">推送公钥</span>
+          <SettingsText as="span" tone="secondary" className="w-20 shrink-0 font-medium">
+            推送公钥
+          </SettingsText>
           <input
             name="VAPID_PUBLIC_KEY"
             value={form.VAPID_PUBLIC_KEY}
@@ -163,7 +167,9 @@ export function PushServiceConfig({ embedded = false }: { embedded?: boolean } =
           />
         </label>
         <label className="flex items-center gap-3">
-          <span className="w-20 shrink-0 text-xs font-medium text-cafe-secondary">推送私钥</span>
+          <SettingsText as="span" tone="secondary" className="w-20 shrink-0 font-medium">
+            推送私钥
+          </SettingsText>
           <input
             name="VAPID_PRIVATE_KEY"
             type="password"
@@ -174,7 +180,9 @@ export function PushServiceConfig({ embedded = false }: { embedded?: boolean } =
           />
         </label>
         <label className="flex items-center gap-3">
-          <span className="w-20 shrink-0 text-xs font-medium text-cafe-secondary">联系信息</span>
+          <SettingsText as="span" tone="secondary" className="w-20 shrink-0 font-medium">
+            联系信息
+          </SettingsText>
           <input
             name="VAPID_SUBJECT"
             value={form.VAPID_SUBJECT}

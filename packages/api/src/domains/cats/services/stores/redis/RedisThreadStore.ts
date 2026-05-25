@@ -184,6 +184,30 @@ export class RedisThreadStore implements IThreadStore {
     return thread;
   }
 
+  async ensureThread(threadId: string, title: string): Promise<Thread> {
+    const key = ThreadKeys.detail(threadId);
+    const existingId = await this.redis.hget(key, 'id');
+    if (existingId) {
+      const data = await this.redis.hgetall(key);
+      return this.hydrateThread(data);
+    }
+
+    const now = Date.now();
+    const thread: Thread = {
+      id: threadId,
+      projectPath: 'default',
+      title,
+      createdBy: 'system',
+      participants: [],
+      lastActiveAt: now,
+      createdAt: now,
+    };
+
+    await this.redis.hset(key, this.serializeThread(thread));
+    // System threads are persistent — no TTL applied (W5: user state default persistent)
+    return thread;
+  }
+
   async get(threadId: string): Promise<Thread | null> {
     const data = await this.redis.hgetall(ThreadKeys.detail(threadId));
     if (!data || !data.id) {

@@ -13,8 +13,8 @@ triggers:
   - "github-review-feedback"
 ---
 
-> **SOP 位置**: 本 skill 是 `docs/SOP.md` Step 3b 的执行细节。
-> **上一步**: `request-review` (Step 3a) | **下一步**: `merge-gate` (Step 4)
+> **SOP 位置**: 本 skill 是 `sop-definitions/development.yaml` stage `review` 的反馈处理执行细节。
+> **上一步**: `request-review` | **下一步**: `merge-gate`
 
 # Receive Review
 
@@ -234,4 +234,4 @@ Reviewer 在 review 期间创建的沙盒：
 
 ## 下一步
 
-Reviewer 放行（"LGTM"/"通过"/"可以合入"）→ **直接加载 `merge-gate`** skill（SOP Step 4）。不要停下来问铲屎官（§17）。
+Reviewer 放行（"LGTM"/"通过"/"可以合入"）→ **直接加载 `merge-gate`** skill（SOP stage `merge`）。不要停下来问铲屎官（§17）。

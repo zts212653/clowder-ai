@@ -103,7 +103,8 @@ export interface InvocationContext {
    */
   sopStageHint?: {
     readonly stage: string;
-    readonly suggestedSkill: string | null;
+    readonly suggestedSkill: string;
+    readonly suggestedSkillSource?: string;
     readonly featureId: string;
   };
   /**
@@ -770,9 +771,9 @@ export function buildInvocationContext(context: InvocationContext): string {
 
   // F073 P4: SOP stage hint — 告示牌 (bulletin board, not controller)
   if (context.sopStageHint) {
-    const { stage, suggestedSkill, featureId } = context.sopStageHint;
-    const skillPart = suggestedSkill ? ` → load skill: ${suggestedSkill}` : '';
-    lines.push(`SOP: ${featureId} stage=${stage}${skillPart}`);
+    const { stage, suggestedSkill, suggestedSkillSource, featureId } = context.sopStageHint;
+    const sourcePart = suggestedSkillSource ? ` (${suggestedSkillSource})` : '';
+    lines.push(`SOP: ${featureId} stage=${stage} → load skill: ${suggestedSkill}${sourcePart}`);
   }
 
   // F092: Voice companion mode — instruct cats to prioritize audio output

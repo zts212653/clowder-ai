@@ -57,16 +57,18 @@ Most frameworks help you *call* agents. Clowder helps them *work together*.
 
 ## Supported Agents
 
-Clowder is model-agnostic. Each agent CLI plugs in via a unified output adapter:
+Clowder is model-agnostic. Each agent CLI/adapter plugs in through a unified message layer:
 
 | Agent CLI | Model Family | Output Format | MCP | Status |
 |-----------|-------------|---------------|-----|--------|
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Claude (Opus / Sonnet / Haiku) | stream-json | Yes | Shipped |
 | [Codex CLI](https://github.com/openai/codex) | GPT / Codex | json | Yes | Shipped |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | Gemini | stream-json | Yes | Shipped |
-| [Antigravity](https://github.com/nolanzandi/antigravity-cli) | Multi-model | cdp-bridge | No | Shipped |
+| [Antigravity CLI](https://antigravity.google/cli) | Gemini / Google account-selected | plain text (`agy --print`) | CLI-managed | Default for non-ACP Gemini routes |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | Gemini | stream-json / ACP | Yes | ACP default where configured; explicit fallback elsewhere |
+| [Antigravity Desktop](https://antigravity.google/) | Multi-model | cdp-bridge | Callback bridge | Opt-in legacy |
 | [opencode](https://github.com/sst/opencode) | Multi-model | ndjson | Yes | Shipped |
 
+> Google consumer Gemini CLI / Gemini Code Assist individual requests stop on 2026-06-18, so non-ACP Gemini routes default to Antigravity CLI. Catalog entries with ACP still use `gemini --acp` until `agy` exposes a supported ACP mode; use `GEMINI_ADAPTER=gemini-cli` only for explicit enterprise/API-key fallback routes.
 > Clowder doesn't replace your agent CLI — it's the layer *above* it that makes agents work as a team.
 
 ## Quick Start

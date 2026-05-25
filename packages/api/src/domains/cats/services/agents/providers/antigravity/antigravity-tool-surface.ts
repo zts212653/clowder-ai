@@ -1,6 +1,7 @@
 import type { TrajectoryStep } from './AntigravityBridge.js';
 
 const LS_OWNED_APPROVAL_TOOLS = new Set<string>([
+  'ask_permission',
   'write_to_file',
   'write_file',
   'replace_file_content',

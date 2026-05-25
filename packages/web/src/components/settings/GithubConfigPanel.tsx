@@ -106,7 +106,10 @@ export function GithubConfigPanel() {
   const messageTone = message?.tone === 'success' ? 'success' : message?.tone === 'error' ? 'error' : 'info';
 
   return (
-    <div className="space-y-3 px-4 py-3">
+    <div
+      className="space-y-3"
+      style={{ borderTop: '1px solid var(--console-border-soft)', paddingInline: '1rem', paddingBlock: '0.75rem' }}
+    >
       <div className="space-y-1">
         <SettingsText as="p" variant="sm" tone="default" className="font-medium">
           GitHub Token
@@ -123,7 +126,11 @@ export function GithubConfigPanel() {
       ) : (
         <div className="grid gap-3">
           {fields.map((field) => (
-            <label key={field.envName} className="space-y-1 text-xs font-medium text-cafe-secondary">
+            <label
+              key={field.envName}
+              className="space-y-1 font-medium"
+              style={{ fontSize: 'var(--console-font-xs)', color: 'var(--cafe-text-secondary)' }}
+            >
               {field.label}
               <input
                 name={field.envName}

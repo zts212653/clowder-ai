@@ -439,6 +439,31 @@ export class RedisMessageStore {
     return this.fetchDeliveredDesc(key, n, userId ? (m) => m.userId === userId || isSystemUserMessage(m) : undefined);
   }
 
+  async getByThreadIncludingQueued(threadId: string, limit?: number, userId?: string): Promise<StoredMessage[]> {
+    const n = limit ?? DEFAULT_LIMIT;
+    const key = MessageKeys.thread(threadId);
+    const CHUNK = Math.max(n, 50);
+    const result: StoredMessage[] = [];
+    let offset = 0;
+
+    while (result.length < n) {
+      const ids = await this.redis.zrevrange(key, offset, offset + CHUNK - 1);
+      if (ids.length === 0) break;
+      const messages = await this.hydrateMessages(ids);
+      for (const msg of messages) {
+        if (msg.deletedAt) continue;
+        if (msg.deliveryStatus === 'canceled') continue;
+        if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
+        result.push(msg);
+        if (result.length >= n) break;
+      }
+      if (ids.length < CHUNK) break;
+      offset += CHUNK;
+    }
+
+    return result.slice(0, n).reverse();
+  }
+
   /**
    * Get messages in a thread after a cursor ID (exclusive), oldest first.
    * If afterId is undefined, returns from thread start.

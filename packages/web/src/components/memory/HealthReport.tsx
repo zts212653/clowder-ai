@@ -280,13 +280,22 @@ export function HealthReport() {
 
       <div className="flex items-center justify-between">
         <span className="text-micro text-cafe-muted">生成于 {new Date(report.generatedAt).toLocaleString()}</span>
-        <button
-          type="button"
-          onClick={fetchReport}
-          className="rounded-lg bg-cafe-accent px-3 py-1.5 text-xs font-semibold text-[var(--cafe-surface)] transition-colors hover:bg-cafe-accent-hover"
-        >
-          刷新
-        </button>
+        <div className="flex items-center gap-2">
+          <a
+            href="/settings?ops=observability&obs=eval"
+            className="rounded-lg border border-cafe px-3 py-1.5 text-xs font-medium text-cafe-secondary transition-colors hover:text-cafe"
+            data-testid="eval-hub-backlink"
+          >
+            Eval Hub
+          </a>
+          <button
+            type="button"
+            onClick={fetchReport}
+            className="rounded-lg bg-cafe-accent px-3 py-1.5 text-xs font-semibold text-[var(--cafe-surface)] transition-colors hover:bg-cafe-accent-hover"
+          >
+            刷新
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -541,28 +541,25 @@ test('spawnCli uses the configured fallback timeout when CLI_TIMEOUT_MS is unset
   }
 });
 
-test('spawnCli resets timeout on stderr activity (CLI alive signal)', async () => {
+test('stderr activity does NOT extend timeout (post-fix: stderr is noise, not alive signal)', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
 
-  const promise = collect(spawnCli({ command: 'test-cli', args: [], timeoutMs: 300 }, { spawnFn }));
+  // timeoutMs=200: process will time out before stdout at 300ms
+  const promise = collect(spawnCli({ command: 'test-cli', args: [], timeoutMs: 200 }, { spawnFn }));
 
-  // Keep the process "alive" with stderr output so it doesn't timeout
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  // stderr at 50ms and 100ms — must NOT extend timeout past 200ms
+  await new Promise((resolve) => setTimeout(resolve, 50));
   proc.stderr.write('thinking...\n');
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await new Promise((resolve) => setTimeout(resolve, 50));
   proc.stderr.write('still working...\n');
-  await new Promise((resolve) => setTimeout(resolve, 100));
-
-  proc.stdout.write('{"type":"ok"}\n');
-  proc.stdout.end();
-  proc._emitter.emit('exit', 0, null);
 
   const results = await promise;
 
-  assert.equal(proc.kill.mock.callCount(), 0, 'should not kill while stderr is active');
-  assert.equal(results.length, 1);
-  assert.deepEqual(results[0], { type: 'ok' });
+  // Process should time out at ~200ms despite stderr activity
+  assert.ok(proc.kill.mock.callCount() >= 1, 'process should be killed — stderr does not extend timeout');
+  const timeout = results.find((r) => r?.__cliTimeout);
+  assert.ok(timeout, 'should yield __cliTimeout — stderr alone cannot keep process alive');
 });
 
 test('spawnCli kills process on abort signal', async () => {
@@ -1176,7 +1173,10 @@ test('P1-fix: probe race timer is cleaned up when NDJSON wins', async () => {
   assert.ok(clearCount >= 10, `clearTimeout should be called at least 10 times, got ${clearCount}`);
 });
 
-test('P2-fix: stderr activity notifies probe (no false silent warning)', async () => {
+test('Post-fix: stderr activity does NOT suppress alive_but_silent warnings', async () => {
+  // Post-fix invariant: stderr is not user-visible output and should NOT reset
+  // probe silence tracking. alive_but_silent warnings should fire based on
+  // stdout/NDJSON silence, regardless of stderr activity.
   const proc = createMockProcess({ pid: process.pid });
   const spawnFn = createMockSpawnFn(proc);
 
@@ -1188,13 +1188,13 @@ test('P2-fix: stderr activity notifies probe (no false silent warning)', async (
         command: 'codex',
         args: [],
         timeoutMs: 500,
-        livenessProbe: { sampleIntervalMs: 30, softWarningMs: 300, stallWarningMs: 1000 },
+        livenessProbe: { sampleIntervalMs: 30, softWarningMs: 100, stallWarningMs: 1000 },
       },
       { spawnFn },
     ),
   );
 
-  // Keep stderr active but stdout silent — should reset probe silence
+  // Keep stderr active but stdout silent — should NOT suppress probe warnings
   for (let i = 0; i < 5; i++) {
     await new Promise((r) => setTimeout(r, 40));
     proc.stderr.write(`thinking step ${i}...\n`);
@@ -1207,7 +1207,7 @@ test('P2-fix: stderr activity notifies probe (no false silent warning)', async (
   const results = await promise;
   const warnings = results.filter((e) => e?.__livenessWarning);
   const silentWarnings = warnings.filter((w) => w.level === 'alive_but_silent');
-  assert.equal(silentWarnings.length, 0, 'stderr activity should prevent alive_but_silent warnings');
+  assert.ok(silentWarnings.length > 0, 'stderr alone should NOT suppress alive_but_silent warnings');
 });
 
 test('spawnCli handles spawn error (e.g. command not found)', async () => {
@@ -1527,7 +1527,13 @@ test('#774: stallAutoKill=false (default) does NOT kill on stall — waits for f
   assert.equal(timeout.stallKill, undefined, 'should NOT have stallKill flag');
 });
 
-test('#774: stallAutoKill does NOT fire when stderr keeps probe alive', async () => {
+test('#774: process is killed when only stderr is active (stderr must not keep probe alive)', async () => {
+  // Post-fix invariant: stderr is not user-visible output and must NOT reset
+  // probe silence tracking. The process should be killed (by stall or timeout)
+  // even with continuous stderr activity.
+  // Note: with pid=process.pid, CPU sampling sees test process activity,
+  // so probe may classify as busy-silent → CLI timeout fires instead of
+  // stallAutoKill. Either way, the key invariant holds: process gets killed.
   const proc = createMockProcess({ pid: process.pid });
   const spawnFn = createMockSpawnFn(proc);
 
@@ -1550,26 +1556,17 @@ test('#774: stallAutoKill does NOT fire when stderr keeps probe alive', async ()
     ),
   );
 
-  // Simulate Claude pattern: stderr thinking keeps probe alive
+  // Simulate stderr chatter — this should NOT prevent timeout/kill
   for (let i = 0; i < 6; i++) {
     await new Promise((r) => setTimeout(r, 40));
     proc.stderr.write(`thinking step ${i}...\n`);
   }
 
-  // Now produce valid output and finish
-  proc.stdout.write(JSON.stringify({ type: 'turn.completed' }) + '\n');
-  proc.stdout.end();
-  proc._emitter.emit('exit', 0, null);
-
   const results = await promise;
 
-  // Should NOT have stall-killed — stderr kept the probe alive
+  // Post-fix: process MUST be killed — stderr does not extend lifetime indefinitely
   const timeout = results.find((r) => r?.__cliTimeout);
-  assert.equal(timeout, undefined, 'should NOT timeout when stderr is active');
-  assert.ok(
-    results.some((r) => r?.type === 'turn.completed'),
-    'should yield the completion event',
-  );
+  assert.ok(timeout, 'process must be killed when only stderr is active (no NDJSON output)');
 });
 
 test('#774 R2: deferred stall-kill is cancelled when NDJSON recovery arrives before next probe timer', async () => {

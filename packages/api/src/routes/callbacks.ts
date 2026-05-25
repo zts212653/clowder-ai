@@ -4,10 +4,17 @@
  */
 
 import type { CatId, CatRoutingError, RichBlock } from '@cat-cafe/shared';
-import { catRegistry, createCatId, normalizeRichBlock } from '@cat-cafe/shared';
-import type { FastifyPluginAsync } from 'fastify';
+import {
+  catRegistry,
+  createCatId,
+  normalizeRichBlock,
+  normalizeSopDefinitionId,
+  resolveWorkflowSopSkill,
+} from '@cat-cafe/shared';
+import type { FastifyBaseLogger, FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { resolveFrontendBaseUrl } from '../config/frontend-origin.js';
+import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import { MessageDeliveryService } from '../domains/cats/services/agents/invocation/MessageDeliveryService.js';
@@ -25,6 +32,7 @@ import {
   hydrateReplyPreview,
   type IMessageStore,
   isDelivered,
+  type StoredMessage,
 } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { type ITaskStore, isSubjectOwnershipConflictError } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore, VotingStateV1 } from '../domains/cats/services/stores/ports/ThreadStore.js';
@@ -70,6 +78,7 @@ import { detectUserMention } from './user-mention.js';
 import { clearVoteTimer, closeVoteInternal, voteTimers } from './votes.js';
 
 const log = createModuleLogger('routes/callbacks');
+const CALLBACK_EXACT_DUPLICATE_WINDOW_MS = 5_000;
 
 /**
  * F193 AC-A4 raw line-start @ detector.
@@ -132,6 +141,106 @@ function buildRoutingOutcome(requestedIds: string[], enqueuedIds: readonly strin
     routed: [...enqueuedIds],
     notEnqueued: requestedIds.filter((id) => !enqueuedSet.has(id)),
   };
+}
+
+function sameStringArray(left: readonly string[] | undefined, right: readonly string[] | undefined): boolean {
+  const a = left ?? [];
+  const b = right ?? [];
+  if (a.length !== b.length) return false;
+  return a.every((value, index) => value === b[index]);
+}
+
+type CallbackDuplicateCandidateStore = IMessageStore & {
+  getByThreadIncludingQueued?: (
+    threadId: string,
+    limit?: number,
+    userId?: string,
+  ) => StoredMessage[] | Promise<StoredMessage[]>;
+};
+
+async function getRecentCallbackDuplicateCandidates(
+  messageStore: IMessageStore,
+  threadId: string,
+  userId: string,
+): Promise<StoredMessage[]> {
+  const store = messageStore as CallbackDuplicateCandidateStore;
+  if (typeof store.getByThreadIncludingQueued === 'function') {
+    return store.getByThreadIncludingQueued(threadId, 20, userId);
+  }
+  return messageStore.getByThread(threadId, 20, userId);
+}
+
+async function findRecentExactCallbackDuplicate(
+  messageStore: IMessageStore,
+  input: {
+    threadId: string;
+    userId: string;
+    catId: string;
+    content: string;
+    mentions: readonly CatId[];
+    mentionsUser?: boolean | undefined;
+    replyTo?: string | undefined;
+    now: number;
+  },
+): Promise<StoredMessage | undefined> {
+  const recent = await getRecentCallbackDuplicateCandidates(messageStore, input.threadId, input.userId);
+  for (let i = recent.length - 1; i >= 0; i -= 1) {
+    const msg = recent[i]!;
+    const ts = msg.deliveredAt ?? msg.timestamp;
+    if (input.now - ts > CALLBACK_EXACT_DUPLICATE_WINDOW_MS) continue;
+    if (msg.origin !== 'callback') continue;
+    if (msg.catId !== input.catId) continue;
+    if (msg.content !== input.content) continue;
+    if ((msg.replyTo ?? undefined) !== (input.replyTo ?? undefined)) continue;
+    if (Boolean(msg.mentionsUser) !== Boolean(input.mentionsUser)) continue;
+    if (!sameStringArray(msg.mentions, input.mentions)) continue;
+    return msg;
+  }
+  return undefined;
+}
+
+function hasQueuedA2AEntryForMessage(
+  invocationQueue: InvocationQueue | undefined,
+  threadId: string,
+  messageId: string,
+): boolean {
+  return invocationQueue?.hasEntryWithMessageId(threadId, messageId) ?? false;
+}
+
+async function recoverQueuedDuplicateCallbackMessage(input: {
+  duplicateMsg: StoredMessage;
+  willEnqueueToQueue: boolean;
+  invocationQueue?: InvocationQueue;
+  threadId: string;
+  log: Pick<FastifyBaseLogger, 'error' | 'warn'>;
+  enqueueA2A: () => Promise<{ enqueued: readonly CatId[] }>;
+  markDelivered?: (deliveredAt: number) => Promise<unknown> | unknown;
+  zeroEnqueuedWarnMessage: string;
+  enqueueFailureMessage: string;
+  broadcastNow: () => Promise<void> | void;
+}): Promise<void> {
+  if (input.duplicateMsg.deliveryStatus !== 'queued') return;
+  if (!input.willEnqueueToQueue) return;
+  if (hasQueuedA2AEntryForMessage(input.invocationQueue, input.threadId, input.duplicateMsg.id)) return;
+
+  const deliveryDecision = await MessageDeliveryService.resolveCallbackDeliveryDecision({
+    canEnqueueA2A: true,
+    willEnqueueToQueue: input.willEnqueueToQueue,
+    messageId: input.duplicateMsg.id,
+    threadId: input.threadId,
+    log: input.log,
+    enqueueA2A: input.enqueueA2A,
+    markDelivered: input.markDelivered,
+    zeroEnqueuedWarnMessage: input.zeroEnqueuedWarnMessage,
+    enqueueFailureMessage: input.enqueueFailureMessage,
+  });
+
+  if (
+    deliveryDecision.shouldBroadcastNow &&
+    !hasQueuedA2AEntryForMessage(input.invocationQueue, input.threadId, input.duplicateMsg.id)
+  ) {
+    await input.broadcastNow();
+  }
 }
 
 export interface CallbackRoutesOptions {
@@ -494,6 +603,81 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
       const hasA2AMentions = !!(mentions.length > 0 && router && invocationRecordStore && effectiveThreadId);
       const willEnqueueToQueue = !!(hasA2AMentions && opts.invocationQueue);
+      const now = Date.now();
+      const duplicateMsg =
+        routing_warnings.length === 0
+          ? await findRecentExactCallbackDuplicate(messageStore, {
+              threadId: effectiveThreadId,
+              userId: principal.userId,
+              catId: principal.catId,
+              content: storedContent,
+              mentions,
+              ...(mentionsUser ? { mentionsUser } : {}),
+              ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
+              now,
+            })
+          : undefined;
+      if (duplicateMsg) {
+        await recoverQueuedDuplicateCallbackMessage({
+          duplicateMsg,
+          willEnqueueToQueue,
+          ...(opts.invocationQueue ? { invocationQueue: opts.invocationQueue } : {}),
+          threadId: effectiveThreadId,
+          log: app.log,
+          enqueueA2A: () =>
+            enqueueA2ATargets(
+              {
+                router: router!,
+                invocationRecordStore: invocationRecordStore!,
+                socketManager,
+                ...(invocationTracker ? { invocationTracker } : {}),
+                ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
+                ...(queueProcessor ? { queueProcessor } : {}),
+                ...(opts.invocationQueue ? { invocationQueue: opts.invocationQueue } : {}),
+                log: app.log,
+              },
+              {
+                targetCats: mentions,
+                content: storedContent,
+                userId: principal.userId,
+                threadId: effectiveThreadId,
+                triggerMessage: duplicateMsg,
+                callerCatId: senderCatId,
+              },
+            ),
+          markDelivered: (deliveredAt) => messageStore.markDelivered?.(duplicateMsg.id, deliveredAt),
+          zeroEnqueuedWarnMessage: '[agent-key/post-message] queued duplicate had no A2A entry — broadcasting anyway',
+          enqueueFailureMessage: '[agent-key/post-message] queued duplicate recovery failed — broadcasting anyway',
+          broadcastNow: async () => {
+            const replyPreview = validatedReplyTo
+              ? await hydrateReplyPreview(messageStore, validatedReplyTo)
+              : undefined;
+            socketManager.broadcastAgentMessage(
+              {
+                type: 'text',
+                catId: principal.catId,
+                content: duplicateMsg.content,
+                origin: 'callback',
+                messageId: duplicateMsg.id,
+                invocationId: duplicateMsg.id,
+                ...(validExplicitTargets.length ? { extra: { targetCats: validExplicitTargets } } : {}),
+                ...(duplicateMsg.mentionsUser ? { mentionsUser: true } : {}),
+                ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
+                ...(replyPreview ? { replyPreview } : {}),
+                timestamp: Date.now(),
+              },
+              effectiveThreadId,
+            );
+          },
+        });
+        return {
+          status: 'duplicate',
+          threadId: effectiveThreadId,
+          messageId: duplicateMsg.id,
+          ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
+          ...(clientMessageId ? { clientMessageId } : {}),
+        };
+      }
 
       const storedMsg = await messageStore.append({
         threadId: effectiveThreadId,
@@ -503,7 +687,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         mentions,
         ...(mentionsUser ? { mentionsUser } : {}),
         origin: 'callback',
-        timestamp: Date.now(),
+        timestamp: now,
         ...(extra ? { extra } : {}),
         ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
         ...(willEnqueueToQueue ? { deliveryStatus: 'queued' as const } : {}),
@@ -866,6 +1050,90 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         turnInvocationId: invocationId ?? effectiveInvId,
       },
     };
+    const now = Date.now();
+    const duplicateMsg =
+      routing_warnings.length === 0
+        ? await findRecentExactCallbackDuplicate(messageStore, {
+            threadId: effectiveThreadId,
+            userId: actor.userId,
+            catId: actor.catId,
+            content: storedContent,
+            mentions,
+            ...(mentionsUser ? { mentionsUser } : {}),
+            ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
+            now,
+          })
+        : undefined;
+    if (duplicateMsg) {
+      await recoverQueuedDuplicateCallbackMessage({
+        duplicateMsg,
+        willEnqueueToQueue,
+        ...(opts.invocationQueue ? { invocationQueue: opts.invocationQueue } : {}),
+        threadId: effectiveThreadId,
+        log: app.log,
+        enqueueA2A: () =>
+          enqueueA2ATargets(
+            {
+              router: router!,
+              invocationRecordStore: invocationRecordStore!,
+              socketManager,
+              ...(invocationTracker ? { invocationTracker } : {}),
+              ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
+              ...(queueProcessor ? { queueProcessor } : {}),
+              ...(opts.invocationQueue ? { invocationQueue: opts.invocationQueue } : {}),
+              log: app.log,
+            },
+            {
+              targetCats: mentions,
+              content: storedContent,
+              userId: actor.userId,
+              threadId: effectiveThreadId,
+              triggerMessage: duplicateMsg,
+              callerCatId: senderCatId,
+              parentInvocationId: record.parentInvocationId,
+              callerTraceContext: record.traceContext,
+            },
+          ),
+        markDelivered: (deliveredAt) => messageStore.markDelivered?.(duplicateMsg.id, deliveredAt),
+        zeroEnqueuedWarnMessage: '[callbacks/post-message] queued duplicate had no A2A entry — broadcasting anyway',
+        enqueueFailureMessage: '[callbacks/post-message] queued duplicate recovery failed — broadcasting anyway',
+        broadcastNow: async () => {
+          const replyPreview = validatedReplyTo ? await hydrateReplyPreview(messageStore, validatedReplyTo) : undefined;
+          socketManager.broadcastAgentMessage(
+            {
+              type: 'text',
+              catId: actor.catId,
+              content: duplicateMsg.content,
+              origin: 'callback',
+              messageId: duplicateMsg.id,
+              ...stampVisibleTurn(effectiveInvId, invocationId),
+              ...(isCrossThread || validExplicitTargets.length
+                ? {
+                    extra: {
+                      ...(isCrossThread
+                        ? { crossPost: { sourceThreadId: actor.threadId, sourceInvocationId: effectiveInvId } }
+                        : {}),
+                      ...(validExplicitTargets.length ? { targetCats: validExplicitTargets } : {}),
+                    },
+                  }
+                : {}),
+              ...(duplicateMsg.mentionsUser ? { mentionsUser: true } : {}),
+              ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
+              ...(replyPreview ? { replyPreview } : {}),
+              timestamp: Date.now(),
+            },
+            effectiveThreadId,
+          );
+        },
+      });
+      return {
+        status: 'duplicate',
+        threadId: effectiveThreadId,
+        messageId: duplicateMsg.id,
+        ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
+        ...(clientMessageId ? { clientMessageId } : {}),
+      };
+    }
     const storedMsg = await messageStore.append({
       userId: actor.userId,
       catId: actor.catId,
@@ -873,7 +1141,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       mentions,
       ...(mentionsUser ? { mentionsUser } : {}),
       origin: 'callback',
-      timestamp: Date.now(),
+      timestamp: now,
       threadId: effectiveThreadId,
       extra: persistedExtra,
       ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
@@ -1363,14 +1631,25 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       if (isOwnThread && thread?.backlogItemId) {
         const sop = await opts.workflowSopStore.get(thread.backlogItemId);
         if (sop) {
-          workflowSop = {
-            featureId: sop.featureId,
-            stage: sop.stage,
-            batonHolder: sop.batonHolder,
-            nextSkill: sop.nextSkill,
-            resumeCapsule: sop.resumeCapsule,
-            checks: sop.checks,
-          };
+          try {
+            const skill = resolveWorkflowSopSkill(sop);
+            workflowSop = {
+              featureId: sop.featureId,
+              sopDefinitionId: normalizeSopDefinitionId(sop.sopDefinitionId),
+              stage: sop.stage,
+              batonHolder: sop.batonHolder,
+              nextSkill: sop.nextSkill,
+              suggestedSkill: skill.skill,
+              suggestedSkillSource: skill.source,
+              resumeCapsule: sop.resumeCapsule,
+              checks: sop.checks,
+            };
+          } catch (err) {
+            log.warn(
+              { err, backlogItemId: thread.backlogItemId, sopDefinitionId: sop.sopDefinitionId, stage: sop.stage },
+              'Skipping invalid workflowSop in thread-context',
+            );
+          }
         }
       }
     }
