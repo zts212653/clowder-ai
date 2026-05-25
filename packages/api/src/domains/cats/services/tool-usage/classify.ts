@@ -52,3 +52,27 @@ export function classifyTool(toolName: string, toolInput: Record<string, unknown
   // Everything else is a native tool
   return { category: 'native', toolName };
 }
+
+/**
+ * F153 Phase J (KD-40): single source of truth for "is this an MCP tool name?".
+ *
+ * Recognizes 4 patterns:
+ * - `mcp__{server}__{tool}` — Claude Code wrapping
+ * - `mcp:{server}/{tool}`   — Codex wrapping
+ * - `cat_cafe_*`            — bare cat-cafe MCP tool (emitted by some providers without wrapping)
+ * - `signal_*`              — bare signal MCP tool
+ *
+ * Used by `span-helpers.ts` to decide whether to create a child `cat_cafe.tool_use` span.
+ *
+ * NOTE: This is intentionally wider than `classifyTool()` for span-emission purposes.
+ * `classifyTool()` returns `native` for bare prefixes, which is a F150 design choice;
+ * this helper does not change F150 behavior.
+ */
+export function isMcpToolName(toolName: string): boolean {
+  return (
+    toolName.startsWith('mcp__') ||
+    toolName.startsWith('mcp:') ||
+    toolName.startsWith('cat_cafe_') ||
+    toolName.startsWith('signal_')
+  );
+}

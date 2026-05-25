@@ -54,6 +54,7 @@ import {
   recordLlmCallSpan,
   recordToolUseSpan,
 } from '../../../../../infrastructure/telemetry/span-helpers.js';
+import { ToolSpanTracker } from '../../../../../infrastructure/telemetry/tool-span-tracker.js';
 import { resolveActiveProjectRoot } from '../../../../../utils/active-project-root.js';
 import { resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { DEFAULT_CLI_TIMEOUT_MS, resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
@@ -598,6 +599,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     { attributes: { [AGENT_ID]: catId, [OPERATION_NAME]: 'invoke', invocationId } },
     parentCtx,
   );
+
+  // F153 Phase J AC-J3: per-invocation tool span tracker (real-duration MCP tool spans).
+  // Used when provider emits toolUseId; falls back to legacy recordToolUseSpan when not.
+  const toolSpanTracker = new ToolSpanTracker(invocationSpan, catId as string);
 
   // F153: Expose invocation span to caller + persist trace context for A2A propagation
   if (params.invocationSpanRef) params.invocationSpanRef.current = invocationSpan;
@@ -1845,9 +1850,18 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         }
         outputs.push(attachInvocationIdToTaskProgress(msg));
 
-        // F153 Phase E: Record tool_use as child span (zero-duration; shows in trace tree with tool name + category)
+        // F153 Phase J AC-J2/J3: real-duration MCP tool spans when provider injects toolUseId,
+        // legacy zero-duration fallback otherwise (provider not yet wired per KD-41).
         if (msg.type === 'tool_use' && msg.toolName && invocationSpan) {
-          recordToolUseSpan(invocationSpan, catId, msg.toolName, msg.toolInput as Record<string, unknown>);
+          if (msg.toolUseId) {
+            toolSpanTracker.start(msg.toolName, msg.toolUseId, msg.toolInput as Record<string, unknown>);
+          } else {
+            recordToolUseSpan(invocationSpan, catId, msg.toolName, msg.toolInput as Record<string, unknown>);
+          }
+        }
+        // F153 Phase J AC-J2: pair tool_result with matching tool_use span; close with status.
+        if (msg.type === 'tool_result' && msg.toolUseId) {
+          toolSpanTracker.end(msg.toolUseId, msg.toolResultStatus ?? 'unknown');
         }
 
         // F26: Detect task management tools and emit task_progress for frontend
@@ -2300,6 +2314,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       tracing: { traceId: sc.traceId, spanId: sc.spanId, ...(parentSid ? { parentSpanId: parentSid } : {}) },
     };
   } finally {
+    // F153 Phase J AC-J4: drain any open tool spans whose tool_result never arrived
+    // (abort / error / timeout). Mirrors PR #732 mention_dispatch abort-safety pattern.
+    toolSpanTracker.endAllOrphans('aborted');
+
     // F089: Clear invocation hard timeout
     if (invocationTimer) clearTimeout(invocationTimer);
 
