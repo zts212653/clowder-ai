@@ -11,6 +11,10 @@ code_anchors:
   - packages/api/src/domains/memory/GenericRepoScanner.ts
   - packages/api/src/domains/memory/ExpeditionBootstrapService.ts
   - packages/api/src/domains/memory/KnowledgeResolver.ts
+  - packages/api/src/domains/memory/PerspectivePlanLoader.ts
+  - packages/api/src/domains/memory/PerspectiveRunner.ts
+  - packages/api/src/routes/perspectives.ts
+  - packages/mcp-server/src/tools/perspective-tools.ts
 doc_anchors:
   - docs/decisions/020-f102-memory-system-architecture.md
   - docs/features/F102-memory-adapter-refactor.md

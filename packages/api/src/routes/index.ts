@@ -42,6 +42,7 @@ export { memoryPublishRoutes } from './memory-publish.js';
 export { messageActionsRoutes } from './message-actions.js';
 export { messagesRoutes } from './messages.js';
 export { packsRoutes } from './packs.js';
+export { perspectiveRoutes } from './perspectives.js';
 export { projectsRoutes } from './projects.js';
 export { projectsBootstrapRoutes } from './projects-bootstrap.js';
 export { mkdirRoute } from './projects-mkdir.js';

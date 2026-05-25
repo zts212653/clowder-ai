@@ -46,6 +46,8 @@ export type GraphQueryResolution =
       queryKind: 'exact';
       query: string;
       resolvedAnchor: string;
+      resolvedCollectionId?: string;
+      resolvedSource?: string;
       graph: GraphResult;
       note?: 'no_edges';
     }
@@ -63,19 +65,22 @@ export type GraphQueryResolution =
       examples: string[];
     };
 
-interface CatalogLike {
+export interface GraphQueryResolverCatalog {
   list(): Array<{ id: string; sensitivity: CollectionSensitivity; kind: string; status?: string }>;
   get(id: string): { id: string; sensitivity: CollectionSensitivity; kind: string; status?: string } | undefined;
 }
 
-interface ResolveOptions {
+export interface GraphQueryResolveOptions {
   depth?: number;
   callerCollections?: string[];
   /** 砚砚 cloud-9 P1: relation-type filter applied AT TRAVERSAL TIME. */
   relations?: readonly string[];
 }
 
-type QueryStore = IEvidenceStore & Partial<GraphStore>;
+export type GraphQueryResolverStore = IEvidenceStore & Partial<GraphStore>;
+type CatalogLike = GraphQueryResolverCatalog;
+type ResolveOptions = GraphQueryResolveOptions;
+type QueryStore = GraphQueryResolverStore;
 type RelatedEdge = Awaited<ReturnType<GraphStore['getRelated']>>[number];
 
 interface ExactMatch {
@@ -228,6 +233,7 @@ export class GraphQueryResolver {
         callerCollections,
         visibleExactMatches[0].collectionId,
         relations,
+        visibleExactMatches[0].item.sourcePath,
       );
     }
     if (visibleExactMatches.length > 1) {
@@ -264,6 +270,7 @@ export class GraphQueryResolver {
     callerCollections: Set<string>,
     centerCollectionId?: string,
     relations?: readonly string[],
+    resolvedSource?: string,
   ): Promise<GraphQueryResolution> {
     const graphResolver = new GraphResolver(this.catalog, this.graphStores());
     const graph = await graphResolver.buildSubgraph(resolvedAnchor, {
@@ -277,6 +284,8 @@ export class GraphQueryResolver {
       queryKind: 'exact',
       query,
       resolvedAnchor: graph.center ?? resolvedAnchor,
+      ...(centerCollectionId ? { resolvedCollectionId: centerCollectionId } : {}),
+      ...(resolvedSource ? { resolvedSource } : {}),
       graph,
       ...(graph.nodes.length === 1 && graph.edges.length === 0 ? { note: 'no_edges' as const } : {}),
     };

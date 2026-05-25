@@ -84,6 +84,27 @@ describe('AntigravityAgentService (Bridge) — fatal errors', () => {
     assert.equal(capacityErrors.length, 0, 'capacity error should stay hidden when retry succeeds');
     assert.equal(bridge.resetSession.mock.callCount(), 1, 'should reset the poisoned cascade before retry');
     assert.equal(bridge.sendMessage.mock.callCount(), 2, 'should resend the prompt after capacity retry');
+    const firstPrompt = bridge.sendMessage.mock.calls[0].arguments[1];
+    const retryPrompt = bridge.sendMessage.mock.calls[1].arguments[1];
+    assert.equal(firstPrompt, 'hello', 'initial send must not inject continuity before rotation');
+    assert.ok(
+      retryPrompt.startsWith('<cat-cafe-control-block type="antigravity-continuity-bootstrap" version="1">'),
+      'capacity retry must prepend continuity to the first prompt in the fresh cascade',
+    );
+    assert.equal((retryPrompt.match(/cat-cafe-control-block/g) ?? []).length, 2, 'retry prompt gets one wrapper');
+    assert.match(retryPrompt, /Reason: model_capacity/);
+    assert.match(retryPrompt, /Previous runtime session: cascade-1/);
+    assert.match(retryPrompt, /Current runtime session: cascade-2/);
+    assert.match(retryPrompt, /\n\n---\n\nhello$/);
+    const sessionInits = messages.filter((m) => m.type === 'session_init');
+    assert.equal(sessionInits.length, 2, 'capacity retry should emit the fresh cascade lifecycle');
+    assert.deepEqual(sessionInits[1].sessionLifecycle, {
+      runtime: 'antigravity-desktop',
+      runtimeSessionId: 'cascade-2',
+      previousRuntimeSessionId: 'cascade-1',
+      sealReason: 'model_capacity',
+      drainResult: 'complete',
+    });
   });
 
   test('quota-style model_capacity wording retries on a fresh cascade and preserves callback fallback prompt', async () => {
@@ -2487,6 +2508,15 @@ describe('AntigravityAgentService (Bridge) — fatal errors', () => {
     const warnings = messages.filter((m) => m.type === 'provider_signal');
     assert.ok(warnings.length >= 1, 'should yield retry warning');
     assert.match(warnings.at(-1).content, /连接中断/, 'retry signal should say 连接中断 for stream_interrupted');
+    const sessionInits = messages.filter((m) => m.type === 'session_init');
+    assert.equal(sessionInits.length, 2, 'stream_error retry should emit the fresh cascade lifecycle');
+    assert.deepEqual(sessionInits[1].sessionLifecycle, {
+      runtime: 'antigravity-desktop',
+      runtimeSessionId: 'cascade-stream-2',
+      previousRuntimeSessionId: 'cascade-stream-1',
+      sealReason: 'stream_error',
+      drainResult: 'complete',
+    });
   });
 
   test('F201 Phase C: stream_error after CODE_ACTION surfaces resumable recovery context', async () => {
@@ -2522,6 +2552,11 @@ describe('AntigravityAgentService (Bridge) — fatal errors', () => {
     const streamError = messages.find((m) => m.type === 'error' && m.errorCode === 'stream_error');
     assert.ok(streamError, 'post-side-effect stream_error must surface instead of blind retry');
     assert.equal(bridge.resetSession.mock.callCount(), 0, 'must not retry a cascade after file writes');
+    assert.deepEqual(streamError.sessionLifecycle, {
+      runtime: 'antigravity-desktop',
+      runtimeSessionId: 'test-cascade-001',
+      sealReason: 'unsafe_side_effect',
+    });
     assert.deepEqual(streamError.metadata?.diagnostics?.recoveryDecision, {
       action: 'surface_resumable_error',
       reason: 'post_side_effect_interrupted',
@@ -2693,6 +2728,15 @@ describe('AntigravityAgentService (Bridge) — fatal errors', () => {
       ),
       'fresh cascade result should be delivered',
     );
+    const sessionInits = messages.filter((msg) => msg.type === 'session_init');
+    assert.equal(sessionInits.length, 2, 'empty_response retry should emit the fresh cascade lifecycle');
+    assert.deepEqual(sessionInits[1].sessionLifecycle, {
+      runtime: 'antigravity-desktop',
+      runtimeSessionId: 'cascade-acg6-empty-2',
+      previousRuntimeSessionId: 'cascade-acg6-empty-1',
+      sealReason: 'empty_response',
+      drainResult: 'complete',
+    });
 
     const resumedPrompt = bridge.sendMessage.mock.calls[1].arguments[1];
     assert.match(resumedPrompt, /Cat Cafe Antigravity safe auto-resume/);

@@ -33,6 +33,11 @@ export function createMockBridge({
       reasons: [],
       retryableForEmptyResponse: false,
     })),
+    drainCascade: mock.fn(async () => ({
+      ok: true,
+      drainResult: 'complete',
+      lastObservedStepCount: steps.length,
+    })),
     pollForSteps: pollError
       ? mock.fn(async function* () {
           throw new Error(pollError);

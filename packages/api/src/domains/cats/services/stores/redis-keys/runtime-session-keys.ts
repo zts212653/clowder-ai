@@ -8,6 +8,7 @@
 
 import type {
   RuntimeSessionLifecycleState,
+  RuntimeSessionMetadata,
   RuntimeSessionRuntime,
 } from '../../runtime-session/RuntimeSessionMetadata.js';
 
@@ -17,6 +18,9 @@ export const RuntimeSessionKeys = {
   /** String: runtime + runtimeSessionId -> SessionRecord.id */
   byRuntime: (runtime: RuntimeSessionRuntime, runtimeSessionId: string) =>
     `runtime-session:runtime:${runtime}:${runtimeSessionId}`,
+  /** String: runtime + threadId + catId -> active SessionRecord.id */
+  byThreadCat: (runtime: RuntimeSessionRuntime, threadId: string, catId: RuntimeSessionMetadata['catId']) =>
+    `runtime-session-active:${runtime}:${threadId}:${catId}`,
   /** Sorted Set: lifecycle state -> SessionRecord.id, score = lifecycle.lastObservedAt */
   byLifecycleState: (state: RuntimeSessionLifecycleState) => `runtime-session:lifecycle:${state}`,
 };

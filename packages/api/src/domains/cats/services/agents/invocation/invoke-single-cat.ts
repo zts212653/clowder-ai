@@ -13,7 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { type CatId, type ContextHealth, catRegistry, type MessageContent } from '@cat-cafe/shared';
+import { type CatId, type ContextHealth, catRegistry, type MessageContent, type SessionRecord } from '@cat-cafe/shared';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import {
   resolveBuiltinClientForProvider,
@@ -114,6 +114,7 @@ export function _resetOpenCodeKnownModels(override?: Set<string> | null): void {
   _openCodeKnownModels = override ?? null;
 }
 
+import type { IRuntimeSessionStore } from '../../runtime-session/RuntimeSessionStore.js';
 import type { SessionManager } from '../../session/SessionManager.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
 import type { TranscriptSessionInfo, TranscriptWriter } from '../../session/TranscriptWriter.js';
@@ -220,6 +221,105 @@ function sessionIdentityKey(userId: string, catId: CatId, threadId: string): str
   return `${userId}:${catId as string}:${threadId}`;
 }
 
+function isAntigravityRuntimeSessionInit(msg: AgentMessage): boolean {
+  return (
+    msg.type === 'session_init' &&
+    msg.sessionLifecycle?.runtime === 'antigravity-desktop' &&
+    typeof msg.sessionLifecycle.runtimeSessionId === 'string' &&
+    msg.sessionLifecycle.runtimeSessionId.trim().length > 0
+  );
+}
+
+async function syncAntigravityRuntimeMetadata(input: {
+  runtimeSessionStore: IRuntimeSessionStore;
+  sessionChainStore: ISessionChainStore;
+  activeRec: SessionRecord;
+  msg: AgentMessage;
+  threadId: string;
+  catId: CatId;
+  userId: string;
+}): Promise<void> {
+  if (!isAntigravityRuntimeSessionInit(input.msg)) return;
+  const lifecycle = input.msg.sessionLifecycle;
+  if (!lifecycle) return;
+  if (typeof input.msg.sessionId !== 'string' || input.activeRec.cliSessionId !== input.msg.sessionId) return;
+
+  const runtimeSessionId = lifecycle.runtimeSessionId;
+  const now = Date.now();
+  const activeRuntime = await input.runtimeSessionStore.getActiveByThreadCat(
+    'antigravity-desktop',
+    input.threadId,
+    input.catId,
+  );
+  if (
+    activeRuntime &&
+    activeRuntime.runtimeSessionId !== runtimeSessionId &&
+    activeRuntime.sessionId !== input.activeRec.id
+  ) {
+    const hostRecord = await input.sessionChainStore.get(activeRuntime.sessionId);
+    if (hostRecord && hostRecord.threadId === input.threadId && hostRecord.catId === input.catId) {
+      const sealReason = lifecycle.sealReason ?? activeRuntime.lifecycle.sealReason ?? 'cli_session_replaced';
+      const drainIncomplete =
+        lifecycle.degraded === true || (lifecycle.drainResult && lifecycle.drainResult !== 'complete');
+      await input.runtimeSessionStore.updateLifecycle(activeRuntime.sessionId, {
+        state: drainIncomplete ? 'runtime_seal_pending' : 'sealed',
+        sealReason,
+        ...(lifecycle.drainResult ? { drainResult: lifecycle.drainResult } : {}),
+        ...(drainIncomplete
+          ? {
+              pendingSince: activeRuntime.lifecycle.pendingSince ?? now,
+              retryCount: activeRuntime.lifecycle.retryCount ?? 0,
+              lastFailureReason:
+                lifecycle.degradedReason ??
+                activeRuntime.lifecycle.lastFailureReason ??
+                'runtime drain did not prove completion',
+            }
+          : {}),
+        lastObservedAt: now,
+      });
+    } else {
+      await input.runtimeSessionStore.updateLifecycle(activeRuntime.sessionId, {
+        state: 'runtime_conflict_pending',
+        lastObservedAt: now,
+        lastFailureReason: `active runtime binding ${activeRuntime.runtimeSessionId} points to missing SessionRecord ${activeRuntime.sessionId}`,
+      });
+    }
+  }
+
+  const existingRuntime = await input.runtimeSessionStore.getByRuntimeSession('antigravity-desktop', runtimeSessionId);
+  const identityHistory =
+    existingRuntime?.sessionId === input.activeRec.id && existingRuntime.identityHistory.length > 0
+      ? existingRuntime.identityHistory
+      : [
+          {
+            catId: input.catId,
+            model: input.msg.metadata?.model ?? 'unknown',
+            ...(typeof input.msg.metadata?.modelVerified === 'boolean'
+              ? { modelVerified: input.msg.metadata.modelVerified }
+              : {}),
+            ...(input.msg.metadata?.provider ? { provider: input.msg.metadata.provider } : {}),
+            from: now,
+            source: 'session_init' as const,
+          },
+        ];
+
+  await input.runtimeSessionStore.upsert({
+    sessionId: input.activeRec.id,
+    runtime: 'antigravity-desktop',
+    runtimeSessionId,
+    threadId: input.threadId,
+    catId: input.catId,
+    userId: input.userId,
+    surface: 'cat-cafe-dispatch',
+    identityHistory,
+    lifecycle: {
+      state: 'active',
+      startedAt: existingRuntime?.sessionId === input.activeRec.id ? existingRuntime.lifecycle.startedAt : now,
+      lastObservedAt: now,
+    },
+  });
+}
+
 /**
  * Shared dependencies for all cat invocations within one AgentRouter
  */
@@ -232,6 +332,8 @@ export interface InvocationDeps {
   readonly taskProgressStore?: TaskProgressStore;
   /** F24: Session chain store for context health tracking */
   readonly sessionChainStore?: ISessionChainStore;
+  /** F211 Phase A2: runtime sidecar for provider runtime session metadata. */
+  readonly runtimeSessionStore?: IRuntimeSessionStore;
   /** F24 Phase B: Session sealer for auto-seal when context threshold reached */
   readonly sessionSealer?: ISessionSealer;
   /** F24 Phase C: Transcript writer for event collection + flush on seal */
@@ -1240,14 +1342,46 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                   // Use requestSeal + finalize to ensure transcript/digest are written,
                   // not bare update(status:'sealed') which skips flush.
                   let sealAccepted = false;
+                  const sealReason = msg.sessionLifecycle?.sealReason ?? 'cli_session_replaced';
                   if (deps.sessionSealer) {
                     try {
                       const result = await deps.sessionSealer.requestSeal({
                         sessionId: existing.id,
-                        reason: 'cli_session_replaced',
+                        reason: sealReason,
                       });
                       sealAccepted = result.accepted;
                       if (sealAccepted) {
+                        const runtimeLifecycle = msg.sessionLifecycle;
+                        if (runtimeLifecycle && deps.transcriptWriter) {
+                          const sealTimestamp = Date.now();
+                          deps.transcriptWriter.appendEvent(
+                            {
+                              sessionId: existing.id,
+                              threadId,
+                              catId: existing.catId,
+                              cliSessionId: existing.cliSessionId,
+                              seq: existing.seq,
+                            },
+                            {
+                              type: 'system_info',
+                              catId,
+                              content: JSON.stringify({
+                                type: 'antigravity_runtime_lifecycle',
+                                runtime: runtimeLifecycle.runtime,
+                                runtimeSessionId: runtimeLifecycle.runtimeSessionId,
+                                previousRuntimeSessionId: runtimeLifecycle.previousRuntimeSessionId,
+                                sealReason,
+                                drainResult: runtimeLifecycle.drainResult,
+                                degraded: runtimeLifecycle.degraded === true,
+                                ...(runtimeLifecycle.degradedReason
+                                  ? { degradedReason: runtimeLifecycle.degradedReason }
+                                  : {}),
+                              }),
+                              timestamp: sealTimestamp,
+                            },
+                            invocationId,
+                          );
+                        }
                         deps.sessionSealer.finalize({ sessionId: existing.id }).catch(() => {});
                       }
                     } catch {
@@ -1258,7 +1392,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                     const now = Date.now();
                     await deps.sessionChainStore.update(existing.id, {
                       status: 'sealed',
-                      sealReason: 'cli_session_replaced',
+                      sealReason,
                       sealedAt: now,
                       updatedAt: now,
                     });
@@ -1309,6 +1443,25 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             }
           } catch {
             // Best-effort — don't break the invocation chain
+          }
+        }
+
+        if (deps.runtimeSessionStore && deps.sessionChainStore && sessionChainActive) {
+          try {
+            const activeRec = await deps.sessionChainStore.getActive(catId, threadId);
+            if (activeRec) {
+              await syncAntigravityRuntimeMetadata({
+                runtimeSessionStore: deps.runtimeSessionStore,
+                sessionChainStore: deps.sessionChainStore,
+                activeRec,
+                msg,
+                threadId,
+                catId,
+                userId,
+              });
+            }
+          } catch (err) {
+            log.warn({ threadId, catId, err }, 'Antigravity runtime metadata sync failed');
           }
         }
 

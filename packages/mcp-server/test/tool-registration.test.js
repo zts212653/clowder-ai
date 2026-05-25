@@ -51,6 +51,7 @@ const EXPECTED_TOOLS = [
   'cat_cafe_retain_memory_callback',
   // Direct evidence tools (cat_cafe_reflect removed in F193 Phase D AC-D1)
   'cat_cafe_search_evidence',
+  'cat_cafe_run_perspective',
   'cat_cafe_read_file_slice',
   // F188 Phase F AC-F1: agent-facing graph navigation
   'cat_cafe_graph_resolve',
@@ -159,6 +160,7 @@ const EXPECTED_MEMORY_TOOLS = [
   'cat_cafe_nominate_for_global',
   'cat_cafe_review_distillation',
   'cat_cafe_search_evidence',
+  'cat_cafe_run_perspective',
   'cat_cafe_read_file_slice',
   'cat_cafe_graph_resolve', // F188 Phase F AC-F1
   'cat_cafe_library_list', // F188 Phase I AC-I4
@@ -394,6 +396,7 @@ const KNOWN_WRITE_TOOLS = [
 
 const EXPECTED_READONLY_TOOLS = [
   'cat_cafe_search_evidence',
+  'cat_cafe_run_perspective',
   'cat_cafe_read_file_slice',
   'cat_cafe_graph_resolve', // F188 Phase F AC-F1
   'cat_cafe_list_recent', // F188 Phase F AC-F2

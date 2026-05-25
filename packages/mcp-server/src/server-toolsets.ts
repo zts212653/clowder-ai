@@ -10,6 +10,7 @@ import {
   graphTools,
   libraryLifecycleTools,
   limbTools,
+  perspectiveTools,
   recentTools,
   richBlockRulesTools,
   scheduleTools,
@@ -38,6 +39,7 @@ export const READONLY_ALLOWED_TOOLS = new Set([
   // Evidence & knowledge (local SQLite, no credentials needed)
   // F193 Phase D AC-D1: cat_cafe_reflect tool removed (deprecated in F152 era)
   'cat_cafe_search_evidence',
+  'cat_cafe_run_perspective',
   'cat_cafe_graph_resolve', // F188 Phase F AC-F1
   'cat_cafe_list_recent', // F188 Phase F AC-F2
   'cat_cafe_get_rich_block_rules',
@@ -95,6 +97,7 @@ const memoryTools: readonly ToolDef[] = applyReadonlyFilter([
   ...fileSliceTools,
   ...graphTools, // F188 Phase F AC-F1
   ...libraryLifecycleTools, // F188 Phase I AC-I4
+  ...perspectiveTools, // F209 Phase D
   ...recentTools, // F188 Phase F AC-F2
   // F193 Phase D AC-D1: reflectTools removed
   ...sessionChainTools,

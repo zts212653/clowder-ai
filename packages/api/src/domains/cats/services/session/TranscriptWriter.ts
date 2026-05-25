@@ -42,6 +42,7 @@ export interface ExtractiveDigestV1 {
   catId: string;
   seq: number;
   time: { createdAt: number; sealedAt: number };
+  sealReason?: string;
   invocations: Array<{
     invocationId?: string;
     toolNames?: string[];
@@ -117,7 +118,10 @@ export class TranscriptWriter {
    * Flush buffered events to disk + generate index + extractive digest.
    * Clears the buffer after successful write.
    */
-  async flush(session: TranscriptSessionInfo, sealTimestamps?: { createdAt: number; sealedAt: number }): Promise<void> {
+  async flush(
+    session: TranscriptSessionInfo,
+    sealTimestamps?: { createdAt: number; sealedAt: number; sealReason?: string },
+  ): Promise<void> {
     const buf = this.buffers.get(session.sessionId);
     if (!buf || buf.length === 0) {
       return;
@@ -180,7 +184,7 @@ export class TranscriptWriter {
    */
   generateExtractiveDigest(
     session: TranscriptSessionInfo,
-    sealTimestamps: { createdAt: number; sealedAt: number },
+    sealTimestamps: { createdAt: number; sealedAt: number; sealReason?: string },
   ): ExtractiveDigestV1 {
     const buf = this.buffers.get(session.sessionId) ?? [];
 
@@ -283,7 +287,8 @@ export class TranscriptWriter {
       threadId: session.threadId,
       catId: session.catId,
       seq: session.seq,
-      time: sealTimestamps,
+      time: { createdAt: sealTimestamps.createdAt, sealedAt: sealTimestamps.sealedAt },
+      ...(sealTimestamps.sealReason ? { sealReason: sealTimestamps.sealReason } : {}),
       invocations: [
         {
           toolNames: [...toolNames],

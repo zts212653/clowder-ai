@@ -528,7 +528,7 @@ describe('GET /api/evidence/status', () => {
       }),
     };
     const evidenceStore = { ...createMockEvidenceStore(), getDb: () => mockDb };
-    await app.register(evidenceRoutes, { evidenceStore });
+    await app.register(evidenceRoutes, { evidenceStore, embeddingService: { isReady: () => true } });
     await app.ready();
 
     const res = await app.inject({ method: 'GET', url: '/api/evidence/status' });
@@ -537,6 +537,62 @@ describe('GET /api/evidence/status', () => {
     assert.equal(body.passages_count, 8608);
     assert.equal(body.passage_vectors_count, 2368, 'status should expose embedded passage-vector count');
     assert.equal(body.passage_vectors_supported, true, 'vec table present → supported');
+  });
+
+  it('reports passage_vectors_supported=false when embedding is disabled even if vec table exists (F209)', async () => {
+    const app = Fastify();
+    const mockDb = {
+      prepare: (sql) => ({
+        get: () => {
+          if (sql.includes('passage_vectors')) return { c: 2368 };
+          if (sql.includes('evidence_passages')) return { c: 8608 };
+          if (sql.includes("kind = 'thread'")) return { c: 12 };
+          if (sql.includes('evidence_docs') && sql.includes('count')) return { c: 42 };
+          if (sql.includes('edges')) return { c: 10 };
+          if (sql.includes('max(updated_at)')) return { t: '2026-05-25T00:00:00Z' };
+          if (sql.includes('embedding_meta')) return { value: 'test-model' };
+          return {};
+        },
+      }),
+    };
+    const evidenceStore = { ...createMockEvidenceStore(), getDb: () => mockDb };
+    await app.register(evidenceRoutes, { evidenceStore });
+    await app.ready();
+
+    const res = await app.inject({ method: 'GET', url: '/api/evidence/status' });
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.passages_count, 8608);
+    assert.equal(body.passage_vectors_count, 2368);
+    assert.equal(body.passage_vectors_supported, false, 'vec table alone is not runtime embedding support');
+  });
+
+  it('reports passage_vectors_supported=false when embedding service is not ready even if vec table exists (F209)', async () => {
+    const app = Fastify();
+    const mockDb = {
+      prepare: (sql) => ({
+        get: () => {
+          if (sql.includes('passage_vectors')) return { c: 2368 };
+          if (sql.includes('evidence_passages')) return { c: 8608 };
+          if (sql.includes("kind = 'thread'")) return { c: 12 };
+          if (sql.includes('evidence_docs') && sql.includes('count')) return { c: 42 };
+          if (sql.includes('edges')) return { c: 10 };
+          if (sql.includes('max(updated_at)')) return { t: '2026-05-25T00:00:00Z' };
+          if (sql.includes('embedding_meta')) return { value: 'test-model' };
+          return {};
+        },
+      }),
+    };
+    const evidenceStore = { ...createMockEvidenceStore(), getDb: () => mockDb };
+    await app.register(evidenceRoutes, { evidenceStore, embeddingService: { isReady: () => false } });
+    await app.ready();
+
+    const res = await app.inject({ method: 'GET', url: '/api/evidence/status' });
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.passages_count, 8608);
+    assert.equal(body.passage_vectors_count, 2368);
+    assert.equal(body.passage_vectors_supported, false, 'embedding service must be ready to support warm-up');
   });
 
   it('reports passage_vectors_supported=false when the vec table is absent (F209 — codex P2)', async () => {

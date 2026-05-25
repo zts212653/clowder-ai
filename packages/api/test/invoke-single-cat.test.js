@@ -743,6 +743,336 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(active.status, 'active');
   });
 
+  it('F211 A2: repeated Antigravity cascade updates runtime metadata without creating a new SessionRecord', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const { RuntimeSessionStore } = await import(
+      '../dist/domains/cats/services/runtime-session/RuntimeSessionStore.js'
+    );
+    const sessionChainStore = new SessionChainStore();
+    const runtimeSessionStore = new RuntimeSessionStore();
+
+    const service = {
+      async *invoke() {
+        yield {
+          type: 'session_init',
+          catId: 'antig-opus',
+          sessionId: 'cascade-repeat',
+          sessionLifecycle: {
+            runtime: 'antigravity-desktop',
+            runtimeSessionId: 'cascade-repeat',
+          },
+          metadata: { provider: 'antigravity', model: 'claude-opus-4-6', modelVerified: true },
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'antig-opus', timestamp: Date.now() };
+      },
+    };
+
+    const deps = { ...makeDeps(), sessionChainStore, runtimeSessionStore };
+    const params = {
+      catId: 'antig-opus',
+      service,
+      prompt: 'test',
+      userId: 'user1',
+      threadId: 'thread-f211-repeat',
+      isLastCat: true,
+    };
+
+    await collect(invokeSingleCat(deps, params));
+    const firstActive = sessionChainStore.getActive('antig-opus', 'thread-f211-repeat');
+    const firstRuntime = runtimeSessionStore.getByRuntimeSession('antigravity-desktop', 'cascade-repeat');
+    assert.ok(firstActive);
+    assert.ok(firstRuntime);
+    assert.equal(firstRuntime.sessionId, firstActive.id, 'runtime metadata must point at internal SessionRecord id');
+    await new Promise((resolve) => setTimeout(resolve, 2));
+
+    await collect(invokeSingleCat(deps, params));
+    const chain = sessionChainStore.getChain('antig-opus', 'thread-f211-repeat');
+    const secondActive = sessionChainStore.getActive('antig-opus', 'thread-f211-repeat');
+    const secondRuntime = runtimeSessionStore.getByRuntimeSession('antigravity-desktop', 'cascade-repeat');
+
+    assert.equal(chain.length, 1, 'same Antigravity cascade must not create a second SessionRecord');
+    assert.equal(secondActive.id, firstActive.id);
+    assert.equal(secondRuntime.sessionId, firstActive.id);
+    assert.ok(
+      secondRuntime.lifecycle.lastObservedAt > firstRuntime.lifecycle.lastObservedAt,
+      'runtime metadata lastObservedAt must refresh on repeated session_init',
+    );
+  });
+
+  it('F211 A2: Antigravity rotation seals old SessionRecord with lifecycle sealReason', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const { RuntimeSessionStore } = await import(
+      '../dist/domains/cats/services/runtime-session/RuntimeSessionStore.js'
+    );
+    const sessionChainStore = new SessionChainStore();
+    const runtimeSessionStore = new RuntimeSessionStore();
+    sessionChainStore.create({
+      cliSessionId: 'cascade-old',
+      threadId: 'thread-f211-rotate',
+      catId: 'antig-opus',
+      userId: 'user1',
+    });
+    const sealCalls = [];
+    const sessionSealer = {
+      requestSeal: async (args) => {
+        sealCalls.push(args);
+        return { accepted: true, status: 'sealing' };
+      },
+      finalize: async () => {},
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
+    };
+    const service = {
+      async *invoke() {
+        yield {
+          type: 'session_init',
+          catId: 'antig-opus',
+          sessionId: 'cascade-new',
+          sessionLifecycle: {
+            runtime: 'antigravity-desktop',
+            runtimeSessionId: 'cascade-new',
+            previousRuntimeSessionId: 'cascade-old',
+            sealReason: 'model_capacity',
+            drainResult: 'complete',
+          },
+          metadata: { provider: 'antigravity', model: 'claude-opus-4-6' },
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'antig-opus', timestamp: Date.now() };
+      },
+    };
+
+    await collect(
+      invokeSingleCat(
+        { ...makeDeps(), sessionChainStore, sessionSealer, runtimeSessionStore },
+        {
+          catId: 'antig-opus',
+          service,
+          prompt: 'test',
+          userId: 'user1',
+          threadId: 'thread-f211-rotate',
+          isLastCat: true,
+        },
+      ),
+    );
+
+    assert.equal(sealCalls.length, 1);
+    assert.equal(sealCalls[0].reason, 'model_capacity');
+    const active = sessionChainStore.getActive('antig-opus', 'thread-f211-rotate');
+    const runtime = runtimeSessionStore.getByRuntimeSession('antigravity-desktop', 'cascade-new');
+    assert.equal(runtime.sessionId, active.id);
+  });
+
+  it('F211 A2: degraded Antigravity rotation leaves old runtime metadata seal-pending for reaper', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const { RuntimeSessionStore } = await import(
+      '../dist/domains/cats/services/runtime-session/RuntimeSessionStore.js'
+    );
+    const sessionChainStore = new SessionChainStore();
+    const runtimeSessionStore = new RuntimeSessionStore();
+    const oldRecord = sessionChainStore.create({
+      cliSessionId: 'cascade-old-pending',
+      threadId: 'thread-f211-pending-rotate',
+      catId: 'antig-opus',
+      userId: 'user1',
+    });
+    runtimeSessionStore.upsert({
+      sessionId: oldRecord.id,
+      runtime: 'antigravity-desktop',
+      runtimeSessionId: 'cascade-old-pending',
+      threadId: 'thread-f211-pending-rotate',
+      catId: 'antig-opus',
+      userId: 'user1',
+      surface: 'cat-cafe-dispatch',
+      identityHistory: [{ catId: 'antig-opus', model: 'claude-opus-4-6', from: 1000, source: 'session_init' }],
+      lifecycle: { state: 'active', startedAt: 1000, lastObservedAt: 1000 },
+    });
+    const sessionSealer = {
+      requestSeal: async () => ({ accepted: true, status: 'sealing' }),
+      finalize: async () => {},
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
+    };
+    const service = {
+      async *invoke() {
+        yield {
+          type: 'session_init',
+          catId: 'antig-opus',
+          sessionId: 'cascade-new-pending',
+          sessionLifecycle: {
+            runtime: 'antigravity-desktop',
+            runtimeSessionId: 'cascade-new-pending',
+            previousRuntimeSessionId: 'cascade-old-pending',
+            sealReason: 'stream_error',
+            drainResult: 'best_effort_quiet_window',
+            degraded: true,
+            degradedReason: 'trajectory did not satisfy quiet window',
+          },
+          metadata: { provider: 'antigravity', model: 'claude-opus-4-6' },
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'antig-opus', timestamp: Date.now() };
+      },
+    };
+
+    await collect(
+      invokeSingleCat(
+        { ...makeDeps(), sessionChainStore, sessionSealer, runtimeSessionStore },
+        {
+          catId: 'antig-opus',
+          service,
+          prompt: 'test',
+          userId: 'user1',
+          threadId: 'thread-f211-pending-rotate',
+          isLastCat: true,
+        },
+      ),
+    );
+
+    const oldRuntime = runtimeSessionStore.getByRuntimeSession('antigravity-desktop', 'cascade-old-pending');
+    assert.equal(oldRuntime.lifecycle.state, 'runtime_seal_pending');
+    assert.equal(oldRuntime.lifecycle.sealReason, 'stream_error');
+    assert.equal(oldRuntime.lifecycle.drainResult, 'best_effort_quiet_window');
+    assert.equal(oldRuntime.lifecycle.retryCount, 0);
+    assert.match(oldRuntime.lifecycle.lastFailureReason, /quiet window/i);
+  });
+
+  it('F211 A2: unresolved runtime active binding is marked runtime_conflict_pending', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const { RuntimeSessionStore } = await import(
+      '../dist/domains/cats/services/runtime-session/RuntimeSessionStore.js'
+    );
+    const sessionChainStore = new SessionChainStore();
+    const runtimeSessionStore = new RuntimeSessionStore();
+    runtimeSessionStore.upsert({
+      sessionId: 'missing-session-record',
+      runtime: 'antigravity-desktop',
+      runtimeSessionId: 'cascade-stale',
+      threadId: 'thread-f211-conflict',
+      catId: 'antig-opus',
+      surface: 'cat-cafe-dispatch',
+      identityHistory: [{ catId: 'antig-opus', model: 'claude-opus-4-6', from: 1000, source: 'session_init' }],
+      lifecycle: { state: 'active', startedAt: 1000, lastObservedAt: 1000 },
+    });
+    const service = {
+      async *invoke() {
+        yield {
+          type: 'session_init',
+          catId: 'antig-opus',
+          sessionId: 'cascade-current',
+          sessionLifecycle: {
+            runtime: 'antigravity-desktop',
+            runtimeSessionId: 'cascade-current',
+          },
+          metadata: { provider: 'antigravity', model: 'claude-opus-4-6' },
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'antig-opus', timestamp: Date.now() };
+      },
+    };
+
+    await collect(
+      invokeSingleCat(
+        { ...makeDeps(), sessionChainStore, runtimeSessionStore },
+        {
+          catId: 'antig-opus',
+          service,
+          prompt: 'test',
+          userId: 'user1',
+          threadId: 'thread-f211-conflict',
+          isLastCat: true,
+        },
+      ),
+    );
+
+    const staleRuntime = runtimeSessionStore.getBySessionId('missing-session-record');
+    const active = sessionChainStore.getActive('antig-opus', 'thread-f211-conflict');
+    const currentRuntime = runtimeSessionStore.getByRuntimeSession('antigravity-desktop', 'cascade-current');
+    assert.equal(staleRuntime.lifecycle.state, 'runtime_conflict_pending');
+    assert.match(staleRuntime.lifecycle.lastFailureReason, /missing SessionRecord/i);
+    assert.equal(currentRuntime.sessionId, active.id);
+  });
+
+  it('F211 A2: does not bind new Antigravity runtime metadata when replacement failed', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const { RuntimeSessionStore } = await import(
+      '../dist/domains/cats/services/runtime-session/RuntimeSessionStore.js'
+    );
+    const sessionChainStore = new SessionChainStore();
+    const runtimeSessionStore = new RuntimeSessionStore();
+    const oldRecord = sessionChainStore.create({
+      cliSessionId: 'cascade-old-rejected',
+      threadId: 'thread-f211-rejected-rotate',
+      catId: 'antig-opus',
+      userId: 'user1',
+    });
+    runtimeSessionStore.upsert({
+      sessionId: oldRecord.id,
+      runtime: 'antigravity-desktop',
+      runtimeSessionId: 'cascade-old-rejected',
+      threadId: 'thread-f211-rejected-rotate',
+      catId: 'antig-opus',
+      userId: 'user1',
+      surface: 'cat-cafe-dispatch',
+      identityHistory: [{ catId: 'antig-opus', model: 'claude-opus-4-6', from: 1000, source: 'session_init' }],
+      lifecycle: { state: 'active', startedAt: 1000, lastObservedAt: 1000 },
+    });
+    const sessionSealer = {
+      requestSeal: async () => ({ accepted: false, status: 'active' }),
+      finalize: async () => {
+        throw new Error('finalize must not run when requestSeal is not accepted');
+      },
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
+    };
+    const service = {
+      async *invoke() {
+        yield {
+          type: 'session_init',
+          catId: 'antig-opus',
+          sessionId: 'cascade-new-rejected',
+          sessionLifecycle: {
+            runtime: 'antigravity-desktop',
+            runtimeSessionId: 'cascade-new-rejected',
+            previousRuntimeSessionId: 'cascade-old-rejected',
+            sealReason: 'cli_session_replaced',
+            drainResult: 'complete',
+          },
+          metadata: { provider: 'antigravity', model: 'claude-opus-4-6' },
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'antig-opus', timestamp: Date.now() };
+      },
+    };
+
+    await collect(
+      invokeSingleCat(
+        { ...makeDeps(), sessionChainStore, sessionSealer, runtimeSessionStore },
+        {
+          catId: 'antig-opus',
+          service,
+          prompt: 'test',
+          userId: 'user1',
+          threadId: 'thread-f211-rejected-rotate',
+          isLastCat: true,
+        },
+      ),
+    );
+
+    const chain = sessionChainStore.getChain('antig-opus', 'thread-f211-rejected-rotate');
+    const active = sessionChainStore.getActive('antig-opus', 'thread-f211-rejected-rotate');
+    const oldRuntime = runtimeSessionStore.getByRuntimeSession('antigravity-desktop', 'cascade-old-rejected');
+    const rejectedRuntime = runtimeSessionStore.getByRuntimeSession('antigravity-desktop', 'cascade-new-rejected');
+
+    assert.equal(chain.length, 1, 'failed replacement must not create a new SessionRecord');
+    assert.equal(active.id, oldRecord.id);
+    assert.ok(oldRuntime, 'old runtime binding must stay intact');
+    assert.equal(oldRuntime.sessionId, oldRecord.id);
+    assert.equal(oldRuntime.lifecycle.state, 'active');
+    assert.equal(rejectedRuntime, null, 'new runtime must not be bound to stale active SessionRecord');
+  });
+
   it('stores route-state continuity capsule on SessionRecord during session_init', async () => {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const { buildCapsuleFromRouteState } = await import(

@@ -20,12 +20,16 @@ import {
   antigravityStreamErrorRecovered,
 } from '../../../../../../infrastructure/telemetry/instruments.js';
 import { normalizeModel } from '../../../../../../infrastructure/telemetry/model-normalizer.js';
+import type { RuntimeSessionMetadata } from '../../../runtime-session/RuntimeSessionMetadata.js';
 import type { IRuntimeSessionStore } from '../../../runtime-session/RuntimeSessionStore.js';
+import type { TranscriptReader } from '../../../session/TranscriptReader.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../../types.js';
 import { appendLocalImagePathHints } from '../image-cli-bridge.js';
 import { extractImagePaths } from '../image-paths.js';
 import {
   AntigravityBridge,
+  type AntigravityDrainOptions,
+  type AntigravityDrainResult,
   type BridgeConnection,
   type CascadeTrajectory,
   type TrajectoryStep,
@@ -41,6 +45,11 @@ import {
   InMemoryAntigravitySupervisorStore,
 } from './AntigravitySupervisorStore.js';
 import type { AntigravityCascadeHealthSnapshot } from './antigravity-cascade-health.js';
+import {
+  type AntigravityContinuityBootstrap,
+  buildAntigravityContinuityBootstrap,
+  prependAntigravityContinuityControlBlock,
+} from './antigravity-continuity-bootstrap.js';
 import type { UpstreamErrorKind } from './antigravity-event-transformer.js';
 import { classifyStep, humanErrorMessage, transformTrajectorySteps } from './antigravity-event-transformer.js';
 import {
@@ -61,6 +70,11 @@ import {
   type AntigravityResumeTierDecision,
   classifyAntigravityResumeTier,
 } from './antigravity-resume-tier.js';
+import {
+  type AntigravityRuntimeSealReason,
+  type AntigravitySessionLifecycle,
+  buildAntigravitySessionLifecycle,
+} from './antigravity-runtime-lifecycle.js';
 import { classifyAntigravityStepEffect, summarizeAntigravityEffects } from './antigravity-step-effects.js';
 import { summarizeStepShape, TRACE_ENABLED, traceLog } from './antigravity-trace.js';
 import { AuditLogger } from './executors/AuditLogger.js';
@@ -92,6 +106,22 @@ type StallLivenessEvidence =
 type AntigravityJournalSummary = ReturnType<AntigravitySideEffectJournal['summary']>;
 type AntigravityJournalEntry = AntigravityJournalSummary['entries'][number];
 type StallTrajectorySnapshot = Partial<CascadeTrajectory> & { steps?: readonly TrajectoryStep[] };
+
+function retryKindToRuntimeSealReason(retryKind: UpstreamErrorKind | undefined): AntigravityRuntimeSealReason {
+  switch (retryKind) {
+    case 'capacity':
+      return 'model_capacity';
+    case 'stream_interrupted':
+      return 'stream_error';
+    case 'network':
+      return 'runtime_disconnected';
+    case 'invalid_tool_call':
+      return 'tool_conflict';
+    case 'unknown':
+    case undefined:
+      return 'runtime_error_reset';
+  }
+}
 
 function sanitizeRetryDelays(delays?: readonly number[]): number[] {
   return (delays ?? DEFAULT_MODEL_CAPACITY_RETRY_DELAYS_MS).filter(
@@ -322,8 +352,10 @@ export interface AntigravityAgentServiceOptions {
   modelCapacityRetryDelaysMs?: readonly number[];
   /** F201 Phase F: durable supervisor record store */
   supervisorStore?: AntigravitySupervisorStore;
-  /** F211 Phase A1: runtime-session metadata sidecar. A1 passes DI only; no production writes yet. */
+  /** F211 Phase A2: runtime-session metadata sidecar owns canonical active cascade lookup. */
   runtimeSessionStore?: IRuntimeSessionStore;
+  /** F211 Phase A2b: read sealed extractive digest for continuity bootstrap. */
+  transcriptReader?: TranscriptReader;
 }
 
 export class AntigravityAgentService implements AgentService {
@@ -337,6 +369,8 @@ export class AntigravityAgentService implements AgentService {
   private readonly streamErrorGraceWindowMs: number;
   private readonly modelCapacityRetryDelaysMs: number[];
   private readonly supervisorStore: AntigravitySupervisorStore;
+  private readonly runtimeSessionStore?: IRuntimeSessionStore;
+  private readonly transcriptReader?: TranscriptReader;
 
   constructor(options?: AntigravityAgentServiceOptions) {
     this.catId = options?.catId
@@ -350,6 +384,7 @@ export class AntigravityAgentService implements AgentService {
       injectedBridge ??
       new AntigravityBridge(options?.connection, {
         runtimeSessionStore: options?.runtimeSessionStore,
+        legacyJsonSessionStore: options?.runtimeSessionStore === undefined,
       });
     this.pollTimeoutMs = options?.pollTimeoutMs ?? 60_000;
     let autoApprove = process.env.ANTIGRAVITY_AUTO_APPROVE !== 'false';
@@ -361,6 +396,8 @@ export class AntigravityAgentService implements AgentService {
     this.autoResumeMaxAttempts = sanitizeAutoResumeMaxAttempts(options?.autoResumeMaxAttempts);
     this.streamErrorGraceWindowMs = options?.streamErrorGraceWindowMs ?? STREAM_ERROR_GRACE_WINDOW_MS;
     this.modelCapacityRetryDelaysMs = sanitizeRetryDelays(options?.modelCapacityRetryDelaysMs);
+    this.runtimeSessionStore = options?.runtimeSessionStore;
+    this.transcriptReader = options?.transcriptReader;
     this.supervisorStore =
       options?.supervisorStore !== undefined
         ? options.supervisorStore
@@ -384,6 +421,13 @@ export class AntigravityAgentService implements AgentService {
     }
   }
 
+  async drainRuntimeSession(
+    runtimeSessionId: string,
+    options?: AntigravityDrainOptions,
+  ): Promise<AntigravityDrainResult> {
+    return this.bridge.drainCascade(runtimeSessionId, options);
+  }
+
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
     const metadata: MessageMetadata = {
       provider: 'antigravity',
@@ -391,6 +435,7 @@ export class AntigravityAgentService implements AgentService {
       modelVerified: !!this.bridge.resolveModelId(this.model),
     };
     let flushSideEffectJournalAudit = async () => {};
+    let lastKnownCascadeId: string | undefined;
 
     try {
       // Abort check
@@ -419,6 +464,7 @@ export class AntigravityAgentService implements AgentService {
 
       const threadId = options?.auditContext?.threadId ?? `ephemeral-${Date.now()}`;
       let cascadeId = await this.bridge.getOrCreateSession(threadId, this.catId as string);
+      lastKnownCascadeId = cascadeId;
       const createSideEffectJournal = (journalCascadeId: string) =>
         new AntigravitySideEffectJournal({
           threadId,
@@ -529,14 +575,146 @@ export class AntigravityAgentService implements AgentService {
           },
         );
       };
+      const drainCascadeForLifecycle = async (targetCascadeId: string): Promise<AntigravityDrainResult> => {
+        try {
+          return await this.bridge.drainCascade(targetCascadeId);
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          log.warn({ cascadeId: targetCascadeId, err }, 'Antigravity cascade drain failed before rotation');
+          return { ok: false, drainResult: 'skipped_runtime_unreachable', reason };
+        }
+      };
+      const buildRotationLifecycle = (
+        oldCascadeId: string,
+        newCascadeId: string,
+        reason: AntigravityRuntimeSealReason,
+        drain: AntigravityDrainResult,
+      ): AntigravitySessionLifecycle =>
+        buildAntigravitySessionLifecycle({
+          runtimeSessionId: newCascadeId,
+          previousRuntimeSessionId: oldCascadeId,
+          sealReason: reason,
+          drainResult: drain.drainResult,
+          ...(!drain.ok || drain.drainResult !== 'complete'
+            ? {
+                degraded: true,
+                degradedReason: drain.ok ? 'runtime drain only reached best-effort quiet window' : drain.reason,
+              }
+            : {}),
+        });
+      const readRuntimeMetadataForBootstrap = async (
+        targetCascadeId: string,
+      ): Promise<RuntimeSessionMetadata | null> => {
+        if (!this.runtimeSessionStore) return null;
+        try {
+          return await this.runtimeSessionStore.getByRuntimeSession('antigravity-desktop', targetCascadeId);
+        } catch (err) {
+          log.warn({ cascadeId: targetCascadeId, err }, 'Antigravity runtime metadata lookup failed for bootstrap');
+          return null;
+        }
+      };
+      const readDigestForBootstrap = async (
+        runtimeMetadata: RuntimeSessionMetadata | null,
+      ): Promise<Record<string, unknown> | null> => {
+        if (!runtimeMetadata?.threadId) return null;
+        if (!this.transcriptReader) return null;
+        try {
+          return await this.transcriptReader.readDigest(
+            runtimeMetadata.sessionId,
+            runtimeMetadata.threadId,
+            runtimeMetadata.catId,
+          );
+        } catch (err) {
+          log.warn(
+            {
+              sessionId: runtimeMetadata.sessionId,
+              threadId: runtimeMetadata.threadId,
+              catId: runtimeMetadata.catId,
+              err,
+            },
+            'Antigravity transcript digest lookup failed for bootstrap',
+          );
+          return null;
+        }
+      };
+      const buildContinuityBootstrap = async (input: {
+        oldCascadeId: string;
+        newCascadeId: string;
+        reason: AntigravityRuntimeSealReason;
+        drain: AntigravityDrainResult;
+        lifecycle: AntigravitySessionLifecycle;
+        sideEffectJournalSummary: AntigravityJournalSummary;
+        allowContinuityBootstrap: boolean;
+      }): Promise<AntigravityContinuityBootstrap | undefined> => {
+        if (!input.allowContinuityBootstrap) return undefined;
+        const runtimeMetadata = await readRuntimeMetadataForBootstrap(input.oldCascadeId);
+        const digest = await readDigestForBootstrap(runtimeMetadata);
+        return buildAntigravityContinuityBootstrap({
+          oldRuntimeSessionId: input.oldCascadeId,
+          newRuntimeSessionId: input.newCascadeId,
+          threadId,
+          catId: this.catId,
+          reason: input.reason,
+          drainResult: input.drain.drainResult,
+          degraded: input.lifecycle.degraded,
+          ...(input.lifecycle.degradedReason ? { degradedReason: input.lifecycle.degradedReason } : {}),
+          digest,
+          runtimeMetadata,
+          sideEffectJournalSummary: input.sideEffectJournalSummary,
+        });
+      };
+      const rotateCascade = async (
+        oldCascadeId: string,
+        reason: AntigravityRuntimeSealReason,
+        allowContinuityBootstrap = true,
+      ): Promise<{
+        newCascadeId: string;
+        lifecycle: AntigravitySessionLifecycle;
+        bootstrap?: AntigravityContinuityBootstrap;
+      }> => {
+        const oldSideEffectJournalSummary = sideEffectJournal.summary();
+        const drain = await drainCascadeForLifecycle(oldCascadeId);
+        this.bridge.resetSession(threadId, this.catId as string);
+        const newCascadeId = this.bridge.getRuntimeSessionStoreForDiagnostics?.()
+          ? await this.bridge.startCascade()
+          : await this.bridge.getOrCreateSession(threadId, this.catId as string);
+        lastKnownCascadeId = newCascadeId;
+        const lifecycle = buildRotationLifecycle(oldCascadeId, newCascadeId, reason, drain);
+        const bootstrap = await buildContinuityBootstrap({
+          oldCascadeId,
+          newCascadeId,
+          reason,
+          drain,
+          lifecycle,
+          sideEffectJournalSummary: oldSideEffectJournalSummary,
+          allowContinuityBootstrap,
+        });
+        sideEffectJournal = createSideEffectJournal(newCascadeId);
+        return {
+          newCascadeId,
+          lifecycle,
+          ...(bootstrap ? { bootstrap } : {}),
+        };
+      };
+      const buildCurrentLifecycle = (
+        targetCascadeId: string,
+        sealReason?: AntigravityRuntimeSealReason,
+      ): AntigravitySessionLifecycle =>
+        buildAntigravitySessionLifecycle({
+          runtimeSessionId: targetCascadeId,
+          ...(sealReason ? { sealReason } : {}),
+        });
       const preflightCascadeHealth = await getCascadeHealth(cascadeId, 'preflight');
       const shouldRetirePreflightCascade =
         preflightCascadeHealth?.level === 'retire' && preflightCascadeHealth.retryableForEmptyResponse;
+      let pendingSessionLifecycle: AntigravitySessionLifecycle | undefined;
+      let pendingContinuityBootstrap: AntigravityContinuityBootstrap | undefined;
       if (shouldRetirePreflightCascade) {
         const oldCascadeId = cascadeId;
-        this.bridge.resetSession(threadId, this.catId as string);
-        cascadeId = await this.bridge.getOrCreateSession(threadId, this.catId as string);
-        sideEffectJournal = createSideEffectJournal(cascadeId);
+        const rotation = await rotateCascade(oldCascadeId, 'oversized_retire');
+        cascadeId = rotation.newCascadeId;
+        pendingSessionLifecycle = rotation.lifecycle;
+        pendingContinuityBootstrap = rotation.bootstrap;
         preflightCascadeRetirement = { oldCascadeId, newCascadeId: cascadeId, health: preflightCascadeHealth };
         log.info(
           { oldCascadeId, newCascadeId: cascadeId, cascadeHealth: preflightCascadeHealth },
@@ -550,13 +728,15 @@ export class AntigravityAgentService implements AgentService {
       }
       let capacityRetryCount = 0;
       let pendingTextReplace = false;
-      let promptForCurrentCascade = effectivePrompt;
+      let promptForCurrentCascade = pendingContinuityBootstrap
+        ? prependAntigravityContinuityControlBlock(pendingContinuityBootstrap, effectivePrompt)
+        : effectivePrompt;
 
-      const makeSessionInit = (sessionId: string): AgentMessage => ({
+      const makeSessionInit = (sessionId: string, lifecycle?: AntigravitySessionLifecycle): AgentMessage => ({
         type: 'session_init',
         catId: this.catId,
         sessionId,
-        ephemeralSession: true,
+        sessionLifecycle: lifecycle ?? buildCurrentLifecycle(sessionId),
         metadata,
         timestamp: Date.now(),
       });
@@ -571,7 +751,7 @@ export class AntigravityAgentService implements AgentService {
         });
 
       log.info(`invoke: cascade=${cascadeId}, thread=${threadId}, model=${this.model}`);
-      yield makeSessionInit(cascadeId);
+      yield makeSessionInit(cascadeId, pendingSessionLifecycle);
       if (preflightCascadeRetirement) {
         yield {
           type: 'system_info' as const,
@@ -657,6 +837,7 @@ export class AntigravityAgentService implements AgentService {
         const retryFreshCascade = async function* (
           delayMs: number,
           retryKind: UpstreamErrorKind | undefined,
+          sealReason: AntigravityRuntimeSealReason,
           logMessage: string,
         ) {
           if (hasText) {
@@ -697,14 +878,16 @@ export class AntigravityAgentService implements AgentService {
           );
           log.info({ cascadeId, threadId, retryCount: capacityRetryCount, delayMs }, logMessage);
           await sleepWithAbort(delayMs, options?.signal);
-          service.bridge.resetSession(threadId, service.catId as string);
-          cascadeId = await service.bridge.getOrCreateSession(threadId, service.catId as string);
-          sideEffectJournal = createSideEffectJournal(cascadeId);
+          const rotation = await rotateCascade(cascadeId, sealReason);
+          cascadeId = rotation.newCascadeId;
           if (autoResumeContext) {
             activeAutoResumePrompt = buildSafeAutoResumePrompt(effectivePrompt, autoResumeContext);
           }
-          promptForCurrentCascade = activeAutoResumePrompt ?? effectivePrompt;
-          yield makeSessionInit(cascadeId);
+          const promptBase = activeAutoResumePrompt ?? effectivePrompt;
+          promptForCurrentCascade = rotation.bootstrap
+            ? prependAntigravityContinuityControlBlock(rotation.bootstrap, promptBase)
+            : promptBase;
+          yield makeSessionInit(cascadeId, rotation.lifecycle);
         };
         const buildRecoveryDecisionDiagnostics = (decision: AntigravityRecoveryDecision | undefined) => {
           if (!decision) return {};
@@ -748,10 +931,27 @@ export class AntigravityAgentService implements AgentService {
             maxAutoResumeAttempts: this.autoResumeMaxAttempts,
           });
         };
+        const recoveryMessageSealReason = (
+          msg: AgentMessage,
+          decision: AntigravityRecoveryDecision,
+        ): AntigravityRuntimeSealReason => {
+          const journalSummary =
+            'journalSummary' in decision && decision.journalSummary
+              ? decision.journalSummary
+              : sideEffectJournal.summary();
+          if (journalSummary.blocksBlindRetry || journalSummary.hasUnsafeSideEffect) return 'unsafe_side_effect';
+          if (msg.errorCode === 'model_capacity') return 'model_capacity';
+          if (msg.errorCode === 'network_error') return 'runtime_disconnected';
+          if (msg.errorCode === 'stream_error') return 'stream_error';
+          if (msg.errorCode === 'empty_response') return 'empty_response';
+          if (msg.metadata?.upstreamError?.kind === 'invalid_tool_call') return 'tool_conflict';
+          return 'runtime_error_reset';
+        };
         const withRecoveryDiagnostics = (msg: AgentMessage, decision: AntigravityRecoveryDecision): AgentMessage => {
           const baseMetadata = msg.metadata ?? metadata;
           return {
             ...msg,
+            sessionLifecycle: buildCurrentLifecycle(cascadeId, recoveryMessageSealReason(msg, decision)),
             metadata: {
               ...baseMetadata,
               diagnostics: {
@@ -1753,6 +1953,7 @@ export class AntigravityAgentService implements AgentService {
           for await (const retryMsg of retryFreshCascade(
             modelCapacityRetryDelayMs,
             retryErrorKind,
+            retryKindToRuntimeSealReason(retryErrorKind),
             'retrying Antigravity invoke after transient error',
           )) {
             yield retryMsg;
@@ -1821,6 +2022,7 @@ export class AntigravityAgentService implements AgentService {
             for await (const retryMsg of retryFreshCascade(
               emptyResponseRecoveryDecision.delayMs,
               'unknown',
+              'empty_response',
               'retrying Antigravity invoke after empty_response on retired cascade',
             )) {
               yield retryMsg;
@@ -1912,7 +2114,21 @@ export class AntigravityAgentService implements AgentService {
       const errorMsg = err instanceof Error ? err.message : String(err);
       log.error(`invoke failed: ${errorMsg}`);
       await flushSideEffectJournalAudit();
-      yield { type: 'error', catId: this.catId, error: errorMsg, metadata, timestamp: Date.now() };
+      yield {
+        type: 'error',
+        catId: this.catId,
+        error: errorMsg,
+        ...(lastKnownCascadeId
+          ? {
+              sessionLifecycle: buildAntigravitySessionLifecycle({
+                runtimeSessionId: lastKnownCascadeId,
+                sealReason: 'runtime_error_reset',
+              }),
+            }
+          : {}),
+        metadata,
+        timestamp: Date.now(),
+      };
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
     }
   }

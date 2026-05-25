@@ -503,17 +503,21 @@ export class IndexBuilder implements IIndexBuilder {
         // fail-open: embedding errors don't block indexing
       }
     }
-    // F209 fix: passage embedding is a recall accelerator (passage_fts stays canonical),
-    // so it MUST NOT block rebuild()/listen(). Fire-and-forget; vectors warm up in background.
-    void this.embedMissingPassages().catch(() => {
-      /* fail-open: passage vectors are an accelerator; passage_fts remains canonical */
-    });
-
     // Persist current indexing version so next startup can detect changes
     await this.storeIndexingVersion();
     report('done', 100);
 
     return { docsIndexed: indexed, docsSkipped: skipped, durationMs: Date.now() - start };
+  }
+
+  startPassageEmbeddingWarmup(): void {
+    // F209 fix: passage embedding is a recall accelerator (passage_fts stays canonical),
+    // so it MUST NOT block rebuild()/listen(). Call this only after the API is listening.
+    setImmediate(() => {
+      void this.embedMissingPassages().catch(() => {
+        /* fail-open: passage vectors are an accelerator; passage_fts remains canonical */
+      });
+    });
   }
 
   async incrementalUpdate(changedPaths: string[]): Promise<void> {

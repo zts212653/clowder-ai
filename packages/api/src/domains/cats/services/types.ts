@@ -6,6 +6,7 @@
 import type { CatId, MessageContent, ReplyPreview } from '@cat-cafe/shared';
 import type { Span } from '@opentelemetry/api';
 import type { CliSpawnOptions } from '../../../utils/cli-types.js';
+import type { AntigravitySessionLifecycle } from './agents/providers/antigravity/antigravity-runtime-lifecycle.js';
 
 /** F8: Unified token usage type across all three cats.
  *  inputTokens = TOTAL input tokens (new + cached). Normalised at extraction
@@ -140,6 +141,8 @@ export interface AgentMessage {
   /** ACP transport: sessionId is per-invocation, not a persistent CLI session.
    *  When true, a different sessionId does NOT mean "session replaced" — skip seal. */
   ephemeralSession?: boolean;
+  /** F211 A2: provider runtime lifecycle facts used by invocation to seal/create SessionRecords. */
+  sessionLifecycle?: AntigravitySessionLifecycle;
   /** Tool name (for 'tool_use' type) */
   toolName?: string;
   /** Tool input parameters (for 'tool_use' type) */

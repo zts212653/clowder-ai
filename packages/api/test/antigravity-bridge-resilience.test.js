@@ -11,6 +11,10 @@ function createBridge() {
   return new AntigravityBridge({ port: 1234, csrfToken: 'test', useTls: false });
 }
 
+function createLegacySessionBridge() {
+  return new AntigravityBridge({ port: 1234, csrfToken: 'test', useTls: false }, { legacyJsonSessionStore: true });
+}
+
 async function listenOnEphemeralPort(server) {
   await new Promise((resolve, reject) => {
     server.once('error', reject);
@@ -204,7 +208,7 @@ describe('G6: connection invalidation and reconnect', () => {
   });
 
   test('getOrCreateSession rejects RUNNING cascade and creates new', async () => {
-    const bridge = createBridge();
+    const bridge = createLegacySessionBridge();
     const startCalls = [];
     mock.method(bridge, 'getTrajectory', async (cascadeId) => {
       if (cascadeId === 'stuck-cascade') {
@@ -227,7 +231,7 @@ describe('G6: connection invalidation and reconnect', () => {
   });
 
   test('getOrCreateSession reuses IDLE cascade', async () => {
-    const bridge = createBridge();
+    const bridge = createLegacySessionBridge();
     mock.method(bridge, 'getTrajectory', async () => {
       return { status: 'CASCADE_RUN_STATUS_IDLE', numTotalSteps: 5 };
     });

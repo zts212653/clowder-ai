@@ -69,6 +69,11 @@ import {
   initPushNotificationService,
   resetPushNotificationService,
 } from './domains/cats/services/push/PushNotificationService.js';
+import {
+  RuntimeSessionSealReaper,
+  type RuntimeSessionSealReaperDrainResult,
+  startSerializedRuntimeSessionSealReaperInterval,
+} from './domains/cats/services/runtime-session/RuntimeSessionSealReaper.js';
 import { createRuntimeSessionStore } from './domains/cats/services/runtime-session/RuntimeSessionStoreFactory.js';
 import type { HandoffConfig } from './domains/cats/services/session/SessionSealer.js';
 import { SessionSealer } from './domains/cats/services/session/SessionSealer.js';
@@ -168,6 +173,7 @@ import {
   messagesRoutes,
   mkdirRoute,
   packsRoutes,
+  perspectiveRoutes,
   projectSetupRoute,
   projectsBootstrapRoutes,
   projectsRoutes,
@@ -237,6 +243,12 @@ export function getSocketManager(): SocketManager {
 }
 
 const PROCESS_START_AT = Date.now();
+
+function hasRuntimeSessionDrain(service: AgentService): service is AgentService & {
+  drainRuntimeSession(runtimeSessionId: string): Promise<RuntimeSessionSealReaperDrainResult>;
+} {
+  return typeof (service as { drainRuntimeSession?: unknown }).drainRuntimeSession === 'function';
+}
 
 async function main(): Promise<void> {
   const { logger: customLogger, isDebugMode, LOG_DIR_PATH } = await import('./infrastructure/logger.js');
@@ -1067,6 +1079,7 @@ async function main(): Promise<void> {
           service = new AntigravityAgentService({
             catId,
             runtimeSessionStore,
+            transcriptReader,
             supervisorStore: redisClient
               ? new RedisAntigravitySupervisorStore(redisClient, {
                   auditDir: join(process.cwd(), 'data', 'antigravity-audit'),
@@ -1104,6 +1117,29 @@ async function main(): Promise<void> {
     if (router) router.refreshFromRegistry(agentRegistry);
   };
   await syncAgentRegistry(catRegistry.getAllConfigs());
+
+  const runtimeSessionSealReaper = new RuntimeSessionSealReaper({
+    runtimeSessionStore,
+    sessionSealer,
+    drainRuntimeSession: async (record) => {
+      if (!agentRegistry.has(record.catId)) {
+        return {
+          ok: false,
+          drainResult: 'skipped_runtime_unreachable',
+          reason: `no AgentService registered for ${record.catId}`,
+        };
+      }
+      const service = agentRegistry.get(record.catId);
+      if (!hasRuntimeSessionDrain(service)) {
+        return {
+          ok: false,
+          drainResult: 'skipped_runtime_unreachable',
+          reason: `AgentService for ${record.catId} cannot drain ${record.runtime}`,
+        };
+      }
+      return service.drainRuntimeSession(record.runtimeSessionId);
+    },
+  });
 
   // F136 Phase 3A: Cat catalog subscriber — syncs AgentRegistry when cats CRUD emits cat-config events
   const { createCatCatalogSubscriber } = await import('./config/cat-catalog-subscriber.js');
@@ -1255,6 +1291,7 @@ async function main(): Promise<void> {
     ...(sessionStore ? { sessionStore } : {}),
     ...(threadStore ? { threadStore } : {}),
     sessionChainStore,
+    runtimeSessionStore,
     transcriptWriter,
     transcriptReader,
     sessionSealer,
@@ -1850,9 +1887,18 @@ async function main(): Promise<void> {
   // Evidence search (SQLite) + reindex endpoint (D-11) + F-4 federated search + F188 rebuild
   await app.register(evidenceRoutes, {
     evidenceStore: memoryServices.evidenceStore,
+    embeddingService: memoryServices.embeddingService,
     indexBuilder: memoryServices.indexBuilder,
     knowledgeResolver: memoryServices.knowledgeResolver,
     rebuildJobTracker,
+  });
+  await app.register(perspectiveRoutes, {
+    repoRoot,
+    evidenceStore: memoryServices.evidenceStore,
+    knowledgeResolver: memoryServices.knowledgeResolver,
+    ...(memoryServices.catalog && memoryServices.collectionStores
+      ? { graphCatalog: memoryServices.catalog, graphStores: memoryServices.collectionStores }
+      : {}),
   });
 
   // F163: Knowledge promotion admin API (localhost-only)
@@ -2130,6 +2176,14 @@ async function main(): Promise<void> {
     f101RecoveryPlayer?.stopAllLoops();
   });
 
+  let runtimeSessionSealReaperTimer: ReturnType<typeof setInterval> | null = null;
+  app.addHook('onClose', async () => {
+    if (runtimeSessionSealReaperTimer) {
+      clearInterval(runtimeSessionSealReaperTimer);
+      runtimeSessionSealReaperTimer = null;
+    }
+  });
+
   // #603: Preload governance overlay (.local / .local-override)
   // Start listening
   let address: string;
@@ -2143,6 +2197,7 @@ async function main(): Promise<void> {
   }
   app.log.info(`[api] Server running on ${address}`);
   app.log.info(`[ws] WebSocket server ready`);
+  memoryServices.indexBuilder?.startPassageEmbeddingWarmup();
 
   // F156: Friendly hint for private network access
   if (HOST === '0.0.0.0' && process.env.CORS_ALLOW_PRIVATE_NETWORK !== 'true') {
@@ -2183,6 +2238,40 @@ async function main(): Promise<void> {
   } catch (err) {
     app.log.warn(`[api] Orphan Chrome cleanup failed (best-effort): ${String(err)}`);
   }
+
+  const RUNTIME_SESSION_SEAL_REAPER_INTERVAL_MS = Number.parseInt(
+    process.env.CAT_CAFE_RUNTIME_SESSION_SEAL_REAPER_INTERVAL_MS ?? '30000',
+    10,
+  );
+  try {
+    const startupRuntimeReaper = await runtimeSessionSealReaper.runOnce();
+    if (
+      startupRuntimeReaper.sealed > 0 ||
+      startupRuntimeReaper.pending > 0 ||
+      startupRuntimeReaper.skippedMaxRetries > 0 ||
+      startupRuntimeReaper.failed > 0
+    ) {
+      app.log.info({ result: startupRuntimeReaper }, '[api] F211 runtime session seal reaper startup sweep completed');
+    }
+  } catch (err) {
+    app.log.warn(`[api] F211 runtime session seal reaper startup sweep failed (best-effort): ${String(err)}`);
+  }
+  runtimeSessionSealReaperTimer = startSerializedRuntimeSessionSealReaperInterval({
+    runtimeSessionSealReaper,
+    intervalMs:
+      Number.isSafeInteger(RUNTIME_SESSION_SEAL_REAPER_INTERVAL_MS) && RUNTIME_SESSION_SEAL_REAPER_INTERVAL_MS > 0
+        ? RUNTIME_SESSION_SEAL_REAPER_INTERVAL_MS
+        : 30_000,
+    onResult: (result) => {
+      if (result.sealed > 0 || result.failed > 0) {
+        app.log.info({ result }, '[api] F211 runtime session seal reaper sweep completed');
+      }
+    },
+    onError: () => {
+      // best-effort periodic reaper
+    },
+  });
+  runtimeSessionSealReaperTimer.unref();
 
   // F118 Hardening: Global session reaper — startup sweep + periodic scan.
   // Reconciles sessions stuck in 'sealing' state that the per-invoke lazy

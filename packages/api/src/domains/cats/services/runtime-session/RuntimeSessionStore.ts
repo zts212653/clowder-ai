@@ -1,3 +1,4 @@
+import type { CatId } from '@cat-cafe/shared';
 import {
   normalizeRuntimeSessionMetadata,
   type RuntimeSessionLifecycleState,
@@ -11,6 +12,11 @@ export interface IRuntimeSessionStore {
   getByRuntimeSession(
     runtime: RuntimeSessionRuntime,
     runtimeSessionId: string,
+  ): RuntimeSessionMetadata | null | Promise<RuntimeSessionMetadata | null>;
+  getActiveByThreadCat(
+    runtime: RuntimeSessionRuntime,
+    threadId: string,
+    catId: CatId,
   ): RuntimeSessionMetadata | null | Promise<RuntimeSessionMetadata | null>;
   listByLifecycleState(
     state: RuntimeSessionLifecycleState,
@@ -49,6 +55,23 @@ export class RuntimeSessionStore implements IRuntimeSessionStore {
   getByRuntimeSession(runtime: RuntimeSessionRuntime, runtimeSessionId: string): RuntimeSessionMetadata | null {
     const sessionId = this.runtimeIndex.get(runtimeKey(runtime, runtimeSessionId));
     return sessionId ? this.getBySessionId(sessionId) : null;
+  }
+
+  getActiveByThreadCat(runtime: RuntimeSessionRuntime, threadId: string, catId: CatId): RuntimeSessionMetadata | null {
+    const active = Array.from(this.records.values())
+      .filter(
+        (record) =>
+          record.runtime === runtime &&
+          record.threadId === threadId &&
+          record.catId === catId &&
+          record.lifecycle.state === 'active',
+      )
+      .sort((a, b) => {
+        const observedDelta = b.lifecycle.lastObservedAt - a.lifecycle.lastObservedAt;
+        if (observedDelta !== 0) return observedDelta;
+        return a.sessionId.localeCompare(b.sessionId);
+      });
+    return active[0] ? cloneMetadata(active[0]) : null;
   }
 
   listByLifecycleState(state: RuntimeSessionLifecycleState): RuntimeSessionMetadata[] {

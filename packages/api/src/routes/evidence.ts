@@ -11,6 +11,7 @@ import {
 } from '../domains/memory/f163-types.js';
 import type {
   EvidenceItem,
+  IEmbeddingService,
   IEvidenceStore,
   IIndexBuilder,
   IKnowledgeResolver,
@@ -78,6 +79,7 @@ export interface EvidenceSearchResponse {
 export interface EvidenceRoutesOptions {
   docsRoot?: string;
   evidenceStore: IEvidenceStore;
+  embeddingService?: Pick<IEmbeddingService, 'isReady'>;
   indexBuilder?: IIndexBuilder;
   knowledgeResolver?: IKnowledgeResolver;
   rebuildJobTracker?: RebuildJobTracker;
@@ -311,9 +313,10 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       // at all" (embed off / sqlite-vec missing), so the UI never shows a warm-up that never finishes.
       let passageVectorCount = 0;
       let passageVectorsSupported = false;
+      const passageEmbeddingReady = opts.embeddingService?.isReady() === true;
       try {
         passageVectorCount = (db.prepare('SELECT count(*) AS c FROM passage_vectors').get() as { c: number }).c;
-        passageVectorsSupported = true;
+        passageVectorsSupported = passageEmbeddingReady;
       } catch {
         /* vec0 table may not exist (sqlite-vec unavailable / embedding off) → unsupported, not warming */
       }

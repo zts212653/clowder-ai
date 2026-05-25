@@ -10,7 +10,10 @@ function tempStorePath() {
 }
 
 function createBridge(storePath) {
-  return new AntigravityBridge({ port: 1234, csrfToken: 'test', useTls: false }, { sessionStorePath: storePath });
+  return new AntigravityBridge(
+    { port: 1234, csrfToken: 'test', useTls: false },
+    { sessionStorePath: storePath, legacyJsonSessionStore: true },
+  );
 }
 
 function createRuntimeSessionStoreProbe() {
@@ -18,8 +21,33 @@ function createRuntimeSessionStoreProbe() {
     upsert: mock.fn(async (metadata) => metadata),
     getBySessionId: mock.fn(async () => null),
     getByRuntimeSession: mock.fn(async () => null),
+    getActiveByThreadCat: mock.fn(async () => null),
     listByLifecycleState: mock.fn(async () => []),
     updateLifecycle: mock.fn(async () => null),
+  };
+}
+
+function runtimeMetadata({ sessionId = 'session-1', runtimeSessionId = 'cascade-runtime', threadId, catId }) {
+  return {
+    sessionId,
+    runtime: 'antigravity-desktop',
+    runtimeSessionId,
+    threadId,
+    catId,
+    surface: 'cat-cafe-dispatch',
+    identityHistory: [
+      {
+        catId,
+        model: 'claude-opus-4-6',
+        from: 1000,
+        source: 'session_init',
+      },
+    ],
+    lifecycle: {
+      state: 'active',
+      startedAt: 1000,
+      lastObservedAt: 2000,
+    },
   };
 }
 
@@ -309,5 +337,159 @@ describe('AntigravityBridge session persistence (G0)', () => {
     bridge.resetSession('thread-f211', 'antig-opus');
 
     assert.equal(runtimeSessionStore.upsert.mock.callCount(), 0, 'A1 must not write runtime metadata from Bridge');
+  });
+
+  test('F211 A2 Task 4: runtime store active binding wins over JSON mapping', async () => {
+    const storePath = tempStorePath();
+    cleanupPaths.push(storePath);
+    fs.writeFileSync(storePath, JSON.stringify({ 'thread-1:antig-opus': 'cascade-json' }));
+    const runtimeSessionStore = createRuntimeSessionStoreProbe();
+    runtimeSessionStore.getActiveByThreadCat = mock.fn(async () =>
+      runtimeMetadata({
+        sessionId: 'session-runtime',
+        runtimeSessionId: 'cascade-runtime',
+        threadId: 'thread-1',
+        catId: 'antig-opus',
+      }),
+    );
+    const bridge = new AntigravityBridge(
+      { port: 1234, csrfToken: 'test', useTls: false },
+      { sessionStorePath: storePath, runtimeSessionStore },
+    );
+
+    mock.method(bridge, 'startCascade', async () => 'cascade-should-not-start');
+    mock.method(bridge, 'getTrajectory', async () => ({
+      status: 'CASCADE_RUN_STATUS_IDLE',
+      numTotalSteps: 1,
+    }));
+
+    const id = await bridge.getOrCreateSession('thread-1', 'antig-opus');
+    assert.equal(id, 'cascade-runtime');
+    assert.equal(runtimeSessionStore.getActiveByThreadCat.mock.callCount(), 1);
+    assert.deepEqual(runtimeSessionStore.getActiveByThreadCat.mock.calls[0].arguments, [
+      'antigravity-desktop',
+      'thread-1',
+      'antig-opus',
+    ]);
+    assert.equal(bridge.startCascade.mock.callCount(), 0);
+    assert.deepEqual(JSON.parse(fs.readFileSync(storePath, 'utf8')), { 'thread-1:antig-opus': 'cascade-json' });
+  });
+
+  test('P1 review: runtime-store dead active binding is replaced before session_init', async () => {
+    const { RuntimeSessionStore } = await import(
+      '../dist/domains/cats/services/runtime-session/RuntimeSessionStore.js'
+    );
+    const storePath = tempStorePath();
+    cleanupPaths.push(storePath);
+    const runtimeSessionStore = new RuntimeSessionStore();
+    runtimeSessionStore.upsert(
+      runtimeMetadata({
+        sessionId: 'session-runtime',
+        runtimeSessionId: 'cascade-dead',
+        threadId: 'thread-1',
+        catId: 'antig-opus',
+      }),
+    );
+    const bridge = new AntigravityBridge(
+      { port: 1234, csrfToken: 'test', useTls: false },
+      { sessionStorePath: storePath, runtimeSessionStore },
+    );
+
+    mock.method(bridge, 'startCascade', async () => 'cascade-replacement');
+    mock.method(bridge, 'getTrajectory', async (cascadeId) => {
+      if (cascadeId === 'cascade-dead') throw new Error('dead runtime');
+      return { status: 'CASCADE_RUN_STATUS_IDLE', numTotalSteps: 0 };
+    });
+
+    const id = await bridge.getOrCreateSession('thread-1', 'antig-opus');
+
+    assert.equal(id, 'cascade-replacement');
+    assert.equal(bridge.startCascade.mock.callCount(), 1);
+    assert.equal(runtimeSessionStore.getByRuntimeSession('antigravity-desktop', 'cascade-dead'), null);
+    assert.equal(
+      runtimeSessionStore.getActiveByThreadCat('antigravity-desktop', 'thread-1', 'antig-opus').runtimeSessionId,
+      'cascade-replacement',
+    );
+  });
+
+  test('F211 A2 Task 4: legacy JSON fallback is read-only and does not migrate keys', async () => {
+    const storePath = tempStorePath();
+    cleanupPaths.push(storePath);
+    fs.writeFileSync(storePath, JSON.stringify({ 'thread-legacy': 'cascade-legacy' }));
+    const runtimeSessionStore = createRuntimeSessionStoreProbe();
+    const bridge = new AntigravityBridge(
+      { port: 1234, csrfToken: 'test', useTls: false },
+      { sessionStorePath: storePath, runtimeSessionStore },
+    );
+
+    mock.method(bridge, 'startCascade', async () => 'cascade-should-not-start');
+    mock.method(bridge, 'getTrajectory', async () => ({
+      status: 'CASCADE_RUN_STATUS_IDLE',
+      numTotalSteps: 5,
+    }));
+
+    const id = await bridge.getOrCreateSession('thread-legacy', 'antig-opus');
+    assert.equal(id, 'cascade-legacy');
+    assert.equal(bridge.startCascade.mock.callCount(), 0);
+    assert.deepEqual(JSON.parse(fs.readFileSync(storePath, 'utf8')), { 'thread-legacy': 'cascade-legacy' });
+  });
+
+  test('F211 A2 Task 4: fresh runtime-store cascade does not write JSON', async () => {
+    const storePath = tempStorePath();
+    cleanupPaths.push(storePath);
+    const runtimeSessionStore = createRuntimeSessionStoreProbe();
+    const bridge = new AntigravityBridge(
+      { port: 1234, csrfToken: 'test', useTls: false },
+      { sessionStorePath: storePath, runtimeSessionStore },
+    );
+
+    mock.method(bridge, 'startCascade', async () => 'cascade-fresh');
+
+    const id = await bridge.getOrCreateSession('thread-fresh', 'antig-opus');
+    assert.equal(id, 'cascade-fresh');
+    assert.equal(fs.existsSync(storePath), false, 'runtime-store mode must not create legacy JSON mapping');
+  });
+
+  test('F211 A2 Task 4: resetSession no longer mutates JSON in runtime-store mode', () => {
+    const storePath = tempStorePath();
+    cleanupPaths.push(storePath);
+    fs.writeFileSync(storePath, JSON.stringify({ 'thread-reset:antig-opus': 'cascade-json' }));
+    const runtimeSessionStore = createRuntimeSessionStoreProbe();
+    const bridge = new AntigravityBridge(
+      { port: 1234, csrfToken: 'test', useTls: false },
+      { sessionStorePath: storePath, runtimeSessionStore },
+    );
+
+    bridge.resetSession('thread-reset', 'antig-opus');
+
+    assert.deepEqual(JSON.parse(fs.readFileSync(storePath, 'utf8')), { 'thread-reset:antig-opus': 'cascade-json' });
+  });
+
+  test('F211 A2 Task 4: same-thread cats resolve separate runtime active bindings', async () => {
+    const storePath = tempStorePath();
+    cleanupPaths.push(storePath);
+    const runtimeSessionStore = createRuntimeSessionStoreProbe();
+    runtimeSessionStore.getActiveByThreadCat = mock.fn(async (_runtime, threadId, catId) =>
+      runtimeMetadata({
+        sessionId: `session-${catId}`,
+        runtimeSessionId: `cascade-${catId}`,
+        threadId,
+        catId,
+      }),
+    );
+    const bridge = new AntigravityBridge(
+      { port: 1234, csrfToken: 'test', useTls: false },
+      { sessionStorePath: storePath, runtimeSessionStore },
+    );
+
+    mock.method(bridge, 'startCascade', async () => 'cascade-should-not-start');
+    mock.method(bridge, 'getTrajectory', async () => ({
+      status: 'CASCADE_RUN_STATUS_IDLE',
+      numTotalSteps: 1,
+    }));
+
+    assert.equal(await bridge.getOrCreateSession('thread-shared', 'antig-opus'), 'cascade-antig-opus');
+    assert.equal(await bridge.getOrCreateSession('thread-shared', 'antig-gemini'), 'cascade-antig-gemini');
+    assert.equal(bridge.startCascade.mock.callCount(), 0);
   });
 });

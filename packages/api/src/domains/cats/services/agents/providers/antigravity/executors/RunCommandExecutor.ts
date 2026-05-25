@@ -142,6 +142,14 @@ function timeoutError(timeoutMs: number): Error {
   return new Error(`RunCommand timed out after ${timeoutMs}ms`);
 }
 
+function durationMsForRunCommandError(err: unknown, timeoutMs: number, startedAt: number): number {
+  const elapsedMs = Date.now() - startedAt;
+  if (err instanceof Error && err.message === timeoutError(timeoutMs).message) {
+    return Math.max(elapsedMs, timeoutMs);
+  }
+  return elapsedMs;
+}
+
 async function withRunCommandTimeout<T>(run: (signal: AbortSignal) => Promise<T>, timeoutMs: number): Promise<T> {
   const controller = new AbortController();
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
@@ -184,9 +192,9 @@ export class RunCommandExecutor implements AntigravityToolExecutor<RunCommandInp
       return refused;
     }
 
+    const timeoutMs = runCommandTimeoutMs();
     const t0 = Date.now();
     try {
-      const timeoutMs = runCommandTimeoutMs();
       // Antigravity LS RunCommand joins `command + args` with spaces and passes
       // to an outer shell. Sending `{ command: '/bin/sh', args: ['-c', cmd] }`
       // causes the outer shell to parse "sh -c cmd" only consuming the first
@@ -229,7 +237,7 @@ export class RunCommandExecutor implements AntigravityToolExecutor<RunCommandInp
       const result: ExecutorResult<{ exitCode: number }> = {
         status: 'error',
         error: err instanceof Error ? err.message : String(err),
-        durationMs: Date.now() - t0,
+        durationMs: durationMsForRunCommandError(err, timeoutMs, t0),
       };
       await ctx.audit.record({
         tool: this.toolName,
