@@ -12,9 +12,15 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { STANDARD_MOUNT_POINT_IDS } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
-import { readCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
+import { readCapabilitiesConfig, resolveRequiredMcpStatus } from '../config/capabilities/capability-orchestrator.js';
 import { readMountRules } from '../config/mount/mount-rules-store.js';
-import { parseManifestSkillMeta, resolveSkillMcpStatuses, type SkillMcpDependency } from '../skills/skill-meta.js';
+import {
+  parseManifestSkillMeta,
+  readSkillMeta,
+  resolveSkillMcpStatuses,
+  type SkillMcpDependency,
+} from '../skills/skill-meta.js';
+import { resolvePluginSkillSourcesForProject } from '../utils/plugin-skill-source.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import {
@@ -263,6 +269,81 @@ export const skillsRoutes: FastifyPluginAsync<SkillsRouteOptions> = async (app, 
       if (!manifestOrdered.has(name)) ordered.push(name);
     }
     const skills = ordered.map((n) => mountLookup.get(n)!).filter(Boolean);
+
+    const existingSkillNames = new Set(skills.map((skill) => skill.name));
+    const pluginSkillInfos = resolvePluginSkillSourcesForProject(skillsCapConfig, join(mainRepo, 'plugins'), projectRoot);
+    for (const info of pluginSkillInfos) {
+      if (existingSkillNames.has(info.skillName)) continue;
+
+      const [claude, codex, gemini, kimi] = await Promise.all([
+        isSkillMountedAtPoint(mountPointDirCandidates.claude, info.skillsSource, info.skillName),
+        isSkillMountedAtPoint(mountPointDirCandidates.codex, info.skillsSource, info.skillName),
+        isSkillMountedAtPoint(mountPointDirCandidates.gemini, info.skillsSource, info.skillName),
+        isSkillMountedAtPoint(mountPointDirCandidates.kimi, info.skillsSource, info.skillName),
+      ]);
+      const customMounts = await Promise.all(
+        customMountTargets.map((target) => isSkillMountedAtPoint(target.candidates, info.skillsSource, info.skillName)),
+      );
+      const mounts: SkillMount = { claude, codex, gemini, kimi };
+      for (const [index, target] of customMountTargets.entries()) {
+        mounts[target.id] = customMounts[index] ?? false;
+      }
+
+      const declaredMountPaths = Array.isArray(info.mountPaths) ? new Set(info.mountPaths) : null;
+      const skillDisabled = !info.enabled || declaredMountPaths?.size === 0;
+      const requiredMountPoints = skillDisabled
+        ? []
+        : declaredMountPaths
+          ? STANDARD_MOUNT_POINT_IDS.filter((id) => declaredMountPaths.has(id) && mountRules.mountPoints[id].enabled)
+          : enabledMountPoints;
+      const requiredCustomTargets = skillDisabled
+        ? []
+        : declaredMountPaths
+          ? customMountTargets.filter((target) => declaredMountPaths.has(target.id))
+          : customMountTargets;
+      const requiredCustomTargetIds = new Set(requiredCustomTargets.map((target) => target.id));
+      const mountedCount =
+        requiredMountPoints.filter((id) => mounts[id]).length +
+        customMountTargets.filter((target, index) => requiredCustomTargetIds.has(target.id) && customMounts[index])
+          .length;
+      const requiredCount = requiredMountPoints.length + requiredCustomTargets.length;
+      const availableMountPointIds = [...enabledMountPoints, ...customMountTargets.map((target) => target.id)];
+      const meta = await readSkillMeta(join(info.skillsSource, info.skillName));
+      const requiresMcp = meta.requiresMcp?.length
+        ? await Promise.all(
+            meta.requiresMcp.map(async (id) => {
+              const resolved = await resolveRequiredMcpStatus(id, {
+                capabilities: skillsCapConfig,
+                env: process.env,
+                projectRoot,
+              });
+              return { id, status: resolved.status };
+            }),
+          )
+        : [];
+      const mountedPointIds = [
+        ...enabledMountPoints.filter((id) => mounts[id]),
+        ...customMountTargets.filter((target) => mounts[target.id]).map((target) => target.id),
+      ];
+      skills.push({
+        name: info.skillName,
+        category: meta.category ?? '插件',
+        trigger: meta.triggers?.length ? meta.triggers.join('、') : '',
+        source: 'cat-cafe',
+        globalEnabled: info.enabled,
+        mountPaths: info.mountPaths ?? mountedPointIds,
+        ...(meta.description ? { description: meta.description } : {}),
+        mounts,
+        mountHealth: {
+          enabledMountPoints: availableMountPointIds,
+          mountedCount,
+          requiredCount,
+          allMounted: mountedCount === requiredCount,
+        },
+        ...(requiresMcp.length ? { requiresMcp } : {}),
+      });
+      existingSkillNames.add(info.skillName);
+    }
 
     // Registration consistency check
     const capConfig = await readCapabilitiesConfig(projectRoot);

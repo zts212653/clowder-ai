@@ -12,6 +12,8 @@ triggers:
   - "weixin"
   - "wechat"
   - "publish article"
+requires_mcp:
+  - "cat-cafe-limb"
 ---
 
 # 微信公众号发文
@@ -20,7 +22,7 @@ triggers:
 
 ## 使用前检查
 
-先调用 `limb_list_available()` 确认 `weixin-mp` 节点在线。
+先调用 `limb_list_available({ capability: "content_publish" })` 确认 `weixin-mp` 节点在线。
 如果节点不在线或不存在，提示用户在 **设置 → 插件集成** 中启用并配置微信公众号插件。
 
 ## 接口发现
@@ -37,19 +39,19 @@ triggers:
 
 ## 核心能力
 
-- **检查连接** — `limb_invoke("weixin-mp", "weixin_mp.check_status")`
+- **检查连接** — `limb_invoke({ nodeId: "weixin-mp", command: "weixin_mp.check_status" })`
   确认公众号是否配置并可连接。
 
-- **发布文章** — `limb_invoke("weixin-mp", "weixin_mp.publish_article", { title, markdown, coverImageUrl?, author?, digest?, publish? })`
+- **发布文章** — `limb_invoke({ nodeId: "weixin-mp", command: "weixin_mp.publish_article", params: { title, markdown, coverImageUrl?, author?, digest?, publish? } })`
   Markdown 自动转为微信兼容内联样式 HTML。封面图提供 `coverImageUrl`（自动上传）或 `thumbMediaId`。默认存草稿箱，`publish: true` 直接发布。
 
-- **上传图片** — `limb_invoke("weixin-mp", "weixin_mp.upload_image", { imageUrl })`
+- **上传图片** — `limb_invoke({ nodeId: "weixin-mp", command: "weixin_mp.upload_image", params: { imageUrl } })`
   上传图片到微信 CDN，返回可在文章正文中使用的链接。
 
-- **查看草稿** — `limb_invoke("weixin-mp", "weixin_mp.list_drafts", { offset?, count? })`
+- **查看草稿** — `limb_invoke({ nodeId: "weixin-mp", command: "weixin_mp.list_drafts", params: { offset?, count? } })`
   列出草稿箱中的文章及其 media_id。
 
-- **发布状态** — `limb_invoke("weixin-mp", "weixin_mp.publish_status", { publishId })`
+- **发布状态** — `limb_invoke({ nodeId: "weixin-mp", command: "weixin_mp.publish_status", params: { publishId } })`
   查询发布任务的处理状态和文章链接。
 
 ## 常见错误

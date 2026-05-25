@@ -5,6 +5,7 @@
  * limb_invoke: 调用指定四肢节点的能力
  */
 
+import { z } from 'zod';
 import { callbackPost, getCallbackConfig, NO_CONFIG_ERROR } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult } from './file-tools.js';
@@ -12,40 +13,21 @@ import { errorResult } from './file-tools.js';
 // ─── Input Schemas ───────────────────────────────────────────
 
 export const limbListAvailableInputSchema = {
-  type: 'object' as const,
-  properties: {
-    capability: {
-      type: 'string',
-      description: '按能力类别过滤（可选，如 "camera", "gpu_render"）',
-    },
-    agentKeyCatId: {
-      type: 'string',
-      description: '共享 Antigravity MCP 时必填你自己的 catId（如 "antig-opus"），用于选择正确的 sidecar agent key。',
-    },
-  },
+  capability: z.string().optional().describe('按能力类别过滤（可选，如 "camera", "gpu_render"）'),
+  agentKeyCatId: z
+    .string()
+    .optional()
+    .describe('共享 Antigravity MCP 时必填你自己的 catId（如 "antig-opus"），用于选择正确的 sidecar agent key。'),
 };
 
 export const limbInvokeInputSchema = {
-  type: 'object' as const,
-  properties: {
-    nodeId: {
-      type: 'string',
-      description: '目标四肢节点 ID',
-    },
-    command: {
-      type: 'string',
-      description: '要执行的命令（如 "camera.snap", "exec.run"）',
-    },
-    params: {
-      type: 'object',
-      description: '命令参数（可选）',
-    },
-    agentKeyCatId: {
-      type: 'string',
-      description: '共享 Antigravity MCP 时必填你自己的 catId（如 "antig-opus"），用于选择正确的 sidecar agent key。',
-    },
-  },
-  required: ['nodeId', 'command'],
+  nodeId: z.string().min(1).describe('目标四肢节点 ID'),
+  command: z.string().min(1).describe('要执行的命令（如 "camera.snap", "exec.run"）'),
+  params: z.record(z.unknown()).optional().describe('命令参数（可选）'),
+  agentKeyCatId: z
+    .string()
+    .optional()
+    .describe('共享 Antigravity MCP 时必填你自己的 catId（如 "antig-opus"），用于选择正确的 sidecar agent key。'),
 };
 
 // ─── Handlers ────────────────────────────────────────────────
@@ -86,25 +68,18 @@ export async function handleLimbInvoke(args: {
 // ─── Phase C: Pairing Tools ──────────────────────────────────
 
 export const limbPairListInputSchema = {
-  type: 'object' as const,
-  properties: {
-    agentKeyCatId: {
-      type: 'string',
-      description: '共享 Antigravity MCP 时必填你自己的 catId（如 "antig-opus"），用于选择正确的 sidecar agent key。',
-    },
-  },
+  agentKeyCatId: z
+    .string()
+    .optional()
+    .describe('共享 Antigravity MCP 时必填你自己的 catId（如 "antig-opus"），用于选择正确的 sidecar agent key。'),
 };
 
 export const limbPairApproveInputSchema = {
-  type: 'object' as const,
-  properties: {
-    requestId: { type: 'string', description: '配对请求 ID' },
-    agentKeyCatId: {
-      type: 'string',
-      description: '共享 Antigravity MCP 时必填你自己的 catId（如 "antig-opus"），用于选择正确的 sidecar agent key。',
-    },
-  },
-  required: ['requestId'],
+  requestId: z.string().min(1).describe('配对请求 ID'),
+  agentKeyCatId: z
+    .string()
+    .optional()
+    .describe('共享 Antigravity MCP 时必填你自己的 catId（如 "antig-opus"），用于选择正确的 sidecar agent key。'),
 };
 
 export async function handleLimbPairList(args: { agentKeyCatId?: string } = {}): Promise<ToolResult> {

@@ -1404,6 +1404,105 @@ describe('Skills Route', () => {
     await app.close();
   });
 
+  it('includes plugin-owned skills from capabilities.json', async () => {
+    const projectDir = join('/tmp', `skills-route-test-plugin-skill-${Date.now()}`);
+    const homeDir = join('/tmp', `skills-route-test-plugin-home-${Date.now()}`);
+    const pluginDir = join(projectDir, 'plugins', 'weixin-mp');
+    const pluginSkillDir = join(pluginDir, 'skills', 'weixin-mp');
+    const prevHome = process.env.HOME;
+
+    await Promise.all([
+      mkdir(pluginSkillDir, { recursive: true }),
+      mkdir(join(projectDir, '.claude', 'skills'), { recursive: true }),
+      mkdir(join(projectDir, '.codex', 'skills'), { recursive: true }),
+      mkdir(join(projectDir, '.gemini', 'skills'), { recursive: true }),
+      mkdir(join(projectDir, '.kimi', 'skills'), { recursive: true }),
+      mkdir(homeDir, { recursive: true }),
+    ]);
+    await writeFile(
+      join(pluginDir, 'plugin.yaml'),
+      [
+        'id: weixin-mp',
+        'name: Weixin MP',
+        'version: 1.0.0',
+        'resources:',
+        '  - type: skill',
+        '    path: skills/weixin-mp',
+      ].join('\n'),
+    );
+    await writeFile(
+      join(pluginSkillDir, 'SKILL.md'),
+      [
+        '---',
+        'name: weixin-mp',
+        'description: 微信公众号文章发布',
+        'triggers:',
+        '  - 微信',
+        '  - 公众号',
+        'requires_mcp:',
+        '  - cat-cafe-limb',
+        '---',
+        '',
+        '# weixin-mp',
+      ].join('\n'),
+    );
+    await Promise.all([
+      symlink(pluginSkillDir, join(projectDir, '.claude', 'skills', 'weixin-mp')),
+      symlink(pluginSkillDir, join(projectDir, '.codex', 'skills', 'weixin-mp')),
+      symlink(pluginSkillDir, join(projectDir, '.gemini', 'skills', 'weixin-mp')),
+      symlink(pluginSkillDir, join(projectDir, '.kimi', 'skills', 'weixin-mp')),
+    ]);
+    await writeCapabilitiesConfig(projectDir, {
+      version: 2,
+      capabilities: [
+        {
+          id: 'weixin-mp',
+          type: 'skill',
+          enabled: true,
+          source: 'cat-cafe',
+          pluginId: 'weixin-mp',
+        },
+        {
+          id: 'cat-cafe-limb',
+          type: 'mcp',
+          enabled: true,
+          source: 'cat-cafe',
+          mcpServer: { command: 'node', args: [join(projectDir, 'packages/mcp-server/dist/limb.js')] },
+        },
+      ],
+    });
+
+    process.env.HOME = homeDir;
+    const app = Fastify();
+    await app.register(skillsRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/skills?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.body);
+      const weixin = body.skills.find((skill) => skill.name === 'weixin-mp');
+      assert.ok(weixin, 'plugin-owned weixin-mp skill should be present');
+      assert.equal(weixin.category, '插件');
+      assert.equal(weixin.description, '微信公众号文章发布');
+      assert.equal(weixin.trigger, '微信、公众号');
+      assert.deepEqual(weixin.mounts, { claude: true, codex: true, gemini: true, kimi: true });
+      assert.deepEqual(weixin.requiresMcp, [{ id: 'cat-cafe-limb', status: 'unresolved' }]);
+      assert.equal(body.summary.total, body.skills.length);
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it('POST /api/skills/sync mounts enabled plugin skill and unmounts disabled plugin skill', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';

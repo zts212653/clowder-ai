@@ -137,10 +137,35 @@ function isNonPluginCatCafeSkillCapability(item: CapabilityBoardItem): boolean {
   return item.type === 'skill' && item.source === 'cat-cafe' && !item.pluginId;
 }
 
+function normalizeMounts(mounts: Record<string, boolean> | undefined, fallback: boolean): SkillMount {
+  return {
+    claude: mounts?.claude ?? fallback,
+    codex: mounts?.codex ?? fallback,
+    gemini: mounts?.gemini ?? fallback,
+    kimi: mounts?.kimi ?? fallback,
+  };
+}
+
+function mountFallbackForCapability(cap: CapabilityBoardItem): boolean {
+  const hasExplicitMount = MOUNT_POINT_KEYS.some((key) => typeof cap.mounts?.[key] === 'boolean');
+  if (hasExplicitMount) return false;
+  return !!cap.pluginId && Object.keys(cap.cats ?? {}).length > 0;
+}
+
+function controlsFromCapability(cap: CapabilityBoardItem): SettingsSkillItem['controls'] {
+  return {
+    source: cap.source,
+    enabled: cap.globalEnabled ?? cap.enabled,
+    cats: cap.cats ?? {},
+    canToggle: true,
+  };
+}
+
 export function composeSkillItems(governance: SkillsData, capabilityItems: CapabilityBoardItem[]): SettingsSkillItem[] {
   const capMap = new Map<string, CapabilityBoardItem>();
   const firstPartyCatCafeCapMap = new Map<string, CapabilityBoardItem>();
   for (const item of capabilityItems) {
+    if (item.type !== 'skill') continue;
     capMap.set(item.id, item);
     if (isNonPluginCatCafeSkillCapability(item)) {
       firstPartyCatCafeCapMap.set(item.id, item);
@@ -150,7 +175,7 @@ export function composeSkillItems(governance: SkillsData, capabilityItems: Capab
   const staleNewNames = new Set(governance.staleness?.newSkills ?? []);
   const staleRemovedNames = new Set(governance.staleness?.removedSkills ?? []);
 
-  return governance.skills.map((skill) => {
+  const rows = governance.skills.map((skill) => {
     const isCatCafeSourceSkill = (skill.source ?? 'cat-cafe') === 'cat-cafe';
     const cap = (isCatCafeSourceSkill ? firstPartyCatCafeCapMap.get(skill.name) : undefined) ?? capMap.get(skill.name);
     const legacyMountedCount = getMountedCount(skill.mounts);
@@ -181,14 +206,37 @@ export function composeSkillItems(governance: SkillsData, capabilityItems: Capab
         isStaleNew: staleNewNames.has(skill.name),
         isStaleRemoved: staleRemovedNames.has(skill.name),
       },
-      controls: cap
-        ? {
-            source: cap.source,
-            enabled: cap.globalEnabled ?? cap.enabled,
-            cats: cap.cats ?? {},
-            canToggle: true,
-          }
-        : null,
+      controls: cap ? controlsFromCapability(cap) : null,
     };
   });
+
+  const governedNames = new Set(governance.skills.map((skill) => skill.name));
+  for (const cap of capMap.values()) {
+    if (governedNames.has(cap.id)) continue;
+    const mounts = normalizeMounts(cap.mounts, mountFallbackForCapability(cap));
+    const mountedCount = getMountedCount(mounts);
+    rows.push({
+      id: cap.id,
+      name: cap.id,
+      category: cap.category ?? (cap.pluginId ? '插件' : '未分类'),
+      trigger: (cap.triggers ?? []).join('、'),
+      description: cap.description,
+      source: cap.source,
+      mountPaths: cap.mountPaths,
+      pluginId: cap.pluginId,
+      governance: {
+        mounts,
+        mountedCount,
+        requiredMountCount: MOUNT_POINT_KEYS.length,
+        allMounted: mountedCount === MOUNT_POINT_KEYS.length,
+        enabledMountPoints: MOUNT_POINT_KEYS,
+        requiresMcp: [],
+        isStaleNew: false,
+        isStaleRemoved: false,
+      },
+      controls: controlsFromCapability(cap),
+    });
+  }
+
+  return rows;
 }

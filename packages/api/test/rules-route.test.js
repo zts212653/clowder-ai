@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import Fastify from 'fastify';
 
 const { isLegacySkillProjectPath, readL0Prompts, loadAvailableCatsForL0, readRulesPayload } = await import(
   '../dist/routes/rules.js'
 );
+const { rulesRoutes } = await import('../dist/routes/rules.js');
 
 function findProjectRoot() {
   let dir = dirname(fileURLToPath(import.meta.url));
@@ -58,6 +60,33 @@ describe('rules route data sources', () => {
     assert.equal(isLegacySkillProjectPath('/Volumes/project', roots), true);
     assert.equal(isLegacySkillProjectPath('/opt/private-project', roots), false);
     assert.equal(isLegacySkillProjectPath('/srv/private-project', roots), false);
+  });
+
+  it('returns the real source path for plugin skills mounted through provider symlinks', async () => {
+    const projectDir = join('/tmp', `rules-route-plugin-skill-${process.pid}-${Date.now()}`);
+    const pluginSkillDir = join(projectDir, 'plugins', 'weixin-mp', 'skills', 'weixin-mp');
+    const claudeSkillsDir = join(projectDir, '.claude', 'skills');
+    mkdirSync(pluginSkillDir, { recursive: true });
+    mkdirSync(claudeSkillsDir, { recursive: true });
+    writeFileSync(join(pluginSkillDir, 'SKILL.md'), '# weixin-mp\n');
+    symlinkSync(pluginSkillDir, join(claudeSkillsDir, 'weixin-mp'), 'dir');
+
+    const app = Fastify();
+    await app.register(rulesRoutes);
+    await app.ready();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/rules/skill/weixin-mp?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: { 'x-cat-cafe-user': 'test-user' },
+      });
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.body);
+      assert.equal(body.path, realpathSync(join(pluginSkillDir, 'SKILL.md')));
+    } finally {
+      await app.close();
+      rmSync(projectDir, { recursive: true, force: true });
+    }
   });
 });
 

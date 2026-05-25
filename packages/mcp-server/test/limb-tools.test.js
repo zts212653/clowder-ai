@@ -16,24 +16,24 @@ import {
 
 describe('limb-tools schema', () => {
   it('limbListAvailableInputSchema has correct shape', () => {
-    assert.equal(limbListAvailableInputSchema.type, 'object');
-    assert.ok(limbListAvailableInputSchema.properties.capability);
-    assert.ok(limbListAvailableInputSchema.properties.agentKeyCatId);
+    assert.ok(limbListAvailableInputSchema.capability.isOptional());
+    assert.ok(limbListAvailableInputSchema.agentKeyCatId.isOptional());
   });
 
   it('limbInvokeInputSchema has required fields', () => {
-    assert.equal(limbInvokeInputSchema.type, 'object');
-    assert.ok(limbInvokeInputSchema.properties.nodeId);
-    assert.ok(limbInvokeInputSchema.properties.command);
-    assert.ok(limbInvokeInputSchema.properties.agentKeyCatId);
-    assert.deepEqual(limbInvokeInputSchema.required, ['nodeId', 'command']);
+    assert.ok(limbInvokeInputSchema.nodeId.safeParse('weixin-mp').success);
+    assert.ok(limbInvokeInputSchema.command.safeParse('weixin_mp.check_status').success);
+    assert.equal(limbInvokeInputSchema.nodeId.safeParse('').success, false);
+    assert.equal(limbInvokeInputSchema.command.safeParse('').success, false);
+    assert.ok(limbInvokeInputSchema.params.isOptional());
+    assert.ok(limbInvokeInputSchema.agentKeyCatId.isOptional());
   });
 
   it('pairing schemas expose agentKeyCatId for shared Antigravity MCP', () => {
-    assert.equal(limbPairListInputSchema.type, 'object');
-    assert.ok(limbPairListInputSchema.properties.agentKeyCatId);
-    assert.equal(limbPairApproveInputSchema.type, 'object');
-    assert.ok(limbPairApproveInputSchema.properties.agentKeyCatId);
+    assert.ok(limbPairListInputSchema.agentKeyCatId.isOptional());
+    assert.ok(limbPairApproveInputSchema.requestId.safeParse('pair-1').success);
+    assert.equal(limbPairApproveInputSchema.requestId.safeParse('').success, false);
+    assert.ok(limbPairApproveInputSchema.agentKeyCatId.isOptional());
   });
 
   it('limbTools array has 4 tools', () => {
@@ -51,6 +51,13 @@ describe('limb-tools schema', () => {
       assert.ok(tool.inputSchema, 'missing inputSchema');
       assert.equal(typeof tool.handler, 'function', 'handler must be function');
     }
+  });
+
+  it('limb_invoke schema is a Zod raw shape, not a JSON Schema wrapper', () => {
+    const invokeTool = limbTools.find((tool) => tool.name === 'limb_invoke');
+    assert.ok(invokeTool);
+    assert.deepEqual(Object.keys(invokeTool.inputSchema), ['nodeId', 'command', 'params', 'agentKeyCatId']);
+    assert.ok(invokeTool.inputSchema.nodeId.safeParse('weixin-mp').success);
   });
 });
 

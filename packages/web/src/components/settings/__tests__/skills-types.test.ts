@@ -208,6 +208,45 @@ describe('composeSkillItems', () => {
     expect(result[0].controls?.enabled).toBe(true);
   });
 
+  it('includes plugin skill capabilities that are not in governance skills', () => {
+    const governance: SkillsData = {
+      skills: [],
+      summary: { total: 0, allMounted: true, registrationConsistent: true },
+      staleness: null,
+    };
+    const caps: CapabilityBoardItem[] = [
+      {
+        id: 'weixin-mp',
+        type: 'skill',
+        source: 'cat-cafe',
+        enabled: true,
+        cats: { codex: true },
+        pluginId: 'weixin-mp',
+        description: '微信公众号文章发布',
+        triggers: ['微信', '公众号'],
+      },
+    ];
+
+    const result = composeSkillItems(governance, caps);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      id: 'weixin-mp',
+      name: 'weixin-mp',
+      category: '插件',
+      trigger: '微信、公众号',
+      description: '微信公众号文章发布',
+      pluginId: 'weixin-mp',
+      controls: {
+        source: 'cat-cafe',
+        enabled: true,
+        cats: { codex: true },
+        canToggle: true,
+      },
+    });
+    expect(result[0].governance.mountedCount).toBe(4);
+  });
+
   it('uses mount-point-aware mount health when disabled mount points are intentionally unmounted', () => {
     const governance: SkillsData = {
       skills: [
