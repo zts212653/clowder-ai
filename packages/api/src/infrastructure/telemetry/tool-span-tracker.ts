@@ -12,8 +12,10 @@
  * - `start(toolName, toolUseId, input)` → creates an open child span on the
  *   invocation span. Basic (non-MCP) tools bypass span creation and bump the
  *   `tool.basic_call_count` counter on the invocation span instead.
- * - `end(toolUseId, status, resultMeta?)` → closes the span with status from
+ * - `end(toolUseId, status)` → closes the span with status from
  *   `toolResultStatus` (KD-38). No-op when toolUseId is unknown.
+ *   Deliberately does NOT accept a result body / metadata parameter —
+ *   keeps tool result bodies out of span attrs (Phase J Out-of-scope boundary).
  * - `endAllOrphans(reason)` → AC-J4 finally cleanup. Called from invocation
  *   lifecycle finally block to drain spans whose `tool_result` never arrived
  *   (abort/error/timeout).
