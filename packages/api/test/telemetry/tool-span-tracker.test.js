@@ -71,7 +71,6 @@ test('F153 Phase J AC-J5: isMcpToolName recognizes all 4 patterns (mcp__ / mcp: 
 
 // ── Behavioral: ToolSpanTracker lifecycle (real OTel exporter) ──────
 
-const { trace: traceApi } = await import('@opentelemetry/api');
 const { InMemorySpanExporter, SimpleSpanProcessor, NodeTracerProvider } = await import('@opentelemetry/sdk-trace-node');
 
 const otelExporter = new InMemorySpanExporter();
