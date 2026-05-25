@@ -35,8 +35,8 @@ test('F153 Phase J AC-J3: tool-span-tracker.ts exports ToolSpanTracker class', (
     'should have start(toolName, toolUseId, ...) API',
   );
   assert.ok(
-    src.includes('end(toolUseId: string, status: ToolResultStatus'),
-    'should have end(toolUseId, status, ...) API',
+    src.includes('end(toolUseId: string, status: ToolResultStatus)'),
+    'should have end(toolUseId, status) API — no result body parameter (砚砚 R1 P2)',
   );
   assert.ok(src.includes('endAllOrphans('), 'should have endAllOrphans for AC-J4');
 });
@@ -146,14 +146,43 @@ test('F153 Phase J AC-J6(c): error result sets span status ERROR + tool.result.s
   const tracker = new ToolSpanTracker(invocationSpan, 'opus');
 
   tracker.start('mcp__cat-cafe__cat_cafe_post_message', 'use-err', {});
-  tracker.end('use-err', 'error', { errorMessage: 'timeout' });
+  tracker.end('use-err', 'error');
   invocationSpan.end();
 
   const spans = otelExporter.getFinishedSpans();
   const toolSpan = spans.find((s) => s.attributes['tool.use_id'] === 'use-err');
   assert.equal(toolSpan.status.code, 2, 'OTel status ERROR (code=2)');
   assert.equal(toolSpan.attributes['tool.result.status'], 'error', 'tool.result.status=error attribute');
-  assert.equal(toolSpan.attributes['tool.result.errorMessage'], 'timeout', 'resultMeta scalar copied to attribute');
+  // 砚砚 R1 P2: tracker.end deliberately does NOT accept result body / resultMeta.
+  // Per spec "Out of scope: Tool input/result body 写入 span attr — 保持低敏".
+  // Only the structured status is attached; freeform fields would bypass redactor coverage.
+  assert.equal(toolSpan.attributes['tool.result.errorMessage'], undefined, 'no freeform result body in span attrs');
+});
+
+test('F153 Phase J AC-J3 (砚砚 R1 P3): tool_use span is child of invocation span (parent-child wiring)', () => {
+  otelExporter.reset();
+  const invocationSpan = otelTracer.startSpan('cat_cafe.invocation');
+  const tracker = new ToolSpanTracker(invocationSpan, 'opus');
+
+  tracker.start('mcp__cat-cafe__cat_cafe_post_message', 'use-parent-check', {});
+  tracker.end('use-parent-check', 'ok');
+  invocationSpan.end();
+
+  const spans = otelExporter.getFinishedSpans();
+  const toolSpan = spans.find((s) => s.attributes['tool.use_id'] === 'use-parent-check');
+  assert.ok(toolSpan, 'tool span should be present');
+  // Hub trace tree relies on parentSpanId pointing at invocation span — this is the
+  // contract that makes the tool show up as a child node, not as an orphan trace.
+  assert.equal(
+    toolSpan.parentSpanContext?.spanId ?? toolSpan.parentSpanId,
+    invocationSpan.spanContext().spanId,
+    'tool span parent must be invocation span (Hub trace tree contract)',
+  );
+  assert.equal(
+    toolSpan.spanContext().traceId,
+    invocationSpan.spanContext().traceId,
+    'tool span shares invocation trace id',
+  );
 });
 
 test('F153 Phase J AC-J6(d) / AC-J4: endAllOrphans marks unresolved spans as aborted', () => {

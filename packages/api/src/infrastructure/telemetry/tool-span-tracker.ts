@@ -22,6 +22,7 @@
 import { context, type Span, SpanStatusCode, trace } from '@opentelemetry/api';
 import { isMcpToolName } from '../../domains/cats/services/tool-usage/classify.js';
 import { AGENT_ID, TOOL_CATEGORY, TOOL_INPUT_KEYS, TOOL_NAME } from './genai-semconv.js';
+import { recordToolUseSpan } from './span-helpers.js';
 
 const tracer = trace.getTracer('cat-cafe-api', '0.1.0');
 
@@ -37,8 +38,6 @@ function classifyToolCategory(toolName: string): string | undefined {
   return undefined;
 }
 
-const basicToolCallCounts = new WeakMap<Span, number>();
-
 export type ToolResultStatus = 'ok' | 'error' | 'unknown';
 
 export class ToolSpanTracker {
@@ -53,13 +52,18 @@ export class ToolSpanTracker {
    * Start a tool_use span. Returns the span for advanced callers, or `undefined`
    * for basic tools (which bump the invocation-span counter and emit no child span).
    *
+   * Basic-tool path delegates to `recordToolUseSpan` from `span-helpers.ts` so
+   * the `tool.basic_call_count` WeakMap state is shared with the legacy fallback
+   * call site (KD-40 + R1 fix per cloud Codex: prevents undercount during the
+   * partial-wiring migration window when some msg path goes through tracker and
+   * some through legacy).
+   *
    * Duplicate `start(toolUseId)` is a no-op (re-emitted event); returns existing span.
    */
   start(toolName: string, toolUseId: string, toolInput?: Record<string, unknown>): Span | undefined {
     if (!isMcpToolName(toolName)) {
-      const prev = (basicToolCallCounts.get(this.invocationSpan) ?? 0) + 1;
-      basicToolCallCounts.set(this.invocationSpan, prev);
-      this.invocationSpan.setAttribute('tool.basic_call_count', prev);
+      // Delegate to shared WeakMap in span-helpers.ts (counter state unified)
+      recordToolUseSpan(this.invocationSpan, this.catId, toolName, toolInput);
       return undefined;
     }
 
@@ -89,8 +93,12 @@ export class ToolSpanTracker {
    * Close a tool_use span with the given status. No-op when toolUseId is
    * unknown (either a basic tool that bypassed span creation, or a `tool_result`
    * without a matching `tool_use`).
+   *
+   * Per Phase J spec "Out of scope: Tool input/result body 写入 span attr — 保持
+   * 低敏，只存 keys + status, 不存正文" — does NOT accept a resultMeta blob.
+   * Only the structured `status` is attached as an attribute.
    */
-  end(toolUseId: string, status: ToolResultStatus, resultMeta?: Record<string, unknown>): void {
+  end(toolUseId: string, status: ToolResultStatus): void {
     const span = this.spans.get(toolUseId);
     if (!span) return;
 
@@ -99,13 +107,6 @@ export class ToolSpanTracker {
       span.setStatus({ code: SpanStatusCode.OK });
     } else if (status === 'error') {
       span.setStatus({ code: SpanStatusCode.ERROR });
-    }
-    if (resultMeta) {
-      for (const [k, v] of Object.entries(resultMeta)) {
-        if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
-          span.setAttribute(`tool.result.${k}`, v);
-        }
-      }
     }
     span.end();
     this.spans.delete(toolUseId);
