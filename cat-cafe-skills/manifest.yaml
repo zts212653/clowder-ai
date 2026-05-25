@@ -1,9 +1,10 @@
 # Cat Café Skills Manifest — 路由单一真相源
-# 所有 skill 的触发规则、排除条件、产出契约、链式导航在此定义。
+# 所有 skill 的触发规则、排除条件、产出契约、skill-to-skill next 链在此定义。
+# SOP stage / suggested skill / hard rules / pitfalls 的机器真相源是 sop-definitions/development.yaml。
 # CLAUDE.md / AGENTS.md / GEMINI.md 的路由表当前手工同步（Wave 2 计划自动生成）。
 # lint 规则：pnpm check:skills（Wave 2 计划增强为 manifest 一致性校验）
 #
-# 更新日期：2026-02-28
+# 更新日期：2026-05-23
 # 来源决策：F042 三层信息架构
 
 # ─── 开发流程链 ─────────────────────────────────────────
@@ -1075,54 +1076,6 @@ iron_laws:
     rule: "同一个体不能 review 自己的代码（跨 family 优先，可降级到同 family 不同个体）"
   - id: no-impersonation
     rule: "不能冒充其他猫，身份是硬约束常量"
-
-# ─── F073 P4: SOP 导航牌 ──────────────────────────────
-# 阶段 → 建议 skill → 硬规则 → 常见坑
-# 告示牌哲学：猫看了自己决定行动，这里只给导航信息。
-# SystemPromptBuilder 读 workflow-sop stage 后在此查找对应导航。
-sop_navigation:
-  kickoff:
-    suggested_skill: feat-lifecycle
-    hard_rules:
-      - "Feature spec 必须有 AC + 需求点 checklist"
-    pitfalls:
-      - "没有铲屎官确认就直接开始实现"
-  impl:
-    suggested_skill: tdd
-    hard_rules:
-      - "worktree 开之前必须 main 双向同步 (ahead=0 behind=0)"
-      - "Redis 只用 6398，禁碰 6399"
-    pitfalls:
-      - "跳过 Design Gate 直接写代码"
-      - "压缩后忘了当前在做什么"
-  quality_gate:
-    suggested_skill: quality-gate
-    hard_rules:
-      - "自检报告必须包含愿景覆盖度"
-    pitfalls:
-      - "声称完成但没跑全量测试"
-  review:
-    suggested_skill: request-review
-    hard_rules:
-      - "同一个体不能 review 自己的代码"
-      - "Review 请求必须附原始需求摘录"
-    pitfalls:
-      - "收到 P1 修完后没 re-trigger review"
-  merge:
-    suggested_skill: merge-gate
-    hard_rules:
-      - "必须用 gh pr merge --squash（禁止本地 squash）"
-      - "云端 review 同一 SHA 不重复触发"
-    pitfalls:
-      - "本地 squash + push + gh pr close（PR 显示 closed 不是 merged）"
-      - "合入后擅自更新 runtime"
-  completion:
-    suggested_skill: feat-lifecycle
-    hard_rules:
-      - "feat close 前必须跨猫愿景守护"
-      - "PR merged + check:features 通过"
-    pitfalls:
-      - "没有 @ 其他猫做愿景守护就直接 close"
 
 # ─── lint 规则 ──────────────────────────────────────────
 lint:

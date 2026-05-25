@@ -65,6 +65,9 @@ interface GroupKey {
   originBucket: 'stream' | 'callback';
 }
 
+type TurnSegmentByRecord = WeakMap<ChatMessage, number>;
+type StreamSegmentsByBaseKey = Map<string, Map<string, number>>;
+
 function getBaseInvocationKey(msg: ChatMessage): string | null {
   if (msg.type !== 'assistant') return null;
   if (!msg.catId) return null;
@@ -73,19 +76,27 @@ function getBaseInvocationKey(msg: ChatMessage): string | null {
   return `${msg.catId}::${inv}`;
 }
 
-function bubbleGroupKey(msg: ChatMessage, streamIdsByBaseKey: Map<string, Set<string>>): GroupKey | null {
+function bubbleGroupKey(
+  msg: ChatMessage,
+  streamSegmentsByBaseKey: StreamSegmentsByBaseKey,
+  turnSegmentByRecord: TurnSegmentByRecord,
+): GroupKey | null {
   if (msg.type !== 'assistant') return null;
   if (!msg.catId) return null;
   const inv = getBubbleInvocationId(msg as ChatMessage);
   if (!inv) return null;
+  const turnSegment = turnSegmentByRecord.get(msg) ?? 0;
   if (msg.origin === 'callback') {
     const baseKey = `${msg.catId}::${inv}`;
-    if (msg.id && streamIdsByBaseKey.get(baseKey)?.has(msg.id)) {
-      return { catId: msg.catId, invocationId: inv, originBucket: 'stream' };
+    if (msg.id) {
+      const streamTurnSegment = streamSegmentsByBaseKey.get(baseKey)?.get(msg.id);
+      if (streamTurnSegment !== undefined) {
+        return { catId: msg.catId, invocationId: `${inv}::turn:${streamTurnSegment}`, originBucket: 'stream' };
+      }
     }
     return { catId: msg.catId, invocationId: msg.id ?? inv, originBucket: 'callback' };
   }
-  return { catId: msg.catId, invocationId: inv, originBucket: 'stream' };
+  return { catId: msg.catId, invocationId: `${inv}::turn:${turnSegment}`, originBucket: 'stream' };
 }
 
 function compareRecords(a: ChatMessage, b: ChatMessage): number {
@@ -93,6 +104,36 @@ function compareRecords(a: ChatMessage, b: ChatMessage): number {
   const bt = b.timestamp ?? 0;
   if (at !== bt) return at - bt;
   return (a.id ?? '').localeCompare(b.id ?? '');
+}
+
+function buildTurnSegments(records: ChatMessage[]): TurnSegmentByRecord {
+  const turnSegmentByRecord = new WeakMap<ChatMessage, number>();
+  let segment = 0;
+  for (const record of records.slice().sort(compareRecords)) {
+    if (record.type === 'user') {
+      segment += 1;
+    }
+    turnSegmentByRecord.set(record, segment);
+  }
+  return turnSegmentByRecord;
+}
+
+function buildStreamSegmentsByBaseKey(
+  records: ChatMessage[],
+  turnSegmentByRecord: TurnSegmentByRecord,
+): StreamSegmentsByBaseKey {
+  const streamSegmentsByBaseKey: StreamSegmentsByBaseKey = new Map();
+  for (const r of records) {
+    if (r.origin !== 'stream' || !r.id) continue;
+    const baseKey = getBaseInvocationKey(r);
+    if (!baseKey) continue;
+    const turnSegment = turnSegmentByRecord.get(r);
+    if (turnSegment === undefined) continue;
+    const segmentsById = streamSegmentsByBaseKey.get(baseKey);
+    if (segmentsById) segmentsById.set(r.id, turnSegment);
+    else streamSegmentsByBaseKey.set(baseKey, new Map([[r.id, turnSegment]]));
+  }
+  return streamSegmentsByBaseKey;
 }
 
 function projectGroup(records: ChatMessage[]): ChatMessage {
@@ -222,19 +263,11 @@ function projectGroup(records: ChatMessage[]): ChatMessage {
 export function projectCanonicalBubbles({ records }: ProjectionInput): ProjectionOutput {
   const groupedKeys = new Map<string, ChatMessage[]>();
   const passthrough: ChatMessage[] = [];
-  const streamIdsByBaseKey = new Map<string, Set<string>>();
+  const turnSegmentByRecord = buildTurnSegments(records);
+  const streamSegmentsByBaseKey = buildStreamSegmentsByBaseKey(records, turnSegmentByRecord);
 
   for (const r of records) {
-    if (r.origin !== 'stream' || !r.id) continue;
-    const baseKey = getBaseInvocationKey(r);
-    if (!baseKey) continue;
-    const ids = streamIdsByBaseKey.get(baseKey);
-    if (ids) ids.add(r.id);
-    else streamIdsByBaseKey.set(baseKey, new Set([r.id]));
-  }
-
-  for (const r of records) {
-    const k = bubbleGroupKey(r, streamIdsByBaseKey);
+    const k = bubbleGroupKey(r, streamSegmentsByBaseKey, turnSegmentByRecord);
     if (!k) {
       passthrough.push(r);
       continue;

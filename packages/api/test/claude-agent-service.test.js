@@ -5,9 +5,9 @@
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { mock, test } from 'node:test';
 import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
@@ -89,12 +89,170 @@ function emitClaudeEvents(proc, events) {
   proc.stdout.end();
 }
 
+/** Fake L0 compiler: records the call + writes content to outPath. */
+function buildFakeL0Compiler(content = 'COMPILED-L0-FOR-CAT') {
+  const fn = async ({ catId, outPath }) => {
+    fn.calls.push({ catId, outPath });
+    if (outPath) writeFileSync(outPath, content, 'utf8');
+    return content;
+  };
+  fn.calls = [];
+  return fn;
+}
+
+function createClaudeAgentService(options = {}) {
+  return new ClaudeAgentService({ l0CompilerFn: buildFakeL0Compiler(), ...options });
+}
+
 // --- Test cases ---
+
+test('F203 AC-C5: -p carrier passes --system-prompt-file with compiled L0 path', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const l0CompilerFn = buildFakeL0Compiler('L0 for opus-47');
+  const service = createClaudeAgentService({
+    catId: 'opus-47',
+    spawnFn,
+    model: 'claude-test-model',
+    l0CompilerFn,
+  });
+
+  const promise = collect(service.invoke('hi'));
+  emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  assert.equal(l0CompilerFn.calls.length, 1);
+  assert.equal(l0CompilerFn.calls[0].catId, 'opus-47');
+  const l0Path = l0CompilerFn.calls[0].outPath;
+  assert.ok(l0Path && l0Path.length > 0, 'compiler called with an outPath');
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  assert.ok(args.includes('-p'), 'still uses print carrier');
+  const flagIdx = args.indexOf('--system-prompt-file');
+  assert.ok(flagIdx >= 0, `--system-prompt-file present in argv: ${args.join(' ')}`);
+  assert.equal(args[flagIdx + 1], l0Path);
+  assert.ok(!args.includes('--append-system-prompt'), 'native L0 must not ride append-system-prompt');
+});
+
+test('F203 AC-C5: -p carrier removes compiled L0 temp dir after success', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const l0CompilerFn = buildFakeL0Compiler('L0 for opus-47');
+  const service = createClaudeAgentService({
+    catId: 'opus-47',
+    spawnFn,
+    model: 'claude-test-model',
+    l0CompilerFn,
+  });
+
+  const promise = collect(service.invoke('hi'));
+  emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const l0Path = l0CompilerFn.calls[0].outPath;
+  assert.equal(existsSync(l0Path), false, 'compiled L0 file is removed after success');
+  assert.equal(existsSync(dirname(l0Path)), false, 'compiled L0 temp dir is removed after success');
+});
+
+test('F203 AC-C5: -p carrier advertises native L0 injection to route layer', () => {
+  const service = createClaudeAgentService({ model: 'claude-test-model' });
+
+  assert.equal(service.injectsL0Natively(), true);
+});
+
+test('F203 AC-C5: -p carrier reports L0 compile failure without spawning claude and removes temp dir', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const failingCompiler = async ({ outPath }) => {
+    failingCompiler.outPath = outPath;
+    if (outPath) writeFileSync(outPath, 'partial L0', 'utf8');
+    throw new Error('compiler exploded');
+  };
+  failingCompiler.outPath = undefined;
+  const service = createClaudeAgentService({
+    catId: 'opus-47',
+    spawnFn,
+    model: 'claude-test-model',
+    l0CompilerFn: failingCompiler,
+  });
+
+  const msgs = await collect(service.invoke('hi'));
+
+  assert.equal(spawnFn.mock.calls.length, 0, 'claude must not spawn when L0 compile fails');
+  assert.equal(msgs.length, 2);
+  assert.equal(msgs[0].type, 'error');
+  assert.match(msgs[0].error, /L0 compile failed.*opus-47.*compiler exploded/);
+  assert.equal(msgs[1].type, 'done');
+  assert.ok(failingCompiler.outPath);
+  assert.equal(existsSync(failingCompiler.outPath), false, 'partial L0 file is removed after compile failure');
+  assert.equal(existsSync(dirname(failingCompiler.outPath)), false, 'L0 temp dir is removed after compile failure');
+});
+
+test('F203 AC-C5: -p carrier removes compiled L0 temp dir after CLI failure', async () => {
+  const proc = createMockProcess();
+  proc.kill = mock.fn(() => true);
+  const spawnFn = createMockSpawnFn(proc);
+  const l0CompilerFn = buildFakeL0Compiler('L0 for opus-47');
+  const service = createClaudeAgentService({
+    catId: 'opus-47',
+    spawnFn,
+    model: 'claude-test-model',
+    l0CompilerFn,
+  });
+
+  const promise = collect(service.invoke('crash'));
+  proc.stderr.write('Error: authentication failed\n');
+  proc.stdout.end();
+  emitProcessExit(proc, 1, null);
+  await promise;
+
+  const l0Path = l0CompilerFn.calls[0].outPath;
+  assert.equal(existsSync(l0Path), false, 'compiled L0 file is removed after CLI failure');
+  assert.equal(existsSync(dirname(l0Path)), false, 'compiled L0 temp dir is removed after CLI failure');
+});
+
+test('F203 AC-C5: cliConfigArgs cannot override reserved Claude system prompt flags', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const l0CompilerFn = buildFakeL0Compiler('L0 for opus-47');
+  const service = createClaudeAgentService({
+    catId: 'opus-47',
+    spawnFn,
+    model: 'claude-test-model',
+    l0CompilerFn,
+  });
+
+  const promise = collect(
+    service.invoke('hi', {
+      cliConfigArgs: [
+        '--system-prompt-file /tmp/attacker.md',
+        '--append-system-prompt ATTACKER_APPEND',
+        '--append-system-prompt-file ./attacker-append.md',
+        '--append-system-prompt-file=./attacker-append-equals.md',
+        '--system-prompt=ATTACKER_REPLACE',
+      ],
+    }),
+  );
+  emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  const l0Path = l0CompilerFn.calls[0].outPath;
+  assert.equal(args.filter((arg) => arg === '--system-prompt-file').length, 1);
+  assert.equal(args[args.indexOf('--system-prompt-file') + 1], l0Path);
+  assert.ok(!args.includes('/tmp/attacker.md'));
+  assert.ok(!args.includes('--append-system-prompt'));
+  assert.ok(!args.includes('ATTACKER_APPEND'));
+  assert.ok(!args.includes('--append-system-prompt-file'));
+  assert.ok(!args.includes('./attacker-append.md'));
+  assert.ok(!args.some((arg) => arg.startsWith('--append-system-prompt-file=')));
+  assert.ok(!args.some((arg) => arg.startsWith('--system-prompt=')));
+});
 
 test('yields session_init, text, and done on basic success', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('Hello'));
 
@@ -117,7 +275,7 @@ test('yields session_init, text, and done on basic success', async () => {
 test('handles tool_use content blocks', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('read file'));
 
@@ -149,7 +307,7 @@ test('handles tool_use content blocks', async () => {
 test('handles mixed text and tool_use in single assistant message', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('do stuff'));
 
@@ -182,7 +340,7 @@ test('handles mixed text and tool_use in single assistant message', async () => 
 test('passes --resume flag when sessionId is provided', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('continue', { sessionId: 'resume-123' }));
   emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
@@ -196,7 +354,7 @@ test('passes --resume flag when sessionId is provided', async () => {
 test('does not include --resume when no sessionId', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('hello'));
   emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
@@ -209,7 +367,7 @@ test('does not include --resume when no sessionId', async () => {
 test('passes cwd from workingDirectory option', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('hi', { workingDirectory: '/my/project' }));
   emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
@@ -227,7 +385,7 @@ test('preserves inherited Anthropic credentials when no profile mode override is
 
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   try {
     const promise = collect(
@@ -261,7 +419,7 @@ test('F062: subscription profile clears inherited ANTHROPIC env vars', async () 
 
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   try {
     const promise = collect(
@@ -296,7 +454,7 @@ test('F062: api_key profile injects ANTHROPIC_API_KEY and ANTHROPIC_BASE_URL', a
 
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   try {
     const promise = collect(
@@ -358,7 +516,7 @@ test('pickGitBashPathFromWhere skips System32 bash.exe when a Git Bash candidate
 test('yields error on result/error event', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('bad'));
 
@@ -375,7 +533,7 @@ test('yields error on CLI non-zero exit', async () => {
   // Override kill to not auto-exit (we control exit manually)
   proc.kill = mock.fn(() => true);
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('crash'));
 
@@ -396,7 +554,7 @@ test('yields actionable rescue hint on invalid thinking signature resume failure
   const proc = createMockProcess();
   proc.kill = mock.fn(() => true);
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('resume me', { sessionId: 'sess-bad-thinking' }));
 
@@ -419,7 +577,7 @@ test('does not duplicate error when result/error is followed by non-zero exit', 
   const proc = createMockProcess();
   proc.kill = mock.fn(() => true);
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('bad'));
 
@@ -444,7 +602,7 @@ test('includes exit signal in CLI error message when no exit code (stderr saniti
   const proc = createMockProcess();
   proc.kill = mock.fn(() => true);
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('crash'));
 
@@ -465,7 +623,7 @@ test('yields error on spawn ENOENT', async () => {
   const proc = createMockProcess();
   proc.kill = mock.fn(() => true);
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('hi'));
 
@@ -486,7 +644,7 @@ test('yields error on spawn ENOENT', async () => {
 test('ignores system/hook and unknown event types', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('test'));
 
@@ -507,7 +665,7 @@ test('ignores system/hook and unknown event types', async () => {
 test('all messages have catId opus', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('check'));
 
@@ -527,7 +685,7 @@ test('passes correct model flag (default and custom)', async () => {
   // Default model
   const proc1 = createMockProcess();
   const spawnFn1 = createMockSpawnFn(proc1);
-  const service1 = new ClaudeAgentService({ spawnFn: spawnFn1 });
+  const service1 = createClaudeAgentService({ spawnFn: spawnFn1 });
 
   const p1 = collect(service1.invoke('hi'));
   emitClaudeEvents(proc1, [{ type: 'result', subtype: 'success' }]);
@@ -542,7 +700,7 @@ test('passes correct model flag (default and custom)', async () => {
   // Custom model (explicit constructor param)
   const proc2 = createMockProcess();
   const spawnFn2 = createMockSpawnFn(proc2);
-  const service2 = new ClaudeAgentService({ spawnFn: spawnFn2, model: 'haiku' });
+  const service2 = createClaudeAgentService({ spawnFn: spawnFn2, model: 'haiku' });
 
   const p2 = collect(service2.invoke('hi'));
   emitClaudeEvents(proc2, [{ type: 'result', subtype: 'success' }]);
@@ -562,7 +720,7 @@ test('F32-b P1 regression: env var CAT_*_MODEL overrides default when model not 
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     // NOTE: explicit catId, no `model` param — matches the fixed index.ts pattern
-    const service = new ClaudeAgentService({ catId: 'opus', spawnFn });
+    const service = createClaudeAgentService({ catId: 'opus', spawnFn });
 
     const p = collect(service.invoke('hi'));
     emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
@@ -585,7 +743,7 @@ test('F32-b P1 regression: env var CAT_*_MODEL overrides default when model not 
 test('passes --include-partial-messages flag for incremental stream-json output', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('stream please'));
   emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
@@ -598,7 +756,7 @@ test('passes --include-partial-messages flag for incremental stream-json output'
 test('streams text deltas from stream_event without duplicating final assistant payload', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('delta test'));
 
@@ -645,7 +803,7 @@ test('streams text deltas from stream_event without duplicating final assistant 
 test('does not pass --allowedTools — all tools available by default', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('hi'));
   emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
@@ -731,7 +889,7 @@ test('falls back to default MCP path when CAT_CAFE_MCP_SERVER_PATH is empty', as
     process.chdir(apiCwd);
     process.env.CAT_CAFE_MCP_SERVER_PATH = '';
 
-    const service = new ClaudeAgentService({ spawnFn });
+    const service = createClaudeAgentService({ spawnFn });
     const promise = collect(
       service.invoke('hello', {
         callbackEnv: {
@@ -763,7 +921,7 @@ test('falls back to default MCP path when CAT_CAFE_MCP_SERVER_PATH is empty', as
 test('F8: result/success extracts usage into done metadata', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('Hello'));
 
@@ -796,7 +954,7 @@ test('F8: result/success extracts usage into done metadata', async () => {
 test('F24: extracts contextWindowSize from result.modelUsage (camelCase)', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('Context window test'));
 
@@ -826,7 +984,7 @@ test('F24: extracts contextWindowSize from result.modelUsage (camelCase)', async
 test('F24: extracts contextWindowSize from result.model_usage (snake_case)', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('snake case test'));
 
@@ -852,7 +1010,7 @@ test('F24: extracts contextWindowSize from result.model_usage (snake_case)', asy
 test('F8: normalises inputTokens to include cache tokens (Claude API → total)', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('cache test'));
 
@@ -887,7 +1045,7 @@ test('F8: normalises inputTokens to include cache tokens (Claude API → total)'
 test('F24-fix: lastTurnInputTokens extracted from last message_start usage', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('multi-turn'));
 
@@ -956,7 +1114,7 @@ test('F24-fix: lastTurnInputTokens extracted from last message_start usage', asy
 test('F24-fix: lastTurnInputTokens is undefined when no message_start has usage', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('no-stream'));
 
@@ -985,7 +1143,7 @@ test('F24-fix: lastTurnInputTokens is undefined when no message_start has usage'
 test('F24-fix: lastTurnInputTokens resets when final message_start has no usage (no stale carryover)', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(service.invoke('stale-test'));
 
@@ -1045,7 +1203,7 @@ test('F24-fix: lastTurnInputTokens resets when final message_start has no usage 
 test('third-party model (glm-5): omits --model flag and injects ANTHROPIC_MODEL env var', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(
     service.invoke('hello', {
@@ -1075,7 +1233,7 @@ test('third-party model (glm-5): omits --model flag and injects ANTHROPIC_MODEL 
 test('native Anthropic model (claude-sonnet-4-6): keeps --model flag, no ANTHROPIC_MODEL env var', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new ClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn });
 
   const promise = collect(
     service.invoke('hello', {

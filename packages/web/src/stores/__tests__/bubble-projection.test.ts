@@ -74,6 +74,72 @@ describe('F194 Phase Z8 — projectCanonicalBubbles (AC-Z20)', () => {
     expect(messages.map((m) => m.content).sort()).toEqual(['turn 1', 'turn 2']);
   });
 
+  it('does not merge legacy parent-key stream records across a user turn', () => {
+    const records: ChatMessage[] = [
+      { id: 'u1', type: 'user', content: 'first prompt', timestamp: 100 },
+      {
+        id: 'a1',
+        type: 'assistant',
+        catId: 'opus',
+        content: 'first answer',
+        origin: 'stream',
+        timestamp: 200,
+        extra: { stream: { invocationId: 'legacy-parent' } },
+      },
+      { id: 'u2', type: 'user', content: 'second prompt', timestamp: 300 },
+      {
+        id: 'a2',
+        type: 'assistant',
+        catId: 'opus',
+        content: 'second answer',
+        origin: 'stream',
+        timestamp: 400,
+        extra: { stream: { invocationId: 'legacy-parent' } },
+      },
+    ];
+
+    const { messages } = projectCanonicalBubbles({ records });
+
+    expect(messages.map((m) => m.id)).toEqual(['u1', 'a1', 'u2', 'a2']);
+    expect(messages.find((m) => m.id === 'a1')?.content).toBe('first answer');
+    expect(messages.find((m) => m.id === 'a2')?.content).toBe('second answer');
+  });
+
+  it('keeps exact-key callback final in the matched stream group after a later user turn', () => {
+    const records: ChatMessage[] = [
+      { id: 'u1', type: 'user', content: 'first prompt', timestamp: 100 },
+      {
+        id: 'stream-1',
+        type: 'assistant',
+        catId: 'opus',
+        content: 'stream answer',
+        origin: 'stream',
+        timestamp: 200,
+        isStreaming: true,
+        extra: { stream: { invocationId: 'legacy-parent' } },
+      },
+      { id: 'u2', type: 'user', content: 'second prompt', timestamp: 300 },
+      {
+        id: 'stream-1',
+        type: 'assistant',
+        catId: 'opus',
+        content: 'callback final',
+        origin: 'callback',
+        timestamp: 400,
+        isStreaming: false,
+        extra: { stream: { invocationId: 'legacy-parent' } },
+      },
+    ];
+
+    const { messages } = projectCanonicalBubbles({ records });
+
+    expect(messages.map((m) => m.id)).toEqual(['u1', 'stream-1', 'u2']);
+    const bubble = messages.find((m) => m.id === 'stream-1')!;
+    expect(bubble.content).toContain('stream answer');
+    expect(bubble.content).toContain('callback final');
+    expect(bubble.isStreaming).toBe(false);
+  });
+
   it('R1 P1#1 (砚砚): isStreaming = LAST record explicit value when no callback (not ANY)', () => {
     // Per R1 P1: rule is callback/terminal-aware, fallback to last record's explicit value.
     // Old earlier record streaming, later record finalized → bubble = false (not ANY=true).

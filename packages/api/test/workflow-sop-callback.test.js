@@ -60,6 +60,7 @@ function createInMemoryWorkflowSopStore() {
       const sop = existing
         ? {
             ...existing,
+            sopDefinitionId: input.sopDefinitionId ?? existing.sopDefinitionId ?? 'development',
             stage: input.stage ?? existing.stage,
             batonHolder: input.batonHolder ?? existing.batonHolder,
             version: existing.version + 1,
@@ -69,6 +70,7 @@ function createInMemoryWorkflowSopStore() {
         : {
             featureId,
             backlogItemId,
+            sopDefinitionId: input.sopDefinitionId ?? 'development',
             stage: input.stage ?? 'kickoff',
             batonHolder: input.batonHolder ?? updatedBy,
             nextSkill: null,
@@ -134,9 +136,47 @@ describe('WorkflowSop callback route', () => {
     assert.equal(res.statusCode, 200);
     const sop = JSON.parse(res.payload);
     assert.equal(sop.featureId, 'F073');
+    assert.equal(sop.sopDefinitionId, 'development');
     assert.equal(sop.stage, 'impl');
     assert.equal(sop.updatedBy, 'opus'); // extracted from invocation context
     assert.equal(sop.version, 1);
+  });
+
+  it('accepts runtime sopDefinitionId via callback and rejects schema-only stubs', async () => {
+    const ok = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/update-workflow-sop',
+      headers: {
+        'content-type': 'application/json',
+        'x-invocation-id': INVOCATION_ID,
+        'x-callback-token': CALLBACK_TOKEN,
+      },
+      payload: {
+        backlogItemId: 'item-1',
+        featureId: 'F073',
+        sopDefinitionId: 'development',
+        stage: 'impl',
+      },
+    });
+    assert.equal(ok.statusCode, 200);
+    assert.equal(JSON.parse(ok.payload).sopDefinitionId, 'development');
+
+    const bad = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/update-workflow-sop',
+      headers: {
+        'content-type': 'application/json',
+        'x-invocation-id': INVOCATION_ID,
+        'x-callback-token': CALLBACK_TOKEN,
+      },
+      payload: {
+        backlogItemId: 'item-1',
+        featureId: 'F073',
+        sopDefinitionId: 'video-cocreation',
+        stage: 'impl',
+      },
+    });
+    assert.equal(bad.statusCode, 400);
   });
 
   it('rejects invalid credentials', async () => {

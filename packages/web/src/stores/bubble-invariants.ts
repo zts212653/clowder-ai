@@ -9,6 +9,7 @@ import type {
 } from '@cat-cafe/shared';
 import { getBubbleInvocationId } from '@/debug/bubbleIdentity';
 import type { ChatMessage } from './chat-types';
+import { crossesUserTurnBoundary } from './turn-boundary';
 
 type BubbleInvariantContext = {
   threadId: string;
@@ -154,6 +155,10 @@ export function findBubbleStoreInvariantViolations(
       seen.set(key, { identity, message });
       continue;
     }
+    if (existing.message.id !== message.id && crossesUserTurnBoundary(messages, existing.message, message)) {
+      seen.set(key, { identity, message });
+      continue;
+    }
 
     violations.push(
       makeViolation(
@@ -190,6 +195,7 @@ export function validateIncomingBubbleEvent(
     }
 
     if (existingKey !== incomingKey) continue;
+    if (existing.id !== incoming.id && crossesUserTurnBoundary(existingMessages, existing, incoming)) continue;
 
     const existingPhase = deriveBubbleOriginPhase(existing);
     if (existingPhase && phaseRank[incomingPhase] < phaseRank[existingPhase]) {

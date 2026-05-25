@@ -19,7 +19,7 @@ triggers:
 
 **Announce at start:** "I'm using the writing-plans skill to create the implementation plan."
 
-**Context:** This should be run in a dedicated worktree (created by `worktree` skill).
+**Context:** Write the plan on main before opening a feature worktree. After the plan is committed, continue to `worktree` and then `tdd`.
 
 **开工前 Recall（F102 记忆系统）🔴**：写计划前先搜相关历史——`search_evidence("{feature}")` 找相关 spec/ADR/讨论，避免重复造轮子。
 
@@ -129,4 +129,4 @@ git commit -m "feat: add specific feature"
 
 ## 下一步
 
-计划写完 → **直接加载 `worktree`**（创建隔离开发环境）→ `tdd`（开始实现）。SOP 链条自动推进（§17）。
+计划写完并提交 → **直接加载 `worktree`**（创建隔离开发环境）→ `tdd`（开始实现）。SOP 链条自动推进（§17）。

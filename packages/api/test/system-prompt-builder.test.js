@@ -1474,12 +1474,14 @@ describe('SystemPromptBuilder', () => {
       sopStageHint: {
         stage: 'impl',
         suggestedSkill: 'tdd',
+        suggestedSkillSource: 'override',
         featureId: 'F073',
       },
     });
     assert.ok(ctx.includes('SOP'), 'Should contain SOP label');
     assert.ok(ctx.includes('impl'), 'Should contain current stage');
     assert.ok(ctx.includes('tdd'), 'Should contain suggested skill');
+    assert.ok(ctx.includes('override'), 'Should contain suggested skill source');
     assert.ok(ctx.includes('F073'), 'Should contain feature ID');
   });
 
@@ -1586,7 +1588,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('SOP:'), 'Should not contain SOP line when no hint');
   });
 
-  test('buildInvocationContext SOP hint omits suggestedSkill when null', async () => {
+  test('buildInvocationContext SOP hint includes definition-sourced skill', async () => {
     const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const ctx = buildInvocationContext({
       catId: 'opus',
@@ -1594,15 +1596,17 @@ describe('SystemPromptBuilder', () => {
       teammates: [],
       mcpAvailable: false,
       sopStageHint: {
-        stage: 'review',
-        suggestedSkill: null,
+        stage: 'impl',
+        suggestedSkill: 'writing-plans',
+        suggestedSkillSource: 'definition',
         featureId: 'F080',
       },
     });
     assert.ok(ctx.includes('SOP'), 'Should contain SOP label');
-    assert.ok(ctx.includes('review'), 'Should contain stage');
+    assert.ok(ctx.includes('impl'), 'Should contain stage');
+    assert.ok(ctx.includes('writing-plans'), 'Should contain definition skill');
+    assert.ok(ctx.includes('definition'), 'Should contain source');
     assert.ok(ctx.includes('F080'), 'Should contain feature ID');
-    assert.ok(!ctx.includes('skill'), 'Should not contain skill reference when null');
   });
 
   test('buildSystemPrompt size stays under 3900 chars with SOP hint after Magic Words + runtime prompt growth', async () => {

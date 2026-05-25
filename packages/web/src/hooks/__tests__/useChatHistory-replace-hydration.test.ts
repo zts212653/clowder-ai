@@ -574,6 +574,72 @@ describe('useChatHistory replace hydration', () => {
     );
   });
 
+  it('preserves a newer local assistant turn when a legacy parent invocation is reused after a user turn', async () => {
+    const history = installDeferredHistoryResponse();
+    const now = Date.now();
+    const cachedMessages: ChatMessage[] = [
+      { id: 'user-1', type: 'user', content: 'first prompt', timestamp: now - 5_000 },
+      {
+        id: 'reply-1',
+        type: 'assistant',
+        catId: 'opus',
+        content: 'first answer',
+        origin: 'callback',
+        timestamp: now - 4_000,
+        extra: { stream: { invocationId: 'legacy-parent' } },
+      },
+      { id: 'user-2', type: 'user', content: 'second prompt', timestamp: now - 3_000 },
+    ];
+    mountReplaceHydrationThread({
+      ...makeThreadBState(now - 5_000, {
+        catInvocations: { opus: { invocationId: 'legacy-parent', startedAt: now - 2_500 } },
+      }),
+      messages: cachedMessages,
+    });
+
+    act(() => {
+      useChatStore.getState().addMessage({
+        id: 'reply-2-live',
+        type: 'assistant',
+        catId: 'opus',
+        content: 'second answer still streaming locally',
+        timestamp: now - 1_000,
+        isStreaming: true,
+        origin: 'stream',
+        extra: { stream: { invocationId: 'legacy-parent' } },
+      });
+    });
+
+    await history.waitUntilPending();
+    history.expectPending();
+
+    await history.resolve({
+      messages: [
+        { id: 'user-1', type: 'user', content: 'first prompt', timestamp: now - 5_000 },
+        {
+          id: 'reply-1',
+          catId: 'opus',
+          content: 'first answer',
+          origin: 'callback',
+          timestamp: now - 4_000,
+          extra: { stream: { invocationId: 'legacy-parent' } },
+        },
+        { id: 'user-2', type: 'user', content: 'second prompt', timestamp: now - 3_000 },
+      ],
+      hasMore: false,
+    });
+
+    expect(useChatStore.getState().messages.map((m) => m.id)).toEqual(['user-1', 'reply-1', 'user-2', 'reply-2-live']);
+    expect(useChatStore.getState().messages.find((m) => m.id === 'reply-1')?.content).toBe('first answer');
+    expect(useChatStore.getState().messages.find((m) => m.id === 'reply-2-live')).toEqual(
+      expect.objectContaining({
+        content: 'second answer still streaming locally',
+        isStreaming: true,
+        origin: 'stream',
+      }),
+    );
+  });
+
   it('preserves local CLI payload when hydration returns the same callback id without tool metadata', async () => {
     const history = installDeferredHistoryResponse();
     const cachedAssistantTs = Date.now() - 1_000;

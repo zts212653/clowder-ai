@@ -97,6 +97,7 @@ export async function handleSearchEvidence(input: {
   collections?: string | undefined;
   explain?: boolean | undefined;
 }): Promise<ToolResult> {
+  const { dimension = 'project' } = input;
   const params = new URLSearchParams({ q: input.query });
   if (input.limit != null) params.set('limit', String(input.limit));
   if (input.scope) params.set('scope', input.scope);
@@ -106,7 +107,7 @@ export async function handleSearchEvidence(input: {
   if (input.dateTo) params.set('dateTo', input.dateTo);
   if (input.contextWindow != null) params.set('contextWindow', String(input.contextWindow));
   if (input.threadId) params.set('threadId', input.threadId);
-  if (input.dimension) params.set('dimension', input.dimension);
+  params.set('dimension', dimension);
   if (input.collections) params.set('collections', input.collections);
   if (input.explain) params.set('explain', 'true');
 

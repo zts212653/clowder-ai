@@ -353,6 +353,42 @@ describe('writeClaudeMcpConfig', () => {
     assert.equal(data.mcpServers.test.cwd, '/tmp');
   });
 
+  it('injects workspace env into managed Cat Cafe servers', async () => {
+    const file = join(dir, '.mcp.json');
+    const originalAwd = process.env.ALLOWED_WORKSPACE_DIRS;
+    const originalWs = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    try {
+      delete process.env.ALLOWED_WORKSPACE_DIRS;
+      process.env.CAT_CAFE_WORKSPACE_ROOT = '/path/to/project';
+
+      await writeClaudeMcpConfig(file, [
+        { name: 'cat-cafe', command: 'node', args: ['index.js'], enabled: true, source: 'cat-cafe' },
+        {
+          name: 'cat-cafe-memory',
+          command: 'node',
+          args: ['memory.js'],
+          enabled: true,
+          source: 'cat-cafe',
+          env: { ALLOWED_WORKSPACE_DIRS: '/stale/workspace', EXTRA_FLAG: 'keep-me' },
+        },
+        { name: 'external', command: 'echo', args: [], enabled: true, source: 'external' },
+      ]);
+
+      const data = JSON.parse(await readFile(file, 'utf-8'));
+      assert.equal(data.mcpServers['cat-cafe'].env.ALLOWED_WORKSPACE_DIRS, '/path/to/project');
+      assert.deepEqual(data.mcpServers['cat-cafe-memory'].env, {
+        ALLOWED_WORKSPACE_DIRS: '/path/to/project',
+        EXTRA_FLAG: 'keep-me',
+      });
+      assert.equal(data.mcpServers.external.env, undefined);
+    } finally {
+      if (originalAwd === undefined) delete process.env.ALLOWED_WORKSPACE_DIRS;
+      else process.env.ALLOWED_WORKSPACE_DIRS = originalAwd;
+      if (originalWs === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = originalWs;
+    }
+  });
+
   it('creates parent directories', async () => {
     const file = join(dir, 'sub', 'dir', '.mcp.json');
     await writeClaudeMcpConfig(file, []);
@@ -396,6 +432,48 @@ describe('writeCodexMcpConfig', () => {
     assert.ok(raw.includes('[model]'));
     assert.ok(raw.includes('name = "gpt-4"'));
     assert.ok(raw.includes('[mcp_servers.test]'));
+  });
+
+  it('injects workspace env into managed Cat Cafe servers', async () => {
+    const file = join(dir, 'config.toml');
+    const originalAwd = process.env.ALLOWED_WORKSPACE_DIRS;
+    const originalWs = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    try {
+      delete process.env.ALLOWED_WORKSPACE_DIRS;
+      process.env.CAT_CAFE_WORKSPACE_ROOT = '/path/to/project';
+
+      await writeCodexMcpConfig(file, [
+        { name: 'cat-cafe', command: 'node', args: ['index.js'], enabled: true, source: 'cat-cafe' },
+        {
+          name: 'cat-cafe-memory',
+          command: 'node',
+          args: ['memory.js'],
+          enabled: true,
+          source: 'cat-cafe',
+          env: { ALLOWED_WORKSPACE_DIRS: '/stale/workspace', EXTRA_FLAG: 'keep-me' },
+        },
+        { name: 'external', command: 'echo', args: [], enabled: true, source: 'external' },
+      ]);
+
+      const servers = await readCodexMcpConfig(file);
+      const main = servers.find((server) => server.name === 'cat-cafe');
+      const memory = servers.find((server) => server.name === 'cat-cafe-memory');
+      const external = servers.find((server) => server.name === 'external');
+      assert.ok(main);
+      assert.equal(main.env?.ALLOWED_WORKSPACE_DIRS, '/path/to/project');
+      assert.ok(memory);
+      assert.deepEqual(memory.env, {
+        ALLOWED_WORKSPACE_DIRS: '/path/to/project',
+        EXTRA_FLAG: 'keep-me',
+      });
+      assert.ok(external);
+      assert.equal(external.env, undefined);
+    } finally {
+      if (originalAwd === undefined) delete process.env.ALLOWED_WORKSPACE_DIRS;
+      else process.env.ALLOWED_WORKSPACE_DIRS = originalAwd;
+      if (originalWs === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = originalWs;
+    }
   });
 });
 
@@ -1174,26 +1252,46 @@ describe('round-trip: read → write → read', () => {
   });
 
   it('Claude .mcp.json round-trips correctly', async () => {
-    const servers = [
-      {
-        name: 'cat-cafe',
-        command: 'node',
-        args: ['./mcp/index.js'],
-        env: { PORT: '3000' },
-        enabled: true,
-        source: /** @type {const} */ ('cat-cafe'),
-      },
-      { name: 'fs', command: 'npx', args: ['-y', '@mcp/fs'], enabled: true, source: /** @type {const} */ ('external') },
-    ];
+    const originalAwd = process.env.ALLOWED_WORKSPACE_DIRS;
+    const originalWs = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    try {
+      delete process.env.ALLOWED_WORKSPACE_DIRS;
+      process.env.CAT_CAFE_WORKSPACE_ROOT = '/path/to/project';
+      const servers = [
+        {
+          name: 'cat-cafe',
+          command: 'node',
+          args: ['./mcp/index.js'],
+          env: { PORT: '3000' },
+          enabled: true,
+          source: /** @type {const} */ ('cat-cafe'),
+        },
+        {
+          name: 'fs',
+          command: 'npx',
+          args: ['-y', '@mcp/fs'],
+          enabled: true,
+          source: /** @type {const} */ ('external'),
+        },
+      ];
 
-    const file = join(dir, '.mcp.json');
-    await writeClaudeMcpConfig(file, servers);
-    const roundTripped = await readClaudeMcpConfig(file);
+      const file = join(dir, '.mcp.json');
+      await writeClaudeMcpConfig(file, servers);
+      const roundTripped = await readClaudeMcpConfig(file);
 
-    assert.equal(roundTripped.length, 2);
-    assert.equal(roundTripped[0].name, 'cat-cafe');
-    assert.equal(roundTripped[0].command, 'node');
-    assert.deepEqual(roundTripped[0].env, { PORT: '3000' });
+      assert.equal(roundTripped.length, 2);
+      assert.equal(roundTripped[0].name, 'cat-cafe');
+      assert.equal(roundTripped[0].command, 'node');
+      assert.deepEqual(roundTripped[0].env, {
+        ALLOWED_WORKSPACE_DIRS: '/path/to/project',
+        PORT: '3000',
+      });
+    } finally {
+      if (originalAwd === undefined) delete process.env.ALLOWED_WORKSPACE_DIRS;
+      else process.env.ALLOWED_WORKSPACE_DIRS = originalAwd;
+      if (originalWs === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = originalWs;
+    }
   });
 
   it('Codex config.toml round-trips correctly', async () => {

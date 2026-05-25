@@ -496,6 +496,21 @@ export class MessageStore {
     return matches.reverse();
   }
 
+  getByThreadIncludingQueued(threadId: string, limit?: number, userId?: string): StoredMessage[] {
+    const n = limit ?? DEFAULT_LIMIT;
+    const matches: StoredMessage[] = [];
+
+    for (let i = this.messages.length - 1; i >= 0 && matches.length < n; i--) {
+      const msg = this.messages[i]!;
+      if (msg.threadId !== threadId) continue;
+      if (msg.deletedAt) continue;
+      if (msg.deliveryStatus === 'canceled') continue;
+      if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
+      matches.push(msg);
+    }
+    return matches.reverse();
+  }
+
   /**
    * Get messages in a thread after a specific message ID (exclusive), oldest first.
    * If afterId is undefined, returns messages from thread start.

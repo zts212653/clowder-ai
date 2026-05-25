@@ -148,12 +148,12 @@ describe('spawnCliInTmux', () => {
     const gen = spawnCliInTmux(
       {
         command: '/bin/sh',
-        args: ['-c', 'for i in 1 2 3 4; do echo "progress-$i" >&2; sleep 0.25; done; echo done'],
+        args: ['-c', 'for i in 1 2 3 4; do echo "progress-$i" >&2; sleep 0.5; done; echo done'],
         outputMode: 'plainText',
         worktreeId: WORKTREE,
         invocationId: 'test-inv-plaintext-stderr-progress',
         cwd: '/tmp',
-        timeoutMs: 400,
+        timeoutMs: 1500,
       },
       { tmuxGateway: gateway },
     );

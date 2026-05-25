@@ -805,12 +805,43 @@ export function ensureCatCafeMainServer(
   //   - hasManagedLimb: managed cat-cafe-limb already in config?
   //   - hasAnyLimbId: any entry (managed OR external) using cat-cafe-limb id?
   //   - canAddManagedLimb: we can safely add managed limb iff no ID collision
+  //   - hasSameRepoExternalLimb: F193 PCFU — `source: external` cat-cafe-limb
+  //     whose binary points to the repo-owned `packages/mcp-server/dist/limb.js`.
+  //     User manually configured the same binary we'd add ourselves, so the
+  //     limb tool surface is effectively available even though the entry is
+  //     not managed. Counts toward `willHaveManagedLimb` so legacy `cat-cafe`
+  //     can be safely removed (F209 D.0 dogfood, 2026-05-24).
   //   - willHaveManagedLimb: end-state will have managed limb iff already
-  //     present OR we'll add one
+  //     present OR we'll add one OR same-repo external limb provides surface
   const hasManagedLimb = config.capabilities.some((cap) => isManagedSplit(cap) && cap.id === 'cat-cafe-limb');
   const hasAnyLimbId = config.capabilities.some((cap) => cap.type === 'mcp' && cap.id === 'cat-cafe-limb');
   const canAddManagedLimb = !hasAnyLimbId;
-  const willHaveManagedLimb = hasManagedLimb || canAddManagedLimb;
+  // F193 PCFU AC-PCFU-1: detect external entries whose binary IS the repo's
+  // own limb. Suffix match on `packages/mcp-server/dist/limb.js` is specific
+  // enough to avoid false positives (no other server name collides) and
+  // handles binaryRoot/CAT_CAFE_RUNTIME_ROOT drift gracefully — the user
+  // might have absolute-pathed a prior worktree but the trailing structure
+  // remains identical because we ship the binary there.
+  //
+  // Cloud codex review #1883 P1 fix (2026-05-24): also require `enabled: true`.
+  // The R4 P1 fail-safe philosophy is "don't remove legacy unless limb is
+  // ACTUALLY available". A disabled external limb won't expose tools via
+  // `resolveServersForCat`, so it doesn't satisfy the availability condition.
+  //
+  // Cloud codex review #1883 P2 fix (2026-05-24): normalize backslash to
+  // forward slash before suffix match. Windows `resolve(...)` yields
+  // backslash-separated paths; without normalization the suffix check fails
+  // silently on Windows installs that use the same-repo external limb shape.
+  const isSameRepoExternalLimb = (cap: CapabilityEntry): boolean => {
+    if (cap.type !== 'mcp' || cap.id !== 'cat-cafe-limb' || cap.source !== 'external') return false;
+    if (cap.enabled !== true) return false;
+    const arg0 = cap.mcpServer?.args?.[0];
+    if (typeof arg0 !== 'string') return false;
+    const posixArg = arg0.replace(/\\/g, '/');
+    return posixArg.endsWith('packages/mcp-server/dist/limb.js');
+  };
+  const hasSameRepoExternalLimb = config.capabilities.some(isSameRepoExternalLimb);
+  const willHaveManagedLimb = hasManagedLimb || canAddManagedLimb || hasSameRepoExternalLimb;
 
   // Capture legacy managed `cat-cafe` settings BEFORE any decision. Limb
   // tools were piggybacked on the all-in-one `cat-cafe` server (via

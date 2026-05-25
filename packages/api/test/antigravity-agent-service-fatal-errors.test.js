@@ -3628,6 +3628,117 @@ describe('AntigravityAgentService (Bridge) — fatal errors', () => {
     assert.equal(record.journalSummarySnapshot.entries[0].status, 'pending');
   });
 
+  test('retries receipt conflict after native-dispatched read-only GitHub PR inspection', async () => {
+    const supervisorStore = new InMemoryAntigravitySupervisorStore();
+    const bridge = createMockBridge();
+    bridge.nativeExecuteAndPush = mock.fn(async (step) => step.type === 'CORTEX_STEP_TYPE_RUN_COMMAND');
+    let sessionIndex = 0;
+    bridge.getOrCreateSession = async () => ['cascade-readonly-gh-1', 'cascade-readonly-gh-2'][sessionIndex++];
+    bridge.pollForSteps = async function* (cascadeId) {
+      if (cascadeId === 'cascade-readonly-gh-1') {
+        yield {
+          steps: [
+            {
+              type: 'CORTEX_STEP_TYPE_RUN_COMMAND',
+              status: 'CORTEX_STEP_STATUS_WAITING',
+              metadata: {
+                toolCall: {
+                  id: 'toolu_readonly_gh_pr_view',
+                  name: 'run_command',
+                  argumentsJson: JSON.stringify({
+                    CommandLine:
+                      'gh pr view 1863 --json title,body,state,headRefName,baseRefName,files,reviews,comments,additions,deletions,changedFiles',
+                    Cwd: '/tmp',
+                    SafeToAutoRun: true,
+                  }),
+                },
+                sourceTrajectoryStepInfo: {
+                  cascadeId: 'cascade-readonly-gh-1',
+                  trajectoryId: 'traj-readonly-gh-1',
+                  stepIndex: 1,
+                },
+              },
+            },
+          ],
+          cursor: { baselineStepCount: 0, lastDeliveredStepCount: 1, terminalSeen: false, lastActivityAt: Date.now() },
+        };
+        yield {
+          steps: [
+            {
+              type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+              status: 'FINISHED',
+              errorMessage: {
+                error: {
+                  userErrorMessage: 'Error: 工具调用失败',
+                },
+              },
+            },
+          ],
+          cursor: { baselineStepCount: 1, lastDeliveredStepCount: 2, terminalSeen: true, lastActivityAt: Date.now() },
+        };
+        return;
+      }
+
+      yield {
+        steps: [
+          {
+            type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+            status: 'FINISHED',
+            plannerResponse: { response: 'Recovered after retry-safe GitHub PR read.' },
+          },
+        ],
+        cursor: { baselineStepCount: 0, lastDeliveredStepCount: 1, terminalSeen: true, lastActivityAt: Date.now() },
+      };
+    };
+
+    const service = new AntigravityAgentService({
+      catId: 'antigravity',
+      model: 'gemini-3.1-pro',
+      bridge,
+      supervisorStore,
+      modelCapacityRetryDelaysMs: [0],
+    });
+    const messages = await collect(
+      service.invoke('hello', {
+        auditContext: {
+          threadId: 'thread-readonly-gh-retry',
+          invocationId: 'inv-readonly-gh-retry',
+          userId: 'u1',
+          catId: 'antigravity',
+        },
+      }),
+    );
+
+    assert.equal(
+      bridge.nativeExecuteAndPush.mock.calls.filter(
+        (call) => call.arguments[0]?.metadata?.toolCall?.id === 'toolu_readonly_gh_pr_view',
+      ).length,
+      1,
+      'native executor should dispatch the original read-only gh command once',
+    );
+    assert.equal(bridge.resetSession.mock.callCount(), 1, 'read-only receipt conflict should retry a fresh cascade');
+    assert.deepEqual(
+      messages.filter((msg) => msg.type === 'text').map((msg) => msg.content),
+      ['Recovered after retry-safe GitHub PR read.'],
+    );
+    assert.equal(
+      messages.some((msg) => msg.type === 'error' && msg.errorCode === 'upstream_error'),
+      false,
+      'retry-safe read-only receipt conflict should not surface the upstream tool failure',
+    );
+    assert.equal(
+      messages.some((msg) => msg.type === 'system_info' && msg.content?.includes('"antigravity_recovery"')),
+      false,
+      'retry-safe read-only receipt conflict should not create a resumable recovery card',
+    );
+
+    const record = await supervisorStore.get('inv-readonly-gh-retry', 'cascade-readonly-gh-1');
+    assert.ok(record, 'native read dispatch may keep liveness evidence');
+    assert.notEqual(record.status, 'resumable', 'retry-safe read-only conflict should not persist manual recovery');
+    assert.notEqual(record.recoveryStrategy, 'manual_card', 'retry-safe read-only conflict should not create a card');
+    assert.equal(record.journalSummarySnapshot.entries.length, 0);
+  });
+
   test('suppresses Antigravity assistant-prefill tail error after terminal text', async () => {
     const supervisorStore = new InMemoryAntigravitySupervisorStore();
     const bridge = createMockBridge({ cascadeId: 'cascade-f201-terminal-prefill-tail' });

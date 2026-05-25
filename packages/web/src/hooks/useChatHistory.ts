@@ -9,6 +9,7 @@ import type { QueueEntry, TaskProgressItem } from '@/stores/chat-types';
 import { type CatInvocationInfo, type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
 import type { TaskItem } from '@/stores/taskStore';
 import { useTaskStore } from '@/stores/taskStore';
+import { crossesUserTurnBoundary } from '@/stores/turn-boundary';
 import { apiFetch } from '@/utils/api-client';
 import {
   loadThreadMessages as loadCachedMessages,
@@ -388,6 +389,13 @@ export function mergeReplaceHydrationMessages(
     const streamHit = streamKey ? historyIndexByStableId.get(streamKey) : undefined;
     let target = idHit?.matchKind === 'id' ? idHit : streamHit?.matchKind === 'stream-key' ? streamHit : undefined;
     let msgForMerge = msg;
+    if (
+      target?.matchKind === 'stream-key' &&
+      mergedMsgs[target.index]?.id !== msg.id &&
+      crossesUserTurnBoundary([...historyMsgs, ...currentMsgs], mergedMsgs[target.index]!, msg)
+    ) {
+      target = undefined;
+    }
 
     // Live race: active stream may start as invocationless, while `/api/messages`
     // already returns the running server draft `draft-{invocationId}` for the same

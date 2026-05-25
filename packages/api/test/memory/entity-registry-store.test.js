@@ -64,6 +64,39 @@ describe('F209 entity registry storage', () => {
     assert.deepEqual(entity.aliases.sort(), ['CVO', '铲屎官'].sort());
   });
 
+  it('updates stored alias surfaces when only alias casing changes', async () => {
+    await store.upsertEntities([
+      {
+        entityId: 'person:landy',
+        type: 'person',
+        canonicalName: 'You',
+        aliases: ['CVO'],
+        provenance: [{ source: 'initial seed' }],
+        updatedAt: '2026-05-20T00:00:00Z',
+      },
+    ]);
+
+    await store.upsertEntities([
+      {
+        entityId: 'person:landy',
+        type: 'person',
+        canonicalName: 'You',
+        aliases: ['cvo'],
+        provenance: [{ source: 'initial seed' }],
+        updatedAt: '2026-05-21T00:00:00Z',
+      },
+    ]);
+
+    const entity = await store.getEntity('person:landy');
+    assert.deepEqual(entity.aliases, ['cvo']);
+
+    const matches = await store.resolveEntityAliases('CVO asked about recall');
+    assert.deepEqual(
+      matches.map((m) => [m.entityId, m.matchedAlias]),
+      [['person:landy', 'cvo']],
+    );
+  });
+
   it('normalizes aliases without host-locale case folding', async () => {
     const { normalizeEntityAlias } = await import('../../dist/domains/memory/EntityRegistry.js');
     const original = String.prototype.toLocaleLowerCase;

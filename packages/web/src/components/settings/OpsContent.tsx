@@ -19,9 +19,9 @@ export function OpsContent() {
   const searchParams = useSearchParams();
   const opsParam = searchParams.get('ops');
   const obsRaw = searchParams.get('obs');
-  const OBS_VALID: ReadonlySet<string> = new Set(['overview', 'traces', 'health', 'callback-auth']);
+  const OBS_VALID: ReadonlySet<string> = new Set(['overview', 'traces', 'health', 'callback-auth', 'eval']);
   const obsParam =
-    obsRaw && OBS_VALID.has(obsRaw) ? (obsRaw as 'overview' | 'traces' | 'health' | 'callback-auth') : null;
+    obsRaw && OBS_VALID.has(obsRaw) ? (obsRaw as 'overview' | 'traces' | 'health' | 'callback-auth' | 'eval') : null;
   const validOpsParam = useMemo(
     () => (opsParam && OPS_SUBSECTIONS.some((s) => s.id === opsParam) ? opsParam : null),
     [opsParam],
@@ -68,7 +68,7 @@ function OpsSubsectionContent({
   nonce,
 }: {
   subsection: string;
-  obsSubTab?: 'overview' | 'traces' | 'health' | 'callback-auth' | null;
+  obsSubTab?: 'overview' | 'traces' | 'health' | 'callback-auth' | 'eval' | null;
   nonce: number;
 }) {
   switch (subsection) {

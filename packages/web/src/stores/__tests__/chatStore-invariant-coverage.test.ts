@@ -77,6 +77,41 @@ describe('F183 Phase E AC-E2 — chatStore mutation path invariant coverage', ()
     // stable identity in store.
   });
 
+  it('addMessage: same legacy parent invocation does not merge assistant turns across a user turn', () => {
+    useChatStore.setState({
+      messages: [],
+      currentThreadId: 'thread-A',
+    });
+    useChatStore.getState().addMessage(
+      makeBubble({
+        id: 'reply-1',
+        origin: 'callback',
+        content: 'first answer',
+        timestamp: 1000,
+        extra: { stream: { invocationId: 'legacy-parent' } },
+      }),
+    );
+    useChatStore.getState().addMessage({
+      id: 'user-2',
+      type: 'user',
+      content: 'second prompt',
+      timestamp: 2000,
+    });
+    useChatStore.getState().addMessage(
+      makeBubble({
+        id: 'reply-2',
+        origin: 'callback',
+        content: 'second answer',
+        timestamp: 3000,
+        extra: { stream: { invocationId: 'legacy-parent' } },
+      }),
+    );
+
+    expect(useChatStore.getState().messages.map((m) => m.id)).toEqual(['reply-1', 'user-2', 'reply-2']);
+    expect(useChatStore.getState().messages.find((m) => m.id === 'reply-1')?.content).toBe('first answer');
+    expect(useChatStore.getState().messages.find((m) => m.id === 'reply-2')?.content).toBe('second answer');
+  });
+
   // addMessageToThread (active thread): TD112 dedup applies the same way.
   it('addMessageToThread (active thread): TD112 dedup prevents duplicate stable identity', () => {
     useChatStore.setState({

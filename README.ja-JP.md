@@ -57,16 +57,18 @@
 
 ## サポートされているエージェント
 
-Clowder はモデル非依存です。各エージェント CLI は統一された出力アダプタを介してプラグインします：
+Clowder はモデル非依存です。各エージェント CLI / adapter は統一されたメッセージ層を介してプラグインします：
 
 | エージェント CLI | モデルファミリー | 出力フォーマット | MCP | ステータス |
 |------------------|------------------|------------------|-----|------------|
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Claude (Opus / Sonnet / Haiku) | stream-json | Yes | リリース済み |
 | [Codex CLI](https://github.com/openai/codex) | GPT / Codex | json | Yes | リリース済み |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | Gemini | stream-json | Yes | リリース済み |
-| [Antigravity](https://github.com/nolanzandi/antigravity-cli) | マルチモデル | cdp-bridge | No | リリース済み |
+| [Antigravity CLI](https://antigravity.google/cli) | Gemini / Google アカウント側選択 | plain text (`agy --print`) | CLI 管理 | 非 ACP Gemini ルートのデフォルト |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | Gemini | stream-json / ACP | Yes | ACP 設定時のデフォルト、その他は明示的 fallback |
+| [Antigravity Desktop](https://antigravity.google/) | マルチモデル | cdp-bridge | コールバックブリッジ | legacy opt-in |
 | [opencode](https://github.com/sst/opencode) | マルチモデル | ndjson | Yes | リリース済み |
 
+> Google consumer Gemini CLI / Gemini Code Assist individual requests は 2026-06-18 に停止されるため、非 ACP Gemini ルートは Antigravity CLI をデフォルトにしています。ACP を持つ catalog entries は `agy` が対応 ACP mode を公開するまで `gemini --acp` を使います。enterprise/API-key fallback が必要な場合のみ `GEMINI_ADAPTER=gemini-cli` を明示してください。
 > Clowder はエージェント CLI を置き換えるものではありません — エージェントをチームとして機能させる、その*上の*層です。
 
 ## クイックスタート

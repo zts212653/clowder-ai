@@ -1,0 +1,10 @@
+id: family-office
+domain: finance
+label: Family Office SOP Stub
+description: Schema fixture only. Not part of runtime codegen.
+stages:
+  - id: research
+    label: Research
+    suggested_skill: expert-panel
+    hard_rules: []
+    pitfalls: []

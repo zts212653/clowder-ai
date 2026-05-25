@@ -71,6 +71,24 @@ test('Task 3: bg carrier passes --system-prompt-file with compiled L0 path', asy
   assert.equal(claudeCall.args[flagIdx + 1], l0Path);
 });
 
+test('Task 3 parity: bg carrier appends pack-only systemPrompt', async () => {
+  const spawnFn = buildArgCapturingSpawn();
+  const l0CompilerFn = buildFakeL0Compiler('COMPILED-L0-FOR-OPUS');
+  const service = new ClaudeBgCarrierService({
+    catId: createCatId('opus-47'),
+    spawnFn,
+    model: 'claude-test-model',
+    l0CompilerFn,
+  });
+  await service.startJob('hi', { systemPrompt: 'PACK-ONLY-BLOCK' });
+
+  const claudeCall = spawnFn.calls.find((c) => c.args.includes('--bg'));
+  assert.ok(claudeCall, 'claude --bg was spawned');
+  const appendIdx = claudeCall.args.indexOf('--append-system-prompt');
+  assert.ok(appendIdx >= 0, `--append-system-prompt present in argv: ${claudeCall.args.join(' ')}`);
+  assert.equal(claudeCall.args[appendIdx + 1], 'PACK-ONLY-BLOCK');
+});
+
 test('Task 3 fail-closed: L0 compile failure rejects startJob with CarrierError', async () => {
   const spawnFn = buildArgCapturingSpawn();
   const failingCompiler = async () => {

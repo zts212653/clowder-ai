@@ -1682,6 +1682,318 @@ describe('ensureCatCafeMainServer (F193 Phase C semantics)', () => {
       else process.env.CAT_CAFE_RUNTIME_ROOT = originalRuntime;
     }
   });
+
+  // ────────── F193 Post-close Follow-up (AC-PCFU) ──────────
+  //
+  // F209 D.0 dogfood (2026-05-24) found legacy `cat-cafe` and 4 splits
+  // co-exist when a user manually added `cat-cafe-limb` as `source: external`
+  // pointing to the SAME repo binary (`packages/mcp-server/dist/limb.js`).
+  //
+  // Phase C R4 P1 fail-safe (above) refused to remove legacy because it
+  // treats every external `cat-cafe-limb` ID collision as "foreign" — too
+  // conservative when the external entry IS the managed limb in disguise.
+  //
+  // Fix: detect same-repo limb via `args[0]` suffix and let it satisfy the
+  // "managed limb available" condition. Foreign external limb (different
+  // binary) still preserves legacy (R4 P1 contract intact).
+
+  it('F193 PCFU AC-PCFU-2: same-repo external limb → legacy cat-cafe removed (path-suffix match)', () => {
+    const config = makeConfig([
+      {
+        id: 'cat-cafe',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/index.js'] },
+      },
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/collab.js'] },
+      },
+      {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/memory.js'] },
+      },
+      {
+        id: 'cat-cafe-signals',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/signals.js'] },
+      },
+      // Same-repo external limb: source=external, but args[0] points to repo-
+      // owned binary. F209 D.0 reproduction shape.
+      {
+        id: 'cat-cafe-limb',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/limb.js'] },
+      },
+    ]);
+
+    const result = ensureCatCafeMainServer(config, { projectRoot: '/repo' });
+    // Legacy must be removed — managed limb surface is available via the
+    // same-repo external limb (same binary file).
+    assert.equal(
+      result.config.capabilities.find((c) => c.id === 'cat-cafe' && c.source === 'cat-cafe'),
+      undefined,
+      'legacy cat-cafe must be removed when same-repo external limb provides equivalent surface',
+    );
+    // External limb preserved untouched (user/external entries are never auto-mutated)
+    const limb = result.config.capabilities.find((c) => c.id === 'cat-cafe-limb');
+    assert.ok(limb, 'cat-cafe-limb entry must remain');
+    assert.equal(limb.source, 'external', 'limb source must NOT be normalized to cat-cafe');
+    assert.equal(limb.mcpServer.args[0], '/repo/packages/mcp-server/dist/limb.js');
+    // No duplicate limb id
+    assert.equal(result.config.capabilities.filter((c) => c.id === 'cat-cafe-limb').length, 1);
+    assert.equal(result.migrated, true, 'migration must report change');
+  });
+
+  it('F193 PCFU AC-PCFU-2 (R4 P1 regression): foreign external limb → legacy preserved', () => {
+    // Same as line 1304 R4 P1 test, restated with PCFU context for clarity.
+    // Foreign external limb (npx-based, different binary) must NOT satisfy
+    // the "managed limb available" condition — the R4 P1 fail-safe stands.
+    const config = makeConfig([
+      {
+        id: 'cat-cafe',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/index.js'] },
+      },
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/collab.js'] },
+      },
+      {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/memory.js'] },
+      },
+      {
+        id: 'cat-cafe-signals',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/signals.js'] },
+      },
+      // Foreign external limb: npx-based, NOT pointing to repo binary.
+      {
+        id: 'cat-cafe-limb',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: { command: 'npx', args: ['external-limb-impostor'] },
+      },
+    ]);
+
+    const result = ensureCatCafeMainServer(config, { projectRoot: '/repo' });
+    assert.ok(
+      result.config.capabilities.find((c) => c.id === 'cat-cafe' && c.source === 'cat-cafe'),
+      'legacy cat-cafe must be preserved when external limb is foreign (no managed surface)',
+    );
+    assert.equal(result.migrated, false, 'no-op when migration would lose managed limb surface');
+    assert.equal(result.config.capabilities.filter((c) => c.id === 'cat-cafe-limb').length, 1);
+  });
+
+  it('F193 PCFU AC-PCFU-5: same-repo external limb migration leaves unrelated external entries untouched', () => {
+    const config = makeConfig([
+      {
+        id: 'cat-cafe',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/index.js'] },
+      },
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/collab.js'] },
+      },
+      {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/memory.js'] },
+      },
+      {
+        id: 'cat-cafe-signals',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/signals.js'] },
+      },
+      {
+        id: 'cat-cafe-limb',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/limb.js'] },
+      },
+      // User-added external MCP entries (filesystem, github, etc.)
+      {
+        id: 'filesystem',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: { command: 'npx', args: ['@modelcontextprotocol/server-filesystem', '/tmp'] },
+      },
+      {
+        id: 'github-mcp',
+        type: 'mcp',
+        enabled: false,
+        source: 'external',
+        mcpServer: { command: 'docker', args: ['run', 'github-mcp'] },
+      },
+    ]);
+
+    const result = ensureCatCafeMainServer(config, { projectRoot: '/repo' });
+    assert.equal(result.migrated, true, 'migration must run');
+    // Legacy gone, splits + external limb stay
+    assert.equal(
+      result.config.capabilities.find((c) => c.id === 'cat-cafe'),
+      undefined,
+    );
+    // Unrelated user externals preserved verbatim
+    const fs = result.config.capabilities.find((c) => c.id === 'filesystem');
+    assert.ok(fs);
+    assert.deepEqual(fs.mcpServer.args, ['@modelcontextprotocol/server-filesystem', '/tmp']);
+    const gh = result.config.capabilities.find((c) => c.id === 'github-mcp');
+    assert.ok(gh);
+    assert.equal(gh.enabled, false, 'user-disabled external must stay disabled');
+    assert.deepEqual(gh.mcpServer.args, ['run', 'github-mcp']);
+  });
+
+  // Cloud codex review #1883 P1 (2026-05-24): the external limb must be
+  // ENABLED to count as "managed limb available". If user explicitly
+  // disabled the same-repo external limb (globally), `resolveServersForCat`
+  // would not expose limb tools — yet our PCFU fix as-of-f3ed308b would
+  // still remove legacy `cat-cafe`, silently losing limb surface. The R4
+  // P1 fail-safe philosophy demands actual availability, not just presence.
+  it('F193 PCFU cloud P1: disabled same-repo external limb does NOT satisfy managed-limb-available', () => {
+    const config = makeConfig([
+      {
+        id: 'cat-cafe',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/index.js'] },
+      },
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/collab.js'] },
+      },
+      {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/memory.js'] },
+      },
+      {
+        id: 'cat-cafe-signals',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/signals.js'] },
+      },
+      // Same-repo external limb but DISABLED — does not provide limb surface
+      {
+        id: 'cat-cafe-limb',
+        type: 'mcp',
+        enabled: false,
+        source: 'external',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/limb.js'] },
+      },
+    ]);
+
+    const result = ensureCatCafeMainServer(config, { projectRoot: '/repo' });
+    // Legacy must STAY because disabled external limb doesn't expose limb tools
+    assert.ok(
+      result.config.capabilities.find((c) => c.id === 'cat-cafe' && c.source === 'cat-cafe'),
+      'legacy cat-cafe must be preserved when same-repo external limb is disabled',
+    );
+    assert.equal(result.migrated, false, 'no-op when external limb cannot provide surface');
+    // External limb stays as-is
+    assert.equal(result.config.capabilities.filter((c) => c.id === 'cat-cafe-limb').length, 1);
+  });
+
+  // Cloud codex review #1883 P2 (2026-05-24): Windows-style backslash paths
+  // produced by `resolve(...)` on win32 must also match — the suffix check
+  // is path-separator-agnostic. Without this, the F193 PCFU migration silently
+  // skips on Windows installs even when the external entry points to the
+  // exact same repo binary.
+  it('F193 PCFU cloud P2: Windows-style backslash limb path matches same-repo discriminator', () => {
+    const config = makeConfig([
+      {
+        id: 'cat-cafe',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['C:\\repo\\packages\\mcp-server\\dist\\index.js'] },
+      },
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['C:\\repo\\packages\\mcp-server\\dist\\collab.js'] },
+      },
+      {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['C:\\repo\\packages\\mcp-server\\dist\\memory.js'] },
+      },
+      {
+        id: 'cat-cafe-signals',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['C:\\repo\\packages\\mcp-server\\dist\\signals.js'] },
+      },
+      // Same-repo external limb with Windows backslash separators
+      {
+        id: 'cat-cafe-limb',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: { command: 'node', args: ['C:\\repo\\packages\\mcp-server\\dist\\limb.js'] },
+      },
+    ]);
+
+    const result = ensureCatCafeMainServer(config, { projectRoot: 'C:\\repo' });
+    // Legacy removed — backslash path is still recognized as same-repo limb
+    assert.equal(
+      result.config.capabilities.find((c) => c.id === 'cat-cafe' && c.source === 'cat-cafe'),
+      undefined,
+      'backslash limb path must be recognized as same-repo limb',
+    );
+    assert.equal(result.migrated, true);
+    // External limb preserved with original backslash args
+    const limb = result.config.capabilities.find((c) => c.id === 'cat-cafe-limb');
+    assert.ok(limb);
+    assert.equal(limb.mcpServer.args[0], 'C:\\repo\\packages\\mcp-server\\dist\\limb.js');
+  });
 });
 
 // ────────── Resolve per-cat ──────────
@@ -2271,6 +2583,73 @@ describe('healCatCafeMcpTopology (F193 Phase C shared migration chain)', () => {
     const limb = result.config.capabilities.find((c) => c.id === 'cat-cafe-limb');
     assert.ok(limb);
     assert.equal(limb.enabled, false, 'limb inherits disabled state from legacy seed');
+  });
+
+  // F193 PCFU AC-PCFU-3 (integration): the F209 D.0 reproduction shape — managed
+  // 3-split + legacy `cat-cafe` + same-repo external `cat-cafe-limb` — passed
+  // through the full heal chain ends in canonical split-only topology (no
+  // duplicate limb id, no legacy main). This is the surface that drives
+  // `generateCliConfigs` → `.mcp.json` / `.codex/config.toml` regeneration,
+  // so removing legacy here is what eliminates the duplicate
+  // `mcp__cat_cafe__cat_cafe_search_evidence` exposure downstream.
+  it('F193 PCFU: heal chain converges F209 D.0 shape to split-only canonical', () => {
+    const config = makeConfig([
+      {
+        id: 'cat-cafe',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/index.js'] },
+      },
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/collab.js'] },
+      },
+      {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/memory.js'] },
+      },
+      {
+        id: 'cat-cafe-signals',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/signals.js'] },
+      },
+      {
+        id: 'cat-cafe-limb',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/limb.js'] },
+      },
+    ]);
+
+    const result = healCatCafeMcpTopology(config, { catCafeRepoRoot: '/repo' });
+    assert.equal(result.migrated, true, 'heal must run on F209 D.0 shape');
+    // No legacy main
+    assert.equal(
+      result.config.capabilities.find((c) => c.id === 'cat-cafe' && c.source === 'cat-cafe'),
+      undefined,
+      'legacy cat-cafe must be removed downstream of heal chain',
+    );
+    // Exactly one limb id (no duplicate)
+    assert.equal(result.config.capabilities.filter((c) => c.id === 'cat-cafe-limb').length, 1);
+    // External limb preserved (managed copy NOT added — would collide)
+    const limb = result.config.capabilities.find((c) => c.id === 'cat-cafe-limb');
+    assert.equal(limb.source, 'external');
+    assert.equal(limb.mcpServer.args[0], '/repo/packages/mcp-server/dist/limb.js');
+    // Three managed splits remain
+    const managedSplits = result.config.capabilities.filter(
+      (c) => c.source === 'cat-cafe' && ['cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals'].includes(c.id),
+    );
+    assert.equal(managedSplits.length, 3, 'all three managed splits remain');
   });
 });
 

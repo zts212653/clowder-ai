@@ -23,6 +23,8 @@ const STATUS_DOT_COLOR: Record<string, string> = {
 
 const ROW_STYLE = { paddingInline: '1.25rem', paddingBlock: '0.75rem' } as const;
 const LOG_POLL_MS = 2000;
+const SERVICE_INSTALL_BUTTON_CLASS =
+  'rounded-lg bg-cafe-accent px-3 py-1.5 text-xs font-semibold text-[var(--cafe-surface)] transition-colors hover:bg-cafe-accent-hover disabled:opacity-50';
 
 interface ServiceStatusPanelProps {
   filterFeatures?: string[];
@@ -194,7 +196,7 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
                     type="button"
                     disabled={isBusy}
                     onClick={() => handleAction(service, 'install')}
-                    className="rounded-lg bg-cafe-accent px-3 py-1.5 text-xs font-semibold text-[var(--cafe-surface)] transition-colors hover:bg-cafe-accent-hover disabled:opacity-50"
+                    className={SERVICE_INSTALL_BUTTON_CLASS}
                   >
                     {isBusy ? '...' : '安装'}
                   </button>

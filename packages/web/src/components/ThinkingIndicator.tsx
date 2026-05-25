@@ -110,7 +110,7 @@ export function ThinkingIndicator({ onCancel, threadId }: ThinkingIndicatorProps
     );
   }
 
-  // F118: alive_but_silent — amber warning banner
+  // F118: alive_but_silent — amber warning banner with cancel button
   if (status === 'alive_but_silent' && warning) {
     const elapsed = formatDuration(warning.silenceDurationMs);
     return (
@@ -119,18 +119,32 @@ export function ThinkingIndicator({ onCancel, threadId }: ThinkingIndicatorProps
         className="px-5 py-3 border-b"
         style={{ backgroundColor: '#FFF8E7', borderColor: '#D4A64A33' }}
       >
-        <div className="flex items-center gap-2.5">
-          <TimerIcon className="w-4 h-4 animate-pulse" style={{ color: '#D4A64A' }} />
-          <div className="flex flex-col gap-0.5">
-            <span className="text-sm font-semibold" style={{ color: '#1A1918' }}>
-              {name} 静默等待中… {elapsed}
-            </span>
-            <span className="text-xs" style={{ color: '#6D6C6A' }}>
-              {warning.state === 'busy-silent'
-                ? '进程存活且 CPU 活跃，可能正在执行工具或等待 API 响应'
-                : '进程存活，等待响应中'}
-            </span>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <TimerIcon className="w-4 h-4 animate-pulse flex-shrink-0" style={{ color: '#D4A64A' }} />
+            <div className="flex flex-col gap-0.5 min-w-0">
+              <span className="text-sm font-semibold" style={{ color: '#1A1918' }}>
+                {name} 静默等待中… {elapsed}
+              </span>
+              <span className="text-xs" style={{ color: '#6D6C6A' }}>
+                {warning.state === 'busy-silent'
+                  ? '进程存活且 CPU 活跃，可能正在执行工具或等待 API 响应'
+                  : '进程存活，等待响应中'}
+              </span>
+            </div>
           </div>
+          {onCancel && effectiveThreadId && (
+            <button
+              type="button"
+              data-testid="cancel-btn"
+              onClick={() => onCancel(effectiveThreadId, catId)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white flex-shrink-0 transition-opacity hover:opacity-90"
+              style={{ backgroundColor: '#D4A64A' }}
+            >
+              <SquareIcon className="w-3.5 h-3.5" />
+              取消
+            </button>
+          )}
         </div>
       </div>
     );

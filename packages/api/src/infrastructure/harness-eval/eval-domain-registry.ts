@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 const evalDomainRegistryEntrySchema = z.object({
-  domainId: z.literal('eval:a2a'),
+  domainId: z.enum(['eval:a2a', 'eval:memory']),
   displayName: z.string().min(1),
   systemThreadId: z.string().min(1, 'systemThreadId is required'),
   evalCat: z.object({
@@ -10,7 +10,7 @@ const evalDomainRegistryEntrySchema = z.object({
     model: z.string().min(1),
   }),
   frequency: z.literal('daily'),
-  sourceAdapter: z.literal('f167-runtime-eval'),
+  sourceAdapter: z.enum(['f167-runtime-eval', 'f200-f188-memory-eval']),
   threadPolicy: z.object({
     role: z.literal('working-home'),
     stateSot: z.literal('registry'),
@@ -18,7 +18,7 @@ const evalDomainRegistryEntrySchema = z.object({
   }),
   legacyScheduledTaskIds: z.array(z.string().min(1)).min(1, 'legacyScheduledTaskIds must not be empty'),
   handoffTargetResolver: z.object({
-    featureId: z.literal('F167'),
+    featureId: z.string().regex(/^F\d{3}$/, 'featureId must match F followed by 3 digits'),
     ownerCatId: z.string().min(1),
     threadLookup: z.literal('feature-thread'),
   }),

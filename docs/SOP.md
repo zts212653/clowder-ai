@@ -3,13 +3,15 @@ feature_ids: [F042]
 topics: [sop]
 doc_kind: note
 created: 2026-02-26
-updated: 2026-03-11
+updated: 2026-05-23
 ---
 
 # Cat Café 开发 SOP
 
 > 三猫开发全流程的导航图。每步的详细操作在对应 skill 内。
-> 冲突时以 skill 内容为准。
+> Stage id / suggested skill / hard rules / pitfalls 的机器真相源是
+> `sop-definitions/development.yaml`；本文件保留人类可读叙事。
+> 冲突时先修 SopDefinition 单一源，再同步本文件和相关 skill。
 
 ## 愿景驱动（核心原则）
 
@@ -71,7 +73,7 @@ Phase N merge → 碰头（不是"要不要继续"，是"方向对不对"）→ 
 
 ```
 ⓪ Design Gate    → 设计确认（UX→铲屎官/后端→猫猫/架构→两边）
-① worktree        → 隔离开发环境
+① impl            → writing-plans → worktree → tdd
 ② quality-gate    → 自检 + 愿景对照 + 设计稿对照
 ③ review 循环     → 本地 peer review（P1/P2 清零 + reviewer 放行）
 ④ merge-gate      → 门禁 → PR → 云端 review → squash merge → 清理
@@ -84,7 +86,7 @@ Phase N merge → 碰头（不是"要不要继续"，是"方向对不对"）→ 
 | Step | 做什么 | Skill | 详情 |
 |------|--------|-------|------|
 | ⓪ | 设计确认：前端→铲屎官画 wireframe；后端→猫猫讨论；架构→两边 | `feat-lifecycle` Design Gate | Trivial 跳过⓪，按下方例外路径判断 |
-| ① | 创建 worktree，配置 Redis 6398 | `worktree` | 禁止直接改 main |
+| ① | 写实施计划 → 创建 worktree → TDD 实现 | `writing-plans` → `worktree` → `tdd` | `sop-definitions/development.yaml` 的 `impl.suggested_skill` 是 `writing-plans`；计划写完自动进入 worktree/TDD，禁止直接改 main |
 | ② | 愿景对照 + spec 合规 + 跑测试 + **有 .pen 则设计稿对照** | `quality-gate` | AC ≠ 完成，问"铲屎官体验如何？" |
 | ③a | 发 review 请求（五件套 + 证据） | `request-review` | 附原始需求摘录 |
 | ③b | 处理 review 反馈（Red→Green） | `receive-review` | 禁止表演性同意 |

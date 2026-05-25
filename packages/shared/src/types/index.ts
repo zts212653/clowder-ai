@@ -519,6 +519,22 @@ export type {
   SliceType,
   UpdateSliceInput,
 } from './slice.js';
+// SOP definition generated truth source (#748)
+export {
+  DEVELOPMENT_SOP_DEFINITION,
+  DEVELOPMENT_SOP_STAGE_IDS,
+  type DevelopmentSopStageId,
+  getSopDefinition,
+  isSopDefinitionId,
+  normalizeSopDefinitionId,
+  type ResolvedWorkflowSopSkill,
+  type RuntimeSopStageId,
+  resolveWorkflowSopSkill,
+  SOP_DEFINITION_IDS,
+  SOP_DEFINITIONS,
+  type SopDefinition,
+  type SopDefinitionId,
+} from './sop-definition.generated.js';
 // STT types (F088 Phase 6 — Speech-to-Text)
 export type { ISttProvider, SttTranscribeRequest, SttTranscribeResult } from './stt.js';
 // Study types (F091 Signal Study Mode)

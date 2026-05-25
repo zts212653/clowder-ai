@@ -1,0 +1,20 @@
+{
+  "verdictId": "2026-05-23-eval-a2a-live-verdict",
+  "rawInputs": [
+    {
+      "path": "docs/harness-feedback/snapshots/2026-05-23-F167-eval.yaml",
+      "sha256": "470fd85e48c686b017a7b1c9865dcfc3cdf5eefbba7569cea627e494098dd6ff"
+    },
+    {
+      "path": "docs/harness-feedback/attributions/2026-05-23-F167-attribution.yaml",
+      "sha256": "90874fd2a790262dd3c463b6b3e6fe197ba85f7c55f31f8e9eff9166cf186d4d"
+    }
+  ],
+  "generatedAt": "2026-05-23T03:13:00.000Z",
+  "generator": {
+    "name": "eval-a2a-live-verdict",
+    "version": "1",
+    "commit": "3d2c9e2c0"
+  },
+  "sanitizeRulesVersion": "f192-e-pilot-v1"
+}

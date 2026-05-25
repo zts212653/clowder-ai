@@ -243,6 +243,32 @@ describe('AntigravityBridge.nativeExecuteAndPush', () => {
     }
   });
 
+  test('routes ask_permission waiting tool steps to approval_pending instead of native writeback', async () => {
+    const { bridge, rpcMock } = makeBridge();
+    const step = {
+      type: 'CORTEX_STEP_TYPE_TOOL_CALL',
+      status: 'CORTEX_STEP_STATUS_WAITING',
+      metadata: {
+        toolCall: {
+          id: 'toolu_ask_permission',
+          name: 'ask_permission',
+          argumentsJson: JSON.stringify({ reason: 'Apply pending edit' }),
+        },
+        sourceTrajectoryStepInfo: { trajectoryId: 'traj-ask', stepIndex: 13, cascadeId: 'c1' },
+      },
+    };
+
+    const handled = await bridge.nativeExecuteAndPush(step, {
+      cascadeId: 'c1',
+      cwd: '/tmp',
+      modelName: 'claude-opus-4-6',
+    });
+
+    assert.equal(handled, 'approval_pending', 'ask_permission must be approved by Antigravity LS');
+    assert.equal(rpcMock.mock.callCount(), 0, 'ask_permission must not call RunCommand or pushToolResult RPCs');
+    assert.equal(bridge.sendMessage.mock.callCount(), 0, 'ask_permission must not synthetic-writeback a result');
+  });
+
   test('approves CODE_ACTION write permissions through Antigravity user interaction RPC', async () => {
     const { bridge, rpcMock } = makeBridge();
     const step = {
@@ -284,6 +310,49 @@ describe('AntigravityBridge.nativeExecuteAndPush', () => {
       },
     });
     assert.equal(bridge.sendMessage.mock.callCount(), 0, 'code action approval must not synthetic-writeback');
+  });
+
+  test('approves generic requestedInteraction permission steps through Antigravity user interaction RPC', async () => {
+    const { bridge, rpcMock } = makeBridge();
+    const step = {
+      type: 'CORTEX_STEP_TYPE_TOOL_CALL',
+      status: 'CORTEX_STEP_STATUS_WAITING',
+      metadata: {
+        toolCall: {
+          id: 'toolu_ask_permission',
+          name: 'ask_permission',
+          argumentsJson: JSON.stringify({ reason: 'Apply pending edit' }),
+        },
+        sourceTrajectoryStepInfo: { trajectoryId: 'traj-ask', stepIndex: 13, cascadeId: 'c1' },
+      },
+      requestedInteraction: {
+        permission: {
+          resource: {
+            action: 'write_file',
+            target: 'docs/probe.md',
+          },
+        },
+      },
+    };
+
+    await bridge.approvePendingInteraction('c1', step);
+
+    const methods = rpcMock.mock.calls.map((c) => {
+      const args = c.arguments;
+      return typeof args[0] === 'string' ? args[0] : args[1];
+    });
+    assert.deepEqual(methods, ['HandleCascadeUserInteraction']);
+
+    const payload = rpcMock.mock.calls[0].arguments[2];
+    assert.deepEqual(payload, {
+      cascadeId: 'c1',
+      interaction: {
+        permission: { allow: true },
+        trajectoryId: 'traj-ask',
+        stepIndex: 13,
+      },
+    });
+    assert.equal(bridge.sendMessage.mock.callCount(), 0, 'permission approval must not synthetic-writeback');
   });
 
   test('acknowledges non-permission CODE_ACTION steps without requiring trajectoryId', async () => {

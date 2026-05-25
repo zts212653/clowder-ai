@@ -87,6 +87,7 @@ function createInMemoryWorkflowSopStore() {
       const sop = existing
         ? {
             ...existing,
+            sopDefinitionId: input.sopDefinitionId ?? existing.sopDefinitionId ?? 'development',
             stage: input.stage ?? existing.stage,
             batonHolder: input.batonHolder ?? existing.batonHolder,
             nextSkill: input.nextSkill !== undefined ? input.nextSkill : existing.nextSkill,
@@ -101,6 +102,7 @@ function createInMemoryWorkflowSopStore() {
         : {
             featureId,
             backlogItemId,
+            sopDefinitionId: input.sopDefinitionId ?? 'development',
             stage: input.stage ?? 'kickoff',
             batonHolder: input.batonHolder ?? updatedBy,
             nextSkill: input.nextSkill !== undefined ? input.nextSkill : null,
@@ -191,6 +193,7 @@ describe('WorkflowSop API routes', () => {
     assert.equal(putRes.statusCode, 200);
     const sop = JSON.parse(putRes.payload);
     assert.equal(sop.featureId, 'F073');
+    assert.equal(sop.sopDefinitionId, 'development');
     assert.equal(sop.stage, 'impl');
     assert.equal(sop.batonHolder, 'opus');
     assert.equal(sop.version, 1);
@@ -203,6 +206,39 @@ describe('WorkflowSop API routes', () => {
     assert.equal(getRes.statusCode, 200);
     const fetched = JSON.parse(getRes.payload);
     assert.equal(fetched.stage, 'impl');
+  });
+
+  it('PUT accepts runtime sopDefinitionId and preserves nextSkill override semantics', async () => {
+    const putRes = await app.inject({
+      method: 'PUT',
+      url: '/api/backlog/item-1/workflow-sop',
+      headers: { ...USER_HEADERS, 'content-type': 'application/json' },
+      payload: {
+        featureId: 'F073',
+        sopDefinitionId: 'development',
+        stage: 'impl',
+        nextSkill: null,
+      },
+    });
+    assert.equal(putRes.statusCode, 200);
+    const sop = JSON.parse(putRes.payload);
+    assert.equal(sop.sopDefinitionId, 'development');
+    assert.equal(sop.stage, 'impl');
+    assert.equal(sop.nextSkill, null);
+  });
+
+  it('PUT rejects schema-only stub sopDefinitionId values', async () => {
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/backlog/item-1/workflow-sop',
+      headers: { ...USER_HEADERS, 'content-type': 'application/json' },
+      payload: {
+        featureId: 'F073',
+        sopDefinitionId: 'video-cocreation',
+        stage: 'impl',
+      },
+    });
+    assert.equal(res.statusCode, 400);
   });
 
   it('PUT updates existing SOP', async () => {

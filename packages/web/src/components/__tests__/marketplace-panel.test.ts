@@ -61,6 +61,7 @@ describe('MarketplacePanel', () => {
 
   it('renders browse results when query is empty', async () => {
     useMarketplaceStore.setState({ results: [MOCK_RESULT], error: null, query: '' });
+    mocks.apiFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ results: [MOCK_RESULT] }) });
 
     await act(async () => {
       root.render(React.createElement(MarketplacePanel));
@@ -73,7 +74,9 @@ describe('MarketplacePanel', () => {
   });
 
   it('retry in browse mode calls browse instead of no-oping', async () => {
-    mocks.apiFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ results: [MOCK_RESULT] }) });
+    mocks.apiFetch
+      .mockResolvedValueOnce({ ok: false, status: 400, json: () => Promise.resolve({}) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ results: [MOCK_RESULT] }) });
 
     await act(async () => {
       root.render(React.createElement(MarketplacePanel));
@@ -88,7 +91,7 @@ describe('MarketplacePanel', () => {
       retryButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    expect(mocks.apiFetch).toHaveBeenCalledWith('/api/marketplace/search?');
+    expect(mocks.apiFetch).toHaveBeenLastCalledWith('/api/marketplace/search?');
     expect(useMarketplaceStore.getState().error).toBeNull();
   });
 });

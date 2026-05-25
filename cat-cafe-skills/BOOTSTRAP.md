@@ -19,9 +19,9 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `guide-interaction` | 判断是否需要交互引导，并按 Guide Matched/Pending/Active 等状态驱动回复 | — |
 | `collaborative-thinking` | brainstorm/多猫讨论/收敛 | — |
 | `expert-panel` | 专家辩论团/竞品分析/技术趋势/showcase | — |
-| `writing-plans` | 写实施计划 | — |
-| `worktree` | 开始写代码（创建隔离环境） | ① |
-| `tdd` | 写测试+实现（红绿重构） | ① |
+| `writing-plans` | 写实施计划 | ① impl |
+| `worktree` | 创建隔离开发环境 | ① impl |
+| `tdd` | 写测试+实现（红绿重构） | ① impl |
 | `debugging` | 遇到 bug（系统化定位） | — |
 | `quality-gate` | 开发完了自检（愿景+spec+验证） | ② |
 | `request-review` | 发 review 请求给 reviewer | ③ |
@@ -75,7 +75,7 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 ## 关键规则
 
 1. **Skill 适用就必须加载，没有选择**
-2. **完整流程见 `docs/SOP.md`**
+2. **完整流程见 `docs/SOP.md`；机器真相源见 `sop-definitions/development.yaml`**
 3. **三条铁律**：Redis production Redis (sacred) / 同一个体不能 self-review / 不能冒充其他猫
 4. **共用规则在 `refs/shared-rules.md`**（不在各猫文件里重复）
 5. **Reviewer 选择是动态匹配**（`docs/SOP.md` 配对规则），禁止写死“reviewer 是Ragdoll”

@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { describe, expect, it, vi } from 'vitest';
 import {
   computeBarWidth,
   computeDonutSegments,
@@ -6,6 +8,8 @@ import {
   type HealthReportData,
   sortedEntries,
 } from '../HealthReport';
+
+Object.assign(globalThis as Record<string, unknown>, { React });
 
 describe('sortedEntries', () => {
   it('sorts by value descending', () => {
@@ -128,5 +132,51 @@ describe('getActionItems', () => {
       knowledgeFeed: { pendingCount: 7, needsReviewCount: 2 },
     });
     expect(items.some((i) => i.includes('待处理知识动态'))).toBe(true);
+  });
+});
+
+describe('HealthReport render', () => {
+  it('includes Eval Hub backlink', async () => {
+    vi.mock('@/utils/api-client', () => ({
+      apiFetch: vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            totalDocs: 100,
+            byKind: { thread: 50 },
+            byAuthority: { observed: 80, constitutional: 20 },
+            contradictions: { total: 0, unresolved: 0 },
+            staleReview: { warning: 0, overdue: 0 },
+            unverified: 0,
+            backstopRatio: 0,
+            compressionRatio: 0,
+            generatedAt: '2026-05-24T00:00:00Z',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      ),
+    }));
+
+    const { HealthReport } = await import('../HealthReport');
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(React.createElement(HealthReport));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const backlink = container.querySelector('[data-testid="eval-hub-backlink"]') as HTMLAnchorElement | null;
+    expect(backlink).toBeTruthy();
+    expect(backlink?.getAttribute('href')).toBe('/settings?ops=observability&obs=eval');
+    expect(backlink?.textContent).toContain('Eval Hub');
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+    vi.restoreAllMocks();
   });
 });

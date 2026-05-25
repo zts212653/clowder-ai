@@ -12,6 +12,7 @@ import {
   validateIncomingBubbleEvent,
 } from './bubble-invariants';
 import type { ChatMessage } from './chat-types';
+import { crossesUserTurnBoundary } from './turn-boundary';
 
 export interface BubbleEvent {
   type: BubbleEventType;
@@ -203,6 +204,7 @@ function findExistingByStableKey(
     const existingInvocationId = getStableInvocationKey(m);
     if (!existingInvocationId) continue; // existing local-only 不参与 stable key 查重
     if (existingInvocationId !== event.canonicalInvocationId) continue;
+    if (m.id !== event.messageId && crossesUserTurnBoundary(messages, m, event)) continue;
     const existingKind = deriveBubbleKindFromMessage(m);
     if (existingKind === event.bubbleKind) {
       return { index: i, message: m }; // (1) 严格匹配

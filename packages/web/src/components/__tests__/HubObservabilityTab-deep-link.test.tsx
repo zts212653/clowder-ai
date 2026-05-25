@@ -17,6 +17,9 @@ vi.mock('../HubCallbackAuthPanel', () => ({
 vi.mock('../HubTraceTree', () => ({
   TraceBrowser: () => <div data-testid="trace-browser">trace-browser</div>,
 }));
+vi.mock('../HubEvalTab', () => ({
+  HubEvalTab: () => <div data-testid="eval-hub-panel">eval-hub-panel</div>,
+}));
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 
 import { HubObservabilityTab } from '../HubObservabilityTab';
@@ -106,6 +109,23 @@ describe('HubObservabilityTab deep-link sync (F174 D2b-3 cloud P1 #1403)', () =>
       root.render(<HubObservabilityTab />);
     });
     expect(container.querySelector('[data-testid="callback-auth-panel"]')).toBeNull();
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it('opens the Eval Hub subtab from an observability deep-link', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<HubObservabilityTab initialSubTab="eval" />);
+    });
+
+    expect(container.querySelector('[data-testid="eval-hub-panel"]')).not.toBeNull();
+
     await act(async () => {
       root.unmount();
     });

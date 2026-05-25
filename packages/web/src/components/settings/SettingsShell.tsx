@@ -9,7 +9,7 @@ import { DEFAULT_SECTION } from './settings-nav-config';
 function SettingsShellInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const activeSection = searchParams.get('s') ?? DEFAULT_SECTION;
+  const activeSection = searchParams.get('s') ?? (searchParams.get('ops') ? 'ops' : DEFAULT_SECTION);
   const initialEditCatId = searchParams.get('cat') ?? undefined;
   const standalone = searchParams.get('standalone') === '1';
 

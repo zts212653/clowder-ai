@@ -54,6 +54,16 @@ describe('Antigravity CLI plain text parser', () => {
     assert.equal(result.textMode, 'replace');
   });
 
+  test('strips fresh conversation warning before surfacing final text', () => {
+    const result = classifyAntigravityCliPlainText({
+      stdout: 'Warning: conversation "agy-live-smoke" not found.\nCAT_CAFE_AGY_E2E_OK\n',
+      stderr: '',
+      resumed: false,
+    });
+
+    assert.deepEqual(result, { kind: 'text', content: 'CAT_CAFE_AGY_E2E_OK' });
+  });
+
   test('classifies the F210 stdout timeout fixture as provider error despite exit 0', () => {
     const stdout = extractBlock(readFixture('agy-print-timeout.txt'), 'stdout');
 

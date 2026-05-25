@@ -16,6 +16,8 @@ triggers:
 
 # Merge Gate
 
+> **SOP definition**: `sop-definitions/development.yaml` stage `merge`。
+
 合入 main 的完整流程：门禁检查 → PR → 云端 review → squash merge → 清理。
 
 ## 核心知识

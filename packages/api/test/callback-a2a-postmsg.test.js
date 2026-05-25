@@ -110,7 +110,7 @@ describe('post_message A2A mention invocation', () => {
   // P1-1 regression: no @ → no invocation
   test('post-message without @ does NOT trigger invocation', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', { threadId: 't1' });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 't1');
 
     const response = await app.inject({
       method: 'POST',
@@ -131,7 +131,7 @@ describe('post_message A2A mention invocation', () => {
   // P1-2 regression: inline @ → no invocation
   test('post-message with inline @ (行中) does NOT trigger invocation', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', { threadId: 't1' });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 't1');
 
     const response = await app.inject({
       method: 'POST',
@@ -196,6 +196,57 @@ describe('post_message A2A mention invocation', () => {
     // InvocationRecord should be created
     assert.equal(invocationRecordStore.getRecords().length, 1);
     assert.deepEqual(invocationRecordStore.getRecords()[0].targetCats, ['codex']);
+  });
+
+  test('post-message duplicate retry recovers a queued A2A callback before returning duplicate', async () => {
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const queueProcessor = {
+      async onInvocationComplete() {},
+      async tryAutoExecute() {},
+      registerEntryCompleteHook() {},
+      unregisterEntryCompleteHook() {},
+    };
+    const invocationQueue = new InvocationQueue();
+    const app = await createApp({ invocationQueue, queueProcessor });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 't1');
+    const content = 'same queued callback report needing A2A recovery';
+
+    const queued = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content,
+      mentions: ['codex'],
+      origin: 'callback',
+      timestamp: Date.now(),
+      threadId: 't1',
+      extra: {
+        stream: {
+          invocationId,
+          turnInvocationId: invocationId,
+        },
+      },
+      deliveryStatus: 'queued',
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { content, targetCats: ['codex'] },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.status, 'duplicate');
+    assert.equal(body.messageId, queued.id);
+
+    const entries = invocationQueue.list('t1', 'user-1');
+    assert.equal(entries.length, 1, 'duplicate retry should enqueue the recovered A2A target');
+    assert.equal(entries[0].messageId, queued.id, 'recovered queue entry should carry the existing message id');
+    assert.deepEqual(entries[0].targetCats, ['codex']);
+    assert.equal(entries[0].autoExecute, true);
+    assert.equal(messageStore.size, 1);
+    assert.equal(socketManager.getMessages().length, 0, 'queued recovery should wait for QueueProcessor delivery');
   });
 
   test('post-message does not claim routed when InvocationQueue skips a duplicate queued target', async () => {

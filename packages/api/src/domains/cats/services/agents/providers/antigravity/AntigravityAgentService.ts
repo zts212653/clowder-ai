@@ -20,6 +20,7 @@ import {
   antigravityStreamErrorRecovered,
 } from '../../../../../../infrastructure/telemetry/instruments.js';
 import { normalizeModel } from '../../../../../../infrastructure/telemetry/model-normalizer.js';
+import type { IRuntimeSessionStore } from '../../../runtime-session/RuntimeSessionStore.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../../types.js';
 import { appendLocalImagePathHints } from '../image-cli-bridge.js';
 import { extractImagePaths } from '../image-paths.js';
@@ -321,6 +322,8 @@ export interface AntigravityAgentServiceOptions {
   modelCapacityRetryDelaysMs?: readonly number[];
   /** F201 Phase F: durable supervisor record store */
   supervisorStore?: AntigravitySupervisorStore;
+  /** F211 Phase A1: runtime-session metadata sidecar. A1 passes DI only; no production writes yet. */
+  runtimeSessionStore?: IRuntimeSessionStore;
 }
 
 export class AntigravityAgentService implements AgentService {
@@ -343,7 +346,11 @@ export class AntigravityAgentService implements AgentService {
       : createCatId('antigravity');
     this.model = options?.model ?? getCatModel(this.catId as string);
     const injectedBridge = options?.bridge;
-    this.bridge = injectedBridge ?? new AntigravityBridge(options?.connection);
+    this.bridge =
+      injectedBridge ??
+      new AntigravityBridge(options?.connection, {
+        runtimeSessionStore: options?.runtimeSessionStore,
+      });
     this.pollTimeoutMs = options?.pollTimeoutMs ?? 60_000;
     let autoApprove = process.env.ANTIGRAVITY_AUTO_APPROVE !== 'false';
     if (options?.autoApprove !== undefined) autoApprove = options.autoApprove;

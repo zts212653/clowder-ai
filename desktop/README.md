@@ -140,7 +140,7 @@ pnpm desktop:pack
 | 2/6 | `pnpm deploy` 导出 api/web/mcp-server 运行时包 | `bundled/deploy/{api,web,mcp-server}/` |
 | 3/6 | 下载 Node.js 便携版（匹配构建机 ABI 版本） | `bundled/node-darwin-{arm64,x64}/` |
 | 4/6 | 从源码编译 Redis（~30s/架构） | `bundled/redis-darwin-{arm64,x64}/` |
-| 5/6 | `npm pack` 打包 CLI 工具（Claude/Codex/Gemini） | `bundled/cli-tools/*.tgz` |
+| 5/6 | `npm pack` 打包可 vendoring 的 CLI 工具（Claude/Codex；Antigravity CLI 走官方安装器/说明） | `bundled/cli-tools/*.tgz` |
 | 6/6 | 生成 icon.icns + electron-builder 构建 DMG | `dist/CatCafe-{version}-{arch}.dmg` |
 
 #### 已知注意事项
@@ -210,14 +210,15 @@ pnpm desktop:installer
 4. **配置 Provider** — 打开 Hub → 账号配置，为你要使用的 AI 服务完成认证：
    - **Claude** — 运行 `claude` 命令完成 Anthropic 登录
    - **Codex** — 运行 `codex` 命令完成 OpenAI 登录
-   - **Gemini** — 运行 `gemini` 命令完成 Google 登录
+   - **Gemini / Antigravity CLI** — 运行 `agy` 完成 Google 登录，并用 `/model` 选择账号侧默认模型
    - **Kimi** — 运行 `kimi` 命令完成 Moonshot 登录
 5. **补装 CLI（如有需要）** — 如果某个 CLI 工具在安装阶段未成功安装，可手动补装。
-   需要系统已安装对应运行时（Node.js/npm 用于前三者，Python/pip 用于 Kimi）：
-   ```bash
+   需要系统已安装对应运行时（Node.js/npm 用于 Claude/Codex 与可选 Gemini CLI fallback，Python/pip 用于 Kimi）：
+   ```powershell
    npm install -g @anthropic-ai/claude-code        # Claude
    npm install -g @openai/codex                     # Codex
-   npm install -g @google/gemini-cli                # Gemini
+   irm https://antigravity.google/cli/install.cmd | iex  # Antigravity CLI / Gemini 默认
+   npm install -g @google/gemini-cli                # Gemini CLI（可选 fallback）
    pip install --user --upgrade kimi-cli            # Kimi（Python）
    ```
    > 安装包内已 bundle 便携 Node.js，安装过程中会自动使用。手动补装时需确保系统 PATH 中有 Node.js 或 Python。

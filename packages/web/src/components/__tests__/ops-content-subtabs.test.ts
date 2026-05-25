@@ -59,7 +59,8 @@ describe('OpsContent sub-tabs', () => {
     });
     const buttons = Array.from(container.querySelectorAll('button'));
     const usageBtn = buttons.find((b) => b.textContent === '使用统计');
-    expect(usageBtn?.className).toContain('bg-cafe-accent');
+    expect(usageBtn?.className).toContain('border-[var(--console-button-emphasis)]');
+    expect(usageBtn?.className).toContain('text-[var(--console-button-emphasis)]');
   });
 
   it('switches active tab on click', () => {
@@ -75,8 +76,9 @@ describe('OpsContent sub-tabs', () => {
       rescueBtn.click();
     });
 
-    expect(rescueBtn.className).toContain('bg-cafe-accent');
+    expect(rescueBtn.className).toContain('border-[var(--console-button-emphasis)]');
+    expect(rescueBtn.className).toContain('text-[var(--console-button-emphasis)]');
     const usageBtn = buttons.find((b) => b.textContent === '使用统计');
-    expect(usageBtn?.className).not.toContain('bg-cafe-accent');
+    expect(usageBtn?.className).not.toContain('border-[var(--console-button-emphasis)]');
   });
 });

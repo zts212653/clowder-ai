@@ -13,6 +13,16 @@ function createBridge(storePath) {
   return new AntigravityBridge({ port: 1234, csrfToken: 'test', useTls: false }, { sessionStorePath: storePath });
 }
 
+function createRuntimeSessionStoreProbe() {
+  return {
+    upsert: mock.fn(async (metadata) => metadata),
+    getBySessionId: mock.fn(async () => null),
+    getByRuntimeSession: mock.fn(async () => null),
+    listByLifecycleState: mock.fn(async () => []),
+    updateLifecycle: mock.fn(async () => null),
+  };
+}
+
 describe('AntigravityBridge session persistence (G0)', () => {
   const cleanupPaths = [];
 
@@ -277,5 +287,27 @@ describe('AntigravityBridge session persistence (G0)', () => {
 
     const stored = JSON.parse(fs.readFileSync(storePath, 'utf8'));
     assert.equal(stored['thread-x'], 'replacement-cascade', 'file should contain updated mapping');
+  });
+
+  test('F211 A1: optional runtime session store is DI-only and does not write on current session paths', async () => {
+    const storePath = tempStorePath();
+    cleanupPaths.push(storePath);
+    const runtimeSessionStore = createRuntimeSessionStoreProbe();
+    const bridge = new AntigravityBridge(
+      { port: 1234, csrfToken: 'test', useTls: false },
+      { sessionStorePath: storePath, runtimeSessionStore },
+    );
+
+    mock.method(bridge, 'startCascade', async () => 'cascade-f211');
+    mock.method(bridge, 'getTrajectory', async () => ({
+      status: 'CASCADE_RUN_STATUS_IDLE',
+      numTotalSteps: 0,
+    }));
+
+    assert.equal(bridge.getRuntimeSessionStoreForDiagnostics(), runtimeSessionStore);
+    assert.equal(await bridge.getOrCreateSession('thread-f211', 'antig-opus'), 'cascade-f211');
+    bridge.resetSession('thread-f211', 'antig-opus');
+
+    assert.equal(runtimeSessionStore.upsert.mock.callCount(), 0, 'A1 must not write runtime metadata from Bridge');
   });
 });

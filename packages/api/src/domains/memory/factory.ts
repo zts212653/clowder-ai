@@ -4,6 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { EmbeddingService } from './EmbeddingService.js';
+import { loadEntitySeeds } from './entity-seeds.js';
 import { loadExternalCollections, resolveCollectionStorePath } from './external-collections.js';
 import { GlobalIndexBuilder } from './GlobalIndexBuilder.js';
 import { type ExcludeThreadIdsFn, IndexBuilder, type MessageListFn, type ThreadListFn } from './IndexBuilder.js';
@@ -78,6 +79,10 @@ export interface MemoryConfig {
   memoryRoot?: string;
   /** F186: External collection data directory (default: ~/.cat-cafe) */
   dataDir?: string;
+  /** F209 Phase B.1: explicit entity seed file (default: config/entity-seeds.json). */
+  entitySeedPath?: string;
+  /** F209 Phase B.1: one-way F032 roster → entity registry mirror (default: true). */
+  includeRosterEntitySeeds?: boolean;
 }
 
 export function computeChildExcludes(parentRoot: string, children: Array<{ root: string }>): string[] {
@@ -101,6 +106,13 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
 
   const store = new SqliteEvidenceStore(sqlitePath);
   await store.initialize();
+  const entitySeeds = loadEntitySeeds({
+    explicitSeedPath: config.entitySeedPath,
+    includeRoster: config.includeRosterEntitySeeds,
+  });
+  if (entitySeeds.length > 0) {
+    await store.upsertEntities(entitySeeds);
+  }
 
   let embeddingService: IEmbeddingService | undefined;
   let vectorStore: VectorStore | undefined;

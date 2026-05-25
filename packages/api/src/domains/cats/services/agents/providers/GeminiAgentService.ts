@@ -3,8 +3,8 @@
  * 使用 Gemini CLI 子进程调用暹罗猫 (Gemini)
  *
  * 双 Adapter 架构:
- *   gemini-cli (默认):  spawn 'gemini' CLI + NDJSON → 全自动 headless
- *   antigravity-cli: spawn 'agy' CLI + plain stdout → 全自动 headless prototype
+ *   antigravity-cli (默认): spawn 'agy' CLI + plain stdout → 全自动 headless
+ *   gemini-cli (fallback):  spawn 'gemini' CLI + NDJSON → legacy/enterprise fallback
  *   antigravity (legacy opt-in): spawn Antigravity IDE → MCP 回传 → 半自动
  *
  * gemini CLI NDJSON 事件格式 (v0.27.2):
@@ -47,6 +47,7 @@ import { isKnownPostResponseCandidatesCrash, isResultErrorEvent, transformGemini
 const log = createModuleLogger('gemini-agent');
 
 type GeminiAdapter = 'gemini-cli' | 'antigravity-cli' | 'antigravity';
+const DEFAULT_GEMINI_ADAPTER: GeminiAdapter = 'antigravity-cli';
 
 interface GeminiStoredThought {
   readonly subject?: string;
@@ -319,7 +320,7 @@ interface GeminiAgentServiceOptions {
   spawnFn?: SpawnFn;
   /** Inject spawn for antigravity adapter (direct child_process.spawn) */
   antigravitySpawnFn?: typeof nodeSpawn;
-  /** Override adapter selection (default: GEMINI_ADAPTER env or 'gemini-cli') */
+  /** Override adapter selection (default: GEMINI_ADAPTER env or antigravity-cli) */
   adapter?: GeminiAdapter;
 }
 
@@ -338,7 +339,8 @@ export class GeminiAgentService implements AgentService {
     this.model = options?.model ?? getCatModel(this.catId as string);
     this.spawnFn = options?.spawnFn;
     this.antigravitySpawnFn = options?.antigravitySpawnFn ?? nodeSpawn;
-    this.adapter = options?.adapter ?? (process.env.GEMINI_ADAPTER as GeminiAdapter | undefined) ?? 'gemini-cli';
+    this.adapter =
+      options?.adapter ?? (process.env.GEMINI_ADAPTER as GeminiAdapter | undefined) ?? DEFAULT_GEMINI_ADAPTER;
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {

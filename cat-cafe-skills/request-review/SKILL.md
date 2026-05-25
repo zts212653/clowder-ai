@@ -11,8 +11,9 @@ triggers:
   - "request review"
 ---
 
-> **SOP 位置**: 本 skill 是 `docs/SOP.md` Step 3a 的执行细节。
-> **上一步**: `quality-gate` (Step 2) | **下一步**: `receive-review` (Step 3b)
+> **SOP 位置**: 本 skill 是 `sop-definitions/development.yaml` stage `review` 的执行细节。
+> **SOP definition**: `sop-definitions/development.yaml` stage `review`。
+> **上一步**: `quality-gate` | **下一步**: `receive-review`
 
 # Request Review
 
@@ -171,4 +172,4 @@ Reviewer 不应该是第一个发现测试失败的人。
 
 ## 下一步
 
-Review 请求发出后 → 等 reviewer 回复 → **直接加载 `receive-review`** skill 处理反馈（SOP Step 3b）。SOP 链条自动推进，不要停下来问铲屎官（§17）。
+Review 请求发出后 → 等 reviewer 回复 → **直接加载 `receive-review`** skill 处理反馈（SOP stage `review`）。SOP 链条自动推进，不要停下来问铲屎官（§17）。

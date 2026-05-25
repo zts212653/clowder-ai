@@ -121,6 +121,23 @@ function ensureKimiCatCafeEnv(name: string, env?: Record<string, string>): Recor
   };
 }
 
+function ensureWorkspaceEnvForManagedCatCafe(
+  server: McpServerDescriptor,
+  env?: Record<string, string>,
+): Record<string, string> | undefined {
+  // Source-based, not name-based: user-owned external servers may legally use
+  // cat-cafe-* names and must not inherit workspace filesystem access.
+  if (server.source !== 'cat-cafe') return env;
+  const workspaceRoot = resolveWorkspaceRoot();
+  if (!env) {
+    return { ALLOWED_WORKSPACE_DIRS: workspaceRoot };
+  }
+  return {
+    ...env,
+    ALLOWED_WORKSPACE_DIRS: workspaceRoot,
+  };
+}
+
 function ensureAntigravityCatCafeEnv(name: string, env?: Record<string, string>): Record<string, string> | undefined {
   if (!isCatCafeServer(name)) return env;
   const safeEnv = { ...(env ?? {}) };
@@ -247,7 +264,8 @@ export async function writeClaudeMcpConfig(filePath: string, servers: McpServerD
         delete existingServers[s.name];
       } else {
         const entry: Record<string, unknown> = { command: s.command, args: s.args };
-        if (s.env && Object.keys(s.env).length > 0) entry.env = s.env;
+        const env = ensureWorkspaceEnvForManagedCatCafe(s, s.env);
+        if (env && Object.keys(env).length > 0) entry.env = env;
         if (s.workingDir) entry.cwd = s.workingDir;
         existingServers[s.name] = entry;
       }
@@ -290,7 +308,8 @@ export async function writeCodexMcpConfig(filePath: string, servers: McpServerDe
       continue;
     }
     const entry: Record<string, unknown> = { command: s.command, args: s.args };
-    if (s.env && Object.keys(s.env).length > 0) entry.env = s.env;
+    const env = ensureWorkspaceEnvForManagedCatCafe(s, s.env);
+    if (env && Object.keys(env).length > 0) entry.env = env;
     entry.enabled = s.enabled;
     existingMcp[s.name] = entry;
   }

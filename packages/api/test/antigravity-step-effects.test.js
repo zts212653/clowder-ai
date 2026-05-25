@@ -112,6 +112,20 @@ describe('F201 classifyAntigravityStepEffect', () => {
     assert.equal(readOnly.blocksBlindRetry, false);
   });
 
+  test('GitHub pull request read tools are retry-safe MCP reads', () => {
+    const readOnly = classifyAntigravityStepEffect({
+      type: 'CORTEX_STEP_TYPE_MCP_TOOL',
+      status: 'CORTEX_STEP_STATUS_FAILED',
+      toolResult: { toolName: 'pull_request_read', success: false, output: 'Error: 工具调用失败' },
+    });
+
+    assert.equal(readOnly.kind, 'tool_read');
+    assert.equal(readOnly.effectType, 'mcp');
+    assert.equal(readOnly.toolName, 'pull_request_read');
+    assert.equal(readOnly.blocksBlindRetry, false);
+    assert.equal(isReadOnlyMcpTool('github-mcp-server__pull_request_read'), true);
+  });
+
   test('Antigravity 2.x call_mcp_tool wrapper is classified by its nested MCP tool name', () => {
     const effect = classifyAntigravityStepEffect({
       type: 'CORTEX_STEP_TYPE_MCP_TOOL',
@@ -312,6 +326,24 @@ describe('F201 classifyAntigravityStepEffect', () => {
       });
 
       assert.equal(effect.kind, 'tool_read');
+      assert.equal(effect.blocksBlindRetry, false);
+    }
+  });
+
+  test('GitHub PR inspection commands are read-only shell commands', () => {
+    for (const commandLine of [
+      'gh pr view 1863 --json title,body,state,headRefName,baseRefName,files,reviews,comments,additions,deletions,changedFiles',
+      'gh pr diff 1863 --name-only',
+      'gh pr checks 1863',
+    ]) {
+      const effect = classifyAntigravityStepEffect({
+        type: 'CORTEX_STEP_TYPE_RUN_COMMAND',
+        status: 'CORTEX_STEP_STATUS_FAILED',
+        runCommand: { commandLine },
+      });
+
+      assert.equal(effect.kind, 'tool_read');
+      assert.equal(effect.effectType, 'shell');
       assert.equal(effect.blocksBlindRetry, false);
     }
   });

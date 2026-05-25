@@ -7,7 +7,7 @@ created: 2026-02-26
 
 # Cat Cafe Feature Roadmap
 
-> 维护者：三猫 | 最后更新：2026-05-22（F210 Phase A recon）
+> 维护者：三猫 | 最后更新：2026-05-24（F211 Antigravity session transparency kickoff）
 >
 > **规则**：只放活跃 Feature（idea/spec/in-progress/review），done 后移除。
 > 详细信息见 `docs/features/Fxxx-*.md`。
@@ -73,5 +73,6 @@ created: 2026-02-26
 | F205 | MediaHub Video Provider Plugins — 视频生成/分析插件 | spec | community @mindfn + maintainers | community [#689](https://github.com/zts212653/clowder-ai/pull/689) | [F205](features/F205-video-provider-plugins.md) |
 | F207 | AI Family Office — 个人投资学习基建（画像/知识/数据/分析/决策五层） | spec | Ragdoll | internal | [F207](features/F207-personal-finance-infra.md) |
 | F208 | Capability Profile Routing — 能力画像档案 + 认知路由 | spec | Ragdoll | internal | [F208](features/F208-capability-profile-routing.md) |
-| F209 | Evidence Recall Optimization — 消息级语义、实体门牌号与活查询藤 | spec | Maine Coon/Maine Coon | internal | [F209](features/F209-evidence-recall-optimization.md) |
+| F209 | Evidence Recall Optimization — 消息级语义、实体门牌号与活查询藤 | in-progress | Maine Coon/Maine Coon | internal | [F209](features/F209-evidence-recall-optimization.md) |
 | F210 | Gemini CLI to Antigravity CLI Migration | in-progress | Maine Coon/Maine Coon | internal | [F210](features/F210-antigravity-cli-migration.md) |
+| F211 | Cross-Runtime Session Transparency — Antigravity Session Chain + IDE Direct Registration | spec | Maine Coon/Maine Coon | internal | [F211](features/F211-cross-runtime-session-transparency.md) |

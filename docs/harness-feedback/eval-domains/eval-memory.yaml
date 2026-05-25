@@ -1,0 +1,26 @@
+---
+domainId: eval:memory
+displayName: Memory Recall & Library Health Eval
+systemThreadId: thread_eval_memory
+evalCat:
+  catId: opus47
+  handle: "@opus47"
+  model: claude-opus-4-7
+frequency: daily
+sourceAdapter: f200-f188-memory-eval
+threadPolicy:
+  role: working-home
+  stateSot: registry
+  allowedContent:
+    - longitudinal-analysis
+    - verdict-discussion
+    - handoff-drafts
+legacyScheduledTaskIds:
+  - memory-recall-digest
+handoffTargetResolver:
+  featureId: F200
+  ownerCatId: opus47
+  threadLookup: feature-thread
+sla:
+  acknowledgeHours: 48
+  reevalWithinHours: 168

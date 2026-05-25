@@ -661,13 +661,22 @@ excluded:
     });
 
     it('sync-manifest exports root package check script targets', () => {
+      const managedRoots = readYamlTopLevelList('sync-manifest.yaml', 'managed_roots');
       const managedScripts = readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts');
       const requiredScripts = [
         'scripts/check-followup-tails.mjs',
         'scripts/derive-worktree-ports.mjs',
         'scripts/derive-worktree-ports.test.mjs',
         'scripts/check-worktree-port-offset.mjs',
+        'scripts/sop-definitions.mjs',
+        'scripts/sop-definitions.test.mjs',
+        'scripts/lib/sop-definition-codegen.mjs',
       ];
+
+      assert.ok(
+        managedRoots.includes('sop-definitions'),
+        'sync-manifest should export sop-definitions because root package.json check:sop-definitions reads it',
+      );
 
       for (const scriptPath of requiredScripts) {
         assert.ok(
@@ -723,7 +732,12 @@ excluded:
       const managedFiles = readYamlTopLevelList('sync-manifest.yaml', 'managed_files');
       const fixturePaths = [
         'docs/harness-feedback/eval-domains/eval-a2a.yaml',
+        'docs/harness-feedback/eval-domains/eval-memory.yaml',
         'docs/harness-feedback/verdicts/fixtures/2026-05-21-eval-a2a-contract-demo.md',
+        'docs/harness-feedback/verdicts/2026-05-23-eval-a2a-live-verdict.md',
+        'docs/harness-feedback/bundles/2026-05-23-eval-a2a-live-verdict/attribution.json',
+        'docs/harness-feedback/bundles/2026-05-23-eval-a2a-live-verdict/provenance.json',
+        'docs/harness-feedback/bundles/2026-05-23-eval-a2a-live-verdict/snapshot.json',
         'docs/features/assets/F210/agy-conversation-resume.txt',
         'docs/features/assets/F210/agy-print-timeout.txt',
         'docs/features/assets/F210/agy-real-home-no-default-model.txt',

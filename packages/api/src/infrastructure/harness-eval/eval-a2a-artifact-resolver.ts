@@ -38,7 +38,7 @@ const bundleComponentSchema = z
 const bundleSnapshotSchema = z.object({
   verdictId: z.string().min(1),
   evalSnapshotId: z.string().min(1),
-  featureId: z.literal('F167'),
+  featureId: z.string().regex(/^F\d{3}$/, 'featureId must match F followed by 3 digits'),
   generatedAt: z.string().datetime({ offset: true }),
   window: z.object({
     startMs: z.number().int().optional(),
@@ -80,7 +80,7 @@ const attributionFindingSchema = z.object({
 
 const bundleAttributionSchema = z.object({
   verdictId: z.string().min(1),
-  featureId: z.literal('F167'),
+  featureId: z.string().regex(/^F\d{3}$/, 'featureId must match F followed by 3 digits'),
   evalSnapshotId: z.string().min(1),
   generatedAt: z.string().datetime({ offset: true }),
   findings: z.array(attributionFindingSchema),
