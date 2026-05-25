@@ -244,7 +244,7 @@ describe('composeSkillItems', () => {
         canToggle: true,
       },
     });
-    expect(result[0].governance.mountedCount).toBe(4);
+    expect(result[0].governance.mountedCount).toBe(0);
   });
 
   it('uses mount-point-aware mount health when disabled mount points are intentionally unmounted', () => {

@@ -146,12 +146,6 @@ function normalizeMounts(mounts: Record<string, boolean> | undefined, fallback: 
   };
 }
 
-function mountFallbackForCapability(cap: CapabilityBoardItem): boolean {
-  const hasExplicitMount = MOUNT_POINT_KEYS.some((key) => typeof cap.mounts?.[key] === 'boolean');
-  if (hasExplicitMount) return false;
-  return !!cap.pluginId && Object.keys(cap.cats ?? {}).length > 0;
-}
-
 function controlsFromCapability(cap: CapabilityBoardItem): SettingsSkillItem['controls'] {
   return {
     source: cap.source,
@@ -213,7 +207,7 @@ export function composeSkillItems(governance: SkillsData, capabilityItems: Capab
   const governedNames = new Set(governance.skills.map((skill) => skill.name));
   for (const cap of capMap.values()) {
     if (governedNames.has(cap.id)) continue;
-    const mounts = normalizeMounts(cap.mounts, mountFallbackForCapability(cap));
+    const mounts = normalizeMounts(cap.mounts, false);
     const mountedCount = getMountedCount(mounts);
     rows.push({
       id: cap.id,

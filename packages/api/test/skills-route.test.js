@@ -1503,6 +1503,95 @@ describe('Skills Route', () => {
     }
   });
 
+  it('does not treat same-named home skills as plugin-owned skill mounts or metadata', async () => {
+    const projectDir = join('/tmp', `skills-route-test-plugin-stale-home-${Date.now()}`);
+    const homeDir = join('/tmp', `skills-route-test-plugin-stale-home-root-${Date.now()}`);
+    const pluginDir = join(projectDir, 'plugins', 'weixin-mp');
+    const pluginSkillDir = join(pluginDir, 'skills', 'weixin-mp');
+    const wrongHomeSkillDir = join(homeDir, '.codex', 'skills', 'weixin-mp');
+    const prevHome = process.env.HOME;
+
+    await Promise.all([mkdir(pluginSkillDir, { recursive: true }), mkdir(wrongHomeSkillDir, { recursive: true })]);
+    await writeFile(
+      join(pluginDir, 'plugin.yaml'),
+      [
+        'id: weixin-mp',
+        'name: Weixin MP',
+        'version: 1.0.0',
+        'resources:',
+        '  - type: skill',
+        '    path: skills/weixin-mp',
+      ].join('\n'),
+    );
+    await writeFile(
+      join(pluginSkillDir, 'SKILL.md'),
+      [
+        '---',
+        'name: weixin-mp',
+        'description: 微信公众号文章发布',
+        'triggers:',
+        '  - 微信',
+        '  - 公众号',
+        '---',
+        '',
+        '# weixin-mp',
+      ].join('\n'),
+    );
+    await writeFile(
+      join(wrongHomeSkillDir, 'SKILL.md'),
+      [
+        '---',
+        'name: weixin-mp',
+        'description: WRONG HOME SKILL',
+        'triggers:',
+        '  - wrong-home',
+        '---',
+        '',
+        '# Wrong home skill',
+      ].join('\n'),
+    );
+    await writeCapabilitiesConfig(projectDir, {
+      version: 2,
+      capabilities: [
+        {
+          id: 'weixin-mp',
+          type: 'skill',
+          enabled: true,
+          source: 'cat-cafe',
+          pluginId: 'weixin-mp',
+        },
+      ],
+    });
+
+    process.env.HOME = homeDir;
+    const app = Fastify();
+    await app.register(skillsRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/skills?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.body);
+      const weixin = body.skills.find((skill) => skill.name === 'weixin-mp');
+      assert.ok(weixin, 'plugin-owned weixin-mp skill should still be represented from capabilities');
+      assert.equal(weixin.description, '微信公众号文章发布');
+      assert.equal(weixin.trigger, '微信、公众号');
+      assert.equal(weixin.mounts.codex, false, 'same-named home skill is not the plugin-owned mount');
+      assert.equal(weixin.mountHealth.mountedCount, 0);
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it('POST /api/skills/sync mounts enabled plugin skill and unmounts disabled plugin skill', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
