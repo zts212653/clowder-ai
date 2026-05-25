@@ -503,7 +503,11 @@ export class IndexBuilder implements IIndexBuilder {
         // fail-open: embedding errors don't block indexing
       }
     }
-    await this.embedMissingPassages();
+    // F209 fix: passage embedding is a recall accelerator (passage_fts stays canonical),
+    // so it MUST NOT block rebuild()/listen(). Fire-and-forget; vectors warm up in background.
+    void this.embedMissingPassages().catch(() => {
+      /* fail-open: passage vectors are an accelerator; passage_fts remains canonical */
+    });
 
     // Persist current indexing version so next startup can detect changes
     await this.storeIndexingVersion();

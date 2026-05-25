@@ -24,6 +24,16 @@ function makeEmbedding({ fail = false } = {}) {
   };
 }
 
+/** Poll a predicate until it is true or the timeout elapses (for fire-and-forget assertions). */
+async function waitFor(predicate, { timeout = 2000, interval = 10 } = {}) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    if (predicate()) return;
+    await new Promise((r) => setTimeout(r, interval));
+  }
+  throw new Error(`waitFor: predicate not satisfied within ${timeout}ms`);
+}
+
 describe('IndexBuilder passage embeddings', () => {
   let tmpDir;
   let docsDir;
@@ -103,7 +113,66 @@ describe('IndexBuilder passage embeddings', () => {
     const db = store.getDb();
     const passageCount = db.prepare('SELECT count(*) as c FROM evidence_passages').get().c;
     assert.equal(passageCount, 2);
-    assert.equal(passageVectorStore.count(), 2, 'rebuild should embed every indexed passage');
+    // F209: passage vectors warm up asynchronously after rebuild() (fire-and-forget).
+    await waitFor(() => passageVectorStore.count() === 2);
+    assert.equal(passageVectorStore.count(), 2, 'rebuild should embed every indexed passage (background warm-up)');
+  });
+
+  it('does not block rebuild() on passage embedding — fire-and-forget (F209 regression)', async () => {
+    // Single message → one passage that must be embedded. With the regression
+    // (`await embedMissingPassages()` before listen) rebuild() would hang here.
+    const messages = [
+      {
+        id: 'msg_block_001',
+        content: 'Startup must not wait for this passage vector to be computed.',
+        catId: 'user',
+        threadId: 'thread_embed1',
+        timestamp: Date.now(),
+      },
+    ];
+    const builder = await createBuilder({ messages });
+
+    // Gate ONLY passage embedding — the path the F209 fix makes non-blocking. (Doc/thread
+    // embedding stays a legitimate synchronous await inside rebuild(), so we must not gate it.)
+    let releaseEmbed;
+    const gate = new Promise((resolve) => {
+      releaseEmbed = resolve;
+    });
+    const originalEmbedMissing = builder.embedMissingPassages.bind(builder);
+    builder.embedMissingPassages = async (...args) => {
+      await gate;
+      return originalEmbedMissing(...args);
+    };
+
+    const rebuildPromise = builder.rebuild();
+    let timer;
+    try {
+      const outcome = await Promise.race([
+        rebuildPromise.then(
+          () => 'resolved',
+          () => 'rejected',
+        ),
+        new Promise((resolve) => {
+          timer = setTimeout(() => resolve('blocked'), 1000);
+        }),
+      ]);
+      clearTimeout(timer);
+      assert.equal(outcome, 'resolved', 'rebuild() must resolve without waiting for passage embedding');
+
+      // Canonical lexical passage is indexed synchronously inside rebuild()...
+      const db = store.getDb();
+      assert.equal(db.prepare('SELECT count(*) as c FROM evidence_passages').get().c, 1);
+      // ...but the semantic vector is still pending while passage embedding is gated.
+      assert.equal(passageVectorStore.count(), 0, 'passage vectors must warm up after listen(), not before');
+    } finally {
+      clearTimeout(timer);
+      releaseEmbed();
+      await rebuildPromise.catch(() => {});
+    }
+
+    // Once the embedding backend responds, the vector lands in the background.
+    await waitFor(() => passageVectorStore.count() === 1);
+    assert.equal(passageVectorStore.count(), 1);
   });
 
   it('embeds late-arriving dirty-thread passages without full rebuild', async () => {
@@ -118,7 +187,8 @@ describe('IndexBuilder passage embeddings', () => {
     ];
     const builder = await createBuilder({ messages });
     await builder.rebuild();
-    assert.equal(passageVectorStore.count(), 1);
+    // F209: initial rebuild embeds passages in the background.
+    await waitFor(() => passageVectorStore.count() === 1);
 
     messages.push({
       id: 'msg_dirty_002',

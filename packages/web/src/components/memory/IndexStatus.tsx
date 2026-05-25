@@ -10,6 +10,8 @@ interface RawStatusResponse {
   docs_count?: number;
   threads_count?: number;
   passages_count?: number;
+  passage_vectors_count?: number;
+  passage_vectors_supported?: boolean;
   edges_count?: number;
   last_rebuild_at?: string | null;
   embedding_model?: string | null;
@@ -22,6 +24,8 @@ export interface IndexStatusData {
   docsCount: number;
   threadsCount: number;
   passagesCount: number;
+  passageVectorsCount: number;
+  passageVectorsSupported: boolean;
   edgesCount: number;
   lastRebuildAt: string | null;
   embeddingModel: string | null;
@@ -38,11 +42,25 @@ export function parseIndexStatus(raw: RawStatusResponse): IndexStatusData {
     docsCount: raw.docs_count ?? 0,
     threadsCount: raw.threads_count ?? 0,
     passagesCount: raw.passages_count ?? 0,
+    passageVectorsCount: raw.passage_vectors_count ?? 0,
+    passageVectorsSupported: raw.passage_vectors_supported ?? false,
     edgesCount: raw.edges_count ?? 0,
     lastRebuildAt: raw.last_rebuild_at ?? null,
     embeddingModel: raw.embedding_model ?? null,
     reason: raw.reason,
   };
+}
+
+/**
+ * F209 Pure: is passage-vector embedding still warming up in the background?
+ * True only when passage vectors are SUPPORTED (sqlite-vec available / embedding on) and there
+ * are passages whose vectors are not all computed yet. When unsupported (embed off / no vec table),
+ * the count stays 0 forever — this guard prevents a perpetual "warming up" banner + 3s poll loop.
+ */
+export function isEmbeddingWarmingUp(status: IndexStatusData): boolean {
+  return (
+    status.passageVectorsSupported && status.passagesCount > 0 && status.passageVectorsCount < status.passagesCount
+  );
 }
 
 // ── F188 Phase A: Rebuild job types + parser ──
@@ -176,6 +194,15 @@ export function IndexStatus() {
     fetchAll();
   }, [fetchAll]);
 
+  // F209: while passage vectors are warming up in the background, poll so the
+  // progress count climbs live. Stops automatically once fully embedded.
+  const warmingUp = status ? isEmbeddingWarmingUp(status) : false;
+  useEffect(() => {
+    if (!warmingUp) return;
+    const timer = setInterval(fetchAll, 3000);
+    return () => clearInterval(timer);
+  }, [warmingUp, fetchAll]);
+
   if (error) {
     return (
       <div data-testid="index-status" className="rounded-lg border border-conn-red-ring bg-conn-red-bg p-4">
@@ -206,12 +233,39 @@ export function IndexStatus() {
         {status.reason && <span className="text-xs text-cafe-secondary">({status.reason})</span>}
       </div>
 
+      {/* F209: background embedding warm-up banner (auto-hides once fully embedded) */}
+      {warmingUp && (
+        <div data-testid="embedding-warmup" className="rounded-lg border border-conn-amber-ring bg-conn-amber-bg p-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-conn-amber-text">语义索引暖机中…</span>
+            <span className="text-xs font-mono text-conn-amber-text">
+              {status.passageVectorsCount} / {status.passagesCount}
+            </span>
+          </div>
+          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[var(--console-field-bg)]">
+            <div
+              className="h-full rounded-full bg-conn-amber-text transition-[width] duration-500"
+              style={{
+                width: `${Math.min(100, Math.round((status.passageVectorsCount / status.passagesCount) * 100))}%`,
+              }}
+            />
+          </div>
+          <p className="mt-1.5 text-micro text-cafe-secondary">
+            关键词检索已就绪；语义召回在后台补全，完成前部分历史暂未覆盖。
+          </p>
+        </div>
+      )}
+
       {/* Stats */}
       <div className="rounded-lg bg-[var(--console-card-bg)] p-3">
         <StatusRow label="后端" value={status.backend} />
         <StatusRow label="文档" value={status.docsCount} />
         <StatusRow label="线程" value={status.threadsCount} />
         <StatusRow label="段落" value={status.passagesCount} />
+        <StatusRow
+          label="段落向量"
+          value={warmingUp ? `${status.passageVectorsCount} / ${status.passagesCount}` : status.passageVectorsCount}
+        />
         <StatusRow label="关系边" value={status.edgesCount} />
         {status.embeddingModel && <StatusRow label="嵌入模型" value={status.embeddingModel} />}
         <StatusRow
