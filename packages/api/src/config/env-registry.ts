@@ -1666,6 +1666,14 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'antigravity',
     sensitive: false,
   },
+  {
+    name: 'CAT_CAFE_RUNTIME_SESSION_SEAL_REAPER_INTERVAL_MS',
+    defaultValue: '30000',
+    description: 'F211 runtime session pending seal reaper 轮询间隔（毫秒，启动时读取）',
+    category: 'antigravity',
+    sensitive: false,
+    runtimeEditable: false,
+  },
   // --- audio (F195 会中实时智囊) ---
   {
     name: 'AUDIO_SERVICE_URL',

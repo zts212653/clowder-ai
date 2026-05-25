@@ -310,7 +310,15 @@ export class SessionSealer implements ISessionSealer {
    * Callers use this to decide whether to emit SEAL_FINALIZED (clean) or log partial.
    */
   private async doFinalize(
-    record: { id: string; threadId: string; catId: string; cliSessionId: string; seq: number; createdAt: number },
+    record: {
+      id: string;
+      threadId: string;
+      catId: string;
+      cliSessionId: string;
+      seq: number;
+      createdAt: number;
+      sealReason?: string;
+    },
     now: number,
   ): Promise<boolean> {
     let clean = true;
@@ -326,7 +334,11 @@ export class SessionSealer implements ISessionSealer {
             cliSessionId: record.cliSessionId,
             seq: record.seq,
           },
-          { createdAt: record.createdAt, sealedAt: now },
+          {
+            createdAt: record.createdAt,
+            sealedAt: now,
+            ...(record.sealReason ? { sealReason: record.sealReason } : {}),
+          },
         );
       } catch {
         clean = false;

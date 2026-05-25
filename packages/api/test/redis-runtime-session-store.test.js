@@ -105,6 +105,68 @@ describe('RedisRuntimeSessionStore', { skip: redisIsolationSkipReason(REDIS_URL)
     assert.equal(staleRaw, null, 'stale runtime tuple index must be removed');
   });
 
+  it('active thread/cat lookup returns the newest active metadata only', async () => {
+    await store.upsert(
+      metadataFor('session-older', {
+        runtimeSessionId: 'cascade-older',
+        lifecycle: { state: 'active', startedAt: 1000, lastObservedAt: 2000 },
+      }),
+    );
+    await store.upsert(
+      metadataFor('session-newer', {
+        runtimeSessionId: 'cascade-newer',
+        lifecycle: { state: 'active', startedAt: 1000, lastObservedAt: 3000 },
+      }),
+    );
+    await store.upsert(
+      metadataFor('session-other-cat', {
+        runtimeSessionId: 'cascade-other-cat',
+        catId: 'opus-47',
+        lifecycle: { state: 'active', startedAt: 1000, lastObservedAt: 4000 },
+      }),
+    );
+    await store.upsert(
+      metadataFor('session-sealed-newest', {
+        runtimeSessionId: 'cascade-sealed',
+        lifecycle: { state: 'sealed', startedAt: 1000, lastObservedAt: 5000, sealReason: 'test' },
+      }),
+    );
+
+    const active = await store.getActiveByThreadCat('antigravity-desktop', 'thread-1', 'antig-opus');
+
+    assert.equal(active.sessionId, 'session-newer');
+    assert.equal(active.runtimeSessionId, 'cascade-newer');
+    assert.equal(
+      (await store.getActiveByThreadCat('antigravity-desktop', 'thread-1', 'opus-47')).sessionId,
+      'session-other-cat',
+    );
+    assert.equal(await store.getActiveByThreadCat('antigravity-desktop', 'missing-thread', 'antig-opus'), null);
+
+    const activeRaw = await redis.get(RuntimeSessionKeys.byThreadCat('antigravity-desktop', 'thread-1', 'antig-opus'));
+    assert.equal(activeRaw, 'session-newer', 'active binding index should point at newest active metadata');
+  });
+
+  it('active thread/cat index is removed when lifecycle leaves active', async () => {
+    await store.upsert(metadataFor('session-1', { runtimeSessionId: 'cascade-1' }));
+
+    assert.equal(
+      (await store.getActiveByThreadCat('antigravity-desktop', 'thread-1', 'antig-opus')).sessionId,
+      'session-1',
+    );
+
+    await store.updateLifecycle('session-1', {
+      state: 'runtime_seal_pending',
+      pendingSince: 3000,
+      lastObservedAt: 3000,
+    });
+
+    assert.equal(await store.getActiveByThreadCat('antigravity-desktop', 'thread-1', 'antig-opus'), null);
+    assert.equal(
+      await redis.get(RuntimeSessionKeys.byThreadCat('antigravity-desktop', 'thread-1', 'antig-opus')),
+      null,
+    );
+  });
+
   it('lifecycle state index moves records and orders by lastObservedAt', async () => {
     await store.upsert(
       metadataFor('session-newer', {

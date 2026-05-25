@@ -8,6 +8,7 @@
  * the script.
  */
 
+import type { CatId } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { RuntimeSessionKeys } from '../stores/redis-keys/runtime-session-keys.js';
 import {
@@ -19,12 +20,22 @@ import {
 import type { IRuntimeSessionStore } from './RuntimeSessionStore.js';
 
 const UPSERT_LUA = `
+local function active_key(runtime, threadId, catId)
+  return ARGV[2] .. 'runtime-session-active:' .. runtime .. ':' .. threadId .. ':' .. catId
+end
+
 local existing = redis.call('GET', KEYS[1])
 if existing and existing ~= '' then
   local decoded = cjson.decode(existing)
   if decoded.runtime and decoded.runtimeSessionId then
     local oldRuntimeKey = ARGV[2] .. 'runtime-session:runtime:' .. decoded.runtime .. ':' .. decoded.runtimeSessionId
     redis.call('DEL', oldRuntimeKey)
+  end
+  if decoded.runtime and decoded.threadId and decoded.catId and decoded.lifecycle and decoded.lifecycle.state == 'active' then
+    local oldActiveKey = active_key(decoded.runtime, decoded.threadId, decoded.catId)
+    if redis.call('GET', oldActiveKey) == ARGV[1] then
+      redis.call('DEL', oldActiveKey)
+    end
   end
   if decoded.lifecycle and decoded.lifecycle.state then
     local oldStateKey = ARGV[2] .. 'runtime-session:lifecycle:' .. decoded.lifecycle.state
@@ -35,6 +46,35 @@ end
 redis.call('SET', KEYS[1], ARGV[3])
 redis.call('SET', KEYS[2], ARGV[1])
 redis.call('ZADD', KEYS[3], tonumber(ARGV[4]), ARGV[1])
+
+if ARGV[8] == 'active' and ARGV[6] ~= '' and ARGV[7] ~= '' then
+  local newActiveKey = active_key(ARGV[5], ARGV[6], ARGV[7])
+  local currentId = redis.call('GET', newActiveKey)
+  local shouldSetActive = false
+
+  if not currentId or currentId == '' or currentId == ARGV[1] then
+    shouldSetActive = true
+  else
+    local currentPayload = redis.call('GET', ARGV[2] .. 'runtime-session:' .. currentId)
+    if not currentPayload or currentPayload == '' then
+      shouldSetActive = true
+    else
+      local current = cjson.decode(currentPayload)
+      local currentObservedAt = 0
+      if current.lifecycle and current.lifecycle.lastObservedAt then
+        currentObservedAt = tonumber(current.lifecycle.lastObservedAt)
+      end
+      if tonumber(ARGV[4]) >= currentObservedAt then
+        shouldSetActive = true
+      end
+    end
+  end
+
+  if shouldSetActive then
+    redis.call('SET', newActiveKey, ARGV[1])
+  end
+end
+
 return ARGV[3]
 `;
 
@@ -54,6 +94,10 @@ export class RedisRuntimeSessionStore implements IRuntimeSessionStore {
       this.keyPrefix,
       payload,
       String(normalized.lifecycle.lastObservedAt),
+      normalized.runtime,
+      normalized.threadId ?? '',
+      normalized.catId,
+      normalized.lifecycle.state,
     );
     return normalized;
   }
@@ -69,6 +113,26 @@ export class RedisRuntimeSessionStore implements IRuntimeSessionStore {
   ): Promise<RuntimeSessionMetadata | null> {
     const sessionId = await this.redis.get(RuntimeSessionKeys.byRuntime(runtime, runtimeSessionId));
     return sessionId ? this.getBySessionId(sessionId) : null;
+  }
+
+  async getActiveByThreadCat(
+    runtime: RuntimeSessionRuntime,
+    threadId: string,
+    catId: CatId,
+  ): Promise<RuntimeSessionMetadata | null> {
+    const sessionId = await this.redis.get(RuntimeSessionKeys.byThreadCat(runtime, threadId, catId));
+    if (!sessionId) return null;
+    const record = await this.getBySessionId(sessionId);
+    if (
+      !record ||
+      record.runtime !== runtime ||
+      record.threadId !== threadId ||
+      record.catId !== catId ||
+      record.lifecycle.state !== 'active'
+    ) {
+      return null;
+    }
+    return record;
   }
 
   async listByLifecycleState(state: RuntimeSessionLifecycleState): Promise<RuntimeSessionMetadata[]> {

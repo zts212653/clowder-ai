@@ -107,6 +107,11 @@ export {
   limbTools,
 } from './limb-tools.js';
 export {
+  handleRunPerspective,
+  perspectiveTools,
+  runPerspectiveInputSchema,
+} from './perspective-tools.js';
+export {
   handleListRecent,
   listRecentInputSchema,
   recentTools,

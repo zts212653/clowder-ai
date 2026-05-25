@@ -114,6 +114,7 @@ describe('IndexBuilder passage embeddings', () => {
     const passageCount = db.prepare('SELECT count(*) as c FROM evidence_passages').get().c;
     assert.equal(passageCount, 2);
     // F209: passage vectors warm up asynchronously after rebuild() (fire-and-forget).
+    builder.startPassageEmbeddingWarmup();
     await waitFor(() => passageVectorStore.count() === 2);
     assert.equal(passageVectorStore.count(), 2, 'rebuild should embed every indexed passage (background warm-up)');
   });
@@ -164,6 +165,7 @@ describe('IndexBuilder passage embeddings', () => {
       assert.equal(db.prepare('SELECT count(*) as c FROM evidence_passages').get().c, 1);
       // ...but the semantic vector is still pending while passage embedding is gated.
       assert.equal(passageVectorStore.count(), 0, 'passage vectors must warm up after listen(), not before');
+      builder.startPassageEmbeddingWarmup();
     } finally {
       clearTimeout(timer);
       releaseEmbed();
@@ -173,6 +175,34 @@ describe('IndexBuilder passage embeddings', () => {
     // Once the embedding backend responds, the vector lands in the background.
     await waitFor(() => passageVectorStore.count() === 1);
     assert.equal(passageVectorStore.count(), 1);
+  });
+
+  it('defers the passage embedding scan itself off the rebuild critical path (F209 regression)', async () => {
+    const messages = [
+      {
+        id: 'msg_scan_001',
+        content: 'Startup must not run passage-vector scan before rebuild resolves.',
+        catId: 'user',
+        threadId: 'thread_embed1',
+        timestamp: Date.now(),
+      },
+    ];
+    const builder = await createBuilder({ messages });
+
+    let scanStarted = false;
+    builder.embedMissingPassages = async () => {
+      scanStarted = true;
+      const stopAt = Date.now() + 250;
+      while (Date.now() < stopAt) {
+        // Simulate the synchronous pre-await DB scan/diff on a large store.
+      }
+    };
+
+    await builder.rebuild();
+
+    assert.equal(scanStarted, false, 'rebuild() must schedule passage-vector scan after it resolves');
+    builder.startPassageEmbeddingWarmup();
+    await waitFor(() => scanStarted);
   });
 
   it('embeds late-arriving dirty-thread passages without full rebuild', async () => {
@@ -188,6 +218,7 @@ describe('IndexBuilder passage embeddings', () => {
     const builder = await createBuilder({ messages });
     await builder.rebuild();
     // F209: initial rebuild embeds passages in the background.
+    builder.startPassageEmbeddingWarmup();
     await waitFor(() => passageVectorStore.count() === 1);
 
     messages.push({

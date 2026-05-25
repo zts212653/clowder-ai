@@ -32,6 +32,7 @@ import {
 } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import type { IntentResult } from '../../context/IntentParser.js';
 import { parseIntent, stripIntentTags } from '../../context/IntentParser.js';
+import type { IRuntimeSessionStore } from '../../runtime-session/RuntimeSessionStore.js';
 import { SessionManager } from '../../session/SessionManager.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
 import type { TranscriptReader } from '../../session/TranscriptReader.js';
@@ -163,6 +164,8 @@ export interface AgentRouterOptions {
   threadStore?: IThreadStore;
   /** F24: Session chain store for context health tracking */
   sessionChainStore?: ISessionChainStore;
+  /** F211 Phase A2: runtime sidecar for provider runtime session metadata */
+  runtimeSessionStore?: IRuntimeSessionStore;
   /** F24 Phase C: Transcript writer for event recording */
   transcriptWriter?: TranscriptWriter;
   /** F24 Phase D: Transcript reader for bootstrap injection */
@@ -226,6 +229,7 @@ export class AgentRouter {
   private deliveryCursorStore: DeliveryCursorStore;
   private threadStore: IThreadStore | null;
   private sessionChainStore: ISessionChainStore | undefined;
+  private runtimeSessionStore: IRuntimeSessionStore | undefined;
   private transcriptWriter: TranscriptWriter | undefined;
   private transcriptReader: TranscriptReader | undefined;
   private sessionSealer: ISessionSealer | undefined;
@@ -289,6 +293,7 @@ export class AgentRouter {
     this.deliveryCursorStore = options.deliveryCursorStore ?? new DeliveryCursorStore(options.sessionStore);
     this.threadStore = options.threadStore ?? null;
     this.sessionChainStore = options.sessionChainStore;
+    this.runtimeSessionStore = options.runtimeSessionStore;
     this.transcriptWriter = options.transcriptWriter;
     this.transcriptReader = options.transcriptReader;
     this.sessionSealer = options.sessionSealer;
@@ -825,6 +830,7 @@ export class AgentRouter {
         apiUrl: `http://127.0.0.1:${apiPort}`,
         ...(this.taskProgressStore ? { taskProgressStore: this.taskProgressStore } : {}),
         ...(this.sessionChainStore ? { sessionChainStore: this.sessionChainStore } : {}),
+        ...(this.runtimeSessionStore ? { runtimeSessionStore: this.runtimeSessionStore } : {}),
         ...(this.transcriptWriter ? { transcriptWriter: this.transcriptWriter } : {}),
         ...(this.transcriptReader ? { transcriptReader: this.transcriptReader } : {}),
         ...(this.sessionSealer ? { sessionSealer: this.sessionSealer } : {}),

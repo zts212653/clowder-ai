@@ -72,6 +72,64 @@ describe('RuntimeSessionStore', () => {
     assert.equal(store.getByRuntimeSession('antigravity-desktop', 'cascade-new').sessionId, 'session-1');
   });
 
+  test('active thread/cat lookup returns newest active metadata only', async () => {
+    const { RuntimeSessionStore } = await loadModules();
+    const store = new RuntimeSessionStore();
+
+    store.upsert(
+      metadataFor('session-older', {
+        runtimeSessionId: 'cascade-older',
+        lifecycle: { state: 'active', startedAt: 1000, lastObservedAt: 2000 },
+      }),
+    );
+    store.upsert(
+      metadataFor('session-newer', {
+        runtimeSessionId: 'cascade-newer',
+        lifecycle: { state: 'active', startedAt: 1000, lastObservedAt: 3000 },
+      }),
+    );
+    store.upsert(
+      metadataFor('session-other-cat', {
+        runtimeSessionId: 'cascade-other-cat',
+        catId: 'opus-47',
+        lifecycle: { state: 'active', startedAt: 1000, lastObservedAt: 4000 },
+      }),
+    );
+    store.upsert(
+      metadataFor('session-sealed-newest', {
+        runtimeSessionId: 'cascade-sealed',
+        lifecycle: { state: 'sealed', startedAt: 1000, lastObservedAt: 5000, sealReason: 'test' },
+      }),
+    );
+
+    const active = store.getActiveByThreadCat('antigravity-desktop', 'thread-1', 'antig-opus');
+
+    assert.equal(active.sessionId, 'session-newer');
+    assert.equal(active.runtimeSessionId, 'cascade-newer');
+    assert.equal(
+      store.getActiveByThreadCat('antigravity-desktop', 'thread-1', 'opus-47').sessionId,
+      'session-other-cat',
+    );
+    assert.equal(store.getActiveByThreadCat('antigravity-desktop', 'missing-thread', 'antig-opus'), null);
+  });
+
+  test('active thread/cat lookup is removed when lifecycle leaves active', async () => {
+    const { RuntimeSessionStore } = await loadModules();
+    const store = new RuntimeSessionStore();
+
+    store.upsert(metadataFor('session-1', { runtimeSessionId: 'cascade-1' }));
+
+    assert.equal(store.getActiveByThreadCat('antigravity-desktop', 'thread-1', 'antig-opus').sessionId, 'session-1');
+
+    store.updateLifecycle('session-1', {
+      state: 'runtime_seal_pending',
+      pendingSince: 3000,
+      lastObservedAt: 3000,
+    });
+
+    assert.equal(store.getActiveByThreadCat('antigravity-desktop', 'thread-1', 'antig-opus'), null);
+  });
+
   test('updateLifecycle changes sidecar state without adding SessionRecord status', async () => {
     const { RuntimeSessionStore } = await loadModules();
     const store = new RuntimeSessionStore();

@@ -10,7 +10,7 @@ You run scenarios without the skill (RED - watch agent fail), write skill addres
 
 **Core principle:** If you didn't watch an agent fail without the skill, you don't know if the skill prevents the right failures.
 
-**REQUIRED BACKGROUND:** You MUST understand superpowers:test-driven-development before using this skill. That skill defines the fundamental RED-GREEN-REFACTOR cycle. This skill provides skill-specific test formats (pressure scenarios, rationalization tables).
+**REQUIRED BACKGROUND:** Use Cat Café's `tdd` discipline as the RED-GREEN-REFACTOR baseline. This reference applies that cycle to process documentation and does not depend on Superpowers.
 
 **Complete worked example:** See examples/CLAUDE_MD_TESTING.md for a full test campaign testing CLAUDE.md documentation variants.
 
@@ -21,11 +21,14 @@ Test skills that:
 - Have compliance costs (time, effort, rework)
 - Could be rationalized away ("just this once")
 - Contradict immediate goals (speed over quality)
+- Encode Cat Café historical traps, evidence standards, or behavior brakes
+- Make a hidden tool/truth source discoverable at the right time
 
 Don't test:
 - Pure reference skills (API docs, syntax guides)
 - Skills without rules to violate
 - Skills agents have no incentive to bypass
+- Generic tutorials for knowledge strong models already have; delete or demote them instead
 
 ## TDD Mapping for Skill Testing
 
@@ -39,6 +42,20 @@ Don't test:
 | **Stay GREEN** | Re-verify | Test again, ensure still compliant |
 
 Same cycle as code TDD, different test format.
+
+## Pre-RED: Value Test
+
+Before writing scenarios, check whether this should be a skill at all:
+
+| Candidate content | Action |
+|-------------------|--------|
+| Generic language/framework knowledge | Do not make a skill. |
+| Time-sensitive external facts | Reference file with "verify official source" instruction. |
+| Real failure mode or rationalization | Test as a discipline skill. |
+| Tool discoverability problem | Test whether the skill makes the agent choose the right tool. |
+| Mechanically detectable high-risk behavior | Prefer hook/runtime guard; test the guard, not prompt compliance. |
+
+If the skill cannot name a concrete failure or capability gap, it has not earned the context it will spend.
 
 ## RED Phase: Baseline Testing (Watch It Fail)
 
