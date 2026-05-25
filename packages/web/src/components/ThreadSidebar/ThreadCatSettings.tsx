@@ -1,19 +1,31 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { CatSelector } from './CatSelector';
 
 interface ThreadCatSettingsProps {
   threadId: string;
   currentCats: string[];
   onSave: (threadId: string, cats: string[]) => void | Promise<void>;
+  triggerLabel?: string;
+  triggerIcon?: ReactNode;
+  triggerClassName?: string;
+  triggerRole?: 'menuitem';
 }
 
 /**
  * F32-b Phase 3: Inline popover to edit a thread's preferredCats.
  * Shown as a small icon button; opens CatSelector in a positioned dropdown.
  */
-export function ThreadCatSettings({ threadId, currentCats, onSave }: ThreadCatSettingsProps) {
+export function ThreadCatSettings({
+  threadId,
+  currentCats,
+  onSave,
+  triggerLabel,
+  triggerIcon,
+  triggerClassName,
+  triggerRole,
+}: ThreadCatSettingsProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [selectedCats, setSelectedCats] = useState<string[]>(currentCats);
   const [isSaving, setIsSaving] = useState(false);
@@ -75,20 +87,32 @@ export function ThreadCatSettings({ threadId, currentCats, onSave }: ThreadCatSe
           e.stopPropagation();
           setIsOpen(!isOpen);
         }}
-        className={`p-0.5 rounded transition-all ${
-          currentCats.length > 0
-            ? 'text-cafe-accent'
-            : 'opacity-0 group-hover:opacity-100 text-cafe-muted hover:text-cafe-accent'
-        }`}
+        className={
+          triggerClassName ??
+          `p-0.5 rounded transition-all ${
+            currentCats.length > 0
+              ? 'text-cafe-accent'
+              : 'opacity-0 group-hover:opacity-100 text-cafe-muted hover:text-cafe-accent'
+          }`
+        }
         title="设置默认猫猫"
+        role={triggerRole}
       >
-        <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M8 1C4.7 1 2 3.2 2 6c0 1.4.7 2.6 1.7 3.5-.1.8-.4 1.6-.9 2.3a.5.5 0 00.4.8c1.2 0 2.3-.5 3.1-1.1.5.1 1.1.2 1.7.2 3.3 0 6-2.2 6-5S11.3 1 8 1z" />
-        </svg>
+        {triggerLabel ? (
+          <>
+            {triggerIcon}
+            <span>{triggerLabel}</span>
+          </>
+        ) : (
+          <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 1C4.7 1 2 3.2 2 6c0 1.4.7 2.6 1.7 3.5-.1.8-.4 1.6-.9 2.3a.5.5 0 00.4.8c1.2 0 2.3-.5 3.1-1.1.5.1 1.1.2 1.7.2 3.3 0 6-2.2 6-5S11.3 1 8 1z" />
+          </svg>
+        )}
       </button>
       {isOpen && (
         <div
           style={getPopoverStyle()}
+          data-thread-action-popover="true"
           className="bg-cafe-surface rounded-lg shadow-lg border border-cafe z-50 flex flex-col"
           onClick={(e) => e.stopPropagation()}
         >

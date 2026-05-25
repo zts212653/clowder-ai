@@ -1356,23 +1356,95 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
     }
   });
 
-  it('rejects capability toggle when DEFAULT_OWNER_USER_ID is missing and rejects configured non-owners', async () => {
+  it('allows local capability toggle when DEFAULT_OWNER_USER_ID is missing and rejects non-local or configured non-owners', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     const projectDir = await seedProject();
     const app = await buildSessionApp();
 
     try {
       delete process.env.DEFAULT_OWNER_USER_ID;
-      const missingOwner = await patchCapability(app, projectDir, OWNER_SESSION_HEADERS);
-      assert.equal(missingOwner.statusCode, 403, missingOwner.payload);
+      const missingOwnerWithoutOrigin = await patchCapability(app, projectDir, {
+        ...OWNER_SESSION_HEADERS,
+        host: 'localhost:3004',
+      });
+      assert.equal(missingOwnerWithoutOrigin.statusCode, 403);
+      assert.match(JSON.parse(missingOwnerWithoutOrigin.payload).error, /direct localhost/i);
+
+      const missingOwner = await patchCapability(app, projectDir, {
+        ...OWNER_SESSION_HEADERS,
+        host: 'localhost:3004',
+        origin: 'http://localhost:3003',
+      });
+      assert.equal(missingOwner.statusCode, 200, missingOwner.payload);
+      let config = await readCapabilitiesConfig(projectDir);
+      assert.equal(config?.capabilities[0]?.enabled, false);
+
+      const nonLocalMissingOwner = await patchCapability(app, projectDir, {
+        ...OWNER_SESSION_HEADERS,
+        host: 'staging.example.test',
+      });
+      assert.equal(nonLocalMissingOwner.statusCode, 403);
+      assert.match(JSON.parse(nonLocalMissingOwner.payload).error, /direct localhost/i);
+
+      const spoofedLocalHost = await app.inject({
+        method: 'PATCH',
+        url: '/api/capabilities',
+        headers: {
+          ...OWNER_SESSION_HEADERS,
+          host: 'localhost:3004',
+          'x-forwarded-host': 'localhost:3004',
+        },
+        remoteAddress: '203.0.113.10',
+        payload: {
+          projectPath: projectDir,
+          capabilityId: 'secret-mcp',
+          capabilityType: 'mcp',
+          scope: 'global',
+          enabled: true,
+        },
+      });
+      assert.equal(spoofedLocalHost.statusCode, 403);
+      assert.match(JSON.parse(spoofedLocalHost.payload).error, /direct localhost/i);
+
+      const forwardedLocalHost = await app.inject({
+        method: 'PATCH',
+        url: '/api/capabilities',
+        headers: {
+          ...OWNER_SESSION_HEADERS,
+          host: 'localhost:3004',
+          'x-forwarded-for': '203.0.113.10',
+          'x-forwarded-host': 'localhost:3004',
+          'x-forwarded-proto': 'https',
+        },
+        payload: {
+          projectPath: projectDir,
+          capabilityId: 'secret-mcp',
+          capabilityType: 'mcp',
+          scope: 'global',
+          enabled: true,
+        },
+      });
+      assert.equal(forwardedLocalHost.statusCode, 403);
+      assert.match(JSON.parse(forwardedLocalHost.payload).error, /direct localhost/i);
 
       process.env.DEFAULT_OWNER_USER_ID = 'you';
-      const nonOwner = await patchCapability(app, projectDir, NON_OWNER_SESSION_HEADERS);
+      const nonOwner = await patchCapability(app, projectDir, {
+        ...NON_OWNER_SESSION_HEADERS,
+        host: 'localhost:3004',
+        origin: 'http://localhost:3003',
+      });
       assert.equal(nonOwner.statusCode, 403);
       assert.match(JSON.parse(nonOwner.payload).error, /owner/);
 
-      const config = await readCapabilitiesConfig(projectDir);
-      assert.equal(config?.capabilities[0]?.enabled, true);
+      const ownerNonLocal = await patchCapability(app, projectDir, {
+        ...OWNER_SESSION_HEADERS,
+        host: 'staging.example.test',
+      });
+      assert.equal(ownerNonLocal.statusCode, 403);
+      assert.match(JSON.parse(ownerNonLocal.payload).error, /direct localhost/i);
+
+      config = await readCapabilitiesConfig(projectDir);
+      assert.equal(config?.capabilities[0]?.enabled, false);
     } finally {
       await app.close();
       await rm(projectDir, { recursive: true, force: true });
@@ -1388,7 +1460,11 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
     const app = await buildSessionApp();
 
     try {
-      const res = await patchCapability(app, projectDir, OWNER_SESSION_HEADERS);
+      const res = await patchCapability(app, projectDir, {
+        ...OWNER_SESSION_HEADERS,
+        host: 'localhost:3004',
+        origin: 'http://localhost:3003',
+      });
       assert.equal(res.statusCode, 200, res.payload);
       assert.doesNotMatch(res.payload, /raw-secret/);
       assert.equal(res.json().capability.mcpServer.env.API_KEY, REDACTED_SECRET);

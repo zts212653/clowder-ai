@@ -2,7 +2,7 @@
 
 // biome-ignore lint/correctness/noUnusedImports: React needed for JSX in vitest environment
 import React, { useEffect, useState } from 'react';
-import { useCatData } from '@/hooks/useCatData';
+import { formatCatName, useCatData } from '@/hooks/useCatData';
 import type { CatInvocationInfo, ContextHealthData } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
 import { BindNewSessionSection } from './BindNewSessionSection';
@@ -98,6 +98,11 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
   const colorsForCat = (catId: string): SessionColors => {
     const cat = getCatById(catId);
     return deriveSessionColors(cat?.color?.primary, cat?.color?.secondary);
+  };
+
+  const labelForCat = (catId: string): string => {
+    const cat = getCatById(catId);
+    return cat ? formatCatName(cat) : catId;
   };
 
   // Data is stale when it belongs to a different thread than the one we're viewing
@@ -242,7 +247,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                   className="text-micro px-1.5 py-0.5 rounded-full font-medium"
                   style={{ backgroundColor: colors.badgeBg, color: colors.badgeText }}
                 >
-                  {session.catId}
+                  {labelForCat(session.catId)}
                 </span>
               </div>
               <div className="text-micro text-cafe-muted mb-1.5">
@@ -327,7 +332,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                         className="text-micro px-1 py-0.5 rounded-full font-medium"
                         style={{ backgroundColor: sealedColors.badgeBg, color: sealedColors.badgeText }}
                       >
-                        {session.catId}
+                        {labelForCat(session.catId)}
                       </span>
                       <SessionIdTag id={session.cliSessionId ?? session.id} />
                     </div>

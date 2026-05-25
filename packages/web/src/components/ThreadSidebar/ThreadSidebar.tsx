@@ -886,6 +886,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                             isPinned={t.pinned}
                             isFavorited={t.favorited}
                             threadState={getThreadState(t.id)}
+                            projectPath={t.projectPath}
                             indented
                             preferredCats={t.preferredCats}
                             threadLabels={t.labels}
@@ -957,6 +958,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                     isPinned={t.pinned}
                     isFavorited={t.favorited}
                     threadState={getThreadState(t.id)}
+                    projectPath={t.projectPath}
                     indented={group.type === 'project'}
                     preferredCats={t.preferredCats}
                     threadLabels={t.labels}

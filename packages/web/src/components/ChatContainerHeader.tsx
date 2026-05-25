@@ -1,5 +1,5 @@
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { ChatVoiceFeatureControls } from './ChatVoiceFeatureControls';
@@ -157,13 +157,28 @@ export function ThreadIndicator({ threadId }: { threadId: string }) {
   const threads = useChatStore((s) => s.threads);
   const currentThread = threads.find((t) => t.id === threadId);
   const [copied, setCopied] = useState(false);
+  const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const title = currentThread?.title ?? '未命名对话';
+  const rawPath = currentThread?.projectPath ?? '';
+
+  useEffect(() => {
+    if (copyResetTimerRef.current) {
+      clearTimeout(copyResetTimerRef.current);
+      copyResetTimerRef.current = null;
+    }
+    setCopied(false);
+  }, [threadId, rawPath]);
+
+  useEffect(() => {
+    return () => {
+      if (copyResetTimerRef.current) clearTimeout(copyResetTimerRef.current);
+    };
+  }, []);
 
   if (threadId === 'default') {
     return <p className="text-xs text-cafe-secondary">大厅 · Your AI team collaboration space</p>;
   }
 
-  const title = currentThread?.title ?? '未命名对话';
-  const rawPath = currentThread?.projectPath ?? '';
   // 'default' is a sentinel for threads without a real projectPath — match exact value, not basename
   const rawBasename = rawPath === 'default' ? '' : (rawPath.split(/[/\\]/).pop() ?? '');
   // Map known internal repo basenames to brand name; preserve real project paths for multi-workspace
@@ -172,6 +187,7 @@ export function ThreadIndicator({ threadId }: { threadId: string }) {
   const projectName = INTERNAL_BASENAMES.includes(rawBasename) && brandName ? brandName : rawBasename;
   const displayName = tailTruncate(projectName);
   const copyPath = rawPath === 'default' ? '' : rawPath;
+  const projectChipLabel = copied ? 'copied!' : displayName;
 
   const handleCopyPath = () => {
     if (!copyPath) return;
@@ -182,8 +198,12 @@ export function ThreadIndicator({ threadId }: { threadId: string }) {
       .then(() => cb.writeText(copyPath))
       .then(
         () => {
+          if (copyResetTimerRef.current) clearTimeout(copyResetTimerRef.current);
           setCopied(true);
-          setTimeout(() => setCopied(false), 1500);
+          copyResetTimerRef.current = setTimeout(() => {
+            setCopied(false);
+            copyResetTimerRef.current = null;
+          }, 1200);
         },
         () => {},
       );
@@ -197,7 +217,8 @@ export function ThreadIndicator({ threadId }: { threadId: string }) {
       {projectName && (
         <span
           className="flex-shrink-0 max-w-[40%] sm:max-w-[200px] overflow-hidden whitespace-nowrap text-cafe-muted cursor-pointer hover:text-cafe-secondary transition-colors"
-          title={copied ? '已复制!' : copyPath}
+          title={copied ? '已复制!' : `点击复制: ${copyPath}`}
+          aria-label={copied ? '已复制项目路径' : `点击复制项目路径: ${copyPath}`}
           onClick={handleCopyPath}
           onKeyDown={(e) => {
             if (PROJECT_PATH_COPY_KEYS.has(e.key)) {
@@ -209,7 +230,7 @@ export function ThreadIndicator({ threadId }: { threadId: string }) {
           tabIndex={0}
         >
           {' '}
-          · {displayName}
+          · {projectChipLabel}
         </span>
       )}
     </div>

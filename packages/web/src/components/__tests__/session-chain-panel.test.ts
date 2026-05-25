@@ -124,14 +124,14 @@ describe('F24: SessionChainPanel', () => {
     expect(container.textContent).toContain('2 sessions');
   });
 
-  it('renders active session with seq number, cat badge, and clickable session ID', async () => {
+  it('renders active session with seq number, cat display badge, and clickable session ID', async () => {
     mockSessionsResponse([
       { id: 'ses_abc12345xyz', catId: 'opus', seq: 2, status: 'active', messageCount: 8, createdAt: Date.now() - 5000 },
     ]);
     renderPanel('thread-1');
     await flushFetch();
     expect(container.textContent).toContain('Session #3');
-    expect(container.textContent).toContain('opus');
+    expect(container.textContent).toContain('布偶猫');
     expect(container.textContent).toContain('Active');
     expect(container.textContent).toContain('8 msgs');
     // Session ID should be visible (truncated) with copy title
@@ -246,13 +246,18 @@ describe('F24: SessionChainPanel', () => {
     expect(badge!.style.color).toMatch(/rgba?\(75,\s*85,\s*99/);
   });
 
-  it('renders catId in the active session badge (not breed displayName)', async () => {
+  it('renders the same cat display name as the main conversation in active session badges', async () => {
     mockSessionsResponse([
       { id: 's1', catId: 'kimi', seq: 0, status: 'active', messageCount: 2, createdAt: Date.now() },
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    expect(container.textContent).toContain('kimi');
+    const badge = container.querySelector(
+      '[data-testid="session-badge-active"][data-cat-id="kimi"]',
+    ) as HTMLElement | null;
+    expect(badge).not.toBeNull();
+    expect(badge!.textContent).toContain('梵花猫');
+    expect(badge!.textContent).not.toContain('kimi');
   });
 
   it('shows post-compact safety alert when sessionSealed is true', async () => {
@@ -540,7 +545,7 @@ describe('F24: SessionChainPanel', () => {
     await flushFetch();
 
     // New data visible, old data gone
-    expect(container.textContent).toContain('codex');
+    expect(container.textContent).toContain('缅因猫');
     expect(container.textContent).toContain('1 session');
   });
 
@@ -572,7 +577,7 @@ describe('F24: SessionChainPanel', () => {
     renderPanel('thread-2');
     await flushFetch();
     expect(container.textContent).toContain('Session #6');
-    expect(container.textContent).toContain('codex');
+    expect(container.textContent).toContain('缅因猫');
 
     renderPanel('thread-1');
     await flushFetch();
@@ -603,9 +608,31 @@ describe('F24: SessionChainPanel', () => {
     const badge = container.querySelector(
       '[data-testid="session-badge-active"][data-cat-id="codex"]',
     ) as HTMLElement | null;
-    expect(badge?.textContent).toContain('codex');
+    expect(badge?.textContent).toContain('缅因猫');
     expect(badge!.style.backgroundColor).toMatch(/rgba?\(212,\s*230,\s*211/);
     expect(badge!.style.color).toMatch(/rgba?\(91,\s*140,\s*90/);
+  });
+
+  it('renders the cat display name in sealed session badges too', async () => {
+    mockSessionsResponse([
+      {
+        id: 's1',
+        catId: 'codex',
+        seq: 0,
+        status: 'sealed',
+        messageCount: 3,
+        createdAt: Date.now() - 60000,
+        sealedAt: Date.now() - 1000,
+      },
+    ]);
+    renderPanel('thread-1');
+    await flushFetch();
+    const badge = container.querySelector(
+      '[data-testid="session-badge-sealed"][data-cat-id="codex"]',
+    ) as HTMLElement | null;
+    expect(badge).not.toBeNull();
+    expect(badge!.textContent).toContain('缅因猫');
+    expect(badge!.textContent).not.toContain('codex');
   });
 
   it('applies gemini colors from cat.color', async () => {

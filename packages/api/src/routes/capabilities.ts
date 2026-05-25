@@ -48,6 +48,7 @@ import {
 import { sanitizeCapabilityForResponse } from '../config/capabilities/capability-redaction.js';
 import {
   requireCapabilityWriteOwner,
+  requireLocalCapabilityWriteRequest,
   resolveCapabilityWriteSessionUserId,
 } from '../config/capabilities/capability-write-guards.js';
 import { isManagedSkill, readSkillsState } from '../config/governance/skills-state.js';
@@ -119,7 +120,7 @@ function getProjectRoot(): string {
 
 function canReadSensitiveMcpConfig(request: FastifyRequest): boolean {
   const sessionUserId = resolveCapabilityWriteSessionUserId(request);
-  return !!sessionUserId && !requireCapabilityWriteOwner(sessionUserId);
+  return !!sessionUserId && !requireCapabilityWriteOwner(sessionUserId, { requireConfiguredOwner: true });
 }
 
 function buildBoardMcpServer(
@@ -832,7 +833,14 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       reply.status(401);
       return { error: 'Identity required (session cookie)' };
     }
-    const ownerError = requireCapabilityWriteOwner(userId);
+    const localError = requireLocalCapabilityWriteRequest(request);
+    if (localError) {
+      reply.status(localError.status);
+      return { error: localError.error };
+    }
+    const ownerError = requireCapabilityWriteOwner(userId, {
+      allowMissingOwner: true,
+    });
     if (ownerError) {
       reply.status(ownerError.status);
       return { error: ownerError.error };

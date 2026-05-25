@@ -67,7 +67,7 @@ F190 Phase C 已经把 hardening pattern (`requireExplicitOwner` + `containsReda
 - 不做 visual parity claim；先收紧现有 capability 写 API，避免 UI 接到不安全 backend
 - 复用 F190 Phase C #1/#4 hardening pattern：
   - session-only identity（不接受 trusted header / fallback 作为写身份）
-  - `requireExplicitOwner` fail-closed (`DEFAULT_OWNER_USER_ID` 未配置 → 403)
+  - capability writes 只支持无登录本地应用的 direct localhost UI（API bind host 也是 localhost、loopback peer + localhost Host/Origin + no proxy forwarding headers）；LAN / reverse proxy / non-local origin 不作为 capability write 支持场景
   - `containsRedactedPlaceholder` 拒写
   - `mergeSecretRecord` 保留 omitted env/header secret
   - audit 写入前统一 sanitize，保留 env/header key name，value 替换为 stable redacted marker
