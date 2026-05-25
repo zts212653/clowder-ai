@@ -153,10 +153,14 @@ function formatGeneratedSource(source) {
   const tempFile = join(tempDir, 'sop-definition.generated.ts');
   try {
     writeFileSync(tempFile, source, 'utf-8');
-    execFileSync('pnpm', ['biome', 'format', '--write', tempFile], {
-      cwd: repoRoot,
-      stdio: 'pipe',
-    });
+    execFileSync(
+      'pnpm',
+      ['biome', 'format', '--write', '--config-path', 'biome.json', '--vcs-use-ignore-file=false', tempFile],
+      {
+        cwd: repoRoot,
+        stdio: 'pipe',
+      },
+    );
     return readFileSync(tempFile, 'utf-8');
   } finally {
     rmSync(tempDir, { force: true, recursive: true });
