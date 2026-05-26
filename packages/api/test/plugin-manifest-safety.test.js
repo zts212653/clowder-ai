@@ -612,6 +612,8 @@ describe('PluginResourceActivator config handling', () => {
         { type: 'limb', path: 'limb.yml' },
       ],
     };
+    mkdirSync(join(projectRoot, 'plugins', manifest.id), { recursive: true });
+    writeFileSync(join(projectRoot, 'plugins', manifest.id, 'limb.yml'), 'nodeId: test-node\n');
 
     const seenTokens = [];
     const { activator, getCapabilities, limbRegistry } = createActivator(
@@ -653,6 +655,8 @@ describe('PluginResourceActivator config handling', () => {
       config: [{ envName: 'TEST_PLUGIN_SYNC_TOKEN', label: 'Token', sensitive: true, required: true }],
       resources: [{ type: 'limb', path: 'limb.yml' }],
     };
+    mkdirSync(join(projectRoot, 'plugins', manifest.id), { recursive: true });
+    writeFileSync(join(projectRoot, 'plugins', manifest.id, 'limb.yml'), 'nodeId: sync-node\n');
 
     const { activator, limbRegistry } = createActivator(projectRoot, async (_pluginId, _yamlPath, pluginConfig) => ({
       nodeId: 'sync-node',
