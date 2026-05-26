@@ -1503,6 +1503,74 @@ describe('Skills Route', () => {
     }
   });
 
+  it('normalizes Windows-style plugin skill paths before reading plugin metadata', async () => {
+    const projectDir = join('/tmp', `skills-route-test-plugin-windows-path-${Date.now()}`);
+    const pluginId = 'windows-skill-plugin';
+    const pluginDir = join(projectDir, 'plugins', pluginId);
+    const pluginSkillDir = join(pluginDir, 'skills', 'windows-skill');
+
+    await Promise.all([mkdir(projectDir, { recursive: true }), mkdir(pluginSkillDir, { recursive: true })]);
+    await writeFile(
+      join(pluginDir, 'plugin.yaml'),
+      [
+        `id: ${pluginId}`,
+        'name: Windows Skill Plugin',
+        'version: "1.0.0"',
+        'config: []',
+        'resources:',
+        '  - type: skill',
+        "    path: 'skills\\\\windows-skill'",
+      ].join('\n'),
+    );
+    await writeFile(
+      join(pluginSkillDir, 'SKILL.md'),
+      [
+        '---',
+        'name: windows-skill',
+        'description: Windows path plugin skill',
+        'triggers:',
+        '  - windows path',
+        '---',
+        '',
+        '# Windows path plugin skill',
+      ].join('\n'),
+    );
+    await writeCapabilitiesConfig(projectDir, {
+      version: 2,
+      capabilities: [
+        {
+          id: 'windows-skill',
+          type: 'skill',
+          enabled: true,
+          source: 'cat-cafe',
+          pluginId,
+        },
+      ],
+    });
+
+    const app = Fastify();
+    await app.register(skillsRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/skills?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.body);
+      const skill = body.skills.find((entry) => entry.name === 'windows-skill');
+      assert.ok(skill, 'Windows-style plugin skill should be represented from capabilities');
+      assert.equal(skill.description, 'Windows path plugin skill');
+      assert.equal(skill.trigger, 'windows path');
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
   it('does not treat same-named home skills as plugin-owned skill mounts or metadata', async () => {
     const projectDir = join('/tmp', `skills-route-test-plugin-stale-home-${Date.now()}`);
     const homeDir = join('/tmp', `skills-route-test-plugin-stale-home-root-${Date.now()}`);
