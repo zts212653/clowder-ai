@@ -4,17 +4,24 @@ import http from 'node:http';
 import https from 'node:https';
 import { isIP } from 'node:net';
 
-const PRIVATE_IP_RANGES = [
-  /^127\./,
-  /^10\./,
-  /^172\.(1[6-9]|2\d|3[01])\./,
-  /^192\.168\./,
-  /^169\.254\./,
-  /^0\./,
-  /^::1$/,
-  /^f[cd][0-9a-f]{2}:/i,
-  /^fe80:/i,
-];
+const NON_PUBLIC_IPV4_RANGES: readonly [number, number][] = [
+  [0x00000000, 0xff000000], // 0.0.0.0/8 "this network"
+  [0x0a000000, 0xff000000], // 10.0.0.0/8 private
+  [0x64400000, 0xffc00000], // 100.64.0.0/10 carrier-grade NAT
+  [0x7f000000, 0xff000000], // 127.0.0.0/8 loopback
+  [0xa9fe0000, 0xffff0000], // 169.254.0.0/16 link-local
+  [0xac100000, 0xfff00000], // 172.16.0.0/12 private
+  [0xc0000000, 0xffffff00], // 192.0.0.0/24 IETF protocol assignments
+  [0xc0000200, 0xffffff00], // 192.0.2.0/24 documentation
+  [0xc0a80000, 0xffff0000], // 192.168.0.0/16 private
+  [0xc6120000, 0xfffe0000], // 198.18.0.0/15 benchmark tests
+  [0xc6336400, 0xffffff00], // 198.51.100.0/24 documentation
+  [0xcb007100, 0xffffff00], // 203.0.113.0/24 documentation
+  [0xe0000000, 0xf0000000], // 224.0.0.0/4 multicast
+  [0xf0000000, 0xf0000000], // 240.0.0.0/4 reserved
+] as const;
+
+const NON_PUBLIC_IPV6_RANGES = [/^::1$/, /^::$/, /^f[cd][0-9a-f]{2}:/i, /^fe[89ab][0-9a-f]?:/i, /^ff/i, /^2001:db8:/i];
 
 const BLOCKED_HOSTNAMES = new Set(['localhost', 'metadata.google.internal', 'metadata.internal']);
 
@@ -54,14 +61,42 @@ function normalizeHostname(hostname: string): string {
   return h;
 }
 
+function parseIpv4(hostname: string): number | null {
+  const parts = hostname.split('.');
+  if (parts.length !== 4) return null;
+  let value = 0;
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) return null;
+    const octet = Number(part);
+    if (!Number.isInteger(octet) || octet < 0 || octet > 255) return null;
+    value = ((value << 8) | octet) >>> 0;
+  }
+  return value >>> 0;
+}
+
+function isPublicIpv4(hostname: string): boolean {
+  const value = parseIpv4(hostname);
+  if (value === null) return false;
+  return !NON_PUBLIC_IPV4_RANGES.some(([network, mask]) => (value & mask) >>> 0 === network);
+}
+
+function isPublicIpv6(hostname: string): boolean {
+  return !NON_PUBLIC_IPV6_RANGES.some((pattern) => pattern.test(hostname));
+}
+
 function assertExternalHostnameAllowed(hostname: string): string {
   const normalized = normalizeHostname(hostname);
   if (BLOCKED_HOSTNAMES.has(normalized)) {
     throw new Error(`URL hostname is blocked: ${normalized}`);
   }
 
-  for (const pattern of PRIVATE_IP_RANGES) {
-    if (pattern.test(normalized)) {
+  const ipType = isIP(normalized);
+  if (ipType === 4) {
+    if (!isPublicIpv4(normalized)) {
+      throw new Error(`URL resolves to private/reserved IP range: ${normalized}`);
+    }
+  } else if (ipType === 6) {
+    if (!isPublicIpv6(normalized)) {
       throw new Error(`URL resolves to private/reserved IP range: ${normalized}`);
     }
   }

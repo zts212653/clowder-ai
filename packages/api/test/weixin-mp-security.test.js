@@ -53,6 +53,16 @@ describe('validateExternalUrl', () => {
     assert.throws(() => validateExternalUrl('http://169.254.169.254/latest/meta-data'), /private/);
   });
 
+  it('rejects carrier-grade NAT addresses', () => {
+    assert.throws(() => validateExternalUrl('http://100.64.0.1/internal'), /private/);
+    assert.throws(() => validateExternalUrl('http://100.127.255.254/internal'), /private/);
+  });
+
+  it('rejects benchmark network addresses', () => {
+    assert.throws(() => validateExternalUrl('http://198.18.0.1/internal'), /private/);
+    assert.throws(() => validateExternalUrl('http://198.19.255.254/internal'), /private/);
+  });
+
   it('rejects metadata.google.internal', () => {
     assert.throws(() => validateExternalUrl('http://metadata.google.internal/'), /blocked/);
   });
@@ -86,6 +96,17 @@ describe('validateExternalUrl', () => {
   it('rejects hostnames that resolve to private IPv4 addresses', async () => {
     await assert.rejects(
       () => validateExternalUrlResolved('https://cdn.example.test/image.png', async () => [{ address: '10.0.0.5' }]),
+      /private/,
+    );
+  });
+
+  it('rejects hostnames that resolve to non-public IPv4 addresses', async () => {
+    await assert.rejects(
+      () => validateExternalUrlResolved('https://cdn.example.test/image.png', async () => [{ address: '100.64.0.1' }]),
+      /private/,
+    );
+    await assert.rejects(
+      () => validateExternalUrlResolved('https://cdn.example.test/image.png', async () => [{ address: '198.18.0.1' }]),
       /private/,
     );
   });

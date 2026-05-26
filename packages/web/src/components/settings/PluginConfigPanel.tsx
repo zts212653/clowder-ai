@@ -23,6 +23,10 @@ function safeHostname(url: string): string {
   }
 }
 
+function resourceBadgeKey(resource: PluginInfo['resources'][number], index: number): string {
+  return `${resource.type}:${resource.path ?? resource.name ?? index}`;
+}
+
 interface Props {
   plugin: PluginInfo;
   onUpdated: () => void;
@@ -177,9 +181,9 @@ export function PluginConfigPanel({ plugin, onUpdated }: Props) {
 
       {plugin.resources.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
-          {plugin.resources.map((r) => (
+          {plugin.resources.map((r, idx) => (
             <span
-              key={r.type}
+              key={resourceBadgeKey(r, idx)}
               className={`rounded-[13px] px-2.5 py-0.5 text-label font-medium ${
                 r.enabled ? 'bg-conn-emerald-bg text-conn-emerald-text' : 'bg-cafe-surface-sunken text-cafe-muted'
               }`}
