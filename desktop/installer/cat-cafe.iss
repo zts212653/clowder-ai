@@ -79,7 +79,6 @@ Source: "..\..\cat-template.json";               DestDir: "{app}"; Components: c
 ; Files, which breaks docs/skills/package resolution paths in the API.
 Source: "..\..\pnpm-workspace.yaml";             DestDir: "{app}"; Components: core
 Source: "..\..\package.json";                    DestDir: "{app}"; Components: core
-Source: "..\..\cat-config.json";                 DestDir: "{app}"; Components: core; Flags: skipifsourcedoesntexist
 ; Skills manifest — loaded by API routes/capabilities.ts when listing available
 ; skills. Missing → skills panel shows empty; cats lose skill context.
 Source: "..\..\cat-cafe-skills\*";               DestDir: "{app}\cat-cafe-skills"; \

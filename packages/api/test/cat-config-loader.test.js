@@ -17,6 +17,7 @@ const {
   getDefaultCatId,
   buildCatIdToBreedIndex,
   getCatEffort,
+  getAcpConfig,
   _resetCachedConfig,
 } = await import('../dist/config/cat-config-loader.js');
 
@@ -1090,5 +1091,222 @@ describe('F167 Phase E: cat-config restrictions', () => {
     const config = loadCatConfig();
     const all = toAllCatConfigs(config);
     assert.ok(all.gemini?.restrictions?.includes('禁止写代码'), 'live gemini.restrictions must include 禁止写代码');
+  });
+});
+
+describe('#772: template breeds must not leak into runtime', () => {
+  function makeBreed(id, catId, mentionPatterns) {
+    return {
+      id,
+      catId,
+      name: id,
+      displayName: id,
+      avatar: '/avatars/default.png',
+      color: { primary: '#000', secondary: '#fff' },
+      mentionPatterns,
+      roleDescription: `${id} role`,
+      defaultVariantId: `${catId}-default`,
+      variants: [
+        {
+          id: `${catId}-default`,
+          clientId: 'anthropic',
+          defaultModel: 'claude-sonnet-4-6',
+          mcpSupport: true,
+          personality: `${id} personality`,
+        },
+      ],
+    };
+  }
+
+  function setupProjectDir(templateBreeds, catalogBreeds) {
+    const projectDir = mkdtempSync(join(tmpdir(), 'cat-772-'));
+    const templatePath = join(projectDir, 'cat-template.json');
+    writeFileSync(
+      templatePath,
+      JSON.stringify({
+        version: 2,
+        breeds: templateBreeds,
+        roster: {},
+        reviewPolicy: {
+          requireDifferentFamily: true,
+          preferActiveInThread: true,
+          preferLead: true,
+          excludeUnavailable: true,
+        },
+      }),
+    );
+    const runtimeDir = join(projectDir, '.cat-cafe');
+    mkdirSync(runtimeDir, { recursive: true });
+    writeFileSync(
+      join(runtimeDir, 'cat-catalog.json'),
+      JSON.stringify({
+        version: 2,
+        breeds: catalogBreeds,
+        roster: {},
+        reviewPolicy: {
+          requireDifferentFamily: true,
+          preferActiveInThread: true,
+          preferLead: true,
+          excludeUnavailable: true,
+        },
+      }),
+    );
+    return { projectDir, templatePath };
+  }
+
+  it('no duplicate catId when runtime catalog has same catId as template breed', () => {
+    const templateBreeds = [makeBreed('ragdoll', 'opus', ['@opus']), makeBreed('moonshot', 'kimi', ['@moonshot-kimi'])];
+    const catalogBreeds = [makeBreed('user-kimi', 'kimi', ['@kimi'])];
+    const { templatePath } = setupProjectDir(templateBreeds, catalogBreeds);
+
+    const saved = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = templatePath;
+    _resetCachedConfig();
+    try {
+      const config = loadCatConfig();
+      const all = toAllCatConfigs(config);
+      assert.ok(all.kimi, 'kimi should exist in resolved cats');
+      assert.equal(all.kimi.breedId, 'user-kimi', 'kimi should come from catalog breed, not template');
+      const kimiCount = Object.values(all).filter((c) => c.id === 'kimi').length;
+      assert.equal(kimiCount, 1, 'exactly one kimi entry');
+    } finally {
+      if (saved === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = saved;
+      _resetCachedConfig();
+    }
+  });
+
+  it('template-only breeds are excluded when runtime catalog exists', () => {
+    const templateBreeds = [makeBreed('ragdoll', 'opus', ['@opus']), makeBreed('moonshot', 'kimi', ['@moonshot-kimi'])];
+    const catalogBreeds = [makeBreed('ragdoll', 'opus', ['@opus'])];
+    const { templatePath } = setupProjectDir(templateBreeds, catalogBreeds);
+
+    const saved = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = templatePath;
+    _resetCachedConfig();
+    try {
+      const config = loadCatConfig();
+      const all = toAllCatConfigs(config);
+      assert.ok(all.opus, 'opus should exist');
+      assert.equal(all.kimi, undefined, 'template-only kimi must not appear as runtime cat');
+    } finally {
+      if (saved === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = saved;
+      _resetCachedConfig();
+    }
+  });
+
+  it('catalog breed inherits template values through merge', () => {
+    const templateBreeds = [
+      {
+        ...makeBreed('ragdoll', 'opus', ['@opus']),
+        teamStrengths: 'template-strength',
+      },
+    ];
+    const catalogBreeds = [makeBreed('ragdoll', 'opus', ['@opus'])];
+    const { templatePath } = setupProjectDir(templateBreeds, catalogBreeds);
+
+    const saved = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = templatePath;
+    _resetCachedConfig();
+    try {
+      const config = loadCatConfig();
+      const all = toAllCatConfigs(config);
+      assert.equal(
+        all.opus.teamStrengths,
+        'template-strength',
+        'catalog breed should inherit template fields via merge',
+      );
+    } finally {
+      if (saved === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = saved;
+      _resetCachedConfig();
+    }
+  });
+
+  it('empty catalog breeds: roster only keeps owner and catalog-added entries', () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'cat-772-empty-'));
+    const templatePath = join(projectDir, 'cat-template.json');
+    writeFileSync(
+      templatePath,
+      JSON.stringify({
+        version: 2,
+        breeds: [makeBreed('ragdoll', 'opus', ['@opus']), makeBreed('moonshot', 'kimi', ['@kimi'])],
+        roster: {
+          opus: { family: 'ragdoll', roles: ['architect'], lead: true, available: true, evaluation: 'active' },
+          kimi: { family: 'moonshot', roles: ['writer'], lead: false, available: true, evaluation: 'active' },
+        },
+        reviewPolicy: {
+          requireDifferentFamily: true,
+          preferActiveInThread: true,
+          preferLead: true,
+          excludeUnavailable: true,
+        },
+      }),
+    );
+    const runtimeDir = join(projectDir, '.cat-cafe');
+    mkdirSync(runtimeDir, { recursive: true });
+    writeFileSync(
+      join(runtimeDir, 'cat-catalog.json'),
+      JSON.stringify({
+        version: 2,
+        breeds: [],
+        roster: { owner: { family: 'human', roles: ['cvo'], lead: true, available: true, evaluation: 'active' } },
+        reviewPolicy: {
+          requireDifferentFamily: true,
+          preferActiveInThread: true,
+          preferLead: true,
+          excludeUnavailable: true,
+        },
+      }),
+    );
+
+    const saved = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = templatePath;
+    _resetCachedConfig();
+    try {
+      const config = loadCatConfig();
+      assert.deepEqual(config.breeds, [], 'empty catalog means no runtime breeds');
+      const rosterKeys = Object.keys(config.roster);
+      assert.ok(rosterKeys.includes('owner'), 'owner roster entry must survive');
+      assert.ok(!rosterKeys.includes('opus'), 'template-only opus must be pruned from roster');
+      assert.ok(!rosterKeys.includes('kimi'), 'template-only kimi must be pruned from roster');
+    } finally {
+      if (saved === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = saved;
+      _resetCachedConfig();
+    }
+  });
+
+  it('getAcpConfig does not return ACP from template-only breed', () => {
+    const templateBreeds = [
+      {
+        ...makeBreed('siamese', 'gemini', ['@gemini']),
+        variants: [
+          {
+            id: 'gemini-default',
+            clientId: 'google',
+            defaultModel: 'gemini-2.5-flash',
+            mcpSupport: true,
+            personality: 'siamese personality',
+            acp: { mode: 'acp', maxLiveProcesses: 3, idleTtlMs: 60000 },
+          },
+        ],
+      },
+    ];
+    const catalogBreeds = [makeBreed('ragdoll', 'opus', ['@opus'])];
+    const { templatePath } = setupProjectDir(templateBreeds, catalogBreeds);
+
+    const saved = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = templatePath;
+    _resetCachedConfig();
+    try {
+      const acp = getAcpConfig('gemini');
+      assert.equal(acp, undefined, 'template-only breed ACP must not leak into runtime');
+    } finally {
+      if (saved === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = saved;
+      _resetCachedConfig();
+    }
   });
 });

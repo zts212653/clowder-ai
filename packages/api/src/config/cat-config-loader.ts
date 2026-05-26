@@ -299,6 +299,48 @@ function mergeById(base: HasId[], overlay: HasId[]): HasId[] {
 }
 
 /**
+ * Merge template + catalog with #772 template-only breed filter applied.
+ * Shared by loadCatConfig() and getAcpConfig() to avoid duplicate merge paths.
+ */
+function mergeTemplateWithCatalog(templatePath: string): string | null {
+  const projectRoot = dirname(templatePath);
+  const catalogRaw = readCatCatalogRaw(projectRoot);
+  if (catalogRaw === null) return null;
+
+  const baseRaw = readTemplate(templatePath);
+  const baseJson = JSON.parse(baseRaw) as Record<string, unknown>;
+  const catalogJson = JSON.parse(catalogRaw) as Record<string, unknown>;
+  const merged = deepMergeConfig(baseJson, catalogJson);
+
+  // #772: Template-only breeds must not leak into runtime.
+  // When a catalog exists, only catalog breeds are runtime members.
+  // breeds: [] (bootstrap state) means "no breeds" — all template breeds are menu data only.
+  const catalogBreeds = Array.isArray(catalogJson.breeds) ? (catalogJson.breeds as HasId[]) : [];
+  const catalogBreedIds = new Set(catalogBreeds.map((b) => b.id));
+  if (Array.isArray(merged.breeds)) {
+    merged.breeds = (merged.breeds as HasId[]).filter((b) => catalogBreedIds.has(b.id));
+  }
+
+  // Prune roster entries for template-only breeds — preserve variant, owner,
+  // and other catalog-added entries. Runs even when catalogBreeds is empty
+  // (bootstrap writes breeds:[] + owner roster; template roster must not leak).
+  const baseBreeds = Array.isArray(baseJson.breeds) ? (baseJson.breeds as Array<HasId & { catId?: string }>) : [];
+  const templateOnlyCatIds = new Set(
+    baseBreeds
+      .filter((b) => !catalogBreedIds.has(b.id))
+      .map((b) => b.catId)
+      .filter(Boolean),
+  );
+  if (templateOnlyCatIds.size > 0 && merged.roster && typeof merged.roster === 'object') {
+    for (const key of Object.keys(merged.roster as Record<string, unknown>)) {
+      if (templateOnlyCatIds.has(key)) delete (merged.roster as Record<string, unknown>)[key];
+    }
+  }
+
+  return JSON.stringify(merged);
+}
+
+/**
  * Load and validate the resolved cat config source.
  * Explicit filePath reads that file directly.
  * Default resolution: cat-template.json is the base, .cat-cafe/cat-catalog.json is a delta overlay.
@@ -316,15 +358,10 @@ export function loadCatConfig(filePath?: string): CatCafeConfig {
     }
   } else {
     const templatePath = process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH;
-    const projectRoot = dirname(templatePath);
-    const catalogRaw = readCatCatalogRaw(projectRoot);
-    if (catalogRaw !== null) {
-      // Catalog exists — use template as base, catalog as overlay
-      const baseRaw = readTemplate(templatePath);
-      const baseJson = JSON.parse(baseRaw) as Record<string, unknown>;
-      const catalogJson = JSON.parse(catalogRaw) as Record<string, unknown>;
-      raw = JSON.stringify(deepMergeConfig(baseJson, catalogJson));
-      resolvedPath = resolveCatCatalogPath(projectRoot);
+    const merged = mergeTemplateWithCatalog(templatePath);
+    if (merged !== null) {
+      raw = merged;
+      resolvedPath = resolveCatCatalogPath(dirname(templatePath));
     } else {
       raw = readTemplate(templatePath);
       resolvedPath = templatePath;
@@ -812,17 +849,7 @@ export interface AcpVariantConfig {
 export function getAcpConfig(catId: string): AcpVariantConfig | undefined {
   try {
     const templatePath = process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH;
-    const projectRoot = dirname(templatePath);
-    const catalogRaw = readCatCatalogRaw(projectRoot);
-    let raw: string;
-    if (catalogRaw !== null) {
-      const baseRaw = readTemplate(templatePath);
-      const baseJson = JSON.parse(baseRaw) as Record<string, unknown>;
-      const catalogJson = JSON.parse(catalogRaw) as Record<string, unknown>;
-      raw = JSON.stringify(deepMergeConfig(baseJson, catalogJson));
-    } else {
-      raw = readTemplate(templatePath);
-    }
+    const raw = mergeTemplateWithCatalog(templatePath) ?? readTemplate(templatePath);
     const json = JSON.parse(raw) as {
       breeds?: Array<{ catId?: string; variants?: Array<{ catId?: string; acp?: AcpVariantConfig }> }>;
     };

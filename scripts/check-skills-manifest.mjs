@@ -17,7 +17,7 @@ const repoRoot = process.argv[2] ? resolve(process.argv[2]) : defaultRepoRoot;
 
 const manifestPath = join(repoRoot, 'cat-cafe-skills', 'manifest.yaml');
 const skillsRoot = join(repoRoot, 'cat-cafe-skills');
-const catConfigPath = join(repoRoot, 'cat-config.json');
+const catTemplatePath = join(repoRoot, 'cat-template.json');
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -47,22 +47,29 @@ function hasYamlFrontmatter(content) {
 }
 
 function loadRosterHandles() {
-  if (!existsSync(catConfigPath)) {
-    throw new Error(`cat-config.json not found: ${catConfigPath}`);
+  if (!existsSync(catTemplatePath)) {
+    throw new Error(`cat-template.json not found: ${catTemplatePath}`);
   }
-  const raw = readFileSync(catConfigPath, 'utf-8');
+  const raw = readFileSync(catTemplatePath, 'utf-8');
   const parsed = JSON.parse(raw);
   if (!parsed.roster || typeof parsed.roster !== 'object') {
-    throw new Error('cat-config.json missing "roster" object');
+    throw new Error('cat-template.json missing "roster" object');
   }
 
-  const handles = Object.keys(parsed.roster)
-    .map((id) => `@${id}`)
-    .sort((a, b) => b.length - a.length);
+  const handleSet = new Set(Object.keys(parsed.roster).map((id) => `@${id}`));
+  if (Array.isArray(parsed.breeds)) {
+    for (const breed of parsed.breeds) {
+      if (breed.catId) handleSet.add(`@${breed.catId}`);
+      for (const variant of Array.isArray(breed.variants) ? breed.variants : []) {
+        if (variant.catId) handleSet.add(`@${variant.catId}`);
+      }
+    }
+  }
+  const handles = [...handleSet].sort((a, b) => b.length - a.length);
 
   const nicknames = new Set();
-  if (parsed.breeds && typeof parsed.breeds === 'object') {
-    for (const breed of Object.values(parsed.breeds)) {
+  if (Array.isArray(parsed.breeds)) {
+    for (const breed of parsed.breeds) {
       if (breed.nickname && typeof breed.nickname === 'string') {
         nicknames.add(breed.nickname);
       }
