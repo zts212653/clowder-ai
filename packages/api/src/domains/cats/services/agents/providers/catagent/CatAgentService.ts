@@ -102,11 +102,14 @@ export class CatAgentService implements AgentService {
       if (result.hadStreamError) {
         const orphanTools = result.contentBlocks.filter((b): b is AnthropicToolUseBlock => b.type === 'tool_use');
         for (const t of orphanTools) {
+          // F153 Phase J AC-J2: carry native tool_use_id + structured error status.
           yield {
             type: 'tool_result',
             catId: this.catId,
             content: 'Error: stream interrupted before tool execution',
             toolName: t.name,
+            toolUseId: t.id,
+            toolResultStatus: 'error',
             metadata,
             timestamp: Date.now(),
           };
@@ -139,11 +142,17 @@ export class CatAgentService implements AgentService {
       // Execute tools and build next turn
       const toolResults = await this.executeTools(toolBlocks, tools, metadata);
       for (const r of toolResults) {
+        // F153 Phase J AC-J2: carry tool_use_id + structured status (heuristic:
+        // content starting with 'Error:' = error, otherwise ok). r.id matches
+        // toolBlocks[].id, so ToolSpanTracker can pair this with the prior tool_use.
+        const isError = r.content.startsWith('Error:');
         yield {
           type: 'tool_result',
           catId: this.catId,
           content: r.content.slice(0, TOOL_RESULT_DIGEST_LIMIT),
           toolName: r.name,
+          toolUseId: r.id,
+          toolResultStatus: isError ? 'error' : 'ok',
           metadata,
           timestamp: Date.now(),
         };
@@ -216,11 +225,13 @@ export class CatAgentService implements AgentService {
     } else if (evt.type === 'content_block_complete') {
       blocksByIndex.set(evt.blockIndex, evt.block);
       if (evt.block.type === 'tool_use') {
+        // F153 Phase J AC-J2: carry native Anthropic tool_use.id (from stream parser).
         yield {
           type: 'tool_use',
           catId: this.catId,
           toolName: evt.block.name,
           toolInput: evt.block.input,
+          toolUseId: evt.block.id,
           metadata,
           timestamp: Date.now(),
         };
