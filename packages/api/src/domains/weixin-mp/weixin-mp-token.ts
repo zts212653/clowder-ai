@@ -3,6 +3,7 @@ import type { RedisClient } from '@cat-cafe/shared/utils';
 const REDIS_KEY_PREFIX = 'weixin-mp:access-token:';
 const WX_TOKEN_URL = 'https://api.weixin.qq.com/cgi-bin/token';
 const REFRESH_MARGIN_SEC = 300;
+const REDIS_HIT_FALLBACK_TTL_MS = 60_000;
 
 interface TokenResponse {
   readonly access_token?: string;
@@ -33,7 +34,10 @@ export class WeixinMpTokenManager {
     if (this.redis) {
       try {
         const cached = await this.redis.get(`${REDIS_KEY_PREFIX}${appId}`);
-        if (cached) return cached;
+        if (cached) {
+          this.rememberToken(appId, cached, REDIS_HIT_FALLBACK_TTL_MS);
+          return cached;
+        }
       } catch {
         /* Redis is an optional cache; fall back to in-memory/fresh token. */
       }
@@ -67,9 +71,13 @@ export class WeixinMpTokenManager {
         /* Redis is an optional cache; keep the process-local token. */
       }
     }
-    this.memToken = data.access_token;
-    this.memExpiresAt = Date.now() + ttlSec * 1000;
-    this.memAppId = appId;
+    this.rememberToken(appId, data.access_token, ttlSec * 1000);
     return data.access_token;
+  }
+
+  private rememberToken(appId: string, token: string, ttlMs: number): void {
+    this.memToken = token;
+    this.memExpiresAt = Date.now() + ttlMs;
+    this.memAppId = appId;
   }
 }
