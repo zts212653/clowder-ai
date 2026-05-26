@@ -2112,7 +2112,7 @@ describe('plugin routes safety', () => {
       limbRegistry: {
         getNodeHandle(nodeId) {
           if (nodeId !== 'yaml-node') return null;
-          return { healthCheck: async () => 'online' };
+          return { invoke: async () => ({ success: true, data: { status: 'online' } }) };
         },
       },
       pluginsDir,
@@ -2197,7 +2197,7 @@ describe('plugin routes safety', () => {
       limbRegistry: {
         getNodeHandle(nodeId) {
           if (nodeId !== 'persisted-node') return null;
-          return { healthCheck: async () => 'online' };
+          return { invoke: async () => ({ success: true, data: { status: 'online' } }) };
         },
       },
       pluginsDir,
@@ -2263,7 +2263,7 @@ describe('plugin routes safety', () => {
         getNodeHandle(nodeId) {
           if (nodeId !== 'yaml-node') return null;
           return {
-            healthCheck: async () => {
+            invoke: async () => {
               throw new Error('adapter timeout');
             },
           };
