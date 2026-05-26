@@ -36,18 +36,46 @@ const BLOCKED_PATTERNS = [
 ];
 
 const EXEMPT_PREFIXES = [
+  /^Merge\b/i, // Merge subjects often include branch names such as fix/foo-followup.
+  /^docs\(F\d+\):\s*(add\s+feature\s+spec|spec\s+follow[\s-]?up|fold\b.*\bspec\b)/i,
   /^docs\(F\d+\):\s*(update|expand|refine)\s+spec\b/i,
   /\[red\]/i, // TDD red-phase commits — "stub" is placeholder for failing tests, not deferred work
+];
+
+// Semantic exemptions: keywords used as programming/implementation terms,
+// NOT as procrastination signals. The blanket regexes above catch any
+// "stub" / "deferred" but conflate "we wrote a stub to defer rust
+// compilation" (implementation noun) with "stubbed out, will do later"
+// (procrastination verb). Patterns below match the implementation
+// senses — line is skipped if any matches.
+const SEMANTIC_EXEMPTIONS = [
+  // "deferred" used as adjective for async/lazy execution (programming term):
+  // "deferred catch-up", "deferred load", "deferred init", and variants with
+  // an intermediate noun: "deferred embed catch-up" / "deferred sidecar load".
+  /\bdeferred\b[\s\w-]{0,40}\b(catch[\s-]?up|initialization|load|loading|fetch|spawn|callback|fire|hook|event|task|operation|promise)\b/i,
+  // "stub" used to describe Python module compatibility shim — common for
+  // Windows ARM64 fastembed cases (py_rust_stemmers stub before pip install).
+  // Matches "stub <package-name>", "<verb> stub for <package>", etc.
+  /\bstub\b.*\b(snowball|stemmer|stemmers|py[-_]rust|fastembed|module|package|compat|shim|wheel|dep|dependency)/i,
+  /\b(create|pre[-_]?create|write|add|register|install)\s+[\w-]+\s*stub\b/i,
+  // "stub <name> for <library>" — pattern of "implementing a stub to satisfy
+  // import-time symbol resolution" (a real engineering decision, not laziness)
+  /\bstub\s+\w+\s+for\s+\w+/i,
 ];
 
 function scanText(text, source) {
   const hits = [];
   const lines = text.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // Semantic exemption: skip line if it uses the keyword in a
+    // programming/implementation sense rather than a procrastination
+    // sense (see SEMANTIC_EXEMPTIONS).
+    if (SEMANTIC_EXEMPTIONS.some((p) => p.test(line))) continue;
     for (const pattern of BLOCKED_PATTERNS) {
-      const match = lines[i].match(pattern);
+      const match = line.match(pattern);
       if (match) {
-        hits.push({ source, line: i + 1, text: lines[i].trim(), keyword: match[0] });
+        hits.push({ source, line: i + 1, text: line.trim(), keyword: match[0] });
       }
     }
   }

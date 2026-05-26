@@ -105,5 +105,5 @@ export function useGuideAutoAdvance(step: OrchestrationStep | null, advance: () 
         bindingKeyRef.current = null;
       }
     };
-  }, [step?.id, step?.target, step?.advance, isActive]);
+  }, [step, isActive]);
 }

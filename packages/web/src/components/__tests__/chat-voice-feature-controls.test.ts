@@ -84,6 +84,7 @@ describe('ChatVoiceFeatureControls', () => {
   });
 
   it('starts installed-but-disabled TTS service before enabling voice companion', async () => {
+    let started = false;
     apiFetchMock.mockImplementation(async (path: string) => {
       if (path === '/api/services') {
         return jsonResponse({
@@ -91,14 +92,18 @@ describe('ChatVoiceFeatureControls', () => {
             {
               id: 'mlx-tts',
               installed: true,
-              enabled: false,
+              enabled: started,
               installable: true,
+              status: started ? 'healthy' : 'not_configured',
               features: ['voice-output', 'voice-companion'],
             },
           ],
         });
       }
-      if (path === '/api/services/mlx-tts/start') return jsonResponse({ ok: true });
+      if (path === '/api/services/mlx-tts/start') {
+        started = true;
+        return jsonResponse({ ok: true });
+      }
       return jsonResponse({ error: `unexpected ${path}` }, false);
     });
     render();
@@ -112,6 +117,68 @@ describe('ChatVoiceFeatureControls', () => {
       headers: { 'Content-Type': 'application/json' },
       body: '{}',
     });
+    expect(useVoiceSessionStore.getState().session?.boundThreadId).toBe('thread-1');
+    expect(useVoiceSessionStore.getState().session?.activeCatId).toBe('opus');
+  });
+
+  it('waits for an enabled TTS service to become healthy before enabling voice companion', async () => {
+    let servicePolls = 0;
+    let resolveHealthy: (() => void) | undefined;
+    apiFetchMock.mockImplementation(async (path: string) => {
+      if (path === '/api/services') {
+        servicePolls += 1;
+        if (servicePolls === 1) {
+          return jsonResponse({
+            services: [
+              {
+                id: 'mlx-tts',
+                installed: true,
+                enabled: true,
+                installable: true,
+                status: 'starting',
+                features: ['voice-output', 'voice-companion'],
+              },
+            ],
+          });
+        }
+        return new Promise<Response>((resolve) => {
+          resolveHealthy = () =>
+            resolve(
+              jsonResponse({
+                services: [
+                  {
+                    id: 'mlx-tts',
+                    installed: true,
+                    enabled: true,
+                    installable: true,
+                    status: 'healthy',
+                    features: ['voice-output', 'voice-companion'],
+                  },
+                ],
+              }),
+            );
+        });
+      }
+      return jsonResponse({ error: `unexpected ${path}` }, false);
+    });
+    render();
+
+    act(() => {
+      button('语音陪伴').click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(servicePolls).toBe(2);
+    expect(useVoiceSessionStore.getState().session).toBeNull();
+
+    await act(async () => {
+      resolveHealthy?.();
+      await Promise.resolve();
+    });
+
     expect(useVoiceSessionStore.getState().session?.boundThreadId).toBe('thread-1');
     expect(useVoiceSessionStore.getState().session?.activeCatId).toBe('opus');
   });
@@ -165,5 +232,94 @@ describe('ChatVoiceFeatureControls', () => {
 
     expect(useChatStore.getState().rightPanelMode).toBe('status');
     expect(useToastStore.getState().toasts[0]?.message).toContain('语音管理');
+  });
+
+  it('opens install preview from the audio capture header action before installing', async () => {
+    const profile = {
+      os: 'win32',
+      arch: 'x64',
+      gpu: 'none',
+      pythonArch: 'native',
+      pythonVersion: '3.12',
+      ramGb: 16,
+      diskFreeGb: 80,
+      detectedAt: Date.now(),
+    };
+    const callLog: string[] = [];
+    let audioInstalled = false;
+    let audioEnabled = false;
+    apiFetchMock.mockImplementation(async (path: string, init?: RequestInit) => {
+      callLog.push(`${path}:${init?.body ?? ''}`);
+      if (path === '/api/services') {
+        return jsonResponse({
+          services: [
+            {
+              id: 'audio-capture',
+              installed: audioInstalled,
+              enabled: audioEnabled,
+              installable: true,
+              status: audioEnabled ? 'healthy' : 'not_configured',
+              features: ['meeting-copilot', 'live-transcript'],
+              prerequisites: {
+                runtime: 'python3.10+',
+                packages: ['sounddevice', 'fastapi', 'uvicorn', 'numpy'],
+                models: [],
+                estimatedMinutes: 2,
+              },
+            },
+          ],
+        });
+      }
+      if (path === '/api/services/audio-capture/install-preview') {
+        return jsonResponse({
+          profile,
+          suggestedPort: 19981,
+          recommendation: {
+            serviceId: 'audio-capture',
+            profile,
+            models: [],
+            notes: ['Windows: sounddevice uses WASAPI / DirectSound, no extra model download.'],
+          },
+        });
+      }
+      if (path === '/api/services/audio-capture/install') {
+        audioInstalled = true;
+        return jsonResponse({ ok: true });
+      }
+      if (path === '/api/services/audio-capture/start') {
+        audioEnabled = true;
+        return jsonResponse({ ok: true });
+      }
+      return jsonResponse({ error: `unexpected ${path}` }, false);
+    });
+    render();
+
+    await act(async () => {
+      button('音频采集').click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(callLog.some((entry) => entry.startsWith('/api/services/audio-capture/install-preview'))).toBe(true);
+    expect(callLog.some((entry) => entry.startsWith('/api/services/audio-capture/install:'))).toBe(false);
+    expect(container.textContent).toContain('安装 音频采集');
+    expect(container.textContent).toContain('无需模型');
+    expect(container.textContent).toContain('语音识别模型请在 Whisper 服务中选择');
+    expect(container.textContent).toContain('no extra model download');
+
+    const confirmBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '开始安装');
+    expect(confirmBtn).toBeTruthy();
+
+    await act(async () => {
+      confirmBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(callLog.some((entry) => entry === '/api/services/audio-capture/install:{"port":19981}')).toBe(true);
+    expect(callLog.some((entry) => entry === '/api/services/audio-capture/start:{}')).toBe(true);
+    expect(useChatStore.getState().rightPanelMode).toBe('transcript');
   });
 });

@@ -18,7 +18,7 @@ async function flushMicrotasks() {
 }
 
 describe('service lifecycle lock', () => {
-  it('holds detached startup guard only for later start requests', async () => {
+  it('holds detached startup guard for every lifecycle action', async () => {
     mock.timers.enable({ apis: ['setTimeout'], now: 0 });
     try {
       const { withLock } = createServiceLifecycleLock();
@@ -36,10 +36,20 @@ describe('service lifecycle lock', () => {
       assert.equal(secondReply.statusCode, 409);
       assert.match(second.error, /already in progress/);
 
+      let stopRan = false;
       const stopReply = createReply();
-      const stop = await withLock('whisper-stt', stopReply, async () => ({ ok: true }));
-      assert.equal(stopReply.statusCode, 200);
-      assert.deepEqual(stop, { ok: true });
+      const stop = await withLock(
+        'whisper-stt',
+        stopReply,
+        async () => {
+          stopRan = true;
+          return { ok: true };
+        },
+        { action: 'stop' },
+      );
+      assert.equal(stopReply.statusCode, 409);
+      assert.match(stop.error, /already in progress/);
+      assert.equal(stopRan, false);
 
       mock.timers.tick(30_000);
       await flushMicrotasks();

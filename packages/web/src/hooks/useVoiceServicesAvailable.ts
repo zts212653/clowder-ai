@@ -3,7 +3,7 @@ import { apiFetch } from '@/utils/api-client';
 
 interface ServiceState {
   features: string[];
-  status: 'healthy' | 'unhealthy' | 'not_configured';
+  status: 'healthy' | 'unhealthy' | 'not_configured' | 'installing' | 'starting' | 'stopping' | 'uninstalling';
 }
 
 const VOICE_FEATURES = ['voice-input', 'voice-output', 'voice-companion'];

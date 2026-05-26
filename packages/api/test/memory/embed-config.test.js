@@ -6,7 +6,9 @@ describe('resolveEmbedConfig', () => {
     const { resolveEmbedConfig } = await import('../../dist/domains/memory/interfaces.js');
     const config = resolveEmbedConfig(undefined);
     assert.equal(config.embedMode, 'off');
-    assert.equal(config.embedModel, 'qwen3-embedding-0.6b');
+    // Sentinel fallback — overwritten as soon as the sidecar /health probe
+    // reports the actual model. See interfaces.ts comment + IndexBuilder.
+    assert.equal(config.embedModel, 'unknown');
     assert.equal(config.embedDim, 768);
     assert.equal(config.maxModelMemMb, 800);
     assert.equal(config.embedTimeoutMs, 3000);
@@ -17,7 +19,7 @@ describe('resolveEmbedConfig', () => {
     const config = resolveEmbedConfig({ embedMode: 'shadow', embedDim: 128 });
     assert.equal(config.embedMode, 'shadow');
     assert.equal(config.embedDim, 128);
-    assert.equal(config.embedModel, 'qwen3-embedding-0.6b'); // untouched default
+    assert.equal(config.embedModel, 'unknown'); // untouched default sentinel
   });
 
   it('accepts embedMode=on', async () => {
@@ -31,15 +33,18 @@ describe('resolveEmbedConfig', () => {
     assert.throws(() => resolveEmbedConfig({ embedMode: 'turbo' }), /invalid embedMode/i);
   });
 
-  it('rejects invalid embedModel', async () => {
+  it('accepts any string embedModel (whitelist removed — sidecar /health is the runtime authority)', async () => {
     const { resolveEmbedConfig } = await import('../../dist/domains/memory/interfaces.js');
-    assert.throws(() => resolveEmbedConfig({ embedModel: 'gpt-9000' }), /invalid embedModel/i);
-  });
-
-  it('accepts multilingual-e5-small as fallback model', async () => {
-    const { resolveEmbedConfig } = await import('../../dist/domains/memory/interfaces.js');
-    const config = resolveEmbedConfig({ embedModel: 'multilingual-e5-small' });
-    assert.equal(config.embedModel, 'multilingual-e5-small');
+    for (const id of [
+      'BAAI/bge-small-zh-v1.5',
+      'jinaai/jina-embeddings-v2-base-zh',
+      'intfloat/multilingual-e5-large',
+      'mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ',
+      'gpt-9000', // even bogus ids pass — recommendation-matrix.yaml curates the user-facing list
+    ]) {
+      const config = resolveEmbedConfig({ embedModel: id });
+      assert.equal(config.embedModel, id);
+    }
   });
 });
 

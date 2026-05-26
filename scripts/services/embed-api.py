@@ -1,36 +1,9 @@
 #!/usr/bin/env python3
 """
-Embedding server for Cat Cafe memory system (F102 Phase C/G).
-Uses Apple Silicon GPU via MLX framework (native Metal acceleration).
+Embedding server for Cat Cafe memory system.
 
-POST /v1/embeddings         — generate embeddings for a batch of texts
-GET  /health                — health check (status/model/backend/device)
-
-Usage:
-  source ~/.cat-cafe/embed-venv/bin/activate
-  python scripts/embed-api.py                                         # default: Qwen3-Embedding-0.6B 4bit
-  python scripts/embed-api.py --port 9877                             # custom port
-  EMBED_DIM=512 python scripts/embed-api.py                           # MRL truncation to 512
-
-Setup (one-time):
-  python3 -m venv ~/.cat-cafe/embed-venv
-  source ~/.cat-cafe/embed-venv/bin/activate
-  pip install mlx mlx-embeddings fastapi uvicorn numpy
-
-Model selection (LL-034: must use MLX GPU, not CPU ONNX):
-  Default: mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ (335MB, MLX 4-bit)
-  Larger:  mlx-community/Qwen3-Embedding-4B-4bit-DWQ   (~2.5GB, better quality)
-
-Dim recommendations (CMTEB bilingual quality):
-  768  — sweet spot for Chinese-English mixed content (default)
-  512  — storage-sensitive floor (quality drops ~2%)
-  256  — DO NOT USE for CJK (quality drops ~5%, too much semantic loss)
-  1024 — maximum quality, 33% more storage than 768
-
-Env vars:
-  EMBED_PORT    — server port (default: 9877)
-  EMBED_MODEL   — MLX model ID (default: mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ)
-  EMBED_DIM     — output dimension after MRL truncation (default: 768)
+Backends: MLX (macOS GPU) → fastembed/ONNX (CPU/CUDA) → sentence-transformers.
+Env vars: EMBED_PORT, EMBED_MODEL (MLX), EMBED_ONNX_MODEL (fastembed), EMBED_DIM.
 """
 
 from __future__ import annotations
@@ -54,6 +27,19 @@ log = logging.getLogger("embed-api")
 
 app = FastAPI(title="Cat Cafe Embedding Server (MLX)")
 
+
+@app.on_event("startup")
+async def _emit_ready_marker():
+    """Print a marker line so the TS parent process can fire 'started' the
+    moment uvicorn finishes binding the port — push-based fast path that
+    replaces a 5s polling delay. Matches the marker constant in
+    packages/api/src/domains/services/service-logs.ts (wireUpSidecarReadyListener).
+    Falls back to uvicorn's own 'Uvicorn running on http' line if this hook
+    doesn't run for any reason.
+    """
+    print("__CATCAFE_SIDECAR_READY__", flush=True)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
@@ -76,7 +62,12 @@ _embed_lock = asyncio.Lock()
 MAX_BATCH_SIZE = 64
 MAX_TEXT_LENGTH = 8192
 
-# Fallback: if mlx-embeddings not available, use sentence-transformers + MPS
+# Lightweight fallback: fastembed (ONNX Runtime, no torch needed)
+_use_fastembed = False
+_fe_model = None
+_onnx_device = "cpu"
+
+# Heavy fallback: sentence-transformers + MPS/CUDA/CPU (needs torch)
 _use_fallback = False
 _st_model = None
 
@@ -141,7 +132,7 @@ async def health():
         "status": "ok" if model_loaded else "loading",
         "model": model_name or "none",
         "backend": _backend,
-        "device": "mlx" if not _use_fallback else "mps",
+        "device": f"onnx-{_onnx_device}" if _use_fastembed else ("mlx" if not _use_fallback else "cpu"),
         "dim": embed_dim,
     }
 
@@ -150,6 +141,8 @@ async def health():
 
 def _encode(texts: List[str]) -> np.ndarray:
     """Encode texts to normalized embeddings with MRL truncation."""
+    if _use_fastembed:
+        return _encode_fastembed(texts)
     if _use_fallback:
         return _encode_fallback(texts)
     return _encode_mlx(texts)
@@ -190,8 +183,17 @@ def _encode_mlx(texts: List[str]) -> np.ndarray:
     return truncated / norms
 
 
+def _encode_fastembed(texts: List[str]) -> np.ndarray:
+    """Lightweight ONNX Runtime encoding via fastembed."""
+    raw = np.array(list(_fe_model.embed(texts)))
+    truncated = raw[:, :embed_dim]
+    norms = np.linalg.norm(truncated, axis=1, keepdims=True)
+    norms = np.where(norms > 0, norms, 1.0)
+    return truncated / norms
+
+
 def _encode_fallback(texts: List[str]) -> np.ndarray:
-    """Fallback: sentence-transformers + MPS/CUDA/CPU."""
+    """Heavy fallback: sentence-transformers + MPS/CUDA/CPU."""
     assert _st_model is not None
     raw = _st_model.encode(texts, normalize_embeddings=False, show_progress_bar=False)
     truncated = raw[:, :embed_dim]
@@ -209,8 +211,11 @@ def main():
     parser = argparse.ArgumentParser(description="Cat Cafe Embedding Server (MLX GPU)")
     parser.add_argument(
         "--model",
-        default=os.environ.get("EMBED_MODEL", "mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ"),
-        help="MLX model ID (default: mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ)",
+        required=True,
+        help="Model repo ID — required, no fallback default. The backend spawn caller "
+        "(routes/services.ts resolveSelectedModel) must always pass this; we rejected "
+        "the previous mlx-community default because it picked the wrong model on "
+        "non-mac platforms when EMBED_MODEL was unset.",
     )
     parser.add_argument("--port", type=int, default=int(os.environ.get("EMBED_PORT", "9880")))
     parser.add_argument("--dim", type=int, default=int(os.environ.get("EMBED_DIM", "768")))
@@ -254,8 +259,58 @@ def main():
             mlx_tokenizer = None
             return False
 
+    def _try_fastembed() -> bool:
+        """Lightweight ONNX backend via fastembed (no torch needed)."""
+        global _use_fastembed, _fe_model, _onnx_device, _backend, model_loaded, model_name, embed_dim
+        try:
+            from fastembed import TextEmbedding
+        except ImportError:
+            log.warning("fastembed not installed")
+            return False
+        # fastembed has a hardcoded whitelist (verified via fastembed 0.8
+        # TextEmbedding.list_supported_models()). jinaai/jina-embeddings-v2-base-zh
+        # is in the catalog (768 dim, bilingual zh+en, ~640MB).
+        # If the configured model is MLX (mac) or another non-whitelisted name,
+        # fall back to jina-zh.
+        fe_name = (
+            model_name
+            if not model_name.startswith("mlx-community/")
+            else "jinaai/jina-embeddings-v2-base-zh"
+        )
+        providers = None
+        device_label = "CPU"
+        try:
+            import onnxruntime as ort
+            avail = ort.get_available_providers()
+            if "CUDAExecutionProvider" in avail:
+                providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+                device_label = "CUDA GPU"
+                _onnx_device = "gpu"
+        except ImportError:
+            pass
+        try:
+            log.info("Loading via fastembed (ONNX %s): %s ...", device_label, fe_name)
+            fe_kwargs: dict = {"model_name": fe_name}
+            if providers:
+                fe_kwargs["providers"] = providers
+            _fe_model = TextEmbedding(**fe_kwargs)
+            test_out = np.array(list(_fe_model.embed(["test"])))
+            native_dim = test_out.shape[1]
+            if native_dim < embed_dim:
+                embed_dim = native_dim
+                log.info("Adjusted embed_dim to model native: %d", native_dim)
+            _use_fastembed = True
+            _backend = "fastembed-onnx"
+            model_name = fe_name
+            model_loaded = True
+            log.info("fastembed loaded in %.1fs (dim=%d, ONNX %s)", time.time() - start, embed_dim, device_label)
+            return True
+        except Exception as e:
+            log.warning("fastembed failed (%s), trying next backend", e)
+            return False
+
     def _try_sentence_transformers() -> bool:
-        """Fallback: sentence-transformers + MPS/CUDA/CPU."""
+        """Heavy fallback: sentence-transformers + MPS/CUDA/CPU (needs torch)."""
         global _use_fallback, _st_model, _backend, model_loaded, model_name
         _use_fallback = True
         _backend = "sentence-transformers"
@@ -276,8 +331,18 @@ def main():
             else:
                 device = "cpu"
             log.info("Loading model via sentence-transformers (device: %s)...", device)
-            _st_model = SentenceTransformer(fallback_model, device=device)
-            model_name = fallback_model  # update displayed model name
+            # Override attn_implementation: some HF models (e.g. older
+            # jinaai/jina-embeddings-v2-*) have `attn_implementation="torch"`
+            # baked into their config.json — newer transformers (>=4.46)
+            # rejects that string and only accepts eager/sdpa/flash_*. Pass
+            # 'eager' explicitly so SentenceTransformer forwards it to
+            # from_pretrained() and shadows the broken config value.
+            _st_model = SentenceTransformer(
+                fallback_model,
+                device=device,
+                model_kwargs={"attn_implementation": "eager"},
+            )
+            model_name = fallback_model
             model_loaded = True
             log.info("Fallback model loaded in %.1fs! (device: %s)", time.time() - start, device)
             return True
@@ -286,9 +351,10 @@ def main():
             return False
 
     if not _try_mlx():
-        if not _try_sentence_transformers():
-            log.error("All backends failed, exiting")
-            sys.exit(1)
+        if not _try_fastembed():
+            if not _try_sentence_transformers():
+                log.error("All backends failed, exiting")
+                sys.exit(1)
 
     log.info("API: http://localhost:%d/v1/embeddings", args.port)
     log.info("Health: http://localhost:%d/health", args.port)

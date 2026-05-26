@@ -48,6 +48,13 @@ log = logging.getLogger("tts-api")
 
 app = FastAPI(title="Cat Cafe TTS Server")
 
+
+@app.on_event("startup")
+async def _emit_ready_marker():
+    """Push-based ready signal — see embed-api.py + service-logs.ts."""
+    print("__CATCAFE_SIDECAR_READY__", flush=True)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
@@ -156,8 +163,6 @@ class MlxAudioAdapter(TtsAdapter):
                 lang_code="z",
                 output_path=str(warmup_dir),
             )
-        except Exception:
-            pass  # Warmup may fail, model is still loaded
         finally:
             shutil.rmtree(warmup_dir, ignore_errors=True)
 
@@ -221,6 +226,113 @@ class EdgeTtsAdapter(TtsAdapter):
             raise RuntimeError("edge-tts returned no audio data")
 
         return b"".join(audio_chunks), actual_format
+
+
+# ─── SAPI Adapter (Windows offline) ─────────────────────────────────
+
+
+class SapiAdapter(TtsAdapter):
+    """Windows SAPI5 TTS via pyttsx3 (offline, no model download)."""
+
+    @property
+    def name(self) -> str:
+        return "sapi"
+
+    async def synthesize(
+        self, text: str, voice: str, lang_code: str, speed: float, audio_format: str,
+    ) -> tuple[bytes, str]:
+        try:
+            import pyttsx3
+        except ImportError as exc:
+            raise RuntimeError("pyttsx3 not available — pip install pyttsx3") from exc
+
+        tmp = Path(tempfile.mktemp(suffix=".wav"))
+        try:
+            def _speak():
+                engine = pyttsx3.init()
+                engine.setProperty("rate", int(engine.getProperty("rate") * speed))
+                engine.save_to_file(text, str(tmp))
+                engine.runAndWait()
+
+            await asyncio.to_thread(_speak)
+            if not tmp.exists():
+                raise RuntimeError("pyttsx3 produced no audio")
+            return tmp.read_bytes(), "wav"
+        finally:
+            tmp.unlink(missing_ok=True)
+
+
+# ─── Piper Adapter (open-source offline, cross-platform ONNX) ────────
+
+
+class PiperAdapter(TtsAdapter):
+    """Piper neural TTS via piper-tts (offline, cross-platform).
+
+    Models are downloaded by tts-install.sh / tts-install.ps1 into
+    ~/.cat-cafe/piper-models/<voice>.onnx + .onnx.json
+    """
+
+    DEFAULT_MODEL = "zh_CN-huayan-medium"
+    MODELS_DIR = Path.home() / ".cat-cafe" / "piper-models"
+
+    def __init__(self, model: str | None = None):
+        self._model = model or self.DEFAULT_MODEL
+        self._voice = None
+        self._lock = asyncio.Lock()
+
+    @property
+    def name(self) -> str:
+        return "piper"
+
+    @property
+    def model_name(self) -> str:
+        return self._model
+
+    def _model_paths(self) -> tuple[Path, Path]:
+        # Allow either bare voice name or full filename
+        base = self._model.removesuffix(".onnx")
+        onnx_path = self.MODELS_DIR / f"{base}.onnx"
+        config_path = self.MODELS_DIR / f"{base}.onnx.json"
+        return onnx_path, config_path
+
+    async def _ensure_loaded(self):
+        if self._voice is not None:
+            return
+        async with self._lock:
+            if self._voice is not None:
+                return
+            try:
+                from piper import PiperVoice
+            except ImportError as exc:
+                raise RuntimeError(
+                    "piper-tts not available — install with: pip install piper-tts"
+                ) from exc
+
+            onnx_path, config_path = self._model_paths()
+            if not onnx_path.exists() or not config_path.exists():
+                raise RuntimeError(
+                    f"Piper model missing at {onnx_path}. Run tts-install to download."
+                )
+            self._voice = await asyncio.to_thread(PiperVoice.load, str(onnx_path))
+            log.info("Loaded Piper voice: %s", self._model)
+
+    async def synthesize(
+        self, text: str, voice: str, lang_code: str, speed: float, audio_format: str,
+    ) -> tuple[bytes, str]:
+        del voice, lang_code, speed, audio_format  # Piper voice/speed driven by model
+        await self._ensure_loaded()
+
+        import io
+        import wave
+
+        def _synth() -> bytes:
+            buf = io.BytesIO()
+            with wave.open(buf, "wb") as wf:
+                self._voice.synthesize(text, wf)
+            return buf.getvalue()
+
+        audio_bytes = await asyncio.to_thread(_synth)
+        return audio_bytes, "wav"
 
 
 # ─── Qwen3 Clone Adapter ────────────────────────────────────────────
@@ -318,8 +430,6 @@ class Qwen3CloneAdapter(TtsAdapter):
                 lang_code="z",
                 output_path=str(warmup_dir),
             )
-        except Exception:
-            pass  # Warmup may fail, model is still loaded
         finally:
             shutil.rmtree(warmup_dir, ignore_errors=True)
 
@@ -335,8 +445,12 @@ def create_adapter(provider: str, model: str) -> TtsAdapter:
         return MlxAudioAdapter(model=model)
     if provider == "edge-tts":
         return EdgeTtsAdapter()
+    if provider == "sapi":
+        return SapiAdapter()
+    if provider == "piper":
+        return PiperAdapter(model=model if model else None)
     raise ValueError(
-        f"Unknown TTS provider: '{provider}'. Supported: qwen3-clone, mlx-audio, edge-tts"
+        f"Unknown TTS provider: '{provider}'. Supported: qwen3-clone, mlx-audio, edge-tts, sapi, piper"
     )
 
 
@@ -429,8 +543,8 @@ def main():
     parser = argparse.ArgumentParser(description="Cat Cafe TTS Server")
     parser.add_argument(
         "--model",
-        default="mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16",
-        help="HuggingFace model repo (default: mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16)",
+        required=True,
+        help="Model repo ID — required, no fallback default. Backend always passes via env.",
     )
     parser.add_argument(
         "--port", type=int, default=9879, help="Server port (default: 9879)"

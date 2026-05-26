@@ -106,6 +106,7 @@ import { shouldTrackApiActivity } from './domains/health/activity-route-filter.j
 import { PortDiscoveryService } from './domains/preview/port-discovery.js';
 import { collectRuntimePorts } from './domains/preview/port-validator.js';
 import { PreviewGateway } from './domains/preview/preview-gateway.js';
+import { appendServiceLog } from './domains/services/service-lifecycle.js';
 import { createSignalArticleLookup } from './domains/signals/services/signal-thread-lookup.js';
 import { AgentPaneRegistry } from './domains/terminal/agent-pane-registry.js';
 import { TmuxGateway } from './domains/terminal/tmux-gateway.js';
@@ -582,14 +583,35 @@ async function main(): Promise<void> {
   initRepoIdentity(repoRoot);
 
   const { createMemoryServices } = await import('./domains/memory/factory.js');
+  // Resolve embed mode. Priority:
+  //   1. If the user enabled the Embedding service in console (service.enabled=true),
+  //      force the in-process mode to 'on' (or honor an explicit 'shadow' / 'on' env
+  //      override). UI toggle is the most direct expression of user intent — letting
+  //      a stale EMBED_MODE=off in .env silently disable catch-up would be a foot-gun
+  //      (sidecar runs, but evidence_vectors stays empty + catch-up logs probed=false).
+  //   2. Otherwise, an explicit EMBED_MODE env wins.
+  //   3. Otherwise, default 'off' (service disabled in console, no env → no
+  //      embedding services wired up).
+  const { getServiceConfig: getEmbedSvcCfg } = await import('./domains/services/service-config.js');
+  const embedSvcEnabled = getEmbedSvcCfg('embedding-model')?.enabled ?? false;
+  const resolvedEmbedMode: 'off' | 'shadow' | 'on' = (() => {
+    const envMode = process.env.EMBED_MODE;
+    if (embedSvcEnabled) {
+      return envMode === 'shadow' || envMode === 'on' ? envMode : 'on';
+    }
+    if (envMode === 'off' || envMode === 'shadow' || envMode === 'on') return envMode;
+    return 'off';
+  })();
+  app.log.info(
+    `[api] F102: embed mode = ${resolvedEmbedMode} (EMBED_MODE=${process.env.EMBED_MODE ?? '(unset)'}, service.enabled=${embedSvcEnabled})`,
+  );
   const memoryServices = await createMemoryServices({
     type: 'sqlite',
     sqlitePath: process.env.EVIDENCE_DB ?? resolve(repoRoot, 'evidence.sqlite'),
     docsRoot: process.env.DOCS_ROOT ?? resolve(repoRoot, 'docs'),
     markersDir: resolve(repoRoot, 'docs', 'markers'),
     transcriptDataDir, // reuse the same resolved path as Writer/Reader (line 282)
-    // Gap-1: expose EMBED_MODE env variable (Phase C infra ready, default off for open-source)
-    embed: process.env.EMBED_MODE ? { embedMode: process.env.EMBED_MODE as 'off' | 'shadow' | 'on' } : undefined,
+    embed: { embedMode: resolvedEmbedMode },
     // Phase E-2: message passage indexing — provide a callback that reads thread messages
     messageListFn: async (threadId: string, limit?: number) => {
       const messages = await messageStore.getByThread(threadId, limit ?? 2000, 'default-user');
@@ -1800,7 +1822,39 @@ async function main(): Promise<void> {
   await app.register(configRoutes);
   await app.register(configSecretsRoutes);
   await app.register(rulesRoutes);
-  await app.register(servicesRoutes);
+  await app.register(servicesRoutes, {
+    lifecycle: {
+      autoStartEnabled: true,
+      onServiceReady: ({ service, operator, reason }) => {
+        if (service.id !== 'embedding-model' || !memoryServices.indexBuilder) return;
+        appendServiceLog(service.id, `[start] embedding service ready (${reason}); scheduling evidence rebuild\n`);
+        app.log.info(
+          { serviceId: service.id, operator, reason },
+          '[api] F102: embedding service ready; scheduling evidence rebuild',
+        );
+        const startedAt = Date.now();
+        void memoryServices.indexBuilder
+          .rebuild({ force: true })
+          .then((result) => {
+            const elapsedMs = Date.now() - startedAt;
+            appendServiceLog(
+              service.id,
+              `[start] evidence rebuild completed: ${result.docsIndexed} indexed, ${result.docsSkipped} skipped (${elapsedMs}ms)\n`,
+            );
+            app.log.info(
+              `[api] F102: embedding service catch-up rebuild completed - ${result.docsIndexed} indexed, ${result.docsSkipped} skipped (${elapsedMs}ms)`,
+            );
+          })
+          .catch((error) => {
+            appendServiceLog(service.id, `[start] evidence rebuild failed: ${String(error)}\n`);
+            app.log.warn(
+              { err: error, serviceId: service.id },
+              '[api] F102: embedding service catch-up rebuild failed',
+            );
+          });
+      },
+    },
+  });
   await app.register(featureDocDetailRoutes);
   await app.register(accountsRoutes);
   await app.register(claudeRescueRoutes);
@@ -1964,14 +2018,16 @@ async function main(): Promise<void> {
     if (!libraryStores.has('project:cat-cafe')) libraryStores.set('project:cat-cafe', memoryServices.store);
     if (memoryServices.globalStore && !libraryStores.has('global:methods'))
       libraryStores.set('global:methods', memoryServices.globalStore);
-    const embedMode = process.env.EMBED_MODE as 'shadow' | 'on' | undefined;
+    // Use the resolvedEmbedMode computed above (service.enabled overrides EMBED_MODE=off).
+    const libraryEmbedMode: 'shadow' | 'on' | undefined =
+      resolvedEmbedMode === 'shadow' || resolvedEmbedMode === 'on' ? resolvedEmbedMode : undefined;
     await app.register(libraryRoutes, {
       catalog: memoryServices.catalog,
       stores: libraryStores,
       dataDir: memoryServices.dataDir,
       managedVaultBase: memoryServices.dataDir,
       embeddingService: memoryServices.embeddingService,
-      embedMode: embedMode && embedMode !== ('off' as string) ? embedMode : undefined,
+      embedMode: libraryEmbedMode,
       // F188 Phase F AC-F9: pass redis for tool-usage-metrics endpoint (砚砚 review P1-2)
       ...(redisClient ? { redis: redisClient } : {}),
       // AC-H1 P1 R3: runtime exclude updates for parent IndexBuilder
@@ -2058,9 +2114,13 @@ async function main(): Promise<void> {
   await app.register(connectorMediaRoutes, { mediaDir: connectorMediaDir });
 
   // F34: TTS Provider (mlx-audio → Python TTS server)
+  // Drop the eager baseUrl injection so the provider resolves the TTS
+  // endpoint via service manifest + persisted config on every request.
+  // /reconfigure-driven port changes therefore apply without restarting
+  // the API (codex P1 2026-05-26). Explicit TTS_URL env is still honored
+  // because resolveServiceEndpoint reads endpointEnvVars first.
   const ttsRegistry = new TtsRegistry();
-  const ttsUrl = process.env.TTS_URL ?? 'http://localhost:9879';
-  ttsRegistry.register(new MlxAudioTtsProvider({ baseUrl: ttsUrl }));
+  ttsRegistry.register(new MlxAudioTtsProvider());
   const ttsCacheDir = process.env.TTS_CACHE_DIR ?? './data/tts-cache';
   await app.register(ttsRoutes, { ttsRegistry, cacheDir: ttsCacheDir });
   initVoiceBlockSynthesizer(ttsRegistry, ttsCacheDir);

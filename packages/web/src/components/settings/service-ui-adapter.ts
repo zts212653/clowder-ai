@@ -1,4 +1,11 @@
-type HomeServiceStatus = 'healthy' | 'unhealthy' | 'not_configured';
+type HomeServiceStatus =
+  | 'healthy'
+  | 'unhealthy'
+  | 'not_configured'
+  | 'installing'
+  | 'starting'
+  | 'stopping'
+  | 'uninstalling';
 
 interface ModelOption {
   name: string;
@@ -26,12 +33,22 @@ export interface HomeServiceState {
   features: string[];
   installed: boolean;
   enabled: boolean;
+  selectedModel?: string;
+  port?: number;
   installable: boolean;
   prerequisites?: ServicePrerequisites;
   error?: string | null;
 }
 
-export type ServiceUiStatus = 'running' | 'stopped' | 'not_configured' | 'error' | 'installing' | 'starting';
+export type ServiceUiStatus =
+  | 'running'
+  | 'stopped'
+  | 'not_configured'
+  | 'error'
+  | 'installing'
+  | 'starting'
+  | 'stopping'
+  | 'uninstalling';
 
 export interface ServiceUiState {
   id: string;
@@ -44,6 +61,8 @@ export interface ServiceUiState {
   statusLabel: string;
   installed: boolean;
   enabled: boolean;
+  selectedModel?: string;
+  port?: number;
   installable: boolean;
   running: boolean;
   prerequisites?: ServicePrerequisites;
@@ -57,6 +76,8 @@ const STATUS_LABELS: Record<ServiceUiStatus, string> = {
   error: '异常',
   installing: '安装中',
   starting: '启动中',
+  stopping: '停止中',
+  uninstalling: '卸载中',
 };
 
 const DISPLAY_NAMES: Record<string, string> = {
@@ -73,7 +94,14 @@ export function adaptServiceState(home: HomeServiceState): ServiceUiState {
   const running = home.status === 'healthy';
 
   let status: ServiceUiStatus;
-  if (!installed) {
+  if (
+    home.status === 'installing' ||
+    home.status === 'starting' ||
+    home.status === 'stopping' ||
+    home.status === 'uninstalling'
+  ) {
+    status = home.status;
+  } else if (!installed) {
     status = 'not_configured';
   } else if (!home.installable) {
     status = running ? 'running' : home.configured ? 'error' : 'not_configured';
@@ -96,6 +124,8 @@ export function adaptServiceState(home: HomeServiceState): ServiceUiState {
     statusLabel: STATUS_LABELS[status],
     installed,
     enabled,
+    selectedModel: home.selectedModel,
+    port: home.port,
     installable: home.installable,
     running,
     prerequisites: home.prerequisites,

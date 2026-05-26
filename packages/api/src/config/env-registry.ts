@@ -175,6 +175,15 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
+    name: 'CAT_CAFE_HOME',
+    defaultValue: '<repoRoot>/.cat-cafe',
+    description:
+      'Service install data root (Python interpreter, per-service venvs, Piper voice models, etc.). Honored by scripts/services/* and the venv-probe path in service-registry — override to share install state across users / containers / mounts.',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'CAT_CAFE_INVOCATION_REGISTRY',
     defaultValue: '(自动：有 Redis 用 redis，否则 memory)',
     description: 'F174-B InvocationRegistry 后端选择：redis（重启不丢 callback 鉴权）/ memory（fallback / 测试）',
@@ -1320,7 +1329,9 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'EMBED_MODE',
     defaultValue: 'off',
-    description: '向量检索模式 (off/shadow/on)，on = 开启 Qwen3 embedding rerank',
+    description:
+      '向量检索模式 (off/shadow/on)。留空时由 console 上 Embedding 服务的开关决定（启用 → on）。' +
+      '显式设了 shadow/on 会覆盖，但 EMBED_MODE=off 不会关掉已经在 console 启用的服务（防 foot-gun）。',
     category: 'evidence',
     sensitive: false,
     allowedValues: ['off', 'shadow', 'on'],

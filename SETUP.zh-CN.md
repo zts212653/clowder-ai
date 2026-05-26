@@ -51,7 +51,7 @@ pnpm start
 #   pnpm start:direct
 ```
 
-如果要给记忆系统开启本地语义 rerank，把 `.env` 里的 `EMBED_MODE` 改成 `on`（或 `shadow`）。开启后，`pnpm start` / `pnpm start:direct` 会自动拉起对应平台的 launcher（Unix 用 `scripts/embed-server.sh`，Windows 用 `scripts/embed-server.ps1`）。Apple Silicon 默认走 MLX，其它平台回落到 `sentence-transformers`。
+如果要给记忆系统开启本地语义 rerank，请在 Console 设置里安装并启用 **Embedding** 服务。安装器会在 `~/.cat-cafe/embed-venv` 创建与你平台匹配的后端（Apple Silicon 用 MLX，其它平台用 fastembed/ONNX 或 `sentence-transformers`）。在 Windows 上，当 Console 记录该服务已安装且已启用后，`pnpm start` / `pnpm start:direct` 会自动拉起 `scripts/services/embed-server.ps1`；如果你在 Console 里卸载或禁用该服务，就不会自动启动。
 
 `pnpm start` 使用**运行时 worktree** 架构：首次运行时自动创建隔离的 `../cat-cafe-runtime` worktree，同步到 `origin/main`，构建，启动 Redis，然后启动前端（端口 3003）+ API（端口 3004）。这样你的开发目录保持干净。
 
@@ -305,17 +305,10 @@ NEXT_PUBLIC_LLM_POSTPROCESS_URL=http://localhost:9878
 ```
 
 支持引擎：输入用 Qwen3-ASR（主）/ Whisper（备）；输出用 Kokoro / edge-tts / Qwen3-TTS。
-这些服务默认关闭。只有在本地依赖安装完成后，再把对应的 `*_ENABLED=1` 打开。
 
 **启动语音服务：**
-```bash
-# TTS（文字转语音）— 需要 Python 3，自动创建 venv 到 ~/.cat-cafe/tts-venv
-./scripts/tts-server.sh                    # 默认: Qwen3-TTS（三猫声线）
-TTS_PROVIDER=edge-tts ./scripts/tts-server.sh  # edge-tts 备选（无需 GPU）
 
-# ASR（语音转文字）— 需要 Python 3 + ffmpeg
-./scripts/qwen3-asr-server.sh             # Qwen3-ASR 服务器
-```
+语音服务（Whisper STT / Qwen3-ASR / mlx-tts / LLM 后处理）都从 **Console → 设置 → 服务** 安装和管理。Console 的安装流程会创建 venv、下载模型，并把选定的端口持久化到 `.cat-cafe/services.json`；API 启动协调器随后会在服务被启用时自动拉起。原本顶层的 `./scripts/*-server.sh` 直接启动脚本已经移除，请改走 Console 流程。
 
 > **系统依赖**：音频处理需要 `ffmpeg`。安装方式：`brew install ffmpeg`（macOS）或 `apt install ffmpeg`（Linux）。
 

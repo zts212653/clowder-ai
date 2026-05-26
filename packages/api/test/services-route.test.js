@@ -124,7 +124,65 @@ describe('services routes', () => {
     }
   });
 
-  it('redacts URL credentials from client-visible service endpoints', async () => {
+  it('install preview suggests an available default service port', async () => {
+    const app = await buildApp({
+      lifecycle: {
+        findPidsByPort: async (port) => (port === 9876 ? [5151] : []),
+        serviceConfig: {
+          get: () => undefined,
+        },
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/services/whisper-stt/install-preview',
+        headers: SESSION_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      assert.equal(JSON.parse(res.payload).suggestedPort, 9877);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('gates /api/services/endpoints behind the lifecycle owner check', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'owner';
+    const app = await buildApp({
+      env: { WHISPER_URL: 'https://user:secret@example.com/healthy' },
+    });
+    try {
+      // Non-owner authenticated session: 403, no credentials returned.
+      const nonOwnerRes = await app.inject({
+        method: 'GET',
+        url: '/api/services/endpoints',
+        headers: { 'x-test-session-user': 'someone-else' },
+      });
+      assert.equal(nonOwnerRes.statusCode, 403, nonOwnerRes.payload);
+      assert.equal(nonOwnerRes.payload.includes('secret'), false);
+
+      // Anonymous: 401.
+      const anonRes = await app.inject({ method: 'GET', url: '/api/services/endpoints' });
+      assert.equal(anonRes.statusCode, 401, anonRes.payload);
+
+      // Owner: 200 with unmasked URL.
+      const ownerRes = await app.inject({
+        method: 'GET',
+        url: '/api/services/endpoints',
+        headers: { 'x-test-session-user': 'owner' },
+      });
+      assert.equal(ownerRes.statusCode, 200, ownerRes.payload);
+      assert.equal(JSON.parse(ownerRes.payload).endpoints['whisper-stt'], 'https://user:secret@example.com/healthy');
+    } finally {
+      await app.close();
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('redacts URL credentials from display surfaces but keeps them on /endpoints', async () => {
     const app = await buildApp({
       env: {
         WHISPER_URL: 'https://user:secret@example.com/healthy',
@@ -157,12 +215,18 @@ describe('services routes', () => {
       const endpointMapValue = JSON.parse(endpointsRes.payload).endpoints['whisper-stt'];
       const healthEndpoint = JSON.parse(healthRes.payload).endpoint;
 
+      // Display surfaces (status panel + health probe response) stay masked.
       assert.equal(serviceEndpoint, 'https://***@example.com/healthy');
-      assert.equal(endpointMapValue, 'https://***@example.com/healthy');
       assert.equal(healthEndpoint, 'https://***@example.com/healthy');
       assert.equal(serviceEndpoint.includes('secret'), false);
-      assert.equal(endpointMapValue.includes('secret'), false);
       assert.equal(healthEndpoint.includes('secret'), false);
+
+      // /api/services/endpoints is the consumption surface (useVoiceInput
+      // posts STT/LLM-postprocess requests against the returned URL), so it
+      // must keep credentials intact. Otherwise authenticated upstreams
+      // configured via WHISPER_URL=https://user:pass@host would fail with
+      // "***" in the wire request (codex P2 2026-05-26).
+      assert.equal(endpointMapValue, 'https://user:secret@example.com/healthy');
     } finally {
       await app.close();
     }
@@ -205,6 +269,72 @@ describe('services routes', () => {
 
       assert.equal(res.statusCode, 200, res.payload);
       assert.equal(JSON.parse(res.payload).endpoints['embedding-model'], 'http://127.0.0.1:19980');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('honors service-specific *_PORT env vars when URL envs are unset', async () => {
+    const app = await buildApp({
+      env: {
+        WHISPER_PORT: '19981',
+        TTS_PORT: '19982',
+        EMBED_PORT: '19983',
+        LLM_POSTPROCESS_PORT: '19984',
+        AUDIO_SERVICE_PORT: '19985',
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/services/endpoints',
+        headers: SESSION_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      assert.deepEqual(JSON.parse(res.payload).endpoints, {
+        'whisper-stt': 'http://127.0.0.1:19981',
+        'mlx-tts': 'http://127.0.0.1:19982',
+        'embedding-model': 'http://127.0.0.1:19983',
+        'llm-postprocess': 'http://127.0.0.1:19984',
+        'audio-capture': 'http://127.0.0.1:19985',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('normalizes localhost sidecar URLs to IPv4 loopback before health probes', async () => {
+    for (const id of ['whisper-stt', 'mlx-tts', 'llm-postprocess']) {
+      setServiceConfig(id, { installed: true, enabled: true });
+    }
+    const probedUrls = new Map();
+    const app = await buildApp({
+      env: {
+        WHISPER_URL: 'http://localhost:19991',
+        TTS_URL: 'http://localhost:19992',
+        NEXT_PUBLIC_LLM_POSTPROCESS_URL: 'http://localhost:19994',
+      },
+      fetchHealth: async (url, service) => {
+        probedUrls.set(service.id, url);
+        return { ok: true, status: 200, error: null };
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/services',
+        headers: SESSION_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      const services = Object.fromEntries(JSON.parse(res.payload).services.map((service) => [service.id, service]));
+      assert.equal(services['whisper-stt'].endpoint, 'http://127.0.0.1:19991');
+      assert.equal(services['mlx-tts'].endpoint, 'http://127.0.0.1:19992');
+      assert.equal(services['llm-postprocess'].endpoint, 'http://127.0.0.1:19994');
+      assert.equal(probedUrls.get('whisper-stt'), 'http://127.0.0.1:19991/health');
+      assert.equal(probedUrls.get('mlx-tts'), 'http://127.0.0.1:19992/health');
+      assert.equal(probedUrls.get('llm-postprocess'), 'http://127.0.0.1:19994/health');
     } finally {
       await app.close();
     }
@@ -421,6 +551,62 @@ describe('services routes', () => {
     }
   });
 
+  it('model-only config from a failed install is not treated as installed', async () => {
+    const freshConfigDir = mkdtempSync(join(tmpdir(), 'services-model-only-'));
+    const prevConfig = process.env.CAT_CAFE_SERVICES_CONFIG;
+    process.env.CAT_CAFE_SERVICES_CONFIG = join(freshConfigDir, 'services.json');
+    setServiceConfig('whisper-stt', { enabled: false, selectedModel: 'mlx-community/whisper-large-v3-turbo' });
+    const app = await buildApp({
+      env: { WHISPER_URL: 'http://127.0.0.1:19999/healthy' },
+      fetchHealth: async () => ({ ok: true, status: 200, error: null }),
+    });
+    try {
+      const listRes = await app.inject({
+        method: 'GET',
+        url: '/api/services',
+        headers: SESSION_HEADERS,
+      });
+      const whisper = JSON.parse(listRes.payload).services.find((s) => s.id === 'whisper-stt');
+      assert.equal(whisper.installed, false, 'selectedModel alone records intent, not an installed service');
+      assert.equal(whisper.enabled, false);
+      assert.equal(whisper.status, 'not_configured');
+    } finally {
+      await app.close();
+      process.env.CAT_CAFE_SERVICES_CONFIG = prevConfig;
+    }
+  });
+
+  it('exposes the persisted selected model for installed services', async () => {
+    const freshConfigDir = mkdtempSync(join(tmpdir(), 'services-selected-model-'));
+    const prevConfig = process.env.CAT_CAFE_SERVICES_CONFIG;
+    process.env.CAT_CAFE_SERVICES_CONFIG = join(freshConfigDir, 'services.json');
+    setServiceConfig('embedding-model', {
+      installed: true,
+      enabled: false,
+      selectedModel: 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
+      port: 19993,
+    });
+    const app = await buildApp();
+    try {
+      const listRes = await app.inject({
+        method: 'GET',
+        url: '/api/services',
+        headers: SESSION_HEADERS,
+      });
+      const embedding = JSON.parse(listRes.payload).services.find((s) => s.id === 'embedding-model');
+      assert.equal(
+        embedding.selectedModel,
+        'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
+        'UI needs the installed model persisted in services.json',
+      );
+      assert.equal(embedding.installed, true);
+      assert.equal(embedding.enabled, false);
+    } finally {
+      await app.close();
+      process.env.CAT_CAFE_SERVICES_CONFIG = prevConfig;
+    }
+  });
+
   it('fresh service (no config record) treated as not installed', async () => {
     const freshConfigDir = mkdtempSync(join(tmpdir(), 'services-fresh-'));
     const prevConfig = process.env.CAT_CAFE_SERVICES_CONFIG;
@@ -444,8 +630,28 @@ describe('services routes', () => {
     }
   });
 
-  it('scriptless service (audio-capture) treated as installed when enabled', async () => {
-    setServiceConfig('audio-capture', { enabled: true });
+  it('audio-capture (scripted) requires install before treated as installed', async () => {
+    setServiceConfig('audio-capture', { installed: false, enabled: true });
+    const app = await buildApp({
+      env: { AUDIO_SERVICE_URL: 'http://127.0.0.1:19995/healthy' },
+      fetchHealth: async () => ({ ok: true, status: 200, error: null }),
+    });
+    try {
+      const listRes = await app.inject({
+        method: 'GET',
+        url: '/api/services',
+        headers: SESSION_HEADERS,
+      });
+      const audioCap = JSON.parse(listRes.payload).services.find((s) => s.id === 'audio-capture');
+      assert.equal(audioCap.installable, true, 'audio-capture now has install scripts');
+      assert.equal(audioCap.installed, false, 'scripted service not installed until config.installed=true');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('audio-capture treated as installed and probed when both installed and enabled', async () => {
+    setServiceConfig('audio-capture', { installed: true, enabled: true });
     let probed = false;
     const app = await buildApp({
       env: { AUDIO_SERVICE_URL: 'http://127.0.0.1:19995/healthy' },
@@ -462,41 +668,52 @@ describe('services routes', () => {
       });
       assert.equal(res.statusCode, 200, res.payload);
       assert.equal(JSON.parse(res.payload).status, 'healthy');
-      assert.equal(probed, true, 'should probe health for scriptless enabled service');
-
-      const listRes = await app.inject({
-        method: 'GET',
-        url: '/api/services',
-        headers: SESSION_HEADERS,
-      });
-      const audioCap = JSON.parse(listRes.payload).services.find((s) => s.id === 'audio-capture');
-      assert.equal(audioCap.installed, true, 'scriptless services treated as installed');
-      assert.equal(audioCap.installable, false, 'audio-capture has no install scripts');
+      assert.equal(probed, true, 'should probe health for installed+enabled service');
     } finally {
       await app.close();
     }
   });
 
-  it('scriptless service probed when endpoint configured even if enabled=false', async () => {
-    setServiceConfig('audio-capture', { enabled: false });
-    let probed = false;
+  it('uses persisted custom ports for service endpoints and health probes', async () => {
+    const freshConfigDir = mkdtempSync(join(tmpdir(), 'services-custom-ports-'));
+    const prevConfig = process.env.CAT_CAFE_SERVICES_CONFIG;
+    process.env.CAT_CAFE_SERVICES_CONFIG = join(freshConfigDir, 'services.json');
+    setServiceConfig('whisper-stt', { installed: true, enabled: true, port: 19991 });
+    setServiceConfig('mlx-tts', { installed: true, enabled: true, port: 19992 });
+    setServiceConfig('embedding-model', { installed: true, enabled: true, port: 19993 });
+    setServiceConfig('llm-postprocess', { installed: true, enabled: true, port: 19994 });
+    setServiceConfig('audio-capture', { installed: true, enabled: true, port: 19995 });
+    const probedUrls = new Map();
     const app = await buildApp({
-      env: { AUDIO_SERVICE_URL: 'http://127.0.0.1:19995/healthy' },
-      fetchHealth: async () => {
-        probed = true;
+      fetchHealth: async (url, service) => {
+        probedUrls.set(service.id, url);
         return { ok: true, status: 200, error: null };
       },
     });
     try {
       const res = await app.inject({
         method: 'GET',
-        url: '/api/services/audio-capture/health',
+        url: '/api/services',
         headers: SESSION_HEADERS,
       });
+
       assert.equal(res.statusCode, 200, res.payload);
-      assert.equal(probed, true, 'scriptless service should be probed regardless of enabled flag');
+      const services = Object.fromEntries(JSON.parse(res.payload).services.map((service) => [service.id, service]));
+      assert.equal(services['whisper-stt'].endpoint, 'http://127.0.0.1:19991');
+      assert.equal(services['mlx-tts'].endpoint, 'http://127.0.0.1:19992');
+      assert.equal(services['embedding-model'].endpoint, 'http://127.0.0.1:19993');
+      assert.equal(services['llm-postprocess'].endpoint, 'http://127.0.0.1:19994');
+      assert.equal(services['audio-capture'].endpoint, 'http://127.0.0.1:19995');
+      assert.deepEqual(Object.fromEntries(probedUrls), {
+        'whisper-stt': 'http://127.0.0.1:19991/health',
+        'mlx-tts': 'http://127.0.0.1:19992/health',
+        'embedding-model': 'http://127.0.0.1:19993/health',
+        'llm-postprocess': 'http://127.0.0.1:19994/health',
+        'audio-capture': 'http://127.0.0.1:19995/status',
+      });
     } finally {
       await app.close();
+      process.env.CAT_CAFE_SERVICES_CONFIG = prevConfig;
     }
   });
 

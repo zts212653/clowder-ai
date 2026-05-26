@@ -1,40 +1,41 @@
 #!/usr/bin/env python3
 """
-LLM post-processing server for Cat Cafe voice input (MLX backend, Apple Silicon native).
-Takes raw ASR text and returns corrected text using a local LLM.
-
-Pipeline position:  Whisper ASR → **LLM post-edit** → term dictionary → filler removal
-
-Usage:
-  source ~/.cat-cafe/llm-venv/bin/activate
-  python scripts/llm-postprocess-api.py                                          # default: Qwen3.5-35B-A3B MoE
-  python scripts/llm-postprocess-api.py --model mlx-community/Qwen3.5-35B-A3B-4bit
-  python scripts/llm-postprocess-api.py --port 9878                              # custom port
-
-Requires: pip install mlx-vlm fastapi uvicorn pydantic
+LLM post-processing server for Cat Cafe voice input.
+Backends: mlx-lm/mlx-vlm (macOS GPU) -> transformers+torch (CPU/CUDA).
+Pipeline: Whisper ASR -> **LLM post-edit** -> term dictionary -> filler removal
 """
+
+from __future__ import annotations
 
 import argparse
 import asyncio
 import logging
+import re
 import signal
 import sys
-import time
 import threading
+import time
 
-import mlx.core as mx
-import mlx_lm
-import mlx_vlm
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-MAX_INPUT_CHARS = 2000  # Voice messages shouldn't be longer than this
+MAX_INPUT_CHARS = 2000
 
 log = logging.getLogger("llm-postprocess")
 
 app = FastAPI(title="Cat Cafe LLM Post-Process Server")
+
+# NOTE: deliberately no __CATCAFE_SIDECAR_READY__ marker emit here.
+# Unlike embed/whisper/tts which finish model load synchronously in main()
+# before uvicorn.run(), this sidecar offloads model load to a background
+# thread (see `_startup_load` below + threading.Thread). At the moment
+# uvicorn binds the port, /health is still status=loading, so emitting
+# the push marker would falsely signal readiness. Health polling (the
+# watcher safety net) correctly waits for status=running anyway, and
+# llm-postprocess has no embed-catch-up hook to fire so the marker
+# wouldn't gain anything even if timed correctly.
 
 app.add_middleware(
     CORSMiddleware,
@@ -43,7 +44,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-model_ref = {"model": None, "processor": None, "path": "", "loaded": False, "error": False, "backend": "unknown"}
+model_ref: dict = {"model": None, "processor": None, "path": "", "loaded": False, "error": False, "backend": "unknown"}
 
 _generate_lock = asyncio.Lock()
 
@@ -62,12 +63,78 @@ SYSTEM_PROMPT = (
 
 class RefineRequest(BaseModel):
     text: str
-    context: str = ""  # Optional conversation context for better correction
+    context: str = ""
 
 
 class RefineResponse(BaseModel):
     text: str
     latency_ms: int
+
+
+def _resolve_hf_model(name: str) -> str:
+    """Convert MLX model name to standard HuggingFace name for transformers."""
+    name = name.replace("mlx-community/", "")
+    name = re.sub(r"-\d+bit(-DWQ)?$", "", name)
+    if name.startswith("Qwen") and "/" not in name:
+        name = "Qwen/" + name
+    return name
+
+
+def _build_prompt(text: str, context: str) -> list[dict]:
+    user_msg = text
+    if context:
+        user_msg = f"[上下文: {context[:200]}]\n{text}"
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_msg},
+    ]
+
+
+def _generate_mlx(messages: list[dict], max_tokens: int) -> str:
+    import mlx.core as mx
+
+    backend = model_ref["backend"]
+    gen_mod = __import__("mlx_lm" if backend == "mlx-lm" else "mlx_vlm")
+
+    template_kwargs = dict(tokenize=False, add_generation_prompt=True)
+    try:
+        prompt = model_ref["processor"].apply_chat_template(
+            messages, **template_kwargs, enable_thinking=False,
+        )
+    except TypeError:
+        prompt = model_ref["processor"].apply_chat_template(messages, **template_kwargs)
+
+    mx.new_thread_local_stream(mx.gpu)
+    result = gen_mod.generate(
+        model_ref["model"], model_ref["processor"], prompt,
+        max_tokens=max_tokens, temperature=0.1,
+    )
+    return (result if isinstance(result, str) else result.text).strip()
+
+
+def _generate_transformers(messages: list[dict], max_tokens: int) -> str:
+    import torch
+
+    tokenizer = model_ref["processor"]
+    model = model_ref["model"]
+
+    inputs = tokenizer.apply_chat_template(
+        messages, tokenize=True, return_tensors="pt", add_generation_prompt=True,
+    )
+    if isinstance(inputs, dict):
+        inputs = {k: v.to(model.device) for k, v in inputs.items()}
+    else:
+        inputs = inputs.to(model.device)
+
+    with torch.no_grad():
+        if isinstance(inputs, dict):
+            outputs = model.generate(**inputs, max_new_tokens=max_tokens, temperature=0.1, do_sample=True)
+            input_len = inputs["input_ids"].shape[1]
+        else:
+            outputs = model.generate(inputs, max_new_tokens=max_tokens, temperature=0.1, do_sample=True)
+            input_len = inputs.shape[1]
+
+    return tokenizer.decode(outputs[0][input_len:], skip_special_tokens=True).strip()
 
 
 @app.post("/v1/text/refine", response_model=RefineResponse)
@@ -79,53 +146,26 @@ async def refine(req: RefineRequest):
     text = req.text.strip()
     if not text:
         return RefineResponse(text="", latency_ms=0)
-
     if len(text) > MAX_INPUT_CHARS:
         raise HTTPException(413, detail=f"Text too long ({len(text)} chars, max {MAX_INPUT_CHARS})")
 
-    user_msg = text
-    if req.context:
-        user_msg = f"[上下文: {req.context[:200]}]\n{text}"
-
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_msg},
-    ]
-
-    template_kwargs = dict(tokenize=False, add_generation_prompt=True)
-    try:
-        prompt = model_ref["processor"].apply_chat_template(
-            messages, **template_kwargs, enable_thinking=False,
-        )
-    except TypeError:
-        prompt = model_ref["processor"].apply_chat_template(messages, **template_kwargs)
-
-    gen_fn = mlx_lm.generate if model_ref["backend"] == "mlx-lm" else mlx_vlm.generate
-
-    def _generate_sync():
-        mx.new_thread_local_stream(mx.gpu)
-        return gen_fn(
-            model_ref["model"],
-            model_ref["processor"],
-            prompt,
-            max_tokens=len(text) * 2 + 50,
-            temperature=0.1,
-        )
+    messages = _build_prompt(text, req.context)
+    max_tokens = len(text) * 2 + 50
+    backend = model_ref["backend"]
+    gen_fn = _generate_mlx if backend in ("mlx-lm", "mlx-vlm") else _generate_transformers
 
     t0 = time.monotonic()
     try:
         async with _generate_lock:
-            result = await asyncio.to_thread(_generate_sync)
+            refined = await asyncio.to_thread(gen_fn, messages, max_tokens)
         latency_ms = int((time.monotonic() - t0) * 1000)
-        refined = (result if isinstance(result, str) else result.text).strip()
 
-        # Safety: if LLM output is suspiciously different or empty, fall back to original
-        max_output_len = max(len(text) * 2.5, 80)  # short inputs get a minimum allowance
+        max_output_len = max(len(text) * 2.5, 80)
         if not refined or len(refined) > max_output_len:
             log.warning("LLM output suspicious (len %d vs input %d), falling back", len(refined), len(text))
             return RefineResponse(text=text, latency_ms=latency_ms)
 
-        log.info("Refined %d→%d chars in %dms", len(text), len(refined), latency_ms)
+        log.info("Refined %d->%d chars in %dms", len(text), len(refined), latency_ms)
         return RefineResponse(text=refined, latency_ms=latency_ms)
     except Exception as exc:
         log.exception("LLM generation failed")
@@ -141,46 +181,91 @@ async def health():
     }
 
 
-def _load_model_sync(model_path: str):
-    """Load model in background thread — tries mlx_lm first, falls back to mlx_vlm."""
-    log.info("Loading model (first run downloads from HuggingFace)...")
+# ─── Model loading ───────────────────────────────────────────────
+
+def _try_mlx(model_path: str) -> bool:
+    try:
+        import mlx_lm
+    except ImportError:
+        return False
     try:
         model, tokenizer = mlx_lm.load(model_path)
         model_ref["model"] = model
         model_ref["processor"] = tokenizer
         model_ref["backend"] = "mlx-lm"
         model_ref["loaded"] = True
-        log.info("Model loaded via mlx-lm! Endpoint ready: /v1/text/refine")
-        return
+        log.info("Model loaded via mlx-lm")
+        return True
     except Exception:
         log.info("mlx-lm failed, trying mlx-vlm...")
     try:
+        import mlx_vlm
         model, processor = mlx_vlm.load(model_path)
         model_ref["model"] = model
         model_ref["processor"] = processor
         model_ref["backend"] = "mlx-vlm"
         model_ref["loaded"] = True
-        log.info("Model loaded via mlx-vlm! Endpoint ready: /v1/text/refine")
+        log.info("Model loaded via mlx-vlm")
+        return True
     except Exception:
-        log.exception("Failed to load model '%s' with both backends", model_path)
-        model_ref["error"] = True
+        log.warning("MLX backends failed for '%s'", model_path)
+        return False
+
+
+def _try_transformers(model_path: str) -> bool:
+    try:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+    except ImportError:
+        log.warning("transformers/torch not installed")
+        return False
+    try:
+        hf_name = _resolve_hf_model(model_path)
+        device = "cpu"
+        dtype = torch.float32
+        if torch.cuda.is_available():
+            device = "cuda"
+            dtype = torch.float16
+        log.info("Loading via transformers: %s (device=%s)", hf_name, device)
+        tokenizer = AutoTokenizer.from_pretrained(hf_name)
+        model = AutoModelForCausalLM.from_pretrained(hf_name, torch_dtype=dtype)
+        if device != "cpu":
+            model = model.to(device)
+        model_ref["model"] = model
+        model_ref["processor"] = tokenizer
+        model_ref["path"] = hf_name
+        model_ref["backend"] = "transformers"
+        model_ref["loaded"] = True
+        log.info("Model loaded via transformers (device: %s)", device)
+        return True
+    except Exception:
+        log.exception("transformers load failed")
+        return False
+
+
+def _load_model_sync(model_path: str):
+    """Load model in background thread — tries MLX first, falls back to transformers."""
+    log.info("Loading model (first run downloads from HuggingFace)...")
+    if not _try_mlx(model_path):
+        if not _try_transformers(model_path):
+            log.error("All backends failed for '%s'", model_path)
+            model_ref["error"] = True
 
 
 @app.on_event("startup")
 async def _startup_load():
-    """Start model loading in a background thread so health is immediately reachable."""
     t = threading.Thread(target=_load_model_sync, args=(model_ref["path"],), daemon=True)
     t.start()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Cat Cafe LLM Post-Process Server (MLX)")
+    parser = argparse.ArgumentParser(description="Cat Cafe LLM Post-Process Server")
     parser.add_argument(
         "--model",
-        default="mlx-community/Qwen3.5-35B-A3B-4bit",
-        help="HuggingFace MLX model repo (default: mlx-community/Qwen3.5-35B-A3B-4bit)",
+        required=True,
+        help="Model repo ID — required, no fallback default. Backend always passes via env.",
     )
-    parser.add_argument("--port", type=int, default=9878, help="Server port (default: 9878)")
+    parser.add_argument("--port", type=int, default=9878)
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -191,7 +276,7 @@ def main():
     signal.signal(signal.SIGTERM, handle_sigterm)
 
     model_ref["path"] = args.model
-    log.info("=== Cat Cafe LLM Post-Process Server (MLX) ===")
+    log.info("=== Cat Cafe LLM Post-Process Server ===")
     log.info("Model: %s | Port: %d", args.model, args.port)
 
     uvicorn.run(app, host="127.0.0.1", port=args.port)

@@ -3,12 +3,13 @@
   Start local embedding server for Cat Cafe on Windows.
 
 .DESCRIPTION
-  Creates/uses ~/.cat-cafe/embed-venv, installs sentence-transformers + torch
-  deps when missing, then launches scripts/embed-api.py on the requested port.
+  Launches embed-api.py from ~/.cat-cafe/embed-venv.
+  Dependencies are managed by embed-install.ps1.
+  embed-api.py auto-detects backend: MLX -> fastembed/ONNX -> sentence-transformers.
 
-  Supported env vars passed through to embed-api.py:
+  Env vars passed through to embed-api.py:
   - EMBED_PORT  (default 9880; overridden by -Port)
-  - EMBED_MODEL (model ID)
+  - EMBED_MODEL / EMBED_ONNX_MODEL (model ID)
   - EMBED_DIM   (MRL-truncated output dimension)
 
 .PARAMETER Port
@@ -16,60 +17,55 @@
 #>
 
 param(
-    [int]$Port = 9880
+    [int]$Port = 0
 )
+# API writes user-chosen / auto-allocated port to services.json and passes it
+# through EMBED_PORT when spawning. Honour env first; fall back to hardcoded
+# default only when neither -Port nor $env:EMBED_PORT was set.
+if ($Port -le 0) {
+    if ($env:EMBED_PORT) { $Port = [int]$env:EMBED_PORT } else { $Port = 9880 }
+}
 
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
+Write-Output "[start] wrapper entered: service=embedding-model script=$PSCommandPath"
+$env:PYTHONUNBUFFERED = "1"
 
-function Resolve-BootstrapPython {
-    $py = Get-Command py -ErrorAction SilentlyContinue
-    if ($py) {
-        return [pscustomobject]@{
-            Path = $py.Source
-            PrefixArgs = @('-3')
-        }
-    }
+. (Join-Path $PSScriptRoot "proxy-env.ps1")
+Normalize-SocksProxyEnv
 
-    $python = Get-Command python -ErrorAction SilentlyContinue
-    if ($python) {
-        return [pscustomobject]@{
-            Path = $python.Source
-            PrefixArgs = @()
-        }
-    }
-
-    throw "Python 3 not found. Install Python 3 first."
+# Server scripts are spawned by the API without sourcing
+# python-resolve.ps1, so $env:CAT_CAFE_HOME may not be set. Mirror the
+# resolver's default (caller env override -> <repoRoot>/.cat-cafe) so
+# Join-Path doesn't receive $null.
+if (-not $env:CAT_CAFE_HOME) {
+    $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+    $env:CAT_CAFE_HOME = Join-Path $repoRoot '.cat-cafe'
 }
 
-$ProjectRoot = Split-Path -Parent $PSScriptRoot
-$VenvDir = Join-Path $HOME ".cat-cafe\embed-venv"
+$VenvDir = Join-Path $env:CAT_CAFE_HOME "embed-venv"
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 $ApiScript = Join-Path $PSScriptRoot "embed-api.py"
-$BootstrapPython = Resolve-BootstrapPython
+Write-Output "[start] resolved runtime: CAT_CAFE_HOME=$($env:CAT_CAFE_HOME); venv=$VenvDir; python=$VenvPython; api=$ApiScript; port=$Port"
 
 if (-not (Test-Path $VenvPython)) {
-    Write-Host "  Creating venv: $VenvDir ..."
-    & $BootstrapPython.Path @($BootstrapPython.PrefixArgs + @('-m', 'venv', $VenvDir))
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to create embedding venv"
-    }
+    throw "Embedding venv not found. Run embed-install.ps1 first."
 }
 
-& $VenvPython -m pip install --quiet -U pip
+& $VenvPython -c "import fastapi, uvicorn, numpy" 2>$null
 if ($LASTEXITCODE -ne 0) {
-    throw "Failed to upgrade pip in embed-venv"
+    throw "Core deps missing in embed-venv. Run embed-install.ps1 first."
 }
 
-& $VenvPython -c "import fastapi, uvicorn, numpy, sentence_transformers" 2>$null
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "  Installing dependencies: sentence-transformers + torch ..."
-    & $VenvPython -m pip install --quiet sentence-transformers torch fastapi uvicorn numpy
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to install embedding dependencies"
-    }
+$Model = $env:EMBED_MODEL
+if (-not $Model) {
+    Write-Error "EMBED_MODEL env var required - backend specifies model, no fallback default."
+    exit 1
 }
-
-Write-Host "Starting Embedding server: port=$Port"
-& $VenvPython $ApiScript --port $Port
+Write-Output "Starting Embedding server: model=$Model, port=$Port"
+Write-Output "[start] launching python: $VenvPython $ApiScript --model $Model --port $Port"
+& $VenvPython $ApiScript --model $Model --port $Port
+$ExitCode = $LASTEXITCODE
+Write-Output "[start] python exited with code $ExitCode"
+exit $ExitCode

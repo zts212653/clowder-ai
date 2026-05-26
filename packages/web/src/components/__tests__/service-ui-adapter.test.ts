@@ -104,6 +104,21 @@ describe('adaptServiceState', () => {
     expect(result.installable).toBe(false);
   });
 
+  it('passes through selected model metadata', () => {
+    const result = adaptServiceState(makeHome({ selectedModel: 'mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ' }));
+    expect(result.selectedModel).toBe('mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ');
+  });
+
+  it('passes through persisted port so the reconfigure modal can pre-fill it', () => {
+    const result = adaptServiceState(makeHome({ port: 19999 }));
+    expect(result.port).toBe(19999);
+  });
+
+  it('omits port when service config does not persist one', () => {
+    const result = adaptServiceState(makeHome());
+    expect(result.port).toBeUndefined();
+  });
+
   it('healthy does not override installed/enabled from API', () => {
     const result = adaptServiceState(makeHome({ status: 'healthy', installed: false, enabled: false }));
     expect(result.running).toBe(true);

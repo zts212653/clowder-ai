@@ -51,7 +51,7 @@ pnpm start
 #   pnpm start:direct
 ```
 
-To enable local semantic rerank for the memory system, set `EMBED_MODE=on` (or `shadow`) in `.env`. `pnpm start` / `pnpm start:direct` will auto-launch the platform launcher (`scripts/embed-server.sh` on Unix, `scripts/embed-server.ps1` on Windows). Apple Silicon uses MLX by default; other platforms fall back to `sentence-transformers`.
+To enable local semantic rerank for the memory system, install the **Embedding** service from Console settings — the installer creates `~/.cat-cafe/embed-venv` with the right backend for your platform (MLX on Apple Silicon, fastembed/ONNX or sentence-transformers elsewhere). On Windows, `pnpm start` / `pnpm start:direct` then auto-launches `scripts/services/embed-server.ps1` when Console reports the service as installed + enabled. Uninstalling or disabling via Console will skip the autostart.
 
 `pnpm start` uses the **runtime worktree** architecture: it creates an isolated `../cat-cafe-runtime` worktree (on first run), syncs it to `origin/main`, builds, starts Redis, and launches Frontend (port 3003) + API (port 3004). This keeps your development checkout clean.
 
@@ -305,17 +305,10 @@ NEXT_PUBLIC_LLM_POSTPROCESS_URL=http://localhost:9878
 ```
 
 Supported engines: Qwen3-ASR (primary), Whisper (fallback) for input; Kokoro, edge-tts, Qwen3-TTS for output.
-These services are disabled by default. Set the corresponding `*_ENABLED=1` flags only after you have installed the local dependencies.
 
 **Starting voice services:**
-```bash
-# TTS (Text-to-Speech) — requires Python 3, creates venv at ~/.cat-cafe/tts-venv
-./scripts/tts-server.sh                    # default: Qwen3-TTS (三猫声线)
-TTS_PROVIDER=edge-tts ./scripts/tts-server.sh  # edge-tts fallback (no GPU needed)
 
-# ASR (Speech-to-Text) — requires Python 3 + ffmpeg
-./scripts/qwen3-asr-server.sh             # Qwen3-ASR server
-```
+The voice services (Whisper STT / Qwen3-ASR / mlx-tts / LLM postprocess) are installed and managed from **Console → Settings → Services**. The Console install path creates the venv, downloads the model, and persists the chosen port to `.cat-cafe/services.json`; the API startup reconciler then brings up the service whenever it is enabled. Direct-spawn `./scripts/*-server.sh` wrappers have been removed — use the Console flow instead.
 
 > **System dependency**: `ffmpeg` is required for audio processing. Install with `brew install ffmpeg` (macOS) or `apt install ffmpeg` (Linux).
 

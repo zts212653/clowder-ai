@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import React from 'react';
 import type { OrchestrationStep, TipsMetadata } from '@/stores/guideStore';
 import { buildGuideTargetSelector, computeHUDPosition } from './helpers';
@@ -101,10 +102,12 @@ export const GuideHUD = React.forwardRef<HTMLDivElement, GuideHUDProps>(function
 function TipsMediaBlock({ metadata }: { metadata: TipsMetadata }) {
   if (metadata.type === 'png' && metadata.src) {
     return (
-      <div className="flex-shrink-0">
-        <img
+      <div className="relative flex-shrink-0" style={{ maxWidth: 200, maxHeight: 200 }}>
+        <Image
           src={metadata.src}
           alt={metadata.alt ?? ''}
+          width={200}
+          height={200}
           className="max-h-[200px] max-w-[200px] rounded-lg border border-[var(--guide-hud-border)] object-contain"
         />
       </div>

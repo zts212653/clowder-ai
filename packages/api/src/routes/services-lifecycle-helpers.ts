@@ -1,7 +1,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { ServiceLifecycleRunner, ServiceLifecycleRunResult } from '../domains/services/service-lifecycle.js';
 import { isValidModelId } from '../domains/services/service-lifecycle.js';
-import { MODEL_ENV_VARS } from '../domains/services/service-manifest.js';
+import { MODEL_ENV_VARS, PORT_ENV_VARS } from '../domains/services/service-manifest.js';
 
 export const DEFAULT_LIFECYCLE_TIMEOUT_MS = 30 * 60 * 1000;
 const LIFECYCLE_RUN_SETTLEMENT = Symbol('lifecycleRunSettlement');
@@ -36,6 +36,7 @@ export function buildLifecycleEnv(
   baseEnv: NodeJS.ProcessEnv,
   serviceId: string,
   model: unknown,
+  port?: unknown,
 ): { ok: true; env: NodeJS.ProcessEnv } | { ok: false; error: string } {
   const env: NodeJS.ProcessEnv = { ...baseEnv };
   if (typeof model === 'string' && model.length > 0) {
@@ -44,6 +45,17 @@ export function buildLifecycleEnv(
     if (envKey) env[envKey] = model;
   } else if (model != null) {
     return { ok: false, error: 'Invalid model ID format (expected: org/model-name)' };
+  }
+  // Port: optional, must be a finite integer in [1, 65535]. Inject into the
+  // service-specific *_PORT env so the install/server scripts pick it up.
+  // Codex P2 3266405019 — without this, the modal could submit a custom
+  // port but the install/start would silently use the default/env port.
+  if (port !== undefined && port !== null) {
+    if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
+      return { ok: false, error: 'Invalid port (expected integer 1-65535)' };
+    }
+    const portKey = PORT_ENV_VARS[serviceId];
+    if (portKey) env[portKey] = String(port);
   }
   return { ok: true, env };
 }

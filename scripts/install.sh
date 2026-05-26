@@ -49,10 +49,14 @@ persist_user_bin() {
     local bin="$1" path=""; path="$(command -v "$bin" 2>/dev/null || true)"
     [[ -n "$path" ]] || return 0
     local real_src; real_src="$(resolve_realpath "$path")"
-    local target="$USER_BIN_DIR/$bin"
+    # Fallback default: callers that forget to initialize USER_BIN_DIR won't
+    # trip `set -u`. The global setup near OS detection sets this for all
+    # unix platforms, but defensive default keeps the function self-contained.
+    local user_bin="${USER_BIN_DIR:-$HOME/.local/bin}"
+    local target="$user_bin/$bin"
     # Guard: GNU ln -sfn errors when source and target resolve to the same path.
     [[ "$(resolve_realpath "$target" 2>/dev/null)" == "$real_src" ]] && return 0
-    $SUDO mkdir -p "$USER_BIN_DIR"
+    $SUDO mkdir -p "$user_bin"
     $SUDO ln -sfn "$real_src" "$target"
 }
 # Append a line to the user's shell profile (idempotent).
@@ -381,17 +385,13 @@ warn_puppeteer_skip_fallback() {
     warn "Bundled Chrome download failed — skipped"
     warn "Thread export / screenshot may be unavailable. To install later: npx puppeteer browsers install chrome"
 }
-sync_agent_hooks_best_effort() {
-    info "  Syncing Agent CLI hooks..."
-    local log_file; log_file="$(mktemp)"
-    if pnpm exec tsx scripts/sync-system-prompts.ts --apply --agent-hooks-only >"$log_file" 2>&1; then
-        ok "Agent CLI hooks synced"
-    else
-        warn "Agent CLI hook sync failed — continuing; Hub health check can repair it later"
-        tail -5 "$log_file" 2>/dev/null | sed 's/^/    /' || true
-    fi
-    rm -f "$log_file"
-}
+# sync_agent_hooks_best_effort: removed.
+# Upstream cat-cafe sync (commit 183d5244) added a call to
+# scripts/sync-system-prompts.ts, but the .ts itself was never synced into
+# clowder-ai — so every install printed an ERR_MODULE_NOT_FOUND warning before
+# the best-effort fallback swallowed it. The Hub does its own hook reconciliation
+# on startup, so this step was always a no-op here. Drop it until upstream
+# actually ships the script into clowder-ai.
 build_step() { local label="$1"; shift; info "  Building $label..."
     "$@" || { fail "$label build failed in $PROJECT_DIR"; exit 1; }; ok "$label done"; }
 resolve_project_dir_from() {
@@ -720,17 +720,20 @@ if [[ "$DISTRO_FAMILY" != "darwin" && $EUID -ne 0 ]]; then
     command -v sudo &>/dev/null || { fail "Not root and sudo not found / 请以 root 运行或安装 sudo"; exit 1; }
     SUDO="sudo"
 fi
-# On Darwin, /usr/local/bin often requires sudo which we skip.
-# Use ~/.local/bin for user-local binaries.
+# Per-user binary dir for symlinks created by persist_user_bin.
+# All unix platforms use ~/.local/bin (XDG-friendly). Earlier this was darwin-only
+# which left USER_BIN_DIR unset on Linux and tripped `set -u` once persist_user_bin
+# fired during the Node / pnpm install steps.
+USER_BIN_DIR="$HOME/.local/bin"
+mkdir -p "$USER_BIN_DIR"
+case ":$PATH:" in
+    *":$USER_BIN_DIR:"*) ;;
+    *) export PATH="$USER_BIN_DIR:$PATH" ;;
+esac
+# Persist ~/.local/bin into login profiles only on macOS — the same shell-profile
+# discovery (darwin_login_profiles) doesn't exist for Linux, and most Linux
+# distros already include ~/.local/bin in PATH via ~/.profile / ~/.bashrc.
 if [[ "$DISTRO_FAMILY" == "darwin" ]]; then
-    USER_BIN_DIR="$HOME/.local/bin"
-    mkdir -p "$USER_BIN_DIR"
-    case ":$PATH:" in
-        *":$USER_BIN_DIR:"*) ;;
-        *) export PATH="$USER_BIN_DIR:$PATH" ;;
-    esac
-    # Persist ~/.local/bin to login profiles unconditionally so that any later
-    # persist_user_bin symlinks survive in new terminals.
     for _prof in $(darwin_login_profiles); do
         append_to_profile 'export PATH="$HOME/.local/bin:$PATH"  # Cat Cafe user binaries' "$_prof"
     done
@@ -982,7 +985,6 @@ if [[ -d "$SKILLS_SOURCE" ]]; then
         done
     done; ok "Skills linked"
 else fail "cat-cafe-skills/ not found"; exit 1; fi
-sync_agent_hooks_best_effort
 
 # ── [6/8] Install AI agent CLI tools ─────────────────────
 step "[6/8] Installing AI CLI tools / 安装 AI 命令行工具..."
@@ -1010,18 +1012,59 @@ install_brew_cask() {
 }
 install_kimi_cli() {
     info "  Installing Kimi CLI..."
+    # kimi-cli requires Python >=3.12 (verified via pypi metadata). Resolution
+    # order matches the D-plan service install policy — reuse what the user
+    # already has, NEVER auto-install uv on their system:
+    #   1. uv (reuse only) → uv tool install isolates kimi in its own venv
+    #   2. pipx (reuse only) → similar isolation
+    #   3. python-resolve.sh resolver → falls back to ~/.cat-cafe/python/,
+    #      and we create ~/.cat-cafe/kimi-venv/ on top of it, then symlink
+    #      $USER_BIN_DIR/kimi to the venv's kimi executable.
+    local log_file; log_file="$(mktemp)"
+    local installer_tried=""
     if command -v uv &>/dev/null; then
-        uv tool install --python 3.13 kimi-cli >/dev/null 2>&1 || uv tool upgrade kimi-cli >/dev/null 2>&1 || true
+        installer_tried="uv (reused)"
+        if ! uv tool install --python 3.12 kimi-cli >"$log_file" 2>&1; then
+            uv tool upgrade kimi-cli >>"$log_file" 2>&1 || true
+        fi
     elif command -v pipx &>/dev/null; then
-        pipx install kimi-cli >/dev/null 2>&1 || pipx upgrade kimi-cli >/dev/null 2>&1 || true
-    elif command -v python3 &>/dev/null; then
-        python3 -m pip install --user --upgrade kimi-cli >/dev/null 2>&1 || true
+        installer_tried="pipx (reused)"
+        if ! pipx install kimi-cli >"$log_file" 2>&1; then
+            pipx upgrade kimi-cli >>"$log_file" 2>&1 || true
+        fi
     else
-        fail "Kimi install failed. Need uv, pipx, or python3 to install kimi-cli"
+        installer_tried="project-owned venv via python-resolve.sh"
+        # Source the resolver in a subshell to avoid leaking RESOLVED_* into
+        # the caller's environment unintentionally.
+        # shellcheck source=services/python-resolve.sh
+        . "$PROJECT_DIR/scripts/services/python-resolve.sh"
+        if ! resolve_python_312 >>"$log_file" 2>&1; then
+            rm -f "$log_file"
+            fail "Kimi install failed: no Python >=3.12 available and resolver couldn't bootstrap one"
+            info "    Recovery: install Python 3.12+ (system / brew / uv / pyenv) and rerun"
+            exit 1
+        fi
+        local kimi_venv="$HOME/.cat-cafe/kimi-venv"
+        if [[ ! -x "$kimi_venv/bin/kimi" ]]; then
+            "$RESOLVED_PYTHON" -m venv "$kimi_venv" >>"$log_file" 2>&1 || true
+        fi
+        "$kimi_venv/bin/pip" install --upgrade kimi-cli >>"$log_file" 2>&1 || true
+        # Symlink into $USER_BIN_DIR so `kimi` is on PATH.
+        local kimi_bin="${USER_BIN_DIR:-$HOME/.local/bin}"
+        mkdir -p "$kimi_bin"
+        ln -sfn "$kimi_venv/bin/kimi" "$kimi_bin/kimi"
+    fi
+    export PATH="${USER_BIN_DIR:-$HOME/.local/bin}:$PATH"; hash -r 2>/dev/null || true
+    if command -v kimi &>/dev/null; then
+        rm -f "$log_file"
+        ok "Kimi CLI installed via $installer_tried"
+    else
+        fail "Kimi install failed via $installer_tried — last output:"
+        tail -10 "$log_file" 2>/dev/null | sed 's/^/    /'
+        info "    Recovery: install one of uv / pipx / Python 3.12+ on your system, then rerun"
+        rm -f "$log_file"
         exit 1
     fi
-    export PATH="$HOME/.local/bin:$PATH"; hash -r 2>/dev/null || true
-    command -v kimi &>/dev/null || { fail "Kimi install failed. Try: uv tool install --python 3.13 kimi-cli"; exit 1; }; ok "Kimi CLI installed"
 }
 install_claude_cli() {
     info "  Installing Claude Code..."

@@ -1,6 +1,16 @@
 import { maskUrlCredentials } from '../../config/env-registry.js';
+import { normalizeLoopbackUrl } from './loopback-url.js';
+import { getServiceConfig } from './service-config.js';
 
-export type ServiceStatus = 'healthy' | 'unhealthy' | 'not_configured';
+export type ServiceLifecycleStateAction = 'install' | 'start' | 'stop' | 'uninstall' | 'toggle';
+export type ServiceStatus =
+  | 'healthy'
+  | 'unhealthy'
+  | 'not_configured'
+  | 'installing'
+  | 'starting'
+  | 'stopping'
+  | 'uninstalling';
 
 export interface ServiceManifest {
   id: string;
@@ -72,6 +82,12 @@ export interface ServiceState {
   error: string | null;
   installed: boolean;
   enabled: boolean;
+  selectedModel?: string;
+  // Persisted port (from services.json); the reconfigure modal needs this
+  // to pre-fill the port input. endpoint already encodes the port in its
+  // URL, but parsing strings client-side just to recover an int we already
+  // have is fragile under masked endpoints and portFallback hosts.
+  port?: number;
   installable: boolean;
   prerequisites?: Omit<NonNullable<ServiceManifest['prerequisites']>, 'venvPath'>;
 }
@@ -81,6 +97,31 @@ export const MODEL_ENV_VARS: Record<string, string> = {
   'mlx-tts': 'TTS_MODEL',
   'embedding-model': 'EMBED_MODEL',
   'llm-postprocess': 'LLM_POSTPROCESS_MODEL',
+};
+
+/** Env var each server script reads to bind its listening port. */
+export const PORT_ENV_VARS: Record<string, string> = {
+  'whisper-stt': 'WHISPER_PORT',
+  'mlx-tts': 'TTS_PORT',
+  'embedding-model': 'EMBED_PORT',
+  'llm-postprocess': 'LLM_POSTPROCESS_PORT',
+  'audio-capture': 'AUDIO_SERVICE_PORT',
+};
+
+export const LEGACY_SERVICE_ENABLED_ENV_VARS: Record<string, string> = {
+  'whisper-stt': 'ASR_ENABLED',
+  'mlx-tts': 'TTS_ENABLED',
+  'embedding-model': 'EMBED_ENABLED',
+  'llm-postprocess': 'LLM_POSTPROCESS_ENABLED',
+  'audio-capture': 'AUDIO_SERVICE_ENABLED',
+};
+
+export const API_SERVICE_ENABLED_ENV_VARS: Record<string, string> = {
+  'whisper-stt': 'CAT_CAFE_SERVICE_ASR_ENABLED',
+  'mlx-tts': 'CAT_CAFE_SERVICE_TTS_ENABLED',
+  'embedding-model': 'CAT_CAFE_SERVICE_EMBED_ENABLED',
+  'llm-postprocess': 'CAT_CAFE_SERVICE_LLM_POSTPROCESS_ENABLED',
+  'audio-capture': 'CAT_CAFE_SERVICE_AUDIO_ENABLED',
 };
 
 type ServiceModel = NonNullable<NonNullable<ServiceManifest['prerequisites']>['models']>[number];
@@ -218,13 +259,27 @@ export const SERVICE_MANIFESTS: readonly ServiceManifest[] = [
     name: 'Audio Capture',
     description: 'Meeting audio capture and transcript endpoint',
     category: 'audio',
-    type: 'node',
+    type: 'python',
     port: 9881,
     features: ['meeting-copilot', 'live-transcript'],
     envVars: ['AUDIO_SERVICE_URL'],
     endpointEnvVars: ['AUDIO_SERVICE_URL'],
     defaultEndpoint: 'http://127.0.0.1:9881',
     healthPath: '/status',
+    prerequisites: {
+      runtime: 'python3.10+',
+      venvPath: '~/.cat-cafe/audio-capture-venv',
+      packages: ['sounddevice', 'fastapi', 'uvicorn', 'numpy'],
+      // No models — audio-capture has no ML inference. Modal still shows
+      // install button (allModels.length === 0 short-circuits canConfirm).
+      models: [],
+      estimatedMinutes: 2,
+    },
+    scripts: {
+      install: 'scripts/services/audio-capture-install.sh',
+      start: 'scripts/services/audio-capture-server.sh',
+      uninstall: 'scripts/services/audio-capture-uninstall.sh',
+    },
   },
 ];
 
@@ -237,16 +292,92 @@ export function getServiceManifest(id: string): ServiceManifest | null {
   return null;
 }
 
-export function resolveServiceEndpoint(service: ServiceManifest, env: NodeJS.ProcessEnv = process.env): string | null {
+export function parseServicePort(value: string | undefined): number | null {
+  if (!value || !/^\d+$/.test(value)) return null;
+  const port = Number.parseInt(value, 10);
+  return port > 0 && port <= 65535 ? port : null;
+}
+
+function parseEnabledEnv(value: string | undefined): boolean | null {
+  if (value === undefined) return null;
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off', ''].includes(normalized)) return false;
+  return null;
+}
+
+export function deriveLegacyServiceConfig(
+  service: ServiceManifest,
+  env: NodeJS.ProcessEnv = process.env,
+): ServiceConfig | undefined {
+  const apiKey = API_SERVICE_ENABLED_ENV_VARS[service.id];
+  const legacyKey = LEGACY_SERVICE_ENABLED_ENV_VARS[service.id];
+  const apiEnabled = parseEnabledEnv(apiKey ? env[apiKey] : undefined);
+  // start-dev/start-windows set CAT_CAFE_SERVICE_* only for explicit .env
+  // legacy flags. When a profile is active, ignore raw *_ENABLED values so
+  // profile defaults do not unexpectedly auto-start ML sidecars.
+  const legacyEnabled =
+    apiEnabled ?? (env.CAT_CAFE_PROFILE ? null : parseEnabledEnv(legacyKey ? env[legacyKey] : undefined));
+  if (legacyEnabled !== true) return undefined;
+
+  const config: ServiceConfig = { installed: true, enabled: true };
+  const modelKey = MODEL_ENV_VARS[service.id];
+  const model = modelKey ? env[modelKey]?.trim() : undefined;
+  if (model) config.selectedModel = model;
+  const portKey = PORT_ENV_VARS[service.id];
+  const port = parseServicePort(portKey ? env[portKey]?.trim() : undefined);
+  if (port) config.port = port;
+  return config;
+}
+
+export function resolveEffectiveServiceConfig(
+  service: ServiceManifest,
+  config: ServiceConfig | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): ServiceConfig | undefined {
+  return config ?? deriveLegacyServiceConfig(service, env);
+}
+
+function replaceEndpointPort(endpoint: string | null, port: number): string | null {
+  if (!endpoint) return null;
+  try {
+    const url = new URL(endpoint);
+    const hadTrailingSlash = endpoint.endsWith('/');
+    url.port = String(port);
+    const serialized = url.toString();
+    return !hadTrailingSlash && url.pathname === '/' ? serialized.replace(/\/$/, '') : serialized;
+  } catch {
+    return endpoint.replace(/:\d+($|[/?#])/, `:${port}$1`);
+  }
+}
+
+export function resolveServiceEndpoint(
+  service: ServiceManifest,
+  env: NodeJS.ProcessEnv = process.env,
+  config: ServiceConfig | undefined = getServiceConfig(service.id),
+): string | null {
   for (const key of service.endpointEnvVars) {
     const value = env[key]?.trim();
-    if (value) return value;
+    if (value) return normalizeLoopbackUrl(value);
   }
-  if (service.portFallback) {
-    const port = env[service.portFallback.envVar]?.trim();
-    if (port) return `${service.portFallback.host.replace(/\/+$/, '')}:${port}`;
+  // Persisted user-chosen port (from install modal) takes precedence over
+  // static env port overrides, while explicit URL envs above remain highest
+  // priority. This must apply to every scripted service, not just embedding,
+  // otherwise start/stop use cfg.port but /api/services health probes the
+  // manifest default and reports a healthy custom-port sidecar as broken.
+  const configuredPort =
+    typeof config?.port === 'number' && config.port > 0 && config.port <= 65535 ? config.port : null;
+  const portEnvKey = PORT_ENV_VARS[service.id];
+  const envPort = parseServicePort(portEnvKey ? env[portEnvKey]?.trim() : undefined);
+  const effectivePort = configuredPort ?? envPort;
+  if (effectivePort) {
+    if (service.portFallback) {
+      return `${service.portFallback.host.replace(/\/+$/, '')}:${effectivePort}`;
+    }
+    const endpoint = replaceEndpointPort(service.defaultEndpoint, effectivePort);
+    return endpoint ? normalizeLoopbackUrl(endpoint) : null;
   }
-  return service.defaultEndpoint;
+  return service.defaultEndpoint ? normalizeLoopbackUrl(service.defaultEndpoint) : null;
 }
 
 function buildClientServiceManifest(service: ServiceManifest) {
@@ -281,9 +412,24 @@ export function resolveServiceHealthUrl(service: ServiceManifest, endpoint: stri
   }
 }
 
-export function resolveServiceEndpointMap(env: NodeJS.ProcessEnv = process.env): Record<string, string | null> {
+// Endpoint map returned by `/api/services/endpoints`. By default the
+// returned URLs are credential-masked so they are safe for display surfaces
+// (status panels, audit logs). Callers that need to actually issue a request
+// against the endpoint must pass `{ mask: false }` so URL auth (e.g.
+// `https://user:pass@host`) survives intact — otherwise the masked
+// `***@host` value will be sent to the wire and the request will fail even
+// though the configured upstream is healthy (codex P2 2026-05-26).
+export function resolveServiceEndpointMap(
+  env: NodeJS.ProcessEnv = process.env,
+  getConfig: (id: string) => ServiceConfig | undefined = getServiceConfig,
+  options: { mask?: boolean } = {},
+): Record<string, string | null> {
+  const mask = options.mask !== false;
   return Object.fromEntries(
-    SERVICE_MANIFESTS.map((service) => [service.id, maskServiceEndpoint(resolveServiceEndpoint(service, env))]),
+    SERVICE_MANIFESTS.map((service) => {
+      const endpoint = resolveServiceEndpoint(service, env, getConfig(service.id));
+      return [service.id, mask ? maskServiceEndpoint(endpoint) : endpoint];
+    }),
   );
 }
 
@@ -309,14 +455,61 @@ export async function resolveServiceState(
     env?: NodeJS.ProcessEnv;
     fetchHealth?: FetchServiceHealth;
     config?: ServiceConfig;
+    lifecycleAction?: ServiceLifecycleStateAction | null;
   } = {},
 ): Promise<ServiceState> {
   const configExists = options.config !== undefined;
   const config = options.config ?? { enabled: false };
   const installable = !!service.scripts?.install;
-  const installed = config.installed ?? (installable ? configExists : true);
+  const installed =
+    config.installed ??
+    (installable
+      ? configExists && (config.enabled || (config.selectedModel === undefined && config.port === undefined))
+      : true);
   const enabled = config.enabled;
-  const endpoint = resolveServiceEndpoint(service, options.env);
+  const endpoint = resolveServiceEndpoint(service, options.env, options.config);
+  const selectedModel =
+    typeof config.selectedModel === 'string' && config.selectedModel.trim().length > 0
+      ? config.selectedModel
+      : undefined;
+  const persistedPort =
+    typeof config.port === 'number' && config.port > 0 && config.port <= 65535 ? config.port : undefined;
+  const clientPrerequisites = service.prerequisites
+    ? { prerequisites: (({ venvPath: _, ...r }) => r)(service.prerequisites) }
+    : {};
+  const lifecycleStatus: Partial<Record<ServiceLifecycleStateAction, ServiceStatus>> = {
+    install: 'installing',
+    start: 'starting',
+    stop: 'stopping',
+    uninstall: 'uninstalling',
+  };
+  const activeLifecycleStatus = options.lifecycleAction ? lifecycleStatus[options.lifecycleAction] : undefined;
+  if (activeLifecycleStatus) {
+    return {
+      ...buildClientServiceManifest(service),
+      endpoint: endpoint ? maskServiceEndpoint(endpoint) : null,
+      configured: !!endpoint,
+      status: activeLifecycleStatus,
+      httpStatus: null,
+      error: null,
+      installed:
+        options.lifecycleAction === 'start'
+          ? true
+          : options.lifecycleAction === 'install'
+            ? Boolean(config.installed)
+            : installed,
+      enabled:
+        options.lifecycleAction === 'start'
+          ? true
+          : options.lifecycleAction === 'stop' || options.lifecycleAction === 'uninstall'
+            ? false
+            : enabled,
+      ...(selectedModel ? { selectedModel } : {}),
+      ...(persistedPort ? { port: persistedPort } : {}),
+      installable,
+      ...clientPrerequisites,
+    };
+  }
   if (!endpoint) {
     return {
       ...buildClientServiceManifest(service),
@@ -327,8 +520,10 @@ export async function resolveServiceState(
       error: null,
       installed,
       enabled,
+      ...(selectedModel ? { selectedModel } : {}),
+      ...(persistedPort ? { port: persistedPort } : {}),
       installable,
-      ...(service.prerequisites ? { prerequisites: (({ venvPath: _, ...r }) => r)(service.prerequisites) } : {}),
+      ...clientPrerequisites,
     };
   }
 
@@ -342,8 +537,10 @@ export async function resolveServiceState(
       error: null,
       installed,
       enabled,
+      ...(selectedModel ? { selectedModel } : {}),
+      ...(persistedPort ? { port: persistedPort } : {}),
       installable,
-      ...(service.prerequisites ? { prerequisites: (({ venvPath: _, ...r }) => r)(service.prerequisites) } : {}),
+      ...clientPrerequisites,
     };
   }
 
@@ -359,8 +556,10 @@ export async function resolveServiceState(
     error: typeof health.error === 'string' ? health.error : null,
     installed,
     enabled,
+    ...(selectedModel ? { selectedModel } : {}),
+    ...(persistedPort ? { port: persistedPort } : {}),
     installable,
-    ...(service.prerequisites ? { prerequisites: (({ venvPath: _, ...r }) => r)(service.prerequisites) } : {}),
+    ...clientPrerequisites,
   };
 }
 
@@ -368,6 +567,7 @@ export async function resolveServiceStates(options: {
   env?: NodeJS.ProcessEnv;
   fetchHealth?: FetchServiceHealth;
   getConfig?: (id: string) => ServiceConfig | undefined;
+  getLifecycleAction?: (id: string) => ServiceLifecycleStateAction | null;
 }): Promise<ServiceState[]> {
   const getConfig = options.getConfig;
   return Promise.all(
@@ -376,6 +576,7 @@ export async function resolveServiceStates(options: {
         env: options.env,
         fetchHealth: options.fetchHealth,
         config: getConfig?.(service.id),
+        lifecycleAction: options.getLifecycleAction?.(service.id),
       }),
     ),
   );

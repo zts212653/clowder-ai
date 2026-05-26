@@ -1,0 +1,630 @@
+# ============================================================
+# Service Recommendation Matrix
+# ============================================================
+# Maps detected environment (OS × Arch × GPU × Python Arch) to
+# a list of available models, OR an unsupported reason with
+# user-action guidance.
+#
+# Lookup is ORDER-SENSITIVE: first matching entry wins.
+# Put MORE SPECIFIC match criteria (e.g. gpu=cuda) BEFORE
+# generic ones (e.g. no gpu key).
+#
+# Schema:
+#   services:
+#     <service-id>:
+#       - match:                      # all keys optional, AND-combined
+#           os: darwin|win32|linux | [darwin, linux]
+#           arch: arm64|x64
+#           gpu: apple|cuda|rocm|none | [cuda, rocm]
+#           pythonArch: native|x86-emulated
+#         models:                     # ordered list; [0] is default recommendation
+#           - name: <model-id>
+#             size: "~1.5GB"
+#             description: <text>
+#             requirements:
+#               ramGb: <number>
+#               diskGb: <number>
+#               gpu: required|recommended|optional   # optional
+#             performance: <text>     # optional
+#         unsupported:                # mutually exclusive with models
+#           reason: <why>
+#           userAction: <what user should do>
+#           retryHint: <how to retry>
+#         notes: [<text>, ...]        # general guidance (was "caveats")
+#         customModelHint:            # shown beside the "custom model" input
+#           requirement: <text>       # one-sentence format requirement on
+#                                     # this env (no implementation jargon)
+#           example: <text>           # one or more concrete model IDs that
+#                                     # satisfy `requirement`
+#           unsupported: <text>       # optional — format(s) that will cause
+#                                     # sidecar start to fail in this env
+#           links:                    # where to look up valid IDs
+#             - label: <text>
+#               url: <url>
+# ============================================================
+
+services:
+  # ------------------------------------------------------------
+  # Whisper STT (语音转写)
+  # ------------------------------------------------------------
+  whisper-stt:
+    - match: { os: darwin, arch: arm64 }
+      models:
+        - name: mlx-community/whisper-large-v3-turbo
+          size: ~1.5GB
+          description: 速度快、质量高（MLX 加速，推荐）
+          requirements: { ramGb: 4, diskGb: 2 }
+          performance: 实时 10x+
+        - name: mlx-community/whisper-large-v3-mlx
+          size: ~3GB
+          description: 最高质量，速度较慢
+          requirements: { ramGb: 6, diskGb: 3.5 }
+        - name: mlx-community/whisper-small-mlx
+          size: ~500MB
+          description: 轻量版，低配机器可用
+          requirements: { ramGb: 2, diskGb: 1 }
+      customModelHint:
+        requirement: 'mlx-community 命名空间下的 whisper MLX 量化模型（Apple Silicon GPU 加速）'
+        example: 'mlx-community/whisper-large-v3-turbo、mlx-community/whisper-medium-mlx'
+        unsupported: 'faster-whisper 短名（base / large-v3-turbo）、HF 上 CTranslate2 转换的 whisper'
+        links:
+          - { label: 'mlx-community / whisper 列表', url: 'https://huggingface.co/mlx-community?search_models=whisper' }
+
+    - match: { os: darwin, arch: x64 }
+      models:
+        - name: large-v3-turbo
+          size: ~1.5GB
+          description: faster-whisper turbo（CTranslate2，推荐）
+          requirements: { ramGb: 4, diskGb: 2 }
+          performance: CPU 实时 2-3x
+        - name: large-v3
+          size: ~3GB
+          description: 最高质量
+          requirements: { ramGb: 6, diskGb: 3.5 }
+        - name: base
+          size: ~150MB
+          description: 轻量版，低配机器可用
+          requirements: { ramGb: 2, diskGb: 0.5 }
+          performance: CPU 实时 1-2x
+      notes:
+        - Intel Mac 不支持 MLX，使用 faster-whisper 后端
+      customModelHint:
+        requirement: 'faster-whisper 内置短名 或 HuggingFace 上 CTranslate2 库标注的 whisper 模型（Intel Mac 走 CTranslate2 CPU 推理）'
+        example: 'base、large-v3-turbo、distil-large-v3、Systran/faster-whisper-large-v3'
+        unsupported: 'MLX 张量格式（mlx-community/whisper-*）'
+        links:
+          - { label: 'faster-whisper 内置模型列表', url: 'https://github.com/SYSTRAN/faster-whisper#available-models' }
+          - { label: 'HF CTranslate2 whisper 模型', url: 'https://huggingface.co/models?library=ctranslate2&search=whisper' }
+
+    # Windows ARM64, no Python yet — installer will auto-fetch x64 Python via
+    # winget. Show the same model list as the x86-emulated case so the dialog
+    # is identical except for the heads-up note.
+    - match: { os: win32, arch: arm64, pythonArch: missing }
+      models:
+        - name: base
+          size: ~150MB
+          description: faster-whisper base（推荐）
+          requirements: { ramGb: 2, diskGb: 0.5 }
+          performance: CPU 偏慢
+        - name: large-v3-turbo
+          size: ~1.5GB
+          description: faster-whisper turbo（仅推荐高内存机器）
+          requirements: { ramGb: 4, diskGb: 2 }
+      notes:
+        - 'ARM64 上 faster-whisper 依赖的 PyAV / ctranslate2 没有 ARM 版本，所以会装 64-bit 通用版本，通过 Windows 内置 emulator 运行。'
+      customModelHint:
+        requirement: 'faster-whisper 内置短名 或 HF 上 CTranslate2 转换的 whisper 模型'
+        example: 'base、large-v3-turbo、distil-large-v3'
+        unsupported: 'MLX 张量格式（mlx-community/whisper-*）'
+        links:
+          - { label: 'faster-whisper 内置模型列表', url: 'https://github.com/SYSTRAN/faster-whisper#available-models' }
+          - { label: 'HF CTranslate2 whisper 模型', url: 'https://huggingface.co/models?library=ctranslate2&search=whisper' }
+
+    # Windows ARM64 native Python — faster-whisper pulls PyAV/ctranslate2 which
+    # have no win-arm64 prebuilt wheels; pip falls back to source build and
+    # fails on Cython compile. Same pattern as llm-postprocess: gate behind x86
+    # Python emulation.
+    - match: { os: win32, arch: arm64, pythonArch: native }
+      unsupported:
+        reason: faster-whisper 间接依赖 PyAV / ctranslate2 等 C 扩展，在 Windows ARM64 没有预编译 wheel，原生 ARM Python 装不上。
+        userAction: 请安装 x86 Python 3.10+（python.org 64-bit Windows 安装包，Microsoft Store 版也可）
+        retryHint: 安装好 x86 Python 后，关闭此弹窗再次点击「安装」，会自动按 x86 模式重新匹配
+
+    - match: { os: win32, arch: arm64, pythonArch: x86-emulated }
+      models:
+        - name: base
+          size: ~150MB
+          description: faster-whisper base（推荐）
+          requirements: { ramGb: 2, diskGb: 0.5 }
+          performance: CPU 偏慢
+        - name: large-v3-turbo
+          size: ~1.5GB
+          description: faster-whisper turbo（仅推荐高内存机器）
+          requirements: { ramGb: 4, diskGb: 2 }
+      notes:
+        - x86 Python 运行在 ARM 模拟层上，性能比原生略低
+      customModelHint:
+        requirement: 'faster-whisper 内置短名（Windows ARM64 native Python 走 x86 emulation 跑 CTranslate2）'
+        example: 'base、large-v3-turbo、distil-large-v3'
+        unsupported: 'MLX 张量格式（mlx-community/whisper-*）'
+        links:
+          - { label: 'faster-whisper 内置模型列表', url: 'https://github.com/SYSTRAN/faster-whisper#available-models' }
+
+    - match: { os: [win32, linux], gpu: [cuda, rocm] }
+      models:
+        - name: large-v3-turbo
+          size: ~1.5GB
+          description: faster-whisper turbo（CTranslate2,GPU 推荐）
+          requirements: { ramGb: 4, diskGb: 2 }
+          performance: GPU 10x+
+        - name: large-v3
+          size: ~3GB
+          description: 最高质量
+          requirements: { ramGb: 6, diskGb: 3.5, gpu: recommended }
+        - name: base
+          size: ~150MB
+          description: 轻量版，低配机器可用
+          requirements: { ramGb: 2, diskGb: 0.5 }
+      notes:
+        - GPU 加速需 CUDA 12+ 或 ROCm 5.7+
+      customModelHint:
+        requirement: 'faster-whisper 内置短名 或 HF 上 CTranslate2 转换的 whisper 模型（GPU 加速）'
+        example: 'large-v3-turbo、large-v3、Systran/faster-whisper-large-v3'
+        unsupported: 'MLX 张量格式'
+
+    - match: { os: [win32, linux], gpu: none }
+      models:
+        - name: base
+          size: ~150MB
+          description: 轻量版，CPU 实时（推荐）
+          requirements: { ramGb: 2, diskGb: 0.5 }
+          performance: CPU 实时 1-2x
+        - name: large-v3-turbo
+          size: ~1.5GB
+          description: faster-whisper turbo（CPU 偏慢）
+          requirements: { ramGb: 4, diskGb: 2 }
+          performance: CPU 实时 2x，可能偏慢
+      notes:
+        - 纯 CPU 上 large 模型偏慢，默认 base
+      customModelHint:
+        requirement: 'faster-whisper 内置短名 或 HF 上 CTranslate2 转换的 whisper 模型（纯 CPU 推理，推荐 ≤ small）'
+        example: 'base、small、distil-large-v3'
+        unsupported: 'MLX 张量格式'
+        links:
+          - { label: 'faster-whisper 内置模型列表', url: 'https://github.com/SYSTRAN/faster-whisper#available-models' }
+
+  # ------------------------------------------------------------
+  # MLX TTS (语音合成)
+  # ------------------------------------------------------------
+  mlx-tts:
+    - match: { os: darwin, arch: arm64 }
+      models:
+        - name: mlx-community/Kokoro-82M-bf16
+          size: ~160MB
+          description: 本地轻量高质量语音合成（MLX，推荐）
+          requirements: { ramGb: 2, diskGb: 0.5 }
+          performance: 实时 5x+
+      customModelHint:
+        requirement: 'mlx-community 命名空间下的 TTS MLX 量化模型（本地、离线、Apple Silicon GPU 加速）'
+        example: 'mlx-community/Kokoro-82M、mlx-community/StyleTTS2'
+        unsupported: 'edge-tts voice 名（本环境跑本地 MLX 推理，不调云端）'
+        links:
+          - { label: 'mlx-community / TTS 模型', url: 'https://huggingface.co/mlx-community?search_models=tts' }
+
+    - match: { os: darwin, arch: x64 }
+      models:
+        - name: edge-tts
+          size: ~20MB
+          description: 微软云端语音，高质量、需联网（推荐）
+          requirements: { ramGb: 1, diskGb: 0.1 }
+          performance: 取决于网络
+      notes:
+        - Intel Mac 不支持 MLX-Audio，使用 edge-tts
+      customModelHint:
+        requirement: 'edge-tts voice 名（云端推理，无本地模型下载）'
+        example: 'zh-CN-XiaoxiaoNeural、en-US-AvaMultilingualNeural'
+        unsupported: 'HuggingFace 模型 ID（本环境不跑本地 TTS 推理）'
+        links:
+          - { label: 'edge-tts voice 列表', url: 'https://github.com/rany2/edge-tts#changing-voices' }
+
+    # Windows ARM64, no Python yet — installer will auto-fetch x64 Python via
+    # winget; offer the full x86-emulated catalog.
+    - match: { os: win32, arch: arm64, pythonArch: missing }
+      models:
+        - name: edge-tts
+          size: ~20MB
+          description: 微软云端语音（推荐）
+          requirements: { ramGb: 1, diskGb: 0.1 }
+          performance: 取决于网络
+        - name: sapi
+          size: ~5MB
+          description: Windows 内置语音，离线可用
+          requirements: { ramGb: 1, diskGb: 0.1 }
+      notes:
+        - 'ARM64 上 edge-tts 依赖的 aiohttp 没有 ARM 版本，所以会装 64-bit 通用版本，通过 Windows 内置 emulator 运行。'
+      customModelHint:
+        requirement: 'edge-tts voice 名 或 Windows SAPI 内置音色'
+        example: 'zh-CN-XiaoxiaoNeural、Microsoft Huihui Desktop'
+        unsupported: 'HuggingFace 模型 ID'
+        links:
+          - { label: 'edge-tts voice 列表', url: 'https://github.com/rany2/edge-tts#changing-voices' }
+
+    # Windows ARM64 native Python — edge-tts pulls aiohttp and piper-tts
+    # pulls piper_phonemize; neither has win-arm64 prebuilt wheels. SAPI is
+    # the only path that works: pyttsx3 (pure python) + pywin32 (ships
+    # win-arm64 wheels from cp310). Audio quality is older Windows TTS but
+    # it's fully offline and installs cleanly without MSVC.
+    - match: { os: win32, arch: arm64, pythonArch: native }
+      models:
+        - name: sapi
+          size: ~5MB
+          description: Windows 内置语音（SAPI，离线可用；ARM64 唯一可装的路径）
+          requirements: { ramGb: 1, diskGb: 0.1 }
+          performance: 实时 1x
+      notes:
+        - 'ARM64 上 edge-tts / piper 受 pip wheel 限制装不上。如需更高质量请安装 x86 Python（参考 LLM 服务的 x86 安装引导）。'
+      customModelHint:
+        requirement: 'Windows 系统已安装的 SAPI 语音名（pyttsx3 调用，离线、零额外下载）'
+        example: 'Microsoft Huihui Desktop、Microsoft Zira Desktop'
+        unsupported: 'edge-tts / HuggingFace 模型（ARM64 native Python 装不上 aiohttp / piper_phonemize）'
+
+    - match: { os: win32, arch: arm64, pythonArch: x86-emulated }
+      models:
+        - name: edge-tts
+          size: ~20MB
+          description: 微软云端语音（推荐）
+          requirements: { ramGb: 1, diskGb: 0.1 }
+          performance: 取决于网络
+        - name: sapi
+          size: ~5MB
+          description: Windows 内置语音，离线可用
+          requirements: { ramGb: 1, diskGb: 0.1 }
+      notes:
+        - x86 Python 运行在 ARM 模拟层上，性能比原生略低；edge-tts 与 sapi 都基本不受影响
+      customModelHint:
+        requirement: 'edge-tts voice 名 或 Windows SAPI 内置音色'
+        example: 'zh-CN-XiaoxiaoNeural、Microsoft Huihui Desktop'
+        unsupported: 'HuggingFace 模型 ID'
+        links:
+          - { label: 'edge-tts voice 列表', url: 'https://github.com/rany2/edge-tts#changing-voices' }
+
+    - match: { os: win32 }
+      models:
+        - name: edge-tts
+          size: ~20MB
+          description: 微软云端语音，高质量、需联网（推荐）
+          requirements: { ramGb: 1, diskGb: 0.1 }
+          performance: 取决于网络
+        - name: piper
+          size: ~80MB
+          description: Piper 开源离线 TTS（ONNX，默认 zh_CN-huayan-medium）
+          requirements: { ramGb: 2, diskGb: 0.2 }
+          performance: CPU 实时
+        - name: sapi
+          size: ~5MB
+          description: Windows 内置语音，离线可用（音色较老）
+          requirements: { ramGb: 1, diskGb: 0.1 }
+          performance: 实时 1x
+      notes:
+        - edge-tts 需要联网；piper/sapi 完全离线
+      customModelHint:
+        requirement: 'piper voice ID（本地）/ edge-tts voice 名（云端）/ Windows SAPI 音色（系统内置）'
+        example: 'zh_CN-huayan-medium、en_US-amy-medium、zh-CN-XiaoxiaoNeural'
+        unsupported: 'HuggingFace 模型 ID'
+        links:
+          - { label: 'piper voice 全列表', url: 'https://github.com/rhasspy/piper/blob/master/VOICES.md' }
+          - { label: 'edge-tts voice 列表', url: 'https://github.com/rany2/edge-tts#changing-voices' }
+
+    - match: { os: linux }
+      models:
+        - name: edge-tts
+          size: ~20MB
+          description: 微软云端语音，高质量、需联网（推荐）
+          requirements: { ramGb: 1, diskGb: 0.1 }
+          performance: 取决于网络
+        - name: piper
+          size: ~80MB
+          description: Piper 开源离线 TTS（ONNX，默认 zh_CN-huayan-medium）
+          requirements: { ramGb: 2, diskGb: 0.2 }
+          performance: CPU 实时
+      notes:
+        - 离线选项 piper 默认下载中文 huayan-medium 模型；可手填 en_US-amy-medium 等
+      customModelHint:
+        requirement: 'piper voice ID（本地）或 edge-tts voice 名（云端）'
+        example: 'zh_CN-huayan-medium、en_US-amy-medium、zh-CN-XiaoxiaoNeural'
+        unsupported: 'HuggingFace 模型 ID'
+        links:
+          - { label: 'piper voice 全列表', url: 'https://github.com/rhasspy/piper/blob/master/VOICES.md' }
+          - { label: 'edge-tts voice 列表', url: 'https://github.com/rany2/edge-tts#changing-voices' }
+
+  # ------------------------------------------------------------
+  # Embedding (语义向量)
+  # ------------------------------------------------------------
+  embedding-model:
+    - match: { os: darwin, arch: arm64 }
+      models:
+        - name: mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ
+          size: ~400MB
+          description: Qwen3 中文向量 0.6B（MLX 4bit-DWQ，推荐）
+          requirements: { ramGb: 2, diskGb: 1 }
+          performance: 实时
+        - name: mlx-community/Qwen3-Embedding-4B-4bit-DWQ
+          size: ~2.5GB
+          description: Qwen3 中文向量 4B（更高质量，32GB+ 内存推荐）
+          requirements: { ramGb: 8, diskGb: 3 }
+          performance: 实时
+        - name: mlx-community/Qwen3-Embedding-8B-4bit-DWQ
+          size: ~5GB
+          description: Qwen3 中文向量 8B（最高质量，48GB+ 内存）
+          requirements: { ramGb: 16, diskGb: 6 }
+          performance: 实时
+      customModelHint:
+        requirement: 'mlx-community 命名空间下的 embedding MLX 量化模型（Apple Silicon GPU 加速，BERT-family encoder）'
+        example: 'mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ、mlx-community/BAAI-bge-large-zh-v1.5-mxfp8'
+        unsupported: '生成式 LLM（CausalLM）模型、纯解码器模型'
+        links:
+          - { label: 'mlx-community / embedding 模型', url: 'https://huggingface.co/mlx-community?search_models=embedding' }
+
+    # Verified against fastembed 0.8 TextEmbedding.list_supported_models():
+    # jinaai/jina-embeddings-v2-base-zh is in the catalog (768 dim, 640MB) and
+    # is explicitly bilingual (Chinese + English). multilingual-e5-large is
+    # also catalogued for higher-quality GPU use cases.
+
+    - match: { os: darwin, arch: x64 }
+      models:
+        - name: jinaai/jina-embeddings-v2-base-zh
+          size: ~640MB
+          description: Jina 中英双语向量 base（768 dim，sentence-transformers，推荐）
+          requirements: { ramGb: 2, diskGb: 1 }
+          performance: CPU 实时
+        - name: intfloat/multilingual-e5-large
+          size: ~2.3GB
+          description: 多语言向量 large（1024 dim，更高质量，Intel Mac CPU 偏慢）
+          requirements: { ramGb: 4, diskGb: 3 }
+          performance: CPU 偏慢
+      notes:
+        - Intel Mac 不支持 MLX，使用 sentence-transformers 后端
+        - 中英文都支持
+      customModelHint:
+        requirement: 'HuggingFace 上任意 sentence-transformers 兼容的 embedding 模型（BERT-family encoder，CPU/MPS 推理）'
+        example: 'BAAI/bge-large-zh-v1.5、jinaai/jina-embeddings-v2-base-zh、intfloat/multilingual-e5-large'
+        unsupported: '生成式 LLM（CausalLM）模型、MLX 张量格式'
+        links:
+          - { label: 'HF sentence-transformers 模型', url: 'https://huggingface.co/models?library=sentence-transformers&sort=likes' }
+
+    # Windows ARM64: sqlite-vec upstream has no prebuilt windows-arm64 binary
+    # (verified: sqlite-vec@0.1.9 optionalDependencies list omits it; npm has
+    # no sqlite-vec-windows-arm64 package). The sidecar would run fine, but
+    # the API main process (native ARM64 Node) cannot load an x86 .dll across
+    # arch — so vectors never persist. Block install with a clear reason.
+    - match: { os: win32, arch: arm64 }
+      unsupported:
+        reason: sqlite-vec（向量索引存储扩展）上游没有 windows-arm64 预编译 binary。Embedding sidecar 本身能跑，但 API 主进程是 ARM64 Node，无法跨架构加载 x86 binary，向量无法落盘。
+        userAction: Windows ARM64 暂不支持向量搜索。BM25 关键字搜索已自动可用，无需任何配置；如需向量搜索请在 x64 Windows / macOS / Linux 上启用。
+        retryHint: 等待上游 sqlite-vec (https://github.com/asg017/sqlite-vec) 发布 windows-arm64 binary 后重试。
+
+    # Linux ARM64: fastembed backend + sqlite-vec-linux-arm64 prebuilt OK.
+    # fastembed has a hardcoded model whitelist verified via
+    # TextEmbedding.list_supported_models() in fastembed 0.8.
+    # NOTE: BGE moved to default position (was jina). jinaai/jina-embeddings-v2
+    # has attn_implementation="torch" baked in its config.json which transformers
+    # ≥4.46 rejects — we override via model_kwargs in embed-api.py, but BGE
+    # doesn't need that workaround, so it's the safer default.
+    - match: { os: linux, arch: arm64 }
+      models:
+        - name: BAAI/bge-small-zh-v1.5
+          size: ~90MB
+          description: BGE 中文 small（512 dim，轻量，兼容性好，推荐）
+          requirements: { ramGb: 2, diskGb: 0.2 }
+          performance: CPU 实时
+        - name: jinaai/jina-embeddings-v2-base-zh
+          size: ~640MB
+          description: Jina 中英双语向量 base（768 dim，更高质量但偏老）
+          requirements: { ramGb: 2, diskGb: 1 }
+          performance: CPU 实时
+      notes:
+        - 'ARM64 走 fastembed 后端，受白名单限制（已对照 fastembed.TextEmbedding.list_supported_models() 选型）'
+        - '如需更高质量请安装 x86 Python（参考 LLM 服务的 x86 安装引导），切换到 sentence-transformers 后端'
+      customModelHint:
+        requirement: 'fastembed 已打包成 ONNX 的 embedding 模型（受 fastembed 白名单限制，Windows ARM64 唯一可装路径）'
+        example: 'jinaai/jina-embeddings-v2-base-zh、intfloat/multilingual-e5-large、BAAI/bge-small-zh-v1.5'
+        unsupported: '白名单外的 HuggingFace 模型、MLX 张量格式、sentence-transformers 模型'
+        links:
+          - { label: 'fastembed 支持的 text embedding 模型', url: 'https://qdrant.github.io/fastembed/examples/Supported_Models/' }
+
+    # Windows/Linux x64 + GPU: sentence-transformers backend, anything HF goes
+    - match: { os: [win32, linux], arch: x64, gpu: [cuda, rocm] }
+      models:
+        - name: intfloat/multilingual-e5-large
+          size: ~2.3GB
+          description: 多语言向量 large（1024 dim，GPU 推荐，中英双语，最高质量）
+          requirements: { ramGb: 4, diskGb: 3, gpu: recommended }
+          performance: GPU 实时
+        - name: jinaai/jina-embeddings-v2-base-zh
+          size: ~640MB
+          description: Jina 中英双语向量 base（768 dim，备选）
+          requirements: { ramGb: 2, diskGb: 1 }
+          performance: CPU 实时
+      notes:
+        - 中英文都支持
+      customModelHint:
+        requirement: 'HuggingFace 上任意 sentence-transformers 兼容的 embedding 模型（BERT-family encoder，GPU 加速）'
+        example: 'BAAI/bge-large-zh-v1.5（1024 dim）、intfloat/multilingual-e5-large、Qwen/Qwen3-Embedding-0.6B'
+        unsupported: '生成式 LLM（CausalLM）模型、MLX 张量格式'
+        links:
+          - { label: 'HF sentence-transformers 模型', url: 'https://huggingface.co/models?library=sentence-transformers&sort=likes' }
+
+    # Windows/Linux x64 CPU (sentence-transformers, no GPU)
+    # NOTE: BGE moved to default position (was jina). Same rationale as
+    # the linux+arm64 entry — jina's stale attn_implementation="torch"
+    # in config.json needs a transformers monkey-patch we should not
+    # rely on as the default.
+    - match: { os: [win32, linux], arch: x64 }
+      models:
+        - name: BAAI/bge-small-zh-v1.5
+          size: ~90MB
+          description: BGE 中文 small（512 dim，轻量，兼容性好，推荐）
+          requirements: { ramGb: 2, diskGb: 0.2 }
+          performance: CPU 实时
+        - name: jinaai/jina-embeddings-v2-base-zh
+          size: ~640MB
+          description: Jina 中英双语向量 base（768 dim，CPU 通用）
+          requirements: { ramGb: 2, diskGb: 1 }
+          performance: CPU 实时
+        - name: intfloat/multilingual-e5-large
+          size: ~2.3GB
+          description: 多语言向量 large（1024 dim，质量更高但 CPU 偏慢）
+          requirements: { ramGb: 4, diskGb: 3, gpu: recommended }
+          performance: CPU 偏慢，GPU 实时
+      notes:
+        - 中英文都支持
+        - '⚠ 切换模型后维度变化 (BGE 512 / jina 768 / e5-large 1024)，需重建 memory 索引'
+      customModelHint:
+        requirement: 'HuggingFace 上任意 sentence-transformers 兼容的 embedding 模型（CPU 推理，建议 ≤768 dim）'
+        example: 'BAAI/bge-base-zh-v1.5（768 dim）、jinaai/jina-embeddings-v2-base-zh、intfloat/multilingual-e5-base'
+        unsupported: '生成式 LLM（CausalLM）模型、MLX 张量格式（1024 dim 模型在 CPU 上偏慢）'
+        links:
+          - { label: 'HF sentence-transformers 模型', url: 'https://huggingface.co/models?library=sentence-transformers&sort=likes' }
+
+  # ------------------------------------------------------------
+  # LLM Postprocess (转写纠正)
+  # ------------------------------------------------------------
+  llm-postprocess:
+    - match: { os: darwin, arch: arm64 }
+      models:
+        - name: mlx-community/Qwen3.5-35B-A3B-4bit
+          size: ~20GB
+          description: Qwen3.5 35B MoE，高质量纠错（MLX，推荐）
+          requirements: { ramGb: 48, diskGb: 22 }
+          performance: 生成 ~30 tok/s
+        - name: mlx-community/Qwen2.5-14B-Instruct-4bit
+          size: ~8GB
+          description: 中等质量，32GB+ 内存推荐
+          requirements: { ramGb: 24, diskGb: 9 }
+        - name: mlx-community/Qwen2.5-7B-Instruct-4bit
+          size: ~4GB
+          description: 轻量版，16GB 内存可用
+          requirements: { ramGb: 12, diskGb: 5 }
+      notes:
+        - Qwen3.5-35B 需要 48GB+ 统一内存
+      customModelHint:
+        requirement: 'mlx-community 命名空间下的 Instruct/Chat CausalLM MLX 量化模型（Apple Silicon GPU 加速；4bit 量化内存占用 ≈ 参数量 × 0.5）'
+        example: 'mlx-community/Qwen2.5-3B-Instruct-4bit、mlx-community/Llama-3.2-3B-Instruct-4bit'
+        unsupported: 'Embedding 类模型（BERT-family encoder）、纯 transformers 格式'
+        links:
+          - { label: 'mlx-community / text-generation 模型', url: 'https://huggingface.co/mlx-community?pipeline_tag=text-generation&sort=likes' }
+
+    - match: { os: darwin, arch: x64 }
+      models:
+        - name: Qwen/Qwen2.5-3B-Instruct
+          size: ~6GB
+          description: transformers 后端，CPU/GPU 都能跑（推荐）
+          requirements: { ramGb: 8, diskGb: 7 }
+          performance: CPU 偏慢，GPU 流畅
+        - name: Qwen/Qwen2.5-7B-Instruct
+          size: ~14GB
+          description: 更高质量，GPU 推荐
+          requirements: { ramGb: 16, diskGb: 15, gpu: recommended }
+      notes:
+        - Intel Mac 不支持 MLX，使用 transformers 后端
+      customModelHint:
+        requirement: 'HuggingFace 上的 CausalLM 因果语言模型（pipeline_tag=text-generation，CPU 推理）'
+        example: 'Qwen/Qwen2.5-3B-Instruct、meta-llama/Llama-3.2-3B-Instruct'
+        unsupported: 'Embedding 模型、MLX 张量格式；CPU 建议 ≤3B'
+        links:
+          - { label: 'HF text-generation 模型', url: 'https://huggingface.co/models?pipeline_tag=text-generation&sort=likes' }
+
+    # Windows ARM64, no Python yet — installer will auto-fetch x64 Python via
+    # winget; surface the same Qwen2.5-3B model as the x86-emulated path with
+    # an upfront heads-up.
+    - match: { os: win32, arch: arm64, pythonArch: missing }
+      models:
+        - name: Qwen/Qwen2.5-3B-Instruct
+          size: ~6GB
+          description: transformers 后端
+          requirements: { ramGb: 8, diskGb: 7 }
+          performance: CPU 偏慢
+      notes:
+        - 'ARM64 上 transformers / safetensors 没有 ARM 版本，所以会装 64-bit 通用版本，通过 Windows 内置 emulator 运行。'
+      customModelHint:
+        requirement: 'HuggingFace 上的 CausalLM 因果语言模型（建议 ≤3B）'
+        example: 'Qwen/Qwen2.5-3B-Instruct、meta-llama/Llama-3.2-3B-Instruct'
+        unsupported: 'Embedding 模型、MLX 张量格式'
+        links:
+          - { label: 'HF text-generation 模型', url: 'https://huggingface.co/models?pipeline_tag=text-generation&sort=likes' }
+
+    - match: { os: win32, arch: arm64, pythonArch: native }
+      unsupported:
+        reason: transformers + safetensors 在 Windows ARM64 没有预编译 wheel，原生 ARM Python 装不上
+        userAction: 请安装 x86 Python 3.10+（python.org 上下载 64-bit Windows 安装包，Microsoft Store 版也可）
+        retryHint: 安装好 x86 Python 后，关闭此弹窗再次点击「安装」，会自动按 x86 模式重新匹配
+
+    - match: { os: win32, arch: arm64, pythonArch: x86-emulated }
+      models:
+        - name: Qwen/Qwen2.5-3B-Instruct
+          size: ~6GB
+          description: transformers 后端
+          requirements: { ramGb: 8, diskGb: 7 }
+          performance: CPU 偏慢
+      notes:
+        - x86 Python 运行在 ARM 模拟层上，性能比原生略低
+      customModelHint:
+        requirement: 'HuggingFace 上的 CausalLM 因果语言模型（Windows ARM64 走 x86 emulation）'
+        example: 'Qwen/Qwen2.5-3B-Instruct、meta-llama/Llama-3.2-3B-Instruct'
+        unsupported: 'Embedding 模型、MLX 张量格式；emulation 性能较低，建议 ≤3B'
+        links:
+          - { label: 'HF text-generation 模型', url: 'https://huggingface.co/models?pipeline_tag=text-generation&sort=likes' }
+
+    - match: { os: [win32, linux], arch: x64, gpu: [cuda, rocm] }
+      models:
+        - name: Qwen/Qwen2.5-7B-Instruct
+          size: ~14GB
+          description: transformers 后端，GPU 推荐
+          requirements: { ramGb: 16, diskGb: 15, gpu: recommended }
+        - name: Qwen/Qwen2.5-3B-Instruct
+          size: ~6GB
+          description: 轻量版，CPU/GPU 都能跑
+          requirements: { ramGb: 8, diskGb: 7 }
+          performance: CPU 偏慢，GPU 流畅
+      notes:
+        - 7B 模型需 ≥12GB 显存
+      customModelHint:
+        requirement: 'HuggingFace 上的 CausalLM 因果语言模型（GPU 加速；FP16 模型显存 ≈ 参数量 × 2）'
+        example: 'Qwen/Qwen2.5-7B-Instruct、meta-llama/Llama-3.1-8B-Instruct'
+        unsupported: 'Embedding 模型、MLX 张量格式'
+        links:
+          - { label: 'HF text-generation 模型', url: 'https://huggingface.co/models?pipeline_tag=text-generation&sort=likes' }
+
+    - match: { os: [win32, linux], arch: x64, gpu: none }
+      models:
+        - name: Qwen/Qwen2.5-3B-Instruct
+          size: ~6GB
+          description: transformers 后端（CPU 偏慢但可用，推荐）
+          requirements: { ramGb: 8, diskGb: 7 }
+          performance: '~5 tok/s'
+      notes:
+        - 纯 CPU 上 3B 模型生成偏慢
+      customModelHint:
+        requirement: 'HuggingFace 上的 CausalLM 因果语言模型（纯 CPU 推理，建议 ≤3B）'
+        example: 'Qwen/Qwen2.5-3B-Instruct、meta-llama/Llama-3.2-3B-Instruct'
+        unsupported: 'Embedding 模型、MLX 张量格式'
+        links:
+          - { label: 'HF text-generation 模型', url: 'https://huggingface.co/models?pipeline_tag=text-generation&sort=likes' }
+
+  # F195 会议音频采集。无 ML 模型概念（仅录音 + HTTP API），跨平台都用
+  # sounddevice (PortAudio binding，三大平台都有 prebuilt wheel)。
+  #
+  # 当前状态：runtime (scripts/meeting-copilot/audio-service.py) 尚未在此
+  # 仓库 bundle 进来——F195 会议音频采集的 Python 服务文件仍只在 home
+  # repo (cat-cafe) 里。安装脚本本身已经就绪 (audio-capture-install.{sh,ps1}
+  # / audio-capture-server.{sh,ps1} / audio-capture-uninstall.{sh,ps1})
+  # 但点击安装会因为找不到 audio-service.py 而 fail-fast。在 F195 runtime
+  # port 到 clowder-ai 之前，把 audio-capture 在 modal 里标成
+  # unsupported——这样用户看到的是清晰的 "暂不支持" panel 而不是一个
+  # 看起来能装但实际 100% 失败的服务（codex P1 2026-05-26）。
+  audio-capture:
+    - match: {}
+      unsupported:
+        reason: F195 会议音频采集的运行时（scripts/meeting-copilot/audio-service.py）尚未在 clowder-ai 仓库 bundle，暂时无法安装。
+        userAction: 等待 F195 runtime port-over 完成后再启用此服务；当前可以使用浏览器自带的 MediaRecorder 接口做基础录音。
+        retryHint: F195 runtime 落地后，重新打开此弹窗会自动显示安装入口。

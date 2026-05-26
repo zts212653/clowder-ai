@@ -1,16 +1,11 @@
 #!/usr/bin/env python3
 """
-Whisper ASR server for Cat Cafe voice input (MLX backend, Apple Silicon native).
+Whisper ASR server for Cat Cafe voice input.
+Backends: mlx-whisper (macOS GPU) -> faster-whisper (CPU/CUDA).
 OpenAI-compatible endpoint: POST /v1/audio/transcriptions
-
-Usage:
-  source ~/.cat-cafe/whisper-venv/bin/activate
-  python scripts/whisper-api.py                                          # default: large-v3-turbo
-  python scripts/whisper-api.py --model mlx-community/whisper-small      # smaller model
-  python scripts/whisper-api.py --port 9876                              # custom port
-
-Requires: pip install mlx-whisper fastapi uvicorn
 """
+
+from __future__ import annotations
 
 import argparse
 import logging
@@ -20,7 +15,6 @@ import tempfile
 import threading
 from pathlib import Path
 
-import mlx_whisper
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,6 +25,13 @@ log = logging.getLogger("whisper-api")
 
 app = FastAPI(title="Cat Cafe Whisper Server")
 
+
+@app.on_event("startup")
+async def _emit_ready_marker():
+    """Push-based ready signal — see embed-api.py + service-logs.ts."""
+    print("__CATCAFE_SIDECAR_READY__", flush=True)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
@@ -40,8 +41,41 @@ app.add_middleware(
 
 model_path: str = ""
 model_loaded: bool = False
+_backend: str = "unknown"
 
 _transcribe_lock = threading.Lock()
+
+# ─── Backend state ────────────────────────────────────────────────
+_fw_model = None  # faster-whisper WhisperModel instance
+
+
+def _resolve_fw_model_size(name: str) -> str:
+    """Convert MLX model name to faster-whisper model size identifier."""
+    if "mlx-community/whisper-" in name:
+        return name.split("whisper-", 1)[1].removesuffix("-mlx")
+    return name
+
+
+def _transcribe_mlx(tmp_path: str, language: str | None, initial_prompt: str | None) -> str:
+    import mlx_whisper
+    result = mlx_whisper.transcribe(
+        tmp_path,
+        path_or_hf_repo=model_path,
+        language=language,
+        initial_prompt=initial_prompt,
+        no_speech_threshold=0.6,
+    )
+    return result.get("text", "").strip()
+
+
+def _transcribe_fw(tmp_path: str, language: str | None, initial_prompt: str | None) -> str:
+    segments, _ = _fw_model.transcribe(
+        tmp_path,
+        language=language,
+        initial_prompt=initial_prompt,
+        no_speech_threshold=0.6,
+    )
+    return " ".join(seg.text for seg in segments).strip()
 
 
 @app.post("/v1/audio/transcriptions")
@@ -65,17 +99,16 @@ async def transcribe(
         tmp.write(content)
         tmp_path = tmp.name
 
+    lang = language if language else None
+    prompt = initial_prompt if initial_prompt else None
+
     try:
         with _transcribe_lock:
-            result = mlx_whisper.transcribe(
-                tmp_path,
-                path_or_hf_repo=model_path,
-                language=language if language else None,
-                initial_prompt=initial_prompt if initial_prompt else None,
-                no_speech_threshold=0.6,
-            )
-        text = result.get("text", "").strip()
-        log.info("Transcribed %d bytes → %d chars (lang=%s)", len(content), len(text), language)
+            if _backend == "mlx-whisper":
+                text = _transcribe_mlx(tmp_path, lang, prompt)
+            else:
+                text = _transcribe_fw(tmp_path, lang, prompt)
+        log.info("Transcribed %d bytes -> %d chars (lang=%s)", len(content), len(text), language)
         return {"text": text}
     except Exception as exc:
         log.exception("Transcription failed for %d-byte upload", len(content))
@@ -89,20 +122,77 @@ async def health():
     return {
         "status": "ok" if model_loaded else "loading",
         "model": model_path or "none",
-        "backend": "mlx-whisper",
+        "backend": _backend,
     }
 
 
-def main():
-    global model_path, model_loaded
+# ─── Startup ─────────────────────────────────────────────────────
 
-    parser = argparse.ArgumentParser(description="Cat Cafe Whisper Server (MLX)")
+def _try_mlx() -> bool:
+    global model_loaded, _backend
+    try:
+        import mlx_whisper
+    except ImportError:
+        return False
+    try:
+        warmup_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        warmup_file.write(b"\x00" * 1000)
+        warmup_file.close()
+        try:
+            mlx_whisper.transcribe(warmup_file.name, path_or_hf_repo=model_path)
+        except Exception:
+            pass
+        finally:
+            Path(warmup_file.name).unlink(missing_ok=True)
+        _backend = "mlx-whisper"
+        model_loaded = True
+        log.info("Model loaded via mlx-whisper (Apple Silicon GPU)")
+        return True
+    except Exception as e:
+        log.warning("MLX whisper failed (%s), trying faster-whisper", e)
+        return False
+
+
+def _try_faster_whisper() -> bool:
+    global model_loaded, _backend, _fw_model, model_path
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError:
+        log.warning("faster-whisper not installed")
+        return False
+    try:
+        fw_name = _resolve_fw_model_size(model_path)
+        device = "cpu"
+        compute_type = "int8"
+        try:
+            import torch
+            if torch.cuda.is_available():
+                device = "cuda"
+                compute_type = "float16"
+        except ImportError:
+            pass
+        log.info("Loading faster-whisper: model=%s device=%s", fw_name, device)
+        _fw_model = WhisperModel(fw_name, device=device, compute_type=compute_type)
+        model_path = fw_name
+        _backend = "faster-whisper"
+        model_loaded = True
+        log.info("Model loaded via faster-whisper (device: %s)", device)
+        return True
+    except Exception:
+        log.exception("faster-whisper load failed")
+        return False
+
+
+def main():
+    global model_path
+
+    parser = argparse.ArgumentParser(description="Cat Cafe Whisper Server")
     parser.add_argument(
         "--model",
-        default="mlx-community/whisper-large-v3-turbo",
-        help="HuggingFace model repo (default: mlx-community/whisper-large-v3-turbo)",
+        required=True,
+        help="Model repo ID — required, no fallback default. Backend always passes via env.",
     )
-    parser.add_argument("--port", type=int, default=9876, help="Server port (default: 9876)")
+    parser.add_argument("--port", type=int, default=9876)
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -113,27 +203,15 @@ def main():
     signal.signal(signal.SIGTERM, handle_sigterm)
 
     model_path = args.model
-    log.info("=== Cat Cafe Whisper Server (MLX) ===")
+    log.info("=== Cat Cafe Whisper Server ===")
     log.info("Model: %s | Port: %d", model_path, args.port)
-    log.info("Loading model (first run downloads from HuggingFace)...")
 
-    try:
-        # Warmup: run a tiny transcription to force model download + compile
-        warmup_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-        warmup_file.write(b"\x00" * 1000)
-        warmup_file.close()
-        try:
-            mlx_whisper.transcribe(warmup_file.name, path_or_hf_repo=model_path)
-        except Exception:
-            pass  # Warmup may fail on dummy data, that's ok — model is loaded
-        finally:
-            Path(warmup_file.name).unlink(missing_ok=True)
-        model_loaded = True
-    except Exception:
-        log.exception("Failed to load model '%s'", model_path)
-        sys.exit(1)
+    if not _try_mlx():
+        if not _try_faster_whisper():
+            log.error("All backends failed (install mlx-whisper or faster-whisper)")
+            sys.exit(1)
 
-    log.info("Model loaded! API: http://localhost:%d/v1/audio/transcriptions", args.port)
+    log.info("API: http://localhost:%d/v1/audio/transcriptions", args.port)
     uvicorn.run(app, host="127.0.0.1", port=args.port)
 
 

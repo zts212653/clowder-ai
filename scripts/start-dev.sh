@@ -260,9 +260,14 @@ apply_profile_defaults() {
     case "$profile" in
         dev)
             _PROF_ANTHROPIC_PROXY_ENABLED=1
-            _PROF_ASR_ENABLED=1
-            _PROF_TTS_ENABLED=1
-            _PROF_LLM_POSTPROCESS_ENABLED=1
+            # Sidecar lifecycle is owned by the API startup reconciler — dev
+            # profile keeps proxy ON but no longer auto-spawns ML sidecars here.
+            # Enable services in console; API starts them via /api/services/:id/start.
+            # Setting these to 1 only re-enables the legacy script-based path and
+            # will double-start sidecars (one via this script, one via API).
+            _PROF_ASR_ENABLED=0
+            _PROF_TTS_ENABLED=0
+            _PROF_LLM_POSTPROCESS_ENABLED=0
             _PROF_AUDIO_SERVICE_ENABLED=0
             _PROF_MESSAGE_TTL_SECONDS=0
             _PROF_THREAD_TTL_SECONDS=0
@@ -369,25 +374,50 @@ resolve_config "REDIS_PROFILE"
 : "${REDIS_PROFILE:=dev}"
 
 derive_embed_enabled() {
+    # EMBED_MODE only controls the API in-process embedding mode (off/shadow/on).
+    # Sidecar lifecycle is owned by the API startup reconciler — this script
+    # no longer derives EMBED_ENABLED=1 from EMBED_MODE.
     local explicit="${EMBED_ENABLED-}"
-    local mode="${EMBED_MODE:-off}"
     if [ -n "$explicit" ]; then
         _SRC_EMBED_ENABLED="env/.env override"
         return
     fi
-
-    case "$mode" in
-        on|shadow)
-            EMBED_ENABLED=1
-            ;;
-        *)
-            EMBED_ENABLED=0
-            ;;
-    esac
-    _SRC_EMBED_ENABLED="derived from EMBED_MODE=${mode}"
+    EMBED_ENABLED=0
+    _SRC_EMBED_ENABLED="default 0 (sidecar managed by API lifecycle)"
 }
 
 derive_embed_enabled
+
+# Sidecar lifecycle is owned by the API startup reconciler reading
+# .cat-cafe/services.json. Enable services in Console; the API spawns them
+# via /api/services/:id/start. Any explicit `.env` flags like ASR_ENABLED=1
+# are transferred to the API service flags (CAT_CAFE_SERVICE_*_ENABLED) so
+# the reconciler treats them as user-enabled, then zeroed here so the rest
+# of this script never branches on the legacy direct-spawn path.
+preserve_explicit_service_flag_for_api() {
+    local source_var="$1"
+    local api_var="$2"
+    local src_meta="_SRC_${source_var}"
+    if [ "${!src_meta:-}" = ".env override" ] && [ -n "${!source_var:-}" ]; then
+        export "${api_var}=${!source_var}"
+    fi
+}
+
+if [ "${ASR_ENABLED:-0}" = "1" ] || [ "${TTS_ENABLED:-0}" = "1" ] \
+   || [ "${LLM_POSTPROCESS_ENABLED:-0}" = "1" ] || [ "${EMBED_ENABLED:-0}" = "1" ] \
+   || [ "${AUDIO_SERVICE_ENABLED:-0}" = "1" ]; then
+    echo "[start-dev] *_ENABLED detected — transferring to API service flags; sidecar lifecycle is owned by the API startup reconciler."
+fi
+preserve_explicit_service_flag_for_api "ASR_ENABLED" "CAT_CAFE_SERVICE_ASR_ENABLED"
+preserve_explicit_service_flag_for_api "TTS_ENABLED" "CAT_CAFE_SERVICE_TTS_ENABLED"
+preserve_explicit_service_flag_for_api "LLM_POSTPROCESS_ENABLED" "CAT_CAFE_SERVICE_LLM_POSTPROCESS_ENABLED"
+preserve_explicit_service_flag_for_api "EMBED_ENABLED" "CAT_CAFE_SERVICE_EMBED_ENABLED"
+preserve_explicit_service_flag_for_api "AUDIO_SERVICE_ENABLED" "CAT_CAFE_SERVICE_AUDIO_ENABLED"
+ASR_ENABLED=0
+TTS_ENABLED=0
+LLM_POSTPROCESS_ENABLED=0
+EMBED_ENABLED=0
+AUDIO_SERVICE_ENABLED=0
 
 default_redis_storage_key() {
     local profile="${1:-$REDIS_PROFILE}"
@@ -688,18 +718,9 @@ kill_managed_ports() {
     if [ "${ANTHROPIC_PROXY_ENABLED:-0}" = "1" ]; then
         [ "${ANTHROPIC_PROXY_ENABLED:-1}" != "0" ] && [ "${ANTHROPIC_PROXY_ENABLED:-1}" != "0" ] && kill_port ${ANTHROPIC_PROXY_PORT:-9877} "Proxy"
     fi
-    if [ "${ASR_ENABLED:-0}" = "1" ]; then
-        kill_port ${WHISPER_PORT:-9876} "ASR"
-    fi
-    if [ "${TTS_ENABLED:-0}" = "1" ]; then
-        kill_port ${TTS_PORT:-9879} "TTS"
-    fi
-    if [ "${LLM_POSTPROCESS_ENABLED:-0}" = "1" ]; then
-        kill_port ${LLM_POSTPROCESS_PORT:-9878} "LLM后修"
-    fi
-    if [ "${AUDIO_SERVICE_ENABLED:-0}" = "1" ]; then
-        kill_port ${AUDIO_SERVICE_PORT:-9881} "Audio采集"
-    fi
+    # Sidecar ports (ASR/TTS/LLM/Embed/Audio) are owned by the API startup
+    # reconciler now; start-dev does not direct-spawn them, so cleanup does
+    # not need to kill those ports — stopping the API process is enough.
 }
 
 # 轮询等待端口监听（ML 模型加载需要时间）
@@ -747,23 +768,6 @@ wait_for_port_or_exit() {
     return 1
 }
 
-# Sidecar 状态机：disabled → launching → ready | failed
-# 用法: start_sidecar <name> <state_var> <port> <timeout> <launch_cmd...>
-start_sidecar() {
-    local name="$1" state_var="$2" port="$3" timeout="$4"
-    shift 4
-    local launch_cmd="$*"
-
-    eval "${state_var}=launching"
-    echo "  启动 ${name} (端口 ${port})..."
-    background_eval_with_null_stdin "$launch_cmd"
-    if wait_for_port "$port" "$name" "$timeout"; then
-        eval "${state_var}=ready"
-    else
-        eval "${state_var}=failed"
-    fi
-}
-
 # 后台 Node dev 进程（tsx watch / next dev）在 macOS + Node 25 下若继承 TTY stdin，
 # 可能在读取 fd0 时抛出 `TTY.onStreamRead` EIO。统一把后台任务 stdin 切到 /dev/null。
 background_eval_with_null_stdin() {
@@ -809,35 +813,6 @@ frontend_launch_command() {
 
 web_production_build_ready() {
     [ -f "$PROJECT_DIR/packages/web/.next/BUILD_ID" ]
-}
-
-# Sidecar summary: ready → 地址, failed → 报告, disabled → 静默
-print_sidecar_summary_all() {
-    local name state_var port state
-    for entry in "ASR:_STATE_ASR:${ASR_PORT:-9876}" "TTS:_STATE_TTS:${TTS_PORT_VAL:-9879}" "LLM后修:_STATE_LLM_PP:${LLM_PP_PORT:-9878}" "Embedding:_STATE_EMBED:${EMBED_PORT:-9880}" "Audio采集:_STATE_AUDIO:${AUDIO_SERVICE_PORT:-9881}"; do
-        name="${entry%%:*}"
-        local rest="${entry#*:}"
-        state_var="${rest%%:*}"
-        port="${rest#*:}"
-        state="${!state_var}"
-        case "$state" in
-            ready)   echo "  - ${name}:      http://localhost:${port}" ;;
-            failed)  echo -e "  - ${name}:      ${RED:-}启动失败${NC:-}" ;;
-        esac
-    done
-}
-
-# 检查 sidecar 依赖是否存在（ENABLED=1 时调用）
-# 用法: check_sidecar_dep <name> <command>
-# 返回 0 = 存在, 1 = 缺失（并打印安装提示）
-check_sidecar_dep() {
-    local name="$1" cmd="$2"
-    if ! command -v "$cmd" &>/dev/null; then
-        echo -e "${RED:-}  ✗ ${name} 需要 ${cmd}，但未安装${NC:-}"
-        echo "    请运行: ./scripts/setup.sh 或手动安装 ${cmd}"
-        return 1
-    fi
-    return 0
 }
 
 # 清理缓存
@@ -1358,88 +1333,11 @@ main() {
         echo -e "${YELLOW}  ⚠ Anthropic Proxy 已禁用 (ANTHROPIC_PROXY_ENABLED=0)${NC}"
     fi
 
-    # Sidecar 状态初始化
-    ASR_PORT=${WHISPER_PORT:-9876}
-    TTS_PORT_VAL=${TTS_PORT:-9879}
-    LLM_PP_PORT=${LLM_POSTPROCESS_PORT:-9878}
-    _STATE_ASR=disabled
-    _STATE_TTS=disabled
-    _STATE_LLM_PP=disabled
-    _STATE_EMBED=disabled
-    _STATE_AUDIO=disabled
-
-    # Qwen3-ASR Server (语音输入 — 替代 Whisper，同端口 drop-in)
-    if [ "${ASR_ENABLED:-0}" = "1" ]; then
-        if ! check_sidecar_dep "ASR" "python3"; then
-            _STATE_ASR=failed
-        elif [ -f "scripts/qwen3-asr-server.sh" ]; then
-            start_sidecar "Qwen3-ASR" "_STATE_ASR" "$ASR_PORT" "${ASR_TIMEOUT:-30}" \
-                "WHISPER_PORT=$ASR_PORT bash scripts/qwen3-asr-server.sh"
-        elif [ -f "scripts/whisper-server.sh" ]; then
-            start_sidecar "Whisper ASR" "_STATE_ASR" "$ASR_PORT" "${ASR_TIMEOUT:-30}" \
-                "WHISPER_PORT=$ASR_PORT bash scripts/whisper-server.sh"
-        else
-            echo -e "${RED}  ✗ ASR 已启用，但脚本未找到${NC}"
-            echo "    请运行: ./scripts/setup.sh"
-            _STATE_ASR=failed
-        fi
-    fi
-
-    # TTS Server (语音合成 — Qwen3-TTS / Kokoro / edge-tts)
-    if [ "${TTS_ENABLED:-0}" = "1" ]; then
-        if ! check_sidecar_dep "TTS" "python3"; then
-            _STATE_TTS=failed
-        elif [ -f "scripts/tts-server.sh" ]; then
-            start_sidecar "TTS" "_STATE_TTS" "$TTS_PORT_VAL" "${TTS_TIMEOUT:-30}" \
-                "TTS_PORT=$TTS_PORT_VAL bash scripts/tts-server.sh"
-        else
-            echo -e "${RED}  ✗ TTS 已启用，但脚本未找到${NC}"
-            echo "    请运行: ./scripts/setup.sh"
-            _STATE_TTS=failed
-        fi
-    fi
-
-    # LLM 后修 Server (语音转写纠正 — Qwen3-4B)
-    if [ "${LLM_POSTPROCESS_ENABLED:-0}" = "1" ]; then
-        if ! check_sidecar_dep "LLM 后修" "python3"; then
-            _STATE_LLM_PP=failed
-        elif [ -f "scripts/llm-postprocess-server.sh" ]; then
-            start_sidecar "LLM 后修" "_STATE_LLM_PP" "$LLM_PP_PORT" "${LLM_TIMEOUT:-60}" \
-                "LLM_POSTPROCESS_PORT=$LLM_PP_PORT bash scripts/llm-postprocess-server.sh"
-        else
-            echo -e "${RED}  ✗ LLM 后修已启用，但脚本未找到${NC}"
-            echo "    请运行: ./scripts/setup.sh"
-            _STATE_LLM_PP=failed
-        fi
-    fi
-
-    # Embedding Server (F102 记忆系统 — Qwen3-Embedding MLX GPU)
-    if [ "${EMBED_ENABLED:-0}" = "1" ]; then
-        if ! check_sidecar_dep "Embedding" "python3"; then
-            _STATE_EMBED=failed
-        elif [ -f "scripts/embed-server.sh" ]; then
-            start_sidecar "Embedding" "_STATE_EMBED" "${EMBED_PORT:-9880}" "${EMBED_TIMEOUT:-30}" \
-                "EMBED_PORT=${EMBED_PORT:-9880} bash scripts/embed-server.sh"
-        else
-            echo -e "${RED}  ✗ Embedding 已启用，但脚本未找到${NC}"
-            echo "    请运行: ./scripts/setup.sh"
-            _STATE_EMBED=failed
-        fi
-    fi
-
-    # Audio Capture Service (F195 会议音频采集 — ScreenCaptureKit + ASR)
-    if [ "${AUDIO_SERVICE_ENABLED:-0}" = "1" ]; then
-        if ! check_sidecar_dep "Audio采集" "python3"; then
-            _STATE_AUDIO=failed
-        elif [ -f "scripts/meeting-copilot/audio-service.py" ]; then
-            local audio_port="${AUDIO_SERVICE_PORT:-9881}"
-            start_sidecar "Audio采集" "_STATE_AUDIO" "$audio_port" "${AUDIO_TIMEOUT:-10}" \
-                "AUDIO_SERVICE_PORT=$audio_port python3 scripts/meeting-copilot/audio-service.py"
-        else
-            echo -e "${RED}  ✗ Audio采集已启用，但脚本未找到${NC}"
-            _STATE_AUDIO=failed
-        fi
-    fi
+    # Sidecar services (ASR / TTS / LLM postprocess / Embedding / Audio
+    # capture) are no longer direct-spawned here. The API startup reconciler
+    # reads .cat-cafe/services.json and brings up the services the user
+    # enabled in Console; legacy *_ENABLED .env flags have already been
+    # transferred to CAT_CAFE_SERVICE_*_ENABLED upstream of this point.
 
     API_LAUNCH_CMD="$(api_launch_command)"
     if [ "${CAT_CAFE_DIRECT_NO_WATCH:-0}" = "1" ]; then
@@ -1497,7 +1395,6 @@ main() {
     echo "  - Frontend: http://localhost:$WEB_PORT"
     echo "  - API:      http://localhost:$API_PORT"
     [ "${ANTHROPIC_PROXY_ENABLED:-0}" = "1" ] && echo "  - Proxy:    http://localhost:$PROXY_PORT"
-    print_sidecar_summary_all
     echo -e "  - 前端模式: $PWA_INFO"
     echo -e "  - 存储:     $STORAGE_INFO"
     echo ""

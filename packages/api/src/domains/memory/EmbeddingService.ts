@@ -1,9 +1,12 @@
 // F102 Phase C/G: EmbeddingService — HTTP client to external GPU embedding server
 // Replaces in-process ONNX (LL-034: must not run model inference in API process)
 //
-// The actual model runs in scripts/embed-api.py (independent Python process on GPU).
+// The actual model runs in scripts/services/embed-api.py (independent Python process on GPU).
 // This service is just an HTTP client, like MlxAudioTtsProvider / WhisperSttProvider.
 
+import { normalizeLoopbackUrl } from '../services/loopback-url.js';
+import { getServiceConfig } from '../services/service-config.js';
+import { getServiceManifest, resolveServiceEndpoint } from '../services/service-manifest.js';
 import type { EmbedModelInfo, IEmbeddingService } from './interfaces.js';
 
 interface EmbeddingServiceConfig {
@@ -26,9 +29,12 @@ interface HealthResponse {
   dim: number;
 }
 
+// Mirror of embed-api.py's MAX_BATCH_SIZE (scripts/services/embed-api.py).
+// Server rejects batches > this with HTTP 400, so the client must split.
+const EMBED_BATCH_SIZE = 64;
+
 export class EmbeddingService implements IEmbeddingService {
   private config: EmbeddingServiceConfig;
-  private baseUrl: string;
   private ready = false;
   private modelId = '';
   private modelRev = 'http-client';
@@ -38,10 +44,21 @@ export class EmbeddingService implements IEmbeddingService {
 
   constructor(config: EmbeddingServiceConfig) {
     this.config = config;
-    // P1 fix (砚砚 review): derive from EMBED_PORT if EMBED_URL not set,
-    // so custom sidecar port is respected without needing both env vars
-    const port = process.env.EMBED_PORT ?? '9880';
-    this.baseUrl = process.env.EMBED_URL ?? `http://127.0.0.1:${port}`;
+  }
+
+  // Resolve the embedding endpoint per request via the service manifest +
+  // persisted services.json so /install / /reconfigure-driven port changes
+  // flow into the API client without an API restart (codex P1 2026-05-24,
+  // outdated thread). EMBED_URL / EMBED_PORT env still win because
+  // resolveServiceEndpoint reads endpointEnvVars and portFallback first.
+  private resolveBaseUrl(): string {
+    const service = getServiceManifest('embedding-model');
+    if (!service) {
+      const port = process.env.EMBED_PORT ?? '9880';
+      return normalizeLoopbackUrl(process.env.EMBED_URL ?? `http://127.0.0.1:${port}`);
+    }
+    const resolved = resolveServiceEndpoint(service, process.env, getServiceConfig('embedding-model'));
+    return normalizeLoopbackUrl(resolved ?? 'http://127.0.0.1:9880');
   }
 
   async load(): Promise<void> {
@@ -52,7 +69,7 @@ export class EmbeddingService implements IEmbeddingService {
 
     // Probe the external embed-api server via /health
     try {
-      const res = await fetch(`${this.baseUrl}/health`, {
+      const res = await fetch(`${this.resolveBaseUrl()}/health`, {
         signal: AbortSignal.timeout(5000),
       });
       if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
@@ -69,6 +86,11 @@ export class EmbeddingService implements IEmbeddingService {
 
   isReady(): boolean {
     return this.ready;
+  }
+
+  markReady(modelId?: string): void {
+    this.ready = true;
+    if (modelId) this.modelId = modelId;
   }
 
   async reprobeIfNeeded(): Promise<void> {
@@ -89,9 +111,22 @@ export class EmbeddingService implements IEmbeddingService {
 
   async embed(texts: string[]): Promise<Float32Array[]> {
     if (!this.ready) throw new Error('EmbeddingService not ready — embed-api server not available');
+    if (texts.length === 0) return [];
 
+    const results: Float32Array[] = new Array(texts.length);
+    for (let offset = 0; offset < texts.length; offset += EMBED_BATCH_SIZE) {
+      const batch = texts.slice(offset, offset + EMBED_BATCH_SIZE);
+      const vectors = await this.embedBatch(batch);
+      for (let i = 0; i < vectors.length; i++) {
+        results[offset + i] = vectors[i]!;
+      }
+    }
+    return results;
+  }
+
+  private async embedBatch(texts: string[]): Promise<Float32Array[]> {
     const timeoutMs = this.config.embedTimeoutMs;
-    const res = await fetch(`${this.baseUrl}/v1/embeddings`, {
+    const res = await fetch(`${this.resolveBaseUrl()}/v1/embeddings`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ input: texts }),
@@ -99,19 +134,16 @@ export class EmbeddingService implements IEmbeddingService {
     });
 
     if (!res.ok) {
-      throw new Error(`Embed API error: ${res.status} ${res.statusText}`);
+      const detail = await res.text().catch(() => '');
+      throw new Error(`Embed API error: ${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ''}`);
     }
 
     const body = (await res.json()) as EmbedApiResponse;
-
-    // Convert number[] to Float32Array with MRL dim check
     const targetDim = this.config.embedDim;
     return body.data
       .sort((a, b) => a.index - b.index)
       .map((d) => {
         const emb = d.embedding;
-        // Server already does MRL truncation + L2 normalization,
-        // but guard against dim mismatch
         const arr = new Float32Array(targetDim);
         for (let i = 0; i < Math.min(emb.length, targetDim); i++) {
           arr[i] = emb[i]!;
