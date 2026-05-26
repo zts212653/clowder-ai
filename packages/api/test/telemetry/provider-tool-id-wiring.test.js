@@ -149,17 +149,70 @@ test('F153 Phase J AC-J2 CatAgent: stream-parser tool_use yield carries block.id
   );
 });
 
-test('F153 Phase J AC-J2 CatAgent: tool_result for executed tools carries toolUseId + status', () => {
+test('F153 Phase J AC-J2 CatAgent: tool_result carries toolUseId + status from executeTools (no content-string heuristic)', () => {
   const src = readFileSync(
     resolve(__dirname, '../../src/domains/cats/services/agents/providers/catagent/CatAgentService.ts'),
     'utf8',
   );
-  // Normal tool_result path (after executeTools) must carry r.id and structured status.
+  // R1 P2 fix: status comes from r.status (executeTools execution edge),
+  // NOT from content.startsWith('Error:') heuristic.
   assert.ok(src.includes('toolUseId: r.id'), 'CatAgent tool_result must carry r.id as toolUseId');
+  assert.ok(src.includes('toolResultStatus: r.status'), 'CatAgent must use r.status from executeTools');
   assert.ok(
-    src.includes("toolResultStatus: isError ? 'error' : 'ok'"),
-    'CatAgent must derive status from content "Error:" prefix heuristic',
+    !src.includes("startsWith('Error:')"),
+    'content-string heuristic must be removed (砚砚 R1 P2 / cloud Codex P2)',
   );
+});
+
+// ── CatAgent behavioral: executeCatAgentTools status comes from execution edge ──
+
+const { executeCatAgentTools } = await import(
+  '../../dist/domains/cats/services/agents/providers/catagent/CatAgentService.js'
+);
+
+const fakeSchema = (name) => ({
+  name,
+  description: 'test',
+  input_schema: { type: 'object', properties: {}, required: [] },
+});
+
+test('F153 Phase J AC-J2 CatAgent R1 P2 fix: successful tool returning "Error: literal" content stays status=ok', async () => {
+  const blocks = [{ id: 'use-1', type: 'tool_use', name: 'fake_read', input: {} }];
+  const tools = [
+    {
+      name: 'fake_read',
+      schema: fakeSchema('fake_read'),
+      // Legitimate "Error: 200 OK" log-like content — must NOT be mis-marked as error.
+      execute: async () => 'Error: 200 OK from upstream — this is the file content',
+    },
+  ];
+  const [result] = await executeCatAgentTools(blocks, tools);
+  assert.equal(result.id, 'use-1');
+  assert.equal(result.status, 'ok', 'successful tool stays ok regardless of content text (KD-38 honesty)');
+  assert.ok(result.content.startsWith('Error: 200 OK'), 'content preserved verbatim');
+});
+
+test('F153 Phase J AC-J2 CatAgent R1 P2 fix: thrown error → status=error', async () => {
+  const blocks = [{ id: 'use-2', type: 'tool_use', name: 'broken_tool', input: {} }];
+  const tools = [
+    {
+      name: 'broken_tool',
+      schema: fakeSchema('broken_tool'),
+      execute: async () => {
+        throw new Error('upstream timeout');
+      },
+    },
+  ];
+  const [result] = await executeCatAgentTools(blocks, tools);
+  assert.equal(result.status, 'error', 'thrown error → status=error');
+  assert.ok(result.content.includes('upstream timeout'));
+});
+
+test('F153 Phase J AC-J2 CatAgent R1 P2 fix: unknown tool → status=error', async () => {
+  const blocks = [{ id: 'use-3', type: 'tool_use', name: 'ghost_tool', input: {} }];
+  const [result] = await executeCatAgentTools(blocks, []);
+  assert.equal(result.status, 'error', 'unknown tool → status=error');
+  assert.ok(result.content.includes('unknown tool'));
 });
 
 test('F153 Phase J AC-J2 CatAgent: orphan tool_result (stream interrupted) carries toolUseId + status=error', () => {
