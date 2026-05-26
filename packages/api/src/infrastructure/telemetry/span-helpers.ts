@@ -6,6 +6,7 @@
  */
 
 import { context, type Span, SpanStatusCode, trace } from '@opentelemetry/api';
+import { isMcpToolName } from '../../domains/cats/services/tool-usage/classify.js';
 import {
   AGENT_ID,
   GENAI_MODEL,
@@ -74,14 +75,14 @@ function classifyToolCategory(toolName: string): string | undefined {
   return undefined;
 }
 
-function isMcpTool(toolName: string): boolean {
-  return toolName.startsWith('cat_cafe_') || toolName.startsWith('mcp__') || toolName.startsWith('signal_');
-}
-
 /**
  * Record a tool_use. MCP/business tools get their own child span;
  * basic tools (Bash/Read/Write/…) only increment a counter attribute
  * on the invocation span to avoid flooding the trace tree.
+ *
+ * F153 Phase J KD-40: uses `isMcpToolName` from `tool-usage/classify.ts` instead
+ * of the previous local `isMcpTool`, which recognized only `cat_cafe_` / `mcp__` /
+ * `signal_` but missed Codex `mcp:` prefix.
  */
 export function recordToolUseSpan(
   invocationSpan: Span,
@@ -89,7 +90,7 @@ export function recordToolUseSpan(
   toolName: string,
   toolInput?: Record<string, unknown>,
 ): void {
-  if (!isMcpTool(toolName)) {
+  if (!isMcpToolName(toolName)) {
     const prev = (toolCallCounts.get(invocationSpan) ?? 0) + 1;
     toolCallCounts.set(invocationSpan, prev);
     invocationSpan.setAttribute('tool.basic_call_count', prev);

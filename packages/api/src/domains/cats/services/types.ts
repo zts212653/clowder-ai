@@ -143,10 +143,19 @@ export interface AgentMessage {
   ephemeralSession?: boolean;
   /** F211 A2: provider runtime lifecycle facts used by invocation to seal/create SessionRecords. */
   sessionLifecycle?: AntigravitySessionLifecycle;
-  /** Tool name (for 'tool_use' type) */
+  /** Tool name (for 'tool_use' and 'tool_result' types; required by F153 Phase J AC-J1) */
   toolName?: string;
   /** Tool input parameters (for 'tool_use' type) */
   toolInput?: Record<string, unknown>;
+  /** F153 Phase J AC-J1: native provider tool call id; used to pair tool_use ↔ tool_result for real-duration spans.
+   *  Provider transformers MUST inject this from raw payload when available (Claude tool_use.id, DARE tool_call_id,
+   *  CatAgent tool_use_id, Codex item.id, etc). Providers without native id may omit; ToolSpanTracker treats
+   *  missing id as fallback (no span open, no fake duration) per KD-41. */
+  toolUseId?: string;
+  /** F153 Phase J AC-J1: structured tool execution outcome (for 'tool_result' type).
+   *  Provider transformers MUST map from raw payload (is_error / success / exitCode / status) instead of
+   *  letting downstream guess from content string. Use 'unknown' when raw signal is genuinely absent. */
+  toolResultStatus?: 'ok' | 'error' | 'unknown';
   /** Error message (for 'error' type) */
   error?: string;
   /** Whether this is the final 'done' in a multi-cat invocation (for 'done' type) */
