@@ -87,7 +87,7 @@ export class WeixinMpLimbNode implements ILimbNode {
     const digest = params['digest'] as string | undefined;
     const coverImageUrl = params['coverImageUrl'] as string | undefined;
     let thumbMediaId = params['thumbMediaId'] as string | undefined;
-    const publish = params['publish'] as boolean | undefined;
+    const publish = params['publish'] === true;
 
     const htmlContent = markdownToWxHtml(markdown);
 
