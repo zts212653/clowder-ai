@@ -87,6 +87,7 @@ import { createLabelStore } from './domains/cats/services/stores/factories/Label
 import { createMemoryStore } from './domains/cats/services/stores/factories/MemoryStoreFactory.js';
 import { createMessageStore } from './domains/cats/services/stores/factories/MessageStoreFactory.js';
 import { createPendingRequestStore } from './domains/cats/services/stores/factories/PendingRequestStoreFactory.js';
+import { createProposalStore } from './domains/cats/services/stores/factories/ProposalStoreFactory.js';
 import { createPushSubscriptionStore } from './domains/cats/services/stores/factories/PushSubscriptionStoreFactory.js';
 import { createReadStateStore } from './domains/cats/services/stores/factories/ReadStateStoreFactory.js';
 import { createSummaryStore } from './domains/cats/services/stores/factories/SummaryStoreFactory.js';
@@ -179,6 +180,7 @@ import {
   projectSetupRoute,
   projectsBootstrapRoutes,
   projectsRoutes,
+  proposalRoutes,
   pushRoutes,
   queueRoutes,
   quotaRoutes,
@@ -470,6 +472,7 @@ async function main(): Promise<void> {
   const sessionStore = redis ? new SessionStore(redis) : undefined;
   const deliveryCursorStore = new DeliveryCursorStore(sessionStore);
   const threadStore = createThreadStore(redis);
+  const proposalStore = createProposalStore(redis);
   // F155 B-4/B-6: Guide state is runtime-only (in-memory, resets on restart)
   const { InMemoryGuideSessionStore } = await import('./domains/guides/GuideSessionRepository.js');
   const guideSessionStore = new InMemoryGuideSessionStore();
@@ -1596,6 +1599,7 @@ async function main(): Promise<void> {
     threadStore,
     sessionChainStore,
     runtimeSessionStore,
+    proposalStore,
     agentRegistry,
     router,
     invocationRecordStore,
@@ -1669,6 +1673,15 @@ async function main(): Promise<void> {
     socketManager,
   });
   await app.register(threadExportRoutes, { threadStore });
+  await app.register(proposalRoutes, {
+    proposalStore,
+    threadStore,
+    messageStore,
+    socketManager,
+    router,
+    invocationQueue,
+    queueProcessor,
+  });
   // F142: shared connector binding store — reused by threadCatsRoutes AND connector gateway
   const { RedisConnectorThreadBindingStore } = await import(
     './infrastructure/connectors/RedisConnectorThreadBindingStore.js'

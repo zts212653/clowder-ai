@@ -1152,6 +1152,65 @@ export async function handleBootcampEnvCheck(input: { threadId: string }): Promi
   return callbackPost('/api/callbacks/bootcamp-env-check', { threadId: input.threadId });
 }
 
+// ============ Propose Thread (F128) ============
+
+export const proposeThreadInputSchema = {
+  title: z.string().min(1).max(200).describe('Title for the proposed thread (user can edit before approving)'),
+  reason: z.string().min(1).max(1000).describe('Why a new thread is needed (shown to the user on the proposal card)'),
+  preferredCats: z
+    .array(z.string().min(1))
+    .max(10)
+    .optional()
+    .describe('Optional cat IDs to preselect for the new thread (e.g. ["codex","gemini"])'),
+  initialMessage: z
+    .string()
+    .max(4000)
+    .optional()
+    .describe('Optional first message body that will be posted by the user into the new thread on approve'),
+  parentThreadId: z.string().min(1).optional().describe('Optional parent thread ID. Defaults to the current thread.'),
+  clientRequestId: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe('Optional idempotency key. Resending with the same value returns the same proposalId.'),
+};
+
+export async function handleProposeThread(input: {
+  title: string;
+  reason: string;
+  preferredCats?: string[] | undefined;
+  initialMessage?: string | undefined;
+  parentThreadId?: string | undefined;
+  clientRequestId?: string | undefined;
+}): Promise<ToolResult> {
+  // P2-1: always send an idempotency key — auto-generate when the caller didn't supply one,
+  // so transient network retries from callbackPost never produce duplicate proposals.
+  const body: Record<string, unknown> = {
+    title: input.title,
+    reason: input.reason,
+    clientRequestId: input.clientRequestId ?? randomUUID(),
+  };
+  if (input.preferredCats?.length) body.preferredCats = input.preferredCats;
+  if (input.initialMessage) body.initialMessage = input.initialMessage;
+  if (input.parentThreadId) body.parentThreadId = input.parentThreadId;
+
+  const result = await callbackPost('/api/callbacks/propose-thread', body);
+  if (!result.isError) {
+    try {
+      const data = JSON.parse((result.content[0] as { text: string }).text);
+      if (data?.status === 'stale_ignored') {
+        return errorResult(
+          'Proposal was NOT created: this invocation has been superseded by a newer one (stale_ignored).',
+        );
+      }
+    } catch {
+      // parse failure is fine
+    }
+  }
+  return result;
+}
+
 // ============ Thread Cats Discovery ============
 
 export const getThreadCatsInputSchema = {};
@@ -1437,6 +1496,22 @@ export const callbackTools = [
       'Returns the full check results for display to the user. Only use during bootcamp phase-2-env-check.',
     inputSchema: bootcampEnvCheckInputSchema,
     handler: handleBootcampEnvCheck,
+  },
+  // F128: Cat-initiated thread proposal (user approves before thread is created)
+  {
+    name: 'cat_cafe_propose_thread',
+    description:
+      'Propose a new thread to the user. Returns proposalId, NOT a threadId — the thread is only created after the user approves the proposal card. Use sparingly: ' +
+      'only when a clearly separable, long-running discussion genuinely deserves its own thread, or when the owner asks for "新开一个 thread". ' +
+      'Do NOT use to escape the current conversation, to split routine tasks, or proactively without an obvious need. ' +
+      'parentThreadId defaults to the current thread. After proposing, continue your current work — do not assume the thread exists until the user approves. ' +
+      'WRITING @-mentions in `initialMessage`: use the SAME stable handle you use in the current thread (e.g. `@砚砚`, `@opus46`, `@gemini`) — NOT the raw catId form like `@cat-rcs85pvn`. ' +
+      'Server normalizes known catIds to stable handles defensively, but always prefer the handle form so the proposal card reads naturally to the user. ' +
+      'preferredCats accepts catIds (returned by cat_cafe_get_thread_cats), and dispatch will wake them in the listed order when the user approves. ' +
+      'FORK-AND-RETURN pattern (thread-orchestration skill Step 5c): if you proposed this thread to delegate a discussion or workflow, write into `initialMessage` who is responsible for reporting back to the source thread when work is done (e.g. "最后一棒猫负责 cat_cafe_cross_post_message 把结果回报到主 thread"). Server auto-injects a "## 主 Thread" header so cats can locate the parent, but you should still state the completion / report-back protocol explicitly so the cats inside the sub-thread know when to close the loop. ' +
+      'INTENT (serial vs ideate): by default the sub-thread first message is dispatched serially in the preferredCats order — write members in the exact order you want them woken (e.g. 接龙 / 轮转). If you genuinely want parallel ideation, tag the message with `#ideate`.',
+    inputSchema: proposeThreadInputSchema,
+    handler: handleProposeThread,
   },
   // ============ F155: Guide Engine ============
   {

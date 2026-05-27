@@ -49,6 +49,8 @@ const EXPECTED_TOOLS = [
   // Bootcamp tools (F087)
   'cat_cafe_update_bootcamp_state',
   'cat_cafe_bootcamp_env_check',
+  // F128: Cat-initiated thread proposal
+  'cat_cafe_propose_thread',
   // Callback-scoped memory tools
   'cat_cafe_retain_memory_callback',
   // Direct evidence tools (cat_cafe_reflect removed in F193 Phase D AC-D1)
@@ -148,6 +150,8 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_start_vote',
   'cat_cafe_update_bootcamp_state',
   'cat_cafe_bootcamp_env_check',
+  // F128: Cat-initiated thread proposal
+  'cat_cafe_propose_thread',
   'cat_cafe_submit_game_action',
   // F139 Phase 3A: Schedule tools
   'cat_cafe_list_schedule_templates',

@@ -1,137 +1,264 @@
 ---
 feature_ids: [F128]
-related_features: [F108, F050]
-related_decisions: [ADR-035]
-topics: [mcp, thread, autonomy, orchestration, community, approval, rich-block]
+related_features: []
+topics: [mcp, autonomy, proposal-flow]
 doc_kind: spec
-created: 2026-03-19
-source: community
-community_issue: https://github.com/zts212653/clowder-ai/issues/82
-community_pr: https://github.com/zts212653/clowder-ai/pull/85
+created: 2026-03-14
+updated: 2026-05-22
 ---
 
-# F128: Cat-Proposed Thread Creation — 猫猫提议创建 Thread
+# F128: Cat Thread Proposal (formerly "Cat-Initiated Thread Creation")
 
-> **Status**: spec | **Source**: clowder-ai #82 (bouillipx) / PR #85 | **Priority**: P2
-> **Design correction (2026-05-22)**: supersedes direct `cat_cafe_create_thread` with Proposal-First flow per ADR-035.
+> **Status**: spec v2 | **Owner**: opus | **Priority**: P1
+> **v1 archived**: direct-create semantics rejected by maintainer 2026-05-22 (#85, #82)
 
 ## Why
 
-猫目前无法帮助team lead准备新 thread。当话题需要独立上下文时（如新 issue 调查、子任务分配），猫只能口头请求team lead去前端手动创建，打断了自主工作流。
+Cats cannot create threads programmatically. When a topic needs its own thread, the cat has to ask the owner to do it in the frontend, breaking autonomous workflow.
 
-> 发现场景（issue #82）：team lead要求"新开一个 thread"，但猫没有 API 可调，只能等team lead手动操作。
+Encountered during #79: owner asked to "新开一个 thread" for the worktree location fix, but the cat had no API to do so.
 
-但直接给猫暴露 `cat_cafe_create_thread` 也不对。Thread 是用户可见、持久化、会改变工作空间结构的对象；猫可以起草创建信息，但不应悄悄创建。F128 的产品目标不是"猫绕过team lead创建 thread"，而是：
+## Product correction (2026-05-22, from #85 maintainer review)
 
-> 猫猫把新 thread 的信息填好，以卡片形式展示；team lead确认或编辑后，系统再创建。
+Threads are user-visible persistent workspace structure. Cats must **not** silently create them. The accepted flow is **proposal-first**:
+
+```
+cat proposes thread (prefilled card) → user reviews / edits / approves → backend creates thread
+```
+
+Direct `cat_cafe_create_thread` semantics are rejected. The replacement is `cat_cafe_propose_thread`.
 
 ## What
 
-### Phase A: Thread Proposal API + Rich Block（核心）
+### Single PR scope — propose flow end-to-end
 
-- `cat_cafe_propose_thread` MCP callback tool
-  - `POST /api/callbacks/thread-proposals` callback route（auth + zod schema）
-  - 必填：`title`（trim 后 1-200 字符）
-  - 必填：`why`（猫猫为什么建议新开 thread）
-  - 可选：`initialMessage`（创建后要投递到新 thread 的第一条消息）
-  - 可选：`preferredCats`（指定 thread 的默认猫）
-  - 可选：`parentThreadId`（默认从 invocation 当前 thread 推导）
-  - 可选：`projectPath`（默认继承 parent thread）
-  - 返回 `{ proposalId }`，不返回 `threadId`，因为此阶段尚未创建 thread
-- Thread proposal rich block
-  - 插入当前 thread，展示标题、原因、父 thread、默认猫、初始消息
-  - team lead可编辑字段
-  - 操作：Create / Edit / Dismiss
-- `POST /api/thread-proposals/:proposalId/approve`
-  - 必须由用户 principal 调用，不能由猫 callback token 自批
-  - 使用 idempotency key，重复点击不会创建重复 thread
-  - 校验 `parentThreadId` 归属与 `projectPath` 权限
-  - 创建成功后返回 `{ threadId }`
-- `POST /api/thread-proposals/:proposalId/reject`
-  - 更新卡片状态，不产生 thread
-- WebSocket `thread_created` 事件
-  - 新 thread 实时推送到前端 sidebar
-  - 源 thread proposal 卡片更新为 created 状态
-- `parentThreadId` 数据模型 — Thread 接口新增字段，Redis 维护 `thread:{parentId}:children` sorted set 二级索引
-- `getChildThreads(parentThreadId)` — 父 thread 发现子 thread
-- Audit trail
-  - 新 thread metadata 记录 `createdFromProposalId` / `sourceThreadId` / `approvedBy` / `approvedAt`
-  - 源 thread 自动追加系统消息：已创建子 thread，并链接到新 thread
-  - 新 thread 自动追加 seed message，说明来源与初始任务
+Owner decision (2026-05-22, mid-spec): do **not** split — proposal-first is a single coherent feature that's only useful end-to-end. The PR ships:
 
-### Phase B: 前端层级 UI + Proposal Card（需设计稿）
+| Layer | Scope |
+|-------|-------|
+| **Backend** | `RedisProposalStore`, `cat_cafe_propose_thread` MCP tool, `POST /api/callbacks/propose-thread` (cat auth), `POST /api/proposals/:id/approve` & `/reject` (user auth), audit fields, tests |
+| **Frontend** | Proposal card rendered in the source thread (reuses rich `card` block kind) with prefilled editable fields and Approve / Edit / Reject buttons; status transitions reflected via `proposal_updated` WS event |
+| **Prompt + skill** | `MCP_TOOLS_SECTION` updated for propose semantics; `thread-orchestration` skill rewritten for propose-first flow |
 
-- Thread proposal card 设计稿
-  - 紧凑态：标题 + why + Create / Dismiss
-  - 展开态：可编辑 title / preferredCats / initialMessage / projectPath
-  - Created 状态：显示 thread link
-  - Rejected 状态：保留审计但降低视觉权重
-- Sidebar 可折叠展开子 thread 树形展示
-- 树形连接线（├──/└──）+ 猫头像 + @handle 标签
-- 展开/收起状态 localStorage 持久化
-- **前置条件**：需 .pen 设计稿 + ThreadSidebar 重构（当前 727 行，超 350 行硬上限）
+### Deferred (NOT in this PR)
 
-### Phase C: Thread Orchestration Skill
+**Hierarchy sidebar UI** (parent/child tree rendering): kept on disk as v1 design reference, but explicitly **out of scope** here. Reason: between v1's `ThreadSidebar` and `main`, F190 console restructure reorganized the sidebar; layering hierarchy onto the v1 component shape would either revert F190 or create a hybrid that's worse than either. A separate follow-up will design hierarchy UI against the post-F190 sidebar shape if still desired. The backend `parentThreadId` field + `getChildThreads()` are kept so the hierarchy follow-up has the data it needs.
 
-- 文档化"拆解→建 thread→分猫→并行→汇聚"编排模式
-- 适配项目 skill manifest 体系
-- 明确要求：猫猫只能 propose，不直接 create
-- 明确何时不该 propose：当前 thread 内即可回答、只是临时子任务、用户已拒绝过同类提案
+## Backend design
 
-## Product Guardrail（ADR-035）
+### Proposal lifecycle
 
-F128 遵循 ADR-035 Proposal-First Agent Actions：
+```
+   propose (cat)            approve (user)            create (system)
+   ──────────►   pending   ──────────────►   approved   ────────►  thread created
+                    │
+                    │ reject (user)
+                    ▼
+                rejected
+```
 
-| 决策点 | F128 规则 |
-|--------|-----------|
-| 猫猫能否直接创建 thread | 默认不能 |
-| 猫猫能做什么 | 起草 thread proposal rich block |
-| 谁确认 | team lead或具备 thread create 权限的用户 |
-| 谁执行创建 | 后端使用用户确认上下文执行 |
-| 如何追踪 | proposalId + sourceThreadId + approvedBy + threadId 双向链接 |
-| 可否 trusted auto-create | 后续 settings opt-in，默认关闭 |
+### Data model — `Proposal`
+
+```ts
+interface ThreadProposal {
+  proposalId: string;          // UUID
+  status: 'pending' | 'approved' | 'rejected';
+
+  // Source / lineage
+  sourceThreadId: string;      // thread the cat was running in
+  sourceInvocationId: string;  // for audit / traceability
+  sourceCatId: CatId;          // cat that proposed
+
+  // Prefilled fields (editable by user before approve)
+  title: string;
+  reason: string;              // why cat thinks a new thread is needed
+  parentThreadId?: string;     // defaults to sourceThreadId, user can change
+  preferredCats?: CatId[];
+  initialMessage?: string;     // optional first message body for new thread
+  projectPath: string;         // inherited from source thread
+
+  // Audit
+  createdBy: string;           // userId from invocation record
+  createdAt: number;           // unix ms
+
+  // Approval outcome
+  approvedBy?: string;
+  approvedAt?: number;
+  createdThreadId?: string;    // backfilled when thread is created on approve
+
+  // Rejection outcome
+  rejectedBy?: string;
+  rejectedAt?: number;
+  rejectionReason?: string;
+}
+```
+
+### Storage — `RedisProposalStore`
+
+Following `RedisPendingRequestStore` / `RedisAuthorizationAuditStore` patterns:
+
+| Key | Type | Purpose |
+|-----|------|---------|
+| `proposal:{proposalId}` | hash | proposal fields |
+| `proposals:user:{userId}` | sorted set (score=createdAt) | user's proposals for dashboard |
+| `proposals:pending:{userId}` | sorted set (score=createdAt) | fast filter for pending UI |
+| `proposals:thread:{threadId}` | sorted set | proposals proposed in a thread (for card re-render lookup) |
+
+Approve transitions `status: pending → approved` and moves out of `proposals:pending:{userId}`.
+
+### Endpoints
+
+#### Cat side — `POST /api/callbacks/propose-thread` (cat callback auth)
+
+Body (Zod schema):
+```ts
+{
+  invocationId: string;
+  callbackToken: string;
+  title: string;             // .trim().min(1).max(200)
+  reason: string;            // .trim().min(1).max(1000)
+  preferredCats?: CatId[];   // max 10
+  initialMessage?: string;   // .max(4000)
+  parentThreadId?: string;   // auto-inferred from record.threadId if omitted
+  clientRequestId?: string;  // idempotency key
+}
+```
+
+Behavior:
+1. `registry.verify` + `registry.isLatest` guard (parity with `create_thread` v1)
+2. Idempotency: if `clientRequestId` is seen, return cached `proposalId`
+3. Auto-fill `sourceThreadId = record.threadId`, `parentThreadId = parentThreadId ?? sourceThreadId`, `projectPath = sourceThread.projectPath`
+4. Ownership check: if `parentThreadId` explicitly provided, verify it belongs to `record.userId` (403 otherwise)
+5. Create proposal row (status=pending)
+6. Emit a `proposal_created` WebSocket event scoped to the user → frontend renders the card in `sourceThreadId`
+7. Return `{ proposalId, status: 'pending' }`
+
+**This route does NOT create a thread.**
+
+#### User side — `POST /api/proposals/:proposalId/approve` (user auth via `resolveUserId`)
+
+Body (optional edits):
+```ts
+{
+  title?: string;
+  parentThreadId?: string;
+  preferredCats?: CatId[];
+  initialMessage?: string;
+}
+```
+
+Behavior:
+1. Resolve `userId` from `X-Cat-Cafe-User` (user auth)
+2. Load proposal; verify `proposal.createdBy === userId` (ownership; cross-user rejection)
+3. Idempotency: if already `approved`, return cached `{ threadId: proposal.createdThreadId }`
+4. If `rejected`, return 409 conflict
+5. Apply user edits to in-memory copy (do not mutate proposal record's prefilled fields beyond `approvedBy/approvedAt`)
+6. Validate `parentThreadId` ownership if provided/changed
+7. Create thread via `threadStore.create(userId, finalTitle, projectPath, finalParentThreadId, finalPreferredCats)`
+8. If `initialMessage` present, post it to the new thread as the user
+9. Update proposal: `status=approved, approvedBy, approvedAt, createdThreadId`
+10. Emit WebSocket events: `thread_created` (for sidebar) + `proposal_updated` (for card status flip)
+11. Return `{ threadId, proposalId, status: 'approved' }`
+
+#### User side — `POST /api/proposals/:proposalId/reject` (user auth)
+
+Body: `{ rejectionReason?: string }`
+- Same ownership check
+- Idempotent: re-reject is no-op
+- Cannot reject after approve (409)
+- Update proposal `status=rejected, rejectedBy, rejectedAt, rejectionReason`
+- Emit `proposal_updated`
+
+### MCP tool — `cat_cafe_propose_thread`
+
+Replaces `cat_cafe_create_thread` (deleted). Tool description (drafted, refine in implementation):
+
+> Propose a new thread to the user. The user will see a card with your proposed title and reason and can approve, edit, or reject. The new thread is **not** created until the user approves. Use sparingly — only when a new dedicated thread is genuinely needed (e.g. owner explicitly asks "open a new thread", or a clearly separable long-running investigation). Returns `proposalId`. Wait for the user's decision before assuming the new thread exists.
+
+### Reused infrastructure
+
+| Reused | From | Why |
+|--------|------|-----|
+| `InvocationRegistry.verify` + `isLatest` | callback-auth | Standard cat-callback auth |
+| `resolveUserId(request)` | request-identity | Standard user auth for approve/reject |
+| Rich `card` block + `interactive.confirm` actions | chat-types.ts | Proposal card renders as existing block kind — no new frontend primitive |
+| `emitToUser` socket pattern | callbacks.ts | Same as v1's `thread_created` broadcast, just different event names |
+| `clientRequestId` idempotency cache | post-message route | Battle-tested dedup pattern |
+
+### Code to delete from v1 worktree
+
+| File | Action |
+|------|--------|
+| `callback-create-thread-routes.ts` | rename + rewrite to `callback-propose-thread-routes.ts` |
+| `callback-tools.ts: cat_cafe_create_thread` | rename to `cat_cafe_propose_thread`, return shape changes |
+| `callback-create-thread.test.js` | rewrite for propose semantics |
+| Frontend hierarchy files (`ThreadHierarchyToggle.tsx`, `thread-hierarchy.ts`, `thread-hierarchy.test.ts`, hierarchy bits in `ThreadItem.tsx` / `ThreadSidebar.tsx`) | **delete** from this PR; defer to hierarchy follow-up (will redesign post-F190) |
+| `designs/F128-thread-hierarchy-sidebar.pen` | keep on disk but mark as deferred follow-up reference; this PR needs a new `F128-proposal-card.pen` |
+| `thread-orchestration` skill | rewrite to propose-first flow (cat proposes → wait for user approval → continue) |
+
+### Code to keep / extend
+
+- `ThreadStore.parentThreadId` field + Redis secondary index for children + `getChildThreads()` — useful for hierarchy follow-up, no harm keeping
+- `SystemPromptBuilder` MCP_TOOLS_SECTION entry — update wording for propose semantics
+- `serializeThread` / `hydrateThread` parentThreadId persistence — keep
 
 ## Acceptance Criteria
 
-- [ ] AC-A1: `cat_cafe_propose_thread` 工具只创建 proposal，不创建 thread
-- [ ] AC-A2: proposal rich block 在源 thread 可见，字段可编辑
-- [ ] AC-A3: approve endpoint 必须使用用户 principal，猫 callback token 不能自批
-- [ ] AC-A4: approve 有 idempotency key，重复点击不创建重复 thread
-- [ ] AC-A5: `parentThreadId` 必须从当前 invocation 推导或校验同用户归属
-- [ ] AC-A6: 创建成功后源 thread 和新 thread 双向链接
-- [ ] AC-A7: WebSocket 推送新 thread，并更新 proposal 卡片状态
-- [ ] AC-A8: reject/dismiss 不产生 thread，但保留审计记录
-- [ ] AC-A9: skill/system prompt 明确教猫何时 propose、何时不要 propose
-- [ ] AC-A10: 测试覆盖 happy path、重复 approve、跨用户 parentThreadId、reject、proposal card state update
+### Backend
 
-## Maintainer Review 结论（2026-03-19，已被 2026-05-22 产品修正补充）
+- [ ] AC-B1: `RedisProposalStore` implements create/get/listByUser/listPending/markApproved/markRejected with proper Redis indices
+- [ ] AC-B2: `POST /api/callbacks/propose-thread` creates proposal, does NOT create thread, returns `proposalId`, supports `clientRequestId` idempotency, enforces stale guard, validates parent ownership
+- [ ] AC-B3: `cat_cafe_propose_thread` MCP tool registered with strong description; old `cat_cafe_create_thread` removed
+- [ ] AC-B4: `POST /api/proposals/:id/approve` (user auth) creates thread, is idempotent on re-approve, rejects cross-user attempts (403), conflicts on already-rejected (409), applies user edits, posts initial message if provided, writes audit fields, emits both `thread_created` + `proposal_updated`
+- [ ] AC-B5: `POST /api/proposals/:id/reject` (user auth) is idempotent, conflicts on already-approved, writes audit, emits `proposal_updated`
+- [ ] AC-B6: `Proposal` schema in shared types matches the spec model above
+- [ ] AC-B7: Tests cover: cat auth happy path, stale guard, ownership rejection, idempotency, user approve happy path, double-approve idempotency, cross-user approve 403, approve-after-reject 409, reject happy path, reject-then-approve 409, edit-on-approve applied to created thread
 
-**Reviewer**: Ragdoll (Opus) + Maine Coon (Codex)
+### Frontend
 
-社区 PR #85 整包 Take-In 不可行，原建议拆三条线：
+- [ ] AC-F1: Proposal card renders in source thread on `proposal_created` socket event (no manual refresh)
+- [ ] AC-F2: Card prefills with cat-supplied fields; user can edit `title`, `parentThreadId`, `preferredCats`, `initialMessage` before approve
+- [ ] AC-F3: Approve button POSTs to `/api/proposals/:id/approve`; on success, sidebar shows new thread (via `thread_created` WS event); card flips to `approved` state with link to created thread
+- [ ] AC-F4: Reject button POSTs to `/api/proposals/:id/reject`; card flips to `rejected` state; thread is not created
+- [ ] AC-F5: Double-click protection on Approve/Reject (rely on backend idempotency + button disable on click)
+- [ ] AC-F6: Frontend tests cover render, edit, approve happy path, reject path, status flip via WS event
 
-| 线 | 范围 | 状态 |
-|----|------|------|
-| PR-A: API + MCP | callback route, MCP tool, parentThreadId, WebSocket, tests | 修 P2 后可合入 |
-| PR-B: 前端层级 UI | ThreadHierarchyToggle, thread-hierarchy.ts, Sidebar 改动 | 需 .pen 设计稿 + Sidebar 重构 |
-| PR-C: Skill | thread-orchestration SKILL.md + manifest | 适配后单独合入 |
+### Cross-cutting
 
-### 阻塞项（PR-A 合入前需修复）
+- [ ] AC-X1: All file sizes ≤ 350 lines (split routes/components if needed)
+- [ ] AC-X2: No `any` types
+- [ ] AC-X3: `MCP_TOOLS_SECTION` updated; `thread-orchestration` skill rewritten for propose-first
+- [ ] AC-X4: `pnpm check` + `pnpm lint` + all affected tests green
 
-1. **幂等性**：`create-thread` route 无 idempotency key，callbackPost 重试会创建重复 thread
-2. **parentThreadId 所有权校验**：当前接受任意 parentThreadId，可跨用户污染 children 索引
-3. **Redis N+1**：`getChildThreads` 逐个 `this.get(id)`，应用 pipeline
+## Risks
 
-### 建议改进
+| Risk | Mitigation |
+|------|-----------|
+| Proposal spam if cat ignores tool description | Rate limit per (userId, sourceThreadId) at store level; status visible to user in dashboard |
+| Approve race (two browser tabs) | Idempotency via `proposal.status` check + Redis WATCH/MULTI or single-route serialization |
+| Initial message posting fails after thread created | Thread creation already committed; post failure surfaces in API response; user can retry |
+| Frontend renders stale proposal status (cached card) | `proposal_updated` socket event triggers re-fetch; status read from store on click, not from cached block |
+| F190 console restructure conflicts with eventual PR-3 hierarchy UI | PR-3 is explicitly deferred and will design against post-F190 sidebar |
 
-4. softDelete/delete 应清理 children 索引
-5. `IThreadStore.create()` 4 个位置参数 → 建议 options 对象
-6. 合入时 squash commits
+## Out of scope
 
-### 2026-05-22 产品修正
+- Hierarchy sidebar UI (deferred to PR-3 or absorbed by F190 follow-up)
+- Cat-side polling for proposal status (cat returns control to user after proposing; doesn't wait synchronously)
+- Bulk approve/reject UI
 
-上述 review 聚焦在 PR #85 的技术拆分与 P2 缺陷；team lead在 2026-05-22 补充了更上层的产品判断：
+## Timeline
 
-> 猫猫创建 thread 之类的能力应该弹出一个卡片，填写好创建的信息，team lead点击再创建，不是悄摸摸创建。
+| Date | Event |
+|------|-------|
+| 2026-03-14 | v1 kickoff (direct-create semantics) |
+| 2026-03-14 ~ 03-31 | v1 implementation + maintainer reviews, blocked |
+| 2026-05-22 | Maintainer correction: switch to proposal-first; spec rewritten as v2 |
+| 2026-05-22 | Owner decision: single PR (no split) — backend + card UI ship together; hierarchy sidebar deferred |
+| TBD | Implementation complete + PR opened |
 
-因此 PR-A 的方向也需从 `cat_cafe_create_thread` 调整为 `cat_cafe_propose_thread`。幂等性、所有权校验、Redis pipeline 仍然有效，但它们属于 approve 后执行阶段的技术约束；产品入口不再是猫直接创建。
+## References
+
+- GitHub issue: #82
+- v1 PR (to close after v2 lands): #85
+- Maintainer correction comments: zts212653/clowder-ai#82#issuecomment-4516585087, zts212653/clowder-ai#85#issuecomment-4516589522
+- Reuse references: `RedisPendingRequestStore`, `request_permission` flow, `InteractiveBlock` / `CardBlock` rich block primitives

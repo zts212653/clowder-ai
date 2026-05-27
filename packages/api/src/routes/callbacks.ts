@@ -64,6 +64,7 @@ import { registerCallbackLarkActionRoutes } from './callback-lark-action-routes.
 import { registerCallbackLimbRoutes } from './callback-limb-routes.js';
 import { registerCallbackMemoryRoutes } from './callback-memory-routes.js';
 import { getMultiMentionOrchestrator, registerMultiMentionRoutes } from './callback-multi-mention-routes.js';
+import { registerCallbackProposeThreadRoutes } from './callback-propose-thread-routes.js';
 import { registerCallbackQuestRoutes } from './callback-quest-routes.js';
 import { registerCallbackRuntimeSessionRoutes } from './callback-runtime-session-routes.js';
 import {
@@ -267,6 +268,8 @@ export interface CallbackRoutesOptions {
   sessionChainStore?: import('../domains/cats/services/stores/ports/SessionChainStore.js').ISessionChainStore;
   runtimeSessionStore?: IRuntimeSessionStore;
   eventAuditLog?: Pick<EventAuditLog, 'append'>;
+  /** F128: cat-side thread proposals (propose endpoint) */
+  proposalStore?: import('../domains/cats/services/stores/ports/ProposalStore.js').IProposalStore;
   /** F155 B-4: Independent guide session store */
   guideSessionStore?: import('../domains/guides/GuideSessionRepository.js').IGuideSessionStore;
   /** AgentRegistry for thread-cats MCP callback */
@@ -2226,6 +2229,17 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     registerCallbackThreadCatsRoutes(app, {
       threadStore: opts.threadStore,
       agentRegistry: opts.agentRegistry,
+    });
+  }
+
+  // F128: Cat-side thread proposal callback
+  if (opts.proposalStore && opts.threadStore) {
+    registerCallbackProposeThreadRoutes(app, {
+      registry,
+      proposalStore: opts.proposalStore,
+      threadStore: opts.threadStore,
+      messageStore: opts.messageStore,
+      socketManager,
     });
   }
 

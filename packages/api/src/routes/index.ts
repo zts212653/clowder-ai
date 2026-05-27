@@ -48,6 +48,7 @@ export { projectsRoutes } from './projects.js';
 export { projectsBootstrapRoutes } from './projects-bootstrap.js';
 export { mkdirRoute } from './projects-mkdir.js';
 export { projectSetupRoute } from './projects-setup.js';
+export { proposalRoutes } from './proposal-routes.js';
 export { pushRoutes } from './push.js';
 export { queueRoutes } from './queue.js';
 export { quotaRoutes } from './quota.js';

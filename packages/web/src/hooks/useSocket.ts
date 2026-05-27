@@ -577,6 +577,29 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       },
     );
 
+    // F128: New thread created via MCP callback — prepend to sidebar thread list
+    socket.on('thread_created', (thread: import('../stores/chat-types').Thread) => {
+      const store = useChatStore.getState();
+      const existing = store.threads;
+      if (!existing.some((t) => t.id === thread.id)) {
+        store.setThreads([thread, ...existing]);
+      }
+    });
+
+    // F128: proposal status changed (approved/rejected/etc) — broadcast to interested cards.
+    // ProposalCard listens via CustomEvent('cat-cafe:proposal-updated'); we don't push into a
+    // global store because proposal state is card-local and only mounted cards need to react.
+    socket.on('proposal_updated', (proposal: { proposalId: string; status: string; createdThreadId?: string }) => {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('cat-cafe:proposal-updated', { detail: proposal }));
+      }
+    });
+    socket.on('proposal_created', (proposal: { proposalId: string; status: string }) => {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('cat-cafe:proposal-created', { detail: proposal }));
+      }
+    });
+
     socket.on(
       'intent_mode',
       (data: { threadId: string; mode: string; targetCats: string[]; invocationId?: string }) => {

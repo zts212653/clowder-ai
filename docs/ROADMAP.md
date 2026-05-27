@@ -39,7 +39,7 @@ created: 2026-02-26
 | F119 | 谁是卧底 — 坏猫战术推理游戏 #2 | spec | Ragdoll | internal | [F119](features/F119-who-is-spy-game.md) |
 | F124 | Apple Ecosystem × Cat Café 语音交互系统 — iOS/watchOS/AirPods | spec | Ragdoll | internal | [F124](features/F124-apple-ecosystem-voice-interaction.md) |
 | F126 | 四肢控制面 — Cat Café Limb Control Plane | in-progress | Ragdoll | internal | [F126](features/F126-limb-control-plane.md) |
-| F128 | Cat-Proposed Thread Creation — 猫猫提议创建 Thread | spec | 待定 | community [#82](https://github.com/zts212653/clowder-ai/issues/82) | [F128](features/F128-cat-create-thread.md) |
+| F128 | Cat Thread Proposal — 猫提议新 thread，用户审批后创建（含提案卡片 + 审批端点） | spec | Ragdoll | community [#82](https://github.com/zts212653/clowder-ai/issues/82) | [F128](features/F128-cat-create-thread.md) |
 | F129 | Pack System — Multi-Agent 共创世界的 Mod 生态 | in-progress | Ragdoll | internal | [F129](features/F129-pack-system-multi-agent-mod.md) |
 | F138 | Cat Café Video Studio — AI 视频制作管线 | spec | 金渐层 | internal | [F138](features/F138-video-studio.md) |
 | F143 | Hostable Agent Runtime — 统一宿主抽象 | spec | Ragdoll | internal | [F143](features/F143-hostable-agent-runtime.md) |

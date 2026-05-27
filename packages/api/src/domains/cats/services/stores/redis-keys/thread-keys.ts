@@ -21,6 +21,9 @@ export const ThreadKeys = {
   /** F046 D3: One-shot suppressed mention routing feedback per cat. */
   mentionRoutingFeedback: (id: string) => `thread:${id}:mention-routing-feedback`,
 
+  /** F128: Sorted set of child thread IDs: thread:{parentId}:children */
+  children: (parentId: string) => `thread:${parentId}:children`,
+
   /** Tombstone left by hard-delete to prevent self-healing resurrection. */
   tombstone: (id: string) => `thread:${id}:tombstone`,
 } as const;
