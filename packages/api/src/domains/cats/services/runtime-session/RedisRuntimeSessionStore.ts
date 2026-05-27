@@ -16,12 +16,26 @@ import {
   type RuntimeSessionLifecycleState,
   type RuntimeSessionMetadata,
   type RuntimeSessionRuntime,
+  type RuntimeSessionSurface,
 } from './RuntimeSessionMetadata.js';
-import type { IRuntimeSessionStore } from './RuntimeSessionStore.js';
+import type { IRuntimeSessionStore, RuntimeSessionRecentFilter } from './RuntimeSessionStore.js';
 
 const UPSERT_LUA = `
 local function active_key(runtime, threadId, catId)
   return ARGV[2] .. 'runtime-session-active:' .. runtime .. ':' .. threadId .. ':' .. catId
+end
+
+local function remove_recent_indexes(sessionId, record)
+  if not record.runtime then
+    return
+  end
+  redis.call('ZREM', ARGV[2] .. 'runtime-session:recent:' .. record.runtime, sessionId)
+  if record.surface then
+    redis.call('ZREM', ARGV[2] .. 'runtime-session:recent:' .. record.runtime .. ':' .. record.surface, sessionId)
+    if record.catId then
+      redis.call('ZREM', ARGV[2] .. 'runtime-session:recent:' .. record.runtime .. ':' .. record.surface .. ':' .. record.catId, sessionId)
+    end
+  end
 end
 
 local existing = redis.call('GET', KEYS[1])
@@ -41,11 +55,15 @@ if existing and existing ~= '' then
     local oldStateKey = ARGV[2] .. 'runtime-session:lifecycle:' .. decoded.lifecycle.state
     redis.call('ZREM', oldStateKey, ARGV[1])
   end
+  remove_recent_indexes(ARGV[1], decoded)
 end
 
 redis.call('SET', KEYS[1], ARGV[3])
 redis.call('SET', KEYS[2], ARGV[1])
 redis.call('ZADD', KEYS[3], tonumber(ARGV[4]), ARGV[1])
+redis.call('ZADD', ARGV[2] .. 'runtime-session:recent:' .. ARGV[5], tonumber(ARGV[4]), ARGV[1])
+redis.call('ZADD', ARGV[2] .. 'runtime-session:recent:' .. ARGV[5] .. ':' .. ARGV[9], tonumber(ARGV[4]), ARGV[1])
+redis.call('ZADD', ARGV[2] .. 'runtime-session:recent:' .. ARGV[5] .. ':' .. ARGV[9] .. ':' .. ARGV[7], tonumber(ARGV[4]), ARGV[1])
 
 if ARGV[8] == 'active' and ARGV[6] ~= '' and ARGV[7] ~= '' then
   local newActiveKey = active_key(ARGV[5], ARGV[6], ARGV[7])
@@ -98,6 +116,7 @@ export class RedisRuntimeSessionStore implements IRuntimeSessionStore {
       normalized.threadId ?? '',
       normalized.catId,
       normalized.lifecycle.state,
+      normalized.surface,
     );
     return normalized;
   }
@@ -158,6 +177,30 @@ export class RedisRuntimeSessionStore implements IRuntimeSessionStore {
     });
   }
 
+  async listRecent(filter: RuntimeSessionRecentFilter): Promise<RuntimeSessionMetadata[]> {
+    const runtime = filter.runtime ?? 'antigravity-desktop';
+    const key = recentKeyFor(runtime, filter.surface, filter.catId);
+    const limit = normalizeLimit(filter.limit);
+    const offset = normalizeOffset(filter.offset);
+    const sessionIds = await this.redis.zrevrange(key, offset, offset + limit - 1);
+    if (sessionIds.length === 0) return [];
+
+    const records = await this.readRecords(sessionIds);
+    return records
+      .filter((record) => {
+        if (record.runtime !== runtime) return false;
+        if (filter.surface && record.surface !== filter.surface) return false;
+        if (filter.catId && record.catId !== filter.catId) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const observedDelta = b.lifecycle.lastObservedAt - a.lifecycle.lastObservedAt;
+        if (observedDelta !== 0) return observedDelta;
+        return a.sessionId.localeCompare(b.sessionId);
+      })
+      .slice(0, limit);
+  }
+
   async updateLifecycle(
     sessionId: string,
     patch: Partial<RuntimeSessionMetadata['lifecycle']>,
@@ -176,8 +219,46 @@ export class RedisRuntimeSessionStore implements IRuntimeSessionStore {
   private get keyPrefix(): string {
     return (this.redis.options as { keyPrefix?: string }).keyPrefix ?? '';
   }
+
+  private async readRecords(sessionIds: readonly string[]): Promise<RuntimeSessionMetadata[]> {
+    const pipeline = this.redis.pipeline();
+    for (const sessionId of sessionIds) {
+      pipeline.get(RuntimeSessionKeys.detail(sessionId));
+    }
+    const results = await pipeline.exec();
+    if (!results) return [];
+
+    const records: RuntimeSessionMetadata[] = [];
+    for (const [err, payload] of results) {
+      if (err || typeof payload !== 'string') continue;
+      records.push(parseMetadata(payload));
+    }
+    return records;
+  }
 }
 
 function parseMetadata(payload: string): RuntimeSessionMetadata {
   return normalizeRuntimeSessionMetadata(JSON.parse(payload));
+}
+
+function recentKeyFor(
+  runtime: RuntimeSessionRuntime,
+  surface: RuntimeSessionSurface | undefined,
+  catId: CatId | undefined,
+): string {
+  if (surface && catId) return RuntimeSessionKeys.recentByRuntimeSurfaceCat(runtime, surface, catId);
+  if (surface) return RuntimeSessionKeys.recentByRuntimeSurface(runtime, surface);
+  return RuntimeSessionKeys.recentByRuntime(runtime);
+}
+
+function normalizeLimit(limit: number | undefined): number {
+  if (limit === undefined) return 50;
+  if (!Number.isInteger(limit) || limit < 1) return 50;
+  return Math.min(limit, 200);
+}
+
+function normalizeOffset(offset: number | undefined): number {
+  if (offset === undefined) return 0;
+  if (!Number.isInteger(offset) || offset < 0) return 0;
+  return offset;
 }

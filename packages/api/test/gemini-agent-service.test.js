@@ -761,6 +761,49 @@ describe('GeminiAgentService (antigravity-cli adapter)', () => {
     );
     assert.equal(msgs[msgs.length - 1].type, 'done');
   });
+
+  // F212 Phase A (砚砚 2nd P2 — Antigravity CLI timeout collector path)
+  test('F212: forwards cliDiagnostics on metadata for antigravity-cli timeout collector path', async () => {
+    const service = new GeminiAgentService({
+      adapter: 'antigravity-cli',
+      model: 'gemini-3.5-flash',
+    });
+
+    // Inject spawnCliOverride that yields __cliTimeout with cliDiagnostics.
+    // This exercises the timeoutEvent collector branch in GeminiAgentService antigravity-cli adapter,
+    // not the early-return isCliTimeout branch (which 6-provider loop handles).
+    const mockSpawnCli = async function* () {
+      yield {
+        __cliTimeout: true,
+        timeoutMs: 30000,
+        message: 'CLI 响应超时 (30s)',
+        command: 'agy',
+        silenceDurationMs: 30000,
+        processAlive: true,
+        cliDiagnostics: {
+          reasonCode: 'network_error',
+          publicSummary: '网络连接失败',
+          publicHint: '检查代理 / VPN / 防火墙；provider 上游也可能短暂不可用。',
+          safeExcerpt: 'ETIMEDOUT after 30s',
+          debugRef: { command: 'agy', exitCode: null, signal: null, invocationId: 'agy-test-inv' },
+        },
+      };
+    };
+
+    const promise = collect(service.invoke('test agy timeout', { spawnCliOverride: () => mockSpawnCli() }));
+    const msgs = await promise;
+
+    const errorMsg = msgs.find((m) => m.type === 'error' && /响应超时/.test(m.error ?? ''));
+    assert.ok(errorMsg, 'expected timeout error from antigravity-cli collector path');
+    assert.ok(errorMsg.metadata, 'metadata must be present on timeout error');
+    assert.ok(
+      errorMsg.metadata.cliDiagnostics,
+      `cliDiagnostics must be forwarded on metadata; got ${JSON.stringify(errorMsg.metadata)}`,
+    );
+    assert.equal(errorMsg.metadata.cliDiagnostics.reasonCode, 'network_error');
+    assert.equal(errorMsg.metadata.cliDiagnostics.safeExcerpt, 'ETIMEDOUT after 30s');
+    assert.match(errorMsg.metadata.cliDiagnostics.publicSummary, /网络/);
+  });
 });
 
 // ===== antigravity adapter tests =====

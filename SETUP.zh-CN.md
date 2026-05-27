@@ -305,10 +305,17 @@ NEXT_PUBLIC_LLM_POSTPROCESS_URL=http://localhost:9878
 ```
 
 支持引擎：输入用 Qwen3-ASR（主）/ Whisper（备）；输出用 Kokoro / edge-tts / Qwen3-TTS。
+这些服务默认关闭。只有在本地依赖安装完成后，再把对应的 `*_ENABLED=1` 打开。
 
 **启动语音服务：**
+```bash
+# TTS（文字转语音）— 需要 Python 3，自动创建 venv 到 ~/.cat-cafe/tts-venv
+./scripts/tts-server.sh                    # 默认: Qwen3-TTS（三猫声线）
+TTS_PROVIDER=edge-tts ./scripts/tts-server.sh  # edge-tts 备选（无需 GPU）
 
-语音服务（Whisper STT / Qwen3-ASR / mlx-tts / LLM 后处理）都从 **Console → 设置 → 服务** 安装和管理。Console 的安装流程会创建 venv、下载模型，并把选定的端口持久化到 `.cat-cafe/services.json`；API 启动协调器随后会在服务被启用时自动拉起。原本顶层的 `./scripts/*-server.sh` 直接启动脚本已经移除，请改走 Console 流程。
+# ASR（语音转文字）— 需要 Python 3 + ffmpeg
+./scripts/qwen3-asr-server.sh             # Qwen3-ASR 服务器
+```
 
 > **系统依赖**：音频处理需要 `ffmpeg`。安装方式：`brew install ffmpeg`（macOS）或 `apt install ffmpeg`（Linux）。
 

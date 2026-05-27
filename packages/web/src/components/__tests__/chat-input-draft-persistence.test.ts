@@ -318,4 +318,47 @@ describe('ChatInput draft persistence', () => {
     // Map should remain empty — no threadId means no persistence
     expect(threadDrafts.size).toBe(0);
   });
+
+  it('syncs text drafts to sessionStorage for cross-navigation survival', () => {
+    const onSend = vi.fn();
+    const STORAGE_KEY = 'cat-cafe:thread-drafts';
+
+    // Mount and type — draft should be written to sessionStorage
+    act(() => {
+      root.render(React.createElement(ChatInput, { threadId: 'thread-SS', onSend }));
+    });
+    act(() => {
+      typeInto(getTextarea(), 'persisted draft');
+    });
+
+    const stored = window.sessionStorage.getItem(STORAGE_KEY);
+    expect(stored).not.toBeNull();
+    const entries: [string, string][] = JSON.parse(stored!);
+    expect(entries).toContainEqual(['thread-SS', 'persisted draft']);
+  });
+
+  it('clears sessionStorage entry when draft is emptied', () => {
+    const onSend = vi.fn();
+    const STORAGE_KEY = 'cat-cafe:thread-drafts';
+
+    act(() => {
+      root.render(React.createElement(ChatInput, { threadId: 'thread-CL', onSend }));
+    });
+    act(() => {
+      typeInto(getTextarea(), 'temp');
+    });
+    expect(window.sessionStorage.getItem(STORAGE_KEY)).not.toBeNull();
+
+    // Clear the input
+    act(() => {
+      typeInto(getTextarea(), '');
+    });
+
+    // sessionStorage should have no entry for this thread
+    const stored = window.sessionStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      const entries: [string, string][] = JSON.parse(stored);
+      expect(entries.find(([k]) => k === 'thread-CL')).toBeUndefined();
+    }
+  });
 });

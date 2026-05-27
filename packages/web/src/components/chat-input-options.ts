@@ -7,6 +7,61 @@ export interface CatOption {
   insert: string;
   color: string; // hex color (for inline style)
   avatar: string;
+  /** Group mention (e.g. @thread, @all) — renders group icon instead of cat avatar */
+  isGroup?: boolean;
+}
+
+/** Static group mention shortcuts — shown at top of autocomplete.
+ *  Aligned with backend AgentRouter.parseGroupMentions patterns. */
+const STATIC_GROUP_MENTIONS: CatOption[] = [
+  {
+    id: 'thread',
+    label: '@thread',
+    desc: '本帖全体参与猫猫',
+    insert: '@thread ',
+    color: '#6B7280',
+    avatar: '',
+    isGroup: true,
+  },
+  {
+    id: 'all',
+    label: '@all',
+    desc: '全体猫猫',
+    insert: '@all ',
+    color: '#6B7280',
+    avatar: '',
+    isGroup: true,
+  },
+];
+
+/** Build breed-scoped group mention options (e.g. @全体布偶猫) from cat data.
+ *  Only generates options for breeds with 2+ available cats. */
+function buildBreedGroupOptions(cats: CatData[]): CatOption[] {
+  const breedMap = new Map<string, { displayName: string; color: string; count: number }>();
+  for (const cat of cats) {
+    if (!cat.breedId || !isAvailable(cat)) continue;
+    const existing = breedMap.get(cat.breedId);
+    if (existing) {
+      existing.count++;
+    } else {
+      breedMap.set(cat.breedId, {
+        displayName: cat.breedDisplayName ?? cat.displayName,
+        color: cat.color.primary,
+        count: 1,
+      });
+    }
+  }
+  return [...breedMap.entries()]
+    .filter(([, info]) => info.count >= 2)
+    .map(([breedId, info]) => ({
+      id: `breed:${breedId}`,
+      label: `@全体${info.displayName}`,
+      desc: `${info.displayName}全体 (${info.count}只)`,
+      insert: `@全体${info.displayName} `,
+      color: info.color,
+      avatar: '',
+      isGroup: true,
+    }));
 }
 
 /** Build @mention autocomplete options from dynamic cat data.
@@ -21,7 +76,8 @@ function isAvailable(cat: CatData): boolean {
 }
 
 export function buildCatOptions(cats: CatData[]): CatOption[] {
-  return cats
+  const breedGroups = buildBreedGroupOptions(cats);
+  const individuals = cats
     .filter((cat) => cat.mentionPatterns.length > 0 && isAvailable(cat))
     .map((cat) => ({
       id: cat.id,
@@ -31,6 +87,7 @@ export function buildCatOptions(cats: CatData[]): CatOption[] {
       color: cat.color.primary,
       avatar: cat.avatar,
     }));
+  return [...STATIC_GROUP_MENTIONS, ...breedGroups, ...individuals];
 }
 
 /** Build whisper target options from dynamic cat data.

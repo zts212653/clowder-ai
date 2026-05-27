@@ -19,23 +19,24 @@ function requireSession(request: FastifyRequest, reply: FastifyReply): string | 
 
 export const evalHubRoutes: FastifyPluginAsync<EvalHubRoutesOptions> = async (app, opts) => {
   app.get('/api/eval-hub/summary', async (request, reply) => {
-    if (!requireSession(request, reply)) return;
+    const userId = requireSession(request, reply);
+    if (!userId) return;
 
     try {
       const summary = loadEvalHubSummary({ harnessFeedbackRoot: opts.harnessFeedbackRoot });
 
-      // Ensure domain system threads exist with proper titles (fix: domain thread 404 bug).
+      // F192 livefix: Ensure domain system threads exist for ALL registered domains,
+      // not just those with verdicts. This makes eval:memory threads visible before first eval.
       // Best-effort: thread store failures must not block the read-only summary response.
+      // Cloud P1: pass userId so threads are indexed into user's sidebar list.
       if (opts.threadStore) {
         try {
-          const domains = summary.items.map((item) => ({
-            domainId: item.domainId,
-            systemThreadId: item.systemWorkspace.threadId,
-            displayName: item.systemWorkspace.label,
+          const allDomains = summary.domains.map((d) => ({
+            domainId: d.domainId,
+            systemThreadId: d.systemThreadId,
+            displayName: d.displayName,
           }));
-          // Deduplicate by threadId (multiple verdicts may share the same domain)
-          const uniqueDomains = [...new Map(domains.map((d) => [d.systemThreadId, d])).values()];
-          await ensureEvalDomainThreads(opts.threadStore, uniqueDomains);
+          await ensureEvalDomainThreads(opts.threadStore, allDomains, userId);
         } catch (threadErr) {
           request.log.warn({ err: threadErr }, 'eval-hub: thread ensure failed (best-effort, continuing)');
         }

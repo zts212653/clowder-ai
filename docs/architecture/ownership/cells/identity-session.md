@@ -16,7 +16,11 @@ code_anchors:
   - packages/api/src/domains/cats/services/runtime-session/RuntimeSessionStore.ts
   - packages/api/src/domains/cats/services/runtime-session/RedisRuntimeSessionStore.ts
   - packages/api/src/domains/cats/services/runtime-session/RuntimeSessionStoreFactory.ts
+  - packages/api/src/domains/cats/services/runtime-session/ExternalRuntimeSessionRegistration.ts
   - packages/api/src/domains/cats/services/stores/redis-keys/runtime-session-keys.ts
+  - packages/api/src/routes/callback-runtime-session-routes.ts
+  - packages/api/src/routes/external-runtime-sessions.ts
+  - packages/mcp-server/src/tools/external-runtime-session-tools.ts
   - packages/api/src/domains/cats/services/agents/providers/antigravity/AntigravityBridge.ts
   - packages/api/src/domains/cats/services/agents/providers/antigravity/antigravity-runtime-session-import.ts
 doc_anchors:
@@ -31,6 +35,7 @@ cited_by:
   - {feature: F193, date: 2026-05-08, delta: Phase B — typed crossThreadReplyHint field on InvocationContext + render block in buildInvocationContext (receiver-side reply hint hydrated from trigger message id)}
   - {feature: F209, date: 2026-05-22, delta: "boundary note — F209 entity_id is a retrievable entity doorway, not roster truth"}
   - {feature: F211, date: 2026-05-24, delta: "new identity-runtime-session subcell for runtime session identity, cascade/conversation binding, lifecycle registration, seal reason, and identity history"}
+  - {feature: F211, date: 2026-05-25, delta: "Phase B external runtime registration/list/read surfaces, hidden anchor threads, and agent-key-only IDE-direct session binding"}
 ---
 
 # Identity / Session
@@ -44,7 +49,7 @@ This is a top-level routing cell with four subcells. It exists to prevent identi
 - `identity-agent`: F032 owns dynamic CatId, roster, AgentRegistry, roles, and reviewer matching.
 - `identity-connector`: F088 owns connector principal link and external chat/thread binding.
 - `identity-bubble`: F183 / ADR-033 own frontend bubble identity within a thread.
-- `identity-runtime-session`: F211 owns runtime session identity and binding for long-lived or external runtimes: cascade/conversation IDs, SessionChainStore bridge records, lifecycle registration, seal reason, and per-session identity history.
+- `identity-runtime-session`: F211 owns runtime session identity and binding for long-lived or external runtimes: cascade/conversation IDs, SessionChainStore bridge records, lifecycle registration, hidden external-runtime anchor threads, seal reason, and per-session identity history.
 
 F209's entity registry is adjacent but not canonical for agent identity. Its `entity_id` / aliases are retrievable memory anchors with provenance; they may point to cats, humans, features, or external concepts, but they do not decide roster membership, current model, role, reviewer eligibility, or who a cat is.
 
@@ -53,14 +58,14 @@ F209's entity registry is adjacent but not canonical for agent identity. Its `en
 - Changing who a cat is, how cats are loaded from roster/config, or how cat IDs are validated.
 - Changing connector user/chat/thread binding, connector permission ownership, or external sender mapping.
 - Changing frontend bubble identity, canonical invocation ID, or bubble kind identity rules.
-- Changing runtime session binding, external conversation registration, cascade/session ownership, or how `cliSessionId` maps to runtime-specific session IDs.
+- Changing runtime session binding, external conversation registration, cascade/session ownership, runtime-session list/read surfaces, or how `cliSessionId` maps to runtime-specific session IDs.
 
 ## Extend By
 
 - For agent identity, update roster/config/schema contracts and keep CatId runtime-dynamic.
 - For connector binding, use `ConnectorThreadBindingStore` and connector binding keys instead of ad hoc thread maps.
 - For bubble identity, follow ADR-033 and route through `bubble-pipeline` contracts and tests.
-- For runtime session binding, use Session Chain / runtime-session metadata keyed by Cat Cafe session id and runtime session id. Avoid ad hoc JSON maps once the canonical binding exists.
+- For runtime session binding, use Session Chain / runtime-session metadata keyed by Cat Cafe session id and runtime session id. IDE-direct registration belongs behind the external runtime registration contract and agent-key authorization, not ad hoc JSON maps.
 - When a feature touches more than one subcell, declare each one in the feature's Architecture cell note and explain the boundary.
 - If a feature consumes F209 `entity_id`, keep the direction one-way: identity/session truth may be referenced as provenance for entity aliases, but entity aliases must not rewrite roster or connector bindings.
 

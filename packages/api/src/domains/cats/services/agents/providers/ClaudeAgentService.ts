@@ -483,7 +483,8 @@ export class ClaudeAgentService implements AgentService {
             type: 'error',
             catId: this.catId,
             error: `布偶猫 CLI 响应超时 (${Math.round(event.timeoutMs / 1000)}s${event.firstEventAt == null ? ', 未收到首帧' : ''})`,
-            metadata,
+            // F212 Phase A (云端 codex P2): timeout cliDiagnostics 也透传到 metadata.
+            metadata: event.cliDiagnostics ? { ...metadata, cliDiagnostics: event.cliDiagnostics } : metadata,
             timestamp: Date.now(),
           };
           continue;
@@ -514,11 +515,12 @@ export class ClaudeAgentService implements AgentService {
             event.reasonCode === 'invalid_thinking_signature'
               ? formatThinkingSignatureRescueError(options?.sessionId)
               : formatCliExitError('Claude CLI', event);
+          // F212 Phase A: forward cliDiagnostics on metadata for frontend folded panel (Phase B).
           yield {
             type: 'error',
             catId: this.catId,
             error,
-            metadata,
+            metadata: event.cliDiagnostics ? { ...metadata, cliDiagnostics: event.cliDiagnostics } : metadata,
             timestamp: Date.now(),
           };
           continue;

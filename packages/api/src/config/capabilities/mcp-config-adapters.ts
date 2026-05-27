@@ -14,6 +14,54 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { McpServerDescriptor } from '@cat-cafe/shared';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
+import { createModuleLogger } from '../../infrastructure/logger.js';
+import { DEPRECATED_MANAGED_SERVERS, isOurOwnedDeprecatedEntry } from './deprecated-managed-servers.js';
+
+/**
+ * F213 Phase B (2026-05-26): shared L5 cleanup helper for any MCP config writer.
+ *
+ * For each `DEPRECATED_MANAGED_SERVERS` entry, inspect the corresponding entry
+ * in `existingServers` (already parsed from harness config file). If the entry
+ * matches one of our known managed markers (e.g. `echoLegacyShim`), remove it
+ * and `log.warn` so the user knows. If the entry exists but does not match any
+ * marker, preserve it (third-party / user-owned with no reliable ownership
+ * proof) and `log.warn` so the user knows the id is reserved-deprecated.
+ *
+ * `existingServers` is mutated in place — caller is responsible for passing the
+ * extracted record (e.g. `existing.mcp_servers` for Codex TOML or
+ * `existing.mcpServers` for Claude/Gemini/Antigravity/Kimi JSON) and writing
+ * the result back to the file.
+ *
+ * `contextLabel` is included in log messages so multi-harness invocations are
+ * traceable (e.g. `'codex'`, `'claude'`, `'gemini'`, `'antigravity'`, `'kimi'`).
+ *
+ * See ADR-036 amendment 2026-05-26 + `docs/features/F213-stale-mcp-config-cleanup.md`.
+ */
+export function applyDeprecatedManagedCleanup(existingServers: Record<string, unknown>, contextLabel: string): void {
+  for (const deprecated of DEPRECATED_MANAGED_SERVERS) {
+    const entry = existingServers[deprecated.serverName];
+    if (entry === undefined || entry === null) continue;
+    if (isOurOwnedDeprecatedEntry(deprecated.serverName, entry)) {
+      delete existingServers[deprecated.serverName];
+      log.warn(
+        {
+          serverName: deprecated.serverName,
+          reason: deprecated.reason,
+          deprecatedBy: deprecated.deprecatedBy,
+          context: contextLabel,
+        },
+        `F213 cleanup [${contextLabel}]: removed our previously-managed but deprecated mcp server '${deprecated.serverName}'`,
+      );
+    } else {
+      log.warn(
+        { serverName: deprecated.serverName, context: contextLabel },
+        `F213 cleanup [${contextLabel}]: reserved server id '${deprecated.serverName}' shadowed by deprecation registry but kept as user-owned (no known managed marker matched)`,
+      );
+    }
+  }
+}
+
+const log = createModuleLogger('mcp-config-adapters');
 
 const GEMINI_CAT_CAFE_ENV_PLACEHOLDERS: Readonly<Record<string, string>> = {
   CAT_CAFE_API_URL: '${CAT_CAFE_API_URL}',
@@ -253,6 +301,9 @@ export async function writeClaudeMcpConfig(filePath: string, servers: McpServerD
       ? { ...(existing.mcpServers as Record<string, unknown>) }
       : {};
 
+  // F213 Phase B: L5 cleanup of deprecated managed entries before update.
+  applyDeprecatedManagedCleanup(existingServers, 'claude');
+
   // Update managed entries (only enabled — Claude has no enabled field)
   for (const s of servers) {
     if (s.enabled) {
@@ -299,6 +350,10 @@ export async function writeCodexMcpConfig(filePath: string, servers: McpServerDe
     ? { ...(existing.mcp_servers as Record<string, Record<string, unknown>>) }
     : {};
 
+  // F213 Phase A/B (2026-05-26): L5 selective cleanup of deprecated managed
+  // entries. See `applyDeprecatedManagedCleanup` above + ADR-036 amendment.
+  applyDeprecatedManagedCleanup(existingMcp, 'codex');
+
   // Update/add only managed entries; preserve user's own servers
   for (const s of servers) {
     // Skip URL-based servers — Codex only supports stdio transport.
@@ -334,6 +389,9 @@ export async function writeGeminiMcpConfig(filePath: string, servers: McpServerD
     existing.mcpServers && typeof existing.mcpServers === 'object'
       ? { ...(existing.mcpServers as Record<string, unknown>) }
       : {};
+
+  // F213 Phase B: L5 cleanup of deprecated managed entries before update.
+  applyDeprecatedManagedCleanup(existingMcp, 'gemini');
 
   // Update/add managed entries; remove disabled managed; preserve user's own
   for (const s of servers) {
@@ -443,6 +501,9 @@ export async function writeKimiMcpConfig(filePath: string, servers: McpServerDes
       ? { ...(existing.mcpServers as Record<string, unknown>) }
       : {};
 
+  // F213 Phase B: L5 cleanup of deprecated managed entries before update.
+  applyDeprecatedManagedCleanup(existingMcp, 'kimi');
+
   for (const s of servers) {
     if (!s.enabled) {
       delete existingMcp[s.name];
@@ -496,6 +557,9 @@ export async function writeAntigravityMcpConfig(filePath: string, servers: McpSe
     existing.mcpServers && typeof existing.mcpServers === 'object'
       ? { ...(existing.mcpServers as Record<string, unknown>) }
       : {};
+
+  // F213 Phase B: L5 cleanup of deprecated managed entries before update.
+  applyDeprecatedManagedCleanup(existingMcp, 'antigravity');
 
   for (const s of servers) {
     if (s.transport === 'streamableHttp') {

@@ -17,6 +17,7 @@
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import { buildCliDiagnostics } from '../../../../../utils/cli-diagnostics.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
@@ -191,7 +192,8 @@ export class OpenCodeAgentService implements AgentService {
             type: 'error',
             catId: this.catId,
             error: `opencode CLI 响应超时 (${Math.round(event.timeoutMs / 1000)}s${event.firstEventAt == null ? ', 未收到首帧' : ''})`,
-            metadata,
+            // F212 Phase A (云端 codex P2): timeout cliDiagnostics 也透传到 metadata.
+            metadata: event.cliDiagnostics ? { ...metadata, cliDiagnostics: event.cliDiagnostics } : metadata,
             timestamp: Date.now(),
           };
           continue;
@@ -217,11 +219,13 @@ export class OpenCodeAgentService implements AgentService {
           continue;
         }
         if (isCliError(event)) {
+          // F212 Phase A (砚砚 review BLOCKED P1-2): forward cliDiagnostics on metadata so
+          // frontend folded panel (Phase B) can render reasonCode / safeExcerpt / publicHint.
           yield {
             type: 'error',
             catId: this.catId,
             error: formatCliExitError('opencode CLI', event),
-            metadata,
+            metadata: event.cliDiagnostics ? { ...metadata, cliDiagnostics: event.cliDiagnostics } : metadata,
             timestamp: Date.now(),
           };
           continue;
@@ -230,6 +234,10 @@ export class OpenCodeAgentService implements AgentService {
         const result = transformOpenCodeEvent(event, this.catId);
         if (result !== null) {
           if (result.type === 'text') textEventCount++;
+          // F212 Phase A AC-A8: enrich stream `error` event yield with cliDiagnostics so
+          // frontend folded panel (Phase B) sees reasonCode / safeExcerpt / publicHint
+          // even when CLI never exits non-zero (some providers emit error events then exit 0).
+          let yieldMetadata: MessageMetadata = metadata;
           if (result.type === 'error') {
             const rawError = (event as Record<string, unknown>).error as
               | { name?: string; data?: { message?: string; statusCode?: number } }
@@ -244,6 +252,18 @@ export class OpenCodeAgentService implements AgentService {
               },
               'OpenCode CLI returned error event',
             );
+            if (rawError?.data?.message) {
+              const cliDiagnostics = buildCliDiagnostics({
+                rawText: rawError.data.message,
+                debugRef: {
+                  command: 'opencode',
+                  exitCode: null,
+                  signal: null,
+                  ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
+                },
+              });
+              yieldMetadata = { ...metadata, cliDiagnostics };
+            }
           }
           // P2-1: Only emit the first session_init; subsequent step_start events
           // in multi-step runs are silently dropped to avoid duplicate session metrics.
@@ -252,7 +272,7 @@ export class OpenCodeAgentService implements AgentService {
             sessionInitEmitted = true;
             if (result.sessionId) metadata.sessionId = result.sessionId;
           }
-          yield { ...result, metadata };
+          yield { ...result, metadata: yieldMetadata };
         }
       }
 

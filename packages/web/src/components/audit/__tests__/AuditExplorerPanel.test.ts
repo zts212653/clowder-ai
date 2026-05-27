@@ -4,14 +4,31 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 beforeAll(() => {
   (globalThis as { React?: typeof React }).React = React;
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 });
 afterAll(() => {
   delete (globalThis as { React?: typeof React }).React;
+  delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
 });
 
 const mocks = vi.hoisted(() => ({ apiFetch: vi.fn() }));
 vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => mocks.apiFetch(...args),
+}));
+vi.mock('../../runtime-sessions/ExternalRuntimeSessionsPanel', () => ({
+  ExternalRuntimeSessionsPanel: ({ onViewSession }: { onViewSession?: (sessionId: string, catId?: string) => void }) =>
+    React.createElement(
+      'div',
+      { 'data-testid': 'runtime-sessions-panel' },
+      React.createElement(
+        'button',
+        {
+          type: 'button',
+          onClick: () => onViewSession?.('runtime-session-1', 'antigravity'),
+        },
+        'open runtime session',
+      ),
+    ),
 }));
 
 describe('AuditExplorerPanel', () => {
@@ -79,6 +96,44 @@ describe('AuditExplorerPanel', () => {
     // Search tab shows input
     const input = container.querySelector('input[type="text"]');
     expect(input).toBeTruthy();
+  });
+
+  it('opens runtime tab and switches selected runtime session into the session viewer', async () => {
+    mocks.apiFetch.mockImplementation((url: string) => {
+      const body = url.includes('/api/sessions/runtime-session-1/events')
+        ? { messages: [{ role: 'user', content: 'runtime evidence', timestamp: 1000 }], nextCursor: null, total: 1 }
+        : { events: [], logPath: null, logFiles: [] };
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(body),
+      });
+    });
+
+    await renderPanel();
+
+    const runtimeTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Runtime');
+    expect(runtimeTab).toBeTruthy();
+
+    await act(async () => {
+      runtimeTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(container.querySelector('[data-testid="runtime-sessions-panel"]')).toBeTruthy();
+
+    const openButton = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === 'open runtime session',
+    );
+    await act(async () => {
+      openButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(container.querySelector('[data-testid="session-viewer-close"]')).toBeTruthy();
+    expect(mocks.apiFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/sessions/runtime-session-1/events?view=chat'),
+    );
   });
 
   it('starts collapsed and expands on click', async () => {

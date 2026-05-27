@@ -17,7 +17,8 @@ import { servicesRoutes } from '../dist/routes/services.js';
 
 const SESSION_HEADERS = { 'x-test-session-user': 'you' };
 const TRUSTED_ORIGIN_HEADERS = { origin: 'http://localhost:3003', host: 'localhost:3003' };
-const ORIGINAL_OWNER_ID = process.env.DEFAULT_OWNER_USER_ID;
+const ORIGINAL_OWNER_ID = 'you';
+process.env.DEFAULT_OWNER_USER_ID = ORIGINAL_OWNER_ID;
 
 async function buildApp(options = {}) {
   const app = Fastify({ logger: false });
@@ -27,8 +28,10 @@ async function buildApp(options = {}) {
       request.sessionUserId = sessionUser.trim();
     }
   });
+  const testEnv = options.env === undefined ? { ...process.env, CAT_CAFE_PROFILE: 'test' } : options.env;
   await app.register(servicesRoutes, {
     ...options,
+    env: testEnv,
     fetchHealth:
       options.fetchHealth ??
       (async () => ({
@@ -1857,6 +1860,10 @@ describe('service lifecycle write routes', () => {
       lifecycle: {
         findPidsByPort: async () => [4242],
         readProcessCommand: async () => 'python unrelated-server.py --port 9876',
+        serviceConfig: {
+          get: () => undefined,
+          set: () => ({ enabled: false }),
+        },
         runScript: async () => {
           didRun = true;
           return { code: 0, output: 'started' };

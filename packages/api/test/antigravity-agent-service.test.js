@@ -47,6 +47,15 @@ function createTranscriptReaderProbe(digest) {
 }
 
 describe('AntigravityAgentService (Bridge)', () => {
+  test('F211 C1: AgentService does not enable legacy JSON fallback by default', () => {
+    const service = new AntigravityAgentService({
+      connection: { port: 1234, csrfToken: 'test', useTls: false },
+      model: 'gemini-3.1-pro',
+    });
+
+    assert.equal(service.getBridgeForDiagnostics().getLegacyJsonSessionStoreForDiagnostics(), false);
+  });
+
   test('yields session_init + text + done from successful response', async () => {
     const bridge = createMockBridge({
       steps: [
@@ -143,6 +152,11 @@ describe('AntigravityAgentService (Bridge)', () => {
     });
     assert.equal(bridge.drainCascade.mock.callCount(), 1);
     assert.equal(bridge.drainCascade.mock.calls[0].arguments[0], 'cascade-old');
+    assert.deepEqual(bridge.resetSession.mock.calls[0].arguments[2], {
+      expectedRuntimeSessionId: 'cascade-old',
+      sealReason: 'oversized_retire',
+      drainResult: 'complete',
+    });
     assert.equal(bridge.getOrCreateSession.mock.callCount(), 1, 'runtime-store rotation must not reselect old binding');
     assert.equal(
       bridge.startCascade.mock.callCount(),
@@ -212,6 +226,11 @@ describe('AntigravityAgentService (Bridge)', () => {
     const sessionInit = messages.find((msg) => msg.type === 'session_init');
     assert.equal(sessionInit.sessionLifecycle.degraded, true);
     assert.equal(sessionInit.sessionLifecycle.degradedReason, 'Antigravity RPC unavailable during drain');
+    assert.deepEqual(bridge.resetSession.mock.calls[0].arguments[2], {
+      expectedRuntimeSessionId: 'cascade-old',
+      sealReason: 'oversized_retire',
+      drainResult: 'skipped_runtime_unreachable',
+    });
 
     const sentPrompt = bridge.sendMessage.mock.calls[0].arguments[1];
     assert.match(sentPrompt, /Degraded: yes/);

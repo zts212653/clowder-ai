@@ -52,6 +52,8 @@ const KIND_PRIORITY: Record<EvidenceKind, number> = {
   'pack-knowledge': 0, // F129: pack knowledge — lowest priority, never overwrites global docs
 };
 
+const PASSAGE_EMBED_SCAN_BATCH_SIZE = 256;
+
 /**
  * Minimal thread snapshot for indexing — avoids coupling to full IThreadStore interface.
  * The caller (factory/index.ts) provides a callback that returns these.
@@ -129,6 +131,8 @@ function detectScanner(docsRoot: string, exclude?: string[]): { scanner: RepoSca
 export class IndexBuilder implements IIndexBuilder {
   /** E-2: Set of threadIds that have been modified since last flush */
   private dirtyThreads = new Set<string>();
+
+  private passageEmbeddingWarmupInFlight: Promise<void> | null = null;
 
   /** F152 Phase A: pluggable scanner — defaults to CatCafeScanner */
   private readonly scanner: RepoScanner & {
@@ -514,10 +518,24 @@ export class IndexBuilder implements IIndexBuilder {
     // F209 fix: passage embedding is a recall accelerator (passage_fts stays canonical),
     // so it MUST NOT block rebuild()/listen(). Call this only after the API is listening.
     setImmediate(() => {
-      void this.embedMissingPassages().catch(() => {
-        /* fail-open: passage vectors are an accelerator; passage_fts remains canonical */
-      });
+      void this.runPassageEmbeddingWarmup();
     });
+  }
+
+  private runPassageEmbeddingWarmup(): Promise<void> {
+    if (this.passageEmbeddingWarmupInFlight) return this.passageEmbeddingWarmupInFlight;
+
+    const warmup = this.embedMissingPassages()
+      .catch(() => {
+        /* fail-open: passage vectors are an accelerator; passage_fts remains canonical */
+      })
+      .finally(() => {
+        if (this.passageEmbeddingWarmupInFlight === warmup) {
+          this.passageEmbeddingWarmupInFlight = null;
+        }
+      });
+    this.passageEmbeddingWarmupInFlight = warmup;
+    return warmup;
   }
 
   async incrementalUpdate(changedPaths: string[]): Promise<void> {
@@ -868,28 +886,35 @@ export class IndexBuilder implements IIndexBuilder {
 
     try {
       const db = this.store.getDb();
-      let sql = 'SELECT doc_anchor AS docAnchor, passage_id AS passageId, content FROM evidence_passages';
-      const params: unknown[] = [];
-      if (docAnchors?.length) {
-        sql += ` WHERE doc_anchor IN (${docAnchors.map(() => '?').join(',')})`;
-        params.push(...docAnchors);
+      const existingStmt = db.prepare('SELECT 1 AS present FROM passage_vectors WHERE passage_key = ? LIMIT 1');
+      let lastId = 0;
+
+      for (;;) {
+        const whereClauses = ['id > ?'];
+        const params: unknown[] = [lastId];
+        if (docAnchors?.length) {
+          whereClauses.push(`doc_anchor IN (${docAnchors.map(() => '?').join(',')})`);
+          params.push(...docAnchors);
+        }
+        const rows = db
+          .prepare(
+            `SELECT id, doc_anchor AS docAnchor, passage_id AS passageId, content
+             FROM evidence_passages
+             WHERE ${whereClauses.join(' AND ')}
+             ORDER BY id
+             LIMIT ?`,
+          )
+          .all(...params, PASSAGE_EMBED_SCAN_BATCH_SIZE) as Array<PassageEmbeddingRow & { id: number }>;
+        if (rows.length === 0) return;
+
+        lastId = rows[rows.length - 1]!.id;
+        const missing = rows.filter((r) => !existingStmt.get(passageVectorKey(r.docAnchor, r.passageId)));
+        await embedPassages({
+          passages: missing,
+          embedding: deps.embedding,
+          passageVectorStore: deps.passageVectorStore,
+        });
       }
-      sql += ' ORDER BY id';
-
-      const rows = db.prepare(sql).all(...params) as PassageEmbeddingRow[];
-      if (rows.length === 0) return;
-
-      const existingRows = db.prepare('SELECT passage_key AS passageKey FROM passage_vectors').all() as Array<{
-        passageKey: string;
-      }>;
-      const existing = new Set(existingRows.map((r) => r.passageKey));
-      const missing = rows.filter((r) => !existing.has(passageVectorKey(r.docAnchor, r.passageId)));
-
-      await embedPassages({
-        passages: missing,
-        embedding: deps.embedding,
-        passageVectorStore: deps.passageVectorStore,
-      });
     } catch {
       // fail-open: passage vectors are an accelerator; passage_fts remains canonical.
     }

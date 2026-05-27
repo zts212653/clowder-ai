@@ -298,6 +298,25 @@ function mergeById(base: HasId[], overlay: HasId[]): HasId[] {
   return result;
 }
 
+type BreedWithResolvedCatIds = HasId & {
+  catId?: string;
+  variants?: Array<{
+    catId?: string;
+  }>;
+};
+
+function collectResolvedCatIds(breeds: BreedWithResolvedCatIds[]): Set<string> {
+  const catIds = new Set<string>();
+  for (const breed of breeds) {
+    if (breed.catId) catIds.add(breed.catId);
+    for (const variant of Array.isArray(breed.variants) ? breed.variants : []) {
+      const resolvedCatId = variant.catId ?? breed.catId;
+      if (resolvedCatId) catIds.add(resolvedCatId);
+    }
+  }
+  return catIds;
+}
+
 /**
  * Merge template + catalog with #772 template-only breed filter applied.
  * Shared by loadCatConfig() and getAcpConfig() to avoid duplicate merge paths.
@@ -315,22 +334,21 @@ function mergeTemplateWithCatalog(templatePath: string): string | null {
   // #772: Template-only breeds must not leak into runtime.
   // When a catalog exists, only catalog breeds are runtime members.
   // breeds: [] (bootstrap state) means "no breeds" — all template breeds are menu data only.
-  const catalogBreeds = Array.isArray(catalogJson.breeds) ? (catalogJson.breeds as HasId[]) : [];
-  const catalogBreedIds = new Set(catalogBreeds.map((b) => b.id));
+  const catalogBreeds = Array.isArray(catalogJson.breeds) ? (catalogJson.breeds as BreedWithResolvedCatIds[]) : [];
+  const catalogBreedIds = new Set(catalogBreeds.map((breed) => breed.id));
   if (Array.isArray(merged.breeds)) {
-    merged.breeds = (merged.breeds as HasId[]).filter((b) => catalogBreedIds.has(b.id));
+    merged.breeds = (merged.breeds as BreedWithResolvedCatIds[]).filter((breed) => catalogBreedIds.has(breed.id));
   }
+  const runtimeCatIds = Array.isArray(merged.breeds)
+    ? collectResolvedCatIds(merged.breeds as BreedWithResolvedCatIds[])
+    : new Set<string>();
 
   // Prune roster entries for template-only breeds — preserve variant, owner,
   // and other catalog-added entries. Runs even when catalogBreeds is empty
   // (bootstrap writes breeds:[] + owner roster; template roster must not leak).
-  const baseBreeds = Array.isArray(baseJson.breeds) ? (baseJson.breeds as Array<HasId & { catId?: string }>) : [];
-  const templateOnlyCatIds = new Set(
-    baseBreeds
-      .filter((b) => !catalogBreedIds.has(b.id))
-      .map((b) => b.catId)
-      .filter(Boolean),
-  );
+  const baseBreeds = Array.isArray(baseJson.breeds) ? (baseJson.breeds as BreedWithResolvedCatIds[]) : [];
+  const templateOnlyCatIds = collectResolvedCatIds(baseBreeds.filter((breed) => !catalogBreedIds.has(breed.id)));
+  for (const runtimeCatId of runtimeCatIds) templateOnlyCatIds.delete(runtimeCatId);
   if (templateOnlyCatIds.size > 0 && merged.roster && typeof merged.roster === 'object') {
     for (const key of Object.keys(merged.roster as Record<string, unknown>)) {
       if (templateOnlyCatIds.has(key)) delete (merged.roster as Record<string, unknown>)[key];

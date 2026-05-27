@@ -10,6 +10,17 @@ export interface LoadEvalHubSummaryInput {
   harnessFeedbackRoot: string;
 }
 
+export interface EvalDomainSummary {
+  domainId: string;
+  displayName: string;
+  systemThreadId: string;
+  frequency: string;
+  evalCatHandle: string;
+  hasVerdict: boolean;
+  latestVerdictId?: string;
+  latestVerdict?: EvalHubItem['verdict'];
+}
+
 export interface EvalHubSummary {
   generatedAt: string;
   counts: {
@@ -17,7 +28,9 @@ export interface EvalHubSummary {
     actionable: number;
     keepObserve: number;
     stale: number;
+    registeredDomains: number;
   };
+  domains: EvalDomainSummary[];
   items: EvalHubItem[];
 }
 
@@ -95,6 +108,22 @@ export function loadEvalHubSummary(input: LoadEvalHubSummaryInput): EvalHubSumma
     .map((verdict) => buildEvalHubItem(input.harnessFeedbackRoot, verdict, domains))
     .sort((a, b) => b.trend.generatedAt.localeCompare(a.trend.generatedAt));
 
+  // F192 livefix OQ-16: Build domain summaries for ALL registered domains,
+  // including those without verdicts (e.g. eval:memory before first eval run).
+  const domainSummaries: EvalDomainSummary[] = [...domains.values()].map((domain) => {
+    const domainVerdicts = items.filter((item) => item.domainId === domain.domainId);
+    const latest = domainVerdicts[0]; // items already sorted by date desc
+    return {
+      domainId: domain.domainId,
+      displayName: domain.displayName,
+      systemThreadId: domain.systemThreadId,
+      frequency: domain.frequency,
+      evalCatHandle: domain.evalCat.handle,
+      hasVerdict: domainVerdicts.length > 0,
+      ...(latest ? { latestVerdictId: latest.id, latestVerdict: latest.verdict } : {}),
+    };
+  });
+
   return {
     generatedAt: new Date().toISOString(),
     counts: {
@@ -102,7 +131,9 @@ export function loadEvalHubSummary(input: LoadEvalHubSummaryInput): EvalHubSumma
       actionable: items.filter((item) => item.verdict !== 'keep_observe').length,
       keepObserve: items.filter((item) => item.verdict === 'keep_observe').length,
       stale: items.filter((item) => item.lifecycle.stale).length,
+      registeredDomains: domainSummaries.length,
     },
+    domains: domainSummaries,
     items,
   };
 }

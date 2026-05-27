@@ -693,7 +693,7 @@
     {
       "id": "F113",
       "name": "Multi-Platform One-Click Deploy",
-      "status": "in-progress | **Source**: clowder-ai #14 (mindfn) | **Priority**: P2",
+      "status": "done | **Source**: clowder-ai #14 (mindfn) | **Priority**: P2",
       "file": "F113-multi-platform-one-click-deploy.md"
     },
     {
@@ -825,7 +825,7 @@
     {
       "id": "F135",
       "name": "狸花猫开箱即用（DARE Out-of-the-Box）",
-      "status": "spec | **Owner**: bouillipx (社区) | **Priority**: P2",
+      "status": "done (closed — 需求已不存在，team lead 2026-05-26 拍板) | **Owner**: bouillipx (社区) | **Priority**: P2",
       "file": "F135-dare-ootb.md"
     },
     {
@@ -945,19 +945,19 @@
     {
       "id": "F155",
       "name": "Add-Member Internal Guide UI Spec (Phase A)",
-      "status": "spec | **Owner**: Maine Coon/Maine Coon (codex) | **Scope**: 内部场景（添加成员）",
+      "status": "done (supporting spec; F155 closed 2026-05-26) | **Owner**: Maine Coon/Maine Coon (codex) | **Scope**: 内部场景（添加成员）",
       "file": "F155-add-member-guide-ui-spec.md"
     },
     {
       "id": "F155",
       "name": "Scene-Based Guidance Engine — 场景式交互引导",
-      "status": "in-progress (Phase A merged in cat-cafe main via PR #1122; Phase B selective intake merged in cat-cafe main via PR #1147; guided-scenarios selective intake merged in cat-cafe main via PR #1296) | **Source**: Community (mindfn) | **Priority**: P1 | **Owner**: Maine Coon/gpt52",
+      "status": "done (closed 2026-05-26) | **Source**: Community (mindfn) | **Priority**: P1 | **Owner**: 社区 (mindfn)",
       "file": "F155-scene-guidance-engine.md"
     },
     {
       "id": "F155",
       "name": "Scene-Based Bidirectional Guidance Engine",
-      "status": "Phase A accepted / frozen — 基础引导引擎已验收冻结，可开 PR 合入 | **Owner**: Ragdoll/Ragdoll | **Priority**: P1",
+      "status": "done (Phase A accepted / frozen; F155 closed 2026-05-26) | **Owner**: Ragdoll/Ragdoll | **Priority**: P1",
       "file": "F155-scene-guidance-phase-a-spec.md"
     },
     {
@@ -1041,7 +1041,7 @@
     {
       "id": "F169",
       "name": "Agent Memory Reflex — 愿景文档（vision artifact）",
-      "status": "**done**（vision realized；B+C 已通过 F148/F163 实现；A team lead拍板关闭，不做持久 Compiled Wiki）",
+      "status": "done（vision realized；B+C 已通过 F148/F163 实现；A team lead拍板关闭，不做持久 Compiled Wiki）",
       "file": "F169-agent-memory-reflex.md"
     },
     {
@@ -1077,7 +1077,7 @@
     {
       "id": "F175",
       "name": "消息队列统一设计 — 优先级排序 + 用户可控编排",
-      "status": "phase-a-done | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "done | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F175-unified-message-queue.md"
     },
     {
@@ -1101,7 +1101,7 @@
     {
       "id": "F179",
       "name": "Desktop Installer Release Pipeline — 自动化产出 Win/Mac 安装包并附 release",
-      "status": "in-progress (Phase B: AC-B3 pending cross-cat verification) | **Owner**: Ragdoll（Opus-47/Ragdoll） | **Reviewer**: Maine Coon（GPT-5.5/Maine Coon） | **Priority**: P1",
+      "status": "done (closed 2026-05-26 after 25-day field validation on v0.9.1) | **Owner**: Ragdoll（Opus-47/Ragdoll） | **Reviewer**: Maine Coon（GPT-5.5/Maine Coon） | **Priority**: P1",
       "file": "F179-desktop-installer-release-pipeline.md"
     },
     {
@@ -1155,7 +1155,7 @@
     {
       "id": "F188",
       "name": "Library Stewardship — 图书馆管护与成长",
-      "status": "reopened | **Completed (A-I)**: 2026-05-20 | **Reopened**: 2026-05-20 (Phase J) | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "done | **Completed**: 2026-05-26 | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F188-library-stewardship.md"
     },
     {
@@ -1269,7 +1269,7 @@
     {
       "id": "F209",
       "name": "Evidence Recall Optimization — 消息级语义、实体门牌号与活查询藤",
-      "status": "in-progress (Phase A ✅ merged PR #1842; Phase B ✅ merged PR #1846 + AC-B3 contract fix PR #1851; Phase C ✅ merged PR #1853 + file-slice dogfood hotfix PR #1854; AC-B6 transferred to F208 AC-A5 — F209 不再阻塞 AC-B6; Phase B.1 minimal seed ✅ merged PR #1867; Phase D.0 readiness sprint ✅ completed, initially BLOCK then **UNBLOCK** after PR #1877 raw embedding reprobe + PR #1882 MCP default dimension fix + runtime restart; next F209 owner focus = Phase D product spike / Design Gate. Cross-line follow-ups are delegated below: F193 MCP topology cleanup, F200 recall@k wrapper, Phase C reader hardening.) | **Owner**: Maine Coon/Maine Coon | **Priority**: P1",
+      "status": "done | **Completed**: 2026-05-26 | **Owner**: Maine Coon/Maine Coon | **Priority**: P1 | **Close evidence**: Phase A-D merged and dogfooded; PR #1910 fixed final thread-scope degraded blocker; independent vision guardian Opus 4.6 approved close. Phase E eval ownership transferred to F200 per KD-6 / HW-5.",
       "file": "F209-evidence-recall-optimization.md"
     },
     {
@@ -1283,6 +1283,18 @@
       "name": "Cross-Runtime Session Transparency — Antigravity Session Chain + IDE Direct Registration",
       "status": "doing | **Owner**: Maine Coon（Maine Coon） | **Priority**: P1",
       "file": "F211-cross-runtime-session-transparency.md"
+    },
+    {
+      "id": "F212",
+      "name": "CLI Error Diagnostics — 结构化 CLI 错误诊断 + 受控前端展示",
+      "status": "in-progress (Phase A merged 2026-05-27) | **Owner**: Ragdoll/Ragdoll (Opus-47) | **Priority**: P1",
+      "file": "F212-cli-error-diagnostics.md"
+    },
+    {
+      "id": "F213",
+      "name": "Stale MCP Config Cleanup at Startup — 过期 MCP 配置启动清理",
+      "status": "done | **Owner**: Ragdoll/Ragdoll (Opus-47) | **Priority**: P1 | **Completed**: 2026-05-26 (Phase A merged PR #1901 + Phase B merged PR #1903 + 跨族愿景守护 antig-opus APPROVE)",
+      "file": "F213-stale-mcp-config-cleanup.md"
     }
   ]
 }

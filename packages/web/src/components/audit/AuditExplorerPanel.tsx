@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useCallback, useState } from 'react';
+import { ExternalRuntimeSessionsPanel } from '../runtime-sessions/ExternalRuntimeSessionsPanel';
 import { settingsResourceCardClass } from '../SettingsResourceCard';
 import { AuditEventsTab } from './AuditEventsTab';
 import { SessionEventsViewer } from './SessionEventsViewer';
 import { SessionSearchTab } from './SessionSearchTab';
 
-type AuditTab = 'events' | 'session' | 'search';
+type AuditTab = 'events' | 'session' | 'runtime' | 'search';
 
 export interface AuditExplorerPanelProps {
   threadId: string;
@@ -20,6 +21,7 @@ export interface AuditExplorerPanelProps {
 const TAB_LABELS: Record<AuditTab, string> = {
   events: '审计事件',
   session: 'Session',
+  runtime: 'Runtime',
   search: '搜索',
 };
 
@@ -70,7 +72,7 @@ export function AuditExplorerPanel({
         <div className="mt-2">
           {/* Tab bar */}
           <div className="flex console-divider-b mb-2">
-            {(['events', 'session', 'search'] as const).map((t) => (
+            {(['events', 'session', 'runtime', 'search'] as const).map((t) => (
               <button
                 type="button"
                 key={t}
@@ -98,6 +100,8 @@ export function AuditExplorerPanel({
                 点击左侧 Session Chain 中的封存会话，或通过搜索找到 session
               </div>
             ))}
+
+          {tab === 'runtime' && <ExternalRuntimeSessionsPanel onViewSession={handleViewSession} />}
 
           {tab === 'search' && <SessionSearchTab threadId={threadId} onViewSession={handleViewSession} />}
         </div>

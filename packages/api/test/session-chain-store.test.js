@@ -190,6 +190,23 @@ describe('SessionChainStore', () => {
     assert.equal(store.getActive('opus', 'thread-1'), null);
   });
 
+  test('update() active restores active index and can clear seal metadata', async () => {
+    const store = await createStore();
+    const record = store.create(BASE_INPUT);
+    const sealedAt = Date.now();
+
+    store.update(record.id, { status: 'sealed', sealReason: 'external_registration_failed', sealedAt });
+    assert.equal(store.getActive('opus', 'thread-1'), null);
+
+    store.update(record.id, { status: 'active', sealReason: null, sealedAt: null });
+
+    const reopened = store.get(record.id);
+    assert.equal(reopened.status, 'active');
+    assert.equal(reopened.sealReason, undefined);
+    assert.equal(reopened.sealedAt, undefined);
+    assert.equal(store.getActive('opus', 'thread-1')?.id, record.id);
+  });
+
   test('getByCliSessionId() returns correct record', async () => {
     const store = await createStore();
     const record = store.create(BASE_INPUT);

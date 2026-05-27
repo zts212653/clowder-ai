@@ -5,7 +5,25 @@ import { resolveServiceScriptPath } from '../dist/domains/services/service-lifec
 import { servicesRoutes } from '../dist/routes/services.js';
 
 const SESSION_HEADERS = { 'x-test-session-user': 'you' };
-const ORIGINAL_OWNER_ID = process.env.DEFAULT_OWNER_USER_ID;
+const ORIGINAL_OWNER_ID = 'you';
+process.env.DEFAULT_OWNER_USER_ID = ORIGINAL_OWNER_ID;
+
+function buildIsolatedTestEnv(baseEnv = process.env) {
+  const env = Object.fromEntries(Object.entries(baseEnv).filter(([key]) => !/^CAT_CAFE_SERVICE_.*_ENABLED$/.test(key)));
+  for (const key of [
+    'ASR_ENABLED',
+    'TTS_ENABLED',
+    'EMBED_ENABLED',
+    'LLM_POSTPROCESS_ENABLED',
+    'AUDIO_SERVICE_ENABLED',
+  ]) {
+    delete env[key];
+  }
+  env.CAT_CAFE_PROFILE = 'test';
+  env.CAT_CAFE_SERVICE_ASR_ENABLED = '0';
+  env.ASR_ENABLED = '0';
+  return env;
+}
 
 async function buildApp(options = {}) {
   const app = Fastify({ logger: false });
@@ -15,8 +33,10 @@ async function buildApp(options = {}) {
       request.sessionUserId = sessionUser.trim();
     }
   });
+  const testEnv = options.env === undefined ? buildIsolatedTestEnv(process.env) : options.env;
   await app.register(servicesRoutes, {
     ...options,
+    env: testEnv,
     fetchHealth:
       options.fetchHealth ??
       (async () => ({

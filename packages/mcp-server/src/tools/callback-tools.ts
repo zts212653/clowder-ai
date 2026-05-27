@@ -56,6 +56,7 @@ interface CallbackConfig {
 
 interface AgentKeyOptions {
   agentKeyCatId?: string;
+  forceAgentKey?: boolean;
 }
 
 function readAgentKeyFile(path: string | undefined): string | undefined {
@@ -108,6 +109,10 @@ export function getCallbackConfig(options?: AgentKeyOptions): CallbackConfig | n
   const invocationId = process.env['CAT_CAFE_INVOCATION_ID'];
   const callbackToken = process.env['CAT_CAFE_CALLBACK_TOKEN'];
   const agentKeySecret = resolveAgentKeySecret(options);
+  if (options?.forceAgentKey === true) {
+    if (!agentKeySecret) return null;
+    return { apiUrl, agentKeySecret };
+  }
 
   if (!invocationId && !callbackToken && !agentKeySecret) return null;
 
@@ -167,9 +172,12 @@ export function formatCatRoutingErrorPrefix(body: {
 export async function callbackPost(
   path: string,
   body: Record<string, unknown>,
-  options?: { enableOutbox?: boolean; agentKeyCatId?: string },
+  options?: { enableOutbox?: boolean; agentKeyCatId?: string; forceAgentKey?: boolean },
 ): Promise<ToolResult> {
-  const config = getCallbackConfig({ agentKeyCatId: options?.agentKeyCatId });
+  const config = getCallbackConfig({
+    agentKeyCatId: options?.agentKeyCatId,
+    forceAgentKey: options?.forceAgentKey,
+  });
   if (!config) return errorResult(NO_CONFIG_ERROR);
 
   const result = await sendCallbackRequest(

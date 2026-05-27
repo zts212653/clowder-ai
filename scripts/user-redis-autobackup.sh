@@ -10,6 +10,8 @@ set -euo pipefail
 #   ./scripts/user-redis-autobackup.sh uninstall
 
 ACTION="${1:-status}"
+LAUNCHD_SAFE_PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export PATH="${LAUNCHD_SAFE_PATH}:${PATH:-}"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 USER_REDIS_SCRIPT="${SCRIPT_DIR}/user-redis.sh"
@@ -24,6 +26,7 @@ fi
 OFFSITE_DIR="${USER_REDIS_OFFSITE_DIR:-$DEFAULT_OFFSITE_ROOT/${PROFILE}}"
 INTERVAL_MINUTES="${USER_REDIS_BACKUP_INTERVAL_MINUTES:-60}"
 OFFSITE_KEEP="${USER_REDIS_OFFSITE_KEEP:-120}"
+OFFSITE_STRICT="${USER_REDIS_OFFSITE_STRICT:-0}"
 AGENT_LABEL="${USER_REDIS_BACKUP_AGENT_LABEL:-com.catcafe.redis.user.backup}"
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
 PLIST_PATH="${LAUNCH_AGENTS_DIR}/${AGENT_LABEL}.plist"
@@ -54,7 +57,14 @@ need_tools() {
 }
 
 ensure_dirs() {
-  mkdir -p "$LOCAL_BACKUP_DIR" "$OFFSITE_DIR" "$LAUNCH_AGENTS_DIR" "$LOG_DIR"
+  mkdir -p "$LOCAL_BACKUP_DIR" "$LAUNCH_AGENTS_DIR" "$LOG_DIR"
+  if ! mkdir -p "$OFFSITE_DIR"; then
+    echo "[autobackup] warning: offsite dir unavailable: $OFFSITE_DIR" >&2
+    if [[ "$OFFSITE_STRICT" == "1" ]]; then
+      exit 1
+    fi
+    OFFSITE_DIR=""
+  fi
 }
 
 latest_local_backup() {
@@ -62,10 +72,12 @@ latest_local_backup() {
 }
 
 latest_offsite_backup() {
+  [[ -n "$OFFSITE_DIR" ]] || return 0
   ls -1t "${OFFSITE_DIR}/${PROFILE}-offsite-"*.rdb 2>/dev/null | head -n 1 || true
 }
 
 prune_offsite_backups() {
+  [[ -n "$OFFSITE_DIR" ]] || return 0
   local keep="$1"
   local files=()
   while IFS= read -r f; do
@@ -82,6 +94,46 @@ prune_offsite_backups() {
   done
 }
 
+offsite_warn_or_fail() {
+  local message="$1"
+  echo "[autobackup] warning: $message" >&2
+  if [[ "$OFFSITE_STRICT" == "1" ]]; then
+    exit 1
+  fi
+}
+
+copy_offsite_backup() {
+  local source="$1"
+  local stamp="$2"
+  if [[ -z "$OFFSITE_DIR" ]]; then
+    offsite_warn_or_fail "offsite copy skipped because offsite dir is unavailable"
+    return 0
+  fi
+
+  local target latest_target latest_tmp copied=0
+  target="${OFFSITE_DIR}/${PROFILE}-offsite-${stamp}.rdb"
+  latest_target="${OFFSITE_DIR}/${PROFILE}-latest.rdb"
+  latest_tmp="${latest_target}.tmp.$$"
+
+  if cp -p "$source" "$target"; then
+    copied=1
+    echo "[autobackup] copied:  $target"
+  else
+    offsite_warn_or_fail "offsite copy failed: $target"
+  fi
+
+  if cp -p "$source" "$latest_tmp" && mv -f "$latest_tmp" "$latest_target"; then
+    echo "[autobackup] latest:  $latest_target"
+  else
+    rm -f "$latest_tmp" 2>/dev/null || true
+    offsite_warn_or_fail "offsite latest copy failed: $latest_target"
+  fi
+
+  if [[ "$copied" == "1" ]]; then
+    prune_offsite_backups "$OFFSITE_KEEP"
+  fi
+}
+
 run_backup() {
   ensure_dirs
   "$USER_REDIS_SCRIPT" backup >/dev/null
@@ -93,17 +145,11 @@ run_backup() {
     exit 1
   fi
 
-  local stamp target latest_target
+  local stamp
   stamp="$(date '+%Y%m%d-%H%M%S')"
-  target="${OFFSITE_DIR}/${PROFILE}-offsite-${stamp}.rdb"
-  latest_target="${OFFSITE_DIR}/${PROFILE}-latest.rdb"
-  cp -p "$source" "$target"
-  cp -p "$source" "$latest_target"
-  prune_offsite_backups "$OFFSITE_KEEP"
+  copy_offsite_backup "$source" "$stamp"
 
   echo "[autobackup] source:  $source"
-  echo "[autobackup] copied:  $target"
-  echo "[autobackup] latest:  $latest_target"
 }
 
 write_plist() {
@@ -129,6 +175,8 @@ write_plist() {
   </array>
   <key>EnvironmentVariables</key>
   <dict>
+    <key>PATH</key>
+    <string>${LAUNCHD_SAFE_PATH}</string>
     <key>USER_REDIS_PORT</key>
     <string>${PORT}</string>
     <key>USER_REDIS_PROFILE</key>
@@ -139,6 +187,8 @@ write_plist() {
     <string>${OFFSITE_DIR}</string>
     <key>USER_REDIS_OFFSITE_KEEP</key>
     <string>${OFFSITE_KEEP}</string>
+    <key>USER_REDIS_OFFSITE_STRICT</key>
+    <string>${OFFSITE_STRICT}</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>

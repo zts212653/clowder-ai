@@ -55,6 +55,40 @@ describe('CallMcpToolExecutor', () => {
     assert.equal(entries[0].result.status, 'success');
   });
 
+  test('delegates readonly file-slice drilldown instead of falling back to truncated IDE reads', async () => {
+    const callTool = mock.fn(async () => ({ content: [{ type: 'text', text: 'Phase D lines' }] }));
+    const executor = new CallMcpToolExecutor({ callTool });
+    const { ctx, entries } = makeContext();
+
+    const result = await executor.execute(
+      {
+        serverName: 'cat-cafe-memory',
+        toolName: 'cat_cafe_read_file_slice',
+        arguments: {
+          path: 'docs/features/F211-cross-runtime-session-transparency.md',
+          startLine: 220,
+          endLine: 260,
+        },
+      },
+      ctx,
+    );
+
+    assert.equal(result.status, 'success');
+    assert.equal(result.stdout, 'Phase D lines');
+    assert.equal(callTool.mock.callCount(), 1);
+    assert.deepEqual(callTool.mock.calls[0].arguments[0], {
+      serverName: 'cat-cafe-memory',
+      toolName: 'cat_cafe_read_file_slice',
+      arguments: {
+        path: 'docs/features/F211-cross-runtime-session-transparency.md',
+        startLine: 220,
+        endLine: 260,
+      },
+    });
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].result.status, 'success');
+  });
+
   test('refuses non-read-only MCP tools without calling the MCP server', async () => {
     const callTool = mock.fn(async () => ({ content: [{ type: 'text', text: 'posted' }] }));
     const executor = new CallMcpToolExecutor({ callTool });

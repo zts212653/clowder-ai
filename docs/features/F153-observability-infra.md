@@ -1,6 +1,6 @@
 ---
 feature_ids: [F153]
-related_features: [F130, F008, F150]
+related_features: [F130, F008, F150, F212]
 topics: [observability, telemetry, metrics, health-check, infrastructure]
 doc_kind: spec
 created: 2026-04-09
@@ -218,6 +218,7 @@ Phase E 实现引入了 `cat_cafe.route` 根 span（`AgentRouter` 创建），`c
 - **触发**：`capturePromptIfEnabled` 在 `invoke-single-cat` fire-and-forget 调用，`PROMPT_CAPTURE` env 控制开关（默认关），`PROMPT_CAPTURE_CATS` 可选白名单
 - **API**：`/api/debug/prompt-captures/{captureId}`、`?invocationId`、`?threadId`、`/status`、`/prune` — session auth + userId resource-level auth（只返回当前用户的 captures）
 - **Hub**：`HubTraceTree` 新增 X-Ray Inspector，tabs 展示 system/user/effective/meta prompt 分解
+- **Known gap（2026-05-26 / F203 interaction）**：F203 将 Codex/Claude 的 L0 identity 移入 native system channel（Codex `developer_instructions` / Claude `--system-prompt-file`）后，当前 Prompt X-Ray 仍只捕获 `invoke-single-cat` 的 user/effective prompt 与可选 pack-only `systemPrompt`；因此 `PROMPT_CAPTURE=on` 会落盘，但 Hub `System` tab 可能为空，无法代表真实 native system prompt。
 
 #### Cross-route A2A Trace Propagation
 
@@ -434,6 +435,7 @@ UI 必须显示 `—` 而非 `0`，否则会让"重启前的数据"看起来像"
 - [ ] AC-G7: `setTraceContext` on `IAuthInvocationBackend`（Memory + Redis 实现），best-effort try/catch
 - [ ] AC-G8: Route aggregate attributes（`ROUTE_TOTAL_CATS_INVOKED`/`ROUTE_TOTAL_TOKENS`/`ROUTE_HAS_A2A_HANDOFF`）设在 route span
 - [ ] AC-G9: `LocalTraceStore` 默认 TTL 从 2h 提升到 24h，导出 `LOCAL_TRACE_STORE_DEFAULT_MAX_AGE_MS` 常量
+- [ ] AC-G10: Prompt X-Ray 必须覆盖 F203 native L0 channel，或在 UI/API 中明确拆分 native system prompt vs user/effective prompt，避免把空 `System` tab 误读成未捕获。
 
 ### Phase I（Step Summary — Agent Loop 行为节奏度量）✅
 - [x] AC-I1: Hub Traces tab 暴露 "Step Summary" 子视图（per `cat_cafe.route`），展示 `agent_loop_count` / `tool_call_count` / `a2a_dispatch_count` / `duration_ms` / `token_total` / `error_count`
@@ -520,3 +522,4 @@ UI 必须显示 `—` 而非 `0`，否则会让"重启前的数据"看起来像"
 | KD-39 | Phase J 同 phase 内做 AC-F8 unblock（持久化 + hydrate），不拆出去 | 两猫共识：防止 Phase F 时"live 真 / restored 假"的 status 漂移重现；Phase J 不标 ✅ 直到两 slice 闭环 | 2026-05-22 |
 | KD-40 | Phase J: 移除 `span-helpers.ts` 本地 `isMcpTool`，统一走 `tool-usage/classify.ts` | Maine Coon独有 finding：本地 `isMcpTool` 当前识别 `cat_cafe_` / `mcp__` / `signal_`，**漏 Codex `mcp:` 前缀**，导致 Codex MCP tool 误判 basic；`tool-usage/classify.ts` 已正确处理 `mcp:` 格式 | 2026-05-22 |
 | KD-41 | Phase J: provider 支持矩阵必须文档化，不允许"至少 X 其他 fallback"模糊口径 | gpt52 finding：模糊 AC 容易把 Phase J 做成局部真实；每个 provider 必须明确列 start/end/id/status 四件套支持，不支持的明确降级（不开 span 或标 fallback） | 2026-05-22 |
+| KD-42 | Prompt X-Ray 不能把 `params.systemPrompt` 等同于真实系统提示词 | F203 将 L0 identity 移到 native system channel；runtime 证明确实会 capture user/effective prompt，但 `System` tab 可为空，F153 Phase G 需要补 native channel coverage 或 UI 明示 partial | 2026-05-26 |

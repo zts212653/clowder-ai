@@ -9,7 +9,9 @@ community_issue: https://github.com/zts212653/clowder-ai/issues/14
 
 # F113: Multi-Platform One-Click Deploy
 
-> **Status**: in-progress | **Source**: clowder-ai #14 (mindfn) | **Priority**: P2
+> **Status**: done | **Source**: clowder-ai #14 (mindfn) | **Priority**: P2
+>
+> **Close 2026-05-26**：18/18 AC done。AC-B6 macOS 验收由社区多位小伙伴实际使用验证通过（team lead 2026-05-26 确认）。社区 issue clowder-ai#14 已关闭。
 
 ## Why
 
@@ -121,7 +123,7 @@ API 契约：
 - [x] AC-B3: 安装结束后，当前 shell 立即可用 `pnpm`/`claude`/`codex`/`gemini`，新终端也可用
 - [x] AC-B4: 兼容 macOS 自带 bash 3.2 / `set -u` / 空数组迭代
 - [x] AC-B5: 重跑安装不破坏 profile，不重复写坏 PATH，不因 profile 无 trailing newline 破坏 shell
-- [ ] AC-B6: team lead在 macOS 真机上完成端到端验收（安装→启动→使用）
+- [x] AC-B6: ~~team lead在 macOS 真机上完成端到端验收~~ 社区多位小伙伴实际使用验证（team lead 2026-05-26 确认通过）
 
 ### Phase C（Windows 一键安装）✅
 - [x] AC-C1: Windows 用户通过 `.\scripts\install.ps1` 完成安装并能启动，不以 WSL 为前提

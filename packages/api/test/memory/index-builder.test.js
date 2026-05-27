@@ -1641,6 +1641,53 @@ Content for single file parse.
     assert.equal(result.item.anchor, 'F100');
     assert.equal(result.provenance.tier, 'authoritative');
   });
+
+  it('discover() skips generated thread export dumps under discussion trees', async () => {
+    mkdirSync(join(docsDir, 'discussions', 'exported-threads'), { recursive: true });
+    mkdirSync(join(docsDir, 'archive', '2026-02', 'discussions', 'exported-threads'), { recursive: true });
+    writeFileSync(
+      join(docsDir, 'discussions', 'design-note.md'),
+      `---
+doc_kind: discussion
+---
+
+# Design Note
+
+Human-curated discussion content.
+`,
+    );
+    writeFileSync(
+      join(docsDir, 'discussions', 'exported-threads', 'thread-thread_abc.md'),
+      `# 对话记录: raw export
+
+- **ID**: thread_abc
+
+Raw generated transcript dump.
+`,
+    );
+    writeFileSync(
+      join(docsDir, 'archive', '2026-02', 'discussions', 'exported-threads', 'thread-thread_def.md'),
+      `# 对话记录: archived raw export
+
+- **ID**: thread_def
+
+Raw generated transcript dump.
+`,
+    );
+
+    const { CatCafeScanner } = await import('../../dist/domains/memory/CatCafeScanner.js');
+    const scanner = new CatCafeScanner();
+    const results = scanner.discover(docsDir);
+
+    assert.ok(
+      results.some((r) => r.item.sourcePath === 'discussions/design-note.md'),
+      'curated discussion docs should still be indexed',
+    );
+    assert.ok(
+      results.every((r) => !r.item.sourcePath?.includes('exported-threads/')),
+      'generated thread export dumps must not enter evidence docs',
+    );
+  });
 });
 
 // ── F152 Phase A: Auto-selection (AC-A3) ────────────────────────────

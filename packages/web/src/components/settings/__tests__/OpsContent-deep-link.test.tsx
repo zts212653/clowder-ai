@@ -27,6 +27,9 @@ vi.mock('../../HubObservabilityTab', () => ({
 vi.mock('../../HubAgentSessionsTab', () => ({
   HubAgentSessionsTab: () => <div data-testid="agent-sessions">agent-sessions</div>,
 }));
+vi.mock('../../HubRuntimeSessionsTab', () => ({
+  HubRuntimeSessionsTab: () => <div data-testid="runtime-sessions">runtime-sessions</div>,
+}));
 vi.mock('../../HubGovernanceTab', () => ({
   HubGovernanceTab: () => <div data-testid="governance">governance</div>,
 }));
@@ -56,6 +59,13 @@ describe('OpsContent URL deep-linking (S-2 P1 fix)', () => {
     mockSearchParams = new URLSearchParams('ops=agent-sessions');
     const html = renderToStaticMarkup(<OpsContent />);
     expect(html).toContain('data-testid="agent-sessions"');
+    expect(html).not.toContain('data-testid="routing-policy"');
+  });
+
+  it('opens runtime-sessions tab when ops=runtime-sessions (F211 Phase E)', () => {
+    mockSearchParams = new URLSearchParams('ops=runtime-sessions');
+    const html = renderToStaticMarkup(<OpsContent />);
+    expect(html).toContain('data-testid="runtime-sessions"');
     expect(html).not.toContain('data-testid="routing-policy"');
   });
 

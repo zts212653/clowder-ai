@@ -10,10 +10,14 @@ set -euo pipefail
 #   ./scripts/thread-exports-autosave.sh uninstall
 
 ACTION="${1:-status}"
+LAUNCHD_SAFE_PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export PATH="${LAUNCHD_SAFE_PATH}:${PATH:-}"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 SYNC_SCRIPT="$SCRIPT_DIR/thread-exports-sync.sh"
 EXPORT_SCRIPT="$SCRIPT_DIR/export-threads-from-redis.mjs"
+EXPORT_OUT_DIR="${THREAD_EXPORT_REPO_DIR:-$PROJECT_DIR/.cat-cafe/thread-exports/repo}"
 
 INTERVAL_MINUTES="${THREAD_EXPORT_SYNC_INTERVAL_MINUTES:-120}"
 LABEL="${THREAD_EXPORT_AUTOSAVE_LABEL:-com.catcafe.thread.exports.sync}"
@@ -79,10 +83,16 @@ write_plist() {
     <string>${SCRIPT_DIR}/thread-exports-autosave.sh</string>
     <string>run</string>
   </array>
+  <key>WorkingDirectory</key>
+  <string>${PROJECT_DIR}</string>
   <key>EnvironmentVariables</key>
   <dict>
+    <key>PATH</key>
+    <string>${LAUNCHD_SAFE_PATH}</string>
     <key>THREAD_EXPORT_REDIS_URL</key>
     <string>${EXPORT_REDIS_URL}</string>
+    <key>THREAD_EXPORT_REPO_DIR</key>
+    <string>${EXPORT_OUT_DIR}</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -139,8 +149,8 @@ case "$ACTION" in
     ;;
   run)
     need_tools
-    node "$EXPORT_SCRIPT" --redis-url "$EXPORT_REDIS_URL"
-    "$SYNC_SCRIPT" sync
+    node "$EXPORT_SCRIPT" --redis-url "$EXPORT_REDIS_URL" --out-dir "$EXPORT_OUT_DIR"
+    THREAD_EXPORT_REPO_DIR="$EXPORT_OUT_DIR" "$SYNC_SCRIPT" sync
     ;;
   status)
     status

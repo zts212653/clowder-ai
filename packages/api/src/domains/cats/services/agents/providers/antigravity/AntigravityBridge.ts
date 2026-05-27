@@ -16,6 +16,7 @@ import {
   cascadeHealthThresholdsFromEnv,
 } from './antigravity-cascade-health.js';
 import { discoverAntigravityLS } from './antigravity-ls-discovery.js';
+import type { AntigravityRuntimeSealReason } from './antigravity-runtime-lifecycle.js';
 import { diffDeliveredSteps } from './antigravity-step-delta.js';
 import { isReadOnlyMcpTool } from './antigravity-step-effects.js';
 import { isLsOwnedApprovalTool, toolNameFromWaitingStep } from './antigravity-tool-surface.js';
@@ -184,6 +185,12 @@ export type AntigravityDrainResult =
       reason: string;
       lastObservedStepCount?: number;
     };
+
+export interface AntigravityResetSessionOptions {
+  expectedRuntimeSessionId?: string;
+  sealReason?: AntigravityRuntimeSealReason;
+  drainResult?: RuntimeSessionDrainResult;
+}
 
 export type BridgeLivenessEvidenceKind =
   | 'trajectory_progress'
@@ -370,6 +377,10 @@ export class AntigravityBridge {
 
   getRuntimeSessionStoreForDiagnostics(): IRuntimeSessionStore | undefined {
     return this.runtimeSessionStore;
+  }
+
+  getLegacyJsonSessionStoreForDiagnostics(): boolean {
+    return this.legacyJsonSessionStore;
   }
 
   private async withInFlight<T>(cascadeId: string, kind: 'rpc' | 'toolResult', fn: () => Promise<T>): Promise<T> {
@@ -956,7 +967,7 @@ export class AntigravityBridge {
       }
     }
 
-    const canReadLegacyJson = this.runtimeSessionStore !== undefined || this.legacyJsonSessionStore;
+    const canReadLegacyJson = this.runtimeSessionStore === undefined && this.legacyJsonSessionStore;
     if (canReadLegacyJson) this.loadSessionMap();
 
     const candidates = canReadLegacyJson ? [this.sessionMap.get(key)] : [];
@@ -1021,7 +1032,51 @@ export class AntigravityBridge {
     log.info(`runtime-store active binding ${active.runtimeSessionId} → ${runtimeSessionId}`);
   }
 
-  resetSession(threadId: string, catId?: string): void {
+  async resetSession(threadId: string, catId?: string, options: AntigravityResetSessionOptions = {}): Promise<void> {
+    if (this.runtimeSessionStore && catId) {
+      try {
+        const active = await this.runtimeSessionStore.getActiveByThreadCat(
+          'antigravity-desktop',
+          threadId,
+          catId as CatId,
+        );
+        if (!active) return;
+        if (
+          options.expectedRuntimeSessionId !== undefined &&
+          active.runtimeSessionId !== options.expectedRuntimeSessionId
+        ) {
+          log.warn(
+            {
+              threadId,
+              catId,
+              expectedRuntimeSessionId: options.expectedRuntimeSessionId,
+              activeRuntimeSessionId: active.runtimeSessionId,
+            },
+            'skipped Antigravity runtime reset because active binding changed',
+          );
+          return;
+        }
+        const now = Date.now();
+        await this.runtimeSessionStore.updateLifecycle(active.sessionId, {
+          state: 'sealed',
+          lastObservedAt: Math.max(active.lifecycle.lastObservedAt, now),
+          sealReason: options.sealReason ?? 'user_initiated',
+          drainResult: options.drainResult ?? 'complete',
+        });
+      } catch (error) {
+        log.warn(
+          {
+            err: error,
+            threadId,
+            catId,
+            expectedRuntimeSessionId: options.expectedRuntimeSessionId,
+          },
+          'failed to seal Antigravity runtime metadata during reset',
+        );
+      }
+      return;
+    }
+
     if (this.runtimeSessionStore || !this.legacyJsonSessionStore) return;
 
     this.loadSessionMap();

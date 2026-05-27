@@ -51,6 +51,27 @@ export interface RuntimeSessionLifecycle {
   lastFailureReason?: string;
 }
 
+export interface RuntimeSessionExternalRegistrationProvenance {
+  source: 'antigravity-ide-direct';
+  agentKeyId: string;
+  registeredAt: number;
+  ideWindowId?: string;
+  workspacePath?: string;
+  runtimeUrl?: string;
+  note?: string;
+}
+
+export type RuntimeSessionExternalRegistrationBinding =
+  | { mode: 'orphan_anchor'; anchorThreadId: string }
+  | { mode: 'thread'; threadId: string; requestedBy: 'agent_key' };
+
+export interface RuntimeSessionExternalRegistrationState {
+  binding: RuntimeSessionExternalRegistrationBinding;
+  provenance: RuntimeSessionExternalRegistrationProvenance;
+  title?: string;
+  clientRegistrationId?: string;
+}
+
 export interface RuntimeSessionMetadata {
   sessionId: string;
   runtime: RuntimeSessionRuntime;
@@ -62,6 +83,7 @@ export interface RuntimeSessionMetadata {
   surface: RuntimeSessionSurface;
   identityHistory: RuntimeIdentityHistoryEntry[];
   lifecycle: RuntimeSessionLifecycle;
+  externalRegistration?: RuntimeSessionExternalRegistrationState;
 }
 
 export function normalizeRuntimeSessionMetadata(input: unknown): RuntimeSessionMetadata {
@@ -83,6 +105,7 @@ export function normalizeRuntimeSessionMetadata(input: unknown): RuntimeSessionM
     surface: requireOneOf(record.surface, RUNTIME_SESSION_SURFACES, 'surface'),
     identityHistory,
     lifecycle,
+    ...optionalExternalRegistration(record.externalRegistration),
   };
 }
 
@@ -145,6 +168,52 @@ function normalizeIdentityHistoryEntry(input: unknown): RuntimeIdentityHistoryEn
   };
 }
 
+function normalizeExternalRegistration(input: unknown): RuntimeSessionExternalRegistrationState {
+  const record = requireRecord(input, 'runtime session external registration');
+  return {
+    binding: normalizeExternalRegistrationBinding(record.binding),
+    provenance: normalizeExternalRegistrationProvenance(record.provenance),
+    ...optionalStringField(record.title, 'externalRegistration.title'),
+    ...optionalStringField(record.clientRegistrationId, 'externalRegistration.clientRegistrationId'),
+  };
+}
+
+function normalizeExternalRegistrationBinding(input: unknown): RuntimeSessionExternalRegistrationBinding {
+  const record = requireRecord(input, 'runtime session external registration binding');
+  const mode = requireNonEmptyString(record.mode, 'externalRegistration.binding.mode');
+  if (mode === 'orphan_anchor') {
+    return {
+      mode,
+      anchorThreadId: requireNonEmptyString(record.anchorThreadId, 'externalRegistration.binding.anchorThreadId'),
+    };
+  }
+  if (mode === 'thread') {
+    return {
+      mode,
+      threadId: requireNonEmptyString(record.threadId, 'externalRegistration.binding.threadId'),
+      requestedBy: 'agent_key',
+    };
+  }
+  throw new Error('invalid externalRegistration.binding.mode');
+}
+
+function normalizeExternalRegistrationProvenance(input: unknown): RuntimeSessionExternalRegistrationProvenance {
+  const record = requireRecord(input, 'runtime session external registration provenance');
+  const source = requireNonEmptyString(record.source, 'externalRegistration.provenance.source');
+  if (source !== 'antigravity-ide-direct') {
+    throw new Error('invalid externalRegistration.provenance.source');
+  }
+  return {
+    source,
+    agentKeyId: requireNonEmptyString(record.agentKeyId, 'externalRegistration.provenance.agentKeyId'),
+    registeredAt: requireFiniteNumber(record.registeredAt, 'externalRegistration.provenance.registeredAt'),
+    ...optionalStringField(record.ideWindowId, 'externalRegistration.provenance.ideWindowId'),
+    ...optionalStringField(record.workspacePath, 'externalRegistration.provenance.workspacePath'),
+    ...optionalStringField(record.runtimeUrl, 'externalRegistration.provenance.runtimeUrl'),
+    ...optionalStringField(record.note, 'externalRegistration.provenance.note'),
+  };
+}
+
 function requireRecord(value: unknown, name: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error(`${name} must be an object`);
@@ -198,6 +267,11 @@ function optionalOneOfField<const T extends readonly string[]>(
 ): Record<string, T[number]> {
   if (value === undefined) return {};
   return { [lastPathSegment(name)]: requireOneOf(value, allowed, name) };
+}
+
+function optionalExternalRegistration(value: unknown): Record<string, RuntimeSessionExternalRegistrationState> {
+  if (value === undefined) return {};
+  return { externalRegistration: normalizeExternalRegistration(value) };
 }
 
 function lastPathSegment(path: string): string {

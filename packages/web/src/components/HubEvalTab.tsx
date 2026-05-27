@@ -4,13 +4,26 @@ import { useCallback, useEffect, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 
+interface EvalDomainSummary {
+  domainId: string;
+  displayName: string;
+  systemThreadId: string;
+  frequency: string;
+  evalCatHandle: string;
+  hasVerdict: boolean;
+  latestVerdictId?: string;
+  latestVerdict?: EvalHubItem['verdict'];
+}
+
 interface EvalHubSummary {
   counts: {
     total: number;
     actionable: number;
     keepObserve: number;
     stale: number;
+    registeredDomains?: number;
   };
+  domains?: EvalDomainSummary[];
   items: EvalHubItem[];
 }
 
@@ -98,7 +111,7 @@ export function HubEvalTab() {
       </div>
     );
   }
-  if (!summary || summary.items.length === 0) {
+  if (!summary || (summary.items.length === 0 && (!summary.domains || summary.domains.length === 0))) {
     return (
       <div className="rounded-lg bg-cafe-surface-elevated p-4 text-sm text-cafe-secondary">
         还没有 live verdict。Eval Hub 只展示已经提交证据包的真实 eval 结论。
@@ -118,11 +131,22 @@ export function HubEvalTab() {
         <StatCell label="过期" sublabel="需重新评估" value={summary.counts.stale} />
       </div>
 
-      <div className="space-y-3">
-        {summary.items.map((item) => (
-          <EvalVerdictCard key={item.id} item={item} />
-        ))}
-      </div>
+      {summary.domains && summary.domains.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-semibold text-cafe">评估域总览</h2>
+          {summary.domains.map((domain) => (
+            <DomainCard key={domain.domainId} domain={domain} />
+          ))}
+        </div>
+      )}
+
+      {summary.items.length > 0 && (
+        <div className="space-y-3">
+          {summary.items.map((item) => (
+            <EvalVerdictCard key={item.id} item={item} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -203,6 +227,41 @@ function EvalVerdictCard({ item }: { item: EvalHubItem }) {
             </a>
           )}
         </div>
+      </div>
+    </section>
+  );
+}
+
+function DomainCard({ domain }: { domain: EvalDomainSummary }) {
+  return (
+    <section className="rounded-lg bg-cafe-surface-elevated p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="text-xs font-medium uppercase tracking-wide text-cafe-muted">{domain.domainId}</div>
+          <h3 className="mt-1 text-base font-semibold text-cafe">{domain.displayName}</h3>
+          <p className="mt-1 text-xs text-cafe-muted">
+            评估频率: {domain.frequency} · 评估猫: {domain.evalCatHandle}
+          </p>
+        </div>
+        <span className="inline-flex shrink-0 rounded-md bg-cafe-surface px-2.5 py-1 text-xs font-semibold text-[var(--console-button-emphasis)]">
+          {domain.hasVerdict && domain.latestVerdict ? VERDICT_LABELS[domain.latestVerdict] : '待首次评估'}
+        </span>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <a
+          href={`/thread/${encodeURIComponent(domain.systemThreadId)}`}
+          className="rounded-md border border-cafe px-3 py-1.5 text-xs font-medium text-cafe-secondary hover:text-cafe"
+        >
+          {domain.displayName} 工作线程
+        </a>
+        {domain.domainId === 'eval:memory' && (
+          <a
+            href="/memory/health"
+            className="rounded-md border border-cafe px-3 py-1.5 text-xs font-medium text-cafe-secondary hover:text-cafe"
+          >
+            记忆健康
+          </a>
+        )}
       </div>
     </section>
   );

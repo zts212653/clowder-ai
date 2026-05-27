@@ -14,6 +14,7 @@ import { formatEventsChat, formatEventsHandoff } from '../domains/cats/services/
 import type { TranscriptReader } from '../domains/cats/services/session/TranscriptReader.js';
 import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import { isSharedDefaultThread } from '../domains/guides/guide-state-access.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
 const VALID_VIEWS = new Set(['raw', 'chat', 'handoff']);
@@ -45,6 +46,17 @@ function checkCatIdAccess(request: { headers: Record<string, unknown> }, session
   return null;
 }
 
+function canAccessSessionThread(
+  thread: { id: string; createdBy: string; externalRuntimeAnchorState?: { userId: string } | undefined } | null,
+  session: { userId: string },
+  userId: string,
+): boolean {
+  if (!thread) return false;
+  if (thread.createdBy === userId) return true;
+  if (thread.externalRuntimeAnchorState?.userId === userId && session.userId === userId) return true;
+  return isSharedDefaultThread(thread) && session.userId === userId;
+}
+
 export async function sessionTranscriptRoutes(
   app: FastifyInstance,
   opts: SessionTranscriptRouteOptions,
@@ -69,7 +81,7 @@ export async function sessionTranscriptRoutes(
     }
 
     const thread = await threadStore.get(session.threadId);
-    if (!thread || thread.createdBy !== userId) {
+    if (!canAccessSessionThread(thread, session, userId)) {
       reply.status(403);
       return { error: 'Access denied' };
     }
@@ -139,7 +151,7 @@ export async function sessionTranscriptRoutes(
     }
 
     const thread = await threadStore.get(session.threadId);
-    if (!thread || thread.createdBy !== userId) {
+    if (!canAccessSessionThread(thread, session, userId)) {
       reply.status(403);
       return { error: 'Access denied' };
     }
@@ -175,7 +187,7 @@ export async function sessionTranscriptRoutes(
     }
 
     const thread = await threadStore.get(session.threadId);
-    if (!thread || thread.createdBy !== userId) {
+    if (!canAccessSessionThread(thread, session, userId)) {
       reply.status(403);
       return { error: 'Access denied' };
     }

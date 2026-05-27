@@ -8,7 +8,7 @@ created: 2026-05-21
 
 # F209: Evidence Recall Optimization — 消息级语义、实体门牌号与活查询藤
 
-> **Status**: in-progress (Phase A ✅ merged PR #1842; Phase B ✅ merged PR #1846 + AC-B3 contract fix PR #1851; Phase C ✅ merged PR #1853 + file-slice dogfood hotfix PR #1854; AC-B6 transferred to F208 AC-A5 — F209 不再阻塞 AC-B6; Phase B.1 minimal seed ✅ merged PR #1867; Phase D.0 readiness sprint ✅ completed, initially BLOCK then **UNBLOCK** after PR #1877 raw embedding reprobe + PR #1882 MCP default dimension fix + runtime restart; next F209 owner focus = Phase D product spike / Design Gate. Cross-line follow-ups are delegated below: F193 MCP topology cleanup, F200 recall@k wrapper, Phase C reader hardening.) | **Owner**: Maine Coon/Maine Coon | **Priority**: P1
+> **Status**: done | **Completed**: 2026-05-26 | **Owner**: Maine Coon/Maine Coon | **Priority**: P1 | **Close evidence**: Phase A-D merged and dogfooded; PR #1910 fixed final thread-scope degraded blocker; independent vision guardian Opus 4.6 approved close. Phase E eval ownership transferred to F200 per KD-6 / HW-5.
 
 ## Why
 
@@ -62,9 +62,10 @@ F209 完整终态包含五层：
    - Phase A: 真实 raw `semantic`/`hybrid` query 找到一条**无字面命中**的旧消息。
    - Phase B: 至少 seed 1 个真实实体（如 `person:landy`），搜别名能命中只提及别名的原消息。
    - Phase C: 真实 `search_evidence → drillDown → typed reader` 端到端打开原文窗口闭环。
-   - Phase D: BLOCKED per Phase D.0 readiness report（见 `docs/decisions/2026-05-23-f209-d0-readiness.md`）。
+   - Phase D: Perspective live query plan must run end-to-end, expose anchors / typed drill-down hints, and remain a live route rather than stored truth.
+   - Close gate: independent vision guardian dogfood must verify Phase A-D are useful to a real cat workflow.
 
-> **来源**：2026-05-23 F209 post-Phase-C dogfood 反思（47 / Maine Coon alignment + team lead指示）。Phase B alias registry 在生产里**机制 ship 但字典为空**、Phase C drillDown **post-merge 才被 author 真用一次抓到 file-slice bug** —— 都是"AC pass ≠ 用户感受到"的同型走偏。该定义钉死后，未来 Phase close 必须证据双足。
+> **来源**：2026-05-23 F209 post-Phase-C dogfood 反思（47 / Maine Coon alignment + team lead指示）。Phase B alias registry 在生产里**机制 ship 但字典为空**、Phase C drillDown **post-merge 才被 author 真用一次抓到 file-slice bug** —— 都是"AC pass ≠ 用户感受到"的同型走偏。该定义钉死后，未来 Phase close 必须证据双足。F209 最终 close 由 Opus 4.6 作为非作者非 reviewer 愿景守护猫吃猫粮复验并 APPROVE。
 
 ## Phase A: Passage-level Semantic Recall ✅
 
@@ -226,7 +227,7 @@ Visibility audit: `docs/decisions/2026-05-24-f209-phase-d-visibility-audit.md`. 
 - 审核与过期：摘要必须带 anchors、生成者、时间、过期 / superseded 状态，不能变成无来源真相。
 - 消费边界：摘要可作为入口 / digest，不能替代 `search_evidence` 原文证据。
 
-## Phase E: F200 Eval Integration
+## Phase E: F200 Eval Integration（Transferred to F200）
 
 避免“更聪明但更偏”的检索回归，但**不在 F209 自建第二套 eval 系统**。边界如下：
 
@@ -234,13 +235,13 @@ Visibility audit: `docs/decisions/2026-05-24-f209-phase-d-visibility-audit.md`. 
 - **F200 owns**：golden query set、recall@k / open-rate / false-confidence 指标、consumption rerank、exploration/freshness 对冲。
 - **接口**：F209 Phase 完成时向 F200 贡献 fixtures；F200 统一跑 retrieval eval 并产出 finding。
 
-### Acceptance Criteria
+### Acceptance Criteria Resolution
 
-- [ ] AC-E1: F209 每个 Phase 至少向 F200 贡献 2 条 retrieval regression fixture。
-- [ ] AC-E2: fixture 至少包含 query、scope/mode/depth、expected anchor pattern、expected drill-down behavior。
-- [ ] AC-E3: F200 统一持有 recall@k / anchor open rate / false confidence / raw drill-down success 指标。
-- [ ] AC-E4: F200 consumption signal 只能影响 navigation utility，不得改变 authority/truth。
-- [ ] AC-E5: F200 负责 exploration / freshness 对冲，防 rich-get-richer；F209 不重复实现。
+- [x] AC-E1: F209 每个 Phase 至少向 F200 贡献 retrieval regression fixture — resolved by ownership transfer: F209 contributed Phase A/B/C fixture docs plus Phase D Perspective dogfood plan; F200 HW-5 owns the runnable wrapper.
+- [x] AC-E2: fixture 至少包含 query、scope/mode/depth、expected anchor pattern、expected drill-down behavior — resolved by existing F209 fixture docs and F200 HW-5 wrapper contract.
+- [x] AC-E3: F200 统一持有 recall@k / anchor open rate / false confidence / raw drill-down success 指标 — resolved by KD-6; these metrics are deliberately not duplicated in F209.
+- [x] AC-E4: F200 consumption signal 只能影响 navigation utility，不得改变 authority/truth — resolved by F209 KD-2 / KD-5 and Phase D AC-D5; Perspective telemetry stays navigation-only.
+- [x] AC-E5: F200 负责 exploration / freshness 对冲，防 rich-get-richer；F209 不重复实现 — resolved by KD-6 and F200 ownership. F209 close does not carry an eval-system tail.
 
 ## Dependencies
 
@@ -298,13 +299,13 @@ Visibility audit: `docs/decisions/2026-05-24-f209-phase-d-visibility-audit.md`. 
 
 | ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
-| R1 | “一个 thread 什么都聊，压缩后你能找回之前记忆吗？” | AC-A1~A5, AC-C1 | raw semantic + message window fixture | [ ] |
-| R2 | “不要小模型替猫思考，search_evidence 为什么不能用在群聊里？” | KD-2, AC-A4 | 搜索只返回候选 + anchor；猫读原文 | [ ] |
-| R3 | “每条消息都有 invocation，这样不就能搜了？” | AC-C1, AC-C2 | message / invocation typed readers | [ ] |
-| R4 | “Everything 为什么那么快，SmartFolder 是否能找奶奶相关内容？” | AC-B1~B5, AC-D0~D5 | entity alias + Perspective walk-through | [ ] |
+| R1 | “一个 thread 什么都聊，压缩后你能找回之前记忆吗？” | AC-A1~A5, AC-C1 | raw semantic + message window fixture; PR #1910 fixed final thread-scope degraded blocker | [x] |
+| R2 | “不要小模型替猫思考，search_evidence 为什么不能用在群聊里？” | KD-2, AC-A4 | 搜索只返回候选 + anchor；猫读原文；guardian dogfood used drill-down instead of summary truth | [x] |
+| R3 | “每条消息都有 invocation，这样不就能搜了？” | AC-C1, AC-C2 | message / invocation typed readers; D.0 + guardian dogfood opened bounded thread context | [x] |
+| R4 | “Everything 为什么那么快，SmartFolder 是否能找奶奶相关内容？” | AC-B1~B5, AC-D0~D5 | entity alias + Perspective walk-through; CVO/CVO alias expansion and Perspective orientation run verified | [x] |
 | R5 | “现在检索有 bm25/embedding/docs/thread/msg，先列现状再优化” | discussion 04 + KD-1 | discussion doc review | [x] |
 | R6 | “别补锅，要用我们现有 search_evidence / graph_resolve / list_recent 思路” | KD-3, Non-goals | spec 不引入摘要 memory / 小模型 splitter | [x] |
-| R7 | “Perspective 不是给team lead搜，但能给team lead看；和 search_evidence 明厨亮灶联动” | AC-D6, AC-D7, KD-10 | Memory / Recall 面板显示 Perspective run trace | [ ] |
+| R7 | “Perspective 不是给team lead搜，但能给team lead看；和 search_evidence 明厨亮灶联动” | AC-D6, AC-D7, KD-10 | API/MCP run trace exposes plan id, steps, hit counts, typed reader route hints, degraded/effectiveMode | [x] |
 
 ### 覆盖检查
 

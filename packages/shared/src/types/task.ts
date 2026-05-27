@@ -26,6 +26,8 @@ export interface CiAutomationState {
   readonly lastNotifiedAt?: number;
   readonly enabled?: boolean;
   readonly skipNotified?: boolean;
+  /** Terminal PR state — persisted by CiCdRouter on lifecycle close (F200 AC-D2.3). */
+  readonly prState?: 'merged' | 'closed';
 }
 
 /** Conflict detection automation state for pr_tracking tasks */

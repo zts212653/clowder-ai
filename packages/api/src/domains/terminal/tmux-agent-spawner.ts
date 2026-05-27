@@ -16,6 +16,7 @@ import type { Interface as ReadlineInterface } from 'node:readline';
 import { createInterface } from 'node:readline';
 import { promisify } from 'node:util';
 import { createModuleLogger } from '../../infrastructure/logger.js';
+import { buildCliDiagnostics } from '../../utils/cli-diagnostics.js';
 import { resolveCliTimeoutMs } from '../../utils/cli-timeout.js';
 import type { CliSpawnOptions } from '../../utils/cli-types.js';
 // parseNDJSON not used directly — we create readline inline for killability.
@@ -290,6 +291,15 @@ export async function* spawnCliInTmux(
     // killAgent closes the active reader/stream to unblock `for await`.
     fifoStream = createReadStream(fifoPath, { encoding: 'utf-8' });
     const plainTextChunks: string[] = [];
+    // F212 (砚砚 round-4 P2): NDJSON mode tmux `2>&1 | tee fifo` merges stderr into stdout fifo.
+    // Non-JSON lines (= stderr noise) end up in the parse-error branch and were previously
+    // log-and-dropped. Collect a bounded slice here so abnormal-exit / timeout can feed it into
+    // buildCliDiagnostics for reasonCode classification. Bounded by line count + total chars to
+    // avoid OOM on pathological output. Sanitization happens inside buildCliDiagnostics, not here.
+    const nonJsonOutput: string[] = [];
+    let nonJsonChars = 0;
+    const NON_JSON_MAX_LINES = 30;
+    const NON_JSON_MAX_CHARS = 8192;
     try {
       if (options.outputMode === 'plainText') {
         for await (const chunk of fifoStream) {
@@ -307,6 +317,11 @@ export async function* spawnCliInTmux(
             event = JSON.parse(trimmed);
           } catch {
             log.error({ line: trimmed }, 'JSON parse error');
+            // F212 (砚砚 round-4): preserve non-JSON line for cliDiagnostics classification.
+            if (nonJsonOutput.length < NON_JSON_MAX_LINES && nonJsonChars + trimmed.length <= NON_JSON_MAX_CHARS) {
+              nonJsonOutput.push(trimmed);
+              nonJsonChars += trimmed.length;
+            }
             continue;
           }
           // Mark first event and switch from first-event timeout to idle timeout.
@@ -330,32 +345,60 @@ export async function* spawnCliInTmux(
     }
 
     const exitCode = await readExitCode(exitFilePath);
+    // F212 (云端 codex P2): always read stderr file once so abnormal-exit / timeout branches
+    // can feed it into buildCliDiagnostics for reasonCode classification. Previously only
+    // plainText mode read stderr and other modes built diagnostics from empty rawText.
+    let stderrCaptured = '';
+    try {
+      stderrCaptured = await readFile(stderrFilePath, 'utf-8');
+    } catch {
+      /* stderr file may be absent if pane startup failed before redirection */
+    }
     if (options.outputMode === 'plainText') {
-      let stderr = '';
-      try {
-        stderr = await readFile(stderrFilePath, 'utf-8');
-      } catch {
-        /* stderr file may be absent if pane startup failed before redirection */
-      }
       yield {
         __cliPlainText: true,
         stdout: plainTextChunks.join(''),
-        stderr,
+        stderr: stderrCaptured,
         exitCode,
         signal: null,
         command: options.command,
       };
     }
     if (!killed && exitCode !== null && exitCode !== 0) {
+      // F212 AC-A1: structured diagnostics on tmux abnormal exit.
+      // 云端 codex P2 + 砚砚 round-4: NDJSON mode merges stderr→stdout fifo so stderrFile is empty;
+      // non-JSON lines collected from parse-error branch (= stderr noise) carry the actual error text.
+      // plainText mode has stderrCaptured populated from the independent stderr file redirect.
+      const ndjsonNoise = nonJsonOutput.join('\n');
+      const rawText = [ndjsonNoise, stderrCaptured].filter(Boolean).join('\n');
+      const cliDiagnostics = buildCliDiagnostics({
+        rawText,
+        debugRef: {
+          command: options.command,
+          exitCode,
+          signal: null,
+        },
+      });
       yield {
         __cliError: true,
         exitCode,
         signal: null,
         message: `CLI 异常退出 (code: ${exitCode}, tmux pane: ${paneId})`,
         command: options.command,
+        cliDiagnostics,
       };
     }
     if (timedOut) {
+      // F212 砚砚 round-4: same dual-source merge as abnormal exit branch.
+      const ndjsonNoise = nonJsonOutput.join('\n');
+      const cliDiagnostics = buildCliDiagnostics({
+        rawText: [ndjsonNoise, stderrCaptured].filter(Boolean).join('\n'),
+        debugRef: {
+          command: options.command,
+          exitCode,
+          signal: null,
+        },
+      });
       yield {
         __cliTimeout: true,
         timeoutMs: gotFirstEvent ? idleTimeoutMs : firstEventTimeoutMs,
@@ -363,6 +406,7 @@ export async function* spawnCliInTmux(
           ? `CLI 响应超时 (${Math.round(idleTimeoutMs / 1000)}s idle, tmux pane: ${paneId})`
           : `CLI 启动超时 — 未收到首个有效事件 (${Math.round(firstEventTimeoutMs / 1000)}s, tmux pane: ${paneId})`,
         command: options.command,
+        cliDiagnostics,
       };
     }
     return { paneId };

@@ -334,7 +334,7 @@ describe('AntigravityBridge session persistence (G0)', () => {
 
     assert.equal(bridge.getRuntimeSessionStoreForDiagnostics(), runtimeSessionStore);
     assert.equal(await bridge.getOrCreateSession('thread-f211', 'antig-opus'), 'cascade-f211');
-    bridge.resetSession('thread-f211', 'antig-opus');
+    await bridge.resetSession('thread-f211', 'antig-opus');
 
     assert.equal(runtimeSessionStore.upsert.mock.callCount(), 0, 'A1 must not write runtime metadata from Bridge');
   });
@@ -412,7 +412,7 @@ describe('AntigravityBridge session persistence (G0)', () => {
     );
   });
 
-  test('F211 A2 Task 4: legacy JSON fallback is read-only and does not migrate keys', async () => {
+  test('F211 C1: runtime-store mode ignores legacy JSON fallback when no active binding exists', async () => {
     const storePath = tempStorePath();
     cleanupPaths.push(storePath);
     fs.writeFileSync(storePath, JSON.stringify({ 'thread-legacy': 'cascade-legacy' }));
@@ -422,15 +422,16 @@ describe('AntigravityBridge session persistence (G0)', () => {
       { sessionStorePath: storePath, runtimeSessionStore },
     );
 
-    mock.method(bridge, 'startCascade', async () => 'cascade-should-not-start');
+    mock.method(bridge, 'startCascade', async () => 'cascade-fresh');
     mock.method(bridge, 'getTrajectory', async () => ({
       status: 'CASCADE_RUN_STATUS_IDLE',
       numTotalSteps: 5,
     }));
 
     const id = await bridge.getOrCreateSession('thread-legacy', 'antig-opus');
-    assert.equal(id, 'cascade-legacy');
-    assert.equal(bridge.startCascade.mock.callCount(), 0);
+    assert.equal(id, 'cascade-fresh');
+    assert.equal(bridge.getTrajectory.mock.callCount(), 0);
+    assert.equal(bridge.startCascade.mock.callCount(), 1);
     assert.deepEqual(JSON.parse(fs.readFileSync(storePath, 'utf8')), { 'thread-legacy': 'cascade-legacy' });
   });
 
@@ -450,19 +451,111 @@ describe('AntigravityBridge session persistence (G0)', () => {
     assert.equal(fs.existsSync(storePath), false, 'runtime-store mode must not create legacy JSON mapping');
   });
 
-  test('F211 A2 Task 4: resetSession no longer mutates JSON in runtime-store mode', () => {
+  test('F211 C3: resetSession seals active runtime metadata in runtime-store mode', async () => {
     const storePath = tempStorePath();
     cleanupPaths.push(storePath);
     fs.writeFileSync(storePath, JSON.stringify({ 'thread-reset:antig-opus': 'cascade-json' }));
     const runtimeSessionStore = createRuntimeSessionStoreProbe();
+    runtimeSessionStore.getActiveByThreadCat = mock.fn(async () =>
+      runtimeMetadata({
+        sessionId: 'session-runtime',
+        runtimeSessionId: 'cascade-runtime',
+        threadId: 'thread-reset',
+        catId: 'antig-opus',
+      }),
+    );
+    runtimeSessionStore.updateLifecycle = mock.fn(async (_sessionId, patch) => ({
+      sessionId: 'session-runtime',
+      runtime: 'antigravity-desktop',
+      runtimeSessionId: 'cascade-runtime',
+      threadId: 'thread-reset',
+      catId: 'antig-opus',
+      surface: 'cat-cafe-dispatch',
+      identityHistory: [],
+      lifecycle: {
+        state: patch.state,
+        startedAt: 1000,
+        lastObservedAt: patch.lastObservedAt,
+        sealReason: patch.sealReason,
+        drainResult: patch.drainResult,
+      },
+    }));
     const bridge = new AntigravityBridge(
       { port: 1234, csrfToken: 'test', useTls: false },
       { sessionStorePath: storePath, runtimeSessionStore },
     );
 
-    bridge.resetSession('thread-reset', 'antig-opus');
+    await bridge.resetSession('thread-reset', 'antig-opus');
 
+    assert.equal(runtimeSessionStore.getActiveByThreadCat.mock.callCount(), 1);
+    assert.equal(runtimeSessionStore.updateLifecycle.mock.callCount(), 1);
+    assert.equal(runtimeSessionStore.updateLifecycle.mock.calls[0].arguments[0], 'session-runtime');
+    assert.equal(runtimeSessionStore.updateLifecycle.mock.calls[0].arguments[1].state, 'sealed');
+    assert.equal(runtimeSessionStore.updateLifecycle.mock.calls[0].arguments[1].sealReason, 'user_initiated');
+    assert.equal(runtimeSessionStore.updateLifecycle.mock.calls[0].arguments[1].drainResult, 'complete');
     assert.deepEqual(JSON.parse(fs.readFileSync(storePath, 'utf8')), { 'thread-reset:antig-opus': 'cascade-json' });
+  });
+
+  test('P1 review: resetSession does not seal a newer active runtime binding', async () => {
+    const storePath = tempStorePath();
+    cleanupPaths.push(storePath);
+    const runtimeSessionStore = createRuntimeSessionStoreProbe();
+    runtimeSessionStore.getActiveByThreadCat = mock.fn(async () =>
+      runtimeMetadata({
+        sessionId: 'session-newer',
+        runtimeSessionId: 'cascade-newer',
+        threadId: 'thread-reset',
+        catId: 'antig-opus',
+      }),
+    );
+    runtimeSessionStore.updateLifecycle = mock.fn(async () => {
+      throw new Error('must not seal the newer active session');
+    });
+    const bridge = new AntigravityBridge(
+      { port: 1234, csrfToken: 'test', useTls: false },
+      { sessionStorePath: storePath, runtimeSessionStore },
+    );
+
+    await bridge.resetSession('thread-reset', 'antig-opus', {
+      expectedRuntimeSessionId: 'cascade-old',
+      sealReason: 'oversized_retire',
+      drainResult: 'complete',
+    });
+
+    assert.equal(runtimeSessionStore.getActiveByThreadCat.mock.callCount(), 1);
+    assert.equal(runtimeSessionStore.updateLifecycle.mock.callCount(), 0);
+  });
+
+  test('P1 review: resetSession degrades when runtime metadata sealing fails', async () => {
+    const storePath = tempStorePath();
+    cleanupPaths.push(storePath);
+    const runtimeSessionStore = createRuntimeSessionStoreProbe();
+    runtimeSessionStore.getActiveByThreadCat = mock.fn(async () =>
+      runtimeMetadata({
+        sessionId: 'session-runtime',
+        runtimeSessionId: 'cascade-old',
+        threadId: 'thread-reset',
+        catId: 'antig-opus',
+      }),
+    );
+    runtimeSessionStore.updateLifecycle = mock.fn(async () => {
+      throw new Error('redis unavailable');
+    });
+    const bridge = new AntigravityBridge(
+      { port: 1234, csrfToken: 'test', useTls: false },
+      { sessionStorePath: storePath, runtimeSessionStore },
+    );
+
+    await assert.doesNotReject(() =>
+      bridge.resetSession('thread-reset', 'antig-opus', {
+        expectedRuntimeSessionId: 'cascade-old',
+        sealReason: 'oversized_retire',
+        drainResult: 'complete',
+      }),
+    );
+
+    assert.equal(runtimeSessionStore.getActiveByThreadCat.mock.callCount(), 1);
+    assert.equal(runtimeSessionStore.updateLifecycle.mock.callCount(), 1);
   });
 
   test('F211 A2 Task 4: same-thread cats resolve separate runtime active bindings', async () => {

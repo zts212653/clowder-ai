@@ -52,6 +52,7 @@ source "$SCRIPT_DIR/lib/node-runtime-guard.sh"
 if [[ "${1:-}" != "--source-only" ]]; then
     ensure_supported_node_runtime "$SCRIPT_DIR/start-dev.sh" "$@"
 fi
+source "$SCRIPT_DIR/lib/redis-rdb-first.sh"
 source "$SCRIPT_DIR/download-source-overrides.sh"
 cd "$PROJECT_DIR"
 
@@ -260,11 +261,9 @@ apply_profile_defaults() {
     case "$profile" in
         dev)
             _PROF_ANTHROPIC_PROXY_ENABLED=1
-            # Sidecar lifecycle is owned by the API startup reconciler — dev
+            # Sidecar lifecycle is owned by the API startup reconciler. The dev
             # profile keeps proxy ON but no longer auto-spawns ML sidecars here.
-            # Enable services in console; API starts them via /api/services/:id/start.
-            # Setting these to 1 only re-enables the legacy script-based path and
-            # will double-start sidecars (one via this script, one via API).
+            # Enable services in Console; the API starts them via lifecycle routes.
             _PROF_ASR_ENABLED=0
             _PROF_TTS_ENABLED=0
             _PROF_LLM_POSTPROCESS_ENABLED=0
@@ -374,9 +373,9 @@ resolve_config "REDIS_PROFILE"
 : "${REDIS_PROFILE:=dev}"
 
 derive_embed_enabled() {
-    # EMBED_MODE only controls the API in-process embedding mode (off/shadow/on).
-    # Sidecar lifecycle is owned by the API startup reconciler — this script
-    # no longer derives EMBED_ENABLED=1 from EMBED_MODE.
+    # EMBED_MODE controls the API in-process embedding mode (off/shadow/on).
+    # The embedding sidecar is now managed by the API service lifecycle, so
+    # start-dev no longer derives EMBED_ENABLED=1 from EMBED_MODE.
     local explicit="${EMBED_ENABLED-}"
     if [ -n "$explicit" ]; then
         _SRC_EMBED_ENABLED="env/.env override"
@@ -388,12 +387,6 @@ derive_embed_enabled() {
 
 derive_embed_enabled
 
-# Sidecar lifecycle is owned by the API startup reconciler reading
-# .cat-cafe/services.json. Enable services in Console; the API spawns them
-# via /api/services/:id/start. Any explicit `.env` flags like ASR_ENABLED=1
-# are transferred to the API service flags (CAT_CAFE_SERVICE_*_ENABLED) so
-# the reconciler treats them as user-enabled, then zeroed here so the rest
-# of this script never branches on the legacy direct-spawn path.
 preserve_explicit_service_flag_for_api() {
     local source_var="$1"
     local api_var="$2"
@@ -718,9 +711,9 @@ kill_managed_ports() {
     if [ "${ANTHROPIC_PROXY_ENABLED:-0}" = "1" ]; then
         [ "${ANTHROPIC_PROXY_ENABLED:-1}" != "0" ] && [ "${ANTHROPIC_PROXY_ENABLED:-1}" != "0" ] && kill_port ${ANTHROPIC_PROXY_PORT:-9877} "Proxy"
     fi
-    # Sidecar ports (ASR/TTS/LLM/Embed/Audio) are owned by the API startup
-    # reconciler now; start-dev does not direct-spawn them, so cleanup does
-    # not need to kill those ports — stopping the API process is enough.
+    # Sidecar ports are owned by the API startup reconciler now. start-dev no
+    # longer direct-spawns them, so stopping the API process is the lifecycle
+    # boundary this script owns.
 }
 
 # 轮询等待端口监听（ML 模型加载需要时间）
@@ -1127,7 +1120,7 @@ setup_storage() {
     echo -e "${YELLOW}  ⚠ Redis 未运行，尝试在端口 $REDIS_PORT 启动...${NC}"
     if command -v redis-server &> /dev/null; then
         maybe_quarantine_stale_aof_dir
-        redis-server \
+        cat_cafe_redis_start_daemon \
             --port "$REDIS_PORT" \
             --bind 127.0.0.1 \
             --dir "$REDIS_DATA_DIR" \
@@ -1139,7 +1132,7 @@ setup_storage() {
             --daemonize yes \
             --pidfile "$REDIS_PIDFILE" \
             --logfile "$REDIS_LOGFILE" \
-            >/dev/null 2>&1 || true
+            || true
         sleep 1
         if redis_ping; then
             echo -e "${GREEN}  ✓ Redis 已启动 (端口 $REDIS_PORT)${NC}"

@@ -258,6 +258,140 @@ describe('TranscriptWriter', () => {
       assert.ok(digest.errors[0].message.includes('File not found'));
     });
 
+    test('F211 E4: folds repeated recovered runtime noise into digest diagnostics', async () => {
+      const { TranscriptWriter } = await loadModules();
+      const writer = new TranscriptWriter({ dataDir: tmpDir });
+
+      writer.appendEvent(SESSION_INFO, { type: 'tool_result', is_error: true, content: 'context canceled' }, 'inv-1');
+      writer.appendEvent(SESSION_INFO, { type: 'tool_result', is_error: true, content: 'context canceled' }, 'inv-1');
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'text', content: 'I recovered and finished the check.', timestamp: Date.now() },
+        'inv-1',
+      );
+
+      const digest = writer.generateExtractiveDigest(SESSION_INFO, {
+        createdAt: 1000,
+        sealedAt: 2000,
+      });
+
+      assert.deepEqual(digest.errors, []);
+      assert.equal(digest.diagnostics?.noise?.[0]?.kind, 'context_canceled');
+      assert.equal(digest.diagnostics?.noise?.[0]?.count, 2);
+      assert.deepEqual(digest.diagnostics?.noise?.[0]?.invocationIds, ['inv-1']);
+      assert.equal(digest.diagnostics?.noise?.[0]?.outcome, 'recovered');
+    });
+
+    test('F211 E4: keeps one promoted error when repeated runtime noise is terminal', async () => {
+      const { TranscriptWriter } = await loadModules();
+      const writer = new TranscriptWriter({ dataDir: tmpDir });
+
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'tool_result', is_error: true, content: 'MCP refused: unsupported write tool' },
+        'inv-2',
+      );
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'tool_result', is_error: true, content: 'Status: refused\nReason: MCP refused request' },
+        'inv-2',
+      );
+
+      const digest = writer.generateExtractiveDigest(SESSION_INFO, {
+        createdAt: 1000,
+        sealedAt: 2000,
+      });
+
+      assert.equal(digest.diagnostics?.noise?.[0]?.kind, 'mcp_refused');
+      assert.equal(digest.diagnostics?.noise?.[0]?.count, 2);
+      assert.equal(digest.diagnostics?.noise?.[0]?.outcome, 'terminal');
+      assert.equal(digest.errors.length, 1);
+      assert.match(digest.errors[0].message, /MCP refused/i);
+    });
+
+    test('F211 E4: keeps non-MCP status refused errors out of MCP noise folding', async () => {
+      const { TranscriptWriter } = await loadModules();
+      const writer = new TranscriptWriter({ dataDir: tmpDir });
+
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'tool_result', is_error: true, content: 'billing status: refused by policy' },
+        'inv-domain',
+      );
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'tool_result', is_error: true, content: 'workflow status: refused by approver' },
+        'inv-domain',
+      );
+      writer.appendEvent(SESSION_INFO, { type: 'text', content: 'Continuing with another path.' }, 'inv-domain');
+
+      const digest = writer.generateExtractiveDigest(SESSION_INFO, {
+        createdAt: 1000,
+        sealedAt: 2000,
+      });
+
+      assert.ok(
+        !digest.diagnostics?.noise?.some((entry) => entry.kind === 'mcp_refused'),
+        'non-MCP status refused text must not be classified as MCP refusal noise',
+      );
+      assert.equal(digest.errors.length, 2);
+      assert.ok(digest.errors.every((error) => /status: refused/i.test(error.message)));
+    });
+
+    test('F211 E4: does not recover terminal noise from another invocation', async () => {
+      const { TranscriptWriter } = await loadModules();
+      const writer = new TranscriptWriter({ dataDir: tmpDir });
+
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'tool_result', is_error: true, content: 'context canceled' },
+        'inv-failed',
+      );
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'tool_result', is_error: true, content: 'context canceled' },
+        'inv-failed',
+      );
+      writer.appendEvent(SESSION_INFO, { type: 'text', content: 'A later invocation succeeded.' }, 'inv-success');
+
+      const digest = writer.generateExtractiveDigest(SESSION_INFO, {
+        createdAt: 1000,
+        sealedAt: 2000,
+      });
+
+      assert.equal(digest.diagnostics?.noise?.[0]?.kind, 'context_canceled');
+      assert.equal(digest.diagnostics?.noise?.[0]?.outcome, 'terminal');
+      assert.deepEqual(digest.diagnostics?.noise?.[0]?.invocationIds, ['inv-failed']);
+      assert.equal(digest.errors.length, 1);
+      assert.equal(digest.errors[0].invocationId, 'inv-failed');
+      assert.match(digest.errors[0].message, /context canceled/i);
+    });
+
+    test('F211 E4: preserves chronological order for retained single noise errors', async () => {
+      const { TranscriptWriter } = await loadModules();
+      const writer = new TranscriptWriter({ dataDir: tmpDir });
+
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'tool_result', is_error: true, content: 'context canceled while probing runtime' },
+        'inv-chronology',
+      );
+      writer.appendEvent(
+        SESSION_INFO,
+        { type: 'tool_result', is_error: true, content: 'real failure: runtime store unavailable' },
+        'inv-chronology',
+      );
+
+      const digest = writer.generateExtractiveDigest(SESSION_INFO, {
+        createdAt: 1000,
+        sealedAt: 2000,
+      });
+
+      assert.equal(digest.errors.length, 2);
+      assert.match(digest.errors[0].message, /context canceled/i);
+      assert.match(digest.errors[1].message, /real failure/i);
+    });
+
     test('R11 P1-2: extracts from AgentMessage fields (toolName/toolInput/error), not raw NDJSON (RED)', async () => {
       // In production, appendEvent receives AgentMessage objects (cast to Record<string,unknown>).
       // AgentMessage uses toolName/toolInput (not name/input) and type:'error'+error (not is_error+content).

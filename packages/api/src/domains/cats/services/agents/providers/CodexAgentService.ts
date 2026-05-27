@@ -191,7 +191,6 @@ const CAT_CAFE_MCP_SERVER_ENTRIES = [
   ['cat-cafe-signals', 'signals.js'],
   ['cat-cafe-limb', 'limb.js'],
 ] as const;
-const CAT_CAFE_LEGACY_STATIC_SERVER_NAME = 'cat-cafe';
 const CAT_CAFE_MCP_CALLBACK_ENV_KEYS = [
   'CAT_CAFE_API_URL',
   'CAT_CAFE_INVOCATION_ID',
@@ -252,9 +251,32 @@ function buildCatCafeMcpConfigArgs(workingDirectory?: string, callbackEnv?: Reco
   const args: string[] = [];
   const allowedWorkspaceDirs = resolveAllowedWorkspaceDirsForMcp(workingDirectory);
 
-  // Codex may still load a user/project-managed legacy `cat-cafe` server from
-  // static config. Overlay env only; split servers remain the only auto-provisioned ones.
-  pushCatCafeMcpEnvConfig(args, CAT_CAFE_LEGACY_STATIC_SERVER_NAME, allowedWorkspaceDirs, callbackEnv);
+  // F213 (2026-05-26, post 砚砚 review P2 fix): L4 per-invocation dummy disabled
+  // override for the legacy `cat-cafe` server. L5 startup cleanup
+  // (`mcp-config-adapters.ts` writers + `deprecated-managed-servers.ts` registry)
+  // only writes to `<projectRoot>/.codex/config.toml`, so legacy entries in
+  // user-level (`~/.codex/config.toml`), `$CODEX_HOME/config.toml`, or system
+  // (`/etc/codex/config.toml`) config files survive cleanup. Without this L4
+  // override, codex would load those surviving legacy entries with no
+  // callback env → fail closed.
+  //
+  // Dummy disabled form (echo + legacy-shim + enabled=false) verified by 砚砚
+  // strict-npm-Codex reproducer: passes config parse (complete transport
+  // definition, not partial) + codex skips server startup (enabled=false).
+  // Per-invocation `--config` is the highest priority override, beating any
+  // legacy entry from any source. This is L4's runtime safety net for the
+  // case L5 cleanup cannot prove ownership.
+  //
+  // See ADR-036 amendment 2026-05-26 + `docs/features/F213-stale-mcp-config-cleanup.md`
+  // + `docs/discussions/2026-05-26-codex-mcp-legacy-deprecation/README.md` §6.2.
+  args.push(
+    '--config',
+    'mcp_servers.cat-cafe.command="echo"',
+    '--config',
+    `mcp_servers.cat-cafe.args=[${toTomlString('legacy-shim')}]`,
+    '--config',
+    'mcp_servers.cat-cafe.enabled=false',
+  );
 
   for (const [serverName, entrypoint] of CAT_CAFE_MCP_SERVER_ENTRIES) {
     const serverPath = resolve(mcpDistDir, entrypoint);
@@ -655,7 +677,8 @@ export class CodexAgentService implements AgentService {
             type: 'error',
             catId: this.catId,
             error: `缅因猫 CLI 响应超时 (${Math.round(event.timeoutMs / 1000)}s${event.firstEventAt == null ? ', 未收到首帧' : ''})`,
-            metadata,
+            // F212 Phase A (云端 codex P2): timeout cliDiagnostics 也透传到 metadata.
+            metadata: event.cliDiagnostics ? { ...metadata, cliDiagnostics: event.cliDiagnostics } : metadata,
             timestamp: Date.now(),
           };
           continue;
@@ -692,11 +715,12 @@ export class CodexAgentService implements AgentService {
             continue;
           }
           const base = formatCliExitError('Codex CLI', event);
+          // F212 Phase A: forward cliDiagnostics on metadata for frontend folded panel (Phase B).
           yield {
             type: 'error',
             catId: this.catId,
             error: withRecentDiagnostics(base, recentStreamErrors),
-            metadata,
+            metadata: event.cliDiagnostics ? { ...metadata, cliDiagnostics: event.cliDiagnostics } : metadata,
             timestamp: Date.now(),
           };
           continue;

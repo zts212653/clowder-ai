@@ -17,7 +17,9 @@ const currentIndexPath = join(repoRoot, 'docs', 'features', 'index.json');
 const generatorPath = join(repoRoot, 'scripts', 'generate-feature-index.mjs');
 
 function isDoneStatus(status) {
-  return /^\s*done\b/i.test(String(status ?? ''));
+  // Strip markdown bold (**) before testing — feature docs use **done**, **closed**, etc.
+  const plain = String(status ?? '').replace(/\*+/g, '');
+  return /^\s*(done|closed)\b/i.test(plain);
 }
 
 function parseBacklogFeatureIds(markdown) {

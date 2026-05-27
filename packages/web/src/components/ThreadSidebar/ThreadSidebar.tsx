@@ -284,7 +284,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   const handleDeleteConfirm = useCallback(async () => {
     if (!deleteTarget) return;
     const threadId = deleteTarget.id;
-    const isSystem = !!deleteTarget.connectorHubState;
+    const isSystem = !!deleteTarget.connectorHubState || !!deleteTarget.systemKind;
     setDeleteTarget(null);
     try {
       // P1-2: System threads require ?force=true (backend enforced)
@@ -387,8 +387,10 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
 
   const handleArchiveThreads = useCallback(
     async (path: string) => {
-      // P1-1: Exclude system threads (connectorHubState) — they have separate delete protection
-      const targets = threads.filter((t) => t.projectPath === path && t.id !== 'default' && !t.connectorHubState);
+      // P1-1: Exclude system threads (connectorHubState OR systemKind) — they have separate delete protection
+      const targets = threads.filter(
+        (t) => t.projectPath === path && t.id !== 'default' && !t.connectorHubState && !t.systemKind,
+      );
       await Promise.allSettled(targets.map((t) => apiFetch(`/api/threads/${t.id}`, { method: 'DELETE' })));
       // P2-1: If current thread was archived, redirect to default
       if (currentThreadId && targets.some((t) => t.id === currentThreadId)) {
@@ -1101,7 +1103,7 @@ function DeleteConfirmDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const isSystem = !!thread.connectorHubState;
+  const isSystem = !!thread.connectorHubState || !!thread.systemKind;
   const title = thread.title ?? '未命名对话';
   const [typedName, setTypedName] = useState('');
   const confirmed = !isSystem || typedName === title;
@@ -1124,7 +1126,7 @@ function DeleteConfirmDialog({
         {isSystem ? (
           <>
             <p className="text-xs text-conn-red-text mb-2">
-              这是系统级对话（IM Hub 连接器）。删除可能影响平台消息路由。
+              这是系统级对话。删除可能影响平台功能（连接器路由或定时评估）。
             </p>
             <p className="text-xs text-cafe-secondary mb-2">请输入对话名称以确认删除：</p>
             <input

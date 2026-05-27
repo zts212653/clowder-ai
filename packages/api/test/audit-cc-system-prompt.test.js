@@ -146,7 +146,7 @@ test('codexNativeBinaryCandidates replicates launcher resolution order', () => {
   const c = codexNativeBinaryCandidates(launcherPath, 'aarch64-apple-darwin');
   assert.ok(Array.isArray(c) && c.length >= 2, 'returns ordered candidate list');
   assert.ok(
-    c[0].includes('node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/codex/codex'),
+    c[0].includes('node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex'),
     `first candidate = nested platform pkg native binary; got ${c[0]}`,
   );
   assert.ok(
@@ -173,7 +173,7 @@ test('codexNativeBinaryCandidates prefers Node-resolved platform pkg (hoisted/si
   assert.deepEqual(calls, [['@openai/codex-darwin-arm64', launcher]], 'resolver anchored at launcher path');
   assert.equal(
     c[0],
-    '/opt/homebrew/lib/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/codex/codex',
+    '/opt/homebrew/lib/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex',
     `Node-resolved (hoist-capable) path must be the first candidate; got ${c[0]}`,
   );
   assert.ok(
@@ -188,14 +188,31 @@ test('codexNativeBinaryCandidates prefers Node-resolved platform pkg (hoisted/si
   );
 });
 
+test('codexNativeBinaryCandidates supports Codex 0.133 bin layout', () => {
+  // Codex 0.133 launcher first checks vendor/<triple>/bin/codex, then the
+  // older vendor/<triple>/codex/codex layout. The audit script must mirror
+  // that order or it reports a missing native binary even when Codex works.
+  const launcher = '/opt/homebrew/lib/node_modules/@openai/codex/bin/codex.js';
+  const resolvedPkgDir = '/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64';
+  const c = codexNativeBinaryCandidates(launcher, 'aarch64-apple-darwin', () => resolvedPkgDir);
+  assert.equal(
+    c[0],
+    '/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex',
+  );
+  assert.equal(
+    c[1],
+    '/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/codex/codex',
+  );
+});
+
 test('codexNativeBinaryCandidates falls back to hardcoded candidates when Node resolution fails', () => {
-  // Resolver returns null (pkg genuinely not installed) → behavior identical to
-  // pre-fix: no crash, hardcoded nested-first ordering preserved.
+  // Resolver returns null (pkg genuinely not installed) → no crash, hardcoded
+  // nested package candidates are still tried before the local vendor fallback.
   const launcher = '/opt/homebrew/lib/node_modules/@openai/codex/bin/codex.js';
   const c = codexNativeBinaryCandidates(launcher, 'aarch64-apple-darwin', () => null);
   assert.ok(
-    c[0].includes('node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/codex/codex'),
-    `unresolvable → first candidate stays the hardcoded nested path; got ${c[0]}`,
+    c[0].includes('node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex'),
+    `unresolvable → first candidate stays the hardcoded nested package path; got ${c[0]}`,
   );
 });
 

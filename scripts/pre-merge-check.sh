@@ -70,6 +70,16 @@ echo "║       🛡️  Pre-Merge Gate — Latest Main Check        ║"
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""
 
+# ── Phase timer ──
+GATE_START=$SECONDS
+STEP_TIMES=""
+record_step() {
+  local step_name="$1"
+  local step_start="$2"
+  local elapsed=$((SECONDS - step_start))
+  STEP_TIMES="${STEP_TIMES}${step_name}:${elapsed}\n"
+}
+
 # ── Step 0: 前置检查 ──
 
 BRANCH="$(git branch --show-current 2>/dev/null)"
@@ -122,14 +132,27 @@ if [ "$REPO_ROOT" != "$MAIN_WORKTREE" ]; then
   esac
 fi
 echo -e "${GREEN}✓ Worktree 位置合规${NC}"
+
+GATE_GUARD_SCRIPT="$REPO_ROOT/scripts/pre-merge-gate-guard.mjs"
+GATE_LOCK_DIR="${CAT_CAFE_GATE_LOCK_DIR:-$REPO_ROOT/.cat-cafe/gate/pre-merge-check.lock}"
+node "$GATE_GUARD_SCRIPT" acquire --lock-dir "$GATE_LOCK_DIR" --holder-pid "$$"
+release_gate_guard() {
+  node "$GATE_GUARD_SCRIPT" release --lock-dir "$GATE_LOCK_DIR" --holder-pid "$$" >/dev/null 2>&1 || true
+}
+trap release_gate_guard EXIT
+trap 'release_gate_guard; exit 130' INT
+trap 'release_gate_guard; exit 143' TERM
+echo -e "${GREEN}✓ Gate singleflight + system-pressure preflight${NC}"
 echo ""
 
 # ── Step 1: Fetch + Rebase origin/main ──
 
 REBASE_SUMMARY="skipped (--no-rebase)"
+STEP_START=$SECONDS
 if [ "$NO_REBASE" = "true" ]; then
   echo "── Step 1/6: 跳过 rebase（--no-rebase）──"
   echo -e "${YELLOW}⚠ 已跳过 origin/main rebase，仅用于本地验证${NC}"
+  record_step "rebase" "$STEP_START"
   echo ""
 else
   echo "── Step 1/6: 同步 origin/main 并 rebase ──"
@@ -156,10 +179,12 @@ else
   fi
   REBASE_SUMMARY="rebased onto origin/main"
   echo -e "${GREEN}✓ rebase origin/main 成功${NC}"
+  record_step "rebase" "$STEP_START"
   echo ""
 fi
 
 # ── Step 2: Dependency refresh ──
+STEP_START=$SECONDS
 
 if [ "$SKIP_INSTALL" = "true" ]; then
   echo "── Step 2/6: 跳过依赖刷新（--skip-install）──"
@@ -178,9 +203,10 @@ else
   echo -e "${GREEN}✓ 依赖刷新通过${NC}"
   echo ""
 fi
+record_step "install" "$STEP_START"
 
 # ── Step 3: Build ──
-
+STEP_START=$SECONDS
 echo "── Step 3/6: 全量 build ──"
 if ! pnpm -r --if-present run build; then
   echo ""
@@ -188,9 +214,11 @@ if ! pnpm -r --if-present run build; then
   exit 1
 fi
 echo -e "${GREEN}✓ build 通过${NC}"
+record_step "build" "$STEP_START"
 echo ""
 
 # ── Step 4: TypeScript 全量类型检查（含测试文件） ──
+STEP_START=$SECONDS
 #
 # Next.js build 只对生产代码做 tsc，__tests__/ 目录被跳过。
 # 这导致测试文件的类型错误无法在 gate 阶段被发现——
@@ -207,10 +235,11 @@ if ! pnpm -r exec bash -lc 'if command -v tsc >/dev/null 2>&1; then tsc --noEmit
   exit 1
 fi
 echo -e "${GREEN}✓ tsc --noEmit 通过（含测试文件）${NC}"
+record_step "tsc" "$STEP_START"
 echo ""
 
 # ── Step 5: Test（全量，不是 --filter） ──
-
+STEP_START=$SECONDS
 echo "── Step 5/6: 全量测试 ──"
 # 清除 REDIS_URL 以避免触发 Redis 隔离守卫。
 # Worktree 的 .env.local 设置了 REDIS_URL=6398（用于开发），
@@ -226,17 +255,23 @@ if ! env -u REDIS_URL pnpm test; then
   exit 1
 fi
 echo -e "${GREEN}✓ 全量测试通过${NC}"
+record_step "test" "$STEP_START"
 echo ""
 
 # ── Step 6: Lint + Check ──
-
-echo "── Step 6/6: lint + check ──"
-if ! pnpm lint; then
+#
+# Lint dedup: Step 4 already ran tsc --noEmit across ALL packages.
+# api/shared/mcp-server/ppt-forge each define "lint": "tsc --noEmit",
+# so `pnpm lint` (= pnpm -r run lint) would re-run tsc on those 4 packages.
+# Only web's "lint": "next lint" (ESLint) adds value here.
+STEP_START=$SECONDS
+echo "── Step 6/6: lint (web only — tsc deduped from Step 4) + check ──"
+if ! pnpm --filter @cat-cafe/web lint; then
   echo ""
-  echo -e "${RED}❌ lint 失败${NC}"
+  echo -e "${RED}❌ web lint 失败${NC}"
   exit 1
 fi
-echo -e "${GREEN}✓ lint 通过${NC}"
+echo -e "${GREEN}✓ web lint 通过（api/shared/mcp/ppt tsc 已在 Step 4 覆盖）${NC}"
 
 if ! pnpm check; then
   echo ""
@@ -244,10 +279,12 @@ if ! pnpm check; then
   exit 1
 fi
 echo -e "${GREEN}✓ check 通过${NC}"
+record_step "lint+check" "$STEP_START"
 echo ""
 
 # ── 报告 ──
 
+GATE_TOTAL=$((SECONDS - GATE_START))
 FINAL_SHA="$(git rev-parse HEAD)"
 SHORT_SHA="${FINAL_SHA:0:8}"
 
@@ -260,6 +297,13 @@ echo "║  Base   : $REBASE_SUMMARY"
 echo "║  Tests  : all passed"
 echo "║  Lint   : passed"
 echo "║  Check  : passed"
+echo "╠──────────────────────────────────────────────────────╣"
+echo "║  ⏱  Phase Timing:"
+echo -e "$STEP_TIMES" | while IFS=: read -r name secs; do
+  [ -z "$name" ] && continue
+  printf "║    %-14s %3ds\n" "$name" "$secs"
+done
+printf "║    %-14s %3ds\n" "TOTAL" "$GATE_TOTAL"
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""
 echo "可以安全执行 merge-gate 的后续步骤了。"

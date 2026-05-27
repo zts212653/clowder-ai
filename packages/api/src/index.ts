@@ -158,6 +158,7 @@ import {
   executionDigestRoutes,
   exportRoutes,
   externalProjectRoutes,
+  externalRuntimeSessionsRoutes,
   featureDocDetailRoutes,
   firstRunQuestRoutes,
   governanceStatusRoute,
@@ -1476,7 +1477,11 @@ async function main(): Promise<void> {
     await app.register(toolUsageRoutes, { toolUsageCounter });
   }
   // F200 Phase B: Recall metrics API
-  await app.register(recallMetricsRoutes, { evidenceDb: memoryServices.store.getDb() });
+  await app.register(recallMetricsRoutes, {
+    evidenceDb: memoryServices.store.getDb(),
+    messageStore,
+    taskStore,
+  });
   // F153 Phase E: Hub embedded observability routes
   const { telemetryRoutes } = await import('./routes/telemetry.js');
   await app.register(telemetryRoutes, {
@@ -1589,6 +1594,8 @@ async function main(): Promise<void> {
     taskStore,
     backlogStore,
     threadStore,
+    sessionChainStore,
+    runtimeSessionStore,
     agentRegistry,
     router,
     invocationRecordStore,
@@ -1909,6 +1916,7 @@ async function main(): Promise<void> {
     sessionSealer,
   });
   await app.register(sessionTranscriptRoutes, { sessionChainStore, threadStore, transcriptReader });
+  await app.register(externalRuntimeSessionsRoutes, { sessionChainStore, runtimeSessionStore, threadStore });
   const hookToken = process.env.CAT_CAFE_HOOK_TOKEN || '';
   await app.register(sessionHooksRoutes, {
     sessionChainStore,
@@ -2749,6 +2757,18 @@ async function main(): Promise<void> {
   // F139 Phase 3A: Hydrate dynamic tasks from SQLite before starting
   const hydrated = taskRunnerV2.hydrateDynamic(dynamicTaskStore, templateRegistry);
   if (hydrated > 0) app.log.info(`[api] F139: hydrated ${hydrated} dynamic task(s)`);
+
+  // F192 livefix OQ-17: Register daily eval domain task (reads eval-domains/*.yaml, triggers eval cats)
+  const { createEvalDomainDailySpec } = await import('./infrastructure/harness-eval/eval-domain-daily.js');
+  const { getOwnerUserId } = await import('./config/cat-config-loader.js');
+  taskRunnerV2.register(
+    createEvalDomainDailySpec({
+      harnessFeedbackRoot: resolve(repoRoot, 'docs', 'harness-feedback'),
+      threadStore,
+      defaultUserId: getOwnerUserId(),
+      listDynamicTasks: () => dynamicTaskStore.getAll(),
+    }),
+  );
 
   // F139: Start unified scheduler (all registered specs)
   taskRunnerV2.start();

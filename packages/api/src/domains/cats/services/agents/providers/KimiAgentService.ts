@@ -189,7 +189,8 @@ export class KimiAgentService implements AgentService {
           yield {
             type: 'error',
             catId: this.catId,
-            metadata,
+            // F212 Phase A (云端 codex P2): timeout cliDiagnostics 也透传到 metadata.
+            metadata: event.cliDiagnostics ? { ...metadata, cliDiagnostics: event.cliDiagnostics } : metadata,
             timestamp: Date.now(),
             error: `Kimi CLI 响应超时 (${Math.round(event.timeoutMs / 1000)}s${firstEventAt == null ? ', 未收到首帧' : ''})`,
           };
@@ -210,11 +211,12 @@ export class KimiAgentService implements AgentService {
           continue;
         }
         if (isCliError(event)) {
+          // F212 Phase A: forward cliDiagnostics on metadata for frontend folded panel (Phase B).
           yield {
             type: 'error',
             catId: this.catId,
             error: formatCliExitError('Kimi CLI', event),
-            metadata,
+            metadata: event.cliDiagnostics ? { ...metadata, cliDiagnostics: event.cliDiagnostics } : metadata,
             timestamp: Date.now(),
           };
           continue;

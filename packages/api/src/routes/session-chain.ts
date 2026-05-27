@@ -34,12 +34,17 @@ interface SessionChainRouteOptions extends FastifyPluginOptions {
 }
 
 function canAccessSessionRecord(
-  thread: { id: string; createdBy: string } | null,
+  thread: {
+    id: string;
+    createdBy: string;
+    externalRuntimeAnchorState?: { userId: string } | undefined;
+  } | null,
   session: { userId: string } | null,
   userId: string,
 ): boolean {
   if (!thread || !session) return false;
   if (thread.createdBy === userId) return true;
+  if (thread.externalRuntimeAnchorState?.userId === userId && session.userId === userId) return true;
   return isSharedDefaultThread(thread) && session.userId === userId;
 }
 
@@ -111,7 +116,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       reply.status(404);
       return { error: 'Thread not found' };
     }
-    if (!canAccessThread(thread, userId) || !canAccessSessionRecord(thread, session, userId)) {
+    if (!canAccessSessionRecord(thread, session, userId)) {
       reply.status(403);
       return { error: 'Access denied' };
     }
@@ -142,7 +147,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       reply.status(404);
       return { error: 'Thread not found' };
     }
-    if (!canAccessThread(thread, userId) || !canAccessSessionRecord(thread, session, userId)) {
+    if (!canAccessSessionRecord(thread, session, userId)) {
       reply.status(403);
       return { error: 'Access denied' };
     }
