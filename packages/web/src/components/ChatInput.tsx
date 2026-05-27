@@ -22,11 +22,11 @@ import { AttachIcon } from './icons/AttachIcon';
 import { MobileInputToolbar } from './MobileInputToolbar';
 import { PathCompletionMenu } from './PathCompletionMenu';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
-import { hasPendingThreadDraft, threadDrafts, threadImageDrafts } from './thread-drafts';
+import { hasPendingThreadDraft, syncDraftToStorage, threadDrafts, threadImageDrafts } from './thread-drafts';
 import { WhisperCatSelector, WhisperTargetChips } from './WhisperCatSelector';
 
 /** Module-level draft storage — survives component unmount/remount across thread switches */
-export { threadDrafts, threadImageDrafts } from './thread-drafts';
+export { syncDraftToStorage, threadDrafts, threadImageDrafts } from './thread-drafts';
 
 const MAX_IMAGE_DRAFT_THREADS = 5;
 
@@ -255,13 +255,24 @@ export function ChatInput({
         setShowGameMenu(false);
         setMentionStart(trigger.start);
         setMentionFilter(trigger.filter);
-        setSelectedIdx(0);
+        // Bare @ defaults to first individual cat so Enter doesn't accidentally
+        // insert a group mention like @thread.  When filter is active the user is
+        // intentionally narrowing, so start at 0.
+        if (trigger.filter) {
+          setSelectedIdx(0);
+        } else {
+          const idx = catOptions.findIndex((opt) => !opt.isGroup);
+          // idx = -1 when no individual cats loaded yet → point past all options
+          // so the existing Enter guard (opt === undefined → closeMenus) fires
+          // instead of accidentally inserting @thread
+          setSelectedIdx(idx >= 0 ? idx : catOptions.length);
+        }
       } else {
         closeMenus();
         setMentionFilter('');
       }
     },
-    [closeMenus],
+    [closeMenus, catOptions],
   );
 
   const handleHistorySelect = useCallback(
@@ -498,8 +509,7 @@ export function ChatInput({
   useLayoutEffect(() => {
     if (!threadId) return;
     const hasDraft = input.trim().length > 0 || images.length > 0;
-    if (input) threadDrafts.set(threadId, input);
-    else threadDrafts.delete(threadId);
+    syncDraftToStorage(threadId, input || undefined);
     if (images.length > 0) {
       threadImageDrafts.delete(threadId); // move to end (Map insertion order)
       threadImageDrafts.set(threadId, images);

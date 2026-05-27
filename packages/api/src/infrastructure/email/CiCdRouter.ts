@@ -67,7 +67,9 @@ export class CiCdRouter {
 
     if (poll.prState === 'merged' || poll.prState === 'closed') {
       // #320 KD-17: lifecycle close = mark task done (not delete)
+      // F200 AC-D2.3: persist prState so signal detection can distinguish merged vs closed
       await taskStore.update(task.id, { status: 'done' });
+      await taskStore.patchAutomationState(task.id, { ci: { prState: poll.prState } });
       log.info(`[CiCdRouter] PR ${poll.repoFullName}#${poll.prNumber} ${poll.prState} — task marked done`);
       return { kind: 'skipped', reason: `PR ${poll.prState}` };
     }

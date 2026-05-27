@@ -165,6 +165,17 @@ describe('RedisRuntimeSessionStore', { skip: redisIsolationSkipReason(REDIS_URL)
       await redis.get(RuntimeSessionKeys.byThreadCat('antigravity-desktop', 'thread-1', 'antig-opus')),
       null,
     );
+    assert.deepEqual(
+      (
+        await store.listRecent({
+          runtime: 'antigravity-desktop',
+          surface: 'cat-cafe-dispatch',
+          catId: 'antig-opus',
+        })
+      ).map((entry) => entry.sessionId),
+      ['session-1'],
+      'sealed/pending runtime metadata must stay discoverable for drilldown',
+    );
   });
 
   it('lifecycle state index moves records and orders by lastObservedAt', async () => {
@@ -195,5 +206,70 @@ describe('RedisRuntimeSessionStore', { skip: redisIsolationSkipReason(REDIS_URL)
       ['session-older', 'session-active', 'session-newer'],
     );
     assert.deepEqual(await redis.zrange(RuntimeSessionKeys.byLifecycleState('active'), 0, -1), []);
+  });
+
+  it('listRecent filters by runtime, surface, and cat newest first', async () => {
+    await store.upsert(
+      metadataFor('session-old-ide', {
+        runtimeSessionId: 'cascade-old-ide',
+        surface: 'ide-direct',
+        lifecycle: { state: 'active', startedAt: 1000, lastObservedAt: 2000 },
+      }),
+    );
+    await store.upsert(
+      metadataFor('session-new-ide', {
+        runtimeSessionId: 'cascade-new-ide',
+        surface: 'ide-direct',
+        lifecycle: { state: 'active', startedAt: 1000, lastObservedAt: 3000 },
+      }),
+    );
+    await store.upsert(
+      metadataFor('session-dispatch', {
+        runtimeSessionId: 'cascade-dispatch',
+        surface: 'cat-cafe-dispatch',
+        lifecycle: { state: 'active', startedAt: 1000, lastObservedAt: 4000 },
+      }),
+    );
+    await store.upsert(
+      metadataFor('session-other-cat', {
+        runtimeSessionId: 'cascade-other-cat',
+        catId: 'antigravity',
+        surface: 'ide-direct',
+        lifecycle: { state: 'active', startedAt: 1000, lastObservedAt: 5000 },
+      }),
+    );
+
+    assert.deepEqual(
+      (
+        await store.listRecent({
+          runtime: 'antigravity-desktop',
+          surface: 'ide-direct',
+          catId: 'antig-opus',
+          limit: 10,
+        })
+      ).map((entry) => entry.sessionId),
+      ['session-new-ide', 'session-old-ide'],
+    );
+    assert.deepEqual(
+      (
+        await store.listRecent({
+          runtime: 'antigravity-desktop',
+          surface: 'ide-direct',
+          limit: 1,
+        })
+      ).map((entry) => entry.sessionId),
+      ['session-other-cat'],
+    );
+    assert.deepEqual(
+      (
+        await store.listRecent({
+          runtime: 'antigravity-desktop',
+          surface: 'ide-direct',
+          limit: 2,
+          offset: 1,
+        })
+      ).map((entry) => entry.sessionId),
+      ['session-new-ide', 'session-old-ide'],
+    );
   });
 });

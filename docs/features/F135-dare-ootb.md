@@ -8,10 +8,12 @@ created: 2026-03-23
 
 # F135: 狸花猫开箱即用（DARE Out-of-the-Box）
 
-> **Status**: spec | **Owner**: bouillipx (社区) | **Priority**: P2
+> **Status**: done (closed — 需求已不存在，team lead 2026-05-26 拍板) | **Owner**: bouillipx (社区) | **Priority**: P2
 >
 > **来源**：社区 PR [clowder-ai#192](https://github.com/zts212653/clowder-ai/pull/192) / [clowder-ai#194](https://github.com/zts212653/clowder-ai/pull/194)
 > **Issue**: [clowder-ai#195](https://github.com/zts212653/clowder-ai/issues/195)
+>
+> **Close 2026-05-26**：team lead判定需求已不存在（DARE 狸花猫不再需要单独 OOTB 流程），直接 close。Phase A 代码已合入（clowder-ai#211），issue #195 已关闭。
 
 ## Why
 

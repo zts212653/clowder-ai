@@ -305,10 +305,17 @@ NEXT_PUBLIC_LLM_POSTPROCESS_URL=http://localhost:9878
 ```
 
 Supported engines: Qwen3-ASR (primary), Whisper (fallback) for input; Kokoro, edge-tts, Qwen3-TTS for output.
+These services are disabled by default. Set the corresponding `*_ENABLED=1` flags only after you have installed the local dependencies.
 
 **Starting voice services:**
+```bash
+# TTS (Text-to-Speech) — requires Python 3, creates venv at ~/.cat-cafe/tts-venv
+./scripts/tts-server.sh                    # default: Qwen3-TTS (三猫声线)
+TTS_PROVIDER=edge-tts ./scripts/tts-server.sh  # edge-tts fallback (no GPU needed)
 
-The voice services (Whisper STT / Qwen3-ASR / mlx-tts / LLM postprocess) are installed and managed from **Console → Settings → Services**. The Console install path creates the venv, downloads the model, and persists the chosen port to `.cat-cafe/services.json`; the API startup reconciler then brings up the service whenever it is enabled. Direct-spawn `./scripts/*-server.sh` wrappers have been removed — use the Console flow instead.
+# ASR (Speech-to-Text) — requires Python 3 + ffmpeg
+./scripts/qwen3-asr-server.sh             # Qwen3-ASR server
+```
 
 > **System dependency**: `ffmpeg` is required for audio processing. Install with `brew install ffmpeg` (macOS) or `apt install ffmpeg` (Linux).
 

@@ -8,9 +8,11 @@ created: 2026-04-28
 
 # F179: Desktop Installer Release Pipeline — 自动化产出 Win/Mac 安装包并附 release
 
-> **Status**: in-progress (Phase B: AC-B3 pending cross-cat verification) | **Owner**: Ragdoll（Opus-47/Ragdoll） | **Reviewer**: Maine Coon（GPT-5.5/Maine Coon） | **Priority**: P1
+> **Status**: done (closed 2026-05-26 after 25-day field validation on v0.9.1) | **Owner**: Ragdoll（Opus-47/Ragdoll） | **Reviewer**: Maine Coon（GPT-5.5/Maine Coon） | **Priority**: P1
 >
-> **Phase A done (2026-04-28, PR #1445 merged at b25b73034)**: 基础设施搭建完成。Maine Coon六轮 review 抓 5 个 P1 + 1 个 P2 全部 0 误报，每条都不在 diff 内的依赖闭包问题（permissions / sync-manifest workflow / rerun semantics / desktop 闭包 / regex \b 边界 / extraResources cross-platform 漂移 / darwin leak regex slash+dest path）。Phase B 待 v0.9.1 release 触发后实测验证。
+> **Phase A done (2026-04-28, PR #1445 merged at b25b73034)**: 基础设施搭建完成。Maine Coon六轮 review 抓 5 个 P1 + 1 个 P2 全部 0 误报，每条都不在 diff 内的依赖闭包问题（permissions / sync-manifest workflow / rerun semantics / desktop 闭包 / regex \b 边界 / extraResources cross-platform 漂移 / darwin leak regex slash+dest path）。
+>
+> **Phase B done (2026-05-26)**: `v0.9.1` release 已连续运行 25 天，release page 持续提供 3 个 installer assets；截至关闭时 GitHub release 下载数为 `CatCafe-0.9.1-arm64.dmg = 30`、`CatCafe-0.9.1-x64.dmg = 5`、`CatCafe-Setup-0.9.1.exe = 53`。按 CVO 口径，这个 post-release field evidence 已强于“一只非作者猫单次手工点装”。
 
 ## Why
 
@@ -101,7 +103,7 @@ v0.9.0 release notes 写 "Windows NSIS installer" 是术语写错了——实际
 ### Phase B
 - [x] AC-B1: v0.9.1 release 创建后，workflow 触发成功（release.published 自动触发，双 job 均 green）
 - [x] AC-B2: v0.9.1 release page 含 mac dmg (arm64+x64) + win exe (x64) 共 3 个 assets（CatCafe-0.9.1-arm64.dmg 1112MB + CatCafe-0.9.1-x64.dmg 1120MB + CatCafe-Setup-0.9.1.exe 435MB）
-- [ ] AC-B3: 跨猫验证（非作者非 reviewer）能下载并启动安装包
+- [x] AC-B3: post-release field validation 证明安装包已被真实用户反复下载使用。2026-05-26（release 后第 25 天）GitHub release 下载数：arm64.dmg `30`、x64.dmg `5`、Setup.exe `53`；在这段观察窗口内没有再开 F179 installer regression/hotfix lane。
 
 ## Dependencies
 

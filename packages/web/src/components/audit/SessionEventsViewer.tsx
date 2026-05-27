@@ -4,6 +4,14 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
+import {
+  formatBindingLabel,
+  formatLifecycleBadge,
+  formatRuntimeLabel,
+  formatSealReason,
+  shortRuntimeId,
+} from '../runtime-sessions/external-runtime-session-format';
+import type { ExternalRuntimeSessionListItem } from '../runtime-sessions/external-runtime-session-types';
 
 type ViewMode = 'chat' | 'handoff' | 'raw';
 
@@ -29,6 +37,45 @@ interface RawEvent {
   t: number;
   catId: string;
   event: Record<string, unknown>;
+}
+
+interface DigestNoiseSummary {
+  kind: string;
+  count: number;
+  sample: string;
+  invocationIds: string[];
+  firstAt: number;
+  lastAt: number;
+  outcome: 'recovered' | 'terminal' | string;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isExternalRuntimeSessionListItem(value: unknown): value is ExternalRuntimeSessionListItem {
+  if (!isObjectRecord(value)) return false;
+
+  const lifecycle = value.lifecycle;
+  const binding = value.binding;
+  const drilldown = value.drilldown;
+
+  return (
+    typeof value.sessionId === 'string' &&
+    typeof value.threadId === 'string' &&
+    typeof value.runtime === 'string' &&
+    typeof value.runtimeSessionId === 'string' &&
+    typeof value.catId === 'string' &&
+    typeof value.lastObservedAt === 'number' &&
+    isObjectRecord(lifecycle) &&
+    typeof lifecycle.state === 'string' &&
+    isObjectRecord(binding) &&
+    typeof binding.mode === 'string' &&
+    isObjectRecord(drilldown) &&
+    typeof drilldown.sessionRecord === 'string' &&
+    typeof drilldown.events === 'string' &&
+    typeof drilldown.digest === 'string'
+  );
 }
 
 export interface SessionEventsViewerProps {
@@ -77,6 +124,8 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
   const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [total, setTotal] = useState(0);
   const [cursorHistory, setCursorHistory] = useState<number[]>([]);
+  const [runtimeSession, setRuntimeSession] = useState<ExternalRuntimeSessionListItem | null>(null);
+  const [digestNoise, setDigestNoise] = useState<DigestNoiseSummary[]>([]);
 
   const fetchEvents = useCallback(
     async (v: ViewMode, c: number) => {
@@ -113,6 +162,42 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
     fetchEvents(view, 0);
   }, [view, fetchEvents]);
 
+  useEffect(() => {
+    let alive = true;
+    setRuntimeSession(null);
+    setDigestNoise([]);
+
+    async function fetchRuntimeMetadata() {
+      try {
+        const metadataRes = await apiFetch(`/api/external-runtime-sessions/${sessionId}`);
+        if (!metadataRes || metadataRes.status === 404 || !metadataRes.ok) return;
+        const metadata = await metadataRes.json();
+        if (!isExternalRuntimeSessionListItem(metadata)) return;
+        if (!alive) return;
+        setRuntimeSession(metadata);
+
+        try {
+          const digestRes = await apiFetch(`/api/sessions/${sessionId}/digest`);
+          if (!digestRes?.ok) return;
+          const digest = (await digestRes.json()) as { diagnostics?: { noise?: DigestNoiseSummary[] } };
+          if (alive) setDigestNoise(Array.isArray(digest.diagnostics?.noise) ? digest.diagnostics.noise : []);
+        } catch {
+          if (alive) setDigestNoise([]);
+        }
+      } catch {
+        if (alive) {
+          setRuntimeSession(null);
+          setDigestNoise([]);
+        }
+      }
+    }
+
+    void fetchRuntimeMetadata();
+    return () => {
+      alive = false;
+    };
+  }, [sessionId]);
+
   const goNext = () => {
     if (nextCursor == null) return;
     setCursorHistory((h) => [...h, cursor]);
@@ -145,6 +230,8 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
           ✕
         </button>
       </div>
+
+      {runtimeSession && <RuntimeMetadataHeader session={runtimeSession} noise={digestNoise} />}
 
       {/* View mode tabs */}
       <div className="flex console-divider-b">
@@ -197,9 +284,9 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
                   {inv.errors > 0 && <span className="text-conn-red-text">{inv.errors} err</span>}
                 </div>
                 <div className="flex flex-wrap gap-1 mt-1">
-                  {(inv.toolCalls ?? []).map((t) => (
+                  {(inv.toolCalls ?? []).map((t, index) => (
                     <span
-                      key={t}
+                      key={`${t}-${index}`}
                       className="bg-cafe-surface-elevated text-cafe-secondary px-1 py-0.5 rounded text-micro"
                     >
                       {t}
@@ -242,6 +329,63 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function RuntimeMetadataHeader({
+  session,
+  noise,
+}: {
+  session: ExternalRuntimeSessionListItem;
+  noise: DigestNoiseSummary[];
+}) {
+  const badge = formatLifecycleBadge(session.lifecycle);
+  const latestIdentity = session.identityHistory?.at(-1);
+  const model = latestIdentity?.model ?? session.model ?? 'model unknown';
+  const identityLabel = `${latestIdentity?.catId ?? session.catId} · ${model}`;
+
+  return (
+    <div className="space-y-2 bg-[var(--console-shell-bg)] px-3 py-2 console-divider-b">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold text-cafe-secondary">{formatRuntimeLabel(session.runtime)}</span>
+        <span className={`rounded-md px-1.5 py-0.5 text-micro font-semibold ${badge.className}`}>{badge.label}</span>
+        {session.lifecycle.sealReason && (
+          <span className="text-micro text-cafe-muted">{formatSealReason(session.lifecycle.sealReason)}</span>
+        )}
+      </div>
+      <div className="grid min-w-0 gap-x-3 gap-y-1 text-micro text-cafe-muted sm:grid-cols-2">
+        <span className="min-w-0 truncate font-mono">Cascade {shortRuntimeId(session.runtimeSessionId)}</span>
+        {session.runtimeConversationId && (
+          <span className="min-w-0 truncate font-mono">Conversation {session.runtimeConversationId}</span>
+        )}
+        <span className="min-w-0 truncate">{identityLabel}</span>
+        <span className="min-w-0 truncate">{formatBindingLabel(session.binding)}</span>
+      </div>
+      <div className="flex flex-wrap gap-2 text-micro">
+        <a className="text-conn-blue-text hover:text-blue-700" href={session.drilldown.sessionRecord}>
+          record
+        </a>
+        <a className="text-conn-blue-text hover:text-blue-700" href={session.drilldown.events}>
+          events
+        </a>
+        <a className="text-conn-blue-text hover:text-blue-700" href={session.drilldown.digest}>
+          digest
+        </a>
+      </div>
+      {noise.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {noise.map((entry) => (
+            <span
+              key={`${entry.kind}-${entry.firstAt}-${entry.lastAt}`}
+              className="rounded-md bg-cafe-surface-elevated px-1.5 py-0.5 text-micro text-cafe-secondary"
+              title={entry.sample}
+            >
+              {entry.kind} × {entry.count} · {entry.outcome}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

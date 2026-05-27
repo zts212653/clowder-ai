@@ -9,7 +9,9 @@ intake_source: clowder-ai#575
 
 # F175: 消息队列统一设计 — 优先级排序 + 用户可控编排
 
-> **Status**: phase-a-done | **Owner**: Ragdoll | **Priority**: P1
+> **Status**: done | **Owner**: Ragdoll | **Priority**: P1
+>
+> **Close 2026-05-27**：Phase A/B/C 全部在 clowder-ai#575 中完成（gpt52 code review 8 轮全 approved），经 cat-cafe PR #1443 absorbed。team lead 2026-05-27 实测确认拖动排序/独立显示/视觉分组/折叠全部工作。之前审计误判"Phase B/C 未完成"是因为 doc AC 未打勾但代码已在 absorbed PR 中。
 >
 > **Inbound source**: [clowder-ai#575](https://github.com/zts212653/clowder-ai/pull/575)
 > **Original tag**: clowder-ai 仓内编号为 F169（unified-queue-design）
@@ -138,17 +140,17 @@ QueueProcessor 出队时：
 - [x] AC-A9: 回归：urgent connector 不打断 A2A 链（#564 原始场景修复）
 - [x] AC-A10: 回归：跨优先级自动 dequeue — urgent 处理完后自动继续 normal
 
-### Phase B（前端编排）
-- [ ] AC-B1: QueuePanel 支持拖动排序
-- [ ] AC-B2: 每条消息独立显示、独立可删除
-- [ ] AC-B3: 视觉分组（sourceCategory + urgent 标记）
-- [ ] AC-B4: QueuePanel 收起/折叠
+### Phase B（前端编排）— ✅ 全部完成（clowder-ai#575 含 Phase B，cat-cafe#1443 absorbed）
+- [x] AC-B1: QueuePanel 支持拖动排序（@dnd-kit drag-and-drop）
+- [x] AC-B2: 每条消息独立显示、独立可删除
+- [x] AC-B3: 视觉分组（sourceCategory badge + urgent 标记）
+- [x] AC-B4: QueuePanel 收起/折叠（≥4 entries 自动收起）
 
-### Phase C（Spec + ADR）
-- [ ] AC-C1: F133 KD-4 修正完成
-- [ ] AC-C2: F122 spec 标 "executor unification: complete"
-- [ ] AC-C3: F047 spec 加 reorder
-- [ ] AC-C4: 新 ADR 创建，含 guard story
+### Phase C（Spec + ADR）— ✅ 全部完成（clowder-ai#575 含 Phase C，cat-cafe#1443 absorbed）
+- [x] AC-C1: F133 KD-4 修正完成
+- [x] AC-C2: F122 spec 标 "executor unification: complete"
+- [x] AC-C3: F047 spec 加 reorder
+- [x] AC-C4: ADR-023 queue 终态设计已创建
 
 ## Dependencies
 

@@ -12,6 +12,7 @@ process.env.CAT_CAFE_SERVICES_CONFIG = join(testConfigDir, 'services.json');
 
 const SESSION_HEADERS = { 'x-test-session-user': 'you' };
 const TRUSTED_ORIGIN_HEADERS = { origin: 'http://localhost:3003', host: 'localhost:3003' };
+process.env.DEFAULT_OWNER_USER_ID = 'you';
 
 async function buildApp(options = {}) {
   const app = Fastify({ logger: false });
@@ -21,8 +22,10 @@ async function buildApp(options = {}) {
       request.sessionUserId = sessionUser.trim();
     }
   });
+  const testEnv = options.env === undefined ? { ...process.env, CAT_CAFE_PROFILE: 'test' } : options.env;
   await app.register(servicesRoutes, {
     ...options,
+    env: testEnv,
     fetchHealth:
       options.fetchHealth ??
       (async (url) => ({

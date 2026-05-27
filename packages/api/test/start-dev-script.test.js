@@ -15,6 +15,15 @@ function baseShellEnv(overrides = {}) {
   };
 }
 
+function commandExists(command) {
+  return (
+    spawnSync('bash', ['-lc', `command -v "${command}" >/dev/null 2>&1`], {
+      encoding: 'utf8',
+      env: baseShellEnv(),
+    }).status === 0
+  );
+}
+
 function runSourceOnlySnippet(scriptPath, snippet, envOverrides = {}) {
   const result = spawnSync(
     'bash',
@@ -66,6 +75,7 @@ declare -F default_redis_storage_key >/dev/null
 declare -F default_redis_data_dir >/dev/null
 declare -F default_redis_backup_dir >/dev/null
 declare -F maybe_quarantine_stale_aof_dir >/dev/null
+declare -F cat_cafe_redis_start_daemon >/dev/null
 printf 'ok'
 `,
   );
@@ -229,6 +239,93 @@ printf 'ok'
   }
 });
 
+test(
+  'Redis cold start uses RDB-first bootstrap when dump.rdb exists without appendonlydir',
+  { skip: !(commandExists('redis-server') && commandExists('redis-cli')) },
+  async () => {
+    const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+    const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-rdb-first-start-'));
+    const redisDir = join(tempRoot, 'redis-data');
+    mkdirSync(redisDir, { recursive: true });
+
+    const server = await listenOnLoopback();
+    const port = server.address().port;
+    await new Promise((resolvePromise) => server.close(resolvePromise));
+
+    const redisCli = (...args) =>
+      spawnSync('redis-cli', ['-p', String(port), ...args], {
+        encoding: 'utf8',
+        env: baseShellEnv(),
+      });
+
+    try {
+      const seed = spawnSync(
+        'redis-server',
+        [
+          '--port',
+          String(port),
+          '--bind',
+          '127.0.0.1',
+          '--dir',
+          redisDir,
+          '--dbfilename',
+          'dump.rdb',
+          '--appendonly',
+          'no',
+          '--daemonize',
+          'yes',
+        ],
+        { encoding: 'utf8', env: baseShellEnv() },
+      );
+      assert.equal(seed.status, 0, `seed redis failed\nstdout:\n${seed.stdout}\nstderr:\n${seed.stderr}`);
+      for (let i = 0; i < 50 && redisCli('ping').status !== 0; i++) {
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      assert.equal(redisCli('set', 'cat-cafe:rdb-first-probe', 'survived').status, 0);
+      assert.equal(redisCli('save').status, 0);
+      redisCli('shutdown', 'save');
+      rmSync(join(redisDir, 'appendonlydir'), { recursive: true, force: true });
+
+      const result = spawnSync(
+        'bash',
+        [
+          '-lc',
+          `
+set -eo pipefail
+source "${scriptPath}" --source-only >/dev/null 2>&1
+trap - EXIT INT TERM
+cat_cafe_redis_start_daemon \
+  --port "${port}" \
+  --bind 127.0.0.1 \
+  --dir "${redisDir}" \
+  --dbfilename dump.rdb \
+  --save "3600 1 300 100 60 10000" \
+  --appendonly yes \
+  --appendfilename appendonly.aof \
+  --appenddirname appendonlydir \
+  --appendfsync everysec \
+  --daemonize yes \
+  --pidfile "${join(redisDir, `redis-${port}.pid`)}" \
+  --logfile "${join(redisDir, `redis-${port}.log`)}"
+redis-cli -p "${port}" dbsize
+redis-cli -p "${port}" get cat-cafe:rdb-first-probe
+redis-cli -p "${port}" config get appendonly | sed -n '2p'
+redis-cli -p "${port}" shutdown nosave >/dev/null 2>&1 || true
+`,
+        ],
+        { encoding: 'utf8', env: baseShellEnv() },
+      );
+
+      assert.equal(result.status, 0, `rdb-first start failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+      const output = result.stdout.trim().split('\n').slice(-3);
+      assert.deepEqual(output, ['1', 'survived', 'yes']);
+    } finally {
+      redisCli('shutdown', 'nosave');
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  },
+);
+
 test('signal traps clean up and exit with standard signal codes', () => {
   const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
   for (const [signal, expectedStatus] of [
@@ -378,6 +475,7 @@ function createTempProject() {
   cpSync(join(realScriptsDir, 'start-dev.sh'), join(scriptsDir, 'start-dev.sh'));
   cpSync(join(realScriptsDir, 'download-source-overrides.sh'), join(scriptsDir, 'download-source-overrides.sh'));
   cpSync(join(realScriptsDir, 'lib', 'node-runtime-guard.sh'), join(scriptsDir, 'lib', 'node-runtime-guard.sh'));
+  cpSync(join(realScriptsDir, 'lib', 'redis-rdb-first.sh'), join(scriptsDir, 'lib', 'redis-rdb-first.sh'));
   chmodSync(join(scriptsDir, 'start-dev.sh'), 0o755);
   return tmp;
 }
@@ -389,6 +487,10 @@ function copyStartDevClosure(tempRoot, scriptPath, tempScriptPath, tempOverrides
   cpSync(
     resolve(process.cwd(), '../../scripts/lib/node-runtime-guard.sh'),
     join(tempRoot, 'scripts', 'lib', 'node-runtime-guard.sh'),
+  );
+  cpSync(
+    resolve(process.cwd(), '../../scripts/lib/redis-rdb-first.sh'),
+    join(tempRoot, 'scripts', 'lib', 'redis-rdb-first.sh'),
   );
 }
 

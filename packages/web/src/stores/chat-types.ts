@@ -358,6 +358,8 @@ export interface Thread {
   deletedAt?: number | null;
   /** F087: CVO Bootcamp onboarding state. */
   bootcampState?: BootcampStateV1;
+  /** F192 livefix: System thread kind for sidebar grouping (connector_hub | eval_domain). */
+  systemKind?: 'connector_hub' | 'eval_domain';
   /** F088 Phase G: Connector Hub thread state — marks this thread as an IM Hub. */
   connectorHubState?: ConnectorHubStateV1;
   /** F187: User-defined label IDs for thread categorization. */

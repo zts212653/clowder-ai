@@ -385,13 +385,17 @@ warn_puppeteer_skip_fallback() {
     warn "Bundled Chrome download failed — skipped"
     warn "Thread export / screenshot may be unavailable. To install later: npx puppeteer browsers install chrome"
 }
-# sync_agent_hooks_best_effort: removed.
-# Upstream cat-cafe sync (commit 183d5244) added a call to
-# scripts/sync-system-prompts.ts, but the .ts itself was never synced into
-# clowder-ai — so every install printed an ERR_MODULE_NOT_FOUND warning before
-# the best-effort fallback swallowed it. The Hub does its own hook reconciliation
-# on startup, so this step was always a no-op here. Drop it until upstream
-# actually ships the script into clowder-ai.
+sync_agent_hooks_best_effort() {
+    info "  Syncing Agent CLI hooks..."
+    local log_file; log_file="$(mktemp)"
+    if pnpm exec tsx scripts/sync-system-prompts.ts --apply --agent-hooks-only >"$log_file" 2>&1; then
+        ok "Agent CLI hooks synced"
+    else
+        warn "Agent CLI hook sync failed — continuing; Hub health check can repair it later"
+        tail -5 "$log_file" 2>/dev/null | sed 's/^/    /' || true
+    fi
+    rm -f "$log_file"
+}
 build_step() { local label="$1"; shift; info "  Building $label..."
     "$@" || { fail "$label build failed in $PROJECT_DIR"; exit 1; }; ok "$label done"; }
 resolve_project_dir_from() {
@@ -985,6 +989,7 @@ if [[ -d "$SKILLS_SOURCE" ]]; then
         done
     done; ok "Skills linked"
 else fail "cat-cafe-skills/ not found"; exit 1; fi
+sync_agent_hooks_best_effort
 
 # ── [6/8] Install AI agent CLI tools ─────────────────────
 step "[6/8] Installing AI CLI tools / 安装 AI 命令行工具..."

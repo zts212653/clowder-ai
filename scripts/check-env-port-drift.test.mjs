@@ -686,9 +686,63 @@ excluded:
       }
     });
 
+    it('sync-manifest exports root package operational helper scripts', () => {
+      const managedScripts = readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts');
+      const requiredScripts = ['scripts/cleanup-stale-dev-processes.mjs'];
+
+      for (const scriptPath of requiredScripts) {
+        assert.ok(
+          managedScripts.includes(scriptPath),
+          `sync-manifest should export ${scriptPath} because public package.json exposes it`,
+        );
+      }
+    });
+
+    it('sync-manifest exports start-dev sourced shell closure', () => {
+      const managedScripts = readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts');
+      const requiredScripts = [
+        'scripts/start-dev.sh',
+        'scripts/download-source-overrides.sh',
+        'scripts/lib/node-runtime-guard.sh',
+        'scripts/lib/redis-rdb-first.sh',
+      ];
+
+      for (const scriptPath of requiredScripts) {
+        assert.ok(
+          managedScripts.includes(scriptPath),
+          `sync-manifest should export ${scriptPath} because public start-dev.sh sources it at runtime`,
+        );
+      }
+    });
+
+    it('sync-manifest does not protect managed service wrappers as target-owned', () => {
+      const managedScripts = readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts');
+      const targetOwnedFiles = readYamlTopLevelList('sync-manifest.yaml', 'target_owned_files');
+      const managedServiceWrappers = managedScripts.filter((entry) => entry.startsWith('scripts/services/'));
+
+      for (const entry of targetOwnedFiles) {
+        const overlappingManaged = managedServiceWrappers.find(
+          (managed) => managed === entry || managed.startsWith(entry),
+        );
+        assert.equal(
+          overlappingManaged,
+          undefined,
+          `target_owned_files should not restore over managed public service wrapper ${overlappingManaged ?? entry}`,
+        );
+      }
+    });
+
     it('sync-to-opensource.sh drops home-only root package scripts whose targets are not exported', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
 
+      assert.ok(
+        content.includes('pkg.scripts.check === "node scripts/run-checks.mjs"'),
+        'public package.json should rewrite source-only run-checks wrapper into an explicit public check chain',
+      );
+      assert.ok(
+        content.includes('pkg.scripts["check:pre-merge-gate"] ='),
+        'public package.json should strip source-only run-checks.test.mjs from check:pre-merge-gate',
+      );
       assert.ok(
         content.includes('delete pkg.scripts["check:architecture-ownership"]'),
         'public package.json should not expose check:architecture-ownership without exporting its script target',

@@ -516,8 +516,9 @@ export class AgentRouter {
   /**
    * F32-b: Parse @mentions with longest-match-first + token boundary.
    * F182 KD-10: match-time resolver check (different patch from a2a-mentions pattern-build stage).
+   * Raw variant returns ParsedMention[] with position info for order-aware merging.
    */
-  private parseMentions(message: string): { mentions: CatId[]; routing_warnings: CatRoutingError[] } {
+  private parseMentionsRaw(message: string): { mentions: ParsedMention[]; routing_warnings: CatRoutingError[] } {
     const lowerMessage = this.normalizeSpeechMentions(message).toLowerCase();
 
     // 1. Collect all mentionPatterns → catId, sorted by length descending
@@ -569,7 +570,12 @@ export class AgentRouter {
     }
 
     mentions.sort((a, b) => a.position - b.position);
-    return { mentions: mentions.map((m) => m.catId), routing_warnings };
+    return { mentions, routing_warnings };
+  }
+
+  private parseMentions(message: string): { mentions: CatId[]; routing_warnings: CatRoutingError[] } {
+    const raw = this.parseMentionsRaw(message);
+    return { mentions: raw.mentions.map((m) => m.catId), routing_warnings: raw.routing_warnings };
   }
 
   /**
@@ -580,25 +586,28 @@ export class AgentRouter {
    * P1 fix: uses token boundary check (same regex as parseMentions) to avoid
    * substring collisions like @allison→@all or @threadsafe→@thread.
    */
-  private async parseGroupMentions(message: string, threadId: string): Promise<CatId[] | null> {
+  private async parseGroupMentions(
+    message: string,
+    threadId: string,
+  ): Promise<{ cats: CatId[]; matchPosition: number } | null> {
     const lowerMessage = this.normalizeSpeechMentions(message).toLowerCase();
 
     // Reuse parseMentions' token boundary regex
     const boundaryRe = /[\s,.:;!?()[\]{}<>，。！？、：；（）【】《》「」『』〈〉]/;
 
-    /** Check if pattern appears in message with a valid token boundary after it */
-    const matchesWithBoundary = (pattern: string): boolean => {
+    /** Find first boundary-valid match position, or -1 if not found */
+    const findMatchPosition = (pattern: string): number => {
       const lowerPattern = pattern.toLowerCase();
       let searchFrom = 0;
       while (searchFrom < lowerMessage.length) {
         const pos = lowerMessage.indexOf(lowerPattern, searchFrom);
-        if (pos === -1) return false;
+        if (pos === -1) return -1;
         const end = pos + lowerPattern.length;
         const charAfter = lowerMessage[end];
-        if (!charAfter || boundaryRe.test(charAfter)) return true;
+        if (!charAfter || boundaryRe.test(charAfter)) return pos;
         searchFrom = pos + 1;
       }
-      return false;
+      return -1;
     };
 
     // Build all group patterns sorted longest-first for correct priority
@@ -670,8 +679,10 @@ export class AgentRouter {
     patterns.sort((a, b) => b.pattern.length - a.pattern.length);
 
     for (const { pattern, resolve } of patterns) {
-      if (matchesWithBoundary(pattern)) {
-        return resolve();
+      const pos = findMatchPosition(pattern);
+      if (pos >= 0) {
+        const cats = await resolve();
+        return cats ? { cats, matchPosition: pos } : null;
       }
     }
 
@@ -679,15 +690,45 @@ export class AgentRouter {
   }
 
   /**
-   * F078: Unified mention parser — group mentions first, then individual.
+   * F078: Unified mention parser — group mentions + individual union.
    * F182: returns routing_warnings from individual parseMentions.
+   *
+   * Bug fix: previously group mentions short-circuited individual parsing,
+   * so "@thread @gemini" would only dispatch to thread participants and drop
+   * the explicit @gemini. Now we union both: group-expanded cats + any
+   * explicit individual mentions not already in the group set.
+   *
+   * Order: respects mention position in original message. "@gemini @thread"
+   * routes gemini first, then thread participants. "@thread @gemini" routes
+   * thread participants first, then gemini.
    */
   private async parseAllMentions(
     message: string,
     threadId: string,
   ): Promise<{ mentions: CatId[]; routing_warnings: CatRoutingError[] }> {
     const groupResult = await this.parseGroupMentions(message, threadId);
-    if (groupResult !== null) return { mentions: groupResult, routing_warnings: [] };
+    if (groupResult !== null) {
+      // Position-aware union: merge individual mentions around group based on message position
+      const individual = this.parseMentionsRaw(message);
+      const groupPos = groupResult.matchPosition;
+      const groupSet = new Set<string>(groupResult.cats.map(String));
+
+      const before: CatId[] = [];
+      const after: CatId[] = [];
+      for (const m of individual.mentions) {
+        if (groupSet.has(String(m.catId))) continue; // dedup: already in group expansion
+        if (m.position < groupPos) {
+          before.push(m.catId);
+        } else {
+          after.push(m.catId);
+        }
+      }
+
+      return {
+        mentions: [...before, ...groupResult.cats, ...after],
+        routing_warnings: individual.routing_warnings,
+      };
+    }
     return this.parseMentions(message);
   }
 

@@ -5,11 +5,19 @@ import { freezeF200Flags } from '../domains/memory/f200-types.js';
 import { OutputVerifiedDetector } from '../domains/memory/output-verified-detector.js';
 import { RecallMetricsComputer } from '../domains/memory/RecallMetricsComputer.js';
 import { SqliteSignalSources } from '../domains/memory/SqliteSignalSources.js';
+import {
+  type SignalMessageStore,
+  type SignalTaskStore,
+  ThreadAwareSignalSources,
+} from '../domains/memory/ThreadAwareSignalSources.js';
 import { TrajectoryQueryService } from '../domains/memory/TrajectoryQueryService.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 export interface RecallMetricsRoutesOptions {
   evidenceDb: Database.Database;
+  /** Optional: pass messageStore + taskStore to enable AC-D2.1/D2.2/D2.3 auto-detection. */
+  messageStore?: SignalMessageStore;
+  taskStore?: SignalTaskStore;
 }
 
 interface CacheEntry {
@@ -122,7 +130,12 @@ export const recallMetricsRoutes: FastifyPluginAsync<RecallMetricsRoutesOptions>
 
     const days = Math.min(Math.max(1, parseInt(request.query.days ?? '30', 10) || 30), 90);
     const unverified = trajectoryService.listRecent({ verified: false, days, limit: 100, oldestFirst: true });
-    const sources = new SqliteSignalSources(opts.evidenceDb);
+    // AC-D2: Use ThreadAwareSignalSources when messageStore + taskStore are available;
+    // fall back to SqliteSignalSources (v1 behavior) otherwise.
+    const sources =
+      opts.messageStore && opts.taskStore
+        ? new ThreadAwareSignalSources(opts.evidenceDb, opts.messageStore, opts.taskStore)
+        : new SqliteSignalSources(opts.evidenceDb);
     const detector = new OutputVerifiedDetector(sources);
 
     let verifiedCount = 0;
@@ -137,7 +150,7 @@ export const recallMetricsRoutes: FastifyPluginAsync<RecallMetricsRoutesOptions>
     return { checked: unverified.length, verified: verifiedCount };
   });
 
-  const VALID_SIGNALS = new Set(['pr_merged', 'cvo_accepted', 'reviewer_approved']);
+  const VALID_SIGNALS = new Set(['pr_merged', 'cvo_accepted', 'reviewer_approved', 'ci_passed']);
 
   app.post<{
     Params: { trajectoryId: string };

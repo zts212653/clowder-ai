@@ -71,6 +71,7 @@ export interface ConnectorRouterOptions {
       threadId: string,
       state: { v: 1; connectorId: string; externalChatId: string; createdAt: number; lastCommandAt?: number } | null,
     ): void | Promise<void>;
+    updateSystemKind?(threadId: string, kind: 'connector_hub' | 'eval_domain' | null): void | Promise<void>;
     get?(threadId: string):
       | {
           projectPath?: string;
@@ -586,6 +587,8 @@ export class ConnectorRouter {
       externalChatId,
       createdAt: Date.now(),
     });
+    // F192 livefix: Set systemKind for unified sidebar "系统" section visibility
+    await threadStore.updateSystemKind?.(hubThread.id, 'connector_hub');
     await bindingStore.setHubThread(connectorId, externalChatId, hubThread.id);
     log.info({ connectorId, externalChatId, hubThreadId: hubThread.id }, '[ConnectorRouter] Hub thread created');
     return hubThread.id;

@@ -8,7 +8,7 @@ created: 2026-03-27
 
 # F155: Add-Member Internal Guide UI Spec (Phase A)
 
-> **Status**: spec | **Owner**: Maine Coon/Maine Coon (codex) | **Scope**: 内部场景（添加成员）
+> **Status**: done (supporting spec; F155 closed 2026-05-26) | **Owner**: Maine Coon/Maine Coon (codex) | **Scope**: 内部场景（添加成员）
 
 ## Why
 

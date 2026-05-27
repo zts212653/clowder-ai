@@ -98,8 +98,8 @@ function formatRequirement(req: ResourceRequirement): string {
 function EnvSummary({ profile }: { profile: EnvironmentProfile }) {
   return (
     <div className="rounded-lg bg-[var(--console-field-bg)] px-4 py-3 space-y-1">
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-cafe-muted">检测到的环境</p>
-      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[12px] text-cafe-secondary">
+      <p className="text-micro font-semibold uppercase tracking-wider text-cafe-muted">检测到的环境</p>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs text-cafe-secondary">
         <span>
           <span className="text-cafe font-medium">系统:</span> {OS_LABEL[profile.os]} {profile.arch}
         </span>
@@ -124,13 +124,13 @@ function EnvSummary({ profile }: { profile: EnvironmentProfile }) {
 function UnsupportedPanel({ info }: { info: UnsupportedReason }) {
   return (
     <div className="rounded-lg border border-conn-red-border bg-conn-red-bg/40 px-4 py-3 space-y-2">
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-conn-red-text">当前环境暂不支持</p>
+      <p className="text-micro font-semibold uppercase tracking-wider text-conn-red-text">当前环境暂不支持</p>
       <p className="text-sm text-cafe">{info.reason}</p>
       <div className="rounded bg-cafe-surface px-3 py-2 space-y-1">
-        <p className="text-[12px] text-cafe">
+        <p className="text-xs text-cafe">
           <span className="font-medium">操作建议:</span> {info.userAction}
         </p>
-        <p className="text-[11px] text-cafe-muted">{info.retryHint}</p>
+        <p className="text-micro text-cafe-muted">{info.retryHint}</p>
       </div>
     </div>
   );
@@ -152,7 +152,7 @@ function ModelSelector(props: ModelSelectorProps) {
   const { models, recommendedName, selectedModel, useCustom, customModel, customModelHint } = props;
   return (
     <div className="rounded-lg bg-[var(--console-field-bg)] px-4 py-3 space-y-2">
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-cafe-muted">模型选择</p>
+      <p className="text-micro font-semibold uppercase tracking-wider text-cafe-muted">模型选择</p>
       <div className="space-y-1.5">
         {models.map((m) => {
           const isRecommended = m.name === recommendedName;
@@ -178,16 +178,16 @@ function ModelSelector(props: ModelSelectorProps) {
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <p className="text-sm font-medium text-cafe truncate">{m.name.split('/').pop()}</p>
                   {isRecommended && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-conn-emerald-bg text-conn-emerald-text">
+                    <span className="text-micro px-1.5 py-0.5 rounded bg-conn-emerald-bg text-conn-emerald-text">
                       推荐
                     </span>
                   )}
                 </div>
-                <p className="text-[11px] text-cafe-muted">
+                <p className="text-micro text-cafe-muted">
                   {m.size} · {formatRequirement(m.requirements)}
                 </p>
-                <p className="text-[11px] text-cafe-muted">{m.description}</p>
-                {m.performance && <p className="text-[10px] text-cafe-muted italic">{m.performance}</p>}
+                <p className="text-micro text-cafe-muted">{m.description}</p>
+                {m.performance && <p className="text-micro text-cafe-muted italic">{m.performance}</p>}
               </div>
             </label>
           );
@@ -217,16 +217,16 @@ function ModelSelector(props: ModelSelectorProps) {
                 />
                 {customModelHint && (
                   <div className="mt-1 space-y-0.5">
-                    <p className="text-[11px] text-cafe-muted leading-relaxed">
+                    <p className="text-micro text-cafe-muted leading-relaxed">
                       <span className="font-semibold text-cafe">格式要求：</span>
                       {customModelHint.requirement}
                     </p>
-                    <p className="text-[11px] text-cafe-muted leading-relaxed">
+                    <p className="text-micro text-cafe-muted leading-relaxed">
                       <span className="font-semibold text-cafe">示例：</span>
                       {customModelHint.example}
                     </p>
                     {customModelHint.unsupported && (
-                      <p className="text-[11px] leading-relaxed text-conn-amber-text">
+                      <p className="text-micro leading-relaxed text-conn-amber-text">
                         <span className="font-semibold">不支持：</span>
                         {customModelHint.unsupported}（启动会失败）
                       </p>
@@ -240,7 +240,7 @@ function ModelSelector(props: ModelSelectorProps) {
                             target="_blank"
                             rel="noopener noreferrer"
                             onClick={(e) => e.stopPropagation()}
-                            className="text-[11px] text-conn-sky-text hover:underline"
+                            className="text-micro text-conn-sky-text hover:underline"
                           >
                             ↗ {link.label}
                           </a>
@@ -375,7 +375,7 @@ export function InstallPreviewModal({
       onClick={onCancel}
     >
       <div
-        className="bg-cafe-surface rounded-xl border border-[var(--cafe-border)] shadow-xl p-6 max-w-md w-full mx-4 max-h-[85vh] overflow-y-auto"
+        className="bg-cafe-surface rounded-2xl border border-[var(--cafe-border)] shadow-xl p-6 max-w-md w-full mx-4 max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
@@ -426,9 +426,9 @@ export function InstallPreviewModal({
 
           {rec && !isUnsupported && allModels.length === 0 && (
             <div className="rounded-lg bg-[var(--console-field-bg)] px-4 py-3 space-y-1.5">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-cafe-muted">模型选择</p>
+              <p className="text-micro font-semibold uppercase tracking-wider text-cafe-muted">模型选择</p>
               <p className="text-sm font-medium text-cafe">无需模型</p>
-              <p className="text-[12px] text-cafe-secondary">
+              <p className="text-xs text-cafe-secondary">
                 此服务只安装运行时依赖，不下载或选择模型。
                 {serviceId === 'audio-capture' ? '语音识别模型请在 Whisper 服务中选择。' : ''}
               </p>
@@ -437,9 +437,9 @@ export function InstallPreviewModal({
 
           {rec && rec.notes.length > 0 && (
             <div className="rounded-lg border border-conn-amber-border bg-conn-amber-bg/40 px-4 py-3 space-y-1">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-conn-amber-text">注意事项</p>
+              <p className="text-micro font-semibold uppercase tracking-wider text-conn-amber-text">注意事项</p>
               {rec.notes.map((c) => (
-                <p key={c} className="text-[12px] text-cafe-secondary">
+                <p key={c} className="text-xs text-cafe-secondary">
                   · {c}
                 </p>
               ))}
@@ -448,7 +448,7 @@ export function InstallPreviewModal({
 
           {!isUnsupported && (
             <div className="rounded-lg bg-[var(--console-field-bg)] px-4 py-3 space-y-1.5">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-cafe-muted">服务端口</p>
+              <p className="text-micro font-semibold uppercase tracking-wider text-cafe-muted">服务端口</p>
               <div className="flex items-center gap-2">
                 <input
                   type="number"
@@ -460,27 +460,27 @@ export function InstallPreviewModal({
                   className="w-32 border border-[var(--console-border-soft)] rounded-md px-2 py-1 text-xs bg-[var(--console-card-bg)] focus:outline-none focus:ring-1 focus:ring-conn-sky-ring"
                 />
                 {suggestedPort && !portError && (
-                  <span className="text-[11px] text-cafe-muted">
+                  <span className="text-micro text-cafe-muted">
                     系统已为你扫描到可用端口 {suggestedPort}，留空则使用该值
                   </span>
                 )}
               </div>
-              {portError && <p className="text-[11px] text-conn-rose-text">{portError}</p>}
+              {portError && <p className="text-micro text-conn-rose-text">{portError}</p>}
             </div>
           )}
 
           {estimatedMinutes && !isUnsupported && !isReconfigure && (
-            <p className="text-[11px] text-cafe-muted">预计耗时 ~{estimatedMinutes} 分钟（取决于网络速度）</p>
+            <p className="text-micro text-cafe-muted">预计耗时 ~{estimatedMinutes} 分钟（取决于网络速度）</p>
           )}
 
           {isReconfigure && !isUnsupported && (
-            <p className="text-[11px] text-cafe-muted">
+            <p className="text-micro text-cafe-muted">
               修改不会重建虚拟环境；端口仅写入配置，下次启用生效；切换模型会重新下载，但不重装依赖。
             </p>
           )}
 
           {!isUnsupported && (
-            <p className="text-[11px] text-cafe-muted">
+            <p className="text-micro text-cafe-muted">
               网络受限 / 内网 / 离线？{' '}
               <a
                 href="/api/services/docs/offline-install"

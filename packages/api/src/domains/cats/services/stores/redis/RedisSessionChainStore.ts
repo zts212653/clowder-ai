@@ -23,11 +23,16 @@ const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
  * Lua: atomic create session record.
  * KEYS[1] = active key, KEYS[2] = chain key, KEYS[3] = detail key, KEYS[4] = cli key
  * ARGV[1] = id, ARGV[2] = cliSessionId, ARGV[3] = threadId, ARGV[4] = catId,
- * ARGV[5] = userId, ARGV[6] = now
+ * ARGV[5] = userId, ARGV[6] = now, ARGV[7] = reuseExistingCliSession flag
  *
- * Returns next seq number.
+ * Returns: {'existing', existingId} when cliSessionId is already claimed,
+ *          {'created', id, seq} when a new record is created.
  */
 const CREATE_LUA = `
+if ARGV[7] == '1' then
+  local existingId = redis.call('GET', KEYS[4])
+  if existingId then return {'existing', existingId} end
+end
 local seq = redis.call('ZCARD', KEYS[2])
 redis.call('HSET', KEYS[3],
   'id', ARGV[1], 'cliSessionId', ARGV[2], 'threadId', ARGV[3],
@@ -39,7 +44,7 @@ redis.call('ZADD', KEYS[2], seq, ARGV[1])
 ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('EXPIRE', KEYS[2], ${DEFAULT_TTL_SECONDS})` : '-- persistent mode: no EXPIRE'}
 ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('SET', KEYS[1], ARGV[1], 'EX', ${DEFAULT_TTL_SECONDS})` : `redis.call('SET', KEYS[1], ARGV[1])`}
 ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('SET', KEYS[4], ARGV[1], 'EX', ${DEFAULT_TTL_SECONDS})` : `redis.call('SET', KEYS[4], ARGV[1])`}
-return seq
+return {'created', ARGV[1], tostring(seq)}
 `;
 
 /**
@@ -65,41 +70,55 @@ export class RedisSessionChainStore implements ISessionChainStore {
 
   async create(input: CreateSessionInput): Promise<SessionRecord> {
     const { randomUUID } = await import('node:crypto');
-    const id = randomUUID();
-    const now = String(Date.now());
-
-    const activeKey = SessionChainKeys.active(input.catId, input.threadId);
-    const chainKey = SessionChainKeys.chain(input.catId, input.threadId);
-    const detailKey = SessionChainKeys.detail(id);
     const cliKey = SessionChainKeys.byCli(input.cliSessionId);
 
-    const seq = (await this.redis.eval(
-      CREATE_LUA,
-      4,
-      activeKey,
-      chainKey,
-      detailKey,
-      cliKey,
-      id,
-      input.cliSessionId,
-      input.threadId,
-      input.catId,
-      input.userId,
-      now,
-    )) as number;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const id = randomUUID();
+      const now = String(Date.now());
+      const activeKey = SessionChainKeys.active(input.catId, input.threadId);
+      const chainKey = SessionChainKeys.chain(input.catId, input.threadId);
+      const detailKey = SessionChainKeys.detail(id);
 
-    return {
-      id,
-      cliSessionId: input.cliSessionId,
-      threadId: input.threadId,
-      catId: input.catId as CatId,
-      userId: input.userId,
-      seq,
-      status: 'active',
-      messageCount: 0,
-      createdAt: parseInt(now, 10),
-      updatedAt: parseInt(now, 10),
-    };
+      const result = (await this.redis.eval(
+        CREATE_LUA,
+        4,
+        activeKey,
+        chainKey,
+        detailKey,
+        cliKey,
+        id,
+        input.cliSessionId,
+        input.threadId,
+        input.catId,
+        input.userId,
+        now,
+        input.reuseExistingCliSession ? '1' : '0',
+      )) as [string, string, string?];
+
+      const [status, recordId, seqRaw] = result;
+      if (status === 'existing') {
+        const existing = await this.get(recordId);
+        if (existing) return existing;
+        await this.redis.del(cliKey);
+        continue;
+      }
+
+      const seq = Number.parseInt(seqRaw ?? '0', 10);
+      return {
+        id: recordId,
+        cliSessionId: input.cliSessionId,
+        threadId: input.threadId,
+        catId: input.catId as CatId,
+        userId: input.userId,
+        seq,
+        status: 'active',
+        messageCount: 0,
+        createdAt: parseInt(now, 10),
+        updatedAt: parseInt(now, 10),
+      };
+    }
+
+    throw new Error(`stale CLI session index could not be repaired: ${input.cliSessionId}`);
   }
 
   async get(id: string): Promise<SessionRecord | null> {
@@ -176,6 +195,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
     if (!exists) return null;
 
     const pairs: string[] = [];
+    const deleteFields: string[] = [];
     pairs.push('updatedAt', String(patch.updatedAt ?? Date.now()));
 
     if (patch.cliSessionId !== undefined) {
@@ -192,12 +212,17 @@ export class RedisSessionChainStore implements ISessionChainStore {
 
     if (patch.status !== undefined) {
       pairs.push('status', patch.status);
-      // Remove from active index if no longer active
-      if (patch.status !== 'active') {
-        const catId = await this.redis.hget(detailKey, 'catId');
-        const threadId = await this.redis.hget(detailKey, 'threadId');
-        if (catId && threadId) {
-          const activeKey = SessionChainKeys.active(catId, threadId);
+      const catId = await this.redis.hget(detailKey, 'catId');
+      const threadId = await this.redis.hget(detailKey, 'threadId');
+      if (catId && threadId) {
+        const activeKey = SessionChainKeys.active(catId, threadId);
+        if (patch.status === 'active') {
+          if (DEFAULT_TTL_SECONDS > 0) {
+            await this.redis.set(activeKey, id, 'EX', DEFAULT_TTL_SECONDS);
+          } else {
+            await this.redis.set(activeKey, id);
+          }
+        } else {
           const currentActive = await this.redis.get(activeKey);
           if (currentActive === id) {
             await this.redis.del(activeKey);
@@ -215,11 +240,13 @@ export class RedisSessionChainStore implements ISessionChainStore {
     if (patch.messageCount !== undefined) {
       pairs.push('messageCount', String(patch.messageCount));
     }
-    if (patch.sealReason !== undefined) {
-      pairs.push('sealReason', patch.sealReason);
+    if ('sealReason' in patch) {
+      if (patch.sealReason === null) deleteFields.push('sealReason');
+      else if (patch.sealReason !== undefined) pairs.push('sealReason', patch.sealReason);
     }
-    if (patch.sealedAt !== undefined) {
-      pairs.push('sealedAt', String(patch.sealedAt));
+    if ('sealedAt' in patch) {
+      if (patch.sealedAt === null) deleteFields.push('sealedAt');
+      else if (patch.sealedAt !== undefined) pairs.push('sealedAt', String(patch.sealedAt));
     }
     if (patch.compressionCount !== undefined) {
       pairs.push('compressionCount', String(patch.compressionCount));
@@ -232,6 +259,9 @@ export class RedisSessionChainStore implements ISessionChainStore {
     }
 
     await this.redis.hset(detailKey, ...pairs);
+    if (deleteFields.length > 0) {
+      await this.redis.hdel(detailKey, ...deleteFields);
+    }
     return this.get(id);
   }
 

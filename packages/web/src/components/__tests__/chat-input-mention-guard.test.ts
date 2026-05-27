@@ -175,18 +175,17 @@ describe('ChatInput mention menu guards', () => {
   });
 
   it('ArrowDown past last item wraps to 0 and Enter still works', () => {
-    // 2 cats: index 0 and 1
+    // 4 options: @thread, @all (groups), 布偶猫, 缅因猫 (individuals).
+    // Default selectedIdx = 2 (first individual, skipping groups).
     render();
 
     typeInTextarea('@');
     expect(container.querySelectorAll('.w-64').length).toBe(1);
 
-    // ArrowDown 3 times: 0→1→0→1 (mod 2 wrapping)
-    pressKey('ArrowDown');
-    pressKey('ArrowDown');
+    // ArrowDown once from idx 2 → idx 3 (缅因猫)
     pressKey('ArrowDown');
 
-    // Enter should insert the cat at wrapped index (1) — 缅因猫
+    // Enter should insert 缅因猫
     pressKey('Enter');
 
     const ta = getTextarea();

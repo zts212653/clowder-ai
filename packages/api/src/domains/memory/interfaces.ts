@@ -386,7 +386,7 @@ export interface IKnowledgeResolver {
 
 export interface EmbedConfig {
   embedMode: 'off' | 'shadow' | 'on';
-  embedModel: 'qwen3-embedding-0.6b' | 'multilingual-e5-small';
+  embedModel: string;
   embedDim: number;
   maxModelMemMb: number;
   embedTimeoutMs: number;
@@ -408,16 +408,17 @@ export interface IEmbeddingService {
 }
 
 const VALID_EMBED_MODES = new Set(['off', 'shadow', 'on']);
-const VALID_EMBED_MODELS = new Set(['qwen3-embedding-0.6b', 'multilingual-e5-small']);
 
 export function resolveEmbedConfig(partial?: Partial<EmbedConfig>): EmbedConfig {
   const mode = partial?.embedMode ?? 'off';
   if (!VALID_EMBED_MODES.has(mode)) throw new Error(`Invalid embedMode: ${mode}`);
-  const model = partial?.embedModel ?? 'qwen3-embedding-0.6b';
-  if (!VALID_EMBED_MODELS.has(model)) throw new Error(`Invalid embedModel: ${model}`);
+  // The scripted sidecar is the runtime authority for the concrete model
+  // after /health responds. Until then this sentinel keeps local config free
+  // of stale TypeScript-side model whitelists.
+  const model = partial?.embedModel ?? 'unknown';
   return {
     embedMode: mode as EmbedConfig['embedMode'],
-    embedModel: model as EmbedConfig['embedModel'],
+    embedModel: model,
     embedDim: partial?.embedDim ?? 768, // LL-034: 768 is sweet spot for CJK bilingual; 256 too low
     maxModelMemMb: partial?.maxModelMemMb ?? 800,
     embedTimeoutMs: partial?.embedTimeoutMs ?? 3000,

@@ -77,6 +77,19 @@ export interface ThreadMemoryV1 {
   }>;
 }
 
+export type ExternalRuntimeAnchorRuntime = 'antigravity-desktop';
+
+export interface ExternalRuntimeAnchorStateV1 {
+  v: 1;
+  runtime: ExternalRuntimeAnchorRuntime;
+  userId: string;
+  createdAt: number;
+}
+
+export function buildExternalRuntimeAnchorThreadId(runtime: ExternalRuntimeAnchorRuntime, userId: string): string {
+  return `external-runtime:${runtime}:${userId}`;
+}
+
 export type MentionRoutingSuppressionReason = 'no_action' | 'cross_paragraph' | 'inline_action';
 export type MentionActionabilityMode = 'strict' | 'relaxed';
 
@@ -141,8 +154,13 @@ export interface Thread {
   bootcampState?: BootcampStateV1;
   /** F171: First-Run Quest onboarding state. */
   firstRunQuestState?: FirstRunQuestStateV1;
+  /** F192 livefix: System thread kind — determines sidebar "系统" section visibility.
+   *  connector_hub = IM Hub thread, eval_domain = harness eval domain thread. */
+  systemKind?: 'connector_hub' | 'eval_domain';
   /** F088 Phase G: Connector Hub thread state — marks this thread as an IM Hub for command isolation. */
   connectorHubState?: ConnectorHubStateV1;
+  /** F211 Phase B: Hidden per-user runtime anchor for orphan external runtime sessions. */
+  externalRuntimeAnchorState?: ExternalRuntimeAnchorStateV1;
   /** F168: Auto-switch workspace panel when this thread is opened. */
   preferredWorkspaceMode?: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community';
   /** F187: User-defined label IDs for thread categorization. */
@@ -337,6 +355,8 @@ export interface IThreadStore {
   updateBootcampState(threadId: string, state: BootcampStateV1 | null): void | Promise<void>;
   /** F171: Get/update first-run quest state. */
   updateFirstRunQuestState(threadId: string, state: FirstRunQuestStateV1 | null): void | Promise<void>;
+  /** F192 livefix: Set/clear system thread kind for sidebar "系统" section visibility. */
+  updateSystemKind(threadId: string, kind: 'connector_hub' | 'eval_domain' | null): void | Promise<void>;
   /** F088 Phase G: Get/update connector hub state. */
   updateConnectorHubState(threadId: string, state: ConnectorHubStateV1 | null): void | Promise<void>;
   updatePreferredWorkspaceMode(
@@ -351,6 +371,7 @@ export interface IThreadStore {
    * Returns the thread (existing or newly created).
    */
   ensureThread(threadId: string, title: string): Thread | Promise<Thread>;
+  ensureExternalRuntimeAnchorThread(runtime: ExternalRuntimeAnchorRuntime, userId: string): Thread | Promise<Thread>;
   updateLastActive(threadId: string): void | Promise<void>;
   delete(threadId: string): boolean | Promise<boolean>;
   /** F095 Phase D: Soft-delete — mark thread as deleted without removing data. */
@@ -359,6 +380,12 @@ export interface IThreadStore {
   restore(threadId: string): boolean | Promise<boolean>;
   /** F095 Phase D: List soft-deleted threads (trash bin). */
   listDeleted(userId: string): Thread[] | Promise<Thread[]>;
+  /**
+   * F192 cloud-review P1: Add an existing thread to a user's thread list so it appears in their sidebar.
+   * Used for system threads (eval domain, connector hub) created by ensureThread() which
+   * skips user-list indexing. Idempotent — re-indexing an already-visible thread is a no-op.
+   */
+  indexForUser(threadId: string, userId: string): void | Promise<void>;
   /** Repair sparse/missing per-user thread indexes from authoritative thread detail hashes. */
   repairIndex?(userId?: string): Promise<{ repairedUsers: number; repairedMembers: number }>;
 }
@@ -377,6 +404,8 @@ export class ThreadStore implements IThreadStore {
   > = new Map();
   /** F046 D3: one-shot suppressed mention feedback per thread+cat */
   private mentionRoutingFeedback: Map<string, ThreadMentionRoutingFeedback> = new Map();
+  /** F192 cloud P1: extra user→threadId index for system threads surfaced via indexForUser */
+  private userThreadIndex: Map<string, Set<string>> = new Map();
   private readonly maxThreads: number;
 
   constructor(options?: { maxThreads?: number }) {
@@ -429,6 +458,33 @@ export class ThreadStore implements IThreadStore {
     return thread;
   }
 
+  ensureExternalRuntimeAnchorThread(runtime: ExternalRuntimeAnchorRuntime, userId: string): Thread {
+    const threadId = buildExternalRuntimeAnchorThreadId(runtime, userId);
+    const existing = this.threads.get(threadId);
+    if (existing) return existing;
+
+    this.evictIfNeeded();
+
+    const now = Date.now();
+    const thread: Thread = {
+      id: threadId,
+      projectPath: `external-runtime:${runtime}`,
+      title: `External runtime: ${runtime}`,
+      createdBy: 'system',
+      participants: [],
+      lastActiveAt: now,
+      createdAt: now,
+      externalRuntimeAnchorState: {
+        v: 1,
+        runtime,
+        userId,
+        createdAt: now,
+      },
+    };
+    this.threads.set(threadId, thread);
+    return thread;
+  }
+
   get(threadId: string): Thread | null {
     // Auto-create default thread on first access
     if (threadId === DEFAULT_THREAD_ID && !this.threads.has(DEFAULT_THREAD_ID)) {
@@ -448,9 +504,13 @@ export class ThreadStore implements IThreadStore {
   }
 
   list(userId: string): Thread[] {
+    const indexed = this.userThreadIndex.get(userId);
     const result: Thread[] = [];
     for (const thread of this.threads.values()) {
-      if ((thread.createdBy === userId || thread.id === DEFAULT_THREAD_ID) && !thread.deletedAt) {
+      if (thread.externalRuntimeAnchorState) continue;
+      const ownedOrDefault = thread.createdBy === userId || thread.id === DEFAULT_THREAD_ID;
+      const userIndexed = indexed?.has(thread.id) ?? false;
+      if ((ownedOrDefault || userIndexed) && !thread.deletedAt) {
         result.push(thread);
       }
     }
@@ -690,6 +750,16 @@ export class ThreadStore implements IThreadStore {
     }
   }
 
+  updateSystemKind(threadId: string, kind: 'connector_hub' | 'eval_domain' | null): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (kind === null) {
+      delete thread.systemKind;
+    } else {
+      thread.systemKind = kind;
+    }
+  }
+
   updateConnectorHubState(threadId: string, state: ConnectorHubStateV1 | null): void {
     const thread = this.get(threadId);
     if (!thread) return;
@@ -754,6 +824,17 @@ export class ThreadStore implements IThreadStore {
   }
 
   /** F095 Phase D: List soft-deleted threads (trash bin). */
+  indexForUser(threadId: string, userId: string): void {
+    const thread = this.threads.get(threadId);
+    if (!thread) return;
+    let indexed = this.userThreadIndex.get(userId);
+    if (!indexed) {
+      indexed = new Set();
+      this.userThreadIndex.set(userId, indexed);
+    }
+    indexed.add(threadId);
+  }
+
   listDeleted(userId: string): Thread[] {
     const result: Thread[] = [];
     for (const thread of this.threads.values()) {

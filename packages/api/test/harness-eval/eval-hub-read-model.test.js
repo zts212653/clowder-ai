@@ -216,6 +216,27 @@ Evidence:
     assert.equal(memItem.systemWorkspace.threadId, 'thread_eval_memory');
   });
 
+  // F192 livefix OQ-16: Hub must show ALL registered domains, not just those with verdicts
+  it('includes all registered domains in domains[] including those without verdicts', () => {
+    const summary = loadEvalHubSummary({ harnessFeedbackRoot: repoHarnessFeedbackRoot });
+
+    assert.ok(summary.domains, 'domains field must exist');
+    assert.equal(summary.domains.length, 2, 'should have 2 registered domains (eval:a2a + eval:memory)');
+    assert.equal(summary.counts.registeredDomains, 2);
+
+    const a2aDomain = summary.domains.find((d) => d.domainId === 'eval:a2a');
+    assert.ok(a2aDomain, 'eval:a2a must appear in domains');
+    assert.equal(a2aDomain.hasVerdict, true);
+    assert.ok(a2aDomain.latestVerdictId, 'eval:a2a should have latestVerdictId');
+    assert.equal(a2aDomain.evalCatHandle, '@codex');
+
+    const memoryDomain = summary.domains.find((d) => d.domainId === 'eval:memory');
+    assert.ok(memoryDomain, 'eval:memory must appear even with zero verdicts');
+    assert.equal(memoryDomain.hasVerdict, false);
+    assert.equal(memoryDomain.latestVerdictId, undefined);
+    assert.equal(memoryDomain.evalCatHandle, '@opus47');
+  });
+
   it('fails closed when a live verdict points at a missing evidence bundle', () => {
     const harnessFeedbackRoot = mkdtempSync(join(tmpdir(), 'f192-eval-hub-'));
     const verdictPath = join(harnessFeedbackRoot, 'verdicts', '2026-05-24-bad-live-verdict.md');

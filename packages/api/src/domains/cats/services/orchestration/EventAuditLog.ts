@@ -232,6 +232,8 @@ export const AuditEventTypes = {
 
   /** 手动绑定 CLI session (#72) */
   SESSION_BIND: 'session_bind',
+  /** F211 Phase B: External IDE-direct runtime session registration */
+  EXTERNAL_RUNTIME_SESSION_REGISTERED: 'external_runtime_session_registered',
 
   // === Push Delivery Diagnostics ===
 

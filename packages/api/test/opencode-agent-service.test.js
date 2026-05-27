@@ -516,4 +516,56 @@ describe('OpenCodeAgentService', () => {
     assert.strictEqual(opts.env.ANTHROPIC_API_KEY, 'sk-normal-key');
     assert.strictEqual(opts.env.ANTHROPIC_BASE_URL, 'https://proxy.example.com/v1');
   });
+
+  // F212 Phase A (砚砚 review BLOCKED P1-2 fix): cliDiagnostics must flow from
+  // spawnCli __cliError → provider yield error.metadata.cliDiagnostics
+  // so frontend folded panel (Phase B) can render reasonCode / safeExcerpt / publicHint.
+  test('F212: forwards cliDiagnostics on metadata when CLI errors (issue #777 reproducer)', async () => {
+    const proc = createMockProcess(1);
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'deepseek-v-4' });
+
+    const promise = collect(service.invoke('Test'));
+    // Real-world issue #777 case: opencode emits a NDJSON error event for DeepSeek 400 model_not_found
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'error',
+        error: {
+          name: 'APIError',
+          data: {
+            message:
+              'The supported API model names are deepseek-v4-pro or deepseek-v4-flash, but you passed deepseek-v-4.',
+            statusCode: 400,
+          },
+        },
+      })}\n`,
+    );
+    proc.stdout.end();
+    emitProcessExit(proc, 1, null);
+    const messages = await promise;
+
+    // Two error messages may be yielded: (1) stream error event (transform-time, cli still running),
+    // (2) cli-spawn __cliError (after exit 1). Both should carry cliDiagnostics; pick any.
+    const errorsWithCD = messages.filter((m) => m.type === 'error' && m.metadata?.cliDiagnostics);
+    assert.ok(
+      errorsWithCD.length >= 1,
+      `at least one error message must carry cliDiagnostics. all messages=${JSON.stringify(messages.map((m) => ({ type: m.type, hasCD: !!m.metadata?.cliDiagnostics })))}`,
+    );
+    // All cliDiagnostics-bearing errors must classify correctly (same rawText source)
+    for (const e of errorsWithCD) {
+      assert.strictEqual(e.metadata.cliDiagnostics.reasonCode, 'model_not_found');
+      assert.ok(
+        e.metadata.cliDiagnostics.safeExcerpt?.includes('deepseek-v4-pro'),
+        `safeExcerpt should include matched line: ${e.metadata.cliDiagnostics.safeExcerpt}`,
+      );
+      assert.match(e.metadata.cliDiagnostics.publicSummary, /模型/);
+      assert.ok(e.metadata.cliDiagnostics.publicHint.length > 0);
+      assert.ok(e.metadata.cliDiagnostics.debugRef, 'debugRef must be present');
+      // command may be 'opencode' (stream error path) OR a resolved absolute path (cli-spawn __cliError path)
+      assert.ok(
+        e.metadata.cliDiagnostics.debugRef.command.includes('opencode'),
+        `debugRef.command should reference opencode: ${e.metadata.cliDiagnostics.debugRef.command}`,
+      );
+    }
+  });
 });

@@ -103,7 +103,11 @@ function finishExit(proc, code) {
 }
 
 const CAT_CAFE_SPLIT_SERVER_IDS = ['cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals', 'cat-cafe-limb'];
-const CAT_CAFE_WORKSPACE_ENV_SERVER_IDS = ['cat-cafe', ...CAT_CAFE_SPLIT_SERVER_IDS];
+// F213 (2026-05-26): Legacy `cat-cafe` no longer auto-provisioned nor env-overlayed.
+// L5 startup cleanup (writeCodexMcpConfig + deprecated-managed-servers registry)
+// removes user-config legacy entries; L4 per-invocation only writes split servers.
+// See ADR-036 amendment 2026-05-26.
+const CAT_CAFE_WORKSPACE_ENV_SERVER_IDS = [...CAT_CAFE_SPLIT_SERVER_IDS];
 
 async function withWorkspaceEnv(env, fn) {
   const previousAllowedWorkspaceDirs = process.env.ALLOWED_WORKSPACE_DIRS;
@@ -313,18 +317,38 @@ test('injects cat-cafe MCP config from runtime root, not thread workingDirectory
       );
     }
 
-    // legacy `cat-cafe` server must NOT be auto-provisioned after the split.
+    // F213 (2026-05-26, post 砚砚 review P2 fix): legacy `cat-cafe` server gets
+    // L4 per-invocation dummy disabled override (covers user-level / $CODEX_HOME
+    // / system config sources that L5 cleanup cannot reach). Dummy disabled form
+    // verified by 砚砚 strict-npm-Codex reproducer: passes config parse + codex
+    // skips server startup (enabled=false).
+    //
+    // INVARIANTS:
+    // - command="echo" (complete transport, strict-codex accepts)
+    // - args=["legacy-shim"] (no real process spawn)
+    // - enabled=false (server not actually started, no callback env needed)
+    // - NO env.* overlay (env-only would be partial definition if transport missing
+    //   from another source — but with our complete transport above, env is irrelevant
+    //   because enabled=false short-circuits server startup)
+    assert.ok(
+      args.includes('mcp_servers.cat-cafe.command="echo"'),
+      'F213: L4 must inject dummy disabled command="echo" for legacy cat-cafe (covers sources outside L5 cleanup reach)',
+    );
+    assert.ok(
+      args.some((arg) => arg.startsWith('mcp_servers.cat-cafe.args=') && arg.includes('legacy-shim')),
+      'F213: L4 must inject dummy disabled args=["legacy-shim"] for legacy cat-cafe',
+    );
+    assert.ok(
+      args.includes('mcp_servers.cat-cafe.enabled=false'),
+      'F213: L4 must inject enabled=false for legacy cat-cafe (server not actually started)',
+    );
+    assert.ok(
+      !args.some((arg) => arg.startsWith('mcp_servers.cat-cafe.env.')),
+      'F213: legacy cat-cafe env overlay must NOT be injected — enabled=false short-circuits, env irrelevant',
+    );
     assert.ok(
       !args.includes('mcp_servers.cat-cafe.command="node"'),
-      'legacy cat-cafe MCP server entry should not be injected after F193 Phase C split',
-    );
-    assert.ok(
-      !args.some((arg) => arg.startsWith('mcp_servers.cat-cafe.args=')),
-      'legacy cat-cafe MCP args should not be injected after F193 Phase C split',
-    );
-    assert.ok(
-      args.includes(`mcp_servers.cat-cafe.env.ALLOWED_WORKSPACE_DIRS="${tmpRoot}"`),
-      'legacy cat-cafe static config must receive the same workspace env overlay',
+      'legacy cat-cafe MCP server command="node" should not be injected (split-only invariant)',
     );
   } finally {
     if (previousAllowedWorkspaceDirs === undefined) {

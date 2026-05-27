@@ -76,6 +76,23 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
     assert.equal(fetched.createdBy, 'user1');
   });
 
+  it('ensureExternalRuntimeAnchorThread stores a persistent hidden anchor', async () => {
+    const anchor = await store.ensureExternalRuntimeAnchorThread('antigravity-desktop', 'user1');
+    const again = await store.ensureExternalRuntimeAnchorThread('antigravity-desktop', 'user1');
+    const retrieved = await store.get(anchor.id);
+    const visible = await store.list('user1');
+
+    assert.equal(anchor.id, 'external-runtime:antigravity-desktop:user1');
+    assert.equal(again.id, anchor.id);
+    assert.equal(retrieved.externalRuntimeAnchorState.userId, 'user1');
+    assert.equal(retrieved.externalRuntimeAnchorState.runtime, 'antigravity-desktop');
+    assert.equal(
+      visible.some((thread) => thread.id === anchor.id),
+      false,
+      'anchor thread must not appear in the normal user thread list',
+    );
+  });
+
   it('get("default") auto-creates default thread', async () => {
     const thread = await store.get('default');
     assert.ok(thread);
@@ -178,7 +195,10 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
     const result = await store.repairIndex();
     assert.equal(result.repairedUsers, 1);
     assert.equal(result.repairedMembers, 1);
-    assert.deepEqual(await redis.zrange(userListKey(userId), 0, -1), [first.id, second.id]);
+    const idsAfterRepair = await redis.zrange(userListKey(userId), 0, -1);
+    assert.equal(idsAfterRepair.length, 2);
+    assert.ok(idsAfterRepair.includes(first.id), 'repairIndex() should preserve the existing thread');
+    assert.ok(idsAfterRepair.includes(second.id), 'repairIndex() should restore the missing thread');
   });
 
   it('updateTitle() updates the title', async () => {

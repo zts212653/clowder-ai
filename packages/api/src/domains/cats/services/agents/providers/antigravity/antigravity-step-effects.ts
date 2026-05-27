@@ -50,6 +50,7 @@ const READ_ONLY_MCP_TOOLS = new Set<string>([
   'cat_cafe_read_session_events',
   'cat_cafe_read_session_digest',
   'cat_cafe_read_invocation_detail',
+  'cat_cafe_read_file_slice',
   'pull_request_read',
   // Safety depends on mcp-server/src/tools/shell-tools.ts enforcing a strict
   // read-only command whitelist; antigravity-step-effects.test.js guards both sides.

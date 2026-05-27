@@ -12,6 +12,8 @@ import argparse
 import asyncio
 import logging
 import os
+import platform
+import resource
 import signal
 import sys
 import time
@@ -55,6 +57,9 @@ model_name: str = ""
 embed_dim: int = 768
 model_loaded: bool = False
 _backend: str = "mlx-embeddings"
+_started_at: float = time.time()
+_request_count: int = 0
+_last_embed_ms: float | None = None
 
 # Serialize GPU access (same pattern as whisper-api.py / tts-api.py)
 _embed_lock = asyncio.Lock()
@@ -70,6 +75,32 @@ _onnx_device = "cpu"
 # Heavy fallback: sentence-transformers + MPS/CUDA/CPU (needs torch)
 _use_fallback = False
 _st_model = None
+_fallback_device: str = ""
+
+
+def _env_truthy(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_apple_silicon() -> bool:
+    return platform.system() == "Darwin" and platform.machine() == "arm64"
+
+
+def _allow_sentence_transformers_fallback() -> bool:
+    if "EMBED_ALLOW_ST_FALLBACK" in os.environ:
+        return _env_truthy("EMBED_ALLOW_ST_FALLBACK")
+    return not _is_apple_silicon()
+
+
+def _process_max_rss_bytes() -> int:
+    """Return process max RSS in bytes (macOS reports bytes, Linux reports KiB)."""
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    if sys.platform == "darwin":
+        return int(rss)
+    return int(rss * 1024)
 
 
 # ─── Request/Response models ──────────────────────────────────────
@@ -91,6 +122,7 @@ class EmbedResponse(BaseModel):
 @app.post("/v1/embeddings")
 async def create_embeddings(req: EmbedRequest):
     """OpenAI-compatible embedding endpoint."""
+    global _request_count, _last_embed_ms
     if not model_loaded:
         raise HTTPException(503, detail="Model not loaded yet")
 
@@ -109,6 +141,8 @@ async def create_embeddings(req: EmbedRequest):
         embeddings = await asyncio.to_thread(_encode, texts)
 
     elapsed_ms = time.time() * 1000 - start_ms
+    _request_count += 1
+    _last_embed_ms = elapsed_ms
     log.info("Embedded %d text(s) in %.0fms (dim=%d)", len(texts), elapsed_ms, embed_dim)
 
     data = []
@@ -132,8 +166,13 @@ async def health():
         "status": "ok" if model_loaded else "loading",
         "model": model_name or "none",
         "backend": _backend,
-        "device": f"onnx-{_onnx_device}" if _use_fastembed else ("mlx" if not _use_fallback else "cpu"),
+        "device": f"onnx-{_onnx_device}" if _use_fastembed else ("mlx" if not _use_fallback else (_fallback_device or "unknown")),
         "dim": embed_dim,
+        "request_count": _request_count,
+        "last_request_ms": round(_last_embed_ms, 2) if _last_embed_ms is not None else None,
+        "max_rss_bytes": _process_max_rss_bytes(),
+        "uptime_seconds": round(time.time() - _started_at, 1),
+        "fallback_allowed": _allow_sentence_transformers_fallback(),
     }
 
 
@@ -206,7 +245,7 @@ def _encode_fallback(texts: List[str]) -> np.ndarray:
 
 def main():
     global mlx_model, mlx_tokenizer, model_name, embed_dim, model_loaded
-    global _use_fallback, _st_model, _backend
+    global _use_fallback, _st_model, _backend, _fallback_device
 
     parser = argparse.ArgumentParser(description="Cat Cafe Embedding Server (MLX GPU)")
     parser.add_argument(
@@ -234,7 +273,8 @@ def main():
     log.info("=== Cat Cafe Embedding Server ===")
     log.info("Model: %s | Dim: %d | Port: %d", model_name, embed_dim, args.port)
 
-    # Try MLX-native first, fallback to sentence-transformers + MPS
+    # Try MLX-native first, then fastembed. On Apple Silicon, do not silently
+    # fall back to sentence-transformers: its MPS path can exhaust unified memory.
     start = time.time()
     def _try_mlx() -> bool:
         """Try MLX-native load + test embedding. Returns True on success."""
@@ -311,7 +351,7 @@ def main():
 
     def _try_sentence_transformers() -> bool:
         """Heavy fallback: sentence-transformers + MPS/CUDA/CPU (needs torch)."""
-        global _use_fallback, _st_model, _backend, model_loaded, model_name
+        global _use_fallback, _st_model, _backend, model_loaded, model_name, _fallback_device
         _use_fallback = True
         _backend = "sentence-transformers"
         try:
@@ -324,9 +364,12 @@ def main():
             fallback_model = model_name.replace("mlx-community/", "").replace("-4bit-DWQ", "").replace("-4bit", "")
             if "Qwen3-Embedding" in fallback_model:
                 fallback_model = "Qwen/" + fallback_model
-            if torch.cuda.is_available():
+            explicit_device = os.environ.get("EMBED_ST_DEVICE", "").strip()
+            if explicit_device:
+                device = explicit_device
+            elif torch.cuda.is_available():
                 device = "cuda"
-            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            elif not _is_apple_silicon() and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
                 device = "mps"
             else:
                 device = "cpu"
@@ -342,6 +385,7 @@ def main():
                 device=device,
                 model_kwargs={"attn_implementation": "eager"},
             )
+            _fallback_device = device
             model_name = fallback_model
             model_loaded = True
             log.info("Fallback model loaded in %.1fs! (device: %s)", time.time() - start, device)
@@ -352,6 +396,12 @@ def main():
 
     if not _try_mlx():
         if not _try_fastembed():
+            if not _allow_sentence_transformers_fallback():
+                log.error(
+                    "SentenceTransformer fallback disabled on Apple Silicon; "
+                    "fix MLX dependencies or set EMBED_ALLOW_ST_FALLBACK=1 to opt in"
+                )
+                sys.exit(1)
             if not _try_sentence_transformers():
                 log.error("All backends failed, exiting")
                 sys.exit(1)

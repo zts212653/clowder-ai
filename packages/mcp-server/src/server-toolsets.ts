@@ -5,6 +5,8 @@ import {
   callbackTools,
   distillationTools,
   evidenceTools,
+  externalRuntimeSessionCallbackTools,
+  externalRuntimeSessionReadTools,
   fileSliceTools,
   gameActionTools,
   graphTools,
@@ -49,6 +51,8 @@ export const READONLY_ALLOWED_TOOLS = new Set([
   'cat_cafe_read_session_events',
   'cat_cafe_read_session_digest',
   'cat_cafe_read_invocation_detail',
+  'cat_cafe_list_external_runtime_sessions',
+  'cat_cafe_read_external_runtime_session',
   // Signals (read-only)
   'signal_list_inbox',
   'signal_get_article',
@@ -68,6 +72,7 @@ export const AGENT_KEY_TOOLS = new Set([
   'cat_cafe_cross_post_message',
   'cat_cafe_get_thread_context',
   'cat_cafe_list_threads',
+  'cat_cafe_register_external_runtime_session',
 ]);
 
 const isReadonly = process.env['CAT_CAFE_READONLY'] === 'true';
@@ -84,6 +89,7 @@ function applyReadonlyFilter(tools: readonly ToolDef[]): readonly ToolDef[] {
 
 const collabTools: readonly ToolDef[] = applyReadonlyFilter([
   ...callbackTools,
+  ...externalRuntimeSessionCallbackTools,
   ...richBlockRulesTools,
   ...gameActionTools,
   ...scheduleTools,
@@ -94,6 +100,7 @@ const memoryTools: readonly ToolDef[] = applyReadonlyFilter([
   ...callbackMemoryTools,
   ...distillationTools,
   ...evidenceTools,
+  ...externalRuntimeSessionReadTools,
   ...fileSliceTools,
   ...graphTools, // F188 Phase F AC-F1
   ...libraryLifecycleTools, // F188 Phase I AC-I4

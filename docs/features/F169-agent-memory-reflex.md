@@ -9,7 +9,7 @@ revised: 2026-05-11
 
 # F169: Agent Memory Reflex — 愿景文档（vision artifact）
 
-> **Status**: **done**（vision realized；B+C 已通过 F148/F163 实现；A team lead拍板关闭，不做持久 Compiled Wiki）
+> **Status**: done（vision realized；B+C 已通过 F148/F163 实现；A team lead拍板关闭，不做持久 Compiled Wiki）
 > **Completed**: 2026-05-11（truth-source close sync；Phase A 关闭决策为 2026-04-25）
 > **Reviewed**: 2026-04-19 by @opus-46 + @gpt52（Maine Coon）（综合 review 已落盘，见 Review Gate 节）
 > **愿景实现度更新**: 2026-05-11（close gate + BACKLOG truth sync）

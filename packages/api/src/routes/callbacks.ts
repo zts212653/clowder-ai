@@ -25,6 +25,8 @@ import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-ta
 import { extractRichFromText } from '../domains/cats/services/agents/routing/rich-block-extract.js';
 import { buildVoteNotification } from '../domains/cats/services/agents/routing/vote-intercept.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
+import type { EventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
+import type { IRuntimeSessionStore } from '../domains/cats/services/runtime-session/RuntimeSessionStore.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
@@ -63,6 +65,7 @@ import { registerCallbackLimbRoutes } from './callback-limb-routes.js';
 import { registerCallbackMemoryRoutes } from './callback-memory-routes.js';
 import { getMultiMentionOrchestrator, registerMultiMentionRoutes } from './callback-multi-mention-routes.js';
 import { registerCallbackQuestRoutes } from './callback-quest-routes.js';
+import { registerCallbackRuntimeSessionRoutes } from './callback-runtime-session-routes.js';
 import {
   deriveCallbackActor,
   effectiveInvocationId,
@@ -260,6 +263,10 @@ export interface CallbackRoutesOptions {
   backlogStore?: IBacklogStore;
   /** For thinking mode filtering in thread-context + thread-cats discovery */
   threadStore?: IThreadStore;
+  /** F211 Phase B: external IDE-direct runtime session registration. */
+  sessionChainStore?: import('../domains/cats/services/stores/ports/SessionChainStore.js').ISessionChainStore;
+  runtimeSessionStore?: IRuntimeSessionStore;
+  eventAuditLog?: Pick<EventAuditLog, 'append'>;
   /** F155 B-4: Independent guide session store */
   guideSessionStore?: import('../domains/guides/GuideSessionRepository.js').IGuideSessionStore;
   /** AgentRegistry for thread-cats MCP callback */
@@ -535,6 +542,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     ...(callbackAuthNotifier ? { notifier: callbackAuthNotifier } : {}),
     ...(agentKeyRegistry ? { agentKeyRegistry } : {}),
   });
+  if (threadStore && opts.sessionChainStore && opts.runtimeSessionStore) {
+    registerCallbackRuntimeSessionRoutes(app, {
+      threadStore,
+      sessionChainStore: opts.sessionChainStore,
+      runtimeSessionStore: opts.runtimeSessionStore,
+      ...(opts.eventAuditLog ? { eventAuditLog: opts.eventAuditLog } : {}),
+    });
+  }
 
   app.post('/api/callbacks/post-message', async (request, reply) => {
     const principal = requireCallbackPrincipal(request, reply);

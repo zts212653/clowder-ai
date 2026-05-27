@@ -21,6 +21,8 @@ ACTION="${1:-status}"
 if [[ $# -gt 0 ]]; then
   shift
 fi
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/redis-rdb-first.sh"
 
 PORT="${USER_REDIS_PORT:-6401}"
 PROFILE="${USER_REDIS_PROFILE:-user}"
@@ -118,7 +120,7 @@ start() {
   fi
 
   backup_snapshot "pre-start"
-  redis-server \
+  cat_cafe_redis_start_daemon \
     --port "$PORT" \
     --bind 127.0.0.1 \
     --dir "$DATA_DIR" \
@@ -126,10 +128,11 @@ start() {
     --save "3600 1 300 100 60 10000" \
     --appendonly yes \
     --appendfilename "appendonly.aof" \
+    --appenddirname "appendonlydir" \
     --appendfsync everysec \
     --daemonize yes \
     --pidfile "$PIDFILE" \
-    --logfile "$LOGFILE" >/dev/null 2>&1
+    --logfile "$LOGFILE"
 
   for _ in $(seq 1 50); do
     if is_running; then
@@ -169,9 +172,7 @@ EOF
 
 restore() {
   need_tools
-  local script_dir
-  script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  "$script_dir/redis-restore-from-rdb.sh" --target-port "$PORT" "$@"
+  "$SCRIPT_DIR/redis-restore-from-rdb.sh" --target-port "$PORT" "$@"
 }
 
 case "$ACTION" in

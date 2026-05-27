@@ -8,7 +8,7 @@ created: 2026-03-27
 
 # F155: Scene-Based Bidirectional Guidance Engine
 
-> **Status**: Phase A accepted / frozen — 基础引导引擎已验收冻结，可开 PR 合入 | **Owner**: Ragdoll/Ragdoll | **Priority**: P1
+> **Status**: done (Phase A accepted / frozen; F155 closed 2026-05-26) | **Owner**: Ragdoll/Ragdoll | **Priority**: P1
 
 ## Why
 

@@ -70,6 +70,17 @@ export {
   searchEvidenceInputSchema,
 } from './evidence-tools.js';
 export {
+  externalRuntimeSessionCallbackTools,
+  externalRuntimeSessionReadTools,
+  externalRuntimeSessionTools,
+  handleListExternalRuntimeSessions,
+  handleReadExternalRuntimeSession,
+  handleRegisterExternalRuntimeSession,
+  listExternalRuntimeSessionsInputSchema,
+  readExternalRuntimeSessionInputSchema,
+  registerExternalRuntimeSessionInputSchema,
+} from './external-runtime-session-tools.js';
+export {
   fileSliceTools,
   handleReadFileSlice,
   readFileSliceInputSchema,

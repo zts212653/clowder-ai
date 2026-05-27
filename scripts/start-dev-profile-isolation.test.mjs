@@ -7,7 +7,6 @@ import { describe, it } from 'node:test';
 import { buildWindowsStatus, resolveWindowsStatusPorts } from './lib/platform-status.mjs';
 
 const ROOT = resolve(process.cwd());
-const SYNC_SCRIPT = resolve(ROOT, 'scripts/sync-to-opensource.sh');
 
 function createSandbox(envFile = '') {
   const dir = mkdtempSync(join(tmpdir(), 'cc-start-dev-profile-'));
@@ -15,6 +14,7 @@ function createSandbox(envFile = '') {
   mkdirSync(join(dir, 'scripts/lib'), { recursive: true });
   cpSync(resolve(ROOT, 'scripts/start-dev.sh'), join(dir, 'scripts', 'start-dev.sh'));
   cpSync(resolve(ROOT, 'scripts/lib/node-runtime-guard.sh'), join(dir, 'scripts/lib', 'node-runtime-guard.sh'));
+  cpSync(resolve(ROOT, 'scripts/lib/redis-rdb-first.sh'), join(dir, 'scripts/lib', 'redis-rdb-first.sh'));
 
   const downloadOverrides = resolve(ROOT, 'scripts/download-source-overrides.sh');
   if (existsSync(downloadOverrides)) {
@@ -483,7 +483,7 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
 
 describe('embedding sidecar startup guards', () => {
   it('does not silently fall back to sentence-transformers on Apple Silicon', () => {
-    const apiScript = readFileSync(resolve(ROOT, 'scripts/embed-api.py'), 'utf8');
+    const apiScript = readFileSync(resolve(ROOT, 'scripts/services/embed-api.py'), 'utf8');
 
     assert.match(apiScript, /EMBED_ALLOW_ST_FALLBACK/);
     assert.match(apiScript, /platform\.system\(\)\s*==\s*["']Darwin["']/);
@@ -632,98 +632,5 @@ describe('Windows Python resolver guards', () => {
     assert.match(innerFunction, /foreach\s*\(\$downloadMode\s+in\s+\$downloadModes\)/);
     assert.match(innerFunction, /Invoke-WebRequest[\s\S]*-TimeoutSec\s+\$downloadTimeoutSec/);
     assert.match(innerFunction, /Retrying Python download via/);
-  });
-});
-
-describe('sync-to-opensource public launch transforms', { skip: !existsSync(SYNC_SCRIPT) }, () => {
-  it('exports opensource-pinned direct launch wrappers and runtime startup', () => {
-    const result = spawnSync('bash', [SYNC_SCRIPT, '--dry-run', '--yes'], {
-      cwd: ROOT,
-      env: {
-        ...process.env,
-        PATH: process.env.PATH ?? '',
-        HOME: process.env.HOME ?? '',
-        TERM: process.env.TERM ?? 'xterm-256color',
-      },
-      encoding: 'utf8',
-      maxBuffer: 20 * 1024 * 1024,
-    });
-
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-    const output = `${result.stdout}\n${result.stderr}`;
-    const match = output.match(/Export (?:complete|preserved) at:[^\n]*\n\s*(\/[^\n]+)/);
-    assert.ok(match?.[1], output);
-
-    const exportDir = match[1].trim();
-    try {
-      const pkg = JSON.parse(readFileSync(resolve(exportDir, 'package.json'), 'utf8'));
-      const runtimeScript = readFileSync(resolve(exportDir, 'scripts/runtime-worktree.sh'), 'utf8');
-      // The canonical sidecar launchers live under scripts/services/; the
-      // top-level scripts/{embed,tts,whisper,llm-postprocess,qwen3-asr}-server.*
-      // legacy wrappers were removed because the Console-managed service
-      // lifecycle has fully replaced the direct-spawn path.
-      const canonicalEmbedScript = readFileSync(resolve(exportDir, 'scripts/services/embed-server.sh'), 'utf8');
-      const canonicalEmbedPsScript = readFileSync(resolve(exportDir, 'scripts/services/embed-server.ps1'), 'utf8');
-      const publicEnv = readFileSync(resolve(exportDir, '.env.example'), 'utf8');
-      const setupDoc = readFileSync(resolve(exportDir, 'SETUP.md'), 'utf8');
-      const setupZhDoc = readFileSync(resolve(exportDir, 'SETUP.zh-CN.md'), 'utf8');
-
-      assert.match(pkg.scripts['dev:direct'], /start-entry\.mjs dev:direct --profile=opensource/);
-      assert.match(pkg.scripts['start:direct'], /start-entry\.mjs start:direct --profile=opensource/);
-      assert.equal(existsSync(resolve(exportDir, 'scripts/start-entry.mjs')), true);
-      assert.equal(existsSync(resolve(exportDir, 'scripts/services/embed-server.sh')), true);
-      assert.equal(existsSync(resolve(exportDir, 'scripts/services/embed-server.ps1')), true);
-      assert.equal(
-        existsSync(resolve(exportDir, 'scripts/embed-server.sh')),
-        false,
-        'top-level scripts/embed-server.sh must not be re-exported after the legacy direct-spawn path was removed',
-      );
-      assert.equal(
-        existsSync(resolve(exportDir, 'scripts/embed-server.ps1')),
-        false,
-        'top-level scripts/embed-server.ps1 must not be re-exported after the legacy direct-spawn path was removed',
-      );
-      assert.match(canonicalEmbedScript, /EMBED_MODEL/);
-      assert.match(canonicalEmbedPsScript, /EMBED_MODEL/);
-      assert.equal(
-        pkg.scripts['check:start-profile-isolation'],
-        'node --test scripts/start-dev-profile-isolation.test.mjs',
-      );
-      assert.equal(existsSync(resolve(exportDir, 'cat-template.json')), true);
-      assert.match(pkg.scripts.check, /check:start-profile-isolation/);
-      assert.equal(existsSync(resolve(exportDir, 'scripts/download-source-overrides.sh')), true);
-      assert.equal(existsSync(resolve(exportDir, 'scripts/start-dev-profile-isolation.test.mjs')), true);
-      assert.match(publicEnv, /EMBED_MODE=off/);
-      assert.match(setupDoc, /install the \*\*Embedding\*\* service from Console settings/i);
-      assert.doesNotMatch(setupDoc, /scripts\/embed-server\.sh/);
-      assert.match(setupZhDoc, /Console 设置里安装并启用 \*\*Embedding\*\* 服务/);
-      assert.doesNotMatch(setupZhDoc, /EMBED_MODE.*on/);
-      assert.doesNotMatch(setupZhDoc, /scripts\/embed-server\.sh/);
-
-      assert.match(
-        runtimeScript,
-        /exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 \.\/scripts\/start-dev\.sh --prod-web --profile=opensource/,
-      );
-
-      const envSource = spawnSync(
-        'bash',
-        ['-lc', 'set -euo pipefail\nset -a\nsource ./.env.example\nset +a\nprintf "%s" "$NEXT_PUBLIC_BRAND_NAME"'],
-        {
-          cwd: exportDir,
-          env: {
-            ...process.env,
-            PATH: process.env.PATH ?? '',
-            HOME: process.env.HOME ?? '',
-            TERM: process.env.TERM ?? 'xterm-256color',
-          },
-          encoding: 'utf8',
-        },
-      );
-
-      assert.equal(envSource.status, 0, envSource.stderr || envSource.stdout);
-      assert.equal(envSource.stdout.trim(), 'Clowder AI');
-    } finally {
-      rmSync(exportDir, { recursive: true, force: true });
-    }
   });
 });

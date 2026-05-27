@@ -354,6 +354,8 @@ export interface AntigravityAgentServiceOptions {
   supervisorStore?: AntigravitySupervisorStore;
   /** F211 Phase A2: runtime-session metadata sidecar owns canonical active cascade lookup. */
   runtimeSessionStore?: IRuntimeSessionStore;
+  /** F211 Phase C: explicit rescue/test-only legacy JSON fallback opt-in. */
+  legacyJsonSessionStore?: boolean;
   /** F211 Phase A2b: read sealed extractive digest for continuity bootstrap. */
   transcriptReader?: TranscriptReader;
 }
@@ -384,7 +386,7 @@ export class AntigravityAgentService implements AgentService {
       injectedBridge ??
       new AntigravityBridge(options?.connection, {
         runtimeSessionStore: options?.runtimeSessionStore,
-        legacyJsonSessionStore: options?.runtimeSessionStore === undefined,
+        legacyJsonSessionStore: options?.legacyJsonSessionStore === true,
       });
     this.pollTimeoutMs = options?.pollTimeoutMs ?? 60_000;
     let autoApprove = process.env.ANTIGRAVITY_AUTO_APPROVE !== 'false';
@@ -419,6 +421,10 @@ export class AntigravityAgentService implements AgentService {
       const audit = new AuditLogger(join(process.cwd(), 'data', 'antigravity-audit'));
       this.bridge.attachExecutors(registry, audit);
     }
+  }
+
+  getBridgeForDiagnostics(): AntigravityBridge {
+    return this.bridge;
   }
 
   async drainRuntimeSession(
@@ -674,7 +680,11 @@ export class AntigravityAgentService implements AgentService {
       }> => {
         const oldSideEffectJournalSummary = sideEffectJournal.summary();
         const drain = await drainCascadeForLifecycle(oldCascadeId);
-        this.bridge.resetSession(threadId, this.catId as string);
+        await this.bridge.resetSession(threadId, this.catId as string, {
+          expectedRuntimeSessionId: oldCascadeId,
+          sealReason: reason,
+          drainResult: drain.drainResult,
+        });
         const newCascadeId = this.bridge.getRuntimeSessionStoreForDiagnostics?.()
           ? await this.bridge.startCascade()
           : await this.bridge.getOrCreateSession(threadId, this.catId as string);
