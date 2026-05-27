@@ -32,6 +32,24 @@ test('redacts HOME path to ~/', () => {
   assert.ok(!out.includes(home), `home path leaked: ${out}`);
 });
 
+test('redacts high-entropy temp HOME path before entropy fallback', () => {
+  const originalHome = process.env.HOME;
+  const home = '/tmp/cat-cafe-test-home-aB3xZ9pQ7nM2vL5kR8tY4wU6';
+  try {
+    process.env.HOME = home;
+    const input = `Error: ENOENT ${home}/foo/bar`;
+    const out = sanitizeCliStderr(input);
+    assert.ok(out.includes('~/foo/bar'), `expected ~/foo/bar, got: ${out}`);
+    assert.ok(!out.includes(home), `home path leaked: ${out}`);
+  } finally {
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+  }
+});
+
 test('redacts Windows C:\\Users\\... path', () => {
   const input = 'Error at C:\\Users\\maxzhong1997\\Desktop\\foo.exe';
   const out = sanitizeCliStderr(input);

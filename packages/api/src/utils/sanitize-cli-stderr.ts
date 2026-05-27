@@ -2,7 +2,8 @@
  * F212 Phase A — Sanitize raw CLI stderr / stream error text before exposing to users or logs.
  *
  * Order matters: structured blobs (JWT/PEM) before token regex, specific tokens before generic,
- * high-entropy fallback last, paths last (token redactions could embed path-looking strings).
+ * known path redactions before high-entropy fallback (temp HOME paths can look token-like),
+ * high-entropy fallback last.
  *
  * KD-2 contract: this function does NOT truncate. Callers truncate AFTER calling sanitize.
  * That way mid-token truncation cannot bypass the blacklist (AC-A3).
@@ -56,15 +57,17 @@ export function sanitizeCliStderr(input: string): string {
     (_full, key: string, delim: string) => `${key}${delim}[TOKEN_REDACTED]`,
   );
 
-  // 8. High-entropy fallback (last-resort for anything that survived above)
-  out = out.replace(SANITIZER_PATTERNS.highEntropy, (m: string) => (looksHighEntropy(m) ? '[REDACTED]' : m));
-
-  // 9. Paths (last — token redactions might contain path-like substrings)
+  // 8. Paths before high-entropy fallback. Test sandboxes often use random HOME
+  //    segments; if entropy runs first, HOME paths become opaque [REDACTED]
+  //    instead of the user-friendly ~/ form.
   const paths = getPathPatterns();
   if (paths.homeUnix) out = out.replace(paths.homeUnix, '~');
   if (paths.userProfileWin) out = out.replace(paths.userProfileWin, '~');
   out = out.replace(SANITIZER_PATTERNS.winUserPath, '~');
   out = out.replace(SANITIZER_PATTERNS.tmpPath, '/tmp/[REDACTED]');
+
+  // 9. High-entropy fallback (last-resort for anything that survived above)
+  out = out.replace(SANITIZER_PATTERNS.highEntropy, (m: string) => (looksHighEntropy(m) ? '[REDACTED]' : m));
 
   return out;
 }
