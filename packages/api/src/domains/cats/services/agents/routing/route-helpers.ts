@@ -91,6 +91,8 @@ export interface RouteOptions {
   history?: StoredMessage[] | undefined;
   /** Current user message ID (enables exact incremental context delivery path) */
   currentUserMessageId?: string | undefined;
+  /** Explicit A2A trigger message ID for queue-dispatched initial targets. */
+  a2aTriggerMessageId?: string | undefined;
   /** Max A2A chain depth for routeSerial (default: MAX_A2A_DEPTH env or 2) */
   maxA2ADepth?: number | undefined;
   /** Queue fairness hook: when true for current thread, routeSerial must stop extending A2A chain.

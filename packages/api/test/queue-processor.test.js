@@ -1068,6 +1068,38 @@ describe('QueueProcessor', () => {
     assert.deepEqual(opts.contentBlocks, contentBlocks);
   });
 
+  it('executeEntry passes explicit A2A trigger id to routeExecution for agent queue entries', async () => {
+    const entry = enqueueEntry(deps.queue, {
+      source: 'agent',
+      sourceCategory: 'a2a',
+      a2aTriggerMessageId: 'msg-trigger',
+    });
+    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-trigger');
+
+    await processor.processNext('t1', 'u1');
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.ok(deps.router.routeExecution.mock.calls.length > 0);
+    const call = deps.router.routeExecution.mock.calls[0];
+    const opts = call.arguments[6];
+    assert.ok(opts && typeof opts === 'object', 'expected opts object');
+    assert.equal(opts.a2aTriggerMessageId, 'msg-trigger');
+  });
+
+  it('executeEntry does not pass current user message id as A2A trigger for normal queue entries', async () => {
+    const entry = enqueueEntry(deps.queue, { source: 'user' });
+    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-user');
+
+    await processor.processNext('t1', 'u1');
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.ok(deps.router.routeExecution.mock.calls.length > 0);
+    const call = deps.router.routeExecution.mock.calls[0];
+    const opts = call.arguments[6];
+    assert.ok(opts && typeof opts === 'object', 'expected opts object');
+    assert.equal(opts.a2aTriggerMessageId, undefined);
+  });
+
   it('degrades when messageStore.getById throws: still executes without contentBlocks', async () => {
     deps.messageStore.getById = mock.fn(async () => {
       throw new Error('redis down');

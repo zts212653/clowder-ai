@@ -1025,6 +1025,8 @@ export class AgentRouter {
       parentInvocationId?: string;
       /** F153: caller trace context for cross-route A2A propagation */
       callerTraceContext?: CallerTraceContext;
+      /** Explicit A2A trigger message ID for queue-dispatched stream reply threading */
+      a2aTriggerMessageId?: string;
     },
   ): AsyncIterable<AgentMessage> {
     const cleanMessage = stripIntentTags(message);
@@ -1077,6 +1079,7 @@ export class AgentRouter {
       completeA2ASlots: options?.completeA2ASlots,
       promptTags: intent.promptTags,
       currentUserMessageId: userMessageId,
+      a2aTriggerMessageId: options?.a2aTriggerMessageId,
       thinkingMode,
       ...(options?.cursorBoundaries ? { cursorBoundaries: options.cursorBoundaries } : {}),
       ...(options?.persistenceContext ? { persistenceContext: options.persistenceContext } : {}),

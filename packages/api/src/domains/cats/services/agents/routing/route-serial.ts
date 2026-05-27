@@ -250,6 +250,7 @@ export async function* routeSerial(
     contextHistory,
     history,
     currentUserMessageId,
+    a2aTriggerMessageId,
     modeSystemPrompt,
     modeSystemPromptByCat,
     queueHasQueuedMessages,
@@ -379,7 +380,8 @@ export async function* routeSerial(
               count: worklistEntry.streakPair.count,
             }
           : undefined;
-      const streamReplyTo = worklistEntry.a2aTriggerMessageId.get(catId);
+      const queueTriggerReplyTo = isOriginalTarget ? a2aTriggerMessageId : undefined;
+      const streamReplyTo = worklistEntry.a2aTriggerMessageId.get(catId) ?? queueTriggerReplyTo;
       const streamReplyPreview = streamReplyTo
         ? await hydrateReplyPreview(deps.messageStore, streamReplyTo)
         : undefined;

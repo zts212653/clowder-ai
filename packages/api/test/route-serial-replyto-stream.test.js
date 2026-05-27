@@ -10,10 +10,12 @@ function createMockService(catId, text) {
   };
 }
 
-function createMockDeps(services, appendCalls) {
+function createMockDeps(services, appendCalls, initialMessages = []) {
   let invocationSeq = 0;
   let messageSeq = 0;
   const storedById = new Map();
+
+  for (const msg of initialMessages) storedById.set(msg.id, msg);
 
   return {
     services,
@@ -23,6 +25,7 @@ function createMockDeps(services, appendCalls) {
         verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
       },
       sessionManager: {
+        get: async () => null,
         getOrCreate: async () => ({}),
         resolveWorkingDirectory: () => '/tmp/test',
       },
@@ -84,5 +87,81 @@ describe('routeSerial replyTo on stream messages', () => {
       senderCatId: 'opus',
       content: '我先看一下\n@缅因猫 帮忙复核',
     });
+  });
+
+  it('attaches replyTo from explicit A2A trigger route option for queue-dispatched initial target', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appendCalls = [];
+    const deps = createMockDeps(
+      {
+        codex: createMockService('codex', '收到，我来复核'),
+      },
+      appendCalls,
+      [
+        {
+          id: 'msg-trigger',
+          userId: 'user1',
+          catId: 'opus',
+          content: '@缅因猫 帮忙复核',
+          mentions: ['codex'],
+          timestamp: 123,
+          threadId: 'thread1',
+        },
+      ],
+    );
+
+    const yielded = [];
+    for await (const msg of routeSerial(deps, ['codex'], '@缅因猫 帮忙复核', 'user1', 'thread1', {
+      a2aTriggerMessageId: 'msg-trigger',
+    })) {
+      yielded.push(msg);
+    }
+
+    assert.equal(appendCalls.length, 1, 'should persist queue-dispatched codex stream message');
+    assert.equal(appendCalls[0].replyTo, 'msg-trigger', 'queue-dispatched A2A stream should persist trigger replyTo');
+
+    const codexText = yielded.find((msg) => msg.type === 'text' && msg.catId === 'codex');
+    assert.ok(codexText, 'should yield codex stream text');
+    assert.equal(codexText.replyTo, 'msg-trigger', 'live stream text should carry trigger replyTo');
+    assert.deepEqual(codexText.replyPreview, {
+      senderCatId: 'opus',
+      content: '@缅因猫 帮忙复核',
+    });
+  });
+
+  it('does not treat currentUserMessageId as stream replyTo without explicit A2A trigger', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appendCalls = [];
+    const deps = createMockDeps(
+      {
+        codex: createMockService('codex', '普通排队消息回复'),
+      },
+      appendCalls,
+      [
+        {
+          id: 'msg-user',
+          userId: 'user1',
+          catId: null,
+          content: '普通用户消息',
+          mentions: ['codex'],
+          timestamp: 123,
+          threadId: 'thread1',
+        },
+      ],
+    );
+
+    const yielded = [];
+    for await (const msg of routeSerial(deps, ['codex'], '普通用户消息', 'user1', 'thread1', {
+      currentUserMessageId: 'msg-user',
+    })) {
+      yielded.push(msg);
+    }
+
+    assert.equal(appendCalls.length, 1, 'should persist normal queued stream message');
+    assert.equal(appendCalls[0].replyTo, undefined, 'normal queue stream must not reply to currentUserMessageId');
+
+    const codexText = yielded.find((msg) => msg.type === 'text' && msg.catId === 'codex');
+    assert.ok(codexText, 'should yield codex stream text');
+    assert.equal(codexText.replyTo, undefined, 'live stream must not carry a bogus user-message replyTo');
   });
 });

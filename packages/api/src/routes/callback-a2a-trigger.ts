@@ -172,11 +172,13 @@ export async function enqueueA2ATargets(
         userId: opts.userId,
         content: opts.content,
         source: 'agent',
+        sourceCategory: 'a2a',
         targetCats: [catId],
         intent: 'execute',
         autoExecute: true,
         callerCatId: callerCatId ?? undefined,
         callerTraceContext: ensureDispatchTraceContext(),
+        a2aTriggerMessageId: triggerMessageId,
       });
       queueDiagnostics.push({
         catId,
@@ -473,6 +475,7 @@ export async function triggerA2AInvocation(
         ...(controller?.signal ? { signal: controller.signal } : {}),
         parentInvocationId: createResult.invocationId,
         callerTraceContext: opts.callerTraceContext,
+        a2aTriggerMessageId: triggerMessage.id,
       })) {
         // #768: Broadcast intent_mode on first CLI event — proves CLI is alive.
         if (!intentModeBroadcast) {

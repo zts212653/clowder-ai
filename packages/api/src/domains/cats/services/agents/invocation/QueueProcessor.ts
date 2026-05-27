@@ -933,6 +933,7 @@ export class QueueProcessor {
           cursorBoundaries,
           persistenceContext,
           ...(invocationId ? { parentInvocationId: invocationId } : {}),
+          ...(entry.a2aTriggerMessageId ? { a2aTriggerMessageId: entry.a2aTriggerMessageId } : {}),
           ...(entry.callerTraceContext ? { callerTraceContext: entry.callerTraceContext } : {}),
         },
       )) {

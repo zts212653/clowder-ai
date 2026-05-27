@@ -47,6 +47,8 @@ export interface QueueEntry {
   /** F175: skill hint for connector triggers — flows through as promptTags on execution */
   suggestedSkill?: string;
   callerTraceContext?: CallerTraceContext;
+  /** Explicit A2A trigger message for stream reply threading. */
+  a2aTriggerMessageId?: string;
 }
 
 export interface EnqueueResult {
@@ -221,6 +223,7 @@ export class InvocationQueue {
       continuationKey: input.continuationKey,
       suggestedSkill: input.suggestedSkill,
       callerTraceContext: input.callerTraceContext,
+      a2aTriggerMessageId: input.a2aTriggerMessageId,
       position: undefined,
     };
     q.push(entry);
