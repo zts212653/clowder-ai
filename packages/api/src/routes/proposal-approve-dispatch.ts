@@ -95,25 +95,36 @@ export async function appendApprovedInitialMessage({
   }
 
   const resolved = await router.resolveTargetsAndIntent(content, threadId, { persist: true });
-  let targetCats: readonly CatId[] = resolved.targetCats;
-  let intentName: string = resolved.intent.intent;
+  const parsed = parseIntent(content, preferredCats?.length ?? resolved.targetCats.length);
 
-  // F128 — preferredCats fallback: if the user-typed initialMessage has no
-  // @-mention, the router returns 0 targets and we'd silently skip dispatch.
-  // But the proposal card already let the user pick proposed members; honoring
-  // that choice is the whole product point. Treat preferredCats as the
-  // fallback target list.
+  // F128 dispatch model — "他们自己决定下一个要把谁叫出来" (owner-defined, 2026-05-27):
   //
-  // Intent: parseIntent's default rule (≥2 cats → ideate → parallel) is wrong
-  // for proposal-card cases. Picking members on the card implies user wants
-  // them in that ORDER (chain / 轮转 / 接龙). parallel ideate scrambles the
-  // order. So we honor explicit #ideate / #execute tags from the user, but
-  // default to 'execute' (serial) when neither is present — this preserves
-  // the preferredCats ordering as a serial chain.
-  if (targetCats.length === 0 && preferredCats && preferredCats.length > 0) {
-    targetCats = preferredCats;
-    const parsed = parseIntent(content, preferredCats.length);
-    intentName = parsed.explicit ? parsed.intent : 'execute';
+  // Default behaviour: wake ONLY the first cat. Subsequent turns are driven by
+  // cat-side @-mentions in the chain (the first cat reads initialMessage,
+  // sees the order/rules, and @s the next cat; that cat does the same).
+  // Dispatch does NOT pre-fire all proposedCats — that would scramble
+  // ordering and force a parallel race where the user wants a chain (接龙
+  // / 轮转 / 讨论).
+  //
+  // First-cat preference:
+  //   1. preferredCats[0] — the card's first picked member is the narrative
+  //      intent ("you chose them, in this order, the first one starts").
+  //   2. router-resolved first mention — fallback when preferredCats is empty
+  //      but the message text @-mentions someone.
+  //
+  // Explicit #ideate escape hatch: if the user really wants parallel
+  // ideation (everyone replies independently at once), they tag #ideate in
+  // the initialMessage. That brings back the legacy "wake all" behaviour.
+  let targetCats: readonly CatId[];
+  let intentName: string;
+  if (parsed.explicit && parsed.intent === 'ideate') {
+    targetCats =
+      preferredCats && preferredCats.length > 0 ? preferredCats : resolved.targetCats;
+    intentName = 'ideate';
+  } else {
+    const firstCandidate = preferredCats?.[0] ?? resolved.targetCats[0];
+    targetCats = firstCandidate ? [firstCandidate] : [];
+    intentName = 'execute';
   }
 
   if (targetCats.length === 0) {
