@@ -9,7 +9,10 @@ import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
+import { CliRawArchive } from '../../session/CliRawArchive.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../types.js';
+import type { RawArchiveSink } from '../providers/codex-audit-hooks.js';
+import { sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
 import { resolveDefaultClaudeMcpServerPath } from './ClaudeAgentService.js';
 import { collectImageAccessDirectories } from './image-cli-bridge.js';
 import { extractImagePaths } from './image-paths.js';
@@ -39,6 +42,8 @@ interface KimiAgentServiceOptions {
   spawnFn?: SpawnFn;
   model?: string;
   mcpServerPath?: string;
+  /** #780: Raw NDJSON archive sink (default: CliRawArchive to disk) */
+  rawArchive?: RawArchiveSink;
 }
 
 export class KimiAgentService implements AgentService {
@@ -46,6 +51,8 @@ export class KimiAgentService implements AgentService {
   private readonly spawnFn: SpawnFn | undefined;
   private readonly model: string;
   private readonly mcpServerPath: string | undefined;
+  /** #780: Raw NDJSON archive for post-mortem diagnostics */
+  private readonly rawArchive: RawArchiveSink;
 
   constructor(options?: KimiAgentServiceOptions) {
     this.catId = options?.catId ?? createCatId('kimi');
@@ -53,6 +60,7 @@ export class KimiAgentService implements AgentService {
     this.model = options?.model ?? getCatModel(this.catId as string);
     this.mcpServerPath =
       options?.mcpServerPath ?? process.env.CAT_CAFE_MCP_SERVER_PATH ?? resolveDefaultClaudeMcpServerPath();
+    this.rawArchive = options?.rawArchive ?? new CliRawArchive();
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
@@ -153,12 +161,21 @@ export class KimiAgentService implements AgentService {
         ...(options?.cliSessionId ? { cliSessionId: options.cliSessionId } : {}),
         ...(options?.livenessProbe ? { livenessProbe: options.livenessProbe } : {}),
         ...(options?.parentSpan ? { parentSpan: options.parentSpan } : {}),
+        ...(options?.invocationId && this.rawArchive.getPath
+          ? { rawArchivePath: this.rawArchive.getPath(options.invocationId) }
+          : {}),
       };
       const events = options?.spawnCliOverride
         ? options.spawnCliOverride(cliOpts)
         : spawnCli(cliOpts, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);
 
       for await (const event of events) {
+        // #780: Archive raw event for post-mortem diagnostics (fire-and-forget)
+        if (options?.invocationId) {
+          this.rawArchive.append(options.invocationId, sanitizeRawEvent(event)).catch((err) => {
+            log.warn({ catId: this.catId, invocationId: options.invocationId, err }, 'Raw archive write failed');
+          });
+        }
         if (isCliTimeout(event)) {
           const {
             silenceDurationMs,

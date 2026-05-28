@@ -26,7 +26,10 @@ import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
+import { CliRawArchive } from '../../session/CliRawArchive.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../types.js';
+import type { RawArchiveSink } from '../providers/codex-audit-hooks.js';
+import { sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
 import { appendLocalImagePathHints, collectImageAccessDirectories } from '../providers/image-cli-bridge.js';
 import { extractImagePaths } from '../providers/image-paths.js';
 import { findGitBashPath } from './claude-agent-win.js';
@@ -208,6 +211,8 @@ interface ClaudeAgentServiceOptions {
   mcpServerPath?: string;
   /** Test seam — replaces the real L0 compiler subprocess. */
   l0CompilerFn?: typeof compileL0ViaSubprocess;
+  /** #780: Raw NDJSON archive sink (default: CliRawArchive to disk) */
+  rawArchive?: RawArchiveSink;
 }
 
 /**
@@ -243,10 +248,13 @@ export class ClaudeAgentService implements AgentService {
   private readonly l0CompilerFn: typeof compileL0ViaSubprocess;
   /** Windows: cached MCP config file path (created once per instance, reused across invocations) */
   private mcpConfigFilePath: string | undefined;
+  /** #780: Raw NDJSON archive for post-mortem diagnostics */
+  private readonly rawArchive: RawArchiveSink;
 
   constructor(options?: ClaudeAgentServiceOptions) {
     this.catId = options?.catId ?? createCatId('opus');
     this.spawnFn = options?.spawnFn;
+    this.rawArchive = options?.rawArchive ?? new CliRawArchive();
     this.l0CompilerFn = options?.l0CompilerFn ?? compileL0ViaSubprocess;
     // F32-b: model from options > env (getCatModel) > default
     this.model = options?.model ?? getCatModel(this.catId as string);
@@ -447,6 +455,9 @@ export class ClaudeAgentService implements AgentService {
         ...(options?.cliSessionId ? { cliSessionId: options.cliSessionId } : {}),
         ...(options?.livenessProbe ? { livenessProbe: options.livenessProbe } : {}),
         ...(options?.parentSpan ? { parentSpan: options.parentSpan } : {}),
+        ...(options?.invocationId && this.rawArchive.getPath
+          ? { rawArchivePath: this.rawArchive.getPath(options.invocationId) }
+          : {}),
       };
       const events = options?.spawnCliOverride
         ? options.spawnCliOverride(cliOpts)
@@ -456,6 +467,12 @@ export class ClaudeAgentService implements AgentService {
       let textEventCount = 0;
       for await (const event of events) {
         eventCount++;
+        // #780: Archive raw event for post-mortem diagnostics (fire-and-forget)
+        if (options?.invocationId) {
+          this.rawArchive.append(options.invocationId, sanitizeRawEvent(event)).catch((err) => {
+            log.warn({ catId: this.catId, invocationId: options.invocationId, err }, 'Raw archive write failed');
+          });
+        }
         const evtType =
           typeof event === 'object' && event !== null && 'type' in event
             ? String((event as Record<string, unknown>).type)
