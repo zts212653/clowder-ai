@@ -46,9 +46,17 @@ if [ -z "$MODEL" ]; then
 fi
 
 if [ ! -d "$VENV_DIR" ]; then
-  echo "ERROR: venv not found: $VENV_DIR"
-  echo "Run install first: scripts/services/embed-install.sh"
-  exit 1
+  echo "[start] venv not found: $VENV_DIR -- auto-installing..." >&2
+  INSTALL_SCRIPT="$SCRIPT_DIR/embed-install.sh"
+  if [ ! -f "$INSTALL_SCRIPT" ]; then
+    echo "ERROR: install script not found: $INSTALL_SCRIPT" >&2
+    exit 1
+  fi
+  EMBED_MODEL="$MODEL" bash "$INSTALL_SCRIPT"
+  if [ ! -d "$VENV_DIR" ]; then
+    echo "ERROR: auto-install completed but venv still missing: $VENV_DIR" >&2
+    exit 1
+  fi
 fi
 source "$VENV_DIR/bin/activate"
 

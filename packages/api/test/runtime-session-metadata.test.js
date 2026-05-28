@@ -55,6 +55,35 @@ describe('RuntimeSessionMetadata', () => {
     });
   });
 
+  test('normalizes unexpected runtime session switch diagnostics', async () => {
+    const { normalizeRuntimeSessionMetadata } = await loadModule();
+
+    const normalized = normalizeRuntimeSessionMetadata(
+      validMetadata({
+        lifecycle: {
+          state: 'active',
+          startedAt: 1000,
+          lastObservedAt: 2000,
+          unexpectedRuntimeSessionSwitch: {
+            detectedAt: 2000,
+            previousSessionId: 'session-old',
+            previousRuntimeSessionId: 'cascade-old',
+            currentRuntimeSessionId: 'cascade-new',
+            reason: 'missing_previous_runtime_session_id',
+          },
+        },
+      }),
+    );
+
+    assert.deepEqual(normalized.lifecycle.unexpectedRuntimeSessionSwitch, {
+      detectedAt: 2000,
+      previousSessionId: 'session-old',
+      previousRuntimeSessionId: 'cascade-old',
+      currentRuntimeSessionId: 'cascade-new',
+      reason: 'missing_previous_runtime_session_id',
+    });
+  });
+
   test('rejects empty identifiers and invalid lifecycle state', async () => {
     const { normalizeRuntimeSessionMetadata } = await loadModule();
 

@@ -870,7 +870,7 @@ describe('bootstrapCapabilities', () => {
     await writeFile(claudeFile, JSON.stringify({ mcpServers: {} }));
     const originalRuntime = process.env.CAT_CAFE_RUNTIME_ROOT;
     try {
-      process.env.CAT_CAFE_RUNTIME_ROOT = '/path/to/project-runtime';
+      process.env.CAT_CAFE_RUNTIME_ROOT = '/home/user/cat-cafe-runtime';
       // No catCafeRepoRoot opt — env should drive resolution. The first
       // positional arg (`projectRoot`) is the workspace project's API root,
       // which the orchestrator must NOT use as the binary root anymore.
@@ -885,7 +885,7 @@ describe('bootstrapCapabilities', () => {
         const cap = config.capabilities.find((c) => c.id === id);
         assert.ok(cap, `${id} should exist`);
         assert.ok(
-          cap.mcpServer?.args[0].startsWith('/path/to/project-runtime/'),
+          cap.mcpServer?.args[0].startsWith('/home/user/cat-cafe-runtime/'),
           `${id} args[0] should resolve under CAT_CAFE_RUNTIME_ROOT, got ${cap.mcpServer?.args[0]}`,
         );
         assert.ok(!cap.mcpServer?.args[0].includes(dir), `${id} args[0] must NOT use the projectRoot positional arg`);

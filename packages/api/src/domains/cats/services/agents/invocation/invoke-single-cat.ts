@@ -115,6 +115,7 @@ export function _resetOpenCodeKnownModels(override?: Set<string> | null): void {
   _openCodeKnownModels = override ?? null;
 }
 
+import type { RuntimeSessionUnexpectedRuntimeSessionSwitch } from '../../runtime-session/RuntimeSessionMetadata.js';
 import type { IRuntimeSessionStore } from '../../runtime-session/RuntimeSessionStore.js';
 import type { SessionManager } from '../../session/SessionManager.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
@@ -231,6 +232,54 @@ function isAntigravityRuntimeSessionInit(msg: AgentMessage): boolean {
   );
 }
 
+const UNEXPECTED_RUNTIME_SESSION_SWITCH_SEAL_REASON = 'unexpected_runtime_session_switch';
+
+function classifyUnexpectedRuntimeSessionSwitch(
+  lifecycle: NonNullable<AgentMessage['sessionLifecycle']>,
+  previousRuntimeSessionId: string,
+): Pick<RuntimeSessionUnexpectedRuntimeSessionSwitch, 'declaredPreviousRuntimeSessionId' | 'reason'> | null {
+  const declaredPreviousRuntimeSessionId = lifecycle.previousRuntimeSessionId?.trim();
+  if (!declaredPreviousRuntimeSessionId) {
+    return { reason: 'missing_previous_runtime_session_id' };
+  }
+  if (declaredPreviousRuntimeSessionId !== previousRuntimeSessionId) {
+    return {
+      declaredPreviousRuntimeSessionId,
+      reason: 'mismatched_previous_runtime_session_id',
+    };
+  }
+  return null;
+}
+
+function antigravityReplacementSealReason(msg: AgentMessage, previousRuntimeSessionId: string): string {
+  if (isAntigravityRuntimeSessionInit(msg) && msg.sessionLifecycle) {
+    const unexpected = classifyUnexpectedRuntimeSessionSwitch(msg.sessionLifecycle, previousRuntimeSessionId);
+    if (unexpected) return UNEXPECTED_RUNTIME_SESSION_SWITCH_SEAL_REASON;
+  }
+  return msg.sessionLifecycle?.sealReason ?? 'cli_session_replaced';
+}
+
+function buildUnexpectedRuntimeSessionSwitch(input: {
+  lifecycle: NonNullable<AgentMessage['sessionLifecycle']>;
+  previousSessionId: string;
+  previousRuntimeSessionId: string;
+  currentRuntimeSessionId: string;
+  detectedAt: number;
+}): RuntimeSessionUnexpectedRuntimeSessionSwitch | null {
+  const unexpected = classifyUnexpectedRuntimeSessionSwitch(input.lifecycle, input.previousRuntimeSessionId);
+  if (!unexpected) return null;
+  return {
+    detectedAt: input.detectedAt,
+    previousSessionId: input.previousSessionId,
+    previousRuntimeSessionId: input.previousRuntimeSessionId,
+    currentRuntimeSessionId: input.currentRuntimeSessionId,
+    ...('declaredPreviousRuntimeSessionId' in unexpected && unexpected.declaredPreviousRuntimeSessionId
+      ? { declaredPreviousRuntimeSessionId: unexpected.declaredPreviousRuntimeSessionId }
+      : {}),
+    reason: unexpected.reason,
+  };
+}
+
 async function syncAntigravityRuntimeMetadata(input: {
   runtimeSessionStore: IRuntimeSessionStore;
   sessionChainStore: ISessionChainStore;
@@ -252,6 +301,18 @@ async function syncAntigravityRuntimeMetadata(input: {
     input.threadId,
     input.catId,
   );
+  const unexpectedRuntimeSessionSwitch =
+    activeRuntime &&
+    activeRuntime.runtimeSessionId !== runtimeSessionId &&
+    activeRuntime.sessionId !== input.activeRec.id
+      ? buildUnexpectedRuntimeSessionSwitch({
+          lifecycle,
+          previousSessionId: activeRuntime.sessionId,
+          previousRuntimeSessionId: activeRuntime.runtimeSessionId,
+          currentRuntimeSessionId: runtimeSessionId,
+          detectedAt: now,
+        })
+      : null;
   if (
     activeRuntime &&
     activeRuntime.runtimeSessionId !== runtimeSessionId &&
@@ -259,7 +320,10 @@ async function syncAntigravityRuntimeMetadata(input: {
   ) {
     const hostRecord = await input.sessionChainStore.get(activeRuntime.sessionId);
     if (hostRecord && hostRecord.threadId === input.threadId && hostRecord.catId === input.catId) {
-      const sealReason = lifecycle.sealReason ?? activeRuntime.lifecycle.sealReason ?? 'cli_session_replaced';
+      const sealReason =
+        unexpectedRuntimeSessionSwitch !== null
+          ? UNEXPECTED_RUNTIME_SESSION_SWITCH_SEAL_REASON
+          : (lifecycle.sealReason ?? activeRuntime.lifecycle.sealReason ?? 'cli_session_replaced');
       const drainIncomplete =
         lifecycle.degraded === true || (lifecycle.drainResult && lifecycle.drainResult !== 'complete');
       await input.runtimeSessionStore.updateLifecycle(activeRuntime.sessionId, {
@@ -317,6 +381,12 @@ async function syncAntigravityRuntimeMetadata(input: {
       state: 'active',
       startedAt: existingRuntime?.sessionId === input.activeRec.id ? existingRuntime.lifecycle.startedAt : now,
       lastObservedAt: now,
+      ...((unexpectedRuntimeSessionSwitch ?? existingRuntime?.lifecycle.unexpectedRuntimeSessionSwitch)
+        ? {
+            unexpectedRuntimeSessionSwitch:
+              unexpectedRuntimeSessionSwitch ?? existingRuntime?.lifecycle.unexpectedRuntimeSessionSwitch,
+          }
+        : {}),
     },
   });
 }
@@ -1347,7 +1417,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                   // Use requestSeal + finalize to ensure transcript/digest are written,
                   // not bare update(status:'sealed') which skips flush.
                   let sealAccepted = false;
-                  const sealReason = msg.sessionLifecycle?.sealReason ?? 'cli_session_replaced';
+                  const sealReason = antigravityReplacementSealReason(msg, existing.cliSessionId);
                   if (deps.sessionSealer) {
                     try {
                       const result = await deps.sessionSealer.requestSeal({
@@ -1378,6 +1448,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                                 sealReason,
                                 drainResult: runtimeLifecycle.drainResult,
                                 degraded: runtimeLifecycle.degraded === true,
+                                unexpectedRuntimeSessionSwitch:
+                                  sealReason === UNEXPECTED_RUNTIME_SESSION_SWITCH_SEAL_REASON,
                                 ...(runtimeLifecycle.degradedReason
                                   ? { degradedReason: runtimeLifecycle.degradedReason }
                                   : {}),

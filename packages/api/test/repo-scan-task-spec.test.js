@@ -4,13 +4,21 @@ import { beforeEach, describe, it } from 'node:test';
 /** Helpers */
 function createMockReconciliationDedup() {
   const notified = new Set();
+  const baselineEstablished = new Set(['owner/repo']);
   return {
     notified,
+    baselineEstablished,
     async isNotified(repo, type, number) {
       return notified.has(`${repo}#${type}-${number}`);
     },
     async markNotified(repo, type, number) {
       notified.add(`${repo}#${type}-${number}`);
+    },
+    async isBaselineEstablished(repo) {
+      return baselineEstablished.has(repo);
+    },
+    async markBaselineEstablished(repo) {
+      baselineEstablished.add(repo);
     },
   };
 }
@@ -101,13 +109,17 @@ describe('RepoScanTaskSpec', () => {
     return { opts, deliveredMessages, markCalls, triggerCalls, reconciliationDedup, bindings };
   }
 
+  function gateCtx(overrides = {}) {
+    return { taskId: 'repo-scan', lastRunAt: Date.now() - 300_000, tickCount: 2, ...overrides };
+  }
+
   // ── Gate tests ──
 
   describe('gate', () => {
     it('returns workItems for unnotified open PRs and Issues', async () => {
       const { opts } = createOpts();
       const spec = createRepoScanTaskSpec(opts);
-      const result = await spec.admission.gate();
+      const result = await spec.admission.gate(gateCtx());
 
       assert.equal(result.run, true);
       // 2 non-draft PRs + 1 issue = 3 workItems
@@ -126,7 +138,7 @@ describe('RepoScanTaskSpec', () => {
         fetchOpenIssues: async () => [],
       });
       const spec = createRepoScanTaskSpec(opts);
-      const result = await spec.admission.gate();
+      const result = await spec.admission.gate(gateCtx());
 
       assert.equal(result.run, false);
     });
@@ -138,7 +150,7 @@ describe('RepoScanTaskSpec', () => {
       await reconciliationDedup.markNotified('owner/repo', 'issue', 20);
 
       const spec = createRepoScanTaskSpec(opts);
-      const result = await spec.admission.gate();
+      const result = await spec.admission.gate(gateCtx());
 
       assert.equal(result.run, false);
       assert.ok(result.reason.includes('no unnotified'));
@@ -147,7 +159,7 @@ describe('RepoScanTaskSpec', () => {
     it('returns run=false when no repos in allowlist', async () => {
       const { opts } = createOpts({ repoAllowlist: [] });
       const spec = createRepoScanTaskSpec(opts);
-      const result = await spec.admission.gate();
+      const result = await spec.admission.gate(gateCtx());
 
       assert.equal(result.run, false);
       assert.ok(result.reason.includes('no repos'));
@@ -166,7 +178,7 @@ describe('RepoScanTaskSpec', () => {
         },
       });
       const spec = createRepoScanTaskSpec(opts);
-      const result = await spec.admission.gate();
+      const result = await spec.admission.gate(gateCtx());
 
       // Should still return items from owner/repo
       assert.equal(result.run, true);
@@ -176,10 +188,82 @@ describe('RepoScanTaskSpec', () => {
     it('uses correct subjectKey format', async () => {
       const { opts } = createOpts();
       const spec = createRepoScanTaskSpec(opts);
-      const result = await spec.admission.gate();
+      const result = await spec.admission.gate(gateCtx());
 
       assert.equal(result.workItems[0].subjectKey, 'repo-owner/repo#pr-10');
       assert.equal(result.workItems[2].subjectKey, 'repo-owner/repo#issue-20');
+    });
+
+    it('baselines existing open items before the persistent repo baseline is established', async () => {
+      const { opts, reconciliationDedup } = createOpts();
+      reconciliationDedup.baselineEstablished.clear();
+      const spec = createRepoScanTaskSpec(opts);
+      const result = await spec.admission.gate(gateCtx());
+
+      assert.equal(result.run, false);
+      assert.ok(result.reason.includes('baseline established'));
+      assert.equal(await reconciliationDedup.isNotified('owner/repo', 'pr', 10), true);
+      assert.equal(await reconciliationDedup.isNotified('owner/repo', 'pr', 12), true);
+      assert.equal(await reconciliationDedup.isNotified('owner/repo', 'issue', 20), true);
+      assert.equal(await reconciliationDedup.isBaselineEstablished('owner/repo'), true);
+    });
+
+    it('does not re-baseline on scheduler restart after the persistent repo baseline exists', async () => {
+      const { opts } = createOpts();
+      const spec = createRepoScanTaskSpec(opts);
+      const result = await spec.admission.gate(gateCtx({ lastRunAt: null, tickCount: 1 }));
+
+      assert.equal(result.run, true);
+      assert.equal(result.workItems.length, 3);
+    });
+
+    it('caps work items per scan to avoid waking the cat once per backlog item', async () => {
+      const { opts } = createOpts({
+        maxWorkItemsPerRun: 2,
+      });
+      const spec = createRepoScanTaskSpec(opts);
+      const result = await spec.admission.gate(gateCtx());
+
+      assert.equal(result.run, true);
+      assert.equal(result.workItems.length, 2);
+      assert.deepEqual(
+        result.workItems.map((item) => `${item.signal.subjectType}-${item.signal.number}`),
+        ['pr-10', 'pr-12'],
+      );
+    });
+
+    it('rotates capped work items across scans so a bad prefix cannot starve later items', async () => {
+      const prs = Array.from({ length: 5 }, (_, idx) => ({
+        number: idx + 1,
+        title: `PR ${idx + 1}`,
+        html_url: `https://github.com/r/p/pull/${idx + 1}`,
+        user: 'alice',
+        author_association: 'CONTRIBUTOR',
+        draft: false,
+      }));
+      const { opts } = createOpts({
+        maxWorkItemsPerRun: 2,
+        fetchOpenPRs: async () => prs,
+        fetchOpenIssues: async () => [],
+      });
+      const spec = createRepoScanTaskSpec(opts);
+
+      const first = await spec.admission.gate(gateCtx());
+      const second = await spec.admission.gate(gateCtx());
+      const third = await spec.admission.gate(gateCtx());
+
+      assert.deepEqual(
+        first.workItems.map((item) => item.signal.number),
+        [1, 2],
+      );
+      assert.deepEqual(
+        second.workItems.map((item) => item.signal.number),
+        [3, 4],
+      );
+      assert.deepEqual(
+        third.workItems.map((item) => item.signal.number),
+        [5, 1],
+      );
     });
   });
 
@@ -189,7 +273,7 @@ describe('RepoScanTaskSpec', () => {
     it('delivers message to correct inbox thread', async () => {
       const { opts, deliveredMessages } = createOpts();
       const spec = createRepoScanTaskSpec(opts);
-      const gateResult = await spec.admission.gate();
+      const gateResult = await spec.admission.gate(gateCtx());
       const workItem = gateResult.workItems[0];
 
       await spec.run.execute(workItem.signal, workItem.subjectKey, { assignedCatId: null });
@@ -203,7 +287,7 @@ describe('RepoScanTaskSpec', () => {
     it('marks item as notified after delivery', async () => {
       const { opts, reconciliationDedup } = createOpts();
       const spec = createRepoScanTaskSpec(opts);
-      const gateResult = await spec.admission.gate();
+      const gateResult = await spec.admission.gate(gateCtx());
       const workItem = gateResult.workItems[0];
 
       await spec.run.execute(workItem.signal, workItem.subjectKey, { assignedCatId: null });
@@ -214,7 +298,7 @@ describe('RepoScanTaskSpec', () => {
     it('triggers cat after delivery', async () => {
       const { opts, triggerCalls } = createOpts();
       const spec = createRepoScanTaskSpec(opts);
-      const gateResult = await spec.admission.gate();
+      const gateResult = await spec.admission.gate(gateCtx());
       const workItem = gateResult.workItems[0];
 
       await spec.run.execute(workItem.signal, workItem.subjectKey, { assignedCatId: null });

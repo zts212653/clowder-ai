@@ -25,9 +25,17 @@ AUDIO_PY="$REPO_ROOT/scripts/meeting-copilot/audio-service.py"
 echo "[start] resolved runtime: CAT_CAFE_HOME=$CAT_CAFE_HOME; venv=$VENV_DIR; python=python3; api=$AUDIO_PY; port=$PORT"
 
 if [ ! -d "$VENV_DIR" ]; then
-  echo "ERROR: venv not found: $VENV_DIR" >&2
-  echo "Run install first: scripts/services/audio-capture-install.sh" >&2
-  exit 1
+  echo "[start] venv not found: $VENV_DIR -- auto-installing..." >&2
+  INSTALL_SCRIPT="$SCRIPT_DIR/audio-capture-install.sh"
+  if [ ! -f "$INSTALL_SCRIPT" ]; then
+    echo "ERROR: install script not found: $INSTALL_SCRIPT" >&2
+    exit 1
+  fi
+  bash "$INSTALL_SCRIPT"
+  if [ ! -d "$VENV_DIR" ]; then
+    echo "ERROR: auto-install completed but venv still missing: $VENV_DIR" >&2
+    exit 1
+  fi
 fi
 source "$VENV_DIR/bin/activate"
 

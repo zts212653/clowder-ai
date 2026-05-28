@@ -10,7 +10,7 @@ function createMockRedis() {
       return store.get(key) ?? null;
     },
     async set(key, value, exToken, ttl) {
-      store.set(key, value);
+      store.set(key, { value, exToken, ttl });
       return 'OK';
     },
     async del(...keys) {
@@ -61,5 +61,43 @@ describe('ReconciliationDedup', () => {
   it('uses correct key prefix', async () => {
     await dedup.markNotified('zts212653/cat-cafe', 'pr', 99);
     assert.ok(redis.store.has('f141:notified:zts212653/cat-cafe#pr-99'));
+  });
+
+  it('tracks repo baseline independently from item notifications', async () => {
+    assert.equal(await dedup.isBaselineEstablished('zts212653/cat-cafe'), false);
+
+    await dedup.markBaselineEstablished('zts212653/cat-cafe');
+
+    assert.equal(await dedup.isBaselineEstablished('zts212653/cat-cafe'), true);
+    assert.equal(await dedup.isBaselineEstablished('zts212653/clowder-ai'), false);
+    assert.equal(await dedup.isNotified('zts212653/cat-cafe', 'pr', 99), false);
+  });
+
+  it('stores notified markers without TTL', async () => {
+    await dedup.markNotified('zts212653/cat-cafe', 'issue', 100);
+    const entry = redis.store.get('f141:notified:zts212653/cat-cafe#issue-100');
+
+    assert.equal(entry.value, '1');
+    assert.equal(entry.exToken, undefined);
+    assert.equal(entry.ttl, undefined);
+  });
+
+  it('stores baseline markers without TTL', async () => {
+    await dedup.markBaselineEstablished('zts212653/cat-cafe');
+    const entry = redis.store.get('f141:baseline:zts212653/cat-cafe');
+
+    assert.equal(entry.value, '1');
+    assert.equal(entry.exToken, undefined);
+    assert.equal(entry.ttl, undefined);
+  });
+
+  it('migrates old TTL markers to persistent markers when observed', async () => {
+    await redis.set('f141:notified:zts212653/cat-cafe#pr-101', '1', 'EX', 604800);
+
+    assert.equal(await dedup.isNotified('zts212653/cat-cafe', 'pr', 101), true);
+    const entry = redis.store.get('f141:notified:zts212653/cat-cafe#pr-101');
+    assert.equal(entry.value, '1');
+    assert.equal(entry.exToken, undefined);
+    assert.equal(entry.ttl, undefined);
   });
 });

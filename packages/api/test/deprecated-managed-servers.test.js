@@ -18,7 +18,7 @@ test('DEPRECATED_MANAGED_SERVERS contains cat-cafe entry with only echoLegacyShi
   assert.ok(catCafe.reason.includes('F193 Phase C'), 'reason must reference F193 Phase C');
   const markerKinds = catCafe.knownManagedMarkers.map((m) => m.kind);
   // F213 砚砚 review 2026-05-26 P1: argsSuffix marker removed — fork paths
-  // (e.g. /path/to/project/...) would falsely match, violating
+  // (e.g. /home/user/cat-cafe/...) would falsely match, violating
   // third-party preservation contract. Only specific echoLegacyShim shape
   // (echo + legacy-shim) is reliable enough to commit to deletion.
   assert.ok(!markerKinds.includes('argsSuffix'), 'argsSuffix marker must be removed for safety');
@@ -29,10 +29,10 @@ test('DEPRECATED_MANAGED_SERVERS contains cat-cafe entry with only echoLegacyShi
 test('isOurOwnedDeprecatedEntry: preserves entry matching previous argsSuffix pattern (user fork should not be misidentified)', () => {
   // F213 砚砚 P1 regression guard: this exact entry would have been falsely
   // marked as ours-owned under the old argsSuffix marker, but a user fork at
-  // /path/to/project/... legitimately has this shape. Must preserve.
+  // /home/user/cat-cafe/... legitimately has this shape. Must preserve.
   const entry = {
     command: 'node',
-    args: ['/path/to/project/packages/mcp-server/dist/index.js'],
+    args: ['/home/user/cat-cafe/packages/mcp-server/dist/index.js'],
     enabled: true,
   };
   assert.equal(isOurOwnedDeprecatedEntry('cat-cafe', entry), false);

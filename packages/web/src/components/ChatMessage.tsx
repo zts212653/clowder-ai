@@ -8,6 +8,7 @@ import { getMentionRe, getMentionToCat } from '@/lib/mention-highlight';
 import { parseDirection } from '@/lib/parse-direction';
 import { type ChatMessage as ChatMessageType, resolveBubbleExpanded, useChatStore } from '@/stores/chatStore';
 import { CatAvatar } from './CatAvatar';
+import { CliDiagnosticsPanel, isKnownReason } from './CliDiagnosticsPanel';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
 import { ConnectorBubble } from './ConnectorBubble';
 import { ContentBlocks } from './ContentBlocks';
@@ -178,12 +179,40 @@ export function ChatMessage({ message, getCatById, onEditCat }: ChatMessageProps
     const isTool = message.variant === 'tool';
     const isFollowup = message.variant === 'a2a_followup';
 
-    // F118 AC-C3: Enhanced timeout diagnostics panel
+    // F212 Phase B routing precedence (砚砚 P1-1 + 云端 codex P2-3, 2026-05-27):
+    //   1. Classified CLI error (reasonCode in REASON_PALETTE) → CLI panel
+    //   2. Timeout with no recognized classification → timeout panel
+    //      (preserves F118 silence/processAlive; covers unknown-reason persisted payloads too)
+    //   3. Unclassified CLI error, no timeout → CLI panel unknown-icon fallback
+    // The `isKnownReason` membership check (not truthy) is the key defense against
+    // persisted/newer/malformed reasonCode strings hijacking the timeout view.
+    if (isError && isKnownReason(message.extra?.cliDiagnostics?.reasonCode)) {
+      return (
+        <div data-message-id={message.id} className="flex justify-center mb-3">
+          <div className="max-w-[85%] w-full">
+            <CliDiagnosticsPanel errorMessage={message.content} diagnostics={message.extra.cliDiagnostics} />
+          </div>
+        </div>
+      );
+    }
+
+    // F118 AC-C3: Enhanced timeout diagnostics panel (precedence step 2)
     if (isError && message.extra?.timeoutDiagnostics) {
       return (
         <div data-message-id={message.id} className="flex justify-center mb-3">
           <div className="max-w-[85%] w-full">
             <TimeoutDiagnosticsPanel errorMessage={message.content} diagnostics={message.extra.timeoutDiagnostics} />
+          </div>
+        </div>
+      );
+    }
+
+    // F212 Phase B precedence step 3: unclassified cliDiagnostics with no timeout.
+    if (isError && message.extra?.cliDiagnostics) {
+      return (
+        <div data-message-id={message.id} className="flex justify-center mb-3">
+          <div className="max-w-[85%] w-full">
+            <CliDiagnosticsPanel errorMessage={message.content} diagnostics={message.extra.cliDiagnostics} />
           </div>
         </div>
       );

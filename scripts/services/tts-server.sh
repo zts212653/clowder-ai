@@ -49,17 +49,28 @@ else
   PROVIDER="$TTS_PROVIDER"
 fi
 
+if [ ! -d "$VENV_DIR" ]; then
+  echo "[start] venv not found: $VENV_DIR -- auto-installing..." >&2
+  INSTALL_SCRIPT="$SCRIPT_DIR/tts-install.sh"
+  if [ ! -f "$INSTALL_SCRIPT" ]; then
+    echo "ERROR: install script not found: $INSTALL_SCRIPT" >&2
+    exit 1
+  fi
+  TTS_MODEL="$MODEL" bash "$INSTALL_SCRIPT"
+  if [ ! -d "$VENV_DIR" ]; then
+    echo "ERROR: auto-install completed but venv still missing: $VENV_DIR" >&2
+    exit 1
+  fi
+fi
+
+# HF_HUB_OFFLINE must be set AFTER auto-install completes -- the installer
+# needs network access to download models/voice assets from HuggingFace.
+# (cloud codex P1: PR #1924)
 case "$PROVIDER" in
   mlx-audio|qwen3-clone)
     export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
     ;;
 esac
-
-if [ ! -d "$VENV_DIR" ]; then
-  echo "ERROR: venv not found: $VENV_DIR"
-  echo "Run install first: scripts/services/tts-install.sh"
-  exit 1
-fi
 echo "[start] resolved runtime: CAT_CAFE_HOME=$CAT_CAFE_HOME; venv=$VENV_DIR; python=python3; api=$API_SCRIPT; port=$PORT"
 source "$VENV_DIR/bin/activate"
 

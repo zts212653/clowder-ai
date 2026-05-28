@@ -77,7 +77,7 @@ team lead指出一个**架构盲点**：cat-cafe 团队 deprecate 了一个 mcp 
        reason: 'F193 Phase C split-only migration: replaced by 4 split servers',
        knownManagedMarkers: [
          // argsSuffix REMOVED 2026-05-26 (Maine Coon P1): user-fork paths like
-         // /path/to/project/packages/mcp-server/dist/index.js
+         // /home/user/cat-cafe/packages/mcp-server/dist/index.js
          // would falsely match. No reliable ownership proof for historical
          // orchestrator-managed entries → conservative preserve. Forward-only
          // owner-tag mechanism deferred to Phase B+.
@@ -157,7 +157,7 @@ trace 所有 mcp config writer：
 - [x] AC-A1: `deprecated-managed-servers.ts` 创建 + `DEPRECATED_MANAGED_SERVERS` registry 含 `cat-cafe` entry + `knownManagedMarkers` (**echoLegacyShim only** — argsSuffix removed 2026-05-26 per Maine Coon P1, fork-path false positive)
 - [x] AC-A2: `isOurOwnedDeprecatedEntry` helper 实现 + 单测覆盖 10 case 含 fork-path-preserve regression guard:
   - args[0] `["legacy-shim"]` + command `"echo"` → true (echoLegacyShim)
-  - Fork-like path `/path/to/project/packages/mcp-server/dist/index.js` → **false (preserve, regression guard)**
+  - Fork-like path `/home/user/cat-cafe/packages/mcp-server/dist/index.js` → **false (preserve, regression guard)**
   - Windows-path entry → false (no longer matches now that argsSuffix removed)
   - 未知第三方 binary path → false
   - args 字段缺失 / non-array / non-string args[0] / null entry → false (defensive)

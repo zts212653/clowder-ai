@@ -35,6 +35,23 @@ interface SessionSummary {
     cacheReadTokens?: number;
     costUsd?: number;
   };
+  runtimeSession?: RuntimeSessionSummary;
+}
+
+interface RuntimeSessionSummary {
+  runtime: string;
+  runtimeSessionId: string;
+  runtimeConversationId?: string;
+  lifecycleState: string;
+  lastObservedAt: number;
+  unexpectedRuntimeSessionSwitch?: {
+    detectedAt: number;
+    previousSessionId: string;
+    previousRuntimeSessionId: string;
+    currentRuntimeSessionId: string;
+    declaredPreviousRuntimeSessionId?: string;
+    reason: string;
+  };
 }
 
 const sessionCache = new Map<string, SessionSummary[]>();
@@ -66,6 +83,7 @@ function sealReasonLabel(reason?: string): string {
   if (reason === 'max_compressions') return 'max compress';
   if (reason === 'manual') return 'manual';
   if (reason === 'cli_session_replaced') return 'CLI replaced';
+  if (reason === 'unexpected_runtime_session_switch') return 'runtime switch';
   if (reason === 'overflow_circuit_breaker') return 'overflow';
   if (reason === 'unseal_displacement') return 'unseal displaced';
   if (reason === 'reconcile_stuck') return 'stuck reaper';
@@ -257,6 +275,30 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                   <span className="text-conn-amber-text"> · {session.compressionCount} compress</span>
                 )}
               </div>
+              {session.runtimeSession && (
+                <div
+                  data-testid="runtime-session-summary"
+                  className="mb-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-micro text-cafe-muted"
+                >
+                  <span>runtime</span>
+                  <SessionIdTag id={session.runtimeSession.runtimeSessionId} />
+                  <span>{session.runtimeSession.runtime}</span>
+                  <span>{session.runtimeSession.lifecycleState}</span>
+                </div>
+              )}
+              {session.runtimeSession?.unexpectedRuntimeSessionSwitch && (
+                <div
+                  data-testid="runtime-session-warning"
+                  className="mb-1 rounded border border-conn-amber-ring bg-conn-amber-bg px-2 py-1 text-micro text-conn-amber-text"
+                >
+                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                    <span className="font-medium">unexpected switch</span>
+                    <SessionIdTag id={session.runtimeSession.unexpectedRuntimeSessionSwitch.previousRuntimeSessionId} />
+                    <span>-&gt;</span>
+                    <SessionIdTag id={session.runtimeSession.unexpectedRuntimeSessionSwitch.currentRuntimeSessionId} />
+                  </div>
+                </div>
+              )}
               {/* Token counts + cache: prefer live invocation, fallback to persisted */}
               {usage && (usage.inputTokens != null || usage.outputTokens != null) && (
                 <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-micro font-mono mb-1">

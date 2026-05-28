@@ -88,9 +88,9 @@ describe('V19 migration — F200 recall_events + edge traversal columns', () => 
     db.close();
   });
 
-  it('CURRENT_SCHEMA_VERSION is 24', async () => {
+  it('CURRENT_SCHEMA_VERSION is 25', async () => {
     const { CURRENT_SCHEMA_VERSION } = await import('../../dist/domains/memory/schema.js');
-    assert.equal(CURRENT_SCHEMA_VERSION, 24);
+    assert.equal(CURRENT_SCHEMA_VERSION, 25);
   });
 
   it('can insert and read recall_events', async () => {

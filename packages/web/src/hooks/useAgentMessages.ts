@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReplyPreview } from '@cat-cafe/shared';
+import type { CliDiagnostics, ReplyPreview } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef } from 'react';
 import { deriveBubbleId, getBubbleInvocationId } from '@/debug/bubbleIdentity';
 import { recordBubbleInvariantViolation } from '@/debug/bubbleInvariantDiagnostics';
@@ -145,7 +145,14 @@ interface AgentMsg {
   /** Structured backend/provider error code. Some provider errors are recoverable mid-run. */
   errorCode?: string;
   isFinal?: boolean;
-  metadata?: { provider: string; model: string; sessionId?: string; usage?: import('../stores/chat-types').TokenUsage };
+  metadata?: {
+    provider: string;
+    model: string;
+    sessionId?: string;
+    usage?: import('../stores/chat-types').TokenUsage;
+    /** F212 Phase B: structured CLI error diagnostics stamped by api providers. */
+    cliDiagnostics?: CliDiagnostics;
+  };
   /** Tool name (for 'tool_use' events from backend) */
   toolName?: string;
   /** Tool input params (for 'tool_use' events from backend) */
@@ -306,7 +313,15 @@ export interface BackgroundAgentMessage {
   /** Structured backend/provider error code. Some provider errors are recoverable mid-run. */
   errorCode?: string;
   isFinal?: boolean;
-  metadata?: { provider: string; model: string; sessionId?: string; usage?: TokenUsage };
+  metadata?: {
+    provider: string;
+    model: string;
+    sessionId?: string;
+    usage?: TokenUsage;
+    /** F212 Phase B: structured CLI error diagnostics stamped by api providers on __cliError/__cliTimeout.
+     *  Travels as-is through `broadcastAgentMessage` spread; web error-path unpacks into `extra.cliDiagnostics`. */
+    cliDiagnostics?: CliDiagnostics;
+  };
   /** F52: Cross-thread origin metadata */
   extra?: { crossPost?: { sourceThreadId: string; sourceInvocationId?: string } };
   /** F057-C2: Whether this message mentions the user (@user / @铲屎官) */
@@ -1782,13 +1797,23 @@ export function handleBackgroundAgentMessage(
     // canonical event 走 stable-key dedup；invocationless 仍 legacy addMessageToThread
     // 用 deterministic bg-err id 避免冲突。pattern 跟 B1.5 active error 同源。
     const errorContent = `Error: ${msg.error ?? 'Unknown error'}`;
+    // F212 Phase B (云端 codex P2-4 2026-05-27): mirror active-path cliDiagnostics
+    // wire-up so background-thread errors also get the folded panel — without this,
+    // a CLI failure in a non-foreground thread loses the structured diagnostic and
+    // falls back to the legacy red-pill bubble.
+    const bgCliDiag = msg.metadata?.cliDiagnostics;
+    const bgErrorExtra: ChatMessage['extra'] | undefined = bgCliDiag ? { cliDiagnostics: bgCliDiag } : undefined;
     let bgErrorReducerHandled = false;
     if (msg.invocationId) {
       const event = adaptIncomingToBubbleEvent(msg, { sourcePath: 'background' });
       if (event) {
         const eventWithEnrichment = {
           ...event,
-          payload: { ...(event.payload ?? {}), content: errorContent },
+          payload: {
+            ...(event.payload ?? {}),
+            content: errorContent,
+            ...(bgErrorExtra ? { extra: bgErrorExtra } : {}),
+          },
         };
         const threadState = options.store.getThreadState(msg.threadId);
         const prevLen = threadState.messages.length;
@@ -1821,6 +1846,7 @@ export function handleBackgroundAgentMessage(
         catId: msg.catId,
         content: errorContent,
         timestamp: msg.timestamp,
+        ...(bgErrorExtra ? { extra: bgErrorExtra } : {}),
       });
     }
     if (!recoverableInFlightError) {
@@ -4666,20 +4692,30 @@ export function useAgentMessages() {
             }
             return base;
           })();
-          const errorExtra = timeoutDiag
-            ? {
-                timeoutDiagnostics: {
-                  silenceDurationMs: timeoutDiag.silenceDurationMs as number,
-                  processAlive: timeoutDiag.processAlive as boolean,
-                  lastEventType: timeoutDiag.lastEventType as string | undefined,
-                  firstEventAt: timeoutDiag.firstEventAt as number | undefined,
-                  lastEventAt: timeoutDiag.lastEventAt as number | undefined,
-                  cliSessionId: timeoutDiag.cliSessionId as string | undefined,
-                  invocationId: timeoutDiag.invocationId as string | undefined,
-                  rawArchivePath: timeoutDiag.rawArchivePath as string | undefined,
-                },
-              }
-            : undefined;
+          // F212 Phase B: pick up structured CLI diagnostics that providers stamp on
+          // `metadata.cliDiagnostics` (Phase A). Independent of the timeout-only pending ledger
+          // — cliDiagnostics is one-shot on the error event itself, no precursor stash needed.
+          const cliDiag = msg.metadata?.cliDiagnostics;
+          const errorExtra: ChatMessage['extra'] | undefined =
+            timeoutDiag || cliDiag
+              ? {
+                  ...(timeoutDiag
+                    ? {
+                        timeoutDiagnostics: {
+                          silenceDurationMs: timeoutDiag.silenceDurationMs as number,
+                          processAlive: timeoutDiag.processAlive as boolean,
+                          lastEventType: timeoutDiag.lastEventType as string | undefined,
+                          firstEventAt: timeoutDiag.firstEventAt as number | undefined,
+                          lastEventAt: timeoutDiag.lastEventAt as number | undefined,
+                          cliSessionId: timeoutDiag.cliSessionId as string | undefined,
+                          invocationId: timeoutDiag.invocationId as string | undefined,
+                          rawArchivePath: timeoutDiag.rawArchivePath as string | undefined,
+                        },
+                      }
+                    : {}),
+                  ...(cliDiag ? { cliDiagnostics: cliDiag } : {}),
+                }
+              : undefined;
 
           let errorReducerHandled = false;
           if (msg.invocationId) {

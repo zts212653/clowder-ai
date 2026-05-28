@@ -46,8 +46,8 @@ export class RecallEventCorrelator {
         (recall_id, cat_id, invocation_id, tool_name, query, mode, scope,
          candidates_json, consumed_json, reformulated, fell_back_to_grep,
          abandoned, next_graph_resolve_after_read, token_cost, timestamp,
-         shadow_ranking_json, result_set_id, attribution_clarity)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         shadow_ranking_json, result_set_id, attribution_clarity, thread_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
   }
 
@@ -175,6 +175,7 @@ export class RecallEventCorrelator {
           e.shadowRankingJson ?? null,
           e.resultSetId ?? null,
           e.attributionClarity ?? null,
+          e.threadId ?? '',
         ];
         this.insertStmt.run(params);
       }

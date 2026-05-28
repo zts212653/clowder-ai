@@ -139,7 +139,7 @@ stages:
         predicate:
           type: command_sequence
           cwd_contains: cat-cafe-runtime
-          must_include:
+          anti_pattern:
             - git pull
             - pnpm start|runtime:start|restart
 

@@ -12,32 +12,13 @@
  *  - AC-A9 red line: no raw stderr ever in publicSummary / publicHint (humanized only)
  */
 
-import { CLASSIFIER_PATTERNS, type CliErrorReasonCode } from './cli-error-patterns.js';
+import type { CliDiagnostics, CliErrorReasonCode } from '@cat-cafe/shared';
+import { CLASSIFIER_PATTERNS } from './cli-error-patterns.js';
 import { sanitizeCliStderr } from './sanitize-cli-stderr.js';
 
-export type { CliErrorReasonCode };
-
-/**
- * CliDiagnostics — structured CLI error payload exposed on `__cliError.cliDiagnostics`
- * (F212 Phase A) and consumed by frontend folded panel (Phase B).
- */
-export interface CliDiagnostics {
-  /** Whitelist classification; undefined = unknown stderr / stream error */
-  reasonCode?: CliErrorReasonCode;
-  /** Always present; humanized title for error bubble (i18n: zh-CN in Phase A) */
-  publicSummary: string;
-  /** Always present; humanized hint for next action */
-  publicHint: string;
-  /** Only present when reasonCode !== undefined (AC-A5); sanitized + length-capped */
-  safeExcerpt?: string;
-  /** Debug correlation metadata — safe to expose */
-  debugRef: {
-    command: string;
-    exitCode: number | null;
-    signal: NodeJS.Signals | string | null;
-    invocationId?: string;
-  };
-}
+// F212 Phase B: CliDiagnostics + CliErrorReasonCode hoisted to @cat-cafe/shared so the web
+// folded panel can import the same contract. Re-exported here for existing api callers.
+export type { CliDiagnostics, CliErrorReasonCode };
 
 /**
  * F212 AC-A4 + AC-A8: classify stderr OR NDJSON stream error text into known reasonCodes.

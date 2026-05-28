@@ -213,7 +213,7 @@ export const DEVELOPMENT_SOP_DEFINITION = {
           owner: { type: 'stage_suggested_skill', skill: 'merge-gate' },
           predicate: {
             type: 'command_sequence',
-            mustInclude: ['git pull', 'pnpm start|runtime:start|restart'],
+            antiPattern: ['git pull', 'pnpm start|runtime:start|restart'],
             cwdContains: 'cat-cafe-runtime',
           },
         },

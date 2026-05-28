@@ -449,6 +449,9 @@ export async function* routeParallel(
   // F060: Collect inline rich blocks per cat from system_info stream
   const catStreamRichBlocks = new Map<string, import('@cat-cafe/shared').RichBlock[]>();
   const catErrorText = new Map<string, string>();
+  // F212 Phase B (云端 codex P2-8 2026-05-27): per-cat capture of Phase A's structured
+  // cliDiagnostics so persistence carries it through to F5 hydration (symmetric with route-serial).
+  const catCliDiagnostics = new Map<string, import('@cat-cafe/shared').CliDiagnostics>();
   const catHadError = new Set<string>();
   // #267: track errors that happened BEFORE abort — only these are real provider failures
   const catHadProviderError = new Set<string>();
@@ -589,6 +592,13 @@ export async function* routeParallel(
         if (effectiveMsg.error) {
           const prev = catErrorText.get(effectiveMsg.catId) ?? '';
           catErrorText.set(effectiveMsg.catId, `${prev}${prev ? '\n' : ''}${effectiveMsg.error}`);
+        }
+        // F212 Phase B (云端 codex P2-8): capture first cliDiagnostics seen per cat.
+        const meta = effectiveMsg.metadata as
+          | { cliDiagnostics?: import('@cat-cafe/shared').CliDiagnostics }
+          | undefined;
+        if (meta?.cliDiagnostics && !catCliDiagnostics.has(effectiveMsg.catId)) {
+          catCliDiagnostics.set(effectiveMsg.catId, meta.cliDiagnostics);
         }
       }
       // Accumulate tool events per cat
@@ -1237,6 +1247,7 @@ export async function* routeParallel(
       // which polluted the conversation history and caused "context poisoning".
       const errorText = catErrorText.get(msg.catId);
       if (errorText) {
+        const cliDiag = catCliDiagnostics.get(msg.catId);
         try {
           await deps.messageStore.append({
             userId: 'system',
@@ -1246,6 +1257,8 @@ export async function* routeParallel(
             origin: 'stream',
             timestamp: Date.now(),
             threadId,
+            // F212 Phase B (云端 codex P2-8): persist cliDiagnostics for F5 hydration.
+            ...(cliDiag ? { metadata: { provider: '', model: '', cliDiagnostics: cliDiag } } : {}),
           });
         } catch (err) {
           log.error({ catId: msg.catId, err }, 'messageStore.append (error system msg) failed');

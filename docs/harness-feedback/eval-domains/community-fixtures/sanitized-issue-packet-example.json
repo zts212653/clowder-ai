@@ -1,0 +1,32 @@
+{
+  "id": "sip-community-001",
+  "domainId": "eval:code-review-quality",
+  "exportedAt": "2026-05-27T10:00:00+08:00",
+  "sourceInstanceId": "community-instance-alpha",
+  "phenomenon": "Code review pass-through rate exceeds 90% — reviews may not be adding value",
+  "harnessComponent": {
+    "componentId": "review-gate-v1",
+    "name": "Review Gate"
+  },
+  "evidenceSummary": {
+    "snapshotCount": 7,
+    "attributionCount": 3,
+    "metricCount": 5,
+    "traceCount": 12
+  },
+  "dailyTrend": {
+    "window": "7d",
+    "current": { "passthrough_rate": 0.92 },
+    "baseline": { "passthrough_rate": 0.75 },
+    "threshold": { "passthrough_rate": 0.85 },
+    "direction": "regressed"
+  },
+  "rootCauseHypothesis": {
+    "summary": "Reviewer workload increased 40% in past sprint, reducing review depth",
+    "confidence": "medium",
+    "alternatives": ["Review criteria too vague", "Auto-merge threshold misconfigured"]
+  },
+  "verdict": "fix",
+  "requestedAction": "Review and tighten review gate criteria; consider reviewer load balancing",
+  "counterarguments": ["High pass rate may reflect genuinely improved code quality from upstream TDD adoption"]
+}

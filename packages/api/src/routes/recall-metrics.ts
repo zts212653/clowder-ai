@@ -1,5 +1,7 @@
 import type Database from 'better-sqlite3';
 import type { FastifyPluginAsync } from 'fastify';
+import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import { canAccessThread } from '../domains/guides/guide-state-access.js';
 import { CrossCatMetricsComputer } from '../domains/memory/CrossCatMetricsComputer.js';
 import { freezeF200Flags } from '../domains/memory/f200-types.js';
 import { OutputVerifiedDetector } from '../domains/memory/output-verified-detector.js';
@@ -18,6 +20,8 @@ export interface RecallMetricsRoutesOptions {
   /** Optional: pass messageStore + taskStore to enable AC-D2.1/D2.2/D2.3 auto-detection. */
   messageStore?: SignalMessageStore;
   taskStore?: SignalTaskStore;
+  /** Optional: pass threadStore to enable thread ownership validation on /api/recall/events. */
+  threadStore?: Pick<IThreadStore, 'get' | 'list'>;
 }
 
 interface CacheEntry {
@@ -32,6 +36,15 @@ const MAX_CACHE = 20;
 
 export function clearRecallMetricsCache(): void {
   cache.clear();
+}
+
+async function isThreadIndexedForUser(
+  threadStore: Pick<IThreadStore, 'list'>,
+  threadId: string,
+  userId: string,
+): Promise<boolean> {
+  const userVisibleThreads = await threadStore.list(userId);
+  return userVisibleThreads.some((visibleThread) => visibleThread.id === threadId);
 }
 
 export const recallMetricsRoutes: FastifyPluginAsync<RecallMetricsRoutesOptions> = async (app, opts) => {
@@ -179,5 +192,68 @@ export const recallMetricsRoutes: FastifyPluginAsync<RecallMetricsRoutesOptions>
 
     trajectoryService.markVerified(trajectoryId, signals);
     return { status: 'ok', trajectoryId, signals };
+  });
+
+  // F102 bugfix: RecallFeed history — query recall_events by threadId
+  // so the UI can show recall history beyond the HISTORY_PAGE_SIZE message window.
+  app.get<{
+    Querystring: { threadId: string; limit?: string };
+  }>('/api/recall/events', async (request, reply) => {
+    const userId = resolveHeaderUserId(request);
+    if (!userId) return reply.status(401).send({ error: 'Missing X-Cat-Cafe-User header' });
+
+    const threadId = request.query.threadId;
+    if (!threadId) return reply.status(400).send({ error: 'threadId is required' });
+
+    // Thread ownership guard: fail-closed — require threadStore
+    if (!opts.threadStore) {
+      return reply.status(503).send({ error: 'Thread store unavailable' });
+    }
+    const thread = await opts.threadStore.get(threadId);
+    if (!thread) return reply.status(404).send({ error: 'Thread not found' });
+    const canReadRecallEvents =
+      canAccessThread(thread, userId) ||
+      (thread.createdBy === 'system' && (await isThreadIndexedForUser(opts.threadStore, thread.id, userId)));
+    if (!canReadRecallEvents) {
+      return reply.status(403).send({ error: 'Forbidden' });
+    }
+
+    const limit = Math.min(Math.max(1, parseInt(request.query.limit ?? '100', 10) || 100), 500);
+
+    const rows = opts.evidenceDb
+      .prepare(
+        `SELECT recall_id, cat_id, tool_name, query, mode, scope,
+              candidates_json, timestamp
+       FROM recall_events
+       WHERE thread_id = ?
+       ORDER BY timestamp DESC
+       LIMIT ?`,
+      )
+      .all(threadId, limit) as Array<{
+      recall_id: string;
+      cat_id: string;
+      tool_name: string;
+      query: string;
+      mode: string | null;
+      scope: string | null;
+      candidates_json: string;
+      timestamp: number;
+    }>;
+
+    return {
+      events: rows.map((r) => ({
+        id: r.recall_id,
+        query: r.query,
+        mode: r.mode ?? undefined,
+        scope: r.scope ?? undefined,
+        timestamp: r.timestamp,
+        resultCount: (JSON.parse(r.candidates_json || '[]') as unknown[]).length,
+        results: (JSON.parse(r.candidates_json || '[]') as Array<{ anchor: string; docKind?: string }>).map((c) => ({
+          title: c.anchor,
+          anchor: c.anchor,
+          sourceType: c.docKind,
+        })),
+      })),
+    };
   });
 };

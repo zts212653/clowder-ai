@@ -359,7 +359,7 @@ describe('writeClaudeMcpConfig', () => {
     const originalWs = process.env.CAT_CAFE_WORKSPACE_ROOT;
     try {
       delete process.env.ALLOWED_WORKSPACE_DIRS;
-      process.env.CAT_CAFE_WORKSPACE_ROOT = '/path/to/project';
+      process.env.CAT_CAFE_WORKSPACE_ROOT = '/home/user/cat-cafe';
 
       await writeClaudeMcpConfig(file, [
         { name: 'cat-cafe', command: 'node', args: ['index.js'], enabled: true, source: 'cat-cafe' },
@@ -375,9 +375,9 @@ describe('writeClaudeMcpConfig', () => {
       ]);
 
       const data = JSON.parse(await readFile(file, 'utf-8'));
-      assert.equal(data.mcpServers['cat-cafe'].env.ALLOWED_WORKSPACE_DIRS, '/path/to/project');
+      assert.equal(data.mcpServers['cat-cafe'].env.ALLOWED_WORKSPACE_DIRS, '/home/user/cat-cafe');
       assert.deepEqual(data.mcpServers['cat-cafe-memory'].env, {
-        ALLOWED_WORKSPACE_DIRS: '/path/to/project',
+        ALLOWED_WORKSPACE_DIRS: '/home/user/cat-cafe',
         EXTRA_FLAG: 'keep-me',
       });
       assert.equal(data.mcpServers.external.env, undefined);
@@ -410,7 +410,7 @@ describe('writeClaudeMcpConfig', () => {
 
   it('F213: preserves fork-like cat-cafe entry (砚砚 P1 regression guard)', async () => {
     const file = join(dir, '.mcp.json');
-    const forkPath = '/path/to/project/packages/mcp-server/dist/index.js';
+    const forkPath = '/home/user/cat-cafe/packages/mcp-server/dist/index.js';
     await writeFile(file, JSON.stringify({ mcpServers: { 'cat-cafe': { command: 'node', args: [forkPath] } } }));
     await writeClaudeMcpConfig(file, []);
     const data = JSON.parse(await readFile(file, 'utf-8'));
@@ -488,7 +488,7 @@ describe('writeCodexMcpConfig', () => {
     const originalWs = process.env.CAT_CAFE_WORKSPACE_ROOT;
     try {
       delete process.env.ALLOWED_WORKSPACE_DIRS;
-      process.env.CAT_CAFE_WORKSPACE_ROOT = '/path/to/project';
+      process.env.CAT_CAFE_WORKSPACE_ROOT = '/home/user/cat-cafe';
 
       await writeCodexMcpConfig(file, [
         { name: 'cat-cafe', command: 'node', args: ['index.js'], enabled: true, source: 'cat-cafe' },
@@ -508,10 +508,10 @@ describe('writeCodexMcpConfig', () => {
       const memory = servers.find((server) => server.name === 'cat-cafe-memory');
       const external = servers.find((server) => server.name === 'external');
       assert.ok(main);
-      assert.equal(main.env?.ALLOWED_WORKSPACE_DIRS, '/path/to/project');
+      assert.equal(main.env?.ALLOWED_WORKSPACE_DIRS, '/home/user/cat-cafe');
       assert.ok(memory);
       assert.deepEqual(memory.env, {
-        ALLOWED_WORKSPACE_DIRS: '/path/to/project',
+        ALLOWED_WORKSPACE_DIRS: '/home/user/cat-cafe',
         EXTRA_FLAG: 'keep-me',
       });
       assert.ok(external);
@@ -539,7 +539,7 @@ describe('writeCodexMcpConfig', () => {
       file,
       `[mcp_servers.cat-cafe]
 command = "node"
-args = ["/path/to/project/packages/mcp-server/dist/index.js"]
+args = ["/home/user/cat-cafe/packages/mcp-server/dist/index.js"]
 enabled = true
 `,
     );
@@ -552,7 +552,7 @@ enabled = true
     const fork = servers.find((s) => s.name === 'cat-cafe');
     const split = servers.find((s) => s.name === 'cat-cafe-collab');
     assert.ok(fork, 'fork-like cat-cafe entry must be preserved (no reliable ownership proof)');
-    assert.equal(fork.args[0], '/path/to/project/packages/mcp-server/dist/index.js');
+    assert.equal(fork.args[0], '/home/user/cat-cafe/packages/mcp-server/dist/index.js');
     assert.ok(split, 'split server entry must still be written');
   });
 
@@ -726,7 +726,7 @@ describe('writeGeminiMcpConfig', () => {
 
   it('F213: preserves fork-like cat-cafe entry in gemini config (砚砚 P1 regression guard)', async () => {
     const file = join(dir, 'settings.json');
-    const forkPath = '/path/to/project/packages/mcp-server/dist/index.js';
+    const forkPath = '/home/user/cat-cafe/packages/mcp-server/dist/index.js';
     await writeFile(file, JSON.stringify({ mcpServers: { 'cat-cafe': { command: 'node', args: [forkPath] } } }));
     await writeGeminiMcpConfig(file, []);
     const data = JSON.parse(await readFile(file, 'utf-8'));
@@ -840,7 +840,7 @@ describe('writeKimiMcpConfig', () => {
 
   it('F213: preserves fork-like cat-cafe entry in kimi config (砚砚 P1 regression guard)', async () => {
     const file = join(dir, 'mcp.json');
-    const forkPath = '/path/to/project/packages/mcp-server/dist/index.js';
+    const forkPath = '/home/user/cat-cafe/packages/mcp-server/dist/index.js';
     await writeFile(file, JSON.stringify({ mcpServers: { 'cat-cafe': { command: 'node', args: [forkPath] } } }));
     await writeKimiMcpConfig(file, []);
     const data = JSON.parse(await readFile(file, 'utf-8'));
@@ -1063,7 +1063,7 @@ describe('writeAntigravityMcpConfig', () => {
     const originalWs = process.env.CAT_CAFE_WORKSPACE_ROOT;
     try {
       delete process.env.ALLOWED_WORKSPACE_DIRS;
-      process.env.CAT_CAFE_WORKSPACE_ROOT = '/path/to/project';
+      process.env.CAT_CAFE_WORKSPACE_ROOT = '/home/user/cat-cafe';
       await writeAntigravityMcpConfig(file, [
         { name: 'cat-cafe', command: 'node', args: ['/runtime/dist/collab.js'], enabled: true, source: 'cat-cafe' },
       ]);
@@ -1071,7 +1071,7 @@ describe('writeAntigravityMcpConfig', () => {
       // Workspace env reflects CAT_CAFE_WORKSPACE_ROOT (where Bengal operates)
       assert.equal(
         raw.mcpServers['cat-cafe'].env.ALLOWED_WORKSPACE_DIRS,
-        '/path/to/project',
+        '/home/user/cat-cafe',
         'ALLOWED_WORKSPACE_DIRS should reflect CAT_CAFE_WORKSPACE_ROOT, not process.cwd()',
       );
       // Binary path stays at whatever the descriptor pointed at (runtime)
@@ -1263,7 +1263,7 @@ describe('writeAntigravityMcpConfig', () => {
 
   it('F213: preserves fork-like cat-cafe entry in antigravity config (砚砚 P1 regression guard)', async () => {
     const file = join(dir, 'mcp_config.json');
-    const forkPath = '/path/to/project/packages/mcp-server/dist/index.js';
+    const forkPath = '/home/user/cat-cafe/packages/mcp-server/dist/index.js';
     await writeFile(file, JSON.stringify({ mcpServers: { 'cat-cafe': { command: 'node', args: [forkPath] } } }));
     await writeAntigravityMcpConfig(file, []);
     const data = JSON.parse(await readFile(file, 'utf-8'));
@@ -1531,7 +1531,7 @@ describe('round-trip: read → write → read', () => {
     const originalWs = process.env.CAT_CAFE_WORKSPACE_ROOT;
     try {
       delete process.env.ALLOWED_WORKSPACE_DIRS;
-      process.env.CAT_CAFE_WORKSPACE_ROOT = '/path/to/project';
+      process.env.CAT_CAFE_WORKSPACE_ROOT = '/home/user/cat-cafe';
       const servers = [
         {
           name: 'cat-cafe',
@@ -1558,7 +1558,7 @@ describe('round-trip: read → write → read', () => {
       assert.equal(roundTripped[0].name, 'cat-cafe');
       assert.equal(roundTripped[0].command, 'node');
       assert.deepEqual(roundTripped[0].env, {
-        ALLOWED_WORKSPACE_DIRS: '/path/to/project',
+        ALLOWED_WORKSPACE_DIRS: '/home/user/cat-cafe',
         PORT: '3000',
       });
     } finally {

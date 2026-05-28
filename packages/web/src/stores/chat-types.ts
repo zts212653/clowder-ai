@@ -1,4 +1,8 @@
-import type { ReplyPreview, SchedulerMessageExtra } from '@cat-cafe/shared';
+import type { CliDiagnostics, ReplyPreview, SchedulerMessageExtra } from '@cat-cafe/shared';
+
+// F212 Phase B: re-export so existing web imports (panel + tests) can pull the contract via the
+// canonical chat-types entry point without each consumer reaching into @cat-cafe/shared.
+export type { CliDiagnostics } from '@cat-cafe/shared';
 
 /** Content block types matching backend MessageContent */
 export interface TextContent {
@@ -279,6 +283,10 @@ export interface ChatMessage {
     scheduler?: SchedulerMessageExtra['scheduler'];
     /** F118 AC-C3: Timeout diagnostics for enhanced error display */
     timeoutDiagnostics?: TimeoutDiagnostics;
+    /** F212 Phase B: structured CLI error diagnostics for folded panel display
+     *  (reasonCode → SVG icon + humanized summary/hint + opt-in safeExcerpt).
+     *  Populated by useAgentMessages error-path from BackgroundAgentMessage.metadata.cliDiagnostics. */
+    cliDiagnostics?: CliDiagnostics;
     /** F070: Governance blocked data for actionable bootstrap card */
     governanceBlocked?: {
       projectPath: string;

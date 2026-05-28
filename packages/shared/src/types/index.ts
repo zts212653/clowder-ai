@@ -189,6 +189,8 @@ export type {
 } from './cat-breed.js';
 // F182: Cat routing error types
 export type { CatAlternative, CatRoutingError } from './cat-routing.js';
+// F212: CLI error diagnostics (cross-package data contract; classifier/sanitizer impl stays in api)
+export type { CliDiagnostics, CliErrorReasonCode } from './cli-diagnostics.js';
 export type { BuiltinAccountClient } from './client-routing.js';
 export {
   builtinAccountFamilyForClient,

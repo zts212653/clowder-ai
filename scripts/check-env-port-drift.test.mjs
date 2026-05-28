@@ -784,9 +784,21 @@ excluded:
 
     it('sync-manifest exports public harness eval fixtures used by test:public', () => {
       const managedFiles = readYamlTopLevelList('sync-manifest.yaml', 'managed_files');
+      const managedRoots = readYamlTopLevelList('sync-manifest.yaml', 'managed_roots');
+
+      // eval-domains/ is exported as a managed_root (whole directory), so the individual
+      // domain registries (eval-a2a/eval-memory/eval-sop) + community-fixtures sync
+      // automatically — they need NOT be listed in managed_files. This guard moved from
+      // per-file enumeration to root-coverage after the recurring "F192 added a new domain
+      // but forgot to update managed_files" sync-config debt (PR #1929).
+      assert.ok(
+        managedRoots.includes('docs/harness-feedback/eval-domains'),
+        'eval-domains/ must be a managed_root so all domain registries + community-fixtures sync to the public repo',
+      );
+
+      // verdicts/ + bundles/ + F210 assets stay curated in managed_files (verdicts/bundles
+      // may contain internal-only entries, so they are NOT blanket-exported as a root).
       const fixturePaths = [
-        'docs/harness-feedback/eval-domains/eval-a2a.yaml',
-        'docs/harness-feedback/eval-domains/eval-memory.yaml',
         'docs/harness-feedback/verdicts/fixtures/2026-05-21-eval-a2a-contract-demo.md',
         'docs/harness-feedback/verdicts/2026-05-23-eval-a2a-live-verdict.md',
         'docs/harness-feedback/bundles/2026-05-23-eval-a2a-live-verdict/attribution.json',

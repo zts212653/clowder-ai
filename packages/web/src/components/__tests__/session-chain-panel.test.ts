@@ -140,6 +140,43 @@ describe('F24: SessionChainPanel', () => {
     expect(idBtn?.textContent).toContain('ses_abc123');
   });
 
+  it('renders Antigravity runtime session identity and unexpected switch diagnostics', async () => {
+    mockSessionsResponse([
+      {
+        id: 'session-new',
+        cliSessionId: 'cascade-new-unexpected',
+        catId: 'opus',
+        seq: 1,
+        status: 'active',
+        messageCount: 1,
+        createdAt: Date.now() - 5000,
+        runtimeSession: {
+          runtime: 'antigravity-desktop',
+          runtimeSessionId: 'cascade-new-unexpected',
+          lifecycleState: 'active',
+          lastObservedAt: Date.now() - 1000,
+          unexpectedRuntimeSessionSwitch: {
+            detectedAt: Date.now() - 1000,
+            previousSessionId: 'session-old',
+            previousRuntimeSessionId: 'cascade-old-unexpected',
+            currentRuntimeSessionId: 'cascade-new-unexpected',
+            reason: 'missing_previous_runtime_session_id',
+          },
+        },
+      },
+    ]);
+
+    renderPanel('thread-1');
+    await flushFetch();
+
+    expect(container.querySelector('[data-testid="runtime-session-summary"]')).not.toBeNull();
+    expect(container.textContent).toContain('runtime');
+    expect(container.textContent).toContain('antigravity-desktop');
+    expect(container.textContent).toContain('unexpected switch');
+    expect(container.querySelector('button[title*="cascade-new-unexpected"]')).not.toBeNull();
+    expect(container.querySelector('button[title*="cascade-old-unexpected"]')).not.toBeNull();
+  });
+
   it('renders ContextHealthBar for active session with health data', async () => {
     mockSessionsResponse([
       {

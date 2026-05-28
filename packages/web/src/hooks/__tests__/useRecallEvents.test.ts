@@ -1,6 +1,7 @@
-// F102 Batch 3 — parseTextResults + anchorToHref
+// F102 Batch 3 — parseTextResults + anchorToHref + deduplicateRecallEvents
 import { describe, expect, it } from 'vitest';
-import { anchorToHref, parseTextResults } from '../useRecallEvents';
+import type { RecallEvent } from '../useRecallEvents';
+import { anchorToHref, deduplicateRecallEvents, parseTextResults } from '../useRecallEvents';
 
 const SAMPLE_OUTPUT = `Found 2 result(s):
 
@@ -110,5 +111,61 @@ describe('anchorToHref', () => {
 
   it('returns null for empty string', () => {
     expect(anchorToHref('')).toBeNull();
+  });
+});
+
+// F102 bugfix regression: deduplicateRecallEvents
+describe('deduplicateRecallEvents', () => {
+  const makeRecall = (id: string, query: string, timestamp: number): RecallEvent => ({
+    id,
+    query,
+    timestamp,
+    resultCount: 1,
+  });
+
+  it('returns only live events when history is empty (thread switch clears stale)', () => {
+    const live = [makeRecall('live-1', 'F102', 1000), makeRecall('live-2', 'F200', 2000)];
+    const history: RecallEvent[] = [];
+
+    const result = deduplicateRecallEvents(live, history);
+    expect(result).toHaveLength(2);
+    expect(result[0]!.id).toBe('live-1');
+    expect(result[1]!.id).toBe('live-2');
+  });
+
+  it('returns only history events when live is empty (page refresh)', () => {
+    const live: RecallEvent[] = [];
+    const history = [makeRecall('hist-1', 'old query', 500)];
+
+    const result = deduplicateRecallEvents(live, history);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.id).toBe('hist-1');
+  });
+
+  it('deduplicates by timestamp:query — live takes precedence', () => {
+    const live = [makeRecall('live-1', 'F102', 1000)];
+    const history = [
+      makeRecall('hist-dup', 'F102', 1000), // same timestamp+query → duplicate
+      makeRecall('hist-unique', 'F200', 2000), // different → kept
+    ];
+
+    const result = deduplicateRecallEvents(live, history);
+    expect(result).toHaveLength(2);
+    // live-1 kept (precedence), hist-dup dropped, hist-unique kept
+    expect(result.map((r) => r.id)).toEqual(['live-1', 'hist-unique']);
+  });
+
+  it('sorts merged results by timestamp ascending', () => {
+    const live = [makeRecall('live-late', 'query2', 3000)];
+    const history = [makeRecall('hist-early', 'query1', 1000)];
+
+    const result = deduplicateRecallEvents(live, history);
+    expect(result).toHaveLength(2);
+    expect(result[0]!.timestamp).toBe(1000);
+    expect(result[1]!.timestamp).toBe(3000);
+  });
+
+  it('handles both empty — returns empty array', () => {
+    expect(deduplicateRecallEvents([], [])).toEqual([]);
   });
 });

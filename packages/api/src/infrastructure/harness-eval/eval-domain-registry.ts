@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 const evalDomainRegistryEntrySchema = z.object({
-  domainId: z.enum(['eval:a2a', 'eval:memory']),
+  domainId: z.enum(['eval:a2a', 'eval:memory', 'eval:sop']),
   displayName: z.string().min(1),
   systemThreadId: z.string().min(1, 'systemThreadId is required'),
   evalCat: z.object({
@@ -9,14 +9,14 @@ const evalDomainRegistryEntrySchema = z.object({
     handle: z.string().min(1),
     model: z.string().min(1),
   }),
-  frequency: z.literal('daily'),
-  sourceAdapter: z.enum(['f167-runtime-eval', 'f200-f188-memory-eval']),
+  frequency: z.enum(['daily', 'weekly']),
+  sourceAdapter: z.enum(['f167-runtime-eval', 'f200-f188-memory-eval', 'sop-trace-eval']),
   threadPolicy: z.object({
     role: z.literal('working-home'),
     stateSot: z.literal('registry'),
     allowedContent: z.array(z.enum(['longitudinal-analysis', 'verdict-discussion', 'handoff-drafts'])).min(1),
   }),
-  legacyScheduledTaskIds: z.array(z.string().min(1)).min(1, 'legacyScheduledTaskIds must not be empty'),
+  legacyScheduledTaskIds: z.array(z.string().min(1)),
   handoffTargetResolver: z.object({
     featureId: z.string().regex(/^F\d{3}$/, 'featureId must match F followed by 3 digits'),
     ownerCatId: z.string().min(1),

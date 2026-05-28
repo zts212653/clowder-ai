@@ -11,19 +11,13 @@
  */
 
 // =============================================================================
-// Reason codes (placed here so both sanitizer + diagnostics can import without cycle)
+// Reason codes (F212 Phase B: hoisted to @cat-cafe/shared; re-exported here so existing
+// regex/sanitizer call sites keep their import path stable.)
 // =============================================================================
 
-export type CliErrorReasonCode =
-  | 'invalid_thinking_signature'
-  | 'missing_rollout'
-  | 'model_not_found'
-  | 'auth_failed'
-  | 'quota_exceeded'
-  | 'network_error'
-  | 'invalid_config'
-  | 'spawn_failed'
-  | 'context_window_exceeded';
+import type { CliErrorReasonCode } from '@cat-cafe/shared';
+
+export type { CliErrorReasonCode };
 
 // =============================================================================
 // Sanitizer regex pool — applied by sanitize-cli-stderr.ts in a fixed order

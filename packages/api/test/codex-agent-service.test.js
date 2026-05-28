@@ -1409,6 +1409,8 @@ test('F24: enriches Codex context snapshot from resolver into done metadata', as
     contextUsedTokens: 186_749,
     contextWindowTokens: 258_400,
     contextResetsAtMs: Date.UTC(2026, 1, 18, 0, 0, 0),
+    lastCachedInputTokens: 122_880,
+    lastOutputTokens: 617,
   }));
   const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, contextSnapshotResolver });
 
@@ -1435,6 +1437,9 @@ test('F24: enriches Codex context snapshot from resolver into done metadata', as
   assert.equal(done.metadata.usage.contextUsedTokens, 186_749);
   assert.equal(done.metadata.usage.contextWindowSize, 258_400);
   assert.equal(done.metadata.usage.contextResetsAtMs, Date.UTC(2026, 1, 18, 0, 0, 0));
+  assert.equal(done.metadata.usage.inputTokens, 186_749);
+  assert.equal(done.metadata.usage.cacheReadTokens, 122_880);
+  assert.equal(done.metadata.usage.outputTokens, 617);
   assert.equal(done.metadata.usage.lastTurnInputTokens, 186_749);
 });
 

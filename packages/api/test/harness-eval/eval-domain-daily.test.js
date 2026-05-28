@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { createEvalDomainDailySpec } from '../../dist/infrastructure/harness-eval/eval-domain-daily.js';
+import {
+  createEvalDomainDailySpec,
+  createEvalDomainWeeklySpec,
+} from '../../dist/infrastructure/harness-eval/eval-domain-daily.js';
 
 const repoHarnessFeedbackRoot = fileURLToPath(new URL('../../../../docs/harness-feedback', import.meta.url));
 
@@ -21,13 +24,14 @@ describe('eval-domain-daily task spec', () => {
     assert.equal(spec.display.category, 'system');
   });
 
-  it('gate returns workItems for each registered eval domain', async () => {
+  it('gate returns workItems for daily-frequency domains only', async () => {
     const spec = createEvalDomainDailySpec({ harnessFeedbackRoot: repoHarnessFeedbackRoot });
 
     const result = await spec.admission.gate();
 
     assert.equal(result.run, true);
-    assert.ok(result.workItems.length >= 2, `expected ≥2 domains, got ${result.workItems.length}`);
+    // Only daily domains: eval:a2a + eval:memory (eval:sop is weekly)
+    assert.equal(result.workItems.length, 2, `expected exactly 2 daily domains, got ${result.workItems.length}`);
 
     const a2a = result.workItems.find((w) => w.subjectKey === 'eval:a2a');
     assert.ok(a2a, 'should have eval:a2a work item');
@@ -57,7 +61,10 @@ describe('eval-domain-daily task spec', () => {
     assert.ok(memory, 'eval:memory should still be included');
   });
 
-  it('gate returns run=false when all domains have active legacy tasks (P1-2)', async () => {
+  it('gate returns run=false when all daily domains have active legacy tasks', async () => {
+    // With frequency filtering, daily gate only sees daily domains (a2a, memory).
+    // eval:sop is weekly and handled by the weekly spec.
+    // If both daily domains have active legacy → daily gate returns run=false.
     const activeLegacyTasks = [
       { id: 'harness-fit-digest', templateId: 'harness-fit-digest', enabled: true },
       { id: 'memory-recall-digest', templateId: 'memory-recall-digest', enabled: true },
@@ -69,8 +76,8 @@ describe('eval-domain-daily task spec', () => {
 
     const result = await spec.admission.gate();
 
-    assert.equal(result.run, false, 'no domains should run when all have active legacy');
-    assert.ok(result.reason.includes('legacy'), 'reason should mention legacy tasks');
+    assert.equal(result.run, false, 'all daily domains have active legacy → run=false');
+    assert.equal(result.reason, 'all domains skipped — active legacy tasks would cause double-trigger');
   });
 
   it('gate returns run=false when no eval domains exist', async () => {
@@ -208,5 +215,84 @@ describe('eval-domain-daily task spec', () => {
     const ctx = { assignedCatId: null };
     await spec.run.execute(item.signal, item.subjectKey, ctx);
     // If we get here without throwing, test passes
+  });
+
+  it('daily gate excludes weekly-frequency domains (eval:sop)', async () => {
+    const spec = createEvalDomainDailySpec({ harnessFeedbackRoot: repoHarnessFeedbackRoot });
+
+    const result = await spec.admission.gate();
+    assert.equal(result.run, true);
+
+    const domainIds = result.workItems.map((w) => w.subjectKey);
+    assert.ok(!domainIds.includes('eval:sop'), 'eval:sop (weekly) must NOT appear in daily gate');
+    assert.ok(domainIds.includes('eval:a2a'), 'eval:a2a (daily) must appear');
+    assert.ok(domainIds.includes('eval:memory'), 'eval:memory (daily) must appear');
+  });
+});
+
+describe('eval-domain-weekly task spec (AC-E19, AC-E20)', () => {
+  it('returns a valid TaskSpec_P1 with weekly cron and correct id', () => {
+    const spec = createEvalDomainWeeklySpec({ harnessFeedbackRoot: repoHarnessFeedbackRoot });
+
+    assert.equal(spec.id, 'eval-domain-weekly');
+    assert.equal(spec.profile, 'awareness');
+    assert.deepEqual(spec.trigger, { type: 'cron', expression: '0 3 * * 0', timezone: 'UTC' });
+    assert.equal(spec.run.overlap, 'skip');
+    assert.equal(spec.run.timeoutMs, 60_000);
+    assert.deepEqual(spec.state, { runLedger: 'sqlite' });
+    assert.deepEqual(spec.outcome, { whenNoSignal: 'drop' });
+    assert.equal(spec.enabled(), true);
+    assert.equal(spec.display.label, '每周 Harness Eval');
+    assert.equal(spec.display.category, 'system');
+  });
+
+  it('weekly gate includes eval:sop but excludes daily domains', async () => {
+    const spec = createEvalDomainWeeklySpec({ harnessFeedbackRoot: repoHarnessFeedbackRoot });
+
+    const result = await spec.admission.gate();
+    assert.equal(result.run, true);
+
+    const domainIds = result.workItems.map((w) => w.subjectKey);
+    assert.ok(domainIds.includes('eval:sop'), 'eval:sop (weekly) must appear in weekly gate');
+    assert.ok(!domainIds.includes('eval:a2a'), 'eval:a2a (daily) must NOT appear in weekly gate');
+    assert.ok(!domainIds.includes('eval:memory'), 'eval:memory (daily) must NOT appear in weekly gate');
+  });
+
+  it('weekly gate returns run=false when no weekly domains exist', async () => {
+    const spec = createEvalDomainWeeklySpec({ harnessFeedbackRoot: '/nonexistent/path' });
+
+    const result = await spec.admission.gate();
+
+    assert.equal(result.run, false);
+  });
+
+  it('weekly execute delivers message with "Weekly eval" trigger reason', async () => {
+    const spec = createEvalDomainWeeklySpec({ harnessFeedbackRoot: repoHarnessFeedbackRoot });
+
+    const gateResult = await spec.admission.gate();
+    assert.equal(gateResult.run, true);
+    const sopItem = gateResult.workItems.find((w) => w.subjectKey === 'eval:sop');
+    assert.ok(sopItem);
+
+    const deliverMock = mock.fn(async () => 'msg_weekly_001');
+    const triggerMock = mock.fn();
+    const ctx = {
+      assignedCatId: null,
+      deliver: deliverMock,
+      invokeTrigger: { trigger: triggerMock },
+    };
+
+    await spec.run.execute(sopItem.signal, sopItem.subjectKey, ctx);
+
+    assert.equal(deliverMock.mock.callCount(), 1);
+    const deliverCall = deliverMock.mock.calls[0].arguments[0];
+    assert.equal(deliverCall.threadId, 'thread_eval_sop');
+    assert.equal(deliverCall.userId, 'scheduler');
+    assert.ok(deliverCall.content.includes('eval:sop'), 'content should mention domain');
+
+    assert.equal(triggerMock.mock.callCount(), 1);
+    const triggerArgs = triggerMock.mock.calls[0].arguments;
+    assert.equal(triggerArgs[0], 'thread_eval_sop');
+    assert.ok(triggerArgs[3].includes('Weekly eval'), 'trigger reason should say Weekly');
   });
 });

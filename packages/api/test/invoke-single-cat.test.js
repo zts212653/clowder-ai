@@ -862,6 +862,89 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const active = sessionChainStore.getActive('antig-opus', 'thread-f211-rotate');
     const runtime = runtimeSessionStore.getByRuntimeSession('antigravity-desktop', 'cascade-new');
     assert.equal(runtime.sessionId, active.id);
+    assert.equal(runtime.lifecycle.unexpectedRuntimeSessionSwitch, undefined);
+  });
+
+  it('F211 D: Antigravity switch without previous runtime id is diagnosed as unexpected', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const { RuntimeSessionStore } = await import(
+      '../dist/domains/cats/services/runtime-session/RuntimeSessionStore.js'
+    );
+    const sessionChainStore = new SessionChainStore();
+    const runtimeSessionStore = new RuntimeSessionStore();
+    const oldRecord = sessionChainStore.create({
+      cliSessionId: 'cascade-old-unexpected',
+      threadId: 'thread-f211-unexpected-switch',
+      catId: 'antig-opus',
+      userId: 'user1',
+    });
+    runtimeSessionStore.upsert({
+      sessionId: oldRecord.id,
+      runtime: 'antigravity-desktop',
+      runtimeSessionId: 'cascade-old-unexpected',
+      threadId: 'thread-f211-unexpected-switch',
+      catId: 'antig-opus',
+      userId: 'user1',
+      surface: 'cat-cafe-dispatch',
+      identityHistory: [{ catId: 'antig-opus', model: 'claude-opus-4-6', from: 1000, source: 'session_init' }],
+      lifecycle: { state: 'active', startedAt: 1000, lastObservedAt: 1000 },
+    });
+    const sealCalls = [];
+    const sessionSealer = {
+      requestSeal: async (args) => {
+        sealCalls.push(args);
+        return { accepted: true, status: 'sealing' };
+      },
+      finalize: async () => {},
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
+    };
+    const service = {
+      async *invoke() {
+        yield {
+          type: 'session_init',
+          catId: 'antig-opus',
+          sessionId: 'cascade-new-unexpected',
+          sessionLifecycle: {
+            runtime: 'antigravity-desktop',
+            runtimeSessionId: 'cascade-new-unexpected',
+          },
+          metadata: { provider: 'antigravity', model: 'claude-opus-4-6' },
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'antig-opus', timestamp: Date.now() };
+      },
+    };
+
+    await collect(
+      invokeSingleCat(
+        { ...makeDeps(), sessionChainStore, sessionSealer, runtimeSessionStore },
+        {
+          catId: 'antig-opus',
+          service,
+          prompt: 'test',
+          userId: 'user1',
+          threadId: 'thread-f211-unexpected-switch',
+          isLastCat: true,
+        },
+      ),
+    );
+
+    assert.equal(sealCalls.length, 1);
+    assert.equal(sealCalls[0].reason, 'unexpected_runtime_session_switch');
+    const oldRuntime = runtimeSessionStore.getByRuntimeSession('antigravity-desktop', 'cascade-old-unexpected');
+    const active = sessionChainStore.getActive('antig-opus', 'thread-f211-unexpected-switch');
+    const currentRuntime = runtimeSessionStore.getByRuntimeSession('antigravity-desktop', 'cascade-new-unexpected');
+    assert.equal(oldRuntime.lifecycle.state, 'sealed');
+    assert.equal(oldRuntime.lifecycle.sealReason, 'unexpected_runtime_session_switch');
+    assert.equal(currentRuntime.sessionId, active.id);
+    assert.deepEqual(currentRuntime.lifecycle.unexpectedRuntimeSessionSwitch, {
+      detectedAt: currentRuntime.lifecycle.lastObservedAt,
+      previousSessionId: oldRecord.id,
+      previousRuntimeSessionId: 'cascade-old-unexpected',
+      currentRuntimeSessionId: 'cascade-new-unexpected',
+      reason: 'missing_previous_runtime_session_id',
+    });
   });
 
   it('F211 A2: degraded Antigravity rotation leaves old runtime metadata seal-pending for reaper', async () => {

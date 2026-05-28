@@ -1484,6 +1484,7 @@ async function main(): Promise<void> {
     evidenceDb: memoryServices.store.getDb(),
     messageStore,
     taskStore,
+    threadStore,
   });
   // F153 Phase E: Hub embedded observability routes
   const { telemetryRoutes } = await import('./routes/telemetry.js');
@@ -1927,6 +1928,7 @@ async function main(): Promise<void> {
     messageStore,
     transcriptReader,
     sessionSealer,
+    runtimeSessionStore,
   });
   await app.register(sessionTranscriptRoutes, { sessionChainStore, threadStore, transcriptReader });
   await app.register(externalRuntimeSessionsRoutes, { sessionChainStore, runtimeSessionStore, threadStore });
@@ -2771,17 +2773,19 @@ async function main(): Promise<void> {
   const hydrated = taskRunnerV2.hydrateDynamic(dynamicTaskStore, templateRegistry);
   if (hydrated > 0) app.log.info(`[api] F139: hydrated ${hydrated} dynamic task(s)`);
 
-  // F192 livefix OQ-17: Register daily eval domain task (reads eval-domains/*.yaml, triggers eval cats)
-  const { createEvalDomainDailySpec } = await import('./infrastructure/harness-eval/eval-domain-daily.js');
-  const { getOwnerUserId } = await import('./config/cat-config-loader.js');
-  taskRunnerV2.register(
-    createEvalDomainDailySpec({
-      harnessFeedbackRoot: resolve(repoRoot, 'docs', 'harness-feedback'),
-      threadStore,
-      defaultUserId: getOwnerUserId(),
-      listDynamicTasks: () => dynamicTaskStore.getAll(),
-    }),
+  // F192 livefix OQ-17: Register daily + weekly eval domain tasks (reads eval-domains/*.yaml, triggers eval cats)
+  const { createEvalDomainDailySpec, createEvalDomainWeeklySpec } = await import(
+    './infrastructure/harness-eval/eval-domain-daily.js'
   );
+  const { getOwnerUserId } = await import('./config/cat-config-loader.js');
+  const evalScheduleOpts = {
+    harnessFeedbackRoot: resolve(repoRoot, 'docs', 'harness-feedback'),
+    threadStore,
+    defaultUserId: getOwnerUserId(),
+    listDynamicTasks: () => dynamicTaskStore.getAll(),
+  };
+  taskRunnerV2.register(createEvalDomainDailySpec(evalScheduleOpts));
+  taskRunnerV2.register(createEvalDomainWeeklySpec(evalScheduleOpts));
 
   // F139: Start unified scheduler (all registered specs)
   taskRunnerV2.start();

@@ -74,11 +74,9 @@ describe('Eval Domain Registry v0', () => {
     assert.throws(() => parseEvalDomainRegistryEntry({ ...validEntry, systemThreadId: '' }), /systemThreadId/);
   });
 
-  it('rejects empty legacy scheduled task ids', () => {
-    assert.throws(
-      () => parseEvalDomainRegistryEntry({ ...validEntry, legacyScheduledTaskIds: [] }),
-      /legacyScheduledTaskIds/,
-    );
+  it('accepts empty legacy scheduled task ids (eval:sop has no legacy tasks)', () => {
+    const entry = parseEvalDomainRegistryEntry({ ...validEntry, legacyScheduledTaskIds: [] });
+    assert.deepEqual(entry.legacyScheduledTaskIds, []);
   });
 
   it('rejects non-positive SLA windows', () => {
@@ -152,5 +150,56 @@ describe('Eval Domain Registry v0', () => {
         handoffTargetResolver: { ...validEntry.handoffTargetResolver, featureId: 'not-a-feature' },
       }),
     );
+  });
+
+  // --- eval:sop domain extension (F192 E-sop) ---
+
+  it('validates a valid eval:sop registry entry', () => {
+    const sopEntry = {
+      domainId: 'eval:sop',
+      displayName: 'SOP Compliance Eval',
+      systemThreadId: 'thread_eval_sop',
+      evalCat: { catId: 'opus47', handle: '@opus47', model: 'claude-opus-4-7' },
+      frequency: 'weekly',
+      sourceAdapter: 'sop-trace-eval',
+      threadPolicy: {
+        role: 'working-home',
+        stateSot: 'registry',
+        allowedContent: ['longitudinal-analysis', 'verdict-discussion', 'handoff-drafts'],
+      },
+      legacyScheduledTaskIds: [],
+      handoffTargetResolver: { featureId: 'F192', ownerCatId: 'opus', threadLookup: 'feature-thread' },
+      sla: { acknowledgeHours: 48, reevalWithinHours: 336 },
+    };
+    const entry = parseEvalDomainRegistryEntry(sopEntry);
+    assert.equal(entry.domainId, 'eval:sop');
+    assert.equal(entry.sourceAdapter, 'sop-trace-eval');
+    assert.equal(entry.frequency, 'weekly');
+    assert.deepEqual(entry.legacyScheduledTaskIds, []);
+  });
+
+  it('accepts weekly frequency for eval:sop', () => {
+    const entry = parseEvalDomainRegistryEntry({
+      ...validEntry,
+      domainId: 'eval:sop',
+      frequency: 'weekly',
+      sourceAdapter: 'sop-trace-eval',
+      legacyScheduledTaskIds: [],
+    });
+    assert.equal(entry.frequency, 'weekly');
+  });
+
+  it('loads the docs-backed eval:sop registry fixture', async () => {
+    const raw = await readFile(
+      new URL('../../../../docs/harness-feedback/eval-domains/eval-sop.yaml', import.meta.url),
+      'utf8',
+    );
+    const parsed = parse(raw);
+    const entry = parseEvalDomainRegistryFile(parsed);
+
+    assert.equal(entry.domainId, 'eval:sop');
+    assert.equal(entry.sourceAdapter, 'sop-trace-eval');
+    assert.equal(entry.frequency, 'weekly');
+    assert.equal(entry.sla.reevalWithinHours, 336);
   });
 });

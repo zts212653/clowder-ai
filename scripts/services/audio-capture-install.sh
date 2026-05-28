@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # scripts/services/audio-capture-install.sh
-# Install dependencies for F195 audio-capture service (venv + sounddevice + fastapi).
+# Install dependencies for F195 audio-capture service (venv + aiohttp + sounddevice).
 # Audio-capture has no ML model -- uses MODEL_LOADER=skip to bypass the
 # model-download step the template normally runs for whisper/tts/embed/llm.
+# Phase F adds Silero VAD (torch) for speech-aware chunking.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,10 +24,11 @@ DISK_REQUIRED_GB=1
 # capture has no model concept (recording + uploading raw audio frames).
 MODEL_ENV_VAR="_AUDIO_CAPTURE_NO_MODEL"
 # Same deps on every platform -- sounddevice wraps PortAudio which has
-# prebuilt wheels for darwin/linux/win32 across arm64/x64. fastapi +
-# uvicorn provide the HTTP layer the audio-proxy.ts routes proxy into.
-PIP_DEPS_ARM64="sounddevice fastapi uvicorn numpy"
-PIP_DEPS_OTHER="sounddevice fastapi uvicorn numpy"
+# prebuilt wheels for darwin/linux/win32 across arm64/x64. aiohttp is the
+# actual HTTP framework used by audio-service.py (not fastapi/uvicorn).
+# torch is needed for Silero VAD speech segmentation (Phase F).
+PIP_DEPS_ARM64="aiohttp sounddevice numpy torch"
+PIP_DEPS_OTHER="aiohttp sounddevice numpy torch"
 MODEL_LOADER_ARM64="skip"
 MODEL_LOADER_OTHER="skip"
 

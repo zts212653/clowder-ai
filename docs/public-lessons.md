@@ -1128,7 +1128,7 @@ created: 2026-02-26
   - `docs/features/F193-cross-thread-comm-unification.md`（事故发生在该 feature Phase A 实施期间）
   - `packages/mcp-server/test/post-message-kd1-mcp-handler.test.js`（修复点）
   - commit `8fea021f1` (fix(F193): mock fetch + override env in AC-A2 test)
-  - 截图证据：`/path/to/project-runtime/packages/api/uploads/1778205224706-386492e0.png`
+  - 截图证据：`/home/user/cat-cafe-runtime/packages/api/uploads/1778205224706-386492e0.png`
 - 原理：**子进程默认继承父 process env，是 OS 级行为不是 shell quirk**。任何用真 callback config 跑的进程（猫的 invocation 进程）下面派生的子进程（pnpm/node test runner）天然带这套 env。Unit test 必须**显式擦除**这些可能触发 side-effect 的 env，不能依赖"测试通常不发 HTTP"的乐观假设。fail-closed 优于 fail-fast——把 URL 指向 closed 端口，比单靠 fetch mock 多一层防御。
 
 - 关联：`cat-cafe-skills/refs/shared-rules.md §19` | F193

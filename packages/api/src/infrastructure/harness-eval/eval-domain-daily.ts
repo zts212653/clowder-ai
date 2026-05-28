@@ -1,11 +1,13 @@
 /**
- * F192 livefix OQ-17: Daily eval domain task spec.
+ * F192 livefix OQ-17 + AC-E19/E20: Frequency-aware eval domain task specs.
  *
- * Reads all eval-domains/*.yaml at gate time, builds invocation packets
- * via buildEvalCatInvocation(), and delivers instructions to each domain's
- * system thread + triggers the assigned eval cat.
+ * Reads all eval-domains/*.yaml at gate time, filters by frequency
+ * (daily vs weekly), builds invocation packets via buildEvalCatInvocation(),
+ * and delivers instructions to each domain's system thread + triggers the
+ * assigned eval cat.
  *
- * Cron: 03:00 UTC daily.
+ * Daily: 03:00 UTC every day (eval:a2a, eval:memory)
+ * Weekly: 03:00 UTC every Sunday (eval:sop)
  */
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -18,7 +20,7 @@ import { type EvalDomainRegistryEntry, parseEvalDomainRegistryFile } from './eva
 import { ensureEvalDomainThreads } from './eval-hub-thread-ensure.js';
 import { inventoryLegacyTasks, type LegacyScheduledTaskLike } from './legacy-task-cleanup.js';
 
-export interface EvalDomainDailyOpts {
+export interface EvalDomainScheduleOpts {
   harnessFeedbackRoot: string;
   threadStore?: IThreadStore;
   /** Cloud P1: user ID for sidebar indexing — system threads need explicit user-list registration. */
@@ -27,19 +29,59 @@ export interface EvalDomainDailyOpts {
   listDynamicTasks?: () => LegacyScheduledTaskLike[];
 }
 
-export function createEvalDomainDailySpec(opts: EvalDomainDailyOpts): TaskSpec_P1<EvalDomainRegistryEntry> {
-  return {
+/** @deprecated Use EvalDomainScheduleOpts — kept for backward compat. */
+export type EvalDomainDailyOpts = EvalDomainScheduleOpts;
+
+// ---- Public factories ----
+
+export function createEvalDomainDailySpec(opts: EvalDomainScheduleOpts): TaskSpec_P1<EvalDomainRegistryEntry> {
+  return createEvalDomainSpec({
+    ...opts,
+    frequency: 'daily',
     id: 'eval-domain-daily',
+    cron: '0 3 * * *',
+    label: '每日 Harness Eval',
+    description: 'Daily harness eval — reads domain registry, triggers eval cat per domain',
+    triggerReasonPrefix: 'Daily eval',
+  });
+}
+
+export function createEvalDomainWeeklySpec(opts: EvalDomainScheduleOpts): TaskSpec_P1<EvalDomainRegistryEntry> {
+  return createEvalDomainSpec({
+    ...opts,
+    frequency: 'weekly',
+    id: 'eval-domain-weekly',
+    cron: '0 3 * * 0',
+    label: '每周 Harness Eval',
+    description: 'Weekly harness eval — reads domain registry, triggers eval cat for weekly domains',
+    triggerReasonPrefix: 'Weekly eval',
+  });
+}
+
+// ---- Shared parameterized factory ----
+
+interface EvalDomainSpecConfig extends EvalDomainScheduleOpts {
+  frequency: 'daily' | 'weekly';
+  id: string;
+  cron: string;
+  label: string;
+  description: string;
+  triggerReasonPrefix: string;
+}
+
+function createEvalDomainSpec(config: EvalDomainSpecConfig): TaskSpec_P1<EvalDomainRegistryEntry> {
+  return {
+    id: config.id,
     profile: 'awareness',
-    trigger: { type: 'cron', expression: '0 3 * * *', timezone: 'UTC' }, // 03:00 UTC daily
+    trigger: { type: 'cron', expression: config.cron, timezone: 'UTC' },
     admission: {
       async gate() {
-        const domains = loadRegisteredDomains(opts.harnessFeedbackRoot);
+        const domains = loadRegisteredDomains(config.harnessFeedbackRoot, config.frequency);
         if (domains.length === 0) return { run: false, reason: 'no registered eval domains' };
 
         // P1-2 fix: skip domains whose legacy scheduled tasks are still active
         // to prevent double-trigger (new eval-domain-daily + legacy harness-fit-digest/memory-recall-digest)
-        const activeTasks = opts.listDynamicTasks?.() ?? [];
+        const activeTasks = config.listDynamicTasks?.() ?? [];
         const eligibleDomains = domains.filter((d) => {
           const legacyActive = inventoryLegacyTasks(d, activeTasks).filter((t) => t.enabled);
           return legacyActive.length === 0;
@@ -62,11 +104,11 @@ export function createEvalDomainDailySpec(opts: EvalDomainDailyOpts): TaskSpec_P
       timeoutMs: 60_000,
       async execute(domain, _subjectKey, ctx) {
         // P1-1 fix: ensure system thread exists before delivering — fresh boot where
-        // 03:00 cron fires before anyone opens Eval Hub would otherwise deliver to
+        // cron fires before anyone opens Eval Hub would otherwise deliver to
         // a non-existent thread.
-        if (opts.threadStore) {
+        if (config.threadStore) {
           await ensureEvalDomainThreads(
-            opts.threadStore,
+            config.threadStore,
             [
               {
                 domainId: domain.domainId,
@@ -74,7 +116,7 @@ export function createEvalDomainDailySpec(opts: EvalDomainDailyOpts): TaskSpec_P
                 displayName: domain.displayName,
               },
             ],
-            opts.defaultUserId,
+            config.defaultUserId,
           );
         }
 
@@ -82,7 +124,7 @@ export function createEvalDomainDailySpec(opts: EvalDomainDailyOpts): TaskSpec_P
         // — its legacy tasks are either absent or disabled. Report accurate status.
         // Note: listDynamicTasks returns ALL defs including disabled ones (DynamicTaskStore.getAll),
         // so we must filter by enabled to avoid misreporting disabled legacy as 'dry_run_ready'.
-        const activeTasks = opts.listDynamicTasks?.() ?? [];
+        const activeTasks = config.listDynamicTasks?.() ?? [];
         const enabledLegacy = inventoryLegacyTasks(domain, activeTasks).filter((t) => t.enabled);
         const legacyStatus = enabledLegacy.length > 0 ? 'dry_run_ready' : 'disabled';
 
@@ -112,7 +154,7 @@ export function createEvalDomainDailySpec(opts: EvalDomainDailyOpts): TaskSpec_P
               invocation.targetThreadId,
               invocation.evalCat.catId,
               'scheduler',
-              `Daily eval: ${invocation.domainId}`,
+              `${config.triggerReasonPrefix}: ${invocation.domainId}`,
               messageId,
             );
           }
@@ -123,18 +165,21 @@ export function createEvalDomainDailySpec(opts: EvalDomainDailyOpts): TaskSpec_P
     outcome: { whenNoSignal: 'drop' },
     enabled: () => true,
     display: {
-      label: '每日 Harness Eval',
+      label: config.label,
       category: 'system',
-      description: 'Daily harness eval — reads domain registry, triggers eval cat per domain',
+      description: config.description,
       subjectKind: 'none',
     },
   };
 }
 
-function loadRegisteredDomains(harnessFeedbackRoot: string): EvalDomainRegistryEntry[] {
+// ---- Domain loader with frequency filter ----
+
+function loadRegisteredDomains(harnessFeedbackRoot: string, frequency: 'daily' | 'weekly'): EvalDomainRegistryEntry[] {
   const domainsDir = join(harnessFeedbackRoot, 'eval-domains');
   if (!existsSync(domainsDir)) return [];
   return readdirSync(domainsDir, { withFileTypes: true })
     .filter((e) => e.isFile() && e.name.endsWith('.yaml'))
-    .map((e) => parseEvalDomainRegistryFile(parseYaml(readFileSync(join(domainsDir, e.name), 'utf8'))));
+    .map((e) => parseEvalDomainRegistryFile(parseYaml(readFileSync(join(domainsDir, e.name), 'utf8'))))
+    .filter((d) => d.frequency === frequency);
 }

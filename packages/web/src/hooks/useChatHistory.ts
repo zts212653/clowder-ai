@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReplyPreview, SchedulerMessageExtra } from '@cat-cafe/shared';
+import type { CliDiagnostics, ReplyPreview, SchedulerMessageExtra } from '@cat-cafe/shared';
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { getBubbleInvocationId, shouldForceReplaceHydrationForCachedMessages } from '@/debug/bubbleIdentity';
 import { recordDebugEvent } from '@/debug/invocationEventDebug';
@@ -161,6 +161,9 @@ function mergeMessageExtra(
   const targetCats = preferred?.targetCats ?? fallback?.targetCats;
   const scheduler = preferred?.scheduler ?? fallback?.scheduler;
   const timeoutDiagnostics = preferred?.timeoutDiagnostics ?? fallback?.timeoutDiagnostics;
+  // F212 Phase B: preserve cliDiagnostics when merging history (mirrors timeoutDiagnostics —
+  // diagnostics outlive a single live event and must survive hydration after F5 / re-fetch).
+  const cliDiagnostics = preferred?.cliDiagnostics ?? fallback?.cliDiagnostics;
   const governanceBlocked = preferred?.governanceBlocked ?? fallback?.governanceBlocked;
   const systemKind = preferred?.systemKind ?? fallback?.systemKind;
   if (
@@ -170,6 +173,7 @@ function mergeMessageExtra(
     !targetCats &&
     !scheduler &&
     !timeoutDiagnostics &&
+    !cliDiagnostics &&
     !governanceBlocked &&
     !systemKind
   ) {
@@ -182,6 +186,7 @@ function mergeMessageExtra(
     ...(targetCats ? { targetCats } : {}),
     ...(scheduler ? { scheduler } : {}),
     ...(timeoutDiagnostics ? { timeoutDiagnostics } : {}),
+    ...(cliDiagnostics ? { cliDiagnostics } : {}),
     ...(governanceBlocked ? { governanceBlocked } : {}),
     ...(systemKind ? { systemKind } : {}),
   };
@@ -633,7 +638,14 @@ export function useChatHistory(threadId: string) {
             content: string;
             contentBlocks?: unknown[];
             toolEvents?: unknown[];
-            metadata?: { provider: string; model: string; sessionId?: string };
+            metadata?: {
+              provider: string;
+              model: string;
+              sessionId?: string;
+              /** F212 Phase B (云端 codex P2 2026-05-27): stored CLI diagnostics on error events;
+               *  copied into extra.cliDiagnostics below so the folded panel survives cold hydration. */
+              cliDiagnostics?: CliDiagnostics;
+            };
             origin?: 'stream' | 'callback' | 'briefing';
             thinking?: string;
             extra?: {
@@ -642,6 +654,9 @@ export function useChatHistory(threadId: string) {
               stream?: { invocationId?: string };
               scheduler?: SchedulerMessageExtra['scheduler'];
               systemKind?: 'a2a_routing';
+              /** F212 Phase B: history-loader path may already carry cliDiagnostics under
+               *  extra (when client wrote it via active-path) — prefer it over metadata copy. */
+              cliDiagnostics?: CliDiagnostics;
             };
             timestamp: number;
             summary?: { id: string; topic: string; conclusions: string[]; openQuestions: string[]; createdBy: string };
@@ -673,17 +688,34 @@ export function useChatHistory(threadId: string) {
               ...(m.metadata ? { metadata: m.metadata } : {}),
               ...(m.origin ? { origin: m.origin } : {}),
               ...(m.thinking ? { thinking: m.thinking } : {}),
-              ...(m.extra?.rich || m.extra?.crossPost || m.extra?.stream || m.extra?.scheduler || m.extra?.systemKind
-                ? {
-                    extra: {
-                      ...(m.extra.rich ? { rich: m.extra.rich } : {}),
-                      ...(m.extra.crossPost ? { crossPost: m.extra.crossPost } : {}),
-                      ...(m.extra.stream ? { stream: m.extra.stream } : {}),
-                      ...(m.extra.scheduler ? { scheduler: m.extra.scheduler } : {}),
-                      ...(m.extra.systemKind ? { systemKind: m.extra.systemKind } : {}),
-                    },
-                  }
-                : {}),
+              // F212 Phase B (云端 codex P2 2026-05-27): cliDiagnostics rides on stored
+              // message metadata (Phase A providers stamp __cliError/__cliTimeout payload
+              // there). Cold hydration / F5 / re-fetch must copy it into `extra.cliDiagnostics`
+              // so ChatMessage's folded panel renders — otherwise the diagnostic panel disappears
+              // on page reload even though the stored payload still has the data.
+              // Precedence: prefer extra.cliDiagnostics (active-path may write here) over
+              // metadata.cliDiagnostics (api-persisted authoritative copy).
+              ...(() => {
+                const cliDiag = m.extra?.cliDiagnostics ?? m.metadata?.cliDiagnostics;
+                const hasExtraField =
+                  m.extra?.rich ||
+                  m.extra?.crossPost ||
+                  m.extra?.stream ||
+                  m.extra?.scheduler ||
+                  m.extra?.systemKind ||
+                  cliDiag;
+                if (!hasExtraField) return {};
+                return {
+                  extra: {
+                    ...(m.extra?.rich ? { rich: m.extra.rich } : {}),
+                    ...(m.extra?.crossPost ? { crossPost: m.extra.crossPost } : {}),
+                    ...(m.extra?.stream ? { stream: m.extra.stream } : {}),
+                    ...(m.extra?.scheduler ? { scheduler: m.extra.scheduler } : {}),
+                    ...(m.extra?.systemKind ? { systemKind: m.extra.systemKind } : {}),
+                    ...(cliDiag ? { cliDiagnostics: cliDiag } : {}),
+                  },
+                };
+              })(),
               ...(m.summary ? { summary: m.summary } : {}),
               ...(m.visibility ? { visibility: m.visibility } : {}),
               ...(m.whisperTo ? { whisperTo: m.whisperTo } : {}),

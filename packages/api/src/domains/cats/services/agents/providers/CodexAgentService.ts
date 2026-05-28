@@ -813,18 +813,24 @@ export class CodexAgentService implements AgentService {
             usage.contextUsedTokens = snapshot.contextUsedTokens;
             usage.contextWindowSize = snapshot.contextWindowTokens;
             usage.lastTurnInputTokens = snapshot.contextUsedTokens;
+            // Codex turn.completed usage can be CLI-session cumulative. When
+            // token_count is available, prefer last_token_usage for this turn.
+            // For Codex, each Cat Cafe invocation is one CLI turn, so
+            // last_token_usage is the invocation input, not a session total.
+            usage.inputTokens = snapshot.contextUsedTokens;
 
             if (snapshot.contextResetsAtMs != null) {
               usage.contextResetsAtMs = snapshot.contextResetsAtMs;
             }
-            if (usage.inputTokens == null && snapshot.totalInputTokens != null) {
-              usage.inputTokens = snapshot.totalInputTokens;
+            if (snapshot.lastCachedInputTokens != null) {
+              usage.cacheReadTokens = snapshot.lastCachedInputTokens;
+            } else {
+              delete usage.cacheReadTokens;
             }
-            if (usage.cacheReadTokens == null && snapshot.totalCachedInputTokens != null) {
-              usage.cacheReadTokens = snapshot.totalCachedInputTokens;
-            }
-            if (usage.outputTokens == null && snapshot.totalOutputTokens != null) {
-              usage.outputTokens = snapshot.totalOutputTokens;
+            if (snapshot.lastOutputTokens != null) {
+              usage.outputTokens = snapshot.lastOutputTokens;
+            } else {
+              delete usage.outputTokens;
             }
 
             metadata.usage = usage;

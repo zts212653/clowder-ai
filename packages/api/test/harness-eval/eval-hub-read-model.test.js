@@ -221,8 +221,8 @@ Evidence:
     const summary = loadEvalHubSummary({ harnessFeedbackRoot: repoHarnessFeedbackRoot });
 
     assert.ok(summary.domains, 'domains field must exist');
-    assert.equal(summary.domains.length, 2, 'should have 2 registered domains (eval:a2a + eval:memory)');
-    assert.equal(summary.counts.registeredDomains, 2);
+    assert.equal(summary.domains.length, 3, 'should have 3 registered domains (eval:a2a + eval:memory + eval:sop)');
+    assert.equal(summary.counts.registeredDomains, 3);
 
     const a2aDomain = summary.domains.find((d) => d.domainId === 'eval:a2a');
     assert.ok(a2aDomain, 'eval:a2a must appear in domains');
@@ -235,6 +235,11 @@ Evidence:
     assert.equal(memoryDomain.hasVerdict, false);
     assert.equal(memoryDomain.latestVerdictId, undefined);
     assert.equal(memoryDomain.evalCatHandle, '@opus47');
+
+    const sopDomain = summary.domains.find((d) => d.domainId === 'eval:sop');
+    assert.ok(sopDomain, 'eval:sop must appear in domains (weekly domain)');
+    assert.equal(sopDomain.hasVerdict, false);
+    assert.equal(sopDomain.evalCatHandle, '@opus47');
   });
 
   it('fails closed when a live verdict points at a missing evidence bundle', () => {

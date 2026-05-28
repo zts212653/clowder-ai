@@ -199,3 +199,4 @@ docs/harness-feedback/attributions/
 docs/harness-feedback/digests/
 packages/api/test/__b1_parent_a__/
 .claude/skills/organize-threads
+.claude/skills/thread-orchestration

@@ -8,7 +8,7 @@ created: 2026-05-24
 
 # F211: Cross-Runtime Session Transparency — Antigravity Session Chain + IDE Direct Registration
 
-> **Status**: doing | **Owner**: Maine Coon（Maine Coon） | **Priority**: P1
+> **Status**: done (post-close P1 fix pending) | **Owner**: Maine Coon（Maine Coon） | **Priority**: P1 | **Completed**: 2026-05-26
 
 Architecture cell: `identity-session` + `memory`
 Map delta: updated — F211 adds runtime session registration / cascade visibility as a first-class session boundary. `identity-session` owns session identity, external runtime anchor threads, registration, and cascade/session binding; `memory` consumes the resulting transcript/digest evidence. F209 remains retrieval-only.
@@ -137,38 +137,65 @@ Replace `data/antigravity-sessions.json` with SessionChainStore-backed lookup an
 
 ### Phase D: Long-Lived Session Kind + Cross-Runtime Protocol
 
-Generalize the model after Antigravity proves the path.
+Generalize the model after Antigravity proves the path. Final Phase D decision:
+do **not** add a top-level `Session.kind` enum now.
 
-Candidate direction:
+`SessionRecord` remains the stable transcript/digest envelope. Runtime-specific
+identity is represented by the existing `RuntimeSessionMetadata` sidecar:
 
-```ts
-Session.kind = 'cli-invocation' | 'long-lived-cascade' | 'external-runtime-conversation'
-```
+| Runtime path | Discriminator | F211 decision |
+|--------------|---------------|---------------|
+| Cat-Cafe-dispatched Antigravity | `RuntimeSessionMetadata.runtime === 'antigravity-desktop'` and `surface === 'cat-cafe-dispatch'` | Long-lived external runtime session. |
+| IDE-direct Antigravity | `RuntimeSessionMetadata.externalRegistration.provenance.source === 'antigravity-ide-direct'` | Orphan or explicitly bound external runtime session. |
+| CLI invocation sessions | No runtime sidecar; plain `SessionRecord` | Legacy/native CLI session, unchanged. |
+| Hub direct chat | No external runtime sidecar; normal thread/session path | Native Cat Cafe path, not a reverse-registration client. |
 
-Phase D must not stop at an enum. It must also define a runtime capability record so future cats can reason about whether a runtime can actually preserve identity and memory across long-lived conversations:
+Tradeoff: absence-based classification is less convenient than an enum for
+analytics, but avoids backfilling historical `SessionRecord` rows and avoids a
+second truth source for runtime identity. If a future feature needs cross-runtime
+analytics, it should query `SessionRecord LEFT JOIN RuntimeSessionMetadata`
+instead of mutating the stable session envelope.
 
-```ts
-type RuntimeContinuityCapability = {
-  runtime: 'antigravity' | 'agy-cli' | 'hub-direct' | 'apple-surface' | string;
-  sessionKind: 'cli-invocation' | 'long-lived-cascade' | 'external-runtime-conversation';
-  promptInjectionMode:
-    | 'native-system-prompt'
-    | 'project-guide'
-    | 'user-message-prepend'
-    | 'callback-fallback';
-  coldStartRecovery: 'session-chain-required' | 'native-continuity' | 'unsupported';
-  readonlyToolContract: string;
-};
-```
+#### Cross-runtime registration contract
 
-The design must remain useful for:
+Phase D records the contract as a capability table, not a broad new TypeScript
+interface. A new external runtime can join F211 by filling this table and then
+implementing the same register/list/read lifecycle.
 
-- F210 AGY CLI runs if they produce cascade-like resumable conversations.
-- Hub direct chat.
-- F124 Apple / watchOS / AirPods conversations.
-- Future IDE integrations beyond Antigravity.
+| Field | Meaning | Antigravity Desktop | Hub direct chat | F124-style external surface |
+|-------|---------|---------------------|-----------------|-----------------------------|
+| `runtime` | Runtime identity namespace | `antigravity-desktop` | Native Cat Cafe; no external runtime id | TBD, e.g. `apple-ecosystem` |
+| `externalSessionId` | Runtime-owned long-lived session id | cascade/runtimeSessionId | N/A | device/session id |
+| `bindingTarget` | Where evidence becomes visible | hidden anchor or explicit thread | normal thread | hidden anchor or explicit thread |
+| `promptDelivery` | How identity/governance/context reaches the runtime | `user_message_prepend` control block; non-native L0 | `native_system_prompt` / normal Cat Cafe L0 | TBD |
+| `coldStartRecovery` | How a fresh runtime regains prior evidence | session-chain bootstrap from old digest/events/metadata | native continuity | TBD |
+| `readonlyTools` | Readonly evidence/drilldown tools the runtime can call | `cat_cafe_read_file_slice` plus readonly memory/session tools | normal Cat Cafe tool surface | TBD |
 
-For current Bengal/Antigravity, Phase D must record that continuity is prompt-level (`user-message-prepend` + `callback-fallback`) rather than native L0. That does not block F211 from tracking sessions, but it does block any claim that Bengal has compression-immune identity/governance continuity.
+Hub direct chat is deliberately excluded from reverse registration: it is already
+inside Cat Cafe's native session-chain path. F124 is the intended next external
+consumer, but F211 only provides the onboarding checklist; F124 owns its concrete
+registration implementation.
+
+#### F210 AGY CLI boundary
+
+F210 AGY CLI remains lifecycle-independent from F211 registration for now. It is
+a headless CLI carrier path with invocation-scoped session handling, not an
+Antigravity Desktop cascade. F211 must prove this boundary with backward
+compatibility tests: plain CLI sessions must still create, list, seal, and read
+without any `RuntimeSessionMetadata` sidecar.
+
+#### Bengal hard gaps
+
+- Bengal/Antigravity native L0 is not implemented by F211. F211 records
+  `promptDelivery=user_message_prepend` and keeps the F203/carrier follow-up
+  open until Antigravity can receive compression-immune native system context.
+- If Antigravity switches to a new runtime session while the runtime did not
+  restart, F211 treats that as an unexpected runtime-session switch. The new
+  sidecar lifecycle diagnostic links previous session id, previous runtime
+  session id, current runtime session id, and a reason such as
+  `missing_previous_runtime_session_id`. The Session Chain UI must surface this
+  as a warning so the user does not see a mysterious new Session #1 with no
+  explanation.
 
 ### Phase E: Hub / In-Context Visibility
 
@@ -222,13 +249,13 @@ Expose runtime session state where users and cats notice it:
 - [x] AC-C4: Tests prove SessionChainStore is the single source of truth for cascade binding after migration.
 
 ### Phase D（Long-lived session kind / cross-runtime protocol）
-- [ ] AC-D1: Spec defines the long-lived session kind or explains why existing session records are sufficient.
-- [ ] AC-D2: Cross-runtime registration contract is generic enough for Antigravity, Hub direct chat, and F124-style external surfaces.
-- [ ] AC-D3: Backward compatibility with CLI invocation sessions is tested.
-- [ ] AC-D4: F210 AGY CLI runs either reuse F211 registration or explicitly document why their session lifecycle remains separate.
-- [ ] AC-D5: Cross-runtime contract records each runtime's prompt injection mode, cold-start recovery path, and readonly tool contract; Bengal/Antigravity is explicitly marked as non-native-L0 until F203/carrier work changes that fact.
+- [x] AC-D1: Spec defines the long-lived session kind or explains why existing session records are sufficient. Source: Phase D decision keeps `SessionRecord` stable and uses `RuntimeSessionMetadata` sidecar discriminators instead of adding top-level `Session.kind`.
+- [x] AC-D2: Cross-runtime registration contract is generic enough for Antigravity, Hub direct chat, and F124-style external surfaces. Source: Phase D capability table covers runtime identity, external session id, binding target, prompt delivery, cold-start recovery, and readonly tool contract; Hub direct chat is explicitly documented as native/non-external.
+- [x] AC-D3: Backward compatibility with CLI invocation sessions is tested. Source: `session-chain-route.test.js` proves legacy CLI sessions remain independent from runtime sidecars.
+- [x] AC-D4: F210 AGY CLI runs either reuse F211 registration or explicitly document why their session lifecycle remains separate. Source: Phase D F210 boundary declares AGY CLI lifecycle-independent from F211 external-runtime registration until F210 requests long-lived external runtime semantics.
+- [x] AC-D5: Cross-runtime contract records each runtime's prompt injection mode, cold-start recovery path, and readonly tool contract; Bengal/Antigravity is explicitly marked as non-native-L0 until F203/carrier work changes that fact. Source: Phase D capability table marks Antigravity `promptDelivery=user_message_prepend` and keeps F203/carrier native-L0 follow-up open.
 - [x] AC-D6: Antigravity readonly tool contract includes `cat_cafe_read_file_slice` or a documented range-read fallback, with regression coverage proving long feature docs can be read without truncation from Bengal. Source: PR #1914 adds `cat_cafe_read_file_slice` to the Antigravity readonly allowlist plus bridge/executor regression coverage proving the call is delegated to the MCP readonly file-slice path instead of refused into IDE fallback reads.
-- [ ] AC-D7: Runtime-session diagnostics can explain an unexplained session/cascade switch without runtime restart by linking old/new records or persisting an explicit break reason; otherwise F211 cannot mark that path as fully transparent.
+- [x] AC-D7: Runtime-session diagnostics can explain an unexplained session/cascade switch without runtime restart by linking old/new records or persisting an explicit break reason; otherwise F211 cannot mark that path as fully transparent. Source: runtime metadata now records `unexpectedRuntimeSessionSwitch`; invoke/session-chain tests cover old/new linkage and Session Chain UI shows the warning.
 
 ### Phase E（Visibility）
 - [x] AC-E1: Hub/session-chain UI can display Antigravity cascade sessions with status and retire reason. Source: `HubRuntimeSessionsTab` plus reusable `ExternalRuntimeSessionsPanel`; browser verified `/settings?s=ops&ops=runtime-sessions` on desktop and mobile.
@@ -295,14 +322,19 @@ Expose runtime session state where users and cats notice it:
 | KD-13 | Phase C keeps legacy JSON as explicit rescue/import input only | Canonical production cascade reuse/reset must go through runtime-session metadata; `legacyJsonSessionStore: true` remains opt-in for rescue/test compatibility, not a default source of truth | 2026-05-26 |
 | KD-14 | Bengal native L0 migration is not hidden inside F211 | F211 owns runtime-session transparency and must record provider prompt-injection capability; compression-immune native L0 belongs to F203 / Antigravity carrier. F211 Phase D cannot claim Bengal identity/governance continuity is native until that follow-up lands. | 2026-05-26 |
 | KD-15 | Runtime-not-restarted session switch is an F211 continuity signal | CVO observed Bengal switching into a fresh/empty session while Antigravity runtime stayed up. Treat this as an unexplained runtime-session switch requiring old/new linkage or persisted break reason, not as a simple runtime restart case. | 2026-05-26 |
+| KD-16 | Do not add top-level `Session.kind` for Phase D | `SessionRecord` is the stable transcript/digest envelope; runtime-specific semantics already live in `RuntimeSessionMetadata`. Adding an enum would require historical backfill and create a second runtime identity truth source. | 2026-05-26 |
+| KD-17 | Hub direct chat is native, not reverse registration | Hub direct chat already enters Cat Cafe's normal thread/session path. Forcing it into external runtime registration would add ceremony without new evidence. | 2026-05-26 |
 
 ## Follow-up Issue Register
 
 | ID | Owner | Issue | F211 handling |
 |----|-------|-------|---------------|
 | F211-P1-2026-05-26-read-file-slice | F211 / Antigravity bridge | `cat_cafe_read_file_slice` is readonly in the MCP server but missing from Antigravity's readonly allowlist, so Bengal falls back to truncated file reads for long specs/evidence. | ✅ Fixed via PR #1914: bridge allowlist parity restored and regression coverage proves readonly file-slice drilldown no longer falls into truncated IDE fallback reads. |
-| F211-D-2026-05-26-session-switch | F211 Phase D | Bengal can appear in a fresh/empty session without runtime restart. The system must explain whether this is cascade switch, registration mismatch, hidden anchor mismatch, or session-chain lookup failure. | Keep AC-D7 open until diagnostics link old/new sessions or persist a clear break reason. |
+| F211-D-2026-05-26-session-switch | F211 Phase D | Bengal can appear in a fresh/empty session without runtime restart. The system must explain whether this is cascade switch, registration mismatch, hidden anchor mismatch, or session-chain lookup failure. | ✅ Closed for F211 transparency: unexpected old/new runtime session switches are now persisted in runtime metadata and surfaced in Session Chain. Provider-internal root cause remains a runtime follow-up if it keeps happening. |
 | F203-FU-2026-05-26-bengal-native-l0 | F203 / F061 Antigravity carrier | Bengal/Antigravity does not yet receive compression-immune native L0; it relies on prompt/callback fallback. | Do not implement inside F211; record capability via AC-D5 and track native injection in F203/carrier follow-up. |
+| F211-BUG3-2026-05-27-first-creation-not-persisted | F211 / AntigravityBridge | **P1**: `getOrCreateSession()` first-creation path does not persist new cascadeId to `runtimeSessionStore` when `runtimeStoreReplacementTarget` is null. The `else if` only covers the legacy JSON fallback. Result: next invoke → `getActiveByThreadCat()` → null → new cascade forever (session leak). | Fix: add `else if (this.runtimeSessionStore)` branch to persist new runtime session metadata for first-creation case. Root cause: `AntigravityBridge.ts:998-1006`. |
+| F211-BUG2-2026-05-27-auto-register-missing | F211 / AntigravityAgentService | **P2**: `registerExternalRuntimeSession` is never auto-called during the invoke pipeline when a Cat-Cafe-dispatched cascade creates its first session. It only exists as an HTTP POST MCP tool for IDE-direct use. Result: Cat-Cafe-dispatched first sessions may not appear in runtime session list until the next rotation triggers `persistRuntimeStoreReplacement`. | Fix: after `getOrCreateSession()` returns a newly-created cascade (not reuse), auto-register via `runtimeSessionStore.upsert(...)` in the invoke pipeline. |
+| F211-BUG1-2026-05-27-callback-image-paths | F211 / callbacks.ts | **P2**: `GET /api/callbacks/thread-context` returns message `contentBlocks` without calling `extractImagePaths`. All other agent services (Claude, Codex, Gemini, Kimi, Antigravity invoke) call it before passing images to CLI. Result: Antigravity gets relative `/uploads/` URLs instead of absolute filesystem paths, so Bengal cannot view images shared in thread context. | Fix: apply `extractImagePaths` to contentBlocks in the thread-context response mapper, or append local image path hints to message content. Root cause: `callbacks.ts:1675-1689`. |
 
 ## Eval / Tracking Contract
 
@@ -338,9 +370,9 @@ in_context_observability:
 | R9 | Bengal review: “IDE-direct 没 threadId/callbackToken，Phase B 注册机制要具体” | AC-B5, OQ-10 | external-session registration contract | [x] |
 | R10 | Bengal review: “context canceled 噪音不要污染 digest” | AC-E4, OQ-11 | noisy trajectory fixture | [x] |
 | R11 | team lead现场反馈：session 指 Antigravity cascade；错误/轮换后新 session 不能断记忆 | AC-A13~A16, KD-10, KD-11 | A2b continuity bootstrap fixture + manual New Cascade non-injection fixture | [x] |
-| R12 | team lead现场反馈：runtime 没重启，但 Bengal 不知道为什么换了一个 session | AC-D7, KD-15, OQ-14 | session-switch diagnostic fixture: old/new linkage or persisted break reason | [ ] |
+| R12 | team lead现场反馈：runtime 没重启，但 Bengal 不知道为什么换了一个 session | AC-D7, KD-15, OQ-14 | session-switch diagnostic fixture: old/new linkage or persisted break reason | [x] |
 | R13 | team lead现场反馈：`read_file_slice` 不在 Antigravity 白名单，F211 spec 被截断 | AC-D6, OQ-16 | Antigravity readonly tool allowlist parity test + long-doc read regression | [x] |
-| R14 | team lead现场反馈：Bengal native L0 没完成不能被 F211 假装透明 | AC-D5, KD-14, F203-FU-2026-05-26-bengal-native-l0 | provider capability record + F203/carrier follow-up issue | [ ] |
+| R14 | team lead现场反馈：Bengal native L0 没完成不能被 F211 假装透明 | AC-D5, KD-14, F203-FU-2026-05-26-bengal-native-l0 | provider capability record + F203/carrier follow-up issue | [x] |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC
@@ -355,3 +387,29 @@ in_context_observability:
 - Phase A2a/A2b plan: Opus 4.7 architecture review for lifecycle/bootstrap contract + Bengal Cat Antigravity surface review for Desktop UX and injection semantics.
 - Phase B plan: Opus45 architecture review before worktree/TDD; P1 clarification on orphan-to-thread migration resolved as one-shot immutable binding for Phase B.
 - Implementation: cross-family review before PR; no self-review.
+
+## User Visibility Disclosure (SOP Step 0.3.5)
+
+| Surface | 用户能做什么（达成态） | 用户实际能做什么（本 feat close 时） | 缺失/退化 | 处置 |
+|---------|--------------------|--------------------------|----------|------|
+| **Session Chain 面板 / 历史记录** | 看到所有的 Antigravity cascade 历史会话，包括每次是在哪里产生的（Cat Cafe dispatch 还是 IDE-direct 独立直聊），能查看每次会话的摘要（digest）、轨迹事件（events）以及密封原因（seal reason）。 | 在 Web 端的 Session Chain 面板上可以查看 Antigravity 运行期会话列表，点击可查看它们的完整状态、catId/model 变更记录、密封原因（如 `oversized_retire`, `user_initiated` 等），以及 Extractive Digest 提取出的摘要和事件记录。 | 无 | 已由 Web UI `HubRuntimeSessionsTab` 和 `ExternalRuntimeSessionsPanel` 完整实现。 |
+| **开发者 IDE / 孟加拉猫直聊** | 在 IDE 直聊时，会话数据能自动 reverse-register 回 Cat Cafe 并在 Session Chain 留痕。如果在 IDE 侧换了新模型或者发生会话切换，系统应该能清楚追踪。 | 通过 Bridge 的 `register_external_session`，IDE 直聊会被逆向注册进 Cat Cafe，并建立对应的隐性锚点线程（anchor thread）以避免污染普通群聊。如果遇到未重启但 runtime 自动切了 session，会生成并记录 `unexpectedRuntimeSessionSwitch` 并附带 old/new 链接，由 API 和 UI 进行提示。 | Bengal/Antigravity 侧仍然缺失 native L0（即无法像 normal cats 一样注入真正的压缩免疫系统级 prompt）。 | 在 spec 中已经将 Bengal native L0 的缺失登记为了 follow-up issue `F203-FU-2026-05-26-bengal-native-l0`，并采用 `user_message_prepend` 封装作为临时过渡，已与 CVO 达成共识降级。 |
+| **会话轮换后的上下文连续性** | 如果 Antigravity cascade 因为超限或报错触发了自动轮换，新建的会话应该能够无缝接续上个会话的记忆，不需要用户重复口述前情。 | 自动/错误触发的轮换中，系统会提取旧 session 的 events 摘要和 side-effect 日志并在新 session 第一个 effective prompt 前自动 prepend 封装 continuity bootstrap 传递给 Bengal。用户在 IDE 感觉不到冷启动。但如果是用户手动发起的 `New Cascade` 则不会强制注入，保护用户开启全新话题。 | 如果前序 session 发生致命崩溃导致 seal pending/incomplete，bootstrap 携带退化 marker (degraded marker) 提醒当前可能缺少部分前序证据。 | 通过 A2b 的 Degraded capsule 及 prompt 注入机制完整覆盖。 |
+| **长 spec / 证据库穿透读取** | 在 Bengal 侧查询猫猫记忆或读取特长 spec 文件时，能完整读取，不会发生文件过长被截断而断章取义的问题。 | 将 `cat_cafe_read_file_slice` 加入 Antigravity 桥接允许白名单，支持按 range/slice 读取完整文件，避免被默认读取限制截断。 | 无 | 已通过 PR #1914 完全修复。 |
+
+## 愿景守护证物对照表 (SOP Step 0)
+
+| team experience/现场反馈（逐字引用/转述） | 当前实际状态（截图/代码/命令输出） | 匹配？ |
+|----------------------|-------------------------------|--------|
+| “我们的这个 antigravity 真的需要接入 session chain 也好或者什么也好，就是他的 session 得是透明的。” | 实现了 `RedisRuntimeSessionStore` 和 `ExternalRuntimeSessionRegistration`。新增了 `/api/external-runtime-sessions` 端点及 MCP 工具 `cat_cafe_list_external_runtime_sessions`、`cat_cafe_read_external_runtime_session`。Web UI 上新增了 `HubRuntimeSessionsTab` 和 `AuditRuntimeTab` 界面，运行期 external session 记录和 retire 细节完全透明。 | ✅ |
+| “session 指 Antigravity cascade；错误/轮换后新 session不能断记忆” | 实现了 `antigravity-continuity-bootstrap.ts`，在 automatic/error 轮换后，通过 `prependContinuityBootstrap` 将上一次会话的 extractive digest 和 task summary 拼装进新 session 的第一条 effective prompt 发送给 Antigravity，打通了跨 cascade 的记忆链条。 | ✅ |
+| “runtime 没重启，但 Bengal 不知道为什么换了一个 session” | 在 `RuntimeSessionMetadata` 中引进了 `unexpectedRuntimeSessionSwitch` 字段，并在 `invoke-single-cat.ts` 和 `RedisRuntimeSessionStore.ts` 捕获这种情况，保留 old/new linkage 关系并在 Session Chain UI 上展示警告标志，从而使得这种偶发性的切分能够被明确诊断，不再“无证据失忆”。 | ✅ |
+| “read_file_slice 不在 Antigravity 白名单，F211 spec 被截断” | 在 PR #1914 里，将 `cat_cafe_read_file_slice` 加进了 Antigravity 的 readonly 允许列表（allowlist），通过测试确保 Bengal 能够跨 runtime 调用这个 range read 方法，避免读取大规格 spec 和 evidence 时遇到 truncation。 | ✅ |
+| “Bengal native L0 没完成不能被 F211 假装透明” | AC-D5 和 KD-14 明确记录 Bengal 不具备 native L0 注入能力，不进行 overclaim。现有的 prompt 注入被限制为 application 层的 `user_message_prepend`。真正的 native L0 已注册到 follow-up issue `F203-FU-2026-05-26-bengal-native-l0` 由 @F203 负责。 | ✅ |
+
+## Completion Sign-off（愿景守护跨猫签收）
+
+| 猫猫 | 读了哪些文档/证据 | 三问结论（核心问题 / 交付物 / 体验） | 签收 |
+|------|-------------------|--------------------------------------|------|
+| Maine Coon/Maine Coon GPT-5.5（作者自检） | F211 spec, PR #1880/#1885/#1899/#1908/#1911/#1914/#1916 merge evidence, `pnpm gate` at `44c170f8d`, doc sync `1a3138263` | 核心问题是 Antigravity / IDE-direct runtime session 对用户和后续猫不可见；交付物让 runtime sessions 进 Session Chain / Hub / Audit evidence，并在 unexpected switch 时留下 old/new linkage；用户现在能看见“到底是什么 session”，Bengal native L0 明确不由 F211 假装完成 | ✅ ready for guardian |
+| Maine Coon GPT-5.4（愿景守护） | F211 spec status/AC/follow-up register, Phase E + Phase D merged code paths, PR #1916, completion doc sync `1a3138263` | 对照team experience：“session 得是透明的”已由 Session Chain + Hub runtime visibility 覆盖；“runtime 没重启却换 session”已变成可解释的 unexpected switch metadata，而不是无证据失忆；“我可以在这里看到到底是什么 session”已由 SessionChainPanel + Hub Runtime Sessions 满足；没有 overclaim Bengal native L0 | ✅ APPROVE |

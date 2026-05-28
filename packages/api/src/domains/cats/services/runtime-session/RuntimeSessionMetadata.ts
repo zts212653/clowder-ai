@@ -21,6 +21,12 @@ export const RUNTIME_SESSION_DRAIN_RESULTS = [
 ] as const;
 export type RuntimeSessionDrainResult = (typeof RUNTIME_SESSION_DRAIN_RESULTS)[number];
 
+export const RUNTIME_SESSION_UNEXPECTED_SWITCH_REASONS = [
+  'missing_previous_runtime_session_id',
+  'mismatched_previous_runtime_session_id',
+] as const;
+export type RuntimeSessionUnexpectedSwitchReason = (typeof RUNTIME_SESSION_UNEXPECTED_SWITCH_REASONS)[number];
+
 export const RUNTIME_IDENTITY_SOURCES = [
   'session_init',
   'trajectory',
@@ -49,6 +55,16 @@ export interface RuntimeSessionLifecycle {
   retryCount?: number;
   lastRetryAt?: number;
   lastFailureReason?: string;
+  unexpectedRuntimeSessionSwitch?: RuntimeSessionUnexpectedRuntimeSessionSwitch;
+}
+
+export interface RuntimeSessionUnexpectedRuntimeSessionSwitch {
+  detectedAt: number;
+  previousSessionId: string;
+  previousRuntimeSessionId: string;
+  currentRuntimeSessionId: string;
+  declaredPreviousRuntimeSessionId?: string;
+  reason: RuntimeSessionUnexpectedSwitchReason;
 }
 
 export interface RuntimeSessionExternalRegistrationProvenance {
@@ -152,6 +168,35 @@ function normalizeLifecycle(input: Record<string, unknown>): RuntimeSessionLifec
     ...optionalNumberField(input.retryCount, 'lifecycle.retryCount'),
     ...optionalNumberField(input.lastRetryAt, 'lifecycle.lastRetryAt'),
     ...optionalStringField(input.lastFailureReason, 'lifecycle.lastFailureReason'),
+    ...optionalUnexpectedRuntimeSessionSwitch(input.unexpectedRuntimeSessionSwitch),
+  };
+}
+
+function normalizeUnexpectedRuntimeSessionSwitch(input: unknown): RuntimeSessionUnexpectedRuntimeSessionSwitch {
+  const record = requireRecord(input, 'runtime session unexpected switch');
+  return {
+    detectedAt: requireFiniteNumber(record.detectedAt, 'unexpectedRuntimeSessionSwitch.detectedAt'),
+    previousSessionId: requireNonEmptyString(
+      record.previousSessionId,
+      'unexpectedRuntimeSessionSwitch.previousSessionId',
+    ),
+    previousRuntimeSessionId: requireNonEmptyString(
+      record.previousRuntimeSessionId,
+      'unexpectedRuntimeSessionSwitch.previousRuntimeSessionId',
+    ),
+    currentRuntimeSessionId: requireNonEmptyString(
+      record.currentRuntimeSessionId,
+      'unexpectedRuntimeSessionSwitch.currentRuntimeSessionId',
+    ),
+    ...optionalStringField(
+      record.declaredPreviousRuntimeSessionId,
+      'unexpectedRuntimeSessionSwitch.declaredPreviousRuntimeSessionId',
+    ),
+    reason: requireOneOf(
+      record.reason,
+      RUNTIME_SESSION_UNEXPECTED_SWITCH_REASONS,
+      'unexpectedRuntimeSessionSwitch.reason',
+    ),
   };
 }
 
@@ -272,6 +317,13 @@ function optionalOneOfField<const T extends readonly string[]>(
 function optionalExternalRegistration(value: unknown): Record<string, RuntimeSessionExternalRegistrationState> {
   if (value === undefined) return {};
   return { externalRegistration: normalizeExternalRegistration(value) };
+}
+
+function optionalUnexpectedRuntimeSessionSwitch(
+  value: unknown,
+): Record<string, RuntimeSessionUnexpectedRuntimeSessionSwitch> {
+  if (value === undefined) return {};
+  return { unexpectedRuntimeSessionSwitch: normalizeUnexpectedRuntimeSessionSwitch(value) };
 }
 
 function lastPathSegment(path: string): string {

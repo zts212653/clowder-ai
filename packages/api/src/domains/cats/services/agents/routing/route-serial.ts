@@ -706,6 +706,10 @@ export async function* routeSerial(
       let hadProviderError = false;
       // Collect error text separately for system-message persistence (F5 reload)
       let collectedErrorText = '';
+      // F212 Phase B (云端 codex P2-8 2026-05-27): persist Phase A's structured
+      // cliDiagnostics alongside the error text so cold hydration (F5 reload) can
+      // restore the folded panel — without this, only the legacy red-pill survives.
+      let collectedCliDiagnostics: import('@cat-cafe/shared').CliDiagnostics | undefined;
       const collectedToolEvents: StoredToolEvent[] = [];
       // F148 OQ-2: Collect tool names for context eval signals
       const collectedToolNames: string[] = [];
@@ -1036,6 +1040,14 @@ export async function* routeSerial(
             if (!signal?.aborted) hadProviderError = true;
             if (effectiveMsg.error) {
               collectedErrorText += `${collectedErrorText ? '\n' : ''}${effectiveMsg.error}`;
+            }
+            // F212 Phase B (云端 codex P2-8): capture structured cliDiagnostics from
+            // metadata; keep the first one seen (canonical for this invocation).
+            const meta = effectiveMsg.metadata as
+              | { cliDiagnostics?: import('@cat-cafe/shared').CliDiagnostics }
+              | undefined;
+            if (meta?.cliDiagnostics && !collectedCliDiagnostics) {
+              collectedCliDiagnostics = meta.cliDiagnostics;
             }
           }
           if (effectiveMsg.metadata && !firstMetadata) {
@@ -1781,6 +1793,7 @@ export async function* routeSerial(
               targetCats: [nextCat],
               callerCatId: catId,
               messageId: storedMsgId,
+              a2aTriggerMessageId: storedMsgId,
               autoExecute: true,
               priority: 'normal',
               intent: 'execute',
@@ -2089,6 +2102,11 @@ export async function* routeSerial(
             origin: 'stream',
             timestamp: Date.now(),
             threadId,
+            // F212 Phase B (云端 codex P2-8): carry cliDiagnostics through to persistence
+            // so cold hydration / F5 reload can re-render the folded panel.
+            ...(collectedCliDiagnostics
+              ? { metadata: { provider: '', model: '', cliDiagnostics: collectedCliDiagnostics } }
+              : {}),
           });
         } catch (err) {
           log.error({ catId: catId as string, err }, 'messageStore.append (error system msg) failed');

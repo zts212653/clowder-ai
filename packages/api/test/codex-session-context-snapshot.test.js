@@ -80,6 +80,8 @@ test('prefers latest token_count with non-zero rate usage when duplicates exist'
     assert.ok(snapshot, 'snapshot should be found');
     assert.equal(snapshot.contextUsedTokens, 186749);
     assert.equal(snapshot.contextWindowTokens, 258400);
+    assert.equal(snapshot.lastCachedInputTokens, 165120);
+    assert.equal(snapshot.lastOutputTokens, 1011);
     assert.equal(snapshot.totalInputTokens, 529593);
     assert.equal(snapshot.totalCachedInputTokens, 405760);
     assert.equal(snapshot.totalOutputTokens, 10298);

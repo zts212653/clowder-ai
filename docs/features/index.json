@@ -782,8 +782,8 @@
     },
     {
       "id": "F128",
-      "name": "Cat Thread Proposal (formerly \"Cat-Initiated Thread Creation\")",
-      "status": "spec v2 | **Owner**: opus | **Priority**: P1",
+      "name": "Cat-Proposed Thread Creation — 猫猫提议创建 Thread",
+      "status": "in-progress | **Source**: clowder-ai #82 (bouillipx) / PR #85 | **Priority**: P2",
       "file": "F128-cat-create-thread.md"
     },
     {
@@ -1179,7 +1179,7 @@
     {
       "id": "F192",
       "name": "Socio-Technical Harness Eval — harness 共创评估体系",
-      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "in-progress (reopened 2026-05-27 for Phase F `eval:capability-wakeup`) | **Owner**: Ragdoll | **Phases A-E completed**: 2026-05-27",
       "file": "F192-socio-technical-harness-eval.md"
     },
     {
@@ -1281,13 +1281,13 @@
     {
       "id": "F211",
       "name": "Cross-Runtime Session Transparency — Antigravity Session Chain + IDE Direct Registration",
-      "status": "doing | **Owner**: Maine Coon（Maine Coon） | **Priority**: P1",
+      "status": "done (post-close P1 fix pending) | **Owner**: Maine Coon（Maine Coon） | **Priority**: P1 | **Completed**: 2026-05-26",
       "file": "F211-cross-runtime-session-transparency.md"
     },
     {
       "id": "F212",
       "name": "CLI Error Diagnostics — 结构化 CLI 错误诊断 + 受控前端展示",
-      "status": "in-progress (Phase A merged 2026-05-27) | **Owner**: Ragdoll/Ragdoll (Opus-47) | **Priority**: P1",
+      "status": "done | **Completed**: 2026-05-27 | **Owner**: Ragdoll/Ragdoll (Opus-47) | **Priority**: P1",
       "file": "F212-cli-error-diagnostics.md"
     },
     {

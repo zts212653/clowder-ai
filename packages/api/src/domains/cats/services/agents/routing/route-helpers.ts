@@ -112,6 +112,7 @@ export interface RouteOptions {
         targetCats: string[];
         callerCatId: string;
         messageId?: string;
+        a2aTriggerMessageId?: string;
         autoExecute: true;
         priority: 'normal';
         intent: 'execute';

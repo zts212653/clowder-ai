@@ -39,9 +39,17 @@ PORT="${LLM_POSTPROCESS_PORT:-9878}"
 echo "[start] resolved runtime: CAT_CAFE_HOME=$CAT_CAFE_HOME; venv=$VENV_DIR; python=python3; api=$API_SCRIPT; port=$PORT"
 
 if [ ! -d "$VENV_DIR" ]; then
-  echo "ERROR: venv not found: $VENV_DIR"
-  echo "Run install first: scripts/services/llm-postprocess-install.sh"
-  exit 1
+  echo "[start] venv not found: $VENV_DIR -- auto-installing..." >&2
+  INSTALL_SCRIPT="$SCRIPT_DIR/llm-postprocess-install.sh"
+  if [ ! -f "$INSTALL_SCRIPT" ]; then
+    echo "ERROR: install script not found: $INSTALL_SCRIPT" >&2
+    exit 1
+  fi
+  LLM_POSTPROCESS_MODEL="$MODEL" bash "$INSTALL_SCRIPT"
+  if [ ! -d "$VENV_DIR" ]; then
+    echo "ERROR: auto-install completed but venv still missing: $VENV_DIR" >&2
+    exit 1
+  fi
 fi
 source "$VENV_DIR/bin/activate"
 

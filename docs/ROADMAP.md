@@ -39,7 +39,7 @@ created: 2026-02-26
 | F119 | 谁是卧底 — 坏猫战术推理游戏 #2 | spec | Ragdoll | internal | [F119](features/F119-who-is-spy-game.md) |
 | F124 | Apple Ecosystem × Cat Café 语音交互系统 — iOS/watchOS/AirPods | spec | Ragdoll | internal | [F124](features/F124-apple-ecosystem-voice-interaction.md) |
 | F126 | 四肢控制面 — Cat Café Limb Control Plane | in-progress | Ragdoll | internal | [F126](features/F126-limb-control-plane.md) |
-| F128 | Cat Thread Proposal — 猫提议新 thread，用户审批后创建（含提案卡片 + 审批端点） | spec | Ragdoll | community [#82](https://github.com/zts212653/clowder-ai/issues/82) | [F128](features/F128-cat-create-thread.md) |
+| F128 | Cat Thread Proposal — 猫提议新 thread，用户审批后创建（含提案卡片 + 审批端点） | in-progress | Ragdoll | community [#82](https://github.com/zts212653/clowder-ai/issues/82) | [F128](features/F128-cat-create-thread.md) |
 | F129 | Pack System — Multi-Agent 共创世界的 Mod 生态 | in-progress | Ragdoll | internal | [F129](features/F129-pack-system-multi-agent-mod.md) |
 | F138 | Cat Café Video Studio — AI 视频制作管线 | spec | 金渐层 | internal | [F138](features/F138-video-studio.md) |
 | F143 | Hostable Agent Runtime — 统一宿主抽象 | spec | Ragdoll | internal | [F143](features/F143-hostable-agent-runtime.md) |
@@ -57,7 +57,7 @@ created: 2026-02-26
 | F180 | Agent CLI Hook Health and Sync — user-level hook 检测 + 一键同步 | in-progress | Maine Coon/Maine Coon | community [#614](https://github.com/zts212653/clowder-ai/issues/614) | [F180](features/F180-agent-cli-hook-health.md) |
 | F181 | Reserved Feature Slot — 待补充需求锚点 | idea | 待定 | internal | [F181](features/F181-reserved-feature-slot.md) |
 | F189 | Operation Context Unification — 操作上下文单点化（HTTP/MCP/CLI/A2A 统一 builder） | spec | Ragdoll | internal | [F189](features/F189-operation-context-unification.md) |
-| F192 | Socio-Technical Harness Eval — Harness Eval Control Plane / Eval Hub | in-progress | Ragdoll | internal | [F192](features/F192-socio-technical-harness-eval.md) |
+| F192 | Socio-Technical Harness Eval — Phase F `eval:capability-wakeup` reopened | in-progress | Ragdoll | internal | [F192](features/F192-socio-technical-harness-eval.md) |
 | F198 | Claude Code Subscription Carrier — 6/15 SDK Credit 拐点前救Ragdoll | spec | Ragdoll Opus 4.7 | internal | [F198](features/F198-claude-code-subscription-carrier.md) |
 | F200 | Memory Recall Eval — 基于猫真实行为的记忆系统反馈闭环 | in-progress | Ragdoll | internal | [F200](features/F200-memory-recall-eval.md) |
 | F202 | Plugin Framework — local discovery, config, and resource activation | review | community @mindfn + maintainers | community [#686](https://github.com/zts212653/clowder-ai/pull/686) | [F202](features/F202-plugin-framework.md) |
@@ -67,5 +67,3 @@ created: 2026-02-26
 | F207 | AI Family Office — 个人投资学习基建（画像/知识/数据/分析/决策五层） | spec | Ragdoll | internal | [F207](features/F207-personal-finance-infra.md) |
 | F208 | Capability Profile Routing — 能力画像档案 + 认知路由 | spec | Ragdoll | internal | [F208](features/F208-capability-profile-routing.md) |
 | F210 | Gemini CLI to Antigravity CLI Migration | in-progress | Maine Coon/Maine Coon | internal | [F210](features/F210-antigravity-cli-migration.md) |
-| F211 | Cross-Runtime Session Transparency — Antigravity Session Chain + IDE Direct Registration | spec | Maine Coon/Maine Coon | internal | [F211](features/F211-cross-runtime-session-transparency.md) |
-| F212 | CLI Error Diagnostics — 结构化 CLI 错误诊断 + 受控前端展示 | spec | Ragdoll/Ragdoll | internal | [F212](features/F212-cli-error-diagnostics.md) |
