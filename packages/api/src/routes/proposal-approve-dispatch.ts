@@ -118,8 +118,7 @@ export async function appendApprovedInitialMessage({
   let targetCats: readonly CatId[];
   let intentName: string;
   if (parsed.explicit && parsed.intent === 'ideate') {
-    targetCats =
-      preferredCats && preferredCats.length > 0 ? preferredCats : resolved.targetCats;
+    targetCats = preferredCats && preferredCats.length > 0 ? preferredCats : resolved.targetCats;
     intentName = 'ideate';
   } else {
     const firstCandidate = preferredCats?.[0] ?? resolved.targetCats[0];
