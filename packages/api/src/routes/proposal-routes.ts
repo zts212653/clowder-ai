@@ -209,9 +209,11 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
           userId,
           threadId: thread.id,
           content: enrichedContent,
-          // F128: pass the proposal's preferredCats so dispatch can wake up all
-          // proposed members even when the user-typed initialMessage has no
-          // @-mention. Without this, only the thread owner gets woken up.
+          // F128 (owner spec 2026-05-27 "他们自己决定下一个要把谁叫出来"):
+          // pass preferredCats so dispatch can pick the chain starter
+          // (preferredCats[0]) — subsequent cats are driven by cat-side
+          // @-mentions in their own replies. #ideate explicit tag in the
+          // initialMessage opts into parallel "wake all" behaviour.
           preferredCats: finalPreferredCats,
           messageStore,
           router: opts.router,
