@@ -7,12 +7,22 @@ const path = require('path');
 const fs = require('fs');
 
 exports.default = async function afterPack(context) {
-  if (context.electronPlatformName !== 'darwin') {
+  const platform = context.electronPlatformName;
+
+  // Resolve the resources directory where extraResources are placed.
+  // macOS: {appOutDir}/{ProductName}.app/Contents/Resources/
+  // Windows: {appOutDir}/resources/
+  let resourcesDir;
+  if (platform === 'darwin') {
+    const productFilename = context.packager.appInfo.productFilename;
+    resourcesDir = path.join(context.appOutDir, `${productFilename}.app`, 'Contents', 'Resources');
+  } else if (platform === 'win32') {
+    resourcesDir = path.join(context.appOutDir, 'resources');
+  } else {
+    // Linux or unknown — skip for now
     return;
   }
 
-  const productFilename = context.packager.appInfo.productFilename;
-  const resourcesDir = path.join(context.appOutDir, `${productFilename}.app`, 'Contents', 'Resources');
   const projectRoot = path.resolve(__dirname, '..');
   const deployRoot = path.join(projectRoot, 'bundled', 'deploy');
 

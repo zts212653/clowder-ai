@@ -164,6 +164,15 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'win32') quitApp();
 });
 
-app.on('before-quit', async () => {
-  if (services) await services.stopAll();
+app.on('before-quit', (e) => {
+  // Electron does NOT await async event handlers. Without blocking here,
+  // the app exits before stopAll() finishes → orphaned node/redis processes.
+  // Prevent default, run cleanup, then quit when done.
+  if (services) {
+    e.preventDefault();
+    services.stopAll().finally(() => {
+      services = null; // prevent re-entry
+      app.quit();
+    });
+  }
 });

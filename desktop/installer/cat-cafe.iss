@@ -96,6 +96,13 @@ Source: "..\..\bundled\node\*";                  DestDir: "{app}\node"; \
 Source: "..\scripts\post-install-offline.ps1";   DestDir: "{app}\scripts"; Components: core
 Source: "..\scripts\generate-desktop-config.ps1"; DestDir: "{app}\scripts"; Components: core
 Source: "..\scripts\sync-agent-hooks-offline.mjs"; DestDir: "{app}\scripts"; Components: core
+; Project-level scripts — needed by the API at runtime (e.g. recommendation-matrix.yaml,
+; service install/uninstall scripts). Without these, the API crashes on startup because
+; recommendation-matrix-data.ts resolves REPO_ROOT from import.meta.url → {app}\ and
+; looks for scripts/services/ there, not inside desktop-dist/resources/.
+Source: "..\..\scripts\*";                       DestDir: "{app}\scripts"; \
+  Excludes: "*.test.*,__pycache__"; \
+  Flags: recursesubdirs createallsubdirs; Components: core
 ; User-level Agent CLI hook truth source used by F180 health/sync.
 Source: "..\..\.claude\hooks\user-level\*";      DestDir: "{app}\.claude\hooks\user-level"; \
   Flags: recursesubdirs createallsubdirs; Components: core
