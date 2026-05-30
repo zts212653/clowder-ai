@@ -513,11 +513,13 @@ async function main(): Promise<void> {
     messageStore instanceof RedisMessageStore &&
     invocationRecordStore instanceof RedisInvocationRecordStore
   ) {
+    const { getOwnerUserId } = await import('./config/cat-config-loader.js');
     const backfillResult = await runSchedulerReplyUserIdBackfill({
       redis,
       messageStore,
       invocationRecordStore,
       threadStore,
+      defaultUserId: getOwnerUserId(),
     });
     if (!backfillResult.skipped && (backfillResult.repairedMessages > 0 || backfillResult.repairedInvocations > 0)) {
       app.log.info(

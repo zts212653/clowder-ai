@@ -68,6 +68,23 @@ export function formatBindingLabel(binding: ExternalRuntimeSessionBinding): stri
   return 'Thread 绑定';
 }
 
+// F211-REG1: surface tells the user how the session was created — a Cat-Cafe @mention
+// dispatch vs a direct IDE conversation. Both are now listed in the runtime panel.
+export interface RuntimeSurfaceBadge {
+  label: string;
+  className: string;
+}
+
+export function formatSurfaceBadge(surface: string | undefined): RuntimeSurfaceBadge | null {
+  if (surface === 'cat-cafe-dispatch') {
+    return { label: 'Café 派发', className: 'bg-conn-blue-bg text-conn-blue-text' };
+  }
+  if (surface === 'ide-direct') {
+    return { label: 'IDE 直连', className: 'bg-cafe-surface-elevated text-cafe-secondary' };
+  }
+  return null;
+}
+
 export function formatRuntimeSessionTitle(session: ExternalRuntimeSessionListItem): string {
   const title = session.title?.trim();
   if (title) return title;

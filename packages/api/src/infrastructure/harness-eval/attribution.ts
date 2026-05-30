@@ -76,55 +76,134 @@ function nextFindingId(): string {
   return `AR-${date}-${String(findingCounter).padStart(3, '0')}`;
 }
 
+// Friction → finding gate (F192 Phase D + 2026-05-29 denominator-robustness fix).
+const MIN_COUNT = 3;
+const RATIO_FLOOR = 0.05;
+
+// Per-friction-metric activation denominators (most specific tier). C2 runs TWO
+// independent guards with separate counts — verdict-without-pass vs void-hold — so they
+// must NOT share one prefix-level denominator: grading void_hold against the verdict
+// count (c2.checked) divides by the wrong base and suppresses real void-hold signals
+// (cloud review PR #1941 P2). Each maps to its own `*_checked` denominator.
+const FRICTION_DENOMINATOR_BY_METRIC: Record<string, string> = {
+  'c2.verdict_without_pass_count': 'c2.checked',
+  'c2.void_hold_hint_emitted': 'c2.void_hold_checked',
+};
+
+// Prefix-level fallback for components whose friction counters all share one denominator.
+// C1's real denominator is `hold_ball_calls` (buildC1), not `c1.checked` (砚砚 review P2).
+// Unknown prefixes fall back to the `<prefix>.checked` convention, which still yields the
+// safe denominator-missing path when absent.
+const FRICTION_DENOMINATOR_BY_PREFIX: Record<string, string> = {
+  c1: 'hold_ball_calls',
+  inline_action: 'inline_action.checked',
+};
+
+interface FrictionGrade {
+  severity: AttributionRecord['frictionSignal']['severity'];
+  confidence: number;
+  hasBaseline: boolean;
+  baseKey: string;
+  baseline: number;
+  ratioText: string;
+}
+
+/**
+ * Grade a single friction counter against its activation denominator `<prefix>.checked`,
+ * or return null to suppress it (sub-threshold noise).
+ *
+ * When the denominator is MISSING we must NOT fabricate a 100% ratio: the pre-fix
+ * `ratio = baseline > 0 ? v/baseline : 1` did exactly that, auto-escalating every
+ * denominator-less counter to high-severity / human-required — it is what made the
+ * F167 eval:a2a 2026-05-29 C2 `verdict_without_pass_count=9` land on the owner as
+ * "human-required" despite there being no way to tell signal from activation. New
+ * contract: still SURFACE the friction (Day-9 invariant #1816 — C2 friction must not
+ * be silently dropped) but, absent a denominator, cap severity at low and propose
+ * adding the denominator, because severity is genuinely uncomputable.
+ */
+function gradeFriction(
+  metric: string,
+  value: number,
+  activationCounts: Record<string, number | null>,
+): FrictionGrade | null {
+  if (value < MIN_COUNT) return null;
+
+  const baseMetric = metric.replace(/\.(shadow_miss|failed|skip)$/, '');
+  const prefix = baseMetric.split('.')[0];
+  const baseKey =
+    FRICTION_DENOMINATOR_BY_METRIC[metric] ?? FRICTION_DENOMINATOR_BY_PREFIX[prefix] ?? `${prefix}.checked`;
+  const rawBaseline = activationCounts[baseKey] as number | null | undefined;
+  const hasBaseline = typeof rawBaseline === 'number' && rawBaseline > 0;
+  const baseline = hasBaseline ? rawBaseline : 0;
+  const ratio = hasBaseline ? value / baseline : null;
+
+  // Ratio-based noise suppression only applies when a real denominator exists.
+  if (ratio != null && ratio <= RATIO_FLOOR) return null;
+
+  // Denominator missing → cannot grade → surface low, never escalate.
+  const severity: FrictionGrade['severity'] =
+    ratio == null ? 'low' : ratio > 0.3 ? 'high' : ratio > 0.1 ? 'medium' : 'low';
+
+  return {
+    severity,
+    confidence: hasBaseline ? 0.7 : 0.4,
+    hasBaseline,
+    baseKey,
+    baseline,
+    ratioText: hasBaseline ? `${((ratio as number) * 100).toFixed(1)}%` : 'n/a',
+  };
+}
+
+function buildFrictionFinding(
+  componentId: string,
+  metric: string,
+  value: number,
+  grade: FrictionGrade,
+): AttributionRecord {
+  const isFailure = metric.includes('failed');
+  const measureNote = grade.hasBaseline
+    ? `baseline ${grade.baseKey}=${grade.baseline}, ratio=${grade.ratioText}`
+    : `denominator ${grade.baseKey} missing — ratio not computable; surfaced low-severity for visibility`;
+  const action = isFailure ? 'tool-fix' : grade.hasBaseline ? 'harness-tune' : 'add-counter';
+  const target = grade.hasBaseline ? `${componentId}/${metric}` : `${componentId}/${grade.baseKey}`;
+  const rationale = grade.hasBaseline
+    ? `${metric} ratio ${grade.ratioText} exceeds threshold`
+    : `${metric}=${value} but denominator ${grade.baseKey} missing — add activation counter to compute a real friction ratio`;
+
+  return {
+    id: nextFindingId(),
+    relatedFeature: 'F167',
+    frictionSignal: {
+      type: metric,
+      severity: grade.severity,
+      confidence: grade.confidence,
+      detectedAt: new Date().toISOString(),
+    },
+    attribution: {
+      primaryLayer: isFailure ? 'execution_gap' : 'harness_misfit',
+      pipelineOrHuman: grade.severity === 'high' ? 'human-required' : 'pipeline',
+      evidence: [
+        {
+          type: 'counter',
+          anchor: `${componentId}/${metric}`,
+          excerpt: `${metric}=${value} (${measureNote})`,
+        },
+      ],
+    },
+    proposedAction: [{ action, target, rationale }],
+    status: 'open',
+  };
+}
+
 function detectFrictionFromCounts(component: AttributionInput['snapshot']['components'][0]): AttributionRecord[] {
   const findings: AttributionRecord[] = [];
   const { frictionCounts, activationCounts, componentId } = component;
 
   for (const [metric, value] of Object.entries(frictionCounts)) {
     if (value == null || value === 0) continue;
-
-    const baseMetric = metric.replace(/\.(shadow_miss|failed|skip)$/, '');
-    const baseKey = `${baseMetric.split('.')[0]}.checked`;
-    const baseline = (activationCounts[baseKey] as number | null | undefined) ?? 0;
-    const ratio = baseline > 0 ? (value as number) / baseline : 1;
-
-    if (ratio <= 0.05 || (value as number) < 3) continue;
-
-    const severity: AttributionRecord['frictionSignal']['severity'] =
-      ratio > 0.3 ? 'high' : ratio > 0.1 ? 'medium' : 'low';
-
-    const isFailure = metric.includes('failed');
-    const primaryLayer: AttributionClass = isFailure ? 'execution_gap' : 'harness_misfit';
-
-    findings.push({
-      id: nextFindingId(),
-      relatedFeature: 'F167',
-      frictionSignal: {
-        type: metric,
-        severity,
-        confidence: baseline > 0 ? 0.7 : 0.4,
-        detectedAt: new Date().toISOString(),
-      },
-      attribution: {
-        primaryLayer,
-        pipelineOrHuman: severity === 'high' ? 'human-required' : 'pipeline',
-        evidence: [
-          {
-            type: 'counter',
-            anchor: `${componentId}/${metric}`,
-            excerpt: `${metric}=${value} (baseline ${baseKey}=${baseline}, ratio=${(ratio * 100).toFixed(1)}%)`,
-          },
-        ],
-      },
-      proposedAction: [
-        {
-          action: isFailure ? 'tool-fix' : 'harness-tune',
-          target: `${componentId}/${metric}`,
-          rationale: `${metric} ratio ${(ratio * 100).toFixed(1)}% exceeds threshold`,
-        },
-      ],
-      status: 'open',
-    });
+    const grade = gradeFriction(metric, value, activationCounts);
+    if (!grade) continue;
+    findings.push(buildFrictionFinding(componentId, metric, value, grade));
   }
   return findings;
 }

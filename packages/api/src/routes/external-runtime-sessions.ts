@@ -1,10 +1,11 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { z } from 'zod';
-import type {
-  RuntimeSessionExternalRegistrationBinding,
-  RuntimeSessionMetadata,
-  RuntimeSessionRuntime,
+import {
+  RUNTIME_SESSION_SURFACES,
+  type RuntimeSessionExternalRegistrationBinding,
+  type RuntimeSessionMetadata,
+  type RuntimeSessionRuntime,
 } from '../domains/cats/services/runtime-session/RuntimeSessionMetadata.js';
 import type { IRuntimeSessionStore } from '../domains/cats/services/runtime-session/RuntimeSessionStore.js';
 import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
@@ -24,6 +25,9 @@ interface ExternalRuntimeSessionsRouteOptions extends FastifyPluginOptions {
 const listQuerySchema = z.object({
   runtime: z.literal('antigravity-desktop').optional(),
   catId: z.string().min(1).optional(),
+  // F211-REG1: default shows ALL external runtime sessions (both cat-cafe-dispatch
+  // and ide-direct). Optional filter lets callers narrow to one surface.
+  surface: z.enum(['cat-cafe-dispatch', 'ide-direct']).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
 const EXTERNAL_RUNTIME_SESSION_LIST_PAGE_SIZE = 200;
@@ -61,6 +65,7 @@ export async function externalRuntimeSessionsRoutes(
         sessionChainStore,
         threadStore,
         runtime: parsed.data.runtime,
+        surface: parsed.data.surface,
         catId: (callerCatId ?? parsed.data.catId) as CatId | undefined,
         userId,
         callerCatId,
@@ -79,7 +84,9 @@ export async function externalRuntimeSessionsRoutes(
     }
 
     const record = await runtimeSessionStore.getBySessionId(request.params.sessionId);
-    if (!record || record.surface !== 'ide-direct') {
+    // F211-REG1: both cat-cafe-dispatch and ide-direct are external runtime sessions
+    // and must be drillable. Only a record with no runtime sidecar is "not found".
+    if (!record) {
       reply.status(404);
       return { error: 'External runtime session not found' };
     }
@@ -100,6 +107,7 @@ async function listReadableExternalRuntimeSessions({
   sessionChainStore,
   threadStore,
   runtime,
+  surface,
   catId,
   userId,
   callerCatId,
@@ -109,6 +117,59 @@ async function listReadableExternalRuntimeSessions({
   sessionChainStore: ISessionChainStore;
   threadStore: IThreadStore;
   runtime?: RuntimeSessionRuntime;
+  surface?: RuntimeSessionMetadata['surface'];
+  catId?: CatId;
+  userId: string;
+  callerCatId?: string;
+  limit: number;
+}): Promise<Record<string, unknown>[]> {
+  // F211-REG1 + cloud-P1: when no explicit surface filter is given, scan each surface
+  // SEPARATELY so every `listRecent` query uses a dense surface(+cat) index. Querying the
+  // global runtime index with a post-hoc catId filter lets a page be diluted by other cats,
+  // which breaks the readable-pagination loop early and hides older sessions for the caller.
+  const surfaces: ReadonlyArray<RuntimeSessionMetadata['surface']> = surface ? [surface] : RUNTIME_SESSION_SURFACES;
+
+  const merged: Record<string, unknown>[] = [];
+  for (const surf of surfaces) {
+    const perSurface = await scanReadableRuntimeSessionsForSurface({
+      runtimeSessionStore,
+      sessionChainStore,
+      threadStore,
+      runtime,
+      surface: surf,
+      catId,
+      userId,
+      callerCatId,
+      limit,
+    });
+    merged.push(...perSurface);
+  }
+
+  if (surfaces.length === 1) return merged;
+  // Merge across surfaces, newest first, and truncate to the requested limit.
+  return merged.sort((a, b) => toTimestamp(b.lastObservedAt) - toTimestamp(a.lastObservedAt)).slice(0, limit);
+}
+
+function toTimestamp(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+async function scanReadableRuntimeSessionsForSurface({
+  runtimeSessionStore,
+  sessionChainStore,
+  threadStore,
+  runtime,
+  surface,
+  catId,
+  userId,
+  callerCatId,
+  limit,
+}: {
+  runtimeSessionStore: IRuntimeSessionStore;
+  sessionChainStore: ISessionChainStore;
+  threadStore: IThreadStore;
+  runtime?: RuntimeSessionRuntime;
+  surface: RuntimeSessionMetadata['surface'];
   catId?: CatId;
   userId: string;
   callerCatId?: string;
@@ -119,7 +180,7 @@ async function listReadableExternalRuntimeSessions({
   while (sessions.length < limit) {
     const records = await runtimeSessionStore.listRecent({
       runtime,
-      surface: 'ide-direct',
+      surface,
       catId,
       limit: EXTERNAL_RUNTIME_SESSION_LIST_PAGE_SIZE,
       offset,
@@ -164,6 +225,7 @@ function formatExternalRuntimeSession(record: RuntimeSessionMetadata, thread: Th
     runtimeSessionId: record.runtimeSessionId,
     runtimeConversationId: record.runtimeConversationId,
     catId: record.catId,
+    surface: record.surface,
     model: identity?.model,
     identityHistory: record.identityHistory,
     lastObservedAt: record.lifecycle.lastObservedAt,

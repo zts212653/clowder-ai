@@ -1,4 +1,5 @@
 import { getSenderName } from '../../context/ContextAssembler.js';
+import { formatPromptTime } from '../../format-time.js';
 
 export interface BatonContext {
   fromMessageId: string;
@@ -108,7 +109,7 @@ export function formatNavigationHeader(ctx: NavigationContext): string {
   const lines: string[] = ['[导航]'];
 
   if (ctx.baton) {
-    const timeStr = new Date(ctx.baton.timestamp).toISOString().slice(11, 16);
+    const timeStr = formatPromptTime(ctx.baton.timestamp);
     lines.push(`传球: ${ctx.baton.fromSpeakerDisplay} → 你 (${timeStr})`);
     if (ctx.baton.mentionExcerpt) {
       lines.push(`原文: "${ctx.baton.mentionExcerpt}"`);

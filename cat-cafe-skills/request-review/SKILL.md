@@ -161,6 +161,10 @@ Reviewer 不只审代码质量，还要判断"这是铲屎官要的吗？"
 Reviewer 不应该是第一个发现测试失败的人。
 ```
 
+## Reviewer 视角：Failure-Mode Sweep Report（§16e）
+
+R2+ 且同型 finding 再次出现时，reviewer 应期待 author 在 PR comment 提交 **Failure-Mode Sweep Report**（pattern name / scanned N / fixed / N/A 列表）。没有 Sweep Report = author 没做 failure-mode audit → reviewer 有权要求补做后再继续 review，不浪费 round 逐点抓同型。
+
 ## 和其他 skill 的区别
 
 | Skill | 关注点 | 时机 |

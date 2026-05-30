@@ -11,6 +11,27 @@ export { loadCommunityDomains, parseCommunityEvalDomainEntry } from './community
 // Community path (AC-E14 / AC-E15)
 export type { SanitizedIssuePacket } from './community-issue-packet.js';
 export { parseSanitizedIssuePacket, sanitizeVerdictForExport } from './community-issue-packet.js';
+export type {
+  CapabilityName,
+  CapabilityPredicate,
+  CapabilityPreviewAvailability,
+  CapabilityTrace,
+  CapabilityTraceInput,
+  CapabilityWakeupRule,
+  CapabilityWakeupTrial,
+  ClassifiedCapabilityWakeupTrial,
+} from './eval-capability-wakeup-adapter.js';
+export {
+  buildCapabilityTrace,
+  buildCapabilityWakeupVerdictHandoff,
+  classifyCapabilityWakeupTrials,
+  evaluateCapabilityWakeupTrace,
+} from './eval-capability-wakeup-adapter.js';
+export type {
+  CapabilityWakeupLiveVerdictArtifact,
+  GenerateCapabilityWakeupLiveVerdictInput,
+} from './eval-capability-wakeup-live-verdict.js';
+export { generateCapabilityWakeupLiveVerdict } from './eval-capability-wakeup-live-verdict.js';
 export type { EvalDomainScheduleOpts } from './eval-domain-daily.js';
 // Scheduling (frequency-aware)
 export { createEvalDomainDailySpec, createEvalDomainWeeklySpec } from './eval-domain-daily.js';

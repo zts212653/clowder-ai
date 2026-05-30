@@ -239,4 +239,160 @@ describe('external runtime sessions API routes', () => {
     assert.equal(readBody.sessionId, defaultThreadSession.sessionId);
     assert.equal(readBody.threadId, DEFAULT_THREAD_ID);
   });
+
+  // F211-REG1: Cat-Cafe-dispatched Antigravity sessions are written by
+  // syncAntigravityRuntimeMetadata with surface 'cat-cafe-dispatch' (NOT via
+  // registerExternalRuntimeSession). They must be visible in the runtime-sessions
+  // list and readable in detail; otherwise the user cannot find the dispatched
+  // Bengal session or its cascadeId (the 2026-05-28 "看不到他的 id" regression).
+  async function seedDispatchSession({ runtimeSessionId, threadTitle, lastObservedAt }) {
+    const thread = threadStore.create('user-1', threadTitle);
+    const rec = await sessionChainStore.create({
+      cliSessionId: runtimeSessionId,
+      threadId: thread.id,
+      catId: 'antig-opus',
+      userId: 'user-1',
+    });
+    await runtimeSessionStore.upsert({
+      sessionId: rec.id,
+      runtime: 'antigravity-desktop',
+      runtimeSessionId,
+      threadId: thread.id,
+      catId: 'antig-opus',
+      userId: 'user-1',
+      surface: 'cat-cafe-dispatch',
+      identityHistory: [{ catId: 'antig-opus', model: 'claude-opus-4-6', from: 1000, source: 'session_init' }],
+      lifecycle: { state: 'active', startedAt: 1000, lastObservedAt },
+    });
+    return { thread, rec };
+  }
+
+  test('list surfaces Cat-Cafe-dispatched sessions, not only ide-direct (F211-REG1)', async () => {
+    const { rec } = await seedDispatchSession({
+      runtimeSessionId: 'cascade-dispatch-1',
+      threadTitle: 'dispatched bengal',
+      lastObservedAt: 12000,
+    });
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/external-runtime-sessions?runtime=antigravity-desktop&limit=10',
+      headers: { 'x-cat-cafe-user': 'user-1', 'x-cat-id': 'antig-opus' },
+    });
+
+    assert.equal(listed.statusCode, 200);
+    const body = JSON.parse(listed.body);
+    const dispatched = body.sessions.find((session) => session.sessionId === rec.id);
+    assert.ok(dispatched, 'dispatched session must appear in the runtime sessions list');
+    assert.equal(dispatched.surface, 'cat-cafe-dispatch');
+    assert.equal(dispatched.runtimeSessionId, 'cascade-dispatch-1');
+  });
+
+  test('read returns Cat-Cafe-dispatched session metadata, not 404 (F211-REG1)', async () => {
+    const { rec } = await seedDispatchSession({
+      runtimeSessionId: 'cascade-dispatch-2',
+      threadTitle: 'dispatched bengal read',
+      lastObservedAt: 13000,
+    });
+
+    const read = await app.inject({
+      method: 'GET',
+      url: `/api/external-runtime-sessions/${rec.id}`,
+      headers: { 'x-cat-cafe-user': 'user-1', 'x-cat-id': 'antig-opus' },
+    });
+
+    assert.equal(read.statusCode, 200, 'dispatched session must be readable in detail');
+    const body = JSON.parse(read.body);
+    assert.equal(body.sessionId, rec.id);
+    assert.equal(body.surface, 'cat-cafe-dispatch');
+    assert.equal(body.runtimeSessionId, 'cascade-dispatch-2');
+  });
+
+  test('list scans per-surface so a cat-scoped query is not diluted by other cats (F211-REG1 cloud-P1)', async () => {
+    // Reproduces the Redis pagination regression cloud Codex flagged: a global (no-surface)
+    // listRecent page can be diluted by another cat's newer sessions, so the requested cat's
+    // session lives beyond the first page. Dropping the surface filter made the route query the
+    // global index + post-hoc catId filter, so the page came back sparse and the loop broke
+    // early — hiding the session. The route must scan per-surface (dense indexes) instead.
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const { externalRuntimeSessionsRoutes } = await import('../dist/routes/external-runtime-sessions.js');
+
+    const chain = new SessionChainStore();
+    const threads = new ThreadStore();
+    const thread = threads.create('user-1', 'dispatched bengal diluted');
+    const rec = await chain.create({
+      cliSessionId: 'cascade-diluted',
+      threadId: thread.id,
+      catId: 'antig-opus',
+      userId: 'user-1',
+    });
+    const dispatchRecord = {
+      sessionId: rec.id,
+      runtime: 'antigravity-desktop',
+      runtimeSessionId: 'cascade-diluted',
+      threadId: thread.id,
+      catId: 'antig-opus',
+      userId: 'user-1',
+      surface: 'cat-cafe-dispatch',
+      identityHistory: [{ catId: 'antig-opus', model: 'claude-opus-4-6', from: 1000, source: 'session_init' }],
+      lifecycle: { state: 'active', startedAt: 1000, lastObservedAt: 1000 },
+    };
+
+    // Stub store mimicking the RedisRuntimeSessionStore index behavior: the global runtime zset
+    // (no surface) returns a diluted/empty page at offset 0, while the surface-scoped index is dense.
+    const stubStore = {
+      listRecent: async ({ surface, catId }) => {
+        if (!surface) return []; // global page diluted: cat's session is beyond offset 0
+        if (surface === 'cat-cafe-dispatch' && catId === 'antig-opus') return [dispatchRecord];
+        return [];
+      },
+      getBySessionId: async (id) => (id === dispatchRecord.sessionId ? dispatchRecord : null),
+    };
+
+    const dilutedApp = Fastify();
+    await dilutedApp.register(externalRuntimeSessionsRoutes, {
+      sessionChainStore: chain,
+      runtimeSessionStore: stubStore,
+      threadStore: threads,
+    });
+
+    const res = await dilutedApp.inject({
+      method: 'GET',
+      url: '/api/external-runtime-sessions?runtime=antigravity-desktop&limit=10',
+      headers: { 'x-cat-cafe-user': 'user-1', 'x-cat-id': 'antig-opus' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.ok(
+      body.sessions.some((session) => session.sessionId === dispatchRecord.sessionId),
+      'per-surface scan must surface a cat session that a diluted global page would hide',
+    );
+  });
+
+  test('optional surface query filter still narrows to ide-direct when requested (F211-REG1)', async () => {
+    await seedDispatchSession({
+      runtimeSessionId: 'cascade-dispatch-3',
+      threadTitle: 'dispatched bengal filtered out',
+      lastObservedAt: 14000,
+    });
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/external-runtime-sessions?runtime=antigravity-desktop&surface=ide-direct&limit=10',
+      headers: { 'x-cat-cafe-user': 'user-1', 'x-cat-id': 'antig-opus' },
+    });
+
+    assert.equal(listed.statusCode, 200);
+    const body = JSON.parse(listed.body);
+    assert.ok(
+      body.sessions.every((session) => session.surface !== 'cat-cafe-dispatch'),
+      'surface=ide-direct filter must exclude dispatched sessions',
+    );
+    assert.ok(
+      body.sessions.some((session) => session.sessionId === user1Session.sessionId),
+      'surface=ide-direct filter must keep ide-direct sessions',
+    );
+  });
 });

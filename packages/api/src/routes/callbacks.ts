@@ -3,6 +3,7 @@
  * 安全: 每个请求都需要 invocationId + callbackToken 验证。
  */
 
+import { createHash } from 'node:crypto';
 import type { CatId, CatRoutingError, RichBlock } from '@cat-cafe/shared';
 import {
   catRegistry,
@@ -20,6 +21,7 @@ import type { InvocationTracker } from '../domains/cats/services/agents/invocati
 import { MessageDeliveryService } from '../domains/cats/services/agents/invocation/MessageDeliveryService.js';
 import { getRichBlockBuffer } from '../domains/cats/services/agents/invocation/RichBlockBuffer.js';
 import { stampVisibleTurn } from '../domains/cats/services/agents/invocation/visible-turn.js';
+import { extractImagePaths, extractImageUrls } from '../domains/cats/services/agents/providers/image-paths.js';
 import { analyzeA2AMentions } from '../domains/cats/services/agents/routing/a2a-mentions.js';
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
 import { extractRichFromText } from '../domains/cats/services/agents/routing/rich-block-extract.js';
@@ -45,6 +47,7 @@ import { buildThreadDeepLink } from '../infrastructure/connectors/connector-comm
 import { createModuleLogger } from '../infrastructure/logger.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { scoreKeywordRelevance, tokenizeKeyword } from '../utils/keyword-relevance.js';
+import { getDefaultUploadDir } from '../utils/upload-paths.js';
 import { getFeatureTagId } from './backlog-doc-import.js';
 import { enqueueA2ATargets, triggerA2AInvocation } from './callback-a2a-trigger.js';
 import {
@@ -201,6 +204,96 @@ async function findRecentExactCallbackDuplicate(
     return msg;
   }
   return undefined;
+}
+
+/**
+ * Stable fingerprint over the exact dimensions findRecentExactCallbackDuplicate compares
+ * (thread/user/cat/content/replyTo/mentionsUser/mentions). Used as the key for the atomic
+ * content-dedup claim that closes the check-then-act race in the duplicate scan. Hashed so
+ * the key stays bounded regardless of message length.
+ */
+function buildCallbackContentDedupFingerprint(input: {
+  threadId: string;
+  userId: string;
+  catId: string;
+  content: string;
+  mentions: readonly CatId[];
+  mentionsUser?: boolean | undefined;
+  replyTo?: string | undefined;
+}): string {
+  const parts = [
+    input.threadId,
+    input.userId,
+    input.catId,
+    input.replyTo ?? '',
+    input.mentionsUser ? '1' : '0',
+    [...input.mentions].join(','),
+    input.content,
+  ].join('\u0000');
+  return createHash('sha256').update(parts).digest('hex');
+}
+
+type CallbackDuplicateResponse = {
+  status: 'duplicate';
+  threadId: string;
+  messageId?: string;
+  replyTo?: string;
+  clientMessageId?: string;
+};
+
+/**
+ * Atomic content-dedup gate shared by the invocation-auth and agent-key post-message paths.
+ * findRecentExactCallbackDuplicate is check-then-act (read recent → append later), so two
+ * concurrent byte-identical deliveries can both pass it before either appends. This claims the
+ * content fingerprint atomically: the winner gets null (proceed to append); a loser (or any
+ * recent identical post within the window) gets a 'duplicate' response without a second append —
+ * closing the byte-identical duplicate-message race. Returns null when routing warnings are
+ * present, matching the existing scan's gate.
+ */
+async function claimCallbackContentOrDuplicate(
+  messageStore: IMessageStore,
+  input: {
+    threadId: string;
+    userId: string;
+    catId: string;
+    content: string;
+    mentions: readonly CatId[];
+    mentionsUser?: boolean | undefined;
+    replyTo?: string | undefined;
+    clientMessageId?: string | undefined;
+    now: number;
+    hasRoutingWarnings: boolean;
+  },
+): Promise<CallbackDuplicateResponse | null> {
+  if (input.hasRoutingWarnings) return null;
+  const fingerprint = buildCallbackContentDedupFingerprint({
+    threadId: input.threadId,
+    userId: input.userId,
+    catId: input.catId,
+    content: input.content,
+    mentions: input.mentions,
+    ...(input.mentionsUser ? { mentionsUser: input.mentionsUser } : {}),
+    ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+  });
+  const claimed = await messageStore.claimContentDedupKey(fingerprint, CALLBACK_EXACT_DUPLICATE_WINDOW_MS);
+  if (claimed) return null;
+  const raced = await findRecentExactCallbackDuplicate(messageStore, {
+    threadId: input.threadId,
+    userId: input.userId,
+    catId: input.catId,
+    content: input.content,
+    mentions: input.mentions,
+    ...(input.mentionsUser ? { mentionsUser: input.mentionsUser } : {}),
+    ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+    now: input.now,
+  });
+  return {
+    status: 'duplicate',
+    threadId: input.threadId,
+    ...(raced ? { messageId: raced.id } : {}),
+    ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+    ...(input.clientMessageId ? { clientMessageId: input.clientMessageId } : {}),
+  };
 }
 
 function hasQueuedA2AEntryForMessage(
@@ -697,6 +790,22 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         };
       }
 
+      // Race-safe backstop (agent-key path, e.g. shared Antigravity MCP): the exact-duplicate scan
+      // above is check-then-act, so an atomic content claim makes the at-most-once decision.
+      const agentKeyContentDuplicate = await claimCallbackContentOrDuplicate(messageStore, {
+        threadId: effectiveThreadId,
+        userId: principal.userId,
+        catId: principal.catId,
+        content: storedContent,
+        mentions,
+        ...(mentionsUser ? { mentionsUser } : {}),
+        ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
+        ...(clientMessageId ? { clientMessageId } : {}),
+        now,
+        hasRoutingWarnings: routing_warnings.length > 0,
+      });
+      if (agentKeyContentDuplicate) return agentKeyContentDuplicate;
+
       const storedMsg = await messageStore.append({
         threadId: effectiveThreadId,
         userId: principal.userId,
@@ -1152,6 +1261,21 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         ...(clientMessageId ? { clientMessageId } : {}),
       };
     }
+    // Race-safe backstop: the exact-duplicate scan above is check-then-act, so an atomic content
+    // claim makes the at-most-once decision (root cause of the byte-identical duplicate bug).
+    const contentDuplicate = await claimCallbackContentOrDuplicate(messageStore, {
+      threadId: effectiveThreadId,
+      userId: actor.userId,
+      catId: actor.catId,
+      content: storedContent,
+      mentions,
+      ...(mentionsUser ? { mentionsUser } : {}),
+      ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
+      ...(clientMessageId ? { clientMessageId } : {}),
+      now,
+      hasRoutingWarnings: routing_warnings.length > 0,
+    });
+    if (contentDuplicate) return contentDuplicate;
     const storedMsg = await messageStore.append({
       userId: actor.userId,
       catId: actor.catId,
@@ -1672,19 +1796,29 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
     }
 
+    // F211 BUG1 fix: resolve /uploads/ relative image URLs to absolute paths
+    // so external runtimes (Antigravity/Bengal) can access image files.
+    const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
+
     return {
       // TD091: echo threadId so cats know which thread they're in
       threadId: effectiveThreadId,
-      messages: filtered.map((item) => ({
-        id: item.id,
-        userId: item.userId,
-        catId: item.catId,
-        content: item.content,
-        ...(item.contentBlocks ? { contentBlocks: item.contentBlocks } : {}),
-        timestamp: item.timestamp,
-        // F148 Phase B (AC-B2): include relevance score when keyword search is active
-        ...(keywordTerms.length > 0 ? { relevanceScore: scoreKeywordRelevance(item.content, keywordTerms) } : {}),
-      })),
+      messages: filtered.map((item) => {
+        const imagePaths = extractImagePaths(item.contentBlocks, uploadDir);
+        const imageUrls = extractImageUrls(item.contentBlocks);
+        return {
+          id: item.id,
+          userId: item.userId,
+          catId: item.catId,
+          content: item.content,
+          ...(item.contentBlocks ? { contentBlocks: item.contentBlocks } : {}),
+          ...(imagePaths.length > 0 ? { imagePaths } : {}),
+          ...(imageUrls.length > 0 ? { imageUrls } : {}),
+          timestamp: item.timestamp,
+          // F148 Phase B (AC-B2): include relevance score when keyword search is active
+          ...(keywordTerms.length > 0 ? { relevanceScore: scoreKeywordRelevance(item.content, keywordTerms) } : {}),
+        };
+      }),
       ...(workflowSop ? { workflowSop } : {}),
     };
   });

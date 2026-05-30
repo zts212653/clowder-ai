@@ -1,169 +1,154 @@
 ---
 name: ppt-forge
 description: >
-  PPT 制作全链路：内容规划 → 风格定调 → Slide 制作 → 视觉审查 → 导出验证 → 交付。
-  Use when: 做 PPT、做演示文稿、做 slide、做海报、PPT review、视觉审查。
+  PPT 制作全链路：内容分析 → 分页规划 → 低保真 MD → imagegen 精美图。
+  架构猫写低保真 MD（ASCII art 结构图 + 视觉指引），imagegen 猫逐页出精美图。
+  Use when: 做 PPT、做演示文稿、做 slide、帮朋友做 PPT、画架构图、画技术蓝图。
   Not for: 纯代码开发（用 worktree/tdd）、纯文档写作（直接写）。
-  Output: 高密度 HTML slide + 多猫审查通过 + 导出验证。
+  Output: 低保真 MD + AI 原生精美图（raster PNG）。
 ---
 
-# PPT Forge — AI 演示文稿生产线
+# PPT Forge — 低保真 MD → AI 精美图
 
 ## 核心原则
 
-**PPT 不是一个人的活，是多猫流水线。** 角色按当前 roster 可用猫分配。
+**架构猫写蓝图，imagegen 猫出精美图。** 不走 HTML/SVG 手工合成。
 
-- 主执行猫（当前持球猫）：内容规划 + HTML 制作 + density gate
-- QA/审查猫（跨 family）：布局/信息审查 + Export Truth Gate
-- 视觉把关猫（跨 family）：审美/品牌审查 + 风格定调
+- **架构猫**（当前持球猫）：内容分析 + 分页规划 + 低保真 MD 写作
+- **imagegen 猫**（imagegen 猫/云端 Codex）：逐页生成精美 raster PNG
+- **铲屎官**：审稿 + 确认风格
+
+产出是 **AI 原生图片**——视觉质量远高于 HTML/CSS 手工画，且速度快。
 
 ## 开局参数（必须声明）
 
 | 参数 | 说明 | 示例 |
 |------|------|------|
-| 页型（archetype） | 决定密度、字号矩阵和信息组织方式 | 华为高密战略页 / KPI Dashboard / 发布会结论页 |
-| 品牌 | 对标公司的视觉基因 | 华为 / Apple / 阿里 |
-| 受众 | 谁看这个 PPT | CTO / 投资人 / 技术团队 |
-| 场景 | PPT 用在哪 | 年会汇报 / 客户提案 / 内部分享 |
-| 主观看模式 | 影响字号/密度/留白标准 | presentation（大屏）/ document（PDF 阅读） |
+| 风格 preset | 对标公司的视觉基因 | 华为 / Apple / 阿里 / 自定义 |
+| 受众 | 谁看这个 PPT | 部门领导 / CTO / 投资人 / 客户 |
+| 场景 | PPT 用在哪 | 转正答辩 / 年会汇报 / 客户提案 / 技术分享 |
+| 内容取舍 | 全保留 or 可精简 | "所有内容全保留" / "只要核心亮点" |
 
-**没有开局参数 = 开工和审查都没有标准。开工前必须先锁这 5 项。**
+**没有开局参数 = 分页和风格无标准。开工前先锁。**
 
 ## 场景路由
 
 | 触发 | 场景 | 主导 | 详细文档 |
 |------|------|------|---------|
-| 铲屎官说"做个 PPT" | **A: 内容规划** | 主执行猫 | 主 skill 最小规则（ref 待补） |
-| 大纲确认 | **B: 风格定调** | 视觉把关猫审 + 主执行猫做 | [ppt-style-tile.md](../refs/ppt-style-tile.md) |
-| 风格确认 | **C: Slide 批量制作** | 主执行猫 | [ppt-slide-authoring.md](../refs/ppt-slide-authoring.md) |
-| Slide 做完 | **D: 视觉审查 Gate** | QA/审查猫(D1) + 视觉把关猫(D2) | [ppt-visual-review.md](../refs/ppt-visual-review.md) |
-| 审查通过 | **E: Export Truth Gate** | QA/审查猫 | 主 skill 最小规则（ref 待补） |
-| 导出验证通过 | **F: 交付** | 主执行猫 | [ppt-delivery.md](../refs/ppt-delivery.md) |
-| 需要对比竞品 | **G: Benchmark 对拍** | QA/审查猫 + 视觉把关猫 | 主 skill 最小规则（ref 待补） |
-| 铲屎官不满意 / 连续 2 轮 P1>0 | **R: 翻盘重来** | 全部参与猫 | 主 skill 最小规则（ref 待补） |
+| 铲屎官说"做个 PPT" | **1: 内容分析 + 分页规划** | 架构猫 | [ppt-lofi-authoring.md](../refs/ppt-lofi-authoring.md) |
+| 分页确认 | **2: 低保真 MD 写作** | 架构猫 | [ppt-lofi-authoring.md](../refs/ppt-lofi-authoring.md) |
+| 低保真 MD 完成 | **3: 铲屎官审稿** | 铲屎官 | — |
+| 审稿通过 | **4: imagegen 出图** | imagegen 猫/云端 Codex | 逐页生成精美图 |
+| 出图完成 | **5: 交付** | 主执行猫 | 图片打包 + 预览 |
+| 铲屎官不满意 | **R: 回到 1 或 2** | — | 改分页/改内容/改风格 |
 
-## 还没拆成 ref 的场景（当前最小真相源）
+## 场景 1-2: 低保真 MD 写作
 
-### A: 内容规划
+> 详细规范：[ppt-lofi-authoring.md](../refs/ppt-lofi-authoring.md)
 
-- 先锁：`archetype / 品牌 / 受众 / 场景 / 主观看模式`
-- 至少产出：`本页目的一句话 + 证据源列表 + 页面结构草图`
-- 没说清"这页让人看完要得出什么结论" → 不进 C
+### 写作流程
 
-### E: Export Truth Gate
+1. **内容分析**：读完全部原始内容，识别：
+   - 核心板块（几个大的独立主题）
+   - 关键数据点（有冲击力的数字）
+   - 可图表化的逻辑链（流程/对比/层级）
+   - 信息层级（总→分）
 
-- 检查：`native text / native chart / native table / screenshot fallback / repair dialog`
-- 任何一项说不清 → 不进 F
+2. **分页规划**：确定每页的类型和内容分配
+   - 页面类型：封面 / 总览 / 详情 / 方法论 / 路线图 / 总结
+   - 先给铲屎官看分页表，确认再动手写
 
-### G: Benchmark 对拍
+3. **风格锁定**：选择风格 preset，配色方案一次锁定
 
-- 必须同 archetype、同主题、同观看模式比较
-- 至少对拍：`信息密度 / 事实保留 / 说服力 / 品牌贴合度`
+4. **低保真 MD 写作**：每页一个 section
+   - ASCII art 结构图（用 box drawing 字符画清布局）
+   - 视觉指引（给 imagegen 猫的文字描述）
+   - 数据高亮方式标注
 
-### R: 翻盘重来
+5. **精美图生成指引**：末尾写总体风格规范 + 逐页清单表格
 
-- 连续 2 轮 P1>0 或铲屎官说"方向不对" → 直接回到 A/B，不准在坏页型上缝补
-- 先写 `Author Synthesis`，说明这次为什么要重开
+### 低保真 MD 文件结构
 
-## 视觉审查 6 件套（D 场景输入包）
+```markdown
+---
+title: "PPT 标题 — 低保真稿"
+created: YYYY-MM-DD
+author: "[签名]"
+doc_kind: diagram
+status: lofi-draft
+---
 
-每次发起视觉审查，作者必须附带：
+# 标题
 
-1. **品牌+受众 brief** — "华为风格，受众 CTO，1 页讲清 moat"
-2. **页型（archetype）+ 主观看模式** — 防止 reviewer 把页面改型
-3. **本页目的** — 一句话说清这页要达成什么
-4. **截图/预览 URL** — 渲染结果
-5. **HTML/CSS 源码** — 定位布局 bug 用
-6. **密度数据** — whitespace%、element count、overflow
+> **受众**：...
+> **风格**：...
+> **视觉**：一行配色方案
+> **页数**：N 页
+> **原则**：...
 
-> 没有 6 件套 = 观感点评；有 6 件套 = P1/P2 级审查。
+## P1：封面
+（ASCII art + 视觉指引）
 
-## 审查维度速查
+## P2：总览
+（ASCII art + 视觉指引）
 
-### D1: 布局/信息审查（QA/审查猫）
+...
 
-| 级别 | 维度 | 判定 |
-|------|------|------|
-| P1 | 布局 bug | 真实 CSS/HTML 错误 |
-| P1 | 信息失败 | 没讲清重点 / 层级错 / 受众看不懂 |
-| P1 | 密度失衡 | 该密不密 / 该疏不疏 |
-
-### D2: 审美/品牌审查（视觉把关猫）
-
-| 级别 | 维度 | 判定 |
-|------|------|------|
-| P2 | 品牌偏移 | 不像目标公司的设计语言 |
-| P2 | 视觉一致性 | 字号/卡片/边框/图标语言不统一 |
-
-审美五维：色彩体系 · 字体排印 · 空间网格 · 视觉元素 · 密度平衡
-
-## HTML Slide 预览（ref: browser-preview skill）
-
-Slide 做完必须先自己看一遍再交活。预览走 **Hub 内嵌浏览器**（browser-preview skill），禁止用 Chrome MCP / `open` 命令 / Playwright。
-
-### 预览流程
-
-```
-1. 图片内联 — 所有 <img src="xxx.png"> 必须转成 data URI
-   原因：Preview Gateway 要求每个请求带 __preview_port 参数，
-   相对路径请求（如 /image.png）不带此参数 → 400 错误 → 图裂。
-
-2. 起 HTTP server — 每个 slide 用独立端口
-   原因：BrowserPanel 按 port 去重，同 port 只创建 1 个 tab。
-   N 个 slide → N 个端口 → N 个 tab。
-   python3 -m http.server PORT（每个 slide 一个端口）
-
-3. 调 auto-open API — 每个端口调一次
-   curl -X POST http://localhost:3003/api/preview/auto-open \
-     -H "Content-Type: application/json" \
-     -d '{"port": PORT, "path": "/slide.html"}'
-   间隔 300ms 避免 socket 事件丢失。
+## 精美图生成指引（给imagegen 猫）
+（配色方案 + 字体风格 + 密度原则 + 逐页清单）
 ```
 
-### 图片内联参考
+## 场景 4: imagegen 出图交接协议
 
-```python
-import base64, re, os
-def inline_images(html_path):
-    with open(html_path) as f: content = f.read()
-    def replace(m):
-        src = m.group(1)
-        if not os.path.exists(src): return m.group(0)
-        b64 = base64.b64encode(open(src,'rb').read()).decode()
-        mime = 'image/png' if src.endswith('.png') else 'image/jpeg'
-        return f'src="data:{mime};base64,{b64}"'
-    return re.sub(r'src="([^"]+\.(?:png|jpg|jpeg|gif|webp))"', replace, content)
-```
+发给 imagegen 猫时说清：
 
-### 陷阱速查
+1. **低保真 MD 文件路径**（不贴全文，太长）
+2. **逐页生成**：每页一张独立图片
+3. **输出位置**：同目录 `assets/` 子目录
+4. **技术要求**：
+   - 原生 imagegen 直出 raster PNG
+   - **不用 SVG / HTML 手工合成**（出来贼丑）
+   - 每页命名：`p{N}-{简短描述}.png`
+5. **内容约束**：
+   - 严格遵循配色方案，不自由发挥
+   - 文字内容以低保真 MD 为准，不删不加
 
-| 现象 | 根因 | 修法 |
-|------|------|------|
-| 图片裂了 | 相对路径缺 `__preview_port` | 图片转 data URI |
-| 只有 1 个 tab | 同 port 去重 | 每 slide 独立端口 |
-| proxy error | HTTP server 没跑 | 先 `curl localhost:PORT` 验证 |
+## 场景 5: 交付
 
-## 密度填充手法
+- 图片生成完成后，打包到 `assets/` 子目录
+- 用 `media_gallery` rich block 或直接展示给铲屎官
+- 说清每页对应关系
 
-详见 [ppt-density-playbook.md](../refs/ppt-density-playbook.md)
+## 风格 Preset
+
+| 风格 | Ref 文件 | 核心特征 |
+|------|---------|---------|
+| **华为** | [ppt-style-huawei.md](../refs/ppt-style-huawei.md) | 白底+红黑、直角、极致密排、图表化、数据说话 |
+| Apple | 待补 | 黑白+渐变、大圆角、极简、每页一件事 |
+| 阿里 | 待补 | 橙+科技蓝、中圆角、Dashboard 风 |
+
+需要新风格时，参照 [ppt-style-huawei.md](../refs/ppt-style-huawei.md) 格式新建 ref。
+
+## 成功案例
+
+| 案例 | 日期 | 路径 | 风格 |
+|------|------|------|------|
+| LLE 自进化平台架构图 | 2026-05-28 | *(internal reference removed)* | 华为 |
+| 试用期工作总结 | 2026-05-29 | *(internal reference removed)* | 华为 |
 
 ## Common Mistakes
 
 | 错误 | 后果 | 修复 |
 |------|------|------|
-| 没声明开局参数 | 开工和审查没有标准 | 开工前锁 `archetype + 品牌 + 受众 + 场景 + 主观看模式` |
-| 20 页全做完才审 | 返工成本爆炸 | B 场景：先做 1-2 页核心页定调 |
-| 自己说"没问题"不截图 | 布局 bug 漏检 | 自检必须截图看一遍再交活 |
-| 审查只给截图没给 HTML | 只能说"这里怪" | 必须带 6 件套 |
-| 主 skill 挂死链 ref | 执行时靠口头补流程 | 没写出来的 ref 不准继续写成可执行路由 |
-| 跳过 Export Gate | 导出后不可编辑/乱码 | 独立验证导出质量 |
+| 没锁风格 preset 就动手写 | 写完才发现配色不对，返工 | 开工前先锁风格 |
+| ASCII art 太简陋 | imagegen 猜布局，结果不对 | 画清每个区域的位置和大小 |
+| 视觉指引缺配色 | imagegen 用默认配色 | 每页引用风格 preset |
+| 大段原文直接贴 | imagegen 不知道怎么排版 | 先做信息设计（分卡片/分层级/转图表） |
+| 没写精美图生成指引 | imagegen 猫要反复问风格 | 末尾必有总章 |
+| 用 SVG/HTML 合成 | **贼丑** | 只用原生 imagegen 直出 |
 
-## 和其他 Skill 的区别
+## 和其他 Skill 的关系
 
-- `request-review` / `receive-review`：**代码**审查 — ppt-forge D 场景是**视觉**审查
+- `image-generation`：通用图片生成 — ppt-forge 是 PPT 专用流程
 - `expert-panel`：多猫分析报告 — ppt-forge 是做 PPT
-- `quality-gate`：代码自检 — ppt-forge 有自己的 density gate
-
-## 下一步
-
-完成交付(F) 后 → 如果是 feature 的一部分 → `feat-lifecycle`
+- `tech-writing`：写文档 — ppt-forge 做演示文稿（视觉优先）

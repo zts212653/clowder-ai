@@ -100,7 +100,7 @@ Claude Code v2.1.142 / Codex 0.130.0 baseline 检测点：safety reflex / parall
 - 想说"文件在 X 路径" → `workspace-navigator` 程式打开
 - 改 UI 视觉 / 设计界面 → `pencil-design` 在 .pen 里探索
 - co-creator问"怎么用 / 怎么配置" → `guide-interaction` 场景式引导
-- 架构决定 / bug 死磕 / 多视角 → `expert-panel` 召唤多猫辩论
+- 架构决定 / bug 死磕 / 多视角 → `expert-panel` 多猫辩论；多猫表决用 `cat_cafe_start_vote`（不无限互 @）
 - 想"另开个 thread"（新调查 / 子任务） → `cat_cafe_propose_thread`（卡片让co-creator确认，F128）
 - 外部 runtime 会话像丢了 → `cat_cafe_list_external_runtime_sessions` / `cat_cafe_read_external_runtime_session`（F211）
 - CLI 只显"退出了" → 读 `cliDiagnostics` / debugRef，不猜 stderr（F212）

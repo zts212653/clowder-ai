@@ -12,7 +12,7 @@ community_pr: https://github.com/zts212653/clowder-ai/pull/85
 
 # F128: Cat-Proposed Thread Creation — 猫猫提议创建 Thread
 
-> **Status**: in-progress | **Source**: clowder-ai #82 (bouillipx) / PR #85 | **Priority**: P2
+> **Status**: done | **Source**: clowder-ai #82 (bouillipx) / PR #85 | **Priority**: P2
 > **Design correction (2026-05-22)**: supersedes direct `cat_cafe_create_thread` with Proposal-First flow per ADR-035.
 
 ## Why
@@ -59,17 +59,10 @@ community_pr: https://github.com/zts212653/clowder-ai/pull/85
   - 源 thread 自动追加系统消息：已创建子 thread，并链接到新 thread
   - 新 thread 自动追加 seed message，说明来源与初始任务
 
-### Phase B: 前端层级 UI + Proposal Card（需设计稿）
+### ~~Phase B: 前端层级 UI + Proposal Card（需设计稿）~~ — CVO rejected (2026-05-29)
 
-- Thread proposal card 设计稿
-  - 紧凑态：标题 + why + Create / Dismiss
-  - 展开态：可编辑 title / preferredCats / initialMessage / projectPath
-  - Created 状态：显示 thread link
-  - Rejected 状态：保留审计但降低视觉权重
-- Sidebar 可折叠展开子 thread 树形展示
-- 树形连接线（├──/└──）+ 猫头像 + @handle 标签
-- 展开/收起状态 localStorage 持久化
-- **前置条件**：需 .pen 设计稿 + ThreadSidebar 重构（当前 727 行，超 350 行硬上限）
+> **CVO 决策**：Sidebar 层级树形 UI 是社区原始设计，不符合自家愿景，拒绝实现。
+> ProposalCard 本身已在 Phase F 实现（pin + navigate + 编辑 + 状态翻转）。
 
 ### Phase C: Thread Orchestration Skill
 
@@ -93,16 +86,16 @@ F128 遵循 ADR-035 Proposal-First Agent Actions：
 
 ## Acceptance Criteria
 
-- [ ] AC-A1: `cat_cafe_propose_thread` 工具只创建 proposal，不创建 thread
-- [ ] AC-A2: proposal rich block 在源 thread 可见，字段可编辑
-- [ ] AC-A3: approve endpoint 必须使用用户 principal，猫 callback token 不能自批
-- [ ] AC-A4: approve 有 idempotency key，重复点击不创建重复 thread
-- [ ] AC-A5: `parentThreadId` 必须从当前 invocation 推导或校验同用户归属
-- [ ] AC-A6: 创建成功后源 thread 和新 thread 双向链接
-- [ ] AC-A7: WebSocket 推送新 thread，并更新 proposal 卡片状态
-- [ ] AC-A8: reject/dismiss 不产生 thread，但保留审计记录
-- [ ] AC-A9: skill/system prompt 明确教猫何时 propose、何时不要 propose
-- [ ] AC-A10: 测试覆盖 happy path、重复 approve、跨用户 parentThreadId、reject、proposal card state update
+- [x] AC-A1: `cat_cafe_propose_thread` 工具只创建 proposal，不创建 thread
+- [x] AC-A2: proposal rich block 在源 thread 可见，字段可编辑
+- [x] AC-A3: approve endpoint 必须使用用户 principal，猫 callback token 不能自批
+- [x] AC-A4: approve 有 idempotency key，重复点击不创建重复 thread
+- [x] AC-A5: `parentThreadId` 必须从当前 invocation 推导或校验同用户归属
+- [x] AC-A6: 创建成功后源 thread 和新 thread 双向链接
+- [x] AC-A7: WebSocket 推送新 thread，并更新 proposal 卡片状态
+- [x] AC-A8: reject/dismiss 不产生 thread，但保留审计记录
+- [x] AC-A9: skill/system prompt 明确教猫何时 propose、何时不要 propose
+- [x] AC-A10: 测试覆盖 happy path、重复 approve、跨用户 parentThreadId、reject、proposal card state update
 
 ### Phase B: 后端实现（clowder-ai#85 intake，2026-05-27）
 
@@ -114,19 +107,21 @@ F128 遵循 ADR-035 Proposal-First Agent Actions：
 - [x] AC-B6: `Proposal` schema in shared types matches the spec model above
 - [x] AC-B7: Tests cover: cat auth happy path, stale guard, ownership rejection, idempotency, user approve happy path, double-approve idempotency, cross-user approve 403, approve-after-reject 409, reject happy path, reject-then-approve 409, edit-on-approve applied to created thread
 
-### Phase F: 前端实现
+### Phase F: 前端实现（2026-05-29 CVO 补充置顶 + 卡片体验）
 
-- [ ] AC-F1: Proposal card renders in source thread on `proposal_created` socket event (no manual refresh)
-- [ ] AC-F2: Card prefills with cat-supplied fields; user can edit `title`, `parentThreadId`, `preferredCats`, `initialMessage` before approve
-- [ ] AC-F3: Approve button POSTs to `/api/proposals/:id/approve`; on success, sidebar shows new thread (via `thread_created` WS event); card flips to `approved` state with link to created thread
-- [ ] AC-F4: Reject button POSTs to `/api/proposals/:id/reject`; card flips to `rejected` state; thread is not created
-- [ ] AC-F5: Double-click protection on Approve/Reject (rely on backend idempotency + button disable on click)
-- [ ] AC-F6: Frontend tests cover render, edit, approve happy path, reject path, status flip via WS event
+- [x] AC-F1: Proposal card renders in source thread on `proposal_created` socket event (no manual refresh)
+- [x] AC-F2: Card prefills with cat-supplied fields; user can edit `title`, `parentThreadId`, `preferredCats`, `initialMessage` before approve
+- [x] AC-F3: Approve button POSTs to `/api/proposals/:id/approve`; on success, sidebar shows new thread (via `thread_created` WS event); card flips to `approved` state with link to created thread
+- [x] AC-F4: Reject button POSTs to `/api/proposals/:id/reject`; card flips to `rejected` state; thread is not created
+- [x] AC-F5: Double-click protection on Approve/Reject (rely on backend idempotency + button disable on click)
+- [x] AC-F6: Frontend tests cover render, edit, approve happy path, reject path, status flip via WS event
+- [x] AC-F7: Approve card 新增 "📌 置顶" toggle — approve 时可选将新 thread 自动置顶（PATCH /api/threads/:id + updateThreadPin）
+- [x] AC-F8: Approve 成功后自动跳转到新创建的 thread（或显示明显的导航入口）
 
 ### Phase X: 质量门禁
 
-- [ ] AC-X1: All file sizes ≤ 350 lines (split routes/components if needed)
-- [ ] AC-X2: No `any` types
+- [x] AC-X1: All file sizes ≤ 350 lines (split routes/components if needed)
+- [x] AC-X2: No `any` types
 - [x] AC-X3: `MCP_TOOLS_SECTION` updated; `thread-orchestration` skill rewritten for propose-first
 - [x] AC-X4: `pnpm check` + `pnpm lint` + all affected tests green
 

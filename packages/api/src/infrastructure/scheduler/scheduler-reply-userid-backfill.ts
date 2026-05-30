@@ -3,7 +3,8 @@ import type { IThreadStore } from '../../domains/cats/services/stores/ports/Thre
 import { RedisInvocationRecordStore } from '../../domains/cats/services/stores/redis/RedisInvocationRecordStore.js';
 import { RedisMessageStore } from '../../domains/cats/services/stores/redis/RedisMessageStore.js';
 
-const MARKER_KEY = 'migration:f139:scheduler-reply-userid-backfill:v1';
+const MARKER_KEY = 'migration:f139:scheduler-reply-userid-backfill:v2';
+const REPAIRABLE_REPLY_ORIGINS = new Set(['callback', 'stream']);
 
 export interface SchedulerReplyUserIdBackfillResult {
   skipped: boolean;
@@ -16,6 +17,7 @@ interface SchedulerReplyUserIdBackfillDeps {
   messageStore: RedisMessageStore;
   invocationRecordStore: RedisInvocationRecordStore;
   threadStore: IThreadStore;
+  defaultUserId?: string;
 }
 
 function isRepairableOwner(userId: string | null | undefined): userId is string {
@@ -34,7 +36,11 @@ export async function runSchedulerReplyUserIdBackfill(
   const resolveThreadOwner = async (threadId: string): Promise<string | null> => {
     if (threadOwnerCache.has(threadId)) return threadOwnerCache.get(threadId) ?? null;
     const thread = await deps.threadStore.get(threadId);
-    const owner = thread?.createdBy ?? null;
+    let owner = thread?.createdBy ?? null;
+    if (!isRepairableOwner(owner) && thread?.systemKind === 'eval_domain') {
+      owner = isRepairableOwner(deps.defaultUserId) ? deps.defaultUserId : null;
+    }
+    if (!isRepairableOwner(owner)) owner = null;
     threadOwnerCache.set(threadId, owner);
     return owner;
   };
@@ -44,7 +50,8 @@ export async function runSchedulerReplyUserIdBackfill(
   for (const msg of allMessages) {
     if (msg.userId !== 'scheduler') continue;
     if (!msg.catId || msg.catId === 'system') continue;
-    if (msg.origin !== 'callback') continue;
+    if (typeof msg.origin !== 'string') continue;
+    if (!REPAIRABLE_REPLY_ORIGINS.has(msg.origin)) continue;
     const owner = await resolveThreadOwner(msg.threadId);
     if (!isRepairableOwner(owner)) continue;
     await deps.messageStore.reassignUserId(msg.id, owner);

@@ -26,6 +26,7 @@ function item(overrides: Partial<ExternalRuntimeSessionListItem> = {}): External
     runtimeSessionId: 'cascade-active-1234567890abcdef',
     runtimeConversationId: 'conversation-active',
     catId: 'antigravity',
+    surface: 'ide-direct',
     model: 'gemini-3.1-pro',
     title: 'IDE active session',
     lastObservedAt: 1780000000000,
@@ -47,6 +48,7 @@ const sessions = [
     runtimeSessionId: 'cascade-sealed-1234567890abcdef',
     runtimeConversationId: 'conversation-sealed',
     catId: 'antig-opus',
+    surface: 'cat-cafe-dispatch',
     model: 'claude-opus-4-6',
     title: undefined,
     lastObservedAt: 1780000001000,
@@ -111,6 +113,8 @@ describe('ExternalRuntimeSessionsPanel', () => {
     expect(container.textContent).toContain('已封存');
     expect(container.textContent).toContain('Runtime 断开');
     expect(container.textContent).toContain('Thread 绑定');
+    // F211-REG1: surface must be visible so dispatched vs IDE-direct is distinguishable.
+    expect(container.textContent).toContain('Café 派发');
   });
 
   it('renders a concise empty state without exposing hidden anchor thread ids', async () => {
@@ -121,7 +125,7 @@ describe('ExternalRuntimeSessionsPanel', () => {
 
     await renderPanel();
 
-    expect(container.textContent).toContain('没有 IDE 直连会话');
+    expect(container.textContent).toContain('没有 runtime 会话');
     expect(container.textContent).not.toContain('external-runtime:');
   });
 

@@ -74,6 +74,11 @@ describe('F201 Phase D cascade health', () => {
     });
 
     assert.equal(health.level, 'retire');
+    assert.equal(
+      health.cascadeStatus,
+      'CASCADE_RUN_STATUS_IDLE',
+      'snapshot carries the cascade run status (gates mid-turn retirement)',
+    );
     assert.equal(health.stepCount, DEFAULT_ANTIGRAVITY_CASCADE_HEALTH_THRESHOLDS.retireSteps);
     assert.ok(health.approximateTrajectoryBytes > 0);
     assert.deepEqual(health.reasons, ['step_count_retire_threshold']);
@@ -126,6 +131,7 @@ describe('F201 Phase D cascade health', () => {
       cascadeId,
       checkedAt: 1770000000000,
       level: cascadeId === 'cascade-old' ? 'retire' : 'ok',
+      cascadeStatus: 'CASCADE_RUN_STATUS_IDLE', // at a turn boundary → safe to retire
       stepCount: cascadeId === 'cascade-old' ? 250 : 1,
       approximateTrajectoryBytes: cascadeId === 'cascade-old' ? 3_000_000 : 128,
       thresholds: DEFAULT_ANTIGRAVITY_CASCADE_HEALTH_THRESHOLDS,

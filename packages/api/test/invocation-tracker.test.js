@@ -307,17 +307,17 @@ describe('InvocationTracker: startAll registers all target cats', () => {
 
   it('completeAll matches all batch slots via batchController', () => {
     const tracker = new InvocationTracker();
-    const controller = tracker.startAll('t1', ['opus', 'codex'], 'user1');
-    // complete() with primaryController matches opus (its own controller)
-    tracker.complete('t1', 'opus', controller);
+    const batchController = tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    // F-parallel-cancel: batchController is INDEPENDENT from per-cat controllers — complete() of a
+    // single slot needs that cat's own controller (getController), not the batch controller.
+    tracker.complete('t1', 'opus', tracker.getController('t1', 'opus'));
     assert.equal(tracker.has('t1', 'opus'), false);
     assert.equal(tracker.has('t1', 'codex'), true);
-    // complete() with primaryController does NOT match codex (different controller)
-    // — this is correct: use completeAll for batch cleanup
-    tracker.complete('t1', 'codex', controller);
-    assert.equal(tracker.has('t1', 'codex'), true, 'individual complete should not match non-primary controller');
-    // completeAll matches via batchController
-    tracker.completeAll('t1', ['codex'], controller);
+    // complete() with the batch controller does NOT match a per-cat slot
+    tracker.complete('t1', 'codex', batchController);
+    assert.equal(tracker.has('t1', 'codex'), true, 'individual complete must not match the batch controller');
+    // completeAll matches all batch slots via batchController
+    tracker.completeAll('t1', ['codex'], batchController);
     assert.equal(tracker.has('t1'), false);
   });
 
@@ -405,14 +405,26 @@ describe('InvocationTracker: per-cat cancel isolation (AC-B9 regression)', () =>
     assert.equal(tracker.has('t1', 'opus'), true, 'opus must survive codex cancel');
   });
 
-  it('cancel primary cat aborts only primary controller', () => {
+  it('cancel one cat aborts only that cat controller, not the batch gate', () => {
     const tracker = new InvocationTracker();
-    const primaryController = tracker.startAll('t1', ['opus', 'codex'], 'user1');
-    // Cancel opus (primary)
+    const batchController = tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    const opusCtrl = tracker.getController('t1', 'opus');
     tracker.cancel('t1', 'opus');
-    assert.equal(primaryController.signal.aborted, true, 'primary controller should be aborted');
-    // Codex's own controller should NOT be aborted
+    assert.equal(opusCtrl.signal.aborted, true, 'cancelled cat per-cat controller aborted');
+    // F-parallel-cancel: a single-cat cancel must NOT abort the independent batch gate
+    // (only cancelAll / force-reset does) — else upper consumers treat it as whole-invocation cancel.
+    assert.equal(batchController.signal.aborted, false, 'batch controller survives single-cat cancel');
     assert.equal(tracker.has('t1', 'codex'), true, 'codex slot still exists');
+  });
+
+  it('cancelAll aborts the batch gate (whole-invocation stop)', () => {
+    const tracker = new InvocationTracker();
+    const batchController = tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    tracker.cancelAll('t1', 'user1', 'cancel_all');
+    // F-parallel-cancel: cancelAll/force-reset is the whole-invocation stop → aborts the batch gate
+    // so upper consumers (messages.ts pre-check / QueueProcessor break) stop the whole record.
+    assert.equal(batchController.signal.aborted, true, 'cancelAll aborts the batch gate');
+    assert.equal(tracker.has('t1'), false, 'all slots removed');
   });
 
   it('tryStartThreadAll also creates independent controllers', () => {
@@ -422,6 +434,40 @@ describe('InvocationTracker: per-cat cancel isolation (AC-B9 regression)', () =>
     tracker.cancel('t1', 'codex');
     assert.equal(primaryController.signal.aborted, false, 'primary survives non-primary cancel');
     assert.equal(tracker.has('t1', 'opus'), true);
+  });
+
+  // F-parallel-cancel: getController exposes each cat's own signal source so the execution
+  // layer can isolate cancels (instead of all cats sharing the returned primaryController.signal).
+  it('getController returns each cat own controller; cancel one does NOT abort the sibling', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    const opusCtrl = tracker.getController('t1', 'opus');
+    const codexCtrl = tracker.getController('t1', 'codex');
+    assert.ok(opusCtrl, 'opus controller exposed');
+    assert.ok(codexCtrl, 'codex controller exposed');
+    assert.notEqual(opusCtrl, codexCtrl, 'each cat has an independent controller');
+    tracker.cancel('t1', 'opus');
+    assert.equal(opusCtrl.signal.aborted, true, 'opus controller aborted by opus cancel');
+    assert.equal(codexCtrl.signal.aborted, false, 'codex controller (sibling signal source) survives');
+  });
+
+  // F-parallel-cancel invariant 1 (砚砚): cancel keeps a tombstone so getController still hands
+  // back the ABORTED controller — a cat cancelled before grabbing its own signal must surface an
+  // aborted signal, NOT fall back to the batch gate (which a single-cat cancel does not abort).
+  it('getController: absent → undefined; active → live controller; cancelled → aborted tombstone', () => {
+    const tracker = new InvocationTracker();
+    assert.equal(tracker.getController('t1', 'opus'), undefined, 'no slot → undefined');
+    assert.equal(tracker.getSlotState('t1', 'opus'), 'absent', 'no slot → absent');
+    tracker.start('t1', 'opus', 'user1', ['opus']);
+    const ctrl = tracker.getController('t1', 'opus');
+    assert.ok(ctrl, 'active slot → controller');
+    assert.equal(ctrl.signal.aborted, false, 'active controller not aborted');
+    tracker.cancel('t1', 'opus');
+    const afterCancel = tracker.getController('t1', 'opus');
+    assert.ok(afterCancel, 'cancelled tombstone → controller (NOT undefined)');
+    assert.equal(afterCancel.signal.aborted, true, 'tombstone controller is aborted');
+    assert.equal(tracker.has('t1', 'opus'), false, 'has() treats tombstone as inactive');
+    assert.equal(tracker.getSlotState('t1', 'opus'), 'canceled', 'getSlotState reports canceled');
   });
 });
 

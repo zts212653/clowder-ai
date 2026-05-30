@@ -1,20 +1,32 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { EventAuditLog } from '../dist/domains/cats/services/orchestration/EventAuditLog.js';
 import { registerWorktrees } from '../dist/domains/workspace/workspace-security.js';
 import { workspaceRoutes } from '../dist/routes/workspace.js';
 
 describe('POST /api/workspace/navigate (F131)', () => {
   const app = Fastify();
   const emittedEvents = [];
+  const appendedAuditEvents = [];
 
   before(async () => {
     registerWorktrees([{ id: 'test-wt', root: process.cwd(), branch: 'main', head: 'abc123' }]);
+    const auditLog = new EventAuditLog({ auditDir: '/tmp/cat-cafe-workspace-navigate-audit-test' });
+    auditLog.append = async (input) => {
+      appendedAuditEvents.push(input);
+      return {
+        id: 'audit-1',
+        timestamp: Date.now(),
+        ...input,
+      };
+    };
 
     await app.register(workspaceRoutes, {
       socketEmit: (event, data, room) => {
         emittedEvents.push({ event, data, room });
       },
+      auditLog,
     });
     await app.ready();
   });
@@ -56,6 +68,7 @@ describe('POST /api/workspace/navigate (F131)', () => {
 
   it('returns 200 and emits dual-broadcast for valid path with worktreeId', async () => {
     emittedEvents.length = 0;
+    appendedAuditEvents.length = 0;
     const res = await app.inject({
       method: 'POST',
       url: '/api/workspace/navigate',
@@ -71,6 +84,16 @@ describe('POST /api/workspace/navigate (F131)', () => {
     assert.equal(emittedEvents[0].event, 'workspace:navigate');
     assert.equal(emittedEvents[0].room, 'worktree:test-wt');
     assert.equal(emittedEvents[1].room, 'workspace:global');
+    assert.equal(appendedAuditEvents.length, 1);
+    assert.equal(appendedAuditEvents[0].type, 'workspace_navigate');
+    assert.equal(appendedAuditEvents[0].threadId, undefined);
+    assert.deepEqual(appendedAuditEvents[0].data, {
+      worktreeId: 'test-wt',
+      path: 'package.json',
+      action: 'reveal',
+      line: undefined,
+      catId: undefined,
+    });
   });
 
   it('accepts action=open and passes it through', async () => {
@@ -99,14 +122,45 @@ describe('POST /api/workspace/navigate (F131)', () => {
 
   it('passes threadId through to emitted events for session isolation', async () => {
     emittedEvents.length = 0;
+    appendedAuditEvents.length = 0;
     const res = await app.inject({
       method: 'POST',
       url: '/api/workspace/navigate',
-      payload: { worktreeId: 'test-wt', path: 'package.json', threadId: 'thread-abc' },
+      payload: { worktreeId: 'test-wt', path: 'package.json', threadId: 'thread-abc', catId: 'gpt52' },
     });
     assert.equal(res.statusCode, 200);
     assert.equal(emittedEvents[0].data.threadId, 'thread-abc');
     assert.equal(emittedEvents[1].data.threadId, 'thread-abc');
+    assert.equal(appendedAuditEvents.length, 1);
+    assert.equal(appendedAuditEvents[0].threadId, 'thread-abc');
+    assert.equal(appendedAuditEvents[0].data.catId, 'gpt52');
+  });
+
+  it('records audit events for knowledge-feed navigation', async () => {
+    emittedEvents.length = 0;
+    appendedAuditEvents.length = 0;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/workspace/navigate',
+      payload: { worktreeId: 'test-wt', action: 'knowledge-feed', threadId: 'thread-knowledge', catId: 'gpt52' },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.ok, true);
+    assert.equal(body.action, 'knowledge-feed');
+    assert.equal(emittedEvents.length, 1);
+    assert.equal(emittedEvents[0].room, 'workspace:global');
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(appendedAuditEvents.length, 1);
+    assert.equal(appendedAuditEvents[0].type, 'workspace_navigate');
+    assert.equal(appendedAuditEvents[0].threadId, 'thread-knowledge');
+    assert.deepEqual(appendedAuditEvents[0].data, {
+      worktreeId: 'test-wt',
+      path: '',
+      action: 'knowledge-feed',
+      line: undefined,
+      catId: 'gpt52',
+    });
   });
 
   it('omits threadId from events when not provided', async () => {

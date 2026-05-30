@@ -58,6 +58,8 @@ describe('F212 CliDiagnosticsPanel (AC-B2/B3/B4)', () => {
     const { CliDiagnosticsPanel } = await import('../CliDiagnosticsPanel');
     const diag = build({
       reasonCode: 'model_not_found',
+      // Phase D P2 fix: classifier-known path → excerptSource='classifier' (matches backend builder)
+      excerptSource: 'classifier',
       safeExcerpt: 'Error: deepseek-v-4 is not a supported model.\nSupported: deepseek-v4-pro / deepseek-v4-flash',
     });
 
@@ -85,7 +87,8 @@ describe('F212 CliDiagnosticsPanel (AC-B2/B3/B4)', () => {
   it('AC-B3: clicking toggle reveals safeExcerpt verbatim', async () => {
     const { CliDiagnosticsPanel } = await import('../CliDiagnosticsPanel');
     const excerpt = '401 Unauthorized: invalid api key\nHint: check ANTHROPIC_API_KEY';
-    const diag = build({ reasonCode: 'auth_failed', safeExcerpt: excerpt });
+    // Phase D P2 fix: classifier-known path → excerptSource='classifier' (matches backend builder)
+    const diag = build({ reasonCode: 'auth_failed', excerptSource: 'classifier', safeExcerpt: excerpt });
 
     act(() => {
       root.render(
@@ -130,17 +133,19 @@ describe('F212 CliDiagnosticsPanel (AC-B2/B3/B4)', () => {
     expect(container.querySelector('[data-testid="cli-diagnostics-excerpt"]')).toBeNull();
   });
 
-  // 砚砚 review P1-2 (2026-05-27): KD-1 white-list admission MUST gate on reasonCode too.
-  // Malformed/persisted payload that retains safeExcerpt without reasonCode should still
-  // suppress the excerpt disclosure — front-end is the last line of defense.
-  it('KD-1 front-end defense: safeExcerpt present but reasonCode absent → toggle still hidden (P1-2 guard)', async () => {
+  // 砚砚 review P1-2 (2026-05-27) → Phase D refinement (2026-05-29 cloud codex P2 fix):
+  // KD-1 white-list moved from reasonCode-only to excerptSource-based. Malformed/persisted
+  // payload that retains safeExcerpt WITHOUT excerptSource MUST still suppress disclosure —
+  // frontend is last line of defense + forward-compat for unknown future sources.
+  it('KD-1 front-end defense: safeExcerpt present but excerptSource undefined → toggle still hidden (malformed payload guard)', async () => {
     const { CliDiagnosticsPanel } = await import('../CliDiagnosticsPanel');
     const diag = build({
-      // no reasonCode — simulates malformed/persisted payload
+      // no reasonCode + no excerptSource — simulates malformed/persisted payload
       safeExcerpt: 'Stale stderr that should not leak through the UI',
       publicSummary: '未识别的 CLI 错误',
       publicHint: '详细诊断信息见后端日志',
     });
+    // intentionally no excerptSource — caller forgot OR payload is malformed/old
 
     act(() => {
       root.render(
@@ -157,6 +162,72 @@ describe('F212 CliDiagnosticsPanel (AC-B2/B3/B4)', () => {
     expect(container.textContent).not.toContain('Stale stderr');
   });
 
+  // F212 Phase D — Cloud codex P2 fix (2026-05-29, on a429aada3):
+  // AC-D3 unknown fallback produces safeExcerpt with excerptSource='cc_structured' (CC
+  // emitted a structured result error that the classifier didn't recognize but is safe
+  // to surface — KD-1 white-list admission via source channel rather than reasonCode).
+  // Frontend MUST render the disclosure even when reasonCode is undefined, otherwise
+  // users see only the 200-char publicSummary and lose the multiline CC cause.
+  it('AC-D3 (Phase D P2 fix): excerptSource=cc_structured renders toggle even when reasonCode undefined', async () => {
+    const { CliDiagnosticsPanel } = await import('../CliDiagnosticsPanel');
+    const ccCause = "The model's tool call could not be parsed (retry also failed).";
+    const diag = build({
+      // no reasonCode (AC-D3 unknown) but CC structured error came through safely
+      excerptSource: 'cc_structured',
+      safeExcerpt: ccCause,
+      publicSummary: `Claude Code 报告：${ccCause}`,
+      publicHint: '这是 Claude Code / 模型侧报告的错误，不是猫咖问题。',
+    });
+
+    act(() => {
+      root.render(
+        React.createElement(CliDiagnosticsPanel, {
+          errorMessage: 'Error: CLI 异常退出',
+          diagnostics: diag,
+        }),
+      );
+    });
+
+    const toggle = container.querySelector('[data-testid="cli-diagnostics-toggle"]') as HTMLButtonElement;
+    expect(toggle, 'AC-D3 path must expose excerpt toggle when excerptSource is whitelisted').toBeTruthy();
+
+    act(() => {
+      toggle.click();
+    });
+
+    const excerptEl = container.querySelector('[data-testid="cli-diagnostics-excerpt"]');
+    expect(excerptEl).toBeTruthy();
+    expect(excerptEl?.textContent).toBe(ccCause);
+  });
+
+  // Forward-compat defense (cloud codex P2 fix 2026-05-29, second leg of KD-1 belt-and-braces):
+  // Newer api ships an excerptSource value the current web doesn't know (e.g. a hypothetical
+  // 'pii_redacted'). Old client must fail closed — only KNOWN sources unlock disclosure.
+  // This complements the malformed-payload guard above; together they cover both directions
+  // of api/web version skew.
+  it('Forward-compat: unknown excerptSource value → toggle hidden even with safeExcerpt', async () => {
+    const { CliDiagnosticsPanel } = await import('../CliDiagnosticsPanel');
+    const diag = build({
+      excerptSource: 'pii_redacted' as unknown as CliDiagnostics['excerptSource'],
+      safeExcerpt: 'A future source the current web does not understand',
+      publicSummary: 'A future error',
+      publicHint: 'A future hint',
+    });
+
+    act(() => {
+      root.render(
+        React.createElement(CliDiagnosticsPanel, {
+          errorMessage: 'Error: future',
+          diagnostics: diag,
+        }),
+      );
+    });
+
+    // unknown source → membership check rejects → no disclosure (defense-in-depth)
+    expect(container.querySelector('[data-testid="cli-diagnostics-toggle"]')).toBeNull();
+    expect(container.querySelector('[data-testid="cli-diagnostics-excerpt"]')).toBeNull();
+  });
+
   it('AC-B4: every reasonCode maps to a distinct icon aria-label (= reasonCode itself)', async () => {
     const { CliDiagnosticsPanel } = await import('../CliDiagnosticsPanel');
     const reasonCodes: CliErrorReasonCode[] = [
@@ -169,6 +240,8 @@ describe('F212 CliDiagnosticsPanel (AC-B2/B3/B4)', () => {
       'missing_rollout',
       'context_window_exceeded',
       'invalid_thinking_signature',
+      'tool_call_parse_failed',
+      'server_overloaded',
     ];
 
     for (const reasonCode of reasonCodes) {
@@ -321,5 +394,27 @@ describe('F212 CliDiagnosticsPanel (AC-B2/B3/B4)', () => {
     expect(container.querySelector('[data-testid="cli-diagnostics-banner"]')?.textContent).toContain(
       'Error: unexpected',
     );
+  });
+
+  // F212 follow-up — codex R3 catch (PR #1967, b304a27d2): biome --write --unsafe via
+  // lint/suspicious/noPrototypeBuiltins rewrites Object.prototype.hasOwnProperty.call
+  // to Object.hasOwn, which is ES2022 (Safari/iOS <15.4 not supported). The Panel
+  // tsconfig target is ES2017, so this would crash any CLI error render on older
+  // Safari. Source-level invariance check defends against future biome rule rename
+  // making the inline biome-ignore comment a no-op.
+  it('isKnownReason source stays on Object.prototype.hasOwnProperty.call (ES2017 compat invariance)', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const url = await import('node:url');
+    const here = path.dirname(url.fileURLToPath(import.meta.url));
+    const panelPath = path.resolve(here, '..', 'CliDiagnosticsPanel.tsx');
+    const src = await fs.readFile(panelPath, 'utf8');
+    // Positive: the safe form must be present
+    expect(src).toContain('Object.prototype.hasOwnProperty.call(REASON_PALETTE');
+    // Negative: the ES2022 form (which biome --unsafe rewrites to) must NOT appear in
+    // the runtime path. Comments mentioning it are fine; we only guard the actual call.
+    const codeLines = src.split('\n').filter((line) => !line.trim().startsWith('//') && !line.trim().startsWith('*'));
+    const runtimeCode = codeLines.join('\n');
+    expect(runtimeCode).not.toMatch(/Object\.hasOwn\s*\(/);
   });
 });

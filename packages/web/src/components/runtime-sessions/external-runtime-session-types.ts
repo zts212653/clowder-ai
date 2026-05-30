@@ -45,6 +45,7 @@ export interface ExternalRuntimeSessionListItem {
   runtimeSessionId: string;
   runtimeConversationId?: string;
   catId: string;
+  surface?: 'cat-cafe-dispatch' | 'ide-direct' | string;
   model?: string;
   identityHistory?: ExternalRuntimeIdentityHistoryEntry[];
   title?: string;

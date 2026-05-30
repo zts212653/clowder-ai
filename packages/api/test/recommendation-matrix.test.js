@@ -25,7 +25,7 @@ describe('recommendation matrix — service coverage', () => {
     const ids = getMatrixServiceIds();
     assert.deepEqual(
       ids.sort(),
-      ['whisper-stt', 'mlx-tts', 'embedding-model', 'llm-postprocess', 'audio-capture'].sort(),
+      ['whisper-stt', 'qwen3-asr', 'mlx-tts', 'embedding-model', 'llm-postprocess', 'audio-capture'].sort(),
     );
   });
 

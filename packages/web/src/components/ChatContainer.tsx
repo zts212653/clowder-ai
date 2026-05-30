@@ -29,6 +29,7 @@ import { useGuideStore } from '@/stores/guideStore';
 import { useSidebarStore } from '@/stores/sidebarStore';
 import { useTaskStore } from '@/stores/taskStore';
 import { apiFetch } from '@/utils/api-client';
+import { computeCliDiagnosticsDedup } from '@/utils/cli-diagnostics-dedup';
 import { computeScrollRecomputeSignal } from '@/utils/scrollRecomputeSignal';
 import { getUserId } from '@/utils/userId';
 import { AgentHookHealthNotice, shouldRenderAgentHookHealthNotice } from './AgentHookHealthNotice';
@@ -576,13 +577,25 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   });
 
   const handleEditCat = useCallback((catId: string) => setEditingCatId(catId), []);
+  // F212 follow-up — UI-layer dedup for adjacent identical CliDiagnostics panels.
+  // Compute once per messages change; map is keyed by messageId.
+  const cliDedupMap = useMemo(() => computeCliDiagnosticsDedup(messages), [messages]);
   const renderSingleMessage = useCallback(
-    (msg: ChatMessageData) => (
-      <MessageActions key={msg.id} message={msg} threadId={threadId}>
-        <ChatMessage message={msg} getCatById={getCatById} onEditCat={handleEditCat} />
-      </MessageActions>
-    ),
-    [threadId, getCatById, handleEditCat],
+    (msg: ChatMessageData) => {
+      const dedupInfo = cliDedupMap.get(msg.id);
+      return (
+        <MessageActions key={msg.id} message={msg} threadId={threadId}>
+          <ChatMessage
+            message={msg}
+            getCatById={getCatById}
+            onEditCat={handleEditCat}
+            hideDiagnosticsPanel={dedupInfo?.hideDiagnosticsPanel}
+            dedupCount={dedupInfo?.dedupCount}
+          />
+        </MessageActions>
+      );
+    },
+    [threadId, getCatById, handleEditCat, cliDedupMap],
   );
 
   const { cancelInvocation, syncRooms, socketConnected } = useSocket(socketCallbacks, threadId);

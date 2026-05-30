@@ -78,6 +78,7 @@ export async function* routeParallel(
     contentBlocks,
     uploadDir,
     signal,
+    signalForCat,
     promptTags,
     contextHistory,
     history,
@@ -415,6 +416,17 @@ export async function* routeParallel(
         }
       }
 
+      // F-parallel-cancel: each concurrent cat listens to ITS OWN slot signal, not the
+      // shared primaryController.signal — canceling one cat must not abort its siblings.
+      const catSignal = signalForCat?.(catId) ?? signal;
+      // F-parallel-cancel (cloud P2): skip invoke for a cat already cancelled BEFORE this route
+      // started it (tombstone aborted signal — e.g. user clicked Stop on this cat pre-invoke).
+      // Otherwise invokeSingleCat turns the aborted iterator into error+done, broadcasting /
+      // persisting a user_cancel as an error instead of silently skipping. route-serial does the
+      // equivalent via its loop-top `if (catSignal?.aborted)` check.
+      if (catSignal?.aborted) {
+        return (async function* skipCancelledCat(): AsyncGenerator<AgentMessage> {})();
+      }
       return invokeSingleCat(deps.invocationDeps, {
         catId,
         service,
@@ -423,7 +435,7 @@ export async function* routeParallel(
         threadId,
         ...(targetContentBlocks ? { contentBlocks: targetContentBlocks } : {}),
         ...(targetUploadDir ? { uploadDir: targetUploadDir } : {}),
-        ...(signal ? { signal } : {}),
+        ...(catSignal ? { signal: catSignal } : {}),
         ...(staticIdentity ? { systemPrompt: staticIdentity } : {}),
         // F194 Phase Z2 (砚砚 catch 2026-05-09)：parallel route 必须传 parentInvocationId，
         // 与 route-serial.ts:725 对齐。否则 child registry record 缺 parentInvocationId →
@@ -585,10 +597,27 @@ export async function* routeParallel(
           /* ignore parse errors */
         }
       }
+      // F-parallel-cancel (cloud #4 2026-05-30): a cat cancelled AFTER its stream started has its
+      // abort converted by invokeSingleCat (abortableNext reject) into an error+done. Drop the
+      // abort-induced error entirely: don't record it (else the done block persists a user_cancel as
+      // an error message ~1262) and don't yield it (else messages.ts/QueueProcessor broadcast it as a
+      // provider failure). The batch gate is intentionally NOT aborted on single-cat cancel, so the
+      // consume-loop's `controller.signal.aborted` guard never catches this — mirrors serial route's
+      // `if (catSignal?.aborted) break`. Partial pre-abort text still persists via the done block
+      // (hadError=false; #267 keeps aborted cats out of catHadProviderError).
+      if (
+        effectiveMsg.type === 'error' &&
+        effectiveMsg.catId &&
+        (signalForCat?.(effectiveMsg.catId) ?? signal)?.aborted
+      ) {
+        continue;
+      }
       if (effectiveMsg.type === 'error' && effectiveMsg.catId) {
         catHadError.add(effectiveMsg.catId);
         // #267: errors before abort are real provider failures; errors after abort are cleanup
-        if (!signal?.aborted) catHadProviderError.add(effectiveMsg.catId);
+        // F-parallel-cancel: judge abort with THIS cat's own signal, not the shared one —
+        // else canceling one concurrent cat mislabels a sibling's real error as cleanup.
+        if (!(signalForCat?.(effectiveMsg.catId) ?? signal)?.aborted) catHadProviderError.add(effectiveMsg.catId);
         if (effectiveMsg.error) {
           const prev = catErrorText.get(effectiveMsg.catId) ?? '';
           catErrorText.set(effectiveMsg.catId, `${prev}${prev ? '\n' : ''}${effectiveMsg.error}`);

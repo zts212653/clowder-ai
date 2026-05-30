@@ -97,6 +97,13 @@ export function isCliTimeoutError(message: string | undefined): boolean {
   return /CLI (?:响应超时|idle-silent 超时)/i.test(message);
 }
 
+/** F215: Detect malformed tool-call error emitted by ClaudeAgentService (form A / B).
+ *  Used in invoke-single-cat to trigger seal+fresh-context+46接力 fallback chain. */
+export function isMalformedToolCallError(message: string | undefined): boolean {
+  if (!message) return false;
+  return message.startsWith('malformed_toolcall:');
+}
+
 /* ── Pre-flight timeout guard ────────────────────────────── */
 
 /**
@@ -116,8 +123,8 @@ export const PREFLIGHT_TIMEOUT_MS = Number(process.env.CAT_CAFE_PREFLIGHT_TIMEOU
  * The original promise is NOT cancelled (no way to do so generically)
  * but the caller can proceed instead of hanging forever.
  */
-export function preflightRace<T>(promise: Promise<T>, label: string, signal?: AbortSignal): Promise<T> {
-  if (signal?.aborted) return Promise.reject(signal.reason);
+export async function preflightRace<T>(promise: Promise<T>, label: string, signal?: AbortSignal): Promise<T> {
+  if (signal?.aborted) throw signal.reason;
 
   let timer: ReturnType<typeof setTimeout> | null = null;
   const cleanup = (): void => {

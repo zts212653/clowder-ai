@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 const evalDomainRegistryEntrySchema = z.object({
-  domainId: z.enum(['eval:a2a', 'eval:memory', 'eval:sop']),
+  domainId: z.enum(['eval:a2a', 'eval:memory', 'eval:sop', 'eval:capability-wakeup']),
   displayName: z.string().min(1),
   systemThreadId: z.string().min(1, 'systemThreadId is required'),
   evalCat: z.object({
@@ -10,7 +10,7 @@ const evalDomainRegistryEntrySchema = z.object({
     model: z.string().min(1),
   }),
   frequency: z.enum(['daily', 'weekly']),
-  sourceAdapter: z.enum(['f167-runtime-eval', 'f200-f188-memory-eval', 'sop-trace-eval']),
+  sourceAdapter: z.enum(['f167-runtime-eval', 'f200-f188-memory-eval', 'sop-trace-eval', 'capability-wakeup-eval']),
   threadPolicy: z.object({
     role: z.literal('working-home'),
     stateSot: z.literal('registry'),

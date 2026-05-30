@@ -24,7 +24,7 @@ import type { RuntimeSessionMetadata } from '../../../runtime-session/RuntimeSes
 import type { IRuntimeSessionStore } from '../../../runtime-session/RuntimeSessionStore.js';
 import type { TranscriptReader } from '../../../session/TranscriptReader.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../../types.js';
-import { appendLocalImagePathHints } from '../image-cli-bridge.js';
+import { appendLocalImagePathHints, buildImageMediaItems } from '../image-cli-bridge.js';
 import { extractImagePaths } from '../image-paths.js';
 import {
   AntigravityBridge,
@@ -461,6 +461,10 @@ export class AntigravityAgentService implements AgentService {
       const callbackFallback = buildCallbackFallbackInstructions(options?.callbackEnv);
       const imagePaths = extractImagePaths(options?.contentBlocks, options?.uploadDir);
       const promptBody = appendLocalImagePathHints(prompt, imagePaths);
+      // F211 REG3 Layer C: read the image bytes into Antigravity media items so the cascade can
+      // actually SEE the image (delivered via SendUserCascadeMessage.media), not just a path hint.
+      // The path hint above is kept as a textual reference; media carries the viewable bytes.
+      const imageMediaItems = await buildImageMediaItems(imagePaths);
 
       const effectivePrompt = options?.systemPrompt
         ? `${options.systemPrompt}${workspaceHint}${callbackFallback}\n\n---\n\n${promptBody}`
@@ -469,7 +473,14 @@ export class AntigravityAgentService implements AgentService {
           : promptBody;
 
       const threadId = options?.auditContext?.threadId ?? `ephemeral-${Date.now()}`;
-      let cascadeId = await this.bridge.getOrCreateSession(threadId, this.catId as string);
+      // F211-REG2: capture the active runtime binding BEFORE getOrCreateSession. If the prior
+      // cascade stalled on a terminal error, getOrCreateSession replaces it with a fresh cascade
+      // and deletes the old reverse index — so this is the only point we can recover the old
+      // session's metadata/digest to bootstrap continuity for the re-summon.
+      const priorActiveRuntime = this.runtimeSessionStore
+        ? await this.runtimeSessionStore.getActiveByThreadCat('antigravity-desktop', threadId, this.catId)
+        : null;
+      let cascadeId = await this.bridge.getOrCreateSession(threadId, this.catId as string, options?.signal);
       lastKnownCascadeId = cascadeId;
       const createSideEffectJournal = (journalCascadeId: string) =>
         new AntigravitySideEffectJournal({
@@ -651,9 +662,16 @@ export class AntigravityAgentService implements AgentService {
         lifecycle: AntigravitySessionLifecycle;
         sideEffectJournalSummary: AntigravityJournalSummary;
         allowContinuityBootstrap: boolean;
+        // F211-REG2: cross-invocation re-summon must pass the old metadata captured BEFORE
+        // getOrCreateSession swapped the binding — the oldCascadeId reverse index is already
+        // deleted by then, so a fresh getByRuntimeSession lookup would return null.
+        prefetchedOldMetadata?: RuntimeSessionMetadata | null;
       }): Promise<AntigravityContinuityBootstrap | undefined> => {
         if (!input.allowContinuityBootstrap) return undefined;
-        const runtimeMetadata = await readRuntimeMetadataForBootstrap(input.oldCascadeId);
+        const runtimeMetadata =
+          input.prefetchedOldMetadata !== undefined
+            ? input.prefetchedOldMetadata
+            : await readRuntimeMetadataForBootstrap(input.oldCascadeId);
         const digest = await readDigestForBootstrap(runtimeMetadata);
         return buildAntigravityContinuityBootstrap({
           oldRuntimeSessionId: input.oldCascadeId,
@@ -687,7 +705,7 @@ export class AntigravityAgentService implements AgentService {
         });
         const newCascadeId = this.bridge.getRuntimeSessionStoreForDiagnostics?.()
           ? await this.bridge.startCascade()
-          : await this.bridge.getOrCreateSession(threadId, this.catId as string);
+          : await this.bridge.getOrCreateSession(threadId, this.catId as string, options?.signal);
         lastKnownCascadeId = newCascadeId;
         const lifecycle = buildRotationLifecycle(oldCascadeId, newCascadeId, reason, drain);
         const bootstrap = await buildContinuityBootstrap({
@@ -715,8 +733,16 @@ export class AntigravityAgentService implements AgentService {
           ...(sealReason ? { sealReason } : {}),
         });
       const preflightCascadeHealth = await getCascadeHealth(cascadeId, 'preflight');
+      // Only retire an oversized cascade at a turn boundary (IDLE). Rotating a RUNNING cascade mid-turn
+      // would discard the in-progress work getOrCreateSession just reused, re-introducing the REG5
+      // amnesia through the health path (cloud line 1080) — e.g. a long model-only research turn passes
+      // the 200-step retire threshold yet is exactly the busy cascade we must preserve. An oversized
+      // RUNNING cascade is left alone here; the empty_response recovery path is the backstop if it
+      // actually overflows mid-turn.
       const shouldRetirePreflightCascade =
-        preflightCascadeHealth?.level === 'retire' && preflightCascadeHealth.retryableForEmptyResponse;
+        preflightCascadeHealth?.level === 'retire' &&
+        preflightCascadeHealth.retryableForEmptyResponse &&
+        preflightCascadeHealth.cascadeStatus === 'CASCADE_RUN_STATUS_IDLE';
       let pendingSessionLifecycle: AntigravitySessionLifecycle | undefined;
       let pendingContinuityBootstrap: AntigravityContinuityBootstrap | undefined;
       if (shouldRetirePreflightCascade) {
@@ -733,7 +759,53 @@ export class AntigravityAgentService implements AgentService {
       } else if (preflightCascadeHealth?.level === 'retire') {
         log.warn(
           { cascadeId, cascadeHealth: preflightCascadeHealth },
-          'skipped preflight Antigravity cascade retirement due to side-effect safety',
+          'skipped preflight Antigravity cascade retirement (side-effect safety, or a non-IDLE busy cascade we must not rotate mid-turn)',
+        );
+      }
+      // F211-REG2: cross-invocation re-summon continuity. getOrCreateSession may have replaced a
+      // dead/stalled prior cascade with a fresh one (same SessionRecord, new cascadeId) without an
+      // intra-invocation rotateCascade — so the preflight path above never built a bootstrap. Detect
+      // that boundary rotation from the pre-captured active binding and prepend continuity, so the
+      // cat does not cold-start. A user-initiated New Cascade goes through resetSession (which seals
+      // and clears the active binding), so priorActiveRuntime would be null here — AC-A16 holds.
+      if (
+        !pendingContinuityBootstrap &&
+        priorActiveRuntime &&
+        priorActiveRuntime.runtimeSessionId !== cascadeId &&
+        priorActiveRuntime.lifecycle.sealReason !== 'user_initiated'
+      ) {
+        // The boundary replacement was not drained by us (getOrCreateSession swapped the dead
+        // cascade), so mark it best-effort/degraded with a runtime_error_reset reason.
+        const reSummonDrain: AntigravityDrainResult = {
+          ok: false,
+          drainResult: 'skipped_runtime_unreachable',
+          reason: 'prior cascade replaced at re-summon boundary',
+        };
+        // Carry the SAME rotation lifecycle on both the bootstrap and the first session_init.
+        // Without setting pendingSessionLifecycle, session_init falls back to a plain lifecycle
+        // (no previousRuntimeSessionId/sealReason), so the invocation sync path would treat the
+        // replacement as an unexpected switch instead of runtime_error_reset and fail to seal the
+        // old stalled binding.
+        const reSummonLifecycle = buildRotationLifecycle(
+          priorActiveRuntime.runtimeSessionId,
+          cascadeId,
+          'runtime_error_reset',
+          reSummonDrain,
+        );
+        pendingContinuityBootstrap = await buildContinuityBootstrap({
+          oldCascadeId: priorActiveRuntime.runtimeSessionId,
+          newCascadeId: cascadeId,
+          reason: 'runtime_error_reset',
+          drain: reSummonDrain,
+          lifecycle: reSummonLifecycle,
+          sideEffectJournalSummary: sideEffectJournal.summary(),
+          allowContinuityBootstrap: true,
+          prefetchedOldMetadata: priorActiveRuntime,
+        });
+        pendingSessionLifecycle = reSummonLifecycle;
+        log.info(
+          { oldCascadeId: priorActiveRuntime.runtimeSessionId, newCascadeId: cascadeId, threadId },
+          'prepended re-summon continuity bootstrap + rotation lifecycle after boundary cascade replacement',
         );
       }
       let capacityRetryCount = 0;
@@ -779,8 +851,26 @@ export class AntigravityAgentService implements AgentService {
       }
 
       let activeAutoResumePrompt: string | undefined;
+      // F211 REG3 Layer C: image media rides with the FIRST user message only; cleared after the
+      // first send so cascade retries / rotation continuations (which resend prompt text) don't
+      // re-deliver the image bytes.
+      let pendingMediaItems = imageMediaItems.length > 0 ? imageMediaItems : undefined;
       while (true) {
-        const stepsBefore = await this.bridge.sendMessage(cascadeId, promptForCurrentCascade, this.model);
+        // Abort check BEFORE send: getOrCreateSession's reuse wait (settleRunningCascadeForReuse) can
+        // block while a busy cascade settles, so a follow-up may have been cancelled in the meantime —
+        // do not enqueue a prompt the user already aborted (cloud P1, line 1029).
+        if (options?.signal?.aborted) {
+          yield { type: 'error', catId: this.catId, error: 'Aborted before send', metadata, timestamp: Date.now() };
+          yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+          return;
+        }
+        const stepsBefore = await this.bridge.sendMessage(
+          cascadeId,
+          promptForCurrentCascade,
+          this.model,
+          pendingMediaItems,
+        );
+        pendingMediaItems = undefined;
 
         // Abort check after send
         if (options?.signal?.aborted) {
@@ -890,6 +980,10 @@ export class AntigravityAgentService implements AgentService {
           await sleepWithAbort(delayMs, options?.signal);
           const rotation = await rotateCascade(cascadeId, sealReason);
           cascadeId = rotation.newCascadeId;
+          // F211 REG3 (cloud P2): a fresh-cascade retry processes the SAME image-bearing user
+          // message — the new cascade has no media yet, so re-attach it for the resend below.
+          // (Cleared again after that send; each fresh cascade receives the image exactly once.)
+          pendingMediaItems = imageMediaItems.length > 0 ? imageMediaItems : undefined;
           if (autoResumeContext) {
             activeAutoResumePrompt = buildSafeAutoResumePrompt(effectivePrompt, autoResumeContext);
           }

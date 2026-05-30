@@ -47,6 +47,68 @@ describe('spawnCliInTmux', () => {
     assert.equal(jsonEvents[1].type, 'done');
   });
 
+  it('forwards stdinInput to the pane command via stdin redirect (P1 regression)', async () => {
+    // Incident 2026-05-29 P1 (cloud codex review): codex `-- -` reads prompt from stdin,
+    // but a tmux pane has no stdin pipe. stdinInput must be redirected from a temp file.
+    // Real tmux pane round-trip — guards the production worktree path that mock/dogfood missed.
+    const SECRET = 'TMUX-STDIN-REDIRECT-披着专业外衣-R8';
+    const events = [];
+    const gen = spawnCliInTmux(
+      {
+        command: process.execPath,
+        args: [
+          '-e',
+          'let d="";process.stdin.on("data",c=>{d+=c});process.stdin.on("end",()=>{process.stdout.write(JSON.stringify({type:"stdin-echo",got:d})+"\\n")})',
+        ],
+        stdinInput: SECRET,
+        worktreeId: WORKTREE,
+        invocationId: 'test-inv-stdin',
+        cwd: '/tmp',
+      },
+      { tmuxGateway: gateway },
+    );
+    for await (const event of gen) events.push(event);
+    const echo = events.find((e) => e.type === 'stdin-echo');
+    assert.ok(echo, 'pane command should receive stdin and echo it back');
+    assert.equal(echo.got, SECRET, 'stdinInput must reach the pane command via stdin redirect');
+  });
+
+  it('cleans up the stdin temp file when tmux setup fails (P1 #2 regression)', async () => {
+    // Incident 2026-05-29 P1 #2 (cloud codex review): the stdin temp file holds the full
+    // conversation history. If setup fails before the main try/finally, it must still be
+    // removed — otherwise the prompt is left on disk forever. Mock createAgentPane to throw.
+    const failGateway = {
+      createAgentPane: async () => {
+        throw new Error('tmux unavailable (simulated setup failure)');
+      },
+    };
+    const uniqueInv = `test-cleanup-${Date.now()}`;
+    let threw = false;
+    try {
+      const gen = spawnCliInTmux(
+        {
+          command: '/bin/sh',
+          args: ['-c', 'true'],
+          stdinInput: 'SECRET-PROMPT-should-be-cleaned-披着专业外衣',
+          worktreeId: WORKTREE,
+          invocationId: uniqueInv,
+          cwd: '/tmp',
+        },
+        { tmuxGateway: failGateway },
+      );
+      for await (const _event of gen) {
+        /* drain */
+      }
+    } catch {
+      threw = true;
+    }
+    assert.ok(threw, 'setup failure should propagate to the caller');
+    const { readdir } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const leftover = (await readdir(tmpdir())).filter((d) => d.includes(uniqueInv));
+    assert.equal(leftover.length, 0, `stdin temp dir must be cleaned up on setup failure, found: ${leftover}`);
+  });
+
   it('reports non-zero exit code via __cliError', async () => {
     const events = [];
     const gen = spawnCliInTmux(

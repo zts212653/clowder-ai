@@ -194,6 +194,42 @@ services:
           - { label: 'faster-whisper 内置模型列表', url: 'https://github.com/SYSTRAN/faster-whisper#available-models' }
 
   # ------------------------------------------------------------
+  # Qwen3 ASR (语音转写, MLX backend, Apple Silicon only)
+  # Drop-in replacement for Whisper STT on the same port (9876).
+  # ------------------------------------------------------------
+  qwen3-asr:
+    - match: { os: darwin, arch: arm64 }
+      models:
+        - name: mlx-community/Qwen3-ASR-1.7B-8bit
+          size: ~2.5GB
+          description: Qwen3 ASR 8bit (MLX, recommended)
+          requirements: { ramGb: 4, diskGb: 3 }
+          performance: realtime 5x+
+        - name: mlx-community/Qwen3-ASR-1.7B-4bit
+          size: ~1.5GB
+          description: Qwen3 ASR 4bit (lower memory)
+          requirements: { ramGb: 2, diskGb: 2 }
+          performance: realtime 5x+
+      customModelHint:
+        requirement: 'mlx-community Qwen3-ASR MLX quantized model (Apple Silicon GPU accelerated)'
+        example: 'mlx-community/Qwen3-ASR-1.7B-8bit, mlx-community/Qwen3-ASR-1.7B-4bit'
+        unsupported: 'Whisper models, faster-whisper short names'
+        links:
+          - { label: 'mlx-community / Qwen3-ASR', url: 'https://huggingface.co/mlx-community?search_models=Qwen3-ASR' }
+
+    - match: { os: darwin, arch: x64 }
+      unsupported:
+        reason: Qwen3-ASR requires MLX (Apple Silicon only). Intel Mac not supported.
+        userAction: Use Whisper STT instead (supports Intel Mac via faster-whisper backend).
+        retryHint: Switch to an Apple Silicon Mac to use Qwen3-ASR.
+
+    - match: {}
+      unsupported:
+        reason: Qwen3-ASR requires MLX which only runs on Apple Silicon (macOS ARM64).
+        userAction: Use Whisper STT instead (supports Windows/Linux via faster-whisper).
+        retryHint: N/A -- MLX is Apple Silicon exclusive.
+
+  # ------------------------------------------------------------
   # MLX TTS (语音合成)
   # ------------------------------------------------------------
   mlx-tts:

@@ -783,7 +783,7 @@
     {
       "id": "F128",
       "name": "Cat-Proposed Thread Creation — 猫猫提议创建 Thread",
-      "status": "in-progress | **Source**: clowder-ai #82 (bouillipx) / PR #85 | **Priority**: P2",
+      "status": "done | **Source**: clowder-ai #82 (bouillipx) / PR #85 | **Priority**: P2",
       "file": "F128-cat-create-thread.md"
     },
     {
@@ -1107,7 +1107,7 @@
     {
       "id": "F180",
       "name": "Agent CLI Hook Health and Sync",
-      "status": "in-progress (Phase A+B merged via PR #1476; Phase C AC-C5 merged via PR #1477; Phase C AC-C1~C3 merged via PR #1478; Phase C AC-C4 + Phase D field repair station merged via PR #1479; AC-D4/open-source closure pending) | **Owner**: Maine Coon/Maine Coon | **Priority**: P1",
+      "status": "✅ closed (2026-06-28) | **Owner**: Maine Coon/Maine Coon | **Priority**: P1 | **愿景守护**: Ragdoll/Opus-46",
       "file": "F180-agent-cli-hook-health.md"
     },
     {
@@ -1281,13 +1281,13 @@
     {
       "id": "F211",
       "name": "Cross-Runtime Session Transparency — Antigravity Session Chain + IDE Direct Registration",
-      "status": "done (post-close P1 fix pending) | **Owner**: Maine Coon（Maine Coon） | **Priority**: P1 | **Completed**: 2026-05-26",
+      "status": "done ✅ REG1 + REG2 + REG3 (Layer B urls + Layer C image media) FIXED + merged + e2e-verified (PR #1940 `a0f7cf208`, PR #1944 `fb37ecc7e`, opus-4.8) ⚠️ **REG4 RESOLVED 2026-05-29 (stale `sessionChain:false` catalog overlay gated the block off — NOT a thrown exception; CVO toggled session-chain ON; durable migration paused). **REG5 (P1) FIXED + merged + LIVE e2e-VERIFIED (PR #1959 squash `bca4c6b82`, 2026-05-30)** — follow-up-while-busy now REUSES the running cascade (full native memory) instead of spinning a fresh blank one; post-deploy controlled mid-work test proved it on the live runtime (task + mid-work follow-up both reused the SAME busy cascade `633808bb`, log-confirmed RUNNING at reuse, Bengal kept full memory); core amnesia + the whole same-class boundary/abort/terminal edge set fixed (getOrCreateSession reuse + preflight health-rotation). Busy-reuse BOUNDARY residual (memory-preserved stale-output + count==0-WAITING) deferred → **REG8** (CVO-approved 2026-05-30). Still open: REG6 (interruption misclassified as `runtime_error_reset` crash) + REG7 (WS flap / premature done affordance). **Runtime sync (deploy to Bengal) = CVO.** | **Owner**: Maine Coon（Maine Coon）; regression + REG4/5/6/7 fixes Ragdoll Opus 4.8 | **Priority**: P1 | **Completed**: 2026-05-26",
       "file": "F211-cross-runtime-session-transparency.md"
     },
     {
       "id": "F212",
       "name": "CLI Error Diagnostics — 结构化 CLI 错误诊断 + 受控前端展示",
-      "status": "done | **Completed**: 2026-05-27 | **Owner**: Ragdoll/Ragdoll (Opus-47) | **Priority**: P1",
+      "status": "done | **Phase A-C done**: 2026-05-27 | **Phase D done**: 2026-05-29 (PR #1950 merged 40af2b82e) | **Owner**: Ragdoll/Ragdoll (Opus-47) | **Priority**: P1",
       "file": "F212-cli-error-diagnostics.md"
     },
     {
@@ -1295,6 +1295,24 @@
       "name": "Stale MCP Config Cleanup at Startup — 过期 MCP 配置启动清理",
       "status": "done | **Owner**: Ragdoll/Ragdoll (Opus-47) | **Priority**: P1 | **Completed**: 2026-05-26 (Phase A merged PR #1901 + Phase B merged PR #1903 + 跨族愿景守护 antig-opus APPROVE)",
       "file": "F213-stale-mcp-config-cleanup.md"
+    },
+    {
+      "id": "F214",
+      "name": "根目录卫生守护 (Root Directory Hygiene Guard)",
+      "status": "done | **Owner**: Ragdoll/Opus-4.8（Ragdoll） | **Priority**: P2",
+      "file": "F214-root-directory-hygiene-guard.md"
+    },
+    {
+      "id": "F215",
+      "name": "Malformed Tool-Call Recovery（textEventCount 检测 + seal/fresh/46接力兜底）",
+      "status": "done ✅ | **Owner**: Ragdoll (Opus-4.8) 设计 + review / Ragdoll (Sonnet-4.6 + Opus-4.6) 实现 / Maine Coon (GPT-5.5) 跨族 review / Siamese (Gemini-3.5) runtime 愿景守护 | **Priority**: P1 | **Completed**: 2026-05-30",
+      "file": "F215-malformed-toolcall-recovery.md"
+    },
+    {
+      "id": "F216",
+      "name": "routeSerial 决策层/执行层分离重构",
+      "status": "spec | **Owner**: 设计 @opus48 (F215 thread) / 执行待 fresh-thread opus-48 | **Priority**: P1 | **Source**: internal (F215 引爆点)",
+      "file": "F216-route-serial-refactor.md"
     }
   ]
 }

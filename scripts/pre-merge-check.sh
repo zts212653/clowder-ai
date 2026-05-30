@@ -156,7 +156,23 @@ if [ "$NO_REBASE" = "true" ]; then
   echo ""
 else
   echo "── Step 1/6: 同步 origin/main 并 rebase ──"
-  git fetch origin main --quiet
+  # git fetch 更新共享的 refs/remotes/origin/main——git worktree 下所有 worktree 共享
+  # 同一个 <main-repo>/.git，remote-tracking ref 的写入受共享 lock 保护
+  # (packed-refs.lock / refs/remotes/origin/main.lock)。并发 gate 同时 fetch 可能撞 ref
+  # lock。concurrent gate 现在降级为 soft-warning 放行（#1937），移除了 HARD_BLOCK 的隐式
+  # fetch 串行化，所以这里 retry 容忍 ref-lock 竞争——窗口极短，2s 间隔几乎必然成功；真失败
+  # （网络/auth）3 次后仍 surface exit 1。rebase 不需要 retry（操作 per-worktree HEAD，不走共享 lock）。
+  for attempt in 1 2 3; do
+    if git fetch origin main --quiet 2>&1; then
+      break
+    fi
+    if [ "$attempt" -eq 3 ]; then
+      echo -e "${RED}❌ git fetch origin main failed after 3 attempts${NC}"
+      exit 1
+    fi
+    echo -e "${YELLOW}⚠ fetch failed (attempt $attempt/3, likely ref-lock contention from concurrent gate), retrying in 2s...${NC}"
+    sleep 2
+  done
   echo -e "${GREEN}✓ fetch origin/main${NC}"
 
   REBASE_RESULT=0

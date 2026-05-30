@@ -26,8 +26,10 @@ import {
 } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import {
   a2aDispatchCount,
+  c2ExitChecked,
   c2VerdictHintEmitted,
   c2VerdictWithoutPassCount,
+  c2VoidHoldChecked,
   c2VoidHoldHintEmitted,
   inlineActionChecked,
   inlineActionDetected,
@@ -246,6 +248,7 @@ export async function* routeSerial(
     contentBlocks,
     uploadDir,
     signal,
+    signalForCat,
     promptTags,
     contextHistory,
     history,
@@ -350,8 +353,16 @@ export async function* routeSerial(
 
   try {
     while (index < worklist.length) {
-      if (signal?.aborted) break;
       const catId = worklist[index]!;
+      // F-parallel-cancel: per-cat signal — canceling one cat skips ONLY that cat, not the
+      // whole worklist. force-reset/cancelAll aborts every cat's controller, so all entries
+      // skip = equivalent to stopping. Using the shared primaryController.signal made
+      // "cancel the first cat" break the entire worklist (并发取消误伤根因：serial 路径).
+      const catSignal = signalForCat?.(catId) ?? signal;
+      if (catSignal?.aborted) {
+        index++;
+        continue;
+      }
       // F148 OQ-2: briefing→invocation link + context eval
       let briefingMessageId: string | undefined;
       let briefingCoverageMap: import('./context-transport.js').CoverageMap | undefined;
@@ -747,6 +758,8 @@ export async function* routeSerial(
       const leakedPayloadStripper = createLeakedToolCallStreamStripper();
       const invocationSpanRef: { current?: Span } = {};
       const invocationStartedAt = Date.now();
+      // F215 AC-C3: flag set when invokeSingleCat emits malformed_toolcall_relay_46 signal
+      let malformedRelayPending = false;
       for await (const msg of invokeSingleCat(deps.invocationDeps, {
         catId,
         service,
@@ -755,7 +768,7 @@ export async function* routeSerial(
         threadId,
         ...(targetContentBlocks ? { contentBlocks: targetContentBlocks } : {}),
         ...(targetUploadDir ? { uploadDir: targetUploadDir } : {}),
-        ...(signal ? { signal } : {}),
+        ...(catSignal ? { signal: catSignal } : {}),
         ...(staticIdentity ? { systemPrompt: staticIdentity } : {}),
         ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
         continuityCapsule,
@@ -770,7 +783,7 @@ export async function* routeSerial(
         isLastCat: false,
       })) {
         // F39 bugfix: stop yielding after cancel (pipe buffer may still drain)
-        if (signal?.aborted) break;
+        if (catSignal?.aborted) break;
 
         const effectiveMsgs: AgentMessage[] = [];
         if (msg.type === 'text' && msg.content) {
@@ -809,7 +822,7 @@ export async function* routeSerial(
                       voiceConfig: getCatVoice(catId as string),
                       broadcaster: deps.socketManager,
                       ttsRegistry,
-                      signal,
+                      signal: catSignal,
                     });
                   }
                 }
@@ -853,9 +866,31 @@ export async function* routeSerial(
               if (parsed.type === 'invocation_usage' && parsed.usage) {
                 routeTotalTokens += (parsed.usage.inputTokens ?? 0) + (parsed.usage.outputTokens ?? 0);
               }
+              // F215 AC-C3: detect 46-接力 relay signal — set flag to push opus-4.6 after loop.
+              // This is an internal routing signal; must be consumed here and NOT yielded to the frontend.
+              if (parsed.type === 'malformed_toolcall_relay_46') {
+                const relay46CatId = createCatId('opus');
+                if (catId !== relay46CatId && Object.hasOwn(deps.services, relay46CatId as string)) {
+                  malformedRelayPending = true;
+                  log.info(
+                    { catId: catId as string, threadId, relay46CatId },
+                    '[F215] malformed_toolcall_relay_46 signal received — will push opus-4.6 after loop',
+                  );
+                }
+                continue; // consume routing signal — never surfaces to user as raw JSON
+              }
             } catch {
               /* ignore parse errors */
             }
+          }
+          // F215 AC-C3: suppress malformed error when relay to 46 is already queued
+          if (
+            malformedRelayPending &&
+            effectiveMsg.type === 'error' &&
+            typeof effectiveMsg.error === 'string' &&
+            effectiveMsg.error.startsWith('malformed_toolcall:')
+          ) {
+            continue; // 46 will take over — don't surface error to user
           }
           // Accumulate tool events for persistence (before draft flush so current event is available)
           const toolEvt = toStoredToolEvent(effectiveMsg);
@@ -1037,7 +1072,7 @@ export async function* routeSerial(
           if (effectiveMsg.type === 'error') {
             hadError = true;
             // #267: errors before abort are real provider failures; errors after abort are cleanup
-            if (!signal?.aborted) hadProviderError = true;
+            if (!catSignal?.aborted) hadProviderError = true;
             if (effectiveMsg.error) {
               collectedErrorText += `${collectedErrorText ? '\n' : ''}${effectiveMsg.error}`;
             }
@@ -1087,6 +1122,33 @@ export async function* routeSerial(
         keepaliveTimer = undefined;
       }
 
+      // F215 AC-C3: push opus-4.6 to worklist as relay when 48 炸毛 + fresh retry also failed
+      if (malformedRelayPending) {
+        const relay46CatId = createCatId('opus');
+        if (
+          catId !== relay46CatId &&
+          Object.hasOwn(deps.services, relay46CatId as string) &&
+          // P2 fix + P1 #1 fix: only check PENDING entries (worklist[index+1..]) not the full
+          // worklist. worklist[0..index] are already executed; including them would silently skip
+          // a legitimate relay when opus ran first in the route (e.g. [opus, opus-48]).
+          !worklist.slice(index + 1).includes(relay46CatId)
+        ) {
+          worklist.push(relay46CatId);
+          worklistEntry.a2aCount++;
+          worklistEntry.a2aFrom.set(relay46CatId, catId);
+          log.info(
+            { catId: catId as string, relay46CatId, threadId, a2aCount: worklistEntry.a2aCount },
+            '[F215] Pushed opus-4.6 to worklist for malformed tool-call relay (AC-C3)',
+          );
+        } else if (worklist.slice(index + 1).includes(relay46CatId)) {
+          log.info(
+            { catId: catId as string, relay46CatId, threadId },
+            '[F215] opus-4.6 already pending in worklist — skipping duplicate relay push (P2 dedup)',
+          );
+        }
+        malformedRelayPending = false;
+      }
+
       // F111 Phase B: Flush remaining buffered text and send voice_stream_end
       let voiceTotalChunks = 0;
       if (voiceChunker) {
@@ -1096,7 +1158,7 @@ export async function* routeSerial(
           log.error({ err }, 'Voice chunker flush failed');
         }
         if (deps.socketManager && voiceChunker.hasStarted()) {
-          const aborted = signal?.aborted ?? false;
+          const aborted = catSignal?.aborted ?? false;
           deps.socketManager.broadcastToRoom(`thread:${threadId}`, 'voice_stream_end', {
             type: 'voice_stream_end',
             catId: catId as string,
@@ -1289,6 +1351,15 @@ export async function* routeSerial(
         // reports ending with `@co-creator` / `@铲屎官` (legitimate escalation to co-creator)
         // don't trigger the verdict-no-pass-hint false-positive. parseA2AMentions only
         // returns cat handles, never co-creator ones.
+        //
+        // C2 denominator (F192 2026-05-29): count every turn the verdict-without-pass
+        // exit-check actually evaluates, so attribution can grade verdict_without_pass_count
+        // against a real `c2.checked` base instead of fabricating a 100% ratio. phaseHHit
+        // turns are excluded — a format error short-circuits the check (AC-H5), so they
+        // were never evaluated.
+        if (!phaseHHit) {
+          c2ExitChecked.add(1, { 'agent.id': catId as string });
+        }
         if (
           !phaseHHit &&
           shouldWarnVerdictWithoutPass({
@@ -1336,6 +1407,10 @@ export async function* routeSerial(
 
         // F167 Phase I AC-I1 (KD-25): void hold detection — text says "持球" but
         // no cat_cafe_hold_ball tool call this turn.声明-动作一致性 check.
+        // C2 void-hold denominator (PR #1941 P2): count every void-hold evaluation so
+        // attribution grades void_hold_hint against c2.void_hold_checked, NOT the
+        // verdict-check count c2.checked (different guard → wrong ratio / suppression).
+        c2VoidHoldChecked.add(1, { 'agent.id': catId as string });
         if (
           shouldWarnVoidHold({
             text: storedContent,
@@ -1620,12 +1695,17 @@ export async function* routeSerial(
               { threadId, catId, a2aMentions, a2aCount: worklistEntry.a2aCount, maxDepth },
               'A2A text-scan blocked: depth limit reached',
             );
-          } else if (signal?.aborted) {
+          } else if (catSignal?.aborted) {
             log.info({ threadId, catId, a2aMentions }, 'A2A text-scan blocked: signal aborted');
           }
         }
 
-        if (a2aMentions.length > 0 && worklistEntry.a2aCount < maxDepth && !signal?.aborted && !queuedMessagesPending) {
+        if (
+          a2aMentions.length > 0 &&
+          worklistEntry.a2aCount < maxDepth &&
+          !catSignal?.aborted &&
+          !queuedMessagesPending
+        ) {
           // F153: mention_dispatch span — tracks the causal link between mentioner and dispatched targets
           let dispatchSpan: Span | undefined;
           const pendingTail = worklist.slice(index + 1);
@@ -1715,7 +1795,7 @@ export async function* routeSerial(
               dispatchSpan.end();
             }
           }
-        } else if (a2aMentions.length > 0 && queuedMessagesPending && deferA2AEnqueue && !signal?.aborted) {
+        } else if (a2aMentions.length > 0 && queuedMessagesPending && deferA2AEnqueue && !catSignal?.aborted) {
           // F185 Phase B: deferred enqueue — preserve A2A handoff behind non-agent entries
           const pendingTailDeferred = worklist.slice(index + 1);
           // F153 Phase I: lazy mention_dispatch span for deferred path (mirrors inline path at :1661-1675).

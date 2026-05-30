@@ -20,7 +20,7 @@ import type { Thread } from '../../stores/ports/ThreadStore.js';
 import { canViewMessage } from '../../stores/visibility.js';
 import type { AgentMessage, AgentService } from '../../types.js';
 import type { InvocationDeps } from '../invocation/invoke-single-cat.js';
-import { extractRecentArtifacts, mergeLedger, sortAndCapArtifacts } from './artifact-tracking.js';
+import { extractRecentArtifacts, mergeLedger } from './artifact-tracking.js';
 import type { CoverageMap } from './context-transport.js';
 import {
   buildCoverageMap,
@@ -84,6 +84,11 @@ export interface RouteOptions {
   contentBlocks?: readonly MessageContent[] | undefined;
   uploadDir?: string | undefined;
   signal?: AbortSignal | undefined;
+  /** Per-cat execution signal resolver. When present, route-parallel gives each cat
+   *  ITS OWN slot signal (signalForCat(catId)) instead of the shared `signal`, so
+   *  canceling one concurrent cat does not abort its siblings (并发取消误伤根因修复).
+   *  Absent → fall back to the shared `signal` (route-serial / legacy callers). */
+  signalForCat?: ((catId: CatId) => AbortSignal | undefined) | undefined;
   promptTags?: readonly string[] | undefined;
   /** Pre-assembled context (deprecated: use history for per-cat budget) */
   contextHistory?: string | undefined;
@@ -320,6 +325,9 @@ const USER_FACING_SYSTEM_INFO_TYPES = new Set([
   'a2a_followup_available',
   'governance_blocked',
   'invocation_preempted',
+  // F215 BLOCKING 1 fix: relay signal produces a user-visible text card before this signal,
+  // so marking it user-facing prevents route-serial from appending a misleading silent_completion.
+  'malformed_toolcall_relay_46',
   'mode_switch_proposal',
   'session_seal_requested',
   'silent_completion',

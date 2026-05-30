@@ -8,6 +8,7 @@ import {
   formatRuntimeLabel,
   formatRuntimeSessionTitle,
   formatSealReason,
+  formatSurfaceBadge,
   shortRuntimeId,
 } from './external-runtime-session-format';
 import type {
@@ -75,7 +76,7 @@ export function ExternalRuntimeSessionsPanel({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-cafe-text">{formatRuntimeLabel('antigravity-desktop')}</h2>
-          <p className="text-micro text-cafe-muted">IDE direct sessions</p>
+          <p className="text-micro text-cafe-muted">Runtime sessions（Café 派发 + IDE 直连）</p>
         </div>
         <button
           type="button"
@@ -117,7 +118,7 @@ export function ExternalRuntimeSessionsPanel({
 
       {!loading && !error && visibleSessions.length === 0 && (
         <div className="rounded-lg border border-dashed border-[var(--console-border-soft)] py-8 text-center text-xs text-cafe-muted">
-          没有 IDE 直连会话
+          没有 runtime 会话
         </div>
       )}
 
@@ -141,6 +142,7 @@ function RuntimeSessionRow({
 }) {
   const badge = formatLifecycleBadge(session.lifecycle);
   const sealReason = formatSealReason(session.lifecycle.sealReason);
+  const surfaceBadge = formatSurfaceBadge(session.surface);
   return (
     <li className="min-w-0 bg-[var(--console-card-bg)] px-3 py-2" data-testid="runtime-session-row">
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-3">
@@ -149,6 +151,11 @@ function RuntimeSessionRow({
             <span className={`rounded-md px-1.5 py-0.5 text-micro font-semibold ${badge.className}`}>
               {badge.label}
             </span>
+            {surfaceBadge && (
+              <span className={`rounded-md px-1.5 py-0.5 text-micro font-semibold ${surfaceBadge.className}`}>
+                {surfaceBadge.label}
+              </span>
+            )}
             {session.lifecycle.sealReason && <span className="text-micro text-cafe-muted">{sealReason}</span>}
             <span className="min-w-0 truncate text-xs font-semibold text-cafe-text">
               {formatRuntimeSessionTitle(session)}

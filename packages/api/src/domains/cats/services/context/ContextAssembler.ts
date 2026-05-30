@@ -8,6 +8,7 @@
 
 import { catRegistry } from '@cat-cafe/shared';
 import { estimateTokens } from '../../../../utils/token-counter.js';
+import { formatPromptTime } from '../format-time.js';
 import { isDelivered, type StoredMessage } from '../stores/ports/MessageStore.js';
 
 export interface ContextAssemblerOptions {
@@ -52,14 +53,6 @@ export function getSenderName(catId: string | null): string {
   return `${config.displayName}(${variantLabel})`;
 }
 
-/** Format timestamp as HH:MM */
-function formatTime(timestamp: number): string {
-  const d = new Date(timestamp);
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  return `${hh}:${mm}`;
-}
-
 /**
  * Truncate content preserving both head and tail.
  * Head gets 40% of budget, tail gets 60% (conclusions/requests live at the end).
@@ -81,8 +74,15 @@ function truncateHeadTail(content: string, limit: number): string {
  *
  * @returns `[HH:MM 角色名] 内容`
  */
-export function formatMessage(msg: StoredMessage, options?: { truncate?: number }): string {
-  const time = formatTime(msg.timestamp);
+export function formatMessage(
+  msg: StoredMessage,
+  options?: { truncate?: number; formatTime?: (epochMs: number) => string },
+): string {
+  // Default formatter: UTC (formatPromptTime) for prompt injection — cats need
+  // to align with external UTC sources. Non-prompt consumers (e.g. user-facing
+  // export route) pass their own formatter to avoid leaking UTC into documents
+  // whose header/footer use host-local time.
+  const time = (options?.formatTime ?? formatPromptTime)(msg.timestamp);
   const sender = msg.source ? msg.source.label : getSenderName(msg.catId);
   // F52: Annotate cross-thread messages with source thread
   const crossPostTag = msg.extra?.crossPost?.sourceThreadId
@@ -133,7 +133,7 @@ export function assembleContext(messages: StoredMessage[], options?: ContextAsse
   let totalTokens = overheadTokens;
   let startIndex = formatted.length; // will walk backward
   for (let i = formatted.length - 1; i >= 0; i--) {
-    const lineTokens = estimateTokens(`${formatted[i]!}\n`);
+    const lineTokens = estimateTokens(`${formatted[i] ?? ''}\n`);
     if (totalTokens + lineTokens > maxTotalTokens) break;
     totalTokens += lineTokens;
     startIndex = i;

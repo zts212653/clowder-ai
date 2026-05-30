@@ -21,4 +21,7 @@ export const MessageKeys = {
 
   /** Idempotency index: msg:idem:{userId}:{threadId}:{key} -> messageId */
   idempotency: (userId: string, threadId: string, key: string) => `msg:idem:${userId}:${threadId}:${key}`,
+
+  /** Callback content-dedup claim (race-safe exact-duplicate gate): msg:cbdedup:{fingerprint} */
+  contentDedup: (fingerprint: string) => `msg:cbdedup:${fingerprint}`,
 } as const;

@@ -465,6 +465,19 @@ export class ClaudeAgentService implements AgentService {
 
       let eventCount = 0;
       let textEventCount = 0;
+      // F215: Track assistant event presence and content blocks (reset per assistant event).
+      //
+      // hasAssistantEvent: model generated a response (needed to distinguish "empty invocation" from "malformed").
+      // lastAssistantHasToolUseBlock: LAST assistant content has a valid tool_use block.
+      //   Per-turn (not global): an earlier turn's tool_use must not suppress detection on a later malformed turn.
+      // lastAssistantHasTextBlock: LAST assistant content has a text block.
+      //   Checked from content blocks directly (not from text event counts) so streaming mode is handled
+      //   correctly: --include-partial-messages sends text_delta BEFORE the assistant event, and
+      //   transformClaudeEvent suppresses the final assistant text to avoid duplicates. The content block
+      //   is present in either mode, so this flag is reliable regardless of streaming vs non-streaming.
+      let hasAssistantEvent = false;
+      let lastAssistantHasToolUseBlock = false;
+      let lastAssistantHasTextBlock = false;
       for await (const event of events) {
         eventCount++;
         // #780: Archive raw event for post-mortem diagnostics (fire-and-forget)
@@ -478,6 +491,29 @@ export class ClaudeAgentService implements AgentService {
             ? String((event as Record<string, unknown>).type)
             : '__unknown';
         log.debug({ catId: this.catId, eventIndex: eventCount, type: evtType }, 'CLI event received');
+        // F215: Inspect assistant events for content blocks (before transformClaudeEvent runs).
+        // Reset per-turn tracking on each new assistant event so multi-turn tool-using sessions are handled
+        // correctly: an earlier turn's blocks must not suppress detection on a later malformed turn.
+        if (evtType === 'assistant') {
+          hasAssistantEvent = true;
+          lastAssistantHasToolUseBlock = false;
+          lastAssistantHasTextBlock = false;
+          const rawEvtCheck = event as Record<string, unknown>;
+          const msgCheck = rawEvtCheck.message as Record<string, unknown> | undefined;
+          const contentCheck = msgCheck?.content;
+          if (Array.isArray(contentCheck)) {
+            lastAssistantHasToolUseBlock = contentCheck.some(
+              (b) =>
+                b &&
+                typeof b === 'object' &&
+                (b as Record<string, unknown>).type === 'tool_use' &&
+                typeof (b as Record<string, unknown>).name === 'string',
+            );
+            lastAssistantHasTextBlock = contentCheck.some(
+              (b) => b && typeof b === 'object' && (b as Record<string, unknown>).type === 'text',
+            );
+          }
+        }
         if (isCliTimeout(event)) {
           // F118 AC-C3: Forward timeout diagnostics before error
           yield {
@@ -562,7 +598,9 @@ export class ClaudeAgentService implements AgentService {
 
         if (Array.isArray(result)) {
           for (const msg of result) {
-            if (msg.type === 'text') textEventCount++;
+            if (msg.type === 'text') {
+              textEventCount++;
+            }
             // Capture sessionId into metadata
             if (msg.type === 'session_init' && msg.sessionId) {
               metadata.sessionId = msg.sessionId;
@@ -582,7 +620,9 @@ export class ClaudeAgentService implements AgentService {
             }
             sawResultError = true;
           }
-          if (result.type === 'text') textEventCount++;
+          if (result.type === 'text') {
+            textEventCount++;
+          }
           yield { ...result, metadata };
         }
       }
@@ -591,7 +631,49 @@ export class ClaudeAgentService implements AgentService {
         { catId: this.catId, totalEvents: eventCount, textEvents: textEventCount, sessionId: metadata.sessionId },
         'Claude CLI invocation completed',
       );
-      if (textEventCount === 0) {
+
+      // F215 AC-B1: Detect malformed tool-call (form A: thinking-only).
+      // Condition: last assistant event has NEITHER a tool_use block NOR a text block in its content.
+      //
+      // Why content blocks (not text event counts):
+      //   textEventCount (global) is polluted by earlier turns; per-turn counters break under streaming
+      //   (--include-partial-messages) because text_delta arrives BEFORE the assistant event, then
+      //   transformClaudeEvent suppresses the final assistant text — resetting a per-turn counter at
+      //   assistant-event time would erase those already-counted streaming text events (AC-B5 fix).
+      //   Content blocks are present in both streaming and non-streaming modes regardless of event order,
+      //   so they are the only reliable source for per-turn "did this turn produce text?" detection.
+      //
+      // Pure tool_use tasks (lastAssistantHasToolUseBlock=true) are not malformed.
+      // Invocations with no assistant event at all (empty/aborted) are NOT malformed.
+      const isMalformedToolCall =
+        hasAssistantEvent && !lastAssistantHasToolUseBlock && !lastAssistantHasTextBlock && !sawResultError;
+      if (isMalformedToolCall) {
+        log.warn(
+          { catId: this.catId, totalEvents: eventCount, sessionId: metadata.sessionId },
+          '[F215] Malformed tool-call detected (form A: thinking-only, no text/tool_use output) — triggering recovery',
+        );
+        // Signal for invoke-single-cat to seal session + trigger fallback chain (AC-C1/C2).
+        yield {
+          type: 'system_info' as const,
+          catId: this.catId,
+          content: JSON.stringify({
+            type: 'malformed_toolcall_detected',
+            form: 'A',
+            sessionId: metadata.sessionId,
+            totalEvents: eventCount,
+          }),
+          metadata,
+          timestamp: Date.now(),
+        };
+        // AC-D1: Explicit炸毛 error — not silent empty return.
+        yield {
+          type: 'error' as const,
+          catId: this.catId,
+          error: 'malformed_toolcall: Opus 炸毛了——thinking-only 输出，无 tool_use / text block，系统已触发恢复流程',
+          metadata,
+          timestamp: Date.now(),
+        };
+      } else if (textEventCount === 0) {
         log.warn(
           { catId: this.catId, totalEvents: eventCount },
           'Claude CLI produced 0 text events — will show as silent_completion',

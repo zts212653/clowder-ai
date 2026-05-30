@@ -68,9 +68,20 @@ interface ChatMessageProps {
   message: ChatMessageType;
   getCatById: (id: string) => CatData | undefined;
   onEditCat?: (catId: string) => void;
+  /** F212 follow-up — UI-layer dedup for adjacent identical CliDiagnostics panels.
+   *  When true, this message hides its CliDiagnosticsPanel entirely (an earlier adjacent
+   *  message in the same dedup group already rendered the panel with a "×N" badge). The
+   *  chat bubble itself, cat signature, and other content still render normally so the
+   *  message audit trail stays intact. Computed at the message-list level via
+   *  `utils/cli-diagnostics-dedup`. */
+  hideDiagnosticsPanel?: boolean;
+  /** F212 follow-up — when this is the head of a dedup group, the group's total size
+   *  (head + N hidden subsequent duplicates). Passed through to CliDiagnosticsPanel for
+   *  the "×N" badge rendering. */
+  dedupCount?: number;
 }
 
-export function ChatMessage({ message, getCatById, onEditCat }: ChatMessageProps) {
+export function ChatMessage({ message, getCatById, onEditCat, hideDiagnosticsPanel, dedupCount }: ChatMessageProps) {
   const coCreator = useCoCreatorConfig();
   const { state: ttsState, synthesize: ttsSynthesize, activeMessageId } = useTts();
   const currentThreadId = useChatStore((s) => s.currentThreadId);
@@ -187,10 +198,22 @@ export function ChatMessage({ message, getCatById, onEditCat }: ChatMessageProps
     // The `isKnownReason` membership check (not truthy) is the key defense against
     // persisted/newer/malformed reasonCode strings hijacking the timeout view.
     if (isError && isKnownReason(message.extra?.cliDiagnostics?.reasonCode)) {
+      // F212 follow-up — UI-layer dedup: if this is a subsequent duplicate of an adjacent
+      // dedup group, hide the panel (group head already rendered it with a ×N badge). We
+      // still render an empty wrapping div with data-message-id so MessageNavigator dots,
+      // ReplyPill jumps, and scrollToMessage queries continue to resolve the anchor —
+      // dropping the wrapper would silently break navigation/audit trail for the hidden
+      // duplicates (codex review PR #1967 P2 catch). h-0 keeps the anchor at zero visual
+      // cost; the group head's panel right above carries all the info via ×N badge.
+      if (hideDiagnosticsPanel) return <div data-message-id={message.id} aria-hidden="true" className="h-0" />;
       return (
         <div data-message-id={message.id} className="flex justify-center mb-3">
           <div className="max-w-[85%] w-full">
-            <CliDiagnosticsPanel errorMessage={message.content} diagnostics={message.extra.cliDiagnostics} />
+            <CliDiagnosticsPanel
+              errorMessage={message.content}
+              diagnostics={message.extra.cliDiagnostics}
+              dedupCount={dedupCount}
+            />
           </div>
         </div>
       );
@@ -209,10 +232,17 @@ export function ChatMessage({ message, getCatById, onEditCat }: ChatMessageProps
 
     // F212 Phase B precedence step 3: unclassified cliDiagnostics with no timeout.
     if (isError && message.extra?.cliDiagnostics) {
+      // F212 follow-up — UI-layer dedup (mirrors the classified-path branch above):
+      // preserve data-message-id anchor so navigation/scroll targets resolve.
+      if (hideDiagnosticsPanel) return <div data-message-id={message.id} aria-hidden="true" className="h-0" />;
       return (
         <div data-message-id={message.id} className="flex justify-center mb-3">
           <div className="max-w-[85%] w-full">
-            <CliDiagnosticsPanel errorMessage={message.content} diagnostics={message.extra.cliDiagnostics} />
+            <CliDiagnosticsPanel
+              errorMessage={message.content}
+              diagnostics={message.extra.cliDiagnostics}
+              dedupCount={dedupCount}
+            />
           </div>
         </div>
       );

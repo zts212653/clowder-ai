@@ -115,6 +115,17 @@ export const CLASSIFIER_PATTERNS: Array<{ code: CliErrorReasonCode; regex: RegEx
     code: 'auth_failed',
     regex: /(\b401\b|Unauthorized|invalid api key|authentication failed|forbidden.*api)/i,
   },
+  // F212 Phase E (cloud codex P1 fix per @co-creator organic 2026-05-29): server-side temporary
+  // throttling is NOT a user quota problem. CC explicitly disambiguates with "(not your usage
+  // limit)" but the quota_exceeded regex below blindly matches "usage limit" / "rate limit",
+  // costing users a futile trip to their quota dashboard. server_overloaded MUST come BEFORE
+  // quota_exceeded in CLASSIFIER_PATTERNS (specific-first ordering) so the disambiguation
+  // signal wins. Lesson: keyword white-list without disambiguation is cognitive scaffolding —
+  // CC says "(not your usage limit)", trust the source's explicit negation.
+  {
+    code: 'server_overloaded',
+    regex: /(temporarily limiting requests|not your usage limit|server is (overloaded|busy)|\b529\b|\bOverloaded\b)/i,
+  },
   {
     code: 'quota_exceeded',
     regex: /(\b429\b|quota|rate limit|too many requests|usage limit)/i,
@@ -134,5 +145,12 @@ export const CLASSIFIER_PATTERNS: Array<{ code: CliErrorReasonCode; regex: RegEx
   {
     code: 'context_window_exceeded',
     regex: /(context length|maximum context|context_length_exceeded|tokens? exceed|prompt too long)/i,
+  },
+  // F212 Phase D: Claude CLI result error — model tool-call parse failure (e.g.
+  // "The model's tool call could not be parsed (retry also failed)"). CC emits this
+  // in the result error event (type==='result' && subtype!=='success'), not stderr.
+  {
+    code: 'tool_call_parse_failed',
+    regex: /tool calls? could not be parsed|could not parse[^.\n]{0,30}tool call/i,
   },
 ];

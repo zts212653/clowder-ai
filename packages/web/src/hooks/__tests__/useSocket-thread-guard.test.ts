@@ -438,7 +438,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     });
   });
 
-  it('F173 Phase E (KD-1): agent_message from any thread forwards to onMessage (single dispatch)', () => {
+  it('F173 Phase E (KD-1): agent_message from any thread forwards to onMessage (single dispatch)', async () => {
     const onMessage = vi.fn();
     const callbacks: SocketCallbacks = {
       onMessage,
@@ -458,15 +458,17 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
         timestamp: Date.now(),
       });
     });
+    // Drain coalescer microtask — agent_message dispatch is now async via queueMicrotask.
+    await Promise.resolve();
 
-    // Phase E: useSocket no longer dispatches active vs background.
+    // Phase E: useSocket no longer dispatches active vs background (after microtask drain).
     // useAgentMessages.handleAgentMessage 是 single dispatch entry，自己路由。
     // useSocket 的契约只是"转发到 onMessage"——所有 thread 都应该被 forward。
     expect(onMessage).toHaveBeenCalledTimes(1);
     expect(onMessage.mock.calls[0]?.[0]).toMatchObject({ threadId: 'thread-A', content: 'hello from thread A' });
   });
 
-  it('route/store mismatch: message for route thread must go background until store switches', () => {
+  it('route/store mismatch: message for route thread must go background until store switches', async () => {
     const onMessage = vi.fn();
     const callbacks: SocketCallbacks = {
       onMessage,
@@ -488,8 +490,10 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
         timestamp: Date.now(),
       });
     });
+    // Drain coalescer microtask — agent_message dispatch is now async via queueMicrotask.
+    await Promise.resolve();
 
-    // Phase E: useSocket forwards everything to onMessage (single dispatch).
+    // Phase E: useSocket forwards everything to onMessage (single dispatch, after microtask drain).
     // useAgentMessages.handleAgentMessage 内部判断 active vs background，并对
     // background path 调用 handleBackgroundAgentMessage（mockAddMessageToThread）。
     // 这里 onMessage 是 vi.fn() 不真跑 useAgentMessages 内部逻辑——只验 forward。
@@ -501,7 +505,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
   // Original dual-pointer guard requires BOTH route and store to match msg.threadId,
   // which mis-routes events when route is stale but store is the truth source.
   // Single-pointer routing uses store as the only source of truth for active-thread decision.
-  it('F173 reverse race: route stale, store=msg.threadId → must go active (single-pointer routing)', () => {
+  it('F173 reverse race: route stale, store=msg.threadId → must go active (single-pointer routing)', async () => {
     const onMessage = vi.fn();
     const callbacks: SocketCallbacks = {
       onMessage,
@@ -525,8 +529,10 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
         timestamp: Date.now(),
       });
     });
+    // Drain coalescer microtask — agent_message dispatch is now async via queueMicrotask.
+    await Promise.resolve();
 
-    // Single-pointer (store) routing → onMessage MUST be called (active path)
+    // Single-pointer (store) routing → onMessage MUST be called (active path, after microtask drain)
     // Original dual-pointer would mis-route to background because route ≠ msg.threadId.
     expect(onMessage).toHaveBeenCalledTimes(1);
     expect(onMessage.mock.calls[0]?.[0]).toMatchObject({
@@ -585,7 +591,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     expect(onSpawnStarted.mock.calls[0]?.[0]).toMatchObject({ threadId: 'thread-B' });
   });
 
-  it('route/store mismatch: non-text tool_use event is preserved via background path', () => {
+  it('route/store mismatch: non-text tool_use event is preserved via background path', async () => {
     const onMessage = vi.fn();
     const callbacks: SocketCallbacks = {
       onMessage,
@@ -606,8 +612,10 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
         timestamp: Date.now(),
       });
     });
+    // Drain coalescer microtask — agent_message dispatch is now async via queueMicrotask.
+    await Promise.resolve();
 
-    // Phase E: useSocket forwards all events to onMessage (single dispatch).
+    // Phase E: useSocket forwards all events to onMessage (single dispatch, after microtask drain).
     // useAgentMessages 内部判断 active vs background 并调 bg helpers (mockAddMessageToThread,
     // mockAppendToolEventToThread)。这里 onMessage 是 vi.fn() 不真跑——仅验 forward。
     expect(onMessage).toHaveBeenCalledTimes(1);

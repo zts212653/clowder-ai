@@ -22,6 +22,8 @@ import {
 } from '../../../../../config/account-resolver.js';
 import { resolveBoundAccountRefForCat } from '../../../../../config/cat-account-binding.js';
 import { isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
+import { buildCatGitIdentityEnv } from '../../../../../config/cat-git-identity.js';
+import { getCatModel } from '../../../../../config/cat-models.js';
 import { getContextWindowFallback } from '../../../../../config/context-window-sizes.js';
 import { getSessionStrategy, shouldTakeAction } from '../../../../../config/session-strategy.js';
 import { assertSafeTestConfigRoot } from '../../../../../config/test-config-write-guard.js';
@@ -81,7 +83,7 @@ import { appendTranscriptPathHints } from '../providers/transcript-path-hints.js
 const log = createModuleLogger('invoke');
 const tracer = trace.getTracer('cat-cafe-api', '0.1.0');
 const TRANSCRIPT_DIR =
-  process.env['TRANSCRIPT_DIR'] ?? resolve(findMonorepoRoot(), 'scripts', 'meeting-copilot', 'transcripts');
+  process.env.TRANSCRIPT_DIR ?? resolve(findMonorepoRoot(), 'scripts', 'meeting-copilot', 'transcripts');
 let _openCodeKnownModels: Set<string> | null = null;
 
 export function getOpenCodeKnownModels(): Set<string> {
@@ -131,6 +133,7 @@ import {
   extractTaskProgress,
   isCliTimeoutError,
   isContextWindowOverflowError,
+  isMalformedToolCallError,
   isMissingClaudeSessionError,
   isPromptTokenLimitExceededError,
   isTransientAcpPromptFailure,
@@ -539,6 +542,26 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // can resolve to a concrete value.
     CAT_CAFE_THREAD_ID: threadId,
     ...(process.env.CAT_CAFE_SIGNAL_USER ? { CAT_CAFE_SIGNAL_USER: process.env.CAT_CAFE_SIGNAL_USER } : {}),
+    // Per-cat git author identity (W1: cats are Agents with identity).
+    // GIT_AUTHOR_NAME/GIT_COMMITTER_NAME override the runtime git config's pinned
+    // user.name so each cat's commits carry its own name instead of all collapsing
+    // to one. Model comes from getCatModel(catId) — the SAME source as the system-prompt
+    // identity line (env CAT_{CATID}_MODEL > runtime catRegistry), so the author name
+    // tracks the cat's real model (opus-45 → claude-opus-4-8), not the catId or a stale
+    // catalog copy. Email is intentionally NOT set — it inherits git config (the CVO's
+    // GitHub noreply account) so contribution-graph attribution stays on one account
+    // while the name distinguishes the cat. (CVO directive 2026-05-28)
+    ...buildCatGitIdentityEnv(
+      catId as string,
+      catRegistry.tryGet(catId as string)?.config?.breedId,
+      ((): string | undefined => {
+        try {
+          return getCatModel(catId as string);
+        } catch {
+          return undefined;
+        }
+      })(),
+    ),
   };
 
   const auditLog = getEventAuditLog();
@@ -2025,7 +2048,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     {
       const maskEnv = (env: Record<string, string>): Record<string, string> => {
         const masked: Record<string, string> = {};
-        for (const [k, v] of Object.entries(env)) {
+        for (const k of Object.keys(env)) {
           masked[k] = '***';
         }
         return masked;
@@ -2068,6 +2091,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       let suppressedContextOverflowError: AgentMessage | undefined;
       let suppressedTransientCliError: AgentMessage | undefined;
       let suppressedTimeoutError: AgentMessage | undefined;
+      // F215: Suppress malformed tool-call error for seal+fresh-retry (AC-C1/C2).
+      // Also suppress the system_info malformed_toolcall_detected signal that precedes the error.
+      let suppressedMalformedError: AgentMessage | undefined;
       let shouldRetryWithoutSession = false;
       let shouldRetryOnTransientCliExit = false;
       let attemptHasContentOutput = false;
@@ -2139,20 +2165,91 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           suppressedTimeoutError = msg;
           continue;
         }
+        // F215 AC-C1/C2: Suppress malformed tool-call error + preceding system_info signal
+        // → seal session + fresh-context retry (sessionId=undefined).
+        // Applies on all attempts (even without session) so a retried invocation that still
+        // produces malformed output also enters the fallback chain.
+        //
+        // BLOCKING 2 fix: malformed_toolcall_detected is emitted BEFORE the error, so we
+        // must suppress it unconditionally (not gated on suppressedMalformedError being set).
+        if (
+          msg.type === 'system_info' &&
+          (() => {
+            try {
+              return JSON.parse(msg.content ?? '{}').type === 'malformed_toolcall_detected';
+            } catch {
+              return false;
+            }
+          })()
+        ) {
+          // Internal detection signal — always suppress; never reaches user.
+          continue;
+        }
+        // P1 7th fix: only suppress malformed error (and retry) when NO content was emitted yet.
+        // Other self-heal paths (prompt limit, context overflow) all guard on !attemptHasContentOutput.
+        // Without this guard, a multi-step run that used a tool then ended with a malformed turn
+        // would re-run the original prompt from scratch — duplicating tool actions.
+        if (msg.type === 'error' && isMalformedToolCallError(msg.error) && !attemptHasContentOutput) {
+          suppressedMalformedError = msg;
+          continue;
+        }
+        // F215 AC-B6 UX fix: when content was already emitted, the malformed error must NOT reach
+        // the user with "系统已触发恢复流程" (a lie — no retry fires when attemptHasContentOutput=true).
+        // Replace the raw error with an honest partial-output text notice.
+        if (msg.type === 'error' && isMalformedToolCallError(msg.error) && attemptHasContentOutput) {
+          log.warn(
+            { catId, error: msg.error },
+            '[F215] Malformed after content output — replacing misleading error with partial-output notice',
+          );
+          const notice: AgentMessage = {
+            type: 'text',
+            catId: catId as CatId,
+            content: `\n\n🐾 手抖了——最后一步没完成。上面的内容已经送到了，可以追问或让其他猫猫接着做。`,
+            timestamp: Date.now(),
+          };
+          for await (const out of streamProcessedOutputs(notice)) {
+            yield out;
+          }
+          continue;
+        }
 
         if (
           suppressedMissingSessionError ||
           suppressedPromptLimitError ||
           suppressedContextOverflowError ||
           suppressedTransientCliError ||
-          suppressedTimeoutError
+          suppressedTimeoutError ||
+          suppressedMalformedError
         ) {
           if (msg.type === 'done') {
+            // F215 AC-C1: Seal malformed session before fresh retry.
+            if (suppressedMalformedError && deps.sessionSealer && deps.sessionChainStore) {
+              try {
+                const activeRec = await deps.sessionChainStore.getActive(catId as CatId, threadId);
+                if (activeRec) {
+                  const sealResult = await deps.sessionSealer.requestSeal({
+                    sessionId: activeRec.id,
+                    reason: 'malformed_toolcall',
+                  });
+                  if (sealResult.accepted) {
+                    sessionManager.delete(userId, catId, threadId).catch(() => {});
+                    deps.sessionSealer.finalize({ sessionId: activeRec.id }).catch(() => {});
+                    log.info(
+                      { catId, threadId, invocationId, sessionId: activeRec.id },
+                      '[F215] Sealed malformed session for fresh-context retry',
+                    );
+                  }
+                }
+              } catch {
+                /* best-effort seal */
+              }
+            }
             shouldRetryWithoutSession = Boolean(
               suppressedMissingSessionError ||
                 suppressedPromptLimitError ||
                 suppressedContextOverflowError ||
-                suppressedTimeoutError,
+                suppressedTimeoutError ||
+                suppressedMalformedError,
             );
             shouldRetryOnTransientCliExit = Boolean(suppressedTransientCliError);
             break;
@@ -2188,6 +2285,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             }
             suppressedTimeoutError = undefined;
           }
+          // F215: Clear malformed error — will be re-evaluated on retry.
+          if (suppressedMalformedError) {
+            suppressedMalformedError = undefined;
+          }
         }
 
         // F149: Map provider_signal / liveness_signal → system_info for frontend delivery
@@ -2206,7 +2307,16 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           msg.type !== 'liveness_signal' &&
           msg.type !== 'status'
         ) {
-          attemptHasContentOutput = true;
+          // F215 hotfix: attemptHasContentOutput must only be set by replay-sensitive types
+          // (text / tool_use / tool_result). system_info (rate_limit_event / agent_loop /
+          // timeout_diagnostics) and other metadata MUST NOT prevent malformed recovery —
+          // they carry no model output that would be duplicated on retry.
+          // Bug: system_info from rate_limit_event precedes malformed turn → sets
+          // attemptHasContentOutput=true → malformed suppress guard !attemptHasContentOutput
+          // fails → seal/fresh-retry/46接力 all skipped → bare malformed error leaks to user.
+          if (msg.type === 'text' || msg.type === 'tool_use' || msg.type === 'tool_result') {
+            attemptHasContentOutput = true;
+          }
           // Substantive = real model output, excludes system_info (e.g. timeout_diagnostics).
           if (msg.type !== 'system_info') {
             attemptHasSubstantiveOutput = true;
@@ -2236,7 +2346,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             ? 'context_window_overflow'
             : suppressedTimeoutError
               ? 'cli_timeout'
-              : 'missing_session';
+              : suppressedMalformedError
+                ? 'malformed_toolcall'
+                : 'missing_session';
         log.info(
           {
             catId,
@@ -2318,6 +2430,67 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
       if (suppressedTransientCliError) {
         for await (const out of streamProcessedOutputs(suppressedTransientCliError)) {
+          yield out;
+        }
+      }
+      // F215 AC-C3/AC-D1: All retries exhausted with malformed result.
+      // BLOCKING 1 fix: emit the relay card as a `text` message (user-visible) THEN emit
+      // the `system_info` signal so route-serial can detect and push opus-4.6 to worklist.
+      // This keeps the user-visible card decoupled from the routing signal.
+      if (suppressedMalformedError) {
+        log.warn(
+          { catId, threadId, invocationId },
+          '[F215] Malformed tool-call recovery exhausted — emitting 46接力 card (AC-C3)',
+        );
+        // 1. User-visible relay card (text type — front-end renders naturally)
+        // BLOCKING 4 fix: removed "请重新发送请求" — relay is automatic.
+        // P2 fix: neutral wording — don't promise relay success before route-serial verifies availability.
+        const cardText = [
+          '🙀 **Opus 4.8 炸毛了** —— 他这次手抖，工具调用格式写歪了，系统读不出来。',
+          '放心，**不是猫咖的问题**，是这只猫在长对话里偶尔会犯的毛病；系统已触发自动恢复，将尝试切换到备用上下文重试（如可用）。',
+          '',
+          '`[展开技术细节 ▾]` 发生了什么：claude-opus-4-8 在长对话后段，偶尔把"工具调用"写成 AI 内部旧格式，Claude Code 识别不了 | 根因：Anthropic 模型的已知问题（#49747），与猫咖无关 | 猫咖怎么兜底：自动检测异常 → 隔离问题对话 → 触发备用恢复路径（如 Opus 4.6 可用则接力）',
+        ].join('\n');
+        for await (const out of streamProcessedOutputs({
+          type: 'text' as const,
+          catId,
+          content: cardText,
+          timestamp: Date.now(),
+        })) {
+          yield out;
+        }
+        // 2. Internal routing signal — route-serial consumes this to push opus-4.6 to worklist.
+        // route-helpers.ts USER_FACING_SYSTEM_INFO_TYPES includes this type so route-serial
+        // won't append a silent_completion after seeing it.
+        for await (const out of streamProcessedOutputs({
+          type: 'system_info' as const,
+          catId,
+          content: JSON.stringify({
+            type: 'malformed_toolcall_relay_46',
+            invocationId,
+          }),
+          timestamp: Date.now(),
+        })) {
+          yield out;
+        }
+        // AC-D1: Explicit final error (not silent empty return)
+        for await (const out of streamProcessedOutputs({
+          type: 'error' as const,
+          catId,
+          error: 'malformed_toolcall: Opus 4.8 炸毛，fresh-context 重试仍失败。系统将用 Opus 4.6 接班（AC-D1）',
+          timestamp: Date.now(),
+        })) {
+          yield out;
+        }
+        // P1 #2 fix: synthesize terminal done — provider's done was consumed by the suppression
+        // path (continue). Without this, route-serial's doneMsg stays null and direct
+        // invokeSingleCat consumers never receive the terminal done/isFinal signal.
+        for await (const out of streamProcessedOutputs({
+          type: 'done' as const,
+          catId,
+          isFinal: isLastCat,
+          timestamp: Date.now(),
+        })) {
           yield out;
         }
       }

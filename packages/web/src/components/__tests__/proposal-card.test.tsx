@@ -1,8 +1,9 @@
 /**
- * F128 ProposalCard frontend tests (AC-F6).
+ * F128 ProposalCard frontend tests (AC-F6 / AC-F7 / AC-F8).
  *
  * Covers: render, edit-on-approve payload, reject, approved/rejected state flip,
- * and the `cat-cafe:proposal-updated` CustomEvent → status sync.
+ * the `cat-cafe:proposal-updated` CustomEvent → status sync,
+ * pin-on-approve toggle (AC-F7), and auto-navigate to new thread (AC-F8).
  */
 
 import React, { act } from 'react';
@@ -17,6 +18,16 @@ vi.mock('@/components/MarkdownContent', () => ({
 const apiFetchMock = vi.fn();
 vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => apiFetchMock(...args),
+}));
+
+const navigateMock = vi.fn();
+vi.mock('@/components/ThreadSidebar/thread-navigation', () => ({
+  pushThreadRouteWithHistory: (...args: unknown[]) => navigateMock(...args),
+}));
+
+const pinMock = vi.fn();
+vi.mock('@/stores/chatStore', () => ({
+  useChatStore: { getState: () => ({ updateThreadPin: pinMock }) },
 }));
 
 import { ProposalCard } from '@/components/rich/ProposalCard';
@@ -72,6 +83,8 @@ describe('ProposalCard', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     apiFetchMock.mockReset();
+    navigateMock.mockReset();
+    pinMock.mockReset();
     // First mount-time GET /api/proposals/:id → 404 by default so each test starts in pending state.
     apiFetchMock.mockImplementation(() => Promise.resolve(jsonResponse(404, { error: 'not found' })));
   });
@@ -189,5 +202,136 @@ describe('ProposalCard', () => {
     });
     expect(container.textContent).toContain('✓ 已批准');
     expect(container.textContent).toContain('thread_socket');
+  });
+
+  // AC-F7: pin-on-approve toggle
+  it('renders a pin toggle checkbox in pending state', async () => {
+    await render();
+    const checkbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    expect(checkbox).toBeTruthy();
+    expect(container.textContent).toContain('置顶');
+    // Default unchecked
+    expect(checkbox.checked).toBe(false);
+  });
+
+  it('does NOT send pinned in approve body (pin is a separate PATCH)', async () => {
+    await render();
+    const checkbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    await act(async () => {
+      checkbox.click();
+    });
+    apiFetchMock.mockImplementation(() =>
+      Promise.resolve(jsonResponse(200, { proposalId: PROPOSAL_ID, threadId: 'thread_pinned', status: 'approved' })),
+    );
+    await act(async () => {
+      findButton('批准并创建').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const approveCall = apiFetchMock.mock.calls.find(([url]) => String(url).endsWith('/approve'));
+    expect(approveCall).toBeTruthy();
+    const sentBody = JSON.parse((approveCall![1] as { body: string }).body);
+    expect(sentBody.pinned).toBeUndefined();
+  });
+
+  it('does not call PATCH pin when pin toggle is unchecked', async () => {
+    await render();
+    apiFetchMock.mockImplementation(() =>
+      Promise.resolve(jsonResponse(200, { proposalId: PROPOSAL_ID, threadId: 'thread_nopin', status: 'approved' })),
+    );
+    await act(async () => {
+      findButton('批准并创建').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const patchCall = apiFetchMock.mock.calls.find(
+      ([url]) => String(url).includes('/api/threads/') && String(url).includes('thread_nopin'),
+    );
+    expect(patchCall).toBeUndefined();
+  });
+
+  it('PATCHes /api/threads/:id with pinned:true after approve when pin is checked', async () => {
+    await render();
+    const checkbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    await act(async () => {
+      checkbox.click();
+    });
+    apiFetchMock.mockImplementation(() =>
+      Promise.resolve(jsonResponse(200, { proposalId: PROPOSAL_ID, threadId: 'thread_pin_patch', status: 'approved' })),
+    );
+    await act(async () => {
+      findButton('批准并创建').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const patchCall = apiFetchMock.mock.calls.find(
+      ([url, opts]) =>
+        String(url) === '/api/threads/thread_pin_patch' && (opts as { method?: string })?.method === 'PATCH',
+    );
+    expect(patchCall).toBeTruthy();
+    const patchBody = JSON.parse((patchCall![1] as { body: string }).body);
+    expect(patchBody.pinned).toBe(true);
+    // P2 fix: local store must also be updated for immediate sidebar UX
+    expect(pinMock).toHaveBeenCalledWith('thread_pin_patch', true);
+  });
+
+  it('does NOT call updateThreadPin when PATCH pin returns non-2xx', async () => {
+    await render();
+    const checkbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    await act(async () => {
+      checkbox.click();
+    });
+    // First call: approve → 200; Second call: PATCH pin → 500
+    let callCount = 0;
+    apiFetchMock.mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve(
+          jsonResponse(200, { proposalId: PROPOSAL_ID, threadId: 'thread_pin_fail', status: 'approved' }),
+        );
+      }
+      return Promise.resolve(jsonResponse(500, { error: 'internal error' }));
+    });
+    await act(async () => {
+      findButton('批准并创建').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(pinMock).not.toHaveBeenCalled();
+  });
+
+  // AC-F8: auto-navigate to new thread after approve
+  it('navigates to the new thread after successful approve', async () => {
+    await render();
+    apiFetchMock.mockImplementation(() =>
+      Promise.resolve(jsonResponse(200, { proposalId: PROPOSAL_ID, threadId: 'thread_nav', status: 'approved' })),
+    );
+    await act(async () => {
+      findButton('批准并创建').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(navigateMock).toHaveBeenCalledWith('thread_nav', window);
+  });
+
+  it('shows clickable thread link in approved state', async () => {
+    await render();
+    apiFetchMock.mockImplementation(() =>
+      Promise.resolve(jsonResponse(200, { proposalId: PROPOSAL_ID, threadId: 'thread_link', status: 'approved' })),
+    );
+    await act(async () => {
+      findButton('批准并创建').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const link = container.querySelector('[data-testid="thread-link"]') as HTMLElement;
+    expect(link).toBeTruthy();
+    expect(link.textContent).toContain('thread_link');
   });
 });

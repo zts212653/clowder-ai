@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
+import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
 import type { RichCardBlock } from '@/stores/chat-types';
+import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 
 type Status = 'pending' | 'approving' | 'approved' | 'rejected';
@@ -49,6 +51,7 @@ export function ProposalCard({ block }: ProposalCardProps) {
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pinOnApprove, setPinOnApprove] = useState(false);
   const [edits, setEdits] = useState<ProposalFieldEdits>(() => ({
     title: block.title.replace(/^📥 提议新建 thread：/, ''),
     parentThreadId: readField(block, '父 Thread'),
@@ -97,7 +100,7 @@ export function ProposalCard({ block }: ProposalCardProps) {
     if (!proposalId) return;
     setLoading(true);
     setError(null);
-    const body = editing
+    const body: Record<string, unknown> = editing
       ? {
           title: edits.title.trim() || undefined,
           parentThreadId: edits.parentThreadId.trim() || undefined,
@@ -113,15 +116,36 @@ export function ProposalCard({ block }: ProposalCardProps) {
       });
       const data = (await res.json()) as { threadId?: string; error?: string };
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
-      setResultThreadId(data.threadId ?? null);
+      const newThreadId = data.threadId ?? null;
+      setResultThreadId(newThreadId);
       setStatus('approved');
       setEditing(false);
+      // AC-F7: persist pin via PATCH /api/threads/:id (server-side) + sync local store for immediate sidebar UX
+      if (pinOnApprove && newThreadId) {
+        try {
+          const pinRes = await apiFetch(`/api/threads/${newThreadId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pinned: true }),
+          });
+          // Only sync local store if server actually persisted the pin
+          if (pinRes.ok) {
+            useChatStore.getState().updateThreadPin(newThreadId, true);
+          }
+        } catch {
+          // best-effort: pin failure should not block the approve success UX
+        }
+      }
+      // AC-F8: auto-navigate to the new thread
+      if (newThreadId) {
+        pushThreadRouteWithHistory(newThreadId, typeof window !== 'undefined' ? window : undefined);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : '批准失败');
     } finally {
       setLoading(false);
     }
-  }, [proposalId, editing, edits]);
+  }, [proposalId, editing, edits, pinOnApprove]);
 
   const reject = useCallback(async () => {
     if (!proposalId) return;
@@ -200,22 +224,45 @@ export function ProposalCard({ block }: ProposalCardProps) {
         </div>
       )}
       {status === 'pending' && (
-        <div className="mt-2 flex flex-wrap gap-2">
-          <button type="button" disabled={loading} onClick={approve} className={btnPrimary}>
-            {loading ? '处理中...' : editing ? '批准（含编辑）' : '批准并创建'}
-          </button>
-          <button type="button" disabled={loading} onClick={() => setEditing((v) => !v)} className={btnSecondary}>
-            {editing ? '取消编辑' : '编辑'}
-          </button>
-          <button type="button" disabled={loading} onClick={reject} className={btnDanger}>
-            驳回
-          </button>
+        <div className="mt-2 space-y-2">
+          <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={pinOnApprove}
+              onChange={(e) => setPinOnApprove(e.target.checked)}
+              className="rounded border-gray-300 dark:border-gray-600"
+            />
+            📌 置顶新 thread
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={loading} onClick={approve} className={btnPrimary}>
+              {loading ? '处理中...' : editing ? '批准（含编辑）' : '批准并创建'}
+            </button>
+            <button type="button" disabled={loading} onClick={() => setEditing((v) => !v)} className={btnSecondary}>
+              {editing ? '取消编辑' : '编辑'}
+            </button>
+            <button type="button" disabled={loading} onClick={reject} className={btnDanger}>
+              驳回
+            </button>
+          </div>
         </div>
       )}
       {status === 'approving' && <div className="mt-2 text-xs text-blue-600 dark:text-blue-300">批准中…</div>}
       {status === 'approved' && (
         <div className="mt-2 text-xs text-green-700 dark:text-green-300">
-          ✓ 已批准，thread 已创建 {resultThreadId ? <span className="font-mono">({resultThreadId})</span> : null}
+          ✓ 已批准，thread 已创建{' '}
+          {resultThreadId ? (
+            <button
+              type="button"
+              data-testid="thread-link"
+              onClick={() =>
+                pushThreadRouteWithHistory(resultThreadId, typeof window !== 'undefined' ? window : undefined)
+              }
+              className="font-mono underline hover:text-green-900 dark:hover:text-green-100 cursor-pointer"
+            >
+              {resultThreadId}
+            </button>
+          ) : null}
         </div>
       )}
       {status === 'rejected' && <div className="mt-2 text-xs text-red-600 dark:text-red-300">✗ 已驳回</div>}

@@ -8,7 +8,7 @@ created: 2026-05-25
 
 # F212: CLI Error Diagnostics — 结构化 CLI 错误诊断 + 受控前端展示
 
-> **Status**: done | **Completed**: 2026-05-27 | **Owner**: Ragdoll/Ragdoll (Opus-47) | **Priority**: P1
+> **Status**: done | **Phase A-C done**: 2026-05-27 | **Phase D done**: 2026-05-29 (PR #1950 merged 40af2b82e) | **Owner**: Ragdoll/Ragdoll (Opus-47) | **Priority**: P1
 
 ## Why
 
@@ -132,6 +132,28 @@ Maine Coon当时挡掉过同样的 `stderrTail` 直传方案：
 3. CloseGateReport + 跨族愿景守护猫（非作者非 reviewer）
 4. Merge
 
+### Phase D: result-error 诊断完整性 follow-up（2026-05-28 organic 验证发现）
+
+**触发**：team lead organic 验证（claude-opus-4-8 实跑）发现——CC 已在 stream 最后吐明确原因 `The model's tool call could not be parsed (retry also failed)`，但 cliDiagnostics 标"未识别的 CLI 错误"，给社区"猫咖 bug"错觉（实为 CC/model 报错）。
+
+**根因（两层）**：
+1. Phase A AC-A8 声称"Classifier 同时扫 stderr + NDJSON stream error events"，但 `maybeCollectStreamError` (cli-spawn.ts:47) 只收 `type==='error'` event，**漏了 Claude CLI 的 result event**。result 被 `isResultErrorEvent` (claude-ndjson-parser.ts:250) yield 到消息气泡但未进 cliDiagnostics 的 rawText → classifyCliError 无输入 → unknown → "未识别"。
+2. **更隐蔽的一层（2026-05-29 runtime archive 取证修正）**：CC 报告 tool-call-parse 失败的 result event 形状**反直觉**——7 个真实 opus-4.8 样本（bb299eb0 / 0d2d46b1 / 86089948 / 8f1ca53d / e305c0dd / 8ae51dfb / 720444c5）一致为：
+   ```json
+   {"type":"result","subtype":"success","is_error":true,"result":"The model's tool call could not be parsed (retry also failed).","errors":null,"stop_reason":"stop_sequence","num_turns":3~32}
+   ```
+   **错误标志是 `is_error:true`，subtype 仍是 `success`(!)，cause 文本在 `result`（errors[] 为 null）**。所以早期设想的 `subtype!=='success'` 判断对真实数据**必然 false（漏收）**——这是差点 ship 的假绿（fixture 用想象的 `subtype:error` 结构会通过，但 production 漏）。正确判断必须基于 `is_error===true`，从 `result` 提取。
+
+**与 F215 边界（协同非重叠）**：opus-4.8 malformed tool call 有两种 stream 结尾形态：
+- **A1（静默假成功）** `{subtype:success, is_error:false, result:""}`（无错误信号，d137d9eb 样本）→ **F215** 用 `textEventCount===0` 检测 + seal/fresh/46 接力兜底
+- **A2（CC 报错）** `{subtype:success, is_error:true, result:"...could not be parsed..."}`（有独立错误信号）→ **F212 Phase D** 正确归因显示
+（顺带修正 F215 KD-6 表述："could not be parsed" 在 stream **确有**独立信号 = A2 的 is_error:true result event；F215 取证按字符串搜未按 is_error 过滤，真信号被猫讨论 F215 的 result 输出噪音淹没。已 cross-post 反馈 F215 thread。）
+
+**修复**：
+1. **补 result error 收集**：`maybeCollectStreamError` (cli-spawn.ts) + tmux-spawner rawText 加收 result event，判断 **`is_error===true`**（兼容保留 `subtype!=='success'`），从 `result` 提取 cause 文本
+2. **扩 reasonCode**：加 `tool_call_parse_failed`（"tool call could not be parsed"）
+3. **unknown fallback 措辞**：CC structured result error 安全显示 `Claude Code 报告：<原因>`，区分 CC/模型报错 vs 猫咖未分类
+
 ## Acceptance Criteria
 
 ### Phase A（Backend cliDiagnostics + Sanitizer）— ✅ merged PR #1907 (2026-05-27)
@@ -160,8 +182,17 @@ Maine Coon当时挡掉过同样的 `stderrTail` 直传方案：
 - [x] AC-C2: Fuzz stderr smoke — **Phase A 40 个 unit fuzz tests 已覆盖**（`sanitize-cli-stderr.test.js` 21 fuzz 含 ANSI/NFKC/path/JWT/PEM/5 类 provider token/generic high-entropy；`cli-error-patterns.test.js` 4 classifier；`cli-diagnostics.test.js` 15 含 panic stack stripping + bounded helpers + LOG_CLI_STDERR gate）。alpha 环境额外 fuzz 不再要求 — automated layer 已达 AC 强度。
 - [x] AC-C3: CloseGateReport（见下方 §CloseGateReport）+ 跨族愿景守护 @gemini25（非作者 = 非 47，非 reviewer = 非Maine Coon，跨族 = Siamese，符合 F073 守护原则）。
 
+### Phase D（result-error 诊断完整性 follow-up）— reopened 2026-05-28
+
+- [x] AC-D1: `maybeCollectStreamError` (cli-spawn.ts) 加收 result error event（判断 **`is_error===true`**，兼容保留 `subtype!=='success'`；真实 A2 是 `subtype:success+is_error:true`），从 `result` 字段提取 cause 进 streamErrorTexts + structuredSink；tmux-spawner.ts rawText 同样补 result error（两条 spawner 路径都修）
+- [x] AC-D2: 新增 reasonCode `tool_call_parse_failed`（"tool call could not be parsed"）+ REASON_TEXT summary/hint（"模型工具调用解析失败 / Claude Code 报告：…非猫咖配置"）
+- [x] AC-D3: unknown fallback 措辞：rawText 含 CC structured result error（structuredErrorText）时显示 `Claude Code 报告：<原因>`，区分 CC/模型报错（非猫咖 bug）vs 猫咖真未分类；KD-1 白名单放行 CC structured result error（安全，CC 标准措辞）
+- [x] AC-D4: 红测先行（先红后绿）：用**真实 A2 结构**（`subtype:success+is_error:true+result文本`，非想象的 subtype:error）做 fixture → maybeCollectStreamError 收集 + buildCliDiagnostics 分类/措辞回归；验证旧 subtype-only guard 对真实数据必 false（红）、is_error guard 收集（绿）、正常 success（is_error:false）不误收；守 AC-A9 红线（raw stderr 不进 user-facing）
+- [x] AC-D5: 跨族 review + 云端 review + 愿景守护 — @gpt52（Maine Coon GPT-5.4）跨族 3 轮 delta APPROVE（6d07ef377 → da1f81763 → 61665f350）；云端 codex 3 轮 review（R1 P2 excerptSource white-list → R2 P1 isResultError gate → R3 Bravo on 61665f350）；merge commit 40af2b82e；愿景守护 cross-post @gemini25 跨族暹罗（非作者非 reviewer）
+
 ## Dependencies
 
+- **Related**: F215（Malformed Tool-Call Recovery，owner opus-4.8）——**协同非重叠**：F215 检测 A1（`textEventCount===0` 静默假成功）+ seal/fresh/46 接力兜底；F212 Phase D 把 A2（CC 吐 `is_error:true` 的 result error）正确归因显示。F215 检测信号亦可喂给 F212 诊断 surface。本 Phase D 取证修正了 F215 KD-6（"could not be parsed" 确有独立 stream 信号 = is_error:true result event；A1 才是无信号靠 textEventCount）
 - **Related**: F153（telemetry/log 脱敏，sanitizer 规则对齐 `TelemetryRedactor` Class A）
 - **Related**: F118（CLI Liveness Watchdog，已 done，错误通道在它之后）
 - **Related**: F173（前端消息管道统一，folded 面板复用既有透传机制）
@@ -214,8 +245,8 @@ Maine Coon当时挡掉过同样的 `stderrTail` 直传方案：
 close_gate_report:
   feature_id: F212
   spec_path: docs/features/F212-cli-error-diagnostics.md
-  head_sha: e93bd8bb2  # spec close 时 main HEAD (Siamese sign-off 3c7a055a7 已 push)
-  report_date: 2026-05-27
+  head_sha: 40af2b82e  # Phase D merge SHA
+  report_date: 2026-05-29
 
   ac_matrix:
     # Phase A — Backend cliDiagnostics + Sanitizer
@@ -246,6 +277,13 @@ close_gate_report:
     - { ac_id: AC-C2, status: met, evidence: [{ kind: test, ref: "Phase A 40 unit fuzz (sanitize 21 + classifier 4 + diagnostics 15)" }],
         resolution: { kind: delete, reason: "alpha 环境 fuzz 不再要求 — automated unit layer 已达 AC 强度。" } }
     - { ac_id: AC-C3, status: met, evidence: [{ kind: commit, ref: "3c7a055a7", description: "Siamese (@gemini25, Siamese) cross-family vision guard sign-off pushed to main" }] }
+
+    # Phase D — result-error 诊断完整性 follow-up
+    - { ac_id: AC-D1, status: met, evidence: [{ kind: pr, ref: "#1950", description: "maybeCollectStreamError + tmux-spawner add support for result error event" }] }
+    - { ac_id: AC-D2, status: met, evidence: [{ kind: pr, ref: "#1950", description: "add tool_call_parse_failed reasonCode & i18n texts" }] }
+    - { ac_id: AC-D3, status: met, evidence: [{ kind: pr, ref: "#1950", description: "CC structured result error classified with safeExcerpt" }] }
+    - { ac_id: AC-D4, status: met, evidence: [{ kind: test, ref: "cli-diagnostics.test.js + cli-error-patterns.test.js", description: "real A2 result error structures and classification validation" }] }
+    - { ac_id: AC-D5, status: met, evidence: [{ kind: commit, ref: "40af2b82e", description: "cross-family @gpt52 review + cloud codex Bravo + merge" }] }
 
   harness_feedback: none
   harness_feedback_reason: "F212 是普通后端+前端 feature，没改 harness/skill/MCP/shared-rules；无 trace anomaly；CVO 主动 directive 推进 organic validation 简化 close (vs CVO 不满意)；无抽样需求 — 教训通过 capsule + 3 个新 memory feedback 充分沉淀。"

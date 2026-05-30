@@ -1,6 +1,7 @@
 // F148 Phase E: Pure function to format context briefing content.
 
 import type { RichCardBlock, RichMessageExtra } from '@cat-cafe/shared';
+import { formatPromptTime, formatPromptTimeRange } from '../../format-time.js';
 import type { AppendMessageInput } from '../../stores/ports/MessageStore.js';
 import type { RecentArtifact } from './artifact-tracking.js';
 import type { CoverageMap } from './context-transport.js';
@@ -63,7 +64,7 @@ export function formatContextBriefing(
 
 function formatBatonField(baton?: BatonContext): string {
   if (!baton) return '直接 @';
-  const timeStr = new Date(baton.timestamp).toISOString().slice(11, 16);
+  const timeStr = formatPromptTime(baton.timestamp);
   let value = `${baton.fromSpeakerDisplay} → 你 (${timeStr})`;
   if (baton.staleHoldWarning) value += ' ⚠️';
   return value;
@@ -119,16 +120,10 @@ export function buildBriefingMessage(
   if (coverageMap.omitted.participants.length > 0) {
     bodyParts.push(`**参与者**: ${coverageMap.omitted.participants.join(', ')}`);
   }
-  const from = new Date(coverageMap.omitted.timeRange.from).toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-  const to = new Date(coverageMap.burst.timeRange.to).toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
   if (coverageMap.omitted.timeRange.from > 0) {
-    bodyParts.push(`**时间范围**: ${from} — ${to}`);
+    bodyParts.push(
+      `**时间范围**: ${formatPromptTimeRange(coverageMap.omitted.timeRange.from, coverageMap.burst.timeRange.to)}`,
+    );
   }
   if (options?.anchorSummaries?.length) {
     bodyParts.push(`**锚点**:\n${options.anchorSummaries.map((a) => `- ${a}`).join('\n')}`);
@@ -147,7 +142,7 @@ export function buildBriefingMessage(
   }
   if (options?.baton) {
     const b = options.baton;
-    const timeStr = new Date(b.timestamp).toISOString().slice(11, 16);
+    const timeStr = formatPromptTime(b.timestamp);
     let batonLine = `**传球**: ${b.fromSpeakerDisplay} → 你 (${timeStr})`;
     if (b.mentionExcerpt) batonLine += ` | 原文: "${b.mentionExcerpt}"`;
     if (b.staleHoldWarning) batonLine += ' ⚠️ 之前有"别动"指令';

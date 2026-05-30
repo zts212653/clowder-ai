@@ -107,6 +107,77 @@ describe('AntigravityAgentService (Bridge) — fatal errors', () => {
     });
   });
 
+  test('F211 REG3: model_capacity retry re-delivers image media to the fresh cascade', async () => {
+    // Cloud review P2: when the first cascade fails before answering and rotates to a fresh
+    // cascade, that fresh cascade processes the SAME image-bearing user message — it must
+    // receive SendUserCascadeMessage.media too, not just the text/path hint.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reg3-retry-media-'));
+    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 5, 6, 7]);
+    fs.writeFileSync(path.join(dir, 'shot.png'), pngBytes);
+
+    const bridge = createMockBridge();
+    let sessionIndex = 0;
+    bridge.getOrCreateSession = async () => ['cascade-1', 'cascade-2'][sessionIndex++];
+    bridge.pollForSteps = async function* (cascadeId) {
+      if (cascadeId === 'cascade-1') {
+        yield {
+          steps: [
+            {
+              type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+              status: 'FINISHED',
+              errorMessage: {
+                error: {
+                  userErrorMessage:
+                    'Our servers are experiencing high traffic right now, please try again in a minute.',
+                },
+              },
+            },
+          ],
+          cursor: { baselineStepCount: 0, lastDeliveredStepCount: 1, terminalSeen: true, lastActivityAt: Date.now() },
+        };
+        return;
+      }
+      yield {
+        steps: [
+          {
+            type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+            status: 'FINISHED',
+            plannerResponse: { response: 'Recovered — and I can see the image.' },
+          },
+        ],
+        cursor: { baselineStepCount: 0, lastDeliveredStepCount: 1, terminalSeen: true, lastActivityAt: Date.now() },
+      };
+    };
+
+    const service = new AntigravityAgentService({
+      catId: 'antigravity',
+      model: 'gemini-3.1-pro',
+      bridge,
+      modelCapacityRetryDelaysMs: [0],
+    });
+    await collect(
+      service.invoke('看这张图', {
+        contentBlocks: [{ type: 'image', url: '/uploads/shot.png' }],
+        uploadDir: dir,
+        auditContext: {
+          threadId: 'thread-reg3-retry',
+          invocationId: 'inv-reg3-retry',
+          userId: 'u1',
+          catId: 'antigravity',
+        },
+      }),
+    );
+
+    assert.equal(bridge.sendMessage.mock.callCount(), 2, 'capacity retry resends to the fresh cascade');
+    const expectedMedia = [{ mimeType: 'image/png', inlineData: pngBytes.toString('base64') }];
+    assert.deepEqual(bridge.sendMessage.mock.calls[0].arguments[3], expectedMedia, 'first send carries media');
+    assert.deepEqual(
+      bridge.sendMessage.mock.calls[1].arguments[3],
+      expectedMedia,
+      'fresh-cascade retry MUST re-carry image media (cloud P2)',
+    );
+  });
+
   test('quota-style model_capacity wording retries on a fresh cascade and preserves callback fallback prompt', async () => {
     const bridge = createMockBridge();
     let sessionIndex = 0;

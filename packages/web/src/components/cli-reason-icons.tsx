@@ -83,6 +83,19 @@ export function GaugeIcon(props: SvgProps) {
   );
 }
 
+/** hourglass — server_overloaded (Lucide hourglass; transient throttle, retry later) */
+export function HourglassIcon(props: SvgProps) {
+  return baseSvg(
+    <>
+      <path d="M5 22h14" />
+      <path d="M5 2h14" />
+      <path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22" />
+      <path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2" />
+    </>,
+    props,
+  );
+}
+
 /** cloud-off — network_error (Lucide cloud-off) */
 export function CloudOffIcon(props: SvgProps) {
   return baseSvg(
@@ -141,6 +154,14 @@ export function BrainIcon(props: SvgProps) {
       <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z" />
       <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4" />
     </>,
+    props,
+  );
+}
+
+/** wrench — tool_call_parse_failed (Lucide wrench; model emitted an unparseable tool call) */
+export function WrenchIcon(props: SvgProps) {
+  return baseSvg(
+    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />,
     props,
   );
 }

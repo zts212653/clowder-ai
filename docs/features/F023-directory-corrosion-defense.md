@@ -1,6 +1,6 @@
 ---
 feature_ids: [F023]
-related_features: []
+related_features: [F214]
 topics: [directory, corrosion, defense]
 doc_kind: note
 created: 2026-02-26

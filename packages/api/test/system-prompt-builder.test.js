@@ -212,6 +212,9 @@ describe('SystemPromptBuilder', () => {
     assert.equal(a, b);
   });
 
+  // 改 governance content（Magic Words / shared-rules）时两个 test 都要跑：
+  //   - 本文件：char budget（runtime prompt）
+  //   - scripts/compile-system-prompt-l0.test.mjs：token budget（L0 compiled markdown）
   test('output size stays under 3900 chars after Magic Words + runtime prompt growth', async () => {
     const build = await getBuilder();
     const prompt = build({
@@ -223,7 +226,7 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: true,
       promptTags: ['critique'],
     });
-    assert.ok(prompt.length < 5870, `Full runtime prompt is ${prompt.length} chars, expected < 5870`);
+    assert.ok(prompt.length < 6000, `Full runtime prompt is ${prompt.length} chars, expected < 6000`);
   });
 
   test('returns empty string for unknown catId', async () => {
@@ -612,7 +615,7 @@ describe('SystemPromptBuilder', () => {
         mcpAvailable: true,
         promptTags: ['critique'],
       });
-      assert.ok(prompt.length < 5870, `Full runtime prompt is ${prompt.length} chars, expected < 5870`);
+      assert.ok(prompt.length < 6000, `Full runtime prompt is ${prompt.length} chars, expected < 6000`);
     } finally {
       catRegistry.reset();
       for (const [id, config] of Object.entries(originalConfigs)) {
@@ -1210,7 +1213,7 @@ describe('SystemPromptBuilder', () => {
         { catId: 'opus', lastMessageAt: Date.now() - 1000, messageCount: 3 },
       ],
     });
-    assert.ok(prompt.length < 5870, `Full runtime prompt is ${prompt.length} chars, expected < 5870`);
+    assert.ok(prompt.length < 6000, `Full runtime prompt is ${prompt.length} chars, expected < 6000`);
   });
 
   // --- F042: pinned identity constant + direct-message reply target ---
@@ -1626,7 +1629,7 @@ describe('SystemPromptBuilder', () => {
         featureId: 'F073',
       },
     });
-    assert.ok(prompt.length < 5900, `Prompt with SOP hint is ${prompt.length} chars, expected < 5900`);
+    assert.ok(prompt.length < 6050, `Prompt with SOP hint is ${prompt.length} chars, expected < 6050`);
   });
 
   // --- F092: Voice Mode prompt injection ---
@@ -1673,7 +1676,7 @@ describe('SystemPromptBuilder', () => {
       },
       voiceMode: true,
     });
-    assert.ok(prompt.length < 5900, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 5900`);
+    assert.ok(prompt.length < 6050, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 6050`);
   });
 
   test('buildInvocationContext injects bootcamp mode when bootcampState provided', async () => {
