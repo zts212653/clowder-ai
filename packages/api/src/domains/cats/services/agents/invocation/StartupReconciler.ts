@@ -204,7 +204,7 @@ export class StartupReconciler {
 
     let notified = 0;
     for (const [threadId, { catIds, userId }] of affectedThreads) {
-      const catLabel = catIds.length === 1 ? catIds[0] : `${catIds.length} cats`;
+      const catLabel = catIds.length === 0 ? '部分' : catIds.length === 1 ? catIds[0] : `${catIds.length} 只猫`;
       const content = `服务刚重启，${catLabel} 的进行中请求已中断，请重新发送。`;
       const fallbackId = `startup-reconciler-${threadId}-${randomUUID().slice(0, 8)}`;
       let messageId = fallbackId;
@@ -298,12 +298,18 @@ export class StartupReconciler {
           if (result != null) {
             recovered++;
             // Track thread for notification (user should know their queued message wasn't executed)
-            const msg = result as { threadId?: string; userId?: string };
+            const msg = result as { threadId?: string; userId?: string; mentions?: CatId[] };
             if (msg.threadId) {
               const existing = affectedThreads.get(msg.threadId) ?? {
                 catIds: [],
                 userId: (msg.userId as string) ?? 'unknown',
               };
+              // Populate catIds from message mentions so notification isn't "0 cats"
+              if (msg.mentions) {
+                for (const catId of msg.mentions) {
+                  if (!existing.catIds.includes(catId)) existing.catIds.push(catId);
+                }
+              }
               affectedThreads.set(msg.threadId, existing);
             }
           }

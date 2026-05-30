@@ -2590,7 +2590,9 @@ async function main(): Promise<void> {
           .map((line) => JSON.parse(line));
       }
 
-      // Per-page fetch with early termination
+      // Per-page fetch — GitHub returns oldest-first (ascending ID).
+      // We paginate through all pages, collecting only items > sinceId.
+      // Early termination only on empty/short page (last page).
       const allItems: Record<string, unknown>[] = [];
       let page = 1;
       while (true) {
@@ -2609,8 +2611,6 @@ async function main(): Promise<void> {
         const newItems = items.filter((item: { id?: number }) => (item.id ?? 0) > sinceId);
         allItems.push(...newItems);
 
-        // If any item on this page is at or below the cursor, we've caught up
-        if (newItems.length < items.length) break;
         // GitHub API max per_page is 100; fewer items = last page
         if (items.length < 100) break;
         page++;
