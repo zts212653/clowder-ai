@@ -135,7 +135,14 @@ test('F153 Phase J AC-J2 Codex: item.completed mcp_tool_call unknown status → 
 });
 
 // ── CatAgent: source-string assertions (full HTTP-mock test out of scope) ──
+// FRAGILE: these 3 tests use readFileSync + assert.ok(src.includes(...)) on literal
+// code patterns and break on variable renames (evt→event, r→result), formatter spacing
+// changes, file restructuring, and comment-mentioning the old pattern (for the negative
+// assertion below). See PR #774 maintainer R3 P2-2 — the 3 behavioral tests for
+// `executeCatAgentTools` (further below) are the real coverage; these 3 are scaffolding
+// kept until a mock-HTTP integration test replaces them.
 
+// fragile: source-string assertion, see PR #774 P2-2
 test('F153 Phase J AC-J2 CatAgent: stream-parser tool_use yield carries block.id as toolUseId', () => {
   const src = readFileSync(
     resolve(__dirname, '../../src/domains/cats/services/agents/providers/catagent/CatAgentService.ts'),
@@ -149,6 +156,7 @@ test('F153 Phase J AC-J2 CatAgent: stream-parser tool_use yield carries block.id
   );
 });
 
+// fragile: source-string assertion, see PR #774 P2-2
 test('F153 Phase J AC-J2 CatAgent: tool_result carries toolUseId + status from executeTools (no content-string heuristic)', () => {
   const src = readFileSync(
     resolve(__dirname, '../../src/domains/cats/services/agents/providers/catagent/CatAgentService.ts'),
@@ -215,6 +223,7 @@ test('F153 Phase J AC-J2 CatAgent R1 P2 fix: unknown tool → status=error', asy
   assert.ok(result.content.includes('unknown tool'));
 });
 
+// fragile: source-string assertion, see PR #774 P2-2
 test('F153 Phase J AC-J2 CatAgent: orphan tool_result (stream interrupted) carries toolUseId + status=error', () => {
   const src = readFileSync(
     resolve(__dirname, '../../src/domains/cats/services/agents/providers/catagent/CatAgentService.ts'),
