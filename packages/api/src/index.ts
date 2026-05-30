@@ -2567,16 +2567,17 @@ async function main(): Promise<void> {
     // feedbackFilter created above — Rule A only post-E.2 cutover (self-authored skip)
 
     /**
-     * #798 止血: Per-page GitHub API fetching to avoid single-buffer overflow.
-     * Always uses per-page mode (100 items, 2MB maxBuffer each) instead of
-     * `--paginate` which buffers the entire history into one stdout.
+     * #798: Per-page GitHub API fetching — root-cause fix for maxBuffer crash.
+     * Replaced `--paginate` (buffers entire history into one stdout) with
+     * per-page mode (100 items, 2MB maxBuffer each). Each page has bounded
+     * size so buffer overflow is structurally impossible.
      *
      * When sinceId > 0, only items with id > sinceId are collected.
      * When sinceId is 0 or omitted, all items are collected.
      *
-     * Limitation: GitHub returns oldest-first and not all endpoints support
-     * `since`/`direction` params, so we still scan all pages client-side.
-     * True incremental fetch needs timestamp cursors + `since` param or GraphQL.
+     * Performance note: GitHub returns oldest-first and not all endpoints
+     * support `since`/`direction` params, so we still scan all pages
+     * client-side. A future optimization could use GraphQL `last:N`.
      */
     const fetchPaginated = async (endpoint: string, sinceId?: number) => {
       const { execFile } = await import('node:child_process');

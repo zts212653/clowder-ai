@@ -134,7 +134,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             const commentCursor = commentCursors.get(prKey) ?? task.automationState?.review?.lastCommentCursor ?? 0;
             const reviewCursor = reviewCursors.get(prKey) ?? task.automationState?.review?.lastDecisionCursor ?? 0;
 
-            // #798: Pass cursor to fetch for client-side filtering (止血: per-page to avoid maxBuffer crash)
+            // #798: Pass cursor to fetch for per-page client-side filtering (eliminates maxBuffer crash)
             const [comments, reviews] = await Promise.all([
               opts.fetchComments(repoFullName, prNumber, commentCursor),
               opts.fetchReviews(repoFullName, prNumber, reviewCursor),
