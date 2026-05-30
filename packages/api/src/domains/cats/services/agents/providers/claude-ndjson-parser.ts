@@ -213,12 +213,14 @@ export function transformClaudeEvent(
     if (messages.length === 0) {
       const thinkingBlock = content.find(
         (b) => typeof b === 'object' && b !== null && (b as Record<string, unknown>).type === 'thinking',
-      ) as { text?: string } | undefined;
+      ) as { thinking?: string; text?: string } | undefined;
       if (thinkingBlock) {
+        // Claude thinking blocks use `thinking` field; fall back to `text` for safety
+        const thinkingText = thinkingBlock.thinking ?? thinkingBlock.text ?? '';
         return {
           type: 'system_info' as AgentMessage['type'],
           catId,
-          content: JSON.stringify({ type: 'thinking', catId, text: thinkingBlock.text ?? '' }),
+          content: JSON.stringify({ type: 'thinking', catId, text: thinkingText }),
           timestamp: Date.now(),
         };
       }
