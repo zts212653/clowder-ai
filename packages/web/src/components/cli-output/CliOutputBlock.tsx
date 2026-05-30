@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
+import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
 import type { CliEvent, CliStatus } from '@/stores/chat-types';
 import typographyTokens from '@/styles/typography-tokens.json';
 
@@ -13,18 +14,6 @@ function hexToRgba(hex: string, opacity: number): string {
   const g = Number.parseInt(hex.slice(3, 5), 16);
   const b = Number.parseInt(hex.slice(5, 7), 16);
   return `rgba(${r}, ${g}, ${b}, ${opacity})`;
-}
-
-/** Blend accent into a dark base → tinted dark surface (not transparent) */
-function tintedDark(hex: string, ratio = 0.25, base = '#1A1625'): string {
-  const parse = (h: string) => [
-    Number.parseInt(h.slice(1, 3), 16),
-    Number.parseInt(h.slice(3, 5), 16),
-    Number.parseInt(h.slice(5, 7), 16),
-  ];
-  const [r1, g1, b1] = parse(hex);
-  const [r2, g2, b2] = parse(base);
-  return `rgb(${Math.round(r2 + (r1 - r2) * ratio)}, ${Math.round(g2 + (g1 - g2) * ratio)}, ${Math.round(b2 + (b1 - b2) * ratio)})`;
 }
 
 /** Lighten a hex color toward white by ratio (0-1) */
@@ -39,7 +28,7 @@ function lighten(hex: string, ratio: number): string {
 }
 
 /* ── Divider stays neutral; surface colors are now breed-tinted (see buildSurface) ── */
-const DIVIDER = '#334155';
+const DIVIDER = 'var(--console-border-strong)';
 
 /* ── Inline SVG icons (Lucide-style, from Pencil design) ── */
 
@@ -71,7 +60,7 @@ function WrenchIcon({ color }: { color?: string }) {
       height="11"
       viewBox="0 0 24 24"
       fill="none"
-      stroke={color || '#E2E8F0'}
+      stroke={color || 'var(--cat-msg-inset-text)'}
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -90,7 +79,7 @@ function CheckIcon() {
       height="12"
       viewBox="0 0 24 24"
       fill="none"
-      stroke="#22D3EE"
+      stroke="var(--console-cli-check-fg)"
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -128,7 +117,7 @@ function PawPrint() {
       height="12"
       viewBox="0 0 24 24"
       fill="none"
-      stroke="#64748B"
+      stroke="var(--console-cli-paw-fg)"
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -244,13 +233,13 @@ function ToolRow({
         {/* Status icon */}
         {isActive ? <LoaderIcon color={accentLight} /> : hasResult ? <CheckIcon /> : null}
         {/* Wrench icon — design: #E2E8F0 normal, #F5F3FF active */}
-        <WrenchIcon color={isActive ? accentVeryLight : '#E2E8F0'} />
+        <WrenchIcon color={isActive ? accentVeryLight : 'var(--cat-msg-inset-text)'} />
         {/* Tool label (full) */}
-        <span className="truncate" style={{ color: isActive ? accentVeryLight : '#E2E8F0' }}>
+        <span className="truncate" style={{ color: isActive ? accentVeryLight : 'var(--cat-msg-inset-text)' }}>
           <span className="font-medium">{event.label?.split(' ')[0]}</span>
           {event.label?.includes(' ') && (
             <span
-              style={{ color: isActive ? accentLight : '#64748B' }}
+              style={{ color: isActive ? accentLight : 'var(--cat-msg-inset-text)' }}
             >{` ${event.label.split(' ').slice(1).join(' ')}`}</span>
           )}
         </span>
@@ -258,7 +247,7 @@ function ToolRow({
       {/* Detail — hidden by default, shown on click */}
       {hasResult && !rowExpanded && <ChevronIcon expanded={false} />}
       {rowExpanded && hasResult && event.detail && (
-        <div className="w-full mt-1 pl-7 whitespace-pre-wrap text-micro" style={{ color: '#64748B' }}>
+        <div className="w-full mt-1 pl-7 whitespace-pre-wrap text-micro" style={{ color: 'var(--cat-msg-inset-text)' }}>
           {event.detail}
         </div>
       )}
@@ -310,7 +299,7 @@ function ToolsSection({
         type="button"
         data-testid="tools-section-toggle"
         className="w-full flex items-center gap-1.5 px-2 py-1.5 text-xs font-mono rounded transition-colors"
-        style={{ color: '#94A3B8' }}
+        style={{ color: 'var(--cat-msg-inset-text)' }}
         onClick={() => {
           toolsUserInteracted.current = true;
           setToolsExpanded((v) => !v);
@@ -404,10 +393,7 @@ export function CliOutputBlock({
   const toolResults = events.filter((e) => e.kind === 'tool_result');
   const textEvents = events.filter((e) => e.kind === 'text');
   const lastToolId = status === 'streaming' ? [...events].reverse().find((e) => e.kind === 'tool_use')?.id : undefined;
-  const accent = breedColor || '#7C3AED';
-  // Breed-tinted dark surface: accent blended into dark base → visibly colored AND text-readable
-  const surface = tintedDark(accent, 0.25);
-  const surfaceInner = tintedDark(accent, 0.18);
+  const accent = breedColor || UNKNOWN_CAT_COLOR.primary;
 
   const handleToggle = () => {
     userInteracted.current = true;
@@ -415,13 +401,13 @@ export function CliOutputBlock({
   };
 
   return (
-    <div className="mt-2 mb-1 overflow-hidden" style={{ backgroundColor: surface, borderRadius: 10 }}>
+    <div className="mt-2 mb-1 overflow-hidden" style={{ backgroundColor: 'var(--cat-msg-inset)', borderRadius: 10 }}>
       {/* Header — design: chevron(accent) + summary(slate-400) + paw chip */}
       <button
         type="button"
         onClick={handleToggle}
         className="w-full flex items-center gap-2 text-xs font-mono transition-colors"
-        style={{ padding: '8px 12px', color: '#94A3B8', backgroundColor: surface }}
+        style={{ padding: '8px 12px', color: 'var(--cat-msg-inset-text)', backgroundColor: 'var(--cat-msg-inset)' }}
       >
         <span style={{ color: accent }}>
           <ChevronIcon expanded={expanded} />
@@ -429,7 +415,7 @@ export function CliOutputBlock({
         <span className="font-medium min-w-0 truncate text-left">{summary}</span>
         <span
           className="ml-auto flex items-center gap-1 flex-shrink-0"
-          style={{ color: '#64748B', fontSize: typographyTokens.fontSizePx.micro }}
+          style={{ color: 'var(--cat-msg-inset-text)', fontSize: typographyTokens.fontSizePx.micro }}
         >
           {thinkingMode === 'debug' ? (
             <>
@@ -444,7 +430,7 @@ export function CliOutputBlock({
 
       {/* Expanded body */}
       {expanded && (
-        <div data-testid="cli-output-body" style={{ backgroundColor: surfaceInner }}>
+        <div data-testid="cli-output-body" style={{ backgroundColor: 'var(--cat-msg-inset)' }}>
           <div style={{ height: 1, backgroundColor: DIVIDER }} />
           {toolUses.length > 0 && (
             <ToolsSection
@@ -468,7 +454,7 @@ export function CliOutputBlock({
                       padding: '8px 12px 4px 12px',
                       fontFamily: 'JetBrains Mono, monospace',
                       fontSize: typographyTokens.fontSizePx.micro,
-                      color: '#475569',
+                      color: 'var(--cat-msg-inset-text)',
                     }}
                   >
                     ─── stdout ───
@@ -479,7 +465,7 @@ export function CliOutputBlock({
                 style={{ padding: '8px 12px 10px 12px' }}
                 className="font-mono text-xs leading-relaxed cli-output-md"
               >
-                <span style={{ color: '#CBD5E1' }}>
+                <span style={{ color: 'var(--cat-msg-inset-text)' }}>
                   <MarkdownContent content={textEvents.map((e) => e.content).join('\n')} />
                 </span>
               </div>

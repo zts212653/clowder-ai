@@ -4,8 +4,8 @@
  * Behavior matrix (unchanged from F174 rev3):
  *   isAvailable=false             → no badge
  *   unviewedFailures24h = 0       → no badge
- *   unviewedFailures24h 1-5       → amber badge (#F59E0B)
- *   unviewedFailures24h >= 6      → red badge (#EF4444)
+ *   unviewedFailures24h 1-5       → amber badge (var(--semantic-warning))
+ *   unviewedFailures24h >= 6      → red badge (var(--semantic-critical))
  *   count > 99                    → "99+" cap with maxWidth 22px
  */
 
@@ -105,7 +105,7 @@ describe('ActivityBar SettingsButton — F174 callback-auth badge', () => {
     const badge = container.querySelector('[data-testid="settings-callback-auth-badge"]') as HTMLElement;
     expect(badge).not.toBeNull();
     expect(badge.textContent).toBe('3');
-    expect(badge.style.backgroundColor).toBe('rgb(245, 158, 11)');
+    expect(badge.style.backgroundColor).toBe('var(--semantic-warning)');
     const btn = container.querySelector('[data-testid="settings-button"]') as HTMLElement;
     expect(btn.getAttribute('data-callback-auth-unviewed')).toBe('3');
   });
@@ -119,7 +119,7 @@ describe('ActivityBar SettingsButton — F174 callback-auth badge', () => {
     const badge = container.querySelector('[data-testid="settings-callback-auth-badge"]') as HTMLElement;
     expect(badge).not.toBeNull();
     expect(badge.textContent).toBe('12');
-    expect(badge.style.backgroundColor).toBe('rgb(239, 68, 68)');
+    expect(badge.style.backgroundColor).toBe('var(--semantic-critical)');
   });
 
   it('caps at "99+" with maxWidth 22px', async () => {

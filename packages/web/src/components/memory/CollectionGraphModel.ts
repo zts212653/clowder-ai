@@ -24,45 +24,51 @@ export interface GraphResult {
   depth: number;
 }
 
-// data-viz palette exempt: graph node kind colors
+// Graph node kind colors — mapped to F056 chart palette tokens for theme/contrast consistency.
+// Hue groups roughly preserve original semantic intent:
+//   blue/cyan family → spec / feature
+//   violet family → decision / plan
+//   green family → lesson / research
+//   orange family → session / discussion
+//   magenta family → thread / lore
 export const KIND_FILL: Record<string, string> = {
-  feature: '#2563eb',
-  spec: '#0891b2',
-  decision: '#7c3aed',
-  plan: '#4f46e5',
-  session: '#d97706',
-  lesson: '#059669',
-  thread: '#db2777',
-  discussion: '#ea580c',
-  research: '#0d9488',
-  lore: '#9333ea',
-  unresolved: '#d1d5db',
+  feature: 'var(--chart-4)', // hue 210 — cyan-blue (was #2563eb)
+  spec: 'var(--chart-3)', // hue 150 — teal-green (was #0891b2)
+  decision: 'var(--chart-5)', // hue 270 — violet (was #7c3aed)
+  plan: 'var(--chart-11)', // hue 270 deeper — indigo-violet (was #4f46e5)
+  session: 'var(--chart-1)', // hue 30 — orange-red (was #d97706)
+  lesson: 'var(--chart-9)', // hue 150 deeper — emerald (was #059669)
+  thread: 'var(--chart-6)', // hue 330 — magenta-pink (was #db2777)
+  discussion: 'var(--chart-7)', // hue 30 deeper — burnt orange (was #ea580c)
+  research: 'var(--chart-8)', // hue 90 deeper — chartreuse (was #0d9488)
+  lore: 'var(--chart-12)', // hue 330 deeper — plum (was #9333ea)
+  unresolved: 'var(--neutral-400)', // was #d1d5db
 };
 
-// data-viz palette exempt: graph edge relation colors
+// Graph edge relation colors — mapped to design system chart/semantic tokens
 export const RELATION_COLOR: Record<string, string> = {
-  related_to: '#6b7280',
-  related: '#6b7280',
-  evolved_from: '#8b5cf6',
-  blocked_by: '#ef4444',
-  supersedes: '#f97316',
-  invalidates: '#dc2626',
-  promoted_from: '#10b981',
-  wikilink: '#3b82f6',
-  doc_link: '#0891b2',
-  feature_ref: '#d97706',
+  related_to: 'var(--neutral-400)',
+  related: 'var(--neutral-400)',
+  evolved_from: 'var(--chart-5)',
+  blocked_by: 'var(--semantic-critical)',
+  supersedes: 'var(--chart-1)',
+  invalidates: 'var(--chart-6)',
+  promoted_from: 'var(--semantic-success)',
+  wikilink: 'var(--semantic-info)',
+  doc_link: 'var(--chart-4)',
+  feature_ref: 'var(--chart-7)',
 };
 
-// data-viz palette exempt: fallback color for unknown node kinds
+// Fallback color for unknown node kinds — uses neutral token
 export function kindFill(kind: string): string {
   const color = KIND_FILL[kind];
-  return typeof color === 'string' ? color : '#6b7280';
+  return typeof color === 'string' ? color : 'var(--neutral-500)';
 }
 
-// data-viz palette exempt: fallback color for unknown edge relations
+// Fallback color for unknown edge relations — uses neutral token
 export function relationColor(relation: string): string {
   const color = RELATION_COLOR[relation];
-  return typeof color === 'string' ? color : '#9ca3af';
+  return typeof color === 'string' ? color : 'var(--neutral-400)';
 }
 
 export function compactAnchorLabel(anchor: string): string {

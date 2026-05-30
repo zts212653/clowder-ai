@@ -288,7 +288,7 @@ export function SignalArticleDetail({
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-semibold text-cafe-secondary">正文</h3>
           <div className="flex items-center gap-2">
-            {enrichError && <span className="text-xs text-red-500">{enrichError}</span>}
+            {enrichError && <span className="text-xs text-conn-red-text">{enrichError}</span>}
             <button
               type="button"
               onClick={handleEnrich}
@@ -407,7 +407,7 @@ export function SignalArticleDetail({
               <button
                 type="button"
                 onClick={() => void handleDelete()}
-                className="rounded-md border border-red-300 px-3 py-1.5 text-xs text-red-700 hover:bg-conn-red-bg"
+                className="rounded-md border border-[var(--semantic-critical)] px-3 py-1.5 text-xs text-conn-red-text hover:bg-conn-red-bg"
               >
                 删除
               </button>

@@ -72,11 +72,44 @@ const rawColorPattern = new RegExp(
 const arbitraryColorPattern =
   /\b(?:bg|text|border|ring|divide|from|to|via|outline|shadow|accent|decoration|fill|stroke)-\[#[0-9a-fA-F]{3,8}\]/;
 
+// F056 Phase E AC-E11: arbitrary oklch() values in className: bg-[oklch(...)] / text-[oklch(...)]
+const arbitraryOklchPattern =
+  /\b(?:bg|text|border|ring|divide|from|to|via|outline|shadow|accent|decoration|fill|stroke)-\[oklch\(/;
+
+// 砚砚 round-5 P2: arbitrary values containing raw color functions in Tailwind utility
+// brackets — catches shadow-[0_5px_14px_rgba(43,37,32,0.07)], bg-[hsl(0,0%,50%)] etc.
+// Allows wrapped tokens like shadow-[var(--xxx)] or shadow-[color-mix(in srgb, var(...) 50%, transparent)].
+// Note: no \b before (rgba|hsla)—Tailwind arbitrary values use _ as space which is a word char,
+// so \b doesn't match between _ and r/h.
+const arbitraryRawColorFnPattern =
+  /\b(?:bg|text|border|ring|divide|from|to|via|outline|shadow|accent|decoration|fill|stroke)-\[[^[\]]*(?<![a-zA-Z])(?:rgba?|hsla?)\s*\(/;
+
 // Hex in style props
 const hexPattern = /#(?:[0-9a-fA-F]{3,4}){1,2}\b/;
 
-// Allowed semantic prefixes (cat tokens, cafe tokens, werewolf tokens)
-const SEMANTIC_PREFIXES = ['opus', 'codex', 'gemini', 'dare', 'cocreator', 'cafe', 'ww'];
+// F056 Phase E AC-E11: oklch() literal in style props (e.g. style={{ color: 'oklch(0.5 0.15 30)' }})
+const oklchLiteralPattern = /\boklch\s*\(/i;
+
+// Allowed semantic prefixes (cat tokens, cafe tokens, werewolf tokens, F056 Phase E token families)
+const SEMANTIC_PREFIXES = [
+  // Cat persona tokens
+  'opus',
+  'codex',
+  'gemini',
+  'kimi',
+  'dare',
+  'cocreator',
+  // Cafe + werewolf
+  'cafe',
+  'ww',
+  // F056 Phase E — OKLCH 七类色 design system primitives
+  'neutral',
+  'accent',
+  'semantic',
+  'chart',
+  'avatar-fallback',
+  'brand',
+];
 const semanticPattern = new RegExp(`\\b(?:${TW_PREFIXES.join('|')})-(?:${SEMANTIC_PREFIXES.join('|')})-`);
 
 /** @type {import('eslint').Rule.RuleModule} */
@@ -91,6 +124,12 @@ const rule = {
         'Hardcoded Tailwind color "{{value}}" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.',
       noArbitraryColor: 'Arbitrary color "{{value}}" — define a CSS variable and use a Tailwind token instead.',
       noHexInStyle: 'Hex color "{{value}}" in style prop — use a CSS variable (var(--xxx)) or design token.',
+      noArbitraryOklch:
+        'Arbitrary oklch() in className "{{value}}" — define a CSS variable in theme-tokens.css and use a Tailwind token instead. (F056 Phase E AC-E11)',
+      noOklchInStyle:
+        'Inline oklch() in style prop "{{value}}" — define a CSS variable in theme-tokens.css and reference via var(--xxx). (F056 Phase E AC-E11)',
+      noArbitraryRawColorFn:
+        'Arbitrary rgba/hsl color function in Tailwind utility "{{value}}" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)',
     },
     schema: [],
   },
@@ -114,6 +153,16 @@ const rule = {
         if (arbitraryColorPattern.test(cls)) {
           context.report({ node, messageId: 'noArbitraryColor', data: { value: cls } });
         }
+
+        // F056 Phase E AC-E11: arbitrary oklch() in className
+        if (arbitraryOklchPattern.test(cls)) {
+          context.report({ node, messageId: 'noArbitraryOklch', data: { value: cls } });
+        }
+
+        // 砚砚 round-5 P2: arbitrary value containing raw color function (rgba/rgb/hsla/hsl)
+        if (arbitraryRawColorFnPattern.test(cls)) {
+          context.report({ node, messageId: 'noArbitraryRawColorFn', data: { value: cls } });
+        }
       }
     }
 
@@ -125,6 +174,11 @@ const rule = {
       const match = value.match(hexPattern);
       if (match) {
         context.report({ node, messageId: 'noHexInStyle', data: { value: match[0] } });
+      }
+
+      // F056 Phase E AC-E11: inline oklch() literal in style values
+      if (oklchLiteralPattern.test(value)) {
+        context.report({ node, messageId: 'noOklchInStyle', data: { value } });
       }
     }
 

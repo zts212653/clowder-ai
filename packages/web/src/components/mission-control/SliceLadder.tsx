@@ -13,9 +13,9 @@ const TYPE_COLORS: Record<SliceType, string> = {
 
 const STATUS_STYLES: Record<SliceStatus, { bg: string; text: string }> = {
   planned: { bg: 'bg-[var(--console-card-bg)]', text: 'text-cafe-secondary' },
-  in_progress: { bg: 'bg-yellow-100', text: 'text-yellow-800' },
-  delivered: { bg: 'bg-conn-green-bg', text: 'text-green-800' },
-  validated: { bg: 'bg-blue-100', text: 'text-conn-blue-text' },
+  in_progress: { bg: 'bg-[var(--semantic-warning-surface)]', text: 'text-conn-amber-text' },
+  delivered: { bg: 'bg-conn-green-bg', text: 'text-conn-emerald-text' },
+  validated: { bg: 'bg-[var(--semantic-info-surface)]', text: 'text-conn-blue-text' },
 };
 
 const NEXT_STATUS: Record<SliceStatus, SliceStatus | null> = {
@@ -106,7 +106,7 @@ export function SliceLadder({ projectId, slices, onUpdate }: SliceLadderProps) {
         <button
           type="button"
           onClick={() => setShowForm(!showForm)}
-          className="rounded-lg bg-[var(--mc-accent)] px-3 py-1.5 text-xs font-medium text-white hover:bg-[var(--mc-accent-hover)]"
+          className="rounded-lg bg-[var(--mc-accent)] px-3 py-1.5 text-xs font-medium text-[var(--cafe-surface)] hover:bg-[var(--mc-accent-hover)]"
         >
           {showForm ? '取消' : 'Add Slice'}
         </button>
@@ -149,7 +149,7 @@ export function SliceLadder({ projectId, slices, onUpdate }: SliceLadderProps) {
                   </div>
                   <button type="button" onClick={() => toggle(slice.id)} className="flex flex-1 items-center gap-2">
                     <span
-                      className="rounded-full px-2 py-0.5 text-micro font-medium text-white"
+                      className="rounded-full px-2 py-0.5 text-micro font-medium text-[var(--cafe-surface)]"
                       style={{ backgroundColor: TYPE_COLORS[slice.sliceType] }}
                     >
                       {slice.sliceType}

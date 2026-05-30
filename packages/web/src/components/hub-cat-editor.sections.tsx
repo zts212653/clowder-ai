@@ -13,6 +13,7 @@ import {
   splitMentionPatterns,
   splitStrengthTags,
 } from './hub-cat-editor.model';
+import { CatColorField } from './hub-cat-editor-color-field';
 import { SectionCard, SelectField, TextField } from './hub-cat-editor-fields';
 import { VoiceConfigSection } from './hub-cat-editor-voice';
 import { TagEditor } from './hub-tag-editor';
@@ -106,7 +107,7 @@ export function IdentitySection({
           onClick={() => fileInputRef.current?.click()}
           className="flex items-center gap-2 rounded-[10px] bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-1.5 text-compact text-cafe-secondary transition hover:opacity-80"
         >
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white text-micro text-cafe-secondary">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-cafe-surface-canvas text-micro text-cafe-secondary">
             {avatarSrc ? (
               <AvatarImageWithFallback src={avatarSrc} alt="Avatar preview" className="h-full w-full object-cover" />
             ) : (
@@ -138,29 +139,13 @@ export function IdentitySection({
         />
       </div>
 
-      <div className="flex items-center gap-3">
-        <span className="text-xs font-bold text-cafe-secondary sm:w-[150px] sm:shrink-0">Background Color</span>
-        <div className="flex items-center gap-2">
-          <label title="Primary">
-            <input
-              type="color"
-              aria-label="Background Color Primary"
-              value={form.colorPrimary}
-              onChange={(event) => onChange({ colorPrimary: event.target.value })}
-              className="h-8 w-8 cursor-pointer rounded border-0 bg-transparent p-0"
-            />
-          </label>
-          <label title="Secondary">
-            <input
-              type="color"
-              aria-label="Background Color Secondary"
-              value={form.colorSecondary}
-              onChange={(event) => onChange({ colorSecondary: event.target.value })}
-              className="h-8 w-8 cursor-pointer rounded border-0 bg-transparent p-0"
-            />
-          </label>
-        </div>
-      </div>
+      {/* F056 KD-18 / AC-E4: single-hue input — all derivation from one primary color
+       * (cat-persona-tokens.css OKLCH formulas). Secondary is deprecated; mirror
+       * primary → secondary to keep the API payload backward-compatible. */}
+      <CatColorField
+        value={form.colorPrimary}
+        onChange={(hex) => onChange({ colorPrimary: hex, colorSecondary: hex })}
+      />
 
       <TextField
         label="擅长领域"

@@ -157,7 +157,7 @@ export function InstallPlanDetail({
           disabled={!canAct}
           className={`inline-flex items-center justify-center gap-2 rounded-lg px-5 py-2 text-xs font-medium transition-colors ${
             canAct
-              ? 'bg-cafe-accent text-white hover:bg-cafe-interactive'
+              ? 'bg-cafe-accent text-[var(--cafe-surface)] hover:bg-cafe-interactive'
               : 'bg-[var(--console-card-bg)] text-cafe-muted shadow-[0_1px_3px_rgba(43,33,26,0.06)] cursor-not-allowed'
           }`}
         >

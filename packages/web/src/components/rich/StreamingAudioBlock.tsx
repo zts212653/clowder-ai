@@ -106,7 +106,7 @@ export function StreamingAudioBlock({ request, catId, autoPlay = true }: Props) 
           )}
         </span>
 
-        <div className="flex-1 h-1 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+        <div className="flex-1 h-1 bg-cafe-surface rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full transition-[width] duration-200 ${colors.bar}`}
             style={{ width: `${Math.min(state.progress * 100, 100)}%` }}

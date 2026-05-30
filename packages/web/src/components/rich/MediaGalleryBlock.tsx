@@ -34,7 +34,7 @@ export function MediaGalleryBlock({ block }: { block: RichMediaGalleryBlock }) {
                 <button
                   type="button"
                   onClick={() => setLightboxIndex(i)}
-                  className="block w-full rounded focus:outline-2 focus:outline-blue-400"
+                  className="block w-full rounded focus:outline-2 focus:outline-[var(--semantic-info)]"
                   aria-label={`Enlarge ${item.alt ?? 'image'}`}
                 >
                   {/* biome-ignore lint/performance/noImgElement: data URIs from MCP cannot use next/image */}

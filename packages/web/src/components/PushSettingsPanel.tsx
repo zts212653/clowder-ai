@@ -60,7 +60,14 @@ function BrowserPushCard({
     <div className={`${settingsResourceCardClass} overflow-hidden`}>
       <div className={settingsResourceRowClass}>
         <span className="flex h-11 w-11 items-center justify-center rounded-xl shrink-0 bg-[var(--cafe-accent,#c96442)]">
-          <svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.5" className="h-5 w-5" aria-hidden="true">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="var(--overlay-fg)"
+            strokeWidth="1.5"
+            className="h-5 w-5"
+            aria-hidden="true"
+          >
             <path
               d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"
               strokeLinecap="round"
@@ -218,7 +225,7 @@ export function PushSettingsPanel() {
               <svg
                 viewBox="0 0 24 24"
                 fill="none"
-                stroke="#fff"
+                stroke="var(--overlay-fg)"
                 strokeWidth="1.5"
                 className="h-5 w-5"
                 aria-hidden="true"

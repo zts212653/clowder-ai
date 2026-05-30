@@ -217,7 +217,7 @@ export default function HubPermissionsTab({ connectorId }: HubPermissionsTabProp
                     type="button"
                     onClick={addGroup}
                     disabled={!newGroupId.trim()}
-                    className="px-3 py-1.5 text-xs font-medium bg-cafe-interactive text-white rounded-lg disabled:opacity-40 transition-opacity"
+                    className="px-3 py-1.5 text-xs font-medium bg-cafe-interactive text-[var(--cafe-surface)] rounded-lg disabled:opacity-40 transition-opacity"
                   >
                     添加
                   </button>
@@ -281,7 +281,7 @@ export default function HubPermissionsTab({ connectorId }: HubPermissionsTabProp
                   type="button"
                   onClick={addAdmin}
                   disabled={!newAdminId.trim()}
-                  className="px-3 py-1.5 text-xs font-medium bg-cafe-interactive text-white rounded-lg disabled:opacity-40 transition-opacity"
+                  className="px-3 py-1.5 text-xs font-medium bg-cafe-interactive text-[var(--cafe-surface)] rounded-lg disabled:opacity-40 transition-opacity"
                 >
                   添加
                 </button>

@@ -22,14 +22,14 @@ export function FileIcon({ name }: { name: string }) {
   const icon = FILE_ICONS[ext];
   if (!icon) {
     return (
-      <span className="w-4 h-4 rounded text-micro font-bold flex items-center justify-center bg-gray-200 text-cafe-secondary flex-shrink-0">
+      <span className="w-4 h-4 rounded text-micro font-bold flex items-center justify-center bg-cafe-surface text-cafe-secondary flex-shrink-0">
         F
       </span>
     );
   }
   return (
     <span
-      className="w-4 h-4 rounded text-micro font-bold flex items-center justify-center flex-shrink-0 text-white"
+      className="w-4 h-4 rounded text-micro font-bold flex items-center justify-center flex-shrink-0 text-[var(--cafe-surface)]"
       style={{ backgroundColor: icon.color }}
     >
       {icon.label}

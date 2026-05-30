@@ -48,7 +48,7 @@ export function TranslationMatrix({ cards, selectedCardId, onSelectCard, onCreat
         <button
           type="button"
           onClick={onCreateCard}
-          className="rounded-lg bg-[var(--mc-accent)] px-3 py-1.5 text-xs font-medium text-white hover:bg-[var(--mc-accent-hover)]"
+          className="rounded-lg bg-[var(--mc-accent)] px-3 py-1.5 text-xs font-medium text-[var(--cafe-surface)] hover:bg-[var(--mc-accent-hover)]"
         >
           + 新建 Intent Card
         </button>
@@ -63,7 +63,7 @@ export function TranslationMatrix({ cards, selectedCardId, onSelectCard, onCreat
             onClick={() => setBucketFilter(f.value)}
             className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
               bucketFilter === f.value
-                ? 'bg-[var(--mc-accent)] text-white'
+                ? 'bg-[var(--mc-accent)] text-[var(--cafe-surface)]'
                 : 'bg-[var(--console-hover-bg)] text-cafe-secondary hover:bg-[var(--console-border-soft)]'
             }`}
           >

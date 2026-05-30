@@ -120,10 +120,10 @@ function SelectInteraction({
             className={`w-full text-left px-4 py-3 rounded-xl border-[1.5px] text-sm transition-all flex items-center gap-2.5
               ${
                 isSelected
-                  ? 'border-conn-amber-ring bg-conn-amber-bg dark:bg-amber-950/30'
+                  ? 'border-conn-amber-ring bg-conn-amber-bg '
                   : disabled
                     ? 'border-cafe opacity-50 cursor-not-allowed'
-                    : 'border-cafe hover:border-conn-amber-ring hover:bg-conn-amber-bg/50 dark:hover:bg-amber-950/20 cursor-pointer'
+                    : 'border-cafe hover:border-conn-amber-ring hover:bg-conn-amber-bg/50 cursor-pointer'
               }`}
           >
             <OptionIcon opt={opt} />
@@ -172,8 +172,8 @@ function SelectInteraction({
           className={`mt-2 w-full py-2.5 rounded-full text-sm font-semibold transition-colors flex items-center justify-center gap-1.5
             ${
               showCustomInput && !customText.trim()
-                ? 'bg-cafe-surface-elevated dark:bg-cafe-surface-elevated text-cafe-muted cursor-not-allowed'
-                : 'bg-amber-600 text-white hover:bg-amber-700'
+                ? 'bg-cafe-surface-elevated -elevated text-cafe-muted cursor-not-allowed'
+                : 'bg-[var(--semantic-warning)] text-[var(--cafe-surface)] hover:opacity-90'
             }`}
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -229,21 +229,17 @@ function MultiSelectInteraction({
             disabled={disabled}
             onClick={() => toggle(opt.id)}
             className={`flex items-center gap-2.5 w-full px-4 py-3 rounded-xl border-[1.5px] text-sm transition-all text-left
-              ${
-                isChecked
-                  ? 'border-conn-amber-ring bg-conn-amber-bg dark:bg-amber-950/30'
-                  : 'border-cafe hover:border-conn-amber-ring'
-              }
+              ${isChecked ? 'border-conn-amber-ring bg-conn-amber-bg ' : 'border-cafe hover:border-conn-amber-ring'}
               ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
           >
             <span
               className={`shrink-0 w-5 h-5 rounded-md flex items-center justify-center transition-colors ${
-                isChecked ? 'bg-amber-600' : 'border-[1.5px] border-cafe'
+                isChecked ? 'bg-[var(--semantic-warning)]' : 'border-[1.5px] border-cafe'
               }`}
             >
               {isChecked && (
                 <svg
-                  className="w-3.5 h-3.5 text-white"
+                  className="w-3.5 h-3.5 text-[var(--cafe-surface)]"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -262,7 +258,7 @@ function MultiSelectInteraction({
         <button
           type="button"
           onClick={() => onSelect([...checked])}
-          className="mt-2 w-full py-2.5 bg-amber-600 text-white rounded-full text-sm font-semibold hover:bg-amber-700 transition-colors flex items-center justify-center gap-1.5"
+          className="mt-2 w-full py-2.5 bg-[var(--semantic-warning)] text-[var(--cafe-surface)] rounded-full text-sm font-semibold hover:opacity-90 transition-colors flex items-center justify-center gap-1.5"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -362,9 +358,9 @@ function CardGridInteraction({
                   className={`p-4 rounded-2xl border-[1.5px] text-center text-sm transition-all
                     ${
                       isSelected || isPending
-                        ? 'border-conn-amber-ring bg-conn-amber-bg dark:bg-amber-950/30 ring-2 ring-conn-amber-ring/50'
+                        ? 'border-conn-amber-ring bg-conn-amber-bg ring-2 ring-conn-amber-ring/50'
                         : isHighlighted
-                          ? 'border-conn-amber-ring bg-conn-amber-bg/80 dark:bg-amber-950/20 scale-105'
+                          ? 'border-conn-amber-ring bg-conn-amber-bg/80 scale-105'
                           : disabled
                             ? 'border-cafe opacity-50 cursor-not-allowed'
                             : 'border-cafe bg-cafe-surface-elevated hover:border-conn-amber-ring hover:shadow-sm cursor-pointer'
@@ -391,7 +387,7 @@ function CardGridInteraction({
             <button
               type="button"
               onClick={handleRandom}
-              className="px-4 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg text-sm hover:from-amber-600 hover:to-orange-600 transition-all"
+              className="px-4 py-1.5 bg-gradient-to-r from-[var(--semantic-warning)] to-[var(--semantic-warning)] text-[var(--cafe-surface)] rounded-lg text-sm hover:from-[var(--semantic-warning)] hover:to-[var(--semantic-warning)] transition-all"
             >
               <CafeIcon name="shuffle" className="w-4 h-4 inline-block" /> 随机抽
             </button>
@@ -400,7 +396,7 @@ function CardGridInteraction({
             <button
               type="button"
               onClick={handleSubmit}
-              className="flex-1 py-2.5 bg-amber-600 text-white rounded-full text-sm font-semibold hover:bg-amber-700 transition-colors flex items-center justify-center gap-1.5"
+              className="flex-1 py-2.5 bg-[var(--semantic-warning)] text-[var(--cafe-surface)] rounded-full text-sm font-semibold hover:opacity-90 transition-colors flex items-center justify-center gap-1.5"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -451,12 +447,12 @@ function ConfirmInteraction({
         className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all border-[1.5px] flex items-center justify-center gap-1.5
           ${
             selectedId === '__cancel__'
-              ? 'bg-conn-red-bg dark:bg-red-950/30 border-conn-red-ring text-conn-red-text dark:text-conn-red-text'
+              ? 'bg-conn-red-bg border-conn-red-ring text-conn-red-text -text'
               : disabled && selectedId
                 ? 'bg-cafe-surface-elevated border-cafe text-cafe-muted opacity-50 cursor-not-allowed'
                 : disabled
                   ? 'bg-cafe-surface-elevated border-cafe text-cafe-muted cursor-not-allowed'
-                  : 'bg-conn-red-bg/50 dark:bg-red-950/10 border-conn-red-ring dark:border-red-800 text-conn-red-text hover:bg-conn-red-bg hover:border-conn-red-ring cursor-pointer'
+                  : 'bg-conn-red-bg/50 border-conn-red-ring text-conn-red-text hover:bg-conn-red-bg hover:border-conn-red-ring cursor-pointer'
           }`}
       >
         {selectedId !== '__cancel__' && (
@@ -473,12 +469,12 @@ function ConfirmInteraction({
         className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all border-[1.5px] flex items-center justify-center gap-1.5
           ${
             selectedId === '__confirm__'
-              ? 'bg-conn-green-bg dark:bg-green-950/30 border-conn-green-ring text-conn-green-text dark:text-green-400'
+              ? 'bg-conn-green-bg border-conn-green-ring text-conn-green-text '
               : disabled && selectedId
                 ? 'bg-cafe-surface-elevated border-cafe text-cafe-muted opacity-50 cursor-not-allowed'
                 : disabled
                   ? 'bg-cafe-surface-elevated border-cafe text-cafe-muted cursor-not-allowed'
-                  : 'bg-conn-green-bg/50 dark:bg-green-950/10 border-conn-green-ring dark:border-green-800 text-conn-green-text hover:bg-conn-green-bg hover:border-conn-green-ring cursor-pointer'
+                  : 'bg-conn-green-bg/50 border-conn-green-ring text-conn-green-text hover:bg-conn-green-bg hover:border-conn-green-ring cursor-pointer'
           }`}
       >
         {selectedId !== '__confirm__' && (

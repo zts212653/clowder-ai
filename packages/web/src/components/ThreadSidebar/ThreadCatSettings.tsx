@@ -142,7 +142,7 @@ export function ThreadCatSettings({
               <button
                 onClick={() => void handleSave()}
                 disabled={!hasChanged || isSaving}
-                className="text-xs px-2 py-0.5 rounded bg-cafe-accent text-white hover:bg-cafe-interactive disabled:opacity-40"
+                className="text-xs px-2 py-0.5 rounded bg-cafe-accent text-[var(--cafe-surface)] hover:bg-cafe-interactive disabled:opacity-40"
               >
                 {isSaving ? '...' : '保存'}
               </button>

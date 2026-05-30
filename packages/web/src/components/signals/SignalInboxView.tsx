@@ -294,7 +294,7 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
           <SignalStatsCards stats={stats} />
 
           {error && (
-            <div className="rounded-lg bg-conn-red-bg px-3 py-2 text-sm text-red-700 shadow-[0_1px_3px_rgba(43,33,26,0.06)]">
+            <div className="rounded-lg bg-conn-red-bg px-3 py-2 text-sm text-conn-red-text shadow-[0_1px_3px_rgba(43,33,26,0.06)]">
               请求失败: {error}
             </div>
           )}

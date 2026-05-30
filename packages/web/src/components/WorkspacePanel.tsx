@@ -623,7 +623,7 @@ export function WorkspacePanel() {
           {currentWorktree && (
             <div className="px-3 py-2 border-b border-cafe-subtle/60 bg-cafe-surface/30">
               <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
+                <span className="w-2 h-2 rounded-full bg-[var(--semantic-success)] flex-shrink-0" />
                 <span className="text-xs font-medium text-cafe-black truncate">{currentWorktree.branch}</span>
                 <span className="text-micro font-mono text-cafe-interactive/50">{currentWorktree.head}</span>
               </div>
@@ -838,7 +838,7 @@ export function WorkspacePanel() {
 
               {/* Error */}
               {error && (
-                <div className="px-3 py-2 text-xs text-conn-red-text bg-conn-red-bg/80 border-b border-red-100">
+                <div className="px-3 py-2 text-xs text-conn-red-text bg-conn-red-bg/80 border-b border-conn-red-ring">
                   {error}
                 </div>
               )}
@@ -868,7 +868,7 @@ export function WorkspacePanel() {
                   <div className="flex items-center gap-2 ml-6">
                     <button
                       type="button"
-                      className="px-3 py-1.5 rounded-md bg-cafe-accent text-white text-xs font-medium hover:bg-cafe-accent-hover transition-colors"
+                      className="px-3 py-1.5 rounded-md bg-cafe-accent text-[var(--cafe-surface)] text-xs font-medium hover:bg-cafe-accent-hover transition-colors"
                       onClick={() => {
                         setPreviewPort(portDiscoveryToast.port);
                         setViewMode('browser');

@@ -1,0 +1,73 @@
+/*
+ * F056 Phase E — Cat Persona Derived (dynamic derivation)
+ *
+ * Post-Option B: per-cat static tokens (light + dark) are generated dynamically
+ * by CatHueInjector.tsx. This file only contains:
+ *   1. .cat-persona-derived — dynamic hue/chroma derivation for message bubbles (light + dark)
+ *   2. .cat-persona-preview-light / -dark — theme-independent preview formulas
+ *
+ * F056: message body text color is applied via inline style on the bubble div
+ * (color: var(--cat-msg-text)), NOT on .cat-persona-derived itself, to avoid
+ * leaking into cat name spans which need their own per-slug --color-{slug}-text.
+ */
+
+/* ============================================================
+ * 通用 Cat Persona 气泡派生（.cat-persona-derived）
+ *
+ * 组件（ChatMessage）从 cat 主色 hex 反推 hue/chroma，注入 --msg-hue / --msg-chroma
+ * 数值变量；本 class 派生 bubble / surface / inset / ring / text 五档。
+ * text 的 L/C 由 Tuner 的 msgText 控制（默认接近中性 --cafe-text）。
+ * light/dark 由 [data-theme] 自动切换。
+ * ============================================================ */
+.cat-persona-derived {
+  --cat-msg-bubble: oklch(
+    var(--cat-bubble-l, 0.62) calc(var(--msg-chroma, 0.1) * var(--cat-bubble-cmul, 1)) var(--msg-hue, 297)
+  );
+  --cat-msg-surface: oklch(
+    var(--cat-surface-l, 0.85) calc(var(--msg-chroma, 0.1) * var(--cat-surface-cmul, 0.45)) var(--msg-hue, 297)
+  );
+  --cat-msg-inset: oklch(
+    var(--cat-inset-l, 0.3) calc(var(--msg-chroma, 0.1) * var(--cat-inset-cmul, 0.15)) var(--msg-hue, 297)
+  );
+  --cat-msg-inset-text: oklch(var(--cat-inset-text-l, 0.85) var(--cat-inset-text-c, 0.04) 250);
+  --cat-msg-text: oklch(var(--cat-msg-text-l, 0.36) var(--cat-msg-text-c, 0.03) 30);
+  --cat-msg-ring: oklch(
+    var(--cat-ring-l, 0.55) calc(var(--msg-chroma, 0.1) * var(--cat-ring-cmul, 1.1)) var(--msg-hue, 297)
+  );
+}
+
+[data-theme="dark"] .cat-persona-derived {
+  --cat-msg-bubble: oklch(
+    var(--cat-bubble-l, 0.68) calc(var(--msg-chroma, 0.1) * var(--cat-bubble-cmul, 0.85)) var(--msg-hue, 297)
+  );
+  --cat-msg-surface: oklch(
+    var(--cat-surface-l, 0.28) calc(var(--msg-chroma, 0.1) * var(--cat-surface-cmul, 0.25)) var(--msg-hue, 297)
+  );
+  --cat-msg-inset: oklch(
+    var(--cat-inset-l, 0.24) calc(var(--msg-chroma, 0.1) * var(--cat-inset-cmul, 0.1)) var(--msg-hue, 297)
+  );
+  --cat-msg-inset-text: oklch(var(--cat-inset-text-l, 0.8) var(--cat-inset-text-c, 0.02) 250);
+  --cat-msg-text: oklch(var(--cat-msg-text-l, 0.8) var(--cat-msg-text-c, 0.02) 30);
+  --cat-msg-ring: oklch(
+    var(--cat-ring-l, 0.7) calc(var(--msg-chroma, 0.1) * var(--cat-ring-cmul, 1)) var(--msg-hue, 297)
+  );
+}
+
+/* ── 成员编辑器 light/dark 双预览（hub-cat-editor-color-field）─────────
+ * 预览要在同一屏同时显示两个 mode，无法靠 [data-theme] 切换；故这两个类
+ * 各自硬编码完整 oklch 值（theme-independent），不依赖 --cat-msg-text-l
+ * 等仅在当前 mode 可用的变量。buildCSS() 运行后会用 Tuner 实际值覆盖。
+ * ⚠️ 硬编码值必须与 INIT defaults (oklch-tuner-engine.ts) 保持一致。 */
+.cat-persona-preview-light {
+  --cat-msg-surface: oklch(0.85 calc(var(--msg-chroma, 0.1) * 0.45) var(--msg-hue, 297));
+  --cat-msg-inset: oklch(0.3 calc(var(--msg-chroma, 0.1) * 0.15) var(--msg-hue, 297));
+  --cat-msg-inset-text: oklch(0.85 0.04 250);
+  --cat-msg-text: oklch(0.36 0.03 30);
+}
+
+.cat-persona-preview-dark {
+  --cat-msg-surface: oklch(0.28 calc(var(--msg-chroma, 0.1) * 0.25) var(--msg-hue, 297));
+  --cat-msg-inset: oklch(0.24 calc(var(--msg-chroma, 0.1) * 0.1) var(--msg-hue, 297));
+  --cat-msg-inset-text: oklch(0.8 0.02 250);
+  --cat-msg-text: oklch(0.8 0.02 30);
+}

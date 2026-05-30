@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { apiFetch } from '@/utils/api-client';
 import type { BuiltinAccountClient, ProfileAuthType } from './hub-accounts.types';
 import { builtinClientLabel } from './hub-accounts.view';
@@ -207,7 +208,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
     }
   };
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-[80] flex items-center justify-center bg-[var(--console-overlay-medium)] px-4"
       onClick={handleClose}
@@ -241,7 +242,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
             type="button"
             onClick={() => !isEdit && setAuthMode('oauth')}
             className={`flex-1 rounded-md py-1.5 text-xs font-medium transition ${
-              isOAuth ? 'bg-cafe-accent text-white shadow-sm' : 'text-cafe-secondary'
+              isOAuth ? 'bg-cafe-accent text-[var(--cafe-surface)] shadow-sm' : 'text-cafe-secondary'
             } ${isEdit ? 'cursor-not-allowed' : !isOAuth ? 'hover:bg-[var(--console-hover-bg)]' : ''}`}
             disabled={isEdit}
           >
@@ -251,7 +252,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
             type="button"
             onClick={() => !isEdit && setAuthMode('api_key')}
             className={`flex-1 rounded-md py-1.5 text-xs font-medium transition ${
-              !isOAuth ? 'bg-cafe-accent text-white shadow-sm' : 'text-cafe-secondary'
+              !isOAuth ? 'bg-cafe-accent text-[var(--cafe-surface)] shadow-sm' : 'text-cafe-secondary'
             } ${isEdit ? 'cursor-not-allowed' : isOAuth ? 'hover:bg-[var(--console-hover-bg)]' : ''}`}
             disabled={isEdit}
           >
@@ -385,7 +386,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
                         placeholder="KEY"
                         className={`w-[38%] font-mono ${
                           entry.key.trim() && !isValidEnvKey(entry.key.trim())
-                            ? `${formInputClass} !border-red-300 !bg-conn-red-bg !text-conn-red-text`
+                            ? `${formInputClass} !border-semantic-critical !bg-semantic-critical-surface !text-semantic-critical`
                             : formInputClass
                         }`}
                       />
@@ -403,7 +404,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
                       <button
                         type="button"
                         onClick={() => setEnvEntries(envEntries.filter((_, j) => j !== i))}
-                        className="text-xs text-cafe-muted hover:text-conn-red-text"
+                        className="text-xs text-cafe-muted hover:text-semantic-critical"
                         title="删除"
                       >
                         <HubIcon name="trash" className="h-3.5 w-3.5" />
@@ -411,7 +412,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
                     </div>
                   ))}
                   {envEntries.some((e) => e.key.trim() && !isValidEnvKey(e.key.trim())) && (
-                    <p className="text-micro text-conn-red-text">
+                    <p className="text-micro text-semantic-critical">
                       {envEntries.some((e) => e.key.trim().startsWith('CAT_CAFE_')) ? 'CAT_CAFE_ 前缀为系统保留；' : ''}
                       变量名须以大写字母或下划线开头，仅含 A-Z、0-9、_
                     </p>
@@ -429,7 +430,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
           </div>
         </div>
 
-        {error && <p className="mt-3 text-xs text-conn-red-text">{error}</p>}
+        {error && <p className="mt-3 text-xs text-semantic-critical">{error}</p>}
 
         {/* Save button — bottom right */}
         <div className="mt-4 flex justify-end">
@@ -438,12 +439,13 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
             data-guide-id="accounts.create-submit"
             onClick={handleSubmit}
             disabled={saving || !canSubmit}
-            className="rounded-lg bg-cafe-accent px-5 py-2 text-sm font-semibold text-white transition hover:bg-cafe-accent-hover disabled:opacity-50"
+            className="rounded-lg bg-cafe-accent px-5 py-2 text-sm font-semibold text-[var(--cafe-surface)] transition hover:bg-cafe-accent-hover disabled:opacity-50"
           >
             {saving ? '保存中...' : '保存'}
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

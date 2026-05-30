@@ -150,8 +150,8 @@ export function WeixinQrPanel({ configured }: { configured: boolean }) {
           <button
             type="button"
             onClick={handleFetchQr}
-            className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white rounded-lg transition-colors"
-            style={{ backgroundColor: '#07C160' }}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-[var(--cafe-surface)] rounded-lg transition-colors"
+            style={{ backgroundColor: 'var(--conn-weixin-bg)' }}
             data-testid="weixin-generate-qr"
           >
             <QrCodeIcon />

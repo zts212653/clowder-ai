@@ -5,6 +5,7 @@ import { Terminal } from '@xterm/xterm';
 import { useEffect, useRef, useState } from 'react';
 import typographyTokens from '@/styles/typography-tokens.json';
 import { API_URL } from '@/utils/api-client';
+import { TERMINAL_THEME } from './terminal-theme';
 
 interface AgentPaneViewerProps {
   worktreeId: string;
@@ -24,12 +25,7 @@ export function AgentPaneViewer({ worktreeId, paneId, onBack }: AgentPaneViewerP
       fontSize: typographyTokens.fontSizePx.compact,
       fontFamily: 'JetBrains Mono, Menlo, Monaco, monospace',
       disableStdin: true,
-      /* xterm.js canvas renderer exempt: requires resolved color values, cannot use CSS vars */
-      theme: {
-        background: '#1a1b26',
-        foreground: '#a9b1d6',
-        cursor: '#c0caf5',
-      },
+      theme: TERMINAL_THEME,
     });
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);

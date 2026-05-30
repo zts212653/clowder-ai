@@ -1,11 +1,13 @@
 import type { CatData } from '@/hooks/useCatData';
+import { catColorVar } from '@/lib/cat-slug';
+import { GROUP_MENTION_COLOR } from '@/lib/color-defaults';
 
 export interface CatOption {
   id: string;
   label: string;
   desc: string;
   insert: string;
-  color: string; // hex color (for inline style)
+  color: string; // CSS color (var or hex) for inline style
   avatar: string;
   /** Group mention (e.g. @thread, @all) — renders group icon instead of cat avatar */
   isGroup?: boolean;
@@ -19,7 +21,7 @@ const STATIC_GROUP_MENTIONS: CatOption[] = [
     label: '@thread',
     desc: '本帖全体参与猫猫',
     insert: '@thread ',
-    color: '#6B7280',
+    color: GROUP_MENTION_COLOR,
     avatar: '',
     isGroup: true,
   },
@@ -28,7 +30,7 @@ const STATIC_GROUP_MENTIONS: CatOption[] = [
     label: '@all',
     desc: '全体猫猫',
     insert: '@all ',
-    color: '#6B7280',
+    color: GROUP_MENTION_COLOR,
     avatar: '',
     isGroup: true,
   },
@@ -46,7 +48,7 @@ function buildBreedGroupOptions(cats: CatData[]): CatOption[] {
     } else {
       breedMap.set(cat.breedId, {
         displayName: cat.breedDisplayName ?? cat.displayName,
-        color: cat.color.primary,
+        color: catColorVar(cat.id, 'primary'),
         count: 1,
       });
     }
@@ -84,7 +86,7 @@ export function buildCatOptions(cats: CatData[]): CatOption[] {
       label: formatCatLabel(cat),
       desc: cat.roleDescription,
       insert: `@${cat.mentionPatterns[0].replace(/^@/, '')} `,
-      color: cat.color.primary,
+      color: catColorVar(cat.id, 'primary'),
       avatar: cat.avatar,
     }));
   return [...STATIC_GROUP_MENTIONS, ...breedGroups, ...individuals];

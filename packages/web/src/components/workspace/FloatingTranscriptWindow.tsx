@@ -162,7 +162,7 @@ export function FloatingTranscriptWindow({
       >
         <div
           tabIndex={-1}
-          className="flex h-9 items-center gap-2 rounded-lg border-2 border-cafe-accent-primary/50 bg-cafe-surface-primary px-3 shadow-lg ring-1 ring-black/20"
+          className="flex h-9 items-center gap-2 rounded-lg border-2 border-cafe-accent-primary/50 bg-cafe-surface-primary px-3 shadow-lg ring-1 ring-[var(--console-border-soft)]"
         >
           <span
             className={`inline-block h-2 w-2 rounded-full ${recording ? 'bg-conn-green-text animate-pulse' : 'bg-cafe-text-muted'}`}
@@ -215,12 +215,12 @@ export function FloatingTranscriptWindow({
     >
       <div
         tabIndex={-1}
-        className="flex h-full flex-col rounded-lg border-2 border-cafe-accent-primary/50 bg-cafe-surface-primary shadow-2xl ring-1 ring-black/20 backdrop-blur-md"
+        className="flex h-full flex-col rounded-lg border-2 border-cafe-accent-primary/50 bg-cafe-surface-primary shadow-2xl ring-1 ring-[var(--console-border-soft)] backdrop-blur-md"
       >
         {/* Header — drag handle */}
         <div className="flex items-center gap-2 border-b border-cafe-border px-3 py-2 cursor-move select-none">
           <span
-            className={`inline-block h-2 w-2 rounded-full ${recording ? (paused ? 'bg-amber-400' : 'bg-conn-green-text animate-pulse') : 'bg-cafe-text-muted'}`}
+            className={`inline-block h-2 w-2 rounded-full ${recording ? (paused ? 'bg-[var(--semantic-warning)]' : 'bg-conn-green-text animate-pulse') : 'bg-cafe-text-muted'}`}
           />
           <span className="flex-1 truncate text-sm font-medium text-cafe-text-primary">
             {recording ? (paused ? 'Paused' : (sourceLabel ?? 'Recording')) : 'Transcript'}
@@ -232,7 +232,7 @@ export function FloatingTranscriptWindow({
                 <button
                   type="button"
                   onClick={onResume}
-                  className="rounded px-1.5 py-0.5 text-xs text-green-400 hover:bg-conn-green-text/10"
+                  className="rounded px-1.5 py-0.5 text-xs text-conn-emerald-text hover:bg-conn-green-text/10"
                 >
                   Resume
                 </button>
@@ -240,7 +240,7 @@ export function FloatingTranscriptWindow({
                 <button
                   type="button"
                   onClick={onPause}
-                  className="rounded px-1.5 py-0.5 text-xs text-amber-400 hover:bg-amber-500/10"
+                  className="rounded px-1.5 py-0.5 text-xs text-conn-amber-text hover:bg-[var(--console-hover-bg)]"
                 >
                   Pause
                 </button>
@@ -260,7 +260,7 @@ export function FloatingTranscriptWindow({
             <button
               type="button"
               onClick={onToggleAdvisory}
-              className={`rounded px-1.5 py-0.5 text-xs ${advisoryMode === 'active' ? 'bg-amber-500/20 text-amber-400' : 'text-cafe-text-muted hover:text-cafe-text-primary'}`}
+              className={`rounded px-1.5 py-0.5 text-xs ${advisoryMode === 'active' ? 'bg-[var(--semantic-warning-surface)] text-conn-amber-text' : 'text-cafe-text-muted hover:text-cafe-text-primary'}`}
               title={advisoryMode === 'active' ? 'Advisory: ON (click to disable)' : 'Advisory: OFF (click to enable)'}
             >
               {advisoryMode === 'active' ? 'Advisory' : 'Passive'}
@@ -287,7 +287,7 @@ export function FloatingTranscriptWindow({
         {/* Advisory hint */}
         {advisory && (
           <div
-            className="flex items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-1.5"
+            className="flex items-center gap-2 border-b border-[var(--semantic-warning)] bg-[var(--semantic-warning-surface)] px-3 py-1.5"
             style={{ opacity: Math.max(0.5, Math.min(1, advisory.confidence)) }}
           >
             <span className="text-xs">
@@ -295,18 +295,18 @@ export function FloatingTranscriptWindow({
               {advisory.reason === 'extended_silence' && '\u{23F8}'}
               {advisory.reason === 'keyword_match' && '\u{1F511}'}
             </span>
-            <span className="flex-1 truncate text-xs text-amber-300">
+            <span className="flex-1 truncate text-xs text-conn-amber-text">
               {advisory.reason === 'question_detected' && 'Question detected'}
               {advisory.reason === 'extended_silence' && 'Pause in conversation'}
               {advisory.reason === 'keyword_match' && 'Topic match'}
               {advisory.talking_point && (
-                <span className="ml-1 text-amber-200/80">&mdash; {advisory.talking_point}</span>
+                <span className="ml-1 text-conn-amber-text/80">&mdash; {advisory.talking_point}</span>
               )}
             </span>
             <button
               type="button"
               onClick={onAdvisoryDnd}
-              className="shrink-0 text-micro text-amber-400/60 hover:text-amber-300"
+              className="shrink-0 text-micro text-conn-amber-text/60 hover:text-conn-amber-text"
               title="Don't disturb for 15 min"
             >
               DND
@@ -314,7 +314,7 @@ export function FloatingTranscriptWindow({
             <button
               type="button"
               onClick={onAdvisoryDismiss}
-              className="shrink-0 text-xs text-amber-400/60 hover:text-amber-300"
+              className="shrink-0 text-xs text-conn-amber-text/60 hover:text-conn-amber-text"
             >
               &times;
             </button>
@@ -361,7 +361,7 @@ export function FloatingTranscriptWindow({
                 if (type === 'app') onStart('app', value);
                 else onStart('mic', undefined, Number(value));
               }}
-              className="w-full rounded bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-conn-green-text disabled:opacity-40 disabled:cursor-not-allowed"
+              className="w-full rounded bg-[var(--semantic-success)] px-2 py-1 text-xs font-medium text-[var(--cafe-surface)] hover:bg-conn-green-text disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Start
             </button>
@@ -420,7 +420,7 @@ export function FloatingTranscriptWindow({
         <div className="flex items-center gap-3 border-t border-cafe-border px-3 py-1.5 text-micro text-cafe-text-muted">
           <span>{lines.length} chunks</span>
           <span>avg {avgLatency}s</span>
-          <span className={connected ? 'text-green-500' : 'text-conn-red-text'}>
+          <span className={connected ? 'text-conn-emerald-text' : 'text-conn-red-text'}>
             {connected ? 'SSE' : 'disconnected'}
           </span>
         </div>

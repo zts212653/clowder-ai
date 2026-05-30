@@ -321,7 +321,7 @@ describe('F212 CliDiagnosticsPanel (AC-B2/B3/B4)', () => {
   it('P2-5 path redaction: macOS/Linux/Windows home paths in command sanitized to ~', async () => {
     const { CliDiagnosticsPanel } = await import('../CliDiagnosticsPanel');
     const fixtures = [
-      { command: '/home/user/codex --json', expectIn: '~/.npm/bin/codex', expectNotIn: 'you' },
+      { command: '/home/user/codex --json', expectIn: '~/codex', expectNotIn: 'user' },
       { command: '/home/alice/.local/bin/claude', expectIn: '~/.local/bin/claude', expectNotIn: 'alice' },
       { command: 'C:\\Users\\bob\\AppData\\codex.exe', expectIn: '~\\AppData\\codex.exe', expectNotIn: 'bob' },
       // 云端 codex P2-6 (round-6): Linux root home (container/server installs)

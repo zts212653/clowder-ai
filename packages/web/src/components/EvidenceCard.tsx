@@ -45,8 +45,8 @@ const STATUS_CONFIG: Record<
   },
   pending: {
     label: '待审',
-    className: 'ring-1 ring-conn-amber-ring/30',
-    badge: 'bg-conn-amber-bg text-conn-amber-text border-conn-amber-ring animate-pulse',
+    className: 'ring-1 ring-semantic-warning/30',
+    badge: 'bg-semantic-warning-surface text-semantic-warning border-semantic-warning animate-pulse',
   },
   published: { label: '正式', className: '', badge: '' },
   archived: { label: '归档', className: 'grayscale-[0.5] opacity-60', badge: 'bg-conn-gray-bg text-cafe-secondary' },
@@ -60,8 +60,8 @@ const CONFIDENCE_STYLES: Record<
     label: string;
   }
 > = {
-  high: { bg: 'bg-conn-emerald-bg', text: 'text-conn-emerald-text', label: '高置信度' },
-  mid: { bg: 'bg-conn-amber-bg', text: 'text-conn-amber-text', label: '中置信度' },
+  high: { bg: 'bg-semantic-success-surface', text: 'text-semantic-success', label: '高置信度' },
+  mid: { bg: 'bg-semantic-warning-surface', text: 'text-semantic-warning', label: '中置信度' },
   low: { bg: 'bg-conn-slate-bg', text: 'text-conn-slate-text', label: '低置信度' },
 };
 
@@ -73,11 +73,11 @@ export function EvidenceCard({ result }: { result: EvidenceResult }) {
 
   return (
     <div
-      className={`flex gap-2.5 p-3 rounded-xl bg-slate-900/80 border border-slate-700 hover:border-slate-500 hover:shadow-sm transition-all duration-200 group relative ${status?.className ?? ''}`}
+      className={`flex gap-2.5 p-3 rounded-xl bg-cafe-surface-sunken/80 border border-[var(--console-border-soft)] hover:border-[var(--console-border-strong)] hover:shadow-sm transition-all duration-200 group relative ${status?.className ?? ''}`}
     >
       {/* Source type icon */}
       <div className="flex-shrink-0 mt-0.5">
-        <div className="w-8 h-8 rounded-lg bg-slate-700 flex items-center justify-center text-slate-300 group-hover:scale-110 transition-transform">
+        <div className="w-8 h-8 rounded-lg bg-cafe-surface-sunken flex items-center justify-center text-cafe-muted group-hover:scale-110 transition-transform">
           <Icon className="w-4 h-4" />
         </div>
       </div>
@@ -90,7 +90,7 @@ export function EvidenceCard({ result }: { result: EvidenceResult }) {
               text={result.title}
               as="h4"
               clampClass="line-clamp-2"
-              className={`text-xs font-bold text-slate-100 leading-snug ${result.status === 'archived' ? 'line-through decoration-gray-400/50' : ''}`}
+              className={`text-xs font-bold text-cafe leading-snug ${result.status === 'archived' ? 'line-through decoration-cafe-muted/50' : ''}`}
             />
           </div>
           <div className="flex flex-col items-end gap-1 flex-shrink-0">
@@ -111,15 +111,15 @@ export function EvidenceCard({ result }: { result: EvidenceResult }) {
           text={result.snippet}
           as="p"
           clampClass="line-clamp-2"
-          className="text-xs text-slate-400 leading-relaxed mt-1.5"
+          className="text-xs text-cafe-muted leading-relaxed mt-1.5"
         />
 
-        <div className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-700">
-          <span className="text-micro text-slate-400 font-bold">{source.label}</span>
+        <div className="flex items-center gap-2 mt-2 pt-2 border-t border-[var(--console-border-soft)]">
+          <span className="text-micro text-cafe-muted font-bold">{source.label}</span>
           {result.authority && (
             <>
               <span className="text-micro text-cafe-muted">·</span>
-              <span className="text-micro text-slate-500 font-mono">{result.authority}</span>
+              <span className="text-micro text-cafe-muted font-mono">{result.authority}</span>
             </>
           )}
           <span className="text-micro text-cafe-muted">·</span>

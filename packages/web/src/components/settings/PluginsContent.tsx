@@ -22,7 +22,7 @@ export function PluginsContent() {
           style={{ textAlign: 'left' }}
           onClick={() => setExpandedId(expandedId === 'github' ? null : 'github')}
         >
-          <div className={settingsResourceAvatarClass} style={{ backgroundColor: '#24292e' }}>
+          <div className={settingsResourceAvatarClass} style={{ backgroundColor: 'var(--conn-github-bg)' }}>
             <span style={{ color: 'var(--cafe-surface)' }}>
               <HubIcon name="key" className="h-5 w-5" />
             </span>

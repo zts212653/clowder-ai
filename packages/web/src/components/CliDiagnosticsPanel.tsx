@@ -48,30 +48,31 @@ interface Palette {
   Icon: IconComponent;
 }
 
-// Tailwind 500/100/300 hex (KD-5: author 自决, picked for at-a-glance severity scanning).
+// Severity palette via CSS tokens (console-tokens.css --cli-sev-*).
+// KD-5: author 自决 severity grouping; tokens derive from semantic / neutral / chart primitives.
 const PALETTE_USER_FIX: Omit<Palette, 'Icon'> = {
-  bg: '#FEE2E2', // red-100
-  border: '#FCA5A5', // red-300
-  accent: '#DC2626', // red-600
-  text: '#1A1918',
+  bg: 'var(--cli-sev-error-bg)',
+  border: 'var(--cli-sev-error-border)',
+  accent: 'var(--cli-sev-error-accent)',
+  text: 'var(--cli-sev-text)',
 };
 const PALETTE_TRANSIENT: Omit<Palette, 'Icon'> = {
-  bg: '#FEF3C7', // amber-100
-  border: '#FCD34D', // amber-300
-  accent: '#D97706', // amber-600
-  text: '#1A1918',
+  bg: 'var(--cli-sev-warning-bg)',
+  border: 'var(--cli-sev-warning-border)',
+  accent: 'var(--cli-sev-warning-accent)',
+  text: 'var(--cli-sev-text)',
 };
 const PALETTE_SYSTEM: Omit<Palette, 'Icon'> = {
-  bg: '#F1F5F9', // slate-100
-  border: '#CBD5E1', // slate-300
-  accent: '#475569', // slate-600
-  text: '#1A1918',
+  bg: 'var(--cli-sev-info-bg)',
+  border: 'var(--cli-sev-info-border)',
+  accent: 'var(--cli-sev-info-accent)',
+  text: 'var(--cli-sev-text)',
 };
 const PALETTE_COGNITIVE: Omit<Palette, 'Icon'> = {
-  bg: '#EDE9FE', // violet-100
-  border: '#C4B5FD', // violet-300
-  accent: '#7C3AED', // violet-600
-  text: '#1A1918',
+  bg: 'var(--cli-sev-cognitive-bg)',
+  border: 'var(--cli-sev-cognitive-border)',
+  accent: 'var(--cli-sev-cognitive-accent)',
+  text: 'var(--cli-sev-text)',
 };
 
 const REASON_PALETTE: Record<CliErrorReasonCode, Palette> = {
@@ -216,7 +217,7 @@ export function CliDiagnosticsPanel({ errorMessage, diagnostics, dedupCount }: C
             )}
           </span>
           {diagnostics.publicHint && (
-            <span className="text-xs" style={{ color: '#6D6C6A', lineHeight: 1.5 }}>
+            <span className="text-xs" style={{ color: 'var(--cli-diag-hint)', lineHeight: 1.5 }}>
               {diagnostics.publicHint}
             </span>
           )}
@@ -234,9 +235,9 @@ export function CliDiagnosticsPanel({ errorMessage, diagnostics, dedupCount }: C
           >
             <ChevronDownIcon
               className="w-3.5 h-3.5 transition-transform"
-              style={{ color: '#9C9B99', transform: expanded ? 'rotate(180deg)' : undefined }}
+              style={{ color: 'var(--cli-diag-meta)', transform: expanded ? 'rotate(180deg)' : undefined }}
             />
-            <span className="text-xs font-semibold" style={{ color: '#9C9B99' }}>
+            <span className="text-xs font-semibold" style={{ color: 'var(--cli-diag-meta)' }}>
               查看详细错误
             </span>
           </button>
@@ -245,8 +246,8 @@ export function CliDiagnosticsPanel({ errorMessage, diagnostics, dedupCount }: C
               data-testid="cli-diagnostics-excerpt"
               className="rounded-lg overflow-x-auto whitespace-pre-wrap break-words text-xs font-mono m-0"
               style={{
-                backgroundColor: '#1E1D1C',
-                color: '#D89575',
+                backgroundColor: 'var(--cli-diag-excerpt-bg)',
+                color: 'var(--cli-diag-excerpt-text)',
                 padding: '12px 14px',
                 lineHeight: 1.5,
               }}
@@ -261,7 +262,7 @@ export function CliDiagnosticsPanel({ errorMessage, diagnostics, dedupCount }: C
       <div
         data-testid="cli-diagnostics-debug-ref"
         className="flex flex-wrap gap-x-3 gap-y-1 text-xs"
-        style={{ color: '#9C9B99' }}
+        style={{ color: 'var(--cli-diag-meta)' }}
       >
         <span>
           <span className="font-medium">command:</span>{' '}

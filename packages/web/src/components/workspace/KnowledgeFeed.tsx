@@ -244,7 +244,7 @@ export function KnowledgeFeed() {
       {/* Stats bar */}
       {data?.stats && (
         <div className="flex items-center justify-center gap-3 px-3 py-1.5 border-t border-cafe-subtle/40 bg-cafe-surface/30">
-          <span className="text-micro font-semibold text-blue-600">{data.stats.decisions} decisions</span>
+          <span className="text-micro font-semibold text-[var(--semantic-info)]">{data.stats.decisions} decisions</span>
           <span className="text-micro font-semibold text-conn-amber-text">{data.stats.lessons} lessons</span>
           <span className="text-micro font-semibold text-conn-green-text">{data.stats.methods} methods</span>
         </div>
@@ -279,7 +279,7 @@ function KnowledgeCard({
   const title = marker.content.replace(/^\[(decision|lesson|method)\]\s*/i, '');
 
   const kindColors: Record<string, { bg: string; text: string }> = {
-    decision: { bg: 'bg-conn-blue-bg', text: 'text-blue-700' },
+    decision: { bg: 'bg-conn-blue-bg', text: 'text-[var(--semantic-info)]' },
     lesson: { bg: 'bg-conn-amber-bg', text: 'text-conn-amber-text' },
     method: { bg: 'bg-conn-green-bg', text: 'text-conn-green-text' },
   };
@@ -329,7 +329,7 @@ function KnowledgeCard({
             <button
               type="button"
               onClick={() => onApprove(marker.id, selectedCollection || undefined)}
-              className="text-micro font-semibold text-white bg-cafe-accent rounded px-2 py-1 hover:opacity-90 transition-opacity"
+              className="text-micro font-semibold text-[var(--cafe-surface)] bg-cafe-accent rounded px-2 py-1 hover:opacity-90 transition-opacity"
             >
               Approve
             </button>

@@ -165,19 +165,21 @@ body {
 
 /* Werewolf Cute Theme → werewolf-theme.css */
 
-/* F097: Dark-theme table overrides for CLI output + Thinking bubbles */
+/* F097/F056: CLI/Thinking table overrides — inherit cat-msg-inset-text
+ * so light-mode dark-inset and dark-mode dark-inset both get readable text.
+ * Falls back to cafe neutrals when --cat-msg-inset-text is unset. */
 .cli-output-md thead {
   background: rgba(255, 255, 255, 0.06);
 }
 .cli-output-md th {
   border-color: rgba(255, 255, 255, 0.12);
-  color: #cbd5e1;
+  color: var(--cat-msg-inset-text, var(--cafe-text-secondary));
 }
 .cli-output-md td {
   border-color: rgba(255, 255, 255, 0.08);
-  color: #94a3b8;
+  color: var(--cat-msg-inset-text, var(--cafe-text-muted));
 }
 .cli-output-md code {
   background: rgba(255, 255, 255, 0.08);
-  color: #e2e8f0;
+  color: var(--cat-msg-inset-text, var(--cafe-text-secondary));
 }

@@ -79,7 +79,7 @@ export function IntentCardDetail({ card, onTriaged }: IntentCardDetailProps) {
           <div className="text-micro font-semibold uppercase text-cafe-secondary">Risk Signals</div>
           <div className="flex flex-wrap gap-1">
             {card.riskSignals.map((signal) => (
-              <span key={signal} className="rounded-full bg-conn-red-bg px-2 py-0.5 text-micro text-red-700">
+              <span key={signal} className="rounded-full bg-conn-red-bg px-2 py-0.5 text-micro text-conn-red-text">
                 {RISK_LABELS[signal]}
               </span>
             ))}
@@ -104,7 +104,7 @@ export function IntentCardDetail({ card, onTriaged }: IntentCardDetailProps) {
                 onClick={() => setSizeBand(s)}
                 className={`rounded px-2 py-0.5 text-micro font-medium ${
                   sizeBand === s
-                    ? 'bg-[var(--mc-accent)] text-white'
+                    ? 'bg-[var(--mc-accent)] text-[var(--cafe-surface)]'
                     : 'bg-[var(--console-hover-bg)] text-cafe-secondary'
                 }`}
               >
@@ -117,7 +117,7 @@ export function IntentCardDetail({ card, onTriaged }: IntentCardDetailProps) {
           type="button"
           onClick={() => void handleTriage()}
           disabled={submitting}
-          className="mt-2 w-full rounded-lg bg-[var(--mc-accent)] py-1.5 text-xs font-medium text-white hover:bg-[var(--mc-accent-hover)] disabled:opacity-40"
+          className="mt-2 w-full rounded-lg bg-[var(--mc-accent)] py-1.5 text-xs font-medium text-[var(--cafe-surface)] hover:bg-[var(--mc-accent-hover)] disabled:opacity-40"
         >
           {submitting ? '评估中...' : '提交 Triage'}
         </button>
@@ -153,7 +153,9 @@ function ScoreSlider({ label, value, onChange }: { label: string; value: number;
             type="button"
             onClick={() => onChange(n)}
             className={`h-6 w-6 rounded text-micro font-medium ${
-              value === n ? 'bg-[var(--mc-accent)] text-white' : 'bg-[var(--console-hover-bg)] text-cafe-secondary'
+              value === n
+                ? 'bg-[var(--mc-accent)] text-[var(--cafe-surface)]'
+                : 'bg-[var(--console-hover-bg)] text-cafe-secondary'
             }`}
           >
             {n}

@@ -79,7 +79,7 @@ export function StudyTimeline({ days = 7 }: StudyTimelineProps) {
               key={d}
               type="button"
               onClick={() => setSelectedDays(d)}
-              className={`rounded-full px-2 py-0.5 text-xs ${selectedDays === d ? 'bg-opus-primary text-white' : 'border border-[var(--console-border-soft)] text-cafe-secondary hover:bg-[var(--console-hover-bg)]'}`}
+              className={`rounded-full px-2 py-0.5 text-xs ${selectedDays === d ? 'bg-opus-primary text-[var(--cafe-surface)]' : 'border border-[var(--console-border-soft)] text-cafe-secondary hover:bg-[var(--console-hover-bg)]'}`}
             >
               {d}天
             </button>

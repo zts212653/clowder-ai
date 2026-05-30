@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { CoCreatorConfig } from '@/components/config-viewer-types';
+import { CO_CREATOR_COLOR } from '@/lib/color-defaults';
 import { refreshCoCreatorMentionData, resetMentionDataForTest } from '@/lib/mention-highlight';
 import { apiFetch } from '@/utils/api-client';
 
@@ -9,10 +10,7 @@ const DEFAULT_CO_CREATOR: CoCreatorConfig = {
   name: 'ME',
   aliases: [],
   mentionPatterns: ['@co-creator'],
-  color: {
-    primary: '#815b5b',
-    secondary: '#FFDDD2',
-  },
+  color: { ...CO_CREATOR_COLOR },
 };
 
 let cachedCoCreator: CoCreatorConfig | null = null;

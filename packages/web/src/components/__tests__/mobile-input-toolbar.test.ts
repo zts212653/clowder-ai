@@ -81,6 +81,6 @@ describe('MobileInputToolbar', () => {
   it('applies whisper-active styling when whisperMode is true', () => {
     render({ whisperMode: true });
     const whisperBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('悄悄话'));
-    expect(whisperBtn?.className).toContain('amber');
+    expect(whisperBtn?.className).toContain('cafe-accent');
   });
 });

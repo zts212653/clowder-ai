@@ -94,8 +94,12 @@ function fmtDuration(ms: number): string {
 }
 
 const ROLE_STYLES: Record<string, string> = {
-  user: 'bg-conn-blue-bg text-conn-blue-text',
+  user: 'text-[var(--color-cafe-accent)]',
   system: 'bg-cafe-surface-elevated text-cafe-secondary',
+};
+/* Slash opacity on CSS-var colors silently fails; use color-mix() via inline style. */
+const ROLE_INLINE_STYLES: Record<string, React.CSSProperties> = {
+  user: { backgroundColor: 'color-mix(in oklch, var(--color-cafe-accent) 10%, transparent)' },
 };
 
 const ASSISTANT_STYLE_BY_CAT: Record<string, string> = {
@@ -104,9 +108,9 @@ const ASSISTANT_STYLE_BY_CAT: Record<string, string> = {
   gemini: 'bg-gemini-light text-gemini-dark',
   kimi: 'bg-kimi-light text-kimi-dark',
   dare: 'bg-dare-light text-dare-dark',
-  gpt52: 'bg-[#C8E6C9] text-[#2E7D32]',
-  'opus-45': 'bg-[#E1D5F0] text-[#5E35B1]',
-  sonnet: 'bg-[#EDE7F6] text-[#6A1B9A]',
+  gpt52: 'bg-conn-emerald-bg text-conn-emerald-text',
+  'opus-45': 'bg-conn-purple-bg text-[var(--color-opus-primary)]',
+  sonnet: 'bg-conn-purple-bg text-[var(--color-opus-primary)]',
 };
 
 function assistantRoleStyle(catId?: string): string {
@@ -217,9 +221,9 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
   const assistantLabel = catId ? (getCatById(catId)?.displayName ?? catId) : 'assistant';
 
   return (
-    <div className="rounded-xl bg-[var(--console-card-bg)] shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
+    <div className="rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 console-divider-b">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--console-border-soft)]">
         <span className="text-xs font-semibold text-cafe-secondary">Session 事件</span>
         <button
           type="button"
@@ -234,14 +238,14 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
       {runtimeSession && <RuntimeMetadataHeader session={runtimeSession} noise={digestNoise} />}
 
       {/* View mode tabs */}
-      <div className="flex console-divider-b">
+      <div className="flex border-b border-[var(--console-border-soft)]">
         {(['chat', 'handoff', 'raw'] as const).map((m) => (
           <button
             type="button"
             key={m}
             onClick={() => setView(m)}
             className={`flex-1 py-1.5 text-micro font-semibold uppercase tracking-wider transition-colors
-              ${view === m ? 'text-blue-600 border-b-2 border-blue-600' : 'text-cafe-muted hover:text-cafe-secondary'}`}
+              ${view === m ? 'text-[var(--color-cafe-accent)] border-b-2 border-[var(--color-cafe-accent)]' : 'text-cafe-muted hover:text-cafe-secondary'}`}
           >
             {m === 'chat' ? 'Chat' : m === 'handoff' ? 'Handoff' : 'Raw'}
           </button>
@@ -266,6 +270,7 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
                     ? assistantStyle
                     : (ROLE_STYLES[msg.role] ?? 'bg-cafe-surface-elevated text-cafe-secondary')
                 }`}
+                style={ROLE_INLINE_STYLES[msg.role]}
               >
                 <span className="font-medium">{msg.role === 'assistant' ? assistantLabel : msg.role}</span>
                 <p className="mt-0.5 whitespace-pre-wrap break-words">{msg.content}</p>
@@ -277,11 +282,16 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
         {!error && view === 'handoff' && (
           <div className="space-y-1.5">
             {(data as HandoffSummary[]).map((inv) => (
-              <div key={inv.invocationId} className="rounded-lg bg-[var(--console-shell-bg)] px-2 py-1.5 text-xs">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-mono text-cafe-secondary">{inv.invocationId}</span>
-                  <span className="text-cafe-muted">{fmtDuration(inv.durationMs)}</span>
-                  {inv.errors > 0 && <span className="text-conn-red-text">{inv.errors} err</span>}
+              <div
+                key={inv.invocationId}
+                className="rounded border border-[var(--console-border-soft)] px-2 py-1.5 text-xs"
+              >
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="truncate min-w-0 font-mono text-cafe-secondary" title={inv.invocationId}>
+                    {inv.invocationId}
+                  </span>
+                  <span className="shrink-0 text-cafe-muted">{fmtDuration(inv.durationMs)}</span>
+                  {inv.errors > 0 && <span className="shrink-0 text-conn-red-text">{inv.errors} err</span>}
                 </div>
                 <div className="flex flex-wrap gap-1 mt-1">
                   {(inv.toolCalls ?? []).map((t, index) => (
@@ -304,7 +314,11 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
         {!error && view === 'raw' && (
           <div className="space-y-1">
             {(data as RawEvent[]).map((evt) => (
-              <div key={evt.eventNo} className="text-micro font-mono bg-cafe-surface-elevated rounded px-1.5 py-1">
+              <div
+                key={evt.eventNo}
+                className="text-micro font-mono bg-cafe-surface-elevated rounded px-1.5 py-1 truncate"
+                title={JSON.stringify(evt.event)}
+              >
                 <span className="text-cafe-muted">#{evt.eventNo}</span>{' '}
                 <span className="text-cafe-secondary">{JSON.stringify(evt.event)}</span>
               </div>
@@ -314,16 +328,16 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
       </div>
 
       {/* Pagination */}
-      <div className="flex items-center justify-between px-3 py-1.5 console-divider-t text-micro text-cafe-muted">
+      <div className="flex items-center justify-between px-3 py-1.5 border-t border-[var(--console-border-soft)] text-micro text-cafe-muted">
         <span>{total} 条事件</span>
         <div className="flex gap-2">
           {cursorHistory.length > 0 && (
-            <button type="button" onClick={goPrev} className="text-conn-blue-text hover:text-blue-700">
+            <button type="button" onClick={goPrev} className="text-[var(--color-cafe-accent)] hover:opacity-80">
               上一页
             </button>
           )}
           {nextCursor != null && (
-            <button type="button" onClick={goNext} className="text-conn-blue-text hover:text-blue-700">
+            <button type="button" onClick={goNext} className="text-[var(--color-cafe-accent)] hover:opacity-80">
               下一页
             </button>
           )}
@@ -363,13 +377,13 @@ function RuntimeMetadataHeader({
         <span className="min-w-0 truncate">{formatBindingLabel(session.binding)}</span>
       </div>
       <div className="flex flex-wrap gap-2 text-micro">
-        <a className="text-conn-blue-text hover:text-blue-700" href={session.drilldown.sessionRecord}>
+        <a className="text-conn-blue-text hover:text-conn-blue-hover" href={session.drilldown.sessionRecord}>
           record
         </a>
-        <a className="text-conn-blue-text hover:text-blue-700" href={session.drilldown.events}>
+        <a className="text-conn-blue-text hover:text-conn-blue-hover" href={session.drilldown.events}>
           events
         </a>
-        <a className="text-conn-blue-text hover:text-blue-700" href={session.drilldown.digest}>
+        <a className="text-conn-blue-text hover:text-conn-blue-hover" href={session.drilldown.digest}>
           digest
         </a>
       </div>

@@ -30,19 +30,19 @@ interface DocumentGroup {
 }
 
 const SENSITIVITY_BADGE: Record<string, string> = {
-  public: 'bg-conn-green-bg text-green-800',
-  internal: 'bg-blue-100 text-conn-blue-text',
+  public: 'bg-conn-green-bg text-conn-emerald-text',
+  internal: 'bg-[var(--semantic-info-surface)] text-conn-blue-text',
   private: 'bg-conn-amber-bg text-conn-amber-text',
-  restricted: 'bg-conn-red-bg text-red-800',
+  restricted: 'bg-conn-red-bg text-conn-red-text',
 };
 
 const STATUS_BADGE: Record<string, string> = {
-  registered: 'bg-gray-100 text-gray-600',
-  indexing: 'bg-blue-50 text-blue-600',
-  active: 'bg-conn-green-bg text-green-700',
+  registered: 'bg-cafe-surface-elevated text-cafe-secondary',
+  indexing: 'bg-[var(--semantic-info-surface)] text-[var(--semantic-info)]',
+  active: 'bg-conn-green-bg text-conn-emerald-text',
   stale: 'bg-conn-amber-bg text-conn-amber-text',
-  blocked: 'bg-conn-red-bg text-red-700',
-  archived: 'bg-gray-200 text-gray-500',
+  blocked: 'bg-conn-red-bg text-conn-red-text',
+  archived: 'bg-cafe-surface text-cafe-muted',
 };
 
 function CollectionDetail({ collectionId }: { collectionId: string }) {
@@ -167,7 +167,7 @@ export function CollectionCatalog() {
         <button
           type="button"
           onClick={() => setShowCreate(true)}
-          className="px-3 py-1 text-xs text-white bg-cafe-accent rounded-lg hover:bg-cafe-interactive"
+          className="px-3 py-1 text-xs text-[var(--cafe-surface)] bg-cafe-accent rounded-lg hover:bg-cafe-interactive"
           data-testid="create-collection-btn"
         >
           + 新建集合

@@ -272,7 +272,7 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
           className={`flex items-center gap-1.5 px-3 py-1 text-xs border-b ${hmrStatus === 'connected' ? 'bg-[var(--ws-surface-hover)] border-[var(--console-border-soft)]' : 'bg-[var(--ws-surface-alert)] border-[var(--console-border-soft)]'} text-[var(--ws-text)]/70`}
         >
           <span
-            className={`w-1.5 h-1.5 rounded-full inline-block ${hmrStatus === 'connected' ? 'bg-conn-green-text' : 'bg-red-400'}`}
+            className={`w-1.5 h-1.5 rounded-full inline-block ${hmrStatus === 'connected' ? 'bg-conn-green-text' : 'bg-[var(--semantic-critical)]'}`}
           />
           {hmrStatus === 'connected' ? (
             <span>HMR connected · localhost:{targetPort}</span>
@@ -288,15 +288,17 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
       )}
 
       {error && (
-        <div className="px-3 py-1.5 text-xs text-conn-red-text bg-conn-red-bg/80 border-b border-red-100">{error}</div>
+        <div className="px-3 py-1.5 text-xs text-conn-red-text bg-conn-red-bg/80 border-b border-[var(--semantic-critical-surface)]">
+          {error}
+        </div>
       )}
       {warning && !error && (
-        <div className="px-3 py-1.5 text-xs text-conn-amber-text bg-conn-amber-bg/80 border-b border-amber-100">
+        <div className="px-3 py-1.5 text-xs text-conn-amber-text bg-conn-amber-bg/80 border-b border-[var(--semantic-warning-surface)]">
           {warning}
         </div>
       )}
       {screenshotUrl && (
-        <div className="px-3 py-1.5 text-xs text-conn-green-text bg-conn-green-bg/80 border-b border-green-100">
+        <div className="px-3 py-1.5 text-xs text-conn-green-text bg-conn-green-bg/80 border-b border-[var(--semantic-success-surface)]">
           Screenshot saved:{' '}
           <a href={screenshotUrl} target="_blank" rel="noreferrer" className="underline">
             {screenshotUrl}

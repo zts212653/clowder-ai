@@ -1234,6 +1234,15 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
   },
 
+  {
+    name: 'THEME_CONFIG',
+    defaultValue: '(未设置)',
+    description: 'OKLCH 主题配置 JSON（清浏览器缓存后可从此恢复）',
+    category: 'frontend',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+
   // --- push ---
   {
     name: 'VAPID_PUBLIC_KEY',

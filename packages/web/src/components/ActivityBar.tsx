@@ -1,14 +1,16 @@
 'use client';
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useCallback, useEffect, useState } from 'react';
-import { useCafeTheme } from '@/hooks/useCafeTheme';
+import { lazy, Suspense, useCallback, useState } from 'react';
 import { usePinnedSections } from '@/hooks/usePinnedSections';
 import { useCallbackAuthAggregate, useCallbackAuthAvailable } from '@/stores/callbackAuthStore';
 import { HubIcon } from './hub-icons';
 import { MemoryIcon } from './icons/MemoryIcon';
 import { SETTINGS_SECTIONS } from './settings/settings-nav-config';
+import { ThemeMenu } from './ThemeMenu';
 import { getThreadIdFromPathname } from './ThreadSidebar/thread-navigation';
+
+const OklchTuner = lazy(() => import('./dev/OklchTuner').then((m) => ({ default: m.OklchTuner })));
 
 const NAV_ITEMS = [
   { id: 'home', path: '/', label: '对话', match: (p: string) => p === '/' || p.startsWith('/thread/') },
@@ -56,32 +58,6 @@ function SignalIcon({ className = 'w-5 h-5' }: { className?: string }) {
         strokeLinejoin="round"
       />
       <line x1="4" y1="22" x2="4" y2="15" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function SunIcon({ className = 'w-5 h-5' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
-      <title>日间模式</title>
-      <circle cx="12" cy="12" r="5" />
-      <line x1="12" y1="1" x2="12" y2="3" />
-      <line x1="12" y1="21" x2="12" y2="23" />
-      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-      <line x1="1" y1="12" x2="3" y2="12" />
-      <line x1="21" y1="12" x2="23" y2="12" />
-      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-    </svg>
-  );
-}
-
-function MoonIcon({ className = 'w-5 h-5' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
-      <title>夜间模式</title>
-      <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -159,8 +135,8 @@ function PinnedSections({ pinned, onNav }: { pinned: readonly string[]; onNav: (
             onClick={() => onNav(`/settings?s=${sec.id}&standalone=1`)}
             className={`flex h-10 w-10 items-center justify-center rounded-lg transition-all ${
               active
-                ? 'bg-[var(--console-rail-active)] shadow-[0_5px_14px_rgba(43,37,32,0.07)]'
-                : 'hover:bg-[var(--console-rail-item)] hover:shadow-[0_5px_14px_rgba(43,37,32,0.07)]'
+                ? 'bg-[var(--console-rail-active)] shadow-[var(--console-rail-shadow)]'
+                : 'hover:bg-[var(--console-rail-item)] hover:shadow-[var(--console-rail-shadow)]'
             }`}
             title={sec.label}
             aria-current={active ? 'page' : undefined}
@@ -173,8 +149,8 @@ function PinnedSections({ pinned, onNav }: { pinned: readonly string[]; onNav: (
   );
 }
 
-const DEGRADED_COLOR = '#F59E0B';
-const BROKEN_COLOR = '#EF4444';
+const DEGRADED_COLOR = 'var(--semantic-warning)';
+const BROKEN_COLOR = 'var(--semantic-critical)';
 const BROKEN_THRESHOLD = 6;
 
 function SettingsButton({ pathname, onNav }: { pathname: string; onNav: (path: string) => void }) {
@@ -196,8 +172,8 @@ function SettingsButton({ pathname, onNav }: { pathname: string; onNav: (path: s
       onClick={() => onNav('/settings')}
       className={`relative flex h-10 w-10 items-center justify-center rounded-lg transition-all ${
         isSettings
-          ? 'bg-[var(--console-rail-active)] shadow-[0_5px_14px_rgba(43,37,32,0.07)]'
-          : 'hover:bg-[var(--console-rail-item)] hover:shadow-[0_5px_14px_rgba(43,37,32,0.07)]'
+          ? 'bg-[var(--console-rail-active)] shadow-[var(--console-rail-shadow)]'
+          : 'hover:bg-[var(--console-rail-item)] hover:shadow-[var(--console-rail-shadow)]'
       }`}
       title={showBadge ? `设置 · MCP Callback Auth 24h ${unviewed} 次未查看失败` : '设置'}
       aria-current={isSettings ? 'page' : undefined}
@@ -212,7 +188,7 @@ function SettingsButton({ pathname, onNav }: { pathname: string; onNav: (path: s
           className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full text-micro font-bold flex items-center justify-center"
           style={{
             backgroundColor: badgeColor,
-            color: '#FFFFFF',
+            color: 'var(--cafe-accent-foreground)',
             maxWidth: '22px',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -229,10 +205,8 @@ function SettingsButton({ pathname, onNav }: { pathname: string; onNav: (path: s
 export function ActivityBar({ className }: ActivityBarProps) {
   const pathname = usePathname() ?? '/';
   const router = useRouter();
-  const { toggleTheme, resolvedTheme } = useCafeTheme();
   const { pinned } = usePinnedSections();
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const [tunerOpen, setTunerOpen] = useState(false);
 
   const handleNav = useCallback(
     (path: string) => {
@@ -256,8 +230,8 @@ export function ActivityBar({ className }: ActivityBarProps) {
             onClick={() => handleNav(item.path)}
             className={`flex h-10 w-10 items-center justify-center rounded-lg transition-all ${
               active
-                ? 'bg-[var(--console-rail-active)] shadow-[0_5px_14px_rgba(43,37,32,0.07)]'
-                : 'hover:bg-[var(--console-rail-item)] hover:shadow-[0_5px_14px_rgba(43,37,32,0.07)]'
+                ? 'bg-[var(--console-rail-active)] shadow-[var(--console-rail-shadow)]'
+                : 'hover:bg-[var(--console-rail-item)] hover:shadow-[var(--console-rail-shadow)]'
             }`}
             title={item.label}
             aria-current={active ? 'page' : undefined}
@@ -273,14 +247,7 @@ export function ActivityBar({ className }: ActivityBarProps) {
       </Suspense>
 
       <div className="mt-auto flex flex-col items-center gap-1.5">
-        <button
-          type="button"
-          onClick={toggleTheme}
-          className="flex h-10 w-10 items-center justify-center rounded-lg hover:bg-[var(--console-rail-item)] hover:shadow-[0_5px_14px_rgba(43,37,32,0.07)] transition-all"
-          title={mounted && resolvedTheme === 'dark' ? '切换到日间模式' : '切换到夜间模式'}
-        >
-          {mounted && resolvedTheme === 'dark' ? <MoonIcon className="h-5 w-5" /> : <SunIcon className="h-5 w-5" />}
-        </button>
+        <ThemeMenu onEditTheme={() => setTunerOpen(true)} />
         <Suspense
           fallback={
             <button
@@ -296,6 +263,11 @@ export function ActivityBar({ className }: ActivityBarProps) {
           <SettingsButton pathname={pathname} onNav={handleNav} />
         </Suspense>
       </div>
+      {tunerOpen && (
+        <Suspense>
+          <OklchTuner onClose={() => setTunerOpen(false)} />
+        </Suspense>
+      )}
     </nav>
   );
 }

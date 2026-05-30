@@ -92,7 +92,7 @@ export function RiskPanel({ projectId, cards }: RiskPanelProps) {
           type="button"
           onClick={() => void runDetection()}
           disabled={detecting || cards.length === 0}
-          className="rounded-lg bg-[var(--mc-accent)] px-4 py-1.5 text-xs font-medium text-white hover:bg-[var(--mc-accent-hover)] disabled:opacity-40"
+          className="rounded-lg bg-[var(--mc-accent)] px-4 py-1.5 text-xs font-medium text-[var(--cafe-surface)] hover:bg-[var(--mc-accent-hover)] disabled:opacity-40"
         >
           {detecting ? '检测中...' : 'Run Detection'}
         </button>
@@ -128,7 +128,7 @@ export function RiskPanel({ projectId, cards }: RiskPanelProps) {
           >
             <div className="mb-2 flex items-center gap-2">
               <span
-                className="rounded-full px-2 py-0.5 text-micro font-medium text-white"
+                className="rounded-full px-2 py-0.5 text-micro font-medium text-[var(--cafe-surface)]"
                 style={{ backgroundColor: SEVERITY_COLORS[severity] }}
               >
                 {severity}

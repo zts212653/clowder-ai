@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { apiFetch } from '@/utils/api-client';
 
 interface SkillPreviewModalProps {
@@ -81,7 +82,7 @@ export function SkillPreviewModal({
   const visibleTriggers = showAllTriggers ? triggerList : triggerList.slice(0, 6);
   const hiddenTriggerCount = showAllTriggers ? 0 : Math.max(triggerList.length - 6, 0);
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-[var(--console-overlay-backdrop)] p-4 backdrop-blur-sm"
       onClick={handleBackdrop}
@@ -158,6 +159,7 @@ export function SkillPreviewModal({
           {error && <p className="text-xs font-semibold text-conn-red-text">{error}</p>}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
