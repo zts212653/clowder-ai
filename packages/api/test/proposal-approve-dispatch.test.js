@@ -7,10 +7,10 @@
  * the initial message when the user approves a proposal" behaviours:
  *
  *  - approve dispatches initialMessage via router + InvocationQueue + processNext
- *  - preferredCats fallback when router resolves 0 targets from message text
- *  - explicit #ideate / #execute tags vs default serial intent
+ *  - dispatch wakes ONLY preferredCats[0] (chain starter); rest is cat-driven
+ *  - explicit #ideate tag opts into "wake all preferredCats" parallel mode
  *  - server-injected "## 主 Thread" header (fork-and-return / skill Step 5c)
- *  - explicit @-mention in content beats preferredCats fallback
+ *  - preferredCats[0] is ground truth; message-body @-mentions are narrative
  *
  * Split out from proposal-flow.test.js to honor AC-X1 ≤350-line file cap
  * (砚砚 re-review on fd8f07ae..76e8d164 flagged the regression).

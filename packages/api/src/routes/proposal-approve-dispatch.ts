@@ -21,11 +21,11 @@ export interface AppendApprovedInitialMessageInput extends ProposalInitialMessag
   threadId: string;
   content: string;
   /**
-   * Optional fallback targets. When the router cannot resolve any @-mention in
-   * `content` (typical case: user wrote "开玩！" as initialMessage without
-   * @-ing the proposed members), we fall back to the proposal's preferredCats
-   * so all proposed members get woken up — that's the whole point of
-   * choosing them on the proposal card.
+   * Proposed chain participants in user-intended order. Dispatch wakes ONLY
+   * `preferredCats[0]` (the chain starter); subsequent cats are driven by the
+   * cat-side @-mention chain in their own replies — "他们自己决定下一个要
+   * 把谁叫出来" (owner spec 2026-05-27). Explicit `#ideate` tag in the
+   * initialMessage opts into "wake all preferredCats parallel" instead.
    */
   preferredCats?: readonly CatId[];
   messageStore: IMessageStore;
