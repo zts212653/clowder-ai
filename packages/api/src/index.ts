@@ -2568,36 +2568,27 @@ async function main(): Promise<void> {
 
     /**
      * #798 止血: Per-page GitHub API fetching to avoid single-buffer overflow.
-     * Splits the fetch into 100-item pages (2MB maxBuffer each) instead of
-     * buffering the entire history into one stdout (which crashed on large PRs).
+     * Always uses per-page mode (100 items, 2MB maxBuffer each) instead of
+     * `--paginate` which buffers the entire history into one stdout.
+     *
+     * When sinceId > 0, only items with id > sinceId are collected.
+     * When sinceId is 0 or omitted, all items are collected.
      *
      * Limitation: GitHub returns oldest-first and not all endpoints support
-     * `since`/`direction` params, so with sinceId we still scan all pages
-     * (filtering client-side). True incremental fetch needs a follow-up
-     * using timestamp cursors + `since` query param or GraphQL `last:N`.
+     * `since`/`direction` params, so we still scan all pages client-side.
+     * True incremental fetch needs timestamp cursors + `since` param or GraphQL.
      */
     const fetchPaginated = async (endpoint: string, sinceId?: number) => {
       const { execFile } = await import('node:child_process');
       const { promisify } = await import('node:util');
       const execFileAsync = promisify(execFile);
 
-      // No cursor → fetch all via --paginate (backward compat for first poll)
-      if (!sinceId) {
-        const { stdout } = await execFileAsync('gh', ['api', endpoint, '--paginate', '--jq', '.[]'], {
-          timeout: 30_000,
-          maxBuffer: 10 * 1024 * 1024,
-        });
-        if (!stdout.trim()) return [];
-        return stdout
-          .trim()
-          .split('\n')
-          .map((line) => JSON.parse(line));
-      }
-
       // Per-page fetch — avoids single-buffer overflow on large PRs.
       // GitHub returns oldest-first (ascending ID); we scan all pages
-      // and collect only items with id > sinceId.
-      const allItems: Record<string, unknown>[] = [];
+      // and collect only items with id > sinceId (0 = collect all).
+      const cursor = sinceId ?? 0;
+      // biome-ignore lint/suspicious/noExplicitAny: GitHub API JSON responses are untyped
+      const allItems: any[] = [];
       let page = 1;
       while (true) {
         const { stdout } = await execFileAsync('gh', ['api', `${endpoint}?per_page=100&page=${page}`, '--jq', '.[]'], {
@@ -2612,7 +2603,7 @@ async function main(): Promise<void> {
           .map((line) => JSON.parse(line));
         if (items.length === 0) break;
 
-        const newItems = items.filter((item: { id?: number }) => (item.id ?? 0) > sinceId);
+        const newItems = cursor > 0 ? items.filter((item: { id?: number }) => (item.id ?? 0) > cursor) : items;
         allItems.push(...newItems);
 
         // GitHub API max per_page is 100; fewer items = last page
