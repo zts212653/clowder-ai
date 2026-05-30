@@ -699,10 +699,11 @@ export class MessageStore {
     return msg;
   }
 
-  /** #697: Scan for message IDs matching a given deliveryStatus. */
-  scanByDeliveryStatus(status: NonNullable<StoredMessage['deliveryStatus']>): string[] {
-    return this.messages.filter((m) => m.deliveryStatus === status).map((m) => m.id);
-  }
+  // #697: scanByDeliveryStatus intentionally NOT implemented for in-memory store.
+  // In-memory store uses a bounded sliding window (MAX_MESSAGES) — messages
+  // beyond the window would be silently ignored, masking real orphans visible
+  // in production Redis. StartupReconciler's guard `if (!messageStore?.scanByDeliveryStatus)`
+  // gracefully skips orphan recovery for in-memory mode. (LL-048 / PR #805 P2-2)
 
   /**
    * Atomic content-dedup claim (synchronous — atomic within the single-threaded event loop).

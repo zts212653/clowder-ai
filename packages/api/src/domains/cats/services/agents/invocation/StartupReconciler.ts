@@ -278,6 +278,11 @@ export class StartupReconciler {
    * #697: Find messages still stuck as deliveryStatus='queued' in MessageStore
    * that have no corresponding InvocationRecord (the in-memory queue entry was
    * lost on restart). Mark them as delivered so they appear in the timeline.
+   *
+   * P2-1 (#805): Also mark any corresponding queued InvocationRecords as failed
+   * to maintain the InvocationRecord single-truth-source invariant. Without this,
+   * a fresh queued record (age < 5min, not caught by sweepStaleQueued) would
+   * remain in Redis as dirty residue — message delivered but record still queued.
    */
   private async recoverOrphanedQueuedMessages(
     affectedThreads: Map<string, { catIds: CatId[]; userId: string }>,
@@ -292,11 +297,14 @@ export class StartupReconciler {
 
       this.deps.log.info(`[startup-reconciler] Found ${queuedIds.length} orphaned queued message(s) — recovering`);
       const now = Date.now();
+      const recoveredMessageIds = new Set<string>();
+
       for (const id of queuedIds) {
         try {
           const result = await messageStore.markDelivered(id, now);
           if (result != null) {
             recovered++;
+            recoveredMessageIds.add(id);
             // Track thread for notification (user should know their queued message wasn't executed)
             const msg = result as { threadId?: string; userId?: string; mentions?: CatId[] };
             if (msg.threadId) {
@@ -310,6 +318,11 @@ export class StartupReconciler {
                   if (!existing.catIds.includes(catId)) existing.catIds.push(catId);
                 }
               }
+              if (existing.catIds.length === 0) {
+                this.deps.log.warn(
+                  `[startup-reconciler] unusual: queued message ${id} has no mentions — broadcast or system message in invocation queue`,
+                );
+              }
               affectedThreads.set(msg.threadId, existing);
             }
           }
@@ -317,10 +330,47 @@ export class StartupReconciler {
           this.deps.log.warn(`[startup-reconciler] Failed to recover queued message ${id}: ${String(err)}`);
         }
       }
+
+      // P2-1: Clean up corresponding InvocationRecords to prevent dirty residue.
+      // Scan all queued records and mark any whose userMessageId was just recovered.
+      await this.cleanupMatchingInvocationRecords(recoveredMessageIds);
     } catch (err) {
       this.deps.log.warn(`[startup-reconciler] Failed to scan for orphaned queued messages: ${String(err)}`);
     }
     return recovered;
+  }
+
+  /**
+   * P2-1 (#805): After recovering orphaned queued messages, clean up any
+   * InvocationRecords that reference those messages. Aligns record state with
+   * message state (both converge to terminal) so InvocationRecord remains the
+   * single truth source for invocation lifecycle.
+   */
+  private async cleanupMatchingInvocationRecords(recoveredMessageIds: Set<string>): Promise<void> {
+    if (recoveredMessageIds.size === 0) return;
+    const store = this.deps.invocationRecordStore;
+    // biome-ignore lint/complexity/useLiteralKeys: TS index signature requires bracket access
+    if (!('scanByStatus' in store) || typeof (store as Record<string, unknown>)['scanByStatus'] !== 'function') return;
+    const scanStore = store as ScanStore;
+
+    try {
+      const queuedRecordIds = await scanStore.scanByStatus('queued');
+      for (const recordId of queuedRecordIds) {
+        const record = await store.get(recordId);
+        if (record?.userMessageId && recoveredMessageIds.has(record.userMessageId)) {
+          await store.update(recordId, {
+            status: 'failed',
+            expectedStatus: 'queued',
+            error: 'process_restart',
+          });
+          this.deps.log.info(
+            `[startup-reconciler] Marked InvocationRecord ${recordId} as failed (message ${record.userMessageId} recovered)`,
+          );
+        }
+      }
+    } catch (err) {
+      this.deps.log.warn(`[startup-reconciler] Failed to clean up InvocationRecords: ${String(err)}`);
+    }
   }
 
   /**

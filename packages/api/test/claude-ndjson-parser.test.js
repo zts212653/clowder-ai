@@ -329,6 +329,60 @@ test('assistant event with only empty text block → null (no empty bubble)', ()
   assert.equal(result, null, 'assistant event with only empty text block should return null');
 });
 
+// ── #778 + #805 review P3-4: thinking-only assistant message fixture ──
+// Real Claude non-streaming response where content = [{ type: 'thinking', thinking: '...' }]
+// with no text or tool_use blocks. This is the exact pattern that caused silent_completion
+// before the #778 fix. Serves as regression test for Claude API spec drift.
+
+test('assistant thinking-only message → system_info(thinking) (non-streaming fixture)', () => {
+  const state = makeStreamState();
+  // Real Claude API shape: content block has `type: 'thinking'` and `thinking: '...'` field
+  const event = {
+    type: 'assistant',
+    message: {
+      id: 'msg-thinking-only',
+      content: [
+        {
+          type: 'thinking',
+          thinking: 'I need to analyze this problem step by step...',
+        },
+      ],
+    },
+  };
+  const result = transformClaudeEvent(event, CAT, state);
+  assert.ok(result !== null, 'thinking-only message must not return null');
+  assert.ok(!Array.isArray(result), 'should return single message');
+  assert.equal(result.type, 'system_info');
+  assert.equal(result.catId, CAT);
+  const parsed = JSON.parse(result.content);
+  assert.equal(parsed.type, 'thinking');
+  assert.equal(parsed.catId, CAT);
+  assert.equal(parsed.text, 'I need to analyze this problem step by step...');
+});
+
+test('assistant thinking-only with `text` field fallback → system_info(thinking)', () => {
+  const state = makeStreamState();
+  // Some API versions may use `text` instead of `thinking` field
+  const event = {
+    type: 'assistant',
+    message: {
+      id: 'msg-thinking-text-fallback',
+      content: [
+        {
+          type: 'thinking',
+          text: 'Fallback thinking content',
+        },
+      ],
+    },
+  };
+  const result = transformClaudeEvent(event, CAT, state);
+  assert.ok(result !== null, 'thinking-only (text fallback) must not return null');
+  assert.ok(!Array.isArray(result));
+  assert.equal(result.type, 'system_info');
+  const parsed = JSON.parse(result.content);
+  assert.equal(parsed.text, 'Fallback thinking content');
+});
+
 test('assistant event with empty text block alongside tool_use → only tool_use returned', () => {
   const state = makeStreamState();
   const event = {

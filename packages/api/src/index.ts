@@ -2566,53 +2566,9 @@ async function main(): Promise<void> {
     // F140: review-feedback with ReviewFeedbackRouter (KD-11 replaces review-comments)
     // feedbackFilter created above — Rule A only post-E.2 cutover (self-authored skip)
 
-    /**
-     * #798: Per-page GitHub API fetching — root-cause fix for maxBuffer crash.
-     * Replaced `--paginate` (buffers entire history into one stdout) with
-     * per-page mode (100 items, 2MB maxBuffer each). Each page has bounded
-     * size so buffer overflow is structurally impossible.
-     *
-     * When sinceId > 0, only items with id > sinceId are collected.
-     * When sinceId is 0 or omitted, all items are collected.
-     *
-     * Performance note: GitHub returns oldest-first and not all endpoints
-     * support `since`/`direction` params, so we still scan all pages
-     * client-side. A future optimization could use GraphQL `last:N`.
-     */
-    const fetchPaginated = async (endpoint: string, sinceId?: number) => {
-      const { execFile } = await import('node:child_process');
-      const { promisify } = await import('node:util');
-      const execFileAsync = promisify(execFile);
-
-      // Per-page fetch — avoids single-buffer overflow on large PRs.
-      // GitHub returns oldest-first (ascending ID); we scan all pages
-      // and collect only items with id > sinceId (0 = collect all).
-      const cursor = sinceId ?? 0;
-      // biome-ignore lint/suspicious/noExplicitAny: GitHub API JSON responses are untyped
-      const allItems: any[] = [];
-      let page = 1;
-      while (true) {
-        const { stdout } = await execFileAsync('gh', ['api', `${endpoint}?per_page=100&page=${page}`, '--jq', '.[]'], {
-          timeout: 15_000,
-          maxBuffer: 2 * 1024 * 1024,
-        });
-        if (!stdout.trim()) break; // empty page = no more data
-
-        const items = stdout
-          .trim()
-          .split('\n')
-          .map((line) => JSON.parse(line));
-        if (items.length === 0) break;
-
-        const newItems = cursor > 0 ? items.filter((item: { id?: number }) => (item.id ?? 0) > cursor) : items;
-        allItems.push(...newItems);
-
-        // GitHub API max per_page is 100; fewer items = last page
-        if (items.length < 100) break;
-        page++;
-      }
-      return allItems;
-    };
+    // #798: fetchPaginated extracted to infrastructure/github/fetch-paginated.ts for testability
+    const { fetchPaginated: fetchPaginatedFn } = await import('./infrastructure/github/fetch-paginated.js');
+    const fetchPaginated = (endpoint: string, sinceId?: number) => fetchPaginatedFn(endpoint, { sinceId });
 
     taskRunnerV2.register(
       createReviewFeedbackTaskSpec({

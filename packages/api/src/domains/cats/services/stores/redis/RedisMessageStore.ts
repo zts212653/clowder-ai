@@ -859,8 +859,7 @@ export class RedisMessageStore {
    * Called by StartupReconciler to find orphaned queued messages after restart.
    */
   async scanByDeliveryStatus(status: string): Promise<string[]> {
-    const keyPrefix = (this.redis as { options?: { keyPrefix?: string } }).options?.keyPrefix ?? '';
-    const matchPattern = `${keyPrefix}${MessageKeys.detail('*')}`;
+    const matchPattern = `${this.keyPrefix}${MessageKeys.detail('*')}`;
     const ids: string[] = [];
     let cursor = '0';
     do {
@@ -869,15 +868,13 @@ export class RedisMessageStore {
       if (keys.length > 0) {
         const pipeline = this.redis.pipeline();
         for (const key of keys) {
-          const stripped = keyPrefix ? key.slice(keyPrefix.length) : key;
-          pipeline.hget(stripped, 'deliveryStatus');
+          pipeline.hget(this.stripPrefix(key), 'deliveryStatus');
         }
         const results = await pipeline.exec();
         for (let i = 0; i < keys.length; i++) {
           const [err, val] = results?.[i] ?? [null, null];
           if (!err && val === status) {
-            const key = keyPrefix ? keys[i]!.slice(keyPrefix.length) : keys[i]!;
-            ids.push(key.replace(/^msg:/, ''));
+            ids.push(this.stripPrefix(keys[i]!).replace(/^msg:/, ''));
           }
         }
       }

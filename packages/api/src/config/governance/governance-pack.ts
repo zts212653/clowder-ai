@@ -16,7 +16,12 @@ export const MANAGED_BLOCK_START = '<!-- CAT-CAFE-GOVERNANCE-START -->';
 export const MANAGED_BLOCK_END = '<!-- CAT-CAFE-GOVERNANCE-END -->';
 
 /** Read port config from env at call time so governance rules
- *  reflect the actual runtime ports, not hardcoded defaults. */
+ *  reflect the actual runtime ports, not hardcoded defaults.
+ *
+ *  NOTE: This makes the governance block (and its checksum) env-sensitive.
+ *  Same git SHA with different env vars produces different checksums/content.
+ *  External caches assuming "same cat-cafe version → same governance block"
+ *  must account for this — use checksum as cache key, not version alone. */
 function getHardConstraints(): string {
   const frontendPort = process.env.FRONTEND_PORT ?? '3003';
   const apiPort = process.env.API_SERVER_PORT ?? '3004';
