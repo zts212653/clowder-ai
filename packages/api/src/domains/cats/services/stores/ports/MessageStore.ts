@@ -283,6 +283,9 @@ export interface IMessageStore {
    * gate. In-memory: synchronous Map check+set (atomic within the event loop). Redis: SET NX PX.
    */
   claimContentDedupKey(key: string, ttlMs: number): boolean | Promise<boolean>;
+  /** #697: Find message IDs with a given deliveryStatus. Used by StartupReconciler
+   *  to recover orphaned queued messages after process restart. */
+  scanByDeliveryStatus?(status: NonNullable<StoredMessage['deliveryStatus']>): string[] | Promise<string[]>;
 }
 
 /** Max messages to keep in memory */
@@ -694,6 +697,11 @@ export class MessageStore {
     if (!msg) return null;
     msg.deliveryStatus = 'canceled';
     return msg;
+  }
+
+  /** #697: Scan for message IDs matching a given deliveryStatus. */
+  scanByDeliveryStatus(status: NonNullable<StoredMessage['deliveryStatus']>): string[] {
+    return this.messages.filter((m) => m.deliveryStatus === status).map((m) => m.id);
   }
 
   /**

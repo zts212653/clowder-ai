@@ -206,6 +206,23 @@ export function transformClaudeEvent(
     if (messageId && skipFinalText) {
       streamState.partialTextMessageIds.delete(messageId);
     }
+    // #778: thinking-only final message — emit system_info instead of null
+    // to prevent silent_completion when Opus 4.7 produces thinking blocks
+    // without text. Streaming thinking_delta already captured the content;
+    // this is a safety net for edge cases (network loss, non-streaming mode).
+    if (messages.length === 0) {
+      const hasThinking = content.some(
+        (b) => typeof b === 'object' && b !== null && (b as Record<string, unknown>).type === 'thinking',
+      );
+      if (hasThinking) {
+        return {
+          type: 'system_info' as AgentMessage['type'],
+          catId,
+          content: JSON.stringify({ type: 'thinking_only_final', catId }),
+          timestamp: Date.now(),
+        };
+      }
+    }
     return messages.length > 0 ? messages : null;
   }
 

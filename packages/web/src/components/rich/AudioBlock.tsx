@@ -128,8 +128,8 @@ export function AudioBlock({ block, catId }: { block: RichAudioBlock; catId?: st
                 className="opacity-70"
               >
                 <path d="M11 5L6 9H2v6h4l5 4V5z" />
-                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                <path d="M19.07 4.93a10 10 0 0 1 0 14.14" className="animate-pulse" />
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" className="animate-ping-slow" />
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14" className="animate-ping-slow animation-delay-200" />
               </svg>
             ) : (
               <svg
@@ -147,15 +147,17 @@ export function AudioBlock({ block, catId }: { block: RichAudioBlock; catId?: st
             )}
           </span>
 
-          {/* Progress dots / bar */}
-          <div className="flex-1 flex items-center gap-[3px]">
-            {Array.from({ length: 6 }).map((_, i) => (
+          {/* #738: Animated sound bars (WeChat-style) */}
+          <div className="flex-1 flex items-end gap-[3px] h-4">
+            {Array.from({ length: 8 }).map((_, i) => (
               <div
                 key={i}
-                className={`rounded-full transition-all duration-150 ${
-                  playing && progress > i / 6 ? `h-3 ${colors.bar}` : `h-1.5 ${colors.bar} opacity-30`
-                }`}
-                style={{ width: '3px' }}
+                className={`rounded-full transition-all ${colors.bar} ${playing ? 'animate-sound-bar' : 'opacity-30'}`}
+                style={{
+                  width: '3px',
+                  height: playing ? undefined : '4px',
+                  animationDelay: playing ? `${i * 80}ms` : undefined,
+                }}
               />
             ))}
           </div>

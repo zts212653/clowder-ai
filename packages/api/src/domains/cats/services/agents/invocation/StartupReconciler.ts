@@ -38,6 +38,8 @@ interface MessageAppender {
   append(msg: AppendMessageInput): unknown;
   /** Mark a queued message as delivered (make visible in timeline). */
   markDelivered?(id: string, deliveredAt: number): unknown;
+  /** #697: Scan for message IDs with a given deliveryStatus. */
+  scanByDeliveryStatus?(status: string): string[] | Promise<string[]>;
 }
 
 interface ConnectorMessageBroadcaster {
@@ -97,12 +99,18 @@ export class StartupReconciler {
     const runResult = await this.sweepRunning(scanStore, this.deps.processStartAt, affectedThreads);
     const queueResult = await this.sweepStaleQueued(scanStore, affectedThreads);
 
+    // #697: Recover orphaned queued messages that have no matching InvocationRecord.
+    // These were persisted to MessageStore with deliveryStatus='queued' but the
+    // in-memory InvocationQueue entry was lost on restart. Without this, they stay
+    // invisible in timeline forever.
+    const orphanedMessageRecovery = await this.recoverOrphanedQueuedMessages(affectedThreads);
+
     const notifiedThreads = await this.notifyAffectedThreads(affectedThreads);
 
     const running = runResult.running;
     const queued = queueResult.queued;
     const taskProgressCleared = runResult.taskProgressCleared;
-    const messagesRecovered = runResult.messagesRecovered + queueResult.messagesRecovered;
+    const messagesRecovered = runResult.messagesRecovered + queueResult.messagesRecovered + orphanedMessageRecovery;
     const swept = running + queued;
     const durationMs = Date.now() - start;
     this.deps.log.info(
@@ -264,6 +272,49 @@ export class StartupReconciler {
       }
     }
     return cleared;
+  }
+
+  /**
+   * #697: Find messages still stuck as deliveryStatus='queued' in MessageStore
+   * that have no corresponding InvocationRecord (the in-memory queue entry was
+   * lost on restart). Mark them as delivered so they appear in the timeline.
+   */
+  private async recoverOrphanedQueuedMessages(
+    affectedThreads: Map<string, { catIds: CatId[]; userId: string }>,
+  ): Promise<number> {
+    const { messageStore } = this.deps;
+    if (!messageStore?.scanByDeliveryStatus || !messageStore.markDelivered) return 0;
+
+    let recovered = 0;
+    try {
+      const queuedIds = await messageStore.scanByDeliveryStatus('queued');
+      if (queuedIds.length === 0) return 0;
+
+      this.deps.log.info(`[startup-reconciler] Found ${queuedIds.length} orphaned queued message(s) — recovering`);
+      const now = Date.now();
+      for (const id of queuedIds) {
+        try {
+          const result = await messageStore.markDelivered(id, now);
+          if (result != null) {
+            recovered++;
+            // Track thread for notification (user should know their queued message wasn't executed)
+            const msg = result as { threadId?: string; userId?: string };
+            if (msg.threadId) {
+              const existing = affectedThreads.get(msg.threadId) ?? {
+                catIds: [],
+                userId: (msg.userId as string) ?? 'unknown',
+              };
+              affectedThreads.set(msg.threadId, existing);
+            }
+          }
+        } catch (err) {
+          this.deps.log.warn(`[startup-reconciler] Failed to recover queued message ${id}: ${String(err)}`);
+        }
+      }
+    } catch (err) {
+      this.deps.log.warn(`[startup-reconciler] Failed to scan for orphaned queued messages: ${String(err)}`);
+    }
+    return recovered;
   }
 
   /**

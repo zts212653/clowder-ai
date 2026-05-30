@@ -2566,18 +2566,56 @@ async function main(): Promise<void> {
     // F140: review-feedback with ReviewFeedbackRouter (KD-11 replaces review-comments)
     // feedbackFilter created above — Rule A only post-E.2 cutover (self-authored skip)
 
-    const fetchPaginated = async (endpoint: string) => {
+    /**
+     * #798: Per-page GitHub API fetching with optional cursor-based early termination.
+     * When sinceId is provided, stops fetching once all items on a page have id <= sinceId,
+     * avoiding the O(total) full-history fetch that --paginate performs.
+     * Without sinceId, falls back to --paginate for backward compatibility.
+     */
+    const fetchPaginated = async (endpoint: string, sinceId?: number) => {
       const { execFile } = await import('node:child_process');
       const { promisify } = await import('node:util');
       const execFileAsync = promisify(execFile);
-      const { stdout } = await execFileAsync('gh', ['api', endpoint, '--paginate', '--jq', '.[]'], {
-        timeout: 30_000,
-      });
-      if (!stdout.trim()) return [];
-      return stdout
-        .trim()
-        .split('\n')
-        .map((line) => JSON.parse(line));
+
+      // Fast path: no cursor → fetch all (backward compat for first poll)
+      if (!sinceId) {
+        const { stdout } = await execFileAsync('gh', ['api', endpoint, '--paginate', '--jq', '.[]'], {
+          timeout: 30_000,
+          maxBuffer: 10 * 1024 * 1024,
+        });
+        if (!stdout.trim()) return [];
+        return stdout
+          .trim()
+          .split('\n')
+          .map((line) => JSON.parse(line));
+      }
+
+      // Per-page fetch with early termination
+      const allItems: Record<string, unknown>[] = [];
+      let page = 1;
+      while (true) {
+        const { stdout } = await execFileAsync('gh', ['api', `${endpoint}?per_page=100&page=${page}`, '--jq', '.[]'], {
+          timeout: 15_000,
+          maxBuffer: 2 * 1024 * 1024,
+        });
+        if (!stdout.trim()) break; // empty page = no more data
+
+        const items = stdout
+          .trim()
+          .split('\n')
+          .map((line) => JSON.parse(line));
+        if (items.length === 0) break;
+
+        const newItems = items.filter((item: { id?: number }) => (item.id ?? 0) > sinceId);
+        allItems.push(...newItems);
+
+        // If any item on this page is at or below the cursor, we've caught up
+        if (newItems.length < items.length) break;
+        // GitHub API max per_page is 100; fewer items = last page
+        if (items.length < 100) break;
+        page++;
+      }
+      return allItems;
     };
 
     taskRunnerV2.register(
@@ -2605,10 +2643,10 @@ async function main(): Promise<void> {
             return null;
           }
         },
-        fetchComments: async (repo, pr) => {
+        fetchComments: async (repo, pr, sinceId) => {
           const [reviewComments, issueComments] = await Promise.all([
-            fetchPaginated(`/repos/${repo}/pulls/${pr}/comments`),
-            fetchPaginated(`/repos/${repo}/issues/${pr}/comments`),
+            fetchPaginated(`/repos/${repo}/pulls/${pr}/comments`, sinceId),
+            fetchPaginated(`/repos/${repo}/issues/${pr}/comments`, sinceId),
           ]);
           return [...reviewComments, ...issueComments].map(
             (c: {
@@ -2632,8 +2670,8 @@ async function main(): Promise<void> {
             }),
           );
         },
-        fetchReviews: async (repo, pr) => {
-          const reviews = await fetchPaginated(`/repos/${repo}/pulls/${pr}/reviews`);
+        fetchReviews: async (repo, pr, sinceId) => {
+          const reviews = await fetchPaginated(`/repos/${repo}/pulls/${pr}/reviews`, sinceId);
           return reviews.map(
             (r: {
               id: number;

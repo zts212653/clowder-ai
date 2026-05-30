@@ -29,7 +29,6 @@ const EXAMPLE_ALLOWLIST = new Map([
   ['CAT_CODEX_MODEL', 'Dynamic per-cat model override (pattern: CAT_{ID}_MODEL)'],
   ['CAT_GEMINI_MODEL', 'Dynamic per-cat model override (pattern: CAT_{ID}_MODEL)'],
   ['NEXT_PUBLIC_BRAND_NAME', 'Consumed by Next.js frontend at build time, not TypeScript API'],
-  ['REDIS_PORT', 'Consumed by Docker Compose / shell scripts, not TypeScript API directly'],
   ['ASR_ENABLED', 'Voice service toggle consumed by Python sidecar, not TypeScript API'],
   ['TTS_ENABLED', 'Voice service toggle consumed by Python sidecar, not TypeScript API'],
   ['LLM_POSTPROCESS_ENABLED', 'Voice service toggle consumed by Python sidecar, not TypeScript API'],
