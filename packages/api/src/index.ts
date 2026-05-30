@@ -2567,17 +2567,21 @@ async function main(): Promise<void> {
     // feedbackFilter created above — Rule A only post-E.2 cutover (self-authored skip)
 
     /**
-     * #798: Per-page GitHub API fetching with optional cursor-based early termination.
-     * When sinceId is provided, stops fetching once all items on a page have id <= sinceId,
-     * avoiding the O(total) full-history fetch that --paginate performs.
-     * Without sinceId, falls back to --paginate for backward compatibility.
+     * #798 止血: Per-page GitHub API fetching to avoid single-buffer overflow.
+     * Splits the fetch into 100-item pages (2MB maxBuffer each) instead of
+     * buffering the entire history into one stdout (which crashed on large PRs).
+     *
+     * Limitation: GitHub returns oldest-first and not all endpoints support
+     * `since`/`direction` params, so with sinceId we still scan all pages
+     * (filtering client-side). True incremental fetch needs a follow-up
+     * using timestamp cursors + `since` query param or GraphQL `last:N`.
      */
     const fetchPaginated = async (endpoint: string, sinceId?: number) => {
       const { execFile } = await import('node:child_process');
       const { promisify } = await import('node:util');
       const execFileAsync = promisify(execFile);
 
-      // Fast path: no cursor → fetch all (backward compat for first poll)
+      // No cursor → fetch all via --paginate (backward compat for first poll)
       if (!sinceId) {
         const { stdout } = await execFileAsync('gh', ['api', endpoint, '--paginate', '--jq', '.[]'], {
           timeout: 30_000,
@@ -2590,9 +2594,9 @@ async function main(): Promise<void> {
           .map((line) => JSON.parse(line));
       }
 
-      // Per-page fetch — GitHub returns oldest-first (ascending ID).
-      // We paginate through all pages, collecting only items > sinceId.
-      // Early termination only on empty/short page (last page).
+      // Per-page fetch — avoids single-buffer overflow on large PRs.
+      // GitHub returns oldest-first (ascending ID); we scan all pages
+      // and collect only items with id > sinceId.
       const allItems: Record<string, unknown>[] = [];
       let page = 1;
       while (true) {
