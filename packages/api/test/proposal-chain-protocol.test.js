@@ -141,6 +141,101 @@ describe('F128 chain protocol injection', () => {
     );
   });
 
+  test('router.resolveTargetsAndIntent receives raw initialMessage — parent-title `@cat` mentions cannot leak into dispatch or participants', async () => {
+    // 砚砚 PR #809 round-3 P2: real router runs parseAllMentions +
+    // resolveTargets(persist=true) on its message arg, which means it BOTH
+    // (a) writes every mentioned cat into the new sub-thread's participants
+    // and (b) feeds dispatch's `preferredCats?.[0] ?? resolved.targetCats[0]`
+    // fallback. Before this fix the enriched content was passed, so a
+    // parent thread titled `Parent @opus thread` would silently wake `opus`
+    // and persist `opus` into participants whenever the user proposed
+    // without preferredCats and without an @ in their raw initialMessage.
+    // Pin both contracts: router only sees raw, and the fallback path
+    // genuinely warns "no targets" instead of waking a phantom cat.
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const invocationQueue = new InvocationQueue();
+    let routerReceivedMessage = null;
+    const router = {
+      async resolveTargetsAndIntent(message) {
+        routerReceivedMessage = message;
+        // Simulate the real router behaviour: parse @-mentions from input.
+        const mentionMatches = message.match(/@(\w+)/g) ?? [];
+        const targetCats = mentionMatches.map((m) => m.slice(1));
+        return {
+          targetCats,
+          intent: { intent: 'execute' },
+          hasMentions: targetCats.length > 0,
+        };
+      },
+    };
+    const queueProcessor = {
+      async processNext() {
+        return { started: true };
+      },
+    };
+    const ctx = await createProposalTestContext({
+      routerOverride: router,
+      invocationQueueOverride: invocationQueue,
+      queueProcessorOverride: queueProcessor,
+    });
+    // Parent thread title intentionally contains a `@opus` mention.
+    const source = await ctx.threadStore.create('alice', 'Parent @opus thread');
+    const { proposalId } = JSON.parse(
+      (
+        await ctx.propose({
+          userId: 'alice',
+          // Raw user input: no @-mention, no preferredCats.
+          body: { initialMessage: '开玩!', preferredCats: [] },
+          threadId: source.id,
+        })
+      ).body,
+    );
+
+    const res = await ctx.approve('alice', proposalId);
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+
+    // Router input must be raw — never enriched.
+    assert.equal(
+      routerReceivedMessage,
+      '开玩!',
+      'router.resolveTargetsAndIntent must receive raw initialMessage, not enriched content',
+    );
+    assert.ok(
+      routerReceivedMessage && !routerReceivedMessage.includes('@opus'),
+      'router input must NOT contain parent-title @opus (would persist into participants)',
+    );
+    assert.ok(
+      routerReceivedMessage && !routerReceivedMessage.includes('## 主 Thread'),
+      'router input must NOT contain server-injected header',
+    );
+
+    // Behavioural consequence: no phantom enqueue. user with empty
+    // preferredCats and no @ deserves an explicit "nobody to wake" warning,
+    // not a silent wake of @parent-title-cat.
+    const entries = invocationQueue.list(body.threadId, 'alice');
+    assert.equal(
+      entries.length,
+      0,
+      'no enqueue — router resolved 0 targets from raw, dispatch fell through to warning',
+    );
+    assert.ok(
+      Array.isArray(body.warnings) && body.warnings.some((w) => w.includes('no target cats resolved')),
+      'response must surface the "no target cats resolved" warning instead of silently waking parent-title @cat',
+    );
+
+    // The stored sub-thread first-message body still gets the enriched
+    // content (header + parent title verbatim) — the fix is at the router
+    // input boundary, not by sanitising the stored message.
+    const messages = await ctx.messageStore.getByThread(body.threadId);
+    const firstSubThreadMessage = messages.find((m) => m.content.includes('开玩!'));
+    assert.ok(firstSubThreadMessage, 'enriched message still stored in the sub-thread');
+    assert.ok(
+      firstSubThreadMessage.content.includes('@opus'),
+      'stored sub-thread message faithfully echoes parent title (display fidelity preserved)',
+    );
+  });
+
   test('approve omits chain protocol when preferredCats is empty (no chain to orchestrate)', async () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const invocationQueue = new InvocationQueue();

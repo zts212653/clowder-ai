@@ -27,17 +27,33 @@ export interface AppendApprovedInitialMessageInput extends ProposalInitialMessag
    */
   content: string;
   /**
-   * Raw user-typed initialMessage BEFORE enrichWithParentThreadHeader. Only
-   * used as the parseIntent source — NEVER stored or enqueued. Defaults to
-   * `content` for backward compatibility, but callers that pre-enrich MUST
-   * pass the raw form, otherwise server-injected text (parent thread title,
-   * chain protocol explanation) can trip parseIntent's `#tag` regex and
-   * flip a serial proposal into parallel mode (砚砚 PR #809 review P2 —
-   * reproduced: parent title `Parent #ideate title` + initialMessage `开玩!`
-   * → targetCats expanded to all preferredCats, intent forced to ideate).
-   * parseIntent intentionally scans the whole string, so isolating its
-   * input is the correct fix; router.resolveTargetsAndIntent keeps reading
-   * the enriched content because dispatch overrides its targetCats anyway.
+   * Raw user-typed initialMessage BEFORE enrichWithParentThreadHeader. Used
+   * as the parseIntent source AND as the router.resolveTargetsAndIntent
+   * source — NEVER stored or enqueued (enqueue/store continue to use the
+   * enriched `content` so cats see the full parent-thread header + chain
+   * protocol section). Defaults to `content` for backward compatibility,
+   * but callers that pre-enrich MUST pass the raw form, otherwise
+   * server-injected text leaks into routing in two ways:
+   *
+   *   1. parseIntent footgun (砚砚 PR #809 round-2 P2): a parent thread
+   *      title containing `#ideate` trips `/#(\w+)/gi` and forces serial
+   *      proposals into parallel mode. Reproduced: parent title
+   *      `Parent #ideate title` + initialMessage `开玩!` → intent=ideate.
+   *
+   *   2. router @-mention persistence footgun (砚砚 PR #809 round-3 P2):
+   *      `router.resolveTargetsAndIntent(..., { persist: true })` scans
+   *      its input for `@-mentions` and persists every hit to thread
+   *      participants. A parent thread title `Parent @opus thread` would
+   *      silently wake `opus` AND write `opus` into the new sub-thread's
+   *      participants whenever the user proposed with `preferredCats=[]`
+   *      and no `@` in their initialMessage. Both effects are wrong: the
+   *      parent title is server-injected display text, not user intent.
+   *
+   * dispatch fallback `preferredCats?.[0] ?? resolved.targetCats[0]` only
+   * uses resolved.targetCats when preferredCats is empty, but that path
+   * exists, so we must close the leak at the router input. router still
+   * needs the threadId for context (e.g. existing participants), but the
+   * message argument must be the raw user intent only.
    */
   rawContent?: string;
   /**
@@ -143,15 +159,17 @@ export async function appendApprovedInitialMessage({
     };
   }
 
-  const resolved = await router.resolveTargetsAndIntent(content, threadId, { persist: true });
-  // F128 (砚砚 PR #809 review P2): parseIntent MUST see the raw user-typed
-  // initialMessage, NOT the enriched content. Otherwise server-injected text
-  // (parent thread title containing `#ideate`, chain protocol explanation,
-  // etc.) trips parseIntent's `#tag` regex and forces parallel mode on
-  // proposals that the user wanted serial. router targets are unaffected by
-  // this — dispatch always overrides targetCats below, so router can keep
-  // reading the enriched content (it needs the full mention surface).
+  // F128 (砚砚 PR #809 round-2 + round-3 P2): isolate router AND parseIntent
+  // inputs to the raw user-typed initialMessage. Enqueue/store still use the
+  // enriched content below so cats see the full "## 主 Thread" + chain
+  // protocol section. See AppendApprovedInitialMessageInput.rawContent
+  // jsdoc for the full footgun catalogue.
+  //   - parseIntent: must not see `#ideate` from parent title
+  //   - router.resolveTargetsAndIntent(persist=true): must not write
+  //     parent-title `@cat` mentions into the new sub-thread participants
+  //     and must not feed dispatch fallback (preferredCats=[] path).
   const intentSource = rawContent ?? content;
+  const resolved = await router.resolveTargetsAndIntent(intentSource, threadId, { persist: true });
   const parsed = parseIntent(intentSource, preferredCats?.length ?? resolved.targetCats.length);
 
   // F128 dispatch model — "他们自己决定下一个要把谁叫出来" (owner-defined, 2026-05-27):
