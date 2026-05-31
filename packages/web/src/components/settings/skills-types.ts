@@ -59,6 +59,7 @@ export interface SettingsSkillItem {
   category: string;
   trigger: string;
   description?: string;
+  pluginId?: string;
   governance: {
     mounts: SkillMount;
     mountedCount: number;
@@ -124,6 +125,7 @@ export function composeSkillItems(governance: SkillsData, capabilityItems: Capab
       category: skill.category,
       trigger: skill.trigger,
       description: skill.description,
+      pluginId: cap?.pluginId,
       governance: {
         mounts: skill.mounts,
         mountedCount: getMountedCount(skill.mounts),

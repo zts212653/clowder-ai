@@ -64,6 +64,10 @@ export interface CapabilityEntry {
   lockVersion?: LockVersion;
   /** F146-C: Persistent probe state (AC-C3/C4/C6) */
   probeState?: ProbeState;
+  /** F202: Plugin that owns this capability (for plugin-managed resources) */
+  pluginId?: string;
+  /** F202: Limb node ID (for type: 'limb') — enables deregistration when YAML is unreadable */
+  limbNodeId?: string;
 }
 
 /** Sanitized MCP server details included in the capability board payload. */
@@ -124,6 +128,8 @@ export interface CapabilityBoardItem {
   ecosystem?: MarketplaceEcosystem;
   /** F146-D: Version lock info (from Phase C install governance) */
   lockVersion?: LockVersion;
+  /** F202: Plugin that owns this capability */
+  pluginId?: string;
 }
 
 /** Lightweight MCP tool info for board display */

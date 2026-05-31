@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { CapabilityBoardItem } from '../../capability-board-ui';
 import { composeSkillItems, matchesSkillSearch, type SettingsSkillItem, type SkillsData } from '../skills-types';
 
 function makeSkillItem(overrides: Partial<SettingsSkillItem> = {}): SettingsSkillItem {
@@ -90,5 +91,54 @@ describe('composeSkillItems', () => {
     };
     const result = composeSkillItems(governance, []);
     expect(result[0].description).toBeUndefined();
+  });
+
+  it('maps pluginId from CapabilityBoardItem', () => {
+    const governance: SkillsData = {
+      skills: [
+        {
+          name: 'weixin-mp',
+          category: '插件',
+          trigger: '/weixin',
+          mounts: { claude: true, codex: false, gemini: false, kimi: false },
+          requiresMcp: [],
+        },
+      ],
+      summary: { total: 1, allMounted: false, registrationConsistent: true },
+      staleness: null,
+      conflicts: [],
+    };
+    const caps: CapabilityBoardItem[] = [
+      {
+        id: 'weixin-mp',
+        type: 'skill',
+        source: 'cat-cafe',
+        enabled: true,
+        cats: { claude: true },
+        pluginId: 'weixin-mp',
+      },
+    ];
+    const result = composeSkillItems(governance, caps);
+    expect(result[0].pluginId).toBe('weixin-mp');
+  });
+
+  it('pluginId is undefined when capability item has no pluginId', () => {
+    const governance: SkillsData = {
+      skills: [
+        {
+          name: 'tdd',
+          category: 'SOP',
+          trigger: '/tdd',
+          mounts: { claude: true, codex: true, gemini: true, kimi: true },
+          requiresMcp: [],
+        },
+      ],
+      summary: { total: 1, allMounted: true, registrationConsistent: true },
+      staleness: null,
+      conflicts: [],
+    };
+    const caps: CapabilityBoardItem[] = [{ id: 'tdd', type: 'skill', source: 'cat-cafe', enabled: true, cats: {} }];
+    const result = composeSkillItems(governance, caps);
+    expect(result[0].pluginId).toBeUndefined();
   });
 });

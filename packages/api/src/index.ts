@@ -4,7 +4,7 @@
  */
 
 import { join } from 'node:path';
-import { type CatConfig, type CatId, CORE_COMMANDS, catRegistry } from '@cat-cafe/shared';
+import { type CatConfig, type CatId, CORE_COMMANDS, catRegistry, type ILimbNode } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createRedisClient, SessionStore } from '@cat-cafe/shared/utils';
 import fastifyCookie from '@fastify/cookie';
@@ -1586,6 +1586,69 @@ async function main(): Promise<void> {
   const limbPairingStore = new LimbPairingStore();
   registerLimbNodeRoutes(app, { limbRegistry, pairingStore: limbPairingStore });
 
+  // F202: Plugin framework — discovery + config + resource activation
+  {
+    const { join } = await import('node:path');
+    const { PluginRegistry } = await import('./domains/plugin/PluginRegistry.js');
+    const { PluginResourceActivator, rehydrateEnabledPluginLimbs } = await import(
+      './domains/plugin/PluginResourceActivator.js'
+    );
+    const { registerPluginRoutes } = await import('./routes/plugin-routes.js');
+    const { generateCliConfigs, readCapabilitiesConfig, writeCapabilitiesConfig, withCapabilityLock } = await import(
+      './config/capabilities/capability-orchestrator.js'
+    );
+    const { resolveStartupCliConfigContext } = await import('./config/capabilities/startup-cli-config.js');
+    const { resolveActiveProjectRoot } = await import('./utils/active-project-root.js');
+
+    const monorepoRoot = findMonorepoRoot(process.cwd());
+    const pluginsDir = join(monorepoRoot, 'plugins');
+    const { loadAllPluginConfigs } = await import('./domains/plugin/plugin-config-store.js');
+    const pluginRegistry = new PluginRegistry(pluginsDir);
+    pluginRegistry.scan();
+    const scannedManifests = pluginRegistry.getAllManifests();
+    const loadedEnvKeys = loadAllPluginConfigs(resolveActiveProjectRoot(), scannedManifests);
+    app.log.info(
+      `[api] F202: PluginRegistry scanned ${scannedManifests.length} plugin(s), loaded ${loadedEnvKeys} config key(s)`,
+    );
+
+    const limbAdapterRegistry = new Map<string, (yamlPath: string) => Promise<ILimbNode>>();
+
+    const pluginActivator = new PluginResourceActivator({
+      resolveProjectRoot: () => resolveActiveProjectRoot(),
+      pluginsDir,
+      limbRegistry,
+      readCapabilities: () => readCapabilitiesConfig(resolveActiveProjectRoot()),
+      writeCapabilities: async (config) => {
+        const root = resolveActiveProjectRoot();
+        await writeCapabilitiesConfig(root, config);
+        const { paths } = resolveStartupCliConfigContext(root);
+        await generateCliConfigs(config, paths);
+      },
+      withCapabilityLock: (fn) => withCapabilityLock(resolveActiveProjectRoot(), fn),
+      limbAdapterFactory: async (pluginId, limbYamlPath) => {
+        const factory = limbAdapterRegistry.get(pluginId);
+        if (!factory) {
+          throw new Error(
+            `No platform-specific limb adapter registered for plugin '${pluginId}'. ` +
+              `Limb resources require a concrete adapter (see Phase 2 for examples).`,
+          );
+        }
+        return factory(limbYamlPath);
+      },
+    });
+
+    const startupCaps = await readCapabilitiesConfig(resolveActiveProjectRoot());
+    await rehydrateEnabledPluginLimbs({
+      capabilities: startupCaps,
+      pluginRegistry,
+      pluginsDir,
+      limbAdapterRegistry,
+      limbRegistry,
+      log: app.log,
+    });
+
+    registerPluginRoutes(app, { pluginRegistry, pluginActivator, limbRegistry, pluginsDir });
+  }
   // F174 D2b-1 — single notifier instance shared between callback auth preHandler
   // (posts in-context surface on 401) and the hide-similar debug endpoint
   // (lets the user 24h-suppress a (reason, tool, catId) tuple).

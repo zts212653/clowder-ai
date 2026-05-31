@@ -295,6 +295,57 @@ describe('SkillsContent', () => {
     expect(body.scope).toBe('global');
   });
 
+  it('renders plugin-owned skills with same controls as regular skills', async () => {
+    mockBothApis(undefined, {
+      ...capabilitiesPayload,
+      items: capabilitiesPayload.items.map((item) =>
+        item.id === 'browser-preview' ? { ...item, pluginId: 'preview-plugin' } : item,
+      ),
+    });
+
+    await render(React.createElement(SkillsContent));
+
+    const cards = Array.from(container.querySelectorAll('.settings-resource-card'));
+    const pluginCard = cards.find((card) => card.textContent?.includes('browser-preview'));
+    expect(pluginCard).toBeTruthy();
+
+    // Plugin skill has same toggle as regular skills — not disabled
+    const pluginToggle = pluginCard?.querySelector('.settings-resource-toggle') as HTMLButtonElement | null;
+    expect(pluginToggle).toBeTruthy();
+    expect(pluginToggle?.disabled).not.toBe(true);
+
+    // Clicking toggle fires the same PATCH as regular skills
+    mockFetch.mockClear();
+    mockBothApis();
+
+    await act(async () => {
+      pluginToggle?.click();
+    });
+    await flushEffects();
+
+    expect(
+      mockFetch.mock.calls.some(
+        (c: unknown[]) => String(c[0]) === '/api/capabilities' && (c[1] as { method?: string })?.method === 'PATCH',
+      ),
+    ).toBe(true);
+
+    // Preview click works — fires skill preview fetch
+    mockFetch.mockClear();
+    mockBothApis();
+
+    const previewButton = Array.from(pluginCard?.querySelectorAll('button') ?? []).find((button) =>
+      button.textContent?.includes('browser-preview'),
+    ) as HTMLButtonElement | undefined;
+    expect(previewButton?.disabled).not.toBe(true);
+
+    await act(async () => {
+      previewButton?.click();
+    });
+    await flushEffects();
+
+    expect(mockFetch.mock.calls.some((c: unknown[]) => String(c[0]).startsWith('/api/rules/skill/'))).toBe(true);
+  });
+
   it('per-cat toggle posts capabilityType skill with scope cat and catId', async () => {
     await render(React.createElement(SkillsContent));
 

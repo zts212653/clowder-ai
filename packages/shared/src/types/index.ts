@@ -448,6 +448,16 @@ export type {
   ResolverType,
   WorkflowAction,
 } from './pack.js';
+// Plugin Framework types (F202 声明式插件注册)
+export type {
+  PluginConfigField,
+  PluginHealthCheck,
+  PluginInfo,
+  PluginManifest,
+  PluginResourceDef,
+  PluginResourceStatus,
+  PluginStatus,
+} from './plugin.js';
 // Proposal types (F128 Cat Thread Proposal)
 export type {
   ProposalApproveOverrides,

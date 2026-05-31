@@ -10,7 +10,7 @@
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -135,4 +135,13 @@ test('compileL0ViaSubprocess fail-closed: spawn error (ENOENT) throws', async ()
   const root = seedRepoRoot();
   const spawnFn = buildFakeSpawn({ errorOnSpawn: Object.assign(new Error('spawn node ENOENT'), { code: 'ENOENT' }) });
   await assert.rejects(() => compileL0ViaSubprocess({ catId: 'opus-47', cwd: root, spawnFn }), /ENOENT|spawn/i);
+});
+
+// --- L0 template content guard ---
+
+test('L0 template includes limb tool quick index', () => {
+  const templatePath = resolve(import.meta.dirname, '../../../assets/system-prompts/system-prompt-l0.md');
+  const content = readFileSync(templatePath, 'utf8');
+  assert.match(content, /limb_list_available/, 'L0 template must mention limb_list_available');
+  assert.match(content, /limb_invoke/, 'L0 template must mention limb_invoke');
 });

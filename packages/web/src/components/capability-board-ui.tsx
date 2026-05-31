@@ -39,6 +39,7 @@ export interface CapabilityBoardItem {
   layer?: 'L1' | 'L2' | 'L3';
   ecosystem?: 'claude' | 'codex' | 'openclaw' | 'antigravity';
   lockVersion?: { source: string; version: string; installedAt: string; installedBy: string };
+  pluginId?: string;
 }
 
 export interface CatFamily {
