@@ -20,7 +20,26 @@ export interface AppendApprovedInitialMessageInput extends ProposalInitialMessag
   proposalId: string;
   userId: string;
   threadId: string;
+  /**
+   * Content actually enqueued + persisted as the first sub-thread message.
+   * Typically pre-enriched by `enrichWithParentThreadHeader` (parent thread
+   * pointer + cat-driven chain protocol section).
+   */
   content: string;
+  /**
+   * Raw user-typed initialMessage BEFORE enrichWithParentThreadHeader. Only
+   * used as the parseIntent source — NEVER stored or enqueued. Defaults to
+   * `content` for backward compatibility, but callers that pre-enrich MUST
+   * pass the raw form, otherwise server-injected text (parent thread title,
+   * chain protocol explanation) can trip parseIntent's `#tag` regex and
+   * flip a serial proposal into parallel mode (砚砚 PR #809 review P2 —
+   * reproduced: parent title `Parent #ideate title` + initialMessage `开玩!`
+   * → targetCats expanded to all preferredCats, intent forced to ideate).
+   * parseIntent intentionally scans the whole string, so isolating its
+   * input is the correct fix; router.resolveTargetsAndIntent keeps reading
+   * the enriched content because dispatch overrides its targetCats anyway.
+   */
+  rawContent?: string;
   /**
    * Proposed chain participants in user-intended order. Dispatch wakes ONLY
    * `preferredCats[0]` (the chain starter); subsequent cats are driven by the
@@ -102,6 +121,7 @@ export async function appendApprovedInitialMessage({
   userId,
   threadId,
   content,
+  rawContent,
   preferredCats,
   messageStore,
   router,
@@ -124,7 +144,15 @@ export async function appendApprovedInitialMessage({
   }
 
   const resolved = await router.resolveTargetsAndIntent(content, threadId, { persist: true });
-  const parsed = parseIntent(content, preferredCats?.length ?? resolved.targetCats.length);
+  // F128 (砚砚 PR #809 review P2): parseIntent MUST see the raw user-typed
+  // initialMessage, NOT the enriched content. Otherwise server-injected text
+  // (parent thread title containing `#ideate`, chain protocol explanation,
+  // etc.) trips parseIntent's `#tag` regex and forces parallel mode on
+  // proposals that the user wanted serial. router targets are unaffected by
+  // this — dispatch always overrides targetCats below, so router can keep
+  // reading the enriched content (it needs the full mention surface).
+  const intentSource = rawContent ?? content;
+  const parsed = parseIntent(intentSource, preferredCats?.length ?? resolved.targetCats.length);
 
   // F128 dispatch model — "他们自己决定下一个要把谁叫出来" (owner-defined, 2026-05-27):
   //

@@ -76,6 +76,71 @@ describe('F128 chain protocol injection', () => {
     assert.ok(!enqueued.includes('#ideate'), 'header must not write literal `#ideate` (parseIntent footgun)');
   });
 
+  test('approve does NOT flip to parallel when parent thread title contains `#ideate` (parseIntent reads raw initialMessage, not enriched content)', async () => {
+    // 砚砚 PR #809 review P2: server enriches the first sub-thread message
+    // with parent thread title + chain protocol section. Before this fix
+    // dispatch called parseIntent(enrichedContent, ...), so a parent thread
+    // whose title happened to contain `#ideate` (e.g. an existing "Demo
+    // #ideate thread") would force every spawned proposal into parallel mode
+    // regardless of what the user typed in initialMessage. Pin the contract:
+    // user intent comes from the raw user-typed initialMessage only.
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const invocationQueue = new InvocationQueue();
+    const router = {
+      async resolveTargetsAndIntent() {
+        return { targetCats: [], intent: { intent: 'execute' }, hasMentions: false };
+      },
+    };
+    const queueProcessor = {
+      async processNext() {
+        return { started: true };
+      },
+    };
+    const ctx = await createProposalTestContext({
+      routerOverride: router,
+      invocationQueueOverride: invocationQueue,
+      queueProcessorOverride: queueProcessor,
+    });
+    // Parent thread title intentionally contains the literal `#ideate` tag.
+    const source = await ctx.threadStore.create('alice', 'Parent #ideate title');
+    const { proposalId } = JSON.parse(
+      (
+        await ctx.propose({
+          userId: 'alice',
+          threadId: source.id,
+          // Raw user intent: serial chain, no #ideate tag.
+          body: { initialMessage: '开玩!', preferredCats: ['kimi', 'gemini', 'codex'] },
+        })
+      ).body,
+    );
+
+    const res = await ctx.approve('alice', proposalId);
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const entries = invocationQueue.list(body.threadId, 'alice');
+
+    // The enriched content WILL still contain `#ideate` (verbatim from
+    // parent title in the "## 主 Thread" header) — that is expected; the
+    // user explicitly named their parent thread that way and the message
+    // must stay faithful. The fix is that dispatch parseIntent ignores
+    // this header text entirely.
+    assert.ok(
+      entries[0].content.includes('#ideate'),
+      'enriched content faithfully echoes parent title (contains `#ideate`)',
+    );
+
+    assert.deepEqual(
+      entries[0].targetCats,
+      ['kimi'],
+      'serial proposal stays serial — only preferredCats[0] is woken, parent-title `#ideate` does NOT leak into parseIntent',
+    );
+    assert.equal(
+      entries[0].intent,
+      'execute',
+      'intent stays execute (chain starter) — explicit-tag path requires user-typed `#ideate` in raw initialMessage',
+    );
+  });
+
   test('approve omits chain protocol when preferredCats is empty (no chain to orchestrate)', async () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const invocationQueue = new InvocationQueue();

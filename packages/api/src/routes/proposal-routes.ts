@@ -210,6 +210,12 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
           userId,
           threadId: thread.id,
           content: enrichedContent,
+          // F128 (砚砚 PR #809 review P2): pass the raw user-typed
+          // initialMessage so dispatch's parseIntent can read user intent
+          // tags (#ideate / #execute) without being contaminated by
+          // server-injected text — e.g. a parent thread title that happens
+          // to contain `#ideate` must NOT flip a serial proposal to parallel.
+          rawContent: finalInitialMessage,
           // F128 (owner spec 2026-05-27 "他们自己决定下一个要把谁叫出来"):
           // pass preferredCats so dispatch can pick the chain starter
           // (preferredCats[0]) — subsequent cats are driven by cat-side
