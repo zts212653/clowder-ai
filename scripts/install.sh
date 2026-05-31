@@ -383,7 +383,7 @@ pnpm_install_needs_puppeteer_skip() {
 }
 warn_puppeteer_skip_fallback() {
     warn "Bundled Chrome download failed — skipped"
-    warn "Thread export / screenshot may be unavailable. To install later: npx puppeteer browsers install chrome"
+    warn "Thread export / screenshot may be unavailable. Install Chrome/Chromium or set CHROME_EXECUTABLE_PATH in .env"
 }
 sync_agent_hooks_best_effort() {
     info "  Syncing Agent CLI hooks..."

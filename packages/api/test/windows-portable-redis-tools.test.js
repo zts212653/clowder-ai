@@ -119,7 +119,7 @@ test('Windows installer retries with PUPPETEER_SKIP_DOWNLOAD only for Puppeteer 
   assert.match(installScript, /Write-Warn "Bundled Chrome download failed - skipped"/);
   assert.match(
     installScript,
-    /Write-Warn "Thread export \/ screenshot may be unavailable\. To install later: npx puppeteer browsers install chrome"/,
+    /Write-Warn "Thread export \/ screenshot may be unavailable\. Install Chrome\/Chromium or set CHROME_EXECUTABLE_PATH in \.env"/,
   );
   // Step 5 now appends a Windows-only --store-dir suffix to every
   // Invoke-PnpmInstallWithCapturedOutput call, so the args either appear as the
