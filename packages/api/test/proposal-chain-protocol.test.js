@@ -141,17 +141,25 @@ describe('F128 chain protocol injection', () => {
     );
   });
 
-  test('router.resolveTargetsAndIntent receives raw initialMessage — parent-title `@cat` mentions cannot leak into dispatch or participants', async () => {
-    // 砚砚 PR #809 round-3 P2: real router runs parseAllMentions +
-    // resolveTargets(persist=true) on its message arg, which means it BOTH
-    // (a) writes every mentioned cat into the new sub-thread's participants
-    // and (b) feeds dispatch's `preferredCats?.[0] ?? resolved.targetCats[0]`
+  test('router.resolveTargetsAndIntent receives raw initialMessage — parent-title `@cat` mentions never reach the routing/persist boundary', async () => {
+    // 砚砚 PR #809 round-3 P2 (round-4 P3 wording sharpened):
+    // real router runs parseAllMentions + resolveTargets(persist=true) on
+    // its message arg, which means it BOTH (a) writes every mentioned cat
+    // into the new sub-thread's participants via ThreadStore.addParticipants
+    // AND (b) feeds dispatch's `preferredCats?.[0] ?? resolved.targetCats[0]`
     // fallback. Before this fix the enriched content was passed, so a
     // parent thread titled `Parent @opus thread` would silently wake `opus`
     // and persist `opus` into participants whenever the user proposed
     // without preferredCats and without an @ in their raw initialMessage.
-    // Pin both contracts: router only sees raw, and the fallback path
-    // genuinely warns "no targets" instead of waking a phantom cat.
+    //
+    // What this test asserts directly: router input is the raw user-typed
+    // initialMessage (`开玩!`), not enriched content. This is the UPSTREAM
+    // cut — once we close it, the downstream effects (addParticipants
+    // persistence + fallback wake) are guaranteed to never see parent-title
+    // @cat mentions because router is the only call path that reaches them.
+    // A separate downstream test would need to stub ThreadStore directly
+    // to assert addParticipants was never invoked with `opus`; we rely on
+    // the input-boundary assertion as the necessary and sufficient cut.
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const invocationQueue = new InvocationQueue();
     let routerReceivedMessage = null;
