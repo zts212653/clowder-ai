@@ -67,7 +67,7 @@ export function HistorySearchModal({ onSelect, onClose }: HistorySearchModalProp
           onCompositionStart={ime.onCompositionStart}
           onCompositionEnd={ime.onCompositionEnd}
           placeholder="Search history..."
-          className="flex-1 text-sm outline-none bg-transparent placeholder:text-gray-300"
+          className="flex-1 text-sm outline-none bg-transparent placeholder:text-cafe-muted"
         />
         <button onClick={onClose} className="text-cafe-muted hover:text-cafe-secondary text-xs">
           Esc

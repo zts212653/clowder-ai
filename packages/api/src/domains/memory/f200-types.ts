@@ -64,6 +64,8 @@ export interface RecallEvent {
   /** F200 HW-4 根因③: 'clean' = unique single-search attribution;
    * 'ambiguous' = overlapping bundle candidate pool (not per-search truth). */
   attributionClarity?: 'clean' | 'ambiguous';
+  /** F102 bugfix: thread association for RecallFeed history persistence. */
+  threadId?: string;
 }
 
 export interface TaskTrajectory {

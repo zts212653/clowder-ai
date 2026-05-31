@@ -1514,6 +1514,39 @@ describe('F183 Phase B1 — BubbleReducer core', () => {
     });
   });
 
+  // F212 Phase B (AC-B1): cliDiagnostics rides the same generic payload.extra passthrough.
+  // Reducer is domain-agnostic — this test locks the contract so future regressions don't
+  // accidentally drop cliDiagnostics during enrichment (mirror of timeoutDiagnostics).
+  it('Phase B (AC-B1): error event with payload.extra.cliDiagnostics survives reducer merge', () => {
+    const cliDiagnostics = {
+      reasonCode: 'model_not_found' as const,
+      publicSummary: '模型名不被支持',
+      publicHint: '检查 CLI 配置里的模型名拼写',
+      safeExcerpt: 'Error: deepseek-v-4 is not supported.',
+      debugRef: { command: 'codex', exitCode: 1, signal: null, invocationId: 'inv-789' },
+    };
+    const output = applyBubbleEvent({
+      threadId: 'thread-1',
+      event: {
+        ...baseEvent(),
+        type: 'error',
+        bubbleKind: 'system_status',
+        messageId: undefined,
+        timestamp: 1500,
+        payload: {
+          content: 'Error: CLI 异常退出 (code: 1)',
+          extra: { cliDiagnostics },
+        },
+      },
+      currentMessages: [],
+    });
+    expect(output.nextMessages).toHaveLength(1);
+    expect(output.nextMessages[0]).toMatchObject({
+      content: 'Error: CLI 异常退出 (code: 1)',
+      extra: expect.objectContaining({ cliDiagnostics }),
+    });
+  });
+
   it('B1.4: invocationless callback WITHOUT messageId hint creates standalone bubble (no hijack of unrelated existing bubble)', () => {
     // 没 messageId hint 时不能扫所有气泡找 invocationless target —— 那会 hijack
     // 别的 invocation 的 stream bubble。caller 没传 hint = caller 不知道 patch 哪条 = 创建新

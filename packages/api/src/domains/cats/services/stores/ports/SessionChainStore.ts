@@ -14,6 +14,7 @@ export interface CreateSessionInput {
   threadId: string;
   catId: CatId;
   userId: string;
+  reuseExistingCliSession?: boolean;
 }
 
 export type SessionRecordPatch = Partial<
@@ -24,14 +25,15 @@ export type SessionRecordPatch = Partial<
     | 'contextHealth'
     | 'lastUsage'
     | 'messageCount'
-    | 'sealReason'
-    | 'sealedAt'
     | 'updatedAt'
     | 'compressionCount'
     | 'continuityCapsule'
     | 'consecutiveRestoreFailures'
   >
->;
+> & {
+  sealReason?: SessionRecord['sealReason'] | null;
+  sealedAt?: number | null;
+};
 
 export interface ISessionChainStore {
   /** Create SessionRecord (seq auto-increments, status=active) */
@@ -74,6 +76,15 @@ export class SessionChainStore implements ISessionChainStore {
   }
 
   create(input: CreateSessionInput): SessionRecord {
+    if (input.reuseExistingCliSession) {
+      const existingId = this.cliIndex.get(input.cliSessionId);
+      if (existingId) {
+        const existing = this.records.get(existingId);
+        if (existing) return existing;
+        this.cliIndex.delete(input.cliSessionId);
+      }
+    }
+
     const now = Date.now();
     const key = this.chainKey(input.catId, input.threadId);
 
@@ -162,9 +173,10 @@ export class SessionChainStore implements ISessionChainStore {
     }
     if (patch.status !== undefined) {
       record.status = patch.status;
-      // If sealed/sealing, remove from active index
-      if (patch.status !== 'active') {
-        const key = this.chainKey(record.catId, record.threadId);
+      const key = this.chainKey(record.catId, record.threadId);
+      if (patch.status === 'active') {
+        this.activeIndex.set(key, id);
+      } else {
         if (this.activeIndex.get(key) === id) {
           this.activeIndex.delete(key);
         }
@@ -173,8 +185,14 @@ export class SessionChainStore implements ISessionChainStore {
     if (patch.contextHealth !== undefined) record.contextHealth = patch.contextHealth;
     if (patch.lastUsage !== undefined) record.lastUsage = patch.lastUsage;
     if (patch.messageCount !== undefined) record.messageCount = patch.messageCount;
-    if (patch.sealReason !== undefined) record.sealReason = patch.sealReason;
-    if (patch.sealedAt !== undefined) record.sealedAt = patch.sealedAt;
+    if ('sealReason' in patch) {
+      if (patch.sealReason === null) delete record.sealReason;
+      else if (patch.sealReason !== undefined) record.sealReason = patch.sealReason;
+    }
+    if ('sealedAt' in patch) {
+      if (patch.sealedAt === null) delete record.sealedAt;
+      else if (patch.sealedAt !== undefined) record.sealedAt = patch.sealedAt;
+    }
     if (patch.compressionCount !== undefined) record.compressionCount = patch.compressionCount;
     if (patch.continuityCapsule !== undefined) record.continuityCapsule = patch.continuityCapsule;
     if (patch.consecutiveRestoreFailures !== undefined)

@@ -8,6 +8,7 @@ interface RawStatusResponse {
   backend: string;
   healthy: boolean;
   docs_count?: number;
+  vectors_count?: number;
   threads_count?: number;
   passages_count?: number;
   passage_vectors_count?: number;
@@ -22,6 +23,7 @@ export interface IndexStatusData {
   backend: string;
   healthy: boolean;
   docsCount: number;
+  vectorsCount: number;
   threadsCount: number;
   passagesCount: number;
   passageVectorsCount: number;
@@ -40,6 +42,7 @@ export function parseIndexStatus(raw: RawStatusResponse): IndexStatusData {
     backend: raw.backend,
     healthy: raw.healthy,
     docsCount: raw.docs_count ?? 0,
+    vectorsCount: raw.vectors_count ?? 0,
     threadsCount: raw.threads_count ?? 0,
     passagesCount: raw.passages_count ?? 0,
     passageVectorsCount: raw.passage_vectors_count ?? 0,

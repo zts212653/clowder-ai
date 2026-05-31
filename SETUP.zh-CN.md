@@ -51,7 +51,7 @@ pnpm start
 #   pnpm start:direct
 ```
 
-如果要给记忆系统开启本地语义 rerank，把 `.env` 里的 `EMBED_MODE` 改成 `on`（或 `shadow`）。开启后，`pnpm start` / `pnpm start:direct` 会自动拉起对应平台的 launcher（Unix 用 `scripts/embed-server.sh`，Windows 用 `scripts/embed-server.ps1`）。Apple Silicon 默认走 MLX，其它平台回落到 `sentence-transformers`。
+如果要给记忆系统开启本地语义 rerank，请在 Console 设置里安装并启用 **Embedding** 服务。安装器会在 `~/.cat-cafe/embed-venv` 创建与你平台匹配的后端（Apple Silicon 用 MLX，其它平台用 fastembed/ONNX 或 `sentence-transformers`）。在 Windows 上，当 Console 记录该服务已安装且已启用后，`pnpm start` / `pnpm start:direct` 会自动拉起 `scripts/services/embed-server.ps1`；如果你在 Console 里卸载或禁用该服务，就不会自动启动。
 
 `pnpm start` 使用**运行时 worktree** 架构：首次运行时自动创建隔离的 `../cat-cafe-runtime` worktree，同步到 `origin/main`，构建，启动 Redis，然后启动前端（端口 3003）+ API（端口 3004）。这样你的开发目录保持干净。
 

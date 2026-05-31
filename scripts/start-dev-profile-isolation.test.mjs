@@ -7,7 +7,6 @@ import { describe, it } from 'node:test';
 import { buildWindowsStatus, resolveWindowsStatusPorts } from './lib/platform-status.mjs';
 
 const ROOT = resolve(process.cwd());
-const SYNC_SCRIPT = resolve(ROOT, 'scripts/sync-to-opensource.sh');
 
 function createSandbox(envFile = '') {
   const dir = mkdtempSync(join(tmpdir(), 'cc-start-dev-profile-'));
@@ -15,6 +14,7 @@ function createSandbox(envFile = '') {
   mkdirSync(join(dir, 'scripts/lib'), { recursive: true });
   cpSync(resolve(ROOT, 'scripts/start-dev.sh'), join(dir, 'scripts', 'start-dev.sh'));
   cpSync(resolve(ROOT, 'scripts/lib/node-runtime-guard.sh'), join(dir, 'scripts/lib', 'node-runtime-guard.sh'));
+  cpSync(resolve(ROOT, 'scripts/lib/redis-rdb-first.sh'), join(dir, 'scripts/lib', 'redis-rdb-first.sh'));
 
   const downloadOverrides = resolve(ROOT, 'scripts/download-source-overrides.sh');
   if (existsSync(downloadOverrides)) {
@@ -122,7 +122,7 @@ describe('start-dev strict profile isolation', () => {
     }
   });
 
-  it('still allows .env overrides after strict sanitize', () => {
+  it('still allows non-sidecar .env overrides after strict sanitize', () => {
     const sandboxDir = createSandbox('ASR_ENABLED=1\nMESSAGE_TTL_SECONDS=123\nREDIS_PROFILE=custom\n');
     try {
       const result = runSourceOnly({
@@ -140,7 +140,7 @@ describe('start-dev strict profile isolation', () => {
 
       assert.equal(result.status, 0, result.stderr || result.stdout);
       assert.match(result.stdout, /PROFILE=opensource/);
-      assert.match(result.stdout, /ASR=1/);
+      assert.match(result.stdout, /ASR=0/);
       assert.match(result.stdout, /EMBED=0/);
       assert.match(result.stdout, /TTL=123/);
       assert.match(result.stdout, /REDIS_PROFILE=custom/);
@@ -149,7 +149,39 @@ describe('start-dev strict profile isolation', () => {
     }
   });
 
-  it('derives EMBED_ENABLED=1 from EMBED_MODE=on when no explicit override is set', () => {
+  it('preserves explicit .env sidecar flags for API lifecycle without enabling legacy direct spawn', () => {
+    const sandboxDir = createSandbox('ASR_ENABLED=1\nTTS_ENABLED=1\nWHISPER_PORT=19976\n');
+    try {
+      const command = [
+        'source scripts/start-dev.sh --source-only -- --profile=opensource',
+        'printf "ASR=%s\\nTTS=%s\\nLEGACY_ASR=%s\\nLEGACY_TTS=%s\\n" "$ASR_ENABLED" "$TTS_ENABLED" "${CAT_CAFE_SERVICE_ASR_ENABLED:-}" "${CAT_CAFE_SERVICE_TTS_ENABLED:-}"',
+      ].join('; ');
+      const result = spawnSync('bash', ['-lc', command], {
+        cwd: sandboxDir,
+        env: {
+          PATH: process.env.PATH ?? '',
+          HOME: process.env.HOME ?? '',
+          TERM: process.env.TERM ?? 'xterm-256color',
+          CAT_CAFE_STRICT_PROFILE_DEFAULTS: '1',
+        },
+        encoding: 'utf8',
+      });
+
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.match(result.stdout, /ASR=0/);
+      assert.match(result.stdout, /TTS=0/);
+      assert.match(result.stdout, /LEGACY_ASR=1/);
+      assert.match(result.stdout, /LEGACY_TTS=1/);
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does NOT derive EMBED_ENABLED from EMBED_MODE (sidecar lifecycle owned by API startup reconciler)', () => {
+    // EMBED_MODE only controls the API in-process embedding mode (off/shadow/on).
+    // Sidecar startup is no longer triggered by EMBED_MODE; the API spawns
+    // sidecars via /api/services/embedding-model/start based on
+    // .cat-cafe/services.json (embedding-model.enabled).
     const sandboxDir = createSandbox('EMBED_MODE=on\n');
     try {
       const result = runSourceOnly({
@@ -162,7 +194,7 @@ describe('start-dev strict profile isolation', () => {
 
       assert.equal(result.status, 0, result.stderr || result.stdout);
       assert.match(result.stdout, /PROFILE=opensource/);
-      assert.match(result.stdout, /EMBED=1/);
+      assert.match(result.stdout, /EMBED=0/);
     } finally {
       rmSync(sandboxDir, { recursive: true, force: true });
     }
@@ -370,7 +402,18 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
       ps1.includes('GetEnvironmentVariable'),
       'start-windows.ps1 must check existing env before applying profile default',
     );
-    assert.ok(ps1.includes('embed-server.ps1'), 'start-windows.ps1 must launch embed-server.ps1 for local embedding');
+    assert.ok(
+      ps1.includes('API startup reconciler'),
+      'start-windows.ps1 must delegate sidecar lifecycle to the API startup reconciler',
+    );
+    assert.ok(
+      !/Start-Job[\s\S]*embed-server\.ps1/i.test(ps1),
+      'start-windows.ps1 must not directly Start-Job embed-server.ps1',
+    );
+    assert.ok(
+      ps1.includes('CAT_CAFE_SERVICE_ASR_ENABLED') && ps1.includes('CAT_CAFE_SERVICE_TTS_ENABLED'),
+      'start-windows.ps1 must preserve explicit .env sidecar flags for API startup lifecycle',
+    );
   });
 
   it('start-windows.ps1 reapplies profile defaults inside Start-Job after .env reload', () => {
@@ -406,6 +449,27 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
     assert.ok(ps1.includes('Start-Job'), 'start-windows.ps1 must use Start-Job (which inherits parent process env)');
   });
 
+  it('start-windows.ps1 passes explicit service lifecycle flags into the API job', () => {
+    const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+    const overridesMatch = ps1.match(/\$runtimeEnvOverrides\s*=\s*@\{([^}]+)\}/s);
+    assert.ok(overridesMatch, 'start-windows.ps1 must define $runtimeEnvOverrides');
+    const overridesBlock = overridesMatch[1];
+
+    for (const flag of [
+      'CAT_CAFE_SERVICE_ASR_ENABLED',
+      'CAT_CAFE_SERVICE_TTS_ENABLED',
+      'CAT_CAFE_SERVICE_LLM_POSTPROCESS_ENABLED',
+      'CAT_CAFE_SERVICE_EMBED_ENABLED',
+      'CAT_CAFE_SERVICE_AUDIO_ENABLED',
+    ]) {
+      assert.match(
+        overridesBlock,
+        new RegExp(`${flag}\\s*=\\s*\\$env:${flag}`),
+        `runtimeEnvOverrides must pass ${flag} into the API job`,
+      );
+    }
+  });
+
   it('start-windows.ps1 assigns NODE_ENV inside the API Start-Job', () => {
     const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
     const jobBlocks = ps1.match(/Start-Job[\s\S]*?-ScriptBlock\s*\{([\s\S]*?)\}\s*-ArgumentList/g);
@@ -419,7 +483,7 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
 
 describe('embedding sidecar startup guards', () => {
   it('does not silently fall back to sentence-transformers on Apple Silicon', () => {
-    const apiScript = readFileSync(resolve(ROOT, 'scripts/embed-api.py'), 'utf8');
+    const apiScript = readFileSync(resolve(ROOT, 'scripts/services/embed-api.py'), 'utf8');
 
     assert.match(apiScript, /EMBED_ALLOW_ST_FALLBACK/);
     assert.match(apiScript, /platform\.system\(\)\s*==\s*["']Darwin["']/);
@@ -427,87 +491,146 @@ describe('embedding sidecar startup guards', () => {
     assert.match(apiScript, /SentenceTransformer fallback disabled/);
   });
 
-  it('pins the MLX embedding tokenizer stack away from transformers v5 drift', () => {
-    const embedScript = readFileSync(resolve(ROOT, 'scripts/embed-server.sh'), 'utf8');
+  it('pins embedding install dependencies away from transformers v5 drift', () => {
+    const installScript = readFileSync(resolve(ROOT, 'scripts/services/embed-install.sh'), 'utf8');
+    const installPs1 = readFileSync(resolve(ROOT, 'scripts/services/embed-install.ps1'), 'utf8');
+    const apiScript = readFileSync(resolve(ROOT, 'scripts/services/embed-api.py'), 'utf8');
 
-    assert.match(embedScript, /transformers<5/);
-    assert.match(embedScript, /huggingface-hub<1\.0/);
-    assert.match(embedScript, /mlx_embeddings\.utils/);
-    assert.match(embedScript, /batch_encode_plus/);
+    assert.match(installScript, /PIP_DEPS_ARM64=.*transformers<5/);
+    assert.match(installScript, /PIP_DEPS_OTHER=.*transformers<5/);
+    assert.match(installScript, /PIP_DEPS_ARM64=.*huggingface-hub\[hf_xet\]<1\.0/);
+    assert.match(installScript, /PIP_DEPS_OTHER=.*huggingface-hub\[hf_xet\]<1\.0/);
+    assert.match(installScript, /PIP_DEPS_ARM64=.*httpx\[socks\]/);
+    assert.match(installScript, /PIP_DEPS_OTHER=.*httpx\[socks\]/);
+    assert.equal((installPs1.match(/'httpx\[socks\]'/g) ?? []).length, 2);
+    assert.match(apiScript, /mlx_embeddings\.utils/);
+    assert.match(apiScript, /attn_implementation["']:\s*["']eager/);
+  });
+
+  it('keeps setup docs aligned with Console-managed embedding service lifecycle', () => {
+    const setupDoc = readFileSync(resolve(ROOT, 'SETUP.md'), 'utf8');
+    const setupZhDoc = readFileSync(resolve(ROOT, 'SETUP.zh-CN.md'), 'utf8');
+
+    assert.match(setupDoc, /install the \*\*Embedding\*\* service from Console settings/i);
+    assert.doesNotMatch(setupDoc, /scripts\/embed-server\.sh/);
+    assert.match(setupZhDoc, /Console 设置里安装并启用 \*\*Embedding\*\* 服务/);
+    assert.doesNotMatch(setupZhDoc, /EMBED_MODE.*on/);
+    assert.doesNotMatch(setupZhDoc, /scripts\/embed-server\.sh/);
   });
 });
 
-describe('sync-to-opensource public launch transforms', { skip: !existsSync(SYNC_SCRIPT) }, () => {
-  it('exports opensource-pinned direct launch wrappers and runtime startup', () => {
-    const result = spawnSync('bash', [SYNC_SCRIPT, '--dry-run', '--yes'], {
-      cwd: ROOT,
-      env: {
-        ...process.env,
-        PATH: process.env.PATH ?? '',
-        HOME: process.env.HOME ?? '',
-        TERM: process.env.TERM ?? 'xterm-256color',
-      },
-      encoding: 'utf8',
-      maxBuffer: 20 * 1024 * 1024,
-    });
+describe('TTS sidecar startup guards', () => {
+  it('preloads runtime voice assets during install and starts from cache', () => {
+    const installScript = readFileSync(resolve(ROOT, 'scripts/services/tts-install.sh'), 'utf8');
+    const serverScript = readFileSync(resolve(ROOT, 'scripts/services/tts-server.sh'), 'utf8');
+    const apiScript = readFileSync(resolve(ROOT, 'scripts/services/tts-api.py'), 'utf8');
 
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-    const output = `${result.stdout}\n${result.stderr}`;
-    const match = output.match(/Export (?:complete|preserved) at:[^\n]*\n\s*(\/[^\n]+)/);
-    assert.ok(match?.[1], output);
+    assert.match(installScript, /POST_INSTALL_HOOK_ARM64=["']tts_install_arm64_warmup["']/);
+    assert.match(installScript, /generate_audio/);
+    assert.match(installScript, /zm_yunjian/);
+    assert.match(installScript, /_CATCAFE_HF_PROXY_FOR_DOWNLOAD/);
+    assert.match(serverScript, /HF_HUB_OFFLINE/);
+    assert.match(serverScript, /mlx-audio\|qwen3-clone/);
+    assert.doesNotMatch(apiScript, /except Exception:\s*\n\s*pass\s+# Warmup may fail/);
+  });
+});
 
-    const exportDir = match[1].trim();
-    try {
-      const pkg = JSON.parse(readFileSync(resolve(exportDir, 'package.json'), 'utf8'));
-      const runtimeScript = readFileSync(resolve(exportDir, 'scripts/runtime-worktree.sh'), 'utf8');
-      const embedScript = readFileSync(resolve(exportDir, 'scripts/embed-server.sh'), 'utf8');
-      const embedPsScript = readFileSync(resolve(exportDir, 'scripts/embed-server.ps1'), 'utf8');
-      const publicEnv = readFileSync(resolve(exportDir, '.env.example'), 'utf8');
-      const setupDoc = readFileSync(resolve(exportDir, 'SETUP.md'), 'utf8');
+describe('Whisper sidecar startup guards', () => {
+  it('preloads faster-whisper model artifacts via snapshot_download before runtime load', () => {
+    const installTemplate = readFileSync(resolve(ROOT, 'scripts/services/install-template.sh'), 'utf8');
+    const prereqPs1 = readFileSync(resolve(ROOT, 'scripts/services/prereq-check.ps1'), 'utf8');
 
-      assert.match(pkg.scripts['dev:direct'], /start-entry\.mjs dev:direct --profile=opensource/);
-      assert.match(pkg.scripts['start:direct'], /start-entry\.mjs start:direct --profile=opensource/);
-      assert.equal(existsSync(resolve(exportDir, 'scripts/start-entry.mjs')), true);
-      assert.equal(existsSync(resolve(exportDir, 'scripts/embed-api.py')), true);
-      assert.equal(existsSync(resolve(exportDir, 'scripts/embed-server.sh')), true);
-      assert.equal(existsSync(resolve(exportDir, 'scripts/embed-server.ps1')), true);
-      assert.match(embedScript, /sentence-transformers/);
-      assert.match(embedPsScript, /sentence-transformers/);
-      assert.equal(
-        pkg.scripts['check:start-profile-isolation'],
-        'node --test scripts/start-dev-profile-isolation.test.mjs',
-      );
-      assert.equal(existsSync(resolve(exportDir, 'cat-template.json')), true);
-      assert.match(pkg.scripts.check, /check:start-profile-isolation/);
-      assert.equal(existsSync(resolve(exportDir, 'scripts/download-source-overrides.sh')), true);
-      assert.equal(existsSync(resolve(exportDir, 'scripts/start-dev-profile-isolation.test.mjs')), true);
-      assert.match(publicEnv, /EMBED_MODE=off/);
-      assert.match(setupDoc, /EMBED_MODE=on/);
+    assert.match(installTemplate, /from faster_whisper\.utils import _MODELS/);
+    assert.match(installTemplate, /from huggingface_hub import snapshot_download/);
+    assert.match(installTemplate, /'faster-whisper snapshot download'/);
+    assert.match(installTemplate, /snapshot_download\(repo_id,/);
+    assert.match(installTemplate, /WhisperModel\(model_path,/);
+    assert.doesNotMatch(installTemplate, /WhisperModel\(sys\.argv\[1\]/);
+    assert.doesNotMatch(installTemplate, /from faster_whisper\.utils import download_model/);
 
-      assert.match(
-        runtimeScript,
-        /exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 \.\/scripts\/start-dev\.sh --prod-web --profile=opensource/,
-      );
+    assert.match(prereqPs1, /from faster_whisper\.utils import _MODELS/);
+    assert.match(prereqPs1, /from huggingface_hub import snapshot_download/);
+    assert.match(prereqPs1, /'faster-whisper snapshot download'/);
+    assert.match(prereqPs1, /snapshot_download\(repo_id,/);
+    assert.match(prereqPs1, /raise ValueError\(f'Invalid faster-whisper model \{model_id!r\},/);
+    assert.match(prereqPs1, /WhisperModel\(model_path,/);
+    assert.doesNotMatch(prereqPs1, /WhisperModel\(sys\.argv\[1\]/);
+    assert.doesNotMatch(prereqPs1, /from faster_whisper\.utils import download_model/);
+    assert.doesNotMatch(prereqPs1, /raise ValueError\(f"Invalid faster-whisper model/);
+  });
 
-      const envSource = spawnSync(
-        'bash',
-        ['-lc', 'set -euo pipefail\nset -a\nsource ./.env.example\nset +a\nprintf "%s" "$NEXT_PUBLIC_BRAND_NAME"'],
-        {
-          cwd: exportDir,
-          env: {
-            ...process.env,
-            PATH: process.env.PATH ?? '',
-            HOME: process.env.HOME ?? '',
-            TERM: process.env.TERM ?? 'xterm-256color',
-          },
-          encoding: 'utf8',
-        },
-      );
+  it('normalizes socks proxy env before HuggingFace runtime loads', () => {
+    const helperPath = resolve(ROOT, 'scripts/services/proxy-env.sh');
+    const helperPs1Path = resolve(ROOT, 'scripts/services/proxy-env.ps1');
+    const huggingFaceServiceScripts = [
+      'scripts/services/whisper-server.sh',
+      'scripts/services/embed-server.sh',
+      'scripts/services/llm-postprocess-server.sh',
+      'scripts/services/tts-server.sh',
+      'scripts/services/install-template.sh',
+    ];
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        [
+          `source "${helperPath}"`,
+          'HTTP_PROXY=socks://127.0.0.1:7897/',
+          'HTTPS_PROXY=socks://127.0.0.1:7897/',
+          'ALL_PROXY=socks5h://127.0.0.1:7897/',
+          'normalize_socks_proxy_env',
+          'printf "%s\\n%s\\n%s\\n" "$HTTP_PROXY" "$HTTPS_PROXY" "$ALL_PROXY"',
+        ].join('; '),
+      ],
+      { encoding: 'utf8' },
+    );
 
-      assert.equal(envSource.status, 0, envSource.stderr || envSource.stdout);
-      assert.equal(envSource.stdout.trim(), 'Clowder AI');
-    } finally {
-      rmSync(exportDir, { recursive: true, force: true });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(
+      result.stdout,
+      ['socks5://127.0.0.1:7897/', 'socks5://127.0.0.1:7897/', 'socks5h://127.0.0.1:7897/'].join('\n') + '\n',
+    );
+    for (const relativePath of huggingFaceServiceScripts) {
+      const script = readFileSync(resolve(ROOT, relativePath), 'utf8');
+      assert.match(script, /normalize_socks_proxy_env/, `${relativePath} must normalize inherited proxy env`);
     }
+
+    const helperPs1 = readFileSync(helperPs1Path, 'utf8');
+    assert.match(helperPs1, /function\s+Normalize-SocksProxyEnv/);
+    assert.match(helperPs1, /socks:\/\/\*/);
+    assert.match(helperPs1, /socks5:\/\//);
+
+    for (const relativePath of [
+      'scripts/services/whisper-server.ps1',
+      'scripts/services/embed-server.ps1',
+      'scripts/services/llm-postprocess-server.ps1',
+      'scripts/services/tts-server.ps1',
+    ]) {
+      const script = readFileSync(resolve(ROOT, relativePath), 'utf8');
+      assert.match(script, /proxy-env\.ps1/, `${relativePath} must load PowerShell proxy normalization`);
+      assert.match(script, /Normalize-SocksProxyEnv/, `${relativePath} must normalize inherited proxy env`);
+    }
+  });
+});
+
+describe('Windows Python resolver guards', () => {
+  it('does not block behind a Python install lock after another installer has finished', () => {
+    const resolver = readFileSync(resolve(ROOT, 'scripts/services/python-resolve.ps1'), 'utf8');
+    const lockFunction = resolver.match(/function Install-PythonToProjectDir \{[\s\S]*?\n\}/)?.[0] ?? '';
+
+    assert.ok(lockFunction.includes('Try-ProjectPython'), 'lock wait path must re-check project Python');
+    assert.match(lockFunction, /WaitOne\(\[TimeSpan\]::FromSeconds\(/);
+    assert.doesNotMatch(lockFunction, /WaitOne\(\[TimeSpan\]::FromMinutes\(10\)\)/);
+    assert.match(lockFunction, /Project Python already present and valid \(installed by concurrent install\)/);
+  });
+
+  it('bounds Windows portable Python downloads and retries the alternate proxy mode', () => {
+    const resolver = readFileSync(resolve(ROOT, 'scripts/services/python-resolve.ps1'), 'utf8');
+    const innerFunction = resolver.match(/function Install-PythonToProjectDirInner \{[\s\S]*?\n\}/)?.[0] ?? '';
+
+    assert.match(innerFunction, /\$downloadTimeoutSec\s*=/);
+    assert.match(innerFunction, /foreach\s*\(\$downloadMode\s+in\s+\$downloadModes\)/);
+    assert.match(innerFunction, /Invoke-WebRequest[\s\S]*-TimeoutSec\s+\$downloadTimeoutSec/);
+    assert.match(innerFunction, /Retrying Python download via/);
   });
 });

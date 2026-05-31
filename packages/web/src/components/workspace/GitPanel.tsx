@@ -116,7 +116,9 @@ export function GitPanel() {
       </div>
 
       {error && (
-        <div className="px-3 py-2 text-xs text-conn-red-text bg-conn-red-bg/80 border-b border-red-100">{error}</div>
+        <div className="px-3 py-2 text-xs text-conn-red-text bg-conn-red-bg/80 border-b border-[var(--semantic-critical-surface)]">
+          {error}
+        </div>
       )}
 
       <div className="flex-1 overflow-y-auto">

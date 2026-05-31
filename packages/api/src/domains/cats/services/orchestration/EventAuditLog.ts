@@ -232,6 +232,8 @@ export const AuditEventTypes = {
 
   /** 手动绑定 CLI session (#72) */
   SESSION_BIND: 'session_bind',
+  /** F211 Phase B: External IDE-direct runtime session registration */
+  EXTERNAL_RUNTIME_SESSION_REGISTERED: 'external_runtime_session_registered',
 
   // === Push Delivery Diagnostics ===
 
@@ -252,6 +254,8 @@ export const AuditEventTypes = {
   BROWSER_PREVIEW_CLOSE: 'browser_preview_close',
   /** 浏览器预览导航 */
   BROWSER_PREVIEW_NAVIGATE: 'browser_preview_navigate',
+  /** Workspace 面板导航 */
+  WORKSPACE_NAVIGATE: 'workspace_navigate',
 
   // === Session Sealing (F118) ===
 

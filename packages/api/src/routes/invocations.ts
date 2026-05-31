@@ -193,6 +193,13 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
             ...(storedMessage.contentBlocks ? { contentBlocks: storedMessage.contentBlocks } : {}),
             uploadDir,
             signal: controller.signal,
+            // F-parallel-cancel (cloud #7): the retry endpoint is a startAll caller too. After the
+            // batchController split, controller.signal is the INDEPENDENT batch gate — a single-cat
+            // cancel aborts only that cat's slot controller, not the batch gate. Pass signalForCat so
+            // the route observes the per-cat signal and a Stop on one cat of a retried multi-cat
+            // invocation is honored immediately (not ignored until cancel-all). Mirrors messages.ts /
+            // QueueProcessor.
+            signalForCat: (catId: string) => opts.invocationTracker.getController?.(record.threadId, catId)?.signal,
             ...(opts.queueProcessor
               ? {
                   queueHasQueuedMessages: (tid: string) =>
@@ -245,12 +252,29 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
             error: governanceErrorCode,
           });
         } else {
-          // ADR-008 S3: ack cursors before marking succeeded so that if ack
-          // throws, the catch block sees running→failed (valid transition).
-          await opts.router.ackCollectedCursors(record.userId, record.threadId, cursorBoundaries);
-
-          await opts.invocationRecordStore.update(id, { status: 'succeeded' });
-          finalStatus = 'succeeded';
+          // F-parallel-cancel (cloud #7): AGGREGATE finalStatus — a single-cat cancel no longer
+          // aborts the batch gate, so raw controller.signal.aborted only covers whole-invocation
+          // abort. Resolve canceled-by-user from per-cat slot tombstones (completeAll runs in the
+          // finally below, AFTER this, so tombstones are still visible). Mirrors QueueProcessor.
+          const batchReason = controller.signal.reason;
+          const aggStatus = opts.invocationTracker.resolveFinalStatus
+            ? opts.invocationTracker.resolveFinalStatus(record.threadId, record.targetCats, {
+                aborted: controller.signal.aborted,
+                reason: batchReason as string | undefined,
+              })
+            : controller.signal.aborted
+              ? 'canceled'
+              : 'succeeded';
+          if (aggStatus === 'canceled_by_user' || aggStatus === 'canceled') {
+            await opts.invocationRecordStore.update(id, { status: 'canceled' });
+            finalStatus = 'canceled';
+          } else {
+            // ADR-008 S3: ack cursors before marking succeeded so that if ack
+            // throws, the catch block sees running→failed (valid transition).
+            await opts.router.ackCollectedCursors(record.userId, record.threadId, cursorBoundaries);
+            await opts.invocationRecordStore.update(id, { status: 'succeeded' });
+            finalStatus = 'succeeded';
+          }
         }
       } catch (err) {
         log.error({ err }, 'Retry execution error');

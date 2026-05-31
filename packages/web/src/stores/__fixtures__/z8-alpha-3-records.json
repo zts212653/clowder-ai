@@ -12,28 +12,28 @@
         "id": "tool-1778467533591-5c25",
         "type": "tool_use",
         "label": "opus → Read",
-        "detail": "{\"file_path\":\"/path/to/project/docs/features/F195-meeting-copilot-live-advisory.md\"}",
+        "detail": "{\"file_path\":\"/home/user/cat-cafe/docs/features/F195-meeting-copilot-live-advisory.md\"}",
         "timestamp": 1778467533591
       },
       {
         "id": "tool-1778467602979-xrmr",
         "type": "tool_use",
         "label": "opus → Edit",
-        "detail": "{\"replace_all\":false,\"file_path\":\"/path/to/project/docs/features/F195-meeting-copilot-live-advisory.md\",\"old_string\":\"### Phase A: 会前预热 + 会后复盘（现有能力直接做）\\n\\n**目的**：零新基础设施，…",
+        "detail": "{\"replace_all\":false,\"file_path\":\"/home/user/cat-cafe/docs/features/F195-meeting-copilot-live-advisory.md\",\"old_string\":\"### Phase A: 会前预热 + 会后复盘（现有能力直接做）\\n\\n**目的**：零新基础设施，…",
         "timestamp": 1778467602979
       },
       {
         "id": "tool-1778467617467-3470",
         "type": "tool_use",
         "label": "opus → Edit",
-        "detail": "{\"replace_all\":false,\"file_path\":\"/path/to/project/docs/features/F195-meeting-copilot-live-advisory.md\",\"old_string\":\"## MVP Acceptance Criteria（草案，待铲屎官确认）\\n\\n进入设计前至少需要定…",
+        "detail": "{\"replace_all\":false,\"file_path\":\"/home/user/cat-cafe/docs/features/F195-meeting-copilot-live-advisory.md\",\"old_string\":\"## MVP Acceptance Criteria（草案，待铲屎官确认）\\n\\n进入设计前至少需要定…",
         "timestamp": 1778467617467
       },
       {
         "id": "tool-1778467630910-1qd0",
         "type": "tool_use",
         "label": "opus → Edit",
-        "detail": "{\"replace_all\":false,\"file_path\":\"/path/to/project/docs/features/F195-meeting-copilot-live-advisory.md\",\"old_string\":\"## Open Questions\\n\\n- 线上会议（Zoom/Tencent Meeting）vs…",
+        "detail": "{\"replace_all\":false,\"file_path\":\"/home/user/cat-cafe/docs/features/F195-meeting-copilot-live-advisory.md\",\"old_string\":\"## Open Questions\\n\\n- 线上会议（Zoom/Tencent Meeting）vs…",
         "timestamp": 1778467630910
       },
       {
@@ -63,70 +63,70 @@
         "id": "tool-1778467828525-b9xl",
         "type": "tool_use",
         "label": "opus → Read",
-        "detail": "{\"file_path\":\"/path/to/project/docs/features/F195-meeting-copilot-live-advisory.md\",\"offset\":86,\"limit\":30}",
+        "detail": "{\"file_path\":\"/home/user/cat-cafe/docs/features/F195-meeting-copilot-live-advisory.md\",\"offset\":86,\"limit\":30}",
         "timestamp": 1778467828525
       },
       {
         "id": "tool-1778467853234-ydhn",
         "type": "tool_use",
         "label": "opus → Read",
-        "detail": "{\"file_path\":\"/path/to/project/docs/features/F195-meeting-copilot-live-advisory.md\",\"offset\":115,\"limit\":25}",
+        "detail": "{\"file_path\":\"/home/user/cat-cafe/docs/features/F195-meeting-copilot-live-advisory.md\",\"offset\":115,\"limit\":25}",
         "timestamp": 1778467853234
       },
       {
         "id": "tool-1778467976826-cwr9",
         "type": "tool_use",
         "label": "opus → Read",
-        "detail": "{\"file_path\":\"/path/to/project/docs/features/F195-meeting-copilot-live-advisory.md\"}",
+        "detail": "{\"file_path\":\"/home/user/cat-cafe/docs/features/F195-meeting-copilot-live-advisory.md\"}",
         "timestamp": 1778467976826
       },
       {
         "id": "tool-1778468054036-rh2r",
         "type": "tool_use",
         "label": "opus → Edit",
-        "detail": "{\"replace_all\":false,\"file_path\":\"/path/to/project/docs/features/F195-meeting-copilot-live-advisory.md\",\"old_string\":\"| **A 会后** | 批处理 ASR + 批处理 diarization（质量优先，非实时） | …",
+        "detail": "{\"replace_all\":false,\"file_path\":\"/home/user/cat-cafe/docs/features/F195-meeting-copilot-live-advisory.md\",\"old_string\":\"| **A 会后** | 批处理 ASR + 批处理 diarization（质量优先，非实时） | …",
         "timestamp": 1778468054036
       },
       {
         "id": "tool-1778468059890-hfxf",
         "type": "tool_use",
         "label": "opus → Edit",
-        "detail": "{\"replace_all\":false,\"file_path\":\"/path/to/project/docs/features/F195-meeting-copilot-live-advisory.md\",\"old_string\":\"| 说话人分离（diarization） | pyannote.audio 可做，M4 Max 可跑 …",
+        "detail": "{\"replace_all\":false,\"file_path\":\"/home/user/cat-cafe/docs/features/F195-meeting-copilot-live-advisory.md\",\"old_string\":\"| 说话人分离（diarization） | pyannote.audio 可做，M4 Max 可跑 …",
         "timestamp": 1778468059890
       },
       {
         "id": "tool-1778468066418-ymqc",
         "type": "tool_use",
         "label": "opus → Edit",
-        "detail": "{\"replace_all\":false,\"file_path\":\"/path/to/project/docs/features/F195-meeting-copilot-live-advisory.md\",\"old_string\":\"| Hub 浮动转写窗 | 前端新组件 | B | 有现成方案可参考吗？ |\\n| Meeting c…",
+        "detail": "{\"replace_all\":false,\"file_path\":\"/home/user/cat-cafe/docs/features/F195-meeting-copilot-live-advisory.md\",\"old_string\":\"| Hub 浮动转写窗 | 前端新组件 | B | 有现成方案可参考吗？ |\\n| Meeting c…",
         "timestamp": 1778468066418
       },
       {
         "id": "tool-1778468076477-2o7g",
         "type": "tool_use",
         "label": "opus → Edit",
-        "detail": "{\"replace_all\":false,\"file_path\":\"/path/to/project/docs/features/F195-meeting-copilot-live-advisory.md\",\"old_string\":\"- [ ] AC-C4: Meeting context 注入猫的 invocation 上下文（Me…",
+        "detail": "{\"replace_all\":false,\"file_path\":\"/home/user/cat-cafe/docs/features/F195-meeting-copilot-live-advisory.md\",\"old_string\":\"- [ ] AC-C4: Meeting context 注入猫的 invocation 上下文（Me…",
         "timestamp": 1778468076477
       },
       {
         "id": "tool-1778468083397-bkfw",
         "type": "tool_use",
         "label": "opus → Edit",
-        "detail": "{\"replace_all\":false,\"file_path\":\"/path/to/project/docs/features/F195-meeting-copilot-live-advisory.md\",\"old_string\":\"### 浮动转写窗最小 AC\\n\\n- 不抢聊天输入焦点\\n- 可拖拽/缩放/最小化\\n- 可暂停采集…",
+        "detail": "{\"replace_all\":false,\"file_path\":\"/home/user/cat-cafe/docs/features/F195-meeting-copilot-live-advisory.md\",\"old_string\":\"### 浮动转写窗最小 AC\\n\\n- 不抢聊天输入焦点\\n- 可拖拽/缩放/最小化\\n- 可暂停采集…",
         "timestamp": 1778468083397
       },
       {
         "id": "tool-1778468089948-o5s2",
         "type": "tool_use",
         "label": "opus → Edit",
-        "detail": "{\"replace_all\":false,\"file_path\":\"/path/to/project/docs/features/F195-meeting-copilot-live-advisory.md\",\"old_string\":\"| **浮动转写窗** | 实时滚动显示转写文本，可拖拽/缩放/最小化 | Hub workspace…",
+        "detail": "{\"replace_all\":false,\"file_path\":\"/home/user/cat-cafe/docs/features/F195-meeting-copilot-live-advisory.md\",\"old_string\":\"| **浮动转写窗** | 实时滚动显示转写文本，可拖拽/缩放/最小化 | Hub workspace…",
         "timestamp": 1778468089948
       },
       {
         "id": "tool-1778468095276-c3s4",
         "type": "tool_use",
         "label": "opus → Read",
-        "detail": "{\"file_path\":\"/path/to/project/docs/features/F195-meeting-copilot-live-advisory.md\",\"offset\":105,\"limit\":70}",
+        "detail": "{\"file_path\":\"/home/user/cat-cafe/docs/features/F195-meeting-copilot-live-advisory.md\",\"offset\":105,\"limit\":70}",
         "timestamp": 1778468095276
       },
       {

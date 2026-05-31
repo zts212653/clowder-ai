@@ -1,4 +1,8 @@
-import type { ReplyPreview, SchedulerMessageExtra } from '@cat-cafe/shared';
+import type { CliDiagnostics, ReplyPreview, SchedulerMessageExtra } from '@cat-cafe/shared';
+
+// F212 Phase B: re-export so existing web imports (panel + tests) can pull the contract via the
+// canonical chat-types entry point without each consumer reaching into @cat-cafe/shared.
+export type { CliDiagnostics } from '@cat-cafe/shared';
 
 /** Content block types matching backend MessageContent */
 export interface TextContent {
@@ -279,6 +283,10 @@ export interface ChatMessage {
     scheduler?: SchedulerMessageExtra['scheduler'];
     /** F118 AC-C3: Timeout diagnostics for enhanced error display */
     timeoutDiagnostics?: TimeoutDiagnostics;
+    /** F212 Phase B: structured CLI error diagnostics for folded panel display
+     *  (reasonCode → SVG icon + humanized summary/hint + opt-in safeExcerpt).
+     *  Populated by useAgentMessages error-path from BackgroundAgentMessage.metadata.cliDiagnostics. */
+    cliDiagnostics?: CliDiagnostics;
     /** F070: Governance blocked data for actionable bootstrap card */
     governanceBlocked?: {
       projectPath: string;
@@ -354,10 +362,14 @@ export interface Thread {
   backlogItemId?: string;
   /** F042: Thread-scoped routing policy (intent/scope). */
   routingPolicy?: ThreadRoutingPolicyV1;
+  /** Thread hierarchy: parent thread ID for orchestrated sub-threads. */
+  parentThreadId?: string;
   /** F095 Phase D: Soft-delete timestamp. Null/undefined = not deleted. */
   deletedAt?: number | null;
   /** F087: CVO Bootcamp onboarding state. */
   bootcampState?: BootcampStateV1;
+  /** F192 livefix: System thread kind for sidebar grouping (connector_hub | eval_domain). */
+  systemKind?: 'connector_hub' | 'eval_domain';
   /** F088 Phase G: Connector Hub thread state — marks this thread as an IM Hub. */
   connectorHubState?: ConnectorHubStateV1;
   /** F187: User-defined label IDs for thread categorization. */

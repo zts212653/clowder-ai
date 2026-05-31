@@ -97,14 +97,14 @@ describe('F190 visual contract — no hard borders in card/panel components', ()
   it('DefaultCatSelector uses console-card-bg shadow, not border-cafe', () => {
     const src = readSrc('DefaultCatSelector.tsx');
     expect(src).toContain('bg-[var(--console-card-bg)]');
-    expect(src).toContain('shadow-[0_8px_22px_rgba(43,33,26,0.04)]');
+    expect(src).toContain('shadow-[var(--shadow-elevation-2)]');
     expect(src).not.toMatch(/border border-cafe bg-cafe-surface/);
   });
 
   it('BrakeSettingsPanel uses console-list-card shadow, not border-cafe', () => {
     const src = readSrc('BrakeSettingsPanel.tsx');
     expect(src).toContain('console-list-card');
-    expect(src).toContain('shadow-[0_8px_22px_rgba(43,33,26,0.04)]');
+    expect(src).toContain('shadow-[var(--shadow-elevation-2)]');
     expect(src).not.toMatch(/border border-cafe bg-cafe-surface-elevated/);
     expect(src).not.toMatch(/border border-indigo-100/);
   });
@@ -183,7 +183,8 @@ describe('F190 visual contract — no hard borders in card/panel components', ()
   it('leaderboard-cards uses cafe/console tokens, no hub-lb-* CSS vars', () => {
     const src = readSrc('leaderboard-cards.tsx');
     expect(src).not.toMatch(/var\(--hub-/);
-    expect(src).toContain('cafe-text-primary');
+    /* F056: cafe-text-primary → cafe-text (OKLCH token rename) */
+    expect(src).toMatch(/cafe-text(?!-)/);
     expect(src).toContain('cafe-accent');
     expect(src).toContain('console-pill-bg');
   });
@@ -191,14 +192,16 @@ describe('F190 visual contract — no hard borders in card/panel components', ()
   it('leaderboard-phase-bc uses cafe/console tokens, no hub-lb-* CSS vars', () => {
     const src = readSrc('leaderboard-phase-bc.tsx');
     expect(src).not.toMatch(/var\(--hub-/);
-    expect(src).toContain('cafe-text-primary');
+    /* F056: cafe-text-primary → cafe-text (OKLCH token rename) */
+    expect(src).toMatch(/cafe-text(?!-)/);
     expect(src).toContain('cafe-accent');
   });
 
   it('HubLeaderboardTab uses cafe/console tokens, no hub-lb-* CSS vars', () => {
     const src = readSrc('HubLeaderboardTab.tsx');
     expect(src).not.toMatch(/var\(--hub-/);
-    expect(src).toContain('cafe-text-primary');
+    /* F056: cafe-text-primary → cafe-text (OKLCH token rename) */
+    expect(src).toMatch(/cafe-text(?!-)/);
     expect(src).toContain('console-pill-bg');
     expect(src).toContain('cafe-accent');
   });
@@ -246,7 +249,7 @@ describe('F190 visual contract — no hard borders in card/panel components', ()
   it('DefaultCatSelector has no fixed height, uses shadow', () => {
     const src = readSrc('DefaultCatSelector.tsx');
     expect(src).not.toContain('h-[72px]');
-    expect(src).toContain('shadow-[0_8px_22px_rgba(43,33,26,0.04)]');
+    expect(src).toContain('shadow-[var(--shadow-elevation-2)]');
   });
 
   it('SettingsRow has default shadow and text-compact font-bold title', () => {
@@ -359,7 +362,9 @@ describe('F190 visual contract — no hard borders in card/panel components', ()
     expect(tokens.fontSizePx).toHaveProperty('compact');
     expect(tokens.fontSizePx).toHaveProperty('label');
     expect(config).toContain("require('./src/styles/typography-tokens.json')");
-    expect(config).toContain('fontSize: typographyTokens.fontSize');
+    /* F056: fontSize expanded to object with spread + caption alias;
+       verify the spread wiring is intact (not the old direct assignment). */
+    expect(config).toContain('...typographyTokens.fontSize');
     expect(config).toContain('--console-font-');
     expect(config).toContain('fontSizePx');
     const css = readFileSync(resolve(testDir, '..', '..', 'app', 'console-shell.css'), 'utf8');
@@ -500,16 +505,20 @@ describe('F190 typography guard — no hardcoded font sizes in console scope', (
 
   it('src-wide guard: no raw pixel font definitions outside typography tokens', () => {
     const srcRoot = resolve(testDir, '..', '..');
-    const violations = collectSourceFiles(srcRoot).flatMap((file) => {
-      const src = readFileSync(file, 'utf8');
-      const matches = [
-        ...(src.match(/text-\[\d+(?:\.\d+)?px\]/g) ?? []),
-        ...(src.match(/fontSize:\s*['"]?\d/g) ?? []),
-        ...(src.match(/fontSize=\{\d/g) ?? []),
-        ...(src.match(/font-size:\s*(?:\d|0\.)/g) ?? []),
-      ];
-      return matches.map((match) => `${file.replace(srcRoot, 'src')}: ${match}`);
-    });
+    /* F056: dev/ tools (OklchTuner) intentionally use dense px sizes */
+    const DEV_EXCLUDE = /\/dev\//;
+    const violations = collectSourceFiles(srcRoot)
+      .filter((file) => !DEV_EXCLUDE.test(file))
+      .flatMap((file) => {
+        const src = readFileSync(file, 'utf8');
+        const matches = [
+          ...(src.match(/text-\[\d+(?:\.\d+)?px\]/g) ?? []),
+          ...(src.match(/fontSize:\s*['"]?\d/g) ?? []),
+          ...(src.match(/fontSize=\{\d/g) ?? []),
+          ...(src.match(/font-size:\s*(?:\d|0\.)/g) ?? []),
+        ];
+        return matches.map((match) => `${file.replace(srcRoot, 'src')}: ${match}`);
+      });
     expect(violations).toEqual([]);
   });
 });
@@ -717,21 +726,22 @@ describe('#723 cross-page typography consistency', () => {
   });
 
   it('light mode --console-field-bg is light, distinct from --console-hover-bg, and not old #f0e6dc', () => {
-    const css = readFileSync(resolve(testDir, '../../app/console-shell.css'), 'utf8');
-    const fieldMatch = css.match(/--console-field-bg:\s*(#[0-9a-fA-F]{6})/);
-    const hoverMatch = css.match(/--console-hover-bg:\s*(#[0-9a-fA-F]{6})/);
-    if (!fieldMatch || !hoverMatch) throw new Error('light mode field/hover tokens not found');
-    const fieldHex = fieldMatch[1].toLowerCase();
-    const hoverHex = hoverMatch[1].toLowerCase();
-    expect(fieldHex).not.toBe('#f0e6dc');
-    expect(hoverHex).not.toBe('#f0e6dc');
-    expect(fieldHex).not.toBe(hoverHex);
-    const hex = parseInt(fieldHex.slice(1), 16);
-    const r = (hex >> 16) & 0xff;
-    const g = (hex >> 8) & 0xff;
-    const b = hex & 0xff;
-    const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
-    expect(luminance).toBeGreaterThan(235);
+    /* F056: token definitions moved from console-shell.css to console-tokens.css
+     * + theme-tokens.css using OKLCH. Verify the token chain instead of hex. */
+    const consoleCss = readFileSync(resolve(testDir, '../../app/console-tokens.css'), 'utf8');
+    const themeCss = readFileSync(resolve(testDir, '../../app/theme-tokens.css'), 'utf8');
+    /* field-bg aliases to cafe-surface-sunken */
+    expect(consoleCss).toMatch(/--console-field-bg:\s*var\(--cafe-surface-sunken\)/);
+    /* hover-bg uses a different recipe (color-mix with accent) */
+    expect(consoleCss).toMatch(/--console-hover-bg:\s*color-mix/);
+    /* surface-sunken in light is oklch(0.92 ...) — L > 0.9 = bright */
+    const sunkenMatch = themeCss.match(/:root[\s\S]*?--cafe-surface-sunken:\s*oklch\((\d+\.?\d*)/);
+    if (!sunkenMatch) throw new Error('--cafe-surface-sunken OKLCH L not found in theme-tokens');
+    const lightness = Number.parseFloat(sunkenMatch[1]);
+    expect(lightness).toBeGreaterThan(0.9);
+    /* Ensure no old deprecated hex value */
+    expect(consoleCss).not.toContain('#f0e6dc');
+    expect(themeCss).not.toContain('#f0e6dc');
   });
 });
 
@@ -875,7 +885,9 @@ describe('#723 round 4 — primitive convergence guard', () => {
     expect(src).not.toContain('bg-cafe-text');
     expect(src).toContain('console-border-soft');
     expect(src).toContain('console-input-stroke');
-    expect(src).toContain('bg-cafe-accent text-white');
+    /* F056: text-white → text-[var(--cafe-surface)] for theme-aware contrast */
+    expect(src).toContain('bg-cafe-accent text-[var(--cafe-surface)]');
+    expect(src).not.toContain('bg-cafe-accent text-white');
   });
 
   it('SettingsSearchInput uses border-soft + transparent bg + input-stroke focus', () => {
@@ -1125,7 +1137,9 @@ describe('#723 round 6 — select/toggle/button primitive convergence', () => {
       );
       for (const btn of secondaryButtons) {
         expect(btn).not.toContain('border-[var(--console-border-soft)]');
-        expect(btn).toContain('shadow-[0_1px_3px');
+        /* F056: raw shadow-[0_1px_3px...] → shadow-sm (tokenized) */
+        expect(btn).toContain('shadow-sm');
+        expect(btn).not.toMatch(/shadow-\[0_1px_3px/);
       }
     }
   });

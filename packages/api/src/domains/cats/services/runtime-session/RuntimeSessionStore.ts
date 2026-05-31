@@ -4,7 +4,16 @@ import {
   type RuntimeSessionLifecycleState,
   type RuntimeSessionMetadata,
   type RuntimeSessionRuntime,
+  type RuntimeSessionSurface,
 } from './RuntimeSessionMetadata.js';
+
+export interface RuntimeSessionRecentFilter {
+  runtime?: RuntimeSessionRuntime;
+  catId?: CatId;
+  surface?: RuntimeSessionSurface;
+  limit?: number;
+  offset?: number;
+}
 
 export interface IRuntimeSessionStore {
   upsert(metadata: RuntimeSessionMetadata): RuntimeSessionMetadata | Promise<RuntimeSessionMetadata>;
@@ -21,6 +30,7 @@ export interface IRuntimeSessionStore {
   listByLifecycleState(
     state: RuntimeSessionLifecycleState,
   ): RuntimeSessionMetadata[] | Promise<RuntimeSessionMetadata[]>;
+  listRecent(filter: RuntimeSessionRecentFilter): RuntimeSessionMetadata[] | Promise<RuntimeSessionMetadata[]>;
   updateLifecycle(
     sessionId: string,
     patch: Partial<RuntimeSessionMetadata['lifecycle']>,
@@ -88,6 +98,25 @@ export class RuntimeSessionStore implements IRuntimeSessionStore {
       .map((record) => cloneMetadata(record));
   }
 
+  listRecent(filter: RuntimeSessionRecentFilter): RuntimeSessionMetadata[] {
+    const limit = normalizeLimit(filter.limit);
+    const offset = normalizeOffset(filter.offset);
+    return Array.from(this.records.values())
+      .filter((record) => {
+        if (filter.runtime && record.runtime !== filter.runtime) return false;
+        if (filter.catId && record.catId !== filter.catId) return false;
+        if (filter.surface && record.surface !== filter.surface) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const observedDelta = b.lifecycle.lastObservedAt - a.lifecycle.lastObservedAt;
+        if (observedDelta !== 0) return observedDelta;
+        return a.sessionId.localeCompare(b.sessionId);
+      })
+      .slice(offset, offset + limit)
+      .map((record) => cloneMetadata(record));
+  }
+
   updateLifecycle(
     sessionId: string,
     patch: Partial<RuntimeSessionMetadata['lifecycle']>,
@@ -123,4 +152,16 @@ function runtimeKey(runtime: RuntimeSessionRuntime, runtimeSessionId: string): s
 
 function cloneMetadata(metadata: RuntimeSessionMetadata): RuntimeSessionMetadata {
   return structuredClone(metadata);
+}
+
+function normalizeLimit(limit: number | undefined): number {
+  if (limit === undefined) return 50;
+  if (!Number.isInteger(limit) || limit < 1) return 50;
+  return Math.min(limit, 200);
+}
+
+function normalizeOffset(offset: number | undefined): number {
+  if (offset === undefined) return 0;
+  if (!Number.isInteger(offset) || offset < 0) return 0;
+  return offset;
 }

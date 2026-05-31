@@ -2595,6 +2595,100 @@ describe('F078: Group mentions', () => {
     // 咪 is not a boundary char — should NOT match @全体布偶猫
     assert.equal(targetCats.length, 1, '@全体布偶猫咪 should not trigger breed group');
   });
+
+  test('@thread + explicit @gemini unions both (group mention does not short-circuit)', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    // Thread t1 has opus + codex as participants; gemini is NOT a participant
+    const threadStore = createMockThreadStore({ t1: ['opus', 'codex'] });
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const { targetCats } = await router.resolveTargetsAndIntent('@thread @gemini 大家看看', 't1');
+    // Should include thread participants (opus, codex) AND the explicit @gemini
+    assert.ok(targetCats.includes('opus'), 'thread participant opus should be included');
+    assert.ok(targetCats.includes('codex'), 'thread participant codex should be included');
+    assert.ok(targetCats.includes('gemini'), 'explicitly mentioned @gemini should be included');
+    assert.equal(targetCats.length, 3, 'should have exactly 3 unique cats');
+  });
+
+  test('@gemini @thread respects message order (explicit mention before group)', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    // Thread t1 has opus + codex as participants; gemini is NOT a participant
+    const threadStore = createMockThreadStore({ t1: ['opus', 'codex'] });
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    // "@gemini" at position 0, "@thread" at position 9 — gemini should come FIRST
+    const { targetCats } = await router.resolveTargetsAndIntent('@gemini @thread 大家看看', 't1');
+    assert.equal(targetCats.length, 3, 'should have exactly 3 unique cats');
+    assert.equal(targetCats[0], 'gemini', 'gemini appears first in message → first in routing order');
+    // thread participants follow after gemini
+    assert.ok(targetCats.includes('opus'), 'thread participant opus should be included');
+    assert.ok(targetCats.includes('codex'), 'thread participant codex should be included');
+  });
+
+  test('@thread @gemini respects message order (group mention before explicit)', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const threadStore = createMockThreadStore({ t1: ['opus', 'codex'] });
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    // "@thread" at position 0, "@gemini" at position 9 — thread participants first, then gemini
+    const { targetCats } = await router.resolveTargetsAndIntent('@thread @gemini 大家看看', 't1');
+    assert.equal(targetCats.length, 3);
+    // gemini (explicit, not in thread) should be LAST since @thread comes first
+    assert.equal(targetCats[targetCats.length - 1], 'gemini', 'gemini after group → last in routing order');
+    assert.ok(targetCats.indexOf('opus') < targetCats.indexOf('gemini'), 'thread participant opus before gemini');
+  });
+
+  test('@all + explicit @codex deduplicates (no duplicate entries)', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+      }),
+    );
+
+    const { targetCats } = await router.resolveTargetsAndIntent('@all @codex 大家好');
+    // @all already includes codex — explicit @codex should NOT create a duplicate
+    assert.ok(targetCats.includes('opus'));
+    assert.ok(targetCats.includes('codex'));
+    assert.ok(targetCats.includes('gemini'));
+    const codexCount = targetCats.filter((c) => c === 'codex').length;
+    assert.equal(codexCount, 1, '@codex should appear exactly once (dedup)');
+  });
 });
 
 // ────────────────────────────────────────────────────────────────

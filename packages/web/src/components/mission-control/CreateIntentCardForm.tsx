@@ -184,7 +184,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
               onClick={() => toggleRisk(s.value)}
               className={`rounded-full px-2 py-0.5 text-micro ${
                 riskSignals.includes(s.value)
-                  ? 'bg-conn-red-bg text-red-800'
+                  ? 'bg-conn-red-bg text-conn-red-text'
                   : 'bg-[var(--console-hover-bg)] text-cafe-secondary'
               }`}
             >
@@ -195,7 +195,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
       </div>
 
       {error && (
-        <div className="rounded-lg border border-conn-red-ring bg-conn-red-bg px-3 py-1.5 text-xs text-red-700">
+        <div className="rounded-lg border border-conn-red-ring bg-conn-red-bg px-3 py-1.5 text-xs text-conn-red-text">
           {error}
         </div>
       )}
@@ -212,7 +212,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
           type="button"
           onClick={() => void handleSubmit()}
           disabled={submitting}
-          className="rounded-lg bg-[var(--mc-accent)] px-4 py-1.5 text-xs font-medium text-white hover:bg-[var(--mc-accent-hover)] disabled:opacity-40"
+          className="rounded-lg bg-[var(--mc-accent)] px-4 py-1.5 text-xs font-medium text-[var(--cafe-surface)] hover:bg-[var(--mc-accent-hover)] disabled:opacity-40"
         >
           {submitting ? '创建中...' : '创建'}
         </button>

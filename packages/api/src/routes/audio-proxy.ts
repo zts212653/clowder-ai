@@ -6,9 +6,15 @@
  */
 
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
+import { getServiceConfig } from '../domains/services/service-config.js';
+import { getServiceManifest, resolveServiceEndpoint } from '../domains/services/service-manifest.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
-const AUDIO_URL = process.env['AUDIO_SERVICE_URL'] ?? 'http://127.0.0.1:9881';
+function resolveAudioServiceUrl(): string {
+  const service = getServiceManifest('audio-capture');
+  if (!service) return process.env['AUDIO_SERVICE_URL'] ?? 'http://127.0.0.1:9881';
+  return resolveServiceEndpoint(service, process.env, getServiceConfig('audio-capture')) ?? 'http://127.0.0.1:9881';
+}
 
 function requireIdentity(request: FastifyRequest, reply: FastifyReply): boolean {
   const userId = resolveUserId(request, {});
@@ -20,7 +26,7 @@ function requireIdentity(request: FastifyRequest, reply: FastifyReply): boolean 
 }
 
 async function proxyJson(reply: FastifyReply, method: string, path: string, body?: unknown): Promise<void> {
-  const resp = await fetch(`${AUDIO_URL}${path}`, {
+  const resp = await fetch(`${resolveAudioServiceUrl()}${path}`, {
     method,
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
@@ -151,7 +157,7 @@ export const audioProxyRoutes: FastifyPluginAsync = async (app) => {
   app.get('/api/audio/events', async (req, reply) => {
     if (!requireIdentity(req, reply)) return;
     try {
-      const resp = await fetch(`${AUDIO_URL}/events`);
+      const resp = await fetch(`${resolveAudioServiceUrl()}/events`);
       if (!resp.ok || !resp.body) {
         return reply.status(502).send({ error: 'Audio service SSE unavailable' });
       }

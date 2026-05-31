@@ -1,4 +1,4 @@
-import { getNextCronMs } from './cron-utils.js';
+import { computeNextCronSlot } from './cron-utils.js';
 import type { DynamicTaskDef, DynamicTaskStore } from './DynamicTaskStore.js';
 import { executeTaskPipeline } from './execute-pipeline.js';
 import type { RunLedger } from './RunLedger.js';
@@ -86,6 +86,14 @@ export class TaskRunnerV2 {
   private running = new Map<string, boolean>();
   private tickCounts = new Map<string, number>();
   private lastRunAt = new Map<string, number | null>();
+  /**
+   * F167 verdict 2026-05-29 (vhp_eval_a2a_2026_05_29T03_11_28Z_double_cron_fire):
+   * epoch-ms of the most recent cron slot already fired per task. Used by
+   * scheduleCronTick() to skip past slots whose tick was already triggered —
+   * prevents the boundary race where setTimeout drift fires the same cron slot
+   * twice via the `.finally` reschedule path.
+   */
+  private cronSlotFired = new Map<string, number>();
   /** Phase 3A: track dynamic task IDs → DynamicTaskDef.id mapping */
   private dynamicTaskIds = new Map<string, string>();
   /** True after start() has been called — used to auto-schedule late-registered tasks */
@@ -155,6 +163,7 @@ export class TaskRunnerV2 {
     this.running.delete(taskId);
     this.tickCounts.delete(taskId);
     this.lastRunAt.delete(taskId);
+    this.cronSlotFired.delete(taskId);
     this.dynamicTaskIds.delete(taskId);
     return true;
   }
@@ -235,7 +244,21 @@ export class TaskRunnerV2 {
   /** Schedule next cron tick via setTimeout chain */
   private scheduleCronTick(task: AnyTaskSpec): void {
     if (task.trigger.type !== 'cron') return;
-    const ms = getNextCronMs(task.trigger.expression, task.trigger.timezone);
+    // F167 fix (boundary-race guard): compute the next slot strictly after the
+    // last slot we already fired. Without this, when setTimeout drifts a few
+    // ms before its target cron time and executePipeline returns quickly, the
+    // `.finally` reschedule below can recompute the same slot (Date.now() is
+    // still before it) and fire it a second time. Marking the slot as fired
+    // synchronously inside the setTimeout callback below closes the race.
+    const lastFired = this.cronSlotFired.get(task.id);
+    let nextSlotMs: number;
+    try {
+      nextSlotMs = computeNextCronSlot(task.trigger.expression, task.trigger.timezone, Date.now(), lastFired);
+    } catch (err) {
+      this.logger.error(`[scheduler] ${task.id}: cron expression invalid`, err);
+      return;
+    }
+    const ms = Math.max(1, nextSlotMs - Date.now());
     // #605: chunk long delays to avoid Node setTimeout 32-bit overflow
     if (ms > TaskRunnerV2.MAX_TIMER_DELAY) {
       const timer = setTimeout(() => {
@@ -249,6 +272,11 @@ export class TaskRunnerV2 {
       return;
     }
     const timer = setTimeout(() => {
+      // F167 fix: mark this slot fired BEFORE any async work. The `.finally`
+      // reschedule may run while Date.now() is still milliseconds before
+      // nextSlotMs (timer drift); computeNextCronSlot will then advance past
+      // this entry instead of returning the same slot.
+      this.cronSlotFired.set(task.id, nextSlotMs);
       this.executePipeline(task)
         .catch((err) => {
           this.logger.error(`[scheduler] ${task.id}: pipeline error`, err);
@@ -369,6 +397,7 @@ export class TaskRunnerV2 {
       this.logger.info(`[scheduler] ${id}: stopped`);
     }
     this.timers.clear();
+    this.cronSlotFired.clear();
     this.started = false;
   }
 

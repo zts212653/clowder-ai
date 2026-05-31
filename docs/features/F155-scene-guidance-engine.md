@@ -11,7 +11,9 @@ intake_issue: "cat-cafe#1294"
 
 # F155: Scene-Based Guidance Engine — 场景式交互引导
 
-> **Status**: in-progress (Phase A merged in cat-cafe main via PR #1122; Phase B selective intake merged in cat-cafe main via PR #1147; guided-scenarios selective intake merged in cat-cafe main via PR #1296) | **Source**: Community (mindfn) | **Priority**: P1 | **Owner**: Maine Coon/gpt52
+> **Status**: done (closed 2026-05-26) | **Source**: Community (mindfn) | **Priority**: P1 | **Owner**: 社区 (mindfn)
+>
+> **Close 2026-05-26**：team lead拍板 close。Phase A（10 项）+ Phase B selective intake（5 项）全部 merged。Phase B 架构重构 6/6 已在 clowder-ai#457（absorbed via cat-cafe#1147）中完成——GuideRoutingInterceptor / GuidePromptSection / GuideSession / GuideSessionRepository / GuideStateMachine / GuideLifecycleService / GuideActionService / GuideDismissTracker / GuideOfferPolicy 均已独立存在于 `packages/api/src/domains/guides/`。9 个 YAML guide scenario 已上线（`guides/flows/`）。Guide Catalog UI 无独立浏览页面，但有 MCP `cat_cafe_get_available_guides` + `guide-registry-loader.ts` 后端 catalog——设计上是猫猫按上下文触发，不是用户浏览。KD-16 决定 session ephemeral by design，不做持久化。社区 issue clowder-ai#409 已关闭。
 
 ## Why
 
@@ -46,18 +48,18 @@ intake_issue: "cat-cafe#1294"
 
 **架构重构**（来自 Design Review 2026-04-10）
 
-- [ ] **路由解耦**：将 guide candidate resolution、offered/completed injection、completionAcked write-back 从 `route-serial`/`route-parallel` 提取到 `GuideRoutingInterceptor`，路由核心保持 guide-agnostic
-- [ ] **SystemPromptBuilder 解耦**：108 行 guide 注入提取为 `GuidePromptSection` builder，由主 builder compose
-- [ ] **CustomEvent 迁移**：移除 `window.addEventListener('guide:start')` 桥接层，改用 Socket.io（server→client）+ Zustand actions（client-side）
-- [ ] **GuideSession 领域对象**：从 thread-scoped `guideState` 迁移到独立 `GuideSession` store `{ threadId, userId, guideId, sessionId, state }`
-- [ ] **文件拆分**：`callback-guide-routes.ts` 状态机迁移到 domain service；`GuideOverlay.tsx` 继续向 `guide-overlay-parts.tsx` 分解
-- [ ] **意图判定与 guide catalog 策略层**：猫先基于用户意图判断是直接解释还是需要引导，再通过 MCP `cat_cafe_get_available_guides()` 获取当前可用场景目录，并基于返回描述选择具体场景；路由层不再直接从原始消息触发 guide，避免 hijack 正常对话
+- [x] **路由解耦**：将 guide candidate resolution、offered/completed injection、completionAcked write-back 从 `route-serial`/`route-parallel` 提取到 `GuideRoutingInterceptor`（275 行），路由核心保持 guide-agnostic
+- [x] **SystemPromptBuilder 解耦**：108 行 guide 注入提取为 `GuidePromptSection`（151 行）builder，由主 builder compose
+- [x] **CustomEvent 迁移**：移除 `window.addEventListener('guide:start')` 桥接层，改用 Socket.io（server→client）+ Zustand actions（client-side）
+- [x] **GuideSession 领域对象**：从 thread-scoped `guideState` 迁移到独立 `GuideSession`（63 行）store + `GuideSessionRepository`（130 行）
+- [x] **文件拆分**：状态机迁移到 `GuideStateMachine`（72 行）domain service；`GuideLifecycleService`（290 行）+ `GuideActionService`（218 行）+ `GuideDismissTracker`（52 行）+ `GuideOfferPolicy`（100 行 via registry-loader）
+- [x] **意图判定与 guide catalog 策略层**：MCP `cat_cafe_get_available_guides()` + `guide-registry-loader.ts` 后端 catalog 实现；猫猫按上下文触发引导，路由层不直接从原始消息 hijack
 
 **产品扩展**
 
-- [ ] 更多平台内场景（Provider 配置、Hub 设置等）
-- [ ] Guide Catalog UI
-- [ ] 进度持久化
+- [x] 更多平台内场景 — 9 个 YAML guide scenario 已上线（`guides/flows/`），覆盖 Provider 配置、Hub 设置等
+- [x] Guide Catalog UI — ⚠️ 无独立浏览页面，但有 MCP `cat_cafe_get_available_guides` + `guide-registry-loader.ts` 后端 catalog——设计上是猫猫按上下文触发，不是用户浏览
+- [x] 进度持久化 — KD-16 决定 session ephemeral by design（`IGuideSessionStore` 扩展点，默认 in-memory）；不做 cross-restart resume
 
 ## State Authority
 

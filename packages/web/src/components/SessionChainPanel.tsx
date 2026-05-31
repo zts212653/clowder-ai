@@ -35,6 +35,23 @@ interface SessionSummary {
     cacheReadTokens?: number;
     costUsd?: number;
   };
+  runtimeSession?: RuntimeSessionSummary;
+}
+
+interface RuntimeSessionSummary {
+  runtime: string;
+  runtimeSessionId: string;
+  runtimeConversationId?: string;
+  lifecycleState: string;
+  lastObservedAt: number;
+  unexpectedRuntimeSessionSwitch?: {
+    detectedAt: number;
+    previousSessionId: string;
+    previousRuntimeSessionId: string;
+    currentRuntimeSessionId: string;
+    declaredPreviousRuntimeSessionId?: string;
+    reason: string;
+  };
 }
 
 const sessionCache = new Map<string, SessionSummary[]>();
@@ -66,6 +83,7 @@ function sealReasonLabel(reason?: string): string {
   if (reason === 'max_compressions') return 'max compress';
   if (reason === 'manual') return 'manual';
   if (reason === 'cli_session_replaced') return 'CLI replaced';
+  if (reason === 'unexpected_runtime_session_switch') return 'runtime switch';
   if (reason === 'overflow_circuit_breaker') return 'overflow';
   if (reason === 'unseal_displacement') return 'unseal displaced';
   if (reason === 'reconcile_stuck') return 'stuck reaper';
@@ -97,9 +115,10 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
 
   const colorsForCat = (catId: string): SessionColors => {
     const cat = getCatById(catId);
-    return deriveSessionColors(cat?.color?.primary, cat?.color?.secondary);
+    return deriveSessionColors(cat?.color?.primary);
   };
 
+  // Badge 显示猫名（与主对话气泡一致）；未知 catId 回落到原始 id。
   const labelForCat = (catId: string): string => {
     const cat = getCatById(catId);
     return cat ? formatCatName(cat) : catId;
@@ -182,15 +201,14 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
 
   return (
     <section className={`${settingsResourceCardClass} p-2.5`}>
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-xs font-semibold text-cafe-secondary">Session Chain</h3>
-        <span className="text-micro text-cafe-muted">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-xs font-bold text-cafe">Session Chain</h3>
+        <span className="text-micro font-bold text-cafe-muted">
           {sessions.length} session{sessions.length !== 1 ? 's' : ''}
         </span>
       </div>
-
       {actionError && (
-        <div className="mb-2 rounded border border-conn-red-ring bg-conn-red-bg px-2 py-1 text-micro text-red-700">
+        <div className="mb-2 rounded border border-conn-red-ring bg-conn-red-bg px-2 py-1 text-micro text-conn-red-text">
           {actionError}
         </div>
       )}
@@ -202,7 +220,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
             <span className="text-conn-amber-text text-xs">&#9888;</span>
             <span className="text-micro font-medium text-conn-amber-text">Post-compact safety active</span>
           </div>
-          <p className="text-xs text-conn-amber-text mt-0.5 ml-4">
+          <p className="text-micro text-conn-amber-text mt-0.5 ml-4">
             High-risk ops may be blocked after context compression
           </p>
         </div>
@@ -228,24 +246,26 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
         return (
           <div key={session.id} className="mb-2">
             <div className="flex items-center gap-1 mb-1">
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-conn-green-text" />
-              <span className="text-micro font-bold text-conn-green-text uppercase tracking-wider">Active</span>
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-conn-emerald-text)]" />
+              <span className="text-micro font-bold text-conn-emerald-text uppercase tracking-wider">Active</span>
             </div>
             <div
               data-testid="session-card-active"
               data-cat-id={session.catId}
-              className="console-list-card session-corner-arcs rounded-xl bg-[var(--console-card-bg)] p-2.5 shadow-[0_2px_8px_rgba(43,33,26,0.06)]"
+              className="console-list-card session-corner-arcs rounded-xl p-2.5"
+              style={{ boxShadow: colors.cardShadow }}
             >
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-semibold text-cafe">Session #{session.seq + 1}</span>
+              <div className="flex items-center justify-between gap-1 mb-1 min-w-0">
+                <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+                  <span className="shrink-0 text-xs font-semibold text-cafe">Session #{session.seq + 1}</span>
                   <SessionIdTag id={session.cliSessionId ?? session.id} />
                 </div>
                 <span
                   data-testid="session-badge-active"
                   data-cat-id={session.catId}
-                  className="text-micro px-1.5 py-0.5 rounded-full font-medium"
+                  className="shrink min-w-[5ch] truncate text-micro px-1.5 py-0.5 rounded-full font-medium"
                   style={{ backgroundColor: colors.badgeBg, color: colors.badgeText }}
+                  title={labelForCat(session.catId)}
                 >
                   {labelForCat(session.catId)}
                 </span>
@@ -257,6 +277,30 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                   <span className="text-conn-amber-text"> · {session.compressionCount} compress</span>
                 )}
               </div>
+              {session.runtimeSession && (
+                <div
+                  data-testid="runtime-session-summary"
+                  className="mb-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-micro text-cafe-muted"
+                >
+                  <span>runtime</span>
+                  <SessionIdTag id={session.runtimeSession.runtimeSessionId} />
+                  <span>{session.runtimeSession.runtime}</span>
+                  <span>{session.runtimeSession.lifecycleState}</span>
+                </div>
+              )}
+              {session.runtimeSession?.unexpectedRuntimeSessionSwitch && (
+                <div
+                  data-testid="runtime-session-warning"
+                  className="mb-1 rounded border border-conn-amber-ring bg-conn-amber-bg px-2 py-1 text-micro text-conn-amber-text"
+                >
+                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                    <span className="font-medium">unexpected switch</span>
+                    <SessionIdTag id={session.runtimeSession.unexpectedRuntimeSessionSwitch.previousRuntimeSessionId} />
+                    <span>-&gt;</span>
+                    <SessionIdTag id={session.runtimeSession.unexpectedRuntimeSessionSwitch.currentRuntimeSessionId} />
+                  </div>
+                </div>
+              )}
               {/* Token counts + cache: prefer live invocation, fallback to persisted */}
               {usage && (usage.inputTokens != null || usage.outputTokens != null) && (
                 <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-micro font-mono mb-1">
@@ -275,7 +319,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                       <span className="text-cafe-muted ml-0.5">↑</span>
                     </span>
                   )}
-                  {cachePct > 0 && <span className="text-conn-green-text">cached {cachePct}%</span>}
+                  {cachePct > 0 && <span className="text-conn-emerald-text">cached {cachePct}%</span>}
                 </div>
               )}
               {/* Context health bar (already shows % internally, no duplicate text) */}
@@ -308,11 +352,12 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                   key={session.id}
                   data-testid="session-card-sealed"
                   data-cat-id={session.catId}
-                  className="console-list-card flex items-center gap-2 rounded-xl bg-[var(--console-card-bg)] px-2.5 py-1.5 shadow-[0_2px_8px_rgba(43,33,26,0.06)]"
+                  className="console-list-card session-corner-arcs flex items-center gap-2 rounded-xl px-2.5 py-1.5"
+                  style={{ boxShadow: sealedColors.cardShadow }}
                 >
                   <div
                     className={`flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center ${
-                      session.sealReason?.includes('compact') ? 'bg-conn-amber-bg' : 'bg-[var(--console-field-bg)]'
+                      session.sealReason?.includes('compact') ? 'bg-conn-amber-bg' : 'bg-cafe-surface-elevated'
                     }`}
                   >
                     <span
@@ -324,13 +369,16 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                     </span>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-medium text-cafe-secondary">Session #{session.seq + 1}</span>
+                    <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+                      <span className="shrink-0 text-xs font-medium text-cafe-secondary">
+                        Session #{session.seq + 1}
+                      </span>
                       <span
                         data-testid="session-badge-sealed"
                         data-cat-id={session.catId}
-                        className="text-micro px-1 py-0.5 rounded-full font-medium"
+                        className="shrink min-w-[5ch] truncate text-micro px-1 py-0.5 rounded-full font-medium"
                         style={{ backgroundColor: sealedColors.badgeBg, color: sealedColors.badgeText }}
+                        title={labelForCat(session.catId)}
                       >
                         {labelForCat(session.catId)}
                       </span>
@@ -350,7 +398,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                       {onViewSession && (
                         <button
                           type="button"
-                          className="text-micro px-2 py-0.5 rounded border border-[var(--console-border-soft)] text-cafe-secondary hover:bg-[var(--console-hover-bg)]"
+                          className="text-micro px-2 py-0.5 rounded border border-[var(--console-border-soft)] text-cafe-secondary hover:bg-cafe-surface-elevated"
                           onClick={() => onViewSession(session.id, session.catId)}
                         >
                           查看
@@ -358,7 +406,13 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                       )}
                       <button
                         type="button"
-                        className="text-micro px-2 py-0.5 rounded border border-conn-blue-ring text-blue-600 hover:bg-conn-blue-bg disabled:opacity-50"
+                        className="text-micro px-2 py-0.5 rounded border border-[var(--_accent-20)] text-[var(--color-cafe-accent)] hover:bg-[var(--_accent-5)] disabled:opacity-50"
+                        style={
+                          {
+                            '--_accent-20': 'color-mix(in oklch, var(--color-cafe-accent) 20%, transparent)',
+                            '--_accent-5': 'color-mix(in oklch, var(--color-cafe-accent) 5%, transparent)',
+                          } as React.CSSProperties
+                        }
                         onClick={() => {
                           void handleUnseal(session.id);
                         }}

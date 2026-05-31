@@ -144,4 +144,56 @@ describe('ensureEvalDomainThreads', () => {
     const healed = store.get('thread_eval_memory');
     assert.equal(healed.title, 'Memory Recall Eval');
   });
+
+  // F192 livefix: systemKind must be set on eval domain threads
+  it('sets systemKind to eval_domain on newly created threads', async () => {
+    const store = new ThreadStore();
+    const domains = [makeDomain('eval:a2a', 'thread_eval_a2a', 'A2A Harness Eval')];
+
+    await ensureEvalDomainThreads(store, domains);
+
+    const thread = await store.get('thread_eval_a2a');
+    assert.equal(thread.systemKind, 'eval_domain', 'new eval thread must have systemKind set');
+  });
+
+  it('heals existing thread missing systemKind', async () => {
+    const store = new ThreadStore();
+    // Simulate a pre-existing eval thread without systemKind
+    store.ensureThread('thread_eval_a2a', 'A2A Harness Eval');
+    const pre = store.get('thread_eval_a2a');
+    assert.equal(pre.systemKind, undefined, 'should have no systemKind before heal');
+
+    const domains = [makeDomain('eval:a2a', 'thread_eval_a2a', 'A2A Harness Eval')];
+    const results = await ensureEvalDomainThreads(store, domains);
+
+    assert.equal(results[0].healed, true, 'should be marked healed');
+    const healed = store.get('thread_eval_a2a');
+    assert.equal(healed.systemKind, 'eval_domain', 'systemKind should be healed');
+  });
+
+  it('indexes newly created eval thread for default user sidebar visibility (cloud P1)', async () => {
+    const store = new ThreadStore();
+    const domains = [makeDomain('eval:a2a', 'thread_eval_a2a', 'A2A Harness Eval')];
+
+    await ensureEvalDomainThreads(store, domains, 'default-user');
+
+    // The thread should appear in the default user's thread list
+    const userThreads = await store.list('default-user');
+    const evalThread = userThreads.find((t) => t.id === 'thread_eval_a2a');
+    assert.ok(evalThread, 'eval thread must appear in default user thread list for sidebar visibility');
+  });
+
+  it('indexes healed eval thread for default user sidebar visibility (cloud P1)', async () => {
+    const store = new ThreadStore();
+    // Create thread without user indexing (simulating old behavior)
+    store.ensureThread('thread_eval_a2a', '');
+
+    const domains = [makeDomain('eval:a2a', 'thread_eval_a2a', 'A2A Harness Eval')];
+    await ensureEvalDomainThreads(store, domains, 'default-user');
+
+    // Even healed threads should be in the user list
+    const userThreads = await store.list('default-user');
+    const evalThread = userThreads.find((t) => t.id === 'thread_eval_a2a');
+    assert.ok(evalThread, 'healed eval thread must appear in default user thread list');
+  });
 });

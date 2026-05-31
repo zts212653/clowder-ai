@@ -686,9 +686,63 @@ excluded:
       }
     });
 
+    it('sync-manifest exports root package operational helper scripts', () => {
+      const managedScripts = readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts');
+      const requiredScripts = ['scripts/cleanup-stale-dev-processes.mjs'];
+
+      for (const scriptPath of requiredScripts) {
+        assert.ok(
+          managedScripts.includes(scriptPath),
+          `sync-manifest should export ${scriptPath} because public package.json exposes it`,
+        );
+      }
+    });
+
+    it('sync-manifest exports start-dev sourced shell closure', () => {
+      const managedScripts = readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts');
+      const requiredScripts = [
+        'scripts/start-dev.sh',
+        'scripts/download-source-overrides.sh',
+        'scripts/lib/node-runtime-guard.sh',
+        'scripts/lib/redis-rdb-first.sh',
+      ];
+
+      for (const scriptPath of requiredScripts) {
+        assert.ok(
+          managedScripts.includes(scriptPath),
+          `sync-manifest should export ${scriptPath} because public start-dev.sh sources it at runtime`,
+        );
+      }
+    });
+
+    it('sync-manifest does not protect managed service wrappers as target-owned', () => {
+      const managedScripts = readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts');
+      const targetOwnedFiles = readYamlTopLevelList('sync-manifest.yaml', 'target_owned_files');
+      const managedServiceWrappers = managedScripts.filter((entry) => entry.startsWith('scripts/services/'));
+
+      for (const entry of targetOwnedFiles) {
+        const overlappingManaged = managedServiceWrappers.find(
+          (managed) => managed === entry || managed.startsWith(entry),
+        );
+        assert.equal(
+          overlappingManaged,
+          undefined,
+          `target_owned_files should not restore over managed public service wrapper ${overlappingManaged ?? entry}`,
+        );
+      }
+    });
+
     it('sync-to-opensource.sh drops home-only root package scripts whose targets are not exported', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
 
+      assert.ok(
+        content.includes('pkg.scripts.check === "node scripts/run-checks.mjs"'),
+        'public package.json should rewrite source-only run-checks wrapper into an explicit public check chain',
+      );
+      assert.ok(
+        content.includes('pkg.scripts["check:pre-merge-gate"] ='),
+        'public package.json should strip source-only run-checks.test.mjs from check:pre-merge-gate',
+      );
       assert.ok(
         content.includes('delete pkg.scripts["check:architecture-ownership"]'),
         'public package.json should not expose check:architecture-ownership without exporting its script target',
@@ -730,9 +784,21 @@ excluded:
 
     it('sync-manifest exports public harness eval fixtures used by test:public', () => {
       const managedFiles = readYamlTopLevelList('sync-manifest.yaml', 'managed_files');
+      const managedRoots = readYamlTopLevelList('sync-manifest.yaml', 'managed_roots');
+
+      // eval-domains/ is exported as a managed_root (whole directory), so the individual
+      // domain registries (eval-a2a/eval-memory/eval-sop) + community-fixtures sync
+      // automatically — they need NOT be listed in managed_files. This guard moved from
+      // per-file enumeration to root-coverage after the recurring "F192 added a new domain
+      // but forgot to update managed_files" sync-config debt (PR #1929).
+      assert.ok(
+        managedRoots.includes('docs/harness-feedback/eval-domains'),
+        'eval-domains/ must be a managed_root so all domain registries + community-fixtures sync to the public repo',
+      );
+
+      // verdicts/ + bundles/ + F210 assets stay curated in managed_files (verdicts/bundles
+      // may contain internal-only entries, so they are NOT blanket-exported as a root).
       const fixturePaths = [
-        'docs/harness-feedback/eval-domains/eval-a2a.yaml',
-        'docs/harness-feedback/eval-domains/eval-memory.yaml',
         'docs/harness-feedback/verdicts/fixtures/2026-05-21-eval-a2a-contract-demo.md',
         'docs/harness-feedback/verdicts/2026-05-23-eval-a2a-live-verdict.md',
         'docs/harness-feedback/bundles/2026-05-23-eval-a2a-live-verdict/attribution.json',

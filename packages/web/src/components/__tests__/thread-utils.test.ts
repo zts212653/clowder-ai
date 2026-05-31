@@ -400,4 +400,47 @@ describe('sortAndGroupThreadsWithWorkspace', () => {
     const pinned = groups.find((group) => group.type === 'pinned');
     expect(pinned?.threads.map((thread) => thread.id)).toEqual(['pinned-old', 'pinned-newer']);
   });
+
+  // F192 livefix: systemKind-based system section grouping (OQ-19)
+  it('groups eval_domain threads into system section via systemKind', () => {
+    const threads = [
+      makeThread({ id: 'eval-thread', title: 'A2A Eval', systemKind: 'eval_domain', lastActiveAt: NOW }),
+      makeThread({ id: 'regular', title: 'Chat', lastActiveAt: NOW - 1 * DAY }),
+    ];
+    const groups = sortAndGroupThreadsWithWorkspace(
+      threads,
+      undefined,
+      new Set(),
+      { activeCutoffMs: 7 * DAY, recentLimit: 8 },
+      NOW,
+    );
+    const system = groups.find((g) => g.type === 'system');
+    expect(system).toBeDefined();
+    expect(system?.threads.map((t) => t.id)).toEqual(['eval-thread']);
+    // eval thread should NOT appear in recent
+    const recent = groups.find((g) => g.type === 'recent');
+    expect(recent?.threads.find((t) => t.id === 'eval-thread')).toBeUndefined();
+  });
+
+  it('groups both connector_hub and eval_domain threads into system section', () => {
+    const threads = [
+      makeThread({
+        id: 'hub-thread',
+        title: 'IM Hub',
+        connectorHubState: { v: 1, connectorId: 'feishu', externalChatId: '123', createdAt: NOW },
+        lastActiveAt: NOW,
+      }),
+      makeThread({ id: 'eval-thread', title: 'Memory Eval', systemKind: 'eval_domain', lastActiveAt: NOW - DAY }),
+    ];
+    const groups = sortAndGroupThreadsWithWorkspace(
+      threads,
+      undefined,
+      new Set(),
+      { activeCutoffMs: 7 * DAY, recentLimit: 8 },
+      NOW,
+    );
+    const system = groups.find((g) => g.type === 'system');
+    expect(system).toBeDefined();
+    expect(system?.threads).toHaveLength(2);
+  });
 });

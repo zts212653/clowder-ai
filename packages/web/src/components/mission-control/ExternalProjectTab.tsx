@@ -243,7 +243,7 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
               onClick={() => setSubTab(t.id)}
               className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
                 subTab === t.id
-                  ? 'bg-[var(--mc-accent)] text-white'
+                  ? 'bg-[var(--mc-accent)] text-[var(--cafe-surface)]'
                   : 'bg-[var(--console-hover-bg)] text-cafe-secondary hover:bg-[var(--console-border-soft)]'
               }`}
             >
@@ -351,9 +351,9 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
                       <span
                         className={`rounded-full px-2 py-0.5 text-micro font-medium ${
                           item.status === 'done'
-                            ? 'bg-conn-green-bg text-green-800'
+                            ? 'bg-conn-green-bg text-conn-emerald-text'
                             : item.status === 'dispatched'
-                              ? 'bg-blue-100 text-conn-blue-text'
+                              ? 'bg-[var(--semantic-info-surface)] text-conn-blue-text'
                               : 'bg-[var(--console-hover-bg)] text-cafe-secondary'
                         }`}
                       >

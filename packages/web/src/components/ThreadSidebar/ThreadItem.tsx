@@ -1,6 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
+import { catColorVar } from '@/lib/cat-slug';
 import type { ThreadState } from '@/stores/chat-types';
 import { useLabelStore } from '@/stores/label-store';
 import { API_URL } from '@/utils/api-client';
@@ -334,7 +335,7 @@ export function ThreadItem({
                 <span
                   key={catId}
                   className="inline-block w-1.5 h-1.5 rounded-full"
-                  style={{ backgroundColor: getCatById(catId)?.color.primary ?? '#9CA3AF' }}
+                  style={{ backgroundColor: catColorVar(catId, 'primary') }}
                 />
               ))}
             </div>

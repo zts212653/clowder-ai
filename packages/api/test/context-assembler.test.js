@@ -24,18 +24,18 @@ function mockMsg(overrides) {
 describe('formatMessage', () => {
   test('formats user message with 铲屎官', async () => {
     const { formatMessage } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
-    const msg = mockMsg({ content: '你好', timestamp: new Date('2026-02-07T14:02:00').getTime() });
+    const msg = mockMsg({ content: '你好', timestamp: new Date('2026-02-07T14:02:00Z').getTime() });
     const result = formatMessage(msg);
-    assert.ok(result.includes('14:02'));
+    assert.ok(result.includes('14:02 UTC'));
     assert.ok(result.includes('铲屎官'));
     assert.ok(result.includes('你好'));
   });
 
   test('formats cat message with display name', async () => {
     const { formatMessage } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
-    const msg = mockMsg({ catId: 'opus', content: '喵', timestamp: new Date('2026-02-07T14:03:00').getTime() });
+    const msg = mockMsg({ catId: 'opus', content: '喵', timestamp: new Date('2026-02-07T14:03:00Z').getTime() });
     const result = formatMessage(msg);
-    assert.ok(result.includes('14:03'));
+    assert.ok(result.includes('14:03 UTC'));
     assert.ok(result.includes('布偶猫'));
     assert.ok(result.includes('喵'));
   });
@@ -263,8 +263,11 @@ describe('formatMessage — head+tail truncation (#91 regression)', () => {
 
     // marker is '\n\n[...truncated N chars...]\n\n' (dynamic), available = 200 - marker.length
     // head = 40% of 180 = 72, tail = 60% of 180 = 108
-    const headContent = result.match(/H+/)?.[0] ?? '';
-    const tailContent = result.match(/T+/)?.[0] ?? '';
+    // Match only the content body (after the `[time sender] ` prefix) so the
+    // "UTC" marker's 'T' in the timestamp isn't picked up by /T+/.
+    const body = result.slice(result.indexOf('] ') + 2);
+    const headContent = body.match(/H+/)?.[0] ?? '';
+    const tailContent = body.match(/T+/)?.[0] ?? '';
     assert.ok(headContent.length > 0, 'should have head content');
     assert.ok(tailContent.length > 0, 'should have tail content');
     assert.ok(tailContent.length > headContent.length, 'tail should be larger than head');

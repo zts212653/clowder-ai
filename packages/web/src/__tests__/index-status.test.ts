@@ -48,6 +48,22 @@ describe('parseIndexStatus', () => {
     expect(status.embeddingModel).toBeNull();
   });
 
+  it('parses vectors_count regardless of platform support flag', () => {
+    // vector_search_available was removed — install dialog already blocks
+    // unsupported platforms via the matrix 'unsupported' branch, so the UI
+    // just shows the raw count. parseIndexStatus tolerates the field if a
+    // legacy API still emits it (silently ignored).
+    const raw = { backend: 'sqlite', healthy: true, vectors_count: 5 };
+    const status = parseIndexStatus(raw);
+    expect(status.vectorsCount).toBe(5);
+  });
+
+  it('parses vectors_count=0', () => {
+    const raw = { backend: 'sqlite', healthy: true, vectors_count: 0 };
+    const status = parseIndexStatus(raw);
+    expect(status.vectorsCount).toBe(0);
+  });
+
   it('parses threads, passages, and embedding mode (Issue 6)', () => {
     const raw = {
       backend: 'sqlite',

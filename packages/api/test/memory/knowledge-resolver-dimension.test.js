@@ -94,6 +94,33 @@ describe('KnowledgeResolver dimension routing', () => {
     assert.equal(result.meta?.effectiveMode, 'lexical');
   });
 
+  it('scope=threads does not query globalStore or inherit global raw degradation', async () => {
+    const proj = makeStore('proj', ['ThreadAlpha']);
+    proj.searchWithMeta = async (query, opts) => ({
+      items: await proj.search(query, opts),
+      meta: { degraded: false },
+    });
+    const glob = makeStore('glob', ['GlobalBeta']);
+    glob.searchWithMeta = async (query, opts) => ({
+      items: await glob.search(query, opts),
+      meta: {
+        degraded: true,
+        degradeReason: 'passage_embedding_unavailable',
+        effectiveMode: 'lexical',
+      },
+    });
+    const resolver = new KnowledgeResolver({ projectStore: proj, globalStore: glob });
+
+    const result = await resolver.resolve('thread query', { scope: 'threads', depth: 'raw', mode: 'semantic' });
+
+    assert.equal(proj.calls.length, 1);
+    assert.equal(glob.calls.length, 0, 'thread-scoped searches must stay project-local');
+    assert.equal(result.results.length, 1);
+    assert.equal(result.results[0].anchor, 'proj:ThreadAlpha');
+    assert.deepEqual(result.sources, ['project']);
+    assert.equal(result.meta?.degraded, false);
+  });
+
   it('undefined dimension behaves like all (backward compat)', async () => {
     const proj = makeStore('proj', ['Alpha']);
     const glob = makeStore('glob', ['Beta']);

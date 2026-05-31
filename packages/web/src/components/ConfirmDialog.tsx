@@ -70,7 +70,7 @@ export function ConfirmDialog({
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             placeholder={inputPlaceholder}
-            className="w-full border border-cafe rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-300"
+            className="w-full border border-cafe rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-[var(--semantic-info)]"
           />
         )}
         <div className="flex justify-end gap-2">
@@ -83,8 +83,8 @@ export function ConfirmDialog({
           <button
             onClick={onConfirm}
             disabled={!canConfirm}
-            className={`px-4 py-2 text-sm text-white rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-              isDanger ? 'bg-conn-red-text hover:bg-conn-red-hover' : 'bg-conn-blue-text hover:bg-conn-blue-hover'
+            className={`px-4 py-2 text-sm text-[var(--cafe-surface)] rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+              isDanger ? 'bg-semantic-critical hover:opacity-90' : 'bg-semantic-info hover:opacity-90'
             }`}
           >
             {confirmLabel}

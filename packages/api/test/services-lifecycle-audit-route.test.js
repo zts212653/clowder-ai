@@ -57,6 +57,7 @@ describe('service lifecycle audit route', () => {
         findPidsByPort: async () => [],
         runScript: async () => ({ code: 0, output: 'RAW_SCRIPT_OUTPUT_SHOULD_NOT_LEAK' }),
       },
+      fetchHealth: async () => ({ ok: true, status: 200, error: null }),
     });
     try {
       const write = await app.inject({

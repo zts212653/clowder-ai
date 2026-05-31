@@ -8,13 +8,13 @@ const HELP = `Usage: node scripts/export-threads-from-redis.mjs [--redis-url <ur
 
 Defaults:
   --redis-url  REDIS_URL or redis://127.0.0.1:6399
-  --out-dir    docs/discussions/exported-threads
+  --out-dir    .cat-cafe/thread-exports/repo
 `;
 
 function parseArgs(argv) {
   const out = {
     redisUrl: process.env.REDIS_URL ?? 'redis://127.0.0.1:6399',
-    outDir: path.resolve(process.cwd(), 'docs/discussions/exported-threads'),
+    outDir: path.resolve(process.cwd(), '.cat-cafe/thread-exports/repo'),
     threadIds: [],
     dryRun: false,
   };

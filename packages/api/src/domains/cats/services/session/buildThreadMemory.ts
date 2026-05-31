@@ -13,6 +13,7 @@
  */
 
 import { estimateTokens } from '../../../../utils/token-counter.js';
+import { formatPromptTimeRange } from '../format-time.js';
 import type { ThreadMemoryV1 } from '../stores/ports/ThreadStore.js';
 import type { DecisionSignals } from './extractDecisionSignals.js';
 import type { ExtractiveDigestV1 } from './TranscriptWriter.js';
@@ -24,14 +25,9 @@ const OP_PRIORITY: Record<string, number> = { create: 0, edit: 1, delete: 2, rea
 const OP_LABELS: Record<string, string> = { create: 'Created', edit: 'Modified', delete: 'Deleted', read: 'Read' };
 const OP_ORDER = ['create', 'edit', 'delete', 'read'];
 
-function formatTimeShort(epoch: number): string {
-  const d = new Date(epoch);
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
-
 function formatSessionLine(digest: ExtractiveDigestV1, sessionNumber: number): string {
   const duration = Math.round((digest.time.sealedAt - digest.time.createdAt) / 60000);
-  const timeRange = `${formatTimeShort(digest.time.createdAt)}-${formatTimeShort(digest.time.sealedAt)}`;
+  const timeRange = formatPromptTimeRange(digest.time.createdAt, digest.time.sealedAt);
 
   // Group files by highest-priority op
   const groups = new Map<string, string[]>();

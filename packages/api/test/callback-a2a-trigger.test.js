@@ -1214,6 +1214,7 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
     assert.equal(enqueueCalls[0].source, 'agent');
     assert.equal(enqueueCalls[0].autoExecute, true);
     assert.equal(enqueueCalls[0].callerCatId, 'codex');
+    assert.equal(enqueueCalls[0].a2aTriggerMessageId, 'msg-trigger');
     assert.equal(enqueueCalls[0].targetCats[0], 'opus');
     assert.equal(tryAutoExecuteCalls.length, 1, 'should trigger tryAutoExecute');
     const queueUpdated = emitCalls.find((c) => c.event === 'queue_updated');

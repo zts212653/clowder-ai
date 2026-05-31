@@ -1,5 +1,54 @@
-export const threadDrafts = new Map<string, string>();
+const STORAGE_KEY = 'cat-cafe:thread-drafts';
+
+/**
+ * Hydrate text drafts from sessionStorage on module init.
+ * sessionStorage is appropriate because drafts are session-scoped — closing
+ * the tab should discard them (localStorage would leak stale drafts forever).
+ */
+function hydrateFromStorage(): Map<string, string> {
+  const map = new Map<string, string>();
+  if (typeof window === 'undefined') return map;
+  try {
+    const raw = window.sessionStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const entries: [string, string][] = JSON.parse(raw);
+      for (const [k, v] of entries) {
+        if (typeof k === 'string' && typeof v === 'string' && v.trim()) {
+          map.set(k, v);
+        }
+      }
+    }
+  } catch {
+    // Corrupt or unavailable sessionStorage — start fresh
+  }
+  return map;
+}
+
+function persistToStorage(map: Map<string, string>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (map.size === 0) {
+      window.sessionStorage.removeItem(STORAGE_KEY);
+    } else {
+      window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify([...map.entries()]));
+    }
+  } catch {
+    // QuotaExceededError or SecurityError — best effort
+  }
+}
+
+export const threadDrafts = hydrateFromStorage();
 export const threadImageDrafts = new Map<string, File[]>();
+
+/** Sync a draft write to sessionStorage. Call after mutating threadDrafts. */
+export function syncDraftToStorage(threadId: string, text: string | undefined): void {
+  if (text && text.trim()) {
+    threadDrafts.set(threadId, text);
+  } else {
+    threadDrafts.delete(threadId);
+  }
+  persistToStorage(threadDrafts);
+}
 
 export function hasPendingThreadDraft(threadId: string): boolean {
   const textDraft = threadDrafts.get(threadId);

@@ -59,9 +59,19 @@ function createMockProcess() {
     }
     return emitted;
   };
+  let stdinData = '';
   const proc = {
     stdout,
     stderr,
+    // Incident 2026-05-29: prompt 走 stdin（不进 argv）。捕获写入供断言。
+    stdin: {
+      write: (chunk) => {
+        stdinData += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+        return true;
+      },
+      end: () => {},
+      on: () => proc.stdin,
+    },
     pid: process.pid,
     exitCode: null,
     kill: mock.fn(() => {
@@ -78,6 +88,9 @@ function createMockProcess() {
     once: (event, listener) => {
       emitter.once(event, listener);
       return proc;
+    },
+    get stdinData() {
+      return stdinData;
     },
     _emitter: emitter,
   };
@@ -531,10 +544,11 @@ describe('AgentRouter + Services wiring', () => {
     await collect(router.route('user-1', '#execute @opus @codex hello', thread.id));
 
     // Codex spawn should receive prompt containing opus's reply (serial chain)
+    // Incident 2026-05-29: prompt 走 stdin（不进 argv）。argv 末尾是 '-'，prompt 内容在 stdin。
     const codexArgs = codexSpawn._calls[0].args;
-    // The prompt is the last positional arg for fresh codex calls
-    const prompt = codexArgs[codexArgs.length - 1];
-    assert.ok(prompt.includes('cat1 reply'), `codex prompt should contain opus reply, got: ${prompt}`);
+    assert.equal(codexArgs[codexArgs.length - 1], '-', 'codex prompt 走 stdin，argv 末尾是 -');
+    const prompt = codexSpawn._calls[0].proc.stdinData;
+    assert.ok(prompt.includes('cat1 reply'), `codex stdin prompt should contain opus reply, got: ${prompt}`);
   });
 
   test('yields isFinal=true only on last cat done (#execute serial)', async () => {

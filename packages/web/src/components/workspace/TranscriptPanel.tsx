@@ -227,7 +227,7 @@ export function TranscriptPanel() {
       {/* Header */}
       <div className="flex items-center gap-2 border-b border-cafe-border px-3 py-2">
         <span
-          className={`inline-block h-2 w-2 rounded-full ${status.running ? (status.paused ? 'bg-amber-400' : 'bg-conn-green-text animate-pulse') : 'bg-cafe-text-muted'}`}
+          className={`inline-block h-2 w-2 rounded-full ${status.running ? (status.paused ? 'bg-[var(--semantic-warning)]' : 'bg-conn-green-text animate-pulse') : 'bg-cafe-text-muted'}`}
         />
         <span className="flex-1 truncate text-sm font-medium text-cafe-text-primary">
           {status.running ? (status.paused ? 'Paused' : sourceLabel) : 'Not monitoring'}
@@ -239,7 +239,7 @@ export function TranscriptPanel() {
               <button
                 type="button"
                 onClick={handleResume}
-                className="rounded px-1.5 py-0.5 text-xs text-green-400 hover:bg-conn-green-text/10"
+                className="rounded px-1.5 py-0.5 text-xs text-conn-emerald-text hover:bg-conn-green-text/10"
               >
                 Resume
               </button>
@@ -247,7 +247,7 @@ export function TranscriptPanel() {
               <button
                 type="button"
                 onClick={handlePause}
-                className="rounded px-1.5 py-0.5 text-xs text-amber-400 hover:bg-amber-500/10"
+                className="rounded px-1.5 py-0.5 text-xs text-conn-amber-text hover:bg-[var(--console-hover-bg)]"
               >
                 Pause
               </button>
@@ -313,7 +313,7 @@ export function TranscriptPanel() {
               if (type === 'app') handleStart('app', value);
               else handleStart('mic', undefined, Number(value));
             }}
-            className="w-full rounded bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-conn-green-text disabled:opacity-40 disabled:cursor-not-allowed"
+            className="w-full rounded bg-[var(--semantic-success)] px-2 py-1 text-xs font-medium text-[var(--cafe-surface)] hover:bg-conn-green-text disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Start
           </button>
@@ -350,7 +350,7 @@ export function TranscriptPanel() {
         <span>{lines.length} chunks</span>
         <span>avg {avgLatency}s</span>
         <span>16kHz mono</span>
-        <span className={connected ? 'text-green-500' : 'text-conn-red-text'}>
+        <span className={connected ? 'text-conn-emerald-text' : 'text-conn-red-text'}>
           {connected ? 'SSE' : 'disconnected'}
         </span>
       </div>

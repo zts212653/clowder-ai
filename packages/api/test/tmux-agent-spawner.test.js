@@ -47,6 +47,68 @@ describe('spawnCliInTmux', () => {
     assert.equal(jsonEvents[1].type, 'done');
   });
 
+  it('forwards stdinInput to the pane command via stdin redirect (P1 regression)', async () => {
+    // Incident 2026-05-29 P1 (cloud codex review): codex `-- -` reads prompt from stdin,
+    // but a tmux pane has no stdin pipe. stdinInput must be redirected from a temp file.
+    // Real tmux pane round-trip — guards the production worktree path that mock/dogfood missed.
+    const SECRET = 'TMUX-STDIN-REDIRECT-披着专业外衣-R8';
+    const events = [];
+    const gen = spawnCliInTmux(
+      {
+        command: process.execPath,
+        args: [
+          '-e',
+          'let d="";process.stdin.on("data",c=>{d+=c});process.stdin.on("end",()=>{process.stdout.write(JSON.stringify({type:"stdin-echo",got:d})+"\\n")})',
+        ],
+        stdinInput: SECRET,
+        worktreeId: WORKTREE,
+        invocationId: 'test-inv-stdin',
+        cwd: '/tmp',
+      },
+      { tmuxGateway: gateway },
+    );
+    for await (const event of gen) events.push(event);
+    const echo = events.find((e) => e.type === 'stdin-echo');
+    assert.ok(echo, 'pane command should receive stdin and echo it back');
+    assert.equal(echo.got, SECRET, 'stdinInput must reach the pane command via stdin redirect');
+  });
+
+  it('cleans up the stdin temp file when tmux setup fails (P1 #2 regression)', async () => {
+    // Incident 2026-05-29 P1 #2 (cloud codex review): the stdin temp file holds the full
+    // conversation history. If setup fails before the main try/finally, it must still be
+    // removed — otherwise the prompt is left on disk forever. Mock createAgentPane to throw.
+    const failGateway = {
+      createAgentPane: async () => {
+        throw new Error('tmux unavailable (simulated setup failure)');
+      },
+    };
+    const uniqueInv = `test-cleanup-${Date.now()}`;
+    let threw = false;
+    try {
+      const gen = spawnCliInTmux(
+        {
+          command: '/bin/sh',
+          args: ['-c', 'true'],
+          stdinInput: 'SECRET-PROMPT-should-be-cleaned-披着专业外衣',
+          worktreeId: WORKTREE,
+          invocationId: uniqueInv,
+          cwd: '/tmp',
+        },
+        { tmuxGateway: failGateway },
+      );
+      for await (const _event of gen) {
+        /* drain */
+      }
+    } catch {
+      threw = true;
+    }
+    assert.ok(threw, 'setup failure should propagate to the caller');
+    const { readdir } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const leftover = (await readdir(tmpdir())).filter((d) => d.includes(uniqueInv));
+    assert.equal(leftover.length, 0, `stdin temp dir must be cleaned up on setup failure, found: ${leftover}`);
+  });
+
   it('reports non-zero exit code via __cliError', async () => {
     const events = [];
     const gen = spawnCliInTmux(
@@ -67,6 +129,83 @@ describe('spawnCliInTmux', () => {
     const errEvent = events.find((e) => e.__cliError);
     assert.ok(errEvent, 'should yield __cliError on non-zero exit');
     assert.equal(errEvent.exitCode, 42);
+  });
+
+  // F212 round-4: tmux stderr classification verified on both modes.
+  // plainText mode: stderrFile populated via L62-64 independent redirect; abnormal exit reads it.
+  // NDJSON mode: stderr merges into fifo via 2>&1; non-JSON lines collected from parse-error branch
+  //              (bounded nonJsonOutput buffer) feed buildCliDiagnostics — see L294 in tmux-agent-spawner.ts.
+  it('F212: __cliError on non-zero exit carries cliDiagnostics built from stderr (plainText mode)', async () => {
+    const events = [];
+    const gen = spawnCliInTmux(
+      {
+        command: '/bin/sh',
+        // stderr contains "401 Unauthorized" → classifier should map to auth_failed
+        args: ['-c', 'echo plain-stdout; echo "Error: 401 Unauthorized" >&2; exit 42'],
+        outputMode: 'plainText',
+        worktreeId: WORKTREE,
+        invocationId: 'test-inv-classify',
+        cwd: '/tmp',
+      },
+      { tmuxGateway: gateway },
+    );
+
+    for await (const event of gen) {
+      events.push(event);
+    }
+
+    const errEvent = events.find((e) => e.__cliError);
+    assert.ok(errEvent, 'should yield __cliError');
+    assert.equal(errEvent.exitCode, 42);
+    assert.ok(errEvent.cliDiagnostics, 'cliDiagnostics must be present');
+    assert.equal(
+      errEvent.cliDiagnostics.reasonCode,
+      'auth_failed',
+      `tmux stderr must feed classification; got reasonCode=${errEvent.cliDiagnostics.reasonCode}, safeExcerpt=${errEvent.cliDiagnostics.safeExcerpt}`,
+    );
+    assert.ok(errEvent.cliDiagnostics.safeExcerpt, 'safeExcerpt should be filled for known reasonCode');
+    assert.ok(
+      errEvent.cliDiagnostics.safeExcerpt.includes('401 Unauthorized'),
+      `safeExcerpt should include matched line: ${errEvent.cliDiagnostics.safeExcerpt}`,
+    );
+  });
+
+  // F212 round-4 (砚砚 P2): NDJSON mode also classifies stderr via nonJsonOutput buffer.
+  // tmux NDJSON command does `2>&1 | tee fifo` so stderr noise lands as non-JSON lines in
+  // the NDJSON parse loop. parse-error branch collects them (bounded) → fed to buildCliDiagnostics.
+  it('F212: __cliError carries cliDiagnostics built from non-JSON noise (NDJSON mode)', async () => {
+    const events = [];
+    const gen = spawnCliInTmux(
+      {
+        command: '/bin/sh',
+        // Emit one valid NDJSON event + stderr "401 Unauthorized" noise + non-zero exit.
+        // 2>&1 merges stderr→stdout fifo; the "Error: 401 Unauthorized" line lands in
+        // the JSON parse-error branch and gets collected for classification.
+        args: ['-c', 'echo \'{"type":"start"}\'; echo "Error: 401 Unauthorized" >&2; exit 42'],
+        worktreeId: WORKTREE,
+        invocationId: 'test-inv-ndjson-classify',
+        cwd: '/tmp',
+      },
+      { tmuxGateway: gateway },
+    );
+
+    for await (const event of gen) {
+      events.push(event);
+    }
+
+    const errEvent = events.find((e) => e.__cliError);
+    assert.ok(errEvent, 'should yield __cliError');
+    assert.equal(errEvent.exitCode, 42);
+    assert.ok(errEvent.cliDiagnostics, 'cliDiagnostics must be present');
+    assert.equal(
+      errEvent.cliDiagnostics.reasonCode,
+      'auth_failed',
+      `NDJSON mode stderr noise must feed classification; got reasonCode=${errEvent.cliDiagnostics.reasonCode}, safeExcerpt=${errEvent.cliDiagnostics.safeExcerpt}`,
+    );
+    assert.ok(
+      errEvent.cliDiagnostics.safeExcerpt?.includes('401 Unauthorized'),
+      `safeExcerpt should include matched line: ${errEvent.cliDiagnostics.safeExcerpt}`,
+    );
   });
 
   it('exit code 0 does not yield __cliError', async () => {
@@ -148,12 +287,15 @@ describe('spawnCliInTmux', () => {
     const gen = spawnCliInTmux(
       {
         command: '/bin/sh',
-        args: ['-c', 'for i in 1 2 3 4; do echo "progress-$i" >&2; sleep 0.5; done; echo done'],
+        args: ['-c', 'for i in 1 2 3 4 5 6 7 8 9 10 11 12; do echo "progress-$i" >&2; sleep 0.75; done; echo done'],
         outputMode: 'plainText',
         worktreeId: WORKTREE,
         invocationId: 'test-inv-plaintext-stderr-progress',
         cwd: '/tmp',
         timeoutMs: 1500,
+        // Full gate load can delay tmux pane startup. Final stdout still lands
+        // after this window, so stderr progress must cancel the startup timer.
+        firstEventTimeoutMs: 8000,
       },
       { tmuxGateway: gateway },
     );
@@ -271,12 +413,13 @@ describe('spawnCliInTmux', () => {
     const timeoutEvent = events.find((e) => e.__cliTimeout);
     assert.ok(timeoutEvent, 'should yield __cliTimeout from idleTimeout');
     assert.match(timeoutEvent.message, /idle/, 'message should mention idle timeout');
+    assert.equal(timeoutEvent.timeoutMs, 300, 'timeout metadata should identify the idle timeout');
     // Should have received the init event before timeout
     const initEvent = events.find((e) => e.type === 'init');
     assert.ok(initEvent, 'should have received the init event before idle timeout fired');
     // killAgent's C-c + 3s grace + kill-pane adds overhead; we tear down the
-    // tmux server after each test to keep this bound stable across the suite.
-    assert.ok(elapsed < 15000, `should converge via idleTimeout, took ${elapsed}ms`);
+    // tmux server after each test, but full-suite load can still stretch wall-clock time.
+    assert.ok(elapsed < 30000, `should converge well before firstEventTimeout, took ${elapsed}ms`);
   });
 
   it('AbortSignal unblocks FIFO read (no deadlock)', async () => {

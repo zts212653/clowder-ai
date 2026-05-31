@@ -6,7 +6,75 @@ module.exports = {
   content: ['./src/**/*.{js,ts,jsx,tsx,mdx}', '../shared/src/**/*.{js,ts}'],
   theme: {
     extend: {
+      fontSize: {
+        /* token-based (from typography-tokens.json — includes micro/label/compact with lineHeight) */
+        ...typographyTokens.fontSize,
+        /* CSS-variable aliases (allow Tuner override via --font-size-* if ever needed) */
+        caption: 'var(--font-size-caption)',
+      },
       colors: {
+        /* F056 Phase E — OKLCH 七类色 utility 暴露 */
+        neutral: {
+          50: 'var(--neutral-50)',
+          100: 'var(--neutral-100)',
+          200: 'var(--neutral-200)',
+          300: 'var(--neutral-300)',
+          400: 'var(--neutral-400)',
+          500: 'var(--neutral-500)',
+          600: 'var(--neutral-600)',
+          700: 'var(--neutral-700)',
+          800: 'var(--neutral-800)',
+          900: 'var(--neutral-900)',
+          950: 'var(--neutral-950)',
+        },
+        accent: {
+          50: 'var(--accent-50)',
+          100: 'var(--accent-100)',
+          200: 'var(--accent-200)',
+          300: 'var(--accent-300)',
+          400: 'var(--accent-400)',
+          500: 'var(--accent-500)',
+          600: 'var(--accent-600)',
+          700: 'var(--accent-700)',
+          900: 'var(--accent-900)',
+        },
+        semantic: {
+          critical: 'var(--semantic-critical)',
+          success: 'var(--semantic-success)',
+          warning: 'var(--semantic-warning)',
+          info: 'var(--semantic-info)',
+          spotlight: 'var(--semantic-spotlight)',
+          'critical-surface': 'var(--semantic-critical-surface)',
+          'success-surface': 'var(--semantic-success-surface)',
+          'warning-surface': 'var(--semantic-warning-surface)',
+          'info-surface': 'var(--semantic-info-surface)',
+          'spotlight-surface': 'var(--semantic-spotlight-surface)',
+        },
+        chart: {
+          1: 'var(--chart-1)',
+          2: 'var(--chart-2)',
+          3: 'var(--chart-3)',
+          4: 'var(--chart-4)',
+          5: 'var(--chart-5)',
+          6: 'var(--chart-6)',
+          7: 'var(--chart-7)',
+          8: 'var(--chart-8)',
+          9: 'var(--chart-9)',
+          10: 'var(--chart-10)',
+          11: 'var(--chart-11)',
+          12: 'var(--chart-12)',
+        },
+        'avatar-fallback': {
+          1: 'var(--avatar-fallback-1)',
+          2: 'var(--avatar-fallback-2)',
+          3: 'var(--avatar-fallback-3)',
+          4: 'var(--avatar-fallback-4)',
+          5: 'var(--avatar-fallback-5)',
+          6: 'var(--avatar-fallback-6)',
+          7: 'var(--avatar-fallback-7)',
+          8: 'var(--avatar-fallback-8)',
+        },
+        brand: 'var(--brand-cat-cafe-pink)',
         opus: {
           primary: 'var(--color-opus-primary)',
           light: 'var(--color-opus-light)',
@@ -36,6 +104,12 @@ module.exports = {
           light: 'var(--color-dare-light)',
           dark: 'var(--color-dare-dark)',
           bg: 'var(--color-dare-bg)',
+        },
+        cocreator: {
+          primary: 'var(--color-cocreator-primary)',
+          light: 'var(--color-cocreator-light)',
+          dark: 'var(--color-cocreator-dark)',
+          bg: 'var(--color-cocreator-bg)',
         },
         /* Connector identity color tokens — auto-adapts to dark mode via CSS variables */
         conn: {
@@ -118,6 +192,7 @@ module.exports = {
           surface: 'var(--cafe-surface)',
           'surface-elevated': 'var(--cafe-surface-elevated)',
           'surface-sunken': 'var(--cafe-surface-sunken)',
+          'surface-canvas': 'var(--cafe-surface-canvas)',
           accent: 'var(--cafe-accent)',
           'accent-hover': 'var(--cafe-accent-hover)',
           crosspost: 'var(--cafe-crosspost)',
@@ -128,6 +203,13 @@ module.exports = {
           'status-active': '#3B82F6',
           'status-broken': '#EF4444',
           'status-unknown': '#A89386',
+        },
+        /* Queue agent accent */
+        queue: {
+          accent: 'var(--queue-accent)',
+          'accent-hover': 'var(--queue-accent-hover)',
+          surface: 'var(--queue-accent-surface)',
+          'on-accent': 'var(--queue-on-accent)',
         },
         /* F101 AC-D5: Werewolf Cute theme tokens */
         ww: {
@@ -179,7 +261,19 @@ module.exports = {
           glow: 'var(--ww-shadow-glow)',
         },
       },
-      fontSize: typographyTokens.fontSize,
+      /* F056 Phase E AC-E3: 全站 shadow-{sm/md/lg/xl/2xl} 自动吃 OKLCH elevation token
+       * 替代"逐个 className 改造"——dark mode 自动获得 inset 高光 + 深阴影，零侵入。 */
+      boxShadow: {
+        sm: 'var(--shadow-elevation-1)',
+        DEFAULT: 'var(--shadow-elevation-1)',
+        md: 'var(--shadow-elevation-2)',
+        lg: 'var(--shadow-elevation-3)',
+        xl: 'var(--shadow-elevation-3)',
+        '2xl': 'var(--shadow-elevation-3)',
+        'elevation-1': 'var(--shadow-elevation-1)',
+        'elevation-2': 'var(--shadow-elevation-2)',
+        'elevation-3': 'var(--shadow-elevation-3)',
+      },
       keyframes: {
         'fade-in': {
           '0%': { opacity: '0', transform: 'translateY(4px)' },
@@ -255,6 +349,7 @@ module.exports = {
     },
   },
   plugins: [
+    /* Expose fontSizePx as --console-font-{name} CSS vars for JS/non-Tailwind consumers */
     ({ addBase }) => {
       const vars = {};
       for (const [name, px] of Object.entries(typographyTokens.fontSizePx)) {

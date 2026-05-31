@@ -37,9 +37,20 @@ function createMockProcess() {
     }
     return emitted;
   };
+  let stdinData = '';
   const proc = {
     stdout,
     stderr,
+    // F-incident 2026-05-29: stdin capture for "prompt 走 stdin 不进 argv" guard.
+    stdin: {
+      write: (chunk) => {
+        stdinData += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+        return true;
+      },
+      end: () => {},
+      on: () => proc.stdin,
+      once: () => proc.stdin,
+    },
     pid: 12345,
     exitCode: null,
     kill: mock.fn(() => true),
@@ -50,6 +61,9 @@ function createMockProcess() {
     once: (e, l) => {
       emitter.once(e, l);
       return proc;
+    },
+    get stdinData() {
+      return stdinData;
     },
     _emitter: emitter,
   };
@@ -99,6 +113,27 @@ test('Task 4: codex argv carries -c developer_instructions=<compiled L0>', async
     args.includes('developer_instructions="DEV-L0-BODY"'),
     `argv must carry TOML-encoded developer_instructions; got: ${args.join(' ')}`,
   );
+});
+
+test('P0 security: prompt 正文走 stdin 不进 argv（ps -o command= 跨进程泄露防护）', async () => {
+  // 2026-05-29 incident (cross-thread-context-contamination): codex 把完整 prompt 当
+  // argv 位置参数传，任何并发进程 `ps -o command=` / 读 /proc/<pid>/cmdline 都能看到
+  // 跨 thread/猫/用户的完整对话历史。修复：prompt 必须走 stdin，argv 只留 '-' 壳。
+  const proc = createMockProcess();
+  const spawnFn = mock.fn(() => proc);
+  const l0CompilerFn = fixedL0('L0');
+  const service = new CodexAgentService({ spawnFn, catId: createCatId('codex'), l0CompilerFn });
+
+  const SECRET = 'SECRET-披着专业外衣的不太光彩偏好-R8-PROMPT-BODY';
+  const promise = collect(service.invoke(SECRET));
+  emitOk(proc);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  const leaked = args.find((a) => typeof a === 'string' && a.includes(SECRET));
+  assert.ok(!leaked, `P0: prompt 正文不得进 argv（ps 可见）。泄露的 arg: ${leaked}`);
+  assert.equal(proc.stdinData, SECRET, 'prompt 必须经 stdin 传入子进程');
+  assert.ok(args.includes('-'), "argv 应含 '-' 让 codex 从 stdin 读 PROMPT");
 });
 
 test('Task 4: per-call argv is cat-scoped (no shared config.toml race)', async () => {

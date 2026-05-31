@@ -606,4 +606,55 @@ describe('RecallEventCorrelator', () => {
     assert.equal(results[0].consumed[0].anchor, 'X');
     assert.equal(results[0].consumed[1].anchor, 'Y');
   });
+
+  it('F102 bugfix: persistBatch writes thread_id for RecallFeed history', () => {
+    const events = [
+      makeEvent({
+        toolName: 'search_evidence',
+        threadId: 'thread-abc-123',
+        timestamp: 1000,
+        turnIndex: 1,
+        summary: {
+          query: 'thread persist test',
+          _f200Candidates: [{ anchor: 'T', rank: 1, sourcePath: 'docs/t.md', docKind: 'feature' }],
+        },
+      }),
+    ];
+
+    const correlator = new RecallEventCorrelator(db);
+    const results = correlator.correlateWindow(events);
+    // Simulate what recall-correlation-hook does: attach threadId before persist
+    for (const re of results) {
+      re.threadId = events[0].threadId;
+    }
+    correlator.persistBatch(results);
+
+    const row = db.prepare('SELECT * FROM recall_events WHERE cat_id = ?').get('opus');
+    assert.ok(row, 'row exists');
+    assert.equal(row.thread_id, 'thread-abc-123', 'thread_id persisted for RecallFeed history');
+    assert.equal(row.query, 'thread persist test');
+  });
+
+  it('F102 bugfix: thread_id defaults to empty string when not provided', () => {
+    const events = [
+      makeEvent({
+        toolName: 'search_evidence',
+        threadId: '', // no thread context
+        timestamp: 5000,
+        turnIndex: 1,
+        summary: {
+          query: 'no thread test',
+          _f200Candidates: [{ anchor: 'N', rank: 1, sourcePath: 'docs/n.md', docKind: 'feature' }],
+        },
+      }),
+    ];
+
+    const correlator = new RecallEventCorrelator(db);
+    const results = correlator.correlateWindow(events);
+    correlator.persistBatch(results);
+
+    const row = db.prepare("SELECT * FROM recall_events WHERE query = 'no thread test'").get();
+    assert.ok(row, 'row exists');
+    assert.equal(row.thread_id, '', 'thread_id defaults to empty string');
+  });
 });

@@ -1,0 +1,30 @@
+# Example: A community project's custom eval domain.
+#
+# Community projects can register eval domains by placing a YAML file
+# in their local `eval-domains/community/` directory. The schema follows
+# the same structure as Cat Cafe's internal domains but with:
+# - domainId: any `eval:<lowercase-slug>` (not restricted to internal enum)
+# - sourceAdapter: must be `community-custom`
+# - handoffTargetResolver: optional (community may not use Cat Cafe threads)
+#
+# See: packages/api/src/infrastructure/harness-eval/community-eval-domain.ts
+
+domainId: eval:code-review-quality
+displayName: Code Review Quality Eval
+systemThreadId: thread_eval_code_review
+evalCat:
+  catId: reviewer-bot
+  handle: "@reviewer-bot"
+  model: community-model-v1
+frequency: weekly
+sourceAdapter: community-custom
+threadPolicy:
+  role: working-home
+  stateSot: registry
+  allowedContent:
+    - longitudinal-analysis
+    - verdict-discussion
+legacyScheduledTaskIds: []
+sla:
+  acknowledgeHours: 48
+  reevalWithinHours: 168

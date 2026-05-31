@@ -41,6 +41,8 @@ interface InvocationTrackerLike {
   ): { cancelled: boolean; catIds: string[] };
   /** Issue #83: Get all active slots for a thread (F5 refresh recovery) */
   getActiveSlots(threadId: string): Array<{ catId: string; startedAt: number }>;
+  /** F-invocation-stale-recovery: Cancel ALL active slots for a thread (abort controllers + delete slots). */
+  cancelAll?(threadId: string, requestUserId?: string, abortReason?: string): string[];
 }
 
 export interface QueueRoutesOptions {
@@ -521,6 +523,44 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       if (!guard) return;
 
       if (!invocationTracker.has(threadId, catId)) {
+        // F-invocation-stale-recovery: 404 short-circuit blocked orphan cleanup (Thread 1 bug).
+        // When the in-memory tracker has no slot, the invocation may still have a persistent
+        // running InvocationRecord (e.g., CLI exited before record was marked done, or process
+        // restarted mid-invocation). Check the record store and mark any found record canceled
+        // so F194 liveness won't classify it as a zombie forever.
+        if (opts.invocationRecordStore) {
+          const runningRecords = await opts.invocationRecordStore.listRunningByThread(threadId, guard.userId);
+          const orphanRecord = runningRecords.find((r) => (r.targetCats as string[]).includes(catId));
+          if (orphanRecord) {
+            // P2 guard: only cancel the record when it's safe — i.e., when no sibling cat
+            // of this multi-cat invocation still has an active tracker slot.
+            // Marking a record canceled while siblings are still running would remove it from
+            // liveness tracking prematurely, causing state inconsistency for the sibling.
+            const siblingCats = (orphanRecord.targetCats as string[]).filter((c) => c !== catId);
+            const siblingStillActive = siblingCats.some((c) => invocationTracker.has(threadId, c));
+            if (siblingStillActive) {
+              // Orphan cancel skipped — a sibling cat is still active; let normal lifecycle handle it
+              reply.status(404);
+              return { error: '该猫当前未在执行', code: 'CAT_NOT_ACTIVE' };
+            }
+
+            await opts.invocationRecordStore.update(orphanRecord.id, { status: 'canceled' });
+            // P2-1 + P2 (codex 第4轮 a5e8eea2): the WHOLE record is being canceled, so broadcast
+            // done + clear pause + release slot for EVERY targetCat — not just the requested one.
+            // Otherwise sibling cats in a multi-cat orphan record stay stuck in the client's active
+            // state and their processingSlots leak; and since the record is no longer running,
+            // force-reset can't rediscover those siblings via listRunningByThread.
+            const orphanCats = orphanRecord.targetCats as string[];
+            for (const m of buildCancelMessages({ cancelled: true, catIds: orphanCats })) {
+              socketManager.broadcastAgentMessage(m, threadId);
+            }
+            for (const c of orphanCats) {
+              queueProcessor.clearPause(threadId, c);
+              queueProcessor.releaseSlot(threadId, c);
+            }
+            return { ok: true, cancelled: true };
+          }
+        }
         reply.status(404);
         return { error: '该猫当前未在执行', code: 'CAT_NOT_ACTIVE' };
       }
@@ -538,4 +578,64 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       return { ok: true, cancelled: cancelResult.cancelled };
     },
   );
+
+  // POST /api/threads/:threadId/force-reset — escape hatch for stuck threads
+  // Bug: both Thread 1 (cancel 404 short-circuit) and Thread 2 (empty-result session stale)
+  // could leave the thread in a permanently stuck state that users could not recover from.
+  // This endpoint provides a last-resort manual reset:
+  //   1. invocationTracker.cancelAll — aborts all active controllers + clears tracker slots
+  //   2. queueProcessor.releaseThread — clears all in-memory processingSlots
+  //   3. listRunningByThread + update canceled — marks all persistent running records done
+  // Returns { ok: true, canceledRecords: N }
+  app.post<{ Params: { threadId: string } }>('/api/threads/:threadId/force-reset', async (request, reply) => {
+    const { threadId } = request.params;
+    const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
+    if (!guard) return;
+
+    // 1. Abort all active InvocationTracker slots (controllers + slot deletion).
+    //    This clears the primary busy source (invocationTracker.has) that hasActiveExecution checks.
+    //    cancelAll aborts in-flight requests and removes active slots atomically.
+    //    P2 (codex 第5轮 34e07c79): use the 'cancel_all' abort reason (NOT a bespoke 'force_reset').
+    //    QueueProcessor.executeEntry only routes 'user_cancel'/'cancel_all' to canceled_by_user, and
+    //    only 'cancel_all' suppresses auto-resume. A custom reason falls into the plain 'canceled'
+    //    branch → pause + 10s auto-recover → queued work restarts, re-busying the thread right after
+    //    reset. 'cancel_all' matches force-reset's "stop everything" intent and suppresses auto-resume.
+    const cancelledCatIds = invocationTracker.cancelAll?.(threadId, guard.userId, 'cancel_all') ?? [];
+
+    // 2+3. Collect EVERY user-owned cat whose processingSlot may still pin hasActiveExecution:
+    //    cancelledCatIds (tracker slots just aborted) ∪ running records' targetCats. The latter
+    //    covers the STALE case codex flagged — when the tracker slot is already gone (so cancelAll
+    //    returned []) but the processingSlot + running record persist, force-reset must still
+    //    release that orphan processingSlot or hasActiveExecution stays true until TTL.
+    //    Both sources are guard.userId-scoped (cancelAll + listRunningByThread), so no cross-user
+    //    slot leak on shared/system threads.
+    const slotsToRelease = new Set<string>(cancelledCatIds);
+    let canceledRecords = 0;
+    if (opts.invocationRecordStore) {
+      const runningRecords = await opts.invocationRecordStore.listRunningByThread(threadId, guard.userId);
+      for (const record of runningRecords) {
+        for (const c of record.targetCats as string[]) slotsToRelease.add(c);
+        await opts.invocationRecordStore.update(record.id, { status: 'canceled' });
+        canceledRecords++;
+      }
+    }
+
+    // Broadcast cancel + clear pause + release processingSlot for EVERY user-owned cat in
+    // slotsToRelease (cancelled tracker slots ∪ stale records' targetCats). P2 (opus-4.6 cross-cat
+    // review): broadcasting only cancelledCatIds left stale records' cats without a done broadcast,
+    // so the frontend "正在回复中" never cleared after force-reset (user had to F5). Doing all three
+    // over the full set keeps force-reset aligned with the orphan/normal cancel paths and covers the
+    // stale case cancelAll missed.
+    if (slotsToRelease.size > 0) {
+      for (const m of buildCancelMessages({ cancelled: true, catIds: [...slotsToRelease] })) {
+        socketManager.broadcastAgentMessage(m, threadId);
+      }
+    }
+    for (const cid of slotsToRelease) {
+      queueProcessor.clearPause(threadId, cid);
+      queueProcessor.releaseSlot(threadId, cid);
+    }
+
+    return { ok: true, canceledRecords };
+  });
 };

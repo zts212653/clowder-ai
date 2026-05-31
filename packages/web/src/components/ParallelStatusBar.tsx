@@ -3,7 +3,7 @@
 import { formatCatName, useCatData } from '@/hooks/useCatData';
 import { useElapsedTime } from '@/hooks/useElapsedTime';
 import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
-import { hexToRgba } from '@/lib/color-utils';
+import { catColorMix, catColorVar } from '@/lib/cat-slug';
 import type { TokenUsage } from '@/stores/chat-types';
 import type { CatInvocationInfo } from '@/stores/chatStore';
 import { deriveActiveCats, formatCost, formatDuration, formatTokenCount } from './status-helpers';
@@ -50,7 +50,7 @@ function CatStatusCard({
     return null;
   })();
 
-  const bgColor = cat ? hexToRgba(cat.color.primary, 0.12) : undefined;
+  const bgColor = cat ? catColorMix(cat.id, 0.12, 'primary') : undefined;
 
   return (
     <div
@@ -58,7 +58,10 @@ function CatStatusCard({
       style={{ backgroundColor: bgColor ?? 'var(--console-pill-bg)' }}
     >
       <StatusDot status={status} />
-      <span className="text-xs font-medium" style={{ color: cat?.color.primary ?? 'var(--cafe-text-secondary)' }}>
+      <span
+        className="text-xs font-medium"
+        style={{ color: cat ? catColorVar(cat.id, 'primary') : 'var(--cafe-text-secondary)' }}
+      >
         {cat ? formatCatName(cat) : catId}
       </span>
       {timeDisplay && <span className="text-xs text-cafe-secondary ml-0.5">{timeDisplay}</span>}

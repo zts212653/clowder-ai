@@ -119,6 +119,9 @@ export async function handleSearchEvidence(input: {
 
     if (!response.ok) {
       const text = await response.text();
+      console.error(
+        `[cat-cafe-search-evidence] HTTP error ${response.status} for ${url}\n  query=${queryLabel}\n  body=${text.slice(0, 500)}`,
+      );
       return errorResult(`Evidence search failed for ${queryLabel} (${response.status}): ${text}`);
     }
 
@@ -286,6 +289,11 @@ export async function handleSearchEvidence(input: {
     return successResult(lines.join('\n'));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : undefined;
+    const cause = err instanceof Error ? (err as Error & { cause?: unknown }).cause : undefined;
+    console.error(
+      `[cat-cafe-search-evidence] fetch threw for ${url}\n  query=${queryLabel}\n  err=${message}\n  cause=${JSON.stringify(cause)}\n  stack=${stack?.split('\n').slice(0, 5).join('\n')}`,
+    );
     return errorResult(`Evidence search request failed for ${queryLabel}: ${message}`);
   }
 }

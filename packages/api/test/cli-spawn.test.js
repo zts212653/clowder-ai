@@ -65,6 +65,7 @@ function createMockProcess(opts = {}) {
   const proc = {
     stdout,
     stderr,
+    stdin: null,
     pid,
     exitCode: null,
     kill: mock.fn((signal) => {
@@ -119,6 +120,45 @@ test('spawnCli yields parsed JSON events from stdout', async () => {
   assert.deepEqual(spawnFn.mock.calls[0].arguments[1], ['--json']);
 });
 
+test('spawnCli: stdinInput 经 stdin 传入 (stdio[0]=pipe + 写入 child.stdin, 不进 argv)', async () => {
+  // Incident 2026-05-29 (cross-thread-context-contamination): prompt 走 stdin 防 ps 泄露。
+  let stdinData = '';
+  const proc = createMockProcess();
+  proc.stdin = {
+    write: (c) => {
+      stdinData += typeof c === 'string' ? c : c.toString('utf8');
+      return true;
+    },
+    end: () => {},
+    on: () => proc.stdin,
+  };
+  const spawnFn = createMockSpawnFn(proc);
+
+  const SECRET = 'SECRET-prompt-body-披着专业外衣';
+  const promise = collect(
+    spawnCli({ command: 'test-cli', args: ['exec', '--', '-'], stdinInput: SECRET }, { spawnFn }),
+  );
+  proc.stdout.end();
+  proc._emitter.emit('exit', 0, null);
+  await promise;
+
+  const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+  assert.equal(spawnOpts.stdio[0], 'pipe', 'stdinInput 设置时 stdio[0] 必须是 pipe');
+  assert.equal(stdinData, SECRET, 'stdinInput 必须写入 child.stdin');
+  const args = spawnFn.mock.calls[0].arguments[1];
+  assert.ok(!args.some((a) => a.includes(SECRET)), 'stdinInput 内容不得出现在 argv');
+});
+
+test('spawnCli: 无 stdinInput 时 stdio[0]=ignore (向后兼容，不影响其它 carrier)', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const promise = collect(spawnCli({ command: 'test-cli', args: ['--json'] }, { spawnFn }));
+  proc.stdout.end();
+  proc._emitter.emit('exit', 0, null);
+  await promise;
+  assert.equal(spawnFn.mock.calls[0].arguments[2].stdio[0], 'ignore');
+});
+
 test(
   'spawnCli default spawn supervisors Unix CLI children with parent pid',
   { skip: process.platform === 'win32' && 'Unix supervisor is not used on Windows' },
@@ -136,6 +176,32 @@ test(
 
     const event = results.find((item) => item?.type === 'env');
     assert.equal(event?.parentPid, String(process.pid));
+  },
+);
+
+test(
+  'spawnCli: stdinInput reaches the supervised child through cli-supervisor (P1 regression)',
+  { skip: process.platform === 'win32' && 'cli-supervisor only wraps on Unix' },
+  async () => {
+    // Incident 2026-05-29 P1 (cloud codex review): production codex runs through
+    // cli-supervisor, which MUST forward stdin to the supervised child. Mock-based
+    // tests bypass the supervisor (fake spawnFn = child directly), so this real-path
+    // test guards the production path — without forwarding, the child gets EOF.
+    const SECRET = 'STDIN-VIA-SUPERVISOR-披着专业外衣-R8';
+    const results = await collect(
+      spawnCli({
+        command: process.execPath,
+        args: [
+          '-e',
+          'let d="";process.stdin.on("data",c=>{d+=c});process.stdin.on("end",()=>{process.stdout.write(JSON.stringify({type:"stdin-echo",got:d})+"\\n")})',
+        ],
+        stdinInput: SECRET,
+        timeoutMs: 8000,
+      }),
+    );
+    const echo = results.find((item) => item?.type === 'stdin-echo');
+    assert.ok(echo, 'supervised child should emit stdin-echo');
+    assert.equal(echo.got, SECRET, 'stdinInput must reach the supervised child through cli-supervisor');
   },
 );
 
@@ -1629,4 +1695,217 @@ test('#774 R2: deferred stall-kill is cancelled when NDJSON recovery arrives bef
   } finally {
     sleeper.kill();
   }
+});
+
+// =============================================================================
+// F212 Phase A — cliDiagnostics on __cliError / __cliTimeout (AC-A1, A7, A8, A9)
+// =============================================================================
+
+test('F212 AC-A1: __cliError includes cliDiagnostics with reasonCode for known stderr', async () => {
+  const proc = createMockProcess({ exitOnKill: false });
+  const spawnFn = createMockSpawnFn(proc);
+
+  const promise = collect(spawnCli({ command: 'codex', args: ['exec'], invocationId: 'inv-A1' }, { spawnFn }));
+  proc.stderr.write('Error: no rollout found for session abc\n');
+  proc.stdout.end();
+  proc._emitter.emit('exit', 1, null);
+
+  const results = await promise;
+  const err = results.find((r) => r?.__cliError);
+  assert.ok(err, 'expected __cliError');
+  assert.ok(err.cliDiagnostics, 'cliDiagnostics field must be present');
+  assert.equal(err.cliDiagnostics.reasonCode, 'missing_rollout');
+  assert.ok(err.cliDiagnostics.safeExcerpt, 'safeExcerpt should be filled for known reasonCode');
+  assert.ok(err.cliDiagnostics.publicSummary.length > 0);
+  assert.ok(err.cliDiagnostics.publicHint.length > 0);
+  assert.equal(err.cliDiagnostics.debugRef.command, 'codex');
+  assert.equal(err.cliDiagnostics.debugRef.exitCode, 1);
+  assert.equal(err.cliDiagnostics.debugRef.invocationId, 'inv-A1');
+});
+
+test('F212 AC-A1: __cliError for unknown stderr has cliDiagnostics with no reasonCode/safeExcerpt', async () => {
+  const proc = createMockProcess({ exitOnKill: false });
+  const spawnFn = createMockSpawnFn(proc);
+
+  const promise = collect(spawnCli({ command: 'test-cli', args: [] }, { spawnFn }));
+  proc.stderr.write('completely random weird thing\n');
+  proc.stdout.end();
+  proc._emitter.emit('exit', 2, null);
+
+  const results = await promise;
+  const err = results.find((r) => r?.__cliError);
+  assert.ok(err);
+  assert.ok(err.cliDiagnostics);
+  assert.equal(err.cliDiagnostics.reasonCode, undefined);
+  assert.equal(err.cliDiagnostics.safeExcerpt, undefined);
+  assert.match(err.cliDiagnostics.publicSummary, /未识别/);
+});
+
+test('F212 AC-A9 红线: __cliError.message does NOT contain raw stderr', async () => {
+  const proc = createMockProcess({ exitOnKill: false });
+  const spawnFn = createMockSpawnFn(proc);
+
+  const promise = collect(spawnCli({ command: 'test-cli', args: [] }, { spawnFn }));
+  const secret = 'super-secret-panic-marker-7f3xq';
+  proc.stderr.write(`${secret}\n`);
+  proc.stdout.end();
+  proc._emitter.emit('exit', 2, null);
+
+  const results = await promise;
+  const err = results.find((r) => r?.__cliError);
+  assert.ok(err);
+  assert.ok(!err.message.includes(secret), `message leaked raw stderr: ${err.message}`);
+  // Also check cliDiagnostics 公共面板字段不漏
+  assert.ok(!err.cliDiagnostics.publicSummary.includes(secret));
+  assert.ok(!err.cliDiagnostics.publicHint.includes(secret));
+});
+
+test('F212 (云端 codex P2): maybeCollectStreamError extracts Error.message (non-enumerable)', async () => {
+  // 砚砚 round-3 catch: prior version of this test used a JSON plain object, which JSON.stringify
+  // serializes correctly even without the fix. The real bug surfaces only when `evt.error` is a
+  // genuine Error instance — name/message/stack are non-enumerable on Error.prototype and would
+  // serialize to `{}`. Test the pure helper directly to exercise the actual failure mode.
+  const { maybeCollectStreamError } = await import('../dist/utils/cli-spawn.js');
+  const sink = [];
+  const evt = { type: 'error', error: new Error('401 Unauthorized') };
+  maybeCollectStreamError(evt, sink);
+  assert.equal(sink.length, 1, 'expected one collected entry');
+  assert.ok(
+    sink[0].includes('401 Unauthorized'),
+    `Error.message must survive non-enumerable serialization; got: ${sink[0]}`,
+  );
+  // Verify the classifier can actually reach the reasonCode from the extracted text
+  const { classifyCliError } = await import('../dist/utils/cli-diagnostics.js');
+  assert.equal(
+    classifyCliError(sink[0]),
+    'auth_failed',
+    `classifier must classify extracted text; got: ${classifyCliError(sink[0])}`,
+  );
+});
+
+test('F212 (云端 codex P2): maybeCollectStreamError extracts plain object error fields', async () => {
+  // Regression: plain {error:{name,message,data:{message,statusCode}}} should also work.
+  const { maybeCollectStreamError } = await import('../dist/utils/cli-spawn.js');
+  const sink = [];
+  maybeCollectStreamError(
+    {
+      type: 'error',
+      error: { name: 'APIError', data: { message: 'model not supported', statusCode: 400 } },
+    },
+    sink,
+  );
+  assert.equal(sink.length, 1);
+  assert.ok(sink[0].includes('model not supported'));
+  assert.ok(sink[0].includes('400'));
+});
+
+test('F212 (云端 codex P2): maybeCollectStreamError ignores non-error events', async () => {
+  const { maybeCollectStreamError } = await import('../dist/utils/cli-spawn.js');
+  const sink = [];
+  maybeCollectStreamError({ type: 'text', content: 'hello' }, sink);
+  maybeCollectStreamError(null, sink);
+  maybeCollectStreamError(undefined, sink);
+  maybeCollectStreamError('string', sink);
+  assert.equal(sink.length, 0, 'non-error events must not be collected');
+});
+
+test('F212 (云端 codex round-5 P2): maybeCollectStreamError bounds sink entries', async () => {
+  // Long-running session emitting many error events must not grow sink unbounded.
+  const { maybeCollectStreamError } = await import('../dist/utils/cli-spawn.js');
+  const sink = [];
+  // Push 100 small error events; cap is 50 entries.
+  for (let i = 0; i < 100; i++) {
+    maybeCollectStreamError({ type: 'error', error: { message: `err ${i}` } }, sink);
+  }
+  assert.ok(sink.length <= 50, `sink.length must be ≤50 entries; got ${sink.length}`);
+});
+
+test('F212 (云端 codex round-5 P2): maybeCollectStreamError bounds total chars', async () => {
+  // Single huge error event must not push beyond 16384 chars total.
+  const { maybeCollectStreamError } = await import('../dist/utils/cli-spawn.js');
+  const sink = [];
+  const huge = 'A'.repeat(20000); // 20KB single message
+  maybeCollectStreamError({ type: 'error', error: { message: huge } }, sink);
+  const total = sink.reduce((sum, s) => sum + s.length, 0);
+  assert.ok(total <= 16384, `total chars must be ≤16384; got ${total}`);
+});
+
+test('F212 AC-A8: NDJSON stream error event triggers cliDiagnostics.reasonCode', async () => {
+  const proc = createMockProcess({ exitOnKill: false });
+  const spawnFn = createMockSpawnFn(proc);
+
+  const promise = collect(spawnCli({ command: 'opencode', args: [] }, { spawnFn }));
+  // Simulate opencode CLI emitting an NDJSON error event with APIError payload (issue #777 reproducer)
+  proc.stdout.write(
+    JSON.stringify({
+      type: 'error',
+      error: {
+        name: 'APIError',
+        data: {
+          message:
+            'The supported API model names are deepseek-v4-pro or deepseek-v4-flash, but you passed deepseek-v-4.',
+          statusCode: 400,
+        },
+      },
+    }) + '\n',
+  );
+  proc.stdout.end();
+  proc._emitter.emit('exit', 1, null);
+
+  const results = await promise;
+  const err = results.find((r) => r?.__cliError);
+  assert.ok(err);
+  assert.ok(err.cliDiagnostics);
+  // Stream error message contains "supported API model names" → model_not_found
+  assert.equal(err.cliDiagnostics.reasonCode, 'model_not_found');
+});
+
+test('F212 AC-A7: stderr NOT logged when LOG_CLI_STDERR unset (default)', async () => {
+  // We can't easily stub the module logger, so smoke-test that no exception is thrown
+  // and that __cliError still emits cliDiagnostics correctly.
+  delete process.env.LOG_CLI_STDERR;
+  const proc = createMockProcess({ exitOnKill: false });
+  const spawnFn = createMockSpawnFn(proc);
+
+  const promise = collect(spawnCli({ command: 'test-cli', args: [] }, { spawnFn }));
+  proc.stderr.write('401 Unauthorized: invalid api key sk-AbCdEfGh1234567890IjKlMnOpQr\n');
+  proc.stdout.end();
+  proc._emitter.emit('exit', 1, null);
+
+  const results = await promise;
+  const err = results.find((r) => r?.__cliError);
+  assert.equal(err.cliDiagnostics.reasonCode, 'auth_failed');
+  // safeExcerpt must have token redacted (KD-2 contract)
+  assert.ok(!err.cliDiagnostics.safeExcerpt.includes('AbCdEfGh1234567890'));
+  assert.ok(err.cliDiagnostics.safeExcerpt.includes('[TOKEN_REDACTED]'));
+});
+
+test('F212 AC-A1: __cliTimeout also carries cliDiagnostics', async () => {
+  // Timeout path also needs cliDiagnostics for frontend rendering consistency.
+  // Use a short timeout to trigger __cliTimeout quickly.
+  const proc = createMockProcess({ exitOnKill: false });
+  const spawnFn = createMockSpawnFn(proc);
+
+  const promise = collect(spawnCli({ command: 'test-cli', args: [], timeoutMs: 50 }, { spawnFn }));
+  // Don't write anything → timeout fires
+  // Mock process never exits; race against timeout
+  setTimeout(() => {
+    proc.stderr.write('ETIMEDOUT after wait\n');
+    proc.stdout.end();
+    proc._emitter.emit('exit', null, 'SIGTERM');
+  }, 200);
+
+  const results = await promise;
+  const to = results.find((r) => r?.__cliTimeout);
+  if (to) {
+    assert.ok(to.cliDiagnostics, '__cliTimeout should also carry cliDiagnostics');
+    assert.equal(to.cliDiagnostics.debugRef.command, 'test-cli');
+  }
+  // If __cliError fired instead (signal kill), it should also have cliDiagnostics
+  const err = results.find((r) => r?.__cliError);
+  if (err) {
+    assert.ok(err.cliDiagnostics);
+  }
+  // At least one of them must have happened
+  assert.ok(to || err, 'expected either __cliTimeout or __cliError');
 });

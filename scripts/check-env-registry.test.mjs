@@ -25,6 +25,7 @@ const ALLOWLIST = new Map([
   ['PATH', 'OS-provided executable search path'],
   ['USER', 'OS-provided username'],
   ['USERNAME', 'Windows OS-provided username'],
+  ['USERPROFILE', 'Windows OS-provided home directory (F212 sanitizer path redaction)'],
   ['LANG', 'OS-provided locale'],
   ['LC_ALL', 'OS-provided locale override'],
   ['APPDATA', 'Windows OS variable (cli-spawn-win.ts)'],

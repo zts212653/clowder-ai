@@ -191,7 +191,7 @@ team lead 2026-05-21 指令：先做 #747，再做 #749；#748 先讨论、暂�
 - [x] AC-E2: 当前 baseline 归档 ✅（既有富文档 `docs/audits/cc-system-prompt-v2.1.143.md`——spec 写 v2.1.142 为 stale，实测 claude=2.1.143——保留 §1-7 富文本 + 新增 §5b 机读 anchor block 使其成合法 `--diff` 源；脚本 `--emit` 自动化补充）
 - [x] AC-E3: `cat-cafe-skills/refs/cc-system-prompt-audit-sop.md` SOP 写完 ✅
 - [x] AC-E4: cron 注册 ✅（项目 scheduler `dyn-1778925760476-s1gprm`，weekly Mon 10:00；CI runner 无二进制故非 GitHub Action）
-- [x] AC-E5: 同款 SOP 对 Codex CLI 适用 ✅（`--cli codex` 参数化——`which codex`=node launcher，复刻 launcher 解析 native 二进制——首份归档 `docs/audits/codex-system-prompt-v0.130.0.md`）
+- [x] AC-E5: 同款 SOP 对 Codex CLI 适用 ✅（`--cli codex` 参数化——`which codex`=node launcher，复刻 launcher 解析 native 二进制——首份归档 `docs/audits/codex-system-prompt-v0.130.0.md`；2026-05-26 Codex 0.133 drift follow-up 归档 `docs/audits/codex-system-prompt-v0.133.0.md`，并补 resolver 适配 0.133 `vendor/<triple>/bin/codex` native layout）
 
 ### Phase F（系统提示词可见化）
 
@@ -250,6 +250,7 @@ team lead 2026-05-21 指令：先做 #747，再做 #749；#748 先讨论、暂�
 | KD-16 | Rules & SOP 面板必须展示 prompt 消费链，而不只是文件列表 | #749：team lead需要知道“实际进 prompt / 只是参考 / skill 按需加载”。`/api/rules` 增 `consumption` 元数据，前端用四类标签显式展示 shared-rules→governance L0→native/fallback、root provider project-doc 的 harness 注入、SOP 参考文档、SKILL.md 按需加载。#748 词汇收敛 deferred，不抢跑。 | 2026-05-21 |
 | KD-17 | Governance L0 compiler anchors must be sanitizer-invariant | Outbound sync public gate exposed a cross-repo drift: `_sanitize-rules.pl` rewrites family names in `cat-cafe-skills/refs/shared-rules.md`（`Maine Coon`→`Maine Coon`、`Siamese`→`Siamese`），but `packages/api/.../governance-l0.ts` was not sanitized and asserted exact localized headings. Result: exported public API startup failed before touching clowder-ai. Fix: assert stable protocol core anchors（`fallback 层数检测协议` / `创意-实现解耦协议`）and derive output labels from the actual heading, so internal output keeps localized labels and public output follows sanitized `Maine Coon` / `Siamese`. Do not sanitize `packages/` code to avoid rewriting runtime identifiers. | 2026-05-21 |
 | KD-18 | Claude carrier 选择正交于 F203 native L0 注入 | AC-C5 alpha probe 发现 runtime default 仍走 `ClaudeAgentService(-p)`，而 Phase C 只在 opt-in `ClaudeBgCarrierService(--bg)` 接了 compiled L0。正确 invariant：`-p` vs `--bg` 只决定执行/会话模式，不能决定身份/家规是否进压缩免疫层；两条 Claude carrier 都必须用 `--system-prompt-file <compiled L0>`，且用户 `cliConfigArgs` 不得覆盖该保留 flag。 | 2026-05-24 |
+| KD-19 | L0 必须把"家里独有能力 trigger reflex"显式注入认知路径，软提示发现率由 eval 数据驱动 iterate | team lead观察："家里做了 browser-preview / rich-messaging / propose_thread 等很多功能猫猫竟然不知道可以用"——skills 在 manifest ≠ 在认知路径。猜测式选 Tier 1 不够；需 eval 跟测掉球率数据驱动 iterate。三猫盘点（47 6 self-check + Siamese 10 UX trigger + Maine Coon 8 backend trigger，合并去重 → 13 条 Tier 1）→ L0 §8 "Cat Café 家里独有能力唤醒指南（场景→skill 触发反射）"+ `cat-cafe-skills/refs/capability-wakeup-index.md` ref doc。Path C double-track：ship v1 不阻塞 + 并行 F192 reopen Phase F `eval:capability-wakeup`（per-cat per-scenario weekly miss rate verdict）→ N 周后数据驱动 §8 v2 iterate。CVO 2026-05-27 sign-off Path C.1 + F192 reopen。 | 2026-05-27 |
 
 ## Spike Log
 

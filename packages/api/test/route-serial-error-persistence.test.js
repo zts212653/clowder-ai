@@ -21,6 +21,22 @@ function createErrorService(catId, errorMsg) {
   };
 }
 
+/** F212 Phase B (云端 codex P2-8): emit error with structured cliDiagnostics on metadata. */
+function createCliErrorWithDiagnosticsService(catId, errorMsg, cliDiagnostics) {
+  return {
+    async *invoke() {
+      yield {
+        type: 'error',
+        catId,
+        error: errorMsg,
+        metadata: { provider: 'test', model: 'test-model', cliDiagnostics },
+        timestamp: Date.now(),
+      };
+      yield { type: 'done', catId, timestamp: Date.now() };
+    },
+  };
+}
+
 function createTextThenErrorService(catId, text, errorMsg) {
   return {
     async *invoke() {
@@ -147,5 +163,52 @@ describe('route-serial error persistence (F5 reload)', () => {
     const errorMsg = yielded.find((m) => m.type === 'error');
     assert.ok(errorMsg, 'error should be yielded to frontend');
     assert.ok(errorMsg.error.includes('init_failure'), 'yielded error should contain error text');
+  });
+
+  // F212 Phase B (云端 codex P2-8 2026-05-27): error message's metadata.cliDiagnostics must be
+  // carried through to messageStore.append so F5 / cold hydration can re-render the folded panel.
+  it('P2-8: persists metadata.cliDiagnostics on error system message for F5 hydration', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appendCalls = [];
+    const cliDiagnostics = {
+      reasonCode: 'auth_failed',
+      publicSummary: 'API 认证失败',
+      publicHint: '检查 .env API key',
+      safeExcerpt: '401 Unauthorized',
+      debugRef: { command: 'codex', exitCode: 1, signal: null, invocationId: 'inv-test' },
+    };
+    const deps = createMockDeps(
+      { gemini: createCliErrorWithDiagnosticsService('gemini', '401 Unauthorized', cliDiagnostics) },
+      appendCalls,
+    );
+
+    for await (const _ of routeSerial(deps, ['gemini'], 'hello', 'user1', 'thread1')) {
+      void _;
+    }
+
+    const errorAppend = appendCalls.find((m) => m.userId === 'system' && m.catId === null);
+    assert.ok(errorAppend, 'should persist a system error message');
+    assert.ok(errorAppend.metadata, 'append must include metadata for hydration');
+    assert.deepEqual(
+      errorAppend.metadata.cliDiagnostics,
+      cliDiagnostics,
+      'cliDiagnostics must survive the active→persistence boundary',
+    );
+  });
+
+  // F212 Phase B (云端 codex P2-8): regression — error without cliDiagnostics must NOT
+  // introduce a phantom metadata field (keeps persisted rows minimal when no diagnostics).
+  it('P2-8: error without cliDiagnostics does not add metadata to persisted row', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appendCalls = [];
+    const deps = createMockDeps({ gemini: createErrorService('gemini', 'plain error, no diag') }, appendCalls);
+
+    for await (const _ of routeSerial(deps, ['gemini'], 'hello', 'user1', 'thread1')) {
+      void _;
+    }
+
+    const errorAppend = appendCalls.find((m) => m.userId === 'system' && m.catId === null);
+    assert.ok(errorAppend, 'should persist a system error message');
+    assert.equal(errorAppend.metadata, undefined, 'metadata must be absent when no cliDiagnostics');
   });
 });

@@ -12,6 +12,7 @@ import { HtmlWidgetBlock } from './HtmlWidgetBlock';
 import { InteractiveBlock } from './InteractiveBlock';
 import { InteractiveBlockGroup } from './InteractiveBlockGroup';
 import { MediaGalleryBlock } from './MediaGalleryBlock';
+import { isProposalCardBlock, ProposalCard } from './ProposalCard';
 
 function RichBlockRenderer({
   block,
@@ -26,6 +27,8 @@ function RichBlockRenderer({
 }) {
   switch (block.kind) {
     case 'card': {
+      // F128: proposal cards have dedicated approval-card renderer
+      if (isProposalCardBlock(block)) return <ProposalCard block={block} messageId={messageId} />;
       // F174 D2b-1: cards tagged with meta.kind = 'callback_auth_failure' get the
       // dedicated in-context observability renderer ("明厨亮灶" — entity carries its
       // own state). Plain cards continue to use the default CardBlock.

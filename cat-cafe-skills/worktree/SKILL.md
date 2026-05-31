@@ -74,8 +74,8 @@ echo "ahead=$AHEAD behind=$BEHIND"
 git worktree add ../cat-cafe-{feature-name} -b feat/{feature-name}
 cd ../cat-cafe-{feature-name}
 
-# 2. 安装依赖
-pnpm install
+# 2. 安装依赖（必须清除 NODE_ENV，否则跳过 devDeps 导致 build 失败！）
+env -u NODE_ENV pnpm install
 
 # 3. 创建 .env（Redis 隔离，必须！）
 cat > .env <<EOF

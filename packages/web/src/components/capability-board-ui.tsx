@@ -8,7 +8,7 @@
 
 'use client';
 
-import { type ReactNode, useState } from 'react';
+import { type CSSProperties, type ReactNode, useState } from 'react';
 import { HubIcon } from './hub-icons';
 import { EcosystemBadge } from './marketplace/marketplace-badges';
 
@@ -457,8 +457,8 @@ function TypeBadge({ type }: { type: 'mcp' | 'skill' }) {
     <span
       className={`inline-flex items-center justify-center text-micro px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
         type === 'mcp'
-          ? 'bg-gradient-to-r from-purple-100 to-indigo-100 text-conn-purple-text border border-conn-purple-ring/50'
-          : 'bg-gradient-to-r from-blue-100 to-cyan-100 text-conn-blue-text border border-conn-blue-ring/50'
+          ? 'bg-gradient-to-r from-[var(--accent-100)] to-[var(--semantic-info-surface)] text-conn-purple-text border border-conn-purple-ring/50'
+          : 'bg-gradient-to-r from-[var(--semantic-info-surface)] to-[var(--semantic-info-surface)] text-conn-blue-text border border-conn-blue-ring/50'
       }`}
     >
       {type === 'mcp' ? 'MCP' : 'Skill'}
@@ -502,7 +502,7 @@ function ToggleSwitch({
       } ${enabled ? 'bg-conn-indigo-text' : 'bg-cafe-surface-elevated'} ${isSm ? 'w-7 h-3.5' : 'w-10 h-5'}`}
     >
       <span
-        className={`absolute top-0 rounded-full bg-cafe-surface shadow-sm ring-1 ring-black/5 transition-transform duration-300 ease-in-out flex items-center justify-center ${isSm ? 'w-3.5 h-3.5' : 'w-5 h-5'} ${
+        className={`absolute top-0 rounded-full bg-cafe-surface shadow-sm ring-1 ring-[var(--console-border-soft)] transition-transform duration-300 ease-in-out flex items-center justify-center ${isSm ? 'w-3.5 h-3.5' : 'w-5 h-5'} ${
           enabled ? (isSm ? 'translate-x-[14px]' : 'translate-x-[20px]') : 'translate-x-0'
         }`}
       >
@@ -658,7 +658,10 @@ export function FilterChips({
 
 export function SectionIconMcp() {
   return (
-    <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-50 to-indigo-100/50 border border-conn-indigo-bg/50 shadow-sm">
+    <div
+      className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--semantic-info-surface)] to-[var(--_info-50)] border border-conn-indigo-bg/50 shadow-sm"
+      style={{ '--_info-50': 'color-mix(in oklch, var(--semantic-info-surface) 50%, transparent)' } as CSSProperties}
+    >
       <McpIcon className="w-4 h-4 text-conn-indigo-text" />
     </div>
   );
@@ -666,7 +669,10 @@ export function SectionIconMcp() {
 
 export function SectionIconSkill() {
   return (
-    <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-amber-50 to-yellow-100/50 border border-amber-100/50 shadow-sm">
+    <div
+      className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--semantic-warning-surface)] to-[var(--_warn-50)] border border-[var(--semantic-warning-surface)] shadow-sm"
+      style={{ '--_warn-50': 'color-mix(in oklch, var(--semantic-warning-surface) 50%, transparent)' } as CSSProperties}
+    >
       <SkillIcon className="w-4 h-4 text-conn-amber-text" />
     </div>
   );
@@ -674,7 +680,10 @@ export function SectionIconSkill() {
 
 export function SectionIconExtension() {
   return (
-    <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-50 to-green-100/50 border border-emerald-100/50 shadow-sm">
+    <div
+      className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--semantic-success-surface)] to-[var(--_ok-50)] border border-[var(--semantic-success-surface)] shadow-sm"
+      style={{ '--_ok-50': 'color-mix(in oklch, var(--semantic-success-surface) 50%, transparent)' } as CSSProperties}
+    >
       <ExtensionIcon className="w-4 h-4 text-conn-emerald-text" />
     </div>
   );

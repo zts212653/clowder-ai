@@ -60,4 +60,27 @@ describe('Eval cat invocation packet', () => {
     assert.deepEqual(invocation.context.legacyScheduledTaskIds, ['harness-fit-digest']);
     assert.match(invocation.instructions, /legacy scheduled task/);
   });
+
+  it('builds instructions for eval:capability-wakeup domains', () => {
+    const invocation = buildEvalCatInvocation({
+      domain: {
+        ...domain,
+        domainId: 'eval:capability-wakeup',
+        displayName: 'Capability Wakeup Eval',
+        systemThreadId: 'thread_eval_capability_wakeup',
+        sourceAdapter: 'capability-wakeup-eval',
+        frequency: 'weekly',
+        legacyScheduledTaskIds: [],
+        handoffTargetResolver: { featureId: 'F203', ownerCatId: 'opus47', threadLookup: 'feature-thread' },
+      },
+      trendRefs: [],
+      verdictRefs: [],
+      legacyCleanup: { status: 'disabled' },
+    });
+
+    assert.equal(invocation.domainId, 'eval:capability-wakeup');
+    assert.equal(invocation.targetThreadId, 'thread_eval_capability_wakeup');
+    assert.match(invocation.instructions, /capability wakeup/i);
+    assert.match(invocation.instructions, /miss/i);
+  });
 });

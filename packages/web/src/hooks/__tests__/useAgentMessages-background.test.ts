@@ -199,6 +199,57 @@ describe('background thread socket handling', () => {
     // F183 Phase B1.7 (砚砚 R1 P1) regression: 重复同 invocation error 走
     // stable-key dedup（reducer 内部 update existing），messages.length 不变，
     // 不应再 +1 unread。
+    // F212 Phase B 云端 codex P2-4 (2026-05-27): bg-thread error must also propagate
+    // metadata.cliDiagnostics into bubble.extra so the folded panel renders. Without
+    // this fix, CLI failures in a non-foreground thread fall back to legacy red-pill.
+    it('F212 Phase B (P2-4): bg error wires metadata.cliDiagnostics into bubble.extra', () => {
+      const diag = {
+        reasonCode: 'auth_failed' as const,
+        publicSummary: 'API 认证失败',
+        publicHint: '检查 API key',
+        debugRef: { command: 'codex', exitCode: 1, signal: null, invocationId: 'inv-bg-cli' },
+      };
+      simulateBackgroundMessage({
+        type: 'error',
+        catId: 'opus',
+        threadId: 'thread-bg-cli',
+        invocationId: 'inv-bg-cli',
+        error: 'CLI exit 1',
+        timestamp: Date.now(),
+        isFinal: true,
+        metadata: { provider: 'anthropic', model: 'claude-opus', cliDiagnostics: diag },
+      });
+      const ts = useChatStore.getState().getThreadState('thread-bg-cli');
+      const errBubble = ts.messages.find((m) => m.type === 'system' && (m as { variant?: string }).variant === 'error');
+      expect(errBubble).toBeTruthy();
+      expect(errBubble?.extra?.cliDiagnostics).toEqual(diag);
+    });
+
+    // F212 Phase B 云端 codex P2-4 fallback path: invocationless bg error (no reducer
+    // route) uses legacy addMessageToThread — that path must also include extra.cliDiagnostics.
+    it('F212 Phase B (P2-4): bg error fallback path also wires cliDiagnostics into extra', () => {
+      const diag = {
+        reasonCode: 'network_error' as const,
+        publicSummary: '网络连接失败',
+        publicHint: '检查代理 / VPN',
+        debugRef: { command: 'codex', exitCode: 1, signal: null },
+      };
+      simulateBackgroundMessage({
+        type: 'error',
+        catId: 'opus',
+        threadId: 'thread-bg-cli-2',
+        // no invocationId — forces legacy addMessageToThread path
+        error: 'CLI exit 1',
+        timestamp: Date.now(),
+        isFinal: true,
+        metadata: { provider: 'anthropic', model: 'claude-opus', cliDiagnostics: diag },
+      });
+      const ts = useChatStore.getState().getThreadState('thread-bg-cli-2');
+      const errBubble = ts.messages.find((m) => m.type === 'system' && (m as { variant?: string }).variant === 'error');
+      expect(errBubble).toBeTruthy();
+      expect(errBubble?.extra?.cliDiagnostics).toEqual(diag);
+    });
+
     it('B1.7 砚砚 R1 P1: bg duplicate error same invocation does NOT double-increment unread', () => {
       simulateBackgroundMessage({
         type: 'error',

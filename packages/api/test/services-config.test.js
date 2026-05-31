@@ -6,10 +6,10 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 describe('service config storage', () => {
-  it('uses ~/.cat-cafe/services.json as the default config path', () => {
+  it('uses CAT_CAFE_HOME/services.json as the default config path', () => {
     const home = mkdtempSync(join(tmpdir(), 'cat-cafe-services-home-'));
     try {
-      const env = { ...process.env, HOME: home };
+      const env = { ...process.env, HOME: home, CAT_CAFE_HOME: join(home, '.cat-cafe') };
       delete env.CAT_CAFE_SERVICES_CONFIG;
       const moduleUrl = new URL('../dist/domains/services/service-config.js', import.meta.url).href;
       const result = spawnSync(
@@ -23,7 +23,7 @@ describe('service config storage', () => {
       );
 
       assert.equal(result.status, 0, result.stderr || result.stdout);
-      const configPath = join(home, '.cat-cafe/services.json');
+      const configPath = join(env.CAT_CAFE_HOME, 'services.json');
       assert.equal(existsSync(configPath), true);
       const data = JSON.parse(readFileSync(configPath, 'utf-8'));
       assert.equal(data['whisper-stt'].enabled, true);

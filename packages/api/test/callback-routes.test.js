@@ -299,6 +299,58 @@ describe('Callback Routes', () => {
     assert.equal(socketManager.getMessages().length, 1);
   });
 
+  // Regression: byte-identical duplicate posts (the screenshot bug). The recent-message
+  // duplicate scan is check-then-act (read recent → later append); two concurrent identical
+  // deliveries (e.g. an at-least-once retry / double-dispatch, each with its own auto-generated
+  // clientMessageId so the clientMessageId SADD does not match) both pass the "no duplicate"
+  // read before either appends → both persist → two identical messages. Closing the race needs
+  // an ATOMIC claim before append. This test forces the interleave by holding the first append
+  // open until the second request has run its duplicate check.
+  test('POST post-message does not double-store byte-identical concurrent posts (atomic dedup)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    const realAppend = messageStore.append.bind(messageStore);
+    let releaseFirstAppend;
+    const firstAppendGate = new Promise((resolve) => {
+      releaseFirstAppend = resolve;
+    });
+    let signalFirstAppendEntered;
+    const firstAppendEntered = new Promise((resolve) => {
+      signalFirstAppendEntered = resolve;
+    });
+    let appendCount = 0;
+    messageStore.append = async (msg) => {
+      appendCount += 1;
+      if (appendCount === 1) {
+        signalFirstAppendEntered();
+        await firstAppendGate; // hold the winner's append open
+      }
+      return realAppend(msg);
+    };
+
+    // No clientMessageId on either request → the clientMessageId dedup is skipped, exercising
+    // the content-fingerprint path specifically (matches production where two deliveries carry
+    // different auto-generated keys).
+    const payload = { content: 'concurrent identical callback report' };
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+
+    const p1 = app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
+    await firstAppendEntered; // p1 passed its duplicate check and is now blocked inside append
+    const second = await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
+    releaseFirstAppend();
+    await p1;
+
+    assert.equal(
+      JSON.parse(second.body).status,
+      'duplicate',
+      'concurrent identical post must be detected as duplicate even before the winner commits its append',
+    );
+    const recent = messageStore.getRecent(10);
+    assert.equal(recent.length, 1, 'concurrent byte-identical posts must persist exactly ONE message');
+    assert.equal(socketManager.getMessages().length, 1, 'only one broadcast for the deduped pair');
+  });
+
   test('POST post-message suppresses exact duplicate callback posts when first copy is queued', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
@@ -674,6 +726,38 @@ describe('Callback Routes', () => {
     assert.equal(body.messages[1].content, 'Reply 1');
   });
 
+  test('GET thread-context exposes HTTP image urls so external runtimes can fetch them (F211-REG3)', async () => {
+    // REG3 Layer B: external runtimes (Antigravity/Bengal) cannot read absolute filesystem
+    // imagePaths under cat-cafe-runtime/uploads (workspace-root boundary). An HTTP url served
+    // by the API /uploads/ static route IS reachable, so the carrier can curl/fetch the bytes.
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'look at this diagram',
+      contentBlocks: [
+        { type: 'text', text: 'look at this diagram' },
+        { type: 'image', url: '/uploads/diagram.png' },
+      ],
+      mentions: [],
+      timestamp: 1,
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    const withImage = body.messages.find((msg) => Array.isArray(msg.imageUrls) && msg.imageUrls.length > 0);
+    assert.ok(withImage, 'a message with an image must expose imageUrls');
+    assert.match(withImage.imageUrls[0], /^https?:\/\/.+\/uploads\/diagram\.png$/);
+  });
+
   test('GET thread-context respects limit parameter', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
@@ -965,8 +1049,20 @@ describe('Callback Routes', () => {
     assert.equal(body.messages[0].contentBlocks.length, 2);
     assert.equal(body.messages[0].contentBlocks[1].type, 'image');
     assert.equal(body.messages[0].contentBlocks[1].url, '/uploads/1234567890-abc.png');
+    // F211 BUG1 fix: imagePaths should contain resolved absolute filesystem paths
+    assert.ok(body.messages[0].imagePaths, 'imagePaths should be present for image messages');
+    assert.equal(body.messages[0].imagePaths.length, 1);
+    assert.ok(
+      body.messages[0].imagePaths[0].endsWith('1234567890-abc.png'),
+      `imagePath should end with filename, got ${body.messages[0].imagePaths[0]}`,
+    );
+    assert.ok(
+      body.messages[0].imagePaths[0].startsWith('/'),
+      `imagePath should be absolute, got ${body.messages[0].imagePaths[0]}`,
+    );
     // Message without contentBlocks should not have the field
     assert.equal(body.messages[1].contentBlocks, undefined);
+    assert.equal(body.messages[1].imagePaths, undefined);
   });
 
   // ---- F-Swarm-6: Cross-thread context read ----

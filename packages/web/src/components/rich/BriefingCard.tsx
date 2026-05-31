@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { type CSSProperties, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import type { RichBlock, RichCardBlock } from '@/stores/chat-types';
 import { CafeIcon } from './CafeIcons';
@@ -16,21 +16,22 @@ export function BriefingCard({ block: raw }: { block: RichBlock; messageId?: str
   const block = raw as RichCardBlock;
 
   return (
-    <div className="border-l-4 border-l-conn-blue-ring bg-conn-blue-bg dark:bg-blue-950/30 rounded-r-lg overflow-hidden">
+    <div className="border-l-4 border-l-conn-blue-ring bg-conn-blue-bg rounded-r-lg overflow-hidden">
       {/* Header row */}
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center gap-1.5 px-3 py-2 text-left hover:bg-blue-100/50 dark:hover:bg-blue-900/30 transition-colors"
+        className="w-full flex items-center gap-1.5 px-3 py-2 text-left hover:bg-[var(--_info-50)] transition-colors"
+        style={{ '--_info-50': 'color-mix(in oklch, var(--semantic-info-surface) 50%, transparent)' } as CSSProperties}
       >
-        <CafeIcon name="search" className="w-3.5 h-3.5 text-conn-blue-text dark:text-blue-400 shrink-0" />
-        <span className="text-xs font-medium text-blue-600 dark:text-blue-300 uppercase tracking-wide">
+        <CafeIcon name="search" className="w-3.5 h-3.5 text-conn-blue-text shrink-0" />
+        <span className="text-xs font-medium text-[var(--semantic-info)] uppercase tracking-wide">
           Context Briefing
         </span>
-        <span className="mx-1.5 text-blue-300 dark:text-blue-600">·</span>
+        <span className="mx-1.5 text-[var(--semantic-info)] ">·</span>
         <span className="text-sm text-cafe-secondary truncate flex-1">{block.title}</span>
         <svg
-          className={`w-3.5 h-3.5 text-blue-400 shrink-0 transition-transform duration-150 ${expanded ? 'rotate-180' : ''}`}
+          className={`w-3.5 h-3.5 text-[var(--semantic-info)] shrink-0 transition-transform duration-150 ${expanded ? 'rotate-180' : ''}`}
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -48,7 +49,7 @@ export function BriefingCard({ block: raw }: { block: RichBlock; messageId?: str
         <div className="px-3 pb-2 grid grid-cols-1 sm:grid-cols-3 gap-1">
           {block.fields.map((f, i) => (
             <div key={i} className="text-xs">
-              <span className="text-conn-blue-text dark:text-blue-400 font-medium">{f.label}</span>
+              <span className="text-conn-blue-text font-medium">{f.label}</span>
               <span className="text-cafe-secondary ml-1">{f.value}</span>
             </div>
           ))}
@@ -57,7 +58,7 @@ export function BriefingCard({ block: raw }: { block: RichBlock; messageId?: str
 
       {/* Expanded: full details */}
       {expanded && block.bodyMarkdown && (
-        <div className="px-3 pb-3 pt-1 border-t border-conn-blue-ring/50 dark:border-blue-800/50">
+        <div className="px-3 pb-3 pt-1 border-t border-conn-blue-ring/50 ">
           <div className="text-xs text-cafe-secondary [&_.markdown-content]:text-xs [&_p]:mb-1 [&_p:last-child]:mb-0">
             <MarkdownContent content={block.bodyMarkdown} className="!text-xs" disableCommandPrefix />
           </div>

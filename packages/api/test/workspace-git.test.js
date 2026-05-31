@@ -128,11 +128,11 @@ describe('parseStaleBranches', () => {
 describe('parseWorktreeHealth', () => {
   test('marks worktrees with merged branches as orphan', () => {
     const worktreeListOutput = [
-      'worktree /path/to/project',
+      'worktree /home/user/cat-cafe',
       'HEAD abc1234567890123456789012345678901234567',
       'branch refs/heads/main',
       '',
-      'worktree /path/to/project-f079',
+      'worktree /home/user/cat-cafe-f079',
       'HEAD def1234567890123456789012345678901234567',
       'branch refs/heads/feat/f079-voting',
       '',

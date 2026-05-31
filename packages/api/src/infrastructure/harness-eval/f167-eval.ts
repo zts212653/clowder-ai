@@ -198,6 +198,8 @@ function buildC2(metrics: Record<string, number>): ComponentHealth {
   const verdictHint = sumMetricByPrefix(metrics, 'cat_cafe_a2a_c2_verdict_hint_emitted');
   const voidHoldHint = sumMetricByPrefix(metrics, 'cat_cafe_a2a_c2_void_hold_hint_emitted');
   const verdictWithoutPass = sumMetricByPrefix(metrics, 'cat_cafe_a2a_c2_verdict_without_pass_count');
+  const exitChecked = sumMetricByPrefix(metrics, 'cat_cafe_a2a_c2_exit_checked');
+  const voidHoldChecked = sumMetricByPrefix(metrics, 'cat_cafe_a2a_c2_void_hold_checked');
   const hasSplitCounters = verdictHint != null || voidHoldHint != null || verdictWithoutPass != null;
   const hasData = hasSplitCounters || (hintCount != null && hintCount > 0);
 
@@ -207,6 +209,12 @@ function buildC2(metrics: Record<string, number>): ComponentHealth {
   const frictionCounts: Record<string, number | null> = {};
   if (hasSplitCounters) {
     activationCounts['c2.verdict_hint_emitted'] = verdictHint ?? 0;
+    // Two distinct C2 denominators (PR #1941 P2): verdict_without_pass is graded against
+    // c2.checked (verdict exit-check count), void_hold against c2.void_hold_checked (the
+    // separate void-hold guard). Absent (old runtime) → 0 → attribution surfaces the
+    // friction at low severity instead of fabricating a ratio against the wrong base.
+    activationCounts['c2.checked'] = exitChecked ?? 0;
+    activationCounts['c2.void_hold_checked'] = voidHoldChecked ?? 0;
     frictionCounts['c2.verdict_without_pass_count'] = verdictWithoutPass ?? 0;
     frictionCounts['c2.void_hold_hint_emitted'] = voidHoldHint ?? 0;
   }

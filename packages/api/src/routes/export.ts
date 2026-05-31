@@ -9,13 +9,25 @@ import { formatMessage } from '../domains/cats/services/context/ContextAssembler
 import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore, Thread } from '../domains/cats/services/stores/ports/ThreadStore.js';
 
+const pad = (n: number) => n.toString().padStart(2, '0');
+
 /**
  * Format date consistently across environments (no locale dependency).
- * Output: YYYY-MM-DD HH:mm
+ * Output: YYYY-MM-DD HH:mm (host-local).
  */
 function formatDatetime(date: Date): string {
-  const pad = (n: number) => n.toString().padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/**
+ * Local HH:mm passed to formatMessage() so the message body shares
+ * formatDatetime's host-local basis. Without this, the prompt default
+ * (UTC with "UTC" marker) would leak into the export and disagree with the
+ * local header/footer in the same document (P1 from review on 2026-05-29).
+ */
+function formatLocalTime(epochMs: number): string {
+  const d = new Date(epochMs);
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 export interface ExportRoutesOptions {
@@ -52,7 +64,7 @@ export function formatThreadAsMarkdown(thread: Thread, messages: StoredMessage[]
 
   // Messages — full content (no truncation)
   for (const msg of messages) {
-    const line = formatMessage(msg);
+    const line = formatMessage(msg, { formatTime: formatLocalTime });
     lines.push(line);
     // Append metadata tag for cat messages
     if (msg.metadata) {
@@ -95,7 +107,7 @@ export function formatThreadAsText(thread: Thread, messages: StoredMessage[]): s
   lines.push(`消息数: ${messages.length}`, '', '---', '');
 
   for (const msg of messages) {
-    const line = formatMessage(msg);
+    const line = formatMessage(msg, { formatTime: formatLocalTime });
     lines.push(line);
     if (msg.metadata) {
       const parts: string[] = [];

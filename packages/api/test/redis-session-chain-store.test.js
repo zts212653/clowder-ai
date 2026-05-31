@@ -85,6 +85,29 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.equal(r1.seq, 1);
   });
 
+  it('create() returns the existing record for an already claimed cliSessionId', async () => {
+    const first = await store.create(BASE_INPUT);
+    const second = await store.create({ ...BASE_INPUT, threadId: 'thread-2', reuseExistingCliSession: true });
+
+    assert.equal(second.id, first.id);
+    assert.equal(second.threadId, 'thread-1');
+    const firstChain = await store.getChain('opus', 'thread-1');
+    const secondChain = await store.getChain('opus', 'thread-2');
+    assert.equal(firstChain.length, 1);
+    assert.equal(secondChain.length, 0);
+  });
+
+  it('create() creates a new record for duplicate cliSessionId unless reuse is requested', async () => {
+    const first = await store.create(BASE_INPUT);
+    const second = await store.create({ ...BASE_INPUT, threadId: 'thread-2' });
+
+    assert.notEqual(second.id, first.id);
+    const firstChain = await store.getChain('opus', 'thread-1');
+    const secondChain = await store.getChain('opus', 'thread-2');
+    assert.equal(firstChain.length, 1);
+    assert.equal(secondChain.length, 1);
+  });
+
   it('create() different cat starts at seq 0', async () => {
     await store.create(BASE_INPUT);
     const codexRecord = await store.create({ ...BASE_INPUT, catId: 'codex', cliSessionId: 'cli-codex-1' });
@@ -255,5 +278,20 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.equal(sealed.status, 'sealed');
     assert.equal(sealed.sealReason, 'threshold');
     assert.equal(sealed.sealedAt, sealedAt);
+  });
+
+  it('reactivated session restores active index and clears seal metadata', async () => {
+    const record = await store.create(BASE_INPUT);
+    const sealedAt = Date.now();
+    await store.update(record.id, { status: 'sealed', sealReason: 'external_registration_failed', sealedAt });
+    assert.equal(await store.getActive('opus', 'thread-1'), null);
+
+    await store.update(record.id, { status: 'active', sealReason: null, sealedAt: null });
+
+    const reopened = await store.get(record.id);
+    assert.equal(reopened.status, 'active');
+    assert.equal(reopened.sealReason, undefined);
+    assert.equal(reopened.sealedAt, undefined);
+    assert.equal((await store.getActive('opus', 'thread-1'))?.id, record.id);
   });
 });

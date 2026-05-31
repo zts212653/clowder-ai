@@ -79,7 +79,7 @@ cat-cafe/
 
 ```bash
 # 源目录绝对路径
-SOURCE=/path/to/project-skills
+SOURCE=/home/user/cat-cafe-skills
 
 # Claude 用户级（每个 skill 单独 symlink）
 mkdir -p ~/.claude/skills

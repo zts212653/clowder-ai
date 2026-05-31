@@ -24,7 +24,27 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 const populatedSummary = {
-  counts: { total: 1, actionable: 0, keepObserve: 1, stale: 0 },
+  counts: { total: 1, actionable: 0, keepObserve: 1, stale: 0, registeredDomains: 2 },
+  domains: [
+    {
+      domainId: 'eval:a2a',
+      displayName: 'A2A Harness Eval',
+      systemThreadId: 'thread_eval_a2a',
+      frequency: 'daily',
+      evalCatHandle: '@codex',
+      hasVerdict: true,
+      latestVerdictId: '2026-05-23-eval-a2a-live-verdict',
+      latestVerdict: 'keep_observe',
+    },
+    {
+      domainId: 'eval:memory',
+      displayName: 'Memory Recall & Library Health Eval',
+      systemThreadId: 'thread_eval_memory',
+      frequency: 'daily',
+      evalCatHandle: '@opus47',
+      hasVerdict: false,
+    },
+  ],
   items: [
     {
       id: '2026-05-23-eval-a2a-live-verdict',
@@ -180,6 +200,37 @@ describe('HubEvalTab', () => {
     const healthLink = links.find((a) => a.textContent?.includes('记忆健康'));
     expect(healthLink).toBeTruthy();
     expect(healthLink?.getAttribute('href')).toBe('/memory/health');
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  // F192 livefix OQ-16: domain overview shows all domains including those without verdicts
+  it('renders domain overview showing eval:memory with "待首次评估" placeholder', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(jsonResponse(populatedSummary));
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<HubEvalTab />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Domain overview section should exist
+    expect(container.textContent).toContain('评估域总览');
+    // eval:memory should show with placeholder status
+    expect(container.textContent).toContain('Memory Recall & Library Health Eval');
+    expect(container.textContent).toContain('待首次评估');
+    // eval:a2a should show with its verdict label
+    expect(container.textContent).toContain('A2A Harness Eval');
+    // Both domains show their eval cats
+    expect(container.textContent).toContain('@codex');
+    expect(container.textContent).toContain('@opus47');
 
     await act(async () => {
       root.unmount();

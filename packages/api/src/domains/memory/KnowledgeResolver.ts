@@ -151,6 +151,11 @@ export class KnowledgeResolver implements IKnowledgeResolver {
       };
     }
 
+    if (isProjectLocalScope(options)) {
+      const execution = await searchStoreWithMeta(this.projectStore, query, { ...options, limit });
+      return { results: execution.items.slice(0, limit), sources: ['project'], query, meta: execution.meta };
+    }
+
     const sources: KnowledgeResult['sources'] = [];
     const projectPromise = searchStoreWithMeta(this.projectStore, query, { ...options, limit });
     const globalPromise = this.globalStore
@@ -230,6 +235,10 @@ function degradeReasonPriority(reason: SearchExecutionMeta['degradeReason']): nu
 
 function isRawNonLexical(options?: SearchOptions): boolean {
   return options?.depth === 'raw' && (options.mode ?? 'lexical') !== 'lexical';
+}
+
+function isProjectLocalScope(options?: SearchOptions): boolean {
+  return options?.scope === 'threads' || options?.scope === 'sessions';
 }
 
 // ── Reciprocal Rank Fusion ──────────────────────────────────────────

@@ -51,7 +51,7 @@ pnpm start
 #   pnpm start:direct
 ```
 
-To enable local semantic rerank for the memory system, set `EMBED_MODE=on` (or `shadow`) in `.env`. `pnpm start` / `pnpm start:direct` will auto-launch the platform launcher (`scripts/embed-server.sh` on Unix, `scripts/embed-server.ps1` on Windows). Apple Silicon uses MLX by default; other platforms fall back to `sentence-transformers`.
+To enable local semantic rerank for the memory system, install the **Embedding** service from Console settings — the installer creates `~/.cat-cafe/embed-venv` with the right backend for your platform (MLX on Apple Silicon, fastembed/ONNX or sentence-transformers elsewhere). On Windows, `pnpm start` / `pnpm start:direct` then auto-launches `scripts/services/embed-server.ps1` when Console reports the service as installed + enabled. Uninstalling or disabling via Console will skip the autostart.
 
 `pnpm start` uses the **runtime worktree** architecture: it creates an isolated `../cat-cafe-runtime` worktree (on first run), syncs it to `origin/main`, builds, starts Redis, and launches Frontend (port 3003) + API (port 3004). This keeps your development checkout clean.
 

@@ -66,7 +66,7 @@ export function TaskComposer({ threadId, onClose }: { threadId: string; onClose:
           type="button"
           onClick={handleSubmit}
           disabled={!canSubmit}
-          className="text-xs font-semibold bg-cafe-crosspost text-white px-3 py-1.5 rounded-lg transition-colors hover:bg-cafe-crosspost/90 disabled:opacity-40 disabled:cursor-not-allowed"
+          className="text-xs font-semibold bg-cafe-crosspost text-[var(--cafe-surface)] px-3 py-1.5 rounded-lg transition-colors hover:bg-cafe-crosspost/90 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {submitting ? '创建中…' : '创建任务'}
         </button>

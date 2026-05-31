@@ -22,6 +22,8 @@ export const KIND_DIRS: Record<string, EvidenceKind> = {
   'harness-feedback': 'lesson',
 };
 
+const GENERATED_DOC_DIRS = new Set(['exported-threads']);
+
 export class CatCafeScanner implements RepoScanner {
   private exclude?: string[];
   constructor(exclude?: string[]) {
@@ -55,8 +57,9 @@ export class CatCafeScanner implements RepoScanner {
   }
 
   private isExcluded(filePath: string, projectRoot: string): boolean {
-    if (!this.exclude?.length) return false;
     const rel = relative(projectRoot, filePath);
+    if (rel.split(/[\\/]+/).some((segment) => GENERATED_DOC_DIRS.has(segment))) return true;
+    if (!this.exclude?.length) return false;
     return this.exclude.some((pattern) => matchGlob(pattern, rel));
   }
 
@@ -127,6 +130,7 @@ function discoverFiles(docsRoot: string): Array<{ path: string; kind: EvidenceKi
             results.push({ path: fullPath, kind });
             discoveredPaths.add(fullPath);
           } else if (lst.isDirectory()) {
+            if (GENERATED_DOC_DIRS.has(entry)) continue;
             scanDir(fullPath, kind, depth + 1);
           }
         } catch {
@@ -185,7 +189,7 @@ function discoverFiles(docsRoot: string): Array<{ path: string; kind: EvidenceKi
     if (depth > 10) return;
     try {
       for (const entry of readdirSync(dirPath)) {
-        if (FALLBACK_EXCLUDE.has(entry)) continue;
+        if (FALLBACK_EXCLUDE.has(entry) || GENERATED_DOC_DIRS.has(entry)) continue;
         const fullPath = join(dirPath, entry);
         try {
           const lst = lstatSync(fullPath);

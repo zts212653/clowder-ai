@@ -77,8 +77,8 @@ if (args[0] === 'install') {
   );
 }
 
-const command = args[0] === '-r' ? args.slice(0, 4).join(' ') : args[0];
-const knownCommands = new Set(['install', 'build', 'test', 'lint', 'check', '-r --if-present run build', '-r exec bash -lc']);
+const command = args[0] === '-r' ? args.slice(0, 4).join(' ') : args[0] === '--filter' ? args.slice(0, 3).join(' ') : args[0];
+const knownCommands = new Set(['install', 'build', 'test', 'check', '-r --if-present run build', '-r exec bash -lc', '--filter @cat-cafe/web lint']);
 if (!knownCommands.has(command)) {
   process.stderr.write(\`unexpected pnpm invocation: \${args.join(' ')}\\n\`);
   process.exit(1);
@@ -105,6 +105,8 @@ function runGate(bash, args = [], extraEnv = {}) {
       env: {
         ...process.env,
         ...extraEnv,
+        CAT_CAFE_GATE_GUARD_SKIP_PRESSURE: '1',
+        CAT_CAFE_GATE_LOCK_DIR: path.join(tempDir, 'pre-merge-check.lock'),
         PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}`,
       },
     });

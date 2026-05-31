@@ -2,6 +2,7 @@
 
 import type { HierarchicalContextConfig } from '../../../../../config/hierarchical-context-config.js';
 import { getSenderName } from '../../context/ContextAssembler.js';
+import { formatPromptTimeRange } from '../../format-time.js';
 import type { StoredMessage } from '../../stores/ports/MessageStore.js';
 
 // --- Phase D: Coverage Map (AC-D2) ---
@@ -291,10 +292,9 @@ export function buildTombstone(
 
 /** Format tombstone as compact context string (~40 tokens) */
 export function formatTombstone(tombstone: ContextTombstone): string {
-  const from = new Date(tombstone.timeRange.from).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-  const to = new Date(tombstone.timeRange.to).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  const range = formatPromptTimeRange(tombstone.timeRange.from, tombstone.timeRange.to);
   const parts = [
-    `[System: skipped ${tombstone.omittedCount} messages (${from}–${to}).`,
+    `[System: skipped ${tombstone.omittedCount} messages (${range}).`,
     `Participants: ${tombstone.participants.join(', ') || 'user'}.`,
     `Keywords: ${tombstone.keywords.join(', ') || 'N/A'}.`,
     `For details: ${tombstone.retrievalHints.join('; ')}]`,

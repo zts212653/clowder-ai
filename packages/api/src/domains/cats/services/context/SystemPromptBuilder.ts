@@ -304,6 +304,7 @@ MCP 工具（异步汇报；token 有效期有限）：
 - cat_cafe_generate_document: 文档生成→IM投递
 - cat_cafe_get_rich_block_rules: rich block 规则
 - cat_cafe_multi_mention: 并行拉猫讨论（先搜后问）
+- cat_cafe_propose_thread: 提议新建 thread（创建提案卡片，**不直接创建 thread**）。返回 proposalId，仅在用户审批通过后后端才创建 thread。审批前必须假设 thread 不存在，不要 cross_post。仅在owner 显式要求或确有独立 long-running 讨论需求时使用。
 
 ${RICH_BLOCK_SHORT}
 需要富呈现时优先 rich block；首次使用前先 call get_rich_block_rules。

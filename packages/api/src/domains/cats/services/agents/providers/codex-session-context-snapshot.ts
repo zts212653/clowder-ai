@@ -34,6 +34,9 @@ export interface CodexSessionContextSnapshot {
   contextWindowTokens: number;
   /** Optional reset timestamp in epoch milliseconds */
   contextResetsAtMs?: number;
+  /** Optional last-token usage counters from the same token_count payload */
+  lastCachedInputTokens?: number;
+  lastOutputTokens?: number;
   /** Optional total usage counters from the same token_count payload */
   totalInputTokens?: number;
   totalCachedInputTokens?: number;
@@ -67,6 +70,8 @@ function toCandidateSnapshot(payload: Record<string, unknown>): CandidateSnapsho
   const secondaryUsed = asNumber(secondary?.used_percent);
   const hasNonZeroRateUsage = (primaryUsed ?? 0) > 0 || (secondaryUsed ?? 0) > 0;
   const resetsAtSeconds = asNumber(secondary?.resets_at) ?? asNumber(primary?.resets_at);
+  const lastCachedInputTokens = asNumber(lastUsage?.cached_input_tokens);
+  const lastOutputTokens = asNumber(lastUsage?.output_tokens);
   const totalInputTokens = asNumber(totalUsage?.input_tokens);
   const totalCachedInputTokens = asNumber(totalUsage?.cached_input_tokens);
   const totalOutputTokens = asNumber(totalUsage?.output_tokens);
@@ -74,6 +79,12 @@ function toCandidateSnapshot(payload: Record<string, unknown>): CandidateSnapsho
   const snapshot: CodexSessionContextSnapshot = { contextUsedTokens, contextWindowTokens };
   if (resetsAtSeconds != null) {
     snapshot.contextResetsAtMs = Math.trunc(resetsAtSeconds * 1000);
+  }
+  if (lastCachedInputTokens != null) {
+    snapshot.lastCachedInputTokens = lastCachedInputTokens;
+  }
+  if (lastOutputTokens != null) {
+    snapshot.lastOutputTokens = lastOutputTokens;
   }
   if (totalInputTokens != null) {
     snapshot.totalInputTokens = totalInputTokens;

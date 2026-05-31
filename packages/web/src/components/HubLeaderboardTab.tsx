@@ -56,7 +56,7 @@ export function HubLeaderboardTab() {
       <div className="flex items-center justify-between">
         <h2
           className="text-xl font-medium"
-          style={{ fontFamily: fraunces.style.fontFamily, color: 'var(--cafe-text-primary)' }}
+          style={{ fontFamily: fraunces.style.fontFamily, color: 'var(--cafe-text)' }}
         >
           Cat Leaderboard
         </h2>
@@ -82,7 +82,7 @@ export function HubLeaderboardTab() {
       {error && (
         <p
           className="text-sm rounded-lg px-3 py-2"
-          style={{ color: 'var(--cafe-accent)', background: 'rgba(212,132,94,0.1)' }}
+          style={{ color: 'var(--cafe-accent)', background: 'color-mix(in srgb, var(--cafe-accent) 10%, transparent)' }}
         >
           {error}
         </p>

@@ -149,9 +149,9 @@ export function sortAndGroupThreadsWithWorkspace(
     groups.push({ type: 'pinned', label: '置顶', threads: pinned });
   }
 
-  // F095 Phase G: System threads (IM Hub connectors) — dedicated section
+  // F095 Phase G + F192 livefix: System threads (IM Hub + eval domains) — dedicated section
   const systemThreads = threads
-    .filter((t) => !!t.connectorHubState && t.id !== 'default' && !t.pinned)
+    .filter((t) => (!!t.systemKind || !!t.connectorHubState) && t.id !== 'default' && !t.pinned)
     .sort((a, b) => sortByUnreadThenActive(a, b, unreadIds));
   if (systemThreads.length > 0) {
     groups.push({ type: 'system', label: '系统', threads: systemThreads });

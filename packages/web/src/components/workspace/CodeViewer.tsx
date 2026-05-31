@@ -17,10 +17,10 @@ const cafeTheme = EditorView.theme(
       borderRight: '1px solid var(--ws-editor-surface)',
     },
     '.cm-activeLineGutter': { backgroundColor: 'var(--ws-editor-surface)' },
-    '.cm-activeLine': { backgroundColor: 'rgba(155, 126, 189, 0.08)' },
+    '.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--chart-5) 8%, transparent)' },
     '.cm-cursor': { borderLeftColor: 'var(--ws-accent)' },
     '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': {
-      backgroundColor: 'rgba(155, 126, 189, 0.25) !important',
+      backgroundColor: 'color-mix(in srgb, var(--chart-5) 25%, transparent) !important',
     },
     '.cm-line': { padding: '0 4px' },
   },
@@ -216,7 +216,7 @@ export function CodeViewer({
           type="button"
           onClick={handleSave}
           disabled={saving}
-          className="absolute bottom-3 right-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 text-white text-xs font-medium shadow-lg hover:bg-conn-green-text disabled:opacity-50 transition-colors z-10 animate-fade-in"
+          className="absolute bottom-3 right-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--semantic-success)] text-[var(--cafe-surface)] text-xs font-medium shadow-lg hover:bg-conn-green-text disabled:opacity-50 transition-colors z-10 animate-fade-in"
           title="保存 (Cmd+S)"
         >
           {saving ? '保存中...' : '保存'}
@@ -227,7 +227,7 @@ export function CodeViewer({
         <button
           type="button"
           onClick={handleAddToChat}
-          className="absolute top-2 right-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cafe-accent text-white text-xs font-medium shadow-lg hover:bg-cafe-interactive transition-colors z-10 animate-fade-in"
+          className="absolute top-2 right-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cafe-accent text-[var(--cafe-surface)] text-xs font-medium shadow-lg hover:bg-cafe-interactive transition-colors z-10 animate-fade-in"
           title="引用到聊天"
         >
           <AddToChatIcon />

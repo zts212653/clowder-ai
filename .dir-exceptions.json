@@ -41,6 +41,13 @@
       "reason": "API utils 当前 25 files；full sync 前先登记基线红灯，后续按 cli/process/path/network/storage/security 子域拆分",
       "expiresAt": "2026-06-01",
       "ticket": "F23"
+    },
+    {
+      "path": "packages/api/src/infrastructure/harness-eval",
+      "owner": "opus",
+      "reason": "F192 socio-technical harness eval 当前 29 .ts（Phase F capability-wakeup 一批 eval-capability-wakeup-* 加入超 error=25）；登记基线红灯，后续按 capability-wakeup / a2a / domain / hub 子域拆分。详见 F192 feat doc Known Debt + GitHub issue。",
+      "expiresAt": "2026-06-15",
+      "ticket": "F192"
     }
   ]
 }

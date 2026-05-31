@@ -210,13 +210,13 @@ function NodeDetailPanel({ data, onClose }: { data: FeatureNodeData; onClose: ()
       {data.evolvedFrom.length > 0 && (
         <div className="mt-2">
           <span className="text-micro font-medium text-cafe-secondary">演化自：</span>
-          <span className="text-xs text-blue-700">{data.evolvedFrom.join(', ')}</span>
+          <span className="text-xs text-[var(--semantic-info)]">{data.evolvedFrom.join(', ')}</span>
         </div>
       )}
       {data.blockedBy.length > 0 && (
         <div className="mt-1">
           <span className="text-micro font-medium text-cafe-secondary">被阻塞：</span>
-          <span className="text-xs text-red-700">{data.blockedBy.join(', ')}</span>
+          <span className="text-xs text-conn-red-text">{data.blockedBy.join(', ')}</span>
         </div>
       )}
       {data.related.length > 0 && (

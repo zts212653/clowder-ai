@@ -12,6 +12,12 @@ import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { registerLivenessProbe, unregisterLivenessProbe } from '../infrastructure/telemetry/instruments.js';
 import { emitOtelLog } from '../infrastructure/telemetry/otel-logger.js';
+import {
+  buildCliDiagnostics,
+  type CliDiagnostics,
+  type CliErrorReasonCode,
+  formatCliStderrForLog,
+} from './cli-diagnostics.js';
 import { invalidateCliCommand } from './cli-resolve.js';
 import { resolveWindowsSpawnPlan } from './cli-spawn-win.js';
 import { resolveCliTimeoutMs } from './cli-timeout.js';
@@ -23,16 +29,89 @@ const log = createModuleLogger('cli-spawn');
 
 const IS_WINDOWS = process.platform === 'win32';
 
-type CliErrorReasonCode = 'invalid_thinking_signature' | 'missing_rollout';
+/**
+ * F212 Phase A — collect text from NDJSON stream `error` events. CLI providers (Codex, opencode)
+ * often report real failure semantics in stream events rather than stderr (AC-A8).
+ *
+ * 云端 codex P2 (2026-05-26): JSON.stringify alone drops `Error` instance fields because
+ * `message`/`name`/`stack` are non-enumerable on Error. We extract those explicitly so the
+ * classifier regex can still see provider error text.
+ *
+ * 云端 codex round-5 P2 (2026-05-26): bounded sink growth — long-running sessions emitting
+ * repeated error events would otherwise grow streamErrorTexts unbounded. Enforce entry +
+ * char caps consistent with tmux nonJsonOutput buffer pattern (see tmux-agent-spawner.ts L294).
+ */
+const STREAM_ERROR_MAX_ENTRIES = 50;
+const STREAM_ERROR_MAX_CHARS = 16384;
 
-function classifyKnownCliStderr(stderr: string): CliErrorReasonCode | undefined {
-  if (/Invalid [`'"]?signature[`'"]? in [`'"]?thinking[`'"]? block/i.test(stderr)) {
-    return 'invalid_thinking_signature';
+export function maybeCollectStreamError(value: unknown, sink: string[], structuredSink?: string[]): void {
+  if (typeof value !== 'object' || value === null) return;
+  const evt = value as Record<string, unknown>;
+  const isErrorEvent = evt.type === 'error';
+  // F212 Phase D: Claude CLI reports tool-call-parse failures via a result event whose shape is
+  // counter-intuitive — verified against 7 real opus-4.8 archive samples (2026-05-29):
+  //   {type:'result', subtype:'success', is_error:true, result:'...could not be parsed...', errors:null}
+  // The authoritative error flag is `is_error===true` (NOT subtype — which stays 'success'); the cause
+  // text lives in `result` (errors[] is null). We ALSO honor subtype!=='success' for any classic error
+  // subtype CC may emit (e.g. error_during_execution / error_max_turns). This was the "未识别" root
+  // cause: the result error never reached cliDiagnostics' rawText, and a subtype-only guard would
+  // STILL have missed it because subtype is 'success'.
+  const isResultError =
+    evt.type === 'result' && (evt.is_error === true || (typeof evt.subtype === 'string' && evt.subtype !== 'success'));
+  if (!isErrorEvent && !isResultError) return;
+  // Bound: skip new entries once cap is reached (entries or total chars).
+  if (sink.length >= STREAM_ERROR_MAX_ENTRIES) return;
+  let currentChars = 0;
+  for (const s of sink) currentChars += s.length;
+  if (currentChars >= STREAM_ERROR_MAX_CHARS) return;
+  // Explicit extraction of common error-shape fields (handles Error instances + plain objects)
+  const explicitParts: string[] = [];
+  const collectFrom = (obj: unknown): void => {
+    if (!obj || typeof obj !== 'object') return;
+    if (obj instanceof Error) {
+      explicitParts.push(`${obj.name ?? 'Error'}: ${obj.message ?? ''}`);
+      return;
+    }
+    const r = obj as Record<string, unknown>;
+    if (typeof r.name === 'string') explicitParts.push(r.name);
+    if (typeof r.message === 'string') explicitParts.push(r.message);
+    if (r.data && typeof r.data === 'object') {
+      const d = r.data as Record<string, unknown>;
+      if (typeof d.message === 'string') explicitParts.push(d.message);
+      if (typeof d.statusCode === 'number') explicitParts.push(String(d.statusCode));
+    }
+  };
+  collectFrom(evt.error);
+  collectFrom(evt);
+  // F212 Phase D: result error fields (errors[] / result) carry CC's emitted cause text
+  // (e.g. "The model's tool call could not be parsed"). type==='error' events don't have these.
+  if (isResultError) {
+    if (Array.isArray(evt.errors)) {
+      for (const e of evt.errors) if (typeof e === 'string' && e.trim()) explicitParts.push(e);
+    }
+    if (typeof evt.result === 'string' && evt.result.trim()) explicitParts.push(evt.result);
   }
-  if (/no rollout found/i.test(stderr)) {
-    return 'missing_rollout';
+  const remainingChars = STREAM_ERROR_MAX_CHARS - currentChars;
+  const pushBounded = (entry: string): void => {
+    sink.push(entry.length > remainingChars ? entry.slice(0, remainingChars) : entry);
+  };
+  // AC-D3: CC structured friendly message (explicitParts) → structuredSink for unknown fallback
+  // display ("Claude Code 报告：<cause>"). Safe source — CC standard wording, not raw stderr.
+  // Cloud codex P1 fix (2026-05-29 on da1f81763): MUST gate on isResultError so unclassified
+  // type='error' events (whose explicitParts include arbitrary provider stderr-like content)
+  // don't leak through AC-D3 → buildCliDiagnostics → safeExcerpt. Result events with is_error:true
+  // remain the only "safe structured source" admitted to structuredSink (KD-1/AC-A9 red line).
+  if (structuredSink && isResultError && explicitParts.length > 0) {
+    const friendly = explicitParts.join('\n');
+    structuredSink.push(friendly.length > remainingChars ? friendly.slice(0, remainingChars) : friendly);
   }
-  return undefined;
+  try {
+    const serialized = JSON.stringify(evt);
+    pushBounded(explicitParts.length > 0 ? `${explicitParts.join('\n')}\n${serialized}` : serialized);
+  } catch {
+    // Circular ref / non-serializable — at least preserve the extracted text
+    if (explicitParts.length > 0) pushBounded(explicitParts.join('\n'));
+  }
 }
 
 function isStallAutoKillWarning(options: CliSpawnOptions, warning: unknown): boolean {
@@ -133,8 +212,30 @@ export async function* spawnCli(
   const child = doSpawn(options.command, options.args, {
     cwd: options.cwd,
     env: buildChildEnv(options.env),
-    stdio: ['ignore', 'pipe', 'pipe'],
+    // Incident 2026-05-29 (cross-thread-context-contamination): when stdinInput is
+    // provided, open stdin as a pipe so the prompt can be streamed off the command
+    // line. Otherwise keep 'ignore' (unchanged for providers not using stdin).
+    stdio: [options.stdinInput != null ? 'pipe' : 'ignore', 'pipe', 'pipe'],
   });
+
+  // Incident 2026-05-29: feed prompt via stdin instead of argv to prevent
+  // cross-process prompt leakage (`ps -o command=` / /proc/<pid>/cmdline can read
+  // any concurrent process's full argv). The child reads it because the CLI is
+  // invoked with PROMPT='-'.
+  if (options.stdinInput != null) {
+    const childStdin = child.stdin;
+    if (childStdin) {
+      // EPIPE guard: child may exit before consuming all stdin. EPIPE is expected
+      // (child gone); surface anything else for future diagnosis (P2-1, opus-46 review).
+      childStdin.on('error', (err) => {
+        if ((err as NodeJS.ErrnoException).code !== 'EPIPE') {
+          log.warn({ err, pid: child.pid, command: options.command }, 'Unexpected CLI stdin write error');
+        }
+      });
+      childStdin.write(options.stdinInput);
+      childStdin.end();
+    }
+  }
 
   log.debug({ pid: child.pid, command: options.command }, 'CLI process spawned');
 
@@ -160,6 +261,12 @@ export async function* spawnCli(
 
   // Buffer stderr for error reporting (handler attached after resetTimeout is defined)
   let stderrBuffer = '';
+
+  // F212 AC-A8: collect NDJSON stream error event payloads alongside stderr
+  const streamErrorTexts: string[] = [];
+  // F212 Phase D (AC-D3): CC structured result error friendly messages (errors[]/result),
+  // surfaced when reasonCode is unknown so the panel shows "Claude Code 报告：<cause>" not "未识别".
+  const structuredErrorTexts: string[] = [];
 
   // Track child exit state (P1: prevents PID reuse kills)
   let childExited = false;
@@ -452,6 +559,8 @@ export async function* spawnCli(
         if (typeof value === 'object' && value !== null && 'type' in value) {
           lastEventType = String((value as Record<string, unknown>).type);
         }
+        // F212 AC-A8: collect stream error events for cliDiagnostics
+        maybeCollectStreamError(value, streamErrorTexts, structuredErrorTexts);
         yield value;
         pendingNext = ndjson.next();
       }
@@ -487,15 +596,20 @@ export async function* spawnCli(
       await Promise.race([closePromise, new Promise<void>((r) => setTimeout(r, SEMANTIC_COMPLETION_GRACE_MS).unref())]);
     }
 
-    if (exitCode === 0 && exitSignal === null && stderrBuffer.trim()) {
-      log.debug(
-        {
-          command: options.command,
-          hadNdjsonEvent: firstEventAt !== null,
-          stderr: stderrBuffer.trim().slice(-1000),
-        },
-        'CLI stderr on successful exit',
-      );
+    // F212 AC-A7 / OQ-2 (砚砚 review BLOCKED P1-1): successful exit stderr also gated by
+    // LOG_CLI_STDERR + sanitized via shared helper. Previously this branch wrote raw stderr unconditionally.
+    if (exitCode === 0 && exitSignal === null) {
+      const stderrForLog = formatCliStderrForLog(stderrBuffer);
+      if (stderrForLog) {
+        log.debug(
+          {
+            command: options.command,
+            hadNdjsonEvent: firstEventAt !== null,
+            stderr: stderrForLog,
+          },
+          'CLI stderr on successful exit (LOG_CLI_STDERR=1)',
+        );
+      }
     }
 
     if (plainTextResult) {
@@ -516,36 +630,66 @@ export async function* spawnCli(
     // NDJSON events, the CLI output is fine — suppress the spurious error.
     const isWindowsLibuvCrash = process.platform === 'win32' && exitCode === 3221226505 && semanticDone;
     if (!semanticDone && !killed && !isWindowsLibuvCrash && (exitCode !== 0 || exitSignal !== null)) {
-      const reasonCode = classifyKnownCliStderr(stderrBuffer);
-      // Log stderr for debugging (never expose to users — may contain thinking/traces)
-      if (stderrBuffer.trim()) {
-        log.error({ command: options.command, stderr: stderrBuffer.trim().slice(-1000) }, 'CLI stderr (debug only)');
+      // F212 AC-A1 + AC-A8: build structured diagnostics from BOTH stderr and stream error events.
+      // Stream errors (NDJSON `{type:"error"}`) often carry the real semantic (Codex code 1 case).
+      const rawText = [...streamErrorTexts, stderrBuffer].filter(Boolean).join('\n');
+      const cliDiagnostics: CliDiagnostics = buildCliDiagnostics({
+        rawText,
+        structuredErrorText: structuredErrorTexts.filter(Boolean).join('\n'),
+        debugRef: {
+          command: options.command,
+          exitCode,
+          signal: exitSignal,
+          ...(options.invocationId ? { invocationId: options.invocationId } : {}),
+        },
+      });
+      // F212 AC-A7 + OQ-2: stderr log gated + sanitized via shared helper.
+      const stderrForLog = formatCliStderrForLog(stderrBuffer);
+      if (stderrForLog) {
+        log.error(
+          { command: options.command, stderr: stderrForLog, reasonCode: cliDiagnostics.reasonCode },
+          'CLI stderr (LOG_CLI_STDERR=1)',
+        );
       }
       yield {
         __cliError: true,
         exitCode,
         signal: exitSignal,
-        // Sanitized message — no raw stderr exposed to users
+        // AC-A9 红线: message is humanized only — no raw stderr exposed
         message: `CLI 异常退出 (code: ${exitCode ?? 'null'}, signal: ${exitSignal ?? 'none'})`,
         command: options.command,
-        ...(reasonCode ? { reasonCode } : {}),
+        ...(cliDiagnostics.reasonCode ? { reasonCode: cliDiagnostics.reasonCode } : {}),
+        cliDiagnostics,
       };
     }
 
     // Yield timeout error (distinct from user cancel which stays silent)
     if (timedOut) {
-      // Log stderr for debugging (never expose to users)
-      if (stderrBuffer.trim()) {
+      // F212 AC-A1: include cliDiagnostics on timeout too (network timeout etc. often classifiable)
+      const rawText = [...streamErrorTexts, stderrBuffer].filter(Boolean).join('\n');
+      const cliDiagnostics: CliDiagnostics = buildCliDiagnostics({
+        rawText,
+        structuredErrorText: structuredErrorTexts.filter(Boolean).join('\n'),
+        debugRef: {
+          command: options.command,
+          exitCode,
+          signal: exitSignal,
+          ...(options.invocationId ? { invocationId: options.invocationId } : {}),
+        },
+      });
+      // F212 AC-A7: gated + sanitized stderr log via shared helper.
+      const stderrForLog = formatCliStderrForLog(stderrBuffer);
+      if (stderrForLog) {
         log.error(
-          { command: options.command, stderr: stderrBuffer.trim().slice(-1000) },
-          'CLI stderr on timeout (debug only)',
+          { command: options.command, stderr: stderrForLog, reasonCode: cliDiagnostics.reasonCode },
+          'CLI stderr on timeout (LOG_CLI_STDERR=1)',
         );
       }
       const stallWarningMs = probe?.config.stallWarningMs;
       yield {
         __cliTimeout: true,
         timeoutMs: stallKilled && stallWarningMs ? stallWarningMs : timeoutMs,
-        // Sanitized message — no raw stderr exposed to users
+        // AC-A9 红线: humanized only, no raw stderr
         message: stallKilled
           ? `CLI idle-silent 超时 (${Math.round((stallWarningMs ?? timeoutMs) / 1000)}s — stall auto-kill)`
           : `CLI 响应超时 (${Math.round(timeoutMs / 1000)}s)`,
@@ -560,6 +704,7 @@ export async function* spawnCli(
         ...(options.invocationId ? { invocationId: options.invocationId } : {}),
         ...(options.cliSessionId ? { cliSessionId: options.cliSessionId } : {}),
         ...(options.rawArchivePath ? { rawArchivePath: options.rawArchivePath } : {}),
+        cliDiagnostics,
       };
     }
   } finally {
@@ -606,6 +751,8 @@ export function isCliError(value: unknown): value is {
   message: string;
   command: string;
   reasonCode?: CliErrorReasonCode;
+  /** F212 Phase A: structured diagnostics (added on every emit; existing consumers safe to ignore) */
+  cliDiagnostics?: CliDiagnostics;
 } {
   return (
     typeof value === 'object' &&
@@ -642,6 +789,8 @@ export function isCliTimeout(value: unknown): value is {
   cliSessionId?: string;
   invocationId?: string;
   rawArchivePath?: string;
+  // F212 Phase A: structured CLI diagnostics on timeout events (mirrors __cliError shape)
+  cliDiagnostics?: CliDiagnostics;
 } {
   return (
     typeof value === 'object' &&
@@ -676,7 +825,7 @@ function defaultSpawn(
   options: {
     cwd?: string | undefined;
     env?: NodeJS.ProcessEnv | undefined;
-    stdio: ['ignore', 'pipe', 'pipe'];
+    stdio: ['ignore' | 'pipe', 'pipe', 'pipe'];
   },
 ): ChildProcessLike {
   if (IS_WINDOWS) {

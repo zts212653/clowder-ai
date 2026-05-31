@@ -59,9 +59,21 @@ async function main(): Promise<void> {
 
   const child = spawn(command, args, {
     detached: !IS_WINDOWS,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    // Incident 2026-05-29 P1 (cloud codex review): stdin must be 'pipe' so the
+    // supervisor can forward its own stdin (the prompt written by spawnCli) to the
+    // supervised child. Previously 'ignore' → stdin-backed prompts (codex `-- -`)
+    // reached the supervisor but never the real CLI → empty prompt in production.
+    stdio: ['pipe', 'pipe', 'pipe'],
   });
 
+  // Forward supervisor stdin → child stdin (prompt delivery). When spawnCli did not
+  // provide stdinInput, the supervisor's own stdin is /dev/null → child sees EOF
+  // (harmless for argv-prompt CLIs like Claude/Gemini). EPIPE guard: child may exit
+  // before consuming all input.
+  if (child.stdin) {
+    child.stdin.on('error', () => {});
+    process.stdin.pipe(child.stdin);
+  }
   child.stdout?.pipe(process.stdout);
   child.stderr?.pipe(process.stderr);
 

@@ -21,6 +21,12 @@ export const RUNTIME_SESSION_DRAIN_RESULTS = [
 ] as const;
 export type RuntimeSessionDrainResult = (typeof RUNTIME_SESSION_DRAIN_RESULTS)[number];
 
+export const RUNTIME_SESSION_UNEXPECTED_SWITCH_REASONS = [
+  'missing_previous_runtime_session_id',
+  'mismatched_previous_runtime_session_id',
+] as const;
+export type RuntimeSessionUnexpectedSwitchReason = (typeof RUNTIME_SESSION_UNEXPECTED_SWITCH_REASONS)[number];
+
 export const RUNTIME_IDENTITY_SOURCES = [
   'session_init',
   'trajectory',
@@ -49,6 +55,37 @@ export interface RuntimeSessionLifecycle {
   retryCount?: number;
   lastRetryAt?: number;
   lastFailureReason?: string;
+  unexpectedRuntimeSessionSwitch?: RuntimeSessionUnexpectedRuntimeSessionSwitch;
+}
+
+export interface RuntimeSessionUnexpectedRuntimeSessionSwitch {
+  detectedAt: number;
+  previousSessionId: string;
+  previousRuntimeSessionId: string;
+  currentRuntimeSessionId: string;
+  declaredPreviousRuntimeSessionId?: string;
+  reason: RuntimeSessionUnexpectedSwitchReason;
+}
+
+export interface RuntimeSessionExternalRegistrationProvenance {
+  source: 'antigravity-ide-direct';
+  agentKeyId: string;
+  registeredAt: number;
+  ideWindowId?: string;
+  workspacePath?: string;
+  runtimeUrl?: string;
+  note?: string;
+}
+
+export type RuntimeSessionExternalRegistrationBinding =
+  | { mode: 'orphan_anchor'; anchorThreadId: string }
+  | { mode: 'thread'; threadId: string; requestedBy: 'agent_key' };
+
+export interface RuntimeSessionExternalRegistrationState {
+  binding: RuntimeSessionExternalRegistrationBinding;
+  provenance: RuntimeSessionExternalRegistrationProvenance;
+  title?: string;
+  clientRegistrationId?: string;
 }
 
 export interface RuntimeSessionMetadata {
@@ -62,6 +99,7 @@ export interface RuntimeSessionMetadata {
   surface: RuntimeSessionSurface;
   identityHistory: RuntimeIdentityHistoryEntry[];
   lifecycle: RuntimeSessionLifecycle;
+  externalRegistration?: RuntimeSessionExternalRegistrationState;
 }
 
 export function normalizeRuntimeSessionMetadata(input: unknown): RuntimeSessionMetadata {
@@ -83,6 +121,7 @@ export function normalizeRuntimeSessionMetadata(input: unknown): RuntimeSessionM
     surface: requireOneOf(record.surface, RUNTIME_SESSION_SURFACES, 'surface'),
     identityHistory,
     lifecycle,
+    ...optionalExternalRegistration(record.externalRegistration),
   };
 }
 
@@ -129,6 +168,35 @@ function normalizeLifecycle(input: Record<string, unknown>): RuntimeSessionLifec
     ...optionalNumberField(input.retryCount, 'lifecycle.retryCount'),
     ...optionalNumberField(input.lastRetryAt, 'lifecycle.lastRetryAt'),
     ...optionalStringField(input.lastFailureReason, 'lifecycle.lastFailureReason'),
+    ...optionalUnexpectedRuntimeSessionSwitch(input.unexpectedRuntimeSessionSwitch),
+  };
+}
+
+function normalizeUnexpectedRuntimeSessionSwitch(input: unknown): RuntimeSessionUnexpectedRuntimeSessionSwitch {
+  const record = requireRecord(input, 'runtime session unexpected switch');
+  return {
+    detectedAt: requireFiniteNumber(record.detectedAt, 'unexpectedRuntimeSessionSwitch.detectedAt'),
+    previousSessionId: requireNonEmptyString(
+      record.previousSessionId,
+      'unexpectedRuntimeSessionSwitch.previousSessionId',
+    ),
+    previousRuntimeSessionId: requireNonEmptyString(
+      record.previousRuntimeSessionId,
+      'unexpectedRuntimeSessionSwitch.previousRuntimeSessionId',
+    ),
+    currentRuntimeSessionId: requireNonEmptyString(
+      record.currentRuntimeSessionId,
+      'unexpectedRuntimeSessionSwitch.currentRuntimeSessionId',
+    ),
+    ...optionalStringField(
+      record.declaredPreviousRuntimeSessionId,
+      'unexpectedRuntimeSessionSwitch.declaredPreviousRuntimeSessionId',
+    ),
+    reason: requireOneOf(
+      record.reason,
+      RUNTIME_SESSION_UNEXPECTED_SWITCH_REASONS,
+      'unexpectedRuntimeSessionSwitch.reason',
+    ),
   };
 }
 
@@ -142,6 +210,52 @@ function normalizeIdentityHistoryEntry(input: unknown): RuntimeIdentityHistoryEn
     from: requireFiniteNumber(record.from, 'identity.from'),
     ...optionalNumberField(record.to, 'identity.to'),
     source: requireOneOf(record.source, RUNTIME_IDENTITY_SOURCES, 'identity.source'),
+  };
+}
+
+function normalizeExternalRegistration(input: unknown): RuntimeSessionExternalRegistrationState {
+  const record = requireRecord(input, 'runtime session external registration');
+  return {
+    binding: normalizeExternalRegistrationBinding(record.binding),
+    provenance: normalizeExternalRegistrationProvenance(record.provenance),
+    ...optionalStringField(record.title, 'externalRegistration.title'),
+    ...optionalStringField(record.clientRegistrationId, 'externalRegistration.clientRegistrationId'),
+  };
+}
+
+function normalizeExternalRegistrationBinding(input: unknown): RuntimeSessionExternalRegistrationBinding {
+  const record = requireRecord(input, 'runtime session external registration binding');
+  const mode = requireNonEmptyString(record.mode, 'externalRegistration.binding.mode');
+  if (mode === 'orphan_anchor') {
+    return {
+      mode,
+      anchorThreadId: requireNonEmptyString(record.anchorThreadId, 'externalRegistration.binding.anchorThreadId'),
+    };
+  }
+  if (mode === 'thread') {
+    return {
+      mode,
+      threadId: requireNonEmptyString(record.threadId, 'externalRegistration.binding.threadId'),
+      requestedBy: 'agent_key',
+    };
+  }
+  throw new Error('invalid externalRegistration.binding.mode');
+}
+
+function normalizeExternalRegistrationProvenance(input: unknown): RuntimeSessionExternalRegistrationProvenance {
+  const record = requireRecord(input, 'runtime session external registration provenance');
+  const source = requireNonEmptyString(record.source, 'externalRegistration.provenance.source');
+  if (source !== 'antigravity-ide-direct') {
+    throw new Error('invalid externalRegistration.provenance.source');
+  }
+  return {
+    source,
+    agentKeyId: requireNonEmptyString(record.agentKeyId, 'externalRegistration.provenance.agentKeyId'),
+    registeredAt: requireFiniteNumber(record.registeredAt, 'externalRegistration.provenance.registeredAt'),
+    ...optionalStringField(record.ideWindowId, 'externalRegistration.provenance.ideWindowId'),
+    ...optionalStringField(record.workspacePath, 'externalRegistration.provenance.workspacePath'),
+    ...optionalStringField(record.runtimeUrl, 'externalRegistration.provenance.runtimeUrl'),
+    ...optionalStringField(record.note, 'externalRegistration.provenance.note'),
   };
 }
 
@@ -198,6 +312,18 @@ function optionalOneOfField<const T extends readonly string[]>(
 ): Record<string, T[number]> {
   if (value === undefined) return {};
   return { [lastPathSegment(name)]: requireOneOf(value, allowed, name) };
+}
+
+function optionalExternalRegistration(value: unknown): Record<string, RuntimeSessionExternalRegistrationState> {
+  if (value === undefined) return {};
+  return { externalRegistration: normalizeExternalRegistration(value) };
+}
+
+function optionalUnexpectedRuntimeSessionSwitch(
+  value: unknown,
+): Record<string, RuntimeSessionUnexpectedRuntimeSessionSwitch> {
+  if (value === undefined) return {};
+  return { unexpectedRuntimeSessionSwitch: normalizeUnexpectedRuntimeSessionSwitch(value) };
 }
 
 function lastPathSegment(path: string): string {

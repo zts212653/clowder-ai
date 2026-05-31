@@ -12,6 +12,7 @@
 
 import type { CatId } from '@cat-cafe/shared';
 import { estimateTokens } from '../../../../utils/token-counter.js';
+import { formatPromptTime } from '../format-time.js';
 import type { ISessionChainStore } from '../stores/ports/SessionChainStore.js';
 import type { ITaskStore } from '../stores/ports/TaskStore.js';
 import type { IThreadStore } from '../stores/ports/ThreadStore.js';
@@ -275,10 +276,10 @@ function formatDigest(digest: ExtractiveDigestV1): string {
 
   // Time range
   if (digest.time) {
-    const start = new Date(digest.time.createdAt);
-    const end = new Date(digest.time.sealedAt);
     const durationMin = Math.round((digest.time.sealedAt - digest.time.createdAt) / 60000);
-    lines.push(`Duration: ${formatTimeShort(start)} → ${formatTimeShort(end)} (${durationMin}min)`);
+    lines.push(
+      `Duration: ${formatPromptTime(digest.time.createdAt)} → ${formatPromptTime(digest.time.sealedAt)} (${durationMin}min)`,
+    );
   }
 
   // Tools used
@@ -322,12 +323,6 @@ function formatDigest(digest: ExtractiveDigestV1): string {
   }
 
   return lines.join('\n');
-}
-
-function formatTimeShort(d: Date): string {
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  return `${hh}:${mm}`;
 }
 
 function formatInlineMessage(text: string): string {

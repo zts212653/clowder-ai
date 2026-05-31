@@ -191,7 +191,6 @@ const CAT_CAFE_MCP_SERVER_ENTRIES = [
   ['cat-cafe-signals', 'signals.js'],
   ['cat-cafe-limb', 'limb.js'],
 ] as const;
-const CAT_CAFE_LEGACY_STATIC_SERVER_NAME = 'cat-cafe';
 const CAT_CAFE_MCP_CALLBACK_ENV_KEYS = [
   'CAT_CAFE_API_URL',
   'CAT_CAFE_INVOCATION_ID',
@@ -252,9 +251,32 @@ function buildCatCafeMcpConfigArgs(workingDirectory?: string, callbackEnv?: Reco
   const args: string[] = [];
   const allowedWorkspaceDirs = resolveAllowedWorkspaceDirsForMcp(workingDirectory);
 
-  // Codex may still load a user/project-managed legacy `cat-cafe` server from
-  // static config. Overlay env only; split servers remain the only auto-provisioned ones.
-  pushCatCafeMcpEnvConfig(args, CAT_CAFE_LEGACY_STATIC_SERVER_NAME, allowedWorkspaceDirs, callbackEnv);
+  // F213 (2026-05-26, post 砚砚 review P2 fix): L4 per-invocation dummy disabled
+  // override for the legacy `cat-cafe` server. L5 startup cleanup
+  // (`mcp-config-adapters.ts` writers + `deprecated-managed-servers.ts` registry)
+  // only writes to `<projectRoot>/.codex/config.toml`, so legacy entries in
+  // user-level (`~/.codex/config.toml`), `$CODEX_HOME/config.toml`, or system
+  // (`/etc/codex/config.toml`) config files survive cleanup. Without this L4
+  // override, codex would load those surviving legacy entries with no
+  // callback env → fail closed.
+  //
+  // Dummy disabled form (echo + legacy-shim + enabled=false) verified by 砚砚
+  // strict-npm-Codex reproducer: passes config parse (complete transport
+  // definition, not partial) + codex skips server startup (enabled=false).
+  // Per-invocation `--config` is the highest priority override, beating any
+  // legacy entry from any source. This is L4's runtime safety net for the
+  // case L5 cleanup cannot prove ownership.
+  //
+  // See ADR-036 amendment 2026-05-26 + `docs/features/F213-stale-mcp-config-cleanup.md`
+  // + `docs/discussions/2026-05-26-codex-mcp-legacy-deprecation/README.md` §6.2.
+  args.push(
+    '--config',
+    'mcp_servers.cat-cafe.command="echo"',
+    '--config',
+    `mcp_servers.cat-cafe.args=[${toTomlString('legacy-shim')}]`,
+    '--config',
+    'mcp_servers.cat-cafe.enabled=false',
+  );
 
   for (const [serverName, entrypoint] of CAT_CAFE_MCP_SERVER_ENTRIES) {
     const serverPath = resolve(mcpDistDir, entrypoint);
@@ -464,7 +486,11 @@ export class CodexAgentService implements AgentService {
     // --add-dir .git: 允许写入 .git/ 目录（index.lock、objects、refs），解锁 git commit
     // 注意：旧 session resume 时沿用创建时的沙箱参数，不会带 --add-dir。
     // 这是预期行为——新建会话即可获得 .git 写入权限。
-    const promptArgs = ['--', effectivePrompt];
+    // Incident 2026-05-29 (cross-thread-context-contamination): prompt 正文经 stdin
+    // 传入（见下方 cliOpts.stdinInput），绝不进 argv —— 否则 `ps -o command=` /
+    // /proc/<pid>/cmdline 会把完整对话历史（含跨 thread/猫/用户内容）暴露给任何
+    // 并发进程。'--' 结束选项解析，'-' 让 codex 从 stdin 读取 PROMPT。
+    const promptArgs = ['--', '-'];
 
     // Dedup: skip system --config/--flag pairs that the user explicitly overrides (#567).
     const dedup = (src: string[]): string[] => {
@@ -595,6 +621,9 @@ export class CodexAgentService implements AgentService {
       const cliOpts = {
         command: codexCommand,
         args,
+        // Incident 2026-05-29 (cross-thread-context-contamination): prompt 正文经 stdin
+        // 传入，不进 argv —— 防 `ps -o command=` / /proc/<pid>/cmdline 跨进程泄露。
+        stdinInput: effectivePrompt,
         ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
         env: codexEnv,
         ...(options?.signal ? { signal: options.signal } : {}),
@@ -655,7 +684,8 @@ export class CodexAgentService implements AgentService {
             type: 'error',
             catId: this.catId,
             error: `缅因猫 CLI 响应超时 (${Math.round(event.timeoutMs / 1000)}s${event.firstEventAt == null ? ', 未收到首帧' : ''})`,
-            metadata,
+            // F212 Phase A (云端 codex P2): timeout cliDiagnostics 也透传到 metadata.
+            metadata: event.cliDiagnostics ? { ...metadata, cliDiagnostics: event.cliDiagnostics } : metadata,
             timestamp: Date.now(),
           };
           continue;
@@ -692,11 +722,12 @@ export class CodexAgentService implements AgentService {
             continue;
           }
           const base = formatCliExitError('Codex CLI', event);
+          // F212 Phase A: forward cliDiagnostics on metadata for frontend folded panel (Phase B).
           yield {
             type: 'error',
             catId: this.catId,
             error: withRecentDiagnostics(base, recentStreamErrors),
-            metadata,
+            metadata: event.cliDiagnostics ? { ...metadata, cliDiagnostics: event.cliDiagnostics } : metadata,
             timestamp: Date.now(),
           };
           continue;
@@ -789,18 +820,24 @@ export class CodexAgentService implements AgentService {
             usage.contextUsedTokens = snapshot.contextUsedTokens;
             usage.contextWindowSize = snapshot.contextWindowTokens;
             usage.lastTurnInputTokens = snapshot.contextUsedTokens;
+            // Codex turn.completed usage can be CLI-session cumulative. When
+            // token_count is available, prefer last_token_usage for this turn.
+            // For Codex, each Cat Cafe invocation is one CLI turn, so
+            // last_token_usage is the invocation input, not a session total.
+            usage.inputTokens = snapshot.contextUsedTokens;
 
             if (snapshot.contextResetsAtMs != null) {
               usage.contextResetsAtMs = snapshot.contextResetsAtMs;
             }
-            if (usage.inputTokens == null && snapshot.totalInputTokens != null) {
-              usage.inputTokens = snapshot.totalInputTokens;
+            if (snapshot.lastCachedInputTokens != null) {
+              usage.cacheReadTokens = snapshot.lastCachedInputTokens;
+            } else {
+              delete usage.cacheReadTokens;
             }
-            if (usage.cacheReadTokens == null && snapshot.totalCachedInputTokens != null) {
-              usage.cacheReadTokens = snapshot.totalCachedInputTokens;
-            }
-            if (usage.outputTokens == null && snapshot.totalOutputTokens != null) {
-              usage.outputTokens = snapshot.totalOutputTokens;
+            if (snapshot.lastOutputTokens != null) {
+              usage.outputTokens = snapshot.lastOutputTokens;
+            } else {
+              delete usage.outputTokens;
             }
 
             metadata.usage = usage;

@@ -5,6 +5,7 @@
 
 import type { CatId, MessageContent, ReplyPreview } from '@cat-cafe/shared';
 import type { Span } from '@opentelemetry/api';
+import type { CliDiagnostics } from '../../../utils/cli-diagnostics.js';
 import type { CliSpawnOptions } from '../../../utils/cli-types.js';
 import type { AntigravitySessionLifecycle } from './agents/providers/antigravity/antigravity-runtime-lifecycle.js';
 
@@ -89,6 +90,10 @@ export interface MessageMetadata {
     transient: boolean;
     rawReason: string;
   };
+  /** F212 Phase A: structured CLI error diagnostics (reasonCode + sanitized excerpt + debugRef).
+   *  Populated by providers when isCliError/isCliTimeout fires, consumed by Phase B folded panel.
+   *  Carries `__cliError.cliDiagnostics` / `__cliTimeout.cliDiagnostics` from cli-spawn. */
+  cliDiagnostics?: CliDiagnostics;
 }
 
 /**

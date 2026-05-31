@@ -1,12 +1,69 @@
 import type { CatData } from '@/hooks/useCatData';
+import { catColorVar } from '@/lib/cat-slug';
+import { GROUP_MENTION_COLOR } from '@/lib/color-defaults';
 
 export interface CatOption {
   id: string;
   label: string;
   desc: string;
   insert: string;
-  color: string; // hex color (for inline style)
+  color: string; // CSS color (var or hex) for inline style
   avatar: string;
+  /** Group mention (e.g. @thread, @all) — renders group icon instead of cat avatar */
+  isGroup?: boolean;
+}
+
+/** Static group mention shortcuts — shown at top of autocomplete.
+ *  Aligned with backend AgentRouter.parseGroupMentions patterns. */
+const STATIC_GROUP_MENTIONS: CatOption[] = [
+  {
+    id: 'thread',
+    label: '@thread',
+    desc: '本帖全体参与猫猫',
+    insert: '@thread ',
+    color: GROUP_MENTION_COLOR,
+    avatar: '',
+    isGroup: true,
+  },
+  {
+    id: 'all',
+    label: '@all',
+    desc: '全体猫猫',
+    insert: '@all ',
+    color: GROUP_MENTION_COLOR,
+    avatar: '',
+    isGroup: true,
+  },
+];
+
+/** Build breed-scoped group mention options (e.g. @全体布偶猫) from cat data.
+ *  Only generates options for breeds with 2+ available cats. */
+function buildBreedGroupOptions(cats: CatData[]): CatOption[] {
+  const breedMap = new Map<string, { displayName: string; color: string; count: number }>();
+  for (const cat of cats) {
+    if (!cat.breedId || !isAvailable(cat)) continue;
+    const existing = breedMap.get(cat.breedId);
+    if (existing) {
+      existing.count++;
+    } else {
+      breedMap.set(cat.breedId, {
+        displayName: cat.breedDisplayName ?? cat.displayName,
+        color: catColorVar(cat.id, 'primary'),
+        count: 1,
+      });
+    }
+  }
+  return [...breedMap.entries()]
+    .filter(([, info]) => info.count >= 2)
+    .map(([breedId, info]) => ({
+      id: `breed:${breedId}`,
+      label: `@全体${info.displayName}`,
+      desc: `${info.displayName}全体 (${info.count}只)`,
+      insert: `@全体${info.displayName} `,
+      color: info.color,
+      avatar: '',
+      isGroup: true,
+    }));
 }
 
 /** Build @mention autocomplete options from dynamic cat data.
@@ -21,16 +78,18 @@ function isAvailable(cat: CatData): boolean {
 }
 
 export function buildCatOptions(cats: CatData[]): CatOption[] {
-  return cats
+  const breedGroups = buildBreedGroupOptions(cats);
+  const individuals = cats
     .filter((cat) => cat.mentionPatterns.length > 0 && isAvailable(cat))
     .map((cat) => ({
       id: cat.id,
       label: formatCatLabel(cat),
       desc: cat.roleDescription,
       insert: `@${cat.mentionPatterns[0].replace(/^@/, '')} `,
-      color: cat.color.primary,
+      color: catColorVar(cat.id, 'primary'),
       avatar: cat.avatar,
     }));
+  return [...STATIC_GROUP_MENTIONS, ...breedGroups, ...individuals];
 }
 
 /** Build whisper target options from dynamic cat data.

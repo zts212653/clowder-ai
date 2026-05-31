@@ -126,4 +126,108 @@ describe('scheduler reply userid backfill', { skip: redisIsolationSkipReason(RED
     const repairedInvocation = await invocationRecordStore.get(createResult.invocationId);
     assert.equal(repairedInvocation.userId, 'real-user-123');
   });
+
+  it('backfills scheduler-triggered stream replies to the real thread owner (#796)', async () => {
+    const thread = await threadStore.create('real-user-456', 'scheduler stream backfill');
+    const now = Date.now();
+
+    const triggerMessage = await messageStore.append({
+      userId: 'scheduler',
+      catId: 'system',
+      content: '[定时任务] eval:a2a daily run',
+      mentions: [],
+      timestamp: now,
+      threadId: thread.id,
+      origin: 'callback',
+    });
+
+    const hiddenStreamReply = await messageStore.append({
+      userId: 'scheduler',
+      catId: 'codex',
+      content: 'eval:a2a daily eval result from route-serial stream',
+      mentions: [],
+      timestamp: now + 1,
+      threadId: thread.id,
+      origin: 'stream',
+    });
+
+    const before = await messageStore.getByThread(thread.id, 50, 'real-user-456');
+    assert.deepEqual(
+      before.map((m) => m.id),
+      [triggerMessage.id],
+      'before backfill the default owner view only sees the scheduler trigger',
+    );
+
+    const result = await runSchedulerReplyUserIdBackfill({
+      redis,
+      messageStore,
+      invocationRecordStore,
+      threadStore,
+    });
+
+    assert.equal(result.repairedMessages, 1);
+
+    const after = await messageStore.getByThread(thread.id, 50, 'real-user-456');
+    assert.deepEqual(
+      after.map((m) => m.id),
+      [triggerMessage.id, hiddenStreamReply.id],
+      'after backfill the owner view sees the stream-origin scheduler reply',
+    );
+    assert.equal(after[1].userId, 'real-user-456');
+    assert.equal(after[1].origin, 'stream');
+  });
+
+  it('uses the configured owner for eval-domain system threads when backfilling stream replies', async () => {
+    const threadId = 'thread_eval_a2a';
+    const ownerUserId = 'real-user-789';
+    await threadStore.ensureThread(threadId, 'A2A Eval');
+    await threadStore.updateSystemKind(threadId, 'eval_domain');
+    await threadStore.indexForUser(threadId, ownerUserId);
+
+    const now = Date.now();
+    const triggerMessage = await messageStore.append({
+      userId: 'scheduler',
+      catId: 'system',
+      content: '[定时任务] eval:a2a daily run',
+      mentions: [],
+      timestamp: now,
+      threadId,
+      origin: 'callback',
+    });
+
+    const hiddenStreamReply = await messageStore.append({
+      userId: 'scheduler',
+      catId: 'codex',
+      content: 'eval:a2a result persisted under scheduler scope',
+      mentions: [],
+      timestamp: now + 1,
+      threadId,
+      origin: 'stream',
+    });
+
+    const before = await messageStore.getByThread(threadId, 50, ownerUserId);
+    assert.deepEqual(
+      before.map((m) => m.id),
+      [triggerMessage.id],
+      'before backfill the configured owner cannot see the scheduler-scoped stream reply',
+    );
+
+    const result = await runSchedulerReplyUserIdBackfill({
+      redis,
+      messageStore,
+      invocationRecordStore,
+      threadStore,
+      defaultUserId: ownerUserId,
+    });
+
+    assert.equal(result.repairedMessages, 1);
+
+    const after = await messageStore.getByThread(threadId, 50, ownerUserId);
+    assert.deepEqual(
+      after.map((m) => m.id),
+      [triggerMessage.id, hiddenStreamReply.id],
+      'after backfill the configured owner sees the eval-domain stream reply',
+    );
+    assert.equal(after[1].userId, ownerUserId);
+  });
 });

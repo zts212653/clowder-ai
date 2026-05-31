@@ -30,6 +30,8 @@ const EXPECTED_TOOLS = [
   'cat_cafe_generate_document',
   'cat_cafe_get_rich_block_rules',
   'cat_cafe_register_pr_tracking',
+  // F211 Phase B: IDE-direct external runtime session registration
+  'cat_cafe_register_external_runtime_session',
   // Guide tools (cat_cafe_guide_resolve legacy alias removed in F193 Phase D AC-D2)
   'cat_cafe_update_guide_state',
   'cat_cafe_get_available_guides',
@@ -47,6 +49,8 @@ const EXPECTED_TOOLS = [
   // Bootcamp tools (F087)
   'cat_cafe_update_bootcamp_state',
   'cat_cafe_bootcamp_env_check',
+  // F128: Cat-initiated thread proposal
+  'cat_cafe_propose_thread',
   // Callback-scoped memory tools
   'cat_cafe_retain_memory_callback',
   // Direct evidence tools (cat_cafe_reflect removed in F193 Phase D AC-D1)
@@ -86,6 +90,8 @@ const EXPECTED_TOOLS = [
   'cat_cafe_read_session_events',
   'cat_cafe_read_session_digest',
   'cat_cafe_read_invocation_detail',
+  'cat_cafe_list_external_runtime_sessions',
+  'cat_cafe_read_external_runtime_session',
   // Limb tools
   'limb_list_available',
   'limb_invoke',
@@ -132,6 +138,8 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_request_permission',
   'cat_cafe_check_permission_status',
   'cat_cafe_register_pr_tracking',
+  // F211 Phase B: IDE-direct external runtime session registration
+  'cat_cafe_register_external_runtime_session',
   // cat_cafe_guide_resolve legacy alias removed in F193 Phase D AC-D2
   'cat_cafe_update_guide_state',
   'cat_cafe_get_available_guides',
@@ -142,6 +150,8 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_start_vote',
   'cat_cafe_update_bootcamp_state',
   'cat_cafe_bootcamp_env_check',
+  // F128: Cat-initiated thread proposal
+  'cat_cafe_propose_thread',
   'cat_cafe_submit_game_action',
   // F139 Phase 3A: Schedule tools
   'cat_cafe_list_schedule_templates',
@@ -175,6 +185,8 @@ const EXPECTED_MEMORY_TOOLS = [
   'cat_cafe_read_session_events',
   'cat_cafe_read_session_digest',
   'cat_cafe_read_invocation_detail',
+  'cat_cafe_list_external_runtime_sessions',
+  'cat_cafe_read_external_runtime_session',
 ];
 
 const EXPECTED_SIGNAL_TOOLS = [
@@ -365,6 +377,7 @@ const KNOWN_WRITE_TOOLS = [
   'cat_cafe_generate_document',
   'cat_cafe_request_permission',
   'cat_cafe_register_pr_tracking',
+  'cat_cafe_register_external_runtime_session',
   'cat_cafe_update_workflow',
   'cat_cafe_start_vote',
   'cat_cafe_update_bootcamp_state',
@@ -406,6 +419,8 @@ const EXPECTED_READONLY_TOOLS = [
   'cat_cafe_read_session_events',
   'cat_cafe_read_session_digest',
   'cat_cafe_read_invocation_detail',
+  'cat_cafe_list_external_runtime_sessions',
+  'cat_cafe_read_external_runtime_session',
   'signal_list_inbox',
   'signal_get_article',
   'signal_search',

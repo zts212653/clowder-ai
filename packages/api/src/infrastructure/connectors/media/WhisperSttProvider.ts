@@ -1,6 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { ISttProvider, SttTranscribeRequest, SttTranscribeResult } from '@cat-cafe/shared';
+import { normalizeLoopbackUrl } from '../../../domains/services/loopback-url.js';
+import { getServiceConfig } from '../../../domains/services/service-config.js';
+import { getServiceManifest, resolveServiceEndpoint } from '../../../domains/services/service-manifest.js';
 
 export interface WhisperSttProviderOptions {
   baseUrl?: string;
@@ -9,16 +12,30 @@ export interface WhisperSttProviderOptions {
   _fetchFn?: typeof fetch;
 }
 
+function resolveWhisperBaseUrl(): string {
+  const service = getServiceManifest('whisper-stt');
+  if (!service) return process.env.WHISPER_URL ?? 'http://127.0.0.1:9876';
+  return resolveServiceEndpoint(service, process.env, getServiceConfig('whisper-stt')) ?? 'http://127.0.0.1:9876';
+}
+
 export class WhisperSttProvider implements ISttProvider {
   readonly id = 'whisper-local';
   readonly model: string;
-  private readonly baseUrl: string;
+  // Caller-supplied baseUrl is treated as an explicit override (mostly
+  // tests). When omitted, resolve on every transcribe so /reconfigure-driven
+  // port changes flow into the next request without restarting the API
+  // (codex P1 2026-05-25, outdated thread).
+  private readonly baseUrlOverride: string | undefined;
   private readonly fetchFn: typeof fetch;
 
   constructor(opts?: WhisperSttProviderOptions) {
-    this.baseUrl = opts?.baseUrl ?? process.env.WHISPER_URL ?? 'http://localhost:9876';
+    this.baseUrlOverride = opts?.baseUrl ? normalizeLoopbackUrl(opts.baseUrl) : undefined;
     this.model = opts?.model ?? 'whisper-large-v3';
     this.fetchFn = opts?._fetchFn ?? fetch;
+  }
+
+  private resolveBaseUrl(): string {
+    return this.baseUrlOverride ?? normalizeLoopbackUrl(resolveWhisperBaseUrl());
   }
 
   async transcribe(request: SttTranscribeRequest): Promise<SttTranscribeResult> {
@@ -31,7 +48,7 @@ export class WhisperSttProvider implements ISttProvider {
     formData.append('model', this.model);
     if (request.language) formData.append('language', request.language);
 
-    const response = await this.fetchFn(`${this.baseUrl}/v1/audio/transcriptions`, {
+    const response = await this.fetchFn(`${this.resolveBaseUrl()}/v1/audio/transcriptions`, {
       method: 'POST',
       body: formData,
     });

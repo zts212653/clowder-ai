@@ -16,6 +16,7 @@ import type { RedisClient } from '@cat-cafe/shared/utils';
 import type {
   BootcampStateV1,
   ConnectorHubStateV1,
+  ExternalRuntimeAnchorRuntime,
   IThreadStore,
   MentionActionabilityMode,
   Thread,
@@ -25,7 +26,7 @@ import type {
   ThreadRoutingPolicyV1,
   VotingStateV1,
 } from '../ports/ThreadStore.js';
-import { DEFAULT_THREAD_ID } from '../ports/ThreadStore.js';
+import { buildExternalRuntimeAnchorThreadId, DEFAULT_THREAD_ID } from '../ports/ThreadStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import { ThreadKeys } from '../redis-keys/thread-keys.js';
 
@@ -157,7 +158,13 @@ export class RedisThreadStore implements IThreadStore {
     }
   }
 
-  async create(userId: string, title?: string, projectPath?: string): Promise<Thread> {
+  async create(
+    userId: string,
+    title?: string,
+    projectPath?: string,
+    parentThreadId?: string,
+    proposalAudit?: import('../ports/ThreadStore.js').ThreadProposalAudit,
+  ): Promise<Thread> {
     const now = Date.now();
     const thread: Thread = {
       id: generateThreadId(),
@@ -167,6 +174,15 @@ export class RedisThreadStore implements IThreadStore {
       participants: [],
       lastActiveAt: now,
       createdAt: now,
+      ...(parentThreadId ? { parentThreadId } : {}),
+      ...(proposalAudit
+        ? {
+            createdFromProposalId: proposalAudit.createdFromProposalId,
+            sourceThreadId: proposalAudit.sourceThreadId,
+            approvedBy: proposalAudit.approvedBy,
+            approvedAt: proposalAudit.approvedAt,
+          }
+        : {}),
     };
 
     const key = ThreadKeys.detail(thread.id);
@@ -178,6 +194,14 @@ export class RedisThreadStore implements IThreadStore {
     pipeline.zadd(ThreadKeys.userList(userId), String(now), thread.id);
     if (this.ttlSeconds !== null) {
       pipeline.expire(ThreadKeys.userList(userId), this.ttlSeconds);
+    }
+    // F128: Maintain parent→children secondary index
+    if (parentThreadId) {
+      const childrenKey = ThreadKeys.children(parentThreadId);
+      pipeline.zadd(childrenKey, String(now), thread.id);
+      if (this.ttlSeconds !== null) {
+        pipeline.expire(childrenKey, this.ttlSeconds);
+      }
     }
     await pipeline.exec();
 
@@ -208,6 +232,36 @@ export class RedisThreadStore implements IThreadStore {
     return thread;
   }
 
+  async ensureExternalRuntimeAnchorThread(runtime: ExternalRuntimeAnchorRuntime, userId: string): Promise<Thread> {
+    const threadId = buildExternalRuntimeAnchorThreadId(runtime, userId);
+    const key = ThreadKeys.detail(threadId);
+    const existingId = await this.redis.hget(key, 'id');
+    if (existingId) {
+      const data = await this.redis.hgetall(key);
+      return this.hydrateThread(data);
+    }
+
+    const now = Date.now();
+    const thread: Thread = {
+      id: threadId,
+      projectPath: `external-runtime:${runtime}`,
+      title: `External runtime: ${runtime}`,
+      createdBy: 'system',
+      participants: [],
+      lastActiveAt: now,
+      createdAt: now,
+      externalRuntimeAnchorState: {
+        v: 1,
+        runtime,
+        userId,
+        createdAt: now,
+      },
+    };
+
+    await this.redis.hset(key, this.serializeThread(thread));
+    return thread;
+  }
+
   async get(threadId: string): Promise<Thread | null> {
     const data = await this.redis.hgetall(ThreadKeys.detail(threadId));
     if (!data || !data.id) {
@@ -234,6 +288,7 @@ export class RedisThreadStore implements IThreadStore {
     const threads: Thread[] = [];
     for (const id of ids) {
       const thread = await this.get(id);
+      if (thread?.externalRuntimeAnchorState) continue;
       if (thread && !thread.deletedAt) threads.push(thread);
     }
 
@@ -514,6 +569,15 @@ export class RedisThreadStore implements IThreadStore {
     }
   }
 
+  async updateSystemKind(threadId: string, kind: 'connector_hub' | 'eval_domain' | null): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    if (kind === null) {
+      await this.deleteDetailFields(key, 'systemKind');
+    } else {
+      await this.setDetailFields(key, 'systemKind', kind);
+    }
+  }
+
   async updateConnectorHubState(threadId: string, state: ConnectorHubStateV1 | null): Promise<void> {
     const key = ThreadKeys.detail(threadId);
     if (state === null) {
@@ -571,6 +635,32 @@ export class RedisThreadStore implements IThreadStore {
     }
   }
 
+  /** F128: List child threads that have this thread as parentThreadId. Pipeline to avoid N+1. */
+  async getChildThreads(parentThreadId: string): Promise<Thread[]> {
+    const childIds = await this.redis.zrange(ThreadKeys.children(parentThreadId), 0, -1);
+    if (!childIds.length) return [];
+    // Pipeline: fetch all thread hashes + participant sets in one round-trip
+    const pipeline = this.redis.multi();
+    for (const id of childIds) {
+      pipeline.hgetall(ThreadKeys.detail(id));
+      pipeline.smembers(ThreadKeys.participants(id));
+    }
+    const results = await pipeline.exec();
+    if (!results) return [];
+    const children: Thread[] = [];
+    for (let i = 0; i < childIds.length; i++) {
+      const dataResult = results[i * 2];
+      const membersResult = results[i * 2 + 1];
+      if (!dataResult || dataResult[0]) continue; // error
+      const data = dataResult[1] as Record<string, string>;
+      if (!data || !data.id) continue;
+      const thread = this.hydrateThread(data);
+      thread.participants = ((membersResult?.[1] as string[]) ?? []) as import('@cat-cafe/shared').CatId[];
+      if (!thread.deletedAt) children.push(thread);
+    }
+    return children;
+  }
+
   /** F095 Phase D: Soft-delete — set deletedAt timestamp. */
   async softDelete(threadId: string): Promise<boolean> {
     if (threadId === DEFAULT_THREAD_ID) return false;
@@ -581,6 +671,11 @@ export class RedisThreadStore implements IThreadStore {
     const existingDeletedAt = await this.redis.hget(key, 'deletedAt');
     if (existingDeletedAt && parseInt(existingDeletedAt, 10) > 0) return false;
     await this.redis.hset(key, 'deletedAt', String(Date.now()));
+    // P3-4: Remove from parent's children index
+    const parentId = await this.redis.hget(key, 'parentThreadId');
+    if (parentId) {
+      await this.redis.zrem(ThreadKeys.children(parentId), threadId);
+    }
     await this.applyKeyRetention([key]);
     return true;
   }
@@ -593,8 +688,31 @@ export class RedisThreadStore implements IThreadStore {
     const existingDeletedAt = await this.redis.hget(key, 'deletedAt');
     if (!existingDeletedAt || parseInt(existingDeletedAt, 10) <= 0) return false;
     await this.redis.hset(key, 'deletedAt', '0');
+    // P2 (Codex review): softDelete strips the child from its parent's children ZSET; restore
+    // must put it back so getChildThreads() stays consistent after a soft-delete/restore cycle.
+    const [parentId, createdAt] = await Promise.all([
+      this.redis.hget(key, 'parentThreadId'),
+      this.redis.hget(key, 'createdAt'),
+    ]);
+    if (parentId) {
+      const score = createdAt && parseInt(createdAt, 10) > 0 ? createdAt : String(Date.now());
+      await this.redis.zadd(ThreadKeys.children(parentId), score, threadId);
+      if (this.ttlSeconds !== null) {
+        await this.redis.expire(ThreadKeys.children(parentId), this.ttlSeconds);
+      }
+    }
     await this.applyKeyRetention([key]);
     return true;
+  }
+
+  /** F192 cloud-review P1: Index a system thread into a user's sidebar list. */
+  async indexForUser(threadId: string, userId: string): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    const existing = await this.redis.hget(key, 'id');
+    if (!existing) return;
+    const lastActiveAt = (await this.redis.hget(key, 'lastActiveAt')) ?? String(Date.now());
+    await this.redis.zadd(ThreadKeys.userList(userId), lastActiveAt, threadId);
+    await this.applyKeyRetention([ThreadKeys.userList(userId)]);
   }
 
   /** F095 Phase D: List soft-deleted threads (trash bin). */
@@ -902,11 +1020,34 @@ export class RedisThreadStore implements IThreadStore {
     if (thread.bootcampState) {
       result.bootcampState = JSON.stringify(thread.bootcampState);
     }
+    // F128: Parent thread for orchestration tracking
+    if (thread.parentThreadId) {
+      result.parentThreadId = thread.parentThreadId;
+    }
+    // F128: Proposal audit metadata (only present on threads created via approve flow)
+    if (thread.createdFromProposalId) {
+      result.createdFromProposalId = thread.createdFromProposalId;
+    }
+    if (thread.sourceThreadId) {
+      result.sourceThreadId = thread.sourceThreadId;
+    }
+    if (thread.approvedBy) {
+      result.approvedBy = thread.approvedBy;
+    }
+    if (thread.approvedAt) {
+      result.approvedAt = String(thread.approvedAt);
+    }
     if (thread.firstRunQuestState) {
       result.firstRunQuestState = JSON.stringify(thread.firstRunQuestState);
     }
+    if (thread.systemKind) {
+      result.systemKind = thread.systemKind;
+    }
     if (thread.connectorHubState) {
       result.connectorHubState = JSON.stringify(thread.connectorHubState);
+    }
+    if (thread.externalRuntimeAnchorState) {
+      result.externalRuntimeAnchorState = JSON.stringify(thread.externalRuntimeAnchorState);
     }
     if (thread.preferredWorkspaceMode) {
       result.preferredWorkspaceMode = thread.preferredWorkspaceMode;
@@ -994,6 +1135,24 @@ export class RedisThreadStore implements IThreadStore {
         /* ignore malformed JSON */
       }
     }
+    // F128: Parent thread for orchestration tracking
+    if (data.parentThreadId) {
+      result.parentThreadId = data.parentThreadId;
+    }
+    // F128: Proposal audit metadata
+    if (data.createdFromProposalId) {
+      result.createdFromProposalId = data.createdFromProposalId;
+    }
+    if (data.sourceThreadId) {
+      result.sourceThreadId = data.sourceThreadId;
+    }
+    if (data.approvedBy) {
+      result.approvedBy = data.approvedBy;
+    }
+    const approvedAt = parseInt(data.approvedAt ?? '0', 10);
+    if (approvedAt > 0) {
+      result.approvedAt = approvedAt;
+    }
     if (data.firstRunQuestState) {
       try {
         const parsed = JSON.parse(data.firstRunQuestState);
@@ -1004,11 +1163,31 @@ export class RedisThreadStore implements IThreadStore {
         /* ignore malformed JSON */
       }
     }
+    if (data.systemKind && (data.systemKind === 'connector_hub' || data.systemKind === 'eval_domain')) {
+      result.systemKind = data.systemKind as 'connector_hub' | 'eval_domain';
+    }
     if (data.connectorHubState) {
       try {
         const parsed = JSON.parse(data.connectorHubState);
         if (parsed && typeof parsed === 'object' && parsed.v === 1) {
           result.connectorHubState = parsed as ConnectorHubStateV1;
+        }
+      } catch {
+        /* ignore malformed JSON */
+      }
+    }
+    if (data.externalRuntimeAnchorState) {
+      try {
+        const parsed = JSON.parse(data.externalRuntimeAnchorState);
+        if (
+          parsed &&
+          typeof parsed === 'object' &&
+          parsed.v === 1 &&
+          parsed.runtime === 'antigravity-desktop' &&
+          typeof parsed.userId === 'string' &&
+          typeof parsed.createdAt === 'number'
+        ) {
+          result.externalRuntimeAnchorState = parsed;
         }
       } catch {
         /* ignore malformed JSON */

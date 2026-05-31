@@ -273,7 +273,25 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         ...(responseGroups && responseGroups.length > 0 ? { collectionGroups: responseGroups } : {}),
         ...(resolveResult?.deprecationWarnings ? { deprecationWarnings: resolveResult.deprecationWarnings } : {}),
       } satisfies Partial<EvidenceSearchResponse>;
-    } catch {
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const errStack = err instanceof Error ? err.stack : undefined;
+      const errCause = err instanceof Error ? (err as Error & { cause?: unknown }).cause : undefined;
+      request.log.error(
+        {
+          serviceArea: 'evidence-search',
+          query: q,
+          scope,
+          mode,
+          depth,
+          dimension,
+          threadId,
+          errMsg,
+          errStack,
+          errCause,
+        },
+        'evidence search failed — returning degraded response',
+      );
       return {
         results: [],
         degraded: true,
@@ -296,8 +314,20 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         db.prepare("SELECT count(*) AS c FROM evidence_docs WHERE kind = 'thread'").get() as { c: number }
       ).c;
       const edgeCount = (db.prepare('SELECT count(*) AS c FROM edges').get() as { c: number }).c;
-      const lastUpdated = (db.prepare('SELECT max(updated_at) AS t FROM evidence_docs').get() as { t: string | null })
-        .t;
+      // Prefer the explicit rebuild stamp written by IndexBuilder; fall back to
+      // MAX(evidence_docs.updated_at) for old databases that predate the stamp.
+      let lastUpdated: string | null = null;
+      try {
+        const stampRow = db.prepare("SELECT value FROM embedding_meta WHERE key = 'last_rebuild_at'").get() as
+          | { value: string }
+          | undefined;
+        lastUpdated = stampRow?.value ?? null;
+      } catch {
+        /* embedding_meta may not exist in very old schemas */
+      }
+      if (!lastUpdated) {
+        lastUpdated = (db.prepare('SELECT max(updated_at) AS t FROM evidence_docs').get() as { t: string | null }).t;
+      }
 
       // Passages count (may not exist in older schemas)
       let passageCount = 0;
@@ -332,6 +362,16 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         /* table may not exist */
       }
 
+      // Vector index size. If the table query throws, sqlite-vec wasn't
+      // loaded — already blocked at the install dialog via the matrix
+      // 'unsupported' branch, so we just defensively return 0 here.
+      let vectorsCount = 0;
+      try {
+        vectorsCount = (db.prepare('SELECT count(*) AS c FROM evidence_vectors').get() as { c: number }).c;
+      } catch {
+        /* vec0 virtual table missing — install dialog blocked this case */
+      }
+
       return {
         backend: 'sqlite',
         healthy: true,
@@ -341,6 +381,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         passage_vectors_count: passageVectorCount,
         passage_vectors_supported: passageVectorsSupported,
         edges_count: edgeCount,
+        vectors_count: vectorsCount,
         last_rebuild_at: lastUpdated,
         embedding_model: embeddingModel,
       };

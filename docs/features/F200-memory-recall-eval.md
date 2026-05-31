@@ -398,9 +398,9 @@ outputVerified = signal_or(
 ### Phase D（Full Trajectory Records）✅
 - [x] AC-D1: TaskTrajectory 按 invocation/thread 粒度聚合
 - [x] AC-D2: outputVerified 推断框架（injectable signal sources + 外部注入 endpoint）上线。v1 自动检测覆盖 invocation status；PR merge / CVO accept / reviewer approval 通过外部注入 endpoint 接入
-- [ ] AC-D2.1: CVO accept + reviewer approval 信号源自动检测（需解析 thread 消息）
-- [ ] AC-D2.2: CI check 信号源（需 F140 GitHub check_run 集成）
-- [ ] AC-D2.3: GitHub PR merge → `pr_merged` trajectory signal 自动桥接（当前 `pr_merged` 是强信号且 endpoint 支持外部注入，但 runtime 实测 58 条 trajectory 的 `outputVerifiedSignals=[]`，自动桥接尚未喂数）
+- [x] AC-D2.1: CVO accept + reviewer approval 信号源自动检测（thread 消息扫描 + clause-anchored whitelist，PR #1898）
+- [x] AC-D2.2: CI check 信号源（pr_tracking task automationState.ci.lastBucket + fingerprint alignment，PR #1898）
+- [x] AC-D2.3: GitHub PR merge → `pr_merged` trajectory signal 自动桥接（CiCdRouter 持久化 prState + ThreadAwareSignalSources.isPrMergedForThread，PR #1898）
 - [x] AC-D3: 成功轨迹可被 list_recent 或 search_evidence 召回（scope="trajectories"）
 - [x] AC-D4: Cross-Cat Effort Variance 和 ConsumedButNotUsedRate 指标上线
 

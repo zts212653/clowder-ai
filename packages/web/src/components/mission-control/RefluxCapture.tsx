@@ -5,9 +5,9 @@ import { useCallback, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 
 const CATEGORY_STYLES: Record<RefluxCategory, { bg: string; text: string; label: string }> = {
-  methodology: { bg: 'bg-blue-100', text: 'text-conn-blue-text', label: '方法论' },
-  risk_pattern: { bg: 'bg-orange-100', text: 'text-orange-800', label: '风险模式' },
-  resolution_strategy: { bg: 'bg-conn-green-bg', text: 'text-green-800', label: '解决策略' },
+  methodology: { bg: 'bg-[var(--semantic-info-surface)]', text: 'text-conn-blue-text', label: '方法论' },
+  risk_pattern: { bg: 'bg-[var(--semantic-warning-surface)]', text: 'text-conn-amber-text', label: '风险模式' },
+  resolution_strategy: { bg: 'bg-conn-green-bg', text: 'text-conn-emerald-text', label: '解决策略' },
 };
 
 const CATEGORY_OPTIONS: RefluxCategory[] = ['methodology', 'risk_pattern', 'resolution_strategy'];
@@ -67,7 +67,7 @@ export function RefluxCapture({ projectId, patterns, onUpdate }: RefluxCapturePr
         <button
           type="button"
           onClick={() => setShowForm(!showForm)}
-          className="rounded-lg bg-[var(--mc-accent)] px-3 py-1.5 text-xs font-medium text-white hover:bg-[var(--mc-accent-hover)]"
+          className="rounded-lg bg-[var(--mc-accent)] px-3 py-1.5 text-xs font-medium text-[var(--cafe-surface)] hover:bg-[var(--mc-accent-hover)]"
         >
           {showForm ? '取消' : 'Capture Insight'}
         </button>
@@ -111,7 +111,7 @@ export function RefluxCapture({ projectId, patterns, onUpdate }: RefluxCapturePr
             type="button"
             onClick={() => void handleCreate()}
             disabled={submitting || !title.trim() || !insight.trim()}
-            className="w-full rounded-lg bg-[var(--mc-accent)] py-1.5 text-xs font-medium text-white hover:bg-[var(--mc-accent-hover)] disabled:opacity-40"
+            className="w-full rounded-lg bg-[var(--mc-accent)] py-1.5 text-xs font-medium text-[var(--cafe-surface)] hover:bg-[var(--mc-accent-hover)] disabled:opacity-40"
           >
             {submitting ? '提交中...' : '提交'}
           </button>
@@ -142,7 +142,7 @@ export function RefluxCapture({ projectId, patterns, onUpdate }: RefluxCapturePr
                   <button
                     type="button"
                     onClick={() => void handleDelete(p.id)}
-                    className="text-micro text-conn-red-text hover:text-red-700"
+                    className="text-micro text-conn-red-text hover:text-conn-red-text"
                   >
                     删除
                   </button>

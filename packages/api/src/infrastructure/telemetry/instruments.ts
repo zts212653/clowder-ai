@@ -161,6 +161,26 @@ export const c2VerdictWithoutPassCount = lazy(() =>
   }),
 );
 
+// Denominator for C2 friction ratios. Incremented every time the verdict-without-pass
+// exit-check actually evaluates a turn, so attribution can compute a real
+// `verdict_without_pass_count / c2.checked` ratio instead of fabricating 100% when no
+// denominator exists (F167 eval:a2a 2026-05-29 over-escalation root cause).
+export const c2ExitChecked = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.c2.exit_checked', {
+    description: 'C2 exit-check evaluations performed (denominator for verdict_without_pass ratio)',
+  }),
+);
+
+// Separate denominator for the void-hold check, which runs as its own guard later in
+// the route (not the verdict-without-pass exit check). Grading void_hold_hint_emitted
+// against c2.exit_checked would divide by the wrong count and suppress real void-hold
+// signals (cloud review PR #1941 P2).
+export const c2VoidHoldChecked = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.c2.void_hold_checked', {
+    description: 'C2 void-hold check evaluations performed (denominator for void_hold_hint ratio)',
+  }),
+);
+
 export const antigravityStreamErrorBuffered = lazy(() =>
   meter().createCounter('cat_cafe.antigravity.stream_error.buffered_total', {
     description: 'Buffered Antigravity stream_error after partial text while waiting for a recovery tail',
@@ -299,4 +319,6 @@ export function warmupCounters(): void {
   c2VerdictHintEmitted.add(0);
   c2VoidHoldHintEmitted.add(0);
   c2VerdictWithoutPassCount.add(0);
+  c2ExitChecked.add(0);
+  c2VoidHoldChecked.add(0);
 }

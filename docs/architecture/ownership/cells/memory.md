@@ -20,11 +20,13 @@ doc_anchors:
   - docs/features/F102-memory-adapter-refactor.md
   - docs/features/F152-expedition-memory.md
   - docs/features/F209-evidence-recall-optimization.md
+  - docs/features/F211-cross-runtime-session-transparency.md
 static_scan_hints: [IEvidenceStore, IIndexBuilder, RepoScanner, EvidenceStore, IndexBuilder, Scanner, Memory, passage_vectors, entity_id, Perspective, searchEvidence, search_evidence]
 cited_by:
   - {feature: F191, date: 2026-05-07, delta: new cell}
   - {feature: F209, date: 2026-05-22, delta: "passage-level semantic recall, entity registry as retrieval anchors, typed evidence drill-down readers, and Perspective query-plan surface"}
   - {feature: F211, date: 2026-05-24, delta: "boundary note — F211 produces runtime session transcript/digest evidence; memory consumes and retrieves that evidence without owning runtime binding"}
+  - {feature: F211, date: 2026-05-25, delta: "Phase B keeps external runtime registration/list/read in identity-session; memory remains a consumer after transcript/digest materialization"}
 ---
 
 # Memory / Evidence
@@ -37,7 +39,7 @@ F152 extends that architecture by adding scanner strategies and bootstrap orches
 
 F209 extends the evidence retrieval surface: passage-level semantic recall, entity registry / aliases as retrievable anchors, typed evidence drill-down readers, and Perspective live query plans. F209 `entity_id` is a memory/evidence doorway with provenance; it does not replace roster truth owned by `identity-agent` / F032.
 
-F211 is an upstream evidence source for Antigravity/runtime sessions. The runtime session binding itself belongs to `identity-session`; once F211 materializes transcript/digest files, Memory / Evidence can index and retrieve them through the normal evidence path.
+F211 is an upstream evidence source for Antigravity/runtime sessions. The runtime session binding, IDE-direct registration, hidden anchor threads, and runtime-session list/read APIs belong to `identity-session`; once F211 materializes transcript/digest files, Memory / Evidence can index and retrieve them through the normal evidence path.
 
 ## Use This When
 
@@ -54,7 +56,7 @@ F211 is an upstream evidence source for Antigravity/runtime sessions. The runtim
 - Add provenance and resolver behavior as structured fields rather than splitting evidence into a new store family.
 - Use `KnowledgeResolver` / collection abstractions for cross-project or library search instead of bypassing evidence search.
 - Treat entity registry records as evidence anchors with provenance and scope controls, not as an authority for who a cat is.
-- Treat F211 runtime session output as evidence after transcript/digest materialization; do not reach back into live runtime binding state from memory indexing code.
+- Treat F211 runtime session output as evidence after transcript/digest materialization; do not reach back into live runtime binding state, external runtime registration, or agent-key auth from memory indexing code.
 
 ## Do NOT Unify With
 

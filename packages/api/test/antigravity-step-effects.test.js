@@ -163,6 +163,7 @@ describe('F201 classifyAntigravityStepEffect', () => {
       'cat_cafe_read_session_events',
       'cat_cafe_read_session_digest',
       'cat_cafe_read_invocation_detail',
+      'cat_cafe_read_file_slice',
       'cat_cafe_shell_exec',
       'signal_list_inbox',
       'signal_get_article',

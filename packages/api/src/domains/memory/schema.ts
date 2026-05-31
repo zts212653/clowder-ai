@@ -66,7 +66,7 @@ END`,
 END`,
 ];
 
-export const CURRENT_SCHEMA_VERSION = 24;
+export const CURRENT_SCHEMA_VERSION = 25;
 
 // F163 Phase A: experiment infrastructure tables (cohorts, suggestions, logs)
 export const SCHEMA_V13_TABLES = `
@@ -707,6 +707,31 @@ export function applyMigrations(db: Database.Database): void {
       db.exec('CREATE INDEX IF NOT EXISTS idx_entity_mentions_doc ON entity_mentions(doc_anchor)');
     } catch {}
     db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(24, new Date().toISOString());
+  }
+
+  // V25: F102 bugfix — add thread_id to recall_events for RecallFeed history persistence
+  if (currentVersion < 25) {
+    try {
+      db.exec("ALTER TABLE recall_events ADD COLUMN thread_id TEXT DEFAULT ''");
+    } catch {}
+    try {
+      db.exec('CREATE INDEX IF NOT EXISTS idx_recall_events_thread ON recall_events(thread_id)');
+    } catch {}
+    // Backfill: recover thread_id for existing recall_events via task_trajectories
+    // (task_trajectories already stores thread_id ↔ invocation_id mapping from F200 Phase D)
+    try {
+      db.exec(`
+        UPDATE recall_events SET thread_id = (
+          SELECT t.thread_id FROM task_trajectories t
+          WHERE t.invocation_id = recall_events.invocation_id
+          LIMIT 1
+        ) WHERE thread_id = '' AND EXISTS (
+          SELECT 1 FROM task_trajectories t
+          WHERE t.invocation_id = recall_events.invocation_id
+        )
+      `);
+    } catch {}
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(25, new Date().toISOString());
   }
 }
 

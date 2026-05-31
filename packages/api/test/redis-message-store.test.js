@@ -66,6 +66,25 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(msg.userId, 'user1');
   });
 
+  it('claimContentDedupKey() is atomic: first wins, live duplicate loses, distinct keys independent', async () => {
+    const first = await store.claimContentDedupKey('fp-abc', 5000);
+    assert.equal(first, true, 'first claim of a fingerprint succeeds');
+    const second = await store.claimContentDedupKey('fp-abc', 5000);
+    assert.equal(second, false, 'a still-live claim of the same fingerprint is reported as duplicate');
+    const other = await store.claimContentDedupKey('fp-xyz', 5000);
+    assert.equal(other, true, 'a different fingerprint is independent');
+  });
+
+  it('claimContentDedupKey() re-allows a fingerprint after the PX window expires', async () => {
+    const first = await store.claimContentDedupKey('fp-ttl', 40);
+    assert.equal(first, true);
+    const immediate = await store.claimContentDedupKey('fp-ttl', 40);
+    assert.equal(immediate, false, 'within window → duplicate');
+    await new Promise((resolve) => setTimeout(resolve, 90)); // wait past the PX TTL
+    const afterExpiry = await store.claimContentDedupKey('fp-ttl', 40);
+    assert.equal(afterExpiry, true, 'after Redis PX expiry the fingerprint can be claimed again');
+  });
+
   it('getRecent() returns messages in chronological order', async () => {
     const now = Date.now();
     await store.append({ userId: 'u', catId: null, content: 'first', mentions: [], timestamp: now });

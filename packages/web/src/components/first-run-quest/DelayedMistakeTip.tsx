@@ -30,10 +30,10 @@ export function DelayedMistakeTip({ catName, onVisible }: DelayedMistakeTipProps
 
   return (
     <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[66] pointer-events-none">
-      <div className="rounded-xl border border-orange-300 bg-orange-50 px-5 py-3 shadow-xl animate-fade-in">
+      <div className="rounded-xl border border-[var(--semantic-warning)] bg-[var(--semantic-warning-surface)] px-5 py-3 shadow-xl animate-fade-in">
         <div className="flex items-center gap-2">
           <span className="text-lg">🤔</span>
-          <span className="text-sm font-medium text-orange-800">
+          <span className="text-sm font-medium text-conn-amber-text">
             似乎{cat}执行的不是那么合适…… 让我们再来一只猫猫监督 TA 干活吧！
           </span>
         </div>

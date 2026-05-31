@@ -8,7 +8,6 @@
  *   - docs/ROADMAP.md
  *   - docs/ROADMAP.md
  *   - cat-template.json
- *   - cat-config.json
  *
  * On non-main branches (worktrees / feature branches), the **unpushed** check
  * is skipped because the branch inherits committed diffs from main that aren't

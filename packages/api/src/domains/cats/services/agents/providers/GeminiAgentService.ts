@@ -455,7 +455,8 @@ export class GeminiAgentService implements AgentService {
             type: 'error',
             catId: this.catId,
             error: `暹罗猫 CLI 响应超时 (${Math.round(event.timeoutMs / 1000)}s${event.firstEventAt == null ? ', 未收到首帧' : ''})`,
-            metadata,
+            // F212 Phase A (云端 codex P2): timeout cliDiagnostics 也透传到 metadata.
+            metadata: event.cliDiagnostics ? { ...metadata, cliDiagnostics: event.cliDiagnostics } : metadata,
             timestamp: Date.now(),
           };
           continue;
@@ -482,11 +483,12 @@ export class GeminiAgentService implements AgentService {
         }
         if (isCliError(event)) {
           if (sawResultError || suppressCliExitError) continue;
+          // F212 Phase A: forward cliDiagnostics on metadata for frontend folded panel (Phase B).
           yield {
             type: 'error',
             catId: this.catId,
             error: formatCliExitError('Gemini CLI', event),
-            metadata,
+            metadata: event.cliDiagnostics ? { ...metadata, cliDiagnostics: event.cliDiagnostics } : metadata,
             timestamp: Date.now(),
           };
           continue;
@@ -690,6 +692,8 @@ export class GeminiAgentService implements AgentService {
             cliSessionId?: string;
             invocationId?: string;
             rawArchivePath?: string;
+            // F212 Phase A (砚砚 2nd P2): cliDiagnostics piggyback on __cliTimeout
+            cliDiagnostics?: import('../../../../../utils/cli-diagnostics.js').CliDiagnostics;
           }
         | undefined;
       let cliErrorEvent:
@@ -700,6 +704,8 @@ export class GeminiAgentService implements AgentService {
             message: string;
             command: string;
             reasonCode?: string;
+            // F212 Phase A: structured CLI diagnostics piggybacking on __cliError event
+            cliDiagnostics?: import('../../../../../utils/cli-diagnostics.js').CliDiagnostics;
           }
         | undefined;
       let cancelled = false;
@@ -789,11 +795,14 @@ export class GeminiAgentService implements AgentService {
           }),
           timestamp: Date.now(),
         };
+        // F212 Phase A (砚砚 2nd P2): Antigravity CLI timeout collector path 也透传 cliDiagnostics.
         yield {
           type: 'error',
           catId: this.catId,
           error: `Antigravity CLI 响应超时 (${Math.round(timeoutEvent.timeoutMs / 1000)}s)`,
-          metadata,
+          metadata: timeoutEvent.cliDiagnostics
+            ? { ...metadata, cliDiagnostics: timeoutEvent.cliDiagnostics }
+            : metadata,
           timestamp: Date.now(),
         };
       } else if (cancelled) {
@@ -808,11 +817,14 @@ export class GeminiAgentService implements AgentService {
           timestamp: Date.now(),
         };
       } else if (cliErrorEvent) {
+        // F212 Phase A: forward cliDiagnostics on metadata for frontend folded panel (Phase B).
         yield {
           type: 'error',
           catId: this.catId,
           error: formatCliExitError('Antigravity CLI', cliErrorEvent),
-          metadata,
+          metadata: cliErrorEvent.cliDiagnostics
+            ? { ...metadata, cliDiagnostics: cliErrorEvent.cliDiagnostics }
+            : metadata,
           timestamp: Date.now(),
         };
       } else if (exitCode !== 0 || exitSignal !== null) {

@@ -2,10 +2,26 @@
 
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useVoiceSettingsStore } from '@/stores/voiceSettingsStore';
+import { apiFetch } from '@/utils/api-client';
 import { correctTranscription, mergeTermEntries, type TermEntry } from '@/utils/transcription-corrector';
 
-const WHISPER_URL = process.env.NEXT_PUBLIC_WHISPER_URL || 'http://localhost:9876';
-const LLM_POSTPROCESS_URL = process.env.NEXT_PUBLIC_LLM_POSTPROCESS_URL || 'http://localhost:9878';
+function normalizeLoopbackUrl(endpoint: string): string {
+  try {
+    const url = new URL(endpoint);
+    if (url.hostname !== 'localhost') return endpoint;
+    const hadTrailingSlash = endpoint.endsWith('/');
+    url.hostname = '127.0.0.1';
+    const serialized = url.toString();
+    return !hadTrailingSlash && url.pathname === '/' ? serialized.replace(/\/$/, '') : serialized;
+  } catch {
+    return endpoint;
+  }
+}
+
+const DEFAULT_WHISPER_URL = normalizeLoopbackUrl(process.env.NEXT_PUBLIC_WHISPER_URL || 'http://127.0.0.1:9876');
+const DEFAULT_LLM_POSTPROCESS_URL = normalizeLoopbackUrl(
+  process.env.NEXT_PUBLIC_LLM_POSTPROCESS_URL || 'http://127.0.0.1:9878',
+);
 
 const DEFAULT_PROMPT =
   '这是 Clowder AI 猫猫协作项目的对话。宪宪是布偶猫（Claude Opus），砚砚是缅因猫（Codex）。' +
@@ -29,8 +45,24 @@ function buildFormData(blob: Blob, prompt: string, language: string): FormData {
   return formData;
 }
 
+async function resolveVoiceServiceEndpoint(serviceId: string, fallback: string): Promise<string> {
+  try {
+    const res = await apiFetch('/api/services/endpoints');
+    if (!res.ok) return fallback;
+    const payload: { endpoints?: Record<string, unknown> } = await res.json();
+    const endpoint = payload.endpoints?.[serviceId];
+    if (typeof endpoint === 'string' && endpoint.trim().length > 0) {
+      return normalizeLoopbackUrl(endpoint.trim());
+    }
+  } catch {
+    // Keep voice input usable when the API endpoint map is temporarily unavailable.
+  }
+  return fallback;
+}
+
 async function transcribeBlob(blob: Blob, prompt: string, language: string): Promise<string> {
-  const res = await fetch(`${WHISPER_URL}/v1/audio/transcriptions`, {
+  const whisperUrl = await resolveVoiceServiceEndpoint('whisper-stt', DEFAULT_WHISPER_URL);
+  const res = await fetch(`${whisperUrl}/v1/audio/transcriptions`, {
     method: 'POST',
     body: buildFormData(blob, prompt, language),
   });
@@ -48,7 +80,8 @@ async function transcribeBlob(blob: Blob, prompt: string, language: string): Pro
 async function llmPostProcess(text: string): Promise<string> {
   if (!text.trim()) return text;
   try {
-    const res = await fetch(`${LLM_POSTPROCESS_URL}/v1/text/refine`, {
+    const llmPostprocessUrl = await resolveVoiceServiceEndpoint('llm-postprocess', DEFAULT_LLM_POSTPROCESS_URL);
+    const res = await fetch(`${llmPostprocessUrl}/v1/text/refine`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text }),

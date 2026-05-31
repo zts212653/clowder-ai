@@ -186,6 +186,30 @@ describe('Antigravity legacy runtime-session import', () => {
     });
   });
 
+  test('missing legacy JSON is a diagnostic no-op migration path', async () => {
+    const { RuntimeSessionStore, importLegacyAntigravitySessions, readLegacyAntigravitySessionMap } =
+      await loadModules();
+    const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-f211-import-missing-'));
+    const file = join(dir, 'missing-antigravity-sessions.json');
+
+    try {
+      const parsed = readLegacyAntigravitySessionMap(file);
+      assert.deepEqual(parsed.entries, []);
+      assert.equal(parsed.diagnostics[0].code, 'missing_file');
+
+      const result = await importLegacyAntigravitySessions({
+        path: file,
+        runtimeSessionStore: new RuntimeSessionStore(),
+        sessionChainStore: sessionChainStoreFor(new Map()),
+      });
+
+      assert.equal(result.imported.length, 0);
+      assert.equal(result.diagnostics[0].code, 'missing_file');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('import is idempotent for the same runtime tuple', async () => {
     const { RuntimeSessionStore, importLegacyAntigravitySessions } = await loadModules();
     const runtimeSessionStore = new RuntimeSessionStore();

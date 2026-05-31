@@ -86,6 +86,20 @@ if (Test-Path $envFile) {
     Write-Warn ".env not found - using defaults"
 }
 
+function Preserve-ServiceFlagForApiLifecycle {
+    param([string]$SourceName, [string]$TargetName)
+    $value = [System.Environment]::GetEnvironmentVariable($SourceName, "Process")
+    if ($null -ne $value -and $value -ne "") {
+        [System.Environment]::SetEnvironmentVariable($TargetName, $value, "Process")
+    }
+}
+
+Preserve-ServiceFlagForApiLifecycle -SourceName "ASR_ENABLED" -TargetName "CAT_CAFE_SERVICE_ASR_ENABLED"
+Preserve-ServiceFlagForApiLifecycle -SourceName "TTS_ENABLED" -TargetName "CAT_CAFE_SERVICE_TTS_ENABLED"
+Preserve-ServiceFlagForApiLifecycle -SourceName "LLM_POSTPROCESS_ENABLED" -TargetName "CAT_CAFE_SERVICE_LLM_POSTPROCESS_ENABLED"
+Preserve-ServiceFlagForApiLifecycle -SourceName "EMBED_ENABLED" -TargetName "CAT_CAFE_SERVICE_EMBED_ENABLED"
+Preserve-ServiceFlagForApiLifecycle -SourceName "AUDIO_SERVICE_ENABLED" -TargetName "CAT_CAFE_SERVICE_AUDIO_ENABLED"
+
 # -- Apply profile defaults (mirrors start-dev.sh apply_profile_defaults) --
 # Profile defaults are fallbacks: .env value wins if set, otherwise profile default applies.
 $profileDefaults = @{}
@@ -271,26 +285,24 @@ $embedEnabled = if ($null -ne $embedEnabledRaw -and $embedEnabledRaw -ne "") {
 }
 $env:EMBED_ENABLED = if ($embedEnabled) { "1" } else { "0" }
 
+# Embedding sidecar lifecycle is owned by the API startup reconciler: it reads
+# .cat-cafe/services.json and starts or cleans Cat Cafe-owned listeners based
+# on Console state. This script only computes EMBED_URL/EMBED_PORT so the API
+# can locate the sidecar.
 $embedPortDefault = if ($env:EMBED_PORT) { [int]$env:EMBED_PORT } else { 9880 }
 $configuredEmbedUrl = if ($env:EMBED_URL) { $env:EMBED_URL.Trim() } else { "" }
 $localEmbedPort = Get-LoopbackHttpPort -Url $configuredEmbedUrl -DefaultPort $embedPortDefault
-$useLocalEmbedSidecar = $embedEnabled -and ((-not $configuredEmbedUrl) -or ($null -ne $localEmbedPort))
-$EmbedPort = if ($useLocalEmbedSidecar) {
-    if ($null -ne $localEmbedPort) { [int]$localEmbedPort } else { $embedPortDefault }
-} else {
-    $embedPortDefault
-}
-$EmbedPidFile = Join-Path $RunDir "embed-$EmbedPort.pid"
-$EmbedLauncher = Join-Path $ProjectRoot "scripts\embed-server.ps1"
-if ($useLocalEmbedSidecar) {
+$EmbedPort = if ($null -ne $localEmbedPort) { [int]$localEmbedPort } else { $embedPortDefault }
+$embedIsLocal = (-not $configuredEmbedUrl) -or ($null -ne $localEmbedPort)
+if (-not $configuredEmbedUrl) {
     $env:EMBED_URL = "http://127.0.0.1:$EmbedPort"
 }
 
 Write-Step "Check ports"
 Stop-PortProcess -Port ([int]$ApiPort) -Name "API" -PidFile $ApiPidFile -ProjectRoot $ProjectRoot
 Stop-PortProcess -Port ([int]$WebPort) -Name "Frontend" -PidFile $WebPidFile -ProjectRoot $ProjectRoot
-if ($useLocalEmbedSidecar) {
-    Stop-PortProcess -Port ([int]$EmbedPort) -Name "Embedding" -PidFile $EmbedPidFile -ProjectRoot $ProjectRoot
+if ($embedEnabled -and $embedIsLocal) {
+    Stop-PortProcess -Port ([int]$EmbedPort) -Name "Embedding" -PidFile (Join-Path $RunDir "embed-$EmbedPort.pid") -ProjectRoot $ProjectRoot
 }
 
 # -- Storage (Redis or Memory) -------------------------------
@@ -496,31 +508,16 @@ try {
         EMBED_PORT = $EmbedPort
         EMBED_ENABLED = $env:EMBED_ENABLED
         EMBED_MODE = $env:EMBED_MODE
+        CAT_CAFE_SERVICE_ASR_ENABLED = $env:CAT_CAFE_SERVICE_ASR_ENABLED
+        CAT_CAFE_SERVICE_TTS_ENABLED = $env:CAT_CAFE_SERVICE_TTS_ENABLED
+        CAT_CAFE_SERVICE_LLM_POSTPROCESS_ENABLED = $env:CAT_CAFE_SERVICE_LLM_POSTPROCESS_ENABLED
+        CAT_CAFE_SERVICE_EMBED_ENABLED = $env:CAT_CAFE_SERVICE_EMBED_ENABLED
+        CAT_CAFE_SERVICE_AUDIO_ENABLED = $env:CAT_CAFE_SERVICE_AUDIO_ENABLED
     }
 
-    $embedJob = $null
-    if ($useLocalEmbedSidecar) {
-        if (Test-Path $EmbedLauncher) {
-            Write-Host "  Starting Embedding sidecar (port $EmbedPort)..."
-            $embedJob = Start-Job -Name "embed" -ScriptBlock {
-                param($launcherPath, $port)
-                [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-                $OutputEncoding = [System.Text.Encoding]::UTF8
-                & powershell -ExecutionPolicy Bypass -File $launcherPath -Port $port 2>&1
-            } -ArgumentList $EmbedLauncher, $EmbedPort
-            $jobs += $embedJob
-
-            $embedTimeout = if ($env:EMBED_TIMEOUT) { [int]$env:EMBED_TIMEOUT } else { 60 }
-            if (Wait-ForListeningPort -Port ([int]$EmbedPort) -TimeoutSec $embedTimeout) {
-                Set-ManagedProcessId -Port ([int]$EmbedPort) -PidFile $EmbedPidFile
-                Write-Ok "Embedding sidecar ready on port $EmbedPort"
-            } else {
-                Write-Warn "Embedding sidecar did not become ready within ${embedTimeout}s - continuing in fail-open mode"
-            }
-        } else {
-            Write-Warn "Embedding launcher not found at $EmbedLauncher - continuing in fail-open mode"
-        }
-    }
+    # Embedding sidecar (and other Cat Cafe ML services) are reconciled by the
+    # API startup lifecycle after it starts, per .cat-cafe/services.json. No
+    # manual Start-Job here.
 
     # API Server
     # Env vars are loaded into this process (line 42-53) and inherited by Start-Job.
@@ -611,9 +608,8 @@ try {
     $storageMode = if ($useRedis -and $safeEffectiveRedisUrl) { "Redis ($safeEffectiveRedisUrl)" } elseif ($useRedis) { "Redis (redis://localhost:$RedisPort)" } else { "Memory (restart loses data)" }
     $frontendMode = if ($Dev) { "development (hot reload)" } else { "production (PWA enabled)" }
     $embeddingMode = if ($embedEnabled) {
-        if ($useLocalEmbedSidecar) { "Local (http://127.0.0.1:$EmbedPort)" }
-        elseif ($configuredEmbedUrl) { "Remote ($configuredEmbedUrl)" }
-        else { "Enabled" }
+        if ($configuredEmbedUrl) { "Remote ($configuredEmbedUrl)" }
+        else { "Local sidecar managed by API autostart (port $EmbedPort)" }
     } else {
         "Off"
     }
@@ -669,7 +665,7 @@ try {
     }
     Clear-ManagedProcessId -PidFile $ApiPidFile
     Clear-ManagedProcessId -PidFile $WebPidFile
-    Clear-ManagedProcessId -PidFile $EmbedPidFile
+    Clear-ManagedProcessId -PidFile (Join-Path $RunDir "embed-$EmbedPort.pid")
 
     if ($startedRedis) {
         try {

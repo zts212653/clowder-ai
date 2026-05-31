@@ -10,7 +10,12 @@ import {
 } from '../SettingsResourceCard';
 import { InstallPreviewModal } from './InstallPreviewModal';
 import { SettingsText } from './primitives';
-import { adaptServiceState, type HomeServiceState, type ServiceUiState } from './service-ui-adapter';
+import {
+  adaptServiceState,
+  type HomeServiceState,
+  type ServiceUiState,
+  type ServiceUiStatus,
+} from './service-ui-adapter';
 
 const STATUS_DOT_COLOR: Record<string, string> = {
   running: 'var(--conn-emerald-text)',
@@ -19,10 +24,13 @@ const STATUS_DOT_COLOR: Record<string, string> = {
   error: 'var(--conn-red-text)',
   installing: 'var(--conn-amber-text)',
   starting: 'var(--conn-amber-text)',
+  stopping: 'var(--conn-amber-text)',
+  uninstalling: 'var(--conn-amber-text)',
 };
 
 const ROW_STYLE = { paddingInline: '1.25rem', paddingBlock: '0.75rem' } as const;
 const LOG_POLL_MS = 2000;
+const LIFECYCLE_BUSY_STATUSES = new Set<ServiceUiStatus>(['installing', 'starting', 'stopping', 'uninstalling']);
 const SERVICE_INSTALL_BUTTON_CLASS =
   'rounded-lg bg-cafe-accent px-3 py-1.5 text-xs font-semibold text-[var(--cafe-surface)] transition-colors hover:bg-cafe-accent-hover disabled:opacity-50';
 
@@ -42,6 +50,7 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
   const [acting, setActing] = useState<Set<string>>(new Set());
   const [actionError, setActionError] = useState<{ id: string; message: string } | null>(null);
   const [installTarget, setInstallTarget] = useState<ServiceUiState | null>(null);
+  const [reconfigureTarget, setReconfigureTarget] = useState<ServiceUiState | null>(null);
   const [progress, setProgress] = useState<Map<string, string>>(new Map());
   const pollRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
 
@@ -74,43 +83,83 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
     };
   }, []);
 
-  function startLogPoll(serviceId: string) {
-    stopLogPoll(serviceId);
-    const interval = setInterval(async () => {
-      try {
-        const res = await apiFetch(`/api/services/${serviceId}/logs`);
-        if (!res.ok) return;
-        const data = (await res.json()) as { lines?: string[] };
-        const lastLine = data.lines?.filter(Boolean).pop();
-        if (lastLine) setProgress((prev) => new Map(prev).set(serviceId, lastLine));
-      } catch {
-        /* ignore polling errors */
-      }
-    }, LOG_POLL_MS);
-    pollRef.current.set(serviceId, interval);
-  }
+  const pollServiceLog = useCallback(async (serviceId: string) => {
+    try {
+      const res = await apiFetch(`/api/services/${serviceId}/logs`);
+      if (!res.ok) return;
+      const data = (await res.json()) as { lines?: string[] };
+      const lastLine = data.lines?.filter(Boolean).pop();
+      if (lastLine) setProgress((prev) => new Map(prev).set(serviceId, lastLine));
+    } catch {
+      /* ignore polling errors */
+    }
+  }, []);
 
-  function stopLogPoll(serviceId: string) {
+  const stopLogPoll = useCallback((serviceId: string) => {
     const existing = pollRef.current.get(serviceId);
     if (existing) {
       clearInterval(existing);
       pollRef.current.delete(serviceId);
     }
-  }
+  }, []);
 
-  async function executeAction(serviceId: string, action: string, model?: string) {
+  const startLogPoll = useCallback(
+    (serviceId: string) => {
+      stopLogPoll(serviceId);
+      void pollServiceLog(serviceId);
+      const interval = setInterval(() => {
+        void pollServiceLog(serviceId);
+      }, LOG_POLL_MS);
+      pollRef.current.set(serviceId, interval);
+    },
+    [pollServiceLog, stopLogPoll],
+  );
+
+  useEffect(() => {
+    const busyIds = new Set(services.filter((service) => LIFECYCLE_BUSY_STATUSES.has(service.status)).map((s) => s.id));
+    for (const serviceId of busyIds) startLogPoll(serviceId);
+    for (const serviceId of pollRef.current.keys()) {
+      if (!busyIds.has(serviceId) && !acting.has(serviceId)) stopLogPoll(serviceId);
+    }
+  }, [acting, services, startLogPoll, stopLogPoll]);
+
+  useEffect(() => {
+    const hasBusyService = acting.size > 0 || services.some((service) => LIFECYCLE_BUSY_STATUSES.has(service.status));
+    if (!hasBusyService) return;
+    const interval = setInterval(() => {
+      void fetchServices();
+    }, LOG_POLL_MS);
+    return () => clearInterval(interval);
+  }, [acting, fetchServices, services]);
+
+  async function executeAction(serviceId: string, action: string, model?: string, port?: number) {
     setActing((prev) => new Set(prev).add(serviceId));
     setActionError(null);
-    if (action === 'install' || action === 'start') startLogPoll(serviceId);
+    if (action === 'install' || action === 'start' || action === 'stop' || action === 'uninstall') {
+      startLogPoll(serviceId);
+    }
     try {
+      // Serialize model + port for install (codex P2 3266352848 — install
+      // modal accepts a port input but executeAction was previously dropping
+      // it on the floor, so user-entered ports silently collided with the
+      // default/env-derived port).
+      // reconfigure shares the same body shape (model? + port?) so the
+      // backend can do port-only vs. model-change branching server-side.
+      const installBody: { model?: string; port?: number } = {};
+      if (model) installBody.model = model;
+      if (typeof port === 'number') installBody.port = port;
+      const sendsBody = (action === 'install' || action === 'reconfigure') && (model || typeof port === 'number');
+      const body = sendsBody ? JSON.stringify(installBody) : '{}';
       const res = await apiFetch(`/api/services/${serviceId}/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: action === 'install' && model ? JSON.stringify({ model }) : '{}',
+        body,
       });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
+      const data = (await res.json()) as { ok?: boolean; error?: string; output?: string };
       if (!data.ok) {
-        setActionError({ id: serviceId, message: data.error ?? `${action} failed` });
+        const output = typeof data.output === 'string' ? data.output.trim() : '';
+        const message = data.error ?? `${action} failed`;
+        setActionError({ id: serviceId, message: output ? `${message}\n${output}` : message });
       }
       await fetchServices();
     } catch {
@@ -135,7 +184,7 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
   }
 
   function handleAction(service: ServiceUiState, action: string) {
-    if (action === 'install' && service.prerequisites?.models?.length) {
+    if (action === 'install' && service.prerequisites) {
       setInstallTarget(service);
       return;
     }
@@ -154,7 +203,7 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
       )}
       {services.map((service) => {
         const dotColor = STATUS_DOT_COLOR[service.status] ?? STATUS_DOT_COLOR.not_configured;
-        const isBusy = acting.has(service.id);
+        const isBusy = acting.has(service.id) || LIFECYCLE_BUSY_STATUSES.has(service.status);
         const error = actionError?.id === service.id ? actionError.message : null;
         const logLine = progress.get(service.id);
 
@@ -171,6 +220,7 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
                 </SettingsText>
                 <SettingsText as="p" tone="muted" className="mt-0.5 truncate">
                   {service.category} · {service.statusLabel}
+                  {service.selectedModel ? ` · ${service.selectedModel}` : ''}
                   {service.endpoint ? ` · ${service.endpoint}` : ''}
                 </SettingsText>
                 {service.error && (
@@ -179,7 +229,7 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
                   </SettingsText>
                 )}
                 {error && (
-                  <SettingsText as="p" tone="red" className="mt-0.5">
+                  <SettingsText as="p" tone="red" className="mt-0.5 whitespace-pre-wrap break-words">
                     {error}
                   </SettingsText>
                 )}
@@ -198,7 +248,7 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
                     onClick={() => handleAction(service, 'install')}
                     className={SERVICE_INSTALL_BUTTON_CLASS}
                   >
-                    {isBusy ? '...' : '安装'}
+                    {service.status === 'installing' ? '安装中' : isBusy ? '...' : '安装'}
                   </button>
                 )}
                 {service.installed && service.installable && (
@@ -210,14 +260,23 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
                       title={service.enabled ? '停止服务' : '启动服务'}
                     />
                     {!service.enabled && (
-                      <SettingsResourceIconButton
-                        tone="danger"
-                        disabled={isBusy}
-                        onClick={() => void executeAction(service.id, 'uninstall')}
-                        title="卸载"
-                      >
-                        <HubIcon name="trash" className="h-3.5 w-3.5" />
-                      </SettingsResourceIconButton>
+                      <>
+                        <SettingsResourceIconButton
+                          disabled={isBusy}
+                          onClick={() => setReconfigureTarget(service)}
+                          title="修改端口或模型"
+                        >
+                          <HubIcon name="settings" className="h-3.5 w-3.5" />
+                        </SettingsResourceIconButton>
+                        <SettingsResourceIconButton
+                          tone="danger"
+                          disabled={isBusy}
+                          onClick={() => void executeAction(service.id, 'uninstall')}
+                          title="卸载"
+                        >
+                          <HubIcon name="trash" className="h-3.5 w-3.5" />
+                        </SettingsResourceIconButton>
+                      </>
                     )}
                   </>
                 )}
@@ -227,16 +286,35 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
         );
       })}
 
-      {installTarget?.prerequisites && (
+      {installTarget && (
         <InstallPreviewModal
+          open={true}
+          serviceId={installTarget.id}
           serviceName={installTarget.name}
-          prerequisites={installTarget.prerequisites}
-          onConfirm={(model) => {
+          estimatedMinutes={installTarget.prerequisites?.estimatedMinutes}
+          onConfirm={({ model, port }) => {
             const id = installTarget.id;
             setInstallTarget(null);
-            void executeAction(id, 'install', model);
+            void executeAction(id, 'install', model, port);
           }}
           onCancel={() => setInstallTarget(null)}
+        />
+      )}
+
+      {reconfigureTarget && (
+        <InstallPreviewModal
+          open={true}
+          mode="reconfigure"
+          serviceId={reconfigureTarget.id}
+          serviceName={reconfigureTarget.name}
+          initialModel={reconfigureTarget.selectedModel}
+          initialPort={reconfigureTarget.port}
+          onConfirm={({ model, port }) => {
+            const id = reconfigureTarget.id;
+            setReconfigureTarget(null);
+            void executeAction(id, 'reconfigure', model, port);
+          }}
+          onCancel={() => setReconfigureTarget(null)}
         />
       )}
     </div>

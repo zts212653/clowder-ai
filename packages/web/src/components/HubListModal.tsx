@@ -100,7 +100,7 @@ export function HubListModal({ open, onClose, currentThreadId }: HubListModalPro
       <div className="bg-cafe-surface rounded-2xl shadow-xl w-[520px] max-h-[80vh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-6 py-4 border-b border-cafe-subtle">
           <div className="flex items-center gap-2.5">
-            <HubIcon className="w-5 h-5 text-blue-600" />
+            <HubIcon className="w-5 h-5 text-[var(--semantic-info)]" />
             <span className="text-lg font-semibold text-cafe">IM Hub</span>
           </div>
           <button
@@ -120,40 +120,42 @@ export function HubListModal({ open, onClose, currentThreadId }: HubListModalPro
             type="button"
             onClick={() => setActiveTab('threads')}
             className={`px-4 py-2.5 text-sm font-medium transition-colors relative ${
-              activeTab === 'threads' ? 'text-blue-600' : 'text-cafe-secondary hover:text-cafe-secondary'
+              activeTab === 'threads' ? 'text-[var(--semantic-info)]' : 'text-cafe-secondary hover:text-cafe-secondary'
             }`}
             data-testid="hub-tab-threads"
           >
             系统对话中心
             {activeTab === 'threads' && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600 rounded-full" />
+              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--semantic-info)] rounded-full" />
             )}
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('config')}
             className={`px-4 py-2.5 text-sm font-medium transition-colors relative ${
-              activeTab === 'config' ? 'text-blue-600' : 'text-cafe-secondary hover:text-cafe-secondary'
+              activeTab === 'config' ? 'text-[var(--semantic-info)]' : 'text-cafe-secondary hover:text-cafe-secondary'
             }`}
             data-testid="hub-tab-config"
             data-guide-id="im-hub.config-tab"
           >
             平台配置
             {activeTab === 'config' && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600 rounded-full" />
+              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--semantic-info)] rounded-full" />
             )}
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('permissions')}
             className={`px-4 py-2.5 text-sm font-medium transition-colors relative ${
-              activeTab === 'permissions' ? 'text-blue-600' : 'text-cafe-secondary hover:text-cafe-secondary'
+              activeTab === 'permissions'
+                ? 'text-[var(--semantic-info)]'
+                : 'text-cafe-secondary hover:text-cafe-secondary'
             }`}
             data-testid="hub-tab-permissions"
           >
             群聊权限
             {activeTab === 'permissions' && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600 rounded-full" />
+              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--semantic-info)] rounded-full" />
             )}
           </button>
         </div>
@@ -169,7 +171,7 @@ export function HubListModal({ open, onClose, currentThreadId }: HubListModalPro
                     onClick={() => setPermConnector(c.id)}
                     className={`px-3 py-1 text-xs rounded-full transition-colors ${
                       permConnector === c.id
-                        ? 'bg-conn-blue-text text-white'
+                        ? 'bg-conn-blue-text text-[var(--cafe-surface)]'
                         : 'bg-cafe-surface-elevated text-cafe-secondary hover:bg-cafe-surface-elevated'
                     }`}
                     data-testid={`perm-connector-${c.id}`}
@@ -190,7 +192,7 @@ export function HubListModal({ open, onClose, currentThreadId }: HubListModalPro
                 <p className="text-center text-cafe-muted py-8 text-sm">加载中...</p>
               ) : loadError ? (
                 <div
-                  className="rounded-xl border border-conn-red-ring bg-conn-red-bg px-4 py-3 text-sm text-red-700"
+                  className="rounded-xl border border-conn-red-ring bg-conn-red-bg px-4 py-3 text-sm text-conn-red-text"
                   role="alert"
                   data-testid="hub-list-error"
                 >
@@ -217,7 +219,7 @@ export function HubListModal({ open, onClose, currentThreadId }: HubListModalPro
                             disabled={isCurrent}
                             className={`w-full text-left p-3 rounded-xl border transition-colors ${
                               isCurrent
-                                ? 'border-blue-300 bg-conn-blue-bg opacity-60 cursor-default'
+                                ? 'border-[var(--semantic-info)] bg-conn-blue-bg opacity-60 cursor-default'
                                 : 'border-cafe bg-cafe-surface-elevated hover:bg-cafe-surface-elevated'
                             }`}
                             data-testid={`hub-item-${t.id}`}
@@ -227,7 +229,7 @@ export function HubListModal({ open, onClose, currentThreadId }: HubListModalPro
                                 {t.title ?? `${CONNECTOR_LABELS[connectorId] ?? connectorId} IM Hub`}
                               </span>
                               {isCurrent && (
-                                <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-blue-100 text-blue-700">
+                                <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-[var(--semantic-info-surface)] text-[var(--semantic-info)]">
                                   当前
                                 </span>
                               )}

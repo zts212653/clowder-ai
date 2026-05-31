@@ -86,10 +86,6 @@
         "to": "package.json"
       },
       {
-        "from": "../cat-config.json",
-        "to": "cat-config.json"
-      },
-      {
         "from": "../cat-cafe-skills",
         "to": "cat-cafe-skills"
       },

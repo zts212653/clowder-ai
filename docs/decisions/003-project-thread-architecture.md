@@ -134,7 +134,7 @@ Demo 发现: 三只猫全不知道自己是谁。
 ```
 System Prompt 分层组装:
 1. 身份层: "你是Ragdoll(Opus), Cat Cafe 的主架构师..."
-2. 项目层: "当前项目: cat-cafe, 路径: /path/to/project"
+2. 项目层: "当前项目: cat-cafe, 路径: /home/user/cat-cafe"
 3. 会话层: "当前对话参与者: opus, codex"
 4. 即时层: "用户刚说: ..."
 ```

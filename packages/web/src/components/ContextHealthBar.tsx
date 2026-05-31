@@ -7,14 +7,13 @@ const CAT_BG_COLORS: Record<string, string> = {
   opus: 'var(--color-opus-primary)',
   codex: 'var(--color-codex-primary)',
   gemini: 'var(--color-gemini-primary)',
-  // Variant-specific shades (same family, different tones)
-  gpt52: '#66BB6A',
-  'opus-45': '#7E57C2',
-  sonnet: '#B39DDB',
+  gpt52: 'var(--color-gpt52-primary)',
+  'opus-45': 'var(--color-opus-45-primary)',
+  sonnet: 'var(--color-sonnet-primary)',
 };
 
-const WARN_COLOR = '#f59e0b'; // amber-500
-const DANGER_COLOR = '#ef4444'; // red-500
+const WARN_COLOR = 'var(--semantic-warning)';
+const DANGER_COLOR = 'var(--semantic-critical)';
 
 export interface ContextHealthBarProps {
   catId: string;
@@ -77,7 +76,7 @@ export function ContextHealthBar({
   return (
     <div className="mt-1" title={tooltip} data-testid={`context-health-${catId}`}>
       <div className="flex items-center gap-1.5">
-        <div className="flex-1 h-[3px] rounded-full bg-gray-200 overflow-hidden">
+        <div className="flex-1 h-[3px] rounded-full bg-cafe-surface overflow-hidden">
           <div
             className={`h-full rounded-full ${isDanger ? 'animate-pulse' : ''}`}
             style={{

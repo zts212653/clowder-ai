@@ -557,9 +557,10 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     try {
       const thread = await threadStore.get(id);
 
-      // F095 Phase G: Protect system threads (connectorHubState) from casual deletion.
+      // F095 Phase G + F192 livefix: Protect system threads from casual deletion.
+      // Covers both IM Hub (connectorHubState) and eval domain (systemKind) threads.
       // Requires explicit ?force=true query param to proceed.
-      if (thread?.connectorHubState) {
+      if (thread?.connectorHubState || thread?.systemKind) {
         const { force } = request.query as { force?: string };
         if (force !== 'true') {
           reply.status(403);

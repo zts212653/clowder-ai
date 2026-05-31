@@ -6,6 +6,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
 import { refreshMentionData } from '@/lib/mention-highlight';
 import { sortCatsByOrder } from '@/lib/sort-cats-by-order';
 import { apiFetch } from '@/utils/api-client';
@@ -124,7 +125,7 @@ function normalizeCats(rawCats: unknown[]): CatData[] {
       ...cat,
       id: cat.id ?? '',
       displayName: cat.displayName ?? cat.id ?? '',
-      color: cat.color ?? { primary: '#000000', secondary: '#ffffff' },
+      color: cat.color ?? UNKNOWN_CAT_COLOR,
       mentionPatterns: Array.isArray(cat.mentionPatterns) ? cat.mentionPatterns : [],
       accountRef: cat.accountRef,
       clientId: cat.clientId ?? 'openai',

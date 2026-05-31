@@ -23,7 +23,7 @@ describe('Session Chain Routes', () => {
   let SessionChainStore;
   let sessionChainRoutes;
 
-  async function setup(threadStoreOverride, sealerOverride) {
+  async function setup(threadStoreOverride, sealerOverride, runtimeSessionStoreOverride) {
     const storeMod = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const routeMod = await import('../dist/routes/session-chain.js');
     SessionChainStore = storeMod.SessionChainStore;
@@ -43,7 +43,12 @@ describe('Session Chain Routes', () => {
       reconcileStuck: async () => 0,
       reconcileAllStuck: async () => 0,
     };
-    await app.register(sessionChainRoutes, { sessionChainStore: store, threadStore, sessionSealer: mockSealer });
+    await app.register(sessionChainRoutes, {
+      sessionChainStore: store,
+      threadStore,
+      sessionSealer: mockSealer,
+      ...(runtimeSessionStoreOverride ? { runtimeSessionStore: runtimeSessionStoreOverride } : {}),
+    });
     await app.ready();
     return store;
   }
@@ -217,6 +222,88 @@ describe('Session Chain Routes', () => {
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.payload);
     assert.equal(body.sessions.length, 2);
+  });
+
+  it('GET /api/threads/:threadId/sessions includes runtime sidecar summaries when present', async () => {
+    const { RuntimeSessionStore } = await import(
+      '../dist/domains/cats/services/runtime-session/RuntimeSessionStore.js'
+    );
+    const runtimeSessionStore = new RuntimeSessionStore();
+    const store = await setup(undefined, undefined, runtimeSessionStore);
+    const record = store.create({
+      cliSessionId: 'cascade-new',
+      threadId: 'thread-1',
+      catId: 'opus',
+      userId: 'user-1',
+    });
+    runtimeSessionStore.upsert({
+      sessionId: record.id,
+      runtime: 'antigravity-desktop',
+      runtimeSessionId: 'cascade-new',
+      runtimeConversationId: 'conversation-new',
+      threadId: 'thread-1',
+      catId: 'opus',
+      userId: 'user-1',
+      surface: 'cat-cafe-dispatch',
+      identityHistory: [{ catId: 'opus', model: 'claude-opus-4-6', from: 1000, source: 'session_init' }],
+      lifecycle: {
+        state: 'active',
+        startedAt: 1000,
+        lastObservedAt: 2000,
+        unexpectedRuntimeSessionSwitch: {
+          detectedAt: 2000,
+          previousSessionId: 'session-old',
+          previousRuntimeSessionId: 'cascade-old',
+          currentRuntimeSessionId: 'cascade-new',
+          reason: 'missing_previous_runtime_session_id',
+        },
+      },
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/threads/thread-1/sessions',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.payload);
+    assert.equal(body.sessions.length, 1);
+    assert.deepEqual(body.sessions[0].runtimeSession, {
+      runtime: 'antigravity-desktop',
+      runtimeSessionId: 'cascade-new',
+      runtimeConversationId: 'conversation-new',
+      lifecycleState: 'active',
+      lastObservedAt: 2000,
+      unexpectedRuntimeSessionSwitch: {
+        detectedAt: 2000,
+        previousSessionId: 'session-old',
+        previousRuntimeSessionId: 'cascade-old',
+        currentRuntimeSessionId: 'cascade-new',
+        reason: 'missing_previous_runtime_session_id',
+      },
+    });
+  });
+
+  it('GET /api/threads/:threadId/sessions keeps legacy CLI sessions independent from runtime sidecars', async () => {
+    const { RuntimeSessionStore } = await import(
+      '../dist/domains/cats/services/runtime-session/RuntimeSessionStore.js'
+    );
+    const runtimeSessionStore = new RuntimeSessionStore();
+    const store = await setup(undefined, undefined, runtimeSessionStore);
+    store.create({ cliSessionId: 'cli-legacy-1', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/threads/thread-1/sessions',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.payload);
+    assert.equal(body.sessions.length, 1);
+    assert.equal(body.sessions[0].cliSessionId, 'cli-legacy-1');
+    assert.equal(body.sessions[0].runtimeSession, undefined);
   });
 
   it('GET /api/threads/:threadId/sessions?catId=opus filters by cat', async () => {

@@ -12,6 +12,8 @@ import { type CatId, catRegistry } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { z } from 'zod';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
+import type { RuntimeSessionMetadata } from '../domains/cats/services/runtime-session/RuntimeSessionMetadata.js';
+import type { IRuntimeSessionStore } from '../domains/cats/services/runtime-session/RuntimeSessionStore.js';
 import { backfillBoundSessionHistory } from '../domains/cats/services/session/BoundSessionHistoryImporter.js';
 import type { ISessionSealer } from '../domains/cats/services/session/SessionSealer.js';
 import type { TranscriptReader } from '../domains/cats/services/session/TranscriptReader.js';
@@ -31,20 +33,71 @@ interface SessionChainRouteOptions extends FastifyPluginOptions {
   messageStore?: IMessageStore;
   transcriptReader?: TranscriptReader;
   sessionSealer?: ISessionSealer;
+  runtimeSessionStore?: IRuntimeSessionStore;
+}
+
+interface RuntimeSessionSummary {
+  runtime: RuntimeSessionMetadata['runtime'];
+  runtimeSessionId: string;
+  runtimeConversationId?: string;
+  lifecycleState: RuntimeSessionMetadata['lifecycle']['state'];
+  lastObservedAt: number;
+  unexpectedRuntimeSessionSwitch?: RuntimeSessionMetadata['lifecycle']['unexpectedRuntimeSessionSwitch'];
 }
 
 function canAccessSessionRecord(
-  thread: { id: string; createdBy: string } | null,
+  thread: {
+    id: string;
+    createdBy: string;
+    externalRuntimeAnchorState?: { userId: string } | undefined;
+  } | null,
   session: { userId: string } | null,
   userId: string,
 ): boolean {
   if (!thread || !session) return false;
   if (thread.createdBy === userId) return true;
+  if (thread.externalRuntimeAnchorState?.userId === userId && session.userId === userId) return true;
   return isSharedDefaultThread(thread) && session.userId === userId;
 }
 
+function formatRuntimeSessionSummary(metadata: RuntimeSessionMetadata): RuntimeSessionSummary {
+  return {
+    runtime: metadata.runtime,
+    runtimeSessionId: metadata.runtimeSessionId,
+    ...('runtimeConversationId' in metadata && metadata.runtimeConversationId
+      ? { runtimeConversationId: metadata.runtimeConversationId }
+      : {}),
+    lifecycleState: metadata.lifecycle.state,
+    lastObservedAt: metadata.lifecycle.lastObservedAt,
+    ...(metadata.lifecycle.unexpectedRuntimeSessionSwitch
+      ? { unexpectedRuntimeSessionSwitch: metadata.lifecycle.unexpectedRuntimeSessionSwitch }
+      : {}),
+  };
+}
+
+async function attachRuntimeSessionSummary<T extends { id: string }>(
+  session: T,
+  runtimeSessionStore?: IRuntimeSessionStore,
+): Promise<T & { runtimeSession?: RuntimeSessionSummary }> {
+  if (!runtimeSessionStore) return session;
+  const metadata = await runtimeSessionStore.getBySessionId(session.id);
+  if (!metadata) return session;
+  return {
+    ...session,
+    runtimeSession: formatRuntimeSessionSummary(metadata),
+  };
+}
+
+async function attachRuntimeSessionSummaries<T extends { id: string }>(
+  sessions: T[],
+  runtimeSessionStore?: IRuntimeSessionStore,
+): Promise<Array<T & { runtimeSession?: RuntimeSessionSummary }>> {
+  if (!runtimeSessionStore) return sessions;
+  return Promise.all(sessions.map((session) => attachRuntimeSessionSummary(session, runtimeSessionStore)));
+}
+
 export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChainRouteOptions): Promise<void> {
-  const { sessionChainStore, threadStore, messageStore, transcriptReader, sessionSealer } = opts;
+  const { sessionChainStore, threadStore, messageStore, transcriptReader, sessionSealer, runtimeSessionStore } = opts;
 
   app.get<{
     Params: { threadId: string };
@@ -79,7 +132,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       const visibleSessions = isSharedDefaultThread(thread)
         ? sessions.filter((session) => session.userId === userId)
         : sessions;
-      return reply.send({ sessions: visibleSessions });
+      return reply.send({ sessions: await attachRuntimeSessionSummaries(visibleSessions, runtimeSessionStore) });
     }
 
     // No catId filter at all (hub UI god-view) — default thread stays user-scoped.
@@ -87,7 +140,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
     const visibleSessions = isSharedDefaultThread(thread)
       ? sessions.filter((session) => session.userId === userId)
       : sessions;
-    return reply.send({ sessions: visibleSessions });
+    return reply.send({ sessions: await attachRuntimeSessionSummaries(visibleSessions, runtimeSessionStore) });
   });
 
   app.get<{
@@ -111,12 +164,12 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       reply.status(404);
       return { error: 'Thread not found' };
     }
-    if (!canAccessThread(thread, userId) || !canAccessSessionRecord(thread, session, userId)) {
+    if (!canAccessSessionRecord(thread, session, userId)) {
       reply.status(403);
       return { error: 'Access denied' };
     }
 
-    return reply.send(session);
+    return reply.send(await attachRuntimeSessionSummary(session, runtimeSessionStore));
   });
 
   // POST /api/sessions/:sessionId/unseal — Manual fallback (#F062)
@@ -142,7 +195,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       reply.status(404);
       return { error: 'Thread not found' };
     }
-    if (!canAccessThread(thread, userId) || !canAccessSessionRecord(thread, session, userId)) {
+    if (!canAccessSessionRecord(thread, session, userId)) {
       reply.status(403);
       return { error: 'Access denied' };
     }

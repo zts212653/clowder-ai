@@ -117,7 +117,7 @@ describe('ThreadCatPill (F154 Phase B)', () => {
   it('shows persona color dot matching the cat', () => {
     const dot = renderPill('thread_pill_test').querySelector('[data-testid="pill-dot"]');
     expect(dot).not.toBeNull();
-    expect(dot?.getAttribute('style')).toContain('background-color:#FFAB91');
+    expect(dot?.getAttribute('style')).toContain('background-color:var(--color-opus-primary)');
   });
 
   it('renders ghost pill for unknown threadId', () => {

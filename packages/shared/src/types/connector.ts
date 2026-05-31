@@ -119,7 +119,7 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     id: 'github-review',
     displayName: 'GitHub Review',
     icon: 'github',
-    color: { primary: '#2563EB', secondary: '#EFF6FF' },
+    color: { primary: '#2563EB', secondary: '#E2E8F0' },
     description: 'GitHub PR review 邮件通知',
     tailwindTheme: {
       avatar: 'bg-conn-slate-bg ring-2 ring-conn-slate-ring',
@@ -132,7 +132,7 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     id: 'github-ci',
     displayName: 'GitHub CI/CD',
     icon: 'github',
-    color: { primary: '#2563EB', secondary: '#EFF6FF' },
+    color: { primary: '#2563EB', secondary: '#E2E8F0' },
     description: 'GitHub CI/CD 状态通知',
     tailwindTheme: {
       avatar: 'bg-conn-slate-bg ring-2 ring-conn-slate-ring',
@@ -145,7 +145,7 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     id: 'github-conflict',
     displayName: 'PR Conflict',
     icon: 'github',
-    color: { primary: '#D97706', secondary: '#FFFBEB' },
+    color: { primary: '#D97706', secondary: '#E2E8F0' },
     description: 'GitHub PR 冲突状态通知',
     tailwindTheme: {
       avatar: 'bg-conn-amber-bg ring-2 ring-conn-amber-ring',
@@ -158,7 +158,7 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     id: 'github-review-feedback',
     displayName: 'Review Feedback',
     icon: 'github',
-    color: { primary: '#475569', secondary: '#F8FAFC' },
+    color: { primary: '#475569', secondary: '#E2E8F0' },
     description: 'GitHub PR review feedback 通知',
     tailwindTheme: {
       avatar: 'bg-conn-slate-bg ring-2 ring-conn-slate-ring',
@@ -171,7 +171,7 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     id: 'github-repo-event',
     displayName: 'Repo Inbox',
     icon: 'github',
-    color: { primary: '#24292e', secondary: '#F6F8FA' },
+    color: { primary: '#24292e', secondary: '#E2E8F0' },
     description: 'GitHub 仓库事件通知（新 PR / 新 Issue）',
     tailwindTheme: {
       avatar: 'bg-conn-gray-bg ring-2 ring-conn-gray-ring',
@@ -301,7 +301,7 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     id: 'scheduler',
     displayName: '定时任务',
     icon: 'scheduler',
-    color: { primary: '#F59E0B', secondary: '#FFFBEB' },
+    color: { primary: '#F59E0B', secondary: '#FDE691' },
     description: '定时任务投递',
     tailwindTheme: {
       avatar: 'bg-conn-amber-bg ring-2 ring-conn-amber-ring',

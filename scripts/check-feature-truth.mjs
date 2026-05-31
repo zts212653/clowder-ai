@@ -17,7 +17,13 @@ const currentIndexPath = join(repoRoot, 'docs', 'features', 'index.json');
 const generatorPath = join(repoRoot, 'scripts', 'generate-feature-index.mjs');
 
 function isDoneStatus(status) {
-  return /^\s*done\b/i.test(String(status ?? ''));
+  // Strip markdown bold (**) AND leading decorations (emoji / ✅ / symbols / whitespace)
+  // before testing — feature docs use **done**, closed, "✅ closed", "done ✅", etc.
+  // (F180 used an emoji *prefix* "✅ closed" which broke the bare ^(done|closed) match.)
+  const plain = String(status ?? '')
+    .replace(/\*+/g, '')
+    .replace(/^[^A-Za-z]+/, '');
+  return /^(done|closed)\b/i.test(plain);
 }
 
 function parseBacklogFeatureIds(markdown) {

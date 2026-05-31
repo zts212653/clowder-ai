@@ -25,6 +25,10 @@ tester.run('no-hardcoded-colors', rule, {
     { code: '<div className="flex items-center gap-2 rounded-lg p-4" />' },
     // CSS variables in style props are fine
     { code: '<div style={{ color: "var(--cafe-text)" }} />' },
+    // F056 Phase E: OKLCH via CSS var is fine
+    { code: '<div className="bg-neutral-50 text-accent-500 border-semantic-warning" />' },
+    { code: '<div className="bg-chart-3 text-avatar-fallback-5" />' },
+    { code: '<div style={{ color: "var(--semantic-critical)" }} />' },
     // Non-JSX strings with colors (not in className/style)
     { code: 'const hex = "#FF0000";' },
   ],
@@ -104,6 +108,37 @@ tester.run('no-hardcoded-colors', rule, {
     {
       code: '<div className={x ? `bg-white ${y}` : "bg-black"} />',
       errors: [{ messageId: 'noRawTailwindColor' }, { messageId: 'noRawTailwindColor' }],
+    },
+    // F056 Phase E AC-E11: arbitrary oklch() in className
+    {
+      code: '<div className="bg-[oklch(0.5_0.15_30)]" />',
+      errors: [{ messageId: 'noArbitraryOklch' }],
+    },
+    {
+      code: '<div className="text-[oklch(0.62_0.13_297)]" />',
+      errors: [{ messageId: 'noArbitraryOklch' }],
+    },
+    // F056 Phase E AC-E11: inline oklch() literal in style props
+    {
+      code: '<div style={{ color: "oklch(0.5 0.15 30)" }} />',
+      errors: [{ messageId: 'noOklchInStyle' }],
+    },
+    {
+      code: '<div style={{ backgroundColor: "oklch(0.18 0.005 30)" }} />',
+      errors: [{ messageId: 'noOklchInStyle' }],
+    },
+    // 砚砚 round-5 P2: arbitrary rgba/hsl in Tailwind utility brackets
+    {
+      code: '<div className="shadow-[0_5px_14px_rgba(43,37,32,0.07)]" />',
+      errors: [{ messageId: 'noArbitraryRawColorFn' }],
+    },
+    {
+      code: '<div className="shadow-[0_1px_3px_rgba(43,33,26,0.06)]" />',
+      errors: [{ messageId: 'noArbitraryRawColorFn' }],
+    },
+    {
+      code: '<div className="bg-[hsl(0,0%,50%)]" />',
+      errors: [{ messageId: 'noArbitraryRawColorFn' }],
     },
   ],
 });

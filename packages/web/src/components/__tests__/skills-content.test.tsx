@@ -89,7 +89,7 @@ const capabilitiesPayload = {
     },
   ],
   catFamilies: [{ id: 'ragdoll', name: '布偶猫族', catIds: ['opus', 'codex'] }],
-  projectPath: '/path/to/project',
+  projectPath: '/home/user/cat-cafe',
 };
 
 async function flushEffects() {
@@ -336,7 +336,7 @@ describe('SkillsContent', () => {
 
   it('project switch refetches both /api/skills and /api/capabilities with projectPath', async () => {
     const altPath = '/home/user/other-project';
-    mockGetProjectPaths.mockReturnValue(['/path/to/project', altPath]);
+    mockGetProjectPaths.mockReturnValue(['/home/user/cat-cafe', altPath]);
 
     await render(React.createElement(SkillsContent));
 

@@ -34,6 +34,8 @@ export async function triggerRecallCorrelation(
   const correlator = new RecallEventCorrelator(db);
   const recallEvents = correlator.correlateWindow(fullEvents);
   if (recallEvents.length > 0) {
+    // F102 bugfix: attach threadId so RecallFeed can query history by thread
+    const threadId = fullEvents.find((e) => e.threadId)?.threadId ?? '';
     const candidateAnchorsPerSearch: string[][] = [];
     for (const e of memoryEvents) {
       const summary = e.summary as Record<string, unknown> | undefined;
@@ -45,6 +47,7 @@ export async function triggerRecallCorrelation(
       }
     }
     for (let i = 0; i < recallEvents.length; i++) {
+      recallEvents[i].threadId = threadId;
       const anchors = candidateAnchorsPerSearch[i];
       if (anchors && anchors.length > 0) {
         const shadowRanking = lookupShadowRanking(anchors);
@@ -58,7 +61,6 @@ export async function triggerRecallCorrelation(
     metricsComputer.refreshAnchorMetrics();
     metricsComputer.refreshGlobalCtrBaseline();
 
-    const threadId = fullEvents.find((e) => e.threadId)?.threadId ?? '';
     if (threadId) {
       const aggregator = new TrajectoryAggregator(db);
       const trajectory = aggregator.aggregate(invocationId, threadId, catId, fullEvents);

@@ -16,6 +16,8 @@ import type { Interface as ReadlineInterface } from 'node:readline';
 import { createInterface } from 'node:readline';
 import { promisify } from 'node:util';
 import { createModuleLogger } from '../../infrastructure/logger.js';
+import { buildCliDiagnostics } from '../../utils/cli-diagnostics.js';
+import { maybeCollectStreamError } from '../../utils/cli-spawn.js';
 import { resolveCliTimeoutMs } from '../../utils/cli-timeout.js';
 import type { CliSpawnOptions } from '../../utils/cli-types.js';
 // parseNDJSON not used directly — we create readline inline for killability.
@@ -55,14 +57,19 @@ function buildPaneCommand(
   fifoPath: string,
   exitFilePath: string,
   stderrFilePath: string,
+  stdinFilePath?: string,
 ): string {
   const parts = [shellEscape(opts.command), ...opts.args.map(shellEscape)];
+  // Incident 2026-05-29 P1 (cloud codex review): codex `-- -` reads the prompt from
+  // stdin, but a tmux pane has no stdin pipe. Redirect from a 0600 temp file so the
+  // prompt reaches codex (content stays off argv/ps — only the file path is visible).
+  const stdinRedirect = stdinFilePath != null ? ` < ${shellEscape(stdinFilePath)}` : '';
   // pipefail ensures $? reflects the CLI exit code, not tee's
   if (opts.outputMode === 'plainText') {
     const stderrFile = shellEscape(stderrFilePath);
-    return `set -o pipefail; ${parts.join(' ')} 2> ${stderrFile} | tee ${shellEscape(fifoPath)}; echo "EXIT:$?" > ${shellEscape(exitFilePath)}; cat ${stderrFile} >&2`;
+    return `set -o pipefail; ${parts.join(' ')}${stdinRedirect} 2> ${stderrFile} | tee ${shellEscape(fifoPath)}; echo "EXIT:$?" > ${shellEscape(exitFilePath)}; cat ${stderrFile} >&2`;
   }
-  return `set -o pipefail; ${parts.join(' ')} 2>&1 | tee ${shellEscape(fifoPath)}; echo "EXIT:$?" > ${shellEscape(exitFilePath)}`;
+  return `set -o pipefail; ${parts.join(' ')}${stdinRedirect} 2>&1 | tee ${shellEscape(fifoPath)}; echo "EXIT:$?" > ${shellEscape(exitFilePath)}`;
 }
 
 /** Read exit code sentinel file with retry (race: FIFO EOF before file write) */
@@ -98,29 +105,51 @@ export async function* spawnCliInTmux(
   const fifoPath = join(tmpDir, 'output.fifo');
   const exitFilePath = join(tmpDir, 'exit-code');
   const stderrFilePath = join(tmpDir, 'stderr.log');
-  await execAsync('mkfifo', [fifoPath]);
-
-  const paneId = await tmuxGateway.createAgentPane(options.worktreeId, {
-    ...(options.cwd ? { cwd: options.cwd } : {}),
-  });
-
-  // Inject environment variables into pane shell
-  if (options.env) {
-    for (const [key, value] of Object.entries(options.env)) {
-      if (value !== null && value !== undefined) {
-        await tmuxGateway.execInPane(options.worktreeId, paneId, `export ${key}=${shellEscape(value)}`);
-      }
+  // Incident 2026-05-29 P1 (cloud codex review): codex `-- -` reads prompt from stdin,
+  // but a tmux pane has no stdin pipe. Write stdinInput to a 0600 temp file (inside
+  // tmpDir) and redirect it in the pane command (buildPaneCommand). Prompt content
+  // stays off argv/ps — only the file path is visible.
+  //
+  // P1 #2 (same review round): the stdin temp file holds the full conversation history,
+  // and the main try/finally that removes tmpDir only starts later. Wrap the entire
+  // setup phase so any failure here (mkfifo / createAgentPane / execInPane when tmux is
+  // unavailable) still removes tmpDir — otherwise the prompt is left on disk forever.
+  let stdinFilePath: string | undefined;
+  let paneId: string;
+  try {
+    if (options.stdinInput != null) {
+      const { writeFile } = await import('node:fs/promises');
+      stdinFilePath = join(tmpDir, 'stdin');
+      await writeFile(stdinFilePath, options.stdinInput, { mode: 0o600 });
     }
-    await new Promise((r) => setTimeout(r, 100));
-  }
+    await execAsync('mkfifo', [fifoPath]);
 
-  await tmuxGateway.execInPane(
-    options.worktreeId,
-    paneId,
-    buildPaneCommand(options, fifoPath, exitFilePath, stderrFilePath),
-  );
-  // Set read-only AFTER command starts (select-pane -d blocks send-keys if set before)
-  await tmuxGateway.setPaneReadOnly(options.worktreeId, paneId, true);
+    paneId = await tmuxGateway.createAgentPane(options.worktreeId, {
+      ...(options.cwd ? { cwd: options.cwd } : {}),
+    });
+
+    // Inject environment variables into pane shell
+    if (options.env) {
+      for (const [key, value] of Object.entries(options.env)) {
+        if (value !== null && value !== undefined) {
+          await tmuxGateway.execInPane(options.worktreeId, paneId, `export ${key}=${shellEscape(value)}`);
+        }
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
+    await tmuxGateway.execInPane(
+      options.worktreeId,
+      paneId,
+      buildPaneCommand(options, fifoPath, exitFilePath, stderrFilePath, stdinFilePath),
+    );
+    // Set read-only AFTER command starts (select-pane -d blocks send-keys if set before)
+    await tmuxGateway.setPaneReadOnly(options.worktreeId, paneId, true);
+  } catch (setupErr) {
+    // Remove tmpDir (incl. the prompt stdin file) before propagating the setup failure.
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    throw setupErr;
+  }
   yield { __tmuxPaneCreated: true, paneId, worktreeId: options.worktreeId } as unknown;
 
   let timedOut = false;
@@ -290,6 +319,19 @@ export async function* spawnCliInTmux(
     // killAgent closes the active reader/stream to unblock `for await`.
     fifoStream = createReadStream(fifoPath, { encoding: 'utf-8' });
     const plainTextChunks: string[] = [];
+    // F212 (砚砚 round-4 P2): NDJSON mode tmux `2>&1 | tee fifo` merges stderr into stdout fifo.
+    // Non-JSON lines (= stderr noise) end up in the parse-error branch and were previously
+    // log-and-dropped. Collect a bounded slice here so abnormal-exit / timeout can feed it into
+    // buildCliDiagnostics for reasonCode classification. Bounded by line count + total chars to
+    // avoid OOM on pathological output. Sanitization happens inside buildCliDiagnostics, not here.
+    const nonJsonOutput: string[] = [];
+    // F212 Phase D: result error events are valid JSON (never hit nonJsonOutput), so collect
+    // them separately for cliDiagnostics — same root-cause fix as cli-spawn maybeCollectStreamError.
+    const streamErrorTexts: string[] = [];
+    const structuredErrorTexts: string[] = [];
+    let nonJsonChars = 0;
+    const NON_JSON_MAX_LINES = 30;
+    const NON_JSON_MAX_CHARS = 8192;
     try {
       if (options.outputMode === 'plainText') {
         for await (const chunk of fifoStream) {
@@ -307,8 +349,16 @@ export async function* spawnCliInTmux(
             event = JSON.parse(trimmed);
           } catch {
             log.error({ line: trimmed }, 'JSON parse error');
+            // F212 (砚砚 round-4): preserve non-JSON line for cliDiagnostics classification.
+            if (nonJsonOutput.length < NON_JSON_MAX_LINES && nonJsonChars + trimmed.length <= NON_JSON_MAX_CHARS) {
+              nonJsonOutput.push(trimmed);
+              nonJsonChars += trimmed.length;
+            }
             continue;
           }
+          // F212 Phase D: collect result error events (type==='result' && subtype!=='success')
+          // for cliDiagnostics — they are valid JSON so they never reach nonJsonOutput above.
+          maybeCollectStreamError(event, streamErrorTexts, structuredErrorTexts);
           // Mark first event and switch from first-event timeout to idle timeout.
           if (!gotFirstEvent) {
             gotFirstEvent = true;
@@ -330,32 +380,62 @@ export async function* spawnCliInTmux(
     }
 
     const exitCode = await readExitCode(exitFilePath);
+    // F212 (云端 codex P2): always read stderr file once so abnormal-exit / timeout branches
+    // can feed it into buildCliDiagnostics for reasonCode classification. Previously only
+    // plainText mode read stderr and other modes built diagnostics from empty rawText.
+    let stderrCaptured = '';
+    try {
+      stderrCaptured = await readFile(stderrFilePath, 'utf-8');
+    } catch {
+      /* stderr file may be absent if pane startup failed before redirection */
+    }
     if (options.outputMode === 'plainText') {
-      let stderr = '';
-      try {
-        stderr = await readFile(stderrFilePath, 'utf-8');
-      } catch {
-        /* stderr file may be absent if pane startup failed before redirection */
-      }
       yield {
         __cliPlainText: true,
         stdout: plainTextChunks.join(''),
-        stderr,
+        stderr: stderrCaptured,
         exitCode,
         signal: null,
         command: options.command,
       };
     }
     if (!killed && exitCode !== null && exitCode !== 0) {
+      // F212 AC-A1: structured diagnostics on tmux abnormal exit.
+      // 云端 codex P2 + 砚砚 round-4: NDJSON mode merges stderr→stdout fifo so stderrFile is empty;
+      // non-JSON lines collected from parse-error branch (= stderr noise) carry the actual error text.
+      // plainText mode has stderrCaptured populated from the independent stderr file redirect.
+      const ndjsonNoise = nonJsonOutput.join('\n');
+      const rawText = [ndjsonNoise, ...streamErrorTexts, stderrCaptured].filter(Boolean).join('\n');
+      const cliDiagnostics = buildCliDiagnostics({
+        rawText,
+        structuredErrorText: structuredErrorTexts.filter(Boolean).join('\n'),
+        debugRef: {
+          command: options.command,
+          exitCode,
+          signal: null,
+        },
+      });
       yield {
         __cliError: true,
         exitCode,
         signal: null,
         message: `CLI 异常退出 (code: ${exitCode}, tmux pane: ${paneId})`,
         command: options.command,
+        cliDiagnostics,
       };
     }
     if (timedOut) {
+      // F212 砚砚 round-4: same dual-source merge as abnormal exit branch.
+      const ndjsonNoise = nonJsonOutput.join('\n');
+      const cliDiagnostics = buildCliDiagnostics({
+        rawText: [ndjsonNoise, ...streamErrorTexts, stderrCaptured].filter(Boolean).join('\n'),
+        structuredErrorText: structuredErrorTexts.filter(Boolean).join('\n'),
+        debugRef: {
+          command: options.command,
+          exitCode,
+          signal: null,
+        },
+      });
       yield {
         __cliTimeout: true,
         timeoutMs: gotFirstEvent ? idleTimeoutMs : firstEventTimeoutMs,
@@ -363,6 +443,7 @@ export async function* spawnCliInTmux(
           ? `CLI 响应超时 (${Math.round(idleTimeoutMs / 1000)}s idle, tmux pane: ${paneId})`
           : `CLI 启动超时 — 未收到首个有效事件 (${Math.round(firstEventTimeoutMs / 1000)}s, tmux pane: ${paneId})`,
         command: options.command,
+        cliDiagnostics,
       };
     }
     return { paneId };

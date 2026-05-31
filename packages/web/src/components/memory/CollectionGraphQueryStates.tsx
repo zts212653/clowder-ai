@@ -33,7 +33,7 @@ export function GraphSearchForm({
       />
       <button
         type="submit"
-        className="h-9 shrink-0 rounded-lg bg-cafe-accent px-3 text-compact font-semibold text-white transition-colors hover:bg-cafe-interactive disabled:opacity-50 sm:w-auto"
+        className="h-9 shrink-0 rounded-lg bg-cafe-accent px-3 text-compact font-semibold text-[var(--cafe-surface)] transition-colors hover:bg-cafe-interactive disabled:opacity-50 sm:w-auto"
         data-testid="graph-fetch-btn"
       >
         查看图谱

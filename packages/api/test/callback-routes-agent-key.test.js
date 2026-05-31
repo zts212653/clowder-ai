@@ -101,6 +101,50 @@ describe('Callback routes: agent-key auth path', () => {
     assert.equal(body.status, 'ok');
   });
 
+  // Regression (byte-identical duplicate bug): the shared Antigravity MCP posts via this agent-key
+  // path. Two concurrent identical deliveries must not both persist. Forces the check-then-act
+  // interleave by holding the winner's append open until the second request has run its dup check.
+  test('agent-key post-message does not double-store byte-identical concurrent posts (atomic dedup)', async () => {
+    const app = await createApp();
+    const { secret } = await issueKey();
+
+    const realAppend = messageStore.append.bind(messageStore);
+    let releaseFirstAppend;
+    const firstAppendGate = new Promise((resolve) => {
+      releaseFirstAppend = resolve;
+    });
+    let signalFirstAppendEntered;
+    const firstAppendEntered = new Promise((resolve) => {
+      signalFirstAppendEntered = resolve;
+    });
+    let appendCount = 0;
+    messageStore.append = async (msg) => {
+      appendCount += 1;
+      if (appendCount === 1) {
+        signalFirstAppendEntered();
+        await firstAppendGate;
+      }
+      return realAppend(msg);
+    };
+
+    const payload = { content: 'concurrent identical agent-key report', threadId: ownedThreadId };
+    const headers = { 'x-agent-key-secret': secret };
+
+    const p1 = app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
+    await firstAppendEntered; // winner passed its dup check, now blocked inside append
+    const second = await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
+    releaseFirstAppend();
+    await p1;
+
+    assert.equal(
+      JSON.parse(second.body).status,
+      'duplicate',
+      'concurrent identical agent-key post must be deduped even before the winner commits its append',
+    );
+    const recent = messageStore.getByThread(ownedThreadId, 10);
+    assert.equal(recent.length, 1, 'concurrent byte-identical agent-key posts must persist exactly ONE message');
+  });
+
   test('post-message with agent-key + unowned threadId returns 403', async () => {
     const app = await createApp();
     const { secret } = await issueKey();

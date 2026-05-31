@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useAgentHookHealth } from '@/hooks/useAgentHookHealth';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
 import { useAuthorization } from '@/hooks/useAuthorization';
@@ -29,6 +30,7 @@ import { useGuideStore } from '@/stores/guideStore';
 import { useSidebarStore } from '@/stores/sidebarStore';
 import { useTaskStore } from '@/stores/taskStore';
 import { apiFetch } from '@/utils/api-client';
+import { computeCliDiagnosticsDedup } from '@/utils/cli-diagnostics-dedup';
 import { computeScrollRecomputeSignal } from '@/utils/scrollRecomputeSignal';
 import { getUserId } from '@/utils/userId';
 import { AgentHookHealthNotice, shouldRenderAgentHookHealthNotice } from './AgentHookHealthNotice';
@@ -576,13 +578,25 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   });
 
   const handleEditCat = useCallback((catId: string) => setEditingCatId(catId), []);
+  // F212 follow-up — UI-layer dedup for adjacent identical CliDiagnostics panels.
+  // Compute once per messages change; map is keyed by messageId.
+  const cliDedupMap = useMemo(() => computeCliDiagnosticsDedup(messages), [messages]);
   const renderSingleMessage = useCallback(
-    (msg: ChatMessageData) => (
-      <MessageActions key={msg.id} message={msg} threadId={threadId}>
-        <ChatMessage message={msg} getCatById={getCatById} onEditCat={handleEditCat} />
-      </MessageActions>
-    ),
-    [threadId, getCatById, handleEditCat],
+    (msg: ChatMessageData) => {
+      const dedupInfo = cliDedupMap.get(msg.id);
+      return (
+        <MessageActions key={msg.id} message={msg} threadId={threadId}>
+          <ChatMessage
+            message={msg}
+            getCatById={getCatById}
+            onEditCat={handleEditCat}
+            hideDiagnosticsPanel={dedupInfo?.hideDiagnosticsPanel}
+            dedupCount={dedupInfo?.dedupCount}
+          />
+        </MessageActions>
+      );
+    },
+    [threadId, getCatById, handleEditCat, cliDedupMap],
   );
 
   const { cancelInvocation, syncRooms, socketConnected } = useSocket(socketCallbacks, threadId);
@@ -844,7 +858,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
               <div className="text-center mt-20">
                 <PawIcon className="w-12 h-12 text-cafe-muted mx-auto mb-4" />
                 <p className="text-lg text-cafe-secondary mb-1">欢迎来到 Clowder AI!</p>
-                <p className="text-sm text-cafe-muted">
+                <p className="text-sm text-cafe-muted" suppressHydrationWarning>
                   {cats.length > 0 ? '输入 @布偶 召唤布偶猫开始聊天' : '还没有可用成员，先开始新手教程创建第一只猫猫'}
                 </p>
                 {showSetupCard && govStatus && (
@@ -899,7 +913,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                       <button
                         type="button"
                         onClick={() => setShowBootcampList(true)}
-                        className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-conn-amber-ring bg-conn-amber-bg text-conn-amber-text hover:bg-conn-amber-bg transition-colors text-sm font-medium"
+                        className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-cafe-accent/20 bg-accent-50 text-cafe-accent hover:bg-accent-100 transition-colors text-sm font-medium"
                         data-testid="empty-state-bootcamp-list"
                       >
                         <BootcampIcon className="w-4 h-4" />
@@ -911,7 +925,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                     <button
                       type="button"
                       onClick={() => setShowBootcampList(true)}
-                      className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-conn-amber-ring bg-conn-amber-bg text-conn-amber-text hover:bg-conn-amber-bg transition-colors text-sm font-medium"
+                      className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-cafe-accent/20 bg-accent-50 text-cafe-accent hover:bg-accent-100 transition-colors text-sm font-medium"
                       data-testid="empty-state-bootcamp"
                     >
                       <BootcampIcon className="w-4 h-4" />
@@ -967,7 +981,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             })()}
 
           {isResearchMode && (
-            <div className="mx-4 mb-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+            <div className="mx-4 mb-2 rounded-lg border border-[var(--semantic-success)] bg-[var(--semantic-success-surface)] px-3 py-2 text-xs text-conn-emerald-text">
               多猫研究模式 — 文章上下文已注入。请输入研究问题，猫猫会自动调用 multi_mention 邀请其他猫参与分析。
             </div>
           )}
@@ -1005,7 +1019,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           {isGameActive && overlayMinimized && gameView?.threadId === threadId && (
             <button
               onClick={() => useGameStore.getState().restoreOverlay()}
-              className="mx-4 mb-2 flex items-center justify-center gap-2 rounded-lg border border-purple-300 bg-purple-50 px-3 py-2 text-sm text-purple-700 hover:bg-purple-100 transition-colors"
+              className="mx-4 mb-2 flex items-center justify-center gap-2 rounded-lg border border-[var(--color-cafe-accent)] bg-[var(--accent-50)] px-3 py-2 text-sm text-[var(--color-cafe-accent)] hover:bg-[var(--color-cocreator-surface)] transition-colors"
             >
               🎮 返回游戏
             </button>
@@ -1129,35 +1143,37 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         threadId={threadId}
         messageSummary={messageSummary}
       />
-      {showFirstRunQuestPrompt && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[var(--console-overlay-medium)] px-4">
-          <div
-            className="w-full max-w-md rounded-2xl border border-conn-amber-ring bg-[var(--console-card-bg)] p-6 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h3 className="text-lg font-semibold text-gray-900">开始猫猫新手教程？</h3>
-            <p className="mt-2 text-sm text-gray-600">
-              当前还没有可用成员。我们可以先带你创建第一只猫猫，再开始首个协作任务。
-            </p>
-            <div className="mt-5 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={handleSkipFirstRunQuest}
-                className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-              >
-                跳过
-              </button>
-              <button
-                type="button"
-                onClick={handleStartFirstRunQuest}
-                className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-medium text-white hover:bg-amber-600"
-              >
-                开始教程
-              </button>
+      {showFirstRunQuestPrompt &&
+        createPortal(
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[var(--console-overlay-medium)] px-4">
+            <div
+              className="w-full max-w-md rounded-2xl border border-conn-amber-ring bg-[var(--console-card-bg)] p-6 shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <h3 className="text-lg font-semibold text-cafe">开始猫猫新手教程？</h3>
+              <p className="mt-2 text-sm text-cafe-secondary">
+                当前还没有可用成员。我们可以先带你创建第一只猫猫，再开始首个协作任务。
+              </p>
+              <div className="mt-5 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={handleSkipFirstRunQuest}
+                  className="rounded-lg border border-[var(--console-border-soft)] px-3 py-2 text-sm text-cafe-secondary hover:bg-[var(--console-hover-bg)]"
+                >
+                  跳过
+                </button>
+                <button
+                  type="button"
+                  onClick={handleStartFirstRunQuest}
+                  className="rounded-lg bg-cafe-accent px-3 py-2 text-sm font-medium text-[var(--cafe-surface)] hover:opacity-90"
+                >
+                  开始教程
+                </button>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
       <FirstRunQuestWizard
         open={showQuestWizard}
         onClose={() => setShowQuestWizard(false)}

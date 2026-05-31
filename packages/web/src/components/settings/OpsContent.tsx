@@ -10,6 +10,7 @@ import { HubGovernanceTab } from '../HubGovernanceTab';
 import { HubLeaderboardTab } from '../HubLeaderboardTab';
 import { HubObservabilityTab } from '../HubObservabilityTab';
 import { HubRoutingPolicyTab } from '../HubRoutingPolicyTab';
+import { HubRuntimeSessionsTab } from '../HubRuntimeSessionsTab';
 import { HubToolUsageTab } from '../HubToolUsageTab';
 import { DEFAULT_OPS_SUBSECTION, OPS_SUBSECTIONS } from './ops-nav-config';
 
@@ -85,6 +86,8 @@ function OpsSubsectionContent({
       return <HubObservabilityTab initialSubTab={obsSubTab ?? undefined} subTabNonce={nonce} />;
     case 'agent-sessions':
       return <HubAgentSessionsTab />;
+    case 'runtime-sessions':
+      return <HubRuntimeSessionsTab />;
     case 'health':
       return (
         <div className="space-y-6">
