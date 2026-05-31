@@ -4,6 +4,7 @@ import type { QueueProcessor } from '../domains/cats/services/agents/invocation/
 import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import { primaryMentionHandleForCatId } from '../utils/cat-mention-handle.js';
 
 type ProposalRouter = Pick<AgentRouter, 'resolveTargetsAndIntent'>;
 type ProposalInvocationQueue = Pick<InvocationQueue, 'enqueue' | 'backfillMessageId' | 'rollbackEnqueue'>;
@@ -55,17 +56,45 @@ export function enrichWithParentThreadHeader(
   content: string,
   sourceThreadId: string,
   sourceThreadTitle?: string | null,
+  preferredCats?: readonly CatId[],
+  resolveHandle: (token: string) => string | null = primaryMentionHandleForCatId,
 ): string {
   const titleLine = sourceThreadTitle ? `\n标题: ${sourceThreadTitle}` : '';
-  const header = [
+  const headerLines: string[] = [
     '---',
     '## 主 Thread',
     `ID: \`${sourceThreadId}\`${titleLine}`,
     '',
     '完成后请由最后一棒猫 `cat_cafe_cross_post_message` 把总结回报到这个主 Thread。',
     '（这是 thread-orchestration skill 的 Step 5c 汇聚铁律，不要忘了汇报。）',
-  ].join('\n');
-  return `${content}\n\n${header}`;
+  ];
+
+  // F128 chain protocol injection (砚砚 PR #809 review P1 fix):
+  // Server tells the woken cat explicitly that this is a cat-driven @-chain
+  // — server only woke the first cat, subsequent cats are driven by line-start
+  // @-mentions in cat replies. Without this, the server knows the workflow is
+  // cat-driven but the cat doesn't, and the chain stalls after one step.
+  if (preferredCats && preferredCats.length > 0) {
+    const handles = preferredCats.map((catId) => resolveHandle(catId) ?? `@${catId}`);
+    const chainOrder = handles.join(' → ');
+    headerLines.push(
+      '',
+      '## 接力链路（cat-driven @-chain）',
+      `顺序: ${chainOrder} → 回到主 Thread`,
+      'Server 只 wake 了**第一棒**。你接到这条消息后:',
+      '  - 完成你的回合',
+      '  - 在自己回复的**行首独立一行** `@` 下一棒猫的 stable handle 把球传出去',
+      '  - 最后一棒完成后, 用 `cat_cafe_cross_post_message` 把总结回报到主 Thread',
+      '',
+      // NOTE: do NOT write the literal "#ideate" string here — parseIntent
+      // would otherwise read this server-injected explanation as an explicit
+      // user tag and force parallel mode. Refer to the tool description for
+      // the actual opt-in syntax.
+      '（如果要**并行模式**让大家独立思考不按顺序，下一次 propose 时按 `cat_cafe_propose_thread` 工具描述里的 ideate 选项 opt-in。）',
+    );
+  }
+
+  return `${content}\n\n${headerLines.join('\n')}`;
 }
 
 export async function appendApprovedInitialMessage({

@@ -202,6 +202,7 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
           finalInitialMessage,
           proposal.sourceThreadId,
           sourceThread?.title,
+          finalPreferredCats,
         );
 
         const result = await appendApprovedInitialMessage({
